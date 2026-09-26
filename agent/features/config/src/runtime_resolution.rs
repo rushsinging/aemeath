@@ -61,13 +61,13 @@ pub struct ResolvedProviderRuntimeConfig {
 
 /// Provider 运行配置的唯一解析入口。
 #[derive(Debug, Clone)]
-pub struct ProviderRuntimeResolver {
+pub(crate) struct ProviderRuntimeResolver {
     system: SystemInformation,
     version: String,
 }
 
 impl ProviderRuntimeResolver {
-    pub fn new(system: SystemInformation, version: impl Into<String>) -> Self {
+    pub(crate) fn new(system: SystemInformation, version: impl Into<String>) -> Self {
         Self {
             system,
             version: version.into(),
@@ -87,7 +87,7 @@ impl ProviderRuntimeResolver {
         ))
     }
 
-    pub fn resolve(
+    pub(crate) fn resolve(
         &self,
         snapshot: &ConfigSnapshot,
         resolved_model: &ResolvedModel,

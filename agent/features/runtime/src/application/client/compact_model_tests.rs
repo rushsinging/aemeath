@@ -45,8 +45,10 @@ impl config::ConfigReader for FakeConfigReader {
         self.changes.subscribe()
     }
 
-    async fn refresh_if_sources_changed(&self) -> config::ConfigRefreshOutcomeData {
-        config::ConfigRefreshOutcomeData::Unchanged
+    async fn refresh_if_sources_changed(
+        &self,
+    ) -> std::result::Result<config::ConfigRefreshOutcomeData, share::error::DomainError> {
+        Ok(config::ConfigRefreshOutcomeData::Unchanged)
     }
 
     async fn snapshot(&self) -> std::result::Result<ConfigSnapshot, share::error::DomainError> {

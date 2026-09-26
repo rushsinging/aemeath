@@ -10,7 +10,7 @@
 //!   `Validation` / `CatalogUnavailable` / `ProbeFailed` /
 //!   `PersistConflict` / `PersistFailed` / `PersistUnavailable` /
 //!   `InteractiveSetupRequired` / `BootstrapRollbackRefused`）；
-//! - [`ProviderProbePort`] / [`ConnectCommitPort`]：inject 端口，便于
+//! - [`crate::ports::ProviderProbePort`] / [`ConnectCommitPort`]：inject 端口，便于
 //!   Composition 装配与测试 mock。
 //!
 //! 设计文档：[`docs/design/02-modules/config/02-provider-catalog-and-connect.md`](../../../../../../docs/design/02-modules/config/02-provider-catalog-and-connect.md)。
@@ -53,13 +53,4 @@ pub use states::{
 pub use view::{
     AvailableAction, ConnectDraftView, ConnectView, ExistingProviderSummary, ModelDraftView,
     ProbeStatusView,
-};
-
-// -- ports crate 的 re-export，让 connect_tests 直接用 `crate::connect::*` --
-//
-// `ProviderProbePort` 与 request/result/error 在 `crate::ports` 中定义，
-// 这里是 connect 的稳定 re-export 入口；测试代码可直接 `use crate::connect::*`。
-pub use crate::ports::{
-    ProviderProbeError, ProviderProbeErrorKind, ProviderProbePort, ProviderProbeRequest,
-    ProviderProbeResult,
 };

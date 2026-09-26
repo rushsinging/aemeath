@@ -1,6 +1,6 @@
 use super::*;
 use async_trait::async_trait;
-use config::connect::{ProviderProbeErrorKind, ProviderProbePort, ProviderProbeRequest};
+use config::ports::{ProviderProbeErrorKind, ProviderProbePort, ProviderProbeRequest};
 use futures_util::stream;
 use provider::composition::{InvocationScope, LlmClient, LlmProvider, SystemBlock};
 use provider::{

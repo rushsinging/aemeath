@@ -29,22 +29,33 @@ pub struct ConfigChangeData {
     pub snapshot: ConfigSnapshot,
 }
 
+/// 刷新失败细分类：crate 内折叠为 `DomainError`（Io→storage，Parse/Invalid→invalid），
+/// 永不作为 port 签名或枚举变体字段越界。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConfigRefreshError {
+pub(crate) enum ConfigRefreshError {
     Io,
     Parse,
     Invalid,
 }
 
+impl std::fmt::Display for ConfigRefreshError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io => write!(formatter, "配置源读取失败"),
+            Self::Parse => write!(formatter, "配置源解析失败"),
+            Self::Invalid => write!(formatter, "配置内容非法"),
+        }
+    }
+}
+
+/// 刷新结果（真领域状态）：失败经 `From<ConfigRefreshError>` 折叠为
+/// `share::error::DomainError`，不再以 `Rejected` 变体伪装 `Err`。
 #[derive(Debug, Clone)]
 pub enum ConfigRefreshOutcomeData {
     Unchanged,
     Reloaded {
         snapshot: ConfigSnapshot,
         scopes: Vec<ConfigApplicationScope>,
-    },
-    Rejected {
-        error: ConfigRefreshError,
     },
 }
 
@@ -183,8 +194,10 @@ impl PreparedConfigUpdateData {
     }
 }
 
+/// 持久化失败细分类：crate 内折叠为 `DomainError`（Io/PermissionDenied→storage，
+/// Serialization/UnsupportedDurability/CorruptTransaction→invalid），永不越界。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConfigPersistError {
+pub(crate) enum ConfigPersistError {
     Serialization,
     Io,
     PermissionDenied,
@@ -204,18 +217,12 @@ impl std::fmt::Display for ConfigPersistError {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConfigCommitWarningData {
-    PreviousPromotionPending,
-    JournalCleanupPending,
-}
-
 #[derive(Debug, Clone)]
 pub struct ReadyConfigCommitData {
     pub(crate) config: Config,
     pub(crate) snapshot: ConfigSnapshot,
     pub(crate) fields: Vec<ConfigFieldData>,
-    pub(crate) warning: Option<ConfigCommitWarningData>,
+    pub(crate) warning: Option<&'static str>,
 }
 
 impl ReadyConfigCommitData {
@@ -223,15 +230,10 @@ impl ReadyConfigCommitData {
         &self.snapshot
     }
 
-    pub fn warning(&self) -> Option<ConfigCommitWarningData> {
+    /// 提交成功的附带告警（中文日志文案）；仅用于日志，不转错误。
+    pub fn warning(&self) -> Option<&'static str> {
         self.warning
     }
-}
-
-#[derive(Debug, Clone)]
-pub enum ConfigPersistOutcomeData {
-    NotCommitted(ConfigPersistError),
-    Committed(Box<ReadyConfigCommitData>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -257,10 +259,45 @@ mod tests;
 
 // ─── DomainError 折叠层（跨界唯一错误）────────────────────────────────
 
+/// 持久化错误的统一分类（`From<ConfigPersistError>` 与
+/// `ConfigUpdateError::Persist` 折叠共用，保证同一细分类只有一种归宿）。
+fn persist_error_category(error: &ConfigPersistError) -> share::error::ErrorCategory {
+    match error {
+        ConfigPersistError::Io | ConfigPersistError::PermissionDenied => {
+            share::error::ErrorCategory::Storage
+        }
+        ConfigPersistError::Serialization
+        | ConfigPersistError::UnsupportedDurability
+        | ConfigPersistError::CorruptTransaction => share::error::ErrorCategory::Invalid,
+    }
+}
+
+impl From<ConfigPersistError> for share::error::DomainError {
+    fn from(inner: ConfigPersistError) -> Self {
+        share::error::DomainError::from_parts(
+            "config",
+            persist_error_category(&inner),
+            inner.to_string(),
+        )
+    }
+}
+
+impl From<ConfigRefreshError> for share::error::DomainError {
+    fn from(inner: ConfigRefreshError) -> Self {
+        let category = match inner {
+            ConfigRefreshError::Io => share::error::ErrorCategory::Storage,
+            ConfigRefreshError::Parse | ConfigRefreshError::Invalid => {
+                share::error::ErrorCategory::Invalid
+            }
+        };
+        share::error::DomainError::from_parts("config", category, inner.to_string())
+    }
+}
+
 impl From<ConfigUpdateError> for share::error::DomainError {
     fn from(inner: ConfigUpdateError) -> Self {
         let category = match &inner {
-            ConfigUpdateError::Persist(_) => share::error::ErrorCategory::Storage,
+            ConfigUpdateError::Persist(error) => persist_error_category(error),
             ConfigUpdateError::Invalid(_) => share::error::ErrorCategory::Invalid,
         };
         share::error::DomainError::from_parts("config", category, inner.to_string())

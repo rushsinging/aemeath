@@ -6,6 +6,10 @@ use async_trait::async_trait;
 use super::commit::test_helpers::{CommitOutcome, StubCommitPort};
 use super::*;
 use crate::catalog::{find_by_source, PROVIDER_CATALOG};
+use crate::ports::{
+    ProviderProbeError, ProviderProbeErrorKind, ProviderProbePort, ProviderProbeRequest,
+    ProviderProbeResult,
+};
 
 struct StubProbe {
     outcome: tokio::sync::Mutex<Result<ProviderProbeResult, ProviderProbeError>>,
@@ -131,8 +135,8 @@ impl ConnectCommitPort for BlockingCommit {
     }
 }
 
-fn test_global_revision() -> crate::GlobalConfigRevision {
-    crate::GlobalConfigRevision::from_digest("test-global-revision")
+fn test_global_revision() -> crate::global_store::GlobalConfigRevision {
+    crate::global_store::GlobalConfigRevision::from_digest("test-global-revision")
 }
 
 /// Provider 目录桩：start_connect 单点加载时返回固定快照集合。
@@ -148,7 +152,7 @@ impl StubDirectory {
 impl crate::connect::ConnectProviderDirectory for StubDirectory {
     async fn provider_snapshots(
         &self,
-    ) -> Result<Vec<ExistingProviderSnapshot>, crate::GlobalConfigStoreError> {
+    ) -> Result<Vec<ExistingProviderSnapshot>, share::error::DomainError> {
         Ok(self.0.clone())
     }
 }

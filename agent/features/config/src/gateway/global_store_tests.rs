@@ -47,10 +47,10 @@ fn commit_replaces_only_target_provider_and_preserves_other_fields() {
     .unwrap();
     let loaded = store.load_global_document().unwrap().unwrap();
     let original_revision = loaded.revision.clone();
-    let receipt = store
+    let revision = store
         .commit_draft(original_revision.clone(), &draft())
         .expect("commit succeeds");
-    assert_ne!(receipt.revision, original_revision);
+    assert_ne!(revision, original_revision);
     let value: serde_json::Value =
         serde_json::from_slice(&fs::read(store.config_path()).unwrap()).unwrap();
     assert_eq!(value["language"], "zh");
@@ -94,4 +94,78 @@ fn rollback_matching_receipt_removes_only_bootstrap_document() {
     let receipt = store.create_complete_default().unwrap();
     store.rollback_bootstrap(&receipt).unwrap();
     assert!(!store.config_path().exists());
+}
+
+/// CAS（trait `compare_and_swap`）直接返回新 revision，不再包 receipt。
+#[tokio::test]
+async fn trait_compare_and_swap_returns_new_revision_directly() {
+    let dir = tempfile::tempdir().unwrap();
+    let store: std::sync::Arc<dyn GlobalConfigConnectStore> = std::sync::Arc::new(
+        FilesystemGlobalConfigConnectStore::new(dir.path().to_path_buf()),
+    );
+    store.create_complete_default().await.unwrap();
+    let loaded = store.load_global_document().await.unwrap().unwrap();
+
+    let revision = store
+        .compare_and_swap(loaded.revision.clone(), draft())
+        .await
+        .expect("commit succeeds");
+
+    assert_ne!(revision, loaded.revision);
+    let reloaded = store.load_global_document().await.unwrap().unwrap();
+    assert_eq!(reloaded.revision, revision);
+}
+
+/// trait 方法的 Err 折叠为 `DomainError`：分类 + 消息不变，
+/// 内部变体经 `source_downcast_ref` 下钻，Conflict 经 `is_persist_conflict` 可识别。
+#[tokio::test]
+async fn trait_errors_fold_into_domain_error_with_downcast_and_conflict_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    let store: std::sync::Arc<dyn GlobalConfigConnectStore> = std::sync::Arc::new(
+        FilesystemGlobalConfigConnectStore::new(dir.path().to_path_buf()),
+    );
+    store.create_complete_default().await.unwrap();
+    let loaded = store.load_global_document().await.unwrap().unwrap();
+    fs::write(
+        dir.path().join("aemeath.json"),
+        b"{\"language\":\"external\"}",
+    )
+    .unwrap();
+
+    let conflict = store
+        .compare_and_swap(loaded.revision.clone(), draft())
+        .await
+        .expect_err("stale revision must conflict");
+    assert_eq!(
+        conflict.category(),
+        share::error::ErrorCategory::Invalid,
+        "Conflict 折叠为 invalid 分类"
+    );
+    assert_eq!(
+        conflict.to_string(),
+        GlobalConfigStoreError::Conflict {
+            expected: loaded.revision.clone()
+        }
+        .to_string(),
+        "折叠后 Display 与原错误文案一致"
+    );
+    assert!(matches!(
+        conflict.source_downcast_ref::<GlobalConfigStoreError>(),
+        Some(GlobalConfigStoreError::Conflict { .. })
+    ));
+    assert!(is_persist_conflict(&conflict));
+
+    let exists = store
+        .create_complete_default()
+        .await
+        .expect_err("document already exists");
+    assert_eq!(exists.category(), share::error::ErrorCategory::Invalid);
+    assert!(matches!(
+        exists.source_downcast_ref::<GlobalConfigStoreError>(),
+        Some(GlobalConfigStoreError::AlreadyExists)
+    ));
+    assert!(
+        !is_persist_conflict(&exists),
+        "AlreadyExists 不是持久化冲突"
+    );
 }

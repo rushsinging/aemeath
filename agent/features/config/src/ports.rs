@@ -17,9 +17,9 @@
 //! 服务调用。Probe 输入为已校验的 driver / endpoint / credential / 模型 /
 //! `max_tokens` / 最终 UA / timeout，不接收 TUI 类型、不暴露内部状态。
 use crate::domain::{
-    ConfigChangeData, ConfigPersistOutcomeData, ConfigRefreshOutcomeData, ConfigSubscriptionData,
-    ConfigUpdateData, PreparedConfigUpdateData, PreparedProjectConfigData,
-    ProjectConfigLocationData, ReadyConfigCommitData,
+    ConfigChangeData, ConfigRefreshOutcomeData, ConfigSubscriptionData, ConfigUpdateData,
+    PreparedConfigUpdateData, PreparedProjectConfigData, ProjectConfigLocationData,
+    ReadyConfigCommitData,
 };
 use async_trait::async_trait;
 use share::config::domain::snapshot::ConfigSnapshot;
@@ -29,7 +29,9 @@ use tokio::sync::watch;
 pub trait ConfigReader: Send + Sync {
     fn committed_snapshot(&self) -> ConfigSnapshot;
     fn subscribe_committed(&self) -> watch::Receiver<ConfigSnapshot>;
-    async fn refresh_if_sources_changed(&self) -> ConfigRefreshOutcomeData;
+    async fn refresh_if_sources_changed(
+        &self,
+    ) -> Result<ConfigRefreshOutcomeData, share::error::DomainError>;
     /// 异步快照（gate-aware 视图实现经内部 gate 校验后委托）。
     async fn snapshot(&self) -> Result<ConfigSnapshot, share::error::DomainError>;
     /// 订阅（gate-aware 同上）。
@@ -56,7 +58,10 @@ pub trait ProjectConfigParticipant: Send + Sync {
         &self,
         command: ConfigUpdateData,
     ) -> Result<PreparedConfigUpdateData, share::error::DomainError>;
-    async fn persist_update(&self, prepared: PreparedConfigUpdateData) -> ConfigPersistOutcomeData;
+    async fn persist_update(
+        &self,
+        prepared: PreparedConfigUpdateData,
+    ) -> Result<Box<ReadyConfigCommitData>, share::error::DomainError>;
     fn commit_update(&self, ready: ReadyConfigCommitData) -> ConfigChangeData;
 }
 

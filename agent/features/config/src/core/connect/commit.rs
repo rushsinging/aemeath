@@ -20,8 +20,7 @@ use crate::catalog::ProviderSource;
 use super::draft::ConnectDraft;
 use super::error::PersistErrorKind;
 use super::states::{ConnectOrigin, ConnectSessionId, ExistingProviderSnapshot};
-use crate::GlobalConfigRevision;
-use crate::GlobalConfigStoreError;
+use crate::global_store::GlobalConfigRevision;
 
 /// Connect 提交请求的归一化投影。
 #[derive(Debug, Clone)]
@@ -111,7 +110,7 @@ pub trait ConnectCommitPort: Send + Sync {
 pub trait ConnectProviderDirectory: Send + Sync {
     async fn provider_snapshots(
         &self,
-    ) -> Result<Vec<ExistingProviderSnapshot>, GlobalConfigStoreError>;
+    ) -> Result<Vec<ExistingProviderSnapshot>, share::error::DomainError>;
 }
 
 /// 测试 / 桩实现：直接返回 caller 配置的结果。**仅**在 `connect::commit`

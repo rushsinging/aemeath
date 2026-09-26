@@ -177,10 +177,10 @@ async fn prepare_update_does_not_publish_before_commit() {
         .await
         .unwrap();
     assert_eq!(service.committed_snapshot().models().default, before);
-    let ready = match service.persist_update(prepared).await {
-        ConfigPersistOutcomeData::Committed(ready) => ready,
-        ConfigPersistOutcomeData::NotCommitted(error) => panic!("unexpected {error:?}"),
-    };
+    let ready = service
+        .persist_update(prepared)
+        .await
+        .unwrap_or_else(|error| panic!("unexpected {error:?}"));
     service.commit_update(*ready);
     assert_eq!(service.committed_snapshot().models().default, "local/model");
 }
@@ -303,9 +303,12 @@ async fn persist_failure_does_not_publish_candidate() {
 
     assert_eq!(
         error,
-        share::error::DomainError::from(ConfigUpdateError::Persist(
-            ConfigPersistError::UnsupportedDurability
-        ))
+        share::error::DomainError::from(ConfigPersistError::UnsupportedDurability)
+    );
+    assert_eq!(
+        error.category(),
+        share::error::ErrorCategory::Invalid,
+        "UnsupportedDurability 折叠为 invalid"
     );
     assert_eq!(service.committed_snapshot().models().default, before);
 }
@@ -421,9 +424,9 @@ async fn refresh_rejects_invalid_source_and_preserves_committed_snapshot() {
     std::fs::write(&global, "not json").unwrap();
     assert!(matches!(
         service.refresh_if_sources_changed().await,
-        ConfigRefreshOutcomeData::Rejected {
-            error: ConfigRefreshError::Parse
-        }
+        Err(error)
+            if error.category() == share::error::ErrorCategory::Invalid
+                && error.message() == "配置源解析失败"
     ));
     assert_eq!(service.committed_snapshot().model_name(), "first");
     assert_eq!(service.committed_snapshot().revision(), before.revision());
@@ -446,7 +449,7 @@ async fn refresh_does_not_publish_file_change_overridden_by_env() {
     std::fs::write(&global, r#"{"model":{"name":"second"}}"#).unwrap();
     assert!(matches!(
         service.refresh_if_sources_changed().await,
-        ConfigRefreshOutcomeData::Unchanged
+        Ok(ConfigRefreshOutcomeData::Unchanged)
     ));
     assert_eq!(service.committed_snapshot().model_name(), "env-model");
     assert_eq!(service.committed_snapshot().revision(), before.revision());
@@ -465,7 +468,7 @@ async fn refresh_reports_run_scope_for_allow_all() {
 
     assert!(matches!(
         outcome,
-        ConfigRefreshOutcomeData::Reloaded { scopes, .. }
+        Ok(ConfigRefreshOutcomeData::Reloaded { scopes, .. })
             if scopes == vec![share::config::domain::scope::ConfigApplicationScope::Run]
     ));
 }
@@ -483,7 +486,7 @@ async fn refresh_reports_session_restart_scope_for_tui_change() {
 
     assert!(matches!(
         outcome,
-        ConfigRefreshOutcomeData::Reloaded { scopes, .. }
+        Ok(ConfigRefreshOutcomeData::Reloaded { scopes, .. })
             if scopes == vec![share::config::domain::scope::ConfigApplicationScope::SessionRestartRequired]
     ));
 }
@@ -500,7 +503,7 @@ async fn refresh_publishes_to_watch_subscribers_once() {
     std::fs::write(&global, r#"{"model":{"name":"second"}}"#).unwrap();
     assert!(matches!(
         service.refresh_if_sources_changed().await,
-        ConfigRefreshOutcomeData::Reloaded { .. }
+        Ok(ConfigRefreshOutcomeData::Reloaded { .. })
     ));
     changes.changed().await.unwrap();
     assert_eq!(changes.borrow().model_name(), "second");

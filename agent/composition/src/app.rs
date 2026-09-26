@@ -313,7 +313,7 @@ impl GlobalConnectDirectoryAdapter {
 impl config::connect::ConnectProviderDirectory for GlobalConnectDirectoryAdapter {
     async fn provider_snapshots(
         &self,
-    ) -> Result<Vec<ExistingProviderSnapshot>, config::GlobalConfigStoreError> {
+    ) -> Result<Vec<ExistingProviderSnapshot>, share::error::DomainError> {
         let document = self.store.load_global_document().await?;
         Ok(document
             .as_ref()
@@ -334,12 +334,12 @@ impl ConnectCommitPort for GlobalConnectCommitAdapter {
         &self,
         request: ConnectCommitRequest,
     ) -> Result<ConnectCommitReceipt, ConnectCommitError> {
-        let receipt = self
+        let revision = self
             .store
             .compare_and_swap(request.expected_global_revision, request.draft)
             .await
             .map_err(map_store_error)?;
-        let applied_revision = stable_revision(receipt.revision.as_str());
+        let applied_revision = stable_revision(revision.as_str());
         Ok(ConnectCommitReceipt { applied_revision })
     }
 }
@@ -356,7 +356,7 @@ impl FirstChatConnectBootstrap {
         self.store
             .rollback_bootstrap(self.receipt)
             .await
-            .map_err(global_connect_store_sdk_error)
+            .map_err(|error| global_connect_store_sdk_error(&error))
     }
 }
 
@@ -371,13 +371,12 @@ pub async fn prepare_first_chat_with_agents_dir(
     agents_dir: &Path,
     interactive: bool,
 ) -> Result<Option<FirstChatConnectBootstrap>, SdkError> {
-    let store: Arc<dyn config::GlobalConfigConnectStore> = Arc::new(
-        config::FilesystemGlobalConfigConnectStore::new(agents_dir.to_path_buf()),
-    );
+    let store: Arc<dyn config::GlobalConfigConnectStore> =
+        config::wire_global_connect_store(agents_dir);
     if store
         .load_global_document()
         .await
-        .map_err(global_connect_store_sdk_error)?
+        .map_err(|error| global_connect_store_sdk_error(&error))?
         .is_some()
     {
         return Ok(None);
@@ -390,7 +389,7 @@ pub async fn prepare_first_chat_with_agents_dir(
     let receipt = store
         .create_complete_default()
         .await
-        .map_err(global_connect_store_sdk_error)?;
+        .map_err(|error| global_connect_store_sdk_error(&error))?;
     let global_user_agent = load_connect_global_user_agent(&store).await?;
     Ok(Some(FirstChatConnectBootstrap {
         connect: wire_connect_with_store(store.clone(), global_user_agent.clone()),
@@ -413,19 +412,18 @@ pub async fn build_connect_bootstrap() -> Result<ConnectBootstrap, SdkError> {
 pub async fn build_connect_bootstrap_with_agents_dir(
     agents_dir: &Path,
 ) -> Result<ConnectBootstrap, SdkError> {
-    let store: Arc<dyn config::GlobalConfigConnectStore> = Arc::new(
-        config::FilesystemGlobalConfigConnectStore::new(agents_dir.to_path_buf()),
-    );
+    let store: Arc<dyn config::GlobalConfigConnectStore> =
+        config::wire_global_connect_store(agents_dir);
     if store
         .load_global_document()
         .await
-        .map_err(global_connect_store_sdk_error)?
+        .map_err(|error| global_connect_store_sdk_error(&error))?
         .is_none()
     {
         store
             .create_complete_default()
             .await
-            .map_err(global_connect_store_sdk_error)?;
+            .map_err(|error| global_connect_store_sdk_error(&error))?;
     }
     let global_user_agent = load_connect_global_user_agent(&store).await?;
     Ok(ConnectBootstrap {
@@ -438,9 +436,8 @@ fn wire_connect(
     agents_dir: &std::path::Path,
     global_user_agent: Option<String>,
 ) -> Arc<ConnectFacade> {
-    let store: Arc<dyn config::GlobalConfigConnectStore> = Arc::new(
-        config::FilesystemGlobalConfigConnectStore::new(agents_dir.to_path_buf()),
-    );
+    let store: Arc<dyn config::GlobalConfigConnectStore> =
+        config::wire_global_connect_store(agents_dir);
     wire_connect_with_store(store, global_user_agent)
 }
 
@@ -464,7 +461,7 @@ async fn load_connect_global_user_agent(
     let document = store
         .load_global_document()
         .await
-        .map_err(global_connect_store_sdk_error)?;
+        .map_err(|error| global_connect_store_sdk_error(&error))?;
     Ok(document
         .as_ref()
         .and_then(connect_global_user_agent_from_document))
@@ -577,22 +574,19 @@ fn provider_snapshot_from_config(
     ))
 }
 
-fn global_connect_store_sdk_error(error: config::GlobalConfigStoreError) -> SdkError {
+fn global_connect_store_sdk_error(error: &share::error::DomainError) -> SdkError {
     SdkError::Init(format!("全局配置初始化失败：{error}"))
 }
 
-fn map_store_error(error: config::GlobalConfigStoreError) -> ConnectCommitError {
-    match error {
-        config::GlobalConfigStoreError::Conflict { .. } => {
-            ConnectCommitError::PersistConflict { expected: 0 }
-        }
-        config::GlobalConfigStoreError::AlreadyExists
-        | config::GlobalConfigStoreError::InvalidDocument(_)
-        | config::GlobalConfigStoreError::InvalidDraft(_)
-        | config::GlobalConfigStoreError::RollbackRefused => {
-            ConnectCommitError::internal(error.to_string())
-        }
-        config::GlobalConfigStoreError::Io(message) => ConnectCommitError::io(message),
+fn map_store_error(error: share::error::DomainError) -> ConnectCommitError {
+    // Conflict 语义由 config crate 的行为辅助识别（变体已折叠为 DomainError）；
+    // 其余按分类分流：Storage → IO 失败，Invalid 等 → 内部错误。
+    if config::is_persist_conflict(&error) {
+        return ConnectCommitError::PersistConflict { expected: 0 };
+    }
+    match error.category() {
+        share::error::ErrorCategory::Storage => ConnectCommitError::io(error.to_string()),
+        _ => ConnectCommitError::internal(error.to_string()),
     }
 }
 

@@ -46,7 +46,7 @@ struct ConnectSession {
     session_id: ConnectSessionId,
     revision: ConnectRevision,
     origin: ConnectOrigin,
-    expected_global_revision: crate::GlobalConfigRevision,
+    expected_global_revision: crate::global_store::GlobalConfigRevision,
     stage: ConnectStage,
     draft: ConnectDraft,
     probe_status: Option<ProbeStatusView>,
@@ -66,7 +66,7 @@ impl ConnectSession {
     fn new(
         session_id: ConnectSessionId,
         origin: ConnectOrigin,
-        expected_global_revision: crate::GlobalConfigRevision,
+        expected_global_revision: crate::global_store::GlobalConfigRevision,
         existing_providers: std::collections::HashMap<String, ExistingProviderSnapshot>,
     ) -> Self {
         Self {
@@ -224,7 +224,7 @@ impl ConnectAppService {
     pub async fn start_connect(
         &self,
         origin: ConnectOrigin,
-        expected_global_revision: crate::GlobalConfigRevision,
+        expected_global_revision: crate::global_store::GlobalConfigRevision,
     ) -> ConnectView {
         // Provider 目录快照在此单点加载；读失败降级为空目录（向导仍可用，
         // 只是不触发 ConfirmOverwrite / 已有值预填），不阻断会话。

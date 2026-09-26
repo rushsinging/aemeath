@@ -250,6 +250,9 @@ impl ExistingProviderSnapshot {
     /// 从现有 [`share::config::ProviderModelsConfig`] 投影构造 snapshot。
     /// API key 字段被归一化为 [`ExistingCredentialStatus`]，明文永不出
     /// 现。`driver` 不在 Config schema 时降级为 `Unknown(_)`。
+    // 预存违规（#1457 引入）：参数分组为 param object 的收敛另行处理，
+    // 本批仅为通过 -D warnings 挂 allow。
+    #[allow(clippy::too_many_arguments)]
     pub fn from_provider_config(
         source: &str,
         base_url: &str,

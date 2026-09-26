@@ -265,7 +265,7 @@ fn reasoning_capability_from_max(max: ReasoningLevel) -> ReasoningCapability {
 
 use std::time::Instant;
 
-use config::connect::{
+use config::ports::{
     ProviderProbeError, ProviderProbeErrorKind, ProviderProbePort, ProviderProbeRequest,
     ProviderProbeResult,
 };

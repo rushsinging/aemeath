@@ -18,7 +18,7 @@ use crate::ports::SystemInformation;
 /// Resolver 输入。Config domain 把所有上游字符串归一为 `Option<&str>` / `HeaderValue`
 /// 后传入；本函数不再二次解析 JSON / 文件。
 #[derive(Debug, Clone)]
-pub struct ProviderUserAgentInputs<'a> {
+pub(crate) struct ProviderUserAgentInputs<'a> {
     /// `models.providers.<source>.userAgent` 经 [`crate::catalog`] / Config 归一化后的值。
     pub provider_user_agent: Option<&'a str>,
     /// Catalog 已核验官方 SDK UA。**NEVER** 来自 Catalog 之外的代码路径。
@@ -54,7 +54,10 @@ fn parse_header_value(raw: &str) -> Option<HeaderValue> {
 /// - 所有动态片段先经 [`sanitize_segment`] 清洗：ASCII 控制字符与非 ASCII
 ///   字节都替换为 `-`，整个 fragment 清洗后为空时回退到 `fallback`；
 /// - 最后再做一次 `HeaderValue::from_str` 兜底校验，失败时降级到最小安全形式。
-pub fn build_global_default_user_agent(system: &SystemInformation, version: &str) -> HeaderValue {
+pub(crate) fn build_global_default_user_agent(
+    system: &SystemInformation,
+    version: &str,
+) -> HeaderValue {
     let os = sanitize_segment(&system.os_name, "unknown-os");
     let arch = sanitize_segment(&system.arch, "unknown-arch");
     let version_segment = sanitize_segment(version, "0.0.0");
@@ -119,7 +122,7 @@ fn sanitize_segment(raw: &str, fallback: &str) -> String {
 /// [`ProviderUserAgentInputs`]：同一 resolver 收到不同输入集合会让 probe 与正式
 /// 请求的 UA 漂移。
 #[derive(Debug, Clone, Copy)]
-pub struct ProviderUserAgentRequest<'a> {
+pub(crate) struct ProviderUserAgentRequest<'a> {
     /// `models.providers.<source>.userAgent` 原始值（未归一化）。
     pub provider_user_agent: Option<&'a str>,
     /// Catalog `source` key；用于查询该 source 的官方 SDK UA。
@@ -135,7 +138,7 @@ pub struct ProviderUserAgentRequest<'a> {
 /// - Provider 专属与全局 UA 先做空白归一：空白等同未配置，继续回退；
 /// - Catalog 官方 SDK UA 按 `source_key` 优先、`driver` 兜底查询；无证据时保持
 ///   `None`，**NEVER** 伪造数值。
-pub fn assemble_provider_user_agent_inputs<'a>(
+pub(crate) fn assemble_provider_user_agent_inputs<'a>(
     request: ProviderUserAgentRequest<'a>,
     system: SystemInformation,
     version: &'a str,
@@ -164,7 +167,7 @@ fn non_blank(value: Option<&str>) -> Option<&str> {
 /// 计算 Provider 请求最终 UA 并以 `&str` 形式返回。
 ///
 /// 等价于 [`resolve_provider_user_agent`]，仅返回字符串便于断言。
-pub fn resolve_provider_user_agent_str(inputs: ProviderUserAgentInputs<'_>) -> String {
+pub(crate) fn resolve_provider_user_agent_str(inputs: ProviderUserAgentInputs<'_>) -> String {
     let header = resolve_provider_user_agent(inputs);
     header
         .to_str()
@@ -178,7 +181,7 @@ pub fn resolve_provider_user_agent_str(inputs: ProviderUserAgentInputs<'_>) -> S
 /// 降级为 `<os>/<arch>` 双段。Catalog 官方 SDK UA 直接使用 `Option<HeaderValue>`：
 /// 构造方需保证它代表通过 `to_str()` 的可见 ASCII；构造入口（[`crate::catalog`]）
 /// 在构造期已做 HeaderValue 安全校验。
-pub fn resolve_provider_user_agent(inputs: ProviderUserAgentInputs<'_>) -> HeaderValue {
+pub(crate) fn resolve_provider_user_agent(inputs: ProviderUserAgentInputs<'_>) -> HeaderValue {
     // 1. Provider 专属
     if let Some(raw) = inputs.provider_user_agent.and_then(parse_header_value) {
         return raw;

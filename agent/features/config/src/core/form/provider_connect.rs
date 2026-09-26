@@ -170,7 +170,7 @@ fn page_for_connect(
             // OpenAI 系 driver 提供 Chat Completions / Responses 接口风格
             // 选择；anthropic / ollama 仅支持 Chat，不显示该字段。driver
             // 优先取 draft，缺失时由 catalog source 推导。
-            let resolved_driver = connect.draft.driver.map(|driver| driver).or_else(|| {
+            let resolved_driver = connect.draft.driver.or_else(|| {
                 connect
                     .draft
                     .source
@@ -472,7 +472,7 @@ fn submit_for_stage(
         }
         ConnectStage::EditEndpoint => {
             let base_url = text_value(field("base_url")?, "base_url")?;
-            let resolved_driver = connect.draft.driver.clone().or_else(|| {
+            let resolved_driver = connect.draft.driver.or_else(|| {
                 connect
                     .draft
                     .source

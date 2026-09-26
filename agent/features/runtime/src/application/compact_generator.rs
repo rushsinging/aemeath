@@ -189,8 +189,11 @@ mod tests {
             tokio::sync::watch::channel(self.snapshot.clone()).1
         }
 
-        async fn refresh_if_sources_changed(&self) -> config::ConfigRefreshOutcomeData {
-            config::ConfigRefreshOutcomeData::Unchanged
+        async fn refresh_if_sources_changed(
+            &self,
+        ) -> std::result::Result<config::ConfigRefreshOutcomeData, share::error::DomainError>
+        {
+            Ok(config::ConfigRefreshOutcomeData::Unchanged)
         }
 
         async fn snapshot(
