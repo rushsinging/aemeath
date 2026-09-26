@@ -69,7 +69,7 @@ impl From<crate::ports::AppendLogError> for AuditError {
 use crate::adapters::append::file_usage_append_store;
 pub use client::{wire_audit_client, wire_audit_store, AuditReader, AuditStore, AuditWriter};
 /// 文件系统审计存储工厂（SPI 经 AuditStore 包装，此处返回 port 以便装配）。
-pub fn append_store_for(
+pub fn wire_append_store_for(
     root: storage::SafeStorageRoot,
 ) -> std::sync::Arc<dyn crate::ports::UsageAppendStorePort> {
     std::sync::Arc::new(file_usage_append_store(root))

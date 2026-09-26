@@ -49,7 +49,7 @@ pub fn wire_session_audit(
 ) -> Result<SessionAudit, String> {
     let root =
         SafeStorageRoot::open(agents_dir.join("audit")).map_err(|error| error.to_string())?;
-    let store = wire_audit_store(audit::append_store_for(root));
+    let store = wire_audit_store(audit::wire_append_store_for(root));
     let (writer, reader) = wire_audit_client(
         &store,
         snapshot.usage_worker_config().capacity(),

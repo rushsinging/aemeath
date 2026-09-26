@@ -23,6 +23,9 @@ mod domain;
 mod ports;
 
 pub use adapters::{CliConfigInputData, ConfigAppService, NativeConfigStore};
+// NativeConfigStore 归类角色（AuditStore 同判：注入式存储句柄，wire 签名载荷）。
+// ConfigAppService 生产零消费（wire_project_config 内部构造）；跨 crate 引用均为
+// 测试直连（owner-test-consumed 模式），收窄随测试迁移批（#1696）执行。
 pub use domain::{
     ConfigChangeCauseData, ConfigChangeData, ConfigCommitWarningData, ConfigFieldData,
     ConfigPersistOutcomeData, ConfigRefreshOutcomeData, ConfigSubscriptionData, ConfigUpdateData,
