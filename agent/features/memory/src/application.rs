@@ -1,8 +1,9 @@
-use crate::{
-    MemoryError, MemoryLayer, MemoryPort, ReflectionApplyResult, ReflectionEngine, ReflectionError,
-    ReflectionErrorCategory, ReflectionHistoryStore, ReflectionMessage, ReflectionOutput,
-    ReflectionRecord, ReflectionStatus, ReflectionTokenUsage, ReflectionTrigger,
+use crate::domain::{
+    MemoryError, MemoryLayer, ReflectionEngine, ReflectionError, ReflectionErrorCategory,
+    ReflectionMessage, ReflectionOutput, ReflectionRecord, ReflectionStatus, ReflectionTokenUsage,
+    ReflectionTrigger,
 };
+use crate::ports::{MemoryPort, ReflectionApplyResult, ReflectionHistoryStore};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReflectionExecutionIdentity {

@@ -18,6 +18,6 @@ use std::sync::Arc;
 /// async locks — production sources read a `parking_lot::RwLock`-guarded
 /// `Arc<dyn MemoryPort>` under a read guard.
 pub trait MemoryPortSource: Send + Sync {
-    /// Returns the currently committed [`memory::MemoryPort`].
-    fn current(&self) -> Arc<dyn memory::MemoryPort>;
+    /// Returns the currently committed [`memory::api::MemoryPort`].
+    fn current(&self) -> Arc<dyn memory::api::MemoryPort>;
 }

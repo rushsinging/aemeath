@@ -116,8 +116,10 @@ fn connect_wizard_probe_shows_busy_then_result_on_long_probe() {
         r#","Anthropic":{{"driver":"anthropic","baseUrl":"http://127.0.0.1:{port}","apiKey":"sk-preconfigured-anthropic","models":[{{"id":"claude-fable-5-1","contextWindow":1000000,"maxTokens":65536}}]}}"#
     );
     let (_guard, command) = isolated_env_with_extra_providers(&anthropic);
-    let mut open = OpenOptions::default();
-    open.restart = true;
+    let open = OpenOptions {
+        restart: true,
+        ..Default::default()
+    };
     let terminal = Session::new(format!("aemeath-slow-probe-{}", std::process::id()));
     terminal.open(open).expect("打开终端");
     let submit = |data: &str| {
@@ -170,8 +172,10 @@ fn connect_wizard_probe_shows_busy_then_result_on_long_probe() {
 #[test]
 fn connect_wizard_full_flow_shows_probe_result() {
     let (_guard, command) = isolated_env();
-    let mut open = OpenOptions::default();
-    open.restart = true;
+    let open = OpenOptions {
+        restart: true,
+        ..Default::default()
+    };
     let terminal = Session::new(format!("aemeath-connect-wizard-{}", std::process::id()));
     terminal.open(open).expect("打开终端");
 

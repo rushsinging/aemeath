@@ -1,7 +1,6 @@
-use memory::{
-    AtomicDatasetReflectionHistoryStore, MemoryError, MemoryStorageErrorKind, ProjectMemoryKey,
-    ReflectionErrorCategory, ReflectionHistoryQuery, ReflectionHistoryStore, ReflectionRecord,
-    ReflectionTrigger,
+use memory::api::{
+    MemoryError, MemoryStorageErrorKind, ProjectMemoryKey, ReflectionErrorCategory,
+    ReflectionHistoryStore, ReflectionRecord, ReflectionTrigger,
 };
 use std::{str::FromStr, sync::Arc};
 use storage as storage_api;
@@ -21,8 +20,9 @@ fn storage(root: &std::path::Path) -> Arc<dyn storage_api::AtomicDatasetPort> {
     storage::file_system_dataset(root).unwrap()
 }
 
-fn store(root: &std::path::Path) -> AtomicDatasetReflectionHistoryStore {
-    AtomicDatasetReflectionHistoryStore::new(storage(root), project_key())
+/// 实现体已收窄 crate 内：跨 crate 构造只能经 `wire_reflection_history_store`。
+fn store(root: &std::path::Path) -> Arc<dyn ReflectionHistoryStore> {
+    memory::wire_reflection_history_store(storage(root), project_key())
 }
 
 fn record(id: &str, timestamp: u64) -> ReflectionRecord {
@@ -39,7 +39,7 @@ fn record(id: &str, timestamp: u64) -> ReflectionRecord {
 async fn reflection_history_upsert_replaces_stable_id_without_duplication() {
     let root = unique_root("upsert");
     let history = store(&root);
-    let running = memory::ReflectionRecord::running("stable", 40, ReflectionTrigger::Manual);
+    let running = memory::api::ReflectionRecord::running("stable", 40, ReflectionTrigger::Manual);
     history.append(&running).await.unwrap();
     let terminal = record("stable", 40);
     history.upsert(&terminal).await.unwrap();
@@ -131,7 +131,7 @@ async fn reflection_history_corruption_fails_closed() {
         .await
         .unwrap();
 
-    let error = AtomicDatasetReflectionHistoryStore::new(storage, project)
+    let error = memory::wire_reflection_history_store(storage, project)
         .list(10)
         .await
         .unwrap_err();
@@ -146,6 +146,9 @@ async fn reflection_history_corruption_fails_closed() {
 
 #[test]
 fn reflection_history_adapter_is_memory_owned_port() {
-    fn assert_store<T: ReflectionHistoryStore + ReflectionHistoryQuery>() {}
-    assert_store::<AtomicDatasetReflectionHistoryStore>();
+    // 具体实现体 `AtomicDatasetReflectionHistoryStore` 已收窄 crate 内
+    // （`pub(crate)`），其「实现两 trait」的静态断言随收窄迁至 crate 内
+    // `adapters_tests`；此处改由 wire 工厂的 trait 对象消费面守住同一约束。
+    fn assert_store<T: ReflectionHistoryStore + ?Sized>() {}
+    assert_store::<dyn ReflectionHistoryStore>();
 }

@@ -3,8 +3,9 @@
 //! These tests prove:
 //!
 //! 1. **Real Memory opener uses project/config** — the production wiring
-//!    constructs `DatasetMemoryOpener` with `storage::file_system_dataset` +
-//!    `FileLegacyMemorySourceFactory`, eager-opens memory from the workspace
+//!    constructs the Memory opener via `memory::wire_memory_opener`
+//!    (`storage::file_system_dataset` + `memory::wire_legacy_memory_source_factory`),
+//!    eager-opens memory from the workspace
 //!    `ProjectIdentityData` + committed `MemoryConfig`, and the resulting
 //!    `MemoryPort` is filesystem-backed (writes persist).
 //! 2. **Runtime gets the same wiring** — the session id returned by
@@ -128,7 +129,7 @@ fn production_runtime_has_no_direct_active_memory_construction() {
         );
     }
     assert_eq!(
-        source.matches("DatasetMemoryOpener::new").count(),
+        source.matches("memory::wire_memory_opener(").count(),
         1,
         "production runtime must provide exactly one active Memory opener to MainSession wiring"
     );
@@ -146,7 +147,7 @@ fn production_runtime_has_no_direct_active_memory_construction() {
     );
     // Verify neither uses `join("memory")` for file_system_dataset.
     // Legacy memory uses `agents_dir.join("memory")` via
-    // FileLegacyMemorySourceFactory, not via file_system_dataset.
+    // memory::wire_legacy_memory_source_factory, not via file_system_dataset.
     for (idx, _) in &reflection_adapter_new {
         let line = source[*idx..].lines().next().unwrap_or("");
         assert!(
@@ -157,7 +158,8 @@ fn production_runtime_has_no_direct_active_memory_construction() {
     }
 }
 
-/// The production wiring constructs a real `DatasetMemoryOpener` backed by
+/// The production wiring constructs a real dataset-backed Memory opener (via
+/// `memory::wire_memory_opener`) backed by
 /// the filesystem. A memory entry written through the committed `MemoryPort`
 /// must be retrievable — proving the opener is not a no-op.
 #[tokio::test(flavor = "current_thread")]
@@ -186,13 +188,8 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
     // Construct the same production opener that Composition uses.
     let dataset_adapter =
         storage::file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
-    let legacy_factory = Arc::new(memory::FileLegacyMemorySourceFactory::new(
-        agents_dir.join("memory"),
-    ));
-    let memory_opener = Box::new(memory::DatasetMemoryOpener::new(
-        dataset_adapter,
-        legacy_factory,
-    ));
+    let legacy_factory = memory::wire_legacy_memory_source_factory(agents_dir.join("memory"));
+    let memory_opener = memory::wire_memory_opener(dataset_adapter, legacy_factory);
 
     let session_management = session_management(&agents_dir);
     let deps = MainSessionDependencies {
@@ -214,22 +211,22 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
     // verify it can be retrieved. An InMemoryTestOpener would lose the
     // entry on clone; the filesystem-backed opener persists it.
     let memory = wiring.committed_memory();
-    let entry = memory::MemoryEntry::new(
-        memory::MemoryId::now_v7(),
+    let entry = memory::api::MemoryEntry::new(
+        memory::api::MemoryId::now_v7(),
         1,
-        memory::MemoryLayer::Project,
-        memory::MemoryCategory::Decision,
+        memory::api::MemoryLayer::Project,
+        memory::api::MemoryCategory::Decision,
         "test memory from composition wiring",
-        memory::MemorySource::User,
+        memory::api::MemorySource::User,
     )
     .expect("create memory entry");
     let write_result = memory.write(entry.clone()).await.expect("write entry");
     assert!(
-        matches!(write_result, memory::WriteResult::Added { .. }),
+        matches!(write_result, memory::api::WriteResult::Added { .. }),
         "write should add the entry, got {write_result:?}"
     );
 
-    let entries = memory.list(Some(memory::MemoryLayer::Project));
+    let entries = memory.list(Some(memory::api::MemoryLayer::Project));
     assert!(
         entries
             .iter()
@@ -254,12 +251,10 @@ async fn production_context_append_reopens_from_atomic_blob() {
     let task_wiring = task::wire_task();
     let dataset_adapter =
         storage::file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
-    let memory_opener = Box::new(memory::DatasetMemoryOpener::new(
+    let memory_opener = memory::wire_memory_opener(
         dataset_adapter,
-        Arc::new(memory::FileLegacyMemorySourceFactory::new(
-            agents_dir.join("memory"),
-        )),
-    ));
+        memory::wire_legacy_memory_source_factory(agents_dir.join("memory")),
+    );
     let session_blob = storage::file_system_blob(&agents_dir).expect("create session blob");
     let session_dataset =
         storage::file_system_dataset(agents_dir.clone()).expect("create session dataset adapter");
@@ -360,19 +355,13 @@ async fn runtime_session_id_matches_wiring_committed_session() {
     // Construct the same production opener that Composition uses.
     let dataset_adapter =
         storage::file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
-    let legacy_factory = Arc::new(memory::FileLegacyMemorySourceFactory::new(
-        agents_dir.join("memory"),
-    ));
+    let legacy_factory = memory::wire_legacy_memory_source_factory(agents_dir.join("memory"));
     let project_key =
         memory::api::ProjectMemoryKey::derive(root.to_str().expect("project root is UTF-8"), None)
             .expect("derive key");
-    let reflection_history: Arc<dyn memory::api::ReflectionHistoryStore> = Arc::new(
-        memory::AtomicDatasetReflectionHistoryStore::new(dataset_adapter.clone(), project_key),
-    );
-    let memory_opener = Box::new(memory::DatasetMemoryOpener::new(
-        dataset_adapter,
-        legacy_factory,
-    ));
+    let reflection_history: Arc<dyn memory::api::ReflectionHistoryStore> =
+        memory::wire_reflection_history_store(dataset_adapter.clone(), project_key);
+    let memory_opener = memory::wire_memory_opener(dataset_adapter, legacy_factory);
 
     let session_management = session_management(&agents_dir);
     let deps = MainSessionDependencies {
@@ -549,13 +538,8 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
 
     let dataset_adapter =
         storage::file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
-    let legacy_factory = Arc::new(memory::FileLegacyMemorySourceFactory::new(
-        agents_dir.join("memory"),
-    ));
-    let memory_opener = Box::new(memory::DatasetMemoryOpener::new(
-        dataset_adapter,
-        legacy_factory,
-    ));
+    let legacy_factory = memory::wire_legacy_memory_source_factory(agents_dir.join("memory"));
+    let memory_opener = memory::wire_memory_opener(dataset_adapter, legacy_factory);
 
     let session_management = session_management(&agents_dir);
     let deps = MainSessionDependencies {

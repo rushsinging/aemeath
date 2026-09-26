@@ -2,11 +2,8 @@ use super::{
     tests::{LayerScript, ScriptedStore},
     MemoryService,
 };
-use crate::{
-    CommittedMemoryDataset, MemoryCategory, MemoryCommitReceipt, MemoryCommitVisibility,
-    MemoryDataset, MemoryEntry, MemoryError, MemoryId, MemoryLayer, MemoryPolicy, MemoryPort,
-    MemorySource, MemorySuggestion, ReflectionOutput,
-};
+use crate::adapters::MemoryPolicy;
+use crate::{domain::*, ports::*};
 
 fn layer_script(
     loads: Vec<Result<CommittedMemoryDataset<u64>, MemoryError>>,
@@ -43,7 +40,7 @@ fn receipt(revision: u64) -> MemoryCommitReceipt<u64> {
 
 fn storage_error() -> MemoryError {
     MemoryError::Storage {
-        kind: crate::MemoryStorageErrorKind::Io,
+        kind: crate::domain::MemoryStorageErrorKind::Io,
     }
 }
 
@@ -124,14 +121,17 @@ async fn retrieve_for_inject_reads_committed_memory_without_write() {
         .await
         .unwrap();
 
-    let result = service.retrieve_for_inject(&crate::MemoryQuery {
+    let result = service.retrieve_for_inject(&crate::ports::MemoryQuery {
         limit: 1,
         layer: Some(MemoryLayer::Project),
         category: None,
         now: 200,
     });
 
-    assert_eq!(result.mode, crate::MemoryRetrievalMode::InjectionPriority);
+    assert_eq!(
+        result.mode,
+        crate::ports::MemoryRetrievalMode::InjectionPriority
+    );
     assert_eq!(result.hits.len(), 1);
     assert_eq!(result.hits[0].entry, stored);
     assert_eq!(

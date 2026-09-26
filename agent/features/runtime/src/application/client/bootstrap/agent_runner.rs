@@ -132,7 +132,7 @@ mod tests {
                         async fn list(
                             &self,
                             _limit: usize,
-                        ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::MemoryError>
+                        ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::api::MemoryError>
                         {
                             Ok(vec![])
                         }
@@ -142,13 +142,13 @@ mod tests {
                         async fn append(
                             &self,
                             _record: &memory::api::ReflectionRecord,
-                        ) -> Result<(), memory::MemoryError> {
+                        ) -> Result<(), memory::api::MemoryError> {
                             Ok(())
                         }
                         async fn upsert(
                             &self,
                             _record: &memory::api::ReflectionRecord,
-                        ) -> Result<(), memory::MemoryError> {
+                        ) -> Result<(), memory::api::MemoryError> {
                             Ok(())
                         }
                     }

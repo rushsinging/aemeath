@@ -1,4 +1,4 @@
-use crate::*;
+use crate::domain::*;
 use async_trait::async_trait;
 use std::sync::Arc;
 use thiserror::Error;
@@ -116,6 +116,11 @@ pub struct MemoryCommitReceipt<R> {
 }
 
 impl<R> MemoryCommitReceipt<R> {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn revision(&self) -> &R {
+        &self.revision
+    }
+
     pub fn new(revision: R, visibility: MemoryCommitVisibility) -> Self {
         Self {
             revision,
@@ -123,10 +128,7 @@ impl<R> MemoryCommitReceipt<R> {
         }
     }
 
-    pub fn revision(&self) -> &R {
-        &self.revision
-    }
-
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn visibility(&self) -> MemoryCommitVisibility {
         self.visibility
     }
@@ -166,20 +168,7 @@ pub enum MemoryRetrievalMode {
     Disabled,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MemoryLocation {
-    Active,
-    Archive,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct MemorySearchHit {
-    pub entry: MemoryEntry,
-    pub location: MemoryLocation,
-    pub outdated: bool,
-    pub ttl_expired: bool,
-    pub relevance: Option<f64>,
-}
+pub use crate::domain::{EvictionCandidate, MemoryLocation, MemorySearchHit, MemorySearchQuery};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MemorySearchResult {
@@ -193,24 +182,6 @@ pub struct MemoryQuery {
     pub layer: Option<MemoryLayer>,
     pub category: Option<MemoryCategory>,
     pub now: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MemorySearchQuery {
-    pub text: String,
-    pub limit: usize,
-    pub layer: Option<MemoryLayer>,
-    pub category: Option<MemoryCategory>,
-    pub include_archive: bool,
-    pub now: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EvictionCandidate {
-    pub entry: MemoryEntry,
-    pub ttl_expired: bool,
-    pub eviction_score: i64,
-    pub eviction_reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -249,16 +220,7 @@ pub struct MemoryStats {
     pub project_archive_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-pub struct ReflectionApplyResult {
-    /// Number of requested operations (suggestions plus outdated-memory marks).
-    pub attempted: usize,
-    /// Number of operations durably completed. This can be smaller than
-    /// `attempted` when a cross-layer apply returns `MemoryError::PartialApply`.
-    pub completed: usize,
-    pub suggestions_added: usize,
-    pub outdated_marked: usize,
-}
+pub use crate::domain::ReflectionApplyResult;
 
 #[async_trait]
 pub trait ReflectionHistoryQuery: Send + Sync {

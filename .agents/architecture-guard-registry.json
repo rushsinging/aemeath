@@ -34,42 +34,6 @@
       "tracking_issue": 1647
     },
     {
-      "id": "construction.memory.datasetmemoryopener",
-      "symbol": "DatasetMemoryOpener",
-      "owner_crate": "memory",
-      "kind": "adapter",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Memory opener is assembled only by the Composition Root (#861/#950)",
-      "tracking_issue": 1067
-    },
-    {
-      "id": "construction.memory.filelegacymemorysourcefactory",
-      "symbol": "FileLegacyMemorySourceFactory",
-      "owner_crate": "memory",
-      "kind": "adapter",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Legacy memory source factory is assembled only by the Composition Root (#861/#950)",
-      "tracking_issue": 1067
-    },
-    {
-      "id": "construction.memory.atomicdatasetreflectionhistorystore",
-      "symbol": "AtomicDatasetReflectionHistoryStore",
-      "owner_crate": "memory",
-      "kind": "adapter",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Reflection history store is assembled only by the Composition Root (#861/#950)",
-      "tracking_issue": 1067
-    },
-    {
       "id": "construction.context.atomicblobacceptedinputwriter",
       "symbol": "AtomicBlobAcceptedInputWriter",
       "owner_crate": "context",
@@ -357,6 +321,42 @@
       "guard": "check-cross-bc-construction-registry.sh",
       "reason": "全局连接存储注入工厂：Filesystem 实现已收窄 crate 内，composition 唯一构造入口（façade 边界收敛批次）",
       "tracking_issue": 1706
+    },
+    {
+      "id": "construction.memory.wire-memory-opener",
+      "symbol": "wire_memory_opener",
+      "owner_crate": "memory",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "memory 实现体收窄后 composition 唯一构造入口（façade 边界收敛批次）",
+      "tracking_issue": 1709
+    },
+    {
+      "id": "construction.memory.wire-legacy-memory-source-factory",
+      "symbol": "wire_legacy_memory_source_factory",
+      "owner_crate": "memory",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "memory 实现体收窄后 composition 唯一构造入口（façade 边界收敛批次）",
+      "tracking_issue": 1709
+    },
+    {
+      "id": "construction.memory.wire-reflection-history-store",
+      "symbol": "wire_reflection_history_store",
+      "owner_crate": "memory",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "memory 实现体收窄后 composition 唯一构造入口（façade 边界收敛批次）",
+      "tracking_issue": 1709
     }
   ],
   "entries": [
@@ -1029,6 +1029,7 @@
         "adapters",
         "adapters.rs",
         "adapters_tests.rs",
+        "api.rs",
         "application",
         "application.rs",
         "application_tests.rs",
@@ -1036,6 +1037,7 @@
         "domain",
         "domain.rs",
         "lib.rs",
+        "lib_tests.rs",
         "noop.rs",
         "ports",
         "ports.rs",
@@ -1819,57 +1821,11 @@
         "value": "agent/features/memory/src"
       },
       "allowed_symbols": [
-        "*",
-        "AtomicDatasetReflectionHistoryStore",
-        "CompactResult",
-        "DatasetMemoryOpener",
-        "EvictionCandidate",
-        "FileLegacyMemorySourceFactory",
-        "InMemoryMemory",
-        "MemoryCategory",
-        "MemoryEntry",
-        "MemoryError",
-        "MemoryId",
-        "MemoryLayer",
-        "MemoryLocation",
-        "MemoryOpenError",
-        "MemoryOpener",
-        "MemoryOpenerError",
-        "MemoryPolicy",
-        "MemoryPort",
-        "MemoryQuery",
-        "MemoryRetrievalMode",
-        "MemorySearchHit",
-        "MemorySearchQuery",
-        "MemorySearchResult",
-        "MemorySource",
-        "MemoryStats",
-        "MemorySuggestion",
-        "NoOpMemory",
-        "ProjectMemoryKey",
-        "ReflectionApplyResult",
-        "ReflectionApplyStatus",
-        "ReflectionEngine",
-        "ReflectionError",
-        "ReflectionErrorCategory",
-        "ReflectionExecutionIdentity",
-        "ReflectionExecutionResult",
-        "ReflectionHistoryQuery",
-        "ReflectionHistoryStore",
-        "ReflectionMessage",
-        "ReflectionOutput",
-        "ReflectionRecord",
-        "ReflectionResult",
-        "ReflectionSafeSummary",
-        "ReflectionStatus",
-        "ReflectionTokenUsage",
-        "ReflectionTrigger",
-        "ReflectionWorkflow",
-        "ReflectionWorkflowError",
-        "RestoreResult",
-        "WriteResult"
+        "wire_legacy_memory_source_factory",
+        "wire_memory_opener",
+        "wire_reflection_history_store"
       ],
-      "reason": "F-2：memory crate 根窄 façade（#1022 登记，消费者证明制）",
+      "reason": "F-2：memory 对外仅 ::api（update 同构，L1 禁段放行 api 段）；根零 re-export，唯三 wire 工厂为 composition 构造入口（#1709 DDD 五类判据）",
       "profile": "full"
     },
     {
@@ -3535,5 +3491,21 @@
       "profile": "full"
     }
   ],
-  "retired_symbols": []
+  "retired_symbols": [
+    {
+      "symbol": "DatasetMemoryOpener",
+      "retired_by": "memory",
+      "reason": "实现体构造已收窄 pub(crate)，跨 BC 不可达；构造由 wire 工厂承接（construction_symbols 三条 wire 条目，tracking 1709）"
+    },
+    {
+      "symbol": "FileLegacyMemorySourceFactory",
+      "retired_by": "memory",
+      "reason": "实现体构造已收窄 pub(crate)，跨 BC 不可达；构造由 wire 工厂承接（construction_symbols 三条 wire 条目，tracking 1709）"
+    },
+    {
+      "symbol": "AtomicDatasetReflectionHistoryStore",
+      "retired_by": "memory",
+      "reason": "实现体构造已收窄 pub(crate)，跨 BC 不可达；构造由 wire 工厂承接（construction_symbols 三条 wire 条目，tracking 1709）"
+    }
+  ]
 }

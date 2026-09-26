@@ -169,7 +169,7 @@ pub struct ToolExecutionPorts {
     workspace: WorkspaceReadAccess,
     read_set: Arc<dyn ReadSet>,
     plan_mode: Arc<dyn PlanModeState>,
-    memory: Arc<dyn memory::MemoryPort>,
+    memory: Arc<dyn memory::api::MemoryPort>,
     parent_session_id: Option<String>,
     reminders: Option<Arc<Mutex<SessionReminders>>>,
     guidance: Arc<dyn Guidance>,
@@ -186,7 +186,7 @@ impl ToolExecutionPorts {
         workspace: WorkspaceReadAccess,
         read_set: Arc<dyn ReadSet>,
         plan_mode: Arc<dyn PlanModeState>,
-        memory: Arc<dyn memory::MemoryPort>,
+        memory: Arc<dyn memory::api::MemoryPort>,
         guidance: Arc<dyn Guidance>,
     ) -> Self {
         Self {
@@ -295,7 +295,7 @@ impl ToolExecutionContext {
     pub fn plan_mode_state(&self) -> Arc<dyn PlanModeState> {
         self.ports.plan_mode.clone()
     }
-    pub fn memory(&self) -> Arc<dyn memory::MemoryPort> {
+    pub fn memory(&self) -> Arc<dyn memory::api::MemoryPort> {
         self.ports.memory.clone()
     }
     pub fn skill_query(&self) -> &SkillQuerySnapshot {

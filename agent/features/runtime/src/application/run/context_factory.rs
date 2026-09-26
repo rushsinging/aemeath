@@ -498,7 +498,7 @@ impl RuntimeContextFactory {
     ) -> Result<MemorySelection, RunCreationError> {
         let port = match bindings.session() {
             Some(session) => session.wiring().committed_memory(),
-            None => Arc::new(memory::NoOpMemory),
+            None => Arc::new(memory::api::NoOpMemory),
         };
         Ok(MemorySelection { port })
     }

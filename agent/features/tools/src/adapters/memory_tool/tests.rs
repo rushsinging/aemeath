@@ -24,14 +24,14 @@ impl MemoryPortSource for SwappableMemorySource {
 #[tokio::test]
 async fn memory_tool_resolves_current_committed_port_for_each_call() {
     let first = Arc::new(
-        memory::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap(),
+        memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap(),
     );
     first
         .write(test_entry("first committed memory", MemoryCategory::Fact))
         .await
         .unwrap();
     let second = Arc::new(
-        memory::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap(),
+        memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap(),
     );
     second
         .write(test_entry("resumed committed memory", MemoryCategory::Fact))
@@ -74,7 +74,7 @@ fn memory_registry_schema_preserves_action_specific_contract() {
     let registry = crate::adapters::tool_registry::ToolRegistry::new();
     registry.register(MemoryTool {
         source: Arc::new(SwappableMemorySource {
-            current: RwLock::new(Arc::new(memory::NoOpMemory)),
+            current: RwLock::new(Arc::new(memory::api::NoOpMemory)),
         }),
     });
 
@@ -106,7 +106,8 @@ fn test_entry(content: &str, category: MemoryCategory) -> MemoryEntry {
 
 #[tokio::test]
 async fn add_result_returns_full_id_for_follow_up_actions() {
-    let memory = memory::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap();
+    let memory =
+        memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap();
     let workspace = tempfile::tempdir().unwrap();
     let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
         workspace.path().to_path_buf(),
@@ -132,7 +133,8 @@ async fn add_result_returns_full_id_for_follow_up_actions() {
 
 #[tokio::test]
 async fn search_result_publishes_ranked_memory_details_for_llm_and_tui() {
-    let memory = memory::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap();
+    let memory =
+        memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap();
     memory
         .write(test_entry(
             "Rust workspace validation requires cargo clippy",
@@ -176,7 +178,8 @@ async fn search_result_publishes_ranked_memory_details_for_llm_and_tui() {
 
 #[tokio::test]
 async fn reflection_generated_memory_remains_searchable_through_tool_contract() {
-    let memory = memory::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap();
+    let memory =
+        memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap();
     memory
         .apply_reflection(&ReflectionOutput {
             suggested_memories: vec![MemorySuggestion {
@@ -208,7 +211,8 @@ async fn reflection_generated_memory_remains_searchable_through_tool_contract() 
 
 #[tokio::test]
 async fn list_result_publishes_manageable_entries_in_llm_text() {
-    let memory = memory::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap();
+    let memory =
+        memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap();
     memory
         .write(test_entry(
             "Rust workspace validation requires cargo clippy",
@@ -229,7 +233,7 @@ async fn list_result_publishes_manageable_entries_in_llm_text() {
 
 #[tokio::test]
 async fn full_add_returns_actionable_typed_eviction_candidates_without_mutation() {
-    let memory = memory::InMemoryMemory::new_with_clock(
+    let memory = memory::api::InMemoryMemory::new_with_clock(
         MemoryPolicy {
             max_entries: 1,
             similarity_threshold: 0.8,
@@ -272,7 +276,7 @@ async fn full_add_returns_actionable_typed_eviction_candidates_without_mutation(
 #[tokio::test]
 async fn archive_and_restore_actions_publish_manageable_terminal_results() {
     let memory = Arc::new(
-        memory::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap(),
+        memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap(),
     );
     let entry = test_entry("archive lifecycle", MemoryCategory::Decision);
     memory.write(entry.clone()).await.unwrap();
