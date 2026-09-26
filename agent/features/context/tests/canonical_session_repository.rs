@@ -13,13 +13,15 @@ use context::{
     SessionCommitPlan, SnapshotState,
 };
 use context::{CanonicalSessionRepository, CanonicalSessionWriter};
-use project::{PreparedWorkspaceRestore, WorkspacePersist, WorkspaceRestoreError};
+use project::{WorkspaceRestoreData, WorkspaceWriter};
 use provider::ReasoningLevel;
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
 use share::message::Message;
-use share::session_types::{PersistedWorkspaceContext, ProjectIdentity, WorkspaceId, WorktreeKind};
+use share::session_types::{
+    PersistedWorkspaceContext, ProjectIdentityData, WorkspaceId, WorktreeKind,
+};
 use task::{PreparedTaskRestore, TaskPersist, TaskSnapshot, TaskSnapshotValidationError};
 
 use tools::{SkillLoadDecision, SkillLoadMutation, SkillLoadScope, SkillLoadStateError};
@@ -173,7 +175,7 @@ impl TaskPersist for EmptyTask {
 }
 
 struct FixedWorkspace(PersistedWorkspaceContext);
-impl WorkspacePersist for FixedWorkspace {
+impl WorkspaceWriter for FixedWorkspace {
     fn snapshot(&self) -> PersistedWorkspaceContext {
         self.0.clone()
     }
@@ -181,17 +183,17 @@ impl WorkspacePersist for FixedWorkspace {
     fn prepare_restore(
         &self,
         _dto: &PersistedWorkspaceContext,
-    ) -> Result<PreparedWorkspaceRestore, WorkspaceRestoreError> {
+    ) -> Result<WorkspaceRestoreData, share::error::DomainError> {
         panic!("not used")
     }
 
-    fn commit_restore(&self, _prepared: PreparedWorkspaceRestore) {
+    fn commit_restore(&self, _prepared: WorkspaceRestoreData) {
         panic!("not used")
     }
 }
 
 fn workspace() -> PersistedWorkspaceContext {
-    let project_identity = ProjectIdentity {
+    let project_identity = ProjectIdentityData {
         initial_cwd: "/tmp/project".to_string(),
         git_common_dir: None,
     };

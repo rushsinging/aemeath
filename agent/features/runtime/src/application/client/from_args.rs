@@ -37,7 +37,7 @@ impl RuntimeToolAssemblyDependencies {
 
 /// 由 Composition 装配、供 Runtime bootstrap 转发的基础运行资源。
 pub struct RuntimeCoreDependencies {
-    workspace: project::WorkspaceViews,
+    workspace: project::Workspace,
     wiring: Arc<context::MainSessionWiring>,
     provider_factory: Arc<dyn ProviderFactory>,
     session_management: Arc<dyn context::SessionManagementPort>,
@@ -45,7 +45,7 @@ pub struct RuntimeCoreDependencies {
 
 impl RuntimeCoreDependencies {
     pub fn new(
-        workspace: project::WorkspaceViews,
+        workspace: project::Workspace,
         wiring: Arc<context::MainSessionWiring>,
         provider_factory: Arc<dyn ProviderFactory>,
         session_management: Arc<dyn context::SessionManagementPort>,
@@ -95,7 +95,7 @@ pub struct SkillBootstrapAssembly {
 impl SkillBootstrapAssembly {
     pub fn new(
         catalog: std::sync::Arc<dyn tools::SkillCatalogPort>,
-        workspace: project::WorkspaceViews,
+        workspace: project::Workspace,
         query: tools::SkillQuery,
     ) -> Self {
         let snapshot = tools::SkillCatalogSnapshot::from_descriptors(catalog.list(query.clone()));
@@ -198,7 +198,7 @@ impl RuntimeIngressAssembly {
 /// `runtime_context_factory` 随 Agent Runner assembly 进入 bootstrap，保证
 /// Main 与 Derived 路径共享同一基础 factory 实例。
 pub struct RuntimeBootstrapDependencies {
-    workspace: project::WorkspaceViews,
+    workspace: project::Workspace,
     wiring: Arc<context::MainSessionWiring>,
     provider_factory: Arc<dyn ProviderFactory>,
     session_management: Arc<dyn context::SessionManagementPort>,
@@ -414,7 +414,7 @@ pub async fn from_args_with_workspace(
 
     // Concurrency settings and shared semaphore are frozen by Composition.
 
-    // 16. PolicyPort 已由 Composition 注入；同一 Arc 分发给 Main 与 Sub。
+    // 16. Policy 已由 Composition 注入；同一 Arc 分发给 Main 与 Sub。
 
     // 17. #1385 Task 7: Memory port is obtained per-run via BoundMainRun
     // (assemble_main_runtime_context), not at bootstrap time.

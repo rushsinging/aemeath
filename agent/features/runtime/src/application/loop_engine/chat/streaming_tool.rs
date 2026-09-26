@@ -40,7 +40,7 @@ struct StreamingToolInner {
     turn_context: RuntimeRunContext,
     run_id: sdk::RunId,
     language: String,
-    workspace_read: Arc<dyn project::WorkspaceRead>,
+    workspace_read: Arc<dyn project::WorkspaceReader>,
     semaphore: Arc<tokio::sync::Semaphore>,
     state: std::sync::Mutex<StreamingToolState>,
 }
@@ -166,7 +166,7 @@ impl StreamingToolExecutor {
         turn_context: RuntimeRunContext,
         run_id: sdk::RunId,
         language: String,
-        workspace_read: Arc<dyn project::WorkspaceRead>,
+        workspace_read: Arc<dyn project::WorkspaceReader>,
         max_tool_concurrency: usize,
     ) -> Self {
         Self {

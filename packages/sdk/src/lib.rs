@@ -68,8 +68,8 @@ pub use commands::{
     ParsedArguments, SkillRequestCommand, SlashInput, SnapshotQueryCommand, SnapshotQueryTarget,
 };
 pub use config_view::{
-    ConfigApplicationScopeView, ConfigChangeCause, ConfigChangedEvent, ConfigField,
-    ConfigReloadedEvent, ConfigUpdate, ConfigUpdateResult, ConfigView, ElementSpacingView,
+    ConfigApplicationScopeView, ConfigChangeCauseData, ConfigChangedEvent, ConfigFieldData,
+    ConfigReloadedEvent, ConfigUpdateData, ConfigUpdateResult, ConfigView, ElementSpacingView,
     MarkdownSpacingModeView, MarkdownSpacingOverridesView, PermissionModeView,
 };
 pub use content::{ContentBlock, ImageSource};

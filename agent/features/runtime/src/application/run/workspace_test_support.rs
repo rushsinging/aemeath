@@ -14,9 +14,7 @@ pub(crate) fn test_runtime_workspace_access() -> RuntimeWorkspaceAccess {
         uuid::Uuid::now_v7()
     ));
     std::fs::create_dir_all(&root).expect("create workspace root");
-    let views = project::wire_production_workspace(root, None)
-        .expect("workspace initialization")
-        .into_views();
+    let views = project::wire_production_workspace(root, None).expect("workspace initialization");
     RuntimeWorkspaceAccess::new(views)
 }
 
@@ -24,9 +22,8 @@ pub(crate) fn test_tool_execution_context(
     root: std::path::PathBuf,
     cancel: tokio_util::sync::CancellationToken,
 ) -> tools::ToolExecutionContext {
-    let views = project::wire_production_workspace(root.clone(), None)
-        .expect("workspace initialization")
-        .into_views();
+    let views =
+        project::wire_production_workspace(root.clone(), None).expect("workspace initialization");
     let workspace = RuntimeWorkspaceAccess::new(views.clone());
     test_workspaces().lock().expect("test workspaces").insert(
         views.read().workspace_id().as_str().to_string(),
@@ -60,6 +57,6 @@ pub(crate) fn runtime_workspace(ctx: &tools::ToolExecutionContext) -> RuntimeWor
 
 pub(crate) fn workspace_persist(
     ctx: &tools::ToolExecutionContext,
-) -> Arc<dyn project::WorkspacePersist> {
+) -> Arc<dyn project::WorkspaceWriter> {
     runtime_workspace(ctx).persist()
 }

@@ -7,7 +7,7 @@
 //! 同一目录，跨项目 session 互不可见，列表查询天然只读本项目。
 
 use sha2::{Digest, Sha256};
-use share::session_types::ProjectIdentity;
+use share::session_types::ProjectIdentityData;
 use std::str::FromStr;
 use storage::SafePathSegment;
 
@@ -17,7 +17,7 @@ use storage::SafePathSegment;
 /// `cwd:<initial_cwd>` 作为哈希输入，取 SHA-256 前 16 个 hex 字符。
 /// 同一 identity（含同一仓库的不同 worktree）得到同一段；不同 identity
 /// 得到不同段的概率由 64 bit 哈希前缀保证。
-pub fn project_dir_segment(identity: &ProjectIdentity) -> SafePathSegment {
+pub fn project_dir_segment(identity: &ProjectIdentityData) -> SafePathSegment {
     let canonical = match identity.git_common_dir.as_deref() {
         Some(common_dir) => format!("git:{common_dir}"),
         None => format!("cwd:{}", identity.initial_cwd),

@@ -4,7 +4,7 @@ use crate::domain::session::{
     CommittedRunStep, RunStepCursor, SnapshotState,
 };
 use share::message::Message;
-use share::session_types::{PersistedWorkspaceContext, ProjectIdentity};
+use share::session_types::{PersistedWorkspaceContext, ProjectIdentityData};
 
 fn session() -> CanonicalSession {
     CanonicalSession {
@@ -73,7 +73,7 @@ fn cleared_empty_session() -> CanonicalSession {
 fn captured_workspace_session(initial_cwd: &str) -> CanonicalSession {
     let mut session = cleared_empty_session();
     session.workspace = SnapshotState::Captured(PersistedWorkspaceContext {
-        project_identity: ProjectIdentity {
+        project_identity: ProjectIdentityData {
             initial_cwd: initial_cwd.to_string(),
             git_common_dir: None,
         },

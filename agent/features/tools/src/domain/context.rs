@@ -8,7 +8,8 @@ use crate::domain::{
     SkillLoadStatePort, SkillQuerySnapshot, ToolProfileName, ToolProgressEvent,
 };
 use async_trait::async_trait;
-use project::{WorkspaceId, WorkspaceRead};
+use project::WorkspaceReader;
+use share::session_types::WorkspaceId;
 use std::{
     collections::HashSet,
     path::PathBuf,
@@ -149,13 +150,13 @@ impl AuthorizationContext {
 /// Read-only workspace capability available to every tool invocation.
 #[derive(Clone)]
 pub struct WorkspaceReadAccess {
-    read: Arc<dyn WorkspaceRead>,
+    read: Arc<dyn WorkspaceReader>,
 }
 impl WorkspaceReadAccess {
-    pub fn new(read: Arc<dyn WorkspaceRead>) -> Self {
+    pub fn new(read: Arc<dyn WorkspaceReader>) -> Self {
         Self { read }
     }
-    pub fn read(&self) -> Arc<dyn WorkspaceRead> {
+    pub fn read(&self) -> Arc<dyn WorkspaceReader> {
         self.read.clone()
     }
 }
@@ -282,7 +283,7 @@ impl ToolExecutionContext {
     pub fn progress_sink(&self) -> Option<Arc<dyn ProgressSink>> {
         self.ports.progress.clone()
     }
-    pub fn workspace_read(&self) -> Arc<dyn WorkspaceRead> {
+    pub fn workspace_read(&self) -> Arc<dyn WorkspaceReader> {
         self.ports.workspace.read()
     }
     pub fn read_set(&self) -> Arc<dyn ReadSet> {

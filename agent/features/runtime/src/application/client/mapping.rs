@@ -1,5 +1,5 @@
 use sdk::{
-    ConfigField, ConfigUpdateResult, ConfigView, ElementSpacingView, MarkdownSpacingModeView,
+    ConfigFieldData, ConfigUpdateResult, ConfigView, ElementSpacingView, MarkdownSpacingModeView,
     MarkdownSpacingOverridesView, MemoryConfigView, ReflectionConfigView, SessionSummary,
 };
 
@@ -43,15 +43,15 @@ fn element_spacing_to_sdk(value: share::config::ElementSpacingOverride) -> Eleme
     }
 }
 
-pub(crate) fn config_change_to_sdk(change: config::ConfigChangeSet) -> ConfigUpdateResult {
+pub(crate) fn config_change_to_sdk(change: config::ConfigChangeData) -> ConfigUpdateResult {
     ConfigUpdateResult {
         changed_fields: change
             .fields
             .into_iter()
             .map(|field| match field {
-                config::ConfigField::Model => ConfigField::Model,
-                config::ConfigField::PermissionMode => ConfigField::PermissionMode,
-                config::ConfigField::Memory => ConfigField::Memory,
+                config::ConfigFieldData::Model => ConfigFieldData::Model,
+                config::ConfigFieldData::PermissionMode => ConfigFieldData::PermissionMode,
+                config::ConfigFieldData::Memory => ConfigFieldData::Memory,
             })
             .collect(),
         view: config_snapshot_to_sdk(&change.snapshot),
@@ -340,18 +340,21 @@ mod tests {
     fn config_change_mapping_preserves_fields_and_committed_view() {
         let mut config = share::config::Config::default();
         config.model.name = "changed/model".into();
-        let result = config_change_to_sdk(config::ConfigChangeSet {
-            cause: config::ConfigChangeCause::ClientUpdate,
+        let result = config_change_to_sdk(config::ConfigChangeData {
+            cause: config::ConfigChangeCauseData::ClientUpdate,
             fields: vec![
-                config::ConfigField::Model,
-                config::ConfigField::PermissionMode,
+                config::ConfigFieldData::Model,
+                config::ConfigFieldData::PermissionMode,
             ],
             snapshot: share::config::domain::snapshot::ConfigSnapshot::new(config),
         });
 
         assert_eq!(
             result.changed_fields,
-            vec![sdk::ConfigField::Model, sdk::ConfigField::PermissionMode]
+            vec![
+                sdk::ConfigFieldData::Model,
+                sdk::ConfigFieldData::PermissionMode
+            ]
         );
         assert_eq!(result.view.model_name, "changed/model");
     }

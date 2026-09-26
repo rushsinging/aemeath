@@ -62,7 +62,7 @@ struct AgentsDirEnvGuard {
 }
 
 fn test_native_store(root: &std::path::Path) -> NativeConfigStore {
-    native_override_store(
+    wire_config_override_store(
         storage::file_system_blob(root.join("config-overrides"))
             .expect("create test config override blob"),
     )
@@ -102,7 +102,7 @@ async fn wire_entry_logs_debug_enter_then_success_on_ok() {
     let result = wire_project_config_with_cli(
         project.path(),
         test_native_store(project.path()),
-        crate::CliConfigInput::default(),
+        crate::CliConfigInputData::default(),
     )
     .await;
 
@@ -137,7 +137,7 @@ async fn wire_entry_logs_debug_enter_then_warn_failure_on_err_and_returns_origin
     let result = wire_project_config_with_cli(
         std::path::Path::new("/nonexistent/config/does/not/exist"),
         test_native_store(missing_store_root.path()),
-        crate::CliConfigInput::default(),
+        crate::CliConfigInputData::default(),
     )
     .await;
 
@@ -147,7 +147,9 @@ async fn wire_entry_logs_debug_enter_then_warn_failure_on_err_and_returns_origin
     };
     assert_eq!(
         error,
-        ConfigError::InvalidLocation(ProjectConfigLocationError::NotCanonical),
+        share::error::DomainError::from(crate::domain::ConfigError::InvalidLocation(
+            crate::domain::ProjectConfigLocationError::NotCanonical,
+        )),
         "original error must be returned unchanged"
     );
     let logs = drain_captured_config_logs();
@@ -178,7 +180,7 @@ async fn wire_entry_never_logs_sensitive_config_values() {
     let _ = wire_project_config_with_cli(
         project.path(),
         test_native_store(project.path()),
-        crate::adapters::CliConfigInput {
+        crate::adapters::CliConfigInputData {
             api_key: Some(secret.into()),
             ..Default::default()
         },

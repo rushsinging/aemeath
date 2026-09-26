@@ -33,7 +33,7 @@ pub(crate) async fn execute_tool_round<S>(
     context: &RuntimeRunContext,
     tool_calls: &[ToolCall],
     catalog: &tools::ToolCatalogSnapshot,
-    policy: &dyn policy::PolicyPort,
+    policy: &dyn policy::Policy,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
     agent: &Agent,
@@ -42,7 +42,7 @@ pub(crate) async fn execute_tool_round<S>(
     activities: &ActivityCoordinator,
     cancel: &CancellationToken,
     language: &str,
-    workspace_read: &Arc<dyn project::WorkspaceRead>,
+    workspace_read: &Arc<dyn project::WorkspaceReader>,
     guarded_calls: &[(ToolCall, crate::application::loop_engine::ToolGuardDecision)],
 ) -> ToolRoundResult
 where
@@ -313,7 +313,7 @@ pub(crate) async fn run_post_tool_hooks(
     execution: &ToolExecution,
     session_id: &str,
     cancel: &CancellationToken,
-    workspace_read: &Arc<dyn project::WorkspaceRead>,
+    workspace_read: &Arc<dyn project::WorkspaceReader>,
 ) {
     let workspace_root = workspace_read.current_workspace_root();
     let output = &execution.outcome.text;
@@ -616,7 +616,7 @@ mod tests {
                 &execution_context,
                 std::slice::from_ref(&execution_call),
                 &execution_agent.catalog,
-                &policy::AllowAllPolicy,
+                &*policy::allow_all(),
                 &sdk::RunId::new_v7(),
                 &sdk::RunStepId::new_v7(),
                 execution_agent.as_ref(),
@@ -664,7 +664,7 @@ mod tests {
             &context,
             std::slice::from_ref(&call),
             &agent.catalog,
-            &policy::AllowAllPolicy,
+            &*policy::allow_all(),
             &sdk::RunId::new_v7(),
             &sdk::RunStepId::new_v7(),
             &agent,
@@ -735,7 +735,7 @@ mod tests {
             &context,
             std::slice::from_ref(&call),
             &agent.catalog,
-            &policy::AllowAllPolicy,
+            &*policy::allow_all(),
             &sdk::RunId::new_v7(),
             &sdk::RunStepId::new_v7(),
             &agent,
@@ -790,7 +790,7 @@ mod tests {
             &context,
             &calls,
             &agent.catalog,
-            &policy::AllowAllPolicy,
+            &*policy::allow_all(),
             &sdk::RunId::new_v7(),
             &sdk::RunStepId::new_v7(),
             &agent,

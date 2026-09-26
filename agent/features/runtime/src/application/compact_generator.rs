@@ -189,8 +189,26 @@ mod tests {
             tokio::sync::watch::channel(self.snapshot.clone()).1
         }
 
-        async fn refresh_if_sources_changed(&self) -> config::ConfigRefreshOutcome {
-            config::ConfigRefreshOutcome::Unchanged
+        async fn refresh_if_sources_changed(&self) -> config::ConfigRefreshOutcomeData {
+            config::ConfigRefreshOutcomeData::Unchanged
+        }
+
+        async fn snapshot(
+            &self,
+        ) -> std::result::Result<
+            share::config::domain::snapshot::ConfigSnapshot,
+            share::error::DomainError,
+        > {
+            Ok(self.committed_snapshot())
+        }
+
+        async fn subscribe(
+            &self,
+        ) -> std::result::Result<config::ConfigSubscriptionData, share::error::DomainError>
+        {
+            let changes = self.subscribe_committed();
+            let initial = changes.borrow().clone();
+            Ok(config::ConfigSubscriptionData { initial, changes })
         }
     }
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::*;
 use crate::application::client::accessors::SessionRuntime;
 use crate::domain::agent_run::RunSpec;
-use crate::ports::PolicyPort;
+use crate::ports::Policy;
 use hook::{HookInvocation, HookOutcome, HookPort};
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 
@@ -231,13 +231,11 @@ async fn make_test_shell(
     let temp = tempfile::tempdir().expect("create temp root");
     let root = temp.path().join("root");
     std::fs::create_dir_all(&root).expect("create root");
-    let workspace = project::wire_production_workspace(root.clone(), None)
-        .expect("wire workspace")
-        .into_views();
+    let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
     let task_wiring = task::wire_task();
     let config = config::wire_project_config(
         &root,
-        config::native_override_store(
+        config::wire_config_override_store(
             storage::file_system_blob(temp.path()).expect("create config blob"),
         ),
     )
@@ -256,7 +254,7 @@ async fn make_test_shell(
     .await;
     let snapshot = wiring.committed_config();
     let binding = crate::application::model::test_support::test_binding(Vec::new());
-    let policy: Arc<dyn PolicyPort> = Arc::new(policy::AllowAllPolicy);
+    let policy: Arc<dyn Policy> = policy::allow_all();
     let _memory: Arc<dyn MemoryPort> = Arc::new(memory::NoOpMemory);
     let tools_factory = tools::composition::TestCatalogExecutionFactory::empty();
     let tool_catalog: Arc<dyn tools::ToolCatalogPort> = tools_factory.catalog_port();
@@ -533,9 +531,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     std::fs::write(agents_dir.join("mcp.json"), r#"{"mcpServers":{}}"#)
         .expect("write isolated MCP config");
 
-    let workspace = project::wire_production_workspace(root.clone(), None)
-        .expect("wire workspace")
-        .into_views();
+    let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
     let original = workspace.clone();
     workspace
         .control()
@@ -552,7 +548,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     };
     let config = config::wire_project_config(
         &root,
-        config::native_override_store(
+        config::wire_config_override_store(
             storage::file_system_blob(&agents_dir).expect("create config blob"),
         ),
     )
@@ -570,7 +566,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         ))),
     )
     .await;
-    let policy: Arc<dyn policy::PolicyPort> = Arc::new(policy::AllowAllPolicy);
+    let policy: Arc<dyn policy::Policy> = policy::allow_all();
     let tools = tools::composition::TestCatalogExecutionFactory::empty();
     let skill_wiring = tools::composition::wire_skills();
     let tool_result_materializer =
@@ -794,7 +790,7 @@ async fn interaction_bridge_is_single_source_on_shell() {
 }
 
 /// Startup resume must run before the committed snapshot is read, while
-/// Context rejects any session whose ProjectIdentity differs from the
+/// Context rejects any session whose ProjectIdentityData differs from the
 /// live workspace; a failed resume therefore cannot change Config/Memory.
 #[test]
 fn startup_resume_precedes_current_project_config_read() {

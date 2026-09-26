@@ -82,7 +82,7 @@ pub(crate) struct SessionRuntimeAssembly {
 pub(crate) async fn from_args_with_gateways(
     args: AgentArgs,
     gateways: FeatureGateways,
-    workspace: project::WorkspaceViews,
+    workspace: project::Workspace,
     config: config::ConfigWiring,
     agents_dir: &std::path::Path,
 ) -> Result<SessionRuntimeAssembly, sdk::SdkError> {

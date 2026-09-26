@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// Project-owned identity published to Session and other bounded contexts.
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ProjectIdentity {
+pub struct ProjectIdentityData {
     /// Canonical cwd used when the project was initialized.
     pub initial_cwd: String,
     /// Canonical git common directory, or `None` for a valid non-git project.
@@ -20,12 +20,17 @@ pub struct ProjectIdentity {
 pub struct WorkspaceId(String);
 
 impl WorkspaceId {
+    /// 直接构造（持久化反序列化与测试；生产派生走 `derive`）。
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
     /// Derive a deterministic opaque identifier without exposing path semantics.
-    pub fn derive(identity: &ProjectIdentity, workspace_root: &str) -> Self {
+    pub fn derive(identity: &ProjectIdentityData, workspace_root: &str) -> Self {
         // Versioned domain separation plus length-prefixing makes the wire derivation
         // unambiguous and leaves room for a future algorithm/schema migration.
         let digest = utils::stable_sha256_hex(
@@ -65,8 +70,8 @@ pub enum WorktreeKind {
     Linked,
 }
 
-fn identity_is_default(value: &ProjectIdentity) -> bool {
-    value == &ProjectIdentity::default()
+fn identity_is_default(value: &ProjectIdentityData) -> bool {
+    value == &ProjectIdentityData::default()
 }
 
 /// Workspace context for worktree support — persisted session DTO.
@@ -79,7 +84,7 @@ pub struct PersistedWorkspaceContext {
     #[serde(default, skip_serializing_if = "WorkspaceId::is_empty")]
     pub workspace_id: WorkspaceId,
     #[serde(default, skip_serializing_if = "identity_is_default")]
-    pub project_identity: ProjectIdentity,
+    pub project_identity: ProjectIdentityData,
     pub path_base: String,
     #[serde(alias = "working_root")]
     pub workspace_root: String,
@@ -105,7 +110,7 @@ mod tests {
 
     #[test]
     fn workspace_id_sha256_derivation_is_fixed_and_stable() {
-        let identity = ProjectIdentity {
+        let identity = ProjectIdentityData {
             initial_cwd: "/repo".into(),
             git_common_dir: Some("/repo/.git".into()),
         };
@@ -152,7 +157,7 @@ mod tests {
         );
     }
 
-    // ---- #894: 完整 DTO 内嵌 ProjectIdentity / WorkspaceId / WorktreeKind ----
+    // ---- #894: 完整 DTO 内嵌 ProjectIdentityData / WorkspaceId / WorktreeKind ----
 
     /// #894: `PersistedWorkspaceContext` 必须内嵌 project identity / workspace id /
     /// worktree kind 的 wire copy，且新字段全部参与 serde round-trip。
@@ -160,7 +165,7 @@ mod tests {
     fn persisted_workspace_context_embeds_identity_id_and_kind() {
         let ctx = PersistedWorkspaceContext {
             workspace_id: WorkspaceId::from("ws-repo-primary"),
-            project_identity: ProjectIdentity {
+            project_identity: ProjectIdentityData {
                 initial_cwd: "/repo".to_string(),
                 git_common_dir: Some("/repo/.git".to_string()),
             },
@@ -196,7 +201,7 @@ mod tests {
     fn persisted_workspace_context_supports_non_git_identity() {
         let ctx = PersistedWorkspaceContext {
             workspace_id: WorkspaceId::from("ws-plain-dir"),
-            project_identity: ProjectIdentity {
+            project_identity: ProjectIdentityData {
                 initial_cwd: "/tmp/plain".to_string(),
                 git_common_dir: None,
             },

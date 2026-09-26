@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use audit::{
-    append_store_for, wire_audit_client, wire_audit_store, UsageDropReasonData,
+    wire_append_store_for, wire_audit_client, wire_audit_store, UsageDropReasonData,
     UsageEmitOutcomeData, UsageQueryData, UsageRecordData,
 };
 use composition::audit::{wire_session_audit, AuditUsageSink};
@@ -14,8 +14,8 @@ use share::config::Config;
 async fn audit_usage_sink_forwards_sender_outcomes_without_blocking() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = storage::SafeStorageRoot::open(temp.path()).expect("storage root");
-    let store = wire_audit_store(append_store_for(root));
-    let client = wire_audit_client(&store, 1, Duration::from_secs(1));
+    let store = wire_audit_store(wire_append_store_for(root));
+    let (client, _reader) = wire_audit_client(&store, 1, Duration::from_secs(1));
     let sink = AuditUsageSink::new(client.clone());
     let record = UsageRecordData {
         recorded_at_unix_ms: 1,
@@ -76,8 +76,8 @@ async fn production_audit_worker_uses_agents_dir_and_remains_live_until_shutdown
     );
     let audit_root = storage::SafeStorageRoot::open(agents_dir.join("audit"))
         .expect("reopen production audit root");
-    let read_client = wire_audit_client(
-        &wire_audit_store(append_store_for(audit_root)),
+    let (_, read_client) = wire_audit_client(
+        &wire_audit_store(wire_append_store_for(audit_root)),
         1,
         std::time::Duration::from_secs(1),
     );

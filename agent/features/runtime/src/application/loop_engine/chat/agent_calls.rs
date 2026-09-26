@@ -11,7 +11,7 @@ use crate::application::tool::coordination::{
     apply_hook_directive_to_tool_call, HookDirectiveOutcome, PreparedToolCall,
 };
 use hook::{HookInvocation, HookPort, PreToolUseInput};
-use policy::PolicyPort;
+use policy::Policy;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tools::ToolExecutionContext;
@@ -26,14 +26,14 @@ pub(crate) async fn execute_agent_calls<S>(
     agent: &crate::application::tool::agent::Agent,
     agent_ctx: &ToolExecutionContext,
     agent_semaphore: &Arc<tokio::sync::Semaphore>,
-    workspace_persist: &Arc<dyn project::WorkspacePersist>,
+    workspace_persist: &Arc<dyn project::WorkspaceWriter>,
     sink: &S,
     hook_port: &Arc<dyn HookPort>,
     activities: &ActivityCoordinator,
     cancel: &CancellationToken,
-    workspace_read: &Arc<dyn project::WorkspaceRead>,
+    workspace_read: &Arc<dyn project::WorkspaceReader>,
     catalog: &tools::ToolCatalogSnapshot,
-    policy: &dyn PolicyPort,
+    policy: &dyn Policy,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
 ) -> Vec<ToolExecution>
@@ -111,12 +111,12 @@ async fn execute_one_agent<S>(
     activities: &ActivityCoordinator,
     agent: &crate::application::tool::agent::Agent,
     agent_tool_context: &mut ToolExecutionContext,
-    workspace_persist: &Arc<dyn project::WorkspacePersist>,
-    workspace_read: &Arc<dyn project::WorkspaceRead>,
+    workspace_persist: &Arc<dyn project::WorkspaceWriter>,
+    workspace_read: &Arc<dyn project::WorkspaceReader>,
     cancel: &CancellationToken,
     authorization: tools::AuthorizationContext,
     catalog: &tools::ToolCatalogSnapshot,
-    policy: &dyn PolicyPort,
+    policy: &dyn Policy,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
 ) -> Vec<ToolExecution>
@@ -803,7 +803,7 @@ mod tests {
                 &cancel,
                 &ctx.workspace_read(),
                 &catalog,
-                &policy::AllowAllPolicy,
+                &*policy::allow_all(),
                 &sdk::RunId::new_v7(),
                 &sdk::RunStepId::new_v7(),
             )

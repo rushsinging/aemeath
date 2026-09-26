@@ -105,14 +105,14 @@ async fn query_skips_unknown_schema_with_exact_warning_and_keeps_neighbors() {
 }
 
 #[tokio::test]
-async fn accepted_usage_drains_to_file_then_queries_and_summarizes() {
+async fn accepted_usage_drains_to_file_then_queries() {
     let temp = tempfile::tempdir().unwrap();
     let store = Arc::new(file_usage_append_store(
         SafeStorageRoot::open(temp.path()).unwrap(),
     ));
     let service = UsageQueryService::from_store(store.clone());
     let expected = record("session-l4", "match", 15);
-    let client = wire_audit_client(&wire_audit_store(store), 4, Duration::from_secs(1));
+    let (client, _reader) = wire_audit_client(&wire_audit_store(store), 4, Duration::from_secs(1));
     let sender = client.clone();
 
     assert_eq!(
@@ -132,18 +132,10 @@ async fn accepted_usage_drains_to_file_then_queries_and_summarizes() {
     let page = service.query(request.clone()).await.unwrap();
     assert_eq!(page.records, vec![expected]);
     assert!(page.warnings.is_empty());
-
-    let summary = service.summarize(request).await.unwrap();
-    assert_eq!(summary.record_count, 1);
-    assert_eq!(summary.input_tokens, 10);
-    assert_eq!(summary.output_tokens, 20);
-    assert_eq!(summary.cache_write_tokens, 3);
-    assert_eq!(summary.cache_read_tokens, 0);
-    assert_eq!(summary.reasoning_tokens, 5);
 }
 
 #[tokio::test]
-async fn global_query_reads_and_summarizes_records_from_multiple_sessions() {
+async fn global_query_reads_records_from_multiple_sessions() {
     let temp = tempfile::tempdir().unwrap();
     let store = Arc::new(file_usage_append_store(
         SafeStorageRoot::open(temp.path()).unwrap(),
@@ -151,7 +143,7 @@ async fn global_query_reads_and_summarizes_records_from_multiple_sessions() {
     let service = UsageQueryService::from_store(store.clone());
     let first = record("session-global-a", "match", 15);
     let second = record("session-global-b", "match", 16);
-    let client = wire_audit_client(&wire_audit_store(store), 4, Duration::from_secs(1));
+    let (client, _reader) = wire_audit_client(&wire_audit_store(store), 4, Duration::from_secs(1));
     let sender = client.clone();
 
     assert_eq!(
@@ -168,13 +160,7 @@ async fn global_query_reads_and_summarizes_records_from_multiple_sessions() {
     assert_eq!(page.records.len(), 2);
     assert!(page.records.contains(&first));
     assert!(page.records.contains(&second));
-    let summary = service.summarize(query(10)).await.unwrap();
-    assert_eq!(summary.record_count, 2);
-    assert_eq!(summary.input_tokens, 20);
-    assert_eq!(summary.output_tokens, 40);
-    assert_eq!(summary.cache_write_tokens, 6);
-    assert_eq!(summary.cache_read_tokens, 0);
-    assert_eq!(summary.reasoning_tokens, 10);
+    // summarize 随死方法退役（生产零消费）。
 }
 
 #[tokio::test]
@@ -274,19 +260,9 @@ async fn query_skips_corrupt_and_truncated_lines_then_summarizes_tokens() {
         UsageQueryWarning::CorruptLine { line_number: 3, .. }
     ));
 
-    let summary = service.summarize(query(10)).await.unwrap();
-    assert_eq!(summary.record_count, 1);
     let mut cursor_query = query(10);
     cursor_query.pagination.cursor = Some(UsageCursor::new("v1:bad:bad:0"));
-    assert_eq!(
-        service.summarize(cursor_query).await,
-        Err(UsageQueryError::InvalidCursor)
-    );
-    assert_eq!(summary.input_tokens, 10);
-    assert_eq!(summary.output_tokens, 20);
-    assert_eq!(summary.cache_write_tokens, 3);
-    assert_eq!(summary.cache_read_tokens, 0);
-    assert_eq!(summary.reasoning_tokens, 5);
+    // summarize 随死方法退役；InvalidCursor 行为由 query 路径同型断言覆盖。
 }
 
 #[tokio::test]

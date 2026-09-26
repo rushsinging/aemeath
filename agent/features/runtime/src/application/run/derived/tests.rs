@@ -23,7 +23,7 @@ fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeCon
     let services = crate::application::run::context::RuntimeServices {
         tool_catalog: tool_ports.catalog_port(),
         tool_execution: tool_ports.execution(),
-        policy: Arc::new(policy::AllowAllPolicy),
+        policy: policy::allow_all(),
         reflection_history: {
             struct FakeRefl;
             #[async_trait]

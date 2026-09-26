@@ -7,10 +7,10 @@ use std::sync::Arc;
 
 /// Runtime-owned workspace capabilities bound to a Run.
 #[derive(Clone)]
-pub struct RuntimeWorkspaceAccess(pub project::WorkspaceViews);
+pub struct RuntimeWorkspaceAccess(pub project::Workspace);
 
 impl RuntimeWorkspaceAccess {
-    pub fn new(views: project::WorkspaceViews) -> Self {
+    pub fn new(views: project::Workspace) -> Self {
         Self(views)
     }
     pub fn read_access(&self) -> tools::WorkspaceReadAccess {
@@ -19,10 +19,10 @@ impl RuntimeWorkspaceAccess {
     pub fn derive_isolated(&self) -> Self {
         Self(self.0.derive_isolated())
     }
-    pub fn views(&self) -> project::WorkspaceViews {
+    pub fn views(&self) -> project::Workspace {
         self.0.clone()
     }
-    pub fn persist(&self) -> Arc<dyn project::WorkspacePersist> {
+    pub fn persist(&self) -> Arc<dyn project::WorkspaceWriter> {
         self.0.persist()
     }
 }

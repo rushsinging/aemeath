@@ -9,7 +9,7 @@
 //! - ContextPort -> context BC (#868)
 //! - ProviderPort -> provider BC (#901) ✅ PL 已冻结
 //! - ToolCatalogPort / ToolExecutionPort -> tools BC (#908)
-//! - PolicyPort -> policy BC (#917)
+//! - Policy -> policy BC (#917)
 //! - MemoryPort -> memory BC (#897) ✅ Port 由 memory crate 提供，runtime 通过 `memory::api::MemoryPort` 消费
 //! - TaskPort -> task BC (#885)
 //! - HookPort -> hook BC (#922)
@@ -36,9 +36,9 @@ pub use context_port::{
     CompactResult, CompactSkipReason, CompactionDecision, DecisionReason, SystemBlock, TokenBudget,
     ToolOutcomeKind, Urgency,
 };
-pub use policy_port::PolicyPort;
+pub use policy_port::Policy;
 #[cfg(test)]
-pub use policy_port::{PolicyDecision, PolicyRequest};
+pub use policy_port::{PolicyDecisionData, PolicyRequestData};
 pub use provider_factory::{ProviderBinding, ProviderBuildSpec, ProviderFactory};
 pub use provider_port::{
     InvocationOptions, InvocationRequest, ModelId, ModelToolSchema, ProviderPort, RawUsageSnapshot,

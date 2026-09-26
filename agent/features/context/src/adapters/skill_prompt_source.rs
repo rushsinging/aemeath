@@ -28,11 +28,11 @@ impl SkillPromptSource {
 }
 
 pub struct WorkspaceSkillQueryFactory {
-    workspace: Arc<dyn project::WorkspaceRead>,
+    workspace: Arc<dyn project::WorkspaceReader>,
 }
 
 impl WorkspaceSkillQueryFactory {
-    pub fn new(workspace: Arc<dyn project::WorkspaceRead>) -> Self {
+    pub fn new(workspace: Arc<dyn project::WorkspaceReader>) -> Self {
         Self { workspace }
     }
 }

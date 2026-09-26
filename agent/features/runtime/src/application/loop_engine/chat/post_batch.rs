@@ -12,7 +12,7 @@ pub(crate) async fn run_post_tool_batch(
     cancel: &CancellationToken,
     tool_count: usize,
     step_count: usize,
-    workspace_read: &Arc<dyn project::WorkspaceRead>,
+    workspace_read: &Arc<dyn project::WorkspaceReader>,
 ) {
     let workspace_root = workspace_read.current_workspace_root();
     let _ = dispatch_hook(

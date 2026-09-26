@@ -6,7 +6,7 @@ use std::time::{Duration, SystemTime};
 fn scope_fixture() -> ExecutionScope {
     ExecutionScope::builder(
         "run-910",
-        project::WorkspaceId::from("workspace-910"),
+        share::session_types::WorkspaceId::from("workspace-910"),
         PathBuf::from("/workspace"),
     )
     .build()
@@ -19,7 +19,7 @@ fn execution_scope_builder_preserves_required_identity() {
     assert_eq!(scope.run_id(), "run-910");
     assert_eq!(
         scope.workspace_id(),
-        &project::WorkspaceId::from("workspace-910")
+        &share::session_types::WorkspaceId::from("workspace-910")
     );
     assert_eq!(scope.workspace_root(), std::path::Path::new("/workspace"));
 }
@@ -39,7 +39,7 @@ fn execution_scope_builder_uses_main_run_defaults() {
 fn execution_scope_builder_preserves_parent_and_sub_agent_source() {
     let scope = ExecutionScope::builder(
         "child-run",
-        project::WorkspaceId::from("workspace-910"),
+        share::session_types::WorkspaceId::from("workspace-910"),
         PathBuf::from("/workspace"),
     )
     .parent_run_id("parent-run")
@@ -55,7 +55,7 @@ fn execution_scope_builder_preserves_registry_profile_and_deadline() {
     let deadline = SystemTime::now() + Duration::from_secs(30);
     let scope = ExecutionScope::builder(
         "run-910",
-        project::WorkspaceId::from("workspace-910"),
+        share::session_types::WorkspaceId::from("workspace-910"),
         PathBuf::from("/workspace"),
     )
     .registry_scope(RegistryScopeName::new("sub-agent"))
