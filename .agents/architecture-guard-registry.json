@@ -320,6 +320,7 @@
         "value": "agent"
       },
       "classification": "target_capability_policy",
+      "mechanism_type": "structural",
       "owner": "architecture",
       "reason": "生产 Rust 标识符必须表达具体目标或用途，禁止用宽泛 Projection/projection 掩盖职责混合",
       "tracking_issue": 1457,

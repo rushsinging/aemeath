@@ -995,15 +995,17 @@
     "ConnectAvailableAction": {
       "enum": [
         "select_provider",
+        "begin_custom_provider",
+        "select_custom_provider",
         "confirm_overwrite",
         "reject_overwrite",
         "set_endpoint",
         "set_credential",
         "set_provider_user_agent",
         "select_recommended_model",
-        "enter_custom_model",
+        "add_model",
+        "edit_model",
         "set_custom_model",
-        "set_global_default",
         "skip_probe",
         "begin_probe",
         "continue_after_probe",
@@ -1018,9 +1020,9 @@
       "oneOf": [
         {
           "enum": [
+            "begin_custom_provider",
             "confirm_overwrite",
             "reject_overwrite",
-            "enter_custom_model",
             "skip_probe",
             "begin_probe",
             "continue_after_probe",
@@ -1052,8 +1054,42 @@
         {
           "additionalProperties": false,
           "properties": {
+            "select_custom_provider": {
+              "properties": {
+                "base_url": {
+                  "type": "string"
+                },
+                "driver": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "driver",
+                "base_url"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "select_custom_provider"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "set_endpoint": {
               "properties": {
+                "api_style": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "base_url": {
                   "type": "string"
                 }
@@ -1112,74 +1148,68 @@
         {
           "additionalProperties": false,
           "properties": {
-            "select_recommended_model": {
+            "set_selected_models": {
               "properties": {
-                "index": {
-                  "format": "uint",
-                  "minimum": 0,
-                  "type": "integer"
+                "models": {
+                  "items": {
+                    "$ref": "#/$defs/ConnectModelSpec"
+                  },
+                  "type": "array"
                 }
               },
               "required": [
-                "index"
+                "models"
               ],
               "type": "object"
             }
           },
           "required": [
-            "select_recommended_model"
+            "set_selected_models"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
           "properties": {
-            "set_custom_model": {
+            "enter_custom_model": {
               "properties": {
-                "context_window": {
-                  "format": "uint",
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "max_tokens": {
-                  "format": "uint32",
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "model_id": {
-                  "type": "string"
+                "target_model": {
+                  "description": "编辑目标模型 id（模型页高亮项）；None = 添加。",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 }
               },
-              "required": [
-                "model_id",
-                "context_window",
-                "max_tokens"
-              ],
               "type": "object"
             }
           },
           "required": [
-            "set_custom_model"
+            "enter_custom_model"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
           "properties": {
-            "set_global_default": {
+            "upsert_custom_model": {
               "properties": {
+                "model": {
+                  "$ref": "#/$defs/ConnectModelSpec"
+                },
                 "set_as_default": {
+                  "default": false,
                   "type": "boolean"
                 }
               },
               "required": [
-                "set_as_default"
+                "model"
               ],
               "type": "object"
             }
           },
           "required": [
-            "set_global_default"
+            "upsert_custom_model"
           ],
           "type": "object"
         }
@@ -1194,6 +1224,12 @@
             "null"
           ]
         },
+        "default_model_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "driver": {
           "type": [
             "string",
@@ -1203,24 +1239,17 @@
         "has_api_key": {
           "type": "boolean"
         },
-        "model": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ConnectModelDraftView"
-            },
-            {
-              "type": "null"
-            }
-          ]
+        "models": {
+          "items": {
+            "$ref": "#/$defs/ConnectModelDraftView"
+          },
+          "type": "array"
         },
         "provider_user_agent": {
           "type": [
             "string",
             "null"
           ]
-        },
-        "set_global_default": {
-          "type": "boolean"
         },
         "source": {
           "type": [
@@ -1231,7 +1260,7 @@
       },
       "required": [
         "has_api_key",
-        "set_global_default"
+        "models"
       ],
       "type": "object"
     },
@@ -1317,10 +1346,47 @@
         },
         "model_id": {
           "type": "string"
+        },
+        "reasoning_effort": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "model_id"
+      ],
+      "type": "object"
+    },
+    "ConnectModelSpec": {
+      "description": "Connect 向导的模型规格（多选提交 / 自定义模型 upsert 载荷）。",
+      "properties": {
+        "context_window": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_tokens": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "model_id": {
+          "type": "string"
+        },
+        "reasoning_effort": {
+          "description": "固定推理档位（off/minimal/low/medium/high/xhigh/max）；None 用全局默认。",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "model_id",
+        "context_window",
+        "max_tokens"
       ],
       "type": "object"
     },
@@ -1493,13 +1559,13 @@
     "ConnectStage": {
       "enum": [
         "select_provider",
+        "edit_custom_provider",
         "confirm_overwrite",
         "edit_endpoint",
         "edit_credential",
         "edit_user_agent",
         "select_model",
         "edit_custom_model",
-        "choose_global_default",
         "choose_probe",
         "probing",
         "review",
