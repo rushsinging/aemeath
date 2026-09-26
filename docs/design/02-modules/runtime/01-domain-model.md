@@ -129,6 +129,8 @@ TerminateRun
 - **结构化交互暂停**：`AwaitingInteraction { request_id }` 只由匹配 `run_id + request_id` 的 reply/cancel 恢复，并按保存的 typed continuation 回到原工作阶段。
 - **控制旁路**：`CancelRunStep` 收口当前 Step 后回到 `DrainingInput`；`TerminateRun` 从任意非终态进入 `Terminating`，最终只能到 `Terminated`。
 
+手动压缩 Run（`RunSpec::manual_compaction()`，目的为 `RunIntent::ManualCompaction`）复用同一状态机：首次 drain 得到 `EmptyAndSealed` 后由引擎兑现压缩意图，走 `PreparingContext → Compacting → PreparingContext`，压缩完成后经 `CompactionOnlySettled` 回到 `DrainingInput`，再由第二次 drain 的 `EmptyAndSealed` 收口 `Completed`。该目的的 Run **NEVER** 迁移到 `InvokingModel`，也不产生 RunStep。
+
 `Completed`、`Failed`、`Terminated` 是唯一终态。所有领域 mutation 后必须立即发布对应事件；图中的边表示 Run 聚合允许的转换，不表示 Port 或 adapter 可以自行迁移状态。
 
 ### 2.2 聚合结构

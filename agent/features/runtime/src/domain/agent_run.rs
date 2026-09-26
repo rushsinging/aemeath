@@ -2,6 +2,7 @@ use tokio_util::sync::CancellationToken;
 
 mod domain;
 mod event;
+mod intent;
 mod spec;
 mod state;
 mod step;
@@ -39,6 +40,7 @@ pub use domain::Run;
 #[cfg(test)]
 pub use event::RunTimingSnapshot;
 pub use event::{RunId, RuntimeLifecycleEvent};
+pub use intent::RunIntent;
 #[cfg(test)]
 pub use spec::{
     EventRoute, InputMode, InteractionMode, MemoryMode, ReasoningBindingMode, ResourceMode,

@@ -11,8 +11,8 @@ use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::ToolCall;
 use crate::domain::agent_run::{
-    DrainDecision, InteractionContinuation, ModelInvocation, Run, RunStatus, RunTransition,
-    RunTransitionError, RuntimeLifecycleEvent, StopHookBlockResult, ToolCallStatus,
+    DrainDecision, InteractionContinuation, ModelInvocation, Run, RunIntent, RunStatus,
+    RunTransition, RunTransitionError, RuntimeLifecycleEvent, StopHookBlockResult, ToolCallStatus,
 };
 
 use super::{StuckDecision, StuckGuard};
@@ -20,6 +20,7 @@ use super::{StuckDecision, StuckGuard};
 mod contracts;
 mod control_driver;
 mod interaction_driver;
+mod manual_compaction;
 mod phases;
 mod step_driver;
 
@@ -27,6 +28,7 @@ pub use contracts::*;
 pub(crate) use control_driver::fail_run;
 use control_driver::*;
 use interaction_driver::*;
+use manual_compaction::*;
 use phases::*;
 use step_driver::*;
 
@@ -99,6 +101,8 @@ async fn run_loop_body(
     // Completed event. Must live outside the loop block — otherwise
     // Complete→drain→EmptyAndSealed loses the result.
     let mut terminal_text: Option<String> = None;
+    // 手动压缩 Run 只执行一次压缩；该标志区分首轮 drain 与压缩后的收口轮。
+    let mut manual_compaction_settled = false;
     loop {
         if let Some(control) = handle_pending_control(run, execution, port).await? {
             if matches!(control, ControlDirective::Terminal) {
@@ -342,6 +346,15 @@ async fn run_loop_body(
                 #[allow(unused_assignments)]
                 {
                     expected_epoch = expected_epoch.next();
+                }
+
+                // 手动压缩 Run 的首轮收口：输入通道已 seal，先执行压缩，再由下一轮
+                // drain 以既有不变量（DrainingInput + EmptyAndSealed）收口 Completed。
+                if run.spec().intent() == RunIntent::ManualCompaction && !manual_compaction_settled
+                {
+                    execute_manual_compaction(run, execution, cancel, port).await?;
+                    manual_compaction_settled = true;
+                    continue;
                 }
 
                 let text = terminal_text.as_deref();

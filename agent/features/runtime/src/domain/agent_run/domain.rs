@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use crate::domain::agent_run::ToolCall;
 
 use super::event::{RunId, RunTimingSnapshot, RuntimeLifecycleEvent};
+use super::intent::RunIntent;
 use super::spec::RunSpec;
 use super::state::{
     DrainDecision, InteractionContinuation, PendingInteraction, RunStatus, RunStep,
@@ -275,6 +276,37 @@ impl Run {
                 return Err(RunTransitionError::StepIncomplete);
             }
         }
+        // 目的决定迁移合法性：只有 compaction-only Run 能收口压缩，且它 NEVER 进入模型调用。
+        if transition == RunTransition::CompactionOnlySettled
+            && self.spec.intent() != RunIntent::ManualCompaction
+        {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "run state transition rejected: run_id={} intent={:?} requested_transition={:?} 仅手动压缩 Run 可在压缩完成后收口",
+                self.id,
+                self.spec.intent(),
+                transition,
+            );
+            return Err(RunTransitionError::IllegalTransition {
+                from: self.status,
+                transition,
+            });
+        }
+        if transition == RunTransition::ContextPrepared
+            && self.spec.intent() == RunIntent::ManualCompaction
+        {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "run state transition rejected: run_id={} intent={:?} requested_transition={:?} 手动压缩 Run 不得进入模型调用",
+                self.id,
+                self.spec.intent(),
+                transition,
+            );
+            return Err(RunTransitionError::IllegalTransition {
+                from: self.status,
+                transition,
+            });
+        }
         let next = match (self.status, transition) {
             (RunStatus::Created, RunTransition::StartDraining) => RunStatus::DrainingInput,
             (RunStatus::DrainingInput, RunTransition::DrainInputs)
@@ -285,6 +317,9 @@ impl Run {
             (RunStatus::PreparingContext, RunTransition::BeginCompaction) => RunStatus::Compacting,
             (RunStatus::Compacting, RunTransition::CompactionCompleted) => {
                 RunStatus::PreparingContext
+            }
+            (RunStatus::PreparingContext, RunTransition::CompactionOnlySettled) => {
+                RunStatus::DrainingInput
             }
             (RunStatus::PreparingContext, RunTransition::ContextPrepared) => {
                 RunStatus::InvokingModel

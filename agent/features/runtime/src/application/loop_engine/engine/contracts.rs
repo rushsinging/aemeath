@@ -592,6 +592,27 @@ pub trait CompactionPort: Send {
     ) -> Result<(), LoopEngineError>;
 }
 
+/// 手动上下文压缩结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManualCompactionOutcome {
+    /// 已提交新的压缩检查点。
+    Committed,
+    /// 没有足够内容可压缩，本次跳过。
+    Skipped,
+}
+
+/// 手动上下文压缩端口：只由产生手动压缩 Run 的来源装配，承载 idle `/compact`
+/// 所需的会话级入参（system prompt、context size、task snapshot）与用户可见结果发布。
+#[async_trait]
+pub trait ManualCompactionPort: Send {
+    async fn manual_compact(
+        &mut self,
+        run_id: &sdk::RunId,
+        cancel: &CancellationToken,
+        progress: std::sync::Arc<dyn CompactProgressView>,
+    ) -> Result<ManualCompactionOutcome, LoopEngineError>;
+}
+
 #[async_trait]
 pub trait ModelInvocationPort: Send {
     async fn invoke_model(

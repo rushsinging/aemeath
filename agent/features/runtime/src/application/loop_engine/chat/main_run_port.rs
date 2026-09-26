@@ -260,6 +260,93 @@ impl crate::application::loop_engine::compaction::CompactionObserver for ChatCom
     }
 }
 
+/// idle `/compact` 的手动压缩端口：由会话驱动装配，承载会话级入参（system prompt、
+/// context size、task snapshot）并发布用户可见结果。
+pub(crate) struct ChatManualCompaction {
+    pub runtime_context: RuntimeContext,
+    pub session_id: String,
+    pub system_prompt: String,
+    pub context_size: usize,
+}
+
+#[async_trait]
+impl crate::application::loop_engine::ManualCompactionPort for ChatManualCompaction {
+    async fn manual_compact(
+        &mut self,
+        run_id: &sdk::RunId,
+        _cancel: &CancellationToken,
+        progress: Arc<dyn crate::application::loop_engine::CompactProgressView>,
+    ) -> Result<crate::application::loop_engine::ManualCompactionOutcome, LoopEngineError> {
+        let coordinator = crate::application::context::coordination::ContextCoordinator::new(
+            self.runtime_context.context(),
+        );
+        let task_snapshot =
+            crate::application::loop_engine::chat::task_snapshot::build_compact_task_snapshot(
+                self.runtime_context.task().as_ref(),
+            );
+        let progress_callback: Arc<dyn context::compact::CompactProgressFn> =
+            Arc::new(move |stage, work| {
+                progress.emit(compact_stage_view(stage), compact_work_view(work));
+            });
+        let request = crate::ports::ManualCompactRequest {
+            session_id: crate::ports::SessionId::new(self.session_id.clone()),
+            run_id: run_id.clone(),
+            system_prompt: crate::ports::SystemPromptSpec::new(self.system_prompt.clone()),
+            context_size: self.context_size,
+            progress: Some(progress_callback),
+            task_snapshot,
+        };
+        match coordinator.manual_compact(&request).await {
+            Ok(crate::ports::CompactOutcome::Committed(result)) => {
+                self.runtime_context
+                    .event_sink()
+                    .send_event(RuntimeStreamEvent::CompactOperationCompleted {
+                        messages: result.recent_messages,
+                        notice: "✓ 上下文压缩完成".to_string(),
+                    })
+                    .await;
+                Ok(crate::application::loop_engine::ManualCompactionOutcome::Committed)
+            }
+            Ok(crate::ports::CompactOutcome::Skipped(_)) => {
+                self.runtime_context
+                    .event_sink()
+                    .send_event(RuntimeStreamEvent::SystemMessage(
+                        "Not enough messages to compact.".to_string(),
+                    ))
+                    .await;
+                Ok(crate::application::loop_engine::ManualCompactionOutcome::Skipped)
+            }
+            Err(error) => Err(LoopEngineError::Adapter(format!(
+                "Session compact 失败：{error}"
+            ))),
+        }
+    }
+}
+
+fn compact_stage_view(stage: context::compact::CompactStage) -> sdk::CompactStageView {
+    match stage {
+        context::compact::CompactStage::Preparing => sdk::CompactStageView::Preparing,
+        context::compact::CompactStage::Generating => sdk::CompactStageView::Generating,
+        context::compact::CompactStage::Mapping => sdk::CompactStageView::Mapping,
+        context::compact::CompactStage::Reducing => sdk::CompactStageView::Reducing,
+        context::compact::CompactStage::Refreshing => sdk::CompactStageView::Refreshing,
+        context::compact::CompactStage::Finalizing => sdk::CompactStageView::Finalizing,
+    }
+}
+
+fn compact_work_view(work: context::compact::CompactWork) -> sdk::CompactWorkView {
+    match work {
+        context::compact::CompactWork::Indeterminate => sdk::CompactWorkView::Indeterminate,
+        context::compact::CompactWork::Determinate { completed, total } => {
+            let (Ok(completed), Ok(total)) = (u32::try_from(completed), u32::try_from(total))
+            else {
+                return sdk::CompactWorkView::Indeterminate;
+            };
+            sdk::CompactWorkView::Determinate { completed, total }
+        }
+    }
+}
+
 pub(crate) struct ChatStopHookObserver {
     pub sink: crate::application::loop_engine::chat::ChatEventSinkHandle,
     pub continuation: InputContinuationState,

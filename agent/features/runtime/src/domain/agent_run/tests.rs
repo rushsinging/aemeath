@@ -652,13 +652,14 @@ const ALL_RUN_STATUSES: [RunStatus; 15] = [
     RunStatus::Terminated,
 ];
 
-const ALL_RUN_TRANSITIONS: [RunTransition; 18] = [
+const ALL_RUN_TRANSITIONS: [RunTransition; 19] = [
     RunTransition::StartDraining,
     RunTransition::DrainInputs,
     RunTransition::DrainInternalContinuation,
     RunTransition::DrainEmptyAndSealed,
     RunTransition::BeginCompaction,
     RunTransition::CompactionCompleted,
+    RunTransition::CompactionOnlySettled,
     RunTransition::ContextPrepared,
     RunTransition::RetryModel,
     RunTransition::ModelContextExceeded,
@@ -803,6 +804,9 @@ fn expected_transition(from: RunStatus, transition: RunTransition) -> Option<Run
             Some(RunStatus::DrainingInput)
         }
         (RunStatus::FinalizingStep, RunTransition::StepCancelled) => Some(RunStatus::DrainingInput),
+        (RunStatus::PreparingContext, RunTransition::CompactionOnlySettled) => {
+            Some(RunStatus::DrainingInput)
+        }
         (RunStatus::Terminating, RunTransition::TerminationFinished) => Some(RunStatus::Terminated),
         _ => None,
     }
@@ -812,7 +816,7 @@ fn expected_transition(from: RunStatus, transition: RunTransition) -> Option<Run
 fn run_transition_matrix_exhaustively_accepts_only_documented_edges() {
     for from in ALL_RUN_STATUSES {
         for transition in ALL_RUN_TRANSITIONS {
-            let mut run = run_at_status(from);
+            let mut run = run_at_status_for_transition(from, transition);
             if from == RunStatus::InvokingModel && transition == RunTransition::ModelInvoked {
                 let step_id = run.begin_step().unwrap();
                 run.record_model_invocation(&step_id, ModelInvocation::new("response"))
@@ -832,6 +836,20 @@ fn run_transition_matrix_exhaustively_accepts_only_documented_edges() {
             }
         }
     }
+}
+
+/// `CompactionOnlySettled` 只对手动压缩 Run 合法：矩阵测试在
+/// `PreparingContext` 上必须改用 compaction-only 意图的 Run，其余组合沿用会话 Run
+/// 以证明该边对会话 Run 被拒绝。
+fn run_at_status_for_transition(status: RunStatus, transition: RunTransition) -> Run {
+    if transition != RunTransition::CompactionOnlySettled || status != RunStatus::PreparingContext {
+        return run_at_status(status);
+    }
+    let mut run = Run::new(RunSpec::manual_compaction(), None);
+    run.start_draining().unwrap();
+    run.apply_drain_decision(DrainDecision::InternalContinuation, None)
+        .unwrap();
+    run
 }
 
 #[test]
@@ -1981,4 +1999,95 @@ fn nested_derived_run_can_further_restrict_interaction() {
         sub2.with_interaction_kind(InteractionBindingMode::Client),
         Err(RunSpecError::CapabilityEscalation)
     );
+}
+
+// ── 手动压缩复用 Run 状态机 ────────────────────────────────────────────
+
+#[test]
+fn manual_compaction_spec_declares_compaction_only_intent() {
+    assert_eq!(RunSpec::main().intent(), RunIntent::Conversation);
+    assert_eq!(
+        RunSpec::manual_compaction().intent(),
+        RunIntent::ManualCompaction
+    );
+    assert_eq!(
+        RunSpec::manual_compaction()
+            .derive_sub("sub", Duration::from_secs(30))
+            .unwrap()
+            .intent(),
+        RunIntent::Conversation,
+        "派生 Run 不得继承 compaction-only 意图"
+    );
+}
+
+#[test]
+fn compaction_only_run_settles_through_draining_input_to_completed() {
+    let mut run = Run::new(RunSpec::manual_compaction(), None);
+    run.start_draining().unwrap();
+    run.apply_drain_decision(DrainDecision::InternalContinuation, None)
+        .unwrap();
+    assert_eq!(run.status(), RunStatus::PreparingContext);
+
+    run.transition(RunTransition::BeginCompaction).unwrap();
+    assert_eq!(run.status(), RunStatus::Compacting);
+
+    run.transition(RunTransition::CompactionCompleted).unwrap();
+    assert_eq!(run.status(), RunStatus::PreparingContext);
+
+    run.transition(RunTransition::CompactionOnlySettled)
+        .unwrap();
+    assert_eq!(run.status(), RunStatus::DrainingInput);
+
+    run.apply_drain_decision(DrainDecision::EmptyAndSealed, Some(""))
+        .unwrap();
+    assert_eq!(run.status(), RunStatus::Completed);
+}
+
+#[test]
+fn conversation_run_rejects_compaction_only_settled() {
+    let mut run = run_at_status(RunStatus::PreparingContext);
+    let events_before = run.events().len();
+
+    assert_eq!(
+        run.transition(RunTransition::CompactionOnlySettled),
+        Err(RunTransitionError::IllegalTransition {
+            from: RunStatus::PreparingContext,
+            transition: RunTransition::CompactionOnlySettled,
+        })
+    );
+    assert_eq!(run.status(), RunStatus::PreparingContext);
+    assert_eq!(
+        run.events().len(),
+        events_before,
+        "被拒绝的 compaction-only 收口不得发布任何迁移事件"
+    );
+}
+
+#[test]
+fn compaction_only_run_never_enters_model_invocation() {
+    let mut run = Run::new(RunSpec::manual_compaction(), None);
+    run.start_draining().unwrap();
+    run.apply_drain_decision(DrainDecision::InternalContinuation, None)
+        .unwrap();
+
+    assert_eq!(
+        run.transition(RunTransition::ContextPrepared),
+        Err(RunTransitionError::IllegalTransition {
+            from: RunStatus::PreparingContext,
+            transition: RunTransition::ContextPrepared,
+        }),
+        "compaction-only Run 不得进入 InvokingModel"
+    );
+    assert_eq!(run.status(), RunStatus::PreparingContext);
+    assert!(
+        !run.events().iter().any(event_run_entered_invoking_model),
+        "被拒绝的上下文准备不得留下 InvokingModel 迁移事件"
+    );
+}
+
+fn event_run_entered_invoking_model(event: &RuntimeLifecycleEvent) -> bool {
+    matches!(
+        event,
+        RuntimeLifecycleEvent::Transitioned { to, .. } if *to == RunStatus::InvokingModel
+    )
 }
