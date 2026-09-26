@@ -23,12 +23,38 @@ impl Drop for TempDirGuard {
 }
 
 fn isolated_env() -> (TempDirGuard, String) {
-    let dir = std::env::temp_dir().join(format!("aemeath-tui-connect-{}", std::process::id()));
+    isolated_env_with_extra_providers("")
+}
+
+/// 目录名带随机后缀，避免并行测试共享同一 agents 目录串台。
+fn unique_suffix() -> String {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!(
+        "-{}-{}",
+        count,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|value| value.subsec_nanos())
+            .unwrap_or_default()
+    )
+}
+
+/// `extra_providers`：追加进预置 providers 的 JSON 片段（如带慢端点的
+/// Anthropic），用于确定性覆盖流程测试。
+fn isolated_env_with_extra_providers(extra_providers: &str) -> (TempDirGuard, String) {
+    let dir = std::env::temp_dir().join(format!(
+        "aemeath-tui-connect-{}{}",
+        std::process::id(),
+        unique_suffix()
+    ));
     std::fs::create_dir_all(&dir).expect("创建临时 agents dir");
     // 有效配置（DeepSeek）保证主 TUI 启动；向导里选 Anthropic 新建。
     std::fs::write(
         dir.join("aemeath.json"),
-        r#"{"models":{"providers":{"DeepSeek":{"driver":"deepseek","baseUrl":"https://api.deepseek.com","apiKey":"sk-preconfigured","models":[{"id":"deepseek-flash","contextWindow":1000,"maxTokens":100}]}}}}"#,
+        format!(
+            r#"{{"models":{{"providers":{{"DeepSeek":{{"driver":"deepseek","baseUrl":"https://api.deepseek.com","apiKey":"sk-preconfigured","models":[{{"id":"deepseek-flash","contextWindow":1000,"maxTokens":100}}]}}{extra_providers}}}}}}}"#
+        ),
     )
     .expect("写入预置配置");
     let command = format!(
@@ -37,6 +63,108 @@ fn isolated_env() -> (TempDirGuard, String) {
         binary_path().to_string_lossy()
     );
     (TempDirGuard(dir), command)
+}
+
+/// 本地慢探测服务：8 秒后返回 HTTP 500（模拟真实长探测）。
+struct SlowProbeServer(std::process::Child);
+impl SlowProbeServer {
+    fn spawn() -> (Self, u16) {
+        let script = r#"
+import socket, time, sys
+server = socket.socket()
+server.bind(("127.0.0.1", 0))
+port = server.getsockname()[1]
+print(port, flush=True)
+server.listen(1)
+conn, _ = server.accept()
+time.sleep(8)
+conn.sendall(b"HTTP/1.1 500 Slow Probe\r\nContent-Length: 0\r\n\r\n")
+conn.close()
+"#;
+        let mut child = std::process::Command::new("python3")
+            .arg("-c")
+            .arg(script)
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("启动慢探测服务");
+        use std::io::Read;
+        let mut port_line = String::new();
+        let mut byte = [0u8; 1];
+        let mut stdout = child.stdout.take().expect("stdout");
+        while stdout.read(&mut byte).is_ok() {
+            if byte[0] == b'\n' {
+                break;
+            }
+            port_line.push(byte[0] as char);
+        }
+        let port: u16 = port_line.trim().parse().expect("解析端口");
+        (Self(child), port)
+    }
+}
+impl Drop for SlowProbeServer {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+    }
+}
+
+#[test]
+fn connect_wizard_probe_shows_busy_then_result_on_long_probe() {
+    let (_server, port) = SlowProbeServer::spawn();
+    // 预置带慢端点的 Anthropic：覆盖流程全程预填（endpoint/key/模型），
+    // 消除输入法不确定性，探测确定性命中慢端点。
+    let anthropic = format!(
+        r#","Anthropic":{{"driver":"anthropic","baseUrl":"http://127.0.0.1:{port}","apiKey":"sk-preconfigured-anthropic","models":[{{"id":"claude-fable-5-1","contextWindow":1000000,"maxTokens":65536}}]}}"#
+    );
+    let (_guard, command) = isolated_env_with_extra_providers(&anthropic);
+    let mut open = OpenOptions::default();
+    open.restart = true;
+    let terminal = Session::new(format!("aemeath-slow-probe-{}", std::process::id()));
+    terminal.open(open).expect("打开终端");
+    let submit = |data: &str| {
+        terminal
+            .execute(Operation::Submit {
+                data: Some(data.to_string()),
+            })
+            .expect("提交");
+    };
+    let wait_screen = |needle: &str, step: &str, timeout_ms: u64| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+        loop {
+            if let Ok(tui_test::OperationResult::Text(text)) =
+                terminal.execute(Operation::Text { full: true })
+            {
+                if text.contains(needle) {
+                    return;
+                }
+            }
+            if std::time::Instant::now() > deadline {
+                panic!("{step}（等待 {needle}）超时");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+    };
+    let pause = || std::thread::sleep(std::time::Duration::from_millis(400));
+
+    submit(&command);
+    wait_screen("● Anthropic", "向导首页", 30_000);
+    submit("");
+    wait_screen("覆盖", "覆盖确认页", 10_000);
+    submit("");
+    pause();
+    // 覆盖后各页预填，一路回车：endpoint → key（掩码保留）→ UA → 模型（预选）
+    submit("");
+    pause();
+    submit("");
+    pause();
+    submit("");
+    pause();
+    submit("");
+    wait_screen("跳过测试", "测试页", 10_000);
+    submit("");
+    // 长探测：busy 状态必须显示，随后结果出现。
+    wait_screen("正在测试连接", "测试中状态", 5_000);
+    wait_screen("失败", "探测结果", 30_000);
+    terminal.close().expect("关闭会话");
 }
 
 #[test]

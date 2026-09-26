@@ -611,6 +611,14 @@ impl ConfigFormModel {
             return;
         };
         if !field.options.is_empty() {
+            // 末项再 ↓：多字段页跳出子选项到下一字段（单字段保持 wrap）。
+            if self.selected_option + 1 >= field.options.len()
+                && self.view.page.fields.len() > 1
+                && self.focused_field + 1 < self.view.page.fields.len()
+            {
+                self.focus_next_field();
+                return;
+            }
             self.selected_option = (self.selected_option + 1) % field.options.len();
         }
     }
@@ -629,6 +637,14 @@ impl ConfigFormModel {
             return;
         };
         if !field.options.is_empty() {
+            // 首项再 ↑：多字段页跳出子选项到上一字段。
+            if self.selected_option == 0
+                && self.view.page.fields.len() > 1
+                && self.focused_field > 0
+            {
+                self.focus_previous_field();
+                return;
+            }
             self.selected_option = self
                 .selected_option
                 .checked_sub(1)

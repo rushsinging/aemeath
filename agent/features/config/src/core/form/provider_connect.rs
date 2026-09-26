@@ -238,9 +238,26 @@ fn page_for_connect(
             vec![recommended_models_field(connect, catalog)?],
         ),
         ConnectStage::EditCustomModel => {
-            // 预填编辑目标（模型页高亮项，经 action 后缀传入）；
-            // 无目标时回落首个已选模型；纯添加场景用户直接覆盖输入。
-            let editing = connect
+            // 预填编辑目标（模型页高亮项，经 action 后缀传入）：优先命中
+            // draft 已选模型；推荐模型（不在 draft）从 catalog 取属性；
+            // 无目标回落首个已选；纯添加场景用户直接覆盖输入。
+            let recommended_spec = |model_id: &str| -> Option<(String, usize, u32)> {
+                let entry = connect
+                    .draft
+                    .source
+                    .as_ref()
+                    .and_then(|source| catalog.iter().find(|entry| entry.source == *source))?;
+                let model = entry
+                    .recommended_models
+                    .iter()
+                    .find(|model| model.model_id == model_id)?;
+                Some((
+                    model.model_id.to_string(),
+                    model.context_window,
+                    model.max_tokens,
+                ))
+            };
+            let editing: Option<crate::connect::ModelDraftView> = connect
                 .draft
                 .editing_model_id
                 .as_deref()
@@ -250,8 +267,24 @@ fn page_for_connect(
                         .models
                         .iter()
                         .find(|model| model.model_id == target)
+                        .cloned()
                 })
-                .or_else(|| connect.draft.models.first());
+                .or_else(|| {
+                    connect
+                        .draft
+                        .editing_model_id
+                        .as_deref()
+                        .and_then(recommended_spec)
+                        .map(|(model_id, context_window, max_tokens)| {
+                            crate::connect::ModelDraftView {
+                                model_id,
+                                context_window: Some(context_window),
+                                max_tokens: Some(max_tokens),
+                                reasoning_effort: None,
+                            }
+                        })
+                })
+                .or_else(|| connect.draft.models.first().cloned());
             let mut effort_field = select_field(
                 "reasoning_effort",
                 "Reasoning Effort",
@@ -266,7 +299,10 @@ fn page_for_connect(
                     option("max", "max", None)?,
                 ],
             )?;
-            if let Some(effort) = editing.and_then(|model| model.reasoning_effort.as_deref()) {
+            if let Some(effort) = editing
+                .as_ref()
+                .and_then(|model| model.reasoning_effort.clone())
+            {
                 if effort_field
                     .options
                     .iter()
@@ -286,7 +322,11 @@ fn page_for_connect(
                 .draft
                 .default_model_id
                 .as_deref()
-                .is_some_and(|target| editing.is_some_and(|model| model.model_id == target));
+                .is_some_and(|target| {
+                    editing
+                        .as_ref()
+                        .is_some_and(|model| model.model_id == target)
+                });
             let default_label = if is_default { "是" } else { "否" };
             default_field.has_value = true;
             default_field.display_value = Some(default_label.to_string());
@@ -298,13 +338,14 @@ fn page_for_connect(
                         "model_id",
                         "Model ID",
                         true,
-                        editing.map(|model| model.model_id.clone()),
+                        editing.as_ref().map(|model| model.model_id.clone()),
                     )?,
                     number_field(
                         "context_window",
                         "Context Window",
                         true,
                         editing
+                            .as_ref()
                             .and_then(|model| model.context_window)
                             .and_then(|value| u64::try_from(value).ok()),
                     )?,
@@ -555,6 +596,7 @@ fn action_for_id(action_id: &str) -> Result<ConnectCommand, ProviderConnectFormE
             let target_model = (!target.is_empty()).then(|| {
                 target
                     .strip_prefix("configured-")
+                    .or_else(|| target.strip_prefix("recommended-"))
                     .unwrap_or(target)
                     .to_string()
             });

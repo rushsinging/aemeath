@@ -94,7 +94,9 @@ pub struct ConnectAppService {
     commit: Option<Arc<dyn ConnectCommitPort>>,
     /// start_connect 单点加载 Provider 目录快照的读端口。
     provider_directory: Option<Arc<dyn ConnectProviderDirectory>>,
-    sessions: Mutex<std::collections::HashMap<ConnectSessionId, Arc<Mutex<ConnectSession>>>>,
+    sessions: std::sync::Arc<
+        Mutex<std::collections::HashMap<ConnectSessionId, Arc<Mutex<ConnectSession>>>>,
+    >,
     pub(crate) system: SystemInformation,
     pub(crate) version: &'static str,
     /// 全局配置 `api.user_agent` 的装配期快照。
@@ -186,7 +188,7 @@ impl ConnectAppServiceBuilder {
                 .expect("ConnectAppService 必须注入 ProviderProbePort"),
             commit,
             provider_directory: self.provider_directory,
-            sessions: Mutex::new(std::collections::HashMap::new()),
+            sessions: std::sync::Arc::new(Mutex::new(std::collections::HashMap::new())),
             system: self.system.unwrap_or_else(|| SystemInformation {
                 os_name: "unknown-os".into(),
                 os_version: None,
@@ -360,15 +362,28 @@ impl ConnectAppService {
             session_guard.revision = bump_revision(session_guard.revision);
             return Ok(self.project_view(&session_guard));
         };
-        drop(session_guard);
 
-        let async_result = self.run_async_operation(operation).await;
-        let mut session_guard = session.lock().await;
-        if session_guard.revision != operation_revision || session_guard.outcome.is_some() {
-            return Ok(self.project_view(&session_guard));
-        }
-        self.apply_async_outcome(&mut session_guard, async_result);
-        session_guard.revision = bump_revision(session_guard.revision);
+        // 立即返回 Running 视图（TUI busy 轮询经 refresh_form 观察进度）；
+        // 异步结果由后台 task 写回：revision 未变且未终态才落盘，避免覆盖
+        // 期间用户命令（Back / Cancel）的状态迁移。
+        let sessions = self.sessions.clone();
+        let probe = self.probe.clone();
+        let commit = self.commit.clone();
+        let session_id = session_guard.session_id;
+        drop(session_guard);
+        tokio::spawn(async move {
+            let async_result = run_async_operation(probe, commit, operation).await;
+            let sessions_guard = sessions.lock().await;
+            if let Some(session) = sessions_guard.get(&session_id) {
+                let mut session = session.lock().await;
+                if session.revision != operation_revision || session.outcome.is_some() {
+                    return;
+                }
+                apply_async_outcome(&mut session, async_result);
+                session.revision = bump_revision(session.revision);
+            }
+        });
+        let session_guard = session.lock().await;
         Ok(self.project_view(&session_guard))
     }
 
@@ -422,42 +437,89 @@ impl ConnectAppService {
             draft: session.draft.clone(),
         }
     }
+}
 
-    async fn run_async_operation(&self, operation: AsyncOperation) -> AsyncOutcome {
-        match operation {
-            AsyncOperation::Probe(request) => self.run_probe(request).await,
-            AsyncOperation::Commit(request) => self.run_commit(request).await,
+/// 后台执行探测；结果由调用方写回 session。
+async fn run_probe(
+    probe: std::sync::Arc<dyn ProviderProbePort>,
+    request: ProviderProbeRequest,
+) -> AsyncOutcome {
+    match probe.probe(request).await {
+        Ok(result) => AsyncOutcome::ProbeSuccess {
+            latency_ms: result.latency.as_millis() as u64,
+        },
+        Err(error) => AsyncOutcome::ProbeFailed {
+            kind: error.kind,
+            message: error.message,
+        },
+    }
+}
+
+/// 后台执行提交；结果由调用方写回 session。
+async fn run_commit(
+    commit: Option<std::sync::Arc<dyn ConnectCommitPort>>,
+    request: ConnectCommitRequest,
+) -> AsyncOutcome {
+    let Some(commit) = commit else {
+        return AsyncOutcome::CommitFailed(ConnectError::PersistUnavailable);
+    };
+    match commit.commit(request).await {
+        Ok(receipt) => AsyncOutcome::CommitSuccess {
+            applied_revision: receipt.applied_revision,
+        },
+        Err(ConnectCommitError::PersistConflict { expected }) => {
+            AsyncOutcome::CommitFailed(ConnectError::PersistConflict { expected })
+        }
+        Err(ConnectCommitError::PersistFailed { kind, message }) => {
+            AsyncOutcome::CommitFailed(ConnectError::PersistFailed { kind, message })
+        }
+        Err(ConnectCommitError::PersistUnavailable) => {
+            AsyncOutcome::CommitFailed(ConnectError::PersistUnavailable)
         }
     }
+}
 
-    fn apply_async_outcome(&self, session: &mut ConnectSession, outcome: AsyncOutcome) {
-        match outcome {
-            AsyncOutcome::ProbeSuccess { latency_ms } => {
-                session.probe_status = Some(ProbeStatusView::Success { latency_ms });
-                session.stage = ConnectStage::Review;
-                session.last_error = None;
-            }
-            AsyncOutcome::ProbeFailed { kind, message } => {
-                session.probe_status = Some(ProbeStatusView::Failed { kind, message });
-                session.stage = ConnectStage::Probing;
-                session.last_error = Some(ConnectError::ProbeFailed {
-                    kind,
-                    message: "探测失败".to_string(),
-                });
-            }
-            AsyncOutcome::CommitSuccess { applied_revision } => {
-                session.draft.credential = crate::connect::draft::CredentialState::NotSet;
-                session.stage = ConnectStage::Completed;
-                session.outcome = Some(ConnectOutcome::Completed { applied_revision });
-                session.last_error = None;
-            }
-            AsyncOutcome::CommitFailed(error) => {
-                session.stage = ConnectStage::Saving;
-                session.last_error = Some(error);
-            }
+/// 后台执行探测 / 提交；结果由调用方写回 session（revision 校验）。
+async fn run_async_operation(
+    probe: std::sync::Arc<dyn ProviderProbePort>,
+    commit: Option<std::sync::Arc<dyn ConnectCommitPort>>,
+    operation: AsyncOperation,
+) -> AsyncOutcome {
+    match operation {
+        AsyncOperation::Probe(request) => run_probe(probe, request).await,
+        AsyncOperation::Commit(request) => run_commit(commit, request).await,
+    }
+}
+
+fn apply_async_outcome(session: &mut ConnectSession, outcome: AsyncOutcome) {
+    match outcome {
+        AsyncOutcome::ProbeSuccess { latency_ms } => {
+            session.probe_status = Some(ProbeStatusView::Success { latency_ms });
+            session.stage = ConnectStage::Review;
+            session.last_error = None;
+        }
+        AsyncOutcome::ProbeFailed { kind, message } => {
+            session.probe_status = Some(ProbeStatusView::Failed { kind, message });
+            session.stage = ConnectStage::Probing;
+            session.last_error = Some(ConnectError::ProbeFailed {
+                kind,
+                message: "探测失败".to_string(),
+            });
+        }
+        AsyncOutcome::CommitSuccess { applied_revision } => {
+            session.draft.credential = crate::connect::draft::CredentialState::NotSet;
+            session.stage = ConnectStage::Completed;
+            session.outcome = Some(ConnectOutcome::Completed { applied_revision });
+            session.last_error = None;
+        }
+        AsyncOutcome::CommitFailed(error) => {
+            session.stage = ConnectStage::Saving;
+            session.last_error = Some(error);
         }
     }
+}
 
+impl ConnectAppService {
     /// 同步 handler。把 stage 修改 / draft 修改直接写入 session，
     /// 返回 (Option<error>, SyncOutcome)。
     fn handle_sync(
@@ -857,38 +919,6 @@ impl ConnectAppService {
                 }),
                 SyncOutcome::Proceed,
             ),
-        }
-    }
-
-    async fn run_probe(&self, request: ProviderProbeRequest) -> AsyncOutcome {
-        match self.probe.probe(request).await {
-            Ok(result) => AsyncOutcome::ProbeSuccess {
-                latency_ms: result.latency.as_millis() as u64,
-            },
-            Err(error) => AsyncOutcome::ProbeFailed {
-                kind: error.kind,
-                message: error.message,
-            },
-        }
-    }
-
-    async fn run_commit(&self, request: ConnectCommitRequest) -> AsyncOutcome {
-        let Some(commit) = self.commit.as_ref() else {
-            return AsyncOutcome::CommitFailed(ConnectError::PersistUnavailable);
-        };
-        match commit.commit(request).await {
-            Ok(receipt) => AsyncOutcome::CommitSuccess {
-                applied_revision: receipt.applied_revision,
-            },
-            Err(ConnectCommitError::PersistConflict { expected }) => {
-                AsyncOutcome::CommitFailed(ConnectError::PersistConflict { expected })
-            }
-            Err(ConnectCommitError::PersistFailed { kind, message }) => {
-                AsyncOutcome::CommitFailed(ConnectError::PersistFailed { kind, message })
-            }
-            Err(ConnectCommitError::PersistUnavailable) => {
-                AsyncOutcome::CommitFailed(ConnectError::PersistUnavailable)
-            }
         }
     }
 
