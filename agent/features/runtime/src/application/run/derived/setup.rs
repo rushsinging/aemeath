@@ -122,6 +122,7 @@ pub fn derive_sub_run(
 
     // 2. RuntimeContextFactory binds the derived workspace and live capabilities.
     let config_snapshot = parent_context.config().clone();
+    let available = config_snapshot.config().agents().enabled_instance_names();
     let resolved = match config_snapshot
         .config()
         .agents()
@@ -131,11 +132,13 @@ pub fn derive_sub_run(
         Some(share::config::ResolveAgentOutcome::Disabled { instance_name }) => {
             return Err(RuntimeContextAssemblyError::SubAgentDisabled {
                 agent: instance_name,
+                available,
             })
         }
         None => {
             return Err(RuntimeContextAssemblyError::SubAgentNotFound {
                 agent: request.agent_name.clone(),
+                available,
             })
         }
     };

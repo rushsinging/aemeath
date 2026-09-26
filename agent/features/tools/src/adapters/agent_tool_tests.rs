@@ -162,6 +162,45 @@ fn agent_tool_schema_requires_agent_and_describes_configured_instance_constraint
         .is_some_and(|description| description.contains("agents.names")));
 }
 
+/// 描述单一真相：`description()` / `description_for(lang)` 与 i18n 入口必须是
+/// 同一份文案，schema 的 required 字段与描述口径必须一致（issue #1736 R1）。
+#[test]
+fn agent_tool_description_is_single_i18n_source_consistent_with_schema_required() {
+    let tool = AgentTool;
+    let schema = tool.input_schema();
+
+    // 单一真相：English description 即 i18n 入口，禁止第二份硬编码口径。
+    assert_eq!(
+        tool.description(),
+        share::i18n::tools::core::agent("en"),
+        "description() 必须复用 i18n::tools::core::agent(\"en\")，不得维护第二份口径"
+    );
+
+    // schema ↔ description 契约：required 必须含 agent、不含废弃 role。
+    let required = schema["required"].as_array().expect("required array");
+    assert!(
+        required.contains(&serde_json::json!("agent")),
+        "required 必须包含 `agent`：{required:?}"
+    );
+    assert!(
+        !required.contains(&serde_json::json!("role")),
+        "required 不得包含废弃字段 `role`：{required:?}"
+    );
+
+    // 注入 LLM 的两个语言版本都必须是 agent 口径。
+    for lang in ["zh", "en"] {
+        let description = tool.description_for(lang).to_string();
+        assert!(
+            !description.contains("config.agents.roles") && !description.contains("`role`"),
+            "{lang} 描述不得出现废弃 role 口径：{description}"
+        );
+        assert!(
+            description.contains("`agent`") && description.contains("config.agents.names"),
+            "{lang} 描述必须声明 agent 字段口径：{description}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn agent_tool_rejects_missing_agent_before_dispatch() {
     let runner = Arc::new(StubRunner::default());

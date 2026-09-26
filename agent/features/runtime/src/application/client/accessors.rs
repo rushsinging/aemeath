@@ -309,11 +309,17 @@ impl SessionRuntime {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[allow(clippy::enum_variant_names)] // Sub* 前缀统一表达子 Run 派生域
 pub enum RuntimeContextAssemblyError {
-    #[error("sub-agent instance `{agent}` not found in config")]
-    SubAgentNotFound { agent: String },
-    #[error("sub-agent instance `{agent}` is disabled")]
-    SubAgentDisabled { agent: String },
-    #[error("sub derivation failed: {reason}")]
+    #[error("子 agent 实例 `{agent}` 不存在；可用 agent 名单：{}", crate::application::run::creation::format_agent_roster(.available))]
+    SubAgentNotFound {
+        agent: String,
+        available: Vec<String>,
+    },
+    #[error("子 agent 实例 `{agent}` 已禁用；可用 agent 名单：{}", crate::application::run::creation::format_agent_roster(.available))]
+    SubAgentDisabled {
+        agent: String,
+        available: Vec<String>,
+    },
+    #[error("子 Run 派生失败：{reason}")]
     SubDerivationFailed { reason: String },
 }
 

@@ -250,20 +250,38 @@ impl RunCreationBindings {
     }
 }
 
+/// 可用 agent 名单的错误文案格式（空名单时给出明确提示）。
+pub(crate) fn format_agent_roster(available: &[String]) -> String {
+    if available.is_empty() {
+        "（配置中无已启用实例）".to_string()
+    } else {
+        available.join(", ")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RunCreationError {
     #[error("子 Run 能力不得超过父 Run")]
     CapabilityEscalation,
     #[error("RuntimeContext 装配失败")]
     ContextAssembly,
-    #[error("子 Run agent 实例不存在：{agent}")]
-    SubAgentNotFound { agent: String },
-    #[error("sub-agent instance disabled: {agent}")]
-    SubAgentDisabled { agent: String },
-    #[error("子 Run agent 实例未配置模型：{agent}")]
-    SubAgentNoModel { agent: String },
-    #[error("子 Run 模型不存在：{model}")]
-    SubUnknownModel { model: String },
+    #[error("子 Run agent 实例 `{agent}` 不存在；可用 agent 名单：{}", format_agent_roster(.available))]
+    SubAgentNotFound {
+        agent: String,
+        available: Vec<String>,
+    },
+    #[error("子 Run agent 实例 `{agent}` 已禁用；可用 agent 名单：{}", format_agent_roster(.available))]
+    SubAgentDisabled {
+        agent: String,
+        available: Vec<String>,
+    },
+    #[error("子 Run agent 实例 `{agent}` 未配置模型（含 agents.default_model 回退后仍为空）；可用 agent 名单：{}", format_agent_roster(.available))]
+    SubAgentNoModel {
+        agent: String,
+        available: Vec<String>,
+    },
+    #[error("子 Run agent `{agent}` 的绑定模型 `{model}` 不可用（未在 config.models 中注册）；请改选系统提示 agent 名单中的其他 agent，勿填模型名")]
+    SubUnknownModel { agent: String, model: String },
     #[error("子 Run provider 构造失败：{message}")]
     SubProviderBuild { message: String },
     #[error("子 Run Tool Catalog 构造失败：{message}")]

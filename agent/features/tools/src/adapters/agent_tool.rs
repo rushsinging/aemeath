@@ -15,8 +15,9 @@ impl TypedTool for AgentTool {
         "Agent"
     }
 
+    /// 单一真相：英文文案即 i18n 入口，NEVER 在此维护第二份口径文本。
     fn description(&self) -> &str {
-        "Launch a new agent to handle a focused, scoped task autonomously. `agent` is required and must name a configured entry in `config.agents.names`; the named instance binds the model and output budget, and its referenced role (builtin: planner, coder, explorer, tester, reviewer) narrows the toolset via the role policy when one is configured. Multiple Agent calls in the SAME response run concurrently."
+        share::i18n::tools::core::agent("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::core::agent(lang))

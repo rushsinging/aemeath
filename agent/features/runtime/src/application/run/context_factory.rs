@@ -401,6 +401,7 @@ impl RuntimeContextFactory {
         if agent.model.trim().is_empty() {
             return Err(RunCreationError::SubAgentNoModel {
                 agent: request.spec().name.clone(),
+                available: request.session().config().agents().enabled_instance_names(),
             });
         }
         let (source_key, source, model) = request
@@ -409,6 +410,7 @@ impl RuntimeContextFactory {
             .models()
             .find_model(&agent.model)
             .ok_or_else(|| RunCreationError::SubUnknownModel {
+                agent: agent.instance_name.clone(),
                 model: agent.model.clone(),
             })?;
         let max_tokens = agent
@@ -650,6 +652,7 @@ impl RuntimeContextFactory {
         request: &RunCreationRequest,
     ) -> Result<share::config::ResolvedAgent, RunCreationError> {
         let agent_name = request.spec().name.clone();
+        let available = request.session().config().agents().enabled_instance_names();
         match request
             .session()
             .config()
@@ -660,9 +663,13 @@ impl RuntimeContextFactory {
             Some(share::config::ResolveAgentOutcome::Disabled { instance_name }) => {
                 Err(RunCreationError::SubAgentDisabled {
                     agent: instance_name,
+                    available,
                 })
             }
-            None => Err(RunCreationError::SubAgentNotFound { agent: agent_name }),
+            None => Err(RunCreationError::SubAgentNotFound {
+                agent: agent_name,
+                available,
+            }),
         }
     }
 }
