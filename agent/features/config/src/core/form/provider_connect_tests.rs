@@ -593,13 +593,13 @@ fn custom_model_page_keeps_fields_empty_without_catalog_defaults() {
 
     assert!(form.page.fields[0].display_value.is_none());
     assert!(form.page.fields[1].display_value.is_none());
-    assert!(form.page.fields[2].display_value.is_none());
-    // global_default 始终预选"否"；其余字段无 catalog 默认时保持空。
+    // global_default 始终预选"否"；max_tokens 预填全局默认 8192；
+    // 其余字段无 catalog 默认时保持空。
     for field in &form.page.fields {
-        if field.id.as_str() == "global_default" {
-            assert_eq!(field.display_value.as_deref(), Some("否"));
-        } else {
-            assert!(!field.has_value);
+        match field.id.as_str() {
+            "global_default" => assert_eq!(field.display_value.as_deref(), Some("否")),
+            "max_tokens" => assert_eq!(field.display_value.as_deref(), Some("8192")),
+            _ => assert!(!field.has_value),
         }
     }
 }

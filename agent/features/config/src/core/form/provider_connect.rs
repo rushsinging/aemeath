@@ -353,7 +353,13 @@ fn page_for_connect(
                         "max_tokens",
                         "Max Tokens",
                         true,
-                        editing.and_then(|model| model.max_tokens).map(u64::from),
+                        Some(
+                            editing
+                                .as_ref()
+                                .and_then(|model| model.max_tokens)
+                                .map(u64::from)
+                                .unwrap_or(share::config::models::DEFAULT_MAX_TOKENS as u64),
+                        ),
                     )?,
                     effort_field,
                     default_field,
