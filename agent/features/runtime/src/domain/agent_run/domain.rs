@@ -277,21 +277,6 @@ impl Run {
             }
         }
         // 目的决定迁移合法性：只有 compaction-only Run 能收口压缩，且它 NEVER 进入模型调用。
-        if transition == RunTransition::CompactionOnlySettled
-            && self.spec.intent() != RunIntent::ManualCompaction
-        {
-            log::warn!(
-                target: crate::LOG_TARGET,
-                "run state transition rejected: run_id={} intent={:?} requested_transition={:?} 仅手动压缩 Run 可在压缩完成后收口",
-                self.id,
-                self.spec.intent(),
-                transition,
-            );
-            return Err(RunTransitionError::IllegalTransition {
-                from: self.status,
-                transition,
-            });
-        }
         if transition == RunTransition::BeginCompaction
             && self.status == RunStatus::DrainingInput
             && self.spec.intent() != RunIntent::ManualCompaction
@@ -332,12 +317,15 @@ impl Run {
             (RunStatus::DrainingInput, RunTransition::DrainEmptyAndSealed) => RunStatus::Completed,
             (RunStatus::PreparingContext, RunTransition::BeginCompaction) => RunStatus::Compacting,
             (RunStatus::Compacting, RunTransition::CompactionCompleted) => {
-                RunStatus::PreparingContext
+                // 自动压缩回到 PreparingContext 继续当前 Step；没有活动 Step 的
+                // 手动压缩 Run 回到排空阶段，由 drain 收口。
+                if self.steps.iter().any(|step| step.is_active()) {
+                    RunStatus::PreparingContext
+                } else {
+                    RunStatus::DrainingInput
+                }
             }
             (RunStatus::DrainingInput, RunTransition::BeginCompaction) => RunStatus::Compacting,
-            (RunStatus::Compacting, RunTransition::CompactionOnlySettled) => {
-                RunStatus::DrainingInput
-            }
             (RunStatus::PreparingContext, RunTransition::ContextPrepared) => {
                 RunStatus::InvokingModel
             }
@@ -375,7 +363,13 @@ impl Run {
             }
         };
 
-        self.apply_state_transition(next, RunTransitionReason::from(transition));
+        let reason = match (next, transition) {
+            (RunStatus::DrainingInput, RunTransition::CompactionCompleted) => {
+                RunTransitionReason::ManualCompactionSettled
+            }
+            _ => RunTransitionReason::from(transition),
+        };
+        self.apply_state_transition(next, reason);
         Ok(next)
     }
 

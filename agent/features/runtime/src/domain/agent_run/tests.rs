@@ -652,14 +652,13 @@ const ALL_RUN_STATUSES: [RunStatus; 15] = [
     RunStatus::Terminated,
 ];
 
-const ALL_RUN_TRANSITIONS: [RunTransition; 19] = [
+const ALL_RUN_TRANSITIONS: [RunTransition; 18] = [
     RunTransition::StartDraining,
     RunTransition::DrainInputs,
     RunTransition::DrainInternalContinuation,
     RunTransition::DrainEmptyAndSealed,
     RunTransition::BeginCompaction,
     RunTransition::CompactionCompleted,
-    RunTransition::CompactionOnlySettled,
     RunTransition::ContextPrepared,
     RunTransition::RetryModel,
     RunTransition::ModelContextExceeded,
@@ -805,9 +804,6 @@ fn expected_transition(from: RunStatus, transition: RunTransition) -> Option<Run
         }
         (RunStatus::FinalizingStep, RunTransition::StepCancelled) => Some(RunStatus::DrainingInput),
         (RunStatus::DrainingInput, RunTransition::BeginCompaction) => Some(RunStatus::Compacting),
-        (RunStatus::Compacting, RunTransition::CompactionOnlySettled) => {
-            Some(RunStatus::DrainingInput)
-        }
         (RunStatus::Terminating, RunTransition::TerminationFinished) => Some(RunStatus::Terminated),
         _ => None,
     }
@@ -839,19 +835,17 @@ fn run_transition_matrix_exhaustively_accepts_only_documented_edges() {
     }
 }
 
-/// 手动压缩专用的两条迁移只在 `ManualCompaction` 意图下合法：矩阵测试对这两个组合
-/// 改用 compaction-only 意图的 Run，其余组合沿用会话 Run，以证明命令与收口边对会话
-/// Run 被拒绝。
+/// 迁移合法性依赖 Run 形态：手动压缩入口只在 `ManualCompaction` 意图下合法；
+/// `CompactionCompleted` 的收口目标取决于是否存在活动 Step，因此矩阵测试需要为
+/// 这两类组合构造对应形态的 Run。
 fn run_at_status_for_transition(status: RunStatus, transition: RunTransition) -> Run {
-    let manual_only = matches!(
-        (status, transition),
-        (RunStatus::DrainingInput, RunTransition::BeginCompaction)
-            | (RunStatus::Compacting, RunTransition::CompactionOnlySettled)
-    );
-    if !manual_only {
-        return run_at_status(status);
+    if transition == RunTransition::BeginCompaction && status == RunStatus::DrainingInput {
+        return manual_compaction_run_at_status(status);
     }
-    manual_compaction_run_at_status(status)
+    if transition == RunTransition::CompactionCompleted && status == RunStatus::Compacting {
+        return automatic_compaction_run_at_compacting();
+    }
+    run_at_status(status)
 }
 
 fn manual_compaction_run_at_status(status: RunStatus) -> Run {
@@ -865,6 +859,15 @@ fn manual_compaction_run_at_status(status: RunStatus) -> Run {
         }
         other => panic!("手动压缩 fixture 不支持状态: {other:?}"),
     }
+}
+
+/// 自动压缩形态：上下文超限时 Step 仍活动，压缩完成后必须回到 `PreparingContext`。
+fn automatic_compaction_run_at_compacting() -> Run {
+    let mut run = run_at_status(RunStatus::InvokingModel);
+    run.begin_step().unwrap();
+    run.transition(RunTransition::ModelContextExceeded).unwrap();
+    assert_eq!(run.status(), RunStatus::Compacting);
+    run
 }
 
 #[test]
@@ -2036,7 +2039,7 @@ fn manual_compaction_spec_declares_compaction_only_intent() {
 }
 
 #[test]
-fn manual_compaction_command_enters_compacting_and_settles_to_completed() {
+fn compaction_completed_without_active_step_settles_to_draining_input() {
     let mut run = Run::new(RunSpec::manual_compaction(), None);
     run.start_draining().unwrap();
     assert_eq!(run.status(), RunStatus::DrainingInput);
@@ -2044,9 +2047,16 @@ fn manual_compaction_command_enters_compacting_and_settles_to_completed() {
     run.begin_manual_compaction().unwrap();
     assert_eq!(run.status(), RunStatus::Compacting);
 
-    run.transition(RunTransition::CompactionOnlySettled)
-        .unwrap();
+    run.transition(RunTransition::CompactionCompleted).unwrap();
     assert_eq!(run.status(), RunStatus::DrainingInput);
+    assert!(
+        run.events().iter().any(|event| matches!(
+            event,
+            RuntimeLifecycleEvent::Transitioned { reason, .. }
+                if *reason == RunTransitionReason::ManualCompactionSettled
+        )),
+        "无活动 Step 的压缩收口必须以 ManualCompactionSettled reason 记录"
+    );
 
     run.apply_drain_decision(DrainDecision::EmptyAndSealed, Some(""))
         .unwrap();
@@ -2070,26 +2080,6 @@ fn conversation_run_rejects_manual_compaction_command() {
         run.events().len(),
         events_before,
         "被拒绝的手动压缩命令不得发布迁移事件"
-    );
-}
-
-#[test]
-fn conversation_run_rejects_compaction_only_settled() {
-    let mut run = run_at_status(RunStatus::Compacting);
-    let events_before = run.events().len();
-
-    assert_eq!(
-        run.transition(RunTransition::CompactionOnlySettled),
-        Err(RunTransitionError::IllegalTransition {
-            from: RunStatus::Compacting,
-            transition: RunTransition::CompactionOnlySettled,
-        })
-    );
-    assert_eq!(run.status(), RunStatus::Compacting);
-    assert_eq!(
-        run.events().len(),
-        events_before,
-        "被拒绝的 compaction-only 收口不得发布任何迁移事件"
     );
 }
 

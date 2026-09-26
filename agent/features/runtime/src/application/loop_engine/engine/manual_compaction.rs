@@ -67,7 +67,7 @@ pub(super) async fn execute_manual_compaction(
                     );
                 }
             }
-            transition_and_emit(run, execution, port, RunTransition::CompactionOnlySettled).await?;
+            transition_and_emit(run, execution, port, RunTransition::CompactionCompleted).await?;
             Ok(ManualCompactionDirective::Settled)
         }
         ManualCompactionPhaseOutcome::Cancelled => {
