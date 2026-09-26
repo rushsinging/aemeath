@@ -184,3 +184,50 @@ fn creation_rejects_child_capability_above_parent_ceiling() {
         Err(super::creation::RunCreationError::CapabilityEscalation)
     ));
 }
+
+/// 错误必须可执行（issue #1736 R2）：带 agent 上下文与下一步指引，
+/// NEVER 只回裸模型名误导 LLM 改填模型。
+#[test]
+fn sub_unknown_model_error_names_agent_and_next_step() {
+    let error = super::creation::RunCreationError::SubUnknownModel {
+        agent: "explorer-mimo".to_string(),
+        model: "Mimo/mimo-v2.6-flash".to_string(),
+    };
+    let message = error.to_string();
+
+    assert!(
+        message.contains("explorer-mimo"),
+        "错误必须指明是哪个 agent：{message}"
+    );
+    assert!(
+        message.contains("Mimo/mimo-v2.6-flash"),
+        "错误必须保留绑定模型上下文：{message}"
+    );
+    assert!(
+        message.contains("改选") && message.contains("agent"),
+        "错误必须给出可执行建议（改选名单中其他 agent）：{message}"
+    );
+    assert!(
+        !message.trim_end().ends_with("Mimo/mimo-v2.6-flash"),
+        "错误 NEVER 以裸模型名结尾：{message}"
+    );
+}
+
+/// `SubAgentNotFound` 必须返回可用 agent 名单，让 LLM 可直接改选（issue #1736 R2）。
+#[test]
+fn sub_agent_not_found_error_lists_available_agents() {
+    let error = super::creation::RunCreationError::SubAgentNotFound {
+        agent: "explorer".to_string(),
+        available: vec!["coder-glm".to_string(), "planner-ds".to_string()],
+    };
+    let message = error.to_string();
+
+    assert!(
+        message.contains("explorer"),
+        "错误必须指明缺失的 agent：{message}"
+    );
+    assert!(
+        message.contains("coder-glm") && message.contains("planner-ds"),
+        "错误必须列出可用 agent 名单：{message}"
+    );
+}

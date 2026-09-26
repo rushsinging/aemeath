@@ -787,7 +787,9 @@ async fn run_agent_rejects_disabled_role_from_frozen_run_config() {
     assert!(matches!(
         result,
         tools::AgentRunTerminal::Failed { ref error }
-            if error.contains("disabled")
+            if error.contains("已禁用")
+                && error.contains("`coder`")
+                && error.contains("可用 agent 名单")
     ));
 }
 
@@ -944,11 +946,17 @@ async fn unknown_sub_agent_name_fails_before_provider_invocation() {
         })
         .await;
 
-    assert_eq!(
-        result,
-        tools::AgentRunTerminal::Failed {
-            error: "sub-agent instance `missing-role` not found in config".to_string(),
-        }
+    let error_message = match result {
+        tools::AgentRunTerminal::Failed { error } => error,
+        other => panic!("unknown agent must fail before provider invocation, got {other:?}"),
+    };
+    assert!(
+        error_message.contains("`missing-role`") && error_message.contains("不存在"),
+        "错误必须指明缺失的 agent：{error_message}"
+    );
+    assert!(
+        error_message.contains("可用 agent 名单"),
+        "错误必须返回可用 agent 名单（issue #1736 R2）：{error_message}"
     );
 }
 
