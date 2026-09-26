@@ -5,19 +5,19 @@
 
 use std::time::Duration;
 
-use crate::domain::invocation::HookPoint;
+use crate::domain::invocation::HookPointData;
 
-// ─── HookDirective ────────────────────────────────────────────
+// ─── HookDirectiveData ────────────────────────────────────────────
 
 /// Hook directive——调用方解释并推进自己的聚合。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HookDirective {
+pub enum HookDirectiveData {
     /// 允许继续。
     Continue,
     /// 主动阻断（exit 0 + JSON `decision:"block"` / `continue:false`，或任意非零 exit）。
     Block {
         /// 阻断原因。
-        reason: HookReason,
+        reason: HookReasonData,
     },
     /// 继续并注入额外上下文。
     ContinueWithContext {
@@ -40,7 +40,7 @@ pub enum HookDirective {
 
 /// Hook 阻断原因。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HookReason {
+pub enum HookReasonData {
     /// Hook 脚本以非零退出码退出。
     /// 携带 exit code 与 stderr 摘要。
     ExitCode {
@@ -77,7 +77,7 @@ pub enum HookReason {
 
 /// `classify_directive` 的 typed 分类失败。
 ///
-/// 对应设计 §5 真值表中的 ExecutionFailed 路径，与业务 Block（`HookReason`）严格区分：
+/// 对应设计 §5 真值表中的 ExecutionFailed 路径，与业务 Block（`HookReasonData`）严格区分：
 /// - 业务 Block 是 Hook 的合法业务结果，永不重试；
 /// - 分类失败是协议级故障，需进入 ExecutionFailed / 重试处理。
 ///
@@ -101,7 +101,7 @@ pub enum ClassifyError {
     /// 进程未正常退出时没有退出码可供分类，必须进入 ExecutionFailed 可重试路径，
     /// **不得**按空 stdout 误判为 Continue。
     MissingExitCode,
-    /// 能力矩阵违规：HookPoint 元数据不支持收到的 directive。
+    /// 能力矩阵违规：HookPointData 元数据不支持收到的 directive。
     ///
     /// 设计 §3：`can_block=false` 收到 Block、`can_modify_input=false` 收到
     /// UpdatedInput、`can_add_context=false` 收到 Context，均为协议错误。
@@ -123,13 +123,13 @@ pub enum ProtocolViolation {
     ContextOnNonContextual,
 }
 
-// ─── HookExecution ────────────────────────────────────────────
+// ─── HookExecutionData ────────────────────────────────────────────
 
 /// 单次 Hook 命令执行的完整记录。
 #[derive(Debug, Clone)]
-pub struct HookExecution {
+pub struct HookExecutionData {
     /// 执行状态。
-    pub status: HookExecutionStatus,
+    pub status: HookExecutionStatusData,
     /// 尝试次数（含第一次）。
     pub attempts: u8,
     /// 进程退出码（进程未正常退出时为 None）。
@@ -149,7 +149,7 @@ pub struct HookExecution {
 
 /// Hook 执行状态。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HookExecutionStatus {
+pub enum HookExecutionStatusData {
     /// 执行成功（exit 0）。
     Success,
     /// Hook 主动阻断（非零 exit 或 JSON 声明 block）。
@@ -163,50 +163,50 @@ pub enum HookExecutionStatus {
     },
 }
 
-// ─── HookOutcome ──────────────────────────────────────────────
+// ─── HookOutcomeData ──────────────────────────────────────────────
 
 /// 触发最终阻断的 subscription 与实际执行记录。
 #[derive(Debug, Clone)]
 pub struct HookBlockDetail {
     /// 配置的实际执行命令（变量已按当前 invocation 展开）。
     pub command: String,
-    /// 在 HookOutcome 全量执行记录中的 1-based 序号。
+    /// 在 HookOutcomeData 全量执行记录中的 1-based 序号。
     pub execution_ordinal: u32,
     /// 触发阻断的最终执行记录。
-    pub execution: HookExecution,
+    pub execution: HookExecutionData,
 }
 
 /// Hook dispatch 的最终结果。
 ///
 /// Runtime 拥有 directive 响应编排（Stop 使用每个 Run 冻结的 block allowance，首个超限 Block 进入 RunFailed）。
 #[derive(Debug, Clone)]
-pub struct HookOutcome {
+pub struct HookOutcomeData {
     /// 所有执行明细（含重试）。
-    pub executions: Vec<HookExecution>,
+    pub executions: Vec<HookExecutionData>,
     /// 最终 directive。
-    pub directive: HookDirective,
+    pub directive: HookDirectiveData,
     /// BC 保留的展示消息（按 executions 聚合顺序逐条保留，不合并、不丢失来源）。
     ///
     /// 与 `directive` 的聚合 context 不同：`messages` 按「每条 subscription 的每次成功
     /// 执行」逐条保留 additionalContext / systemMessage，供调用方（Runtime / TUI）原样展示。
-    pub messages: Vec<HookDisplayMessage>,
+    pub messages: Vec<HookDisplayMessageData>,
     /// 最终 directive 为 Block 时，标识实际阻断 subscription；其它 directive 为 None。
     pub block_detail: Option<HookBlockDetail>,
 }
 
-impl HookOutcome {
+impl HookOutcomeData {
     /// 创建一个 Proceed（Continue）结果，无执行明细、无展示消息。
     pub fn proceed() -> Self {
         Self {
             executions: Vec::new(),
-            directive: HookDirective::Continue,
+            directive: HookDirectiveData::Continue,
             messages: Vec::new(),
             block_detail: None,
         }
     }
 }
 
-// ─── HookDisplayMessage（BC 保留展示消息，#925）─────────────────
+// ─── HookDisplayMessageData（BC 保留展示消息，#925）─────────────────
 
 /// Hook 展示消息种类。
 ///
@@ -214,7 +214,7 @@ impl HookOutcome {
 /// - `AdditionalContext` ← JSON `additionalContext`（注入 LLM 对话流）；
 /// - `SystemMessage` ← JSON `systemMessage`（显示在 TUI）。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HookDisplayMessageKind {
+pub enum HookDisplayMessageKindData {
     /// 额外上下文（JSON `additionalContext`）。
     AdditionalContext,
     /// 系统消息（JSON `systemMessage`，警告等，显示在 TUI）。
@@ -224,20 +224,20 @@ pub enum HookDisplayMessageKind {
 /// Hook BC 保留的展示消息。
 ///
 /// 按「每条 subscription 的每次成功执行」逐条保留，不合并、不丢失来源，
-/// 供调用方（Runtime / TUI）原样展示。`source` 取 HookMatcher 的稳定非秘密值
+/// 供调用方（Runtime / TUI）原样展示。`source` 取 HookMatcherData 的稳定非秘密值
 /// （`All`="*"，`ToolName(name)`=name），`execution_ordinal` 按 executions 聚合顺序递增。
 #[derive(Debug, Clone)]
-pub struct HookDisplayMessage {
+pub struct HookDisplayMessageData {
     /// 触发点。
-    pub point: HookPoint,
-    /// 来源（HookMatcher 稳定非秘密值：`All`="*"，`ToolName(name)`=name）。
+    pub point: HookPointData,
+    /// 来源（HookMatcherData 稳定非秘密值：`All`="*"，`ToolName(name)`=name）。
     pub source: String,
     /// 执行序号（按 executions 聚合顺序，1-based）。
     pub execution_ordinal: u32,
     /// 该 subscription 内的成功 attempt 序号（含重试，1-based）。
     pub attempt: u8,
     /// 消息种类。
-    pub kind: HookDisplayMessageKind,
+    pub kind: HookDisplayMessageKindData,
     /// 消息文本。
     pub text: String,
 }

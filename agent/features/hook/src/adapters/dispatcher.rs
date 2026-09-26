@@ -3,7 +3,7 @@
 //! 对应设计：`docs/design/02-modules/hook/README.md` §4 §6 §10 与
 //! `01-run-loop-integration.md` §1 §2。
 //!
-//! - `Dispatcher` 实现 `HookPort`：matcher 过滤 / order 排序 / Block 短路 /
+//! - `Dispatcher` 实现 `HookDispatcher`：matcher 过滤 / order 排序 / Block 短路 /
 //!   Context 合并 / UpdatedInput 串联 / ExecutionFailed 重试 / StopFailure 派发；
 //! - 私有 [`executor::Executor`] port 抽象「单次命令执行」，便于测试用
 //!   [`fake::Scripted`] fake 替代真实进程；
@@ -32,17 +32,18 @@ use async_trait::async_trait;
 
 use share::config::domain::snapshot::HookExecutionPolicy;
 
-use crate::domain::invocation::{HookInvocation, HookPoint, StopFailureInput};
+use crate::domain::invocation::{HookInvocationData, HookPointData, StopFailureInput};
 use crate::domain::outcome::{
-    HookBlockDetail, HookDirective, HookDisplayMessage, HookDisplayMessageKind, HookExecution,
-    HookExecutionStatus, HookOutcome,
+    HookBlockDetail, HookDirectiveData, HookDisplayMessageData, HookDisplayMessageKindData,
+    HookExecutionData, HookExecutionStatusData, HookOutcomeData,
 };
 use crate::domain::protocol::classify_output;
 use crate::domain::subscription::{HookCommand, HookSubscription, SubscriptionError};
 
 use crate::ports::{
-    CancellationSignal, HookDispatchContext, HookPort, HookSubscriptionExecutionEvent,
-    HookSubscriptionExecutionObserver, HookSubscriptionExecutionTerminal,
+    CancellationSignal, HookDispatchContextData, HookDispatcher,
+    HookSubscriptionExecutionEventData, HookSubscriptionExecutionObserver,
+    HookSubscriptionExecutionTerminalData,
 };
 
 pub(crate) use executor::{ExecutionFault, Executor, ProcessDriverExecutor};
@@ -58,7 +59,7 @@ use helpers::{
 /// 内部以 `Box<dyn Executor>` 持有执行端口，对外只暴露稳定构造入口
 /// [`Dispatcher::try_new`]（cwd + env 白名单装配受管子进程执行器），
 /// 不泄漏 `Executor` / `RawExecution` / `ExecutionFault` 等技术类型。
-pub struct Dispatcher {
+pub(crate) struct Dispatcher {
     subscriptions: Vec<HookSubscription>,
     executor: Box<dyn Executor>,
     execution_policy: HookExecutionPolicy,
@@ -72,7 +73,7 @@ pub struct Dispatcher {
 ///
 /// 扁平解析器（cmux / Claude Code 生态工具按顶层字段提取会话标识）与
 /// 既有按 tagged 结构解析的脚本同时可读；Runtime **NEVER** 参与拼装。
-fn stdin_payload(invocation: &HookInvocation, session_id: Option<&str>) -> serde_json::Value {
+fn stdin_payload(invocation: &HookInvocationData, session_id: Option<&str>) -> serde_json::Value {
     let mut payload = serde_json::to_value(invocation).unwrap_or(serde_json::json!({}));
     let event_name = serde_json::to_value(invocation.point())
         .ok()
@@ -141,6 +142,8 @@ impl Dispatcher {
         })
     }
 
+    /// 测试专用：注入订阅执行观察者。
+    #[cfg(test)]
     pub fn with_subscription_execution_observer(
         mut self,
         observer: Arc<dyn HookSubscriptionExecutionObserver>,
@@ -175,37 +178,37 @@ enum AttemptOutcome {
     /// subscription 成功返回 directive（含业务 Block，业务 Block 不重试）。
     ///
     /// `executions` 携带该 subscription 的**全部** attempt 明细（含此前失败的
-    /// 尝试与最终成功的尝试），确保 `HookOutcome.executions` 完整保留重试轨迹。
+    /// 尝试与最终成功的尝试），确保 `HookOutcomeData.executions` 完整保留重试轨迹。
     /// `system_message` 为本次成功执行独立保留的 systemMessage（展示用）。
     Success {
-        executions: Vec<HookExecution>,
-        directive: HookDirective,
+        executions: Vec<HookExecutionData>,
+        directive: HookDirectiveData,
         system_message: Option<String>,
     },
     /// 重试耗尽（ExecutionFailed 达到注入的 execution policy 上限）。
-    Exhausted { executions: Vec<HookExecution> },
+    Exhausted { executions: Vec<HookExecutionData> },
     /// 被 cancellation 终止（不重试，但仍保留这一次 attempt 的 ExecutionFailed 明细）。
-    Cancelled { executions: Vec<HookExecution> },
+    Cancelled { executions: Vec<HookExecutionData> },
 }
 
 #[async_trait]
-impl HookPort for Dispatcher {
+impl HookDispatcher for Dispatcher {
     async fn dispatch(
         &self,
-        invocation: HookInvocation,
+        invocation: HookInvocationData,
         cancellation: &dyn CancellationSignal,
-    ) -> HookOutcome {
+    ) -> HookOutcomeData {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        self.dispatch_at(invocation, HookDispatchContext::new(cwd), cancellation)
+        self.dispatch_at(invocation, HookDispatchContextData::new(cwd), cancellation)
             .await
     }
 
     async fn dispatch_at(
         &self,
-        invocation: HookInvocation,
-        context: HookDispatchContext,
+        invocation: HookInvocationData,
+        context: HookDispatchContextData,
         cancellation: &dyn CancellationSignal,
-    ) -> HookOutcome {
+    ) -> HookOutcomeData {
         let point = invocation.point();
         let subscription_execution_observer = context
             .subscription_execution_observer()
@@ -226,9 +229,9 @@ impl HookPort for Dispatcher {
         // 最近一次 UpdatedInput 的 input 作为最终 UpdatedInput。
         let mut aggregated_context: Option<String> = None;
         let mut final_input: Option<serde_json::Value> = None;
-        let mut all_executions: Vec<HookExecution> = Vec::new();
+        let mut all_executions: Vec<HookExecutionData> = Vec::new();
         // BC 保留展示消息：按 executions 聚合顺序逐条保留 additionalContext / systemMessage。
-        let mut messages: Vec<HookDisplayMessage> = Vec::new();
+        let mut messages: Vec<HookDisplayMessageData> = Vec::new();
 
         for sub in matching {
             let current_input = stdin_payload(&current_invocation, context.session_id());
@@ -262,25 +265,25 @@ impl HookPort for Dispatcher {
                     let source = matcher_source(&sub.matcher);
                     // systemMessage 独立保留为展示消息（不折叠进 directive）。
                     if let Some(text) = system_message {
-                        messages.push(HookDisplayMessage {
+                        messages.push(HookDisplayMessageData {
                             point,
                             source: source.clone(),
                             execution_ordinal,
                             attempt,
-                            kind: HookDisplayMessageKind::SystemMessage,
+                            kind: HookDisplayMessageKindData::SystemMessage,
                             text,
                         });
                     }
                     match directive {
-                        HookDirective::Continue => {}
-                        HookDirective::Block { reason } => {
+                        HookDirectiveData::Continue => {}
+                        HookDirectiveData::Block { reason } => {
                             let execution = all_executions
                                 .last()
                                 .expect("Block 成功执行必须保留最终 execution")
                                 .clone();
-                            return HookOutcome {
+                            return HookOutcomeData {
                                 executions: all_executions,
-                                directive: HookDirective::Block { reason },
+                                directive: HookDirectiveData::Block { reason },
                                 messages,
                                 block_detail: Some(HookBlockDetail {
                                     command: sub.command.command.clone(),
@@ -289,28 +292,28 @@ impl HookPort for Dispatcher {
                                 }),
                             };
                         }
-                        HookDirective::ContinueWithContext { context } => {
-                            messages.push(HookDisplayMessage {
+                        HookDirectiveData::ContinueWithContext { context } => {
+                            messages.push(HookDisplayMessageData {
                                 point,
                                 source: source.clone(),
                                 execution_ordinal,
                                 attempt,
-                                kind: HookDisplayMessageKind::AdditionalContext,
+                                kind: HookDisplayMessageKindData::AdditionalContext,
                                 text: context.clone(),
                             });
                             push_context(&mut aggregated_context, context);
                         }
-                        HookDirective::ContinueWithUpdatedInput { input } => {
+                        HookDirectiveData::ContinueWithUpdatedInput { input } => {
                             current_invocation.apply_updated_input(&input);
                             final_input = Some(input);
                         }
-                        HookDirective::ContinueWithContextAndInput { context, input } => {
-                            messages.push(HookDisplayMessage {
+                        HookDirectiveData::ContinueWithContextAndInput { context, input } => {
+                            messages.push(HookDisplayMessageData {
                                 point,
                                 source: source.clone(),
                                 execution_ordinal,
                                 attempt,
-                                kind: HookDisplayMessageKind::AdditionalContext,
+                                kind: HookDisplayMessageKindData::AdditionalContext,
                                 text: context.clone(),
                             });
                             push_context(&mut aggregated_context, context);
@@ -325,7 +328,7 @@ impl HookPort for Dispatcher {
                         synthesize_exhausted_directive(point, sub.failure_policy, &all_executions);
                     // Block 短路：Stop（固定 Block，用户不可覆盖）或配置
                     // failure_policy=Block 的前置闸门。后续 subscription 不再执行。
-                    if let HookDirective::Block { .. } = directive {
+                    if let HookDirectiveData::Block { .. } = directive {
                         let execution = all_executions
                             .last()
                             .expect("耗尽 Block 必须保留最终 execution")
@@ -336,8 +339,8 @@ impl HookPort for Dispatcher {
                             execution,
                         };
                         // Stop point 耗尽后尽力派发一次 StopFailure（不递归），
-                        // 其执行明细并入原 Stop HookOutcome.executions。
-                        if point == HookPoint::Stop {
+                        // 其执行明细并入原 Stop HookOutcomeData.executions。
+                        if point == HookPointData::Stop {
                             let error = last_error_of(&all_executions).unwrap_or_default();
                             let sf_outcome = self
                                 .dispatch_stop_failure(
@@ -350,7 +353,7 @@ impl HookPort for Dispatcher {
                                 .await;
                             all_executions.extend(sf_outcome.executions);
                         }
-                        return HookOutcome {
+                        return HookOutcomeData {
                             executions: all_executions,
                             directive,
                             messages,
@@ -370,7 +373,7 @@ impl HookPort for Dispatcher {
                         .last()
                         .expect("取消 Block 必须保留最终 execution")
                         .clone();
-                    return HookOutcome {
+                    return HookOutcomeData {
                         executions: all_executions,
                         directive,
                         messages,
@@ -386,15 +389,15 @@ impl HookPort for Dispatcher {
 
         // 全部 subscription 完成 —— 组装聚合 directive。
         let directive = match (aggregated_context, final_input) {
-            (Some(ctx), Some(inp)) => HookDirective::ContinueWithContextAndInput {
+            (Some(ctx), Some(inp)) => HookDirectiveData::ContinueWithContextAndInput {
                 context: ctx,
                 input: inp,
             },
-            (Some(ctx), None) => HookDirective::ContinueWithContext { context: ctx },
-            (None, Some(inp)) => HookDirective::ContinueWithUpdatedInput { input: inp },
-            (None, None) => HookDirective::Continue,
+            (Some(ctx), None) => HookDirectiveData::ContinueWithContext { context: ctx },
+            (None, Some(inp)) => HookDirectiveData::ContinueWithUpdatedInput { input: inp },
+            (None, None) => HookDirectiveData::Continue,
         };
-        HookOutcome {
+        HookOutcomeData {
             executions: all_executions,
             directive,
             messages,
@@ -447,7 +450,7 @@ fn first_shell_command_word(command: &str) -> String {
 }
 
 fn invocation_environment(
-    invocation: &HookInvocation,
+    invocation: &HookInvocationData,
     cwd: &std::path::Path,
     session_id: Option<&str>,
 ) -> HashMap<String, String> {
@@ -463,14 +466,14 @@ fn invocation_environment(
         env.insert("AEMEATH_SESSION_ID".to_string(), session_id.to_string());
     }
     match invocation {
-        HookInvocation::PreToolUse(input) => {
+        HookInvocationData::PreToolUse(input) => {
             env.insert("AEMEATH_TOOL_NAME".to_string(), input.tool_name.clone());
             env.insert(
                 "AEMEATH_TOOL_INPUT".to_string(),
                 input.tool_input.to_string(),
             );
         }
-        HookInvocation::PostToolUse(input) => {
+        HookInvocationData::PostToolUse(input) => {
             env.insert("AEMEATH_TOOL_NAME".to_string(), input.tool_name.clone());
             env.insert(
                 "AEMEATH_TOOL_INPUT".to_string(),
@@ -482,7 +485,7 @@ fn invocation_environment(
                 input.is_error.to_string(),
             );
         }
-        HookInvocation::PostToolUseFailure(input) => {
+        HookInvocationData::PostToolUseFailure(input) => {
             env.insert("AEMEATH_TOOL_NAME".to_string(), input.tool_name.clone());
             env.insert(
                 "AEMEATH_TOOL_INPUT".to_string(),
@@ -491,13 +494,14 @@ fn invocation_environment(
             env.insert("AEMEATH_TOOL_OUTPUT".to_string(), input.error.clone());
             env.insert("AEMEATH_TOOL_IS_ERROR".to_string(), "true".to_string());
         }
-        HookInvocation::Stop(input) => {
+        HookInvocationData::Stop(input) => {
             env.insert(
                 "AEMEATH_STOP_RUN_STEPS".to_string(),
                 input.run_steps.to_string(),
             );
         }
-        HookInvocation::PermissionRequest(input) | HookInvocation::PermissionDenied(input) => {
+        HookInvocationData::PermissionRequest(input)
+        | HookInvocationData::PermissionDenied(input) => {
             env.insert(
                 "AEMEATH_PERMISSION_TOOL_NAME".to_string(),
                 input.tool_name.clone(),
@@ -507,7 +511,7 @@ fn invocation_environment(
                 input.permission_rule.clone(),
             );
         }
-        HookInvocation::InstructionsLoaded(input) => {
+        HookInvocationData::InstructionsLoaded(input) => {
             env.insert(
                 "AEMEATH_INSTRUCTIONS_FILE_PATH".to_string(),
                 input.file_path.clone(),
@@ -517,7 +521,7 @@ fn invocation_environment(
                 input.instruction_type.clone(),
             );
         }
-        HookInvocation::Notification(input) => {
+        HookInvocationData::Notification(input) => {
             env.insert(
                 "AEMEATH_NOTIFICATION_TEXT".to_string(),
                 input.notification_text.clone(),
@@ -543,7 +547,7 @@ impl Dispatcher {
         cancellation: &dyn CancellationSignal,
     ) -> AttemptOutcome {
         let mut attempts: u8 = 0;
-        let mut executions: Vec<HookExecution> = Vec::new();
+        let mut executions: Vec<HookExecutionData> = Vec::new();
         // 命令原样透传：项目目录只经 `AEMEATH_PROJECT_DIR` / `CLAUDE_PROJECT_DIR`
         // 环境变量注入（`invocation_environment`），shell 内用 `${AEMEATH_PROJECT_DIR}`
         // 展开；`{AEMEATH_PROJECT_DIR}` 占位符写法已移除，不再替换。
@@ -551,7 +555,7 @@ impl Dispatcher {
         let script = hook_script_file_name(&command.command);
         Self::observe_subscription_execution(
             subscription_execution_observer,
-            HookSubscriptionExecutionEvent::Started {
+            HookSubscriptionExecutionEventData::Started {
                 point: sub.point,
                 script: script.clone(),
                 attempt: 1,
@@ -562,7 +566,7 @@ impl Dispatcher {
             if attempts > 1 {
                 Self::observe_subscription_execution(
                     subscription_execution_observer,
-                    HookSubscriptionExecutionEvent::AttemptChanged {
+                    HookSubscriptionExecutionEventData::AttemptChanged {
                         point: sub.point,
                         script: script.clone(),
                         attempt: attempts,
@@ -581,20 +585,20 @@ impl Dispatcher {
                     match classify_output(sub.point, raw.exit_code, &raw.stdout, &raw.stderr) {
                         Ok((directive, system_message)) => {
                             let status = match &directive {
-                                HookDirective::Block { .. } => HookExecutionStatus::Blocked,
-                                _ => HookExecutionStatus::Success,
+                                HookDirectiveData::Block { .. } => HookExecutionStatusData::Blocked,
+                                _ => HookExecutionStatusData::Success,
                             };
                             let terminal = match status {
-                                HookExecutionStatus::Success => {
-                                    HookSubscriptionExecutionTerminal::Succeeded
+                                HookExecutionStatusData::Success => {
+                                    HookSubscriptionExecutionTerminalData::Succeeded
                                 }
-                                HookExecutionStatus::Blocked
-                                | HookExecutionStatus::Cancelled
-                                | HookExecutionStatus::ExecutionFailed { .. } => {
-                                    HookSubscriptionExecutionTerminal::Failed
+                                HookExecutionStatusData::Blocked
+                                | HookExecutionStatusData::Cancelled
+                                | HookExecutionStatusData::ExecutionFailed { .. } => {
+                                    HookSubscriptionExecutionTerminalData::Failed
                                 }
                             };
-                            let execution = HookExecution {
+                            let execution = HookExecutionData {
                                 status,
                                 attempts,
                                 exit_code: raw.exit_code,
@@ -605,11 +609,11 @@ impl Dispatcher {
                                 duration,
                             };
                             // 成功也必须保留 prior executions（此前失败的 attempt 明细），
-                            // 使 HookOutcome.executions 完整反映全部重试轨迹。
+                            // 使 HookOutcomeData.executions 完整反映全部重试轨迹。
                             executions.push(execution);
                             Self::observe_subscription_execution(
                                 subscription_execution_observer,
-                                HookSubscriptionExecutionEvent::Finished {
+                                HookSubscriptionExecutionEventData::Finished {
                                     point: sub.point,
                                     script,
                                     terminal,
@@ -623,8 +627,8 @@ impl Dispatcher {
                         }
                         Err(err) => {
                             let error = classify_error_summary(&err);
-                            let execution = HookExecution {
-                                status: HookExecutionStatus::ExecutionFailed {
+                            let execution = HookExecutionData {
+                                status: HookExecutionStatusData::ExecutionFailed {
                                     error: error.clone(),
                                 },
                                 attempts,
@@ -639,10 +643,10 @@ impl Dispatcher {
                             if attempts >= self.execution_policy.max_attempts() {
                                 Self::observe_subscription_execution(
                                     subscription_execution_observer,
-                                    HookSubscriptionExecutionEvent::Finished {
+                                    HookSubscriptionExecutionEventData::Finished {
                                         point: sub.point,
                                         script,
-                                        terminal: HookSubscriptionExecutionTerminal::Failed,
+                                        terminal: HookSubscriptionExecutionTerminalData::Failed,
                                     },
                                 );
                                 return AttemptOutcome::Exhausted { executions };
@@ -651,8 +655,8 @@ impl Dispatcher {
                     }
                 }
                 Err(ExecutionFault::Cancelled) => {
-                    let execution = HookExecution {
-                        status: HookExecutionStatus::Cancelled,
+                    let execution = HookExecutionData {
+                        status: HookExecutionStatusData::Cancelled,
                         attempts,
                         exit_code: None,
                         stdout: String::new(),
@@ -664,18 +668,18 @@ impl Dispatcher {
                     executions.push(execution);
                     Self::observe_subscription_execution(
                         subscription_execution_observer,
-                        HookSubscriptionExecutionEvent::Finished {
+                        HookSubscriptionExecutionEventData::Finished {
                             point: sub.point,
                             script,
-                            terminal: HookSubscriptionExecutionTerminal::Cancelled,
+                            terminal: HookSubscriptionExecutionTerminalData::Cancelled,
                         },
                     );
                     return AttemptOutcome::Cancelled { executions };
                 }
                 #[cfg(any(not(unix), test))]
                 Err(ExecutionFault::Unsupported) => {
-                    let execution = HookExecution {
-                        status: HookExecutionStatus::ExecutionFailed {
+                    let execution = HookExecutionData {
+                        status: HookExecutionStatusData::ExecutionFailed {
                             error: ExecutionFault::Unsupported.message(),
                         },
                         attempts,
@@ -689,17 +693,17 @@ impl Dispatcher {
                     executions.push(execution);
                     Self::observe_subscription_execution(
                         subscription_execution_observer,
-                        HookSubscriptionExecutionEvent::Finished {
+                        HookSubscriptionExecutionEventData::Finished {
                             point: sub.point,
                             script,
-                            terminal: HookSubscriptionExecutionTerminal::Failed,
+                            terminal: HookSubscriptionExecutionTerminalData::Failed,
                         },
                     );
                     return AttemptOutcome::Exhausted { executions };
                 }
                 Err(fault) => {
-                    let execution = HookExecution {
-                        status: HookExecutionStatus::ExecutionFailed {
+                    let execution = HookExecutionData {
+                        status: HookExecutionStatusData::ExecutionFailed {
                             error: fault.message(),
                         },
                         attempts,
@@ -719,10 +723,10 @@ impl Dispatcher {
                     {
                         Self::observe_subscription_execution(
                             subscription_execution_observer,
-                            HookSubscriptionExecutionEvent::Finished {
+                            HookSubscriptionExecutionEventData::Finished {
                                 point: sub.point,
                                 script,
-                                terminal: HookSubscriptionExecutionTerminal::Failed,
+                                terminal: HookSubscriptionExecutionTerminalData::Failed,
                             },
                         );
                         return AttemptOutcome::Exhausted { executions };
@@ -734,7 +738,7 @@ impl Dispatcher {
 
     fn observe_subscription_execution(
         observer: Option<&Arc<dyn HookSubscriptionExecutionObserver>>,
-        event: HookSubscriptionExecutionEvent,
+        event: HookSubscriptionExecutionEventData,
     ) {
         if let Some(observer) = observer {
             observer.observe(event);
@@ -750,20 +754,20 @@ impl Dispatcher {
     ///
     /// StopFailure subscription 与普通 subscription 一样遵守
     /// `enabled` + `matcher` + `order` 稳定规则；其执行明细由调用方并入原 Stop
-    /// HookOutcome.executions（本函数返回值的 `executions`）。
+    /// HookOutcomeData.executions（本函数返回值的 `executions`）。
     async fn dispatch_stop_failure(
         &self,
-        stop_invocation: &HookInvocation,
+        stop_invocation: &HookInvocationData,
         error: String,
         cwd: &std::path::Path,
         session_id: Option<&str>,
         cancellation: &dyn CancellationSignal,
-    ) -> HookOutcome {
+    ) -> HookOutcomeData {
         let run_steps = match stop_invocation {
-            HookInvocation::Stop(input) => input.run_steps,
+            HookInvocationData::Stop(input) => input.run_steps,
             _ => 0,
         };
-        let invocation = HookInvocation::StopFailure(StopFailureInput { run_steps, error });
+        let invocation = HookInvocationData::StopFailure(StopFailureInput { run_steps, error });
 
         // 复用主 dispatch 的 enabled + matcher + order 稳定规则（不再触发新的 StopFailure）。
         let mut matching: Vec<&HookSubscription> = self
@@ -771,7 +775,7 @@ impl Dispatcher {
             .iter()
             .filter(|s| {
                 s.enabled
-                    && s.point == HookPoint::StopFailure
+                    && s.point == HookPointData::StopFailure
                     && matcher_hits(&s.matcher, &invocation)
             })
             .collect();
@@ -779,7 +783,7 @@ impl Dispatcher {
 
         let current_input = stdin_payload(&invocation, session_id);
         let invocation_env = invocation_environment(&invocation, cwd, session_id);
-        let mut all_executions: Vec<HookExecution> = Vec::new();
+        let mut all_executions: Vec<HookExecutionData> = Vec::new();
         for sub in matching {
             match self
                 .execute_subscription(
@@ -807,9 +811,9 @@ impl Dispatcher {
         }
 
         // StopFailure 是观察点：其结果不改写已合成的 Stop Block。
-        HookOutcome {
+        HookOutcomeData {
             executions: all_executions,
-            directive: HookDirective::Continue,
+            directive: HookDirectiveData::Continue,
             messages: Vec::new(),
             block_detail: None,
         }

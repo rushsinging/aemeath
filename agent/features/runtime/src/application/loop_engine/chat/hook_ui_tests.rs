@@ -4,12 +4,14 @@
 
 use std::sync::Arc;
 
-use hook::{HookDirective, HookDispatchContext, HookInvocation, HookOutcome, HookPort};
+use hook::{
+    HookDirectiveData, HookDispatchContextData, HookDispatcher, HookInvocationData, HookOutcomeData,
+};
 
 use super::hook_ui::dispatch_hook;
 
 /// 记录 (触发点, context.session_id) 的 dispatch 轨迹。
-type ContextDispatchLog = Arc<std::sync::Mutex<Vec<(hook::HookPoint, Option<String>)>>>;
+type ContextDispatchLog = Arc<std::sync::Mutex<Vec<(hook::HookPointData, Option<String>)>>>;
 
 #[derive(Clone, Default)]
 struct ContextRecordingHookPort {
@@ -17,28 +19,28 @@ struct ContextRecordingHookPort {
 }
 
 #[async_trait::async_trait]
-impl HookPort for ContextRecordingHookPort {
+impl HookDispatcher for ContextRecordingHookPort {
     async fn dispatch(
         &self,
-        _invocation: HookInvocation,
+        _invocation: HookInvocationData,
         _cancellation: &dyn hook::CancellationSignal,
-    ) -> HookOutcome {
+    ) -> HookOutcomeData {
         unreachable!("主循环 hook 必须经 dispatch_at 携带 workspace 上下文");
     }
 
     async fn dispatch_at(
         &self,
-        invocation: HookInvocation,
-        context: HookDispatchContext,
+        invocation: HookInvocationData,
+        context: HookDispatchContextData,
         _cancellation: &dyn hook::CancellationSignal,
-    ) -> HookOutcome {
+    ) -> HookOutcomeData {
         self.dispatches
             .lock()
             .unwrap()
             .push((invocation.point(), context.session_id().map(str::to_string)));
-        HookOutcome {
+        HookOutcomeData {
             executions: Vec::new(),
-            directive: HookDirective::Continue,
+            directive: HookDirectiveData::Continue,
             messages: Vec::new(),
             block_detail: None,
         }
@@ -61,10 +63,10 @@ async fn dispatch_hook_passes_session_id_into_context() {
     let activities = coordinator();
 
     dispatch_hook(
-        &(Arc::new(port.clone()) as Arc<dyn HookPort>),
+        &(Arc::new(port.clone()) as Arc<dyn HookDispatcher>),
         &activities,
         &sdk::RunStepId::new("step-hook-ui"),
-        HookInvocation::PreToolUse(hook::PreToolUseInput {
+        HookInvocationData::PreToolUse(hook::PreToolUseInput {
             tool_name: "Bash".to_string(),
             tool_input: serde_json::json!({"command": "ls"}),
         }),
@@ -76,7 +78,7 @@ async fn dispatch_hook_passes_session_id_into_context() {
 
     let dispatches = port.dispatches.lock().unwrap();
     assert_eq!(dispatches.len(), 1);
-    assert_eq!(dispatches[0].0, hook::HookPoint::PreToolUse);
+    assert_eq!(dispatches[0].0, hook::HookPointData::PreToolUse);
     assert_eq!(
         dispatches[0].1.as_deref(),
         Some("sess-hook-ui-1"),

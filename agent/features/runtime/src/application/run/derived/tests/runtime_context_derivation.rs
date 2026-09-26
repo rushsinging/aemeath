@@ -75,13 +75,13 @@ impl memory::api::ReflectionHistoryStore for FakeReflHist {
 
 pub(super) struct FakeHookPort;
 #[async_trait::async_trait]
-impl hook::HookPort for FakeHookPort {
+impl hook::HookDispatcher for FakeHookPort {
     async fn dispatch(
         &self,
-        _invocation: hook::HookInvocation,
+        _invocation: hook::HookInvocationData,
         _cancellation: &dyn hook::CancellationSignal,
-    ) -> hook::HookOutcome {
-        hook::HookOutcome::proceed()
+    ) -> hook::HookOutcomeData {
+        hook::HookOutcomeData::proceed()
     }
 }
 // ── Helper: build a parent RuntimeContext through RunFactory ──

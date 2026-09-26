@@ -1,9 +1,9 @@
-//! 测试先行：Runtime application hook adapter —— 由 `hook::HookOutcome`
+//! 测试先行：Runtime application hook adapter —— 由 `hook::HookOutcomeData`
 //! 到 Runtime-owned `RuntimeHookDispatch` 的纯值投影。
 //!
 //! 这些测试固定以下不变式（对应 #925）：
 //! - directive 完整覆盖 Continue / Block(reason) / Context / UpdatedInput / ContextAndInput；
-//! - `RuntimeHookReason` 结构化对应 `hook::HookReason` 的全部 variant，
+//! - `RuntimeHookReason` 结构化对应 `hook::HookReasonData` 的全部 variant，
 //!   绝不压成 Debug 字符串；
 //! - execution 完整保留 status / attempts / exit_code / stdout / stderr / duration；
 //! - messages（#925 BC 展示消息）按源顺序 1:1 投影，point / source /
@@ -13,8 +13,8 @@
 use std::time::Duration;
 
 use hook::{
-    HookDirective, HookDisplayMessage, HookDisplayMessageKind, HookExecution, HookExecutionStatus,
-    HookOutcome, HookPoint, HookReason,
+    HookDirectiveData, HookDisplayMessageData, HookDisplayMessageKindData, HookExecutionData,
+    HookExecutionStatusData, HookOutcomeData, HookPointData, HookReasonData,
 };
 use serde_json::json;
 
@@ -26,14 +26,14 @@ use super::hook_acl::{
 // ─── helpers ──────────────────────────────────────────────────
 
 fn exec(
-    status: HookExecutionStatus,
+    status: HookExecutionStatusData,
     attempts: u8,
     exit_code: Option<i32>,
     stdout: &str,
     stderr: &str,
     duration: Duration,
-) -> HookExecution {
-    HookExecution {
+) -> HookExecutionData {
+    HookExecutionData {
         status,
         attempts,
         exit_code,
@@ -45,10 +45,10 @@ fn exec(
     }
 }
 
-/// 构造一个 `messages` 为空的 `HookOutcome`，避免每个测试 literal 重复写
-/// `messages: Vec::new()`（#925 之后 `HookOutcome` 多了 `messages` 字段）。
-fn outcome(directive: HookDirective, executions: Vec<HookExecution>) -> HookOutcome {
-    HookOutcome {
+/// 构造一个 `messages` 为空的 `HookOutcomeData`，避免每个测试 literal 重复写
+/// `messages: Vec::new()`（#925 之后 `HookOutcomeData` 多了 `messages` 字段）。
+fn outcome(directive: HookDirectiveData, executions: Vec<HookExecutionData>) -> HookOutcomeData {
+    HookOutcomeData {
         executions,
         directive,
         messages: Vec::new(),
@@ -56,16 +56,16 @@ fn outcome(directive: HookDirective, executions: Vec<HookExecution>) -> HookOutc
     }
 }
 
-/// 构造一条 `hook::HookDisplayMessage` 测试夹具，减少新测试里的字段重复。
+/// 构造一条 `hook::HookDisplayMessageData` 测试夹具，减少新测试里的字段重复。
 fn msg(
-    point: HookPoint,
+    point: HookPointData,
     source: &str,
     execution_ordinal: u32,
     attempt: u8,
-    kind: HookDisplayMessageKind,
+    kind: HookDisplayMessageKindData,
     text: &str,
-) -> HookDisplayMessage {
-    HookDisplayMessage {
+) -> HookDisplayMessageData {
+    HookDisplayMessageData {
         point,
         source: source.to_string(),
         execution_ordinal,
@@ -79,7 +79,7 @@ fn msg(
 
 #[test]
 fn continue_directive_projects_with_no_executions() {
-    let outcome = HookOutcome::proceed();
+    let outcome = HookOutcomeData::proceed();
     let dispatch = map_hook_outcome(&outcome);
 
     assert_eq!(dispatch.directive, RuntimeHookDirective::Continue);
@@ -87,13 +87,13 @@ fn continue_directive_projects_with_no_executions() {
     assert!(dispatch.messages.is_empty());
 }
 
-// ─── Block × every HookReason variant (structured, not Debug string) ──
+// ─── Block × every HookReasonData variant (structured, not Debug string) ──
 
 #[test]
 fn block_exit_code_reason_preserves_code_and_stderr() {
     let outcome = outcome(
-        HookDirective::Block {
-            reason: HookReason::ExitCode {
+        HookDirectiveData::Block {
+            reason: HookReasonData::ExitCode {
                 code: 2,
                 stderr: "boom".to_string(),
             },
@@ -116,8 +116,8 @@ fn block_exit_code_reason_preserves_code_and_stderr() {
 #[test]
 fn block_exit_code_reason_with_empty_stderr_preserved() {
     let outcome = outcome(
-        HookDirective::Block {
-            reason: HookReason::ExitCode {
+        HookDirectiveData::Block {
+            reason: HookReasonData::ExitCode {
                 code: 137,
                 stderr: String::new(),
             },
@@ -140,8 +140,8 @@ fn block_exit_code_reason_with_empty_stderr_preserved() {
 #[test]
 fn block_json_block_reason_preserves_reason() {
     let outcome = outcome(
-        HookDirective::Block {
-            reason: HookReason::JsonBlock {
+        HookDirectiveData::Block {
+            reason: HookReasonData::JsonBlock {
                 reason: "forbidden by policy".to_string(),
             },
         },
@@ -160,8 +160,8 @@ fn block_json_block_reason_preserves_reason() {
 #[test]
 fn block_json_continue_false_preserves_stop_reason_some() {
     let outcome = outcome(
-        HookDirective::Block {
-            reason: HookReason::JsonContinueFalse {
+        HookDirectiveData::Block {
+            reason: HookReasonData::JsonContinueFalse {
                 stop_reason: Some("end_turn".to_string()),
             },
         },
@@ -180,8 +180,8 @@ fn block_json_continue_false_preserves_stop_reason_some() {
 #[test]
 fn block_json_continue_false_preserves_stop_reason_none() {
     let outcome = outcome(
-        HookDirective::Block {
-            reason: HookReason::JsonContinueFalse { stop_reason: None },
+        HookDirectiveData::Block {
+            reason: HookReasonData::JsonContinueFalse { stop_reason: None },
         },
         Vec::new(),
     );
@@ -198,8 +198,8 @@ fn block_json_continue_false_preserves_stop_reason_none() {
 #[test]
 fn block_stop_hook_execution_failed_preserves_error() {
     let outcome = outcome(
-        HookDirective::Block {
-            reason: HookReason::StopHookExecutionFailed {
+        HookDirectiveData::Block {
+            reason: HookReasonData::StopHookExecutionFailed {
                 error: "retry exhausted".to_string(),
             },
         },
@@ -218,8 +218,8 @@ fn block_stop_hook_execution_failed_preserves_error() {
 #[test]
 fn block_policy_block_preserves_error() {
     let outcome = outcome(
-        HookDirective::Block {
-            reason: HookReason::PolicyBlock {
+        HookDirectiveData::Block {
+            reason: HookReasonData::PolicyBlock {
                 error: "policy=block".to_string(),
             },
         },
@@ -235,20 +235,20 @@ fn block_policy_block_preserves_error() {
     }
 }
 
-/// 关键不变式：`HookReason` 不得压成仅 Debug 字符串——即便两个 reason
+/// 关键不变式：`HookReasonData` 不得压成仅 Debug 字符串——即便两个 reason
 /// 共享相同文本（"same"），只要 variant 不同，投影后也必须可区分。
 #[test]
 fn reason_is_structural_not_flattened_to_debug_string() {
-    let mk = |reason: HookReason| {
-        map_hook_outcome(&outcome(HookDirective::Block { reason }, Vec::new())).directive
+    let mk = |reason: HookReasonData| {
+        map_hook_outcome(&outcome(HookDirectiveData::Block { reason }, Vec::new())).directive
     };
 
     // JsonBlock.reason = "same" 与 StopHookExecutionFailed.error = "same" 文本相同，
     // 若压成 Debug 字符串将无法区分；结构化投影必须保留 variant 边界。
-    let json_block = mk(HookReason::JsonBlock {
+    let json_block = mk(HookReasonData::JsonBlock {
         reason: "same".to_string(),
     });
-    let stop_failed = mk(HookReason::StopHookExecutionFailed {
+    let stop_failed = mk(HookReasonData::StopHookExecutionFailed {
         error: "same".to_string(),
     });
 
@@ -306,7 +306,7 @@ fn all_hook_reason_variants_have_a_runtime_counterpart() {
 #[test]
 fn context_directive_preserves_context_string() {
     let outcome = outcome(
-        HookDirective::ContinueWithContext {
+        HookDirectiveData::ContinueWithContext {
             context: "extra guidance".to_string(),
         },
         Vec::new(),
@@ -325,7 +325,7 @@ fn context_directive_preserves_context_string() {
 fn updated_input_directive_preserves_json_value() {
     let value = json!({"decision": "block", "reason": "no"});
     let outcome = outcome(
-        HookDirective::ContinueWithUpdatedInput {
+        HookDirectiveData::ContinueWithUpdatedInput {
             input: value.clone(),
         },
         Vec::new(),
@@ -342,7 +342,7 @@ fn updated_input_directive_preserves_json_value() {
 fn context_and_input_directive_preserves_both_fields() {
     let value = json!({"k": 42});
     let outcome = outcome(
-        HookDirective::ContinueWithContextAndInput {
+        HookDirectiveData::ContinueWithContextAndInput {
             context: "ctx".to_string(),
             input: value.clone(),
         },
@@ -364,9 +364,9 @@ fn context_and_input_directive_preserves_both_fields() {
 #[test]
 fn execution_success_preserves_all_fields() {
     let outcome = outcome(
-        HookDirective::Continue,
+        HookDirectiveData::Continue,
         vec![exec(
-            HookExecutionStatus::Success,
+            HookExecutionStatusData::Success,
             1,
             Some(0),
             "{\"ok\":true}",
@@ -388,9 +388,9 @@ fn execution_success_preserves_all_fields() {
 #[test]
 fn execution_blocked_status_preserved() {
     let outcome = outcome(
-        HookDirective::Continue,
+        HookDirectiveData::Continue,
         vec![exec(
-            HookExecutionStatus::Blocked,
+            HookExecutionStatusData::Blocked,
             1,
             Some(2),
             "",
@@ -409,9 +409,9 @@ fn execution_blocked_status_preserved() {
 #[test]
 fn execution_cancelled_preserves_typed_status() {
     let outcome = outcome(
-        HookDirective::Continue,
+        HookDirectiveData::Continue,
         vec![exec(
-            HookExecutionStatus::Cancelled,
+            HookExecutionStatusData::Cancelled,
             1,
             None,
             "",
@@ -431,9 +431,9 @@ fn execution_cancelled_preserves_typed_status() {
 #[test]
 fn execution_failed_preserves_error_message() {
     let outcome = outcome(
-        HookDirective::Continue,
+        HookDirectiveData::Continue,
         vec![exec(
-            HookExecutionStatus::ExecutionFailed {
+            HookExecutionStatusData::ExecutionFailed {
                 error: "spawn failed".to_string(),
             },
             3,
@@ -458,9 +458,9 @@ fn execution_failed_preserves_error_message() {
 #[test]
 fn execution_missing_exit_code_preserved_as_none() {
     let outcome = outcome(
-        HookDirective::Continue,
+        HookDirectiveData::Continue,
         vec![exec(
-            HookExecutionStatus::ExecutionFailed {
+            HookExecutionStatusData::ExecutionFailed {
                 error: "timeout".to_string(),
             },
             2,
@@ -480,8 +480,15 @@ fn execution_missing_exit_code_preserved_as_none() {
 fn duration_preserved_exactly() {
     let dur = Duration::new(7, 123_456);
     let outcome = outcome(
-        HookDirective::Continue,
-        vec![exec(HookExecutionStatus::Success, 1, Some(0), "", "", dur)],
+        HookDirectiveData::Continue,
+        vec![exec(
+            HookExecutionStatusData::Success,
+            1,
+            Some(0),
+            "",
+            "",
+            dur,
+        )],
     );
     let dispatch = map_hook_outcome(&outcome);
 
@@ -494,9 +501,9 @@ fn stdout_and_stderr_preserved_verbatim_without_parsing() {
     // 看起来像 JSON 的 stdout 不应被解析；非法 JSON 的 stdout 也不应导致失败。
     let raw = "{ this is not valid json ]]}}";
     let outcome = outcome(
-        HookDirective::Continue,
+        HookDirectiveData::Continue,
         vec![exec(
-            HookExecutionStatus::Success,
+            HookExecutionStatusData::Success,
             1,
             Some(0),
             raw,
@@ -515,10 +522,10 @@ fn stdout_and_stderr_preserved_verbatim_without_parsing() {
 #[test]
 fn multiple_executions_preserved_in_order() {
     let outcome = outcome(
-        HookDirective::Continue,
+        HookDirectiveData::Continue,
         vec![
             exec(
-                HookExecutionStatus::Success,
+                HookExecutionStatusData::Success,
                 1,
                 Some(0),
                 "first",
@@ -526,7 +533,7 @@ fn multiple_executions_preserved_in_order() {
                 Duration::from_millis(1),
             ),
             exec(
-                HookExecutionStatus::Blocked,
+                HookExecutionStatusData::Blocked,
                 1,
                 Some(2),
                 "second",
@@ -555,10 +562,10 @@ fn multiple_executions_preserved_in_order() {
 #[test]
 fn retry_trajectory_preserved_with_three_attempts() {
     let outcome = outcome(
-        HookDirective::Continue,
+        HookDirectiveData::Continue,
         vec![
             exec(
-                HookExecutionStatus::ExecutionFailed {
+                HookExecutionStatusData::ExecutionFailed {
                     error: "busy".to_string(),
                 },
                 1,
@@ -568,7 +575,7 @@ fn retry_trajectory_preserved_with_three_attempts() {
                 Duration::from_millis(10),
             ),
             exec(
-                HookExecutionStatus::ExecutionFailed {
+                HookExecutionStatusData::ExecutionFailed {
                     error: "busy".to_string(),
                 },
                 2,
@@ -578,7 +585,7 @@ fn retry_trajectory_preserved_with_three_attempts() {
                 Duration::from_millis(10),
             ),
             exec(
-                HookExecutionStatus::Success,
+                HookExecutionStatusData::Success,
                 3,
                 Some(0),
                 "ok",
@@ -612,26 +619,26 @@ fn retry_trajectory_preserved_with_three_attempts() {
 /// 六个字段全部 1:1 投影。
 #[test]
 fn messages_project_both_kinds_with_all_fields_preserved() {
-    let outcome = HookOutcome {
+    let outcome = HookOutcomeData {
         executions: Vec::new(),
-        directive: HookDirective::ContinueWithContext {
+        directive: HookDirectiveData::ContinueWithContext {
             context: "agg".to_string(),
         },
         messages: vec![
             msg(
-                HookPoint::PreToolUse,
+                HookPointData::PreToolUse,
                 "*",
                 1,
                 1,
-                HookDisplayMessageKind::AdditionalContext,
+                HookDisplayMessageKindData::AdditionalContext,
                 "ctx-a",
             ),
             msg(
-                HookPoint::Stop,
+                HookPointData::Stop,
                 "Write",
                 2,
                 3,
-                HookDisplayMessageKind::SystemMessage,
+                HookDisplayMessageKindData::SystemMessage,
                 "warn-b",
             ),
         ],
@@ -643,7 +650,7 @@ fn messages_project_both_kinds_with_all_fields_preserved() {
 
     // 第一条：AdditionalContext，全部字段 1:1 投影。
     let m0 = &dispatch.messages[0];
-    assert_eq!(m0.point, HookPoint::PreToolUse);
+    assert_eq!(m0.point, HookPointData::PreToolUse);
     assert_eq!(m0.source, "*");
     assert_eq!(m0.execution_ordinal, 1);
     assert_eq!(m0.attempt, 1);
@@ -652,7 +659,7 @@ fn messages_project_both_kinds_with_all_fields_preserved() {
 
     // 第二条：SystemMessage；attempt=3（含重试）与 execution_ordinal=2 均原样保留。
     let m1 = &dispatch.messages[1];
-    assert_eq!(m1.point, HookPoint::Stop);
+    assert_eq!(m1.point, HookPointData::Stop);
     assert_eq!(m1.source, "Write");
     assert_eq!(m1.execution_ordinal, 2);
     assert_eq!(m1.attempt, 3);
@@ -664,40 +671,40 @@ fn messages_project_both_kinds_with_all_fields_preserved() {
 /// 交错排列的多条消息，投影后顺序与内容均不得丢失或重排（不合并、不丢弃来源）。
 #[test]
 fn messages_preserve_order_verbatim_no_merge_or_drop() {
-    let outcome = HookOutcome {
+    let outcome = HookOutcomeData {
         executions: Vec::new(),
-        directive: HookDirective::Continue,
+        directive: HookDirectiveData::Continue,
         messages: vec![
             msg(
-                HookPoint::PreToolUse,
+                HookPointData::PreToolUse,
                 "*",
                 1,
                 1,
-                HookDisplayMessageKind::AdditionalContext,
+                HookDisplayMessageKindData::AdditionalContext,
                 "m1",
             ),
             msg(
-                HookPoint::PostToolUse,
+                HookPointData::PostToolUse,
                 "Read",
                 1,
                 1,
-                HookDisplayMessageKind::SystemMessage,
+                HookDisplayMessageKindData::SystemMessage,
                 "m2",
             ),
             msg(
-                HookPoint::Stop,
+                HookPointData::Stop,
                 "Edit",
                 3,
                 2,
-                HookDisplayMessageKind::AdditionalContext,
+                HookDisplayMessageKindData::AdditionalContext,
                 "m3",
             ),
             msg(
-                HookPoint::Stop,
+                HookPointData::Stop,
                 "Write",
                 3,
                 2,
-                HookDisplayMessageKind::SystemMessage,
+                HookDisplayMessageKindData::SystemMessage,
                 "m4",
             ),
         ],
@@ -725,7 +732,7 @@ fn messages_preserve_order_verbatim_no_merge_or_drop() {
 /// 空源 messages 投影为空（继续 / proceed 路径不产生展示消息）。
 #[test]
 fn messages_empty_when_source_has_none() {
-    let outcome = outcome(HookDirective::Continue, Vec::new());
+    let outcome = outcome(HookDirectiveData::Continue, Vec::new());
     let dispatch = map_hook_outcome(&outcome);
 
     assert!(dispatch.messages.is_empty());
@@ -736,13 +743,13 @@ fn messages_empty_when_source_has_none() {
 #[test]
 fn mapping_does_not_mutate_source() {
     let outcome = outcome(
-        HookDirective::Block {
-            reason: HookReason::JsonBlock {
+        HookDirectiveData::Block {
+            reason: HookReasonData::JsonBlock {
                 reason: "x".to_string(),
             },
         },
         vec![exec(
-            HookExecutionStatus::Success,
+            HookExecutionStatusData::Success,
             1,
             Some(0),
             "src",
@@ -755,7 +762,7 @@ fn mapping_does_not_mutate_source() {
 
     let _ = map_hook_outcome(&outcome);
 
-    // 源 HookOutcome 不受投影影响（纯函数）。
+    // 源 HookOutcomeData 不受投影影响（纯函数）。
     assert_eq!(format!("{:?}", outcome.directive), snapshot_directive);
     assert_eq!(outcome.executions[0].stdout, snapshot_exec_stdout);
     assert_eq!(outcome.executions.len(), 1);
@@ -764,9 +771,9 @@ fn mapping_does_not_mutate_source() {
 #[test]
 fn from_impl_delegates_to_map_hook_outcome() {
     let outcome = outcome(
-        HookDirective::Continue,
+        HookDirectiveData::Continue,
         vec![exec(
-            HookExecutionStatus::Success,
+            HookExecutionStatusData::Success,
             1,
             Some(0),
             "",
@@ -784,13 +791,13 @@ fn from_impl_delegates_to_map_hook_outcome() {
 #[test]
 fn dispatch_round_trips_directive_and_executions_together() {
     let outcome = outcome(
-        HookDirective::ContinueWithContextAndInput {
+        HookDirectiveData::ContinueWithContextAndInput {
             context: "c".to_string(),
             input: json!({"a": 1}),
         },
         vec![
             exec(
-                HookExecutionStatus::Blocked,
+                HookExecutionStatusData::Blocked,
                 1,
                 Some(2),
                 "",
@@ -798,7 +805,7 @@ fn dispatch_round_trips_directive_and_executions_together() {
                 Duration::from_millis(3),
             ),
             exec(
-                HookExecutionStatus::Success,
+                HookExecutionStatusData::Success,
                 2,
                 Some(0),
                 "{}",

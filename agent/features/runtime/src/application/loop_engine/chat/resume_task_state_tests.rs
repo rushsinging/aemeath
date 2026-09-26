@@ -141,7 +141,7 @@ fn restored_session(
 fn resumed_shell(
     task_store: Arc<task::TaskStore>,
     session_management: Arc<dyn context::SessionManagementPort>,
-    hooks: Arc<dyn hook::HookPort>,
+    hooks: Arc<dyn hook::HookDispatcher>,
 ) -> crate::application::client::SessionRuntime {
     let mut shell = test_shell_with_task_store(hooks, task_store.clone());
     let workspace = shell.workspace.clone();
@@ -283,37 +283,37 @@ async fn successful_resume_without_active_batch_emits_empty_state_to_clear_old_s
 // ════════════════════════════════════════════════════════════
 
 /// 记录 (触发点, context.session_id) 的 dispatch 轨迹。
-type SessionDispatchLog = Arc<Mutex<Vec<(hook::HookPoint, Option<String>)>>>;
+type SessionDispatchLog = Arc<Mutex<Vec<(hook::HookPointData, Option<String>)>>>;
 
-/// 记录型 HookPort：捕获每次 dispatch_at 的触发点与 context 携带的 session_id。
+/// 记录型 HookDispatcher：捕获每次 dispatch_at 的触发点与 context 携带的 session_id。
 #[derive(Clone, Default)]
 struct RecordingSessionStartHookPort {
     dispatches: SessionDispatchLog,
 }
 
 #[async_trait::async_trait]
-impl hook::HookPort for RecordingSessionStartHookPort {
+impl hook::HookDispatcher for RecordingSessionStartHookPort {
     async fn dispatch(
         &self,
-        _invocation: hook::HookInvocation,
+        _invocation: hook::HookInvocationData,
         _cancellation: &dyn hook::CancellationSignal,
-    ) -> hook::HookOutcome {
+    ) -> hook::HookOutcomeData {
         unreachable!("resume emit 必须经 dispatch_at 携带 workspace 上下文");
     }
 
     async fn dispatch_at(
         &self,
-        invocation: hook::HookInvocation,
-        context: hook::HookDispatchContext,
+        invocation: hook::HookInvocationData,
+        context: hook::HookDispatchContextData,
         _cancellation: &dyn hook::CancellationSignal,
-    ) -> hook::HookOutcome {
+    ) -> hook::HookOutcomeData {
         self.dispatches
             .lock()
             .unwrap()
             .push((invocation.point(), context.session_id().map(str::to_string)));
-        hook::HookOutcome {
+        hook::HookOutcomeData {
             executions: Vec::new(),
-            directive: hook::HookDirective::Continue,
+            directive: hook::HookDirectiveData::Continue,
             messages: Vec::new(),
             block_detail: None,
         }
@@ -348,7 +348,7 @@ async fn successful_resume_emits_session_start_hook_with_resumed_session_id() {
     let dispatches = recording_hook.dispatches.lock().unwrap();
     let session_starts: Vec<_> = dispatches
         .iter()
-        .filter(|(point, _)| *point == hook::HookPoint::SessionStart)
+        .filter(|(point, _)| *point == hook::HookPointData::SessionStart)
         .collect();
     assert_eq!(
         session_starts.len(),

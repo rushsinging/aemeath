@@ -12,7 +12,7 @@
 //! - Policy -> policy BC (#917)
 //! - MemoryPort -> memory BC (#897) ✅ Port 由 memory crate 提供，runtime 通过 `memory::api::MemoryPort` 消费
 //! - TaskPort -> task BC (#885)
-//! - HookPort -> hook BC (#922)
+//! - HookDispatcher -> hook BC (#922)
 //! - ReasoningPort -> workflow BC (#919)
 //! - RuntimeStreamEvent::Usage 路径 -> audit BC (#927)
 

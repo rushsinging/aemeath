@@ -4,7 +4,7 @@ use super::*;
 use crate::application::client::accessors::SessionRuntime;
 use crate::domain::agent_run::RunSpec;
 use crate::ports::Policy;
-use hook::{HookInvocation, HookOutcome, HookPort};
+use hook::{HookDispatcher, HookInvocationData, HookOutcomeData};
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 
 static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -213,13 +213,13 @@ impl memory::api::ReflectionHistoryStore for FakeReflectionHistory {
 
 struct FakeHook;
 #[async_trait::async_trait]
-impl HookPort for FakeHook {
+impl HookDispatcher for FakeHook {
     async fn dispatch(
         &self,
-        _invocation: HookInvocation,
+        _invocation: HookInvocationData,
         _cancellation: &dyn hook::CancellationSignal,
-    ) -> HookOutcome {
-        HookOutcome::proceed()
+    ) -> HookOutcomeData {
+        HookOutcomeData::proceed()
     }
 }
 /// Build a minimal `SessionRuntime` with fake ports for assembler tests.
@@ -261,7 +261,7 @@ async fn make_test_shell(
     let tool_execution: Arc<dyn tools::ToolExecutionPort> = tools_factory.execution();
     let reflection_history: Arc<dyn ReflectionHistoryStore> = Arc::new(FakeReflectionHistory);
     let task_access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
-    let hook_runner: Arc<dyn HookPort> = Arc::new(FakeHook);
+    let hook_runner: Arc<dyn HookDispatcher> = Arc::new(FakeHook);
 
     struct NoopRunner;
     #[async_trait::async_trait]
@@ -572,12 +572,10 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     let tool_result_materializer =
         crate::application::tool::test_support::test_tool_result_materializer();
     let active_run = Arc::new(crate::application::run::active_registry::wire_active_run_registry());
-    let hook_runner: Arc<dyn hook::HookPort> = Arc::new(
-        hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
-            share::config::Config::default(),
-        ))
-        .expect("test hook dispatcher"),
-    );
+    let hook_runner: Arc<dyn hook::HookDispatcher> = hook::wire_hook_dispatcher(
+        &share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config::default()),
+    )
+    .expect("test hook dispatcher");
     let initial_binding = crate::ports::ProviderFactory::build(
         &crate::ports::provider_port::fake::FakeProviderFactory,
         crate::ports::ProviderBuildSpec {

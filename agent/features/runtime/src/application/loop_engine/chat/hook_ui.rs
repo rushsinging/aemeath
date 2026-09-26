@@ -5,8 +5,9 @@ use crate::application::hook::outcome_mapper::{
     map_hook_outcome, RuntimeHookDirective, RuntimeHookDispatch,
 };
 use hook::{
-    HookDispatchContext, HookInvocation, HookPoint, HookPort, HookSubscriptionExecutionEvent,
-    HookSubscriptionExecutionObserver, HookSubscriptionExecutionTerminal,
+    HookDispatchContextData, HookDispatcher, HookInvocationData, HookPointData,
+    HookSubscriptionExecutionEventData, HookSubscriptionExecutionObserver,
+    HookSubscriptionExecutionTerminalData,
 };
 use parking_lot::Mutex;
 use std::path::Path;
@@ -21,9 +22,9 @@ struct HookActivityObserver {
 }
 
 impl HookSubscriptionExecutionObserver for HookActivityObserver {
-    fn observe(&self, event: HookSubscriptionExecutionEvent) {
+    fn observe(&self, event: HookSubscriptionExecutionEventData) {
         match event {
-            HookSubscriptionExecutionEvent::Started {
+            HookSubscriptionExecutionEventData::Started {
                 point,
                 script,
                 attempt,
@@ -40,7 +41,7 @@ impl HookSubscriptionExecutionObserver for HookActivityObserver {
                     .ok();
                 *self.live_activity_id.lock() = activity_id;
             }
-            HookSubscriptionExecutionEvent::AttemptChanged {
+            HookSubscriptionExecutionEventData::AttemptChanged {
                 point,
                 script,
                 attempt,
@@ -54,12 +55,16 @@ impl HookSubscriptionExecutionObserver for HookActivityObserver {
                     );
                 }
             }
-            HookSubscriptionExecutionEvent::Finished { terminal, .. } => {
+            HookSubscriptionExecutionEventData::Finished { terminal, .. } => {
                 if let Some(activity_id) = self.live_activity_id.lock().take() {
                     let terminal = match terminal {
-                        HookSubscriptionExecutionTerminal::Succeeded => ActivityTerminal::Succeeded,
-                        HookSubscriptionExecutionTerminal::Failed => ActivityTerminal::Failed,
-                        HookSubscriptionExecutionTerminal::Cancelled => ActivityTerminal::Cancelled,
+                        HookSubscriptionExecutionTerminalData::Succeeded => {
+                            ActivityTerminal::Succeeded
+                        }
+                        HookSubscriptionExecutionTerminalData::Failed => ActivityTerminal::Failed,
+                        HookSubscriptionExecutionTerminalData::Cancelled => {
+                            ActivityTerminal::Cancelled
+                        }
                     };
                     let _ = self.activities.finish(activity_id, terminal);
                 }
@@ -68,7 +73,7 @@ impl HookSubscriptionExecutionObserver for HookActivityObserver {
     }
 }
 
-fn hook_point_view(point: HookPoint) -> sdk::HookPointView {
+fn hook_point_view(point: HookPointData) -> sdk::HookPointView {
     crate::application::hook::stop_coordination::hook_point_view(point)
 }
 
@@ -95,16 +100,16 @@ pub(crate) fn subscription_activity_observer(
 /// 注入子进程环境（`AEMEATH_SESSION_ID`），供外部集成捕获会话。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn dispatch_hook(
-    hook_port: &Arc<dyn HookPort>,
+    hook_port: &Arc<dyn HookDispatcher>,
     activities: &ActivityCoordinator,
     run_step_id: &sdk::RunStepId,
-    invocation: HookInvocation,
+    invocation: HookInvocationData,
     workspace_root: &Path,
     session_id: &str,
     cancel: &CancellationToken,
 ) -> RuntimeHookDispatch {
     let subscription_execution_observer = subscription_activity_observer(activities, run_step_id);
-    let mut context = HookDispatchContext::new(workspace_root).with_session_id(session_id);
+    let mut context = HookDispatchContextData::new(workspace_root).with_session_id(session_id);
     if let Some(observer) = subscription_execution_observer {
         context = context.with_subscription_execution_observer(observer);
     }

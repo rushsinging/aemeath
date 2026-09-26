@@ -51,7 +51,7 @@ impl InteractionBindingMode {
 pub enum HookBindingMode {
     /// All hooks active (Main run).
     Full,
-    /// No Hook capability. Runtime binds a no-op HookPort for this mode.
+    /// No Hook capability. Runtime binds a no-op HookDispatcher for this mode.
     BoundaryOnly,
 }
 

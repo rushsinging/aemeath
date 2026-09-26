@@ -8,7 +8,9 @@ use crate::application::loop_engine::chat::{
 use crate::application::loop_engine::{ApprovalRequiredCall, SuspendedQuestion, SuspendedToolCall};
 use crate::application::tool::agent::{Agent, ToolCall, ToolExecution};
 use crate::application::tool::coordination::{prepare_tool_round, restore_tool_call_order};
-use hook::{HookInvocation, HookPort, PermissionInput, PostToolUseFailureInput, PostToolUseInput};
+use hook::{
+    HookDispatcher, HookInvocationData, PermissionInput, PostToolUseFailureInput, PostToolUseInput,
+};
 
 use sdk::ids::ToolCallId;
 use std::sync::Arc;
@@ -38,7 +40,7 @@ pub(crate) async fn execute_tool_round<S>(
     step_id: &sdk::RunStepId,
     agent: &Agent,
     sink: &S,
-    hook_port: &Arc<dyn HookPort>,
+    hook_port: &Arc<dyn HookDispatcher>,
     activities: &ActivityCoordinator,
     cancel: &CancellationToken,
     language: &str,
@@ -231,7 +233,7 @@ async fn deny_tool_calls<S>(
     denied: &[crate::application::tool::coordination::DeniedToolCall],
     sink: &S,
     context: &RuntimeRunContext,
-    hook_port: &Arc<dyn HookPort>,
+    hook_port: &Arc<dyn HookDispatcher>,
     activities: &ActivityCoordinator,
     step_id: &sdk::RunStepId,
     cancel: &CancellationToken,
@@ -252,7 +254,7 @@ where
             hook_port,
             activities,
             step_id,
-            HookInvocation::PermissionDenied(PermissionInput {
+            HookInvocationData::PermissionDenied(PermissionInput {
                 tool_name: call.call.name.clone(),
                 permission_rule: "deny".to_string(),
             }),
@@ -306,7 +308,7 @@ where
 }
 
 pub(crate) async fn run_post_tool_hooks(
-    hook_port: &Arc<dyn HookPort>,
+    hook_port: &Arc<dyn HookDispatcher>,
     activities: &ActivityCoordinator,
     step_id: &sdk::RunStepId,
     call: &ToolCall,
@@ -323,7 +325,7 @@ pub(crate) async fn run_post_tool_hooks(
         hook_port,
         activities,
         step_id,
-        HookInvocation::PostToolUse(PostToolUseInput {
+        HookInvocationData::PostToolUse(PostToolUseInput {
             tool_name: call.name.clone(),
             tool_input: call.input.clone(),
             tool_output: output.to_string(),
@@ -340,7 +342,7 @@ pub(crate) async fn run_post_tool_hooks(
             hook_port,
             activities,
             step_id,
-            HookInvocation::PostToolUseFailure(PostToolUseFailureInput {
+            HookInvocationData::PostToolUseFailure(PostToolUseFailureInput {
                 tool_name: call.name.clone(),
                 tool_input: call.input.clone(),
                 error: output.to_string(),
@@ -428,7 +430,7 @@ mod tests {
     use crate::application::tool::agent::{Agent, ToolCall, ToolExecution};
     use crate::application::tool::coordination::complete_cancelled_tool_round;
     use async_trait::async_trait;
-    use hook::{HookInvocation, HookOutcome, HookPort};
+    use hook::{HookDispatcher, HookInvocationData, HookOutcomeData};
     use sdk::ids::{ChatId, ChatRunId, ToolCallId};
     use serde_json::Value;
     use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
@@ -438,21 +440,21 @@ mod tests {
     use tools::ToolOutcome;
     use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
 
-    /// A test HookPort that always returns Continue.
+    /// A test HookDispatcher that always returns Continue.
     struct NoOpHookPort;
 
     #[async_trait]
-    impl HookPort for NoOpHookPort {
+    impl HookDispatcher for NoOpHookPort {
         async fn dispatch(
             &self,
-            _invocation: HookInvocation,
+            _invocation: HookInvocationData,
             _cancellation: &dyn hook::CancellationSignal,
-        ) -> HookOutcome {
-            HookOutcome::proceed()
+        ) -> HookOutcomeData {
+            HookOutcomeData::proceed()
         }
     }
 
-    fn noop_hook_port() -> Arc<dyn HookPort> {
+    fn noop_hook_port() -> Arc<dyn HookDispatcher> {
         Arc::new(NoOpHookPort)
     }
 
@@ -711,18 +713,16 @@ mod tests {
                 timeout: 5,
             }],
         );
-        let hook_port: Arc<dyn HookPort> = Arc::new(
-            hook::build_dispatcher(&share::config::domain::snapshot::ConfigSnapshot::new(
-                share::config::Config {
-                    hooks: HooksConfig {
-                        events,
-                        ..HooksConfig::default()
-                    },
-                    ..share::config::Config::default()
+        let hook_port: Arc<dyn HookDispatcher> = hook::wire_hook_dispatcher(
+            &share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config {
+                hooks: HooksConfig {
+                    events,
+                    ..HooksConfig::default()
                 },
-            ))
-            .unwrap(),
-        );
+                ..share::config::Config::default()
+            }),
+        )
+        .unwrap();
         let context = RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn"));
         let call = lifecycle_call(0);
         let activities = crate::application::activity::ActivityCoordinator::new(

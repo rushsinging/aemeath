@@ -27,7 +27,7 @@ use crate::application::loop_engine::chat::ChatEventSinkHandle;
 use crate::application::run::config::RunConfigSnapshot;
 use crate::domain::agent_run::RunSpec;
 use crate::ports::{ContextPort, Policy, ProviderBinding};
-use hook::HookPort;
+use hook::HookDispatcher;
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 use task::TaskAccess;
 use tools::{ToolCatalogPort, ToolExecutionPort};
@@ -351,7 +351,7 @@ pub struct RuntimeServices {
     /// Runtime Published State（会话级，跨 Run 复用）。
     pub(crate) published_state: crate::application::published_state::PublishedStateRegistry,
     /// Hook BC 出站端口。
-    pub hooks: Arc<dyn HookPort>,
+    pub hooks: Arc<dyn HookDispatcher>,
     /// Audit Usage 事实的非阻塞出站端口。
     pub usage_sink: Arc<dyn crate::ports::UsageSink>,
 }
@@ -420,7 +420,7 @@ pub struct RuntimeContext {
     memory: Arc<dyn MemoryPort>,
     reflection_history: Arc<dyn ReflectionHistoryStore>,
     task: Arc<dyn TaskAccess>,
-    hooks: Arc<dyn HookPort>,
+    hooks: Arc<dyn HookDispatcher>,
     usage_sink: Arc<dyn crate::ports::UsageSink>,
     skill_load_state: Arc<dyn tools::SkillLoadStatePort>,
     skill_load_session_id: String,
@@ -534,7 +534,7 @@ impl RuntimeContext {
         self.task.clone()
     }
     /// Hook 端口，`Arc` clone。
-    pub fn hooks(&self) -> Arc<dyn HookPort> {
+    pub fn hooks(&self) -> Arc<dyn HookDispatcher> {
         self.hooks.clone()
     }
     /// Audit Usage 事实的非阻塞出站端口，`Arc` clone。
@@ -615,7 +615,7 @@ impl RuntimeContext {
         &self.task
     }
     /// Hook port reference.
-    pub fn hooks_ref(&self) -> &Arc<dyn HookPort> {
+    pub fn hooks_ref(&self) -> &Arc<dyn HookDispatcher> {
         &self.hooks
     }
     /// Reasoning port reference.

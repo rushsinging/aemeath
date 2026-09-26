@@ -7,7 +7,7 @@ use crate::ports::{
     ContextPort, Policy, PolicyDecisionData, PolicyRequestData, ProviderBinding, ProviderBuildSpec,
     ProviderError, ProviderFactory, ProviderPort,
 };
-use hook::{HookInvocation, HookOutcome, HookPort};
+use hook::{HookDispatcher, HookInvocationData, HookOutcomeData};
 use tools::{
     SkillCatalogPort, SkillDescriptor, SkillQuery, ToolCatalogError, ToolCatalogPort,
     ToolCatalogSnapshot, ToolExecutionOutcome, ToolExecutionPort, ToolInvocation, ToolProfileName,
@@ -188,13 +188,13 @@ impl memory::api::ReflectionHistoryStore for FakeReflectionHistory {
 pub(crate) struct FakeHookPort;
 
 #[async_trait::async_trait]
-impl HookPort for FakeHookPort {
+impl HookDispatcher for FakeHookPort {
     async fn dispatch(
         &self,
-        _invocation: HookInvocation,
+        _invocation: HookInvocationData,
         _cancellation: &dyn hook::CancellationSignal,
-    ) -> HookOutcome {
-        HookOutcome::proceed()
+    ) -> HookOutcomeData {
+        HookOutcomeData::proceed()
     }
 }
 

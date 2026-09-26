@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use crate::application::activity::ActivityCoordinator;
 use crate::application::loop_engine::chat::{ChatEventSink, RuntimeStreamEvent};
 use crate::application::tool::agent::{ToolCall, ToolExecution};
-use hook::{HookInvocation, HookPort, TaskInput};
+use hook::{HookDispatcher, HookInvocationData, TaskInput};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -49,7 +49,7 @@ pub(crate) struct TaskCommittedSideEffectHandler {
     access: Arc<dyn task::TaskAccess>,
     sink: crate::application::loop_engine::chat::ChatEventSinkHandle,
     session_id: String,
-    hooks: Arc<dyn HookPort>,
+    hooks: Arc<dyn HookDispatcher>,
     activities: Arc<ActivityCoordinator>,
     workspace_root: std::path::PathBuf,
 }
@@ -59,7 +59,7 @@ impl TaskCommittedSideEffectHandler {
         access: Arc<dyn task::TaskAccess>,
         sink: crate::application::loop_engine::chat::ChatEventSinkHandle,
         session_id: String,
-        hooks: Arc<dyn HookPort>,
+        hooks: Arc<dyn HookDispatcher>,
         activities: Arc<ActivityCoordinator>,
         workspace_root: impl Into<std::path::PathBuf>,
     ) -> Self {
@@ -110,12 +110,14 @@ impl CommittedSideEffectHandler for TaskCommittedSideEffectHandler {
             .await;
         for fact in change.facts() {
             let invocation = match fact {
-                tools::TaskChangeFact::Created { .. } => HookInvocation::TaskCreated(TaskInput {
-                    tool_input: call.input.clone(),
-                    tool_output: execution.outcome.text.clone(),
-                }),
+                tools::TaskChangeFact::Created { .. } => {
+                    HookInvocationData::TaskCreated(TaskInput {
+                        tool_input: call.input.clone(),
+                        tool_output: execution.outcome.text.clone(),
+                    })
+                }
                 tools::TaskChangeFact::Completed { .. } => {
-                    HookInvocation::TaskCompleted(TaskInput {
+                    HookInvocationData::TaskCompleted(TaskInput {
                         tool_input: call.input.clone(),
                         tool_output: execution.outcome.text.clone(),
                     })

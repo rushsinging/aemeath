@@ -23,7 +23,7 @@ use crate::application::run::creation::{
 use crate::application::run::workspace::RuntimeWorkspaceAccess;
 use crate::domain::agent_run::{HookBindingMode, InteractionBindingMode, RunSpec};
 use crate::ports::Policy;
-use hook::HookPort;
+use hook::HookDispatcher;
 use memory::api::ReflectionHistoryStore;
 use task::TaskAccess;
 use tools::{
@@ -86,7 +86,7 @@ struct InteractionSelection {
 }
 
 struct HookSelection {
-    port: Arc<dyn HookPort>,
+    port: Arc<dyn HookDispatcher>,
 }
 
 struct ReasoningSelection {
@@ -150,7 +150,7 @@ impl RuntimeContextFactory {
         policy: Arc<dyn Policy>,
         reflection_history: Arc<dyn ReflectionHistoryStore>,
         task: Arc<dyn TaskAccess>,
-        hooks: Arc<dyn HookPort>,
+        hooks: Arc<dyn HookDispatcher>,
         usage_sink: Arc<dyn crate::ports::UsageSink>,
     ) -> Self {
         Self::from_services(
@@ -170,7 +170,7 @@ impl RuntimeContextFactory {
         policy: Arc<dyn Policy>,
         reflection_history: Arc<dyn ReflectionHistoryStore>,
         task: Arc<dyn TaskAccess>,
-        hooks: Arc<dyn HookPort>,
+        hooks: Arc<dyn HookDispatcher>,
         usage_sink: Arc<dyn crate::ports::UsageSink>,
     ) -> Self {
         Self {
@@ -553,13 +553,11 @@ impl RuntimeContextFactory {
         config: &crate::application::run::config::RunConfigSnapshot,
         parent: Option<&RuntimeContext>,
     ) -> Result<HookSelection, RunCreationError> {
-        let run_hooks: Arc<dyn HookPort> = if cfg!(test) && self.use_injected_hooks {
+        let run_hooks: Arc<dyn HookDispatcher> = if cfg!(test) && self.use_injected_hooks {
             self.services.hooks.clone()
         } else {
-            Arc::new(
-                hook::build_dispatcher(config.config())
-                    .map_err(|_| RunCreationError::ContextAssembly)?,
-            )
+            hook::wire_hook_dispatcher(config.config())
+                .map_err(|_| RunCreationError::ContextAssembly)?
         };
         let port = match spec.hook_binding() {
             HookBindingMode::Full => run_hooks,
