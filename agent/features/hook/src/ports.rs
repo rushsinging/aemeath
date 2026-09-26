@@ -15,14 +15,14 @@ use async_trait::async_trait;
 use crate::domain::{HookInvocationData, HookOutcomeData, HookPointData};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HookSubscriptionExecutionTerminalData {
+pub enum HookExecutionTerminalData {
     Succeeded,
     Failed,
     Cancelled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HookSubscriptionExecutionEventData {
+pub enum HookExecutionEventData {
     Started {
         point: HookPointData,
         script: String,
@@ -36,12 +36,12 @@ pub enum HookSubscriptionExecutionEventData {
     Finished {
         point: HookPointData,
         script: String,
-        terminal: HookSubscriptionExecutionTerminalData,
+        terminal: HookExecutionTerminalData,
     },
 }
 
-pub trait HookSubscriptionExecutionObserver: Send + Sync {
-    fn observe(&self, event: HookSubscriptionExecutionEventData);
+pub trait HookExecutionObserver: Send + Sync {
+    fn observe(&self, event: HookExecutionEventData);
 }
 
 /// Hook 一次 dispatch 的工作区上下文。
@@ -54,7 +54,7 @@ pub trait HookSubscriptionExecutionObserver: Send + Sync {
 pub struct HookDispatchContextData {
     cwd: PathBuf,
     session_id: Option<String>,
-    subscription_execution_observer: Option<std::sync::Arc<dyn HookSubscriptionExecutionObserver>>,
+    subscription_execution_observer: Option<std::sync::Arc<dyn HookExecutionObserver>>,
 }
 
 impl HookDispatchContextData {
@@ -73,7 +73,7 @@ impl HookDispatchContextData {
 
     pub fn with_subscription_execution_observer(
         mut self,
-        observer: std::sync::Arc<dyn HookSubscriptionExecutionObserver>,
+        observer: std::sync::Arc<dyn HookExecutionObserver>,
     ) -> Self {
         self.subscription_execution_observer = Some(observer);
         self
@@ -81,7 +81,7 @@ impl HookDispatchContextData {
 
     pub fn subscription_execution_observer(
         &self,
-    ) -> Option<&std::sync::Arc<dyn HookSubscriptionExecutionObserver>> {
+    ) -> Option<&std::sync::Arc<dyn HookExecutionObserver>> {
         self.subscription_execution_observer.as_ref()
     }
 
@@ -96,13 +96,13 @@ impl HookDispatchContextData {
 
 /// Hook domain 所需的最小协作取消能力。
 #[async_trait]
-pub trait CancellationSignal: Send + Sync {
+pub trait HookCancellationSignal: Send + Sync {
     fn is_cancelled(&self) -> bool;
     async fn cancelled(&self);
 }
 
 #[async_trait]
-impl CancellationSignal for tokio_util::sync::CancellationToken {
+impl HookCancellationSignal for tokio_util::sync::CancellationToken {
     fn is_cancelled(&self) -> bool {
         tokio_util::sync::CancellationToken::is_cancelled(self)
     }
@@ -125,7 +125,7 @@ pub trait HookDispatcher: Send + Sync {
     async fn dispatch(
         &self,
         invocation: HookInvocationData,
-        cancellation: &dyn CancellationSignal,
+        cancellation: &dyn HookCancellationSignal,
     ) -> HookOutcomeData;
 
     /// 使用当前工作区上下文分发 Hook。
@@ -136,7 +136,7 @@ pub trait HookDispatcher: Send + Sync {
         &self,
         invocation: HookInvocationData,
         _context: HookDispatchContextData,
-        cancellation: &dyn CancellationSignal,
+        cancellation: &dyn HookCancellationSignal,
     ) -> HookOutcomeData {
         self.dispatch(invocation, cancellation).await
     }

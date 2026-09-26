@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use hook::{
     HookDirectiveData, HookDispatchContextData, HookExecutionStatusData, HookInvocationData,
-    HookReasonData, PreToolUseInput,
+    HookReasonData,
 };
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
@@ -37,10 +37,10 @@ fn dispatcher_for(command: String, timeout: u64) -> std::sync::Arc<dyn hook::Hoo
 }
 
 fn invocation() -> HookInvocationData {
-    HookInvocationData::PreToolUse(PreToolUseInput {
+    HookInvocationData::PreToolUse {
         tool_name: "Bash".to_string(),
         tool_input: serde_json::json!({"command": "printf contract"}),
-    })
+    }
 }
 
 async fn dispatch(dispatcher: &dyn hook::HookDispatcher, cwd: &Path) -> hook::HookOutcomeData {

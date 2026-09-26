@@ -161,7 +161,7 @@ mod tests {
                         async fn dispatch(
                             &self,
                             _invocation: hook::HookInvocationData,
-                            _cancellation: &dyn hook::CancellationSignal,
+                            _cancellation: &dyn hook::HookCancellationSignal,
                         ) -> hook::HookOutcomeData {
                             hook::HookOutcomeData::proceed()
                         }

@@ -10,7 +10,7 @@ use crate::application::tool::agent::{ToolCall, ToolExecution};
 use crate::application::tool::coordination::{
     apply_hook_directive_to_tool_call, HookDirectiveOutcome, PreparedToolCall,
 };
-use hook::{HookDispatcher, HookInvocationData, PreToolUseInput};
+use hook::{HookDispatcher, HookInvocationData};
 use policy::Policy;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -139,10 +139,10 @@ where
         &hook_port,
         activities,
         step_id,
-        HookInvocationData::PreToolUse(PreToolUseInput {
+        HookInvocationData::PreToolUse {
             tool_name: call.name.clone(),
             tool_input: call.input.clone(),
-        }),
+        },
         &workspace_root,
         agent.session_id.as_ref(),
         cancel,
@@ -635,7 +635,7 @@ mod tests {
         async fn dispatch(
             &self,
             _invocation: HookInvocationData,
-            _cancellation: &dyn hook::CancellationSignal,
+            _cancellation: &dyn hook::HookCancellationSignal,
         ) -> hook::HookOutcomeData {
             hook::HookOutcomeData::proceed()
         }

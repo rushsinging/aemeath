@@ -13,10 +13,10 @@ impl context::guidance::InstructionsLoadedHook for PromptInstructionsHook {
         let _ = self
             .hooks
             .dispatch_at(
-                hook::HookInvocationData::InstructionsLoaded(hook::InstructionsInput {
+                hook::HookInvocationData::InstructionsLoaded {
                     file_path: file_path.to_string(),
                     instruction_type: instruction_type.to_string(),
-                }),
+                },
                 HookDispatchContextData::new(&self.workspace_root),
                 &tokio_util::sync::CancellationToken::new(),
             )

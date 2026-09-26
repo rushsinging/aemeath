@@ -327,11 +327,11 @@ impl AgentRunner for CliAgentRunner {
                     "{}:sub-run-start",
                     derived.instance.run().id().as_ref()
                 )),
-                hook::HookInvocationData::SubRunStart(hook::SubRunInput {
+                hook::HookInvocationData::SubRunStart {
                     prompt: prompt.to_string(),
                     system: system.clone(),
                     model_spec: Some(model_display.clone()),
-                }),
+                },
                 &workspace_root,
                 derived.instance.context().main_session_id(),
                 &tokio_util::sync::CancellationToken::new(),

@@ -6,7 +6,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use hook::{HookDispatchContextData, HookDispatcher, HookInvocationData, SessionInput};
+use hook::{HookDispatchContextData, HookDispatcher, HookInvocationData};
 
 /// Emit 一次 SessionStart：invocation payload 与 dispatch context 均携带
 /// 当前 Main Session id，外部集成（如终端会话恢复）据此捕获/刷新会话。
@@ -18,9 +18,9 @@ pub(crate) async fn emit_session_start(
     workspace_root: &Path,
     session_id: &str,
 ) {
-    let invocation = HookInvocationData::SessionStart(SessionInput {
+    let invocation = HookInvocationData::SessionStart {
         session_id: session_id.to_string(),
-    });
+    };
     let context = HookDispatchContextData::new(workspace_root).with_session_id(session_id);
     let outcome = hook_port
         .dispatch_at(

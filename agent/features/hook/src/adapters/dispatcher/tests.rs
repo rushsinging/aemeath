@@ -12,17 +12,14 @@ use std::sync::{Arc, Mutex};
 
 use tokio_util::sync::CancellationToken;
 
-use crate::domain::invocation::{
-    HookInvocationData, HookPointData, PreToolUseInput, StopInput, UserPromptInput,
-};
+use crate::domain::invocation::{HookInvocationData, HookPointData};
 use crate::domain::outcome::{
     HookDirectiveData, HookDisplayMessageData, HookDisplayMessageKindData, HookExecutionStatusData,
     HookReasonData,
 };
 use crate::domain::subscription::{HookFailurePolicy, HookMatcherData, HookSubscription};
 use crate::ports::{
-    HookDispatchContextData, HookDispatcher, HookSubscriptionExecutionEventData,
-    HookSubscriptionExecutionObserver,
+    HookDispatchContextData, HookDispatcher, HookExecutionEventData, HookExecutionObserver,
 };
 
 use super::{Dispatcher, ExecutionFault, ScriptStep, Scripted};
@@ -32,14 +29,14 @@ use super::{Dispatcher, ExecutionFault, ScriptStep, Scripted};
 // ════════════════════════════════════════════════════════════
 
 fn pre_tool_use(tool_name: &str) -> HookInvocationData {
-    HookInvocationData::PreToolUse(PreToolUseInput {
+    HookInvocationData::PreToolUse {
         tool_name: tool_name.to_string(),
         tool_input: serde_json::json!({}),
-    })
+    }
 }
 
 fn stop(run_steps: usize) -> HookInvocationData {
-    HookInvocationData::Stop(StopInput { run_steps })
+    HookInvocationData::Stop { run_steps }
 }
 
 fn sub(point: HookPointData, command: &str) -> HookSubscription {
@@ -48,11 +45,11 @@ fn sub(point: HookPointData, command: &str) -> HookSubscription {
 
 #[derive(Default)]
 struct RecordingSubscriptionObserver {
-    events: Mutex<Vec<HookSubscriptionExecutionEventData>>,
+    events: Mutex<Vec<HookExecutionEventData>>,
 }
 
-impl HookSubscriptionExecutionObserver for RecordingSubscriptionObserver {
-    fn observe(&self, event: HookSubscriptionExecutionEventData) {
+impl HookExecutionObserver for RecordingSubscriptionObserver {
+    fn observe(&self, event: HookExecutionEventData) {
         self.events.lock().expect("observer lock").push(event);
     }
 }
@@ -456,9 +453,9 @@ async fn updated_input_replaces_user_prompt_at_payload_location() {
 
     dispatcher
         .dispatch(
-            HookInvocationData::UserPromptSubmit(UserPromptInput {
+            HookInvocationData::UserPromptSubmit {
                 prompt: "original".to_string(),
-            }),
+            },
             &CancellationToken::new(),
         )
         .await;
@@ -1512,25 +1509,25 @@ async fn subscription_execution_events_follow_order_and_expose_only_script_file_
     assert_eq!(
         observer.events.lock().expect("observer events").as_slice(),
         [
-            HookSubscriptionExecutionEventData::Started {
+            HookExecutionEventData::Started {
                 point: HookPointData::PreToolUse,
                 script: "check-first.sh".to_string(),
                 attempt: 1,
             },
-            HookSubscriptionExecutionEventData::Finished {
+            HookExecutionEventData::Finished {
                 point: HookPointData::PreToolUse,
                 script: "check-first.sh".to_string(),
-                terminal: crate::ports::HookSubscriptionExecutionTerminalData::Succeeded,
+                terminal: crate::ports::HookExecutionTerminalData::Succeeded,
             },
-            HookSubscriptionExecutionEventData::Started {
+            HookExecutionEventData::Started {
                 point: HookPointData::PreToolUse,
                 script: "check-second.sh".to_string(),
                 attempt: 1,
             },
-            HookSubscriptionExecutionEventData::Finished {
+            HookExecutionEventData::Finished {
                 point: HookPointData::PreToolUse,
                 script: "check-second.sh".to_string(),
-                terminal: crate::ports::HookSubscriptionExecutionTerminalData::Succeeded,
+                terminal: crate::ports::HookExecutionTerminalData::Succeeded,
             },
         ]
     );
@@ -1607,20 +1604,20 @@ async fn subscription_retry_updates_one_execution_lifecycle_before_success() {
     assert_eq!(
         observer.events.lock().expect("observer events").as_slice(),
         [
-            HookSubscriptionExecutionEventData::Started {
+            HookExecutionEventData::Started {
                 point: HookPointData::Stop,
                 script: "check-stop.sh".to_string(),
                 attempt: 1,
             },
-            HookSubscriptionExecutionEventData::AttemptChanged {
+            HookExecutionEventData::AttemptChanged {
                 point: HookPointData::Stop,
                 script: "check-stop.sh".to_string(),
                 attempt: 2,
             },
-            HookSubscriptionExecutionEventData::Finished {
+            HookExecutionEventData::Finished {
                 point: HookPointData::Stop,
                 script: "check-stop.sh".to_string(),
-                terminal: crate::ports::HookSubscriptionExecutionTerminalData::Succeeded,
+                terminal: crate::ports::HookExecutionTerminalData::Succeeded,
             },
         ]
     );

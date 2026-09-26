@@ -23,7 +23,7 @@ impl HookDispatcher for ContextRecordingHookPort {
     async fn dispatch(
         &self,
         _invocation: HookInvocationData,
-        _cancellation: &dyn hook::CancellationSignal,
+        _cancellation: &dyn hook::HookCancellationSignal,
     ) -> HookOutcomeData {
         unreachable!("主循环 hook 必须经 dispatch_at 携带 workspace 上下文");
     }
@@ -32,7 +32,7 @@ impl HookDispatcher for ContextRecordingHookPort {
         &self,
         invocation: HookInvocationData,
         context: HookDispatchContextData,
-        _cancellation: &dyn hook::CancellationSignal,
+        _cancellation: &dyn hook::HookCancellationSignal,
     ) -> HookOutcomeData {
         self.dispatches
             .lock()
@@ -66,10 +66,10 @@ async fn dispatch_hook_passes_session_id_into_context() {
         &(Arc::new(port.clone()) as Arc<dyn HookDispatcher>),
         &activities,
         &sdk::RunStepId::new("step-hook-ui"),
-        HookInvocationData::PreToolUse(hook::PreToolUseInput {
+        HookInvocationData::PreToolUse {
             tool_name: "Bash".to_string(),
             tool_input: serde_json::json!({"command": "ls"}),
-        }),
+        },
         std::path::Path::new("/tmp/aemeath-hook-ui-workspace"),
         "sess-hook-ui-1",
         &tokio_util::sync::CancellationToken::new(),

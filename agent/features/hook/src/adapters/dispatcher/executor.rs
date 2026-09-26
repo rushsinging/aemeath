@@ -15,7 +15,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use crate::domain::subscription::HookCommand;
-use crate::ports::CancellationSignal;
+use crate::ports::HookCancellationSignal;
 
 #[cfg(any(not(unix), test))]
 use crate::adapters::process::UNSUPPORTED_PLATFORM_MESSAGE;
@@ -93,7 +93,7 @@ pub(crate) trait Executor: Send + Sync {
         cwd: &std::path::Path,
         env: &HashMap<String, String>,
         timeout: Duration,
-        cancellation: &dyn CancellationSignal,
+        cancellation: &dyn HookCancellationSignal,
     ) -> Result<RawExecution, ExecutionFault>;
 }
 
@@ -132,7 +132,7 @@ impl Executor for ProcessDriverExecutor {
         cwd: &std::path::Path,
         env: &HashMap<String, String>,
         timeout: Duration,
-        cancellation: &dyn CancellationSignal,
+        cancellation: &dyn HookCancellationSignal,
     ) -> Result<RawExecution, ExecutionFault> {
         let stdin_bytes = serde_json::to_vec(stdin).unwrap_or_default();
         let request = ProcessRequest {

@@ -62,7 +62,7 @@ fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeCon
                 async fn dispatch(
                     &self,
                     _invocation: hook::HookInvocationData,
-                    _cancellation: &dyn hook::CancellationSignal,
+                    _cancellation: &dyn hook::HookCancellationSignal,
                 ) -> hook::HookOutcomeData {
                     hook::HookOutcomeData::proceed()
                 }
@@ -634,13 +634,27 @@ impl tools::CancellationSignal for ManualCancellation {
     fn is_cancelled(&self) -> bool {
         self.cancelled.load(std::sync::atomic::Ordering::SeqCst)
     }
+
+    async fn cancelled(&self) {
+        while !self.is_cancelled() {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    fn child_signal(&self) -> Arc<dyn tools::CancellationSignal> {
+        Arc::new(self.clone())
+    }
+}
+
+#[async_trait::async_trait]
+impl hook::HookCancellationSignal for ManualCancellation {
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(std::sync::atomic::Ordering::SeqCst)
+    }
     async fn cancelled(&self) {
         while !self.is_cancelled() {
             self.notify.notified().await;
         }
-    }
-    fn child_signal(&self) -> Arc<dyn tools::CancellationSignal> {
-        Arc::new(self.clone())
     }
 }
 

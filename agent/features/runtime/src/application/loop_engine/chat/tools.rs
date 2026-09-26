@@ -8,9 +8,7 @@ use crate::application::loop_engine::chat::{
 use crate::application::loop_engine::{ApprovalRequiredCall, SuspendedQuestion, SuspendedToolCall};
 use crate::application::tool::agent::{Agent, ToolCall, ToolExecution};
 use crate::application::tool::coordination::{prepare_tool_round, restore_tool_call_order};
-use hook::{
-    HookDispatcher, HookInvocationData, PermissionInput, PostToolUseFailureInput, PostToolUseInput,
-};
+use hook::{HookDispatcher, HookInvocationData};
 
 use sdk::ids::ToolCallId;
 use std::sync::Arc;
@@ -254,10 +252,10 @@ where
             hook_port,
             activities,
             step_id,
-            HookInvocationData::PermissionDenied(PermissionInput {
+            HookInvocationData::PermissionDenied {
                 tool_name: call.call.name.clone(),
                 permission_rule: "deny".to_string(),
-            }),
+            },
             workspace_root,
             agent.session_id.as_ref(),
             cancel,
@@ -325,12 +323,12 @@ pub(crate) async fn run_post_tool_hooks(
         hook_port,
         activities,
         step_id,
-        HookInvocationData::PostToolUse(PostToolUseInput {
+        HookInvocationData::PostToolUse {
             tool_name: call.name.clone(),
             tool_input: call.input.clone(),
             tool_output: output.to_string(),
             is_error,
-        }),
+        },
         &workspace_root,
         session_id,
         cancel,
@@ -342,11 +340,11 @@ pub(crate) async fn run_post_tool_hooks(
             hook_port,
             activities,
             step_id,
-            HookInvocationData::PostToolUseFailure(PostToolUseFailureInput {
+            HookInvocationData::PostToolUseFailure {
                 tool_name: call.name.clone(),
                 tool_input: call.input.clone(),
                 error: output.to_string(),
-            }),
+            },
             &workspace_root,
             session_id,
             cancel,
@@ -448,7 +446,7 @@ mod tests {
         async fn dispatch(
             &self,
             _invocation: HookInvocationData,
-            _cancellation: &dyn hook::CancellationSignal,
+            _cancellation: &dyn hook::HookCancellationSignal,
         ) -> HookOutcomeData {
             HookOutcomeData::proceed()
         }

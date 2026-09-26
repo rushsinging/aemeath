@@ -15,7 +15,7 @@ impl HookDispatcher for RecordingPostBatchHook {
     async fn dispatch(
         &self,
         _invocation: HookInvocationData,
-        _cancellation: &dyn hook::CancellationSignal,
+        _cancellation: &dyn hook::HookCancellationSignal,
     ) -> hook::HookOutcomeData {
         hook::HookOutcomeData::proceed()
     }
@@ -24,7 +24,7 @@ impl HookDispatcher for RecordingPostBatchHook {
         &self,
         _invocation: HookInvocationData,
         context: HookDispatchContextData,
-        _cancellation: &dyn hook::CancellationSignal,
+        _cancellation: &dyn hook::HookCancellationSignal,
     ) -> hook::HookOutcomeData {
         self.dispatched_cwds
             .lock()

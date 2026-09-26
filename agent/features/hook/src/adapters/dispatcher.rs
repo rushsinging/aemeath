@@ -32,7 +32,7 @@ use async_trait::async_trait;
 
 use share::config::domain::snapshot::HookExecutionPolicy;
 
-use crate::domain::invocation::{HookInvocationData, HookPointData, StopFailureInput};
+use crate::domain::invocation::{HookInvocationData, HookPointData};
 use crate::domain::outcome::{
     HookBlockDetail, HookDirectiveData, HookDisplayMessageData, HookDisplayMessageKindData,
     HookExecutionData, HookExecutionStatusData, HookOutcomeData,
@@ -41,9 +41,8 @@ use crate::domain::protocol::classify_output;
 use crate::domain::subscription::{HookCommand, HookSubscription, SubscriptionError};
 
 use crate::ports::{
-    CancellationSignal, HookDispatchContextData, HookDispatcher,
-    HookSubscriptionExecutionEventData, HookSubscriptionExecutionObserver,
-    HookSubscriptionExecutionTerminalData,
+    HookCancellationSignal, HookDispatchContextData, HookDispatcher, HookExecutionEventData,
+    HookExecutionObserver, HookExecutionTerminalData,
 };
 
 pub(crate) use executor::{ExecutionFault, Executor, ProcessDriverExecutor};
@@ -63,7 +62,7 @@ pub(crate) struct Dispatcher {
     subscriptions: Vec<HookSubscription>,
     executor: Box<dyn Executor>,
     execution_policy: HookExecutionPolicy,
-    subscription_execution_observer: Option<Arc<dyn HookSubscriptionExecutionObserver>>,
+    subscription_execution_observer: Option<Arc<dyn HookExecutionObserver>>,
 }
 
 /// Hook 子进程的 stdin payload：tagged enum 序列化后顶层双写扁平字段。
@@ -146,7 +145,7 @@ impl Dispatcher {
     #[cfg(test)]
     pub fn with_subscription_execution_observer(
         mut self,
-        observer: Arc<dyn HookSubscriptionExecutionObserver>,
+        observer: Arc<dyn HookExecutionObserver>,
     ) -> Self {
         self.subscription_execution_observer = Some(observer);
         self
@@ -196,7 +195,7 @@ impl HookDispatcher for Dispatcher {
     async fn dispatch(
         &self,
         invocation: HookInvocationData,
-        cancellation: &dyn CancellationSignal,
+        cancellation: &dyn HookCancellationSignal,
     ) -> HookOutcomeData {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         self.dispatch_at(invocation, HookDispatchContextData::new(cwd), cancellation)
@@ -207,7 +206,7 @@ impl HookDispatcher for Dispatcher {
         &self,
         invocation: HookInvocationData,
         context: HookDispatchContextData,
-        cancellation: &dyn CancellationSignal,
+        cancellation: &dyn HookCancellationSignal,
     ) -> HookOutcomeData {
         let point = invocation.point();
         let subscription_execution_observer = context
@@ -466,69 +465,82 @@ fn invocation_environment(
         env.insert("AEMEATH_SESSION_ID".to_string(), session_id.to_string());
     }
     match invocation {
-        HookInvocationData::PreToolUse(input) => {
-            env.insert("AEMEATH_TOOL_NAME".to_string(), input.tool_name.clone());
-            env.insert(
-                "AEMEATH_TOOL_INPUT".to_string(),
-                input.tool_input.to_string(),
-            );
+        HookInvocationData::PreToolUse {
+            tool_input,
+            tool_name,
+            ..
+        } => {
+            env.insert("AEMEATH_TOOL_NAME".to_string(), tool_name.clone());
+            env.insert("AEMEATH_TOOL_INPUT".to_string(), tool_input.to_string());
         }
-        HookInvocationData::PostToolUse(input) => {
-            env.insert("AEMEATH_TOOL_NAME".to_string(), input.tool_name.clone());
-            env.insert(
-                "AEMEATH_TOOL_INPUT".to_string(),
-                input.tool_input.to_string(),
-            );
-            env.insert("AEMEATH_TOOL_OUTPUT".to_string(), input.tool_output.clone());
-            env.insert(
-                "AEMEATH_TOOL_IS_ERROR".to_string(),
-                input.is_error.to_string(),
-            );
+        HookInvocationData::PostToolUse {
+            is_error,
+            tool_name,
+            tool_input,
+            tool_output,
+        } => {
+            env.insert("AEMEATH_TOOL_NAME".to_string(), tool_name.clone());
+            env.insert("AEMEATH_TOOL_INPUT".to_string(), tool_input.to_string());
+            env.insert("AEMEATH_TOOL_OUTPUT".to_string(), tool_output.clone());
+            env.insert("AEMEATH_TOOL_IS_ERROR".to_string(), is_error.to_string());
         }
-        HookInvocationData::PostToolUseFailure(input) => {
-            env.insert("AEMEATH_TOOL_NAME".to_string(), input.tool_name.clone());
-            env.insert(
-                "AEMEATH_TOOL_INPUT".to_string(),
-                input.tool_input.to_string(),
-            );
-            env.insert("AEMEATH_TOOL_OUTPUT".to_string(), input.error.clone());
+        HookInvocationData::PostToolUseFailure {
+            error,
+            tool_name,
+            tool_input,
+        } => {
+            env.insert("AEMEATH_TOOL_NAME".to_string(), tool_name.clone());
+            env.insert("AEMEATH_TOOL_INPUT".to_string(), tool_input.to_string());
+            env.insert("AEMEATH_TOOL_OUTPUT".to_string(), error.clone());
             env.insert("AEMEATH_TOOL_IS_ERROR".to_string(), "true".to_string());
         }
-        HookInvocationData::Stop(input) => {
-            env.insert(
-                "AEMEATH_STOP_RUN_STEPS".to_string(),
-                input.run_steps.to_string(),
-            );
+        HookInvocationData::Stop { run_steps, .. } => {
+            env.insert("AEMEATH_STOP_RUN_STEPS".to_string(), run_steps.to_string());
         }
-        HookInvocationData::PermissionRequest(input)
-        | HookInvocationData::PermissionDenied(input) => {
+        HookInvocationData::PermissionRequest {
+            permission_rule,
+            tool_name,
+            ..
+        }
+        | HookInvocationData::PermissionDenied {
+            permission_rule,
+            tool_name,
+            ..
+        } => {
             env.insert(
                 "AEMEATH_PERMISSION_TOOL_NAME".to_string(),
-                input.tool_name.clone(),
+                tool_name.clone(),
             );
             env.insert(
                 "AEMEATH_PERMISSION_RULE".to_string(),
-                input.permission_rule.clone(),
+                permission_rule.clone(),
             );
         }
-        HookInvocationData::InstructionsLoaded(input) => {
+        HookInvocationData::InstructionsLoaded {
+            file_path,
+            instruction_type,
+        } => {
             env.insert(
                 "AEMEATH_INSTRUCTIONS_FILE_PATH".to_string(),
-                input.file_path.clone(),
+                file_path.clone(),
             );
             env.insert(
                 "AEMEATH_INSTRUCTIONS_TYPE".to_string(),
-                input.instruction_type.clone(),
+                instruction_type.clone(),
             );
         }
-        HookInvocationData::Notification(input) => {
+        HookInvocationData::Notification {
+            notification_text,
+            notification_type,
+            ..
+        } => {
             env.insert(
                 "AEMEATH_NOTIFICATION_TEXT".to_string(),
-                input.notification_text.clone(),
+                notification_text.clone(),
             );
             env.insert(
                 "AEMEATH_NOTIFICATION_TYPE".to_string(),
-                input.notification_type.clone(),
+                notification_type.clone(),
             );
         }
         _ => {}
@@ -543,8 +555,8 @@ impl Dispatcher {
         current_input: &serde_json::Value,
         cwd: &std::path::Path,
         env: &HashMap<String, String>,
-        subscription_execution_observer: Option<&Arc<dyn HookSubscriptionExecutionObserver>>,
-        cancellation: &dyn CancellationSignal,
+        subscription_execution_observer: Option<&Arc<dyn HookExecutionObserver>>,
+        cancellation: &dyn HookCancellationSignal,
     ) -> AttemptOutcome {
         let mut attempts: u8 = 0;
         let mut executions: Vec<HookExecutionData> = Vec::new();
@@ -555,7 +567,7 @@ impl Dispatcher {
         let script = hook_script_file_name(&command.command);
         Self::observe_subscription_execution(
             subscription_execution_observer,
-            HookSubscriptionExecutionEventData::Started {
+            HookExecutionEventData::Started {
                 point: sub.point,
                 script: script.clone(),
                 attempt: 1,
@@ -566,7 +578,7 @@ impl Dispatcher {
             if attempts > 1 {
                 Self::observe_subscription_execution(
                     subscription_execution_observer,
-                    HookSubscriptionExecutionEventData::AttemptChanged {
+                    HookExecutionEventData::AttemptChanged {
                         point: sub.point,
                         script: script.clone(),
                         attempt: attempts,
@@ -590,12 +602,12 @@ impl Dispatcher {
                             };
                             let terminal = match status {
                                 HookExecutionStatusData::Success => {
-                                    HookSubscriptionExecutionTerminalData::Succeeded
+                                    HookExecutionTerminalData::Succeeded
                                 }
                                 HookExecutionStatusData::Blocked
                                 | HookExecutionStatusData::Cancelled
                                 | HookExecutionStatusData::ExecutionFailed { .. } => {
-                                    HookSubscriptionExecutionTerminalData::Failed
+                                    HookExecutionTerminalData::Failed
                                 }
                             };
                             let execution = HookExecutionData {
@@ -613,7 +625,7 @@ impl Dispatcher {
                             executions.push(execution);
                             Self::observe_subscription_execution(
                                 subscription_execution_observer,
-                                HookSubscriptionExecutionEventData::Finished {
+                                HookExecutionEventData::Finished {
                                     point: sub.point,
                                     script,
                                     terminal,
@@ -643,10 +655,10 @@ impl Dispatcher {
                             if attempts >= self.execution_policy.max_attempts() {
                                 Self::observe_subscription_execution(
                                     subscription_execution_observer,
-                                    HookSubscriptionExecutionEventData::Finished {
+                                    HookExecutionEventData::Finished {
                                         point: sub.point,
                                         script,
-                                        terminal: HookSubscriptionExecutionTerminalData::Failed,
+                                        terminal: HookExecutionTerminalData::Failed,
                                     },
                                 );
                                 return AttemptOutcome::Exhausted { executions };
@@ -668,10 +680,10 @@ impl Dispatcher {
                     executions.push(execution);
                     Self::observe_subscription_execution(
                         subscription_execution_observer,
-                        HookSubscriptionExecutionEventData::Finished {
+                        HookExecutionEventData::Finished {
                             point: sub.point,
                             script,
-                            terminal: HookSubscriptionExecutionTerminalData::Cancelled,
+                            terminal: HookExecutionTerminalData::Cancelled,
                         },
                     );
                     return AttemptOutcome::Cancelled { executions };
@@ -693,10 +705,10 @@ impl Dispatcher {
                     executions.push(execution);
                     Self::observe_subscription_execution(
                         subscription_execution_observer,
-                        HookSubscriptionExecutionEventData::Finished {
+                        HookExecutionEventData::Finished {
                             point: sub.point,
                             script,
-                            terminal: HookSubscriptionExecutionTerminalData::Failed,
+                            terminal: HookExecutionTerminalData::Failed,
                         },
                     );
                     return AttemptOutcome::Exhausted { executions };
@@ -723,10 +735,10 @@ impl Dispatcher {
                     {
                         Self::observe_subscription_execution(
                             subscription_execution_observer,
-                            HookSubscriptionExecutionEventData::Finished {
+                            HookExecutionEventData::Finished {
                                 point: sub.point,
                                 script,
-                                terminal: HookSubscriptionExecutionTerminalData::Failed,
+                                terminal: HookExecutionTerminalData::Failed,
                             },
                         );
                         return AttemptOutcome::Exhausted { executions };
@@ -737,8 +749,8 @@ impl Dispatcher {
     }
 
     fn observe_subscription_execution(
-        observer: Option<&Arc<dyn HookSubscriptionExecutionObserver>>,
-        event: HookSubscriptionExecutionEventData,
+        observer: Option<&Arc<dyn HookExecutionObserver>>,
+        event: HookExecutionEventData,
     ) {
         if let Some(observer) = observer {
             observer.observe(event);
@@ -761,13 +773,13 @@ impl Dispatcher {
         error: String,
         cwd: &std::path::Path,
         session_id: Option<&str>,
-        cancellation: &dyn CancellationSignal,
+        cancellation: &dyn HookCancellationSignal,
     ) -> HookOutcomeData {
         let run_steps = match stop_invocation {
-            HookInvocationData::Stop(input) => input.run_steps,
+            HookInvocationData::Stop { run_steps, .. } => *run_steps,
             _ => 0,
         };
-        let invocation = HookInvocationData::StopFailure(StopFailureInput { run_steps, error });
+        let invocation = HookInvocationData::StopFailure { run_steps, error };
 
         // 复用主 dispatch 的 enabled + matcher + order 稳定规则（不再触发新的 StopFailure）。
         let mut matching: Vec<&HookSubscription> = self

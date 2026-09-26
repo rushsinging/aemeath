@@ -614,188 +614,188 @@ fn test_invocation_point_roundtrip() {
 
     let cases: Vec<(HookInvocationData, HookPointData)> = vec![
         (
-            HookInvocationData::PreToolUse(PreToolUseInput {
+            HookInvocationData::PreToolUse {
                 tool_name: "Bash".into(),
                 tool_input: serde_json::json!({}),
-            }),
+            },
             HookPointData::PreToolUse,
         ),
         (
-            HookInvocationData::UserPromptSubmit(UserPromptInput {
+            HookInvocationData::UserPromptSubmit {
                 prompt: "hi".into(),
-            }),
+            },
             HookPointData::UserPromptSubmit,
         ),
         (
-            HookInvocationData::PreCompact(PreCompactInput {
+            HookInvocationData::PreCompact {
                 run_steps: 1,
                 messages_count: 10,
-            }),
+            },
             HookPointData::PreCompact,
         ),
         (
-            HookInvocationData::PermissionRequest(PermissionInput {
+            HookInvocationData::PermissionRequest {
                 tool_name: "Bash".into(),
                 permission_rule: "ask".into(),
-            }),
+            },
             HookPointData::PermissionRequest,
         ),
         (
-            HookInvocationData::Elicitation(ElicitationInput {
+            HookInvocationData::Elicitation {
                 server_name: "srv".into(),
                 elicitation_text: "text".into(),
-            }),
+            },
             HookPointData::Elicitation,
         ),
         (
-            HookInvocationData::UserPromptExpansion(UserPromptExpansionInput {
+            HookInvocationData::UserPromptExpansion {
                 original_input: "a".into(),
                 expanded_input: "b".into(),
-            }),
+            },
             HookPointData::UserPromptExpansion,
         ),
         (
-            HookInvocationData::Stop(StopInput { run_steps: 1 }),
+            HookInvocationData::Stop { run_steps: 1 },
             HookPointData::Stop,
         ),
         (
-            HookInvocationData::PostToolUse(PostToolUseInput {
+            HookInvocationData::PostToolUse {
                 tool_name: "Bash".into(),
                 tool_input: serde_json::json!({}),
                 tool_output: "done".into(),
                 is_error: false,
-            }),
+            },
             HookPointData::PostToolUse,
         ),
         (
-            HookInvocationData::PostToolUseFailure(PostToolUseFailureInput {
+            HookInvocationData::PostToolUseFailure {
                 tool_name: "Bash".into(),
                 tool_input: serde_json::json!({}),
                 error: "boom".into(),
-            }),
+            },
             HookPointData::PostToolUseFailure,
         ),
         (
-            HookInvocationData::PostCompact(PostCompactInput {
+            HookInvocationData::PostCompact {
                 run_steps: 1,
                 messages_before: 10,
                 messages_after: 5,
-            }),
+            },
             HookPointData::PostCompact,
         ),
         (
-            HookInvocationData::PostToolBatch(PostToolBatchInput {
+            HookInvocationData::PostToolBatch {
                 tool_count: 3,
                 summary: "ok".into(),
-            }),
+            },
             HookPointData::PostToolBatch,
         ),
         (
-            HookInvocationData::ElicitationResult(ElicitationResultInput {
+            HookInvocationData::ElicitationResult {
                 server_name: "srv".into(),
                 user_response: "resp".into(),
-            }),
+            },
             HookPointData::ElicitationResult,
         ),
         (
-            HookInvocationData::SessionStart(SessionInput {
+            HookInvocationData::SessionStart {
                 session_id: "sess-start".into(),
-            }),
+            },
             HookPointData::SessionStart,
         ),
         (
-            HookInvocationData::SessionEnd(SessionInput {
+            HookInvocationData::SessionEnd {
                 session_id: "sess-end".into(),
-            }),
+            },
             HookPointData::SessionEnd,
         ),
         (
-            HookInvocationData::SubRunStart(SubRunInput {
+            HookInvocationData::SubRunStart {
                 prompt: "p".into(),
                 system: "s".into(),
                 model_spec: None,
-            }),
+            },
             HookPointData::SubRunStart,
         ),
         (
-            HookInvocationData::SubRunStop(SubRunStopInput {
+            HookInvocationData::SubRunStop {
                 prompt: "p".into(),
                 system: "s".into(),
                 model_spec: None,
                 result: "r".into(),
                 run_steps: 1,
                 is_error: false,
-            }),
+            },
             HookPointData::SubRunStop,
         ),
         (
-            HookInvocationData::TaskCreated(TaskInput {
+            HookInvocationData::TaskCreated {
                 tool_input: serde_json::json!({}),
                 tool_output: "ok".into(),
-            }),
+            },
             HookPointData::TaskCreated,
         ),
         (
-            HookInvocationData::TaskCompleted(TaskInput {
+            HookInvocationData::TaskCompleted {
                 tool_input: serde_json::json!({}),
                 tool_output: "ok".into(),
-            }),
+            },
             HookPointData::TaskCompleted,
         ),
         (
-            HookInvocationData::Notification(NotificationInput {
+            HookInvocationData::Notification {
                 notification_text: "n".into(),
                 notification_type: "t".into(),
-            }),
+            },
             HookPointData::Notification,
         ),
         (
-            HookInvocationData::InstructionsLoaded(InstructionsInput {
+            HookInvocationData::InstructionsLoaded {
                 file_path: "f".into(),
                 instruction_type: "claude_md".into(),
-            }),
+            },
             HookPointData::InstructionsLoaded,
         ),
         (
-            HookInvocationData::StopFailure(StopFailureInput {
+            HookInvocationData::StopFailure {
                 run_steps: 1,
                 error: "e".into(),
-            }),
+            },
             HookPointData::StopFailure,
         ),
         (
-            HookInvocationData::PermissionDenied(PermissionInput {
+            HookInvocationData::PermissionDenied {
                 tool_name: "Bash".into(),
                 permission_rule: "deny".into(),
-            }),
+            },
             HookPointData::PermissionDenied,
         ),
         (
-            HookInvocationData::ConfigChange(ConfigChangeInput {
+            HookInvocationData::ConfigChange {
                 config_file: "f".into(),
                 changed_field: None,
-            }),
+            },
             HookPointData::ConfigChange,
         ),
         (
-            HookInvocationData::CwdChanged(CwdChangedInput {
+            HookInvocationData::CwdChanged {
                 old_cwd: "/a".into(),
                 new_cwd: "/b".into(),
-            }),
+            },
             HookPointData::CwdChanged,
         ),
         (
-            HookInvocationData::FileChanged(FileChangedInput {
+            HookInvocationData::FileChanged {
                 file_path: "f".into(),
                 change_type: "write".into(),
-            }),
+            },
             HookPointData::FileChanged,
         ),
         (
-            HookInvocationData::TeammateIdle(TeammateIdleInput {
+            HookInvocationData::TeammateIdle {
                 teammate_name: "t".into(),
                 idle_reason: None,
-            }),
+            },
             HookPointData::TeammateIdle,
         ),
     ];
@@ -961,18 +961,18 @@ fn all_points() -> Vec<HookPointData> {
 fn session_lifecycle_payload_serializes_session_id() {
     use crate::domain::invocation::*;
 
-    let start = serde_json::to_value(HookInvocationData::SessionStart(SessionInput {
+    let start = serde_json::to_value(HookInvocationData::SessionStart {
         session_id: "sess-serialize-1".into(),
-    }))
+    })
     .expect("SessionStart 序列化必须成功");
     assert_eq!(
         start,
         serde_json::json!({"SessionStart": {"session_id": "sess-serialize-1"}})
     );
 
-    let end = serde_json::to_value(HookInvocationData::SessionEnd(SessionInput {
+    let end = serde_json::to_value(HookInvocationData::SessionEnd {
         session_id: "sess-serialize-2".into(),
-    }))
+    })
     .expect("SessionEnd 序列化必须成功");
     assert_eq!(
         end,

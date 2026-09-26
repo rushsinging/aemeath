@@ -5,9 +5,8 @@ use crate::application::hook::outcome_mapper::{
     map_hook_outcome, RuntimeHookDirective, RuntimeHookDispatch,
 };
 use hook::{
-    HookDispatchContextData, HookDispatcher, HookInvocationData, HookPointData,
-    HookSubscriptionExecutionEventData, HookSubscriptionExecutionObserver,
-    HookSubscriptionExecutionTerminalData,
+    HookDispatchContextData, HookDispatcher, HookExecutionEventData, HookExecutionObserver,
+    HookExecutionTerminalData, HookInvocationData, HookPointData,
 };
 use parking_lot::Mutex;
 use std::path::Path;
@@ -21,10 +20,10 @@ struct HookActivityObserver {
     live_activity_id: Mutex<Option<sdk::ActivityId>>,
 }
 
-impl HookSubscriptionExecutionObserver for HookActivityObserver {
-    fn observe(&self, event: HookSubscriptionExecutionEventData) {
+impl HookExecutionObserver for HookActivityObserver {
+    fn observe(&self, event: HookExecutionEventData) {
         match event {
-            HookSubscriptionExecutionEventData::Started {
+            HookExecutionEventData::Started {
                 point,
                 script,
                 attempt,
@@ -41,7 +40,7 @@ impl HookSubscriptionExecutionObserver for HookActivityObserver {
                     .ok();
                 *self.live_activity_id.lock() = activity_id;
             }
-            HookSubscriptionExecutionEventData::AttemptChanged {
+            HookExecutionEventData::AttemptChanged {
                 point,
                 script,
                 attempt,
@@ -55,16 +54,12 @@ impl HookSubscriptionExecutionObserver for HookActivityObserver {
                     );
                 }
             }
-            HookSubscriptionExecutionEventData::Finished { terminal, .. } => {
+            HookExecutionEventData::Finished { terminal, .. } => {
                 if let Some(activity_id) = self.live_activity_id.lock().take() {
                     let terminal = match terminal {
-                        HookSubscriptionExecutionTerminalData::Succeeded => {
-                            ActivityTerminal::Succeeded
-                        }
-                        HookSubscriptionExecutionTerminalData::Failed => ActivityTerminal::Failed,
-                        HookSubscriptionExecutionTerminalData::Cancelled => {
-                            ActivityTerminal::Cancelled
-                        }
+                        HookExecutionTerminalData::Succeeded => ActivityTerminal::Succeeded,
+                        HookExecutionTerminalData::Failed => ActivityTerminal::Failed,
+                        HookExecutionTerminalData::Cancelled => ActivityTerminal::Cancelled,
                     };
                     let _ = self.activities.finish(activity_id, terminal);
                 }
@@ -80,7 +75,7 @@ fn hook_point_view(point: HookPointData) -> sdk::HookPointView {
 pub(crate) fn subscription_activity_observer(
     activities: &ActivityCoordinator,
     run_step_id: &sdk::RunStepId,
-) -> Option<Arc<dyn HookSubscriptionExecutionObserver>> {
+) -> Option<Arc<dyn HookExecutionObserver>> {
     activities
         .live_hook_parent_id()
         .ok()
@@ -90,7 +85,7 @@ pub(crate) fn subscription_activity_observer(
                 run_step_id: run_step_id.clone(),
                 parent_activity_id,
                 live_activity_id: Mutex::new(None),
-            }) as Arc<dyn HookSubscriptionExecutionObserver>
+            }) as Arc<dyn HookExecutionObserver>
         })
 }
 

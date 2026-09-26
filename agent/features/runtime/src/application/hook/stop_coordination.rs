@@ -21,8 +21,8 @@ use crate::application::loop_engine::LoopEngineError;
 use crate::application::run::execution_state::RunExecutionState;
 use async_trait::async_trait;
 use hook::{
-    HookDispatchContextData, HookDispatcher, HookInvocationData, HookPointData,
-    HookSubscriptionExecutionObserver, StopInput,
+    HookDispatchContextData, HookDispatcher, HookExecutionObserver, HookInvocationData,
+    HookPointData,
 };
 use share::message::{HookNotice, HookNoticeKind, Message};
 use std::path::PathBuf;
@@ -77,7 +77,7 @@ pub struct StopHookExecutionContext {
     workspace_read: Arc<dyn project::WorkspaceReader>,
     session_id: String,
     language: String,
-    subscription_execution_observer: Option<Arc<dyn HookSubscriptionExecutionObserver>>,
+    subscription_execution_observer: Option<Arc<dyn HookExecutionObserver>>,
 }
 
 impl StopHookExecutionContext {
@@ -98,7 +98,7 @@ impl StopHookExecutionContext {
 
     pub fn with_subscription_execution_observer(
         mut self,
-        observer: Arc<dyn HookSubscriptionExecutionObserver>,
+        observer: Arc<dyn HookExecutionObserver>,
     ) -> Self {
         self.subscription_execution_observer = Some(observer);
         self
@@ -172,7 +172,7 @@ pub struct StopHookContext {
     pub workspace_root: PathBuf,
     pub session_id: String,
     pub language: String,
-    pub subscription_execution_observer: Option<Arc<dyn HookSubscriptionExecutionObserver>>,
+    pub subscription_execution_observer: Option<Arc<dyn HookExecutionObserver>>,
 }
 
 #[derive(Debug, Clone)]
@@ -217,9 +217,9 @@ pub async fn orchestrate_stop_hook(
     context: StopHookContext,
     cancellation: &CancellationToken,
 ) -> StopHookOutcome {
-    let invocation = HookInvocationData::Stop(StopInput {
+    let invocation = HookInvocationData::Stop {
         run_steps: context.run_steps,
-    });
+    };
     let mut hook_dispatch_context =
         HookDispatchContextData::new(&context.workspace_root).with_session_id(&context.session_id);
     if let Some(observer) = context.subscription_execution_observer {

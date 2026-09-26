@@ -11,7 +11,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use crate::domain::subscription::HookCommand;
-use crate::ports::CancellationSignal;
+use crate::ports::HookCancellationSignal;
 
 use super::executor::{ExecutionFault, Executor, RawExecution};
 
@@ -139,7 +139,7 @@ impl Executor for Scripted {
         cwd: &std::path::Path,
         env: &std::collections::HashMap<String, String>,
         _timeout: Duration,
-        _cancellation: &dyn CancellationSignal,
+        _cancellation: &dyn HookCancellationSignal,
     ) -> Result<RawExecution, ExecutionFault> {
         self.calls
             .lock()

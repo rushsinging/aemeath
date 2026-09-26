@@ -22,7 +22,7 @@ impl HookDispatcher for RecordingWorkspaceHook {
     async fn dispatch(
         &self,
         _invocation: HookInvocationData,
-        _cancellation: &dyn hook::CancellationSignal,
+        _cancellation: &dyn hook::HookCancellationSignal,
     ) -> hook::HookOutcomeData {
         hook::HookOutcomeData::proceed()
     }
@@ -31,7 +31,7 @@ impl HookDispatcher for RecordingWorkspaceHook {
         &self,
         _invocation: HookInvocationData,
         context: HookDispatchContextData,
-        _cancellation: &dyn hook::CancellationSignal,
+        _cancellation: &dyn hook::HookCancellationSignal,
     ) -> hook::HookOutcomeData {
         self.dispatched_cwds
             .lock()
