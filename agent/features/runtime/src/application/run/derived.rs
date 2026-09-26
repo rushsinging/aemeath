@@ -25,10 +25,10 @@ pub struct CliAgentRunner {
     /// Skill metadata catalog shared with sub-run isolated contexts.
     /// Skill bodies remain call-time Tool-owned loads.
     pub skill_catalog: Arc<dyn tools::SkillCatalogPort>,
-    /// #1385 Task 6: Injectable parent context source — set by the Main Run
+    /// #1385 TaskData 6: Injectable parent context source — set by the Main Run
     /// loop before tool execution so sub-agent runs can derive from it.
     pub parent_context: ParentRunContextSource,
-    /// #1248 Task 3: RuntimeContextFactory — same instance as SessionRuntime's.
+    /// #1248 TaskData 3: RuntimeContextFactory — same instance as SessionRuntime's.
     /// Used for sub-run RuntimeContext assembly without a separate factory.
     pub runtime_context_factory: Arc<RuntimeContextFactory>,
 }

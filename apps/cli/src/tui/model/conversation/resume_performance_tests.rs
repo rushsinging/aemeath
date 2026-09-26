@@ -96,7 +96,7 @@ fn resume_performance_large_session() {
 
 #[test]
 fn resume_workload_timeline_stays_bounded_in_debug() {
-    // debug 模式不卡阈值，只验证规模与顺序正确性（顺序断言见 Task 2 一致性测试）。
+    // debug 模式不卡阈值，只验证规模与顺序正确性（顺序断言见 TaskData 2 一致性测试）。
     let steps = build_resume_workload(10, 3);
     let mut model = ConversationModel::default();
     model.apply(ConversationIntent::ResumeConversation(

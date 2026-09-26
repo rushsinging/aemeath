@@ -2,20 +2,20 @@ use super::published_language::ToolSuccess;
 use super::{CommittedTaskChange, ToolResult, TypedToolResult};
 use crate::domain::types::task_create::TaskCreateResult;
 use serde_json::json;
-use task::{BatchCreateSpec, TaskAccess, TaskCreateSpec, TaskPriority, TaskStore};
+use task::{BatchCreateSpecData, TaskAccess, TaskCreateSpecData, TaskPriorityData, TaskStore};
 
 fn committed_change() -> CommittedTaskChange {
     let store = TaskStore::new();
     store
-        .create_batch(BatchCreateSpec::try_new("batch".to_owned()).unwrap(), 1)
+        .create_batch(BatchCreateSpecData::try_new("batch".to_owned()).unwrap(), 1)
         .unwrap();
     let result = store
         .create_task(
-            TaskCreateSpec::try_new(
+            TaskCreateSpecData::try_new(
                 "task".to_owned(),
                 "description".to_owned(),
                 None,
-                TaskPriority::Normal,
+                TaskPriorityData::Normal,
             )
             .unwrap(),
             2,
@@ -28,7 +28,7 @@ fn committed_change() -> CommittedTaskChange {
 fn typed_result_preserves_runtime_task_change_without_changing_llm_data() {
     let change = committed_change();
     let result = TypedToolResult::success(
-        "Task #1 created",
+        "TaskData #1 created",
         TaskCreateResult {
             task_id: "1".to_owned(),
             display_id: "1".to_owned(),
@@ -39,7 +39,7 @@ fn typed_result_preserves_runtime_task_change_without_changing_llm_data() {
     )
     .with_task_change(Some(change.clone()));
 
-    assert_eq!(result.text, "Task #1 created");
+    assert_eq!(result.text, "TaskData #1 created");
     assert_eq!(result.task_change, Some(change));
     assert!(result.data.is_some());
 }

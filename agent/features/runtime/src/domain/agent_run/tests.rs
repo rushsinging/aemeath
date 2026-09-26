@@ -1222,7 +1222,7 @@ fn derived_run_can_relax_memory_when_parent_allows() {
     assert_eq!(sub.memory, MemoryMode::Enabled);
 }
 
-// ── Task 3: table-driven capability contraction ───────────────────
+// ── TaskData 3: table-driven capability contraction ───────────────────
 
 #[test]
 fn capability_input_monotonic_contraction() {
@@ -1791,7 +1791,7 @@ fn drain_epoch_persists_across_run_operations() {
     assert_eq!(run.status(), RunStatus::Completed);
 }
 
-// ── #1248 Task 1: capability-semantic enums ──
+// ── #1248 TaskData 1: capability-semantic enums ──
 
 #[test]
 fn interaction_value_domain() {

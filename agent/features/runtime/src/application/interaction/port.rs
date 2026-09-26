@@ -10,7 +10,7 @@
 //!
 //! 消费：`InteractionPort`（UI 交互）、`Policy`（权限判断）
 //!
-//! #1248 Task 4: 收敛为 Runtime-owned object-safe `InteractionPort` trait。
+//! #1248 TaskData 4: 收敛为 Runtime-owned object-safe `InteractionPort` trait。
 //! `InteractionBridge` 实现 client 端口；`UnavailableInteractionPort` 立即
 //! 返回 typed `InteractionPortError::Unavailable`（非悬挂）。
 
@@ -110,7 +110,7 @@ pub enum InteractionPortError {
 
 /// Runtime-owned port for interaction lifecycle management.
 ///
-/// #1248 Task 4: Replaces the concrete `Arc<InteractionBridge>` with a
+/// #1248 TaskData 4: Replaces the concrete `Arc<InteractionBridge>` with a
 /// trait so that Client, ParentMediated, and Unavailable binding modes
 /// share a unified contract — register, reply, cancel, drain, contains.
 pub trait InteractionPort: Send + Sync {
@@ -151,7 +151,7 @@ pub trait InteractionPort: Send + Sync {
 
 /// Validate that a reply body matches the expected request body.
 ///
-/// #1248 Task 4: Single shared validation function — used by both
+/// #1248 TaskData 4: Single shared validation function — used by both
 /// [`InteractionBridge`] and [`InteractionCoordinator`].  No duplicate
 /// match arms.
 ///
@@ -201,7 +201,7 @@ struct BridgeState {
 /// processes `register`/`reply`/`cancel`/`drain_run`/`contains` in
 /// critical sections.
 ///
-/// #1248 Task 4: Implements [`InteractionPort`] for the Client binding mode.
+/// #1248 TaskData 4: Implements [`InteractionPort`] for the Client binding mode.
 /// `InteractionCapability` / `disabled()` have been removed — use
 /// [`UnavailableInteractionPort`] for unavailable interaction.
 pub struct InteractionBridge {
@@ -520,7 +520,7 @@ impl InteractionPort for ParentMediatedInteractionPort {
 /// `register` always returns [`InteractionPortError::Unavailable`]
 /// without any async work or locking — guarantees no hanging.
 ///
-/// #1248 Task 4: Typed unavailable — use this instead of the removed
+/// #1248 TaskData 4: Typed unavailable — use this instead of the removed
 /// `InteractionBridge::disabled()`.
 #[derive(Debug, Clone, Default)]
 pub struct UnavailableInteractionPort;

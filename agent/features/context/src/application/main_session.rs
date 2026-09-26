@@ -10,7 +10,7 @@ use memory::{MemoryOpenError, MemoryOpener, MemoryOpenerError, MemoryPort, Proje
 use project::{WorkspaceReader, WorkspaceRestoreData, WorkspaceWriter};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::session_types::ProjectIdentityData;
-use task::{PreparedTaskRestore, TaskPersist, TaskSnapshot, TaskSnapshotValidationError};
+use task::{PreparedTaskRestoreData, TaskPersist, TaskSnapshotData};
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock as TokioRwLock};
 
 use crate::domain::session::{same_project_identity, CanonicalSession, SnapshotState};
@@ -116,9 +116,9 @@ pub enum MainSessionError {
     #[error("memory open failed: {0}")]
     MemoryOpen(#[from] MemoryOpenerError),
 
-    /// Task-owned `TaskPersist::prepare_restore` rejected the task snapshot.
+    /// TaskData-owned `TaskPersist::prepare_restore` rejected the task snapshot.
     #[error("task restore prepare failed: {0}")]
-    TaskRestore(#[from] TaskSnapshotValidationError),
+    TaskRestore(share::error::DomainError),
 
     /// The session switch gate was closed (inner lock dropped).
     #[error("session switch gate closed")]
@@ -300,8 +300,8 @@ pub async fn wire_main_session(
 ///    truth** for Config and Memory.
 /// 3. **Memory eager open** — `MemoryOpener::open_memory` eagerly opens both
 ///    layers for the canonical identity.
-/// 4. **Task prepare** — `TaskPersist::prepare_restore` validates the task
-///    snapshot. `Missing` / `CapturedEmpty` maps to `TaskSnapshot::empty()`,
+/// 4. **TaskData prepare** — `TaskPersist::prepare_restore` validates the task
+///    snapshot. `Missing` / `CapturedEmpty` maps to `TaskSnapshotData::empty()`,
 ///    clearing any stale live tasks.
 ///
 /// **Cross-project resume is forbidden.** The persisted project identity
@@ -310,7 +310,7 @@ pub async fn wire_main_session(
 ///
 /// If **any** prepare fails, nothing is committed and the old state is kept
 /// unchanged. If all prepares succeed, commits proceed **without await**:
-/// Project → Task → publish Session/Memory → Config commit (last, so the config
+/// Project → TaskData → publish Session/Memory → Config commit (last, so the config
 /// watch only fires after everything else is visible).
 ///
 /// # Gate-aware Config façades
@@ -334,7 +334,7 @@ pub struct MainSessionWiring {
     workspace_read: Arc<dyn WorkspaceReader>,
     workspace_persist: Arc<dyn WorkspaceWriter>,
 
-    // ── Task BC ──
+    // ── TaskData BC ──
     task_persist: Arc<dyn TaskPersist>,
 
     // ── Config BC ──
@@ -553,7 +553,7 @@ impl MainSessionWiring {
     ///
     /// See the [type-level docs](MainSessionWiring) for the full pipeline
     /// description. In short: prepare every participant first (Project → Config
-    /// → Memory → Task), and only if all succeed, commit them synchronously.
+    /// → Memory → TaskData), and only if all succeed, commit them synchronously.
     /// Any prepare failure leaves the old state untouched.
     ///
     /// **Cross-project resume is forbidden.** The persisted workspace identity
@@ -635,22 +635,26 @@ impl MainSessionWiring {
             .open_memory(&memory_key, prepared_config.memory_config())
             .await?;
 
-        // ── 4. Task prepare ──
+        // ── 4. TaskData prepare ──
         //
-        // Missing/CapturedEmpty maps to TaskSnapshot::empty(), which clears any
+        // Missing/CapturedEmpty maps to TaskSnapshotData::empty(), which clears any
         // stale live tasks on commit.
-        let prepared_task: PreparedTaskRestore = match &session.tasks {
-            SnapshotState::Captured(snapshot) => self.task_persist.prepare_restore(snapshot)?,
-            SnapshotState::Missing | SnapshotState::CapturedEmpty => {
-                self.task_persist.prepare_restore(&TaskSnapshot::empty())?
-            }
+        let prepared_task: PreparedTaskRestoreData = match &session.tasks {
+            SnapshotState::Captured(snapshot) => self
+                .task_persist
+                .prepare_restore(snapshot)
+                .map_err(MainSessionError::TaskRestore)?,
+            SnapshotState::Missing | SnapshotState::CapturedEmpty => self
+                .task_persist
+                .prepare_restore(&TaskSnapshotData::empty())
+                .map_err(MainSessionError::TaskRestore)?,
         };
 
         // ════════════════════════════════════════════════════════════════
         // All prepares succeeded — commit phase (synchronous, no await).
         // ════════════════════════════════════════════════════════════════
 
-        // Commit Project + Task first — both are infallible.
+        // Commit Project + TaskData first — both are infallible.
         self.workspace_persist.commit_restore(prepared_workspace);
         self.task_persist.commit_restore(prepared_task);
 

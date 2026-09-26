@@ -10,7 +10,10 @@ async fn task_create_uses_task_access_and_active_batch() {
     let store = Arc::new(task::TaskStore::new());
     let access: Arc<dyn task::TaskAccess> = store.clone();
     let batch = access
-        .create_batch(task::BatchCreateSpec::try_new("batch".into()).unwrap(), 1)
+        .create_batch(
+            task::BatchCreateSpecData::try_new("batch".into()).unwrap(),
+            1,
+        )
         .unwrap();
     let tool = TaskCreateTool { access };
 
@@ -29,7 +32,7 @@ async fn task_create_uses_task_access_and_active_batch() {
     let tasks = store.list();
     assert_eq!(tasks.len(), 1);
     assert_eq!(tasks[0].batch(), batch.value.id());
-    assert_eq!(tasks[0].priority(), task::TaskPriority::High);
+    assert_eq!(tasks[0].priority(), task::TaskPriorityData::High);
     assert_eq!(tasks[0].session_id(), None);
     let task_change = result
         .task_change

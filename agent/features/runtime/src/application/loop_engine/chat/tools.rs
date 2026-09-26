@@ -179,7 +179,7 @@ where
         .chain(fused_results)
         .chain(denied_results)
         .collect();
-    // #1248 Task 5: Map RequireApproval calls from policy to engine-level ApprovalRequiredCall.
+    // #1248 TaskData 5: Map RequireApproval calls from policy to engine-level ApprovalRequiredCall.
     let approvals: Vec<ApprovalRequiredCall> = prepared
         .require_approval
         .into_iter()
@@ -1024,7 +1024,7 @@ mod tests {
         assert!(text.contains(&session_id));
     }
 
-    // #1248 Task 5: Bridge resolve tests moved to engine-level tests
+    // #1248 TaskData 5: Bridge resolve tests moved to engine-level tests
     // (interaction_routing module in loop_engine/tests.rs).
     // resolve_ask_user_via_bridge is deleted — the engine handles
     // all interaction routing via InteractionCoordinator.

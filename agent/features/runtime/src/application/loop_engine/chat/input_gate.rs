@@ -128,7 +128,7 @@ pub struct GateOutcome {
     /// 本次 gate 接纳的 typed 用户输入。它是后续模型消息、持久化与
     /// UserMessagesAdopted 的唯一真相，禁止并行维护 event/message 双轨。
     pub accepted_inputs: Vec<crate::application::loop_engine::AcceptedUserInput>,
-    /// idle reset 已完成 Task 清理，请求 Context owner 清空 durable Session。
+    /// idle reset 已完成 TaskData 清理，请求 Context owner 清空 durable Session。
     pub reset_requested: bool,
     /// idle 时收到的待执行命令（替代 compact_requested + model_switch_requested）。
     pub pending_command: Option<PendingCommand>,
@@ -318,7 +318,7 @@ where
                         decision = GateDecision::Proceed;
                         break;
                     }
-                    // idle：权威 Task 清理成功后请求 Context owner 清空会话。
+                    // idle：权威 TaskData 清理成功后请求 Context owner 清空会话。
                     reset_requested = true;
                     dropped_events = iter.count();
                     decision = GateDecision::Proceed;

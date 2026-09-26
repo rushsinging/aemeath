@@ -23,7 +23,7 @@ pub use application::client::{
     SkillBootstrapAssembly,
 };
 pub use application::compact_generator::ProviderCompactGenerator;
-// #1248 Task 3: RuntimeContextFactory is the narrow crate-root construction
+// #1248 TaskData 3: RuntimeContextFactory is the narrow crate-root construction
 // entry.  RuntimeServices stays internal; callers construct via
 // RuntimeContextFactory::new(…).
 pub use application::prompt::build::{build_system_prompt_parts, PromptContext};
@@ -116,8 +116,8 @@ mod boundary_tests {
                     }
                     let source = std::fs::read_to_string(&path).expect("read Runtime source file");
                     assert!(
-                        !source.contains(&["Task", "Persist"].concat()),
-                        "{} must not name the Task persistence capability",
+                        !source.contains(&["TaskData", "Persist"].concat()),
+                        "{} must not name the TaskData persistence capability",
                         path.display()
                     );
                     assert!(

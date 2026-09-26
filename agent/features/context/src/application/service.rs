@@ -164,7 +164,7 @@ impl ContextApplicationService {
                     })?;
                 let bounded_summary = match task_state_companion {
                     Some(companion) => format!(
-                        "{}\n\n## Current Task State\n{companion}",
+                        "{}\n\n## Current TaskData State\n{companion}",
                         bounded_checkpoint.render()
                     ),
                     None => bounded_checkpoint.render(),

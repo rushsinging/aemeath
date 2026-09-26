@@ -15,18 +15,20 @@ mod snapshot_validation_tests;
 
 pub use lifecycle::{
     detect_batch_all_completed, detect_interrupted_batch, detect_stale_batches,
-    InterruptedBatchInfo, StaleBatchInfo,
+    InterruptedBatchInfoData, StaleBatchInfoData,
 };
-pub(crate) use model::TaskSnapshotFields;
+pub(crate) use model::{TaskCommandError, TaskSnapshotFields};
+
 pub use model::{
-    Batch, BatchCreateSpec, BatchId, BatchStatus, Task, TaskCommandError, TaskCommandResult,
-    TaskCreateSpec, TaskEvent, TaskId, TaskPriority, TaskRevision, TaskStatus, TaskView,
+    BatchCreateSpecData, BatchData, BatchIdData, BatchStatusData, TaskCommandResultData,
+    TaskCreateSpecData, TaskData, TaskEventData, TaskIdData, TaskPriorityData, TaskRevisionData,
+    TaskStatusData, TaskViewData,
 };
 pub use query::{
-    TaskBatchSnapshot, TaskLifecycleSnapshot, TaskProgressItem, TaskProgressSnapshot,
-    TaskStoreStats,
+    TaskBatchSnapshotData, TaskLifecycleSnapshotData, TaskPriorityStatsData, TaskProgressItemData,
+    TaskProgressSnapshotData, TaskStoreStatsData,
 };
-pub use snapshot::{PreparedTaskRestore, TaskSnapshot, TaskSnapshotValidationError};
+pub use snapshot::{PreparedTaskRestoreData, TaskSnapshotData};
 /// 聚合内部事务状态：仅 crate 内 `TaskStore` backing 可见，**NEVER** 进入
 /// 公开 façade（否则消费方可绕过窄端口直接改状态 / 触碰内部 map / counter）。
 pub(crate) use state::TaskStoreState;

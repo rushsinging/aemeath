@@ -1,7 +1,7 @@
 use super::*;
 use context::SessionManagementError;
 use std::collections::VecDeque;
-use task::{BatchCreateSpec, TaskAccess, TaskCreateSpec, TaskPersist, TaskPriority};
+use task::{BatchCreateSpecData, TaskAccess, TaskCreateSpecData, TaskPersist, TaskPriorityData};
 
 #[derive(Clone)]
 struct ResumeSessionManagement {
@@ -118,7 +118,7 @@ impl InputEventDrainPort for ResumeInputEvents {
 fn restored_session(
     session_id: &str,
     workspace: share::session_types::PersistedWorkspaceContext,
-    tasks: task::TaskSnapshot,
+    tasks: task::TaskSnapshotData,
 ) -> context::session::CanonicalSession {
     let now = chrono::Utc::now().to_rfc3339();
     context::session::CanonicalSession {
@@ -185,21 +185,21 @@ async fn run_resume(
     sink
 }
 
-fn snapshot_with_one_task() -> task::TaskSnapshot {
+fn snapshot_with_one_task() -> task::TaskSnapshotData {
     let store = task::TaskStore::new();
     store
         .create_batch(
-            BatchCreateSpec::try_new("restored batch".to_owned()).unwrap(),
+            BatchCreateSpecData::try_new("restored batch".to_owned()).unwrap(),
             1,
         )
         .unwrap();
     store
         .create_task(
-            TaskCreateSpec::try_new(
+            TaskCreateSpecData::try_new(
                 "restored task".to_owned(),
                 String::new(),
                 None,
-                TaskPriority::High,
+                TaskPriorityData::High,
             )
             .unwrap(),
             2,
@@ -260,7 +260,7 @@ async fn successful_resume_without_active_batch_emits_empty_state_to_clear_old_s
             session: restored_session(
                 session_id,
                 shell_workspace_snapshot(),
-                task::TaskSnapshot::empty(),
+                task::TaskSnapshotData::empty(),
             ),
         }),
         noop_hook_port(),
@@ -333,7 +333,7 @@ async fn successful_resume_emits_session_start_hook_with_resumed_session_id() {
             session: restored_session(
                 session_id,
                 shell_workspace_snapshot(),
-                task::TaskSnapshot::empty(),
+                task::TaskSnapshotData::empty(),
             ),
         }),
         Arc::new(recording_hook.clone()),

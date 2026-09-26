@@ -9,11 +9,17 @@ fn test_ctx() -> ToolExecutionContext {
 async fn task_lists_discovers_historical_and_current_batches() {
     let access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
     access
-        .create_batch(task::BatchCreateSpec::try_new("历史".into()).unwrap(), 1)
+        .create_batch(
+            task::BatchCreateSpecData::try_new("历史".into()).unwrap(),
+            1,
+        )
         .unwrap();
-    access.archive_batch(task::BatchId::new(1)).unwrap();
+    access.archive_batch(task::BatchIdData::new(1)).unwrap();
     access
-        .create_batch(task::BatchCreateSpec::try_new("当前".into()).unwrap(), 2)
+        .create_batch(
+            task::BatchCreateSpecData::try_new("当前".into()).unwrap(),
+            2,
+        )
         .unwrap();
 
     let result = TaskListsTool { access }
@@ -39,7 +45,10 @@ async fn task_lists_discovers_historical_and_current_batches() {
 async fn task_lists_filters_status_and_rejects_unknown_status() {
     let access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
     access
-        .create_batch(task::BatchCreateSpec::try_new("当前".into()).unwrap(), 1)
+        .create_batch(
+            task::BatchCreateSpecData::try_new("当前".into()).unwrap(),
+            1,
+        )
         .unwrap();
     let tool = TaskListsTool { access };
 

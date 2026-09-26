@@ -5,20 +5,23 @@ fn test_ctx() -> ToolExecutionContext {
         .build()
 }
 
-fn task_spec(subject: &str) -> task::TaskCreateSpec {
-    task::TaskCreateSpec::try_new(
+fn task_spec(subject: &str) -> task::TaskCreateSpecData {
+    task::TaskCreateSpecData::try_new(
         subject.into(),
         String::new(),
         None,
-        task::TaskPriority::Normal,
+        task::TaskPriorityData::Normal,
     )
     .unwrap()
 }
 
-fn setup() -> (Arc<task::TaskStore>, Vec<task::TaskId>) {
+fn setup() -> (Arc<task::TaskStore>, Vec<task::TaskIdData>) {
     let store = Arc::new(task::TaskStore::new());
     store
-        .create_batch(task::BatchCreateSpec::try_new("batch".into()).unwrap(), 1)
+        .create_batch(
+            task::BatchCreateSpecData::try_new("batch".into()).unwrap(),
+            1,
+        )
         .unwrap();
     let ids = ["目标", "前置一", "前置二"]
         .into_iter()

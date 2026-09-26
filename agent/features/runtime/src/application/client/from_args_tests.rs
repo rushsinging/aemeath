@@ -281,7 +281,7 @@ async fn make_test_shell(
     let session_management = wiring.session_management();
     let cwd = root.clone();
 
-    // #1248 Task 3: Build RuntimeContextFactory for test SessionRuntime.
+    // #1248 TaskData 3: Build RuntimeContextFactory for test SessionRuntime.
     let runtime_context_factory = Arc::new(
         crate::application::run::context_factory::RuntimeContextFactory::new(
             tool_catalog.clone(),
@@ -364,7 +364,7 @@ async fn make_test_shell(
     )
 }
 
-// ── Task 4 L1: Shell classification tests ──
+// ── TaskData 4 L1: Shell classification tests ──
 
 /// After bootstrap, SessionRuntime holds session-level state: wiring, workspace,
 /// session identity, prompt bootstrap, model switch. It does NOT hold a per-Run
@@ -692,7 +692,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         client.inner.shell.workspace.read().current_path_base(),
         root.canonicalize().expect("canonicalize root")
     );
-} // ── Task 4 GREEN: single-source verification tests ──
+} // ── TaskData 4 GREEN: single-source verification tests ──
 
 /// The SDK startup snapshot reads the current model state without exposing
 /// Runtime services or adapter-owned launch containers.
@@ -721,7 +721,7 @@ async fn startup_snapshot_reads_current_model_state() {
     assert_eq!(launch.model_display, expected_display);
 }
 
-/// #1385 Task 7: accessors return values from `shell`, the single source.
+/// #1385 TaskData 7: accessors return values from `shell`, the single source.
 #[tokio::test(flavor = "current_thread")]
 async fn accessors_read_from_shell_single_source() {
     let shell =
@@ -766,7 +766,7 @@ async fn accessors_read_from_shell_single_source() {
     assert_eq!(client.shell().verbose, shell.verbose);
 }
 
-/// #1385 Task 7: `shell.interaction_bridge` is the single source.
+/// #1385 TaskData 7: `shell.interaction_bridge` is the single source.
 /// `reply_interaction` and `cancel_interaction` both use it.
 #[tokio::test(flavor = "current_thread")]
 async fn interaction_bridge_is_single_source_on_shell() {

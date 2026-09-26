@@ -29,7 +29,7 @@ pub struct TaskCreateInput {
     pub subject: String,
     /// What needs to be done
     pub description: String,
-    /// Task priority level
+    /// TaskData priority level
     pub priority: Option<String>,
 }
 

@@ -179,7 +179,7 @@ pub struct SessionRuntime {
 
     // ── Cross-run shared resources ──
     pub(crate) agent_runner: Arc<dyn AgentRunner>,
-    /// #1385 Task 6: shared parent context source — written by the Main Run
+    /// #1385 TaskData 6: shared parent context source — written by the Main Run
     /// loop before tool execution, read by sub-agent derivation.
     pub(crate) parent_context_source: ParentRunContextSource,
     pub(crate) tool_result_materializer:
@@ -196,14 +196,14 @@ pub struct SessionRuntime {
     pub session_reminders: std::sync::Arc<std::sync::RwLock<share::memory::SessionReminders>>,
 
     // ── Parent capability ports (cloned into per-Run RuntimeContext) ──
-    // #1248 Task 3: These ports are held in RuntimeContextFactory → RuntimeServices.
+    // #1248 TaskData 3: These ports are held in RuntimeContextFactory → RuntimeServices.
     // Access them via shell.runtime_context_factory.services() rather than
     // duplicating the Arc references here.
     //
     // Tool, Hook and other per-Run services remain accessible only through
     // RuntimeContextFactory during Run creation.
 
-    // ── #1248 Task 3: RuntimeContextFactory (constructed once from static ports) ──
+    // ── #1248 TaskData 3: RuntimeContextFactory (constructed once from static ports) ──
     pub(crate) runtime_context_factory: Arc<RuntimeContextFactory>,
 }
 
@@ -330,7 +330,7 @@ pub struct AgentClientImpl {
 
 /// Runtime 内部状态。
 ///
-/// #1385 Task 4-7: `shell` is the single session-level state source.
+/// #1385 TaskData 4-7: `shell` is the single session-level state source.
 /// All fields formerly duplicated here have been removed.
 pub struct RuntimeHandle {
     pub shell: SessionRuntime,

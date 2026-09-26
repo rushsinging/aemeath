@@ -4,13 +4,13 @@ use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use task::{BatchStatus, TaskAccess};
+use task::{BatchStatusData, TaskAccess};
 
 pub struct TaskListsTool {
     pub access: Arc<dyn TaskAccess>,
 }
 
-fn status_name(status: BatchStatus) -> String {
+fn status_name(status: BatchStatusData) -> String {
     format!("{status:?}").to_ascii_lowercase()
 }
 
@@ -59,9 +59,9 @@ impl TypedTool for TaskListsTool {
         };
         let status = match args.status.as_deref() {
             None => None,
-            Some("active") => Some(BatchStatus::Active),
-            Some("paused") => Some(BatchStatus::Paused),
-            Some("archived") => Some(BatchStatus::Archived),
+            Some("active") => Some(BatchStatusData::Active),
+            Some("paused") => Some(BatchStatusData::Paused),
+            Some("archived") => Some(BatchStatusData::Archived),
             Some(value) => {
                 return TypedToolResult::error(format!("invalid task list status: {value}"))
             }

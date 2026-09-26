@@ -105,7 +105,7 @@ pub(crate) trait InputStrategy {
 
 /// Input strategy for the **Main** adapter.
 ///
-/// #1385 Task 12: `sink` is now a [`ChatEventSinkHandle`] (shared with
+/// #1385 TaskData 12: `sink` is now a [`ChatEventSinkHandle`] (shared with
 /// [`RuntimeContext`]) instead of a generic `&S`.  This eliminates the `S`
 /// generic parameter.
 #[derive(Clone)]
@@ -114,13 +114,13 @@ where
     I: SessionInputPort,
 {
     pub input_events: I,
-    /// #1385 Task 12: Canonical event sink from RuntimeContext, not a separate
+    /// #1385 TaskData 12: Canonical event sink from RuntimeContext, not a separate
     /// sink reference.  This is Clone and implements ChatEventSink directly.
     pub sink: ChatEventSinkHandle,
     /// Non-user-message events (controls) are forwarded here for the
     /// session idle gate to process after the Run ends.
     pub pending_input: PendingInputBuffer,
-    /// #1385 Task 12: Run-scoped input buffer handle shared with RuntimeContext.
+    /// #1385 TaskData 12: Run-scoped input buffer handle shared with RuntimeContext.
     /// User messages received during this Run are accumulated here and drained
     /// per-step within the same Run (#1272).  All access goes through
     /// [`RunInputBufferHandle::with_lock`].

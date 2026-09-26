@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::domain::{
-    Batch, BatchId, BatchStatus, Task, TaskId, TaskPriority, TaskRevision, TaskSnapshot,
-    TaskSnapshotFields, TaskStatus,
+    BatchData, BatchIdData, BatchStatusData, TaskData, TaskIdData, TaskPriorityData,
+    TaskRevisionData, TaskSnapshotData, TaskSnapshotFields, TaskStatusData,
 };
 
 const CURRENT_SCHEMA_VERSION: u64 = 2;
@@ -24,7 +24,7 @@ pub enum TaskSnapshotCodecError {
     NextBatchIdExhausted,
 }
 
-impl TaskSnapshot {
+impl TaskSnapshotData {
     pub fn decode(bytes: &[u8]) -> Result<Self, TaskSnapshotCodecError> {
         let value: serde_json::Value = serde_json::from_slice(bytes)
             .map_err(|error| TaskSnapshotCodecError::InvalidJson(error.to_string()))?;
@@ -95,8 +95,8 @@ struct TaskWireV2 {
     session_id: Option<String>,
     tags: Vec<String>,
     blocked_by: Vec<String>,
-    status: TaskStatus,
-    priority: TaskPriority,
+    status: TaskStatusData,
+    priority: TaskPriorityData,
     created_at: u64,
     updated_at: u64,
     started_at: Option<u64>,
@@ -107,14 +107,14 @@ struct TaskWireV2 {
 struct BatchWireV2 {
     id: String,
     summary: Option<String>,
-    status: BatchStatus,
+    status: BatchStatusData,
     created_at: u64,
     last_active_turn: u64,
     silence_turns: u64,
 }
 
-impl From<&Task> for TaskWireV2 {
-    fn from(task: &Task) -> Self {
+impl From<&TaskData> for TaskWireV2 {
+    fn from(task: &TaskData) -> Self {
         Self {
             id: task.id().get().to_string(),
             batch: task.batch().get().to_string(),
@@ -135,8 +135,8 @@ impl From<&Task> for TaskWireV2 {
     }
 }
 
-impl From<&Batch> for BatchWireV2 {
-    fn from(batch: &Batch) -> Self {
+impl From<&BatchData> for BatchWireV2 {
+    fn from(batch: &BatchData) -> Self {
         Self {
             id: batch.id().get().to_string(),
             summary: batch.summary().map(str::to_owned),
@@ -148,7 +148,7 @@ impl From<&Batch> for BatchWireV2 {
     }
 }
 
-fn decode_v2(value: serde_json::Value) -> Result<TaskSnapshot, TaskSnapshotCodecError> {
+fn decode_v2(value: serde_json::Value) -> Result<TaskSnapshotData, TaskSnapshotCodecError> {
     validate_v2_ids(&value)?;
     let wire: SnapshotWireV2 = serde_json::from_value(value)
         .map_err(|error| TaskSnapshotCodecError::InvalidJson(error.to_string()))?;
@@ -158,7 +158,7 @@ fn decode_v2(value: serde_json::Value) -> Result<TaskSnapshot, TaskSnapshotCodec
     let current_batch = wire
         .current_batch
         .as_deref()
-        .map(|id| parse_id(id, "current_batch", false).map(BatchId::new))
+        .map(|id| parse_id(id, "current_batch", false).map(BatchIdData::new))
         .transpose()?;
     let tasks = wire
         .tasks
@@ -166,9 +166,9 @@ fn decode_v2(value: serde_json::Value) -> Result<TaskSnapshot, TaskSnapshotCodec
         .enumerate()
         .map(|(index, task)| task_from_v2(task, index))
         .collect::<Result<Vec<_>, _>>()?;
-    let mut legacy_seq_by_batch = std::collections::HashMap::<BatchId, u64>::new();
+    let mut legacy_seq_by_batch = std::collections::HashMap::<BatchIdData, u64>::new();
     let mut tasks = tasks;
-    tasks.sort_unstable_by_key(Task::id);
+    tasks.sort_unstable_by_key(TaskData::id);
     for task in &mut tasks {
         if task.seq() == 0 {
             let seq = legacy_seq_by_batch.entry(task.batch()).or_insert(1);
@@ -182,18 +182,18 @@ fn decode_v2(value: serde_json::Value) -> Result<TaskSnapshot, TaskSnapshotCodec
         .enumerate()
         .map(|(index, batch)| batch_from_v2(batch, index))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(TaskSnapshot::from_decoded_parts(
-        TaskRevision::new(revision),
+    Ok(TaskSnapshotData::from_decoded_parts(
+        TaskRevisionData::new(revision),
         tasks,
-        TaskId::new(next_task_id),
-        BatchId::new(next_batch_id),
+        TaskIdData::new(next_task_id),
+        BatchIdData::new(next_batch_id),
         current_batch,
         batches,
     ))
 }
 
-fn task_from_v2(mut wire: TaskWireV2, index: usize) -> Result<Task, TaskSnapshotCodecError> {
-    if wire.status == TaskStatus::Pending && wire.completed_at.is_none() {
+fn task_from_v2(mut wire: TaskWireV2, index: usize) -> Result<TaskData, TaskSnapshotCodecError> {
+    if wire.status == TaskStatusData::Pending && wire.completed_at.is_none() {
         wire.started_at = None;
     }
     let id = parse_id(&wire.id, &format!("tasks[{index}].id"), false)?;
@@ -208,12 +208,12 @@ fn task_from_v2(mut wire: TaskWireV2, index: usize) -> Result<Task, TaskSnapshot
                 &format!("tasks[{index}].blocked_by[{dependency}]"),
                 false,
             )
-            .map(TaskId::new)
+            .map(TaskIdData::new)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Task::from_snapshot(TaskSnapshotFields {
-        id: TaskId::new(id),
-        batch: BatchId::new(batch),
+    Ok(TaskData::from_snapshot(TaskSnapshotFields {
+        id: TaskIdData::new(id),
+        batch: BatchIdData::new(batch),
         seq: wire.seq,
         subject: wire.subject,
         description: wire.description,
@@ -230,10 +230,10 @@ fn task_from_v2(mut wire: TaskWireV2, index: usize) -> Result<Task, TaskSnapshot
     }))
 }
 
-fn batch_from_v2(wire: BatchWireV2, index: usize) -> Result<Batch, TaskSnapshotCodecError> {
+fn batch_from_v2(wire: BatchWireV2, index: usize) -> Result<BatchData, TaskSnapshotCodecError> {
     let id = parse_id(&wire.id, &format!("batches[{index}].id"), false)?;
-    Ok(Batch::from_snapshot(
-        BatchId::new(id),
+    Ok(BatchData::from_snapshot(
+        BatchIdData::new(id),
         wire.summary,
         wire.status,
         wire.created_at,
@@ -325,9 +325,9 @@ struct TaskWireV1 {
     tags: Vec<String>,
     #[serde(default)]
     blocked_by: Vec<String>,
-    status: TaskStatus,
+    status: TaskStatusData,
     #[serde(default)]
-    priority: TaskPriority,
+    priority: TaskPriorityData,
     #[serde(default)]
     created_at: u64,
     #[serde(default)]
@@ -343,14 +343,14 @@ struct BatchWireV1 {
     id: u64,
     #[serde(default)]
     summary: Option<String>,
-    status: BatchStatus,
+    status: BatchStatusData,
     created_at: u64,
     last_active_turn: u64,
     #[serde(default)]
     silence_turns: u64,
 }
 
-fn decode_v1(value: serde_json::Value) -> Result<TaskSnapshot, TaskSnapshotCodecError> {
+fn decode_v1(value: serde_json::Value) -> Result<TaskSnapshotData, TaskSnapshotCodecError> {
     let wire: SnapshotWireV1 = serde_json::from_value(value)
         .map_err(|error| TaskSnapshotCodecError::InvalidJson(error.to_string()))?;
     if wire.next_id == 0 {
@@ -371,7 +371,8 @@ fn decode_v1(value: serde_json::Value) -> Result<TaskSnapshot, TaskSnapshotCodec
                 .into_iter()
                 .enumerate()
                 .map(|(j, raw)| {
-                    parse_id(&raw, &format!("tasks[{i}].blocked_by[{j}]"), false).map(TaskId::new)
+                    parse_id(&raw, &format!("tasks[{i}].blocked_by[{j}]"), false)
+                        .map(TaskIdData::new)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let (started_at, completed_at) = upgrade_v1_execution_timestamps(
@@ -380,9 +381,9 @@ fn decode_v1(value: serde_json::Value) -> Result<TaskSnapshot, TaskSnapshotCodec
                 task.started_at,
                 task.completed_at,
             );
-            Ok(Task::from_snapshot(TaskSnapshotFields {
-                id: TaskId::new(id),
-                batch: BatchId::new(task.batch),
+            Ok(TaskData::from_snapshot(TaskSnapshotFields {
+                id: TaskIdData::new(id),
+                batch: BatchIdData::new(task.batch),
                 seq: id,
                 subject: task.subject,
                 description: task.description,
@@ -403,8 +404,8 @@ fn decode_v1(value: serde_json::Value) -> Result<TaskSnapshot, TaskSnapshotCodec
         .batches
         .into_iter()
         .map(|batch| {
-            Batch::from_snapshot(
-                BatchId::new(batch.id),
+            BatchData::from_snapshot(
+                BatchIdData::new(batch.id),
                 batch.summary,
                 batch.status,
                 batch.created_at,
@@ -413,32 +414,32 @@ fn decode_v1(value: serde_json::Value) -> Result<TaskSnapshot, TaskSnapshotCodec
             )
         })
         .collect();
-    Ok(TaskSnapshot::from_decoded_parts(
-        TaskRevision::new(0),
+    Ok(TaskSnapshotData::from_decoded_parts(
+        TaskRevisionData::new(0),
         tasks,
-        TaskId::new(wire.next_id),
-        BatchId::new(next_batch_id),
-        (wire.current_batch != 0).then_some(BatchId::new(wire.current_batch)),
+        TaskIdData::new(wire.next_id),
+        BatchIdData::new(next_batch_id),
+        (wire.current_batch != 0).then_some(BatchIdData::new(wire.current_batch)),
         batches,
     ))
 }
 
 fn upgrade_v1_execution_timestamps(
-    status: TaskStatus,
+    status: TaskStatusData,
     updated_at: u64,
     started_at: Option<u64>,
     completed_at: Option<u64>,
 ) -> (Option<u64>, Option<u64>) {
     match status {
-        TaskStatus::Pending => (None, None),
-        TaskStatus::InProgress => (Some(started_at.unwrap_or(updated_at)), None),
-        TaskStatus::Completed => (
+        TaskStatusData::Pending => (None, None),
+        TaskStatusData::InProgress => (Some(started_at.unwrap_or(updated_at)), None),
+        TaskStatusData::Completed => (
             Some(started_at.unwrap_or(updated_at)),
             Some(completed_at.unwrap_or(updated_at)),
         ),
         // Deleted records remain untouched so validation rejects the tombstone
         // rather than manufacturing execution history for it.
-        TaskStatus::Deleted => (started_at, completed_at),
+        TaskStatusData::Deleted => (started_at, completed_at),
     }
 }
 

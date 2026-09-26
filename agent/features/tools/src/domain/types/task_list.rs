@@ -25,7 +25,7 @@ pub struct TaskListStats {
 pub struct TaskListResult {
     pub task_list: Option<TaskListMetadata>,
     pub stats: TaskListStats,
-    pub tasks: Vec<task::TaskView>,
+    pub tasks: Vec<task::TaskViewData>,
 }
 
 /// Typed input for the `task_list` tool.
@@ -34,7 +34,7 @@ pub struct TaskListResult {
 /// 所有字段可选（原 schema 无 required）。
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct TaskListInput {
-    /// Task list ID to query; defaults to the current active list
+    /// TaskData list ID to query; defaults to the current active list
     pub task_list_id: Option<String>,
     /// Filter by status
     pub status: Option<String>,

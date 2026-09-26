@@ -1,17 +1,18 @@
 use super::*;
 use crate::{
-    BatchCreateSpec, TaskCommandError, TaskCreateSpec, TaskEvent, TaskPriority, TaskRevision,
+    domain::TaskCommandError, BatchCreateSpecData, TaskCreateSpecData, TaskEventData,
+    TaskPriorityData, TaskRevisionData,
 };
 
-fn batch_spec(name: &str) -> BatchCreateSpec {
-    BatchCreateSpec::try_new(name.into()).unwrap()
+fn batch_spec(name: &str) -> BatchCreateSpecData {
+    BatchCreateSpecData::try_new(name.into()).unwrap()
 }
 
-fn task_spec(name: &str) -> TaskCreateSpec {
-    TaskCreateSpec::try_new(name.into(), String::new(), None, TaskPriority::Normal).unwrap()
+fn task_spec(name: &str) -> TaskCreateSpecData {
+    TaskCreateSpecData::try_new(name.into(), String::new(), None, TaskPriorityData::Normal).unwrap()
 }
 
-fn state_with_tasks(count: usize) -> (TaskStoreState, Vec<TaskId>) {
+fn state_with_tasks(count: usize) -> (TaskStoreState, Vec<TaskIdData>) {
     let mut state = TaskStoreState::empty();
     state.create_batch(batch_spec("批次"), 1).unwrap();
     let ids = (0..count)
@@ -33,54 +34,58 @@ fn deleting_last_unfinished_task_returns_progress_and_auto_closes_batch() {
     let deleted = state.delete_with_progress(ids[0], 10).unwrap();
 
     assert!(deleted.value.auto_closed);
-    assert_eq!(deleted.value.updated.status, TaskStatus::Deleted);
+    assert_eq!(deleted.value.updated.status, TaskStatusData::Deleted);
     assert_eq!(state.current_batch(), None);
     assert_eq!(
-        state.batches()[&BatchId::new(1)].status(),
-        BatchStatus::Archived
+        state.batches()[&BatchIdData::new(1)].status(),
+        BatchStatusData::Archived
     );
 }
 
 #[test]
 fn status_progress_auto_closes_and_reopens_batch_atomically() {
     let (mut state, ids) = state_with_tasks(1);
-    let batch_id = BatchId::new(1);
+    let batch_id = BatchIdData::new(1);
 
     let completed = state
-        .transition_with_progress(ids[0], TaskStatus::Completed, 10)
+        .transition_with_progress(ids[0], TaskStatusData::Completed, 10)
         .unwrap();
     assert!(completed.value.auto_closed);
     assert!(!completed.value.auto_reopened);
     assert_eq!(state.current_batch(), None);
-    assert_eq!(state.batches()[&batch_id].status(), BatchStatus::Archived);
+    assert_eq!(
+        state.batches()[&batch_id].status(),
+        BatchStatusData::Archived
+    );
 
     let reopened = state
-        .transition_with_progress(ids[0], TaskStatus::Pending, 11)
+        .transition_with_progress(ids[0], TaskStatusData::Pending, 11)
         .unwrap();
     assert!(!reopened.value.auto_closed);
     assert!(reopened.value.auto_reopened);
     assert_eq!(state.current_batch(), Some(batch_id));
-    assert_eq!(state.batches()[&batch_id].status(), BatchStatus::Active);
-    assert_eq!(state.tasks()[&ids[0]].status(), TaskStatus::Pending);
+    assert_eq!(state.batches()[&batch_id].status(), BatchStatusData::Active);
+    assert_eq!(state.tasks()[&ids[0]].status(), TaskStatusData::Pending);
 }
 
 #[test]
 fn status_progress_reopen_conflict_leaves_aggregate_unchanged() {
     let (mut state, ids) = state_with_tasks(1);
-    let archived = BatchId::new(1);
+    let archived = BatchIdData::new(1);
     state
-        .transition_with_progress(ids[0], TaskStatus::Completed, 10)
+        .transition_with_progress(ids[0], TaskStatusData::Completed, 10)
         .unwrap();
     state.create_batch(batch_spec("current"), 11).unwrap();
-    let active = BatchId::new(2);
+    let active = BatchIdData::new(2);
     let before = state.clone();
 
     assert_eq!(
-        state.transition_with_progress(ids[0], TaskStatus::Pending, 12),
+        state.transition_with_progress(ids[0], TaskStatusData::Pending, 12),
         Err(TaskCommandError::ActiveBatchConflict {
             active,
             requested: archived,
-        })
+        }
+        .into())
     );
     assert_eq!(state, before);
 }
@@ -90,8 +95,8 @@ fn empty_state_has_canonical_initial_values() {
     let state = TaskStoreState::empty();
     assert!(state.tasks().is_empty());
     assert!(state.batches().is_empty());
-    assert_eq!(state.next_task_id(), TaskId::new(1));
-    assert_eq!(state.next_batch_id(), BatchId::new(1));
+    assert_eq!(state.next_task_id(), TaskIdData::new(1));
+    assert_eq!(state.next_batch_id(), BatchIdData::new(1));
     assert_eq!(state.current_batch(), None);
 }
 
@@ -103,7 +108,7 @@ fn add_dependency_updates_both_directions_and_is_idempotent() {
     assert_eq!(state.tasks()[&ids[1]].blocks(), &[ids[0]]);
     assert_eq!(
         result.events,
-        vec![TaskEvent::TaskDependencyAdded {
+        vec![TaskEventData::TaskDependencyAdded {
             task_id: ids[0],
             blocked_by_id: ids[1],
         }]
@@ -120,17 +125,19 @@ fn add_dependency_rejects_missing_self_cycle_and_indirect_cycle_atomically() {
     let (mut state, ids) = state_with_tasks(3);
     let before = state.clone();
     assert_eq!(
-        state.add_dependency(TaskId::new(99), ids[0], 10),
+        state.add_dependency(TaskIdData::new(99), ids[0], 10),
         Err(TaskCommandError::TaskNotFound {
-            id: TaskId::new(99)
-        })
+            id: TaskIdData::new(99)
+        }
+        .into())
     );
     assert_eq!(state, before);
     assert_eq!(
-        state.add_dependency(ids[0], TaskId::new(99), 10),
+        state.add_dependency(ids[0], TaskIdData::new(99), 10),
         Err(TaskCommandError::TaskNotFound {
-            id: TaskId::new(99)
-        })
+            id: TaskIdData::new(99)
+        }
+        .into())
     );
     assert_eq!(state, before);
     assert_eq!(
@@ -138,7 +145,8 @@ fn add_dependency_rejects_missing_self_cycle_and_indirect_cycle_atomically() {
         Err(TaskCommandError::DependencyCycle {
             task_id: ids[0],
             blocked_by_id: ids[0],
-        })
+        }
+        .into())
     );
     assert_eq!(state, before);
 
@@ -150,7 +158,8 @@ fn add_dependency_rejects_missing_self_cycle_and_indirect_cycle_atomically() {
         Err(TaskCommandError::DependencyCycle {
             task_id: ids[2],
             blocked_by_id: ids[0],
-        })
+        }
+        .into())
     );
     assert_eq!(state, before_cycle);
 }
@@ -159,7 +168,7 @@ fn add_dependency_rejects_missing_self_cycle_and_indirect_cycle_atomically() {
 fn add_dependency_rejects_cross_batch_edge_atomically() {
     let (mut state, ids) = state_with_tasks(1);
     let first = ids[0];
-    state.pause_batch(BatchId::new(1)).unwrap();
+    state.pause_batch(BatchIdData::new(1)).unwrap();
     state.create_batch(batch_spec("第二批"), 10).unwrap();
     let second = state
         .create_task(task_spec("第二批任务"), 11)
@@ -172,7 +181,8 @@ fn add_dependency_rejects_cross_batch_edge_atomically() {
         Err(TaskCommandError::CrossBatchDependency {
             task_id: second,
             blocked_by_id: first,
-        })
+        }
+        .into())
     );
     assert_eq!(state, before);
 }
@@ -184,12 +194,12 @@ fn add_dependency_rejects_deleted_endpoints_atomically() {
     let before = state.clone();
     assert_eq!(
         state.add_dependency(ids[0], ids[1], 11),
-        Err(TaskCommandError::TaskNotFound { id: ids[1] })
+        Err(TaskCommandError::TaskNotFound { id: ids[1] }.into())
     );
     assert_eq!(state, before);
     assert_eq!(
         state.add_dependency(ids[1], ids[0], 12),
-        Err(TaskCommandError::TaskNotFound { id: ids[1] })
+        Err(TaskCommandError::TaskNotFound { id: ids[1] }.into())
     );
     assert_eq!(state, before);
 }
@@ -211,24 +221,24 @@ fn replace_dependencies_updates_the_complete_set_in_one_commit() {
     assert!(state.tasks()[&ids[3]].blocks().contains(&ids[0]));
     assert_eq!(
         result.revision(),
-        Some(TaskRevision::new(revision_before.get() + 1))
+        Some(TaskRevisionData::new(revision_before.get() + 1))
     );
     assert_eq!(
         state.revision(),
-        TaskRevision::new(revision_before.get() + 1)
+        TaskRevisionData::new(revision_before.get() + 1)
     );
     assert_eq!(
         result.events,
         vec![
-            TaskEvent::TaskDependencyRemoved {
+            TaskEventData::TaskDependencyRemoved {
                 task_id: ids[0],
                 blocked_by_id: ids[1],
             },
-            TaskEvent::TaskDependencyAdded {
+            TaskEventData::TaskDependencyAdded {
                 task_id: ids[0],
                 blocked_by_id: ids[2],
             },
-            TaskEvent::TaskDependencyAdded {
+            TaskEventData::TaskDependencyAdded {
                 task_id: ids[0],
                 blocked_by_id: ids[3],
             },
@@ -261,7 +271,11 @@ fn replace_dependencies_empty_list_clears_and_same_set_is_noop() {
 fn replace_dependencies_rejects_invalid_sets_atomically() {
     let (mut state, ids) = state_with_tasks(3);
 
-    for dependencies in [vec![ids[1], ids[1]], vec![TaskId::new(99)], vec![ids[0]]] {
+    for dependencies in [
+        vec![ids[1], ids[1]],
+        vec![TaskIdData::new(99)],
+        vec![ids[0]],
+    ] {
         let before = state.clone();
         assert!(state
             .replace_dependencies(ids[0], dependencies, 10)
@@ -274,7 +288,7 @@ fn replace_dependencies_rejects_invalid_sets_atomically() {
     let before_cycle = state.clone();
     assert!(matches!(
         state.replace_dependencies(ids[0], vec![ids[1]], 13),
-        Err(TaskCommandError::DependencyCycle { .. })
+        Err(ref error) if error.message().contains("依赖边会形成环")
     ));
     assert_eq!(state, before_cycle);
 }
@@ -283,7 +297,7 @@ fn replace_dependencies_rejects_invalid_sets_atomically() {
 fn replace_dependencies_rejects_cross_batch_set_atomically() {
     let (mut state, ids) = state_with_tasks(1);
     let first = ids[0];
-    state.pause_batch(BatchId::new(1)).unwrap();
+    state.pause_batch(BatchIdData::new(1)).unwrap();
     state.create_batch(batch_spec("第二批"), 10).unwrap();
     let second = state
         .create_task(task_spec("第二批任务"), 11)
@@ -294,7 +308,7 @@ fn replace_dependencies_rejects_cross_batch_set_atomically() {
 
     assert!(matches!(
         state.replace_dependencies(second, vec![first], 12),
-        Err(TaskCommandError::CrossBatchDependency { .. })
+        Err(ref error) if error.message().contains("禁止跨批次依赖")
     ));
     assert_eq!(state, before);
 }
@@ -308,7 +322,7 @@ fn remove_dependency_updates_both_directions_and_absent_edge_is_idempotent() {
     assert!(state.tasks()[&ids[1]].blocks().is_empty());
     assert_eq!(
         result.events,
-        vec![TaskEvent::TaskDependencyRemoved {
+        vec![TaskEventData::TaskDependencyRemoved {
             task_id: ids[0],
             blocked_by_id: ids[1],
         }]
@@ -326,24 +340,29 @@ fn blocked_admission_is_atomic_until_every_dependency_completes() {
     state.add_dependency(ids[0], ids[2], 10).unwrap();
     let before = state.clone();
     assert_eq!(
-        state.transition(ids[0], TaskStatus::InProgress, 20),
+        state.transition(ids[0], TaskStatusData::InProgress, 20),
         Err(TaskCommandError::TaskBlocked {
             id: ids[0],
             blocked_by: vec![ids[1], ids[2]],
-        })
+        }
+        .into())
     );
     assert_eq!(state, before);
 
-    state.transition(ids[1], TaskStatus::Completed, 21).unwrap();
-    assert!(matches!(
-        state.transition(ids[0], TaskStatus::InProgress, 22),
-        Err(TaskCommandError::TaskBlocked { .. })
-    ));
-    state.transition(ids[2], TaskStatus::Completed, 23).unwrap();
     state
-        .transition(ids[0], TaskStatus::InProgress, 24)
+        .transition(ids[1], TaskStatusData::Completed, 21)
         .unwrap();
-    assert_eq!(state.tasks()[&ids[0]].status(), TaskStatus::InProgress);
+    assert!(matches!(
+        state.transition(ids[0], TaskStatusData::InProgress, 22),
+        Err(ref error) if error.message().contains("被前置任务阻塞")
+    ));
+    state
+        .transition(ids[2], TaskStatusData::Completed, 23)
+        .unwrap();
+    state
+        .transition(ids[0], TaskStatusData::InProgress, 24)
+        .unwrap();
+    assert_eq!(state.tasks()[&ids[0]].status(), TaskStatusData::InProgress);
 }
 
 #[test]
@@ -353,7 +372,7 @@ fn delete_cleans_all_incoming_and_outgoing_edges_atomically() {
     state.add_dependency(ids[1], ids[2], 11).unwrap();
     state.add_dependency(ids[3], ids[2], 12).unwrap();
     let result = state.delete(ids[1], 20).unwrap();
-    assert_eq!(result.value.status(), TaskStatus::Deleted);
+    assert_eq!(result.value.status(), TaskStatusData::Deleted);
     assert!(state.tasks()[&ids[1]].blocked_by().is_empty());
     assert!(state.tasks()[&ids[1]].blocks().is_empty());
     assert!(state.tasks()[&ids[0]].blocked_by().is_empty());
@@ -361,7 +380,7 @@ fn delete_cleans_all_incoming_and_outgoing_edges_atomically() {
     assert_eq!(state.tasks()[&ids[3]].blocked_by(), &[ids[2]]);
     assert_eq!(
         result.events,
-        vec![TaskEvent::TaskDeleted { task_id: ids[1] }]
+        vec![TaskEventData::TaskDeleted { task_id: ids[1] }]
     );
 }
 
@@ -379,35 +398,35 @@ fn delete_repeated_on_already_deleted_task_is_idempotent_no_op() {
     );
     assert_eq!(duplicate.revision(), None);
     assert!(duplicate.events.is_empty());
-    assert_eq!(duplicate.value.status(), TaskStatus::Deleted);
+    assert_eq!(duplicate.value.status(), TaskStatusData::Deleted);
 }
 
 #[test]
 fn batch_commands_keep_current_batch_and_ids_consistent() {
     let mut state = TaskStoreState::empty();
     let first = state.create_batch(batch_spec("第一批"), 1).unwrap().value;
-    assert_eq!(first.id(), BatchId::new(1));
+    assert_eq!(first.id(), BatchIdData::new(1));
     assert_eq!(state.current_batch(), Some(first.id()));
-    assert_eq!(state.next_batch_id(), BatchId::new(2));
+    assert_eq!(state.next_batch_id(), BatchIdData::new(2));
 
     let task_one = state.create_task(task_spec("任务一"), 2).unwrap().value;
-    assert_eq!(task_one.id(), TaskId::new(1));
+    assert_eq!(task_one.id(), TaskIdData::new(1));
     assert_eq!(task_one.batch(), first.id());
     state.pause_batch(first.id()).unwrap();
     assert_eq!(state.current_batch(), None);
     let next_before_failure = state.next_task_id();
     assert_eq!(
         state.create_task(task_spec("无批次任务"), 3),
-        Err(TaskCommandError::NoActiveBatch)
+        Err(TaskCommandError::NoActiveBatch.into())
     );
     assert_eq!(state.next_task_id(), next_before_failure);
 
     let second = state.create_batch(batch_spec("第二批"), 4).unwrap().value;
-    assert_eq!(second.id(), BatchId::new(2));
+    assert_eq!(second.id(), BatchIdData::new(2));
     let task_two = state.create_task(task_spec("任务二"), 5).unwrap().value;
-    assert_eq!(task_two.id(), TaskId::new(2));
+    assert_eq!(task_two.id(), TaskIdData::new(2));
     assert_eq!(task_two.batch(), second.id());
-    assert_eq!(state.next_task_id(), TaskId::new(3));
+    assert_eq!(state.next_task_id(), TaskIdData::new(3));
 }
 
 #[test]
@@ -430,7 +449,8 @@ fn resume_and_archive_enforce_single_active_batch_and_archived_terminal_state() 
         Err(TaskCommandError::ActiveBatchConflict {
             active: second,
             requested: first,
-        })
+        }
+        .into())
     );
     assert_eq!(state, before);
 
@@ -440,11 +460,11 @@ fn resume_and_archive_enforce_single_active_batch_and_archived_terminal_state() 
     assert_eq!(state.current_batch(), Some(first));
     state.archive_batch(first).unwrap();
     assert_eq!(state.current_batch(), None);
-    assert_eq!(state.batches()[&first].status(), BatchStatus::Archived);
+    assert_eq!(state.batches()[&first].status(), BatchStatusData::Archived);
     state.archive_batch(first).unwrap();
     assert!(matches!(
         state.resume_batch(first),
-        Err(TaskCommandError::IllegalBatchTransition { .. })
+        Err(ref error) if error.message().contains("不允许从")
     ));
 }
 
@@ -452,45 +472,45 @@ fn resume_and_archive_enforce_single_active_batch_and_archived_terminal_state() 
 fn deleting_task_and_archiving_batch_never_reuse_ids() {
     let (mut state, ids) = state_with_tasks(1);
     state.delete(ids[0], 10).unwrap();
-    state.archive_batch(BatchId::new(1)).unwrap();
+    state.archive_batch(BatchIdData::new(1)).unwrap();
     let second_batch = state.create_batch(batch_spec("第二批"), 11).unwrap().value;
     let second_task = state.create_task(task_spec("第二任务"), 12).unwrap().value;
-    assert_eq!(second_batch.id(), BatchId::new(2));
-    assert_eq!(second_task.id(), TaskId::new(2));
+    assert_eq!(second_batch.id(), BatchIdData::new(2));
+    assert_eq!(second_task.id(), TaskIdData::new(2));
 }
 
 #[test]
 fn successful_mutations_commit_monotonic_revision_and_noop_mutations_stay_uncommitted() {
     let mut state = TaskStoreState::empty();
-    assert_eq!(state.revision(), TaskRevision::new(0));
+    assert_eq!(state.revision(), TaskRevisionData::new(0));
 
     let batch = state.create_batch(batch_spec("批次"), 1).unwrap();
-    assert_eq!(batch.revision(), Some(TaskRevision::new(1)));
-    assert_eq!(state.revision(), TaskRevision::new(1));
+    assert_eq!(batch.revision(), Some(TaskRevisionData::new(1)));
+    assert_eq!(state.revision(), TaskRevisionData::new(1));
 
     let task = state.create_task(task_spec("任务"), 2).unwrap();
-    assert_eq!(task.revision(), Some(TaskRevision::new(2)));
-    assert_eq!(state.revision(), TaskRevision::new(2));
+    assert_eq!(task.revision(), Some(TaskRevisionData::new(2)));
+    assert_eq!(state.revision(), TaskRevisionData::new(2));
 
     let task_id = task.value.id();
     let noop = state
-        .set_priority(task_id, TaskPriority::Normal, 3)
+        .set_priority(task_id, TaskPriorityData::Normal, 3)
         .unwrap();
     assert_eq!(noop.revision(), None);
-    assert_eq!(state.revision(), TaskRevision::new(2));
+    assert_eq!(state.revision(), TaskRevisionData::new(2));
     assert!(noop.events.is_empty());
 
     let changed = state
-        .set_priority(task_id, TaskPriority::Urgent, 4)
+        .set_priority(task_id, TaskPriorityData::Urgent, 4)
         .unwrap();
-    assert_eq!(changed.revision(), Some(TaskRevision::new(3)));
-    assert_eq!(state.revision(), TaskRevision::new(3));
+    assert_eq!(changed.revision(), Some(TaskRevisionData::new(3)));
+    assert_eq!(state.revision(), TaskRevisionData::new(3));
     assert_eq!(
         changed.events,
-        vec![TaskEvent::TaskPriorityChanged {
+        vec![TaskEventData::TaskPriorityChanged {
             task_id,
-            from: TaskPriority::Normal,
-            to: TaskPriority::Urgent,
+            from: TaskPriorityData::Normal,
+            to: TaskPriorityData::Urgent,
         }]
     );
 }
@@ -505,37 +525,49 @@ fn add_and_remove_tag_return_task_and_stable_events_and_are_idempotent() {
     assert_eq!(added.value.tags(), &["backend".to_string()]);
     assert_eq!(
         added.events,
-        vec![TaskEvent::TaskTagAdded {
+        vec![TaskEventData::TaskTagAdded {
             task_id: id,
             tag: "backend".into(),
         }]
     );
     assert_eq!(
         added.revision(),
-        Some(TaskRevision::new(base_revision.get() + 1))
+        Some(TaskRevisionData::new(base_revision.get() + 1))
     );
-    assert_eq!(state.revision(), TaskRevision::new(base_revision.get() + 1));
+    assert_eq!(
+        state.revision(),
+        TaskRevisionData::new(base_revision.get() + 1)
+    );
 
     let duplicate = state.add_tag(id, "backend".into(), 11).unwrap();
     assert!(duplicate.events.is_empty());
     assert_eq!(duplicate.revision(), None);
-    assert_eq!(state.revision(), TaskRevision::new(base_revision.get() + 1));
+    assert_eq!(
+        state.revision(),
+        TaskRevisionData::new(base_revision.get() + 1)
+    );
 
     let removed = state.remove_tag(id, "backend", 12).unwrap();
     assert!(removed.value.tags().is_empty());
     assert_eq!(
         removed.events,
-        vec![TaskEvent::TaskTagRemoved {
+        vec![TaskEventData::TaskTagRemoved {
             task_id: id,
             tag: "backend".into(),
         }]
     );
-    assert_eq!(state.revision(), TaskRevision::new(base_revision.get() + 2));
+    assert_eq!(
+        state.revision(),
+        TaskRevisionData::new(base_revision.get() + 2)
+    );
 
     let absent = state.remove_tag(id, "missing", 13).unwrap();
     assert!(absent.events.is_empty());
     assert_eq!(absent.revision(), None);
-    assert_eq!(state.revision(), TaskRevision::new(base_revision.get() + 2));
+    assert_eq!(
+        state.revision(),
+        TaskRevisionData::new(base_revision.get() + 2)
+    );
 }
 
 #[test]
@@ -548,7 +580,7 @@ fn dependency_commands_return_the_primary_task_and_commit_revision() {
     assert_eq!(added.value.blocked_by(), &[ids[1]]);
     assert_eq!(
         added.revision(),
-        Some(TaskRevision::new(base_revision.get() + 1))
+        Some(TaskRevisionData::new(base_revision.get() + 1))
     );
 
     let duplicate = state.add_dependency(ids[0], ids[1], 11).unwrap();
@@ -560,7 +592,7 @@ fn dependency_commands_return_the_primary_task_and_commit_revision() {
     assert!(removed.value.blocked_by().is_empty());
     assert_eq!(
         removed.revision(),
-        Some(TaskRevision::new(base_revision.get() + 2))
+        Some(TaskRevisionData::new(base_revision.get() + 2))
     );
 
     let absent = state.remove_dependency(ids[0], ids[1], 13).unwrap();
@@ -573,19 +605,19 @@ fn batch_lifecycle_commands_return_batch_command_results_with_revision() {
     let mut state = TaskStoreState::empty();
     let created = state.create_batch(batch_spec("批次"), 1).unwrap();
     let id = created.value.id();
-    assert_eq!(created.revision(), Some(TaskRevision::new(1)));
+    assert_eq!(created.revision(), Some(TaskRevisionData::new(1)));
 
     let paused = state.pause_batch(id).unwrap();
-    assert_eq!(paused.value.status(), BatchStatus::Paused);
-    assert_eq!(paused.revision(), Some(TaskRevision::new(2)));
+    assert_eq!(paused.value.status(), BatchStatusData::Paused);
+    assert_eq!(paused.revision(), Some(TaskRevisionData::new(2)));
 
     let resumed = state.resume_batch(id).unwrap();
-    assert_eq!(resumed.value.status(), BatchStatus::Active);
-    assert_eq!(resumed.revision(), Some(TaskRevision::new(3)));
+    assert_eq!(resumed.value.status(), BatchStatusData::Active);
+    assert_eq!(resumed.revision(), Some(TaskRevisionData::new(3)));
 
     let archived = state.archive_batch(id).unwrap();
-    assert_eq!(archived.value.status(), BatchStatus::Archived);
-    assert_eq!(archived.revision(), Some(TaskRevision::new(4)));
+    assert_eq!(archived.value.status(), BatchStatusData::Archived);
+    assert_eq!(archived.revision(), Some(TaskRevisionData::new(4)));
 }
 
 #[test]
@@ -603,7 +635,7 @@ fn record_batch_turn_tracks_last_active_turn_and_silence_and_commits_revision() 
     assert_eq!(silent.value.last_active_turn(), 0);
     assert_eq!(
         silent.revision(),
-        Some(TaskRevision::new(base_revision.get() + 1))
+        Some(TaskRevisionData::new(base_revision.get() + 1))
     );
 
     let silent_again = state.record_batch_turn(id, 6, false).unwrap();
@@ -615,41 +647,42 @@ fn record_batch_turn_tracks_last_active_turn_and_silence_and_commits_revision() 
 
     let before = state.clone();
     assert_eq!(
-        state.record_batch_turn(BatchId::new(99), 8, true),
+        state.record_batch_turn(BatchIdData::new(99), 8, true),
         Err(TaskCommandError::BatchNotFound {
-            id: BatchId::new(99)
-        })
+            id: BatchIdData::new(99)
+        }
+        .into())
     );
     assert_eq!(state, before);
 }
 
 #[test]
 fn task_and_batch_id_exhaustion_is_rejected_and_state_is_unchanged() {
-    let mut state = TaskStoreState::empty().with_next_batch_id(BatchId::new(u64::MAX));
+    let mut state = TaskStoreState::empty().with_next_batch_id(BatchIdData::new(u64::MAX));
     let before = state.clone();
     assert_eq!(
         state.create_batch(batch_spec("批次"), 1),
-        Err(TaskCommandError::BatchIdExhausted)
+        Err(TaskCommandError::BatchIdExhausted.into())
     );
     assert_eq!(state, before);
 
-    let mut state = TaskStoreState::empty().with_next_task_id(TaskId::new(u64::MAX));
+    let mut state = TaskStoreState::empty().with_next_task_id(TaskIdData::new(u64::MAX));
     state.create_batch(batch_spec("批次"), 1).unwrap();
     let before = state.clone();
     assert_eq!(
         state.create_task(task_spec("任务"), 2),
-        Err(TaskCommandError::TaskIdExhausted)
+        Err(TaskCommandError::TaskIdExhausted.into())
     );
     assert_eq!(state, before);
 }
 
 #[test]
 fn revision_exhaustion_is_rejected_and_state_is_unchanged() {
-    let mut state = TaskStoreState::empty().with_revision(TaskRevision::new(u64::MAX));
+    let mut state = TaskStoreState::empty().with_revision(TaskRevisionData::new(u64::MAX));
     let before = state.clone();
     assert_eq!(
         state.create_batch(batch_spec("批次"), 1),
-        Err(TaskCommandError::RevisionExhausted)
+        Err(TaskCommandError::RevisionExhausted.into())
     );
     assert_eq!(state, before);
 }
@@ -665,7 +698,7 @@ fn archive_batch_is_idempotent_noop_and_tolerates_revision_exhaustion() {
 
     // First archive is a real, revision-committing transition.
     let archived = state.archive_batch(id).unwrap();
-    assert_eq!(archived.value.status(), BatchStatus::Archived);
+    assert_eq!(archived.value.status(), BatchStatusData::Archived);
     assert!(archived.revision().is_some());
     let revision_after_first_archive = state.revision();
 
@@ -675,20 +708,20 @@ fn archive_batch_is_idempotent_noop_and_tolerates_revision_exhaustion() {
     let duplicate = state.archive_batch(id).unwrap();
     assert!(duplicate.events.is_empty());
     assert_eq!(duplicate.revision(), None);
-    assert_eq!(duplicate.value.status(), BatchStatus::Archived);
+    assert_eq!(duplicate.value.status(), BatchStatusData::Archived);
     assert_eq!(state, before);
     assert_eq!(state.revision(), revision_after_first_archive);
 
     // Even when the store's revision counter is already exhausted, a repeat
     // archive call must still succeed as a no-op instead of surfacing
     // `RevisionExhausted`, because it never needs to reserve a revision.
-    let mut saturated = state.with_revision(TaskRevision::new(u64::MAX));
+    let mut saturated = state.with_revision(TaskRevisionData::new(u64::MAX));
     let before = saturated.clone();
     let duplicate_at_max = saturated.archive_batch(id).unwrap();
     assert!(duplicate_at_max.events.is_empty());
     assert_eq!(duplicate_at_max.revision(), None);
     assert_eq!(saturated, before);
-    assert_eq!(saturated.revision(), TaskRevision::new(u64::MAX));
+    assert_eq!(saturated.revision(), TaskRevisionData::new(u64::MAX));
 }
 
 #[test]
@@ -706,8 +739,9 @@ fn record_batch_turn_rejects_non_active_batch_and_leaves_state_unchanged() {
         state.record_batch_turn(id, 5, true),
         Err(TaskCommandError::BatchNotActive {
             id,
-            status: BatchStatus::Paused,
-        })
+            status: BatchStatusData::Paused,
+        }
+        .into())
     );
     assert_eq!(state, before);
 
@@ -718,18 +752,19 @@ fn record_batch_turn_rejects_non_active_batch_and_leaves_state_unchanged() {
         state.record_batch_turn(id, 5, true),
         Err(TaskCommandError::BatchNotActive {
             id,
-            status: BatchStatus::Archived,
-        })
+            status: BatchStatusData::Archived,
+        }
+        .into())
     );
     assert_eq!(state, before);
 }
 
 #[test]
 fn record_batch_turn_is_noop_when_no_effective_change() {
-    let id = BatchId::new(1);
+    let id = BatchIdData::new(1);
     let mut state = TaskStoreState::empty()
-        .with_next_batch_id(BatchId::new(2))
-        .with_batch(Batch::with_status(id, BatchStatus::Active, 0));
+        .with_next_batch_id(BatchIdData::new(2))
+        .with_batch(BatchData::with_status(id, BatchStatusData::Active, 0));
     let base_revision = state.revision();
 
     // Already at last_active_turn == 0 with silence_turns == 0: recording the
@@ -741,12 +776,12 @@ fn record_batch_turn_is_noop_when_no_effective_change() {
     assert_eq!(state.batches()[&id].last_active_turn(), 0);
     assert_eq!(state.batches()[&id].silence_turns(), 0);
 
-    let saturated_id = BatchId::new(2);
+    let saturated_id = BatchIdData::new(2);
     let mut saturated_state = TaskStoreState::empty()
-        .with_next_batch_id(BatchId::new(3))
-        .with_batch(Batch::with_status(
+        .with_next_batch_id(BatchIdData::new(3))
+        .with_batch(BatchData::with_status(
             saturated_id,
-            BatchStatus::Active,
+            BatchStatusData::Active,
             u64::MAX,
         ));
     let base_revision = saturated_state.revision();
@@ -772,11 +807,11 @@ fn clear_is_one_atomic_revision_and_empty_clear_is_noop() {
     let cleared = state.clear().expect("clear succeeds");
     assert_eq!(
         cleared.revision(),
-        Some(TaskRevision::new(before.get() + 1))
+        Some(TaskRevisionData::new(before.get() + 1))
     );
     assert_eq!(
         cleared.events,
-        vec![TaskEvent::TaskStoreCleared {
+        vec![TaskEventData::TaskStoreCleared {
             task_count: 2,
             batch_count: 1,
         }]
@@ -784,8 +819,8 @@ fn clear_is_one_atomic_revision_and_empty_clear_is_noop() {
     assert!(state.list().is_empty());
     assert!(state.list_batches().is_empty());
     assert_eq!(state.current_batch(), None);
-    assert_eq!(state.next_task_id(), TaskId::new(3));
-    assert_eq!(state.next_batch_id(), BatchId::new(1));
+    assert_eq!(state.next_task_id(), TaskIdData::new(3));
+    assert_eq!(state.next_batch_id(), BatchIdData::new(1));
 
     let revision = state.revision();
     let noop = state.clear().expect("empty clear succeeds");
@@ -797,8 +832,11 @@ fn clear_is_one_atomic_revision_and_empty_clear_is_noop() {
 #[test]
 fn clear_at_revision_exhaustion_is_atomic() {
     let (state, _) = state_with_tasks(1);
-    let mut state = state.with_revision(TaskRevision::new(u64::MAX));
+    let mut state = state.with_revision(TaskRevisionData::new(u64::MAX));
     let before = state.clone();
-    assert_eq!(state.clear(), Err(TaskCommandError::RevisionExhausted));
+    assert_eq!(
+        state.clear(),
+        Err(TaskCommandError::RevisionExhausted.into())
+    );
     assert_eq!(state, before);
 }

@@ -577,8 +577,8 @@ fn catalog_covers_exactly_runtime_owners() {
         (
             "agent/features/task",
             "aemeath:agent:task",
-            Owner::Task,
-            Sink::Task,
+            Owner::TaskData,
+            Sink::TaskData,
             "agent-task.log",
         ),
         (

@@ -595,7 +595,7 @@ async fn terminate_while_awaiting_user_finishes_as_terminated() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// #1248 Task 5: Four-body interaction routing engine tests (RED)
+// #1248 TaskData 5: Four-body interaction routing engine tests (RED)
 // ═══════════════════════════════════════════════════════════════════
 
 mod interaction_routing {

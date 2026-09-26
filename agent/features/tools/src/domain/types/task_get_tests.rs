@@ -1,22 +1,22 @@
 use super::TaskGetResult;
 use crate::domain::types::ToolSchema;
-use task::{BatchCreateSpec, TaskCreateSpec, TaskPriority};
+use task::{BatchCreateSpecData, TaskCreateSpecData, TaskPriorityData};
 
 #[test]
 fn task_get_result_uses_task_owned_view_without_legacy_owner() {
     let wiring = task::wire_task();
     let access = wiring.access();
     let batch = access
-        .create_batch(BatchCreateSpec::try_new("批次".into()).unwrap(), 10)
+        .create_batch(BatchCreateSpecData::try_new("批次".into()).unwrap(), 10)
         .unwrap()
         .value;
     let task = access
         .create_task(
-            TaskCreateSpec::try_new(
+            TaskCreateSpecData::try_new(
                 "核验输出".into(),
                 "保持既有 wire".into(),
                 None,
-                TaskPriority::High,
+                TaskPriorityData::High,
             )
             .unwrap(),
             11,
@@ -25,14 +25,14 @@ fn task_get_result_uses_task_owned_view_without_legacy_owner() {
         .value;
 
     let value = serde_json::to_value(TaskGetResult {
-        task: task::TaskView::from(&task),
+        task: task::TaskViewData::from(&task),
     })
     .expect("serialize task result");
     assert_eq!(
         value,
         serde_json::json!({
             "task": {
-                "id": "1",
+                "id": 1,
                 "subject": "核验输出",
                 "description": "保持既有 wire",
                 "status": "pending",

@@ -28,7 +28,7 @@ pub enum PreviousPolicy {
 pub enum StorageNamespace {
     Session,
     Memory,
-    Task,
+    TaskData,
     History,
     ToolResult,
     AuditUsage,
@@ -41,7 +41,7 @@ impl StorageNamespace {
         match self {
             Self::Session => "session",
             Self::Memory => "memory",
-            Self::Task => "task",
+            Self::TaskData => "task",
             Self::History => "history",
             Self::ToolResult => "tool-result",
             Self::AuditUsage => "audit-usage",
@@ -55,7 +55,7 @@ impl StorageNamespace {
             Self::AuditUsage => PreviousPolicy::Discard,
             Self::Session
             | Self::Memory
-            | Self::Task
+            | Self::TaskData
             | Self::History
             | Self::ToolResult
             | Self::Config
@@ -68,7 +68,7 @@ impl StorageNamespace {
             Self::AuditUsage => Durability::BestEffort,
             Self::Session
             | Self::Memory
-            | Self::Task
+            | Self::TaskData
             | Self::History
             | Self::ToolResult
             | Self::Config
