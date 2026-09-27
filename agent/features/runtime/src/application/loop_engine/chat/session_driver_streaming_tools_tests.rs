@@ -16,7 +16,7 @@ struct StepBlockingTool {
 }
 
 #[async_trait]
-impl ::tools::TypedTool for StepBlockingTool {
+impl ::tools::published::typed::TypedTool for StepBlockingTool {
     type Output = serde_json::Value;
 
     fn name(&self) -> &str {
@@ -39,11 +39,11 @@ impl ::tools::TypedTool for StepBlockingTool {
         &self,
         _input: serde_json::Value,
         context: &::tools::ToolExecutionContext,
-    ) -> ::tools::TypedToolResult<Self::Output> {
+    ) -> ::tools::published::typed::TypedToolResult<Self::Output> {
         self.started.notify_one();
         context.cancellation().cancelled().await;
         self.cleaned.notify_one();
-        ::tools::TypedToolResult::error(format!("{} cancelled by current Step", self.name))
+        ::tools::published::typed::TypedToolResult::error(format!("{} cancelled by current Step", self.name))
     }
 }
 

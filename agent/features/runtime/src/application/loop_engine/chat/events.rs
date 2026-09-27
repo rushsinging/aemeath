@@ -176,8 +176,8 @@ pub enum RuntimeStreamEvent {
         tool_id: ToolCallId,
         delta: String,
     },
-    SubRunStarted(tools::SubRunStartedEvent),
-    SubRunActivity(tools::SubRunActivityEvent),
+    SubRunStarted(tools::published::sub_run::SubRunStartedEvent),
+    SubRunActivity(tools::published::sub_run::SubRunActivityEvent),
     SkillsUpdated {
         snapshot: tools::SkillCatalogSnapshot,
     },

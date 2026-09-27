@@ -273,7 +273,7 @@ struct SpyTool {
 }
 
 #[async_trait::async_trait]
-impl tools::TypedTool for SpyTool {
+impl tools::published::typed::TypedTool for SpyTool {
     type Output = serde_json::Value;
 
     fn name(&self) -> &str {
@@ -292,14 +292,17 @@ impl tools::TypedTool for SpyTool {
         &self,
         _input: serde_json::Value,
         ctx: &tools::ToolExecutionContext,
-    ) -> tools::TypedToolResult<Self::Output> {
+    ) -> tools::published::typed::TypedToolResult<Self::Output> {
         self.executed.store(true, Ordering::SeqCst);
         // Verify progress_sink is Some — proving ToolExecutionPorts wired it.
         if ctx.progress_sink().is_some() {
             self.progress_sink_was_some.store(true, Ordering::SeqCst);
         }
         *self.invocation_source.lock().unwrap() = Some(ctx.scope().invocation_source());
-        tools::TypedToolResult::success("ok", serde_json::json!({"executed": true}))
+        tools::published::typed::TypedToolResult::success(
+            "ok",
+            serde_json::json!({"executed": true}),
+        )
     }
 }
 
@@ -514,7 +517,7 @@ struct BlockingCancelTool {
 }
 
 #[async_trait::async_trait]
-impl tools::TypedTool for BlockingCancelTool {
+impl tools::published::typed::TypedTool for BlockingCancelTool {
     type Output = serde_json::Value;
 
     fn name(&self) -> &str {
@@ -533,11 +536,11 @@ impl tools::TypedTool for BlockingCancelTool {
         &self,
         _input: serde_json::Value,
         ctx: &tools::ToolExecutionContext,
-    ) -> tools::TypedToolResult<Self::Output> {
+    ) -> tools::published::typed::TypedToolResult<Self::Output> {
         self.started.store(true, Ordering::SeqCst);
         // Block until the cancellation signal fires.
         ctx.cancellation().cancelled().await;
-        tools::TypedToolResult::error("cancelled")
+        tools::published::typed::TypedToolResult::error("cancelled")
     }
 }
 

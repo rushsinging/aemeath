@@ -36,12 +36,16 @@ impl crate::application::loop_engine::run_finalization::RunFinalizationObserver
         if let Some(sink) = self.progress_sink {
             let terminal_outcome = match terminal {
                 tools::AgentRunTerminal::Completed { .. } => {
-                    tools::SubRunTerminalOutcome::Completed
+                    tools::published::sub_run::SubRunTerminalOutcome::Completed
                 }
-                tools::AgentRunTerminal::Failed { error } => tools::SubRunTerminalOutcome::Failed {
-                    error: error.clone(),
-                },
-                tools::AgentRunTerminal::Cancelled => tools::SubRunTerminalOutcome::Cancelled,
+                tools::AgentRunTerminal::Failed { error } => {
+                    tools::published::sub_run::SubRunTerminalOutcome::Failed {
+                        error: error.clone(),
+                    }
+                }
+                tools::AgentRunTerminal::Cancelled => {
+                    tools::published::sub_run::SubRunTerminalOutcome::Cancelled
+                }
             };
             sink.emit(super::progress::build_progress_event(
                 self.source_context.clone(),

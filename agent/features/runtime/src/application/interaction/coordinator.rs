@@ -360,7 +360,7 @@ async fn execute_approved_call(
     };
     let call = approval.call;
     let mut input = call.input.clone();
-    tools::strip_runtime_meta(&mut input);
+    tools::published::schema_validation::strip_runtime_meta(&mut input);
     let invocation = tools::ToolInvocation::new(
         call.name.as_str(),
         input,

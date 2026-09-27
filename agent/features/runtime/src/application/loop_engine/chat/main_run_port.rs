@@ -108,7 +108,7 @@ pub(crate) fn make_agent(
     workspace: &project::Workspace,
     cancel: &CancellationToken,
     read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    session_reminders: Arc<std::sync::Mutex<tools::SessionReminders>>,
+    session_reminders: Arc<std::sync::Mutex<tools::published::session_reminder::SessionReminders>>,
     max_tool_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
     session_id: &str,

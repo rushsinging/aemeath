@@ -435,8 +435,9 @@ mod tests {
     use share::message::ContentBlock;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
+    use tools::published::typed::{TypedTool, TypedToolResult};
+    use tools::ToolExecutionContext;
     use tools::ToolOutcome;
-    use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
 
     /// A test HookDispatcher that always returns Continue.
     struct NoOpHookPort;

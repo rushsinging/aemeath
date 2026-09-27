@@ -727,7 +727,7 @@ impl std::fmt::Debug for HookDirectiveOutcome {
 ///
 /// 1. Look up the frozen catalog descriptor by tool name.
 /// 2. Validate the updated input against the descriptor's `input_schema` via
-///    [`tools::validate_tool_input`].
+///    [`tools::published::schema_validation::validate_tool_input`].
 /// 3. Rebuild a [`PolicyRequestData`] using the descriptor's `required_capabilities`.
 /// 4. Re-evaluate policy.
 ///
@@ -803,10 +803,14 @@ fn revalidate_updated_input(
     };
 
     // 2. Validate updated input against the descriptor's JSON Schema.
-    if let Err(mismatch) = tools::validate_tool_input(&call.name, &descriptor.input_schema, input) {
+    if let Err(mismatch) = tools::published::schema_validation::validate_tool_input(
+        &call.name,
+        &descriptor.input_schema,
+        input,
+    ) {
         return HookDirectiveOutcome::InvalidInput {
             call: call.clone(),
-            error: tools::format_tool_input_error(&mismatch),
+            error: tools::published::schema_validation::format_tool_input_error(&mismatch),
         };
     }
 

@@ -104,19 +104,20 @@ fn activity_events_map_without_losing_change_or_snapshot_facts() {
 
 #[test]
 fn sdk_event_mapper_sub_run_activity_preserves_identity() {
-    let event = RuntimeStreamEvent::SubRunActivity(tools::SubRunActivityEvent {
-        identity: tools::SubRunIdentity {
-            agent_id: "agent-child-a".to_string(),
-            run_id: "run-child-a".to_string(),
-            parent_chat_id: "parent-chat".to_string(),
-            parent_run_id: "run-main".to_string(),
-            spawned_by_tool_call_id: "tool-agent-a".to_string(),
-        },
-        sequence: 3,
-        kind: tools::SubRunActivityKind::Text {
-            text: "检查配置".to_string(),
-        },
-    });
+    let event =
+        RuntimeStreamEvent::SubRunActivity(tools::published::sub_run::SubRunActivityEvent {
+            identity: tools::published::sub_run::SubRunIdentity {
+                agent_id: "agent-child-a".to_string(),
+                run_id: "run-child-a".to_string(),
+                parent_chat_id: "parent-chat".to_string(),
+                parent_run_id: "run-main".to_string(),
+                spawned_by_tool_call_id: "tool-agent-a".to_string(),
+            },
+            sequence: 3,
+            kind: tools::published::sub_run::SubRunActivityKind::Text {
+                text: "检查配置".to_string(),
+            },
+        });
 
     match map_stream_event(event) {
         sdk::ChatEvent::SubRunActivity { event } => {
@@ -147,23 +148,24 @@ fn sdk_event_mapper_sub_run_activity_preserves_identity() {
 
 #[test]
 fn sdk_sub_run_tool_result_preserves_tool_name() {
-    let event = RuntimeStreamEvent::SubRunActivity(tools::SubRunActivityEvent {
-        identity: tools::SubRunIdentity {
-            agent_id: "agent-child-a".to_string(),
-            run_id: "run-child-a".to_string(),
-            parent_chat_id: "parent-chat".to_string(),
-            parent_run_id: "run-main".to_string(),
-            spawned_by_tool_call_id: "tool-agent-a".to_string(),
-        },
-        sequence: 4,
-        kind: tools::SubRunActivityKind::ToolResult {
-            tool_call_id: "skill-call".to_string(),
-            tool_name: "Skill".to_string(),
-            output: "SKILL_BODY_SENTINEL".to_string(),
-            content: serde_json::json!({"name": "using-superpowers"}),
-            is_error: false,
-        },
-    });
+    let event =
+        RuntimeStreamEvent::SubRunActivity(tools::published::sub_run::SubRunActivityEvent {
+            identity: tools::published::sub_run::SubRunIdentity {
+                agent_id: "agent-child-a".to_string(),
+                run_id: "run-child-a".to_string(),
+                parent_chat_id: "parent-chat".to_string(),
+                parent_run_id: "run-main".to_string(),
+                spawned_by_tool_call_id: "tool-agent-a".to_string(),
+            },
+            sequence: 4,
+            kind: tools::published::sub_run::SubRunActivityKind::ToolResult {
+                tool_call_id: "skill-call".to_string(),
+                tool_name: "Skill".to_string(),
+                output: "SKILL_BODY_SENTINEL".to_string(),
+                content: serde_json::json!({"name": "using-superpowers"}),
+                is_error: false,
+            },
+        });
 
     let sdk::ChatEvent::SubRunActivity { event } = map_stream_event(event) else {
         panic!("expected SubRunActivity");
@@ -183,8 +185,8 @@ fn sub_run_started_preserves_identity_role_model_and_sequence() {
     let expected_agent_id = sdk::AgentId::from_legacy_or_new("agent-sub-a");
     let expected_parent_chat_id = sdk::ChatId::from_legacy_or_new("parent-chat");
     let expected_tool_call_id = sdk::ToolCallId::from_legacy_or_new("tool-agent-a");
-    let event = RuntimeStreamEvent::SubRunStarted(tools::SubRunStartedEvent {
-        identity: tools::SubRunIdentity {
+    let event = RuntimeStreamEvent::SubRunStarted(tools::published::sub_run::SubRunStartedEvent {
+        identity: tools::published::sub_run::SubRunIdentity {
             agent_id: "agent-sub-a".to_string(),
             run_id: "run-sub-a".to_string(),
             parent_chat_id: "parent-chat".to_string(),

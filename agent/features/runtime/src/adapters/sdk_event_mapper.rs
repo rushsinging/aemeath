@@ -651,7 +651,9 @@ pub(crate) fn map_stream_event(
     }
 }
 
-fn sub_run_identity_to_sdk(identity: tools::SubRunIdentity) -> SubRunIdentityView {
+fn sub_run_identity_to_sdk(
+    identity: tools::published::sub_run::SubRunIdentity,
+) -> SubRunIdentityView {
     SubRunIdentityView {
         agent_id: sdk::AgentId::from_legacy_or_new(&identity.agent_id),
         run_id: sdk::RunId::from_legacy_or_new(&identity.run_id),
@@ -663,26 +665,30 @@ fn sub_run_identity_to_sdk(identity: tools::SubRunIdentity) -> SubRunIdentityVie
     }
 }
 
-fn sub_run_activity_to_sdk(event: tools::SubRunActivityEvent) -> SubRunActivityEventView {
+fn sub_run_activity_to_sdk(
+    event: tools::published::sub_run::SubRunActivityEvent,
+) -> SubRunActivityEventView {
     SubRunActivityEventView {
         identity: sub_run_identity_to_sdk(event.identity),
         sequence: event.sequence,
         kind: match event.kind {
-            tools::SubRunActivityKind::Text { text } => SubRunActivityKindView::Text { text },
-            tools::SubRunActivityKind::Thinking { text } => {
+            tools::published::sub_run::SubRunActivityKind::Text { text } => {
+                SubRunActivityKindView::Text { text }
+            }
+            tools::published::sub_run::SubRunActivityKind::Thinking { text } => {
                 SubRunActivityKindView::Thinking { text }
             }
-            tools::SubRunActivityKind::ToolCall { id, name, input } => {
+            tools::published::sub_run::SubRunActivityKind::ToolCall { id, name, input } => {
                 SubRunActivityKindView::ToolCall {
                     id: sdk::ToolCallId::from_legacy_or_new(&id),
                     name,
                     input,
                 }
             }
-            tools::SubRunActivityKind::ToolOutput { tool_name, text } => {
+            tools::published::sub_run::SubRunActivityKind::ToolOutput { tool_name, text } => {
                 SubRunActivityKindView::ToolOutput { tool_name, text }
             }
-            tools::SubRunActivityKind::ToolResult {
+            tools::published::sub_run::SubRunActivityKind::ToolResult {
                 tool_call_id,
                 tool_name,
                 output,
@@ -695,15 +701,21 @@ fn sub_run_activity_to_sdk(event: tools::SubRunActivityEvent) -> SubRunActivityE
                 content,
                 is_error,
             },
-            tools::SubRunActivityKind::Terminal { outcome } => SubRunActivityKindView::Terminal {
-                outcome: match outcome {
-                    tools::SubRunTerminalOutcome::Completed => SubRunTerminalOutcomeView::Completed,
-                    tools::SubRunTerminalOutcome::Failed { error } => {
-                        SubRunTerminalOutcomeView::Failed { error }
-                    }
-                    tools::SubRunTerminalOutcome::Cancelled => SubRunTerminalOutcomeView::Cancelled,
-                },
-            },
+            tools::published::sub_run::SubRunActivityKind::Terminal { outcome } => {
+                SubRunActivityKindView::Terminal {
+                    outcome: match outcome {
+                        tools::published::sub_run::SubRunTerminalOutcome::Completed => {
+                            SubRunTerminalOutcomeView::Completed
+                        }
+                        tools::published::sub_run::SubRunTerminalOutcome::Failed { error } => {
+                            SubRunTerminalOutcomeView::Failed { error }
+                        }
+                        tools::published::sub_run::SubRunTerminalOutcome::Cancelled => {
+                            SubRunTerminalOutcomeView::Cancelled
+                        }
+                    },
+                }
+            }
         },
     }
 }

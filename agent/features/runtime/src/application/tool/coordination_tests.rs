@@ -8,7 +8,8 @@ use policy::{
 use sdk::ids::ToolCallId;
 use std::sync::Mutex;
 use tools::composition::TestCatalogExecutionFactory;
-use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
+use tools::published::typed::{TypedTool, TypedToolResult};
+use tools::ToolExecutionContext;
 
 #[test]
 fn p6_4_production_uses_explicit_tool_round_boundaries() {

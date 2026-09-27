@@ -367,12 +367,12 @@ where
 }
 
 enum SubRunPublishedFact {
-    Started(tools::SubRunStartedEvent),
-    Activity(tools::SubRunActivityEvent),
+    Started(tools::published::sub_run::SubRunStartedEvent),
+    Activity(tools::published::sub_run::SubRunActivityEvent),
 }
 
 struct SubRunFactPublisher {
-    identity: Option<tools::SubRunIdentity>,
+    identity: Option<tools::published::sub_run::SubRunIdentity>,
     parent_context: RuntimeRunContext,
     parent_tool_call_id: sdk::ToolCallId,
     sequence: u64,
@@ -391,7 +391,7 @@ impl SubRunFactPublisher {
     fn publish(&mut self, event: tools::AgentProgressEvent) -> Vec<SubRunPublishedFact> {
         if self.identity.is_none() {
             if let Some(source) = event.source_context.as_ref() {
-                self.identity = Some(tools::SubRunIdentity {
+                self.identity = Some(tools::published::sub_run::SubRunIdentity {
                     agent_id: source.chat_id.clone(),
                     run_id: source.run_id.clone(),
                     parent_chat_id: self.parent_context.chat_id.to_string(),
@@ -406,18 +406,20 @@ impl SubRunFactPublisher {
         match event.kind {
             tools::AgentProgressKind::Started { role, model } => {
                 self.sequence = self.sequence.saturating_add(1);
-                vec![SubRunPublishedFact::Started(tools::SubRunStartedEvent {
-                    identity,
-                    sequence: self.sequence,
-                    role,
-                    model,
-                })]
+                vec![SubRunPublishedFact::Started(
+                    tools::published::sub_run::SubRunStartedEvent {
+                        identity,
+                        sequence: self.sequence,
+                        role,
+                        model,
+                    },
+                )]
             }
             kind => sub_run_activity_kinds(kind)
                 .into_iter()
                 .map(|kind| {
                     self.sequence = self.sequence.saturating_add(1);
-                    SubRunPublishedFact::Activity(tools::SubRunActivityEvent {
+                    SubRunPublishedFact::Activity(tools::published::sub_run::SubRunActivityEvent {
                         identity: identity.clone(),
                         sequence: self.sequence,
                         kind,
@@ -428,25 +430,29 @@ impl SubRunFactPublisher {
     }
 }
 
-fn sub_run_activity_kinds(kind: tools::AgentProgressKind) -> Vec<tools::SubRunActivityKind> {
+fn sub_run_activity_kinds(
+    kind: tools::AgentProgressKind,
+) -> Vec<tools::published::sub_run::SubRunActivityKind> {
     match kind {
         tools::AgentProgressKind::Started { .. } => Vec::new(),
         tools::AgentProgressKind::Message { text } => {
-            vec![tools::SubRunActivityKind::Text { text }]
+            vec![tools::published::sub_run::SubRunActivityKind::Text { text }]
         }
         tools::AgentProgressKind::Thinking { text } => {
-            vec![tools::SubRunActivityKind::Thinking { text }]
+            vec![tools::published::sub_run::SubRunActivityKind::Thinking { text }]
         }
         tools::AgentProgressKind::ToolCalls { calls } => calls
             .into_iter()
-            .map(|call| tools::SubRunActivityKind::ToolCall {
-                id: call.id,
-                name: call.name,
-                input: call.input,
-            })
+            .map(
+                |call| tools::published::sub_run::SubRunActivityKind::ToolCall {
+                    id: call.id,
+                    name: call.name,
+                    input: call.input,
+                },
+            )
             .collect(),
         tools::AgentProgressKind::ToolOutput { tool_name, text } => {
-            vec![tools::SubRunActivityKind::ToolOutput { tool_name, text }]
+            vec![tools::published::sub_run::SubRunActivityKind::ToolOutput { tool_name, text }]
         }
         tools::AgentProgressKind::ToolResult {
             tool_call_id,
@@ -454,7 +460,7 @@ fn sub_run_activity_kinds(kind: tools::AgentProgressKind) -> Vec<tools::SubRunAc
             output,
             content,
             is_error,
-        } => vec![tools::SubRunActivityKind::ToolResult {
+        } => vec![tools::published::sub_run::SubRunActivityKind::ToolResult {
             tool_call_id,
             tool_name,
             output,
@@ -462,7 +468,7 @@ fn sub_run_activity_kinds(kind: tools::AgentProgressKind) -> Vec<tools::SubRunAc
             is_error,
         }],
         tools::AgentProgressKind::Terminal { outcome } => {
-            vec![tools::SubRunActivityKind::Terminal { outcome }]
+            vec![tools::published::sub_run::SubRunActivityKind::Terminal { outcome }]
         }
     }
 }
@@ -478,7 +484,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
     use tokio::sync::{mpsc, Notify};
-    use tools::{TypedTool, TypedToolResult};
+    use tools::published::typed::{TypedTool, TypedToolResult};
 
     #[test]
     fn sub_run_activity_projection_preserves_parent_tool_identity_and_kinds() {
@@ -521,7 +527,7 @@ mod tests {
         assert_eq!(activity.sequence, 1);
         assert!(matches!(
             &activity.kind,
-            tools::SubRunActivityKind::Thinking { text } if text == "reasoning"
+            tools::published::sub_run::SubRunActivityKind::Thinking { text } if text == "reasoning"
         ));
     }
 
@@ -564,7 +570,7 @@ mod tests {
         };
         assert!(matches!(
             &activity.kind,
-            tools::SubRunActivityKind::ToolResult {
+            tools::published::sub_run::SubRunActivityKind::ToolResult {
                 tool_name,
                 output,
                 ..
@@ -611,7 +617,7 @@ mod tests {
         assert_eq!(output.sequence, 2);
         assert!(matches!(
             &output.kind,
-            tools::SubRunActivityKind::ToolOutput { tool_name, text }
+            tools::published::sub_run::SubRunActivityKind::ToolOutput { tool_name, text }
                 if tool_name == "Bash" && text == "hello"
         ));
     }

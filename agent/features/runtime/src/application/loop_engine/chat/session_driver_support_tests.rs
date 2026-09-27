@@ -538,7 +538,7 @@ where
         input_events,
         session,
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::SessionReminders::new())),
+        session_reminders: Arc::new(std::sync::Mutex::new(::tools::published::session_reminder::SessionReminders::new())),
         session_queries: test_session_query_port(),
     }
 }

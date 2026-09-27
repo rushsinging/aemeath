@@ -899,7 +899,7 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
 struct ReadFixtureTool;
 
 #[async_trait]
-impl tools::TypedTool for ReadFixtureTool {
+impl tools::published::typed::TypedTool for ReadFixtureTool {
     type Output = serde_json::Value;
 
     fn name(&self) -> &str {
@@ -918,8 +918,8 @@ impl tools::TypedTool for ReadFixtureTool {
         &self,
         _input: serde_json::Value,
         _ctx: &tools::ToolExecutionContext,
-    ) -> tools::TypedToolResult<Self::Output> {
-        tools::TypedToolResult::success("ok", serde_json::json!({"ok": true}))
+    ) -> tools::published::typed::TypedToolResult<Self::Output> {
+        tools::published::typed::TypedToolResult::success("ok", serde_json::json!({"ok": true}))
     }
 }
 

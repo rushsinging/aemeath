@@ -6,7 +6,8 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, Notify};
 use tools::composition::TestCatalogExecutionFactory;
-use tools::{Tool, ToolExecutionContext, TypedTool, TypedToolAdapter, TypedToolResult};
+use tools::published::typed::{TypedTool, TypedToolAdapter, TypedToolResult};
+use tools::{Tool, ToolExecutionContext};
 
 #[test]
 fn agent_for_test_persist_uses_context_workspace_backing() {

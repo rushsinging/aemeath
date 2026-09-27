@@ -18,6 +18,7 @@ pub mod composition {
 }
 
 /// Published tool-domain DTO types (kept as a public module facade).
+pub mod published;
 pub use domain::types;
 
 // Published language: shared-kernel tool types, DTOs, and ports.
@@ -40,11 +41,6 @@ pub use domain::{
     ToolExecutionPorts, ToolInvocation, ToolName, ToolOutcome, ToolProfile, ToolProfileName,
     ToolProgressEvent, ToolResult, ToolSuspension, TypedTool, TypedToolAdapter, TypedToolResult,
     UserQuestion, WorkspaceReadAccess,
-};
-
-// Schema validator (moved from runtime).
-pub use domain::schema_validator::{
-    format_tool_input_error, strip_runtime_meta, validate_tool_input,
 };
 
 // Role-policy compilation: config strings → narrowed ToolProfile.
