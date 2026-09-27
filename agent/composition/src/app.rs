@@ -538,9 +538,13 @@ fn provider_snapshot_from_config(
         provider
             .get("userAgent")
             .and_then(serde_json::Value::as_str),
+        model.and_then(model_reasoning_effort),
+        // canonical 为模型级 `apiStyle`；存量文件曾落 provider 级，fallback
+        // 读取以保证编辑已有 Provider 时接口风格选择不丢失。
         model
-            .and_then(|model| model.get("reasoningEffort"))
-            .and_then(serde_json::Value::as_str),
+            .and_then(|model| model.get("apiStyle"))
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| provider.get("apiStyle").and_then(serde_json::Value::as_str)),
         provider
             .get("models")
             .and_then(serde_json::Value::as_array)
@@ -562,16 +566,22 @@ fn provider_snapshot_from_config(
                                 .and_then(serde_json::Value::as_u64)
                                 .and_then(|value| u32::try_from(value).ok())
                                 .unwrap_or_default(),
-                            reasoning_effort: model
-                                .get("reasoningEffort")
-                                .and_then(serde_json::Value::as_str)
-                                .map(str::to_string),
+                            reasoning_effort: model_reasoning_effort(model).map(str::to_string),
                         })
                     })
                     .collect()
             })
             .unwrap_or_default(),
     ))
+}
+
+/// 读取模型 entry 的推理档位：canonical `reasoning_effort` 优先，兼容存量
+/// camelCase `reasoningEffort`（Connect 曾落盘的漂移格式）。
+fn model_reasoning_effort(model: &serde_json::Value) -> Option<&str> {
+    model
+        .get("reasoning_effort")
+        .or_else(|| model.get("reasoningEffort"))
+        .and_then(serde_json::Value::as_str)
 }
 
 fn global_connect_store_sdk_error(error: &share::error::DomainError) -> SdkError {
@@ -1476,6 +1486,83 @@ mod tests {
         assert_eq!(
             connect_global_user_agent_from_document(&document),
             Some(Config::default().api.user_agent)
+        );
+    }
+
+    /// 快照提取（canonical 格式）：`reasoning_effort` 与模型级 `apiStyle`
+    /// 必须进入 `ExistingProviderSnapshot`，供编辑已有 Provider 时回填。
+    #[test]
+    fn provider_snapshot_reads_canonical_reasoning_effort_and_model_level_api_style() {
+        let document = document_with_value(serde_json::json!({
+            "models": {"providers": {"Zhipu": {
+                "baseUrl": "https://zhipu.test",
+                "driver": "zhipu",
+                "models": [{
+                    "id": "glm-5.3",
+                    "contextWindow": 256_000,
+                    "max_tokens": 16_000,
+                    "reasoning_effort": "high",
+                    "apiStyle": "responses"
+                }]
+            }}}
+        }));
+        let snapshots = existing_provider_snapshots(&document.value);
+        let snapshot = snapshots.first().expect("snapshot extracted");
+        assert_eq!(snapshot.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(snapshot.api_style.as_deref(), Some("responses"));
+        assert_eq!(
+            snapshot.models.first().unwrap().reasoning_effort.as_deref(),
+            Some("high")
+        );
+    }
+
+    /// 快照提取（存量漂移格式）：camelCase `reasoningEffort` 与 provider 级
+    /// `apiStyle` 必须兼容读取，避免存量配置在编辑时丢失推理档位与接口风格。
+    #[test]
+    fn provider_snapshot_reads_legacy_camel_case_and_provider_level_api_style() {
+        let document = document_with_value(serde_json::json!({
+            "models": {"providers": {"Zhipu": {
+                "baseUrl": "https://zhipu.test",
+                "driver": "zhipu",
+                "apiStyle": "responses",
+                "models": [{
+                    "id": "glm-5.3",
+                    "contextWindow": 256_000,
+                    "max_tokens": 16_000,
+                    "reasoningEffort": "xhigh"
+                }]
+            }}}
+        }));
+        let snapshots = existing_provider_snapshots(&document.value);
+        let snapshot = snapshots.first().expect("snapshot extracted");
+        assert_eq!(snapshot.reasoning_effort.as_deref(), Some("xhigh"));
+        assert_eq!(snapshot.api_style.as_deref(), Some("responses"));
+        assert_eq!(
+            snapshot.models.first().unwrap().reasoning_effort.as_deref(),
+            Some("xhigh")
+        );
+    }
+
+    /// 快照提取（canonical 优先）：两种格式并存时以 snake_case 为准。
+    #[test]
+    fn provider_snapshot_prefers_canonical_reasoning_effort_over_legacy_alias() {
+        let document = document_with_value(serde_json::json!({
+            "models": {"providers": {"Zhipu": {
+                "baseUrl": "https://zhipu.test",
+                "driver": "zhipu",
+                "models": [{
+                    "id": "glm-5.3",
+                    "contextWindow": 256_000,
+                    "max_tokens": 16_000,
+                    "reasoning_effort": "low",
+                    "reasoningEffort": "high"
+                }]
+            }}}
+        }));
+        let snapshots = existing_provider_snapshots(&document.value);
+        assert_eq!(
+            snapshots.first().unwrap().reasoning_effort.as_deref(),
+            Some("low")
         );
     }
 

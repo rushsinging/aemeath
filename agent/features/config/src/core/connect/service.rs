@@ -703,6 +703,10 @@ impl ConnectAppService {
             if provider.user_agent.is_some() {
                 session.draft.provider_user_agent = provider.user_agent.clone();
             }
+            // 编辑已有 Provider 时回填接口风格，避免重新提交时丢失选择。
+            if provider.api_style.is_some() {
+                session.draft.api_style = provider.api_style.clone();
+            }
             session.draft.credential_mask = provider.credential_mask.clone();
             let models: Vec<ModelDraft> = provider
                 .models

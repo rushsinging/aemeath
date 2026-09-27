@@ -291,67 +291,56 @@ fn merge_draft(mut root: Value, draft: &ConnectDraft) -> Result<Value, GlobalCon
         .as_ref()
         .and_then(|key| providers.get(key))
         .and_then(|value| value.get("apiKey"))
-        .cloned();
-    let mut provider = Map::new();
-    provider.insert("baseUrl".to_string(), Value::String(base_url.clone()));
-    provider.insert(
-        "driver".to_string(),
-        Value::String(driver.as_str().to_string()),
-    );
-    provider.insert(
-        "apiKey".to_string(),
-        draft
-            .api_key_plaintext()
-            .map(|key| Value::String(key.to_string()))
-            .or(existing_api_key)
-            .unwrap_or_else(|| Value::String(String::new())),
-    );
-    let model_values: Vec<Value> = draft
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    // 字段名 / 层级以 shared serde schema 为单一真相源：构造类型化配置再
+    // 序列化，杜绝手拼 JSON 的字段名漂移（camelCase `reasoningEffort` 与
+    // provider 级 `apiStyle` 曾因此被运行时反序列化静默丢弃）。
+    // `apiStyle` 属模型级（`ModelEntryConfig.api_style`），对 draft 中全部
+    // 模型 entry 统一复制；凭证沿用新明文 → 旧值 → 空串的回退链。
+    let model_entries: Vec<share::config::models::ModelEntryConfig> = draft
         .models
         .iter()
-        .map(|model| {
-            let mut entry = serde_json::json!({
-                "id": model.model_id,
-                "name": model.model_id,
-                "input": ["text"],
-                "contextWindow": model.context_window,
-                "max_tokens": model.max_tokens,
-            });
-            if let Some(effort) = model
+        .map(|model| share::config::models::ModelEntryConfig {
+            id: model.model_id.clone(),
+            name: model.model_id.clone(),
+            input: vec!["text".to_string()],
+            context_window: model.context_window,
+            max_tokens: model.max_tokens,
+            reasoning: None,
+            reasoning_effort: model
                 .reasoning_effort
                 .as_ref()
-                .filter(|value| !value.trim().is_empty())
-            {
-                entry["reasoningEffort"] = Value::String(effort.trim().to_string());
-            }
-            entry
+                .filter(|effort| !effort.trim().is_empty())
+                .map(|effort| effort.trim().to_string()),
+            api_style: draft
+                .api_style
+                .as_ref()
+                .filter(|style| !style.trim().is_empty())
+                .map(|style| style.trim().to_string()),
         })
         .collect();
-    provider.insert("models".to_string(), Value::Array(model_values));
-    if let Some(user_agent) = draft
-        .provider_user_agent
-        .as_ref()
-        .filter(|value| !value.trim().is_empty())
-    {
-        provider.insert(
-            "userAgent".to_string(),
-            Value::String(user_agent.trim().to_string()),
-        );
-    }
-    if let Some(api_style) = draft
-        .api_style
-        .as_ref()
-        .filter(|style| !style.trim().is_empty())
-    {
-        provider.insert(
-            "apiStyle".to_string(),
-            Value::String(api_style.trim().to_string()),
-        );
-    }
+    let provider_config = share::config::models::ProviderModelsConfig {
+        base_url: base_url.clone(),
+        api_key: draft
+            .api_key_plaintext()
+            .map(str::to_string)
+            .or(existing_api_key)
+            .unwrap_or_default(),
+        driver: driver.as_str().to_string(),
+        models: model_entries,
+        user_agent: draft
+            .provider_user_agent
+            .as_ref()
+            .filter(|user_agent| !user_agent.trim().is_empty())
+            .map(|user_agent| user_agent.trim().to_string()),
+    };
+    let provider = serde_json::to_value(&provider_config)
+        .map_err(|error| GlobalConfigStoreError::InvalidDocument(error.to_string()))?;
     if let Some(key) = existing_key {
         providers.remove(&key);
     }
-    providers.insert(source.as_str().to_string(), Value::Object(provider));
+    providers.insert(source.as_str().to_string(), provider);
     // 全局默认模型：编辑页"设为全局默认"勾选产生（全局唯一）；
     // 未显式指定时回落首个所选模型。
     let default_model = draft
