@@ -20,7 +20,7 @@ impl tools::MemoryPortSource for WiringMemoryPortSource {
 
 struct RuntimeToolAssembly {
     catalog: Arc<dyn tools::ToolCatalogPort>,
-    execution: Arc<dyn tools::ToolExecutionPort>,
+    execution: Arc<dyn tools::published::execution::ToolExecutionPort>,
     tool_result_materializer: Arc<runtime::ToolResultMaterializer>,
     active_run: Arc<runtime::ActiveRunRegistry>,
 }
@@ -29,7 +29,7 @@ fn wire_runtime_tool_assembly(
     task_access: Arc<dyn task::TaskAccess>,
     memory_source: Arc<dyn tools::MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
-    skill_loader: Arc<dyn tools::SkillLoadPort>,
+    skill_loader: Arc<dyn tools::published::skill::SkillLoadPort>,
     snapshot: &share::config::domain::snapshot::ConfigSnapshot,
     agents_dir: &std::path::Path,
     context_size: usize,
@@ -325,7 +325,7 @@ pub(crate) async fn from_args_with_gateways(
         .iter()
         .map(|descriptor| descriptor.name.as_str().to_string())
         .collect();
-    let skill_query = tools::SkillQuery::new(
+    let skill_query = tools::published::skill::SkillQuery::new(
         prompt_root.clone(),
         snapshot.skills().dirs.clone(),
         available_tools,

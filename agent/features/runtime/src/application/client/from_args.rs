@@ -11,7 +11,7 @@ use super::accessors::{AgentClientImpl, RuntimeHandle};
 /// 由 Composition 装配、供 Runtime bootstrap 转发的 Tool/Skill/Run 资源。
 pub struct RuntimeToolAssemblyDependenciesData {
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
-    skill_catalog: Arc<dyn tools::SkillCatalogPort>,
+    skill_catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
     tool_result_materializer:
         Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
     active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
@@ -20,7 +20,7 @@ pub struct RuntimeToolAssemblyDependenciesData {
 impl RuntimeToolAssemblyDependenciesData {
     pub fn new(
         tool_catalog: Arc<dyn tools::ToolCatalogPort>,
-        skill_catalog: Arc<dyn tools::SkillCatalogPort>,
+        skill_catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
         tool_result_materializer: Arc<
             crate::application::tool::tool_result_materializer::ToolResultMaterializer,
         >,
@@ -86,7 +86,7 @@ impl SessionBootstrapAssemblyData {
 }
 
 pub struct SkillBootstrapAssemblyData {
-    pub snapshot: tools::SkillCatalogSnapshot,
+    pub snapshot: tools::published::skill::SkillCatalogSnapshot,
     /// 轮次边界重扫组件：会话中 skill 文件变更后经 `SkillsUpdated`
     /// 事件刷新 TUI slash 目录（初始 revision 即 snapshot）。
     pub refresh: crate::application::client::SkillCatalogRefresh,
@@ -94,11 +94,13 @@ pub struct SkillBootstrapAssemblyData {
 
 impl SkillBootstrapAssemblyData {
     pub fn new(
-        catalog: std::sync::Arc<dyn tools::SkillCatalogPort>,
+        catalog: std::sync::Arc<dyn tools::published::skill::SkillCatalogPort>,
         workspace: project::Workspace,
-        query: tools::SkillQuery,
+        query: tools::published::skill::SkillQuery,
     ) -> Self {
-        let snapshot = tools::SkillCatalogSnapshot::from_descriptors(catalog.list(query.clone()));
+        let snapshot = tools::published::skill::SkillCatalogSnapshot::from_descriptors(
+            catalog.list(query.clone()),
+        );
         let refresh = crate::application::client::SkillCatalogRefresh::new(
             catalog, workspace, query, &snapshot,
         );
@@ -264,7 +266,7 @@ impl RuntimeBootstrapDependenciesData {
         self.tool_assembly.tool_catalog.clone()
     }
 
-    pub fn skill_catalog(&self) -> Arc<dyn tools::SkillCatalogPort> {
+    pub fn skill_catalog(&self) -> Arc<dyn tools::published::skill::SkillCatalogPort> {
         self.tool_assembly.skill_catalog.clone()
     }
 

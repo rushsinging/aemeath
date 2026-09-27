@@ -546,7 +546,9 @@ pub(crate) fn converge_cancelled_tool_round(
             by_id.remove(&call.id).unwrap_or_else(|| {
                 ToolExecution::new_typed(
                     call,
-                    tools::ToolExecutionOutcome::cancelled("Command cancelled by user"),
+                    tools::published::execution::ToolExecutionOutcome::cancelled(
+                        "Command cancelled by user",
+                    ),
                 )
             })
         })
@@ -554,12 +556,12 @@ pub(crate) fn converge_cancelled_tool_round(
     for result in &results {
         debug_assert!(matches!(
             result.typed_outcome,
-            tools::ToolExecutionOutcome::Success(_)
-                | tools::ToolExecutionOutcome::Failure(_)
-                | tools::ToolExecutionOutcome::Cancelled(_)
-                | tools::ToolExecutionOutcome::TimedOut(_)
-                | tools::ToolExecutionOutcome::CancellationUnconfirmed(_)
-                | tools::ToolExecutionOutcome::Suspended(_)
+            tools::published::execution::ToolExecutionOutcome::Success(_)
+                | tools::published::execution::ToolExecutionOutcome::Failure(_)
+                | tools::published::execution::ToolExecutionOutcome::Cancelled(_)
+                | tools::published::execution::ToolExecutionOutcome::TimedOut(_)
+                | tools::published::execution::ToolExecutionOutcome::CancellationUnconfirmed(_)
+                | tools::published::execution::ToolExecutionOutcome::Suspended(_)
         ));
     }
     CancelledToolRoundConvergence { results }
@@ -727,7 +729,7 @@ impl std::fmt::Debug for HookDirectiveOutcome {
 ///
 /// 1. Look up the frozen catalog descriptor by tool name.
 /// 2. Validate the updated input against the descriptor's `input_schema` via
-///    [`tools::validate_tool_input`].
+///    [`tools::published::schema_validation::validate_tool_input`].
 /// 3. Rebuild a [`PolicyRequestData`] using the descriptor's `required_capabilities`.
 /// 4. Re-evaluate policy.
 ///
@@ -803,10 +805,14 @@ fn revalidate_updated_input(
     };
 
     // 2. Validate updated input against the descriptor's JSON Schema.
-    if let Err(mismatch) = tools::validate_tool_input(&call.name, &descriptor.input_schema, input) {
+    if let Err(mismatch) = tools::published::schema_validation::validate_tool_input(
+        &call.name,
+        &descriptor.input_schema,
+        input,
+    ) {
         return HookDirectiveOutcome::InvalidInput {
             call: call.clone(),
-            error: tools::format_tool_input_error(&mismatch),
+            error: tools::published::schema_validation::format_tool_input_error(&mismatch),
         };
     }
 

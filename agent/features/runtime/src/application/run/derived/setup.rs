@@ -10,8 +10,9 @@ use crate::domain::agent_run::RunSpec;
 use async_trait::async_trait;
 use std::sync::Arc;
 use std::time::Duration;
-use tools::{AgentProgressKind, AgentProgressSourceContext};
-use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext};
+use tools::published::agent::{AgentProgressKind, AgentProgressSourceContext};
+use tools::published::agent::{AgentRunRequest, AgentRunner};
+use tools::published::execution::ToolExecutionContext;
 
 // ── Sub-run derivation types ──
 
@@ -45,7 +46,7 @@ pub struct DerivedRun {
     /// Session ID for the isolated context.
     pub session_id: String,
     /// Stable Skill 去重作用域，绑定当前 Sub-agent instance，不使用 run_id。
-    pub skill_load_scope: tools::SkillLoadScope,
+    pub skill_load_scope: tools::published::skill::SkillLoadScope,
 }
 
 /// #1385: Combined cancellation signal — wraps an external signal (from the
@@ -53,12 +54,12 @@ pub struct DerivedRun {
 /// Either source cancelling makes the combined signal fire, so a parent
 /// cancellation propagates into tool execution AND the runtime LLM token.
 struct CombinedCancellationSignal {
-    external: Arc<dyn tools::CancellationSignal>,
+    external: Arc<dyn tools::published::execution::CancellationSignal>,
     token: tokio_util::sync::CancellationToken,
 }
 
 #[async_trait]
-impl tools::CancellationSignal for CombinedCancellationSignal {
+impl tools::published::execution::CancellationSignal for CombinedCancellationSignal {
     fn is_cancelled(&self) -> bool {
         self.external.is_cancelled() || self.token.is_cancelled()
     }
@@ -71,7 +72,7 @@ impl tools::CancellationSignal for CombinedCancellationSignal {
         }
     }
 
-    fn child_signal(&self) -> Arc<dyn tools::CancellationSignal> {
+    fn child_signal(&self) -> Arc<dyn tools::published::execution::CancellationSignal> {
         // Child tools get the same combined signal.
         Arc::new(Self {
             external: self.external.clone(),
@@ -108,7 +109,7 @@ pub fn derive_sub_run(
     parent_run_id: crate::domain::agent_run::RunId,
     request: &SubRunRequest,
     provider_factory: Arc<dyn crate::ports::ProviderFactory>,
-    skill_catalog: Arc<dyn tools::SkillCatalogPort>,
+    skill_catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
     runtime_context_factory: Arc<RuntimeContextFactory>,
 ) -> Result<DerivedRun, crate::application::client::RuntimeContextAssemblyError> {
     use crate::application::client::RuntimeContextAssemblyError;
@@ -191,13 +192,16 @@ pub fn derive_sub_run(
         model_name,
         max_tokens,
         reasoning_level,
-        skill_load_scope: tools::SkillLoadScope::new_subagent_instance(),
+        skill_load_scope: tools::published::skill::SkillLoadScope::new_subagent_instance(),
     })
 }
 
 #[async_trait]
 impl AgentRunner for CliAgentRunner {
-    async fn run_agent(&self, request: AgentRunRequest<'_>) -> tools::AgentRunTerminal {
+    async fn run_agent(
+        &self,
+        request: AgentRunRequest<'_>,
+    ) -> tools::published::agent::AgentRunTerminal {
         let prompt = request.prompt;
         let system = request.system;
         let identity = request.identity;
@@ -217,7 +221,7 @@ impl AgentRunner for CliAgentRunner {
         let parent_frame = match self.parent_context.get() {
             Some(frame) => frame,
             None => {
-                return tools::AgentRunTerminal::Failed {
+                return tools::published::agent::AgentRunTerminal::Failed {
                     error: "no parent run context — sub-agent invoked outside Main Run".to_string(),
                 };
             }
@@ -239,7 +243,7 @@ impl AgentRunner for CliAgentRunner {
         ) {
             Ok(d) => d,
             Err(error) => {
-                return tools::AgentRunTerminal::Failed {
+                return tools::published::agent::AgentRunTerminal::Failed {
                     error: error.to_string(),
                 };
             }
@@ -252,7 +256,7 @@ impl AgentRunner for CliAgentRunner {
         let runtime_token = derived.instance.context().cancel().token().clone();
         // Combined cancellation for ToolExecutionPorts: external (tools-layer)
         // OR runtime token cancelling stops executing tools.
-        let combined_cancel: Arc<dyn tools::CancellationSignal> =
+        let combined_cancel: Arc<dyn tools::published::execution::CancellationSignal> =
             Arc::new(CombinedCancellationSignal {
                 external: external_cancel,
                 token: runtime_token.clone(),
@@ -378,7 +382,7 @@ impl AgentRunner for CliAgentRunner {
             ) {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
-                    return tools::AgentRunTerminal::Failed {
+                    return tools::published::agent::AgentRunTerminal::Failed {
                         error: error.to_string(),
                     }
                 }
@@ -397,7 +401,7 @@ impl AgentRunner for CliAgentRunner {
                 sub_views.read().current_workspace_root(),
             )
             .parent_run_id(identity.run_id())
-            .invocation_source(tools::InvocationSource::SubAgent)
+            .invocation_source(tools::published::execution::InvocationSource::SubAgent)
             .registry_scope(tools::RegistryScopeName::new("sub-agent"))
             .profile(tools::ToolProfileName::new("sub-agent-restricted"))
             .build();
@@ -411,7 +415,7 @@ impl AgentRunner for CliAgentRunner {
             );
             let sub_ctx = ToolExecutionContext::new(
                 sub_scope,
-                tools::ToolExecutionPorts::new(
+                tools::published::execution::ToolExecutionPorts::new(
                     combined_cancel.clone(),
                     derived
                         .instance

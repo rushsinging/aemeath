@@ -13,7 +13,8 @@ use hook::{HookDispatcher, HookInvocationData};
 use sdk::ids::ToolCallId;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-use tools::{ToolOutcome, ToolSuspension};
+use tools::published::execution::ToolSuspension;
+use tools::ToolOutcome;
 
 /// Result of a tool execution round.
 /// Suspensions and approvals are returned as typed data — the caller
@@ -105,7 +106,7 @@ where
             .execute_one_outcome_with_ctx(call, &tool_ctx, step_id)
             .await
         {
-            (tools::ToolExecutionOutcome::Suspended(suspension), _) => {
+            (tools::published::execution::ToolExecutionOutcome::Suspended(suspension), _) => {
                 let questions = match suspension {
                     ToolSuspension::UserInteraction(spec) => spec
                         .questions
@@ -435,8 +436,9 @@ mod tests {
     use share::message::ContentBlock;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
+    use tools::published::execution::ToolExecutionContext;
+    use tools::published::typed::{TypedTool, TypedToolResult};
     use tools::ToolOutcome;
-    use tools::{ToolExecutionContext, TypedTool, TypedToolResult};
 
     /// A test HookDispatcher that always returns Continue.
     struct NoOpHookPort;
@@ -514,8 +516,8 @@ mod tests {
             serde_json::json!({"type":"object"})
         }
 
-        fn cancellation(&self) -> tools::CancellationDeclaration {
-            tools::CancellationDeclaration::Cooperative
+        fn cancellation(&self) -> tools::published::execution::CancellationDeclaration {
+            tools::published::execution::CancellationDeclaration::Cooperative
         }
 
         async fn call(

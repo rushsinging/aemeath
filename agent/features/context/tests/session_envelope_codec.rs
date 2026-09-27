@@ -11,7 +11,7 @@ use share::session_types::{
     PersistedWorkspaceContext, ProjectIdentityData, WorkspaceId, WorktreeKind,
 };
 
-use tools::{SkillLoadDecision, SkillLoadScope};
+use tools::published::skill::{SkillLoadDecision, SkillLoadScope};
 
 #[test]
 fn current_envelope_round_trips_skill_load_records() {

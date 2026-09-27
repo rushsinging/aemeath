@@ -73,10 +73,10 @@ fn execution_observation_state_tracks_start_and_terminal_once() {
 
     state.initialize_for_launch(Vec::new(), 0);
     assert!(state.started_at().is_some());
-    state.set_terminal(tools::AgentRunTerminal::Cancelled);
+    state.set_terminal(tools::published::agent::AgentRunTerminal::Cancelled);
     assert_eq!(
         state.take_terminal(),
-        Some(tools::AgentRunTerminal::Cancelled)
+        Some(tools::published::agent::AgentRunTerminal::Cancelled)
     );
     assert!(state.take_terminal().is_none());
 }

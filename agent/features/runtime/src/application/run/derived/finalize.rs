@@ -1,6 +1,6 @@
 use hook::{HookDispatcher, HookInvocationData};
 use std::sync::Arc;
-use tools::{AgentProgressKind, AgentProgressSourceContext};
+use tools::published::agent::{AgentProgressKind, AgentProgressSourceContext};
 
 pub use crate::application::loop_engine::run_finalization::{
     log_run_finalization as log_agent_outcome, RunFinalizationOutcome as AgentRunOutcome,
@@ -19,7 +19,7 @@ pub(crate) struct SubRunFinalizationObserver<'a> {
     pub prompt: &'a str,
     pub system: &'a str,
     pub model_spec: Option<&'a str>,
-    pub progress_sink: Option<&'a std::sync::Arc<dyn tools::ProgressSink>>,
+    pub progress_sink: Option<&'a std::sync::Arc<dyn tools::published::execution::ProgressSink>>,
     pub source_context: AgentProgressSourceContext,
 }
 
@@ -30,18 +30,22 @@ impl crate::application::loop_engine::run_finalization::RunFinalizationObserver
     async fn on_finalized(
         &mut self,
         outcome: &AgentRunOutcome,
-        terminal: &tools::AgentRunTerminal,
+        terminal: &tools::published::agent::AgentRunTerminal,
     ) {
         log_agent_outcome(outcome, self.session_id);
         if let Some(sink) = self.progress_sink {
             let terminal_outcome = match terminal {
-                tools::AgentRunTerminal::Completed { .. } => {
-                    tools::SubRunTerminalOutcome::Completed
+                tools::published::agent::AgentRunTerminal::Completed { .. } => {
+                    tools::published::sub_run::SubRunTerminalOutcome::Completed
                 }
-                tools::AgentRunTerminal::Failed { error } => tools::SubRunTerminalOutcome::Failed {
-                    error: error.clone(),
-                },
-                tools::AgentRunTerminal::Cancelled => tools::SubRunTerminalOutcome::Cancelled,
+                tools::published::agent::AgentRunTerminal::Failed { error } => {
+                    tools::published::sub_run::SubRunTerminalOutcome::Failed {
+                        error: error.clone(),
+                    }
+                }
+                tools::published::agent::AgentRunTerminal::Cancelled => {
+                    tools::published::sub_run::SubRunTerminalOutcome::Cancelled
+                }
             };
             sink.emit(super::progress::build_progress_event(
                 self.source_context.clone(),

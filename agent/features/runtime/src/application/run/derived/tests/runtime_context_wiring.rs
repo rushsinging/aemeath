@@ -45,7 +45,7 @@ impl Policy for SpyPolicy {
 /// Shared production-factory context construction for wiring tests.
 fn assemble_test_context(
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
-    tool_execution: Arc<dyn tools::ToolExecutionPort>,
+    tool_execution: Arc<dyn tools::published::execution::ToolExecutionPort>,
     policy: Arc<dyn Policy>,
     config: RunConfigSnapshot,
 ) -> (RuntimeContext, Arc<RuntimeContextFactory>) {
@@ -269,11 +269,11 @@ async fn derived_context_integration_verifies_policy_catalog() {
 struct SpyTool {
     executed: Arc<AtomicBool>,
     progress_sink_was_some: Arc<AtomicBool>,
-    invocation_source: Arc<std::sync::Mutex<Option<tools::InvocationSource>>>,
+    invocation_source: Arc<std::sync::Mutex<Option<tools::published::execution::InvocationSource>>>,
 }
 
 #[async_trait::async_trait]
-impl tools::TypedTool for SpyTool {
+impl tools::published::typed::TypedTool for SpyTool {
     type Output = serde_json::Value;
 
     fn name(&self) -> &str {
@@ -291,15 +291,18 @@ impl tools::TypedTool for SpyTool {
     async fn call(
         &self,
         _input: serde_json::Value,
-        ctx: &tools::ToolExecutionContext,
-    ) -> tools::TypedToolResult<Self::Output> {
+        ctx: &tools::published::execution::ToolExecutionContext,
+    ) -> tools::published::typed::TypedToolResult<Self::Output> {
         self.executed.store(true, Ordering::SeqCst);
         // Verify progress_sink is Some — proving ToolExecutionPorts wired it.
         if ctx.progress_sink().is_some() {
             self.progress_sink_was_some.store(true, Ordering::SeqCst);
         }
         *self.invocation_source.lock().unwrap() = Some(ctx.scope().invocation_source());
-        tools::TypedToolResult::success("ok", serde_json::json!({"executed": true}))
+        tools::published::typed::TypedToolResult::success(
+            "ok",
+            serde_json::json!({"executed": true}),
+        )
     }
 }
 
@@ -355,7 +358,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
         }));
 
     // ── Progress sink ──
-    let (tx, mut rx) = mpsc::channel::<tools::AgentProgressEvent>(8);
+    let (tx, mut rx) = mpsc::channel::<tools::published::agent::AgentProgressEvent>(8);
 
     // ── Provider: first call → tool call, second call → end_turn ──
     let second_call = Arc::new(AtomicBool::new(false));
@@ -465,7 +468,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     assert!(
         matches!(
             *invocation_source.lock().unwrap(),
-            Some(tools::InvocationSource::SubAgent)
+            Some(tools::published::execution::InvocationSource::SubAgent)
         ),
         "L2: derived tool execution context must use SubAgent invocation source"
     );
@@ -479,8 +482,8 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     let mut saw_tool_calls = false;
     while let Ok(ev) = rx.try_recv() {
         match ev.kind {
-            tools::AgentProgressKind::Started { .. } => saw_started = true,
-            tools::AgentProgressKind::ToolCalls { .. } => saw_tool_calls = true,
+            tools::published::agent::AgentProgressKind::Started { .. } => saw_started = true,
+            tools::published::agent::AgentProgressKind::ToolCalls { .. } => saw_tool_calls = true,
             _ => {}
         }
         if saw_started && saw_tool_calls {
@@ -498,7 +501,10 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
 
     // Run completed (not failed).
     assert!(
-        matches!(result, tools::AgentRunTerminal::Completed { .. }),
+        matches!(
+            result,
+            tools::published::agent::AgentRunTerminal::Completed { .. }
+        ),
         "L2: run must complete successfully, got {result:?}"
     );
 
@@ -514,7 +520,7 @@ struct BlockingCancelTool {
 }
 
 #[async_trait::async_trait]
-impl tools::TypedTool for BlockingCancelTool {
+impl tools::published::typed::TypedTool for BlockingCancelTool {
     type Output = serde_json::Value;
 
     fn name(&self) -> &str {
@@ -532,12 +538,12 @@ impl tools::TypedTool for BlockingCancelTool {
     async fn call(
         &self,
         _input: serde_json::Value,
-        ctx: &tools::ToolExecutionContext,
-    ) -> tools::TypedToolResult<Self::Output> {
+        ctx: &tools::published::execution::ToolExecutionContext,
+    ) -> tools::published::typed::TypedToolResult<Self::Output> {
         self.started.store(true, Ordering::SeqCst);
         // Block until the cancellation signal fires.
         ctx.cancellation().cancelled().await;
-        tools::TypedToolResult::error("cancelled")
+        tools::published::typed::TypedToolResult::error("cancelled")
     }
 }
 
@@ -632,7 +638,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
         runtime_context_factory: shared_factory,
     };
     let ctx = test_ctx();
-    let (tx, _rx) = mpsc::channel::<tools::AgentProgressEvent>(8);
+    let (tx, _rx) = mpsc::channel::<tools::published::agent::AgentProgressEvent>(8);
 
     // Spawn run_agent so we can cancel the parent token from outside.
     let handle = tokio::spawn(async move {
@@ -678,7 +684,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
     // The run must terminate with Cancelled, proving that
     // CombinedCancellationSignal actually propagated the parent cancel.
     assert!(
-        matches!(result, tools::AgentRunTerminal::Cancelled),
+        matches!(result, tools::published::agent::AgentRunTerminal::Cancelled),
         "L3: parent cancel must terminate the run (got {result:?})"
     );
 

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub struct AgentRunnerAssemblyData {
-    pub runner: Arc<dyn tools::AgentRunner>,
+    pub runner: Arc<dyn tools::published::agent::AgentRunner>,
     pub parent_context_source: ParentRunContextSource,
     pub active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
     pub max_tool_concurrency: usize,
@@ -28,7 +28,7 @@ pub fn wire_agent_runner(
         crate::application::tool::tool_result_materializer::ToolResultMaterializer,
     >,
     workspace: project::Workspace,
-    skill_catalog: Arc<dyn tools::SkillCatalogPort>,
+    skill_catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
     parent_context_source: ParentRunContextSource,
     runtime_context_factory: Arc<crate::application::run::context_factory::RuntimeContextFactory>,
 ) -> AgentRunnerAssemblyData {
@@ -36,17 +36,18 @@ pub fn wire_agent_runner(
     let active_run_for_runner = active_run.clone();
     let semaphore_for_runner = agent_semaphore.clone();
     let factory_for_runner = runtime_context_factory.clone();
-    let runner: Arc<dyn tools::AgentRunner> = Arc::new(agent_runner::CliAgentRunner {
-        factory,
-        active_run: active_run_for_runner,
-        max_tool_concurrency,
-        agent_semaphore: semaphore_for_runner,
-        tool_result_materializer,
-        workspace: crate::application::run::workspace::RuntimeWorkspaceAccess::new(workspace),
-        skill_catalog,
-        parent_context: parent_context_for_runner,
-        runtime_context_factory: factory_for_runner,
-    });
+    let runner: Arc<dyn tools::published::agent::AgentRunner> =
+        Arc::new(agent_runner::CliAgentRunner {
+            factory,
+            active_run: active_run_for_runner,
+            max_tool_concurrency,
+            agent_semaphore: semaphore_for_runner,
+            tool_result_materializer,
+            workspace: crate::application::run::workspace::RuntimeWorkspaceAccess::new(workspace),
+            skill_catalog,
+            parent_context: parent_context_for_runner,
+            runtime_context_factory: factory_for_runner,
+        });
     AgentRunnerAssemblyData {
         runner,
         parent_context_source,

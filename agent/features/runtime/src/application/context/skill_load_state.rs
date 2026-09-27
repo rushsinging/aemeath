@@ -17,11 +17,14 @@ impl ContextSkillLoadState {
 }
 
 #[async_trait]
-impl tools::SkillLoadStatePort for ContextSkillLoadState {
+impl tools::published::skill::SkillLoadStatePort for ContextSkillLoadState {
     async fn compare_and_record(
         &self,
-        mutation: tools::SkillLoadMutation,
-    ) -> Result<tools::SkillLoadDecision, tools::SkillLoadStateError> {
+        mutation: tools::published::skill::SkillLoadMutation,
+    ) -> Result<
+        tools::published::skill::SkillLoadDecision,
+        tools::published::skill::SkillLoadStateError,
+    > {
         self.context.compare_and_record_skill_load(mutation).await
     }
 }

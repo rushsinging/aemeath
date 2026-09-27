@@ -249,7 +249,7 @@ struct NoopMarkerOutput {
 }
 
 #[async_trait]
-impl ::tools::TypedTool for NoopMarkerTool {
+impl ::tools::published::typed::TypedTool for NoopMarkerTool {
     type Output = NoopMarkerOutput;
     fn name(&self) -> &str {
         "NoopMarker"
@@ -280,9 +280,9 @@ impl ::tools::TypedTool for NoopMarkerTool {
     async fn call(
         &self,
         _input: serde_json::Value,
-        _ctx: &::tools::ToolExecutionContext,
-    ) -> ::tools::TypedToolResult<Self::Output> {
-        ::tools::TypedToolResult::success(
+        _ctx: &::tools::published::execution::ToolExecutionContext,
+    ) -> ::tools::published::typed::TypedToolResult<Self::Output> {
+        ::tools::published::typed::TypedToolResult::success(
             "noop-marker-result",
             NoopMarkerOutput {
                 marker: "noop-marker-result",

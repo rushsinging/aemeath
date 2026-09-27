@@ -60,10 +60,10 @@ pub fn isolated_context(session_id: &str) -> Arc<dyn crate::ports::ContextPort> 
 /// skill-aware [`SkillPromptSource`].
 ///
 /// Unlike [`isolated_context`], the prompt pipeline lists metadata through the
-/// injected [`tools::SkillCatalogPort`] and [`SkillQueryFactory`].
+/// injected [`tools::published::skill::SkillCatalogPort`] and [`SkillQueryFactory`].
 pub fn isolated_context_with_skill(
     session_id: &str,
-    catalog: Arc<dyn tools::SkillCatalogPort>,
+    catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
     query_factory: Arc<dyn crate::ports::SkillQueryFactory>,
 ) -> Arc<dyn crate::ports::ContextPort> {
     let repository = Arc::new(InMemorySessionRepository::new());
@@ -88,7 +88,7 @@ pub fn isolated_context_with_skill(
 /// the Context adapters so consumers never assemble cross-BC concrete types.
 pub fn isolated_context_with_workspace_skills(
     session_id: &str,
-    catalog: Arc<dyn tools::SkillCatalogPort>,
+    catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
     workspace: Arc<dyn project::WorkspaceReader>,
 ) -> Arc<dyn crate::ports::ContextPort> {
     isolated_context_with_skill(

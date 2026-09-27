@@ -210,9 +210,9 @@ impl TestToolExecutionContextBuilder {
     }
     pub(crate) fn build(self) -> ToolExecutionContext {
         let authorization = if self.allow_all {
-            crate::AuthorizationContext::ALLOW_ALL
+            crate::domain::context::AuthorizationContext::ALLOW_ALL
         } else {
-            crate::AuthorizationContext::STANDARD
+            crate::domain::context::AuthorizationContext::STANDARD
         };
         let workspace = FakeWorkspace::new(self.root);
         let scope = ExecutionScope::builder(

@@ -14,7 +14,7 @@ use super::doubles::{FakeProviderFactory, FakeSkillCatalog};
 pub(crate) struct ParentRunFixture {
     context_factory: Arc<RuntimeContextFactory>,
     provider_factory: Arc<dyn ProviderFactory>,
-    skill_catalog: Arc<dyn tools::SkillCatalogPort>,
+    skill_catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
 }
 
 impl ParentRunFixture {

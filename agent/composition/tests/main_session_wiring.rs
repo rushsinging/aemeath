@@ -442,9 +442,12 @@ async fn runtime_session_id_matches_wiring_committed_session() {
 
     struct NoopRunner;
     #[async_trait::async_trait]
-    impl tools::AgentRunner for NoopRunner {
-        async fn run_agent(&self, _request: tools::AgentRunRequest<'_>) -> tools::AgentRunTerminal {
-            tools::AgentRunTerminal::Completed {
+    impl tools::published::agent::AgentRunner for NoopRunner {
+        async fn run_agent(
+            &self,
+            _request: tools::published::agent::AgentRunRequest<'_>,
+        ) -> tools::published::agent::AgentRunTerminal {
+            tools::published::agent::AgentRunTerminal::Completed {
                 result: String::new(),
             }
         }
@@ -488,7 +491,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         runtime::SkillBootstrapAssemblyData::new(
             tools::composition::wire_skills().catalog(),
             workspace.clone(),
-            tools::SkillQuery::new(root.clone(), Vec::new(), Default::default()),
+            tools::published::skill::SkillQuery::new(root.clone(), Vec::new(), Default::default()),
         ),
         agent_runner,
     );

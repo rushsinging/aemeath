@@ -14,8 +14,9 @@ use provider::{InvocationStreamData, ProviderError, ProviderErrorKind};
 use share::config::AgentInstanceConfig;
 use share::message::Message;
 use std::sync::Arc;
-use tools::AgentProgressKind;
-use tools::{AgentRunRequest, AgentRunner, ToolExecutionContext};
+use tools::published::agent::AgentProgressKind;
+use tools::published::agent::{AgentRunRequest, AgentRunner};
+use tools::published::execution::ToolExecutionContext;
 
 /// #1248 TaskData 3: shared test factory for CliAgentRunner in tests.
 fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeContextFactory> {
@@ -257,8 +258,14 @@ async fn concurrent_sub_runs_reach_provider_with_isolated_scopes_and_restore_par
                 agent_name: "role-b",
             }),
         );
-        assert!(matches!(a, tools::AgentRunTerminal::Failed { .. }));
-        assert!(matches!(b, tools::AgentRunTerminal::Failed { .. }));
+        assert!(matches!(
+            a,
+            tools::published::agent::AgentRunTerminal::Failed { .. }
+        ));
+        assert!(matches!(
+            b,
+            tools::published::agent::AgentRunTerminal::Failed { .. }
+        ));
         assert_eq!(scoped_logging::capture(), parent);
     })
     .await;
@@ -439,7 +446,8 @@ fn test_role_max_tokens_override() {
 
 #[test]
 fn derived_progress_preserves_child_source_context() {
-    let source_context = tools::AgentProgressSourceContext::new("child-chat", "child-turn");
+    let source_context =
+        tools::published::agent::AgentProgressSourceContext::new("child-chat", "child-turn");
     let calls = vec![test_tool_call(
         "1",
         "Read",
@@ -469,7 +477,7 @@ fn test_build_tool_calls_progress_event_preserves_call_data_and_summaries() {
     ];
 
     let event = build_tool_calls_progress_event(
-        tools::AgentProgressSourceContext::new("child-chat", "child-turn"),
+        tools::published::agent::AgentProgressSourceContext::new("child-chat", "child-turn"),
         2,
         &calls,
     );
@@ -509,7 +517,7 @@ fn test_build_tool_calls_progress_event_truncates_long_read_groups_at_summary_le
     )];
 
     let event = build_tool_calls_progress_event(
-        tools::AgentProgressSourceContext::new("child-chat", "child-turn"),
+        tools::published::agent::AgentProgressSourceContext::new("child-chat", "child-turn"),
         1,
         &calls,
     );
@@ -632,7 +640,7 @@ impl ManualCancellation {
     }
 }
 #[async_trait::async_trait]
-impl tools::CancellationSignal for ManualCancellation {
+impl tools::published::execution::CancellationSignal for ManualCancellation {
     fn is_cancelled(&self) -> bool {
         self.cancelled.load(std::sync::atomic::Ordering::SeqCst)
     }
@@ -643,7 +651,7 @@ impl tools::CancellationSignal for ManualCancellation {
         }
     }
 
-    fn child_signal(&self) -> Arc<dyn tools::CancellationSignal> {
+    fn child_signal(&self) -> Arc<dyn tools::published::execution::CancellationSignal> {
         Arc::new(self.clone())
     }
 }
@@ -735,7 +743,7 @@ async fn test_sub_run_registers_and_clears_active_run_on_registry_cancel() {
         .await;
 
     driver.await.unwrap();
-    assert_eq!(result, tools::AgentRunTerminal::Cancelled);
+    assert_eq!(result, tools::published::agent::AgentRunTerminal::Cancelled);
     assert!(
         !ctx.cancellation().is_cancelled(),
         "按 Sub Run ID 取消不得反向取消父 Run token"
@@ -788,7 +796,7 @@ async fn run_agent_rejects_disabled_role_from_frozen_run_config() {
 
     assert!(matches!(
         result,
-        tools::AgentRunTerminal::Failed { ref error }
+        tools::published::agent::AgentRunTerminal::Failed { ref error }
             if error.contains("已禁用")
                 && error.contains("`coder`")
                 && error.contains("可用 agent 名单")
@@ -817,7 +825,7 @@ async fn test_run_agent_provider_cancelled_error_returns_user_cancelled() {
         })
         .await;
 
-    assert_eq!(result, tools::AgentRunTerminal::Cancelled);
+    assert_eq!(result, tools::published::agent::AgentRunTerminal::Cancelled);
 }
 
 #[tokio::test]
@@ -847,7 +855,7 @@ async fn test_run_agent_context_cancelled_after_provider_error_returns_user_canc
         })
         .await;
 
-    assert_eq!(result, tools::AgentRunTerminal::Cancelled);
+    assert_eq!(result, tools::published::agent::AgentRunTerminal::Cancelled);
 }
 
 #[tokio::test]
@@ -893,13 +901,13 @@ async fn test_run_agent_cancel_arrives_mid_flight_during_stream_returns_promptly
     .expect("run_agent 必须在 mid-flight cancel 后及时返回，不能挂起等待 provider 自然结束");
 
     canceller.await.unwrap();
-    assert_eq!(result, tools::AgentRunTerminal::Cancelled);
+    assert_eq!(result, tools::published::agent::AgentRunTerminal::Cancelled);
 }
 
 struct ReadFixtureTool;
 
 #[async_trait]
-impl tools::TypedTool for ReadFixtureTool {
+impl tools::published::typed::TypedTool for ReadFixtureTool {
     type Output = serde_json::Value;
 
     fn name(&self) -> &str {
@@ -917,9 +925,9 @@ impl tools::TypedTool for ReadFixtureTool {
     async fn call(
         &self,
         _input: serde_json::Value,
-        _ctx: &tools::ToolExecutionContext,
-    ) -> tools::TypedToolResult<Self::Output> {
-        tools::TypedToolResult::success("ok", serde_json::json!({"ok": true}))
+        _ctx: &tools::published::execution::ToolExecutionContext,
+    ) -> tools::published::typed::TypedToolResult<Self::Output> {
+        tools::published::typed::TypedToolResult::success("ok", serde_json::json!({"ok": true}))
     }
 }
 
@@ -949,7 +957,7 @@ async fn unknown_sub_agent_name_fails_before_provider_invocation() {
         .await;
 
     let error_message = match result {
-        tools::AgentRunTerminal::Failed { error } => error,
+        tools::published::agent::AgentRunTerminal::Failed { error } => error,
         other => panic!("unknown agent must fail before provider invocation, got {other:?}"),
     };
     assert!(
@@ -1022,7 +1030,10 @@ async fn sub_agent_provider_spec_inherits_model_owned_settings() {
         })
         .await;
 
-    assert!(matches!(result, tools::AgentRunTerminal::Failed { .. }));
+    assert!(matches!(
+        result,
+        tools::published::agent::AgentRunTerminal::Failed { .. }
+    ));
     let spec = captured_spec
         .lock()
         .unwrap()
@@ -1105,7 +1116,10 @@ async fn sub_agent_provider_spec_ignores_legacy_role_reasoning_override() {
         })
         .await;
 
-    assert!(matches!(result, tools::AgentRunTerminal::Failed { .. }));
+    assert!(matches!(
+        result,
+        tools::published::agent::AgentRunTerminal::Failed { .. }
+    ));
     let spec = captured_spec
         .lock()
         .unwrap()
@@ -1173,7 +1187,10 @@ async fn sub_agent_provider_spec_maps_model_reasoning_to_medium_without_effort()
         })
         .await;
 
-    assert!(matches!(result, tools::AgentRunTerminal::Failed { .. }));
+    assert!(matches!(
+        result,
+        tools::published::agent::AgentRunTerminal::Failed { .. }
+    ));
     let spec = captured_spec
         .lock()
         .unwrap()
@@ -1236,7 +1253,10 @@ async fn sub_agent_sends_context_window_skills_and_tool_schemas_to_provider() {
         })
         .await;
 
-    assert!(matches!(result, tools::AgentRunTerminal::Failed { .. }));
+    assert!(matches!(
+        result,
+        tools::published::agent::AgentRunTerminal::Failed { .. }
+    ));
     let captured = captured.lock().unwrap();
     assert!(captured
         .system
@@ -1253,7 +1273,7 @@ async fn sub_agent_sends_context_window_skills_and_tool_schemas_to_provider() {
 #[tokio::test]
 async fn test_started_event_emitted_with_role_and_model() {
     use tokio::sync::mpsc;
-    use tools::{AgentProgressEvent, AgentProgressKind};
+    use tools::published::agent::{AgentProgressEvent, AgentProgressKind};
 
     let (runner, _guard) = test_runner(ProviderError::fatal(
         ProviderErrorKind::Network,
@@ -1296,7 +1316,7 @@ async fn test_started_event_emitted_with_role_and_model() {
 #[tokio::test]
 async fn started_event_always_reports_required_role_and_configured_model() {
     use tokio::sync::mpsc;
-    use tools::{AgentProgressEvent, AgentProgressKind};
+    use tools::published::agent::{AgentProgressEvent, AgentProgressKind};
 
     let (runner, _guard) = test_runner(ProviderError::fatal(
         ProviderErrorKind::Network,
@@ -1366,7 +1386,7 @@ async fn test_started_event_not_emitted_without_progress_tx() {
     // ErrorProvider 会返回 Err，但不应 panic
     assert!(matches!(
         result,
-        tools::AgentRunTerminal::Failed { ref error }
+        tools::published::agent::AgentRunTerminal::Failed { ref error }
             if error.contains("setup-only") || error.contains("error") || !error.is_empty()
     ));
 }
@@ -1395,7 +1415,7 @@ async fn test_run_agent_non_cancel_provider_error_returns_sub_agent_error() {
 
     assert_eq!(
         result,
-        tools::AgentRunTerminal::Failed {
+        tools::published::agent::AgentRunTerminal::Failed {
             error: "loop adapter error: network error: boom".to_string(),
         }
     );
@@ -1440,7 +1460,7 @@ async fn sub_empty_completion_retries_and_succeeds() {
     assert_eq!(provider.calls(), 2);
     assert_eq!(
         result,
-        tools::AgentRunTerminal::Completed {
+        tools::published::agent::AgentRunTerminal::Completed {
             result: "sub recovered".to_string(),
         }
     );
@@ -1485,7 +1505,7 @@ async fn sub_empty_completion_exhaustion_is_typed_failure() {
     assert_eq!(provider.calls(), 11);
     assert_eq!(
         result,
-        tools::AgentRunTerminal::Failed {
+        tools::published::agent::AgentRunTerminal::Failed {
             error: "loop adapter error: protocol error: provider completed without assistant text or tool call"
                 .to_string(),
         }
@@ -1519,7 +1539,7 @@ async fn test_run_agent_timeout_comes_from_request_and_returns_typed_failure() {
 
     assert_eq!(
         result,
-        tools::AgentRunTerminal::Failed {
+        tools::published::agent::AgentRunTerminal::Failed {
             error: "run timed out after 0 seconds".to_string(),
         }
     );

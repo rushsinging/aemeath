@@ -24,7 +24,7 @@ pub struct CliAgentRunner {
     pub workspace: crate::application::run::workspace::RuntimeWorkspaceAccess,
     /// Skill metadata catalog shared with sub-run isolated contexts.
     /// Skill bodies remain call-time Tool-owned loads.
-    pub skill_catalog: Arc<dyn tools::SkillCatalogPort>,
+    pub skill_catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
     /// #1385 TaskData 6: Injectable parent context source — set by the Main Run
     /// loop before tool execution so sub-agent runs can derive from it.
     pub parent_context: ParentRunContextSource,

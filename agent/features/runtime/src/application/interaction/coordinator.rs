@@ -39,16 +39,16 @@ use crate::domain::agent_run::{InteractionContinuation, Run, RunTransitionError}
 /// Role adapters only construct this narrow context. The coordinator owns all
 /// completion decisions, approved tool execution, and result materialization.
 pub struct InteractionCompletionContext<'a> {
-    tool_context: tools::ToolExecutionContext,
-    tool_execution: &'a dyn tools::ToolExecutionPort,
+    tool_context: tools::published::execution::ToolExecutionContext,
+    tool_execution: &'a dyn tools::published::execution::ToolExecutionPort,
     materializer: &'a crate::application::tool::tool_result_materializer::ToolResultMaterializer,
     session_id: &'a str,
 }
 
 impl<'a> InteractionCompletionContext<'a> {
     pub fn new(
-        tool_context: tools::ToolExecutionContext,
-        tool_execution: &'a dyn tools::ToolExecutionPort,
+        tool_context: tools::published::execution::ToolExecutionContext,
+        tool_execution: &'a dyn tools::published::execution::ToolExecutionPort,
         materializer: &'a crate::application::tool::tool_result_materializer::ToolResultMaterializer,
         session_id: &'a str,
     ) -> Self {
@@ -360,8 +360,8 @@ async fn execute_approved_call(
     };
     let call = approval.call;
     let mut input = call.input.clone();
-    tools::strip_runtime_meta(&mut input);
-    let invocation = tools::ToolInvocation::new(
+    tools::published::schema_validation::strip_runtime_meta(&mut input);
+    let invocation = tools::published::execution::ToolInvocation::new(
         call.name.as_str(),
         input,
         context.tool_context.scope().clone(),

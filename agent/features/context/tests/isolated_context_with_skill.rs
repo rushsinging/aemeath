@@ -9,7 +9,9 @@ use context::SkillQueryFactory;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
 use share::reasoning::ReasoningLevel;
-use tools::{SkillCatalogPort, SkillDescriptor, SkillQuery, SkillSource, SkillSourceKind};
+use tools::published::skill::{
+    SkillCatalogPort, SkillDescriptor, SkillQuery, SkillSource, SkillSourceKind,
+};
 
 struct FakeCatalog;
 impl SkillCatalogPort for FakeCatalog {

@@ -27,7 +27,7 @@ pub(super) async fn execute_non_agent<S>(
     policy: &dyn Policy,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
-    tool_context: &tools::ToolExecutionContext,
+    tool_context: &tools::published::execution::ToolExecutionContext,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Vec<ToolExecution>
 where
@@ -95,7 +95,7 @@ async fn execute_multiple_non_agent<S>(
     policy: &dyn Policy,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
-    tool_context: &tools::ToolExecutionContext,
+    tool_context: &tools::published::execution::ToolExecutionContext,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Vec<ToolExecution>
 where
@@ -229,7 +229,7 @@ async fn execute_one_non_agent<S>(
     policy: &dyn Policy,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
-    tool_context: &tools::ToolExecutionContext,
+    tool_context: &tools::published::execution::ToolExecutionContext,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Vec<ToolExecution>
 where
@@ -424,7 +424,8 @@ where
         // Set up tool stream channel for stdout streaming.
         // Uses ToolProgressEvent (not AgentProgressEvent) since Bash stdout
         // is tool output, not sub-agent progress.
-        let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::ToolProgressEvent>(32);
+        let (prog_tx, mut prog_rx) =
+            tokio::sync::mpsc::channel::<tools::published::execution::ToolProgressEvent>(32);
         let streaming_ctx = tool_ctx.with_progress(Some(
             crate::application::run::context::tool_stream_progress_sink(prog_tx),
         ));

@@ -1,10 +1,10 @@
 use context::ToolCallIdentity;
 use share::message::{ContentBlock, Message};
 use std::sync::Arc;
-use tools::{
-    ToolCatalogSnapshot, ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort,
-    ToolInvocation, ToolOutcome,
+use tools::published::execution::{
+    ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort, ToolInvocation,
 };
+use tools::{ToolCatalogSnapshot, ToolOutcome};
 
 use crate::application::context::coordination::ContextCoordinator;
 use crate::application::tool::execution_supervisor::{SupervisedToolCall, ToolExecutionSupervisor};
@@ -109,9 +109,11 @@ async fn call_tool_with_timeout(
     if ctx.cancellation().is_cancelled() {
         return Err(tool_call_cancelled_message(name));
     }
-    tools::strip_runtime_meta(&mut input);
-    if let Err(mismatch) = tools::validate_tool_input(name, &tool.input_schema(), &input) {
-        let message = tools::format_tool_input_error(&mismatch);
+    tools::published::schema_validation::strip_runtime_meta(&mut input);
+    if let Err(mismatch) =
+        tools::published::schema_validation::validate_tool_input(name, &tool.input_schema(), &input)
+    {
+        let message = tools::published::schema_validation::format_tool_input_error(&mismatch);
         return Ok(tools::ToolResult {
             text: message.clone(),
             data: serde_json::json!({ "status": "error", "message": message }),
@@ -274,7 +276,7 @@ impl Agent {
     ) -> (ToolExecutionOutcome, Option<u64>) {
         let authorization = ctx.authorization();
         let mut input = call.input.clone();
-        tools::strip_runtime_meta(&mut input);
+        tools::published::schema_validation::strip_runtime_meta(&mut input);
         // per-call child cancellation：deadline 到期或用户取消时由 supervisor
         // 触发并经工具 ctx 传播；工具观察到的 cancellation 即 per-call scope，
         // 不再直接绑定 Run 级 token。

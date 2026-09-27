@@ -178,7 +178,9 @@ async fn run_resume(
         input_events: ResumeInputEvents::new(session_id),
         session: shell,
         read_files: Arc::new(Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(Mutex::new(::tools::SessionReminders::new())),
+        session_reminders: Arc::new(Mutex::new(
+            ::tools::published::session_reminder::SessionReminders::new(),
+        )),
         session_queries: test_session_query_port(),
     };
     run_session_command_driver(input).await;

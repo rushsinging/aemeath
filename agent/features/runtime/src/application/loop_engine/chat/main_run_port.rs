@@ -103,12 +103,12 @@ pub(crate) fn fixture_two_step_accepted(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn make_agent(
     runtime_context: &RuntimeContext,
-    agent_runner: Option<Arc<dyn tools::AgentRunner>>,
+    agent_runner: Option<Arc<dyn tools::published::agent::AgentRunner>>,
     language: &str,
     workspace: &project::Workspace,
     cancel: &CancellationToken,
     read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    session_reminders: Arc<std::sync::Mutex<tools::SessionReminders>>,
+    session_reminders: Arc<std::sync::Mutex<tools::published::session_reminder::SessionReminders>>,
     max_tool_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
     session_id: &str,
@@ -140,14 +140,14 @@ pub(crate) fn make_agent(
             runtime_context.context(),
         ),
         session_id: context::SessionId::new(session_id),
-        ctx: tools::ToolExecutionContext::new(
+        ctx: tools::published::execution::ToolExecutionContext::new(
             tools::ExecutionScope::builder(
                 run_id.to_string(),
                 workspace.read().workspace_id(),
                 workspace.read().current_workspace_root(),
             )
             .build(),
-            tools::ToolExecutionPorts::new(
+            tools::published::execution::ToolExecutionPorts::new(
                 Arc::new(runtime_context.cancel().clone()),
                 crate::application::run::workspace::RuntimeWorkspaceAccess::new(workspace.clone())
                     .read_access(),
@@ -161,7 +161,7 @@ pub(crate) fn make_agent(
             .with_user_agent(&runtime_provider.user_agent)
             .with_memory_context(Some(session_id.to_string()), Some(session_reminders))
             .with_skill_load_state(
-                tools::SkillLoadScope::main(),
+                tools::published::skill::SkillLoadScope::main(),
                 runtime_context.skill_load_state(),
             )
             .with_agent(agent_runner),

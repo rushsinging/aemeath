@@ -301,7 +301,7 @@ fn step_message_segments(step: &CommittedRunStep) -> Vec<Arc<[Message]>> {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillLoadRecord {
-    pub scope: tools::SkillLoadScope,
+    pub scope: tools::published::skill::SkillLoadScope,
     pub skill_name: String,
     pub revision: String,
 }
@@ -589,7 +589,7 @@ impl Eq for CanonicalSession {}
 impl CanonicalSession {
     pub fn loaded_skill_revision(
         &self,
-        scope: &tools::SkillLoadScope,
+        scope: &tools::published::skill::SkillLoadScope,
         skill_name: &str,
     ) -> Option<&str> {
         self.skill_load_records
@@ -600,20 +600,20 @@ impl CanonicalSession {
 
     pub fn compare_and_record_skill(
         &mut self,
-        scope: &tools::SkillLoadScope,
+        scope: &tools::published::skill::SkillLoadScope,
         skill_name: &str,
         revision: &str,
-    ) -> tools::SkillLoadDecision {
+    ) -> tools::published::skill::SkillLoadDecision {
         if let Some(record) = self
             .skill_load_records
             .iter_mut()
             .find(|record| &record.scope == scope && record.skill_name == skill_name)
         {
             if record.revision == revision {
-                return tools::SkillLoadDecision::AlreadyLoaded;
+                return tools::published::skill::SkillLoadDecision::AlreadyLoaded;
             }
             record.revision = revision.to_string();
-            return tools::SkillLoadDecision::Updated;
+            return tools::published::skill::SkillLoadDecision::Updated;
         }
         self.skill_load_records.push(SkillLoadRecord {
             scope: scope.clone(),
@@ -623,7 +623,7 @@ impl CanonicalSession {
         self.skill_load_records.sort_by(|left, right| {
             (&left.scope, &left.skill_name).cmp(&(&right.scope, &right.skill_name))
         });
-        tools::SkillLoadDecision::Fresh
+        tools::published::skill::SkillLoadDecision::Fresh
     }
 
     pub fn step_receipts(&self, run_id: &str, step_id: &str) -> Vec<StepReceipt> {

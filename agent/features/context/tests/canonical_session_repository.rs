@@ -24,7 +24,9 @@ use share::session_types::{
 };
 use task::{PreparedTaskRestoreData, TaskPersist, TaskSnapshotData};
 
-use tools::{SkillLoadDecision, SkillLoadMutation, SkillLoadScope, SkillLoadStateError};
+use tools::published::skill::{
+    SkillLoadDecision, SkillLoadMutation, SkillLoadScope, SkillLoadStateError,
+};
 
 #[derive(Debug)]
 struct RecordedSessionCommit {

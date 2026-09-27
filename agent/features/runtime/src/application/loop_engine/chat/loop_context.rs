@@ -40,6 +40,7 @@ where
     pub input_events: I,
     pub session: crate::application::client::SessionRuntime,
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    pub session_reminders: Arc<std::sync::Mutex<tools::SessionReminders>>,
+    pub session_reminders:
+        Arc<std::sync::Mutex<tools::published::session_reminder::SessionReminders>>,
     pub session_queries: Arc<dyn crate::ports::SessionQueryPort>,
 }

@@ -1,5 +1,5 @@
 use crate::application::tool::agent::ToolCall;
-use tools::{
+use tools::published::agent::{
     AgentProgressEvent, AgentProgressKind, AgentProgressSourceContext, AgentToolCallProgress,
 };
 

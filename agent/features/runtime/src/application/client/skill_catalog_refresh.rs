@@ -15,21 +15,21 @@ use std::sync::{Arc, Mutex};
 /// 轮次边界的 skill catalog 刷新器。
 #[derive(Clone)]
 pub struct SkillCatalogRefresh {
-    catalog: Arc<dyn tools::SkillCatalogPort>,
+    catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
     workspace: project::Workspace,
     /// 启动快照：extra_dirs 与 available_tools；project_root 字段被忽略，
     /// 每次刷新以 workspace 当前根覆盖。
-    query_template: tools::SkillQuery,
+    query_template: tools::published::skill::SkillQuery,
     last_revision: Arc<Mutex<String>>,
 }
 
 impl SkillCatalogRefresh {
     /// `initial` 为启动 bootstrap 快照，其 revision 作为比较基线。
     pub fn new(
-        catalog: Arc<dyn tools::SkillCatalogPort>,
+        catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
         workspace: project::Workspace,
-        query_template: tools::SkillQuery,
-        initial: &tools::SkillCatalogSnapshot,
+        query_template: tools::published::skill::SkillQuery,
+        initial: &tools::published::skill::SkillCatalogSnapshot,
     ) -> Self {
         Self {
             catalog,
@@ -41,12 +41,17 @@ impl SkillCatalogRefresh {
 
     /// 重扫 catalog；revision 变化时向 `sink` emit `SkillsUpdated` 并返回
     /// 新 snapshot，未变化返回 `None`。
-    pub async fn refresh<S: ChatEventSink>(&self, sink: &S) -> Option<tools::SkillCatalogSnapshot> {
-        let query = tools::SkillQuery {
+    pub async fn refresh<S: ChatEventSink>(
+        &self,
+        sink: &S,
+    ) -> Option<tools::published::skill::SkillCatalogSnapshot> {
+        let query = tools::published::skill::SkillQuery {
             project_root: self.workspace.read().current_workspace_root(),
             ..self.query_template.clone()
         };
-        let snapshot = tools::SkillCatalogSnapshot::from_descriptors(self.catalog.list(query));
+        let snapshot = tools::published::skill::SkillCatalogSnapshot::from_descriptors(
+            self.catalog.list(query),
+        );
 
         let revision_changed = {
             let mut last_revision = self

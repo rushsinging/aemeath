@@ -57,7 +57,7 @@ where
             let workspace = shell.workspace.clone();
             let wiring = shell.wiring.clone();
             let tool_result_materializer = shell.tool_result_materializer.clone();
-            let agent_runner: Option<Arc<dyn tools::AgentRunner>> =
+            let agent_runner: Option<Arc<dyn tools::published::agent::AgentRunner>> =
                 Some(shell.agent_runner.clone());
             let max_tool_concurrency = shell.max_tool_concurrency;
             let agent_semaphore = shell.agent_semaphore.clone();

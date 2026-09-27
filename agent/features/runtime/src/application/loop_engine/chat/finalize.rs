@@ -16,7 +16,7 @@ impl RunFinalizationObserver for MainRunFinalizationObserver<'_> {
     async fn on_finalized(
         &mut self,
         outcome: &RunFinalizationOutcome,
-        _terminal: &tools::AgentRunTerminal,
+        _terminal: &tools::published::agent::AgentRunTerminal,
     ) {
         crate::application::loop_engine::run_finalization::log_run_finalization(
             outcome,

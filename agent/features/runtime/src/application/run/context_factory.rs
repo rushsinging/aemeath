@@ -26,9 +26,9 @@ use crate::ports::Policy;
 use hook::HookDispatcher;
 use memory::api::ReflectionHistoryStore;
 use task::TaskAccess;
+use tools::published::execution::ToolExecutionPort;
 use tools::{
-    RegistryScopeName, ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot, ToolExecutionPort,
-    ToolProfileName,
+    RegistryScopeName, ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot, ToolProfileName,
 };
 
 // ── Factory-owned immutable services ──
@@ -117,7 +117,7 @@ struct LifecycleSelection {
 }
 
 struct SkillLoadSelection {
-    state: Arc<dyn tools::SkillLoadStatePort>,
+    state: Arc<dyn tools::published::skill::SkillLoadStatePort>,
     session_id: String,
 }
 
@@ -134,7 +134,7 @@ struct RunCreationResources {
 pub struct RuntimeContextFactory {
     services: RuntimeServices,
     provider_factory: Option<Arc<dyn crate::ports::ProviderFactory>>,
-    skill_catalog: Option<Arc<dyn tools::SkillCatalogPort>>,
+    skill_catalog: Option<Arc<dyn tools::published::skill::SkillCatalogPort>>,
     use_injected_hooks: bool,
 }
 
@@ -199,7 +199,7 @@ impl RuntimeContextFactory {
     pub fn with_derived_bindings(
         &self,
         provider_factory: Arc<dyn crate::ports::ProviderFactory>,
-        skill_catalog: Arc<dyn tools::SkillCatalogPort>,
+        skill_catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
     ) -> Self {
         Self {
             services: self.services.clone(),
@@ -288,7 +288,7 @@ impl RuntimeContextFactory {
         activity_publisher: Arc<dyn crate::application::activity::ActivityChangePublisher>,
         bindings: RunCapabilityBindings,
         hook: HookSelection,
-        skill_load_state: Arc<dyn tools::SkillLoadStatePort>,
+        skill_load_state: Arc<dyn tools::published::skill::SkillLoadStatePort>,
         resources: RunCreationResources,
     ) -> Result<
         (
