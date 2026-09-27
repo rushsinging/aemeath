@@ -1,6 +1,6 @@
-use memory::api::{
-    ReflectionApplyStatus, ReflectionErrorCategory, ReflectionSafeSummary, ReflectionStatus,
-    ReflectionTrigger,
+use memory::api::reflection::ReflectionStatus;
+use memory::api::reflection::{
+    ReflectionApplyStatus, ReflectionErrorCategory, ReflectionSafeSummary, ReflectionTrigger,
 };
 use sdk::{
     ReflectionApplyStatusView, ReflectionErrorCategoryView, ReflectionHistoryView,
@@ -88,7 +88,7 @@ mod tests {
             outdated: 3,
             apply_status: ReflectionApplyStatus::Applied,
             error_category: None,
-            token_usage: Some(memory::api::ReflectionTokenUsage {
+            token_usage: Some(memory::api::reflection::ReflectionTokenUsage {
                 input_tokens: 10,
                 output_tokens: 20,
             }),

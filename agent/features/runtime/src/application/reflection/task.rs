@@ -3,10 +3,10 @@ use super::execution::{
     ReflectionExecutionResultType, ReflectionInvocation,
 };
 use crate::ports::ProviderPort;
-use memory::api::{
-    MemoryPort, ReflectionErrorCategory, ReflectionExecutionIdentity, ReflectionHistoryStore,
-    ReflectionTrigger, ReflectionWorkflow,
+use memory::api::reflection::{
+    ReflectionErrorCategory, ReflectionExecutionIdentity, ReflectionTrigger, ReflectionWorkflow,
 };
+use memory::api::{MemoryPort, ReflectionHistoryStore};
 
 pub type ReflectionResultPayload = CompleteReflectionResult;
 pub(crate) type ReflectionError = ReflectionExecutionError;

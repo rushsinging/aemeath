@@ -2,7 +2,8 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use memory::api::{MemoryPort, MemoryQuery, MemoryRetrievalMode, MemorySearchHit};
+use memory::api::search::{MemoryRetrievalMode, MemorySearchHit};
+use memory::api::{MemoryPort, MemoryQuery};
 
 use crate::domain::{ContextRequest, SystemBlock};
 use crate::ports::{ContextMemorySource, MemoryMaterialization};
@@ -210,11 +211,13 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use async_trait::async_trait;
+    use memory::api::reflection::{ReflectionApplyResult, ReflectionOutput};
+    use memory::api::search::{
+        MemoryRetrievalMode, MemorySearchHit, MemorySearchQuery, MemorySearchResult,
+    };
     use memory::api::{
         CompactResult, MemoryCategory, MemoryEntry, MemoryError, MemoryId, MemoryLayer,
-        MemoryLocation, MemoryPort, MemoryQuery, MemoryRetrievalMode, MemorySearchHit,
-        MemorySearchQuery, MemorySearchResult, MemorySource, MemoryStats, ReflectionApplyResult,
-        ReflectionOutput, WriteResult,
+        MemoryLocation, MemoryPort, MemoryQuery, MemorySource, MemoryStats, WriteResult,
     };
     use sdk::RunId;
     use share::config::domain::snapshot::ConfigSnapshot;

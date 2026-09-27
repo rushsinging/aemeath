@@ -3,10 +3,12 @@ use crate::domain::types::memory::{
     MemoryLocationResult, MemoryResult, MemorySearchHitResult,
 };
 use crate::domain::{ToolExecutionContext, TypedToolResult};
+use memory::api::search::MemorySearchHit;
+use memory::api::search::MemorySearchQuery as Query;
 use memory::api::{
     EvictionCandidate, MemoryCategory as Category, MemoryEntry, MemoryId as Id,
-    MemoryLayer as Layer, MemoryLocation, MemoryPort, MemorySearchHit, MemorySearchQuery as Query,
-    MemorySource as Source, RestoreResult, WriteResult,
+    MemoryLayer as Layer, MemoryLocation, MemoryPort, MemorySource as Source, RestoreResult,
+    WriteResult,
 };
 use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};

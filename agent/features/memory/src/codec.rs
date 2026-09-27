@@ -1,4 +1,4 @@
-use crate::*;
+use crate::domain::*;
 use serde::{Deserialize, Serialize};
 
 const SCHEMA_VERSION: u32 = 1;

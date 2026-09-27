@@ -60,7 +60,7 @@ pub(crate) fn production_execution_context(root: PathBuf) -> ToolExecutionContex
             WorkspaceReadAccess::new(read),
             Arc::new(MutexReadSet(Arc::new(Mutex::new(HashSet::new())))),
             Arc::new(FixedPlanMode(None)),
-            Arc::new(memory::NoOpMemory),
+            Arc::new(memory::api::NoOpMemory),
             Arc::new(FixedGuidance {
                 language: "en".into(),
             }),

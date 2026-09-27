@@ -226,7 +226,7 @@ impl TestToolExecutionContextBuilder {
             fake_workspace_read_access(workspace),
             Arc::new(MutexReadSet(Arc::new(Mutex::new(self.read_files)))),
             Arc::new(FixedPlanMode(None)),
-            Arc::new(memory::NoOpMemory),
+            Arc::new(memory::api::NoOpMemory),
             Arc::new(FixedGuidance {
                 language: "en".into(),
             }),

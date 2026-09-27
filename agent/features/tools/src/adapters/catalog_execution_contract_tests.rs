@@ -675,7 +675,7 @@ fn context_for_run_profile_cancellation_and_selection(
             Default::default(),
         )))),
         Arc::new(FixedPlanMode(None)),
-        Arc::new(memory::NoOpMemory),
+        Arc::new(memory::api::NoOpMemory),
         Arc::new(FixedGuidance {
             language: "en".into(),
         }),

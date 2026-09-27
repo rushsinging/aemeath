@@ -5,7 +5,7 @@ use tokio_util::sync::CancellationToken;
 
 fn successful_payload() -> CompleteReflectionResult {
     CompleteReflectionResult {
-        output: memory::api::ReflectionOutput::default(),
+        output: memory::api::reflection::ReflectionOutput::default(),
         input_tokens: 0,
         output_tokens: 0,
         apply_result: None,

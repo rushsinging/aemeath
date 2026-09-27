@@ -303,7 +303,7 @@ impl MainContextFactory for ProductionMainContextFactory {
         session: Arc<RwLock<Arc<CanonicalSession>>>,
         task_persist: Arc<dyn task::TaskPersist>,
         workspace_persist: Arc<dyn project::WorkspaceWriter>,
-        memory: Arc<RwLock<Arc<dyn memory::MemoryPort>>>,
+        memory: Arc<RwLock<Arc<dyn memory::api::MemoryPort>>>,
         mutation_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Arc<dyn ContextPort> {
         let prompt: Arc<dyn crate::ports::ContextPromptSource> =

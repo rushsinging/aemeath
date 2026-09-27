@@ -31,8 +31,10 @@ fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeCon
                 async fn list(
                     &self,
                     _limit: usize,
-                ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::MemoryError>
-                {
+                ) -> Result<
+                    Vec<memory::api::reflection::ReflectionSafeSummary>,
+                    memory::api::MemoryError,
+                > {
                     Ok(vec![])
                 }
             }
@@ -40,14 +42,14 @@ fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeCon
             impl memory::api::ReflectionHistoryStore for FakeRefl {
                 async fn append(
                     &self,
-                    _record: &memory::api::ReflectionRecord,
-                ) -> Result<(), memory::MemoryError> {
+                    _record: &memory::api::reflection::ReflectionRecord,
+                ) -> Result<(), memory::api::MemoryError> {
                     Ok(())
                 }
                 async fn upsert(
                     &self,
-                    _record: &memory::api::ReflectionRecord,
-                ) -> Result<(), memory::MemoryError> {
+                    _record: &memory::api::reflection::ReflectionRecord,
+                ) -> Result<(), memory::api::MemoryError> {
                     Ok(())
                 }
             }
