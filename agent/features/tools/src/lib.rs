@@ -8,14 +8,7 @@ mod domain;
 
 /// Composition-only adapter construction. Concrete adapter and backing types
 /// remain private; production business code consumes the returned ports.
-pub mod composition {
-    pub use crate::adapters::composition::{
-        wire_builtin_catalog_execution, wire_commands, wire_skills, CatalogExecutionWiring,
-        CommandWiring, SkillWiring,
-    };
-    #[cfg(feature = "test-harness")]
-    pub use crate::adapters::composition::{TestCatalogExecution, TestCatalogExecutionFactory};
-}
+pub mod composition;
 
 /// Published tool-domain DTO types (kept as a public module facade).
 pub mod published;
