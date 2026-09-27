@@ -48,13 +48,9 @@ pub use domain::schema_validator::{
 };
 
 // Role-policy compilation: config strings → narrowed ToolProfile.
-pub use domain::role_policy::{role_profile_name, RolePolicyCompileError};
+pub use domain::role_policy::role_profile_name;
 
 // Runtime's phase-peel seam delegates to this Tools-owned typed parser.
-pub use adapters::ask_user::ask_user_suspension;
 
 // Adapter façade: only MCP protocol values and the read-only command classifier.
-pub use adapters::bash::is_readonly_command;
-pub use adapters::mcp::McpTransportKind;
-pub use adapters::mcp_manager::McpConnectionManager;
 pub use adapters::mcp_tool::McpTool;

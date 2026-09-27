@@ -131,7 +131,7 @@ async fn dynamic_mcp_style_tool_enters_main_catalog_and_receives_invocation_auth
         .execution
         .execute(
             invocation(&ports.scope, "mcp__demo__read", json!({"value":"ok"}))
-                .with_authorization(crate::AuthorizationContext::ALLOW_ALL),
+                .with_authorization(crate::domain::context::AuthorizationContext::ALLOW_ALL),
             &ports.context,
         )
         .await;

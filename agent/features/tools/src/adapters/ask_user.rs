@@ -52,7 +52,7 @@ impl TypedTool for AskUserQuestionTool {
 /// Compatibility seam for Runtime until the execution port is wired end to
 /// end. It uses the same typed parser as `TypedTool::suspension` and owns no
 /// Runtime identity or waiting state.
-pub fn ask_user_suspension(input: &Value) -> Result<ToolSuspension, String> {
+pub(crate) fn ask_user_suspension(input: &Value) -> Result<ToolSuspension, String> {
     parse_interaction(input).map(ToolSuspension::UserInteraction)
 }
 

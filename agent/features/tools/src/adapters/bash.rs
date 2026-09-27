@@ -14,7 +14,7 @@ use cwd::{split_stdout_and_cwd, CWD_MARKER};
 
 use super::process_cleanup::terminate_process_tree;
 
-pub use crate::domain::shell_safety::is_readonly_command;
+use crate::domain::shell_safety::is_readonly_command;
 use serde_json::Value;
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;

@@ -1,5 +1,7 @@
 use super::*;
-use crate::{SkillLoadDecision, SkillLoadMutation, SkillLoadStateError, SkillLoadStatePort};
+use crate::domain::{
+    SkillLoadDecision, SkillLoadMutation, SkillLoadStateError, SkillLoadStatePort,
+};
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
