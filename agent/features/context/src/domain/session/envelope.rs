@@ -10,7 +10,7 @@ use crate::domain::{FinalizeCause, StepReceipt, ToolCallReceipt, ToolReceiptMuta
 
 use super::{ChatSegment, PersistedWorkspaceContext, SessionMetadata};
 
-pub const CURRENT_SESSION_SCHEMA_VERSION: u32 = 6;
+pub(crate) const CURRENT_SESSION_SCHEMA_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", content = "value", rename_all = "snake_case")]
@@ -991,7 +991,7 @@ pub struct DecodedSession {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum SessionCodecError {
+pub(crate) enum SessionCodecError {
     #[error("Session schema version {version} is newer than supported")]
     UnsupportedFutureVersion {
         version: u32,
@@ -1093,7 +1093,7 @@ pub(super) mod task_snapshot_state {
     }
 }
 
-pub struct SessionCodec;
+pub(crate) struct SessionCodec;
 
 impl SessionCodec {
     pub fn encode(session: &CanonicalSession) -> Result<Vec<u8>, SessionCodecError> {

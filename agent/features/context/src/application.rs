@@ -11,8 +11,9 @@ mod session_persistence;
 pub use main_session::test_support;
 #[cfg_attr(not(test), allow(unused_imports))]
 pub use main_session::{
-    wire_main_session, BoundMainRun, MainSessionDependencies, MainSessionError, MainSessionWiring,
-    MainSessionWiringBuilder, OwnedSessionSharedPermit, SessionSwitchGate,
+    wire_main_session, MainSessionDependencies, MainSessionWiring, MainSessionWiringBuilder,
+    OwnedSessionSharedPermit,
 };
-pub use service::ContextApplicationService;
-pub use session_persistence::{SessionLoadError, SessionPersistenceService};
+pub(crate) use main_session::{BoundMainRun, MainSessionError, SessionSwitchGate};
+pub(crate) use service::ContextApplicationService;
+pub(crate) use session_persistence::{SessionLoadError, SessionPersistenceService};

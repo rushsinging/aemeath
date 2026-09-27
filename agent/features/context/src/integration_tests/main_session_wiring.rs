@@ -6,22 +6,22 @@
 //! (they are in-memory / filesystem-light) and **real** `ConfigAppService`.
 //! Only the `MemoryOpener` is mocked.
 
+use config::{ConfigAppService, ConfigReader, ProjectConfigParticipant};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use config::{ConfigAppService, ConfigReader, ProjectConfigParticipant};
-use context::main_session::{MainSessionError, MainSessionWiring, MainSessionWiringBuilder};
-use context::ContextPort;
-use context::{
+use crate::main_session::{MainSessionError, MainSessionWiring, MainSessionWiringBuilder};
+use crate::ContextPort;
+use crate::{
     AcceptedInputAppend, CleanupConfirmation, ContentFingerprint, ContextAppend, ContextRequest,
     ContextRequestId, FinalizeCause, Language, RunStepId, SessionId, SessionRevision, StepReceipt,
     SystemPromptSpec, ToolCallIdentity, ToolCallReceipt, ToolOutcomeKind, ToolTerminalReceipt,
 };
-use context::{
+use crate::{
     CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStepMessages,
     FinalizedOutcomeRecord, SnapshotState,
 };
+use async_trait::async_trait;
 use memory::api::{
     InMemoryMemory, MemoryOpener, MemoryOpenerError, MemoryPolicy, MemoryPort, ProjectMemoryKey,
 };
@@ -227,13 +227,13 @@ fn build_harness() -> Harness {
             open_count: Arc::clone(&memory_opener.open_count),
             fail: Arc::clone(&memory_opener.fail),
         }),
-        session_management: Arc::new(context::AtomicBlobSessionManagement::new(
+        session_management: Arc::new(crate::AtomicBlobSessionManagement::new(
             storage::wire_file_system_blob(tmp.path()).unwrap(),
         )),
         initial_session,
         initial_memory,
-        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
+        context_factory: Arc::new(crate::ProductionMainContextFactory::new(Arc::new(
+            crate::NoOpCanonicalSessionWriter,
         ))),
     };
 
@@ -346,7 +346,7 @@ fn finalized_tool_step(
                 agent: false,
             },
             input_preview: input.to_string(),
-            state: context::ToolCallState::Terminal(ToolTerminalReceipt::new(
+            state: crate::ToolCallState::Terminal(ToolTerminalReceipt::new(
                 ToolOutcomeKind::Success,
                 "terminal",
                 CleanupConfirmation::NotApplicable,

@@ -7,7 +7,7 @@ pub(crate) mod guidance;
 pub(crate) mod security;
 
 pub use guidance::resolver::InstructionsLoadedHook;
-pub use guidance::{
-    init_guidance_dir, resolve_guidance, resolve_guidance_async, universal_execution_discipline,
-};
-pub use security::{assess_guidance, GuidanceAssessment};
+pub use guidance::{init_guidance_dir, resolve_guidance_async};
+pub(crate) use guidance::{resolve_guidance, universal_execution_discipline};
+pub use security::assess_guidance;
+pub(crate) use security::GuidanceAssessment;

@@ -2,15 +2,15 @@ use std::sync::Arc;
 
 use share::message::{ContentBlock, Message};
 
-use context::compact::{
+use crate::compact::{
     microcompact_exploration, snip_superseded_exploration, ContextReadCandidate, ContextReadRun,
     ContextReadStep, ProtectedRunPolicy,
 };
-use context::{
+use crate::{
     AcceptedInputRecord, CommittedRunSlice, CommittedRunStep, CommittedStepMessages,
     FinalizedOutcomeRecord, SessionHistory,
 };
-use context::{
+use crate::{
     CleanupConfirmation, FinalizeCause, SessionId, ToolCallIdentity, ToolCallReceipt,
     ToolOutcomeKind, ToolTerminalReceipt,
 };
@@ -145,7 +145,7 @@ fn terminal_receipt(
             agent: false,
         },
         input_preview: input.to_string(),
-        state: context::ToolCallState::Terminal(ToolTerminalReceipt::new(
+        state: crate::ToolCallState::Terminal(ToolTerminalReceipt::new(
             outcome,
             "terminal",
             CleanupConfirmation::NotApplicable,

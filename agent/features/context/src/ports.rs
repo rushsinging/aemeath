@@ -12,10 +12,12 @@ use crate::domain::{
 pub mod context_port;
 pub mod session_management;
 pub mod session_snapshot_store;
-pub use crate::domain::PromptMaterializationError;
+pub(crate) use crate::domain::PromptMaterializationError;
 pub use context_port::ContextPort;
 pub use session_management::SessionManagementPort;
-pub use session_snapshot_store::{SessionGeneration, SessionSnapshotStore, SessionStoreError};
+pub(crate) use session_snapshot_store::{
+    SessionGeneration, SessionSnapshotStore, SessionStoreError,
+};
 
 pub trait MainContextFactory: Send + Sync {
     fn build(
@@ -36,7 +38,7 @@ pub trait SessionDecoder: Send + Sync {
 }
 
 #[derive(Debug, Clone)]
-pub struct SessionSnapshot {
+pub(crate) struct SessionSnapshot {
     pub revision: SessionRevision,
     pub messages: ContextMessages,
     pub structured_history: Option<crate::domain::session::SessionHistory>,
@@ -44,7 +46,7 @@ pub struct SessionSnapshot {
 }
 
 #[async_trait]
-pub trait SessionRepository: Send + Sync {
+pub(crate) trait SessionRepository: Send + Sync {
     async fn snapshot(&self, session_id: &SessionId) -> Result<SessionSnapshot, String>;
     async fn append_accepted_input(
         &self,
@@ -99,7 +101,7 @@ pub trait SessionRepository: Send + Sync {
 }
 
 #[derive(Debug, Clone)]
-pub struct PromptMaterialization {
+pub(crate) struct PromptMaterialization {
     pub cacheable: Vec<SystemBlock>,
     pub uncached: Vec<SystemBlock>,
     pub revision: u64,
@@ -112,7 +114,7 @@ pub trait SkillQueryFactory: Send + Sync {
 }
 
 #[async_trait]
-pub trait ContextPromptSource: Send + Sync {
+pub(crate) trait ContextPromptSource: Send + Sync {
     async fn materialize(
         &self,
         request: &ContextRequest,
@@ -120,12 +122,12 @@ pub trait ContextPromptSource: Send + Sync {
 }
 
 #[derive(Debug, Clone)]
-pub struct MemoryMaterialization {
+pub(crate) struct MemoryMaterialization {
     pub blocks: Vec<SystemBlock>,
     pub revision: u64,
 }
 
 #[async_trait]
-pub trait ContextMemorySource: Send + Sync {
+pub(crate) trait ContextMemorySource: Send + Sync {
     async fn materialize(&self, request: &ContextRequest) -> Result<MemoryMaterialization, String>;
 }

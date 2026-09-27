@@ -1,9 +1,9 @@
-use context::{
+use crate::{
     AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
     CommittedRunStep, FinalizedOutcomeRecord, RunStepCursor, SessionCommitPlan,
     SessionGenerationCodec,
 };
-use context::{CanonicalSessionWriter, DatasetCanonicalSessionWriter};
+use crate::{CanonicalSessionWriter, DatasetCanonicalSessionWriter};
 use share::message::Message;
 use storage::{DatasetKeyData, DatasetReadOutcomeData, SafePathSegmentData, StorageNamespaceData};
 

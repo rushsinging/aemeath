@@ -14,9 +14,11 @@ mod structured_facts;
 // 显式 re-export token_budget 的预算/估算函数（#1486：排除
 // FALLBACK_PREVIOUS_SUMMARY_CAP，避免与 compact_summary 的 glob
 // re-export 产生歧义——该常量由 compact_summary 单点导出）。
+pub(crate) use crate::domain::token_budget::{
+    autocompact_threshold, effective_context_window, estimate_message_tokens, estimate_tokens,
+};
 pub use crate::domain::token_budget::{
-    autocompact_threshold, effective_context_window, estimate_json_tokens, estimate_message_tokens,
-    estimate_messages_tokens, estimate_tokens, estimate_tokens_with_ratio,
+    estimate_json_tokens, estimate_messages_tokens, estimate_tokens_with_ratio,
     estimate_tool_schemas_tokens, summary_budget,
 };
 pub use autocompact::*;

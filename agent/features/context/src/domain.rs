@@ -12,14 +12,18 @@ pub mod tool_receipt;
 mod tool_receipt_tests;
 
 pub use compact::{CompactProgressFn, CompactStage, CompactWork};
+pub(crate) use token_budget::{
+    autocompact_threshold, effective_context_window, estimate_message_tokens, estimate_tokens,
+};
 pub use token_budget::{
-    autocompact_threshold, clamped_max_output, effective_context_window, estimate_message_tokens,
-    estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens, MIN_EFFECTIVE_WINDOW,
+    clamped_max_output, estimate_messages_tokens, estimate_tool_schemas_tokens,
+    MIN_EFFECTIVE_WINDOW,
 };
 pub use tool_receipt::{
-    CleanupConfirmation, ToolCallIdentity, ToolCallReceipt, ToolCallState, ToolReceiptMutation,
-    ToolReceiptMutationError, ToolReceiptMutationReceipt, ToolTerminalReceipt,
+    CleanupConfirmation, ToolCallIdentity, ToolReceiptMutation, ToolReceiptMutationError,
+    ToolReceiptMutationReceipt, ToolTerminalReceipt,
 };
+pub(crate) use tool_receipt::{ToolCallReceipt, ToolCallState};
 
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize};

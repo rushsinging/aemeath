@@ -17,7 +17,7 @@ use storage::SafePathSegmentData;
 /// `cwd:<initial_cwd>` 作为哈希输入，取 SHA-256 前 16 个 hex 字符。
 /// 同一 identity（含同一仓库的不同 worktree）得到同一段；不同 identity
 /// 得到不同段的概率由 64 bit 哈希前缀保证。
-pub fn project_dir_segment(identity: &ProjectIdentityData) -> SafePathSegmentData {
+pub(crate) fn project_dir_segment(identity: &ProjectIdentityData) -> SafePathSegmentData {
     let canonical = match identity.git_common_dir.as_deref() {
         Some(common_dir) => format!("git:{common_dir}"),
         None => format!("cwd:{}", identity.initial_cwd),

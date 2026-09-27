@@ -1,4 +1,4 @@
-use context::guidance::{assess_guidance, resolve_guidance, universal_execution_discipline};
+use crate::guidance::{assess_guidance, resolve_guidance, universal_execution_discipline};
 use std::collections::HashMap;
 
 #[test]

@@ -296,7 +296,7 @@ impl SessionStepReference {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionGenerationManifest {
+pub(crate) struct SessionGenerationManifest {
     generation_schema_version: u32,
     session_schema_version: u32,
     session_id: String,
@@ -594,7 +594,7 @@ impl SessionMemberBytes {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionCommitPlan {
+pub(crate) struct SessionCommitPlan {
     changed_members: Vec<SessionMemberBytes>,
     reused_members: Vec<String>,
     removed_members: Vec<String>,
@@ -1194,7 +1194,7 @@ impl SessionStepMember {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum SessionGenerationWireError {
+pub(crate) enum SessionGenerationWireError {
     #[error("Session generation schema version {version} is newer than supported")]
     UnsupportedFutureVersion {
         version: u32,
@@ -1229,7 +1229,7 @@ pub enum SessionGenerationWireError {
     Encode(String),
 }
 
-pub struct SessionGenerationCodec;
+pub(crate) struct SessionGenerationCodec;
 
 impl SessionGenerationCodec {
     pub fn encode_manifest(

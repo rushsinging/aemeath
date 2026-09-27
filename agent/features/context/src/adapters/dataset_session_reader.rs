@@ -75,7 +75,7 @@ fn parse_blob_segments(raw_key: &str) -> Vec<String> {
     raw_key.split('/').map(str::to_string).collect()
 }
 
-pub struct DatasetSessionReader {
+pub(crate) struct DatasetSessionReader {
     dataset: Arc<dyn AtomicDatasetPort>,
     legacy_blob: Option<Arc<dyn storage::AtomicBlobPort>>,
 }

@@ -10,7 +10,7 @@ use crate::ports::{
     ContextPromptSource, PromptMaterialization, PromptMaterializationError, SkillQueryFactory,
 };
 
-pub struct SkillPromptSource {
+pub(crate) struct SkillPromptSource {
     catalog: Arc<dyn SkillCatalogPort>,
     query_factory: Arc<dyn SkillQueryFactory>,
 }
@@ -56,7 +56,7 @@ pub(crate) fn sort_and_dedup(mut descriptors: Vec<SkillDescriptor>) -> Vec<Skill
     descriptors
 }
 
-pub fn skill_prompt_budget(context_size: usize) -> usize {
+pub(crate) fn skill_prompt_budget(context_size: usize) -> usize {
     (context_size / 8).max(1_024)
 }
 

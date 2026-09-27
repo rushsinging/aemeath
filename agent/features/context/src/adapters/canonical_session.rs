@@ -196,7 +196,7 @@ impl ToolReceiptWriter for NoOpToolReceiptWriter {
     }
 }
 
-pub struct AtomicBlobCanonicalSessionWriter {
+pub(crate) struct AtomicBlobCanonicalSessionWriter {
     blob: Arc<dyn storage::AtomicBlobPort>,
 }
 
@@ -389,7 +389,7 @@ impl Drop for AutoCompactAttemptPermit {
     }
 }
 
-pub struct CanonicalSessionRepository {
+pub(crate) struct CanonicalSessionRepository {
     session: Arc<RwLock<Arc<CanonicalSession>>>,
     task_persist: Arc<dyn task::TaskPersist>,
     workspace_persist: Arc<dyn project::WorkspaceWriter>,

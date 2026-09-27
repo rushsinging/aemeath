@@ -4,8 +4,8 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use context::ContextRequest;
-use context::SkillQueryFactory;
+use crate::ContextRequest;
+use crate::SkillQueryFactory;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
 use share::reasoning::ReasoningLevel;
@@ -36,7 +36,7 @@ impl SkillQueryFactory for FixedQueryFactory {
 }
 
 fn base_request() -> ContextRequest {
-    use context::*;
+    use crate::*;
     ContextRequest {
         session_id: SessionId::new("isolated-session"),
         request_id: ContextRequestId::new("request"),
@@ -61,7 +61,7 @@ fn base_request() -> ContextRequest {
 
 #[tokio::test]
 async fn isolated_context_with_skill_catalog_builds_metadata_directory() {
-    let port = context::isolated_context_with_skill(
+    let port = crate::isolated_context_with_skill(
         "isolated-session",
         Arc::new(FakeCatalog),
         Arc::new(FixedQueryFactory),
@@ -79,7 +79,7 @@ async fn isolated_context_with_skill_catalog_builds_metadata_directory() {
 
 #[tokio::test]
 async fn isolated_context_without_catalog_has_no_skills_block() {
-    let port = context::isolated_context("isolated-session");
+    let port = crate::isolated_context("isolated-session");
     let window = port.build_window(&base_request()).await.unwrap();
     assert!(!window
         .system_blocks

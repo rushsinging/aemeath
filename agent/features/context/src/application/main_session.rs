@@ -85,7 +85,7 @@ pub struct SessionSwitchClosed;
 /// Each variant identifies a distinct phase of the cross-BC prepare/commit
 /// pipeline so the caller can distinguish *why* a resume was rejected.
 #[derive(Debug, thiserror::Error)]
-pub enum MainSessionError {
+pub(crate) enum MainSessionError {
     /// The envelope's `workspace` slot is `Missing` or `CapturedEmpty`. A typed
     /// workspace context is mandatory for resume — there is no safe default.
     #[error("workspace snapshot is missing or captured empty; a typed workspace context is required for resume")]
@@ -207,6 +207,14 @@ pub struct MainSessionDependencies {
 /// fully wired with the real opener. There is no compatibility no-op opener
 /// in production.
 pub async fn wire_main_session(
+    deps: MainSessionDependencies,
+) -> Result<Arc<MainSessionWiring>, sdk::SdkError> {
+    wire_main_session_inner(deps)
+        .await
+        .map_err(|error| sdk::SdkError::Init(error.to_string()))
+}
+
+async fn wire_main_session_inner(
     deps: MainSessionDependencies,
 ) -> Result<Arc<MainSessionWiring>, MainSessionError> {
     let workspace_read = deps.workspace.read();

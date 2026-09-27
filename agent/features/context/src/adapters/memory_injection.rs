@@ -9,7 +9,7 @@ use crate::domain::{ContextRequest, SystemBlock};
 use crate::ports::{ContextMemorySource, MemoryMaterialization};
 
 /// Read-only bridge from the Memory BC retrieval port into Context system blocks.
-pub struct MemoryRetrieveAdapter {
+pub(crate) struct MemoryRetrieveAdapter {
     memory: Arc<dyn MemoryPort>,
     now: Arc<dyn Fn() -> u64 + Send + Sync>,
 }
@@ -165,7 +165,7 @@ fn stable_revision(hits: &[MemorySearchHit]) -> u64 {
     revision
 }
 
-pub struct CommittedMemoryRetrieveAdapter {
+pub(crate) struct CommittedMemoryRetrieveAdapter {
     memory: Arc<std::sync::RwLock<Arc<dyn MemoryPort>>>,
 }
 
@@ -190,7 +190,7 @@ impl ContextMemorySource for CommittedMemoryRetrieveAdapter {
 }
 
 /// Sub Run 或禁用 Memory 时使用的空注入 adapter。
-pub struct NoOpContextMemorySource;
+pub(crate) struct NoOpContextMemorySource;
 
 #[async_trait]
 impl ContextMemorySource for NoOpContextMemorySource {

@@ -40,7 +40,7 @@ impl LoadedGuidance {
 ///   2. Every prefix-matched `{prefix}.md`, general to specific
 ///   3. Every matching config guidance entry, general to specific
 ///   4. If `reasoning == true`, append `_reasoning.md`
-pub fn resolve_guidance(
+pub(crate) fn resolve_guidance(
     model_id: &str,
     config_guidance: &HashMap<String, String>,
     reasoning: bool,

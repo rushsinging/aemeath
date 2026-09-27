@@ -26,7 +26,7 @@ struct SessionState {
 
 /// #870 的确定性内存 backing；durable Envelope/AtomicBlob 由 #869/#880 替换。
 #[derive(Default)]
-pub struct InMemorySessionRepository {
+pub(crate) struct InMemorySessionRepository {
     sessions: Mutex<HashMap<String, SessionState>>,
 }
 

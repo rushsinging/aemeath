@@ -11,7 +11,7 @@ use crate::domain::{
 };
 use crate::ports::{ContextMemorySource, ContextPort, ContextPromptSource, SessionRepository};
 
-pub struct ContextApplicationService {
+pub(crate) struct ContextApplicationService {
     session: Arc<dyn SessionRepository>,
     prompt: Arc<dyn ContextPromptSource>,
     memory: Arc<dyn ContextMemorySource>,

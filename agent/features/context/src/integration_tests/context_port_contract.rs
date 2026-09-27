@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
-use async_trait::async_trait;
-use context::context_port::{
+use crate::context_port::{
     AcceptedInputAppend, AcceptedInputReceipt, AppendReceipt, CompactOutcome, CompactRequest,
     CompactResult, CompactTrigger, CompactionDecision, ContentFingerprint, ContextAppend,
     ContextAppendError, ContextMessage, ContextPort, ContextPortError, ContextRequest,
@@ -9,6 +8,7 @@ use context::context_port::{
     RunStepId, SessionId, SessionRevision, StepReceipt, SystemPromptSpec, TokenBudget,
     ToolOutcomeKind, Urgency,
 };
+use async_trait::async_trait;
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
@@ -81,7 +81,7 @@ impl ContextPort for FakeContextPort {
             summary: "summary".into(),
             recent_messages: vec![],
             source_revision: SessionRevision::new(3),
-            quality: context::CompactSummaryQuality::LocalOnly,
+            quality: crate::CompactSummaryQuality::LocalOnly,
         }))
     }
 
@@ -93,7 +93,7 @@ impl ContextPort for FakeContextPort {
             summary: format!("manual summary for {}", request.session_id.as_str()),
             recent_messages: vec![],
             source_revision: SessionRevision::new(5),
-            quality: context::CompactSummaryQuality::LocalOnly,
+            quality: crate::CompactSummaryQuality::LocalOnly,
         }))
     }
 
@@ -104,7 +104,7 @@ impl ContextPort for FakeContextPort {
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppend,
-    ) -> Result<AcceptedInputReceipt, context::context_port::AcceptedInputError> {
+    ) -> Result<AcceptedInputReceipt, crate::context_port::AcceptedInputError> {
         Ok(AcceptedInputReceipt {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),

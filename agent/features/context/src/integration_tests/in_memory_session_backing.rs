@@ -1,6 +1,6 @@
-use context::InMemorySessionRepository;
-use context::SessionRepository;
-use context::{
+use crate::InMemorySessionRepository;
+use crate::SessionRepository;
+use crate::{
     AcceptedInputAppend, AcceptedInputError, CleanupConfirmation, ContentFingerprint,
     ContextAppend, ContextAppendError, ContextRequestId, FinalizeCause, RunStepId, SessionId,
     SessionRevision, ToolCallIdentity, ToolOutcomeKind, ToolReceiptMutation, ToolTerminalReceipt,
@@ -119,9 +119,9 @@ async fn commit_tool_step(
 
 #[tokio::test]
 async fn build_window_applies_l3_to_isolated_subagent_history() {
-    use context::ContextApplicationService;
-    use context::{ContextPort, ContextPromptSource, PromptMaterialization};
-    use context::{ContextRequest, Language, SystemPromptSpec};
+    use crate::ContextApplicationService;
+    use crate::{ContextPort, ContextPromptSource, PromptMaterialization};
+    use crate::{ContextRequest, Language, SystemPromptSpec};
     use share::config::domain::snapshot::ConfigSnapshot;
     use share::config::Config;
     use share::reasoning::ReasoningLevel;
@@ -133,7 +133,7 @@ async fn build_window_applies_l3_to_isolated_subagent_history() {
         async fn materialize(
             &self,
             _request: &ContextRequest,
-        ) -> Result<PromptMaterialization, context::PromptMaterializationError> {
+        ) -> Result<PromptMaterialization, crate::PromptMaterializationError> {
             Ok(PromptMaterialization {
                 cacheable: vec![],
                 uncached: vec![],
@@ -160,7 +160,7 @@ async fn build_window_applies_l3_to_isolated_subagent_history() {
     let service = ContextApplicationService::new(
         backing,
         Arc::new(Prompt),
-        Arc::new(context::NoOpContextMemorySource),
+        Arc::new(crate::NoOpContextMemorySource),
     );
     let request = ContextRequest {
         session_id,
@@ -291,10 +291,10 @@ async fn finalized_outcome_keeps_receipt_metadata_for_idempotent_retry() {
     let mut outcome = append("outcome-v1");
     outcome.finalize_cause = FinalizeCause::RunTerminated;
     outcome.api_input_tokens = Some(21);
-    outcome.receipts = vec![context::StepReceipt::agent(
+    outcome.receipts = vec![crate::StepReceipt::agent(
         "agent-call",
         0,
-        context::ToolOutcomeKind::CancellationUnconfirmed,
+        crate::ToolOutcomeKind::CancellationUnconfirmed,
     )];
 
     let first = backing.append_finalized(&outcome).await.unwrap();

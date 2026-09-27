@@ -1,10 +1,10 @@
-use context::decode_session;
-use context::{
+use crate::decode_session;
+use crate::{
     AcceptedInputRecord, CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStep,
     CommittedStepMessages, FinalizedOutcomeRecord, SessionCodec, SessionCodecError, SnapshotState,
     CURRENT_SESSION_SCHEMA_VERSION,
 };
-use context::{FinalizeCause, StepReceipt, ToolOutcomeKind};
+use crate::{FinalizeCause, StepReceipt, ToolOutcomeKind};
 use serde_json::json;
 use share::message::{ContentBlock, Message, Role};
 use share::session_types::{

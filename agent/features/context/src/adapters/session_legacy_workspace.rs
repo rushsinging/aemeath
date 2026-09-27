@@ -17,7 +17,7 @@ use share::session_types::{
 
 use crate::domain::session::{DecodedSession, SessionCodec, SessionCodecError};
 
-pub struct LegacySessionDecoder;
+pub(crate) struct LegacySessionDecoder;
 
 impl crate::ports::SessionDecoder for LegacySessionDecoder {
     fn decode(&self, bytes: &[u8]) -> Result<DecodedSession, SessionCodecError> {
