@@ -53,7 +53,7 @@ impl memory::api::ReflectionHistoryQuery for FakeReflHist {
     async fn list(
         &self,
         _limit: usize,
-    ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::api::MemoryError> {
+    ) -> Result<Vec<memory::api::reflection::ReflectionSafeSummary>, memory::api::MemoryError> {
         Ok(vec![])
     }
 }
@@ -61,13 +61,13 @@ impl memory::api::ReflectionHistoryQuery for FakeReflHist {
 impl memory::api::ReflectionHistoryStore for FakeReflHist {
     async fn append(
         &self,
-        _record: &memory::api::ReflectionRecord,
+        _record: &memory::api::reflection::ReflectionRecord,
     ) -> Result<(), memory::api::MemoryError> {
         Ok(())
     }
     async fn upsert(
         &self,
-        _record: &memory::api::ReflectionRecord,
+        _record: &memory::api::reflection::ReflectionRecord,
     ) -> Result<(), memory::api::MemoryError> {
         Ok(())
     }

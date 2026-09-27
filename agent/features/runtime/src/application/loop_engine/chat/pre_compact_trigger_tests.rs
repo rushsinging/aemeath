@@ -174,7 +174,8 @@ pub(super) fn noop_reflection_history() -> Arc<dyn memory::api::ReflectionHistor
         async fn list(
             &self,
             _limit: usize,
-        ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::api::MemoryError> {
+        ) -> Result<Vec<memory::api::reflection::ReflectionSafeSummary>, memory::api::MemoryError>
+        {
             Ok(Vec::new())
         }
     }
@@ -182,13 +183,13 @@ pub(super) fn noop_reflection_history() -> Arc<dyn memory::api::ReflectionHistor
     impl memory::api::ReflectionHistoryStore for NoopHistory {
         async fn append(
             &self,
-            _record: &memory::api::ReflectionRecord,
+            _record: &memory::api::reflection::ReflectionRecord,
         ) -> Result<(), memory::api::MemoryError> {
             Ok(())
         }
         async fn upsert(
             &self,
-            _record: &memory::api::ReflectionRecord,
+            _record: &memory::api::reflection::ReflectionRecord,
         ) -> Result<(), memory::api::MemoryError> {
             Ok(())
         }
@@ -203,7 +204,8 @@ fn failing_append_reflection_history() -> Arc<dyn memory::api::ReflectionHistory
         async fn list(
             &self,
             _limit: usize,
-        ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::api::MemoryError> {
+        ) -> Result<Vec<memory::api::reflection::ReflectionSafeSummary>, memory::api::MemoryError>
+        {
             Ok(Vec::new())
         }
     }
@@ -211,7 +213,7 @@ fn failing_append_reflection_history() -> Arc<dyn memory::api::ReflectionHistory
     impl memory::api::ReflectionHistoryStore for FailingAppendHistory {
         async fn append(
             &self,
-            _record: &memory::api::ReflectionRecord,
+            _record: &memory::api::reflection::ReflectionRecord,
         ) -> Result<(), memory::api::MemoryError> {
             Err(memory::api::MemoryError::InvalidEntry {
                 message: "history append failed".to_string(),
@@ -219,7 +221,7 @@ fn failing_append_reflection_history() -> Arc<dyn memory::api::ReflectionHistory
         }
         async fn upsert(
             &self,
-            _record: &memory::api::ReflectionRecord,
+            _record: &memory::api::reflection::ReflectionRecord,
         ) -> Result<(), memory::api::MemoryError> {
             panic!("append failure must prevent terminal upsert")
         }
@@ -493,7 +495,7 @@ async fn submit_pre_compact_reflection_reports_history_failure_and_releases_slot
             .metadata
             .as_ref()
             .and_then(|metadata| metadata.error_category),
-        Some(memory::api::ReflectionErrorCategory::History)
+        Some(memory::api::reflection::ReflectionErrorCategory::History)
     );
     assert_eq!(
         adapter.submit(ReflectionTaskRequest::new(

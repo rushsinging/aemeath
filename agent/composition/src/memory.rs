@@ -110,7 +110,7 @@ impl<I: Eq> ActiveMemoryWiring<I> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use memory::api::{MemoryRetrievalMode, MemorySearchQuery};
+    use memory::api::search::{MemoryRetrievalMode, MemorySearchQuery};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn service() -> Arc<dyn MemoryPort> {

@@ -4,9 +4,10 @@
 //! 结果通过 RuntimeStreamEvent::CommandResultText { text, is_error } 回传 TUI。
 
 use context::SessionManagementPort;
+use memory::api::search::MemorySearchQuery;
 use memory::api::{
-    MemoryCategory, MemoryEntry, MemoryId, MemoryLayer, MemoryPort, MemorySearchQuery,
-    MemorySource, MemoryStats, WriteResult,
+    MemoryCategory, MemoryEntry, MemoryId, MemoryLayer, MemoryPort, MemorySource, MemoryStats,
+    WriteResult,
 };
 use share::config::MemoryConfig;
 

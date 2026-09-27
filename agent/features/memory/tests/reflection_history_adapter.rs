@@ -1,7 +1,5 @@
-use memory::api::{
-    MemoryError, MemoryStorageErrorKind, ProjectMemoryKey, ReflectionErrorCategory,
-    ReflectionHistoryStore, ReflectionRecord, ReflectionTrigger,
-};
+use memory::api::reflection::{ReflectionErrorCategory, ReflectionRecord, ReflectionTrigger};
+use memory::api::{MemoryError, MemoryStorageErrorKind, ProjectMemoryKey, ReflectionHistoryStore};
 use std::{str::FromStr, sync::Arc};
 use storage as storage_api;
 
@@ -39,7 +37,8 @@ fn record(id: &str, timestamp: u64) -> ReflectionRecord {
 async fn reflection_history_upsert_replaces_stable_id_without_duplication() {
     let root = unique_root("upsert");
     let history = store(&root);
-    let running = memory::api::ReflectionRecord::running("stable", 40, ReflectionTrigger::Manual);
+    let running =
+        memory::api::reflection::ReflectionRecord::running("stable", 40, ReflectionTrigger::Manual);
     history.append(&running).await.unwrap();
     let terminal = record("stable", 40);
     history.upsert(&terminal).await.unwrap();

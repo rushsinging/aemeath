@@ -4,9 +4,10 @@ use crate::domain::types::{
     MemoryCategoryInput, MemoryLayerInput, MemoryLocationResult, ToolSchema,
 };
 use crate::domain::TypedTool;
+use memory::api::reflection::ReflectionOutput;
 use memory::api::{
     MemoryCategory, MemoryEntry, MemoryId, MemoryLayer, MemoryPolicy, MemoryPort, MemorySource,
-    MemorySuggestion, ReflectionOutput,
+    MemorySuggestion,
 };
 
 use std::sync::{Arc, RwLock};

@@ -1,8 +1,7 @@
 //! crate 根 wire 工厂契约测试：工厂返回的对象满足 trait 且可完成最小操作。
-use crate::api::{
-    LegacyMemoryLayer, LegacyMemoryMember, LegacyMemorySourceFactory, MemoryLayer, MemoryOpener,
-    ReflectionHistoryStore, ReflectionRecord, ReflectionTrigger,
-};
+use crate::api::legacy::{LegacyMemoryLayer, LegacyMemoryMember, LegacyMemorySourceFactory};
+use crate::api::reflection::{ReflectionRecord, ReflectionTrigger};
+use crate::api::{MemoryLayer, MemoryOpener, ReflectionHistoryStore};
 use crate::domain::ProjectMemoryKey;
 use std::sync::Arc;
 

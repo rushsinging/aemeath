@@ -1,15 +1,16 @@
 use crate::ports::ProviderPort;
 use futures::StreamExt;
-use memory::api::{
-    MemoryPort, ReflectionErrorCategory, ReflectionExecutionIdentity, ReflectionExecutionResult,
-    ReflectionHistoryStore, ReflectionTokenUsage, ReflectionWorkflow, ReflectionWorkflowError,
+use memory::api::reflection::{
+    ReflectionErrorCategory, ReflectionExecutionIdentity, ReflectionExecutionResult,
+    ReflectionTokenUsage, ReflectionWorkflow, ReflectionWorkflowError,
 };
+use memory::api::{MemoryPort, ReflectionHistoryStore};
 use thiserror::Error;
 
 #[derive(Debug, Clone)]
 pub struct CompleteReflectionResult {
-    pub output: memory::api::ReflectionOutput,
-    pub apply_result: Option<memory::api::ReflectionApplyResult>,
+    pub output: memory::api::reflection::ReflectionOutput,
+    pub apply_result: Option<memory::api::reflection::ReflectionApplyResult>,
     pub error_category: Option<ReflectionErrorCategory>,
     pub record_id: Option<String>,
     pub input_tokens: u32,

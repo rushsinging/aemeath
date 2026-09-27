@@ -7,8 +7,10 @@
 //! reads the current config — the candidate config is supplied by the caller.
 
 use async_trait::async_trait;
-use memory::api::{
+use memory::api::legacy::{
     LegacyMemoryLayer, LegacyMemorySource, LegacyMemorySourceError, LegacyMemorySourceFactory,
+};
+use memory::api::{
     MemoryCategory, MemoryEntry, MemoryId, MemoryLayer, MemoryOpener, MemoryPort, MemorySource,
     ProjectMemoryKey,
 };

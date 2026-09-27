@@ -191,7 +191,7 @@ impl memory::api::ReflectionHistoryQuery for FakeReflectionHistory {
     async fn list(
         &self,
         _limit: usize,
-    ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::api::MemoryError> {
+    ) -> Result<Vec<memory::api::reflection::ReflectionSafeSummary>, memory::api::MemoryError> {
         Ok(vec![])
     }
 }
@@ -199,13 +199,13 @@ impl memory::api::ReflectionHistoryQuery for FakeReflectionHistory {
 impl memory::api::ReflectionHistoryStore for FakeReflectionHistory {
     async fn append(
         &self,
-        _record: &memory::api::ReflectionRecord,
+        _record: &memory::api::reflection::ReflectionRecord,
     ) -> Result<(), memory::api::MemoryError> {
         Ok(())
     }
     async fn upsert(
         &self,
-        _record: &memory::api::ReflectionRecord,
+        _record: &memory::api::reflection::ReflectionRecord,
     ) -> Result<(), memory::api::MemoryError> {
         Ok(())
     }
@@ -477,7 +477,8 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         async fn list(
             &self,
             _limit: usize,
-        ) -> Result<Vec<memory::api::ReflectionSafeSummary>, memory::api::MemoryError> {
+        ) -> Result<Vec<memory::api::reflection::ReflectionSafeSummary>, memory::api::MemoryError>
+        {
             Ok(Vec::new())
         }
     }
@@ -485,13 +486,13 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     impl memory::api::ReflectionHistoryStore for TestReflectionHistory {
         async fn append(
             &self,
-            _record: &memory::api::ReflectionRecord,
+            _record: &memory::api::reflection::ReflectionRecord,
         ) -> Result<(), memory::api::MemoryError> {
             Ok(())
         }
         async fn upsert(
             &self,
-            _record: &memory::api::ReflectionRecord,
+            _record: &memory::api::reflection::ReflectionRecord,
         ) -> Result<(), memory::api::MemoryError> {
             Ok(())
         }

@@ -13,8 +13,10 @@
 //! 6. **end-to-end migration** — the opener reads legacy files, migrates them
 //!    to the new dataset format, and exposes the entries through the port.
 
-use memory::api::{
+use memory::api::legacy::{
     LegacyMemoryMember, LegacyMemorySource, LegacyMemorySourceError, LegacyMemorySourceFactory,
+};
+use memory::api::{
     MemoryCategory, MemoryEntry, MemoryId, MemoryLayer, MemorySource, ProjectMemoryKey,
 };
 use share::config::MemoryConfig;
@@ -403,8 +405,9 @@ async fn opener_legacy_conflict_when_new_data_exists() {
             async fn probe(
                 &self,
                 _layer: MemoryLayer,
-            ) -> Result<memory::api::LegacyMemoryLayer, LegacyMemorySourceError> {
-                Ok(memory::api::LegacyMemoryLayer::default())
+            ) -> Result<memory::api::legacy::LegacyMemoryLayer, LegacyMemorySourceError>
+            {
+                Ok(memory::api::legacy::LegacyMemoryLayer::default())
             }
         }
         #[derive(Clone)]

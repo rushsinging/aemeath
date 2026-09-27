@@ -5,9 +5,8 @@ use crate::ports::provider_port::{
     ProviderErrorKind, ReasoningCapabilityData,
 };
 use async_trait::async_trait;
-use memory::api::{
-    MemoryError, NoOpMemory, ReflectionHistoryQuery, ReflectionRecord, ReflectionSafeSummary,
-};
+use memory::api::reflection::{ReflectionRecord, ReflectionSafeSummary};
+use memory::api::{MemoryError, NoOpMemory, ReflectionHistoryQuery};
 use std::sync::Mutex;
 
 struct StaticProvider {
@@ -92,7 +91,7 @@ fn identity() -> ReflectionExecutionIdentity {
     ReflectionExecutionIdentity {
         id: "reflection-id".to_string(),
         timestamp: 42,
-        trigger: memory::api::ReflectionTrigger::Manual,
+        trigger: memory::api::reflection::ReflectionTrigger::Manual,
     }
 }
 

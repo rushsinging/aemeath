@@ -1,4 +1,5 @@
 use memory::api::*;
+use memory::api::{reflection::*, search::*};
 use std::time::Duration;
 
 fn entry(_id: &str, content: &str, now: u64) -> MemoryEntry {
