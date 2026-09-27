@@ -352,6 +352,15 @@
       "id": "construction.runtime.agent-runner",
       "symbol": "wire_agent_runner",
       "owner_crate": "runtime",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "runtime 装配工厂（build_agent_runner/from_args_with_workspace 更名 wire_ 前缀类）；跨 BC 调用点仅 composition 装配",
+      "tracking_issue": 1713
+    },
+    {
       "id": "construction.memory.wire-memory-opener",
       "symbol": "wire_memory_opener",
       "owner_crate": "memory",
@@ -360,8 +369,8 @@
         "agent/composition/src"
       ],
       "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "runtime 装配工厂（build_agent_runner/from_args_with_workspace 更名 wire_ 前缀类）；跨 BC 调用点仅 composition 装配",
-      "tracking_issue": 1713
+      "reason": "memory 实现体收窄后 composition 唯一构造入口（façade 边界收敛批次）",
+      "tracking_issue": 1709
     },
     {
       "id": "construction.runtime.agent-client-from-args",
@@ -386,18 +395,6 @@
       "guard": "check-cross-bc-construction-registry.sh",
       "reason": "runtime 装配工厂（build_agent_runner/from_args_with_workspace 更名 wire_ 前缀类）；跨 BC 调用点仅 composition 装配",
       "tracking_issue": 1713
-    },
-    {
-      "id": "construction.memory.wire-memory-opener",
-      "symbol": "wire_memory_opener",
-      "owner_crate": "memory",
-      "kind": "wire",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "memory 实现体收窄后 composition 唯一构造入口（façade 边界收敛批次）",
-      "tracking_issue": 1709
     },
     {
       "id": "construction.memory.wire-reflection-history-store",
