@@ -254,9 +254,9 @@ fn test_reflection_history_store() -> Arc<dyn memory::api::ReflectionHistoryStor
 /// #1385: No-op AgentRunner for tests that don't exercise agent tool dispatch.
 struct NoopAgentRunner;
 #[async_trait]
-impl ::tools::AgentRunner for NoopAgentRunner {
-    async fn run_agent(&self, _request: ::tools::AgentRunRequest<'_>) -> ::tools::AgentRunTerminal {
-        ::tools::AgentRunTerminal::Completed {
+impl ::tools::published::agent::AgentRunner for NoopAgentRunner {
+    async fn run_agent(&self, _request: ::tools::published::agent::AgentRunRequest<'_>) -> ::tools::published::agent::AgentRunTerminal {
+        ::tools::published::agent::AgentRunTerminal::Completed {
             result: String::new(),
         }
     }
@@ -297,12 +297,12 @@ fn test_shell_with_catalog(
     let workspace = project::wire_production_workspace(cwd.clone(), None)
         .expect("workspace 初始化成功")
         ;
-    let initial_skill_snapshot = ::tools::SkillCatalogSnapshot::from_descriptors(Vec::new());
+    let initial_skill_snapshot = ::tools::published::skill::SkillCatalogSnapshot::from_descriptors(Vec::new());
     let skill_catalog = ::tools::composition::wire_skills().catalog();
     let skill_refresh = crate::application::client::SkillCatalogRefresh::new(
         skill_catalog.clone(),
         workspace.clone(),
-        ::tools::SkillQuery::new(cwd.clone(), Vec::new(), Default::default()),
+        ::tools::published::skill::SkillQuery::new(cwd.clone(), Vec::new(), Default::default()),
         &initial_skill_snapshot,
     );
 
@@ -403,12 +403,12 @@ fn test_shell_with_task_store(
         .expect("workspace 初始化成功")
         ;
     let factory = ::tools::composition::TestCatalogExecutionFactory::empty();
-    let initial_skill_snapshot = ::tools::SkillCatalogSnapshot::from_descriptors(Vec::new());
+    let initial_skill_snapshot = ::tools::published::skill::SkillCatalogSnapshot::from_descriptors(Vec::new());
     let skill_catalog = ::tools::composition::wire_skills().catalog();
     let skill_refresh = crate::application::client::SkillCatalogRefresh::new(
         skill_catalog.clone(),
         workspace.clone(),
-        ::tools::SkillQuery::new(cwd.clone(), Vec::new(), Default::default()),
+        ::tools::published::skill::SkillQuery::new(cwd.clone(), Vec::new(), Default::default()),
         &initial_skill_snapshot,
     );
 

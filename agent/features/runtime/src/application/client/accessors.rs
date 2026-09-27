@@ -9,7 +9,7 @@ use crate::application::run::context_factory::RuntimeContextFactory;
 use sdk::ChatEvent;
 use share::config::models::ResolvedModel;
 use share::config::MemoryConfig;
-use tools::AgentRunner;
+use tools::published::agent::AgentRunner;
 
 trait DynSessionInput: Send + Sync {
     fn defer(&self, event: sdk::ChatInputEvent);
@@ -160,8 +160,8 @@ pub struct SessionRuntime {
     pub prompt_model_id: String,
 
     // ── Skills ──
-    pub skill_catalog: Arc<dyn tools::SkillCatalogPort>,
-    pub initial_skill_snapshot: tools::SkillCatalogSnapshot,
+    pub skill_catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
+    pub initial_skill_snapshot: tools::published::skill::SkillCatalogSnapshot,
     /// 轮次边界重扫；新 Run 启动前调用以刷新 TUI slash 目录。
     pub skill_refresh: crate::application::client::SkillCatalogRefresh,
 
@@ -226,8 +226,8 @@ impl SessionRuntime {
         initial_git_context: String,
         user_context: String,
         prompt_model_id: String,
-        skill_catalog: Arc<dyn tools::SkillCatalogPort>,
-        initial_skill_snapshot: tools::SkillCatalogSnapshot,
+        skill_catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
+        initial_skill_snapshot: tools::published::skill::SkillCatalogSnapshot,
         skill_refresh: crate::application::client::SkillCatalogRefresh,
         memory_config: MemoryConfig,
         context_size: usize,

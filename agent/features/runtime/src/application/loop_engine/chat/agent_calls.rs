@@ -14,9 +14,9 @@ use hook::{HookDispatcher, HookInvocationData};
 use policy::Policy;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-use tools::ToolExecutionContext;
+use tools::published::execution::ToolExecutionContext;
 #[cfg(test)]
-use tools::ToolExecutionPort;
+use tools::published::execution::ToolExecutionPort;
 use tools::ToolOutcome;
 
 #[allow(clippy::too_many_arguments)]
@@ -292,7 +292,8 @@ where
         effective_call.name,
         agent_tool_context.cancellation().is_cancelled()
     );
-    let (prog_tx, mut prog_rx) = tokio::sync::mpsc::channel::<tools::AgentProgressEvent>(32);
+    let (prog_tx, mut prog_rx) =
+        tokio::sync::mpsc::channel::<tools::published::agent::AgentProgressEvent>(32);
     let prog_adapter = crate::application::run::context::tool_progress_sink(prog_tx);
     *agent_tool_context = agent_tool_context.with_progress(Some(prog_adapter.clone()));
     let call_id = effective_call.id.clone();
@@ -388,7 +389,10 @@ impl SubRunFactPublisher {
         }
     }
 
-    fn publish(&mut self, event: tools::AgentProgressEvent) -> Vec<SubRunPublishedFact> {
+    fn publish(
+        &mut self,
+        event: tools::published::agent::AgentProgressEvent,
+    ) -> Vec<SubRunPublishedFact> {
         if self.identity.is_none() {
             if let Some(source) = event.source_context.as_ref() {
                 self.identity = Some(tools::published::sub_run::SubRunIdentity {
@@ -404,7 +408,7 @@ impl SubRunFactPublisher {
             return Vec::new();
         };
         match event.kind {
-            tools::AgentProgressKind::Started { role, model } => {
+            tools::published::agent::AgentProgressKind::Started { role, model } => {
                 self.sequence = self.sequence.saturating_add(1);
                 vec![SubRunPublishedFact::Started(
                     tools::published::sub_run::SubRunStartedEvent {
@@ -431,17 +435,17 @@ impl SubRunFactPublisher {
 }
 
 fn sub_run_activity_kinds(
-    kind: tools::AgentProgressKind,
+    kind: tools::published::agent::AgentProgressKind,
 ) -> Vec<tools::published::sub_run::SubRunActivityKind> {
     match kind {
-        tools::AgentProgressKind::Started { .. } => Vec::new(),
-        tools::AgentProgressKind::Message { text } => {
+        tools::published::agent::AgentProgressKind::Started { .. } => Vec::new(),
+        tools::published::agent::AgentProgressKind::Message { text } => {
             vec![tools::published::sub_run::SubRunActivityKind::Text { text }]
         }
-        tools::AgentProgressKind::Thinking { text } => {
+        tools::published::agent::AgentProgressKind::Thinking { text } => {
             vec![tools::published::sub_run::SubRunActivityKind::Thinking { text }]
         }
-        tools::AgentProgressKind::ToolCalls { calls } => calls
+        tools::published::agent::AgentProgressKind::ToolCalls { calls } => calls
             .into_iter()
             .map(
                 |call| tools::published::sub_run::SubRunActivityKind::ToolCall {
@@ -451,10 +455,10 @@ fn sub_run_activity_kinds(
                 },
             )
             .collect(),
-        tools::AgentProgressKind::ToolOutput { tool_name, text } => {
+        tools::published::agent::AgentProgressKind::ToolOutput { tool_name, text } => {
             vec![tools::published::sub_run::SubRunActivityKind::ToolOutput { tool_name, text }]
         }
-        tools::AgentProgressKind::ToolResult {
+        tools::published::agent::AgentProgressKind::ToolResult {
             tool_call_id,
             tool_name,
             output,
@@ -467,7 +471,7 @@ fn sub_run_activity_kinds(
             content,
             is_error,
         }],
-        tools::AgentProgressKind::Terminal { outcome } => {
+        tools::published::agent::AgentProgressKind::Terminal { outcome } => {
             vec![tools::published::sub_run::SubRunActivityKind::Terminal { outcome }]
         }
     }
@@ -491,13 +495,13 @@ mod tests {
         let parent_context =
             RuntimeRunContext::new(ChatId::new("parent-chat"), ChatRunId::new("parent-run"));
         let parent_tool_id = ToolCallId::new("agent-call");
-        let event = tools::AgentProgressEvent {
-            source_context: Some(tools::AgentProgressSourceContext::new(
+        let event = tools::published::agent::AgentProgressEvent {
+            source_context: Some(tools::published::agent::AgentProgressSourceContext::new(
                 "researcher",
                 "child-run",
             )),
             sequence: 7,
-            kind: tools::AgentProgressKind::Thinking {
+            kind: tools::published::agent::AgentProgressKind::Thinking {
                 text: "reasoning".to_string(),
             },
         };
@@ -537,13 +541,13 @@ mod tests {
             RuntimeRunContext::new(ChatId::new("parent-chat"), ChatRunId::new("parent-run"));
         let parent_tool_id = ToolCallId::new("agent-call");
         let mut publisher = SubRunFactPublisher::new(parent_context, parent_tool_id);
-        let started = tools::AgentProgressEvent {
-            source_context: Some(tools::AgentProgressSourceContext::new(
+        let started = tools::published::agent::AgentProgressEvent {
+            source_context: Some(tools::published::agent::AgentProgressSourceContext::new(
                 "researcher",
                 "child-run",
             )),
             sequence: 0,
-            kind: tools::AgentProgressKind::Started {
+            kind: tools::published::agent::AgentProgressKind::Started {
                 role: Some("researcher".to_string()),
                 model: "model".to_string(),
             },
@@ -553,10 +557,10 @@ mod tests {
         };
         assert_eq!(started.sequence, 1);
 
-        let projected = publisher.publish(tools::AgentProgressEvent {
+        let projected = publisher.publish(tools::published::agent::AgentProgressEvent {
             source_context: None,
             sequence: 1,
-            kind: tools::AgentProgressKind::ToolResult {
+            kind: tools::published::agent::AgentProgressKind::ToolResult {
                 tool_call_id: "skill-call".to_string(),
                 tool_name: "Skill".to_string(),
                 output: "SKILL_BODY_SENTINEL".to_string(),
@@ -584,13 +588,13 @@ mod tests {
             RuntimeRunContext::new(ChatId::new("parent-chat"), ChatRunId::new("parent-run"));
         let parent_tool_id = ToolCallId::new("agent-call");
         let mut publisher = SubRunFactPublisher::new(parent_context, parent_tool_id);
-        let started = tools::AgentProgressEvent {
-            source_context: Some(tools::AgentProgressSourceContext::new(
+        let started = tools::published::agent::AgentProgressEvent {
+            source_context: Some(tools::published::agent::AgentProgressSourceContext::new(
                 "researcher",
                 "child-run",
             )),
             sequence: 0,
-            kind: tools::AgentProgressKind::Started {
+            kind: tools::published::agent::AgentProgressKind::Started {
                 role: Some("researcher".to_string()),
                 model: "model".to_string(),
             },
@@ -600,10 +604,10 @@ mod tests {
         };
         assert_eq!(started.sequence, 1);
 
-        let output = publisher.publish(tools::AgentProgressEvent {
+        let output = publisher.publish(tools::published::agent::AgentProgressEvent {
             source_context: None,
             sequence: 1,
-            kind: tools::AgentProgressKind::ToolOutput {
+            kind: tools::published::agent::AgentProgressKind::ToolOutput {
                 tool_name: "Bash".to_string(),
                 text: "hello".to_string(),
             },

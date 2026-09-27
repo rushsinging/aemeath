@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use share::message::Message;
 use share::string_idx::slice_head;
 use tokio_util::sync::CancellationToken;
-use tools::{AgentProgressKind, AgentProgressSourceContext, AgentRunTerminal};
+use tools::published::agent::{AgentProgressKind, AgentProgressSourceContext, AgentRunTerminal};
 
 use crate::application::loop_engine::chat::InvocationResponse;
 use crate::application::loop_engine::event_strategy::{ProgressTerminalObserver, RunEventObserver};
@@ -59,7 +59,7 @@ pub(super) struct CancellationPropagationGuard(tokio::task::JoinHandle<()>);
 
 impl CancellationPropagationGuard {
     pub(super) fn new(
-        signal: Arc<dyn tools::CancellationSignal>,
+        signal: Arc<dyn tools::published::execution::CancellationSignal>,
         token: CancellationToken,
     ) -> Self {
         Self(tokio::spawn(async move {
@@ -79,7 +79,7 @@ impl Drop for CancellationPropagationGuard {
 pub(super) async fn launch_sub_run(
     instance: &mut RunInstance,
     active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
-    tool_execution_context: tools::ToolExecutionContext,
+    tool_execution_context: tools::published::execution::ToolExecutionContext,
     mut input: crate::application::loop_engine::input_strategy::FixedInputAdapter<'_>,
     mut events: DerivedEventPort,
     mut model: crate::application::loop_engine::run_services::RuntimeModelInvocation<
@@ -165,7 +165,7 @@ impl EventSinkPort for DerivedEventPort {
 
 pub(super) struct DerivedModelObserver {
     pub runtime_context: RuntimeContext,
-    pub progress_sink: Option<Arc<dyn tools::ProgressSink>>,
+    pub progress_sink: Option<Arc<dyn tools::published::execution::ProgressSink>>,
     pub source_context: AgentProgressSourceContext,
     pub runtime_cancellation: CancellationToken,
     pub role_name: String,
@@ -352,7 +352,7 @@ impl ModelInvocationObserver for DerivedModelObserver {
 }
 
 pub(super) struct ProgressToolRoundObserver {
-    pub progress_sink: Option<Arc<dyn tools::ProgressSink>>,
+    pub progress_sink: Option<Arc<dyn tools::published::execution::ProgressSink>>,
     pub source_context: AgentProgressSourceContext,
     pub progress: ProgressReporter,
     pub role_name: String,
@@ -449,7 +449,7 @@ pub(super) struct SubRunFinalizer {
     pub prompt: String,
     pub system: String,
     pub model_spec: Option<String>,
-    pub progress_sink: Option<Arc<dyn tools::ProgressSink>>,
+    pub progress_sink: Option<Arc<dyn tools::published::execution::ProgressSink>>,
     pub source_context: AgentProgressSourceContext,
 }
 
@@ -501,7 +501,7 @@ mod tests {
                     result: "done".to_string(),
                     user_cancelled_step: false,
                 },
-                Some(tools::AgentRunTerminal::Completed {
+                Some(tools::published::agent::AgentRunTerminal::Completed {
                     result: "done".to_string(),
                 }),
             ),
@@ -511,7 +511,7 @@ mod tests {
                     parent_run_id: parent_run_id.clone(),
                     error: "boom".to_string(),
                 },
-                Some(tools::AgentRunTerminal::Failed {
+                Some(tools::published::agent::AgentRunTerminal::Failed {
                     error: "boom".to_string(),
                 }),
             ),
@@ -521,7 +521,7 @@ mod tests {
                     parent_run_id,
                     reason: sdk::RunTerminationReason::ParentStepCancelled,
                 },
-                Some(tools::AgentRunTerminal::Cancelled),
+                Some(tools::published::agent::AgentRunTerminal::Cancelled),
             ),
         ];
         for (event, expected) in cases {

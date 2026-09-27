@@ -59,7 +59,7 @@ pub(crate) fn config_change_to_sdk(change: config::ConfigChangeData) -> ConfigUp
 }
 
 pub(crate) fn skill_snapshot_to_sdk(
-    snapshot: tools::SkillCatalogSnapshot,
+    snapshot: tools::published::skill::SkillCatalogSnapshot,
 ) -> sdk::SkillsUpdatedEvent {
     sdk::SkillsUpdatedEvent {
         revision: snapshot.revision,

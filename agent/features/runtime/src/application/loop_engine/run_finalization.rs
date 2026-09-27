@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use tools::AgentRunTerminal;
+use tools::published::agent::AgentRunTerminal;
 
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::run::launcher::{RunLaunchResult, RunLaunchResult::Failed};

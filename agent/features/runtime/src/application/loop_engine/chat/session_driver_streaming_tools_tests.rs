@@ -31,14 +31,14 @@ impl ::tools::published::typed::TypedTool for StepBlockingTool {
         serde_json::json!({"type": "object"})
     }
 
-    fn cancellation(&self) -> ::tools::CancellationDeclaration {
-        ::tools::CancellationDeclaration::Cooperative
+    fn cancellation(&self) -> ::tools::published::execution::CancellationDeclaration {
+        ::tools::published::execution::CancellationDeclaration::Cooperative
     }
 
     async fn call(
         &self,
         _input: serde_json::Value,
-        context: &::tools::ToolExecutionContext,
+        context: &::tools::published::execution::ToolExecutionContext,
     ) -> ::tools::published::typed::TypedToolResult<Self::Output> {
         self.started.notify_one();
         context.cancellation().cancelled().await;

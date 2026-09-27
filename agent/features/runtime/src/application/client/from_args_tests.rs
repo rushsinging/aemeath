@@ -258,21 +258,25 @@ async fn make_test_shell(
     let _memory: Arc<dyn MemoryPort> = Arc::new(memory::api::NoOpMemory);
     let tools_factory = tools::composition::TestCatalogExecutionFactory::empty();
     let tool_catalog: Arc<dyn tools::ToolCatalogPort> = tools_factory.catalog_port();
-    let tool_execution: Arc<dyn tools::ToolExecutionPort> = tools_factory.execution();
+    let tool_execution: Arc<dyn tools::published::execution::ToolExecutionPort> =
+        tools_factory.execution();
     let reflection_history: Arc<dyn ReflectionHistoryStore> = Arc::new(FakeReflectionHistory);
     let task_access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
     let hook_runner: Arc<dyn HookDispatcher> = Arc::new(FakeHook);
 
     struct NoopRunner;
     #[async_trait::async_trait]
-    impl tools::AgentRunner for NoopRunner {
-        async fn run_agent(&self, _request: tools::AgentRunRequest<'_>) -> tools::AgentRunTerminal {
-            tools::AgentRunTerminal::Completed {
+    impl tools::published::agent::AgentRunner for NoopRunner {
+        async fn run_agent(
+            &self,
+            _request: tools::published::agent::AgentRunRequest<'_>,
+        ) -> tools::published::agent::AgentRunTerminal {
+            tools::published::agent::AgentRunTerminal::Completed {
                 result: String::new(),
             }
         }
     }
-    let agent_runner: Arc<dyn tools::AgentRunner> = Arc::new(NoopRunner);
+    let agent_runner: Arc<dyn tools::published::agent::AgentRunner> = Arc::new(NoopRunner);
     let tool_result_materializer =
         crate::application::tool::test_support::test_tool_result_materializer();
     let active_run = Arc::new(crate::application::run::active_registry::wire_active_run_registry());
@@ -295,11 +299,12 @@ async fn make_test_shell(
     );
 
     let skill_wiring = tools::composition::wire_skills();
-    let initial_skill_snapshot = tools::SkillCatalogSnapshot::from_descriptors(Vec::new());
+    let initial_skill_snapshot =
+        tools::published::skill::SkillCatalogSnapshot::from_descriptors(Vec::new());
     let skill_refresh = crate::application::client::SkillCatalogRefresh::new(
         skill_wiring.catalog(),
         workspace.clone(),
-        tools::SkillQuery::new(cwd.clone(), Vec::new(), Default::default()),
+        tools::published::skill::SkillQuery::new(cwd.clone(), Vec::new(), Default::default()),
         &initial_skill_snapshot,
     );
 
@@ -615,9 +620,12 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     );
     struct NoopRunner;
     #[async_trait::async_trait]
-    impl tools::AgentRunner for NoopRunner {
-        async fn run_agent(&self, _request: tools::AgentRunRequest<'_>) -> tools::AgentRunTerminal {
-            tools::AgentRunTerminal::Completed {
+    impl tools::published::agent::AgentRunner for NoopRunner {
+        async fn run_agent(
+            &self,
+            _request: tools::published::agent::AgentRunRequest<'_>,
+        ) -> tools::published::agent::AgentRunTerminal {
+            tools::published::agent::AgentRunTerminal::Completed {
                 result: String::new(),
             }
         }
@@ -653,7 +661,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         SkillBootstrapAssemblyData::new(
             skill_wiring.catalog(),
             workspace.clone(),
-            tools::SkillQuery::new(root.clone(), Vec::new(), Default::default()),
+            tools::published::skill::SkillQuery::new(root.clone(), Vec::new(), Default::default()),
         ),
         crate::application::client::bootstrap::AgentRunnerAssemblyData {
             runner: Arc::new(NoopRunner),

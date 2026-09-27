@@ -739,7 +739,7 @@ pub enum ContextAppendError {
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum PromptMaterializationError {
     #[error("Skill supplier materialization failed: {0}")]
-    SkillSupplier(tools::SkillError),
+    SkillSupplier(tools::published::skill::SkillError),
     #[error("Baseline prompt block failure: {0}")]
     Baseline(String),
 }

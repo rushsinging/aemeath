@@ -5,11 +5,12 @@ use context::{
     CleanupConfirmation as ReceiptCleanupConfirmation, ToolCallIdentity, ToolReceiptMutation,
     ToolTerminalReceipt,
 };
-use tools::{
-    CancellationDeclaration, CancellationSignal, CleanupConfirmation, ToolCatalogSnapshot,
-    ToolExecutionContext, ToolExecutionOutcome as PublishedToolOutcome, ToolExecutionPort,
-    ToolInvocation,
+use tools::published::execution::ToolExecutionOutcome as PublishedToolOutcome;
+use tools::published::execution::{
+    CancellationDeclaration, CancellationSignal, CleanupConfirmation, ToolExecutionContext,
+    ToolExecutionPort, ToolInvocation,
 };
+use tools::ToolCatalogSnapshot;
 
 use crate::application::context::coordination::ContextCoordinator;
 

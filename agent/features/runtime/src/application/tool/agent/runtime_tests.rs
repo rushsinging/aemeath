@@ -6,8 +6,9 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, Notify};
 use tools::composition::TestCatalogExecutionFactory;
+use tools::published::execution::ToolExecutionContext;
 use tools::published::typed::{TypedTool, TypedToolAdapter, TypedToolResult};
-use tools::{Tool, ToolExecutionContext};
+use tools::Tool;
 
 #[test]
 fn agent_for_test_persist_uses_context_workspace_backing() {
@@ -817,8 +818,8 @@ async fn test_execute_tools_deadline_notifies_cooperative_tool_cancellation() {
         fn timeout_secs(&self) -> u64 {
             0
         }
-        fn cancellation(&self) -> tools::CancellationDeclaration {
-            tools::CancellationDeclaration::Cooperative
+        fn cancellation(&self) -> tools::published::execution::CancellationDeclaration {
+            tools::published::execution::CancellationDeclaration::Cooperative
         }
         async fn call(
             &self,
@@ -894,8 +895,8 @@ async fn test_execute_tools_cancel_notifies_cooperative_tool_cancellation() {
         fn timeout_secs(&self) -> u64 {
             600
         }
-        fn cancellation(&self) -> tools::CancellationDeclaration {
-            tools::CancellationDeclaration::Cooperative
+        fn cancellation(&self) -> tools::published::execution::CancellationDeclaration {
+            tools::published::execution::CancellationDeclaration::Cooperative
         }
         async fn call(
             &self,

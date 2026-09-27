@@ -8,8 +8,8 @@ use policy::{
 use sdk::ids::ToolCallId;
 use std::sync::Mutex;
 use tools::composition::TestCatalogExecutionFactory;
+use tools::published::execution::ToolExecutionContext;
 use tools::published::typed::{TypedTool, TypedToolResult};
-use tools::ToolExecutionContext;
 
 #[test]
 fn p6_4_production_uses_explicit_tool_round_boundaries() {
@@ -309,11 +309,11 @@ fn cancelled_round_convergence_preserves_typed_outcomes_and_call_order() {
     let calls = vec![call("Allowed", 0), call("Allowed", 1), call("Allowed", 2)];
     let completed = crate::application::tool::agent::ToolExecution::new_typed(
         &calls[0],
-        tools::ToolExecutionOutcome::success_text("finished"),
+        tools::published::execution::ToolExecutionOutcome::success_text("finished"),
     );
     let unconfirmed = crate::application::tool::agent::ToolExecution::new_typed(
         &calls[1],
-        tools::ToolExecutionOutcome::cancellation_unconfirmed(
+        tools::published::execution::ToolExecutionOutcome::cancellation_unconfirmed(
             "cleanup receipt not confirmed",
             Vec::new(),
             Vec::new(),
@@ -328,15 +328,15 @@ fn cancelled_round_convergence_preserves_typed_outcomes_and_call_order() {
     assert_eq!(convergence.results[2].call_id, calls[2].id);
     assert!(matches!(
         convergence.results[0].typed_outcome,
-        tools::ToolExecutionOutcome::Success(_)
+        tools::published::execution::ToolExecutionOutcome::Success(_)
     ));
     assert!(matches!(
         convergence.results[1].typed_outcome,
-        tools::ToolExecutionOutcome::CancellationUnconfirmed(_)
+        tools::published::execution::ToolExecutionOutcome::CancellationUnconfirmed(_)
     ));
     assert!(matches!(
         convergence.results[2].typed_outcome,
-        tools::ToolExecutionOutcome::Cancelled(_)
+        tools::published::execution::ToolExecutionOutcome::Cancelled(_)
     ));
 }
 

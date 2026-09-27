@@ -74,9 +74,12 @@ pub trait SessionRepository: Send + Sync {
     }
     async fn compare_and_record_skill_load(
         &self,
-        _mutation: tools::SkillLoadMutation,
-    ) -> Result<tools::SkillLoadDecision, tools::SkillLoadStateError> {
-        Err(tools::SkillLoadStateError::Storage(
+        _mutation: tools::published::skill::SkillLoadMutation,
+    ) -> Result<
+        tools::published::skill::SkillLoadDecision,
+        tools::published::skill::SkillLoadStateError,
+    > {
+        Err(tools::published::skill::SkillLoadStateError::Storage(
             "此 SessionRepository 未实现 Skill 加载状态持久化".to_string(),
         ))
     }
@@ -103,9 +106,9 @@ pub struct PromptMaterialization {
 }
 
 /// Context-owned 查询工厂：为每次 `materialize(request)` 从 request/config
-/// 与 live Project `WorkspaceReader` 快照构造 `tools::SkillQuery`。
+/// 与 live Project `WorkspaceReader` 快照构造 `tools::published::skill::SkillQuery`。
 pub trait SkillQueryFactory: Send + Sync {
-    fn query(&self, request: &ContextRequest) -> tools::SkillQuery;
+    fn query(&self, request: &ContextRequest) -> tools::published::skill::SkillQuery;
 }
 
 #[async_trait]

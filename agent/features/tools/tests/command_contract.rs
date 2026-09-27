@@ -1,4 +1,4 @@
-use tools::{
+use tools::published::command::{
     ApplicationControlTarget, CommandArgumentSchema, CommandMechanism, CommandParseError,
     CommandRoute, CommandTarget, SlashInput,
 };
@@ -24,13 +24,13 @@ fn catalog_is_the_single_source_for_discovery_and_alias_completion() {
 
 #[test]
 fn router_classifies_all_three_mechanisms_without_executing() {
-    let review = tools::CommandDescriptor::new(
+    let review = tools::published::command::CommandDescriptor::new(
         "review",
         &[],
         "Review changes",
-        tools::CommandMechanism::SkillRequest,
-        tools::CommandTarget::ContextManagement,
-        tools::CommandArgumentSchema::OptionalText,
+        tools::published::command::CommandMechanism::SkillRequest,
+        tools::published::command::CommandTarget::ContextManagement,
+        tools::published::command::CommandArgumentSchema::OptionalText,
     )
     .expect("review descriptor")
     .with_target_identity("review");
@@ -143,7 +143,7 @@ fn builtin_catalog_exposes_the_complete_stable_descriptor_matrix() {
 
 #[test]
 fn public_wiring_preserves_duplicate_target_and_missing_argument_errors() {
-    let duplicate = tools::CommandDescriptor::new(
+    let duplicate = tools::published::command::CommandDescriptor::new(
         "help",
         &[],
         "duplicate",
@@ -157,7 +157,7 @@ fn public_wiring_preserves_duplicate_target_and_missing_argument_errors() {
         Err(CommandParseError::DuplicateName { .. })
     ));
 
-    let mismatch = tools::CommandDescriptor::new(
+    let mismatch = tools::published::command::CommandDescriptor::new(
         "bad-target",
         &[],
         "bad",

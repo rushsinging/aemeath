@@ -26,13 +26,13 @@ impl ToolCatalogPort for FakeToolCat {
 
 pub(super) struct FakeToolExec;
 #[async_trait::async_trait]
-impl tools::ToolExecutionPort for FakeToolExec {
+impl tools::published::execution::ToolExecutionPort for FakeToolExec {
     async fn execute(
         &self,
-        _invocation: tools::ToolInvocation,
-        _context: &tools::ToolExecutionContext,
-    ) -> tools::ToolExecutionOutcome {
-        tools::ToolExecutionOutcome::success_text("fake")
+        _invocation: tools::published::execution::ToolInvocation,
+        _context: &tools::published::execution::ToolExecutionContext,
+    ) -> tools::published::execution::ToolExecutionOutcome {
+        tools::published::execution::ToolExecutionOutcome::success_text("fake")
     }
 }
 
@@ -88,7 +88,7 @@ impl hook::HookDispatcher for FakeHookPort {
 
 fn assemble_parent_context(
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
-    tool_execution: Arc<dyn tools::ToolExecutionPort>,
+    tool_execution: Arc<dyn tools::published::execution::ToolExecutionPort>,
     config: RunConfigSnapshot,
 ) -> RuntimeContext {
     SessionRunFixture::builder()
@@ -204,7 +204,7 @@ async fn derived_context_does_not_publish_raw_child_events_to_parent_sink() {
 
 pub(super) fn make_parent_context_with_catalog(
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
-    tool_execution: Arc<dyn tools::ToolExecutionPort>,
+    tool_execution: Arc<dyn tools::published::execution::ToolExecutionPort>,
 ) -> RuntimeContext {
     let config_snapshot =
         crate::application::run::config::RunConfigSnapshot::capture(super::test_config_snapshot());

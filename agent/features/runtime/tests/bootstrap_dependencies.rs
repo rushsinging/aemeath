@@ -86,9 +86,12 @@ fn initial_provider_assembly() -> runtime::InitialProviderAssemblyData {
 struct NoopAgentRunner;
 
 #[async_trait::async_trait]
-impl tools::AgentRunner for NoopAgentRunner {
-    async fn run_agent(&self, _request: tools::AgentRunRequest<'_>) -> tools::AgentRunTerminal {
-        tools::AgentRunTerminal::Completed {
+impl tools::published::agent::AgentRunner for NoopAgentRunner {
+    async fn run_agent(
+        &self,
+        _request: tools::published::agent::AgentRunRequest<'_>,
+    ) -> tools::published::agent::AgentRunTerminal {
+        tools::published::agent::AgentRunTerminal::Completed {
             result: String::new(),
         }
     }
@@ -108,7 +111,11 @@ fn test_skill_bootstrap_assembly(root: &std::path::Path) -> runtime::SkillBootst
     runtime::SkillBootstrapAssemblyData::new(
         tools::composition::wire_skills().catalog(),
         project::wire_production_workspace(root.to_path_buf(), None).expect("wire test workspace"),
-        tools::SkillQuery::new(root.to_path_buf(), Vec::new(), Default::default()),
+        tools::published::skill::SkillQuery::new(
+            root.to_path_buf(),
+            Vec::new(),
+            Default::default(),
+        ),
     )
 }
 
@@ -327,7 +334,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
 
     // ── Skill catalog: functional check (call succeeds without panicking) ──
     let skills = dependencies.skill_catalog();
-    let _skill_list = skills.list(tools::SkillQuery::new(
+    let _skill_list = skills.list(tools::published::skill::SkillQuery::new(
         temp.path().to_path_buf(),
         vec![],
         BTreeSet::new(),

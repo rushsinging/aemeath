@@ -3,13 +3,13 @@
 //! The owner is the Tools BC. SDK re-exports the exact types and ports instead
 //! of defining a second descriptor, parser, or route model.
 
-pub use tools::published::snapshot_query::{SnapshotQueryCommand, SnapshotQueryTarget};
-pub use tools::{
+pub use tools::published::command::{
     ApplicationControlCommand, ApplicationControlTarget, CommandArgumentSchema, CommandCatalogPort,
     CommandCompletion, CommandDescriptor, CommandMechanism, CommandName, CommandParseError,
     CommandRoute, CommandRouterPort, CommandTarget, ParsedArguments, SkillRequestCommand,
     SlashInput,
 };
+pub use tools::published::snapshot_query::{SnapshotQueryCommand, SnapshotQueryTarget};
 
 // ─── Command execution result views ───
 

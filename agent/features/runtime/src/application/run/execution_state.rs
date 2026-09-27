@@ -5,7 +5,7 @@ use std::time::Instant;
 use crate::application::interaction::port::{InteractionCompletion, InteractionRequestMetadata};
 use crate::application::loop_engine::PendingInteractionWork;
 
-use tools::AgentRunTerminal;
+use tools::published::agent::AgentRunTerminal;
 
 use crate::ports::{ContextRequest, ContextWindow};
 

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tools::{SkillCatalogPort, SkillDescriptor, SkillQuery};
+use tools::published::skill::{SkillCatalogPort, SkillDescriptor, SkillQuery};
 
 use crate::domain::ContextRequest;
 use crate::ports::{

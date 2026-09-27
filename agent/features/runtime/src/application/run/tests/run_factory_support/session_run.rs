@@ -43,7 +43,7 @@ pub(crate) struct SessionRunFixture {
     reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
     event_sink: RecordingEventSink,
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
-    tool_execution: Arc<dyn tools::ToolExecutionPort>,
+    tool_execution: Arc<dyn tools::published::execution::ToolExecutionPort>,
     policy: Arc<dyn crate::ports::Policy>,
     hooks: Arc<dyn hook::HookDispatcher>,
     workspace: crate::application::run::workspace::RuntimeWorkspaceAccess,
@@ -99,7 +99,9 @@ impl SessionRunFixture {
         &self.tool_catalog
     }
 
-    pub(crate) fn tool_execution(&self) -> &Arc<dyn tools::ToolExecutionPort> {
+    pub(crate) fn tool_execution(
+        &self,
+    ) -> &Arc<dyn tools::published::execution::ToolExecutionPort> {
         &self.tool_execution
     }
 
@@ -137,7 +139,7 @@ pub(crate) struct SessionRunFixtureBuilder {
     event_sink_handle: Option<crate::application::loop_engine::chat::ChatEventSinkHandle>,
     hooks: Arc<dyn hook::HookDispatcher>,
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
-    tool_execution: Arc<dyn tools::ToolExecutionPort>,
+    tool_execution: Arc<dyn tools::published::execution::ToolExecutionPort>,
     policy: Arc<dyn crate::ports::Policy>,
     context_factory: Option<Arc<RuntimeContextFactory>>,
     config: share::config::domain::snapshot::ConfigSnapshot,
@@ -223,7 +225,7 @@ impl SessionRunFixtureBuilder {
 
     pub(crate) fn with_tool_execution(
         mut self,
-        tool_execution: Arc<dyn tools::ToolExecutionPort>,
+        tool_execution: Arc<dyn tools::published::execution::ToolExecutionPort>,
     ) -> Self {
         self.tool_execution = tool_execution;
         self

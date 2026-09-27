@@ -10,13 +10,13 @@ fn sdk_reexports_tools_owned_command_contract_without_a_second_dto() {
 
 #[test]
 fn sdk_command_descriptor_is_the_tools_published_language() {
-    let descriptor: sdk::CommandDescriptor = tools::CommandDescriptor::new(
+    let descriptor: sdk::CommandDescriptor = tools::published::command::CommandDescriptor::new(
         "help",
         &[],
         "help",
-        tools::CommandMechanism::SnapshotQuery,
-        tools::CommandTarget::ApplicationShell,
-        tools::CommandArgumentSchema::None,
+        tools::published::command::CommandMechanism::SnapshotQuery,
+        tools::published::command::CommandTarget::ApplicationShell,
+        tools::published::command::CommandArgumentSchema::None,
     )
     .expect("descriptor");
 

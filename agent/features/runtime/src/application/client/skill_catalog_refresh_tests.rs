@@ -4,7 +4,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::application::client::SkillCatalogRefresh;
 use crate::application::loop_engine::chat::{ChatEventSink, EventFuture, RuntimeStreamEvent};
-use tools::{SkillCatalogPort, SkillDescriptor, SkillQuery, SkillSource, SkillSourceKind};
+use tools::published::skill::{
+    SkillCatalogPort, SkillDescriptor, SkillQuery, SkillSource, SkillSourceKind,
+};
 
 /// 可变 catalog fake：模拟磁盘上 skill 集合在轮次间变化。
 struct MutableCatalog {
@@ -62,7 +64,7 @@ fn refresh_with(
     let catalog = Arc::new(MutableCatalog {
         descriptors: Mutex::new(descriptors.clone()),
     });
-    let initial = tools::SkillCatalogSnapshot::from_descriptors(descriptors);
+    let initial = tools::published::skill::SkillCatalogSnapshot::from_descriptors(descriptors);
     let query = SkillQuery::new(std::env::temp_dir(), Vec::new(), Default::default());
     let refresh = SkillCatalogRefresh::new(catalog.clone(), workspace_views(), query, &initial);
     (catalog, refresh, CollectingSink::default())
@@ -99,7 +101,7 @@ async fn changed_revision_emits_once_until_next_change() {
     let first = refresh.refresh(&sink).await;
     assert!(first.is_some(), "revision 变化后必须返回新 snapshot");
     assert_eq!(first.expect("checked some").revision, {
-        tools::SkillCatalogSnapshot::from_descriptors(vec![
+        tools::published::skill::SkillCatalogSnapshot::from_descriptors(vec![
             descriptor("commit", "desc"),
             descriptor("release", "new skill"),
         ])

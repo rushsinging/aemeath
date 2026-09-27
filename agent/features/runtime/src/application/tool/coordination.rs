@@ -546,7 +546,9 @@ pub(crate) fn converge_cancelled_tool_round(
             by_id.remove(&call.id).unwrap_or_else(|| {
                 ToolExecution::new_typed(
                     call,
-                    tools::ToolExecutionOutcome::cancelled("Command cancelled by user"),
+                    tools::published::execution::ToolExecutionOutcome::cancelled(
+                        "Command cancelled by user",
+                    ),
                 )
             })
         })
@@ -554,12 +556,12 @@ pub(crate) fn converge_cancelled_tool_round(
     for result in &results {
         debug_assert!(matches!(
             result.typed_outcome,
-            tools::ToolExecutionOutcome::Success(_)
-                | tools::ToolExecutionOutcome::Failure(_)
-                | tools::ToolExecutionOutcome::Cancelled(_)
-                | tools::ToolExecutionOutcome::TimedOut(_)
-                | tools::ToolExecutionOutcome::CancellationUnconfirmed(_)
-                | tools::ToolExecutionOutcome::Suspended(_)
+            tools::published::execution::ToolExecutionOutcome::Success(_)
+                | tools::published::execution::ToolExecutionOutcome::Failure(_)
+                | tools::published::execution::ToolExecutionOutcome::Cancelled(_)
+                | tools::published::execution::ToolExecutionOutcome::TimedOut(_)
+                | tools::published::execution::ToolExecutionOutcome::CancellationUnconfirmed(_)
+                | tools::published::execution::ToolExecutionOutcome::Suspended(_)
         ));
     }
     CancelledToolRoundConvergence { results }

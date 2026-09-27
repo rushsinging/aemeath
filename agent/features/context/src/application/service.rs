@@ -528,8 +528,11 @@ impl ContextPort for ContextApplicationService {
 
     async fn compare_and_record_skill_load(
         &self,
-        mutation: tools::SkillLoadMutation,
-    ) -> Result<tools::SkillLoadDecision, tools::SkillLoadStateError> {
+        mutation: tools::published::skill::SkillLoadMutation,
+    ) -> Result<
+        tools::published::skill::SkillLoadDecision,
+        tools::published::skill::SkillLoadStateError,
+    > {
         self.session.compare_and_record_skill_load(mutation).await
     }
 

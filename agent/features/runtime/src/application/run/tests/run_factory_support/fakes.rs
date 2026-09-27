@@ -8,10 +8,9 @@ use crate::ports::{
     ProviderBuildSpecData, ProviderError, ProviderFactory, ProviderPort,
 };
 use hook::{HookDispatcher, HookInvocationData, HookOutcomeData};
-use tools::{
-    SkillCatalogPort, SkillDescriptor, SkillQuery, ToolCatalogError, ToolCatalogPort,
-    ToolCatalogSnapshot, ToolExecutionOutcome, ToolExecutionPort, ToolInvocation, ToolProfileName,
-};
+use tools::published::execution::{ToolExecutionOutcome, ToolExecutionPort, ToolInvocation};
+use tools::published::skill::{SkillCatalogPort, SkillDescriptor, SkillQuery};
+use tools::{ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot, ToolProfileName};
 
 pub(crate) struct FakeContextPort;
 
@@ -138,7 +137,7 @@ impl ToolExecutionPort for FakeToolExecution {
     async fn execute(
         &self,
         _invocation: ToolInvocation,
-        _context: &tools::ToolExecutionContext,
+        _context: &tools::published::execution::ToolExecutionContext,
     ) -> ToolExecutionOutcome {
         ToolExecutionOutcome::success_text("fake")
     }

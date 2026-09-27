@@ -252,7 +252,7 @@ pub struct ProductionMainContextFactory {
     accepted_input_writer: Arc<dyn AcceptedInputWriter>,
     tool_receipt_writer: Arc<dyn ToolReceiptWriter>,
     /// 可选注入的 Skill metadata catalog 与 Context-owned query factory。
-    skill_catalog: Option<Arc<dyn tools::SkillCatalogPort>>,
+    skill_catalog: Option<Arc<dyn tools::published::skill::SkillCatalogPort>>,
     query_factory: Option<Arc<dyn crate::ports::SkillQueryFactory>>,
     /// 可选注入的 LLM 摘要生成器（#1486）；None 时 compact 走本地压缩。
     generator: Option<Arc<dyn CompactGenerator>>,
@@ -282,7 +282,7 @@ impl ProductionMainContextFactory {
 
     pub fn with_skill_catalog(
         mut self,
-        catalog: Arc<dyn tools::SkillCatalogPort>,
+        catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
         query_factory: Arc<dyn crate::ports::SkillQueryFactory>,
     ) -> Self {
         self.skill_catalog = Some(catalog);
@@ -1025,18 +1025,25 @@ impl SessionRepository for CanonicalSessionRepository {
 
     async fn compare_and_record_skill_load(
         &self,
-        mutation: tools::SkillLoadMutation,
-    ) -> Result<tools::SkillLoadDecision, tools::SkillLoadStateError> {
+        mutation: tools::published::skill::SkillLoadMutation,
+    ) -> Result<
+        tools::published::skill::SkillLoadDecision,
+        tools::published::skill::SkillLoadStateError,
+    > {
         let _mutation_guard = self.mutation_gate.lock().await;
         let current = self
             .session
             .read()
-            .map_err(|error| tools::SkillLoadStateError::Storage(error.to_string()))?
+            .map_err(|error| {
+                tools::published::skill::SkillLoadStateError::Storage(error.to_string())
+            })?
             .clone();
         if current.id != mutation.session_id() {
-            return Err(tools::SkillLoadStateError::SessionNotFound(
-                mutation.session_id().to_string(),
-            ));
+            return Err(
+                tools::published::skill::SkillLoadStateError::SessionNotFound(
+                    mutation.session_id().to_string(),
+                ),
+            );
         }
         let mut candidate = (*current).clone();
         let decision = candidate.compare_and_record_skill(
@@ -1044,7 +1051,7 @@ impl SessionRepository for CanonicalSessionRepository {
             mutation.skill_name(),
             mutation.revision(),
         );
-        if decision == tools::SkillLoadDecision::AlreadyLoaded {
+        if decision == tools::published::skill::SkillLoadDecision::AlreadyLoaded {
             return Ok(decision);
         }
         candidate.revision += 1;
@@ -1053,9 +1060,9 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
         self.persist_candidate(&current, &candidate)
             .await
-            .map_err(tools::SkillLoadStateError::Storage)?;
+            .map_err(tools::published::skill::SkillLoadStateError::Storage)?;
         self.publish_generation(&current, candidate)
-            .map_err(tools::SkillLoadStateError::Storage)?;
+            .map_err(tools::published::skill::SkillLoadStateError::Storage)?;
         Ok(decision)
     }
 

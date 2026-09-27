@@ -16,21 +16,11 @@ pub use domain::types;
 
 // Published language: shared-kernel tool types, DTOs, and ports.
 pub use domain::{
-    AgentDispatch, AgentProgressEvent, AgentProgressKind, AgentProgressSourceContext,
-    AgentRunRequest, AgentRunTerminal, AgentRunner, AgentToolCallProgress,
-    ApplicationControlCommand, ApplicationControlTarget, AuthorizationContext,
-    CancellationDeclaration, CancellationSignal, CleanupConfirmation, CommandArgumentSchema,
-    CommandCatalogPort, CommandCompletion, CommandDescriptor, CommandMechanism, CommandName,
-    CommandParseError, CommandRoute, CommandRouterPort, CommandTarget, CommittedTaskChange,
-    ExecutionScope, FixedGuidance, FixedPlanMode, Guidance, ImageData, InvocationSource,
-    MemoryPortSource, MutexReadSet, ParsedArguments, ProgressSink, RegistryScopeName,
-    SkillCatalogPort, SkillCatalogSnapshot, SkillDescriptor, SkillError, SkillLoadDecision,
-    SkillLoadMutation, SkillLoadPort, SkillLoadScope, SkillLoadStateError, SkillLoadStatePort,
-    SkillQuery, SkillRequestCommand, SkillSource, SkillSourceKind, SlashInput, TaskChangeFact,
-    Tool, ToolCapabilities, ToolCapability, ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot,
-    ToolErrorKind, ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort,
-    ToolExecutionPorts, ToolInvocation, ToolName, ToolOutcome, ToolProfile, ToolProfileName,
-    ToolProgressEvent, ToolResult, ToolSuspension, UserQuestion, WorkspaceReadAccess,
+    AuthorizationContext, CommittedTaskChange, ExecutionScope, FixedGuidance, FixedPlanMode,
+    Guidance, ImageData, MemoryPortSource, MutexReadSet, RegistryScopeName, TaskChangeFact, Tool,
+    ToolCapabilities, ToolCapability, ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot,
+    ToolErrorKind, ToolName, ToolOutcome, ToolProfile, ToolProfileName, ToolResult,
+    WorkspaceReadAccess,
 };
 
 // Role-policy compilation: config strings → narrowed ToolProfile.

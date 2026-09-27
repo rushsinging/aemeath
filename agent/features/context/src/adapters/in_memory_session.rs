@@ -21,7 +21,7 @@ struct SessionState {
     accepted_steps: HashMap<(String, String), AcceptedInputRecord>,
     committed_steps: HashMap<(String, String), FinalizedOutcomeRecord>,
     tool_receipts: HashMap<String, ToolCallReceipt>,
-    skill_load_records: HashMap<(tools::SkillLoadScope, String), String>,
+    skill_load_records: HashMap<(tools::published::skill::SkillLoadScope, String), String>,
 }
 
 /// #870 的确定性内存 backing；durable Envelope/AtomicBlob 由 #869/#880 替换。
@@ -208,31 +208,35 @@ impl SessionRepository for InMemorySessionRepository {
 
     async fn compare_and_record_skill_load(
         &self,
-        mutation: tools::SkillLoadMutation,
-    ) -> Result<tools::SkillLoadDecision, tools::SkillLoadStateError> {
-        let mut sessions = self
-            .sessions
-            .lock()
-            .map_err(|error| tools::SkillLoadStateError::Storage(error.to_string()))?;
+        mutation: tools::published::skill::SkillLoadMutation,
+    ) -> Result<
+        tools::published::skill::SkillLoadDecision,
+        tools::published::skill::SkillLoadStateError,
+    > {
+        let mut sessions = self.sessions.lock().map_err(|error| {
+            tools::published::skill::SkillLoadStateError::Storage(error.to_string())
+        })?;
         let state = sessions.get_mut(mutation.session_id()).ok_or_else(|| {
-            tools::SkillLoadStateError::SessionNotFound(mutation.session_id().to_string())
+            tools::published::skill::SkillLoadStateError::SessionNotFound(
+                mutation.session_id().to_string(),
+            )
         })?;
         let key = (mutation.scope().clone(), mutation.skill_name().to_string());
         match state.skill_load_records.get_mut(&key) {
             Some(revision) if revision == mutation.revision() => {
-                Ok(tools::SkillLoadDecision::AlreadyLoaded)
+                Ok(tools::published::skill::SkillLoadDecision::AlreadyLoaded)
             }
             Some(revision) => {
                 *revision = mutation.revision().to_string();
                 state.revision += 1;
-                Ok(tools::SkillLoadDecision::Updated)
+                Ok(tools::published::skill::SkillLoadDecision::Updated)
             }
             None => {
                 state
                     .skill_load_records
                     .insert(key, mutation.revision().to_string());
                 state.revision += 1;
-                Ok(tools::SkillLoadDecision::Fresh)
+                Ok(tools::published::skill::SkillLoadDecision::Fresh)
             }
         }
     }

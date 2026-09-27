@@ -479,7 +479,7 @@ use crate::domain::agent_run::{
 #[derive(Clone)]
 struct FakeToolExecutionPort {
     execute_count: Arc<std::sync::atomic::AtomicUsize>,
-    recorded_invocations: Arc<std::sync::Mutex<Vec<tools::ToolInvocation>>>,
+    recorded_invocations: Arc<std::sync::Mutex<Vec<tools::published::execution::ToolInvocation>>>,
     result_text: Arc<std::sync::Mutex<String>>,
     /// Records the last text returned by execute() so tests can assert on it.
     returned_text: Arc<std::sync::Mutex<Option<String>>>,
@@ -510,12 +510,12 @@ impl FakeToolExecutionPort {
 }
 
 #[async_trait::async_trait]
-impl tools::ToolExecutionPort for FakeToolExecutionPort {
+impl tools::published::execution::ToolExecutionPort for FakeToolExecutionPort {
     async fn execute(
         &self,
-        invocation: tools::ToolInvocation,
-        context: &tools::ToolExecutionContext,
-    ) -> tools::ToolExecutionOutcome {
+        invocation: tools::published::execution::ToolInvocation,
+        context: &tools::published::execution::ToolExecutionContext,
+    ) -> tools::published::execution::ToolExecutionOutcome {
         let _ = context;
         self.execute_count
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
@@ -527,7 +527,7 @@ impl tools::ToolExecutionPort for FakeToolExecutionPort {
             text.clone()
         };
         *self.returned_text.lock().unwrap() = Some(outcome_text.clone());
-        tools::ToolExecutionOutcome::success_text(outcome_text)
+        tools::published::execution::ToolExecutionOutcome::success_text(outcome_text)
     }
 }
 
@@ -1405,7 +1405,7 @@ impl crate::application::interaction::coordinator::InteractionCompletionContextP
         static UNUSED_TOOL_EXECUTION: std::sync::LazyLock<FakeToolExecutionPort> =
             std::sync::LazyLock::new(FakeToolExecutionPort::new);
         let tool_execution = self.fake_tool_port.as_deref().map_or(
-            &*UNUSED_TOOL_EXECUTION as &dyn tools::ToolExecutionPort,
+            &*UNUSED_TOOL_EXECUTION as &dyn tools::published::execution::ToolExecutionPort,
             |port| port,
         );
         let tool_context =

@@ -1,10 +1,11 @@
-pub fn wire_commands() -> Result<::tools::composition::CommandWiring, ::tools::CommandParseError> {
+pub fn wire_commands(
+) -> Result<::tools::composition::CommandWiring, ::tools::published::command::CommandParseError> {
     ::tools::composition::wire_commands(Vec::new())
 }
 
 pub fn wire_commands_with_skills(
     skills: &std::collections::HashMap<String, sdk::SkillView>,
-) -> Result<::tools::composition::CommandWiring, ::tools::CommandParseError> {
+) -> Result<::tools::composition::CommandWiring, ::tools::published::command::CommandParseError> {
     let mut descriptors = Vec::new();
     for skill in skills.values() {
         let Some(slash_command) = skill.slash_command.as_deref() else {
@@ -15,16 +16,16 @@ pub fn wire_commands_with_skills(
             .iter()
             .map(String::as_str)
             .collect::<Vec<_>>();
-        let descriptor = match ::tools::CommandDescriptor::new(
+        let descriptor = match ::tools::published::command::CommandDescriptor::new(
             slash_command,
             &aliases,
             skill.description.as_str(),
-            ::tools::CommandMechanism::SkillRequest,
-            ::tools::CommandTarget::ContextManagement,
-            ::tools::CommandArgumentSchema::OptionalText,
+            ::tools::published::command::CommandMechanism::SkillRequest,
+            ::tools::published::command::CommandTarget::ContextManagement,
+            ::tools::published::command::CommandArgumentSchema::OptionalText,
         ) {
             Ok(descriptor) => descriptor.with_target_identity(skill.name.clone()),
-            Err(::tools::CommandParseError::InvalidName { name }) => {
+            Err(::tools::published::command::CommandParseError::InvalidName { name }) => {
                 log::warn!(target: crate::LOG_TARGET,
                     "skip invalid Skill Slash projection: skill={} slash_command={name}",
                     skill.name

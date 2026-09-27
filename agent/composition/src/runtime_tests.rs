@@ -34,19 +34,19 @@ fn noop_memory_source() -> Arc<dyn tools::MemoryPortSource> {
 struct NeverCancelled;
 
 #[async_trait::async_trait]
-impl tools::CancellationSignal for NeverCancelled {
+impl tools::published::execution::CancellationSignal for NeverCancelled {
     fn is_cancelled(&self) -> bool {
         false
     }
     async fn cancelled(&self) {
         std::future::pending::<()>().await
     }
-    fn child_signal(&self) -> Arc<dyn tools::CancellationSignal> {
+    fn child_signal(&self) -> Arc<dyn tools::published::execution::CancellationSignal> {
         Arc::new(Self)
     }
 }
 
-fn cancellation() -> Arc<dyn tools::CancellationSignal> {
+fn cancellation() -> Arc<dyn tools::published::execution::CancellationSignal> {
     Arc::new(NeverCancelled)
 }
 
@@ -74,11 +74,14 @@ fn workspace_root(workspace: &project::Workspace) -> std::path::PathBuf {
 /// The scope's `workspace_root` is set to the project's initial_cwd so
 /// invocation scopes built with the same root pass the equality check
 /// in `BoundExecutionContexts::resolve`.
-fn tool_context(workspace: &project::Workspace, run_id: &str) -> tools::ToolExecutionContext {
+fn tool_context(
+    workspace: &project::Workspace,
+    run_id: &str,
+) -> tools::published::execution::ToolExecutionContext {
     let root: std::path::PathBuf = workspace_root(workspace);
     let scope =
         tools::ExecutionScope::builder(run_id, workspace.read().workspace_id(), root).build();
-    let ports = tools::ToolExecutionPorts::new(
+    let ports = tools::published::execution::ToolExecutionPorts::new(
         cancellation(),
         tools::WorkspaceReadAccess::new(workspace.read()),
         Arc::new(tools::MutexReadSet(Arc::new(std::sync::Mutex::new(
@@ -90,7 +93,7 @@ fn tool_context(workspace: &project::Workspace, run_id: &str) -> tools::ToolExec
             language: "en".to_string(),
         }),
     );
-    tools::ToolExecutionContext::new(scope, ports)
+    tools::published::execution::ToolExecutionContext::new(scope, ports)
 }
 
 /// Create a temp file inside the workspace root, write content, return its path.
@@ -170,7 +173,7 @@ async fn wire_runtime_tool_assembly_produces_working_catalog_and_execution() {
     let scope =
         tools::ExecutionScope::builder("run-assembly", workspace.read().workspace_id(), root)
             .build();
-    let invocation = tools::ToolInvocation::new(
+    let invocation = tools::published::execution::ToolInvocation::new(
         "Read",
         serde_json::json!({"file_path": file_path.to_string_lossy()}),
         scope,

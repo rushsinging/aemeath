@@ -280,7 +280,7 @@ impl ::tools::published::typed::TypedTool for NoopMarkerTool {
     async fn call(
         &self,
         _input: serde_json::Value,
-        _ctx: &::tools::ToolExecutionContext,
+        _ctx: &::tools::published::execution::ToolExecutionContext,
     ) -> ::tools::published::typed::TypedToolResult<Self::Output> {
         ::tools::published::typed::TypedToolResult::success(
             "noop-marker-result",

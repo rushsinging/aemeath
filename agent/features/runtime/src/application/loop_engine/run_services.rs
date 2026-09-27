@@ -284,7 +284,7 @@ where
 
 pub(crate) struct ChatInteractionPublisher<'a> {
     pub runtime_context: &'a RuntimeContext,
-    pub tool_context: tools::ToolExecutionContext,
+    pub tool_context: tools::published::execution::ToolExecutionContext,
     pub materializer: &'a ToolResultMaterializer,
     pub session_id: &'a str,
 }
@@ -326,7 +326,7 @@ impl InteractionPublisher for ChatInteractionPublisher<'_> {
 
 pub(crate) struct ProgressInteractionPublisher<'a> {
     pub runtime_context: &'a RuntimeContext,
-    pub tool_context: tools::ToolExecutionContext,
+    pub tool_context: tools::published::execution::ToolExecutionContext,
     pub session_id: &'a str,
     pub materializer: &'a ToolResultMaterializer,
     pub progress: &'a (dyn Fn(Option<usize>, &str) + Send + Sync),

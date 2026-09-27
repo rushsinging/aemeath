@@ -60,9 +60,12 @@ pub trait ContextPort: Send + Sync {
 
     async fn compare_and_record_skill_load(
         &self,
-        _mutation: tools::SkillLoadMutation,
-    ) -> Result<tools::SkillLoadDecision, tools::SkillLoadStateError> {
-        Err(tools::SkillLoadStateError::Storage(
+        _mutation: tools::published::skill::SkillLoadMutation,
+    ) -> Result<
+        tools::published::skill::SkillLoadDecision,
+        tools::published::skill::SkillLoadStateError,
+    > {
+        Err(tools::published::skill::SkillLoadStateError::Storage(
             "此 ContextPort 未实现 Skill 加载状态持久化".to_string(),
         ))
     }

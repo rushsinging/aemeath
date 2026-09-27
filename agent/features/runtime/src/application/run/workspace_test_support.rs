@@ -21,7 +21,7 @@ pub(crate) fn test_runtime_workspace_access() -> RuntimeWorkspaceAccess {
 pub(crate) fn test_tool_execution_context(
     root: std::path::PathBuf,
     cancel: tokio_util::sync::CancellationToken,
-) -> tools::ToolExecutionContext {
+) -> tools::published::execution::ToolExecutionContext {
     let views =
         project::wire_production_workspace(root.clone(), None).expect("workspace initialization");
     let workspace = RuntimeWorkspaceAccess::new(views.clone());
@@ -29,9 +29,9 @@ pub(crate) fn test_tool_execution_context(
         views.read().workspace_id().as_str().to_string(),
         workspace.clone(),
     );
-    tools::ToolExecutionContext::new(
+    tools::published::execution::ToolExecutionContext::new(
         tools::ExecutionScope::builder("test-run", views.read().workspace_id(), root).build(),
-        tools::ToolExecutionPorts::new(
+        tools::published::execution::ToolExecutionPorts::new(
             Arc::new(crate::application::run::context::RunCancellationScope::from_token(cancel)),
             workspace.read_access(),
             Arc::new(tools::MutexReadSet(Arc::new(std::sync::Mutex::new(
@@ -46,7 +46,9 @@ pub(crate) fn test_tool_execution_context(
     )
 }
 
-pub(crate) fn runtime_workspace(ctx: &tools::ToolExecutionContext) -> RuntimeWorkspaceAccess {
+pub(crate) fn runtime_workspace(
+    ctx: &tools::published::execution::ToolExecutionContext,
+) -> RuntimeWorkspaceAccess {
     test_workspaces()
         .lock()
         .expect("test workspaces")
@@ -56,7 +58,7 @@ pub(crate) fn runtime_workspace(ctx: &tools::ToolExecutionContext) -> RuntimeWor
 }
 
 pub(crate) fn workspace_persist(
-    ctx: &tools::ToolExecutionContext,
+    ctx: &tools::published::execution::ToolExecutionContext,
 ) -> Arc<dyn project::WorkspaceWriter> {
     runtime_workspace(ctx).persist()
 }

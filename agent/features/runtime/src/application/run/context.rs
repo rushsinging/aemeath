@@ -30,7 +30,8 @@ use crate::ports::{ContextPort, Policy, ProviderBindingData};
 use hook::HookDispatcher;
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 use task::TaskAccess;
-use tools::{ToolCatalogPort, ToolExecutionPort};
+use tools::published::execution::ToolExecutionPort;
+use tools::ToolCatalogPort;
 
 /// per-Run 协作式取消作用域；属于 RuntimeContext 活资源，不持久化。
 ///
@@ -80,7 +81,7 @@ impl RunCancellationScope {
 }
 
 #[async_trait::async_trait]
-impl tools::CancellationSignal for RunCancellationScope {
+impl tools::published::execution::CancellationSignal for RunCancellationScope {
     fn is_cancelled(&self) -> bool {
         self.token.is_cancelled()
     }
@@ -89,7 +90,7 @@ impl tools::CancellationSignal for RunCancellationScope {
         self.token.cancelled().await
     }
 
-    fn child_signal(&self) -> Arc<dyn tools::CancellationSignal> {
+    fn child_signal(&self) -> Arc<dyn tools::published::execution::CancellationSignal> {
         Arc::new(self.child_scope())
     }
 }
@@ -101,17 +102,17 @@ impl Default for RunCancellationScope {
 }
 
 struct ToolProgressSink {
-    agent_tx: Option<tokio::sync::mpsc::Sender<tools::AgentProgressEvent>>,
-    tool_tx: Option<tokio::sync::mpsc::Sender<tools::ToolProgressEvent>>,
+    agent_tx: Option<tokio::sync::mpsc::Sender<tools::published::agent::AgentProgressEvent>>,
+    tool_tx: Option<tokio::sync::mpsc::Sender<tools::published::execution::ToolProgressEvent>>,
 }
 
-impl tools::ProgressSink for ToolProgressSink {
-    fn emit(&self, event: tools::AgentProgressEvent) {
+impl tools::published::execution::ProgressSink for ToolProgressSink {
+    fn emit(&self, event: tools::published::agent::AgentProgressEvent) {
         if let Some(tx) = &self.agent_tx {
             let _ = tx.try_send(event);
         }
     }
-    fn emit_tool_stream(&self, event: tools::ToolProgressEvent) {
+    fn emit_tool_stream(&self, event: tools::published::execution::ToolProgressEvent) {
         if let Some(tx) = &self.tool_tx {
             let _ = tx.try_send(event);
         }
@@ -119,8 +120,8 @@ impl tools::ProgressSink for ToolProgressSink {
 }
 
 pub(crate) fn tool_progress_sink(
-    tx: tokio::sync::mpsc::Sender<tools::AgentProgressEvent>,
-) -> Arc<dyn tools::ProgressSink> {
+    tx: tokio::sync::mpsc::Sender<tools::published::agent::AgentProgressEvent>,
+) -> Arc<dyn tools::published::execution::ProgressSink> {
     Arc::new(ToolProgressSink {
         agent_tx: Some(tx),
         tool_tx: None,
@@ -129,8 +130,8 @@ pub(crate) fn tool_progress_sink(
 
 /// 为 Bash 等长输出工具构造 progress sink，仅转发 [`ToolProgressEvent`]。
 pub(crate) fn tool_stream_progress_sink(
-    tx: tokio::sync::mpsc::Sender<tools::ToolProgressEvent>,
-) -> Arc<dyn tools::ProgressSink> {
+    tx: tokio::sync::mpsc::Sender<tools::published::execution::ToolProgressEvent>,
+) -> Arc<dyn tools::published::execution::ProgressSink> {
     Arc::new(ToolProgressSink {
         agent_tx: None,
         tool_tx: Some(tx),
@@ -422,7 +423,7 @@ pub struct RuntimeContext {
     task: Arc<dyn TaskAccess>,
     hooks: Arc<dyn HookDispatcher>,
     usage_sink: Arc<dyn crate::ports::UsageSink>,
-    skill_load_state: Arc<dyn tools::SkillLoadStatePort>,
+    skill_load_state: Arc<dyn tools::published::skill::SkillLoadStatePort>,
     skill_load_session_id: String,
     reasoning: Arc<Mutex<share::reasoning::ReasoningLevel>>,
     config: RunConfigSnapshot,
@@ -459,7 +460,7 @@ impl RuntimeContext {
     pub(super) fn new(
         services: RuntimeServices,
         bindings: impl Into<RunCapabilityBindings>,
-        skill_load_state: Arc<dyn tools::SkillLoadStatePort>,
+        skill_load_state: Arc<dyn tools::published::skill::SkillLoadStatePort>,
         activities: Arc<ActivityCoordinator>,
         _token: RuntimeContextAssemblyToken,
     ) -> Self {
@@ -509,7 +510,7 @@ impl RuntimeContext {
     pub fn tool_catalog(&self) -> Arc<dyn ToolCatalogPort> {
         self.tool_catalog.clone()
     }
-    /// Tool 执行端口（生产 `tools::ToolExecutionPort`），`Arc` clone。
+    /// Tool 执行端口（生产 `tools::published::execution::ToolExecutionPort`），`Arc` clone。
     pub fn tool_execution(&self) -> Arc<dyn ToolExecutionPort> {
         self.tool_execution.clone()
     }
@@ -542,7 +543,7 @@ impl RuntimeContext {
         self.usage_sink.clone()
     }
     /// Skill 加载状态端口，Sub-run 继承父级的 Context-owned durable backing。
-    pub fn skill_load_state(&self) -> Arc<dyn tools::SkillLoadStatePort> {
+    pub fn skill_load_state(&self) -> Arc<dyn tools::published::skill::SkillLoadStatePort> {
         self.skill_load_state.clone()
     }
     /// Skill 状态所属的 Main Session identity。

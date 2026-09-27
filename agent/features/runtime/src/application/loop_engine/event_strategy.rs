@@ -15,7 +15,7 @@ use crate::application::loop_engine::run_finalization::{
 };
 use crate::application::loop_engine::LoopEngineError;
 use crate::domain::agent_run::RuntimeLifecycleEvent;
-use tools::AgentRunTerminal;
+use tools::published::agent::AgentRunTerminal;
 
 /// Extract terminal state from a domain event. Shared between Main and Sub.
 ///
