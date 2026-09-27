@@ -3,13 +3,13 @@ use std::sync::Arc;
 use sdk::SdkError;
 use share::config::models::ResolvedModel;
 
-use crate::application::client::bootstrap::{ChatBootstrapArgs, ModelRuntimeSettings};
+use crate::application::client::bootstrap::{ChatBootstrapArgs, ModelRuntimeSettingsData};
 use crate::ports::ProviderFactory;
 
 use super::accessors::{AgentClientImpl, RuntimeHandle};
 
 /// 由 Composition 装配、供 Runtime bootstrap 转发的 Tool/Skill/Run 资源。
-pub struct RuntimeToolAssemblyDependencies {
+pub struct RuntimeToolAssemblyDependenciesData {
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     skill_catalog: Arc<dyn tools::SkillCatalogPort>,
     tool_result_materializer:
@@ -17,7 +17,7 @@ pub struct RuntimeToolAssemblyDependencies {
     active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
 }
 
-impl RuntimeToolAssemblyDependencies {
+impl RuntimeToolAssemblyDependenciesData {
     pub fn new(
         tool_catalog: Arc<dyn tools::ToolCatalogPort>,
         skill_catalog: Arc<dyn tools::SkillCatalogPort>,
@@ -36,14 +36,14 @@ impl RuntimeToolAssemblyDependencies {
 }
 
 /// 由 Composition 装配、供 Runtime bootstrap 转发的基础运行资源。
-pub struct RuntimeCoreDependencies {
+pub struct RuntimeCoreDependenciesData {
     workspace: project::Workspace,
     wiring: Arc<context::MainSessionWiring>,
     provider_factory: Arc<dyn ProviderFactory>,
     session_management: Arc<dyn context::SessionManagementPort>,
 }
 
-impl RuntimeCoreDependencies {
+impl RuntimeCoreDependenciesData {
     pub fn new(
         workspace: project::Workspace,
         wiring: Arc<context::MainSessionWiring>,
@@ -59,7 +59,7 @@ impl RuntimeCoreDependencies {
     }
 }
 
-pub struct SessionBootstrapAssembly {
+pub struct SessionBootstrapAssemblyData {
     pub cwd: std::path::PathBuf,
     pub context_size: usize,
     pub allow_all: bool,
@@ -67,7 +67,7 @@ pub struct SessionBootstrapAssembly {
     pub resume: Option<String>,
 }
 
-impl SessionBootstrapAssembly {
+impl SessionBootstrapAssemblyData {
     pub fn new(
         cwd: std::path::PathBuf,
         context_size: usize,
@@ -85,14 +85,14 @@ impl SessionBootstrapAssembly {
     }
 }
 
-pub struct SkillBootstrapAssembly {
+pub struct SkillBootstrapAssemblyData {
     pub snapshot: tools::SkillCatalogSnapshot,
     /// 轮次边界重扫组件：会话中 skill 文件变更后经 `SkillsUpdated`
     /// 事件刷新 TUI slash 目录（初始 revision 即 snapshot）。
     pub refresh: crate::application::client::SkillCatalogRefresh,
 }
 
-impl SkillBootstrapAssembly {
+impl SkillBootstrapAssemblyData {
     pub fn new(
         catalog: std::sync::Arc<dyn tools::SkillCatalogPort>,
         workspace: project::Workspace,
@@ -106,7 +106,7 @@ impl SkillBootstrapAssembly {
     }
 }
 
-pub struct PromptAssembly {
+pub struct PromptAssemblyData {
     pub system_blocks: Vec<crate::ports::RequestSystemBlockData>,
     pub system_prompt_text: String,
     pub initial_git_context: String,
@@ -114,7 +114,7 @@ pub struct PromptAssembly {
     pub model_id: String,
 }
 
-impl PromptAssembly {
+impl PromptAssemblyData {
     pub fn new(
         system_blocks: Vec<crate::ports::RequestSystemBlockData>,
         initial_git_context: String,
@@ -136,19 +136,19 @@ impl PromptAssembly {
     }
 }
 
-pub struct InitialProviderAssembly {
-    binding: crate::ports::ProviderBinding,
+pub struct InitialProviderAssemblyData {
+    binding: crate::ports::ProviderBindingData,
     resolved_model: ResolvedModel,
-    runtime_settings: ModelRuntimeSettings,
-    compact_model_slot: crate::application::client::SessionModelSlot,
+    runtime_settings: ModelRuntimeSettingsData,
+    compact_model_slot: crate::application::client::SessionModelSlotData,
 }
 
-impl InitialProviderAssembly {
+impl InitialProviderAssemblyData {
     pub fn new(
-        binding: crate::ports::ProviderBinding,
+        binding: crate::ports::ProviderBindingData,
         resolved_model: ResolvedModel,
-        runtime_settings: ModelRuntimeSettings,
-        compact_model_slot: crate::application::client::SessionModelSlot,
+        runtime_settings: ModelRuntimeSettingsData,
+        compact_model_slot: crate::application::client::SessionModelSlotData,
     ) -> Self {
         Self {
             binding,
@@ -158,7 +158,7 @@ impl InitialProviderAssembly {
         }
     }
 
-    pub fn binding(&self) -> &crate::ports::ProviderBinding {
+    pub fn binding(&self) -> &crate::ports::ProviderBindingData {
         &self.binding
     }
 
@@ -166,12 +166,12 @@ impl InitialProviderAssembly {
         &self.resolved_model
     }
 
-    pub fn runtime_settings(&self) -> &ModelRuntimeSettings {
+    pub fn runtime_settings(&self) -> &ModelRuntimeSettingsData {
         &self.runtime_settings
     }
 
     /// Compact 模型解析共享的会话模型槽；Composition 用它构造解析器。
-    pub fn compact_model_slot(&self) -> crate::application::client::SessionModelSlot {
+    pub fn compact_model_slot(&self) -> crate::application::client::SessionModelSlotData {
         self.compact_model_slot.clone()
     }
 }
@@ -197,122 +197,85 @@ impl RuntimeIngressAssembly {
 ///
 /// `runtime_context_factory` 随 Agent Runner assembly 进入 bootstrap，保证
 /// Main 与 Derived 路径共享同一基础 factory 实例。
-pub struct RuntimeBootstrapDependencies {
-    workspace: project::Workspace,
-    wiring: Arc<context::MainSessionWiring>,
-    provider_factory: Arc<dyn ProviderFactory>,
-    session_management: Arc<dyn context::SessionManagementPort>,
-    tool_catalog: Arc<dyn tools::ToolCatalogPort>,
-    skill_catalog: Arc<dyn tools::SkillCatalogPort>,
-    tool_result_materializer:
-        Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
-    active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
+pub struct RuntimeBootstrapDependenciesData {
+    /// 核心依赖（workspace/会话/provider 工厂）。
+    core: RuntimeCoreDependenciesData,
+    /// 工具装配依赖（目录/物化器/活动注册表）。
+    tool_assembly: RuntimeToolAssemblyDependenciesData,
+    /// agent runner 装配（runner/并发/上下文工厂）。
+    agent_runner: crate::application::client::bootstrap::AgentRunnerAssemblyData,
     ingress: RuntimeIngressAssembly,
-    initial_provider: InitialProviderAssembly,
-    session_bootstrap: SessionBootstrapAssembly,
-    prompt: PromptAssembly,
-    skills: SkillBootstrapAssembly,
-    agent_runner: Arc<dyn tools::AgentRunner>,
-    parent_context_source: crate::application::run::context::ParentRunContextSource,
-    max_tool_concurrency: usize,
-    max_agent_concurrency: usize,
-    agent_semaphore: Arc<tokio::sync::Semaphore>,
-    runtime_context_factory: Arc<crate::application::run::context_factory::RuntimeContextFactory>,
+    initial_provider: InitialProviderAssemblyData,
+    session_bootstrap: SessionBootstrapAssemblyData,
+    prompt: PromptAssemblyData,
+    skills: SkillBootstrapAssemblyData,
 }
 
-impl RuntimeBootstrapDependencies {
+impl RuntimeBootstrapDependenciesData {
     pub fn new(
-        core: RuntimeCoreDependencies,
-        tool_assembly: RuntimeToolAssemblyDependencies,
+        core: RuntimeCoreDependenciesData,
+        tool_assembly: RuntimeToolAssemblyDependenciesData,
         ingress: RuntimeIngressAssembly,
-        initial_provider: InitialProviderAssembly,
-        session_bootstrap: SessionBootstrapAssembly,
-        prompt: PromptAssembly,
-        skills: SkillBootstrapAssembly,
-        agent_runner: crate::application::client::bootstrap::AgentRunnerAssembly,
+        initial_provider: InitialProviderAssemblyData,
+        session_bootstrap: SessionBootstrapAssemblyData,
+        prompt: PromptAssemblyData,
+        skills: SkillBootstrapAssemblyData,
+        agent_runner: crate::application::client::bootstrap::AgentRunnerAssemblyData,
     ) -> Self {
-        let RuntimeCoreDependencies {
-            workspace,
-            wiring,
-            provider_factory,
-            session_management,
-        } = core;
-        let RuntimeToolAssemblyDependencies {
-            tool_catalog,
-            skill_catalog,
-            tool_result_materializer,
-            active_run,
-            ..
-        } = tool_assembly;
-        let crate::application::client::bootstrap::AgentRunnerAssembly {
-            runner: agent_runner,
-            parent_context_source,
+        let RuntimeToolAssemblyDependenciesData { active_run, .. } = &tool_assembly;
+        let crate::application::client::bootstrap::AgentRunnerAssemblyData {
             active_run: agent_runner_active_run,
-            max_tool_concurrency,
-            max_agent_concurrency,
-            agent_semaphore,
-            runtime_context_factory,
-        } = agent_runner;
+            ..
+        } = &agent_runner;
         assert!(
             Arc::ptr_eq(
                 &(active_run.clone() as Arc<dyn crate::domain::agent_run::ActiveRunPort>),
-                &agent_runner_active_run,
+                agent_runner_active_run,
             ),
             "Main Runtime 与 Derived Agent Runner 必须共享同一 ActiveRun 控制面",
         );
         Self {
-            workspace,
-            wiring,
-            provider_factory,
-            session_management,
-            tool_catalog,
-            skill_catalog,
-            tool_result_materializer,
-            active_run,
+            core,
+            tool_assembly,
+            agent_runner,
             ingress,
             initial_provider,
             session_bootstrap,
             prompt,
             skills,
-            agent_runner,
-            parent_context_source,
-            max_tool_concurrency,
-            max_agent_concurrency,
-            agent_semaphore,
-            runtime_context_factory,
         }
     }
 
     pub fn runtime_context_factory(
         &self,
     ) -> &Arc<crate::application::run::context_factory::RuntimeContextFactory> {
-        &self.runtime_context_factory
+        self.agent_runner.runtime_context_factory()
     }
 
     pub fn session_management(&self) -> Arc<dyn context::SessionManagementPort> {
-        self.session_management.clone()
+        self.core.session_management.clone()
     }
 
     pub fn wiring(&self) -> Arc<context::MainSessionWiring> {
-        self.wiring.clone()
+        self.core.wiring.clone()
     }
 
     pub fn tool_catalog(&self) -> Arc<dyn tools::ToolCatalogPort> {
-        self.tool_catalog.clone()
+        self.tool_assembly.tool_catalog.clone()
     }
 
     pub fn skill_catalog(&self) -> Arc<dyn tools::SkillCatalogPort> {
-        self.skill_catalog.clone()
+        self.tool_assembly.skill_catalog.clone()
     }
 
     pub fn tool_result_materializer(
         &self,
     ) -> Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer> {
-        self.tool_result_materializer.clone()
+        self.tool_assembly.tool_result_materializer.clone()
     }
 
     pub fn active_run(&self) -> Arc<crate::application::run::active_registry::ActiveRunRegistry> {
-        self.active_run.clone()
+        self.tool_assembly.active_run.clone()
     }
 }
 
@@ -322,39 +285,50 @@ impl RuntimeBootstrapDependencies {
 ///
 /// `task_access` 由 Composition 层注入；Runtime 不得自行创建
 /// TaskData BC 的 backing 或持久化封套（跨域越权，#890）。
-pub async fn from_args_with_workspace(
+pub async fn wire_agent_client_from_args(
     _args: ChatBootstrapArgs,
-    dependencies: RuntimeBootstrapDependencies,
+    dependencies: RuntimeBootstrapDependenciesData,
 ) -> Result<AgentClientImpl, SdkError> {
-    let RuntimeBootstrapDependencies {
-        workspace,
-        wiring,
-        provider_factory,
-        session_management,
-        tool_catalog: _,
-        skill_catalog,
-        tool_result_materializer,
-        active_run,
+    let RuntimeBootstrapDependenciesData {
+        core,
+        tool_assembly,
         ingress,
         initial_provider,
         session_bootstrap,
         prompt,
         skills,
-        agent_runner,
+        agent_runner: runner_assembly,
+    } = dependencies;
+    let RuntimeCoreDependenciesData {
+        workspace,
+        wiring,
+        provider_factory,
+        session_management,
+    } = core;
+    let RuntimeToolAssemblyDependenciesData {
+        tool_catalog: _,
+        skill_catalog,
+        tool_result_materializer,
+        active_run,
+        ..
+    } = tool_assembly;
+    let crate::application::client::bootstrap::AgentRunnerAssemblyData {
+        runner: agent_runner,
         parent_context_source,
         max_tool_concurrency,
         max_agent_concurrency,
         agent_semaphore,
         runtime_context_factory,
         ..
-    } = dependencies;
+    } = runner_assembly;
+    let _ = &session_management;
 
     // Config query/writer come from the wiring gate-aware façade.
     // Bootstrap reads committed_config directly from wiring (one-shot).
     let config_query = wiring.config_query();
     let config_writer = wiring.config_writer();
 
-    let SessionBootstrapAssembly {
+    let SessionBootstrapAssemblyData {
         cwd,
         context_size,
         allow_all,
@@ -386,7 +360,7 @@ pub async fn from_args_with_workspace(
     // 5. 日志已由 Composition 在进入 Runtime 前初始化。
 
     // 6. 初始模型绑定由 Composition 解析并构造；Runtime 只消费 typed assembly。
-    let InitialProviderAssembly {
+    let InitialProviderAssemblyData {
         binding,
         resolved_model,
         runtime_settings: _,
@@ -401,7 +375,7 @@ pub async fn from_args_with_workspace(
     compact_model_slot.bind(model_state.clone());
 
     // Tool and Skill bootstrap results are assembled and frozen by Composition.
-    let SkillBootstrapAssembly {
+    let SkillBootstrapAssemblyData {
         snapshot: initial_skill_snapshot,
         refresh: skill_refresh,
     } = skills;
@@ -422,7 +396,7 @@ pub async fn from_args_with_workspace(
     // Parent context source and concrete AgentRunner are assembled by Composition.
 
     // Prompt content is assembled by Composition and frozen for this session.
-    let PromptAssembly {
+    let PromptAssemblyData {
         system_blocks,
         system_prompt_text,
         initial_git_context,

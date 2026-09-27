@@ -22,14 +22,14 @@ pub struct SystemPromptParts {
 }
 
 #[derive(Debug, Clone)]
-pub struct PromptContext {
+pub struct PromptContextData {
     pub cwd: PathBuf,
     pub provider_name: Option<String>,
     pub model_name: Option<String>,
     pub permission_mode: PermissionModeConfig,
 }
 
-impl PromptContext {
+impl PromptContextData {
     pub fn new(
         cwd: &Path,
         provider_name: Option<&str>,
@@ -142,7 +142,7 @@ fn build_commit_guidance(
 }
 
 pub async fn build_system_prompt_parts(
-    context: &PromptContext,
+    context: &PromptContextData,
     hook_port: &Arc<dyn HookDispatcher>,
     lang: &str,
 ) -> SystemPromptParts {

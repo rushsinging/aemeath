@@ -170,9 +170,9 @@ pub(crate) mod fake {
     impl crate::ports::ProviderFactory for FakeProviderFactory {
         fn build(
             &self,
-            spec: crate::ports::ProviderBuildSpec,
-        ) -> Result<crate::ports::ProviderBinding, ProviderError> {
-            Ok(crate::ports::ProviderBinding {
+            spec: crate::ports::ProviderBuildSpecData,
+        ) -> Result<crate::ports::ProviderBindingData, ProviderError> {
+            Ok(crate::ports::ProviderBindingData {
                 provider: Arc::new(FakeProvider::new()),
                 model: spec.model,
                 max_tokens: spec.max_tokens,

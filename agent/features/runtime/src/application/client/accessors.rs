@@ -87,13 +87,13 @@ pub(crate) type EventSinkFactory =
 #[derive(Clone)]
 pub struct SessionModelState {
     resolved: Arc<std::sync::RwLock<ResolvedModel>>,
-    binding: Arc<std::sync::RwLock<Arc<crate::ports::ProviderBinding>>>,
+    binding: Arc<std::sync::RwLock<Arc<crate::ports::ProviderBindingData>>>,
 }
 
 impl SessionModelState {
     pub(crate) fn new(
         resolved: ResolvedModel,
-        binding: Arc<crate::ports::ProviderBinding>,
+        binding: Arc<crate::ports::ProviderBindingData>,
     ) -> Self {
         Self {
             resolved: Arc::new(std::sync::RwLock::new(resolved)),
@@ -105,11 +105,11 @@ impl SessionModelState {
         self.resolved.read().unwrap().clone()
     }
 
-    pub(crate) fn binding(&self) -> Arc<crate::ports::ProviderBinding> {
+    pub(crate) fn binding(&self) -> Arc<crate::ports::ProviderBindingData> {
         self.binding.read().unwrap().clone()
     }
 
-    pub(crate) fn update_binding(&self, binding: Arc<crate::ports::ProviderBinding>) {
+    pub(crate) fn update_binding(&self, binding: Arc<crate::ports::ProviderBindingData>) {
         *self.binding.write().unwrap() = binding;
     }
 }

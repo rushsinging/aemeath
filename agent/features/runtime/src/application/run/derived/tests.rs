@@ -95,15 +95,15 @@ struct CapturingProvider {
 }
 
 struct CapturingBuildFactory {
-    binding: Arc<crate::ports::ProviderBinding>,
-    spec: Arc<std::sync::Mutex<Option<crate::ports::ProviderBuildSpec>>>,
+    binding: Arc<crate::ports::ProviderBindingData>,
+    spec: Arc<std::sync::Mutex<Option<crate::ports::ProviderBuildSpecData>>>,
 }
 
 impl crate::ports::ProviderFactory for CapturingBuildFactory {
     fn build(
         &self,
-        spec: crate::ports::ProviderBuildSpec,
-    ) -> Result<crate::ports::ProviderBinding, crate::ports::ProviderError> {
+        spec: crate::ports::ProviderBuildSpecData,
+    ) -> Result<crate::ports::ProviderBindingData, crate::ports::ProviderError> {
         *self.spec.lock().unwrap() = Some(spec);
         Ok(self.binding.as_ref().clone())
     }
@@ -111,8 +111,8 @@ impl crate::ports::ProviderFactory for CapturingBuildFactory {
 
 impl CapturingBuildFactory {
     fn new(
-        binding: Arc<crate::ports::ProviderBinding>,
-        spec: Arc<std::sync::Mutex<Option<crate::ports::ProviderBuildSpec>>>,
+        binding: Arc<crate::ports::ProviderBindingData>,
+        spec: Arc<std::sync::Mutex<Option<crate::ports::ProviderBuildSpecData>>>,
     ) -> Self {
         Self { binding, spec }
     }

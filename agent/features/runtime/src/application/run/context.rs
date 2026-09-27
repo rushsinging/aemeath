@@ -26,7 +26,7 @@ use crate::application::loop_engine::chat::run_input_buffer::RunInputBuffer;
 use crate::application::loop_engine::chat::ChatEventSinkHandle;
 use crate::application::run::config::RunConfigSnapshot;
 use crate::domain::agent_run::RunSpec;
-use crate::ports::{ContextPort, Policy, ProviderBinding};
+use crate::ports::{ContextPort, Policy, ProviderBindingData};
 use hook::HookDispatcher;
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 use task::TaskAccess;
@@ -366,7 +366,7 @@ pub struct RunCapabilityBindings {
 #[derive(Clone)]
 pub struct ModelBindings {
     pub context: Arc<dyn ContextPort>,
-    pub provider: Arc<ProviderBinding>,
+    pub provider: Arc<ProviderBindingData>,
     pub interaction: Arc<dyn InteractionPort>,
     pub memory: Arc<dyn MemoryPort>,
     pub config: RunConfigSnapshot,
@@ -396,7 +396,7 @@ pub struct LifecycleBindings {
 /// #1385 变更：
 /// - 移除 `WorkspacePort`（无生产实现，过期端口）。
 /// - `task` 从旧空壳 `TaskPort` 校正为生产已使用的 `TaskAccess`。
-/// - `provider` 收敛为 `ProviderBinding`（含 port + model 约束）。
+/// - `provider` 收敛为 `ProviderBindingData`（含 port + model 约束）。
 /// - 新增 `InteractionBridge` 与 `ReflectionHistoryStore`。
 /// - 不含 `MainSessionWiring`、`Workspace`、`SessionQueryPort`、`ConfigReader`/`ConfigWriter`。
 ///
@@ -412,7 +412,7 @@ pub struct LifecycleBindings {
 #[derive(Clone)]
 pub struct RuntimeContext {
     context: Arc<dyn ContextPort>,
-    provider: Arc<ProviderBinding>,
+    provider: Arc<ProviderBindingData>,
     tool_catalog: Arc<dyn ToolCatalogPort>,
     tool_execution: Arc<dyn ToolExecutionPort>,
     policy: Arc<dyn Policy>,
@@ -502,7 +502,7 @@ impl RuntimeContext {
         self.context.clone()
     }
     /// Provider 绑定，`Arc` clone。
-    pub fn provider(&self) -> Arc<ProviderBinding> {
+    pub fn provider(&self) -> Arc<ProviderBindingData> {
         self.provider.clone()
     }
     /// Tool 目录端口（生产 `tools::ToolCatalogPort`），`Arc` clone。
@@ -583,7 +583,7 @@ impl RuntimeContext {
     // ── Reference accessors (#1385): zero-clone borrow for loop adapter borrow sites ──
 
     /// Provider binding reference.
-    pub fn provider_ref(&self) -> &Arc<ProviderBinding> {
+    pub fn provider_ref(&self) -> &Arc<ProviderBindingData> {
         &self.provider
     }
     /// Tool catalog port reference.

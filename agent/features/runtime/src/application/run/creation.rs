@@ -13,7 +13,7 @@ use crate::domain::agent_run::{Run, RunId, RunSpec, RunSpecError};
 #[derive(Clone)]
 pub(crate) struct SessionRunBindings {
     wiring: Arc<context::MainSessionWiring>,
-    provider: Arc<crate::ports::ProviderBinding>,
+    provider: Arc<crate::ports::ProviderBindingData>,
     interaction: Arc<dyn crate::application::interaction::port::InteractionPort>,
     reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
     event_sink: ChatEventSinkHandle,
@@ -26,7 +26,7 @@ pub(crate) struct SessionRunBindings {
 impl SessionRunBindings {
     pub(crate) fn new(
         wiring: Arc<context::MainSessionWiring>,
-        provider: Arc<crate::ports::ProviderBinding>,
+        provider: Arc<crate::ports::ProviderBindingData>,
         interaction: Arc<dyn crate::application::interaction::port::InteractionPort>,
         reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
         event_sink: ChatEventSinkHandle,
@@ -46,7 +46,7 @@ impl SessionRunBindings {
         &self.wiring
     }
 
-    pub(crate) fn provider(&self) -> &Arc<crate::ports::ProviderBinding> {
+    pub(crate) fn provider(&self) -> &Arc<crate::ports::ProviderBindingData> {
         &self.provider
     }
 
@@ -110,7 +110,7 @@ impl SessionState {
 
     pub fn update_provider_binding(
         &mut self,
-        binding: &crate::ports::ProviderBinding,
+        binding: &crate::ports::ProviderBindingData,
         config: ConfigSnapshot,
     ) {
         self.update_model(

@@ -10,7 +10,8 @@ use provider::{
 };
 
 use runtime::{
-    ProviderBinding, ProviderBuildSpec, ProviderFactory as ProviderFactoryTrait, ProviderPort,
+    ProviderBindingData, ProviderBuildSpecData, ProviderFactory as ProviderFactoryTrait,
+    ProviderPort,
 };
 use share::reasoning::ReasoningLevel;
 
@@ -78,8 +79,8 @@ impl ProviderPort for ProviderAdapter {
 
 // ─── ProviderFactory implementation ─────────────────────
 
-/// Default `ProviderFactory` implementation: builds a `ProviderBinding` from a
-/// `ProviderBuildSpec` through the Provider-owned Composition construction API,
+/// Default `ProviderFactory` implementation: builds a `ProviderBindingData` from a
+/// `ProviderBuildSpecData` through the Provider-owned Composition construction API,
 /// building a `ModelCapabilityData` from the client's max reasoning level and spec
 /// limits, and wrapping the client in the existing `ProviderAdapter`.
 ///
@@ -118,7 +119,7 @@ pub fn provider_factory() -> Arc<DefaultProviderFactory> {
 }
 
 impl ProviderFactoryTrait for DefaultProviderFactory {
-    fn build(&self, spec: ProviderBuildSpec) -> Result<ProviderBinding, ProviderError> {
+    fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
         let config = LlmConfigOptionsData {
             driver: spec.driver.clone(),
             source_key: spec.source_key.clone(),
@@ -178,7 +179,7 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
         let capabilities = HashMap::from([(spec.model.clone(), capability)]);
         let port = provider_port(client, capabilities);
 
-        Ok(ProviderBinding {
+        Ok(ProviderBindingData {
             provider: port,
             model: spec.model,
             max_tokens: spec.max_tokens,

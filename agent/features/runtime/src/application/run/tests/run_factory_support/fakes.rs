@@ -4,8 +4,8 @@ use crate::application::loop_engine::chat::{
     ChatEventSink, ChatEventSinkHandle, EventFuture, RuntimeStreamEvent,
 };
 use crate::ports::{
-    ContextPort, Policy, PolicyDecisionData, PolicyRequestData, ProviderBinding, ProviderBuildSpec,
-    ProviderError, ProviderFactory, ProviderPort,
+    ContextPort, Policy, PolicyDecisionData, PolicyRequestData, ProviderBindingData,
+    ProviderBuildSpecData, ProviderError, ProviderFactory, ProviderPort,
 };
 use hook::{HookDispatcher, HookInvocationData, HookOutcomeData};
 use tools::{
@@ -88,8 +88,8 @@ impl ProviderPort for FakeProviderPort {
     }
 }
 
-pub(crate) fn fake_provider_binding() -> Arc<ProviderBinding> {
-    Arc::new(ProviderBinding {
+pub(crate) fn fake_provider_binding() -> Arc<ProviderBindingData> {
+    Arc::new(ProviderBindingData {
         provider: Arc::new(FakeProviderPort),
         model: crate::ports::ModelIdData {
             provider: "test-provider".into(),
@@ -104,8 +104,8 @@ pub(crate) fn fake_provider_binding() -> Arc<ProviderBinding> {
 pub(crate) struct FakeProviderFactory;
 
 impl ProviderFactory for FakeProviderFactory {
-    fn build(&self, spec: ProviderBuildSpec) -> Result<ProviderBinding, ProviderError> {
-        Ok(ProviderBinding {
+    fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
+        Ok(ProviderBindingData {
             provider: Arc::new(FakeProviderPort),
             model: spec.model,
             max_tokens: spec.max_tokens,

@@ -274,10 +274,10 @@ impl crate::ports::ProviderPort for TestProviderPort {
     }
 }
 
-pub(crate) fn test_binding(responses: Vec<&str>) -> Arc<crate::ports::ProviderBinding> {
+pub(crate) fn test_binding(responses: Vec<&str>) -> Arc<crate::ports::ProviderBindingData> {
     let model_id = test_model_id();
     let port = Arc::new(TestProviderPort::new(responses, model_id.clone()));
-    Arc::new(crate::ports::ProviderBinding {
+    Arc::new(crate::ports::ProviderBindingData {
         provider: port,
         model: model_id,
         max_tokens: 8192,
@@ -286,9 +286,11 @@ pub(crate) fn test_binding(responses: Vec<&str>) -> Arc<crate::ports::ProviderBi
     })
 }
 
-pub(crate) fn test_binding_from_port(port: TestProviderPort) -> Arc<crate::ports::ProviderBinding> {
+pub(crate) fn test_binding_from_port(
+    port: TestProviderPort,
+) -> Arc<crate::ports::ProviderBindingData> {
     let model_id = port.model.clone();
-    Arc::new(crate::ports::ProviderBinding {
+    Arc::new(crate::ports::ProviderBindingData {
         provider: Arc::new(port),
         model: model_id,
         max_tokens: 8192,
@@ -311,13 +313,13 @@ pub(crate) fn test_model_id() -> provider::ModelIdData {
 ///
 /// Used by sub-agent runner tests where the binding's `ProviderPort` (e.g.
 /// `TestProviderPort`) is what we want exercised, regardless of how the
-/// runner resolved the `ProviderBuildSpec` from `ModelsConfig`.
+/// runner resolved the `ProviderBuildSpecData` from `ModelsConfig`.
 pub(crate) struct ConstantTestFactory {
-    binding: Arc<crate::ports::ProviderBinding>,
+    binding: Arc<crate::ports::ProviderBindingData>,
 }
 
 impl ConstantTestFactory {
-    pub fn new(binding: Arc<crate::ports::ProviderBinding>) -> Self {
+    pub fn new(binding: Arc<crate::ports::ProviderBindingData>) -> Self {
         Self { binding }
     }
 }
@@ -325,14 +327,14 @@ impl ConstantTestFactory {
 impl crate::ports::ProviderFactory for ConstantTestFactory {
     fn build(
         &self,
-        _spec: crate::ports::ProviderBuildSpec,
-    ) -> Result<crate::ports::ProviderBinding, crate::ports::provider_port::ProviderError> {
+        _spec: crate::ports::ProviderBuildSpecData,
+    ) -> Result<crate::ports::ProviderBindingData, crate::ports::provider_port::ProviderError> {
         Ok(self.binding.as_ref().clone())
     }
 }
 
 pub(crate) fn constant_factory(
-    binding: Arc<crate::ports::ProviderBinding>,
+    binding: Arc<crate::ports::ProviderBindingData>,
 ) -> Arc<dyn crate::ports::ProviderFactory> {
     Arc::new(ConstantTestFactory::new(binding))
 }
@@ -344,7 +346,7 @@ pub(crate) fn constant_factory(
 ///
 /// Used only by `runtime` lib tests as a minimal bridge so the legacy scripted
 /// fakes (e.g. `SequenceProvider`, `RecordingProvider`, `CountingProvider`,
-/// `ErrorProvider`) can be wrapped in a `ProviderBinding` without rewriting
+/// `ErrorProvider`) can be wrapped in a `ProviderBindingData` without rewriting
 /// every test to the new `ProviderPort` trait.
 struct LlmProviderPortAdapter {
     provider: std::sync::Arc<dyn provider::composition::LlmProvider>,
@@ -439,19 +441,19 @@ impl crate::ports::ProviderPort for LlmProviderPortAdapter {
 }
 
 /// Wrap an existing `provider::composition::LlmProvider` scripted fake into a
-/// `ProviderBinding` so session-driver and agent tests can reuse their scripted
+/// `ProviderBindingData` so session-driver and agent tests can reuse their scripted
 /// providers without rewriting the fake bodies.
 ///
 /// The binding's `model`/`max_tokens`/`context_window` mirror the values used by
 /// the script fakes' default `LlmClient::from_provider(...)` construction.
 pub(crate) fn binding_from_llm_provider(
     provider: std::sync::Arc<dyn provider::composition::LlmProvider>,
-) -> std::sync::Arc<crate::ports::ProviderBinding> {
+) -> std::sync::Arc<crate::ports::ProviderBindingData> {
     let model = provider::ModelIdData {
         provider: provider.provider_name().to_string(),
         model: provider.model_name().to_string(),
     };
-    std::sync::Arc::new(crate::ports::ProviderBinding {
+    std::sync::Arc::new(crate::ports::ProviderBindingData {
         provider: std::sync::Arc::new(LlmProviderPortAdapter::new(provider)),
         model,
         max_tokens: 8192,

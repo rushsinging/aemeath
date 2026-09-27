@@ -66,7 +66,7 @@ struct WorkspaceSelection {
 }
 
 struct ProviderSelection {
-    binding: Arc<crate::ports::ProviderBinding>,
+    binding: Arc<crate::ports::ProviderBindingData>,
 }
 
 struct ContextSelection {
@@ -436,7 +436,7 @@ impl RuntimeContextFactory {
             .provider_factory
             .as_ref()
             .ok_or(RunCreationError::ContextAssembly)?
-            .build(crate::ports::ProviderBuildSpec {
+            .build(crate::ports::ProviderBuildSpecData {
                 driver: source.driver.clone(),
                 source_key: source_key.clone(),
                 api_style: model.api_style.clone(),

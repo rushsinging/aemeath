@@ -1,7 +1,7 @@
 //! ProviderFactory — Runtime-owned factory contract for building provider bindings.
 //!
 //! Composition implements `ProviderFactory` to create `ProviderPort` instances
-//! from a `ProviderBuildSpec` without depending on provider-internal config
+//! from a `ProviderBuildSpecData` without depending on provider-internal config
 //! resolution. The factory owns the provider client construction and capability
 //! construction; Runtime only supplies the spec.
 
@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use crate::ports::provider_port::{ModelIdData, ProviderError, ProviderPort, ReasoningLevel};
 
-// ─── ProviderBuildSpec ──────────────────────────────────────
+// ─── ProviderBuildSpecData ──────────────────────────────────────
 
 /// Specification sufficient for Composition to construct a provider client
 /// via provider config options and wrap it in a `ProviderPort`.
@@ -18,7 +18,7 @@ use crate::ports::provider_port::{ModelIdData, ProviderError, ProviderPort, Reas
 /// All fields map directly to provider config options except `context_window`, which
 /// feeds the `ModelCapabilityData.context_limit` constructed alongside the client.
 #[derive(Debug, Clone)]
-pub struct ProviderBuildSpec {
+pub struct ProviderBuildSpecData {
     /// Driver kind (e.g. `"Anthropic"`, `"OpenAI"`, `"Zhipu"`).
     pub driver: String,
     /// Source key for display / logging.
@@ -43,12 +43,12 @@ pub struct ProviderBuildSpec {
     pub user_agent: String,
 }
 
-// ─── ProviderBinding ────────────────────────────────────────
+// ─── ProviderBindingData ────────────────────────────────────────
 
 /// An active provider binding: a ready-to-use `ProviderPort` together with the
 /// model and constraints that were used to build it.
 #[derive(Clone)]
-pub struct ProviderBinding {
+pub struct ProviderBindingData {
     /// The built provider port.
     pub provider: Arc<dyn ProviderPort>,
     /// Model identifier.
@@ -61,9 +61,9 @@ pub struct ProviderBinding {
     pub context_window: Option<usize>,
 }
 
-impl std::fmt::Debug for ProviderBinding {
+impl std::fmt::Debug for ProviderBindingData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ProviderBinding")
+        f.debug_struct("ProviderBindingData")
             .field("model", &self.model)
             .field("max_tokens", &self.max_tokens)
             .field("requested_reasoning", &self.requested_reasoning)
@@ -74,7 +74,7 @@ impl std::fmt::Debug for ProviderBinding {
 
 // ─── ProviderFactory trait ──────────────────────────────────
 
-/// Factory that builds a [`ProviderBinding`] from a [`ProviderBuildSpec`].
+/// Factory that builds a [`ProviderBindingData`] from a [`ProviderBuildSpecData`].
 ///
 /// The factory owns the knowledge of how to construct a provider client and
 /// how to construct a `ModelCapabilityData`. The caller (Runtime) only provides the
@@ -86,5 +86,5 @@ pub trait ProviderFactory: Send + Sync {
     ///
     /// Returns `ProviderError` if the spec is invalid (unknown driver, invalid
     /// model, etc.).
-    fn build(&self, spec: ProviderBuildSpec) -> Result<ProviderBinding, ProviderError>;
+    fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError>;
 }

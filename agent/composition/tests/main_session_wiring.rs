@@ -403,7 +403,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
             storage::wire_file_system_blob(temp.path()).expect("tool result blob"),
             temp.path().to_path_buf(),
         )),
-        runtime::ToolResultMaterializationPolicy::new(50_000, 2_000, 500),
+        runtime::ToolResultMaterializationPolicyData::new(50_000, 2_000, 500),
     ));
     let active_run = Arc::new(runtime::wire_active_run_registry());
     let hook_runner: Arc<dyn hook::HookDispatcher> = hook::wire_hook_dispatcher(
@@ -412,7 +412,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
     .expect("test hook dispatcher");
 
     let provider_factory = composition::provider::provider_factory();
-    let provider_spec = runtime::ProviderBuildSpec {
+    let provider_spec = runtime::ProviderBuildSpecData {
         driver: "openai".to_string(),
         source_key: "local".to_string(),
         api_style: None,
@@ -430,7 +430,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
     };
     let initial_binding = runtime::ProviderFactory::build(provider_factory.as_ref(), provider_spec)
         .expect("build test provider binding");
-    let initial_provider = runtime::InitialProviderAssembly::new(
+    let initial_provider = runtime::InitialProviderAssemblyData::new(
         initial_binding,
         share::config::models::ResolvedModel {
             source_key: "local".to_string(),
@@ -443,12 +443,12 @@ async fn runtime_session_id_matches_wiring_committed_session() {
             },
             driver: "openai".to_string(),
         },
-        runtime::ModelRuntimeSettings {
+        runtime::ModelRuntimeSettingsData {
             max_tokens: 8192,
             reasoning: false,
             reasoning_effort: None,
         },
-        runtime::SessionModelSlot::new(),
+        runtime::SessionModelSlotData::new(),
     );
 
     struct NoopRunner;
@@ -469,7 +469,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         hook_runner,
         Arc::new(runtime::UnavailableUsageSink),
     ));
-    let agent_runner = runtime::AgentRunnerAssembly {
+    let agent_runner = runtime::AgentRunnerAssemblyData {
         runner: Arc::new(NoopRunner),
         parent_context_source: runtime::ParentRunContextSource::new(),
         active_run: active_run.clone(),
@@ -479,14 +479,14 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         runtime_context_factory: runtime_context_factory.clone(),
     };
 
-    let dependencies = runtime::RuntimeBootstrapDependencies::new(
-        runtime::RuntimeCoreDependencies::new(
+    let dependencies = runtime::RuntimeBootstrapDependenciesData::new(
+        runtime::RuntimeCoreDependenciesData::new(
             workspace.clone(),
             wiring,
             provider_factory,
             session_management,
         ),
-        runtime::RuntimeToolAssemblyDependencies::new(
+        runtime::RuntimeToolAssemblyDependenciesData::new(
             tools.catalog_port(),
             skill_wiring.catalog(),
             tool_result_materializer,
@@ -494,9 +494,9 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         ),
         runtime::composition::wire_sdk_chat_ingress(),
         initial_provider,
-        runtime::SessionBootstrapAssembly::new(root.clone(), 8192, true, false, None),
-        runtime::PromptAssembly::new(Vec::new(), String::new(), String::new(), "test-model"),
-        runtime::SkillBootstrapAssembly::new(
+        runtime::SessionBootstrapAssemblyData::new(root.clone(), 8192, true, false, None),
+        runtime::PromptAssemblyData::new(Vec::new(), String::new(), String::new(), "test-model"),
+        runtime::SkillBootstrapAssemblyData::new(
             tools::composition::wire_skills().catalog(),
             workspace.clone(),
             tools::SkillQuery::new(root.clone(), Vec::new(), Default::default()),
@@ -517,7 +517,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         ..Default::default()
     };
 
-    let client = runtime::from_args_with_workspace(args, dependencies)
+    let client = runtime::wire_agent_client_from_args(args, dependencies)
         .await
         .expect("build client");
 

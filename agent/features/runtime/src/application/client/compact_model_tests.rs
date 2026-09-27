@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::ports::provider_port::fake::FakeProvider;
-use crate::ports::ProviderBuildSpec;
+use crate::ports::ProviderBuildSpecData;
 use provider::ModelIdData;
 use share::config::models::{ModelEntryConfig, ProviderModelsConfig};
 use share::config::Config;
@@ -70,9 +70,12 @@ struct RecordingFactory {
 }
 
 impl ProviderFactory for RecordingFactory {
-    fn build(&self, spec: ProviderBuildSpec) -> Result<ProviderBinding, provider::ProviderError> {
+    fn build(
+        &self,
+        spec: ProviderBuildSpecData,
+    ) -> Result<ProviderBindingData, provider::ProviderError> {
         self.builds.fetch_add(1, Ordering::SeqCst);
-        Ok(ProviderBinding {
+        Ok(ProviderBindingData {
             provider: Arc::new(FakeProvider::new()),
             model: spec.model,
             max_tokens: spec.max_tokens,
@@ -117,7 +120,7 @@ fn snapshot_with(compact_model: Option<&str>) -> ConfigSnapshot {
 
 fn resolver(
     snapshot: ConfigSnapshot,
-    session_model: SessionModelSlot,
+    session_model: SessionModelSlotData,
 ) -> (
     CompactModelResolver,
     Arc<AtomicUsize>,
@@ -146,7 +149,7 @@ fn session_state(
     let model_id = resolved.model.id.clone();
     crate::application::client::SessionModelState::new(
         resolved,
-        Arc::new(ProviderBinding {
+        Arc::new(ProviderBindingData {
             provider: Arc::new(FakeProvider::new()),
             model: ModelIdData {
                 provider: "local".into(),
@@ -159,8 +162,8 @@ fn session_state(
     )
 }
 
-fn bound_slot(snapshot: &ConfigSnapshot) -> SessionModelSlot {
-    let slot = SessionModelSlot::new();
+fn bound_slot(snapshot: &ConfigSnapshot) -> SessionModelSlotData {
+    let slot = SessionModelSlotData::new();
     slot.bind(session_state(snapshot, "local/session-model", 200_000));
     slot
 }
@@ -262,7 +265,7 @@ fn unknown_configured_selection_returns_typed_error() {
 #[test]
 fn unbound_session_model_without_configuration_returns_typed_error() {
     let snapshot = snapshot_with(None);
-    let (resolver, _builds, _reader) = resolver(snapshot, SessionModelSlot::new());
+    let (resolver, _builds, _reader) = resolver(snapshot, SessionModelSlotData::new());
 
     let error = resolver.resolve().expect_err("未绑定会话模型时必须报错");
 
@@ -272,7 +275,7 @@ fn unbound_session_model_without_configuration_returns_typed_error() {
 #[test]
 fn session_model_switch_is_observed_by_later_resolves() {
     let snapshot = snapshot_with(None);
-    let slot = SessionModelSlot::new();
+    let slot = SessionModelSlotData::new();
     slot.bind(session_state(&snapshot, "local/session-model", 200_000));
     let (resolver, _builds, _reader) = resolver(snapshot.clone(), slot.clone());
 

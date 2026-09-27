@@ -35,8 +35,10 @@ impl ToolResultBlobPort for FakeBlobPort {
 #[tokio::test]
 async fn one_tool_execution_persists_oversized_output_only_once_across_consumers() {
     let blobs = Arc::new(FakeBlobPort::default());
-    let materializer =
-        ToolResultMaterializer::new(blobs.clone(), ToolResultMaterializationPolicy::new(4, 2, 1));
+    let materializer = ToolResultMaterializer::new(
+        blobs.clone(),
+        ToolResultMaterializationPolicyData::new(4, 2, 1),
+    );
     let execution = crate::application::tool::agent::ToolExecution::from_parts(
         sdk::ids::ToolCallId::new("runtime-tool"),
         "provider-tool".to_string(),
@@ -62,8 +64,10 @@ async fn one_tool_execution_persists_oversized_output_only_once_across_consumers
 #[tokio::test]
 async fn output_at_threshold_remains_inline_without_blob_write() {
     let blobs = Arc::new(FakeBlobPort::default());
-    let materializer =
-        ToolResultMaterializer::new(blobs.clone(), ToolResultMaterializationPolicy::new(4, 2, 1));
+    let materializer = ToolResultMaterializer::new(
+        blobs.clone(),
+        ToolResultMaterializationPolicyData::new(4, 2, 1),
+    );
 
     let output = materializer
         .materialize("session", "tool", "四个字符")
@@ -77,8 +81,10 @@ async fn output_at_threshold_remains_inline_without_blob_write() {
 #[tokio::test]
 async fn oversized_unicode_output_writes_full_bytes_and_formats_character_preview() {
     let blobs = Arc::new(FakeBlobPort::default());
-    let materializer =
-        ToolResultMaterializer::new(blobs.clone(), ToolResultMaterializationPolicy::new(4, 2, 1));
+    let materializer = ToolResultMaterializer::new(
+        blobs.clone(),
+        ToolResultMaterializationPolicyData::new(4, 2, 1),
+    );
 
     let output = materializer
         .materialize("session", "tool", "甲乙丙丁戊")
@@ -104,7 +110,7 @@ async fn oversized_output_when_blob_write_fails_keeps_bounded_projection() {
     let blobs = Arc::new(FakeBlobPort::default());
     *blobs.failure.lock().unwrap() = Some(ToolResultBlobError::write("磁盘不可写"));
     let materializer =
-        ToolResultMaterializer::new(blobs, ToolResultMaterializationPolicy::new(4, 2, 1));
+        ToolResultMaterializer::new(blobs, ToolResultMaterializationPolicyData::new(4, 2, 1));
 
     let output = materializer
         .materialize("session", "tool", "甲乙丙丁戊")
@@ -122,7 +128,7 @@ async fn oversized_output_when_blob_write_fails_keeps_bounded_projection() {
 async fn oversized_output_projection_reports_exact_size_and_persisted_locator() {
     let blobs = Arc::new(FakeBlobPort::default());
     let materializer =
-        ToolResultMaterializer::new(blobs, ToolResultMaterializationPolicy::new(4, 2, 1));
+        ToolResultMaterializer::new(blobs, ToolResultMaterializationPolicyData::new(4, 2, 1));
 
     let output = materializer
         .materialize("session", "tool", "甲乙丙丁戊")
@@ -140,7 +146,7 @@ async fn oversized_output_projection_reports_unavailable_blob_without_locator() 
     let blobs = Arc::new(FakeBlobPort::default());
     *blobs.failure.lock().unwrap() = Some(ToolResultBlobError::write("磁盘不可写"));
     let materializer =
-        ToolResultMaterializer::new(blobs, ToolResultMaterializationPolicy::new(4, 2, 1));
+        ToolResultMaterializer::new(blobs, ToolResultMaterializationPolicyData::new(4, 2, 1));
 
     let output = materializer
         .materialize("session", "tool", "甲乙丙丁戊")
@@ -157,7 +163,7 @@ async fn oversized_output_projection_reports_unavailable_blob_without_locator() 
 async fn provider_text_and_session_content_share_one_bounded_projection() {
     let blobs = Arc::new(FakeBlobPort::default());
     let materializer =
-        ToolResultMaterializer::new(blobs, ToolResultMaterializationPolicy::new(4, 2, 1));
+        ToolResultMaterializer::new(blobs, ToolResultMaterializationPolicyData::new(4, 2, 1));
     let original = "甲乙丙丁戊";
 
     let message = materializer
@@ -204,7 +210,7 @@ async fn provider_text_and_session_content_share_one_bounded_projection() {
 async fn display_and_session_consumers_share_the_same_projection() {
     let display_blobs = Arc::new(FakeBlobPort::default());
     let session_blobs = Arc::new(FakeBlobPort::default());
-    let policy = ToolResultMaterializationPolicy::new(4, 2, 1);
+    let policy = ToolResultMaterializationPolicyData::new(4, 2, 1);
     let display = ToolResultMaterializer::new(display_blobs, policy);
     let session = ToolResultMaterializer::new(session_blobs, policy);
     let original = "甲乙丙丁戊";
@@ -241,7 +247,7 @@ async fn display_and_session_consumers_share_the_same_projection() {
 async fn main_and_sub_paths_share_the_same_tool_result_projection() {
     let main_blobs = Arc::new(FakeBlobPort::default());
     let sub_blobs = Arc::new(FakeBlobPort::default());
-    let policy = ToolResultMaterializationPolicy::new(4, 2, 1);
+    let policy = ToolResultMaterializationPolicyData::new(4, 2, 1);
     let main = ToolResultMaterializer::new(main_blobs, policy);
     let sub = ToolResultMaterializer::new(sub_blobs, policy);
     let result = (

@@ -126,7 +126,7 @@ fn test_build_commit_guidance_uses_unknown_fallback() {
 #[test]
 fn test_prompt_context_new_preserves_model_metadata() {
     let cwd = PathBuf::from("/tmp/example");
-    let context = PromptContext::new(
+    let context = PromptContextData::new(
         &cwd,
         Some("openrouter"),
         Some("anthropic/claude-sonnet-4"),
@@ -255,7 +255,7 @@ async fn build_system_prompt_parts_captures_git_once_without_changing_static_pro
         &share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config::default()),
     )
     .unwrap();
-    let context = PromptContext::new(
+    let context = PromptContextData::new(
         cwd.path(),
         Some("deepseek"),
         Some("deepseek-chat"),
