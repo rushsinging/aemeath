@@ -762,6 +762,7 @@ async fn confirming_overwrite_prefills_draft_from_existing_provider() {
         16_000,
         Some("ZCode/3.10.0"),
         None,
+        Some("responses"),
         vec![
             ExistingModelSnapshot {
                 model_id: "glm-5.3".to_string(),
@@ -812,6 +813,11 @@ async fn confirming_overwrite_prefills_draft_from_existing_provider() {
         Some("ZCode/3.10.0"),
         "Provider UA 必须预填全局配置已有值"
     );
+    assert_eq!(
+        confirmed.draft.api_style.as_deref(),
+        Some("responses"),
+        "接口风格必须预填全局配置已有值，避免重新提交时丢失"
+    );
     let model = confirmed
         .draft
         .models
@@ -852,6 +858,7 @@ async fn empty_credential_submission_keeps_preserved_existing_key() {
         "glm-5.3",
         1_048_576,
         16_384,
+        None,
         None,
         None,
         vec![ExistingModelSnapshot {

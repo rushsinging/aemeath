@@ -22,6 +22,53 @@ fn draft() -> ConnectDraft {
     draft
 }
 
+/// 跨层契约：Connect 落盘产物必须能被 shared 配置 schema（`ModelsConfig`）
+/// 反序列化读到 reasoning 档位与 apiStyle——运行时消费的唯一真相源。
+/// 复现漂移：手拼 JSON 曾写 camelCase `reasoningEffort` 与 provider 级
+/// `apiStyle`，运行时 `ModelEntryConfig` 均读不到（静默丢弃）。
+#[test]
+fn commit_output_is_readable_by_shared_models_config_schema() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FilesystemGlobalConfigConnectStore::new(dir.path().to_path_buf());
+    store.create_complete_default().unwrap();
+    let loaded = store.load_global_document().unwrap().unwrap();
+
+    let mut connect_draft = draft();
+    connect_draft.models[0].reasoning_effort = Some("high".to_string());
+    connect_draft.api_style = Some("responses".to_string());
+
+    store
+        .commit_draft(loaded.revision, &connect_draft)
+        .expect("commit succeeds");
+
+    let persisted: serde_json::Value =
+        serde_json::from_slice(&fs::read(store.config_path()).unwrap()).unwrap();
+    let models_config: share::config::models::ModelsConfig =
+        serde_json::from_value(persisted["models"].clone()).unwrap();
+    let provider = models_config
+        .providers
+        .get("Anthropic")
+        .expect("provider persisted");
+    let model_entry = provider.models.first().expect("model entry persisted");
+    assert_eq!(
+        model_entry.reasoning_effort.as_deref(),
+        Some("high"),
+        "运行时 schema 必须能读到 reasoning 档位"
+    );
+    assert_eq!(
+        model_entry.api_style.as_deref(),
+        Some("responses"),
+        "apiStyle 必须落在模型级（运行时消费层级）"
+    );
+    assert!(
+        !persisted["models"]["providers"]["Anthropic"]
+            .as_object()
+            .expect("provider object")
+            .contains_key("apiStyle"),
+        "provider 级 apiStyle 是层级漂移，禁止再写入"
+    );
+}
+
 #[test]
 fn create_default_is_create_new_and_does_not_overwrite() {
     let dir = tempfile::tempdir().unwrap();

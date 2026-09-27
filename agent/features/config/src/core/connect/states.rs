@@ -180,8 +180,11 @@ pub struct ExistingProviderSnapshot {
     pub max_tokens: Option<u32>,
     /// 全局配置中该 Provider 的专属 UA（`userAgent`，已归一化空白）。
     pub user_agent: Option<String>,
-    /// 首个模型的固定推理档位（`reasoningEffort`）。
+    /// 首个模型的固定推理档位（canonical `reasoning_effort`）。
     pub reasoning_effort: Option<String>,
+    /// OpenAI 系接口风格（模型级 `apiStyle`；存量文件可能落在 provider 级，
+    /// 由快照提取方负责 fallback 归一）。
+    pub api_style: Option<String>,
     /// 已有凭证的掩码形态（首 4 + `****` + 尾 4；短凭证整体 `****`）。
     /// 仅用于向导展示；明文不离开全局配置存储。
     pub credential_mask: Option<String>,
@@ -263,6 +266,7 @@ impl ExistingProviderSnapshot {
         max_tokens: u32,
         user_agent: Option<&str>,
         reasoning_effort: Option<&str>,
+        api_style: Option<&str>,
         models: Vec<ExistingModelSnapshot>,
     ) -> Self {
         let api_key_status = if api_key.is_some_and(|value| !value.is_empty()) {
@@ -299,6 +303,10 @@ impl ExistingProviderSnapshot {
             context_window: (context_window > 0).then_some(context_window),
             max_tokens: (max_tokens > 0).then_some(max_tokens),
             reasoning_effort: reasoning_effort
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+            api_style: api_style
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .map(str::to_string),

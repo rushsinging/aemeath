@@ -21,7 +21,7 @@ impl<'de> Deserialize<'de> for ModelEntryConfig {
             max_tokens: u32,
             #[serde(default)]
             reasoning: Option<bool>,
-            #[serde(default)]
+            #[serde(default, alias = "reasoningEffort")]
             reasoning_effort: Option<String>,
             #[serde(default, rename = "apiStyle")]
             api_style: Option<String>,
@@ -58,5 +58,14 @@ mod tests {
         let json = r#"{ "id": "m", "reasoning": true }"#;
         let entry: ModelEntryConfig = serde_json::from_str(json).unwrap();
         assert_eq!(entry.reasoning_effort, None);
+    }
+
+    /// 存量兼容：Connect 曾落盘 camelCase `reasoningEffort`，读取侧必须
+    /// 经 alias 归一，避免存量配置的推理档位被静默丢弃。
+    #[test]
+    fn deserialize_reads_legacy_camel_case_reasoning_effort_alias() {
+        let json = r#"{ "id": "m", "reasoningEffort": "xhigh" }"#;
+        let entry: ModelEntryConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.reasoning_effort.as_deref(), Some("xhigh"));
     }
 }
