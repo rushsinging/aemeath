@@ -5,8 +5,8 @@ use share::message::Message;
 use crate::application::run::config::RunConfigSnapshot;
 use crate::application::run::context::RuntimeContext;
 use crate::ports::{
-    ContextRequest, ContextRequestId, Language, ModelToolSchemaData, RunStepId, SessionId,
-    SystemPromptSpec,
+    ContextRequestData, ContextRequestId, Language, ModelToolSchemaData, RunStepId, SessionId,
+    SystemPromptSpecData,
 };
 
 /// Frozen values required to build one Step's Context request.
@@ -23,7 +23,7 @@ pub(crate) struct ContextRequestSource<'a> {
     pub raw_tool_schemas: Vec<serde_json::Value>,
 }
 
-/// Role-neutral owner of ContextRequest assembly.
+/// Role-neutral owner of ContextRequestData assembly.
 pub(crate) struct ContextRequestCoordinator<'a> {
     source: ContextRequestSource<'a>,
 }
@@ -38,7 +38,7 @@ impl<'a> ContextRequestCoordinator<'a> {
         run_id: &sdk::RunId,
         step_id: &RunStepId,
         pending_messages: Vec<Message>,
-    ) -> ContextRequest {
+    ) -> ContextRequestData {
         let tool_schemas = self
             .source
             .raw_tool_schemas
@@ -51,14 +51,14 @@ impl<'a> ContextRequestCoordinator<'a> {
                 })
             })
             .collect();
-        ContextRequest {
+        ContextRequestData {
             session_id: SessionId::new(self.source.session_id),
             request_id: ContextRequestId::new(uuid::Uuid::now_v7().to_string()),
             run_id: run_id.clone(),
             step_id: step_id.clone(),
             pending_messages,
             invocation_reminders: vec![],
-            system_prompt: SystemPromptSpec::new(self.source.system_prompt),
+            system_prompt: SystemPromptSpecData::new(self.source.system_prompt),
             model_id: self.source.model_id.to_string(),
             effective_reasoning: *self
                 .source

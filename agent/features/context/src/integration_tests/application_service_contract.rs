@@ -3,10 +3,10 @@ use std::sync::Arc;
 use crate::CommittedMemoryRetrieveAdapter;
 use crate::ContextApplicationService;
 use crate::{
-    CleanupConfirmation, ContextAppend, ContextMessages, ContextRequest, ContextRequestId,
-    FinalizeCause, InvocationReminder, Language, RunStepId, SessionId, SessionRevision,
-    SystemBlock, SystemPromptSpec, ToolCallIdentity, ToolCallReceipt, ToolOutcomeKind,
-    ToolTerminalReceipt,
+    CleanupConfirmation, ContextAppendData, ContextMessages, ContextRequestData, ContextRequestId,
+    FinalizeCause, InvocationReminderData, Language, RunStepId, SessionId, SessionRevision,
+    SystemBlock, SystemPromptSpecData, ToolCallIdentityData, ToolCallReceiptData,
+    ToolOutcomeKindData, ToolTerminalReceiptData,
 };
 use crate::{
     CommittedRunSlice, CommittedRunStep, CommittedStepMessages, FinalizedOutcomeRecord,
@@ -96,8 +96,8 @@ fn structured_fake_session() -> FakeSession {
                     fingerprint: format!("fp-{step_id}"),
                     committed_revision: 2,
                 }),
-                tool_receipts: vec![ToolCallReceipt {
-                    identity: ToolCallIdentity {
+                tool_receipts: vec![ToolCallReceiptData {
+                    identity: ToolCallIdentityData {
                         session_id: SessionId::new("session"),
                         run_id: normalized_run_id,
                         step_id: normalized_step_id,
@@ -108,8 +108,8 @@ fn structured_fake_session() -> FakeSession {
                         agent: false,
                     },
                     input_preview: input.to_string(),
-                    state: crate::ToolCallState::Terminal(ToolTerminalReceipt::new(
-                        ToolOutcomeKind::Success,
+                    state: crate::ToolCallState::Terminal(ToolTerminalReceiptData::new(
+                        ToolOutcomeKindData::Success,
                         "terminal",
                         CleanupConfirmation::NotApplicable,
                     )),
@@ -200,9 +200,9 @@ impl SessionRepository for FakeSession {
 
     async fn append_finalized(
         &self,
-        append: &ContextAppend,
-    ) -> Result<crate::AppendReceipt, crate::ContextAppendError> {
-        Ok(crate::AppendReceipt {
+        append: &ContextAppendData,
+    ) -> Result<crate::AppendReceiptData, crate::ContextAppendError> {
+        Ok(crate::AppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(3),
@@ -212,7 +212,7 @@ impl SessionRepository for FakeSession {
 
     async fn commit_compaction(
         &self,
-        _request: &crate::CompactRequest,
+        _request: &crate::CompactRequestData,
     ) -> Result<crate::CompactOutcome, crate::ContextPortError> {
         Ok(crate::CompactOutcome::Skipped(
             crate::CompactSkipReason::ResumeProtection,
@@ -221,7 +221,7 @@ impl SessionRepository for FakeSession {
 
     async fn commit_manual_compaction(
         &self,
-        _request: &crate::ManualCompactRequest,
+        _request: &crate::ManualCompactRequestData,
     ) -> Result<crate::CompactOutcome, crate::ContextPortError> {
         Ok(crate::CompactOutcome::Committed(crate::CompactResult {
             summary: "manual".into(),
@@ -241,7 +241,7 @@ struct FakePrompt;
 impl ContextPromptSource for FakePrompt {
     async fn materialize(
         &self,
-        _request: &ContextRequest,
+        _request: &ContextRequestData,
     ) -> Result<PromptMaterialization, crate::PromptMaterializationError> {
         Ok(PromptMaterialization {
             cacheable: vec![block("system_prompt"), block("user_guidance")],
@@ -256,7 +256,7 @@ struct FakeMemory;
 impl ContextMemorySource for FakeMemory {
     async fn materialize(
         &self,
-        _request: &ContextRequest,
+        _request: &ContextRequestData,
     ) -> Result<MemoryMaterialization, String> {
         Ok(MemoryMaterialization {
             blocks: vec![block("memory_context")],
@@ -274,15 +274,15 @@ fn block(kind: &str) -> SystemBlock {
     }
 }
 
-fn request() -> ContextRequest {
-    ContextRequest {
+fn request() -> ContextRequestData {
+    ContextRequestData {
         session_id: SessionId::new("session"),
         request_id: ContextRequestId::new("request"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("pending")],
         invocation_reminders: vec![],
-        system_prompt: SystemPromptSpec::new("system"),
+        system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
         language: Language::new("zh"),
@@ -312,7 +312,7 @@ fn service() -> ContextApplicationService {
 fn request_with_context_reduction(
     snip_enabled: bool,
     microcompact_enabled: bool,
-) -> ContextRequest {
+) -> ContextRequestData {
     let mut request = request();
     let mut config = Config::default();
     config.context.snip_enabled = snip_enabled;
@@ -321,7 +321,7 @@ fn request_with_context_reduction(
     request
 }
 
-fn result_text(window: &crate::ContextWindow, call_id: &str) -> String {
+fn result_text(window: &crate::ContextWindowData, call_id: &str) -> String {
     window
         .messages
         .iter()
@@ -559,19 +559,19 @@ async fn build_window_omits_date_and_dynamic_system_context() {
 async fn build_window_renders_invocation_reminders_once_in_stable_order() {
     let mut request = request();
     request.invocation_reminders = vec![
-        InvocationReminder::model_guidance_mismatch("session/model", "run/model"),
-        InvocationReminder::guidance_sources_changed(),
-        InvocationReminder::task_progress(crate::TaskProgressReminder {
+        InvocationReminderData::model_guidance_mismatch("session/model", "run/model"),
+        InvocationReminderData::guidance_sources_changed(),
+        InvocationReminderData::task_progress(crate::TaskProgressReminderData {
             total: 2,
             completed: 0,
             items: vec![
-                crate::TaskProgressReminderItem {
+                crate::TaskProgressReminderItemData {
                     sequence: 1,
                     subject: "task one".into(),
                     status: crate::TaskProgressStatus::InProgress,
                     blocked_by_sequences: vec![],
                 },
-                crate::TaskProgressReminderItem {
+                crate::TaskProgressReminderItemData {
                     sequence: 2,
                     subject: "task two".into(),
                     status: crate::TaskProgressStatus::Pending,
@@ -618,7 +618,7 @@ async fn build_window_without_invocation_reminders_keeps_messages_unchanged() {
 
 #[tokio::test]
 async fn append_delegates_finalized_step_to_session_backing() {
-    let append = ContextAppend {
+    let append = ContextAppendData {
         session_id: SessionId::new("session"),
         expected_revision: SessionRevision::new(2),
         run_id: RunId::new("run"),
@@ -639,10 +639,10 @@ async fn append_delegates_finalized_step_to_session_backing() {
 async fn manual_compact_and_clear_session_delegate_to_session_repository() {
     let service = service();
     let outcome = service
-        .manual_compact(&crate::ManualCompactRequest {
+        .manual_compact(&crate::ManualCompactRequestData {
             session_id: SessionId::new("session"),
             run_id: RunId::new("run"),
-            system_prompt: crate::SystemPromptSpec::new("system"),
+            system_prompt: crate::SystemPromptSpecData::new("system"),
             context_size: 128_000,
             progress: None,
             task_snapshot: None,

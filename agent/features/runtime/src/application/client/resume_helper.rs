@@ -8,7 +8,7 @@ pub type ResumeError = context::SessionManagementError;
 pub async fn resume_session_to_backing(
     session_id: &str,
     wiring: &context::MainSessionWiring,
-) -> Result<context::SessionResumeView, ResumeError> {
+) -> Result<context::SessionResumeViewData, ResumeError> {
     log::debug!(
         target: LOG_TARGET,
         "resume_lifecycle boundary=runtime_resume_helper stage=backing_load_started session_id={}",

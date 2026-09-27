@@ -2,6 +2,13 @@
 //!
 //! 设计文档：`docs/design/02-modules/context-management/01-session.md`
 
+pub(crate) use generation::{
+    SessionCommitPlan, SessionGenerationCodec, SessionGenerationManifest,
+    SessionGenerationWireError,
+};
+
+pub use share::session_types::PersistedWorkspaceContext;
+
 mod chat_chain;
 mod envelope;
 mod generation;
@@ -23,22 +30,16 @@ pub use envelope::{
     SkillLoadRecord, SnapshotState,
 };
 pub use generation::{
-    DisplayHistoryStepIndex, DisplayHistoryStepWindow, SessionMemberBytes, SessionMetadataMember,
-    SessionStateMember, SessionStepMember, SessionStepReference,
-};
-pub(crate) use generation::{
-    DisplayHistoryStepReference, SessionCommitPlan, SessionGenerationCodec,
-    SessionGenerationManifest, SessionGenerationWireError,
+    DisplayHistoryStepIndexData, DisplayHistoryStepWindowData, SessionMemberBytes,
+    SessionMetadataMember, SessionStateMember, SessionStepMember, SessionStepReference,
 };
 pub use management::{
-    same_project_identity, session_matches_project, SessionListEntry, SessionManagementError,
-    SessionMetadataUpdate, SessionResumeLoad, SessionResumeView,
+    same_project_identity, session_matches_project, SessionListEntryData, SessionManagementError,
+    SessionMetadataUpdateData, SessionResumeLoad, SessionResumeViewData,
 };
 pub(crate) use project_layout::project_dir_segment;
 pub use project_layout::session_project_dir;
-pub use restore::{SessionRestore, SessionRestoreStep};
-pub(crate) use types::PersistedWorkspaceFrame;
+pub use restore::{SessionRestore, SessionRestoreStepData};
 pub use types::{
-    extract_project_name, new_session_id, now_iso, validate_session_id, PersistedWorkspaceContext,
-    SessionMetadata,
+    extract_project_name, new_session_id, now_iso, validate_session_id, SessionMetadata,
 };

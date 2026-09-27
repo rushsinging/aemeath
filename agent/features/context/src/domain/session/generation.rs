@@ -21,13 +21,13 @@ const SESSION_RECEIPT_MEMBER_NAME: &str = "receipt-ledger.json";
 const SESSION_SKILL_MEMBER_NAME: &str = "skill-loads.json";
 
 #[derive(Debug, Clone)]
-pub struct DisplayHistoryStepWindow {
+pub struct DisplayHistoryStepWindowData {
     session_id: String,
     generation_revision: u64,
     steps: Vec<SessionStepMember>,
 }
 
-impl DisplayHistoryStepWindow {
+impl DisplayHistoryStepWindowData {
     pub fn new(
         session_id: impl Into<String>,
         generation_revision: u64,
@@ -95,13 +95,13 @@ impl DisplayHistoryStepReference {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DisplayHistoryStepIndex {
+pub struct DisplayHistoryStepIndexData {
     session_id: String,
     generation_revision: u64,
     steps: Vec<DisplayHistoryStepReference>,
 }
 
-impl DisplayHistoryStepIndex {
+impl DisplayHistoryStepIndexData {
     #[cfg(any(test, feature = "dev"))]
     pub fn fixture(
         session_id: impl Into<String>,

@@ -484,7 +484,7 @@ impl RuntimeContextFactory {
             .ok_or(RunCreationError::ContextAssembly)?
             .clone();
         Ok(ContextSelection {
-            port: context::isolated_context_with_workspace_skills(
+            port: context::wire_isolated_context_with_workspace_skills(
                 session.snapshot.session_id(),
                 skill_catalog,
                 workspace.views().read(),

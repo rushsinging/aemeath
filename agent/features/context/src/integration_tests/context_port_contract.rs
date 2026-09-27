@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
 use crate::context_port::{
-    AcceptedInputAppend, AcceptedInputReceipt, AppendReceipt, CompactOutcome, CompactRequest,
-    CompactResult, CompactTrigger, CompactionDecision, ContentFingerprint, ContextAppend,
-    ContextAppendError, ContextMessage, ContextPort, ContextPortError, ContextRequest,
-    ContextRequestId, ContextWindow, DecisionReason, FinalizeCause, Language, ManualCompactRequest,
-    RunStepId, SessionId, SessionRevision, StepReceipt, SystemPromptSpec, TokenBudget,
-    ToolOutcomeKind, Urgency,
+    AcceptedInputAppendData, AcceptedInputReceiptData, AppendReceiptData, CompactOutcome,
+    CompactRequestData, CompactResult, CompactTrigger, CompactionDecisionData, ContentFingerprint,
+    ContextAppendData, ContextAppendError, ContextMessage, ContextPort, ContextPortError,
+    ContextRequestData, ContextRequestId, ContextWindowData, DecisionReason, FinalizeCause,
+    Language, ManualCompactRequestData, RunStepId, SessionId, SessionRevision, StepReceiptData,
+    SystemPromptSpecData, TokenBudget, ToolOutcomeKindData, Urgency,
 };
 use async_trait::async_trait;
 use sdk::RunId;
@@ -17,8 +17,8 @@ use share::reasoning::ReasoningLevel;
 
 struct FakeContextPort;
 
-fn decision() -> CompactionDecision {
-    CompactionDecision {
+fn decision() -> CompactionDecisionData {
+    CompactionDecisionData {
         needed: false,
         urgency: Urgency::None,
         decision_token_count: 12,
@@ -29,15 +29,15 @@ fn decision() -> CompactionDecision {
     }
 }
 
-fn request() -> ContextRequest {
-    ContextRequest {
+fn request() -> ContextRequestData {
+    ContextRequestData {
         session_id: SessionId::new("session-1"),
         request_id: ContextRequestId::new("request-1"),
         run_id: RunId::new("run-1"),
         step_id: RunStepId::new("step-1"),
         pending_messages: vec![Message::user("hello")],
         invocation_reminders: vec![],
-        system_prompt: SystemPromptSpec::new("system"),
+        system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
         language: Language::new("zh"),
@@ -56,9 +56,9 @@ fn request() -> ContextRequest {
 impl ContextPort for FakeContextPort {
     async fn build_window(
         &self,
-        request: &ContextRequest,
-    ) -> Result<ContextWindow, ContextPortError> {
-        Ok(ContextWindow {
+        request: &ContextRequestData,
+    ) -> Result<ContextWindowData, ContextPortError> {
+        Ok(ContextWindowData {
             backing_revision: SessionRevision::new(3),
             system_blocks: vec![],
             messages: request.pending_messages.clone().into(),
@@ -70,12 +70,15 @@ impl ContextPort for FakeContextPort {
 
     async fn needs_compaction(
         &self,
-        _request: &ContextRequest,
-    ) -> Result<CompactionDecision, ContextPortError> {
+        _request: &ContextRequestData,
+    ) -> Result<CompactionDecisionData, ContextPortError> {
         Ok(decision())
     }
 
-    async fn compact(&self, request: &CompactRequest) -> Result<CompactOutcome, ContextPortError> {
+    async fn compact(
+        &self,
+        request: &CompactRequestData,
+    ) -> Result<CompactOutcome, ContextPortError> {
         assert_eq!(request.trigger, CompactTrigger::Automatic);
         Ok(CompactOutcome::Committed(CompactResult {
             summary: "summary".into(),
@@ -87,7 +90,7 @@ impl ContextPort for FakeContextPort {
 
     async fn manual_compact(
         &self,
-        request: &ManualCompactRequest,
+        request: &ManualCompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError> {
         Ok(CompactOutcome::Committed(CompactResult {
             summary: format!("manual summary for {}", request.session_id.as_str()),
@@ -103,9 +106,9 @@ impl ContextPort for FakeContextPort {
 
     async fn append_accepted_input(
         &self,
-        append: &AcceptedInputAppend,
-    ) -> Result<AcceptedInputReceipt, crate::context_port::AcceptedInputError> {
-        Ok(AcceptedInputReceipt {
+        append: &AcceptedInputAppendData,
+    ) -> Result<AcceptedInputReceiptData, crate::context_port::AcceptedInputError> {
+        Ok(AcceptedInputReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(4),
@@ -115,9 +118,9 @@ impl ContextPort for FakeContextPort {
 
     async fn append_and_persist(
         &self,
-        append: &ContextAppend,
-    ) -> Result<AppendReceipt, ContextAppendError> {
-        Ok(AppendReceipt {
+        append: &ContextAppendData,
+    ) -> Result<AppendReceiptData, ContextAppendError> {
+        Ok(AppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(4),
@@ -129,7 +132,7 @@ impl ContextPort for FakeContextPort {
 #[tokio::test]
 async fn accepted_input_port_returns_typed_receipt() {
     let port = FakeContextPort;
-    let accepted = AcceptedInputAppend {
+    let accepted = AcceptedInputAppendData {
         session_id: SessionId::new("session-1"),
         run_id: RunId::new("run-1"),
         step_id: RunStepId::new("step-1"),
@@ -138,7 +141,7 @@ async fn accepted_input_port_returns_typed_receipt() {
         fingerprint: ContentFingerprint::new("input-fingerprint"),
     };
 
-    let receipt: AcceptedInputReceipt = port.append_accepted_input(&accepted).await.unwrap();
+    let receipt: AcceptedInputReceiptData = port.append_accepted_input(&accepted).await.unwrap();
     assert_eq!(receipt.run_id, accepted.run_id);
     assert_eq!(receipt.step_id, accepted.step_id);
     assert_eq!(receipt.committed_revision, SessionRevision::new(4));
@@ -154,7 +157,7 @@ async fn context_port_exposes_provider_neutral_six_method_contract() {
     assert_eq!(window.messages.len(), 1);
     assert!(!port.needs_compaction(&request).await.unwrap().needed);
     assert!(matches!(
-        port.compact(&CompactRequest {
+        port.compact(&CompactRequestData {
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(3),
             source: request.clone(),
@@ -169,7 +172,7 @@ async fn context_port_exposes_provider_neutral_six_method_contract() {
     ));
 
     let manual = port
-        .manual_compact(&ManualCompactRequest {
+        .manual_compact(&ManualCompactRequestData {
             session_id: request.session_id.clone(),
             run_id: request.run_id.clone(),
             system_prompt: request.system_prompt.clone(),
@@ -198,8 +201,8 @@ fn finalized_step_supports_all_three_causes() {
     );
 }
 
-fn finalized_append() -> ContextAppend {
-    ContextAppend {
+fn finalized_append() -> ContextAppendData {
+    ContextAppendData {
         session_id: SessionId::new("session-1"),
         expected_revision: SessionRevision::new(3),
         run_id: RunId::new("run-1"),
@@ -209,12 +212,12 @@ fn finalized_append() -> ContextAppend {
         duration_ms: Some(7_325_000),
         messages: vec![Message::user("finalized")],
         receipts: vec![
-            StepReceipt::tool("call-1", 0, ToolOutcomeKind::Success),
-            StepReceipt::tool("call-2", 1, ToolOutcomeKind::Failure),
-            StepReceipt::agent("call-3", 2, ToolOutcomeKind::Success)
+            StepReceiptData::tool("call-1", 0, ToolOutcomeKindData::Success),
+            StepReceiptData::tool("call-2", 1, ToolOutcomeKindData::Failure),
+            StepReceiptData::agent("call-3", 2, ToolOutcomeKindData::Success)
                 .with_summary("child finished")
                 .with_artifact_ref("artifact://child-result"),
-            StepReceipt::agent("call-4", 3, ToolOutcomeKind::CancellationUnconfirmed)
+            StepReceiptData::agent("call-4", 3, ToolOutcomeKindData::CancellationUnconfirmed)
                 .with_possible_side_effect("remote write may have started")
                 .with_unfinished_call("child-call-9"),
         ],
@@ -226,7 +229,7 @@ fn finalized_append() -> ContextAppend {
 #[test]
 fn mixed_tool_outcomes_and_agent_receipts_preserve_original_order() {
     let append = finalized_append();
-    let indexes: Vec<_> = append.receipts.iter().map(StepReceipt::index).collect();
+    let indexes: Vec<_> = append.receipts.iter().map(StepReceiptData::index).collect();
 
     assert_eq!(indexes, vec![0, 1, 2, 3]);
     assert_eq!(append.receipts[2].summary(), Some("child finished"));
@@ -236,7 +239,7 @@ fn mixed_tool_outcomes_and_agent_receipts_preserve_original_order() {
     );
     assert_eq!(
         append.receipts[3].outcome(),
-        ToolOutcomeKind::CancellationUnconfirmed
+        ToolOutcomeKindData::CancellationUnconfirmed
     );
     assert_eq!(append.receipts[3].unfinished_call_ids(), &["child-call-9"]);
 }

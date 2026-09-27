@@ -21,12 +21,12 @@
 use std::sync::Arc;
 
 use crate::ports::{
-    AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
-    CompactRequest, CompactTrigger, ContentFingerprint, ContextAppend, ContextAppendError,
-    ContextPort, ContextPortError, ContextRequest, ContextWindow, FinalizeCause,
-    ManualCompactRequest, SessionId, SessionRevision, StepReceipt,
+    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
+    CompactOutcome, CompactRequestData, CompactTrigger, ContentFingerprint, ContextAppendData,
+    ContextAppendError, ContextPort, ContextPortError, ContextRequestData, ContextWindowData,
+    FinalizeCause, ManualCompactRequestData, SessionId, SessionRevision, StepReceiptData,
 };
-use context::{ToolReceiptMutation, ToolReceiptMutationError, ToolReceiptMutationReceipt};
+use context::{ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData};
 use sdk::RunStepId;
 use sha2::{Digest, Sha256};
 use share::message::Message;
@@ -34,7 +34,7 @@ use share::message::Message;
 /// Apply the Runtime-owned state transition for an automatic compact outcome.
 ///
 /// A committed compact invalidates both the Provider usage baseline and the
-/// materialized ContextWindow. A typed skip is a non-fatal no-op: Context did
+/// materialized ContextWindowData. A typed skip is a non-fatal no-op: Context did
 /// not mutate its backing, so Runtime keeps both values and proceeds with the
 /// current model invocation.
 /// #1385 TaskData 12: `last_total_tokens` replaced with `RunUsageTracker` for
@@ -63,8 +63,8 @@ impl ContextCoordinator {
 
     pub(crate) async fn build_window(
         &self,
-        request: &ContextRequest,
-    ) -> Result<ContextWindow, ContextPortError> {
+        request: &ContextRequestData,
+    ) -> Result<ContextWindowData, ContextPortError> {
         log::debug!(
             target: crate::LOG_TARGET,
             "context_request_forwarded request_id={} reminders={} run_id={} step_id={}",
@@ -88,25 +88,25 @@ impl ContextCoordinator {
 
     pub(crate) async fn compaction_decision(
         &self,
-        request: &ContextRequest,
-    ) -> Result<context::CompactionDecision, ContextPortError> {
+        request: &ContextRequestData,
+    ) -> Result<context::CompactionDecisionData, ContextPortError> {
         self.port.needs_compaction(request).await
     }
 
     #[cfg(test)]
     pub(crate) async fn needs_compaction(
         &self,
-        request: &ContextRequest,
+        request: &ContextRequestData,
     ) -> Result<bool, ContextPortError> {
         Ok(self.compaction_decision(request).await?.needed)
     }
 
     pub(crate) async fn compact(
         &self,
-        request: &ContextRequest,
+        request: &ContextRequestData,
         source_revision: SessionRevision,
         progress: std::sync::Arc<dyn crate::application::loop_engine::CompactProgressView>,
-        task_snapshot: Option<context::compact::CompactTaskSnapshot>,
+        task_snapshot: Option<context::compact::CompactTaskSnapshotData>,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<CompactOutcome, ContextPortError> {
         let progress: Option<std::sync::Arc<dyn context::compact::CompactProgressFn>> =
@@ -114,7 +114,7 @@ impl ContextCoordinator {
                 crate::application::loop_engine::compaction::CompactProgressAdapter(progress),
             ));
         self.port
-            .compact(&CompactRequest {
+            .compact(&CompactRequestData {
                 run_id: request.run_id.clone(),
                 source_revision,
                 source: request.clone(),
@@ -128,7 +128,7 @@ impl ContextCoordinator {
 
     pub(crate) async fn manual_compact(
         &self,
-        request: &ManualCompactRequest,
+        request: &ManualCompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError> {
         self.port.manual_compact(request).await
     }
@@ -142,12 +142,12 @@ impl ContextCoordinator {
 
     pub(crate) async fn append_accepted_input(
         &self,
-        request: &ContextRequest,
+        request: &ContextRequestData,
         messages: Vec<Message>,
-    ) -> Result<AcceptedInputReceipt, AcceptedInputError> {
+    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
         let fingerprint = accepted_input_fingerprint(request, &messages)?;
         self.port
-            .append_accepted_input(&AcceptedInputAppend {
+            .append_accepted_input(&AcceptedInputAppendData {
                 session_id: request.session_id.clone(),
                 run_id: request.run_id.clone(),
                 step_id: request.step_id.clone(),
@@ -160,15 +160,15 @@ impl ContextCoordinator {
 
     pub(crate) async fn advance_tool_receipt(
         &self,
-        mutation: ToolReceiptMutation,
-    ) -> Result<ToolReceiptMutationReceipt, ToolReceiptMutationError> {
+        mutation: ToolReceiptMutationData,
+    ) -> Result<ToolReceiptMutationReceiptData, ToolReceiptMutationError> {
         self.port.advance_tool_receipt(mutation).await
     }
 
     pub(crate) async fn step_receipts(
         &self,
-        request: &ContextRequest,
-    ) -> Result<Vec<StepReceipt>, ToolReceiptMutationError> {
+        request: &ContextRequestData,
+    ) -> Result<Vec<StepReceiptData>, ToolReceiptMutationError> {
         self.port
             .step_receipts(&request.session_id, &request.run_id, &request.step_id)
             .await
@@ -177,15 +177,15 @@ impl ContextCoordinator {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn append_finalized(
         &self,
-        request: &ContextRequest,
+        request: &ContextRequestData,
         step_id: RunStepId,
         expected_revision: SessionRevision,
         finalize_cause: FinalizeCause,
         duration_ms: Option<u64>,
         messages: Vec<Message>,
-        receipts: Vec<StepReceipt>,
+        receipts: Vec<StepReceiptData>,
         api_input_tokens: Option<u64>,
-    ) -> Result<AppendReceipt, ContextAppendError> {
+    ) -> Result<AppendReceiptData, ContextAppendError> {
         let fingerprint = fingerprint(
             request,
             &step_id,
@@ -196,7 +196,7 @@ impl ContextCoordinator {
             api_input_tokens,
         )?;
         self.port
-            .append_and_persist(&ContextAppend {
+            .append_and_persist(&ContextAppendData {
                 session_id: request.session_id.clone(),
                 expected_revision,
                 run_id: request.run_id.clone(),
@@ -214,7 +214,7 @@ impl ContextCoordinator {
 }
 
 fn accepted_input_fingerprint(
-    request: &ContextRequest,
+    request: &ContextRequestData,
     messages: &[Message],
 ) -> Result<ContentFingerprint, AcceptedInputError> {
     let payload = serde_json::to_vec(&(
@@ -233,12 +233,12 @@ fn accepted_input_fingerprint(
 }
 
 fn fingerprint(
-    request: &ContextRequest,
+    request: &ContextRequestData,
     step_id: &RunStepId,
     finalize_cause: FinalizeCause,
     duration_ms: Option<u64>,
     messages: &[Message],
-    receipts: &[StepReceipt],
+    receipts: &[StepReceiptData],
     api_input_tokens: Option<u64>,
 ) -> Result<ContentFingerprint, ContextAppendError> {
     let payload = serde_json::to_vec(&(
@@ -265,7 +265,9 @@ fn fingerprint(
             .collect::<Vec<_>>(),
         api_input_tokens,
     ))
-    .map_err(|error| ContextAppendError::Storage(format!("ContextAppend 指纹编码失败：{error}")))?;
+    .map_err(|error| {
+        ContextAppendError::Storage(format!("ContextAppendData 指纹编码失败：{error}"))
+    })?;
     let digest = Sha256::digest(payload);
     Ok(ContentFingerprint::new(format!("{digest:x}")))
 }

@@ -1,5 +1,5 @@
 use crate::domain::{
-    CompactionDecision, ContextRequest, DecisionReason, SystemBlock, TokenBudget, Urgency,
+    CompactionDecisionData, ContextRequestData, DecisionReason, SystemBlock, TokenBudget, Urgency,
     MIN_EFFECTIVE_WINDOW,
 };
 
@@ -8,7 +8,7 @@ use crate::domain::{
 pub(crate) const HEURISTIC_CALIBRATION_RANGE: std::ops::RangeInclusive<f64> = 0.5..=2.0;
 
 /// 解析 request 携带的 heuristic 校准系数；越界或缺失按 1.0。
-pub(crate) fn resolve_calibration_factor(request: &ContextRequest) -> f64 {
+pub(crate) fn resolve_calibration_factor(request: &ContextRequestData) -> f64 {
     request
         .heuristic_calibration
         .filter(|factor| HEURISTIC_CALIBRATION_RANGE.contains(factor))
@@ -16,7 +16,7 @@ pub(crate) fn resolve_calibration_factor(request: &ContextRequest) -> f64 {
 }
 
 pub(crate) fn token_budget(
-    request: &ContextRequest,
+    request: &ContextRequestData,
     messages: &crate::domain::ContextMessages,
     system_blocks: &[SystemBlock],
 ) -> TokenBudget {
@@ -59,10 +59,10 @@ pub(crate) fn token_budget(
 /// `effective = context_size - reserved_context(2%) - clamped_max_output(≤25% window)`
 /// `threshold = effective * 0.8`
 pub(crate) fn calculate(
-    request: &ContextRequest,
+    request: &ContextRequestData,
     messages: &crate::domain::ContextMessages,
     system_blocks: &[SystemBlock],
-) -> CompactionDecision {
+) -> CompactionDecisionData {
     let budget = token_budget(request, messages, system_blocks);
 
     let effective =
@@ -78,7 +78,7 @@ pub(crate) fn calculate(
             effective,
             MIN_EFFECTIVE_WINDOW,
         );
-        return CompactionDecision {
+        return CompactionDecisionData {
             needed: false,
             urgency: Urgency::None,
             decision_token_count: budget.total_tokens,
@@ -105,7 +105,7 @@ pub(crate) fn calculate(
         _ => Urgency::Must,
     };
 
-    CompactionDecision {
+    CompactionDecisionData {
         needed: decision_token_count > threshold,
         urgency,
         decision_token_count,

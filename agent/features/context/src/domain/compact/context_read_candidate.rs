@@ -3,7 +3,7 @@ use std::sync::Arc;
 use share::message::Message;
 
 use crate::domain::session::{CommittedStepMessages, SessionHistory};
-use crate::domain::{ContextMessages, ToolCallReceipt};
+use crate::domain::{ContextMessages, ToolCallReceiptData};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProtectedRunPolicy {
@@ -192,7 +192,7 @@ pub struct ContextReadStep {
     step_id: String,
     accepted_messages: Option<CommittedStepMessages>,
     outcome_messages: Option<CommittedStepMessages>,
-    tool_receipts: Arc<[ToolCallReceipt]>,
+    tool_receipts: Arc<[ToolCallReceiptData]>,
     finalized: bool,
 }
 
@@ -201,7 +201,7 @@ impl ContextReadStep {
         step_id: impl Into<String>,
         accepted_messages: Option<CommittedStepMessages>,
         outcome_messages: Option<CommittedStepMessages>,
-        tool_receipts: Vec<ToolCallReceipt>,
+        tool_receipts: Vec<ToolCallReceiptData>,
         finalized: bool,
     ) -> Self {
         Self {
@@ -228,7 +228,7 @@ impl ContextReadStep {
         &self.step_id
     }
 
-    pub fn tool_receipts(&self) -> &[ToolCallReceipt] {
+    pub fn tool_receipts(&self) -> &[ToolCallReceiptData] {
         &self.tool_receipts
     }
 }

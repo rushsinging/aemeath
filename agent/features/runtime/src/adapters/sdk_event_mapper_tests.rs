@@ -261,7 +261,7 @@ fn microcompact_completed_preserves_messages_and_cleared_count() {
 fn session_resume_mapping_preserves_body_free_history_index() {
     let event = RuntimeStreamEvent::SessionResumed {
         steps: Vec::new(),
-        display_history: Some(context::api::DisplayHistoryStepIndex::fixture(
+        display_history: Some(context::api::DisplayHistoryStepIndexData::fixture(
             "session-index",
             17,
             vec![("run-1", "step-1", "step-run-step.json", 23)],

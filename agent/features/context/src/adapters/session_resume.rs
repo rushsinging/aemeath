@@ -1,12 +1,12 @@
 use std::time::Instant;
 
-use crate::domain::session::{SessionManagementError, SessionRestore, SessionResumeView};
+use crate::domain::session::{SessionManagementError, SessionRestore, SessionResumeViewData};
 
 impl crate::application::MainSessionWiring {
     pub async fn resume_session(
         &self,
         session_id: &str,
-    ) -> Result<SessionResumeView, SessionManagementError> {
+    ) -> Result<SessionResumeViewData, SessionManagementError> {
         let started = Instant::now();
         let project = self.project_identity();
         log::debug!(
@@ -59,7 +59,7 @@ impl crate::application::MainSessionWiring {
             started.elapsed().as_secs_f64() * 1000.0,
             restore_started.elapsed().as_secs_f64() * 1000.0
         );
-        Ok(SessionResumeView {
+        Ok(SessionResumeViewData {
             session_id: committed.id.clone(),
             active_messages: restore.active_messages,
             display_steps: restore.display_steps,

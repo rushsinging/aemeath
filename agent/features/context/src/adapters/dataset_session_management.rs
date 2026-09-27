@@ -8,7 +8,7 @@ use crate::adapters::{
 };
 use crate::domain::session::{
     now_iso, project_dir_segment, session_matches_project, CanonicalSession, SessionCodec,
-    SessionListEntry, SessionManagementError, SessionMetadataUpdate,
+    SessionListEntryData, SessionManagementError, SessionMetadataUpdateData,
 };
 use crate::ports::SessionManagementPort;
 
@@ -103,7 +103,7 @@ impl SessionManagementPort for DatasetSessionManagement {
         project: &share::session_types::ProjectIdentityData,
         generation_revision: u64,
         member_names: &[String],
-    ) -> Result<crate::domain::session::DisplayHistoryStepWindow, SessionManagementError> {
+    ) -> Result<crate::domain::session::DisplayHistoryStepWindowData, SessionManagementError> {
         self.load_for_project(id, project).await?;
         let project_dir = project_dir_segment(project);
         self.reader
@@ -118,7 +118,7 @@ impl SessionManagementPort for DatasetSessionManagement {
     async fn list_for_project(
         &self,
         project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<SessionListEntry>, SessionManagementError> {
+    ) -> Result<Vec<SessionListEntryData>, SessionManagementError> {
         let project_dir = project_dir_segment(project);
         let dataset_keys = self
             .dataset
@@ -145,7 +145,7 @@ impl SessionManagementPort for DatasetSessionManagement {
                 if segments.len() == 1 && !session_matches_project(&session, project) {
                     continue;
                 }
-                sessions.push(SessionListEntry::from_canonical(&session));
+                sessions.push(SessionListEntryData::from_canonical(&session));
             }
         }
         for entry in self.legacy.list_for_project(project).await? {
@@ -171,7 +171,7 @@ impl SessionManagementPort for DatasetSessionManagement {
         &self,
         bytes: &[u8],
         project: &share::session_types::ProjectIdentityData,
-    ) -> Result<SessionListEntry, SessionManagementError> {
+    ) -> Result<SessionListEntryData, SessionManagementError> {
         let decoded = crate::adapters::decode_session(bytes).map_err(|error| match error {
             crate::domain::session::SessionCodecError::UnsupportedFutureVersion {
                 version, ..
@@ -186,15 +186,15 @@ impl SessionManagementPort for DatasetSessionManagement {
             .save_initial(&session)
             .await
             .map_err(SessionManagementError::Storage)?;
-        Ok(SessionListEntry::from_canonical(&session))
+        Ok(SessionListEntryData::from_canonical(&session))
     }
 
     async fn update_metadata_for_project(
         &self,
         id: &str,
         project: &share::session_types::ProjectIdentityData,
-        update: SessionMetadataUpdate,
-    ) -> Result<SessionListEntry, SessionManagementError> {
+        update: SessionMetadataUpdateData,
+    ) -> Result<SessionListEntryData, SessionManagementError> {
         let before = self.load_for_project(id, project).await?;
         let mut after = before.clone();
         update.apply(&mut after.metadata);
@@ -204,7 +204,7 @@ impl SessionManagementPort for DatasetSessionManagement {
             .save_incremental(&before, &after)
             .await
             .map_err(SessionManagementError::Storage)?;
-        Ok(SessionListEntry::from_canonical(&after))
+        Ok(SessionListEntryData::from_canonical(&after))
     }
 
     async fn delete_for_project(

@@ -784,7 +784,7 @@ mod tests {
                 catalog: catalog.clone(),
                 execution,
                 context: crate::application::context::coordination::ContextCoordinator::new(
-                    context::isolated_context("test-session"),
+                    context::wire_isolated_context("test-session"),
                 ),
                 session_id: context::SessionId::new("test-session"),
                 ctx: ctx.clone(),

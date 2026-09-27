@@ -197,7 +197,7 @@ fn tool_call_status_to_sdk(
 }
 
 pub(crate) fn map_display_history_index(
-    index: context::api::DisplayHistoryStepIndex,
+    index: context::api::DisplayHistoryStepIndexData,
 ) -> sdk::DisplayHistoryIndex {
     sdk::DisplayHistoryIndex {
         session_id: index.session_id().to_string(),

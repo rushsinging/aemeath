@@ -7,32 +7,35 @@ pub use crate::domain::*;
 /// Context Management 对 Agent Runtime 开放的唯一端口。
 ///
 /// Runtime 每个 RunStep 开始时构建 window；需要时执行 compact；普通完成、
-/// CancelRunStep 或 TerminateRun 经 StepFinalizer 收口后提交唯一 ContextAppend。
+/// CancelRunStep 或 TerminateRun 经 StepFinalizer 收口后提交唯一 ContextAppendData。
 #[async_trait]
 pub trait ContextPort: Send + Sync {
     async fn build_window(
         &self,
-        request: &ContextRequest,
-    ) -> Result<ContextWindow, ContextPortError>;
+        request: &ContextRequestData,
+    ) -> Result<ContextWindowData, ContextPortError>;
 
     async fn needs_compaction(
         &self,
-        request: &ContextRequest,
-    ) -> Result<CompactionDecision, ContextPortError>;
+        request: &ContextRequestData,
+    ) -> Result<CompactionDecisionData, ContextPortError>;
 
-    async fn compact(&self, request: &CompactRequest) -> Result<CompactOutcome, ContextPortError>;
+    async fn compact(
+        &self,
+        request: &CompactRequestData,
+    ) -> Result<CompactOutcome, ContextPortError>;
 
     async fn manual_compact(
         &self,
-        request: &ManualCompactRequest,
+        request: &ManualCompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError>;
 
     async fn clear_session(&self, session_id: &SessionId) -> Result<(), ContextPortError>;
 
     async fn append_accepted_input(
         &self,
-        _append: &AcceptedInputAppend,
-    ) -> Result<AcceptedInputReceipt, AcceptedInputError> {
+        _append: &AcceptedInputAppendData,
+    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
         Err(AcceptedInputError::Storage(
             "此 ContextPort 未实现已接受输入持久化".to_string(),
         ))
@@ -40,8 +43,8 @@ pub trait ContextPort: Send + Sync {
 
     async fn advance_tool_receipt(
         &self,
-        _mutation: ToolReceiptMutation,
-    ) -> Result<ToolReceiptMutationReceipt, ToolReceiptMutationError> {
+        _mutation: ToolReceiptMutationData,
+    ) -> Result<ToolReceiptMutationReceiptData, ToolReceiptMutationError> {
         Err(ToolReceiptMutationError::Storage(
             "此 ContextPort 未实现 Tool receipt 持久化".to_string(),
         ))
@@ -52,7 +55,7 @@ pub trait ContextPort: Send + Sync {
         _session_id: &SessionId,
         _run_id: &sdk::RunId,
         _step_id: &sdk::RunStepId,
-    ) -> Result<Vec<StepReceipt>, ToolReceiptMutationError> {
+    ) -> Result<Vec<StepReceiptData>, ToolReceiptMutationError> {
         Err(ToolReceiptMutationError::Storage(
             "此 ContextPort 未实现 Step receipt 查询".to_string(),
         ))
@@ -72,6 +75,6 @@ pub trait ContextPort: Send + Sync {
 
     async fn append_and_persist(
         &self,
-        append: &ContextAppend,
-    ) -> Result<AppendReceipt, ContextAppendError>;
+        append: &ContextAppendData,
+    ) -> Result<AppendReceiptData, ContextAppendError>;
 }

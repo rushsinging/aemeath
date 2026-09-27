@@ -3,13 +3,13 @@
 use super::envelope::RestoreStepSource;
 use super::message_integrity::{check_message_integrity, deep_clean_messages, sanitize_messages};
 use crate::domain::session::CanonicalSession;
-use crate::domain::{ToolCallReceipt, ToolCallState};
+use crate::domain::{ToolCallReceiptData, ToolCallState};
 use std::sync::Arc;
 
 use share::message::{ContentBlock, Message, Role};
 
 #[derive(Debug, Clone)]
-pub struct SessionRestoreStep {
+pub struct SessionRestoreStepData {
     pub run_id: String,
     pub step_id: String,
     pub message_segments: Vec<Arc<[Message]>>,
@@ -17,7 +17,7 @@ pub struct SessionRestoreStep {
     pub duration_ms: Option<u64>,
 }
 
-impl SessionRestoreStep {
+impl SessionRestoreStepData {
     pub fn messages(&self) -> impl Iterator<Item = &Message> {
         self.message_segments
             .iter()
@@ -28,7 +28,7 @@ impl SessionRestoreStep {
 #[derive(Debug, Clone)]
 pub struct SessionRestore {
     pub active_messages: Vec<Message>,
-    pub display_steps: Vec<SessionRestoreStep>,
+    pub display_steps: Vec<SessionRestoreStepData>,
     pub compacted: bool,
     pub created_at: String,
     pub trimmed: usize,
@@ -41,7 +41,7 @@ impl SessionRestore {
             clean_steps(session.restore_steps_from_marker());
         let active_messages = active_steps
             .iter()
-            .flat_map(SessionRestoreStep::messages)
+            .flat_map(SessionRestoreStepData::messages)
             .cloned()
             .collect();
         Self {
@@ -60,7 +60,7 @@ impl SessionRestore {
         let (display_steps, _, _) = clean_steps(session.all_restore_steps());
         let active_messages = active_steps
             .iter()
-            .flat_map(SessionRestoreStep::messages)
+            .flat_map(SessionRestoreStepData::messages)
             .cloned()
             .collect();
         Self {
@@ -74,7 +74,7 @@ impl SessionRestore {
     }
 }
 
-fn clean_steps(raw_steps: Vec<RestoreStepSource>) -> (Vec<SessionRestoreStep>, usize, usize) {
+fn clean_steps(raw_steps: Vec<RestoreStepSource>) -> (Vec<SessionRestoreStepData>, usize, usize) {
     let mut steps = Vec::with_capacity(raw_steps.len());
     let mut trimmed = 0;
     let mut repaired = 0;
@@ -93,7 +93,7 @@ fn clean_steps(raw_steps: Vec<RestoreStepSource>) -> (Vec<SessionRestoreStep>, u
         });
         if !had_unfinished_receipts && !needs_integrity_repair {
             if !message_segments.iter().all(|segment| segment.is_empty()) {
-                steps.push(SessionRestoreStep {
+                steps.push(SessionRestoreStepData {
                     run_id: cursor.run_id,
                     step_id: cursor.step_id,
                     message_segments,
@@ -116,7 +116,7 @@ fn clean_steps(raw_steps: Vec<RestoreStepSource>) -> (Vec<SessionRestoreStep>, u
             repaired += deep_clean_messages(&mut messages);
         }
         if !messages.is_empty() {
-            steps.push(SessionRestoreStep {
+            steps.push(SessionRestoreStepData {
                 run_id: cursor.run_id,
                 step_id: cursor.step_id,
                 message_segments: vec![messages.into()],
@@ -151,7 +151,7 @@ fn message_segments_need_repair(message_segments: &[Arc<[Message]>]) -> bool {
             .any(|tool_use_id| !tool_result_ids.contains(tool_use_id))
 }
 
-fn has_unfinished_receipts(receipts: &[ToolCallReceipt]) -> bool {
+fn has_unfinished_receipts(receipts: &[ToolCallReceiptData]) -> bool {
     receipts.iter().any(|receipt| {
         matches!(
             receipt.state,
@@ -160,8 +160,8 @@ fn has_unfinished_receipts(receipts: &[ToolCallReceipt]) -> bool {
     })
 }
 
-fn project_unfinished_tool_results(messages: &mut Vec<Message>, receipts: &[ToolCallReceipt]) {
-    let unresolved: Vec<&ToolCallReceipt> = receipts
+fn project_unfinished_tool_results(messages: &mut Vec<Message>, receipts: &[ToolCallReceiptData]) {
+    let unresolved: Vec<&ToolCallReceiptData> = receipts
         .iter()
         .filter(|receipt| {
             matches!(
@@ -232,14 +232,14 @@ fn project_unfinished_tool_results(messages: &mut Vec<Message>, receipts: &[Tool
     });
 }
 
-fn restored_tool_input(receipt: &ToolCallReceipt) -> serde_json::Value {
+fn restored_tool_input(receipt: &ToolCallReceiptData) -> serde_json::Value {
     serde_json::from_str(&receipt.input_preview)
         .ok()
         .filter(serde_json::Value::is_object)
         .unwrap_or_else(|| serde_json::json!({}))
 }
 
-fn provider_call_id(receipt: &ToolCallReceipt) -> &str {
+fn provider_call_id(receipt: &ToolCallReceiptData) -> &str {
     receipt
         .identity
         .provider_call_id

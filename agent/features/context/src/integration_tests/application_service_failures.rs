@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use crate::ContextApplicationService;
 use crate::{
-    ContextAppend, ContextRequest, ContextRequestId, Language, SessionId, SessionRevision,
-    SystemPromptSpec,
+    ContextAppendData, ContextRequestData, ContextRequestId, Language, SessionId, SessionRevision,
+    SystemPromptSpecData,
 };
 use crate::{
     ContextMemorySource, ContextPromptSource, MemoryMaterialization, PromptMaterialization,
@@ -30,21 +30,21 @@ impl SessionRepository for Session {
 
     async fn append_finalized(
         &self,
-        _append: &ContextAppend,
-    ) -> Result<crate::AppendReceipt, crate::ContextAppendError> {
+        _append: &ContextAppendData,
+    ) -> Result<crate::AppendReceiptData, crate::ContextAppendError> {
         unreachable!()
     }
 
     async fn commit_compaction(
         &self,
-        _request: &crate::CompactRequest,
+        _request: &crate::CompactRequestData,
     ) -> Result<crate::CompactOutcome, crate::ContextPortError> {
         unreachable!()
     }
 
     async fn commit_manual_compaction(
         &self,
-        _request: &crate::ManualCompactRequest,
+        _request: &crate::ManualCompactRequestData,
     ) -> Result<crate::CompactOutcome, crate::ContextPortError> {
         Ok(crate::CompactOutcome::Committed(crate::CompactResult {
             summary: "manual".into(),
@@ -64,7 +64,7 @@ struct FailingPrompt;
 impl ContextPromptSource for FailingPrompt {
     async fn materialize(
         &self,
-        _request: &ContextRequest,
+        _request: &ContextRequestData,
     ) -> Result<PromptMaterialization, crate::PromptMaterializationError> {
         Err(crate::PromptMaterializationError::Baseline(
             "guidance unavailable".into(),
@@ -77,7 +77,7 @@ struct CountingMemory(Arc<AtomicUsize>);
 impl ContextMemorySource for CountingMemory {
     async fn materialize(
         &self,
-        _request: &ContextRequest,
+        _request: &ContextRequestData,
     ) -> Result<MemoryMaterialization, String> {
         self.0.fetch_add(1, Ordering::SeqCst);
         Ok(MemoryMaterialization {
@@ -87,15 +87,15 @@ impl ContextMemorySource for CountingMemory {
     }
 }
 
-fn request() -> ContextRequest {
-    ContextRequest {
+fn request() -> ContextRequestData {
+    ContextRequestData {
         session_id: SessionId::new("session"),
         request_id: ContextRequestId::new("request"),
         run_id: RunId::new("run"),
         step_id: crate::RunStepId::new("step"),
         pending_messages: vec![],
         invocation_reminders: vec![],
-        system_prompt: SystemPromptSpec::new("system"),
+        system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
         language: Language::new("zh"),

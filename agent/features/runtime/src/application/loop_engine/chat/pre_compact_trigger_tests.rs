@@ -32,10 +32,10 @@ use crate::application::reflection::{
     ReflectionTaskTrigger,
 };
 use crate::ports::{
-    CompactOutcome, CompactRequest, CompactResult, CompactSkipReason, CompactionDecision,
-    ContextPort, ContextPortError, ContextRequest, ContextRequestId, ContextWindow, DecisionReason,
-    Language as ContextLanguage, SessionId, SessionRevision, SystemBlock, SystemPromptSpec,
-    TokenBudget, Urgency,
+    CompactOutcome, CompactRequestData, CompactResult, CompactSkipReason, CompactionDecisionData,
+    ContextPort, ContextPortError, ContextRequestData, ContextRequestId, ContextWindowData,
+    DecisionReason, Language as ContextLanguage, SessionId, SessionRevision, SystemBlock,
+    SystemPromptSpecData, TokenBudget, Urgency,
 };
 
 /// `submit_complete` builds its own executor closure and ignores the
@@ -49,15 +49,15 @@ fn production_adapter() -> ReflectionTaskAdapter {
     ReflectionTaskAdapter::production(Duration::from_secs(5))
 }
 
-fn frozen_request() -> ContextRequest {
-    ContextRequest {
+fn frozen_request() -> ContextRequestData {
+    ContextRequestData {
         session_id: SessionId::new("session"),
         request_id: ContextRequestId::new("request"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("seed")],
         invocation_reminders: vec![],
-        system_prompt: SystemPromptSpec::new("system"),
+        system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: share::reasoning::ReasoningLevel::Off,
         language: ContextLanguage::new("en"),
@@ -72,8 +72,8 @@ fn frozen_request() -> ContextRequest {
     }
 }
 
-fn window_with(messages: Vec<Message>) -> ContextWindow {
-    ContextWindow {
+fn window_with(messages: Vec<Message>) -> ContextWindowData {
+    ContextWindowData {
         backing_revision: SessionRevision::new(7),
         system_blocks: vec![SystemBlock {
             kind: "system_prompt".to_string(),
@@ -84,7 +84,7 @@ fn window_with(messages: Vec<Message>) -> ContextWindow {
         messages: messages.into(),
         tool_schemas: vec![],
         token_estimation: TokenBudget::default(),
-        compaction_decision: CompactionDecision {
+        compaction_decision: CompactionDecisionData {
             needed: true,
             urgency: Urgency::Must,
             decision_token_count: 0,
@@ -101,7 +101,7 @@ fn window_with(messages: Vec<Message>) -> ContextWindow {
 /// touches `compact`.
 struct StubContextPort {
     outcome: Mutex<Option<Result<CompactOutcome, ContextPortError>>>,
-    compact_calls: Mutex<Vec<CompactRequest>>,
+    compact_calls: Mutex<Vec<CompactRequestData>>,
 }
 
 impl StubContextPort {
@@ -112,7 +112,7 @@ impl StubContextPort {
         })
     }
 
-    fn compact_calls(&self) -> Vec<CompactRequest> {
+    fn compact_calls(&self) -> Vec<CompactRequestData> {
         self.compact_calls.lock().unwrap().clone()
     }
 }
@@ -121,21 +121,24 @@ impl StubContextPort {
 impl ContextPort for StubContextPort {
     async fn build_window(
         &self,
-        _request: &ContextRequest,
-    ) -> Result<ContextWindow, ContextPortError> {
+        _request: &ContextRequestData,
+    ) -> Result<ContextWindowData, ContextPortError> {
         Err(ContextPortError::Compact("stub: build_window".to_string()))
     }
 
     async fn needs_compaction(
         &self,
-        _request: &ContextRequest,
-    ) -> Result<CompactionDecision, ContextPortError> {
+        _request: &ContextRequestData,
+    ) -> Result<CompactionDecisionData, ContextPortError> {
         Err(ContextPortError::Compact(
             "stub: needs_compaction".to_string(),
         ))
     }
 
-    async fn compact(&self, request: &CompactRequest) -> Result<CompactOutcome, ContextPortError> {
+    async fn compact(
+        &self,
+        request: &CompactRequestData,
+    ) -> Result<CompactOutcome, ContextPortError> {
         self.compact_calls.lock().unwrap().push(request.clone());
         self.outcome
             .lock()
@@ -146,7 +149,7 @@ impl ContextPort for StubContextPort {
 
     async fn manual_compact(
         &self,
-        _request: &crate::ports::ManualCompactRequest,
+        _request: &crate::ports::ManualCompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError> {
         Err(ContextPortError::Compact(
             "stub: manual_compact".to_string(),
@@ -159,8 +162,8 @@ impl ContextPort for StubContextPort {
 
     async fn append_and_persist(
         &self,
-        _append: &crate::ports::ContextAppend,
-    ) -> Result<crate::ports::AppendReceipt, crate::ports::ContextAppendError> {
+        _append: &crate::ports::ContextAppendData,
+    ) -> Result<crate::ports::AppendReceiptData, crate::ports::ContextAppendError> {
         Err(crate::ports::ContextAppendError::Storage(
             "stub".to_string(),
         ))

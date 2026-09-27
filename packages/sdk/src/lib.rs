@@ -30,7 +30,7 @@ pub mod session_lock;
 pub use chat_event::{
     DisplayHistoryIndex, DisplayHistoryStepReference, DisplayHistoryWindow,
     DisplayHistoryWindowRequest, LocalResumedSessionStep, LocalSessionResumeBacking,
-    SessionResumeFailureKind, SessionResumeView,
+    SessionResumeFailureKind, SessionResumeViewData,
 };
 pub mod task;
 pub mod tool_input;

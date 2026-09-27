@@ -13,14 +13,14 @@ use crate::adapters::{
 };
 use crate::application::SessionPersistenceService;
 use crate::domain::session::{
-    CanonicalSession, CommittedRunSlice, DisplayHistoryStepIndex, DisplayHistoryStepWindow,
+    CanonicalSession, CommittedRunSlice, DisplayHistoryStepIndexData, DisplayHistoryStepWindowData,
     RunStepCursor, SessionGenerationCodec, SessionGenerationManifest, SessionGenerationWireError,
     SessionHistory, SessionStepMember, SessionStepReference,
 };
 
 pub struct PreparedDatasetResume {
     pub active_session: CanonicalSession,
-    pub display_history: DisplayHistoryStepIndex,
+    pub display_history: DisplayHistoryStepIndexData,
 }
 
 /// dataset 读取候选 key：project 目录段存在时先探测 scoped 两段 key，
@@ -175,7 +175,7 @@ impl DatasetSessionReader {
         session_id: &str,
         generation_revision: u64,
         member_names: &[String],
-    ) -> Result<DisplayHistoryStepWindow, SessionGenerationWireError> {
+    ) -> Result<DisplayHistoryStepWindowData, SessionGenerationWireError> {
         let manifest_name = safe_member_name(SessionGenerationManifest::manifest_member_name())?;
         let candidate_keys = dataset_read_candidates(project_dir, session_id)?;
         for dataset_key in &candidate_keys {
@@ -211,7 +211,7 @@ impl DatasetSessionReader {
         member_names: &[String],
         manifest_outcome: DatasetReadOutcomeData,
         _manifest_name: &SafePathSegmentData,
-    ) -> Result<DisplayHistoryStepWindow, SessionGenerationWireError> {
+    ) -> Result<DisplayHistoryStepWindowData, SessionGenerationWireError> {
         let DatasetReadOutcomeData::Found(manifest_read) = manifest_outcome else {
             return Err(SessionGenerationWireError::InvalidManifest(
                 "Session generation 不存在".to_string(),
@@ -273,7 +273,7 @@ impl DatasetSessionReader {
                 Ok(member)
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(DisplayHistoryStepWindow::new(
+        Ok(DisplayHistoryStepWindowData::new(
             session_id,
             generation_revision,
             steps,
@@ -349,7 +349,7 @@ impl DatasetSessionReader {
                 .collect::<Result<Vec<_>, _>>()?,
         )?;
         Ok(PreparedDatasetResume {
-            display_history: DisplayHistoryStepIndex::from_session_and_manifest(
+            display_history: DisplayHistoryStepIndexData::from_session_and_manifest(
                 &session, &manifest,
             ),
             active_session: session,
@@ -474,7 +474,7 @@ impl DatasetSessionReader {
         }
         Ok(PreparedDatasetResume {
             active_session,
-            display_history: DisplayHistoryStepIndex::from_manifest_after_clear(
+            display_history: DisplayHistoryStepIndexData::from_manifest_after_clear(
                 &manifest,
                 cleared_after,
             ),

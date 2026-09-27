@@ -3,8 +3,8 @@ use async_trait::async_trait;
 use share::session_types::ProjectIdentityData;
 
 use crate::domain::session::{
-    CanonicalSession, DisplayHistoryStepWindow, SessionListEntry, SessionManagementError,
-    SessionMetadataUpdate, SessionResumeLoad,
+    CanonicalSession, DisplayHistoryStepWindowData, SessionListEntryData, SessionManagementError,
+    SessionMetadataUpdateData, SessionResumeLoad,
 };
 
 /// Context-owned Session identity management contract.
@@ -40,7 +40,7 @@ pub trait SessionManagementPort: Send + Sync {
         project: &ProjectIdentityData,
         generation_revision: u64,
         member_names: &[String],
-    ) -> Result<DisplayHistoryStepWindow, SessionManagementError> {
+    ) -> Result<DisplayHistoryStepWindowData, SessionManagementError> {
         let _ = (id, project, generation_revision, member_names);
         Err(SessionManagementError::Storage(
             "当前 Session 存储不支持按需 display history".to_string(),
@@ -51,7 +51,7 @@ pub trait SessionManagementPort: Send + Sync {
     async fn list_for_project(
         &self,
         project: &ProjectIdentityData,
-    ) -> Result<Vec<SessionListEntry>, SessionManagementError>;
+    ) -> Result<Vec<SessionListEntryData>, SessionManagementError>;
 
     /// Exports only a session belonging to the supplied stable project identity.
     async fn export_for_project(
@@ -66,7 +66,7 @@ pub trait SessionManagementPort: Send + Sync {
         &self,
         bytes: &[u8],
         project: &ProjectIdentityData,
-    ) -> Result<SessionListEntry, SessionManagementError>;
+    ) -> Result<SessionListEntryData, SessionManagementError>;
 
     /// Updates metadata only for a session belonging to the supplied stable
     /// project identity.
@@ -74,8 +74,8 @@ pub trait SessionManagementPort: Send + Sync {
         &self,
         id: &str,
         project: &ProjectIdentityData,
-        update: SessionMetadataUpdate,
-    ) -> Result<SessionListEntry, SessionManagementError>;
+        update: SessionMetadataUpdateData,
+    ) -> Result<SessionListEntryData, SessionManagementError>;
 
     /// Deletes only a session belonging to the supplied stable project identity.
     async fn delete_for_project(

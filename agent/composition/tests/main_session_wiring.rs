@@ -20,7 +20,7 @@ use context::context_port::ContextPort;
 use context::MainSessionDependencies;
 use context::SessionManagementPort;
 use context::{
-    ContentFingerprint, ContextAppend, ContextRequestId, FinalizeCause, RunStepId, SessionId,
+    ContentFingerprint, ContextAppendData, ContextRequestId, FinalizeCause, RunStepId, SessionId,
     SessionRevision,
 };
 use sdk::{ChatBootstrapArgs, RunId};
@@ -279,7 +279,7 @@ async fn production_context_append_reopens_from_atomic_blob() {
     let context: Arc<dyn ContextPort> = bound.context();
     let session_id = bound.session().id.clone();
     drop(bound);
-    let append = ContextAppend {
+    let append = ContextAppendData {
         session_id: SessionId::new(&session_id),
         expected_revision: SessionRevision::new(0),
         run_id: RunId::new("production-run"),

@@ -7,14 +7,14 @@ use storage::{
 };
 
 use crate::domain::session::CanonicalSession;
-use crate::domain::ToolCallReceipt;
+use crate::domain::ToolCallReceiptData;
 
 const RECEIPT_LEDGER_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct PersistedToolReceipt {
     revision: u64,
-    receipt: ToolCallReceipt,
+    receipt: ToolCallReceiptData,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -82,7 +82,7 @@ impl AtomicBlobToolReceiptLedger {
     pub(crate) async fn save(
         &self,
         revision: u64,
-        receipt: &ToolCallReceipt,
+        receipt: &ToolCallReceiptData,
     ) -> Result<(), String> {
         let mut ledger = self.read().await?;
         if let Some(existing) = ledger
@@ -117,7 +117,7 @@ impl AtomicBlobToolReceiptLedger {
         let ledger = self.read().await?;
         for entry in ledger.receipts {
             session
-                .advance_tool_receipt(crate::domain::ToolReceiptMutation {
+                .advance_tool_receipt(crate::domain::ToolReceiptMutationData {
                     identity: entry.receipt.identity.clone(),
                     input_preview: Some(entry.receipt.input_preview.clone()),
                     next: entry.receipt.state.clone(),

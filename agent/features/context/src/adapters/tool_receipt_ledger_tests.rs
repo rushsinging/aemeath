@@ -1,6 +1,6 @@
 use super::AtomicBlobToolReceiptLedger;
 use crate::domain::session::CanonicalSession;
-use crate::domain::{SessionId, ToolCallIdentity, ToolCallReceipt};
+use crate::domain::{SessionId, ToolCallIdentityData, ToolCallReceiptData};
 use sdk::{RunId, RunStepId};
 use std::sync::Arc;
 
@@ -10,7 +10,7 @@ async fn overlay_does_not_advance_canonical_session_revision() {
     let blob: Arc<dyn storage::AtomicBlobPort> =
         storage::wire_file_system_blob(root.path()).expect("blob adapter");
     let ledger = AtomicBlobToolReceiptLedger::new(blob, "session").expect("tool receipt ledger");
-    let identity = ToolCallIdentity {
+    let identity = ToolCallIdentityData {
         session_id: SessionId::new("session"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
@@ -21,7 +21,7 @@ async fn overlay_does_not_advance_canonical_session_revision() {
         agent: false,
     };
     ledger
-        .save(4, &ToolCallReceipt::pending(identity, "preview"))
+        .save(4, &ToolCallReceiptData::pending(identity, "preview"))
         .await
         .expect("save tool receipt");
 

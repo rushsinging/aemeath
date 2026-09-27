@@ -14,7 +14,7 @@ use share::message::{ContentBlock, Message};
 /// Uses CJK-aware estimation: CJK characters average ~1 token each
 /// (mainstream tokenizers measure 0.7–1.0 tokens per CJK char),
 /// while ASCII/Latin text averages ~4 characters per token.
-pub(crate) fn estimate_tokens(text: &str) -> usize {
+pub fn estimate_tokens(text: &str) -> usize {
     estimate_tokens_with_ratio(text, 4.0)
 }
 
@@ -67,7 +67,7 @@ pub fn estimate_messages_tokens(messages: &[Message]) -> usize {
 }
 
 /// Estimate tokens for a single message
-pub(crate) fn estimate_message_tokens(message: &Message) -> usize {
+pub fn estimate_message_tokens(message: &Message) -> usize {
     // ~4 tokens overhead per message (role, formatting)
     4 + message
         .content
@@ -148,7 +148,7 @@ pub fn compact_chunk_target_tokens(context_size: usize) -> usize {
 /// Calculate the effective context window size (after reserving output tokens
 /// and summary budget). Output reservation is clamped to at most 25% of the
 /// window (#1626) so the effective window never collapses to zero.
-pub(crate) fn effective_context_window(context_size: usize, max_output_tokens: usize) -> usize {
+pub fn effective_context_window(context_size: usize, max_output_tokens: usize) -> usize {
     let reserved =
         summary_budget(context_size) + clamped_max_output(context_size, max_output_tokens);
     context_size.saturating_sub(reserved)
@@ -156,7 +156,7 @@ pub(crate) fn effective_context_window(context_size: usize, max_output_tokens: u
 
 /// Calculate the autocompact trigger threshold.
 /// Formula: effective_context_window * 0.8
-pub(crate) fn autocompact_threshold(context_size: usize, max_output_tokens: usize) -> usize {
+pub fn autocompact_threshold(context_size: usize, max_output_tokens: usize) -> usize {
     let effective = effective_context_window(context_size, max_output_tokens);
     ((effective as f64) * 0.8) as usize
 }

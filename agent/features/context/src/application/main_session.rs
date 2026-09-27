@@ -941,7 +941,7 @@ pub mod test_support {
             &self,
             _project: &share::session_types::ProjectIdentityData,
         ) -> Result<
-            Vec<crate::domain::session::SessionListEntry>,
+            Vec<crate::domain::session::SessionListEntryData>,
             crate::domain::session::SessionManagementError,
         > {
             Ok(Vec::new())
@@ -962,7 +962,7 @@ pub mod test_support {
             _bytes: &[u8],
             _project: &share::session_types::ProjectIdentityData,
         ) -> Result<
-            crate::domain::session::SessionListEntry,
+            crate::domain::session::SessionListEntryData,
             crate::domain::session::SessionManagementError,
         > {
             Err(crate::domain::session::SessionManagementError::Storage(
@@ -974,9 +974,9 @@ pub mod test_support {
             &self,
             id: &str,
             _project: &share::session_types::ProjectIdentityData,
-            _update: crate::domain::session::SessionMetadataUpdate,
+            _update: crate::domain::session::SessionMetadataUpdateData,
         ) -> Result<
-            crate::domain::session::SessionListEntry,
+            crate::domain::session::SessionListEntryData,
             crate::domain::session::SessionManagementError,
         > {
             Err(crate::domain::session::SessionManagementError::NotFound(

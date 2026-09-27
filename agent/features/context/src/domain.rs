@@ -11,19 +11,16 @@ pub mod tool_receipt;
 #[cfg(test)]
 mod tool_receipt_tests;
 
-pub use compact::{CompactProgressFn, CompactStage, CompactWork};
-pub(crate) use token_budget::{
-    autocompact_threshold, effective_context_window, estimate_message_tokens, estimate_tokens,
-};
+pub use compact::{CompactProgressFn, CompactStageData, CompactWorkData};
 pub use token_budget::{
-    clamped_max_output, estimate_messages_tokens, estimate_tool_schemas_tokens,
-    MIN_EFFECTIVE_WINDOW,
+    autocompact_threshold, clamped_max_output, effective_context_window, estimate_message_tokens,
+    estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens, MIN_EFFECTIVE_WINDOW,
 };
 pub use tool_receipt::{
-    CleanupConfirmation, ToolCallIdentity, ToolReceiptMutation, ToolReceiptMutationError,
-    ToolReceiptMutationReceipt, ToolTerminalReceipt,
+    CleanupConfirmation, ToolCallIdentityData, ToolReceiptMutationData, ToolReceiptMutationError,
+    ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
 };
-pub(crate) use tool_receipt::{ToolCallReceipt, ToolCallState};
+pub(crate) use tool_receipt::{ToolCallReceiptData, ToolCallState};
 
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize};
@@ -63,7 +60,7 @@ macro_rules! string_value_object {
 
 string_value_object!(ContextRequestId);
 string_value_object!(Language);
-string_value_object!(SystemPromptSpec);
+string_value_object!(SystemPromptSpecData);
 string_value_object!(ContentFingerprint);
 
 /// Session backing 的单调 revision。
@@ -85,8 +82,8 @@ impl SessionRevision {
 /// Runtime 负责产生 intent 与生命周期；Context 负责本地化渲染、排序和预算。
 /// 这些值 **NEVER** 写入 canonical Session。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum InvocationReminder {
-    TaskProgress(TaskProgressReminder),
+pub enum InvocationReminderData {
+    TaskProgress(TaskProgressReminderData),
     GuidanceSourcesChanged,
     ModelGuidanceMismatch {
         session_model_id: String,
@@ -94,7 +91,7 @@ pub enum InvocationReminder {
     },
 }
 
-impl InvocationReminder {
+impl InvocationReminderData {
     pub fn guidance_sources_changed() -> Self {
         Self::GuidanceSourcesChanged
     }
@@ -109,7 +106,7 @@ impl InvocationReminder {
         }
     }
 
-    pub fn task_progress(progress: TaskProgressReminder) -> Self {
+    pub fn task_progress(progress: TaskProgressReminderData) -> Self {
         Self::TaskProgress(progress)
     }
 
@@ -123,15 +120,15 @@ impl InvocationReminder {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskProgressReminder {
+pub struct TaskProgressReminderData {
     pub total: usize,
     pub completed: usize,
-    pub items: Vec<TaskProgressReminderItem>,
+    pub items: Vec<TaskProgressReminderItemData>,
     pub hidden_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskProgressReminderItem {
+pub struct TaskProgressReminderItemData {
     pub sequence: u64,
     pub subject: String,
     pub status: TaskProgressStatus,
@@ -147,14 +144,14 @@ pub enum TaskProgressStatus {
 
 /// 构建 window 的不可变输入；历史由 Context backing 独占。
 #[derive(Debug, Clone)]
-pub struct ContextRequest {
+pub struct ContextRequestData {
     pub session_id: SessionId,
     pub request_id: ContextRequestId,
     pub run_id: RunId,
     pub step_id: RunStepId,
     pub pending_messages: Vec<ContextMessage>,
-    pub invocation_reminders: Vec<InvocationReminder>,
-    pub system_prompt: SystemPromptSpec,
+    pub invocation_reminders: Vec<InvocationReminderData>,
+    pub system_prompt: SystemPromptSpecData,
     pub model_id: String,
     pub effective_reasoning: ReasoningLevel,
     pub language: Language,
@@ -308,13 +305,13 @@ impl From<Vec<ContextMessage>> for ContextMessages {
 
 /// Context window 及同一冻结输入上计算的压缩决策。
 #[derive(Debug, Clone)]
-pub struct ContextWindow {
+pub struct ContextWindowData {
     pub backing_revision: SessionRevision,
     pub system_blocks: Vec<SystemBlock>,
     pub messages: ContextMessages,
     pub tool_schemas: Vec<ModelToolSchemaData>,
     pub token_estimation: TokenBudget,
-    pub compaction_decision: CompactionDecision,
+    pub compaction_decision: CompactionDecisionData,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -339,7 +336,7 @@ pub enum DecisionReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompactionDecision {
+pub struct CompactionDecisionData {
     pub needed: bool,
     pub urgency: Urgency,
     /// Token count used for the decision — either provider-reported actual usage
@@ -359,24 +356,24 @@ pub enum CompactTrigger {
 }
 
 #[derive(Clone)]
-pub struct CompactRequest {
+pub struct CompactRequestData {
     pub run_id: RunId,
     pub source_revision: SessionRevision,
-    pub source: ContextRequest,
+    pub source: ContextRequestData,
     pub trigger: CompactTrigger,
     /// 压缩进度回调（#1500）：Preparing/Summarizing/Finalizing 阶段与
     /// map-reduce chunk 计数实时上报；`None` 表示调用方不关心进度。
     pub progress: Option<Arc<dyn CompactProgressFn>>,
     /// 当前 typed TaskData 快照：参与 Rust-owned checkpoint 协调，并由同一快照
     /// 确定性渲染非权威 `Current TaskData State` companion。
-    pub task_snapshot: Option<crate::domain::compact::CompactTaskSnapshot>,
+    pub task_snapshot: Option<crate::domain::compact::CompactTaskSnapshotData>,
     /// 当前 Run 的取消信号。摘要生成必须合作式消费；取消后不得提交 fallback。
     pub cancellation: tokio_util::sync::CancellationToken,
 }
 
-impl std::fmt::Debug for CompactRequest {
+impl std::fmt::Debug for CompactRequestData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CompactRequest")
+        f.debug_struct("CompactRequestData")
             .field("run_id", &self.run_id)
             .field("source_revision", &self.source_revision)
             .field("source", &self.source)
@@ -398,20 +395,20 @@ impl std::fmt::Debug for CompactRequest {
 }
 
 #[derive(Clone)]
-pub struct ManualCompactRequest {
+pub struct ManualCompactRequestData {
     pub session_id: SessionId,
     pub run_id: RunId,
-    pub system_prompt: SystemPromptSpec,
+    pub system_prompt: SystemPromptSpecData,
     pub context_size: usize,
-    /// 压缩进度回调（#1500），语义同 [`CompactRequest::progress`]。
+    /// 压缩进度回调（#1500），语义同 [`CompactRequestData::progress`]。
     pub progress: Option<Arc<dyn CompactProgressFn>>,
-    /// 当前 typed TaskData 快照，语义同 [`CompactRequest::task_snapshot`]。
-    pub task_snapshot: Option<crate::domain::compact::CompactTaskSnapshot>,
+    /// 当前 typed TaskData 快照，语义同 [`CompactRequestData::task_snapshot`]。
+    pub task_snapshot: Option<crate::domain::compact::CompactTaskSnapshotData>,
 }
 
-impl std::fmt::Debug for ManualCompactRequest {
+impl std::fmt::Debug for ManualCompactRequestData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ManualCompactRequest")
+        f.debug_struct("ManualCompactRequestData")
             .field("session_id", &self.session_id)
             .field("run_id", &self.run_id)
             .field("system_prompt", &self.system_prompt)
@@ -432,7 +429,7 @@ impl std::fmt::Debug for ManualCompactRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompactGenerationOutput {
+pub struct CompactGenerationOutputData {
     text: String,
     completion_reason: Option<String>,
     text_delta_count: usize,
@@ -440,7 +437,7 @@ pub struct CompactGenerationOutput {
     completed: bool,
 }
 
-impl CompactGenerationOutput {
+impl CompactGenerationOutputData {
     pub fn completed(
         text: impl Into<String>,
         completion_reason: Option<impl Into<String>>,
@@ -481,13 +478,13 @@ impl CompactGenerationOutput {
     }
 }
 
-impl From<String> for CompactGenerationOutput {
+impl From<String> for CompactGenerationOutputData {
     fn from(text: String) -> Self {
         Self::completed(text, None::<String>, 0, 0)
     }
 }
 
-impl From<&str> for CompactGenerationOutput {
+impl From<&str> for CompactGenerationOutputData {
     fn from(text: &str) -> Self {
         Self::completed(text, None::<String>, 0, 0)
     }
@@ -504,12 +501,12 @@ pub enum CompactGenerationFailureKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompactGenerationFailure {
+pub struct CompactGenerationFailureData {
     pub kind: CompactGenerationFailureKind,
     pub message: String,
 }
 
-impl CompactGenerationFailure {
+impl CompactGenerationFailureData {
     pub fn new(kind: CompactGenerationFailureKind, message: impl Into<String>) -> Self {
         Self {
             kind,
@@ -566,7 +563,7 @@ pub enum FinalizeCause {
 
 /// Tool/Agent 调用已经收敛的稳定结果种类。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ToolOutcomeKind {
+pub enum ToolOutcomeKindData {
     Success,
     Failure,
     Denied,
@@ -578,10 +575,10 @@ pub enum ToolOutcomeKind {
 
 /// finalized Step 中可确定重放的 Tool/Agent receipt。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StepReceipt {
+pub struct StepReceiptData {
     call_id: String,
     index: usize,
-    outcome: ToolOutcomeKind,
+    outcome: ToolOutcomeKindData,
     agent: bool,
     summary: Option<String>,
     artifact_refs: Vec<String>,
@@ -589,19 +586,19 @@ pub struct StepReceipt {
     unfinished_call_ids: Vec<String>,
 }
 
-impl StepReceipt {
-    pub fn tool(call_id: impl Into<String>, index: usize, outcome: ToolOutcomeKind) -> Self {
+impl StepReceiptData {
+    pub fn tool(call_id: impl Into<String>, index: usize, outcome: ToolOutcomeKindData) -> Self {
         Self::new(call_id, index, outcome, false)
     }
 
-    pub fn agent(call_id: impl Into<String>, index: usize, outcome: ToolOutcomeKind) -> Self {
+    pub fn agent(call_id: impl Into<String>, index: usize, outcome: ToolOutcomeKindData) -> Self {
         Self::new(call_id, index, outcome, true)
     }
 
     fn new(
         call_id: impl Into<String>,
         index: usize,
-        outcome: ToolOutcomeKind,
+        outcome: ToolOutcomeKindData,
         agent: bool,
     ) -> Self {
         Self {
@@ -644,7 +641,7 @@ impl StepReceipt {
         self.index
     }
 
-    pub const fn outcome(&self) -> ToolOutcomeKind {
+    pub const fn outcome(&self) -> ToolOutcomeKindData {
         self.outcome
     }
 
@@ -671,7 +668,7 @@ impl StepReceipt {
 
 /// 已绑定到 RunStep 的不可变 user 输入提交载荷。
 #[derive(Debug, Clone)]
-pub struct AcceptedInputAppend {
+pub struct AcceptedInputAppendData {
     pub session_id: SessionId,
     pub run_id: RunId,
     pub step_id: RunStepId,
@@ -682,7 +679,7 @@ pub struct AcceptedInputAppend {
 
 /// accepted input durable commit 的确定性回执。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AcceptedInputReceipt {
+pub struct AcceptedInputReceiptData {
     pub run_id: RunId,
     pub step_id: RunStepId,
     pub committed_revision: SessionRevision,
@@ -702,7 +699,7 @@ pub enum AcceptedInputError {
 
 /// 单个 finalized RunStep 的不可变提交载荷。
 #[derive(Debug, Clone)]
-pub struct ContextAppend {
+pub struct ContextAppendData {
     pub session_id: SessionId,
     pub expected_revision: SessionRevision,
     pub run_id: RunId,
@@ -711,14 +708,14 @@ pub struct ContextAppend {
     pub finalize_cause: FinalizeCause,
     pub duration_ms: Option<u64>,
     pub messages: Vec<ContextMessage>,
-    pub receipts: Vec<StepReceipt>,
+    pub receipts: Vec<StepReceiptData>,
     pub api_input_tokens: Option<u64>,
     pub fingerprint: ContentFingerprint,
 }
 
 /// append durable commit 的确定性回执。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AppendReceipt {
+pub struct AppendReceiptData {
     pub run_id: RunId,
     pub step_id: RunStepId,
     pub committed_revision: SessionRevision,
@@ -741,9 +738,10 @@ pub enum ContextAppendError {
 }
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
-pub enum PromptMaterializationError {
-    #[error("Skill supplier materialization failed: {0}")]
-    SkillSupplier(tools::published::skill::SkillError),
+pub(crate) enum PromptMaterializationError {
+    /// 集成测试构造用（基线块失败注入）。
+    #[cfg(test)]
+    #[cfg(test)]
     #[error("Baseline prompt block failure: {0}")]
     Baseline(String),
 }

@@ -7,7 +7,7 @@ use crate::application::loop_engine::PendingInteractionWork;
 
 use tools::published::agent::AgentRunTerminal;
 
-use crate::ports::{ContextRequest, ContextWindow};
+use crate::ports::{ContextRequestData, ContextWindowData};
 
 pub(crate) struct ActiveInteractionReceiver {
     pub(crate) metadata: InteractionRequestMetadata,
@@ -25,8 +25,8 @@ pub struct RunExecutionState {
     pending_step_messages: Vec<Message>,
     active_step_messages: Vec<Message>,
     step_outcome: Vec<Message>,
-    context_request: Option<ContextRequest>,
-    context_window: Option<ContextWindow>,
+    context_request: Option<ContextRequestData>,
+    context_window: Option<ContextWindowData>,
     step_count: usize,
     started_at: Option<Instant>,
     step_started_at: Option<Instant>,
@@ -168,22 +168,22 @@ impl RunExecutionState {
         self.active_step_messages.len()
     }
 
-    pub(crate) fn context_request(&self) -> Option<&ContextRequest> {
+    pub(crate) fn context_request(&self) -> Option<&ContextRequestData> {
         self.context_request.as_ref()
     }
 
-    pub(crate) fn context_window(&self) -> Option<&ContextWindow> {
+    pub(crate) fn context_window(&self) -> Option<&ContextWindowData> {
         self.context_window.as_ref()
     }
 
-    pub(crate) fn context_window_mut(&mut self) -> &mut Option<ContextWindow> {
+    pub(crate) fn context_window_mut(&mut self) -> &mut Option<ContextWindowData> {
         &mut self.context_window
     }
 
     pub(crate) fn replace_context_state(
         &mut self,
-        request: ContextRequest,
-        window: Option<ContextWindow>,
+        request: ContextRequestData,
+        window: Option<ContextWindowData>,
     ) {
         self.context_request = Some(request);
         self.context_window = window;

@@ -7,19 +7,19 @@ use share::message::Message;
 use share::reasoning::ReasoningLevel;
 
 use super::{
-    context_decision, ContextRequest, ContextRequestId, DecisionReason, Language, SessionId,
-    SystemPromptSpec,
+    context_decision, ContextRequestData, ContextRequestId, DecisionReason, Language, SessionId,
+    SystemPromptSpecData,
 };
 
-fn request(last_api_total_tokens: Option<u64>) -> ContextRequest {
-    ContextRequest {
+fn request(last_api_total_tokens: Option<u64>) -> ContextRequestData {
+    ContextRequestData {
         session_id: SessionId::new("session"),
         request_id: ContextRequestId::new("request"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("pending")],
         invocation_reminders: vec![],
-        system_prompt: SystemPromptSpec::new("system"),
+        system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
         language: Language::new("zh"),
@@ -116,7 +116,7 @@ fn heuristic_estimate_with_realistic_mix_no_longer_triggers_at_43_percent() {
         .map(|_| serde_json::from_str(tool_schema_json).unwrap())
         .collect();
 
-    let candidate = ContextRequest {
+    let candidate = ContextRequestData {
         context_size,
         max_output_tokens,
         last_api_total_tokens: None,

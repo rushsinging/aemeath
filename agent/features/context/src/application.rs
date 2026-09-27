@@ -14,6 +14,5 @@ pub use main_session::{
     wire_main_session, MainSessionDependencies, MainSessionWiring, MainSessionWiringBuilder,
     OwnedSessionSharedPermit,
 };
-pub(crate) use main_session::{BoundMainRun, MainSessionError, SessionSwitchGate};
 pub(crate) use service::ContextApplicationService;
 pub(crate) use session_persistence::{SessionLoadError, SessionPersistenceService};

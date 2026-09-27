@@ -14,18 +14,22 @@ use crate::ports::CompactOutcome;
 pub(crate) struct CompactProgressAdapter(pub(crate) std::sync::Arc<dyn CompactProgressView>);
 
 impl context::compact::CompactProgressFn for CompactProgressAdapter {
-    fn emit(&self, stage: context::compact::CompactStage, work: context::compact::CompactWork) {
+    fn emit(
+        &self,
+        stage: context::compact::CompactStageData,
+        work: context::compact::CompactWorkData,
+    ) {
         let view_stage = match stage {
-            context::compact::CompactStage::Preparing => sdk::CompactStageView::Preparing,
-            context::compact::CompactStage::Generating => sdk::CompactStageView::Generating,
-            context::compact::CompactStage::Mapping => sdk::CompactStageView::Mapping,
-            context::compact::CompactStage::Reducing => sdk::CompactStageView::Reducing,
-            context::compact::CompactStage::Refreshing => sdk::CompactStageView::Refreshing,
-            context::compact::CompactStage::Finalizing => sdk::CompactStageView::Finalizing,
+            context::compact::CompactStageData::Preparing => sdk::CompactStageView::Preparing,
+            context::compact::CompactStageData::Generating => sdk::CompactStageView::Generating,
+            context::compact::CompactStageData::Mapping => sdk::CompactStageView::Mapping,
+            context::compact::CompactStageData::Reducing => sdk::CompactStageView::Reducing,
+            context::compact::CompactStageData::Refreshing => sdk::CompactStageView::Refreshing,
+            context::compact::CompactStageData::Finalizing => sdk::CompactStageView::Finalizing,
         };
         let view_work = match work {
-            context::compact::CompactWork::Indeterminate => sdk::CompactWorkView::Indeterminate,
-            context::compact::CompactWork::Determinate { completed, total } => {
+            context::compact::CompactWorkData::Indeterminate => sdk::CompactWorkView::Indeterminate,
+            context::compact::CompactWorkData::Determinate { completed, total } => {
                 let (Ok(completed), Ok(total)) = (u32::try_from(completed), u32::try_from(total))
                 else {
                     return;
@@ -78,7 +82,7 @@ impl CompactionCoordinator {
     ) -> Result<bool, LoopEngineError> {
         let request = execution
             .context_request()
-            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
+            .ok_or_else(|| LoopEngineError::Adapter("ContextRequestData 尚未冻结".to_string()))?;
         let window = self
             .context
             .build_window(request)
@@ -108,7 +112,7 @@ impl CompactionCoordinator {
         execution: &mut RunExecutionState,
         observer: &mut O,
         progress: std::sync::Arc<dyn CompactProgressView>,
-        task_snapshot: Option<context::compact::CompactTaskSnapshot>,
+        task_snapshot: Option<context::compact::CompactTaskSnapshotData>,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<(), LoopEngineError>
     where
@@ -124,11 +128,11 @@ impl CompactionCoordinator {
                     ),
                 )
             })
-            .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
+            .ok_or_else(|| LoopEngineError::Adapter("ContextWindowData 尚未构建".to_string()))?;
         let request = execution
             .context_request()
             .cloned()
-            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
+            .ok_or_else(|| LoopEngineError::Adapter("ContextRequestData 尚未冻结".to_string()))?;
         let outcome = self
             .context
             .compact(

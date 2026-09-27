@@ -2,10 +2,11 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use crate::SessionRepository;
 use crate::{
-    AcceptedInputAppend, AcceptedInputError, CompactRequest, CompactTrigger, ContentFingerprint,
-    ContextAppend, ContextAppendError, ContextRequest, ContextRequestId, FinalizeCause, Language,
-    ManualCompactRequest, RunStepId, SessionId, SessionRevision, SystemPromptSpec,
-    ToolCallIdentity, ToolCallState, ToolReceiptMutation,
+    AcceptedInputAppendData, AcceptedInputError, CompactRequestData, CompactTrigger,
+    ContentFingerprint, ContextAppendData, ContextAppendError, ContextRequestData,
+    ContextRequestId, FinalizeCause, Language, ManualCompactRequestData, RunStepId, SessionId,
+    SessionRevision, SystemPromptSpecData, ToolCallIdentityData, ToolCallState,
+    ToolReceiptMutationData,
 };
 use crate::{
     AcceptedInputRecord, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
@@ -89,7 +90,7 @@ impl CanonicalSessionWriter for RecordingWriter {
 
 #[derive(Default)]
 struct RecordingToolReceiptWriter {
-    saved: Mutex<Vec<crate::ToolCallReceipt>>,
+    saved: Mutex<Vec<crate::ToolCallReceiptData>>,
     fail: bool,
 }
 
@@ -99,7 +100,7 @@ impl crate::ToolReceiptWriter for RecordingToolReceiptWriter {
         &self,
         _session_id: &str,
         _revision: u64,
-        receipt: &crate::ToolCallReceipt,
+        receipt: &crate::ToolCallReceiptData,
     ) -> Result<(), String> {
         if self.fail {
             return Err("receipt disk full".to_string());
@@ -209,8 +210,8 @@ fn workspace() -> PersistedWorkspaceContext {
     }
 }
 
-fn append(fingerprint: &str) -> ContextAppend {
-    ContextAppend {
+fn append(fingerprint: &str) -> ContextAppendData {
+    ContextAppendData {
         session_id: SessionId::new("session"),
         expected_revision: SessionRevision::new(0),
         run_id: RunId::new("run"),
@@ -225,8 +226,8 @@ fn append(fingerprint: &str) -> ContextAppend {
     }
 }
 
-fn tool_identity() -> ToolCallIdentity {
-    ToolCallIdentity {
+fn tool_identity() -> ToolCallIdentityData {
+    ToolCallIdentityData {
         session_id: SessionId::new("session"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
@@ -238,8 +239,8 @@ fn tool_identity() -> ToolCallIdentity {
     }
 }
 
-fn accepted_input(fingerprint: &str) -> AcceptedInputAppend {
-    AcceptedInputAppend {
+fn accepted_input(fingerprint: &str) -> AcceptedInputAppendData {
+    AcceptedInputAppendData {
         session_id: SessionId::new("session"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
@@ -280,15 +281,15 @@ fn valid_fact_batch(objective: &str) -> String {
     .to_string()
 }
 
-fn compact_request(session_id: SessionId) -> ContextRequest {
-    ContextRequest {
+fn compact_request(session_id: SessionId) -> ContextRequestData {
+    ContextRequestData {
         session_id,
         request_id: ContextRequestId::new("request"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![],
         invocation_reminders: vec![],
-        system_prompt: SystemPromptSpec::new("system"),
+        system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
         language: Language::new("zh"),
@@ -415,7 +416,7 @@ async fn compact(repository: &CanonicalSessionRepository, session_id: SessionId,
     let mut request = compact_request(session_id);
     request.context_size = 100_000;
     let outcome = repository
-        .commit_compaction(&CompactRequest {
+        .commit_compaction(&CompactRequestData {
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(revision),
             source: request,
@@ -575,7 +576,7 @@ async fn compaction_clears_skill_load_records() {
     source.context_size = 100_000;
     assert!(matches!(
         repository
-            .commit_compaction(&CompactRequest {
+            .commit_compaction(&CompactRequestData {
                 run_id: RunId::new("run"),
                 source_revision: SessionRevision::new(1),
                 source,
@@ -911,7 +912,7 @@ async fn compaction_changes_visibility_without_dropping_persisted_structure() {
     let mut request = compact_request(session_id);
     request.context_size = 100_000;
     let (result, lifecycle) =
-        crate::capture_session_lifecycle(repository.commit_compaction(&CompactRequest {
+        crate::capture_session_lifecycle(repository.commit_compaction(&CompactRequestData {
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,
@@ -1136,10 +1137,10 @@ async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
     finalized.expected_revision = SessionRevision::new(1);
     finalized.finalize_cause = FinalizeCause::UserCancelledStep;
     finalized.api_input_tokens = Some(42);
-    finalized.receipts = vec![crate::StepReceipt::agent(
+    finalized.receipts = vec![crate::StepReceiptData::agent(
         "agent-call",
         0,
-        crate::ToolOutcomeKind::CancellationUnconfirmed,
+        crate::ToolOutcomeKindData::CancellationUnconfirmed,
     )];
     let receipt = repository.append_finalized(&finalized).await.unwrap();
 
@@ -1159,7 +1160,7 @@ async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
     assert_eq!(outcome.api_input_tokens, Some(42));
     assert_eq!(
         outcome.receipts[0].outcome(),
-        crate::ToolOutcomeKind::CancellationUnconfirmed
+        crate::ToolOutcomeKindData::CancellationUnconfirmed
     );
     assert_eq!(outcome.fingerprint, "outcome-v1");
     assert_eq!(outcome.committed_revision, receipt.committed_revision.get());
@@ -1268,7 +1269,7 @@ async fn snapshot_after_compact_shares_only_visible_step_backing() {
 }
 
 #[tokio::test]
-async fn snapshot_reads_structured_projection_not_legacy_chats() {
+async fn snapshot_reads_structured_view_not_legacy_chats() {
     let writer = Arc::new(RecordingWriter::default());
     let mut legacy = ChatSegment::normal(None);
     legacy.messages = vec![Message::user("legacy-only")];
@@ -1443,7 +1444,7 @@ async fn advance_tool_receipt_persists_before_publish_and_is_idempotent() {
     let receipt_writer = Arc::new(RecordingToolReceiptWriter::default());
     let (repository, holder) =
         repository_with_receipt_writer(writer.clone(), receipt_writer.clone());
-    let mutation = ToolReceiptMutation::pending(tool_identity(), "safe preview");
+    let mutation = ToolReceiptMutationData::pending(tool_identity(), "safe preview");
 
     let first = repository
         .advance_tool_receipt(mutation.clone())
@@ -1476,7 +1477,7 @@ async fn advance_tool_receipt_write_failure_does_not_publish_candidate() {
 
     assert!(matches!(
         repository
-            .advance_tool_receipt(ToolReceiptMutation::pending(tool_identity(), "safe preview"))
+            .advance_tool_receipt(ToolReceiptMutationData::pending(tool_identity(), "safe preview"))
             .await,
         Err(crate::ToolReceiptMutationError::Storage(message)) if message == "receipt disk full"
     ));
@@ -1551,12 +1552,13 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<crate::CompactGenerationOutput, crate::CompactGenerationFailure> {
+        ) -> Result<crate::CompactGenerationOutputData, crate::CompactGenerationFailureData>
+        {
             if let Some(started) = self.started.lock().unwrap().take() {
                 let _ = started.send(());
             }
             self.release.lock().await.recv().await;
-            Ok(crate::CompactGenerationOutput::from(valid_fact_batch(
+            Ok(crate::CompactGenerationOutputData::from(valid_fact_batch(
                 "generated",
             )))
         }
@@ -1578,7 +1580,7 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
         let repository = Arc::clone(&repository);
         tokio::spawn(async move {
             repository
-                .commit_compaction(&CompactRequest {
+                .commit_compaction(&CompactRequestData {
                     run_id: request.run_id.clone(),
                     source_revision: SessionRevision::new(0),
                     source: request,
@@ -1626,7 +1628,7 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
 #[tokio::test]
 async fn cancelled_compaction_does_not_commit_local_fallback() {
     use crate::compact::CompactGenerator;
-    use crate::{CompactGenerationFailure, CompactGenerationFailureKind};
+    use crate::{CompactGenerationFailureData, CompactGenerationFailureKind};
     use tokio_util::sync::CancellationToken;
 
     struct CancelledGenerator;
@@ -1637,9 +1639,9 @@ async fn cancelled_compaction_does_not_commit_local_fallback() {
             &self,
             _request: Vec<Message>,
             cancel: &CancellationToken,
-        ) -> Result<crate::CompactGenerationOutput, CompactGenerationFailure> {
+        ) -> Result<crate::CompactGenerationOutputData, CompactGenerationFailureData> {
             assert!(cancel.is_cancelled());
-            Err(CompactGenerationFailure::new(
+            Err(CompactGenerationFailureData::new(
                 CompactGenerationFailureKind::Cancelled,
                 "cancelled",
             ))
@@ -1656,7 +1658,7 @@ async fn cancelled_compaction_does_not_commit_local_fallback() {
     let request = compact_request(session_id);
 
     let outcome = repository
-        .commit_compaction(&CompactRequest {
+        .commit_compaction(&CompactRequestData {
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,
@@ -1680,7 +1682,7 @@ async fn cancelled_compaction_does_not_commit_local_fallback() {
 #[tokio::test]
 async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
     use crate::compact::CompactGenerator;
-    use crate::{CompactGenerationFailure, CompactGenerationFailureKind};
+    use crate::{CompactGenerationFailureData, CompactGenerationFailureKind};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio_util::sync::CancellationToken;
 
@@ -1694,9 +1696,9 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<crate::CompactGenerationOutput, CompactGenerationFailure> {
+        ) -> Result<crate::CompactGenerationOutputData, CompactGenerationFailureData> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Err(CompactGenerationFailure::new(
+            Err(CompactGenerationFailureData::new(
                 CompactGenerationFailureKind::Provider,
                 "provider failed",
             ))
@@ -1738,7 +1740,7 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
 
     for _ in 0..2 {
         assert!(repository
-            .commit_compaction(&CompactRequest {
+            .commit_compaction(&CompactRequestData {
                 run_id: request.run_id.clone(),
                 source_revision: SessionRevision::new(0),
                 source: request.clone(),
@@ -1751,7 +1753,7 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
             .is_err());
     }
     let outcome = repository
-        .commit_compaction(&CompactRequest {
+        .commit_compaction(&CompactRequestData {
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,
@@ -1773,7 +1775,7 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
 #[tokio::test]
 async fn manual_compact_bypasses_automatic_circuit_breaker() {
     use crate::compact::CompactGenerator;
-    use crate::{CompactGenerationFailure, CompactGenerationFailureKind};
+    use crate::{CompactGenerationFailureData, CompactGenerationFailureKind};
     use tokio_util::sync::CancellationToken;
 
     struct SwitchableGenerator {
@@ -1786,14 +1788,14 @@ async fn manual_compact_bypasses_automatic_circuit_breaker() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<crate::CompactGenerationOutput, CompactGenerationFailure> {
+        ) -> Result<crate::CompactGenerationOutputData, CompactGenerationFailureData> {
             if self.should_fail.load(std::sync::atomic::Ordering::SeqCst) {
-                Err(CompactGenerationFailure::new(
+                Err(CompactGenerationFailureData::new(
                     CompactGenerationFailureKind::Provider,
                     "provider failed",
                 ))
             } else {
-                Ok(crate::CompactGenerationOutput::from(valid_fact_batch(
+                Ok(crate::CompactGenerationOutputData::from(valid_fact_batch(
                     "manual",
                 )))
             }
@@ -1831,7 +1833,7 @@ async fn manual_compact_bypasses_automatic_circuit_breaker() {
         },
         ..Config::default()
     }));
-    let automatic = CompactRequest {
+    let automatic = CompactRequestData {
         run_id: automatic_source.run_id.clone(),
         source_revision: SessionRevision::new(99),
         source: automatic_source,
@@ -1844,10 +1846,10 @@ async fn manual_compact_bypasses_automatic_circuit_breaker() {
     should_fail.store(false, std::sync::atomic::Ordering::SeqCst);
 
     let outcome = repository
-        .commit_manual_compaction(&ManualCompactRequest {
+        .commit_manual_compaction(&ManualCompactRequestData {
             session_id,
             run_id: RunId::new("manual-run"),
-            system_prompt: SystemPromptSpec::new("system"),
+            system_prompt: SystemPromptSpecData::new("system"),
             context_size: 200_000,
             progress: None,
             task_snapshot: None,
@@ -1873,7 +1875,7 @@ async fn automatic_compaction_executes_after_actual_token_decision() {
     request.last_api_total_tokens = Some(900_000);
 
     let outcome = repository
-        .commit_compaction(&CompactRequest {
+        .commit_compaction(&CompactRequestData {
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,
@@ -1895,10 +1897,10 @@ async fn manual_compaction_bypasses_automatic_threshold() {
     let (repository, _) = repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
 
     let outcome = repository
-        .commit_manual_compaction(&ManualCompactRequest {
+        .commit_manual_compaction(&ManualCompactRequestData {
             session_id,
             run_id: RunId::new("manual-run"),
-            system_prompt: SystemPromptSpec::new("system"),
+            system_prompt: SystemPromptSpecData::new("system"),
             context_size: 1_000_000,
             progress: None,
             task_snapshot: None,
@@ -1993,7 +1995,7 @@ async fn compaction_rejects_stale_source_revision() {
     let request = compact_request(session_id);
 
     let result = repository
-        .commit_compaction(&CompactRequest {
+        .commit_compaction(&CompactRequestData {
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(1),
             source: request,
@@ -2063,8 +2065,9 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<crate::CompactGenerationOutput, crate::CompactGenerationFailure> {
-            Ok(crate::CompactGenerationOutput::from(valid_fact_batch(
+        ) -> Result<crate::CompactGenerationOutputData, crate::CompactGenerationFailureData>
+        {
+            Ok(crate::CompactGenerationOutputData::from(valid_fact_batch(
                 self.0,
             )))
         }
@@ -2080,7 +2083,7 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
     let mut generated_request = compact_request(session_id.clone());
     generated_request.context_size = 100_000;
     let outcome = repository_under_test
-        .commit_compaction(&CompactRequest {
+        .commit_compaction(&CompactRequestData {
             run_id: generated_request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: generated_request,
@@ -2128,17 +2131,17 @@ async fn commit_compaction_reconciles_typed_task_snapshot_and_companion() {
     let mut request = compact_request(session_id.clone());
     request.context_size = 100_000;
     let outcome = base_repository
-        .commit_compaction(&crate::CompactRequest {
+        .commit_compaction(&crate::CompactRequestData {
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,
             trigger: crate::CompactTrigger::Automatic,
             progress: None,
-            task_snapshot: Some(crate::compact::CompactTaskSnapshot::active(
+            task_snapshot: Some(crate::compact::CompactTaskSnapshotData::active(
                 1,
                 1,
                 "实现压缩拼接",
-                vec![crate::compact::CompactTaskItem::in_progress(
+                vec![crate::compact::CompactTaskItemData::in_progress(
                     1,
                     "实现压缩拼接",
                 )],
@@ -2171,12 +2174,12 @@ async fn commit_compaction_keeps_large_task_companion_within_summary_budget() {
         repository_with_session(writer.clone(), ten_step_session(&session_id, vec![], 0));
     let mut request = compact_request(session_id.clone());
     request.context_size = 100_000;
-    let task_items = std::iter::once(crate::compact::CompactTaskItem::in_progress(
+    let task_items = std::iter::once(crate::compact::CompactTaskItemData::in_progress(
         1,
         "实现压缩预算闭环",
     ))
     .chain((2..=30).map(|sequence| {
-        crate::compact::CompactTaskItem::pending(
+        crate::compact::CompactTaskItemData::pending(
             sequence,
             format!("任务 {sequence}: {}", "需要保留的详细恢复信息 ".repeat(80)),
             Vec::new(),
@@ -2185,13 +2188,13 @@ async fn commit_compaction_keeps_large_task_companion_within_summary_budget() {
     .collect();
 
     let outcome = base_repository
-        .commit_compaction(&crate::CompactRequest {
+        .commit_compaction(&crate::CompactRequestData {
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,
             trigger: crate::CompactTrigger::Automatic,
             progress: None,
-            task_snapshot: Some(crate::compact::CompactTaskSnapshot::active(
+            task_snapshot: Some(crate::compact::CompactTaskSnapshotData::active(
                 1,
                 1,
                 "实现压缩预算闭环",

@@ -15,7 +15,7 @@ fn unfinished_tool_session_with_outcome(
     has_outcome: bool,
     input_preview: &str,
 ) -> CanonicalSession {
-    let identity = crate::domain::ToolCallIdentity {
+    let identity = crate::domain::ToolCallIdentityData {
         session_id: crate::domain::SessionId::new("session"),
         run_id: sdk::RunId::new("run-1"),
         step_id: sdk::RunStepId::new("step-1"),
@@ -25,10 +25,10 @@ fn unfinished_tool_session_with_outcome(
         call_index: 0,
         agent: false,
     };
-    let mut receipt = crate::domain::ToolCallReceipt::pending(identity.clone(), input_preview);
+    let mut receipt = crate::domain::ToolCallReceiptData::pending(identity.clone(), input_preview);
     if state == crate::domain::ToolCallState::Running {
         receipt = receipt
-            .advance(crate::domain::ToolReceiptMutation::running(identity))
+            .advance(crate::domain::ToolReceiptMutationData::running(identity))
             .unwrap()
             .receipt;
     }

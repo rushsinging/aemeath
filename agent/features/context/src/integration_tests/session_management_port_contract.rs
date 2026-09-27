@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::decode_session;
 use crate::SessionManagementPort;
 use crate::{CanonicalSession, SessionCodec, SnapshotState};
-use crate::{SessionId, ToolCallIdentity};
+use crate::{SessionId, ToolCallIdentityData};
 use share::session_types::{
     PersistedWorkspaceContext, ProjectIdentityData, WorkspaceId, WorktreeKind,
 };
@@ -48,7 +48,7 @@ async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
     )
     .await
     .expect("persist session");
-    let identity = ToolCallIdentity {
+    let identity = ToolCallIdentityData {
         session_id: session_id.clone(),
         run_id: sdk::RunId::new("run"),
         step_id: crate::RunStepId::new("step"),
@@ -58,7 +58,7 @@ async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
         call_index: 0,
         agent: false,
     };
-    let receipt = crate::ToolCallReceipt::pending(identity, "safe preview");
+    let receipt = crate::ToolCallReceiptData::pending(identity, "safe preview");
     writer
         .save_tool_receipt(session_id.as_str(), 1, &receipt)
         .await
@@ -144,7 +144,7 @@ async fn session_management_filters_and_loads_only_matching_project_identity() {
         port.update_metadata_for_project(
             "project-b",
             &same_git_other_worktree,
-            crate::SessionMetadataUpdate {
+            crate::SessionMetadataUpdateData {
                 title: Some("forbidden".to_string()),
                 ..Default::default()
             },
@@ -245,7 +245,7 @@ async fn session_management_imports_exports_updates_and_deletes_through_injected
         .update_metadata_for_project(
             "session-lifecycle",
             &project,
-            crate::SessionMetadataUpdate {
+            crate::SessionMetadataUpdateData {
                 title: Some("renamed".to_string()),
                 ..Default::default()
             },

@@ -481,13 +481,13 @@ pub(super) fn freeze_step<P>(
 
 #[derive(Debug, Clone)]
 pub struct StepCommit {
-    pub request: Option<crate::ports::ContextRequest>,
+    pub request: Option<crate::ports::ContextRequestData>,
     pub step_id: sdk::RunStepId,
     pub expected_revision: Option<crate::ports::SessionRevision>,
     pub cause: crate::ports::FinalizeCause,
     pub duration_ms: Option<u64>,
     pub messages: Vec<share::message::Message>,
-    pub receipts: Vec<crate::ports::StepReceipt>,
+    pub receipts: Vec<crate::ports::StepReceiptData>,
 }
 
 pub(super) fn prepare_step_commit(
@@ -540,7 +540,7 @@ pub trait StepPersistencePort: Send {
         _execution: &RunExecutionState,
         _run_id: &sdk::RunId,
         _step_id: &sdk::RunStepId,
-    ) -> Option<crate::ports::ContextRequest> {
+    ) -> Option<crate::ports::ContextRequestData> {
         None
     }
     async fn accept_step_input(
@@ -552,8 +552,8 @@ pub trait StepPersistencePort: Send {
     }
     async fn load_step_receipts(
         &mut self,
-        _request: &crate::ports::ContextRequest,
-    ) -> Result<Vec<crate::ports::StepReceipt>, LoopEngineError> {
+        _request: &crate::ports::ContextRequestData,
+    ) -> Result<Vec<crate::ports::StepReceiptData>, LoopEngineError> {
         Ok(Vec::new())
     }
     async fn persist_step_commit(&mut self, _commit: &StepCommit) -> Result<(), LoopEngineError> {

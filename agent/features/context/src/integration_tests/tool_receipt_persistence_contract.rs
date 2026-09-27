@@ -1,11 +1,11 @@
 use crate::{
-    CleanupConfirmation, SessionId, ToolCallIdentity, ToolCallReceipt, ToolCallState,
-    ToolOutcomeKind, ToolReceiptMutation, ToolTerminalReceipt,
+    CleanupConfirmation, SessionId, ToolCallIdentityData, ToolCallReceiptData, ToolCallState,
+    ToolOutcomeKindData, ToolReceiptMutationData, ToolTerminalReceiptData,
 };
 use sdk::{RunId, RunStepId};
 
-fn identity() -> ToolCallIdentity {
-    ToolCallIdentity {
+fn identity() -> ToolCallIdentityData {
+    ToolCallIdentityData {
         session_id: SessionId::new("session"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
@@ -19,22 +19,22 @@ fn identity() -> ToolCallIdentity {
 
 #[test]
 fn tool_receipt_wire_round_trips_running_and_terminal_details() {
-    let running = ToolCallReceipt {
+    let running = ToolCallReceiptData {
         identity: identity(),
         input_preview: "{\"pattern\":\"**/archify.mjs\"}".to_string(),
         state: ToolCallState::Running,
     };
     let encoded = serde_json::to_vec(&running).unwrap();
     assert_eq!(
-        serde_json::from_slice::<ToolCallReceipt>(&encoded).unwrap(),
+        serde_json::from_slice::<ToolCallReceiptData>(&encoded).unwrap(),
         running
     );
 
     let terminal = running
-        .advance(ToolReceiptMutation::terminal(
+        .advance(ToolReceiptMutationData::terminal(
             identity(),
-            ToolTerminalReceipt::new(
-                ToolOutcomeKind::CancellationUnconfirmed,
+            ToolTerminalReceiptData::new(
+                ToolOutcomeKindData::CancellationUnconfirmed,
                 "cleanup not confirmed",
                 CleanupConfirmation::Unconfirmed,
             )
@@ -45,7 +45,7 @@ fn tool_receipt_wire_round_trips_running_and_terminal_details() {
         .receipt;
     let encoded = serde_json::to_vec(&terminal).unwrap();
     assert_eq!(
-        serde_json::from_slice::<ToolCallReceipt>(&encoded).unwrap(),
+        serde_json::from_slice::<ToolCallReceiptData>(&encoded).unwrap(),
         terminal
     );
 }

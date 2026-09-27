@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::ContextRequest;
+use crate::ContextRequestData;
 use crate::{ContextPromptSource, SkillQueryFactory};
 use crate::{SkillPromptSource, WorkspaceSkillQueryFactory};
 use share::config::domain::snapshot::ConfigSnapshot;
@@ -23,7 +23,7 @@ impl SkillCatalogPort for FakeCatalog {
 
 struct FixedQueryFactory;
 impl SkillQueryFactory for FixedQueryFactory {
-    fn query(&self, _request: &ContextRequest) -> SkillQuery {
+    fn query(&self, _request: &ContextRequestData) -> SkillQuery {
         SkillQuery::new(PathBuf::from("/fake"), Vec::new(), BTreeSet::new())
     }
 }
@@ -47,16 +47,16 @@ fn source(skills: Vec<SkillDescriptor>) -> SkillPromptSource {
     SkillPromptSource::new(Arc::new(FakeCatalog(skills)), Arc::new(FixedQueryFactory))
 }
 
-fn base_request() -> ContextRequest {
+fn base_request() -> ContextRequestData {
     use crate::*;
-    ContextRequest {
+    ContextRequestData {
         session_id: SessionId::new("session"),
         request_id: ContextRequestId::new("request"),
         run_id: sdk::RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![],
         invocation_reminders: vec![],
-        system_prompt: SystemPromptSpec::new("base system prompt"),
+        system_prompt: SystemPromptSpecData::new("base system prompt"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
         language: Language::new("en"),

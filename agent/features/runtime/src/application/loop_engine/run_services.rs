@@ -28,9 +28,9 @@ use crate::application::loop_engine::{
 use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::tool_result_materializer::ToolResultMaterializer;
-use crate::ports::{ContextRequest, RunStepId};
+use crate::ports::{ContextRequestData as _CtxRequestData, RunStepId};
 
-pub(crate) struct ContextRequestData<'a> {
+pub(crate) struct ContextRequest<'a> {
     pub runtime_context: &'a RuntimeContext,
     pub session_id: &'a str,
     pub system_prompt: &'a str,
@@ -41,12 +41,12 @@ pub(crate) struct ContextRequestData<'a> {
     pub context_size: usize,
     pub max_output_tokens: usize,
     pub raw_tool_schemas: Vec<serde_json::Value>,
-    pub invocation_reminders: Vec<context::InvocationReminder>,
+    pub invocation_reminders: Vec<context::InvocationReminderData>,
 }
 
 pub(crate) struct RuntimeStepPersistence<'a, O> {
     run_id: sdk::RunId,
-    context_request: ContextRequestData<'a>,
+    context_request: ContextRequest<'a>,
     input_prefix: Option<Message>,
     accepted_input: O,
     reminder_intents_available: bool,
@@ -58,7 +58,7 @@ where
 {
     pub(crate) fn new(
         run_id: sdk::RunId,
-        context_request: ContextRequestData<'a>,
+        context_request: ContextRequest<'a>,
         input_prefix: Option<Message>,
         accepted_input: O,
     ) -> Self {
@@ -101,7 +101,7 @@ where
         execution: &RunExecutionState,
         _run_id: &sdk::RunId,
         step_id: &RunStepId,
-    ) -> Option<ContextRequest> {
+    ) -> Option<_CtxRequestData> {
         let mut request = ContextRequestCoordinator::new(self.source()).build_request(
             &self.run_id,
             step_id,
@@ -113,7 +113,7 @@ where
                 let kinds = request
                     .invocation_reminders
                     .iter()
-                    .map(context::InvocationReminder::kind)
+                    .map(context::InvocationReminderData::kind)
                     .collect::<Vec<_>>()
                     .join(",");
                 log::debug!(
@@ -150,8 +150,8 @@ where
 
     async fn load_step_receipts(
         &mut self,
-        request: &ContextRequest,
-    ) -> Result<Vec<crate::ports::StepReceipt>, LoopEngineError> {
+        request: &crate::ports::ContextRequestData,
+    ) -> Result<Vec<crate::ports::StepReceiptData>, LoopEngineError> {
         StepPersistenceCoordinator::from_context(self.context_request.runtime_context)
             .load_step_receipts(request)
             .await

@@ -100,7 +100,7 @@ async fn persisted_tool_result_bytes_survive_save_resume_and_llm_view() {
 }
 
 #[tokio::test]
-async fn unavailable_tool_result_projection_survives_save_and_resume() {
+async fn unavailable_tool_result_view_survives_save_and_resume() {
     let store = Arc::new(JourneyStore::default());
     let preview = "<persisted-output>bounded unavailable preview</persisted-output>";
     let projection = serde_json::json!({

@@ -1,15 +1,16 @@
 use crate::InMemorySessionRepository;
 use crate::SessionRepository;
 use crate::{
-    AcceptedInputAppend, AcceptedInputError, CleanupConfirmation, ContentFingerprint,
-    ContextAppend, ContextAppendError, ContextRequestId, FinalizeCause, RunStepId, SessionId,
-    SessionRevision, ToolCallIdentity, ToolOutcomeKind, ToolReceiptMutation, ToolTerminalReceipt,
+    AcceptedInputAppendData, AcceptedInputError, CleanupConfirmation, ContentFingerprint,
+    ContextAppendData, ContextAppendError, ContextRequestId, FinalizeCause, RunStepId, SessionId,
+    SessionRevision, ToolCallIdentityData, ToolOutcomeKindData, ToolReceiptMutationData,
+    ToolTerminalReceiptData,
 };
 use sdk::RunId;
 use share::message::{ContentBlock, Message};
 
-fn append(fingerprint: &str) -> ContextAppend {
-    ContextAppend {
+fn append(fingerprint: &str) -> ContextAppendData {
+    ContextAppendData {
         session_id: SessionId::new("session"),
         expected_revision: SessionRevision::new(0),
         run_id: RunId::new("run"),
@@ -24,8 +25,8 @@ fn append(fingerprint: &str) -> ContextAppend {
     }
 }
 
-fn accepted_input(fingerprint: &str) -> AcceptedInputAppend {
-    AcceptedInputAppend {
+fn accepted_input(fingerprint: &str) -> AcceptedInputAppendData {
+    AcceptedInputAppendData {
         session_id: SessionId::new("session"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
@@ -35,8 +36,13 @@ fn accepted_input(fingerprint: &str) -> AcceptedInputAppend {
     }
 }
 
-fn tool_identity(run_id: &str, step_id: &str, call_id: &str, tool_name: &str) -> ToolCallIdentity {
-    ToolCallIdentity {
+fn tool_identity(
+    run_id: &str,
+    step_id: &str,
+    call_id: &str,
+    tool_name: &str,
+) -> ToolCallIdentityData {
+    ToolCallIdentityData {
         session_id: SessionId::new("session"),
         run_id: RunId::new(run_id),
         step_id: RunStepId::new(step_id),
@@ -81,17 +87,17 @@ async fn commit_tool_step(
     let current_revision = backing.snapshot(&session_id).await.unwrap().revision;
     let identity = tool_identity(run_id, step_id, call_id, tool_name);
     backing
-        .advance_tool_receipt(ToolReceiptMutation::pending(
+        .advance_tool_receipt(ToolReceiptMutationData::pending(
             identity.clone(),
             serde_json::json!({"file_path": path}).to_string(),
         ))
         .await
         .unwrap();
     backing
-        .advance_tool_receipt(ToolReceiptMutation::terminal(
+        .advance_tool_receipt(ToolReceiptMutationData::terminal(
             identity,
-            ToolTerminalReceipt::new(
-                ToolOutcomeKind::Success,
+            ToolTerminalReceiptData::new(
+                ToolOutcomeKindData::Success,
                 "terminal",
                 CleanupConfirmation::NotApplicable,
             ),
@@ -100,7 +106,7 @@ async fn commit_tool_step(
         .unwrap();
     let receipt_revision = backing.snapshot(&session_id).await.unwrap().revision;
     backing
-        .append_finalized(&ContextAppend {
+        .append_finalized(&ContextAppendData {
             session_id,
             expected_revision: current_revision.max(receipt_revision),
             run_id: RunId::new(run_id),
@@ -121,7 +127,7 @@ async fn commit_tool_step(
 async fn build_window_applies_l3_to_isolated_subagent_history() {
     use crate::ContextApplicationService;
     use crate::{ContextPort, ContextPromptSource, PromptMaterialization};
-    use crate::{ContextRequest, Language, SystemPromptSpec};
+    use crate::{ContextRequestData, Language, SystemPromptSpecData};
     use share::config::domain::snapshot::ConfigSnapshot;
     use share::config::Config;
     use share::reasoning::ReasoningLevel;
@@ -132,7 +138,7 @@ async fn build_window_applies_l3_to_isolated_subagent_history() {
     impl ContextPromptSource for Prompt {
         async fn materialize(
             &self,
-            _request: &ContextRequest,
+            _request: &ContextRequestData,
         ) -> Result<PromptMaterialization, crate::PromptMaterializationError> {
             Ok(PromptMaterialization {
                 cacheable: vec![],
@@ -162,14 +168,14 @@ async fn build_window_applies_l3_to_isolated_subagent_history() {
         Arc::new(Prompt),
         Arc::new(crate::NoOpContextMemorySource),
     );
-    let request = ContextRequest {
+    let request = ContextRequestData {
         session_id,
         request_id: ContextRequestId::new("request-window"),
         run_id: RunId::new("active"),
         step_id: RunStepId::new("active-step"),
         pending_messages: vec![],
         invocation_reminders: vec![],
-        system_prompt: SystemPromptSpec::new("system"),
+        system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
         language: Language::new("en"),
@@ -220,17 +226,17 @@ async fn snapshot_preserves_structured_run_step_receipts_for_isolated_context() 
         .await
         .unwrap();
     backing
-        .advance_tool_receipt(ToolReceiptMutation::pending(
+        .advance_tool_receipt(ToolReceiptMutationData::pending(
             identity.clone(),
             r#"{"file_path":"/repo/src/lib.rs"}"#,
         ))
         .await
         .unwrap();
     backing
-        .advance_tool_receipt(ToolReceiptMutation::terminal(
+        .advance_tool_receipt(ToolReceiptMutationData::terminal(
             identity,
-            ToolTerminalReceipt::new(
-                ToolOutcomeKind::Success,
+            ToolTerminalReceiptData::new(
+                ToolOutcomeKindData::Success,
                 "terminal",
                 CleanupConfirmation::NotApplicable,
             ),
@@ -291,10 +297,10 @@ async fn finalized_outcome_keeps_receipt_metadata_for_idempotent_retry() {
     let mut outcome = append("outcome-v1");
     outcome.finalize_cause = FinalizeCause::RunTerminated;
     outcome.api_input_tokens = Some(21);
-    outcome.receipts = vec![crate::StepReceipt::agent(
+    outcome.receipts = vec![crate::StepReceiptData::agent(
         "agent-call",
         0,
-        crate::ToolOutcomeKind::CancellationUnconfirmed,
+        crate::ToolOutcomeKindData::CancellationUnconfirmed,
     )];
 
     let first = backing.append_finalized(&outcome).await.unwrap();

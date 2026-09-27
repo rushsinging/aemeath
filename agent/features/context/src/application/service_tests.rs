@@ -13,9 +13,10 @@ use super::service::{
     invocation_reminder_log_payloads, ContextApplicationService, ReminderLogPayload,
 };
 use crate::domain::{
-    ContextAppend, ContextMessages, ContextRequest, ContextRequestId, InvocationReminder, Language,
-    RunStepId, SessionId, SessionRevision, SystemBlock, SystemPromptSpec, TaskProgressReminder,
-    TaskProgressReminderItem, TaskProgressStatus,
+    ContextAppendData, ContextMessages, ContextRequestData, ContextRequestId,
+    InvocationReminderData, Language, RunStepId, SessionId, SessionRevision, SystemBlock,
+    SystemPromptSpecData, TaskProgressReminderData, TaskProgressReminderItemData,
+    TaskProgressStatus,
 };
 use crate::ports::{
     ContextMemorySource, ContextPort, ContextPromptSource, MemoryMaterialization,
@@ -44,9 +45,9 @@ impl SessionRepository for BaselineSession {
 
     async fn append_finalized(
         &self,
-        append: &ContextAppend,
-    ) -> Result<crate::domain::AppendReceipt, crate::domain::ContextAppendError> {
-        Ok(crate::domain::AppendReceipt {
+        append: &ContextAppendData,
+    ) -> Result<crate::domain::AppendReceiptData, crate::domain::ContextAppendError> {
+        Ok(crate::domain::AppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: self.revision,
@@ -56,7 +57,7 @@ impl SessionRepository for BaselineSession {
 
     async fn commit_compaction(
         &self,
-        _request: &crate::domain::CompactRequest,
+        _request: &crate::domain::CompactRequestData,
     ) -> Result<crate::domain::CompactOutcome, crate::domain::ContextPortError> {
         if self.committed_compaction {
             Ok(crate::domain::CompactOutcome::Committed(
@@ -76,7 +77,7 @@ impl SessionRepository for BaselineSession {
 
     async fn commit_manual_compaction(
         &self,
-        _request: &crate::domain::ManualCompactRequest,
+        _request: &crate::domain::ManualCompactRequestData,
     ) -> Result<crate::domain::CompactOutcome, crate::domain::ContextPortError> {
         Ok(crate::domain::CompactOutcome::Skipped(
             crate::domain::CompactSkipReason::ResumeProtection,
@@ -94,7 +95,7 @@ struct BaselinePrompt;
 impl ContextPromptSource for BaselinePrompt {
     async fn materialize(
         &self,
-        _request: &ContextRequest,
+        _request: &ContextRequestData,
     ) -> Result<PromptMaterialization, crate::domain::PromptMaterializationError> {
         Ok(PromptMaterialization {
             cacheable: vec![block("system_prompt"), block("user_guidance")],
@@ -110,7 +111,7 @@ struct BaselineMemory;
 impl ContextMemorySource for BaselineMemory {
     async fn materialize(
         &self,
-        _request: &ContextRequest,
+        _request: &ContextRequestData,
     ) -> Result<MemoryMaterialization, String> {
         Ok(MemoryMaterialization {
             blocks: vec![block("memory_context")],
@@ -128,15 +129,15 @@ fn block(kind: &str) -> SystemBlock {
     }
 }
 
-fn request(last_api_total_tokens: Option<u64>) -> ContextRequest {
-    ContextRequest {
+fn request(last_api_total_tokens: Option<u64>) -> ContextRequestData {
+    ContextRequestData {
         session_id: SessionId::new("baseline-session"),
         request_id: ContextRequestId::new("baseline-request"),
         run_id: RunId::new("baseline-run"),
         step_id: RunStepId::new("baseline-step"),
         pending_messages: vec![Message::user("pending")],
         invocation_reminders: vec![],
-        system_prompt: SystemPromptSpec::new("system"),
+        system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
         language: Language::new("zh"),
@@ -312,8 +313,8 @@ fn tool_result_message(bytes: usize) -> (Message, usize) {
     )
 }
 
-fn compact_request(source: ContextRequest) -> crate::domain::CompactRequest {
-    crate::domain::CompactRequest {
+fn compact_request(source: ContextRequestData) -> crate::domain::CompactRequestData {
+    crate::domain::CompactRequestData {
         run_id: RunId::new("baseline-run"),
         source_revision: SessionRevision::new(42),
         source,
@@ -385,12 +386,12 @@ async fn post_compaction_usage_check_below_half_threshold_for_small_history() {
 fn invocation_reminder_log_payloads_include_summary_preview_and_redacted_body() {
     let secret = "sk-ant-api03-secret-value";
     let reminders = vec![
-        InvocationReminder::model_guidance_mismatch("session/model", "run/model"),
-        InvocationReminder::guidance_sources_changed(),
-        InvocationReminder::task_progress(TaskProgressReminder {
+        InvocationReminderData::model_guidance_mismatch("session/model", "run/model"),
+        InvocationReminderData::guidance_sources_changed(),
+        InvocationReminderData::task_progress(TaskProgressReminderData {
             total: 1,
             completed: 0,
-            items: vec![TaskProgressReminderItem {
+            items: vec![TaskProgressReminderItemData {
                 sequence: 7,
                 subject: format!("diagnose Authorization: Bearer {secret}"),
                 status: TaskProgressStatus::InProgress,

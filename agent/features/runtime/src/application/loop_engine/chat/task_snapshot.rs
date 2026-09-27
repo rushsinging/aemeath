@@ -125,7 +125,7 @@ fn current_batch_tasks(access: &dyn TaskAccess) -> Option<Vec<TaskData>> {
 pub(crate) fn build_task_reminder_intent(
     access: &dyn TaskAccess,
     max_items: usize,
-) -> Option<context::InvocationReminder> {
+) -> Option<context::InvocationReminderData> {
     let tasks = current_batch_tasks(access)?;
     if max_items == 0 {
         return None;
@@ -159,7 +159,7 @@ pub(crate) fn build_task_reminder_intent(
         tasks.iter().map(|task| (task.id(), task.seq())).collect();
     let items = visible
         .into_iter()
-        .map(|task| context::TaskProgressReminderItem {
+        .map(|task| context::TaskProgressReminderItemData {
             sequence: task.seq(),
             subject: task.subject().to_owned(),
             status: match task.status() {
@@ -175,12 +175,13 @@ pub(crate) fn build_task_reminder_intent(
                 .collect(),
         })
         .collect();
-    let reminder = context::InvocationReminder::task_progress(context::TaskProgressReminder {
-        total,
-        completed,
-        items,
-        hidden_count: total.saturating_sub(max_items),
-    });
+    let reminder =
+        context::InvocationReminderData::task_progress(context::TaskProgressReminderData {
+            total,
+            completed,
+            items,
+            hidden_count: total.saturating_sub(max_items),
+        });
     log::debug!(
         target: crate::LOG_TARGET,
         "invocation_reminder_created kind={} total={} completed={} visible={} hidden={}",
@@ -196,7 +197,7 @@ pub(crate) fn build_task_reminder_intent(
 /// 将当前 TaskData aggregate 冻结为 Context-owned typed compact snapshot。
 pub(crate) fn build_compact_task_snapshot(
     access: &dyn TaskAccess,
-) -> Option<context::compact::CompactTaskSnapshot> {
+) -> Option<context::compact::CompactTaskSnapshotData> {
     let batch_id = access.current_batch()?;
     let batch_snapshot = access.batch_snapshot(batch_id)?;
     let batch = batch_snapshot.batch();
@@ -205,9 +206,9 @@ pub(crate) fn build_compact_task_snapshot(
         return None;
     }
     let status = match batch.status() {
-        BatchStatusData::Active => context::compact::CompactTaskBatchStatus::Active,
-        BatchStatusData::Paused => context::compact::CompactTaskBatchStatus::Paused,
-        BatchStatusData::Archived => context::compact::CompactTaskBatchStatus::Archived,
+        BatchStatusData::Active => context::compact::CompactTaskBatchStatusData::Active,
+        BatchStatusData::Paused => context::compact::CompactTaskBatchStatusData::Paused,
+        BatchStatusData::Archived => context::compact::CompactTaskBatchStatusData::Archived,
     };
     let sequence_by_id = batch_snapshot
         .tasks()
@@ -219,13 +220,15 @@ pub(crate) fn build_compact_task_snapshot(
         .iter()
         .filter(|task| task.status() != TaskStatusData::Deleted)
         .map(|task| {
-            context::compact::CompactTaskItem::new(
+            context::compact::CompactTaskItemData::new(
                 task.seq(),
                 task.subject(),
                 match task.status() {
-                    TaskStatusData::Pending => context::compact::CompactTaskStatus::Pending,
-                    TaskStatusData::InProgress => context::compact::CompactTaskStatus::InProgress,
-                    TaskStatusData::Completed => context::compact::CompactTaskStatus::Completed,
+                    TaskStatusData::Pending => context::compact::CompactTaskStatusData::Pending,
+                    TaskStatusData::InProgress => {
+                        context::compact::CompactTaskStatusData::InProgress
+                    }
+                    TaskStatusData::Completed => context::compact::CompactTaskStatusData::Completed,
                     TaskStatusData::Deleted => unreachable!("deleted tasks were filtered"),
                 },
                 task.blocked_by()
@@ -238,7 +241,7 @@ pub(crate) fn build_compact_task_snapshot(
     if items.is_empty() {
         return None;
     }
-    Some(context::compact::CompactTaskSnapshot::new(
+    Some(context::compact::CompactTaskSnapshotData::new(
         access.revision().get(),
         batch.id().get(),
         batch_summary,

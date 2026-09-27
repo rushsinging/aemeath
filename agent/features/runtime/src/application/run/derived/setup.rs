@@ -537,7 +537,7 @@ impl AgentRunner for CliAgentRunner {
             let persistence =
                 crate::application::loop_engine::run_services::RuntimeStepPersistence::new(
                     run_id.clone(),
-                    crate::application::loop_engine::run_services::ContextRequestData {
+                    crate::application::loop_engine::run_services::ContextRequest {
                         runtime_context: &runtime_context,
                         session_id: &session_id,
                         system_prompt: &system,
@@ -556,7 +556,7 @@ impl AgentRunner for CliAgentRunner {
                             .into_iter()
                             .collect::<Vec<_>>();
                             if model_name != parent_frame.context.provider_ref().model.model {
-                                let reminder = context::InvocationReminder::model_guidance_mismatch(
+                                let reminder = context::InvocationReminderData::model_guidance_mismatch(
                                     parent_frame.context.provider_ref().model.model.clone(),
                                     model_name.clone(),
                                 );
