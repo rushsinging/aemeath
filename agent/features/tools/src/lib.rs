@@ -31,16 +31,13 @@ pub use domain::{
     CommandParseError, CommandRoute, CommandRouterPort, CommandTarget, CommittedTaskChange,
     ExecutionScope, FixedGuidance, FixedPlanMode, Guidance, ImageData, InvocationSource,
     MemoryPortSource, MutexReadSet, ParsedArguments, ProgressSink, RegistryScopeName,
-    SessionReminder, SessionReminders, SkillCatalogPort, SkillCatalogSnapshot, SkillDescriptor,
-    SkillError, SkillLoadDecision, SkillLoadMutation, SkillLoadPort, SkillLoadScope,
-    SkillLoadStateError, SkillLoadStatePort, SkillQuery, SkillRequestCommand, SkillSource,
-    SkillSourceKind, SlashInput, SnapshotQueryCommand, SnapshotQueryTarget, SubRunActivityEvent,
-    SubRunActivityKind, SubRunIdentity, SubRunStartedEvent, SubRunTerminalOutcome, TaskChangeFact,
+    SkillCatalogPort, SkillCatalogSnapshot, SkillDescriptor, SkillError, SkillLoadDecision,
+    SkillLoadMutation, SkillLoadPort, SkillLoadScope, SkillLoadStateError, SkillLoadStatePort,
+    SkillQuery, SkillRequestCommand, SkillSource, SkillSourceKind, SlashInput, TaskChangeFact,
     Tool, ToolCapabilities, ToolCapability, ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot,
     ToolErrorKind, ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort,
     ToolExecutionPorts, ToolInvocation, ToolName, ToolOutcome, ToolProfile, ToolProfileName,
-    ToolProgressEvent, ToolResult, ToolSuspension, TypedTool, TypedToolAdapter, TypedToolResult,
-    UserQuestion, WorkspaceReadAccess,
+    ToolProgressEvent, ToolResult, ToolSuspension, UserQuestion, WorkspaceReadAccess,
 };
 
 // Role-policy compilation: config strings → narrowed ToolProfile.
