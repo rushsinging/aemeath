@@ -3,19 +3,21 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 
 use crate::domain::{
-    AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
-    CompactRequest, ContextAppend, ContextAppendError, ContextMessages, ContextPortError,
-    ContextRequest, ManualCompactRequest, SessionId, SessionRevision, SystemBlock,
-    ToolReceiptMutation, ToolReceiptMutationError, ToolReceiptMutationReceipt,
+    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
+    CompactOutcome, CompactRequestData, ContextAppendData, ContextAppendError, ContextMessages,
+    ContextPortError, ContextRequestData, ManualCompactRequestData, SessionId, SessionRevision,
+    SystemBlock, ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
 
 pub mod context_port;
 pub mod session_management;
 pub mod session_snapshot_store;
-pub use crate::domain::PromptMaterializationError;
+pub(crate) use crate::domain::PromptMaterializationError;
 pub use context_port::ContextPort;
 pub use session_management::SessionManagementPort;
-pub use session_snapshot_store::{SessionGeneration, SessionSnapshotStore, SessionStoreError};
+pub(crate) use session_snapshot_store::{
+    SessionGeneration, SessionSnapshotStore, SessionStoreError,
+};
 
 pub trait MainContextFactory: Send + Sync {
     fn build(
@@ -36,7 +38,7 @@ pub trait SessionDecoder: Send + Sync {
 }
 
 #[derive(Debug, Clone)]
-pub struct SessionSnapshot {
+pub(crate) struct SessionSnapshot {
     pub revision: SessionRevision,
     pub messages: ContextMessages,
     pub structured_history: Option<crate::domain::session::SessionHistory>,
@@ -44,20 +46,20 @@ pub struct SessionSnapshot {
 }
 
 #[async_trait]
-pub trait SessionRepository: Send + Sync {
+pub(crate) trait SessionRepository: Send + Sync {
     async fn snapshot(&self, session_id: &SessionId) -> Result<SessionSnapshot, String>;
     async fn append_accepted_input(
         &self,
-        _append: &AcceptedInputAppend,
-    ) -> Result<AcceptedInputReceipt, AcceptedInputError> {
+        _append: &AcceptedInputAppendData,
+    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
         Err(AcceptedInputError::Storage(
             "此 SessionRepository 未实现已接受输入持久化".to_string(),
         ))
     }
     async fn advance_tool_receipt(
         &self,
-        _mutation: ToolReceiptMutation,
-    ) -> Result<ToolReceiptMutationReceipt, ToolReceiptMutationError> {
+        _mutation: ToolReceiptMutationData,
+    ) -> Result<ToolReceiptMutationReceiptData, ToolReceiptMutationError> {
         Err(ToolReceiptMutationError::Storage(
             "此 SessionRepository 未实现 Tool receipt 持久化".to_string(),
         ))
@@ -67,7 +69,7 @@ pub trait SessionRepository: Send + Sync {
         _session_id: &SessionId,
         _run_id: &sdk::RunId,
         _step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::domain::StepReceipt>, ToolReceiptMutationError> {
+    ) -> Result<Vec<crate::domain::StepReceiptData>, ToolReceiptMutationError> {
         Err(ToolReceiptMutationError::Storage(
             "此 SessionRepository 未实现 Step receipt 查询".to_string(),
         ))
@@ -85,21 +87,21 @@ pub trait SessionRepository: Send + Sync {
     }
     async fn append_finalized(
         &self,
-        append: &ContextAppend,
-    ) -> Result<AppendReceipt, ContextAppendError>;
+        append: &ContextAppendData,
+    ) -> Result<AppendReceiptData, ContextAppendError>;
     async fn commit_compaction(
         &self,
-        request: &CompactRequest,
+        request: &CompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError>;
     async fn commit_manual_compaction(
         &self,
-        request: &ManualCompactRequest,
+        request: &ManualCompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError>;
     async fn clear(&self, session_id: &SessionId) -> Result<(), ContextPortError>;
 }
 
 #[derive(Debug, Clone)]
-pub struct PromptMaterialization {
+pub(crate) struct PromptMaterialization {
     pub cacheable: Vec<SystemBlock>,
     pub uncached: Vec<SystemBlock>,
     pub revision: u64,
@@ -108,24 +110,27 @@ pub struct PromptMaterialization {
 /// Context-owned 查询工厂：为每次 `materialize(request)` 从 request/config
 /// 与 live Project `WorkspaceReader` 快照构造 `tools::published::skill::SkillQuery`。
 pub trait SkillQueryFactory: Send + Sync {
-    fn query(&self, request: &ContextRequest) -> tools::published::skill::SkillQuery;
+    fn query(&self, request: &ContextRequestData) -> tools::published::skill::SkillQuery;
 }
 
 #[async_trait]
-pub trait ContextPromptSource: Send + Sync {
+pub(crate) trait ContextPromptSource: Send + Sync {
     async fn materialize(
         &self,
-        request: &ContextRequest,
+        request: &ContextRequestData,
     ) -> Result<PromptMaterialization, PromptMaterializationError>;
 }
 
 #[derive(Debug, Clone)]
-pub struct MemoryMaterialization {
+pub(crate) struct MemoryMaterialization {
     pub blocks: Vec<SystemBlock>,
     pub revision: u64,
 }
 
 #[async_trait]
-pub trait ContextMemorySource: Send + Sync {
-    async fn materialize(&self, request: &ContextRequest) -> Result<MemoryMaterialization, String>;
+pub(crate) trait ContextMemorySource: Send + Sync {
+    async fn materialize(
+        &self,
+        request: &ContextRequestData,
+    ) -> Result<MemoryMaterialization, String>;
 }

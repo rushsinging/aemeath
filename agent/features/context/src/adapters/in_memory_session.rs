@@ -5,10 +5,10 @@ use async_trait::async_trait;
 
 use crate::domain::session::{AcceptedInputRecord, FinalizedOutcomeRecord, SessionHistory};
 use crate::domain::{
-    AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
-    CompactRequest, CompactSkipReason, ContextAppend, ContextAppendError, ContextMessage,
-    ContextPortError, SessionId, SessionRevision, ToolCallReceipt, ToolReceiptMutation,
-    ToolReceiptMutationError, ToolReceiptMutationReceipt,
+    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
+    CompactOutcome, CompactRequestData, CompactSkipReason, ContextAppendData, ContextAppendError,
+    ContextMessage, ContextPortError, SessionId, SessionRevision, ToolCallReceiptData,
+    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
 use crate::ports::{SessionRepository, SessionSnapshot};
 
@@ -20,13 +20,13 @@ struct SessionState {
     active_summary: Option<String>,
     accepted_steps: HashMap<(String, String), AcceptedInputRecord>,
     committed_steps: HashMap<(String, String), FinalizedOutcomeRecord>,
-    tool_receipts: HashMap<String, ToolCallReceipt>,
+    tool_receipts: HashMap<String, ToolCallReceiptData>,
     skill_load_records: HashMap<(tools::published::skill::SkillLoadScope, String), String>,
 }
 
 /// #870 的确定性内存 backing；durable Envelope/AtomicBlob 由 #869/#880 替换。
 #[derive(Default)]
-pub struct InMemorySessionRepository {
+pub(crate) struct InMemorySessionRepository {
     sessions: Mutex<HashMap<String, SessionState>>,
 }
 
@@ -60,8 +60,11 @@ impl InMemorySessionRepository {
             );
     }
 
-    fn receipt(append: &ContextAppend, committed_revision: SessionRevision) -> AppendReceipt {
-        AppendReceipt {
+    fn receipt(
+        append: &ContextAppendData,
+        committed_revision: SessionRevision,
+    ) -> AppendReceiptData {
+        AppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision,
@@ -70,10 +73,10 @@ impl InMemorySessionRepository {
     }
 
     fn accepted_receipt(
-        append: &AcceptedInputAppend,
+        append: &AcceptedInputAppendData,
         committed_revision: SessionRevision,
-    ) -> AcceptedInputReceipt {
-        AcceptedInputReceipt {
+    ) -> AcceptedInputReceiptData {
+        AcceptedInputReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision,
@@ -99,8 +102,8 @@ impl SessionRepository for InMemorySessionRepository {
 
     async fn append_accepted_input(
         &self,
-        append: &AcceptedInputAppend,
-    ) -> Result<AcceptedInputReceipt, AcceptedInputError> {
+        append: &AcceptedInputAppendData,
+    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
         let mut sessions = self
             .sessions
             .lock()
@@ -143,8 +146,8 @@ impl SessionRepository for InMemorySessionRepository {
 
     async fn advance_tool_receipt(
         &self,
-        mutation: ToolReceiptMutation,
-    ) -> Result<ToolReceiptMutationReceipt, ToolReceiptMutationError> {
+        mutation: ToolReceiptMutationData,
+    ) -> Result<ToolReceiptMutationReceiptData, ToolReceiptMutationError> {
         let mut sessions = self
             .sessions
             .lock()
@@ -159,9 +162,9 @@ impl SessionRepository for InMemorySessionRepository {
             receipt.clone().advance(mutation.clone())?
         } else {
             let preview = mutation.input_preview.clone().unwrap_or_default();
-            let receipt = ToolCallReceipt::pending(mutation.identity.clone(), preview);
+            let receipt = ToolCallReceiptData::pending(mutation.identity.clone(), preview);
             if mutation.next == crate::domain::ToolCallState::Pending {
-                ToolReceiptMutationReceipt {
+                ToolReceiptMutationReceiptData {
                     receipt,
                     changed: true,
                 }
@@ -186,7 +189,7 @@ impl SessionRepository for InMemorySessionRepository {
         session_id: &SessionId,
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::domain::StepReceipt>, ToolReceiptMutationError> {
+    ) -> Result<Vec<crate::domain::StepReceiptData>, ToolReceiptMutationError> {
         let sessions = self
             .sessions
             .lock()
@@ -200,9 +203,9 @@ impl SessionRepository for InMemorySessionRepository {
             .filter(|receipt| {
                 receipt.identity.run_id == *run_id && receipt.identity.step_id == *step_id
             })
-            .filter_map(ToolCallReceipt::to_step_receipt)
+            .filter_map(ToolCallReceiptData::to_step_receipt)
             .collect::<Vec<_>>();
-        receipts.sort_by_key(crate::domain::StepReceipt::index);
+        receipts.sort_by_key(crate::domain::StepReceiptData::index);
         Ok(receipts)
     }
 
@@ -243,8 +246,8 @@ impl SessionRepository for InMemorySessionRepository {
 
     async fn append_finalized(
         &self,
-        append: &ContextAppend,
-    ) -> Result<AppendReceipt, ContextAppendError> {
+        append: &ContextAppendData,
+    ) -> Result<AppendReceiptData, ContextAppendError> {
         let mut sessions = self
             .sessions
             .lock()
@@ -305,14 +308,14 @@ impl SessionRepository for InMemorySessionRepository {
 
     async fn commit_compaction(
         &self,
-        _request: &CompactRequest,
+        _request: &CompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError> {
         Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection))
     }
 
     async fn commit_manual_compaction(
         &self,
-        _request: &crate::domain::ManualCompactRequest,
+        _request: &crate::domain::ManualCompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError> {
         Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection))
     }

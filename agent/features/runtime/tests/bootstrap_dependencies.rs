@@ -151,7 +151,7 @@ impl context::SessionManagementPort for NoopSessionManagement {
     async fn list_for_project(
         &self,
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<context::SessionListEntry>, context::SessionManagementError> {
+    ) -> Result<Vec<context::SessionListEntryData>, context::SessionManagementError> {
         Ok(Vec::new())
     }
 
@@ -167,7 +167,7 @@ impl context::SessionManagementPort for NoopSessionManagement {
         &self,
         _bytes: &[u8],
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<context::SessionListEntry, context::SessionManagementError> {
+    ) -> Result<context::SessionListEntryData, context::SessionManagementError> {
         Err(context::SessionManagementError::Storage(
             "test port".to_string(),
         ))
@@ -177,8 +177,8 @@ impl context::SessionManagementPort for NoopSessionManagement {
         &self,
         id: &str,
         _project: &share::session_types::ProjectIdentityData,
-        _update: context::SessionMetadataUpdate,
-    ) -> Result<context::SessionListEntry, context::SessionManagementError> {
+        _update: context::SessionMetadataUpdateData,
+    ) -> Result<context::SessionListEntryData, context::SessionManagementError> {
         Err(context::SessionManagementError::NotFound(id.to_string()))
     }
 

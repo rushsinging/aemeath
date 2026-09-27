@@ -1,17 +1,17 @@
 use async_trait::async_trait;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SessionGeneration {
+pub(crate) enum SessionGeneration {
     Primary,
     Previous,
 }
 
 #[derive(Debug, thiserror::Error)]
 #[error("Session snapshot store failed: {0}")]
-pub struct SessionStoreError(pub String);
+pub(crate) struct SessionStoreError(pub String);
 
 #[async_trait]
-pub trait SessionSnapshotStore: Send + Sync {
+pub(crate) trait SessionSnapshotStore: Send + Sync {
     async fn read(
         &self,
         generation: SessionGeneration,

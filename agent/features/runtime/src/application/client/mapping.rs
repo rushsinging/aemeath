@@ -101,7 +101,9 @@ pub(crate) fn memory_config_to_sdk(config: share::config::MemoryConfig) -> Memor
     }
 }
 
-pub(crate) fn session_summary_from_context(session: context::SessionListEntry) -> SessionSummary {
+pub(crate) fn session_summary_from_context(
+    session: context::SessionListEntryData,
+) -> SessionSummary {
     SessionSummary {
         id: session.id,
         title: session.title,
@@ -194,7 +196,7 @@ pub(crate) fn message_to_sdk(message: share::message::Message) -> sdk::ChatMessa
 }
 
 pub(crate) fn display_history_window_to_sdk(
-    window: context::api::DisplayHistoryStepWindow,
+    window: context::api::DisplayHistoryStepWindowData,
 ) -> sdk::DisplayHistoryWindow {
     sdk::DisplayHistoryWindow {
         session_id: window.session_id().to_string(),
@@ -248,7 +250,7 @@ mod tests {
 
     #[test]
     fn session_summary_mapping_carries_project_and_empty_marker_summary() {
-        let entry = context::SessionListEntry {
+        let entry = context::SessionListEntryData {
             id: "session-1".to_string(),
             title: None,
             project: Some("aemeath".to_string()),

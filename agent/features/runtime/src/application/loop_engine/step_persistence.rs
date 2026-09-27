@@ -48,7 +48,7 @@ impl StepPersistenceCoordinator {
         }
         let request = execution
             .context_request()
-            .ok_or_else(|| LoopEngineError::Adapter("ContextRequest 尚未冻结".to_string()))?;
+            .ok_or_else(|| LoopEngineError::Adapter("ContextRequestData 尚未冻结".to_string()))?;
         debug_assert_eq!(&request.step_id, step_id);
         self.context
             .append_accepted_input(request, accepted)
@@ -59,8 +59,8 @@ impl StepPersistenceCoordinator {
 
     pub(crate) async fn load_step_receipts(
         &self,
-        request: &crate::ports::ContextRequest,
-    ) -> Result<Vec<crate::ports::StepReceipt>, LoopEngineError> {
+        request: &crate::ports::ContextRequestData,
+    ) -> Result<Vec<crate::ports::StepReceiptData>, LoopEngineError> {
         self.context
             .step_receipts(request)
             .await

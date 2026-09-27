@@ -1,16 +1,16 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use context::ContextApplicationService;
-use context::{
-    ContextAppend, ContextRequest, ContextRequestId, Language, SessionId, SessionRevision,
-    SystemPromptSpec,
+use crate::ContextApplicationService;
+use crate::{
+    ContextAppendData, ContextRequestData, ContextRequestId, Language, SessionId, SessionRevision,
+    SystemPromptSpecData,
 };
-use context::{
+use crate::{
     ContextMemorySource, ContextPromptSource, MemoryMaterialization, PromptMaterialization,
     SessionRepository, SessionSnapshot,
 };
+use async_trait::async_trait;
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
@@ -30,31 +30,31 @@ impl SessionRepository for Session {
 
     async fn append_finalized(
         &self,
-        _append: &ContextAppend,
-    ) -> Result<context::AppendReceipt, context::ContextAppendError> {
+        _append: &ContextAppendData,
+    ) -> Result<crate::AppendReceiptData, crate::ContextAppendError> {
         unreachable!()
     }
 
     async fn commit_compaction(
         &self,
-        _request: &context::CompactRequest,
-    ) -> Result<context::CompactOutcome, context::ContextPortError> {
+        _request: &crate::CompactRequestData,
+    ) -> Result<crate::CompactOutcome, crate::ContextPortError> {
         unreachable!()
     }
 
     async fn commit_manual_compaction(
         &self,
-        _request: &context::ManualCompactRequest,
-    ) -> Result<context::CompactOutcome, context::ContextPortError> {
-        Ok(context::CompactOutcome::Committed(context::CompactResult {
+        _request: &crate::ManualCompactRequestData,
+    ) -> Result<crate::CompactOutcome, crate::ContextPortError> {
+        Ok(crate::CompactOutcome::Committed(crate::CompactResult {
             summary: "manual".into(),
             recent_messages: vec![],
             source_revision: SessionRevision::new(1),
-            quality: context::CompactSummaryQuality::LocalOnly,
+            quality: crate::CompactSummaryQuality::LocalOnly,
         }))
     }
 
-    async fn clear(&self, _session_id: &SessionId) -> Result<(), context::ContextPortError> {
+    async fn clear(&self, _session_id: &SessionId) -> Result<(), crate::ContextPortError> {
         Ok(())
     }
 }
@@ -64,9 +64,9 @@ struct FailingPrompt;
 impl ContextPromptSource for FailingPrompt {
     async fn materialize(
         &self,
-        _request: &ContextRequest,
-    ) -> Result<PromptMaterialization, context::PromptMaterializationError> {
-        Err(context::PromptMaterializationError::Baseline(
+        _request: &ContextRequestData,
+    ) -> Result<PromptMaterialization, crate::PromptMaterializationError> {
+        Err(crate::PromptMaterializationError::Baseline(
             "guidance unavailable".into(),
         ))
     }
@@ -77,7 +77,7 @@ struct CountingMemory(Arc<AtomicUsize>);
 impl ContextMemorySource for CountingMemory {
     async fn materialize(
         &self,
-        _request: &ContextRequest,
+        _request: &ContextRequestData,
     ) -> Result<MemoryMaterialization, String> {
         self.0.fetch_add(1, Ordering::SeqCst);
         Ok(MemoryMaterialization {
@@ -87,15 +87,15 @@ impl ContextMemorySource for CountingMemory {
     }
 }
 
-fn request() -> ContextRequest {
-    ContextRequest {
+fn request() -> ContextRequestData {
+    ContextRequestData {
         session_id: SessionId::new("session"),
         request_id: ContextRequestId::new("request"),
         run_id: RunId::new("run"),
-        step_id: context::RunStepId::new("step"),
+        step_id: crate::RunStepId::new("step"),
         pending_messages: vec![],
         invocation_reminders: vec![],
-        system_prompt: SystemPromptSpec::new("system"),
+        system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
         language: Language::new("zh"),
@@ -112,7 +112,7 @@ fn request() -> ContextRequest {
 
 #[tokio::test]
 async fn prompt_failure_is_typed_and_stops_before_memory_materialization() {
-    use context::ContextPort;
+    use crate::ContextPort;
 
     let memory_calls = Arc::new(AtomicUsize::new(0));
     let service = ContextApplicationService::new(
@@ -123,8 +123,8 @@ async fn prompt_failure_is_typed_and_stops_before_memory_materialization() {
 
     assert!(matches!(
         service.build_window(&request()).await,
-        Err(context::ContextPortError::PromptMaterialization(
-            context::PromptMaterializationError::Baseline(msg)
+        Err(crate::ContextPortError::PromptMaterialization(
+            crate::PromptMaterializationError::Baseline(msg)
         )) if msg == "guidance unavailable"
     ));
     assert_eq!(memory_calls.load(Ordering::SeqCst), 0);

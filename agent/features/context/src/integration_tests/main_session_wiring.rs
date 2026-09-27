@@ -6,22 +6,23 @@
 //! (they are in-memory / filesystem-light) and **real** `ConfigAppService`.
 //! Only the `MemoryOpener` is mocked.
 
+use config::{ConfigAppService, ConfigReader, ProjectConfigParticipant};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use config::{ConfigAppService, ConfigReader, ProjectConfigParticipant};
-use context::main_session::{MainSessionError, MainSessionWiring, MainSessionWiringBuilder};
-use context::ContextPort;
-use context::{
-    AcceptedInputAppend, CleanupConfirmation, ContentFingerprint, ContextAppend, ContextRequest,
-    ContextRequestId, FinalizeCause, Language, RunStepId, SessionId, SessionRevision, StepReceipt,
-    SystemPromptSpec, ToolCallIdentity, ToolCallReceipt, ToolOutcomeKind, ToolTerminalReceipt,
+use crate::main_session::{MainSessionError, MainSessionWiring, MainSessionWiringBuilder};
+use crate::ContextPort;
+use crate::{
+    AcceptedInputAppendData, CleanupConfirmation, ContentFingerprint, ContextAppendData,
+    ContextRequestData, ContextRequestId, FinalizeCause, Language, RunStepId, SessionId,
+    SessionRevision, StepReceiptData, SystemPromptSpecData, ToolCallIdentityData,
+    ToolCallReceiptData, ToolOutcomeKindData, ToolTerminalReceiptData,
 };
-use context::{
+use crate::{
     CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStepMessages,
     FinalizedOutcomeRecord, SnapshotState,
 };
+use async_trait::async_trait;
 use memory::api::{
     InMemoryMemory, MemoryOpener, MemoryOpenerError, MemoryPolicy, MemoryPort, ProjectMemoryKey,
 };
@@ -227,13 +228,13 @@ fn build_harness() -> Harness {
             open_count: Arc::clone(&memory_opener.open_count),
             fail: Arc::clone(&memory_opener.fail),
         }),
-        session_management: Arc::new(context::AtomicBlobSessionManagement::new(
+        session_management: Arc::new(crate::AtomicBlobSessionManagement::new(
             storage::wire_file_system_blob(tmp.path()).unwrap(),
         )),
         initial_session,
         initial_memory,
-        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
+        context_factory: Arc::new(crate::ProductionMainContextFactory::new(Arc::new(
+            crate::NoOpCanonicalSessionWriter,
         ))),
     };
 
@@ -272,15 +273,15 @@ fn session_with_workspace(
     }
 }
 
-fn request(session_id: &str, run_id: &str) -> ContextRequest {
-    ContextRequest {
+fn request(session_id: &str, run_id: &str) -> ContextRequestData {
+    ContextRequestData {
         session_id: sdk::SessionId::from_legacy_or_new(session_id),
         request_id: ContextRequestId::new("resume-window-request"),
         run_id: RunId::new(run_id),
         step_id: RunStepId::new("active-step"),
         pending_messages: vec![],
         invocation_reminders: vec![],
-        system_prompt: SystemPromptSpec::new("system"),
+        system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
         language: Language::new("zh"),
@@ -334,8 +335,8 @@ fn finalized_tool_step(
             fingerprint: format!("fp-{step_id}"),
             committed_revision: 1,
         }),
-        tool_receipts: vec![ToolCallReceipt {
-            identity: ToolCallIdentity {
+        tool_receipts: vec![ToolCallReceiptData {
+            identity: ToolCallIdentityData {
                 session_id: SessionId::new("resume-target"),
                 run_id: normalized_run_id,
                 step_id: normalized_step_id,
@@ -346,8 +347,8 @@ fn finalized_tool_step(
                 agent: false,
             },
             input_preview: input.to_string(),
-            state: context::ToolCallState::Terminal(ToolTerminalReceipt::new(
-                ToolOutcomeKind::Success,
+            state: crate::ToolCallState::Terminal(ToolTerminalReceiptData::new(
+                ToolOutcomeKindData::Success,
                 "terminal",
                 CleanupConfirmation::NotApplicable,
             )),
@@ -567,7 +568,7 @@ async fn accepted_input_persists_and_is_visible_after_resume_without_outcome() {
     drop(bound);
 
     let receipt = context
-        .append_accepted_input(&AcceptedInputAppend {
+        .append_accepted_input(&AcceptedInputAppendData {
             session_id: SessionId::new(source_id.clone()),
             run_id: RunId::new("run-accepted"),
             step_id: RunStepId::new("step-accepted"),
@@ -613,7 +614,7 @@ async fn finalized_outcome_metadata_survives_resume_without_runtime_state() {
     drop(bound);
 
     context
-        .append_accepted_input(&AcceptedInputAppend {
+        .append_accepted_input(&AcceptedInputAppendData {
             session_id: SessionId::new(source_id.clone()),
             run_id: RunId::new("run-finalized"),
             step_id: RunStepId::new("step-finalized"),
@@ -624,7 +625,7 @@ async fn finalized_outcome_metadata_survives_resume_without_runtime_state() {
         .await
         .expect("append accepted input");
     context
-        .append_and_persist(&ContextAppend {
+        .append_and_persist(&ContextAppendData {
             session_id: SessionId::new(source_id.clone()),
             expected_revision: SessionRevision::new(0),
             run_id: RunId::new("run-finalized"),
@@ -633,10 +634,10 @@ async fn finalized_outcome_metadata_survives_resume_without_runtime_state() {
             finalize_cause: FinalizeCause::RunTerminated,
             duration_ms: None,
             messages: vec![Message::user("finalized partial")],
-            receipts: vec![StepReceipt::agent(
+            receipts: vec![StepReceiptData::agent(
                 "agent-call",
                 0,
-                ToolOutcomeKind::CancellationUnconfirmed,
+                ToolOutcomeKindData::CancellationUnconfirmed,
             )],
             api_input_tokens: Some(34),
             fingerprint: ContentFingerprint::new("outcome-fingerprint"),
@@ -666,7 +667,7 @@ async fn finalized_outcome_metadata_survives_resume_without_runtime_state() {
     assert_eq!(outcome.api_input_tokens, Some(34));
     assert_eq!(
         outcome.receipts[0].outcome(),
-        ToolOutcomeKind::CancellationUnconfirmed
+        ToolOutcomeKindData::CancellationUnconfirmed
     );
     assert_eq!(outcome.committed_revision, 1);
 }
@@ -681,7 +682,7 @@ async fn finalized_append_persists_and_is_visible_after_resume() {
     let workspace = bound.session().workspace.clone();
     drop(bound);
 
-    let append = ContextAppend {
+    let append = ContextAppendData {
         session_id: SessionId::new(source_id.clone()),
         expected_revision: SessionRevision::new(0),
         run_id: RunId::new("run-persist"),

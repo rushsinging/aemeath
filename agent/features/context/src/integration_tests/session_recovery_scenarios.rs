@@ -1,10 +1,10 @@
 use std::sync::{Arc, Mutex};
 
+use crate::LegacySessionDecoder;
+use crate::{CanonicalSession, CommittedRunSlice, CommittedRunStep};
+use crate::{SessionGeneration, SessionSnapshotStore, SessionStoreError};
+use crate::{SessionLoadError, SessionPersistenceService};
 use async_trait::async_trait;
-use context::LegacySessionDecoder;
-use context::{CanonicalSession, CommittedRunSlice, CommittedRunStep};
-use context::{SessionGeneration, SessionSnapshotStore, SessionStoreError};
-use context::{SessionLoadError, SessionPersistenceService};
 use share::message::{ContentBlock, Message, Role};
 
 #[derive(Default)]
@@ -100,7 +100,7 @@ async fn persisted_tool_result_bytes_survive_save_resume_and_llm_view() {
 }
 
 #[tokio::test]
-async fn unavailable_tool_result_projection_survives_save_and_resume() {
+async fn unavailable_tool_result_view_survives_save_and_resume() {
     let store = Arc::new(JourneyStore::default());
     let preview = "<persisted-output>bounded unavailable preview</persisted-output>";
     let projection = serde_json::json!({

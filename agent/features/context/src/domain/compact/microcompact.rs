@@ -1,7 +1,7 @@
 use share::message::{ContentBlock, Message};
 
 use super::context_read_candidate::{ContextReadCandidate, ContextReadStep};
-use crate::domain::{ToolCallReceipt, ToolCallState, ToolOutcomeKind};
+use crate::domain::{ToolCallReceiptData, ToolCallState, ToolOutcomeKindData};
 
 const EXPLORATORY_TOOLS: &[&str] = &[
     "Read",
@@ -43,7 +43,7 @@ fn successful_exploration_calls(
         .collect()
 }
 
-fn receipt_call_id(receipt: &ToolCallReceipt) -> String {
+fn receipt_call_id(receipt: &ToolCallReceiptData) -> String {
     receipt
         .identity
         .provider_call_id
@@ -52,10 +52,10 @@ fn receipt_call_id(receipt: &ToolCallReceipt) -> String {
         .to_string()
 }
 
-fn is_success(receipt: &ToolCallReceipt) -> bool {
+fn is_success(receipt: &ToolCallReceiptData) -> bool {
     matches!(
         &receipt.state,
-        ToolCallState::Terminal(terminal) if terminal.outcome == ToolOutcomeKind::Success
+        ToolCallState::Terminal(terminal) if terminal.outcome == ToolOutcomeKindData::Success
     )
 }
 

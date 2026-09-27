@@ -4,9 +4,9 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use context::ContextRequest;
-use context::{ContextPromptSource, SkillQueryFactory};
-use context::{SkillPromptSource, WorkspaceSkillQueryFactory};
+use crate::ContextRequestData;
+use crate::{ContextPromptSource, SkillQueryFactory};
+use crate::{SkillPromptSource, WorkspaceSkillQueryFactory};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
 use share::reasoning::ReasoningLevel;
@@ -23,7 +23,7 @@ impl SkillCatalogPort for FakeCatalog {
 
 struct FixedQueryFactory;
 impl SkillQueryFactory for FixedQueryFactory {
-    fn query(&self, _request: &ContextRequest) -> SkillQuery {
+    fn query(&self, _request: &ContextRequestData) -> SkillQuery {
         SkillQuery::new(PathBuf::from("/fake"), Vec::new(), BTreeSet::new())
     }
 }
@@ -47,16 +47,16 @@ fn source(skills: Vec<SkillDescriptor>) -> SkillPromptSource {
     SkillPromptSource::new(Arc::new(FakeCatalog(skills)), Arc::new(FixedQueryFactory))
 }
 
-fn base_request() -> ContextRequest {
-    use context::*;
-    ContextRequest {
+fn base_request() -> ContextRequestData {
+    use crate::*;
+    ContextRequestData {
         session_id: SessionId::new("session"),
         request_id: ContextRequestId::new("request"),
         run_id: sdk::RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![],
         invocation_reminders: vec![],
-        system_prompt: SystemPromptSpec::new("base system prompt"),
+        system_prompt: SystemPromptSpecData::new("base system prompt"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
         language: Language::new("en"),
@@ -118,14 +118,14 @@ async fn duplicate_identity_is_deduplicated_and_empty_catalog_omits_block() {
 #[tokio::test]
 async fn chinese_header_and_budget_are_deterministic() {
     let mut request = base_request();
-    request.language = context::Language::new("zh");
+    request.language = crate::Language::new("zh");
     request.context_size = 8_000;
     let result = source(vec![descriptor("alpha", &"x".repeat(8_000), None)])
         .materialize(&request)
         .await
         .unwrap();
     assert!(!result.cacheable.iter().any(|block| block.kind == "skills"));
-    assert_eq!(context::skill_prompt_budget(8_000), 1_024);
+    assert_eq!(crate::skill_prompt_budget(8_000), 1_024);
 }
 
 struct FakeWorkspace(PathBuf);

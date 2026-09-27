@@ -49,7 +49,7 @@ fn session() -> CanonicalSession {
 
 #[test]
 fn list_entry_reads_marker_projected_messages() {
-    let entry = SessionListEntry::from_canonical(&session());
+    let entry = SessionListEntryData::from_canonical(&session());
 
     assert_eq!(entry.message_count, 1);
     assert_eq!(entry.preview.as_deref(), Some("visible preview"));
@@ -84,7 +84,7 @@ fn captured_workspace_session(initial_cwd: &str) -> CanonicalSession {
 
 #[test]
 fn list_entry_marks_cleared_empty_tail_as_empty_instead_of_unknown() {
-    let entry = SessionListEntry::from_canonical(&cleared_empty_session());
+    let entry = SessionListEntryData::from_canonical(&cleared_empty_session());
 
     assert_eq!(entry.message_count, 0);
     assert_eq!(entry.preview, None);
@@ -93,8 +93,9 @@ fn list_entry_marks_cleared_empty_tail_as_empty_instead_of_unknown() {
 
 #[test]
 fn list_entry_derives_project_name_from_workspace_identity() {
-    let entry =
-        SessionListEntry::from_canonical(&captured_workspace_session("/Users/dev/work/aemeath"));
+    let entry = SessionListEntryData::from_canonical(&captured_workspace_session(
+        "/Users/dev/work/aemeath",
+    ));
 
     assert_eq!(entry.project.as_deref(), Some("aemeath"));
 }
@@ -104,14 +105,14 @@ fn list_entry_prefers_explicit_metadata_project_over_workspace_identity() {
     let mut session = captured_workspace_session("/Users/dev/work/aemeath");
     session.metadata.project = Some("custom-project".to_string());
 
-    let entry = SessionListEntry::from_canonical(&session);
+    let entry = SessionListEntryData::from_canonical(&session);
 
     assert_eq!(entry.project.as_deref(), Some("custom-project"));
 }
 
 #[test]
 fn list_entry_keeps_project_none_without_workspace_snapshot() {
-    let entry = SessionListEntry::from_canonical(&cleared_empty_session());
+    let entry = SessionListEntryData::from_canonical(&cleared_empty_session());
 
     assert_eq!(entry.project, None);
 }

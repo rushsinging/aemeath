@@ -2,17 +2,17 @@ use std::sync::Arc;
 
 use share::message::{ContentBlock, Message};
 
-use context::compact::{
+use crate::compact::{
     microcompact_exploration, snip_superseded_exploration, ContextReadCandidate, ContextReadRun,
     ContextReadStep, ProtectedRunPolicy,
 };
-use context::{
+use crate::{
     AcceptedInputRecord, CommittedRunSlice, CommittedRunStep, CommittedStepMessages,
     FinalizedOutcomeRecord, SessionHistory,
 };
-use context::{
-    CleanupConfirmation, FinalizeCause, SessionId, ToolCallIdentity, ToolCallReceipt,
-    ToolOutcomeKind, ToolTerminalReceipt,
+use crate::{
+    CleanupConfirmation, FinalizeCause, SessionId, ToolCallIdentityData, ToolCallReceiptData,
+    ToolOutcomeKindData, ToolTerminalReceiptData,
 };
 
 fn finalized(messages: Vec<Message>) -> FinalizedOutcomeRecord {
@@ -131,10 +131,10 @@ fn terminal_receipt(
     tool_use_id: &str,
     tool_name: &str,
     input: serde_json::Value,
-    outcome: ToolOutcomeKind,
-) -> ToolCallReceipt {
-    ToolCallReceipt {
-        identity: ToolCallIdentity {
+    outcome: ToolOutcomeKindData,
+) -> ToolCallReceiptData {
+    ToolCallReceiptData {
+        identity: ToolCallIdentityData {
             session_id: SessionId::new("session"),
             run_id: sdk::RunId::new(run_id),
             step_id: sdk::RunStepId::new(step_id),
@@ -145,7 +145,7 @@ fn terminal_receipt(
             agent: false,
         },
         input_preview: input.to_string(),
-        state: context::ToolCallState::Terminal(ToolTerminalReceipt::new(
+        state: crate::ToolCallState::Terminal(ToolTerminalReceiptData::new(
             outcome,
             "terminal",
             CleanupConfirmation::NotApplicable,
@@ -161,7 +161,7 @@ fn tool_step_with_receipt_preview(
     input: serde_json::Value,
     receipt_input_preview: &str,
     text: &str,
-    outcome: ToolOutcomeKind,
+    outcome: ToolOutcomeKindData,
 ) -> ContextReadStep {
     let normalized_run_id = sdk::RunId::new(run_id);
     let normalized_step_id = sdk::RunStepId::new(step_id);
@@ -195,7 +195,7 @@ fn tool_step(
     tool_name: &str,
     input: serde_json::Value,
     text: &str,
-    outcome: ToolOutcomeKind,
+    outcome: ToolOutcomeKindData,
 ) -> ContextReadStep {
     let receipt_input_preview = input.to_string();
     tool_step_with_receipt_preview(
@@ -218,7 +218,7 @@ fn context_read_step(
     run_id: &str,
     step_id: &str,
     messages: Option<CommittedStepMessages>,
-    receipts: Vec<ToolCallReceipt>,
+    receipts: Vec<ToolCallReceiptData>,
     finalized: bool,
 ) -> ContextReadStep {
     let normalized_run_id = sdk::RunId::new(run_id);
@@ -276,7 +276,7 @@ fn snip_replaces_old_read_when_later_successful_edit_targets_same_canonical_path
         "Read",
         serde_json::json!({"file_path": "/repo/src/lib.rs"}),
         "obsolete source bytes",
-        ToolOutcomeKind::Success,
+        ToolOutcomeKindData::Success,
     );
     let later_edit = tool_step(
         "run-edit",
@@ -285,7 +285,7 @@ fn snip_replaces_old_read_when_later_successful_edit_targets_same_canonical_path
         "Edit",
         serde_json::json!({"file_path": "/repo/src/../src/lib.rs"}),
         "edited",
-        ToolOutcomeKind::Success,
+        ToolOutcomeKindData::Success,
     );
     let candidate = ContextReadCandidate::from_steps(
         vec![
@@ -343,7 +343,7 @@ fn snip_uses_typed_tool_input_when_receipt_preview_is_truncated() {
         read_input,
         "{\"file_path\":\"/repo/src/lib.rs\",\"pattern\":\"truncated",
         "obsolete source bytes",
-        ToolOutcomeKind::Success,
+        ToolOutcomeKindData::Success,
     );
     let later_write = tool_step(
         "run-write",
@@ -352,7 +352,7 @@ fn snip_uses_typed_tool_input_when_receipt_preview_is_truncated() {
         "Write",
         serde_json::json!({"file_path": "/repo/src/lib.rs"}),
         "written",
-        ToolOutcomeKind::Success,
+        ToolOutcomeKindData::Success,
     );
     let candidate = ContextReadCandidate::from_steps(
         vec![
@@ -380,7 +380,7 @@ fn snip_keeps_different_path_failed_write_and_protected_run() {
         "Read",
         serde_json::json!({"file_path": "/repo/src/lib.rs"}),
         "keep me",
-        ToolOutcomeKind::Success,
+        ToolOutcomeKindData::Success,
     );
     let protected_read = tool_step(
         "run-protected",
@@ -389,7 +389,7 @@ fn snip_keeps_different_path_failed_write_and_protected_run() {
         "Read",
         serde_json::json!({"file_path": "/repo/src/protected.rs"}),
         "protected result",
-        ToolOutcomeKind::Success,
+        ToolOutcomeKindData::Success,
     );
     let failed_write = tool_step(
         "run-write",
@@ -398,7 +398,7 @@ fn snip_keeps_different_path_failed_write_and_protected_run() {
         "Write",
         serde_json::json!({"file_path": "/repo/src/lib.rs"}),
         "failed",
-        ToolOutcomeKind::Failure,
+        ToolOutcomeKindData::Failure,
     );
     let other_edit = tool_step(
         "run-other",
@@ -407,7 +407,7 @@ fn snip_keeps_different_path_failed_write_and_protected_run() {
         "Edit",
         serde_json::json!({"file_path": "/repo/src/other.rs"}),
         "edited",
-        ToolOutcomeKind::Success,
+        ToolOutcomeKindData::Success,
     );
     let protected_edit = tool_step(
         "run-edit-protected",
@@ -416,7 +416,7 @@ fn snip_keeps_different_path_failed_write_and_protected_run() {
         "Edit",
         serde_json::json!({"file_path": "/repo/src/protected.rs"}),
         "edited protected file",
-        ToolOutcomeKind::Success,
+        ToolOutcomeKindData::Success,
     );
     let candidate = ContextReadCandidate::from_steps(
         vec![
@@ -471,7 +471,7 @@ fn snip_copies_only_the_matching_step_and_keeps_other_blocks_byte_stable() {
             "read-call",
             "Read",
             serde_json::json!({"file_path": "/repo/src/lib.rs"}),
-            ToolOutcomeKind::Success,
+            ToolOutcomeKindData::Success,
         )],
         true,
     );
@@ -482,7 +482,7 @@ fn snip_copies_only_the_matching_step_and_keeps_other_blocks_byte_stable() {
         "Read",
         serde_json::json!({"file_path": "/repo/src/other.rs"}),
         "still current",
-        ToolOutcomeKind::Success,
+        ToolOutcomeKindData::Success,
     );
     let unchanged_backing = unchanged_read.outcome_messages();
     let later_write = tool_step(
@@ -492,7 +492,7 @@ fn snip_copies_only_the_matching_step_and_keeps_other_blocks_byte_stable() {
         "Write",
         serde_json::json!({"file_path": "/repo/src/lib.rs"}),
         "written",
-        ToolOutcomeKind::Success,
+        ToolOutcomeKindData::Success,
     );
     let candidate = ContextReadCandidate::from_steps(
         vec![
@@ -539,7 +539,7 @@ fn snip_requires_tool_use_name_to_match_typed_receipt_identity() {
             "read-call",
             "Read",
             serde_json::json!({"file_path": "/repo/src/lib.rs"}),
-            ToolOutcomeKind::Success,
+            ToolOutcomeKindData::Success,
         )],
         true,
     );
@@ -550,7 +550,7 @@ fn snip_requires_tool_use_name_to_match_typed_receipt_identity() {
         "Write",
         serde_json::json!({"file_path": "/repo/src/lib.rs"}),
         "written",
-        ToolOutcomeKind::Success,
+        ToolOutcomeKindData::Success,
     );
     let source_backing = read_step.outcome_messages();
     let candidate = ContextReadCandidate::from_steps(
@@ -580,7 +580,7 @@ fn snip_requires_later_write_receipt_to_belong_to_its_candidate_step() {
         "Read",
         serde_json::json!({"file_path": "/repo/src/lib.rs"}),
         "must stay",
-        ToolOutcomeKind::Success,
+        ToolOutcomeKindData::Success,
     );
     let mut foreign_write = tool_step(
         "foreign-run",
@@ -589,7 +589,7 @@ fn snip_requires_later_write_receipt_to_belong_to_its_candidate_step() {
         "Write",
         serde_json::json!({"file_path": "/repo/src/lib.rs"}),
         "written",
-        ToolOutcomeKind::Success,
+        ToolOutcomeKindData::Success,
     );
     foreign_write = ContextReadStep::new(
         "step-write",
@@ -640,7 +640,7 @@ fn microcompact_replaces_only_unprotected_exploration_whitelist_results() {
                 tool_name,
                 serde_json::json!({"path": format!("/repo/item-{tool_index}")}),
                 &format!("old {tool_name} result"),
-                ToolOutcomeKind::Success,
+                ToolOutcomeKindData::Success,
             )
         })
         .collect();
@@ -651,7 +651,7 @@ fn microcompact_replaces_only_unprotected_exploration_whitelist_results() {
         "Edit",
         serde_json::json!({"file_path": "/repo/src/lib.rs"}),
         "edit result",
-        ToolOutcomeKind::Success,
+        ToolOutcomeKindData::Success,
     );
     let bash_step = tool_step(
         "run-bash",
@@ -660,7 +660,7 @@ fn microcompact_replaces_only_unprotected_exploration_whitelist_results() {
         "Bash",
         serde_json::json!({"command": "pwd"}),
         "bash result",
-        ToolOutcomeKind::Success,
+        ToolOutcomeKindData::Success,
     );
     let candidate = ContextReadCandidate::from_steps(
         vec![
@@ -705,7 +705,7 @@ fn microcompact_protects_three_recent_complete_runs_and_unfinalized_run() {
                     &format!("call-{run_id}"),
                     "Read",
                     serde_json::json!({"file_path": format!("/repo/{run_id}.rs")}),
-                    ToolOutcomeKind::Success,
+                    ToolOutcomeKindData::Success,
                 )],
                 finalized,
             )],
@@ -758,7 +758,7 @@ fn microcompact_uses_receipt_tool_identity_instead_of_untrusted_tool_use_name() 
             "read-call",
             "Read",
             serde_json::json!({"file_path": "/repo/src/lib.rs"}),
-            ToolOutcomeKind::Success,
+            ToolOutcomeKindData::Success,
         )],
         true,
     );
@@ -796,7 +796,7 @@ fn microcompact_requires_receipt_to_belong_to_its_candidate_run_and_step() {
             "read-call",
             "Read",
             serde_json::json!({"file_path": "/repo/src/lib.rs"}),
-            ToolOutcomeKind::Success,
+            ToolOutcomeKindData::Success,
         )],
         true,
     );
@@ -825,7 +825,7 @@ fn microcompact_preserves_protected_failed_and_unpaired_results_with_shared_back
         "Read",
         serde_json::json!({"file_path": "/repo/failed.rs"}),
         "failed read result",
-        ToolOutcomeKind::Failure,
+        ToolOutcomeKindData::Failure,
     );
     let unpaired_message = Message {
         role: share::message::Role::Assistant,
@@ -847,7 +847,7 @@ fn microcompact_preserves_protected_failed_and_unpaired_results_with_shared_back
             "unpaired-call",
             "Read",
             serde_json::json!({"file_path": "/repo/unpaired.rs"}),
-            ToolOutcomeKind::Success,
+            ToolOutcomeKindData::Success,
         )],
         true,
     );
@@ -858,7 +858,7 @@ fn microcompact_preserves_protected_failed_and_unpaired_results_with_shared_back
         "Read",
         serde_json::json!({"file_path": "/repo/protected.rs"}),
         "protected read result",
-        ToolOutcomeKind::Success,
+        ToolOutcomeKindData::Success,
     );
     let failed_backing = failed_read.outcome_messages();
     let unpaired_backing = unpaired_step.outcome_messages();
@@ -907,7 +907,7 @@ fn microcompact_is_idempotent_after_l2_snip_without_replacing_snip_metadata() {
         "Read",
         serde_json::json!({"file_path": "/repo/src/lib.rs"}),
         "obsolete source bytes",
-        ToolOutcomeKind::Success,
+        ToolOutcomeKindData::Success,
     );
     let later_write = tool_step(
         "run-write",
@@ -916,7 +916,7 @@ fn microcompact_is_idempotent_after_l2_snip_without_replacing_snip_metadata() {
         "Write",
         serde_json::json!({"file_path": "/repo/src/lib.rs"}),
         "written",
-        ToolOutcomeKind::Success,
+        ToolOutcomeKindData::Success,
     );
     let candidate = ContextReadCandidate::from_steps(
         vec![

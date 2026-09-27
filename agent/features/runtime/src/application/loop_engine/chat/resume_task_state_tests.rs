@@ -21,7 +21,7 @@ impl context::SessionManagementPort for ResumeSessionManagement {
     async fn list_for_project(
         &self,
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<context::SessionListEntry>, SessionManagementError> {
+    ) -> Result<Vec<context::SessionListEntryData>, SessionManagementError> {
         Ok(Vec::new())
     }
 
@@ -37,7 +37,7 @@ impl context::SessionManagementPort for ResumeSessionManagement {
         &self,
         _bytes: &[u8],
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<context::SessionListEntry, SessionManagementError> {
+    ) -> Result<context::SessionListEntryData, SessionManagementError> {
         Err(SessionManagementError::Storage("unused".to_owned()))
     }
 
@@ -45,8 +45,8 @@ impl context::SessionManagementPort for ResumeSessionManagement {
         &self,
         _id: &str,
         _project: &share::session_types::ProjectIdentityData,
-        _update: context::SessionMetadataUpdate,
-    ) -> Result<context::SessionListEntry, SessionManagementError> {
+        _update: context::SessionMetadataUpdateData,
+    ) -> Result<context::SessionListEntryData, SessionManagementError> {
         Err(SessionManagementError::Storage("unused".to_owned()))
     }
 

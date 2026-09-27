@@ -3,13 +3,13 @@ use share::message::{Message, Role};
 use share::session_types::ProjectIdentityData;
 
 use super::{
-    extract_project_name, CanonicalSession, DisplayHistoryStepIndex, SessionMetadata,
-    SessionRestoreStep, SnapshotState,
+    extract_project_name, CanonicalSession, DisplayHistoryStepIndexData, SessionMetadata,
+    SessionRestoreStepData, SnapshotState,
 };
 
 /// Context-owned session list projection published to Runtime/SDK adapters.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionListEntry {
+pub struct SessionListEntryData {
     pub id: String,
     pub title: Option<String>,
     pub project: Option<String>,
@@ -21,7 +21,7 @@ pub struct SessionListEntry {
     pub summary: String,
 }
 
-impl SessionListEntry {
+impl SessionListEntryData {
     pub(crate) fn from_canonical(session: &CanonicalSession) -> Self {
         let messages = session.structured_messages();
         let preview = messages
@@ -103,14 +103,14 @@ fn first_line(message: &Message) -> Option<String> {
 mod tests;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SessionMetadataUpdate {
+pub struct SessionMetadataUpdateData {
     pub title: Option<String>,
     pub tags: Option<Vec<String>>,
     pub notes: Option<String>,
     pub is_favorite: Option<bool>,
 }
 
-impl SessionMetadataUpdate {
+impl SessionMetadataUpdateData {
     pub(crate) fn apply(self, metadata: &mut SessionMetadata) {
         if let Some(title) = self.title {
             metadata.title = Some(title);
@@ -130,16 +130,16 @@ impl SessionMetadataUpdate {
 #[derive(Debug, Clone)]
 pub struct SessionResumeLoad {
     pub active_session: CanonicalSession,
-    pub display_history: Option<DisplayHistoryStepIndex>,
+    pub display_history: Option<DisplayHistoryStepIndexData>,
 }
 
 /// Runtime-safe resume view. Session internals never cross the crate boundary.
 #[derive(Debug, Clone)]
-pub struct SessionResumeView {
+pub struct SessionResumeViewData {
     pub session_id: String,
     pub active_messages: Vec<Message>,
-    pub display_steps: Vec<SessionRestoreStep>,
-    pub display_history: Option<DisplayHistoryStepIndex>,
+    pub display_steps: Vec<SessionRestoreStepData>,
+    pub display_history: Option<DisplayHistoryStepIndexData>,
     pub compacted: bool,
     pub created_at: String,
     pub trimmed: usize,

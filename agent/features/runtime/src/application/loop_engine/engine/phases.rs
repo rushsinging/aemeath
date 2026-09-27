@@ -151,11 +151,11 @@ where
 }
 
 pub(super) fn terminal_from_cleanup_receipts(
-    receipts: &[crate::ports::StepReceipt],
+    receipts: &[crate::ports::StepReceiptData],
 ) -> crate::domain::agent_run::RunStepStatus {
     if receipts
         .iter()
-        .any(|receipt| receipt.outcome() == context::ToolOutcomeKind::CancellationUnconfirmed)
+        .any(|receipt| receipt.outcome() == context::ToolOutcomeKindData::CancellationUnconfirmed)
     {
         crate::domain::agent_run::RunStepStatus::CancellationUnconfirmed
     } else {

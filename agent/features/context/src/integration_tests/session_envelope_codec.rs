@@ -1,15 +1,16 @@
-use context::decode_session;
-use context::{
+use crate::decode_session;
+use crate::{
     AcceptedInputRecord, CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStep,
     CommittedStepMessages, FinalizedOutcomeRecord, SessionCodec, SessionCodecError, SnapshotState,
     CURRENT_SESSION_SCHEMA_VERSION,
 };
-use context::{FinalizeCause, StepReceipt, ToolOutcomeKind};
+use crate::{FinalizeCause, StepReceiptData, ToolOutcomeKindData};
 use serde_json::json;
 use share::message::{ContentBlock, Message, Role};
 use share::session_types::{
     PersistedWorkspaceContext, ProjectIdentityData, WorkspaceId, WorktreeKind,
 };
+use utils;
 
 use tools::published::skill::{SkillLoadDecision, SkillLoadScope};
 
@@ -67,7 +68,7 @@ fn committed_step_messages_preserve_the_existing_json_array_wire() {
 }
 
 #[test]
-fn tool_result_projection_round_trips_without_full_payload() {
+fn tool_result_view_round_trips_without_full_payload() {
     let preview = "<persisted-output>bounded preview</persisted-output>";
     let content = json!({
         "text": preview,
@@ -156,7 +157,7 @@ fn legacy_messages_upgrade_to_single_normal_chat() {
 }
 
 #[test]
-fn structured_projection_flattens_steps_once() {
+fn structured_view_flattens_steps_once() {
     let mut session = CanonicalSession::fixture("structured");
     session.run_slices = vec![
         CommittedRunSlice::new(
@@ -231,10 +232,10 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
                 finalize_cause: FinalizeCause::UserCancelledStep,
                 duration_ms: Some(7_325_000),
                 messages: vec![Message::user("partial assistant")].into(),
-                receipts: vec![StepReceipt::agent(
+                receipts: vec![StepReceiptData::agent(
                     "agent-call",
                     0,
-                    ToolOutcomeKind::CancellationUnconfirmed,
+                    ToolOutcomeKindData::CancellationUnconfirmed,
                 )],
                 api_input_tokens: Some(42),
                 fingerprint: "outcome-fingerprint".to_string(),
@@ -256,7 +257,7 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
     assert_eq!(outcome.messages[0].text_content(), "partial assistant");
     assert_eq!(
         outcome.receipts[0].outcome(),
-        ToolOutcomeKind::CancellationUnconfirmed
+        ToolOutcomeKindData::CancellationUnconfirmed
     );
     assert_eq!(outcome.api_input_tokens, Some(42));
     assert_eq!(outcome.fingerprint, "outcome-fingerprint");
@@ -273,7 +274,7 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
 }
 
 #[test]
-fn v2_compatibility_outcome_vector_upgrades_as_single_projection() {
+fn v2_compatibility_outcome_vector_upgrades_as_single_view() {
     let bytes = serde_json::to_vec(&json!({
         "schema_version": 2,
         "id": "v2-bridge",
@@ -473,7 +474,9 @@ fn unique_non_git_dir(tag: &str) -> (std::path::PathBuf, String) {
 /// 初始化一个真实的 primary Git 仓库并返回其 canonical 根路径。
 fn init_git_repo(tag: &str) -> (std::path::PathBuf, String) {
     let (dir, _) = unique_non_git_dir(tag);
-    let status = std::process::Command::new("git")
+    let mut command = std::process::Command::new("git");
+    utils::configure_std_noninteractive(&mut command).expect("configure noninteractive git");
+    let status = command
         .args(["init", "-q"])
         .current_dir(&dir)
         .env("LC_ALL", "C")

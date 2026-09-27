@@ -266,7 +266,7 @@ pub struct LocalSessionResumeBacking {
 }
 
 impl LocalSessionResumeBacking {
-    pub fn from_wire(view: SessionResumeView) -> Self {
+    pub fn from_wire(view: SessionResumeViewData) -> Self {
         Self {
             steps: view
                 .steps
@@ -280,8 +280,8 @@ impl LocalSessionResumeBacking {
         }
     }
 
-    pub fn materialize(&self) -> SessionResumeView {
-        SessionResumeView {
+    pub fn materialize(&self) -> SessionResumeViewData {
+        SessionResumeViewData {
             steps: self
                 .steps
                 .iter()
@@ -344,7 +344,7 @@ pub struct ResumedSessionStep {
 
 /// 启动 `--resume` 已完成一次 backing 恢复后交给前端的历史投影。
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct SessionResumeView {
+pub struct SessionResumeViewData {
     pub steps: Vec<ResumedSessionStep>,
     pub session_id: String,
     pub created_at: u64,

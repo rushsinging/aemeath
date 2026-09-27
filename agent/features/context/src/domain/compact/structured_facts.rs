@@ -333,7 +333,7 @@ impl CompactFact {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CompactTaskBatchStatus {
+pub enum CompactTaskBatchStatusData {
     Active,
     Paused,
     Archived,
@@ -341,7 +341,7 @@ pub enum CompactTaskBatchStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum CompactTaskStatus {
+pub enum CompactTaskStatusData {
     Pending,
     InProgress,
     Completed,
@@ -349,14 +349,14 @@ pub enum CompactTaskStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct CompactTaskItem {
+pub struct CompactTaskItemData {
     sequence: u64,
     subject: String,
-    status: CompactTaskStatus,
+    status: CompactTaskStatusData,
     blocked_by_sequences: Vec<u64>,
 }
 
-impl CompactTaskItem {
+impl CompactTaskItemData {
     pub fn pending(
         sequence: u64,
         subject: impl Into<String>,
@@ -365,23 +365,33 @@ impl CompactTaskItem {
         Self::new(
             sequence,
             subject,
-            CompactTaskStatus::Pending,
+            CompactTaskStatusData::Pending,
             blocked_by_sequences,
         )
     }
 
     pub fn in_progress(sequence: u64, subject: impl Into<String>) -> Self {
-        Self::new(sequence, subject, CompactTaskStatus::InProgress, Vec::new())
+        Self::new(
+            sequence,
+            subject,
+            CompactTaskStatusData::InProgress,
+            Vec::new(),
+        )
     }
 
     pub fn completed(sequence: u64, subject: impl Into<String>) -> Self {
-        Self::new(sequence, subject, CompactTaskStatus::Completed, Vec::new())
+        Self::new(
+            sequence,
+            subject,
+            CompactTaskStatusData::Completed,
+            Vec::new(),
+        )
     }
 
     pub fn new(
         sequence: u64,
         subject: impl Into<String>,
-        status: CompactTaskStatus,
+        status: CompactTaskStatusData,
         blocked_by_sequences: Vec<u64>,
     ) -> Self {
         Self {
@@ -400,7 +410,7 @@ impl CompactTaskItem {
         &self.subject
     }
 
-    pub const fn status(&self) -> &CompactTaskStatus {
+    pub const fn status(&self) -> &CompactTaskStatusData {
         &self.status
     }
 
@@ -411,26 +421,26 @@ impl CompactTaskItem {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct CompactTaskSnapshot {
+pub struct CompactTaskSnapshotData {
     revision: u64,
     batch_id: u64,
     batch_summary: String,
-    batch_status: CompactTaskBatchStatus,
-    items: Vec<CompactTaskItem>,
+    batch_status: CompactTaskBatchStatusData,
+    items: Vec<CompactTaskItemData>,
 }
 
-impl CompactTaskSnapshot {
+impl CompactTaskSnapshotData {
     pub fn active(
         revision: u64,
         batch_id: u64,
         batch_summary: impl Into<String>,
-        items: Vec<CompactTaskItem>,
+        items: Vec<CompactTaskItemData>,
     ) -> Self {
         Self::new(
             revision,
             batch_id,
             batch_summary,
-            CompactTaskBatchStatus::Active,
+            CompactTaskBatchStatusData::Active,
             items,
         )
     }
@@ -439,13 +449,13 @@ impl CompactTaskSnapshot {
         revision: u64,
         batch_id: u64,
         batch_summary: impl Into<String>,
-        items: Vec<CompactTaskItem>,
+        items: Vec<CompactTaskItemData>,
     ) -> Self {
         Self::new(
             revision,
             batch_id,
             batch_summary,
-            CompactTaskBatchStatus::Paused,
+            CompactTaskBatchStatusData::Paused,
             items,
         )
     }
@@ -454,10 +464,10 @@ impl CompactTaskSnapshot {
         revision: u64,
         batch_id: u64,
         batch_summary: impl Into<String>,
-        batch_status: CompactTaskBatchStatus,
-        mut items: Vec<CompactTaskItem>,
+        batch_status: CompactTaskBatchStatusData,
+        mut items: Vec<CompactTaskItemData>,
     ) -> Self {
-        items.sort_by_key(CompactTaskItem::sequence);
+        items.sort_by_key(CompactTaskItemData::sequence);
         Self {
             revision,
             batch_id,
@@ -479,11 +489,11 @@ impl CompactTaskSnapshot {
         &self.batch_summary
     }
 
-    pub const fn batch_status(&self) -> &CompactTaskBatchStatus {
+    pub const fn batch_status(&self) -> &CompactTaskBatchStatusData {
         &self.batch_status
     }
 
-    pub fn items(&self) -> &[CompactTaskItem] {
+    pub fn items(&self) -> &[CompactTaskItemData] {
         &self.items
     }
 
@@ -495,7 +505,7 @@ impl CompactTaskSnapshot {
         let completed = self
             .items
             .iter()
-            .filter(|item| item.status == CompactTaskStatus::Completed)
+            .filter(|item| item.status == CompactTaskStatusData::Completed)
             .count();
         let mut lines = vec![format!(
             "BatchData #{} — Tasks: {completed}/{}",
@@ -505,22 +515,22 @@ impl CompactTaskSnapshot {
         let prioritized_items = self
             .items
             .iter()
-            .filter(|item| item.status == CompactTaskStatus::InProgress)
+            .filter(|item| item.status == CompactTaskStatusData::InProgress)
             .chain(
                 self.items
                     .iter()
-                    .filter(|item| item.status == CompactTaskStatus::Pending),
+                    .filter(|item| item.status == CompactTaskStatusData::Pending),
             )
             .chain(
                 self.items
                     .iter()
-                    .filter(|item| item.status == CompactTaskStatus::Completed),
+                    .filter(|item| item.status == CompactTaskStatusData::Completed),
             );
         for item in prioritized_items.take(item_limit) {
             let icon = match item.status {
-                CompactTaskStatus::Pending => "□",
-                CompactTaskStatus::InProgress => "■",
-                CompactTaskStatus::Completed => "✓",
+                CompactTaskStatusData::Pending => "□",
+                CompactTaskStatusData::InProgress => "■",
+                CompactTaskStatusData::Completed => "✓",
             };
             let blocked_by = if item.blocked_by_sequences.is_empty() {
                 String::new()
@@ -571,7 +581,7 @@ impl CompactFactBatch {
 
 pub fn reconcile_checkpoint_with_task_snapshot(
     checkpoint: ContinuationCheckpoint,
-    task_snapshot: Option<&CompactTaskSnapshot>,
+    task_snapshot: Option<&CompactTaskSnapshotData>,
 ) -> Result<ContinuationCheckpoint, CheckpointError> {
     let Some(task_snapshot) =
         task_snapshot.filter(|snapshot| task_snapshot_is_authoritative(snapshot))
@@ -582,12 +592,12 @@ pub fn reconcile_checkpoint_with_task_snapshot(
     let in_progress = task_snapshot
         .items
         .iter()
-        .find(|item| item.status == CompactTaskStatus::InProgress)
+        .find(|item| item.status == CompactTaskStatusData::InProgress)
         .expect("authoritative task snapshot requires exactly one in-progress item");
     let completed_subjects = task_snapshot
         .items
         .iter()
-        .filter(|item| item.status == CompactTaskStatus::Completed)
+        .filter(|item| item.status == CompactTaskStatusData::Completed)
         .map(|item| normalize_for_comparison(item.subject()))
         .collect::<Vec<_>>();
 
@@ -601,7 +611,7 @@ pub fn reconcile_checkpoint_with_task_snapshot(
     for item in task_snapshot
         .items
         .iter()
-        .filter(|item| item.status == CompactTaskStatus::Pending)
+        .filter(|item| item.status == CompactTaskStatusData::Pending)
     {
         let dependency = if item.blocked_by_sequences().is_empty() {
             String::new()
@@ -626,13 +636,13 @@ pub fn reconcile_checkpoint_with_task_snapshot(
     ContinuationCheckpoint::try_from(wire)
 }
 
-fn task_snapshot_is_authoritative(snapshot: &CompactTaskSnapshot) -> bool {
-    snapshot.batch_status == CompactTaskBatchStatus::Active
+fn task_snapshot_is_authoritative(snapshot: &CompactTaskSnapshotData) -> bool {
+    snapshot.batch_status == CompactTaskBatchStatusData::Active
         && !snapshot.batch_summary.trim().is_empty()
         && snapshot
             .items
             .iter()
-            .filter(|item| item.status == CompactTaskStatus::InProgress)
+            .filter(|item| item.status == CompactTaskStatusData::InProgress)
             .count()
             == 1
 }
@@ -645,7 +655,7 @@ pub fn reduce_compact_facts(
 
 pub fn reduce_compact_facts_with_task_snapshot(
     batch: CompactFactBatch,
-    task_snapshot: Option<&CompactTaskSnapshot>,
+    task_snapshot: Option<&CompactTaskSnapshotData>,
 ) -> Result<ContinuationCheckpoint, CheckpointError> {
     reduce_compact_facts_with_objective_fallback(batch, task_snapshot, None)
 }
@@ -657,7 +667,7 @@ pub fn reduce_compact_facts_with_task_snapshot(
 /// 空白值视为缺失，此时保持既有保守语义（占位符 + `Waiting for User`）。
 pub fn reduce_compact_facts_with_objective_fallback(
     batch: CompactFactBatch,
-    task_snapshot: Option<&CompactTaskSnapshot>,
+    task_snapshot: Option<&CompactTaskSnapshotData>,
     objective_fallback: Option<&str>,
 ) -> Result<ContinuationCheckpoint, CheckpointError> {
     let mut indexed_facts = batch
@@ -765,14 +775,14 @@ pub fn reduce_compact_facts_with_objective_fallback(
         let in_progress = task_snapshot
             .items
             .iter()
-            .find(|item| item.status == CompactTaskStatus::InProgress)
+            .find(|item| item.status == CompactTaskStatusData::InProgress)
             .expect("active task reconciliation requires exactly one in-progress item");
         next_action = Some(in_progress.subject().to_string());
 
         let completed_subjects = task_snapshot
             .items
             .iter()
-            .filter(|item| item.status == CompactTaskStatus::Completed)
+            .filter(|item| item.status == CompactTaskStatusData::Completed)
             .map(|item| normalize_for_comparison(item.subject()))
             .collect::<Vec<_>>();
         working_set.retain(|line| !contradicts_completed_work(line, &completed_subjects));
@@ -782,7 +792,7 @@ pub fn reduce_compact_facts_with_objective_fallback(
         for item in task_snapshot
             .items
             .iter()
-            .filter(|item| item.status == CompactTaskStatus::Pending)
+            .filter(|item| item.status == CompactTaskStatusData::Pending)
         {
             let dependency = if item.blocked_by_sequences().is_empty() {
                 String::new()
@@ -854,7 +864,7 @@ pub fn reduce_compact_facts_with_objective_fallback(
     })
 }
 
-fn same_task_working_item(line: &str, item: &CompactTaskItem) -> bool {
+fn same_task_working_item(line: &str, item: &CompactTaskItemData) -> bool {
     let normalized_line = normalize_for_comparison(line);
     let normalized_subject = normalize_for_comparison(item.subject());
     normalized_line.contains(&format!("pending task {}", item.sequence()))

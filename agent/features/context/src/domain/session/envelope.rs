@@ -6,11 +6,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use task::TaskSnapshotData;
 
-use crate::domain::{FinalizeCause, StepReceipt, ToolCallReceipt, ToolReceiptMutation};
+use crate::domain::{FinalizeCause, StepReceiptData, ToolCallReceiptData, ToolReceiptMutationData};
 
 use super::{ChatSegment, PersistedWorkspaceContext, SessionMetadata};
 
-pub const CURRENT_SESSION_SCHEMA_VERSION: u32 = 6;
+pub(crate) const CURRENT_SESSION_SCHEMA_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", content = "value", rename_all = "snake_case")]
@@ -211,7 +211,7 @@ pub struct FinalizedOutcomeRecord {
     #[serde(default)]
     pub duration_ms: Option<u64>,
     pub messages: CommittedStepMessages,
-    pub receipts: Vec<StepReceipt>,
+    pub receipts: Vec<StepReceiptData>,
     pub api_input_tokens: Option<u64>,
     pub fingerprint: String,
     pub committed_revision: u64,
@@ -239,7 +239,7 @@ pub struct CommittedRunStep {
     #[serde(default)]
     pub outcome: Option<FinalizedOutcomeRecord>,
     #[serde(default)]
-    pub tool_receipts: Vec<ToolCallReceipt>,
+    pub tool_receipts: Vec<ToolCallReceiptData>,
 }
 
 impl CommittedRunStep {
@@ -286,7 +286,7 @@ impl CommittedRunSlice {
 pub(crate) struct RestoreStepSource {
     pub cursor: RunStepCursor,
     pub message_segments: Vec<Arc<[Message]>>,
-    pub tool_receipts: Vec<ToolCallReceipt>,
+    pub tool_receipts: Vec<ToolCallReceiptData>,
     pub finalize_cause: Option<FinalizeCause>,
     pub duration_ms: Option<u64>,
 }
@@ -415,7 +415,7 @@ impl SessionHistory {
         self.step(run_id, step_id)?.accepted_input.as_ref()
     }
 
-    pub fn tool_receipt(&self, mutation: &ToolReceiptMutation) -> Option<&ToolCallReceipt> {
+    pub fn tool_receipt(&self, mutation: &ToolReceiptMutationData) -> Option<&ToolCallReceiptData> {
         self.step(
             mutation.identity.run_id.as_ref(),
             mutation.identity.step_id.as_str(),
@@ -425,25 +425,25 @@ impl SessionHistory {
         .find(|receipt| receipt.identity == mutation.identity)
     }
 
-    pub fn step_receipts(&self, run_id: &str, step_id: &str) -> Vec<StepReceipt> {
+    pub fn step_receipts(&self, run_id: &str, step_id: &str) -> Vec<StepReceiptData> {
         let mut receipts = self
             .step(run_id, step_id)
             .map(|step| {
                 step.tool_receipts
                     .iter()
-                    .filter_map(ToolCallReceipt::to_step_receipt)
+                    .filter_map(ToolCallReceiptData::to_step_receipt)
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        receipts.sort_by_key(StepReceipt::index);
+        receipts.sort_by_key(StepReceiptData::index);
         receipts
     }
 
     pub fn advance_tool_receipt(
         &self,
-        mutation: ToolReceiptMutation,
+        mutation: ToolReceiptMutationData,
     ) -> Result<
-        (Self, crate::domain::ToolReceiptMutationReceipt),
+        (Self, crate::domain::ToolReceiptMutationReceiptData),
         crate::domain::ToolReceiptMutationError,
     > {
         if let Some(receipt) = self.tool_receipt(&mutation) {
@@ -468,11 +468,11 @@ impl SessionHistory {
         }
 
         let input_preview = mutation.input_preview.clone().unwrap_or_default();
-        let mut receipt = ToolCallReceipt::pending(mutation.identity.clone(), input_preview);
+        let mut receipt = ToolCallReceiptData::pending(mutation.identity.clone(), input_preview);
         if mutation.next != crate::domain::ToolCallState::Pending {
             receipt = receipt.advance(mutation.clone())?.receipt;
         }
-        let advanced = crate::domain::ToolReceiptMutationReceipt {
+        let advanced = crate::domain::ToolReceiptMutationReceiptData {
             receipt: receipt.clone(),
             changed: true,
         };
@@ -626,17 +626,17 @@ impl CanonicalSession {
         tools::published::skill::SkillLoadDecision::Fresh
     }
 
-    pub fn step_receipts(&self, run_id: &str, step_id: &str) -> Vec<StepReceipt> {
+    pub fn step_receipts(&self, run_id: &str, step_id: &str) -> Vec<StepReceiptData> {
         self.run_slices.step_receipts(run_id, step_id)
     }
 
-    pub fn tool_receipt(&self, mutation: &ToolReceiptMutation) -> Option<&ToolCallReceipt> {
+    pub fn tool_receipt(&self, mutation: &ToolReceiptMutationData) -> Option<&ToolCallReceiptData> {
         self.run_slices.tool_receipt(mutation)
     }
 
     pub fn advance_tool_receipt(
         &mut self,
-        mutation: ToolReceiptMutation,
+        mutation: ToolReceiptMutationData,
     ) -> Result<bool, crate::domain::ToolReceiptMutationError> {
         let (history, advanced) = self.run_slices.advance_tool_receipt(mutation)?;
         if advanced.changed {
@@ -991,7 +991,7 @@ pub struct DecodedSession {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum SessionCodecError {
+pub(crate) enum SessionCodecError {
     #[error("Session schema version {version} is newer than supported")]
     UnsupportedFutureVersion {
         version: u32,
@@ -1093,7 +1093,7 @@ pub(super) mod task_snapshot_state {
     }
 }
 
-pub struct SessionCodec;
+pub(crate) struct SessionCodec;
 
 impl SessionCodec {
     pub fn encode(session: &CanonicalSession) -> Result<Vec<u8>, SessionCodecError> {

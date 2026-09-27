@@ -8,10 +8,10 @@ use crate::domain::session::{
     FinalizedOutcomeRecord, SessionCommitPlan, SnapshotState,
 };
 use crate::domain::{
-    AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
-    CompactRequest, CompactSkipReason, ContextAppend, ContextAppendError, ContextPortError,
-    ManualCompactRequest, SessionId, SessionRevision, ToolReceiptMutation,
-    ToolReceiptMutationError, ToolReceiptMutationReceipt,
+    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
+    CompactOutcome, CompactRequestData, CompactSkipReason, ContextAppendData, ContextAppendError,
+    ContextPortError, ManualCompactRequestData, SessionId, SessionRevision,
+    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
 use crate::ports::{ContextPort, MainContextFactory, SessionRepository, SessionSnapshot};
 
@@ -99,7 +99,7 @@ pub trait ToolReceiptWriter: Send + Sync {
         &self,
         session_id: &str,
         revision: u64,
-        receipt: &crate::domain::ToolCallReceipt,
+        receipt: &crate::domain::ToolCallReceiptData,
     ) -> Result<(), String>;
 }
 
@@ -171,7 +171,7 @@ impl ToolReceiptWriter for AtomicBlobToolReceiptWriter {
         &self,
         session_id: &str,
         revision: u64,
-        receipt: &crate::domain::ToolCallReceipt,
+        receipt: &crate::domain::ToolCallReceiptData,
     ) -> Result<(), String> {
         crate::adapters::tool_receipt_ledger::AtomicBlobToolReceiptLedger::new(
             Arc::clone(&self.blob),
@@ -190,13 +190,13 @@ impl ToolReceiptWriter for NoOpToolReceiptWriter {
         &self,
         _session_id: &str,
         _revision: u64,
-        _receipt: &crate::domain::ToolCallReceipt,
+        _receipt: &crate::domain::ToolCallReceiptData,
     ) -> Result<(), String> {
         Ok(())
     }
 }
 
-pub struct AtomicBlobCanonicalSessionWriter {
+pub(crate) struct AtomicBlobCanonicalSessionWriter {
     blob: Arc<dyn storage::AtomicBlobPort>,
 }
 
@@ -209,7 +209,7 @@ impl AtomicBlobCanonicalSessionWriter {
         &self,
         session_id: &str,
         revision: u64,
-        receipt: &crate::domain::ToolCallReceipt,
+        receipt: &crate::domain::ToolCallReceiptData,
     ) -> Result<(), String> {
         crate::adapters::tool_receipt_ledger::AtomicBlobToolReceiptLedger::new(
             Arc::clone(&self.blob),
@@ -226,7 +226,7 @@ impl ToolReceiptWriter for AtomicBlobCanonicalSessionWriter {
         &self,
         session_id: &str,
         revision: u64,
-        receipt: &crate::domain::ToolCallReceipt,
+        receipt: &crate::domain::ToolCallReceiptData,
     ) -> Result<(), String> {
         AtomicBlobCanonicalSessionWriter::save_tool_receipt(self, session_id, revision, receipt)
             .await
@@ -389,7 +389,7 @@ impl Drop for AutoCompactAttemptPermit {
     }
 }
 
-pub struct CanonicalSessionRepository {
+pub(crate) struct CanonicalSessionRepository {
     session: Arc<RwLock<Arc<CanonicalSession>>>,
     task_persist: Arc<dyn task::TaskPersist>,
     workspace_persist: Arc<dyn project::WorkspaceWriter>,
@@ -480,7 +480,7 @@ impl CanonicalSessionRepository {
         context_size: usize,
         step_boundaries: &[usize],
         progress: Option<std::sync::Arc<dyn crate::domain::CompactProgressFn>>,
-        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
+        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
         cancellation: &tokio_util::sync::CancellationToken,
     ) -> Option<crate::adapters::compact_summary::CompactResult> {
         let tail = crate::adapters::compact_summary::CompactTail::from_context(
@@ -536,7 +536,7 @@ impl CanonicalSessionRepository {
     /// 收敛到同一 Context-owned summary budget。
     fn append_task_snapshot_companion(
         summary: &str,
-        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
+        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
         budget: usize,
     ) -> Result<String, crate::domain::compact::CheckpointError> {
         let checkpoint =
@@ -577,7 +577,7 @@ impl CanonicalSessionRepository {
 
     async fn commit_automatic_compaction(
         &self,
-        request: &CompactRequest,
+        request: &CompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError> {
         let source = self
             .freeze_compact_source(&request.source.session_id, Some(request.source_revision))
@@ -668,7 +668,7 @@ impl CanonicalSessionRepository {
         source: &CompactSource,
         context_size: usize,
         progress: Option<std::sync::Arc<dyn crate::domain::CompactProgressFn>>,
-        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
+        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
         cancellation: &tokio_util::sync::CancellationToken,
     ) -> Result<Option<GeneratedCompact>, crate::domain::CompactSkipReason> {
         let Some(compacted) = self
@@ -779,8 +779,8 @@ impl CanonicalSessionRepository {
         ))
     }
 
-    fn receipt(append: &ContextAppend, revision: SessionRevision) -> AppendReceipt {
-        AppendReceipt {
+    fn receipt(append: &ContextAppendData, revision: SessionRevision) -> AppendReceiptData {
+        AppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: revision,
@@ -789,10 +789,10 @@ impl CanonicalSessionRepository {
     }
 
     fn accepted_receipt(
-        append: &AcceptedInputAppend,
+        append: &AcceptedInputAppendData,
         revision: SessionRevision,
-    ) -> AcceptedInputReceipt {
-        AcceptedInputReceipt {
+    ) -> AcceptedInputReceiptData {
+        AcceptedInputReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: revision,
@@ -892,8 +892,8 @@ impl SessionRepository for CanonicalSessionRepository {
 
     async fn append_accepted_input(
         &self,
-        append: &AcceptedInputAppend,
-    ) -> Result<AcceptedInputReceipt, AcceptedInputError> {
+        append: &AcceptedInputAppendData,
+    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
         let _mutation = self.mutation_gate.lock().await;
         let current = self
             .session
@@ -953,8 +953,8 @@ impl SessionRepository for CanonicalSessionRepository {
 
     async fn advance_tool_receipt(
         &self,
-        mutation: ToolReceiptMutation,
-    ) -> Result<ToolReceiptMutationReceipt, ToolReceiptMutationError> {
+        mutation: ToolReceiptMutationData,
+    ) -> Result<ToolReceiptMutationReceiptData, ToolReceiptMutationError> {
         let _mutation_guard = self.mutation_gate.lock().await;
         let current = self
             .session
@@ -979,7 +979,7 @@ impl SessionRepository for CanonicalSessionRepository {
                 .tool_receipt(&mutation)
                 .expect("unchanged receipt must exist")
                 .clone();
-            return Ok(ToolReceiptMutationReceipt {
+            return Ok(ToolReceiptMutationReceiptData {
                 receipt,
                 changed: false,
             });
@@ -998,7 +998,7 @@ impl SessionRepository for CanonicalSessionRepository {
             .map_err(ToolReceiptMutationError::Storage)?;
         self.publish_generation(&current, candidate)
             .map_err(ToolReceiptMutationError::Storage)?;
-        return Ok(ToolReceiptMutationReceipt {
+        return Ok(ToolReceiptMutationReceiptData {
             receipt,
             changed: true,
         });
@@ -1009,7 +1009,7 @@ impl SessionRepository for CanonicalSessionRepository {
         session_id: &SessionId,
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::domain::StepReceipt>, ToolReceiptMutationError> {
+    ) -> Result<Vec<crate::domain::StepReceiptData>, ToolReceiptMutationError> {
         let current = self
             .session
             .read()
@@ -1068,8 +1068,8 @@ impl SessionRepository for CanonicalSessionRepository {
 
     async fn append_finalized(
         &self,
-        append: &ContextAppend,
-    ) -> Result<AppendReceipt, ContextAppendError> {
+        append: &ContextAppendData,
+    ) -> Result<AppendReceiptData, ContextAppendError> {
         let _mutation = self.mutation_gate.lock().await;
         let current = self
             .session
@@ -1168,7 +1168,7 @@ impl SessionRepository for CanonicalSessionRepository {
 
     async fn commit_compaction(
         &self,
-        request: &CompactRequest,
+        request: &CompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError> {
         let Some(attempt) = self.begin_auto_compact_attempt(
             request.source.config_snapshot.auto_compact_failure_limit(),
@@ -1184,7 +1184,7 @@ impl SessionRepository for CanonicalSessionRepository {
 
     async fn commit_manual_compaction(
         &self,
-        request: &ManualCompactRequest,
+        request: &ManualCompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError> {
         let source = self
             .freeze_compact_source(&request.session_id, None)

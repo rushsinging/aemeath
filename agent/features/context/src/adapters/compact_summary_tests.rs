@@ -139,11 +139,12 @@ async fn map_reduce_chunk_target_follows_compact_model_window() {
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(CompactGenerationOutput::from(typed_response_for_request(
-                &request,
-            )))
+            Ok(CompactGenerationOutputData::from(
+                typed_response_for_request(&request),
+            ))
         }
 
         async fn compact_context_window(&self) -> Option<usize> {
@@ -223,16 +224,17 @@ async fn summary_budget_follows_injection_window_not_compact_window() {
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
             let text = request
                 .first()
                 .map(Message::text_content)
                 .unwrap_or_default();
             if text.contains("<unprotected_checkpoint_details>") {
-                return Ok(CompactGenerationOutput::from(SHORTER_COMPRESSION_PATCH));
+                return Ok(CompactGenerationOutputData::from(SHORTER_COMPRESSION_PATCH));
             }
             if text.contains("<compact_facts>") {
-                return Ok(CompactGenerationOutput::from(VALID_CHECKPOINT_WIRE));
+                return Ok(CompactGenerationOutputData::from(VALID_CHECKPOINT_WIRE));
             }
             let mut facts = serde_json::json!([
                 {
@@ -270,7 +272,7 @@ async fn summary_budget_follows_injection_window_not_compact_window() {
                         "text": format!("Evidence {index}: {}", "durable observation ".repeat(12))
                     }));
             }
-            Ok(CompactGenerationOutput::from(
+            Ok(CompactGenerationOutputData::from(
                 serde_json::json!({ "facts": facts }).to_string(),
             ))
         }
@@ -336,12 +338,13 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let _ = request;
-            Ok(CompactGenerationOutput::from(typed_response_for_request(
-                &request,
-            )))
+            Ok(CompactGenerationOutputData::from(
+                typed_response_for_request(&request),
+            ))
         }
     }
 
@@ -477,7 +480,7 @@ fn compact_prompts_require_typed_json_contracts() {
     let repair_request = build_typed_output_repair_request(
         "map",
         "{\"facts\":[]}",
-        &crate::domain::CompactGenerationFailure::new(
+        &crate::domain::CompactGenerationFailureData::new(
             crate::domain::CompactGenerationFailureKind::InvalidSummary,
             "unknown field `resume_candidate`",
         ),
@@ -815,7 +818,8 @@ async fn multi_chunk_map_is_reduced_locally_without_full_checkpoint_request() {
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
             let prompt = request
                 .first()
                 .map(Message::text_content)
@@ -823,10 +827,10 @@ async fn multi_chunk_map_is_reduced_locally_without_full_checkpoint_request() {
             if prompt.contains("<compact_facts>") {
                 self.forbidden_full_checkpoint_calls
                     .fetch_add(1, Ordering::SeqCst);
-                return Ok(CompactGenerationOutput::from(VALID_CHECKPOINT_WIRE));
+                return Ok(CompactGenerationOutputData::from(VALID_CHECKPOINT_WIRE));
             }
             self.map_calls.fetch_add(1, Ordering::SeqCst);
-            Ok(CompactGenerationOutput::from(VALID_MAP_FACTS))
+            Ok(CompactGenerationOutputData::from(VALID_MAP_FACTS))
         }
     }
 
@@ -889,7 +893,8 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
             let active = self.current.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_concurrent.fetch_max(active, Ordering::SeqCst);
             self.call_count.fetch_add(1, Ordering::SeqCst);
@@ -901,9 +906,9 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
                 .unwrap_or_default();
             self.current.fetch_sub(1, Ordering::SeqCst);
             let _ = text;
-            Ok(CompactGenerationOutput::from(typed_response_for_request(
-                &request,
-            )))
+            Ok(CompactGenerationOutputData::from(
+                typed_response_for_request(&request),
+            ))
         }
     }
 
@@ -981,14 +986,15 @@ async fn local_reduce_normalizes_oversized_unprotected_facts_to_budget() {
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
             self.call_count.fetch_add(1, Ordering::SeqCst);
             let text = request
                 .first()
                 .map(|msg| msg.text_content())
                 .unwrap_or_default();
             if text.contains("<unprotected_checkpoint_details>") {
-                Ok(CompactGenerationOutput::from(SHORTER_COMPRESSION_PATCH))
+                Ok(CompactGenerationOutputData::from(SHORTER_COMPRESSION_PATCH))
             } else {
                 let mut batch: serde_json::Value = serde_json::from_str(VALID_MAP_FACTS).unwrap();
                 batch["facts"]
@@ -1000,7 +1006,7 @@ async fn local_reduce_normalizes_oversized_unprotected_facts_to_budget() {
                         "kind": "milestone",
                         "text": format!("Archive abc: {}", "historical detail ".repeat(80_000))
                     }));
-                Ok(CompactGenerationOutput::from(batch.to_string()))
+                Ok(CompactGenerationOutputData::from(batch.to_string()))
             }
         }
     }
@@ -1043,14 +1049,14 @@ impl CompactGenerator for MockGenerator {
         &self,
         request: Vec<Message>,
         _cancel: &CancellationToken,
-    ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+    ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData> {
         self.requests.lock().unwrap().push(
             request
                 .first()
                 .map(Message::text_content)
                 .unwrap_or_default(),
         );
-        Ok(CompactGenerationOutput::from(self.text.clone()))
+        Ok(CompactGenerationOutputData::from(self.text.clone()))
     }
 }
 
@@ -1110,8 +1116,9 @@ async fn compact_cancelled_generator_does_not_fallback() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
-            Err(crate::domain::CompactGenerationFailure::new(
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
+            Err(crate::domain::CompactGenerationFailureData::new(
                 crate::domain::CompactGenerationFailureKind::Cancelled,
                 "cancelled",
             ))
@@ -1150,8 +1157,9 @@ async fn compact_falls_back_when_generator_errors() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
-            Err(crate::domain::CompactGenerationFailure::new(
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
+            Err(crate::domain::CompactGenerationFailureData::new(
                 crate::domain::CompactGenerationFailureKind::Provider,
                 "simulated LLM failure",
             ))
@@ -1239,14 +1247,15 @@ async fn local_reduce_normalization_avoids_non_shrinking_refresh_rounds() {
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let text = request
                 .first()
                 .map(|msg| msg.text_content())
                 .unwrap_or_default();
             if text.contains("<unprotected_checkpoint_details>") {
-                return Ok(CompactGenerationOutput::from(
+                return Ok(CompactGenerationOutputData::from(
                     r#"{
                   "committed_facts": [],
                   "uncommitted_working_set": [],
@@ -1267,7 +1276,7 @@ async fn local_reduce_normalization_avoids_non_shrinking_refresh_rounds() {
                     "kind": "milestone",
                     "text": format!("Archive abc: {}", "historical detail ".repeat(40_000))
                 }));
-            Ok(CompactGenerationOutput::from(batch.to_string()))
+            Ok(CompactGenerationOutputData::from(batch.to_string()))
         }
     }
 
@@ -1309,7 +1318,7 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
         })
         .collect::<Vec<_>>();
     let cancel = CancellationToken::new();
-    let seen = Arc::new(Mutex::new(Vec::<(String, CompactWork)>::new()));
+    let seen = Arc::new(Mutex::new(Vec::<(String, CompactWorkData)>::new()));
 
     struct EchoGenerator;
     #[async_trait::async_trait]
@@ -1318,16 +1327,17 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
-            Ok(CompactGenerationOutput::from(typed_response_for_request(
-                &request,
-            )))
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
+            Ok(CompactGenerationOutputData::from(
+                typed_response_for_request(&request),
+            ))
         }
     }
 
     let progress = {
         let seen = seen.clone();
-        move |stage: CompactStage, work: CompactWork| {
+        move |stage: CompactStageData, work: CompactWorkData| {
             seen.lock()
                 .unwrap()
                 .push((stage.as_str().to_string(), work));
@@ -1368,14 +1378,14 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
         mapping.len() >= 3,
         "map-reduce 应按真实完成上报多个 chunk 进度，实际 {mapping:?}"
     );
-    let CompactWork::Determinate {
+    let CompactWorkData::Determinate {
         completed: first_completed,
         total: first_total,
     } = mapping[0].1
     else {
         panic!("mapping 必须是 determinate work")
     };
-    let CompactWork::Determinate {
+    let CompactWorkData::Determinate {
         completed: last_completed,
         total: last_total,
     } = mapping.last().unwrap().1
@@ -1400,7 +1410,7 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
         .map(|index| Message::user(format!("短会话消息编号 {index}，不足以触发 map-reduce。")))
         .collect::<Vec<_>>();
     let cancel = CancellationToken::new();
-    let seen = Arc::new(Mutex::new(Vec::<(String, CompactWork)>::new()));
+    let seen = Arc::new(Mutex::new(Vec::<(String, CompactWorkData)>::new()));
 
     struct EchoGenerator;
     #[async_trait::async_trait]
@@ -1409,16 +1419,17 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
-            Ok(CompactGenerationOutput::from(typed_response_for_request(
-                &request,
-            )))
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
+            Ok(CompactGenerationOutputData::from(
+                typed_response_for_request(&request),
+            ))
         }
     }
 
     let progress = {
         let seen = seen.clone();
-        move |stage: CompactStage, work: CompactWork| {
+        move |stage: CompactStageData, work: CompactWorkData| {
             seen.lock()
                 .unwrap()
                 .push((stage.as_str().to_string(), work));
@@ -1450,7 +1461,7 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
     );
     assert!(
         seen.iter()
-            .all(|(_, work)| *work == CompactWork::Indeterminate),
+            .all(|(_, work)| *work == CompactWorkData::Indeterminate),
         "单次摘要不应伪造 chunk 计数，实际 {seen:?}"
     );
 }
@@ -1474,7 +1485,8 @@ async fn empty_single_map_retries_once_with_original_history() {
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
             let prompt = request
                 .iter()
                 .map(Message::text_content)
@@ -1483,14 +1495,14 @@ async fn empty_single_map_retries_once_with_original_history() {
             let mut requests = self.requests.lock().unwrap();
             requests.push(prompt);
             if requests.len() == 1 {
-                Ok(CompactGenerationOutput::completed(
+                Ok(CompactGenerationOutputData::completed(
                     "",
                     Some("end_turn"),
                     0,
                     1,
                 ))
             } else {
-                Ok(CompactGenerationOutput::completed(
+                Ok(CompactGenerationOutputData::completed(
                     VALID_MAP_FACTS,
                     Some("end_turn"),
                     1,
@@ -1547,7 +1559,8 @@ async fn one_persistently_empty_map_chunk_degrades_locally_without_losing_other_
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
             let prompt = request
                 .iter()
                 .map(Message::text_content)
@@ -1555,14 +1568,14 @@ async fn one_persistently_empty_map_chunk_degrades_locally_without_losing_other_
                 .join("\n");
             if prompt.contains("chunk-marker-0") {
                 self.empty_calls.fetch_add(1, Ordering::SeqCst);
-                return Ok(CompactGenerationOutput::completed(
+                return Ok(CompactGenerationOutputData::completed(
                     "",
                     Some("end_turn"),
                     0,
                     1,
                 ));
             }
-            Ok(CompactGenerationOutput::completed(
+            Ok(CompactGenerationOutputData::completed(
                 r#"{"facts":[{"sequence":700,"source":"tool_result","kind":"committed_fact","text":"successful chunk fact survived"},{"sequence":701,"source":"main_user","kind":"objective","text":"Continue chunk recovery."},{"sequence":702,"source":"main_user","kind":"resume_candidate","text":"Verify partial degradation."}]}"#,
                 Some("end_turn"),
                 1,
@@ -1618,8 +1631,9 @@ async fn previous_summary_with_task_companion_reaches_typed_reduce() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
-            Ok(CompactGenerationOutput::from(VALID_MAP_FACTS))
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
+            Ok(CompactGenerationOutputData::from(VALID_MAP_FACTS))
         }
     }
 
@@ -1672,7 +1686,8 @@ async fn partial_map_fallback_preserves_previous_constraints() {
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
             let prompt = request
                 .iter()
                 .map(Message::text_content)
@@ -1683,7 +1698,7 @@ async fn partial_map_fallback_preserves_previous_constraints() {
                 && !prompt.contains("## Committed Facts")
             {
                 self.first_chunk_calls.fetch_add(1, Ordering::SeqCst);
-                return Ok(CompactGenerationOutput::completed(
+                return Ok(CompactGenerationOutputData::completed(
                     "",
                     Some("end_turn"),
                     0,
@@ -1691,9 +1706,11 @@ async fn partial_map_fallback_preserves_previous_constraints() {
                 ));
             }
             if prompt.contains("<previous_checkpoint>") {
-                return Ok(CompactGenerationOutput::from(self.previous_facts.clone()));
+                return Ok(CompactGenerationOutputData::from(
+                    self.previous_facts.clone(),
+                ));
             }
-            Ok(CompactGenerationOutput::from(VALID_MAP_FACTS))
+            Ok(CompactGenerationOutputData::from(VALID_MAP_FACTS))
         }
     }
 
@@ -1743,7 +1760,8 @@ async fn invalid_single_map_json_is_repaired_before_fallback() {
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
             let prompt = request
                 .first()
                 .map(Message::text_content)
@@ -1751,9 +1769,11 @@ async fn invalid_single_map_json_is_repaired_before_fallback() {
             let mut requests = self.requests.lock().unwrap();
             requests.push(prompt.clone());
             if requests.len() == 1 {
-                Ok(CompactGenerationOutput::from(r#"{"facts":"not-an-array"}"#))
+                Ok(CompactGenerationOutputData::from(
+                    r#"{"facts":"not-an-array"}"#,
+                ))
             } else {
-                Ok(CompactGenerationOutput::from(VALID_MAP_FACTS))
+                Ok(CompactGenerationOutputData::from(VALID_MAP_FACTS))
             }
         }
     }
@@ -1808,7 +1828,8 @@ async fn local_reduce_never_repairs_a_full_checkpoint_wire() {
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
             let prompt = request
                 .first()
                 .map(Message::text_content)
@@ -1816,7 +1837,7 @@ async fn local_reduce_never_repairs_a_full_checkpoint_wire() {
             if prompt.contains("<compact_facts>") || prompt.contains("repairing the reduce") {
                 self.0.fetch_add(1, Ordering::SeqCst);
             }
-            Ok(CompactGenerationOutput::from(VALID_MAP_FACTS))
+            Ok(CompactGenerationOutputData::from(VALID_MAP_FACTS))
         }
     }
 
@@ -1864,20 +1885,21 @@ async fn refresh_repair_provider_failure_degrades_to_bounded_canonical_checkpoin
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let prompt = request
                 .first()
                 .map(Message::text_content)
                 .unwrap_or_default();
             if prompt.contains("repairing the refresh") {
-                return Err(crate::domain::CompactGenerationFailure::new(
+                return Err(crate::domain::CompactGenerationFailureData::new(
                     crate::domain::CompactGenerationFailureKind::Provider,
                     "provider upstream unavailable",
                 ));
             }
             if prompt.contains("<unprotected_checkpoint_details>") {
-                return Ok(CompactGenerationOutput::from(
+                return Ok(CompactGenerationOutputData::from(
                     r#"{"committed_facts":["unterminated""#,
                 ));
             }
@@ -1894,7 +1916,7 @@ async fn refresh_repair_provider_failure_degrades_to_bounded_canonical_checkpoin
                     )
                 }));
             }
-            Ok(CompactGenerationOutput::from(batch.to_string()))
+            Ok(CompactGenerationOutputData::from(batch.to_string()))
         }
     }
 
@@ -1955,7 +1977,8 @@ async fn invalid_refresh_checkpoint_is_repaired_before_preserving_current_checkp
             &self,
             request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
             let prompt = request
                 .first()
                 .map(Message::text_content)
@@ -1966,11 +1989,11 @@ async fn invalid_refresh_checkpoint_is_repaired_before_preserving_current_checkp
             if prompt.contains("repairing the refresh") {
                 self.refresh_calls.fetch_add(1, Ordering::SeqCst);
                 self.repair_seen.store(true, Ordering::SeqCst);
-                return Ok(CompactGenerationOutput::from(SHORTER_COMPRESSION_PATCH));
+                return Ok(CompactGenerationOutputData::from(SHORTER_COMPRESSION_PATCH));
             }
             if prompt.contains("<unprotected_checkpoint_details>") {
                 self.refresh_calls.fetch_add(1, Ordering::SeqCst);
-                return Ok(CompactGenerationOutput::from(
+                return Ok(CompactGenerationOutputData::from(
                     r#"{"resume_cursor":{"next_action":[]}}"#,
                 ));
             }
@@ -1984,7 +2007,7 @@ async fn invalid_refresh_checkpoint_is_repaired_before_preserving_current_checkp
                     "kind": "milestone",
                     "text": format!("Archive abc: {}", "historical detail ".repeat(80_000))
                 }));
-            Ok(CompactGenerationOutput::from(batch.to_string()))
+            Ok(CompactGenerationOutputData::from(batch.to_string()))
         }
     }
 
@@ -2031,10 +2054,13 @@ async fn cancelled_invalid_output_repair_does_not_retry_or_fallback() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
             self.calls.fetch_add(1, Ordering::SeqCst);
             self.cancel.cancel();
-            Ok(CompactGenerationOutput::from(r#"{"facts":"not-an-array"}"#))
+            Ok(CompactGenerationOutputData::from(
+                r#"{"facts":"not-an-array"}"#,
+            ))
         }
     }
 
@@ -2074,9 +2100,12 @@ async fn exhausted_invalid_output_repair_falls_back_after_one_retry() {
             &self,
             _request: Vec<Message>,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
             self.0.fetch_add(1, Ordering::SeqCst);
-            Ok(CompactGenerationOutput::from(r#"{"facts":"not-an-array"}"#))
+            Ok(CompactGenerationOutputData::from(
+                r#"{"facts":"not-an-array"}"#,
+            ))
         }
     }
 
@@ -2211,18 +2240,18 @@ impl CompactGenerator for FactsWithoutObjective {
         &self,
         request: Vec<Message>,
         _cancel: &CancellationToken,
-    ) -> Result<CompactGenerationOutput, crate::domain::CompactGenerationFailure> {
+    ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData> {
         let text = request
             .first()
             .map(Message::text_content)
             .unwrap_or_default();
         if text.contains("<unprotected_checkpoint_details>") {
-            return Ok(CompactGenerationOutput::from(SHORTER_COMPRESSION_PATCH));
+            return Ok(CompactGenerationOutputData::from(SHORTER_COMPRESSION_PATCH));
         }
         if text.contains("<compact_facts>") {
-            return Ok(CompactGenerationOutput::from(VALID_CHECKPOINT_WIRE));
+            return Ok(CompactGenerationOutputData::from(VALID_CHECKPOINT_WIRE));
         }
-        Ok(CompactGenerationOutput::from(
+        Ok(CompactGenerationOutputData::from(
             r#"{"facts":[{"sequence":1,"source":"main_user","kind":"working_set","text":"Diff before/after steer in useChatAPIV2.ts."},{"sequence":2,"source":"tool_result","kind":"committed_fact","text":"origin/release/v2.2.0 lacks the segmented-bubble fix."}]}"#,
         ))
     }

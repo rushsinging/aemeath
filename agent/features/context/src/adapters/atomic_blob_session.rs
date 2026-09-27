@@ -9,7 +9,7 @@ use storage::{
 
 use crate::ports::{SessionGeneration, SessionSnapshotStore, SessionStoreError};
 
-pub struct AtomicBlobSessionStore {
+pub(crate) struct AtomicBlobSessionStore {
     blob: Arc<dyn AtomicBlobPort>,
     key: StorageKeyData,
 }

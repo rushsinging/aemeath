@@ -21,13 +21,13 @@ const SESSION_RECEIPT_MEMBER_NAME: &str = "receipt-ledger.json";
 const SESSION_SKILL_MEMBER_NAME: &str = "skill-loads.json";
 
 #[derive(Debug, Clone)]
-pub struct DisplayHistoryStepWindow {
+pub struct DisplayHistoryStepWindowData {
     session_id: String,
     generation_revision: u64,
     steps: Vec<SessionStepMember>,
 }
 
-impl DisplayHistoryStepWindow {
+impl DisplayHistoryStepWindowData {
     pub fn new(
         session_id: impl Into<String>,
         generation_revision: u64,
@@ -95,13 +95,13 @@ impl DisplayHistoryStepReference {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DisplayHistoryStepIndex {
+pub struct DisplayHistoryStepIndexData {
     session_id: String,
     generation_revision: u64,
     steps: Vec<DisplayHistoryStepReference>,
 }
 
-impl DisplayHistoryStepIndex {
+impl DisplayHistoryStepIndexData {
     #[cfg(any(test, feature = "dev"))]
     pub fn fixture(
         session_id: impl Into<String>,
@@ -296,7 +296,7 @@ impl SessionStepReference {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionGenerationManifest {
+pub(crate) struct SessionGenerationManifest {
     generation_schema_version: u32,
     session_schema_version: u32,
     session_id: String,
@@ -594,7 +594,7 @@ impl SessionMemberBytes {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SessionCommitPlan {
+pub(crate) struct SessionCommitPlan {
     changed_members: Vec<SessionMemberBytes>,
     reused_members: Vec<String>,
     removed_members: Vec<String>,
@@ -1194,7 +1194,7 @@ impl SessionStepMember {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum SessionGenerationWireError {
+pub(crate) enum SessionGenerationWireError {
     #[error("Session generation schema version {version} is newer than supported")]
     UnsupportedFutureVersion {
         version: u32,
@@ -1229,7 +1229,7 @@ pub enum SessionGenerationWireError {
     Encode(String),
 }
 
-pub struct SessionGenerationCodec;
+pub(crate) struct SessionGenerationCodec;
 
 impl SessionGenerationCodec {
     pub fn encode_manifest(

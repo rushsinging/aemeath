@@ -5,11 +5,11 @@ use async_trait::async_trait;
 use memory::api::search::{MemoryRetrievalMode, MemorySearchHit};
 use memory::api::{MemoryPort, MemoryQuery};
 
-use crate::domain::{ContextRequest, SystemBlock};
+use crate::domain::{ContextRequestData, SystemBlock};
 use crate::ports::{ContextMemorySource, MemoryMaterialization};
 
 /// Read-only bridge from the Memory BC retrieval port into Context system blocks.
-pub struct MemoryRetrieveAdapter {
+pub(crate) struct MemoryRetrieveAdapter {
     memory: Arc<dyn MemoryPort>,
     now: Arc<dyn Fn() -> u64 + Send + Sync>,
 }
@@ -104,7 +104,10 @@ fn system_now() -> u64 {
 
 #[async_trait]
 impl ContextMemorySource for MemoryRetrieveAdapter {
-    async fn materialize(&self, request: &ContextRequest) -> Result<MemoryMaterialization, String> {
+    async fn materialize(
+        &self,
+        request: &ContextRequestData,
+    ) -> Result<MemoryMaterialization, String> {
         self.materialize_config(request.config_snapshot.memory())
             .await
     }
@@ -165,7 +168,7 @@ fn stable_revision(hits: &[MemorySearchHit]) -> u64 {
     revision
 }
 
-pub struct CommittedMemoryRetrieveAdapter {
+pub(crate) struct CommittedMemoryRetrieveAdapter {
     memory: Arc<std::sync::RwLock<Arc<dyn MemoryPort>>>,
 }
 
@@ -177,7 +180,10 @@ impl CommittedMemoryRetrieveAdapter {
 
 #[async_trait]
 impl ContextMemorySource for CommittedMemoryRetrieveAdapter {
-    async fn materialize(&self, request: &ContextRequest) -> Result<MemoryMaterialization, String> {
+    async fn materialize(
+        &self,
+        request: &ContextRequestData,
+    ) -> Result<MemoryMaterialization, String> {
         let memory = self
             .memory
             .read()
@@ -190,13 +196,13 @@ impl ContextMemorySource for CommittedMemoryRetrieveAdapter {
 }
 
 /// Sub Run 或禁用 Memory 时使用的空注入 adapter。
-pub struct NoOpContextMemorySource;
+pub(crate) struct NoOpContextMemorySource;
 
 #[async_trait]
 impl ContextMemorySource for NoOpContextMemorySource {
     async fn materialize(
         &self,
-        _request: &ContextRequest,
+        _request: &ContextRequestData,
     ) -> Result<MemoryMaterialization, String> {
         Ok(MemoryMaterialization {
             blocks: Vec::<SystemBlock>::new(),
@@ -226,7 +232,7 @@ mod tests {
     use share::reasoning::ReasoningLevel;
 
     use super::*;
-    use crate::domain::{ContextRequestId, Language, SystemPromptSpec};
+    use crate::domain::{ContextRequestId, Language, SystemPromptSpecData};
 
     struct FakeMemory {
         result: MemorySearchResult,
@@ -312,19 +318,23 @@ mod tests {
         }
     }
 
-    fn request(enabled: bool, inject_count: usize, inject_token_budget: usize) -> ContextRequest {
+    fn request(
+        enabled: bool,
+        inject_count: usize,
+        inject_token_budget: usize,
+    ) -> ContextRequestData {
         let mut config = Config::default();
         config.memory.enabled = enabled;
         config.memory.inject_count = inject_count;
         config.memory.inject_token_budget = inject_token_budget;
-        ContextRequest {
+        ContextRequestData {
             session_id: sdk::SessionId::new("session"),
             request_id: ContextRequestId::new("request"),
             run_id: RunId::new("run"),
             step_id: sdk::RunStepId::new("step"),
             pending_messages: vec![Message::user("pending")],
             invocation_reminders: vec![],
-            system_prompt: SystemPromptSpec::new("system"),
+            system_prompt: SystemPromptSpecData::new("system"),
             model_id: "fake/model".into(),
             effective_reasoning: ReasoningLevel::Off,
             language: Language::new("en"),

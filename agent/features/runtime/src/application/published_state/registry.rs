@@ -12,7 +12,7 @@ impl PublishedStateRegistry {
     pub(crate) fn update_context_budget(
         &self,
         session_id: impl Into<String>,
-        decision: &context::CompactionDecision,
+        decision: &context::CompactionDecisionData,
     ) -> sdk::RuntimeStatusView {
         let session_id = session_id.into();
         let mut state = self.inner.lock();
@@ -80,8 +80,8 @@ impl PublishedStateRegistry {
 mod tests {
     use super::*;
 
-    fn decision() -> context::CompactionDecision {
-        context::CompactionDecision {
+    fn decision() -> context::CompactionDecisionData {
+        context::CompactionDecisionData {
             needed: true,
             urgency: context::Urgency::Should,
             decision_token_count: 145_000,

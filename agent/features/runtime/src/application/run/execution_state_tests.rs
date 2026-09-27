@@ -1,8 +1,9 @@
 use super::execution_state::RunExecutionState;
 use crate::application::loop_engine::PendingInteractionWork;
 use crate::ports::{
-    CompactionDecision, ContextRequest, ContextRequestId, ContextWindow, DecisionReason, Language,
-    SessionId, SessionRevision, SystemPromptSpec, TokenBudget, Urgency,
+    CompactionDecisionData, ContextRequestData, ContextRequestId, ContextWindowData,
+    DecisionReason, Language, SessionId, SessionRevision, SystemPromptSpecData, TokenBudget,
+    Urgency,
 };
 use sdk::{RunId, RunStepId};
 use share::reasoning::ReasoningLevel;
@@ -12,15 +13,15 @@ use share::{
 };
 use std::collections::HashMap;
 
-fn context_request(step_id: &str) -> ContextRequest {
-    ContextRequest {
+fn context_request(step_id: &str) -> ContextRequestData {
+    ContextRequestData {
         session_id: SessionId::new("session"),
         request_id: ContextRequestId::new(format!("request-{step_id}")),
         run_id: RunId::new("run"),
         step_id: RunStepId::new(step_id),
         pending_messages: vec![],
         invocation_reminders: vec![],
-        system_prompt: SystemPromptSpec::new("system"),
+        system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
         language: Language::new("zh"),
@@ -35,14 +36,14 @@ fn context_request(step_id: &str) -> ContextRequest {
     }
 }
 
-fn context_window(revision: u64) -> ContextWindow {
-    ContextWindow {
+fn context_window(revision: u64) -> ContextWindowData {
+    ContextWindowData {
         backing_revision: SessionRevision::new(revision),
         system_blocks: vec![],
         messages: vec![].into(),
         tool_schemas: vec![],
         token_estimation: TokenBudget::default(),
-        compaction_decision: CompactionDecision {
+        compaction_decision: CompactionDecisionData {
             needed: false,
             urgency: Urgency::None,
             decision_token_count: 0,

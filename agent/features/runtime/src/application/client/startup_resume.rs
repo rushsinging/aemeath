@@ -17,7 +17,7 @@ use super::resume_helper::resume_session_to_backing;
 ///
 /// created_at 解析失败时退化为 0（resume 历史展示降级），不阻断 bootstrap。
 pub(crate) fn map_resume_view_to_sdk_backing(
-    resume_view: context::SessionResumeView,
+    resume_view: context::SessionResumeViewData,
 ) -> LocalSessionResumeBacking {
     LocalSessionResumeBacking {
         steps: resume_view

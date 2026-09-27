@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use context::{
+use crate::{
     AcceptedInputRecord, CanonicalSession, CommittedRunSlice, CommittedRunStep,
     SessionGenerationCodec, SessionGenerationManifest,
 };
-use context::{DatasetCanonicalSessionWriter, DatasetSessionReader};
+use crate::{DatasetCanonicalSessionWriter, DatasetSessionReader};
 use share::message::Message;
 use storage::{
     DatasetKeyData, DatasetMemberData, DurabilityData, SafePathSegmentData, StorageNamespaceData,
@@ -55,14 +55,14 @@ async fn dataset_reader_migrates_legacy_blob_once_when_dataset_is_absent() {
     let blob: Arc<dyn storage::AtomicBlobPort> =
         storage::wire_file_system_blob(root.path()).expect("blob adapter");
     let expected = session_with_step("legacy", 4, "legacy history");
-    let legacy_management = context::AtomicBlobSessionManagement::new(blob.clone());
+    let legacy_management = crate::AtomicBlobSessionManagement::new(blob.clone());
     let project = share::session_types::ProjectIdentityData {
         initial_cwd: "/legacy".to_string(),
         git_common_dir: None,
     };
     let mut expected = expected;
     expected.workspace =
-        context::SnapshotState::Captured(share::session_types::PersistedWorkspaceContext {
+        crate::SnapshotState::Captured(share::session_types::PersistedWorkspaceContext {
             workspace_id: share::session_types::WorkspaceId::derive(&project, "/legacy"),
             project_identity: project.clone(),
             path_base: "/legacy".to_string(),
@@ -70,9 +70,9 @@ async fn dataset_reader_migrates_legacy_blob_once_when_dataset_is_absent() {
             worktree_kind: share::session_types::WorktreeKind::Primary,
             context_stack: Vec::new(),
         });
-    context::SessionManagementPort::import_for_project(
+    crate::SessionManagementPort::import_for_project(
         &legacy_management,
-        &context::SessionCodec::encode(&expected).expect("encode legacy"),
+        &crate::SessionCodec::encode(&expected).expect("encode legacy"),
         &project,
     )
     .await
@@ -80,7 +80,7 @@ async fn dataset_reader_migrates_legacy_blob_once_when_dataset_is_absent() {
 
     let reader = DatasetSessionReader::new(dataset.clone(), Some(blob));
     // import 落新布局（scoped key）：load 必须带同一 project 目录段探测。
-    let project_dir = context::project_dir_segment(&project);
+    let project_dir = crate::project_dir_segment(&project);
     let loaded = reader
         .load(Some(&project_dir), "legacy")
         .await
@@ -193,7 +193,7 @@ async fn dataset_reader_reports_future_manifest_and_preserves_original_bytes() {
 
     assert!(matches!(
         error,
-        context::SessionGenerationWireError::UnsupportedFutureVersion {
+        crate::SessionGenerationWireError::UnsupportedFutureVersion {
             version: 999,
             original_bytes,
         } if original_bytes == future_bytes
@@ -224,7 +224,7 @@ async fn dataset_reader_resumes_with_empty_active_history_after_clear_boundary()
     ]
     .into();
     // /clear 写入逻辑断点：最后被清除的 step 是 step-2。
-    session.cleared_after = Some(context::RunStepCursor {
+    session.cleared_after = Some(crate::RunStepCursor {
         run_id: "run-2".to_string(),
         step_id: "step-2".to_string(),
     });
@@ -267,7 +267,7 @@ async fn dataset_reader_shows_only_post_clear_steps_after_clear_then_append() {
         )],
     )]
     .into();
-    session.cleared_after = Some(context::RunStepCursor {
+    session.cleared_after = Some(crate::RunStepCursor {
         run_id: "run-1".to_string(),
         step_id: "step-1".to_string(),
     });
@@ -335,9 +335,9 @@ async fn dataset_reader_loads_only_steps_after_compact_marker_for_runtime_resume
     ]
     .into();
     let checkpoint = "## Immutable Constraints\n- review only\n\n## Current Objective\n- inspect resume\n\n## Committed Facts\n- persisted\n\n## Uncommitted Working Set\n- none\n\n## Open Decisions / Risks\n- dynamic state\n\n## Resume Cursor\n- Next action: revalidate once\n\n## Required Revalidation\n- revalidate git\n\n## Archived Milestones\n- baseline\n\n## Continuation Status\nContinue\n\n## Current TaskData State\n■ current task";
-    session.compact = Some(context::ActiveCompactMarker {
+    session.compact = Some(crate::ActiveCompactMarker {
         summary: checkpoint.to_string(),
-        start_at: Some(context::RunStepCursor {
+        start_at: Some(crate::RunStepCursor {
             run_id: "run-2".to_string(),
             step_id: "step-2".to_string(),
         }),
@@ -468,8 +468,8 @@ async fn continuation_checkpoint_control_lines_survive_dataset_resume() {
     let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let mut session = session_with_step("control-lines", 3, "visible");
-    let checkpoint = context::compact::ContinuationCheckpoint::from_sections(
-        context::compact::CheckpointSections {
+    let checkpoint =
+        crate::compact::ContinuationCheckpoint::from_sections(crate::compact::CheckpointSections {
             immutable_constraints: vec!["- review only".to_string()],
             current_objective: vec!["- inspect\n## 来源与身份".to_string()],
             committed_facts: vec!["- persisted".to_string()],
@@ -479,13 +479,12 @@ async fn continuation_checkpoint_control_lines_survive_dataset_resume() {
             next_action: "revalidate once".to_string(),
             required_revalidation: vec!["- revalidate git".to_string()],
             archived_milestones: vec!["- baseline `abc`".to_string()],
-            status: context::compact::ContinuationStatus::Continue,
+            status: crate::compact::ContinuationStatus::Continue,
             status_reason: Some("work remains".to_string()),
-        },
-    )
-    .unwrap()
-    .render();
-    session.compact = Some(context::ActiveCompactMarker {
+        })
+        .unwrap()
+        .render();
+    session.compact = Some(crate::ActiveCompactMarker {
         summary: checkpoint.clone(),
         start_at: None,
         source_revision: 2,
@@ -499,5 +498,5 @@ async fn continuation_checkpoint_control_lines_survive_dataset_resume() {
     let restored = prepared.active_session.compact.unwrap().summary;
 
     assert_eq!(restored, checkpoint);
-    assert!(context::compact::ContinuationCheckpoint::parse(&restored).is_ok());
+    assert!(crate::compact::ContinuationCheckpoint::parse(&restored).is_ok());
 }

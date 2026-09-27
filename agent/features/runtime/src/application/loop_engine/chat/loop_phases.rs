@@ -16,7 +16,7 @@ pub(crate) struct TurnBoundaryConfigOutcome {
 
 /// Turn 边界配置变更检测与 diagnostic 通知。
 ///
-/// Provider-visible reminder 只返回 typed fact，由后续 ContextRequest 携带；
+/// Provider-visible reminder 只返回 typed fact，由后续 ContextRequestData 携带；
 /// 此函数 **NEVER** 修改 Run message state。
 pub(crate) async fn handle_turn_boundary_config<S>(
     config_snapshot: &mut SourceSnapshotRegistry,

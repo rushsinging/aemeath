@@ -1,6 +1,6 @@
 use super::{
-    DisplayHistoryStepIndex, SessionCommitPlan, SessionGenerationCodec, SessionGenerationManifest,
-    SessionGenerationWireError, SessionStepMember,
+    DisplayHistoryStepIndexData, SessionCommitPlan, SessionGenerationCodec,
+    SessionGenerationManifest, SessionGenerationWireError, SessionStepMember,
 };
 use crate::domain::session::{
     AcceptedInputRecord, CanonicalSession, CommittedRunSlice, CommittedRunStep, RunStepCursor,
@@ -351,7 +351,8 @@ fn display_history_index_excludes_steps_up_to_clear_boundary() {
         step_id: "step-a".to_string(),
     };
 
-    let index = DisplayHistoryStepIndex::from_manifest_after_clear(&manifest, Some(&cleared_after));
+    let index =
+        DisplayHistoryStepIndexData::from_manifest_after_clear(&manifest, Some(&cleared_after));
 
     assert_eq!(
         index
@@ -499,7 +500,7 @@ fn generation_manifest_builds_body_free_display_history_index() {
             ("run-active", "step-active", "active body"),
         ],
     );
-    let index = DisplayHistoryStepIndex::from_session_and_manifest(&session, &manifest);
+    let index = DisplayHistoryStepIndexData::from_session_and_manifest(&session, &manifest);
 
     assert_eq!(index.session_id(), "session");
     assert_eq!(index.generation_revision(), 7);

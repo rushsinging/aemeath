@@ -1,19 +1,19 @@
 use super::{extract_invocation_context, invocation_mapping_log_summary};
 use crate::ports::{
-    CompactionDecision, ContextWindow, DecisionReason, SessionRevision, SystemBlock, TokenBudget,
-    Urgency,
+    CompactionDecisionData, ContextWindowData, DecisionReason, SessionRevision, SystemBlock,
+    TokenBudget, Urgency,
 };
 use provider::RequestSystemBlockData;
 use share::message::{ContentBlock, Message, MessageMetadata, MessageSource, Role};
 
-fn window(messages: Vec<Message>) -> ContextWindow {
-    ContextWindow {
+fn window(messages: Vec<Message>) -> ContextWindowData {
+    ContextWindowData {
         backing_revision: SessionRevision::new(1),
         system_blocks: vec![],
         messages: messages.into(),
         tool_schemas: vec![],
         token_estimation: TokenBudget::default(),
-        compaction_decision: CompactionDecision {
+        compaction_decision: CompactionDecisionData {
             needed: false,
             urgency: Urgency::None,
             decision_token_count: 0,

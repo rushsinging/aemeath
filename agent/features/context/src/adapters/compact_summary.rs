@@ -3,9 +3,11 @@
 //! 提供 `compact_messages` 作为本地压缩入口，以及 LLM 压缩相关的
 //! 请求构建 / 响应解析 / 摘要文本生成。
 
-use crate::domain::compact::{sanitize_tool_pairs, CompactProgressFn, CompactStage, CompactWork};
+use crate::domain::compact::{
+    sanitize_tool_pairs, CompactProgressFn, CompactStageData, CompactWorkData,
+};
 use crate::domain::{
-    CompactGenerationFailure, CompactGenerationFailureKind, CompactGenerationOutput,
+    CompactGenerationFailureData, CompactGenerationFailureKind, CompactGenerationOutputData,
     CompactSummaryQuality,
 };
 use async_trait::async_trait;
@@ -41,20 +43,20 @@ fn placeholder_tool_results(messages: &mut [Message]) {
 /// Compact 进度回调 trait 的域定义见 `crate::domain::compact::CompactProgressFn`
 /// （#1500 上移，adapter 层不再重复定义）。
 /// 发出进度回调的辅助函数（`progress` 为 `None` 时 no-op）。
-fn emit_progress(progress: Option<&dyn CompactProgressFn>, stage: CompactStage) {
+fn emit_progress(progress: Option<&dyn CompactProgressFn>, stage: CompactStageData) {
     if let Some(progress) = progress {
-        progress.emit(stage, CompactWork::Indeterminate);
+        progress.emit(stage, CompactWorkData::Indeterminate);
     }
 }
 
 fn emit_progress_completed(
     progress: Option<&dyn CompactProgressFn>,
-    stage: CompactStage,
+    stage: CompactStageData,
     completed: usize,
     total: usize,
 ) {
     if let Some(progress) = progress {
-        progress.emit(stage, CompactWork::Determinate { completed, total });
+        progress.emit(stage, CompactWorkData::Determinate { completed, total });
     }
 }
 
@@ -77,7 +79,7 @@ pub trait CompactGenerator: Send + Sync {
         &self,
         request: Vec<Message>,
         cancel: &CancellationToken,
-    ) -> Result<CompactGenerationOutput, CompactGenerationFailure>;
+    ) -> Result<CompactGenerationOutputData, CompactGenerationFailureData>;
 
     /// 本次 compact 调用模型的输入窗口。
     ///
@@ -214,7 +216,7 @@ async fn llm_refresh(
     checkpoint: &crate::domain::compact::ContinuationCheckpoint,
     budget: usize,
     cancel: &CancellationToken,
-) -> Result<crate::domain::compact::ContinuationCheckpoint, CompactGenerationFailure> {
+) -> Result<crate::domain::compact::ContinuationCheckpoint, CompactGenerationFailureData> {
     let prompt = build_refresh_prompt(checkpoint, budget);
     let refreshed = generate_and_validate_typed(
         generator,
@@ -228,7 +230,7 @@ async fn llm_refresh(
                 .clone()
                 .apply_compression_patch(patch)
                 .map_err(|error| {
-                    CompactGenerationFailure::new(
+                    CompactGenerationFailureData::new(
                         CompactGenerationFailureKind::InvalidSummary,
                         format!("refresh compact patch 无效：{error}"),
                     )
@@ -771,7 +773,7 @@ pub async fn compact_messages_with_llm(
     context_size: usize,
     generator: Option<&dyn CompactGenerator>,
     progress: Option<&dyn CompactProgressFn>,
-    task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
+    task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
     cancel: &CancellationToken,
     tail: CompactTail<'_>,
 ) -> Option<CompactResult> {
@@ -790,7 +792,7 @@ pub async fn compact_messages_with_llm(
         return None;
     }
 
-    emit_progress(progress, CompactStage::Preparing);
+    emit_progress(progress, CompactStageData::Preparing);
 
     let window = compact_window_with_budget(messages, tail.step_boundaries, tail.token_cap)?;
 
@@ -808,7 +810,7 @@ pub async fn compact_messages_with_llm(
     );
     let (summary, quality) = match generator {
         Some(generator) => {
-            let result: Result<(String, CompactSummaryQuality), CompactGenerationFailure> =
+            let result: Result<(String, CompactSummaryQuality), CompactGenerationFailureData> =
                 if early_tokens > budgets.chunk_target_tokens() {
                     compact_messages_map_reduce(
                         generator,
@@ -825,7 +827,7 @@ pub async fn compact_messages_with_llm(
                         (output.summary, quality)
                     })
                 } else {
-                    emit_progress(progress, CompactStage::Generating);
+                    emit_progress(progress, CompactStageData::Generating);
                     llm_compact(
                         generator,
                         early_messages,
@@ -866,7 +868,7 @@ pub async fn compact_messages_with_llm(
         ),
     };
 
-    emit_progress(progress, CompactStage::Finalizing);
+    emit_progress(progress, CompactStageData::Finalizing);
 
     // recent tail：split_point 到末尾的原始消息
     let mut recent = messages[window.split_point..].to_vec();
@@ -893,10 +895,10 @@ async fn llm_generate(
     generator: &dyn CompactGenerator,
     request: Vec<Message>,
     cancel: &CancellationToken,
-) -> Result<CompactGenerationOutput, CompactGenerationFailure> {
+) -> Result<CompactGenerationOutputData, CompactGenerationFailureData> {
     let output = generator.generate(request, cancel).await?;
     if output.text().trim().is_empty() {
-        return Err(CompactGenerationFailure::new(
+        return Err(CompactGenerationFailureData::new(
             CompactGenerationFailureKind::InvalidSummary,
             format!(
                 "LLM 返回了空的 compact 结构化响应：completion_reason={} text_deltas={} non_text_deltas={} completed={}",
@@ -922,12 +924,12 @@ async fn llm_generate_with_empty_retry(
     stage: &str,
     request: Vec<Message>,
     cancel: &CancellationToken,
-) -> Result<CompactGenerationOutput, CompactGenerationFailure> {
+) -> Result<CompactGenerationOutputData, CompactGenerationFailureData> {
     match llm_generate(generator, request.clone(), cancel).await {
         Ok(output) => Ok(output),
         Err(error) if error.kind == CompactGenerationFailureKind::InvalidSummary => {
             if cancel.is_cancelled() {
-                return Err(CompactGenerationFailure::new(
+                return Err(CompactGenerationFailureData::new(
                     CompactGenerationFailureKind::Cancelled,
                     "compact 空响应重试前已取消",
                 ));
@@ -955,7 +957,7 @@ async fn llm_generate_with_empty_retry(
 fn decode_typed_json<T: serde::de::DeserializeOwned>(
     stage: &str,
     response: &str,
-) -> Result<T, CompactGenerationFailure> {
+) -> Result<T, CompactGenerationFailureData> {
     let trimmed = response.trim();
     let json = trimmed
         .strip_prefix("```json")
@@ -964,7 +966,7 @@ fn decode_typed_json<T: serde::de::DeserializeOwned>(
         .map(str::trim)
         .unwrap_or(trimmed);
     serde_json::from_str(json).map_err(|error| {
-        CompactGenerationFailure::new(
+        CompactGenerationFailureData::new(
             CompactGenerationFailureKind::InvalidSummary,
             format!("{stage} compact JSON 无效：{error}"),
         )
@@ -974,7 +976,7 @@ fn decode_typed_json<T: serde::de::DeserializeOwned>(
 fn build_typed_output_repair_request(
     stage: &str,
     invalid_response: &str,
-    validation_error: &CompactGenerationFailure,
+    validation_error: &CompactGenerationFailureData,
 ) -> Vec<Message> {
     let invalid_response = slice_head(invalid_response, FALLBACK_PREVIOUS_SUMMARY_CAP);
     vec![Message::user(format!(
@@ -993,9 +995,9 @@ async fn generate_and_validate_typed<Decoded, Validate>(
     request: Vec<Message>,
     cancel: &CancellationToken,
     validate: Validate,
-) -> Result<Decoded, CompactGenerationFailure>
+) -> Result<Decoded, CompactGenerationFailureData>
 where
-    Validate: Fn(&str) -> Result<Decoded, CompactGenerationFailure>,
+    Validate: Fn(&str) -> Result<Decoded, CompactGenerationFailureData>,
 {
     let mut response = llm_generate_with_empty_retry(generator, stage, request, cancel)
         .await?
@@ -1007,7 +1009,7 @@ where
 
     for repair_attempt in 1..=MAX_TYPED_OUTPUT_REPAIR_ATTEMPTS {
         if cancel.is_cancelled() {
-            return Err(CompactGenerationFailure::new(
+            return Err(CompactGenerationFailureData::new(
                 CompactGenerationFailureKind::Cancelled,
                 format!("{stage} compact 格式修复前已取消"),
             ));
@@ -1035,7 +1037,7 @@ async fn generate_and_decode_typed<Decoded: serde::de::DeserializeOwned>(
     stage: &str,
     request: Vec<Message>,
     cancel: &CancellationToken,
-) -> Result<Decoded, CompactGenerationFailure> {
+) -> Result<Decoded, CompactGenerationFailureData> {
     generate_and_validate_typed(generator, stage, request, cancel, |response| {
         decode_typed_json(stage, response)
     })
@@ -1048,7 +1050,7 @@ async fn llm_extract_facts(
     previous_summary: Option<&str>,
     budgets: crate::domain::compact::CompactBudgetSources,
     cancel: &CancellationToken,
-) -> Result<crate::domain::compact::CompactFactBatch, CompactGenerationFailure> {
+) -> Result<crate::domain::compact::CompactFactBatch, CompactGenerationFailureData> {
     let request = build_compact_request(
         early_messages,
         previous_summary,
@@ -1070,7 +1072,7 @@ async fn llm_extract_facts_or_local_fallback(
         crate::domain::compact::CompactFactBatch,
         Option<CompactGenerationFailureKind>,
     ),
-    CompactGenerationFailure,
+    CompactGenerationFailureData,
 > {
     match llm_extract_facts(generator, messages, previous_summary, budgets, cancel).await {
         Ok(facts) => {
@@ -1098,7 +1100,7 @@ async fn llm_extract_facts_or_local_fallback(
             let fallback = build_summary_text(messages, None);
             let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&fallback)
                 .map_err(|parse_error| {
-                    CompactGenerationFailure::new(
+                    CompactGenerationFailureData::new(
                         CompactGenerationFailureKind::InvalidSummary,
                         format!("local chunk fallback 无法解析：{parse_error}"),
                     )
@@ -1180,7 +1182,7 @@ pub(crate) fn latest_main_user_request(messages: &[Message]) -> Option<String> {
 fn reduce_facts_with_objective_fallback(
     facts: crate::domain::compact::CompactFactBatch,
     messages: &[Message],
-    task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
+    task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
 ) -> Result<crate::domain::compact::ContinuationCheckpoint, crate::domain::compact::CheckpointError>
 {
     let facts_have_main_user_objective = facts.facts().iter().any(|fact| {
@@ -1214,14 +1216,14 @@ async fn llm_compact(
     early_messages: &[Message],
     previous_summary: Option<&str>,
     budgets: crate::domain::compact::CompactBudgetSources,
-    task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
+    task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
     cancel: &CancellationToken,
-) -> Result<String, CompactGenerationFailure> {
+) -> Result<String, CompactGenerationFailureData> {
     let facts =
         llm_extract_facts(generator, early_messages, previous_summary, budgets, cancel).await?;
     let checkpoint = reduce_facts_with_objective_fallback(facts, early_messages, task_snapshot)
         .map_err(|error| {
-            CompactGenerationFailure::new(
+            CompactGenerationFailureData::new(
                 CompactGenerationFailureKind::InvalidSummary,
                 format!("map compact facts 无法归并：{error}"),
             )
@@ -1230,7 +1232,7 @@ async fn llm_compact(
         .normalize_to_budget(budgets.summary_budget())
         .map(|checkpoint| checkpoint.render())
         .map_err(|error| {
-            CompactGenerationFailure::new(
+            CompactGenerationFailureData::new(
                 CompactGenerationFailureKind::InvalidSummary,
                 format!("map compact checkpoint 无法收敛：{error}"),
             )
@@ -1274,9 +1276,9 @@ async fn compact_messages_map_reduce(
     previous_summary: Option<&str>,
     progress: Option<&dyn CompactProgressFn>,
     budgets: crate::domain::compact::CompactBudgetSources,
-    task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshot>,
+    task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
     cancel: &CancellationToken,
-) -> Result<MapReduceCompactOutput, CompactGenerationFailure> {
+) -> Result<MapReduceCompactOutput, CompactGenerationFailureData> {
     use crate::domain::token_budget::estimate_messages_tokens;
 
     let chunk_target = budgets.chunk_target_tokens();
@@ -1313,7 +1315,7 @@ async fn compact_messages_map_reduce(
                     cancel,
                 )
                 .await?;
-                Ok::<_, CompactGenerationFailure>((chunk_index, facts, degradation))
+                Ok::<_, CompactGenerationFailureData>((chunk_index, facts, degradation))
             }
         })
         .collect::<Vec<_>>();
@@ -1325,7 +1327,7 @@ async fn compact_messages_map_reduce(
         completed_chunks += 1;
         emit_progress_completed(
             progress,
-            CompactStage::Mapping,
+            CompactStageData::Mapping,
             completed_chunks,
             total_chunks,
         );
@@ -1339,7 +1341,7 @@ async fn compact_messages_map_reduce(
         let checkpoint = crate::domain::compact::CanonicalCompactSummary::decode(previous_summary)
             .map(crate::domain::compact::CanonicalCompactSummary::into_checkpoint)
             .map_err(|parse_error| {
-                CompactGenerationFailure::new(
+                CompactGenerationFailureData::new(
                     CompactGenerationFailureKind::InvalidSummary,
                     format!("previous compact checkpoint 无法解析：{parse_error}"),
                 )
@@ -1378,7 +1380,7 @@ async fn compact_messages_map_reduce(
                 locally_degraded_to_budget: false,
             })
             .map_err(|error| {
-                CompactGenerationFailure::new(
+                CompactGenerationFailureData::new(
                     CompactGenerationFailureKind::InvalidSummary,
                     format!("map compact facts 无法归并：{error}"),
                 )
@@ -1386,7 +1388,7 @@ async fn compact_messages_map_reduce(
     }
 
     // reduce: Context 按 chunk index 与 fact sequence 确定性归并，LLM 不再构造权威 checkpoint。
-    emit_progress(progress, CompactStage::Reducing);
+    emit_progress(progress, CompactStageData::Reducing);
     let combined_facts = fact_batches
         .into_iter()
         .flat_map(crate::domain::compact::CompactFactBatch::into_facts)
@@ -1397,7 +1399,7 @@ async fn compact_messages_map_reduce(
         task_snapshot,
     )
     .map_err(|error| {
-        CompactGenerationFailure::new(
+        CompactGenerationFailureData::new(
             CompactGenerationFailureKind::InvalidSummary,
             format!("reduce compact facts 无法归并：{error}"),
         )
@@ -1422,7 +1424,7 @@ async fn compact_messages_map_reduce(
         }
         emit_progress_completed(
             progress,
-            CompactStage::Refreshing,
+            CompactStageData::Refreshing,
             round - 1,
             MAX_REDUCE_REFRESH_ROUNDS,
         );
@@ -1442,7 +1444,7 @@ async fn compact_messages_map_reduce(
             };
         emit_progress_completed(
             progress,
-            CompactStage::Refreshing,
+            CompactStageData::Refreshing,
             round,
             MAX_REDUCE_REFRESH_ROUNDS,
         );
@@ -1479,7 +1481,7 @@ async fn compact_messages_map_reduce(
         final_checkpoint = final_checkpoint
             .degrade_to_budget(budget)
             .map_err(|error| {
-                CompactGenerationFailure::new(
+                CompactGenerationFailureData::new(
                     CompactGenerationFailureKind::InvalidSummary,
                     format!("compact checkpoint 无法安全降级到预算：{error}"),
                 )

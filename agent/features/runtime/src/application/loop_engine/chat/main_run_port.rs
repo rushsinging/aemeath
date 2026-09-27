@@ -20,9 +20,9 @@ use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::{Agent, ToolCall};
 use crate::domain::agent_run::RuntimeLifecycleEvent;
-use crate::ports::ContextRequest;
+use crate::ports::ContextRequestData;
 
-fn request_context_size(request: Option<&ContextRequest>) -> usize {
+fn request_context_size(request: Option<&ContextRequestData>) -> usize {
     request.map_or(1, |request| request.context_size.max(1))
 }
 
@@ -297,10 +297,10 @@ impl crate::application::loop_engine::ManualCompactionPort for ChatManualCompact
             Arc::new(move |stage, work| {
                 progress.emit(compact_stage_view(stage), compact_work_view(work));
             });
-        let request = crate::ports::ManualCompactRequest {
+        let request = crate::ports::ManualCompactRequestData {
             session_id: crate::ports::SessionId::new(self.session_id.clone()),
             run_id: run_id.clone(),
-            system_prompt: crate::ports::SystemPromptSpec::new(self.system_prompt.clone()),
+            system_prompt: crate::ports::SystemPromptSpecData::new(self.system_prompt.clone()),
             context_size: self.context_size,
             progress: Some(progress_callback),
             task_snapshot,
@@ -332,21 +332,21 @@ impl crate::application::loop_engine::ManualCompactionPort for ChatManualCompact
     }
 }
 
-fn compact_stage_view(stage: context::compact::CompactStage) -> sdk::CompactStageView {
+fn compact_stage_view(stage: context::compact::CompactStageData) -> sdk::CompactStageView {
     match stage {
-        context::compact::CompactStage::Preparing => sdk::CompactStageView::Preparing,
-        context::compact::CompactStage::Generating => sdk::CompactStageView::Generating,
-        context::compact::CompactStage::Mapping => sdk::CompactStageView::Mapping,
-        context::compact::CompactStage::Reducing => sdk::CompactStageView::Reducing,
-        context::compact::CompactStage::Refreshing => sdk::CompactStageView::Refreshing,
-        context::compact::CompactStage::Finalizing => sdk::CompactStageView::Finalizing,
+        context::compact::CompactStageData::Preparing => sdk::CompactStageView::Preparing,
+        context::compact::CompactStageData::Generating => sdk::CompactStageView::Generating,
+        context::compact::CompactStageData::Mapping => sdk::CompactStageView::Mapping,
+        context::compact::CompactStageData::Reducing => sdk::CompactStageView::Reducing,
+        context::compact::CompactStageData::Refreshing => sdk::CompactStageView::Refreshing,
+        context::compact::CompactStageData::Finalizing => sdk::CompactStageView::Finalizing,
     }
 }
 
-fn compact_work_view(work: context::compact::CompactWork) -> sdk::CompactWorkView {
+fn compact_work_view(work: context::compact::CompactWorkData) -> sdk::CompactWorkView {
     match work {
-        context::compact::CompactWork::Indeterminate => sdk::CompactWorkView::Indeterminate,
-        context::compact::CompactWork::Determinate { completed, total } => {
+        context::compact::CompactWorkData::Indeterminate => sdk::CompactWorkView::Indeterminate,
+        context::compact::CompactWorkData::Determinate { completed, total } => {
             let (Ok(completed), Ok(total)) = (u32::try_from(completed), u32::try_from(total))
             else {
                 return sdk::CompactWorkView::Indeterminate;

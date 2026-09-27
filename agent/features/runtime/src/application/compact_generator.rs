@@ -6,7 +6,9 @@
 
 use async_trait::async_trait;
 use context::compact::CompactGenerator;
-use context::{CompactGenerationFailure, CompactGenerationFailureKind, CompactGenerationOutput};
+use context::{
+    CompactGenerationFailureData, CompactGenerationFailureKind, CompactGenerationOutputData,
+};
 use futures::StreamExt;
 use provider::{
     InvocationDeltaData, InvocationEventData, InvocationOptionsData, InvocationRequestData,
@@ -55,7 +57,7 @@ impl CompactGenerator for ProviderCompactGenerator {
         &self,
         request: Vec<Message>,
         cancel: &CancellationToken,
-    ) -> Result<CompactGenerationOutput, CompactGenerationFailure> {
+    ) -> Result<CompactGenerationOutputData, CompactGenerationFailureData> {
         let target = self.resolver.resolve().map_err(compact_model_failure)?;
         let binding = target.binding();
         let max_output_tokens = self.max_output_tokens.min(binding.max_tokens.max(1));
@@ -85,7 +87,7 @@ impl CompactGenerator for ProviderCompactGenerator {
                 }
                 InvocationEventData::Delta(_) => non_text_delta_count += 1,
                 InvocationEventData::Completed(completion) => {
-                    return Ok(CompactGenerationOutput::completed(
+                    return Ok(CompactGenerationOutputData::completed(
                         text,
                         Some(completion_reason(&completion.stop_reason)),
                         text_delta_count,
@@ -97,7 +99,7 @@ impl CompactGenerator for ProviderCompactGenerator {
                 }
             }
         }
-        Err(CompactGenerationFailure::new(
+        Err(CompactGenerationFailureData::new(
             CompactGenerationFailureKind::Provider,
             "Provider 流在完成事件前结束",
         ))
@@ -138,7 +140,7 @@ fn completion_reason(reason: &provider::ProviderStopReasonData) -> String {
     }
 }
 
-fn compact_generation_failure(error: provider::ProviderError) -> CompactGenerationFailure {
+fn compact_generation_failure(error: provider::ProviderError) -> CompactGenerationFailureData {
     use provider::ProviderErrorKind;
 
     let kind = match error.kind {
@@ -156,12 +158,12 @@ fn compact_generation_failure(error: provider::ProviderError) -> CompactGenerati
         | ProviderErrorKind::StreamTruncated
         | ProviderErrorKind::Configuration => CompactGenerationFailureKind::Provider,
     };
-    CompactGenerationFailure::new(kind, error.safe_message)
+    CompactGenerationFailureData::new(kind, error.safe_message)
 }
 
 /// 模型解析失败按 Provider 类错误上报；已配置 selection 的错误 **NEVER** 静默回退。
-fn compact_model_failure(error: CompactModelResolveError) -> CompactGenerationFailure {
-    CompactGenerationFailure::new(CompactGenerationFailureKind::Provider, error.to_string())
+fn compact_model_failure(error: CompactModelResolveError) -> CompactGenerationFailureData {
+    CompactGenerationFailureData::new(CompactGenerationFailureKind::Provider, error.to_string())
 }
 
 #[cfg(test)]

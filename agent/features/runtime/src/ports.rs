@@ -25,16 +25,16 @@ pub mod tool_result_blob;
 pub mod usage_sink;
 
 pub use context_port::{
-    AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
-    CompactRequest, CompactTrigger, ContentFingerprint, ContextAppend, ContextAppendError,
-    ContextPort, ContextPortError, ContextRequest, ContextRequestId, ContextWindow, FinalizeCause,
-    Language, ManualCompactRequest, RunStepId, SessionId, SessionRevision, StepReceipt,
-    SystemPromptSpec,
+    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
+    CompactOutcome, CompactRequestData, CompactTrigger, ContentFingerprint, ContextAppendData,
+    ContextAppendError, ContextPort, ContextPortError, ContextRequestData, ContextRequestId,
+    ContextWindowData, FinalizeCause, Language, ManualCompactRequestData, RunStepId, SessionId,
+    SessionRevision, StepReceiptData, SystemPromptSpecData,
 };
 #[cfg(test)]
 pub use context_port::{
-    CompactResult, CompactSkipReason, CompactionDecision, DecisionReason, SystemBlock, TokenBudget,
-    ToolOutcomeKind, Urgency,
+    CompactResult, CompactSkipReason, CompactionDecisionData, DecisionReason, SystemBlock,
+    TokenBudget, ToolOutcomeKindData, Urgency,
 };
 pub use policy_port::Policy;
 #[cfg(test)]

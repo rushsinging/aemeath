@@ -40,7 +40,7 @@ fn step_commit_carries_durable_receipts_into_context_finalization() {
     let contracts = include_str!("engine/contracts.rs");
     let persistence = include_str!("step_persistence.rs");
 
-    assert!(contracts.contains("pub receipts: Vec<crate::ports::StepReceipt>"));
+    assert!(contracts.contains("pub receipts: Vec<crate::ports::StepReceiptData>"));
     assert!(persistence.contains("commit.receipts.clone()"));
     assert!(!persistence.contains("vec![],\n                self.usage.get()"));
 }
@@ -226,7 +226,7 @@ fn p6_9_4_source_directories_expose_only_source_observer_topology_and_mapping() 
             "prepare_tool_round(",
             "execute_tool_round(",
             "HookInvocationData::Stop",
-            "ContextRequest {",
+            "ContextRequestData {",
             "async fn finalize_sub_agent(",
             "impl crate::application::loop_engine::ModelInvocationPort",
             "impl crate::application::loop_engine::ToolOrchestrationPort",
@@ -1078,7 +1078,7 @@ impl StepPersistencePort for StepPersistenceFake {
         _execution: &crate::application::run::execution_state::RunExecutionState,
         _run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
-    ) -> Option<crate::ports::ContextRequest> {
+    ) -> Option<crate::ports::ContextRequestData> {
         let _ = step_id;
         None
     }

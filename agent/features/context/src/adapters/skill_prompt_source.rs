@@ -5,12 +5,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tools::published::skill::{SkillCatalogPort, SkillDescriptor, SkillQuery};
 
-use crate::domain::ContextRequest;
+use crate::domain::ContextRequestData;
 use crate::ports::{
     ContextPromptSource, PromptMaterialization, PromptMaterializationError, SkillQueryFactory,
 };
 
-pub struct SkillPromptSource {
+pub(crate) struct SkillPromptSource {
     catalog: Arc<dyn SkillCatalogPort>,
     query_factory: Arc<dyn SkillQueryFactory>,
 }
@@ -38,7 +38,7 @@ impl WorkspaceSkillQueryFactory {
 }
 
 impl SkillQueryFactory for WorkspaceSkillQueryFactory {
-    fn query(&self, request: &ContextRequest) -> SkillQuery {
+    fn query(&self, request: &ContextRequestData) -> SkillQuery {
         let project_root = self.workspace.current_workspace_root();
         let extra_dirs = request.config_snapshot.skills().dirs.clone();
         let available_tools = request
@@ -56,7 +56,7 @@ pub(crate) fn sort_and_dedup(mut descriptors: Vec<SkillDescriptor>) -> Vec<Skill
     descriptors
 }
 
-pub fn skill_prompt_budget(context_size: usize) -> usize {
+pub(crate) fn skill_prompt_budget(context_size: usize) -> usize {
     (context_size / 8).max(1_024)
 }
 
@@ -138,7 +138,7 @@ fn metadata_revision(descriptors: &[SkillDescriptor]) -> u64 {
 impl ContextPromptSource for SkillPromptSource {
     async fn materialize(
         &self,
-        request: &ContextRequest,
+        request: &ContextRequestData,
     ) -> Result<PromptMaterialization, PromptMaterializationError> {
         let (mut cacheable, uncached) =
             crate::adapters::BaselinePromptSource::baseline_blocks(request);

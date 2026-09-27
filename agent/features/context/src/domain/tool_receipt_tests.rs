@@ -1,9 +1,9 @@
 use super::tool_receipt::*;
-use super::{SessionId, ToolOutcomeKind};
+use super::{SessionId, ToolOutcomeKindData};
 use sdk::{RunId, RunStepId};
 
-fn identity() -> ToolCallIdentity {
-    ToolCallIdentity {
+fn identity() -> ToolCallIdentityData {
+    ToolCallIdentityData {
         session_id: SessionId::new("session-1"),
         run_id: RunId::new("run-1"),
         step_id: RunStepId::new("step-1"),
@@ -17,23 +17,26 @@ fn identity() -> ToolCallIdentity {
 
 #[test]
 fn tool_receipt_state_is_monotonic_and_idempotent() {
-    let pending = ToolCallReceipt::pending(identity(), "pattern=**/archify.mjs");
+    let pending = ToolCallReceiptData::pending(identity(), "pattern=**/archify.mjs");
     let running = pending
-        .advance(ToolReceiptMutation::running(identity()))
+        .advance(ToolReceiptMutationData::running(identity()))
         .expect("Pending -> Running 应合法")
         .receipt;
-    let terminal = ToolTerminalReceipt::new(
-        ToolOutcomeKind::TimedOut,
+    let terminal = ToolTerminalReceiptData::new(
+        ToolOutcomeKindData::TimedOut,
         "达到 effective deadline",
         CleanupConfirmation::Confirmed,
     );
     let timed_out = running
-        .advance(ToolReceiptMutation::terminal(identity(), terminal.clone()))
+        .advance(ToolReceiptMutationData::terminal(
+            identity(),
+            terminal.clone(),
+        ))
         .expect("Running -> TimedOut 应合法")
         .receipt;
 
     let repeated = timed_out
-        .advance(ToolReceiptMutation::terminal(identity(), terminal))
+        .advance(ToolReceiptMutationData::terminal(identity(), terminal))
         .expect("相同 terminal mutation 应幂等");
     assert!(!repeated.changed);
     assert!(matches!(repeated.receipt.state, ToolCallState::Terminal(_)));
@@ -41,12 +44,12 @@ fn tool_receipt_state_is_monotonic_and_idempotent() {
 
 #[test]
 fn cancellation_unconfirmed_preserves_side_effects_and_unfinished_ids() {
-    let running = ToolCallReceipt::pending(identity(), "command=external")
-        .advance(ToolReceiptMutation::running(identity()))
+    let running = ToolCallReceiptData::pending(identity(), "command=external")
+        .advance(ToolReceiptMutationData::running(identity()))
         .unwrap()
         .receipt;
-    let terminal = ToolTerminalReceipt::new(
-        ToolOutcomeKind::CancellationUnconfirmed,
+    let terminal = ToolTerminalReceiptData::new(
+        ToolOutcomeKindData::CancellationUnconfirmed,
         "底层工作未确认停止",
         CleanupConfirmation::Unconfirmed,
     )
@@ -54,7 +57,7 @@ fn cancellation_unconfirmed_preserves_side_effects_and_unfinished_ids() {
     .with_unfinished_call("child-1");
 
     let result = running
-        .advance(ToolReceiptMutation::terminal(identity(), terminal))
+        .advance(ToolReceiptMutationData::terminal(identity(), terminal))
         .unwrap();
     let ToolCallState::Terminal(terminal) = result.receipt.state else {
         panic!("应为 terminal");
@@ -65,11 +68,11 @@ fn cancellation_unconfirmed_preserves_side_effects_and_unfinished_ids() {
 
 #[test]
 fn terminal_receipt_rejects_state_regression_and_conflicting_terminal() {
-    let terminal = ToolCallReceipt::pending(identity(), "safe")
-        .advance(ToolReceiptMutation::terminal(
+    let terminal = ToolCallReceiptData::pending(identity(), "safe")
+        .advance(ToolReceiptMutationData::terminal(
             identity(),
-            ToolTerminalReceipt::new(
-                ToolOutcomeKind::Denied,
+            ToolTerminalReceiptData::new(
+                ToolOutcomeKindData::Denied,
                 "审批拒绝",
                 CleanupConfirmation::NotApplicable,
             ),
@@ -80,14 +83,14 @@ fn terminal_receipt_rejects_state_regression_and_conflicting_terminal() {
     assert!(matches!(
         terminal
             .clone()
-            .advance(ToolReceiptMutation::running(identity())),
+            .advance(ToolReceiptMutationData::running(identity())),
         Err(ToolReceiptMutationError::TerminalStateConflict { .. })
     ));
     assert!(matches!(
-        terminal.advance(ToolReceiptMutation::terminal(
+        terminal.advance(ToolReceiptMutationData::terminal(
             identity(),
-            ToolTerminalReceipt::new(
-                ToolOutcomeKind::Failure,
+            ToolTerminalReceiptData::new(
+                ToolOutcomeKindData::Failure,
                 "另一终态",
                 CleanupConfirmation::NotApplicable,
             ),
@@ -98,9 +101,9 @@ fn terminal_receipt_rejects_state_regression_and_conflicting_terminal() {
 
 #[test]
 fn timed_out_is_a_distinct_tool_outcome_kind() {
-    assert_ne!(ToolOutcomeKind::TimedOut, ToolOutcomeKind::Failure);
+    assert_ne!(ToolOutcomeKindData::TimedOut, ToolOutcomeKindData::Failure);
     assert_ne!(
-        ToolOutcomeKind::TimedOut,
-        ToolOutcomeKind::CancellationUnconfirmed
+        ToolOutcomeKindData::TimedOut,
+        ToolOutcomeKindData::CancellationUnconfirmed
     );
 }

@@ -675,7 +675,7 @@ where
                 .collect::<Vec<_>>();
                 if turn_boundary_config.guidance_sources_changed {
                     let reminder =
-                        context::InvocationReminder::guidance_sources_changed();
+                        context::InvocationReminderData::guidance_sources_changed();
                     log::debug!(
                         target: crate::LOG_TARGET,
                         "invocation_reminder_created kind={} trigger=guidance_sources_changed",
@@ -684,7 +684,7 @@ where
                     invocation_reminders.push(reminder);
                 }
                 if runtime_context.provider_ref().model.model != shell.prompt_model_id {
-                    let reminder = context::InvocationReminder::model_guidance_mismatch(
+                    let reminder = context::InvocationReminderData::model_guidance_mismatch(
                         shell.prompt_model_id.clone(),
                         runtime_context.provider_ref().model.model.clone(),
                     );
@@ -698,7 +698,7 @@ where
                     invocation_reminders.push(reminder);
                 }
                 let context_request =
-                    crate::application::loop_engine::run_services::ContextRequestData {
+                    crate::application::loop_engine::run_services::ContextRequest {
                         runtime_context: &runtime_context,
                         session_id: &session_id,
                         system_prompt: &cacheable_system_prompt,

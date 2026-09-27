@@ -1,4 +1,4 @@
-use super::{SessionId, ToolOutcomeKind};
+use super::{SessionId, ToolOutcomeKindData};
 use sdk::{RunId, RunStepId};
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +10,7 @@ pub enum CleanupConfirmation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolCallIdentity {
+pub struct ToolCallIdentityData {
     pub session_id: SessionId,
     pub run_id: RunId,
     pub step_id: RunStepId,
@@ -22,17 +22,17 @@ pub struct ToolCallIdentity {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolTerminalReceipt {
-    pub outcome: ToolOutcomeKind,
+pub struct ToolTerminalReceiptData {
+    pub outcome: ToolOutcomeKindData,
     pub safe_reason: String,
     possible_side_effects: Vec<String>,
     unfinished_call_ids: Vec<String>,
     pub cleanup: CleanupConfirmation,
 }
 
-impl ToolTerminalReceipt {
+impl ToolTerminalReceiptData {
     pub fn new(
-        outcome: ToolOutcomeKind,
+        outcome: ToolOutcomeKindData,
         safe_reason: impl Into<String>,
         cleanup: CleanupConfirmation,
     ) -> Self {
@@ -65,21 +65,21 @@ impl ToolTerminalReceipt {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ToolCallState {
+pub(crate) enum ToolCallState {
     Pending,
     Running,
-    Terminal(ToolTerminalReceipt),
+    Terminal(ToolTerminalReceiptData),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolCallReceipt {
-    pub identity: ToolCallIdentity,
+pub(crate) struct ToolCallReceiptData {
+    pub identity: ToolCallIdentityData,
     pub input_preview: String,
     pub state: ToolCallState,
 }
 
-impl ToolCallReceipt {
-    pub fn to_step_receipt(&self) -> Option<super::StepReceipt> {
+impl ToolCallReceiptData {
+    pub fn to_step_receipt(&self) -> Option<super::StepReceiptData> {
         let ToolCallState::Terminal(terminal) = &self.state else {
             return None;
         };
@@ -89,9 +89,9 @@ impl ToolCallReceipt {
             .as_deref()
             .unwrap_or(&self.identity.runtime_call_id);
         let receipt = if self.identity.agent {
-            super::StepReceipt::agent(call_id, self.identity.call_index, terminal.outcome)
+            super::StepReceiptData::agent(call_id, self.identity.call_index, terminal.outcome)
         } else {
-            super::StepReceipt::tool(call_id, self.identity.call_index, terminal.outcome)
+            super::StepReceiptData::tool(call_id, self.identity.call_index, terminal.outcome)
         }
         .with_summary(terminal.safe_reason.clone());
         let receipt = terminal
@@ -110,7 +110,7 @@ impl ToolCallReceipt {
         )
     }
 
-    pub fn pending(identity: ToolCallIdentity, input_preview: impl Into<String>) -> Self {
+    pub fn pending(identity: ToolCallIdentityData, input_preview: impl Into<String>) -> Self {
         Self {
             identity,
             input_preview: input_preview.into(),
@@ -120,8 +120,8 @@ impl ToolCallReceipt {
 
     pub fn advance(
         self,
-        mutation: ToolReceiptMutation,
-    ) -> Result<ToolReceiptMutationReceipt, ToolReceiptMutationError> {
+        mutation: ToolReceiptMutationData,
+    ) -> Result<ToolReceiptMutationReceiptData, ToolReceiptMutationError> {
         if self.identity != mutation.identity {
             return Err(ToolReceiptMutationError::IdentityMismatch);
         }
@@ -133,7 +133,7 @@ impl ToolCallReceipt {
                 ToolCallState::Terminal(terminal),
             ) => ToolCallState::Terminal(terminal),
             (ToolCallState::Running, ToolCallState::Running) => {
-                return Ok(ToolReceiptMutationReceipt {
+                return Ok(ToolReceiptMutationReceiptData {
                     receipt: self,
                     changed: false,
                 });
@@ -141,7 +141,7 @@ impl ToolCallReceipt {
             (ToolCallState::Terminal(current), ToolCallState::Terminal(next))
                 if current == &next =>
             {
-                return Ok(ToolReceiptMutationReceipt {
+                return Ok(ToolReceiptMutationReceiptData {
                     receipt: self,
                     changed: false,
                 });
@@ -152,7 +152,7 @@ impl ToolCallReceipt {
                 });
             }
             (current, next) if current == &next => {
-                return Ok(ToolReceiptMutationReceipt {
+                return Ok(ToolReceiptMutationReceiptData {
                     receipt: self,
                     changed: false,
                 });
@@ -160,7 +160,7 @@ impl ToolCallReceipt {
             _ => return Err(ToolReceiptMutationError::InvalidTransition),
         };
 
-        Ok(ToolReceiptMutationReceipt {
+        Ok(ToolReceiptMutationReceiptData {
             receipt: Self {
                 state: next,
                 ..self
@@ -171,14 +171,14 @@ impl ToolCallReceipt {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolReceiptMutation {
-    pub identity: ToolCallIdentity,
+pub struct ToolReceiptMutationData {
+    pub identity: ToolCallIdentityData,
     pub input_preview: Option<String>,
     pub next: ToolCallState,
 }
 
-impl ToolReceiptMutation {
-    pub fn pending(identity: ToolCallIdentity, input_preview: impl Into<String>) -> Self {
+impl ToolReceiptMutationData {
+    pub fn pending(identity: ToolCallIdentityData, input_preview: impl Into<String>) -> Self {
         Self {
             identity,
             input_preview: Some(input_preview.into()),
@@ -186,7 +186,7 @@ impl ToolReceiptMutation {
         }
     }
 
-    pub fn running(identity: ToolCallIdentity) -> Self {
+    pub fn running(identity: ToolCallIdentityData) -> Self {
         Self {
             identity,
             input_preview: None,
@@ -194,7 +194,7 @@ impl ToolReceiptMutation {
         }
     }
 
-    pub fn terminal(identity: ToolCallIdentity, terminal: ToolTerminalReceipt) -> Self {
+    pub fn terminal(identity: ToolCallIdentityData, terminal: ToolTerminalReceiptData) -> Self {
         Self {
             identity,
             input_preview: None,
@@ -204,8 +204,8 @@ impl ToolReceiptMutation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolReceiptMutationReceipt {
-    pub receipt: ToolCallReceipt,
+pub struct ToolReceiptMutationReceiptData {
+    pub receipt: ToolCallReceiptData,
     pub changed: bool,
 }
 

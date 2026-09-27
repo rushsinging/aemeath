@@ -133,7 +133,7 @@ fn task_reminder_intent_preserves_count_and_active_list() {
         .unwrap();
 
     let reminder = build_task_reminder_intent(access, 7).expect("reminder intent");
-    let context::InvocationReminder::TaskProgress(progress) = reminder else {
+    let context::InvocationReminderData::TaskProgress(progress) = reminder else {
         panic!("expected task progress reminder");
     };
 

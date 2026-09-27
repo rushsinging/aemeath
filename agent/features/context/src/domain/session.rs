@@ -2,6 +2,13 @@
 //!
 //! 设计文档：`docs/design/02-modules/context-management/01-session.md`
 
+pub(crate) use generation::{
+    SessionCommitPlan, SessionGenerationCodec, SessionGenerationManifest,
+    SessionGenerationWireError,
+};
+
+pub use share::session_types::PersistedWorkspaceContext;
+
 mod chat_chain;
 mod envelope;
 mod generation;
@@ -11,26 +18,28 @@ mod project_layout;
 mod restore;
 mod types;
 
-pub use chat_chain::{ChatChain, ChatSegment, SegmentKind};
-pub use envelope::{
-    AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
-    CommittedRunStep, CommittedStep, CommittedStepLedger, CommittedStepMessages, DecodedSession,
+pub(crate) use chat_chain::ChatSegment;
+pub use chat_chain::{ChatChain, SegmentKind};
+pub(crate) use envelope::{
+    AcceptedInputRecord, ActiveCompactMarker, CommittedRunSlice, CommittedRunStep,
     FinalizedOutcomeRecord, RunStepCursor, SessionCodec, SessionCodecError, SessionHistory,
-    SkillLoadRecord, SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
+    CURRENT_SESSION_SCHEMA_VERSION,
+};
+pub use envelope::{
+    CanonicalSession, CommittedStep, CommittedStepLedger, CommittedStepMessages, DecodedSession,
+    SkillLoadRecord, SnapshotState,
 };
 pub use generation::{
-    DisplayHistoryStepIndex, DisplayHistoryStepReference, DisplayHistoryStepWindow,
-    SessionCommitPlan, SessionGenerationCodec, SessionGenerationManifest,
-    SessionGenerationWireError, SessionMemberBytes, SessionMetadataMember, SessionStateMember,
-    SessionStepMember, SessionStepReference,
+    DisplayHistoryStepIndexData, DisplayHistoryStepWindowData, SessionMemberBytes,
+    SessionMetadataMember, SessionStateMember, SessionStepMember, SessionStepReference,
 };
 pub use management::{
-    same_project_identity, session_matches_project, SessionListEntry, SessionManagementError,
-    SessionMetadataUpdate, SessionResumeLoad, SessionResumeView,
+    same_project_identity, session_matches_project, SessionListEntryData, SessionManagementError,
+    SessionMetadataUpdateData, SessionResumeLoad, SessionResumeViewData,
 };
-pub use project_layout::{project_dir_segment, session_project_dir};
-pub use restore::{SessionRestore, SessionRestoreStep};
+pub(crate) use project_layout::project_dir_segment;
+pub use project_layout::session_project_dir;
+pub use restore::{SessionRestore, SessionRestoreStepData};
 pub use types::{
-    extract_project_name, new_session_id, now_iso, validate_session_id, PersistedWorkspaceContext,
-    PersistedWorkspaceFrame, SessionMetadata,
+    extract_project_name, new_session_id, now_iso, validate_session_id, SessionMetadata,
 };

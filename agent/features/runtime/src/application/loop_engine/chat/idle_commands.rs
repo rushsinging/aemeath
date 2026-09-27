@@ -80,7 +80,7 @@ pub async fn execute_session(
                 .update_metadata_for_project(
                     parts[1],
                     project,
-                    context::SessionMetadataUpdate {
+                    context::SessionMetadataUpdateData {
                         title: Some(parts[2..].join(" ")),
                         ..Default::default()
                     },

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::domain::session::{CanonicalSession, SessionCodec, SessionCodecError};
 use crate::ports::{SessionDecoder, SessionGeneration, SessionSnapshotStore, SessionStoreError};
 
-pub struct SessionPersistenceService {
+pub(crate) struct SessionPersistenceService {
     store: Arc<dyn SessionSnapshotStore>,
     decoder: Arc<dyn SessionDecoder>,
 }
@@ -66,7 +66,7 @@ impl SessionPersistenceService {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum SessionLoadError {
+pub(crate) enum SessionLoadError {
     #[error("Session snapshot not found")]
     NotFound,
     #[error("No decodable Session generation")]

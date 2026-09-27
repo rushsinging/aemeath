@@ -32,6 +32,7 @@ pub struct SessionMetadata {
     pub project: Option<String>,
 }
 
+#[cfg(any(test, feature = "dev"))]
 pub use share::session_types::{PersistedWorkspaceContext, PersistedWorkspaceFrame};
 
 pub fn extract_project_name(cwd: &str) -> Option<String> {

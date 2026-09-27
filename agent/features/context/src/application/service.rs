@@ -3,15 +3,15 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use crate::domain::{
-    AcceptedInputAppend, AcceptedInputError, AcceptedInputReceipt, AppendReceipt, CompactOutcome,
-    CompactRequest, CompactionDecision, ContextAppend, ContextAppendError, ContextPortError,
-    ContextRequest, ContextWindow, InvocationReminder, ManualCompactRequest, SessionId,
-    SystemBlock, TaskProgressStatus, ToolReceiptMutation, ToolReceiptMutationError,
-    ToolReceiptMutationReceipt,
+    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
+    CompactOutcome, CompactRequestData, CompactionDecisionData, ContextAppendData,
+    ContextAppendError, ContextPortError, ContextRequestData, ContextWindowData,
+    InvocationReminderData, ManualCompactRequestData, SessionId, SystemBlock, TaskProgressStatus,
+    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
 use crate::ports::{ContextMemorySource, ContextPort, ContextPromptSource, SessionRepository};
 
-pub struct ContextApplicationService {
+pub(crate) struct ContextApplicationService {
     session: Arc<dyn SessionRepository>,
     prompt: Arc<dyn ContextPromptSource>,
     memory: Arc<dyn ContextMemorySource>,
@@ -32,8 +32,8 @@ impl ContextApplicationService {
 
     async fn build_candidate(
         &self,
-        request: &ContextRequest,
-    ) -> Result<ContextWindow, ContextPortError> {
+        request: &ContextRequestData,
+    ) -> Result<ContextWindowData, ContextPortError> {
         #[cfg(test)]
         let build_started = std::time::Instant::now();
         #[cfg(test)]
@@ -223,7 +223,7 @@ impl ContextApplicationService {
             decision.reason,
             decision_started.elapsed(),
         );
-        let window = ContextWindow {
+        let window = ContextWindowData {
             backing_revision: snapshot.revision,
             system_blocks: blocks,
             messages,
@@ -239,7 +239,7 @@ impl ContextApplicationService {
     /// compact 提交后的占用体检报告（防震荡观测信号）。
     pub(crate) async fn post_compaction_usage_check(
         &self,
-        source: &ContextRequest,
+        source: &ContextRequestData,
     ) -> Option<PostCompactionUsageReport> {
         // compact 刚重置 usage baseline，source 里携带的 provider 旧值
         // 不代表提交后的状态，强制走 heuristic 估算路径。
@@ -297,13 +297,13 @@ pub(crate) struct ReminderLogPayload {
 
 pub(crate) fn invocation_reminder_log_payloads(
     language: &str,
-    reminders: &[InvocationReminder],
+    reminders: &[InvocationReminderData],
 ) -> Vec<ReminderLogPayload> {
     let mut rendered = Vec::new();
     for reminder_kind in [0_u8, 1, 2] {
         for reminder in reminders {
             let text = match (reminder_kind, reminder) {
-                (0, InvocationReminder::TaskProgress(progress)) => {
+                (0, InvocationReminderData::TaskProgress(progress)) => {
                     let mut lines = vec![match language {
                         "zh" => format!("━━ 任务：{}/{} ━━", progress.completed, progress.total),
                         _ => format!("━━ Tasks: {}/{} ━━", progress.completed, progress.total),
@@ -349,7 +349,7 @@ pub(crate) fn invocation_reminder_log_payloads(
                         lines.join("\n")
                     ))
                 }
-                (1, InvocationReminder::GuidanceSourcesChanged) => {
+                (1, InvocationReminderData::GuidanceSourcesChanged) => {
                     Some(match language {
                         "zh" => "<system-reminder>guidance 来源已变更；当前 Session 的冻结系统提示保持不变。新 Session 才会重新物化这些来源。</system-reminder>".to_string(),
                         _ => "<system-reminder>Guidance sources changed. This Session's frozen system prompt remains unchanged; a new Session will materialize the updated sources.</system-reminder>".to_string(),
@@ -357,7 +357,7 @@ pub(crate) fn invocation_reminder_log_payloads(
                 }
                 (
                     2,
-                    InvocationReminder::ModelGuidanceMismatch {
+                    InvocationReminderData::ModelGuidanceMismatch {
                         session_model_id,
                         run_model_id,
                     },
@@ -460,19 +460,22 @@ fn context_message_tool_result_metrics(messages: &crate::domain::ContextMessages
 impl ContextPort for ContextApplicationService {
     async fn build_window(
         &self,
-        request: &ContextRequest,
-    ) -> Result<ContextWindow, ContextPortError> {
+        request: &ContextRequestData,
+    ) -> Result<ContextWindowData, ContextPortError> {
         self.build_candidate(request).await
     }
 
     async fn needs_compaction(
         &self,
-        request: &ContextRequest,
-    ) -> Result<CompactionDecision, ContextPortError> {
+        request: &ContextRequestData,
+    ) -> Result<CompactionDecisionData, ContextPortError> {
         Ok(self.build_candidate(request).await?.compaction_decision)
     }
 
-    async fn compact(&self, request: &CompactRequest) -> Result<CompactOutcome, ContextPortError> {
+    async fn compact(
+        &self,
+        request: &CompactRequestData,
+    ) -> Result<CompactOutcome, ContextPortError> {
         let outcome = self.session.commit_compaction(request).await?;
         // 仅在真实提交后体检：Skipped 时会话状态未变，重建无意义。
         if matches!(outcome, CompactOutcome::Committed(_)) {
@@ -492,7 +495,7 @@ impl ContextPort for ContextApplicationService {
 
     async fn manual_compact(
         &self,
-        request: &ManualCompactRequest,
+        request: &ManualCompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError> {
         self.session.commit_manual_compaction(request).await
     }
@@ -503,15 +506,15 @@ impl ContextPort for ContextApplicationService {
 
     async fn append_accepted_input(
         &self,
-        append: &AcceptedInputAppend,
-    ) -> Result<AcceptedInputReceipt, AcceptedInputError> {
+        append: &AcceptedInputAppendData,
+    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
         self.session.append_accepted_input(append).await
     }
 
     async fn advance_tool_receipt(
         &self,
-        mutation: ToolReceiptMutation,
-    ) -> Result<ToolReceiptMutationReceipt, ToolReceiptMutationError> {
+        mutation: ToolReceiptMutationData,
+    ) -> Result<ToolReceiptMutationReceiptData, ToolReceiptMutationError> {
         self.session.advance_tool_receipt(mutation).await
     }
 
@@ -520,7 +523,7 @@ impl ContextPort for ContextApplicationService {
         session_id: &SessionId,
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::domain::StepReceipt>, ToolReceiptMutationError> {
+    ) -> Result<Vec<crate::domain::StepReceiptData>, ToolReceiptMutationError> {
         self.session
             .step_receipts(session_id, run_id, step_id)
             .await
@@ -538,8 +541,8 @@ impl ContextPort for ContextApplicationService {
 
     async fn append_and_persist(
         &self,
-        append: &ContextAppend,
-    ) -> Result<AppendReceipt, ContextAppendError> {
+        append: &ContextAppendData,
+    ) -> Result<AppendReceiptData, ContextAppendError> {
         self.session.append_finalized(append).await
     }
 }

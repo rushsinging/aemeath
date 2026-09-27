@@ -85,7 +85,7 @@ pub struct SessionSwitchClosed;
 /// Each variant identifies a distinct phase of the cross-BC prepare/commit
 /// pipeline so the caller can distinguish *why* a resume was rejected.
 #[derive(Debug, thiserror::Error)]
-pub enum MainSessionError {
+pub(crate) enum MainSessionError {
     /// The envelope's `workspace` slot is `Missing` or `CapturedEmpty`. A typed
     /// workspace context is mandatory for resume — there is no safe default.
     #[error("workspace snapshot is missing or captured empty; a typed workspace context is required for resume")]
@@ -207,6 +207,14 @@ pub struct MainSessionDependencies {
 /// fully wired with the real opener. There is no compatibility no-op opener
 /// in production.
 pub async fn wire_main_session(
+    deps: MainSessionDependencies,
+) -> Result<Arc<MainSessionWiring>, sdk::SdkError> {
+    wire_main_session_inner(deps)
+        .await
+        .map_err(|error| sdk::SdkError::Init(error.to_string()))
+}
+
+async fn wire_main_session_inner(
     deps: MainSessionDependencies,
 ) -> Result<Arc<MainSessionWiring>, MainSessionError> {
     let workspace_read = deps.workspace.read();
@@ -933,7 +941,7 @@ pub mod test_support {
             &self,
             _project: &share::session_types::ProjectIdentityData,
         ) -> Result<
-            Vec<crate::domain::session::SessionListEntry>,
+            Vec<crate::domain::session::SessionListEntryData>,
             crate::domain::session::SessionManagementError,
         > {
             Ok(Vec::new())
@@ -954,7 +962,7 @@ pub mod test_support {
             _bytes: &[u8],
             _project: &share::session_types::ProjectIdentityData,
         ) -> Result<
-            crate::domain::session::SessionListEntry,
+            crate::domain::session::SessionListEntryData,
             crate::domain::session::SessionManagementError,
         > {
             Err(crate::domain::session::SessionManagementError::Storage(
@@ -966,9 +974,9 @@ pub mod test_support {
             &self,
             id: &str,
             _project: &share::session_types::ProjectIdentityData,
-            _update: crate::domain::session::SessionMetadataUpdate,
+            _update: crate::domain::session::SessionMetadataUpdateData,
         ) -> Result<
-            crate::domain::session::SessionListEntry,
+            crate::domain::session::SessionListEntryData,
             crate::domain::session::SessionManagementError,
         > {
             Err(crate::domain::session::SessionManagementError::NotFound(

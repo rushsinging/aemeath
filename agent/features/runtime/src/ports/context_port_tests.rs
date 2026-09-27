@@ -9,15 +9,15 @@ use super::*;
 
 struct FakeContextPort;
 
-fn request() -> ContextRequest {
-    ContextRequest {
+fn request() -> ContextRequestData {
+    ContextRequestData {
         session_id: SessionId::new("session"),
         request_id: ContextRequestId::new("request"),
         run_id: sdk::RunId::new("run"),
         step_id: sdk::RunStepId::new("step"),
         pending_messages: vec![],
         invocation_reminders: vec![],
-        system_prompt: SystemPromptSpec::new("system"),
+        system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
         language: Language::new("zh"),
@@ -36,9 +36,9 @@ fn request() -> ContextRequest {
 impl ContextPort for FakeContextPort {
     async fn build_window(
         &self,
-        request: &ContextRequest,
-    ) -> Result<ContextWindow, ContextPortError> {
-        Ok(ContextWindow {
+        request: &ContextRequestData,
+    ) -> Result<ContextWindowData, ContextPortError> {
+        Ok(ContextWindowData {
             backing_revision: SessionRevision::new(0),
             system_blocks: vec![],
             messages: request.pending_messages.clone().into(),
@@ -50,9 +50,9 @@ impl ContextPort for FakeContextPort {
 
     async fn needs_compaction(
         &self,
-        _request: &ContextRequest,
-    ) -> Result<CompactionDecision, ContextPortError> {
-        Ok(CompactionDecision {
+        _request: &ContextRequestData,
+    ) -> Result<CompactionDecisionData, ContextPortError> {
+        Ok(CompactionDecisionData {
             needed: false,
             urgency: Urgency::None,
             decision_token_count: 0,
@@ -63,13 +63,16 @@ impl ContextPort for FakeContextPort {
         })
     }
 
-    async fn compact(&self, _request: &CompactRequest) -> Result<CompactOutcome, ContextPortError> {
+    async fn compact(
+        &self,
+        _request: &CompactRequestData,
+    ) -> Result<CompactOutcome, ContextPortError> {
         Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection))
     }
 
     async fn manual_compact(
         &self,
-        request: &ManualCompactRequest,
+        request: &ManualCompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError> {
         Ok(CompactOutcome::Committed(CompactResult {
             summary: format!("manual summary for {}", request.session_id.as_str()),
@@ -85,9 +88,9 @@ impl ContextPort for FakeContextPort {
 
     async fn append_and_persist(
         &self,
-        append: &ContextAppend,
-    ) -> Result<AppendReceipt, ContextAppendError> {
-        Ok(AppendReceipt {
+        append: &ContextAppendData,
+    ) -> Result<AppendReceiptData, ContextAppendError> {
+        Ok(AppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(1),
@@ -103,7 +106,7 @@ async fn runtime_fake_compiles_against_context_owned_port() {
     assert!(window.messages.is_empty());
 
     let manual = FakeContextPort
-        .manual_compact(&ManualCompactRequest {
+        .manual_compact(&ManualCompactRequestData {
             session_id: request.session_id.clone(),
             run_id: request.run_id.clone(),
             system_prompt: request.system_prompt.clone(),

@@ -215,7 +215,7 @@ pub enum RuntimeStreamEvent {
     /// 会话恢复完成通知（#497）。
     SessionResumed {
         steps: Vec<RuntimeResumedSessionStep>,
-        display_history: Option<context::api::DisplayHistoryStepIndex>,
+        display_history: Option<context::api::DisplayHistoryStepIndexData>,
         session_id: String,
         created_at: u64,
         compacted: bool,

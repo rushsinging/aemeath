@@ -212,7 +212,7 @@ async fn invoke_model_impl(
     let window = execution
         .context_window()
         .cloned()
-        .ok_or_else(|| LoopEngineError::Adapter("ContextWindow 尚未构建".to_string()))?;
+        .ok_or_else(|| LoopEngineError::Adapter("ContextWindowData 尚未构建".to_string()))?;
     observer.on_window(execution).await;
     let invocation_context = extract_invocation_context(&window);
     let mapping_summary =

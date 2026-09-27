@@ -2,13 +2,13 @@ use super::{
     AcceptedInputRecord, CommittedRunSlice, CommittedRunStep, CommittedStep, CommittedStepLedger,
     FinalizedOutcomeRecord, SessionHistory,
 };
-use crate::domain::{FinalizeCause, SessionId, ToolCallIdentity, ToolReceiptMutation};
+use crate::domain::{FinalizeCause, SessionId, ToolCallIdentityData, ToolReceiptMutationData};
 use sdk::{RunId, RunStepId};
 use share::message::Message;
 use std::sync::Arc;
 
-fn tool_identity(run_id: &str, step_id: &str) -> ToolCallIdentity {
-    ToolCallIdentity {
+fn tool_identity(run_id: &str, step_id: &str) -> ToolCallIdentityData {
+    ToolCallIdentityData {
         session_id: SessionId::new("session"),
         run_id: RunId::new(run_id),
         step_id: RunStepId::new(step_id),
@@ -133,7 +133,8 @@ fn advancing_tool_receipt_reuses_other_run_slice_and_returns_changed_receipt() {
         )],
     )]);
     let other_slice_pointer = Arc::as_ptr(&history.slices()[0]);
-    let mutation = ToolReceiptMutation::pending(tool_identity("run-new", "step-new"), "pattern");
+    let mutation =
+        ToolReceiptMutationData::pending(tool_identity("run-new", "step-new"), "pattern");
 
     let (updated, advanced) = history
         .advance_tool_receipt(mutation.clone())
@@ -152,7 +153,7 @@ fn advancing_tool_receipt_reuses_other_run_slice_and_returns_changed_receipt() {
 
 #[test]
 fn repeated_tool_receipt_is_idempotent_without_replacing_history() {
-    let mutation = ToolReceiptMutation::pending(tool_identity("run", "step"), "pattern");
+    let mutation = ToolReceiptMutationData::pending(tool_identity("run", "step"), "pattern");
     let (history, first) = SessionHistory::default()
         .advance_tool_receipt(mutation.clone())
         .expect("first receipt");

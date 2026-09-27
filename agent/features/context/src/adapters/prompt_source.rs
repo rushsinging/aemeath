@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::domain::{ContextRequest, SystemBlock};
+use crate::domain::{ContextRequestData, SystemBlock};
 use crate::ports::{ContextPromptSource, PromptMaterialization, PromptMaterializationError};
 
 /// Context-owned baseline prompt materializer. Produces the stable, always-present
@@ -11,7 +11,7 @@ pub struct BaselinePromptSource;
 impl BaselinePromptSource {
     /// 组装基线 cacheable / uncached 块，供 `SkillPromptSource` 复用以避免逻辑重复。
     pub(crate) fn baseline_blocks(
-        request: &ContextRequest,
+        request: &ContextRequestData,
     ) -> (Vec<SystemBlock>, Vec<SystemBlock>) {
         let cacheable = vec![
             SystemBlock {
@@ -38,7 +38,7 @@ impl BaselinePromptSource {
 impl ContextPromptSource for BaselinePromptSource {
     async fn materialize(
         &self,
-        request: &ContextRequest,
+        request: &ContextRequestData,
     ) -> Result<PromptMaterialization, PromptMaterializationError> {
         let (cacheable, uncached) = Self::baseline_blocks(request);
         Ok(PromptMaterialization {

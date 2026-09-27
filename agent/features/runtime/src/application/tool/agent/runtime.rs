@@ -1,4 +1,4 @@
-use context::ToolCallIdentity;
+use context::ToolCallIdentityData;
 use share::message::{ContentBlock, Message};
 use std::sync::Arc;
 use tools::published::execution::{
@@ -147,7 +147,7 @@ impl Agent {
             workspace_persist: crate::application::run::workspace_test_support::workspace_persist(
                 &ctx,
             ),
-            context: ContextCoordinator::new(context::isolated_context("test-session")),
+            context: ContextCoordinator::new(context::wire_isolated_context("test-session")),
             session_id: context::SessionId::new("test-session"),
             tool_result_materializer:
                 crate::application::tool::test_support::test_tool_result_materializer(),
@@ -292,7 +292,7 @@ impl Agent {
         );
         supervisor
             .execute(SupervisedToolCall {
-                identity: ToolCallIdentity {
+                identity: ToolCallIdentityData {
                     session_id: self.session_id.clone(),
                     run_id: sdk::RunId::from_legacy_or_new(ctx.scope().run_id()),
                     step_id: step_id.clone(),

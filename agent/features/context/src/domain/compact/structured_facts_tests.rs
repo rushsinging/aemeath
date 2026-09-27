@@ -368,15 +368,15 @@ fn active_task_snapshot_reconciles_stale_checkpoint_progress() {
         )
         .unwrap(),
     ]);
-    let task_snapshot = CompactTaskSnapshot::active(
+    let task_snapshot = CompactTaskSnapshotData::active(
         42,
         25,
         "Fix the Build Plan cwd regression and restore Build/Deploy.",
         vec![
-            CompactTaskItem::completed(1, "Collect the missing diagnostics."),
-            CompactTaskItem::completed(2, "Implement and validate the hotfix."),
-            CompactTaskItem::in_progress(3, "Create the hotfix PR."),
-            CompactTaskItem::pending(4, "Restore full Build/Deploy.", Vec::new()),
+            CompactTaskItemData::completed(1, "Collect the missing diagnostics."),
+            CompactTaskItemData::completed(2, "Implement and validate the hotfix."),
+            CompactTaskItemData::in_progress(3, "Create the hotfix PR."),
+            CompactTaskItemData::pending(4, "Restore full Build/Deploy.", Vec::new()),
         ],
     );
 
@@ -421,11 +421,11 @@ fn task_snapshot_cannot_change_protected_constraint_semantics() {
         )
         .unwrap(),
     ]);
-    let task_snapshot = CompactTaskSnapshot::active(
+    let task_snapshot = CompactTaskSnapshotData::active(
         9,
         7,
         "Merge and release immediately.",
-        vec![CompactTaskItem::in_progress(1, "Merge the PR.")],
+        vec![CompactTaskItemData::in_progress(1, "Merge the PR.")],
     );
 
     let rendered = reduce_compact_facts_with_task_snapshot(facts, Some(&task_snapshot))
@@ -456,19 +456,19 @@ fn non_active_or_ambiguous_task_snapshot_does_not_override_main_user_cursor() {
         )
         .unwrap(),
     ]);
-    let paused = CompactTaskSnapshot::paused(
+    let paused = CompactTaskSnapshotData::paused(
         10,
         8,
         "Archived operational work.",
-        vec![CompactTaskItem::in_progress(1, "Merge the PR.")],
+        vec![CompactTaskItemData::in_progress(1, "Merge the PR.")],
     );
-    let ambiguous = CompactTaskSnapshot::active(
+    let ambiguous = CompactTaskSnapshotData::active(
         11,
         9,
         "Parallel work.",
         vec![
-            CompactTaskItem::in_progress(1, "First task."),
-            CompactTaskItem::in_progress(2, "Second task."),
+            CompactTaskItemData::in_progress(1, "First task."),
+            CompactTaskItemData::in_progress(2, "Second task."),
         ],
     );
 
@@ -748,13 +748,13 @@ fn authoritative_objective_cursor_and_task_snapshot_remove_stale_control_noise()
         )
         .unwrap(),
     ]);
-    let task_snapshot = CompactTaskSnapshot::active(
+    let task_snapshot = CompactTaskSnapshotData::active(
         12,
         16,
         "Read-only compatibility test",
         vec![
-            CompactTaskItem::in_progress(5, "Verify compatibility."),
-            CompactTaskItem::pending(6, "Summarize results.", vec![5]),
+            CompactTaskItemData::in_progress(5, "Verify compatibility."),
+            CompactTaskItemData::pending(6, "Summarize results.", vec![5]),
         ],
     );
 

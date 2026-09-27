@@ -9,10 +9,10 @@ use share::message::Message;
 
 use crate::application::loop_engine::chat::InvocationResponse;
 use crate::application::loop_engine::StepTokenUsage;
-use crate::ports::ContextWindow;
+use crate::ports::ContextWindowData;
 
 /// Output of [`extract_invocation_context`] — the three API invocation primitives
-/// derived from a [`ContextWindow`].
+/// derived from a [`ContextWindowData`].
 pub(crate) struct InvocationContext {
     messages_for_api: Vec<Message>,
     pub tool_schemas: Vec<serde_json::Value>,
@@ -49,11 +49,11 @@ pub(crate) fn invocation_mapping_log_summary(
     }
 }
 
-/// Map a [`ContextWindow`] into the three invocation primitives:
+/// Map a [`ContextWindowData`] into the three invocation primitives:
 /// LLM-visible messages, tool schema JSON objects, and provider system blocks.
 ///
 /// This logic is character-identical between Main and Sub.
-pub(crate) fn extract_invocation_context(window: &ContextWindow) -> InvocationContext {
+pub(crate) fn extract_invocation_context(window: &ContextWindowData) -> InvocationContext {
     let messages_for_api = window
         .messages
         .iter()

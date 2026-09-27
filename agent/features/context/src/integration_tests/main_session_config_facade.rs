@@ -9,13 +9,13 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::main_session::{MainSessionWiring, MainSessionWiringBuilder};
+use crate::{CanonicalSession, SnapshotState};
 use async_trait::async_trait;
 use config::{
     wire_config_override_store, ConfigAppService, ConfigReader, ConfigUpdateData,
     ProjectConfigParticipant,
 };
-use context::main_session::{MainSessionWiring, MainSessionWiringBuilder};
-use context::{CanonicalSession, SnapshotState};
 use memory::api::{
     InMemoryMemory, MemoryOpener, MemoryOpenerError, MemoryPolicy, MemoryPort, ProjectMemoryKey,
 };
@@ -235,13 +235,13 @@ async fn build_facade_harness(
             last_key,
             fail,
         }),
-        session_management: Arc::new(context::AtomicBlobSessionManagement::new(
+        session_management: Arc::new(crate::AtomicBlobSessionManagement::new(
             storage::wire_file_system_blob(tmp.path()).unwrap(),
         )),
         initial_session,
         initial_memory,
-        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
+        context_factory: Arc::new(crate::ProductionMainContextFactory::new(Arc::new(
+            crate::NoOpCanonicalSessionWriter,
         ))),
     };
 
@@ -352,7 +352,7 @@ async fn cross_project_resume_does_not_switch_config_or_memory() {
     // Cross-project resume must fail before Config/Memory preparation.
     assert!(matches!(
         h.wiring.resume_prepared(session).await,
-        Err(context::main_session::MainSessionError::ProjectMismatch)
+        Err(crate::main_session::MainSessionError::ProjectMismatch)
     ));
 
     let post_model = h

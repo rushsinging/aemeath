@@ -4,7 +4,7 @@ use serde_json::Value;
 use share::message::{ContentBlock, Message};
 
 use super::context_read_candidate::{ContextReadCandidate, ContextReadStep};
-use crate::domain::{ToolCallReceipt, ToolCallState, ToolOutcomeKind};
+use crate::domain::{ToolCallReceiptData, ToolCallState, ToolOutcomeKindData};
 
 const SNIPPABLE_TOOLS: &[&str] = &["Read", "Grep", "Glob"];
 const WRITE_TOOLS: &[&str] = &["Edit", "Write"];
@@ -109,7 +109,7 @@ fn successful_call_ids_for_tools(
         .collect()
 }
 
-fn receipt_call_id(receipt: &ToolCallReceipt) -> String {
+fn receipt_call_id(receipt: &ToolCallReceiptData) -> String {
     receipt
         .identity
         .provider_call_id
@@ -186,10 +186,10 @@ fn replace_snippable_results(
     changed.then_some(messages)
 }
 
-fn is_success(receipt: &ToolCallReceipt) -> bool {
+fn is_success(receipt: &ToolCallReceiptData) -> bool {
     matches!(
         &receipt.state,
-        ToolCallState::Terminal(terminal) if terminal.outcome == ToolOutcomeKind::Success
+        ToolCallState::Terminal(terminal) if terminal.outcome == ToolOutcomeKindData::Success
     )
 }
 

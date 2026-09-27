@@ -20,28 +20,33 @@ mod session_resume;
 mod skill_prompt_source;
 mod tool_receipt_ledger;
 
-pub use atomic_blob_session::AtomicBlobSessionStore;
+pub(crate) use atomic_blob_session::AtomicBlobSessionStore;
 pub use atomic_blob_session_management::AtomicBlobSessionManagement;
+pub(crate) use canonical_session::{
+    AcceptedInputWriter, AtomicBlobCanonicalSessionWriter, CanonicalSessionRepository,
+    CanonicalSessionWriter, ToolReceiptWriter,
+};
 pub use canonical_session::{
-    AcceptedInputWriter, AtomicBlobAcceptedInputWriter, AtomicBlobCanonicalSessionWriter,
-    AtomicBlobToolReceiptWriter, CanonicalSessionRepository, CanonicalSessionWriter,
-    NoOpCanonicalSessionWriter, ProductionMainContextFactory, ToolReceiptWriter,
+    AtomicBlobAcceptedInputWriter, AtomicBlobToolReceiptWriter, NoOpCanonicalSessionWriter,
+    ProductionMainContextFactory,
 };
 pub use dataset_session_management::DatasetSessionManagement;
-pub use dataset_session_reader::DatasetSessionReader;
+pub(crate) use dataset_session_reader::DatasetSessionReader;
 pub use dataset_session_writer::DatasetCanonicalSessionWriter;
-pub use in_memory_session::InMemorySessionRepository;
+pub(crate) use in_memory_session::InMemorySessionRepository;
 pub use legacy_flat_session_migrator::migrate_flat_sessions_to_project_dirs;
-pub use memory_injection::{
-    CommittedMemoryRetrieveAdapter, MemoryRetrieveAdapter, NoOpContextMemorySource,
-};
+pub(crate) use memory_injection::{CommittedMemoryRetrieveAdapter, NoOpContextMemorySource};
 pub use prompt_source::BaselinePromptSource;
-pub use session_legacy_workspace::{decode as decode_session, LegacySessionDecoder};
+pub use session_legacy_workspace::decode as decode_session;
+pub(crate) use session_legacy_workspace::LegacySessionDecoder;
 #[cfg(any(test, feature = "dev"))]
-pub use session_lifecycle::capture as capture_session_lifecycle;
-pub use skill_prompt_source::{skill_prompt_budget, SkillPromptSource, WorkspaceSkillQueryFactory};
+pub(crate) use session_lifecycle::capture as capture_session_lifecycle;
+#[cfg(any(test, feature = "dev"))]
+pub(crate) use skill_prompt_source::skill_prompt_budget;
+pub(crate) use skill_prompt_source::SkillPromptSource;
+pub use skill_prompt_source::WorkspaceSkillQueryFactory;
 
-pub fn isolated_context(session_id: &str) -> Arc<dyn crate::ports::ContextPort> {
+pub fn wire_isolated_context(session_id: &str) -> Arc<dyn crate::ports::ContextPort> {
     let repository = Arc::new(InMemorySessionRepository::new());
     repository.seed(
         &crate::domain::SessionId::new(session_id),
@@ -59,9 +64,9 @@ pub fn isolated_context(session_id: &str) -> Arc<dyn crate::ports::ContextPort> 
 /// Build an isolated (in-memory) context whose prompt source is the
 /// skill-aware [`SkillPromptSource`].
 ///
-/// Unlike [`isolated_context`], the prompt pipeline lists metadata through the
+/// Unlike [`wire_isolated_context`], the prompt pipeline lists metadata through the
 /// injected [`tools::published::skill::SkillCatalogPort`] and [`SkillQueryFactory`].
-pub fn isolated_context_with_skill(
+pub(crate) fn wire_isolated_context_with_skill(
     session_id: &str,
     catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
     query_factory: Arc<dyn crate::ports::SkillQueryFactory>,
@@ -83,15 +88,15 @@ pub fn isolated_context_with_skill(
 /// Build an isolated (in-memory) context whose skill queries resolve against
 /// the given workspace read view.
 ///
-/// Unlike [`isolated_context_with_skill`], callers pass only the workspace
+/// Unlike [`wire_isolated_context_with_skill`], callers pass only the workspace
 /// port; the concrete [`WorkspaceSkillQueryFactory`] construction stays inside
 /// the Context adapters so consumers never assemble cross-BC concrete types.
-pub fn isolated_context_with_workspace_skills(
+pub fn wire_isolated_context_with_workspace_skills(
     session_id: &str,
     catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
     workspace: Arc<dyn project::WorkspaceReader>,
 ) -> Arc<dyn crate::ports::ContextPort> {
-    isolated_context_with_skill(
+    wire_isolated_context_with_skill(
         session_id,
         catalog,
         Arc::new(WorkspaceSkillQueryFactory::new(workspace)),

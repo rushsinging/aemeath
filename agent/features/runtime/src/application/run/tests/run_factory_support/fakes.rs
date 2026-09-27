@@ -18,28 +18,28 @@ pub(crate) struct FakeContextPort;
 impl ContextPort for FakeContextPort {
     async fn build_window(
         &self,
-        _request: &crate::ports::ContextRequest,
-    ) -> Result<crate::ports::ContextWindow, crate::ports::ContextPortError> {
+        _request: &crate::ports::ContextRequestData,
+    ) -> Result<crate::ports::ContextWindowData, crate::ports::ContextPortError> {
         Err(crate::ports::ContextPortError::Compact("fake".into()))
     }
 
     async fn needs_compaction(
         &self,
-        _request: &crate::ports::ContextRequest,
-    ) -> Result<crate::ports::CompactionDecision, crate::ports::ContextPortError> {
+        _request: &crate::ports::ContextRequestData,
+    ) -> Result<crate::ports::CompactionDecisionData, crate::ports::ContextPortError> {
         Err(crate::ports::ContextPortError::Compact("fake".into()))
     }
 
     async fn compact(
         &self,
-        _request: &crate::ports::CompactRequest,
+        _request: &crate::ports::CompactRequestData,
     ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
         Err(crate::ports::ContextPortError::Compact("fake".into()))
     }
 
     async fn manual_compact(
         &self,
-        _request: &crate::ports::ManualCompactRequest,
+        _request: &crate::ports::ManualCompactRequestData,
     ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
         Err(crate::ports::ContextPortError::Compact("fake".into()))
     }
@@ -53,8 +53,8 @@ impl ContextPort for FakeContextPort {
 
     async fn append_and_persist(
         &self,
-        _append: &crate::ports::ContextAppend,
-    ) -> Result<crate::ports::AppendReceipt, crate::ports::ContextAppendError> {
+        _append: &crate::ports::ContextAppendData,
+    ) -> Result<crate::ports::AppendReceiptData, crate::ports::ContextAppendError> {
         Err(crate::ports::ContextAppendError::Storage("fake".into()))
     }
 }
