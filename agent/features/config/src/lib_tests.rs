@@ -63,7 +63,7 @@ struct AgentsDirEnvGuard {
 
 fn test_native_store(root: &std::path::Path) -> NativeConfigStore {
     wire_config_override_store(
-        storage::file_system_blob(root.join("config-overrides"))
+        storage::wire_file_system_blob(root.join("config-overrides"))
             .expect("create test config override blob"),
     )
 }

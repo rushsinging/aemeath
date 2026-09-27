@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use storage::{
-    AtomicDatasetPort, DatasetKey, DatasetMember, DatasetReadOutcome, Generation, SafePathSegment,
-    StorageError,
+    AtomicDatasetPort, DatasetKeyData, DatasetMemberData, DatasetReadOutcomeData, GenerationData,
+    SafePathSegmentData, StorageError,
 };
 
 use crate::adapters::{
@@ -26,9 +26,9 @@ pub struct PreparedDatasetResume {
 /// dataset 读取候选 key：project 目录段存在时先探测 scoped 两段 key，
 /// 再退回平铺（迁移期兼容）；无目录段时仅平铺。
 fn dataset_read_candidates(
-    project_dir: Option<&SafePathSegment>,
+    project_dir: Option<&SafePathSegmentData>,
     session_id: &str,
-) -> Result<Vec<DatasetKey>, SessionGenerationWireError> {
+) -> Result<Vec<DatasetKeyData>, SessionGenerationWireError> {
     let mut candidates = Vec::new();
     if let Some(project_dir) = project_dir {
         candidates.push(
@@ -47,7 +47,7 @@ fn dataset_read_candidates(
 /// 调用方按序探测，第一个 load 成功者胜出。
 fn legacy_blob_persistence_candidates(
     blob: Arc<dyn storage::AtomicBlobPort>,
-    project_dir: Option<&SafePathSegment>,
+    project_dir: Option<&SafePathSegmentData>,
     session_id: &str,
 ) -> Result<Vec<SessionPersistenceService>, SessionGenerationWireError> {
     let build = |segments: Vec<String>| -> Result<_, String> {
@@ -93,7 +93,7 @@ impl DatasetSessionReader {
 
     pub async fn load(
         &self,
-        project_dir: Option<&SafePathSegment>,
+        project_dir: Option<&SafePathSegmentData>,
         session_id: &str,
     ) -> Result<CanonicalSession, SessionGenerationWireError> {
         self.load_for_resume(project_dir, session_id)
@@ -105,7 +105,7 @@ impl DatasetSessionReader {
     /// 未命中再退回平铺 `<id>.dataset`，最后回退 legacy blob（兼容迁移期）。
     pub async fn load_for_resume(
         &self,
-        project_dir: Option<&SafePathSegment>,
+        project_dir: Option<&SafePathSegmentData>,
         session_id: &str,
     ) -> Result<PreparedDatasetResume, SessionGenerationWireError> {
         let started = Instant::now();
@@ -120,7 +120,7 @@ impl DatasetSessionReader {
                 Ok(outcome) => outcome,
                 Err(error) => return Err(storage_error(error)),
             };
-            if matches!(primary_manifest, DatasetReadOutcome::NotFound) {
+            if matches!(primary_manifest, DatasetReadOutcomeData::NotFound) {
                 continue;
             }
             log::debug!(
@@ -140,12 +140,12 @@ impl DatasetSessionReader {
     /// primary 解码失败时回退 previous generation；future version 直接上抛。
     async fn decode_with_previous_fallback(
         &self,
-        dataset_key: &DatasetKey,
-        primary_manifest: DatasetReadOutcome,
-        manifest_name: &SafePathSegment,
+        dataset_key: &DatasetKeyData,
+        primary_manifest: DatasetReadOutcomeData,
+        manifest_name: &SafePathSegmentData,
     ) -> Result<PreparedDatasetResume, SessionGenerationWireError> {
         match self
-            .decode_generation(dataset_key, Generation::Primary, primary_manifest)
+            .decode_generation(dataset_key, GenerationData::Primary, primary_manifest)
             .await
         {
             Ok(session) => Ok(session),
@@ -159,7 +159,7 @@ impl DatasetSessionReader {
                     .await
                     .map_err(storage_error)?;
                 match self
-                    .decode_generation(dataset_key, Generation::Previous, previous_manifest)
+                    .decode_generation(dataset_key, GenerationData::Previous, previous_manifest)
                     .await
                 {
                     Ok(session) => Ok(session),
@@ -171,7 +171,7 @@ impl DatasetSessionReader {
 
     pub async fn load_display_history_steps(
         &self,
-        project_dir: Option<&SafePathSegment>,
+        project_dir: Option<&SafePathSegmentData>,
         session_id: &str,
         generation_revision: u64,
         member_names: &[String],
@@ -184,7 +184,7 @@ impl DatasetSessionReader {
                 .read_consistent(dataset_key, std::slice::from_ref(&manifest_name))
                 .await
                 .map_err(storage_error)?;
-            if matches!(manifest_outcome, DatasetReadOutcome::NotFound) {
+            if matches!(manifest_outcome, DatasetReadOutcomeData::NotFound) {
                 continue;
             }
             return self
@@ -205,14 +205,14 @@ impl DatasetSessionReader {
 
     async fn decode_display_history_steps(
         &self,
-        dataset_key: &DatasetKey,
+        dataset_key: &DatasetKeyData,
         session_id: &str,
         generation_revision: u64,
         member_names: &[String],
-        manifest_outcome: DatasetReadOutcome,
-        _manifest_name: &SafePathSegment,
+        manifest_outcome: DatasetReadOutcomeData,
+        _manifest_name: &SafePathSegmentData,
     ) -> Result<DisplayHistoryStepWindow, SessionGenerationWireError> {
-        let DatasetReadOutcome::Found(manifest_read) = manifest_outcome else {
+        let DatasetReadOutcomeData::Found(manifest_read) = manifest_outcome else {
             return Err(SessionGenerationWireError::InvalidManifest(
                 "Session generation 不存在".to_string(),
             ));
@@ -246,7 +246,7 @@ impl DatasetSessionReader {
             .read_consistent(dataset_key, &safe_names)
             .await
             .map_err(storage_error)?;
-        let DatasetReadOutcome::Found(read) = outcome else {
+        let DatasetReadOutcomeData::Found(read) = outcome else {
             return Err(SessionGenerationWireError::InvalidManifest(
                 "display history member 缺失".to_string(),
             ));
@@ -282,7 +282,7 @@ impl DatasetSessionReader {
 
     async fn load_and_migrate_legacy(
         &self,
-        project_dir: Option<&SafePathSegment>,
+        project_dir: Option<&SafePathSegmentData>,
         session_id: &str,
     ) -> Result<PreparedDatasetResume, SessionGenerationWireError> {
         let Some(blob) = &self.legacy_blob else {
@@ -358,11 +358,11 @@ impl DatasetSessionReader {
 
     async fn decode_generation(
         &self,
-        dataset_key: &DatasetKey,
-        generation: Generation,
-        manifest_read: DatasetReadOutcome,
+        dataset_key: &DatasetKeyData,
+        generation: GenerationData,
+        manifest_read: DatasetReadOutcomeData,
     ) -> Result<PreparedDatasetResume, SessionGenerationWireError> {
-        let DatasetReadOutcome::Found(manifest_read) = manifest_read else {
+        let DatasetReadOutcomeData::Found(manifest_read) = manifest_read else {
             return Err(SessionGenerationWireError::InvalidManifest(
                 "Session generation 不存在".to_string(),
             ));
@@ -374,7 +374,7 @@ impl DatasetSessionReader {
             != dataset_key
                 .segments()
                 .last()
-                .map(SafePathSegment::as_str)
+                .map(SafePathSegmentData::as_str)
                 .unwrap_or_default()
         {
             return Err(SessionGenerationWireError::InvalidManifest(
@@ -387,11 +387,11 @@ impl DatasetSessionReader {
             safe_member_name(manifest.metadata_member_name())?,
         ];
         let base_outcome = match generation {
-            Generation::Primary => self.dataset.read_consistent(dataset_key, &base_names).await,
-            Generation::Previous => self.dataset.read_previous(dataset_key, &base_names).await,
+            GenerationData::Primary => self.dataset.read_consistent(dataset_key, &base_names).await,
+            GenerationData::Previous => self.dataset.read_previous(dataset_key, &base_names).await,
         }
         .map_err(storage_error)?;
-        let DatasetReadOutcome::Found(base_read) = base_outcome else {
+        let DatasetReadOutcomeData::Found(base_read) = base_outcome else {
             return Err(SessionGenerationWireError::InvalidManifest(
                 "Session state 或 metadata member 缺失".to_string(),
             ));
@@ -435,15 +435,17 @@ impl DatasetSessionReader {
             .map(|step| safe_member_name(step.member_name()))
             .collect::<Result<Vec<_>, _>>()?;
         let active_outcome = match generation {
-            Generation::Primary => {
+            GenerationData::Primary => {
                 self.dataset
                     .read_consistent(dataset_key, &active_names)
                     .await
             }
-            Generation::Previous => self.dataset.read_previous(dataset_key, &active_names).await,
+            GenerationData::Previous => {
+                self.dataset.read_previous(dataset_key, &active_names).await
+            }
         }
         .map_err(storage_error)?;
-        let DatasetReadOutcome::Found(active_read) = active_outcome else {
+        let DatasetReadOutcomeData::Found(active_read) = active_outcome else {
             return Err(SessionGenerationWireError::InvalidManifest(
                 "Session active step member 缺失".to_string(),
             ));
@@ -515,7 +517,7 @@ fn visible_steps_after_boundaries<'a>(
 
 fn assemble_session(
     manifest: &SessionGenerationManifest,
-    members: &[DatasetMember],
+    members: &[DatasetMemberData],
 ) -> Result<CanonicalSession, SessionGenerationWireError> {
     let members_by_name = members
         .iter()
@@ -585,7 +587,7 @@ fn assemble_session(
     Ok(state.into_session(metadata, SessionHistory::from_slices(slices)))
 }
 
-fn only_member_bytes(members: &[DatasetMember]) -> Result<&[u8], SessionGenerationWireError> {
+fn only_member_bytes(members: &[DatasetMemberData]) -> Result<&[u8], SessionGenerationWireError> {
     if members.len() != 1 {
         return Err(SessionGenerationWireError::InvalidManifest(
             "Session generation manifest member 缺失".to_string(),
@@ -594,8 +596,8 @@ fn only_member_bytes(members: &[DatasetMember]) -> Result<&[u8], SessionGenerati
     Ok(members[0].bytes())
 }
 
-fn safe_member_name(name: &str) -> Result<SafePathSegment, SessionGenerationWireError> {
-    SafePathSegment::from_str(name).map_err(storage_error)
+fn safe_member_name(name: &str) -> Result<SafePathSegmentData, SessionGenerationWireError> {
+    SafePathSegmentData::from_str(name).map_err(storage_error)
 }
 
 fn storage_error(error: StorageError) -> SessionGenerationWireError {

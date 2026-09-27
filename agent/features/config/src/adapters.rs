@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 use storage::{
-    AtomicBlobPort, CommitWarning, Durability, Generation, ReadOutcome, SafePathSegment,
-    StorageErrorKind, StorageKey, StorageNamespace, WriteOptions,
+    AtomicBlobPort, CommitWarningData, DurabilityData, GenerationData, ReadOutcomeData,
+    SafePathSegmentData, StorageErrorKind, StorageKeyData, StorageNamespaceData, WriteOptionsData,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -527,10 +527,10 @@ impl NativeConfigStore {
         Self { storage }
     }
 
-    fn key(project_key: &str) -> Result<StorageKey, ConfigAdapterError> {
+    fn key(project_key: &str) -> Result<StorageKeyData, ConfigAdapterError> {
         let segment =
-            SafePathSegment::from_str(project_key).map_err(|_| ConfigAdapterError::Invalid)?;
-        StorageKey::new(StorageNamespace::Config, vec![segment])
+            SafePathSegmentData::from_str(project_key).map_err(|_| ConfigAdapterError::Invalid)?;
+        StorageKeyData::new(StorageNamespaceData::Config, vec![segment])
             .map_err(|_| ConfigAdapterError::Invalid)
     }
 
@@ -540,12 +540,12 @@ impl NativeConfigStore {
     ) -> Result<Option<ConfigPatch>, ConfigAdapterError> {
         match self
             .storage
-            .read(&Self::key(project_key)?, Generation::Primary)
+            .read(&Self::key(project_key)?, GenerationData::Primary)
             .await
             .map_err(map_storage_error)?
         {
-            ReadOutcome::NotFound => Ok(None),
-            ReadOutcome::Found(blob) => serde_json::from_slice(blob.bytes())
+            ReadOutcomeData::NotFound => Ok(None),
+            ReadOutcomeData::Found(blob) => serde_json::from_slice(blob.bytes())
                 .map(Some)
                 .map_err(|_| ConfigAdapterError::Parse),
         }
@@ -555,13 +555,13 @@ impl NativeConfigStore {
         &self,
         project_key: &str,
         bytes: &[u8],
-    ) -> Result<Option<CommitWarning>, ConfigAdapterError> {
+    ) -> Result<Option<CommitWarningData>, ConfigAdapterError> {
         let receipt = self
             .storage
             .write_atomic(
                 &Self::key(project_key)?,
                 bytes,
-                WriteOptions::new(Durability::ProcessCrashSafe),
+                WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
             )
             .await
             .map_err(map_storage_error)?;

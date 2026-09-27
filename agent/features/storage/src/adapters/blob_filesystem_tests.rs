@@ -3,7 +3,9 @@ use std::str::FromStr;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use super::FileSystemBlobAdapter;
-use crate::domain::{Durability, SafePathSegment, StorageKey, StorageNamespace, WriteOptions};
+use crate::domain::{
+    DurabilityData, SafePathSegmentData, StorageKeyData, StorageNamespaceData, WriteOptionsData,
+};
 use crate::ports::AtomicBlobPort;
 use crate::test_log;
 
@@ -47,10 +49,10 @@ fn root() -> std::path::PathBuf {
     ))
 }
 
-fn key() -> StorageKey {
-    StorageKey::new(
-        StorageNamespace::Session,
-        vec![SafePathSegment::from_str("log-test").unwrap()],
+fn key() -> StorageKeyData {
+    StorageKeyData::new(
+        StorageNamespaceData::Session,
+        vec![SafePathSegmentData::from_str("log-test").unwrap()],
     )
     .unwrap()
 }
@@ -72,7 +74,7 @@ async fn cleanup_fault_emits_recovery_pending_warn() {
         .write_atomic(
             &key(),
             b"v1",
-            WriteOptions::new(Durability::ProcessCrashSafe),
+            WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
         )
         .await
         .expect("first write must succeed");
@@ -84,7 +86,7 @@ async fn cleanup_fault_emits_recovery_pending_warn() {
         .write_atomic(
             &key(),
             b"v2",
-            WriteOptions::new(Durability::ProcessCrashSafe),
+            WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
         )
         .await;
     let logs = test_log::drain();
@@ -93,7 +95,7 @@ async fn cleanup_fault_emits_recovery_pending_warn() {
     let receipt = receipt.expect("post-Prepared fault returns committed receipt");
     assert_eq!(
         receipt.warning(),
-        Some(crate::CommitWarning::JournalCleanupPending),
+        Some(crate::CommitWarningData::JournalCleanupPending),
         "expected JournalCleanupPending warning"
     );
 
@@ -114,24 +116,24 @@ async fn cleanup_fault_emits_recovery_pending_warn() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// 按 project 分目录的 session 布局使用多段 StorageKey；`list_primary` 必须
+/// 按 project 分目录的 session 布局使用多段 StorageKeyData；`list_primary` 必须
 /// 递归列出子目录内的 blob，同时不破坏平铺（单段）key 的枚举。
 #[tokio::test(flavor = "current_thread")]
 async fn list_primary_enumerates_nested_segment_keys_and_flat_keys() {
     let root = root();
     let adapter = FileSystemBlobAdapter::new(&root).expect("adapter init");
 
-    let nested_key = StorageKey::new(
-        StorageNamespace::Session,
+    let nested_key = StorageKeyData::new(
+        StorageNamespaceData::Session,
         vec![
-            SafePathSegment::from_str("project-dir-a").unwrap(),
-            SafePathSegment::from_str("session-1").unwrap(),
+            SafePathSegmentData::from_str("project-dir-a").unwrap(),
+            SafePathSegmentData::from_str("session-1").unwrap(),
         ],
     )
     .unwrap();
-    let flat_key = StorageKey::new(
-        StorageNamespace::Session,
-        vec![SafePathSegment::from_str("flat-session").unwrap()],
+    let flat_key = StorageKeyData::new(
+        StorageNamespaceData::Session,
+        vec![SafePathSegmentData::from_str("flat-session").unwrap()],
     )
     .unwrap();
 
@@ -139,7 +141,7 @@ async fn list_primary_enumerates_nested_segment_keys_and_flat_keys() {
         .write_atomic(
             &nested_key,
             b"nested",
-            WriteOptions::new(Durability::ProcessCrashSafe),
+            WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
         )
         .await
         .expect("nested write must succeed");
@@ -147,16 +149,16 @@ async fn list_primary_enumerates_nested_segment_keys_and_flat_keys() {
         .write_atomic(
             &flat_key,
             b"flat",
-            WriteOptions::new(Durability::ProcessCrashSafe),
+            WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
         )
         .await
         .expect("flat write must succeed");
 
     let listed = adapter
-        .list_primary(StorageNamespace::Session)
+        .list_primary(StorageNamespaceData::Session)
         .await
         .expect("list must succeed");
-    let listed_keys: Vec<&StorageKey> = listed.iter().map(|entry| entry.key()).collect();
+    let listed_keys: Vec<&StorageKeyData> = listed.iter().map(|entry| entry.key()).collect();
     assert!(
         listed_keys.contains(&&nested_key),
         "嵌套 project 段 key 必须被列出：{listed_keys:?}"

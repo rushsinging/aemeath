@@ -24,9 +24,10 @@ use std::time::{Duration, Instant};
 use fs2::FileExt;
 use sha2::{Digest, Sha256};
 use storage::{
-    AtomicDatasetPort, CommitWarning, DatasetCommitVisibility, DatasetKey, DatasetMember,
-    DatasetReadOutcome, Durability, QuarantineDisposition, SafePathSegment, StorageError,
-    StorageErrorKind, StorageNamespace, TransactionScope, WriteOptions,
+    AtomicDatasetPort, CommitWarningData, DatasetCommitVisibilityData, DatasetKeyData,
+    DatasetMemberData, DatasetReadOutcomeData, DurabilityData, QuarantineDisposition,
+    SafePathSegmentData, StorageError, StorageErrorKind, StorageNamespaceData,
+    TransactionScopeData, WriteOptionsData,
 };
 use uuid::Uuid;
 
@@ -72,42 +73,42 @@ fn unique_root(case: &str) -> PathBuf {
     std::env::temp_dir().join(format!("aemeath-dataset-crash-{case}-{}", Uuid::new_v4()))
 }
 
-fn key_named(value: &str) -> DatasetKey {
-    DatasetKey::new(
-        StorageNamespace::Memory,
-        vec![SafePathSegment::from_str(value).expect("valid dataset segment")],
+fn key_named(value: &str) -> DatasetKeyData {
+    DatasetKeyData::new(
+        StorageNamespaceData::Memory,
+        vec![SafePathSegmentData::from_str(value).expect("valid dataset segment")],
     )
     .expect("valid dataset key")
 }
 
-fn key() -> DatasetKey {
+fn key() -> DatasetKeyData {
     key_named("conversation-1")
 }
 
-fn name(value: &str) -> SafePathSegment {
-    SafePathSegment::from_str(value).expect("valid member name")
+fn name(value: &str) -> SafePathSegmentData {
+    SafePathSegmentData::from_str(value).expect("valid member name")
 }
 
-fn member(value: &str, bytes: &[u8]) -> DatasetMember {
-    DatasetMember::new(name(value), bytes.to_vec())
+fn member(value: &str, bytes: &[u8]) -> DatasetMemberData {
+    DatasetMemberData::new(name(value), bytes.to_vec())
 }
 
-fn old_members() -> Vec<DatasetMember> {
+fn old_members() -> Vec<DatasetMemberData> {
     vec![
         member("active", b"old-active"),
         member("archive", b"old-archive"),
     ]
 }
 
-fn new_members() -> Vec<DatasetMember> {
+fn new_members() -> Vec<DatasetMemberData> {
     vec![
         member("active", b"new-active"),
         member("archive", b"new-archive"),
     ]
 }
 
-fn options() -> WriteOptions {
-    WriteOptions::new(Durability::ProcessCrashSafe)
+fn options() -> WriteOptionsData {
+    WriteOptionsData::new(DurabilityData::ProcessCrashSafe)
 }
 
 fn dataset_dir(root: &Path, dataset: &str) -> PathBuf {
@@ -115,14 +116,18 @@ fn dataset_dir(root: &Path, dataset: &str) -> PathBuf {
 }
 
 fn adapter(root: &Path) -> std::sync::Arc<dyn AtomicDatasetPort> {
-    storage::file_system_dataset(root).expect("adapter root must initialize")
+    storage::wire_file_system_dataset(root).expect("adapter root must initialize")
 }
 
 fn runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Runtime::new().expect("runtime must initialize")
 }
 
-fn seed(root: &Path, dataset: &DatasetKey, members: &[DatasetMember]) -> storage::DatasetRevision {
+fn seed(
+    root: &Path,
+    dataset: &DatasetKeyData,
+    members: &[DatasetMemberData],
+) -> storage::DatasetRevisionData {
     let adapter = adapter(root);
     let runtime = runtime();
     let expected = runtime
@@ -176,7 +181,7 @@ fn read_generation_pair(root: &Path, previous: bool) -> (Vec<u8>, Vec<u8>) {
         runtime.block_on(adapter.read_consistent(&key(), &[name("active"), name("archive")]))
     }
     .expect("reopen must recover before reading");
-    let DatasetReadOutcome::Found(read) = outcome else {
+    let DatasetReadOutcomeData::Found(read) = outcome else {
         panic!("recovered generation must contain both requested members");
     };
     let mut values = read
@@ -263,7 +268,7 @@ fn assert_corrupt_and_quarantined(error: StorageError, root: &Path) {
     let StorageErrorKind::CorruptTransaction(corruption) = error.kind() else {
         panic!("recovery contradiction must outrank ordinary I/O/CAS errors: {error:?}");
     };
-    assert_eq!(corruption.scope(), TransactionScope::Dataset);
+    assert_eq!(corruption.scope(), TransactionScopeData::Dataset);
     assert_eq!(
         corruption.quarantine_disposition(),
         QuarantineDisposition::EvidenceQuarantined,
@@ -306,12 +311,15 @@ fn dataset_child_runs_transaction() {
     if let Some(result) = std::env::var_os(HELPER_RESULT) {
         let label = match outcome {
             Ok(receipt)
-                if receipt.visibility() == DatasetCommitVisibility::RecoveryPending
-                    && receipt.warning() == Some(CommitWarning::MemberPublishRecoveryPending) =>
+                if receipt.visibility() == DatasetCommitVisibilityData::RecoveryPending
+                    && receipt.warning()
+                        == Some(CommitWarningData::MemberPublishRecoveryPending) =>
             {
                 "recovery-pending"
             }
-            Ok(receipt) if receipt.visibility() == DatasetCommitVisibility::Visible => "visible",
+            Ok(receipt) if receipt.visibility() == DatasetCommitVisibilityData::Visible => {
+                "visible"
+            }
             Ok(_) => "wrong-receipt",
             Err(_) => "error",
         };
@@ -662,7 +670,7 @@ fn commit_journal_revision_must_match_the_staged_generation() {
     let outcome = runtime()
         .block_on(adapter(&root).read_consistent(&key(), &[name("active")]))
         .expect("after invalid journal quarantine the untouched primary remains readable");
-    let DatasetReadOutcome::Found(read) = outcome else {
+    let DatasetReadOutcomeData::Found(read) = outcome else {
         panic!("the healthy old primary must remain available");
     };
     assert_eq!(
@@ -704,7 +712,7 @@ fn self_consistent_journal_revision_metadata_must_match_staged_bytes() {
     let outcome = runtime()
         .block_on(adapter(&root).read_consistent(&key(), &[name("active")]))
         .expect("invalid journal quarantine must leave the old primary readable");
-    let DatasetReadOutcome::Found(read) = outcome else {
+    let DatasetReadOutcomeData::Found(read) = outcome else {
         panic!("the healthy old primary must remain available");
     };
     assert_eq!(
@@ -802,8 +810,8 @@ fn published_member_digest_contradiction_is_typed_corruption_and_quarantined() {
     );
 
     match runtime().block_on(adapter(&root).read_consistent(&key(), &[name("active")])) {
-        Err(_) | Ok(DatasetReadOutcome::NotFound) => {}
-        Ok(DatasetReadOutcome::Found(read)) => panic!(
+        Err(_) | Ok(DatasetReadOutcomeData::NotFound) => {}
+        Ok(DatasetReadOutcomeData::Found(read)) => panic!(
             "a second read must remain fail-closed/NotFound, never return quarantined tampered primary bytes: {:?}",
             read.members()
         ),

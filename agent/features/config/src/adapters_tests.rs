@@ -305,7 +305,7 @@ async fn compatibility_paths_are_applied_in_stable_order() {
 #[tokio::test]
 async fn native_store_round_trips_patch_and_maps_commit_warning() {
     let dir = tempfile::tempdir().unwrap();
-    let storage = storage::file_system_blob(dir.path()).unwrap();
+    let storage = storage::wire_file_system_blob(dir.path()).unwrap();
     let store = NativeConfigStore::new(storage);
     let bytes = br#"{"models":{"default":"local/model"}}"#;
     assert_eq!(store.write_override("project", bytes).await.unwrap(), None);
@@ -319,7 +319,7 @@ async fn native_store_round_trips_patch_and_maps_commit_warning() {
 #[tokio::test]
 async fn native_store_contract_reports_missing_and_invalid_payload() {
     let dir = tempfile::tempdir().unwrap();
-    let storage = storage::file_system_blob(dir.path()).unwrap();
+    let storage = storage::wire_file_system_blob(dir.path()).unwrap();
     let store = NativeConfigStore::new(storage);
     assert!(store.read_override("missing").await.unwrap().is_none());
     store.write_override("invalid", b"not-json").await.unwrap();

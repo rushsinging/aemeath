@@ -5,7 +5,7 @@ async fn wiring_reads_runtime_override_from_injected_native_store() {
     let project = tempfile::tempdir().expect("create project directory");
     let storage = tempfile::tempdir().expect("create override storage directory");
     let store = wire_config_override_store(
-        storage::file_system_blob(storage.path()).expect("create override blob"),
+        storage::wire_file_system_blob(storage.path()).expect("create override blob"),
     );
 
     let first = config::wire_project_config(project.path(), store.clone())

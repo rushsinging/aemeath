@@ -40,7 +40,7 @@ async fn cli_layer_overrides_env() {
 #[tokio::test]
 async fn update_replaces_committed_snapshot_even_without_receiver() {
     let dir = tempfile::tempdir().unwrap();
-    let storage = storage::file_system_blob(dir.path()).unwrap();
+    let storage = storage::wire_file_system_blob(dir.path()).unwrap();
     let service =
         ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
             .with_native_store(NativeConfigStore::new(storage));
@@ -59,7 +59,7 @@ async fn update_replaces_committed_snapshot_even_without_receiver() {
 #[tokio::test]
 async fn consecutive_updates_preserve_previously_committed_fields() {
     let dir = tempfile::tempdir().unwrap();
-    let storage = storage::file_system_blob(dir.path()).unwrap();
+    let storage = storage::wire_file_system_blob(dir.path()).unwrap();
     let service =
         ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
             .with_native_store(NativeConfigStore::new(storage));
@@ -87,7 +87,7 @@ async fn consecutive_updates_preserve_previously_committed_fields() {
     let rebuilt =
         ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
             .with_native_store(NativeConfigStore::new(
-                storage::file_system_blob(dir.path()).unwrap(),
+                storage::wire_file_system_blob(dir.path()).unwrap(),
             ));
     rebuilt.load().await.unwrap();
     let snapshot = rebuilt.committed_snapshot();
@@ -101,7 +101,7 @@ async fn consecutive_updates_preserve_previously_committed_fields() {
 #[tokio::test]
 async fn concurrent_updates_are_serialized_without_losing_fields() {
     let dir = tempfile::tempdir().unwrap();
-    let storage = storage::file_system_blob(dir.path()).unwrap();
+    let storage = storage::wire_file_system_blob(dir.path()).unwrap();
     let service = std::sync::Arc::new(
         ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
             .with_native_store(NativeConfigStore::new(storage)),
@@ -141,7 +141,7 @@ async fn concurrent_updates_are_serialized_without_losing_fields() {
 async fn runtime_override_is_restored_after_service_rebuild() {
     let dir = tempfile::tempdir().unwrap();
     let global = dir.path().join("config.json");
-    let storage = storage::file_system_blob(dir.path()).unwrap();
+    let storage = storage::wire_file_system_blob(dir.path()).unwrap();
     let store = NativeConfigStore::new(storage);
     let service =
         ConfigAppService::with_global_path(None, global.clone()).with_native_store(store.clone());
@@ -165,7 +165,7 @@ async fn runtime_override_is_restored_after_service_rebuild() {
 #[tokio::test]
 async fn prepare_update_does_not_publish_before_commit() {
     let dir = tempfile::tempdir().unwrap();
-    let storage = storage::file_system_blob(dir.path()).unwrap();
+    let storage = storage::wire_file_system_blob(dir.path()).unwrap();
     let service =
         ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
             .with_native_store(NativeConfigStore::new(storage));
@@ -188,7 +188,7 @@ async fn prepare_update_does_not_publish_before_commit() {
 #[tokio::test]
 async fn env_permission_override_remains_above_dynamic_local_update() {
     let dir = tempfile::tempdir().unwrap();
-    let storage = storage::file_system_blob(dir.path()).unwrap();
+    let storage = storage::wire_file_system_blob(dir.path()).unwrap();
     let service =
         ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
             .with_native_store(NativeConfigStore::new(storage))
@@ -216,7 +216,7 @@ async fn env_permission_override_remains_above_dynamic_local_update() {
 #[tokio::test]
 async fn cli_permission_override_remains_highest_after_dynamic_update() {
     let dir = tempfile::tempdir().unwrap();
-    let storage = storage::file_system_blob(dir.path()).unwrap();
+    let storage = storage::wire_file_system_blob(dir.path()).unwrap();
     let service =
         ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
             .with_native_store(NativeConfigStore::new(storage));
@@ -255,7 +255,7 @@ async fn complete_priority_contract_uses_cli_over_env_over_local_over_global() {
         r#"{"model":{"name":"project"}}"#,
     )
     .unwrap();
-    let storage = storage::file_system_blob(dir.path().join("storage")).unwrap();
+    let storage = storage::wire_file_system_blob(dir.path().join("storage")).unwrap();
     let store = NativeConfigStore::new(storage);
     let runtime = ConfigPatch {
         model: Some(share::config::domain::merge::ModelConfigPatch {
@@ -316,7 +316,7 @@ async fn persist_failure_does_not_publish_candidate() {
 #[tokio::test]
 async fn committed_update_notifies_subscription_with_same_snapshot() {
     let dir = tempfile::tempdir().unwrap();
-    let storage = storage::file_system_blob(dir.path()).unwrap();
+    let storage = storage::wire_file_system_blob(dir.path()).unwrap();
     let service =
         ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
             .with_native_store(NativeConfigStore::new(storage));
@@ -353,7 +353,7 @@ async fn project_commit_becomes_baseline_for_following_update() {
     let root = project.canonicalize().unwrap();
     let location =
         ProjectConfigLocationData::try_from_project_identity(root, b"project-a").unwrap();
-    let storage = storage::file_system_blob(dir.path().join("storage")).unwrap();
+    let storage = storage::wire_file_system_blob(dir.path().join("storage")).unwrap();
     let service = ConfigAppService::with_global_path(None, dir.path().join("global.json"))
         .with_native_store(NativeConfigStore::new(storage));
 

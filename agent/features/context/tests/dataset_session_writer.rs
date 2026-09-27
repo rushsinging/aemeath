@@ -5,7 +5,7 @@ use context::{
 };
 use context::{CanonicalSessionWriter, DatasetCanonicalSessionWriter};
 use share::message::Message;
-use storage::{DatasetKey, DatasetReadOutcome, SafePathSegment, StorageNamespace};
+use storage::{DatasetKeyData, DatasetReadOutcomeData, SafePathSegmentData, StorageNamespaceData};
 
 fn session_with_steps(id: &str, revision: u64, steps: &[(&str, &str, &str)]) -> CanonicalSession {
     let mut session = CanonicalSession::fixture(id);
@@ -29,11 +29,11 @@ fn session_with_steps(id: &str, revision: u64, steps: &[(&str, &str, &str)]) -> 
     session
 }
 
-fn dataset_key(session_id: &str) -> DatasetKey {
-    DatasetKey::new(
-        StorageNamespace::Session,
+fn dataset_key(session_id: &str) -> DatasetKeyData {
+    DatasetKeyData::new(
+        StorageNamespaceData::Session,
         vec![format!("{session_id}.dataset")
-            .parse::<SafePathSegment>()
+            .parse::<SafePathSegmentData>()
             .expect("safe session dataset id")],
     )
     .expect("valid Session dataset key")
@@ -42,7 +42,7 @@ fn dataset_key(session_id: &str) -> DatasetKey {
 #[tokio::test]
 async fn save_incremental_maps_session_changes_and_reuses_unchanged_step_member() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let before = session_with_steps("session", 1, &[("run-a", "step-a", "a")]);
 
@@ -59,7 +59,7 @@ async fn save_incremental_maps_session_changes_and_reuses_unchanged_step_member(
     let unchanged_member = initial_manifest
         .member_evidence(
             &unchanged_name
-                .parse::<SafePathSegment>()
+                .parse::<SafePathSegmentData>()
                 .expect("safe unchanged member name"),
         )
         .expect("initial unchanged member evidence");
@@ -93,7 +93,7 @@ async fn save_incremental_maps_session_changes_and_reuses_unchanged_step_member(
     let names = manifest
         .members()
         .iter()
-        .map(SafePathSegment::as_str)
+        .map(SafePathSegmentData::as_str)
         .collect::<Vec<_>>();
     assert_eq!(
         names,
@@ -109,7 +109,7 @@ async fn save_incremental_maps_session_changes_and_reuses_unchanged_step_member(
     let reused_member = manifest
         .member_evidence(
             &unchanged_name
-                .parse::<SafePathSegment>()
+                .parse::<SafePathSegmentData>()
                 .expect("safe unchanged member name"),
         )
         .expect("reused unchanged member evidence");
@@ -133,7 +133,7 @@ async fn save_incremental_maps_session_changes_and_reuses_unchanged_step_member(
 #[tokio::test]
 async fn commit_clearing_history_keeps_every_persisted_step_member() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     // 磁盘持久化完整历史：compact 边界前的 step-a 与边界后的 step-b。
     let persisted = session_with_steps(
@@ -185,7 +185,7 @@ async fn commit_clearing_history_keeps_every_persisted_step_member() {
 #[tokio::test]
 async fn overlay_step_missing_from_current_generation_is_written_not_reused() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let persisted = session_with_steps("overlay-session", 1, &[("run-a", "step-a", "a")]);
     writer
@@ -220,7 +220,7 @@ async fn overlay_step_missing_from_current_generation_is_written_not_reused() {
 #[tokio::test]
 async fn accepted_input_mutation_writes_one_new_step_member_for_large_history() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let steps = (0..256)
         .map(|index| {
@@ -292,7 +292,7 @@ async fn accepted_input_mutation_writes_one_new_step_member_for_large_history() 
 #[tokio::test]
 async fn active_resume_append_reuses_compact_history_members() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let mut complete = session_with_steps(
         "resumed",
@@ -342,13 +342,13 @@ async fn active_resume_append_reuses_compact_history_members() {
     let names = manifest
         .members()
         .iter()
-        .map(SafePathSegment::as_str)
+        .map(SafePathSegmentData::as_str)
         .collect::<Vec<_>>();
     assert!(names.contains(&"step-72756e2d6f6c64-737465702d6f6c64.json"));
     let manifest_name = "manifest.json"
-        .parse::<SafePathSegment>()
+        .parse::<SafePathSegmentData>()
         .expect("manifest member name");
-    let DatasetReadOutcome::Found(read) = dataset
+    let DatasetReadOutcomeData::Found(read) = dataset
         .read_consistent(&dataset_key("resumed"), &[manifest_name])
         .await
         .expect("read domain manifest")
@@ -366,7 +366,7 @@ async fn active_resume_append_reuses_compact_history_members() {
 #[tokio::test]
 async fn active_resume_finalize_reuses_compact_history_members() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let mut complete = session_with_steps(
         "finalized-resume",
@@ -410,9 +410,9 @@ async fn active_resume_finalize_reuses_compact_history_members() {
         .expect("active Resume finalize must preserve complete generation");
 
     let manifest_name = "manifest.json"
-        .parse::<SafePathSegment>()
+        .parse::<SafePathSegmentData>()
         .expect("manifest member name");
-    let DatasetReadOutcome::Found(read) = dataset
+    let DatasetReadOutcomeData::Found(read) = dataset
         .read_consistent(&dataset_key("finalized-resume"), &[manifest_name])
         .await
         .expect("read domain manifest")
@@ -430,7 +430,7 @@ async fn active_resume_finalize_reuses_compact_history_members() {
 #[tokio::test]
 async fn partial_history_commit_intent_cannot_remove_persisted_step_members() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let before = session_with_steps(
         "partial-history",
@@ -470,7 +470,7 @@ async fn incremental_save_with_cleared_memory_keeps_persisted_step_members() {
     // 物理删除路径已退役（/clear 改为逻辑断点）：内存清空历史的增量
     // 提交保留磁盘全部 step 成员，由 state 的 clear 边界负责截断。
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let before = session_with_steps(
         "cleared",
@@ -506,7 +506,7 @@ async fn incremental_save_with_cleared_memory_keeps_persisted_step_members() {
 #[tokio::test]
 async fn commit_plan_publishes_first_generation_when_dataset_is_absent() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let before = session_with_steps("new-session", 0, &[]);
     let mut after = before.clone();
@@ -524,9 +524,9 @@ async fn commit_plan_publishes_first_generation_when_dataset_is_absent() {
         .expect("first typed commit must publish an initial Dataset generation");
 
     let manifest_name = "manifest.json"
-        .parse::<SafePathSegment>()
+        .parse::<SafePathSegmentData>()
         .expect("manifest member name");
-    let DatasetReadOutcome::Found(read) = dataset
+    let DatasetReadOutcomeData::Found(read) = dataset
         .read_consistent(&dataset_key("new-session"), &[manifest_name])
         .await
         .expect("read first generation manifest")
@@ -543,7 +543,7 @@ async fn commit_plan_publishes_first_generation_when_dataset_is_absent() {
 #[tokio::test]
 async fn commit_plan_rejects_session_identity_mismatch_before_dataset_publish() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let before = session_with_steps("session", 1, &[("run", "step", "before")]);
     writer
@@ -567,7 +567,7 @@ async fn commit_plan_rejects_session_identity_mismatch_before_dataset_publish() 
         .await
         .expect("read unchanged manifest");
     let requested = manifest.members().to_vec();
-    let DatasetReadOutcome::Found(read) = dataset
+    let DatasetReadOutcomeData::Found(read) = dataset
         .read_consistent(&dataset_key("session"), &requested)
         .await
         .expect("current generation remains readable")
@@ -587,7 +587,7 @@ async fn commit_plan_rejects_session_identity_mismatch_before_dataset_publish() 
 #[tokio::test]
 async fn commit_plan_rejects_target_revision_that_does_not_advance_expected_revision() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let before = session_with_steps("session", 1, &[("run", "step", "before")]);
     writer
@@ -605,9 +605,9 @@ async fn commit_plan_rejects_target_revision_that_does_not_advance_expected_revi
 
     assert!(error.contains("revision"), "unexpected error: {error}");
     let manifest_name = "manifest.json"
-        .parse::<SafePathSegment>()
+        .parse::<SafePathSegmentData>()
         .expect("manifest member name");
-    let DatasetReadOutcome::Found(read) = dataset
+    let DatasetReadOutcomeData::Found(read) = dataset
         .read_consistent(&dataset_key("session"), &[manifest_name])
         .await
         .expect("read unchanged generation manifest")
@@ -622,7 +622,7 @@ async fn commit_plan_rejects_target_revision_that_does_not_advance_expected_revi
 #[tokio::test]
 async fn save_incremental_with_stale_manifest_preserves_current_generation() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let before = session_with_steps("session", 1, &[("run", "step", "a")]);
     writer
@@ -652,7 +652,7 @@ async fn save_incremental_with_stale_manifest_preserves_current_generation() {
         .await
         .expect("read current generation");
     let requested = manifest.members().to_vec();
-    let DatasetReadOutcome::Found(read) = dataset
+    let DatasetReadOutcomeData::Found(read) = dataset
         .read_consistent(&dataset_key("session"), &requested)
         .await
         .expect("current generation remains readable")
@@ -671,7 +671,7 @@ async fn save_incremental_with_stale_manifest_preserves_current_generation() {
 #[tokio::test]
 async fn rebuild_empty_dataset_restores_wiped_dataset_with_aligned_revision() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
 
     // 模拟外部清空：先落一代，再删除数据集目录。
@@ -702,13 +702,13 @@ async fn rebuild_empty_dataset_restores_wiped_dataset_with_aligned_revision() {
         "rebuilt dataset must carry members"
     );
     let state_name = "session-state.json"
-        .parse::<SafePathSegment>()
+        .parse::<SafePathSegmentData>()
         .expect("safe state member name");
     let read = dataset
         .read_consistent(&dataset_key("session"), &[state_name])
         .await
         .expect("read rebuilt members");
-    let DatasetReadOutcome::Found(read) = read else {
+    let DatasetReadOutcomeData::Found(read) = read else {
         panic!("rebuilt generation must be readable");
     };
     assert_eq!(read.members().len(), 1);
@@ -725,7 +725,7 @@ async fn rebuild_empty_dataset_restores_wiped_dataset_with_aligned_revision() {
 #[tokio::test]
 async fn rebuild_empty_dataset_fails_closed_when_dataset_is_not_empty() {
     let root = tempfile::tempdir().expect("temporary dataset root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
 
     let seeded = session_with_steps("session", 1, &[("run-a", "step-a", "a")]);

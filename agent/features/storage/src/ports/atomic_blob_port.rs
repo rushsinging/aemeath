@@ -1,43 +1,47 @@
 use async_trait::async_trait;
 
 use crate::{
-    DeleteOptions, DeleteOutcome, Generation, PromoteOutcome, QuarantineOutcome, QuarantineReason,
-    ReadOutcome, StorageError, StorageKey, TransactionScope, WriteOptions, WriteReceipt,
+    DeleteOptionsData, DeleteOutcomeData, GenerationData, PromoteOutcomeData,
+    QuarantineOutcomeData, QuarantineReason, ReadOutcomeData, StorageError, StorageKeyData,
+    TransactionScopeData, WriteOptionsData, WriteReceiptData,
 };
 
 #[async_trait]
 pub trait AtomicBlobPort: Send + Sync {
     async fn read(
         &self,
-        key: &StorageKey,
-        generation: Generation,
-    ) -> Result<ReadOutcome, StorageError>;
+        key: &StorageKeyData,
+        generation: GenerationData,
+    ) -> Result<ReadOutcomeData, StorageError>;
 
     async fn write_atomic(
         &self,
-        key: &StorageKey,
+        key: &StorageKeyData,
         bytes: &[u8],
-        options: WriteOptions,
-    ) -> Result<WriteReceipt, StorageError>;
+        options: WriteOptionsData,
+    ) -> Result<WriteReceiptData, StorageError>;
 
-    async fn promote_previous(&self, key: &StorageKey) -> Result<PromoteOutcome, StorageError>;
+    async fn promote_previous(
+        &self,
+        key: &StorageKeyData,
+    ) -> Result<PromoteOutcomeData, StorageError>;
 
     async fn quarantine(
         &self,
-        key: &StorageKey,
-        generation: Generation,
-        scope: TransactionScope,
+        key: &StorageKeyData,
+        generation: GenerationData,
+        scope: TransactionScopeData,
         reason: QuarantineReason,
-    ) -> Result<QuarantineOutcome, StorageError>;
+    ) -> Result<QuarantineOutcomeData, StorageError>;
 
     async fn delete_all_generations(
         &self,
-        key: &StorageKey,
-        options: DeleteOptions,
-    ) -> Result<DeleteOutcome, StorageError>;
+        key: &StorageKeyData,
+        options: DeleteOptionsData,
+    ) -> Result<DeleteOutcomeData, StorageError>;
 
     async fn list_primary(
         &self,
-        namespace: crate::domain::StorageNamespace,
-    ) -> Result<Vec<crate::domain::StorageEntry>, StorageError>;
+        namespace: crate::domain::StorageNamespaceData,
+    ) -> Result<Vec<crate::domain::StorageEntryData>, StorageError>;
 }

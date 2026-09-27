@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use storage::{
-    AtomicBlobPort, DeleteOptions, Durability, Generation, ReadOutcome, SafePathSegment,
-    StorageKey, StorageNamespace, WriteOptions,
+    AtomicBlobPort, DeleteOptionsData, DurabilityData, GenerationData, ReadOutcomeData,
+    SafePathSegmentData, StorageKeyData, StorageNamespaceData, WriteOptionsData,
 };
 
 use crate::domain::session::CanonicalSession;
@@ -36,16 +36,16 @@ impl ToolReceiptLedger {
 
 pub(crate) struct AtomicBlobToolReceiptLedger {
     blob: Arc<dyn AtomicBlobPort>,
-    key: StorageKey,
+    key: StorageKeyData,
     session_id: String,
 }
 
 impl AtomicBlobToolReceiptLedger {
     pub(crate) fn new(blob: Arc<dyn AtomicBlobPort>, session_id: &str) -> Result<Self, String> {
         let segment = format!("receipt-ledger-{session_id}")
-            .parse::<SafePathSegment>()
+            .parse::<SafePathSegmentData>()
             .map_err(|error| error.to_string())?;
-        let key = StorageKey::new(StorageNamespace::ToolResult, vec![segment])
+        let key = StorageKeyData::new(StorageNamespaceData::ToolResult, vec![segment])
             .map_err(|error| error.to_string())?;
         Ok(Self {
             blob,
@@ -57,13 +57,15 @@ impl AtomicBlobToolReceiptLedger {
     async fn read(&self) -> Result<ToolReceiptLedger, String> {
         let ledger = match self
             .blob
-            .read(&self.key, Generation::Primary)
+            .read(&self.key, GenerationData::Primary)
             .await
             .map_err(|error| error.to_string())?
         {
-            ReadOutcome::Found(read) => serde_json::from_slice::<ToolReceiptLedger>(read.bytes())
-                .map_err(|error| error.to_string())?,
-            ReadOutcome::NotFound => ToolReceiptLedger::empty(&self.session_id),
+            ReadOutcomeData::Found(read) => {
+                serde_json::from_slice::<ToolReceiptLedger>(read.bytes())
+                    .map_err(|error| error.to_string())?
+            }
+            ReadOutcomeData::NotFound => ToolReceiptLedger::empty(&self.session_id),
         };
         if ledger.schema_version != RECEIPT_LEDGER_SCHEMA_VERSION {
             return Err(format!(
@@ -104,7 +106,7 @@ impl AtomicBlobToolReceiptLedger {
             .write_atomic(
                 &self.key,
                 &bytes,
-                WriteOptions::new(Durability::ProcessCrashSafe),
+                WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
             )
             .await
             .map_err(|error| error.to_string())?;
@@ -127,7 +129,7 @@ impl AtomicBlobToolReceiptLedger {
 
     pub(crate) async fn delete(&self) -> Result<(), String> {
         self.blob
-            .delete_all_generations(&self.key, DeleteOptions::default())
+            .delete_all_generations(&self.key, DeleteOptionsData::default())
             .await
             .map_err(|error| error.to_string())?;
         Ok(())

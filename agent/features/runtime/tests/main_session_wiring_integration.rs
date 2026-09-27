@@ -65,7 +65,7 @@ async fn make_wiring_and_workspace(
     let config = config::wire_project_config(
         &root,
         config::wire_config_override_store(
-            storage::file_system_blob(temp.path().join("config-overrides"))
+            storage::wire_file_system_blob(temp.path().join("config-overrides"))
                 .expect("create config blob"),
         ),
     )
@@ -74,7 +74,8 @@ async fn make_wiring_and_workspace(
     let task_wiring = task::wire_task();
     let session_management: Arc<dyn context::SessionManagementPort> =
         Arc::new(context::AtomicBlobSessionManagement::new(
-            storage::file_system_blob(temp.path().join("agents")).expect("create session blob"),
+            storage::wire_file_system_blob(temp.path().join("agents"))
+                .expect("create session blob"),
         ));
     let wiring = context::test_support::wire_in_memory(
         &workspace,
@@ -232,7 +233,7 @@ async fn config_query_and_writer_come_from_wiring() {
     let config = config::wire_project_config(
         &root,
         config::wire_config_override_store(
-            storage::file_system_blob(temp.path().join("config-overrides"))
+            storage::wire_file_system_blob(temp.path().join("config-overrides"))
                 .expect("create config blob"),
         ),
     )
@@ -241,7 +242,8 @@ async fn config_query_and_writer_come_from_wiring() {
     let task_wiring = task::wire_task();
     let session_management: Arc<dyn context::SessionManagementPort> =
         Arc::new(context::AtomicBlobSessionManagement::new(
-            storage::file_system_blob(temp.path().join("agents")).expect("create session blob"),
+            storage::wire_file_system_blob(temp.path().join("agents"))
+                .expect("create session blob"),
         ));
 
     let wiring = context::test_support::wire_in_memory(

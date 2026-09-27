@@ -3,16 +3,18 @@ use std::fmt;
 
 use sha2::{Digest, Sha256};
 
-use super::{CommitWarning, SafePathSegment, StorageError, StorageErrorKind, StorageNamespace};
+use super::{
+    CommitWarningData, SafePathSegmentData, StorageError, StorageErrorKind, StorageNamespaceData,
+};
 
 const REVISION_DOMAIN: &[u8] = b"aemeath.storage.dataset.revision.v1\0";
 const MEMBER_BYTES_DOMAIN: &[u8] = b"aemeath.storage.dataset.member.bytes.v1\0";
 
 /// 计算单个成员字节参与修订号运算的领域摘要（`MEMBER_BYTES_DOMAIN`）。
 ///
-/// 与 `DatasetRevision::from_canonical_members` 内联的成员摘要算法严格一致：
+/// 与 `DatasetRevisionData::from_canonical_members` 内联的成员摘要算法严格一致：
 /// `SHA256(MEMBER_BYTES_DOMAIN || len_le64 || bytes)`。adapter 将其持久化进事务
-/// journal，使得恢复时不需要原始字节即可精确重算 `DatasetRevision`。
+/// journal，使得恢复时不需要原始字节即可精确重算 `DatasetRevisionData`。
 pub(crate) fn revision_member_digest(bytes: &[u8]) -> [u8; 32] {
     let mut digest = Sha256::new();
     digest.update(MEMBER_BYTES_DOMAIN);
@@ -23,15 +25,15 @@ pub(crate) fn revision_member_digest(bytes: &[u8]) -> [u8; 32] {
 
 /// The adapter-independent logical location of an atomic dataset.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct DatasetKey {
-    namespace: StorageNamespace,
-    segments: Vec<SafePathSegment>,
+pub struct DatasetKeyData {
+    namespace: StorageNamespaceData,
+    segments: Vec<SafePathSegmentData>,
 }
 
-impl DatasetKey {
+impl DatasetKeyData {
     pub fn new(
-        namespace: StorageNamespace,
-        segments: Vec<SafePathSegment>,
+        namespace: StorageNamespaceData,
+        segments: Vec<SafePathSegmentData>,
     ) -> Result<Self, StorageError> {
         if segments.is_empty() {
             return Err(StorageError::new(
@@ -46,28 +48,28 @@ impl DatasetKey {
         })
     }
 
-    pub fn namespace(&self) -> StorageNamespace {
+    pub fn namespace(&self) -> StorageNamespaceData {
         self.namespace
     }
 
-    pub fn segments(&self) -> &[SafePathSegment] {
+    pub fn segments(&self) -> &[SafePathSegmentData] {
         &self.segments
     }
 }
 
 /// One named byte value supplied to a dataset commit or returned by a read.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DatasetMember {
-    name: SafePathSegment,
+pub struct DatasetMemberData {
+    name: SafePathSegmentData,
     bytes: Vec<u8>,
 }
 
-impl DatasetMember {
-    pub fn new(name: SafePathSegment, bytes: Vec<u8>) -> Self {
+impl DatasetMemberData {
+    pub fn new(name: SafePathSegmentData, bytes: Vec<u8>) -> Self {
         Self { name, bytes }
     }
 
-    pub fn name(&self) -> &SafePathSegment {
+    pub fn name(&self) -> &SafePathSegmentData {
         &self.name
     }
 
@@ -78,17 +80,17 @@ impl DatasetMember {
 
 /// An immutable member that an incremental generation reuses from the expected primary.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DatasetMemberReference {
-    source_revision: DatasetRevision,
-    name: SafePathSegment,
+pub struct DatasetMemberReferenceData {
+    source_revision: DatasetRevisionData,
+    name: SafePathSegmentData,
     byte_len: u64,
     member_digest: [u8; 32],
 }
 
-impl DatasetMemberReference {
+impl DatasetMemberReferenceData {
     pub fn from_manifest_member(
-        source_revision: DatasetRevision,
-        name: SafePathSegment,
+        source_revision: DatasetRevisionData,
+        name: SafePathSegmentData,
         byte_len: u64,
         member_digest: [u8; 32],
     ) -> Self {
@@ -100,11 +102,11 @@ impl DatasetMemberReference {
         }
     }
 
-    pub fn source_revision(&self) -> &DatasetRevision {
+    pub fn source_revision(&self) -> &DatasetRevisionData {
         &self.source_revision
     }
 
-    pub fn name(&self) -> &SafePathSegment {
+    pub fn name(&self) -> &SafePathSegmentData {
         &self.name
     }
 
@@ -123,12 +125,12 @@ impl DatasetMemberReference {
 
 /// A byte-bearing member change for an incremental dataset generation.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DatasetMemberChange {
-    Replace(DatasetMember),
+pub enum DatasetMemberChangeData {
+    Replace(DatasetMemberData),
 }
 
-impl DatasetMemberChange {
-    pub fn member(&self) -> &DatasetMember {
+impl DatasetMemberChangeData {
+    pub fn member(&self) -> &DatasetMemberData {
         match self {
             Self::Replace(member) => member,
         }
@@ -137,18 +139,18 @@ impl DatasetMemberChange {
 
 /// A complete target-generation description that carries bytes only for changed members.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DatasetChangeSet {
-    expected_revision: DatasetRevision,
-    new_members: Vec<DatasetMemberChange>,
-    reused_members: Vec<DatasetMemberReference>,
-    removed_members: Vec<SafePathSegment>,
+pub struct DatasetChangeSetData {
+    expected_revision: DatasetRevisionData,
+    new_members: Vec<DatasetMemberChangeData>,
+    reused_members: Vec<DatasetMemberReferenceData>,
+    removed_members: Vec<SafePathSegmentData>,
 }
 
-impl DatasetChangeSet {
+impl DatasetChangeSetData {
     pub fn new(
-        expected_revision: DatasetRevision,
-        mut new_members: Vec<DatasetMemberChange>,
-        mut reused_members: Vec<DatasetMemberReference>,
+        expected_revision: DatasetRevisionData,
+        mut new_members: Vec<DatasetMemberChangeData>,
+        mut reused_members: Vec<DatasetMemberReferenceData>,
     ) -> Result<Self, StorageError> {
         new_members.sort_by(|left, right| left.member().name().cmp(right.member().name()));
         reused_members.sort_by(|left, right| left.name.cmp(&right.name));
@@ -180,7 +182,7 @@ impl DatasetChangeSet {
 
     pub fn with_removed_members(
         mut self,
-        mut removed_members: Vec<SafePathSegment>,
+        mut removed_members: Vec<SafePathSegmentData>,
     ) -> Result<Self, StorageError> {
         removed_members.sort();
         reject_duplicate_names(&removed_members)?;
@@ -203,19 +205,19 @@ impl DatasetChangeSet {
         Ok(self)
     }
 
-    pub fn expected_revision(&self) -> &DatasetRevision {
+    pub fn expected_revision(&self) -> &DatasetRevisionData {
         &self.expected_revision
     }
 
-    pub fn new_members(&self) -> &[DatasetMemberChange] {
+    pub fn new_members(&self) -> &[DatasetMemberChangeData] {
         &self.new_members
     }
 
-    pub fn reused_members(&self) -> &[DatasetMemberReference] {
+    pub fn reused_members(&self) -> &[DatasetMemberReferenceData] {
         &self.reused_members
     }
 
-    pub fn removed_members(&self) -> &[SafePathSegment] {
+    pub fn removed_members(&self) -> &[SafePathSegmentData] {
         &self.removed_members
     }
 }
@@ -225,15 +227,15 @@ impl DatasetChangeSet {
 /// The fingerprint is deliberately redacted from `Debug` so that raw
 /// generation bytes never leak into logs, panics, or receipts.
 #[derive(Clone, Eq, Hash, PartialEq)]
-pub struct DatasetRevision([u8; 32]);
+pub struct DatasetRevisionData([u8; 32]);
 
-impl fmt::Debug for DatasetRevision {
+impl fmt::Debug for DatasetRevisionData {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("DatasetRevision(<redacted>)")
+        formatter.write_str("DatasetRevisionData(<redacted>)")
     }
 }
 
-impl DatasetRevision {
+impl DatasetRevisionData {
     /// 供 adapter 将修订号持久化到私有 schema（十六进制）后再复原。
     pub(crate) fn as_bytes(&self) -> &[u8; 32] {
         &self.0
@@ -244,7 +246,7 @@ impl DatasetRevision {
         Self(bytes)
     }
 
-    fn from_canonical_members(members: &[DatasetMember]) -> Self {
+    fn from_canonical_members(members: &[DatasetMemberData]) -> Self {
         let evidence: Vec<(&str, u64, [u8; 32])> = members
             .iter()
             .map(|member| {
@@ -289,21 +291,21 @@ impl DatasetRevision {
 /// member instead carries Storage-verified reuse evidence that can be passed
 /// directly to an incremental commit for the reported revision.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DatasetManifest {
-    revision: DatasetRevision,
-    members: Vec<SafePathSegment>,
-    member_evidence: Vec<DatasetMemberReference>,
+pub struct DatasetManifestData {
+    revision: DatasetRevisionData,
+    members: Vec<SafePathSegmentData>,
+    member_evidence: Vec<DatasetMemberReferenceData>,
 }
 
-impl DatasetManifest {
+impl DatasetManifestData {
     /// Freezes a complete generation into canonical member-name order.
-    pub(crate) fn new(mut members: Vec<DatasetMember>) -> Result<Self, StorageError> {
+    pub(crate) fn new(mut members: Vec<DatasetMemberData>) -> Result<Self, StorageError> {
         canonicalize_members(&mut members)?;
-        let revision = DatasetRevision::from_canonical_members(&members);
+        let revision = DatasetRevisionData::from_canonical_members(&members);
         let member_evidence = members
             .iter()
             .map(|member| {
-                DatasetMemberReference::from_manifest_member(
+                DatasetMemberReferenceData::from_manifest_member(
                     revision.clone(),
                     member.name.clone(),
                     member.bytes.len() as u64,
@@ -324,8 +326,8 @@ impl DatasetManifest {
     /// Adapters must only use evidence verified under the same dataset lock as
     /// the complete generation represented by `revision`.
     pub(crate) fn from_verified_members(
-        revision: DatasetRevision,
-        mut member_evidence: Vec<DatasetMemberReference>,
+        revision: DatasetRevisionData,
+        mut member_evidence: Vec<DatasetMemberReferenceData>,
     ) -> Result<Self, StorageError> {
         member_evidence.sort_by(|left, right| left.name.cmp(&right.name));
         let members = member_evidence
@@ -349,15 +351,18 @@ impl DatasetManifest {
         })
     }
 
-    pub fn revision(&self) -> &DatasetRevision {
+    pub fn revision(&self) -> &DatasetRevisionData {
         &self.revision
     }
 
-    pub fn members(&self) -> &[SafePathSegment] {
+    pub fn members(&self) -> &[SafePathSegmentData] {
         &self.members
     }
 
-    pub fn member_evidence(&self, name: &SafePathSegment) -> Option<&DatasetMemberReference> {
+    pub fn member_evidence(
+        &self,
+        name: &SafePathSegmentData,
+    ) -> Option<&DatasetMemberReferenceData> {
         self.member_evidence
             .binary_search_by(|member| member.name.cmp(name))
             .ok()
@@ -365,8 +370,9 @@ impl DatasetManifest {
     }
 
     /// Returns names present in this manifest but absent from its replacement.
-    pub fn omitted_members<'a>(&'a self, replacement: &Self) -> Vec<&'a SafePathSegment> {
-        let replacement_names: BTreeSet<&SafePathSegment> = replacement.members.iter().collect();
+    pub fn omitted_members<'a>(&'a self, replacement: &Self) -> Vec<&'a SafePathSegmentData> {
+        let replacement_names: BTreeSet<&SafePathSegmentData> =
+            replacement.members.iter().collect();
         self.members
             .iter()
             .filter(|name| !replacement_names.contains(name))
@@ -376,56 +382,56 @@ impl DatasetManifest {
 
 /// A revision and requested member bytes read under one dataset lock.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DatasetRead {
-    revision: DatasetRevision,
-    members: Vec<DatasetMember>,
+pub struct DatasetReadData {
+    revision: DatasetRevisionData,
+    members: Vec<DatasetMemberData>,
 }
 
-impl DatasetRead {
+impl DatasetReadData {
     pub(crate) fn new(
-        revision: DatasetRevision,
-        mut members: Vec<DatasetMember>,
+        revision: DatasetRevisionData,
+        mut members: Vec<DatasetMemberData>,
     ) -> Result<Self, StorageError> {
         canonicalize_members(&mut members)?;
         Ok(Self { revision, members })
     }
 
-    pub fn revision(&self) -> &DatasetRevision {
+    pub fn revision(&self) -> &DatasetRevisionData {
         &self.revision
     }
 
-    pub fn members(&self) -> &[DatasetMember] {
+    pub fn members(&self) -> &[DatasetMemberData] {
         &self.members
     }
 }
 
 /// Result of reading a requested member set from one explicit generation.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DatasetReadOutcome {
-    Found(DatasetRead),
+pub enum DatasetReadOutcomeData {
+    Found(DatasetReadData),
     NotFound,
 }
 
 /// Whether a logically committed generation is already externally visible.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DatasetCommitVisibility {
+pub enum DatasetCommitVisibilityData {
     Visible,
     RecoveryPending,
 }
 
 /// Proof that a dataset generation crossed its logical commit point.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DatasetCommitReceipt {
-    revision: DatasetRevision,
-    visibility: DatasetCommitVisibility,
-    warning: Option<CommitWarning>,
+pub struct DatasetCommitReceiptData {
+    revision: DatasetRevisionData,
+    visibility: DatasetCommitVisibilityData,
+    warning: Option<CommitWarningData>,
 }
 
-impl DatasetCommitReceipt {
+impl DatasetCommitReceiptData {
     pub(crate) fn committed(
-        revision: DatasetRevision,
-        visibility: DatasetCommitVisibility,
-        warning: Option<CommitWarning>,
+        revision: DatasetRevisionData,
+        visibility: DatasetCommitVisibilityData,
+        warning: Option<CommitWarningData>,
     ) -> Self {
         Self {
             revision,
@@ -434,20 +440,20 @@ impl DatasetCommitReceipt {
         }
     }
 
-    pub fn revision(&self) -> &DatasetRevision {
+    pub fn revision(&self) -> &DatasetRevisionData {
         &self.revision
     }
 
-    pub fn visibility(&self) -> DatasetCommitVisibility {
+    pub fn visibility(&self) -> DatasetCommitVisibilityData {
         self.visibility
     }
 
-    pub fn warning(&self) -> Option<CommitWarning> {
+    pub fn warning(&self) -> Option<CommitWarningData> {
         self.warning
     }
 }
 
-fn canonicalize_members(members: &mut [DatasetMember]) -> Result<(), StorageError> {
+fn canonicalize_members(members: &mut [DatasetMemberData]) -> Result<(), StorageError> {
     members.sort_by(|left, right| left.name.cmp(&right.name));
     if members.windows(2).any(|pair| pair[0].name == pair[1].name) {
         return Err(duplicate_member_error());
@@ -455,7 +461,7 @@ fn canonicalize_members(members: &mut [DatasetMember]) -> Result<(), StorageErro
     Ok(())
 }
 
-fn reject_duplicate_names(members: &[SafePathSegment]) -> Result<(), StorageError> {
+fn reject_duplicate_names(members: &[SafePathSegmentData]) -> Result<(), StorageError> {
     if members.windows(2).any(|pair| pair[0] == pair[1]) {
         return Err(duplicate_member_error());
     }

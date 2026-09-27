@@ -33,7 +33,7 @@ async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
     ));
     std::fs::create_dir_all(&root).expect("create storage root");
     let blob: Arc<dyn storage::AtomicBlobPort> =
-        storage::file_system_blob(&root).expect("create filesystem blob adapter");
+        storage::wire_file_system_blob(&root).expect("create filesystem blob adapter");
     let port = context::AtomicBlobSessionManagement::new(Arc::clone(&blob));
     let writer = context::AtomicBlobCanonicalSessionWriter::new(blob);
     let project = ProjectIdentityData {
@@ -82,7 +82,7 @@ async fn session_management_filters_and_loads_only_matching_project_identity() {
     ));
     std::fs::create_dir_all(&root).expect("create storage root");
     let port: Arc<dyn SessionManagementPort> = Arc::new(context::AtomicBlobSessionManagement::new(
-        storage::file_system_blob(&root).expect("create filesystem blob adapter"),
+        storage::wire_file_system_blob(&root).expect("create filesystem blob adapter"),
     ));
     let project_a = ProjectIdentityData {
         initial_cwd: "/project-a".to_string(),
@@ -179,7 +179,7 @@ async fn session_management_lists_only_primary_sessions_for_current_project() {
         uuid::Uuid::now_v7()
     ));
     std::fs::create_dir_all(&root).expect("create storage root");
-    let blob = storage::file_system_blob(&root).expect("create filesystem blob adapter");
+    let blob = storage::wire_file_system_blob(&root).expect("create filesystem blob adapter");
     let port: Arc<dyn SessionManagementPort> =
         Arc::new(context::AtomicBlobSessionManagement::new(blob));
     let project = ProjectIdentityData {
@@ -212,7 +212,7 @@ async fn session_management_imports_exports_updates_and_deletes_through_injected
     ));
     std::fs::create_dir_all(&root).expect("create storage root");
     let port: Arc<dyn SessionManagementPort> = Arc::new(context::AtomicBlobSessionManagement::new(
-        storage::file_system_blob(&root).expect("create filesystem blob adapter"),
+        storage::wire_file_system_blob(&root).expect("create filesystem blob adapter"),
     ));
     let project = ProjectIdentityData {
         initial_cwd: "/session-lifecycle".to_string(),

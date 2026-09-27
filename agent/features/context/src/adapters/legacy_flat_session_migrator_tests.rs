@@ -4,7 +4,7 @@ use crate::domain::session::{CanonicalSession, SessionCodec, SessionMetadata, Sn
 use crate::ports::{SessionManagementPort, SessionSnapshotStore};
 use share::session_types::{PersistedWorkspaceContext, ProjectIdentityData};
 use std::sync::Arc;
-use storage::{file_system_blob, AtomicBlobPort, StorageNamespace};
+use storage::{wire_file_system_blob, AtomicBlobPort, StorageNamespaceData};
 
 fn captured_session(id: &str, common_dir: &str) -> CanonicalSession {
     let identity = ProjectIdentityData {
@@ -48,7 +48,7 @@ fn temp_blob() -> Arc<dyn AtomicBlobPort> {
         std::thread::sleep(std::time::Duration::from_secs(120));
         let _ = std::fs::remove_dir_all(&root_clone);
     });
-    file_system_blob(&root).expect("blob adapter init")
+    wire_file_system_blob(&root).expect("blob adapter init")
 }
 
 /// 以旧版 `<id>.json` 平铺形态写入一个 session。
@@ -96,7 +96,10 @@ async fn bare_id_flat_sessions_move_into_project_dirs_and_become_listable() {
         }
     );
 
-    let entries = blob.list_primary(StorageNamespace::Session).await.unwrap();
+    let entries = blob
+        .list_primary(StorageNamespaceData::Session)
+        .await
+        .unwrap();
     assert!(
         entries
             .iter()
@@ -132,7 +135,10 @@ async fn flat_json_sessions_move_into_project_dirs_and_become_listable() {
     );
 
     // 平铺文件消失；本项目目录里能列出对应 session。
-    let entries = blob.list_primary(StorageNamespace::Session).await.unwrap();
+    let entries = blob
+        .list_primary(StorageNamespaceData::Session)
+        .await
+        .unwrap();
     assert!(
         entries
             .iter()

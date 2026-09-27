@@ -3,7 +3,7 @@
 //! These tests prove:
 //!
 //! 1. **Real Memory opener uses project/config** — the production wiring
-//!    constructs `DatasetMemoryOpener` with `storage::file_system_dataset` +
+//!    constructs `DatasetMemoryOpener` with `storage::wire_file_system_dataset` +
 //!    `FileLegacyMemorySourceFactory`, eager-opens memory from the workspace
 //!    `ProjectIdentityData` + committed `MemoryConfig`, and the resulting
 //!    `MemoryPort` is filesystem-backed (writes persist).
@@ -100,14 +100,14 @@ async fn wire_config_with_agents_dir(
 
 fn config_native_store(agents_dir: &Path) -> config::NativeConfigStore {
     config::wire_config_override_store(
-        storage::file_system_blob(agents_dir.join("config-overrides"))
+        storage::wire_file_system_blob(agents_dir.join("config-overrides"))
             .expect("create config override blob"),
     )
 }
 
 fn session_management(agents_dir: &Path) -> Arc<dyn SessionManagementPort> {
     Arc::new(context::AtomicBlobSessionManagement::new(
-        storage::file_system_blob(agents_dir).expect("create session blob"),
+        storage::wire_file_system_blob(agents_dir).expect("create session blob"),
     ))
 }
 
@@ -134,24 +134,24 @@ fn production_runtime_has_no_direct_active_memory_construction() {
     );
 
     // #1385: reflection history adapter root is agents_dir, not
-    // agents_dir.join("memory"). StorageNamespace::Memory already adds the
+    // agents_dir.join("memory"). StorageNamespaceData::Memory already adds the
     // "memory" segment; an explicit join produces memory/memory/...
     let reflection_adapter_new = source
-        .match_indices("storage::file_system_dataset(")
+        .match_indices("storage::wire_file_system_dataset(")
         .collect::<Vec<_>>();
     assert_eq!(
         reflection_adapter_new.len(),
         3,
         "production runtime must construct exactly 3 dataset adapters: one for reflection, one for Session, and one for MemoryOpener"
     );
-    // Verify neither uses `join("memory")` for file_system_dataset.
+    // Verify neither uses `join("memory")` for wire_file_system_dataset.
     // Legacy memory uses `agents_dir.join("memory")` via
-    // FileLegacyMemorySourceFactory, not via file_system_dataset.
+    // FileLegacyMemorySourceFactory, not via wire_file_system_dataset.
     for (idx, _) in &reflection_adapter_new {
         let line = source[*idx..].lines().next().unwrap_or("");
         assert!(
             !line.contains(r#"join("memory")"#),
-            "file_system_dataset must not use join(\"memory\") — \
+            "wire_file_system_dataset must not use join(\"memory\") — \
              namespace adds the segment; found: {line}"
         );
     }
@@ -185,7 +185,7 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
 
     // Construct the same production opener that Composition uses.
     let dataset_adapter =
-        storage::file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
+        storage::wire_file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
     let legacy_factory = Arc::new(memory::FileLegacyMemorySourceFactory::new(
         agents_dir.join("memory"),
     ));
@@ -253,16 +253,16 @@ async fn production_context_append_reopens_from_atomic_blob() {
             .expect("wire config");
     let task_wiring = task::wire_task();
     let dataset_adapter =
-        storage::file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
+        storage::wire_file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
     let memory_opener = Box::new(memory::DatasetMemoryOpener::new(
         dataset_adapter,
         Arc::new(memory::FileLegacyMemorySourceFactory::new(
             agents_dir.join("memory"),
         )),
     ));
-    let session_blob = storage::file_system_blob(&agents_dir).expect("create session blob");
-    let session_dataset =
-        storage::file_system_dataset(agents_dir.clone()).expect("create session dataset adapter");
+    let session_blob = storage::wire_file_system_blob(&agents_dir).expect("create session blob");
+    let session_dataset = storage::wire_file_system_dataset(agents_dir.clone())
+        .expect("create session dataset adapter");
     let session_management: Arc<dyn SessionManagementPort> = Arc::new(
         context::DatasetSessionManagement::new(session_dataset.clone(), session_blob.clone()),
     );
@@ -359,7 +359,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
 
     // Construct the same production opener that Composition uses.
     let dataset_adapter =
-        storage::file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
+        storage::wire_file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
     let legacy_factory = Arc::new(memory::FileLegacyMemorySourceFactory::new(
         agents_dir.join("memory"),
     ));
@@ -400,7 +400,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
     let skill_wiring = tools::composition::wire_skills();
     let tool_result_materializer = Arc::new(runtime::ToolResultMaterializer::new(
         Arc::new(runtime::AtomicBlobToolResultStore::new(
-            storage::file_system_blob(temp.path()).expect("tool result blob"),
+            storage::wire_file_system_blob(temp.path()).expect("tool result blob"),
             temp.path().to_path_buf(),
         )),
         runtime::ToolResultMaterializationPolicy::new(50_000, 2_000, 500),
@@ -548,7 +548,7 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
     let task_wiring = task::wire_task();
 
     let dataset_adapter =
-        storage::file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
+        storage::wire_file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
     let legacy_factory = Arc::new(memory::FileLegacyMemorySourceFactory::new(
         agents_dir.join("memory"),
     ));

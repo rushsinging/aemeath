@@ -214,7 +214,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     let temp = tempfile::tempdir().unwrap();
     let config = config::wire_project_config(
         temp.path(),
-        config::wire_config_override_store(storage::file_system_blob(temp.path()).unwrap()),
+        config::wire_config_override_store(storage::wire_file_system_blob(temp.path()).unwrap()),
     )
     .await
     .unwrap();
@@ -222,7 +222,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     let task = task::wire_task();
     let access = task.access();
     let memory_opener = Box::new(memory::DatasetMemoryOpener::new(
-        storage::file_system_dataset(temp.path()).unwrap(),
+        storage::wire_file_system_dataset(temp.path()).unwrap(),
         Arc::new(memory::FileLegacyMemorySourceFactory::new(temp.path())),
     ));
     let session_management: Arc<dyn context::SessionManagementPort> =
@@ -247,7 +247,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     let skill_catalog = skill_wiring.catalog();
     let tool_result_materializer = Arc::new(runtime::ToolResultMaterializer::new(
         Arc::new(runtime::AtomicBlobToolResultStore::new(
-            storage::file_system_blob(temp.path()).unwrap(),
+            storage::wire_file_system_blob(temp.path()).unwrap(),
             temp.path().to_path_buf(),
         )),
         runtime::ToolResultMaterializationPolicy::new(50_000, 2_000, 500),

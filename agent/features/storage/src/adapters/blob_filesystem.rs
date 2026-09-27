@@ -1,3 +1,4 @@
+use crate::domain::PreviousPolicy;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -12,11 +13,11 @@ use super::blob_protocol::{
     digest, digest_file, journal_name, read_journal, write_journal, BlobJournal, JournalPhase,
 };
 use crate::{
-    AtomicBlobPort, BlobRead, CorruptTransactionError, CorruptionReason, DeleteOptions,
-    DeleteOutcome, Durability, Generation, PreviousPolicy, PromoteOutcome, QuarantineDisposition,
-    QuarantineOutcome, QuarantineReason, QuarantineReceipt, ReadOutcome, SafePathSegment,
-    StorageEntry, StorageError, StorageErrorKind, StorageKey, StorageNamespace, TransactionScope,
-    WriteOptions, WriteReceipt,
+    AtomicBlobPort, BlobReadData, CorruptTransactionError, CorruptionReason, DeleteOptionsData,
+    DeleteOutcomeData, DurabilityData, GenerationData, PromoteOutcomeData, QuarantineDisposition,
+    QuarantineOutcomeData, QuarantineReason, QuarantineReceiptData, ReadOutcomeData,
+    SafePathSegmentData, StorageEntryData, StorageError, StorageErrorKind, StorageKeyData,
+    StorageNamespaceData, TransactionScopeData, WriteOptionsData, WriteReceiptData,
 };
 
 #[derive(Debug)]
@@ -82,7 +83,7 @@ impl FileSystemBlobAdapter {
         Ok(Self { root })
     }
 
-    fn relative_primary(key: &StorageKey) -> PathBuf {
+    fn relative_primary(key: &StorageKeyData) -> PathBuf {
         key.segments()
             .iter()
             .fold(PathBuf::from(key.namespace().as_str()), |path, segment| {
@@ -90,7 +91,7 @@ impl FileSystemBlobAdapter {
             })
     }
 
-    fn prepare_parent(&self, key: &StorageKey) -> Result<(Dir, PathBuf), StorageError> {
+    fn prepare_parent(&self, key: &StorageKeyData) -> Result<(Dir, PathBuf), StorageError> {
         let primary = Self::relative_primary(key);
         let parent = primary
             .parent()
@@ -129,7 +130,7 @@ impl FileSystemBlobAdapter {
 
     fn prepare_locked(
         &self,
-        key: &StorageKey,
+        key: &StorageKeyData,
     ) -> Result<(Dir, PathBuf, std::fs::File), StorageError> {
         let (parent, primary_name) = self.prepare_parent(key)?;
         let lock = self.lock_key(&parent, &primary_name)?;
@@ -150,8 +151,8 @@ impl FileSystemBlobAdapter {
 
     fn list_primary_sync(
         &self,
-        namespace: StorageNamespace,
-    ) -> Result<Vec<StorageEntry>, StorageError> {
+        namespace: StorageNamespaceData,
+    ) -> Result<Vec<StorageEntryData>, StorageError> {
         let namespace_path = Path::new(namespace.as_str());
         let namespace_dir = match self.root.open_dir(namespace_path) {
             Ok(directory) => directory,
@@ -174,9 +175,9 @@ impl FileSystemBlobAdapter {
     /// 布局依赖此行为）；协议工件与符号链接的排除规则与平铺一致。
     fn collect_primary_entries(
         directory: &Dir,
-        namespace: StorageNamespace,
-        prefix_segments: &mut Vec<SafePathSegment>,
-        entries: &mut Vec<StorageEntry>,
+        namespace: StorageNamespaceData,
+        prefix_segments: &mut Vec<SafePathSegmentData>,
+        entries: &mut Vec<StorageEntryData>,
     ) -> Result<(), StorageError> {
         for entry in directory.entries().map_err(map_io)? {
             let entry = entry.map_err(map_io)?;
@@ -184,7 +185,7 @@ impl FileSystemBlobAdapter {
             if Self::is_protocol_artifact(&raw_name) {
                 continue;
             }
-            let segment = match SafePathSegment::from_str(&raw_name) {
+            let segment = match SafePathSegmentData::from_str(&raw_name) {
                 Ok(segment) => segment,
                 Err(_) => continue,
             };
@@ -197,9 +198,9 @@ impl FileSystemBlobAdapter {
             }
             if metadata.file_type().is_file() {
                 prefix_segments.push(segment);
-                let key = StorageKey::new(namespace, prefix_segments.clone())?;
+                let key = StorageKeyData::new(namespace, prefix_segments.clone())?;
                 prefix_segments.pop();
-                entries.push(StorageEntry::new(key, metadata.len() as usize));
+                entries.push(StorageEntryData::new(key, metadata.len() as usize));
             } else {
                 let child = directory
                     .open_dir(Path::new(segment.as_str()))
@@ -263,7 +264,7 @@ impl FileSystemBlobAdapter {
         parent
             .remove_file(journal_name(primary_name))
             .map_err(map_io)?;
-        sync_directory(parent, Durability::ProcessCrashSafe)
+        sync_directory(parent, DurabilityData::ProcessCrashSafe)
     }
 
     fn recover_orphan_previous(
@@ -277,7 +278,7 @@ impl FileSystemBlobAdapter {
         };
         if digest_file(parent, primary_name)?.as_deref() == Some(orphan_digest.as_str()) {
             parent.remove_file(&previous_next).map_err(map_io)?;
-            return sync_directory(parent, Durability::ProcessCrashSafe);
+            return sync_directory(parent, DurabilityData::ProcessCrashSafe);
         }
         let journal = BlobJournal {
             nonce: "orphan".to_string(),
@@ -330,10 +331,10 @@ impl FileSystemBlobAdapter {
                 disposition = QuarantineDisposition::QuarantineFailed;
             }
         }
-        let _ = sync_directory(parent, Durability::ProcessCrashSafe);
+        let _ = sync_directory(parent, DurabilityData::ProcessCrashSafe);
         StorageError::new(
             StorageErrorKind::CorruptTransaction(CorruptTransactionError::new(
-                TransactionScope::Blob,
+                TransactionScopeData::Blob,
                 reason,
                 disposition,
             )),
@@ -343,10 +344,10 @@ impl FileSystemBlobAdapter {
 
     fn write_sync(
         &self,
-        key: &StorageKey,
+        key: &StorageKeyData,
         bytes: &[u8],
-        options: WriteOptions,
-    ) -> Result<WriteReceipt, StorageError> {
+        options: WriteOptionsData,
+    ) -> Result<WriteReceiptData, StorageError> {
         let durability = key.namespace().effective_durability(options.durability());
         let (parent, primary_name, _lock) = self.prepare_locked(key)?;
         if let Ok(metadata) = parent.symlink_metadata(&primary_name) {
@@ -367,7 +368,7 @@ impl FileSystemBlobAdapter {
             let mut stage = parent.open_with(&stage_name, &options).map_err(map_io)?;
             stage.write_all(bytes).map_err(map_io)?;
             inject_fault(FaultPoint::StageWrite)?;
-            if durability == Durability::ProcessCrashSafe {
+            if durability == DurabilityData::ProcessCrashSafe {
                 inject_fault(FaultPoint::UnsupportedDurability)?;
                 stage.sync_all().map_err(map_durability)?;
                 inject_fault(FaultPoint::FileSync)?;
@@ -401,7 +402,7 @@ impl FileSystemBlobAdapter {
                     .hard_link(&primary_name, &parent, &previous_next_name)
                     .map_err(map_io)?;
                 inject_fault(FaultPoint::PreviousNext)?;
-                if durability == Durability::ProcessCrashSafe {
+                if durability == DurabilityData::ProcessCrashSafe {
                     let previous_next = parent.open(&previous_next_name).map_err(map_io)?;
                     previous_next.sync_all().map_err(map_durability)?;
                 }
@@ -409,7 +410,7 @@ impl FileSystemBlobAdapter {
                     &parent,
                     &primary_name,
                     &journal,
-                    durability == Durability::ProcessCrashSafe,
+                    durability == DurabilityData::ProcessCrashSafe,
                 )?;
                 inject_fault(FaultPoint::PreparedJournal)?;
                 sync_directory(&parent, durability)?;
@@ -437,7 +438,7 @@ impl FileSystemBlobAdapter {
                     &parent,
                     &primary_name,
                     &journal,
-                    durability == Durability::ProcessCrashSafe,
+                    durability == DurabilityData::ProcessCrashSafe,
                 )?;
                 inject_fault(FaultPoint::PreparedJournal)?;
                 sync_directory(&parent, durability)?;
@@ -457,7 +458,7 @@ impl FileSystemBlobAdapter {
                 &parent,
                 &primary_name,
                 &committed,
-                durability == Durability::ProcessCrashSafe,
+                durability == DurabilityData::ProcessCrashSafe,
             )?;
             inject_fault(FaultPoint::CommittedJournal)?;
             let _ = parent.remove_file(promoted_marker_name(&primary_name));
@@ -467,7 +468,7 @@ impl FileSystemBlobAdapter {
                 .map_err(map_io)?;
             inject_fault(FaultPoint::Cleanup)?;
             sync_directory(&parent, durability)?;
-            Ok(WriteReceipt::committed(None))
+            Ok(WriteReceiptData::committed(None))
         })();
         match result {
             Ok(receipt) => Ok(receipt),
@@ -490,8 +491,8 @@ impl FileSystemBlobAdapter {
                         target: crate::LOG_TARGET,
                         "blob_write recovery_pending journal_cleanup_pending"
                     );
-                    Ok(WriteReceipt::committed(Some(
-                        crate::CommitWarning::JournalCleanupPending,
+                    Ok(WriteReceiptData::committed(Some(
+                        crate::CommitWarningData::JournalCleanupPending,
                     )))
                 } else {
                     Err(error)
@@ -505,18 +506,18 @@ impl FileSystemBlobAdapter {
 impl AtomicBlobPort for FileSystemBlobAdapter {
     async fn read(
         &self,
-        key: &StorageKey,
-        generation: Generation,
-    ) -> Result<ReadOutcome, StorageError> {
+        key: &StorageKeyData,
+        generation: GenerationData,
+    ) -> Result<ReadOutcomeData, StorageError> {
         let (parent, primary_name, _lock) = self.prepare_locked(key)?;
         let relative = match generation {
-            Generation::Primary => primary_name,
-            Generation::Previous => primary_name.with_extension("previous"),
+            GenerationData::Primary => primary_name,
+            GenerationData::Previous => primary_name.with_extension("previous"),
         };
         let metadata = match parent.symlink_metadata(&relative) {
             Ok(metadata) => metadata,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(ReadOutcome::NotFound);
+                return Ok(ReadOutcomeData::NotFound);
             }
             Err(error) => return Err(map_io(error)),
         };
@@ -529,19 +530,22 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
         let mut file = parent.open(&relative).map_err(map_io)?;
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes).map_err(map_io)?;
-        Ok(ReadOutcome::Found(BlobRead::new(generation, bytes)))
+        Ok(ReadOutcomeData::Found(BlobReadData::new(generation, bytes)))
     }
 
     async fn write_atomic(
         &self,
-        key: &StorageKey,
+        key: &StorageKeyData,
         bytes: &[u8],
-        options: WriteOptions,
-    ) -> Result<WriteReceipt, StorageError> {
+        options: WriteOptionsData,
+    ) -> Result<WriteReceiptData, StorageError> {
         self.write_sync(key, bytes, options)
     }
 
-    async fn promote_previous(&self, key: &StorageKey) -> Result<PromoteOutcome, StorageError> {
+    async fn promote_previous(
+        &self,
+        key: &StorageKeyData,
+    ) -> Result<PromoteOutcomeData, StorageError> {
         let (parent, primary_name, _lock) = self.prepare_locked(key)?;
         let previous_name = primary_name.with_extension("previous");
         match parent.symlink_metadata(&previous_name) {
@@ -551,9 +555,9 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
                     .is_ok()
                     && parent.symlink_metadata(&primary_name).is_ok()
                 {
-                    return Ok(PromoteOutcome::AlreadyPromoted);
+                    return Ok(PromoteOutcomeData::AlreadyPromoted);
                 }
-                return Ok(PromoteOutcome::NotFound);
+                return Ok(PromoteOutcomeData::NotFound);
             }
             Err(error) => return Err(map_io(error)),
             Ok(metadata) if metadata.file_type().is_symlink() => {
@@ -581,25 +585,29 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
             .rename(&previous_name, &parent, &primary_name)
             .map_err(map_io)?;
         write_promoted_marker(&parent, &primary_name)?;
-        sync_directory(&parent, Durability::ProcessCrashSafe)?;
-        Ok(PromoteOutcome::Promoted(WriteReceipt::committed(None)))
+        sync_directory(&parent, DurabilityData::ProcessCrashSafe)?;
+        Ok(PromoteOutcomeData::Promoted(WriteReceiptData::committed(
+            None,
+        )))
     }
 
     async fn quarantine(
         &self,
-        key: &StorageKey,
-        generation: Generation,
-        scope: TransactionScope,
+        key: &StorageKeyData,
+        generation: GenerationData,
+        scope: TransactionScopeData,
         reason: QuarantineReason,
-    ) -> Result<QuarantineOutcome, StorageError> {
+    ) -> Result<QuarantineOutcomeData, StorageError> {
         let (parent, primary_name, _lock) = self.prepare_locked(key)?;
         let source = match generation {
-            Generation::Primary => primary_name.clone(),
-            Generation::Previous => primary_name.with_extension("previous"),
+            GenerationData::Primary => primary_name.clone(),
+            GenerationData::Previous => primary_name.with_extension("previous"),
         };
         match parent.symlink_metadata(&source) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(QuarantineOutcome::already_absent(generation, scope, reason));
+                return Ok(QuarantineOutcomeData::already_absent(
+                    generation, scope, reason,
+                ));
             }
             Err(error) => return Err(map_io(error)),
             Ok(metadata) if metadata.file_type().is_symlink() => {
@@ -611,19 +619,19 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
             Ok(_) => {}
         }
 
-        let id = SafePathSegment::from_str(&Uuid::new_v4().simple().to_string())?;
+        let id = SafePathSegmentData::from_str(&Uuid::new_v4().simple().to_string())?;
         let target = quarantine_name(&primary_name, id.as_str());
         parent.rename(&source, &parent, target).map_err(map_io)?;
-        Ok(QuarantineOutcome::Moved(QuarantineReceipt::new(
+        Ok(QuarantineOutcomeData::Moved(QuarantineReceiptData::new(
             id, generation, scope, reason,
         )))
     }
 
     async fn delete_all_generations(
         &self,
-        key: &StorageKey,
-        options: DeleteOptions,
-    ) -> Result<DeleteOutcome, StorageError> {
+        key: &StorageKeyData,
+        options: DeleteOptionsData,
+    ) -> Result<DeleteOutcomeData, StorageError> {
         let (parent, primary_name, _lock) = self.prepare_locked(key)?;
         let deleted_primary = remove_if_exists(&parent, &primary_name)?;
         let deleted_previous = remove_if_exists(&parent, &primary_name.with_extension("previous"))?;
@@ -640,7 +648,7 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
             }
         }
         let _ = parent.remove_file(promoted_marker_name(&primary_name));
-        Ok(DeleteOutcome::new(
+        Ok(DeleteOutcomeData::new(
             deleted_primary,
             deleted_previous,
             deleted_quarantine,
@@ -649,8 +657,8 @@ impl AtomicBlobPort for FileSystemBlobAdapter {
 
     async fn list_primary(
         &self,
-        namespace: StorageNamespace,
-    ) -> Result<Vec<StorageEntry>, StorageError> {
+        namespace: StorageNamespaceData,
+    ) -> Result<Vec<StorageEntryData>, StorageError> {
         self.list_primary_sync(namespace)
     }
 }
@@ -684,8 +692,8 @@ fn read_and_digest(parent: &Dir, path: &Path) -> Result<String, StorageError> {
     Ok(digest(&bytes))
 }
 
-fn sync_directory(parent: &Dir, durability: Durability) -> Result<(), StorageError> {
-    if durability == Durability::ProcessCrashSafe {
+fn sync_directory(parent: &Dir, durability: DurabilityData) -> Result<(), StorageError> {
+    if durability == DurabilityData::ProcessCrashSafe {
         let mut directory_options = OpenOptions::new();
         directory_options.read(true);
         parent
@@ -699,7 +707,7 @@ fn sync_directory(parent: &Dir, durability: Durability) -> Result<(), StorageErr
 fn quarantine_name(primary: &Path, id: &str) -> PathBuf {
     let name = primary
         .file_name()
-        .expect("validated StorageKey always has a file name")
+        .expect("validated StorageKeyData always has a file name")
         .to_string_lossy();
     PathBuf::from(format!("{name}.quarantine.{id}"))
 }

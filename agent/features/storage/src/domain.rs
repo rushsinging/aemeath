@@ -9,22 +9,23 @@ mod safe_path;
 mod tests;
 
 pub use atomic_blob::{
-    BlobRead, CommitWarning, DeleteOptions, DeleteOutcome, Generation, PromoteOutcome,
-    QuarantineOutcome, QuarantineReason, QuarantineReceipt, ReadOutcome, StorageEntry,
-    TransactionScope, WriteOptions, WriteReceipt,
+    BlobReadData, CommitWarningData, DeleteOptionsData, DeleteOutcomeData, GenerationData,
+    PromoteOutcomeData, QuarantineOutcomeData, QuarantineReason, QuarantineReceiptData,
+    ReadOutcomeData, StorageEntryData, TransactionScopeData, WriteOptionsData, WriteReceiptData,
 };
 pub(crate) use atomic_dataset::revision_member_digest;
 pub use atomic_dataset::{
-    DatasetChangeSet, DatasetCommitReceipt, DatasetCommitVisibility, DatasetKey, DatasetManifest,
-    DatasetMember, DatasetMemberChange, DatasetMemberReference, DatasetRead, DatasetReadOutcome,
-    DatasetRevision,
+    DatasetChangeSetData, DatasetCommitReceiptData, DatasetCommitVisibilityData, DatasetKeyData,
+    DatasetManifestData, DatasetMemberChangeData, DatasetMemberData, DatasetMemberReferenceData,
+    DatasetReadData, DatasetReadOutcomeData, DatasetRevisionData,
 };
 #[cfg_attr(not(test), allow(unused_imports))]
 pub use blob_recovery::{
     decide_blob_recovery, decide_orphan_previous, CorruptTransactionError, CorruptionReason,
     DigestObservation, JournalPhase, QuarantineDisposition, RecoveryDecision, TransactionDigest,
 };
+pub(crate) use published_language::PreviousPolicy;
 pub use published_language::{
-    Durability, PreviousPolicy, StorageError, StorageErrorKind, StorageKey, StorageNamespace,
+    DurabilityData, StorageError, StorageErrorKind, StorageKeyData, StorageNamespaceData,
 };
-pub use safe_path::SafePathSegment;
+pub use safe_path::SafePathSegmentData;

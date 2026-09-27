@@ -2,23 +2,24 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use storage::{
-    AtomicBlobPort, Durability, Generation, PromoteOutcome, QuarantineReason, ReadOutcome,
-    SafePathSegment, StorageKey, StorageNamespace, TransactionScope, WriteOptions,
+    AtomicBlobPort, DurabilityData, GenerationData, PromoteOutcomeData, QuarantineReason,
+    ReadOutcomeData, SafePathSegmentData, StorageKeyData, StorageNamespaceData,
+    TransactionScopeData, WriteOptionsData,
 };
 
 use crate::ports::{SessionGeneration, SessionSnapshotStore, SessionStoreError};
 
 pub struct AtomicBlobSessionStore {
     blob: Arc<dyn AtomicBlobPort>,
-    key: StorageKey,
+    key: StorageKeyData,
 }
 
 impl AtomicBlobSessionStore {
     pub fn new(blob: Arc<dyn AtomicBlobPort>, session_id: &str) -> Result<Self, SessionStoreError> {
         let segment = session_id
-            .parse::<SafePathSegment>()
+            .parse::<SafePathSegmentData>()
             .map_err(|error| SessionStoreError(error.to_string()))?;
-        let key = StorageKey::new(StorageNamespace::Session, vec![segment])
+        let key = StorageKeyData::new(StorageNamespaceData::Session, vec![segment])
             .map_err(|error| SessionStoreError(error.to_string()))?;
         Ok(Self { blob, key })
     }
@@ -26,14 +27,14 @@ impl AtomicBlobSessionStore {
     /// 按 project 分目录的 store：key 为 `<project-dir>/<session-id>`。
     pub fn new_scoped(
         blob: Arc<dyn AtomicBlobPort>,
-        project_dir: &SafePathSegment,
+        project_dir: &SafePathSegmentData,
         session_id: &str,
     ) -> Result<Self, SessionStoreError> {
         let segment = session_id
-            .parse::<SafePathSegment>()
+            .parse::<SafePathSegmentData>()
             .map_err(|error| SessionStoreError(error.to_string()))?;
-        let key = StorageKey::new(
-            StorageNamespace::Session,
+        let key = StorageKeyData::new(
+            StorageNamespaceData::Session,
             vec![project_dir.clone(), segment],
         )
         .map_err(|error| SessionStoreError(error.to_string()))?;
@@ -49,25 +50,25 @@ impl AtomicBlobSessionStore {
             .into_iter()
             .map(|segment| {
                 segment
-                    .parse::<SafePathSegment>()
+                    .parse::<SafePathSegmentData>()
                     .map_err(|error| SessionStoreError(error.to_string()))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let key = StorageKey::new(StorageNamespace::Session, segments)
+        let key = StorageKeyData::new(StorageNamespaceData::Session, segments)
             .map_err(|error| SessionStoreError(error.to_string()))?;
         Ok(Self { blob, key })
     }
 
-    fn storage_generation(generation: SessionGeneration) -> Generation {
+    fn storage_generation(generation: SessionGeneration) -> GenerationData {
         match generation {
-            SessionGeneration::Primary => Generation::Primary,
-            SessionGeneration::Previous => Generation::Previous,
+            SessionGeneration::Primary => GenerationData::Primary,
+            SessionGeneration::Previous => GenerationData::Previous,
         }
     }
 
-    pub async fn delete_all(&self) -> Result<storage::DeleteOutcome, SessionStoreError> {
+    pub async fn delete_all(&self) -> Result<storage::DeleteOutcomeData, SessionStoreError> {
         self.blob
-            .delete_all_generations(&self.key, storage::DeleteOptions::default())
+            .delete_all_generations(&self.key, storage::DeleteOptionsData::default())
             .await
             .map_err(|error| SessionStoreError(error.to_string()))
     }
@@ -85,8 +86,8 @@ impl SessionSnapshotStore for AtomicBlobSessionStore {
             .await
             .map_err(|error| SessionStoreError(error.to_string()))?
         {
-            ReadOutcome::Found(read) => Ok(Some(read.bytes().to_vec())),
-            ReadOutcome::NotFound => Ok(None),
+            ReadOutcomeData::Found(read) => Ok(Some(read.bytes().to_vec())),
+            ReadOutcomeData::NotFound => Ok(None),
         }
     }
 
@@ -95,7 +96,7 @@ impl SessionSnapshotStore for AtomicBlobSessionStore {
             .write_atomic(
                 &self.key,
                 bytes,
-                WriteOptions::new(Durability::ProcessCrashSafe),
+                WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
             )
             .await
             .map_err(|error| SessionStoreError(error.to_string()))?;
@@ -109,8 +110,8 @@ impl SessionSnapshotStore for AtomicBlobSessionStore {
             .await
             .map_err(|error| SessionStoreError(error.to_string()))?
         {
-            PromoteOutcome::Promoted(_) | PromoteOutcome::AlreadyPromoted => Ok(()),
-            PromoteOutcome::NotFound => Err(SessionStoreError(
+            PromoteOutcomeData::Promoted(_) | PromoteOutcomeData::AlreadyPromoted => Ok(()),
+            PromoteOutcomeData::NotFound => Err(SessionStoreError(
                 "previous Session generation not found".into(),
             )),
         }
@@ -121,7 +122,7 @@ impl SessionSnapshotStore for AtomicBlobSessionStore {
             .quarantine(
                 &self.key,
                 Self::storage_generation(generation),
-                TransactionScope::Blob,
+                TransactionScopeData::Blob,
                 QuarantineReason::DecoderRejected,
             )
             .await

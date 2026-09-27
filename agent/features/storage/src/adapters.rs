@@ -7,6 +7,7 @@ mod safe_storage_root;
 
 pub use blob_filesystem::FileSystemBlobAdapter;
 pub use dataset_filesystem::FileSystemDatasetAdapter;
+pub use safe_storage_root::SafeStorageEntryData;
 pub use safe_storage_root::{
     SafeOpenOptions, SafeStorageDir, SafeStorageFileType, SafeStorageRoot,
 };

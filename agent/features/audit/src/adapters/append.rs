@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use sdk::SessionId;
-use storage::{SafeOpenOptions, SafePathSegment, SafeStorageFileType, SafeStorageRoot};
+use storage::{SafeOpenOptions, SafePathSegmentData, SafeStorageFileType, SafeStorageRoot};
 
 use crate::ports::{
     AppendLogError, AppendLogLine, AppendLogNamespace, AppendLogReader, AppendLogStream,
@@ -52,15 +52,15 @@ impl FileUsageAppendStore {
     }
 
     fn usage_dir(&self) -> Result<storage::SafeStorageDir, AppendLogError> {
-        let namespace = SafePathSegment::from_str(USAGE_NAMESPACE)
+        let namespace = SafePathSegmentData::from_str(USAGE_NAMESPACE)
             .map_err(|_| AppendLogError::InvalidNamespace)?;
         self.root
             .ensure_dir(&[namespace])
             .map_err(|_| AppendLogError::Io)
     }
 
-    fn stream_file_name(stream: &AppendLogStream) -> Result<SafePathSegment, AppendLogError> {
-        SafePathSegment::from_str(&format!("{}{JSONL_SUFFIX}", stream.as_str()))
+    fn stream_file_name(stream: &AppendLogStream) -> Result<SafePathSegmentData, AppendLogError> {
+        SafePathSegmentData::from_str(&format!("{}{JSONL_SUFFIX}", stream.as_str()))
             .map_err(|_| AppendLogError::InvalidStream)
     }
 
@@ -165,7 +165,7 @@ impl FileUsageAppendStore {
             let Some(stream) = entry.name().as_str().strip_suffix(JSONL_SUFFIX) else {
                 continue;
             };
-            if SafePathSegment::from_str(stream).is_ok() {
+            if SafePathSegmentData::from_str(stream).is_ok() {
                 streams.push(AppendLogStream::new(stream.to_string()));
             }
         }

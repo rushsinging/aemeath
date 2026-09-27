@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use storage::{AtomicBlobPort, AtomicDatasetPort, SafePathSegment, StorageNamespace};
+use storage::{AtomicBlobPort, AtomicDatasetPort, SafePathSegmentData, StorageNamespaceData};
 
 use crate::adapters::{
     AtomicBlobSessionManagement, DatasetCanonicalSessionWriter, DatasetSessionReader,
@@ -39,7 +39,7 @@ impl DatasetSessionManagement {
     }
     async fn load_canonical(
         &self,
-        project_dir: Option<&SafePathSegment>,
+        project_dir: Option<&SafePathSegmentData>,
         id: &str,
     ) -> Result<CanonicalSession, SessionManagementError> {
         self.reader
@@ -122,7 +122,7 @@ impl SessionManagementPort for DatasetSessionManagement {
         let project_dir = project_dir_segment(project);
         let dataset_keys = self
             .dataset
-            .list_datasets(StorageNamespace::Session)
+            .list_datasets(StorageNamespaceData::Session)
             .await
             .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
         let mut sessions = Vec::new();
@@ -217,7 +217,7 @@ impl SessionManagementPort for DatasetSessionManagement {
             .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
         let outcome = self
             .dataset
-            .delete_all_generations(&dataset_key, storage::DeleteOptions::default())
+            .delete_all_generations(&dataset_key, storage::DeleteOptionsData::default())
             .await
             .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
         let legacy_outcome = self.legacy.delete_for_project(id, project).await.err();

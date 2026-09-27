@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use storage::{AtomicBlobPort, SafePathSegment, StorageNamespace};
+use storage::{AtomicBlobPort, SafePathSegmentData, StorageNamespaceData};
 
 use crate::adapters::{AtomicBlobSessionStore, LegacySessionDecoder};
 use crate::application::{SessionLoadError, SessionPersistenceService};
@@ -28,7 +28,7 @@ impl AtomicBlobSessionManagement {
 
     fn store_scoped(
         &self,
-        project_dir: &SafePathSegment,
+        project_dir: &SafePathSegmentData,
         id: &str,
     ) -> Result<Arc<AtomicBlobSessionStore>, SessionManagementError> {
         AtomicBlobSessionStore::new_scoped(Arc::clone(&self.blob), project_dir, id)
@@ -47,7 +47,7 @@ impl AtomicBlobSessionManagement {
     /// 后缀（更早版本布局）。逐候选探测，第一个成功者胜出。
     async fn load_canonical(
         &self,
-        project_dir: Option<&SafePathSegment>,
+        project_dir: Option<&SafePathSegmentData>,
         id: &str,
     ) -> Result<CanonicalSession, SessionManagementError> {
         let mut candidates: Vec<Arc<AtomicBlobSessionStore>> = Vec::new();
@@ -124,7 +124,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
         let project_dir = project_dir_segment(project);
         let entries = self
             .blob
-            .list_primary(StorageNamespace::Session)
+            .list_primary(StorageNamespaceData::Session)
             .await
             .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
         let mut sessions = Vec::new();

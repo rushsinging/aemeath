@@ -5,7 +5,7 @@ use std::sync::Arc;
 use cap_std::ambient_authority;
 use cap_std::fs::{Dir, OpenOptions};
 
-use crate::{SafePathSegment, StorageError, StorageErrorKind};
+use crate::{SafePathSegmentData, StorageError, StorageErrorKind};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SafeStorageFileType {
@@ -14,13 +14,13 @@ pub enum SafeStorageFileType {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SafeStorageEntry {
-    name: SafePathSegment,
+pub struct SafeStorageEntryData {
+    name: SafePathSegmentData,
     file_type: SafeStorageFileType,
 }
 
-impl SafeStorageEntry {
-    pub fn name(&self) -> &SafePathSegment {
+impl SafeStorageEntryData {
+    pub fn name(&self) -> &SafePathSegmentData {
         &self.name
     }
 
@@ -47,7 +47,10 @@ impl SafeStorageRoot {
         Ok(Self { dir: Arc::new(dir) })
     }
 
-    pub fn ensure_dir(&self, segments: &[SafePathSegment]) -> Result<SafeStorageDir, StorageError> {
+    pub fn ensure_dir(
+        &self,
+        segments: &[SafePathSegmentData],
+    ) -> Result<SafeStorageDir, StorageError> {
         let mut current = self.dir.try_clone().map_err(map_io)?;
         for segment in segments {
             reject_symlink(&current, Path::new(segment.as_str()))?;
@@ -73,7 +76,7 @@ pub struct SafeStorageDir {
 impl SafeStorageDir {
     pub fn open_existing(
         &self,
-        name: &SafePathSegment,
+        name: &SafePathSegmentData,
         options: SafeOpenOptions,
     ) -> Result<std::fs::File, StorageError> {
         reject_regular_file_symlink(&self.dir, name)?;
@@ -86,7 +89,7 @@ impl SafeStorageDir {
 
     pub fn create_or_open(
         &self,
-        name: &SafePathSegment,
+        name: &SafePathSegmentData,
         options: SafeOpenOptions,
     ) -> Result<std::fs::File, StorageError> {
         reject_regular_file_symlink(&self.dir, name)?;
@@ -100,12 +103,12 @@ impl SafeStorageDir {
         Ok(file)
     }
 
-    pub fn entries(&self) -> Result<Vec<SafeStorageEntry>, StorageError> {
+    pub fn entries(&self) -> Result<Vec<SafeStorageEntryData>, StorageError> {
         let mut entries = Vec::new();
         for entry in self.dir.entries().map_err(map_io)? {
             let entry = entry.map_err(map_io)?;
             let name = entry.file_name().to_string_lossy().into_owned();
-            let Ok(name) = SafePathSegment::from_str(&name) else {
+            let Ok(name) = SafePathSegmentData::from_str(&name) else {
                 continue;
             };
             let metadata = entry.metadata().map_err(map_io)?;
@@ -120,7 +123,7 @@ impl SafeStorageDir {
             } else {
                 continue;
             };
-            entries.push(SafeStorageEntry { name, file_type });
+            entries.push(SafeStorageEntryData { name, file_type });
         }
         entries.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(entries)
@@ -136,7 +139,7 @@ fn cap_options(options: SafeOpenOptions, create: bool) -> OpenOptions {
     result
 }
 
-fn reject_regular_file_symlink(dir: &Dir, name: &SafePathSegment) -> Result<(), StorageError> {
+fn reject_regular_file_symlink(dir: &Dir, name: &SafePathSegmentData) -> Result<(), StorageError> {
     reject_symlink(dir, Path::new(name.as_str()))?;
     match dir.symlink_metadata(name.as_str()) {
         Ok(metadata) if !metadata.file_type().is_file() => Err(StorageError::new(

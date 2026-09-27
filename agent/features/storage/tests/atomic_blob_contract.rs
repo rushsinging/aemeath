@@ -2,9 +2,9 @@
 use std::os::unix::fs::symlink;
 use std::str::FromStr;
 use storage::{
-    AtomicBlobPort, DeleteOptions, Durability, Generation, PromoteOutcome, QuarantineOutcome,
-    QuarantineReason, ReadOutcome, SafePathSegment, StorageErrorKind, StorageKey, StorageNamespace,
-    TransactionScope, WriteOptions,
+    AtomicBlobPort, DeleteOptionsData, DurabilityData, GenerationData, PromoteOutcomeData,
+    QuarantineOutcomeData, QuarantineReason, ReadOutcomeData, SafePathSegmentData,
+    StorageErrorKind, StorageKeyData, StorageNamespaceData, TransactionScopeData, WriteOptionsData,
 };
 use uuid::Uuid;
 
@@ -12,10 +12,10 @@ fn unique_root(case: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("aemeath-storage-{case}-{}", Uuid::new_v4()))
 }
 
-fn key() -> StorageKey {
-    StorageKey::new(
-        StorageNamespace::Session,
-        vec![SafePathSegment::from_str("session-1").expect("valid segment")],
+fn key() -> StorageKeyData {
+    StorageKeyData::new(
+        StorageNamespaceData::Session,
+        vec![SafePathSegmentData::from_str("session-1").expect("valid segment")],
     )
     .expect("valid key")
 }
@@ -23,39 +23,47 @@ fn key() -> StorageKey {
 async fn assert_atomic_blob_contract(port: &dyn AtomicBlobPort) {
     let key = key();
     assert_eq!(
-        port.read(&key, Generation::Primary).await.unwrap(),
-        ReadOutcome::NotFound
+        port.read(&key, GenerationData::Primary).await.unwrap(),
+        ReadOutcomeData::NotFound
     );
 
     let receipt = port
-        .write_atomic(&key, b"first", WriteOptions::new(Durability::BestEffort))
+        .write_atomic(
+            &key,
+            b"first",
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
         .await
         .expect("write must commit");
     assert_eq!(receipt.warning(), None);
 
-    let ReadOutcome::Found(read) = port
-        .read(&key, Generation::Primary)
+    let ReadOutcomeData::Found(read) = port
+        .read(&key, GenerationData::Primary)
         .await
         .expect("read must succeed")
     else {
         panic!("committed primary must exist");
     };
-    assert_eq!(read.generation(), Generation::Primary);
+    assert_eq!(read.generation(), GenerationData::Primary);
     assert_eq!(read.bytes(), b"first");
 
     assert_eq!(
-        port.read(&key, Generation::Previous).await.unwrap(),
-        ReadOutcome::NotFound,
+        port.read(&key, GenerationData::Previous).await.unwrap(),
+        ReadOutcomeData::NotFound,
         "read must never fall back across generations"
     );
 
-    port.write_atomic(&key, b"second", WriteOptions::new(Durability::BestEffort))
-        .await
-        .expect("replacement must commit");
-    assert_generation(port, &key, Generation::Primary, b"second").await;
-    assert_generation(port, &key, Generation::Previous, b"first").await;
+    port.write_atomic(
+        &key,
+        b"second",
+        WriteOptionsData::new(DurabilityData::BestEffort),
+    )
+    .await
+    .expect("replacement must commit");
+    assert_generation(port, &key, GenerationData::Primary, b"second").await;
+    assert_generation(port, &key, GenerationData::Previous, b"first").await;
 
-    let PromoteOutcome::Promoted(receipt) = port
+    let PromoteOutcomeData::Promoted(receipt) = port
         .promote_previous(&key)
         .await
         .expect("promote must succeed")
@@ -63,51 +71,54 @@ async fn assert_atomic_blob_contract(port: &dyn AtomicBlobPort) {
         panic!("existing previous must be promoted");
     };
     assert_eq!(receipt.warning(), None);
-    assert_generation(port, &key, Generation::Primary, b"first").await;
+    assert_generation(port, &key, GenerationData::Primary, b"first").await;
     assert_eq!(
         port.promote_previous(&key).await.unwrap(),
-        PromoteOutcome::AlreadyPromoted
+        PromoteOutcomeData::AlreadyPromoted
     );
-    assert_generation(port, &key, Generation::Primary, b"first").await;
+    assert_generation(port, &key, GenerationData::Primary, b"first").await;
 
     let outcome = port
         .quarantine(
             &key,
-            Generation::Primary,
-            TransactionScope::Blob,
+            GenerationData::Primary,
+            TransactionScopeData::Blob,
             QuarantineReason::DecoderRejected,
         )
         .await
         .expect("quarantine must succeed");
-    assert!(matches!(outcome, QuarantineOutcome::Moved(_)));
-    assert_eq!(outcome.generation(), Generation::Primary);
-    assert_eq!(outcome.scope(), TransactionScope::Blob);
+    assert!(matches!(outcome, QuarantineOutcomeData::Moved(_)));
+    assert_eq!(outcome.generation(), GenerationData::Primary);
+    assert_eq!(outcome.scope(), TransactionScopeData::Blob);
     assert_eq!(outcome.reason(), QuarantineReason::DecoderRejected);
     assert_eq!(
-        port.read(&key, Generation::Primary).await.unwrap(),
-        ReadOutcome::NotFound
+        port.read(&key, GenerationData::Primary).await.unwrap(),
+        ReadOutcomeData::NotFound
     );
 
     let absent = port
         .quarantine(
             &key,
-            Generation::Primary,
-            TransactionScope::Blob,
+            GenerationData::Primary,
+            TransactionScopeData::Blob,
             QuarantineReason::DecoderRejected,
         )
         .await
         .unwrap();
-    assert!(matches!(absent, QuarantineOutcome::AlreadyAbsent { .. }));
+    assert!(matches!(
+        absent,
+        QuarantineOutcomeData::AlreadyAbsent { .. }
+    ));
 
     let deleted = port
-        .delete_all_generations(&key, DeleteOptions::default())
+        .delete_all_generations(&key, DeleteOptionsData::default())
         .await
         .expect("delete-all must succeed");
     assert!(!deleted.deleted_primary());
     assert!(!deleted.deleted_previous());
     assert!(deleted.deleted_quarantine());
     let repeated = port
-        .delete_all_generations(&key, DeleteOptions::default())
+        .delete_all_generations(&key, DeleteOptionsData::default())
         .await
         .unwrap();
     assert!(!repeated.deleted_primary());
@@ -117,11 +128,11 @@ async fn assert_atomic_blob_contract(port: &dyn AtomicBlobPort) {
 
 async fn assert_generation(
     port: &dyn AtomicBlobPort,
-    key: &StorageKey,
-    generation: Generation,
+    key: &StorageKeyData,
+    generation: GenerationData,
     expected: &[u8],
 ) {
-    let ReadOutcome::Found(read) = port.read(key, generation).await.unwrap() else {
+    let ReadOutcomeData::Found(read) = port.read(key, generation).await.unwrap() else {
         panic!("requested generation must exist: {generation:?}");
     };
     assert_eq!(read.generation(), generation);
@@ -153,16 +164,16 @@ async fn list_primary_hides_protocol_files_and_rejects_symlink_entries() {
     std::fs::write(&outside_file, b"outside").expect("write outside file");
     symlink(&outside_file, root.join("session/unsafe")).expect("create symlink");
 
-    let adapter = storage::file_system_blob(&root).expect("adapter root should initialize");
+    let adapter = storage::wire_file_system_blob(&root).expect("adapter root should initialize");
     let error = adapter
-        .list_primary(StorageNamespace::Session)
+        .list_primary(StorageNamespaceData::Session)
         .await
         .expect_err("symlink entry must fail closed");
     assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
     std::fs::remove_file(root.join("session/unsafe")).expect("remove symlink");
 
     let entries = adapter
-        .list_primary(StorageNamespace::Session)
+        .list_primary(StorageNamespaceData::Session)
         .await
         .expect("list primary after removing symlink");
     assert_eq!(entries.len(), 1);
@@ -175,27 +186,31 @@ async fn list_primary_hides_protocol_files_and_rejects_symlink_entries() {
 #[tokio::test]
 async fn list_primary_returns_only_top_level_primary_entries_for_namespace() {
     let root = unique_root("list-primary");
-    let adapter = storage::file_system_blob(&root).expect("adapter root should initialize");
-    let first = StorageKey::new(
-        StorageNamespace::Session,
-        vec![SafePathSegment::from_str("first").expect("valid entry")],
+    let adapter = storage::wire_file_system_blob(&root).expect("adapter root should initialize");
+    let first = StorageKeyData::new(
+        StorageNamespaceData::Session,
+        vec![SafePathSegmentData::from_str("first").expect("valid entry")],
     )
     .expect("valid first key");
-    let second = StorageKey::new(
-        StorageNamespace::Session,
-        vec![SafePathSegment::from_str("second").expect("valid entry")],
+    let second = StorageKeyData::new(
+        StorageNamespaceData::Session,
+        vec![SafePathSegmentData::from_str("second").expect("valid entry")],
     )
     .expect("valid second key");
 
     adapter
-        .write_atomic(&first, b"first", WriteOptions::new(Durability::BestEffort))
+        .write_atomic(
+            &first,
+            b"first",
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
         .await
         .expect("write first");
     adapter
         .write_atomic(
             &first,
             b"first-next",
-            WriteOptions::new(Durability::BestEffort),
+            WriteOptionsData::new(DurabilityData::BestEffort),
         )
         .await
         .expect("replace first");
@@ -203,21 +218,21 @@ async fn list_primary_returns_only_top_level_primary_entries_for_namespace() {
         .write_atomic(
             &second,
             b"second",
-            WriteOptions::new(Durability::BestEffort),
+            WriteOptionsData::new(DurabilityData::BestEffort),
         )
         .await
         .expect("write second");
 
     let entries = adapter
-        .list_primary(StorageNamespace::Session)
+        .list_primary(StorageNamespaceData::Session)
         .await
         .expect("list primary");
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].key(), &first);
-    assert_eq!(entries[0].generation(), Generation::Primary);
+    assert_eq!(entries[0].generation(), GenerationData::Primary);
     assert_eq!(entries[0].size_bytes(), b"first-next".len());
     assert_eq!(entries[1].key(), &second);
-    assert_eq!(entries[1].generation(), Generation::Primary);
+    assert_eq!(entries[1].generation(), GenerationData::Primary);
     assert_eq!(entries[1].size_bytes(), b"second".len());
 
     std::fs::remove_dir_all(root).expect("remove test root");
@@ -226,7 +241,7 @@ async fn list_primary_returns_only_top_level_primary_entries_for_namespace() {
 #[tokio::test]
 async fn filesystem_adapter_satisfies_atomic_blob_contract() {
     let root = unique_root("contract");
-    let adapter = storage::file_system_blob(&root).expect("adapter root should initialize");
+    let adapter = storage::wire_file_system_blob(&root).expect("adapter root should initialize");
 
     assert_atomic_blob_contract(&*adapter).await;
 
@@ -236,19 +251,28 @@ async fn filesystem_adapter_satisfies_atomic_blob_contract() {
 #[tokio::test]
 async fn filesystem_adapter_replaces_primary_with_complete_value() {
     let root = unique_root("replace");
-    let adapter = storage::file_system_blob(&root).expect("adapter root should initialize");
+    let adapter = storage::wire_file_system_blob(&root).expect("adapter root should initialize");
     let key = key();
 
     adapter
-        .write_atomic(&key, b"old", WriteOptions::new(Durability::BestEffort))
+        .write_atomic(
+            &key,
+            b"old",
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
         .await
         .unwrap();
     adapter
-        .write_atomic(&key, b"new", WriteOptions::new(Durability::BestEffort))
+        .write_atomic(
+            &key,
+            b"new",
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
         .await
         .unwrap();
 
-    let ReadOutcome::Found(read) = adapter.read(&key, Generation::Primary).await.unwrap() else {
+    let ReadOutcomeData::Found(read) = adapter.read(&key, GenerationData::Primary).await.unwrap()
+    else {
         panic!("replaced primary must exist");
     };
     assert_eq!(read.bytes(), b"new");
@@ -274,28 +298,36 @@ async fn filesystem_adapter_replaces_primary_with_complete_value() {
 #[tokio::test]
 async fn filesystem_adapter_quarantine_moves_only_requested_generation() {
     let root = unique_root("quarantine-layout");
-    let adapter = storage::file_system_blob(&root).expect("adapter root should initialize");
+    let adapter = storage::wire_file_system_blob(&root).expect("adapter root should initialize");
     let key = key();
     adapter
-        .write_atomic(&key, b"old", WriteOptions::new(Durability::BestEffort))
+        .write_atomic(
+            &key,
+            b"old",
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
         .await
         .unwrap();
     adapter
-        .write_atomic(&key, b"new", WriteOptions::new(Durability::BestEffort))
+        .write_atomic(
+            &key,
+            b"new",
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
         .await
         .unwrap();
 
     let outcome = adapter
         .quarantine(
             &key,
-            Generation::Previous,
-            TransactionScope::Blob,
+            GenerationData::Previous,
+            TransactionScopeData::Blob,
             QuarantineReason::DecoderRejected,
         )
         .await
         .unwrap();
 
-    let QuarantineOutcome::Moved(receipt) = outcome else {
+    let QuarantineOutcomeData::Moved(receipt) = outcome else {
         panic!("existing previous must move to quarantine");
     };
     let quarantine_path = root
@@ -322,10 +354,14 @@ async fn filesystem_adapter_rejects_symlink_target_without_touching_outside_file
     let outside_file = outside.join("target");
     std::fs::write(&outside_file, b"outside").unwrap();
     symlink(&outside_file, root.join("session/session-1")).unwrap();
-    let adapter = storage::file_system_blob(&root).expect("adapter root should initialize");
+    let adapter = storage::wire_file_system_blob(&root).expect("adapter root should initialize");
 
     let error = adapter
-        .write_atomic(&key(), b"new", WriteOptions::new(Durability::BestEffort))
+        .write_atomic(
+            &key(),
+            b"new",
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
         .await
         .expect_err("symlink target must fail closed");
 
