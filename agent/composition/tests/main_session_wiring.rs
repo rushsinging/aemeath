@@ -255,9 +255,9 @@ async fn production_context_append_reopens_from_atomic_blob() {
         dataset_adapter,
         memory::wire_legacy_memory_source_factory(agents_dir.join("memory")),
     );
-    let session_blob = storage::file_system_blob(&agents_dir).expect("create session blob");
-    let session_dataset =
-        storage::wire_file_system_dataset(agents_dir.clone()).expect("create session dataset adapter");
+    let session_blob = storage::wire_file_system_blob(&agents_dir).expect("create session blob");
+    let session_dataset = storage::wire_file_system_dataset(agents_dir.clone())
+        .expect("create session dataset adapter");
     let session_management: Arc<dyn SessionManagementPort> = Arc::new(
         context::DatasetSessionManagement::new(session_dataset.clone(), session_blob.clone()),
     );

@@ -24,7 +24,7 @@ async fn wire_memory_opener_returns_object_safe_cloneable_opener() {
     std::fs::create_dir_all(&root).unwrap();
 
     let opener: Box<dyn MemoryOpener> = crate::wire_memory_opener(
-        storage::file_system_dataset(&root).unwrap(),
+        storage::wire_file_system_dataset(&root).unwrap(),
         crate::wire_legacy_memory_source_factory(root.join("legacy")),
     );
     let port = opener
@@ -69,7 +69,7 @@ async fn wire_reflection_history_store_appends_and_lists() {
     std::fs::create_dir_all(&root).unwrap();
 
     let store: Arc<dyn ReflectionHistoryStore> = crate::wire_reflection_history_store(
-        storage::file_system_dataset(&root).unwrap(),
+        storage::wire_file_system_dataset(&root).unwrap(),
         project_key(),
     );
     store
