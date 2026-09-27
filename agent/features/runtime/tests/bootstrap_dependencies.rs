@@ -6,8 +6,8 @@ struct TestProviderFactory;
 impl runtime::ProviderFactory for TestProviderFactory {
     fn build(
         &self,
-        spec: runtime::ProviderBuildSpec,
-    ) -> Result<runtime::ProviderBinding, provider::ProviderError> {
+        spec: runtime::ProviderBuildSpecData,
+    ) -> Result<runtime::ProviderBindingData, provider::ProviderError> {
         struct UnusedPort;
         #[async_trait::async_trait]
         impl runtime::ProviderPort for UnusedPort {
@@ -32,7 +32,7 @@ impl runtime::ProviderFactory for TestProviderFactory {
                 ))
             }
         }
-        Ok(runtime::ProviderBinding {
+        Ok(runtime::ProviderBindingData {
             provider: Arc::new(UnusedPort),
             model: spec.model,
             max_tokens: spec.max_tokens,
@@ -42,8 +42,8 @@ impl runtime::ProviderFactory for TestProviderFactory {
     }
 }
 
-fn initial_provider_assembly() -> runtime::InitialProviderAssembly {
-    let spec = runtime::ProviderBuildSpec {
+fn initial_provider_assembly() -> runtime::InitialProviderAssemblyData {
+    let spec = runtime::ProviderBuildSpecData {
         driver: "test".to_string(),
         source_key: "test".to_string(),
         api_style: None,
@@ -61,7 +61,7 @@ fn initial_provider_assembly() -> runtime::InitialProviderAssembly {
     };
     let binding = runtime::ProviderFactory::build(&TestProviderFactory, spec)
         .expect("build test provider binding");
-    runtime::InitialProviderAssembly::new(
+    runtime::InitialProviderAssemblyData::new(
         binding,
         share::config::models::ResolvedModel {
             source_key: "test".to_string(),
@@ -74,12 +74,12 @@ fn initial_provider_assembly() -> runtime::InitialProviderAssembly {
             },
             driver: "test".to_string(),
         },
-        runtime::ModelRuntimeSettings {
+        runtime::ModelRuntimeSettingsData {
             max_tokens: 8192,
             reasoning: false,
             reasoning_effort: None,
         },
-        runtime::SessionModelSlot::new(),
+        runtime::SessionModelSlotData::new(),
     )
 }
 
@@ -94,16 +94,18 @@ impl tools::AgentRunner for NoopAgentRunner {
     }
 }
 
-fn test_prompt_assembly() -> runtime::PromptAssembly {
-    runtime::PromptAssembly::new(Vec::new(), String::new(), String::new(), "test-model")
+fn test_prompt_assembly() -> runtime::PromptAssemblyData {
+    runtime::PromptAssemblyData::new(Vec::new(), String::new(), String::new(), "test-model")
 }
 
-fn test_session_bootstrap_assembly(root: &std::path::Path) -> runtime::SessionBootstrapAssembly {
-    runtime::SessionBootstrapAssembly::new(root.to_path_buf(), 8192, true, false, None)
+fn test_session_bootstrap_assembly(
+    root: &std::path::Path,
+) -> runtime::SessionBootstrapAssemblyData {
+    runtime::SessionBootstrapAssemblyData::new(root.to_path_buf(), 8192, true, false, None)
 }
 
-fn test_skill_bootstrap_assembly(root: &std::path::Path) -> runtime::SkillBootstrapAssembly {
-    runtime::SkillBootstrapAssembly::new(
+fn test_skill_bootstrap_assembly(root: &std::path::Path) -> runtime::SkillBootstrapAssemblyData {
+    runtime::SkillBootstrapAssemblyData::new(
         tools::composition::wire_skills().catalog(),
         project::wire_production_workspace(root.to_path_buf(), None).expect("wire test workspace"),
         tools::SkillQuery::new(root.to_path_buf(), Vec::new(), Default::default()),
@@ -113,8 +115,8 @@ fn test_skill_bootstrap_assembly(root: &std::path::Path) -> runtime::SkillBootst
 fn test_agent_runner_assembly(
     runtime_context_factory: Arc<runtime::RuntimeContextFactory>,
     active_run: Arc<runtime::ActiveRunRegistry>,
-) -> runtime::AgentRunnerAssembly {
-    runtime::AgentRunnerAssembly {
+) -> runtime::AgentRunnerAssemblyData {
+    runtime::AgentRunnerAssemblyData {
         runner: Arc::new(NoopAgentRunner),
         parent_context_source: runtime::ParentRunContextSource::new(),
         active_run,
@@ -250,7 +252,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
             storage::wire_file_system_blob(temp.path()).unwrap(),
             temp.path().to_path_buf(),
         )),
-        runtime::ToolResultMaterializationPolicy::new(50_000, 2_000, 500),
+        runtime::ToolResultMaterializationPolicyData::new(50_000, 2_000, 500),
     ));
     let active_run = Arc::new(runtime::wire_active_run_registry());
     let hook_runner: Arc<dyn hook::HookDispatcher> = hook::wire_hook_dispatcher(
@@ -268,14 +270,14 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         hook_runner.clone(),
         Arc::new(runtime::UnavailableUsageSink),
     ));
-    let dependencies = runtime::RuntimeBootstrapDependencies::new(
-        runtime::RuntimeCoreDependencies::new(
+    let dependencies = runtime::RuntimeBootstrapDependenciesData::new(
+        runtime::RuntimeCoreDependenciesData::new(
             workspace,
             wiring,
             Arc::new(TestProviderFactory),
             session_management.clone(),
         ),
-        runtime::RuntimeToolAssemblyDependencies::new(
+        runtime::RuntimeToolAssemblyDependenciesData::new(
             tools.catalog_port(),
             skill_catalog,
             tool_result_materializer.clone(),
@@ -295,7 +297,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     ));
 
     // Core dependencies that also live in RuntimeServices are intentionally
-    // not projected again by RuntimeBootstrapDependencies.
+    // not projected again by RuntimeBootstrapDependenciesData.
     assert!(Arc::ptr_eq(
         &dependencies.session_management(),
         &session_management

@@ -7,7 +7,7 @@ use share::config::AgentsConfig;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-pub struct AgentRunnerAssembly {
+pub struct AgentRunnerAssemblyData {
     pub runner: Arc<dyn tools::AgentRunner>,
     pub parent_context_source: ParentRunContextSource,
     pub active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
@@ -19,7 +19,7 @@ pub struct AgentRunnerAssembly {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn build_agent_runner(
+pub fn wire_agent_runner(
     factory: Arc<dyn ProviderFactory>,
     active_run: Arc<dyn crate::domain::agent_run::ActiveRunPort>,
     max_tool_concurrency: usize,
@@ -31,7 +31,7 @@ pub fn build_agent_runner(
     skill_catalog: Arc<dyn tools::SkillCatalogPort>,
     parent_context_source: ParentRunContextSource,
     runtime_context_factory: Arc<crate::application::run::context_factory::RuntimeContextFactory>,
-) -> AgentRunnerAssembly {
+) -> AgentRunnerAssemblyData {
     let parent_context_for_runner = parent_context_source.clone();
     let active_run_for_runner = active_run.clone();
     let semaphore_for_runner = agent_semaphore.clone();
@@ -47,7 +47,7 @@ pub fn build_agent_runner(
         parent_context: parent_context_for_runner,
         runtime_context_factory: factory_for_runner,
     });
-    AgentRunnerAssembly {
+    AgentRunnerAssemblyData {
         runner,
         parent_context_source,
         active_run,
@@ -92,6 +92,15 @@ fn expand_tilde_path(path: &str) -> PathBuf {
     }
 }
 
+impl AgentRunnerAssemblyData {
+    /// 共享的 runtime context factory（Main/Derived 同源）。
+    pub fn runtime_context_factory(
+        &self,
+    ) -> &Arc<crate::application::run::context_factory::RuntimeContextFactory> {
+        &self.runtime_context_factory
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,7 +124,7 @@ mod tests {
         let skill_wiring = tools::composition::wire_skills();
         let skill_catalog = skill_wiring.catalog();
         let tool_ports = tools::composition::TestCatalogExecutionFactory::empty();
-        let runner = build_agent_runner(
+        let runner = wire_agent_runner(
             Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
             Arc::new(crate::application::run::active_registry::wire_active_run_registry()),
             10,

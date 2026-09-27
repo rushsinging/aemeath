@@ -6,7 +6,7 @@ use crate::application::reflection::{
     ReflectionTaskAdapter, ReflectionTaskRequest, ReflectionTaskSubmitOutcome,
     ReflectionTaskTrigger,
 };
-use crate::ports::{CompactOutcome, ProviderBinding};
+use crate::ports::{CompactOutcome, ProviderBindingData};
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 
 use provider::ProviderStopReasonData;
@@ -19,7 +19,7 @@ pub(crate) fn submit_interval_reflection(
     config: &share::config::MemoryConfig,
     step_count: usize,
     messages: &[share::message::Message],
-    binding: &Arc<ProviderBinding>,
+    binding: &Arc<ProviderBindingData>,
     system_prompt_text: &str,
     lang: &str,
     memory: &Arc<dyn MemoryPort>,
@@ -48,7 +48,7 @@ pub(crate) fn submit_pre_compact_reflection(
     adapter: &ReflectionTaskAdapter,
     config: &share::config::MemoryConfig,
     messages: &[share::message::Message],
-    binding: &Arc<ProviderBinding>,
+    binding: &Arc<ProviderBindingData>,
     system_prompt_text: &str,
     lang: &str,
     memory: &Arc<dyn MemoryPort>,
@@ -77,7 +77,7 @@ pub(crate) fn submit_manual_reflection(
     adapter: &ReflectionTaskAdapter,
     config: &share::config::MemoryConfig,
     messages: &[share::message::Message],
-    binding: &Arc<ProviderBinding>,
+    binding: &Arc<ProviderBindingData>,
     system_prompt_text: &str,
     lang: &str,
     memory: &Arc<dyn MemoryPort>,
@@ -127,7 +127,7 @@ pub(crate) fn maybe_submit_pre_compact_reflection(
     pre_compact_messages: &[share::message::Message],
     adapter: &ReflectionTaskAdapter,
     config: &share::config::MemoryConfig,
-    binding: &Arc<ProviderBinding>,
+    binding: &Arc<ProviderBindingData>,
     system_prompt_text: &str,
     lang: &str,
     memory: &Arc<dyn MemoryPort>,
@@ -154,7 +154,7 @@ fn submit(
     trigger: ReflectionTaskTrigger,
     config: &share::config::MemoryConfig,
     messages: Vec<share::message::Message>,
-    binding: &Arc<ProviderBinding>,
+    binding: &Arc<ProviderBindingData>,
     system_prompt_text: &str,
     lang: &str,
     memory: &Arc<dyn MemoryPort>,

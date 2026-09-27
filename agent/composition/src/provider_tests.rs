@@ -546,8 +546,8 @@ async fn invoke_returns_cancelled_when_signal_fires_during_establishment() {
 
 // ─── ProviderFactory TDD tests ─────────────────────────────────────
 
-fn valid_spec() -> ProviderBuildSpec {
-    ProviderBuildSpec {
+fn valid_spec() -> ProviderBuildSpecData {
+    ProviderBuildSpecData {
         driver: "anthropic".to_string(),
         source_key: "test-source".to_string(),
         api_style: None,
@@ -694,8 +694,8 @@ fn spec_with(
     api_key: &str,
     base_url: Option<&str>,
     user_agent: &str,
-) -> ProviderBuildSpec {
-    ProviderBuildSpec {
+) -> ProviderBuildSpecData {
+    ProviderBuildSpecData {
         driver: driver.to_string(),
         source_key: "test-source".to_string(),
         api_style: None,

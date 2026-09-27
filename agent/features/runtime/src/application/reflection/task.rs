@@ -9,7 +9,7 @@ use memory::api::{
 };
 
 pub type ReflectionResultPayload = CompleteReflectionResult;
-pub type ReflectionError = ReflectionExecutionError;
+pub(crate) type ReflectionError = ReflectionExecutionError;
 pub type ReflectionResult<T> = ReflectionExecutionResultType<T>;
 pub type ReflectionInputMessage = share::message::Message;
 

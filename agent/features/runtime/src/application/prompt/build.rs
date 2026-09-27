@@ -1,4 +1,4 @@
 pub(crate) mod git_context;
 mod prompt_build;
 
-pub use prompt_build::{build_system_prompt_parts, PromptContext, SystemPromptParts};
+pub use prompt_build::{build_system_prompt_parts, PromptContextData, SystemPromptParts};

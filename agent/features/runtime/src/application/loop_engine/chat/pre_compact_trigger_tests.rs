@@ -333,14 +333,14 @@ impl crate::ports::ProviderPort for StaticReflectionProvider {
     }
 }
 
-/// Build a `ProviderBinding` whose provider returns a parseable reflection
+/// Build a `ProviderBindingData` whose provider returns a parseable reflection
 /// response so `submit_complete` can drain the adapter to a terminal state.
-fn pre_compact_test_binding() -> Arc<crate::ports::ProviderBinding> {
+fn pre_compact_test_binding() -> Arc<crate::ports::ProviderBindingData> {
     let model = provider::ModelIdData {
         provider: "pre-compact-test".to_string(),
         model: "pre-compact-test-model".to_string(),
     };
-    Arc::new(crate::ports::ProviderBinding {
+    Arc::new(crate::ports::ProviderBindingData {
         provider: Arc::new(StaticReflectionProvider),
         model,
         max_tokens: 8_192,

@@ -14,13 +14,13 @@ fn sha256(bytes: &[u8]) -> [u8; 32] {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ToolResultMaterializationPolicy {
+pub struct ToolResultMaterializationPolicyData {
     threshold_chars: usize,
     preview_head_chars: usize,
     preview_tail_chars: usize,
 }
 
-impl ToolResultMaterializationPolicy {
+impl ToolResultMaterializationPolicyData {
     pub fn new(
         threshold_chars: usize,
         preview_head_chars: usize,
@@ -149,14 +149,14 @@ impl CompletedToolResultMaterializations {
 #[derive(Clone)]
 pub struct ToolResultMaterializer {
     blobs: Arc<dyn ToolResultBlobPort>,
-    policy: ToolResultMaterializationPolicy,
+    policy: ToolResultMaterializationPolicyData,
     completed: Arc<Mutex<CompletedToolResultMaterializations>>,
 }
 
 impl ToolResultMaterializer {
     pub fn new(
         blobs: Arc<dyn ToolResultBlobPort>,
-        policy: ToolResultMaterializationPolicy,
+        policy: ToolResultMaterializationPolicyData,
     ) -> Self {
         Self {
             blobs,
@@ -286,14 +286,14 @@ impl ToolResultMaterializer {
     }
 }
 
-fn omitted_chars(character_count: usize, policy: ToolResultMaterializationPolicy) -> usize {
+fn omitted_chars(character_count: usize, policy: ToolResultMaterializationPolicyData) -> usize {
     character_count - policy.preview_head_chars - policy.preview_tail_chars
 }
 
 fn bounded_tool_result_text(
     output: &str,
     character_count: usize,
-    policy: ToolResultMaterializationPolicy,
+    policy: ToolResultMaterializationPolicyData,
     locator: Option<&str>,
 ) -> String {
     let head: String = output.chars().take(policy.preview_head_chars).collect();

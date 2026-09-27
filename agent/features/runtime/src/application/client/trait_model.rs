@@ -1,22 +1,22 @@
 use sdk::{ModelSummary, SdkError};
 
 use super::accessors::AgentClientImpl;
-use crate::ports::{ProviderBuildSpec, ProviderFactory};
+use crate::ports::{ProviderBuildSpecData, ProviderFactory};
 use config::{resolve_provider_runtime, ConfigReader};
 
 type Result<T> = std::result::Result<T, SdkError>;
 
-/// 由 selection 字符串解析配置并通过 ProviderFactory 构建新 `ProviderBinding`
+/// 由 selection 字符串解析配置并通过 ProviderFactory 构建新 `ProviderBindingData`
 /// + `ModelSwitchResult`（#567 / #907）。
 ///
 /// 在 loop_runner idle 分支收到 `SwitchModel` 事件时调用。
 /// 从 `ConfigReader` 加载配置（gate-aware），经 `resolve_model_selection` 解析
-/// `Provider/Model`，再构建 `ProviderBuildSpec` 交由 factory 构建 binding。
+/// `Provider/Model`，再构建 `ProviderBuildSpecData` 交由 factory 构建 binding。
 pub(crate) async fn build_provider_binding_for_switch(
     selection: &str,
     query: &dyn ConfigReader,
     factory: &dyn ProviderFactory,
-) -> std::result::Result<(crate::ports::ProviderBinding, sdk::ModelSwitchResult), String> {
+) -> std::result::Result<(crate::ports::ProviderBindingData, sdk::ModelSwitchResult), String> {
     let snapshot = query
         .snapshot()
         .await
@@ -33,7 +33,7 @@ pub(crate) fn build_provider_binding_from_runtime_model(
     snapshot: &share::config::domain::snapshot::ConfigSnapshot,
     base_url_override: Option<&str>,
     factory: &dyn ProviderFactory,
-) -> std::result::Result<(crate::ports::ProviderBinding, sdk::ModelSwitchResult), String> {
+) -> std::result::Result<(crate::ports::ProviderBindingData, sdk::ModelSwitchResult), String> {
     let resolved_model = runtime_model.resolved_model().clone();
 
     let driver = resolved_model.driver.as_str();
@@ -63,7 +63,7 @@ pub(crate) fn build_provider_binding_from_runtime_model(
             share::reasoning::ReasoningLevel::Off
         });
 
-    let spec = ProviderBuildSpec {
+    let spec = ProviderBuildSpecData {
         driver: driver.to_string(),
         source_key: resolved_model.source_key.clone(),
         api_style: resolved_model.model.api_style.clone(),
@@ -215,7 +215,7 @@ mod tests {
         assert_eq!(query.reads.load(Ordering::SeqCst), 1);
     }
 
-    // Test factory — builds a ProviderBinding wrapping a pure Fake ProviderPort.
+    // Test factory — builds a ProviderBindingData wrapping a pure Fake ProviderPort.
     // Does NOT construct a provider client; uses the runtime port's FakeProvider contract.
     fn test_factory() -> Arc<dyn ProviderFactory> {
         use crate::ports::provider_port::{
@@ -259,8 +259,8 @@ mod tests {
         impl ProviderFactory for TestFactory {
             fn build(
                 &self,
-                spec: ProviderBuildSpec,
-            ) -> std::result::Result<crate::ports::ProviderBinding, ProviderError> {
+                spec: ProviderBuildSpecData,
+            ) -> std::result::Result<crate::ports::ProviderBindingData, ProviderError> {
                 let capability = ModelCapabilityData {
                     model: spec.model.clone(),
                     supports_tools: true,
@@ -281,7 +281,7 @@ mod tests {
                 let capabilities =
                     std::collections::HashMap::from([(spec.model.clone(), capability)]);
                 let port: Arc<dyn ProviderPortTrait> = Arc::new(TestPort { capabilities });
-                Ok(crate::ports::ProviderBinding {
+                Ok(crate::ports::ProviderBindingData {
                     provider: port,
                     model: spec.model,
                     max_tokens: spec.max_tokens,

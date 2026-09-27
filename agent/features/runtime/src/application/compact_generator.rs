@@ -167,9 +167,9 @@ fn compact_model_failure(error: CompactModelResolveError) -> CompactGenerationFa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::application::client::SessionModelSlot;
+    use crate::application::client::SessionModelSlotData;
     use crate::ports::provider_port::fake::FakeProvider;
-    use crate::ports::{ProviderBinding, ProviderBuildSpec, ProviderFactory};
+    use crate::ports::{ProviderBindingData, ProviderBuildSpecData, ProviderFactory};
     use provider::ModelIdData;
     use share::config::models::{ModelEntryConfig, ProviderModelsConfig};
     use share::config::Config;
@@ -221,9 +221,9 @@ mod tests {
     impl ProviderFactory for UnusedFactory {
         fn build(
             &self,
-            spec: ProviderBuildSpec,
-        ) -> Result<ProviderBinding, provider::ProviderError> {
-            Ok(ProviderBinding {
+            spec: ProviderBuildSpecData,
+        ) -> Result<ProviderBindingData, provider::ProviderError> {
+            Ok(ProviderBindingData {
                 provider: Arc::new(FakeProvider::new()),
                 model: spec.model,
                 max_tokens: spec.max_tokens,
@@ -268,7 +268,7 @@ mod tests {
 
     fn generator_with(
         snapshot: share::config::domain::snapshot::ConfigSnapshot,
-        session_model: SessionModelSlot,
+        session_model: SessionModelSlotData,
     ) -> ProviderCompactGenerator {
         ProviderCompactGenerator::new(Arc::new(CompactModelResolver::new(
             Arc::new(StaticReader { snapshot }),
@@ -277,15 +277,15 @@ mod tests {
         )))
     }
 
-    fn session_slot() -> SessionModelSlot {
+    fn session_slot() -> SessionModelSlotData {
         let snapshot = snapshot(None);
         let resolved = snapshot
             .resolve_model_selection("fake/test-model")
             .expect("session model must resolve");
-        let slot = SessionModelSlot::new();
+        let slot = SessionModelSlotData::new();
         slot.bind(crate::application::client::SessionModelState::new(
             resolved,
-            Arc::new(ProviderBinding {
+            Arc::new(ProviderBindingData {
                 provider: Arc::new(FakeProvider::new()),
                 model: ModelIdData {
                     provider: "fake".into(),

@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use share::config::domain::snapshot::ConfigSnapshot;
 
 use crate::application::client::SessionModelState;
-use crate::ports::{ProviderBinding, ProviderFactory};
+use crate::ports::{ProviderBindingData, ProviderFactory};
 
 /// 会话当前模型的共享槽。
 ///
@@ -25,11 +25,11 @@ use crate::ports::{ProviderBinding, ProviderFactory};
 /// 会话装配时把 [`SessionModelState`]（会话模型的唯一真相源）绑定进来。
 /// 槽本身不保存第二份模型状态，`/model` 切换通过同一 `SessionModelState` 可见。
 #[derive(Clone, Default)]
-pub struct SessionModelSlot {
+pub struct SessionModelSlotData {
     inner: Arc<std::sync::RwLock<Option<SessionModelState>>>,
 }
 
-impl SessionModelSlot {
+impl SessionModelSlotData {
     pub fn new() -> Self {
         Self::default()
     }
@@ -82,16 +82,16 @@ impl std::error::Error for CompactModelResolveError {}
 /// 本次 compact 应使用的模型绑定。
 #[derive(Debug, Clone)]
 pub struct CompactModelTarget {
-    binding: Arc<ProviderBinding>,
+    binding: Arc<ProviderBindingData>,
     origin: CompactModelOrigin,
 }
 
 impl CompactModelTarget {
-    fn new(binding: Arc<ProviderBinding>, origin: CompactModelOrigin) -> Self {
+    fn new(binding: Arc<ProviderBindingData>, origin: CompactModelOrigin) -> Self {
         Self { binding, origin }
     }
 
-    pub fn binding(&self) -> &Arc<ProviderBinding> {
+    pub fn binding(&self) -> &Arc<ProviderBindingData> {
         &self.binding
     }
 
@@ -115,14 +115,14 @@ impl CompactModelTarget {
 
 struct CachedCompactBinding {
     selection: String,
-    binding: Arc<ProviderBinding>,
+    binding: Arc<ProviderBindingData>,
 }
 
 /// Compact 模型解析器；见模块文档。
 pub struct CompactModelResolver {
     config: Arc<dyn config::ConfigReader>,
     factory: Arc<dyn ProviderFactory>,
-    session_model: SessionModelSlot,
+    session_model: SessionModelSlotData,
     cache: Mutex<Option<CachedCompactBinding>>,
 }
 
@@ -130,7 +130,7 @@ impl CompactModelResolver {
     pub fn new(
         config: Arc<dyn config::ConfigReader>,
         factory: Arc<dyn ProviderFactory>,
-        session_model: SessionModelSlot,
+        session_model: SessionModelSlotData,
     ) -> Self {
         Self {
             config,
@@ -181,7 +181,7 @@ impl CompactModelResolver {
         Ok(target)
     }
 
-    fn cached_binding(&self, selection: &str) -> Option<Arc<ProviderBinding>> {
+    fn cached_binding(&self, selection: &str) -> Option<Arc<ProviderBindingData>> {
         self.cache
             .lock()
             .unwrap_or_else(|error| error.into_inner())
@@ -190,7 +190,7 @@ impl CompactModelResolver {
             .map(|cached| Arc::clone(&cached.binding))
     }
 
-    fn store_cached_binding(&self, selection: &str, binding: Arc<ProviderBinding>) {
+    fn store_cached_binding(&self, selection: &str, binding: Arc<ProviderBindingData>) {
         *self.cache.lock().unwrap_or_else(|error| error.into_inner()) =
             Some(CachedCompactBinding {
                 selection: selection.to_string(),
@@ -202,7 +202,7 @@ impl CompactModelResolver {
         &self,
         snapshot: &ConfigSnapshot,
         selection: &str,
-    ) -> Result<Arc<ProviderBinding>, CompactModelResolveError> {
+    ) -> Result<Arc<ProviderBindingData>, CompactModelResolveError> {
         let runtime_model = snapshot
             .resolve_runtime_model(Some(selection), None)
             .map_err(|error| CompactModelResolveError::Selection(error.to_string()))?;

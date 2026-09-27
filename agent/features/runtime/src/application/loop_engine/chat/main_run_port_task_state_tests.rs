@@ -4,7 +4,7 @@ use crate::application::run::run_factory_support::SessionRunFixture;
 use crate::application::tool::agent::{ToolCall, ToolExecution};
 use crate::application::tool::coordination::ToolRoundObserver;
 use crate::application::tool::tool_result_materializer::{
-    ToolResultMaterializationPolicy, ToolResultMaterializer,
+    ToolResultMaterializationPolicyData, ToolResultMaterializer,
 };
 use crate::ports::{ToolResultBlobError, ToolResultBlobPort, ToolResultBlobRef};
 use std::sync::{Arc, Mutex};
@@ -46,7 +46,7 @@ impl ToolResultBlobPort for UnusedBlobPort {
 fn materializer() -> Arc<ToolResultMaterializer> {
     Arc::new(ToolResultMaterializer::new(
         Arc::new(UnusedBlobPort),
-        ToolResultMaterializationPolicy::new(1, 1, 0),
+        ToolResultMaterializationPolicyData::new(1, 1, 0),
     ))
 }
 

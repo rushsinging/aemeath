@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use super::ToolResultBlobPort;
+use crate::adapters::tool_result_blob::AtomicBlobToolResultStore;
 use async_trait::async_trait;
-use runtime::{AtomicBlobToolResultStore, ToolResultBlobPort};
 use storage::{
     AtomicBlobPort, BlobReadData, DeleteOptionsData, DeleteOutcomeData, GenerationData,
     PromoteOutcomeData, QuarantineOutcomeData, QuarantineReason, ReadOutcomeData, StorageError,

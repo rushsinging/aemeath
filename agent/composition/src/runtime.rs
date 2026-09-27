@@ -64,7 +64,7 @@ fn wire_runtime_tool_assembly(
         execution: tools.execution(),
         tool_result_materializer: Arc::new(runtime::ToolResultMaterializer::new(
             blobs,
-            runtime::ToolResultMaterializationPolicy::new(
+            runtime::ToolResultMaterializationPolicyData::new(
                 policy.threshold_chars(),
                 policy.preview_head_chars(),
                 policy.preview_tail_chars(),
@@ -149,7 +149,7 @@ pub(crate) async fn from_args_with_gateways(
                 "API key not set. Use --api-key, set provider-specific env var, set LLM_API_KEY, or configure in ~/.aemeath/config.json".to_string(),
             )
         })?;
-    let provider_spec = runtime::ProviderBuildSpec {
+    let provider_spec = runtime::ProviderBuildSpecData {
         driver: resolved_model.driver.clone(),
         source_key: resolved_model.source_key.clone(),
         api_style: resolved_model.model.api_style.clone(),
@@ -181,8 +181,8 @@ pub(crate) async fn from_args_with_gateways(
         .provider
         .build(provider_spec)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
-    let compact_model_slot = runtime::SessionModelSlot::new();
-    let initial_provider = runtime::InitialProviderAssembly::new(
+    let compact_model_slot = runtime::SessionModelSlotData::new();
+    let initial_provider = runtime::InitialProviderAssemblyData::new(
         initial_binding,
         resolved_model,
         runtime_settings,
@@ -282,7 +282,7 @@ pub(crate) async fn from_args_with_gateways(
         .clone()
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let session_bootstrap = runtime::SessionBootstrapAssembly::new(
+    let session_bootstrap = runtime::SessionBootstrapAssemblyData::new(
         cwd,
         context_size,
         args.allow_all,
@@ -291,7 +291,7 @@ pub(crate) async fn from_args_with_gateways(
     );
 
     let prompt_root = std::path::PathBuf::from(&identity.initial_cwd);
-    let prompt_context = runtime::PromptContext::new(
+    let prompt_context = runtime::PromptContextData::new(
         &prompt_root,
         Some(&initial_provider.binding().model.provider),
         Some(&initial_provider.binding().model.model),
@@ -309,7 +309,7 @@ pub(crate) async fn from_args_with_gateways(
         prompt_parts.clone(),
     )
     .await;
-    let prompt = runtime::PromptAssembly::new(
+    let prompt = runtime::PromptAssemblyData::new(
         vec![provider::RequestSystemBlockData::Cacheable(static_prompt)],
         prompt_parts.initial_git_context,
         prompt_parts.claude_md,
@@ -332,15 +332,18 @@ pub(crate) async fn from_args_with_gateways(
         snapshot.skills().dirs.clone(),
         available_tools,
     );
-    let skills =
-        runtime::SkillBootstrapAssembly::new(skill_catalog.clone(), workspace.clone(), skill_query);
+    let skills = runtime::SkillBootstrapAssemblyData::new(
+        skill_catalog.clone(),
+        workspace.clone(),
+        skill_query,
+    );
 
     let (max_tool_concurrency, max_agent_concurrency) = runtime::resolve_concurrency_limits(
         args.max_tool_concurrency,
         args.max_agent_concurrency,
         &snapshot,
     );
-    let agent_runner = runtime::build_agent_runner(
+    let agent_runner = runtime::wire_agent_runner(
         gateways.provider.clone(),
         tool_assembly.active_run.clone(),
         max_tool_concurrency,
@@ -352,14 +355,14 @@ pub(crate) async fn from_args_with_gateways(
         runtime_context_factory.clone(),
     );
 
-    let dependencies = runtime::RuntimeBootstrapDependencies::new(
-        runtime::RuntimeCoreDependencies::new(
+    let dependencies = runtime::RuntimeBootstrapDependenciesData::new(
+        runtime::RuntimeCoreDependenciesData::new(
             workspace,
             wiring,
             gateways.provider,
             session_management,
         ),
-        runtime::RuntimeToolAssemblyDependencies::new(
+        runtime::RuntimeToolAssemblyDependenciesData::new(
             tool_assembly.catalog,
             skill_catalog,
             tool_assembly.tool_result_materializer,
@@ -372,7 +375,7 @@ pub(crate) async fn from_args_with_gateways(
         skills,
         agent_runner,
     );
-    let client = runtime::from_args_with_workspace(args, dependencies).await?;
+    let client = runtime::wire_agent_client_from_args(args, dependencies).await?;
     Ok(SessionRuntimeAssembly {
         client,
         audit: session_audit,

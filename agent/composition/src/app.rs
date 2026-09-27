@@ -1431,7 +1431,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
 mod tests {
     use super::*;
     use provider::ProviderError;
-    use runtime::{ProviderBinding, ProviderBuildSpec, ProviderFactory};
+    use runtime::{ProviderBindingData, ProviderBuildSpecData, ProviderFactory};
     use share::config::Config;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -1605,8 +1605,8 @@ mod tests {
     }
 
     impl ProviderFactory for ReportedUsageProviderFactory {
-        fn build(&self, spec: ProviderBuildSpec) -> Result<ProviderBinding, ProviderError> {
-            Ok(ProviderBinding {
+        fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
+            Ok(ProviderBindingData {
                 provider: Arc::new(ReportedUsageProvider {
                     invocation_count: self.invocation_count.clone(),
                 }),
@@ -1619,7 +1619,7 @@ mod tests {
     }
 
     impl ProviderFactory for CountingProviderFactory {
-        fn build(&self, spec: ProviderBuildSpec) -> Result<ProviderBinding, ProviderError> {
+        fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
             self.build_calls.fetch_add(1, Ordering::SeqCst);
             crate::provider::provider_factory().build(spec)
         }

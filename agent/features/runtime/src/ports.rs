@@ -39,7 +39,7 @@ pub use context_port::{
 pub use policy_port::Policy;
 #[cfg(test)]
 pub use policy_port::{PolicyDecisionData, PolicyRequestData};
-pub use provider_factory::{ProviderBinding, ProviderBuildSpec, ProviderFactory};
+pub use provider_factory::{ProviderBindingData, ProviderBuildSpecData, ProviderFactory};
 pub use provider_port::{
     InvocationOptionsData, InvocationRequestData, ModelIdData, ModelToolSchemaData, ProviderPort,
     RawUsageSnapshotData, RequestSystemBlockData, StopReason,
@@ -49,5 +49,6 @@ pub use provider_port::{
     InvocationStreamData, ModelCapabilityData, ProviderError, ReasoningCapabilityData,
 };
 pub use session_query::SessionQueryPort;
-pub use tool_result_blob::{ToolResultBlobError, ToolResultBlobPort, ToolResultBlobRef};
+pub use tool_result_blob::ToolResultBlobPort;
+pub(crate) use tool_result_blob::{ToolResultBlobError, ToolResultBlobRef};
 pub use usage_sink::{UnavailableUsageSink, UsageSink};

@@ -24,8 +24,8 @@ fn enabled_memory_config() -> share::config::MemoryConfig {
     }
 }
 
-fn fake_binding() -> Arc<crate::ports::ProviderBinding> {
-    Arc::new(crate::ports::ProviderBinding {
+fn fake_binding() -> Arc<crate::ports::ProviderBindingData> {
+    Arc::new(crate::ports::ProviderBindingData {
         provider: Arc::new(crate::application::loop_engine::chat::pre_compact_trigger_tests::StaticReflectionProvider),
         model: provider::ModelIdData {
             provider: "manual-test".to_string(),

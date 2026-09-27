@@ -8,7 +8,7 @@ use crate::application::loop_engine::input_strategy::SessionInputPort;
 use std::sync::Arc;
 
 /// 模型切换构建器类型（#567）：接受 selection 字符串，async 返回
-/// `(ProviderBinding, ModelSwitchResult)` 或 `String` 错误。
+/// `(ProviderBindingData, ModelSwitchResult)` 或 `String` 错误。
 pub type SwitchClientFn = Arc<
     dyn Fn(
             &str,
@@ -16,7 +16,7 @@ pub type SwitchClientFn = Arc<
             Box<
                 dyn std::future::Future<
                         Output = std::result::Result<
-                            (crate::ports::ProviderBinding, sdk::ModelSwitchResult),
+                            (crate::ports::ProviderBindingData, sdk::ModelSwitchResult),
                             String,
                         >,
                     > + Send,

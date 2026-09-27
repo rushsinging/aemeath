@@ -1,6 +1,6 @@
 //! Startup session 解析：startup resume 视图 → SDK backing 映射（from_args 职责 1）。
 //!
-//! `from_args_with_workspace` 只消费这里产出的 `(session_id, Option<backing>)`；
+//! `wire_agent_client_from_args` 只消费这里产出的 `(session_id, Option<backing>)`；
 //! 逐字段映射语义由 `startup_resume_tests` 锁定，`FinalizeCause` 枚举完备性
 //! 由 `sdk_event_mapper_tests` 承担。
 

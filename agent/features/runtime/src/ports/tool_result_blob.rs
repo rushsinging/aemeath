@@ -57,3 +57,7 @@ pub trait ToolResultBlobPort: Send + Sync {
         bytes: &[u8],
     ) -> Result<ToolResultBlobRef, ToolResultBlobError>;
 }
+
+#[cfg(test)]
+#[path = "tool_result_blob_contract_tests.rs"]
+mod tool_result_blob_contract_tests;

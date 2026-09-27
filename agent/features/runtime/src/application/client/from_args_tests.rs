@@ -93,10 +93,10 @@ fn bootstrap_dependencies_do_not_duplicate_runtime_services() {
     let source = include_str!("from_args.rs");
     let production = source.split("#[cfg(test)]").next().unwrap_or(source);
     let bootstrap = production
-        .split("pub struct RuntimeBootstrapDependencies")
+        .split("pub struct RuntimeBootstrapDependenciesData")
         .nth(1)
-        .and_then(|rest| rest.split("impl RuntimeBootstrapDependencies").next())
-        .expect("RuntimeBootstrapDependencies definition");
+        .and_then(|rest| rest.split("impl RuntimeBootstrapDependenciesData").next())
+        .expect("RuntimeBootstrapDependenciesData definition");
     assert!(!bootstrap.contains("reflection_history:"));
     assert!(!bootstrap.contains("policy:"));
     assert!(!bootstrap.contains("task_access:"));
@@ -144,14 +144,14 @@ fn runtime_bootstrap_does_not_resolve_agent_concurrency() {
 fn runtime_bootstrap_does_not_construct_agent_runner() {
     let source = include_str!("from_args.rs");
     let production = source.split("#[cfg(test)]").next().unwrap_or(source);
-    assert!(!production.contains("build_agent_runner("));
+    assert!(!production.contains("wire_agent_runner("));
 }
 
 #[test]
 fn runtime_bootstrap_does_not_construct_initial_provider_binding() {
     let source = include_str!("from_args.rs");
     let production = source.split("#[cfg(test)]").next().unwrap_or(source);
-    assert!(!production.contains("ProviderBuildSpec {"));
+    assert!(!production.contains("ProviderBuildSpecData {"));
     assert!(!production.contains("provider_factory.build("));
 }
 
@@ -578,7 +578,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     .expect("test hook dispatcher");
     let initial_binding = crate::ports::ProviderFactory::build(
         &crate::ports::provider_port::fake::FakeProviderFactory,
-        crate::ports::ProviderBuildSpec {
+        crate::ports::ProviderBuildSpecData {
             driver: "openai".to_string(),
             source_key: "local".to_string(),
             api_style: None,
@@ -597,15 +597,15 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     )
     .expect("build initial binding");
     let initial_snapshot = config.reader().committed_snapshot();
-    let compact_model_slot = crate::SessionModelSlot::new();
-    let initial_provider = InitialProviderAssembly::new(
+    let compact_model_slot = crate::SessionModelSlotData::new();
+    let initial_provider = InitialProviderAssemblyData::new(
         initial_binding,
         initial_snapshot
             .resolve_runtime_model(None, None)
             .expect("resolve test model")
             .resolved_model()
             .clone(),
-        ModelRuntimeSettings {
+        ModelRuntimeSettingsData {
             max_tokens: 8192,
             reasoning: false,
             reasoning_effort: None,
@@ -632,14 +632,14 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
             Arc::new(crate::ports::UnavailableUsageSink),
         ),
     );
-    let dependencies = RuntimeBootstrapDependencies::new(
-        RuntimeCoreDependencies::new(
+    let dependencies = RuntimeBootstrapDependenciesData::new(
+        RuntimeCoreDependenciesData::new(
             workspace.clone(),
             wiring,
             Arc::new(crate::ports::provider_port::fake::FakeProviderFactory),
             Arc::new(context::test_support::UnavailableSessionManagement),
         ),
-        RuntimeToolAssemblyDependencies::new(
+        RuntimeToolAssemblyDependenciesData::new(
             tools.catalog_port(),
             skill_wiring.catalog(),
             tool_result_materializer,
@@ -647,14 +647,14 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         ),
         crate::composition::wire_sdk_chat_ingress(),
         initial_provider,
-        SessionBootstrapAssembly::new(root.clone(), 8192, true, false, None),
-        PromptAssembly::new(Vec::new(), String::new(), String::new(), "test-model"),
-        SkillBootstrapAssembly::new(
+        SessionBootstrapAssemblyData::new(root.clone(), 8192, true, false, None),
+        PromptAssemblyData::new(Vec::new(), String::new(), String::new(), "test-model"),
+        SkillBootstrapAssemblyData::new(
             skill_wiring.catalog(),
             workspace.clone(),
             tools::SkillQuery::new(root.clone(), Vec::new(), Default::default()),
         ),
-        crate::application::client::bootstrap::AgentRunnerAssembly {
+        crate::application::client::bootstrap::AgentRunnerAssemblyData {
             runner: Arc::new(NoopRunner),
             parent_context_source: crate::application::run::context::ParentRunContextSource::new(),
             active_run: active_run.clone(),
@@ -664,7 +664,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
             runtime_context_factory: runtime_context_factory.clone(),
         },
     );
-    let client = from_args_with_workspace(args, dependencies)
+    let client = wire_agent_client_from_args(args, dependencies)
         .await
         .expect("build client with workspace");
 

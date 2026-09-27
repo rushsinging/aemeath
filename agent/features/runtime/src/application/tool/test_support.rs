@@ -23,7 +23,7 @@ pub(crate) fn test_tool_result_materializer(
     Arc::new(
         super::tool_result_materializer::ToolResultMaterializer::new(
             Arc::new(TestBlobPort),
-            super::tool_result_materializer::ToolResultMaterializationPolicy::new(
+            super::tool_result_materializer::ToolResultMaterializationPolicyData::new(
                 50_000, 2_000, 500,
             ),
         ),

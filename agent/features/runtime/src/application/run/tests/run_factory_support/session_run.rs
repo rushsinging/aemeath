@@ -8,7 +8,7 @@ use crate::application::run::creation::{
 };
 use crate::application::run::factory::RunFactory;
 use crate::domain::agent_run::RunSpec;
-use crate::ports::{ContextPort, ProviderBinding};
+use crate::ports::{ContextPort, ProviderBindingData};
 
 struct FixedMainContextFactory {
     context: Arc<dyn ContextPort>,
@@ -38,7 +38,7 @@ pub(crate) struct SessionRunFixture {
     session_bindings: SessionRunBindings,
     context_port: Arc<dyn ContextPort>,
     memory: Arc<dyn memory::api::MemoryPort>,
-    provider: Arc<ProviderBinding>,
+    provider: Arc<ProviderBindingData>,
     interaction: Arc<dyn InteractionPort>,
     reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
     event_sink: RecordingEventSink,
@@ -79,7 +79,7 @@ impl SessionRunFixture {
         &self.memory
     }
 
-    pub(crate) fn provider(&self) -> &Arc<ProviderBinding> {
+    pub(crate) fn provider(&self) -> &Arc<ProviderBindingData> {
         &self.provider
     }
 
@@ -130,7 +130,7 @@ impl Default for SessionRunFixture {
 
 pub(crate) struct SessionRunFixtureBuilder {
     context_port: Arc<dyn ContextPort>,
-    provider: Arc<ProviderBinding>,
+    provider: Arc<ProviderBindingData>,
     interaction: Arc<dyn InteractionPort>,
     reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
     event_sink: RecordingEventSink,
@@ -182,7 +182,7 @@ impl SessionRunFixtureBuilder {
         self
     }
 
-    pub(crate) fn with_provider_binding(mut self, provider: Arc<ProviderBinding>) -> Self {
+    pub(crate) fn with_provider_binding(mut self, provider: Arc<ProviderBindingData>) -> Self {
         self.provider = provider;
         self
     }
