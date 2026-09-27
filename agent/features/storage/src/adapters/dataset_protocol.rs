@@ -3,8 +3,8 @@
 //! 本模块只负责 manifest 记录与事务 journal 的 serde 编解码，以及若干受
 //! cap-std 约束的文件读写工具。协议本身独立于 blob 协议，不复用 AtomicBlobPort。
 //!
-//! 磁盘布局（每个 DatasetKey 一个目录）：
-//! - `dataset.lock`            每 DatasetKey 的 OS 排他锁文件
+//! 磁盘布局（每个 DatasetKeyData 一个目录）：
+//! - `dataset.lock`            每 DatasetKeyData 的 OS 排他锁文件
 //! - `members/<内容摘要>`       跨代共享的不可变成员内容
 //! - `primary/manifest.json`   当前代权威 manifest（名称到内容摘要的完整映射）
 //! - `previous/manifest.json`  上一代权威 manifest
@@ -22,7 +22,7 @@ use cap_std::fs::{Dir, OpenOptions};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{SafePathSegment, StorageError, StorageErrorKind};
+use crate::{SafePathSegmentData, StorageError, StorageErrorKind};
 
 pub(super) const LOCK_FILE: &str = "dataset.lock";
 pub(super) const JOURNAL_FILE: &str = "journal.json";
@@ -60,7 +60,7 @@ pub(super) enum JournalKind {
 ///   的新代一致（物理证据校验）。
 /// - `字节数` 与 `修订摘要`：`revision_member_digest`（同 atomic_dataset
 ///   `MEMBER_BYTES_DOMAIN`），使得恢复时无需原始字节即可用「canonical 名称 + 字节数 +
-///   成员摘要」精确重算 `DatasetRevision`，据此语义校验 journal 记录的修订号是否自洽。
+///   成员摘要」精确重算 `DatasetRevisionData`，据此语义校验 journal 记录的修订号是否自洽。
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(super) struct JournalMember {
     #[serde(rename = "名称")]
@@ -153,7 +153,7 @@ pub(super) fn is_hex64(value: &str) -> bool {
 /// - 旧/新修订号：恰好 64 位十六进制；
 /// - 成员集合：名称为安全路径段、摘要 64 位十六进制、按名称严格升序且无重复。
 pub(super) fn validate_journal_structure(journal: &DatasetJournal) -> Result<(), ()> {
-    if SafePathSegment::from_str(&journal.随机数).is_err() {
+    if SafePathSegmentData::from_str(&journal.随机数).is_err() {
         return Err(());
     }
     if !is_hex64(&journal.旧修订号) || !is_hex64(&journal.新修订号) {
@@ -161,7 +161,7 @@ pub(super) fn validate_journal_structure(journal: &DatasetJournal) -> Result<(),
     }
     let mut previous: Option<&str> = None;
     for member in &journal.成员集合 {
-        if SafePathSegment::from_str(&member.名称).is_err() {
+        if SafePathSegmentData::from_str(&member.名称).is_err() {
             return Err(());
         }
         if !is_hex64(&member.摘要) || !is_hex64(&member.修订摘要) {
@@ -329,7 +329,7 @@ pub(super) fn digest_file(dir: &Dir, path: &Path) -> Result<Option<String>, Stor
     }
 }
 
-/// 计算成员字节参与 `DatasetRevision` 运算的领域摘要（十六进制），与
+/// 计算成员字节参与 `DatasetRevisionData` 运算的领域摘要（十六进制），与
 /// atomic_dataset `MEMBER_BYTES_DOMAIN` 算法一致。持久化进 journal 后，恢复时无需
 /// 原始字节即可精确重算修订号。
 pub(super) fn revision_member_digest_hex(bytes: &[u8]) -> String {

@@ -4,9 +4,10 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use super::FileSystemDatasetAdapter;
 use crate::domain::{
-    revision_member_digest, DatasetChangeSet, DatasetCommitVisibility, DatasetKey, DatasetManifest,
-    DatasetMember, DatasetMemberChange, DatasetMemberReference, DatasetReadOutcome,
-    DatasetRevision, Durability, SafePathSegment, StorageErrorKind, StorageNamespace, WriteOptions,
+    revision_member_digest, DatasetChangeSetData, DatasetCommitVisibilityData, DatasetKeyData,
+    DatasetManifestData, DatasetMemberChangeData, DatasetMemberData, DatasetMemberReferenceData,
+    DatasetReadOutcomeData, DatasetRevisionData, DurabilityData, SafePathSegmentData,
+    StorageErrorKind, StorageNamespaceData, WriteOptionsData,
 };
 use crate::ports::AtomicDatasetPort;
 use crate::test_log;
@@ -61,26 +62,26 @@ fn root() -> std::path::PathBuf {
     ))
 }
 
-fn key() -> DatasetKey {
-    DatasetKey::new(
-        StorageNamespace::Memory,
-        vec![SafePathSegment::from_str("conv-log").unwrap()],
+fn key() -> DatasetKeyData {
+    DatasetKeyData::new(
+        StorageNamespaceData::Memory,
+        vec![SafePathSegmentData::from_str("conv-log").unwrap()],
     )
     .unwrap()
 }
 
-fn member(name: &str, bytes: &[u8]) -> DatasetMember {
-    DatasetMember::new(SafePathSegment::from_str(name).unwrap(), bytes.to_vec())
+fn member(name: &str, bytes: &[u8]) -> DatasetMemberData {
+    DatasetMemberData::new(SafePathSegmentData::from_str(name).unwrap(), bytes.to_vec())
 }
 
 fn member_reference(
-    revision: &DatasetRevision,
+    revision: &DatasetRevisionData,
     name: &str,
     bytes: &[u8],
-) -> DatasetMemberReference {
-    DatasetMemberReference::from_manifest_member(
+) -> DatasetMemberReferenceData {
+    DatasetMemberReferenceData::from_manifest_member(
         revision.clone(),
-        SafePathSegment::from_str(name).expect("safe member name"),
+        SafePathSegmentData::from_str(name).expect("safe member name"),
         bytes.len() as u64,
         revision_member_digest(bytes),
     )
@@ -110,7 +111,7 @@ async fn incremental_commit_persists_only_changed_member_content() {
             &key,
             &empty_revision,
             &historical_members,
-            WriteOptions::new(Durability::BestEffort),
+            WriteOptionsData::new(DurabilityData::BestEffort),
         )
         .await
         .expect("seed generation");
@@ -120,9 +121,9 @@ async fn incremental_commit_persists_only_changed_member_content() {
         .expect("read current manifest");
     let current_revision = current_manifest.revision().clone();
     let changed_name = "history-000";
-    let changes = DatasetChangeSet::new(
+    let changes = DatasetChangeSetData::new(
         current_revision.clone(),
-        vec![DatasetMemberChange::Replace(member(
+        vec![DatasetMemberChangeData::Replace(member(
             changed_name,
             b"changed",
         ))],
@@ -141,7 +142,11 @@ async fn incremental_commit_persists_only_changed_member_content() {
     .expect("valid incremental change set");
     let dataset_path = root.join("memory").join("conv-log");
     adapter
-        .commit_incremental(&key, &changes, WriteOptions::new(Durability::BestEffort))
+        .commit_incremental(
+            &key,
+            &changes,
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
         .await
         .expect("first incremental commit migrates legacy member content");
     let migrated_manifest = adapter
@@ -149,9 +154,9 @@ async fn incremental_commit_persists_only_changed_member_content() {
         .await
         .expect("read migrated manifest");
     let migrated_revision = migrated_manifest.revision().clone();
-    let second_changes = DatasetChangeSet::new(
+    let second_changes = DatasetChangeSetData::new(
         migrated_revision.clone(),
-        vec![DatasetMemberChange::Replace(member(
+        vec![DatasetMemberChangeData::Replace(member(
             changed_name,
             b"changed-again",
         ))],
@@ -174,7 +179,7 @@ async fn incremental_commit_persists_only_changed_member_content() {
         .commit_incremental(
             &key,
             &second_changes,
-            WriteOptions::new(Durability::BestEffort),
+            WriteOptionsData::new(DurabilityData::BestEffort),
         )
         .await
         .expect("incremental commit");
@@ -249,7 +254,7 @@ async fn legacy_manifest_without_member_evidence_reads_and_migrates_on_increment
     std::fs::create_dir_all(&primary_blobs).expect("create legacy primary blobs");
     let active = member("active", b"a1");
     let archive = member("archive", b"z1");
-    let legacy_manifest = DatasetManifest::new(vec![active.clone(), archive.clone()])
+    let legacy_manifest = DatasetManifestData::new(vec![active.clone(), archive.clone()])
         .expect("legacy manifest domain value");
     std::fs::write(primary_blobs.join("active"), active.bytes()).expect("write legacy active");
     std::fs::write(primary_blobs.join("archive"), archive.bytes()).expect("write legacy archive");
@@ -265,10 +270,10 @@ async fn legacy_manifest_without_member_evidence_reads_and_migrates_on_increment
 
     let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
     let requested = [
-        SafePathSegment::from_str("active").expect("safe member name"),
-        SafePathSegment::from_str("archive").expect("safe member name"),
+        SafePathSegmentData::from_str("active").expect("safe member name"),
+        SafePathSegmentData::from_str("archive").expect("safe member name"),
     ];
-    let DatasetReadOutcome::Found(read) = adapter
+    let DatasetReadOutcomeData::Found(read) = adapter
         .read_consistent(&key(), &requested)
         .await
         .expect("legacy manifest must remain readable")
@@ -277,9 +282,9 @@ async fn legacy_manifest_without_member_evidence_reads_and_migrates_on_increment
     };
     assert_eq!(read.members(), &[active.clone(), archive.clone()]);
 
-    let changes = DatasetChangeSet::new(
+    let changes = DatasetChangeSetData::new(
         legacy_manifest.revision().clone(),
-        vec![DatasetMemberChange::Replace(member("active", b"a2"))],
+        vec![DatasetMemberChangeData::Replace(member("active", b"a2"))],
         vec![member_reference(
             legacy_manifest.revision(),
             "archive",
@@ -288,7 +293,11 @@ async fn legacy_manifest_without_member_evidence_reads_and_migrates_on_increment
     )
     .expect("valid migration change set");
     adapter
-        .commit_incremental(&key(), &changes, WriteOptions::new(Durability::BestEffort))
+        .commit_incremental(
+            &key(),
+            &changes,
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
         .await
         .expect("first incremental commit migrates legacy manifest");
 
@@ -323,7 +332,7 @@ async fn legacy_manifest_with_revision_evidence_but_without_content_digests_read
     std::fs::create_dir_all(&primary_blobs).expect("create legacy primary blobs");
     let active = member("active", b"a1");
     let archive = member("archive", b"z1");
-    let legacy_manifest = DatasetManifest::new(vec![active.clone(), archive.clone()])
+    let legacy_manifest = DatasetManifestData::new(vec![active.clone(), archive.clone()])
         .expect("legacy manifest domain value");
     std::fs::write(primary_blobs.join("active"), active.bytes()).expect("write legacy active");
     std::fs::write(primary_blobs.join("archive"), archive.bytes()).expect("write legacy archive");
@@ -351,10 +360,10 @@ async fn legacy_manifest_with_revision_evidence_but_without_content_digests_read
 
     let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
     let requested = [
-        SafePathSegment::from_str("active").expect("safe member name"),
-        SafePathSegment::from_str("archive").expect("safe member name"),
+        SafePathSegmentData::from_str("active").expect("safe member name"),
+        SafePathSegmentData::from_str("archive").expect("safe member name"),
     ];
-    let DatasetReadOutcome::Found(read) = adapter
+    let DatasetReadOutcomeData::Found(read) = adapter
         .read_consistent(&key(), &requested)
         .await
         .expect("legacy manifest with revision evidence must remain readable")
@@ -363,9 +372,9 @@ async fn legacy_manifest_with_revision_evidence_but_without_content_digests_read
     };
     assert_eq!(read.members(), &[active.clone(), archive.clone()]);
 
-    let changes = DatasetChangeSet::new(
+    let changes = DatasetChangeSetData::new(
         legacy_manifest.revision().clone(),
-        vec![DatasetMemberChange::Replace(member("active", b"a2"))],
+        vec![DatasetMemberChangeData::Replace(member("active", b"a2"))],
         vec![member_reference(
             legacy_manifest.revision(),
             "archive",
@@ -374,7 +383,11 @@ async fn legacy_manifest_with_revision_evidence_but_without_content_digests_read
     )
     .expect("valid migration change set");
     adapter
-        .commit_incremental(&key(), &changes, WriteOptions::new(Durability::BestEffort))
+        .commit_incremental(
+            &key(),
+            &changes,
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
         .await
         .expect("first incremental commit migrates legacy manifest");
 
@@ -412,7 +425,7 @@ async fn incremental_commit_reuses_verified_member_and_publishes_complete_genera
             &key,
             &empty_revision,
             &[member("active", b"a1"), member("archive", b"z1")],
-            WriteOptions::new(Durability::BestEffort),
+            WriteOptionsData::new(DurabilityData::BestEffort),
         )
         .await
         .expect("seed generation");
@@ -422,23 +435,27 @@ async fn incremental_commit_reuses_verified_member_and_publishes_complete_genera
         .expect("read current manifest")
         .revision()
         .clone();
-    let changes = DatasetChangeSet::new(
+    let changes = DatasetChangeSetData::new(
         current_revision.clone(),
-        vec![DatasetMemberChange::Replace(member("active", b"a2"))],
+        vec![DatasetMemberChangeData::Replace(member("active", b"a2"))],
         vec![member_reference(&current_revision, "archive", b"z1")],
     )
     .expect("valid incremental change set");
 
     adapter
-        .commit_incremental(&key, &changes, WriteOptions::new(Durability::BestEffort))
+        .commit_incremental(
+            &key,
+            &changes,
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
         .await
         .expect("incremental commit");
 
     let requested = [
-        SafePathSegment::from_str("active").expect("safe member name"),
-        SafePathSegment::from_str("archive").expect("safe member name"),
+        SafePathSegmentData::from_str("active").expect("safe member name"),
+        SafePathSegmentData::from_str("archive").expect("safe member name"),
     ];
-    let DatasetReadOutcome::Found(read) = adapter
+    let DatasetReadOutcomeData::Found(read) = adapter
         .read_consistent(&key, &requested)
         .await
         .expect("read complete generation")
@@ -483,7 +500,7 @@ async fn incremental_commit_rejects_reused_member_when_primary_bytes_do_not_matc
             &key,
             &empty_revision,
             &[member("active", b"a1"), member("archive", b"z1")],
-            WriteOptions::new(Durability::BestEffort),
+            WriteOptionsData::new(DurabilityData::BestEffort),
         )
         .await
         .expect("seed generation");
@@ -494,15 +511,19 @@ async fn incremental_commit_rejects_reused_member_when_primary_bytes_do_not_matc
         .revision()
         .clone();
     let invalid_reference = member_reference(&current_revision, "archive", b"other");
-    let changes = DatasetChangeSet::new(
+    let changes = DatasetChangeSetData::new(
         current_revision,
-        vec![DatasetMemberChange::Replace(member("active", b"a2"))],
+        vec![DatasetMemberChangeData::Replace(member("active", b"a2"))],
         vec![invalid_reference],
     )
     .expect("domain-valid reference");
 
     let error = adapter
-        .commit_incremental(&key, &changes, WriteOptions::new(Durability::BestEffort))
+        .commit_incremental(
+            &key,
+            &changes,
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
         .await
         .expect_err("mismatched reuse evidence must be rejected");
 
@@ -510,8 +531,8 @@ async fn incremental_commit_rejects_reused_member_when_primary_bytes_do_not_matc
         error.kind(),
         StorageErrorKind::CorruptTransaction(_)
     ));
-    let requested = [SafePathSegment::from_str("active").expect("safe member name")];
-    let DatasetReadOutcome::Found(read) = adapter
+    let requested = [SafePathSegmentData::from_str("active").expect("safe member name")];
+    let DatasetReadOutcomeData::Found(read) = adapter
         .read_consistent(&key, &requested)
         .await
         .expect("read unchanged primary")
@@ -539,7 +560,7 @@ async fn incremental_commit_rejects_reused_member_missing_from_primary_manifest(
             &key,
             &empty_revision,
             &[member("active", b"a1")],
-            WriteOptions::new(Durability::BestEffort),
+            WriteOptionsData::new(DurabilityData::BestEffort),
         )
         .await
         .expect("seed generation");
@@ -549,7 +570,7 @@ async fn incremental_commit_rejects_reused_member_missing_from_primary_manifest(
         .expect("read current manifest")
         .revision()
         .clone();
-    let changes = DatasetChangeSet::new(
+    let changes = DatasetChangeSetData::new(
         current_revision.clone(),
         Vec::new(),
         vec![member_reference(&current_revision, "archive", b"z1")],
@@ -557,7 +578,11 @@ async fn incremental_commit_rejects_reused_member_missing_from_primary_manifest(
     .expect("domain-valid reference");
 
     let error = adapter
-        .commit_incremental(&key, &changes, WriteOptions::new(Durability::BestEffort))
+        .commit_incremental(
+            &key,
+            &changes,
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
         .await
         .expect_err("missing source member must be rejected");
 
@@ -589,7 +614,7 @@ async fn incremental_commit_removes_only_explicit_omitted_member() {
                 member("archive", b"z1"),
                 member("index", b"i1"),
             ],
-            WriteOptions::new(Durability::BestEffort),
+            WriteOptionsData::new(DurabilityData::BestEffort),
         )
         .await
         .expect("seed generation");
@@ -599,7 +624,7 @@ async fn incremental_commit_removes_only_explicit_omitted_member() {
         .expect("read current manifest")
         .revision()
         .clone();
-    let changes = DatasetChangeSet::new(
+    let changes = DatasetChangeSetData::new(
         current_revision.clone(),
         Vec::new(),
         vec![
@@ -609,12 +634,16 @@ async fn incremental_commit_removes_only_explicit_omitted_member() {
     )
     .expect("valid incremental change set")
     .with_removed_members(vec![
-        SafePathSegment::from_str("archive").expect("safe member name")
+        SafePathSegmentData::from_str("archive").expect("safe member name")
     ])
     .expect("valid removal");
 
     adapter
-        .commit_incremental(&key, &changes, WriteOptions::new(Durability::BestEffort))
+        .commit_incremental(
+            &key,
+            &changes,
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
         .await
         .expect("incremental removal");
 
@@ -622,7 +651,7 @@ async fn incremental_commit_removes_only_explicit_omitted_member() {
     let names = manifest
         .members()
         .iter()
-        .map(SafePathSegment::as_str)
+        .map(SafePathSegmentData::as_str)
         .collect::<Vec<_>>();
     assert_eq!(names, ["active", "index"]);
 
@@ -649,7 +678,7 @@ async fn incremental_commit_after_prepared_recovers_complete_generation() {
             &key,
             &empty_revision,
             &[member("active", b"a1"), member("archive", b"z1")],
-            WriteOptions::new(Durability::BestEffort),
+            WriteOptionsData::new(DurabilityData::BestEffort),
         )
         .await
         .expect("seed generation");
@@ -659,29 +688,33 @@ async fn incremental_commit_after_prepared_recovers_complete_generation() {
         .expect("read current manifest")
         .revision()
         .clone();
-    let changes = DatasetChangeSet::new(
+    let changes = DatasetChangeSetData::new(
         current_revision.clone(),
-        vec![DatasetMemberChange::Replace(member("active", b"a2"))],
+        vec![DatasetMemberChangeData::Replace(member("active", b"a2"))],
         vec![member_reference(&current_revision, "archive", b"z1")],
     )
     .expect("valid incremental change set");
 
     let fault = FaultEnvGuard::after_prepared();
     let receipt = adapter
-        .commit_incremental(&key, &changes, WriteOptions::new(Durability::BestEffort))
+        .commit_incremental(
+            &key,
+            &changes,
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
         .await
         .expect("post-Prepared failure is committed");
     assert_eq!(
         receipt.visibility(),
-        DatasetCommitVisibility::RecoveryPending
+        DatasetCommitVisibilityData::RecoveryPending
     );
     drop(fault);
 
     let requested = [
-        SafePathSegment::from_str("active").expect("safe member name"),
-        SafePathSegment::from_str("archive").expect("safe member name"),
+        SafePathSegmentData::from_str("active").expect("safe member name"),
+        SafePathSegmentData::from_str("archive").expect("safe member name"),
     ];
-    let DatasetReadOutcome::Found(read) = adapter
+    let DatasetReadOutcomeData::Found(read) = adapter
         .read_consistent(&key, &requested)
         .await
         .expect("next lock entry rolls generation forward")
@@ -749,7 +782,7 @@ async fn commit_recovery_pending_emits_warn() {
     let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
     let key = key();
 
-    let expected: DatasetRevision = adapter
+    let expected: DatasetRevisionData = adapter
         .read_manifest(&key)
         .await
         .expect("read_manifest")
@@ -760,12 +793,12 @@ async fn commit_recovery_pending_emits_warn() {
             &key,
             &expected,
             &[member("active", b"a1")],
-            WriteOptions::new(Durability::BestEffort),
+            WriteOptionsData::new(DurabilityData::BestEffort),
         )
         .await
         .expect("first commit");
 
-    let expected: DatasetRevision = adapter
+    let expected: DatasetRevisionData = adapter
         .read_manifest(&key)
         .await
         .expect("read_manifest")
@@ -779,7 +812,7 @@ async fn commit_recovery_pending_emits_warn() {
             &key,
             &expected,
             &[member("active", b"a2")],
-            WriteOptions::new(Durability::BestEffort),
+            WriteOptionsData::new(DurabilityData::BestEffort),
         )
         .await;
     let logs = test_log::drain();
@@ -788,7 +821,7 @@ async fn commit_recovery_pending_emits_warn() {
     let receipt = receipt.expect("post-Prepared fault returns committed receipt");
     assert_eq!(
         receipt.visibility(),
-        DatasetCommitVisibility::RecoveryPending,
+        DatasetCommitVisibilityData::RecoveryPending,
         "expected RecoveryPending visibility"
     );
     assert!(
@@ -826,7 +859,7 @@ async fn incremental_commit_collects_member_content_orphaned_by_older_generation
             &key,
             &empty_revision,
             &[member("active", b"v1"), member("pinned", b"keep")],
-            WriteOptions::new(Durability::BestEffort),
+            WriteOptionsData::new(DurabilityData::BestEffort),
         )
         .await
         .expect("seed generation");
@@ -842,9 +875,9 @@ async fn incremental_commit_collects_member_content_orphaned_by_older_generation
             .await
             .expect("read manifest after seed");
         let revision = current.revision().clone();
-        let changes = DatasetChangeSet::new(
+        let changes = DatasetChangeSetData::new(
             revision,
-            vec![DatasetMemberChange::Replace(member("active", b"v2"))],
+            vec![DatasetMemberChangeData::Replace(member("active", b"v2"))],
             vec![member_reference(
                 &current.revision().clone(),
                 "pinned",
@@ -853,7 +886,11 @@ async fn incremental_commit_collects_member_content_orphaned_by_older_generation
         )
         .expect("valid second change set");
         adapter
-            .commit_incremental(&key, &changes, WriteOptions::new(Durability::BestEffort))
+            .commit_incremental(
+                &key,
+                &changes,
+                WriteOptionsData::new(DurabilityData::BestEffort),
+            )
             .await
             .expect("second commit");
         adapter
@@ -874,9 +911,9 @@ async fn incremental_commit_collects_member_content_orphaned_by_older_generation
         .read_manifest(&key)
         .await
         .expect("read manifest after second commit");
-    let changes = DatasetChangeSet::new(
+    let changes = DatasetChangeSetData::new(
         second_revision,
-        vec![DatasetMemberChange::Replace(member("active", b"v3"))],
+        vec![DatasetMemberChangeData::Replace(member("active", b"v3"))],
         vec![member_reference(
             current_manifest.revision(),
             "pinned",
@@ -885,7 +922,11 @@ async fn incremental_commit_collects_member_content_orphaned_by_older_generation
     )
     .expect("valid third change set");
     adapter
-        .commit_incremental(&key, &changes, WriteOptions::new(Durability::BestEffort))
+        .commit_incremental(
+            &key,
+            &changes,
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
         .await
         .expect("third commit");
 
@@ -940,7 +981,7 @@ async fn dataset_read_entry_collects_pre_existing_orphan_member_content() {
             &key,
             &empty_revision,
             &[member("active", b"a1")],
-            WriteOptions::new(Durability::BestEffort),
+            WriteOptionsData::new(DurabilityData::BestEffort),
         )
         .await
         .expect("seed generation");
@@ -950,8 +991,8 @@ async fn dataset_read_entry_collects_pre_existing_orphan_member_content() {
     std::fs::write(member_store.join(&orphan_digest), b"leaked-legacy-content")
         .expect("plant pre-existing orphan content");
 
-    let requested = [SafePathSegment::from_str("active").expect("safe member name")];
-    let DatasetReadOutcome::Found(read) = adapter
+    let requested = [SafePathSegmentData::from_str("active").expect("safe member name")];
+    let DatasetReadOutcomeData::Found(read) = adapter
         .read_consistent(&key, &requested)
         .await
         .expect("read after planting orphan")

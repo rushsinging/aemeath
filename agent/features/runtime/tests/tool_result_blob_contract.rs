@@ -4,15 +4,15 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use runtime::{AtomicBlobToolResultStore, ToolResultBlobPort};
 use storage::{
-    AtomicBlobPort, BlobRead, DeleteOptions, DeleteOutcome, Generation, PromoteOutcome,
-    QuarantineOutcome, QuarantineReason, ReadOutcome, StorageError, StorageKey, TransactionScope,
-    WriteOptions, WriteReceipt,
+    AtomicBlobPort, BlobReadData, DeleteOptionsData, DeleteOutcomeData, GenerationData,
+    PromoteOutcomeData, QuarantineOutcomeData, QuarantineReason, ReadOutcomeData, StorageError,
+    StorageKeyData, TransactionScopeData, WriteOptionsData, WriteReceiptData,
 };
 
 #[derive(Default)]
 struct FakeBlobPort {
-    values: Mutex<HashMap<StorageKey, Vec<u8>>>,
-    writes: Mutex<Vec<(StorageKey, Vec<u8>, WriteOptions)>>,
+    values: Mutex<HashMap<StorageKeyData, Vec<u8>>>,
+    writes: Mutex<Vec<(StorageKeyData, Vec<u8>, WriteOptionsData)>>,
     write_failure: Mutex<Option<String>>,
 }
 
@@ -20,24 +20,24 @@ struct FakeBlobPort {
 impl AtomicBlobPort for FakeBlobPort {
     async fn read(
         &self,
-        key: &StorageKey,
-        generation: Generation,
-    ) -> Result<ReadOutcome, StorageError> {
-        if generation == Generation::Previous {
-            return Ok(ReadOutcome::NotFound);
+        key: &StorageKeyData,
+        generation: GenerationData,
+    ) -> Result<ReadOutcomeData, StorageError> {
+        if generation == GenerationData::Previous {
+            return Ok(ReadOutcomeData::NotFound);
         }
         Ok(match self.values.lock().unwrap().get(key) {
-            Some(bytes) => ReadOutcome::Found(BlobRead::new(generation, bytes.clone())),
-            None => ReadOutcome::NotFound,
+            Some(bytes) => ReadOutcomeData::Found(BlobReadData::new(generation, bytes.clone())),
+            None => ReadOutcomeData::NotFound,
         })
     }
 
     async fn write_atomic(
         &self,
-        key: &StorageKey,
+        key: &StorageKeyData,
         bytes: &[u8],
-        options: WriteOptions,
-    ) -> Result<WriteReceipt, StorageError> {
+        options: WriteOptionsData,
+    ) -> Result<WriteReceiptData, StorageError> {
         if let Some(message) = self.write_failure.lock().unwrap().clone() {
             return Err(StorageError::new(storage::StorageErrorKind::Io, message));
         }
@@ -49,39 +49,42 @@ impl AtomicBlobPort for FakeBlobPort {
             .lock()
             .unwrap()
             .push((key.clone(), bytes.to_vec(), options));
-        Ok(WriteReceipt::committed(None))
+        Ok(WriteReceiptData::committed(None))
     }
 
-    async fn promote_previous(&self, _key: &StorageKey) -> Result<PromoteOutcome, StorageError> {
-        Ok(PromoteOutcome::NotFound)
+    async fn promote_previous(
+        &self,
+        _key: &StorageKeyData,
+    ) -> Result<PromoteOutcomeData, StorageError> {
+        Ok(PromoteOutcomeData::NotFound)
     }
 
     async fn quarantine(
         &self,
-        _key: &StorageKey,
-        _generation: Generation,
-        _scope: TransactionScope,
+        _key: &StorageKeyData,
+        _generation: GenerationData,
+        _scope: TransactionScopeData,
         _reason: QuarantineReason,
-    ) -> Result<QuarantineOutcome, StorageError> {
-        Ok(QuarantineOutcome::already_absent(
-            Generation::Primary,
-            TransactionScope::Blob,
+    ) -> Result<QuarantineOutcomeData, StorageError> {
+        Ok(QuarantineOutcomeData::already_absent(
+            GenerationData::Primary,
+            TransactionScopeData::Blob,
             QuarantineReason::DecoderRejected,
         ))
     }
 
     async fn delete_all_generations(
         &self,
-        _key: &StorageKey,
-        _options: DeleteOptions,
-    ) -> Result<DeleteOutcome, StorageError> {
-        Ok(DeleteOutcome::new(false, false, false))
+        _key: &StorageKeyData,
+        _options: DeleteOptionsData,
+    ) -> Result<DeleteOutcomeData, StorageError> {
+        Ok(DeleteOutcomeData::new(false, false, false))
     }
 
     async fn list_primary(
         &self,
-        _namespace: storage::StorageNamespace,
-    ) -> Result<Vec<storage::StorageEntry>, StorageError> {
+        _namespace: storage::StorageNamespaceData,
+    ) -> Result<Vec<storage::StorageEntryData>, StorageError> {
         Ok(Vec::new())
     }
 }
@@ -104,7 +107,7 @@ async fn adapter_maps_ids_to_tool_result_namespace_and_is_write_once_idempotent(
     assert_eq!(blob.writes.lock().unwrap().len(), 1);
     let writes = blob.writes.lock().unwrap();
     let (key, bytes, options) = &writes[0];
-    assert_eq!(key.namespace(), storage::StorageNamespace::ToolResult);
+    assert_eq!(key.namespace(), storage::StorageNamespaceData::ToolResult);
     assert_eq!(
         key.segments()
             .iter()
@@ -113,7 +116,10 @@ async fn adapter_maps_ids_to_tool_result_namespace_and_is_write_once_idempotent(
         vec!["session-1", "tool-1"]
     );
     assert_eq!(bytes, b"full output");
-    assert_eq!(options.durability(), storage::Durability::ProcessCrashSafe);
+    assert_eq!(
+        options.durability(),
+        storage::DurabilityData::ProcessCrashSafe
+    );
 }
 
 #[tokio::test]

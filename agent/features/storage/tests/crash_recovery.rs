@@ -3,8 +3,8 @@ use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use storage::{
-    AtomicBlobPort, Durability, Generation, ReadOutcome, SafePathSegment, StorageKey,
-    StorageNamespace, WriteOptions,
+    AtomicBlobPort, DurabilityData, GenerationData, ReadOutcomeData, SafePathSegmentData,
+    StorageKeyData, StorageNamespaceData, WriteOptionsData,
 };
 use uuid::Uuid;
 
@@ -43,10 +43,10 @@ fn root(label: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("aemeath-storage-{label}-{}", Uuid::new_v4()))
 }
 
-fn key() -> StorageKey {
-    StorageKey::new(
-        StorageNamespace::Session,
-        vec![SafePathSegment::from_str("session-1").unwrap()],
+fn key() -> StorageKeyData {
+    StorageKeyData::new(
+        StorageNamespaceData::Session,
+        vec![SafePathSegmentData::from_str("session-1").unwrap()],
     )
     .unwrap()
 }
@@ -54,12 +54,12 @@ fn key() -> StorageKey {
 #[tokio::test]
 async fn replacement_never_moves_primary_before_commit() {
     let root = root("primary-window");
-    let adapter = storage::file_system_blob(&root).unwrap();
+    let adapter = storage::wire_file_system_blob(&root).unwrap();
     adapter
         .write_atomic(
             &key(),
             b"old",
-            WriteOptions::new(Durability::ProcessCrashSafe),
+            WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
         )
         .await
         .unwrap();
@@ -67,7 +67,7 @@ async fn replacement_never_moves_primary_before_commit() {
         .write_atomic(
             &key(),
             b"new",
-            WriteOptions::new(Durability::ProcessCrashSafe),
+            WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
         )
         .await
         .unwrap();
@@ -94,13 +94,13 @@ async fn replacement_never_moves_primary_before_commit() {
 #[test]
 fn conflicting_prepared_evidence_is_quarantined_with_typed_error() {
     let root = root("corruption");
-    let adapter = storage::file_system_blob(&root).unwrap();
+    let adapter = storage::wire_file_system_blob(&root).unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime
         .block_on(adapter.write_atomic(
             &key(),
             b"old",
-            WriteOptions::new(Durability::ProcessCrashSafe),
+            WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
         ))
         .unwrap();
     drop(adapter);
@@ -116,9 +116,9 @@ fn conflicting_prepared_evidence_is_quarantined_with_typed_error() {
     assert!(!status.success());
     std::fs::write(root.join("session/session-1"), b"tampered").unwrap();
 
-    let reopened = storage::file_system_blob(&root).unwrap();
+    let reopened = storage::wire_file_system_blob(&root).unwrap();
     let error = runtime
-        .block_on(reopened.read(&key(), Generation::Primary))
+        .block_on(reopened.read(&key(), GenerationData::Primary))
         .unwrap_err();
     let storage::StorageErrorKind::CorruptTransaction(corruption) = error.kind() else {
         panic!("digest conflict must be typed corruption");
@@ -151,12 +151,12 @@ fn helper_process_reports_fault_outcome() {
     let root = std::path::PathBuf::from(std::env::var_os("AEMEATH_STORAGE_MATRIX_ROOT").unwrap());
     let result =
         std::path::PathBuf::from(std::env::var_os("AEMEATH_STORAGE_MATRIX_RESULT").unwrap());
-    let adapter = storage::file_system_blob(&root).unwrap();
+    let adapter = storage::wire_file_system_blob(&root).unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let outcome = runtime.block_on(adapter.write_atomic(
         &key(),
         b"new",
-        WriteOptions::new(Durability::ProcessCrashSafe),
+        WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
     ));
     let label = match outcome {
         Ok(receipt) if receipt.warning().is_some() => "warning",
@@ -184,13 +184,13 @@ fn all_protocol_fault_points_preserve_commit_contract() {
         ("cleanup", "warning"),
     ] {
         let root = root(point);
-        let adapter = storage::file_system_blob(&root).unwrap();
+        let adapter = storage::wire_file_system_blob(&root).unwrap();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime
             .block_on(adapter.write_atomic(
                 &key(),
                 b"old",
-                WriteOptions::new(Durability::ProcessCrashSafe),
+                WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
             ))
             .unwrap();
         drop(adapter);
@@ -210,9 +210,9 @@ fn all_protocol_fault_points_preserve_commit_contract() {
             expected,
             "{point}"
         );
-        let reopened = storage::file_system_blob(&root).unwrap();
-        let ReadOutcome::Found(primary) = runtime
-            .block_on(reopened.read(&key(), Generation::Primary))
+        let reopened = storage::wire_file_system_blob(&root).unwrap();
+        let ReadOutcomeData::Found(primary) = runtime
+            .block_on(reopened.read(&key(), GenerationData::Primary))
             .unwrap()
         else {
             panic!("{point}: primary must remain readable");
@@ -233,25 +233,25 @@ fn helper_process_aborts_after_replace() {
         return;
     }
     let root = std::path::PathBuf::from(std::env::var_os("AEMEATH_STORAGE_CRASH_ROOT").unwrap());
-    let adapter = storage::file_system_blob(&root).unwrap();
+    let adapter = storage::wire_file_system_blob(&root).unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let _ = runtime.block_on(adapter.write_atomic(
         &key(),
         b"new",
-        WriteOptions::new(Durability::ProcessCrashSafe),
+        WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
     ));
 }
 
 #[test]
 fn process_abort_after_replace_rolls_forward_on_reopen() {
     let root = root("process-crash");
-    let adapter = storage::file_system_blob(&root).unwrap();
+    let adapter = storage::wire_file_system_blob(&root).unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     runtime
         .block_on(adapter.write_atomic(
             &key(),
             b"old",
-            WriteOptions::new(Durability::ProcessCrashSafe),
+            WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
         ))
         .unwrap();
     drop(adapter);
@@ -267,16 +267,16 @@ fn process_abort_after_replace_rolls_forward_on_reopen() {
         .unwrap();
     assert!(!status.success());
 
-    let reopened = storage::file_system_blob(&root).unwrap();
-    let ReadOutcome::Found(primary) = runtime
-        .block_on(reopened.read(&key(), Generation::Primary))
+    let reopened = storage::wire_file_system_blob(&root).unwrap();
+    let ReadOutcomeData::Found(primary) = runtime
+        .block_on(reopened.read(&key(), GenerationData::Primary))
         .unwrap()
     else {
         panic!("recovery must publish the committed primary");
     };
     assert_eq!(primary.bytes(), b"new");
-    let ReadOutcome::Found(previous) = runtime
-        .block_on(reopened.read(&key(), Generation::Previous))
+    let ReadOutcomeData::Found(previous) = runtime
+        .block_on(reopened.read(&key(), GenerationData::Previous))
         .unwrap()
     else {
         panic!("recovery must promote previous.next");
@@ -293,18 +293,18 @@ fn helper_process_reports_post_commit_warning() {
     let root = std::path::PathBuf::from(std::env::var_os("AEMEATH_STORAGE_WARNING_ROOT").unwrap());
     let result =
         std::path::PathBuf::from(std::env::var_os("AEMEATH_STORAGE_WARNING_RESULT").unwrap());
-    let adapter = storage::file_system_blob(&root).unwrap();
+    let adapter = storage::wire_file_system_blob(&root).unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let receipt = runtime
         .block_on(adapter.write_atomic(
             &key(),
             b"new",
-            WriteOptions::new(Durability::ProcessCrashSafe),
+            WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
         ))
         .unwrap();
     assert_eq!(
         receipt.warning(),
-        Some(storage::CommitWarning::JournalCleanupPending)
+        Some(storage::CommitWarningData::JournalCleanupPending)
     );
     std::fs::write(result, b"warning").unwrap();
 }
@@ -324,10 +324,10 @@ fn post_commit_fault_returns_committed_warning() {
         .unwrap();
     assert!(status.success());
     assert_eq!(std::fs::read(result).unwrap(), b"warning");
-    let adapter = storage::file_system_blob(&root).unwrap();
+    let adapter = storage::wire_file_system_blob(&root).unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    let ReadOutcome::Found(primary) = runtime
-        .block_on(adapter.read(&key(), Generation::Primary))
+    let ReadOutcomeData::Found(primary) = runtime
+        .block_on(adapter.read(&key(), GenerationData::Primary))
         .unwrap()
     else {
         panic!("warning receipt must still publish new primary");
@@ -390,7 +390,7 @@ fn os_lock_serializes_another_process_for_same_key() {
         std::env::set_var("AEMEATH_STORAGE_BLOB_LOCK_ATTEMPT", &lock_attempt_for_read);
         let adapter = FileSystemBlobAdapter::new(&root_for_read).unwrap();
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let result = runtime.block_on(adapter.read(&key(), Generation::Primary));
+        let result = runtime.block_on(adapter.read(&key(), GenerationData::Primary));
         std::env::remove_var("AEMEATH_STORAGE_BLOB_LOCK_ATTEMPT");
         result.unwrap();
         std::fs::write(done_for_read, b"done").unwrap();
@@ -416,7 +416,11 @@ async fn orphan_previous_next_is_cleaned_only_when_matching_primary() {
     let matching_root = root("orphan-match");
     let adapter = FileSystemBlobAdapter::new(&matching_root).unwrap();
     adapter
-        .write_atomic(&key(), b"same", WriteOptions::new(Durability::BestEffort))
+        .write_atomic(
+            &key(),
+            b"same",
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
         .await
         .unwrap();
     std::fs::hard_link(
@@ -424,7 +428,7 @@ async fn orphan_previous_next_is_cleaned_only_when_matching_primary() {
         matching_root.join("session/session-1.previous.next"),
     )
     .unwrap();
-    adapter.read(&key(), Generation::Primary).await.unwrap();
+    adapter.read(&key(), GenerationData::Primary).await.unwrap();
     assert!(!matching_root
         .join("session/session-1.previous.next")
         .exists());
@@ -436,7 +440,7 @@ async fn orphan_previous_next_is_cleaned_only_when_matching_primary() {
         .write_atomic(
             &key(),
             b"primary",
-            WriteOptions::new(Durability::BestEffort),
+            WriteOptionsData::new(DurabilityData::BestEffort),
         )
         .await
         .unwrap();
@@ -445,7 +449,10 @@ async fn orphan_previous_next_is_cleaned_only_when_matching_primary() {
         b"other",
     )
     .unwrap();
-    let error = adapter.read(&key(), Generation::Primary).await.unwrap_err();
+    let error = adapter
+        .read(&key(), GenerationData::Primary)
+        .await
+        .unwrap_err();
     let storage::StorageErrorKind::CorruptTransaction(corruption) = error.kind() else {
         panic!("mismatched orphan must be typed corruption");
     };
@@ -464,8 +471,11 @@ async fn protocol_symlinks_fail_closed_without_touching_outside_file() {
     std::fs::write(&outside, b"safe").unwrap();
     #[cfg(unix)]
     std::os::unix::fs::symlink(&outside, root.join("session/session-1.lock")).unwrap();
-    let adapter = storage::file_system_blob(&root).unwrap();
-    let error = adapter.read(&key(), Generation::Primary).await.unwrap_err();
+    let adapter = storage::wire_file_system_blob(&root).unwrap();
+    let error = adapter
+        .read(&key(), GenerationData::Primary)
+        .await
+        .unwrap_err();
     assert_eq!(error.kind(), &storage::StorageErrorKind::InvalidKey);
     assert_eq!(std::fs::read(outside).unwrap(), b"safe");
     std::fs::remove_dir_all(root).unwrap();
@@ -474,19 +484,29 @@ async fn protocol_symlinks_fail_closed_without_touching_outside_file() {
 #[tokio::test]
 async fn concurrent_writers_serialize_and_leave_no_stage_collision() {
     let root = root("writers");
-    let left = storage::file_system_blob(&root).unwrap();
-    let right = storage::file_system_blob(&root).unwrap();
+    let left = storage::wire_file_system_blob(&root).unwrap();
+    let right = storage::wire_file_system_blob(&root).unwrap();
     let key = key();
     let (left_result, right_result) = tokio::join!(
-        left.write_atomic(&key, b"left", WriteOptions::new(Durability::BestEffort)),
-        right.write_atomic(&key, b"right", WriteOptions::new(Durability::BestEffort)),
+        left.write_atomic(
+            &key,
+            b"left",
+            WriteOptionsData::new(DurabilityData::BestEffort)
+        ),
+        right.write_atomic(
+            &key,
+            b"right",
+            WriteOptionsData::new(DurabilityData::BestEffort)
+        ),
     );
     left_result.unwrap();
     right_result.unwrap();
-    let ReadOutcome::Found(primary) = left.read(&key, Generation::Primary).await.unwrap() else {
+    let ReadOutcomeData::Found(primary) = left.read(&key, GenerationData::Primary).await.unwrap()
+    else {
         panic!("serialized writers must leave a primary");
     };
-    let ReadOutcome::Found(previous) = left.read(&key, Generation::Previous).await.unwrap() else {
+    let ReadOutcomeData::Found(previous) = left.read(&key, GenerationData::Previous).await.unwrap()
+    else {
         panic!("serialized writers must retain the other complete generation");
     };
     assert_ne!(primary.bytes(), previous.bytes());
@@ -507,25 +527,33 @@ async fn promote_idempotency_survives_adapter_reopen() {
     let root = root("promote-reopen");
     let key = key();
     {
-        let adapter = storage::file_system_blob(&root).unwrap();
+        let adapter = storage::wire_file_system_blob(&root).unwrap();
         adapter
-            .write_atomic(&key, b"old", WriteOptions::new(Durability::BestEffort))
+            .write_atomic(
+                &key,
+                b"old",
+                WriteOptionsData::new(DurabilityData::BestEffort),
+            )
             .await
             .unwrap();
         adapter
-            .write_atomic(&key, b"new", WriteOptions::new(Durability::BestEffort))
+            .write_atomic(
+                &key,
+                b"new",
+                WriteOptionsData::new(DurabilityData::BestEffort),
+            )
             .await
             .unwrap();
         assert!(matches!(
             adapter.promote_previous(&key).await.unwrap(),
-            storage::PromoteOutcome::Promoted(_)
+            storage::PromoteOutcomeData::Promoted(_)
         ));
     }
 
-    let reopened = storage::file_system_blob(&root).unwrap();
+    let reopened = storage::wire_file_system_blob(&root).unwrap();
     assert_eq!(
         reopened.promote_previous(&key).await.unwrap(),
-        storage::PromoteOutcome::AlreadyPromoted
+        storage::PromoteOutcomeData::AlreadyPromoted
     );
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -534,18 +562,21 @@ async fn promote_idempotency_survives_adapter_reopen() {
 async fn reopen_observes_a_settled_primary() {
     let root = root("reopen");
     {
-        let adapter = storage::file_system_blob(&root).unwrap();
+        let adapter = storage::wire_file_system_blob(&root).unwrap();
         adapter
             .write_atomic(
                 &key(),
                 b"value",
-                WriteOptions::new(Durability::ProcessCrashSafe),
+                WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
             )
             .await
             .unwrap();
     }
-    let reopened = storage::file_system_blob(&root).unwrap();
-    let ReadOutcome::Found(value) = reopened.read(&key(), Generation::Primary).await.unwrap()
+    let reopened = storage::wire_file_system_blob(&root).unwrap();
+    let ReadOutcomeData::Found(value) = reopened
+        .read(&key(), GenerationData::Primary)
+        .await
+        .unwrap()
     else {
         panic!("primary must survive reopen");
     };

@@ -13,7 +13,7 @@
 
 use std::sync::Arc;
 
-use storage::{AtomicBlobPort, StorageNamespace};
+use storage::{AtomicBlobPort, StorageNamespaceData};
 
 use crate::adapters::{AtomicBlobSessionStore, LegacySessionDecoder};
 use crate::application::SessionPersistenceService;
@@ -33,7 +33,7 @@ pub struct FlatSessionMigrationReport {
 pub async fn migrate_flat_sessions_to_project_dirs(
     blob: Arc<dyn AtomicBlobPort>,
 ) -> FlatSessionMigrationReport {
-    let entries = match blob.list_primary(StorageNamespace::Session).await {
+    let entries = match blob.list_primary(StorageNamespaceData::Session).await {
         Ok(entries) => entries,
         Err(error) => {
             log::warn!(

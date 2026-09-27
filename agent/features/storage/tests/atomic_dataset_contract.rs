@@ -10,10 +10,10 @@
 use std::str::FromStr;
 
 use storage::{
-    AtomicDatasetPort, DatasetChangeSet, DatasetCommitVisibility, DatasetKey, DatasetMember,
-    DatasetMemberChange, DatasetReadOutcome, DeleteOptions, Durability, Generation,
-    QuarantineOutcome, QuarantineReason, SafePathSegment, StorageErrorKind, StorageNamespace,
-    TransactionScope, WriteOptions,
+    AtomicDatasetPort, DatasetChangeSetData, DatasetCommitVisibilityData, DatasetKeyData,
+    DatasetMemberChangeData, DatasetMemberData, DatasetReadOutcomeData, DeleteOptionsData,
+    DurabilityData, GenerationData, QuarantineOutcomeData, QuarantineReason, SafePathSegmentData,
+    StorageErrorKind, StorageNamespaceData, TransactionScopeData, WriteOptionsData,
 };
 use uuid::Uuid;
 
@@ -24,34 +24,34 @@ fn unique_root(case: &str) -> std::path::PathBuf {
 fn adapter(case: &str) -> (std::sync::Arc<dyn AtomicDatasetPort>, std::path::PathBuf) {
     let root = unique_root(case);
     let adapter =
-        storage::file_system_dataset(&root).expect("dataset adapter root should initialize");
+        storage::wire_file_system_dataset(&root).expect("dataset adapter root should initialize");
     (adapter, root)
 }
 
-fn key() -> DatasetKey {
-    DatasetKey::new(
-        StorageNamespace::Memory,
-        vec![SafePathSegment::from_str("conversation-1").expect("valid segment")],
+fn key() -> DatasetKeyData {
+    DatasetKeyData::new(
+        StorageNamespaceData::Memory,
+        vec![SafePathSegmentData::from_str("conversation-1").expect("valid segment")],
     )
     .expect("valid dataset key")
 }
 
-fn name(value: &str) -> SafePathSegment {
-    SafePathSegment::from_str(value).expect("valid member name")
+fn name(value: &str) -> SafePathSegmentData {
+    SafePathSegmentData::from_str(value).expect("valid member name")
 }
 
-fn member(value: &str, bytes: &[u8]) -> DatasetMember {
-    DatasetMember::new(name(value), bytes.to_vec())
+fn member(value: &str, bytes: &[u8]) -> DatasetMemberData {
+    DatasetMemberData::new(name(value), bytes.to_vec())
 }
 
-fn options() -> WriteOptions {
-    WriteOptions::new(Durability::BestEffort)
+fn options() -> WriteOptionsData {
+    WriteOptionsData::new(DurabilityData::BestEffort)
 }
 
-fn member_names(manifest_members: &[SafePathSegment]) -> Vec<&str> {
+fn member_names(manifest_members: &[SafePathSegmentData]) -> Vec<&str> {
     manifest_members
         .iter()
-        .map(SafePathSegment::as_str)
+        .map(SafePathSegmentData::as_str)
         .collect()
 }
 
@@ -59,9 +59,9 @@ fn member_names(manifest_members: &[SafePathSegment]) -> Vec<&str> {
 /// current revision is, and returns the freshly committed revision.
 async fn seed_generation(
     port: &dyn AtomicDatasetPort,
-    dataset: &DatasetKey,
-    members: &[DatasetMember],
-) -> storage::DatasetRevision {
+    dataset: &DatasetKeyData,
+    members: &[DatasetMemberData],
+) -> storage::DatasetRevisionData {
     let expected = port
         .read_manifest(dataset)
         .await
@@ -72,7 +72,7 @@ async fn seed_generation(
         .commit_atomic(dataset, &expected, members, options())
         .await
         .expect("commit_atomic must publish the generation");
-    assert_eq!(receipt.visibility(), DatasetCommitVisibility::Visible);
+    assert_eq!(receipt.visibility(), DatasetCommitVisibilityData::Visible);
     assert_eq!(receipt.warning(), None);
     receipt.revision().clone()
 }
@@ -100,9 +100,9 @@ async fn read_manifest_exposes_verified_member_reuse_evidence() {
     assert_eq!(active_evidence.name(), &name("active"));
     assert_eq!(active_evidence.byte_len(), 2);
 
-    let changes = DatasetChangeSet::new(
+    let changes = DatasetChangeSetData::new(
         manifest.revision().clone(),
-        vec![DatasetMemberChange::Replace(member("archive", b"z2"))],
+        vec![DatasetMemberChangeData::Replace(member("archive", b"z2"))],
         vec![active_evidence.clone()],
     )
     .expect("manifest evidence must be directly consumable by incremental commit");
@@ -111,7 +111,7 @@ async fn read_manifest_exposes_verified_member_reuse_evidence() {
         .await
         .expect("verified manifest evidence must safely reuse the member");
 
-    let DatasetReadOutcome::Found(read) = adapter
+    let DatasetReadOutcomeData::Found(read) = adapter
         .read_consistent(&key, &[name("active"), name("archive")])
         .await
         .expect("committed generation must remain readable")
@@ -151,7 +151,7 @@ async fn read_manifest_starts_empty_with_stable_revision() {
     );
     assert_eq!(
         adapter.read_consistent(&key, &[]).await.unwrap(),
-        DatasetReadOutcome::NotFound,
+        DatasetReadOutcomeData::NotFound,
         "an uncommitted dataset has no consistent snapshot to read"
     );
 
@@ -178,7 +178,7 @@ async fn first_commit_publishes_complete_generation() {
         )
         .await
         .expect("first commit must succeed against the empty revision");
-    assert_eq!(receipt.visibility(), DatasetCommitVisibility::Visible);
+    assert_eq!(receipt.visibility(), DatasetCommitVisibilityData::Visible);
     assert_eq!(receipt.warning(), None);
 
     let manifest = adapter.read_manifest(&key).await.unwrap();
@@ -197,7 +197,7 @@ async fn commit_revision_is_independent_of_member_input_order() {
     let (adapter, root) = adapter("input-order");
     let ordered_key = key();
     let scrambled_key =
-        DatasetKey::new(StorageNamespace::Memory, vec![name("conversation-2")]).unwrap();
+        DatasetKeyData::new(StorageNamespaceData::Memory, vec![name("conversation-2")]).unwrap();
 
     let ordered = seed_generation(
         &*adapter,
@@ -277,7 +277,7 @@ async fn complete_replacement_deletes_omitted_members() {
             .read_consistent(&key, &[name("archive")])
             .await
             .unwrap(),
-        DatasetReadOutcome::NotFound,
+        DatasetReadOutcomeData::NotFound,
         "a deleted member must never resurface from the previous generation"
     );
 
@@ -299,7 +299,7 @@ async fn read_consistent_returns_requested_complete_members() {
     )
     .await;
 
-    let DatasetReadOutcome::Found(read) = adapter
+    let DatasetReadOutcomeData::Found(read) = adapter
         .read_consistent(&key, &[name("active"), name("index")])
         .await
         .expect("read_consistent must succeed")
@@ -401,12 +401,12 @@ async fn read_previous_is_explicit_and_never_auto_fallback() {
             .read_consistent(&key, &[name("archive")])
             .await
             .unwrap(),
-        DatasetReadOutcome::NotFound,
+        DatasetReadOutcomeData::NotFound,
         "read_consistent must never auto-fallback to the previous generation"
     );
 
     // The previous generation is explicitly readable as a complete member set.
-    let DatasetReadOutcome::Found(previous) = adapter
+    let DatasetReadOutcomeData::Found(previous) = adapter
         .read_previous(&key, &[name("active"), name("archive"), name("index")])
         .await
         .expect("read_previous must succeed")
@@ -457,7 +457,7 @@ async fn promote_previous_restores_prior_generation() {
         .promote_previous(&key)
         .await
         .expect("promote_previous must succeed while a previous generation exists");
-    assert_eq!(receipt.visibility(), DatasetCommitVisibility::Visible);
+    assert_eq!(receipt.visibility(), DatasetCommitVisibilityData::Visible);
     assert_eq!(
         receipt.revision(),
         &original,
@@ -475,8 +475,8 @@ async fn promote_previous_restores_prior_generation() {
 async fn list_datasets_returns_only_live_dataset_keys() {
     let (adapter, root) = adapter("list-datasets");
     let first = key();
-    let second = DatasetKey::new(
-        StorageNamespace::Session,
+    let second = DatasetKeyData::new(
+        StorageNamespaceData::Session,
         vec![name("conversation-2.dataset")],
     )
     .unwrap();
@@ -484,12 +484,12 @@ async fn list_datasets_returns_only_live_dataset_keys() {
     seed_generation(&*adapter, &second, &[member("active", b"a2")]).await;
 
     let keys = adapter
-        .list_datasets(StorageNamespace::Memory)
+        .list_datasets(StorageNamespaceData::Memory)
         .await
         .expect("dataset enumeration must succeed");
     assert_eq!(keys, vec![first.clone()]);
     let session_keys = adapter
-        .list_datasets(StorageNamespace::Session)
+        .list_datasets(StorageNamespaceData::Session)
         .await
         .expect("dataset enumeration must support every namespace");
     assert_eq!(session_keys, vec![second]);
@@ -503,7 +503,7 @@ async fn delete_all_generations_removes_dataset_and_is_idempotent() {
     seed_generation(&*adapter, &key, &[member("active", b"a1")]).await;
 
     let deleted = adapter
-        .delete_all_generations(&key, DeleteOptions::default())
+        .delete_all_generations(&key, DeleteOptionsData::default())
         .await
         .expect("dataset deletion must succeed");
     assert!(deleted.deleted_primary());
@@ -517,10 +517,10 @@ async fn delete_all_generations_removes_dataset_and_is_idempotent() {
             .read_consistent(&key, &[name("active")])
             .await
             .unwrap(),
-        DatasetReadOutcome::NotFound
+        DatasetReadOutcomeData::NotFound
     );
     let absent = adapter
-        .delete_all_generations(&key, DeleteOptions::default())
+        .delete_all_generations(&key, DeleteOptionsData::default())
         .await
         .expect("deleting an absent dataset must be idempotent");
     assert!(!absent.deleted_primary());
@@ -542,15 +542,15 @@ async fn quarantine_moves_requested_dataset_generation() {
     let outcome = adapter
         .quarantine(
             &key,
-            Generation::Primary,
-            TransactionScope::Dataset,
+            GenerationData::Primary,
+            TransactionScopeData::Dataset,
             QuarantineReason::DecoderRejected,
         )
         .await
         .expect("quarantine must succeed for the current dataset generation");
-    assert!(matches!(outcome, QuarantineOutcome::Moved(_)));
-    assert_eq!(outcome.generation(), Generation::Primary);
-    assert_eq!(outcome.scope(), TransactionScope::Dataset);
+    assert!(matches!(outcome, QuarantineOutcomeData::Moved(_)));
+    assert_eq!(outcome.generation(), GenerationData::Primary);
+    assert_eq!(outcome.scope(), TransactionScopeData::Dataset);
     assert_eq!(outcome.reason(), QuarantineReason::DecoderRejected);
 
     let manifest = adapter.read_manifest(&key).await.unwrap();
@@ -562,13 +562,16 @@ async fn quarantine_moves_requested_dataset_generation() {
     let absent = adapter
         .quarantine(
             &key,
-            Generation::Primary,
-            TransactionScope::Dataset,
+            GenerationData::Primary,
+            TransactionScopeData::Dataset,
             QuarantineReason::DecoderRejected,
         )
         .await
         .unwrap();
-    assert!(matches!(absent, QuarantineOutcome::AlreadyAbsent { .. }));
+    assert!(matches!(
+        absent,
+        QuarantineOutcomeData::AlreadyAbsent { .. }
+    ));
 
     std::fs::remove_dir_all(root).unwrap();
 }

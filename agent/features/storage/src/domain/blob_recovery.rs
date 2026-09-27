@@ -1,6 +1,6 @@
 use sha2::{Digest, Sha256};
 
-use super::TransactionScope;
+use super::TransactionScopeData;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[cfg_attr(not(test), allow(dead_code))]
@@ -102,14 +102,14 @@ pub enum QuarantineDisposition {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CorruptTransactionError {
-    scope: TransactionScope,
+    scope: TransactionScopeData,
     reason: CorruptionReason,
     quarantine_disposition: QuarantineDisposition,
 }
 
 impl CorruptTransactionError {
     pub fn new(
-        scope: TransactionScope,
+        scope: TransactionScopeData,
         reason: CorruptionReason,
         quarantine_disposition: QuarantineDisposition,
     ) -> Self {
@@ -120,7 +120,7 @@ impl CorruptTransactionError {
         }
     }
 
-    pub fn scope(&self) -> TransactionScope {
+    pub fn scope(&self) -> TransactionScopeData {
         self.scope
     }
 

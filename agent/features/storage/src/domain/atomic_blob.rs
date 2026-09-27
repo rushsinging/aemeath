@@ -1,13 +1,13 @@
-use super::Durability;
+use super::DurabilityData;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Generation {
+pub enum GenerationData {
     Primary,
     Previous,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TransactionScope {
+pub enum TransactionScopeData {
     Blob,
     Dataset,
 }
@@ -20,11 +20,11 @@ pub enum QuarantineReason {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct DeleteOptions {
+pub struct DeleteOptionsData {
     include_quarantine: bool,
 }
 
-impl DeleteOptions {
+impl DeleteOptionsData {
     pub fn new(include_quarantine: bool) -> Self {
         Self { include_quarantine }
     }
@@ -34,7 +34,7 @@ impl DeleteOptions {
     }
 }
 
-impl Default for DeleteOptions {
+impl Default for DeleteOptionsData {
     fn default() -> Self {
         Self {
             include_quarantine: true,
@@ -43,13 +43,13 @@ impl Default for DeleteOptions {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct DeleteOutcome {
+pub struct DeleteOutcomeData {
     deleted_primary: bool,
     deleted_previous: bool,
     deleted_quarantine: bool,
 }
 
-impl DeleteOutcome {
+impl DeleteOutcomeData {
     pub fn new(deleted_primary: bool, deleted_previous: bool, deleted_quarantine: bool) -> Self {
         Self {
             deleted_primary,
@@ -72,18 +72,18 @@ impl DeleteOutcome {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct QuarantineReceipt {
-    id: super::SafePathSegment,
-    generation: Generation,
-    scope: TransactionScope,
+pub struct QuarantineReceiptData {
+    id: super::SafePathSegmentData,
+    generation: GenerationData,
+    scope: TransactionScopeData,
     reason: QuarantineReason,
 }
 
-impl QuarantineReceipt {
+impl QuarantineReceiptData {
     pub fn new(
-        id: super::SafePathSegment,
-        generation: Generation,
-        scope: TransactionScope,
+        id: super::SafePathSegmentData,
+        generation: GenerationData,
+        scope: TransactionScopeData,
         reason: QuarantineReason,
     ) -> Self {
         Self {
@@ -94,25 +94,25 @@ impl QuarantineReceipt {
         }
     }
 
-    pub fn id(&self) -> &super::SafePathSegment {
+    pub fn id(&self) -> &super::SafePathSegmentData {
         &self.id
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum QuarantineOutcome {
-    Moved(QuarantineReceipt),
+pub enum QuarantineOutcomeData {
+    Moved(QuarantineReceiptData),
     AlreadyAbsent {
-        generation: Generation,
-        scope: TransactionScope,
+        generation: GenerationData,
+        scope: TransactionScopeData,
         reason: QuarantineReason,
     },
 }
 
-impl QuarantineOutcome {
+impl QuarantineOutcomeData {
     pub fn already_absent(
-        generation: Generation,
-        scope: TransactionScope,
+        generation: GenerationData,
+        scope: TransactionScopeData,
         reason: QuarantineReason,
     ) -> Self {
         Self::AlreadyAbsent {
@@ -122,14 +122,14 @@ impl QuarantineOutcome {
         }
     }
 
-    pub fn generation(&self) -> Generation {
+    pub fn generation(&self) -> GenerationData {
         match self {
             Self::Moved(receipt) => receipt.generation,
             Self::AlreadyAbsent { generation, .. } => *generation,
         }
     }
 
-    pub fn scope(&self) -> TransactionScope {
+    pub fn scope(&self) -> TransactionScopeData {
         match self {
             Self::Moved(receipt) => receipt.scope,
             Self::AlreadyAbsent { scope, .. } => *scope,
@@ -149,24 +149,24 @@ impl QuarantineOutcome {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PromoteOutcome {
-    Promoted(WriteReceipt),
+pub enum PromoteOutcomeData {
+    Promoted(WriteReceiptData),
     AlreadyPromoted,
     NotFound,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct BlobRead {
-    generation: Generation,
+pub struct BlobReadData {
+    generation: GenerationData,
     bytes: Vec<u8>,
 }
 
-impl BlobRead {
-    pub fn new(generation: Generation, bytes: Vec<u8>) -> Self {
+impl BlobReadData {
+    pub fn new(generation: GenerationData, bytes: Vec<u8>) -> Self {
         Self { generation, bytes }
     }
 
-    pub fn generation(&self) -> Generation {
+    pub fn generation(&self) -> GenerationData {
         self.generation
     }
 
@@ -176,23 +176,23 @@ impl BlobRead {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ReadOutcome {
-    Found(BlobRead),
+pub enum ReadOutcomeData {
+    Found(BlobReadData),
     NotFound,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StorageEntry {
-    key: super::StorageKey,
+pub struct StorageEntryData {
+    key: super::StorageKeyData,
     size_bytes: usize,
 }
 
-impl StorageEntry {
-    pub fn new(key: super::StorageKey, size_bytes: usize) -> Self {
+impl StorageEntryData {
+    pub fn new(key: super::StorageKeyData, size_bytes: usize) -> Self {
         Self { key, size_bytes }
     }
 
-    pub fn key(&self) -> &super::StorageKey {
+    pub fn key(&self) -> &super::StorageKeyData {
         &self.key
     }
 
@@ -200,28 +200,28 @@ impl StorageEntry {
         self.size_bytes
     }
 
-    pub fn generation(&self) -> Generation {
-        Generation::Primary
+    pub fn generation(&self) -> GenerationData {
+        GenerationData::Primary
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct WriteOptions {
-    durability: Durability,
+pub struct WriteOptionsData {
+    durability: DurabilityData,
 }
 
-impl WriteOptions {
-    pub fn new(durability: Durability) -> Self {
+impl WriteOptionsData {
+    pub fn new(durability: DurabilityData) -> Self {
         Self { durability }
     }
 
-    pub fn durability(self) -> Durability {
+    pub fn durability(self) -> DurabilityData {
         self.durability
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CommitWarning {
+pub enum CommitWarningData {
     PreviousPromotionPending,
     JournalCleanupPending,
     /// The dataset is committed, but one or more members still require
@@ -230,16 +230,16 @@ pub enum CommitWarning {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct WriteReceipt {
-    warning: Option<CommitWarning>,
+pub struct WriteReceiptData {
+    warning: Option<CommitWarningData>,
 }
 
-impl WriteReceipt {
-    pub fn committed(warning: Option<CommitWarning>) -> Self {
+impl WriteReceiptData {
+    pub fn committed(warning: Option<CommitWarningData>) -> Self {
         Self { warning }
     }
 
-    pub fn warning(self) -> Option<CommitWarning> {
+    pub fn warning(self) -> Option<CommitWarningData> {
         self.warning
     }
 }

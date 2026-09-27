@@ -9,7 +9,7 @@
 use sha2::{Digest, Sha256};
 use share::session_types::ProjectIdentityData;
 use std::str::FromStr;
-use storage::SafePathSegment;
+use storage::SafePathSegmentData;
 
 /// project identity → 稳定目录段。
 ///
@@ -17,7 +17,7 @@ use storage::SafePathSegment;
 /// `cwd:<initial_cwd>` 作为哈希输入，取 SHA-256 前 16 个 hex 字符。
 /// 同一 identity（含同一仓库的不同 worktree）得到同一段；不同 identity
 /// 得到不同段的概率由 64 bit 哈希前缀保证。
-pub fn project_dir_segment(identity: &ProjectIdentityData) -> SafePathSegment {
+pub fn project_dir_segment(identity: &ProjectIdentityData) -> SafePathSegmentData {
     let canonical = match identity.git_common_dir.as_deref() {
         Some(common_dir) => format!("git:{common_dir}"),
         None => format!("cwd:{}", identity.initial_cwd),
@@ -28,12 +28,12 @@ pub fn project_dir_segment(identity: &ProjectIdentityData) -> SafePathSegment {
         .take(8)
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    SafePathSegment::from_str(&segment).expect("16 个 hex 字符必然是合法路径段")
+    SafePathSegmentData::from_str(&segment).expect("16 个 hex 字符必然是合法路径段")
 }
 
 /// session 的落盘目录段：workspace 已捕获 identity 时派生目录段；
 /// workspace 缺失（无归属信息）时返回 `None`，调用方退回平铺 key。
-pub fn session_project_dir(session: &super::CanonicalSession) -> Option<SafePathSegment> {
+pub fn session_project_dir(session: &super::CanonicalSession) -> Option<SafePathSegmentData> {
     match &session.workspace {
         super::SnapshotState::Captured(context) => {
             Some(project_dir_segment(&context.project_identity))

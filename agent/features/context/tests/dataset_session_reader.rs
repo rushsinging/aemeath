@@ -7,7 +7,8 @@ use context::{
 use context::{DatasetCanonicalSessionWriter, DatasetSessionReader};
 use share::message::Message;
 use storage::{
-    DatasetKey, DatasetMember, Durability, SafePathSegment, StorageNamespace, WriteOptions,
+    DatasetKeyData, DatasetMemberData, DurabilityData, SafePathSegmentData, StorageNamespaceData,
+    WriteOptionsData,
 };
 
 fn session_with_step(id: &str, revision: u64, text: &str) -> CanonicalSession {
@@ -24,23 +25,23 @@ fn session_with_step(id: &str, revision: u64, text: &str) -> CanonicalSession {
     session
 }
 
-fn dataset_key(session_id: &str) -> DatasetKey {
-    DatasetKey::new(
-        StorageNamespace::Session,
+fn dataset_key(session_id: &str) -> DatasetKeyData {
+    DatasetKeyData::new(
+        StorageNamespaceData::Session,
         vec![format!("{session_id}.dataset")
-            .parse::<SafePathSegment>()
+            .parse::<SafePathSegmentData>()
             .expect("safe session dataset id")],
     )
     .expect("dataset key")
 }
 
-fn scoped_dataset_key(project_dir: &SafePathSegment, session_id: &str) -> DatasetKey {
-    DatasetKey::new(
-        StorageNamespace::Session,
+fn scoped_dataset_key(project_dir: &SafePathSegmentData, session_id: &str) -> DatasetKeyData {
+    DatasetKeyData::new(
+        StorageNamespaceData::Session,
         vec![
             project_dir.clone(),
             format!("{session_id}.dataset")
-                .parse::<SafePathSegment>()
+                .parse::<SafePathSegmentData>()
                 .expect("safe session dataset id"),
         ],
     )
@@ -50,9 +51,9 @@ fn scoped_dataset_key(project_dir: &SafePathSegment, session_id: &str) -> Datase
 #[tokio::test]
 async fn dataset_reader_migrates_legacy_blob_once_when_dataset_is_absent() {
     let root = tempfile::tempdir().expect("temporary root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let blob: Arc<dyn storage::AtomicBlobPort> =
-        storage::file_system_blob(root.path()).expect("blob adapter");
+        storage::wire_file_system_blob(root.path()).expect("blob adapter");
     let expected = session_with_step("legacy", 4, "legacy history");
     let legacy_management = context::AtomicBlobSessionManagement::new(blob.clone());
     let project = share::session_types::ProjectIdentityData {
@@ -97,7 +98,7 @@ async fn dataset_reader_migrates_legacy_blob_once_when_dataset_is_absent() {
 #[tokio::test]
 async fn dataset_reader_restores_primary_generation_without_legacy_blob() {
     let root = tempfile::tempdir().expect("temporary root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let expected = session_with_step("primary", 3, "primary history");
     writer
@@ -117,7 +118,7 @@ async fn dataset_reader_restores_primary_generation_without_legacy_blob() {
 #[tokio::test]
 async fn dataset_reader_falls_back_to_previous_when_primary_domain_manifest_is_invalid() {
     let root = tempfile::tempdir().expect("temporary root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let previous = session_with_step("recover", 1, "previous history");
     writer
@@ -132,9 +133,9 @@ async fn dataset_reader_falls_back_to_previous_when_primary_domain_manifest_is_i
         .expect("save current generation");
 
     let manifest_name = SessionGenerationManifest::manifest_member_name()
-        .parse::<SafePathSegment>()
+        .parse::<SafePathSegmentData>()
         .expect("manifest name");
-    let corrupt_members = vec![DatasetMember::new(manifest_name, b"not-json".to_vec())];
+    let corrupt_members = vec![DatasetMemberData::new(manifest_name, b"not-json".to_vec())];
     let storage_manifest = dataset
         .read_manifest(&dataset_key("recover"))
         .await
@@ -144,7 +145,7 @@ async fn dataset_reader_falls_back_to_previous_when_primary_domain_manifest_is_i
             &dataset_key("recover"),
             storage_manifest.revision(),
             &corrupt_members,
-            WriteOptions::new(Durability::ProcessCrashSafe),
+            WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
         )
         .await
         .expect("publish invalid domain generation");
@@ -165,10 +166,10 @@ async fn dataset_reader_falls_back_to_previous_when_primary_domain_manifest_is_i
 #[tokio::test]
 async fn dataset_reader_reports_future_manifest_and_preserves_original_bytes() {
     let root = tempfile::tempdir().expect("temporary root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let future_bytes = br#"{"generation_schema_version":999,"opaque":"keep-me"}"#.to_vec();
     let manifest_name = SessionGenerationManifest::manifest_member_name()
-        .parse::<SafePathSegment>()
+        .parse::<SafePathSegmentData>()
         .expect("manifest name");
     let empty = dataset
         .read_manifest(&dataset_key("future"))
@@ -178,8 +179,8 @@ async fn dataset_reader_reports_future_manifest_and_preserves_original_bytes() {
         .commit_atomic(
             &dataset_key("future"),
             empty.revision(),
-            &[DatasetMember::new(manifest_name, future_bytes.clone())],
-            WriteOptions::new(Durability::ProcessCrashSafe),
+            &[DatasetMemberData::new(manifest_name, future_bytes.clone())],
+            WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
         )
         .await
         .expect("publish future manifest");
@@ -202,7 +203,7 @@ async fn dataset_reader_reports_future_manifest_and_preserves_original_bytes() {
 #[tokio::test]
 async fn dataset_reader_resumes_with_empty_active_history_after_clear_boundary() {
     let root = tempfile::tempdir().expect("temporary root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let mut session = session_with_step("cleared", 7, "history before clear");
     session.run_slices = vec![
@@ -255,7 +256,7 @@ async fn dataset_reader_resumes_with_empty_active_history_after_clear_boundary()
 #[tokio::test]
 async fn dataset_reader_shows_only_post_clear_steps_after_clear_then_append() {
     let root = tempfile::tempdir().expect("temporary root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let mut session = session_with_step("cleared-then-append", 7, "history before clear");
     session.run_slices = vec![CommittedRunSlice::new(
@@ -313,7 +314,7 @@ async fn dataset_reader_shows_only_post_clear_steps_after_clear_then_append() {
 #[tokio::test]
 async fn dataset_reader_loads_only_steps_after_compact_marker_for_runtime_resume() {
     let root = tempfile::tempdir().expect("temporary root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let mut session = session_with_step("compacted", 7, "hidden before compact");
     session.run_slices = vec![
@@ -390,7 +391,7 @@ async fn dataset_reader_loads_only_steps_after_compact_marker_for_runtime_resume
 #[tokio::test]
 async fn dataset_reader_loads_requested_display_history_steps_from_same_generation() {
     let root = tempfile::tempdir().expect("temporary root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let mut session = session_with_step("windowed", 9, "first");
     session.run_slices = vec![
@@ -464,7 +465,7 @@ fn manifest_codec_fixture_remains_current_for_reader_contract() {
 #[tokio::test]
 async fn continuation_checkpoint_control_lines_survive_dataset_resume() {
     let root = tempfile::tempdir().expect("temporary root");
-    let dataset = storage::file_system_dataset(root.path()).expect("dataset adapter");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
     let mut session = session_with_step("control-lines", 3, "visible");
     let checkpoint = context::compact::ContinuationCheckpoint::from_sections(

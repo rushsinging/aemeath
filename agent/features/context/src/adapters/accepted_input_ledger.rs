@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use storage::{
-    AtomicBlobPort, DeleteOptions, Durability, Generation, ReadOutcome, SafePathSegment,
-    StorageKey, StorageNamespace, WriteOptions,
+    AtomicBlobPort, DeleteOptionsData, DurabilityData, GenerationData, ReadOutcomeData,
+    SafePathSegmentData, StorageKeyData, StorageNamespaceData, WriteOptionsData,
 };
 
 use crate::domain::session::{AcceptedInputRecord, CanonicalSession};
@@ -37,16 +37,16 @@ impl AcceptedInputLedger {
 
 pub(crate) struct AtomicBlobAcceptedInputLedger {
     blob: Arc<dyn AtomicBlobPort>,
-    key: StorageKey,
+    key: StorageKeyData,
     session_id: String,
 }
 
 impl AtomicBlobAcceptedInputLedger {
     pub(crate) fn new(blob: Arc<dyn AtomicBlobPort>, session_id: &str) -> Result<Self, String> {
         let segment = format!("accepted-input-ledger-{session_id}")
-            .parse::<SafePathSegment>()
+            .parse::<SafePathSegmentData>()
             .map_err(|error| error.to_string())?;
-        let key = StorageKey::new(StorageNamespace::Session, vec![segment])
+        let key = StorageKeyData::new(StorageNamespaceData::Session, vec![segment])
             .map_err(|error| error.to_string())?;
         Ok(Self {
             blob,
@@ -58,13 +58,15 @@ impl AtomicBlobAcceptedInputLedger {
     async fn read(&self) -> Result<AcceptedInputLedger, String> {
         let ledger = match self
             .blob
-            .read(&self.key, Generation::Primary)
+            .read(&self.key, GenerationData::Primary)
             .await
             .map_err(|error| error.to_string())?
         {
-            ReadOutcome::Found(read) => serde_json::from_slice::<AcceptedInputLedger>(read.bytes())
-                .map_err(|error| error.to_string())?,
-            ReadOutcome::NotFound => AcceptedInputLedger::empty(&self.session_id),
+            ReadOutcomeData::Found(read) => {
+                serde_json::from_slice::<AcceptedInputLedger>(read.bytes())
+                    .map_err(|error| error.to_string())?
+            }
+            ReadOutcomeData::NotFound => AcceptedInputLedger::empty(&self.session_id),
         };
         if ledger.schema_version != ACCEPTED_INPUT_LEDGER_SCHEMA_VERSION {
             return Err(format!(
@@ -112,7 +114,7 @@ impl AtomicBlobAcceptedInputLedger {
             .write_atomic(
                 &self.key,
                 &bytes,
-                WriteOptions::new(Durability::ProcessCrashSafe),
+                WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
             )
             .await
             .map_err(|error| error.to_string())?;
@@ -144,7 +146,7 @@ impl AtomicBlobAcceptedInputLedger {
             .write_atomic(
                 &self.key,
                 &bytes,
-                WriteOptions::new(Durability::ProcessCrashSafe),
+                WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
             )
             .await
             .map_err(|error| error.to_string())?;
@@ -152,7 +154,7 @@ impl AtomicBlobAcceptedInputLedger {
     }
     pub(crate) async fn delete(&self) -> Result<(), String> {
         self.blob
-            .delete_all_generations(&self.key, DeleteOptions::default())
+            .delete_all_generations(&self.key, DeleteOptionsData::default())
             .await
             .map_err(|error| error.to_string())?;
         Ok(())

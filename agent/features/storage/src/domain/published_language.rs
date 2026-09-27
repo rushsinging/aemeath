@@ -1,15 +1,15 @@
 use std::error::Error;
 use std::fmt;
 
-use super::{CorruptTransactionError, SafePathSegment};
+use super::{CorruptTransactionError, SafePathSegmentData};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Durability {
+pub enum DurabilityData {
     BestEffort,
     ProcessCrashSafe,
 }
 
-impl Durability {
+impl DurabilityData {
     pub fn satisfies(self, required: Self) -> bool {
         matches!(
             (self, required),
@@ -19,13 +19,13 @@ impl Durability {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum PreviousPolicy {
+pub(crate) enum PreviousPolicy {
     Retain,
     Discard,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum StorageNamespace {
+pub enum StorageNamespaceData {
     Session,
     Memory,
     TaskData,
@@ -36,7 +36,7 @@ pub enum StorageNamespace {
     Workspace,
 }
 
-impl StorageNamespace {
+impl StorageNamespaceData {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Session => "session",
@@ -50,7 +50,7 @@ impl StorageNamespace {
         }
     }
 
-    pub fn previous_policy(self) -> PreviousPolicy {
+    pub(crate) fn previous_policy(self) -> PreviousPolicy {
         match self {
             Self::AuditUsage => PreviousPolicy::Discard,
             Self::Session
@@ -63,20 +63,20 @@ impl StorageNamespace {
         }
     }
 
-    pub fn minimum_durability(self) -> Durability {
+    pub fn minimum_durability(self) -> DurabilityData {
         match self {
-            Self::AuditUsage => Durability::BestEffort,
+            Self::AuditUsage => DurabilityData::BestEffort,
             Self::Session
             | Self::Memory
             | Self::TaskData
             | Self::History
             | Self::ToolResult
             | Self::Config
-            | Self::Workspace => Durability::ProcessCrashSafe,
+            | Self::Workspace => DurabilityData::ProcessCrashSafe,
         }
     }
 
-    pub fn effective_durability(self, requested: Durability) -> Durability {
+    pub fn effective_durability(self, requested: DurabilityData) -> DurabilityData {
         if requested.satisfies(self.minimum_durability()) {
             requested
         } else {
@@ -86,15 +86,15 @@ impl StorageNamespace {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct StorageKey {
-    namespace: StorageNamespace,
-    segments: Vec<SafePathSegment>,
+pub struct StorageKeyData {
+    namespace: StorageNamespaceData,
+    segments: Vec<SafePathSegmentData>,
 }
 
-impl StorageKey {
+impl StorageKeyData {
     pub fn new(
-        namespace: StorageNamespace,
-        segments: Vec<SafePathSegment>,
+        namespace: StorageNamespaceData,
+        segments: Vec<SafePathSegmentData>,
     ) -> Result<Self, StorageError> {
         if segments.is_empty() {
             return Err(StorageError::new(
@@ -108,11 +108,11 @@ impl StorageKey {
         })
     }
 
-    pub fn namespace(&self) -> StorageNamespace {
+    pub fn namespace(&self) -> StorageNamespaceData {
         self.namespace
     }
 
-    pub fn segments(&self) -> &[SafePathSegment] {
+    pub fn segments(&self) -> &[SafePathSegmentData] {
         &self.segments
     }
 }

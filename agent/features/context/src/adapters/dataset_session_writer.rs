@@ -2,9 +2,9 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use storage::{
-    AtomicDatasetPort, DatasetChangeSet, DatasetKey, DatasetMember, DatasetMemberChange,
-    DatasetMemberReference, Durability, SafePathSegment, StorageError, StorageErrorKind,
-    StorageNamespace, WriteOptions,
+    AtomicDatasetPort, DatasetChangeSetData, DatasetKeyData, DatasetMemberChangeData,
+    DatasetMemberData, DatasetMemberReferenceData, DurabilityData, SafePathSegmentData,
+    StorageError, StorageErrorKind, StorageNamespaceData, WriteOptionsData,
 };
 
 use crate::domain::session::{
@@ -92,17 +92,17 @@ impl DatasetCanonicalSessionWriter {
     /// steps 索引），供增量与 clear 断点提交对齐磁盘真相。
     async fn read_persisted_generation_manifest(
         &self,
-        dataset_key: &DatasetKey,
+        dataset_key: &DatasetKeyData,
     ) -> Result<SessionGenerationManifest, String> {
         let manifest_member_name =
-            SafePathSegment::from_str(SessionGenerationManifest::manifest_member_name())
+            SafePathSegmentData::from_str(SessionGenerationManifest::manifest_member_name())
                 .map_err(|error| error.to_string())?;
         let persisted_manifest = self
             .dataset
             .read_consistent(dataset_key, std::slice::from_ref(&manifest_member_name))
             .await
             .map_err(|error| error.to_string())?;
-        let storage::DatasetReadOutcome::Found(persisted_manifest) = persisted_manifest else {
+        let storage::DatasetReadOutcomeData::Found(persisted_manifest) = persisted_manifest else {
             return Err("Session generation manifest 不存在".to_string());
         };
         SessionGenerationCodec::decode_manifest(
@@ -204,8 +204,8 @@ impl DatasetCanonicalSessionWriter {
 
     async fn commit_with_manifest(
         &self,
-        dataset_key: &DatasetKey,
-        manifest: &storage::DatasetManifest,
+        dataset_key: &DatasetKeyData,
+        manifest: &storage::DatasetManifestData,
         changes: SessionCommitPlan,
     ) -> Result<(), String> {
         let dataset_changes =
@@ -214,7 +214,7 @@ impl DatasetCanonicalSessionWriter {
             .commit_incremental(
                 dataset_key,
                 &dataset_changes,
-                WriteOptions::new(Durability::ProcessCrashSafe),
+                WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
             )
             .await
             .map_err(|error| error.to_string())?;
@@ -222,30 +222,32 @@ impl DatasetCanonicalSessionWriter {
     }
 }
 
-pub(super) fn session_dataset_key(session_id: &str) -> Result<DatasetKey, StorageError> {
-    DatasetKey::new(
-        StorageNamespace::Session,
-        vec![SafePathSegment::from_str(&format!("{session_id}.dataset"))?],
+pub(super) fn session_dataset_key(session_id: &str) -> Result<DatasetKeyData, StorageError> {
+    DatasetKeyData::new(
+        StorageNamespaceData::Session,
+        vec![SafePathSegmentData::from_str(&format!(
+            "{session_id}.dataset"
+        ))?],
     )
 }
 
 /// 按 project 分目录的 dataset key：`<project-dir>/<session-id>.dataset`。
 pub(super) fn session_dataset_key_scoped(
-    project_dir: &SafePathSegment,
+    project_dir: &SafePathSegmentData,
     session_id: &str,
-) -> Result<DatasetKey, StorageError> {
-    DatasetKey::new(
-        StorageNamespace::Session,
+) -> Result<DatasetKeyData, StorageError> {
+    DatasetKeyData::new(
+        StorageNamespaceData::Session,
         vec![
             project_dir.clone(),
-            SafePathSegment::from_str(&format!("{session_id}.dataset"))?,
+            SafePathSegmentData::from_str(&format!("{session_id}.dataset"))?,
         ],
     )
 }
 
 /// session 写入位置的 key：workspace 捕获了 project identity 时落到
 /// project 目录段下，否则退回平铺（无归属信息的 session 维持旧布局）。
-fn dataset_key_for_session(session: &CanonicalSession) -> Result<DatasetKey, StorageError> {
+fn dataset_key_for_session(session: &CanonicalSession) -> Result<DatasetKeyData, StorageError> {
     match session_project_dir(session) {
         Some(project_dir) => session_dataset_key_scoped(&project_dir, &session.id),
         None => session_dataset_key(&session.id),
@@ -255,8 +257,8 @@ fn dataset_key_for_session(session: &CanonicalSession) -> Result<DatasetKey, Sto
 /// 提交计划写入位置的 key：plan 构建时携带的 project 目录段决定布局。
 fn dataset_key_for_plan(
     session_id: &str,
-    project_dir: Option<&SafePathSegment>,
-) -> Result<DatasetKey, StorageError> {
+    project_dir: Option<&SafePathSegmentData>,
+) -> Result<DatasetKeyData, StorageError> {
     match project_dir {
         Some(project_dir) => session_dataset_key_scoped(project_dir, session_id),
         None => session_dataset_key(session_id),
@@ -264,16 +266,16 @@ fn dataset_key_for_plan(
 }
 
 fn promote_missing_reuse_evidence(
-    manifest: &storage::DatasetManifest,
+    manifest: &storage::DatasetManifestData,
     plan: &mut SessionCommitPlan,
 ) -> Result<(), String> {
     plan.promote_reuse_fallbacks(|name| {
-        SafePathSegment::from_str(name)
+        SafePathSegmentData::from_str(name)
             .ok()
             .is_some_and(|safe_name| manifest.member_evidence(&safe_name).is_some())
     });
     let missing_name = plan.reused_members().iter().find(|name| {
-        SafePathSegment::from_str(name)
+        SafePathSegmentData::from_str(name)
             .ok()
             .is_none_or(|safe_name| manifest.member_evidence(&safe_name).is_none())
     });
@@ -284,15 +286,15 @@ fn promote_missing_reuse_evidence(
 }
 
 fn map_session_changes(
-    manifest: &storage::DatasetManifest,
+    manifest: &storage::DatasetManifestData,
     changes: SessionCommitPlan,
-) -> Result<DatasetChangeSet, StorageError> {
+) -> Result<DatasetChangeSetData, StorageError> {
     let changed_members = changes
         .changed_members()
         .iter()
         .map(|member| {
-            Ok(DatasetMemberChange::Replace(DatasetMember::new(
-                SafePathSegment::from_str(member.name())?,
+            Ok(DatasetMemberChangeData::Replace(DatasetMemberData::new(
+                SafePathSegmentData::from_str(member.name())?,
                 member.bytes().to_vec(),
             )))
         })
@@ -301,20 +303,20 @@ fn map_session_changes(
         .reused_members()
         .iter()
         .map(|name| {
-            let safe_name = SafePathSegment::from_str(name)?;
+            let safe_name = SafePathSegmentData::from_str(name)?;
             manifest
                 .member_evidence(&safe_name)
                 .cloned()
                 .ok_or_else(|| missing_reuse_evidence(name))
         })
-        .collect::<Result<Vec<DatasetMemberReference>, StorageError>>()?;
+        .collect::<Result<Vec<DatasetMemberReferenceData>, StorageError>>()?;
     let removed_members = changes
         .removed_members()
         .iter()
-        .map(|name| SafePathSegment::from_str(name))
+        .map(|name| SafePathSegmentData::from_str(name))
         .collect::<Result<Vec<_>, StorageError>>()?;
 
-    DatasetChangeSet::new(manifest.revision().clone(), changed_members, reused_members)?
+    DatasetChangeSetData::new(manifest.revision().clone(), changed_members, reused_members)?
         .with_removed_members(removed_members)
 }
 

@@ -44,7 +44,7 @@ fn legacy_stem(cwd: &str) -> String {
 }
 
 fn storage(root: &std::path::Path) -> Arc<dyn storage_api::AtomicDatasetPort> {
-    storage::file_system_dataset(root).unwrap()
+    storage::wire_file_system_dataset(root).unwrap()
 }
 
 /// Serialize a single legacy entry as the plain JSON array written by the

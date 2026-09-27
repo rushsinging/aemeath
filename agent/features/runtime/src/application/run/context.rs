@@ -706,7 +706,7 @@ struct ParentRunContextSourceInner {
 /// guard clears the frame on drop — no manual `clear()` needed.
 ///
 /// #1385 TaskData 7: Each source carries its own generation counter (no global
-/// static).  Generation wraps on overflow but never hits 0, preventing
+/// static).  GenerationData wraps on overflow but never hits 0, preventing
 /// stale-guard / fresh-frame collisions.
 ///
 /// ## Lock choice

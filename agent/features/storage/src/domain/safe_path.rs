@@ -4,15 +4,15 @@ use std::str::FromStr;
 use super::{StorageError, StorageErrorKind};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct SafePathSegment(String);
+pub struct SafePathSegmentData(String);
 
-impl SafePathSegment {
+impl SafePathSegmentData {
     pub fn as_str(&self) -> &str {
         &self.0
     }
 }
 
-impl FromStr for SafePathSegment {
+impl FromStr for SafePathSegmentData {
     type Err = StorageError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
@@ -33,7 +33,7 @@ impl FromStr for SafePathSegment {
     }
 }
 
-impl fmt::Display for SafePathSegment {
+impl fmt::Display for SafePathSegmentData {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
     }

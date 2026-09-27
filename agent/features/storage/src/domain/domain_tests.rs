@@ -2,17 +2,19 @@ use std::str::FromStr;
 
 use crate::domain::{
     decide_blob_recovery, decide_orphan_previous, CorruptTransactionError, CorruptionReason,
-    DatasetChangeSet, DatasetKey, DatasetManifest, DatasetMember, DatasetMemberChange,
-    DatasetMemberReference, DeleteOptions, DigestObservation, Durability, Generation, JournalPhase,
-    PreviousPolicy, QuarantineDisposition, QuarantineOutcome, QuarantineReason, RecoveryDecision,
-    SafePathSegment, StorageErrorKind, StorageKey, StorageNamespace, TransactionDigest,
-    TransactionScope,
+    DatasetChangeSetData, DatasetKeyData, DatasetManifestData, DatasetMemberChangeData,
+    DatasetMemberData, DatasetMemberReferenceData, DeleteOptionsData, DigestObservation,
+    DurabilityData, GenerationData, JournalPhase, PreviousPolicy, QuarantineDisposition,
+    QuarantineOutcomeData, QuarantineReason, RecoveryDecision, SafePathSegmentData,
+    StorageErrorKind, StorageKeyData, StorageNamespaceData, TransactionDigest,
+    TransactionScopeData,
 };
 
 #[test]
 fn safe_path_segment_accepts_plain_component() {
     for value in ["a", "SESSION_01", "会话-01"] {
-        let segment = SafePathSegment::from_str(value).expect("plain component should be valid");
+        let segment =
+            SafePathSegmentData::from_str(value).expect("plain component should be valid");
         assert_eq!(segment.as_str(), value);
         assert_eq!(segment.to_string(), value);
     }
@@ -22,7 +24,7 @@ fn safe_path_segment_accepts_plain_component() {
 fn safe_path_segment_rejects_unsafe_components() {
     for value in ["", ".", "..", ".hidden", "/tmp", "a/b", "a\\b", "a\0b"] {
         assert!(
-            SafePathSegment::from_str(value).is_err(),
+            SafePathSegmentData::from_str(value).is_err(),
             "unsafe segment must be rejected: {value:?}"
         );
     }
@@ -30,7 +32,7 @@ fn safe_path_segment_rejects_unsafe_components() {
 
 #[test]
 fn storage_key_requires_at_least_one_segment() {
-    let error = StorageKey::new(StorageNamespace::Session, Vec::new())
+    let error = StorageKeyData::new(StorageNamespaceData::Session, Vec::new())
         .expect_err("empty keys must be rejected");
 
     assert_eq!(error.kind(), &crate::domain::StorageErrorKind::InvalidKey);
@@ -39,41 +41,41 @@ fn storage_key_requires_at_least_one_segment() {
 #[test]
 fn namespace_minimum_durability_cannot_be_lowered() {
     assert_eq!(
-        StorageNamespace::Session.minimum_durability(),
-        Durability::ProcessCrashSafe
+        StorageNamespaceData::Session.minimum_durability(),
+        DurabilityData::ProcessCrashSafe
     );
     assert_eq!(
-        StorageNamespace::ToolResult.effective_durability(Durability::BestEffort),
-        Durability::ProcessCrashSafe
+        StorageNamespaceData::ToolResult.effective_durability(DurabilityData::BestEffort),
+        DurabilityData::ProcessCrashSafe
     );
     assert_eq!(
-        StorageNamespace::AuditUsage.effective_durability(Durability::BestEffort),
-        Durability::BestEffort
+        StorageNamespaceData::AuditUsage.effective_durability(DurabilityData::BestEffort),
+        DurabilityData::BestEffort
     );
 }
 
 #[test]
 fn namespace_previous_policy_is_explicit() {
     for namespace in [
-        StorageNamespace::Session,
-        StorageNamespace::Memory,
-        StorageNamespace::TaskData,
-        StorageNamespace::History,
-        StorageNamespace::ToolResult,
-        StorageNamespace::Config,
-        StorageNamespace::Workspace,
+        StorageNamespaceData::Session,
+        StorageNamespaceData::Memory,
+        StorageNamespaceData::TaskData,
+        StorageNamespaceData::History,
+        StorageNamespaceData::ToolResult,
+        StorageNamespaceData::Config,
+        StorageNamespaceData::Workspace,
     ] {
         assert_eq!(namespace.previous_policy(), PreviousPolicy::Retain);
     }
     assert_eq!(
-        StorageNamespace::AuditUsage.previous_policy(),
+        StorageNamespaceData::AuditUsage.previous_policy(),
         PreviousPolicy::Discard
     );
 }
 
 #[test]
 fn delete_options_default_includes_quarantine() {
-    assert!(DeleteOptions::default().include_quarantine());
+    assert!(DeleteOptionsData::default().include_quarantine());
 }
 
 #[test]
@@ -142,13 +144,13 @@ fn transaction_digest_is_domain_separated_and_distinguishes_absent() {
 #[test]
 fn corrupt_transaction_error_preserves_typed_facts_without_paths() {
     let corruption = CorruptTransactionError::new(
-        TransactionScope::Blob,
+        TransactionScopeData::Blob,
         CorruptionReason::CommittedDigestMismatch,
         QuarantineDisposition::EvidenceQuarantined,
     );
     let kind = StorageErrorKind::CorruptTransaction(corruption.clone());
 
-    assert_eq!(corruption.scope(), TransactionScope::Blob);
+    assert_eq!(corruption.scope(), TransactionScopeData::Blob);
     assert_eq!(
         corruption.reason(),
         CorruptionReason::CommittedDigestMismatch
@@ -163,30 +165,30 @@ fn corrupt_transaction_error_preserves_typed_facts_without_paths() {
 
 #[test]
 fn quarantine_already_absent_preserves_requested_facts() {
-    let outcome = QuarantineOutcome::already_absent(
-        Generation::Previous,
-        TransactionScope::Blob,
+    let outcome = QuarantineOutcomeData::already_absent(
+        GenerationData::Previous,
+        TransactionScopeData::Blob,
         QuarantineReason::DecoderRejected,
     );
 
-    assert_eq!(outcome.generation(), Generation::Previous);
-    assert_eq!(outcome.scope(), TransactionScope::Blob);
+    assert_eq!(outcome.generation(), GenerationData::Previous);
+    assert_eq!(outcome.scope(), TransactionScopeData::Blob);
     assert_eq!(outcome.reason(), QuarantineReason::DecoderRejected);
     assert!(!outcome.moved());
 }
 
 // --- #983 AtomicDataset published-language (L1) ---------------------------------
 
-fn dataset_member(name: &str, bytes: &[u8]) -> DatasetMember {
-    DatasetMember::new(
-        SafePathSegment::from_str(name).expect("member name should be a safe path segment"),
+fn dataset_member(name: &str, bytes: &[u8]) -> DatasetMemberData {
+    DatasetMemberData::new(
+        SafePathSegmentData::from_str(name).expect("member name should be a safe path segment"),
         bytes.to_vec(),
     )
 }
 
 #[test]
 fn dataset_key_with_empty_segments_is_rejected() {
-    let error = DatasetKey::new(StorageNamespace::Memory, Vec::new())
+    let error = DatasetKeyData::new(StorageNamespaceData::Memory, Vec::new())
         .expect_err("dataset keys with no segments must be rejected");
 
     assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
@@ -194,7 +196,7 @@ fn dataset_key_with_empty_segments_is_rejected() {
 
 #[test]
 fn dataset_manifest_orders_members_canonically_by_name() {
-    let manifest = DatasetManifest::new(vec![
+    let manifest = DatasetManifestData::new(vec![
         dataset_member("payload", b"p"),
         dataset_member("active", b"a"),
         dataset_member("index", b"i"),
@@ -212,7 +214,7 @@ fn dataset_manifest_orders_members_canonically_by_name() {
 
 #[test]
 fn dataset_manifest_with_duplicate_member_names_is_rejected() {
-    let error = DatasetManifest::new(vec![
+    let error = DatasetManifestData::new(vec![
         dataset_member("index", b"first"),
         dataset_member("index", b"second"),
     ])
@@ -223,20 +225,20 @@ fn dataset_manifest_with_duplicate_member_names_is_rejected() {
 
 #[test]
 fn empty_dataset_manifest_has_stable_revision() {
-    let first = DatasetManifest::new(Vec::new()).expect("empty manifest is valid");
-    let second = DatasetManifest::new(Vec::new()).expect("empty manifest is valid");
+    let first = DatasetManifestData::new(Vec::new()).expect("empty manifest is valid");
+    let second = DatasetManifestData::new(Vec::new()).expect("empty manifest is valid");
 
     assert_eq!(first.revision(), second.revision());
 }
 
 #[test]
 fn dataset_revision_is_independent_of_member_input_order() {
-    let ordered = DatasetManifest::new(vec![
+    let ordered = DatasetManifestData::new(vec![
         dataset_member("active", b"a"),
         dataset_member("archive", b"z"),
     ])
     .expect("distinct member names should be accepted");
-    let shuffled = DatasetManifest::new(vec![
+    let shuffled = DatasetManifestData::new(vec![
         dataset_member("archive", b"z"),
         dataset_member("active", b"a"),
     ])
@@ -247,9 +249,9 @@ fn dataset_revision_is_independent_of_member_input_order() {
 
 #[test]
 fn dataset_revision_changes_when_member_name_changes() {
-    let base = DatasetManifest::new(vec![dataset_member("active", b"a")])
+    let base = DatasetManifestData::new(vec![dataset_member("active", b"a")])
         .expect("distinct member names should be accepted");
-    let renamed = DatasetManifest::new(vec![dataset_member("archive", b"a")])
+    let renamed = DatasetManifestData::new(vec![dataset_member("archive", b"a")])
         .expect("distinct member names should be accepted");
 
     assert_ne!(base.revision(), renamed.revision());
@@ -257,9 +259,9 @@ fn dataset_revision_changes_when_member_name_changes() {
 
 #[test]
 fn dataset_revision_changes_when_member_bytes_change() {
-    let base = DatasetManifest::new(vec![dataset_member("active", b"a")])
+    let base = DatasetManifestData::new(vec![dataset_member("active", b"a")])
         .expect("distinct member names should be accepted");
-    let mutated = DatasetManifest::new(vec![dataset_member("active", b"b")])
+    let mutated = DatasetManifestData::new(vec![dataset_member("active", b"b")])
         .expect("distinct member names should be accepted");
 
     assert_ne!(base.revision(), mutated.revision());
@@ -267,10 +269,10 @@ fn dataset_revision_changes_when_member_bytes_change() {
 
 #[test]
 fn manifest_member_evidence_matches_only_original_bytes() {
-    let manifest = DatasetManifest::new(vec![dataset_member("active", b"a")])
+    let manifest = DatasetManifestData::new(vec![dataset_member("active", b"a")])
         .expect("current generation should be valid");
     let evidence = manifest
-        .member_evidence(&SafePathSegment::from_str("active").expect("safe member name"))
+        .member_evidence(&SafePathSegmentData::from_str("active").expect("safe member name"))
         .expect("manifest evidence");
 
     assert!(evidence.matches_bytes(b"a"));
@@ -280,24 +282,24 @@ fn manifest_member_evidence_matches_only_original_bytes() {
 
 #[test]
 fn incremental_dataset_members_distinguish_new_and_reused_bytes() {
-    let current = DatasetManifest::new(vec![
+    let current = DatasetManifestData::new(vec![
         dataset_member("active", b"a"),
         dataset_member("archive", b"z"),
     ])
     .expect("current generation should be valid");
-    let reused = DatasetMemberReference::from_manifest_member(
+    let reused = DatasetMemberReferenceData::from_manifest_member(
         current.revision().clone(),
-        SafePathSegment::from_str("archive").expect("safe member name"),
+        SafePathSegmentData::from_str("archive").expect("safe member name"),
         1,
         [0; 32],
     );
-    let replacement = DatasetMember::new(
-        SafePathSegment::from_str("active").expect("safe member name"),
+    let replacement = DatasetMemberData::new(
+        SafePathSegmentData::from_str("active").expect("safe member name"),
         b"a2".to_vec(),
     );
-    let change_set = DatasetChangeSet::new(
+    let change_set = DatasetChangeSetData::new(
         current.revision().clone(),
-        vec![DatasetMemberChange::Replace(replacement)],
+        vec![DatasetMemberChangeData::Replace(replacement)],
         vec![reused.clone()],
     )
     .expect("incremental member set should be valid");
@@ -309,19 +311,19 @@ fn incremental_dataset_members_distinguish_new_and_reused_bytes() {
 
 #[test]
 fn incremental_dataset_rejects_duplicate_new_and_reused_member_names() {
-    let revision = DatasetManifest::new(vec![dataset_member("active", b"a")])
+    let revision = DatasetManifestData::new(vec![dataset_member("active", b"a")])
         .expect("current generation should be valid")
         .revision()
         .clone();
-    let reused = DatasetMemberReference::from_manifest_member(
+    let reused = DatasetMemberReferenceData::from_manifest_member(
         revision.clone(),
-        SafePathSegment::from_str("active").expect("safe member name"),
+        SafePathSegmentData::from_str("active").expect("safe member name"),
         1,
         [0; 32],
     );
-    let error = DatasetChangeSet::new(
+    let error = DatasetChangeSetData::new(
         revision,
-        vec![DatasetMemberChange::Replace(dataset_member(
+        vec![DatasetMemberChangeData::Replace(dataset_member(
             "active", b"a2",
         ))],
         vec![reused],
@@ -333,20 +335,20 @@ fn incremental_dataset_rejects_duplicate_new_and_reused_member_names() {
 
 #[test]
 fn incremental_dataset_removal_names_are_canonical_and_unique() {
-    let revision = DatasetManifest::new(vec![dataset_member("active", b"a")])
+    let revision = DatasetManifestData::new(vec![dataset_member("active", b"a")])
         .expect("current generation should be valid")
         .revision()
         .clone();
-    let active = SafePathSegment::from_str("active").expect("safe member name");
-    let archive = SafePathSegment::from_str("archive").expect("safe member name");
-    let change_set = DatasetChangeSet::new(revision.clone(), Vec::new(), Vec::new())
+    let active = SafePathSegmentData::from_str("active").expect("safe member name");
+    let archive = SafePathSegmentData::from_str("archive").expect("safe member name");
+    let change_set = DatasetChangeSetData::new(revision.clone(), Vec::new(), Vec::new())
         .expect("empty change set should be valid")
         .with_removed_members(vec![archive.clone(), active.clone()])
         .expect("distinct removal names should be valid");
 
     assert_eq!(change_set.removed_members(), &[active.clone(), archive]);
 
-    let duplicate_error = DatasetChangeSet::new(revision, Vec::new(), Vec::new())
+    let duplicate_error = DatasetChangeSetData::new(revision, Vec::new(), Vec::new())
         .expect("empty change set should be valid")
         .with_removed_members(vec![active.clone(), active])
         .expect_err("duplicate removal names must be rejected");
@@ -355,22 +357,22 @@ fn incremental_dataset_removal_names_are_canonical_and_unique() {
 
 #[test]
 fn incremental_dataset_rejects_reused_member_from_another_revision() {
-    let expected_revision = DatasetManifest::new(vec![dataset_member("active", b"a")])
+    let expected_revision = DatasetManifestData::new(vec![dataset_member("active", b"a")])
         .expect("current generation should be valid")
         .revision()
         .clone();
-    let another_revision = DatasetManifest::new(vec![dataset_member("active", b"b")])
+    let another_revision = DatasetManifestData::new(vec![dataset_member("active", b"b")])
         .expect("another generation should be valid")
         .revision()
         .clone();
-    let reused = DatasetMemberReference::from_manifest_member(
+    let reused = DatasetMemberReferenceData::from_manifest_member(
         another_revision,
-        SafePathSegment::from_str("active").expect("safe member name"),
+        SafePathSegmentData::from_str("active").expect("safe member name"),
         1,
         [0; 32],
     );
 
-    let error = DatasetChangeSet::new(expected_revision, Vec::new(), vec![reused])
+    let error = DatasetChangeSetData::new(expected_revision, Vec::new(), vec![reused])
         .expect_err("a reused member must belong to the expected generation");
 
     assert_eq!(error.kind(), &StorageErrorKind::InvalidKey);
@@ -378,14 +380,14 @@ fn incremental_dataset_rejects_reused_member_from_another_revision() {
 
 #[test]
 fn incremental_dataset_rejects_member_named_as_removed() {
-    let revision = DatasetManifest::new(vec![dataset_member("active", b"a")])
+    let revision = DatasetManifestData::new(vec![dataset_member("active", b"a")])
         .expect("current generation should be valid")
         .revision()
         .clone();
-    let active = SafePathSegment::from_str("active").expect("safe member name");
-    let error = DatasetChangeSet::new(
+    let active = SafePathSegmentData::from_str("active").expect("safe member name");
+    let error = DatasetChangeSetData::new(
         revision,
-        vec![DatasetMemberChange::Replace(dataset_member(
+        vec![DatasetMemberChangeData::Replace(dataset_member(
             "active", b"a2",
         ))],
         Vec::new(),
@@ -399,13 +401,13 @@ fn incremental_dataset_rejects_member_named_as_removed() {
 
 #[test]
 fn omitted_members_are_old_names_absent_from_replacement() {
-    let current = DatasetManifest::new(vec![
+    let current = DatasetManifestData::new(vec![
         dataset_member("active", b"a"),
         dataset_member("archive", b"z"),
         dataset_member("index", b"i"),
     ])
     .expect("distinct member names should be accepted");
-    let replacement = DatasetManifest::new(vec![
+    let replacement = DatasetManifestData::new(vec![
         dataset_member("active", b"a2"),
         dataset_member("index", b"i2"),
     ])

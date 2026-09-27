@@ -2,18 +2,18 @@ use std::io::{Read, Write};
 use std::str::FromStr;
 
 use storage::{
-    SafeOpenOptions, SafePathSegment, SafeStorageFileType, SafeStorageRoot, StorageErrorKind,
+    SafeOpenOptions, SafePathSegmentData, SafeStorageFileType, SafeStorageRoot, StorageErrorKind,
 };
 
-fn segment(value: &str) -> SafePathSegment {
-    SafePathSegment::from_str(value).expect("safe path segment")
+fn segment(value: &str) -> SafePathSegmentData {
+    SafePathSegmentData::from_str(value).expect("safe path segment")
 }
 
 #[test]
 fn public_safe_path_segment_rejects_unsafe_components_before_io() {
     for value in ["", ".", "..", ".hidden", "/tmp", "a/b", "a\\b", "a\0b"] {
         assert!(
-            SafePathSegment::from_str(value).is_err(),
+            SafePathSegmentData::from_str(value).is_err(),
             "unsafe segment must be rejected: {value:?}"
         );
     }

@@ -1,7 +1,7 @@
 //! #983 `FileSystemDatasetAdapter`：受 cap-std 约束目录下的完整代数据集事务
 //! 与崩溃恢复协议。
 //!
-//! 每个 `DatasetKey` 独占一个 OS 排他锁，所有入口都先取锁再跑一次恢复。提交严格
+//! 每个 `DatasetKeyData` 独占一个 OS 排他锁，所有入口都先取锁再跑一次恢复。提交严格
 //! 遵循「写 stage → 保留 previous → 完整 fsync → 写 Prepared journal（逻辑提交点）
 //! → 逐 member 发布/删除 omitted → validate 全代 → Committed marker → 提升 previous
 //! → cleanup」。Prepared 落盘即视为已提交：恢复只前滚，绝不回滚。
@@ -27,12 +27,13 @@ use super::dataset_protocol::{
 };
 use crate::domain::revision_member_digest;
 use crate::{
-    AtomicDatasetPort, CommitWarning, CorruptTransactionError, CorruptionReason, DatasetChangeSet,
-    DatasetCommitReceipt, DatasetCommitVisibility, DatasetKey, DatasetManifest, DatasetMember,
-    DatasetMemberChange, DatasetMemberReference, DatasetRead, DatasetReadOutcome, DatasetRevision,
-    DeleteOptions, DeleteOutcome, Generation, QuarantineDisposition, QuarantineOutcome,
-    QuarantineReason, QuarantineReceipt, SafePathSegment, StorageError, StorageErrorKind,
-    TransactionScope, WriteOptions,
+    AtomicDatasetPort, CommitWarningData, CorruptTransactionError, CorruptionReason,
+    DatasetChangeSetData, DatasetCommitReceiptData, DatasetCommitVisibilityData, DatasetKeyData,
+    DatasetManifestData, DatasetMemberChangeData, DatasetMemberData, DatasetMemberReferenceData,
+    DatasetReadData, DatasetReadOutcomeData, DatasetRevisionData, DeleteOptionsData,
+    DeleteOutcomeData, GenerationData, QuarantineDisposition, QuarantineOutcomeData,
+    QuarantineReason, QuarantineReceiptData, SafePathSegmentData, StorageError, StorageErrorKind,
+    TransactionScopeData, WriteOptionsData,
 };
 
 // ---- 私有、仅供 crash 测试驱动的故障注入接缝（不对外导出） ----
@@ -110,7 +111,7 @@ impl FileSystemDatasetAdapter {
         result
     }
 
-    fn dataset_rel(key: &DatasetKey) -> PathBuf {
+    fn dataset_rel(key: &DatasetKeyData) -> PathBuf {
         key.segments()
             .iter()
             .fold(PathBuf::from(key.namespace().as_str()), |path, segment| {
@@ -118,13 +119,13 @@ impl FileSystemDatasetAdapter {
             })
     }
 
-    fn open_dataset_dir(&self, key: &DatasetKey) -> Result<Dir, StorageError> {
+    fn open_dataset_dir(&self, key: &DatasetKeyData) -> Result<Dir, StorageError> {
         let rel = Self::dataset_rel(key);
         self.root.create_dir_all(&rel).map_err(proto::map_io)?;
         self.root.open_dir(&rel).map_err(proto::map_io)
     }
 
-    fn open_existing_dataset_dir(&self, key: &DatasetKey) -> Result<Option<Dir>, StorageError> {
+    fn open_existing_dataset_dir(&self, key: &DatasetKeyData) -> Result<Option<Dir>, StorageError> {
         let rel = Self::dataset_rel(key);
         match self.root.symlink_metadata(&rel) {
             Ok(metadata) if metadata.file_type().is_symlink() => Err(StorageError::new(
@@ -144,9 +145,9 @@ impl FileSystemDatasetAdapter {
     fn collect_dataset_keys(
         &self,
         directory: &Dir,
-        namespace: crate::domain::StorageNamespace,
-        segments: &mut Vec<SafePathSegment>,
-        result: &mut Vec<DatasetKey>,
+        namespace: crate::domain::StorageNamespaceData,
+        segments: &mut Vec<SafePathSegmentData>,
+        result: &mut Vec<DatasetKeyData>,
     ) -> Result<(), StorageError> {
         for entry in directory.entries().map_err(proto::map_io)? {
             let entry = entry.map_err(proto::map_io)?;
@@ -155,7 +156,7 @@ impl FileSystemDatasetAdapter {
             if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
                 continue;
             }
-            let name = match SafePathSegment::from_str(&name.to_string_lossy()) {
+            let name = match SafePathSegmentData::from_str(&name.to_string_lossy()) {
                 Ok(name) => name,
                 Err(_) => continue,
             };
@@ -164,7 +165,7 @@ impl FileSystemDatasetAdapter {
                 .map_err(proto::map_io)?;
             segments.push(name);
             if proto::exists(&child, Path::new(PRIMARY_DIR).join(MANIFEST_FILE).as_path())? {
-                result.push(DatasetKey::new(namespace, segments.clone())?);
+                result.push(DatasetKeyData::new(namespace, segments.clone())?);
             }
             self.collect_dataset_keys(&child, namespace, segments, result)?;
             segments.pop();
@@ -174,8 +175,8 @@ impl FileSystemDatasetAdapter {
 
     fn list_datasets_sync(
         &self,
-        namespace: crate::domain::StorageNamespace,
-    ) -> Result<Vec<DatasetKey>, StorageError> {
+        namespace: crate::domain::StorageNamespaceData,
+    ) -> Result<Vec<DatasetKeyData>, StorageError> {
         let namespace_path = Path::new(namespace.as_str());
         let namespace_dir = match self.root.open_dir(namespace_path) {
             Ok(directory) => directory,
@@ -190,12 +191,12 @@ impl FileSystemDatasetAdapter {
 
     fn delete_all_generations_sync(
         &self,
-        key: &DatasetKey,
-        options: DeleteOptions,
-    ) -> Result<DeleteOutcome, StorageError> {
+        key: &DatasetKeyData,
+        options: DeleteOptionsData,
+    ) -> Result<DeleteOutcomeData, StorageError> {
         let rel = Self::dataset_rel(key);
         let Some(dir) = self.open_existing_dataset_dir(key)? else {
-            return Ok(DeleteOutcome::new(false, false, false));
+            return Ok(DeleteOutcomeData::new(false, false, false));
         };
         let lock = self.lock(&dir)?;
         self.recover(&dir)?;
@@ -214,7 +215,7 @@ impl FileSystemDatasetAdapter {
             proto::sync_dir(&dir)?;
             drop(lock);
         }
-        Ok(DeleteOutcome::new(
+        Ok(DeleteOutcomeData::new(
             deleted_primary,
             deleted_previous,
             deleted_quarantine,
@@ -238,7 +239,7 @@ impl FileSystemDatasetAdapter {
 
     /// 取锁并跑一次恢复，返回数据集目录句柄与锁守卫。所有入口都经此路径：
     /// 锁内恢复保证并发读永不看到半代，且校验前滚合法性。
-    fn locked(&self, key: &DatasetKey) -> Result<(Dir, std::fs::File), StorageError> {
+    fn locked(&self, key: &DatasetKeyData) -> Result<(Dir, std::fs::File), StorageError> {
         let dir = self.open_dataset_dir(key)?;
         let lock = self.lock(&dir)?;
         self.recover(&dir)?;
@@ -471,7 +472,7 @@ impl FileSystemDatasetAdapter {
             actual_evidence.push((member.名称.as_str(), bytes.len() as u64, revision_digest));
         }
         let recomputed = proto::encode_revision(
-            DatasetRevision::from_member_digests(&actual_evidence).as_bytes(),
+            DatasetRevisionData::from_member_digests(&actual_evidence).as_bytes(),
         );
         if recomputed != journal.新修订号 {
             return Err(self.quarantine_corrupt(dir, CorruptionReason::InvalidJournal, false));
@@ -707,7 +708,7 @@ impl FileSystemDatasetAdapter {
         if let Err(error) = self.write_corruption_marker(dir) {
             return StorageError::new(
                 StorageErrorKind::CorruptTransaction(CorruptTransactionError::new(
-                    TransactionScope::Dataset,
+                    TransactionScopeData::Dataset,
                     reason,
                     QuarantineDisposition::QuarantineFailed,
                 )),
@@ -776,7 +777,7 @@ impl FileSystemDatasetAdapter {
         let _ = proto::sync_dir(dir);
         StorageError::new(
             StorageErrorKind::CorruptTransaction(CorruptTransactionError::new(
-                TransactionScope::Dataset,
+                TransactionScopeData::Dataset,
                 reason,
                 disposition,
             )),
@@ -811,10 +812,10 @@ impl FileSystemDatasetAdapter {
     }
     // ---- 读取辅助 ----
 
-    fn current_manifest(&self, dir: &Dir) -> Result<DatasetManifest, StorageError> {
+    fn current_manifest(&self, dir: &Dir) -> Result<DatasetManifestData, StorageError> {
         match proto::read_manifest(dir, Path::new(PRIMARY_DIR))? {
             Some(record) => manifest_from_record(dir, PRIMARY_DIR, &record),
-            None => DatasetManifest::new(Vec::new()),
+            None => DatasetManifestData::new(Vec::new()),
         }
     }
 
@@ -822,13 +823,13 @@ impl FileSystemDatasetAdapter {
         &self,
         dir: &Dir,
         generation_dir: &str,
-        members: &[SafePathSegment],
-    ) -> Result<DatasetReadOutcome, StorageError> {
+        members: &[SafePathSegmentData],
+    ) -> Result<DatasetReadOutcomeData, StorageError> {
         let generation_path = PathBuf::from(generation_dir);
         let Some(record) = proto::read_manifest(dir, &generation_path)? else {
-            return Ok(DatasetReadOutcome::NotFound);
+            return Ok(DatasetReadOutcomeData::NotFound);
         };
-        let revision = DatasetRevision::from_bytes(proto::decode_revision(&record.修订号)?);
+        let revision = DatasetRevisionData::from_bytes(proto::decode_revision(&record.修订号)?);
         let legacy_blobs = generation_path.join(BLOBS_DIR);
         let uses_legacy_member_layout = !record.成员集合.is_empty()
             && (record.成员证据.is_empty()
@@ -844,7 +845,7 @@ impl FileSystemDatasetAdapter {
                     .iter()
                     .any(|member_name| member_name == name.as_str())
                 {
-                    return Ok(DatasetReadOutcome::NotFound);
+                    return Ok(DatasetReadOutcomeData::NotFound);
                 }
                 legacy_blobs.join(name.as_str())
             } else {
@@ -853,12 +854,12 @@ impl FileSystemDatasetAdapter {
                     .iter()
                     .find(|member| member.名称 == name.as_str())
                 else {
-                    return Ok(DatasetReadOutcome::NotFound);
+                    return Ok(DatasetReadOutcomeData::NotFound);
                 };
                 PathBuf::from(MEMBERS_DIR).join(&member_record.内容摘要)
             };
             let Some(bytes) = proto::read_file(dir, &content_path)? else {
-                return Ok(DatasetReadOutcome::NotFound);
+                return Ok(DatasetReadOutcomeData::NotFound);
             };
             if !uses_legacy_member_layout
                 && proto::digest_bytes(&bytes)
@@ -871,9 +872,9 @@ impl FileSystemDatasetAdapter {
             {
                 return Err(dataset_member_mismatch());
             }
-            result.push(DatasetMember::new(name.clone(), bytes));
+            result.push(DatasetMemberData::new(name.clone(), bytes));
         }
-        Ok(DatasetReadOutcome::Found(DatasetRead::new(
+        Ok(DatasetReadOutcomeData::Found(DatasetReadData::new(
             revision, result,
         )?))
     }
@@ -883,8 +884,8 @@ impl FileSystemDatasetAdapter {
     fn commit_incremental_sync(
         &self,
         dir: &Dir,
-        changes: &DatasetChangeSet,
-    ) -> Result<DatasetCommitReceipt, StorageError> {
+        changes: &DatasetChangeSetData,
+    ) -> Result<DatasetCommitReceiptData, StorageError> {
         let current = self.current_manifest(dir)?;
         if current.revision() != changes.expected_revision() {
             return Err(StorageError::new(
@@ -983,10 +984,10 @@ impl FileSystemDatasetAdapter {
     fn commit_incremental_verified(
         &self,
         dir: &Dir,
-        current: &DatasetManifest,
-        changes: &DatasetChangeSet,
-        reused_content: &[(SafePathSegment, String)],
-    ) -> Result<DatasetCommitReceipt, StorageError> {
+        current: &DatasetManifestData,
+        changes: &DatasetChangeSetData,
+        reused_content: &[(SafePathSegmentData, String)],
+    ) -> Result<DatasetCommitReceiptData, StorageError> {
         let current_record = proto::read_manifest(dir, Path::new(PRIMARY_DIR))?;
         let new_members = changes
             .new_members()
@@ -1011,16 +1012,16 @@ impl FileSystemDatasetAdapter {
             }))
             .collect::<Vec<_>>();
         revision_evidence.sort_by(|left, right| left.0.cmp(right.0));
-        let new_revision = DatasetRevision::from_member_digests(&revision_evidence);
+        let new_revision = DatasetRevisionData::from_member_digests(&revision_evidence);
         let member_names = revision_evidence
             .iter()
-            .map(|(name, _, _)| SafePathSegment::from_str(name))
+            .map(|(name, _, _)| SafePathSegmentData::from_str(name))
             .collect::<Result<Vec<_>, _>>()?;
         let member_evidence = revision_evidence
             .iter()
             .zip(member_names)
             .map(|((_, byte_len, member_digest), name)| {
-                DatasetMemberReference::from_manifest_member(
+                DatasetMemberReferenceData::from_manifest_member(
                     new_revision.clone(),
                     name,
                     *byte_len,
@@ -1029,7 +1030,7 @@ impl FileSystemDatasetAdapter {
             })
             .collect::<Vec<_>>();
         let _new_manifest =
-            DatasetManifest::from_verified_members(new_revision.clone(), member_evidence)?;
+            DatasetManifestData::from_verified_members(new_revision.clone(), member_evidence)?;
         let nonce = Uuid::new_v4().simple().to_string();
         let mut journal_members = new_members
             .iter()
@@ -1158,9 +1159,9 @@ impl FileSystemDatasetAdapter {
         })();
 
         match result {
-            Ok(()) => Ok(DatasetCommitReceipt::committed(
+            Ok(()) => Ok(DatasetCommitReceiptData::committed(
                 new_revision,
-                DatasetCommitVisibility::Visible,
+                DatasetCommitVisibilityData::Visible,
                 None,
             )),
             Err(error) if matches!(error.kind(), StorageErrorKind::CorruptTransaction(_)) => {
@@ -1168,10 +1169,10 @@ impl FileSystemDatasetAdapter {
             }
             Err(_) if crossed_commit => {
                 log::warn!(target: crate::LOG_TARGET, "dataset_commit recovery_pending");
-                Ok(DatasetCommitReceipt::committed(
+                Ok(DatasetCommitReceiptData::committed(
                     new_revision,
-                    DatasetCommitVisibility::RecoveryPending,
-                    Some(CommitWarning::MemberPublishRecoveryPending),
+                    DatasetCommitVisibilityData::RecoveryPending,
+                    Some(CommitWarningData::MemberPublishRecoveryPending),
                 ))
             }
             Err(error) => {
@@ -1232,9 +1233,9 @@ impl FileSystemDatasetAdapter {
     fn commit_sync(
         &self,
         dir: &Dir,
-        expected: &DatasetRevision,
-        members: &[DatasetMember],
-    ) -> Result<DatasetCommitReceipt, StorageError> {
+        expected: &DatasetRevisionData,
+        members: &[DatasetMemberData],
+    ) -> Result<DatasetCommitReceiptData, StorageError> {
         let current = self.current_manifest(dir)?;
         if current.revision() != expected {
             return Err(StorageError::new(
@@ -1245,7 +1246,7 @@ impl FileSystemDatasetAdapter {
         let replacements = members
             .iter()
             .cloned()
-            .map(DatasetMemberChange::Replace)
+            .map(DatasetMemberChangeData::Replace)
             .collect();
         let target_names = members
             .iter()
@@ -1257,13 +1258,13 @@ impl FileSystemDatasetAdapter {
             .filter(|name| !target_names.contains(*name))
             .cloned()
             .collect();
-        let changes = DatasetChangeSet::new(expected.clone(), replacements, Vec::new())?
+        let changes = DatasetChangeSetData::new(expected.clone(), replacements, Vec::new())?
             .with_removed_members(removed_members)?;
         self.commit_incremental_sync(dir, &changes)
     }
 
     /// 提升前完整验证上一代：每个成员字节必须存在，且据其重算的
-    /// `DatasetManifest` 修订号必须与持久化记录相符。任一缺失/矛盾即返回 typed
+    /// `DatasetManifestData` 修订号必须与持久化记录相符。任一缺失/矛盾即返回 typed
     /// `DatasetMemberDigestMismatch`，调用方据此在写 journal 之前拒绝提升。
     fn validate_previous_generation(
         &self,
@@ -1272,7 +1273,7 @@ impl FileSystemDatasetAdapter {
     ) -> Result<(), StorageError> {
         let mut members = Vec::with_capacity(record.成员集合.len());
         for name in &record.成员集合 {
-            let segment = SafePathSegment::from_str(name)?;
+            let segment = SafePathSegmentData::from_str(name)?;
             let member_record = record
                 .成员证据
                 .iter()
@@ -1290,24 +1291,24 @@ impl FileSystemDatasetAdapter {
             {
                 return Err(dataset_member_mismatch());
             }
-            members.push(DatasetMember::new(segment, bytes));
+            members.push(DatasetMemberData::new(segment, bytes));
         }
-        let recomputed = DatasetManifest::new(members)?;
-        let expected = DatasetRevision::from_bytes(proto::decode_revision(&record.修订号)?);
+        let recomputed = DatasetManifestData::new(members)?;
+        let expected = DatasetRevisionData::from_bytes(proto::decode_revision(&record.修订号)?);
         if recomputed.revision() != &expected {
             return Err(dataset_member_mismatch());
         }
         Ok(())
     }
 
-    fn promote_sync(&self, dir: &Dir) -> Result<DatasetCommitReceipt, StorageError> {
+    fn promote_sync(&self, dir: &Dir) -> Result<DatasetCommitReceiptData, StorageError> {
         let previous_dir = PathBuf::from(PREVIOUS_DIR);
         let Some(previous_record) = proto::read_manifest(dir, &previous_dir)? else {
             // 无上一代可提升：无操作，回报当前 primary 修订号。
             let current = self.current_manifest(dir)?;
-            return Ok(DatasetCommitReceipt::committed(
+            return Ok(DatasetCommitReceiptData::committed(
                 current.revision().clone(),
-                DatasetCommitVisibility::Visible,
+                DatasetCommitVisibilityData::Visible,
                 None,
             ));
         };
@@ -1315,7 +1316,7 @@ impl FileSystemDatasetAdapter {
         self.validate_previous_generation(dir, &previous_record)?;
 
         let new_revision =
-            DatasetRevision::from_bytes(proto::decode_revision(&previous_record.修订号)?);
+            DatasetRevisionData::from_bytes(proto::decode_revision(&previous_record.修订号)?);
         let current = self.current_manifest(dir)?;
 
         let mut journal_members = Vec::with_capacity(previous_record.成员集合.len());
@@ -1371,9 +1372,9 @@ impl FileSystemDatasetAdapter {
         })();
 
         match result {
-            Ok(()) => Ok(DatasetCommitReceipt::committed(
+            Ok(()) => Ok(DatasetCommitReceiptData::committed(
                 new_revision,
-                DatasetCommitVisibility::Visible,
+                DatasetCommitVisibilityData::Visible,
                 None,
             )),
             Err(error) => {
@@ -1387,10 +1388,10 @@ impl FileSystemDatasetAdapter {
                         target: crate::LOG_TARGET,
                         "dataset_promote recovery_pending"
                     );
-                    Ok(DatasetCommitReceipt::committed(
+                    Ok(DatasetCommitReceiptData::committed(
                         new_revision,
-                        DatasetCommitVisibility::RecoveryPending,
-                        Some(CommitWarning::MemberPublishRecoveryPending),
+                        DatasetCommitVisibilityData::RecoveryPending,
+                        Some(CommitWarningData::MemberPublishRecoveryPending),
                     ))
                 } else {
                     let _ = proto::remove_journal(dir);
@@ -1485,19 +1486,21 @@ impl FileSystemDatasetAdapter {
     fn quarantine_sync(
         &self,
         dir: &Dir,
-        generation: Generation,
-        scope: TransactionScope,
+        generation: GenerationData,
+        scope: TransactionScopeData,
         reason: QuarantineReason,
-    ) -> Result<QuarantineOutcome, StorageError> {
+    ) -> Result<QuarantineOutcomeData, StorageError> {
         let generation_dir = match generation {
-            Generation::Primary => PathBuf::from(PRIMARY_DIR),
-            Generation::Previous => PathBuf::from(PREVIOUS_DIR),
+            GenerationData::Primary => PathBuf::from(PRIMARY_DIR),
+            GenerationData::Previous => PathBuf::from(PREVIOUS_DIR),
         };
         if !proto::exists(dir, &generation_dir.join(MANIFEST_FILE))? {
-            return Ok(QuarantineOutcome::already_absent(generation, scope, reason));
+            return Ok(QuarantineOutcomeData::already_absent(
+                generation, scope, reason,
+            ));
         }
         proto::reject_symlink(dir, &generation_dir)?;
-        let id = SafePathSegment::from_str(&Uuid::new_v4().simple().to_string())?;
+        let id = SafePathSegmentData::from_str(&Uuid::new_v4().simple().to_string())?;
         let target = PathBuf::from(format!(
             "{}.quarantine.{}",
             generation_dir.to_string_lossy(),
@@ -1506,7 +1509,7 @@ impl FileSystemDatasetAdapter {
         dir.rename(&generation_dir, dir, &target)
             .map_err(proto::map_io)?;
         proto::sync_dir(dir)?;
-        Ok(QuarantineOutcome::Moved(QuarantineReceipt::new(
+        Ok(QuarantineOutcomeData::Moved(QuarantineReceiptData::new(
             id, generation, scope, reason,
         )))
     }
@@ -1526,14 +1529,14 @@ fn recompute_revision_hex(members: &[JournalMember]) -> Result<String, StorageEr
         .map(|(member, digest)| (member.名称.as_str(), member.字节数, *digest))
         .collect();
     Ok(proto::encode_revision(
-        DatasetRevision::from_member_digests(&evidence).as_bytes(),
+        DatasetRevisionData::from_member_digests(&evidence).as_bytes(),
     ))
 }
 
 fn corrupt_journal_barrier_error() -> StorageError {
     StorageError::new(
         StorageErrorKind::CorruptTransaction(CorruptTransactionError::new(
-            TransactionScope::Dataset,
+            TransactionScopeData::Dataset,
             CorruptionReason::InvalidJournal,
             QuarantineDisposition::EvidenceQuarantined,
         )),
@@ -1545,7 +1548,7 @@ fn corrupt_journal_barrier_error() -> StorageError {
 fn corruption_marker_error() -> StorageError {
     StorageError::new(
         StorageErrorKind::CorruptTransaction(CorruptTransactionError::new(
-            TransactionScope::Dataset,
+            TransactionScopeData::Dataset,
             CorruptionReason::DatasetMemberDigestMismatch,
             QuarantineDisposition::QuarantineFailed,
         )),
@@ -1560,7 +1563,7 @@ fn corruption_marker_error() -> StorageError {
 fn dataset_member_mismatch() -> StorageError {
     StorageError::new(
         StorageErrorKind::CorruptTransaction(CorruptTransactionError::new(
-            TransactionScope::Dataset,
+            TransactionScopeData::Dataset,
             CorruptionReason::DatasetMemberDigestMismatch,
             QuarantineDisposition::EvidenceQuarantined,
         )),
@@ -1593,19 +1596,19 @@ fn manifest_from_record(
     dir: &Dir,
     generation_dir: &str,
     record: &DatasetManifestRecord,
-) -> Result<DatasetManifest, StorageError> {
-    let revision = DatasetRevision::from_bytes(proto::decode_revision(&record.修订号)?);
+) -> Result<DatasetManifestData, StorageError> {
+    let revision = DatasetRevisionData::from_bytes(proto::decode_revision(&record.修订号)?);
     let member_evidence = if record.成员证据.is_empty() && !record.成员集合.is_empty() {
         let blobs = PathBuf::from(generation_dir).join(BLOBS_DIR);
         record
             .成员集合
             .iter()
             .map(|name| {
-                let safe_name = SafePathSegment::from_str(name)?;
+                let safe_name = SafePathSegmentData::from_str(name)?;
                 let bytes = proto::read_file(dir, &blobs.join(name))?.ok_or_else(|| {
                     StorageError::new(StorageErrorKind::Io, "数据集 manifest 引用的成员不存在")
                 })?;
-                Ok(DatasetMemberReference::from_manifest_member(
+                Ok(DatasetMemberReferenceData::from_manifest_member(
                     revision.clone(),
                     safe_name,
                     bytes.len() as u64,
@@ -1618,20 +1621,20 @@ fn manifest_from_record(
             .成员证据
             .iter()
             .map(|member| {
-                Ok(DatasetMemberReference::from_manifest_member(
+                Ok(DatasetMemberReferenceData::from_manifest_member(
                     revision.clone(),
-                    SafePathSegment::from_str(&member.名称)?,
+                    SafePathSegmentData::from_str(&member.名称)?,
                     member.字节数,
                     proto::decode_revision(&member.修订摘要)?,
                 ))
             })
             .collect::<Result<Vec<_>, StorageError>>()?
     };
-    let manifest = DatasetManifest::from_verified_members(revision, member_evidence)?;
+    let manifest = DatasetManifestData::from_verified_members(revision, member_evidence)?;
     let persisted_names = record
         .成员集合
         .iter()
-        .map(|name| SafePathSegment::from_str(name))
+        .map(|name| SafePathSegmentData::from_str(name))
         .collect::<Result<Vec<_>, _>>()?;
     if manifest.members() != persisted_names {
         return Err(StorageError::new(
@@ -1646,78 +1649,81 @@ fn manifest_from_record(
 impl AtomicDatasetPort for FileSystemDatasetAdapter {
     async fn list_datasets(
         &self,
-        namespace: crate::domain::StorageNamespace,
-    ) -> Result<Vec<DatasetKey>, StorageError> {
+        namespace: crate::domain::StorageNamespaceData,
+    ) -> Result<Vec<DatasetKeyData>, StorageError> {
         self.list_datasets_sync(namespace)
     }
 
     async fn delete_all_generations(
         &self,
-        dataset: &DatasetKey,
-        options: DeleteOptions,
-    ) -> Result<DeleteOutcome, StorageError> {
+        dataset: &DatasetKeyData,
+        options: DeleteOptionsData,
+    ) -> Result<DeleteOutcomeData, StorageError> {
         self.delete_all_generations_sync(dataset, options)
     }
 
-    async fn read_manifest(&self, dataset: &DatasetKey) -> Result<DatasetManifest, StorageError> {
+    async fn read_manifest(
+        &self,
+        dataset: &DatasetKeyData,
+    ) -> Result<DatasetManifestData, StorageError> {
         let (dir, _lock) = self.locked(dataset)?;
         self.current_manifest(&dir)
     }
 
     async fn read_consistent(
         &self,
-        dataset: &DatasetKey,
-        members: &[SafePathSegment],
-    ) -> Result<DatasetReadOutcome, StorageError> {
+        dataset: &DatasetKeyData,
+        members: &[SafePathSegmentData],
+    ) -> Result<DatasetReadOutcomeData, StorageError> {
         let (dir, _lock) = self.locked(dataset)?;
         self.read_generation(&dir, PRIMARY_DIR, members)
     }
 
     async fn read_previous(
         &self,
-        dataset: &DatasetKey,
-        members: &[SafePathSegment],
-    ) -> Result<DatasetReadOutcome, StorageError> {
+        dataset: &DatasetKeyData,
+        members: &[SafePathSegmentData],
+    ) -> Result<DatasetReadOutcomeData, StorageError> {
         let (dir, _lock) = self.locked(dataset)?;
         self.read_generation(&dir, PREVIOUS_DIR, members)
     }
 
     async fn commit_atomic(
         &self,
-        dataset: &DatasetKey,
-        expected: &DatasetRevision,
-        members: &[DatasetMember],
-        _options: WriteOptions,
-    ) -> Result<DatasetCommitReceipt, StorageError> {
+        dataset: &DatasetKeyData,
+        expected: &DatasetRevisionData,
+        members: &[DatasetMemberData],
+        _options: WriteOptionsData,
+    ) -> Result<DatasetCommitReceiptData, StorageError> {
         let (dir, _lock) = self.locked(dataset)?;
         self.commit_sync(&dir, expected, members)
     }
 
     async fn commit_incremental(
         &self,
-        dataset: &DatasetKey,
-        changes: &DatasetChangeSet,
-        _options: WriteOptions,
-    ) -> Result<DatasetCommitReceipt, StorageError> {
+        dataset: &DatasetKeyData,
+        changes: &DatasetChangeSetData,
+        _options: WriteOptionsData,
+    ) -> Result<DatasetCommitReceiptData, StorageError> {
         let (dir, _lock) = self.locked(dataset)?;
         self.commit_incremental_sync(&dir, changes)
     }
 
     async fn promote_previous(
         &self,
-        dataset: &DatasetKey,
-    ) -> Result<DatasetCommitReceipt, StorageError> {
+        dataset: &DatasetKeyData,
+    ) -> Result<DatasetCommitReceiptData, StorageError> {
         let (dir, _lock) = self.locked(dataset)?;
         self.promote_sync(&dir)
     }
 
     async fn quarantine(
         &self,
-        dataset: &DatasetKey,
-        generation: Generation,
-        scope: TransactionScope,
+        dataset: &DatasetKeyData,
+        generation: GenerationData,
+        scope: TransactionScopeData,
         reason: QuarantineReason,
-    ) -> Result<QuarantineOutcome, StorageError> {
+    ) -> Result<QuarantineOutcomeData, StorageError> {
         let (dir, _lock) = self.locked(dataset)?;
         self.quarantine_sync(&dir, generation, scope, reason)
     }

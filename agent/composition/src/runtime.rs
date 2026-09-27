@@ -55,7 +55,7 @@ fn wire_runtime_tool_assembly(
     let policy = snapshot.tool_result_policy(context_size);
     let agents_dir_buf = agents_dir.to_path_buf();
     let blobs = Arc::new(runtime::AtomicBlobToolResultStore::new(
-        storage::file_system_blob(agents_dir_buf.clone())
+        storage::wire_file_system_blob(agents_dir_buf.clone())
             .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
         agents_dir_buf,
     ));
@@ -92,13 +92,13 @@ pub(crate) async fn from_args_with_gateways(
         identity.git_common_dir.as_deref(),
     )
     .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
-    // StorageNamespace::Memory adds "memory" segment → adapter root is
+    // StorageNamespaceData::Memory adds "memory" segment → adapter root is
     // agents_dir so the dataset lives at agents_dir/memory/{project}/...
     // (not agents_dir/memory/memory/...). Legacy memory still uses the
     // explicit agents_dir.join("memory") path via FileLegacyMemorySourceFactory.
     let reflection_history: Arc<dyn memory_api::ReflectionHistoryStore> =
         Arc::new(memory_api::AtomicDatasetReflectionHistoryStore::new(
-            storage::file_system_dataset(agents_dir)
+            storage::wire_file_system_dataset(agents_dir)
                 .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
             project_key,
         ));
@@ -110,9 +110,9 @@ pub(crate) async fn from_args_with_gateways(
     let skill_wiring = tools::composition::wire_skills();
     let skill_catalog = skill_wiring.catalog();
     let skill_loader = skill_wiring.loader();
-    let session_dataset = storage::file_system_dataset(agents_dir)
+    let session_dataset = storage::wire_file_system_dataset(agents_dir)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
-    let session_blob = storage::file_system_blob(agents_dir)
+    let session_blob = storage::wire_file_system_blob(agents_dir)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
     let session_management: Arc<dyn context::SessionManagementPort> = Arc::new(
         context::DatasetSessionManagement::new(session_dataset.clone(), session_blob.clone()),
@@ -205,7 +205,7 @@ pub(crate) async fn from_args_with_gateways(
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener: Box::new(memory::DatasetMemoryOpener::new(
-            storage::file_system_dataset(agents_dir_buf)
+            storage::wire_file_system_dataset(agents_dir_buf)
                 .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
             Arc::new(memory::FileLegacyMemorySourceFactory::new(
                 agents_dir.join("memory"),

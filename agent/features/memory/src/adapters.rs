@@ -35,8 +35,8 @@ const REFLECTION_HISTORY_CAS_ATTEMPTS: usize = 8;
 /// legacy classification remains follow-up work.
 pub(crate) struct AtomicDatasetMemoryStore {
     storage: Arc<dyn storage_api::AtomicDatasetPort>,
-    global: storage_api::DatasetKey,
-    project: storage_api::DatasetKey,
+    global: storage_api::DatasetKeyData,
+    project: storage_api::DatasetKeyData,
 }
 
 impl AtomicDatasetMemoryStore {
@@ -53,7 +53,7 @@ impl AtomicDatasetMemoryStore {
         }
     }
 
-    fn dataset_key_for(&self, layer: MemoryLayer) -> &storage_api::DatasetKey {
+    fn dataset_key_for(&self, layer: MemoryLayer) -> &storage_api::DatasetKeyData {
         match layer {
             MemoryLayer::Global => &self.global,
             MemoryLayer::Project => &self.project,
@@ -63,7 +63,7 @@ impl AtomicDatasetMemoryStore {
     async fn load_for_open(
         &self,
         layer: MemoryLayer,
-    ) -> Result<CommittedMemoryDataset<storage_api::DatasetRevision>, MemoryOpenerError> {
+    ) -> Result<CommittedMemoryDataset<storage_api::DatasetRevisionData>, MemoryOpenerError> {
         let dataset_key = self.dataset_key_for(layer);
         let manifest = self
             .storage
@@ -86,7 +86,7 @@ impl AtomicDatasetMemoryStore {
             .read_consistent(dataset_key, &expected)
             .await
             .map_err(map_storage_open_error)?;
-        let storage_api::DatasetReadOutcome::Found(read) = read else {
+        let storage_api::DatasetReadOutcomeData::Found(read) = read else {
             return Err(MemoryOpenerError::CorruptTransaction);
         };
         if read.revision() != &revision {
@@ -96,7 +96,7 @@ impl AtomicDatasetMemoryStore {
             read.members()
                 .iter()
                 .find(|member| member.name().as_str() == name)
-                .map(storage_api::DatasetMember::bytes)
+                .map(storage_api::DatasetMemberData::bytes)
                 .ok_or(MemoryOpenerError::CorruptTransaction)
         };
         let dataset =
@@ -138,10 +138,10 @@ fn map_memory_open_error(error: MemoryError) -> MemoryOpenerError {
     }
 }
 
-fn dataset_key(segment: &str) -> storage_api::DatasetKey {
-    let segment = storage_api::SafePathSegment::from_str(segment)
+fn dataset_key(segment: &str) -> storage_api::DatasetKeyData {
+    let segment = storage_api::SafePathSegmentData::from_str(segment)
         .expect("Memory dataset segment is always a safe Storage path segment");
-    storage_api::DatasetKey::new(storage_api::StorageNamespace::Memory, vec![segment])
+    storage_api::DatasetKeyData::new(storage_api::StorageNamespaceData::Memory, vec![segment])
         .expect("Memory dataset segment always forms a valid dataset key")
 }
 
@@ -170,31 +170,31 @@ fn invalid_dataset(kind: MemoryStorageErrorKind) -> MemoryError {
     MemoryError::Storage { kind }
 }
 
-fn member_name(value: &str) -> storage_api::SafePathSegment {
-    storage_api::SafePathSegment::from_str(value).expect("fixed Memory member name is safe")
+fn member_name(value: &str) -> storage_api::SafePathSegmentData {
+    storage_api::SafePathSegmentData::from_str(value).expect("fixed Memory member name is safe")
 }
 
-fn expected_member_names() -> Vec<storage_api::SafePathSegment> {
+fn expected_member_names() -> Vec<storage_api::SafePathSegmentData> {
     MEMORY_MEMBER_NAMES.into_iter().map(member_name).collect()
 }
 
 fn encode_members(
     layer: MemoryLayer,
     dataset: &MemoryDataset,
-) -> Result<Vec<storage_api::DatasetMember>, MemoryError> {
+) -> Result<Vec<storage_api::DatasetMemberData>, MemoryError> {
     if dataset.layer() != layer {
         return Err(invalid_dataset(MemoryStorageErrorKind::Serialization));
     }
     let (active, archive) = crate::codec::encode_dataset(dataset)?;
     Ok(vec![
-        storage_api::DatasetMember::new(member_name(ACTIVE_MEMBER), active),
-        storage_api::DatasetMember::new(member_name(ARCHIVE_MEMBER), archive),
+        storage_api::DatasetMemberData::new(member_name(ACTIVE_MEMBER), active),
+        storage_api::DatasetMemberData::new(member_name(ARCHIVE_MEMBER), archive),
     ])
 }
 
 #[async_trait]
 impl MemoryDatasetStore for AtomicDatasetMemoryStore {
-    type Revision = storage_api::DatasetRevision;
+    type Revision = storage_api::DatasetRevisionData;
 
     async fn load_committed(
         &self,
@@ -224,7 +224,7 @@ impl MemoryDatasetStore for AtomicDatasetMemoryStore {
             .read_consistent(dataset_key, &expected)
             .await
             .map_err(storage_error)?;
-        let storage_api::DatasetReadOutcome::Found(read) = read else {
+        let storage_api::DatasetReadOutcomeData::Found(read) = read else {
             return Err(invalid_dataset(MemoryStorageErrorKind::CorruptTransaction));
         };
         if read.revision() != &revision {
@@ -235,7 +235,7 @@ impl MemoryDatasetStore for AtomicDatasetMemoryStore {
             read.members()
                 .iter()
                 .find(|member| member.name().as_str() == name)
-                .map(storage_api::DatasetMember::bytes)
+                .map(storage_api::DatasetMemberData::bytes)
                 .ok_or_else(|| invalid_dataset(MemoryStorageErrorKind::CorruptTransaction))
         };
         let dataset =
@@ -258,13 +258,13 @@ impl MemoryDatasetStore for AtomicDatasetMemoryStore {
                 self.dataset_key_for(layer),
                 expected,
                 &members,
-                storage_api::WriteOptions::new(storage_api::Durability::ProcessCrashSafe),
+                storage_api::WriteOptionsData::new(storage_api::DurabilityData::ProcessCrashSafe),
             )
             .await
             .map_err(storage_error)?;
         let visibility = match receipt.visibility() {
-            storage_api::DatasetCommitVisibility::Visible => MemoryCommitVisibility::Visible,
-            storage_api::DatasetCommitVisibility::RecoveryPending => {
+            storage_api::DatasetCommitVisibilityData::Visible => MemoryCommitVisibility::Visible,
+            storage_api::DatasetCommitVisibilityData::RecoveryPending => {
                 MemoryCommitVisibility::RecoveryPending
             }
         };
@@ -280,7 +280,7 @@ impl MemoryDatasetStore for AtomicDatasetMemoryStore {
 /// `Vec<ReflectionRecord>`.
 pub struct AtomicDatasetReflectionHistoryStore {
     storage: Arc<dyn storage_api::AtomicDatasetPort>,
-    dataset: storage_api::DatasetKey,
+    dataset: storage_api::DatasetKeyData,
 }
 
 impl AtomicDatasetReflectionHistoryStore {
@@ -288,11 +288,11 @@ impl AtomicDatasetReflectionHistoryStore {
         storage: Arc<dyn storage_api::AtomicDatasetPort>,
         project: ProjectMemoryKey,
     ) -> Self {
-        let project = storage_api::SafePathSegment::from_str(project.as_str())
+        let project = storage_api::SafePathSegmentData::from_str(project.as_str())
             .expect("derived project Memory key is a safe Storage path segment");
         let history = member_name(REFLECTION_HISTORY_SEGMENT);
-        let dataset = storage_api::DatasetKey::new(
-            storage_api::StorageNamespace::Memory,
+        let dataset = storage_api::DatasetKeyData::new(
+            storage_api::StorageNamespaceData::Memory,
             vec![project, history],
         )
         .expect("Reflection history segments form a valid dataset key");
@@ -301,7 +301,7 @@ impl AtomicDatasetReflectionHistoryStore {
 
     async fn load_records(
         &self,
-    ) -> Result<(Vec<ReflectionRecord>, storage_api::DatasetRevision), MemoryError> {
+    ) -> Result<(Vec<ReflectionRecord>, storage_api::DatasetRevisionData), MemoryError> {
         let manifest = self
             .storage
             .read_manifest(&self.dataset)
@@ -320,7 +320,7 @@ impl AtomicDatasetReflectionHistoryStore {
             .read_consistent(&self.dataset, std::slice::from_ref(&records_member))
             .await
             .map_err(storage_error)?;
-        let storage_api::DatasetReadOutcome::Found(read) = read else {
+        let storage_api::DatasetReadOutcomeData::Found(read) = read else {
             return Err(invalid_dataset(MemoryStorageErrorKind::CorruptTransaction));
         };
         if read.revision() != &revision {
@@ -330,7 +330,7 @@ impl AtomicDatasetReflectionHistoryStore {
             .members()
             .first()
             .filter(|member| member.name() == &records_member)
-            .map(storage_api::DatasetMember::bytes)
+            .map(storage_api::DatasetMemberData::bytes)
             .ok_or_else(|| invalid_dataset(MemoryStorageErrorKind::CorruptTransaction))?;
         let records = serde_json::from_slice(bytes)
             .map_err(|_| invalid_dataset(MemoryStorageErrorKind::Serialization))?;
@@ -355,7 +355,7 @@ impl AtomicDatasetReflectionHistoryStore {
             mutation(&mut records);
             let bytes = serde_json::to_vec(&records)
                 .map_err(|_| invalid_dataset(MemoryStorageErrorKind::Serialization))?;
-            let members = [storage_api::DatasetMember::new(
+            let members = [storage_api::DatasetMemberData::new(
                 member_name(REFLECTION_RECORDS_MEMBER),
                 bytes,
             )];
@@ -365,7 +365,9 @@ impl AtomicDatasetReflectionHistoryStore {
                     &self.dataset,
                     &revision,
                     &members,
-                    storage_api::WriteOptions::new(storage_api::Durability::ProcessCrashSafe),
+                    storage_api::WriteOptionsData::new(
+                        storage_api::DurabilityData::ProcessCrashSafe,
+                    ),
                 )
                 .await
             {

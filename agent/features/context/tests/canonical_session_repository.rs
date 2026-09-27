@@ -777,7 +777,7 @@ async fn snapshot_does_not_publish_a_new_session_generation() {
 async fn clear_after_partial_resume_keeps_persisted_steps_on_disk() {
     let root = tempfile::tempdir().expect("temporary dataset root");
     let dataset: Arc<dyn storage::AtomicDatasetPort> =
-        storage::file_system_dataset(root.path()).expect("dataset adapter");
+        storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
     let writer = Arc::new(context::DatasetCanonicalSessionWriter::new(dataset.clone()));
     let session_id = SessionId::new("resume-clear-session");
     // 磁盘持久化完整历史：compact 边界前的 run-a 与边界后的 run-b。
@@ -849,12 +849,12 @@ async fn clear_after_partial_resume_keeps_persisted_steps_on_disk() {
     let project_dir = context::project_dir_segment(&workspace().project_identity);
     let manifest = dataset
         .read_manifest(
-            &storage::DatasetKey::new(
-                storage::StorageNamespace::Session,
+            &storage::DatasetKeyData::new(
+                storage::StorageNamespaceData::Session,
                 vec![
                     project_dir,
                     format!("{}.dataset", session_id.as_str())
-                        .parse::<storage::SafePathSegment>()
+                        .parse::<storage::SafePathSegmentData>()
                         .expect("safe dataset segment"),
                 ],
             )
@@ -865,7 +865,7 @@ async fn clear_after_partial_resume_keeps_persisted_steps_on_disk() {
     let names = manifest
         .members()
         .iter()
-        .map(storage::SafePathSegment::as_str)
+        .map(storage::SafePathSegmentData::as_str)
         .collect::<Vec<_>>();
     // 逻辑断点：磁盘保留全部 step 成员（含内存未装载的 step-a）。
     assert_eq!(

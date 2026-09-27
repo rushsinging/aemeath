@@ -18,7 +18,7 @@ fn project_key() -> ProjectMemoryKey {
 }
 
 fn storage(root: &std::path::Path) -> Arc<dyn storage_api::AtomicDatasetPort> {
-    storage::file_system_dataset(root).unwrap()
+    storage::wire_file_system_dataset(root).unwrap()
 }
 
 fn store(root: &std::path::Path) -> AtomicDatasetReflectionHistoryStore {
@@ -109,11 +109,11 @@ async fn reflection_history_corruption_fails_closed() {
     let root = unique_root("corruption");
     let storage = storage(&root);
     let project = project_key();
-    let key = storage_api::DatasetKey::new(
-        storage_api::StorageNamespace::Memory,
+    let key = storage_api::DatasetKeyData::new(
+        storage_api::StorageNamespaceData::Memory,
         vec![
-            storage_api::SafePathSegment::from_str(project.as_str()).unwrap(),
-            storage_api::SafePathSegment::from_str("reflection-history").unwrap(),
+            storage_api::SafePathSegmentData::from_str(project.as_str()).unwrap(),
+            storage_api::SafePathSegmentData::from_str("reflection-history").unwrap(),
         ],
     )
     .unwrap();
@@ -122,11 +122,11 @@ async fn reflection_history_corruption_fails_closed() {
         .commit_atomic(
             &key,
             manifest.revision(),
-            &[storage_api::DatasetMember::new(
-                storage_api::SafePathSegment::from_str("records").unwrap(),
+            &[storage_api::DatasetMemberData::new(
+                storage_api::SafePathSegmentData::from_str("records").unwrap(),
                 br#"{"raw_prompt":"must not be accepted"}"#.to_vec(),
             )],
-            storage_api::WriteOptions::new(storage_api::Durability::ProcessCrashSafe),
+            storage_api::WriteOptionsData::new(storage_api::DurabilityData::ProcessCrashSafe),
         )
         .await
         .unwrap();

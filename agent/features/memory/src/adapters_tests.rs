@@ -33,7 +33,7 @@ fn project_key() -> ProjectMemoryKey {
 }
 
 fn shared_storage(root: &std::path::Path) -> Arc<dyn storage_api::AtomicDatasetPort> {
-    storage::file_system_dataset(root).unwrap()
+    storage::wire_file_system_dataset(root).unwrap()
 }
 
 fn store(root: &std::path::Path) -> AtomicDatasetMemoryStore {
@@ -72,7 +72,7 @@ fn storage_error_acl_maps_only_memory_owned_error_kinds() {
 
 #[test]
 fn adapter_is_memory_owned_store() {
-    fn assert_store<T: MemoryDatasetStore<Revision = storage_api::DatasetRevision>>() {}
+    fn assert_store<T: MemoryDatasetStore<Revision = storage_api::DatasetRevisionData>>() {}
     assert_store::<AtomicDatasetMemoryStore>();
 }
 
@@ -89,18 +89,18 @@ async fn opener_reads_legacy_storage_manifest_without_member_evidence() {
     .expect("valid project memory dataset");
     let (active, archive) =
         crate::codec::encode_dataset(&expected_dataset).expect("encode project memory dataset");
-    let active_member = storage_api::DatasetMember::new(
-        storage_api::SafePathSegment::from_str("active").expect("safe active member"),
+    let active_member = storage_api::DatasetMemberData::new(
+        storage_api::SafePathSegmentData::from_str("active").expect("safe active member"),
         active.clone(),
     );
-    let archive_member = storage_api::DatasetMember::new(
-        storage_api::SafePathSegment::from_str("archive").expect("safe archive member"),
+    let archive_member = storage_api::DatasetMemberData::new(
+        storage_api::SafePathSegmentData::from_str("archive").expect("safe archive member"),
         archive.clone(),
     );
     let storage = shared_storage(&root);
-    let dataset_key = storage_api::DatasetKey::new(
-        storage_api::StorageNamespace::Memory,
-        vec![storage_api::SafePathSegment::from_str(project.as_str())
+    let dataset_key = storage_api::DatasetKeyData::new(
+        storage_api::StorageNamespaceData::Memory,
+        vec![storage_api::SafePathSegmentData::from_str(project.as_str())
             .expect("safe project memory key")],
     )
     .expect("valid project dataset key");
@@ -115,7 +115,7 @@ async fn opener_reads_legacy_storage_manifest_without_member_evidence() {
             &dataset_key,
             &empty_revision,
             &[active_member.clone(), archive_member.clone()],
-            storage_api::WriteOptions::new(storage_api::Durability::BestEffort),
+            storage_api::WriteOptionsData::new(storage_api::DurabilityData::BestEffort),
         )
         .await
         .expect("seed project dataset");
