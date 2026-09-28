@@ -564,7 +564,10 @@ async fn per_turn_drain_seal_initial_user_message_not_replayed_on_tool_results_c
     for (idx, payload) in recorded.iter().enumerate() {
         let count = payload
             .iter()
-            .filter(|m| matches!(m.role, Role::User) && m.text_content() == user_text)
+            .filter(|m| {
+                matches!(m.role, Role::User)
+                    && without_input_timestamp(&m.text_content()) == user_text
+            })
             .count();
         assert!(
             count <= 1,
@@ -573,11 +576,17 @@ async fn per_turn_drain_seal_initial_user_message_not_replayed_on_tool_results_c
     }
     let first_count = recorded[0]
         .iter()
-        .filter(|m| matches!(m.role, Role::User) && m.text_content() == user_text)
+        .filter(|m| {
+                matches!(m.role, Role::User)
+                    && without_input_timestamp(&m.text_content()) == user_text
+            })
         .count();
     let second_count = recorded[1]
         .iter()
-        .filter(|m| matches!(m.role, Role::User) && m.text_content() == user_text)
+        .filter(|m| {
+                matches!(m.role, Role::User)
+                    && without_input_timestamp(&m.text_content()) == user_text
+            })
         .count();
     assert_eq!(
         first_count, 1,
@@ -685,7 +694,10 @@ async fn per_turn_drain_seal_input_id_preserved_when_run_returns_tool_results_wi
     for (idx, payload) in recorded.iter().enumerate() {
         let count = payload
             .iter()
-            .filter(|m| matches!(m.role, Role::User) && m.text_content() == user_text)
+            .filter(|m| {
+                matches!(m.role, Role::User)
+                    && without_input_timestamp(&m.text_content()) == user_text
+            })
             .count();
         assert!(
             count <= 1,
@@ -765,7 +777,10 @@ async fn per_turn_drain_seal_context_accept_exactly_once_single_llm_invocation()
     let payload = &recorded[0];
     let user_count = payload
         .iter()
-        .filter(|m| matches!(m.role, Role::User) && m.text_content() == user_text)
+        .filter(|m| {
+                matches!(m.role, Role::User)
+                    && without_input_timestamp(&m.text_content()) == user_text
+            })
         .count();
     assert_eq!(
         user_count, 1,

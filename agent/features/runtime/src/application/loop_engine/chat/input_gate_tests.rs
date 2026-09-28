@@ -657,3 +657,68 @@ async fn test_apply_gate_no_premature_adopted_emission() {
         "apply_gate must not emit any events; Adopted is deferred to accept_step_input"
     );
 }
+
+// ── 用户输入时刻盖章（metadata.created_at）──────────────────────
+
+#[tokio::test]
+async fn model_message_stamps_user_input_timestamp_for_plain_input() {
+    let buffer = PendingInputBuffer::default();
+    let input_id = sdk::InputId::new_v7();
+    let input = TestInputEventPort::new(vec![ChatInputEvent::UserMessage {
+        id: input_id.clone(),
+        text: "hello".to_string(),
+        images: vec![],
+    }]);
+    let sink = TestSink::default();
+
+    let outcome = run_loop_gate(
+        GateKind::BeforeLlm,
+        &buffer,
+        &input,
+        &sink,
+        &task::TaskStore::new(),
+        false,
+    )
+    .await;
+    assert_eq!(outcome.accepted_inputs.len(), 1);
+
+    let before = chrono::Local::now().fixed_offset();
+    let message = outcome.accepted_inputs[0].model_message();
+    let after = chrono::Local::now().fixed_offset();
+
+    let created_at = message
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.created_at)
+        .expect("用户输入消息必须盖输入时刻");
+    assert!(
+        created_at >= before && created_at <= after,
+        "created_at {created_at:?} 应落在构造调用时间区间 [{before:?}, {after:?}] 内"
+    );
+    assert_eq!(message.text_content(), "hello");
+}
+
+#[test]
+fn loop_input_message_without_accepted_stamps_user_input_timestamp() {
+    let loop_input = crate::application::loop_engine::engine::LoopInput {
+        text: "hi".to_string(),
+        input_id: None,
+        images: vec![],
+        accepted: None,
+    };
+
+    let before = chrono::Local::now().fixed_offset();
+    let message = loop_input.message();
+    let after = chrono::Local::now().fixed_offset();
+
+    let created_at = message
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.created_at)
+        .expect("无 accepted 的 LoopInput 消息必须盖输入时刻");
+    assert!(
+        created_at >= before && created_at <= after,
+        "created_at {created_at:?} 应落在构造调用时间区间 [{before:?}, {after:?}] 内"
+    );
+    assert_eq!(message.text_content(), "hi");
+}

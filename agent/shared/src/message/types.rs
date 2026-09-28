@@ -2,6 +2,7 @@
 //!
 //! 定义 Role, ContentBlock, ImageSource, Message 及其相关类型。
 
+use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
 
 /// Describes a message integrity issue found during session validation.
@@ -54,6 +55,10 @@ pub struct MessageMetadata {
     pub hook_notice: Option<HookNotice>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skill_request: Option<SkillRequestMetadata>,
+    /// 用户输入时刻（含 UTC offset）。仅真实用户输入在构造时盖章；
+    /// Context window 渲染时据此生成 LLM 时间前缀，canonical 文本与 TUI 显示不消费。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<DateTime<FixedOffset>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

@@ -181,10 +181,10 @@ async fn stop_hook_block_merges_feedback_with_follow_up_before_continuation() {
         2,
         "follow-up must join the continuation, not start a new Run"
     );
-    let texts = requests[1]
+    let texts: Vec<String> = requests[1]
         .iter()
-        .map(Message::text_content)
-        .collect::<Vec<_>>();
+        .map(|message| without_input_timestamp(&message.text_content()).to_string())
+        .collect();
     let assistant_idx = texts
         .iter()
         .position(|text| text == "attempted final")

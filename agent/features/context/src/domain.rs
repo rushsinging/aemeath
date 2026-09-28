@@ -5,6 +5,9 @@ pub(crate) mod context_decision;
 #[cfg(test)]
 #[path = "domain/context_decision_tests.rs"]
 mod context_decision_tests;
+#[cfg(test)]
+#[path = "domain/context_messages_map_tests.rs"]
+mod context_messages_map_tests;
 pub mod session;
 pub(crate) mod token_budget;
 pub mod tool_receipt;
@@ -249,6 +252,45 @@ impl ContextMessages {
             committed_steps.push(Arc::clone(&self.pending));
         }
         Self::from_committed_steps(committed_steps, pending)
+    }
+
+    /// 逐条变换消息：闭包返回 `Some(new)` 替换该消息，返回 `None` 原样保留。
+    /// 无替换的 committed step / pending 段复用原 Arc payload（不 clone 大段）；
+    /// 不增删消息，顺序与 len 不变。
+    pub fn map_messages(
+        &self,
+        mut mutate: impl FnMut(&ContextMessage) -> Option<ContextMessage>,
+    ) -> Self {
+        fn map_step(
+            step: &[ContextMessage],
+            mutate: &mut impl FnMut(&ContextMessage) -> Option<ContextMessage>,
+        ) -> Option<Arc<[ContextMessage]>> {
+            let mut mapped: Option<Vec<ContextMessage>> = None;
+            for (index, message) in step.iter().enumerate() {
+                match mutate(message) {
+                    Some(replacement) => {
+                        mapped
+                            .get_or_insert_with(|| step[..index].to_vec())
+                            .push(replacement);
+                    }
+                    None => {
+                        if let Some(mapped) = mapped.as_mut() {
+                            mapped.push(message.clone());
+                        }
+                    }
+                }
+            }
+            mapped.map(Vec::into)
+        }
+
+        let committed_steps = self
+            .committed_steps
+            .iter()
+            .map(|step| map_step(step, &mut mutate).unwrap_or_else(|| Arc::clone(step)))
+            .collect();
+        let pending =
+            map_step(&self.pending, &mut mutate).unwrap_or_else(|| Arc::clone(&self.pending));
+        Self::from_committed_steps(committed_steps, pending.to_vec())
     }
 
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = &ContextMessage> {

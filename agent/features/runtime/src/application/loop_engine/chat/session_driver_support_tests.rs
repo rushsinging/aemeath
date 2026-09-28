@@ -837,7 +837,7 @@ impl LlmProvider for TwoTurnProvider {
     ) -> Result<InvocationStreamData, ProviderError> {
         let text = if messages
             .iter()
-            .any(|message| message.text_content() == "stop-hook input")
+            .any(|message| without_input_timestamp(&message.text_content()) == "stop-hook input")
         {
             "handled queued input"
         } else {

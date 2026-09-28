@@ -362,6 +362,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -3725,6 +3726,7 @@ name = "share"
 version = "0.0.0"
 dependencies = [
  "bitflags 2.13.1",
+ "chrono",
  "log",
  "logging",
  "schemars",

@@ -117,6 +117,9 @@ impl ContextApplicationService {
                     .collect(),
             );
         }
+        // LLM 视图收口（specs/3.7 §18）：为带输入时刻的 user 消息渲染时间前缀；
+        // canonical 与持久化 JSON 不含前缀，无 created_at 的消息原样保留。
+        let messages = messages.map_messages(render_user_input_timestamp_prefix);
         #[cfg(test)]
         let messages_assembly_duration = messages_started.elapsed();
 
@@ -545,4 +548,25 @@ impl ContextPort for ContextApplicationService {
     ) -> Result<AppendReceiptData, ContextAppendError> {
         self.session.append_finalized(append).await
     }
+}
+
+/// 为带用户输入时刻的 user 消息渲染 LLM 时间前缀 `[YYYY-MM-DD HH:MM ±ZZZZ] `，
+/// 仅作用于 ContextWindow 视图（canonical message 与落盘 JSON 不变）。
+/// 返回 `None` 表示原样保留：非 user、无 `created_at`（系统生成 / tool result /
+/// reminder）或无 Text block 的消息都不加前缀。
+pub(crate) fn render_user_input_timestamp_prefix(
+    message: &share::message::Message,
+) -> Option<share::message::Message> {
+    if message.role != share::message::Role::User {
+        return None;
+    }
+    let created_at = message.metadata.as_ref()?.created_at?;
+    let prefix = format!("[{}]: ", created_at.format("%Y-%m-%d %H:%M %z"));
+    let mut rendered = message.clone();
+    let first_text = rendered.content.iter_mut().find_map(|block| match block {
+        share::message::ContentBlock::Text { text } => Some(text),
+        _ => None,
+    })?;
+    *first_text = format!("{prefix}{first_text}");
+    Some(rendered)
 }

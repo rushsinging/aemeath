@@ -1,6 +1,7 @@
 //! 消息构造方法
 
 use crate::message::types::*;
+use chrono::{DateTime, FixedOffset};
 use serde_json;
 
 impl Message {
@@ -12,6 +13,15 @@ impl Message {
         }
     }
 
+    /// 盖用户输入时刻：Context window 渲染时据此生成 LLM 时间前缀。
+    /// canonical 文本不变；无 `created_at` 的消息（系统生成、tool result、reminder）不加前缀。
+    pub fn with_user_input_timestamp(mut self, at: DateTime<FixedOffset>) -> Self {
+        self.metadata
+            .get_or_insert_with(MessageMetadata::default)
+            .created_at = Some(at);
+        self
+    }
+
     pub fn system_generated_user(text: impl Into<String>) -> Self {
         Self {
             role: Role::User,
@@ -20,6 +30,7 @@ impl Message {
                 source: MessageSource::SystemGenerated,
                 hook_notice: None,
                 skill_request: None,
+                created_at: None,
             }),
         }
     }
@@ -32,6 +43,7 @@ impl Message {
                 source: MessageSource::Hook,
                 hook_notice: Some(notice),
                 skill_request: None,
+                created_at: None,
             }),
         }
     }
@@ -44,6 +56,7 @@ impl Message {
                 source: MessageSource::SkillRequest,
                 hook_notice: None,
                 skill_request: Some(payload),
+                created_at: None,
             }),
         }
     }
