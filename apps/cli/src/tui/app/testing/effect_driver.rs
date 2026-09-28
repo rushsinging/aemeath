@@ -50,6 +50,8 @@ impl ScriptedEffectDriver {
                 Effect::RequestRender
                     | Effect::RunHook { .. }
                     | Effect::LoadDisplayHistoryWindow { .. }
+                    // fire-and-forget 通知：只记录供断言，不需要脚本回复。
+                    | Effect::SendTerminalNotification { .. }
             ) {
                 self.effects.push(effect);
                 continue;

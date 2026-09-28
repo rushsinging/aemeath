@@ -64,4 +64,9 @@ pub enum Effect {
     OpenUrl {
         url: String,
     },
+    /// 回合完成时向终端发送 OSC 777 桌面通知（cmux 等终端零配置提醒）。
+    SendTerminalNotification {
+        title: String,
+        body: String,
+    },
 }
