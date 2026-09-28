@@ -147,7 +147,7 @@ pub(crate) struct FakePolicyPort;
 
 impl Policy for FakePolicyPort {
     fn evaluate(&self, _request: &PolicyRequestData) -> PolicyDecisionData {
-        PolicyDecisionData::Allow(tools::AuthorizationContext::STANDARD)
+        PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::STANDARD)
     }
 
     fn current_mode(&self) -> policy::PolicyModeData {

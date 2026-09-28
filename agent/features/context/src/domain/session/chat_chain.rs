@@ -11,8 +11,8 @@
 //!
 //! resume 只加载活跃链（最后一个 `Compact` 段到末端），天然跳过被压缩的旧历史。
 
-use sdk::ids::ChatId;
 use serde::{Deserialize, Serialize};
+use share::ids::ChatId;
 use share::message::Message;
 
 /// 段类型

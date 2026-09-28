@@ -34,7 +34,7 @@ struct SpyPolicy {
 impl Policy for SpyPolicy {
     fn evaluate(&self, _request: &PolicyRequestData) -> PolicyDecisionData {
         self.called.store(true, Ordering::SeqCst);
-        PolicyDecisionData::Allow(tools::AuthorizationContext::STANDARD)
+        PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::STANDARD)
     }
 
     fn current_mode(&self) -> policy::PolicyModeData {

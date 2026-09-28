@@ -14,10 +14,11 @@ use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::{ToolCall, ToolExecution};
 use async_trait::async_trait;
 use policy::{Policy, PolicyDecisionData, PolicyRequestData};
+use share::tools_vocab::ToolName;
 use std::collections::HashMap;
 use std::path::Path;
 use tokio_util::sync::CancellationToken;
-use tools::{ToolCatalogSnapshot, ToolName};
+use tools::ToolCatalogSnapshot;
 
 pub(crate) struct ToolRoundContext<'a> {
     pub runtime_context: &'a crate::application::run::context::RuntimeContext,
@@ -428,7 +429,7 @@ pub(crate) struct DeniedToolCall {
 
 pub(crate) struct PreparedToolCall {
     pub call: ToolCall,
-    pub authorization: tools::AuthorizationContext,
+    pub authorization: share::tools_vocab::AuthorizationContext,
 }
 
 #[derive(Default)]
@@ -448,7 +449,7 @@ pub(crate) struct PreparedToolRound {
 #[derive(Clone)]
 pub(crate) struct RequireApprovalCall {
     pub call: ToolCall,
-    pub authorization: tools::AuthorizationContext,
+    pub authorization: share::tools_vocab::AuthorizationContext,
     pub reason: String,
     pub subject: String,
 }
@@ -517,7 +518,7 @@ pub(crate) fn prepare_tool_round(
                 // deny inline.
                 prepared.require_approval.push(RequireApprovalCall {
                     call: call.clone(),
-                    authorization: tools::AuthorizationContext::STANDARD,
+                    authorization: share::tools_vocab::AuthorizationContext::STANDARD,
                     reason: format!("{reason:?}"),
                     subject: format!("{subject:?}"),
                 });
@@ -628,7 +629,7 @@ pub enum HookDirectiveOutcome {
         /// The call with validated, updated input.
         call: ToolCall,
         /// Authorization returned by the mandatory post-update Policy evaluation.
-        authorization: tools::AuthorizationContext,
+        authorization: share::tools_vocab::AuthorizationContext,
         /// Context string from `ContextAndInput` (preserved for caller injection).
         context: Option<String>,
     },

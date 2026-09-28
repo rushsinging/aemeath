@@ -227,7 +227,7 @@ pub enum ToolStep {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ApprovalRequiredCall {
     pub call: ToolCall,
-    pub authorization: tools::AuthorizationContext,
+    pub authorization: share::tools_vocab::AuthorizationContext,
     pub reason: String,
     pub subject: String,
 }

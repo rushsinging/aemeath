@@ -1,5 +1,5 @@
 use crate::{Policy, PolicyDecisionData, PolicyModeData, PolicyRequestData};
-use tools::AuthorizationContext;
+use share::tools_vocab::AuthorizationContext;
 
 pub(crate) struct ConfiguredPolicy<ModeFn> {
     mode: ModeFn,

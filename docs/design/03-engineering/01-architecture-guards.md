@@ -138,15 +138,15 @@
 | `policy` | `share` |
 | `context` | `share`, `provider`, `storage`, `project`, `config`, `memory`, `task`, `tools`, `sdk`, `utils` |
 | `memory` | `share`, `storage`, `utils` |
-| `provider` | `share` |
-| `tools` | `share`, `project`, `storage`, `memory`, `task`, `utils` |
+| `provider` | `logging`, `share` |
+| `tools` | `memory`, `project`, `share`, `task`, `utils` |
 | `storage` | `share` |
-| `task` | ∅ |
+| `task` | `share` |
 | `hook` | `share`, `utils` |
 | `audit` | `share`, `sdk`, `storage` |
 | `workflow` | `share` |
 | `update` | `share`, `sdk`, `logging` |
-| `sdk` | `share`, `utils` |
+| `sdk` | `share`, `tools`, `utils` |
 | `logging` | ∅ |
 | `utils` | ∅ |
 

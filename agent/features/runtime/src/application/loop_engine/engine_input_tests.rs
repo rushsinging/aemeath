@@ -828,7 +828,7 @@ mod interaction_routing {
         let call_id = call.id.clone();
         let approval = ApprovalRequiredCall {
             call: call.clone(),
-            authorization: tools::AuthorizationContext::STANDARD,
+            authorization: share::tools_vocab::AuthorizationContext::STANDARD,
             reason: "approval required: high risk".to_string(),
             subject: "exec".to_string(),
         };
@@ -958,7 +958,7 @@ mod interaction_routing {
                 fuse_bypassed: Vec::new(),
                 calls_needing_approval: vec![ApprovalRequiredCall {
                     call: call.clone(),
-                    authorization: tools::AuthorizationContext::STANDARD,
+                    authorization: share::tools_vocab::AuthorizationContext::STANDARD,
                     reason: "dangerous".to_string(),
                     subject: "exec".to_string(),
                 }],
@@ -1020,7 +1020,7 @@ mod interaction_routing {
         assert_eq!(invocations[0].input, json!({"command": "ls"}));
         assert_eq!(
             invocations[0].authorization,
-            tools::AuthorizationContext::STANDARD
+            share::tools_vocab::AuthorizationContext::STANDARD
         );
         // set_result_text was used — verify the returned text
         assert_eq!(fake.returned_text(), Some("approved result".to_string()));
@@ -1070,7 +1070,7 @@ mod interaction_routing {
                 fuse_bypassed: Vec::new(),
                 calls_needing_approval: vec![ApprovalRequiredCall {
                     call: call.clone(),
-                    authorization: tools::AuthorizationContext::STANDARD,
+                    authorization: share::tools_vocab::AuthorizationContext::STANDARD,
                     reason: "dangerous".to_string(),
                     subject: "destroy".to_string(),
                 }],

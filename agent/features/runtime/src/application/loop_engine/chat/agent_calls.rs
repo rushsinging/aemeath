@@ -114,7 +114,7 @@ async fn execute_one_agent<S>(
     workspace_persist: &Arc<dyn project::WorkspaceWriter>,
     workspace_read: &Arc<dyn project::WorkspaceReader>,
     cancel: &CancellationToken,
-    authorization: tools::AuthorizationContext,
+    authorization: share::tools_vocab::AuthorizationContext,
     catalog: &tools::ToolCatalogSnapshot,
     policy: &dyn Policy,
     run_id: &sdk::RunId,
@@ -777,7 +777,7 @@ mod tests {
                 .into_iter()
                 .map(|call| PreparedToolCall {
                     call,
-                    authorization: tools::AuthorizationContext::STANDARD,
+                    authorization: share::tools_vocab::AuthorizationContext::STANDARD,
                 })
                 .collect::<Vec<_>>();
             let agent = crate::application::tool::agent::Agent {

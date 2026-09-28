@@ -187,7 +187,7 @@ impl Agent {
     #[cfg(test)]
     fn is_concurrent(&self, call: &ToolCall) -> bool {
         self.catalog
-            .find(&tools::ToolName::new(&call.name))
+            .find(&share::tools_vocab::ToolName::new(&call.name))
             .is_some_and(|d| d.is_concurrency_safe())
     }
 
@@ -196,7 +196,7 @@ impl Agent {
         &self,
         call: &ToolCall,
         ctx: &ToolExecutionContext,
-        authorization: tools::AuthorizationContext,
+        authorization: share::tools_vocab::AuthorizationContext,
         step_id: &sdk::RunStepId,
     ) -> ToolExecution {
         let authorized_ctx = ctx.with_authorization(authorization);
@@ -212,7 +212,7 @@ impl Agent {
             .map(
                 |call| crate::application::tool::coordination::PreparedToolCall {
                     call,
-                    authorization: tools::AuthorizationContext::STANDARD,
+                    authorization: share::tools_vocab::AuthorizationContext::STANDARD,
                 },
             )
             .collect::<Vec<_>>();

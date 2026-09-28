@@ -1,6 +1,6 @@
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolCall {
-    pub id: sdk::ids::ToolCallId,
+    pub id: share::ids::ToolCallId,
     pub provider_id: String,
     pub name: String,
     pub index: usize,
@@ -72,7 +72,7 @@ impl RunToolCall {
         }
     }
 
-    pub fn id(&self) -> &sdk::ids::ToolCallId {
+    pub fn id(&self) -> &share::ids::ToolCallId {
         &self.call.id
     }
 

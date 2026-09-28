@@ -78,7 +78,7 @@ fn test_partition_calls_routes_concurrency_safe_tools_to_concurrent() {
         .into_iter()
         .map(|call| PreparedToolCall {
             call,
-            authorization: tools::AuthorizationContext::STANDARD,
+            authorization: share::tools_vocab::AuthorizationContext::STANDARD,
         })
         .collect::<Vec<_>>();
     let refs = prepared.iter().collect::<Vec<_>>();
@@ -106,7 +106,7 @@ fn test_partition_calls_routes_non_concurrency_safe_tools_to_sequential() {
         .into_iter()
         .map(|call| PreparedToolCall {
             call,
-            authorization: tools::AuthorizationContext::STANDARD,
+            authorization: share::tools_vocab::AuthorizationContext::STANDARD,
         })
         .collect::<Vec<_>>();
     let refs = prepared.iter().collect::<Vec<_>>();
@@ -134,7 +134,7 @@ fn test_partition_calls_preserves_mixed_positions() {
         .into_iter()
         .map(|call| PreparedToolCall {
             call,
-            authorization: tools::AuthorizationContext::STANDARD,
+            authorization: share::tools_vocab::AuthorizationContext::STANDARD,
         })
         .collect::<Vec<_>>();
     let refs = prepared.iter().collect::<Vec<_>>();
@@ -154,7 +154,7 @@ fn test_partition_calls_routes_unknown_tools_to_sequential() {
         .into_iter()
         .map(|call| PreparedToolCall {
             call,
-            authorization: tools::AuthorizationContext::STANDARD,
+            authorization: share::tools_vocab::AuthorizationContext::STANDARD,
         })
         .collect::<Vec<_>>();
     let refs = prepared.iter().collect::<Vec<_>>();
