@@ -561,7 +561,7 @@ pub(crate) fn render_user_input_timestamp_prefix(
         return None;
     }
     let created_at = message.metadata.as_ref()?.created_at?;
-    let prefix = format!("[{}] ", created_at.format("%Y-%m-%d %H:%M %z"));
+    let prefix = format!("[{}]: ", created_at.format("%Y-%m-%d %H:%M %z"));
     let mut rendered = message.clone();
     let first_text = rendered.content.iter_mut().find_map(|block| match block {
         share::message::ContentBlock::Text { text } => Some(text),

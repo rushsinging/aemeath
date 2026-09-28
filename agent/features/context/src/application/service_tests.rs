@@ -624,7 +624,7 @@ fn render_user_input_timestamp_prefixes_user_text_with_offset() {
     let rendered =
         render_user_input_timestamp_prefix(&message).expect("带输入时刻的 user 消息必须加时间前缀");
 
-    assert_eq!(rendered.text_content(), "[2026-06-15 14:30 +0800] hello");
+    assert_eq!(rendered.text_content(), "[2026-06-15 14:30 +0800]: hello");
     assert_eq!(
         rendered
             .metadata
@@ -691,7 +691,7 @@ fn render_user_input_timestamp_prefixes_only_first_text_block() {
             _ => None,
         })
         .expect("渲染后必须保留 Text block");
-    assert_eq!(first_text, "[2026-06-15 14:30 +0800] hello");
+    assert_eq!(first_text, "[2026-06-15 14:30 +0800]: hello");
     let image_blocks = rendered
         .content
         .iter()

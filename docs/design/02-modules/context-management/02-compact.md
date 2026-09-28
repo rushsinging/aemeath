@@ -163,7 +163,7 @@ ordinary messages:
   TaskUpdate(status) tool result → 按事件携带 Task 原子进度摘要
 user message 时间前缀：
   带 `metadata.created_at` 的 user 输入在 final assembly 渲染为
-  `[YYYY-MM-DD HH:MM ±ZZZZ] ` 前缀；仅 window 视图，canonical 与
+  `[YYYY-MM-DD HH:MM ±ZZZZ]: ` 前缀；仅 window 视图，canonical 与
   落盘 JSON 不含前缀，tool result / 系统生成 / reminder 消息不加。
 ```
 Git 首次快照不属于 `ContextWindow.system_blocks`：Runtime 仅在 session 首个 Run 作为普通系统生成消息投递一次。

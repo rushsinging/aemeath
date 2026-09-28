@@ -560,7 +560,7 @@ async fn build_window_prefixes_user_input_timestamp_without_time_system_blocks()
         .expect("带输入时刻的 pending 消息必须进入 window");
     assert_eq!(
         prefixed.text_content(),
-        "[2026-06-15 14:30 +0800] pending",
+        "[2026-06-15 14:30 +0800]: pending",
         "LLM 视图必须带输入时刻前缀"
     );
     assert_eq!(
