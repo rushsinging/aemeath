@@ -26,10 +26,7 @@ pub(crate) async fn run_sessions_command(
             ingress: std::sync::Arc::new(input_port),
         })
         .await
-        .unwrap_or_else(|e| {
-            eprintln!("Error: {e}");
-            std::process::exit(1);
-        });
+        .unwrap_or_else(|error| crate::fatal_error::report_fatal(error));
 
     if let Some(id) = &delete {
         let _ = input_tx.send(sdk::ChatInputEvent::ManageSession {
@@ -37,13 +34,11 @@ pub(crate) async fn run_sessions_command(
         });
         // 等待会话列表回传（删除后 runtime 回传更新后的列表）。
         let sessions = wait_for_session_list(&mut stream).await.unwrap_or_else(|| {
-            eprintln!("Error: stream closed before session list received");
-            std::process::exit(1);
+            crate::fatal_error::report_fatal("stream closed before session list received")
         });
         // 删除成功后检查列表中是否还有该 id。
         if sessions.iter().any(|s| &s.id == id) {
-            eprintln!("Error: failed to delete session {}", id);
-            std::process::exit(1);
+            crate::fatal_error::report_fatal(format!("failed to delete session {id}"));
         }
         println!("Session {} deleted.", id);
         return;
@@ -53,8 +48,7 @@ pub(crate) async fn run_sessions_command(
         args: String::new(),
     });
     let sessions = wait_for_session_list(&mut stream).await.unwrap_or_else(|| {
-        eprintln!("Error: stream closed before session list received");
-        std::process::exit(1);
+        crate::fatal_error::report_fatal("stream closed before session list received")
     });
     if sessions.is_empty() {
         println!("No saved sessions.");

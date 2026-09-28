@@ -15,9 +15,9 @@ mod adapters;
 mod domain;
 
 pub use adapters::{
-    app_version, boot_ts, capture, instrument, is_rotated_log_path, rotated_path, set_app_version,
-    set_boot_ts, spawn_instrumented, timestamp_local_rfc3339, timestamp_rfc3339, within,
-    UnifiedLogger,
+    app_version, boot_ts, capture, instrument, is_rotated_log_path, restore_native_stderr,
+    rotated_path, set_app_version, set_boot_ts, spawn_instrumented, timestamp_local_rfc3339,
+    timestamp_rfc3339, within, UnifiedLogger,
 };
 pub use domain::{
     FieldPatch, LogContext, LogContextPatch, LoggingOutputMode, LoggingSettings,

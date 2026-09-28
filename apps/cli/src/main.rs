@@ -4,6 +4,7 @@ mod args;
 mod chat;
 #[cfg(test)]
 mod command_contract_tests;
+mod fatal_error;
 mod panic_hook;
 mod session_lock;
 mod subcommand;
@@ -24,11 +25,7 @@ async fn main() {
                 Args::from(cli.run_args),
             ))
             .await
-            .unwrap_or_else(|e| {
-                eprintln!("Error: {e}");
-                composition::app::flush_diagnostic_logs();
-                std::process::exit(1);
-            });
+            .unwrap_or_else(|error| fatal_error::report_fatal(error));
             subcommand::model_selection::run_models_command(client, json).await;
         }
         Some(Commands::Sessions {
@@ -40,11 +37,7 @@ async fn main() {
                 Args::from(cli.run_args),
             ))
             .await
-            .unwrap_or_else(|e| {
-                eprintln!("Error: {e}");
-                composition::app::flush_diagnostic_logs();
-                std::process::exit(1);
-            });
+            .unwrap_or_else(|error| fatal_error::report_fatal(error));
             subcommand::sessions_command::run_sessions_command(client, delete, json, limit).await;
         }
         Some(Commands::Run { run_args }) => {
@@ -61,11 +54,7 @@ async fn main() {
             let args = Args::from(cli.run_args);
             let user_agent = composition::app::configured_user_agent(args.into())
                 .await
-                .unwrap_or_else(|error| {
-                    eprintln!("Error: {error}");
-                    composition::app::flush_diagnostic_logs();
-                    std::process::exit(1);
-                });
+                .unwrap_or_else(|error| fatal_error::report_fatal(error));
             subcommand::update_command::run_update_command(check, user_agent).await;
         }
         Some(Commands::Version) => {

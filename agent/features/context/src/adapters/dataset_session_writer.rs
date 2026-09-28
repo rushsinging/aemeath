@@ -147,7 +147,7 @@ impl DatasetCanonicalSessionWriter {
             .validate_commit_boundary(after.id.as_str(), before.revision, &persisted_manifest)
             .map_err(|error| error.to_string())?;
         promote_missing_reuse_evidence(&manifest, &mut changes)?;
-        self.commit_with_manifest(&dataset_key, &manifest, changes)
+        self.commit_with_manifest(after.id.as_str(), &dataset_key, &manifest, changes)
             .await
     }
 
@@ -169,7 +169,7 @@ impl DatasetCanonicalSessionWriter {
                 .map_err(|error| error.to_string())?;
             promote_missing_reuse_evidence(&manifest, &mut plan)?;
             return self
-                .commit_with_manifest(&dataset_key, &manifest, plan)
+                .commit_with_manifest(session_id, &dataset_key, &manifest, plan)
                 .await;
         }
         let persisted_manifest = self
@@ -186,7 +186,7 @@ impl DatasetCanonicalSessionWriter {
         plan.reconcile_persisted_steps(&persisted_manifest)
             .map_err(|error| error.to_string())?;
         promote_missing_reuse_evidence(&manifest, &mut plan)?;
-        self.commit_with_manifest(&dataset_key, &manifest, plan)
+        self.commit_with_manifest(session_id, &dataset_key, &manifest, plan)
             .await
     }
 
@@ -198,16 +198,26 @@ impl DatasetCanonicalSessionWriter {
             .read_manifest(&dataset_key)
             .await
             .map_err(|error| error.to_string())?;
-        self.commit_with_manifest(&dataset_key, &manifest, changes)
+        self.commit_with_manifest(session_id, &dataset_key, &manifest, changes)
             .await
     }
 
     async fn commit_with_manifest(
         &self,
+        session_id: &str,
         dataset_key: &DatasetKeyData,
         manifest: &storage::DatasetManifestData,
-        changes: SessionCommitPlan,
+        mut changes: SessionCommitPlan,
     ) -> Result<(), String> {
+        if changes
+            .reconcile_cleared_after_with_manifest()
+            .map_err(|error| error.to_string())?
+        {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "session_commit_clear_boundary_trimmed session_id={session_id}"
+            );
+        }
         let dataset_changes =
             map_session_changes(manifest, changes).map_err(|error| error.to_string())?;
         self.dataset

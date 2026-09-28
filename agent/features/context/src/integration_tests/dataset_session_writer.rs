@@ -740,3 +740,109 @@ async fn rebuild_empty_dataset_fails_closed_when_dataset_is_not_empty() {
         "failure must explain the dataset is not empty: {outcome}"
     );
 }
+
+/// 读取已落盘 generation 的 state 成员，供断言磁盘真相（而非内存快照）。
+async fn read_committed_state(
+    dataset: &std::sync::Arc<dyn storage::AtomicDatasetPort>,
+    session_id: &str,
+) -> crate::domain::session::SessionStateMember {
+    let state_name = "session-state.json"
+        .parse::<SafePathSegmentData>()
+        .expect("safe state member name");
+    let outcome = dataset
+        .read_consistent(&dataset_key(session_id), std::slice::from_ref(&state_name))
+        .await
+        .expect("read committed state member");
+    let DatasetReadOutcomeData::Found(found) = outcome else {
+        panic!("committed state member must exist");
+    };
+    SessionGenerationCodec::decode_state(found.members()[0].bytes())
+        .expect("decode committed state member")
+}
+
+#[tokio::test]
+async fn save_initial_drops_clear_boundary_absent_from_generation_manifest() {
+    let root = tempfile::tempdir().expect("temporary dataset root");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let mut session = session_with_steps("trimmed", 9, &[("run-1", "step-1", "active")]);
+    // 内存 session 携带更早的 `/clear` 边界，而 generation manifest 只写入活动
+    // 窗口：落盘 state 必须归一为无边界，磁盘 primary 不得自相矛盾。
+    session.cleared_after = Some(RunStepCursor {
+        run_id: "run-0".to_string(),
+        step_id: "step-0".to_string(),
+    });
+
+    writer
+        .save_initial(&session)
+        .await
+        .expect("initial generation must commit");
+
+    let state = read_committed_state(&dataset, "trimmed").await;
+    assert_eq!(
+        state.cleared_after(),
+        None,
+        "越界 clear 边界必须在落盘前归一，磁盘 state 不得引用 manifest 之外的 step"
+    );
+}
+
+#[tokio::test]
+async fn save_incremental_drops_clear_boundary_absent_from_generation_manifest() {
+    let root = tempfile::tempdir().expect("temporary dataset root");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let before = session_with_steps("trimmed-incremental", 1, &[("run-1", "step-1", "a")]);
+    writer
+        .save_initial(&before)
+        .await
+        .expect("initial generation must commit");
+
+    let mut after = before.clone();
+    after.revision = 2;
+    after.cleared_after = Some(RunStepCursor {
+        run_id: "run-0".to_string(),
+        step_id: "step-0".to_string(),
+    });
+    writer
+        .save_incremental(&before, &after)
+        .await
+        .expect("incremental generation must commit");
+
+    let state = read_committed_state(&dataset, "trimmed-incremental").await;
+    assert_eq!(
+        state.cleared_after(),
+        None,
+        "增量提交同样必须在落盘前归一越界 clear 边界"
+    );
+}
+
+#[tokio::test]
+async fn save_initial_keeps_clear_boundary_present_in_generation_manifest() {
+    let root = tempfile::tempdir().expect("temporary dataset root");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let mut session = session_with_steps(
+        "kept",
+        9,
+        &[
+            ("run-1", "step-1", "hidden"),
+            ("run-2", "step-2", "visible"),
+        ],
+    );
+    session.cleared_after = Some(RunStepCursor {
+        run_id: "run-2".to_string(),
+        step_id: "step-2".to_string(),
+    });
+
+    writer
+        .save_initial(&session)
+        .await
+        .expect("initial generation must commit");
+
+    let state = read_committed_state(&dataset, "kept").await;
+    assert_eq!(
+        state.cleared_after().map(|cursor| cursor.step_id.as_str()),
+        Some("step-2"),
+        "命中 manifest 的 clear 边界必须原样保留，不得被误清"
+    );
+}

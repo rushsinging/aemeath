@@ -52,9 +52,8 @@ pub(crate) async fn run_update_command(check: bool, user_agent: String) {
                 println!("Already up to date ({})", result.current_version);
             }
         }
-        Err(e) => {
-            eprintln!("Failed to check for updates: {e}");
-            std::process::exit(1);
-        }
+        Err(error) => crate::fatal_error::report_fatal_message(format!(
+            "Failed to check for updates: {error}"
+        )),
     }
 }

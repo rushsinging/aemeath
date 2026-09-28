@@ -11,6 +11,8 @@ struct FakeNativeStderrOps {
     created_dirs: RefCell<Vec<PathBuf>>,
     opened_paths: RefCell<Vec<PathBuf>>,
     replaced: RefCell<Vec<i32>>,
+    saved: RefCell<Vec<SavedStderr>>,
+    restored: RefCell<Vec<SavedStderr>>,
     fail_open: bool,
     fail_replace: bool,
 }
@@ -56,6 +58,19 @@ impl NativeStderrOps for FakeNativeStderrOps {
         } else {
             Ok(())
         }
+    }
+
+    fn save_stderr(&self) -> io::Result<SavedStderr> {
+        let saved = SavedStderr {
+            fd: 10 + self.saved.borrow().len() as i32,
+        };
+        self.saved.borrow_mut().push(saved);
+        Ok(saved)
+    }
+
+    fn restore_stderr(&self, saved: SavedStderr) -> io::Result<()> {
+        self.restored.borrow_mut().push(saved);
+        Ok(())
     }
 }
 
@@ -178,4 +193,36 @@ fn replace_failure_reports_stage_and_path() {
     let message = error.to_string();
     assert!(message.contains("replace"));
     assert!(message.contains("native-stderr.log"));
+}
+
+#[test]
+fn routing_saves_native_stderr_for_fatal_error_recovery() {
+    let ops = same_terminal_ops();
+
+    route_native_stderr_with(&settings(NativeStderrRouting::AppendToFile), &ops).unwrap();
+
+    assert_eq!(
+        ops.saved.borrow().len(),
+        1,
+        "路由前必须保存原生 stderr 副本，供致命错误重新可见"
+    );
+    assert_eq!(
+        ops.replaced.borrow().as_slice(),
+        [STDERR_FD],
+        "保存副本不得影响正常路由"
+    );
+}
+
+#[test]
+fn restore_reinstates_saved_native_stderr() {
+    let ops = same_terminal_ops();
+    let saved = ops.save_stderr().expect("save native stderr");
+
+    restore_native_stderr_with(&ops, saved).expect("restore native stderr");
+
+    assert_eq!(
+        ops.restored.borrow().as_slice(),
+        [saved],
+        "恢复必须把保存的副本重新指向进程 stderr"
+    );
 }

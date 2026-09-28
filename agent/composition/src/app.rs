@@ -1341,6 +1341,13 @@ pub fn flush_diagnostic_logs() {
     logging::flush_diagnostic_logs();
 }
 
+/// 把进程 stderr 恢复到原生终端：TUI 模式下 stderr 已被路由到
+/// `native-stderr.log`，致命错误必须先恢复终端才可能被用户看到。
+/// 未发生路由（Preserve / 非终端 / 保存失败）时为空操作。
+pub fn restore_terminal_stderr() -> std::io::Result<()> {
+    logging::restore_native_stderr()
+}
+
 pub async fn configured_user_agent(args: AgentArgs) -> Result<String, SdkError> {
     let cwd = args
         .cwd

@@ -87,8 +87,7 @@ pub(crate) async fn run_chat(args: Args) {
                 let fallback = composition::app::build_connect_bootstrap()
                     .await
                     .unwrap_or_else(|bootstrap_error| {
-                        eprintln!("Error: {bootstrap_error}");
-                        std::process::exit(1);
+                        crate::fatal_error::report_fatal(bootstrap_error)
                     });
                 match crate::subcommand::connect_command::run_connect_command_with_origin(
                     fallback.forms,
@@ -97,22 +96,13 @@ pub(crate) async fn run_chat(args: Args) {
                 .await
                 {
                     Ok(sdk::ConfigFormTerminal::Completed { .. }) => {}
-                    _ => {
-                        eprintln!("Error: {error}");
-                        std::process::exit(1);
-                    }
+                    _ => crate::fatal_error::report_fatal(error),
                 }
                 composition::app::build_agent_bootstrap(args.into())
                     .await
-                    .unwrap_or_else(|retry_error| {
-                        eprintln!("Error: {retry_error}");
-                        std::process::exit(1);
-                    })
+                    .unwrap_or_else(|retry_error| crate::fatal_error::report_fatal(retry_error))
             }
-            Err(error) => {
-                eprintln!("Error: {error}");
-                std::process::exit(1);
-            }
+            Err(error) => crate::fatal_error::report_fatal(error),
         };
     let session_id = bootstrap.session_id.clone();
     let frontend_context = composition::delivery_logging::create_session_scope(
@@ -126,10 +116,7 @@ pub(crate) async fn run_chat(args: Args) {
             Err(crate::session_lock::AcquireError::Denied) => {
                 std::process::exit(4);
             }
-            Err(e) => {
-                eprintln!("Error: session lock acquire failed: {e}");
-                std::process::exit(1);
-            }
+            Err(error) =>crate::fatal_error::report_fatal(format!("session lock acquire failed: {error}")),
         };
         if should_emit_cli_frontend_started_log() {
             crate::tui::log_info!("chat frontend started: quiet={quiet} session={session_id}");
@@ -158,10 +145,7 @@ pub(crate) async fn run_chat(args: Args) {
                     .await
                 },
             )            .await
-            .unwrap_or_else(|error| {
-                eprintln!("Error: {error}");
-                std::process::exit(1);
-            });
+            .unwrap_or_else(|error|crate::fatal_error::report_fatal(error));
             return;
         }
 
@@ -234,7 +218,7 @@ pub(crate) async fn run_chat(args: Args) {
         )        .await
         .unwrap_or_else(|error| {
             crate::tui::log_error!("TUI error: {error}");
-            std::process::exit(1);
+           crate::fatal_error::report_fatal(error)
         });
         println!("aemeath --resume {}", session_id);
     })

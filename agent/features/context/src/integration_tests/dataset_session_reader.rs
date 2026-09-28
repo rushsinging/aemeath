@@ -7,8 +7,8 @@ use crate::{
 use crate::{DatasetCanonicalSessionWriter, DatasetSessionReader};
 use share::message::Message;
 use storage::{
-    DatasetKeyData, DatasetMemberData, DurabilityData, SafePathSegmentData, StorageNamespaceData,
-    WriteOptionsData,
+    DatasetKeyData, DatasetMemberData, DatasetReadOutcomeData, DurabilityData, SafePathSegmentData,
+    StorageNamespaceData, WriteOptionsData,
 };
 
 fn session_with_step(id: &str, revision: u64, text: &str) -> CanonicalSession {
@@ -309,6 +309,154 @@ async fn dataset_reader_shows_only_post_clear_steps_after_clear_then_append() {
             .collect::<Vec<_>>(),
         ["step-2"]
     );
+}
+
+#[tokio::test]
+async fn dataset_reader_loads_when_clear_boundary_precedes_manifest_head() {
+    let root = tempfile::tempdir().expect("temporary root");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let mut session = session_with_step("trimmed-boundary", 9, "active after trim");
+    session.run_slices = vec![CommittedRunSlice::new(
+        "run-1",
+        vec![CommittedRunStep::accepted_only(
+            "step-1",
+            AcceptedInputRecord::new(vec![Message::user("active after trim")], "fp-1", 9),
+        )],
+    )]
+    .into();
+    // 全量重写时 manifest steps 只含活动窗口：clear 边界指向更早、
+    // 已被裁剪出 steps 的 step —— 必须按「边界之前已不可见」语义加载。
+    session.cleared_after = Some(crate::RunStepCursor {
+        run_id: "run-0".to_string(),
+        step_id: "step-0".to_string(),
+    });
+    writer
+        .save_initial(&session)
+        .await
+        .expect("save generation");
+
+    let reader = DatasetSessionReader::new(dataset, None);
+    let prepared = reader
+        .load_for_resume(None, "trimmed-boundary")
+        .await
+        .expect("已裁剪的 clear 边界必须按无边界语义加载");
+    let loaded = prepared.active_session;
+
+    assert!(
+        loaded.cleared_after.is_none(),
+        "被裁剪的 clear 边界对活动会话不可表达，必须归一为无边界"
+    );
+    assert_eq!(loaded.run_slices.len(), 1);
+    assert_eq!(loaded.run_slices[0].steps[0].step_id, "step-1");
+    assert_eq!(
+        prepared
+            .display_history
+            .steps()
+            .iter()
+            .map(|step| step.step_id())
+            .collect::<Vec<_>>(),
+        ["step-1"]
+    );
+}
+
+#[tokio::test]
+async fn dataset_reader_rejects_clear_boundary_missing_inside_manifest_steps() {
+    let root = tempfile::tempdir().expect("temporary root");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let mut session = session_with_step("torn-manifest", 9, "head");
+    session.run_slices = vec![
+        CommittedRunSlice::new(
+            "run-1",
+            vec![CommittedRunStep::accepted_only(
+                "step-1",
+                AcceptedInputRecord::new(vec![Message::user("head")], "fp-1", 1),
+            )],
+        ),
+        CommittedRunSlice::new(
+            "run-3",
+            vec![CommittedRunStep::accepted_only(
+                "step-3",
+                AcceptedInputRecord::new(vec![Message::user("tail")], "fp-3", 9),
+            )],
+        ),
+    ]
+    .into();
+    writer
+        .save_initial(&session)
+        .await
+        .expect("save generation");
+
+    // 边界落在 manifest steps 区间内部却缺失：写入侧对齐后磁盘不再产生这种
+    // 状态，这里绕过 writer 改写 state 成员，模拟历史遗留的撕裂数据。
+    let mut torn = session.clone();
+    torn.cleared_after = Some(crate::RunStepCursor {
+        run_id: "run-2".to_string(),
+        step_id: "step-2".to_string(),
+    });
+    let torn_state = crate::SessionGenerationCodec::encode_state(
+        &crate::domain::session::SessionStateMember::from_session(&torn),
+    )
+    .expect("encode torn state");
+    let committed = dataset
+        .read_manifest(&dataset_key("torn-manifest"))
+        .await
+        .expect("committed manifest");
+    let member_names = committed.members().to_vec();
+    let current = dataset
+        .read_consistent(&dataset_key("torn-manifest"), &member_names)
+        .await
+        .expect("read committed members");
+    let DatasetReadOutcomeData::Found(current) = current else {
+        panic!("committed generation members must exist");
+    };
+    // commit_atomic 以传入成员集为新全集：未改动的成员必须原样带上。
+    let members = current
+        .members()
+        .iter()
+        .map(|member| {
+            if member.name().as_str() == "session-state.json" {
+                DatasetMemberData::new(
+                    "session-state.json"
+                        .parse::<SafePathSegmentData>()
+                        .expect("safe state member name"),
+                    torn_state.clone(),
+                )
+            } else {
+                member.clone()
+            }
+        })
+        .collect::<Vec<_>>();
+    dataset
+        .commit_atomic(
+            &dataset_key("torn-manifest"),
+            committed.revision(),
+            &members,
+            WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
+        )
+        .await
+        .expect("publish torn state member");
+    // 本用例只验证 primary 的 fail-closed 语义：令 previous generation 不可回退。
+    let previous_dir = root
+        .path()
+        .join("session")
+        .join("torn-manifest.dataset")
+        .join("previous");
+    if previous_dir.exists() {
+        std::fs::remove_dir_all(&previous_dir).expect("drop previous generation");
+    }
+
+    let reader = DatasetSessionReader::new(dataset, None);
+    let result = reader.load_for_resume(None, "torn-manifest").await;
+
+    match result {
+        Ok(_) => panic!("区间内部缺失的 clear 边界必须判为损坏"),
+        Err(crate::SessionGenerationWireError::InvalidManifest(message)) => {
+            assert_eq!(message, "Session clear 边界不在此 generation manifest 中");
+        }
+        Err(other) => panic!("期望 InvalidManifest，实际 {other:?}"),
+    }
 }
 
 #[tokio::test]
