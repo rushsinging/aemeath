@@ -79,7 +79,7 @@ mod tests {
             .expect("empty snapshot restores");
         persist.commit_restore(empty);
         assert!(access.list().is_empty());
-        assert!(access.list_batches().is_empty());
+        assert!(access.list_batch_snapshots().is_empty());
     }
 
     #[test]
@@ -109,7 +109,10 @@ mod tests {
             .expect("captured live snapshot restores");
         target_persist.commit_restore(prepared);
         assert_eq!(target_access.list(), access.list());
-        assert_eq!(target_access.list_batches(), access.list_batches());
+        assert_eq!(
+            target_access.list_batch_snapshots().len(),
+            access.list_batch_snapshots().len()
+        );
     }
 
     #[test]

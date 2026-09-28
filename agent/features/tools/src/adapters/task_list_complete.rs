@@ -98,7 +98,7 @@ mod tests {
         assert!(!result.is_error, "{}", result.text);
         assert_eq!(result.data.unwrap().batch_id, batch.id().to_string());
         assert_eq!(
-            task::TaskAccess::list_batches(access.as_ref())[0].status(),
+            access.list_batch_snapshots()[0].batch().status(),
             task::BatchStatusData::Archived
         );
     }

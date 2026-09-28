@@ -138,7 +138,7 @@ fn task_persist_contract_collect_prepare_commit_and_same_backing_views() {
     assert_eq!(unit, ());
 
     assert_eq!(target_access.list(), access.list());
-    assert_eq!(target_access.list_batches(), access.list_batches());
+    assert_eq!(target.list_batches(), store.list_batches());
     assert_eq!((&target as &dyn TaskPersist).collect_snapshot(), snapshot);
 }
 
@@ -174,7 +174,7 @@ fn task_persist_prepare_failure_and_captured_empty_are_atomic() {
         .expect("captured empty 应合法");
     (&store as &dyn TaskPersist).commit_restore(prepared);
     assert!(access.list().is_empty());
-    assert!(access.list_batches().is_empty());
+    assert!(store.list_batches().is_empty());
     assert_eq!((&store as &dyn TaskPersist).collect_snapshot(), empty);
 }
 

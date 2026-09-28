@@ -58,7 +58,9 @@ async fn task_list_uses_current_batch_sequences_for_ids_and_dependencies() {
         )
         .unwrap()
         .value;
-    access.add_dependency(second.id(), first.id(), 6).unwrap();
+    access
+        .replace_dependencies(second.id(), vec![first.id()], 6)
+        .unwrap();
 
     let result = TaskListTool { access }
         .call(serde_json::json!({}), &test_ctx())

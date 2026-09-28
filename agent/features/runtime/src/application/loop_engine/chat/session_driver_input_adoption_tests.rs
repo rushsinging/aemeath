@@ -926,7 +926,7 @@ async fn task_reminder_injected_once_per_run_and_never_synced_to_tui() {
         .unwrap()
         .value;
     task_store
-        .transition(task.id(), task::TaskStatusData::InProgress, 3)
+        .transition_with_progress(task.id(), task::TaskStatusData::InProgress, 3)
         .unwrap();
 
     input_tx

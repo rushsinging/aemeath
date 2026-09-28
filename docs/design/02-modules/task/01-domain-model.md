@@ -55,7 +55,7 @@ Task 聚合只通过方法修改状态，外部不可直接写字段：
 | `add_tag(t)` / `remove_tag(t)` | 标签管理 | — |
 | `mark_deleted()` | 在图边已清理后标记 Deleted | INV-2 / INV-5；只由 `TaskAccess::delete` 的 store-backed 用例调用 |
 
-> **Decision**：依赖图操作跨越多个 Task，归 `TaskStoreState` 的领域服务方法所有；它在一次 mutation 中完成环检测及 `blocked_by` / `blocks` 双向更新。单个 Task 聚合方法 **NEVER** 接收 store 引用，也不独自维护跨聚合不变量。`transition_to()` 只守护单 Task 状态迁移矩阵；公开 `TaskAccess::transition(id, InProgress)` 还必须由 store-backed 命令在同一写锁 / mutation 内检查实时依赖状态并调用它，不能以先调用 `is_blocked` 再 transition 的 TOCTOU 流程代替。
+> **Decision**：依赖图操作跨越多个 Task，归 `TaskStoreState` 的领域服务方法所有；它在一次 mutation 中完成环检测及 `blocked_by` / `blocks` 双向更新。单个 Task 聚合方法 **NEVER** 接收 store 引用，也不独自维护跨聚合不变量。`transition_to()` 只守护单 Task 状态迁移矩阵；公开 `TaskAccess::transition_with_progress(id, InProgress)` 还必须由 store-backed 命令在同一写锁 / mutation 内检查实时依赖状态并调用它，不能以先调用 `is_blocked` 再 transition 的 TOCTOU 流程代替。
 
 ## 2. TaskStatus 状态机
 
@@ -211,7 +211,7 @@ Batch 历史查询通过 Task-owned `TaskBatchSnapshot` 发布。该只读投影
 | `detect_interrupted_batch` | 新话题打断旧批次 → 旧批次有未完成任务 | `Option<InterruptedBatchInfo>` |
 | `detect_stale_batches` | 批次静默过久 → 陈旧 | `Vec<StaleBatchInfo>` |
 
-> **Decision**：检测函数是纯函数，不产生副作用。集合型输入的遍历顺序不是领域语义：返回的 Batch 与 Task ID 必须按强类型 ID 升序稳定排列；存在多个 interrupted 候选时选择最小 `BatchId`。调用方根据检测结果，以明确 `BatchId` 调用 `pause_batch` / `archive_batch`；恢复由 `resume_batch` 执行。状态变化与 `current_batch` 更新仍由 TaskAccess 实现原子守护。
+> **Decision**：检测函数是纯函数，不产生副作用。集合型输入的遍历顺序不是领域语义：返回的 Batch 与 Task ID 必须按强类型 ID 升序稳定排列；存在多个 interrupted 候选时选择最小 `BatchId`。调用方根据检测结果，以明确 `BatchId` 调用 `archive_batch`（`pause_batch` / `resume_batch` 为 Task-internal 能力，见端口文档 §1.1）。状态变化与 `current_batch` 更新仍由 TaskAccess 实现原子守护。
 
 ## 5. TaskSnapshot
 

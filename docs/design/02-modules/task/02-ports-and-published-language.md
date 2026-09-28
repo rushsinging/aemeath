@@ -9,46 +9,55 @@ Task BC 从同一个 TaskStore backing instance 发布两个窄入站 OHS：Agen
 
 ### 1.1 端口定义
 
+`TaskAccess` 只发布 crate 外实际消费的 19 个命令/查询（同步、无 I/O）：
+
 ```rust
-#[async_trait]
 pub trait TaskAccess: Send + Sync {
-    // ── CRUD ──
-    async fn create_task(&self, spec: TaskCreateSpec) -> Result<TaskCommandResult<Task>, TaskCommandError>;
-    async fn get(&self, id: &TaskId) -> Option<Task>;
-    async fn transition(&self, id: &TaskId, to: TaskStatus) -> Result<TaskCommandResult<Task>, TaskCommandError>;
-    async fn set_subject(&self, id: &TaskId, subject: String) -> Result<TaskCommandResult<Task>, TaskCommandError>;
-    async fn set_description(&self, id: &TaskId, description: String) -> Result<TaskCommandResult<Task>, TaskCommandError>;
-    async fn set_priority(&self, id: &TaskId, priority: TaskPriority) -> Result<TaskCommandResult<Task>, TaskCommandError>;
-    async fn add_dependency(&self, id: &TaskId, blocked_by: &TaskId) -> Result<TaskCommandResult<Task>, TaskCommandError>;
-    async fn remove_dependency(&self, id: &TaskId, blocked_by: &TaskId) -> Result<TaskCommandResult<Task>, TaskCommandError>;
-    async fn add_tag(&self, id: &TaskId, tag: String) -> Result<TaskCommandResult<Task>, TaskCommandError>;
-    async fn remove_tag(&self, id: &TaskId, tag: &str) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    // ── 聚合与批次 ──
+    fn revision(&self) -> TaskRevision;
+    fn clear(&self) -> Result<TaskCommandResult<()>, TaskCommandError>;
+    fn create_batch(&self, spec: BatchCreateSpec, timestamp: u64) -> Result<TaskCommandResult<Batch>, TaskCommandError>;
+    fn archive_batch(&self, id: BatchId) -> Result<TaskCommandResult<Batch>, TaskCommandError>;
+
+    // ── Task 命令 ──
+    fn create_task(&self, spec: TaskCreateSpec, timestamp: u64) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    /// 状态推进并在同一事务返回 TaskProgressSnapshot（含批次 auto-close/reopen 判定）
+    fn transition_with_progress(&self, id: TaskId, to: TaskStatus, updated_at: u64)
+        -> Result<TaskCommandResult<TaskProgressSnapshot>, TaskCommandError>;
+    fn set_subject(&self, id: TaskId, subject: String, updated_at: u64) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    fn set_description(&self, id: TaskId, description: String, updated_at: u64) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    fn set_priority(&self, id: TaskId, priority: TaskPriority, updated_at: u64) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    /// 整组改写该 Task 的依赖边（写入命令内部 MUST 自行复核依赖环）
+    fn replace_dependencies(&self, task_id: TaskId, blocked_by_ids: Vec<TaskId>, updated_at: u64) -> Result<TaskCommandResult<Task>, TaskCommandError>;
+    fn delete_with_progress(&self, id: TaskId, updated_at: u64) -> Result<TaskCommandResult<TaskProgressSnapshot>, TaskCommandError>;
     /// 在一次 state mutation 中移除该 Task 的全部依赖边，再标记 Deleted
-    async fn delete(&self, id: &TaskId) -> Result<TaskCommandResult<Task>, TaskCommandError>;
-
-    // ── 依赖图只读查询；写入命令内部仍 MUST 自行复核 ──
-    async fn is_blocked(&self, id: &TaskId) -> bool;
-    async fn would_create_cycle(&self, id: &TaskId, blocked_by_id: &TaskId) -> bool;
-
-    // ── 批次 ──
-    async fn create_batch(&self, spec: BatchCreateSpec) -> Result<TaskCommandResult<Batch>, TaskCommandError>;
-    async fn pause_batch(&self, id: &BatchId) -> Result<TaskCommandResult<Batch>, TaskCommandError>;
-    async fn resume_batch(&self, id: &BatchId) -> Result<TaskCommandResult<Batch>, TaskCommandError>;
-    async fn archive_batch(&self, id: &BatchId) -> Result<TaskCommandResult<Batch>, TaskCommandError>;
-    /// 每个 Runtime turn 结束时原子更新 Active Batch 的 last_active_turn / silence_turns。
-    async fn record_batch_turn(&self, id: &BatchId, turn: u64, active: bool)
-        -> Result<TaskCommandResult<Batch>, TaskCommandError>;
+    fn delete(&self, id: TaskId, updated_at: u64) -> Result<TaskCommandResult<Task>, TaskCommandError>;
 
     // ── 查询 ──
-    async fn list(&self) -> Vec<Task>;
-    async fn list_batches(&self) -> Vec<Batch>;
-    async fn lifecycle_snapshot(&self, stale_after_silence_turns: u64) -> TaskLifecycleSnapshot;
-    async fn stats(&self) -> TaskStoreStats;
-    async fn progress_snapshot(&self, batch_id: &BatchId, updated_task_id: &TaskId)
-        -> Result<TaskProgressSnapshot, TaskCommandError>;
-
+    fn get(&self, id: TaskId) -> Option<Task>;
+    fn current_task_by_seq(&self, seq: u64) -> Option<Task>;
+    fn list(&self) -> Vec<Task>;
+    fn batch_snapshot(&self, id: BatchId) -> Option<TaskBatchSnapshot>;
+    fn list_batch_snapshots(&self) -> Vec<TaskBatchSnapshot>;
+    fn current_batch(&self) -> Option<BatchId>;
+    fn lifecycle_snapshot(&self, stale_after_silence_turns: u64) -> TaskLifecycleSnapshot;
 }
+```
 
+#### Task-internal 能力（未发布）
+
+以下 12 个能力在生产构建中没有任何 crate 外消费者，**未发布到 `TaskAccess`**，以 `TaskStore` 的 `pub(crate)` 固有方法提供、由 crate 内契约测试锁定行为；消费面激活（如 Runtime 接管 batch 中断/恢复、TUI 接线依赖图提示）时再评估升格发布：
+
+`pause_batch` / `resume_batch` / `record_batch_turn` / `transition`（非 progress 版）/ `add_dependency` / `remove_dependency` / `add_tag` / `remove_tag` / `list_batches` / `is_blocked` / `would_create_cycle` / `stats`。
+
+- 批次细粒度生命周期（pause/resume/record_turn）与全局 batch 列表：crate 外历史发现走 `list_batch_snapshots`；
+- 单边依赖增删：crate 外统一走 `replace_dependencies` 整组改写；
+- tag 增删：尚无外部消费面；
+- `transition`：crate 外状态推进统一走 `transition_with_progress`；
+- blocked / 依赖环探测：写入侧 admission 由原子 `transition_with_progress` 在锁内检查 blocked，探测查询不充当写入 precondition；
+- 全局 `stats`：crate 外 batch 统计走 `batch_snapshot` 家族。
+
+```rust
 pub struct TaskCreateSpec {
     subject: String,
     description: String,
@@ -116,13 +125,13 @@ impl<T> TaskCommandResult<T> {
 
 `TaskRevision` 是 Task backing 的单调提交版本，空 store 从 `0` 开始。每次实际改变 `TaskStoreState` 的成功命令只递增一次，即使命令原子修改多个 Task、Batch 或依赖边；此时 `TaskCommandResult::revision()` 返回提交后的权威 `Some(TaskRevision)`。失败命令、只读查询和幂等 no-op 均不递增；聚合内尚未提交的本地结果与 store 幂等 no-op 的 `revision()` 均返回 `None`。`revision` 字段及其写入能力保持 Task-private，外部调用方只能通过 accessor 读取，不能伪造提交信息。真实提交的 revision 与命令的 `value` / `events` 在同一 state transaction 中产生，调用方 **NEVER** 通过命令后另查 revision 拼接提交结果。revision 溢出返回结构化 `RevisionExhausted`，state、events 与 revision 全部不变。`#887` 不引入 expected-revision/CAS 参数；若未来出现多 writer 乐观并发需求，必须另行设计冲突协议。
 
-所有 mutation command 都返回 `TaskCommandResult<T>`；Runtime 必须先消费 `events` 并经 ACL 投影，再使用 `value` 更新本地 read model。失败没有事件。`add_dependency` 即使调用方先查询 `would_create_cycle`，也 **MUST** 在同一 store write mutation 内重新检查环；`transition(id, InProgress)` 同理必须锁内检查 blocked，查询方法只是 UI/规划提示，不能充当写入 precondition。
+所有 mutation command 都返回 `TaskCommandResult<T>`；Runtime 必须先消费 `events` 并经 ACL 投影，再使用 `value` 更新本地 read model。失败没有事件。依赖改写命令（`replace_dependencies` 及 Task-internal 的单边 `add_dependency` / `remove_dependency`）即使调用方先做环探测，也 **MUST** 在同一 store write mutation 内重新检查环；`transition_with_progress(id, InProgress)` 同理必须锁内检查 blocked——探测查询只是规划提示，不能充当写入 precondition。
 
 `TaskCreateSpec` / `BatchCreateSpec` 是 Task-owned typed command input，**NEVER** 与 Tool wire DTO 共用类型。其字段与直接构造器保持私有：`try_new` 校验非空 subject / summary；`create_task` / `create_batch` 再校验当前 state，最后才分配 ID 并在一次 state mutation 中插入。任何校验或 ID 溢出都返回结构化 `TaskCommandError` 且 state / counter 不变，**NEVER** 以 panic、空字符串修补或半创建表示失败。`set_subject` 同样拒绝空白标题；`set_subject` / `set_description` 是保留 Tool 编辑能力的 Task-owned 意图命令，真实修改各产生一次 revision 与对应封闭事件，重复值是无事件、无 revision 的幂等成功，**NEVER** 重新开放通用 update closure。
 
 `Task.batch` 是非可选引用，因此 `create_task` **MUST** 把新 Task 绑定到 `current_batch` 指向的唯一 `Active` Batch；合法空 snapshot 的 `current_batch=None` 时返回 `NoActiveBatch`，**NEVER** 隐式创建不可见 Batch、写入 `BatchId(0)` 或返回缺少 batch 的 Task。调用方必须先显式 `create_batch`。`create_batch` 要求当前没有 Active Batch，否则返回 `ActiveBatchConflict { active, requested }`；新建命令只接收并持久化 `summary`，**NEVER** 发布 Batch 不拥有的 `description` 参数。
 
-Batch lifecycle 命令全部按 id 且 fallible：`pause_batch(Active)` 原子变为 Paused 并清空 current；`resume_batch(Paused)` 仅在无其他 Active 时原子设为 Active/current；`archive_batch(Active|Paused)` 原子变为 Archived 并按需清空 current，重复 archive 幂等返回 Archived 实体。不存在、非法迁移或另一 Active 存在均返回 typed error 且不改 state。公开 Target **NEVER** 保留依赖隐式 current 的 `complete_batch()` shortcut。
+Batch lifecycle 命令全部按 id 且 fallible：`pause_batch(Active)` 原子变为 Paused 并清空 current；`resume_batch(Paused)` 仅在无其他 Active 时原子设为 Active/current；`archive_batch(Active|Paused)` 原子变为 Archived 并按需清空 current，重复 archive 幂等返回 Archived 实体。不存在、非法迁移或另一 Active 存在均返回 typed error 且不改 state。其中 `pause_batch` / `resume_batch` / `record_batch_turn` 当前为 Task-internal 能力（见 §1.1），`archive_batch` 已发布。公开 Target **NEVER** 保留依赖隐式 current 的 `complete_batch()` shortcut。
 
 `TaskProgressSnapshot` 是 Task-owned 原子 mutation result，随 `TaskUpdate(status)` 在同一 state transaction 中返回：包含目标 Batch 元数据、本次更新任务、最近最多 2 个已完成任务、全部 `in_progress`、最多 2 个未阻塞 `pending`、其余 ready/blocked 计数以及自动关闭/重开标记。最近完成项按 `completed_at` 倒序；完成任务重新进入非完成状态时清除时间，再次完成时重写。Tools Adapter 只负责按语言渲染并序列化 typed result，Runtime/Context **NEVER** 另查 Task 或注入独立 reminder。Task BC 同时发布 `TaskBatchStats` / `TaskBatchSnapshot` 作为按 Batch 查询的唯一只读投影：snapshot 包含 Batch 元数据、batch-local live Task 统计与稳定排序任务；`TaskAccess::batch_snapshot(id)` 查询指定 Batch，`list_batch_snapshots()` 用于历史发现。Tools 与 Runtime **NEVER** 从全局 `stats()` 或原始 `list()` 重复计算 Batch 统计。
 
@@ -182,7 +191,7 @@ impl TaskSnapshot {
 
 | 消费方 | 使用方式 |
 |---|---|
-| **Agent Runtime / TaskTool** | 只获得 `TaskAccess`：创建 / 推进 / 删除 Task；`is_blocked` 仅用于展示/规划提示，真正执行 admission 必须直接调用原子 `transition(id, InProgress)` 并处理 `TaskBlocked` |
+| **Agent Runtime / TaskTool** | 只获得 `TaskAccess`：创建 / 推进 / 删除 Task；真正执行 admission 必须直接调用原子 `transition_with_progress(id, InProgress)` 并处理 `TaskBlocked`，不依赖任何 blocked 探测查询 |
 | **Context Management** | 只获得 `TaskPersist`：Session 落盘时 collect；恢复时先取得 exclusive session-switch lease，再在同一 lease 内与 Project 一起 prepare / commit |
 | **TUI** | 经 SDK 事件投影 Task 状态，**NEVER** 直接调用 Task OHS |
 
@@ -209,7 +218,7 @@ Context Map §7 和 §10 决策：Task 类型是 Task BC 的 Published Language�
 | `TaskLifecycleSnapshot` | 带显式 stale threshold 的 Batch lifecycle 纯值输入 | Runtime |
 | `TaskSnapshot` | 可持久化快照 | Context Management |
 | `PersistedTask` | `TaskSnapshot` 内部持久化 DTO；不含派生 `blocks` | Context Management（只随 snapshot） |
-| `TaskStoreStats` | 统计信息；只能经 Runtime→SDK DTO 投影给 TUI | Runtime |
+| `TaskStoreStats` | 统计信息；Task-internal（未发布到 `TaskAccess`），crate 外 batch 统一经 `TaskBatchStats` / `TaskBatchSnapshot` | Task（内部） |
 
 ### 2.2 PL 所有权与发布边界
 
@@ -322,13 +331,12 @@ Agent Runtime 通过 `TaskAccess` 管理 Task 作为自身执行规划的投影�
 | Runtime 动作 | TaskAccess 调用 |
 |---|---|
 | 开始多步工作 | `BatchCreateSpec::try_new` → `create_batch`；`TaskCreateSpec::try_new` → `create_task` × N，逐次处理 typed error |
-| 开始执行某任务 | `transition(id, InProgress)` |
-| 任务完成 | `transition(id, Completed)` |
-| 添加依赖 | `add_dependency(id, blocked_by)` |
-| 检查 blocked 展示/规划提示 | `is_blocked(id)`；**NEVER** 作为随后 transition 的 precondition |
-| 用户中断 / 新话题 | `pause_batch(batch_id)`，随后可创建新 Batch |
-| 恢复旧批次 | 在无其他 Active 时 `resume_batch(batch_id)` |
+| 开始执行某任务 | `transition_with_progress(id, InProgress)`（锁内检查 blocked，处理 `TaskBlocked`） |
+| 任务完成 | `transition_with_progress(id, Completed)` |
+| 改写依赖 | `replace_dependencies(id, blocked_by_ids)`（整组改写；写入时锁内复核依赖环） |
+| 用户中断 / 新话题 | 现走 `archive_batch(batch_id)` 后创建新 Batch；`pause_batch` / `resume_batch` 为 Task-internal，Runtime 接管中断恢复时升格发布 |
 | 批次完成 / 废弃 | `archive_batch(batch_id)` |
+| 历史批次发现 | `list_batch_snapshots()`；按 ID 查询走 `batch_snapshot(id)` |
 
 ### 5.2 边界约束
 
@@ -352,3 +360,4 @@ Agent Runtime 通过 `TaskAccess` 管理 Task 作为自身执行规划的投影�
 | 2026-07-14 | 拆分 TaskAccess / TaskPersist；快照恢复改为无副作用 prepare + gate 内无失败 commit，并明确 absent legacy / captured empty | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 新建命令改为 typed/fallible spec，补齐 Batch pause/resume/archive-by-id 并移除 current-only complete shortcut | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-26 | 增加 Batch-scoped 查询投影、历史发现与结构化 reminder 边界，禁止消费方用全局统计代替 Batch 统计 | [#1415](https://github.com/rushsinging/aemeath/issues/1415) |
+| 2026-09-27 | port 卫生收窄：TaskAccess 发布面按实际消费收敛为 19 方法，12 个零外部消费能力降为 TaskStore `pub(crate)` 固有方法（Task-internal，契约测试锁定行为） | port 卫生复审 |

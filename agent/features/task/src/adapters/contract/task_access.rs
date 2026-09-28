@@ -1,7 +1,7 @@
 use crate::{
     domain::TaskCommandError, BatchCreateSpecData, BatchData, BatchIdData, BatchStatusData,
     TaskAccess, TaskCreateSpecData, TaskData, TaskEventData, TaskPriorityData, TaskRevisionData,
-    TaskStatusData,
+    TaskStatusData, TaskStore,
 };
 
 fn batch_spec(subject: &str) -> BatchCreateSpecData {
@@ -18,30 +18,42 @@ fn task_spec(subject: &str) -> TaskCreateSpecData {
     .expect("valid task spec")
 }
 
-/// Every read the `TaskAccess` port exposes that a failed or no-op command
-/// MUST leave byte-for-byte untouched: the authoritative revision plus both
-/// deterministic list projections. Comparing this triple before/after a
-/// rejected or idempotent command is a `dyn TaskAccess`-safe substitute for
-/// inspecting a concrete backing snapshot.
-fn observable(access: &dyn TaskAccess) -> (TaskRevisionData, Vec<TaskData>, Vec<BatchData>) {
-    (access.revision(), access.list(), access.list_batches())
+/// Every read that a failed or no-op command MUST leave byte-for-byte
+/// untouched: the authoritative revision plus both deterministic list
+/// projections. Comparing this triple before/after a rejected or idempotent
+/// command is a `dyn TaskAccess`-safe substitute for inspecting a concrete
+/// backing snapshot. The batch list itself is a Task-internal read, so it is
+/// observed through the concrete [`TaskStore`] view.
+fn observable(
+    access: &dyn TaskAccess,
+    store: &TaskStore,
+) -> (TaskRevisionData, Vec<TaskData>, Vec<BatchData>) {
+    (access.revision(), access.list(), store.list_batches())
 }
 
 /// Pre-overflow fixtures for the three independent exhaustion scenarios.
 ///
 /// Each scenario needs its own starting shape (an already-seeded BatchData ID
 /// counter, an already-seeded TaskData ID counter with no BatchData yet, or an
-/// already-maxed revision) so the contract stays agnostic to *how* a
-/// concrete `TaskAccess` implementation constructs that starting state.
+/// already-maxed revision) so the contract stays agnostic to *how* a concrete
+/// backing constructs that starting state.
 pub(super) struct TaskAccessOverflowFixtures<'a> {
-    pub revision_exhausted: &'a dyn TaskAccess,
-    pub batch_id_exhausted: &'a dyn TaskAccess,
-    pub task_id_exhausted: &'a dyn TaskAccess,
+    pub revision_exhausted: &'a TaskStore,
+    pub batch_id_exhausted: &'a TaskStore,
+    pub task_id_exhausted: &'a TaskStore,
 }
 
 /// Reusable behavioral contract for every `TaskAccess` implementation.
+///
+/// `store` is the same backing observed through its concrete type: the twelve
+/// Task-internal commands/queries (batch pause/resume/turn, plain transition,
+/// single-edge dependency add/remove, tag add/remove, global batch list,
+/// blocked/cycle probes, global stats) are deliberately not published on the
+/// port, so the contract asserts them through the `pub(crate)` inherent view
+/// while every published capability keeps flowing through `access`.
 pub(super) fn assert_task_access_contract(
     access: &dyn TaskAccess,
+    store: &TaskStore,
     overflow: TaskAccessOverflowFixtures<'_>,
 ) {
     // Empty backing is revision zero.
@@ -62,7 +74,7 @@ pub(super) fn assert_task_access_contract(
         .expect("batch creation succeeds");
     assert_eq!(batch.revision(), Some(TaskRevisionData::new(1)));
     assert_eq!(access.revision(), TaskRevisionData::new(1));
-    assert_eq!(access.list_batches(), vec![batch.value.clone()]);
+    assert_eq!(store.list_batches(), vec![batch.value.clone()]);
 
     let second = access
         .create_task(task_spec("second"), 3)
@@ -83,11 +95,11 @@ pub(super) fn assert_task_access_contract(
     let expected = vec![second.value.clone(), first.value.clone()];
     assert_eq!(access.list(), expected);
     assert_eq!(access.list(), expected);
-    assert_eq!(access.list_batches(), access.list_batches());
-    assert_eq!(access.stats(), access.stats());
+    assert_eq!(store.list_batches(), store.list_batches());
+    assert_eq!(store.stats(), store.stats());
     assert_eq!(access.lifecycle_snapshot(5), access.lifecycle_snapshot(5));
-    assert!(!access.is_blocked(first.value.id()).expect("known task"));
-    assert!(!access.would_create_cycle(first.value.id(), second.value.id()));
+    assert!(!store.is_blocked(first.value.id()).expect("known task"));
+    assert!(!store.would_create_cycle(first.value.id(), second.value.id()));
     assert_eq!(access.revision(), before_queries);
 
     // An idempotent successful no-op has no commit revision or events.
@@ -119,7 +131,7 @@ pub(super) fn assert_task_access_contract(
         "existing task remains attached to archived list"
     );
     assert_eq!(
-        access
+        store
             .list_batches()
             .iter()
             .find(|candidate| candidate.id() == batch.value.id())
@@ -149,7 +161,7 @@ pub(super) fn assert_task_access_contract(
 
     // alpha depends on beta; beta and delta both depend on gamma.
     let revision_before_edges = access.revision();
-    let added_ab = access
+    let added_ab = store
         .add_dependency(alpha.id(), beta.id(), 10)
         .expect("edge admitted");
     assert_eq!(
@@ -159,14 +171,14 @@ pub(super) fn assert_task_access_contract(
     assert_eq!(access.get(alpha.id()).unwrap().blocked_by(), &[beta.id()]);
     assert_eq!(access.get(beta.id()).unwrap().blocks(), &[alpha.id()]);
 
-    let added_bg = access
+    let added_bg = store
         .add_dependency(beta.id(), gamma.id(), 11)
         .expect("edge admitted");
     assert_eq!(
         added_bg.revision(),
         Some(TaskRevisionData::new(revision_before_edges.get() + 2))
     );
-    let added_dg = access
+    let added_dg = store
         .add_dependency(delta.id(), gamma.id(), 12)
         .expect("edge admitted");
     assert_eq!(
@@ -186,14 +198,14 @@ pub(super) fn assert_task_access_contract(
         .replace_dependencies(delta.id(), vec![gamma.id()], 14)
         .expect("dependency set restoration succeeds");
 
-    assert!(access.is_blocked(alpha.id()).expect("known task"));
-    assert!(access.is_blocked(beta.id()).expect("known task"));
-    assert!(access.is_blocked(delta.id()).expect("known task"));
-    assert!(!access.is_blocked(gamma.id()).expect("known task"));
+    assert!(store.is_blocked(alpha.id()).expect("known task"));
+    assert!(store.is_blocked(beta.id()).expect("known task"));
+    assert!(store.is_blocked(delta.id()).expect("known task"));
+    assert!(!store.is_blocked(gamma.id()).expect("known task"));
 
     // Re-adding the same edge is an idempotent no-op.
     let revision_before_duplicate_edge = access.revision();
-    let duplicate_edge = access
+    let duplicate_edge = store
         .add_dependency(alpha.id(), beta.id(), 13)
         .expect("idempotent edge succeeds");
     assert_eq!(duplicate_edge.revision(), None);
@@ -201,30 +213,30 @@ pub(super) fn assert_task_access_contract(
     assert_eq!(access.revision(), revision_before_duplicate_edge);
 
     // A self-cycle is rejected atomically without touching any entity.
-    let observable_before_self_cycle = observable(access);
+    let observable_before_self_cycle = observable(access, store);
     assert_eq!(
-        access.add_dependency(alpha.id(), alpha.id(), 14),
+        store.add_dependency(alpha.id(), alpha.id(), 14),
         Err(TaskCommandError::DependencyCycle {
             task_id: alpha.id(),
             blocked_by_id: alpha.id(),
         }
         .into())
     );
-    assert_eq!(observable(access), observable_before_self_cycle);
+    assert_eq!(observable(access, store), observable_before_self_cycle);
 
     // An indirect cycle (gamma -> alpha would close alpha -> beta -> gamma)
     // is rejected the same way; the advisory query agrees beforehand.
-    assert!(access.would_create_cycle(gamma.id(), alpha.id()));
-    let observable_before_indirect_cycle = observable(access);
+    assert!(store.would_create_cycle(gamma.id(), alpha.id()));
+    let observable_before_indirect_cycle = observable(access, store);
     assert_eq!(
-        access.add_dependency(gamma.id(), alpha.id(), 15),
+        store.add_dependency(gamma.id(), alpha.id(), 15),
         Err(TaskCommandError::DependencyCycle {
             task_id: gamma.id(),
             blocked_by_id: alpha.id(),
         }
         .into())
     );
-    assert_eq!(observable(access), observable_before_indirect_cycle);
+    assert_eq!(observable(access, store), observable_before_indirect_cycle);
 
     // Deleting `beta` (which both depends on gamma and is depended on by
     // alpha) clears both edge directions for its direct neighbours in the
@@ -254,14 +266,14 @@ pub(super) fn assert_task_access_contract(
     // ---- TaskData status transition: legal path plus an atomic illegal
     // transition failure that must not disturb any read model ----
     let revision_before_transition = access.revision();
-    let started = access
+    let started = store
         .transition(gamma.id(), TaskStatusData::InProgress, 17)
         .expect("legal transition");
     assert_eq!(
         started.revision(),
         Some(TaskRevisionData::new(revision_before_transition.get() + 1))
     );
-    let completed = access
+    let completed = store
         .transition(gamma.id(), TaskStatusData::Completed, 18)
         .expect("legal transition");
     assert_eq!(
@@ -270,28 +282,34 @@ pub(super) fn assert_task_access_contract(
     );
     assert_eq!(completed.value.status(), TaskStatusData::Completed);
     // Once its sole dependency completes, `delta` is no longer blocked.
-    assert!(!access.is_blocked(delta.id()).expect("known task"));
+    assert!(!store.is_blocked(delta.id()).expect("known task"));
 
-    let observable_before_illegal_transition = observable(access);
+    let observable_before_illegal_transition = observable(access, store);
     assert_eq!(
-        access.transition(gamma.id(), TaskStatusData::InProgress, 19),
+        store.transition(gamma.id(), TaskStatusData::InProgress, 19),
         Err(TaskCommandError::IllegalTransition {
             from: TaskStatusData::Completed,
             to: TaskStatusData::InProgress,
         }
         .into())
     );
-    assert_eq!(observable(access), observable_before_illegal_transition);
     assert_eq!(
-        access.transition(gamma.id(), TaskStatusData::Deleted, 20),
+        observable(access, store),
+        observable_before_illegal_transition
+    );
+    assert_eq!(
+        store.transition(gamma.id(), TaskStatusData::Deleted, 20),
         Err(TaskCommandError::DeletedOnlyViaDelete.into())
     );
-    assert_eq!(observable(access), observable_before_illegal_transition);
+    assert_eq!(
+        observable(access, store),
+        observable_before_illegal_transition
+    );
 
     // ---- Tag commands: add/remove with an idempotent no-op both ways, and
     // rejection on an already-deleted TaskData ----
     let revision_before_tag = access.revision();
-    let tagged = access
+    let tagged = store
         .add_tag(alpha.id(), "urgent".to_owned(), 21)
         .expect("tag add succeeds");
     assert_eq!(
@@ -300,13 +318,13 @@ pub(super) fn assert_task_access_contract(
     );
     assert_eq!(tagged.value.tags(), ["urgent".to_owned()]);
 
-    let duplicate_tag = access
+    let duplicate_tag = store
         .add_tag(alpha.id(), "urgent".to_owned(), 22)
         .expect("idempotent tag succeeds");
     assert_eq!(duplicate_tag.revision(), None);
     assert!(duplicate_tag.events.is_empty());
 
-    let untagged = access
+    let untagged = store
         .remove_tag(alpha.id(), "urgent", 23)
         .expect("tag remove succeeds");
     assert_eq!(
@@ -315,18 +333,18 @@ pub(super) fn assert_task_access_contract(
     );
     assert!(untagged.value.tags().is_empty());
 
-    let absent_tag = access
+    let absent_tag = store
         .remove_tag(alpha.id(), "urgent", 24)
         .expect("idempotent removal succeeds");
     assert_eq!(absent_tag.revision(), None);
     assert!(absent_tag.events.is_empty());
 
-    let observable_before_deleted_tag = observable(access);
+    let observable_before_deleted_tag = observable(access, store);
     assert_eq!(
-        access.add_tag(beta.id(), "late".to_owned(), 25),
+        store.add_tag(beta.id(), "late".to_owned(), 25),
         Err(TaskCommandError::TaskNotFound { id: beta.id() }.into())
     );
-    assert_eq!(observable(access), observable_before_deleted_tag);
+    assert_eq!(observable(access, store), observable_before_deleted_tag);
 
     // Text field commands are typed intent operations: blank subjects fail
     // atomically, duplicate values are true no-ops, and each real update has
@@ -353,12 +371,12 @@ pub(super) fn assert_task_access_contract(
     assert_eq!(duplicate_subject.revision(), None);
     assert!(duplicate_subject.events.is_empty());
 
-    let before_invalid_subject = observable(access);
+    let before_invalid_subject = observable(access, store);
     assert_eq!(
         access.set_subject(alpha.id(), "  ".to_owned(), 28),
         Err(TaskCommandError::InvalidTaskSubject.into())
     );
-    assert_eq!(observable(access), before_invalid_subject);
+    assert_eq!(observable(access, store), before_invalid_subject);
 
     let revision_before_description = access.revision();
     let described = access
@@ -379,7 +397,7 @@ pub(super) fn assert_task_access_contract(
     // ---- record_batch_turn: Active admission plus idempotent no-op ----
     let active_batch_id = replacement.value.id();
     let revision_before_turn = access.revision();
-    let turned = access
+    let turned = store
         .record_batch_turn(active_batch_id, 1, true)
         .expect("active batch admits turn");
     assert_eq!(
@@ -390,14 +408,14 @@ pub(super) fn assert_task_access_contract(
     assert_eq!(turned.value.silence_turns(), 0);
 
     let revision_after_first_turn = access.revision();
-    let repeated_turn = access
+    let repeated_turn = store
         .record_batch_turn(active_batch_id, 1, true)
         .expect("idempotent turn succeeds");
     assert_eq!(repeated_turn.revision(), None);
     assert!(repeated_turn.events.is_empty());
     assert_eq!(access.revision(), revision_after_first_turn);
 
-    let silent_turn = access
+    let silent_turn = store
         .record_batch_turn(active_batch_id, 2, false)
         .expect("silence turn recorded");
     assert_eq!(
@@ -409,7 +427,7 @@ pub(super) fn assert_task_access_contract(
     // ---- BatchData lifecycle: pause -> resume -> archive, where a duplicate
     // archive is the sole idempotent no-op terminal transition ----
     let revision_before_pause = access.revision();
-    let paused = access.pause_batch(active_batch_id).expect("pause succeeds");
+    let paused = store.pause_batch(active_batch_id).expect("pause succeeds");
     assert_eq!(
         paused.revision(),
         Some(TaskRevisionData::new(revision_before_pause.get() + 1))
@@ -417,19 +435,19 @@ pub(super) fn assert_task_access_contract(
     assert_eq!(paused.value.status(), BatchStatusData::Paused);
 
     // A Paused batch can no longer record turns; the rejection is atomic.
-    let observable_before_paused_turn = observable(access);
+    let observable_before_paused_turn = observable(access, store);
     assert_eq!(
-        access.record_batch_turn(active_batch_id, 3, true),
+        store.record_batch_turn(active_batch_id, 3, true),
         Err(TaskCommandError::BatchNotActive {
             id: active_batch_id,
             status: BatchStatusData::Paused,
         }
         .into())
     );
-    assert_eq!(observable(access), observable_before_paused_turn);
+    assert_eq!(observable(access, store), observable_before_paused_turn);
 
     let revision_before_resume = access.revision();
-    let resumed = access
+    let resumed = store
         .resume_batch(active_batch_id)
         .expect("resume succeeds");
     assert_eq!(
@@ -461,9 +479,9 @@ pub(super) fn assert_task_access_contract(
     assert_eq!(access.revision(), revision_after_archive);
 
     // An Archived batch can never record turns, pause, or resume again.
-    let observable_before_archived_ops = observable(access);
+    let observable_before_archived_ops = observable(access, store);
     assert_eq!(
-        access.record_batch_turn(batch.value.id(), 4, true),
+        store.record_batch_turn(batch.value.id(), 4, true),
         Err(TaskCommandError::BatchNotActive {
             id: batch.value.id(),
             status: BatchStatusData::Archived,
@@ -471,7 +489,7 @@ pub(super) fn assert_task_access_contract(
         .into())
     );
     assert_eq!(
-        access.pause_batch(batch.value.id()),
+        store.pause_batch(batch.value.id()),
         Err(TaskCommandError::IllegalBatchTransition {
             id: batch.value.id(),
             from: BatchStatusData::Archived,
@@ -480,7 +498,7 @@ pub(super) fn assert_task_access_contract(
         .into())
     );
     assert_eq!(
-        access.resume_batch(batch.value.id()),
+        store.resume_batch(batch.value.id()),
         Err(TaskCommandError::IllegalBatchTransition {
             id: batch.value.id(),
             from: BatchStatusData::Archived,
@@ -488,13 +506,13 @@ pub(super) fn assert_task_access_contract(
         }
         .into())
     );
-    assert_eq!(observable(access), observable_before_archived_ops);
+    assert_eq!(observable(access, store), observable_before_archived_ops);
 
     // Whole-aggregate clear is one atomic command. It resets entities,
     // allocation/current pointers, emits one aggregate event, and advances the
     // monotonic revision once. Repeating it is an idempotent no-op.
-    let task_count = access.stats().total;
-    let batch_count = access.list_batches().len();
+    let task_count = store.stats().total;
+    let batch_count = store.list_batches().len();
     let revision_before_clear = access.revision();
     let cleared = access.clear().expect("aggregate clear succeeds");
     assert_eq!(
@@ -509,7 +527,7 @@ pub(super) fn assert_task_access_contract(
         }]
     );
     assert!(access.list().is_empty());
-    assert!(access.list_batches().is_empty());
+    assert!(store.list_batches().is_empty());
     assert_eq!(access.current_batch(), None);
     let revision_after_clear = access.revision();
     let duplicate_clear = access.clear().expect("empty clear succeeds");
@@ -586,6 +604,7 @@ fn task_store_satisfies_task_access_contract() {
         TaskStore::from_state(TaskStoreState::empty().with_next_task_id(TaskIdData::new(u64::MAX)));
 
     assert_task_access_contract(
+        &access,
         &access,
         TaskAccessOverflowFixtures {
             revision_exhausted: &revision_exhausted,

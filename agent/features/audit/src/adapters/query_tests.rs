@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use crate::domain::{UsagePaginationData, UsageQueryData, UsageQueryError};
 use crate::ports::{
     AppendLogError, AppendLogNamespace, AppendLogReader, AppendLogStream, UsageAppendStorePort,
-    UsageQueryPort,
 };
 
 #[derive(Clone, Copy)]

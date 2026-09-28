@@ -60,13 +60,13 @@ fn task_status_lines_orders_statuses_and_formats_dependencies() {
     let in_progress = access.create_task(task_spec("working"), 3).unwrap().value;
     let pending = access.create_task(task_spec("blocked"), 4).unwrap().value;
     access
-        .transition(completed.id(), TaskStatusData::Completed, 5)
+        .transition_with_progress(completed.id(), TaskStatusData::Completed, 5)
         .unwrap();
     access
-        .transition(in_progress.id(), TaskStatusData::InProgress, 6)
+        .transition_with_progress(in_progress.id(), TaskStatusData::InProgress, 6)
         .unwrap();
     access
-        .add_dependency(pending.id(), completed.id(), 7)
+        .replace_dependencies(pending.id(), vec![completed.id()], 7)
         .unwrap();
 
     let lines = task_status_lines(&access.list(), 7);
@@ -93,16 +93,23 @@ fn blocked_by_omits_dependencies_outside_current_batch() {
 fn task_status_lines_limits_visible_tasks_and_reports_hidden_count() {
     let store = access_with_active_batch();
     let access: &dyn TaskAccess = &store;
+    // 先创建全部任务再依次完成：`transition_with_progress` 完成 batch 内
+    // 最后一个未完成任务时会 auto-close 批次，逐个"创建即完成"会清掉
+    // active batch，使后续 create_task 失败。
+    let mut completed_ids = Vec::new();
     for index in 0..3 {
         let task = access
             .create_task(task_spec(&format!("completed-{index}")), index + 2)
             .unwrap()
             .value;
-        access
-            .transition(task.id(), TaskStatusData::Completed, index + 10)
-            .unwrap();
+        completed_ids.push(task.id());
     }
     access.create_task(task_spec("pending"), 20).unwrap();
+    for (index, task_id) in completed_ids.into_iter().enumerate() {
+        access
+            .transition_with_progress(task_id, TaskStatusData::Completed, (index + 10) as u64)
+            .unwrap();
+    }
 
     let lines = task_status_lines(&access.list(), 2);
 
@@ -129,7 +136,7 @@ fn task_reminder_intent_preserves_count_and_active_list() {
     let completed = access.create_task(task_spec("done"), 2).unwrap().value;
     let _pending = access.create_task(task_spec("todo"), 3).unwrap().value;
     access
-        .transition(completed.id(), TaskStatusData::Completed, 4)
+        .transition_with_progress(completed.id(), TaskStatusData::Completed, 4)
         .unwrap();
 
     let reminder = build_task_reminder_intent(access, 7).expect("reminder intent");
@@ -176,7 +183,7 @@ fn compact_task_snapshot_renders_with_full_identifiers() {
     let completed = access.create_task(task_spec("done"), 2).unwrap().value;
     let _pending = access.create_task(task_spec("todo"), 3).unwrap().value;
     access
-        .transition(completed.id(), TaskStatusData::Completed, 4)
+        .transition_with_progress(completed.id(), TaskStatusData::Completed, 4)
         .unwrap();
 
     let snapshot = build_compact_task_snapshot(access).expect("typed snapshot built");

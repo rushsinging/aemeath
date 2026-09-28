@@ -50,7 +50,7 @@ async fn test_idle_gate_reset_clears_messages_and_emits_session_reset() {
         task_access.list().is_empty(),
         "Reset must clear authoritative TaskAccess"
     );
-    assert!(task_access.list_batches().is_empty());
+    assert!(task_access.list_batch_snapshots().is_empty());
     assert_eq!(outcome.decision, GateDecision::Proceed);
     assert!(outcome.reset_requested, "idle Reset 应请求清空会话");
     assert!(

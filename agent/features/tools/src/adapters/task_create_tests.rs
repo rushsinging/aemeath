@@ -60,6 +60,6 @@ async fn task_create_without_active_batch_returns_typed_error() {
     assert!(result.is_error);
     assert!(result.text.contains("active"), "{}", result.text);
     assert!(store.list().is_empty());
-    assert!(store.list_batches().is_empty());
+    assert!(store.list_batch_snapshots().is_empty());
     assert!(result.task_change.is_none());
 }

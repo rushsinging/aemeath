@@ -9,7 +9,6 @@ use crate::domain::{
     UsageCursor, UsageEnvelopeV1, UsagePaginationData, UsageQueryData, UsageQueryError,
     UsageQueryWarning, UsageRecordData, UsageTimeRangeData, CURRENT_USAGE_SCHEMA_VERSION,
 };
-use crate::ports::UsageQueryPort;
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 use storage::SafeStorageRoot;
 

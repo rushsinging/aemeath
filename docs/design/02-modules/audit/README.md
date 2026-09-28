@@ -87,7 +87,7 @@ owner 未显式 shutdown 便被 Drop，或 shutdown Future 被取消时，Drop �
 
 ## 7. 全局 UsageQuery
 
-`UsageQueryPort` 支持：
+Usage 查询经 audit 发布的读角色 `AuditReader::query_page`（内部由 `UsageQueryService` 固有 `query_page` 承载，细分类错误映射为 `DomainError`）支持：
 
 - 指定 Session 查询一个分区；
 - 不指定 Session 时查询全部分区；
@@ -114,7 +114,7 @@ Runtime → Audit PL + Runtime-owned UsageSink
 Composition bridge → Runtime UsageSink + Audit sender/worker
 Audit worker → UsageAppendStorePort
 Audit File adapter → Storage path-safety PL
-CLI/TUI → UsageQueryPort → Audit
+CLI/TUI → AuditReader::query_page → Audit
 ```
 
 ## 9. 不变量
