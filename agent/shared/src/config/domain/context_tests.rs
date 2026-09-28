@@ -48,6 +48,7 @@ fn compact_model_patch_overrides_without_touching_other_context_fields() {
             microcompact_enabled: false,
             auto_compact_failure_limit: 7,
             compact_model: Some("Zhipu/glm-5.3".to_string()),
+            auto_compact_threshold_ratio: 0.8,
         },
         ..Config::default()
     };
@@ -119,4 +120,83 @@ fn snapshot_trims_surrounding_whitespace_in_compact_model() {
     let snapshot = snapshot_from_json(r#"{"context":{"compact_model":"  Zhipu/glm-5.3  "}}"#);
 
     assert_eq!(snapshot.context_compact_model(), Some("Zhipu/glm-5.3"));
+}
+
+#[test]
+fn auto_compact_threshold_ratio_defaults_to_0_8() {
+    let config = Config::default();
+
+    assert_eq!(config.context.auto_compact_threshold_ratio, 0.8);
+    assert_eq!(
+        ConfigSnapshot::new(config).auto_compact_threshold_ratio(),
+        0.8
+    );
+}
+
+#[test]
+fn auto_compact_threshold_ratio_parses_snake_case_field() {
+    let snapshot = snapshot_from_json(r#"{"context":{"auto_compact_threshold_ratio":0.9}}"#);
+
+    assert_eq!(snapshot.auto_compact_threshold_ratio(), 0.9);
+}
+
+#[test]
+fn auto_compact_threshold_ratio_accepts_camel_case_alias() {
+    let snapshot = snapshot_from_json(r#"{"context":{"autoCompactThresholdRatio":0.9}}"#);
+
+    assert_eq!(snapshot.auto_compact_threshold_ratio(), 0.9);
+}
+
+#[test]
+fn snapshot_clamps_threshold_ratio_into_safe_range() {
+    let too_small = snapshot_from_json(r#"{"context":{"auto_compact_threshold_ratio":0.1}}"#);
+    assert_eq!(too_small.auto_compact_threshold_ratio(), 0.5);
+
+    let too_large = snapshot_from_json(r#"{"context":{"auto_compact_threshold_ratio":0.99}}"#);
+    assert_eq!(too_large.auto_compact_threshold_ratio(), 0.95);
+}
+
+#[test]
+fn threshold_ratio_patch_overrides_without_touching_other_context_fields() {
+    let base = Config {
+        context: crate::config::context::ContextConfig {
+            snip_enabled: false,
+            microcompact_enabled: false,
+            auto_compact_failure_limit: 7,
+            compact_model: Some("Zhipu/glm-5.3".to_string()),
+            auto_compact_threshold_ratio: 0.8,
+        },
+        ..Config::default()
+    };
+    let patch: ConfigPatch =
+        serde_json::from_str(r#"{"context":{"auto_compact_threshold_ratio":0.85}}"#)
+            .expect("patch must parse");
+
+    let merged = apply_patch(base, patch);
+
+    assert_eq!(merged.context.auto_compact_threshold_ratio, 0.85);
+    assert!(!merged.context.snip_enabled);
+    assert!(!merged.context.microcompact_enabled);
+    assert_eq!(merged.context.auto_compact_failure_limit, 7);
+    assert_eq!(
+        merged.context.compact_model.as_deref(),
+        Some("Zhipu/glm-5.3")
+    );
+}
+
+#[test]
+fn threshold_ratio_patch_without_value_preserves_existing_ratio() {
+    let base = Config {
+        context: crate::config::context::ContextConfig {
+            auto_compact_threshold_ratio: 0.9,
+            ..Default::default()
+        },
+        ..Config::default()
+    };
+    let patch: ConfigPatch =
+        serde_json::from_str(r#"{"context":{"snip_enabled":false}}"#).expect("patch must parse");
+
+    let merged = apply_patch(base, patch);
+
+    assert_eq!(merged.context.auto_compact_threshold_ratio, 0.9);
 }

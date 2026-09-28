@@ -89,7 +89,7 @@ pub fn estimate_message_tokens(message: &Message) -> usize {
 
 // ---- Autocompact threshold constants ----
 // effective = context_size - reserved_context(2%) - clamped_max_output(≤25% 窗口)
-// threshold = effective * 0.8
+// threshold = effective * ratio（默认 0.8；配置化见 `autocompact_threshold`）
 
 /// max_output 预留占窗口的比例上限（#1626）。
 ///
@@ -155,10 +155,19 @@ pub fn effective_context_window(context_size: usize, max_output_tokens: usize) -
 }
 
 /// Calculate the autocompact trigger threshold.
-/// Formula: effective_context_window * 0.8
-pub fn autocompact_threshold(context_size: usize, max_output_tokens: usize) -> usize {
+/// Formula: effective_context_window * ratio
+///
+/// `ratio` 为触发阈值占 effective window 的比例（默认路径 0.8，可由
+/// `context.auto_compact_threshold_ratio` 配置）。函数内 clamp 到
+/// share 定义的 `[0.5, 0.95]` 安全区间作为单一防线：下限防 compact
+/// 风暴（#1626），上限防估算缓冲归零。
+pub fn autocompact_threshold(context_size: usize, max_output_tokens: usize, ratio: f64) -> usize {
     let effective = effective_context_window(context_size, max_output_tokens);
-    ((effective as f64) * 0.8) as usize
+    let safe_ratio = ratio.clamp(
+        share::config::context::AUTO_COMPACT_THRESHOLD_RATIO_MIN,
+        share::config::context::AUTO_COMPACT_THRESHOLD_RATIO_MAX,
+    );
+    ((effective as f64) * safe_ratio) as usize
 }
 
 /// Estimate the token overhead of tool schemas.

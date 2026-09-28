@@ -154,6 +154,10 @@ pub struct ContextConfigPatch {
     pub microcompact_enabled: Option<bool>,
     #[serde(default)]
     pub auto_compact_failure_limit: Option<u8>,
+    /// 覆盖 auto-compact 触发阈值比例；未指定保留现值。
+    /// 存储原值，读取经 `ConfigSnapshot::auto_compact_threshold_ratio` 归一化。
+    #[serde(default, alias = "autoCompactThresholdRatio")]
+    pub auto_compact_threshold_ratio: Option<f64>,
     /// `Some("")`（或纯空白）表示清除已配置的 compact 模型。
     #[serde(default, alias = "compactModel")]
     pub compact_model: Option<String>,
@@ -528,6 +532,9 @@ pub(crate) fn apply_context_patch(
     }
     if let Some(value) = patch.auto_compact_failure_limit {
         base.auto_compact_failure_limit = value;
+    }
+    if let Some(value) = patch.auto_compact_threshold_ratio {
+        base.auto_compact_threshold_ratio = value;
     }
     if let Some(value) = patch.compact_model {
         base.compact_model = crate::config::context::normalize_compact_model_selection(value);

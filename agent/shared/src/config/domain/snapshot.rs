@@ -301,6 +301,16 @@ impl ConfigSnapshot {
         self.inner.context.auto_compact_failure_limit.max(1)
     }
 
+    /// Auto-compact 触发阈值比例（已归一化）。
+    ///
+    /// 读取时 clamp 到 `[0.5, 0.95]`，避免绕过 `ContextConfig`
+    /// 反序列化的程序化构造让越界值触发 compact 风暴或缓冲归零。
+    pub fn auto_compact_threshold_ratio(&self) -> f64 {
+        crate::config::context::clamp_auto_compact_threshold_ratio(
+            self.inner.context.auto_compact_threshold_ratio,
+        )
+    }
+
     /// Compact 专用模型 selection；`None` 表示跟随当前会话模型。
     ///
     /// 再次归一化空白，避免绕过 `ContextConfig` 反序列化的程序化构造

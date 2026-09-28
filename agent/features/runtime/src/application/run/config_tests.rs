@@ -49,3 +49,27 @@ fn captured_snapshot_keeps_revision_and_allow_all() {
     assert_eq!(run.revision(), ConfigRevision::new(7));
     assert!(run.allow_all());
 }
+
+/// Run 创建时捕获的 committed 快照必须携带 auto-compact 阈值比例——
+/// build_request 将其整体克隆进 ContextRequestData，context decision
+/// 据此计算触发阈值（默认 0.8，配置 0.9 时 Run 内生效）。
+#[test]
+fn captured_snapshot_carries_auto_compact_threshold_ratio() {
+    let default_run = RunConfigSnapshot::capture(
+        share::config::domain::snapshot::ConfigSnapshot::new(Config::default()),
+    );
+    assert_eq!(default_run.config().auto_compact_threshold_ratio(), 0.8);
+
+    let configured = Config {
+        context: share::config::context::ContextConfig {
+            auto_compact_threshold_ratio: 0.9,
+            ..Default::default()
+        },
+        ..Config::default()
+    };
+    let configured_run = RunConfigSnapshot::capture(
+        share::config::domain::snapshot::ConfigSnapshot::new(configured),
+    );
+
+    assert_eq!(configured_run.config().auto_compact_threshold_ratio(), 0.9);
+}
