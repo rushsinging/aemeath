@@ -14,15 +14,18 @@ const DEFAULT_WORKTREE_BASE: &str = "main";
 const DEFAULT_WORKTREE_DIR: &str = ".worktrees";
 const UNNAMED_WORKSPACE_SEGMENT: &str = "workspace";
 
+/// Workspace 聚合根：字段全私有，不变量（containment / git 位置 / 栈形态）
+/// 只能经本 impl 的方法修改。生产代码 NEVER 直接读写字段；白盒测试位于
+/// 子模块 `state_tests`，允许构造非法形态以验证校验逻辑本身。
 #[derive(Clone)]
 pub struct WorkspaceState {
-    pub project_identity: ProjectIdentityData,
-    pub workspace_root: PathBuf,
-    pub path_base: PathBuf,
-    pub worktree_kind: WorktreeKind,
+    project_identity: ProjectIdentityData,
+    workspace_root: PathBuf,
+    path_base: PathBuf,
+    worktree_kind: WorktreeKind,
     /// 已解析的 worktree 默认创建根目录（生产由 wiring 注入配置值）。
-    pub worktrees_root: PathBuf,
-    pub stack: Vec<WorkspaceData>,
+    worktrees_root: PathBuf,
+    stack: Vec<WorkspaceData>,
 }
 
 impl WorkspaceState {
@@ -58,6 +61,37 @@ impl WorkspaceState {
         }
     }
 
+    /// 从当前状态派生隔离实例：继承身份、root、base、kind 与 worktree 根，
+    /// 清空栈。唯一的跨实例派生入口（子 agent 种子）。
+    pub fn derive_isolated(&self) -> Self {
+        Self {
+            project_identity: self.project_identity.clone(),
+            workspace_root: self.workspace_root.clone(),
+            path_base: self.path_base.clone(),
+            worktree_kind: self.worktree_kind,
+            worktrees_root: self.worktrees_root.clone(),
+            stack: Vec::new(),
+        }
+    }
+
+    // ── 只读访问面（service 读点专用；跨 crate 观测一律走窄 trait）──
+
+    pub fn project_identity(&self) -> &ProjectIdentityData {
+        &self.project_identity
+    }
+
+    pub fn workspace_root(&self) -> &Path {
+        &self.workspace_root
+    }
+
+    pub fn path_base(&self) -> &Path {
+        &self.path_base
+    }
+
+    pub fn worktree_kind(&self) -> WorktreeKind {
+        self.worktree_kind
+    }
+
     pub fn workspace_id(&self) -> WorkspaceId {
         WorkspaceId::derive(
             &self.project_identity,
@@ -70,6 +104,26 @@ impl WorkspaceState {
         } else {
             self.path_base.join(rel)
         }
+    }
+
+    // ── 白盒测试构造面（仅测校验逻辑时构造特定形态）──
+
+    /// 强制设置位置（绕过校验），用于构造异常形态被测方。
+    #[cfg(test)]
+    pub fn force_position(&mut self, path_base: PathBuf, workspace_root: PathBuf) {
+        self.path_base = path_base;
+        self.workspace_root = workspace_root;
+    }
+
+    /// 直接压栈一帧（绕过 git 校验），用于构造栈形态被测方。
+    #[cfg(test)]
+    pub fn push_frame(&mut self, frame: WorkspaceData) {
+        self.stack.push(frame);
+    }
+
+    #[cfg(test)]
+    pub fn stack_depth(&self) -> usize {
+        self.stack.len()
     }
 }
 
@@ -126,29 +180,29 @@ fn resolve_worktree_base(base: Option<&str>) -> &str {
         .unwrap_or(DEFAULT_WORKTREE_BASE)
 }
 
-pub fn change_directory(
-    state: &mut WorkspaceState,
-    path: PathBuf,
-) -> Result<(), share::error::DomainError> {
-    let canonical = path
-        .canonicalize()
-        .map_err(|_| WorkspaceError::PathNotFound(path.clone()))?;
-    if !canonical.is_dir() {
-        return Err(WorkspaceError::NotDirectory(canonical).into());
-    }
-    let canonical_root = state
-        .workspace_root
-        .canonicalize()
-        .map_err(|_| WorkspaceError::PathNotFound(state.workspace_root.clone()))?;
-    if !canonical.starts_with(&canonical_root) {
-        return Err(WorkspaceError::PathOutsideWorkspaceRoot {
-            path: canonical,
-            root: canonical_root,
+impl WorkspaceState {
+    /// 变更当前工作目录（path_base），必须位于 workspace root 内。
+    pub fn change_directory(&mut self, path: PathBuf) -> Result<(), share::error::DomainError> {
+        let canonical = path
+            .canonicalize()
+            .map_err(|_| WorkspaceError::PathNotFound(path.clone()))?;
+        if !canonical.is_dir() {
+            return Err(WorkspaceError::NotDirectory(canonical).into());
         }
-        .into());
+        let canonical_root = self
+            .workspace_root
+            .canonicalize()
+            .map_err(|_| WorkspaceError::PathNotFound(self.workspace_root.clone()))?;
+        if !canonical.starts_with(&canonical_root) {
+            return Err(WorkspaceError::PathOutsideWorkspaceRoot {
+                path: canonical,
+                root: canonical_root,
+            }
+            .into());
+        }
+        self.path_base = canonical;
+        Ok(())
     }
-    state.path_base = canonical;
-    Ok(())
 }
 
 /// Canonicalize `target` and verify it lives in the same repo as `state.workspace_root`.
@@ -198,106 +252,117 @@ fn validate_in_repo(
     }
 }
 
-pub fn enter(
-    state: &mut WorkspaceState,
-    git: &dyn GitWorktreeOps,
-    path: Option<PathBuf>,
-    branch: Option<String>,
-    base: Option<String>,
-) -> Result<WorkspaceData, share::error::DomainError> {
-    if state.worktree_kind == WorktreeKind::NonGit {
-        return Err(WorkspaceError::UnsupportedForNonGit.into());
-    }
-    let mut next_stack = state.stack.clone();
-    if !next_stack.is_empty() {
-        match git
-            .is_linked_worktree(&state.path_base)
-            .map_err(WorkspaceError::GitOperationFailed)?
-        {
-            false => next_stack.clear(),
-            true => {
-                return Err(WorkspaceError::NestedWorktree {
-                    current_workspace_root: state.workspace_root.clone(),
-                    current_path_base: state.path_base.clone(),
+impl WorkspaceState {
+    /// 进入（必要时创建）linked worktree，压栈前一帧。
+    pub fn enter(
+        &mut self,
+        git: &dyn GitWorktreeOps,
+        path: Option<PathBuf>,
+        branch: Option<String>,
+        base: Option<String>,
+    ) -> Result<WorkspaceData, share::error::DomainError> {
+        if self.worktree_kind == WorktreeKind::NonGit {
+            return Err(WorkspaceError::UnsupportedForNonGit.into());
+        }
+        let mut next_stack = self.stack.clone();
+        if !next_stack.is_empty() {
+            match git
+                .is_linked_worktree(&self.path_base)
+                .map_err(WorkspaceError::GitOperationFailed)?
+            {
+                false => next_stack.clear(),
+                true => {
+                    return Err(WorkspaceError::NestedWorktree {
+                        current_workspace_root: self.workspace_root.clone(),
+                        current_path_base: self.path_base.clone(),
+                    }
+                    .into());
                 }
-                .into());
             }
         }
+        let target = resolve_worktree_path(self, path, branch.as_deref())?;
+        if !target.exists() {
+            let b = branch
+                .as_deref()
+                .filter(|v| !v.trim().is_empty())
+                .ok_or(WorkspaceError::MissingPathAndBranch)?;
+            git.worktree_add(
+                &self.workspace_root,
+                &target,
+                b,
+                resolve_worktree_base(base.as_deref()),
+            )
+            .map_err(WorkspaceError::GitOperationFailed)?;
+        }
+        let (canonical, worktree_root, worktree_kind) = validate_in_repo(self, git, &target)?;
+        if worktree_kind != WorktreeKind::Linked {
+            return Err(WorkspaceError::NotLinkedWorktree { path: canonical }.into());
+        }
+        let frame = WorkspaceData {
+            id: self.workspace_id(),
+            path_base: self.path_base.clone(),
+            workspace_root: self.workspace_root.clone(),
+            worktree_kind: self.worktree_kind,
+        };
+        next_stack.push(frame.clone());
+        self.stack = next_stack;
+        self.workspace_root = worktree_root;
+        self.path_base = canonical;
+        self.worktree_kind = worktree_kind;
+        Ok(frame)
     }
-    let target = resolve_worktree_path(state, path, branch.as_deref())?;
-    if !target.exists() {
-        let b = branch
-            .as_deref()
-            .filter(|v| !v.trim().is_empty())
-            .ok_or(WorkspaceError::MissingPathAndBranch)?;
-        git.worktree_add(
-            &state.workspace_root,
-            &target,
-            b,
-            resolve_worktree_base(base.as_deref()),
-        )
-        .map_err(WorkspaceError::GitOperationFailed)?;
-    }
-    let (canonical, worktree_root, worktree_kind) = validate_in_repo(state, git, &target)?;
-    if worktree_kind != WorktreeKind::Linked {
-        return Err(WorkspaceError::NotLinkedWorktree { path: canonical }.into());
-    }
-    let frame = WorkspaceData {
-        id: state.workspace_id(),
-        path_base: state.path_base.clone(),
-        workspace_root: state.workspace_root.clone(),
-        worktree_kind: state.worktree_kind,
-    };
-    next_stack.push(frame.clone());
-    state.stack = next_stack;
-    state.workspace_root = worktree_root;
-    state.path_base = canonical;
-    state.worktree_kind = worktree_kind;
-    Ok(frame)
-}
 
-pub fn exit(
-    state: &mut WorkspaceState,
-    git: &dyn GitWorktreeOps,
-) -> Result<WorkspaceData, share::error::DomainError> {
-    if state.worktree_kind == WorktreeKind::NonGit {
-        return Err(WorkspaceError::UnsupportedForNonGit.into());
-    }
-    let prev = state
-        .stack
-        .last()
-        .cloned()
-        .ok_or(WorkspaceError::EmptyStack)?;
-    let (canonical, worktree_root, worktree_kind) = validate_in_repo(state, git, &prev.path_base)?;
-    if canonical != prev.path_base
-        || worktree_root != prev.workspace_root
-        || worktree_kind != prev.worktree_kind
-    {
-        return Err(WorkspaceError::GitProbeFailed(GitProbeError::InvalidOutput).into());
-    }
-    state.stack.pop();
-    state.workspace_root = worktree_root;
-    state.path_base = canonical;
-    state.worktree_kind = worktree_kind;
-    Ok(prev)
-}
-
-pub fn snapshot(state: &WorkspaceState) -> PersistedWorkspaceContext {
-    PersistedWorkspaceContext {
-        workspace_id: state.workspace_id(),
-        project_identity: state.project_identity.clone(),
-        path_base: state.path_base.display().to_string(),
-        workspace_root: state.workspace_root.display().to_string(),
-        worktree_kind: state.worktree_kind,
-        context_stack: state
+    /// 退出当前 worktree，弹栈并恢复上一帧（git 位置必须仍自洽）。
+    pub fn exit(
+        &mut self,
+        git: &dyn GitWorktreeOps,
+    ) -> Result<WorkspaceData, share::error::DomainError> {
+        if self.worktree_kind == WorktreeKind::NonGit {
+            return Err(WorkspaceError::UnsupportedForNonGit.into());
+        }
+        let prev = self
             .stack
-            .iter()
-            .map(|f| PersistedWorkspaceFrame {
-                path_base: f.path_base.display().to_string(),
-                workspace_root: f.workspace_root.display().to_string(),
-                worktree_kind: f.worktree_kind,
-            })
-            .collect(),
+            .last()
+            .cloned()
+            .ok_or(WorkspaceError::EmptyStack)?;
+        let (canonical, worktree_root, worktree_kind) =
+            validate_in_repo(self, git, &prev.path_base)?;
+        if canonical != prev.path_base
+            || worktree_root != prev.workspace_root
+            || worktree_kind != prev.worktree_kind
+        {
+            return Err(WorkspaceError::GitProbeFailed(GitProbeError::InvalidOutput).into());
+        }
+        self.stack.pop();
+        self.workspace_root = worktree_root;
+        self.path_base = canonical;
+        self.worktree_kind = worktree_kind;
+        Ok(prev)
+    }
+
+    /// 会话持久化快照（Writer 面唯一出口）。
+    pub fn snapshot(&self) -> PersistedWorkspaceContext {
+        PersistedWorkspaceContext {
+            workspace_id: self.workspace_id(),
+            project_identity: self.project_identity.clone(),
+            path_base: self.path_base.display().to_string(),
+            workspace_root: self.workspace_root.display().to_string(),
+            worktree_kind: self.worktree_kind,
+            context_stack: self
+                .stack
+                .iter()
+                .map(|f| PersistedWorkspaceFrame {
+                    path_base: f.path_base.display().to_string(),
+                    workspace_root: f.workspace_root.display().to_string(),
+                    worktree_kind: f.worktree_kind,
+                })
+                .collect(),
+        }
+    }
+
+    /// 用恢复令牌整体替换当前状态（一次性按值消费）。
+    pub fn commit_restore(&mut self, prepared: WorkspaceRestoreData) {
+        *self = prepared.candidate;
     }
 }
 
@@ -373,21 +438,28 @@ fn validate_git_location(
     }
 }
 
-pub fn prepare_restore(
-    live_state: &WorkspaceState,
+/// restore 阶段一产物：已恢复并通过 containment 校验的路径 + 回退资格。
+struct RestoredPaths {
+    initial_cwd: PathBuf,
+    workspace_root: PathBuf,
+    path_base: PathBuf,
+    /// path_base 是 cwd 语义（上次工作目录），不是会话身份：目录被外部替换为
+    /// 嵌套仓库、删除或移动后，对无 worktree 历史的普通会话（Primary + 空栈）
+    /// 回退 workspace_root，与「shell cwd 被删回退 HOME」同语义，不丢任何会话
+    /// 数据；worktree 上下文损坏必须走显式 exit 协议，保持 fail-closed。
+    path_base_fallback_eligible: bool,
+}
+
+/// 阶段一：恢复身份三路径并校验 containment（含 path_base 回退资格判定）。
+fn restore_identity(
     dto: &PersistedWorkspaceContext,
-    git: &dyn GitWorktreeOps,
-) -> Result<WorkspaceRestoreData, WorkspaceRestoreError> {
+) -> Result<RestoredPaths, WorkspaceRestoreError> {
     if dto.project_identity.initial_cwd.is_empty() {
         return Err(WorkspaceRestoreError::InvalidProjectIdentity);
     }
 
     let initial_cwd = restore_path(&dto.project_identity.initial_cwd)?;
     let workspace_root = restore_path(&dto.workspace_root)?;
-    // path_base 是 cwd 语义（上次工作目录），不是会话身份：目录被外部替换为
-    // 嵌套仓库、删除或移动后，对无 worktree 历史的普通会话（Primary + 空栈）
-    // 回退 workspace_root，与「shell cwd 被删回退 HOME」同语义，不丢任何会话
-    // 数据；worktree 上下文损坏必须走显式 exit 协议，保持 fail-closed。
     let path_base_fallback_eligible =
         dto.worktree_kind == WorktreeKind::Primary && dto.context_stack.is_empty();
     let path_base = match restore_path(&dto.path_base) {
@@ -403,7 +475,18 @@ pub fn prepare_restore(
         Err(restore_error) => return Err(restore_error),
     };
     validate_containment(&path_base, &workspace_root)?;
+    Ok(RestoredPaths {
+        initial_cwd,
+        workspace_root,
+        path_base,
+        path_base_fallback_eligible,
+    })
+}
 
+/// 阶段二：从持久化栈构造 frame 序列（每帧校验 containment）。
+fn restore_stack(
+    dto: &PersistedWorkspaceContext,
+) -> Result<Vec<WorkspaceData>, WorkspaceRestoreError> {
     let mut stack = Vec::with_capacity(dto.context_stack.len());
     for persisted in &dto.context_stack {
         let frame_root = restore_path(&persisted.workspace_root)?;
@@ -416,9 +499,18 @@ pub fn prepare_restore(
             worktree_kind: persisted.worktree_kind,
         });
     }
+    Ok(stack)
+}
 
-    let mut restored_path_base = path_base.clone();
-    let canonical_identity = match dto.project_identity.git_common_dir.as_deref() {
+/// 阶段三：校验 git 位置（common dir / toplevel / kind 三向一致），
+/// 产出 canonical 身份；path_base 校验失败时按回退资格调整。
+fn restore_git_location(
+    git: &dyn GitWorktreeOps,
+    dto: &PersistedWorkspaceContext,
+    paths: &mut RestoredPaths,
+    stack: &[WorkspaceData],
+) -> Result<ProjectIdentityData, WorkspaceRestoreError> {
+    match dto.project_identity.git_common_dir.as_deref() {
         Some(common) if !common.is_empty() => {
             let common = PathBuf::from(common);
             if !common.is_absolute()
@@ -432,11 +524,11 @@ pub fn prepare_restore(
                 return Err(WorkspaceRestoreError::InvalidStackShape);
             }
 
-            validate_git_location(git, &initial_cwd, None, &common, None)?;
+            validate_git_location(git, &paths.initial_cwd, None, &common, None)?;
             validate_git_location(
                 git,
-                &workspace_root,
-                Some(&workspace_root),
+                &paths.workspace_root,
+                Some(&paths.workspace_root),
                 &common,
                 Some(dto.worktree_kind),
             )?;
@@ -447,24 +539,24 @@ pub fn prepare_restore(
             // 走显式 exit 协议，保持 fail-closed。
             if let Err(restore_error) = validate_git_location(
                 git,
-                &path_base,
-                Some(&workspace_root),
+                &paths.path_base,
+                Some(&paths.workspace_root),
                 &common,
                 Some(dto.worktree_kind),
             ) {
-                if path_base_fallback_eligible {
+                if paths.path_base_fallback_eligible {
                     log::warn!(
                         target: crate::LOG_TARGET,
                         "workspace restore path_base fallback: persisted path_base={} 校验失败（{restore_error}），回退 workspace_root={}",
-                        path_base.display(),
-                        workspace_root.display()
+                        paths.path_base.display(),
+                        paths.workspace_root.display()
                     );
-                    restored_path_base = workspace_root.clone();
+                    paths.path_base = paths.workspace_root.clone();
                 } else {
                     return Err(restore_error);
                 }
             }
-            for frame in &stack {
+            for frame in stack {
                 validate_git_location(
                     git,
                     &frame.workspace_root,
@@ -480,32 +572,46 @@ pub fn prepare_restore(
                     Some(frame.worktree_kind),
                 )?;
             }
-            ProjectIdentityData {
-                initial_cwd: initial_cwd.to_string_lossy().into_owned(),
+            Ok(ProjectIdentityData {
+                initial_cwd: paths.initial_cwd.to_string_lossy().into_owned(),
                 git_common_dir: Some(common.to_string_lossy().into_owned()),
-            }
+            })
         }
-        Some(_) => return Err(WorkspaceRestoreError::InvalidProjectIdentity),
+        Some(_) => Err(WorkspaceRestoreError::InvalidProjectIdentity),
         None => {
             if dto.worktree_kind != WorktreeKind::NonGit
                 || !stack.is_empty()
-                || workspace_root != initial_cwd
+                || paths.workspace_root != paths.initial_cwd
             {
                 return Err(WorkspaceRestoreError::InvalidStackShape);
             }
-            if !matches!(probe_restore(git, &initial_cwd)?, RepositoryProbe::NonGit)
-                || !matches!(probe_restore(git, &path_base)?, RepositoryProbe::NonGit)
-            {
+            if !matches!(
+                probe_restore(git, &paths.initial_cwd)?,
+                RepositoryProbe::NonGit
+            ) || !matches!(
+                probe_restore(git, &paths.path_base)?,
+                RepositoryProbe::NonGit
+            ) {
                 return Err(WorkspaceRestoreError::RepositoryMismatch);
             }
-            ProjectIdentityData {
-                initial_cwd: initial_cwd.to_string_lossy().into_owned(),
+            Ok(ProjectIdentityData {
+                initial_cwd: paths.initial_cwd.to_string_lossy().into_owned(),
                 git_common_dir: None,
-            }
+            })
         }
-    };
+    }
+}
 
-    let expected_id = WorkspaceId::derive(&canonical_identity, &workspace_root.to_string_lossy());
+/// 阶段四：id 派生比对 + 组装候选状态（恢复令牌）。
+fn restore_candidate(
+    live_state: &WorkspaceState,
+    dto: &PersistedWorkspaceContext,
+    paths: RestoredPaths,
+    stack: Vec<WorkspaceData>,
+    canonical_identity: ProjectIdentityData,
+) -> Result<WorkspaceRestoreData, WorkspaceRestoreError> {
+    let expected_id =
+        WorkspaceId::derive(&canonical_identity, &paths.workspace_root.to_string_lossy());
     if dto.workspace_id != expected_id {
         return Err(WorkspaceRestoreError::WorkspaceIdMismatch);
     }
@@ -513,8 +619,8 @@ pub fn prepare_restore(
     Ok(WorkspaceRestoreData {
         candidate: WorkspaceState {
             project_identity: canonical_identity,
-            workspace_root,
-            path_base: restored_path_base,
+            workspace_root: paths.workspace_root,
+            path_base: paths.path_base,
             worktree_kind: dto.worktree_kind,
             // 恢复不改变运行中进程的 worktree 目录配置：继承 live state。
             worktrees_root: live_state.worktrees_root.clone(),
@@ -523,8 +629,18 @@ pub fn prepare_restore(
     })
 }
 
-pub fn commit_restore(state: &mut WorkspaceState, prepared: WorkspaceRestoreData) {
-    *state = prepared.candidate;
+impl WorkspaceState {
+    /// 校验持久化快照并构造恢复令牌；NEVER 修改 live 状态。
+    pub fn prepare_restore(
+        live_state: &WorkspaceState,
+        dto: &PersistedWorkspaceContext,
+        git: &dyn GitWorktreeOps,
+    ) -> Result<WorkspaceRestoreData, WorkspaceRestoreError> {
+        let mut paths = restore_identity(dto)?;
+        let stack = restore_stack(dto)?;
+        let canonical_identity = restore_git_location(git, dto, &mut paths, &stack)?;
+        restore_candidate(live_state, dto, paths, stack, canonical_identity)
+    }
 }
 
 #[cfg(test)]

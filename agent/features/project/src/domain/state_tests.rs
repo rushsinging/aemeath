@@ -52,7 +52,7 @@ fn resolve_relative_uses_path_base() {
 fn exit_empty_stack_errors() {
     let mut s = st("/repo");
     assert_eq!(
-        exit(&mut s, &FakeGit::default()),
+        s.exit(&FakeGit::default()),
         Err(share::error::DomainError::from(WorkspaceError::EmptyStack))
     );
 }
@@ -80,7 +80,7 @@ fn exit_pops_and_restores() {
     let mut git = FakeGit::default();
     git.toplevel.insert(root.clone(), root.clone());
     git.common_dir.insert(root.clone(), common);
-    let prev = exit(&mut s, &git).unwrap();
+    let prev = s.exit(&git).unwrap();
     assert_eq!(prev.path_base, root);
     assert_eq!(s.path_base, prev.path_base);
 }
@@ -111,9 +111,9 @@ fn exit_rejects_noncanonical_frame_path_as_invalid_output_and_keeps_state() {
     let mut git = FakeGit::default();
     git.toplevel.insert(root.clone(), root.clone());
     git.common_dir.insert(root.clone(), common);
-    let before = snapshot(&state);
+    let before = state.snapshot();
 
-    let result = exit(&mut state, &git);
+    let result = state.exit(&git);
 
     assert_eq!(
         result,
@@ -121,7 +121,7 @@ fn exit_rejects_noncanonical_frame_path_as_invalid_output_and_keeps_state() {
             WorkspaceError::GitProbeFailed(crate::domain::types::GitProbeError::InvalidOutput)
         ))
     );
-    assert_eq!(snapshot(&state), before);
+    assert_eq!(state.snapshot(), before);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -149,9 +149,9 @@ fn exit_rejects_frame_workspace_root_mismatch_as_invalid_output_and_keeps_state(
     let mut git = FakeGit::default();
     git.toplevel.insert(root.clone(), actual_root.clone());
     git.common_dir.insert(actual_root, common);
-    let before = snapshot(&state);
+    let before = state.snapshot();
 
-    let result = exit(&mut state, &git);
+    let result = state.exit(&git);
 
     assert_eq!(
         result,
@@ -159,7 +159,7 @@ fn exit_rejects_frame_workspace_root_mismatch_as_invalid_output_and_keeps_state(
             WorkspaceError::GitProbeFailed(crate::domain::types::GitProbeError::InvalidOutput)
         ))
     );
-    assert_eq!(snapshot(&state), before);
+    assert_eq!(state.snapshot(), before);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -186,9 +186,9 @@ fn exit_rejects_frame_worktree_kind_mismatch_as_invalid_output_and_keeps_state()
     let mut git = FakeGit::default();
     git.toplevel.insert(root.clone(), root.clone());
     git.common_dir.insert(root.clone(), common);
-    let before = snapshot(&state);
+    let before = state.snapshot();
 
-    let result = exit(&mut state, &git);
+    let result = state.exit(&git);
 
     assert_eq!(
         result,
@@ -196,7 +196,7 @@ fn exit_rejects_frame_worktree_kind_mismatch_as_invalid_output_and_keeps_state()
             WorkspaceError::GitProbeFailed(crate::domain::types::GitProbeError::InvalidOutput)
         ))
     );
-    assert_eq!(snapshot(&state), before);
+    assert_eq!(state.snapshot(), before);
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -212,7 +212,7 @@ fn change_directory_canonicalizes_and_keeps_root() {
         WorktreeKind::NonGit,
         root.join(".worktrees"),
     );
-    change_directory(&mut s, sub.clone()).unwrap();
+    s.change_directory(sub.clone()).unwrap();
     assert_eq!(s.path_base, sub.canonicalize().unwrap());
     assert_eq!(s.workspace_root, root);
 }
@@ -235,7 +235,7 @@ fn snapshot_captures_all_fields() {
         worktree_kind: WorktreeKind::Primary,
     });
 
-    let dto = snapshot(&s);
+    let dto = s.snapshot();
 
     assert_eq!(dto.workspace_id, s.workspace_id());
     assert_eq!(dto.project_identity, s.project_identity);
@@ -288,7 +288,7 @@ fn prepare_restore_success_does_not_mutate_live_state() {
     let before_identity = live.project_identity.clone();
 
     let prepared: crate::domain::state::WorkspaceRestoreData =
-        prepare_restore(&live, &dto, &git).expect("合法 DTO 应构造令牌");
+        WorkspaceState::prepare_restore(&live, &dto, &git).expect("合法 DTO 应构造令牌");
 
     // live state（不可变借用）必须原样保留。
     assert_eq!(live.path_base, before_base);
@@ -310,11 +310,11 @@ fn commit_restore_replaces_state_in_one_shot() {
     let git = git_ops_for(&root, common);
 
     let live = st("/repo");
-    let prepared = prepare_restore(&live, &dto, &git).expect("合法 DTO 应构造令牌");
+    let prepared = WorkspaceState::prepare_restore(&live, &dto, &git).expect("合法 DTO 应构造令牌");
 
     // 提交进一个与来源不同的 state slot，验证全量替换。
     let mut target = st("/somewhere-else");
-    let _: () = commit_restore(&mut target, prepared);
+    let _: () = target.commit_restore(prepared);
 
     assert_eq!(target.workspace_root, root);
     assert_eq!(target.path_base, sub);
@@ -338,7 +338,7 @@ fn prepare_restore_path_not_found_keeps_live_state() {
 
     let live = st("/repo");
     let before = live.path_base.clone();
-    let result = prepare_restore(&live, &dto, &git);
+    let result = WorkspaceState::prepare_restore(&live, &dto, &git);
 
     assert!(
         matches!(
@@ -361,7 +361,7 @@ fn prepare_restore_path_outside_root_keeps_live_state() {
 
     let live = st("/repo");
     let before = live.workspace_root.clone();
-    let result = prepare_restore(&live, &dto, &git);
+    let result = WorkspaceState::prepare_restore(&live, &dto, &git);
 
     assert!(
         matches!(
@@ -387,7 +387,7 @@ fn prepare_restore_workspace_id_mismatch_keeps_live_state() {
 
     let live = st("/repo");
     let before = live.project_identity.clone();
-    let result = prepare_restore(&live, &dto, &git);
+    let result = WorkspaceState::prepare_restore(&live, &dto, &git);
 
     assert!(
         matches!(
@@ -412,7 +412,7 @@ fn prepare_restore_repo_mismatch_keeps_live_state() {
 
     let live = st("/repo");
     let before = live.workspace_root.clone();
-    let result = prepare_restore(&live, &dto, &git);
+    let result = WorkspaceState::prepare_restore(&live, &dto, &git);
 
     assert!(
         matches!(
@@ -449,7 +449,7 @@ fn prepare_restore_non_git_with_stack_is_invalid_stack_shape() {
 
     let live = st("/repo");
     let before = live.stack.clone();
-    let result = prepare_restore(&live, &dto, &git);
+    let result = WorkspaceState::prepare_restore(&live, &dto, &git);
 
     assert!(
         matches!(
@@ -482,7 +482,7 @@ fn prepare_restore_non_git_disguise_over_real_git_keeps_live_state() {
 
     let live = st("/repo");
     let before = live.project_identity.clone();
-    let result = prepare_restore(&live, &dto, &git);
+    let result = WorkspaceState::prepare_restore(&live, &dto, &git);
 
     assert!(
         matches!(
@@ -514,7 +514,7 @@ fn enter_with_stale_stack_clears_only_after_negative_probe() {
         worktree_kind: WorktreeKind::Primary,
     });
 
-    enter(&mut state, &git, Some(target), None, None).unwrap();
+    state.enter(&git, Some(target), None, None).unwrap();
 
     assert_eq!(state.stack.len(), 1, "残栈清理后只压入当前 frame");
     assert_eq!(state.stack[0].workspace_root, PathBuf::from("/repo"));
@@ -535,7 +535,7 @@ fn enter_when_stale_stack_probe_fails_keeps_state_unchanged() {
     };
     state.stack.push(frame.clone());
 
-    let result = enter(&mut state, &git, Some("/target".into()), None, None);
+    let result = state.enter(&git, Some("/target".into()), None, None);
 
     assert_eq!(
         result,
@@ -560,9 +560,9 @@ fn enter_with_stale_stack_and_missing_target_keeps_full_state_unchanged() {
         workspace_root: "/stale".into(),
         worktree_kind: WorktreeKind::Primary,
     });
-    let before = snapshot(&state);
+    let before = state.snapshot();
 
-    let result = enter(&mut state, &git, None, None, None);
+    let result = state.enter(&git, None, None, None);
 
     assert_eq!(
         result,
@@ -570,7 +570,7 @@ fn enter_with_stale_stack_and_missing_target_keeps_full_state_unchanged() {
             WorkspaceError::MissingPathAndBranch
         ))
     );
-    assert_eq!(snapshot(&state), before);
+    assert_eq!(state.snapshot(), before);
 }
 
 #[test]
@@ -584,7 +584,9 @@ fn enter_rejects_nested_when_in_worktree() {
         workspace_root: "/prev".into(),
         worktree_kind: WorktreeKind::Primary,
     });
-    let enter_error = enter(&mut s, &git, Some("/other".into()), None, None).unwrap_err();
+    let enter_error = s
+        .enter(&git, Some("/other".into()), None, None)
+        .unwrap_err();
     assert!(
         enter_error.message().contains("已在 worktree 中")
             && enter_error.message().contains("/repo"),
@@ -617,7 +619,7 @@ fn enter_missing_path_and_branch_errors() {
     let git = FakeGit::default();
     let mut s = st("/repo");
     assert_eq!(
-        enter(&mut s, &git, None, None, None),
+        s.enter(&git, None, None, None),
         Err(share::error::DomainError::from(
             WorkspaceError::MissingPathAndBranch
         ))
@@ -699,14 +701,14 @@ fn enter_with_empty_path_derives_target_and_forwards_default_base() {
     let mut state = WorkspaceState::new(root.clone());
     let git = FakeGit::default();
 
-    enter(
-        &mut state,
-        &git,
-        Some(PathBuf::new()),
-        Some("feature/empty path".into()),
-        None,
-    )
-    .unwrap();
+    state
+        .enter(
+            &git,
+            Some(PathBuf::new()),
+            Some("feature/empty path".into()),
+            None,
+        )
+        .unwrap();
 
     assert_eq!(state.path_base, expected_target);
     assert_eq!(
@@ -733,14 +735,14 @@ fn enter_with_blank_base_forwards_default_base() {
         let mut state = WorkspaceState::new(root.clone());
         let git = FakeGit::default();
 
-        enter(
-            &mut state,
-            &git,
-            None,
-            Some(format!("feature/{case}")),
-            Some(base.into()),
-        )
-        .unwrap();
+        state
+            .enter(
+                &git,
+                None,
+                Some(format!("feature/{case}")),
+                Some(base.into()),
+            )
+            .unwrap();
 
         assert_eq!(
             git.added.lock().unwrap().as_slice(),
@@ -766,14 +768,14 @@ fn enter_with_explicit_base_forwards_value_unchanged() {
     let mut state = WorkspaceState::new(root.clone());
     let git = FakeGit::default();
 
-    enter(
-        &mut state,
-        &git,
-        None,
-        Some("feature/explicit".into()),
-        Some(" release/v2 ".into()),
-    )
-    .unwrap();
+    state
+        .enter(
+            &git,
+            None,
+            Some("feature/explicit".into()),
+            Some(" release/v2 ".into()),
+        )
+        .unwrap();
 
     assert_eq!(
         git.added.lock().unwrap().as_slice(),
@@ -796,9 +798,9 @@ fn enter_rejects_primary_target_as_not_linked_and_keeps_state_unchanged() {
     git.common_dir.insert(target.clone(), common);
 
     let mut state = st("/repo");
-    let before = snapshot(&state);
+    let before = state.snapshot();
 
-    let result = enter(&mut state, &git, Some(target.clone()), None, None);
+    let result = state.enter(&git, Some(target.clone()), None, None);
 
     assert_eq!(
         result,
@@ -815,7 +817,7 @@ fn enter_rejects_primary_target_as_not_linked_and_keeps_state_unchanged() {
             target.display()
         )
     );
-    assert_eq!(snapshot(&state), before);
+    assert_eq!(state.snapshot(), before);
     let _ = std::fs::remove_dir_all(target);
 }
 
@@ -831,14 +833,14 @@ fn enter_existing_linked_worktree_ignores_invalid_base_without_git_add() {
     git.worktrees.insert(target.clone());
     let mut state = WorkspaceState::new(root.clone());
 
-    let frame = enter(
-        &mut state,
-        &git,
-        Some(target.clone()),
-        None,
-        Some("definitely-invalid-base".into()),
-    )
-    .unwrap();
+    let frame = state
+        .enter(
+            &git,
+            Some(target.clone()),
+            None,
+            Some("definitely-invalid-base".into()),
+        )
+        .unwrap();
 
     assert!(git.added.lock().unwrap().is_empty());
     assert_eq!(frame.path_base, root);
@@ -884,7 +886,9 @@ fn enter_happy_path_pushes_frame_and_swaps_cwd() {
 
     // Pass the temp dir as an absolute path → resolve_worktree_path returns it directly,
     // target.exists() is true → worktree_add is NOT called.
-    let frame = enter(&mut s, &git, Some(canonical_tmp.clone()), None, None).unwrap();
+    let frame = s
+        .enter(&git, Some(canonical_tmp.clone()), None, None)
+        .unwrap();
 
     // Returned frame holds the PRE-change state.
     assert_eq!(frame.path_base, saved_path_base);
@@ -935,7 +939,7 @@ fn enter_rejects_non_git_identity() {
     let mut s = st("/repo");
     s.worktree_kind = WorktreeKind::NonGit;
     assert_eq!(
-        enter(&mut s, &git, Some("/repo/wt".into()), None, None),
+        s.enter(&git, Some("/repo/wt".into()), None, None),
         Err(share::error::DomainError::from(
             WorkspaceError::UnsupportedForNonGit
         ))
@@ -970,7 +974,9 @@ fn enter_promotes_worktree_kind_to_linked_and_captures_previous() {
     let mut s = st("/repo");
     s.worktree_kind = WorktreeKind::Primary;
 
-    let frame = enter(&mut s, &git, Some(canonical_tmp.clone()), None, None).unwrap();
+    let frame = s
+        .enter(&git, Some(canonical_tmp.clone()), None, None)
+        .unwrap();
 
     assert_eq!(
         frame.worktree_kind,
@@ -1004,9 +1010,10 @@ fn restore_falls_back_to_workspace_root_when_primary_path_base_turns_foreign_rep
         .insert(sub.clone(), PathBuf::from("/foreign/.git"));
 
     let mut live = st("/repo");
-    let prepared: crate::domain::state::WorkspaceRestoreData = prepare_restore(&live, &dto, &git)
-        .expect("path_base 沦为嵌套仓库时必须回退 workspace_root");
-    commit_restore(&mut live, prepared);
+    let prepared: crate::domain::state::WorkspaceRestoreData =
+        WorkspaceState::prepare_restore(&live, &dto, &git)
+            .expect("path_base 沦为嵌套仓库时必须回退 workspace_root");
+    live.commit_restore(prepared);
     assert_eq!(live.path_base, root.canonicalize().unwrap());
     assert_eq!(live.workspace_root, root.canonicalize().unwrap());
 }
@@ -1024,8 +1031,9 @@ fn restore_falls_back_to_workspace_root_when_primary_path_base_probe_fails() {
 
     let mut live = st("/repo");
     let prepared: crate::domain::state::WorkspaceRestoreData =
-        prepare_restore(&live, &dto, &git).expect("path_base 探测失败时必须回退 workspace_root");
-    commit_restore(&mut live, prepared);
+        WorkspaceState::prepare_restore(&live, &dto, &git)
+            .expect("path_base 探测失败时必须回退 workspace_root");
+    live.commit_restore(prepared);
     assert_eq!(live.path_base, root.canonicalize().unwrap());
 }
 
@@ -1052,7 +1060,7 @@ fn restore_keeps_failing_closed_with_nonempty_stack_when_path_base_foreign() {
     git.worktrees.insert(wt.clone());
 
     let live = st("/repo");
-    let result = prepare_restore(&live, &dto, &git);
+    let result = WorkspaceState::prepare_restore(&live, &dto, &git);
     assert!(
         matches!(
             result,
