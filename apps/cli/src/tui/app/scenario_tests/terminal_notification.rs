@@ -119,9 +119,9 @@ fn done_notification_carries_session_context() {
         notification_effects(&harness),
         vec![(
             "aemeath · ~/repo".to_string(),
-            "重构通知逻辑 · main · Turn complete in 2m 5s".to_string()
+            "Turn complete in 2m 5s · main · 重构通知逻辑".to_string()
         )],
-        "通知必须携带项目名、prompt 首行与分支"
+        "通知必须携带项目名、prompt 首行与分支，完成状态在正文最前"
     );
     harness.assert_idle();
 }

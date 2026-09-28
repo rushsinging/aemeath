@@ -5,8 +5,11 @@
 //! 终端该序列无害，**NEVER** 做终端能力猜测。
 //!
 //! 通知携带 session 上下文：
-//! - title = `aemeath · <项目名>`（项目名缺失时回退 `aemeath`）
-//! - body  = `<当前 prompt 首行> · <分支> · Turn complete in <耗时>`（缺段省略）
+//! - title = `aemeath · <项目名末两段>`（项目名缺失时回退 `aemeath`）
+//! - body  = `Turn complete in <耗时> · <分支> · <prompt 首行>`（完成状态在
+//!   最前，横幅截断也不丢核心信息；缺失段省略）
+//!
+//! 长度防护：prompt 首行超 60 字符截断；长路径 title 只保留末两段。
 
 use std::io;
 
@@ -57,12 +60,15 @@ fn summarize_prompt(text: &str) -> Option<String> {
     }
 }
 
-/// 组装通知 (title, body)；缺失段自动省略，不产生多余分隔符。
+/// 组装通知 (title, body)。
+///
+/// - title：项目名保留末两段（`…/` 前缀），长路径不挤占横幅首屏
+/// - body：完成状态在最前（横幅截断也不丢核心信息），缺失段自动省略
 pub(crate) fn turn_complete_notification(
     context: &TurnCompleteNotificationContext<'_>,
 ) -> (String, String) {
     let title = match non_empty(context.path_base) {
-        Some(path_base) => format!("aemeath · {path_base}"),
+        Some(path_base) => format!("aemeath · {}", shorten_path_base(path_base)),
         None => "aemeath".to_string(),
     };
 
@@ -76,16 +82,29 @@ pub(crate) fn turn_complete_notification(
         None => "Turn complete".to_string(),
     };
 
-    let mut body_segments: Vec<&str> = Vec::new();
-    if let Some(prompt) = non_empty(context.prompt) {
-        body_segments.push(prompt);
-    }
+    let mut body_segments: Vec<&str> = vec![&completion];
     if let Some(branch) = non_empty(context.branch) {
         body_segments.push(branch);
     }
-    body_segments.push(&completion);
+    if let Some(prompt) = non_empty(context.prompt) {
+        body_segments.push(prompt);
+    }
 
     (title, body_segments.join(" · "))
+}
+
+/// 长路径只保留末两段并加 `…/` 前缀；两段以内原样返回。
+///
+/// `/` 与 `\` 都作为分隔符（兼容 Windows 风格路径），统一以 `/` 重新拼接。
+fn shorten_path_base(path_base: &str) -> String {
+    let segments: Vec<&str> = path_base
+        .split(['/', '\\'])
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    match segments.len() {
+        0..=2 => path_base.to_string(),
+        _ => format!("…/{}", segments[segments.len() - 2..].join("/")),
+    }
 }
 
 fn non_empty(value: Option<&str>) -> Option<&str> {

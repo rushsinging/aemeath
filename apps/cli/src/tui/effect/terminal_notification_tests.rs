@@ -51,10 +51,37 @@ fn write_terminal_notification_writes_exact_bytes_to_writer() {
 #[test]
 fn notification_title_appends_path_base_when_present() {
     let (title, _) = turn_complete_notification(&TurnCompleteNotificationContext {
-        path_base: Some("~/repo/cli"),
+        path_base: Some("repo/cli"),
         ..context()
     });
-    assert_eq!(title, "aemeath · ~/repo/cli");
+    assert_eq!(title, "aemeath · repo/cli");
+}
+
+/// 长路径只保留末两段（`…/` 前缀），保证横幅可见范围内项目名完整。
+#[test]
+fn notification_title_truncates_long_path_base_to_last_two_segments() {
+    let (title, _) = turn_complete_notification(&TurnCompleteNotificationContext {
+        path_base: Some("~/Nextcloud/work/claudecode/aemeath"),
+        ..context()
+    });
+    assert_eq!(title, "aemeath · …/claudecode/aemeath");
+
+    // 两段以内原样保留。
+    let (title, _) = turn_complete_notification(&TurnCompleteNotificationContext {
+        path_base: Some("~/aemeath"),
+        ..context()
+    });
+    assert_eq!(title, "aemeath · ~/aemeath");
+}
+
+/// 反斜杠路径（Windows 风格）同样按段切分。
+#[test]
+fn notification_title_truncates_backslash_path_base() {
+    let (title, _) = turn_complete_notification(&TurnCompleteNotificationContext {
+        path_base: Some("C:\\work\\projects\\aemeath"),
+        ..context()
+    });
+    assert_eq!(title, "aemeath · …/projects/aemeath");
 }
 
 #[test]
@@ -63,9 +90,10 @@ fn notification_title_is_plain_without_path_base() {
     assert_eq!(title, "aemeath");
 }
 
-/// 正文段落：prompt · branch · Turn complete in <耗时>，缺失段省略（无多余分隔符）。
+/// 正文段落：完成状态在前（横幅截断也不丢核心信息），
+/// 顺序为 Turn complete in <耗时> · <分支> · <prompt>，缺失段省略。
 #[test]
-fn notification_body_joins_prompt_branch_duration() {
+fn notification_body_joins_duration_branch_prompt_with_completion_first() {
     let (_, body) = turn_complete_notification(&TurnCompleteNotificationContext {
         prompt: Some("重构通知逻辑"),
         branch: Some("feature/osc777"),
@@ -74,7 +102,7 @@ fn notification_body_joins_prompt_branch_duration() {
     });
     assert_eq!(
         body,
-        "重构通知逻辑 · feature/osc777 · Turn complete in 2m 5s"
+        "Turn complete in 2m 5s · feature/osc777 · 重构通知逻辑"
     );
 }
 
@@ -84,14 +112,14 @@ fn notification_body_omits_missing_segments() {
         branch: Some("main"),
         ..context()
     });
-    assert_eq!(body, "main · Turn complete");
+    assert_eq!(body, "Turn complete · main");
 
     let (_, body) = turn_complete_notification(&TurnCompleteNotificationContext {
         prompt: Some("hi"),
         duration_ms: Some(5_000),
         ..context()
     });
-    assert_eq!(body, "hi · Turn complete in 5s");
+    assert_eq!(body, "Turn complete in 5s · hi");
 }
 
 #[test]
