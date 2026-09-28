@@ -112,7 +112,7 @@ Slash Command 的 `SnapshotQuery`（`/memory` 查看列表）和 `ApplicationCon
 | [02-retrieval-and-injection.md](02-retrieval-and-injection.md) | 检索策略、BM25 升级路径(#551)、注入格式、similarity_threshold 单一去重用途 |
 | [03-reflection.md](03-reflection.md) | ReflectionEngine、MemorySuggestion、触发条件、prompt/output/apply、与 Runtime 职责边界 |
 | [04-ports-and-adapters.md](04-ports-and-adapters.md) | MemoryPort / ReflectionWorkflow / ReflectionHistoryStore、NoOpMemory、Storage 边界、project-aware Composition 装配 |
-| [05-hindsight-research.md](05-hindsight-research.md) | 外部系统 Hindsight 记忆架构调研：四层认知梯度、retain 摄入链路、数据模型、检索融合、巩固机制与心智模型 |
+| [05-hindsight-research.md](05-hindsight-research.md) | 外部系统 Hindsight 调研：设计优势与边界、记忆架构（类型体系 / 组织维度 / 分层设计律）、记忆链路（形态演进与失效重算）、retain 摄入、数据模型、检索融合、巩固机制与心智模型 |
 | [06-hindsight-design-comparison.md](06-hindsight-design-comparison.md) | 四项建议逐项对照（取代关系 / 证据指针 / 巩固水位 / 认知梯度）、依赖链结论、对齐检查与不采纳清单 |
 
 ## 8. 相关文档
