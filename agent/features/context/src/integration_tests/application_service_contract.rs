@@ -246,7 +246,6 @@ impl ContextPromptSource for FakePrompt {
         Ok(PromptMaterialization {
             cacheable: vec![block("system_prompt"), block("user_guidance")],
             uncached: Vec::new(),
-            revision: 7,
         })
     }
 }

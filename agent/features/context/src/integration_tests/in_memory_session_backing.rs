@@ -143,7 +143,6 @@ async fn build_window_applies_l3_to_isolated_subagent_history() {
             Ok(PromptMaterialization {
                 cacheable: vec![],
                 uncached: vec![],
-                revision: 0,
             })
         }
     }

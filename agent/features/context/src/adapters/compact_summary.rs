@@ -293,6 +293,7 @@ impl<'a> CompactTail<'a> {
     }
 
     /// 测试/无边界退化：等价旧条数语义（无边界对齐、无预算收缩）。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn unbounded() -> Self {
         Self {
             step_boundaries: &[],

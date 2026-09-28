@@ -46,7 +46,7 @@ fn tool_name_display() {
 
 #[test]
 fn tool_name_ordering_follows_normalized_key() {
-    let mut names = vec![
+    let mut names = [
         ToolName::new("Write"),
         ToolName::new("bash"),
         ToolName::new("ALL"),

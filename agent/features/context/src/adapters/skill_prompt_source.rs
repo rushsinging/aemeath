@@ -105,35 +105,6 @@ fn render_skills_block(selected: &[SkillDescriptor], lang: &str) -> String {
     format!("{header}{body}\n")
 }
 
-fn metadata_revision(descriptors: &[SkillDescriptor]) -> u64 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for descriptor in descriptors {
-        for value in [
-            descriptor.name(),
-            descriptor.description(),
-            descriptor.slash_command().unwrap_or_default(),
-            descriptor.argument_hint().unwrap_or_default(),
-        ] {
-            for byte in value.bytes() {
-                hash ^= byte as u64;
-                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-            }
-            hash ^= 0xff;
-        }
-        for alias in descriptor
-            .aliases()
-            .iter()
-            .chain(descriptor.slash_aliases())
-        {
-            for byte in alias.bytes() {
-                hash ^= byte as u64;
-                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-            }
-        }
-    }
-    hash
-}
-
 #[async_trait]
 impl ContextPromptSource for SkillPromptSource {
     async fn materialize(
@@ -167,7 +138,6 @@ impl ContextPromptSource for SkillPromptSource {
         Ok(PromptMaterialization {
             cacheable,
             uncached,
-            revision: metadata_revision(&descriptors),
         })
     }
 }

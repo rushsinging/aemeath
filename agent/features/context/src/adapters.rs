@@ -22,9 +22,11 @@ mod tool_receipt_ledger;
 
 pub(crate) use atomic_blob_session::AtomicBlobSessionStore;
 pub use atomic_blob_session_management::AtomicBlobSessionManagement;
+pub(crate) use canonical_session::CanonicalSessionWriter;
+#[cfg(test)]
 pub(crate) use canonical_session::{
     AcceptedInputWriter, AtomicBlobCanonicalSessionWriter, CanonicalSessionRepository,
-    CanonicalSessionWriter, ToolReceiptWriter,
+    ToolReceiptWriter,
 };
 pub use canonical_session::{
     AtomicBlobAcceptedInputWriter, AtomicBlobToolReceiptWriter, NoOpCanonicalSessionWriter,
@@ -41,7 +43,7 @@ pub use session_legacy_workspace::decode as decode_session;
 pub(crate) use session_legacy_workspace::LegacySessionDecoder;
 #[cfg(any(test, feature = "dev"))]
 pub(crate) use session_lifecycle::capture as capture_session_lifecycle;
-#[cfg(any(test, feature = "dev"))]
+#[cfg(test)]
 pub(crate) use skill_prompt_source::skill_prompt_budget;
 pub(crate) use skill_prompt_source::SkillPromptSource;
 pub use skill_prompt_source::WorkspaceSkillQueryFactory;

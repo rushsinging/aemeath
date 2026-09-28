@@ -10,7 +10,6 @@ use share::message::{ContentBlock, Message, Role};
 use share::session_types::{
     PersistedWorkspaceContext, ProjectIdentityData, WorkspaceId, WorktreeKind,
 };
-use utils;
 
 use tools::published::skill::{SkillLoadDecision, SkillLoadScope};
 

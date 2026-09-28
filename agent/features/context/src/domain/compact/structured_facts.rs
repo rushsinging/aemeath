@@ -68,6 +68,8 @@ pub struct ConstraintMetadata {
 }
 
 impl ConstraintMetadata {
+    /// 仅测试构造器（生产经 serde 反序列化路径构造）；保留错误分支覆盖。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub const fn new(
         scope: ConstraintScope,
         lifecycle: ConstraintLifecycle,
@@ -140,6 +142,8 @@ pub struct CompactFactIdentity {
 }
 
 impl CompactFactIdentity {
+    /// 仅测试构造器（生产经 serde 反序列化路径构造）。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(
         entity: CompactFactEntity,
         key: impl Into<String>,
@@ -158,14 +162,20 @@ impl CompactFactIdentity {
         })
     }
 
+    /// 仅测试访问器。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub const fn entity(&self) -> CompactFactEntity {
         self.entity
     }
 
+    /// 仅测试访问器。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn key(&self) -> &str {
         &self.key
     }
 
+    /// 仅测试访问器。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub const fn dimension(&self) -> CompactFactDimension {
         self.dimension
     }
@@ -231,16 +241,6 @@ impl CompactFact {
         Self::new_with_metadata(sequence, source, kind, text, constraint, None)
     }
 
-    pub fn new_with_identity(
-        sequence: u64,
-        source: CompactFactSource,
-        kind: CompactFactKind,
-        text: impl Into<String>,
-        identity: CompactFactIdentity,
-    ) -> Result<Self, CompactFactError> {
-        Self::new_with_metadata(sequence, source, kind, text, None, Some(identity))
-    }
-
     fn new_with_metadata(
         sequence: u64,
         source: CompactFactSource,
@@ -279,6 +279,20 @@ impl CompactFact {
         })
     }
 
+    /// 构造带 identity 的 fact（生产经 serde 反序列化路径；此构造器供测试与显式构造）。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn new_with_identity(
+        sequence: u64,
+        source: CompactFactSource,
+        kind: CompactFactKind,
+        text: impl Into<String>,
+        identity: CompactFactIdentity,
+    ) -> Result<Self, CompactFactError> {
+        Self::new_with_metadata(sequence, source, kind, text, None, Some(identity))
+    }
+
+    /// 仅测试构造器（生产经 serde 反序列化路径构造）；保留错误分支覆盖。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn constraint(
         sequence: u64,
         source: CompactFactSource,
@@ -647,12 +661,14 @@ fn task_snapshot_is_authoritative(snapshot: &CompactTaskSnapshotData) -> bool {
             == 1
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn reduce_compact_facts(
     batch: CompactFactBatch,
 ) -> Result<ContinuationCheckpoint, CheckpointError> {
     reduce_compact_facts_with_objective_fallback(batch, None, None)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn reduce_compact_facts_with_task_snapshot(
     batch: CompactFactBatch,
     task_snapshot: Option<&CompactTaskSnapshotData>,

@@ -101,7 +101,6 @@ impl ContextPromptSource for BaselinePrompt {
         Ok(PromptMaterialization {
             cacheable: vec![block("system_prompt"), block("user_guidance")],
             uncached: vec![block("runtime_context")],
-            revision: 7,
         })
     }
 }
