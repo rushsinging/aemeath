@@ -46,7 +46,7 @@ pub use application::prompt::build::{build_system_prompt_parts, PromptContextDat
 pub use application::prompt::prompt_build_ext::build_static_prompt;
 pub use application::reflection::{
     CompleteReflectionResult, ReflectionTaskAdapter, ReflectionTaskCompletionStatus,
-    ReflectionTaskRequest, ReflectionTaskSubmitOutcome, ReflectionTaskTrigger,
+    ReflectionTaskRequest, ReflectionTaskTrigger,
 };
 pub use application::run::context::ParentRunContextSource;
 pub use application::run::context_factory::RuntimeContextFactory;
@@ -54,6 +54,10 @@ pub use ports::{
     ProviderBindingData, ProviderBuildSpecData, ProviderFactory, ProviderPort, ToolResultBlobPort,
     UnavailableUsageSink, UsageSink,
 };
+
+#[cfg(test)]
+#[path = "test_log.rs"]
+pub(crate) mod test_log;
 
 #[cfg(test)]
 mod boundary_tests {

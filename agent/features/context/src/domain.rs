@@ -92,6 +92,12 @@ pub enum InvocationReminderData {
         session_model_id: String,
         run_model_id: String,
     },
+    /// A reflection run changed memory before this Run started. The body only
+    /// says how many entries changed and how to look them up — the content
+    /// itself stays out of the prompt.
+    MemoryUpdated {
+        changed: usize,
+    },
 }
 
 impl InvocationReminderData {
@@ -113,11 +119,16 @@ impl InvocationReminderData {
         Self::TaskProgress(progress)
     }
 
+    pub fn memory_updated(changed: usize) -> Self {
+        Self::MemoryUpdated { changed }
+    }
+
     pub const fn kind(&self) -> &'static str {
         match self {
             Self::TaskProgress(_) => "task_progress",
             Self::GuidanceSourcesChanged => "guidance_sources_changed",
             Self::ModelGuidanceMismatch { .. } => "model_guidance_mismatch",
+            Self::MemoryUpdated { .. } => "memory_updated",
         }
     }
 }

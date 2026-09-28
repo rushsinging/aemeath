@@ -369,7 +369,7 @@ where
                         .services()
                         .reflection_history
                         .clone();
-                    let outcome = crate::application::loop_engine::chat::reflection::submit_manual_reflection(
+                    let outcome = crate::application::loop_engine::chat::reflection::run_manual_reflection(
                         &reflection_tasks,
                         &memory_config,
                         &visible_messages,
@@ -378,9 +378,10 @@ where
                         &language,
                         &memory,
                         &reflection_history,
-                    );
+                    )
+                    .await;
                     let (text, is_error) =
-                        crate::application::loop_engine::chat::reflection::manual_reflection_outcome_text(outcome);
+                        crate::application::loop_engine::chat::reflection::manual_reflection_outcome_text(&outcome);
                     sink.send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
                         .await;
                     continue;
@@ -697,6 +698,19 @@ where
                     );
                     invocation_reminders.push(reminder);
                 }
+                if let Some(notice) = reflection_tasks.take_memory_update_notice() {
+                    // The TUI already showed the notice when reflection finished;
+                    // the model needs the same facts in the turn that follows it.
+                    let reminder =
+                        context::InvocationReminderData::memory_updated(notice.changed);
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "invocation_reminder_created kind={} trigger=memory_updated changed={}",
+                        reminder.kind(),
+                        notice.changed,
+                    );
+                    invocation_reminders.push(reminder);
+                }
                 let context_request =
                     crate::application::loop_engine::run_services::ContextRequest {
                         runtime_context: &runtime_context,
@@ -896,10 +910,9 @@ where
                 // Runtime 不保留跨 Run 的语义消息；已提交历史只存在于 Context backing。
                 messages.clear();
             }
-            // Session teardown first drains within a bounded grace period. If a
-            // Reflection job is still active, shutdown cancels it and waits for
-            // its terminal durable record before the Run lease is released.
-            let _ = reflection_tasks.shutdown(std::time::Duration::from_secs(5)).await;
+            // Reflection is a synchronous stage inside the Run that owns it, so
+            // teardown has no background job to drain: every run has already
+            // reached a terminal durable record before this point.
         },
     )
     .await

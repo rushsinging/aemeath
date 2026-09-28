@@ -175,6 +175,7 @@ pub(crate) trait ModelInvocationObserver: ModelInvocationSource {
         response: &InvocationResponse,
         calls: Vec<ToolCall>,
         usage: StepTokenUsage,
+        cancel: &CancellationToken,
     ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError>;
 }
 
@@ -354,7 +355,7 @@ async fn invoke_model_impl(
         observer.role(),
     );
     observer
-        .classify_terminal(execution, &response, calls, usage)
+        .classify_terminal(execution, &response, calls, usage, cancel)
         .await
 }
 

@@ -2,19 +2,23 @@
 
 use std::sync::Arc;
 
+use crate::application::loop_engine::chat::{
+    ChatEventSink, ChatEventSinkHandle, RuntimeStreamEvent,
+};
 use crate::application::reflection::{
-    ReflectionTaskAdapter, ReflectionTaskRequest, ReflectionTaskSubmitOutcome,
-    ReflectionTaskTrigger,
+    ReflectionRunOutcome, ReflectionTaskAdapter, ReflectionTaskCompletionStatus,
+    ReflectionTaskRequest, ReflectionTaskTrigger,
 };
 use crate::ports::{CompactOutcome, ProviderBindingData};
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 
 use provider::ProviderStopReasonData;
 
-/// Submit interval reflection with an owned message snapshot. This function does
-/// not await execution and never exposes generated reflection text to chat UI.
+/// Run interval reflection with an owned message snapshot. The run is awaited so
+/// the caller can report the outcome before this turn's terminal step, and the
+/// generated reflection text never reaches the chat UI.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn submit_interval_reflection(
+pub(crate) async fn run_interval_reflection(
     adapter: &ReflectionTaskAdapter,
     config: &share::config::MemoryConfig,
     step_count: usize,
@@ -24,8 +28,9 @@ pub(crate) fn submit_interval_reflection(
     lang: &str,
     memory: &Arc<dyn MemoryPort>,
     history: &Arc<dyn ReflectionHistoryStore>,
-) -> ReflectionTaskSubmitOutcome {
-    submit(
+    cancel: tokio_util::sync::CancellationToken,
+) -> ReflectionRunOutcome {
+    run(
         adapter,
         ReflectionTaskTrigger::Interval { step_count },
         config,
@@ -35,16 +40,16 @@ pub(crate) fn submit_interval_reflection(
         lang,
         memory,
         history,
+        cancel,
     )
+    .await
 }
 
-/// Submit pre-compact reflection with an owned message snapshot. Only the
+/// Run pre-compact reflection with an owned message snapshot. Only the
 /// production automatic compact path (engine-driven `NeedsCompaction`) must call
-/// this after `CompactOutcome::Committed`; failures or `Skipped` never submit.
-/// The function does not await execution and never exposes generated reflection
-/// text to chat UI; the slot is shared with `Interval` and `Manual`.
+/// this after `CompactOutcome::Committed`; failures or `Skipped` never run.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn submit_pre_compact_reflection(
+pub(crate) async fn run_pre_compact_reflection(
     adapter: &ReflectionTaskAdapter,
     config: &share::config::MemoryConfig,
     messages: &[share::message::Message],
@@ -53,8 +58,9 @@ pub(crate) fn submit_pre_compact_reflection(
     lang: &str,
     memory: &Arc<dyn MemoryPort>,
     history: &Arc<dyn ReflectionHistoryStore>,
-) -> ReflectionTaskSubmitOutcome {
-    submit(
+    cancel: tokio_util::sync::CancellationToken,
+) -> ReflectionRunOutcome {
+    run(
         adapter,
         ReflectionTaskTrigger::PreCompact,
         config,
@@ -64,16 +70,16 @@ pub(crate) fn submit_pre_compact_reflection(
         lang,
         memory,
         history,
+        cancel,
     )
+    .await
 }
 
-/// Submit manual reflection with an owned message snapshot. Only the
+/// Run manual reflection with an owned message snapshot. Only the
 /// `/reflect-now` idle command path (#1289) calls this after freezing the
-/// committed session's visible messages. The function does not await
-/// execution and never exposes generated reflection text to chat UI; the
-/// slot is shared with `Interval` and `PreCompact`.
+/// committed session's visible messages.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn submit_manual_reflection(
+pub(crate) async fn run_manual_reflection(
     adapter: &ReflectionTaskAdapter,
     config: &share::config::MemoryConfig,
     messages: &[share::message::Message],
@@ -82,8 +88,8 @@ pub(crate) fn submit_manual_reflection(
     lang: &str,
     memory: &Arc<dyn MemoryPort>,
     history: &Arc<dyn ReflectionHistoryStore>,
-) -> ReflectionTaskSubmitOutcome {
-    submit(
+) -> ReflectionRunOutcome {
+    run(
         adapter,
         ReflectionTaskTrigger::Manual,
         config,
@@ -93,36 +99,64 @@ pub(crate) fn submit_manual_reflection(
         lang,
         memory,
         history,
+        tokio_util::sync::CancellationToken::new(),
     )
+    .await
 }
 
-/// `/reflect-now` 受理结果的用户可见文案。返回 `(text, is_error)`：
-/// 所有分支都不是执行失败——busy/disabled 是显式跳过语义。
-pub(crate) fn manual_reflection_outcome_text(
-    outcome: ReflectionTaskSubmitOutcome,
-) -> (String, bool) {
+/// `/reflect-now` 受理结果的用户可见文案。返回 `(text, is_error)`。
+pub(crate) fn manual_reflection_outcome_text(outcome: &ReflectionRunOutcome) -> (String, bool) {
     match outcome {
-        ReflectionTaskSubmitOutcome::Accepted => (
-            "Reflection 已开始：结果只写入历史，稍后可用 /reflect 查询安全摘要。".to_string(),
-            false,
-        ),
-        ReflectionTaskSubmitOutcome::BusySkipped => (
-            "Reflection 正在运行，已跳过本次手动触发；稍后再试。".to_string(),
-            false,
-        ),
-        ReflectionTaskSubmitOutcome::DisabledSkipped => (
+        ReflectionRunOutcome::DisabledSkipped => (
             "Memory 或 Reflection 未启用；请在配置中开启后重试。".to_string(),
             false,
         ),
+        ReflectionRunOutcome::Completed(completion) => {
+            let changed = completion
+                .metadata
+                .as_ref()
+                .map(|metadata| metadata.applied_changes())
+                .unwrap_or_default();
+            (
+                manual_completion_text(completion.status, changed),
+                completion.status == ReflectionTaskCompletionStatus::Failed,
+            )
+        }
     }
 }
 
-/// Decide whether to enqueue a PreCompact reflection job based on the compact
-/// outcome. Only `CompactOutcome::Committed` calls
-/// `submit_pre_compact_reflection`; `Skipped` returns `None` and never claims
-/// the shared slot. The caller remains non-blocking in both cases.
+fn manual_completion_text(status: ReflectionTaskCompletionStatus, changed: usize) -> String {
+    match status {
+        ReflectionTaskCompletionStatus::Succeeded => {
+            if changed > 0 {
+                format!("Reflection 已完成：更新 {changed} 条记忆；摘要可用 /reflect 查询。")
+            } else {
+                "Reflection 已完成：没有记忆变更。".to_string()
+            }
+        }
+        ReflectionTaskCompletionStatus::Cancelled => "Reflection 已取消。".to_string(),
+        ReflectionTaskCompletionStatus::TimedOut => "Reflection 超时，已中止。".to_string(),
+        ReflectionTaskCompletionStatus::Failed => "Reflection 执行失败；详情见日志。".to_string(),
+    }
+}
+
+/// TUI notice text for a reflection that changed memory. Shown as soon as the
+/// run completes; the LLM-side reminder follows in the next Run.
+pub(crate) fn memory_updated_notice_text(changed: usize, lang: &str) -> String {
+    if lang == "zh" {
+        format!("记忆已更新 {changed} 条")
+    } else {
+        format!(
+            "Memory updated: {changed} entr{}",
+            if changed == 1 { "y" } else { "ies" }
+        )
+    }
+}
+
+/// Decide whether to run a PreCompact reflection based on the compact outcome.
+/// Only `CompactOutcome::Committed` runs reflection; `Skipped` returns `None`.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn maybe_submit_pre_compact_reflection(
+pub(crate) async fn maybe_run_pre_compact_reflection(
     outcome: &CompactOutcome,
     pre_compact_messages: &[share::message::Message],
     adapter: &ReflectionTaskAdapter,
@@ -132,24 +166,57 @@ pub(crate) fn maybe_submit_pre_compact_reflection(
     lang: &str,
     memory: &Arc<dyn MemoryPort>,
     history: &Arc<dyn ReflectionHistoryStore>,
-) -> Option<ReflectionTaskSubmitOutcome> {
+    cancel: tokio_util::sync::CancellationToken,
+) -> Option<ReflectionRunOutcome> {
     match outcome {
-        CompactOutcome::Committed(_) => Some(submit_pre_compact_reflection(
-            adapter,
-            config,
-            pre_compact_messages,
-            binding,
-            system_prompt_text,
-            lang,
-            memory,
-            history,
-        )),
+        CompactOutcome::Committed(_) => Some(
+            run_pre_compact_reflection(
+                adapter,
+                config,
+                pre_compact_messages,
+                binding,
+                system_prompt_text,
+                lang,
+                memory,
+                history,
+                cancel,
+            )
+            .await,
+        ),
         CompactOutcome::Skipped(_) => None,
     }
 }
 
+/// Send the TUI notice for a completed reflection that changed memory. Returns
+/// the number announced, so callers can also report it in the LLM reminder slot.
+pub(crate) async fn announce_memory_update(
+    sink: &ChatEventSinkHandle,
+    outcome: &ReflectionRunOutcome,
+    lang: &str,
+) -> Option<usize> {
+    let ReflectionRunOutcome::Completed(completion) = outcome else {
+        return None;
+    };
+    if completion.status != ReflectionTaskCompletionStatus::Succeeded {
+        return None;
+    }
+    let changed = completion
+        .metadata
+        .as_ref()
+        .map(|metadata| metadata.applied_changes())
+        .unwrap_or_default();
+    if changed == 0 {
+        return None;
+    }
+    sink.send_event(RuntimeStreamEvent::SystemMessage(
+        memory_updated_notice_text(changed, lang),
+    ))
+    .await;
+    Some(changed)
+}
+
 #[allow(clippy::too_many_arguments)]
-fn submit(
+async fn run(
     adapter: &ReflectionTaskAdapter,
     trigger: ReflectionTaskTrigger,
     config: &share::config::MemoryConfig,
@@ -159,19 +226,23 @@ fn submit(
     lang: &str,
     memory: &Arc<dyn MemoryPort>,
     history: &Arc<dyn ReflectionHistoryStore>,
-) -> ReflectionTaskSubmitOutcome {
-    adapter.submit_complete(
-        ReflectionTaskRequest::new(trigger, messages),
-        config.clone(),
-        Arc::clone(&binding.provider),
-        binding.model.clone(),
-        binding.max_tokens,
-        binding.requested_reasoning,
-        system_prompt_text.to_owned(),
-        lang.to_owned(),
-        Arc::clone(memory),
-        Arc::clone(history),
-    )
+    cancel: tokio_util::sync::CancellationToken,
+) -> ReflectionRunOutcome {
+    adapter
+        .run_complete(
+            ReflectionTaskRequest::new(trigger, messages),
+            config.clone(),
+            Arc::clone(&binding.provider),
+            binding.model.clone(),
+            binding.max_tokens,
+            binding.requested_reasoning,
+            system_prompt_text.to_owned(),
+            lang.to_owned(),
+            Arc::clone(memory),
+            Arc::clone(history),
+            cancel,
+        )
+        .await
 }
 
 pub(crate) fn should_run_turn_reflection(

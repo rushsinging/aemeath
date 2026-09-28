@@ -307,6 +307,7 @@ impl ModelInvocationObserver for DerivedModelObserver {
         response: &InvocationResponse,
         tool_calls: Vec<crate::application::tool::agent::ToolCall>,
         usage: crate::application::loop_engine::StepTokenUsage,
+        _cancel: &CancellationToken,
     ) -> Result<(ModelStep, crate::application::loop_engine::StepTokenUsage), LoopEngineError> {
         if response.stop_reason == StopReason::MaxOutputTokens {
             log::warn!(
