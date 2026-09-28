@@ -57,7 +57,8 @@ pub(crate) fn token_budget(
 ///
 /// All paths use the same `effective` / `threshold` formula:
 /// `effective = context_size - reserved_context(2%) - clamped_max_output(≤25% window)`
-/// `threshold = effective * 0.8`
+/// `threshold = effective * ratio`（ratio 来自 config_snapshot 的
+/// `auto_compact_threshold_ratio`，默认 0.8，clamp 到 [0.5, 0.95]）
 pub(crate) fn calculate(
     request: &ContextRequestData,
     messages: &crate::domain::ContextMessages,
@@ -67,8 +68,11 @@ pub(crate) fn calculate(
 
     let effective =
         crate::domain::effective_context_window(request.context_size, request.max_output_tokens);
-    let threshold =
-        crate::domain::autocompact_threshold(request.context_size, request.max_output_tokens);
+    let threshold = crate::domain::autocompact_threshold(
+        request.context_size,
+        request.max_output_tokens,
+        request.config_snapshot.auto_compact_threshold_ratio(),
+    );
 
     if effective < MIN_EFFECTIVE_WINDOW {
         log::warn!(

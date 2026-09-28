@@ -44,7 +44,29 @@ fn effective_window_reserves_guidance_summary_and_output_independently() {
 
 #[test]
 fn threshold_uses_only_effective_window_safety_ratio() {
-    assert_eq!(autocompact_threshold(200_000, 16_000), 144_000);
+    assert_eq!(autocompact_threshold(200_000, 16_000, 0.8), 144_000);
+}
+
+/// 配置化的触发阈值比例：effective(200_000, 16_000) = 180_000，
+/// ratio 0.9 → 162_000（默认 0.8 → 144_000）。
+#[test]
+fn threshold_honors_configured_ratio() {
+    assert_eq!(autocompact_threshold(200_000, 16_000, 0.9), 162_000);
+    assert_eq!(autocompact_threshold(200_000, 16_000, 0.5), 90_000);
+}
+
+/// 越界 ratio clamp 到安全区间 [0.5, 0.95]：
+/// 下限防 compact 风暴（#1626），上限防估算缓冲归零。
+#[test]
+fn threshold_ratio_clamped_into_safe_range() {
+    assert_eq!(
+        autocompact_threshold(200_000, 16_000, 0.1),
+        autocompact_threshold(200_000, 16_000, 0.5)
+    );
+    assert_eq!(
+        autocompact_threshold(200_000, 16_000, 0.99),
+        autocompact_threshold(200_000, 16_000, 0.95)
+    );
 }
 
 #[test]
@@ -53,16 +75,16 @@ fn effective_window_saturates_when_reservations_exceed_context_size() {
     // 预留超出窗口的场景不再让 effective 归零（恒触发 compact 风暴根因）。
     // 1_000 窗口：clamp(2_000 -> 250)，effective = 1_000 - 20 - 250 = 730。
     assert_eq!(effective_context_window(1_000, 2_000), 730);
-    assert!(autocompact_threshold(1_000, 2_000) > 0);
+    assert!(autocompact_threshold(1_000, 2_000, 0.8) > 0);
 }
 
 /// #1626 复现：8k 窗口 + 默认 max_output 8192 时 effective=0、threshold=0，
 /// 任意一轮对话即恒触发 auto-compact。护栏生效后 threshold 永不为 0。
 #[test]
 fn threshold_never_zero_for_short_window_with_default_output() {
-    assert!(autocompact_threshold(8_192, 8_192) > 0);
-    assert!(autocompact_threshold(16_384, 8_192) > 0);
-    assert!(autocompact_threshold(32_768, 8_192) > 0);
+    assert!(autocompact_threshold(8_192, 8_192, 0.8) > 0);
+    assert!(autocompact_threshold(16_384, 8_192, 0.8) > 0);
+    assert!(autocompact_threshold(32_768, 8_192, 0.8) > 0);
 }
 
 /// #1626：max_output 预留 clamp 到窗口 25% 上限。
@@ -70,14 +92,14 @@ fn threshold_never_zero_for_short_window_with_default_output() {
 #[test]
 fn max_output_clamped_to_quarter_of_window() {
     assert_eq!(effective_context_window(16_384, 8_192), 11_961);
-    assert_eq!(autocompact_threshold(16_384, 8_192), 9_568);
+    assert_eq!(autocompact_threshold(16_384, 8_192, 0.8), 9_568);
 }
 
 /// #1626：clamp 不影响大窗口常规配置（8k output 远小于 200k 的 25%）。
 #[test]
 fn clamp_keeps_large_window_behavior_unchanged() {
     assert_eq!(effective_context_window(200_000, 16_000), 180_000);
-    assert_eq!(autocompact_threshold(200_000, 16_000), 144_000);
+    assert_eq!(autocompact_threshold(200_000, 16_000, 0.8), 144_000);
 }
 
 #[test]
