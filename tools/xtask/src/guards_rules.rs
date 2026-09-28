@@ -4,11 +4,14 @@ use serde::Deserialize;
 use std::fs;
 use std::path::Path;
 
-/// 规则作用域：path_prefix 限定相对路径前缀，workspace 覆盖全仓源码。
+/// 规则作用域：`path_prefix` 限定单个相对路径前缀，`path_prefixes` 覆盖
+/// 多个并列前缀（把 pattern 完全相同的重复规则合并为一条），
+/// `workspace` 覆盖全仓源码。
 #[derive(Debug, Deserialize, Clone)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Scope {
     PathPrefix { value: String },
+    PathPrefixes { values: Vec<String> },
     Workspace,
 }
 
@@ -221,6 +224,9 @@ fn enforce_forbidden_file_names(
 fn scope_matches(scope: &Scope, relative_file: &str) -> bool {
     match scope {
         Scope::PathPrefix { value } => relative_file.starts_with(value.as_str()),
+        Scope::PathPrefixes { values } => values
+            .iter()
+            .any(|value| relative_file.starts_with(value.as_str())),
         Scope::Workspace => true,
     }
 }
@@ -238,9 +244,17 @@ fn is_test_source(relative_file: &str) -> bool {
             .any(|segment| segment == "tests" || segment.ends_with("_tests"))
 }
 
-fn scope_prefix(scope: &Scope) -> &str {
+/// scope 命中的前缀（多前缀取最长命中项，供 layer_order/layout 计算相对层级）；
+/// 未命中返回空串。
+fn scope_prefix<'a>(scope: &'a Scope, relative_file: &str) -> &'a str {
     match scope {
         Scope::PathPrefix { value } => value.as_str(),
+        Scope::PathPrefixes { values } => values
+            .iter()
+            .filter(|value| relative_file.starts_with(value.as_str()))
+            .max_by_key(|value| value.len())
+            .map(String::as_str)
+            .unwrap_or(""),
         Scope::Workspace => "",
     }
 }
@@ -326,7 +340,7 @@ fn enforce_layer_order(
     relative_file: &str,
     layer_order: &[String],
 ) -> Result<Vec<Violation>> {
-    let scope_value = scope_prefix(&rule.scope);
+    let scope_value = scope_prefix(&rule.scope, relative_file);
     let remainder = relative_file
         .strip_prefix(scope_value)
         .unwrap_or(relative_file)
@@ -373,7 +387,7 @@ fn enforce_layout(
     relative_file: &str,
     allowed_entries: &[String],
 ) -> Result<Vec<Violation>> {
-    let scope_value = scope_prefix(scope);
+    let scope_value = scope_prefix(scope, relative_file);
     let remainder = relative_file
         .strip_prefix(scope_value)
         .unwrap_or(relative_file)

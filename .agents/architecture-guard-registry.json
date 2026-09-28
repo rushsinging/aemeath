@@ -859,62 +859,6 @@
       "profile": "full"
     },
     {
-      "id": "pattern.tui.model-update-no-direct-effects",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "apps/cli/src/tui/model"
-      },
-      "forbidden_patterns": [
-        "tokio::spawn(",
-        "std::thread::spawn(",
-        "Command::new(",
-        "HookRunner::run",
-        ".run_hook(",
-        "clipboard::",
-        "arboard::",
-        "copypasta::",
-        "read_clipboard_image(",
-        "process_image_file(",
-        "Handle::block_on(",
-        "Runtime::block_on(",
-        "block_in_place",
-        ".await",
-        "mpsc::Sender"
-      ],
-      "exclusions": [],
-      "reason": "F-17：model/update 以 Effect 值描述副作用，禁直接执行（model 目录；update 目录并入同 scope 需另条）",
-      "profile": "full"
-    },
-    {
-      "id": "pattern.tui.update-no-direct-effects",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "apps/cli/src/tui/update"
-      },
-      "forbidden_patterns": [
-        "tokio::spawn(",
-        "std::thread::spawn(",
-        "Command::new(",
-        "HookRunner::run",
-        ".run_hook(",
-        "clipboard::",
-        "arboard::",
-        "copypasta::",
-        "read_clipboard_image(",
-        "process_image_file(",
-        "Handle::block_on(",
-        "Runtime::block_on(",
-        "block_in_place",
-        ".await",
-        "mpsc::Sender"
-      ],
-      "exclusions": [],
-      "reason": "F-17：update 目录同 model 目录副作用禁式",
-      "profile": "full"
-    },
-    {
       "id": "pattern.tui.render-output-purity",
       "assertion": "pattern_exclusion",
       "scope": {
@@ -2441,76 +2385,6 @@
       "profile": "full"
     },
     {
-      "id": "pattern.tui.app-pure-model",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "apps/cli/src/tui/app"
-      },
-      "forbidden_patterns": [
-        "tokio::spawn(",
-        "std::thread::spawn(",
-        "Command::new(",
-        "clipboard::",
-        "arboard::",
-        "copypasta::",
-        ".await"
-      ],
-      "exclusions": [
-        {
-          "path": "apps/cli/src/tui/app/run_loop.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/app/runtime.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/app/testing/"
-        }
-      ],
-      "reason": "F-21：tui app TEA 纯度（run_loop/runtime/testing 编排层豁免，#59 S5-gap 裁定）",
-      "profile": "full"
-    },
-    {
-      "id": "pattern.tui.view-assembler-pure",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "apps/cli/src/tui/view_assembler"
-      },
-      "forbidden_patterns": [
-        "tokio::spawn(",
-        "std::thread::spawn(",
-        "Command::new(",
-        "clipboard::",
-        "arboard::",
-        "copypasta::",
-        ".await"
-      ],
-      "exclusions": [],
-      "reason": "F-21：view_assembler 纯投影",
-      "profile": "full"
-    },
-    {
-      "id": "pattern.tui.view-model-pure",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "apps/cli/src/tui/view_model"
-      },
-      "forbidden_patterns": [
-        "tokio::spawn(",
-        "std::thread::spawn(",
-        "Command::new(",
-        "clipboard::",
-        "arboard::",
-        "copypasta::",
-        ".await"
-      ],
-      "exclusions": [],
-      "reason": "F-21：view_model 纯投影",
-      "profile": "full"
-    },
-    {
       "id": "pattern.share.minimal-kernel",
       "assertion": "pattern_exclusion",
       "scope": {
@@ -3412,6 +3286,71 @@
         }
       ],
       "reason": "#1679：error_log HTTP/network 诊断 API 仅 executor 可调，driver 仅 log_stream_protocol_error 窄口",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tui.model-update-no-direct-effects",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefixes",
+        "values": [
+          "apps/cli/src/tui/model",
+          "apps/cli/src/tui/update"
+        ]
+      },
+      "forbidden_patterns": [
+        "tokio::spawn(",
+        "std::thread::spawn(",
+        "Command::new(",
+        "HookRunner::run",
+        ".run_hook(",
+        "clipboard::",
+        "arboard::",
+        "copypasta::",
+        "read_clipboard_image(",
+        "process_image_file(",
+        "Handle::block_on(",
+        "Runtime::block_on(",
+        "block_in_place",
+        ".await",
+        "mpsc::Sender"
+      ],
+      "exclusions": [],
+      "reason": "F-17：model/update 以 Effect 值描述副作用，禁直接执行（合并原两条同 pattern 重复规则，#1696③）",
+      "profile": "full"
+    },
+    {
+      "id": "pattern.tui.app-pure-model",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefixes",
+        "values": [
+          "apps/cli/src/tui/app",
+          "apps/cli/src/tui/view_assembler",
+          "apps/cli/src/tui/view_model"
+        ]
+      },
+      "forbidden_patterns": [
+        "tokio::spawn(",
+        "std::thread::spawn(",
+        "Command::new(",
+        "clipboard::",
+        "arboard::",
+        "copypasta::",
+        ".await"
+      ],
+      "exclusions": [
+        {
+          "path": "apps/cli/src/tui/app/run_loop.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/runtime.rs"
+        },
+        {
+          "path": "apps/cli/src/tui/app/testing/"
+        }
+      ],
+      "reason": "F-21：tui app TEA 与 view_assembler/view_model 纯度（run_loop/runtime/testing 编排层豁免，#59 S5-gap 裁定；合并原三条同 pattern 重复规则，#1696③）",
       "profile": "full"
     }
   ],
