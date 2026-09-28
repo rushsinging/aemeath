@@ -184,6 +184,7 @@ fn service_with_session(
         Arc::new(BaselinePrompt),
         Arc::new(BaselineMemory),
     )
+    .with_time_source(super::current_local_time::fixed_local_test_now)
 }
 
 fn service_with_summary(
@@ -207,6 +208,7 @@ fn service_with_summary(
         Arc::new(BaselinePrompt),
         Arc::new(BaselineMemory),
     )
+    .with_time_source(super::current_local_time::fixed_local_test_now)
 }
 
 fn oversized_checkpoint_summary() -> String {
@@ -445,7 +447,7 @@ async fn build_window_capture_reports_structure_phases_and_actual_usage() {
     assert_eq!(metrics.snapshot_shared_messages, 2);
     assert_eq!(metrics.pending_messages, 1);
     assert_eq!(metrics.final_messages, 3);
-    assert_eq!(metrics.system_blocks, 5);
+    assert_eq!(metrics.system_blocks, 6);
     assert_eq!(metrics.tool_result_blocks, 1);
     assert_eq!(metrics.tool_result_content_bytes, expected_bytes as u64);
     assert_eq!(metrics.provider_actual_tokens, Some(777));

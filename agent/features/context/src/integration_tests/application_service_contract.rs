@@ -303,6 +303,7 @@ fn service_with_session(session: FakeSession) -> ContextApplicationService {
         Arc::new(FakePrompt),
         Arc::new(FakeMemory),
     )
+    .with_time_source(crate::application::current_local_time::fixed_local_test_now)
 }
 
 fn service() -> ContextApplicationService {
@@ -517,6 +518,7 @@ async fn build_window_assembles_history_pending_and_fixed_extension_order() {
             "user_guidance",
             "memory_context",
             "active_summary",
+            "current_local_time",
         ]
     );
     assert!(window
@@ -546,13 +548,29 @@ async fn build_window_assembles_history_pending_and_fixed_extension_order() {
 }
 
 #[tokio::test]
-async fn build_window_omits_date_and_dynamic_system_context() {
+async fn build_window_appends_current_local_time_and_still_omits_dynamic_system_context() {
     let window = service().build_window(&request()).await.unwrap();
 
-    assert!(window.system_blocks.iter().all(|block| !matches!(
-        block.kind.as_str(),
-        "current_date" | "dynamic_system_context"
-    )));
+    let time_block = window
+        .system_blocks
+        .iter()
+        .find(|block| block.kind == "current_local_time")
+        .expect("window 必须携带当前本地时间块");
+    assert_eq!(
+        time_block.content,
+        "当前本地时间: 2026-06-15 14:30:05 +0800"
+    );
+    assert!(!time_block.cacheable);
+    assert!(!time_block.cache_break);
+    assert_eq!(
+        window.system_blocks.last().map(|block| block.kind.as_str()),
+        Some("current_local_time"),
+        "时间块必须位于 uncached suffix 末尾"
+    );
+    assert!(window
+        .system_blocks
+        .iter()
+        .all(|block| block.kind != "dynamic_system_context"));
 }
 
 #[tokio::test]

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::{DateTime, FixedOffset};
 
 use crate::domain::{
     AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
@@ -15,6 +16,8 @@ pub(crate) struct ContextApplicationService {
     session: Arc<dyn SessionRepository>,
     prompt: Arc<dyn ContextPromptSource>,
     memory: Arc<dyn ContextMemorySource>,
+    /// 请求级「当前本地时间」块的时间源；测试可注入固定时钟（3.2.5.4）。
+    time_source: fn() -> DateTime<FixedOffset>,
 }
 
 impl ContextApplicationService {
@@ -27,7 +30,15 @@ impl ContextApplicationService {
             session,
             prompt,
             memory,
+            time_source: super::current_local_time::local_now,
         }
+    }
+
+    /// 测试专用：替换时间源为固定时钟，避免用例依赖真实时间。
+    #[cfg(test)]
+    pub(crate) fn with_time_source(mut self, time_source: fn() -> DateTime<FixedOffset>) -> Self {
+        self.time_source = time_source;
+        self
     }
 
     async fn build_candidate(
@@ -194,6 +205,12 @@ impl ContextApplicationService {
             last_cacheable.cache_break = true;
         }
         blocks.extend(prompt.uncached);
+        // uncached suffix 末尾追加请求级本地时间：每步请求都携带当前时间，
+        // 位于 cache breakpoint 之后，不破坏 prompt cache（specs/3.7 §18）。
+        blocks.push(super::current_local_time::current_local_time_block(
+            request.language.as_str(),
+            (self.time_source)(),
+        ));
 
         #[cfg(test)]
         {
