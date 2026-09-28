@@ -10,9 +10,10 @@
 //! | Error | 出口统一 `sdk::SdkError`（架构既定）；10 个内部错误全 crate 内——**不折叠不 Data 化** |
 //!
 //! 删除与内部化：sdk 转发 7（纯冗余，消费方直连 sdk）；实测修正——
-//! `RuntimeLifecycleEvent`/`map_lifecycle_event`（架构测试钉住 pub）、
 //! `ToolResultBlobPort`（签名载荷）、reflection 数据 5 + resume/Assembly 3
 //! （集成测试消费）恢复 pub；契约测试 3 个搬 crate 内联。
+//! 后续下架：`RuntimeLifecycleEvent`/`map_lifecycle_event` 根 re-export
+//! （零 crate 外消费，内部走真实模块路径；定义处 pub 由架构测试钉住）。
 //! 按 docs/design/03-engineering/05-published-language.md SOP。
 
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:runtime";
@@ -24,7 +25,6 @@ pub mod composition;
 pub(crate) mod domain;
 pub(crate) mod ports;
 
-pub use adapters::sdk_event_mapper::map_lifecycle_event;
 pub use adapters::tool_result_blob::AtomicBlobToolResultStore;
 pub use application::run::active_registry::{wire_active_run_registry, ActiveRunRegistry};
 pub use application::tool::tool_result_materializer::{
@@ -50,7 +50,6 @@ pub use application::reflection::{
 };
 pub use application::run::context::ParentRunContextSource;
 pub use application::run::context_factory::RuntimeContextFactory;
-pub use domain::agent_run::RuntimeLifecycleEvent;
 pub use ports::{
     ProviderBindingData, ProviderBuildSpecData, ProviderFactory, ProviderPort, ToolResultBlobPort,
     UnavailableUsageSink, UsageSink,
