@@ -92,7 +92,7 @@
 
 另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §20。
 
-`check-no-inline-tests.sh` 的历史存量走 `.agents/inline-tests-baseline.json`：基线登记守卫正则失效期间已存在的内嵌测试文件，只拦截**新增**违规；基线中已无违规的失效条目同样失败，强制迁移完成时同步收缩清单。`specs/3.2.5.3` 要求渐进迁移，**NEVER** 一次性移动全仓历史测试。配套 `check-no-inline-tests-tests.sh` 覆盖 `{` 无尾随空格、注释误报、基线与失效条目、缺基线 fail-closed 四类边界。
+`check-no-inline-tests.sh` 的历史存量走 `.agents/inline-tests-baseline.json`：基线登记守卫正则失效期间已存在的内嵌测试文件，只拦截**新增**违规；基线中已无违规的失效条目同样失败，强制迁移完成时同步收缩清单。内联测试存量现由 registry `pattern.all.no-inline-test-modules` 的 `exclusions` 承载，并以 `exclusion_baseline` 机器校验只降不升。`specs/3.2.5.3` 要求渐进迁移，**NEVER** 一次性移动全仓历史测试。配套 `check-no-inline-tests-tests.sh` 覆盖 `{` 无尾随空格、注释误报、基线与失效条目、缺基线 fail-closed 四类边界。
 
 `check-runtime-capability-assembly-ownership.sh` 同时承担 Runtime 命名边界：生产源码中的类型、trait、模块、函数、方法与变量不得使用 `Projection` / `projection` 宽泛命名。真正的单向值转换必须使用目标或用途明确的 mapper/view/record 名称；职责混合必须通过类型拆分解决，不能用命名白名单放行。该规则不扫描测试文件，测试中的退役符号断言可继续存在。
 
@@ -116,6 +116,8 @@
 - **stale / 隐式排除**：精确 path/path-prefix 不存在即 stale；每个注册项必须被其声明的 Guard 以精确 `guard-registry:<stable-id>` 引用；Shell 中 `grep -v`、`--exclude`、`--exclude-dir`、`EXEMPT_FILES`、migration exception 集合和自由格式 inline allow 必须在同一行或前一行引用同 Guard 下已登记 stable id。
 - **expiry**：每次执行通过 GitHub CLI 核验所有 migration exception 的 tracking Issue 仍为 OPEN；查询失败或 Issue 已关闭均 fail-closed。
 - **报告**：`cargo run -p xtask -- guard-registry report . <output>` 按 stable id 确定性输出 classification、module、guard、scope kind 与 lifecycle 维度，用于模块开发前/完成后预算复核。
+- **scope 形态**：`workspace`（全仓）/ `path_prefix`（单前缀）/ `path_prefixes`（多前缀数组，用于把 pattern 完全相同的重复规则合并为一条；引擎取任一命中，`scope_prefix` 取最长命中供层级计算）。
+- **豁免基线契约**：规则的 `exclusion_baseline` 登记 `exclusions` 存量上限，`guard-registry check` 阻断反弹（只降不升）；迁移一批后必须同时下调清单与基线。
 - **Current 基线复核**：Storage 的 Target policy 不计债务；#883 已删除 `STORAGE_TRANSITIONAL_MODULES` 及其唯一 migration exception，Storage migration debt 为 `0`。Composition 仅有合法唯一装配 policy；Workflow、Audit、Project 未发现 migration exception，与人工基线一致。
 - **Tools crate-root façade**：`TOOLS_DOMAIN_FACADE` 登记 Tool/Command/Skill Published Language；Task committed-change 链额外登记仅供 Tools/Runtime 协调的 `CommittedTaskChange` 与 `TaskChangeFact`；Skill revision 去重新增 `SkillLoadScope`、`SkillLoadMutation`、`SkillLoadDecision`、`SkillLoadStateError` 与 `SkillLoadStatePort`；Sub Run 事实链登记 `SubRunIdentity`、`SubRunStartedEvent`、`SubRunActivityEvent`、`SubRunActivityKind` 与 `SubRunTerminalOutcome` 纯值 Published Language。Context/Runtime 只能经这些 crate-root 符号消费，Guard 同时要求登记集合与 `tools/src/lib.rs` 实际公开面精确一致。
 - **Runtime 根 façade**：`config_snapshot_to_sdk` 是 Composition 将 committed `ConfigSnapshot` 投影为 SDK `ConfigView` 的已登记窄入口；跨 feature 消费 **MUST** 仅调用该 crate-root re-export，**NEVER** 穿透 `application::client::mapping`。`CompactModelResolver` 与 `SessionModelSlot` 是 Composition 装配 Compact 模型解析（配置 `context.compact_model`）的已登记窄入口，`CompactModelOrigin` / `CompactModelTarget` / `CompactModelResolveError` 为该入口的纯值 Published Language；跨 feature 消费 **MUST** 仅经这些 crate-root 符号，**NEVER** 穿透 `application::client::compact_model`。

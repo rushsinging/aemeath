@@ -681,23 +681,6 @@
       "profile": "full"
     },
     {
-      "id": "pattern.runtime.no-shared-client-mutation",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src"
-      },
-      "forbidden_patterns": [
-        "shared_client_lock",
-        "set_max_tokens(",
-        "set_reasoning_level(",
-        "current_reasoning_level"
-      ],
-      "exclusions": [],
-      "reason": "runtime 禁恢复共享客户端突变/串行锁；调用语义经 provider Published Language",
-      "profile": "full"
-    },
-    {
       "id": "pattern.runtime.activity-construction-single-owner",
       "assertion": "pattern_exclusion",
       "scope": {
@@ -811,14 +794,13 @@
         "value": "agent/features/tools/src/domain"
       },
       "forbidden_patterns": [
-        "WorkspaceViews",
         "tokio::sync",
         "std::sync::mpsc",
         "Semaphore",
         "CancellationToken"
       ],
       "exclusions": [],
-      "reason": "R10：Tools domain 禁活资源与 workspace 视图，保持纯值域",
+      "reason": "R10：Tools domain 禁活资源与 workspace 视图，保持纯值域（#1696② 清理：随符号物理删除的防复活 pattern 已移除，复活归 review）",
       "profile": "full"
     },
     {
@@ -838,24 +820,6 @@
         }
       ],
       "reason": "RuntimeContext/AssemblyToken 构造限单一工厂文件；工厂正向完整性（must wire 一串）由必填参数与构造点编译承接；BoundaryHookPort filtering/proceed 行为断言归测试（#1056 范围）；crate-root façade 白名单由 crate-api-boundary（F-2 数据化承接）",
-      "profile": "full"
-    },
-    {
-      "id": "pattern.tui.render-no-mirror-storage",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "apps/cli/src/tui/render"
-      },
-      "forbidden_patterns": [
-        "pub(super) suggestions: Vec",
-        "pub selected_suggestion",
-        "pub show_suggestions",
-        "pub(super) struct SpinnerState",
-        "pub struct SpinnerState"
-      ],
-      "exclusions": [],
-      "reason": "render widget 禁 pub(super) 级镜像存储（SuggestionViewState 等 view_state 派生投影合法）；retired adapter 已 #[cfg(test)] 模块级锁定（④）",
       "profile": "full"
     },
     {
@@ -2255,11 +2219,10 @@
         "value": "packages/global/logging/src"
       },
       "forbidden_patterns": [
-        "lazy_static! {",
         "thread_local! {"
       ],
       "exclusions": [],
-      "reason": "F-26：logging 禁进程全局/线程局部状态，用 LogContext task-local；static 大写声明白名单正则特征 defer（与 F-23 同批）；legacy 符号已删④",
+      "reason": "F-26：logging 禁进程全局/线程局部状态，用 LogContext task-local；static 大写声明白名单正则特征 defer（与 F-23 同批）；legacy 符号已删④（#1696② 清理：随符号物理删除的防复活 pattern 已移除，复活归 review）",
       "profile": "full"
     },
     {
@@ -2453,15 +2416,10 @@
       },
       "forbidden_patterns": [
         "active_summary:",
-        "continuation_checkpoint:",
-        "continuation_summary:",
-        "slice_head(previous_summary",
-        "slice_tail(previous_summary",
-        "slice_head(previous_checkpoint",
-        "slice_tail(previous_checkpoint"
+        "continuation_checkpoint:"
       ],
       "exclusions": [],
-      "reason": "F-25：continuation 状态归 Context checkpoint 权威，runtime 不得持有/切片（文档标记正向断言④）",
+      "reason": "F-25：continuation 状态归 Context checkpoint 权威，runtime 不得持有/切片（文档标记正向断言④）（#1696② 清理：随符号物理删除的防复活 pattern 已移除，复活归 review）",
       "profile": "full"
     },
     {
@@ -3122,22 +3080,9 @@
           "path": "apps/cli/src/tui/render/output_area/resize.rs"
         }
       ],
-      "reason": "F-28：分离测试约定，禁新增内联 mod tests {；存量基线 210 + 3 声明遗漏补录（cfg(test) 门控确认为存量），迁移完成 MUST 收缩 exclusions",
-      "profile": "full"
-    },
-    {
-      "id": "pattern.tools.no-legacy-tool-paths",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/tools/src"
-      },
-      "forbidden_patterns": [
-        "wire_tools"
-      ],
-      "exclusions": [],
-      "reason": "#1696-②：legacy 符号编译期已拦（④退役归 review）；仅保留 wire_tools 装配入口禁式",
-      "profile": "full"
+      "reason": "F-28：分离测试约定，禁新增内联 mod tests {；存量基线 211（原始 213 随迁移净减，逐批收缩；exclusion_baseline 机器校验只降不升），迁移完成 MUST 收缩 exclusions 与基线",
+      "profile": "full",
+      "exclusion_baseline": 211
     },
     {
       "id": "budget.runtime.responsibility",

@@ -334,6 +334,21 @@ fn validate_registry(registry: &Registry) -> Result<RegistryReport> {
         if !rule_ids.insert(rule.id.as_str()) {
             violations.push(format!("规则 id 重复：{}", rule.id));
         }
+        // 豁免基线只降不升：exclusions 增长必须先下调 exclusion_baseline
+        // （基线是收缩契约，不是当前值的自动跟随）。
+        if let Some(baseline) = rule.exclusion_baseline {
+            if let crate::guards_rules::RuleSpec::PatternExclusion { exclusions, .. } = &rule.spec {
+                if exclusions.len() > baseline {
+                    violations.push(format!(
+                        "规则 {} 的豁免条目 {} 超过 exclusion_baseline {}：内联测试等豁免只降不升，\
+                         迁移该文件后下调基线",
+                        rule.id,
+                        exclusions.len(),
+                        baseline
+                    ));
+                }
+            }
+        }
     }
     if !violations.is_empty() {
         anyhow::bail!(violations.join("\n"));
