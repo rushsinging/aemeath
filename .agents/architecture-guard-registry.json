@@ -2200,9 +2200,7 @@
           "utils"
         ],
         "policy": [
-          "sdk",
-          "share",
-          "tools"
+          "share"
         ],
         "context": [
           "config",
@@ -2826,9 +2824,6 @@
           "path": "agent/features/tools/src/adapters/tool_search.rs"
         },
         {
-          "path": "agent/features/tools/src/domain/published_language.rs"
-        },
-        {
           "path": "agent/features/tools/src/domain/shell_safety.rs"
         },
         {
@@ -3262,9 +3257,6 @@
         },
         {
           "path": "packages/sdk/src/content.rs"
-        },
-        {
-          "path": "packages/sdk/src/ids.rs"
         },
         {
           "path": "packages/sdk/src/session_lock.rs"

@@ -1,15 +1,15 @@
-pub use sdk::RunStepId;
+pub use share::ids::RunStepId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingInteraction {
-    pub request_id: sdk::InteractionRequestId,
+    pub request_id: share::ids::InteractionRequestId,
     pub continuation: InteractionContinuation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InteractionContinuation {
-    CompleteToolCall(sdk::ids::ToolCallId),
-    ContinueToolApproval(sdk::ids::ToolCallId),
+    CompleteToolCall(share::ids::ToolCallId),
+    ContinueToolApproval(share::ids::ToolCallId),
     ContinuePlanApproval,
     ContinueAfterHardPause,
 }
@@ -216,13 +216,13 @@ pub enum RunTransitionError {
         to: ToolCallStatus,
     },
     #[error("Run 已有待处理交互：{0}")]
-    InteractionAlreadyPending(sdk::InteractionRequestId),
+    InteractionAlreadyPending(share::ids::InteractionRequestId),
     #[error("Run 当前没有待处理交互")]
     NoPendingInteraction,
     #[error("交互请求不匹配：expected={expected}, received={received}")]
     InteractionRequestMismatch {
-        expected: sdk::InteractionRequestId,
-        received: sdk::InteractionRequestId,
+        expected: share::ids::InteractionRequestId,
+        received: share::ids::InteractionRequestId,
     },
 }
 

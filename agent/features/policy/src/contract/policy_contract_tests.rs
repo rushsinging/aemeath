@@ -4,9 +4,9 @@ use crate::domain::{
     PolicyRequestData,
 };
 use crate::{allow_all, configured};
-use sdk::ids::{RunId, RunStepId};
 use share::config::PermissionModeConfig;
-use tools::{ToolCapabilities, ToolCapability, ToolName};
+use share::ids::{RunId, RunStepId};
+use share::tools_vocab::{ToolCapabilities, ToolCapability, ToolName};
 
 fn request(tool: &str, capability: ToolCapability) -> PolicyRequestData {
     PolicyRequestData::new(
@@ -38,8 +38,8 @@ fn permission_mode_maps_to_single_policy_mode() {
 #[test]
 fn allow_all_authorization_disables_every_authorization_guard() {
     assert_eq!(
-        tools::AuthorizationContext::ALLOW_ALL,
-        tools::AuthorizationContext {
+        share::tools_vocab::AuthorizationContext::ALLOW_ALL,
+        share::tools_vocab::AuthorizationContext {
             allow_outside_workspace: true,
             require_read_before_write: false,
             enforce_bash_safety: false,
@@ -51,8 +51,8 @@ fn allow_all_authorization_disables_every_authorization_guard() {
 #[test]
 fn standard_authorization_preserves_existing_guards() {
     assert_eq!(
-        tools::AuthorizationContext::STANDARD,
-        tools::AuthorizationContext {
+        share::tools_vocab::AuthorizationContext::STANDARD,
+        share::tools_vocab::AuthorizationContext {
             allow_outside_workspace: false,
             require_read_before_write: true,
             enforce_bash_safety: true,
@@ -66,7 +66,7 @@ fn standard_policy_returns_allow_with_standard_authorization() {
     let policy: &dyn Policy = &StandardPolicy;
     assert_eq!(
         policy.evaluate(&request("Read", ToolCapability::Read)),
-        PolicyDecisionData::Allow(tools::AuthorizationContext::STANDARD)
+        PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::STANDARD)
     );
 }
 
@@ -79,14 +79,14 @@ fn configured_policy_reads_current_mode_for_every_evaluation() {
 
     assert_eq!(
         policy.evaluate(&request),
-        PolicyDecisionData::Allow(tools::AuthorizationContext::STANDARD)
+        PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::STANDARD)
     );
 
     *mode.write().expect("mode source lock") = PermissionModeConfig::AllowAll;
 
     assert_eq!(
         policy.evaluate(&request),
-        PolicyDecisionData::Allow(tools::AuthorizationContext::ALLOW_ALL)
+        PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::ALLOW_ALL)
     );
 }
 
@@ -116,7 +116,7 @@ fn allow_all_policy_contract_allows_every_valid_request() {
     ] {
         assert_eq!(
             policy.evaluate(&request),
-            PolicyDecisionData::Allow(tools::AuthorizationContext::ALLOW_ALL)
+            PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::ALLOW_ALL)
         );
     }
 }

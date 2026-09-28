@@ -31,8 +31,18 @@ pub mod error;
 #[path = "error_domain_tests.rs"]
 mod error_domain_tests;
 pub mod i18n;
+pub mod ids;
+
+#[cfg(test)]
+#[path = "ids_tests.rs"]
+mod ids_tests;
 pub mod memory;
 pub mod message;
 pub mod reasoning;
 pub mod session_types;
 pub mod string_idx;
+pub mod tools_vocab;
+
+#[cfg(test)]
+#[path = "tools_vocab_tests.rs"]
+mod tools_vocab_tests;

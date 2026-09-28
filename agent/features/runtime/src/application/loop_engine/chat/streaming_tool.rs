@@ -244,7 +244,7 @@ impl StreamingToolExecutor {
         let is_concurrency_safe = inner
             .agent
             .catalog
-            .find(&tools::ToolName::new(&call.name))
+            .find(&share::tools_vocab::ToolName::new(&call.name))
             .is_some_and(|descriptor| descriptor.is_concurrency_safe());
         let spawn_inner = inner.clone();
         let operation = async move {

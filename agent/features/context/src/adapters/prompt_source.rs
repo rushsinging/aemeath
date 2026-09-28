@@ -22,7 +22,7 @@ impl BaselinePromptSource {
             },
             SystemBlock {
                 kind: "execution_discipline".to_string(),
-                content: crate::adapters::prompt::universal_execution_discipline(
+                content: share::i18n::prompt::discipline::universal_execution_discipline(
                     request.language.as_str(),
                 )
                 .to_string(),

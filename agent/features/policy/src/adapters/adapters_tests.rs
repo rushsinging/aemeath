@@ -5,9 +5,9 @@
 //! tool name, workspace path, or run identifiers.
 
 use crate::{allow_all, PolicyDecisionData, PolicyRequestData};
-use sdk::ids::{RunId, RunStepId};
+use share::ids::{RunId, RunStepId};
+use share::tools_vocab::{ToolCapabilities, ToolCapability, ToolName};
 use std::sync::Mutex;
-use tools::{ToolCapabilities, ToolCapability, ToolName};
 
 /// Captured log lines (level + formatted message) for the policy target.
 ///
@@ -80,7 +80,7 @@ fn evaluate_emits_entry_and_allow_exit_logging_only_mode_count_and_decision() {
 
     assert_eq!(
         allow_all().evaluate(&request),
-        PolicyDecisionData::Allow(tools::AuthorizationContext::ALLOW_ALL)
+        PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::ALLOW_ALL)
     );
 
     let lines = CAPTURED.lock().expect("read capture").clone();
@@ -155,7 +155,7 @@ fn capability_count_reflects_request_requirements() {
 
     assert_eq!(
         allow_all().evaluate(&request),
-        PolicyDecisionData::Allow(tools::AuthorizationContext::ALLOW_ALL)
+        PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::ALLOW_ALL)
     );
 
     let joined = CAPTURED

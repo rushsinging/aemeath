@@ -196,7 +196,7 @@ fn partition_calls(agent: &Agent, calls: &[&PreparedToolCall]) -> (Vec<usize>, V
     for (i, call) in calls.iter().enumerate() {
         let is_safe = agent
             .catalog
-            .find(&tools::ToolName::new(&call.call.name))
+            .find(&share::tools_vocab::ToolName::new(&call.call.name))
             .is_some_and(|descriptor| descriptor.is_concurrency_safe());
         if is_safe {
             concurrent_positions.push(i);
