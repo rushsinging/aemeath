@@ -429,7 +429,8 @@ impl DatasetSessionReader {
         }
         let active_start = state.compact_start_at();
         let cleared_after = state.cleared_after();
-        let visible_steps = visible_steps_after_boundaries(&manifest, active_start, cleared_after)?;
+        let (visible_steps, _) =
+            visible_steps_after_boundaries(&manifest, active_start, cleared_after)?;
         let active_names = visible_steps
             .iter()
             .map(|step| safe_member_name(step.member_name()))
@@ -482,37 +483,75 @@ impl DatasetSessionReader {
     }
 }
 
+/// clear 边界相对当前 generation manifest 的位置。
+///
+/// `TrimmedAway` 是 compact 裁剪 + 全量重写后的合法状态：边界之前的 step 已
+/// 不在 manifest steps 中，边界对活动会话不可表达。只有边界落在 steps 区间
+/// 内部却缺失时才视为数据撕裂。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClearBoundaryPlacement {
+    /// 从未 `/clear`。
+    Absent,
+    /// 命中 manifest steps：可见 steps 为边界之后的部分。
+    Hit,
+    /// 边界早于 manifest 首步（或 manifest 无 step）：边界之前的 step 已被裁剪。
+    TrimmedAway,
+}
+
+/// 按时间顺序比较两个 step cursor：两种标识均为时间有序，可字典序比较。
+fn cursor_precedes(left: &RunStepCursor, right: &RunStepCursor) -> bool {
+    (left.run_id.as_str(), left.step_id.as_str()) < (right.run_id.as_str(), right.step_id.as_str())
+}
+
 /// 按可见边界（compact 起点 + `/clear` 逻辑断点）过滤 manifest steps：
 /// 取两边界中更晚者之后的 step 引用，供 active 成员加载使用。
-/// clear 边界必须命中当前 generation manifest，否则视为数据不一致。
+/// clear 边界必须可定位到当前 generation manifest，否则视为数据不一致。
 fn visible_steps_after_boundaries<'a>(
     manifest: &'a SessionGenerationManifest,
     active_start: Option<&RunStepCursor>,
     cleared_after: Option<&RunStepCursor>,
-) -> Result<Vec<&'a SessionStepReference>, SessionGenerationWireError> {
-    let steps_after_clear: Vec<&SessionStepReference> = match cleared_after {
-        Some(cleared) => {
-            let position = manifest
+) -> Result<(Vec<&'a SessionStepReference>, ClearBoundaryPlacement), SessionGenerationWireError> {
+    let (steps_after_clear, placement): (Vec<&SessionStepReference>, ClearBoundaryPlacement) =
+        match cleared_after {
+            Some(cleared) => match manifest
                 .steps()
                 .iter()
                 .position(|step| step.cursor() == cleared)
-                .ok_or_else(|| {
-                    SessionGenerationWireError::InvalidManifest(
-                        "Session clear 边界不在此 generation manifest 中".to_string(),
+            {
+                Some(position) => (
+                    manifest.steps().iter().skip(position + 1).collect(),
+                    ClearBoundaryPlacement::Hit,
+                ),
+                None if manifest
+                    .steps()
+                    .first()
+                    .is_none_or(|head| cursor_precedes(cleared, head.cursor())) =>
+                {
+                    (
+                        manifest.steps().iter().collect(),
+                        ClearBoundaryPlacement::TrimmedAway,
                     )
-                })?;
-            manifest.steps().iter().skip(position + 1).collect()
-        }
-        None => manifest.steps().iter().collect(),
-    };
-    Ok(steps_after_clear
+                }
+                None => {
+                    return Err(SessionGenerationWireError::InvalidManifest(
+                        "Session clear 边界不在此 generation manifest 中".to_string(),
+                    ))
+                }
+            },
+            None => (
+                manifest.steps().iter().collect(),
+                ClearBoundaryPlacement::Absent,
+            ),
+        };
+    let visible = steps_after_clear
         .into_iter()
         .skip_while(|step| {
             active_start.is_some_and(|start| {
                 step.cursor().run_id != start.run_id || step.cursor().step_id != start.step_id
             })
         })
-        .collect())
+        .collect();
+    Ok((visible, placement))
 }
 
 fn assemble_session(
@@ -546,7 +585,7 @@ fn assemble_session(
     }
 
     let active_start = state.compact_start_at();
-    let visible_steps =
+    let (visible_steps, clear_boundary_placement) =
         visible_steps_after_boundaries(manifest, active_start, state.cleared_after())?;
     let mut active = active_start.is_none();
     let mut slices = Vec::<CommittedRunSlice>::new();
@@ -584,7 +623,22 @@ fn assemble_session(
             ));
         }
     }
-    Ok(state.into_session(metadata, SessionHistory::from_slices(slices)))
+    let mut session = state.into_session(metadata, SessionHistory::from_slices(slices));
+    match clear_boundary_placement {
+        // 自愈：磁盘 state 引用的 clear 边界已被裁剪出 manifest steps。该边界对
+        // 活动会话不可表达，就地归一为无边界——后续任一次提交都会把对齐后的
+        // 边界落盘，使磁盘 primary manifest 重新自洽（step 成员不删）。
+        ClearBoundaryPlacement::TrimmedAway => {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "session_resume_clear_boundary_trimmed session_id={}",
+                session.id
+            );
+            session.cleared_after = None;
+        }
+        ClearBoundaryPlacement::Absent | ClearBoundaryPlacement::Hit => {}
+    }
+    Ok(session)
 }
 
 fn only_member_bytes(members: &[DatasetMemberData]) -> Result<&[u8], SessionGenerationWireError> {

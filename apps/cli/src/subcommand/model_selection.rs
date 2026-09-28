@@ -33,26 +33,19 @@ pub(crate) async fn run_models_command(client: Arc<dyn sdk::AgentClient>, json: 
             ingress: std::sync::Arc::new(input_port),
         })
         .await
-        .unwrap_or_else(|e| {
-            eprintln!("Error: {e}");
-            std::process::exit(1);
-        });
+        .unwrap_or_else(|error| crate::fatal_error::report_fatal(error));
     let _ = input_tx.send(sdk::ChatInputEvent::ListModels);
     let models = loop {
         match stream.recv().await {
             Some(sdk::ChatEvent::ModelList { models }) => break models,
             Some(_) => continue,
-            None => {
-                eprintln!("Error: stream closed before model list received");
-                std::process::exit(1);
-            }
+            None => crate::fatal_error::report_fatal("stream closed before model list received"),
         }
     };
     if models.is_empty() {
-        eprintln!(
-            "No models configured. Add models to ~/.agents/aemeath.json or .agents/aemeath.json"
+        crate::fatal_error::report_fatal_message(
+            "No models configured. Add models to ~/.agents/aemeath.json or .agents/aemeath.json",
         );
-        std::process::exit(1);
     }
     if json {
         let output: Vec<serde_json::Value> = models

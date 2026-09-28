@@ -10,6 +10,15 @@ use std::os::fd::AsRawFd;
 const STDOUT_FD: i32 = 1;
 const STDERR_FD: i32 = 2;
 
+/// 路由前保存的原生 stderr 描述符副本，供致命错误重新在终端可见。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SavedStderr {
+    fd: i32,
+}
+
+/// 进程级保存位：stderr 只路由一次，副本随首次路由写入。
+static SAVED_STDERR: std::sync::OnceLock<SavedStderr> = std::sync::OnceLock::new();
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct TerminalIdentity {
     device: u64,
@@ -24,6 +33,10 @@ trait NativeStderrOps {
     fn create_dir_all(&self, path: &Path) -> io::Result<()>;
     fn open_append(&self, path: &Path) -> io::Result<Self::Target>;
     fn replace_stderr(&self, target: &Self::Target) -> io::Result<()>;
+    /// 复制原生 stderr 描述符，供致命错误恢复终端可见性。
+    fn save_stderr(&self) -> io::Result<SavedStderr>;
+    /// 把保存的描述符重新指向进程 stderr。
+    fn restore_stderr(&self, saved: SavedStderr) -> io::Result<()>;
 }
 
 pub(super) fn route_native_stderr(settings: &LoggingSettings) -> io::Result<()> {
@@ -87,12 +100,45 @@ where
             format!("open native stderr file '{}': {error}", path.display()),
         )
     })?;
+    let saved = ops.save_stderr().map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("save native stderr before routing: {error}"),
+        )
+    })?;
     ops.replace_stderr(&target).map_err(|error| {
         io::Error::new(
             error.kind(),
             format!("replace native stderr with '{}': {error}", path.display()),
         )
-    })
+    })?;
+    let _ = SAVED_STDERR.set(saved);
+    Ok(())
+}
+
+/// 把进程 stderr 恢复到路由前的原生终端：致命错误必须在终端可见，而 TUI 模式下
+/// stderr 已被路由到 `native-stderr.log`。未发生路由时为空操作。
+pub fn restore_native_stderr() -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        match SAVED_STDERR.get() {
+            Some(saved) => UnixNativeStderrOps.restore_stderr(*saved),
+            None => Ok(()),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+fn restore_native_stderr_with<Ops>(ops: &Ops, saved: SavedStderr) -> io::Result<()>
+where
+    Ops: NativeStderrOps,
+{
+    ops.restore_stderr(saved)
+        .map_err(|error| io::Error::new(error.kind(), format!("restore native stderr: {error}")))
 }
 
 #[cfg(unix)]
@@ -142,6 +188,26 @@ impl NativeStderrOps for UnixNativeStderrOps {
         // SAFETY: both descriptors are valid for this call; `dup2` atomically
         // replaces FD 2 while `target` remains alive through the call.
         if unsafe { libc::dup2(target.as_raw_fd(), STDERR_FD) } == -1 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn save_stderr(&self) -> io::Result<SavedStderr> {
+        // SAFETY: `dup` only duplicates FD 2 and leaves the original untouched.
+        let fd = unsafe { libc::dup(STDERR_FD) };
+        if fd == -1 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(SavedStderr { fd })
+        }
+    }
+
+    fn restore_stderr(&self, saved: SavedStderr) -> io::Result<()> {
+        // SAFETY: both descriptors are valid for this call; `dup2` atomically
+        // replaces FD 2 with the previously saved terminal descriptor.
+        if unsafe { libc::dup2(saved.fd, STDERR_FD) } == -1 {
             Err(io::Error::last_os_error())
         } else {
             Ok(())

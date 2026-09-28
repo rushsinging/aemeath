@@ -547,6 +547,11 @@ impl SessionStateMember {
         self.cleared_after.as_ref()
     }
 
+    /// 归一已被裁剪出 generation manifest 的 `/clear` 边界。
+    pub fn reset_cleared_after(&mut self) {
+        self.cleared_after = None;
+    }
+
     pub fn into_session(
         self,
         metadata: SessionMetadataMember,
@@ -1117,6 +1122,43 @@ impl SessionCommitPlan {
         self.reused_members.sort();
         self.reused_members.dedup();
         Ok(())
+    }
+
+    /// 对齐 state 的 `/clear` 边界与本次提交写入的 generation manifest：
+    /// 边界不在新 manifest steps 中（compact 裁剪或全量重写后已不可见）时清空，
+    /// 保证磁盘 state 与 manifest 永不自相矛盾。返回是否发生了对齐。
+    pub fn reconcile_cleared_after_with_manifest(
+        &mut self,
+    ) -> Result<bool, SessionGenerationWireError> {
+        let Some(manifest_member) = self
+            .changed_members
+            .iter()
+            .find(|member| member.name() == MANIFEST_MEMBER_NAME)
+        else {
+            return Ok(false);
+        };
+        let target_manifest = SessionGenerationCodec::decode_manifest(manifest_member.bytes())?;
+        let Some(state_member) = self
+            .changed_members
+            .iter_mut()
+            .find(|member| member.name() == SESSION_STATE_MEMBER_NAME)
+        else {
+            return Ok(false);
+        };
+        let mut state = SessionGenerationCodec::decode_state(state_member.bytes())?;
+        let Some(cleared_after) = state.cleared_after().cloned() else {
+            return Ok(false);
+        };
+        if target_manifest
+            .steps()
+            .iter()
+            .any(|reference| reference.cursor() == &cleared_after)
+        {
+            return Ok(false);
+        }
+        state.reset_cleared_after();
+        state_member.bytes = SessionGenerationCodec::encode_state(&state)?;
+        Ok(true)
     }
 
     pub fn promote_reuse_fallbacks<F>(&mut self, mut has_evidence: F)

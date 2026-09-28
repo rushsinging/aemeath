@@ -88,3 +88,40 @@ fn tui_and_no_tui_preserve_prompt_injection_and_invalid_name_results() {
 }
 
 fn _arc_contract(_: Arc<dyn sdk::CommandCatalogPort>, _: Arc<dyn sdk::CommandRouterPort>) {}
+
+/// TUI 模式下 stderr 已被路由到 native-stderr.log：任何直接 `eprintln!` + `exit(1)`
+/// 的致命错误都会对用户静默。所有致命出口 **MUST** 经 `crate::fatal_error`。
+#[test]
+fn fatal_exit_paths_restore_terminal_stderr_through_single_reporter() {
+    let reporter = include_str!("fatal_error.rs");
+    assert!(
+        reporter.contains("restore_terminal_stderr"),
+        "致命错误出口必须先恢复原生 stderr"
+    );
+    assert!(
+        reporter.contains("std::process::exit(1)"),
+        "致命错误出口负责唯一退出"
+    );
+
+    for (path, source) in [
+        ("chat.rs", include_str!("chat.rs")),
+        ("main.rs", include_str!("main.rs")),
+        (
+            "subcommand/model_selection.rs",
+            include_str!("subcommand/model_selection.rs"),
+        ),
+        (
+            "subcommand/sessions_command.rs",
+            include_str!("subcommand/sessions_command.rs"),
+        ),
+        (
+            "subcommand/update_command.rs",
+            include_str!("subcommand/update_command.rs"),
+        ),
+    ] {
+        assert!(
+            !source.contains("std::process::exit(1)"),
+            "{path} 不得直接 exit(1)：必须经 crate::fatal_error::report_fatal 恢复终端 stderr"
+        );
+    }
+}

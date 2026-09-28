@@ -12,3 +12,4 @@ pub use context::{
 pub use file_sink::UnifiedLogger;
 pub use formatter::timestamp_local_rfc3339;
 pub use lifecycle::{is_rotated_log_path, rotated_path, timestamp_rfc3339};
+pub use native_stderr::restore_native_stderr;
