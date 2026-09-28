@@ -154,6 +154,9 @@ fn sdk_message_to_local(message: ChatMessage) -> share::message::Message {
         metadata: message
             .metadata
             .map(|metadata| share::message::MessageMetadata {
+                // SDK wire 不携带输入时刻；该链路仅服务显示投影，
+                // LLM 时间前缀的唯一来源是本机 session 持久化的 created_at。
+                created_at: None,
                 source: match metadata.source {
                     crate::ChatMessageSource::User => share::message::MessageSource::User,
                     crate::ChatMessageSource::SystemGenerated => {

@@ -362,6 +362,7 @@ dependencies = [
  "iana-time-zone",
  "js-sys",
  "num-traits",
+ "serde",
  "wasm-bindgen",
  "windows-link",
 ]
@@ -3726,6 +3727,7 @@ dependencies = [
 name = "share"
 version = "0.0.0"
 dependencies = [
+ "chrono",
  "log",
  "logging",
  "serde",

@@ -10,7 +10,8 @@ use share::reasoning::ReasoningLevel;
 
 use super::performance::{capture, percentiles_ns};
 use super::service::{
-    invocation_reminder_log_payloads, ContextApplicationService, ReminderLogPayload,
+    invocation_reminder_log_payloads, render_user_input_timestamp_prefix,
+    ContextApplicationService, ReminderLogPayload,
 };
 use crate::domain::{
     ContextAppendData, ContextMessages, ContextRequestData, ContextRequestId,
@@ -184,7 +185,6 @@ fn service_with_session(
         Arc::new(BaselinePrompt),
         Arc::new(BaselineMemory),
     )
-    .with_time_source(super::current_local_time::fixed_local_test_now)
 }
 
 fn service_with_summary(
@@ -208,7 +208,6 @@ fn service_with_summary(
         Arc::new(BaselinePrompt),
         Arc::new(BaselineMemory),
     )
-    .with_time_source(super::current_local_time::fixed_local_test_now)
 }
 
 fn oversized_checkpoint_summary() -> String {
@@ -447,7 +446,7 @@ async fn build_window_capture_reports_structure_phases_and_actual_usage() {
     assert_eq!(metrics.snapshot_shared_messages, 2);
     assert_eq!(metrics.pending_messages, 1);
     assert_eq!(metrics.final_messages, 3);
-    assert_eq!(metrics.system_blocks, 6);
+    assert_eq!(metrics.system_blocks, 5);
     assert_eq!(metrics.tool_result_blocks, 1);
     assert_eq!(metrics.tool_result_content_bytes, expected_bytes as u64);
     assert_eq!(metrics.provider_actual_tokens, Some(777));
@@ -604,4 +603,99 @@ async fn context_build_release_workload() {
             decision_p95 as f64 / 1_000_000.0,
         );
     }
+}
+
+// ── 用户输入时间前缀渲染（LLM 视图，canonical 不变）────────────
+
+fn fixed_user_input_time() -> chrono::DateTime<chrono::FixedOffset> {
+    use chrono::TimeZone;
+    chrono::FixedOffset::east_opt(8 * 3600)
+        .expect("UTC+8 offset 必须存在")
+        .with_ymd_and_hms(2026, 6, 15, 14, 30, 5)
+        .single()
+        .expect("固定测试时刻必须唯一")
+}
+
+#[test]
+fn render_user_input_timestamp_prefixes_user_text_with_offset() {
+    let message =
+        share::message::Message::user("hello").with_user_input_timestamp(fixed_user_input_time());
+
+    let rendered =
+        render_user_input_timestamp_prefix(&message).expect("带输入时刻的 user 消息必须加时间前缀");
+
+    assert_eq!(rendered.text_content(), "[2026-06-15 14:30 +0800] hello");
+    assert_eq!(
+        rendered
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.created_at),
+        Some(fixed_user_input_time()),
+        "metadata 必须原样保留"
+    );
+}
+
+#[test]
+fn render_user_input_timestamp_skips_messages_without_created_at() {
+    let message = share::message::Message::user("plain");
+
+    assert!(render_user_input_timestamp_prefix(&message).is_none());
+}
+
+#[test]
+fn render_user_input_timestamp_skips_assistant_role() {
+    let message = share::message::Message {
+        role: share::message::Role::Assistant,
+        content: vec![share::message::ContentBlock::Text {
+            text: "answer".to_string(),
+        }],
+        metadata: None,
+    }
+    .with_user_input_timestamp(fixed_user_input_time());
+
+    assert!(render_user_input_timestamp_prefix(&message).is_none());
+}
+
+#[test]
+fn render_user_input_timestamp_skips_tool_result_only_user_message() {
+    let message = share::message::Message::tool_results(vec![(
+        "tool-1".to_string(),
+        "result".to_string(),
+        false,
+    )])
+    .with_user_input_timestamp(fixed_user_input_time());
+
+    assert!(render_user_input_timestamp_prefix(&message).is_none());
+}
+
+#[test]
+fn render_user_input_timestamp_prefixes_only_first_text_block() {
+    let message = share::message::Message::user_with_images(
+        "hello",
+        vec![(
+            "[Image #1]".to_string(),
+            "AAAA".to_string(),
+            "image/png".to_string(),
+        )],
+    )
+    .with_user_input_timestamp(fixed_user_input_time());
+
+    let rendered =
+        render_user_input_timestamp_prefix(&message).expect("含图片的 user 文本消息仍须加前缀");
+
+    let first_text = rendered
+        .content
+        .iter()
+        .find_map(|block| match block {
+            share::message::ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .expect("渲染后必须保留 Text block");
+    assert_eq!(first_text, "[2026-06-15 14:30 +0800] hello");
+    let image_blocks = rendered
+        .content
+        .iter()
+        .filter(|block| matches!(block, share::message::ContentBlock::Image { .. }))
+        .count();
+    assert_eq!(image_blocks, 1, "图片块不得被改动");
 }

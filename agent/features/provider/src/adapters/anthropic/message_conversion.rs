@@ -247,6 +247,7 @@ mod tests {
                 source: MessageSource::SystemGenerated,
                 hook_notice: None,
                 skill_request: None,
+                created_at: None,
             }),
         };
         let result = convert_messages(&[msg]);

@@ -59,7 +59,7 @@ impl AcceptedUserInput {
     }
 
     pub fn model_message(&self) -> share::message::Message {
-        match self {
+        let message = match self {
             Self::UserMessage { text, images, .. } if images.is_empty() => {
                 share::message::Message::user(text.clone())
             }
@@ -79,7 +79,10 @@ impl AcceptedUserInput {
                     raw_input: request.raw_input.clone(),
                 },
             ),
-        }
+        };
+        // 真实用户输入的唯一构造收口：盖输入时刻，供 Context window
+        // 渲染 LLM 时间前缀；canonical 文本不变。
+        message.with_user_input_timestamp(chrono::Local::now().fixed_offset())
     }
 
     pub fn withdraw_text(&self) -> String {
@@ -118,7 +121,7 @@ impl LoopInput {
         if let Some(input) = self.accepted.as_ref() {
             return input.model_message();
         }
-        if self.images.is_empty() {
+        let message = if self.images.is_empty() {
             share::message::Message::user(self.text.clone())
         } else {
             share::message::Message::user_with_images(
@@ -129,7 +132,9 @@ impl LoopInput {
                     .map(|image| (image.id, image.base64, image.media_type))
                     .collect(),
             )
-        }
+        };
+        // 未走 gate 的兜底输入同样是真实用户输入：盖输入时刻。
+        message.with_user_input_timestamp(chrono::Local::now().fixed_offset())
     }
 }
 

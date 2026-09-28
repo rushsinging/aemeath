@@ -70,7 +70,8 @@ impl ContextRequest {
 }
 struct ContextWindow {
     backing_revision: SessionRevision, // 本 window 读取的稳定 backing revision，供 append CAS
-    system_blocks: Vec<SystemBlock>,    // 稳定系统+memory+summary（cacheable prefix）+ 当前本地时间（uncached suffix）
+    system_blocks: Vec<SystemBlock>,    // 稳定系统+memory+summary；全部位于 cacheable prefix
+    // （时间不进 system blocks：user 输入时刻前缀在 final assembly 渲染）
     messages: Vec<Message>,             // canonical 原文窗口；包含已提交的普通 tool results
     tool_schemas: Vec<ModelToolSchema>, // req.tool_schemas 原样透传；Context 不重拉 Catalog
     token_estimation: TokenBudget,      // 预算快照
@@ -158,10 +159,12 @@ cacheable_prefix:
   4 skills                5 agent_roles           6 user_guidance
   7 memory_context        8 active_summary
 cache breakpoint
-uncached_suffix:
-  9 current_local_time     // 请求级本地时间；随请求更新，进 prefix 会导致缓存失效
 ordinary messages:
   TaskUpdate(status) tool result → 按事件携带 Task 原子进度摘要
+user message 时间前缀：
+  带 `metadata.created_at` 的 user 输入在 final assembly 渲染为
+  `[YYYY-MM-DD HH:MM ±ZZZZ] ` 前缀；仅 window 视图，canonical 与
+  落盘 JSON 不含前缀，tool result / 系统生成 / reminder 消息不加。
 ```
 Git 首次快照不属于 `ContextWindow.system_blocks`：Runtime 仅在 session 首个 Run 作为普通系统生成消息投递一次。
 ## 3. 五级管线总览

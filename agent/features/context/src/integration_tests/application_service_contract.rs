@@ -303,7 +303,6 @@ fn service_with_session(session: FakeSession) -> ContextApplicationService {
         Arc::new(FakePrompt),
         Arc::new(FakeMemory),
     )
-    .with_time_source(crate::application::current_local_time::fixed_local_test_now)
 }
 
 fn service() -> ContextApplicationService {
@@ -518,7 +517,6 @@ async fn build_window_assembles_history_pending_and_fixed_extension_order() {
             "user_guidance",
             "memory_context",
             "active_summary",
-            "current_local_time",
         ]
     );
     assert!(window
@@ -548,29 +546,44 @@ async fn build_window_assembles_history_pending_and_fixed_extension_order() {
 }
 
 #[tokio::test]
-async fn build_window_appends_current_local_time_and_still_omits_dynamic_system_context() {
-    let window = service().build_window(&request()).await.unwrap();
+async fn build_window_prefixes_user_input_timestamp_without_time_system_blocks() {
+    let mut request = request();
+    request.pending_messages =
+        vec![Message::user("pending").with_user_input_timestamp(fixed_user_input_time())];
 
-    let time_block = window
-        .system_blocks
+    let window = service().build_window(&request).await.unwrap();
+
+    let prefixed = window
+        .messages
         .iter()
-        .find(|block| block.kind == "current_local_time")
-        .expect("window 必须携带当前本地时间块");
+        .find(|message| message.text_content().contains("pending"))
+        .expect("带输入时刻的 pending 消息必须进入 window");
     assert_eq!(
-        time_block.content,
-        "当前本地时间: 2026-06-15 14:30:05 +0800"
+        prefixed.text_content(),
+        "[2026-06-15 14:30 +0800] pending",
+        "LLM 视图必须带输入时刻前缀"
     );
-    assert!(!time_block.cacheable);
-    assert!(!time_block.cache_break);
     assert_eq!(
-        window.system_blocks.last().map(|block| block.kind.as_str()),
-        Some("current_local_time"),
-        "时间块必须位于 uncached suffix 末尾"
+        window.messages[0].text_content(),
+        "history",
+        "无 created_at 的历史消息不得被装饰"
     );
-    assert!(window
-        .system_blocks
-        .iter()
-        .all(|block| block.kind != "dynamic_system_context"));
+    assert!(
+        window.system_blocks.iter().all(|block| !matches!(
+            block.kind.as_str(),
+            "current_local_time" | "current_date" | "dynamic_system_context"
+        )),
+        "时间不得以 system block 形式注入，dynamic_system_context 仍须省略"
+    );
+}
+
+fn fixed_user_input_time() -> chrono::DateTime<chrono::FixedOffset> {
+    use chrono::TimeZone;
+    chrono::FixedOffset::east_opt(8 * 3600)
+        .expect("UTC+8 offset 必须存在")
+        .with_ymd_and_hms(2026, 6, 15, 14, 30, 5)
+        .single()
+        .expect("固定测试时刻必须唯一")
 }
 
 #[tokio::test]

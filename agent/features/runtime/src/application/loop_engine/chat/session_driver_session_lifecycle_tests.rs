@@ -260,7 +260,10 @@ impl LlmProvider for RecordingProvider {
             .iter()
             .rev()
             .find(|message| message.role == Role::User)
-            .map(|message| message.text_content())
+            .map(|message| {
+                let text = message.text_content();
+                without_input_timestamp(&text).to_string()
+            })
             .unwrap_or_default();
         self.calls.lock().unwrap().push(last_user.clone());
         let text = format!("response to {last_user}");

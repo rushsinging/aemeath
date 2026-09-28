@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use chrono::{DateTime, FixedOffset};
 
 use crate::domain::{
     AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
@@ -16,8 +15,6 @@ pub(crate) struct ContextApplicationService {
     session: Arc<dyn SessionRepository>,
     prompt: Arc<dyn ContextPromptSource>,
     memory: Arc<dyn ContextMemorySource>,
-    /// 请求级「当前本地时间」块的时间源；测试可注入固定时钟（3.2.5.4）。
-    time_source: fn() -> DateTime<FixedOffset>,
 }
 
 impl ContextApplicationService {
@@ -30,15 +27,7 @@ impl ContextApplicationService {
             session,
             prompt,
             memory,
-            time_source: super::current_local_time::local_now,
         }
-    }
-
-    /// 测试专用：替换时间源为固定时钟，避免用例依赖真实时间。
-    #[cfg(test)]
-    pub(crate) fn with_time_source(mut self, time_source: fn() -> DateTime<FixedOffset>) -> Self {
-        self.time_source = time_source;
-        self
     }
 
     async fn build_candidate(
@@ -128,6 +117,9 @@ impl ContextApplicationService {
                     .collect(),
             );
         }
+        // LLM 视图收口（specs/3.7 §18）：为带输入时刻的 user 消息渲染时间前缀；
+        // canonical 与持久化 JSON 不含前缀，无 created_at 的消息原样保留。
+        let messages = messages.map_messages(render_user_input_timestamp_prefix);
         #[cfg(test)]
         let messages_assembly_duration = messages_started.elapsed();
 
@@ -205,12 +197,6 @@ impl ContextApplicationService {
             last_cacheable.cache_break = true;
         }
         blocks.extend(prompt.uncached);
-        // uncached suffix 末尾追加请求级本地时间：每步请求都携带当前时间，
-        // 位于 cache breakpoint 之后，不破坏 prompt cache（specs/3.7 §18）。
-        blocks.push(super::current_local_time::current_local_time_block(
-            request.language.as_str(),
-            (self.time_source)(),
-        ));
 
         #[cfg(test)]
         {
@@ -562,4 +548,25 @@ impl ContextPort for ContextApplicationService {
     ) -> Result<AppendReceiptData, ContextAppendError> {
         self.session.append_finalized(append).await
     }
+}
+
+/// 为带用户输入时刻的 user 消息渲染 LLM 时间前缀 `[YYYY-MM-DD HH:MM ±ZZZZ] `，
+/// 仅作用于 ContextWindow 视图（canonical message 与落盘 JSON 不变）。
+/// 返回 `None` 表示原样保留：非 user、无 `created_at`（系统生成 / tool result /
+/// reminder）或无 Text block 的消息都不加前缀。
+pub(crate) fn render_user_input_timestamp_prefix(
+    message: &share::message::Message,
+) -> Option<share::message::Message> {
+    if message.role != share::message::Role::User {
+        return None;
+    }
+    let created_at = message.metadata.as_ref()?.created_at?;
+    let prefix = format!("[{}] ", created_at.format("%Y-%m-%d %H:%M %z"));
+    let mut rendered = message.clone();
+    let first_text = rendered.content.iter_mut().find_map(|block| match block {
+        share::message::ContentBlock::Text { text } => Some(text),
+        _ => None,
+    })?;
+    *first_text = format!("{prefix}{first_text}");
+    Some(rendered)
 }

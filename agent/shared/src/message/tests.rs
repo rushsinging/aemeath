@@ -273,3 +273,78 @@ fn test_tool_result_ids() {
     ]);
     assert_eq!(msg.tool_result_ids(), vec!["r1", "r2"]);
 }
+
+// ── 用户输入时刻（metadata.created_at）─────────────────────────
+
+fn fixed_user_input_time() -> chrono::DateTime<chrono::FixedOffset> {
+    use chrono::TimeZone;
+    chrono::FixedOffset::east_opt(8 * 3600)
+        .expect("UTC+8 offset 必须存在")
+        .with_ymd_and_hms(2026, 6, 15, 14, 30, 5)
+        .single()
+        .expect("固定测试时刻必须唯一")
+}
+
+#[test]
+fn with_user_input_timestamp_stamps_created_at_without_changing_text() {
+    let message = Message::user("hello").with_user_input_timestamp(fixed_user_input_time());
+
+    assert_eq!(
+        message
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.created_at),
+        Some(fixed_user_input_time())
+    );
+    assert_eq!(message.text_content(), "hello");
+    assert_eq!(message.role, Role::User);
+}
+
+#[test]
+fn with_user_input_timestamp_preserves_existing_metadata_fields() {
+    let message = Message::skill_request(
+        "/skill x",
+        SkillRequestMetadata {
+            skill: "x".to_string(),
+            arguments: String::new(),
+            raw_input: "/skill x".to_string(),
+        },
+    )
+    .with_user_input_timestamp(fixed_user_input_time());
+
+    let metadata = message
+        .metadata
+        .as_ref()
+        .expect("skill_request 消息必须保留 metadata");
+    assert_eq!(metadata.source, MessageSource::SkillRequest);
+    assert!(metadata.skill_request.is_some());
+    assert_eq!(metadata.created_at, Some(fixed_user_input_time()));
+}
+
+#[test]
+fn legacy_message_json_without_created_at_still_parses() {
+    let legacy = serde_json::json!({
+        "role": "user",
+        "content": [{ "type": "text", "text": "hi" }]
+    });
+
+    let message: Message =
+        serde_json::from_value(legacy).expect("无 created_at 的旧 session JSON 必须可解析");
+    assert_eq!(
+        message.metadata.and_then(|metadata| metadata.created_at),
+        None
+    );
+}
+
+#[test]
+fn created_at_round_trips_through_session_json() {
+    let message = Message::user("hi").with_user_input_timestamp(fixed_user_input_time());
+
+    let json = serde_json::to_value(&message).expect("消息必须可序列化");
+    let restored: Message =
+        serde_json::from_value(json).expect("带 created_at 的消息必须可反序列化");
+    assert_eq!(
+        restored.metadata.and_then(|metadata| metadata.created_at),
+        Some(fixed_user_input_time())
+    );
+}
