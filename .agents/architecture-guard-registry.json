@@ -1689,7 +1689,6 @@
         "ConfigRefreshOutcomeData",
         "ConfigSubscriptionData",
         "ConfigUpdateData",
-        "ConfigWiring",
         "ConfigWriter",
         "GlobalConfigConnectStore",
         "GlobalConfigDocument",
@@ -1699,19 +1698,9 @@
         "PreparedProjectConfigData",
         "ProjectConfigLocationData",
         "ProjectConfigParticipant",
-        "catalog",
-        "connect",
-        "form",
         "is_persist_conflict",
-        "ports",
         "resolve_provider_runtime",
-        "resolve_provider_runtime_for_selection",
-        "runtime_resolution",
-        "wire_config_override_store",
-        "wire_global_connect_store",
-        "wire_project_config",
-        "wire_project_config_with_agents_dir",
-        "wire_project_config_with_cli"
+        "resolve_provider_runtime_for_selection"
       ],
       "reason": "F-2：config crate 根窄 façade（#1706 DDD 五类判据：命令/事件/值对象/端口/工厂；协议模块 connect/form/catalog/ports 为子发布语言）",
       "profile": "full"
@@ -1858,11 +1847,7 @@
         "kind": "path_prefix",
         "value": "agent/features/memory/src"
       },
-      "allowed_symbols": [
-        "wire_legacy_memory_source_factory",
-        "wire_memory_opener",
-        "wire_reflection_history_store"
-      ],
+      "allowed_symbols": [],
       "reason": "F-2：memory 对外仅 ::api（update 同构，L1 禁段放行 api 段）；根零 re-export，唯三 wire 工厂为 composition 构造入口（#1709 DDD 五类判据）",
       "profile": "full"
     },
@@ -1897,13 +1882,9 @@
         "Workspace",
         "WorkspaceControl",
         "WorkspaceData",
-        "WorkspaceError",
-        "WorkspaceId",
         "WorkspaceReader",
         "WorkspaceRestoreData",
-        "WorkspaceRestoreError",
         "WorkspaceWriter",
-        "WorktreeKind",
         "wire_production_workspace"
       ],
       "reason": "F-2：project crate 根窄 façade（#1022 登记，消费者证明制）",
@@ -1980,7 +1961,6 @@
         "RuntimeBootstrapDependenciesData",
         "RuntimeContextFactory",
         "RuntimeCoreDependenciesData",
-        "RuntimeLifecycleEvent",
         "RuntimeToolAssemblyDependenciesData",
         "SessionBootstrapAssemblyData",
         "SessionModelSlotData",
@@ -1993,7 +1973,6 @@
         "build_static_prompt",
         "build_system_prompt_parts",
         "config_snapshot_to_sdk",
-        "map_lifecycle_event",
         "resolve_concurrency_limits",
         "resolve_model_runtime_settings",
         "resume_session_to_backing",
@@ -2130,8 +2109,6 @@
         "ToolProfileName",
         "ToolResult",
         "WorkspaceReadAccess",
-        "composition",
-        "published",
         "role_profile_name",
         "types"
       ],

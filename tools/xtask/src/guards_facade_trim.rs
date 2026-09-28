@@ -131,9 +131,10 @@ pub fn analyze_crate(repo_root: &Path, crate_name: &str) -> Result<FacadeReport>
     let exports = export_leaves_with_module(&lib_source);
     let symbols: Vec<&String> = exports.keys().collect();
 
-    // 面 1：跨 crate + 外部工程消费（含 owner tests/ 集成契约）。
+    // 面 1：跨 crate + 外部工程消费（含 owner tests/ 与 composition 集成契约测试）。
     let mut consumer_dirs: Vec<PathBuf> = vec![
         repo_root.join("agent/composition/src"),
+        repo_root.join("agent/composition/tests"),
         repo_root.join("apps/cli/src"),
         repo_root.join("packages/sdk/src"),
         repo_root.join("agent/shared/src"),
