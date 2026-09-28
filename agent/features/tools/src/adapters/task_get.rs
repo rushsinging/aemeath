@@ -16,10 +16,10 @@ mod tests;
 fn current_task(access: &dyn TaskAccess, value: &str) -> Result<task::TaskData, String> {
     let seq = TaskIdData::parse_tool_input(value)
         .map(TaskIdData::get)
-        .map_err(|_| format!("TaskData ID must be a non-zero decimal number: {value}"))?;
+        .map_err(|_| format!("Task ID must be a non-zero decimal number: {value}"))?;
     access
         .current_task_by_seq(seq)
-        .ok_or_else(|| format!("TaskData not found: {value}"))
+        .ok_or_else(|| format!("Task not found: {value}"))
 }
 
 #[async_trait]
@@ -68,7 +68,7 @@ impl TypedTool for TaskGetTool {
             .filter_map(|id| self.access.get(*id).map(|task| task.seq().to_string()))
             .collect();
         TypedToolResult::success(
-            format!("TaskData #{}: {}", task.seq(), task.subject()),
+            format!("Task #{}: {}", task.seq(), task.subject()),
             TaskGetResult {
                 task: TaskViewData::from_task(&task, blocked_by),
             },

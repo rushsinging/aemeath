@@ -53,7 +53,7 @@ impl TypedTool for TaskListCompleteTool {
                 let task_change = CommittedTaskChange::from_command_result(&command_result);
                 let batch_id = command_result.value.id().to_string();
                 TypedToolResult::success(
-                    format!("TaskData list #{} completed", batch_id),
+                    format!("Task list #{} completed", batch_id),
                     TaskListCompleteResult { batch_id },
                 )
                 .with_task_change(task_change)

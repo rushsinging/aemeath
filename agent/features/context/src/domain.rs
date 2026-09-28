@@ -407,7 +407,7 @@ pub struct CompactRequestData {
     /// map-reduce chunk 计数实时上报；`None` 表示调用方不关心进度。
     pub progress: Option<Arc<dyn CompactProgressFn>>,
     /// 当前 typed TaskData 快照：参与 Rust-owned checkpoint 协调，并由同一快照
-    /// 确定性渲染非权威 `Current TaskData State` companion。
+    /// 确定性渲染非权威 `Current Task State` companion。
     pub task_snapshot: Option<crate::domain::compact::CompactTaskSnapshotData>,
     /// 当前 Run 的取消信号。摘要生成必须合作式消费；取消后不得提交 fallback。
     pub cancellation: tokio_util::sync::CancellationToken,

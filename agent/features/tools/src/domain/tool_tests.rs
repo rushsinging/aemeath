@@ -28,7 +28,7 @@ fn committed_change() -> CommittedTaskChange {
 fn typed_result_preserves_runtime_task_change_without_changing_llm_data() {
     let change = committed_change();
     let result = TypedToolResult::success(
-        "TaskData #1 created",
+        "Task #1 created",
         TaskCreateResult {
             task_id: "1".to_owned(),
             display_id: "1".to_owned(),
@@ -39,7 +39,7 @@ fn typed_result_preserves_runtime_task_change_without_changing_llm_data() {
     )
     .with_task_change(Some(change.clone()));
 
-    assert_eq!(result.text, "TaskData #1 created");
+    assert_eq!(result.text, "Task #1 created");
     assert_eq!(result.task_change, Some(change));
     assert!(result.data.is_some());
 }

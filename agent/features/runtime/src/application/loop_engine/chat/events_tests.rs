@@ -6,7 +6,7 @@ fn tool_outcome_has_committed_task_change(outcome: &ToolOutcome) -> bool {
 
 #[test]
 fn task_refresh_gating_uses_committed_change_not_tool_name() {
-    let outcome = ToolOutcome::new("TaskData #1 updated", serde_json::Value::Null, Vec::new());
+    let outcome = ToolOutcome::new("Task #1 updated", serde_json::Value::Null, Vec::new());
 
     assert!(!tool_outcome_has_committed_task_change(&outcome));
 }

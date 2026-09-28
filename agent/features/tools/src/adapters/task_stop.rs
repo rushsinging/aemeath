@@ -16,10 +16,10 @@ mod tests;
 fn current_task(access: &dyn TaskAccess, value: &str) -> Result<task::TaskData, String> {
     let seq = TaskIdData::parse_tool_input(value)
         .map(TaskIdData::get)
-        .map_err(|_| format!("TaskData ID must be a non-zero decimal number: {value}"))?;
+        .map_err(|_| format!("Task ID must be a non-zero decimal number: {value}"))?;
     access
         .current_task_by_seq(seq)
-        .ok_or_else(|| format!("TaskData not found: {value}"))
+        .ok_or_else(|| format!("Task not found: {value}"))
 }
 
 #[async_trait]
@@ -66,15 +66,12 @@ impl TypedTool for TaskStopTool {
         match task.status() {
             TaskStatusData::Completed => {
                 return TypedToolResult::error(format!(
-                    "TaskData #{} is already completed and cannot be stopped",
+                    "Task #{} is already completed and cannot be stopped",
                     task.seq()
                 ))
             }
             TaskStatusData::Deleted => {
-                return TypedToolResult::error(format!(
-                    "TaskData #{} is already deleted",
-                    task.seq()
-                ))
+                return TypedToolResult::error(format!("Task #{} is already deleted", task.seq()))
             }
             _ => {}
         }
@@ -87,7 +84,7 @@ impl TypedTool for TaskStopTool {
         };
         let task_change = CommittedTaskChange::from_command_result(&command_result);
         TypedToolResult::success(
-            format!("TaskData #{} stopped and marked as deleted", task.seq()),
+            format!("Task #{} stopped and marked as deleted", task.seq()),
             TaskStopResult {
                 task_id: task.seq().to_string(),
             },

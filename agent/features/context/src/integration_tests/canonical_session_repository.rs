@@ -2153,16 +2153,13 @@ async fn commit_compaction_reconciles_typed_task_snapshot_and_companion() {
     let crate::CompactOutcome::Committed(result) = &outcome else {
         panic!("expected committed compact: {outcome:?}");
     };
-    assert_eq!(
-        result.summary.matches("## Current TaskData State").count(),
-        1
-    );
+    assert_eq!(result.summary.matches("## Current Task State").count(), 1);
     assert!(result.summary.contains("■ [task:1 seq:1] 实现压缩拼接"));
     assert!(result.summary.contains("- Next action: 实现压缩拼接"));
     assert!(result.summary.contains("## Current Objective"));
     assert!(
         crate::compact::estimate_tokens(&result.summary) <= crate::compact::summary_budget(100_000),
-        "checkpoint 与 Current TaskData State companion 的完整持久化结果必须在预算内"
+        "checkpoint 与 Current Task State companion 的完整持久化结果必须在预算内"
     );
 }
 
@@ -2211,10 +2208,7 @@ async fn commit_compaction_keeps_large_task_companion_within_summary_budget() {
     assert!(
         crate::compact::estimate_tokens(&result.summary) <= crate::compact::summary_budget(100_000)
     );
-    assert_eq!(
-        result.summary.matches("## Current TaskData State").count(),
-        1
-    );
+    assert_eq!(result.summary.matches("## Current Task State").count(), 1);
     assert!(result.summary.contains("BatchData #1 — Tasks: 0/30"));
     assert!(result.summary.contains("- Next action:"));
 }
