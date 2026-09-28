@@ -615,13 +615,23 @@ impl App {
                 self.chat.active_run_step = None;
                 self.chat.stop_processing();
                 self.mark_output_dirty();
-                // 回合完成 → OSC 777 桌面通知（副作用经 Effect 由 executor 执行）。
+                // 回合完成 → OSC 777 桌面通知（副作用经 Effect 由 executor 执行），
+                // 携带 session 上下文：项目名、分支、当前 prompt。
+                let notification =
+                    crate::tui::effect::terminal_notification::turn_complete_notification(
+                        &crate::tui::effect::terminal_notification::TurnCompleteNotificationContext {
+                            prompt: crate::tui::effect::terminal_notification::latest_user_prompt(
+                                self.model.conversation.timeline.items(),
+                            )
+                            .as_deref(),
+                            path_base: self.model.workspace_provider.path_base(),
+                            branch: self.model.workspace_provider.branch(),
+                            duration_ms: *duration_ms,
+                        },
+                    );
                 extra_effects.push(Effect::SendTerminalNotification {
-                    title: "aemeath".to_string(),
-                    body:
-                        crate::tui::effect::terminal_notification::turn_complete_notification_body(
-                            *duration_ms,
-                        ),
+                    title: notification.0,
+                    body: notification.1,
                 });
             }
             TuiRuntimeEvent::Cancelled { .. } => {

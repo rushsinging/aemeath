@@ -75,3 +75,53 @@ fn cancelled_event_does_not_emit_terminal_notification() {
     );
     harness.assert_idle();
 }
+
+/// 完整 session 上下文：项目名进 title，prompt + 分支进 body。
+#[test]
+fn done_notification_carries_session_context() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+
+    // 项目名：WorkspaceSnapshot → ApplySnapshot。
+    harness.runtime_event(TuiRuntimeEvent::WorkspaceSnapshot(
+        crate::tui::adapter::tui_runtime_event::TuiWorkspaceSnapshot {
+            path_base: "~/repo".to_string(),
+            workspace_root: "/repo".to_string(),
+            context_stack: vec![],
+        },
+    ));
+    // 分支：metadata 解析回灌（ApplyMetadata 根因匹配 root + revision=1）。
+    harness.ui(crate::tui::app::event::UiEvent::WorkspaceMetadataResolved(
+        crate::tui::app::event::WorkspaceMetadataResolved {
+            root: "/repo".to_string(),
+            revision: 1,
+            branch: Some("main".to_string()),
+            kind: crate::tui::model::conversation::workspace::WorktreeKind::MainCheckout,
+        },
+    ));
+    // 当前 prompt：用户消息 adopted 进 timeline。
+    harness.runtime_event(TuiRuntimeEvent::UserMessagesAdopted {
+        items: vec![
+            crate::tui::adapter::runtime_view::TuiChatMessage::user_text(
+                "重构通知逻辑\n第二行不该出现",
+            ),
+        ],
+        queued: vec![],
+    });
+
+    harness.runtime_event(TuiRuntimeEvent::TurnStarted { messages: vec![] });
+    harness.runtime_event(TuiRuntimeEvent::Done {
+        context: ctx(),
+        duration_ms: Some(125_000),
+    });
+    harness.render();
+
+    assert_eq!(
+        notification_effects(&harness),
+        vec![(
+            "aemeath · ~/repo".to_string(),
+            "重构通知逻辑 · main · Turn complete in 2m 5s".to_string()
+        )],
+        "通知必须携带项目名、prompt 首行与分支"
+    );
+    harness.assert_idle();
+}
