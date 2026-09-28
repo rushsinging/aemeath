@@ -91,6 +91,10 @@ pub struct Rule {
     pub reason: String,
     #[serde(default = "default_profile")]
     pub profile: Profile,
+    /// 豁免条目存量上限（`exclusions` 当前数量不得超过它；只降不升的收缩契约）。
+    /// 缺省表示不约束；`guard-registry check` 负责阻断反弹。
+    #[serde(default)]
+    pub exclusion_baseline: Option<usize>,
 }
 
 fn default_profile() -> Profile {

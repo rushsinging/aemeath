@@ -98,6 +98,7 @@ pub fn run(repo_root: &Path, profile: Profile, rule_filter: Option<&str>) -> Res
                 spec,
                 reason: String::new(),
                 profile: guards_rules::Profile::Full,
+                exclusion_baseline: None,
             };
             for relative_file in &source_files {
                 let file_violations = guards_rules::enforce_rule(&rule, repo_root, relative_file)?;
