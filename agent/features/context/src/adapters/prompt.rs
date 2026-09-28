@@ -6,8 +6,10 @@
 pub(crate) mod guidance;
 pub(crate) mod security;
 
+#[cfg(any(test, feature = "dev"))]
+pub(crate) use guidance::resolve_guidance;
 pub use guidance::resolver::InstructionsLoadedHook;
 pub use guidance::{init_guidance_dir, resolve_guidance_async};
-#[cfg(any(test, feature = "dev"))]
-pub(crate) use guidance::{resolve_guidance, universal_execution_discipline};
+// 生产消费点：adapters/prompt_source.rs（BaselinePromptSource 组装 execution_discipline）。
+pub(crate) use guidance::universal_execution_discipline;
 pub use security::assess_guidance;
