@@ -481,6 +481,20 @@ Compact 完成后             →  刷新注入（重新检索 + 替换）
 
 **零变更不提示**：`N == 0` 时两条通道都不发。
 
+#### 可观测性配套
+
+D3 需要"变更了 N 条"这一数字，而它目前**既无日志也无对外出口** —— `ReflectionApplyResult { suggestions_added, outdated_marked, superseded }` 只存在于结构体中，反思终态日志记录的是 status 而非计数。因此 D3 的实现必然要读出它，**顺手补齐日志属于数据流的一环**（符合 `specs/3.15` 的"info 记录终态"约定）：
+
+| 项 | level | 内容与条件 |
+|---|---|---|
+| apply 结果计数 | `info` | 变更总数 > 0 时记录分项：`added` / `superseded` / `outdated` |
+| token 消耗 | `info` | 与反思终态日志一并记录 input / output tokens |
+| 触发判定禁用原因 | `info` | **仅**记录配置类禁用（`enabled=false` / `reflection.enabled=false` / `interval_runs=0`） |
+
+**明确不记录**：触发判定中"`step_count` 未到 `interval_runs` 倍数"这类**常态未触发** —— 该判定每轮都执行，全量记录会淹没日志。
+
+**现状参照**：反思链路已有生命周期日志（`[reflection_busy]` 跳过 / `[reflection_accepted]` 接受 / `[reflection_terminal]` 终态含错误分类与记录 id），以及 apply 失败的 `warn`。上述三项是在此基础上的缺口补齐，**不重复已有记录**。
+
 ### 7.4 D4：reflect 模型可跨 provider 指定（既有能力）
 
 `memory.reflection.model` 的配置值格式为 `provider/model`（`share/src/config/domain/memory.rs` 测试用例为 `Some("test/model")`），支持在**全部 provider 的模型**中指定。
@@ -641,7 +655,7 @@ Compact 完成后             →  刷新注入（重新检索 + 替换）
 |---|---|
 | L0 编译期 | 新字段参与 `MemoryEntry` 构造的所有点；架构守卫无新增违规 |
 | L1 单元测试 | eligibility 三个新条件的纯函数；取代链环检测；证据指针校验；归纳证据下限（`evidence.len() >= 2`）；**比例预算函数的边界值（含 3% 的整数实现）**；全部字段的 serde 往返（含旧格式缺字段、`inject_count` 残留配置被忽略） |
-| L2 模块协作 | `write` 合并路径；`apply_reflection` 的取代路径与归纳路径（`synthesizes` → `kind` + `evidence`）；三消费场景的状态分工（§8.2 可见性矩阵逐格）；**覆盖式让位算法（§8.3）**；**注入时机：首次注入后冻结、compact 后刷新（§7.2）** |
+| L2 模块协作 | `write` 合并路径；`apply_reflection` 的取代路径与归纳路径（`synthesizes` → `kind` + `evidence`）；三消费场景的状态分工（§8.2 可见性矩阵逐格）；**覆盖式让位算法（§8.3）**；**注入时机：首次注入后冻结、compact 后刷新（§7.2）**；**apply 计数与 token 的 info 日志断言（参照既有 `CapturingLogger` 测试模式，§7.3）** |
 | L3 契约测试 | `apply_reflection` 扩展行为契约；`NoOpMemory` 行为；持久化格式向前兼容；**系统提示 reminder 的新变体契约（仅下一轮一次）** |
 | L4 场景测试 | 取代后不再注入但可检索；合并后证据可查；归纳结论可产出且可回溯到全部来源事实；**注入时结论优先、来源事实让位，同时显式检索中两者都完整可见**；反思不基于被取代条目产出新建议（污染循环回归）；**compact 后注入刷新**；**反思完成后 LLM 收到一次 reminder、TUI 收到一次提示，零变更时都不发** |
 | L5 系统 smoke | 不适用（无进程级、平台级行为变更） |
@@ -716,4 +730,4 @@ Compact 完成后             →  刷新注入（重新检索 + 替换）
 | 2026-09-28 | 初稿：变更 A/B/C 的领域模型、不变量、端口与行为设计、测试策略与验收标准；变更 D 方向记录；不变量与端口变更汇总；不采纳清单与开放问题 |
 | 2026-09-28 | 新增读链路设计：三条读路径与决策者、可见性矩阵（含反思输入排除规则）、证据消费、滞后判定与分层读取策略 |
 | 2026-09-28 | **按方案确认重构**：删除「巩固水位」与「独立归纳层」两个变更，改为「由反思承担归纳职责」（新变更 C，沿用既有触发）；读链路精简为可见性矩阵 + 归纳产物与来源事实的读取协调（注入降权 / 检索不降权）；滞后判定与分层读取策略移入不采纳清单并记录场景依据；不变量收敛为 M9–M13 |
-| 2026-09-28 | 新增**变更 D（注入与提醒机制）**：注入预算改为按比例（`context_size / 50`）并移除条数上限；注入时机改为「Session 首次 + compact 后刷新」；reflect 完成后双通道提示（LLM 单次 reminder 含查看指引 + TUI system message）；`format_output` 与 `user_alert` 按死代码移除（TUI 侧只走系统提示）；附带修正 compact 比例（summary 5% / tail 3%）。变更 B 补入 `kind: MemoryKind` 字段；读链路降权实现定为「覆盖式让位」 |
+| 2026-09-28 | 新增**变更 D（注入与提醒机制）**：注入预算改为按比例（`context_size / 50`）并移除条数上限；注入时机改为「Session 首次 + compact 后刷新」；reflect 完成后双通道提示（LLM 单次 reminder 含查看指引 + TUI system message）；`format_output` 与 `user_alert` 按死代码移除（TUI 侧只走系统提示）；补入可观测性配套（apply 计数、token 消耗、配置类禁用原因的 info 日志）；附带修正 compact 比例（summary 5% / tail 3%）。变更 B 补入 `kind: MemoryKind` 字段；读链路降权实现定为「覆盖式让位」 |
