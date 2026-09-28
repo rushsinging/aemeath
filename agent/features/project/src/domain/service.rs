@@ -7,7 +7,7 @@ use share::session_types::{
 
 use crate::domain::git::GitWorktreeOps;
 use crate::domain::state::WorkspaceRestoreData;
-use crate::domain::state::{self as rules, WorkspaceState};
+use crate::domain::state::WorkspaceState;
 use crate::domain::types::{
     WorkspaceControl, WorkspaceData, WorkspaceError, WorkspaceReader, WorkspaceWriter,
 };
@@ -152,14 +152,7 @@ impl WorkspaceService {
     pub fn seed_isolated(&self) -> Arc<Self> {
         let s = self.lock();
         Arc::new(Self {
-            state: Mutex::new(WorkspaceState {
-                project_identity: s.project_identity.clone(),
-                workspace_root: s.workspace_root.clone(),
-                path_base: s.path_base.clone(),
-                worktree_kind: s.worktree_kind,
-                worktrees_root: s.worktrees_root.clone(),
-                stack: Vec::new(),
-            }),
+            state: Mutex::new(s.derive_isolated()),
             control_operation: Mutex::new(()),
             git: self.git.clone(),
         })
@@ -188,20 +181,20 @@ impl WorkspaceReader for WorkspaceService {
         self.lock().workspace_id()
     }
     fn project_identity(&self) -> ProjectIdentityData {
-        self.lock().project_identity.clone()
+        self.lock().project_identity().clone()
     }
     fn current_workspace_root(&self) -> PathBuf {
-        self.lock().workspace_root.clone()
+        self.lock().workspace_root().to_path_buf()
     }
     fn current_path_base(&self) -> PathBuf {
-        self.lock().path_base.clone()
+        self.lock().path_base().to_path_buf()
     }
     fn resolve(&self, rel: &Path) -> PathBuf {
         self.lock().resolve(rel)
     }
     fn resolve_file_path(&self, path: &Path) -> Result<PathBuf, share::error::DomainError> {
         let state = self.lock();
-        resolve_path(path, &state.path_base, Some(&state.workspace_root), false)
+        resolve_path(path, state.path_base(), Some(state.workspace_root()), false)
     }
     fn resolve_file_path_authorized(
         &self,
@@ -211,14 +204,14 @@ impl WorkspaceReader for WorkspaceService {
         let state = self.lock();
         resolve_path(
             path,
-            &state.path_base,
-            (!allow_outside_workspace).then_some(state.workspace_root.as_path()),
+            state.path_base(),
+            (!allow_outside_workspace).then_some(state.workspace_root()),
             false,
         )
     }
     fn resolve_search_path(&self, path: &Path) -> Result<PathBuf, share::error::DomainError> {
         let state = self.lock();
-        resolve_path(path, &state.path_base, Some(&state.workspace_root), true)
+        resolve_path(path, state.path_base(), Some(state.workspace_root()), true)
     }
     fn resolve_search_path_authorized(
         &self,
@@ -228,8 +221,8 @@ impl WorkspaceReader for WorkspaceService {
         let state = self.lock();
         let resolved = resolve_path(
             path,
-            &state.path_base,
-            (!allow_outside_workspace).then_some(state.workspace_root.as_path()),
+            state.path_base(),
+            (!allow_outside_workspace).then_some(state.workspace_root()),
             true,
         )?;
         if !resolved.is_dir() {
@@ -240,14 +233,14 @@ impl WorkspaceReader for WorkspaceService {
         Ok(resolved)
     }
     fn in_worktree(&self) -> bool {
-        self.lock().worktree_kind == WorktreeKind::Linked
+        self.lock().worktree_kind() == WorktreeKind::Linked
     }
     fn current_branch(&self) -> Result<Option<String>, share::error::DomainError> {
         let state = self.lock();
-        if state.worktree_kind == WorktreeKind::NonGit {
+        if state.worktree_kind() == WorktreeKind::NonGit {
             return Ok(None);
         }
-        let root = state.workspace_root.clone();
+        let root = state.workspace_root().to_path_buf();
         drop(state);
         self.git
             .current_branch(&root)
@@ -255,7 +248,7 @@ impl WorkspaceReader for WorkspaceService {
             .map_err(Into::into)
     }
     fn initial_cwd(&self) -> PathBuf {
-        PathBuf::from(&self.lock().project_identity.initial_cwd)
+        PathBuf::from(&self.lock().project_identity().initial_cwd)
     }
 }
 
@@ -263,7 +256,7 @@ impl WorkspaceControl for WorkspaceService {
     fn change_directory(&self, path: PathBuf) -> Result<(), share::error::DomainError> {
         let _control = self.lock_control();
         let mut candidate = self.candidate();
-        rules::change_directory(&mut candidate, path)?;
+        candidate.change_directory(path)?;
         self.commit(candidate);
         Ok(())
     }
@@ -275,14 +268,14 @@ impl WorkspaceControl for WorkspaceService {
     ) -> Result<WorkspaceData, share::error::DomainError> {
         let _control = self.lock_control();
         let mut candidate = self.candidate();
-        let frame = rules::enter(&mut candidate, self.git.as_ref(), path, branch, base)?;
+        let frame = candidate.enter(self.git.as_ref(), path, branch, base)?;
         self.commit(candidate);
         Ok(frame)
     }
     fn exit(&self) -> Result<WorkspaceData, share::error::DomainError> {
         let _control = self.lock_control();
         let mut candidate = self.candidate();
-        let frame = rules::exit(&mut candidate, self.git.as_ref())?;
+        let frame = candidate.exit(self.git.as_ref())?;
         self.commit(candidate);
         Ok(frame)
     }
@@ -290,7 +283,7 @@ impl WorkspaceControl for WorkspaceService {
 
 impl WorkspaceWriter for WorkspaceService {
     fn snapshot(&self) -> PersistedWorkspaceContext {
-        rules::snapshot(&self.lock())
+        self.lock().snapshot()
     }
 
     fn prepare_restore(
@@ -298,12 +291,12 @@ impl WorkspaceWriter for WorkspaceService {
         dto: &PersistedWorkspaceContext,
     ) -> Result<WorkspaceRestoreData, share::error::DomainError> {
         let live = self.candidate();
-        rules::prepare_restore(&live, dto, self.git.as_ref()).map_err(Into::into)
+        WorkspaceState::prepare_restore(&live, dto, self.git.as_ref()).map_err(Into::into)
     }
 
     fn commit_restore(&self, prepared: WorkspaceRestoreData) {
         let _control = self.lock_control();
-        rules::commit_restore(&mut self.lock(), prepared);
+        self.lock().commit_restore(prepared);
     }
 }
 
@@ -547,9 +540,8 @@ mod tests {
         // 父进入一个伪 worktree 帧
         {
             let mut s = parent.lock();
-            s.path_base = "/wt".into();
-            s.workspace_root = "/wt".into();
-            s.stack.push(WorkspaceData {
+            s.force_position("/wt".into(), "/wt".into());
+            s.push_frame(WorkspaceData {
                 id: WorkspaceId::new("test-frame"),
                 path_base: "/repo".into(),
                 workspace_root: "/repo".into(),
@@ -565,7 +557,7 @@ mod tests {
             Err(error) if error.category() == share::error::ErrorCategory::Invalid
         ));
         // 父仍有一帧（不受子影响）
-        assert_eq!(parent.lock().stack.len(), 1);
+        assert_eq!(parent.lock().stack_depth(), 1);
     }
 
     // ---- #894: WorkspaceWriter prepare_restore / commit_restore 令牌协议 ----
