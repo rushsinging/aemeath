@@ -533,3 +533,93 @@ fn rules_registry_parses_guard_section_and_retired_symbols() {
     assert_eq!(registry.retired_symbols.len(), 1);
     assert_eq!(registry.retired_symbols[0].symbol, "CostTracker");
 }
+
+/// 多前缀 scope（`path_prefixes`）：同一规则覆盖多个并列目录，
+/// 用于把「pattern 完全相同的重复规则」合并为一条。
+fn multi_prefix_pattern_rule() -> crate::guards_rules::Rule {
+    serde_json::from_value(serde_json::json!({
+        "id": "pattern.tui.no-direct-effects",
+        "assertion": "pattern_exclusion",
+        "scope": {
+            "kind": "path_prefixes",
+            "values": ["apps/cli/src/tui/model", "apps/cli/src/tui/update"]
+        },
+        "forbidden_patterns": ["Command::new("],
+        "reason": "多前缀副作用禁式",
+        "profile": "full"
+    }))
+    .expect("deserialize multi-prefix rule")
+}
+
+#[test]
+fn pattern_exclusion_multi_prefix_hits_every_listed_scope() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    for scope in ["apps/cli/src/tui/model", "apps/cli/src/tui/update"] {
+        write_source(
+            &temp.path().join(format!("{scope}/widget.rs")),
+            "fn build() { let _ = Command::new(\"ls\"); }\n",
+        );
+    }
+
+    for scope in ["apps/cli/src/tui/model", "apps/cli/src/tui/update"] {
+        let relative = format!("{scope}/widget.rs");
+        let violations =
+            crate::guards_rules::enforce_rule(&multi_prefix_pattern_rule(), temp.path(), &relative)
+                .expect("enforce");
+        assert_eq!(violations.len(), 1, "{relative} 应命中多前缀规则");
+        assert_eq!(violations[0].rule_id, "pattern.tui.no-direct-effects");
+    }
+}
+
+#[test]
+fn pattern_exclusion_multi_prefix_skips_unlisted_scope() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    let relative = "apps/cli/src/tui/view/widget.rs";
+    write_source(
+        &temp.path().join(relative),
+        "fn build() { let _ = Command::new(\"ls\"); }\n",
+    );
+
+    let violations =
+        crate::guards_rules::enforce_rule(&multi_prefix_pattern_rule(), temp.path(), relative)
+            .expect("enforce");
+    assert!(violations.is_empty(), "未登记前缀不得被多前缀规则命中");
+}
+
+#[test]
+fn pattern_exclusion_multi_prefix_keeps_file_exemptions() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    // app 编排层豁免（#59 S5-gap 裁定）：合并多前缀后豁免仍按路径生效
+    write_source(
+        &temp.path().join("apps/cli/src/tui/app/run_loop.rs"),
+        "fn pump() { let _ = Command::new(\"ls\"); }\n",
+    );
+    write_source(
+        &temp.path().join("apps/cli/src/tui/app/state.rs"),
+        "fn reduce() { let _ = Command::new(\"ls\"); }\n",
+    );
+
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "pattern.tui.app-pure-model",
+        "assertion": "pattern_exclusion",
+        "scope": {
+            "kind": "path_prefixes",
+            "values": ["apps/cli/src/tui/app", "apps/cli/src/tui/view_model"]
+        },
+        "forbidden_patterns": ["Command::new("],
+        "exclusions": [{ "path": "apps/cli/src/tui/app/run_loop.rs" }],
+        "reason": "编排层豁免",
+        "profile": "full"
+    }))
+    .expect("deserialize rule with exclusions");
+
+    let exempt =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "apps/cli/src/tui/app/run_loop.rs")
+            .expect("enforce exempt");
+    assert!(exempt.is_empty(), "登记豁免文件不得被命中");
+
+    let flagged =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "apps/cli/src/tui/app/state.rs")
+            .expect("enforce flagged");
+    assert_eq!(flagged.len(), 1, "同 scope 非豁免文件必须命中");
+}
