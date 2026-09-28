@@ -467,15 +467,17 @@ Compact 完成后             →  刷新注入（重新检索 + 替换）
 
 **TUI 侧**：复用既有 system message 通道（`append_system_notice` 是"替代旧的命令式 `OutputArea::push_system` 的唯一入口"），**不新增渲染机制**。
 
-**顺带接线 `user_alert`**：其字段与格式化逻辑已存在（渲染为"用户提醒：…"），但未接入消费路径；本次一并接上 TUI 通道。
+**`format_output` 与 `user_alert` 的处理：移除（死代码清理）**。
 
-`user_alert` 与本设计的系统通知**语义不同，并存不合并**：
+`format_output()` 渲染四段内容（deviations / suggested_memories / outdated_memories / user_alert），但它在**生产代码中没有任何调用方** —— 只有定义与测试引用。既然本次 TUI 侧只走系统提示（不展示反思摘要），它们会继续悬空，因此按死代码清理：
 
-| | `user_alert` | 系统通知 |
+| 对象 | 处理 | 理由 |
 |---|---|---|
-| 来源 | **LLM 主动产出**（反思输出字段） | **系统自动**（apply 有变更即发） |
-| 内容 | 开放，由 LLM 决定 | 固定格式（含计数） |
-| 触发 | LLM 认为必要时 | 有变更时（零变更不发） |
+| `format_output()` | **移除**（函数、i18n 文案、测试） | 无生产调用方；TUI 侧不采用摘要展示 |
+| `ReflectionOutput.user_alert` | **移除**（字段、prompt 输出要求、i18n 表头） | 唯一消费者是 `format_output`；保留会让 LLM 每次反思白产出一个无人读取的字段，且占用输出 token |
+| `ReflectionOutput.deviations` | **待评估**（§14 开放问题） | 同样已无消费者，但它可能对反思质量有影响（促使 LLM 更深入检查偏差），移除前需单独评估 |
+
+**`suggested_memories` 与 `outdated_memories` 保留** —— 它们有真实的 apply 消费者（`memory` 的 apply 流程）。
 
 **零变更不提示**：`N == 0` 时两条通道都不发。
 
@@ -623,7 +625,8 @@ Compact 完成后             →  刷新注入（重新检索 + 替换）
 | `MemoryConfig` | **移除** `inject_count`；`inject_token_budget` 改为比例 `context_size / 50` | D1 |
 | 注入时机 | 由每轮重算改为「Session 首次 + compact 后刷新」（§7.2） | D2 |
 | `InvocationReminderData` | 新增变体（记忆已更新，仅下一轮注入一次） | D3 |
-| `RuntimeStreamEvent::SystemMessage` | 复用既有通道下发 TUI 提示；同时接线 `user_alert` | D3 |
+| `RuntimeStreamEvent::SystemMessage` | 复用既有通道下发 TUI 提示 | D3 |
+| `format_output()` / `ReflectionOutput.user_alert` | **移除**（死代码：无生产调用方）及其 i18n 文案与测试 | D3 |
 | `token_budget` | `summary_budget` 2% → 5%；`compact_tail_token_cap` 5% → 3% | D5 |
 
 **不新增端口方法**：归纳由既有 `apply_reflection` 承载（§6.3），注入降权在既有路径内实现，因此 `MemoryPort` 的**方法集合不变**。
@@ -655,7 +658,7 @@ Compact 完成后             →  刷新注入（重新检索 + 替换）
 - [ ] B：合并发生后，新旧内容均可查（active 与 archive），证据指针可追溯；归档清理不删除被引用条目；历史已合并条目**不**被伪造指针
 - [ ] C：反思能产出跨条目归纳结论，其 `evidence` 可回溯到全部来源记忆；`evidence.len() < 2` 的"归纳"不会产出（M13）；停止输出 `synthesizes` 后行为退化为原状
 - [ ] 读链路（§8.2 / §8.3）：反思输入排除失效条目，**污染循环不可复现**；`search` 结果携带取代 / 过期状态；**注入时归纳结论优先、被引用事实降权，而显式检索中两者都完整可见**
-- [ ] D：注入预算按 `context_size / 50` 计算且条数上限已移除；注入在 Session 首次后冻结、compact 后刷新；reflect 完成且有变更时，LLM 收到一次含「记忆已更新 N 条」与查看指引的 reminder，TUI 收到一次提示；零变更时两者都不发；`user_alert` 已接入 TUI 通道
+- [ ] D：注入预算按 `context_size / 50` 计算且条数上限已移除；注入在 Session 首次后冻结、compact 后刷新；reflect 完成且有变更时，LLM 收到一次含「记忆已更新 N 条」与查看指引的 reminder，TUI 收到一次提示；零变更时两者都不发；`format_output` 与 `user_alert` 已移除（含 i18n 文案与相关测试）
 - [ ] D5：`summary_budget` 为 5%、`compact_tail_token_cap` 为 3%（后者以命名常量或 `* 3 / 100` 实现，无魔法除数）
 - [ ] 全部新增字段通过旧格式读取测试（缺失字段得到安全默认值）
 - [ ] 实现完成后，`docs/design/02-modules/memory/` 的 01（领域模型）、02（检索与注入）、03（Reflection）、04（端口）**MUST** 同步更新，使目标态设计与实现一致
@@ -691,7 +694,8 @@ Compact 完成后             →  刷新注入（重新检索 + 替换）
 5. **反思 prompt 任务拆分**：两类任务（从对话提炼新记忆 / 从记忆归纳结论）是否应拆成两次调用，避免互相干扰（§6.5）？
 6. **反思触发的空转**：现有 `interval_runs` 计数触发在无新内容时仍会调用 LLM。本设计未处理该问题（原先设想的"内容水位门控"因归纳改由反思承担而失去归属）；若需解决应单独立项。
 7. **reader 兼容前置验证**：持久化 reader 是否配置 `deny_unknown_fields`，决定新字段是否会影响旧版本读取。
-9. **注入冻结的失效场景**：注入冻结后，会话中途的记忆变更不进入上下文，仅靠 reminder 提示 LLM 主动检索。若实测发现 LLM 不主动检索，需要考虑额外的刷新触发点（本设计明确只有首次与 compact 两个时机）。
+9. **`ReflectionOutput.deviations` 的去留**：移除 `format_output` 后该字段已无消费者。保留会让 LLM 每次输出无人读取的内容；移除则可能降低反思深度（"发现偏差"本身可能是促使 LLM 认真检查的机制）。需在实现前单独评估。
+10. **注入冻结的失效场景**：注入冻结后，会话中途的记忆变更不进入上下文，仅靠 reminder 提示 LLM 主动检索。若实测发现 LLM 不主动检索，需要考虑额外的刷新触发点（本设计明确只有首次与 compact 两个时机）。
 8. **总结所需的证据出处**：本设计的每条结论指向 [05-hindsight-research.md](../../design/02-modules/memory/05-hindsight-research.md)；该文标注的"未验证项"在实现前**MUST** 补验，**NEVER** 基于未验证结论做实现决策。
 
 ---
@@ -712,4 +716,4 @@ Compact 完成后             →  刷新注入（重新检索 + 替换）
 | 2026-09-28 | 初稿：变更 A/B/C 的领域模型、不变量、端口与行为设计、测试策略与验收标准；变更 D 方向记录；不变量与端口变更汇总；不采纳清单与开放问题 |
 | 2026-09-28 | 新增读链路设计：三条读路径与决策者、可见性矩阵（含反思输入排除规则）、证据消费、滞后判定与分层读取策略 |
 | 2026-09-28 | **按方案确认重构**：删除「巩固水位」与「独立归纳层」两个变更，改为「由反思承担归纳职责」（新变更 C，沿用既有触发）；读链路精简为可见性矩阵 + 归纳产物与来源事实的读取协调（注入降权 / 检索不降权）；滞后判定与分层读取策略移入不采纳清单并记录场景依据；不变量收敛为 M9–M13 |
-| 2026-09-28 | 新增**变更 D（注入与提醒机制）**：注入预算改为按比例（`context_size / 50`）并移除条数上限；注入时机改为「Session 首次 + compact 后刷新」；reflect 完成后双通道提示（LLM 单次 reminder 含查看指引 + TUI system message）；`user_alert` 接线；附带修正 compact 比例（summary 5% / tail 3%）。变更 B 补入 `kind: MemoryKind` 字段；读链路降权实现定为「覆盖式让位」 |
+| 2026-09-28 | 新增**变更 D（注入与提醒机制）**：注入预算改为按比例（`context_size / 50`）并移除条数上限；注入时机改为「Session 首次 + compact 后刷新」；reflect 完成后双通道提示（LLM 单次 reminder 含查看指引 + TUI system message）；`format_output` 与 `user_alert` 按死代码移除（TUI 侧只走系统提示）；附带修正 compact 比例（summary 5% / tail 3%）。变更 B 补入 `kind: MemoryKind` 字段；读链路降权实现定为「覆盖式让位」 |
