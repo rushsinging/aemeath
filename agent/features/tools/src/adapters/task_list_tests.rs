@@ -73,7 +73,7 @@ async fn task_list_uses_current_batch_sequences_for_ids_and_dependencies() {
     assert_eq!(tasks[1]["blocked_by"], serde_json::json!(["1"]));
     assert_eq!(data["task_list"]["id"], "2");
     assert_eq!(data["stats"]["total"], 2);
-    assert!(result.text.contains("TaskData list #2: 当前请求"));
+    assert!(result.text.contains("Task list #2: 当前请求"));
     assert!(result
         .text
         .contains("2 tasks (2 pending, 0 in_progress, 0 completed)"));

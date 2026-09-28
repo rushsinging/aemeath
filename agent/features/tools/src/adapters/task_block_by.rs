@@ -21,7 +21,7 @@ fn current_task_id(
     access
         .current_task_by_seq(seq)
         .map(|task| task.id())
-        .ok_or_else(|| format!("TaskData not found in current task list: {value}"))
+        .ok_or_else(|| format!("Task not found in current task list: {value}"))
 }
 
 #[async_trait]
@@ -108,7 +108,7 @@ impl TypedTool for TaskBlockByTool {
         let task_id = updated.seq().to_string();
         TypedToolResult::success(
             format!(
-                "TaskData #{} blocking dependencies replaced: {}",
+                "Task #{} blocking dependencies replaced: {}",
                 task_id,
                 if blocked_by_ids.is_empty() {
                     "none".to_string()

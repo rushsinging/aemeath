@@ -70,7 +70,7 @@ impl TypedTool for TaskListCreateTool {
         let batch = command_result.value;
         let batch_id = batch.id().to_string();
         TypedToolResult::success(
-            format!("TaskData list #{} created. Subject: {}", batch_id, subject),
+            format!("Task list #{} created. Subject: {}", batch_id, subject),
             TaskListCreateResult { batch_id },
         )
         .with_task_change(task_change)

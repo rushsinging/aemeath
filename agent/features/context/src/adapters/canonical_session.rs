@@ -551,7 +551,8 @@ impl CanonicalSessionRepository {
         loop {
             let companion = snapshot.render_companion_with_limit(item_limit);
             let companion_tokens = crate::domain::token_budget::estimate_tokens(&format!(
-                "\n\n## Current TaskData State\n{companion}"
+                "{}{companion}",
+                crate::domain::compact::TASK_STATE_HEADING
             ));
             if companion_tokens < budget {
                 if let Ok(bounded_checkpoint) = checkpoint
@@ -559,8 +560,9 @@ impl CanonicalSessionRepository {
                     .degrade_to_budget(budget - companion_tokens)
                 {
                     return Ok(format!(
-                        "{}\n\n## Current TaskData State\n{companion}",
-                        bounded_checkpoint.render()
+                        "{}{}{companion}",
+                        bounded_checkpoint.render(),
+                        crate::domain::compact::TASK_STATE_HEADING
                     ));
                 }
             }

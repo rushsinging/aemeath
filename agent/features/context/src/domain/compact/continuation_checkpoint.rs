@@ -667,10 +667,15 @@ pub(crate) fn is_compact_protocol_text(text: &str) -> bool {
     .any(|marker| normalized.contains(marker))
 }
 
+/// task companion 的当前写入标题（写入侧与解析侧共用的唯一真相）。
+pub const TASK_STATE_HEADING: &str = "\n\n## Current Task State\n";
+/// 历史 session summary 的旧标题，解析侧必须兼容。
+const LEGACY_TASK_STATE_HEADING: &str = "\n\n## Current TaskData State\n";
+
 pub fn split_checkpoint_and_task_state(source: &str) -> (&str, Option<&str>) {
-    const TASK_HEADING: &str = "\n\n## Current TaskData State\n";
     source
-        .rsplit_once(TASK_HEADING)
+        .rsplit_once(TASK_STATE_HEADING)
+        .or_else(|| source.rsplit_once(LEGACY_TASK_STATE_HEADING))
         .map_or((source, None), |(checkpoint, task_state)| {
             (checkpoint, Some(task_state.trim()))
         })

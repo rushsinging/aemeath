@@ -92,7 +92,7 @@ impl TypedTool for TaskCreateTool {
         let created = command_result.value;
         let display_id = created.seq().to_string();
         TypedToolResult::success(
-            format!("TaskData #{} created: {}", display_id, created.subject()),
+            format!("Task #{} created: {}", display_id, created.subject()),
             TaskCreateResult {
                 task_id: display_id.clone(),
                 display_id,

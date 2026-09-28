@@ -131,7 +131,7 @@ impl TypedTool for TaskListTool {
         let stats = snapshot.stats();
         let batch = snapshot.batch();
         let mut message = format!(
-            "TaskData list #{}: {}\n{} tasks ({} pending, {} in_progress, {} completed)",
+            "Task list #{}: {}\n{} tasks ({} pending, {} in_progress, {} completed)",
             batch.id(),
             batch.summary().unwrap_or_default(),
             stats.total,

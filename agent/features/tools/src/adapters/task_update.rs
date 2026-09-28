@@ -42,12 +42,12 @@ fn task_id(
                         .find(|task| task.seq() == seq)
                         .map(task::TaskData::id)
                 })
-                .ok_or_else(|| format!("TaskData not found in task list #{batch_id}: {value}"))
+                .ok_or_else(|| format!("Task not found in task list #{batch_id}: {value}"))
         }
         None => access
             .current_task_by_seq(seq)
             .map(|task| task.id())
-            .ok_or_else(|| format!("TaskData not found in current task list: {value}")),
+            .ok_or_else(|| format!("Task not found in current task list: {value}")),
     }
 }
 
@@ -302,7 +302,7 @@ impl TypedTool for TaskUpdateTool {
             let task_id = updated.seq().to_string();
             let status = status_label(updated.status()).to_owned();
             let text = format!(
-                "TaskData #{} updated. Status: {}\n\n{}",
+                "Task #{} updated. Status: {}\n\n{}",
                 task_id,
                 display_status(updated.status()),
                 render_progress(&snapshot, ctx.guidance().language())
@@ -358,7 +358,7 @@ impl TypedTool for TaskUpdateTool {
             .filter_map(|id| self.access.get(*id).map(|task| format!("#{}", task.seq())))
             .collect();
         TypedToolResult::success(
-            format!("TaskData #{} updated. Status: {}", task_id, status),
+            format!("Task #{} updated. Status: {}", task_id, status),
             TaskUpdateResult {
                 task_id,
                 status,

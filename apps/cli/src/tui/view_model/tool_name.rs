@@ -16,16 +16,16 @@ static TOOL_DISPLAY_NAMES: LazyLock<HashMap<&'static str, &'static str>> = LazyL
         ("EnterPlanMode", "Enter Plan Mode"),
         ("ExitPlanMode", "Exit Plan Mode"),
         ("AskUserQuestion", "Ask"),
-        ("TaskCreate", "TaskData"),
-        ("TaskUpdate", "TaskData"),
-        ("TaskBlockBy", "TaskData"),
-        ("TaskGet", "TaskData"),
+        ("TaskCreate", "New Task"),
+        ("TaskUpdate", "Update Task"),
+        ("TaskBlockBy", "Block Task"),
+        ("TaskGet", "Task"),
         ("TaskListGet", "Tasks"),
         ("TaskList", "Tasks"),
-        ("TaskLists", "TaskData Lists"),
-        ("TaskListCreate", "New TaskData List"),
+        ("TaskLists", "Task Lists"),
+        ("TaskListCreate", "New Task List"),
         ("TaskListComplete", "Complete List"),
-        ("TaskStop", "Stop TaskData"),
+        ("TaskStop", "Stop Task"),
     ])
 });
 
@@ -48,16 +48,16 @@ mod tests {
         assert_eq!(tool_display_name("EnterPlanMode"), "Enter Plan Mode");
         assert_eq!(tool_display_name("ExitPlanMode"), "Exit Plan Mode");
         assert_eq!(tool_display_name("AskUserQuestion"), "Ask");
-        assert_eq!(tool_display_name("TaskCreate"), "TaskData");
-        assert_eq!(tool_display_name("TaskUpdate"), "TaskData");
-        assert_eq!(tool_display_name("TaskBlockBy"), "TaskData");
-        assert_eq!(tool_display_name("TaskGet"), "TaskData");
+        assert_eq!(tool_display_name("TaskCreate"), "New Task");
+        assert_eq!(tool_display_name("TaskUpdate"), "Update Task");
+        assert_eq!(tool_display_name("TaskBlockBy"), "Block Task");
+        assert_eq!(tool_display_name("TaskGet"), "Task");
         assert_eq!(tool_display_name("TaskListGet"), "Tasks");
         assert_eq!(tool_display_name("TaskList"), "Tasks");
-        assert_eq!(tool_display_name("TaskLists"), "TaskData Lists");
-        assert_eq!(tool_display_name("TaskListCreate"), "New TaskData List");
+        assert_eq!(tool_display_name("TaskLists"), "Task Lists");
+        assert_eq!(tool_display_name("TaskListCreate"), "New Task List");
         assert_eq!(tool_display_name("TaskListComplete"), "Complete List");
-        assert_eq!(tool_display_name("TaskStop"), "Stop TaskData");
+        assert_eq!(tool_display_name("TaskStop"), "Stop Task");
     }
 
     #[test]

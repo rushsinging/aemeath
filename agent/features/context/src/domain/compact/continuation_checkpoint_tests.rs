@@ -512,6 +512,16 @@ fn legacy_summary_becomes_conservative_checkpoint() {
 
 #[test]
 fn task_state_companion_is_split_from_checkpoint() {
+    let source = format!("{COMPLETE_CHECKPOINT}\n\n## Current Task State\n■ #1 running");
+    let (checkpoint, task_state) = split_checkpoint_and_task_state(&source);
+
+    assert_eq!(checkpoint, COMPLETE_CHECKPOINT);
+    assert_eq!(task_state, Some("■ #1 running"));
+}
+
+#[test]
+fn legacy_task_data_heading_still_splits_from_historical_summary() {
+    // 历史 session 的 summary 以旧标题写入，恢复时必须仍能切出 companion。
     let source = format!("{COMPLETE_CHECKPOINT}\n\n## Current TaskData State\n■ #1 running");
     let (checkpoint, task_state) = split_checkpoint_and_task_state(&source);
 
@@ -521,7 +531,7 @@ fn task_state_companion_is_split_from_checkpoint() {
 
 #[test]
 fn canonical_summary_decodes_checkpoint_and_non_authoritative_task_companion() {
-    let source = format!("{COMPLETE_CHECKPOINT}\n\n## Current TaskData State\n■ #1 running");
+    let source = format!("{COMPLETE_CHECKPOINT}\n\n## Current Task State\n■ #1 running");
 
     let decoded = CanonicalCompactSummary::decode(&source).expect("canonical summary must decode");
 
@@ -532,7 +542,7 @@ fn canonical_summary_decodes_checkpoint_and_non_authoritative_task_companion() {
 #[test]
 fn canonical_summary_rejects_unknown_authoritative_section_before_task_companion() {
     let source = format!(
-        "{COMPLETE_CHECKPOINT}\n\n## Unexpected Authority\n- must fail\n\n## Current TaskData State\n■ #1 running"
+        "{COMPLETE_CHECKPOINT}\n\n## Unexpected Authority\n- must fail\n\n## Current Task State\n■ #1 running"
     );
 
     let error = CanonicalCompactSummary::decode(&source)

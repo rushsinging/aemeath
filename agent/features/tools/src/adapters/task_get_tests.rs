@@ -54,7 +54,7 @@ async fn task_get_hides_deleted_task() {
         .await;
 
     assert!(result.is_error);
-    assert!(result.text.contains("TaskData not found"));
+    assert!(result.text.contains("Task not found"));
 }
 
 #[tokio::test]
