@@ -29,7 +29,7 @@ fn without_input_timestamp(text: &str) -> &str {
             matches!(index, 4 | 7 | 10 | 13 | 16 | 17) || byte.is_ascii_digit()
         });
     if looks_like_timestamp {
-        &rest[end + 2..]
+        &rest[end + 2..] // allow unsafe_text_op: find offset
     } else {
         text
     }
