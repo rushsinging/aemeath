@@ -65,14 +65,14 @@ impl ToolTerminalReceiptData {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) enum ToolCallState {
+pub enum ToolCallState {
     Pending,
     Running,
     Terminal(ToolTerminalReceiptData),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct ToolCallReceiptData {
+pub struct ToolCallReceiptData {
     pub identity: ToolCallIdentityData,
     pub input_preview: String,
     pub state: ToolCallState,

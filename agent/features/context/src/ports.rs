@@ -104,7 +104,6 @@ pub(crate) trait SessionRepository: Send + Sync {
 pub(crate) struct PromptMaterialization {
     pub cacheable: Vec<SystemBlock>,
     pub uncached: Vec<SystemBlock>,
-    pub revision: u64,
 }
 
 /// Context-owned 查询工厂：为每次 `materialize(request)` 从 request/config
@@ -124,6 +123,9 @@ pub(crate) trait ContextPromptSource: Send + Sync {
 #[derive(Debug, Clone)]
 pub(crate) struct MemoryMaterialization {
     pub blocks: Vec<SystemBlock>,
+    /// 内容派生 revision（记忆注入结果变更检测；单元测试断言其随命中内容变化，
+    /// 生产读侧待接线）。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub revision: u64,
 }
 

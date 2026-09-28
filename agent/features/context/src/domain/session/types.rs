@@ -6,21 +6,6 @@ use std::path::PathBuf;
 use uuid::{NoContext, Timestamp, Uuid};
 
 /// Validate a session ID to prevent path traversal attacks.
-pub fn validate_session_id(id: &str) -> Result<(), String> {
-    if id.is_empty() {
-        return Err("session ID must not be empty".to_string());
-    }
-    if !id
-        .chars()
-        .all(|character| character.is_ascii_alphanumeric() || character == '-' || character == '_')
-    {
-        return Err(format!(
-            "invalid session ID: {id:?} — only alphanumeric characters, hyphens, and underscores are allowed"
-        ));
-    }
-    Ok(())
-}
-
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct SessionMetadata {
@@ -31,9 +16,6 @@ pub struct SessionMetadata {
     pub model: Option<String>,
     pub project: Option<String>,
 }
-
-#[cfg(any(test, feature = "dev"))]
-pub use share::session_types::{PersistedWorkspaceContext, PersistedWorkspaceFrame};
 
 pub fn extract_project_name(cwd: &str) -> Option<String> {
     PathBuf::from(cwd)

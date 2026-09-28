@@ -20,13 +20,17 @@ pub(crate) const LOG_TARGET: &str = "aemeath:context";
 ///
 /// 设计文档：`docs/design/02-modules/context-management/README.md`
 mod adapters;
+// dev 门控契约测试经 crate 根消费（canonical_session_repository / isolated_context_with_skill）。
+#[cfg(any(test, feature = "dev"))]
+// workspace feature 统一下 dev 门控测试不参与 clippy 编译，显式标注未用豁免。
+#[allow(unused_imports)]
+pub(crate) use adapters::capture_session_lifecycle;
 mod application;
 mod domain;
 mod ports;
 
 #[cfg(any(test, feature = "dev"))]
-#[cfg(any(test, feature = "dev"))]
-pub(crate) use adapters::capture_session_lifecycle;
+#[cfg(test)]
 pub(crate) use adapters::wire_isolated_context_with_skill;
 pub use adapters::{wire_isolated_context, wire_isolated_context_with_workspace_skills};
 pub use adapters::{NoOpCanonicalSessionWriter, ProductionMainContextFactory};
@@ -46,7 +50,7 @@ pub use application::{
 };
 
 // 窄 façade根导出（#1022 收口：内部层 mod 私有，跨 BC 消费只经 crate 根与语义模块）
-#[cfg(any(test, feature = "dev"))]
+#[cfg(test)]
 pub(crate) use adapters::{
     decode_session, skill_prompt_budget, AcceptedInputWriter, AtomicBlobCanonicalSessionWriter,
     AtomicBlobSessionStore, CanonicalSessionRepository, CanonicalSessionWriter,
@@ -58,11 +62,11 @@ pub use adapters::{
     DatasetCanonicalSessionWriter, DatasetSessionManagement, WorkspaceSkillQueryFactory,
 };
 pub use application::main_session;
-#[cfg(any(test, feature = "dev"))]
+#[cfg(test)]
 pub(crate) use application::ContextApplicationService;
-#[cfg(any(test, feature = "dev"))]
+#[cfg(test)]
 pub(crate) use application::{SessionLoadError, SessionPersistenceService};
-#[cfg(any(test, feature = "dev"))]
+#[cfg(test)]
 pub(crate) use domain::session::{
     project_dir_segment, AcceptedInputRecord, ActiveCompactMarker, ChatSegment, CommittedRunSlice,
     CommittedRunStep, FinalizedOutcomeRecord, RunStepCursor, SessionCodec, SessionCodecError,
@@ -70,7 +74,7 @@ pub(crate) use domain::session::{
     SessionGenerationWireError, SessionHistory, CURRENT_SESSION_SCHEMA_VERSION,
 };
 pub use domain::session::{CanonicalSession, CommittedStep, CommittedStepMessages, SnapshotState};
-#[cfg(any(test, feature = "dev"))]
+#[cfg(test)]
 pub(crate) use domain::ContextMessages;
 pub use domain::{
     AcceptedInputAppendData, AcceptedInputError, ContextAppendData, ContextRequestId,
@@ -87,9 +91,9 @@ pub use domain::{
     TaskProgressStatus, ToolCallIdentityData, ToolOutcomeKindData, ToolReceiptMutationData,
     ToolReceiptMutationError, ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
 };
-#[cfg(any(test, feature = "dev"))]
+#[cfg(test)]
 pub(crate) use domain::{ToolCallReceiptData, ToolCallState};
-#[cfg(any(test, feature = "dev"))]
+#[cfg(test)]
 pub(crate) use ports::{
     ContextMemorySource, ContextPromptSource, MemoryMaterialization, PromptMaterialization,
     PromptMaterializationError, SessionGeneration, SessionRepository, SessionSnapshot,
@@ -104,7 +108,7 @@ pub mod api {
 
 pub mod context_port {
     // 消费方（runtime::ports）显式转发集；新增消费先扩本列表。
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(test)]
     pub(crate) use crate::domain::ContextMessage;
     pub use crate::domain::{
         AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
@@ -122,7 +126,7 @@ pub mod compact {
     pub use crate::adapters::compact_summary::{
         messages_selected_for_precompact_memory, CompactGenerator,
     };
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(test)]
     pub(crate) use crate::domain::compact::{
         microcompact_exploration, snip_superseded_exploration, CheckpointSections,
         ContextReadCandidate, ContextReadRun, ContextReadStep, ContinuationCheckpoint,
@@ -132,7 +136,7 @@ pub mod compact {
         CompactProgressFn, CompactStageData, CompactTaskBatchStatusData, CompactTaskItemData,
         CompactTaskSnapshotData, CompactTaskStatusData, CompactWorkData,
     };
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(test)]
     pub(crate) use crate::domain::token_budget::{estimate_tokens, summary_budget};
     pub use crate::domain::{estimate_messages_tokens, estimate_tool_schemas_tokens};
 }
@@ -141,7 +145,7 @@ pub mod guidance {
     pub use crate::adapters::prompt::{
         assess_guidance, init_guidance_dir, resolve_guidance_async, InstructionsLoadedHook,
     };
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(test)]
     pub(crate) use crate::adapters::prompt::{resolve_guidance, universal_execution_discipline};
 }
 

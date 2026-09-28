@@ -44,7 +44,6 @@ impl ContextPromptSource for BaselinePromptSource {
         Ok(PromptMaterialization {
             cacheable,
             uncached,
-            revision: 0,
         })
     }
 }

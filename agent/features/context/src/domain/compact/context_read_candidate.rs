@@ -134,10 +134,6 @@ impl ContextReadCandidate {
         Self { runs }
     }
 
-    pub fn run(&self, run_id: &str) -> Option<&ContextReadRun> {
-        self.runs.iter().find(|run| run.run_id == run_id)
-    }
-
     pub fn messages(&self) -> ContextMessages {
         let committed_steps = self
             .runs
@@ -166,6 +162,7 @@ pub struct ContextReadRun {
 }
 
 impl ContextReadRun {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(run_id: impl Into<String>, steps: Vec<ContextReadStep>) -> Self {
         Self {
             run_id: run_id.into(),
@@ -178,6 +175,7 @@ impl ContextReadRun {
         &self.run_id
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub const fn is_protected(&self) -> bool {
         self.protected
     }
@@ -197,6 +195,7 @@ pub struct ContextReadStep {
 }
 
 impl ContextReadStep {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(
         step_id: impl Into<String>,
         accepted_messages: Option<CommittedStepMessages>,

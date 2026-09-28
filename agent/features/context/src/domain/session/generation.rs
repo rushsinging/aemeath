@@ -296,7 +296,7 @@ impl SessionStepReference {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct SessionGenerationManifest {
+pub struct SessionGenerationManifest {
     generation_schema_version: u32,
     session_schema_version: u32,
     session_id: String,
@@ -538,6 +538,7 @@ impl SessionStateMember {
             .and_then(|marker| marker.start_at.as_ref())
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn compact_summary(&self) -> Option<&str> {
         self.compact.as_ref().map(|marker| marker.summary.as_str())
     }
@@ -599,7 +600,7 @@ impl SessionMemberBytes {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SessionCommitPlan {
+pub struct SessionCommitPlan {
     changed_members: Vec<SessionMemberBytes>,
     reused_members: Vec<String>,
     removed_members: Vec<String>,
@@ -1236,7 +1237,7 @@ impl SessionStepMember {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum SessionGenerationWireError {
+pub enum SessionGenerationWireError {
     #[error("Session generation schema version {version} is newer than supported")]
     UnsupportedFutureVersion {
         version: u32,

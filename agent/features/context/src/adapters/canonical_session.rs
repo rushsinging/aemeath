@@ -196,10 +196,13 @@ impl ToolReceiptWriter for NoOpToolReceiptWriter {
     }
 }
 
+/// 预留给 dev 门控契约测试的 blob 落盘写入器：常规测试与生产不构造。
+#[cfg_attr(any(not(test), feature = "dev"), allow(dead_code))]
 pub(crate) struct AtomicBlobCanonicalSessionWriter {
     blob: Arc<dyn storage::AtomicBlobPort>,
 }
 
+#[cfg_attr(any(not(test), feature = "dev"), allow(dead_code))]
 impl AtomicBlobCanonicalSessionWriter {
     pub fn new(blob: Arc<dyn storage::AtomicBlobPort>) -> Self {
         Self { blob }
@@ -220,6 +223,7 @@ impl AtomicBlobCanonicalSessionWriter {
     }
 }
 
+#[cfg_attr(any(not(test), feature = "dev"), allow(dead_code))]
 #[async_trait]
 impl ToolReceiptWriter for AtomicBlobCanonicalSessionWriter {
     async fn save(

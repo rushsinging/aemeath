@@ -1,3 +1,7 @@
+//! Session 生命周期捕获：dev 门控契约测试专用（生产路径不走，测试在
+//! `#[cfg(feature = "dev")]` 集成测试中构造）。
+#![allow(dead_code)]
+
 use std::cell::RefCell;
 use std::future::Future;
 use std::sync::{Arc, Weak};

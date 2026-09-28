@@ -14,9 +14,9 @@ pub mod tool_receipt;
 #[cfg(test)]
 mod tool_receipt_tests;
 
-pub use compact::{CompactProgressFn, CompactStageData, CompactWorkData};
+pub use compact::CompactProgressFn;
 pub use token_budget::{
-    autocompact_threshold, clamped_max_output, effective_context_window, estimate_message_tokens,
+    autocompact_threshold, effective_context_window, estimate_message_tokens,
     estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens, MIN_EFFECTIVE_WINDOW,
 };
 pub use tool_receipt::{
@@ -780,7 +780,7 @@ pub enum ContextAppendError {
 }
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
-pub(crate) enum PromptMaterializationError {
+pub enum PromptMaterializationError {
     /// 集成测试构造用（基线块失败注入）。
     #[cfg(test)]
     #[cfg(test)]

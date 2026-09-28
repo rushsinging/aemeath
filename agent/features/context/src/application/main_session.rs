@@ -85,7 +85,7 @@ pub struct SessionSwitchClosed;
 /// Each variant identifies a distinct phase of the cross-BC prepare/commit
 /// pipeline so the caller can distinguish *why* a resume was rejected.
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum MainSessionError {
+pub enum MainSessionError {
     /// The envelope's `workspace` slot is `Missing` or `CapturedEmpty`. A typed
     /// workspace context is mandatory for resume — there is no safe default.
     #[error("workspace snapshot is missing or captured empty; a typed workspace context is required for resume")]
