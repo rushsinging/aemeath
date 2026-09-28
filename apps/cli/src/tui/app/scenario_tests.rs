@@ -19,3 +19,4 @@ mod p1;
 mod resume_sdk_delivery;
 mod snapshot;
 mod startup;
+mod terminal_notification;

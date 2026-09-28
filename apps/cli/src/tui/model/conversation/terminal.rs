@@ -35,7 +35,7 @@ const DONE_VERBS: [&str; 20] = [
     "Blanched",
 ];
 
-fn format_duration(duration: Duration) -> String {
+pub(crate) fn format_duration(duration: Duration) -> String {
     let secs = duration.as_secs();
     if secs >= 60 {
         format!("{}m {}s", secs / 60, secs % 60)

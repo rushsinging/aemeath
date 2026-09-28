@@ -10,6 +10,7 @@ use crate::tui::model::conversation::interaction::{
 use crate::tui::model::conversation::workspace::WorktreeKind;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::update::intent::AgentIntent;
+use std::io;
 use tokio::sync::mpsc;
 
 fn interaction_reply_summary(reply: &UiInteractionReply) -> String {
@@ -135,6 +136,21 @@ impl App {
             Effect::RunSelfUpdate => self.run_self_update_effect(ui_tx).await,
             Effect::ResetRuntimeState => self.reset_runtime_state(),
             Effect::OpenUrl { url } => self.open_url_effect(&url),
+            Effect::SendTerminalNotification { title, body } => {
+                self.send_terminal_notification_effect(&title, &body)
+            }
+        }
+    }
+
+    /// 写 OSC 777 通知到终端 stdout；失败仅记日志，NEVER 影响回合收口。
+    fn send_terminal_notification_effect(&self, title: &str, body: &str) {
+        let mut stdout = io::stdout();
+        if let Err(error) = crate::tui::effect::terminal_notification::write_terminal_notification(
+            &mut stdout,
+            title,
+            body,
+        ) {
+            crate::tui::log_warn!("terminal notification write failed: {error}");
         }
     }
 

@@ -250,6 +250,8 @@ impl App {
         }
         // UserMessagesAdopted 需要在 mapper/reducer 之外执行清占位 + 用户回显，
         // 因为这些副作用依赖 App 级方法且不产生 Intent。
+        // extra_effects：mapper/reducer 之外由本层直接产出的副作用（如回合完成通知）。
+        let mut extra_effects: Vec<Effect> = Vec::new();
         match &event {
             TuiRuntimeEvent::SkillsUpdated {
                 revision,
@@ -608,8 +610,22 @@ impl App {
                     self.append_system_notice(lines.join("\n"));
                 }
             }
-            TuiRuntimeEvent::Done { .. } | TuiRuntimeEvent::Cancelled { .. } => {
-                // Done/Cancelled 只收敛 App 级 processing；活动展示由 typed Run status 收敛。
+            TuiRuntimeEvent::Done { duration_ms, .. } => {
+                // Done 只收敛 App 级 processing；活动展示由 typed Run status 收敛。
+                self.chat.active_run_step = None;
+                self.chat.stop_processing();
+                self.mark_output_dirty();
+                // 回合完成 → OSC 777 桌面通知（副作用经 Effect 由 executor 执行）。
+                extra_effects.push(Effect::SendTerminalNotification {
+                    title: "aemeath".to_string(),
+                    body:
+                        crate::tui::effect::terminal_notification::turn_complete_notification_body(
+                            *duration_ms,
+                        ),
+                });
+            }
+            TuiRuntimeEvent::Cancelled { .. } => {
+                // Cancelled 是用户主动取消，不是回合完成，NEVER 发送通知。
                 self.chat.active_run_step = None;
                 self.chat.stop_processing();
                 self.mark_output_dirty();
@@ -640,8 +656,10 @@ impl App {
             );
         }
         crate::tui::update::dirty::merge_dirty(&mut self.view_state.dirty, model_result.dirty);
+        let mut effects = model_result.effects;
+        effects.extend(extra_effects);
         UpdateResult {
-            effects: model_result.effects,
+            effects,
             spawn_effect: None,
         }
     }
