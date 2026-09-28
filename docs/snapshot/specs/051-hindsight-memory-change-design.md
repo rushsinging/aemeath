@@ -4,7 +4,7 @@
 
 **日期**：2026-09-28
 **状态**：设计中（本设计只覆盖设计阶段；实现需按本设计的测试策略另行立项）
-**证据基础**：[050-hindsight-memory-research.md](050-hindsight-memory-research.md)
+**证据基础**：[05-hindsight-research.md](../../design/02-modules/memory/05-hindsight-research.md)
 **影响范围**：Memory BC（`agent/shared/memory/`）、Runtime（Reflection 编排与触发门控）、Tool 层（Memory Tool Published Language）、Context Management（注入 eligibility）
 
 ---
@@ -57,7 +57,7 @@
 | 巩固水位 | mutation 即时写入；Reflection 按 `interval_runs` 计数触发，处理对象是消息快照 | 无"记忆条目是否已被处理"的进度；无"内容是否变化"的触发门控 |
 | 归纳层 | Reflection 的 `MemorySuggestion` 直接成为普通 `MemoryEntry` | 无跨条目归纳；无证据支撑的信念类型 |
 
-外部系统的对应做法与证据出处见 [050-hindsight-memory-research.md](050-hindsight-memory-research.md)（§2 优势、§3 记忆架构、§4 记忆链路）。
+外部系统的对应做法与证据出处见 [05-hindsight-research.md](../../design/02-modules/memory/05-hindsight-research.md)（§2 优势、§3 记忆架构、§4 记忆链路）。
 
 ---
 
@@ -476,13 +476,13 @@ pub trait MemoryPort {
 4. **门控与计数的关系**：内容水位门控与 `interval_runs` 计数是互补（本设计）还是应当最终替代计数？
 5. **归纳产物的读取路径**：与原始事实同路径（统一检索）还是独立路径（分层下钻）？
 6. **reader 兼容前置验证**：持久化 reader 是否配置 `deny_unknown_fields`，决定新字段是否会影响旧版本读取。
-7. **总结所需的证据出处**：本设计的每条结论指向 [050-hindsight-memory-research.md](050-hindsight-memory-research.md)；该文标注的"未验证项"在实现前**MUST** 补验，**NEVER** 基于未验证结论做实现决策。
+7. **总结所需的证据出处**：本设计的每条结论指向 [05-hindsight-research.md](../../design/02-modules/memory/05-hindsight-research.md)；该文标注的"未验证项"在实现前**MUST** 补验，**NEVER** 基于未验证结论做实现决策。
 
 ---
 
 ## 14. 相关文档
 
-- 证据基础：[050-hindsight-memory-research.md](050-hindsight-memory-research.md)
+- 证据基础：[05-hindsight-research.md](../../design/02-modules/memory/05-hindsight-research.md)
 - 目标态领域模型：[01-domain-model.md](../../design/02-modules/memory/01-domain-model.md)
 - 目标态检索与注入：[02-retrieval-and-injection.md](../../design/02-modules/memory/02-retrieval-and-injection.md)
 - 目标态 Reflection 引擎：[03-reflection.md](../../design/02-modules/memory/03-reflection.md)

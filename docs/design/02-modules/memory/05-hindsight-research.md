@@ -1,12 +1,8 @@
-# Hindsight 记忆架构调研（变更设计的证据基础）
+# Memory · Hindsight 记忆架构调研
 
-> 对应 Issue: https://github.com/rushsinging/aemeath/issues/1764
-
-**日期**：2026-09-28
-**状态**：调研完成
-**配套**：本文是 [051-hindsight-memory-change-design.md](051-hindsight-memory-change-design.md) 的证据基础
-
-> 本文**只记录外部系统 Hindsight 的可核查事实**，不含本项目决策；本项目决策见上述变更设计。
+> 层级：02-modules / memory（模块战术设计）
+> 状态：调研记录（外部系统事实，长期保留）｜Milestone：v0.1.0
+> 本文**只记录外部系统 Hindsight 的可核查事实**，不含本项目决策；据此形成的变更设计见 [051-hindsight-memory-change-design.md](../../snapshot/specs/051-hindsight-memory-change-design.md)。
 
 ## 1. 调研对象与方法
 
@@ -685,12 +681,12 @@ reflect agent 的工具集中**没有写记忆的工具**。闭环在别处：re
 
 ## 13. 相关文档
 
-- 变更设计：[051-hindsight-memory-change-design.md](051-hindsight-memory-change-design.md)
-- 目标态模块入口：[Memory README](../../design/02-modules/memory/README.md)
-- 目标态领域模型：[01-domain-model.md](../../design/02-modules/memory/01-domain-model.md)
-- 目标态检索与注入：[02-retrieval-and-injection.md](../../design/02-modules/memory/02-retrieval-and-injection.md)
-- 目标态 Reflection 引擎：[03-reflection.md](../../design/02-modules/memory/03-reflection.md)
-- 目标态端口与适配器：[04-ports-and-adapters.md](../../design/02-modules/memory/04-ports-and-adapters.md)
+- 模块入口：[README.md](README.md)
+- 变更设计（进行中）：[051-hindsight-memory-change-design.md](../../snapshot/specs/051-hindsight-memory-change-design.md)
+- 领域模型：[01-domain-model.md](01-domain-model.md)
+- 检索与注入：[02-retrieval-and-injection.md](02-retrieval-and-injection.md)
+- Reflection 引擎：[03-reflection.md](03-reflection.md)
+- 端口与适配器：[04-ports-and-adapters.md](04-ports-and-adapters.md)
 
 ## 修改历史
 
@@ -698,4 +694,4 @@ reflect agent 的工具集中**没有写记忆的工具**。闭环在别处：re
 |---|---|
 | 2026-09-28 | 初稿：Hindsight 四层梯度、retain 链路、数据模型、检索融合、巩固机制与心智模型的调研记录 |
 | 2026-09-28 | 补充设计优势（§2）与记忆链路（§4）；「记忆体系总览」并入「记忆架构」（§3）并补充记忆类型体系、组织维度与分层设计律，后续章节顺延重编号 |
-| 2026-09-28 | 按变更设计治理约定从 design 目录迁入 snapshot/specs 并重命名，补齐快照格式头部与变更设计指针，修正跨目录链接 |
+| 2026-09-28 | 作为长期保留的调研记录回归 design 目录（本文）；变更设计留在 snapshot/specs |
