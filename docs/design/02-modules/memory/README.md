@@ -21,13 +21,13 @@ Memory BC **不拥有**：记忆在 Context Window 中的注入位置、token �
 1. **Memory 是数据 BC，不是状态机**：Memory 没有执行生命周期状态机；它守护 MemoryEntry 聚合的局部不变量（id 唯一、layer 不可变、confirmation_count 单调递增、outdated 不可逆）。
 2. **双层记忆**：Global（跨项目通用偏好）+ Project（项目特定决策/模式/陷阱）。两层独立存储、独立检索、统一排序。
 3. **检索与注入分离**：Memory BC 负责 filtering、scoring 与 relevance ranking；Context Management 负责 render、注入时机、位置、预算与跨轮去重。
-4. **Reflection workflow 归 Memory，Provider 调用归 Runtime**：Memory-owned `ReflectionWorkflow` 统一构建 prompt、解析 output、应用当前 Run 的同一 `MemoryPort` 并提交 history；Runtime 只判定触发、调用 `ProviderPort` 和管理单槽任务生命周期。Memory BC **不依赖** ProviderPort，也不隐式选择 store。
+4. **Reflection workflow 归 Memory，Provider 调用归 Runtime**：Memory-owned `ReflectionWorkflow` 统一构建 prompt、解析 output、应用当前 Run 的同一 `MemoryPort` 并提交 history；Runtime 只判定触发、调用 `ProviderPort` 和编排执行通道的终态。Memory BC **不依赖** ProviderPort，也不隐式选择 store。
 5. **去重基于 Jaccard 相似度**：写入时与同 layer 条目比较，超过 `similarity_threshold` 则合并 tags + confirmation，不新增。
 6. **淘汰基于评分**：pinned 条目不可淘汰；其余按 `eviction_score`（recency + confirmation_count）排序，取最低分候选归档。
 7. **Archive 不删除**：归档条目移到 `_archive.json`，保留可审计性；search 可跨 active + archive 检索。
 8. **Sub Run 默认不读写 Memory**：默认装配 `NoOpMemory`；Main 显式 share 时 clone 父 Run 当前 Arc 并继承 shared lease，**NEVER** 在同一 Composition / 进程的 active Main slot 为同 identity 新开第二个 service。独立进程 writer 则经 revision CAS 协调。
 9. **检索能力分层**：Tier 1 BM25 是 v0.1.0 primary；Tier 0 子串只作显式 fallback；Tier 2 embedding 属 Future 且需真实收益证据。
-10. **Reflection 异步执行**：Interval 和 Pre-compact 触发的 Reflection 不阻塞主循环——Runtime `tokio::spawn` 后台任务，结果通过 channel 回传。Forced（`/reflection`）保持同步。单一后台 slot 并发控制，前一个未完成时跳过本次。Pre-compact 在 compact 前抓 messages 快照交给后台任务，compact 立即继续。
+10. **Reflection 同步执行**：三种 trigger 都进入 Runtime 的同一执行通道，调用方 await 到终态（`Completed` 或配置 `DisabledSkipped`），不存在后台 slot 与结果回传 channel。取消与超时由执行通道承担。Pre-compact 在 compact 前抓 messages 快照，compact 成功后执行。
 11. **查询只读已验证内存态**：open 完成 dataset recovery 与 eager-read；retrieve / search / list / stats 不做 I/O 或确认。mutation 先构造 candidate，再经 Storage dataset transaction durable commit，最后无失败发布。
 12. **Active + archive 共同换代**：archive / compact 对受影响成员使用同一 `AtomicDatasetPort` journal / commit primitive；失败或 crash 后只能恢复完整旧代或新代，**NEVER** 暴露半迁移。
 13. **跨实例用 revision CAS 防丢更新**：open 持有 Storage 返回的 opaque dataset revision；每次 mutation 以它作为 expected revision 提交。冲突时重新读取、验证并重算一次，**NEVER** 让跨进程锁掩盖 stale-writer overwrite。

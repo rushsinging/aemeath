@@ -122,7 +122,7 @@ impl ReflectionWorkflow {
 }
 ```
 
-Runtime **MUST NOT** 分别调用 `ReflectionEngine::parse_output`、`MemoryPort::apply_reflection` 与 `ReflectionHistoryStore::upsert` 重建第二套业务顺序。Provider invoke、单槽并发、cancel、timeout 与 drain 仍归 Runtime。
+Runtime **MUST NOT** 分别调用 `ReflectionEngine::parse_output`、`MemoryPort::apply_reflection` 与 `ReflectionHistoryStore::upsert` 重建第二套业务顺序。Provider invoke、执行通道编排、cancel 与 timeout 仍归 Runtime。
 
 ## 3. Reflection history 端口
 

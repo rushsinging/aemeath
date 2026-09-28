@@ -24,11 +24,11 @@ use tokio_util::sync::CancellationToken;
 
 use super::main_run_port::ChatCompactionObserver;
 use crate::application::loop_engine::chat::reflection::{
-    maybe_submit_pre_compact_reflection, submit_pre_compact_reflection,
+    maybe_run_pre_compact_reflection, run_pre_compact_reflection,
 };
 use crate::application::loop_engine::CompactionPort;
 use crate::application::reflection::{
-    ReflectionTaskAdapter, ReflectionTaskRequest, ReflectionTaskSubmitOutcome,
+    ReflectionRunOutcome, ReflectionTaskAdapter, ReflectionTaskCompletionStatus,
     ReflectionTaskTrigger,
 };
 use crate::ports::{
@@ -170,36 +170,6 @@ impl ContextPort for StubContextPort {
     }
 }
 
-pub(super) fn noop_reflection_history() -> Arc<dyn memory::api::ReflectionHistoryStore> {
-    struct NoopHistory;
-    #[async_trait]
-    impl memory::api::ReflectionHistoryQuery for NoopHistory {
-        async fn list(
-            &self,
-            _limit: usize,
-        ) -> Result<Vec<memory::api::reflection::ReflectionSafeSummary>, memory::api::MemoryError>
-        {
-            Ok(Vec::new())
-        }
-    }
-    #[async_trait]
-    impl memory::api::ReflectionHistoryStore for NoopHistory {
-        async fn append(
-            &self,
-            _record: &memory::api::reflection::ReflectionRecord,
-        ) -> Result<(), memory::api::MemoryError> {
-            Ok(())
-        }
-        async fn upsert(
-            &self,
-            _record: &memory::api::reflection::ReflectionRecord,
-        ) -> Result<(), memory::api::MemoryError> {
-            Ok(())
-        }
-    }
-    Arc::new(NoopHistory)
-}
-
 fn failing_append_reflection_history() -> Arc<dyn memory::api::ReflectionHistoryStore> {
     struct FailingAppendHistory;
     #[async_trait]
@@ -257,6 +227,7 @@ struct CompactHarness {
     stub: Arc<StubContextPort>,
     runtime_context: crate::application::run::context::RuntimeContext,
     context_port: Arc<dyn ContextPort>,
+    reflection_history: Arc<RecordingReflectionHistory>,
 }
 
 impl CompactHarness {
@@ -265,12 +236,14 @@ impl CompactHarness {
         let stub = StubContextPort::new(outcome);
         let binding = pre_compact_test_binding();
         let config_snapshot = ConfigSnapshot::new(Config::default());
+        let reflection_history = Arc::new(RecordingReflectionHistory::default());
         let runtime_context =
             crate::application::run::run_factory_support::SessionRunFixture::builder()
                 .with_context_port(stub.clone())
                 .with_provider_binding(binding)
                 .with_config(config_snapshot)
                 .with_session_id("session".to_string())
+                .with_reflection_history(reflection_history.clone())
                 .build()
                 .create(crate::domain::agent_run::RunSpec::main())
                 .expect("pre-compact parent run creation must succeed")
@@ -282,7 +255,64 @@ impl CompactHarness {
             stub,
             runtime_context,
             context_port,
+            reflection_history,
         }
+    }
+
+    /// Triggers of the reflection runs that reached persistence. A synchronous
+    /// run writes its `Running` marker before calling the provider, so this is
+    /// a deterministic observation rather than a race with a background task.
+    fn persisted_triggers(&self) -> Vec<memory::api::reflection::ReflectionTrigger> {
+        self.reflection_history.triggers()
+    }
+}
+
+/// Records every durable record a reflection run writes, so tests can observe
+/// which trigger ran without reaching into the adapter.
+#[derive(Default)]
+struct RecordingReflectionHistory {
+    triggers: Mutex<Vec<memory::api::reflection::ReflectionTrigger>>,
+}
+
+impl RecordingReflectionHistory {
+    fn triggers(&self) -> Vec<memory::api::reflection::ReflectionTrigger> {
+        self.triggers.lock().expect("history lock").clone()
+    }
+
+    fn record(&self, record: &memory::api::reflection::ReflectionRecord) {
+        self.triggers
+            .lock()
+            .expect("history lock")
+            .push(record.trigger);
+    }
+}
+
+#[async_trait]
+impl memory::api::ReflectionHistoryQuery for RecordingReflectionHistory {
+    async fn list(
+        &self,
+        _limit: usize,
+    ) -> Result<Vec<memory::api::reflection::ReflectionSafeSummary>, memory::api::MemoryError> {
+        Ok(Vec::new())
+    }
+}
+
+#[async_trait]
+impl memory::api::ReflectionHistoryStore for RecordingReflectionHistory {
+    async fn append(
+        &self,
+        record: &memory::api::reflection::ReflectionRecord,
+    ) -> Result<(), memory::api::MemoryError> {
+        self.record(record);
+        Ok(())
+    }
+
+    async fn upsert(
+        &self,
+        record: &memory::api::reflection::ReflectionRecord,
+    ) -> Result<(), memory::api::MemoryError> {
+        self.record(record);
+        Ok(())
     }
 }
 
@@ -358,14 +388,14 @@ fn pre_compact_test_binding() -> Arc<crate::ports::ProviderBindingData> {
 /// `Committed`, the production adapter receives exactly one PreCompact job.
 /// We verify the trigger via `adapter.drain()` because `submit_complete`
 /// writes a `ReflectionTaskCompletion` carrying the trigger after the
-/// spawned executor settles.
+/// Unit-level: `maybe_run_pre_compact_reflection` only runs on `Committed`.
 #[tokio::test]
-async fn maybe_submit_pre_compact_reflection_only_submits_on_committed() {
+async fn maybe_run_pre_compact_reflection_only_runs_on_committed() {
     let adapter = production_adapter();
     let binding = pre_compact_test_binding();
     let memory_config = share::config::MemoryConfig::default();
     let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::api::NoOpMemory);
-    let history = noop_reflection_history();
+    let history = crate::application::reflection::test_support::noop_reflection_history();
     let snapshot = vec![
         Message::user("kept-by-compact"),
         Message::user("discarded-by-compact"),
@@ -379,7 +409,7 @@ async fn maybe_submit_pre_compact_reflection_only_submits_on_committed() {
     });
     let skipped = CompactOutcome::Skipped(CompactSkipReason::ResumeProtection);
 
-    let outcome_committed = maybe_submit_pre_compact_reflection(
+    let outcome_committed = maybe_run_pre_compact_reflection(
         &committed,
         &snapshot,
         &adapter,
@@ -389,27 +419,21 @@ async fn maybe_submit_pre_compact_reflection_only_submits_on_committed() {
         "en",
         &memory,
         &history,
-    );
+        CancellationToken::new(),
+    )
+    .await;
+    let ReflectionRunOutcome::Completed(completion) =
+        outcome_committed.expect("Committed must run reflection")
+    else {
+        panic!("an enabled configuration must not skip the run");
+    };
     assert_eq!(
-        outcome_committed,
-        Some(ReflectionTaskSubmitOutcome::Accepted)
-    );
-
-    // Spawned task: write `Running`, call LLM, parse, upsert terminal record.
-    // The completion slot will record the trigger regardless of execution
-    // status (Succeeded or Failed both carry the trigger).
-    let completions_committed = adapter.drain().await;
-    assert_eq!(completions_committed.len(), 1, "exactly one PreCompact job");
-    assert_eq!(
-        completions_committed[0].trigger,
+        completion.trigger,
         ReflectionTaskTrigger::PreCompact,
-        "Committed must enqueue a PreCompact trigger"
+        "Committed must run the PreCompact trigger"
     );
 
-    // Skipped → no submission. We reuse the same adapter, which has been
-    // fully drained above; calling again with `Skipped` must leave the slot
-    // idle and never enqueue.
-    let outcome_skipped = maybe_submit_pre_compact_reflection(
+    let outcome_skipped = maybe_run_pre_compact_reflection(
         &skipped,
         &snapshot,
         &adapter,
@@ -419,34 +443,31 @@ async fn maybe_submit_pre_compact_reflection_only_submits_on_committed() {
         "en",
         &memory,
         &history,
-    );
+        CancellationToken::new(),
+    )
+    .await;
     assert!(
         outcome_skipped.is_none(),
-        "Skipped must report that no PreCompact job was enqueued"
-    );
-    let completions_skipped = adapter.drain().await;
-    assert!(
-        completions_skipped.is_empty(),
-        "Skipped must not enqueue any job: {completions_skipped:?}"
+        "Skipped must report that no PreCompact run happened"
     );
 }
 
-/// Unit-level assertion: `submit_pre_compact_reflection` (the production
-/// helper) enqueues a `PreCompact` request against the production adapter.
+/// Unit-level assertion: `run_pre_compact_reflection` (the production helper)
+/// returns a `PreCompact` completion for the production adapter.
 #[tokio::test]
-async fn submit_pre_compact_reflection_enqueues_precompact_request() {
+async fn run_pre_compact_reflection_reports_a_precompact_completion() {
     let adapter = production_adapter();
     let binding = pre_compact_test_binding();
     let memory_config = share::config::MemoryConfig::default();
     let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::api::NoOpMemory);
-    let history = noop_reflection_history();
+    let history = crate::application::reflection::test_support::noop_reflection_history();
     let snapshot = vec![
         Message::user("alpha"),
         Message::user("beta"),
         Message::user("gamma"),
     ];
 
-    let outcome = submit_pre_compact_reflection(
+    let outcome = run_pre_compact_reflection(
         &adapter,
         &memory_config,
         &snapshot,
@@ -455,26 +476,25 @@ async fn submit_pre_compact_reflection_enqueues_precompact_request() {
         "en",
         &memory,
         &history,
-    );
+        CancellationToken::new(),
+    )
+    .await;
 
-    assert_eq!(outcome, ReflectionTaskSubmitOutcome::Accepted);
-    let completions = adapter.drain().await;
-    assert_eq!(completions.len(), 1);
-    assert_eq!(
-        completions[0].trigger,
-        ReflectionTaskTrigger::PreCompact,
-        "submit_pre_compact_reflection must enqueue a PreCompact job"
-    );
+    let ReflectionRunOutcome::Completed(completion) = outcome else {
+        panic!("an enabled configuration must not skip the run");
+    };
+    assert_eq!(completion.trigger, ReflectionTaskTrigger::PreCompact);
+    assert_eq!(completion.status, ReflectionTaskCompletionStatus::Succeeded);
 }
 
 #[tokio::test]
-async fn submit_pre_compact_reflection_reports_history_failure_and_releases_slot() {
+async fn run_pre_compact_reflection_reports_history_failure() {
     let adapter = production_adapter();
     let binding = pre_compact_test_binding();
     let memory_config = share::config::MemoryConfig::default();
     let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::api::NoOpMemory);
 
-    let outcome = submit_pre_compact_reflection(
+    let outcome = run_pre_compact_reflection(
         &adapter,
         &memory_config,
         &[Message::user("must not invoke provider")],
@@ -483,33 +503,27 @@ async fn submit_pre_compact_reflection_reports_history_failure_and_releases_slot
         "en",
         &memory,
         &failing_append_reflection_history(),
-    );
+        CancellationToken::new(),
+    )
+    .await;
 
-    assert_eq!(outcome, ReflectionTaskSubmitOutcome::Accepted);
-    let completions = adapter.drain().await;
-    assert_eq!(completions.len(), 1);
-    assert_eq!(completions[0].trigger, ReflectionTaskTrigger::PreCompact);
+    let ReflectionRunOutcome::Completed(completion) = outcome else {
+        panic!("an enabled configuration must not skip the run");
+    };
+    assert_eq!(completion.trigger, ReflectionTaskTrigger::PreCompact);
+    assert_eq!(completion.status, ReflectionTaskCompletionStatus::Failed);
     assert_eq!(
-        completions[0].status,
-        crate::application::reflection::ReflectionTaskCompletionStatus::Failed
-    );
-    assert_eq!(
-        completions[0]
+        completion
             .metadata
             .as_ref()
             .and_then(|metadata| metadata.error_category),
         Some(memory::api::reflection::ReflectionErrorCategory::History)
     );
     assert_eq!(
-        adapter.submit(ReflectionTaskRequest::new(
-            ReflectionTaskTrigger::PreCompact,
-            vec![]
-        )),
-        ReflectionTaskSubmitOutcome::Accepted,
-        "history append failure must release the shared slot"
+        adapter.take_memory_update_notice(),
+        None,
+        "a history failure must not announce a memory update"
     );
-    adapter.cancel().await;
-    let _ = adapter.drain().await;
 }
 
 /// Integration: the production compaction service and chat observer submit a PreCompact job exactly once
@@ -544,18 +558,12 @@ async fn pre_compact_trigger_submits_after_compact_outcome_committed() {
         "compact should succeed on Committed: {result:?}"
     );
 
-    // Drain the adapter to join the spawned PreCompact job; the completion
-    // carries the trigger regardless of execution status (Succeeded / Failed).
-    let completions = harness.adapter.drain().await;
-    assert_eq!(
-        completions.len(),
-        1,
-        "Committed must enqueue exactly one PreCompact job"
-    );
-    assert_eq!(
-        completions[0].trigger,
-        ReflectionTaskTrigger::PreCompact,
-        "production PreCompact trigger must be submitted after Committed"
+    // The observer runs reflection synchronously inside `compact`, so by the
+    // time it returns the PreCompact run already wrote its durable records.
+    let triggers = harness.persisted_triggers();
+    assert!(
+        triggers.contains(&memory::api::reflection::ReflectionTrigger::PreCompact),
+        "Committed must run exactly one PreCompact reflection: {triggers:?}"
     );
     assert_eq!(harness.stub.compact_calls().len(), 1);
 }
@@ -584,12 +592,12 @@ async fn pre_compact_trigger_skips_on_compact_outcome_skipped() {
         "automatic compact skip must continue the current Run: {result:?}"
     );
 
-    // Allow any spawned tasks to settle so the absence of a submission is a
-    // deterministic observation, not a race.
-    let completions = harness.adapter.drain().await;
+    // Reflection runs inside the synchronous compact call, so the absence of a
+    // persisted record is a deterministic observation, not a race.
+    let triggers = harness.persisted_triggers();
     assert!(
-        completions.is_empty(),
-        "Skipped must NOT submit a PreCompact reflection job: {completions:?}"
+        triggers.is_empty(),
+        "Skipped must NOT run a PreCompact reflection: {triggers:?}"
     );
     assert_eq!(harness.stub.compact_calls().len(), 1);
 }
@@ -619,12 +627,12 @@ async fn pre_compact_trigger_skips_when_context_compact_call_errors() {
         "compact must propagate context port errors"
     );
 
-    // Allow any spawned tasks to settle so the absence of a submission is a
-    // deterministic observation, not a race.
-    let completions = harness.adapter.drain().await;
+    // Reflection only runs after a committed compact, so the failed port call
+    // must leave the pre-compact snapshot unobserved.
+    let triggers = harness.persisted_triggers();
     assert!(
-        completions.is_empty(),
-        "context port errors must NOT submit a PreCompact reflection job: {completions:?}"
+        triggers.is_empty(),
+        "context port errors must NOT run a PreCompact reflection: {triggers:?}"
     );
     assert_eq!(harness.stub.compact_calls().len(), 1);
 }

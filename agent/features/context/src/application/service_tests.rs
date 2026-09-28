@@ -424,6 +424,49 @@ fn invocation_reminder_log_payloads_include_summary_preview_and_redacted_body() 
     assert!(payloads[2].body.contains("run/model"));
 }
 
+#[test]
+fn memory_updated_reminder_points_at_the_memory_tool_without_quoting_content() {
+    let reminders = vec![InvocationReminderData::memory_updated(3)];
+
+    let zh = invocation_reminder_log_payloads("zh", &reminders);
+    assert_eq!(zh.len(), 1);
+    assert_eq!(zh[0].kind, "memory_updated");
+    assert!(zh[0].rendered_body.starts_with("<system-reminder>"));
+    assert!(zh[0].rendered_body.contains('3'));
+    // Must tell the model how to look the change up.
+    assert!(
+        zh[0].rendered_body.contains("list"),
+        "{}",
+        zh[0].rendered_body
+    );
+    assert!(
+        zh[0].rendered_body.contains("search"),
+        "{}",
+        zh[0].rendered_body
+    );
+
+    let en = invocation_reminder_log_payloads("en", &reminders);
+    assert_eq!(en.len(), 1);
+    assert!(en[0].rendered_body.contains("3"));
+    assert!(en[0].rendered_body.contains("list"));
+    assert!(en[0].rendered_body.contains("search"));
+}
+
+#[test]
+fn the_memory_updated_reminder_keeps_its_place_after_the_other_reminders() {
+    let payloads = invocation_reminder_log_payloads(
+        "en",
+        &[
+            InvocationReminderData::memory_updated(1),
+            InvocationReminderData::guidance_sources_changed(),
+        ],
+    );
+
+    assert_eq!(payloads.len(), 2);
+    assert_eq!(payloads[0].kind, "guidance_sources_changed");
+    assert_eq!(payloads[1].kind, "memory_updated");
+}
+
 #[tokio::test]
 async fn build_window_capture_reports_structure_phases_and_actual_usage() {
     let (tool_result, expected_bytes) = tool_result_message(1_024);

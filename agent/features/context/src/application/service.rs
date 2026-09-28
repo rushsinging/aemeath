@@ -304,7 +304,7 @@ pub(crate) fn invocation_reminder_log_payloads(
     reminders: &[InvocationReminderData],
 ) -> Vec<ReminderLogPayload> {
     let mut rendered = Vec::new();
-    for reminder_kind in [0_u8, 1, 2] {
+    for reminder_kind in [0_u8, 1, 2, 3] {
         for reminder in reminders {
             let text = match (reminder_kind, reminder) {
                 (0, InvocationReminderData::TaskProgress(progress)) => {
@@ -377,6 +377,16 @@ pub(crate) fn invocation_reminder_log_payloads(
                         escape_reminder_text(run_model_id)
                     ),
                 }),
+                (3, InvocationReminderData::MemoryUpdated { changed }) => {
+                    Some(match language {
+                        "zh" => format!(
+                            "<system-reminder>记忆已更新 {changed} 条；需要最新内容时用 memory tool 的 list / search 查看，不要凭记忆假设。</system-reminder>"
+                        ),
+                        _ => format!(
+                            "<system-reminder>Memory was updated ({changed} entries). Use the memory tool's list / search actions to read the current content instead of assuming what it says.</system-reminder>"
+                        ),
+                    })
+                }
                 _ => None,
             };
             if let Some(text) = text {

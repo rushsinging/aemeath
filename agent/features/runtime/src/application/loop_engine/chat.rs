@@ -33,6 +33,8 @@ pub(crate) mod reflection;
 #[cfg(test)]
 mod reflection_manual_tests;
 #[cfg(test)]
+mod reflection_notice_tests;
+#[cfg(test)]
 mod reflection_trigger_tests;
 pub(crate) mod run_input_buffer;
 mod session_driver;

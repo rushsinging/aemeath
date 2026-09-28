@@ -590,7 +590,11 @@ fn main_logging_path_uses_scopes_and_no_legacy_setters() {
     assert!(chat_source.contains("logging::spawn_instrumented(session_context"));
     assert!(runner_source.contains("session_id: logging::FieldPatch::Set"));
     assert!(runner_source.contains("chat_id: logging::FieldPatch::Set"));
-    assert!(runner_source.contains("run_step: logging::FieldPatch::Set(step_count)"));
+    // `run_step` is the LLM step counter: only the LLM scope sets it. The Run
+    // scope deliberately leaves it unset (schema renders it as `null`), because
+    // binding the session's Run ordinal here made one field mean two things.
+    let run_services = include_str!("../run_services.rs");
+    assert!(run_services.contains("run_step: logging::FieldPatch::Set(run_step)"));
     assert!(invocation_source.contains("logging::instrument(request_context"));
     for source in [chat_source, runner_source, port_source, invocation_source] {
         assert!(!source.contains("logging::set_current_"));

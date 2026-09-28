@@ -85,7 +85,7 @@ where
             let mut cwd = workspace.read().current_workspace_root();
             // Per-Session usage tracker shared across all Main Runs.
             let session_usage = crate::application::run::context::RunUsageTracker::new();
-            let mut step_count = 0;
+            let mut run_count = 0;
             let mut pending_input = PendingInputBuffer::default();
             // idle `/compact` 已受理，等待下一次循环启动手动压缩 Run。
             let mut manual_compaction_requested = false;
@@ -263,7 +263,7 @@ where
                             .await;
                             // Run 计数器（Reflection interval 频控）per-session：
                             // resume 切换 session 后从 0 重数，NEVER 延续旧 session 计数。
-                            step_count = 0;
+                            run_count = 0;
                             shell
                                 .session_state
                                 .write()
@@ -369,7 +369,7 @@ where
                         .services()
                         .reflection_history
                         .clone();
-                    let outcome = crate::application::loop_engine::chat::reflection::submit_manual_reflection(
+                    let outcome = crate::application::loop_engine::chat::reflection::run_manual_reflection(
                         &reflection_tasks,
                         &memory_config,
                         &visible_messages,
@@ -378,9 +378,10 @@ where
                         &language,
                         &memory,
                         &reflection_history,
-                    );
+                    )
+                    .await;
                     let (text, is_error) =
-                        crate::application::loop_engine::chat::reflection::manual_reflection_outcome_text(outcome);
+                        crate::application::loop_engine::chat::reflection::manual_reflection_outcome_text(&outcome);
                     sink.send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
                         .await;
                     continue;
@@ -484,7 +485,7 @@ where
                                 messages.clear();
                                 // Run 计数器（Reflection interval 频控）绑定
                                 // session epoch：/clear 即新 epoch，从 0 重数。
-                                step_count = 0;
+                                run_count = 0;
                                 sink.send_event(RuntimeStreamEvent::SessionReset).await;
                             }
                             Err(error) => {
@@ -517,10 +518,10 @@ where
                         (next_segment, accepted_inputs)
                     }                };
 
-                step_count += 1;
+                run_count += 1;
                 let run_id = ChatRunId::new_v7();
                 let turn_context = RuntimeRunContext::new(chat_id.clone(), run_id.clone());
-                sink.send_event(RuntimeStreamEvent::RunChanged(step_count))
+                sink.send_event(RuntimeStreamEvent::RunChanged(run_count))
                     .await;
                 cwd = workspace.read().current_workspace_root();
                 shell
@@ -536,7 +537,7 @@ where
                     &mut config_snapshot,
                     config_reader.as_ref(),
                     wiring.as_ref(),
-                    step_count,
+                    run_count,
                     &sink,
                     &language,
                     &segment_id,
@@ -582,7 +583,7 @@ where
                         .unwrap_or_else(|error| error.into_inner())
                         .update_session(session_id.clone(), prepared_session.config().clone());
                 }
-                run_instance.initialize(messages.clone(), step_count);
+                run_instance.initialize(messages.clone(), run_count);
                 let runtime_context = run_instance.context().clone();
                 let run_id = run_instance.run().id().clone();
                 let spec = run_instance.run().spec().clone();
@@ -694,6 +695,19 @@ where
                         reminder.kind(),
                         shell.prompt_model_id,
                         runtime_context.provider_ref().model.model,
+                    );
+                    invocation_reminders.push(reminder);
+                }
+                if let Some(notice) = reflection_tasks.take_memory_update_notice() {
+                    // The TUI already showed the notice when reflection finished;
+                    // the model needs the same facts in the turn that follows it.
+                    let reminder =
+                        context::InvocationReminderData::memory_updated(notice.changed);
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "invocation_reminder_created kind={} trigger=memory_updated changed={}",
+                        reminder.kind(),
+                        notice.changed,
                     );
                     invocation_reminders.push(reminder);
                 }
@@ -865,17 +879,15 @@ where
                 if manual_compaction_run {
                     loop_context.bind_manual_compaction(&mut manual_compaction);
                 }
-                let launch_result = logging::within(
-                    logging::LogContextPatch {
-                        run_step: logging::FieldPatch::Set(step_count),
-                        ..logging::LogContextPatch::default()
-                    },
-                    crate::application::run::launcher::launch(
-                        &mut run_instance,
-                        cancel.clone(),
-                        main_active_run.clone(),
-                        &mut loop_context,
-                    ),
+                // `run_step` stays unset at Run level: it is the schema's LLM
+                // step counter, and a Run has none. `run_services` sets it per
+                // LLM call; binding the Run ordinal here made one field mean
+                // two different things.
+                let launch_result = crate::application::run::launcher::launch(
+                    &mut run_instance,
+                    cancel.clone(),
+                    main_active_run.clone(),
+                    &mut loop_context,
                 )
                 .await;
                 heartbeat_cancel.cancel();
@@ -896,10 +908,9 @@ where
                 // Runtime 不保留跨 Run 的语义消息；已提交历史只存在于 Context backing。
                 messages.clear();
             }
-            // Session teardown first drains within a bounded grace period. If a
-            // Reflection job is still active, shutdown cancels it and waits for
-            // its terminal durable record before the Run lease is released.
-            let _ = reflection_tasks.shutdown(std::time::Duration::from_secs(5)).await;
+            // Reflection is a synchronous stage inside the Run that owns it, so
+            // teardown has no background job to drain: every run has already
+            // reached a terminal durable record before this point.
         },
     )
     .await

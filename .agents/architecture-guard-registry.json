@@ -959,7 +959,8 @@
         "lib.rs",
         "ports",
         "ports.rs",
-        "shared"
+        "shared",
+        "test_log.rs"
       ],
       "reason": "F-3：runtime Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
       "profile": "full"

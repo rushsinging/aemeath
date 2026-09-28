@@ -7,7 +7,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::application::loop_engine::chat::post_batch::run_post_tool_batch;
 use crate::application::loop_engine::chat::reflection::{
-    maybe_submit_pre_compact_reflection, should_run_turn_reflection, submit_interval_reflection,
+    announce_memory_update, maybe_run_pre_compact_reflection, run_interval_reflection,
+    should_run_turn_reflection,
 };
 use crate::application::loop_engine::chat::stream_handler::InvocationEventReducer;
 use crate::application::loop_engine::chat::{ChatEventSink, RuntimeRunContext, RuntimeStreamEvent};
@@ -254,7 +255,7 @@ impl crate::application::loop_engine::compaction::CompactionObserver for ChatCom
         outcome: &crate::ports::CompactOutcome,
         discarded_messages: &[Message],
     ) -> Result<(), LoopEngineError> {
-        let _ = maybe_submit_pre_compact_reflection(
+        let reflection_outcome = maybe_run_pre_compact_reflection(
             outcome,
             discarded_messages,
             &self.reflection_tasks,
@@ -264,7 +265,17 @@ impl crate::application::loop_engine::compaction::CompactionObserver for ChatCom
             &self.language,
             self.runtime_context.memory_ref(),
             self.runtime_context.reflection_history_ref(),
-        );
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await;
+        if let Some(reflection_outcome) = reflection_outcome {
+            announce_memory_update(
+                &self.runtime_context.event_sink(),
+                &reflection_outcome,
+                &self.language,
+            )
+            .await;
+        }
         Ok(())
     }
 }
@@ -611,6 +622,7 @@ where
         response: &crate::application::loop_engine::chat::InvocationResponse,
         calls: Vec<ToolCall>,
         usage: crate::application::loop_engine::StepTokenUsage,
+        cancel: &CancellationToken,
     ) -> Result<(ModelStep, crate::application::loop_engine::StepTokenUsage), LoopEngineError> {
         if !calls.is_empty() {
             return Ok((
@@ -629,7 +641,7 @@ where
             &response.stop_reason,
             false,
         ) {
-            let _ = submit_interval_reflection(
+            let outcome = run_interval_reflection(
                 &self.reflection_tasks,
                 memory_config,
                 execution.step_count(),
@@ -639,7 +651,11 @@ where
                 &self.language,
                 self.runtime_context.memory_ref(),
                 self.runtime_context.reflection_history_ref(),
-            );
+                cancel.clone(),
+            )
+            .await;
+            announce_memory_update(&self.runtime_context.event_sink(), &outcome, &self.language)
+                .await;
         }
         Ok((
             ModelStep::Complete {

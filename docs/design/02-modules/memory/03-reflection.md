@@ -11,12 +11,12 @@ Reflection 是 Memory BC 内部的**领域服务**——它不调 LLM，不依�
 1. **构建 prompt**：把当前项目记忆 + 最近对话摘要组装为反思 prompt（纯函数，i18n）。
 2. **解析 output**：把 LLM 返回的 JSON 解析为 `ReflectionOutput`（含 MemorySuggestion）。
 3. **应用结果**：把 suggestion 转为 MemoryEntry，并通过当前 Run 的同一 `MemoryPort` 写入/合并、归档候选、标记过期记忆。
-4. **历史事实**：定义 `ReflectionRecord` 与只读 `ReflectionHistoryQuery`；异步执行 adapter 完成后写入历史，`/reflect` 只查询这些记录。
+4. **历史事实**：定义 `ReflectionRecord` 与只读 `ReflectionHistoryQuery`；Runtime 执行通道完成后写入历史，`/reflect` 只查询这些记录。
 
 Runtime 负责：
-- **触发判断**：interval / manual request / pre-compact 三种来源的判定；三者都进入异步单槽协议。
+- **触发判断**：interval / manual request / pre-compact 三种来源的判定；三者都进入同一同步执行通道。
 - **LLM 调用**：经 ProviderPort 发起独立 LLM 调用，传入 Memory BC 构建的 prompt。
-- **历史提交**：将完成结果交给 Memory-owned history adapter；完成后不主动向 TUI 投影完整结果。
+- **历史提交**：将完成结果交给 Memory-owned history adapter；完成后只发布不含正文的计数事实。
 
 ### 职责边界
 
@@ -52,14 +52,12 @@ struct ReflectionOutput {                // LLM 返回的完整反思结果
     deviations: Vec<String>,             // 偏差检测：对话中的偏离行为
     suggested_memories: Vec<MemorySuggestion>, // 建议新增的记忆
     outdated_memories: Vec<String>,      // 建议标记过期的记忆 id 列表
-    user_alert: Option<String>,          // 需要提醒用户的事项
 }
 ```
 
 - **deviations**：LLM 观察到 agent 在对话中有偏离预期行为的描述（如重复尝试失败方案、忽略用户指令）。正文只保存在 Memory-owned history record 中；TUI 的只读查询只取得计数等安全摘要。
 - **suggested_memories**：LLM 认为值得持久化的新记忆建议。
 - **outdated_memories**：LLM 认为已过时的已有记忆 id 列表（apply 后标记 outdated）。
-- **user_alert**：LLM 认为需要提醒用户的重要事项（可选）。
 
 ### 反序列化兼容
 
@@ -84,19 +82,19 @@ enum ReflectionTrigger {
 }
 ```
 
-Runtime 对三种来源统一做 enable / interval 判定并构造拥有消息快照的后台请求。`Manual` 与 `PreCompact` 在启用 Reflection 时不受 interval 限制，但仍使用相同异步单槽，不存在特殊执行通道。
+Runtime 对三种来源统一做 enable / interval 判定并构造拥有消息快照的请求。`Manual` 与 `PreCompact` 在启用 Reflection 时不受 interval 限制，但仍走同一个同步执行通道，不存在特殊路径。
 
 ### 三种触发时机
 
 | 时机 | Trigger | 执行方式 | 触发者 | 说明 |
 |---|---|---|---|---|
-| **轮次间隔** | `Interval` | Runtime 单槽异步 submit | Runtime loop | 每 `interval_runs`（默认 10，旧键 `interval_run_steps` 仍可读取）个 Run 触发一次；计数 per-session，`/clear` 与 resume 切换后从 0 重数；有 tool_calls 且非 EndTurn 时跳过；不阻塞主循环 |
-| **Pre-compact** | `PreCompact` | Runtime 单槽异步 submit | Runtime compact 成功后 | compact 前冻结“将被丢弃”的 messages 快照；只有 compact 成功产生 outcome 后才 submit，不等待 Reflection |
-| **手动请求** | `Manual` | Runtime 单槽异步 submit | `/reflect-now` 命令（#1289） | 与另两种 trigger 共用 slot；busy 时同样 skip；`/reflect [limit]` **NEVER** 进入此入口 |
+| **轮次间隔** | `Interval` | Runtime 同步 await | Runtime loop | 每 `interval_runs`（默认 10，旧键 `interval_run_steps` 仍可读取）个 Main Run 触发一次；`run_count` per-session 计数，`/clear` 与 resume 切换后从 0 重数；**只在 Run 的最后一跳（该跳无 tool call）判定**；轮末等待反思完成 |
+| **Pre-compact** | `PreCompact` | Runtime 同步 await | Runtime compact 成功后 | compact 前冻结“将被丢弃”的 messages 快照；只有 compact 成功产生 outcome 后才执行 |
+| **手动请求** | `Manual` | Runtime 同步 await | `/reflect-now` 命令（#1289） | 与另两种 trigger 共用通道；`/reflect [limit]` **NEVER** 进入此入口 |
 
 ### Manual 显式入口链路（#1289）
 
-用户唯一可见入口是 slash 命令 `/reflect-now`（无参数）。链路与 `/compact` 同构，但 busy 语义相反：
+用户唯一可见入口是 slash 命令 `/reflect-now`（无参数）。链路与 `/compact` 同构：
 
 ```text
 TUI "/reflect-now"
@@ -108,43 +106,56 @@ TUI "/reflect-now"
   → run_launch handler:
       memory/reflection 未启用 → CommandResultText(DisabledSkipped 文案)
       bind_main_run → session.structured_messages() 冻结 owned 快照
-      submit_manual_reflection(ReflectionTaskTrigger::Manual, snapshot)
-        ├─ BusySkipped → 受理提示（不重试）
-        └─ Accepted   → CommandResultText("已开始，结果仅写入历史，/reflect 查询")
+      run_manual_reflection(ReflectionTaskTrigger::Manual, snapshot)
+        ├─ DisabledSkipped → 未启用提示
+        └─ Completed       → CommandResultText（完成计数；Failed 时 is_error）
 ```
 
 - **消息快照来源**：idle 时经 `MainSessionWiring::bind_main_run` 读取 committed CanonicalSession 的 `structured_messages()`（与 `/sessions` 列表同一投影），即当前可见 active 历史；不包含 system 注入。
-- **受理即返回**：submit 非阻塞；成功、失败与取消只写入 Memory-owned history record，不向 chat 投影正文（同另两种 trigger）。
-- **busy 双层语义**：gate 层（Run 进行中）直接提示跳过；slot 层（单槽被 Interval/PreCompact/前一次 Manual 占用）由 `BusySkipped` 表达，同样只提示不排队。
+- **等待终态再回显**：handler 同步 await 反思终态，只回显安全计数，不向 chat 投影反思正文。
+- **配置门控**：input gate 的 busy 判定与配置门控是两层，前者在 Run 进行中直接丢弃，后者由 `DisabledSkipped` 表达。
 
-### 异步执行模型
+### 同步执行模型
 
-三种 trigger 全部进入 Runtime-owned 的同一个单槽后台 adapter，调用方只得到 `Accepted`、`BusySkipped` 或 disabled skip，不 await 完整结果。slot 接受任务后，先 append `Running` durable fact；执行成功、失败、partial apply、timeout 或 cancel 时再以同一 id `upsert` 终态。Runtime 仅保留不含正文的 completion metadata 用于 slot 释放、drain 与诊断，**NEVER** 主动发出完整 `ReflectionResult`、正文或“完成”系统消息到 TUI。`/reflect [limit]` 是只读 history query，不触发 LLM，也不执行 apply。
+三种 trigger 全部进入 Runtime-owned 的同一执行通道，调用方 await 到终态：`Completed`（携带不含正文的状态与计数）或 `DisabledSkipped`。执行开始前 append `Running` durable fact；成功、失败、partial apply、timeout 或 cancel 时再以同一 id `upsert` 终态。Runtime **NEVER** 把反思正文投影到 TUI 或 chat，只发布计数事实。`/reflect [limit]` 是只读 history query，不触发 LLM，也不执行 apply。
 
 ```text
 Interval / PreCompact / Manual
-  → Runtime submit(messages snapshot)
-      ├─ slot busy → BusySkipped（不排队）
-      └─ Accepted → spawn: build_prompt → call_llm → parse → optional apply
-                       → append Running；upsert terminal record
-                       → 仅安全 completion metadata，释放 slot
-
-主 Run / compact 不等待结果，也不把结果主动投影到 TUI。
+  → Runtime run(snapshot)
+      ├─ 配置禁用 → DisabledSkipped（记录 [reflection_disabled]）
+      └─ append Running → build_prompt → call_llm → parse → optional apply
+                       → upsert terminal record
+                       → 变更计数 > 0 时：TUI SystemMessage + 累积 LLM reminder
 ```
 
-### 并发与结束控制
+### 完成时的记忆变更提示
 
-- **单一后台 slot**：Interval、PreCompact、Manual 同一时间合计最多一个 Reflection job。
-- **busy skip**：slot 已占用或当前无法立即取得 slot 时，新触发返回 `BusySkipped`；不等待、不排队，也不另开并发路径。
-- **任务超时**：adapter 对后台执行施加 timeout；超时/取消只形成安全终态 metadata，不泄漏 prompt、provider raw response 或 Reflection 正文。
-- **Run 结束 drain/cancel**：先 drain 已完成/正在收口的 job；若在结束 deadline 内仍未完成，则 cancel，等待其释放 slot 后结束，避免孤儿任务及 Run lease 逃逸。
+反思 apply 产生变更时走双通道，两侧都在「反思完成」这一时刻发生：
+
+- **TUI**：立即 `RuntimeStreamEvent::SystemMessage`，渲染为 system notice，文案只含条数。
+- **LLM**：变更计数累积在 adapter 内，由**下一次 Main Run 启动时**取走一次，注入 `InvocationReminderData::MemoryUpdated`。当前轮的 LLM 请求在反思完成前已发出，因此只能进下一轮；这与 system prompt 的 Session 冻结语义一致。
+
+零变更、失败、取消、超时与配置禁用都不产生任何提示。
+
+### 结束控制
+
+- **执行期间可取消**：反思是 Run 内的协作式阶段，Run 的 cancellation token 直接传入执行通道；取消只形成安全终态 metadata，不泄漏 prompt、provider raw response 或 Reflection 正文。
+- **任务超时**：执行通道对反思施加 timeout，超时形成安全终态。
+- **无后台残留**：三种 trigger 都在所属调用点 await 完成，Session teardown 不需要 drain 或等待后台 job。
+
+### 计数口径
+
+`run_count`（session 内的 Main Run 序号）与 `execution.step_count()`（Run 内 LLM 跳数）是两个不同计数器，Interval 频控只看前者：
+
+- 触发判定在回合收尾的那一跳进行——`classify_terminal` 遇到有 tool call 的响应会先返回 `ModelStep::Tools`，因此中途跳不会触发反思。
+- `run_count` 在每个 Main Run 启动前递增，`/clear` 与 resume 切换 session 时归零，NEVER 延续旧 session 计数。
+- 日志字段 `run_step`（`specs/3.15` 字段 7）只承载 LLM 跳数，Run 级事件不设置它（未设置为 `null`）。
 
 ### 间隔触发的跳过条件
 
 - `before_finish_gate_continue`（Run 还在门禁续行中）
 - 有 tool_calls 且 `stop_reason != EndTurn`（工具调用中途不反思）
 - `config.enabled = false` 或 `config.reflection.enabled = false`
-- 后台 slot 被占用（前一个 Reflection 未完成）
 
 ## 5. Prompt 构建（纯函数）
 
@@ -170,7 +181,6 @@ Prompt 结构（i18n）：
 1. deviations: agent 是否有偏离行为
 2. suggested_memories: 值得持久化的新记忆
 3. outdated_memories: 已过时的记忆 id
-4. user_alert: 需要提醒用户的事项
 
 只输出 JSON，格式如下：
 {...}
@@ -250,7 +260,7 @@ if config.reflection.auto_apply_suggestions {
 ```
 
 - `auto_apply_suggestions = false`（默认）时，不修改 active Memory；完整 output 只作为 Memory-owned `ReflectionRecord` 持久化，`/reflect` 仍只返回安全摘要。
-- `auto_apply_suggestions = true` 时，后台 job 自动写入 suggestion 并标记过期；apply 计数进入 record / safe summary，不触发 TUI 主动展示。
+- `auto_apply_suggestions = true` 时，执行通道写入 suggestion 并标记过期；apply 计数进入 record / safe summary，并触发完成时的双通道计数提示（不投影正文）。
 
 ### ReflectionApplyResult
 
@@ -263,32 +273,29 @@ struct ReflectionApplyResult {
 
 ## 8. 完整编排流程（Runtime 侧）
 
-Memory BC 提供 prompt / parse / apply / history 的单一 `ReflectionWorkflow`；Runtime 统一编排 Interval、PreCompact、Manual 三种 trigger、Provider 调用与任务生命周期。不存在同步执行路径。
+Memory BC 提供 prompt / parse / apply / history 的单一 `ReflectionWorkflow`；Runtime 统一编排 Interval、PreCompact、Manual 三种 trigger 与 Provider 调用。三种 trigger 走同一条同步执行路径，调用方 await 到终态。
 
 ```text
 Runtime trigger
   ├─ capture owned messages snapshot
-  └─ ReflectionTaskAdapter.submit
-       ├─ BusySkipped → 安全日志（trigger/status 等 metadata），返回主流程
-       └─ Accepted → background job
-            Memory: format_memory_summary + recent_messages_summary + build_prompt
-            Runtime: Provider invocation
-            Memory: parse_output
-            Runtime: optional MemoryPort.apply_reflection
-            Memory: append Running → upsert terminal ReflectionRecord
-            Runtime: 保存安全 completion metadata 并释放 slot
+  └─ ReflectionTaskAdapter.run
+       ├─ DisabledSkipped → [reflection_disabled] 安全日志，返回调用方
+       └─ append Running → build_prompt → Provider invocation → parse_output
+                       → optional MemoryPort.apply_reflection
+                       → upsert terminal ReflectionRecord
+                       → 返回 completion（状态 + 计数，不含正文）
+                       → 计数 > 0 时发 TUI SystemMessage 并累积 LLM reminder
 
-Run teardown
-  └─ drain → deadline 到期仍 busy 时 cancel → 等待 slot 收口
+调用方（Run 轮末 / compact 完成 / /reflect-now）await 上述结果。
 ```
 
 ### 8.1 Pre-compact 快照语义
 
-PreCompact 在 compact 前把所选 `messages` clone 为 owned snapshot，但只有 compact 成功产生 outcome 后才尝试 submit。compact 失败、被 hook block、消息不足或取消时不 submit；`Accepted` / `BusySkipped` 都不影响已经成功的 compact outcome。后台 job 只使用冻结快照，因此不会观察 compact 后的消息变化。
+PreCompact 在 compact 前把所选 `messages` clone 为 owned snapshot，但只有 compact 成功产生 outcome 后才执行。compact 失败、被 hook block、消息不足或取消时不执行。执行只使用冻结快照，因此不会观察 compact 后的消息变化。
 
-- **快照时机**：compact 执行前冻结，`messages` 尚未被压缩；提交时机在 compact 成功 outcome 之后。
+- **快照时机**：compact 执行前冻结，`messages` 尚未被压缩；执行时机在 compact 成功 outcome 之后。
 - **快照内容**：`messages_selected_for_precompact_memory(messages)` 的结果（只取 compact 会丢掉的消息）。
-- **完成去向**：接受后 append `Running`，终态以同 id upsert；不通过结果通道回传完整结果，也不在后续轮次 emit 正文。
+- **完成去向**：执行前 append `Running`，终态以同 id upsert；不回传完整结果，也不在后续轮次 emit 正文。
 
 ### 8.2 History 与安全查询
 
@@ -325,6 +332,8 @@ struct ReflectionConfig {
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-09-29 | 补充「计数口径」小节：区分 session 内 Main Run 序号 `run_count` 与 Run 内 LLM 跳数；Interval 判定只发生在回合收尾跳；`run_step` 日志字段只承载 LLM 跳数 |
+| 2026-09-28 | 三种 trigger 由「单槽后台异步」改为「同一执行通道同步 await」：调用方 await 到终态，Run 的 cancellation token 传入执行通道，Session teardown 不再 drain；完成时按 apply 计数发 TUI SystemMessage 并累积下一轮 LLM reminder；`user_alert` 与无生产调用方的 `format_output` 随 i18n 死代码一并移除 | #1772 |
 | 2026-09-25 | #1289 接通 Manual 显式入口：Tools catalog `/reflect-now` → SDK `ChatInputEvent::ReflectNow` → input gate（idle 受理 / busy 提示丢弃，NEVER 排队）→ run_launch handler 冻结 `structured_messages()` 快照 submit 单槽 | #1289 |
 | 2026-07-20 | #1285 为 Run teardown 落地有界 drain→cancel→terminal 收口；Manual 显式入口由 #1289（归 #860）承接 | #1285/#1289/#860 |
 | 2026-07-20 | #1284 接通 compact 成功后的 PreCompact 冻结快照提交；Manual 显式入口拆分至 #1289 | #1284/#1289 |

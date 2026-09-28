@@ -36,8 +36,6 @@ pub struct ReflectionOutput {
     pub suggested_memories: Vec<MemorySuggestion>,
     #[serde(default, deserialize_with = "null_as_empty_vec")]
     pub outdated_memories: Vec<String>,
-    #[serde(default)]
-    pub user_alert: Option<String>,
 }
 
 // Value-namespace compatibility for callers of the former unit placeholder.
@@ -46,7 +44,6 @@ pub const ReflectionOutput: ReflectionOutput = ReflectionOutput {
     deviations: Vec::new(),
     suggested_memories: Vec::new(),
     outdated_memories: Vec::new(),
-    user_alert: None,
 };
 
 #[derive(Debug, Error)]
@@ -285,8 +282,7 @@ JSON 格式：
 {{
     "deviations": ["偏差描述"],
     "suggested_memories": [{{"layer":"project","category":"decision","content":"记忆内容","tags":["可选标签"],"reason":"为什么建议添加"}}],
-    "outdated_memories": ["memory-id"],
-    "user_alert": "可选用户提示"
+    "outdated_memories": ["memory-id"]
 }}
 
 # 当前项目记忆
@@ -308,8 +304,7 @@ JSON format:
 {{
     "deviations": ["deviation description"],
     "suggested_memories": [{{"layer":"project","category":"decision","content":"memory content","tags":["optional tag"],"reason":"why this is suggested"}}],
-    "outdated_memories": ["memory-id"],
-    "user_alert": "optional user alert"
+    "outdated_memories": ["memory-id"]
 }}
 
 # Current project memory
@@ -358,85 +353,6 @@ impl ReflectionEngine {
             }
         }
         Ok(output)
-    }
-
-    #[cfg_attr(not(test), allow(dead_code))]
-    fn labels(
-        lang: &str,
-    ) -> (
-        &'static str,
-        &'static str,
-        &'static str,
-        &'static str,
-        &'static str,
-        &'static str,
-    ) {
-        if lang == "zh" {
-            (
-                "Reflection",
-                "偏差：暂无明显偏差",
-                "偏差：\n- ",
-                "记忆建议：暂无建议",
-                "记忆建议：\n",
-                "过期记忆：",
-            )
-        } else {
-            (
-                "Reflection",
-                "Deviations: no significant deviations",
-                "Deviations:\n- ",
-                "Memory suggestions: none",
-                "Memory suggestions:\n",
-                "Outdated memories: ",
-            )
-        }
-    }
-
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub fn format_output(&self, output: &ReflectionOutput, lang: &str) -> String {
-        let (
-            title,
-            deviations_empty,
-            deviations_header,
-            suggestions_empty,
-            suggestions_header,
-            outdated_header,
-        ) = Self::labels(lang);
-        let mut sections = vec![title.to_string()];
-        if output.deviations.is_empty() {
-            sections.push(deviations_empty.to_string());
-        } else {
-            sections.push(format!(
-                "{deviations_header}{}",
-                output.deviations.join("\n- ")
-            ));
-        }
-        if output.suggested_memories.is_empty() {
-            sections.push(suggestions_empty.to_string());
-        } else {
-            let suggestions = output
-                .suggested_memories
-                .iter()
-                .map(|suggestion| format!("- [{:?}] {}", suggestion.category, suggestion.content))
-                .collect::<Vec<_>>()
-                .join("\n");
-            sections.push(format!("{suggestions_header}{suggestions}"));
-        }
-        if !output.outdated_memories.is_empty() {
-            sections.push(format!(
-                "{outdated_header}{}",
-                output.outdated_memories.join(", ")
-            ));
-        }
-        if let Some(alert) = &output.user_alert {
-            let header = if lang == "zh" {
-                "用户提醒："
-            } else {
-                "User alert: "
-            };
-            sections.push(format!("{header}{alert}"));
-        }
-        sections.join("\n\n")
     }
 
     pub fn format_memory_summary(&self, entries: &[MemoryEntry]) -> String {
@@ -511,7 +427,6 @@ mod tests {
                     reason: "secret reason".into(),
                 }],
                 outdated_memories: vec!["secret-id".into()],
-                user_alert: None,
             }),
             apply_result: None,
             error_category: None,
@@ -565,7 +480,9 @@ mod tests {
     #[test]
     fn null_collections_deserialize_as_empty() {
         let output = engine()
-            .parse_output(r#"{"deviations":null,"suggested_memories":null,"outdated_memories":null,"user_alert":null}"#)
+            .parse_output(
+                r#"{"deviations":null,"suggested_memories":null,"outdated_memories":null}"#,
+            )
             .unwrap();
         assert_eq!(output, ReflectionOutput::default());
 
@@ -613,20 +530,15 @@ mod tests {
     }
 
     #[test]
-    fn prompt_and_format_are_bilingual() {
+    fn prompt_is_bilingual_without_user_alert() {
         let zh = engine().build_prompt("MEM", "SUMMARY", "zh");
         let en = engine().build_prompt("MEM", "SUMMARY", "en");
         assert!(zh.contains("只输出 JSON") && zh.contains("# 最近对话摘要"));
         assert!(en.contains("Output JSON only") && en.contains("# Recent conversation summary"));
         assert!(zh.contains("MEM") && en.contains("SUMMARY"));
-
-        let empty = ReflectionOutput::default();
-        assert!(engine()
-            .format_output(&empty, "zh")
-            .contains("暂无明显偏差"));
-        assert!(engine()
-            .format_output(&empty, "en")
-            .contains("no significant deviations"));
+        // user_alert 已随死代码清理移除：prompt 不再要求 LLM 产出该字段。
+        assert!(!zh.contains("user_alert"));
+        assert!(!en.contains("user_alert"));
     }
 
     #[test]

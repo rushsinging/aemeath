@@ -50,10 +50,12 @@ impl ReflectionTaskRequest {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReflectionTaskSubmitOutcome {
-    Accepted,
-    BusySkipped,
+/// One run of the reflection stage, awaited by its caller.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReflectionRunOutcome {
+    /// The stage ran to a terminal status; the completion carries its facts.
+    Completed(ReflectionTaskCompletion),
+    /// Configuration disabled reflection; nothing ran.
     DisabledSkipped,
 }
 
@@ -70,11 +72,26 @@ pub struct ReflectionTaskMetadata {
     pub error_category: Option<ReflectionErrorCategory>,
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// Deviations the model reported.
     pub deviations: usize,
+    /// Memories the model proposed to add (not necessarily applied).
     pub suggestions: usize,
+    /// Memory ids the model proposed to mark outdated (not necessarily applied).
     pub outdated: usize,
+    /// Entries the apply stage actually added.
+    pub suggestions_added: usize,
+    /// Entries the apply stage actually marked outdated.
+    pub outdated_marked: usize,
     pub duration_ms: u64,
     pub record_id: Option<String>,
+}
+
+impl ReflectionTaskMetadata {
+    /// Entries the apply stage actually changed. A partial apply still reports
+    /// what it completed, and a run without apply (auto-apply off) reports zero.
+    pub fn applied_changes(&self) -> usize {
+        self.suggestions_added + self.outdated_marked
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,14 +101,15 @@ pub struct ReflectionTaskCompletion {
     pub metadata: Option<ReflectionTaskMetadata>,
 }
 
+/// Memory entries changed since the last notice, awaiting the next Run to deliver it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MemoryUpdateNotice {
+    pub changed: usize,
+}
+
 struct ReflectionPersistence {
     identity: ReflectionExecutionIdentity,
     history: std::sync::Arc<dyn ReflectionHistoryStore>,
-}
-
-struct ReflectionTaskSlot {
-    running: Option<tokio_util::sync::CancellationToken>,
-    completions: Vec<ReflectionTaskCompletion>,
 }
 
 type ReflectionTaskFuture = std::pin::Pin<
@@ -101,13 +119,30 @@ type ReflectionTaskExecutor = dyn Fn(ReflectionTaskRequest, tokio_util::sync::Ca
     + Send
     + Sync;
 
+/// Why a configuration check disabled reflection. Logged at `info` because each
+/// cause is a one-off configuration decision, never a per-turn no-op.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReflectionDisabledReason {
+    MemoryOff,
+    ReflectionOff,
+    IntervalZero,
+}
+
+impl ReflectionDisabledReason {
+    fn label(self) -> &'static str {
+        match self {
+            Self::MemoryOff => "memory_off",
+            Self::ReflectionOff => "reflection_off",
+            Self::IntervalZero => "interval_zero",
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ReflectionTaskAdapter {
     timeout: std::time::Duration,
-    submissions_enabled: bool,
     executor: std::sync::Arc<ReflectionTaskExecutor>,
-    slot: std::sync::Arc<tokio::sync::Mutex<ReflectionTaskSlot>>,
-    changed: std::sync::Arc<tokio::sync::Notify>,
+    pending_memory_updates: std::sync::Arc<std::sync::Mutex<usize>>,
 }
 
 impl ReflectionTaskAdapter {
@@ -123,15 +158,10 @@ impl ReflectionTaskAdapter {
     {
         Self {
             timeout,
-            submissions_enabled: true,
             executor: std::sync::Arc::new(move |request, cancel| {
                 Box::pin(executor(request, cancel))
             }),
-            slot: std::sync::Arc::new(tokio::sync::Mutex::new(ReflectionTaskSlot {
-                running: None,
-                completions: Vec::new(),
-            })),
-            changed: std::sync::Arc::new(tokio::sync::Notify::new()),
+            pending_memory_updates: std::sync::Arc::new(std::sync::Mutex::new(0)),
         }
     }
 
@@ -141,31 +171,38 @@ impl ReflectionTaskAdapter {
         })
     }
 
-    pub fn submit(&self, request: ReflectionTaskRequest) -> ReflectionTaskSubmitOutcome {
-        if !self.submissions_enabled {
-            return ReflectionTaskSubmitOutcome::DisabledSkipped;
-        }
-        let trigger = request.trigger;
-        let executor = std::sync::Arc::clone(&self.executor);
-        self.submit_future(trigger, move |cancel| executor(request, cancel))
+    /// Run the stage without configuration gating, for callers that own their own
+    /// trigger decision. `cancel` is the caller's Run token; the stage also
+    /// enforces its own timeout.
+    pub async fn run(&self, request: ReflectionTaskRequest) -> ReflectionRunOutcome {
+        self.run_future(
+            request.trigger,
+            tokio_util::sync::CancellationToken::new(),
+            move |cancel| {
+                let executor = std::sync::Arc::clone(&self.executor);
+                async move { executor(request, cancel).await }
+            },
+        )
+        .await
     }
 
-    pub fn submit_future<F, Fut>(
+    /// Same as [`Self::run`] but the caller supplies the future, keeping the
+    /// `cancel` token in the caller's hands for provider-level cancellation.
+    pub async fn run_future<F, Fut>(
         &self,
         trigger: ReflectionTaskTrigger,
+        cancel: tokio_util::sync::CancellationToken,
         build: F,
-    ) -> ReflectionTaskSubmitOutcome
+    ) -> ReflectionRunOutcome
     where
-        F: FnOnce(tokio_util::sync::CancellationToken) -> Fut + Send + 'static,
-        Fut: std::future::Future<Output = ReflectionResult<ReflectionResultPayload>>
-            + Send
-            + 'static,
+        F: FnOnce(tokio_util::sync::CancellationToken) -> Fut,
+        Fut: std::future::Future<Output = ReflectionResult<ReflectionResultPayload>> + Send,
     {
-        self.submit_future_inner(trigger, None, build)
+        self.run_persisted(trigger, None, cancel, build).await
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn submit_complete(
+    pub async fn run_complete(
         &self,
         request: ReflectionTaskRequest,
         config: share::config::MemoryConfig,
@@ -177,9 +214,16 @@ impl ReflectionTaskAdapter {
         lang: String,
         memory: std::sync::Arc<dyn MemoryPort>,
         history: std::sync::Arc<dyn ReflectionHistoryStore>,
-    ) -> ReflectionTaskSubmitOutcome {
-        if !config.enabled || !config.reflection.enabled || config.reflection.interval_runs == 0 {
-            return ReflectionTaskSubmitOutcome::DisabledSkipped;
+        cancel: tokio_util::sync::CancellationToken,
+    ) -> ReflectionRunOutcome {
+        if let Some(reason) = ReflectionDisabledReason::of(&config) {
+            log::info!(
+                target: crate::LOG_TARGET,
+                "[reflection_disabled] trigger={} reason={}",
+                request.trigger.label(),
+                reason.label(),
+            );
+            return ReflectionRunOutcome::DisabledSkipped;
         }
         let trigger = request.trigger;
         let identity = ReflectionExecutionIdentity {
@@ -187,12 +231,13 @@ impl ReflectionTaskAdapter {
             timestamp: chrono::Utc::now().timestamp().max(0) as u64,
             trigger: trigger.memory_trigger(),
         };
-        self.submit_future_inner(
+        self.run_persisted(
             trigger,
             Some(ReflectionPersistence {
                 identity: identity.clone(),
                 history: std::sync::Arc::clone(&history),
             }),
+            cancel,
             move |cancel| async move {
                 execute_reflection(
                     &request.messages,
@@ -213,180 +258,148 @@ impl ReflectionTaskAdapter {
                 .await
             },
         )
+        .await
     }
 
-    fn submit_future_inner<F, Fut>(
+    /// Take the memory changes recorded since the last take. Returns `None` when
+    /// nothing changed, so a Run never injects an empty notice.
+    pub fn take_memory_update_notice(&self) -> Option<MemoryUpdateNotice> {
+        let mut pending = self.pending_memory_updates.lock().ok()?;
+        let changed = std::mem::take(&mut *pending);
+        (changed > 0).then_some(MemoryUpdateNotice { changed })
+    }
+
+    async fn run_persisted<F, Fut>(
         &self,
         trigger: ReflectionTaskTrigger,
         persistence: Option<ReflectionPersistence>,
+        cancel: tokio_util::sync::CancellationToken,
         build: F,
-    ) -> ReflectionTaskSubmitOutcome
+    ) -> ReflectionRunOutcome
     where
-        F: FnOnce(tokio_util::sync::CancellationToken) -> Fut + Send + 'static,
-        Fut: std::future::Future<Output = ReflectionResult<ReflectionResultPayload>>
-            + Send
-            + 'static,
+        F: FnOnce(tokio_util::sync::CancellationToken) -> Fut,
+        Fut: std::future::Future<Output = ReflectionResult<ReflectionResultPayload>> + Send,
     {
-        let Ok(mut slot) = self.slot.try_lock() else {
-            log_completion("busy", trigger, "busy", None);
-            return ReflectionTaskSubmitOutcome::BusySkipped;
-        };
-        if slot.running.is_some() {
-            log_completion("busy", trigger, "busy", None);
-            return ReflectionTaskSubmitOutcome::BusySkipped;
-        }
-        let cancel = tokio_util::sync::CancellationToken::new();
-        slot.running = Some(cancel.clone());
-        let task_cancel = cancel.clone();
         let timeout = self.timeout;
-        let task_slot = std::sync::Arc::clone(&self.slot);
-        let changed = std::sync::Arc::clone(&self.changed);
+        let started = std::time::Instant::now();
+        if let Some(persistence) = &persistence {
+            if ReflectionWorkflow::append_running(
+                persistence.history.as_ref(),
+                &persistence.identity,
+            )
+            .await
+            .is_err()
+            {
+                let metadata =
+                    terminal_metadata(ReflectionErrorCategory::History, started.elapsed());
+                log_completion("terminal", trigger, "failed", Some(&metadata));
+                return ReflectionRunOutcome::Completed(ReflectionTaskCompletion {
+                    trigger,
+                    status: ReflectionTaskCompletionStatus::Failed,
+                    metadata: Some(metadata),
+                });
+            }
+        }
         log_completion("accepted", trigger, "accepted", None);
-        tokio::spawn(async move {
-            let started = std::time::Instant::now();
+        let execution = build(cancel.clone());
+        tokio::pin!(execution);
+        let (mut status, mut metadata) = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => (
+                ReflectionTaskCompletionStatus::Cancelled,
+                Some(terminal_metadata(ReflectionErrorCategory::Cancelled, started.elapsed())),
+            ),
+            _ = tokio::time::sleep(timeout) => (
+                ReflectionTaskCompletionStatus::TimedOut,
+                Some(terminal_metadata(ReflectionErrorCategory::TimedOut, started.elapsed())),
+            ),
+            result = &mut execution => match result {
+                Ok(result) => (
+                    if result.error_category.is_some() {
+                        ReflectionTaskCompletionStatus::Failed
+                    } else {
+                        ReflectionTaskCompletionStatus::Succeeded
+                    },
+                    Some(result_metadata(&result, started.elapsed())),
+                ),
+                Err(error) => (
+                    ReflectionTaskCompletionStatus::Failed,
+                    Some(terminal_metadata(error.category(), started.elapsed())),
+                ),
+            },
+        };
+        if matches!(
+            status,
+            ReflectionTaskCompletionStatus::Cancelled | ReflectionTaskCompletionStatus::TimedOut
+        ) {
             if let Some(persistence) = &persistence {
-                if ReflectionWorkflow::append_running(
+                let category = if status == ReflectionTaskCompletionStatus::Cancelled {
+                    ReflectionErrorCategory::Cancelled
+                } else {
+                    ReflectionErrorCategory::TimedOut
+                };
+                if ReflectionWorkflow::record_failure(
                     persistence.history.as_ref(),
                     &persistence.identity,
+                    category,
+                    started.elapsed().as_millis() as u64,
                 )
                 .await
                 .is_err()
                 {
-                    finish_slot(
-                        task_slot,
-                        changed,
-                        ReflectionTaskCompletion {
-                            trigger,
-                            status: ReflectionTaskCompletionStatus::Failed,
-                            metadata: Some(terminal_metadata(
-                                ReflectionErrorCategory::History,
-                                started.elapsed(),
-                            )),
-                        },
-                    )
-                    .await;
-                    return;
+                    status = ReflectionTaskCompletionStatus::Failed;
+                    metadata = Some(terminal_metadata(
+                        ReflectionErrorCategory::History,
+                        started.elapsed(),
+                    ));
+                } else if let Some(metadata) = &mut metadata {
+                    metadata.record_id = Some(persistence.identity.id.clone());
                 }
             }
-            let execution = build(task_cancel.clone());
-            tokio::pin!(execution);
-            let (mut status, mut metadata) = tokio::select! {
-                biased;
-                _ = task_cancel.cancelled() => (
-                    ReflectionTaskCompletionStatus::Cancelled,
-                    Some(terminal_metadata(ReflectionErrorCategory::Cancelled, started.elapsed())),
-                ),
-                _ = tokio::time::sleep(timeout) => (
-                    ReflectionTaskCompletionStatus::TimedOut,
-                    Some(terminal_metadata(ReflectionErrorCategory::TimedOut, started.elapsed())),
-                ),
-                result = &mut execution => match result {
-                    Ok(result) => (
-                        if result.error_category.is_some() {
-                            ReflectionTaskCompletionStatus::Failed
-                        } else {
-                            ReflectionTaskCompletionStatus::Succeeded
-                        },
-                        Some(result_metadata(&result, started.elapsed())),
-                    ),
-                    Err(error) => (
-                        ReflectionTaskCompletionStatus::Failed,
-                        Some(terminal_metadata(error.category(), started.elapsed())),
-                    ),
-                },
-            };
-            if matches!(
-                status,
-                ReflectionTaskCompletionStatus::Cancelled
-                    | ReflectionTaskCompletionStatus::TimedOut
-            ) {
-                if let Some(persistence) = &persistence {
-                    let category = if status == ReflectionTaskCompletionStatus::Cancelled {
-                        ReflectionErrorCategory::Cancelled
-                    } else {
-                        ReflectionErrorCategory::TimedOut
-                    };
-                    if ReflectionWorkflow::record_failure(
-                        persistence.history.as_ref(),
-                        &persistence.identity,
-                        category,
-                        started.elapsed().as_millis() as u64,
-                    )
-                    .await
-                    .is_err()
-                    {
-                        status = ReflectionTaskCompletionStatus::Failed;
-                        metadata = Some(terminal_metadata(
-                            ReflectionErrorCategory::History,
-                            started.elapsed(),
-                        ));
-                    } else if let Some(metadata) = &mut metadata {
-                        metadata.record_id = Some(persistence.identity.id.clone());
-                    }
-                }
-            }
-            if let Some(metadata) = &mut metadata {
-                metadata.duration_ms = started.elapsed().as_millis() as u64;
-            }
-            log_completion(
-                "terminal",
-                trigger,
-                completion_status_label(status),
-                metadata.as_ref(),
-            );
-            finish_slot(
-                task_slot,
-                changed,
-                ReflectionTaskCompletion {
-                    trigger,
-                    status,
-                    metadata,
-                },
-            )
-            .await;
-        });
-        ReflectionTaskSubmitOutcome::Accepted
-    }
-
-    pub async fn cancel(&self) {
-        if let Some(cancel) = &self.slot.lock().await.running {
-            cancel.cancel();
         }
-    }
-
-    pub async fn shutdown(&self, deadline: std::time::Duration) -> Vec<ReflectionTaskCompletion> {
-        match tokio::time::timeout(deadline, self.drain()).await {
-            Ok(completions) => completions,
-            Err(_) => {
-                self.cancel().await;
-                self.drain().await
-            }
+        if let Some(metadata) = &mut metadata {
+            metadata.duration_ms = started.elapsed().as_millis() as u64;
         }
+        log_completion(
+            "terminal",
+            trigger,
+            completion_status_label(status),
+            metadata.as_ref(),
+        );
+        if status == ReflectionTaskCompletionStatus::Succeeded {
+            self.record_applied_changes(metadata.as_ref());
+        }
+        ReflectionRunOutcome::Completed(ReflectionTaskCompletion {
+            trigger,
+            status,
+            metadata,
+        })
     }
 
-    pub async fn drain(&self) -> Vec<ReflectionTaskCompletion> {
-        loop {
-            let notified = self.changed.notified();
-            let mut slot = self.slot.lock().await;
-            if slot.running.is_none() {
-                return std::mem::take(&mut slot.completions);
-            }
-            drop(slot);
-            notified.await;
+    fn record_applied_changes(&self, metadata: Option<&ReflectionTaskMetadata>) {
+        let Some(metadata) = metadata else {
+            return;
+        };
+        let applied_changes = metadata.applied_changes();
+        if applied_changes == 0 {
+            return;
+        }
+        if let Ok(mut pending) = self.pending_memory_updates.lock() {
+            *pending += applied_changes;
         }
     }
 }
 
-async fn finish_slot(
-    slot: std::sync::Arc<tokio::sync::Mutex<ReflectionTaskSlot>>,
-    changed: std::sync::Arc<tokio::sync::Notify>,
-    completion: ReflectionTaskCompletion,
-) {
-    let mut slot = slot.lock().await;
-    slot.running = None;
-    slot.completions.push(completion);
-    drop(slot);
-    changed.notify_waiters();
+impl ReflectionDisabledReason {
+    fn of(config: &share::config::MemoryConfig) -> Option<Self> {
+        if !config.enabled {
+            return Some(Self::MemoryOff);
+        }
+        if !config.reflection.enabled {
+            return Some(Self::ReflectionOff);
+        }
+        (config.reflection.interval_runs == 0).then_some(Self::IntervalZero)
+    }
 }
 
 fn terminal_metadata(
@@ -400,6 +413,8 @@ fn terminal_metadata(
         deviations: 0,
         suggestions: 0,
         outdated: 0,
+        suggestions_added: 0,
+        outdated_marked: 0,
         duration_ms: duration.as_millis() as u64,
         record_id: None,
     }
@@ -409,6 +424,11 @@ fn result_metadata(
     result: &CompleteReflectionResult,
     duration: std::time::Duration,
 ) -> ReflectionTaskMetadata {
+    let (suggestions_added, outdated_marked) = result
+        .apply_result
+        .as_ref()
+        .map(|apply| (apply.suggestions_added, apply.outdated_marked))
+        .unwrap_or_default();
     ReflectionTaskMetadata {
         error_category: result.error_category,
         input_tokens: result.input_tokens,
@@ -416,6 +436,8 @@ fn result_metadata(
         deviations: result.output.deviations.len(),
         suggestions: result.output.suggested_memories.len(),
         outdated: result.output.outdated_memories.len(),
+        suggestions_added,
+        outdated_marked,
         duration_ms: duration.as_millis() as u64,
         record_id: result.record_id.clone(),
     }
@@ -448,6 +470,33 @@ fn log_completion(
         "[reflection_{event}] trigger={} status={status} error_category={category} record_id={record_id}",
         trigger.label(),
     );
+    if event == "terminal" {
+        log_terminal_facts(trigger, metadata);
+    }
+}
+
+/// The apply counts and token usage only exist on a terminal that actually ran;
+/// busy skips and rejected submissions never reach this point.
+fn log_terminal_facts(trigger: ReflectionTaskTrigger, metadata: Option<&ReflectionTaskMetadata>) {
+    let Some(metadata) = metadata else {
+        return;
+    };
+    log::info!(
+        target: crate::LOG_TARGET,
+        "[reflection_tokens] trigger={} input_tokens={} output_tokens={}",
+        trigger.label(),
+        metadata.input_tokens,
+        metadata.output_tokens,
+    );
+    if metadata.applied_changes() > 0 {
+        log::info!(
+            target: crate::LOG_TARGET,
+            "[reflection_applied] trigger={} added={} outdated={}",
+            trigger.label(),
+            metadata.suggestions_added,
+            metadata.outdated_marked,
+        );
+    }
 }
 
 fn error_category_label(category: ReflectionErrorCategory) -> &'static str {

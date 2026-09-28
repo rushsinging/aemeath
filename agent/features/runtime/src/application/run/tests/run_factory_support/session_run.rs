@@ -147,6 +147,7 @@ pub(crate) struct SessionRunFixtureBuilder {
     workspace_root: PathBuf,
     usage: crate::application::run::context::RunUsageTracker,
     usage_sink: Arc<dyn crate::ports::UsageSink>,
+    reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
 }
 
 impl SessionRunFixtureBuilder {
@@ -176,6 +177,7 @@ impl SessionRunFixtureBuilder {
             )),
             usage: crate::application::run::context::RunUsageTracker::new(),
             usage_sink: Arc::new(crate::ports::UnavailableUsageSink),
+            reflection_history: Arc::new(FakeReflectionHistory),
         }
     }
 
@@ -246,6 +248,16 @@ impl SessionRunFixtureBuilder {
         context_factory: Arc<RuntimeContextFactory>,
     ) -> Self {
         self.context_factory = Some(context_factory);
+        self
+    }
+
+    /// Replace the reflection history so a test can observe which reflection
+    /// runs reached persistence, and with which trigger.
+    pub(crate) fn with_reflection_history(
+        mut self,
+        reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
+    ) -> Self {
+        self.reflection_history = reflection_history;
         self
     }
 
@@ -338,7 +350,7 @@ impl SessionRunFixtureBuilder {
                 tool_catalog.clone(),
                 tool_execution.clone(),
                 policy.clone(),
-                Arc::new(FakeReflectionHistory),
+                self.reflection_history,
                 task_store,
                 self.hooks.clone(),
                 self.usage_sink.clone(),
