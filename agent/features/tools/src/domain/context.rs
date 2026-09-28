@@ -124,29 +124,10 @@ pub trait Guidance: Send + Sync {
     fn language(&self) -> &str;
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AuthorizationContext {
-    pub allow_outside_workspace: bool,
-    pub require_read_before_write: bool,
-    pub enforce_bash_safety: bool,
-    pub enforce_tool_fuse: bool,
-}
+// 授权上下文已下沉 share 共享词汇（policy domain 依赖 share 而非本 crate）；
+// 此处 re-export 保持 `crate::domain::AuthorizationContext` 路径兼容。
+pub use share::tools_vocab::AuthorizationContext;
 
-impl AuthorizationContext {
-    pub const STANDARD: Self = Self {
-        allow_outside_workspace: false,
-        require_read_before_write: true,
-        enforce_bash_safety: true,
-        enforce_tool_fuse: true,
-    };
-
-    pub const ALLOW_ALL: Self = Self {
-        allow_outside_workspace: true,
-        require_read_before_write: false,
-        enforce_bash_safety: false,
-        enforce_tool_fuse: false,
-    };
-}
 /// Read-only workspace capability available to every tool invocation.
 #[derive(Clone)]
 pub struct WorkspaceReadAccess {

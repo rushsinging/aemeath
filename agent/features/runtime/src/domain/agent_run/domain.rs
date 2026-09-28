@@ -135,7 +135,7 @@ impl Run {
 
     pub fn begin_interaction(
         &mut self,
-        request_id: sdk::InteractionRequestId,
+        request_id: share::ids::InteractionRequestId,
         continuation: InteractionContinuation,
     ) -> Result<(), RunTransitionError> {
         if self.rejects_controlled_work() {
@@ -179,7 +179,7 @@ impl Run {
 
     pub fn complete_interaction(
         &mut self,
-        request_id: &sdk::InteractionRequestId,
+        request_id: &share::ids::InteractionRequestId,
     ) -> Result<InteractionContinuation, RunTransitionError> {
         let pending = self
             .pending_interaction
@@ -206,7 +206,7 @@ impl Run {
 
     pub fn cancel_interaction(
         &mut self,
-        request_id: &sdk::InteractionRequestId,
+        request_id: &share::ids::InteractionRequestId,
     ) -> Result<InteractionContinuation, RunTransitionError> {
         let pending = self
             .pending_interaction
@@ -495,7 +495,7 @@ impl Run {
     pub fn advance_tool_call(
         &mut self,
         step_id: &RunStepId,
-        call_id: &sdk::ids::ToolCallId,
+        call_id: &share::ids::ToolCallId,
         status: ToolCallStatus,
     ) -> Result<(), RunTransitionError> {
         self.ensure_accepts_step_work()?;

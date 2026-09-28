@@ -1,7 +1,7 @@
 use std::num::NonZeroUsize;
 
-use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 use serde::{Deserialize, Serialize};
+use share::ids::{ModelInvocationId, RunId, RunStepId, SessionId};
 
 pub const CURRENT_USAGE_SCHEMA_VERSION: u32 = 1;
 

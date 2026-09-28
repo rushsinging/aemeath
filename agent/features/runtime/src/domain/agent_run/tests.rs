@@ -1,5 +1,5 @@
 use super::*;
-use sdk::InteractionRequestId;
+use share::ids::InteractionRequestId;
 use std::time::Duration;
 
 #[test]
@@ -37,7 +37,9 @@ fn run() -> Run {
 }
 
 fn tool_continuation(provider_id: &str) -> InteractionContinuation {
-    InteractionContinuation::CompleteToolCall(sdk::ids::ToolCallId::from_legacy_or_new(provider_id))
+    InteractionContinuation::CompleteToolCall(share::ids::ToolCallId::from_legacy_or_new(
+        provider_id,
+    ))
 }
 
 #[test]
@@ -137,7 +139,7 @@ fn cancelling_interaction_restores_working_status_without_emitting_resumed() {
 
 #[test]
 fn interaction_continuation_exhaustively_restores_its_origin_phase() {
-    let call_id = sdk::ids::ToolCallId::from_legacy_or_new("call-1");
+    let call_id = share::ids::ToolCallId::from_legacy_or_new("call-1");
     let cases = [
         (
             RunStatus::ExecutingTools,
@@ -896,7 +898,7 @@ fn configured_stop_hook_block_limit_controls_retry_exhaustion() {
 
 fn tool_call(provider_id: &str) -> crate::domain::agent_run::ToolCall {
     crate::domain::agent_run::ToolCall {
-        id: sdk::ids::ToolCallId::from_legacy_or_new(provider_id),
+        id: share::ids::ToolCallId::from_legacy_or_new(provider_id),
         provider_id: provider_id.to_string(),
         name: "Read".to_string(),
         index: 0,

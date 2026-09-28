@@ -14,9 +14,11 @@ serde_json = { workspace = true }
 serde_yml = "0.0.12"
 thiserror = { workspace = true }
 tokio-util = { workspace = true }
-uuid = { version = "1", features = ["v7"] }
+schemars = { workspace = true }
+uuid = { version = "1", features = ["v5", "v7", "serde"] }
 log = "0.4"
 unicode-width = "0.2"
+bitflags = { version = "2", features = ["serde"] }
 logging = { path = "../../packages/global/logging" }
 utils = { path = "../../packages/global/utils" }
 

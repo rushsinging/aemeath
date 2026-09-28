@@ -1,6 +1,6 @@
 use super::state::{RunStatus, RunStepId, RunTransitionReason};
 
-pub use sdk::RunId;
+pub use share::ids::RunId;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RunTimingSnapshot {
@@ -67,12 +67,12 @@ pub enum RuntimeLifecycleEvent {
     AwaitingUser {
         run_id: RunId,
         parent_run_id: Option<RunId>,
-        request_id: sdk::InteractionRequestId,
+        request_id: share::ids::InteractionRequestId,
     },
     Resumed {
         run_id: RunId,
         parent_run_id: Option<RunId>,
-        request_id: sdk::InteractionRequestId,
+        request_id: share::ids::InteractionRequestId,
     },
     StuckDetected {
         run_id: RunId,

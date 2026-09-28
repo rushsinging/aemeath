@@ -73,7 +73,7 @@ impl Policy for RecordingPolicy {
                     reason: PolicyReasonData::RestrictedTool,
                 }
             } else {
-                PolicyDecisionData::Allow(tools::AuthorizationContext::STANDARD)
+                PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::STANDARD)
             }
         })
     }
@@ -173,7 +173,7 @@ impl Policy for AllowAllRecordingPolicy {
             .lock()
             .unwrap()
             .push(request.tool_name().as_str().to_string());
-        PolicyDecisionData::Allow(tools::AuthorizationContext::ALLOW_ALL)
+        PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::ALLOW_ALL)
     }
 
     fn current_mode(&self) -> policy::PolicyModeData {
@@ -253,7 +253,7 @@ fn prepare_round_rejects_missing_catalog_tool_without_invoking_policy() {
     );
     let catalog = factory.build(ctx).catalog();
     let policy = RecordingPolicy::returning(PolicyDecisionData::Allow(
-        tools::AuthorizationContext::STANDARD,
+        share::tools_vocab::AuthorizationContext::STANDARD,
     ));
 
     let prepared = prepare_tool_round(
@@ -285,7 +285,7 @@ fn prepare_round_rejects_invalid_policy_request_without_invoking_policy() {
     );
     let catalog = factory.build(ctx).catalog();
     let policy = RecordingPolicy::returning(PolicyDecisionData::Allow(
-        tools::AuthorizationContext::STANDARD,
+        share::tools_vocab::AuthorizationContext::STANDARD,
     ));
 
     let prepared = prepare_tool_round(
@@ -407,15 +407,15 @@ fn restore_tool_call_order_uses_original_call_order() {
 /// based on the tool name.
 struct HookTestPolicy {
     eval_count: Mutex<usize>,
-    authorization: tools::AuthorizationContext,
+    authorization: share::tools_vocab::AuthorizationContext,
 }
 
 impl HookTestPolicy {
     fn new() -> Self {
-        Self::with_authorization(tools::AuthorizationContext::STANDARD)
+        Self::with_authorization(share::tools_vocab::AuthorizationContext::STANDARD)
     }
 
-    fn with_authorization(authorization: tools::AuthorizationContext) -> Self {
+    fn with_authorization(authorization: share::tools_vocab::AuthorizationContext) -> Self {
         Self {
             eval_count: Mutex::new(0),
             authorization,
@@ -613,7 +613,10 @@ fn hook_directive_updated_input_valid_passes_schema_and_policy() {
             assert_eq!(call.name, "Allowed");
             assert_eq!(call.input, serde_json::json!({"path": "/tmp/file"}));
             assert!(context.is_none());
-            assert_eq!(authorization, tools::AuthorizationContext::STANDARD);
+            assert_eq!(
+                authorization,
+                share::tools_vocab::AuthorizationContext::STANDARD
+            );
         }
         other => panic!("expected Ready, got {other:?}"),
     }
@@ -624,7 +627,8 @@ fn hook_directive_updated_input_valid_passes_schema_and_policy() {
 #[test]
 fn hook_directive_updated_input_preserves_policy_authorization() {
     let catalog = build_catalog();
-    let policy = HookTestPolicy::with_authorization(tools::AuthorizationContext::ALLOW_ALL);
+    let policy =
+        HookTestPolicy::with_authorization(share::tools_vocab::AuthorizationContext::ALLOW_ALL);
     let original = call("Allowed", 0);
 
     let outcome = apply_hook_directive_to_tool_call(
@@ -641,7 +645,10 @@ fn hook_directive_updated_input_preserves_policy_authorization() {
 
     match outcome {
         HookDirectiveOutcome::Ready { authorization, .. } => {
-            assert_eq!(authorization, tools::AuthorizationContext::ALLOW_ALL);
+            assert_eq!(
+                authorization,
+                share::tools_vocab::AuthorizationContext::ALLOW_ALL
+            );
         }
         other => panic!("expected Ready, got {other:?}"),
     }
@@ -763,7 +770,10 @@ fn hook_directive_context_and_input_preserves_context_in_ready() {
         } => {
             assert_eq!(call.input, serde_json::json!({"path": "/updated"}));
             assert_eq!(context.as_deref(), Some("important context"));
-            assert_eq!(authorization, tools::AuthorizationContext::STANDARD);
+            assert_eq!(
+                authorization,
+                share::tools_vocab::AuthorizationContext::STANDARD
+            );
         }
         other => panic!("expected Ready, got {other:?}"),
     }

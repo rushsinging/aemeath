@@ -31,10 +31,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use provider::ModelToolSchemaData;
-use sdk::RunId;
-pub use sdk::{RunStepId, SessionId};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::AgentRoleDefinition;
+use share::ids::RunId;
+pub use share::ids::{RunStepId, SessionId};
 pub use share::message::Message as ContextMessage;
 use share::reasoning::ReasoningLevel;
 

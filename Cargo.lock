@@ -2843,12 +2843,10 @@ name = "policy"
 version = "0.0.0"
 dependencies = [
  "log",
- "sdk",
  "serde",
  "serde_json",
  "share",
  "tempfile",
- "tools",
 ]
 
 [[package]]
@@ -3727,9 +3725,11 @@ dependencies = [
 name = "share"
 version = "0.0.0"
 dependencies = [
+ "bitflags 2.13.1",
  "chrono",
  "log",
  "logging",
+ "schemars",
  "serde",
  "serde_json",
  "serde_yml",

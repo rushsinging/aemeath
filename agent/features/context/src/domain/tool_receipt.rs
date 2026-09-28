@@ -1,6 +1,6 @@
 use super::{SessionId, ToolOutcomeKindData};
-use sdk::{RunId, RunStepId};
 use serde::{Deserialize, Serialize};
+use share::ids::{RunId, RunStepId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CleanupConfirmation {
