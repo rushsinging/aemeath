@@ -85,7 +85,7 @@ where
             let mut cwd = workspace.read().current_workspace_root();
             // Per-Session usage tracker shared across all Main Runs.
             let session_usage = crate::application::run::context::RunUsageTracker::new();
-            let mut step_count = 0;
+            let mut run_count = 0;
             let mut pending_input = PendingInputBuffer::default();
             // idle `/compact` 已受理，等待下一次循环启动手动压缩 Run。
             let mut manual_compaction_requested = false;
@@ -263,7 +263,7 @@ where
                             .await;
                             // Run 计数器（Reflection interval 频控）per-session：
                             // resume 切换 session 后从 0 重数，NEVER 延续旧 session 计数。
-                            step_count = 0;
+                            run_count = 0;
                             shell
                                 .session_state
                                 .write()
@@ -485,7 +485,7 @@ where
                                 messages.clear();
                                 // Run 计数器（Reflection interval 频控）绑定
                                 // session epoch：/clear 即新 epoch，从 0 重数。
-                                step_count = 0;
+                                run_count = 0;
                                 sink.send_event(RuntimeStreamEvent::SessionReset).await;
                             }
                             Err(error) => {
@@ -518,10 +518,10 @@ where
                         (next_segment, accepted_inputs)
                     }                };
 
-                step_count += 1;
+                run_count += 1;
                 let run_id = ChatRunId::new_v7();
                 let turn_context = RuntimeRunContext::new(chat_id.clone(), run_id.clone());
-                sink.send_event(RuntimeStreamEvent::RunChanged(step_count))
+                sink.send_event(RuntimeStreamEvent::RunChanged(run_count))
                     .await;
                 cwd = workspace.read().current_workspace_root();
                 shell
@@ -537,7 +537,7 @@ where
                     &mut config_snapshot,
                     config_reader.as_ref(),
                     wiring.as_ref(),
-                    step_count,
+                    run_count,
                     &sink,
                     &language,
                     &segment_id,
@@ -583,7 +583,7 @@ where
                         .unwrap_or_else(|error| error.into_inner())
                         .update_session(session_id.clone(), prepared_session.config().clone());
                 }
-                run_instance.initialize(messages.clone(), step_count);
+                run_instance.initialize(messages.clone(), run_count);
                 let runtime_context = run_instance.context().clone();
                 let run_id = run_instance.run().id().clone();
                 let spec = run_instance.run().spec().clone();
@@ -879,17 +879,15 @@ where
                 if manual_compaction_run {
                     loop_context.bind_manual_compaction(&mut manual_compaction);
                 }
-                let launch_result = logging::within(
-                    logging::LogContextPatch {
-                        run_step: logging::FieldPatch::Set(step_count),
-                        ..logging::LogContextPatch::default()
-                    },
-                    crate::application::run::launcher::launch(
-                        &mut run_instance,
-                        cancel.clone(),
-                        main_active_run.clone(),
-                        &mut loop_context,
-                    ),
+                // `run_step` stays unset at Run level: it is the schema's LLM
+                // step counter, and a Run has none. `run_services` sets it per
+                // LLM call; binding the Run ordinal here made one field mean
+                // two different things.
+                let launch_result = crate::application::run::launcher::launch(
+                    &mut run_instance,
+                    cancel.clone(),
+                    main_active_run.clone(),
+                    &mut loop_context,
                 )
                 .await;
                 heartbeat_cancel.cancel();

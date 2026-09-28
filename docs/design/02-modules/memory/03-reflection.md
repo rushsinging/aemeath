@@ -88,7 +88,7 @@ Runtime 对三种来源统一做 enable / interval 判定并构造拥有消息�
 
 | 时机 | Trigger | 执行方式 | 触发者 | 说明 |
 |---|---|---|---|---|
-| **轮次间隔** | `Interval` | Runtime 同步 await | Runtime loop | 每 `interval_runs`（默认 10，旧键 `interval_run_steps` 仍可读取）个 Run 触发一次；计数 per-session，`/clear` 与 resume 切换后从 0 重数；有 tool_calls 且非 EndTurn 时跳过；轮末等待反思完成 |
+| **轮次间隔** | `Interval` | Runtime 同步 await | Runtime loop | 每 `interval_runs`（默认 10，旧键 `interval_run_steps` 仍可读取）个 Main Run 触发一次；`run_count` per-session 计数，`/clear` 与 resume 切换后从 0 重数；**只在 Run 的最后一跳（该跳无 tool call）判定**；轮末等待反思完成 |
 | **Pre-compact** | `PreCompact` | Runtime 同步 await | Runtime compact 成功后 | compact 前冻结“将被丢弃”的 messages 快照；只有 compact 成功产生 outcome 后才执行 |
 | **手动请求** | `Manual` | Runtime 同步 await | `/reflect-now` 命令（#1289） | 与另两种 trigger 共用通道；`/reflect [limit]` **NEVER** 进入此入口 |
 
@@ -142,6 +142,14 @@ Interval / PreCompact / Manual
 - **执行期间可取消**：反思是 Run 内的协作式阶段，Run 的 cancellation token 直接传入执行通道；取消只形成安全终态 metadata，不泄漏 prompt、provider raw response 或 Reflection 正文。
 - **任务超时**：执行通道对反思施加 timeout，超时形成安全终态。
 - **无后台残留**：三种 trigger 都在所属调用点 await 完成，Session teardown 不需要 drain 或等待后台 job。
+
+### 计数口径
+
+`run_count`（session 内的 Main Run 序号）与 `execution.step_count()`（Run 内 LLM 跳数）是两个不同计数器，Interval 频控只看前者：
+
+- 触发判定在回合收尾的那一跳进行——`classify_terminal` 遇到有 tool call 的响应会先返回 `ModelStep::Tools`，因此中途跳不会触发反思。
+- `run_count` 在每个 Main Run 启动前递增，`/clear` 与 resume 切换 session 时归零，NEVER 延续旧 session 计数。
+- 日志字段 `run_step`（`specs/3.15` 字段 7）只承载 LLM 跳数，Run 级事件不设置它（未设置为 `null`）。
 
 ### 间隔触发的跳过条件
 
@@ -324,6 +332,7 @@ struct ReflectionConfig {
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-09-29 | 补充「计数口径」小节：区分 session 内 Main Run 序号 `run_count` 与 Run 内 LLM 跳数；Interval 判定只发生在回合收尾跳；`run_step` 日志字段只承载 LLM 跳数 |
 | 2026-09-28 | 三种 trigger 由「单槽后台异步」改为「同一执行通道同步 await」：调用方 await 到终态，Run 的 cancellation token 传入执行通道，Session teardown 不再 drain；完成时按 apply 计数发 TUI SystemMessage 并累积下一轮 LLM reminder；`user_alert` 与无生产调用方的 `format_output` 随 i18n 死代码一并移除 | #1772 |
 | 2026-09-25 | #1289 接通 Manual 显式入口：Tools catalog `/reflect-now` → SDK `ChatInputEvent::ReflectNow` → input gate（idle 受理 / busy 提示丢弃，NEVER 排队）→ run_launch handler 冻结 `structured_messages()` 快照 submit 单槽 | #1289 |
 | 2026-07-20 | #1285 为 Run teardown 落地有界 drain→cancel→terminal 收口；Manual 显式入口由 #1289（归 #860）承接 | #1285/#1289/#860 |
