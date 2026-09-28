@@ -105,10 +105,13 @@ mod tests {
 
         assert!(!result.is_error, "{}", result.text);
         assert!(result.text.contains("Subject: legacy display"));
-        let batches = task::TaskAccess::list_batches(access.as_ref());
-        assert_eq!(batches.len(), 1);
-        assert_eq!(batches[0].summary(), Some("修复 task 状态"));
-        assert_eq!(result.data.unwrap().batch_id, batches[0].id().to_string());
+        let snapshots = access.list_batch_snapshots();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(snapshots[0].batch().summary(), Some("修复 task 状态"));
+        assert_eq!(
+            result.data.unwrap().batch_id,
+            snapshots[0].batch().id().to_string()
+        );
     }
 
     #[tokio::test]

@@ -72,6 +72,133 @@ impl TaskStore {
             .lock()
             .expect("task store mutex poisoned; refusing to expose potentially partial state")
     }
+
+    /// 以下 12 个 Task-internal 能力（batch pause/resume/turn、plain
+    /// transition、单边依赖增删、tag 增删、全局 batch 列表、blocked/cycle
+    /// 探测、全局 stats）未发布到 [`TaskAccess`]，生产构建当前没有 crate 内
+    /// 消费者；行为由 `adapters/contract/task_access.rs` 与 store 层测试锁定，
+    /// 待消费面激活后移除各自的 `allow(dead_code)`。
+    #[cfg_attr(not(test), allow(dead_code))]
+    /// Task-internal batch 生命周期命令（未发布到 [`TaskAccess`]）：
+    /// `Active` 原子转为 `Paused` 并清空 current；重复 pause 幂等返回 `Paused` 实体。
+    pub(crate) fn pause_batch(
+        &self,
+        id: BatchIdData,
+    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError> {
+        self.lock().pause_batch(id)
+    }
+
+    /// Task-internal batch 生命周期命令（未发布到 [`TaskAccess`]）：
+    /// 仅在无其他 `Active` 时把 `Paused` 原子设回 `Active`/current。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn resume_batch(
+        &self,
+        id: BatchIdData,
+    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError> {
+        self.lock().resume_batch(id)
+    }
+
+    /// Task-internal batch turn 事实记录（未发布到 [`TaskAccess`]）。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn record_batch_turn(
+        &self,
+        id: BatchIdData,
+        turn: u64,
+        active: bool,
+    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError> {
+        self.lock().record_batch_turn(id, turn, active)
+    }
+
+    /// Task-internal 非 progress 状态迁移（未发布到 [`TaskAccess`]）；
+    /// crate 外状态推进走 [`TaskAccess::transition_with_progress`]。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn transition(
+        &self,
+        id: TaskIdData,
+        to: TaskStatusData,
+        updated_at: u64,
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
+        self.lock().transition(id, to, updated_at)
+    }
+
+    /// Task-internal 单条依赖追加（未发布到 [`TaskAccess`]）；
+    /// crate 外依赖改写走 [`TaskAccess::replace_dependencies`]。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn add_dependency(
+        &self,
+        task_id: TaskIdData,
+        blocked_by_id: TaskIdData,
+        updated_at: u64,
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
+        self.lock()
+            .add_dependency(task_id, blocked_by_id, updated_at)
+    }
+
+    /// Task-internal 单条依赖移除（未发布到 [`TaskAccess`]）。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn remove_dependency(
+        &self,
+        task_id: TaskIdData,
+        blocked_by_id: TaskIdData,
+        updated_at: u64,
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
+        self.lock()
+            .remove_dependency(task_id, blocked_by_id, updated_at)
+    }
+
+    /// Task-internal tag 追加（未发布到 [`TaskAccess`]）。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn add_tag(
+        &self,
+        id: TaskIdData,
+        tag: String,
+        updated_at: u64,
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
+        self.lock().add_tag(id, tag, updated_at)
+    }
+
+    /// Task-internal tag 移除（未发布到 [`TaskAccess`]）。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn remove_tag(
+        &self,
+        id: TaskIdData,
+        tag: &str,
+        updated_at: u64,
+    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
+        self.lock().remove_tag(id, tag, updated_at)
+    }
+
+    /// Task-internal 全局 batch 列表（未发布到 [`TaskAccess`]）；
+    /// crate 外历史发现走 [`TaskAccess::list_batch_snapshots`]。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn list_batches(&self) -> Vec<BatchData> {
+        self.lock().list_batches()
+    }
+
+    /// Task-internal 全局统计（未发布到 [`TaskAccess`]）；
+    /// crate 外 batch 统计走 [`TaskAccess::batch_snapshot`] 家族。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn stats(&self) -> TaskStoreStatsData {
+        self.lock().stats()
+    }
+
+    /// Task-internal blocked 探测（未发布到 [`TaskAccess`]）；
+    /// 写入侧 admission 由原子 transition 在锁内检查，不依赖本查询。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn is_blocked(&self, id: TaskIdData) -> Result<bool, share::error::DomainError> {
+        self.lock().is_blocked(id)
+    }
+
+    /// Task-internal 依赖环预检（未发布到 [`TaskAccess`]）；
+    /// `replace_dependencies` 写入时在同一事务内重新检查环。
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn would_create_cycle(
+        &self,
+        task_id: TaskIdData,
+        blocked_by_id: TaskIdData,
+    ) -> bool {
+        self.lock().would_create_cycle(task_id, blocked_by_id)
+    }
 }
 
 impl TaskAccess for TaskStore {
@@ -91,34 +218,11 @@ impl TaskAccess for TaskStore {
         self.lock().create_batch(spec, timestamp)
     }
 
-    fn pause_batch(
-        &self,
-        id: BatchIdData,
-    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError> {
-        self.lock().pause_batch(id)
-    }
-
-    fn resume_batch(
-        &self,
-        id: BatchIdData,
-    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError> {
-        self.lock().resume_batch(id)
-    }
-
     fn archive_batch(
         &self,
         id: BatchIdData,
     ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError> {
         self.lock().archive_batch(id)
-    }
-
-    fn record_batch_turn(
-        &self,
-        id: BatchIdData,
-        turn: u64,
-        active: bool,
-    ) -> Result<TaskCommandResultData<BatchData>, share::error::DomainError> {
-        self.lock().record_batch_turn(id, turn, active)
     }
 
     fn create_task(
@@ -136,15 +240,6 @@ impl TaskAccess for TaskStore {
         updated_at: u64,
     ) -> Result<TaskCommandResultData<TaskProgressSnapshotData>, share::error::DomainError> {
         self.lock().transition_with_progress(id, to, updated_at)
-    }
-
-    fn transition(
-        &self,
-        id: TaskIdData,
-        to: TaskStatusData,
-        updated_at: u64,
-    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
-        self.lock().transition(id, to, updated_at)
     }
 
     fn set_subject(
@@ -174,16 +269,6 @@ impl TaskAccess for TaskStore {
         self.lock().set_priority(id, priority, updated_at)
     }
 
-    fn add_dependency(
-        &self,
-        task_id: TaskIdData,
-        blocked_by_id: TaskIdData,
-        updated_at: u64,
-    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
-        self.lock()
-            .add_dependency(task_id, blocked_by_id, updated_at)
-    }
-
     fn replace_dependencies(
         &self,
         task_id: TaskIdData,
@@ -192,34 +277,6 @@ impl TaskAccess for TaskStore {
     ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
         self.lock()
             .replace_dependencies(task_id, blocked_by_ids, updated_at)
-    }
-
-    fn remove_dependency(
-        &self,
-        task_id: TaskIdData,
-        blocked_by_id: TaskIdData,
-        updated_at: u64,
-    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
-        self.lock()
-            .remove_dependency(task_id, blocked_by_id, updated_at)
-    }
-
-    fn add_tag(
-        &self,
-        id: TaskIdData,
-        tag: String,
-        updated_at: u64,
-    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
-        self.lock().add_tag(id, tag, updated_at)
-    }
-
-    fn remove_tag(
-        &self,
-        id: TaskIdData,
-        tag: &str,
-        updated_at: u64,
-    ) -> Result<TaskCommandResultData<TaskData>, share::error::DomainError> {
-        self.lock().remove_tag(id, tag, updated_at)
     }
 
     fn delete_with_progress(
@@ -250,10 +307,6 @@ impl TaskAccess for TaskStore {
         self.lock().list()
     }
 
-    fn list_batches(&self) -> Vec<BatchData> {
-        self.lock().list_batches()
-    }
-
     fn batch_snapshot(&self, id: BatchIdData) -> Option<TaskBatchSnapshotData> {
         self.lock().batch_snapshot(id)
     }
@@ -266,20 +319,8 @@ impl TaskAccess for TaskStore {
         self.lock().current_batch()
     }
 
-    fn stats(&self) -> TaskStoreStatsData {
-        self.lock().stats()
-    }
-
     fn lifecycle_snapshot(&self, stale_after_silence_turns: u64) -> TaskLifecycleSnapshotData {
         self.lock().lifecycle_snapshot(stale_after_silence_turns)
-    }
-
-    fn is_blocked(&self, id: TaskIdData) -> Result<bool, share::error::DomainError> {
-        self.lock().is_blocked(id)
-    }
-
-    fn would_create_cycle(&self, task_id: TaskIdData, blocked_by_id: TaskIdData) -> bool {
-        self.lock().would_create_cycle(task_id, blocked_by_id)
     }
 }
 

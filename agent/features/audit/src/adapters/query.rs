@@ -1,13 +1,11 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
-
 use crate::application::query::{
     decode_cursor, decode_record, encode_cursor, matches, query_fingerprint, validate_query,
     CursorPosition,
 };
 use crate::domain::{UsageCursor, UsagePageData, UsageQueryData, UsageQueryError};
-use crate::ports::{AppendLogNamespace, AppendLogStream, UsageAppendStorePort, UsageQueryPort};
+use crate::ports::{AppendLogNamespace, AppendLogStream, UsageAppendStorePort};
 
 #[derive(Clone)]
 pub struct UsageQueryService {
@@ -20,9 +18,13 @@ impl UsageQueryService {
     }
 }
 
-#[async_trait]
-impl UsageQueryPort for UsageQueryService {
-    async fn query(&self, query: UsageQueryData) -> Result<UsagePageData, UsageQueryError> {
+impl UsageQueryService {
+    /// 分页查询实现：校验、cursor 一致性、按 stream 顺序扫描与 warning 收集。
+    /// 细分类错误仅供 crate 内诊断；跨边界读出走 [`Self::query_page`]。
+    pub(crate) async fn query(
+        &self,
+        query: UsageQueryData,
+    ) -> Result<UsagePageData, UsageQueryError> {
         let limit = validate_query(&query)?;
         let cursor = query
             .pagination
@@ -90,8 +92,7 @@ impl UsageQueryService {
         &self,
         query: UsageQueryData,
     ) -> Result<UsagePageData, share::error::DomainError> {
-        let port = self as &dyn crate::ports::UsageQueryPort;
-        port.query(query)
+        self.query(query)
             .await
             .map_err(crate::AuditError::from)
             .map_err(Into::into)

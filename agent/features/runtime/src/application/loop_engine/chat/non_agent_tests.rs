@@ -228,7 +228,7 @@ fn completed_task_outcome(text: &str) -> tools::ToolOutcome {
         )
         .unwrap();
     let result = store
-        .transition(created.value.id(), TaskStatusData::Completed, 3)
+        .transition_with_progress(created.value.id(), TaskStatusData::Completed, 3)
         .unwrap();
     tools::ToolOutcome::new(text, Value::Null, Vec::new())
         .with_task_change(tools::CommittedTaskChange::from_command_result(&result))
@@ -287,7 +287,7 @@ async fn dispatch_task_facts(outcome: tools::ToolOutcome) -> Vec<&'static str> {
         if revision >= 3 {
             let task_id = store.list()[0].id();
             store
-                .transition(task_id, TaskStatusData::Completed, 3)
+                .transition_with_progress(task_id, TaskStatusData::Completed, 3)
                 .unwrap();
         }
     }

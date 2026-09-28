@@ -41,10 +41,10 @@ fn committed_completion_exposes_completed_fact_only_on_real_transition() {
         .unwrap();
     let created = store.create_task(task_spec("first"), 2).unwrap().value;
     store
-        .transition(created.id(), TaskStatusData::InProgress, 3)
+        .transition_with_progress(created.id(), TaskStatusData::InProgress, 3)
         .unwrap();
     let completed = store
-        .transition(created.id(), TaskStatusData::Completed, 4)
+        .transition_with_progress(created.id(), TaskStatusData::Completed, 4)
         .unwrap();
 
     let change = CommittedTaskChange::from_command_result(&completed).expect("completion commits");
