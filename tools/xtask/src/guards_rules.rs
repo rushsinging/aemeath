@@ -464,7 +464,12 @@ fn strip_inline_cfg_test_region(source: &str) -> String {
             pending_test_attr = true;
             blanked = true;
         } else if test_block_depth.is_none() && pending_test_attr {
-            if trimmed.starts_with("mod ") && trimmed.contains('{') {
+            // 支持 `mod tests {`、`pub(crate) mod tests {`、`pub mod tests {` 等形态。
+            let module_decl = trimmed
+                .strip_prefix("pub(crate) ")
+                .or_else(|| trimmed.strip_prefix("pub "))
+                .unwrap_or(trimmed);
+            if module_decl.starts_with("mod ") && module_decl.contains('{') {
                 test_block_depth = Some(depth);
             } else if !trimmed.is_empty() && !trimmed.starts_with('#') {
                 pending_test_attr = false;
