@@ -286,7 +286,11 @@ async fn summary_budget_follows_injection_window_not_compact_window() {
         .map(|index| Message::user(format!("第 {index} 条需要压缩的历史消息。")))
         .collect::<Vec<_>>();
     let injection_window = 100_000;
-    let compact_window = 20_000;
+    // compact 模型窗口取 10_000（预算 5_000 的十分之一 = 500）：必须显著
+    // 小于本用例生成的摘要（~863 tokens），否则断言 `tokens > 该预算` 会因
+    // 摘要天然落在预算内而失去判别力（#1773 摘要预留 2%→5% 后 20_000 窗口
+    // 的预算已涨到 1_000，恰好盖过摘要）。
+    let compact_window = 10_000;
     let result = compact_messages_with_llm(
         &messages,
         None,

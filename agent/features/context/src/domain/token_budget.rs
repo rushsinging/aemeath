@@ -113,16 +113,24 @@ pub fn clamped_max_output(context_size: usize, max_output_tokens: usize) -> usiz
 }
 
 /// Reserved context for guidance and compaction summary.
-/// 预留上下文预算：context window 的 2%。
+/// 预留上下文预算：context window 的 5%（#1773 由 2% 放宽，让压缩后的
+/// 摘要能承载更多历史）。
 pub fn summary_budget(context_size: usize) -> usize {
-    context_size / 50
+    context_size / 20
 }
 
+/// Compact 保留 tail（recent messages）的 token 预算封顶占窗口的百分数（#1773）。
+///
+/// 3% 刻意不用整数除法表达：`context_size / 33` 这类魔法除数会在 33 与 34
+/// 之间反复横跳（33.3% 与 2.94% 混用），且调整比例时无法从代码看出意图。
+pub const COMPACT_TAIL_WINDOW_PERCENT: usize = 3;
+
 /// Compact 保留 tail（recent messages）的 token 预算封顶：context window
-/// 的 5%（#1688）。与 L1 `scaled_for_context_window` 同路子——大窗口允许
-/// 更大 tail 预算，小窗口自动收紧；条数 10% 候选超过该预算时向内收缩。
+/// 的 3%（#1773 由 5% 收紧，尾部只保留最近上下文）。与 L1
+/// `scaled_for_context_window` 同路子——大窗口允许更大 tail 预算，
+/// 小窗口自动收紧；条数 10% 候选超过该预算时向内收缩。
 pub fn compact_tail_token_cap(context_size: usize) -> usize {
-    context_size / 20
+    context_size * COMPACT_TAIL_WINDOW_PERCENT / 100
 }
 
 /// fallback/护栏中 previous_summary 允许嵌入的最大字符数（#1486）。

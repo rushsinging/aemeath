@@ -38,21 +38,22 @@ fn test_estimate_json_no_inflated_ratio() {
 
 #[test]
 fn effective_window_reserves_guidance_summary_and_output_independently() {
-    assert_eq!(summary_budget(200_000), 4_000);
-    assert_eq!(effective_context_window(200_000, 16_000), 180_000);
+    // #1773：摘要预留由 2% 放宽到 5%，让压缩后的摘要能承载更多历史。
+    assert_eq!(summary_budget(200_000), 10_000);
+    assert_eq!(effective_context_window(200_000, 16_000), 174_000);
 }
 
 #[test]
 fn threshold_uses_only_effective_window_safety_ratio() {
-    assert_eq!(autocompact_threshold(200_000, 16_000, 0.8), 144_000);
+    assert_eq!(autocompact_threshold(200_000, 16_000, 0.8), 139_200);
 }
 
-/// 配置化的触发阈值比例：effective(200_000, 16_000) = 180_000，
-/// ratio 0.9 → 162_000（默认 0.8 → 144_000）。
+/// 配置化的触发阈值比例：effective(200_000, 16_000) = 174_000，
+/// ratio 0.9 → 156_600（默认 0.8 → 139_200）。
 #[test]
 fn threshold_honors_configured_ratio() {
-    assert_eq!(autocompact_threshold(200_000, 16_000, 0.9), 162_000);
-    assert_eq!(autocompact_threshold(200_000, 16_000, 0.5), 90_000);
+    assert_eq!(autocompact_threshold(200_000, 16_000, 0.9), 156_600);
+    assert_eq!(autocompact_threshold(200_000, 16_000, 0.5), 87_000);
 }
 
 /// 越界 ratio clamp 到安全区间 [0.5, 0.95]：
@@ -73,8 +74,8 @@ fn threshold_ratio_clamped_into_safe_range() {
 fn effective_window_saturates_when_reservations_exceed_context_size() {
     // #1626：max_output 参与预留前 clamp 到窗口 25% 上限，
     // 预留超出窗口的场景不再让 effective 归零（恒触发 compact 风暴根因）。
-    // 1_000 窗口：clamp(2_000 -> 250)，effective = 1_000 - 20 - 250 = 730。
-    assert_eq!(effective_context_window(1_000, 2_000), 730);
+    // 1_000 窗口：clamp(2_000 -> 250)，effective = 1_000 - 50 - 250 = 700。
+    assert_eq!(effective_context_window(1_000, 2_000), 700);
     assert!(autocompact_threshold(1_000, 2_000, 0.8) > 0);
 }
 
@@ -88,25 +89,50 @@ fn threshold_never_zero_for_short_window_with_default_output() {
 }
 
 /// #1626：max_output 预留 clamp 到窗口 25% 上限。
-/// 16_384 窗口：clamp(8_192 -> 4_096)，effective = 16_384 - 327 - 4_096 = 11_961。
+/// 16_384 窗口：clamp(8_192 -> 4_096)，effective = 16_384 - 819 - 4_096 = 11_469
+/// （#1773 后摘要预留由 327（2%）放宽到 819（5%））。
 #[test]
 fn max_output_clamped_to_quarter_of_window() {
-    assert_eq!(effective_context_window(16_384, 8_192), 11_961);
-    assert_eq!(autocompact_threshold(16_384, 8_192, 0.8), 9_568);
+    assert_eq!(effective_context_window(16_384, 8_192), 11_469);
+    assert_eq!(autocompact_threshold(16_384, 8_192, 0.8), 9_175);
 }
 
 /// #1626：clamp 不影响大窗口常规配置（8k output 远小于 200k 的 25%）。
 #[test]
 fn clamp_keeps_large_window_behavior_unchanged() {
-    assert_eq!(effective_context_window(200_000, 16_000), 180_000);
-    assert_eq!(autocompact_threshold(200_000, 16_000, 0.8), 144_000);
+    assert_eq!(clamped_max_output(200_000, 16_000), 16_000);
+    assert_eq!(
+        effective_context_window(200_000, 16_000),
+        200_000 - summary_budget(200_000) - 16_000,
+    );
 }
 
 #[test]
-fn compact_tail_token_cap_is_five_percent_of_window() {
-    // #1688：compact 保留 tail 的 token 封顶按窗口比例（5%），与 L1
-    // scaled_for_context_window 同路子；大窗口允许更大 tail 预算。
-    assert_eq!(compact_tail_token_cap(200_000), 10_000);
-    assert_eq!(compact_tail_token_cap(300_000), 15_000);
-    assert_eq!(compact_tail_token_cap(1_000_000), 50_000);
+fn compact_tail_token_cap_is_three_percent_of_window() {
+    // #1688 起按窗口比例封顶；#1773 由 5% 收紧为 3%——尾部只保留最近
+    // 上下文，摘要预算随之放大到 5% 承载更多历史。
+    assert_eq!(compact_tail_token_cap(200_000), 6_000);
+    assert_eq!(compact_tail_token_cap(300_000), 9_000);
+    assert_eq!(compact_tail_token_cap(1_000_000), 30_000);
+}
+
+/// 3% 无法用整数除法简洁表达：`context_size / 33` 这类魔法除数会在
+/// 33 与 34 之间反复横跳（33.3% 与 2.94% 混用），因此按百分数直乘。
+#[test]
+fn compact_tail_token_cap_keeps_three_percent_at_both_sides_of_the_magic_divisor() {
+    // 33×3=99 < 100，34×3=102 ≥ 100：魔法除数在这两个窗口上给出不同比例。
+    assert_eq!(compact_tail_token_cap(33), 0);
+    assert_eq!(33 / 33, 1, "the magic divisor would round 33 up to 1");
+    assert_eq!(compact_tail_token_cap(34), 1);
+    // 大窗口上精确收敛到 3%，不因整数截断偏低。
+    assert_eq!(compact_tail_token_cap(10_000), 300);
+    assert_eq!(compact_tail_token_cap(3_300), 99);
+}
+
+/// 短窗口下 3% 可能取整为 0：此时 tail 候选仍受条数上限约束，
+/// 不允许 clamp 成 1 制造虚假预算。
+#[test]
+fn compact_tail_token_cap_may_round_to_zero_on_tiny_windows() {
+    assert_eq!(compact_tail_token_cap(33), 0);
+    assert_eq!(compact_tail_token_cap(0), 0);
 }

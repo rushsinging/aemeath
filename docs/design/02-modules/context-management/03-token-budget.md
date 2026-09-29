@@ -135,7 +135,8 @@ Token Budget 不建立聚合全部配置的大型 struct。预算由两类单一
 |---|---|---|
 | `context_size` | 本 Run 已解析 model capability / ConfigSnapshot | Run/Invocation binding |
 | `max_output_tokens` | 本 Run 已解析 model capability / ConfigSnapshot | Run/Invocation binding |
-| `reserved_context` | `context_size * 2%`（动态） | `token_budget::summary_budget` |
+| `reserved_context` | `context_size * 5%`（动态，#1773 由 2% 放宽） | `token_budget::summary_budget` |
+| compact tail 预算 | `context_size * 3%`（#1773 由 5% 收紧，尾部只保留最近上下文） | `token_budget::compact_tail_token_cap` |
 | compact 模型窗口 | `context.compact_model` 解析结果或当前会话模型 | Runtime `CompactModelResolver` |
 | compact threshold ratio | 0.8 | `token_budget::autocompact_threshold` |
 | 文本 / JSON / 图像估算 | Context-owned 纯函数与局部常量 | `token_budget` |
@@ -150,16 +151,16 @@ compact 的两个窗口 **MUST** 分开归属：`summary_budget` 由**注入窗�
 ```
 resolved         = ProviderPort.resolve_invocation_options(model, requested)
 max_output       = resolved.max_output_tokens
-reserved_context = context_size * 2%
+reserved_context = context_size * 5%
 effective        = context_size - reserved_context - max_output
 threshold        = effective * 0.8
 ```
 
 **示例**（context_size=200,000, max_output=16,000）：
 ```
-reserved_context = 200,000 * 2% = 4,000
-effective        = 200,000 - 4,000 - 16,000 = 180,000
-threshold        = 180,000 * 0.8 = 144,000
+reserved_context = 200,000 * 5% = 10,000
+effective        = 200,000 - 10,000 - 16,000 = 174,000
+threshold        = 174,000 * 0.8 = 139,200
 ```
 
 ### 4.2 max_output_tokens 注入
@@ -330,6 +331,7 @@ aemeath **不主动分配** system / history / tool / response 的 token 预算�
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-12 | 初稿：估算策略、effective window 公式、常量统一、幂等性设计、遗留清理 | #786 |
+| 2026-09-29 | compact 预算比例修正：summary_budget 2% → 5%（摘要承载更多历史），compact_tail_token_cap 5% → 3%（尾部只保留最近上下文）；后者以 `COMPACT_TAIL_WINDOW_PERCENT` 常量按百分数直乘表达，禁用 `context_size / 33` 类魔法除数 | #1773 |
 | 2026-07-16 | summary_budget 改为动态计算（context_size * 2%），替代写死的 max_summary_output_tokens=20000；threshold 公式加 *0.8 系数 | #1110 |
 | 2026-07-17 | Provider ACL 标准化 total tokens（Anthropic 纳入 cache read/create）；自动 compact 只由 last_total_tokens 触发；明确 recent-tail 30% 与常驻 Snip/Microcompact 为 Deferred Target，Current tail 保持 message 10% | compact token reset design |
 | 2026-08-08 | 退役只被测试消费的 `needs_compaction_*` / `compaction_urgency` 平行 API；冻结后的 Run/Invocation budget inputs 成为 Context decision 与 Provider request 的唯一共同输入 | #832 |
