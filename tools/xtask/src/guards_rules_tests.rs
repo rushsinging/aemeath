@@ -102,6 +102,7 @@ fn facade_whitelist_flags_unregistered_reexport() {
 
     assert_eq!(violations.len(), 1);
     assert!(violations[0].message.contains("Rogue"));
+    assert_eq!(violations[0].location, "crates/task/src/lib.rs:1");
 }
 
 #[test]

@@ -153,8 +153,37 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
+        Some("test-runner") => {
+            let root = PathBuf::from(env::var("AEMEATH_PROJECT_DIR").unwrap_or_else(|_| ".".into()));
+            let timeout_secs: u64 = env::var("AEMEATH_UNIT_TEST_TIMEOUT_SECS")
+                .ok()
+                .map(|value| {
+                    value
+                        .parse()
+                        .ok()
+                        .filter(|parsed| *parsed > 0)
+                        .unwrap_or_else(|| {
+                            eprintln!(
+                                "AEMEATH_UNIT_TEST_TIMEOUT_SECS must be a positive integer, got: {value}"
+                            );
+                            std::process::exit(2);
+                        })
+                })
+                .unwrap_or(180);
+            match xtask::test_runner::run(&root, timeout_secs) {
+                Ok(_) => Ok(()),
+                Err(error) => {
+                    if let Some(failure) =
+                        error.downcast_ref::<xtask::test_runner::GateFailure>()
+                    {
+                        std::process::exit(failure.exit_code);
+                    }
+                    Err(error)
+                }
+            }
+        }
         _ => anyhow::bail!(
-            "用法: cargo run -p xtask -- <coverage-summary <report.json> <root>|production-reachability [root]|guard-registry <check|report> [root] [output]|sdk-wire-schema <write|check> [output]|source-guard [root] [public-surface-output]|guard [--fast|--full|--rule <id>]>"
+            "用法: cargo run -p xtask -- <coverage-summary <report.json> <root>|production-reachability [root]|guard-registry <check|report> [root] [output]|sdk-wire-schema <write|check> [output]|source-guard [root] [public-surface-output]|guard [--fast|--full|--rule <id>]|test-runner>"
         ),
     }
 }

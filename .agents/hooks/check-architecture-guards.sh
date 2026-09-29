@@ -10,21 +10,8 @@ if [ -n "${AEMEATH_PROJECT_DIR:-}" ] && [ ! -d "${AEMEATH_PROJECT_DIR}/.agents/h
 fi
 HOOKS_DIR="$ROOT/.agents/hooks"
 
-# 守卫引擎（#1676 起默认 xtask）：registry 90+ 规则 + 过渡期未迁移脚本。
-# AEMEATH_GUARD_ENGINE=legacy 逃生阀回退纯旧脚本链路（E 组测试化完成前保留）。
-GUARD_ENGINE="${AEMEATH_GUARD_ENGINE:-xtask}"
-if [ "$GUARD_ENGINE" != "legacy" ]; then
-  mode="${1:---full}"
-  engine_status=0
-  cargo run --quiet -p xtask -- guard "$mode" || engine_status=$?
-  if [ "$engine_status" -ne 0 ]; then
-    echo "[architecture] xtask guard failed (exit=$engine_status)" >&2
-    exit "$engine_status"
-  fi
-fi
-
-
-
+# 守卫引擎薄壳（#1675/#1676 终态）：xtask guard 为唯一架构守卫入口，
+# registry 数据驱动；尾部仅保留尚未引擎化的 legacy 检查（退役各自归所属 issue）。
 mode="${1:---full}"
 case "$mode" in
   --fast|--full) ;;
@@ -33,6 +20,13 @@ case "$mode" in
     exit 2
     ;;
 esac
+
+engine_status=0
+cargo run --quiet -p xtask -- guard "$mode" || engine_status=$?
+if [ "$engine_status" -ne 0 ]; then
+  echo "[architecture] xtask guard failed (exit=$engine_status)" >&2
+  exit "$engine_status"
+fi
 
 fast_pids=()
 fast_names=()
@@ -128,6 +122,9 @@ run_guard fast "$HOOKS_DIR/check-tui-unsafe-text-ops.sh"
 run_guard full bash -c "cargo test --quiet -p logging routing_guard::tests"
 run_guard full bash -c "cargo run --quiet -p xtask -- sdk-wire-schema check"
 run_guard full bash -c "cargo run --quiet -p xtask -- source-guard \"$ROOT\" "
+# gate 分层契约回归（Stop=--fast、pre-push 顺序、fail-fast 不清缓存），
+# 进程级测试，fake repo 内执行，不参与源码结构检查。
+run_guard full bash "$HOOKS_DIR/check-gate-layering-tests.sh"
 
 if [ "$mode" = "--fast" ]; then
   wait_for_fast_guards || fast_status=1

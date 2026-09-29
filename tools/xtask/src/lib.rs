@@ -7,6 +7,7 @@ pub mod guards_rules;
 pub mod reachability;
 pub mod sdk_wire_schema;
 pub mod source_guard;
+pub mod test_runner;
 pub mod workspace_guard;
 
 #[cfg(test)]

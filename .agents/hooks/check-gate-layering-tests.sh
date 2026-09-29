@@ -22,7 +22,7 @@ fail() {
 
 make_fake_repo() {
   local repo="$1"
-  mkdir -p "$repo/.agents/hooks" "$repo/.cargo/hooks" "$repo/scripts"
+  mkdir -p "$repo/.agents/hooks" "$repo/.cargo/hooks" "$repo/scripts" "$repo/bin"
   git -C "$repo" init -q
   cp "$STOP_HOOK" "$repo/.agents/hooks/check-agent-stop.sh"
   cp "$PRE_PUSH_HOOK" "$repo/.cargo/hooks/pre-push"
@@ -34,12 +34,19 @@ make_fake_repo() {
 printf 'architecture:%s\n' "${1:-missing}" >>"$GATE_LOG"
 [ "${FAKE_FAIL:-}" != "architecture" ]
 EOF
-  cat >"$repo/.agents/hooks/check-unit-tests.sh" <<'EOF'
+  # pre-push 的单元测试门禁已迁移为 `xtask test-runner`（Rust）：
+  # fake repo 无 Cargo.toml，用 PATH stub 拦截 cargo 调用并记录 gate 序列。
+  cat >"$repo/bin/cargo" <<'EOF'
 #!/usr/bin/env bash
-printf 'unit-tests\n' >>"$GATE_LOG"
-[ "${FAKE_FAIL:-}" != "unit-tests" ]
+set -euo pipefail
+if [[ "$*" == *"xtask -- test-runner"* ]]; then
+  printf 'unit-tests\n' >>"$GATE_LOG"
+  [ "${FAKE_FAIL:-}" != "unit-tests" ]
+  exit $?
+fi
+exit 0
 EOF
-  chmod +x "$repo/.agents/hooks/"*.sh "$repo/.cargo/hooks/pre-push" "$repo/scripts/clean-worktree-targets.sh"
+  chmod +x "$repo/.agents/hooks/"*.sh "$repo/.cargo/hooks/pre-push" "$repo/scripts/clean-worktree-targets.sh" "$repo/bin/cargo"
 }
 
 run_gate() {
@@ -48,7 +55,7 @@ run_gate() {
   local failure="${3:-}"
   (
     cd "$repo"
-    GATE_LOG="$repo/gate.log" FAKE_FAIL="$failure" "$hook"
+    PATH="$repo/bin:$PATH" GATE_LOG="$repo/gate.log" FAKE_FAIL="$failure" "$hook"
   )
 }
 
