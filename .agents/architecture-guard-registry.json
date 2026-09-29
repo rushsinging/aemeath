@@ -1143,11 +1143,13 @@
       "allowed_entries": [
         "adapters",
         "adapters.rs",
+        "application.rs",
         "domain",
         "domain.rs",
-        "lib.rs"
+        "lib.rs",
+        "service.rs"
       ],
-      "reason": "F-3：project Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
+      "reason": "F-3：project Hexagonal 层目录与顶层文件白名单（#1022 矩阵；application.rs 用例编排层 / service.rs 持锁状态容器，#1746 归位）",
       "profile": "full"
     },
     {

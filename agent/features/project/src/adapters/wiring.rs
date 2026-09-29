@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use crate::adapters::git::GitCli;
 use crate::domain::git::{GitWorktreeOps, RepositoryProbe};
-use crate::domain::service::WorkspaceService;
 use crate::domain::types::{
     WorkspaceControl, WorkspaceInitError, WorkspaceReader, WorkspaceWriter,
 };
+use crate::service::WorkspaceService;
 use share::session_types::{ProjectIdentityData, WorktreeKind};
 
 /// workspace 域句柄角色：三窄面 accessor + 隔离派生。

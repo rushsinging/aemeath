@@ -5,6 +5,7 @@ use share::session_types::{
     PersistedWorkspaceContext, ProjectIdentityData, WorkspaceId, WorktreeKind,
 };
 
+use crate::application;
 use crate::domain::git::GitWorktreeOps;
 use crate::domain::state::WorkspaceRestoreData;
 use crate::domain::state::WorkspaceState;
@@ -255,9 +256,11 @@ impl WorkspaceReader for WorkspaceService {
 impl WorkspaceControl for WorkspaceService {
     fn change_directory(&self, path: PathBuf) -> Result<(), share::error::DomainError> {
         let _control = self.lock_control();
-        let mut candidate = self.candidate();
-        candidate.change_directory(path)?;
-        self.commit(candidate);
+        // 先克隆快照再编排：git IO 与路径 canonicalize 都在锁外，
+        // 只读访问全程不被阻塞（并发不变量由 enter_during_git_io_* 测试锁定）。
+        let live = self.candidate();
+        let next = application::change_directory(&live, path)?;
+        self.commit(next);
         Ok(())
     }
     fn enter(
@@ -267,16 +270,17 @@ impl WorkspaceControl for WorkspaceService {
         base: Option<String>,
     ) -> Result<WorkspaceData, share::error::DomainError> {
         let _control = self.lock_control();
-        let mut candidate = self.candidate();
-        let frame = candidate.enter(self.git.as_ref(), path, branch, base)?;
-        self.commit(candidate);
+        let live = self.candidate();
+        let (next, frame) =
+            application::enter_worktree(&live, self.git.as_ref(), path, branch, base)?;
+        self.commit(next);
         Ok(frame)
     }
     fn exit(&self) -> Result<WorkspaceData, share::error::DomainError> {
         let _control = self.lock_control();
-        let mut candidate = self.candidate();
-        let frame = candidate.exit(self.git.as_ref())?;
-        self.commit(candidate);
+        let live = self.candidate();
+        let (next, frame) = application::exit_worktree(&live, self.git.as_ref())?;
+        self.commit(next);
         Ok(frame)
     }
 }
@@ -291,7 +295,7 @@ impl WorkspaceWriter for WorkspaceService {
         dto: &PersistedWorkspaceContext,
     ) -> Result<WorkspaceRestoreData, share::error::DomainError> {
         let live = self.candidate();
-        WorkspaceState::prepare_restore(&live, dto, self.git.as_ref()).map_err(Into::into)
+        application::prepare_workspace_restore(&live, dto, self.git.as_ref())
     }
 
     fn commit_restore(&self, prepared: WorkspaceRestoreData) {
