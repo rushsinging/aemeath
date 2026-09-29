@@ -1,784 +1,195 @@
 # 架构守卫与白名单
 
-> 状态：**已落地** · 维护人：架构组
-> 对应实现：`.agents/aemeath.json` + `.agents/hooks/check-*.sh` + `.agents/hooks/check-no-mod-rs.sh`
+> 对应实现：`.agents/architecture-guard-registry.json`（数据真相源）+ `tools/xtask/src/guards*.rs`（引擎）+ `.agents/hooks/check-architecture-guards.sh`（薄壳编排）。
 >
-> 守卫脚本本身是**可执行的运行时真相**——真正的行为、常量与白名单以脚本代码为准。本文档是配套的**人类可读索引**，梳理已启用守卫的脚本行为、常量与白名单，便于查阅、评审与 PR 描述引用；它不覆盖脚本、也不是脚本之外的第二真相源。任何守卫脚本行为、常量或白名单的变更，**MUST** 同步更新本文档对应小节；本文档与脚本不一致时，**以脚本的可执行语义为准**，并在本文档 PR 中说明差异原因。Current → Target 差距、责任、进度与退出条件以 [Migration Governance](03-migration-governance.md) 为唯一治理真相。
+> registry 是唯一调度源：规则即数据，引擎自动发现执行。文档与实现不一致时，**以 registry 与引擎代码为准**——它们是运行时真相源；本文档跟随实现迁移。
 
 ## 概述
 
-架构守卫是仓库的"机械式宪法"——把 [依赖铁律](../01-system/05-dependency-rules.md)、[能力优先代码组织](../01-system/06-code-organization.md)、薄入口和单一真相等规则固化为可执行的静态检查。已启用但只反映迁移期实现的守卫 **MUST** 在本文单独标记，**NEVER** 冒充 Target 原则。守卫由唯一编排器 `check-architecture-guards.sh` 按 profile 执行：`.agents/aemeath.json` 的 `Stop` 钩子调用 `--fast`，只运行无 Cargo 的即时静态守卫；Git `pre-push` 调用 `--full`，运行全部守卫后再执行单元测试。任一失败均阻断对应阶段。
+守卫体系为「xtask guard 引擎 + registry 数据驱动 + 薄壳编排」三层形态：
+
+- **registry**（`.agents/architecture-guard-registry.json`）：全部规则的数据真相源，含 `rules`（断言器数据行）、`construction_symbols`（跨 BC 构造白名单）、`entries`（例外/豁免登记）、`retired_symbols`（退役符号区）与 `budgets`（预算）。
+- **引擎**（`tools/xtask/src/guards*.rs`）：`xtask guard [--fast|--full|--rule <id>]` 单一入口；启动时对 registry 做 schema 级自检（fail-closed），随后按档位筛选规则，以「文件 × 规则」循环执行（每文件文本与 use 索引经 `FileContext` 懒加载共享，至多一次读取/解析）。
+- **薄壳**（`.agents/hooks/check-architecture-guards.sh`）：hook 入口适配层——先跑引擎，再执行少量尚未引擎化的 legacy 检查（见「薄壳 legacy 段」）。
+
+拦截可靠性按优先级分三类机制：**编译期事实**（可见性收窄/私有构造器，违规编译不过）→ **引擎结构断言**（use 索引/导出白名单/依赖矩阵）→ **cargo test 行为断言**（进程/日志等运行时契约）。正则文本扫描只作为前两者的补充，且豁免清单全部由 registry 数据承载。
+
+## 执行链路
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ PreToolUse（Edit/Write）                                    │
-│   └─ reject-main-edit.sh    拦截在主工作区直接改代码；对不   │
-│                             存在父目录向上解析最近祖先，区分 │
-│                             主工作区 / worktree / git 上下文 │
-│                             不可解析三类诊断                 │
+│ PreToolUse（Edit/Write，流程防护）                           │
+│   └─ reject-main-edit.sh                                    │
 │                                                              │
 │ Stop（任务结束，快速反馈）                                   │
 │   └─ check-agent-stop.sh                                    │
 │       └─ check-architecture-guards.sh --fast                │
+│            ├─ xtask guard --fast（结构类规则）               │
+│            └─ legacy fast 段（少量独立脚本，并发）           │
 │                                                              │
 │ Git pre-push（完整合入前门禁）                               │
 │   ├─ check-architecture-guards.sh --full                    │
-│   └─ xtask test-runner（cargo run -p xtask -- test-runner） │
+│   │    ├─ xtask guard --full（全部规则 + 构造白名单）        │
+│   │    └─ legacy full 段（registry 对账 / 行为测试 / 契约）  │
+│   ├─ xtask test-runner（逐包 cargo test 门禁）               │
+│   └─ clean-worktree-targets.sh --current --yes              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`check-architecture-guards.sh` 本身**不是**守卫，而是 fast/full 的唯一编排真相。`--fast` 排除会调用 Cargo 的 Guard Registry、Cargo dependency graph、CLI metadata、log target Rust 测试、production reachability，以及会复制仓库或执行正反例测试的 `check-shared-run-loop-tests.sh`、`check-sdk-wire-schema.sh`、`check-runtime-capability-assembly-ownership-tests.sh`；其余无 Cargo 即时静态守卫并行执行。`--full` 按固定顺序串行执行全部独立脚本守卫、正反例测试及内联 TUI 结构守卫。下表才是真正的守卫集合；实际调用顺序和 profile 以该脚本为准。
+`--fast` 档只跑结构类规则（`forbidden_segments` / `facade_whitelist` / `layer_order` / `layout` / `dependency_matrix`），秒级完成；`--full` 档跑全部规则与 `construction_symbols` 文本扫描。档位归属由每条规则的 `profile` 字段决定，文本扫描类规则 **NEVER** 进入 fast 档。
 
-## 守卫索引
+## registry 数据区
 
-| # | 守卫脚本 | 类别 | 守护不变量 |
+| 数据区 | 职责 | 关键字段 |
+|---|---|---|
+| `rules` | 断言器数据行（规则 = 数据） | `id` / `assertion` / `scope` / 断言器参数 / `reason` / `profile` / `exclusion_baseline` |
+| `construction_symbols` | 跨 BC 构造点白名单（adapter/wire 两类） | `symbol` / `owner_crate` / `allowed_paths` / `guard` / `reason` |
+| `entries` | 例外与豁免登记（migration_exception / scope_exclusion 等分类） | `classification` / `mechanism_type` / `owner` / `exit_condition` / `status` |
+| `retired_symbols` | 已物理删除符号的登记（复活归 review，不设机械拦截） | `symbol` / `retired_by` / `reason` |
+| `budgets` | 仓库与模块级 migration debt 预算 | `repository_migration_debt` / `modules` |
+
+规则 id 命名：`{断言器族}.{域}.{关注点}`（如 `pattern.tui.render-output-purity`、`facade.project.root-exports`）。规则 id 一经分配 **NEVER** 复用于不同语义；退役规则保留 id 记录于修改历史。
+
+## 断言器目录
+
+引擎内置 9 种断言器（`tools/xtask/src/guards_rules.rs`），新增约束优先复用现有断言器加数据行：
+
+| 断言器 | 语义 | 数据形态 | 档位 |
 |---|---|---|---|
-| 0 | `check-guard-registry.sh` | Guard 治理 | 校验机器注册表、stable id、分类、迁移债务预算、stale scope 与 Shell 隐式排除引用 |
-| 1 | `check-cargo-dependency-graph.sh` | DDD 边界 | Cargo workspace 依赖方向白名单 |
-| 2 | `check-cli-thin-entry.sh` | DDD 边界 | CLI 仅 `composition + sdk`，禁止穿入 runtime |
-| 3 | `check-share-no-upstream-deps.sh` | DDD 边界 | share 不依赖任何业务 feature |
-| 4 | `check-share-minimal-kernel.sh` | DDD 边界 | share kernel 禁行为/IO/并发/时钟 + 依赖白名单；禁止 Task PL/行为爬回 Shared |
-| 4a | `check-noninteractive-child-session.sh` + `check-noninteractive-child-session-tests.sh` | 安全/IO | 所有生产非交互外部进程必须经 `utils` 唯一边界创建独立 session，禁止继承父控制终端 |
-| 4b | `check-composition-layout.sh` | Composition Root | Composition 只使用扁平 capability-first wiring modules，禁止 Hexagonal/COLA 层与未登记顶层源码 |
-| 5 | `check-hexagonal-layer-purity.sh` | Hexagonal 正式层界 | 全部 feature crate 层目录白名单 + R8 层内依赖方向 + retired COLA 层名防复活（#1022 正式化；update 例外 tracking #989）；Tools 额外锁定 capability-only 授权、`ToolProfile` shrink-only API 与 registry/domain/façade 边界 |
-| 6 | `check-crate-api-boundary.sh` | Feature 边界 | 已迁移 feature（含 Task、Storage）仅开放登记的 crate-root 窄 façade，禁止穿透内部模块；Audit 登记 Usage/Query PL、AppendLog 入口、无指标 `UsageSender`、消费式 `UsageWorker` 及被 Composition 消费的 `usage_query_service` 查询装配入口；退役 worker metrics 与共享 shutdown outcome 不得重新进入 façade；Runtime 登记 Compact 模型解析入口 `CompactModelResolver` / `SessionModelSlot`；Storage 经 `check_storage_facade` 与 lib.rs 公开面 exact-match（#1647） |
-| 6t | `check-task-persistence-capability.sh` | Task 能力隔离 | Runtime/Tools 仅可消费注入的 `TaskAccess`，禁止具体 `TaskStore` 与 persistence/wiring 能力；Task restore authority 仅限 Context/Composition |
-| 6u | `check-task-state-pipeline.sh` | Task 跨层状态链 | 禁止恢复工具名/结果文本推断、字符串-only SDK snapshot；所有 Task mutation adapter 必须保留 committed change metadata |
-| 6a | `check-provider-invocation-scope.sh` | Provider 调用隔离 | Provider 禁调用期 atomics/setter，Runtime 禁 shared-client lock/restore；`invocation_stream` 必须显式接收不可变 Invocation Scope |
-| 6c | `check-provider-http-attempt.sh` | Provider 调用隔离 | 单 attempt 机械 send/cancel/status 只能经 crate-private `HttpAttemptExecutor`；HTTP/network 诊断日志 API（`log_network_error`/`log_http_error`/`ErrorLogContext`/`LlmApiErrorRecord`）仅限 `http_attempt.rs` + `error_log.rs` 调用 |
-| 6d | `check-provider-retry-ownership.sh` | Provider 策略所有权 | Provider 生产 stream adapter 禁止恢复 retry loop、backoff sleep、`FallbackPlanned` 或 stream→non-stream fallback；跨 attempt 策略只属于 Runtime |
-| 6e | `check-provider-usage-capability.sh` | Provider PL 语义 | pull-stream usage 禁止把未报告字段默认成零；OpenAI-compatible reasoning maximum 与 legacy clamp 必须从唯一 `ReasoningCapability` 派生 |
-| 6f | `check-provider-driver-acl.sh` | Provider Driver ACL | driver 解析、协议族/API style 选择与实现配置必须留在 Provider；Runtime/Composition/CLI 禁止解析 driver 或引用内部配置 |
-| 6i | `check-provider-window-single-owner.sh` + `check-provider-window-single-owner-tests.sh` | Context / Runtime Provider 窗口所有权 | Main/Sub 必须经共享 `ContextRequestCoordinator → ContextPort::build_window → ContextWindow`；Runtime `extract_invocation_context` 后禁止修改 `messages_for_api`；typed reminder 必须进入 ContextRequest；正反 fixture 验证后置 push 与 Runtime reminder tag 渲染被阻断 |
-| 6g | `check-session-management-ownership.sh` | Context / Composition 构造权 | Composition 唯一创建 Dataset Session backing、仅将 AtomicBlob 作为 legacy migration source 注入 Dataset-aware `SessionManagementPort`，并将同一 Port 交给 Context / Runtime；生产 writer 必须是 Dataset 增量 writer，禁止 Context filesystem 构造（含 `file_system_blob` 构造函数）、legacy free-function façade、Runtime 直连 façade或 Composition 装配 legacy-only management；测试文件（`*_tests.rs` / `tests.rs` / `tests/`）构造真实 blob 夹具不参与生产权限扫描 |
-| 6h | `check-hook-target-facade.sh` | Hook / Runtime 边界 | Hook 只从 crate-root 发布稳定 PL 与 `HookPort`；禁止 `hook::api`、legacy re-export 与 Runtime 生产消费 `hook::api::*` |
-| 7 | `check-context-architecture.sh` | 业务约束 | agent context 所有权 CTX-R1–CTX-R6 |
-| 8 | `check-forbidden-imports.sh` | 业务约束 | `share::adapter` 仅 composition 可引用 |
-| 9 | `check-tui-tea-purity.sh` | TUI 架构 | update 纯函数、副作用走 Effect |
-| 10 | `check-tui-toplevel-layout.sh` | TUI 架构 | 顶层模块白名单 + feature #57 旧路径守卫 |
-| 11 | `check-tui-effect-boundary.sh` | TUI 架构 | model/update 不直接执行 Effect |
-| 12 | `check-tui-model-view-boundaries.sh` | TUI 架构 | model/render/view 边界 + 物理遗留 |
-| 13 | `check-tui-output-legacy-guards.sh` | TUI 遗留 | TUI M2 后选区/工具状态旁路守卫 |
-| 13a | `check-tui-retained-output-view.sh` | TUI 性能架构 | 生产输出刷新只经统一窗口物化入口；保留视图不得拥有完整历史节点，渲染器不得扫描完整语义历史；变更日志保持有界 |
-| 14 | `check-tui-block-nesting.sh` | TUI 组件 | gutter 仅由 document_renderer 注入 |
-| 15a | `check-tui-render-pure.sh` | TUI 渲染 | render 禁止直读 conversation/runtime domain model，测试与登记 display bridge 除外 |
-| 15 | `check-tui-render-isolation.sh` | TUI 渲染 | render/output 纯函数边界 |
-| 16 | `check-tui-unsafe-text-ops.sh` | 安全/IO | 禁非 char 边界 str 切片 |
-| 17 | `check-log-target-prefix.sh` | 日志架构 | 全仓生产 `log::xxx!` 必须显式引用所属 crate root 的唯一 `LOG_TARGET`，拒绝裸宏、target 字符串、未注册常量值、跨 owner 冒用与 macro alias；Provider 仅 `error_log.rs` 可使用已注册 `LLM_API_ERROR_TARGET` |
-| 17a | `check-logging-scope-context.sh` | 日志架构 | 禁止在 legacy 精确基线外新增进程级执行上下文状态；新路径必须使用 `LogContext` task-local scope |
-| 17b | `check-logging-settings-injection.sh` | 日志架构 | Logging 禁止读取 env；Runtime 禁止装配或初始化 Logging；`UnifiedLogger::init` 只能由 Composition 单一入口调用 |
-| 18 | `check-no-mod-rs.sh` | 文件约定 | 禁止 `mod.rs` |
-| 19 | `check-config-env-guard.sh` | 配置架构 | 禁止 config 包外读业务 env（`AEMEATH_*`、`*_API_KEY`、`LLM_*`） |
-| 19a | `check-config-adapter-boundary.sh` | 配置架构 | Config application 禁止直接 fs/JSON 解析；adapter stub/TODO 禁止回流 |
-| 19b | `check-config-store-ownership.sh` | Config / Composition 构造权 | Composition 唯一选择 `config-overrides` filesystem backing 并注入 `NativeConfigStore`；Config application 禁止构造 blob adapter，且 wiring 必须显式要求 injected store |
-| 19c | `check-composition-construction-ownership.sh` | Composition 跨 BC 验收 | 汇总验证 Session、Config Store、Runtime Tool 与 Hook 四个 leaf ownership Guard 已注册、编排、active policy 且三侧代表性 concrete constructor 不回流；不替代 leaf Guard，也不拥有 MCP lifecycle |
-| 19d | `check-cross-bc-construction-registry.sh` + `check-cross-bc-construction-registry-tests.sh` | Composition 构造注册表 | 以 `.agents/architecture-guard-registry.json` 的 `construction_symbols` 段做 fail-closed 注册表：feature crate adapters 模块导出的 concrete adapter 与 feature `wire_*` 装配函数，凡在跨 crate 生产代码构造/调用即必须登记，未登记（含新增 adapter）或越出 `allowed_paths` 均 exit 2；同 crate 内部构造与 `cfg(test)`/dev 门控段不拦截 |
-| 20 | `run_tui_single_source_structure_guard`（内联） | TUI 结构 | feature #70 结构化单一真相规则 |
-| 21 | `check-agent-client-trait-minimal.sh` | SDK 边界 | `AgentClient` trait 仅 `chat()`、同步 `cancel_run(run_id)`、Runtime-owned `reply_interaction` / `cancel_interaction` 与 Config control-plane；禁止恢复 `ChatInputEvent::Cancel` |
-| 22 | `check-shared-run-loop.sh` | Runtime 架构 | Main/Sub 只调用唯一共享 Loop Engine；禁止旧 FSM、Session token 槽与 `max_turns`；测试 fixture 必须位于显式 `tests/` 目录，生产 Session 边界扫描仅排除该目录与 `*_tests.rs` |
-| 23 | `check-run-control-boundary.sh` | SDK 边界 | SDK run control Published Language（`packages/sdk/src/run.rs`）只能是纯值 DTO；`packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前提前出现 `cancel_run_step` / `terminate_run` |
-| 23a | `check-tool-catalog-execution-boundary.sh` | Tools/Runtime 边界 | Runtime 生产代码只经 Catalog/Execution 端口消费 Tool；Execution adapter 不下沉 Runtime 编排；suspension/AskUser 保持纯值；Tools façade 与 schema validator 保持唯一、窄公开面 |
-| 23c | `check-runtime-tool-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一装配 Tool Catalog/Execution、Skill Catalog/Load ports、Tool Result materializer 与 ActiveRunRegistry，并把 Execution 注入 `application/run/context_factory.rs` 的 `RuntimeContextFactory`；factory 通过 `RuntimeServices` 单一持有静态能力，Runtime bootstrap 只持 injected factory，不得重复保存 Execution，也禁止恢复已退役的 Tool context binding、Tools factory、Tool Result filesystem/store 或 MCP private-wiring seam |
-| 23d | `check-runtime-hook-assembly-ownership.sh` | Runtime / Composition 构造权 | Composition 唯一从 committed ConfigSnapshot 构造 Hook dispatcher 并注入 `RuntimeContextFactory`；Runtime bootstrap 只携带 injected factory，Main/Sub 只消费其中的 HookPort，禁止恢复 HookRunner / dispatcher factory |
-| 23e | `check-runtime-capability-assembly-ownership.sh` | Runtime 装配守卫 | `application/run/context_factory.rs` 是 `RuntimeContext` 唯一生产构造入口；`RuntimeContextAssemblyToken::new` 只允许该生产算法使用，禁止 test-only Context creator；`RuntimeContextFactory::prepare` 与 `RunInstance::new` 的调用点扫描覆盖生产和测试 Rust 源码并先屏蔽字符串字面量，分别只允许 `RunFactory`；crate-root 窄 façade 登记生命周期语言 `RuntimeLifecycleEvent`、SDK mapper `map_lifecycle_event` 以及 Composition 接入 Audit worker 与失败降级所需的 Runtime-owned `UsageSink` / `UnavailableUsageSink` 出站端口；`RunCreationRequest`、`SessionSnapshot`、`ParentRunFacts` 保持纯值；crate-root façade 另外登记 Compact 模型解析 `CompactModelResolver` / `SessionModelSlot` 及其值类型 `CompactModelOrigin` / `CompactModelTarget` / `CompactModelResolveError`，它们不得演变为第二份模型选择状态；Main/Derived 都必须经 `RunFactory::create → RunLauncher::launch`；Runtime application 禁止依赖具体 adapter；`RuntimeResources`、`ChatRuntimeContext`、`ChatLoopContext`、fat `RunLoopPort` 与 Main/Sub 角色 adapter 不得复活；RunKind 不驱动控制流；BoundaryOnly Hook adapter 必须从 `HookPointMetadata.class` 派生过滤并禁止变体 allow-list，从而保留 Stop 与生命周期 Boundary；Interaction、Hook、Reasoning 与统一编排按目标装配；Tool round 由 `ToolRoundCoordinator` 单一 owner 执行；Runtime 生产标识禁止宽泛 `Projection` / `projection` 命名。配套正反例脚本验证未登记 façade 以 exit code 2 阻断，并验证登记的 lifecycle、SDK mapper 与 Usage façade clean pass |
-| 23f | `check-runtime-activity-observation.sh` | Runtime Activity 观测 | `ActivityObservation` 只能由 `ActivityCoordinator` 构造；Runtime production 只允许 logical-commit `ActivitySnapshot` 与 heartbeat，禁止 `RuntimeActivityEvent::Changed` / `publish_change` 回流；TUI Activity 事实镜像只能经 root reducer 变更；LiveStatus 禁止依赖旧 Run status；Hook 执行生命周期展示只能走逐 subscription Activity 链，用户可见的结构化 Hook 结果则走独立 `HookNotice` 语义；旧活动字段保持零生产引用；Runtime/TUI 日志必须包含 identity、类型、状态、revision 与 timing，且禁止原始参数、stdout、response payload |
-| 23g | `check-runtime-event-naming.sh` | Runtime Published Language 命名治理 | 以结构化 baseline 冻结 Runtime/SDK/TUI 当前事件集合、compatibility names、跨层同名事实和索引登记；禁止新增宽泛 `*Updated`/`*Info`/`*Data`/`*Notification`、Lifecycle terminal 风格 ACK，以及 retired `CompactProgress` / `TasksSnapshot` / `AskUserBatch`；不破坏仍登记的 SDK wire compatibility |
-| 23h | `check-cost-tracker-retirement.sh` | Audit Usage-only 退役边界 | Runtime Cost/Pricing owner、legacy Cost history path、SDK/Runtime/TUI Cost DTO/event/presentation 与无消费者 Storage Cost namespace 保持零引用；不扫描用户磁盘，不删除 legacy 文件 |
-| 23i | `check-projection-naming.sh` | 命名约束 | Rust 生产源码禁止新增宽泛 `Projection` / `projection` 标识符；领域转换必须使用目标或用途明确的名称；测试文件、`*_tests.rs`、`tests/`、`scenario_tests/` 与 `#[cfg(test)]` 模块不扫描 |
-| 23b | `check-command-catalog-boundary.sh` | Command/交付边界 | Command PL 与 Catalog/Router 只由 Tools 定义；SDK/CLI/TUI/no-TUI 禁止恢复 builtin 清单、静态帮助清单或独立 slash parser；Runtime 禁止定义第二套 Command Catalog/Router |
-| 24 | `check-config-reader-injection.sh` | 配置架构 | ConfigAppService 仅由 Config/Composition 构造；Runtime/TUI/CLI 禁止散点构造或持 Config 契约 |
-| 25 | `check-production-reachability.sh` | 测试治理 | Rust xtask 拦截生产 test-only API、未保护 testing/fixture/fake 模块与新增 `allow(dead_code)`；可输出 deterministic public surface |
-| 26 | `check-no-inline-tests.sh` + `check-no-inline-tests-tests.sh` | 测试治理 | 源码禁止内嵌 `#[cfg(test)] mod tests { ... }`，测试必须分离为 `foo.rs ↔ foo_tests.rs`；匹配不受 `{` 与 `;` 后的空白影响，整行 `//` 注释不参与匹配；历史存量由 `.agents/inline-tests-baseline.json` 冻结、只拦截新增，基线失效条目强制收缩 |
+| `forbidden_segments` | use 路径禁穿透段（如跨 crate 禁 `feature::domain::`） | `forbidden_segments` + `allow_prefixes` | fast |
+| `facade_whitelist` | crate 根 `pub use` 导出符号白名单（窄 façade） | `allowed_symbols` | fast |
+| `layer_order` | 同 crate Hexagonal 层内依赖方向（`crate::` 路径段比对） | `layer_order` 层序数组 | fast |
+| `layout` | 目录/顶层文件布局白名单 | `allowed_entries` | fast |
+| `dependency_matrix` | workspace path 依赖边矩阵（cargo metadata） | `business_allow` | fast |
+| `pattern_exclusion` | 禁用文本模式（子串）+ 豁免清单 + 行级 allow marker | `forbidden_patterns` / `exclusions` / `allow_marker` | full |
+| `construction_whitelist` | 构造符号出现点白名单（由 `construction_symbols` 合成） | `symbol` + `allowed_paths` | full |
+| `forbidden_file_names` | 禁文件名（如 `mod.rs`） | `forbidden_file_names` | full |
+| `line_budget` | 单文件行数预算（职责不回缩锁） | `max_lines` 等 | full |
 
-另有 `check-architecture-guards.sh` 内联 `run_tui_single_source_structure_guard` 守卫（#70 TUI 单一真相 + InputModel 写入约束），见 §20。
+代表性规则族（完整清单以 registry 为准）：
 
-`check-no-inline-tests.sh` 的历史存量走 `.agents/inline-tests-baseline.json`：基线登记守卫正则失效期间已存在的内嵌测试文件，只拦截**新增**违规；基线中已无违规的失效条目同样失败，强制迁移完成时同步收缩清单。内联测试存量现由 registry `pattern.all.no-inline-test-modules` 的 `exclusions` 承载，并以 `exclusion_baseline` 机器校验只降不升。`specs/3.2.5.3` 要求渐进迁移，**NEVER** 一次性移动全仓历史测试。配套 `check-no-inline-tests-tests.sh` 覆盖 `{` 无尾随空格、注释误报、基线与失效条目、缺基线 fail-closed 四类边界。
+- **跨 crate 边界**：`use.features.no-internal-segment-penetration`（内部层禁穿透）、`use.share.adapter-single-root`（adapter 唯一根）、`dependency.workspace-matrix`（依赖矩阵）。
+- **窄 façade**：`facade.<crate>.root-exports` 系列（逐 crate 导出白名单）。
+- **层序与布局**：`layer.<crate>.hexagonal-order`、`layout.<crate>.hexagonal-top-level` 系列。
+- **构造与装配**：`construction_symbols` 数据区（owner crate 内部放行，越界构造与未登记跨 BC wire fail-closed）。
+- **行为禁模式**：`pattern.config.app-service-no-direct-io`、`pattern.tui.model-update-no-direct-effects`、`pattern.logging.no-env-read`、`pattern.all.no-inline-test-modules`（`exclusion_baseline` 只降不升）等。
 
-`check-runtime-capability-assembly-ownership.sh` 同时承担 Runtime 命名边界：生产源码中的类型、trait、模块、函数、方法与变量不得使用 `Projection` / `projection` 宽泛命名。真正的单向值转换必须使用目标或用途明确的 mapper/view/record 名称；职责混合必须通过类型拆分解决，不能用命名白名单放行。该规则不扫描测试文件，测试中的退役符号断言可继续存在。
+## 引擎能力边界（accepted gaps）
 
-## -1. 守卫自测（#1074）
+引擎的 use 分析是**单文件语法级索引**（syn 展开 use 树 + 路径段文本匹配），不是跨 crate 定义归属解析。以下绕过形态引擎抓不到，由 code review 与编译期类型化承担：
 
-守卫是验证者，自身也 **MUST** 有持久化回归测试（"验证验证者"）：守卫重构（如 #1022 对 layer-purity 的大幅重构）一旦使判定逻辑静默失效，仓库自身 clean 时总编排照样绿，只有 fixture 违规仓库能揭出。
+- 经 façade re-export 洗白内部符号（不解析目标 crate 的 re-export 链）；
+- glob import 洗路径（`use share::*` 后引用内部模块）；
+- use 别名洗路径；
+- 表达式内全限定路径（无 use 语句）。
 
-| 测试守卫 | 被测守卫 | 场景 |
+真正需要结构事实的约束 **MUST** 优先类型化（可见性收窄、私有构造器），使违规编译不过；引擎断言是辅助防线，**NEVER** 用文本扫描替代可类型化的约束。
+
+## 编译期事实（类型化承接）
+
+一批原脚本守卫已由代码设计收口为编译期事实（违规编译不过），不再有任何运行期检查。典型形态：
+
+- 构造器收窄 `pub(crate)`（crate 外构造报 E0624）：`ConfigAppService`、各类 Store/Adapter；
+- 字段私有化 + 只读访问器（装饰/改写编译期不可达）；
+- 模块树位置表达归属（内部层 `mod` 无 `pub`，crate 外路径不可达）。
+
+此类约束的复活决策归 review 与设计文档，**NEVER** 为其恢复文本黑名单脚本。
+
+## cargo test 行为断言
+
+运行时行为契约由 cargo test 承接（非引擎规则），挂薄壳 full 档：
+
+- `cargo test -p logging routing_guard`：log target 路由与 TargetCatalog 一致性；
+- `check-gate-layering-tests.sh`：gate 分层契约（Stop 只跑 `--fast`、pre-push 顺序、fail-fast 不清缓存）；
+- 引擎 fixture 测试：`tools/xtask/tests/guard_cli.rs`（exit 0/2 语义）与 `guard_profile.rs`（档位打标策略）等。
+
+## 薄壳 legacy 段
+
+`.agents/hooks/` 当前文件与归宿：
+
+| 文件 | 角色 | 归宿 |
 |---|---|---|
-| `check-hexagonal-layer-purity-tests.sh` | `check-hexagonal-layer-purity.sh` | R8 两向违规、COLA 目录复活、update 越界、config application 复活、clean 基线 |
-| `check-crate-api-boundary-tests.sh` | `check-crate-api-boundary.sh` | L0 `pub mod` 内部层、L1 层段穿透、L2 未登记符号、登记符号消费 + clean |
+| `check-architecture-guards.sh` | 薄壳编排（引擎入口 + legacy 段） | 长期保留（hook 适配层） |
+| `check-agent-stop.sh` | Stop hook 入口（转发 `--fast`） | 长期保留 |
+| `reject-main-edit.sh`(+tests) | PreToolUse 流程防护（强制 worktree 开发） | 长期保留（非静态结构事实） |
+| `check-gate-layering-tests.sh` | gate 分层契约回归 | 保留（进程级契约测试） |
+| `check-noninteractive-child-session.sh`(+tests) | 子进程 session 隔离（计数配比半段） | 待计数断言器批次退役 |
+| `check-projection-naming.sh` | 命名守卫（标识符级正则） | 待 regex/标识符断言器批次退役 |
+| `check-tui-unsafe-text-ops.sh` | 切片区间正则残段 | 待 regex 断言器批次退役（子串两模式已由 `pattern.all.no-unsafe-text-slicing` 承接） |
 
-实现模式：mktemp 迷你仓库（含 `.agents/hooks` 目录通过 env 有效性检查）+ `AEMEATH_PROJECT_DIR` 注入 + expect_block（非零退出且消息命中）/ clean pass 断言；tools/storage 的全量 façade 精确核对场景直接复制真实 `lib.rs` 文本（守卫为文本解析，无编译依赖，随源自动更新无 stale）。编排接入 full gate；registry 登记 `policy.repository.guard-selftest-*`（structural）。
+`xtask guard-registry check` 与 `xtask sdk-wire-schema check`、`xtask source-guard` 为 full 档内联调用，不再保留独立壳脚本。
 
-## 0. check-guard-registry.sh
+## 元守卫（registry 对账）
 
-- **功能**：调用 `cargo run -p xtask -- guard-registry check`，以 `.agents/architecture-guard-registry.json` 为单一机器可读治理注册表。
-- **分类**：`target_capability_policy`、`target_hexagonal_policy`、`scope_exclusion`、`false_positive_suppression`、`migration_exception`；只有最后一类计入迁移债务。
-- **schema**：每项使用全局唯一 stable id，并记录 guard、module、scope、owner、reason、tracking issue、introduced baseline、exit condition 与 status。迁移例外缺失归责或退出信息时 fail-closed。
-- **预算**：Current 冻结迁移债务为 repository `5`，其中 Runtime `4`、TUI `1`；Storage 的 #883 transitional business modules 债务已删除，模块和仓库预算均只允许下降。
-- **stale / 隐式排除**：精确 path/path-prefix 不存在即 stale；每个注册项必须被其声明的 Guard 以精确 `guard-registry:<stable-id>` 引用；Shell 中 `grep -v`、`--exclude`、`--exclude-dir`、`EXEMPT_FILES`、migration exception 集合和自由格式 inline allow 必须在同一行或前一行引用同 Guard 下已登记 stable id。
-- **expiry**：每次执行通过 GitHub CLI 核验所有 migration exception 的 tracking Issue 仍为 OPEN；查询失败或 Issue 已关闭均 fail-closed。
-- **报告**：`cargo run -p xtask -- guard-registry report . <output>` 按 stable id 确定性输出 classification、module、guard、scope kind 与 lifecycle 维度，用于模块开发前/完成后预算复核。
-- **scope 形态**：`workspace`（全仓）/ `path_prefix`（单前缀）/ `path_prefixes`（多前缀数组，用于把 pattern 完全相同的重复规则合并为一条；引擎取任一命中，`scope_prefix` 取最长命中供层级计算）。
-- **豁免基线契约**：规则的 `exclusion_baseline` 登记 `exclusions` 存量上限，`guard-registry check` 阻断反弹（只降不升）；迁移一批后必须同时下调清单与基线。
-- **Current 基线复核**：Storage 的 Target policy 不计债务；#883 已删除 `STORAGE_TRANSITIONAL_MODULES` 及其唯一 migration exception，Storage migration debt 为 `0`。Composition 仅有合法唯一装配 policy；Workflow、Audit、Project 未发现 migration exception，与人工基线一致。
-- **Tools crate-root façade**：`TOOLS_DOMAIN_FACADE` 登记 Tool/Command/Skill Published Language；Task committed-change 链额外登记仅供 Tools/Runtime 协调的 `CommittedTaskChange` 与 `TaskChangeFact`；Skill revision 去重新增 `SkillLoadScope`、`SkillLoadMutation`、`SkillLoadDecision`、`SkillLoadStateError` 与 `SkillLoadStatePort`；Sub Run 事实链登记 `SubRunIdentity`、`SubRunStartedEvent`、`SubRunActivityEvent`、`SubRunActivityKind` 与 `SubRunTerminalOutcome` 纯值 Published Language。Context/Runtime 只能经这些 crate-root 符号消费，Guard 同时要求登记集合与 `tools/src/lib.rs` 实际公开面精确一致。
-- **Runtime 根 façade**：`config_snapshot_to_sdk` 是 Composition 将 committed `ConfigSnapshot` 投影为 SDK `ConfigView` 的已登记窄入口；跨 feature 消费 **MUST** 仅调用该 crate-root re-export，**NEVER** 穿透 `application::client::mapping`。`CompactModelResolver` 与 `SessionModelSlot` 是 Composition 装配 Compact 模型解析（配置 `context.compact_model`）的已登记窄入口，`CompactModelOrigin` / `CompactModelTarget` / `CompactModelResolveError` 为该入口的纯值 Published Language；跨 feature 消费 **MUST** 仅经这些 crate-root 符号，**NEVER** 穿透 `application::client::compact_model`。
-- **边界**：本守卫只治理例外和 policy 元数据，NEVER 替代 #1022 的 capability-first 正式边界，也不退役 legacy COLA Guard。
-- **故意违规证据**：缺 owner、重复 id、stale path、超预算、未登记 `grep -v` 均被定向元守卫阻断；恢复后元守卫及总编排 clean pass。
+`xtask guard-registry check`（薄壳 full 档执行）校验 registry 自身一致性：
 
-## 1. check-cargo-dependency-graph.sh
+- schema：必填字段、`classification` / `mechanism_type` 枚举、id 格式与唯一性、`status: active`；
+- 预算：仓库与模块 migration debt 不超 `budgets`；
+- 豁免基线：`exclusion_baseline` 只降不升（豁免增长必须先下调基线）；
+- 引用对账：`entries` 的 `guard` 字段指向的脚本必须存在且含 `guard-registry:<id>` 标记；
+- 新鲜度：entry scope 路径必须仍存在（stale 检测）；
+- 文档对账：本文档与 `AGENTS.md` 引用的规则 id 必须存在于 registry（见「维护说明」）。
 
-- **功能**：基于 `cargo metadata` 校验各 crate 的业务依赖是否落在显式白名单内。
-- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3 / R4 / R6——固化当前 feature 依赖白名单、薄外部驱动与唯一生产装配入口。默认拒绝未声明的业务依赖，防双向/横向乱依赖。
-- **白名单（`business_allow`）**：
+引擎启动自检（每次 `xtask guard` 运行）对 registry 做 schema 级校验，非法即 fail-closed。
 
-| Crate | 允许依赖（workspace crate） |
-|---|---|
-| `cli` | `composition`, `sdk`, `utils` |
-| `composition` | 全部 FEATURE_CRATES + `share` + `sdk` + `logging` |
-| `runtime` | `project`, `policy`, `context`, `memory`, `provider`, `tools`, `storage`, `task`, `hook`, `audit`, `workflow`, `share`, `sdk`, `logging`, `utils` |
-| `share` | `logging`, `utils` |
-| `project` | `share`, `utils` |
-| `policy` | `share` |
-| `context` | `share`, `provider`, `storage`, `project`, `config`, `memory`, `task`, `tools`, `sdk`, `utils` |
-| `memory` | `share`, `storage`, `utils` |
-| `provider` | `logging`, `share` |
-| `tools` | `memory`, `project`, `share`, `task`, `utils` |
-| `storage` | `share` |
-| `task` | `share` |
-| `hook` | `share`, `utils` |
-| `audit` | `share`, `sdk`, `storage` |
-| `workflow` | `share` |
-| `update` | `share`, `sdk`, `logging` |
-| `sdk` | `share`, `tools`, `utils` |
-| `logging` | ∅ |
-| `utils` | ∅ |
+## Git hooks（非架构守卫）
 
-> **Memory BC 当前物理落点**：#895 已建立独立 `memory` crate 的 owner-owned PL/`MemoryPort`；#896 新增 Memory-owned `MemoryDatasetStore`、AtomicDataset integration adapter 与 `utils` key hash；#900 删除 Composition 第二 active Memory open，并将 concrete dataset store / project opener / service 收回 crate 内。`memory → storage` 只允许 adapter 消费 Storage crate-root OHS，domain/ports/service 的层间方向由 `check-cola-layer-purity.sh` 守卫；正式 capability-first 唯一构造 Guard 与 stale root allowlist 清理由 #982/#1022 承接。
->
-> **Workflow BC 当前物理落点**：Workflow（Reasoning Graph）已位于独立 `agent/features/workflow` crate。Runtime 仅依赖 Workflow crate-root 窄 façade；Workflow 只依赖 Shared Kernel，不依赖 Runtime 或 Provider。
+### pre-commit
 
-- **例外 / 已批准跨 BC 依赖**：
-  - `runtime/tools → {task,memory}`：分别消费 Task-owned `TaskAccess` 与 Memory-owned `MemoryPort` / `MemoryPortSource` Published Language；Task / Memory 反向依赖消费者仍被拒绝。
-  - `context → {project,config,memory,task,tools}`：#871 Main Session 联合协调器消费各供应 BC 的窄 façade / PL；#912 直接消费 Tools-owned `PromptFragment` 与 `SkillMaterializationPort`，Context 不穿透 adapter 或 Tool execution。  - `memory → share`：只消费 ConfigSnapshot 发布的 `MemoryConfig` 值类型，不依赖 Config service。
-  - `tools → {project, storage}`：Current 横向依赖登记；按 [05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3 只能经各自窄 façade 接入。脚本中的 `api` 名称是迁移期物理事实，不是 Target 通用目录规范。
-  - `composition →` 全部 feature：唯一装配根。
-- **失败模式**：违反时输出 `{"decision":"block", "reason": "Cargo workspace dependency graph violates strict DDD boundaries: ..."}` 并以 exit code 2 退出。
+`.cargo/hooks/pre-commit`（`core.hooksPath=.cargo/hooks`）：提交前轻量检查；详见该脚本头部注释。
 
-## 2. check-cli-thin-entry.sh
+### pre-push
 
-- **功能**：检查 `apps/cli` 只直接依赖 `composition + sdk + utils 纯技术进程边界`。
-- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R4 / R6——CLI 不得直连 Runtime 内部或 supporting capability，业务能力经 Composition 装配与 `AgentClient` 契约接入。
-- **白名单**：
-  - `ALLOWED_CLI_WORKSPACE_DEPS = {composition, sdk, utils}`
-  - `FORBIDDEN_DOMAIN_CRATES = {runtime, project, policy, context, provider, tools, storage, hook, audit, share, update}`
-  - `BOOTSTRAP_DETAIL` 正则：拦截 `AgentClientImpl` / `from_args` / `wire_runtime` / `runtime::(api::)?(gateway|core|business|utils|contract|AgentClientImpl)` 等实现细节。
-- **例外**：无。
-- **检查范围**：
-  - `apps/cli/Cargo.toml` 不能声明对 FORBIDDEN_DOMAIN_CRATES 的 path 依赖；
-  - 必须在 `apps/cli/src/**/*.rs` 中检查 `use` 语句；
-  - 经 `cargo metadata` 二次确认工作区依赖闭包。
-
-## 3. check-share-no-upstream-deps.sh
-
-- **功能**：检查 `agent/shared/Cargo.toml` 不依赖任何业务 feature。
-- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3——shared kernel 只能发布经证明的共享语言，禁止反依赖业务 capability。
-- **被禁上游 crate 列表**：`runtime, project, policy, context, provider, tools, storage, hook, audit, composition, cli, sdk`。
-- **例外**：无。
-- **检查方式**：单文件清单匹配 `[dependencies]` 段；命中即失败。
-
-## 4. check-share-minimal-kernel.sh
-
-- **功能**：扫描 `agent/shared/src/`，禁止 kernel 出现行为/IO/并发/时钟/状态容器；并把 `agent/shared/Cargo.toml` 依赖限定在白名单内。
-- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R1 / R3——kernel 只承载稳定共享语言与纯函数，禁止吸收行为、I/O 和业务状态。
-- **禁用模式（`forbidden_patterns`）**：
-
-| 模式 | 理由 |
-|---|---|
-| `\bToolRegistry\b` | 属于 `tools` crate-root façade |
-| `\bTaskStore\b` / `\bTaskStoreStats\b` | 属于 Task capability crate-root façade |
-| `\bstd::fs::` / `\btokio::fs::` / `\bFile::` / `read_to_string` / `write(` / `create_dir` | share 不得做 fs IO |
-| `\bstd::process::` / `\btokio::process::` / `Command::new` | share 不得 spawn process |
-| `\breqwest::` / `\bhyper::` / `\bureq::` / `\bhttp::` | share 不得做网络/http IO |
-| `\bparking_lot::` / `\bRwLock\b` | 状态容器不属于 share |
-| `#[\s*async_trait\s*]` | async trait 行为属于 feature |
-| `\btrait\s+(Tool|AgentRunner)\b` | 行为 trait 属于 `tools` crate-root façade |
-| `Arc<\s*Mutex\b` | 运行时状态不属于 share kernel |
-| `\btokio::sync::(?:mpsc\|Semaphore\|oneshot\|{ ... })` | 并发原语属于 feature |
-| `\bCancellationToken\b` | 属于 feature |
-| `\bSystemTime::now\b` / `\bInstant::now\b` | share kernel 不得读时钟 |
-| `\bUuid::now_v7\b` / `\bUuid::new_v4\b` | share kernel 不得生成 id |
-
-- **`per_file_exemptions`**：空。带退出条件的临时豁免（命中模式但放行某文件）当前**没有任何**。
-- **`forbidden_modules`**（防回归禁单）：`agent/shared/src/task.rs` 与 `agent/shared/src/task/`；Task PL、lifecycle 与 store 行为由 Task BC 独占，禁止第二套 DTO/schema/状态机爬回 Shared Kernel。
-
-- **依赖白名单（`allowed_dependencies`）**：`serde`, `serde_json`, `serde_yml`, `thiserror`, `tokio`, `tokio-util`, `uuid`, `log`, `logging`, `unicode-width`, `utils`。
-
-## 4a. check-noninteractive-child-session.sh
-
-- **功能**：扫描 `apps/**/src`、`agent/**/src` 与 `packages/**/src` 的生产 Rust 源码，要求所有 `std::process::Command` / `tokio::process::Command` 启动点在 spawn/output/status 前调用 `utils::configure_std_noninteractive` 或 `utils::configure_tokio_noninteractive`。
-- **唯一底层 owner**：`packages/global/utils/src/process.rs` 在 Unix spawn 前回调中调用 `setsid()`；业务 adapter 禁止自行调用 `process_group`、`pre_exec` 或 `setsid`。
-- **排除范围**：`tests/`、`tests.rs`、`*_tests.rs`、`*_test.rs` 与 Project crate-root 测试夹具不属于生产启动点。
-- **失败模式**：发现未配置的生产命令或复制 session 系统调用时以 exit code 2 阻断。
-- **故意违规证据**：`check-noninteractive-child-session-tests.sh` 用裸 `Command::output` 负例证明阻断，以统一配置正例、测试目录与唯一底层实现证明 clean pass。
-
-### 4b. check-composition-layout.sh
-
-- **功能**：锁定 `agent/composition/src` 的 capability-first wiring modules 结构；Composition 按被装配职责分片，不机械复制 feature crate 的 Hexagonal 四层。
-- **允许的顶层源码**：`lib.rs`, `app.rs`, `audit.rs`, `provider.rs`, `runtime.rs`, `tools.rs`, `update.rs`；`lib.rs` 必须且只能公开声明 `app/audit/provider/runtime/tools/update` 六个 wiring module。`audit.rs` 仅装配 #929 worker lifecycle/value extraction，Runtime UsageSink bridge 仍归 #931。
-- **禁止结构**：`domain/application/ports/adapters`、`api/business/contract/core/gateway/capabilities` 文件或目录，以及任意未登记顶层源码或子目录。
-- **白名单预算**：路径例外、整文件豁免、行级 allow、`grep -v` / exclude / skip 均为 0；允许文件集合是 Target 结构化 policy，不计 migration debt。
-- **范围边界**：本守卫证明 Composition 物理结构、façade 模块声明，以及 `FeatureGateways` 的 Provider/Policy capability 被 Runtime 主 bootstrap 实际消费。#914 已删除无效的 Tool gateway 注入；正式跨 capability 边界替换由 #1022 承接。
-- **#1002 故意违规证据**：临时创建 `agent/composition/src/domain.rs` 时，单 Guard 与总编排均以 exit 2 命中 `forbidden Hexagonal/COLA layer`；删除探针后两者 clean pass。
-- **#914 注入规则**：`composition/src/runtime.rs` 必须把 `gateways.provider` / `gateways.policy` 传给 Runtime；Tool Catalog/Execution 只由 Runtime bootstrap 经 `tools::composition::wire_builtin_catalog_execution` 装配，禁止恢复 `ToolCatalogGateway`、`new_registry` 或 `register_all_tools*` 兼容链。规则使用结构化正向/负向断言，白名单仍为 0。
-- **#914 故意违规证据**：在 Tools 临时恢复 `LegacyNoAgent` 后，`check-tool-catalog-execution-boundary.sh` 以 exit 2 阻断；删除探针后单 Guard 与总编排 clean pass。
-
-## 5. check-hexagonal-layer-purity.sh（原 check-cola-layer-purity.sh，#1022 正式化）
-
-- **定位**：Hexagonal 正式层界守卫（#1022）：全部 feature crate 的层目录白名单、R8 层内依赖方向（`domain ← application ← ports ← adapters`）与 retired COLA 层名防复活。迁移期 COLA 矩阵（`@FEATURE_LAYERS` fallback、business/utils/contract/gateway 方向规则）已退役；唯一残留例外是 update crate（registry `exception.update.cola-layout`，tracking #989）。
-- **功能**：R8 层内依赖方向统一覆盖全部 Hexagonal crate（含 storage 补入、config 三层收敛后零例外开启）；retired COLA 层名防复活（统一 `@RETIRED_COLA_LAYERS`）；update 显式例外分支；各 crate 层目录与顶层文件白名单维持既有锁定。
-- **Tools scope/profile 机械约束**：生产代码不得恢复 ToolProfile 黑名单；allowed_capabilities 是唯一授权真相，RegistryScope 内部不从 crate root 导出。
-- **Tools scope/profile 机械约束**：生产代码不得恢复 ToolProfile 黑名单；allowed_capabilities 是唯一授权真相（capability-only 组装），公开 API 白名单为 `baseline / derive_restricted / allowed_capabilities`，RegistryScope 内部不从 crate root 导出。
-- **实际检查语义**：Task 只允许 `lib.rs/domain.rs/adapters.rs` 与 `domain/adapters`，旧 COLA 层及其他顶层源码均被拒绝，domain 不能依赖 adapters；Policy 由空层集合 + `lib.rs` 锁定 #916 基线；Audit 由 `AUDIT_HEX_LAYERS = {domain, application, ports, adapters}`、精确顶层文件和 legacy 禁单锁定 #929 基线；Storage 只允许 `domain/ports/adapters`，`memory_store` / `task_store` 被列入 legacy 禁单，且 domain 禁物理 fs API、PathBuf 与 adapters 反向依赖。
-- **迁移治理**：Target 覆盖门槛、实施 leaf issue 状态、责任与退出证据只在 Migration Governance 维护。
-- **结构定义**：Audit 使用 `domain/application/ports/adapters`，#930 只能随真实 query 实现扩展；Policy #917 随真实实现恢复层；其他过渡集合禁止无证据扩张。
-- **被禁依赖方向（`FORBIDDEN_LAYER_DEPS`）**：
-
-| 当前层 | 禁止依赖 |
-|---|---|
-
-- **检查方式**：
-  - 扫描 `agent/features/*/src/*`：普通 feature 的目录名必须在 `FEATURE_LAYERS`；Runtime、Context、Provider、Policy、Storage 与 Audit 使用各自目标规则。
-  - Task 顶层只允许 `lib.rs`、`domain.rs`、`adapters.rs` 及同名 `domain/`、`adapters/`；重新出现 `business/core/ports/capabilities` 或其他顶层源码时直接失败。
-  - Policy 顶层在 #916 后只允许 `lib.rs`；重新出现 path helper、`api/business/contract/core/gateway/capabilities` 或空 `domain/adapters` 时直接失败，#917 随真实实现恢复。  - Audit 的 `domain.rs` / `ports.rs` 顶层文件与同名目录均参与层级依赖扫描；跨 crate wildcard `use audit::*` 被拒绝，消费者必须显式导入登记的 root façade 符号。
-  - Audit 顶层只允许 #927 已证明的 `lib.rs/domain.rs/ports.rs` 与 `domain/ports` 层；重新出现 `api` / `business` / `contract` / `core` / `gateway` / `capabilities` 文件或目录时直接失败，其他层必须由对应后续实现 Issue 同步更新 Guard。
-  - Provider 顶层重新出现 `api` / `business` / `contract` / `core` / `gateway` 文件或目录时直接失败。
-  - Config 已收敛为 `domain/ports/adapters` 三层（#1022：ConfigAppService 是实现 ports 的 adapter，application 层属过度预建并已移除；wiring 归位 crate 根 `lib.rs`）；顶层白名单与目录白名单锁定，R8 方向检查零例外开启。
-  - Update 目录白名单显式登记（`api/contract/gateway` + 对应 `.rs`），越界文件（如 `domain.rs`）直接失败；该分支是 registry 登记的 migration exception（tracking #989），#989 完成后删除。
-  - Storage 顶层重新出现 `api.rs` / `api/`、`business.rs` / `business/`、`contract.rs` / `contract/`、`gateway.rs` / `gateway/` 时直接失败；新增其他未登记目录同样失败。
-  - Storage `domain.rs` / `domain/` 若出现物理 fs API、`PathBuf` 或依赖 `crate::adapters`，直接失败。
-  - 依赖方向扫描跳过测试路径，并按 `FORBIDDEN_LAYER_DEPS` 检查未迁移横向层及 Runtime、Context、Provider、Storage Hexagonal 层。
-  - 检查 `agent/runtime`, `agent/provider`, `agent/tools` 旧目录**不存在**。
-- **#891 Task Target 故意违规证据**：临时恢复 `agent/features/task/src/business.rs` 后，单 Guard 与总编排均以 exit 2 命中 `Task legacy fixed layer is forbidden`；删除后 clean pass。Task Target layout 使用 `target_hexagonal_policy`，migration exception 为 0。
-- **#988 故意违规证据**：临时恢复 `agent/features/audit/src/api.rs` 后，单 Guard 以 exit 2 命中 `Audit empty or legacy fixed layer is forbidden`；删除违规文件后单 Guard 与总编排均 clean pass。Audit 无路径白名单、整文件豁免或隐式 exclude，白名单预算保持 0。
-- **#991 故意违规证据**：临时恢复 `agent/features/storage/src/api.rs` 后，单 Guard 以 exit 2 命中 `Storage legacy fixed layer is forbidden`；删除违规文件后单 Guard 与总编排均 clean pass。
-- **#992 故意违规证据**：临时恢复 `agent/features/provider/src/business.rs` 后，单 Guard 以 exit 2 命中 `Provider legacy fixed layer is forbidden`；删除违规文件后 clean pass。Provider 原 13 个 `business → core` 精确例外已全部删除。
-- **#1654 故意违规证据**：临时恢复 `agent/features/config/src/contract.rs` 后，单 Guard 阻断并命中 `Config top-level source files must be [...]`；临时新建 `agent/features/config/src/api/` 后阻断并命中 `Config legacy fixed layer is forbidden`；删除违规项后 clean pass。Config 无路径白名单、整文件豁免或隐式 exclude；inline-tests 基线随迁移净减 3 条（213→210）。
-- **白名单（`LAYER_MIGRATION_EXCEPTIONS`）**：无。tools 已完成迁移（`agent/features/tools/src/business/` 已不存在），历史 business→core 例外记录已清理。
-- **实现载体**：perl 单进程核心（`.agents/hooks/check-cola-layer-purity.sh` 内联，含与语义等价的 23 项启动自检）。原 `cargo run -p xtask -- cola-layer-purity` 实现因 Stop Hook 每次触发的编译/运行成本（实测 40~80s，占 fast 总耗时 96%+）于 #1521 退役，xtask 不再提供 `cola-layer-purity` 子命令；perl 版实测 0.22s，与 xtask 版在 clean 仓库及违规样本上输出逐字一致。
-
-- **Runtime 六边形迁移例外（`RUNTIME_LAYER_MIGRATION_EXCEPTIONS`）**：空集合。Runtime application 不得依赖 `crate::adapters`；旧容器、角色 adapter 与兼容参数袋由 `check-runtime-capability-assembly-ownership.sh` 同时禁止复活。
-
-- **#916 安全所有权规则（`check-context-architecture.sh` R8）**：Bash safety 禁止与 `allow_all` 条件耦合（`tools/src/adapters/bash` 范围）。路径解析经 Project `WorkspaceRead`，read-before-write 与 Bash safety 留在 Tool adapter。原 Policy/Runtime 范围的 `PathAccess` / `path_accesses` 等 retired 符号墓地黑名单已随 #1021 退役（删除前探针命中，复活把关归 review 与结构性守卫）。
-
-## 6. check-crate-api-boundary.sh
-
-- **功能**：检查跨 feature 访问经稳定 façade。未迁移 feature 继续使用 `::<feature>::api`；Provider、Runtime、Context、Policy、Storage、Project、Task 与 Audit 使用登记的 crate-root 窄 façade；Workflow 只允许 `workflow::api` 与 composition-only wiring。
-- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R3——禁止穿透 Current 内部层或 capability 私有模块；禁止 Current `api.rs` 暴露内部层；锁定已迁移 feature 的精确根公开面。
-- **常量**：
-  - `FEATURE_CRATES = {runtime, project, policy, context, memory, provider, tools, storage, task, hook, audit, update, workflow}`
-  - `INTERNAL_SEGMENTS = {contract, gateway, core, business, utils}`
-  - `API_FACADE_ALLOWED_SEGMENTS = {contract, gateway}`（仅用于仍有 `api.rs` 的 Current feature）
-  - `ROOT_REEXPORT_ALLOW = {project: {ProjectContext}}`
-  - `ROOT_ACCESS_ALLOW.policy = ∅`：#916 已删除全部 path façade；#917 只可随真实 Policy PL/AllowAll 消费增量登记。
-  - `ROOT_ACCESS_ALLOW.context` 继续只登记 `guidance` 模块；purpose-specific assessment façade保持稳定。
-  - `ROOT_ACCESS_ALLOW.audit`：#927 Usage PL/query、#928 AppendLog、#929 concrete sender/worker config/lifecycle/metrics 与 start factory；Runtime trait bridge仍归 #931。
-  - **#1022 L0/L1/L2 正式边界**：全部 Hexagonal feature crate 的 lib.rs 内部层模块（`domain/application/ports/adapters/shared/capabilities`）MUST 私有，`pub mod` 直接失败（update 例外 tracking #989）；跨 crate 访问 Hexagonal 内部层段（`<crate>::domain::` 等）与 retired COLA 段同被拒绝；context 完成窄 façade 收口——内部四层转私有，跨 BC 只经 crate 根符号与语义模块（`api/compact/context_port/guidance/main_session/session/skill`），`ROOT_ACCESS_ALLOW.context` 按根导出面机器推导登记（`policy.context.crate-root-facade`）；config crate 补入 `FEATURE_CRATES` 并登记 crate-root façade（消费者：composition/context/runtime）。
-  - `ROOT_ACCESS_ALLOW.task`：#891 按 `task/src/lib.rs` 的真实 Published Language、`TaskAccess` / `TaskPersist` 与 composition wiring 建立精确 crate-root policy；#1456 新增 `TaskProgressItem` / `TaskProgressSnapshot` 供 Tools Adapter 消费 status mutation 原子结果，并移除已退役的 `TaskReminderItem` / `TaskReminderSnapshot`；跨 crate 的 `task::{domain,adapters,...}` 访问被拒绝。
-  - `ROOT_ACCESS_ALLOW.storage`：#1647 后 crate root 是唯一稳定 PL/OHS 入口，集合与 `storage/src/lib.rs` 公开面做 exact-match 互验（`check_storage_facade`）：登记全部 Storage PL（`AtomicBlobPort` / `AtomicDatasetPort`、`StorageKey` / `StorageEntry` / Dataset 系列值、`Safe*` 安全路径机制等）与两个 composition wiring 构造函数 `file_system_blob` / `file_system_dataset`；`FileSystemBlobAdapter` / `FileSystemDatasetAdapter` concrete adapter 与 stale 的 `memory_base_dir` / `project_file_name*` 已移出集合，跨 crate 访问被拒绝；`storage::api`（模块与物理路径）禁止复活，`adapters` / `domain` / `ports` 内部模块必须保持私有。
-  - `ROOT_ACCESS_ALLOW.project`：Project 发布 `ProjectIdentity` / `WorkspaceId` / `WorktreeKind`、三类 workspace port、opaque restore token、结构化 init/control/restore/git 错误与 composition-only wiring；`WorkspaceService`、Git adapter/port 和内部 state **NEVER** 跨 crate 暴露。
-  - `ROOT_ACCESS_ALLOW.provider`：#992 后真实消费者使用的 crate-root façade 符号集合；#903 新增 pull-stream PL 的 `CancellationSignal` 与 `InvocationEvent`，并禁止跨 crate 消费仅供 Provider 内部 decoder 迁移的 `LegacyStreamSink`；#904 将 `OpenAIProviderConfig` 收回 Provider 内部；已退役的 `CallbackHandler` / `StreamHandler` 不再允许；`provider::api` 与 `provider::{domain,ports,adapters}` 跨 crate 访问被拒绝。
-  - `ROOT_ACCESS_ALLOW.workflow = {adaptive_reasoning}`：跨 BC 只经 `workflow::api`；`adaptive_reasoning` 是 crate-root 发布的 composition façade（返回 `Arc<dyn api::ReasoningPort>`），graph/node/config 不再作为 crate-root façade。
-  - `ROOT_ACCESS_ALLOW.runtime`：Composition 仅可消费登记的 crate-root façade，包括 Client/bootstrap、Provider factory PL、RuntimeContextFactory、Tool Result/ActiveRun，以及 P4 初始模型装配所需的 `InitialProviderAssembly`、`ModelRuntimeSettings`、`resolve_model_runtime_settings`；禁止穿透 `runtime::application`。`UsageSink` 供 #931 bridge，实现细节仍私有。
-  - `ROOT_ACCESS_ALLOW.context`：除既有 `compact/context_port/guidance/session/skill` 外，#871 登记 `MainSessionWiring`、gate/permit、`SessionResumeView`、production factory/dependencies 与结构化错误；内部 application/adapters 路径仍禁止穿透。  - `ROOT_ACCESS_ALLOW.memory`：#900 后生产消费只需 Memory-owned OHS/PL、project key、`DatasetMemoryOpener`、legacy source factory、Reflection history adapter 与稳定错误；concrete active dataset store、project opener 和 `MemoryService` 已收回 crate 内。脚本中的 stale 名称由 #982/#1022 统一收口，本 Issue 不修改 `.agents/hooks/**`。
-  - `ROOT_ACCESS_ALLOW.tools`：除最新统一授权与 Tool PL、`MemoryPortSource` 外，#912 登记 Skill-owned `PromptFragment`、Catalog/Materialization ports、query/snapshot/revision/source/cache/error PL；Runtime 的 Agent execution 与 Sub Run activity 链路额外消费 crate-root 发布的 `AgentProgressSourceContext`、`SubRunIdentity`、`SubRunStartedEvent`、`SubRunActivityEvent`、`SubRunActivityKind`、`SubRunTerminalOutcome` 纯值身份与活动 PL，禁止穿透 Tools 内部模块；Context 与 Runtime 只能经 crate-root façade 消费，adapter 仍私有。
-  - `CONTEXT_FORBIDDEN_PATHS = {context/src/api.rs, context/src/gateway.rs, context/src/capabilities}`
-  - `POLICY_FORBIDDEN_PATHS` 禁止 Policy 的 `api/business/contract/core/gateway/capabilities` 文件与目录恢复
-- **检查方式**：
-  - 扫描 `agent/`, `apps/`, `packages/` 下的 `*.rs`（跳过 `target/`）；
-  - 未迁移 feature 的跨 crate 入口仍必须是 `api`；Project、Runtime、Context、Policy、Storage 只放行对应 `ROOT_ACCESS_ALLOW` 登记符号；Policy 的 `domain/adapters`、Project internal state/service/Git seam、Context `application/ports/adapters` 与 Storage 私有模块 **NEVER** 直接跨 crate 访问，`context::domain` 仅发布稳定 PL；
-  - 对仍存在的 `agent/features/*/src/api.rs`，`pub use crate::<segment>` 仅可指向 `contract` / `gateway`；
-  - `CONTEXT_FORBIDDEN_PATHS` 任一路径复活立即失败。
-- **例外**：无 path 级白名单。Context、Policy 与 Storage root 集合都是结构化 façade policy，不是 migration exception。
-
-### 6h. check-hook-target-facade.sh
-
-- **功能**：锁定 #926 后 Hook 的 crate-root Published Language 与 Runtime 消费边界。
-- **扫描范围**：`agent/features/hook/src/lib.rs`、不存在性检查 `agent/features/hook/src/api.rs`，以及全部 `agent/features/runtime/src/**/*.rs` 生产源（跳过 `*_tests.rs`、`tests.rs` 与 `tests/`）。
-- **不变量**：Hook crate-root 只能发布稳定 PL、`HookPort`、`HookDispatchContext` 与生产 Dispatcher；禁止 `pub mod api`、`api.rs` 物理路径和 `adapters::legacy` re-export；Runtime 必须经登记的 Hook crate-root façade消费，禁止 `hook::api::*`。
-- **白名单预算**：迁移例外、路径/整文件豁免、行级 allow、`grep -v` / exclude / skip 均为 `0`；`policy.hook.target-facade` 与 `policy.hook.crate-root-facade` 分别是 Target façade/re-export policy，不计 migration debt。
-- **故意违规证据**：`check-hook-target-facade-tests.sh` 在隔离副本依次注入 `pub mod api`、legacy re-export 与 Runtime `hook::api` import；每类反例均以 exit 2 被单 Guard 拦截，恢复后单 Guard clean pass。总编排 fast profile 同时执行该 Guard。
-
-### 6t. check-task-persistence-capability.sh
-
-- **功能**：把 Task backing / persistence / restore authority 限定在 Task、Context 与 Composition；Runtime/Tools 生产代码只能消费注入的 `TaskAccess`。
-- **守护**：扫描 Runtime/Tools 生产 Rust 源码，拒绝 `TaskStore`、`TaskPersist`、`PreparedTaskRestore`、`TaskRestoreAdapter`、`TaskSnapshotSource`、`SessionTaskAdapters`、`TaskWiring` 与 `wire_task`；专用测试文件及 `trait_reflection.rs` 测试 fixture 不参与生产权限判断。
-- **正向路径**：Composition 创建唯一 Main `TaskWiring`，把 `TaskAccess` 注入 Runtime/Tools，并把 persistence view 交给 Context；Sub Runtime 不再构造未消费的第二 Task backing。
-- **白名单预算**：Task / Storage migration exception 均为 `0`；测试路径排除是生产权限扫描的 scope exclusion，不授权生产代码。
-- **sanity / 故意违规**：脚本内置允许 `TaskAccess`、拒绝 concrete backing/persistence symbols 的 detector sanity；#891 分别以 `TaskStore`、`share::task` 与 Task internal segment 探针验证单 Guard 和总编排 exit 2，恢复后 clean pass。
-- **完成证据（#891）**：Shared legacy Task DTO/lifecycle 已物理删除；Runtime/Tools 生产扫描只允许注入的 `TaskAccess`；Task/Storage migration exception 均为 `0`，repository migration debt 保持 `6`；`cargo check/clippy --workspace --all-targets`、Task/Tools/Context 与受影响 Runtime 测试、production reachability 和总架构守卫共同验证该边界。
-
-### 6a. check-provider-invocation-scope.sh
-
-- **功能**：锁定 #902 的调用隔离边界，防共享 Provider/client 恢复调用期可变状态。
-- **守护**：Provider 生产代码禁止 `AtomicU32/AtomicU8/AtomicBool`、`set_max_tokens`、`set_reasoning_level`、`current_reasoning_level` 与 `reasoning_config.lock()`；Runtime 禁止 `shared_client_lock` 与 setter/restore 路径。
-- **正向约束**：`LlmProvider::invocation_stream` 必须显式接收 `&InvocationScope`。
-- **故意违规验证**：临时向 Provider source 加入 `set_max_tokens` 标记时脚本退出 2；移除后通过。
-
-### 6b. check-provider-pull-stream.sh（已退役，#1021）
-
-- **退役决策**：retired 符号防复活黑名单（改名即绕过、无结构兜底）整体退役。#907 迁移完成后该守卫只剩墓地清单语义。
-- **替代覆盖**：Provider-private `InvocationSink` 等内部类型由 crate-root 窄 façade（`mod` 私有 + `pub use` 白名单，见 §6）与跨 crate 穿透禁令结构性保证，改名不可绕过；旧形态复活的把关归 review 与设计文档。
-- **退役证据**：删除前 `CallbackHandler` 探针命中 exit 2；删除后总编排 clean pass。
-
-### 6c. check-provider-http-attempt.sh
-
-- **功能**：锁定 #1033 的单 attempt 机械收敛边界，防止各 driver 重新手写请求发送、错误响应体读取与 HTTP/network 诊断日志拼装。
-- **守护**：`agent/features/provider/src/adapters/http_attempt.rs` 的 `HttpAttemptExecutor` 是唯一允许发起请求发送与读取失败/成功响应体的入口（成功路径经其 `read_success_json` helper）；`error_log.rs` 的 `log_network_error` / `log_http_error` / `ErrorLogContext` / `LlmApiErrorRecord` 只能被 `http_attempt.rs` 与 `error_log.rs` 自身引用，其余 driver 只能调用窄的 `error_log::log_stream_protocol_error`。
-- **扫描范围**：整个 `agent/features/provider/src`（不仅 `adapters/`，覆盖 `domain/`、`ports.rs`、`published_language.rs`、`lib.rs` 等所有生产文件），精确排除 `adapters/http_attempt.rs` 本身（唯一 executor）与本 crate 测试约定文件（`*_tests.rs` / `tests.rs` / `tests/` 目录）；`error_log.rs` 仍在扫描范围内，仅对"禁止自引用诊断 API"这一项单独豁免。
-- **测试尾部剥离**：按本 crate 惯例——每个生产文件底部若有整段 `#[cfg(test)] mod tests { ... }`（列级、后跟 `mod NAME {` 而非 `mod NAME;`），扫描时剥离该标记起到文件末尾的内容；**NEVER** 盲目从文件中出现的第一个 `#[cfg(test)]` 处截断——中段声明式 `#[cfg(test)] mod x;`（引用外部测试子模块文件，如 `mod message_conversion_tests;` 或 `#[path = "..."] mod foo;`）不会触发截断，其后的生产代码继续参与扫描；若同一文件同时存在中段声明式标记与末尾内联测试块，只以最后一个"以 `mod NAME {` 开块"的标记为截断点。
-- **禁用模式**：
-  - `\.send\(\)` / `\.execute\(` —— driver 必须经 `HttpAttemptExecutor::execute` 发送请求，禁止直接调用 `RequestBuilder::send()` / `Client::execute()`；
-  - `\.(text|json|bytes|chunk)(::<T>)?\(\)` 紧跟 `\.await`（**跨行**检测，允许两者分处相邻两行，中间可穿插空行/被剥离的整行注释）—— driver 不得直接 `await` `reqwest::Response` 的 `text()`/`json()`/`bytes()`/`chunk()`（含带 turbofish 的 `.json::<T>()`）；`RequestBuilder::json(&body)` 因参数非空、`BoundedErrorBody::text()` 因无 `.await` 而天然豁免；整行 `//`/`///` 注释在匹配前被剔除，避免"注释里提到 `response.json().await`"误报。
-  - `log_network_error` / `log_http_error` / `ErrorLogContext` / `LlmApiErrorRecord` —— 仅 `http_attempt.rs`（消费方）与 `error_log.rs`（原生定义处）可引用，其余 driver 一律改走 `error_log::log_stream_protocol_error`。
-- **白名单**：无。
-- **刻意的简化**：注释豁免只剔除"整行以 `//` 开头"的注释（含 `///` doc comment），不做完整词法级字符串/注释区分；当前代码库内所有已知的 `.json().await` 提及都落在这类整行注释里，足够覆盖真实场景，换取实现简单。
-- **故意违规验证**（#1033 doc audit，验证后已还原）：临时在 driver 文件末尾追加 `client.get(url).send().await`、跨行 `.json::<T>().await` 与 `crate::adapters::error_log::log_network_error(..)` 三类探针，单 Guard 分别以 exit 2 命中三条对应说明；另在 `openai_compatible.rs` 中段声明式 `#[cfg(test)] mod message_conversion_tests;` 之后插入 `.send().await` 探针，验证不会被误剥离，同样以 exit 2 命中；移除探针后单 Guard 与总编排均 clean pass。
-- **范围边界**：本守卫只锁定“单次 attempt 怎么发、怎么判失败、怎么记一条日志”的机械收敛；不覆盖、也不代表 Runtime 已接管跨调用 retry/backoff 或 stream→non-stream fallback（P6/P7，由 [#905](https://github.com/rushsinging/aemeath/issues/905) 承接收口），也不覆盖 pull-based `InvocationStream`（P4，由 [#903](https://github.com/rushsinging/aemeath/issues/903) 承接）；详见 [Migration Governance §4](03-migration-governance.md#4-provider-现状缺口s2-代码盘点)。
-- **失败模式**：命中任一模式即输出对应 `[architecture]` 说明并以 exit code 2 退出。
-
-### 6d. check-provider-driver-acl.sh
-
-- **功能**：锁定 #904 的 Provider-owned Driver ACL，避免 Runtime、Composition 或 CLI 重新解析 driver 并选择具体协议实现。
-- **守护**：外层生产代码禁止引用 `ProviderDriverKind::parse`、`OpenAIProviderConfig`、`ProtocolFamily` 或 `DriverSpec`；Provider crate-root 禁止重新导出 `OpenAIProviderConfig`；`LlmClient::from_config` 必须在 Provider 内调用 `DriverSpec::parse`。
-- **范围边界**：外层只传递配置中的 driver/source key/API style 原始值；协议族、OpenAI Chat Completions/Responses 方言及实现配置由 Provider 唯一 factory 决定。未知 driver 与非法组合必须 fail-closed。
-- **失败模式**：命中任一模式即输出对应 `[architecture]` 说明并以 exit code 2 退出。
-
-## 7. check-context-architecture.sh
-
-- **功能**：守护 agent context 所有权重构（project 拥有 `WorkspaceState`）的架构不变量。
-- **守护**：`docs/superpowers/specs/2026-06-07-agent-context-ownership-redesign.md`——workspace 真相单一所有者在 project，tools 只用读/控能力，持久化 DTO 留 session 边界，git 收敛在 `GitCli`。
-- **规则**（CTX-R 前缀为 context ownership 局部规则编号，与 [05-dependency-rules.md](../01-system/05-dependency-rules.md) 的全局铁律 R1–R7 **无对应关系**）：
-
-| 编号 | 规则 | 守护目标 |
-|---|---|---|
-| CTX-R1 | `ToolExecutionContext` 定义不得含 `workspace_root` / `path_base` / `context_stack` 字段 | 防上下文三元组爬回 tools |
-| CTX-R2 | `tools/` 不得引用 `PersistedWorkspaceContext` / `WorkspacePersist` | 持久化是 session 边界，tools 不得直接触达 |
-| CTX-R3 | `struct WorkspaceState` 仅可在 `project/` 定义；`agent/features/` 内（project 除外）禁止任何 struct 同时打包 `workspace_root + path_base + (context_stack\|stack)` | 防 `WorktreeWorkingContext` 复活 |
-| CTX-R4 | 生产代码调 `.workspace_control()` 仅限 `tools/src/business/bash.rs` 与 `worktree.rs` | 控能力集中收口 |
-| CTX-R5 | `project/` 内非测试 `Command::new("git")` 仅限 `business/git_ops.rs` | git 收敛在 `GitCli` 适配器 |
-| CTX-R6 | `WorkspacePersist` 仅可出现在 `project/`（def/impl）、Context Session 联合协调与 `runtime/` | 与 CTX-R2 重叠的兜底；Context 是 Session 恢复消费者 |
-
-- **白名单**（路径级 allowlist）：
-
-| 规则 | 允许 | 说明 |
-|---|---|---|
-| CTX-R4 | `agent/features/tools/src/business/bash.rs`, `agent/features/tools/src/business/worktree.rs` | 唯一允许调 `.workspace_control()` 的生产文件 |
-| CTX-R5 | `agent/features/project/src/business/git_ops.rs` | 唯一允许在 `project/` 调 `Command::new("git")` 的生产文件 |
-| 测试放行 | `*_test.rs`, `*_tests.rs`, `tests/` 目录, `#[cfg(test)]` 区域 | R4 / R5 / R6 对测试代码放行 |
-
-- **范围缩窄**：R3 的 triple-bundle 检测**限定 `agent/features/`**（不含 `agent/shared/`, `packages/sdk/`）——这两处是设计允许的序列化/投影形态（`PersistedWorkspaceContext` / `WorkspaceContextView`），不是运行期可变三元组。
-
-## 8. check-forbidden-imports.sh
-
-- **功能**：检查源码 import 边界，禁止非 composition 代码引用生产 adapter。
-- **守护**：[05-dependency-rules.md](../01-system/05-dependency-rules.md) §2 R1 / R6——shared adapter 只能由 Composition 装配；feature 与 CLI 不得直接 import 易变 detail。
-- **白名单（`RUNTIME_ADAPTER_MIGRATION_EXCEPTIONS`）**：已退役。原 `agent/features/runtime/src/adapters/runtime.rs` 例外（Runtime-owned ACL 临时把 shared adapter newtype 适配到 runtime-local port）经 #1385 删除文件、移除 mod 声明并清退例外集合后退役；白名单预算降至 0。
-- **检查方式**：扫描 `agent/`, `apps/`, `packages/` 下的 `*.rs`（跳过 `*_test.rs` / `*_tests.rs` / `tests/` / `agent/composition/src/`），匹配 `\bshare::adapter\b | \bshared::adapter\b | agent/shared/src/adapter`。
-
-## 9. check-tui-tea-purity.sh
-
-- **功能**：检查 TUI update 子树保持 TEA 纯函数语义——副作用一律走 `Cmd` / `Effect` 派发。
-- **守护**：[01-architecture-and-dataflow.md](../02-modules/tui/01-architecture-and-dataflow.md) §TEA 架构——`update()` 不得直接 `await` / `spawn` / IO / 调 hook。
-- **检查目标目录**（`TUI_PURE_DIRS`）：
-  - `apps/cli/src/tui/app`
-  - `apps/cli/src/tui/model`
-  - `apps/cli/src/tui/view_assembler`
-  - `apps/cli/src/tui/view_model`
-- **禁用模式**：
-
-| 模式 | 含义 |
-|---|---|
-| `tokio::spawn\s*\(` | 异步 spawn |
-| `std::thread::spawn\s*\(` | 线程 spawn |
-| `Command::new\s*\(` | 进程执行 |
-| `HookRunner::run` / `.run_hook\s*\(` | Hook 直接调用 |
-| `clipboard::` / `arboard::` / `copypasta::` | 剪贴板依赖 |
-| `read_clipboard_image\s*\(` / `process_image_file\s*\(` | 剪贴板图片 |
-| `Handle::block_on` / `Runtime::block_on` | 同步阻塞运行时 |
-| `block_in_place` | 阻塞占位 |
-| `.await\b` | 直接 await（不允许在 update） |
-
-- **白名单（`EXEMPT_FILES`）**——runtime / 命令执行层，预期含副作用：
-
-| 文件 | 豁免理由（#59 S5-gap 裁定） |
-|---|---|
-| `apps/cli/src/tui/app/mod.rs` | 同步 git 元数据探测（`Command::new`），非 update 副作用 |
-| `apps/cli/src/tui/app/run_loop.rs` | runtime 编排层（事件循环 `.await`），TEA 副作用执行器所在 |
-| `apps/cli/src/tui/app/runtime.rs` | runtime 编排层 / Effect executor 本身 |
-
-- **行级豁免锚点**：单行末尾 `// allow tea_side_effect` 注释可放行。
-- **注**：A1-A4 已 Effect 化/转纯的文件（`dialog.rs`, `suggestions.rs`, 已删除的 `save.rs`, `memory.rs`）已移出本名单，受严格纯度检查约束。slash 分发已纯化为同步 update（`handle_slash_command` 返回 `UpdateResult`，#947），连同其测试文件一并移出豁免，受严格纯度检查约束。
-
-## 10. check-tui-toplevel-layout.sh
-
-- **功能**：保证 `apps/cli/src/tui` 顶层目录全部在白名单内；同时拦截 feature #57 之前的旧模块路径。
-- **白名单**（顶层目录名正则）：`^(adapter|app|effect|model|render|update|view_assembler|view_model|view_state)$`。
-- **被禁旧路径**：`tui::(core|output_area|input|display|completion|session)`（含 `crate::` 前缀），命中即视为 feature #57 之前的遗留。
-
-## 11. check-tui-effect-boundary.sh
-
-- **功能**：TUI `model/` 和 `update/` 子树**严格不执行**任何副作用——比 §9 更严，不接受 EXEMPT 名单。
-- **检查目标目录**：
-  - `apps/cli/src/tui/model`
-  - `apps/cli/src/tui/update`
-- **禁用模式**（与 §9 一致，**外加** `mpsc::Sender`）：spawn / Command / HookRunner / clipboard / block_on / `.await` / `mpsc::Sender`。
-- **白名单**：无。
-- **错误信息**：`TUI model/update must describe side effects as Effect values instead of executing them directly`.
-
-## 12. check-tui-model-view-boundaries.sh
-
-- **功能**：保证 TUI model / render / view_assembler / view_model 之间的依赖方向。
-- **检查项**：
-
-| 子树 | 禁用模式 | 错误信息 |
-|---|---|---|
-| `model/` | `ratatui` / `Crossterm` / `Terminal<` / `AgentClient` / `mpsc::Sender` / `tokio::spawn` / `std::thread::spawn` / `Command::new` / `clipboard::` / `arboard::` / `copypasta::` / `read_clipboard_image` / `process_image_file` / `Handle::block_on` / `Runtime::block_on` / `block_in_place` / `.await` | model 必须保持纯函数 |
-| `render/` | `find_last_running_tool` / `last running` / `最后一个 running` | render 不得有"标记最后一个 running tool 为完成"的旧 fallback |
-| `view_assembler/` | `ratatui` / `tokio::spawn` / `std::thread::spawn` / `Command::new` / `mpsc::Sender` / `.await` / `HookRunner::run` / `.run_hook` | view_assembler 不得渲染或执行副作用 |
-| `view_model/` | `crate::tui::model` / `ratatui` | view_model 不得依赖 model 内部或 ratatui |
-| `model/` + `view_model/` + `view_assembler/` + `render/` | `sdk::ChatEvent` / `RuntimeStreamEvent` | SDK/runtime 事件协议必须经 adapter 适配后再进入 TUI model |
-
-- **物理遗留守卫**：
-
-| 路径 | 错误信息 |
-|---|---|
-| `apps/cli/src/tui/core/state` 存在 | `legacy tui/core/state ... forbidden after feature #55` |
-| `apps/cli/src/tui/core/update` 存在 | `legacy tui/core/update ... forbidden after feature #55` |
-| `apps/cli/src/tui/model/session` 存在 | `tui/model/session is not a fifth model context; session model belongs under runtime` |
-| `apps/cli/src/tui/render/output_area/markdown.rs` 存在 | `output render implementation must live under tui/render/output after feature #55` |
-| `apps/cli/src/tui/render/output_area/rendered_lines.rs` 存在 | 同上 |
-| `apps/cli/src/tui/render/output_area/render_blocks.rs` 存在 | 同上 |
-| `apps/cli/src/tui/render/output_area/render_spans.rs` 存在 | 同上 |
-| `apps/cli/src/tui/render/output_area/render_status.rs` 存在 | 同上 |
-| `apps/cli/src/tui/render/output_area/diff.rs` 存在 | 同上 |
-| `apps/cli/src/tui/render/output_area/tool_display/` 存在 | 同上 |
-
-- **白名单**：无。
-
-## 13. check-tui-output-legacy-guards.sh
-
-- **功能**：TUI M2 之后的输出区旁路守卫。
-- **检查项**：
-  - `apps/cli/src/tui/output_area` + `apps/cli/src/tui/render` 不得在非 `if matches!(line.style, LineStyle::ToolCallRunning)` 上下文中调 `cell.set_char('●')`（防覆盖已完成 tool 的状态图标）。
-  - ConversationModel 不得保留平行 Run 生命周期状态源；Runtime Run 生命周期观察不得修改 ConversationModel。
-- **白名单**：cell 写入的 `if matches!(line.style, LineStyle::ToolCallRunning)` 守卫条件本身。
-- **已退役（#1021）**：`find_last_running` / `last running` 字符串墓地黑名单删除（删除前探针命中，删除后 clean pass）；复活把关归 review。
-
-### 13a. check-tui-retained-output-view.sh
-
-- **功能**：锁定统一输出窗口物化生产路径，防止长会话输出刷新重新回退到完整历史节点常驻、完整历史装配或渲染前全量语义扫描。
-- **正向约束**：`app/update.rs` 必须调用 `RetainedOutputView::materialize_window`；`RetainedOutputView` 只拥有轻量 `OutputWindowIndex` 与同步状态；模型侧 journal 必须具有固定容量并在超限时移除最旧 entry。
-- **禁用规则**：生产输出刷新调用 `assemble_from_conversation`；`RetainedOutputView` 持有完整 `OutputViewModel` 或 `Vec<Arc<BlockNode>>`；保留视图调用 `assemble_shared_roots` 或维护重复完整历史 ID；renderer 构造 `semantic_root_ids` / `root_layout_states` 扫描完整语义历史；恢复 `OutputViewCache`、`OutputProjection` 或 `output_projection` 命名；移除 journal 的容量常量或淘汰逻辑。
-- **测试**：`check-tui-retained-output-view-tests.sh` 在隔离 fixture 中验证合法窗口入口，并分别注入完整历史 owner、完整 roots 装配、renderer 全量语义扫描、生产完整装配、旧 cache 与无界 journal 等违规。
-- **白名单**：守卫 fixture 中的禁止模式字符串；无生产路径例外。
-
-## 14. check-tui-block-nesting.sh
-
-- **功能**：gutter 归属不变量（Task 4.2）——gutter（marker/indent）**只由**渲染器 `document_renderer.rs` 经 `apply_gutter` 注入；block 组件的 `render_self` 绝不自写 gutter/marker/indent。
-- **检查目标目录**：`apps/cli/src/tui/render/output/blocks/*.rs`。
-- **禁用模式**：`\bapply_gutter\s*\(`。
-- **白名单**：无（这是高价值、无歧义检查）。
-- **刻意的简化**：marker 前缀检测（"● "/"  > " 等）有意不做——`thinking.rs`(💭)、`queued_submission.rs`(⏳) 合法保留内容字形，`ask_user`/`edit_diff` 含内容内前缀，强行正则易误报。
-
-## 15. check-tui-render-isolation.sh
-
-- **功能**：render 隔离守卫（feature #58 输出区单一真相管线）——保证 `apps/cli/src/tui/render/output` 保持纯函数边界。
-- **检查目标目录**：`apps/cli/src/tui/render/output`。
-- **禁用规则**：
-
-| 规则 | 模式 |
-|---|---|
-| 禁引 Model 可变类型 | `use\s+crate::tui::model::`（`view_model::` 允许） |
-| 禁 fs IO | `\bstd::fs::` |
-| 禁 process | `\bstd::process::` |
-| 禁 tokio | `\btokio::` |
-| 选区上色唯一路径 | `SELECTION_BG` 只能出现在 `selection_overlay.rs`（断言行 `assert` 豁免） |
-
-- **白名单**：
-  - `selection_overlay.rs` 是 `SELECTION_BG` 唯一允许文件；
-  - `#[cfg(test)]` 测试代码区豁免 IO / 选区断言。
-
-## 16. check-tui-unsafe-text-ops.sh
-
-- **功能**：扫描整个 `apps/cli/src`（不仅 tui），检测因"字节偏移落在非 char 边界"而 panic 的文本操作。
-- **禁用模式**：
-
-| 模式 | 含义 |
-|---|---|
-| `.chars().nth(` | 字符索引误当字节索引 |
-| `&var[..]` | `&str` 字节切片 |
-| `var[a..b]` | `String` 字节切片 |
-| `.split_at(` | `str::split_at` 非 char 边界 panic |
-
-- **白名单（文件级）**：
-
-| 路径 | 理由 |
-|---|---|
-| `apps/cli/src/tui/render/display/safe_text.rs` | 安全 helper 集中地 |
-| `apps/cli/src/tui/display/safe_text.rs` | 历史路径（safe_text 的同义存放） |
-| `apps/cli/src/tui/text.rs` | `split_at_ascii` 等只计数字节值 < 128 的 ASCII 字符 helper |
-
-- **行级豁免锚点**：`// allow unsafe_text_op: Vec slice`——对 `Vec<u8>` 切片（非 `str` 切片）显式豁免。
-- **刻意的简化**：
-  - 不检测 `get(range)`（返回 `Option` 不 panic，是 safe_text 推荐用法，flag 会误伤）；
-  - 不检测 `truncate`（本仓库内均为 `Vec::truncate`，flag 会产生误导性注解）。
-
-## 17. check-log-target-prefix.sh
-
-- **功能**：运行 owner-aware Rust scanner，扫描全仓生产日志调用、crate-root target owner 与 TargetCatalog。
-- **守护**：调用方只能引用所属 owner 的唯一 target；Audit Usage Fact 名称 `aemeath:agent:audit` 与旧 `agent-audit.log` 不得进入 Diagnostic catalog，Audit 模块运行诊断使用 `aemeath:diagnostic:audit`。
-- **范围排除**：测试目录、`*test*.rs` 与 `cfg(test)` probe；登记为 `scope.logging.production-test-sources`，不属于迁移债务。
-- **关联 Rust 守卫**：`packages/global/logging/src/domain/routing_guard.rs` 消费唯一 TargetCatalog，并校验 owner、sink 与文件唯一性。
-
-### 17a. check-logging-scope-context.sh
-
-- **功能**：扫描整个 `packages/global/logging/src` 的生产 Rust 文件，拒绝未登记的 `static`、`static mut`、`lazy_static!` 与 `thread_local!` 状态；`pub`、多行声明同样参与检查。
-- **守护**：新日志执行上下文只能通过不可变 `LogContext` 与 Tokio task-local scope 传播；禁止以改名或移动文件的方式恢复 Main/Sub 共享的进程级可变 current 状态。
-- **精确白名单**：`context.rs` 的 `SCOPED_CONTEXT / BOOT_TS / APP_VERSION / PID`，以及 `file_sink.rs` 的 `UNKNOWN_TARGET_REPORTS / LOGGER`。仅允许 task-local owner 与不可变进程元数据；`LEGACY_EXECUTION_CONTEXT`、legacy setter/getter 与 formatter fallback 已由 #942 删除并由 Guard 拒绝回流。
-- **故意违规证据**：临时恢复未登记 static 或任一 retired legacy symbol，单 Guard 与总编排均必须 exit 2；恢复后 clean pass。
-
-### 17b. check-logging-settings-injection.sh
-
-- **功能**：扫描 Logging、Runtime 与全仓初始化调用，锁定 ConfigSnapshot → LoggingSettings 的单向注入。
-- **守护**：`packages/global/logging/src` 生产代码不得读取 env；Runtime 不得调用 `UnifiedLogger::init`、构造 `LoggingSettings` 或恢复 `init_logging`；`UnifiedLogger::init` 的唯一生产调用点必须是 `agent/composition/src/app.rs::init_logging`。日志输出模式（File/Stderr）由 CLI typed bootstrap 输入注入，**NEVER** 经 env 旁路（#941 已删除 `AEMEATH_LOG_STDERR`，防回归断言见 `agent/features/config/src/adapters.rs`）。
-- **白名单**：无路径排除或 migration exception；Config `EnvAdapter` 仍是 `AEMEATH_LOG_LEVEL` 的唯一业务 env reader。
-- **故意违规证据**：临时在 Logging formatter 恢复 `std::env::var("AEMEATH_LOG_LEVEL")` 后单 Guard 以 exit 2 阻断；恢复后单 Guard clean pass。
-
-## 18. check-no-mod-rs.sh
-
-- **功能**：架构 guard——检测项目中新增的 `mod.rs` 文件，强制 Rust 2018+ 文件即模块惯例。
-- **运行模式**：
-  - 默认（无参数）：扫描全仓库 `*/src/*/mod.rs`；
-  - `--diff`：仅检查 git 暂存区 `*.rs` 中 `diff-filter=A` 的 `mod.rs`。
-- **跳过路径**：`.worktrees/`, `.claude/`, `target/`；默认模式使用目录级 `find -prune`，不得递归扫描 linked worktree、工具缓存或构建产物。
-- **白名单**：无（这就是"无例外"规则）。
-- **错误信息**：`Rust 2018+ 推荐使用与目录同名的文件代替 mod.rs：foo/mod.rs → foo.rs`.
-  
-## 19. check-config-env-guard.sh
-  
-- **位置**：`.agents/hooks/check-config-env-guard.sh`。
-- **功能**：禁止 config 包外读取业务 env（`AEMEATH_*`、`*_API_KEY`、`LLM_*`）。业务 env 只允许在白名单路径读取。
-- **扫描路径**：`agent/features/**`、`apps/cli/src/**`。
-- **业务 env 列表**：`AEMEATH_CONTEXT_SIZE`、`AEMEATH_PROVIDER`、`AEMEATH_API_KEY`、`AEMEATH_BASE_URL`、`AEMEATH_MODEL`、`AEMEATH_MAX_TOKENS`、`AEMEATH_PERMISSION_MODE`、`AEMEATH_MAX_TOOL_CONCURRENCY`、`AEMEATH_MAX_AGENT_CONCURRENCY`、`AEMEATH_VERBOSE`、`AEMEATH_LOG_LEVEL`、`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`CLAUDE_API_KEY`、`LLM_API_KEY`、`LLM_BASE_URL`、`DEEPSEEK_API_KEY`、`MINIMAX_API_KEY`、`MIMO_API_KEY`、`VOLCENGINE_CODING_PLAN_API_KEY`、`AGNES_API_KEY`、`OLLAMA_API_KEY`。
-- **白名单路径**：
-  - `agent/shared/src/config/adapters/env` — EnvAdapter，唯一业务 env 读取点
-  - `agent/shared/src/config/adapters/paths` — `AEMEATH_AGENTS_DIR`，路径根
-  - `agent/shared/src/config/domain/driver_env` — driver→env name 映射
-  - `agent/features/runtime/src/core/config_app_service.rs` — `resolve_provider_api_keys` 在 config 加载时从 env 注入 per-provider API key
-  - `packages/global/logging/` — `AEMEATH_LOG_LEVEL` 在 logging 层处理
-  - `build.rs` — 编译期
-  
-## 20. run_tui_single_source_structure_guard（内联）
-
-- **位置**：`check-architecture-guards.sh` 内的 `run_tui_single_source_structure_guard` 函数，**不**是独立脚本。
-- **功能**：feature #70 结构化单一真相规则——app/domain 真相只在 `model/` 或 `view_state/`；render widgets 仅保留 render 投影/缓存；退场 adapter 必须只活在 `#[cfg(test)]`。
-- **检查项**：
-
-| 编号 | 检查 | 详情 |
-|---|---|---|
-| 20.1 | `apps/cli/src/tui/adapter.rs` 中 `pub mod input_widget` / `resize` / `live_status_widget` / `status_widget` / `output_widget` / `output_view_widget` 必须在 `#[cfg(test)]` 区域内 | 退场 widget adapter 不得重新恢复为生产模块 |
-  | 20.2 | `apps/cli/src/tui/adapter/{input_widget, resize, live_status_widget, status_widget, output_widget, output_view_widget}.rs` 不得恢复生产 writeback/helper API（如 `set_text`、`set_cursor_byte_index`、`resize_mapping`、`map_resize`、`apply_resize`、`&mut InputArea` 等） | 防 widget 重新变成"拥有状态的可变对象" |
-  | 20.3 | `apps/cli/src/tui/render/{input/input_area*, status, output_area*}` 不得物理存储 `textarea` / `history` / `saved_input` / `status_type` / `vm` / `thinking` / `is_selecting` / `selection_*` / `spinner` / `task_status_lines` / `queued_submission_lines` / `last_visible_height` / `last_line_count` / `scroll_offset` / `auto_scroll` 等镜像字段 | 真相必须留 `model/` 或 `view_state/` |
-| 20.4 | render widgets 不得恢复 completion / suggestions / spinner 镜像存储与类型（`pub(super) suggestions: Vec`、`pub selected_suggestion`、`pub show_suggestions`、`struct SpinnerState`） | 同上 |
-| 20.5 | render widgets 不得暴露 `set_text` / `set_cursor_byte_index` / `set_pending_images` / `set_focused` / `set_thinking` / `start_selection` / `set_suggestions` / `accept_suggestion` 等生产状态变更 API | 状态变更一律经 `model` / `view_state` 与 projection helper |
-| 20.6 | 生产路径不得调 `(input_area\|status_bar\|output_area).{set_text, set_cursor_byte_index, set_pending_images, get_text, start_selection, scroll_up, start_spinner, set_task_status, ...}` | 调 widget 镜像方法当真相读/写 |
-| 20.7 | 生产路径不得写 `widget.{scroll_offset\|auto_scroll\|is_selecting\|selection_*\|spinner\|task_status_lines\|queued_submission_lines} = ...`（排除 `view_state/` 与合法 selection 模块） | 直接赋值 widget 镜像字段 |
-| 20.8 | `OutputArea` 选区/复制坐标 helper 必须保持只读纯函数——`get_line_content` / `screen_to_anchor` / `word_bounds_at` / `selected_text_for_view` / `selected_text_for_range` 不得用 `&mut self` | 防选区 helper 偷偷写状态 |
-| 20.9 | TUI output document 投影必须集中化；render widgets 不得持有 renderer 缓存、不得调 `refresh_output_widget_from_model` / `handle_resize(visible_height)` / `set_document(...)` / `replace_document(...)` 等旧 API | 渲染真相归 `document_renderer.rs` |
-| 20.10 | `queued_submission_lines` 不得作为业务真相从 `OutputArea` 读取（除 `app/update/notice.rs`） | 改走 `ConversationModel.queued_submissions` / `LiveStatusViewModel` |
-| 20.11 | `apps/cli/src/tui/**`（除 `model/input/`）中 `model.input.document.{clear, insert_text, replace_text, move_, set_cursor_col, delete_}` 全部禁止 | input 文档变更一律经 `InputIntent → InputModel::apply` |
-| 20.12 | `apps/cli/src/tui/app/state/**` 不得镜像 `total_input_tokens` / `total_output_tokens` / `total_api_calls` / `last_input_tokens` / `usage_snapshot` / `record_usage` / `thinking_enabled` | usage/thinking 真相留 `RuntimeModel`，状态由 `StatusViewAssembler` 派生 |
-
-### 21. AgentClient trait 最小化（#567 事件流收口）
-
-`check-agent-client-trait-minimal.sh`
-
-| # | 规则 | 理由 |
-|---|---|---|
-| 21.1 | `packages/sdk/src/client.rs` 中 `trait AgentClient` 只允许 `chat()`、同步 `cancel_run(run_id)`、Runtime-owned `reply_interaction()` / `cancel_interaction()` 与 Config control-plane 的 `config_view()` / `update_config()` | Chat data plane 仍走事件流；interaction 与 Config 命令只交换 SDK 纯值 DTO，禁止把 waiter/channel、Config service/reader/watch 暴露给交付层 |
-
-> 该 allow set 仍是窄 façade；后续 interaction/run-control 扩容按对应 leaf 同步更新并提供故意违规证据。
-
-- **白名单**：各 check 内联有具体保留名单（如 19.3 允许 `pub(super) text:&...`、`pub(super) cursor:&...`，允许 `pub(super) focused` / `pending_images` / `content_width` 等投影字段）。
-
-## 22. check-shared-run-loop.sh
-
-- **功能**：验证 Runtime 内只有一个共享 Loop Engine 实现，禁止在 `agent/shared/` 或其他 feature crate 中出现平行 run-loop 实现。
-- **守护**：确保 Loop Engine 的单一真相——所有 Main / Sub Run 共用同一驱动骨架（[03-loop-and-state-machine.md](../02-modules/runtime/03-loop-and-state-machine.md)）。
-- **检查方式**：确认 Runtime 的 Main/Derived 入口调用唯一 `loop_engine::run_loop`，禁止旧 FSM；唯一入口检测兼容普通函数、带 visibility scope 的函数以及泛型 `run_loop<P>` 形状，避免把合法的窄阶段泛型重构误判为入口消失；并扫描 `agent/features/runtime/src`、`agent/features/tools/src/adapters/agent_tool.rs` 与 `agent/features/tools/src/domain/types/agent.rs`，禁止恢复 Session token 槽或 `max_turns`。测试 fixture 只有位于显式 `tests/` 目录或 `*_tests.rs` 文件时才从生产 Session 边界扫描中排除，避免普通生产目录中的测试辅助模块伪装成合法装配入口。
-- **失败模式**：发现平行 loop 实现时以 exit code 2 退出。
-
-- **#872 Context 边界 / #1397 公共 owner**：扫描整个 `agent/features/runtime/src` 的生产源码，禁止引用 `context::session::*`、`ChatChain` / `ChatSegment`、`current_chain` / `frozen_chats` / `active_summary`、`SessionProjectionParticipant`、`projection_start_index`、`save_chain` 或 legacy compact helper；测试路径由已登记的 `scope.runtime.shared-loop-tests` 排除。独立 Run 与派生 Run 均委托 `application/loop_engine/step_persistence.rs` 的无角色 owner 接入唯一 `append_finalized`，Main/Sub adapter 禁止各自保留 finalized append 算法。Interaction completion 必须由 `application/interaction/coordinator.rs` 的 `InteractionCompletionContext` 与 `complete_tool_interaction` 统一拥有；禁止恢复 `InteractionCompletionPort` 或 Main/Sub 五组角色 completion 方法。消息归属必须使用显式 Step ownership，idle compact/reset 经 ContextPort，resume 与 session commands 经 Context crate-root Published Language。
-- **故意违规验证**：`check-shared-run-loop-tests.sh` 在隔离副本向 Runtime 生产路径注入 `context::session::ChatChain`，断言单 Guard exit 2；移除探针后 clean pass。该正反例脚本只进入 `--full`，不进入 Stop `--fast`。白名单预算保持不变，不新增 migration exception。
-
-## 23. check-run-control-boundary.sh
-
-- **位置**：`.agents/hooks/check-run-control-boundary.sh`。
-- **功能**：锁定 SDK run control Published Language 与 `AgentClient` 的迁移期扩容边界，防止 #878 atomic cutover 完成前提前引入并发原语或新 RPC。
-- **守护**：
-  - `packages/sdk/src/run.rs`（SDK run control Published Language）只能是纯值 DTO，禁止 `CancellationToken` / `Sender<` / `Receiver<` / `Mutex<` / `RwLock<` / `Arc<`；
-  - `packages/sdk/src/client.rs` 禁止在 #878 atomic cutover 前出现 `cancel_run_step` / `terminate_run` 新 API。
-- **检查方式**：`grep -nE` 分别扫描上述两个文件，命中即输出对应说明并 `exit 1`。
-- **白名单**：无。
-- **失败模式**：`SDK run control Published Language must contain only pure value DTOs.` / `New run control APIs must not reach production AgentClient before #878 atomic cutover.`
-
-## 23a. check-tool-catalog-execution-boundary.sh
-
-- **位置**：`.agents/hooks/check-tool-catalog-execution-boundary.sh`；正反例脚本为 `check-tool-catalog-execution-boundary-tests.sh`。
-- **Runtime 生产边界**：扫描 `agent/features/runtime/src/**/*.rs` 的生产源码，禁止 `ToolRegistry`、`Arc<dyn Tool>`、`registry.get()`、`tool.call()` 与 `input_schema()` 直取。规则没有 composition/legacy 路径白名单；Composition 可通过 Tools 提供的窄 factory 装配双端口，但 Runtime 内仍存旧路径必须迁移或退役，不能以例外隐藏。
-- **Execution adapter 边界**：`tools/src/adapters/execution.rs` 禁止引用 `policy/hook/sdk/tui/runtime`，并禁止 `timeout`、`Semaphore`、`RunStep`、`approval`；这些编排职责归 Runtime。
-- **纯值 suspension / AskUser**：`tools/src/domain/suspension.rs` 禁止 tokio、Sender/Receiver、Mutex/RwLock/Arc、RuntimeHandle、request id 与 resume token；Tools AskUser 生产 adapter 禁止 `__ASK_USER__` / `__ASK_USER_SELECT__` 魔法协议及 oneshot/channel/waiter。Runtime-owned AskUser oneshot 明确不在该 Tools 扫描范围。
-- **legacy Tools 退役**：`check-tool-catalog-execution-boundary.sh` 在 Tools 生产源码拒绝 `LegacyNoAgent` / `legacy-no-agent`、`SkillTool` / legacy Skill DTO、`register_all_tools*` / `register_subagent_tools` 及 `ToolCatalogGateway` / `DefaultToolCatalogGateway` / `wire_tools`；私有 `ToolRegistry` backing 仅可留在 Tools adapter composition。该规则无 migration exception、路径 allowlist 或 suppression。
-- **排除语义**：只排除测试路径与精确 `#[cfg(test)]` item，不提供 migration exception、路径 allowlist 或 suppression。
-- **故意违规证据**：sanity 脚本先验证 Runtime-owned oneshot 正例，再分别注入 Runtime registry 直取、Execution→Hook、Suspension Sender、AskUser 魔法字符串、具体 adapter façade 与 Runtime schema copy；六类反例均必须由单 Guard 以 exit 2 拦截，恢复后 clean pass。
-- **失败模式**：逐项输出 `path:line: reason`，汇总后 exit 2。
-
-## 23b. check-command-catalog-boundary.sh
-
-- **位置**：`.agents/hooks/check-command-catalog-boundary.sh`。
-- **唯一所有者**：`CommandDescriptor`、`CommandRoute`、`CommandCatalogPort`、`CommandRouterPort`、`SlashInput` 与 `CommandParseError` 只能定义在 Tools `domain/command_{pl,ports}.rs`；SDK 直接 re-export，不复制 DTO。
-- **交付边界**：SDK/CLI/TUI/no-TUI 禁止恢复 `builtin_commands()`、`SLASH_HELP_LINES`、`is_exit_command` 或 `parse_reflection_history_command`；发现、帮助、补全和解析必须消费注入的 Catalog/Router。
-- **Runtime 边界**：Runtime 可消费 typed route，但不得定义第二套 Command Catalog/Router PL。
-- **白名单**：无；仅排除测试路径。
-- **故意违规证据**：在临时副本分别加入 SDK `builtin_commands()`、no-TUI 独立 parser 与 Runtime `CommandRoute`，单 Guard 和总编排均须 exit 2；恢复后 clean pass。
-- **失败模式**：输出命中路径后以 exit 2 阻断。
-
-## 23g. check-runtime-event-naming.sh
-
-- **位置**：`.agents/hooks/check-runtime-event-naming.sh`；结构化 catalog/baseline 为 `.agents/runtime-event-naming-baseline.json`；正反例脚本为 `check-runtime-event-naming-tests.sh`。
-- **功能**：解析 `RuntimeStreamEvent`、SDK `ChatEvent` 与 `TuiRuntimeEvent` 的 enum 结构，要求当前 variant 集合与 baseline 精确一致；新增、删除或跨层改名必须同时评审结构化 catalog 与 `09-event-index.md`，避免仅靠 grep 或 Markdown 表格解析治理事件语言。
-- **兼容边界**：`legacy_broad_names` 显式冻结仍在生产使用的 compatibility names，不进行 SDK wire breaking rename；`sdk_compatibility_variants` 允许旧 SDK variant 继续 dual-read，但 Guard 要求其不得恢复为 Runtime producer 或 TUI fact。当前明确登记 `Token`、legacy `Thinking`、`ToolCallStart`、`ToolCallUpdate`、`ToolProgress`、`MicrocompactDone`、`CompactRollback`、`CompactFinished` 与 `AgentProgress`，均由 TUI/CLI 第一边界归一化为 typed content/tool delta、tool call fact、operation result fact 或 `SubRunStarted` / `SubRunActivity`；`UiEvent::AgentProgress` 与 `sdk_event_to_ui_event` 第二兼容链已经退役，Guard 禁止恢复；新增宽泛 `*Updated`、`*Info`、`*Data`、`*Notification`、`*ProgressUpdated` 仍会被拒绝。
-- **语义边界**：`current_cross_layer_facts` 锁定 Runtime → SDK → TUI 同名事实；`ack_terminal_patterns` 以结构化模式禁止命令 ACK 借用 Lifecycle terminal 名称，确有现存 wire 兼容名时只能进入显式 `ack_terminal_compatibility_names`；`retired_symbols` 禁止恢复 `CompactProgress`、`TasksSnapshot` 与 `AskUserBatch`：Compact live display 只来自 typed Activity stage/work，Task state 只来自 revisioned `TaskStateChanged`，交互协议只来自纯值 `InteractionRequested` 与 command reply。
-- **索引登记**：除 `Noop`、`Error`、`Run`、`RunStep`、`GraphPhaseChanged` 五个 TUI 内部容器 variant 外，baseline 内每个事件名必须出现在 Runtime 事件索引中。容器例外不授权新增事实名，也不计 compatibility debt。
-- **故意违规证据**：隔离副本依次注入宽泛 `RuntimeDataUpdated`、未登记事件、跨层 fact 漂移、SDK-only compatibility event（`ToolCallUpdate`、`ToolCallStart`、`ToolProgress`、`MicrocompactDone`、`CompactRollback` / `CompactFinished`、`AgentProgress` 或 legacy `Text`/`Thinking`）恢复为 Runtime producer、TUI internal fact、`UiEvent::AgentProgress` 或 `sdk_event_to_ui_event` 第二兼容链，另注入 legacy `AgentProgress::ToolCalls` 首项截断、TUI Conversation intent/change 与 output timeline 恢复 `AgentProgress` 领域 surface、Sub Run ToolCall 在 Conversation reducer 以 `workspace_root=None` 提前压扁、ordering watermark 旁恢复无消费者的 `sub_run_activities` / `agent_progress` 完整镜像、已退役 `TasksSnapshot` / `AskUserBatch` transport、Lifecycle terminal 风格 ACK 和 stringly `CompactProgress`；每类均必须由单 Guard 拒绝，恢复后 clean pass。
-
-`check-runtime-capability-assembly-ownership-tests.sh`、`check-runtime-event-naming-tests.sh` 与 `check-sdk-wire-schema.sh` 均属于会复制仓库或运行正反例的回归脚本，只进入 `--full`；Stop `--fast` 只执行对应的即时静态主体守卫。`check-runtime-activity-observation.sh` 保持 `fast`，其扫描实现使用仓库原生 `/bin/bash` + Perl，不依赖 Python，并与此前的 production/test 排除、allowlist、日志字段和敏感字段语义等价。事件命名主体 Guard 同样进入 `fast`，其结构化负例脚本只进入 `full`。
-
-## 23h. check-cost-tracker-retirement.sh
-
-- **位置**：`.agents/hooks/check-cost-tracker-retirement.sh`；正反例脚本为 `check-cost-tracker-retirement-tests.sh`。
-- **功能**：锁定 Usage-only Audit MVP 的退役边界：`agent/features/runtime/src/application/cost{.rs,/}` 与 Runtime 文件名含 `cost` / `pricing` 的实现不得恢复；`CostTracker`、`CostSummary`、`SessionCostSummary`、`ModelPricing`、`CostInfo`、`CostUpdate`、`cost_usd`、`COST_HISTORY_FILE`、`global_cost_history_path`、`StorageNamespace::Cost` 与 Rust 源码中的 `cost_history.json` 路径 literal 在 `agent/`、`apps/`、`packages/` 保持零引用。
-- **数据边界**：Guard 只扫描仓库源码，**NEVER** 读取、迁移、清空或删除用户磁盘上的 `~/.agents/cost_history.json`。旧文件是未迁移 artifact；当前生产查询只读 Audit Usage JSONL。
-- **编排**：静态主体进入 Stop `--fast`；复制仓库并注入 Runtime owner、Runtime pricing/cost 文件、旧 tracker、legacy path API/literal、SDK Cost DTO 与 Storage namespace 的八类负向探针只进入 `--full`。
-- **治理**：注册为 `policy.audit.cost-retirement` Target policy，不增加 migration exception、scope exclusion 或 inline allow。Future Cost/Pricing 若获批准，必须先建立 Audit-owned Published Language、定价来源和迁移语义，再以等价或更强 policy 替换，**NEVER** 直接删除 Guard。
-
-## 24. check-config-reader-injection.sh
-
-- **位置**：`.agents/hooks/check-config-reader-injection.sh`。
-- **功能**：禁止 Runtime/TUI/CLI 直接构造 `ConfigAppService`，并禁止 TUI/CLI 持有 ConfigReader/Query/Writer/participant/subscription/watch。
-- **守护**：Composition 构造唯一 Config wiring；Runtime 只持注入视图与 Main Run snapshot；交付层只见 SDK DTO。
-- **检查方式**：扫描 Runtime/TUI 的 `ConfigAppService::new` 及 TUI Config 契约符号。
-- **例外**：仅 `trait_reflection.rs` 的测试 fixture；生产路径零例外。
-- **失败模式**：`Config reader injection guard FAILED`，exit 2。
-
-## 25. check-production-reachability.sh
-
-- **位置**：`.agents/hooks/check-production-reachability.sh`，调用 `cargo run --quiet -p xtask -- source-guard`。
-- **功能**：扫描 `agent/`、`apps/`、`packages/` 的 Rust 源码，拦截非 `cfg(test)` 的公开 `*_for_test` / `test_only` 入口、未保护的 `testing` / `fixture(s)` / `fake(s)` 模块，以及超过集中 baseline 的生产 `allow(dead_code)`。
-- **baseline**：`.agents/dead-code-baseline.json` 当前上限 10，记录 owner、原因和退出条件；历史清理由 #649/#947 承接，新增数量必须显式评审。
-- **public surface**：`source-guard <root> <output>` 可输出按路径和声明排序的 deterministic public surface，仅供 diff review，不承诺 crates.io semver。
-- **执行策略**：source guard 同时进入通用 Git pre-commit（仅 staged 路径命中时）与完整 pre-push profile；#1018 实测热耗时约 3.1-6s，不进入 Agent Stop 的快速 profile，也不新增在线 workflow。
-
-## 26. check-cross-bc-construction-registry.sh
-
-- **位置**：`.agents/hooks/check-cross-bc-construction-registry.sh`（主守卫）与 `.agents/hooks/check-cross-bc-construction-registry-tests.sh`（探针自测）。
-- **功能**：注册表驱动的跨 BC 构造守卫（fail-closed），补齐 #1296 聚合 Guard"代表性覆盖"之外的全部构造符号机械闭环。保护对象为两类：feature crate `adapters` 模块（`src/adapters.rs` 与 `src/adapters/**`）定义或导出的 concrete adapter 类型；feature crate 定义的 `pub fn wire_*` 装配函数。
-- **数据源**：`.agents/architecture-guard-registry.json` 顶层 `construction_symbols` 段，条目字段为 `id`（`construction.<owner>.<symbol>`）、`symbol`、`owner_crate`、`kind`（`adapter` / `wire`）、`allowed_paths`（默认 `agent/composition/src`）、`guard`、`reason`、`tracking_issue`。
-- **检查方式**：自动收集 feature crate adapters 候选符号与 wire 函数全集，扫描 `agent/features`、`agent/composition`、`apps`、`packages` 生产段（剥离 `#[cfg(...test...)]` 门控 item，包括 `cfg(any(test, feature = "dev"))` 模块）；对 `Type::new/default/with_*` 构造与 `path::wire_*` 调用判定跨 crate 归属：未登记 → 违例（新增 adapter 自动纳入保护），已登记但越出 `allowed_paths` → 违例。
-- **边界**：同 crate 内部构造是 BC 内部事务，不拦截；`agent/composition` 自身定义的 `wire_*` 被 apps 消费是设计意图，不登记；feature 反向依赖 composition 由 `check-cargo-dependency-graph.sh` 管。
-- **失败模式**：`cross-BC construction registry guard FAILED`，exit 2；探针自测覆盖 clean 基线、未登记 adapter、越界构造、`cfg(test)` 豁免、wire 越界、注册段缺失与恢复 clean 七类用例。
-- **治理**：注册为 `policy.cross-bc.construction-registry`；新增条目 **MUST** 附 `reason` 与 `tracking_issue`，**NEVER** 通过删除条目消除违例——要么移动构造点回 Composition，要么以设计文档评审后的豁免理由登记。
-
-### Git pre-commit（本地钩子，非架构守卫）
-
-- **位置**：`.cargo/hooks/pre-commit`，通过 `core.hooksPath=.cargo/hooks` 启用。
-- **行为**：对 staged Rust 执行 `cargo fmt` 并重新暂存；相关源码/守卫变更执行 source guard；TUI scenario/snapshot 变更只检查 `.snap.new` / `.pending-snap`。
-- **边界**：不执行 production reachability、workspace/all-target、Coverage、完整 P0 或任何依赖 GitHub 网络的 Issue 治理检查。
-- **绕过**：仅使用 Git 原生 `--no-verify`；PR Test plan 必须披露并补跑。
-
-### Git pre-push（本地完整门禁）
-
-- **位置**：`.cargo/hooks/pre-push`，与 pre-commit 共用 `core.hooksPath=.cargo/hooks`。
-- **行为**：先执行 `check-architecture-guards.sh --full`，成功后执行 `xtask test-runner`；任一步失败立即阻止 push。
-- **边界**：不重复 all-target clippy、Coverage、TUI P0/P1 或依赖 GitHub 网络的 Issue 治理检查。
+- **位置**：`.cargo/hooks/pre-push`。
+- **行为**：先 `check-architecture-guards.sh --full`，成功后 `xtask test-runner`，最后清理当前 worktree 构建缓存；任一步失败立即阻止 push 且 **NEVER** 清理缓存。
 - **绕过**：仅使用 Git 原生 `--no-verify`；PR Test plan 必须披露并手工补跑两个完整入口。
-
-### #677 文档—代码双向校验（人工关键节点）
-
-- **时机**：sub-issue 创建/调整后、叶子 PR 创建前、叶子 PR 合入后、#677 关闭前。
-- **检查**：gate marker、开发前差异、无待对齐、实施结果与 PR/commit 证据、延期承接 Issue，以及原生 parent/sub-issue/blocked-by 状态。
-- **方式**：使用 `gh issue view` 与 GitHub 原生关系人工核验；该规则只服务 #677 有限生命周期，不沉淀为长期 xtask 或通用 pre-commit。
+- **已知边界**：worktree push 时 hooks 按主工作区版本执行（`core.hooksPath` 相对主仓库解析），删除 hook 脚本类的 PR 需在 Test plan 披露并手工补跑。
 
 ## 附：钩子体系（非架构守卫）
-
-以下脚本与架构守卫共用 `.agents/aemeath.json` 注册，但**不是**架构守卫；列出供完整理解编排。
 
 ### reject-main-edit.sh（PreToolUse）
 
 - **触发**：`PreToolUse` 钩子，`Edit` / `Write` 工具。
-- **行为**：
-  1. 仅对 `Edit` / `Write` 生效，其他工具直接放行；
-  2. 解析 `git rev-parse --show-toplevel`，项目外文件放行；
-  3. 用 git 原生检测（`git rev-parse --absolute-git-dir` vs `--git-common-dir`）判断是否在 worktree 中，worktree 放行；
-  4. 否则输出 "Edit/Write rejected: 在 main 工作区直接修改" 错误并以 exit 2 阻断。
-- **设计意图**：强制 [AGENTS.md](../../../AGENTS.md) §Git 工作流——所有代码 / 文档 / 配置修改都在独立 git worktree 中执行。
+- **行为**：仅对 `Edit` / `Write` 生效；项目外文件放行；worktree 内放行；主工作区直接修改输出错误并 exit 2 阻断。
+- **设计意图**：强制根指令的 Git 工作流——所有代码 / 文档 / 配置修改都在独立 git worktree 中执行。
 
 ### check-agent-stop.sh（Stop）
 
-- **触发**：`.agents/aemeath.json` 的 `Stop` 钩子（无 matcher）。
-- **行为**：只转发到 `check-architecture-guards.sh --fast`；不运行任何 Cargo-backed 守卫或 crate 测试。
-- **设计意图**：保留会话结束时的即时架构反馈，同时把冷启动和重复编译成本收敛到一次 pre-push。
+- **触发**：`.agents/aemeath.json` 的 `Stop` 钩子。
+- **行为**：只转发到 `check-architecture-guards.sh --fast`（引擎结构类规则 + legacy fast 段，秒级）。
+- **设计意图**：会话结束时的即时架构反馈，重检查（full 档、逐包测试）收敛到 pre-push。
 
 ### xtask test-runner（pre-push）
 
-- **触发**：`.cargo/hooks/pre-push` 执行 `cargo run --quiet -p xtask -- test-runner`，且仅在完整架构守卫通过后执行。实现：`tools/xtask/src/test_runner.rs`。
+- **触发**：`.cargo/hooks/pre-push` 执行 `cargo run --quiet -p xtask -- test-runner`，仅在完整架构守卫通过后执行。实现：`tools/xtask/src/test_runner.rs`。
 - **行为**：
-  1. 清除 Git Hook 注入的 repository-local 环境变量，避免 `GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` 等污染 Cargo 测试中的临时仓库；
-  2. 设置 `CARGO_TARGET_DIR=target/hook-tests`（未显式指定时；隔离各 checkout 的 cargo 元数据，避免 stale path-dep 缓存）；
+  1. 清除 Git Hook 注入的 repository-local 环境变量，避免 `GIT_DIR` / `GIT_WORK_TREE` 等污染 Cargo 测试中的临时仓库；
+  2. 设置 `CARGO_TARGET_DIR=target/hook-tests`（未显式指定时；隔离各 checkout 的 cargo 元数据）；
   3. 对包矩阵顺序跑 `cargo test`（默认 `--lib`；`composition` 跑 `--tests`，`cli` 跑 `--bin aemeath`）；
-  4. 每个包默认最多运行 180 秒，可用 `AEMEATH_UNIT_TEST_TIMEOUT_SECS` 调整；超时经独立进程组 TERM→KILL 收割，输出包名与上限并返回 124；
-  5. 任一包超时或测试失败后立即退出（fail-fast），exit code 原样传播，**NEVER** 继续执行后续包；
+  4. 每包默认最多 180 秒（`AEMEATH_UNIT_TEST_TIMEOUT_SECS` 可调）；超时经独立进程组 TERM→KILL 收割并返回 124；
+  5. 任一包失败 fail-fast，exit code 原样传播；
   6. 包日志写入 `<CARGO_TARGET_DIR>/hook-logs/<package>.log`，失败时打印错误摘要（前 40 行）。
 - **回归测试**：`tools/xtask/tests/test_runner.rs`（fake cargo PATH stub：超时收割、exit 码传播、git env 净化、包矩阵断言）。
-- **被测包**：`share, runtime, project, policy, context, provider, tools, storage, hook, audit, composition, cli`（矩阵常量 `PACKAGE_GATES`）。
 
 ## 维护说明
 
-- **新增守卫**：在 `.agents/hooks/` 添加 `check-<name>.sh`，在 `check-architecture-guards.sh` 的唯一编排表中登记 profile 与调用顺序，并在本文档新增一节。默认无 Cargo 的纯静态检查进入 `fast`；调用 Cargo、网络或完整测试的检查仅进入 `full`。
-- **调整白名单**：直接修改脚本中常量；**MUST** 在同一 PR 中同步本文档对应小节。
-- **清理 stale exception**：脚本自检会提示"exception list is stale"——按提示删除未命中的精确路径。
-- **冲突解决**：本文档与脚本不一致时，**以脚本为准**——脚本是运行时真相源；本文档跟随脚本迁移。
+- **新增约束**：优先判断能否类型化（编译期事实）；否则在 registry `rules` 加一行数据（复用现有断言器），引擎自动发现执行。确需新断言器时在 `guards_rules.rs` 实现并配正反例单测。**NEVER** 新增 `.agents/hooks/check-*.sh` 脚本。
+- **新增豁免**：写入规则的 `exclusions` 并同步下调 `exclusion_baseline`（基线是收缩契约，只降不升）；裸豁免会被元守卫拒绝。
+- **退役规则**：规则 id 保留在修改历史，**NEVER** 复用；防复活需求登记 `retired_symbols`（纯数据，复活归 review），不设文本黑名单。
+- **文档对账**：本文档与 `AGENTS.md` 引用规则 id 时使用反引号完整 id（如 `pattern.all.no-inline-test-modules`），元守卫校验引用必须存在于 registry。
+- **冲突解决**：本文档与 registry/引擎不一致时，**以 registry 与引擎代码为准**——它们是运行时真相源；本文档跟随实现迁移。
 
 ## 相关文档
 
-- 系统级代码组织规范：[../01-system/06-code-organization.md](../01-system/06-code-organization.md)
-- 依赖规则与铁律：[../01-system/05-dependency-rules.md](../01-system/05-dependency-rules.md)
-- Current → Target 迁移跟踪：[migration-governance.md](03-migration-governance.md)
-- 仓库级工作约束：[../../../AGENTS.md](../../../AGENTS.md)
+- [架构守卫收敛判据清单（执行记录）](../../snapshot/specs/guard-consolidation-matrix.md)：90 脚本 → 引擎的逐条消解判据与批次进度。
+- [依赖规则](../01-system/05-dependency-rules.md)：R8 同 crate Hexagonal 层内依赖方向（`layer_order` 断言器的规则语义来源）。
+- [代码组织](../01-system/06-code-organization.md)：Hexagonal crate 内部默认与 façade 约定。
+- [Migration Governance](03-migration-governance.md)：迁移例外、责任与退出条件。
+- [测试与覆盖](04-testing-and-coverage.md)：测试分层与守卫在其中的位置。
 
 ## 修改历史
 
-| 日期 | 变更 | 关联 |
-|---|---|---|
-| 2026-08-09 | #932 新增 `check-cost-tracker-retirement.sh` Target policy 与八类负向探针，锁定 Runtime Pricing/Cost、legacy history path、SDK/Runtime/TUI Cost surface 和 Storage Cost namespace 零引用；不接触用户旧文件，迁移债务保持不变 | [#932](https://github.com/rushsinging/aemeath/issues/932) |
-| 2026-08-04 | #1521 cola-layer-purity 守卫从 xtask 移植为 perl 单进程核心（Stop Hook fast 瓶颈 40~80s → 0.22s）；退役 xtask `cola-layer-purity` / `run-test` / `changed-lines` 子命令与 `flaky.rs` / `changed_lines.rs`（净删 1042 行）；清理 §5 stale `LAYER_MIGRATION_EXCEPTIONS` 白名单表（tools business 目录已不存在） | [#1521](https://github.com/rushsinging/aemeath/issues/1521) |
-| 2026-08-04 | #1399 退役 Runtime 旧容器、`ChatLoopContext` 参数袋、Runtime-owned TUI launch adapter 与 Tokio cancellation adapter；具体 SDK ingress/egress 构造归 Runtime adapter façade并由 Composition 注入；`RUNTIME_LAYER_MIGRATION_EXCEPTIONS` 清零，registry migration debt 收敛为 repository 1 / Runtime 0 / TUI 1；Runtime capability Guard 新增旧符号与 application→adapters 反向依赖禁入 | [#1399](https://github.com/rushsinging/aemeath/issues/1399) |
-| 2026-07-17 | 登记 #983 的 AtomicDataset crate-root public façade；因跨 crate Memory 消费 deferred 至 #896，不提前修改 `ROOT_ACCESS_ALLOW.storage`，且 #983 无 Guard exception / allowlist 净增 | [#983](https://github.com/rushsinging/aemeath/issues/983) |
-| 2026-07-17 | #903 收紧 `check-provider-pull-stream.sh`：Runtime/Context 的生产代码与测试替身统一禁止跨 crate 使用 legacy sink；同时为 Stop 单 crate 测试增加 180 秒默认超时、进程组回收与失败快速退出，避免单 crate 卡住整个 Hook | [#903](https://github.com/rushsinging/aemeath/issues/903) |
-| 2026-07-16 | 新增 `check-provider-http-attempt.sh`（§6c）：锁定 #1033 单 attempt 机械收敛（send/cancel/status 只能经 crate-private `HttpAttemptExecutor`、HTTP/network 诊断日志 API 仅限 `http_attempt.rs` + `error_log.rs`）；串行守卫总数由 25 增至 26（此前 §6a `check-provider-invocation-scope.sh` 已计入，故基数为 25 而非 24） | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
-| 2026-07-16 | 文档审查修正：补登记此前文档从未登记、但脚本编排一直包含的 `check-run-control-boundary.sh`（新增 §23，原 §23/§24 顺延为 §24/§25）；同时收紧 `check-provider-http-attempt.sh` 扫描范围至整个 `agent/features/provider/src`（非仅 `adapters/`）、修复 `strip_test_tail` 首个 `#[cfg(test)]` 盲截尾问题、新增 `.text()/.json()/.bytes()/.chunk()` 跨行 body 读取绕过检测；串行守卫总数由 26 更正为 27，与 `check-architecture-guards.sh` 实际调用数一致 | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
-| 2026-07-14 | 将固定层级检查重分类为迁移期守卫，精确记录按测试路径跳过文件及普通文件内 `#[cfg(test)]` block 仍受扫描的运行时语义，并将覆盖门槛、实施状态、责任与退出证据收口到 Migration Governance | [#972](https://github.com/rushsinging/aemeath/issues/972) |
-| 2026-07-17 | #1385 退役 `migration.runtime.shared-adapter-bridge`：删除 `agent/features/runtime/src/adapters/runtime.rs`（仅剩 4 行注释、零 `share::adapter` 引用）、移除 `adapters.rs` mod 声明、清退 `check-forbidden-imports.sh` 例外集合/stale 自检/`is_runtime_adapter_migration_path` 函数与 `guard-registry` stable-id 引用、从 registry 删除对应 entry；迁移债务预算 repository 5→4、Runtime 4→3；§8 白名单表移除，白名单预算归零 | [#1385](https://github.com/rushsinging/aemeath/issues/1385) |
-
-### Compact continuation checkpoint ownership
-
-`context.compact-continuation-checkpoint` 由 Context 拥有。Context 可在领域 normalizer 内按分区和行执行预算收敛，但不得通过 head/tail slicing 将 previous checkpoint 的任一端当作 authoritative continuation。Runtime 只能逐字消费 `ContextWindow`，不得持有 `active_summary`/continuation backing，也不得拼装 checkpoint 标题。Guard 提供 `--self-test`，以机械截断、Runtime 第二 owner、Runtime 标题拼装为负例，以 Context normalizer 与 Runtime `ContextWindow` 消费为正例；它与 shared-run-loop 的 owner 边界互补。
+| 日期 | 变更 |
+|---|---|
+| 2026-09-29 | 终态重写：守卫体系收敛为「xtask guard 引擎 + registry 数据驱动 + 薄壳编排」后的全量改写；原 90 个脚本的逐条归宿见判据清单文档；执行链路、断言器目录、数据区、能力边界与维护流程按终态重述。 |
+| 更早 | 脚本时代的逐守卫演进记录已随重写归档（历史版本见 git 记录）。 |

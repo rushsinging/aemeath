@@ -250,11 +250,11 @@ src/
 | Audit Fact 与诊断路由隔离 | L0/L3 | `audit_facts_have_no_diagnostic_route`、`audit_facts_are_forbidden_from_diagnostic_catalog`、target guard | 旧 target/file 被拒绝，Audit 运行诊断使用独立 target/file |
 | File/Stderr output mode 与 emergency 行为 | L2/L4 | `adapters/file_sink_tests.rs`、CLI `args.rs` output mapping tests | File 模式写 `emergency.log` 且不污染 TUI；no-TUI verbose 保留 stderr |
 | sink degrade、5 秒惰性恢复、rotation、retention 与跨 sink 隔离 | L2/L3 | `adapters/file_sink_fault_tests.rs`、`adapters/lifecycle_tests.rs` | 注入 clock/file ops 覆盖完整故障矩阵，无短 sleep |
-| ConfigSnapshot → LoggingSettings → Composition 唯一初始化 | L0/L2 | `domain/settings_tests.rs`、Composition/Runtime 定向测试、`check-logging-settings-injection.sh` | 无 env 旁路，Runtime 不装配 Logging |
-| owner-aware target、scope-local context、production reachability | L0 | 三个 Logging Guard、`check-production-reachability.sh`、workspace clippy | 正反向规则与生产可达性由总架构门禁执行 |
+| ConfigSnapshot → LoggingSettings → Composition 唯一初始化 | L0/L2 | `domain/settings_tests.rs`、Composition/Runtime 定向测试、引擎规则 `pattern.logging.no-env-read` 与 `pattern.runtime.no-logging-assembly` | 无 env 旁路，Runtime 不装配 Logging |
+| owner-aware target、scope-local context、production reachability | L0 | `cargo test -p logging routing_guard`、`xtask source-guard`、workspace clippy | 正反向规则与生产可达性由总架构门禁执行 |
 | 真实网络、PTY、发布资产 | L5 | 不适用 | Logging 机制可由注入 seam 和 CLI/TUI 场景确定性覆盖，不新增易 flaky smoke |
 
-#1066 审查基线：测试外置后的 Logging 生产源码口径为 line 86.82%、region 85.81%、function 86.75%（外置前测试与生产同文件的混合口径为 88.02% / 87.44% / 87.80%，不可直接横向比较）；百分比只作为风险信号，最终结论以上述行为矩阵、fault matrix 与跨层证据为准。Logging 自身的历史内嵌测试已迁到同级 `*_tests.rs`。审查同时发现全仓 `check-no-inline-tests.sh` 检测器失效及大量跨 crate 存量，由 [#1240](https://github.com/rushsinging/aemeath/issues/1240) 独立承接，不把全仓迁移混入本模块验收。首次 `cargo test --workspace` 失败于与 Logging 无关的 Runtime canonical tool name 旧断言，已有 [#1238](https://github.com/rushsinging/aemeath/issues/1238) / PR #1242 承接；本审查保留首次失败，不以重跑覆盖。
+#1066 审查基线：测试外置后的 Logging 生产源码口径为 line 86.82%、region 85.81%、function 86.75%（外置前测试与生产同文件的混合口径为 88.02% / 87.44% / 87.80%，不可直接横向比较）；百分比只作为风险信号，最终结论以上述行为矩阵、fault matrix 与跨层证据为准。Logging 自身的历史内嵌测试已迁到同级 `*_tests.rs`。审查同时发现全仓内联测试检测器失效及大量跨 crate 存量，由独立跟踪承接，不把全仓迁移混入本模块验收（现由引擎规则 `pattern.all.no-inline-test-modules` 锁定）。首次 `cargo test --workspace` 失败于与 Logging 无关的 Runtime canonical tool name 旧断言，已有独立跟踪承接；本审查保留首次失败，不以重跑覆盖。
 
 ## 12. 相关文档
 

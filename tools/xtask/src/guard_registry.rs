@@ -158,6 +158,7 @@ pub fn check_workspace(root: &Path, report_output: Option<&Path>) -> Result<Regi
     validate_tracking_issues(root, &registry)?;
     validate_registry_references(root, &registry)?;
     validate_script_exclusions(root, &registry)?;
+    validate_doc_rule_references(root, &registry)?;
     if let Some(path) = report_output {
         fs::write(path, report.render())
             .with_context(|| format!("写入 {} 失败", path.display()))?;
@@ -587,4 +588,93 @@ fn collect_scripts(directory: &Path) -> Result<Vec<PathBuf>> {
         }
     }
     Ok(scripts)
+}
+
+/// 文档对账：AGENTS.md 与架构守卫设计文档中反引号包裹的规则 id
+/// （`pattern.all.no-inline-test-modules` 形态）必须存在于 registry。
+/// 族模式（含 `<crate>` 等 `<...>` 占位段）按前缀通配校验，要求至少命中一条。
+/// 纯数字段 token（如版本号 `v0.1.0`）与文件路径不构成候选。
+fn validate_doc_rule_references(root: &Path, registry: &Registry) -> Result<()> {
+    let mut valid_ids: BTreeSet<&str> = BTreeSet::new();
+    for rule in &registry.rules {
+        valid_ids.insert(rule.id.as_str());
+    }
+    for entry in &registry.entries {
+        valid_ids.insert(entry.id.as_str());
+    }
+    for symbol in &registry.construction_symbols {
+        valid_ids.insert(symbol.id.as_str());
+    }
+
+    let documents = [
+        root.join("AGENTS.md"),
+        root.join("docs/design/03-engineering/01-architecture-guards.md"),
+    ];
+    let mut violations = Vec::new();
+    for document in &documents {
+        let Ok(content) = fs::read_to_string(document) else {
+            continue;
+        };
+        let relative = document
+            .strip_prefix(root)
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| document.display().to_string());
+        for candidate in extract_rule_id_candidates(&content) {
+            if candidate.contains('<') {
+                // 族模式：占位段替换为通配前缀校验。
+                let prefix = candidate.split('<').next().unwrap_or("");
+                if !valid_ids
+                    .iter()
+                    .any(|id| id.starts_with(prefix.trim_end_matches('.')))
+                {
+                    violations.push(format!(
+                        "{relative}: 规则族 `{candidate}` 在 registry 中无任何匹配"
+                    ));
+                }
+            } else if !valid_ids.contains(candidate.as_str()) {
+                violations.push(format!(
+                    "{relative}: 引用的规则 id `{candidate}` 不在 registry（rules/entries/construction_symbols）中"
+                ));
+            }
+        }
+    }
+    if violations.is_empty() {
+        Ok(())
+    } else {
+        anyhow::bail!(violations.join("\n"))
+    }
+}
+
+/// 提取反引号包裹的规则 id 候选：至少三段点号分隔、每段小写字母开头
+/// （排除版本号、文件路径与蛇形单段名）。
+fn extract_rule_id_candidates(content: &str) -> Vec<String> {
+    let mut candidates = Vec::new();
+    let mut rest = content;
+    while let Some(start) = rest.find('`') {
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('`') else {
+            break;
+        };
+        let token = &after[..end];
+        rest = &after[end + 1..];
+        if token.contains('/') || token.contains("::") || token.contains(' ') {
+            continue;
+        }
+        let segments: Vec<&str> = token.split('.').collect();
+        let segment_valid = |segment: &str| {
+            let segment = segment.trim_matches(|c| c == '<' || c == '>');
+            !segment.is_empty()
+                && segment
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_lowercase())
+                && segment
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+        };
+        if segments.len() >= 3 && segments.iter().all(|s| segment_valid(s)) {
+            candidates.push(token.to_owned());
+        }
+    }
+    candidates
 }

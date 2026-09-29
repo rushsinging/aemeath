@@ -79,7 +79,7 @@ AEMEATH_LOG_LEVEL=aemeath:tui=debug,aemeath:agent:runtime=trace cargo run
 | `specs/3.13-bug-feature-tracking.md` | 无路径触发 | 任何 bug 修复或 feature 实现；操作 GitHub Issues（迁移自 `docs/bug/`、`docs/snapshot/`） |
 | `specs/3.14-workflow.md` | 无路径触发 | 任何 bug 修复 / feature 实现 / PR 创建 / 发版 / Hook 阻断处理；含项目结构、运行时目录、Git 工作流、Milestone 管理 |
 | `specs/3.15-logging.md` | `packages/global/logging/**`、全仓库 `log::xxx!` 调用点 —— 日志 target 命名、14 字段 schema、event_type 枚举、级别策略 | 新增/修改 log 调用、改日志路由、改 schema 字段、新增日志文件 |
-| `docs/design/03-engineering/01-architecture-guards.md` | `.agents/aemeath.json`、`.agents/hooks/**` —— 架构守卫注册表与 17 个 guard 脚本 | 新增 / 调整守卫、白名单、Hook 编排；Stop 时 `check-architecture-guards.sh` 失败需排查；改 `docs/design/03-engineering/01-architecture-guards.md` 本身 |
+| `docs/design/03-engineering/01-architecture-guards.md` | `.agents/aemeath.json`、`.agents/hooks/**`、`tools/xtask/src/guards*.rs`、`.agents/architecture-guard-registry.json` —— 架构守卫：`xtask guard` 引擎 + registry 数据驱动 + 薄壳编排 | 新增 / 调整守卫（registry 加规则数据，NEVER 新增脚本）、白名单、Hook 编排；Stop 时 `check-architecture-guards.sh` 失败需排查；改 `docs/design/03-engineering/01-architecture-guards.md` 本身 |
 
 > feature crate 内部统一采用 Hexagonal 分层（`domain ← application ← ports ← adapters`，R8）；依赖方向与代码组织真相源见 `docs/design/01-system/05-dependency-rules.md` 与 `06-code-organization.md`。
 

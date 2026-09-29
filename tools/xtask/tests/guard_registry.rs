@@ -352,3 +352,80 @@ fn blacklist_mechanism_requires_tracking_issue() {
         xtask::guard_registry::validate_str(&valid).unwrap();
     }
 }
+
+fn registry_with_rules(rules: &str) -> String {
+    format!(
+        r#"{{
+  "version": 1,
+  "budgets": {{"repository_migration_debt": 0, "modules": {{}}}},
+  "entries": [],
+  "rules": [{rules}],
+  "retired_symbols": []
+}}"#
+    )
+}
+
+fn sample_rule(id: &str) -> String {
+    format!(
+        r#"{{
+  "id": "{id}",
+  "assertion": "pattern_exclusion",
+  "scope": {{"kind": "path_prefix", "value": "agent"}},
+  "forbidden_patterns": ["Legacy"],
+  "exclusions": [],
+  "reason": "fixture rule",
+  "profile": "full"
+}}"#
+    )
+}
+
+#[test]
+fn doc_references_accept_registered_rule_ids() {
+    let temp = tempfile::tempdir().unwrap();
+    write(
+        &temp.path().join(".agents/architecture-guard-registry.json"),
+        &registry_with_rules(&sample_rule("pattern.all.no-inline-test-modules")),
+    );
+    write(
+        &temp.path().join("AGENTS.md"),
+        "测试分离由 `pattern.all.no-inline-test-modules` 守卫；版本号 v0.1.0 不是规则 id。\n",
+    );
+
+    let report = xtask::guard_registry::check_workspace(temp.path(), None).unwrap();
+    assert_eq!(report.migration_debt, 0);
+}
+
+#[test]
+fn doc_references_reject_unknown_rule_ids() {
+    let temp = tempfile::tempdir().unwrap();
+    write(
+        &temp.path().join(".agents/architecture-guard-registry.json"),
+        &registry_with_rules(&sample_rule("pattern.all.no-inline-test-modules")),
+    );
+    write(
+        &temp.path().join("AGENTS.md"),
+        "引用了不存在的 `pattern.all.no-such-rule`。\n",
+    );
+
+    let error = xtask::guard_registry::check_workspace(temp.path(), None).unwrap_err();
+    assert!(error.to_string().contains("pattern.all.no-such-rule"));
+    assert!(error.to_string().contains("AGENTS.md"));
+}
+
+#[test]
+fn doc_references_accept_family_pattern_with_placeholder() {
+    let temp = tempfile::tempdir().unwrap();
+    write(
+        &temp.path().join(".agents/architecture-guard-registry.json"),
+        &registry_with_rules(&sample_rule("facade.runtime.root-exports")),
+    );
+    write(
+        &temp
+            .path()
+            .join("docs/design/03-engineering/01-architecture-guards.md"),
+        "窄 façade 规则族 `facade.<crate>.root-exports` 逐 crate 登记。\n",
+    );
+
+    let report = xtask::guard_registry::check_workspace(temp.path(), None).unwrap();
+    assert_eq!(report.migration_debt, 0);
+}

@@ -520,7 +520,7 @@ Deny: arbitrary absolute PathBuf crossing Storage PL
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
-| 2026-07-21 | #1647 收口 crate-root 唯一稳定公开面：物理删除 `storage::api` 过渡 façade（27 文件 / 61 行消费者全部迁至 crate root）；`FileSystemBlobAdapter` / `FileSystemDatasetAdapter` 退出公开面改为 crate 私有，Composition 经 `file_system_blob` / `file_system_dataset` 构造函数装配；`check-crate-api-boundary.sh` 的 `ROOT_ACCESS_ALLOW.storage` 与 lib.rs 公开面 exact-match，`storage::api` 与跨 crate adapter 访问被硬拒，stale 的 `memory_base_dir` / `project_file_name*` 一并移出 | [#1647](https://github.com/rushsinging/aemeath/issues/1647) |
+| 2026-07-21 | 收口 crate-root 唯一稳定公开面：物理删除 `storage::api` 过渡 façade（27 文件 / 61 行消费者全部迁至 crate root）；`FileSystemBlobAdapter` / `FileSystemDatasetAdapter` 退出公开面改为 crate 私有，Composition 经 `file_system_blob` / `file_system_dataset` 构造函数装配；引擎规则 `facade.storage.root-exports` 与 lib.rs 公开面 exact-match，`storage::api` 与跨 crate adapter 访问被硬拒，stale 的 `memory_base_dir` / `project_file_name*` 一并移出 | 治理记录 |
 | 2026-07-20 | #1057 完成测试完整性审查：补齐 SafeStorageRoot 路径安全契约、Session AtomicBlob 相邻映射、owning-layer 外置与跨进程锁确定性；公开面双 façade 与 `list_primary` 文档—代码漂移由 #1263 承接并阻断父项关闭 | [#1057](https://github.com/rushsinging/aemeath/issues/1057)、[#1263](https://github.com/rushsinging/aemeath/issues/1263) |
 | 2026-07-20 | #1263 将已实现的 `AtomicBlobPort::list_primary(namespace)` 与 `StorageEntry` 对齐 Target：只枚举 namespace 顶层 primary regular blob，隐藏协议文件、symlink 与嵌套目录；Session 管理以此 OHS 列表，不把 `StorageKey` 放宽为目录 prefix | [#1263](https://github.com/rushsinging/aemeath/issues/1263) |
 | 2026-07-17 | #928 发布 `SafeStorageRoot` / `SafeStorageDir` capability-root 路径安全 PL，并冻结其只负责 no-follow 打开安全句柄；Audit 自有 append/write/sync/read/list 语义，Storage 不新增 AppendLog OHS | [#928](https://github.com/rushsinging/aemeath/issues/928) |

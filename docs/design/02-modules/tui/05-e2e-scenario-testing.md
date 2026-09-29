@@ -292,7 +292,7 @@ streaming 每个 chunk 不建快照。流式顺序由语义断言覆盖，屏幕
 4. 接受的 `.snap` 与对应代码变更在同一 PR 提交；
 5. 拒绝并删除无意变化。
 
-CI 使用 `CI=1` 与 `INSTA_UPDATE=no`，并检查不存在 `.snap.new` 和 `.pending-snap`。CI **NEVER** 自动接受或重写快照。#1017 当前将该行为落为本地/离线 `scripts/check-tui-snapshots.sh`；是否进入在线 PR CI 由 #1018 按耗时决策。
+CI 使用 `CI=1` 与 `INSTA_UPDATE=no`，并检查不存在 `.snap.new` 和 `.pending-snap`。CI **NEVER** 自动接受或重写快照。该行为已落为本地/离线 `scripts/check-tui-snapshots.sh`；是否进入在线 PR CI 按耗时另行决策。
 
 ## 7. 确定性约束
 
@@ -391,7 +391,7 @@ apps/cli/src/tui/app/scenario_tests/
 5. CLI 全量测试与 clippy；
 6. 独立的少量 PTY smoke test。
 
-P0/P1、快照草稿检查和 PTY smoke 均先提供本地/离线入口并记录冷/热耗时。#1050 最终落地 `scripts/check-slow-test-matrix.sh`：host-native fmt/clippy/workspace/P0/P1/PTY 为必跑，跨 target build 仅在显式 `AEMEATH_MATRIX_CROSS=1` 且 toolchain/linker 可用时运行；不新增普通 PR workflow。
+P0/P1、快照草稿检查和 PTY smoke 均先提供本地/离线入口并记录冷/热耗时。已落地 `scripts/check-slow-test-matrix.sh`：host-native fmt/clippy/workspace/P0/P1/PTY 为必跑，跨 target build 仅在显式 `AEMEATH_MATRIX_CROSS=1` 且 toolchain/linker 可用时运行；不新增普通 PR workflow。
 
 ### 10.2 设计验收
 
