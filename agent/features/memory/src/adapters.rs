@@ -718,11 +718,7 @@ impl MemoryPort for InMemoryMemory {
             .filter(|entry| is_injection_eligible(entry, query.now))
             .cloned()
             .collect::<Vec<_>>();
-        entries.sort_by(|left, right| {
-            injection_score(right, query.now)
-                .cmp(&injection_score(left, query.now))
-                .then_with(|| left.id.cmp(&right.id))
-        });
+        order_for_injection(&mut entries, query.now);
         entries.truncate(query.limit);
         MemorySearchResult {
             mode: MemoryRetrievalMode::InjectionPriority,

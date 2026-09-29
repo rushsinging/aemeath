@@ -8,6 +8,10 @@ use memory::api::{MemoryPort, MemoryQuery};
 use crate::domain::{ContextRequestData, SystemBlock};
 use crate::ports::{ContextMemorySource, MemoryMaterialization};
 
+/// 注入候选的检索窗口上限。token 预算才是真正的约束（#1777 移除了条数
+/// 上限），这里只保证排序与让位顺序有足够素材。
+const INJECTION_CANDIDATE_LIMIT: usize = 200;
+
 /// Read-only bridge from the Memory BC retrieval port into Context system blocks.
 pub(crate) struct MemoryRetrieveAdapter {
     memory: Arc<dyn MemoryPort>,
@@ -19,16 +23,24 @@ impl MemoryRetrieveAdapter {
         Self::with_clock(memory, Arc::new(system_now))
     }
 
+    /// 按窗口比例物化注入内容。`context_size` 来自当轮 request——预算随窗口
+    /// 缩放，大窗口不再浪费空间、小窗口也不会超出比例（#1777）。
     pub async fn materialize_config(
         &self,
         config: &share::config::MemoryConfig,
+        context_size: usize,
     ) -> Result<MemoryMaterialization, String> {
-        if !config.enabled || config.inject_count == 0 || config.inject_token_budget == 0 {
+        let token_budget = match config.inject_token_budget {
+            Some(0) => return Ok(empty_materialization()),
+            Some(fixed) => fixed,
+            None => crate::domain::token_budget::injection_token_budget(context_size),
+        };
+        if !config.enabled || token_budget == 0 {
             return Ok(empty_materialization());
         }
 
         let result = self.memory.retrieve_for_inject(&MemoryQuery {
-            limit: config.inject_count,
+            limit: INJECTION_CANDIDATE_LIMIT,
             layer: None,
             category: None,
             now: (self.now)(),
@@ -44,11 +56,10 @@ impl MemoryRetrieveAdapter {
             }
         }
 
-        let candidate_count = result.hits.len().min(config.inject_count);
-        let hits = take_ordered_prefix_within_budget(
-            result.hits.into_iter().take(config.inject_count),
-            config.inject_token_budget,
-        );
+        // 条数上限已移除（#1777）：token 预算本身就是上限。候选仍取一个
+        // 足够大的窗口，保证排序与让位顺序完整，截断交给预算。
+        let candidate_count = result.hits.len();
+        let hits = take_with_overlay_within_budget(result.hits, token_budget);
         let estimated_tokens = hits
             .iter()
             .map(|hit| crate::domain::token_budget::estimate_tokens(&render_memory_line(hit)))
@@ -60,13 +71,13 @@ impl MemoryRetrieveAdapter {
         let project_hits = hits.len().saturating_sub(global_hits);
         log::debug!(
             target: crate::LOG_TARGET,
-            "memory_injection_materialized candidates={} injected={} estimated_tokens={} dropped={} count_limit={} token_budget={} global_hits={} project_hits={}",
+            "memory_injection_materialized candidates={} injected={} estimated_tokens={} dropped={} token_budget={} context_size={} global_hits={} project_hits={}",
             candidate_count,
             hits.len(),
             estimated_tokens,
             candidate_count.saturating_sub(hits.len()),
-            config.inject_count,
-            config.inject_token_budget,
+            token_budget,
+            context_size,
             global_hits,
             project_hits
         );
@@ -108,7 +119,7 @@ impl ContextMemorySource for MemoryRetrieveAdapter {
         &self,
         request: &ContextRequestData,
     ) -> Result<MemoryMaterialization, String> {
-        self.materialize_config(request.config_snapshot.memory())
+        self.materialize_config(request.config_snapshot.memory(), request.context_size)
             .await
     }
 }
@@ -136,6 +147,70 @@ fn take_ordered_prefix_within_budget(
         selected.push(hit);
     }
     selected
+}
+
+/// 覆盖式让位的注入填充（#1777）。
+///
+/// Memory 侧已把 `kind = Synthesized` 的结论排到全部普通条目之前，组内保持
+/// `injection_score` 顺序（不改分数，只改顺序）。这里做两段预算填充：
+///
+/// 1. 先填结论段；
+/// 2. 再用剩余预算填普通条目，但**跳过被已选结论覆盖的来源**。
+///
+/// 「已覆盖」在填充时计算（扫描已选结论的 `evidence`），不依赖任何写时标记。
+/// 关键性质：结论若在第一段就没挤进预算，它的来源在第二段照常参与——固定
+/// 降权系数会在这个场景误伤来源，让位因此必须是条件性的。
+fn take_with_overlay_within_budget(
+    hits: Vec<MemorySearchHit>,
+    token_budget: usize,
+) -> Vec<MemorySearchHit> {
+    let mut used_tokens = 0usize;
+    let mut selected = Vec::new();
+    let mut covered = std::collections::HashSet::new();
+
+    // 段一：结论（Memory 侧已排在前），超预算即停——被挤掉的结论不产生覆盖。
+    for hit in hits
+        .iter()
+        .filter(|hit| hit.entry.kind == memory::api::MemoryKind::Synthesized)
+        .cloned()
+    {
+        if !fill_within_budget(&hit, token_budget, &mut used_tokens, &mut covered) {
+            break;
+        }
+        selected.push(hit);
+    }
+    // 段二：其余条目，被已选结论覆盖的来源让位。
+    for hit in hits
+        .into_iter()
+        .filter(|hit| hit.entry.kind != memory::api::MemoryKind::Synthesized)
+    {
+        if covered.contains(&hit.entry.id) {
+            continue;
+        }
+        if !fill_within_budget(&hit, token_budget, &mut used_tokens, &mut covered) {
+            break;
+        }
+        selected.push(hit);
+    }
+    selected
+}
+
+/// 单条填充：预算够则计入并（若是结论）登记其覆盖的来源，返回是否入账。
+fn fill_within_budget(
+    hit: &MemorySearchHit,
+    token_budget: usize,
+    used_tokens: &mut usize,
+    covered: &mut std::collections::HashSet<memory::api::MemoryId>,
+) -> bool {
+    let tokens = crate::domain::token_budget::estimate_tokens(&render_memory_line(&hit));
+    if used_tokens.saturating_add(tokens) > token_budget {
+        return false;
+    }
+    *used_tokens = used_tokens.saturating_add(tokens);
+    if hit.entry.kind == memory::api::MemoryKind::Synthesized {
+        covered.extend(hit.entry.evidence.iter().copied());
+    }
+    true
 }
 
 fn render_memory_line(hit: &MemorySearchHit) -> String {
@@ -319,14 +394,121 @@ mod tests {
         }
     }
 
-    fn request(
-        enabled: bool,
-        inject_count: usize,
-        inject_token_budget: usize,
-    ) -> ContextRequestData {
+    /// 归纳结论命中：携带 `evidence` 来源。
+    fn synthesized_hit(id: &str, content: &str, sources: Vec<MemoryId>) -> MemorySearchHit {
+        let mut hit = hit(id, MemoryCategory::Decision, content, false);
+        hit.entry.kind = memory::api::MemoryKind::Synthesized;
+        hit.entry.evidence = sources;
+        hit
+    }
+
+    #[test]
+    fn a_selected_conclusion_pushes_its_sources_out_of_the_injection() {
+        let source_a = MemoryId::new("01890f3c-7c00-7000-8000-0000000000a1").unwrap();
+        let source_b = MemoryId::new("01890f3c-7c00-7000-8000-0000000000a2").unwrap();
+        let conclusion_id = MemoryId::new("01890f3c-7c00-7000-8000-0000000000b1").unwrap();
+        let hits = vec![
+            synthesized_hit(
+                "01890f3c-7c00-7000-8000-0000000000b1",
+                "release ownership is centralised",
+                vec![source_a, source_b],
+            ),
+            hit(
+                "01890f3c-7c00-7000-8000-0000000000a1",
+                MemoryCategory::Fact,
+                "a source fact",
+                false,
+            ),
+            hit(
+                "01890f3c-7c00-7000-8000-0000000000a2",
+                MemoryCategory::Fact,
+                "another source fact",
+                false,
+            ),
+        ];
+
+        let selected = take_with_overlay_within_budget(hits, 4_000);
+
+        assert_eq!(
+            selected.len(),
+            1,
+            "the conclusion takes the whole budget slot"
+        );
+        assert_eq!(selected[0].entry.id, conclusion_id);
+    }
+
+    #[test]
+    fn a_conclusion_that_loses_the_budget_leaves_its_sources_alone() {
+        let source = MemoryId::new("01890f3c-7c00-7000-8000-0000000000a1").unwrap();
+        let hits = vec![
+            synthesized_hit(
+                "01890f3c-7c00-7000-8000-0000000000b1",
+                "a conclusion long enough to blow a tiny budget on its own",
+                vec![source],
+            ),
+            hit(
+                "01890f3c-7c00-7000-8000-0000000000a1",
+                MemoryCategory::Fact,
+                "short source",
+                false,
+            ),
+        ];
+
+        let selected = take_with_overlay_within_budget(hits, 8);
+
+        assert!(
+            !selected
+                .iter()
+                .any(|hit| hit.entry.kind == memory::api::MemoryKind::Synthesized),
+            "the oversized conclusion does not fit"
+        );
+        assert_eq!(
+            selected.len(),
+            1,
+            "its source must still be injected — downweighting would punish it for nothing"
+        );
+        assert_eq!(selected[0].entry.id, source);
+    }
+
+    #[test]
+    fn an_uncovered_source_fills_the_budget_left_by_the_conclusion() {
+        let covered = MemoryId::new("01890f3c-7c00-7000-8000-0000000000a1").unwrap();
+        let other = MemoryId::new("01890f3c-7c00-7000-8000-0000000000a2").unwrap();
+        let hits = vec![
+            synthesized_hit(
+                "01890f3c-7c00-7000-8000-0000000000b1",
+                "release ownership is centralised",
+                vec![covered],
+            ),
+            hit(
+                "01890f3c-7c00-7000-8000-0000000000a1",
+                MemoryCategory::Fact,
+                "a covered source",
+                false,
+            ),
+            hit(
+                "01890f3c-7c00-7000-8000-0000000000a2",
+                MemoryCategory::Fact,
+                "an unrelated fact",
+                false,
+            ),
+        ];
+
+        let selected = take_with_overlay_within_budget(hits, 4_000);
+        let ids = selected.iter().map(|hit| hit.entry.id).collect::<Vec<_>>();
+
+        assert!(
+            ids.contains(&other),
+            "uncovered entries still get their share"
+        );
+        assert!(!ids.contains(&covered), "the covered source steps aside");
+    }
+
+    /// `inject_token_budget` 为 `None` 时走窗口比例（#1777）；传 `Some(n)`
+    /// 覆盖为固定预算（`Some(0)` 禁用）。
+    fn request(enabled: bool, inject_token_budget: Option<usize>) -> ContextRequestData {
         let mut config = Config::default();
         config.memory.enabled = enabled;
-        config.memory.inject_count = inject_count;
         config.memory.inject_token_budget = inject_token_budget;
         ContextRequestData {
             session_id: sdk::SessionId::new("session"),
@@ -350,8 +532,10 @@ mod tests {
         }
     }
 
+    /// #1777：条数上限移除后，只要预算允许，全部命中按序进入；截断只由
+    /// token 预算决定（见 `token_budget_keeps_only_the_ordered_prefix`）。
     #[tokio::test]
-    async fn preserves_hit_order_and_only_truncates_the_tail() {
+    async fn preserves_hit_order_within_the_budget() {
         let memory = Arc::new(FakeMemory::new(
             MemoryRetrievalMode::InjectionPriority,
             vec![
@@ -377,19 +561,21 @@ mod tests {
         ));
         let adapter = MemoryRetrieveAdapter::with_clock(memory.clone(), Arc::new(|| 4242));
 
-        let result = adapter.materialize(&request(true, 2, 300)).await.unwrap();
+        let result = adapter
+            .materialize(&request(true, Some(300)))
+            .await
+            .unwrap();
 
         assert_eq!(result.blocks.len(), 1);
         assert_eq!(
             result.blocks[0].content,
-            "<memory-context>\n- [Fact] first\n- ★ [Decision] second\n</memory-context>"
+            "<memory-context>\n- [Fact] first\n- ★ [Decision] second\n- [Pattern] third\n</memory-context>"
         );
-        assert!(!result.blocks[0].content.contains("third"));
         assert_ne!(result.revision, 0);
         assert_eq!(
             memory.queries.lock().unwrap().as_slice(),
             &[MemoryQuery {
-                limit: 2,
+                limit: super::INJECTION_CANDIDATE_LIMIT,
                 layer: None,
                 category: None,
                 now: 4242,
@@ -407,7 +593,7 @@ mod tests {
         let adapter = MemoryRetrieveAdapter::with_clock(memory, Arc::new(|| 99));
 
         let block = &adapter
-            .materialize(&request(true, 5, 300))
+            .materialize(&request(true, Some(300)))
             .await
             .unwrap()
             .blocks[0];
@@ -431,7 +617,10 @@ mod tests {
         ));
         let adapter = MemoryRetrieveAdapter::with_clock(memory.clone(), Arc::new(|| 1));
 
-        let result = adapter.materialize(&request(false, 5, 300)).await.unwrap();
+        let result = adapter
+            .materialize(&request(false, Some(300)))
+            .await
+            .unwrap();
 
         assert!(result.blocks.is_empty());
         assert_eq!(result.revision, 0);
@@ -465,7 +654,7 @@ mod tests {
         ));
         let adapter = MemoryRetrieveAdapter::with_clock(memory, Arc::new(|| 1));
 
-        let result = adapter.materialize(&request(true, 3, 8)).await.unwrap();
+        let result = adapter.materialize(&request(true, Some(8))).await.unwrap();
         let content = &result.blocks[0].content;
 
         assert!(content.contains("short first"));
@@ -481,7 +670,7 @@ mod tests {
         ));
         let adapter = MemoryRetrieveAdapter::with_clock(memory.clone(), Arc::new(|| 1));
 
-        let result = adapter.materialize(&request(true, 5, 0)).await.unwrap();
+        let result = adapter.materialize(&request(true, Some(0))).await.unwrap();
 
         assert!(result.blocks.is_empty());
         assert!(memory.queries.lock().unwrap().is_empty());
@@ -494,7 +683,7 @@ mod tests {
             Arc::new(|| 1),
         );
         assert!(disabled
-            .materialize(&request(true, 5, 300))
+            .materialize(&request(true, Some(300)))
             .await
             .unwrap()
             .blocks
@@ -505,7 +694,7 @@ mod tests {
             Arc::new(|| 1),
         );
         let error = explicit
-            .materialize(&request(true, 5, 300))
+            .materialize(&request(true, Some(300)))
             .await
             .unwrap_err();
         assert!(error.contains("InjectionPriority"));

@@ -232,8 +232,8 @@ fn patch_for_update(
                     enabled: Some(config.enabled),
                     max_entries: Some(config.max_entries),
                     similarity_threshold: Some(config.similarity_threshold),
-                    inject_count: Some(config.inject_count),
-                    inject_token_budget: Some(config.inject_token_budget),
+                    inject_count: None,
+                    inject_token_budget: config.inject_token_budget,
                     reflection: Some(share::config::domain::merge::ReflectionConfigPatch {
                         enabled: Some(config.reflection.enabled),
                         interval_runs: Some(config.reflection.interval_runs),

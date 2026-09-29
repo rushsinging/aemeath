@@ -119,6 +119,14 @@ pub fn summary_budget(context_size: usize) -> usize {
     context_size / 20
 }
 
+/// 自动 Memory 注入的 token 预算：窗口的 2%（#1777）。
+///
+/// 取代旧的固定值——固定预算在大窗口浪费空间、在小窗口可能超支。2% 恰好
+/// 可用整数除法表达（`context_size / 50`）。
+pub fn injection_token_budget(context_size: usize) -> usize {
+    context_size / 50
+}
+
 /// Compact 保留 tail（recent messages）的 token 预算封顶占窗口的百分数（#1773）。
 ///
 /// 3% 刻意不用整数除法表达：`context_size / 33` 这类魔法除数会在 33 与 34

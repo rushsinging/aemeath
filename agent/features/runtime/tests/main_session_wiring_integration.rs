@@ -354,7 +354,7 @@ async fn cross_project_resume_keeps_bound_run_on_current_memory_config() {
     );
     std::fs::create_dir_all(temp.path().join("agents")).expect("create agents dir");
 
-    // Project A — wiring source, default memory config (enabled, inject_count=5).
+    // Project A — wiring source, default memory config (enabled, ratio budget).
     let (wiring, _workspace_a) = make_wiring_and_workspace(&temp).await;
 
     // Verify bootstrap defaults before any resume.
@@ -364,11 +364,11 @@ async fn cross_project_resume_keeps_bound_run_on_current_memory_config() {
         "project A default memory should be enabled"
     );
     assert_eq!(
-        bootstrap_memory.inject_count, 5,
-        "project A default inject_count should be 5"
+        bootstrap_memory.inject_token_budget, None,
+        "project A default injection budget is ratio-derived (#1777)"
     );
 
-    // Project B — resume target with disabled memory and inject_count=3.
+    // Project B — resume target with disabled memory and an explicit budget.
     let root_b = make_target_project(&temp);
     let workspace_b =
         project::wire_production_workspace(root_b.clone(), None).expect("wire workspace B");
@@ -381,7 +381,7 @@ async fn cross_project_resume_keeps_bound_run_on_current_memory_config() {
             .await
             .expect("bind before resume should succeed");
         assert!(bound.config().memory().enabled);
-        assert_eq!(bound.config().memory().inject_count, 5);
+        assert_eq!(bound.config().memory().inject_token_budget, None);
     }
 
     // Cross-project resume is rejected before Config/Memory switching.
@@ -396,16 +396,16 @@ async fn cross_project_resume_keeps_bound_run_on_current_memory_config() {
     let committed = wiring.committed_config();
     assert!(committed.memory().enabled, "memory must remain enabled");
     assert_eq!(
-        committed.memory().inject_count,
-        5,
-        "memory inject_count must remain on project A"
+        committed.memory().inject_token_budget,
+        None,
+        "the memory budget must remain on project A"
     );
     let bound = wiring
         .bind_main_run()
         .await
         .expect("bind after rejected resume should succeed");
     assert!(bound.config().memory().enabled);
-    assert_eq!(bound.config().memory().inject_count, 5);
+    assert_eq!(bound.config().memory().inject_token_budget, None);
 }
 
 // ─── Test 7: Cross-project resume preserves current Config/Memory ─────────
@@ -458,9 +458,9 @@ async fn cross_project_resume_keeps_current_model_and_memory() {
         "memory enabled state must remain on project A"
     );
     assert_eq!(
-        after.memory().inject_count,
-        before.memory().inject_count,
-        "memory inject_count must remain on project A"
+        after.memory().inject_token_budget,
+        before.memory().inject_token_budget,
+        "the memory injection budget must remain on project A"
     );
     assert_eq!(
         after.memory().reflection.interval_runs,

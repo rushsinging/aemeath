@@ -21,8 +21,8 @@ fn retrieve_for_inject(&self, query: &MemoryQuery) -> MemorySearchResult;
 
 - 跨 Global + Project 两层 active 条目合并。
 - 在评分前硬过滤被取代（M10）、outdated 与 TTL-expired；pinned **NEVER** 绕过 eligibility。
-- 对 eligible 集合按 `injection_score` 降序、完整 Memory ID 升序作为最终 tie-break。
-- 先取 query.limit 个候选；Context 再按 `inject_token_budget` 做有序前缀截断，不跳过超预算项继续选择后项。
+- 对 eligible 集合**先分组后排序**（#1777 覆盖式让位）：`kind = Synthesized` 的归纳结论排在全部普通条目之前，组内仍按 `injection_score` 降序、完整 Memory ID 升序。**不改分数，只改顺序**。
+- 先取 query.limit 个候选；Context 再按 token 预算做**两段填充**（见 §6.2），超预算时停止，不重排、不回填后项。
 - **不 touch、不落盘**——避免每轮注入导致排序漂移。
 
 **设计理由**：注入是每轮 LLM 调用都会发生的高频纯查询。它只读 open 时已验证的内存 state；访问统计若未来需要，必须另设显式、fallible mutation。
@@ -141,15 +141,42 @@ Memory BC 只输出"这些条目值得注入，格式如下"；Context Managemen
 
 ```rust
 struct MemoryConfig {
-    inject_count: usize,          // 默认 5；0 禁用
-    inject_token_budget: usize,   // 默认 300；0 禁用
+    /// None（默认）= 按窗口比例 `context_size / 50`（2%）；Some(0) 禁用；
+    /// Some(n) 为固定预算覆盖（#1777）。
+    inject_token_budget: Option<usize>,
 }
 ```
 
+- 条数上限 `inject_count` 已随比例化**移除**（#1777）：token 预算本身就是上限，再叠条数约束只会让「长条目被条数截断、短条目被预算截断」两种语义互相掩盖。旧配置中的 `inject_count` 被忽略而非报错。
 - 自动注入保持 query-independent `InjectionPriority`，显式 BM25 search 不改变其排序。
-- Context 按 Memory 顺序执行 count + token 双预算的前缀截断；超预算时停止，不重排、不回填后项。
-- `enabled=false`、`inject_count=0` 或 `inject_token_budget=0` 都不读取 Memory。
+- `enabled=false` 或预算为 0 都不读取 Memory。
 - User Message / Step query-aware retrieval 属 v0.2.0，当前不进入自动注入。
+
+## 6.2 覆盖式让位与注入冻结
+
+**填充算法**（#1777，预算紧而检索宽）：
+
+```text
+1. Memory 侧已把归纳结论排在前面（见 §1.1）
+2. Context 第一段填结论；超预算即停——被挤掉的结论**不产生任何覆盖标记**
+3. 第二段用剩余预算填普通条目，跳过被**已选结论**的 evidence 覆盖的来源
+```
+
+- 「已覆盖」在填充时扫描已选结论的 `evidence` 计算（`max_entries` 量级为微秒级），不引入 `synthesized_into` 反向指针。
+- **关键性质**：结论未入选时其来源照常参与——固定降权系数会在这个场景误伤来源（来源被降权却没换来结论入注），因此让位必须是条件性的。
+- 显式 `search` 中结论与来源**平等可见，都不让位**；反思输入两者都可见。
+
+**注入时机**（#1777）：
+
+```text
+Session 首次 build window  →  注入并冻结
+后续 build window          →  复用冻结内容（不重新检索）
+Compact 成功提交后         →  下一次 build window 重新检索并替换
+```
+
+- 记忆块属于可缓存 system prefix：每轮重新检索会让内容漂移，直接损害 provider 的 prompt cache 命中率。
+- 刷新点**只有 compact 成功提交**；`Skipped` 不刷新，reflect 完成也不刷新（只发提示）。
+- 冻结状态绑定 `session_id`：resume 切换到新 Session 视为该 Session 的首次注入；`clear_session` 释放冻结内容。
 
 ## 6.1 安全观测
 
@@ -168,6 +195,8 @@ struct MemoryConfig {
 | R5 | pinned 只在 eligible 集合中获得最高优先级 | pinned 不能绕过 superseded / outdated / TTL eligibility |
 | R7 | 被取代条目不参与注入但可显式检索并携带取代者 | M10 硬过滤；`superseded_by` 经 hit metadata 表达，关系由 apply 建立且无环（M9） |
 | R8 | 合并产物可追溯且指针不悬空 | M11：写入时校验 evidence 指向；合并 = 归档新条目 + 旧条目记指针；compact 不删除被引用条目 |
+| R9 | 结论入选时来源让位，未入选时来源照常 | 覆盖式让位：结论段优先填充，已选结论的 evidence 在第二段让位；不设降权系数、不设结论配额 |
+| R10 | 注入内容在 Session 内稳定 | 首次注入后冻结，仅 compact 成功提交后刷新；`injection_score` 的 query-independent 语义不被排序分组破坏 |
 | R6 | search 平分使用 search_tie_break_score | archived/outdated/TTL hit NEVER 调 injection_score |
 
 ## 8. 相关文档
@@ -187,5 +216,6 @@ struct MemoryConfig {
 | 2026-08-11 | 在单一 Tier 1 BM25 tokenizer 中加入连续 Han 字符 bigram，补齐中文短语与中英代码混排召回，不引入词典或第二检索路径 | Chinese lexical retrieval |
 | 2026-07-26 | 落地共享确定性 BM25 词法排序与 typed Memory Tool PL；明确 Reflection 无需修改、search relevance 不复用写入去重 threshold | Tier 1 retrieval |
 | 2026-07-12 | 初稿：检索模式、BM25 分层、注入格式、similarity_threshold 双重用途、注入职责边界 | 初始设计 |
+| 2026-09-29 | 注入预算比例化（移除 `inject_count`、`inject_token_budget` 改 `Option` 且默认按窗口 2%）、覆盖式让位（结论优先 + 来源条件让位）、注入时机冻结（Session 首次 + compact 刷新）；决策矩阵新增 R9/R10 |
 | 2026-09-29 | 注入硬过滤新增被取代条目（M10，pinned 不绕过）；`search` 结果 metadata 新增 `superseded_by`；决策矩阵新增 R7 | #1774 |
 | 2026-07-17 | 对齐 #895：旧 top query 统一为只读 `retrieve_for_inject`；outdated/TTL 改为 eligibility 硬过滤；显式 search 改用 relevance + 独立 tie-break，并由 Context 独占 render | #895 |

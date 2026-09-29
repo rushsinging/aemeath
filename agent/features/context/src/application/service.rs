@@ -15,6 +15,20 @@ pub(crate) struct ContextApplicationService {
     session: Arc<dyn SessionRepository>,
     prompt: Arc<dyn ContextPromptSource>,
     memory: Arc<dyn ContextMemorySource>,
+    /// 本 Session 冻结的注入内容（#1777）。记忆块属于可缓存 system
+    /// prefix：每轮重新检索会让内容漂移，直接损害 provider 的 prompt cache
+    /// 命中率。刷新点只有「Session 首次」与「compact 成功后」。
+    frozen_injection: std::sync::Arc<std::sync::Mutex<Option<FrozenInjection>>>,
+    /// compact 成功后置位：下一轮 build window 重新检索并替换冻结内容。
+    injection_refresh_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// 注入冻结状态。绑定 `session_id`：resume 切换到新 Session 视为该 Session
+/// 的首次注入。
+#[derive(Debug, Clone)]
+struct FrozenInjection {
+    session_id: SessionId,
+    materialization: crate::ports::MemoryMaterialization,
 }
 
 impl ContextApplicationService {
@@ -27,7 +41,51 @@ impl ContextApplicationService {
             session,
             prompt,
             memory,
+            frozen_injection: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            injection_refresh_pending: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                false,
+            )),
         }
+    }
+
+    /// 取本轮的注入内容：命中冻结则复用，否则检索并冻结。
+    async fn injection_for(
+        &self,
+        request: &ContextRequestData,
+    ) -> Result<crate::ports::MemoryMaterialization, ContextPortError> {
+        let refresh = self
+            .injection_refresh_pending
+            .swap(false, std::sync::atomic::Ordering::Relaxed);
+        if !refresh {
+            if let Some(frozen) = self
+                .frozen_injection
+                .lock()
+                .expect("injection lock poisoned")
+                .as_ref()
+                .filter(|frozen| frozen.session_id == request.session_id)
+            {
+                return Ok(frozen.materialization.clone());
+            }
+        }
+        let materialization = self
+            .memory
+            .materialize(request)
+            .await
+            .map_err(ContextPortError::MemoryMaterialization)?;
+        *self
+            .frozen_injection
+            .lock()
+            .expect("injection lock poisoned") = Some(FrozenInjection {
+            session_id: request.session_id.clone(),
+            materialization: materialization.clone(),
+        });
+        Ok(materialization)
+    }
+
+    /// compact 改写了对话历史，冻结的注入内容随之过期。
+    fn mark_injection_stale(&self) {
+        self.injection_refresh_pending
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     async fn build_candidate(
@@ -134,11 +192,7 @@ impl ContextApplicationService {
         crate::application::performance::record_prompt(prompt_started.elapsed());
         #[cfg(test)]
         let memory_started = std::time::Instant::now();
-        let memory = self
-            .memory
-            .materialize(request)
-            .await
-            .map_err(ContextPortError::MemoryMaterialization)?;
+        let memory = self.injection_for(request).await?;
         #[cfg(test)]
         crate::application::performance::record_memory(memory_started.elapsed());
 
@@ -493,6 +547,8 @@ impl ContextPort for ContextApplicationService {
         let outcome = self.session.commit_compaction(request).await?;
         // 仅在真实提交后体检：Skipped 时会话状态未变，重建无意义。
         if matches!(outcome, CompactOutcome::Committed(_)) {
+            // #1777：compact 重写了对话，冻结的注入内容随之过期。
+            self.mark_injection_stale();
             if let Some(report) = self.post_compaction_usage_check(&request.source).await {
                 if report.exceeds_half_threshold() {
                     log::warn!(
@@ -511,11 +567,28 @@ impl ContextPort for ContextApplicationService {
         &self,
         request: &ManualCompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError> {
-        self.session.commit_manual_compaction(request).await
+        let outcome = self.session.commit_manual_compaction(request).await?;
+        if matches!(outcome, CompactOutcome::Committed(_)) {
+            // #1777：手动 compact 同样刷新冻结的注入内容。
+            self.mark_injection_stale();
+        }
+        Ok(outcome)
     }
 
     async fn clear_session(&self, session_id: &SessionId) -> Result<(), ContextPortError> {
-        self.session.clear(session_id).await
+        let cleared = self.session.clear(session_id).await?;
+        // 清除的是该 Session 的冻结注入，下一次窗口重新注入。
+        let mut frozen = self
+            .frozen_injection
+            .lock()
+            .expect("injection lock poisoned");
+        if frozen
+            .as_ref()
+            .is_some_and(|held| &held.session_id == session_id)
+        {
+            *frozen = None;
+        }
+        Ok(cleared)
     }
 
     async fn append_accepted_input(
