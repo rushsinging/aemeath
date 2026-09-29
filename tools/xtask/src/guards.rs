@@ -1,3 +1,4 @@
+use crate::guards_engine;
 use crate::guards_rules::{self, Rule, Violation};
 use anyhow::{Context, Result};
 use std::collections::BTreeSet;
@@ -49,12 +50,24 @@ pub fn run(repo_root: &Path, profile: Profile, rule_filter: Option<&str>) -> Res
 
     let source_files = collect_source_files(repo_root)?;
     let mut violations = Vec::new();
-    for rule in &selected {
-        if matches!(rule.spec, guards_rules::RuleSpec::DependencyMatrix { .. }) {
-            continue;
-        }
-        for relative_file in &source_files {
-            let file_violations = guards_rules::enforce_rule(rule, repo_root, relative_file)?;
+    // 文件 × 规则循环（反转规则 × 文件）：每个文件的文本与 use 索引
+    // 经 FileContext 懒加载一次、被命中 scope 的所有规则共享。
+    let per_file_rules: Vec<&Rule> = selected
+        .iter()
+        .filter(|rule| {
+            !matches!(
+                rule.spec,
+                guards_rules::RuleSpec::DependencyMatrix { .. }
+                    | guards_rules::RuleSpec::LineBudget { .. }
+            )
+        })
+        .copied()
+        .collect();
+    for relative_file in &source_files {
+        let context = guards_engine::FileContext::new(repo_root.join(relative_file));
+        for rule in &per_file_rules {
+            let file_violations =
+                guards_rules::enforce_rule_with_context(rule, relative_file, &context)?;
             violations.extend(file_violations);
         }
     }
@@ -77,33 +90,34 @@ pub fn run(repo_root: &Path, profile: Profile, rule_filter: Option<&str>) -> Res
         }
     }
     // F-1 样板：construction_symbols 越界检查 + 跨 BC wire 调用 fail-closed。
-    if rule_filter.is_none() || rule_filter.is_some_and(|id| id == "construction.cross-bc") {
+    // 文本扫描类（词边界全文匹配），与 pattern_exclusion 同策略：只在 full 档执行；
+    // --rule construction.cross-bc 定向运行时不受档位限制。
+    let run_construction = match rule_filter {
+        Some(rule_id) => rule_id == "construction.cross-bc",
+        None => profile == Profile::Full,
+    };
+    if run_construction {
+        let mut construction_rules = Vec::new();
         for symbol in &registry.construction_symbols {
             // wire 类条目经限定调用检查（enforce_wire_registration）：
             // 经 composition 转发的 `composition::tools::wire_x` 文本出现是合法装配面。
             if symbol.kind == "wire" {
                 continue;
             }
-            let scope = guards_rules::Scope::Workspace;
             // 原样板语义：owner crate 内部构造不拦截（BC 内部事务）。
             let mut allowed = symbol.allowed_paths.clone();
             allowed.push(format!("agent/features/{}", symbol.owner_crate));
-            let spec = guards_rules::RuleSpec::ConstructionWhitelist {
-                symbol: symbol.symbol.clone(),
-                allowed_paths: allowed,
-            };
-            let rule = guards_rules::Rule {
+            construction_rules.push(guards_rules::Rule {
                 id: symbol.id.clone(),
-                scope,
-                spec,
+                scope: guards_rules::Scope::Workspace,
+                spec: guards_rules::RuleSpec::ConstructionWhitelist {
+                    symbol: symbol.symbol.clone(),
+                    allowed_paths: allowed,
+                },
                 reason: String::new(),
                 profile: guards_rules::Profile::Full,
                 exclusion_baseline: None,
-            };
-            for relative_file in &source_files {
-                let file_violations = guards_rules::enforce_rule(&rule, repo_root, relative_file)?;
-                violations.extend(file_violations);
-            }
+            });
         }
         let wire_definitions = guards_rules::collect_wire_definitions(repo_root);
         let registered: Vec<(String, String, Vec<String>)> = registry
@@ -118,11 +132,19 @@ pub fn run(repo_root: &Path, profile: Profile, rule_filter: Option<&str>) -> Res
             })
             .collect();
         for relative_file in &source_files {
+            let context = guards_engine::FileContext::new(repo_root.join(relative_file));
+            for rule in &construction_rules {
+                violations.extend(guards_rules::enforce_rule_with_context(
+                    rule,
+                    relative_file,
+                    &context,
+                )?);
+            }
             violations.extend(guards_rules::enforce_wire_registration(
                 &wire_definitions,
                 &registered,
-                repo_root,
                 relative_file,
+                &context,
             ));
         }
     }

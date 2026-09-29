@@ -78,7 +78,12 @@ fn engine_collects_public_reexports_of_crate_root() {
 
     let index = crate::guards_engine::index_file(&root).expect("index file");
 
-    assert_eq!(index.public_reexports, vec!["Good", "AlsoGood"]);
+    let symbols: Vec<(&str, usize)> = index
+        .public_reexports
+        .iter()
+        .map(|reexport| (reexport.symbol.as_str(), reexport.line))
+        .collect();
+    assert_eq!(symbols, vec![("Good", 1), ("AlsoGood", 1)]);
 }
 
 #[test]

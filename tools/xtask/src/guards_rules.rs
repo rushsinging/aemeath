@@ -148,11 +148,18 @@ pub fn parse_registry(bytes: &[u8]) -> Result<GuardsRegistry> {
 /// 生产结构断言（forbidden_segments / facade_whitelist / layer_order /
 /// pattern_exclusion）默认跳过测试源（`*_tests.rs` 与 `tests/` 目录）。
 pub fn enforce_rule(rule: &Rule, repo_root: &Path, relative_file: &str) -> Result<Vec<Violation>> {
+    let context = guards_engine::FileContext::new(repo_root.join(relative_file));
+    enforce_rule_with_context(rule, relative_file, &context)
+}
+
+/// 共享 [`guards_engine::FileContext`] 版本：一趟文件遍历中多规则复用
+/// 同一文件的文本与 use 索引，避免按规则重复读盘 / syn 解析。
+pub fn enforce_rule_with_context(
+    rule: &Rule,
+    relative_file: &str,
+    context: &guards_engine::FileContext,
+) -> Result<Vec<Violation>> {
     if !scope_matches(&rule.scope, relative_file) {
-        return Ok(Vec::new());
-    }
-    let absolute = repo_root.join(relative_file);
-    if !absolute.is_file() {
         return Ok(Vec::new());
     }
     let skips_test_sources = !matches!(
@@ -168,16 +175,16 @@ pub fn enforce_rule(rule: &Rule, repo_root: &Path, relative_file: &str) -> Resul
             allow_prefixes,
         } => enforce_forbidden_segments(
             rule,
-            repo_root,
             relative_file,
+            context,
             forbidden_segments,
             allow_prefixes,
         ),
         RuleSpec::FacadeWhitelist { allowed_symbols } => {
-            enforce_facade_whitelist(rule, &absolute, relative_file, allowed_symbols)
+            enforce_facade_whitelist(rule, relative_file, context, allowed_symbols)
         }
         RuleSpec::LayerOrder { layer_order } => {
-            enforce_layer_order(rule, &absolute, relative_file, layer_order)
+            enforce_layer_order(rule, relative_file, context, layer_order)
         }
         RuleSpec::Layout { allowed_entries } => {
             enforce_layout(rule, &rule.scope, relative_file, allowed_entries)
@@ -188,8 +195,8 @@ pub fn enforce_rule(rule: &Rule, repo_root: &Path, relative_file: &str) -> Resul
             allow_marker,
         } => enforce_pattern_exclusion(
             rule,
-            &absolute,
             relative_file,
+            context,
             forbidden_patterns,
             exclusions,
             allow_marker.as_deref(),
@@ -197,7 +204,7 @@ pub fn enforce_rule(rule: &Rule, repo_root: &Path, relative_file: &str) -> Resul
         RuleSpec::ConstructionWhitelist {
             symbol,
             allowed_paths,
-        } => enforce_construction_whitelist(rule, &absolute, relative_file, symbol, allowed_paths),
+        } => enforce_construction_whitelist(rule, relative_file, context, symbol, allowed_paths),
         RuleSpec::ForbiddenFileNames {
             forbidden_file_names,
         } => enforce_forbidden_file_names(rule, relative_file, forbidden_file_names),
@@ -265,8 +272,8 @@ fn scope_prefix<'a>(scope: &'a Scope, relative_file: &str) -> &'a str {
 
 fn enforce_forbidden_segments(
     rule: &Rule,
-    repo_root: &Path,
     relative_file: &str,
+    context: &guards_engine::FileContext,
     forbidden_segments: &[String],
     allow_prefixes: &[String],
 ) -> Result<Vec<Violation>> {
@@ -276,9 +283,8 @@ fn enforce_forbidden_segments(
     {
         return Ok(Vec::new());
     }
-    let index = match guards_engine::index_file(&repo_root.join(relative_file)) {
-        Ok(index) => index,
-        Err(_) => return Ok(Vec::new()),
+    let Some(index) = context.index() else {
+        return Ok(Vec::new());
     };
     let mut violations = Vec::new();
     for use_path in index.production_use_paths() {
@@ -310,28 +316,23 @@ fn enforce_forbidden_segments(
 
 fn enforce_facade_whitelist(
     rule: &Rule,
-    absolute: &Path,
     relative_file: &str,
+    context: &guards_engine::FileContext,
     allowed_symbols: &[String],
 ) -> Result<Vec<Violation>> {
-    if absolute
-        .file_name()
-        .map(|name| name != "lib.rs")
-        .unwrap_or(true)
-    {
+    if relative_file.rsplit('/').next() != Some("lib.rs") {
         return Ok(Vec::new());
     }
-    let index = match guards_engine::index_file(absolute) {
-        Ok(index) => index,
-        Err(_) => return Ok(Vec::new()),
+    let Some(index) = context.index() else {
+        return Ok(Vec::new());
     };
     let mut violations = Vec::new();
-    for symbol in &index.public_reexports {
-        if !allowed_symbols.contains(symbol) {
+    for reexport in &index.public_reexports {
+        if !allowed_symbols.contains(&reexport.symbol) {
             violations.push(Violation {
                 rule_id: rule.id.clone(),
-                location: relative_file.to_owned(),
-                message: format!("crate 根导出 `{symbol}` 未在 façade 白名单登记"),
+                location: format!("{relative_file}:{}", reexport.line),
+                message: format!("crate 根导出 `{}` 未在 façade 白名单登记", reexport.symbol),
             });
         }
     }
@@ -340,8 +341,8 @@ fn enforce_facade_whitelist(
 
 fn enforce_layer_order(
     rule: &Rule,
-    absolute: &Path,
     relative_file: &str,
+    context: &guards_engine::FileContext,
     layer_order: &[String],
 ) -> Result<Vec<Violation>> {
     let scope_value = scope_prefix(&rule.scope, relative_file);
@@ -359,9 +360,8 @@ fn enforce_layer_order(
     let Some(file_layer) = layer_order.iter().position(|layer| layer == first) else {
         return Ok(Vec::new());
     };
-    let index = match guards_engine::index_file(absolute) {
-        Ok(index) => index,
-        Err(_) => return Ok(Vec::new()),
+    let Some(index) = context.index() else {
+        return Ok(Vec::new());
     };
     let mut violations = Vec::new();
     for use_path in index.production_use_paths() {
@@ -412,8 +412,8 @@ fn enforce_layout(
 
 fn enforce_pattern_exclusion(
     rule: &Rule,
-    absolute: &Path,
     relative_file: &str,
+    context: &guards_engine::FileContext,
     forbidden_patterns: &[String],
     exclusions: &[Exclusion],
     allow_marker: Option<&str>,
@@ -424,11 +424,10 @@ fn enforce_pattern_exclusion(
     {
         return Ok(Vec::new());
     }
-    let source = match fs::read_to_string(absolute) {
-        Ok(source) => source,
-        Err(_) => return Ok(Vec::new()),
+    let Some(source) = context.text() else {
+        return Ok(Vec::new());
     };
-    let production = strip_inline_cfg_test_region(&source);
+    let production = strip_inline_cfg_test_region(source);
     let mut violations = Vec::new();
     for (offset, line) in production.lines().enumerate() {
         let code = line.trim_start();
@@ -492,8 +491,8 @@ fn strip_inline_cfg_test_region(source: &str) -> String {
 
 fn enforce_construction_whitelist(
     rule: &Rule,
-    absolute: &Path,
     relative_file: &str,
+    context: &guards_engine::FileContext,
     symbol: &str,
     allowed_paths: &[String],
 ) -> Result<Vec<Violation>> {
@@ -502,11 +501,10 @@ fn enforce_construction_whitelist(
     }) {
         return Ok(Vec::new());
     }
-    let source = match fs::read_to_string(absolute) {
-        Ok(source) => source,
-        Err(_) => return Ok(Vec::new()),
+    let Some(source) = context.text() else {
+        return Ok(Vec::new());
     };
-    let production = strip_inline_cfg_test_region(&source);
+    let production = strip_inline_cfg_test_region(source);
     let mut violations = Vec::new();
     for (offset, line) in production.lines().enumerate() {
         if contains_symbol(line, symbol) {
@@ -637,17 +635,16 @@ fn collect_pub_wire_names(
 pub fn enforce_wire_registration(
     wire_definitions: &std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
     registered: &[(String, String, Vec<String>)],
-    repo_root: &std::path::Path,
     relative_file: &str,
+    context: &guards_engine::FileContext,
 ) -> Vec<Violation> {
     if is_test_source(relative_file) {
         return Vec::new();
     }
-    let absolute = repo_root.join(relative_file);
-    let Ok(source) = fs::read_to_string(&absolute) else {
+    let Some(source) = context.text() else {
         return Vec::new();
     };
-    let production = strip_inline_cfg_test_region(&source);
+    let production = strip_inline_cfg_test_region(source);
     // 文件所属 crate：agent/features/<crate>/… → <crate>；composition/share 等 → 目录名。
     let owning_crate = owning_crate_of(relative_file);
     let mut violations = Vec::new();

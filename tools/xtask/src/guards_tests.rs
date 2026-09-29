@@ -213,3 +213,58 @@ fn guard_run_clean_tree_has_no_violations() {
     assert!(report.violations.is_empty());
     assert!(report.render().is_empty() || !report.render().trim().is_empty());
 }
+
+/// construction_symbols 属于文本扫描类检查（词边界全文匹配），
+/// fast 档语义与 pattern_exclusion 一致：只在 full 档执行。
+#[test]
+fn guard_run_fast_profile_skips_construction_symbol_scan() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    let root = temp.path().join("repo");
+    fs::create_dir_all(root.join(".agents")).expect("create .agents");
+    let registry = serde_json::json!({
+        "version": 1,
+        "entries": [],
+        "rules": [],
+        "construction_symbols": [
+            {
+                "id": "construction.task.filesystem-store",
+                "symbol": "FileSystemTaskStore",
+                "owner_crate": "task",
+                "kind": "construction",
+                "allowed_paths": ["agent/composition/src"],
+                "reason": "test",
+                "tracking_issue": 1
+            }
+        ]
+    });
+    fs::write(
+        root.join(".agents/architecture-guard-registry.json"),
+        serde_json::to_string_pretty(&registry).expect("serialize"),
+    )
+    .expect("write registry");
+    write_source(
+        &root.join("agent/features/task/src/store.rs"),
+        "pub struct FileSystemTaskStore;\n",
+    );
+    write_source(
+        &root.join("agent/features/runtime/src/assembly.rs"),
+        "let store = FileSystemTaskStore::new();\n",
+    );
+
+    let fast_report = crate::guards::run(&root, crate::guards::Profile::Fast, None).expect("run");
+    assert!(
+        fast_report.violations.is_empty(),
+        "fast 档不执行 construction 文本扫描：{:#?}",
+        fast_report.violations
+    );
+
+    let full_report = crate::guards::run(&root, crate::guards::Profile::Full, None).expect("run");
+    assert!(
+        full_report
+            .violations
+            .iter()
+            .any(|violation| violation.rule_id == "construction.task.filesystem-store"),
+        "full 档必须拦截越界构造：{:#?}",
+        full_report.violations
+    );
+}

@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
+use std::cell::OnceCell;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// 单条 `use` 语句展开后的完整路径（含来源行号与测试上下文标记）。
 #[derive(Debug, Clone)]
@@ -10,11 +11,18 @@ pub struct UsePath {
     pub in_test_module: bool,
 }
 
+/// crate 根 `pub use` 导出项（含来源行号，供违规定位到具体导出语句）。
+#[derive(Debug, Clone)]
+pub struct PublicReexport {
+    pub symbol: String,
+    pub line: usize,
+}
+
 /// 单个源文件的结构索引：use 树展开 + crate 根 `pub use` 导出面。
 #[derive(Debug, Default)]
 pub struct FileIndex {
     pub use_paths: Vec<UsePath>,
-    pub public_reexports: Vec<String>,
+    pub public_reexports: Vec<PublicReexport>,
 }
 
 impl FileIndex {
@@ -24,6 +32,38 @@ impl FileIndex {
             .iter()
             .filter(|path| !path.in_test_module)
             .collect()
+    }
+}
+
+/// 单文件懒加载上下文：同一趟文件遍历中多条规则共享文本与 use 索引，
+/// 每个文件至多 `read_to_string` 一次、`syn` 解析一次，按需触发。
+pub struct FileContext {
+    absolute: PathBuf,
+    text: OnceCell<Option<String>>,
+    index: OnceCell<Option<FileIndex>>,
+}
+
+impl FileContext {
+    pub fn new(absolute: PathBuf) -> Self {
+        Self {
+            absolute,
+            text: OnceCell::new(),
+            index: OnceCell::new(),
+        }
+    }
+
+    /// 文件全文（读取失败返回 None，与既有的「读不了就跳过」语义一致）。
+    pub fn text(&self) -> Option<&str> {
+        self.text
+            .get_or_init(|| fs::read_to_string(&self.absolute).ok())
+            .as_deref()
+    }
+
+    /// use 索引（解析失败返回 None，与既有 `index_file` 失败跳过语义一致）。
+    pub fn index(&self) -> Option<&FileIndex> {
+        self.index
+            .get_or_init(|| index_file(&self.absolute).ok())
+            .as_ref()
     }
 }
 
@@ -109,7 +149,9 @@ impl<'a> UseCollector<'a> {
                 in_test_module: self.in_test_module,
             });
             if is_public {
-                self.index.public_reexports.push(leaf);
+                self.index
+                    .public_reexports
+                    .push(PublicReexport { symbol: leaf, line });
             }
         });
     }

@@ -896,7 +896,7 @@
         "kind": "workspace"
       },
       "reason": "F-5：生产 adapter 唯一根在 composition，其余禁穿透 share::adapter 路径段",
-      "profile": "full",
+      "profile": "fast",
       "forbidden_segments": [
         "share::adapter",
         "shared::adapter"
@@ -927,7 +927,7 @@
         "test_log.rs"
       ],
       "reason": "F-3：runtime Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layer.runtime.hexagonal-order",
@@ -944,7 +944,7 @@
         "adapters"
       ],
       "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layout.workflow.hexagonal-top-level",
@@ -958,7 +958,7 @@
         "lib.rs"
       ],
       "reason": "F-3：workflow Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layer.workflow.hexagonal-order",
@@ -975,7 +975,7 @@
         "adapters"
       ],
       "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layout.provider.hexagonal-top-level",
@@ -994,7 +994,7 @@
         "published_language.rs"
       ],
       "reason": "F-3：provider Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layer.provider.hexagonal-order",
@@ -1011,7 +1011,7 @@
         "adapters"
       ],
       "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layout.memory.hexagonal-top-level",
@@ -1040,7 +1040,7 @@
         "service_reflection_tests.rs"
       ],
       "reason": "F-3：memory Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layer.memory.hexagonal-order",
@@ -1057,7 +1057,7 @@
         "adapters"
       ],
       "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layout.policy.hexagonal-top-level",
@@ -1076,7 +1076,7 @@
         "lib.rs"
       ],
       "reason": "F-3：policy Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layer.policy.hexagonal-order",
@@ -1093,7 +1093,7 @@
         "adapters"
       ],
       "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layout.storage.hexagonal-top-level",
@@ -1114,7 +1114,7 @@
         "test_log.rs"
       ],
       "reason": "F-3：storage Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layer.storage.hexagonal-order",
@@ -1131,7 +1131,7 @@
         "adapters"
       ],
       "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layout.project.hexagonal-top-level",
@@ -1150,7 +1150,7 @@
         "service.rs"
       ],
       "reason": "F-3：project Hexagonal 层目录与顶层文件白名单（#1022 矩阵；application.rs 用例编排层 / service.rs 持锁状态容器，#1746 归位）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layer.project.hexagonal-order",
@@ -1167,7 +1167,7 @@
         "adapters"
       ],
       "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layout.tools.hexagonal-top-level",
@@ -1187,7 +1187,7 @@
         "published.rs"
       ],
       "reason": "F-3：tools Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layer.tools.hexagonal-order",
@@ -1204,7 +1204,7 @@
         "adapters"
       ],
       "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layout.task.hexagonal-top-level",
@@ -1221,7 +1221,7 @@
         "lib.rs"
       ],
       "reason": "F-3：task Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layer.task.hexagonal-order",
@@ -1238,7 +1238,7 @@
         "adapters"
       ],
       "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layout.audit.hexagonal-top-level",
@@ -1263,7 +1263,7 @@
         "ports.rs"
       ],
       "reason": "F-3：audit Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layer.audit.hexagonal-order",
@@ -1280,7 +1280,7 @@
         "adapters"
       ],
       "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layout.hook.hexagonal-top-level",
@@ -1301,7 +1301,7 @@
         "ports_tests.rs"
       ],
       "reason": "F-3：hook Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layer.hook.hexagonal-order",
@@ -1318,7 +1318,7 @@
         "adapters"
       ],
       "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layout.config.hexagonal-top-level",
@@ -1350,7 +1350,7 @@
         "user_agent_tests.rs"
       ],
       "reason": "F-3：config Hexagonal 层目录与顶层文件白名单（#1022 矩阵）；catalog/connect/core/gateway/runtime_resolution/user_agent 为 Connect 向导与 UA resolver 模块（#1457）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layer.config.hexagonal-order",
@@ -1367,7 +1367,7 @@
         "adapters"
       ],
       "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layout.context.hexagonal-top-level",
@@ -1389,7 +1389,7 @@
         "integration_tests"
       ],
       "reason": "F-3：context Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layer.context.hexagonal-order",
@@ -1406,7 +1406,7 @@
         "adapters"
       ],
       "reason": "F-3：shared 最内（工具不依赖领域），domain←ports←application←adapters 依赖只向内",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "use.features.no-internal-segment-penetration",
@@ -1556,7 +1556,7 @@
         "workflow::utils"
       ],
       "reason": "F-2：feature 内部层路径段禁穿透（L1）；update 对外仅 ::api（api 段不在禁集）；config::ports 移出禁段：ports 为子发布语言协议命名空间（模块即边界），与 catalog/connect/form 同口径",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "facade.audit.root-exports",
@@ -1580,7 +1580,7 @@
         "wire_audit_store"
       ],
       "reason": "F-2：audit crate 根窄 façade（#1022 登记，消费者证明制）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "facade.config.root-exports",
@@ -1614,7 +1614,7 @@
         "resolve_provider_runtime_for_selection"
       ],
       "reason": "F-2：config crate 根窄 façade（#1706 DDD 五类判据：命令/事件/值对象/端口/工厂；协议模块 connect/form/catalog/ports 为子发布语言）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "facade.context.root-exports",
@@ -1719,7 +1719,7 @@
         "wire_main_session"
       ],
       "reason": "F-2：context crate 根窄 façade（#1022 登记，消费者证明制）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "facade.hook.root-exports",
@@ -1749,7 +1749,7 @@
         "wire_hook_dispatcher"
       ],
       "reason": "F-2：hook crate 根窄 façade（#1022 登记，消费者证明制）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "facade.memory.root-exports",
@@ -1760,7 +1760,7 @@
       },
       "allowed_symbols": [],
       "reason": "F-2：memory 对外仅 ::api（update 同构，L1 禁段放行 api 段）；根零 re-export，唯三 wire 工厂为 composition 构造入口（#1709 DDD 五类判据）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "facade.policy.root-exports",
@@ -1780,7 +1780,7 @@
         "configured"
       ],
       "reason": "F-2：policy crate 根窄 façade（#1022 登记，消费者证明制）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "facade.project.root-exports",
@@ -1799,7 +1799,7 @@
         "wire_production_workspace"
       ],
       "reason": "F-2：project crate 根窄 façade（#1022 登记，消费者证明制）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "facade.provider.root-exports",
@@ -1838,7 +1838,7 @@
         "TransportPool"
       ],
       "reason": "F-2：provider crate 根窄 façade（#1022 登记，消费者证明制）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "facade.runtime.root-exports",
@@ -1892,7 +1892,7 @@
         "wire_agent_runner"
       ],
       "reason": "F-2：runtime crate 根窄 façade（#1022 登记，消费者证明制）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "facade.storage.root-exports",
@@ -1945,7 +1945,7 @@
         "WriteReceiptData"
       ],
       "reason": "F-2：storage crate 根窄 façade（#1022 登记，消费者证明制）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "facade.task.root-exports",
@@ -1985,7 +1985,7 @@
         "wire_task"
       ],
       "reason": "F-2：task crate 根窄 façade（#1022 登记，消费者证明制）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "facade.tools.root-exports",
@@ -2024,7 +2024,7 @@
         "types"
       ],
       "reason": "F-2：tools crate 根窄 façade（DDD 五类判据；published/ 九子命名空间承载词汇族；composition 独立装配面；#1716 收敛）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "dependency.workspace-matrix",
@@ -2150,7 +2150,7 @@
         "utils": []
       },
       "reason": "F-4：workspace 业务依赖矩阵（cargo metadata path 依赖边校验；不在矩阵的 crate 跳过）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layout.tui.top-level",
@@ -2187,7 +2187,7 @@
         "view_state.rs"
       ],
       "reason": "F-22：tui 顶层目录白名单；旧命名空间 import 防复活④（模块已删编译失败）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "layout.composition.top-level",
@@ -2212,7 +2212,7 @@
         "provider_probe_tests.rs"
       ],
       "reason": "F-8：composition 顶层文件白名单（lib_tests.rs 现状冻结；mod 声明集与文件白名单一致）",
-      "profile": "full"
+      "profile": "fast"
     },
     {
       "id": "pattern.logging.no-process-global-state",
