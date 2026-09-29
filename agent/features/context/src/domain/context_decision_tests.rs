@@ -69,15 +69,16 @@ fn custom_output_limit_changes_actual_usage_threshold() {
 
     assert!(!smaller_output_decision.needed);
     assert!(larger_output_decision.needed);
-    // 2_000 窗口：smaller(10) effective=1_950 → threshold 1_560；
-    // larger(1_500) clamp 到窗口 25%（500）→ effective=1_460 → threshold 1_168。
-    assert_eq!(smaller_output_decision.threshold, 1_560);
-    assert_eq!(larger_output_decision.threshold, 1_168);
+    // 2_000 窗口（#1773 后摘要预留 100）：smaller(10) effective=1_890 →
+    // threshold 1_512；larger(1_500) clamp 到窗口 25%（500）→ effective=1_400
+    // → threshold 1_120。
+    assert_eq!(smaller_output_decision.threshold, 1_512);
+    assert_eq!(larger_output_decision.threshold, 1_120);
 }
 
 /// 配置的 `auto_compact_threshold_ratio` 经 request 携带的 config_snapshot
-/// 进入决策：0.9 时 2_000 窗口（effective 1_860）threshold 从 1_488 升到
-/// 1_674——默认 0.8 下会触发的 1_600 total 变为不触发（更晚压缩）。
+/// 进入决策：0.9 时 2_000 窗口（effective 1_800）threshold 从 1_440 升到
+/// 1_620——默认 0.8 下会触发的 1_600 total 变为不触发（更晚压缩）。
 #[test]
 fn configured_threshold_ratio_from_config_snapshot_defers_trigger() {
     let mut configured = request(Some(1_600));
@@ -90,7 +91,7 @@ fn configured_threshold_ratio_from_config_snapshot_defers_trigger() {
     });
     let decision = context_decision::calculate(&configured, &Vec::new().into(), &[]);
 
-    assert_eq!(decision.threshold, 1_674);
+    assert_eq!(decision.threshold, 1_620);
     assert!(!decision.needed);
 }
 
@@ -107,8 +108,8 @@ fn out_of_range_threshold_ratio_is_clamped_by_config_snapshot() {
     });
     let decision = context_decision::calculate(&out_of_range, &Vec::new().into(), &[]);
 
-    // 2_000 窗口（effective 1_860）：0.95 → 1_767；若未 clamp（0.99）会是 1_841。
-    assert_eq!(decision.threshold, 1_767);
+    // 2_000 窗口（effective 1_800）：0.95 → 1_710；若未 clamp（0.99）会是 1_782。
+    assert_eq!(decision.threshold, 1_710);
 }
 
 #[test]

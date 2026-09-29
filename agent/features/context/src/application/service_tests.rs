@@ -290,7 +290,8 @@ async fn build_window_short_window_no_longer_always_triggers() {
     let decision = &window.compaction_decision;
 
     assert!(decision.threshold > 0, "clamp 后 threshold 永不为 0");
-    assert_eq!(decision.effective_window, 8_192 - 163 - 2_048);
+    // 摘要预留 5%（#1773）：8_192 / 20 = 409，max_output clamp 到 2_048。
+    assert_eq!(decision.effective_window, 8_192 - 409 - 2_048);
     // 空会话 + 短 system prompt：估算远低于 threshold，不触发
     assert!(!decision.needed);
 }
