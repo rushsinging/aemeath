@@ -5314,6 +5314,7 @@ name = "xtask"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "libc",
  "quote",
  "sdk",
  "serde",

@@ -230,6 +230,15 @@ F 组 29 项 + D/E 组切出的白名单子项，收敛为 4 个通用断言器�
 
 `retired_symbols` 为纯数据区（不设断言器），供 review 对照，不再机械拦截。
 
+### 3.10 执行进度（#1675/#1676 引擎收口批次，PR #1790）
+
+- **fast 档修复**：43 条结构规则（forbidden_segments/facade_whitelist/layer_order/dependency_matrix/layout）标 `profile:"fast"`，修复 fast 档 0 规则空跑；construction_symbols 文本扫描归入 full 档。
+- **FileContext 共享索引**：引擎循环反转为文件×规则，每文件至多一次 read/syn 解析——fast 13.9s→3.0s，full 16.2s→9.2s。
+- **registry 启动自检**并入 `xtask guard` 启动（schema 级 fail-closed，§2.2 目标态第①步落地）；workspace 级对账仍由编排器 full 档 `guard-registry check` 承担。
+- **编排器薄壳化**：删 `AEMEATH_GUARD_ENGINE=legacy` 逃生阀；`check-gate-layering-tests.sh` 挂入编排器 full 档（结束孤儿状态）。
+- **check-unit-tests.sh(+tests) 退役**：逐包测试编排迁移为 `xtask test-runner`（`tools/xtask/src/test_runner.rs`，包矩阵常量 + 进程组超时收割 + exit 码原样传播），自测译为 `tools/xtask/tests/test_runner.rs`（fake cargo PATH stub 四组断言）；pre-push 改调 `cargo run -p xtask -- test-runner`。
+- `.agents/hooks/` 12 → **9 文件**（编排器+agent-stop+reject-main-edit(+tests)+gate-layering-tests+noninteractive(+tests)+projection-naming+unsafe-text-ops）。
+
 ### 3.9 执行进度（#1676 退役壳收敛批次）
 
 - C 组④4 脚本退役（cost-tracker/hook-target-facade/share-no-upstream/tui-output-legacy）+ entry 4 条。
