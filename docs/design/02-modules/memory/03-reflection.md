@@ -137,6 +137,18 @@ Interval / PreCompact / Manual
 
 零变更、失败、取消、超时与配置禁用都不产生任何提示。
 
+### 归纳产物（跨条目结论）
+
+反思除「提炼新记忆 / 标记过时」外，还判断「是否存在可归纳的组合」（#1776）。沿用既有两步流程：prompt 要求模型输出 `synthesizes`（来源 memory id 列表）→ apply 写入时置 `kind = Synthesized` 并把来源写入 `evidence`。
+
+- **触发沿用既有三种**（Interval / PreCompact / Manual），不新增触发条件：归纳是「每 N 轮批量做」，存在最多 N 轮延迟；记忆是辅助信息源，当前对话 context 优先级更高，该延迟可接受。
+- **M13 证据下限**：`evidence.len() >= 2`。单条来源的「归纳」等价于复制既有条目，MUST NOT 产出；此时**降级**为普通建议（`Raw` + 空 evidence），内容照常写入——丢弃模型产出的内容比降级更糟。
+- **不新增产物类型**：归纳结论仍是 `MemoryEntry`，`kind` 表达来源、`MemoryCategory` 表达用途，两维正交。
+- **「已被归纳吸收」是推导的**：读时反向查询「是否有 active 条目的 evidence 包含它」，NEVER 在原始记忆上加反向指针（与取代关系同一取舍）。
+- **回滚**：模型停止输出 `synthesizes` 即退化为原行为，字段保持空。
+
+**已知限制**：归纳质量取决于反思时可见的记忆集合。候选集过小只会**漏掉归纳机会**（不会产出错误结论）；本设计明确不引入「反思前的相关记忆检索」。
+
 ### 结束控制
 
 - **执行期间可取消**：反思是 Run 内的协作式阶段，Run 的 cancellation token 直接传入执行通道；取消只形成安全终态 metadata，不泄漏 prompt、provider raw response 或 Reflection 正文。
@@ -332,6 +344,7 @@ struct ReflectionConfig {
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-09-29 | 新增「归纳产物（跨条目结论）」小节：`synthesizes` → `kind=Synthesized` + `evidence`、M13 证据下限与降级语义、触发沿用既有三种、候选集为已知限制 |
 | 2026-09-29 | 补充「计数口径」小节：区分 session 内 Main Run 序号 `run_count` 与 Run 内 LLM 跳数；Interval 判定只发生在回合收尾跳；`run_step` 日志字段只承载 LLM 跳数 |
 | 2026-09-28 | 三种 trigger 由「单槽后台异步」改为「同一执行通道同步 await」：调用方 await 到终态，Run 的 cancellation token 传入执行通道，Session teardown 不再 drain；完成时按 apply 计数发 TUI SystemMessage 并累积下一轮 LLM reminder；`user_alert` 与无生产调用方的 `format_output` 随 i18n 死代码一并移除 | #1772 |
 | 2026-09-25 | #1289 接通 Manual 显式入口：Tools catalog `/reflect-now` → SDK `ChatInputEvent::ReflectNow` → input gate（idle 受理 / busy 提示丢弃，NEVER 排队）→ run_launch handler 冻结 `structured_messages()` 快照 submit 单槽 | #1289 |

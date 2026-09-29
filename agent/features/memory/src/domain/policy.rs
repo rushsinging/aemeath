@@ -1,7 +1,25 @@
 use super::EvictionCandidate;
 use super::MemoryEntry;
 use super::MemoryId;
+use super::MemoryKind;
 use std::collections::HashSet;
+
+/// M13 的证据下限（#1776）：少于两条来源的「归纳」等价于复制既有条目，
+/// MUST NOT 产出。
+pub const MIN_SYNTHESIS_EVIDENCE: usize = 2;
+
+/// 把建议声明的 `synthesizes` 映射为归纳产物的类型与证据，返回是否构成归纳。
+///
+/// 不足下限时**不修改** entry：内容照常写入，但保持 `Raw` 且无 evidence——
+/// 产出一条普通记忆远好于丢弃模型给出的内容。
+pub fn apply_synthesis(entry: &mut MemoryEntry, synthesizes: &[MemoryId]) -> bool {
+    if synthesizes.len() < MIN_SYNTHESIS_EVIDENCE {
+        return false;
+    }
+    entry.kind = MemoryKind::Synthesized;
+    entry.evidence = synthesizes.to_vec();
+    true
+}
 
 /// 取代链上溯的最大步数（#1774）。合法链长不会超过 `max_entries`；
 /// 超过该上限说明数据已损坏，按成环处理以收敛写入路径。

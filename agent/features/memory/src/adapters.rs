@@ -879,6 +879,17 @@ impl MemoryPort for InMemoryMemory {
                 MemorySource::Llm,
             )?;
             entry.tags = suggestion.tags.clone();
+            // M13: fewer than two sources is a copy, not a synthesis.
+            if !apply_synthesis(&mut entry, &suggestion.synthesizes)
+                && !suggestion.synthesizes.is_empty()
+            {
+                log::info!(
+                    target: crate::LOG_TARGET,
+                    "memory_synthesis_downgraded sources={} below_min={}",
+                    suggestion.synthesizes.len(),
+                    MIN_SYNTHESIS_EVIDENCE,
+                );
+            }
 
             let mut state = self.state.write().expect("memory state lock poisoned");
             let surviving = apply_reflection_entry(&mut state, entry, self.policy)?;
@@ -1052,6 +1063,18 @@ fn apply_reflection_entry(
     policy: MemoryPolicy,
 ) -> Result<Option<MemoryId>, MemoryError> {
     validate_content(&entry.content)?;
+    // M11: a synthesized entry may only cite memories this store already holds.
+    if entry.evidence.iter().any(|source| {
+        !state
+            .active
+            .iter()
+            .chain(state.archive.iter())
+            .any(|stored| &stored.id == source)
+    }) {
+        return Err(MemoryError::InvalidEntry {
+            message: "证据指针指向不存在的记忆".to_string(),
+        });
+    }
     if state.active.iter().any(|stored| stored.id == entry.id)
         || state.archive.iter().any(|stored| stored.id == entry.id)
     {

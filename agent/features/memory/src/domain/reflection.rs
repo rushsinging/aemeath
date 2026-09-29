@@ -29,6 +29,11 @@ pub struct MemorySuggestion {
     /// 只由 apply 消费，不直接写库（#1774）。
     #[serde(default, deserialize_with = "null_as_empty_vec")]
     pub supersedes: Vec<MemoryId>,
+    /// 本建议归纳自哪些已有记忆（apply 后成为新条目的 `evidence`，且置
+    /// `kind = Synthesized`）。少于两条来源不是归纳而是复制，M13 要求
+    /// 降级为普通建议（#1776）。
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    pub synthesizes: Vec<MemoryId>,
 }
 
 /// The complete published-language response expected from a Reflection model.
@@ -284,12 +289,18 @@ impl ReflectionEngine {
 - suggested_memories[].layer 只能是 project 或 global，默认优先使用 project。
 - suggested_memories[].category 只能是 fact、decision、preference、pattern、pitfall。
 - outdated_memories 使用已有 memory id。
+- suggested_memories[].synthesizes 只在**归纳多条已有记忆**时填这些 memory id。
+  单条来源不是归纳（那只是改写），此时留空数组——不足两条来源的归纳 MUST NOT
+  产出。结论被新证据修正时在正文里写「曾…现…」，不要输出置信度数字。
+- suggested_memories[].supersedes 只在**新记忆明确取代某条已有记忆**时填该
+  memory id（例如部署方式、端口、结论被新事实推翻）。两条记忆只是补充关系、或
+  旧记忆仍然成立时，**必须留空数组**——误取代会让仍有价值的记忆停止注入。
 - 没有内容时输出空数组。
 
 JSON 格式：
 {{
     "deviations": ["偏差描述"],
-    "suggested_memories": [{{"layer":"project","category":"decision","content":"记忆内容","tags":["可选标签"],"reason":"为什么建议添加"}}],
+    "suggested_memories": [{{"layer":"project","category":"decision","content":"记忆内容","tags":["可选标签"],"reason":"为什么建议添加","supersedes":[],"synthesizes":[]}}],
     "outdated_memories": ["memory-id"]
 }}
 
@@ -306,6 +317,12 @@ Requirements:
 - suggested_memories[].layer must be project or global; prefer project by default.
 - suggested_memories[].category must be fact, decision, preference, pattern, or pitfall.
 - outdated_memories uses existing memory ids.
+- Fill suggested_memories[].synthesizes with the memory ids ONLY when this
+  suggestion combines several existing memories into a new conclusion. A single
+  source is not a synthesis — it is a restatement — so leave it empty; a
+  synthesis over fewer than two sources must not be produced. When new evidence
+  corrects a conclusion, phrase the change in the content ("used to …, now …")
+  instead of emitting a confidence number.
 - Fill suggested_memories[].supersedes with an existing memory id ONLY when the
   new memory explicitly replaces it (a changed deploy target, port, or reversed
   conclusion). Leave it empty when the two memories merely complement each
@@ -316,7 +333,7 @@ Requirements:
 JSON format:
 {{
     "deviations": ["deviation description"],
-    "suggested_memories": [{{"layer":"project","category":"decision","content":"memory content","tags":["optional tag"],"reason":"why this is suggested","supersedes":[]}}],
+    "suggested_memories": [{{"layer":"project","category":"decision","content":"memory content","tags":["optional tag"],"reason":"why this is suggested","supersedes":[],"synthesizes":[]}}],
     "outdated_memories": ["memory-id"]
 }}
 
@@ -439,6 +456,7 @@ mod tests {
                     tags: vec![],
                     reason: "secret reason".into(),
                     supersedes: vec![],
+                    synthesizes: Vec::new(),
                 }],
                 outdated_memories: vec!["secret-id".into()],
             }),
