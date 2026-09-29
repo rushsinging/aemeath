@@ -63,6 +63,7 @@ fn suggestion(layer: MemoryLayer, content: &str) -> MemorySuggestion {
         content: content.to_string(),
         tags: vec!["reflection".to_string()],
         reason: "test".to_string(),
+        supersedes: vec![],
     }
 }
 
@@ -97,6 +98,7 @@ async fn reflection_partial_apply_reports_committed_suggestion_before_outdated_w
             result_completed: 1,
             suggestions_added: 1,
             outdated_marked: 0,
+            superseded: 0,
         }
     ));
     let entries = service.list(Some(MemoryLayer::Project));

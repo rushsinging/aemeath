@@ -77,6 +77,10 @@ pub struct MemoryEntry {
     pub confirmation_count: u32,
     #[serde(default)]
     pub outdated: bool,
+    /// 被哪条记忆取代；`None` = 未被取代。只记录单向：反向关系可沿
+    /// 全量条目扫描推导（#1774）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub superseded_by: Option<MemoryId>,
 }
 
 impl MemoryEntry {
@@ -108,6 +112,7 @@ impl MemoryEntry {
             last_confirmed_at: now,
             confirmation_count: 0,
             outdated: false,
+            superseded_by: None,
         })
     }
 
@@ -132,6 +137,7 @@ pub enum MemoryError {
         result_completed: usize,
         suggestions_added: usize,
         outdated_marked: usize,
+        superseded: usize,
     },
 }
 
@@ -270,6 +276,9 @@ pub struct MemorySearchHit {
     pub location: MemoryLocation,
     pub outdated: bool,
     pub ttl_expired: bool,
+    /// Which entry replaced this one (#1774). `search` keeps reporting
+    /// superseded entries; only injection filters them out (M10).
+    pub superseded_by: Option<MemoryId>,
     pub relevance: Option<f64>,
 }
 

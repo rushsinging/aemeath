@@ -108,12 +108,14 @@ impl ReflectionWorkflow {
                     result_completed,
                     suggestions_added,
                     outdated_marked,
+                    superseded,
                 }) => (
                     Some(ReflectionApplyResult {
                         attempted: result_attempted,
                         completed: result_completed,
                         suggestions_added,
                         outdated_marked,
+                        superseded,
                     }),
                     Some(ReflectionErrorCategory::Apply),
                 ),

@@ -21,6 +21,7 @@ fn payload_with_applied_changes(added: usize, outdated_marked: usize) -> Complet
             completed: added + outdated_marked,
             suggestions_added: added,
             outdated_marked,
+            superseded: 0,
         }),
         ..successful_payload()
     }

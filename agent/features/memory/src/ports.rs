@@ -320,6 +320,7 @@ mod tests {
                 location: MemoryLocation::Archive,
                 outdated: true,
                 ttl_expired: true,
+                superseded_by: None,
                 relevance: Some(0.75),
             }],
         };

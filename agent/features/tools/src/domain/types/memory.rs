@@ -65,6 +65,9 @@ pub struct MemoryEntryResult {
     pub pinned: bool,
     pub outdated: bool,
     pub ttl_expired: bool,
+    /// Set when another memory replaced this one (#1774). Such an entry is no
+    /// longer injected but stays visible here so the model can see the history.
+    pub superseded_by: Option<String>,
 }
 
 /// Structured explicit-search hit with deterministic relevance metadata.
@@ -79,6 +82,7 @@ pub struct MemorySearchHitResult {
     pub location: MemoryLocationResult,
     pub outdated: bool,
     pub ttl_expired: bool,
+    pub superseded_by: Option<String>,
     pub relevance: Option<f64>,
 }
 

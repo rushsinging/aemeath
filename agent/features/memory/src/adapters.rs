@@ -729,6 +729,7 @@ impl MemoryPort for InMemoryMemory {
             hits: entries
                 .into_iter()
                 .map(|entry| MemorySearchHit {
+                    superseded_by: entry.superseded_by,
                     entry,
                     location: MemoryLocation::Active,
                     outdated: false,
@@ -851,10 +852,19 @@ impl MemoryPort for InMemoryMemory {
             entry.tags = suggestion.tags.clone();
 
             let mut state = self.state.write().expect("memory state lock poisoned");
-            apply_reflection_entry(&mut state, entry, self.policy)?;
+            let surviving = apply_reflection_entry(&mut state, entry, self.policy)?;
             state.revision = state.revision.saturating_add(1);
             result.suggestions_added += 1;
             result.completed += 1;
+            // A merged suggestion never keeps its own id, so the relation has to
+            // attach to the entry that actually survived the merge.
+            if let Some(surviving) = surviving {
+                result.attempted += suggestion.supersedes.len();
+                let established =
+                    establish_supersede_relations(&mut state, surviving, &suggestion.supersedes);
+                result.completed += established;
+                result.superseded += established;
+            }
         }
 
         for raw_id in &output.outdated_memories {
@@ -1005,11 +1015,13 @@ fn reflection_capacity_error() -> MemoryError {
     }
 }
 
+/// 应用一条反思建议。返回 `Some(id)` = 实际留存条目的 id（新增时为新 id，
+/// 合并时为被并入的既有 id），`None` = 建议被丢弃、未产生留存条目。
 fn apply_reflection_entry(
     state: &mut MemoryState,
     mut entry: MemoryEntry,
     policy: MemoryPolicy,
-) -> Result<(), MemoryError> {
+) -> Result<Option<MemoryId>, MemoryError> {
     validate_content(&entry.content)?;
     if state.active.iter().any(|stored| stored.id == entry.id)
         || state.archive.iter().any(|stored| stored.id == entry.id)
@@ -1027,7 +1039,7 @@ fn apply_reflection_entry(
         existing.tags.dedup();
         existing.last_confirmed_at = entry.created_at;
         existing.confirmation_count = existing.confirmation_count.saturating_add(1);
-        return Ok(());
+        return Ok(Some(existing.id));
     }
     let layer_entries = state
         .active
@@ -1060,8 +1072,47 @@ fn apply_reflection_entry(
             return Err(reflection_capacity_error());
         }
     }
+    let id = entry.id;
     state.active.push(entry);
-    Ok(())
+    Ok(Some(id))
+}
+
+/// 在既有条目上建立取代关系，返回成功建立的数量。环检测在写入前基于
+/// 同一锁内的一致状态完成（M9），被拒的关系不写入也不计数。
+fn establish_supersede_relations(
+    state: &mut MemoryState,
+    superseding: MemoryId,
+    superseded: &[MemoryId],
+) -> usize {
+    let mut established = 0;
+    for target in superseded {
+        let cycle = {
+            let chain = [state.active.as_slice(), state.archive.as_slice()];
+            would_create_supersede_cycle(&superseding, target, supersede_chain_of(&chain))
+        };
+        if cycle {
+            log::info!(
+                target: crate::LOG_TARGET,
+                "memory_supersede_rejected target={} superseding={} reason=cycle",
+                target,
+                superseding,
+            );
+            continue;
+        }
+        if assign_supersede(&mut state.active, target, superseding)
+            || assign_supersede(&mut state.archive, target, superseding)
+        {
+            established += 1;
+        } else {
+            log::info!(
+                target: crate::LOG_TARGET,
+                "memory_supersede_rejected target={} superseding={} reason=missing_target",
+                target,
+                superseding,
+            );
+        }
+    }
+    established
 }
 
 fn validate_content(content: &str) -> Result<(), MemoryError> {

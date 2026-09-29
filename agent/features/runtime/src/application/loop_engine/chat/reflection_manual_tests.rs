@@ -53,6 +53,7 @@ fn completed(status: ReflectionTaskCompletionStatus, changed: usize) -> Reflecti
             outdated: 0,
             suggestions_added: changed,
             outdated_marked: 0,
+            superseded: 0,
             duration_ms: 1,
             record_id: None,
         }),

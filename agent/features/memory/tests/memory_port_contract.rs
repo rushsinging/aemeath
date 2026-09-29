@@ -223,6 +223,7 @@ fn suggestion(layer: MemoryLayer, content: &str) -> MemorySuggestion {
         content: content.to_string(),
         tags: vec!["reflection".to_string()],
         reason: "test".to_string(),
+        supersedes: vec![],
     }
 }
 

@@ -5,6 +5,10 @@ mod policy;
 mod reflection;
 
 #[cfg(test)]
+#[path = "domain/policy_tests.rs"]
+mod policy_tests;
+
+#[cfg(test)]
 #[path = "domain/reflection_error_boundary_tests.rs"]
 mod reflection_error_boundary_tests;
 
