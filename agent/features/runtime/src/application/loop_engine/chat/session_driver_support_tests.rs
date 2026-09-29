@@ -160,7 +160,7 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
     let persist = workspace.persist();
     let config = Arc::new(config::ConfigAppService::with_global_path(Some(
         &workspace.read().initial_cwd(),
-    ), share::config::paths::global_config_path()));
+    ), std::path::PathBuf::from("/nonexistent/test-isolated-config.json")));
     let now = chrono::Utc::now().to_rfc3339();
     Arc::new(context::MainSessionWiring::build(
         context::MainSessionWiringBuilder {
@@ -319,8 +319,8 @@ fn test_shell_with_catalog(
         )),
         workspace,
         wiring,
-        config_query: Arc::new(config::ConfigAppService::with_global_path(None, share::config::paths::global_config_path())),
-        config_writer: Arc::new(config::ConfigAppService::with_global_path(None, share::config::paths::global_config_path())),
+        config_query: Arc::new(config::ConfigAppService::with_global_path(None, std::path::PathBuf::from("/nonexistent/test-isolated-config.json"))),
+        config_writer: Arc::new(config::ConfigAppService::with_global_path(None, std::path::PathBuf::from("/nonexistent/test-isolated-config.json"))),
         session_management: Arc::new(context::test_support::UnavailableSessionManagement),
         provider_factory: crate::application::model::test_support::constant_factory(
             binding.clone(),
@@ -425,8 +425,8 @@ fn test_shell_with_task_store(
         )),
         workspace,
         wiring,
-        config_query: Arc::new(config::ConfigAppService::with_global_path(None, share::config::paths::global_config_path())),
-        config_writer: Arc::new(config::ConfigAppService::with_global_path(None, share::config::paths::global_config_path())),
+        config_query: Arc::new(config::ConfigAppService::with_global_path(None, std::path::PathBuf::from("/nonexistent/test-isolated-config.json"))),
+        config_writer: Arc::new(config::ConfigAppService::with_global_path(None, std::path::PathBuf::from("/nonexistent/test-isolated-config.json"))),
         session_management: Arc::new(context::test_support::UnavailableSessionManagement),
         provider_factory: crate::application::model::test_support::constant_factory(
             binding.clone(),

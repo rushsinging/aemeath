@@ -7,7 +7,6 @@
 //! never produce one.
 
 use memory::api::reflection::*;
-use memory::api::search::*;
 use memory::api::*;
 
 fn now() -> u64 {

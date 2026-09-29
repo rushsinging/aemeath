@@ -145,9 +145,14 @@ fn resumed_shell(
 ) -> crate::application::client::SessionRuntime {
     let mut shell = test_shell_with_task_store(hooks, task_store.clone());
     let workspace = shell.workspace.clone();
+    // 测试不读真实全局配置：用不存在的隔离路径，避免用户 aemeath.json
+    // 非法（schema 漂移期/半写坏档）时 hook 装配静默降级、断言随机失败。
     let config = Arc::new(config::ConfigAppService::with_global_path(
         Some(&workspace.read().initial_cwd()),
-        share::config::paths::global_config_path(),
+        workspace
+            .read()
+            .initial_cwd()
+            .join("nonexistent-isolated-config.json"),
     ));
     shell.wiring = Arc::new(context::MainSessionWiring::build(
         context::MainSessionWiringBuilder {
