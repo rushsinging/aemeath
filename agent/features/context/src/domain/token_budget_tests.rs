@@ -107,6 +107,23 @@ fn clamp_keeps_large_window_behavior_unchanged() {
     );
 }
 
+/// #1777：注入预算按窗口比例（2%）计算，取代旧的固定 token 值。
+#[test]
+fn injection_token_budget_is_two_percent_of_window() {
+    assert_eq!(injection_token_budget(200_000), 4_000);
+    assert_eq!(injection_token_budget(128_000), 2_560);
+    assert_eq!(injection_token_budget(1_000_000), 20_000);
+}
+
+/// 小窗口下 2% 可能取整为 0：此时不做 clamp，让「禁用注入」保持为一个显式
+/// 选择（`inject_token_budget: Some(0)`），而不是窗口大小的副作用。
+#[test]
+fn injection_token_budget_may_round_to_zero_on_tiny_windows() {
+    assert_eq!(injection_token_budget(49), 0);
+    assert_eq!(injection_token_budget(50), 1);
+    assert_eq!(injection_token_budget(0), 0);
+}
+
 #[test]
 fn compact_tail_token_cap_is_three_percent_of_window() {
     // #1688 起按窗口比例封顶；#1773 由 5% 收紧为 3%——尾部只保留最近

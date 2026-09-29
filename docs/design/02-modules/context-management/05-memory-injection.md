@@ -60,15 +60,23 @@ ContextPort.build_window
 
 ### 3.2 注入时机
 
-- **每轮 LLM 调用前**：`build_window` 时注入
-- **属于 cacheable_prefix**：memory 内容不变时命中 prompt cache；reflection 写入新 memory 时 fingerprint 变化 → cache miss 一次 → 下一轮恢复命中（见 [04-prompt-guidance.md](04-prompt-guidance.md) §3.2）
+- **Session 首次 `build_window`**：检索并注入，随后**冻结复用**（#1777）
+- **compact 成功提交后**：下一次 `build_window` 重新检索并替换冻结内容；`Skipped` 不刷新
+- **其他轮次**：直接复用冻结内容，不发起检索——memory 属于 cacheable prefix，每轮重取会让内容漂移、cache 命中不可预测（见 [04-prompt-guidance.md](04-prompt-guidance.md) §3.2）
+- 冻结状态绑定 `session_id`：resume 切换 Session 视为该 Session 的首次注入；`clear_session` 释放
 
 ### 3.3 注入条件
 
 ```rust
-if config.memory.enabled && config.memory.inject_count > 0 {
-    let query = MemoryQuery { limit: config.memory.inject_count, ..Default::default() };
-    if let Some(block) = build_memory_block(port.retrieve_for_inject(&query)) {
+// #1777：预算按窗口比例（None 默认 2%），条数上限已移除
+let token_budget = match config.memory.inject_token_budget {
+    Some(0) => return Ok(empty),
+    Some(fixed) => fixed,
+    None => token_budget::injection_token_budget(request.context_size),
+};
+if config.memory.enabled && token_budget > 0 {
+    let query = MemoryQuery { limit: CANDIDATE_LIMIT, ..Default::default() };
+    if let Some(block) = build_memory_block(port.retrieve_for_inject(&query), token_budget) {
         window.system_blocks.push(block);
     }
 }
@@ -78,10 +86,11 @@ if config.memory.enabled && config.memory.inject_count > 0 {
 
 评分公式、BM25 / fallback 选择、filtering、ranking 与 `similarity_threshold` 的唯一真相见 [Memory 检索与注入](../memory/02-retrieval-and-injection.md)。Context Management **MUST** 验证 `MemorySearchResult.mode == InjectionPriority`，保持 `hits` 返回顺序，并且只消费 `hits[*].entry`；mode 不匹配返回 typed integration error，**NEVER** 复制 `injection_score` 或按 recency / pinned 二次排序。
 
-- Context 先按剩余 token budget 计算本轮最多可容纳条数，再把该上限放入 `MemoryQuery.limit`。
-- 返回后只允许按实际序列化 token 数截断尾部；**NEVER** 跳过高位条目后保留低位条目。
+- Context 取一个足够大的候选窗口（条数上限已移除，#1777），由 token 预算做最终截断。
+- 返回后按**两段预算填充**（#1777 覆盖式让位）：先填 `kind = Synthesized` 的结论，再用剩余预算填普通条目并跳过被已选结论 `evidence` 覆盖的来源；段内超预算即停，**NEVER** 跳过高位条目后保留低位条目。
+- 结论若在第一段就未入选，其来源在第二段照常参与——固定降权系数会误伤来源，让位必须是条件性的。
 - render 只使用 `hits[*].entry` 的稳定 `MemoryEntry` Published Language 字段；result/hit 的 retrieval mode、relevance、location、outdated、TTL、internal score / index metadata **NEVER** 进入 prompt。
-- 默认 `inject_count = 5` 是 Config 提供的静态上限，不是 Memory 相关性阈值；最终条数取 Config 上限与本轮 token budget 的较小值。
+- 注入条数只由 token 预算决定（#1777 已移除 `inject_count`），Config 可用 `inject_token_budget` 覆盖为固定值。
 
 ## 5. Active Memory 生命周期
 
@@ -103,9 +112,9 @@ Memory tool 是 LLM 主动调用的 tool，与自动注入是**互补关系**：
 
 | 维度 | 自动注入（MemoryPort） | Memory Tool（LLM 调用） |
 |---|---|---|
-| 触发 | 每轮 build_window | LLM 决定调用 |
+| 触发 | Session 首次 + compact 后（其余轮次复用冻结内容） | LLM 决定调用 |
 | 检索 | `retrieve_for_inject`（Memory-owned ranking） | `search`（BM25 primary / 显式 fallback） |
-| 条数 | inject_count（默认 5） | LLM 指定 limit |
+| 条数 | token 预算（窗口 2% 默认，可配置覆盖） | LLM 指定 limit |
 | 写入 | 不写入（只读） | 可写入（`Memory.tool` write 操作） |
 | 端口 | MemoryPort | MemoryPort（同一 trait） |
 

@@ -63,6 +63,26 @@ pub(crate) fn supersede_chain_of<'a>(
     }
 }
 
+/// 覆盖式让位的注入顺序（#1777）：**不改分数，只改顺序**——把
+/// `kind = Synthesized` 的归纳结论排在全部普通条���之前，组内仍按
+/// `injection_score` 降序。
+///
+/// 调用方（Context 的注入填充）据此做两段填充：结论段先填，其 `evidence`
+/// 指向的来源在第二段让位；结论未入选时来源照常参与。固定降权系数会在
+/// 「结论未被选中」时误伤来源，因此不存在。
+pub fn order_for_injection(entries: &mut [MemoryEntry], now: u64) {
+    entries.sort_by(|left, right| {
+        let group = |entry: &MemoryEntry| match entry.kind {
+            MemoryKind::Synthesized => 0,
+            MemoryKind::Raw => 1,
+        };
+        group(left)
+            .cmp(&group(right))
+            .then_with(|| injection_score(right, now).cmp(&injection_score(left, now)))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+}
+
 /// M9：建立 `superseded_by` 关系前校验不成环。
 ///
 /// `superseded.superseded_by = new` 这条边若让新条目重新出现在被取代条目的
