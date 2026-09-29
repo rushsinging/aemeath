@@ -11,6 +11,7 @@ fn fixture_root(temp: &Path) -> std::path::PathBuf {
     fs::create_dir_all(root.join(".agents")).expect("create .agents");
     let registry = serde_json::json!({
         "version": 1,
+        "budgets": {"repository_migration_debt": 0, "modules": {}},
         "entries": [],
         "rules": [
             {
@@ -100,6 +101,7 @@ fn guard_run_enforces_construction_symbols_outside_allowed_paths() {
     fs::create_dir_all(root.join(".agents")).expect("create .agents");
     let registry = serde_json::json!({
         "version": 1,
+        "budgets": {"repository_migration_debt": 0, "modules": {}},
         "entries": [],
         "rules": [],
         "construction_symbols": [
@@ -108,6 +110,7 @@ fn guard_run_enforces_construction_symbols_outside_allowed_paths() {
                 "symbol": "wire_task",
                 "owner_crate": "task",
                 "kind": "wire",
+                "guard": "check-architecture-guards.sh",
                 "allowed_paths": ["agent/features/task/src"],
                 "reason": "test",
                 "tracking_issue": 1
@@ -149,6 +152,7 @@ fn guard_run_flags_unregistered_cross_bc_wire_calls_fail_closed() {
     fs::create_dir_all(root.join(".agents")).expect("create .agents");
     let registry = serde_json::json!({
         "version": 1,
+        "budgets": {"repository_migration_debt": 0, "modules": {}},
         "entries": [],
         "rules": [],
         "construction_symbols": [
@@ -157,6 +161,7 @@ fn guard_run_flags_unregistered_cross_bc_wire_calls_fail_closed() {
                 "symbol": "wire_task",
                 "owner_crate": "task",
                 "kind": "wire",
+                "guard": "check-architecture-guards.sh",
                 "allowed_paths": ["agent/features/task/src", "agent/composition/src"],
                 "reason": "test",
                 "tracking_issue": 1
@@ -223,6 +228,7 @@ fn guard_run_fast_profile_skips_construction_symbol_scan() {
     fs::create_dir_all(root.join(".agents")).expect("create .agents");
     let registry = serde_json::json!({
         "version": 1,
+        "budgets": {"repository_migration_debt": 0, "modules": {}},
         "entries": [],
         "rules": [],
         "construction_symbols": [
@@ -230,7 +236,8 @@ fn guard_run_fast_profile_skips_construction_symbol_scan() {
                 "id": "construction.task.filesystem-store",
                 "symbol": "FileSystemTaskStore",
                 "owner_crate": "task",
-                "kind": "construction",
+                "kind": "adapter",
+                "guard": "check-architecture-guards.sh",
                 "allowed_paths": ["agent/composition/src"],
                 "reason": "test",
                 "tracking_issue": 1
@@ -266,5 +273,31 @@ fn guard_run_fast_profile_skips_construction_symbol_scan() {
             .any(|violation| violation.rule_id == "construction.task.filesystem-store"),
         "full 档必须拦截越界构造：{:#?}",
         full_report.violations
+    );
+}
+
+/// 引擎启动自检（matrix 目标态：原 guard-registry check 的 schema 级并入引擎启动）：
+/// registry schema 非法时 fail-closed，任何档位都不得继续执行规则。
+#[test]
+fn guard_run_rejects_invalid_registry_schema() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    let root = temp.path().join("repo");
+    fs::create_dir_all(root.join(".agents")).expect("create .agents");
+    // version != 1 属于 schema 级非法。
+    fs::write(
+        root.join(".agents/architecture-guard-registry.json"),
+        r#"{"version": 2, "budgets": {"repository_migration_debt": 0, "modules": {}}, "entries": [], "rules": [], "retired_symbols": []}"#,
+    )
+    .expect("write registry");
+
+    let result = crate::guards::run(&root, crate::guards::Profile::Fast, None);
+
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => panic!("schema 非法必须 fail-closed"),
+    };
+    assert!(
+        format!("{error:#}").contains("注册表") || format!("{error:#}").contains("registry"),
+        "错误应指向 registry 自检: {error:#}"
     );
 }

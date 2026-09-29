@@ -37,6 +37,12 @@ pub fn run(repo_root: &Path, profile: Profile, rule_filter: Option<&str>) -> Res
     let registry_path = repo_root.join(".agents/architecture-guard-registry.json");
     let bytes = fs::read(&registry_path)
         .with_context(|| format!("读取 {} 失败", registry_path.display()))?;
+    // 启动自检（schema 级，原 guard-registry check 的并入步骤）：
+    // registry 是引擎唯一调度源，schema 非法必须 fail-closed，NEVER 带病执行规则。
+    crate::guard_registry::validate_str(
+        std::str::from_utf8(&bytes).context("registry 不是合法 UTF-8")?,
+    )
+    .context("registry 启动自检失败")?;
     let registry = guards_rules::parse_registry(&bytes)?;
 
     let selected: Vec<&Rule> = registry

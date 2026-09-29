@@ -18,6 +18,7 @@ fn write(path: &Path, content: &str) {
 fn write_registry(root: &Path, rules: serde_json::Value) {
     let registry = serde_json::json!({
         "version": 1,
+        "budgets": {"repository_migration_debt": 0, "modules": {}},
         "entries": [],
         "rules": rules,
         "retired_symbols": []
