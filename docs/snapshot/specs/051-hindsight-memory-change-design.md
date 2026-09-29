@@ -727,6 +727,7 @@ D3 需要"变更了 N 条"这一数字，而它目前**既无日志也无对外�
 
 | 日期 | 变更 |
 |---|---|
+| 2026-09-29 | §5 证据指针落地（实施 #1775 时确认）：`MemoryKind` 序列化为 snake_case 且 Raw 不占载荷；合并路径在 service 与 InMemory 两个实现同步改为「归档 + 指针」；M11 写入校验拒绝悬空 evidence；当前 compact 只归档不删除，指针不悬空由测试固化，未来 archive 淘汰功能须前置排除被引用条目 |
 | 2026-09-29 | §4 取代关系落地（实施 #1774 时确认）：`MemorySuggestion.supersedes` 为 `Vec<MemoryId>` 并进入 prompt 双语模板；`MemorySearchHit` 增加 `superseded_by`；`ReflectionApplyResult` 新增 `superseded` 计数；环护栏深度 256 步。合并导致关系自指时按 M9 拒绝（测试 `a_suggestion_merged_into_its_own_target_yields_no_relation` 固化该语义） |
 | 2026-09-28 | §7.3 执行模型调整（实施 #1772 时确认）：反思由「单槽后台异步」改为「同一执行通道同步 await」，调用方 await 到终态并把 Run 的 cancellation token 传入执行通道，Session teardown 不再 drain；TUI 提示在反思完成时立即发出，LLM reminder 仍由下一轮取走一次（当前轮 LLM 请求在反思完成前已发出）。`format_output` / `user_alert` / 整份 i18n reflection 文案按死代码移除。目标态以 `docs/design/02-modules/memory/03-reflection.md` 为准 |
 | 2026-09-28 | 初稿：变更 A/B/C 的领域模型、不变量、端口与行为设计、测试策略与验收标准；变更 D 方向记录；不变量与端口变更汇总；不采纳清单与开放问题 |

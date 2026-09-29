@@ -32,8 +32,8 @@ pub mod search {
 
 pub use crate::adapters::{InMemoryMemory, MemoryPolicy};
 pub use crate::domain::{
-    MemoryCategory, MemoryEntry, MemoryError, MemoryId, MemoryLayer, MemoryOpenError, MemorySource,
-    MemoryStorageErrorKind, MemorySuggestion, ProjectMemoryKey,
+    MemoryCategory, MemoryEntry, MemoryError, MemoryId, MemoryKind, MemoryLayer, MemoryOpenError,
+    MemorySource, MemoryStorageErrorKind, MemorySuggestion, ProjectMemoryKey,
 };
 pub use crate::noop::NoOpMemory;
 pub use crate::ports::{

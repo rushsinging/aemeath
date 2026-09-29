@@ -68,6 +68,9 @@ pub struct MemoryEntryResult {
     /// Set when another memory replaced this one (#1774). Such an entry is no
     /// longer injected but stays visible here so the model can see the history.
     pub superseded_by: Option<String>,
+    /// Memory ids this entry was merged from (#1775). Historical merges carry
+    /// no pointers — the evidence chain only starts with new merges.
+    pub evidence: Vec<String>,
 }
 
 /// Structured explicit-search hit with deterministic relevance metadata.
@@ -83,6 +86,8 @@ pub struct MemorySearchHitResult {
     pub outdated: bool,
     pub ttl_expired: bool,
     pub superseded_by: Option<String>,
+    /// Memory ids this entry was merged from (#1775).
+    pub evidence: Vec<String>,
     pub relevance: Option<f64>,
 }
 

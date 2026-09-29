@@ -55,6 +55,25 @@ pub enum MemorySource {
     User,
 }
 
+/// 记忆来源类型，与 [`MemoryCategory`] 正交：分类表达用途，类型表达来源。
+/// 合并产物与归纳产物都会持有 `evidence`，但读侧行为相反（归纳来源仍在
+/// active 需要让位），因此必须显式标记，**NEVER** 用 `evidence.len()` 推导。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryKind {
+    /// 原始记忆（默认；合并产物亦属此类——其来源已归档，不参与注入）。
+    #[default]
+    Raw,
+    /// 由多条记忆归纳而来的结论（其来源仍可能在 active，读侧需让位）。
+    Synthesized,
+}
+
+impl MemoryKind {
+    fn is_raw(kind: &MemoryKind) -> bool {
+        matches!(kind, MemoryKind::Raw)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryEntry {
     pub id: MemoryId,
@@ -81,6 +100,13 @@ pub struct MemoryEntry {
     /// 全量条目扫描推导（#1774）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub superseded_by: Option<MemoryId>,
+    /// 记忆来源类型（#1775）。
+    #[serde(default, skip_serializing_if = "MemoryKind::is_raw")]
+    pub kind: MemoryKind,
+    /// 来源条目：本条目由这些条目合并（写入去重，#1775）或归纳（#1776）
+    /// 而来。可能指向同层 archive 条目，也可能指向 active 条目。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<MemoryId>,
 }
 
 impl MemoryEntry {
@@ -113,6 +139,8 @@ impl MemoryEntry {
             confirmation_count: 0,
             outdated: false,
             superseded_by: None,
+            kind: MemoryKind::default(),
+            evidence: Vec::new(),
         })
     }
 

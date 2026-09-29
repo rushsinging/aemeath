@@ -775,17 +775,46 @@ impl MemoryPort for InMemoryMemory {
                 message: "记忆 ID 必须唯一".to_string(),
             });
         }
-        if let Some(existing) = state.active.iter_mut().find(|stored| {
-            stored.layer == entry.layer
-                && jaccard_similarity(&stored.content, &entry.content)
-                    >= self.policy.similarity_threshold
+        // M11: every evidence pointer must resolve from day one.
+        if entry.evidence.iter().any(|source| {
+            !state
+                .active
+                .iter()
+                .chain(state.archive.iter())
+                .any(|stored| &stored.id == source)
         }) {
-            existing.tags.append(&mut entry.tags);
-            existing.tags.sort();
-            existing.tags.dedup();
-            existing.last_confirmed_at = entry.created_at;
-            existing.confirmation_count = existing.confirmation_count.saturating_add(1);
-            let existing_id = existing.id;
+            return Err(MemoryError::InvalidEntry {
+                message: "证据指针指向不存在的记忆".to_string(),
+            });
+        }
+        let dedup_hit = state
+            .active
+            .iter_mut()
+            .find(|stored| {
+                stored.layer == entry.layer
+                    && jaccard_similarity(&stored.content, &entry.content)
+                        >= self.policy.similarity_threshold
+            })
+            .map(|existing| {
+                existing.tags.append(&mut entry.tags);
+                existing.tags.sort();
+                existing.tags.dedup();
+                existing.last_confirmed_at = entry.created_at;
+                existing.confirmation_count = existing.confirmation_count.saturating_add(1);
+                existing.id
+            });
+        if let Some(existing_id) = dedup_hit {
+            // #1775: archive the incoming entry instead of dropping it, and
+            // let the survivor keep a pointer to it.
+            let incoming_id = entry.id;
+            state.archive.push(entry);
+            if let Some(existing) = state
+                .active
+                .iter_mut()
+                .find(|stored| stored.id == existing_id)
+            {
+                existing.evidence.push(incoming_id);
+            }
             state.revision = state.revision.saturating_add(1);
             return Ok(WriteResult::Merged { existing_id });
         }
@@ -1039,6 +1068,10 @@ fn apply_reflection_entry(
         existing.tags.dedup();
         existing.last_confirmed_at = entry.created_at;
         existing.confirmation_count = existing.confirmation_count.saturating_add(1);
+        // #1775: archive the incoming entry and let the survivor point at it.
+        let incoming_id = entry.id;
+        state.archive.push(entry);
+        existing.evidence.push(incoming_id);
         return Ok(Some(existing.id));
     }
     let layer_entries = state
