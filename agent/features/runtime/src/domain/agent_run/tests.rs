@@ -57,6 +57,7 @@ fn pending_interaction_enters_awaiting_user_and_emits_request_identity() {
         Some(&PendingInteraction {
             request_id: request_id.clone(),
             continuation,
+            hard_pause_resume_status: None,
         })
     );
     assert!(run.events().iter().any(|event| matches!(
@@ -170,6 +171,37 @@ fn interaction_continuation_exhaustively_restores_its_origin_phase() {
             .unwrap();
         run.complete_interaction(&request_id).unwrap();
         assert_eq!(run.status(), expected);
+    }
+}
+
+/// 断点 A 复现：HardPause 的三个 step_driver 调用点分别处于
+/// `ApplyingResponse`（text stall 的 Complete/Continue 分支）与
+/// `AwaitingToolApproval`（工具检查分支），挂起白名单必须覆盖这些来源相位。
+#[test]
+fn hard_pause_interaction_begins_from_suspended_model_and_approval_phases() {
+    for initial in [
+        RunStatus::ApplyingResponse,
+        RunStatus::AwaitingToolApproval,
+        RunStatus::ExecutingTools,
+        RunStatus::DrainingInput,
+    ] {
+        let mut run = run_at_status(initial);
+        let request_id = InteractionRequestId::new_v7();
+        run.begin_interaction(
+            request_id.clone(),
+            InteractionContinuation::ContinueAfterHardPause,
+        )
+        .unwrap_or_else(|error| panic!("HardPause 应能从 {initial:?} 挂起，实际被拒: {error:?}"));
+        assert_eq!(run.status(), RunStatus::AwaitingUser);
+        assert_eq!(
+            run.complete_interaction(&request_id).unwrap(),
+            InteractionContinuation::ContinueAfterHardPause
+        );
+        assert_eq!(
+            run.status(),
+            initial,
+            "HardPause 恢复必须回到挂起源相位，收口 transition 才能沿原路径推进"
+        );
     }
 }
 

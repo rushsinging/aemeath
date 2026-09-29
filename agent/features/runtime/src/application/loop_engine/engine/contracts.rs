@@ -185,6 +185,25 @@ pub enum ToolGuardDecision {
     SoftBlock { reason: String },
 }
 
+/// HardPause 挂起时对当前 step 的收口方式。
+/// text stall 来源（`ModelStep::Complete` / `Continue`）在现场收口 step；
+/// tool fuse 来源在工具轮已收口到 `DrainingInput` 后才挂起，跳过收口。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HardPauseStepClose {
+    CloseNow,
+    AlreadyClosed,
+}
+
+/// HardPause 交互发起结果。
+/// `Suspended`：run 已挂起为 `AwaitingUser`，调用点必须停止本轮工作；
+/// `Degraded`：交互发起失败（Run 未被触碰），守卫降级为 SoftBlock 语义，
+/// 调用点按常规 SoftBlock 路径继续，守卫自身 NEVER 打死 run。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HardPauseBegin {
+    Suspended,
+    Degraded,
+}
+
 /// #1248 TaskData 5: A tool call that was suspended for user interaction.
 /// Carries the suspension details needed to form a `UserQuestions` intent.
 #[derive(Debug, Clone, PartialEq)]

@@ -150,7 +150,6 @@ impl Run {
             (&continuation, self.status),
             (
                 InteractionContinuation::CompleteToolCall(_)
-                    | InteractionContinuation::ContinueAfterHardPause
                     | InteractionContinuation::ContinueToolApproval(_),
                 RunStatus::ExecutingTools
             ) | (
@@ -159,14 +158,26 @@ impl Run {
             ) | (
                 InteractionContinuation::ContinuePlanApproval,
                 RunStatus::ApplyingResponse
+            ) | (
+                InteractionContinuation::ContinueAfterHardPause,
+                RunStatus::ExecutingTools
+                    | RunStatus::ApplyingResponse
+                    | RunStatus::AwaitingToolApproval
+                    | RunStatus::DrainingInput
             )
         );
         if !allowed {
             return Err(RunTransitionError::RunNotActive(self.status));
         }
+        let hard_pause_resume_status = matches!(
+            continuation,
+            InteractionContinuation::ContinueAfterHardPause
+        )
+        .then_some(self.status);
         self.pending_interaction = Some(PendingInteraction {
             request_id: request_id.clone(),
             continuation,
+            hard_pause_resume_status,
         });
         self.set_status_by_command(RunStatus::AwaitingUser, RunTransitionReason::AwaitUser)?;
         self.events.push(RuntimeLifecycleEvent::AwaitingUser {
@@ -192,10 +203,10 @@ impl Run {
             });
         }
         let pending = self.pending_interaction.take().expect("checked above");
-        self.set_status_by_command(
-            pending.continuation.resume_status(),
-            RunTransitionReason::UserResumed,
-        )?;
+        let resume_status = pending
+            .hard_pause_resume_status
+            .unwrap_or_else(|| pending.continuation.resume_status());
+        self.set_status_by_command(resume_status, RunTransitionReason::UserResumed)?;
         self.events.push(RuntimeLifecycleEvent::Resumed {
             run_id: self.id.clone(),
             parent_run_id: self.parent_id.clone(),
@@ -219,10 +230,10 @@ impl Run {
             });
         }
         let pending = self.pending_interaction.take().expect("checked above");
-        self.set_status_by_command(
-            pending.continuation.resume_status(),
-            RunTransitionReason::UserResumed,
-        )?;
+        let resume_status = pending
+            .hard_pause_resume_status
+            .unwrap_or_else(|| pending.continuation.resume_status());
+        self.set_status_by_command(resume_status, RunTransitionReason::UserResumed)?;
         Ok(pending.continuation)
     }
 
@@ -929,16 +940,24 @@ fn command_status_allowed(from: RunStatus, to: RunStatus) -> bool {
         RunStatus::CancellingStep => true,
         // Step 收口只能从取消态进入。
         RunStatus::FinalizingStep => from == RunStatus::CancellingStep,
-        // 交互暂停：只允许从工具/模型工作阶段进入。
+        // 交互暂停：只允许从工具/模型工作阶段进入（DrainingInput 为
+        // tool fuse HardPause 的挂起点——工具轮收口后挂起）。
         RunStatus::AwaitingUser => matches!(
             from,
             RunStatus::InvokingModel
                 | RunStatus::ApplyingResponse
                 | RunStatus::AwaitingToolApproval
                 | RunStatus::ExecutingTools
+                | RunStatus::DrainingInput
         ),
         // 交互恢复：只能从 AwaitingUser 回到 continuation 保存的工作阶段。
-        RunStatus::ExecutingTools | RunStatus::PreparingContext => from == RunStatus::AwaitingUser,
+        // HardPause 恢复须回到挂起源相位（ApplyingResponse / AwaitingToolApproval /
+        // ExecutingTools / DrainingInput），后续收口 transition 才沿原状态机路径推进。
+        RunStatus::ExecutingTools
+        | RunStatus::PreparingContext
+        | RunStatus::ApplyingResponse
+        | RunStatus::AwaitingToolApproval
+        | RunStatus::DrainingInput => from == RunStatus::AwaitingUser,
         _ => false,
     }
 }
