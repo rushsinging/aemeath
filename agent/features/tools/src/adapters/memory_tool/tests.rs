@@ -190,6 +190,7 @@ async fn reflection_generated_memory_remains_searchable_through_tool_contract() 
                 tags: vec!["reflection".to_string()],
                 reason: "user preference".to_string(),
                 supersedes: vec![],
+                synthesizes: vec![],
             }],
             ..ReflectionOutput::default()
         })

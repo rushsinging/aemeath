@@ -517,6 +517,18 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                 MemorySource::Llm,
             )?;
             entry.tags = suggestion.tags.clone();
+            // M13: fewer than two sources is a copy, not a synthesis. The
+            // content is still written — only the type marking is withheld.
+            if !apply_synthesis(&mut entry, &suggestion.synthesizes)
+                && !suggestion.synthesizes.is_empty()
+            {
+                log::info!(
+                    target: crate::LOG_TARGET,
+                    "memory_synthesis_downgraded sources={} below_min={}",
+                    suggestion.synthesizes.len(),
+                    MIN_SYNTHESIS_EVIDENCE,
+                );
+            }
             prepared.push((entry, suggestion.supersedes.clone()));
         }
         let outdated = output
@@ -719,6 +731,19 @@ fn apply_reflection_entry(
     policy: MemoryPolicy,
 ) -> Result<(WriteResult, bool), MemoryError> {
     validate_content(&entry.content)?;
+    // M11: a synthesized entry may only cite memories this layer already
+    // holds — an untraceable conclusion is worse than no conclusion.
+    if entry.evidence.iter().any(|source| {
+        !dataset
+            .active()
+            .iter()
+            .chain(dataset.archive())
+            .any(|stored| &stored.id == source)
+    }) {
+        return Err(MemoryError::InvalidEntry {
+            message: "证据指针指向不存在的记忆".to_string(),
+        });
+    }
     if dataset
         .active()
         .iter()
@@ -1512,6 +1537,7 @@ mod tests {
                 tags: vec!["reflected".to_string()],
                 reason: "test".to_string(),
                 supersedes: vec![],
+                synthesizes: Vec::new(),
             }],
             ..ReflectionOutput::default()
         }

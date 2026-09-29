@@ -32,6 +32,7 @@ fn suggestion(content: &str, supersedes: Vec<MemoryId>) -> MemorySuggestion {
         tags: vec!["reflection".to_string()],
         reason: "test".to_string(),
         supersedes,
+        synthesizes: Vec::new(),
     }
 }
 

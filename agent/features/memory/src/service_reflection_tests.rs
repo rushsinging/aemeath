@@ -64,6 +64,7 @@ fn suggestion(layer: MemoryLayer, content: &str) -> MemorySuggestion {
         tags: vec!["reflection".to_string()],
         reason: "test".to_string(),
         supersedes: vec![],
+        synthesizes: Vec::new(),
     }
 }
 
