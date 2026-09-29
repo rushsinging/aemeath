@@ -132,7 +132,7 @@ Memory BC 只输出"这些条目值得注入，格式如下"；Context Managemen
 - `global` / `project` 是持久化 Memory 层；分类固定为 `fact`、`decision`、`preference`、`pattern`、`pitfall`。
 - `add_reminder` / `complete_reminder` 是当前 Session reminder，不写入持久化 Memory。
 - input schema 对 action、layer、category、priority 发布枚举约束，而不是无边界字符串。
-- `search` 的 typed result 返回 id、content、layer、category、tags、pinned、location、outdated、ttl_expired、superseded_by、relevance；`list` 返回完整 entries。由于 Tool pipeline 对 LLM 使用 text-first 投影，search/list 的 text **MUST** 同样保留有序条目与可管理完整 ID；structured data 服务 TUI/server，不能替代 LLM 文本契约。
+- `search` 的 typed result 返回 id、content、layer、category、tags、pinned、location、outdated、ttl_expired、superseded_by、evidence、relevance；`list` 返回完整 entries。由于 Tool pipeline 对 LLM 使用 text-first 投影，search/list 的 text **MUST** 同样保留有序条目与可管理完整 ID；structured data 服务 TUI/server，不能替代 LLM 文本契约。
 - Tool 同时发布 `archive` / `restore`。满容量 add/restore 返回 `action=needs_eviction` 与 typed candidates（完整 ID、正文、层/分类/状态、confirmation_count、last_confirmed_at、eviction score/reason），写入保持 NotCommitted；调用方只能显式 archive，禁止静默自动淘汰。
 - Tool description 承载 Memory 使用策略：历史证据不足先 search；用户明确要求长期记住时 add；默认 project，明确跨项目才 global；临时工作用 reminder；敏感、推测和仓库可即时恢复的临时事实不写；无命中不伪造；Memory 不覆盖更高优先级指令。
 - Reflection 写入的 `MemorySuggestion` 经同一个 `MemoryPort` 成为普通 `MemoryEntry`，因此无需修改 Reflection trigger/workflow 即可被 Tool search 检索。
@@ -167,6 +167,7 @@ struct MemoryConfig {
 | R4 | outdated 条目 **不参与注入但可显式检索** | 状态通过 search hit metadata 表达，NEVER 静默丢失 |
 | R5 | pinned 只在 eligible 集合中获得最高优先级 | pinned 不能绕过 superseded / outdated / TTL eligibility |
 | R7 | 被取代条目不参与注入但可显式检索并携带取代者 | M10 硬过滤；`superseded_by` 经 hit metadata 表达，关系由 apply 建立且无环（M9） |
+| R8 | 合并产物可追溯且指针不悬空 | M11：写入时校验 evidence 指向；合并 = 归档新条目 + 旧条目记指针；compact 不删除被引用条目 |
 | R6 | search 平分使用 search_tie_break_score | archived/outdated/TTL hit NEVER 调 injection_score |
 
 ## 8. 相关文档

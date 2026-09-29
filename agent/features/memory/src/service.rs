@@ -387,22 +387,51 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                         message: "记忆 ID 必须唯一".to_string(),
                     });
                 }
-                if let Some(existing) = dataset.active_mut().iter_mut().find(|stored| {
-                    jaccard_similarity(&stored.content, &entry.content)
-                        >= policy.similarity_threshold
+                // M11: every evidence pointer must resolve on this layer from
+                // day one — a pointer that dangles now can only get worse.
+                if entry.evidence.iter().any(|source| {
+                    !dataset
+                        .active()
+                        .iter()
+                        .chain(dataset.archive())
+                        .any(|stored| &stored.id == source)
                 }) {
-                    let mut tags = entry.tags.clone();
-                    existing.tags.append(&mut tags);
-                    existing.tags.sort();
-                    existing.tags.dedup();
-                    existing.last_confirmed_at = entry.created_at;
-                    existing.confirmation_count = existing.confirmation_count.saturating_add(1);
-                    return Ok((
-                        WriteResult::Merged {
-                            existing_id: existing.id,
-                        },
-                        true,
-                    ));
+                    return Err(MemoryError::InvalidEntry {
+                        message: "证据指针指向不存在的记忆".to_string(),
+                    });
+                }
+                let dedup_hit = dataset
+                    .active_mut()
+                    .iter_mut()
+                    .find(|stored| {
+                        jaccard_similarity(&stored.content, &entry.content)
+                            >= policy.similarity_threshold
+                    })
+                    .map(|existing| {
+                        let mut tags = entry.tags.clone();
+                        existing.tags.append(&mut tags);
+                        existing.tags.sort();
+                        existing.tags.dedup();
+                        existing.last_confirmed_at = entry.created_at;
+                        existing.confirmation_count = existing.confirmation_count.saturating_add(1);
+                        existing.id
+                    });
+                if let Some(existing_id) = dedup_hit {
+                    // #1775: the incoming entry is archived on the same layer
+                    // instead of being dropped, and the survivor keeps a
+                    // pointer to it. Confirmation semantics are unchanged.
+                    // The closure is `Fn` (CAS retries re-run it), so archive a
+                    // clone and keep `entry` alive for the next attempt.
+                    let incoming_id = entry.id;
+                    dataset.archive_mut().push(entry.clone());
+                    if let Some(existing) = dataset
+                        .active_mut()
+                        .iter_mut()
+                        .find(|stored| stored.id == existing_id)
+                    {
+                        existing.evidence.push(incoming_id);
+                    }
+                    return Ok((WriteResult::Merged { existing_id }, true));
                 }
                 if dataset.active().len() >= policy.max_entries {
                     return Ok((
@@ -700,21 +729,33 @@ fn apply_reflection_entry(
             message: "记忆 ID 必须唯一".to_string(),
         });
     }
-    if let Some(existing) = dataset.active_mut().iter_mut().find(|stored| {
-        jaccard_similarity(&stored.content, &entry.content) >= policy.similarity_threshold
-    }) {
-        let mut tags = entry.tags.clone();
-        existing.tags.append(&mut tags);
-        existing.tags.sort();
-        existing.tags.dedup();
-        existing.last_confirmed_at = entry.created_at;
-        existing.confirmation_count = existing.confirmation_count.saturating_add(1);
-        return Ok((
-            WriteResult::Merged {
-                existing_id: existing.id,
-            },
-            true,
-        ));
+    let dedup_hit = dataset
+        .active_mut()
+        .iter_mut()
+        .find(|stored| {
+            jaccard_similarity(&stored.content, &entry.content) >= policy.similarity_threshold
+        })
+        .map(|existing| {
+            let mut tags = entry.tags.clone();
+            existing.tags.append(&mut tags);
+            existing.tags.sort();
+            existing.tags.dedup();
+            existing.last_confirmed_at = entry.created_at;
+            existing.confirmation_count = existing.confirmation_count.saturating_add(1);
+            existing.id
+        });
+    if let Some(existing_id) = dedup_hit {
+        // #1775: archive the incoming entry and let the survivor point at it.
+        let incoming_id = entry.id;
+        dataset.archive_mut().push(entry.clone());
+        if let Some(existing) = dataset
+            .active_mut()
+            .iter_mut()
+            .find(|stored| stored.id == existing_id)
+        {
+            existing.evidence.push(incoming_id);
+        }
+        return Ok((WriteResult::Merged { existing_id }, true));
     }
     if dataset.active().len() >= policy.max_entries {
         let candidates = eviction_candidates(dataset.active(), 3, entry.created_at);
