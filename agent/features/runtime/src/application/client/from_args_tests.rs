@@ -231,6 +231,11 @@ async fn make_test_shell(
     let temp = tempfile::tempdir().expect("create temp root");
     let root = temp.path().join("root");
     std::fs::create_dir_all(&root).expect("create root");
+    // 隔离用户全局配置：config 分层加载读 AEMEATH_AGENTS_DIR 下的 aemeath.json，
+    // 不隔离时用户配置文件非法（schema 漂移期 / 半写坏档）会让本组测试随机失败。
+    let agents_dir = temp.path().join("agents");
+    std::fs::create_dir_all(&agents_dir).expect("create isolated agents dir");
+    let _env = EnvGuard::set("AEMEATH_AGENTS_DIR", &agents_dir);
     let workspace = project::wire_production_workspace(root.clone(), None).expect("wire workspace");
     let task_wiring = task::wire_task();
     let config = config::wire_project_config(

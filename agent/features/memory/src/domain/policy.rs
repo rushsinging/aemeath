@@ -76,7 +76,8 @@ pub fn would_create_supersede_cycle(
     if new_entry_id == superseded_id {
         return true;
     }
-    let mut cursor = Some(new_entry_id.clone());
+    // MemoryId 是 Copy：按位解引用拷贝即离开借用域，无需 clone。
+    let mut cursor = Some(*new_entry_id);
     let mut steps = 0usize;
     while let Some(current) = cursor {
         if &current == superseded_id {
