@@ -75,7 +75,7 @@ Created
 
 ### 3.2 可见内容与重复调用
 
-> **当前落地（#1033/#905）**：Provider 已用 crate-private `HttpAttemptExecutor`（`adapters/http_attempt.rs`）统一单 attempt 的机械发送、cancellation、status/error body 判定与单一 diagnostic 记录，driver 之间不再各自复制这段逻辑。#905 已关闭：跨调用 retry/backoff（P6）与 stream→non-stream fallback（P7）的所有权已迁至 Runtime，错误分类统一（P9）已收口。Provider 生产 stream adapter 被 `check-provider-retry-ownership.sh` 守卫禁止恢复 retry loop、backoff sleep 或 fallback 发起逻辑。
+> **当前落地**：Provider 已用 crate-private `HttpAttemptExecutor`（`adapters/http_attempt.rs`）统一单 attempt 的机械发送、cancellation、status/error body 判定与单一 diagnostic 记录，driver 之间不再各自复制这段逻辑。跨调用 retry/backoff 与 stream→non-stream fallback 的所有权已迁至 Runtime，错误分类统一收口。Provider 生产 stream adapter 由引擎规则 `pattern.provider.no-pull-stream-retry-loop` 禁止恢复 retry loop、backoff sleep 或 fallback 发起逻辑。
 
 ProviderPort 的一次 invoke 只允许一次上游语义请求。Provider 不实现“stream 失败后自动 non-stream 重发”，因为第二次请求可能产生不同文本、工具调用或副作用意图，也会让 Runtime 无法准确记录 attempt 和 usage。
 
@@ -147,7 +147,7 @@ Runtime 负责：
 
 ## 6. 不可变 Transport
 
-> **当前落地（#1645）**：`adapters/transport.rs` + `adapters/pool.rs` 已交付不可变 `ProviderTransport` 与 `TransportPool`。pool key = `(driver_kind, api_style, base_url, api_key, user_agent, timeout_secs)`——覆盖 endpoint、认证域与 driver identity；model / max_tokens / reasoning 是 invocation 配置，**NEVER** 进入 key。`ProviderTransport` 只承载 `reqwest::Client`（HTTP connection pool）与单调递增诊断 id，不保存 current model / reasoning / max tokens / handler；各 driver 经 `from_shared_http` 注入共享 client，自身仅保存 endpoint/认证/展示字段。pool 由 Composition Root 的 `DefaultProviderFactory` 持有（进程级，随 `provider::composition::TransportPool` 构造面暴露并受 `check-provider-construction-ownership.sh` 零白名单锁定）；`LlmClient::from_config_with_pool` 按 key acquire，`from_config` 保持独占 client 路径。失效策略：无主动失效——key 任一事实变化（凭证轮换、endpoint / user-agent / timeout 变更）即产生新 key、新 transport，旧实例随最后一个 `Arc` 释放、连接池随 client drop 关闭，进程退出即整体回收。找不到指定 driver 时 `DriverSpec::parse` 显式报 Configuration，**NEVER** 静默回退默认 client。下方 struct 为设计签名，实际字段以代码为准。
+> **当前落地**：`adapters/transport.rs` + `adapters/pool.rs` 已交付不可变 `ProviderTransport` 与 `TransportPool`。pool key = `(driver_kind, api_style, base_url, api_key, user_agent, timeout_secs)`——覆盖 endpoint、认证域与 driver identity；model / max_tokens / reasoning 是 invocation 配置，**NEVER** 进入 key。`ProviderTransport` 只承载 `reqwest::Client`（HTTP connection pool）与单调递增诊断 id，不保存 current model / reasoning / max tokens / handler；各 driver 经 `from_shared_http` 注入共享 client，自身仅保存 endpoint/认证/展示字段。pool 由 Composition Root 的 `DefaultProviderFactory` 持有（进程级，随 `provider::composition::TransportPool` 构造面暴露并受 `construction_symbols` 白名单锁定）；`LlmClient::from_config_with_pool` 按 key acquire，`from_config` 保持独占 client 路径。失效策略：无主动失效——key 任一事实变化（凭证轮换、endpoint / user-agent / timeout 变更）即产生新 key、新 transport，旧实例随最后一个 `Arc` 释放、连接池随 client drop 关闭，进程退出即整体回收。找不到指定 driver 时 `DriverSpec::parse` 显式报 Configuration，**NEVER** 静默回退默认 client。下方 struct 为设计签名，实际字段以代码为准。
 
 ```rust
 struct ProviderTransport {
@@ -171,7 +171,7 @@ Transport pool 的 key 至少能唯一标识 provider endpoint、认证域和 dr
 
 ## 7. Invocation Scope
 
-> **当前落地（#902/#903/#907）**：`provider::InvocationScope` 已冻结 `model / max_tokens / requested_reasoning / effective_reasoning`，并显式传入 `LlmProvider::invocation_stream`。Anthropic、OpenAI-compatible 与 Ollama 请求构造只读该 scope；provider atomics / setter、Runtime shared-client lock 与 finalize restore 已物理删除（`check-provider-invocation-scope.sh` 守卫阻止回流）。#1645 已落地不可变 Transport（见 §6 当前落地注记）；下方 `transport / capability_fingerprint / OutputTokenLimit` 字段中 `capability_fingerprint` 与 `OutputTokenLimit` 仍是后续完整 ProviderPort 切线的 Target，不应误读为当前 Rust 类型已全部具备。
+> **当前落地**：`provider::InvocationScope` 已冻结 `model / max_tokens / requested_reasoning / effective_reasoning`，并显式传入 `LlmProvider::invocation_stream`。Anthropic、OpenAI-compatible 与 Ollama 请求构造只读该 scope；provider atomics / setter、Runtime shared-client lock 与 finalize restore 已物理删除（引擎规则 `pattern.provider.no-mutable-invocation-state` 阻止回流）。不可变 Transport 已落地（见 §6 当前落地注记）；下方 `transport / capability_fingerprint / OutputTokenLimit` 字段中 `capability_fingerprint` 与 `OutputTokenLimit` 仍是后续完整 ProviderPort 切线的 Target，不应误读为当前 Rust 类型已全部具备。
 
 ```rust
 struct InvocationScope {
@@ -223,7 +223,7 @@ Main 与每个 Sub Run 都可共享同一个 `Arc<ProviderTransport>`，但不�
 
 ## 9. Composition Root 与 Factory
 
-> **当前落地（#907）**：Composition Root 已通过 Runtime-owned `ProviderFactory` trait（`runtime::ports::provider_factory`）独占 provider 构造。`ProviderFactory::build(spec: ProviderBuildSpec) -> Result<ProviderBinding, ProviderError>` 接收纯值 spec 并返回 `ProviderBinding`（`Arc<dyn ProviderPort>` + model / max_tokens / reasoning / context_window）。Provider crate 的 `provider::composition` 模块是 Composition Root 专用构造面，重新导出 `LlmClient` / `LlmConfigOptions` / `InvocationScope` / `SystemBlock` / `LlmProvider` 等具体构造符号；非 Composition crate **NEVER** 引用 `provider::composition` 或构造符号。`check-provider-construction-ownership.sh` 守卫以零白名单锁定此边界并含负向探针证据。#1645 起生产 factory（`DefaultProviderFactory`）持有进程级 `TransportPool` 并经 `from_config_with_pool` 构造，"构造和缓存不可变 ProviderTransport"职责随之落地（见 §6）。
+> **当前落地**：Composition Root 已通过 Runtime-owned `ProviderFactory` trait（`runtime::ports::provider_factory`）独占 provider 构造。`ProviderFactory::build(spec: ProviderBuildSpec) -> Result<ProviderBinding, ProviderError>` 接收纯值 spec 并返回 `ProviderBinding`（`Arc<dyn ProviderPort>` + model / max_tokens / reasoning / context_window）。Provider crate 的 `provider::composition` 模块是 Composition Root 专用构造面，重新导出 `LlmClient` / `LlmConfigOptions` / `InvocationScope` / `SystemBlock` / `LlmProvider` 等具体构造符号；非 Composition crate **NEVER** 引用 `provider::composition` 或构造符号。引擎规则 `pattern.features.no-provider-composition-penetration` 与 `construction_symbols` 白名单锁定此边界并含负向探针证据。生产 factory（`DefaultProviderFactory`）持有进程级 `TransportPool` 并经 `from_config_with_pool` 构造，"构造和缓存不可变 ProviderTransport"职责随之落地（见 §6）。
 
 Composition Root 唯一负责：
 
@@ -298,7 +298,7 @@ Deny: production set_model/set_max_tokens/set_reasoning_level on shared Provider
 
 守卫应优先检查 AST/path 与公开 re-export，不依赖简单文件名黑名单。新增白名单必须记录 owner、理由和退出条件。
 
-> **已落地（#1033/#907/#1645）**：`check-provider-http-attempt.sh` 已启用（§6c），锁定"driver 只能经 `HttpAttemptExecutor::execute` 发送请求、只能经其 `BoundedErrorBody` 读取失败响应体、HTTP/network 诊断日志 API 仅限 `http_attempt.rs` + `error_log.rs` 调用"三条不变量。`check-provider-construction-ownership.sh`（§6g）以零白名单锁定 #907 构造所有权：非 Composition crate 禁止引用 `provider::composition` 或具体构造符号（`LlmClient` / `LlmConfigOptions` / `InvocationScope` / `SystemBlock` / `LlmProvider` / `TransportPool`），正向断言 `provider::composition` 至少被 Composition 生产代码引用；负向探针（在非 Composition 源文件中追加 `provider::composition::LlmClient` 引用）以 exit 2 命中，移除后 clean pass。详见 [Architecture Guards §6c/§6g](../../03-engineering/01-architecture-guards.md)。
+> **已落地**：引擎规则 `pattern.provider.http-send-single-executor` 与 `pattern.provider.error-log-diag-single-caller` 锁定"driver 只能经 `HttpAttemptExecutor::execute` 发送请求、只能经其 `BoundedErrorBody` 读取失败响应体、HTTP/network 诊断日志 API 仅限 `http_attempt.rs` + `error_log.rs` 调用"三条不变量。`pattern.features.no-provider-composition-penetration` 与 `construction_symbols` 白名单锁定构造所有权：非 Composition crate 禁止引用 `provider::composition` 或具体构造符号（`LlmClient` / `LlmConfigOptions` / `InvocationScope` / `SystemBlock` / `LlmProvider` / `TransportPool`），正向断言 `provider::composition` 至少被 Composition 生产代码引用；负向探针（在非 Composition 源文件中追加 `provider::composition::LlmClient` 引用）以 exit 2 命中，移除后 clean pass。详见 [Architecture Guards](../../03-engineering/01-architecture-guards.md) 断言器目录。
 
 ## 13. 相关文档
 
@@ -313,9 +313,9 @@ Deny: production set_model/set_max_tokens/set_reasoning_level on shared Provider
 | 日期 | 变更 | 关联 |
 |---|---|---|
 | 2026-07-20 | #1645 落地不可变 Transport + TransportPool：`adapters/transport.rs` / `adapters/pool.rs` 按 key（driver/endpoint/认证域/user-agent/timeout）缓存不可变 transport，模型切换复用同一连接池；`DefaultProviderFactory` 进程级持有 pool，`TransportPool` 纳入构造所有权守卫符号清单；失效策略为 key 变更即新实例、无主动失效 | [#1645](https://github.com/rushsinging/aemeath/issues/1645) |
-| 2026-07-19 | #907 完成 Adapter 最终收口：Runtime Main/Sub/Reflection/Compact 只依赖 `ProviderFactory` / `ProviderBinding` / `ProviderPort` 与 PL；`provider::composition` 独占构造（`check-provider-construction-ownership.sh` 零白名单 + 负向探针）；旧 `LegacyStreamSink` / gateway callback / pool / setter restore 物理清零；Provider 内部 `InvocationSink`（`pub(crate)`）为私有 decoder seam 非 legacy；#905 已关闭 P6/P7/P9；#1142 resolver 接线仍延期 | [#907](https://github.com/rushsinging/aemeath/issues/907) |
+| 2026-07-19 | Adapter 最终收口：Runtime Main/Sub/Reflection/Compact 只依赖 `ProviderFactory` / `ProviderBinding` / `ProviderPort` 与 PL；`provider::composition` 独占构造（引擎构造白名单 + 负向探针）；旧 `LegacyStreamSink` / gateway callback / pool / setter restore 物理清零；Provider 内部 `InvocationSink`（`pub(crate)`）为私有 decoder seam 非 legacy；跨调用 retry/fallback 与错误分类已收口；resolver 接线仍延期 | 治理记录 |
 | 2026-07-17 | #903 将 Provider→Runtime 生产链切换为 pull-based `InvocationStream`：`Completed/Failed` 单终结、取消统一为 `Failed(Cancelled)`、Runtime/Context 主动 poll 且禁止跨 crate legacy sink；Provider decoder 内部迁移桥作为明确残余登记 | [#903](https://github.com/rushsinging/aemeath/issues/903) |
-| 2026-07-16 | #1033 交付 crate-private `HttpAttemptExecutor`：收敛单 attempt 机械 send/cancel/status、安全 headers、16KiB bounded error body、typed transport failure 分类与单一 diagnostic，并新增 `check-provider-http-attempt.sh` 守卫；跨调用 retry/fallback（P6/P7）仍是 Runtime 待迁移债，本次改动不冒充其已完成 | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
+| 2026-07-16 | 交付 crate-private `HttpAttemptExecutor`：收敛单 attempt 机械 send/cancel/status、安全 headers、16KiB bounded error body、typed transport failure 分类与单一 diagnostic，并以引擎规则锁定单 executor 边界；跨调用 retry/fallback 仍是 Runtime 待迁移债，本次改动不冒充其已完成 | 治理记录 |
 | 2026-07-16 | 文档审查：明确后续承接边界——pull-based `InvocationStream`（P4）由 [#903](https://github.com/rushsinging/aemeath/issues/903) 承接；跨调用 retry/backoff（P6）、stream→non-stream fallback（P7）与错误分类统一（P9）由 [#905](https://github.com/rushsinging/aemeath/issues/905) 承接 | [#1033](https://github.com/rushsinging/aemeath/issues/1033) |
 | 2026-07-12 | 初稿：ProviderPort、流/取消、Runtime 重试边界、不可变 Transport 与 Invocation Scope | #788 |
 | 2026-07-14 | 增加 build 前 option resolution；Context prompt 与 InvocationScope 共享唯一 effective reasoning / limits 快照 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

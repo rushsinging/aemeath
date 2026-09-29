@@ -700,7 +700,7 @@ Runtime application 回答“何时发生什么业务动作”：
 后续拆分仍属可维护性工作：
 
 - 入站边界继续将 CLI/SDK args 标准化为 typed bootstrap request；
-- Composition 保持具体 adapter/object graph 的唯一装配所有者（由 `check-cross-bc-construction-registry.sh` fail-closed 注册表机械保护）；
+- Composition 保持具体 adapter/object graph 的唯一装配所有者（由 registry `construction_symbols` 数据区 fail-closed 机械保护，未登记跨 BC 构造 exit 2）；
 - Runtime bootstrap 按 Session、模型、Prompt/Skill 与 Client construction 拆成窄 application services；
 - Run 创建继续唯一提交 `RunCreationRequest`，不得恢复 Main/Sub 分叉装配。
 
