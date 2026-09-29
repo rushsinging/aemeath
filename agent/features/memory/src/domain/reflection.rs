@@ -1,4 +1,4 @@
-use super::{MemoryCategory, MemoryEntry, MemoryError, MemoryLayer};
+use super::{MemoryCategory, MemoryEntry, MemoryError, MemoryId, MemoryLayer};
 use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
@@ -25,6 +25,10 @@ pub struct MemorySuggestion {
     pub tags: Vec<String>,
     #[serde(default)]
     pub reason: String,
+    /// 本建议取代哪些已有记忆（apply 时建立 `superseded_by = 留存条目 id`）。
+    /// 只由 apply 消费，不直接写库（#1774）。
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    pub supersedes: Vec<MemoryId>,
 }
 
 /// The complete published-language response expected from a Reflection model.
@@ -146,6 +150,10 @@ pub struct ReflectionApplyResult {
     pub completed: usize,
     pub suggestions_added: usize,
     pub outdated_marked: usize,
+    /// Supersede relations durably established (#1774). A relation rejected by
+    /// the cycle guard (M9) counts in neither this nor `completed`, so
+    /// `attempted - completed` stays the honest skipped-operation count.
+    pub superseded: usize,
 }
 
 /// One completed Reflection result. Persistence is supplied by a separate adapter.
@@ -298,12 +306,17 @@ Requirements:
 - suggested_memories[].layer must be project or global; prefer project by default.
 - suggested_memories[].category must be fact, decision, preference, pattern, or pitfall.
 - outdated_memories uses existing memory ids.
+- Fill suggested_memories[].supersedes with an existing memory id ONLY when the
+  new memory explicitly replaces it (a changed deploy target, port, or reversed
+  conclusion). Leave it empty when the two memories merely complement each
+  other or the old one still holds — a wrong supersede stops a still-valuable
+  memory from being injected.
 - Output empty arrays when there is nothing.
 
 JSON format:
 {{
     "deviations": ["deviation description"],
-    "suggested_memories": [{{"layer":"project","category":"decision","content":"memory content","tags":["optional tag"],"reason":"why this is suggested"}}],
+    "suggested_memories": [{{"layer":"project","category":"decision","content":"memory content","tags":["optional tag"],"reason":"why this is suggested","supersedes":[]}}],
     "outdated_memories": ["memory-id"]
 }}
 
@@ -425,6 +438,7 @@ mod tests {
                     content: "secret memory".into(),
                     tags: vec![],
                     reason: "secret reason".into(),
+                    supersedes: vec![],
                 }],
                 outdated_memories: vec!["secret-id".into()],
             }),

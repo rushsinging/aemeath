@@ -21,6 +21,7 @@ struct MemoryEntry {                     // 聚合根（可序列化，持久化
     last_confirmed_at: u64,              // 最后一次重复写入确认时间
     confirmation_count: u32,             // 重复写入确认次数（单调递增）
     outdated: bool,                      // Reflection 标记为过期（不可逆）
+    superseded_by: Option<MemoryId>,     // 被哪条记忆取代（单向，#1774；None=未被取代）
 }
 ```
 
@@ -90,6 +91,8 @@ Memory BC 守护以下局部不变量：
 | M6 | **pinned 不被淘汰** | compact/evict 淘汰了 pinned 条目 | `eviction_candidates` 过滤 `!entry.pinned` |
 | M7 | **active 容量上限** | active 条目数超过 `max_entries` | `add` 时检查，返回 `NeedsEviction` |
 | M8 | **TTL 过期不注入** | 注入了 TTL 已过期的记忆 | `is_injection_eligible` 硬过滤 |
+| M9 | **取代关系无环** | 沿 `superseded_by` 上溯回到自身 | 建立关系前 `would_create_supersede_cycle` 校验；超长链（>256 步）按损坏数据处理拒绝；违反时跳过该关系并计数，NEVER 半写入 |
+| M10 | **被取代条目不可注入** | 把 `superseded_by` 非空的记忆放入注入候选（含 pinned） | `is_injection_eligible` 硬过滤，与 M5/M8 同层；显式 `search` 不受影响，结果 metadata 携带取代状态 |
 
 ## 4. 评分函数
 
@@ -99,7 +102,7 @@ Memory BC 守护以下局部不变量：
 
 ```rust
 fn is_injection_eligible(entry: &MemoryEntry, now: u64) -> bool {
-    !entry.outdated && !entry.is_ttl_expired(now)
+    entry.superseded_by.is_none() && !entry.outdated && !entry.is_ttl_expired(now)
 }
 
 fn injection_score(entry: &MemoryEntry, now: u64) -> i64 {
@@ -224,7 +227,7 @@ enum WriteResult {
 
 | 对象 | 类型 | 所有权 / 说明 |
 |---|---|---|
-| MemoryEntry | 聚合根 | 守护 M1-M8 不变量 |
+| MemoryEntry | 聚合根 | 守护 M1-M10 不变量 |
 | is_injection_eligible / injection_score / eviction_score | 纯函数（领域服务）| 无状态，接收 entry + now；先过滤再评分；injection_score 与 query relevance 正交 |
 | jaccard_similarity / tokenize | 纯函数（领域服务）| 无状态，接收两个字符串 |
 | MemoryService | 应用服务 | 实现 MemoryPort，编排领域规则与窄 Storage port；不直接做文件 I/O |
@@ -243,5 +246,6 @@ enum WriteResult {
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-09-29 | 新增取代关系：`MemoryEntry.superseded_by` 单向字段、不变量 M9（链无环，写入前校验，超长链按损坏拒绝）与 M10（被取代不可注入，pinned 不绕过；`search` 仍可见并携带状态）；取代关系只由 `apply_reflection` 承载，不新增 `MemoryPort` 写入口 | #1774 |
 | 2026-07-12 | 初稿：MemoryEntry 聚合、枚举、不变量 M1-M8、评分函数、去重、淘汰归档 | #789 |
 | 2026-07-14 | 统一 TTL 基准、写入顺序、ReflectionApplyResult | #972 |

@@ -53,6 +53,7 @@ pub(crate) fn rank_explicit_search<'a>(
                 location: document.location,
                 outdated: document.entry.outdated,
                 ttl_expired: document.entry.is_ttl_expired(query.now),
+                superseded_by: document.entry.superseded_by,
                 relevance: Some(score),
             })
         })

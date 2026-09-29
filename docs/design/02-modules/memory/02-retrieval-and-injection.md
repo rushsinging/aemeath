@@ -20,7 +20,7 @@ fn retrieve_for_inject(&self, query: &MemoryQuery) -> MemorySearchResult;
 ```
 
 - 跨 Global + Project 两层 active 条目合并。
-- 在评分前硬过滤 outdated 与 TTL-expired；pinned **NEVER** 绕过 eligibility。
+- 在评分前硬过滤被取代（M10）、outdated 与 TTL-expired；pinned **NEVER** 绕过 eligibility。
 - 对 eligible 集合按 `injection_score` 降序、完整 Memory ID 升序作为最终 tie-break。
 - 先取 query.limit 个候选；Context 再按 `inject_token_budget` 做有序前缀截断，不跳过超预算项继续选择后项。
 - **不 touch、不落盘**——避免每轮注入导致排序漂移。
@@ -34,7 +34,7 @@ fn search(&self, query: &MemorySearchQuery) -> MemorySearchResult;
 ```
 
 - 可按 `include_archive` 跨 active + archive（Global + Project）检索。
-- archived、outdated 与 TTL-expired 条目仍可由用户显式检索，并通过 hit metadata 无损表达状态。
+- archived、被取代、outdated 与 TTL-expired 条目仍可由用户显式检索，并通过 hit metadata（含 `superseded_by`）无损表达状态。
 - 先按 query relevance 降序排列；仅 relevance 平分时使用 `search_tie_break_score`，**NEVER** 调用要求 injection eligibility 的 `injection_score`。
 - search 同样不 touch、不落盘；返回 `mode = ExplicitSearch` 且每个 hit 携 relevance。
 
@@ -132,7 +132,7 @@ Memory BC 只输出"这些条目值得注入，格式如下"；Context Managemen
 - `global` / `project` 是持久化 Memory 层；分类固定为 `fact`、`decision`、`preference`、`pattern`、`pitfall`。
 - `add_reminder` / `complete_reminder` 是当前 Session reminder，不写入持久化 Memory。
 - input schema 对 action、layer、category、priority 发布枚举约束，而不是无边界字符串。
-- `search` 的 typed result 返回 id、content、layer、category、tags、pinned、location、outdated、ttl_expired、relevance；`list` 返回完整 entries。由于 Tool pipeline 对 LLM 使用 text-first 投影，search/list 的 text **MUST** 同样保留有序条目与可管理完整 ID；structured data 服务 TUI/server，不能替代 LLM 文本契约。
+- `search` 的 typed result 返回 id、content、layer、category、tags、pinned、location、outdated、ttl_expired、superseded_by、relevance；`list` 返回完整 entries。由于 Tool pipeline 对 LLM 使用 text-first 投影，search/list 的 text **MUST** 同样保留有序条目与可管理完整 ID；structured data 服务 TUI/server，不能替代 LLM 文本契约。
 - Tool 同时发布 `archive` / `restore`。满容量 add/restore 返回 `action=needs_eviction` 与 typed candidates（完整 ID、正文、层/分类/状态、confirmation_count、last_confirmed_at、eviction score/reason），写入保持 NotCommitted；调用方只能显式 archive，禁止静默自动淘汰。
 - Tool description 承载 Memory 使用策略：历史证据不足先 search；用户明确要求长期记住时 add；默认 project，明确跨项目才 global；临时工作用 reminder；敏感、推测和仓库可即时恢复的临时事实不写；无命中不伪造；Memory 不覆盖更高优先级指令。
 - Reflection 写入的 `MemorySuggestion` 经同一个 `MemoryPort` 成为普通 `MemoryEntry`，因此无需修改 Reflection trigger/workflow 即可被 Tool search 检索。
@@ -165,7 +165,8 @@ struct MemoryConfig {
 | R2 | search **可跨 active + archive** | 归档条目仍可由显式 search 检索 |
 | R3 | TTL-expired 条目 **不参与注入** | 在 injection_score 前由 eligibility 硬过滤 |
 | R4 | outdated 条目 **不参与注入但可显式检索** | 状态通过 search hit metadata 表达，NEVER 静默丢失 |
-| R5 | pinned 只在 eligible 集合中获得最高优先级 | pinned 不能绕过 outdated / TTL eligibility |
+| R5 | pinned 只在 eligible 集合中获得最高优先级 | pinned 不能绕过 superseded / outdated / TTL eligibility |
+| R7 | 被取代条目不参与注入但可显式检索并携带取代者 | M10 硬过滤；`superseded_by` 经 hit metadata 表达，关系由 apply 建立且无环（M9） |
 | R6 | search 平分使用 search_tie_break_score | archived/outdated/TTL hit NEVER 调 injection_score |
 
 ## 8. 相关文档
@@ -185,4 +186,5 @@ struct MemoryConfig {
 | 2026-08-11 | 在单一 Tier 1 BM25 tokenizer 中加入连续 Han 字符 bigram，补齐中文短语与中英代码混排召回，不引入词典或第二检索路径 | Chinese lexical retrieval |
 | 2026-07-26 | 落地共享确定性 BM25 词法排序与 typed Memory Tool PL；明确 Reflection 无需修改、search relevance 不复用写入去重 threshold | Tier 1 retrieval |
 | 2026-07-12 | 初稿：检索模式、BM25 分层、注入格式、similarity_threshold 双重用途、注入职责边界 | 初始设计 |
+| 2026-09-29 | 注入硬过滤新增被取代条目（M10，pinned 不绕过）；`search` 结果 metadata 新增 `superseded_by`；决策矩阵新增 R7 | #1774 |
 | 2026-07-17 | 对齐 #895：旧 top query 统一为只读 `retrieve_for_inject`；outdated/TTL 改为 eligibility 硬过滤；显式 search 改用 relevance + 独立 tie-break，并由 Context 独占 render | #895 |

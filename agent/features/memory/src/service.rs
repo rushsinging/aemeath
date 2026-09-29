@@ -141,6 +141,72 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
         Ok(false)
     }
 
+    /// 承载取代关系：`superseded` 中每条被 `superseding` 取代的记忆各建立
+    /// 一条 `superseded_by` 边，返回成功建立的数量。
+    ///
+    /// 每条关系是一次独立的跨层 mutation，环检测在写入前基于**提交态**
+    /// 快照做判定（M9）；被拒的关系既不写入也不计数，由调用方通过
+    /// `attempted - completed` 表达跳过。
+    async fn establish_supersede_relations(
+        &self,
+        superseding: MemoryId,
+        superseded: &[MemoryId],
+    ) -> usize {
+        let mut established = 0;
+        for target in superseded {
+            if self.mark_superseded_by(*target, superseding).await {
+                established += 1;
+            }
+        }
+        established
+    }
+
+    async fn mark_superseded_by(&self, target: MemoryId, superseding: MemoryId) -> bool {
+        let (global, project) = self.snapshot();
+        let chain = [
+            global.active(),
+            global.archive(),
+            project.active(),
+            project.archive(),
+        ];
+        if would_create_supersede_cycle(&superseding, &target, supersede_chain_of(&chain)) {
+            log::info!(
+                target: crate::LOG_TARGET,
+                "memory_supersede_rejected target={} superseding={} reason=cycle",
+                target,
+                superseding,
+            );
+            return false;
+        }
+        match self
+            .mutate_owning_layer(move |dataset| {
+                assign_supersede(dataset.active_mut(), &target, superseding)
+                    || assign_supersede(dataset.archive_mut(), &target, superseding)
+            })
+            .await
+        {
+            Ok(true) => true,
+            Ok(false) => {
+                log::info!(
+                    target: crate::LOG_TARGET,
+                    "memory_supersede_rejected target={} superseding={} reason=missing_target",
+                    target,
+                    superseding,
+                );
+                false
+            }
+            Err(error) => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "memory_supersede_failed target={} superseding={} error={error}",
+                    target,
+                    superseding,
+                );
+                false
+            }
+        }
+    }
+
     fn layer_state(&self, layer: MemoryLayer) -> LayerState<S::Revision> {
         let state = self.state.read().expect("memory state lock poisoned");
         match layer {
@@ -249,6 +315,7 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                     location: MemoryLocation::Active,
                     outdated: false,
                     ttl_expired: false,
+                    superseded_by: None,
                     relevance: None,
                 })
                 .collect(),
@@ -421,7 +488,7 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                 MemorySource::Llm,
             )?;
             entry.tags = suggestion.tags.clone();
-            prepared.push(entry);
+            prepared.push((entry, suggestion.supersedes.clone()));
         }
         let outdated = output
             .outdated_memories
@@ -433,10 +500,11 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             attempted: prepared.len() + outdated.len(),
             ..ReflectionApplyResult::default()
         };
-        for entry in prepared {
+        for (entry, supersedes) in prepared {
             let policy = self.policy;
+            let layer = entry.layer;
             let write_result = match self
-                .mutate_layer(entry.layer, move |dataset| {
+                .mutate_layer(layer, move |dataset| {
                     apply_reflection_entry(dataset, &entry, policy)
                 })
                 .await
@@ -444,16 +512,29 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                 Ok(value) => value,
                 Err(error) => return Err(partial_apply_or(error, &result)),
             };
-            match write_result {
-                WriteResult::Added { .. } | WriteResult::Merged { .. } => {
-                    result.suggestions_added += 1;
-                }
+            // The relation must point at the entry that actually survived: a
+            // merged suggestion never keeps its own id, so attaching to the
+            // freshly generated one would dangle.
+            let surviving_id = match &write_result {
+                WriteResult::Added { id } => Some(*id),
+                WriteResult::Merged { existing_id } => Some(*existing_id),
                 WriteResult::NeedsEviction { .. } => {
                     return Err(partial_apply_or(reflection_capacity_error(), &result));
                 }
-                WriteResult::NoOp => {}
+                WriteResult::NoOp => None,
+            };
+            if surviving_id.is_some() {
+                result.suggestions_added += 1;
             }
             result.completed += 1;
+            if let Some(surviving_id) = surviving_id {
+                result.attempted += supersedes.len();
+                let established = self
+                    .establish_supersede_relations(surviving_id, &supersedes)
+                    .await;
+                result.completed += established;
+                result.superseded += established;
+            }
         }
         for id in outdated {
             match self.mark_outdated(&id).await {
@@ -596,6 +677,7 @@ fn partial_apply_or(error: MemoryError, result: &ReflectionApplyResult) -> Memor
             result_completed: result.completed,
             suggestions_added: result.suggestions_added,
             outdated_marked: result.outdated_marked,
+            superseded: result.superseded,
         }
     }
 }
@@ -1388,6 +1470,7 @@ mod tests {
                 content: content.to_string(),
                 tags: vec!["reflected".to_string()],
                 reason: "test".to_string(),
+                supersedes: vec![],
             }],
             ..ReflectionOutput::default()
         }

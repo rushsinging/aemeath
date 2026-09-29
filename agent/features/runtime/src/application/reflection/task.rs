@@ -82,6 +82,8 @@ pub struct ReflectionTaskMetadata {
     pub suggestions_added: usize,
     /// Entries the apply stage actually marked outdated.
     pub outdated_marked: usize,
+    /// Supersede relations the apply stage actually established (#1774).
+    pub superseded: usize,
     pub duration_ms: u64,
     pub record_id: Option<String>,
 }
@@ -90,7 +92,7 @@ impl ReflectionTaskMetadata {
     /// Entries the apply stage actually changed. A partial apply still reports
     /// what it completed, and a run without apply (auto-apply off) reports zero.
     pub fn applied_changes(&self) -> usize {
-        self.suggestions_added + self.outdated_marked
+        self.suggestions_added + self.outdated_marked + self.superseded
     }
 }
 
@@ -415,6 +417,7 @@ fn terminal_metadata(
         outdated: 0,
         suggestions_added: 0,
         outdated_marked: 0,
+        superseded: 0,
         duration_ms: duration.as_millis() as u64,
         record_id: None,
     }
@@ -424,10 +427,16 @@ fn result_metadata(
     result: &CompleteReflectionResult,
     duration: std::time::Duration,
 ) -> ReflectionTaskMetadata {
-    let (suggestions_added, outdated_marked) = result
+    let (suggestions_added, outdated_marked, superseded) = result
         .apply_result
         .as_ref()
-        .map(|apply| (apply.suggestions_added, apply.outdated_marked))
+        .map(|apply| {
+            (
+                apply.suggestions_added,
+                apply.outdated_marked,
+                apply.superseded,
+            )
+        })
         .unwrap_or_default();
     ReflectionTaskMetadata {
         error_category: result.error_category,
@@ -438,6 +447,7 @@ fn result_metadata(
         outdated: result.output.outdated_memories.len(),
         suggestions_added,
         outdated_marked,
+        superseded,
         duration_ms: duration.as_millis() as u64,
         record_id: result.record_id.clone(),
     }
@@ -491,9 +501,10 @@ fn log_terminal_facts(trigger: ReflectionTaskTrigger, metadata: Option<&Reflecti
     if metadata.applied_changes() > 0 {
         log::info!(
             target: crate::LOG_TARGET,
-            "[reflection_applied] trigger={} added={} outdated={}",
+            "[reflection_applied] trigger={} added={} superseded={} outdated={}",
             trigger.label(),
             metadata.suggestions_added,
+            metadata.superseded,
             metadata.outdated_marked,
         );
     }

@@ -361,7 +361,7 @@ fn render_memory_entries(entries: &[MemoryEntry], now: u64) -> String {
         .iter()
         .map(|entry| {
             format!(
-                "- id={} layer={} category={} tags={} pinned={} outdated={} ttl_expired={}\n  {}",
+                "- id={} layer={} category={} tags={} pinned={} outdated={} ttl_expired={} superseded_by={}\n  {}",
                 entry.id,
                 memory_layer_name(entry.layer),
                 memory_category_name(entry.category),
@@ -369,11 +369,18 @@ fn render_memory_entries(entries: &[MemoryEntry], now: u64) -> String {
                 entry.pinned,
                 entry.outdated,
                 entry.is_ttl_expired(now),
+                render_superseded_by(entry.superseded_by.as_ref()),
                 entry.content
             )
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn render_superseded_by(superseded_by: Option<&Id>) -> String {
+    superseded_by
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "-".to_string())
 }
 
 fn render_tags(tags: &[String]) -> String {
@@ -411,6 +418,7 @@ fn memory_entry_result(entry: &MemoryEntry, now: u64) -> MemoryEntryResult {
         pinned: entry.pinned,
         outdated: entry.outdated,
         ttl_expired: entry.is_ttl_expired(now),
+        superseded_by: entry.superseded_by.map(|id| id.to_string()),
     }
 }
 
@@ -428,6 +436,7 @@ fn search_hit_result(hit: &MemorySearchHit) -> MemorySearchHitResult {
         },
         outdated: hit.outdated,
         ttl_expired: hit.ttl_expired,
+        superseded_by: hit.superseded_by.map(|id| id.to_string()),
         relevance: hit.relevance,
     }
 }

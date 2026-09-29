@@ -1,9 +1,76 @@
 use super::EvictionCandidate;
 use super::MemoryEntry;
+use super::MemoryId;
 use std::collections::HashSet;
 
+/// 取代链上溯的最大步数（#1774）。合法链长不会超过 `max_entries`；
+/// 超过该上限说明数据已损坏，按成环处理以收敛写入路径。
+pub const MAX_SUPERSEDE_CHAIN_DEPTH: usize = 256;
+
+/// M10：被取代条目不可注入。与 M5（outdated）、M8（TTL）同层，
+/// `pinned` 不绕过——pinned 保护「不要淘汰」，不保护「不要被取代」。
 pub fn is_injection_eligible(entry: &MemoryEntry, now: u64) -> bool {
-    !entry.outdated && !entry.is_ttl_expired(now)
+    entry.superseded_by.is_none() && !entry.outdated && !entry.is_ttl_expired(now)
+}
+
+/// 把 `target` 的取代关系指向 `superseding`，返回是否写入。
+///
+/// 找不到 `target` 时返回 `false`，调用方据此判定为「跳过」而非写坏
+/// （不存在半条关系：单字段赋值要么生效要么不生效）。active 与 archive
+/// 都要试——被取代的条目本就可能已经归档。
+pub(crate) fn assign_supersede(
+    entries: &mut [MemoryEntry],
+    target: &MemoryId,
+    superseding: MemoryId,
+) -> bool {
+    match entries.iter_mut().find(|entry| &entry.id == target) {
+        Some(entry) => {
+            entry.superseded_by = Some(superseding);
+            true
+        }
+        None => false,
+    }
+}
+
+/// 从给定条目集合解析「该条目被谁取代」，用于 `would_create_supersede_cycle`。
+pub(crate) fn supersede_chain_of<'a>(
+    groups: &'a [&'a [MemoryEntry]],
+) -> impl Fn(&MemoryId) -> Option<MemoryId> + 'a {
+    move |id: &MemoryId| {
+        groups
+            .iter()
+            .flat_map(|entries| entries.iter())
+            .find(|entry| &entry.id == id)
+            .and_then(|entry| entry.superseded_by)
+    }
+}
+
+/// M9：建立 `superseded_by` 关系前校验不成环。
+///
+/// `superseded.superseded_by = new` 这条边若让新条目重新出现在被取代条目的
+/// 既有上游链上，就闭合了回路。`lookup` 解析「该条目被谁取代」；返回 `None`
+/// 表示链尾。
+pub fn would_create_supersede_cycle(
+    new_entry_id: &MemoryId,
+    superseded_id: &MemoryId,
+    lookup: impl Fn(&MemoryId) -> Option<MemoryId>,
+) -> bool {
+    if new_entry_id == superseded_id {
+        return true;
+    }
+    let mut cursor = Some(new_entry_id.clone());
+    let mut steps = 0usize;
+    while let Some(current) = cursor {
+        if &current == superseded_id {
+            return true;
+        }
+        if steps == MAX_SUPERSEDE_CHAIN_DEPTH {
+            return true;
+        }
+        cursor = lookup(&current);
+        steps += 1;
+    }
+    false
 }
 
 pub fn injection_score(entry: &MemoryEntry, now: u64) -> i64 {
