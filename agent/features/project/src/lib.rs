@@ -14,7 +14,9 @@
 
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:project";
 mod adapters;
+pub(crate) mod application;
 mod domain;
+pub(crate) mod service;
 
 pub use adapters::wiring::{wire_production_workspace, Workspace};
 pub use domain::state::WorkspaceRestoreData;
