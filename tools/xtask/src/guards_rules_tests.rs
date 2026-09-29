@@ -624,3 +624,31 @@ fn pattern_exclusion_multi_prefix_keeps_file_exemptions() {
             .expect("enforce flagged");
     assert_eq!(flagged.len(), 1, "同 scope 非豁免文件必须命中");
 }
+
+#[test]
+fn pattern_exclusion_strips_pub_crate_cfg_test_module() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/domain/git.rs"),
+        "pub fn production() {}\n\n#[cfg(test)]\npub(crate) mod tests {\n    fn fake() { std::fs::create_dir_all(\"/tmp/x\").unwrap(); }\n}\n",
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "pattern.test.no-io",
+        "assertion": "pattern_exclusion",
+        "scope": { "kind": "path_prefix", "value": "crates/x/src" },
+        "forbidden_patterns": ["std::fs::"],
+        "exclusions": [],
+        "reason": "test",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/domain/git.rs")
+            .expect("enforce");
+
+    assert!(
+        violations.is_empty(),
+        "pub(crate) mod tests 内的命中必须被剥离：{violations:?}"
+    );
+}

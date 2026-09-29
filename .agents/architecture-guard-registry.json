@@ -3300,6 +3300,40 @@
       ],
       "reason": "F-21：tui app TEA 与 view_assembler/view_model 纯度（run_loop/runtime/testing 编排层豁免，#59 S5-gap 裁定；合并原三条同 pattern 重复规则，#1696③）",
       "profile": "full"
+    },
+    {
+      "id": "pattern.features.domain-no-direct-io",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefixes",
+        "values": [
+          "agent/features/runtime/src/domain",
+          "agent/features/context/src/domain",
+          "agent/features/provider/src/domain",
+          "agent/features/tools/src/domain",
+          "agent/features/storage/src/domain",
+          "agent/features/hook/src/domain",
+          "agent/features/audit/src/domain",
+          "agent/features/project/src/domain",
+          "agent/features/policy/src/domain",
+          "agent/features/config/src/domain",
+          "agent/features/memory/src/domain",
+          "agent/features/task/src/domain",
+          "agent/features/share/src/domain",
+          "agent/shared/src/domain"
+        ]
+      },
+      "forbidden_patterns": [
+        "std::fs::",
+        "tokio::fs::",
+        "std::net::",
+        "tokio::net::",
+        "std::process::Command",
+        "std::process::command"
+      ],
+      "exclusions": [],
+      "reason": "domain 层纯值域：文件/网络/进程 IO 只经 ports 出站；领域策略 NEVER 直接 IO",
+      "profile": "full"
     }
   ],
   "retired_symbols": [
