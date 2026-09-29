@@ -32,7 +32,7 @@ Memory BC **不拥有**：记忆在 Context Window 中的注入位置、token �
 12. **Active + archive 共同换代**：archive / compact 对受影响成员使用同一 `AtomicDatasetPort` journal / commit primitive；失败或 crash 后只能恢复完整旧代或新代，**NEVER** 暴露半迁移。
 13. **跨实例用 revision CAS 防丢更新**：open 持有 Storage 返回的 opaque dataset revision；每次 mutation 以它作为 expected revision 提交。冲突时重新读取、验证并重算一次，**NEVER** 让跨进程锁掩盖 stale-writer overwrite。
 14. **committed warning 仍发布**：Storage `Err` 只表示未提交；`Visible` / `RecoveryPending` receipt 都表示 durable truth 已是 candidate，Memory 必须发布新内存态，warning 只作诊断。
-15. **查询 envelope 无损表达事实**：自动注入与显式 search 都返回 `MemorySearchResult`；BM25 / substring fallback 必须可诊断，archive / outdated / TTL 是独立状态维度。自动注入的 `injection_score` 不携 query relevance，**NEVER** 把 BM25 的收益套到 `inject_count`。
+15. **查询 envelope 无损表达事实**：自动注入与显式 search 都返回 `MemorySearchResult`；BM25 / substring fallback 必须可诊断，archive / outdated / TTL 是独立状态维度。自动注入的 `injection_score` 不携 query relevance，**NEVER** 把 BM25 的收益套到注入排序（#1777 起注入顺序由 token 预算 + 覆盖式让位决定，无条数上限）。
 
 ## 3. Target 物理目录
 
@@ -87,7 +87,7 @@ Storage BC 提供**物理机制**（单 blob 原子写、多 member dataset tran
 
 ### Config
 
-Config 通过只读 ConfigSnapshot 提供 MemoryConfig（enabled / max_entries / similarity_threshold / inject_count / inject_token_budget / reflection 配置）。Memory BC 不绕过快照读取裸配置。
+Config 通过只读 ConfigSnapshot 提供 MemoryConfig（enabled / max_entries / similarity_threshold / inject_token_budget（默认按窗口比例）/ reflection 配置）。Memory BC 不绕过快照读取裸配置。
 
 ### Tool & Skill & Command
 

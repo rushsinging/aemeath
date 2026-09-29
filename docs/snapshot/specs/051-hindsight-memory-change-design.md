@@ -727,6 +727,7 @@ D3 需要"变更了 N 条"这一数字，而它目前**既无日志也无对外�
 
 | 日期 | 变更 |
 |---|---|
+| 2026-09-29 | §7 / §8.3 落地（实施 #1777 时确认）：`inject_token_budget` 采用 `Option<usize>`（`None` = 窗口 2%，`Some(0)` = 禁用），而非直接删除配置项——删除会使「禁用自动注入」不再可表达；`inject_count` 从 `MemoryConfig` 移除，patch 侧保留该键以容忍旧配置。冻结状态由 `ContextApplicationService` 持有并绑定 `session_id`（resume 切换 = 新 Session 首次），刷新标志由 `compact` / `manual_compact` 在 `Committed` 时置位。覆盖式让位拆为两段：Memory 侧只改顺序（结论段在前），Context 侧做两段预算填充并按已选结论的 `evidence` 判定让位 |
 | 2026-09-29 | §6 归纳落地（实施 #1776 时确认）：M13 下限不足时**降级为普通建议**（Raw + 空 evidence）而非丢弃内容；apply 路径补 M11 证据校验（此前仅 write 路径有）；「已被归纳吸收」的反向查询与注入让位属 #1777 读侧协调，本单元不实现。附修 #1774 遗漏：反思 prompt 中文侧因模式串缩进错误未替换成功，supersedes 说明与 JSON 字段此前只进了英文模板 |
 | 2026-09-29 | §5 证据指针落地（实施 #1775 时确认）：`MemoryKind` 序列化为 snake_case 且 Raw 不占载荷；合并路径在 service 与 InMemory 两个实现同步改为「归档 + 指针」；M11 写入校验拒绝悬空 evidence；当前 compact 只归档不删除，指针不悬空由测试固化，未来 archive 淘汰功能须前置排除被引用条目 |
 | 2026-09-29 | §4 取代关系落地（实施 #1774 时确认）：`MemorySuggestion.supersedes` 为 `Vec<MemoryId>` 并进入 prompt 双语模板；`MemorySearchHit` 增加 `superseded_by`；`ReflectionApplyResult` 新增 `superseded` 计数；环护栏深度 256 步。合并导致关系自指时按 M9 拒绝（测试 `a_suggestion_merged_into_its_own_target_yields_no_relation` 固化该语义） |

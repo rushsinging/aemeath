@@ -320,6 +320,8 @@ pub struct MemoryConfigPatch {
     pub max_entries: Option<usize>,
     #[serde(default)]
     pub similarity_threshold: Option<f64>,
+    /// #1777：条数上限已随比例化移除；patch 侧保留该键以容忍旧配置
+    /// （解析后忽略，不产生任何效果）。
     #[serde(default)]
     pub inject_count: Option<usize>,
     #[serde(default)]
@@ -792,11 +794,10 @@ pub(crate) fn apply_memory_patch(mut base: MemoryConfig, patch: MemoryConfigPatc
     if let Some(v) = patch.similarity_threshold {
         base.similarity_threshold = v;
     }
-    if let Some(v) = patch.inject_count {
-        base.inject_count = v;
-    }
+    // `inject_count` 已移除（#1777）：旧 patch 里的该键被容忍并忽略。
+    let _ = patch.inject_count;
     if let Some(v) = patch.inject_token_budget {
-        base.inject_token_budget = v;
+        base.inject_token_budget = Some(v);
     }
     if let Some(v) = patch.reflection {
         base.reflection = apply_reflection_patch(base.reflection, v);

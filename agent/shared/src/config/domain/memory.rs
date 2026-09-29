@@ -14,16 +14,6 @@ pub(crate) fn default_interval_runs() -> usize {
     10
 }
 
-/// 默认注入条数。自动注入按 pin/确认/新鲜度稳定排序，
-/// 与显式 BM25 search 相互独立。
-pub(crate) fn default_inject_count() -> usize {
-    5
-}
-
-pub(crate) fn default_inject_token_budget() -> usize {
-    300
-}
-
 /// Memory system configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryConfig {
@@ -43,14 +33,16 @@ pub struct MemoryConfig {
     #[serde(default)]
     pub reflection: ReflectionConfig,
 
-    /// 每轮 LLM 调用前注入的稳定优先级 Memory 条目数。
-    /// 显式 search 使用 BM25；自动注入不 query-aware。
-    #[serde(default = "default_inject_count")]
-    pub inject_count: usize,
-
-    /// 自动 Memory 注入的独立估算 token 预算；0 禁用自动注入。
-    #[serde(default = "default_inject_token_budget")]
-    pub inject_token_budget: usize,
+    /// 自动 Memory 注入的 token 预算覆盖（#1777）。
+    ///
+    /// `None`（默认）表示按窗口比例计算（`context_size / 50`，即 2%）；
+    /// `Some(0)` 显式禁用自动注入。部分数值则直接作为固定预算。
+    ///
+    /// 条数上限 `inject_count` 已随比例化移除：预算本身就是上限，再叠一个
+    /// 条数约束只会让「长条目被条数截断、短条目被预算截断」两种语义互相
+    /// 掩盖。旧配置中的 `inject_count` 残留被忽略（serde 不拒绝未知字段）。
+    #[serde(default)]
+    pub inject_token_budget: Option<usize>,
 }
 
 impl Default for MemoryConfig {
@@ -60,8 +52,7 @@ impl Default for MemoryConfig {
             max_entries: default_max_entries(),
             similarity_threshold: default_similarity_threshold(),
             reflection: ReflectionConfig::default(),
-            inject_count: default_inject_count(),
-            inject_token_budget: default_inject_token_budget(),
+            inject_token_budget: None,
         }
     }
 }

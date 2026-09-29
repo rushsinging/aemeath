@@ -165,6 +165,7 @@ mod integration_tests {
     mod dataset_session_writer;
     mod guidance_contract;
     mod in_memory_session_backing;
+    mod injection_freeze;
     mod isolated_context_with_skill;
     mod main_session_config_facade;
     mod main_session_gate;
