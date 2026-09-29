@@ -33,13 +33,23 @@ pub enum ReflectionWorkflowError {
 pub struct ReflectionWorkflow;
 
 impl ReflectionWorkflow {
+    /// `now` 是本次反思运行的时间戳（M12 的 TTL 判定需要它），由调用方从反思
+    /// identity 传入，避免在此处另起时钟导致两次读取跨秒。
     pub fn build_prompt(
         messages: &[share::message::Message],
         lang: &str,
         memory: &dyn MemoryPort,
+        now: u64,
     ) -> String {
         let engine = ReflectionEngine;
-        let project_memory = engine.format_memory_summary(&memory.list(Some(MemoryLayer::Project)));
+        // M12：反思输入排除失效条目（outdated / 被取代 / TTL 过期）。
+        let project_memory = engine.format_memory_summary(
+            &memory
+                .list(Some(MemoryLayer::Project))
+                .into_iter()
+                .filter(|entry| crate::domain::is_reflection_input_eligible(entry, now))
+                .collect::<Vec<_>>(),
+        );
         let messages = messages
             .iter()
             .map(|message| {

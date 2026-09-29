@@ -75,7 +75,7 @@ pub(crate) async fn execute_reflection(
     cancel: &tokio_util::sync::CancellationToken,
 ) -> ReflectionExecutionResultType<CompleteReflectionResult> {
     let started = std::time::Instant::now();
-    let prompt = ReflectionWorkflow::build_prompt(messages, lang, memory);
+    let prompt = ReflectionWorkflow::build_prompt(messages, lang, memory, identity.timestamp);
     let response = call_provider(&invocation, &prompt, cancel).await;
     let (raw_response, input_tokens, output_tokens) = match response {
         Ok(response) => response,
