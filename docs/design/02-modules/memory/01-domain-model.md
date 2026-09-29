@@ -95,6 +95,7 @@ Memory BC 守护以下局部不变量：
 | M8 | **TTL 过期不注入** | 注入了 TTL 已过期的记忆 | `is_injection_eligible` 硬过滤 |
 | M9 | **取代关系无环** | 沿 `superseded_by` 上溯回到自身 | 建立关系前 `would_create_supersede_cycle` 校验；超长链（>256 步）按损坏数据处理拒绝；违反时跳过该关系并计数，NEVER 半写入 |
 | M10 | **被取代条目不可注入** | 把 `superseded_by` 非空的记忆放入注入候选（含 pinned） | `is_injection_eligible` 硬过滤，与 M5/M8 同层；显式 `search` 不受影响，结果 metadata 携带取代状态 |
+| M12 | **反思输入排除失效条目** | `outdated`、被取代、TTL 过期条目进入反思 prompt | `is_reflection_input_eligible` 硬过滤（复用注入资格判定，语义独立）；`build_prompt` 按反思运行时间戳过滤，防止「建议 → 写入 → 基于失效内容再产出建议」的污染循环 |
 | M13 | **归纳产物证据下限** | 产出 `evidence.len() < 2` 的 `kind = Synthesized` 条目 | apply 时 `apply_synthesis` 校验 `MIN_SYNTHESIS_EVIDENCE = 2`；不足则**保持 Raw 且不写 evidence**（内容照常写入，丢弃模型产出更糟） |
 | M11 | **证据指针指向真实条目** | `evidence` 引用的 id 在同层 active/archive 中不存在（悬空指针）；归档清理删除被引用条目 | 写入时校验（悬空即拒绝）；合并路径先归档新条目再记指针；当前 compact 只归档不删除，未来 archive 淘汰功能 MUST 前置排除被引用条目 |
 
@@ -231,7 +232,7 @@ enum WriteResult {
 
 | 对象 | 类型 | 所有权 / 说明 |
 |---|---|---|
-| MemoryEntry | 聚合根 | 守护 M1-M11 / M13 不变量 |
+| MemoryEntry | 聚合根 | 守护 M1-M11 / M12 / M13 不变量 |
 | is_injection_eligible / injection_score / eviction_score | 纯函数（领域服务）| 无状态，接收 entry + now；先过滤再评分；injection_score 与 query relevance 正交 |
 | jaccard_similarity / tokenize | 纯函数（领域服务）| 无状态，接收两个字符串 |
 | MemoryService | 应用服务 | 实现 MemoryPort，编排领域规则与窄 Storage port；不直接做文件 I/O |
@@ -250,6 +251,7 @@ enum WriteResult {
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-09-29 | 补实现 M12（反思输入排除失效条目）：收尾核对发现该不变量原被 051 §9 要求但不在任何交付单元范围内；`is_reflection_input_eligible` 复用注入资格判定，pinned 与归纳产物不受影响；同步修正 051 §8.2 可见性矩阵把排除规则误标为 M13 的编号笔误 |
 | 2026-09-29 | 新增归纳产物约束 M13：`kind = Synthesized` 必须 `evidence.len() >= 2`（`MIN_SYNTHESIS_EVIDENCE`）；不足下限时降级为 Raw 且不写证据，NEVER 丢弃模型产出的内容 | #1776 |
 | 2026-09-29 | 新增证据指针与来源类型：`MemoryEntry.kind`（Raw/Synthesized，与 Category 正交，NEVER 用 `evidence.len()` 推导）与 `evidence: Vec<MemoryId>`；写入去重命中改为「保留旧条目 + 归档新条目 + 记录指针」（M11：指针写入时校验，悬空即拒绝）；历史数据不回溯，更早的合并不伪造指针 | #1775 |
 | 2026-09-29 | 新增取代关系：`MemoryEntry.superseded_by` 单向字段、不变量 M9（链无环，写入前校验，超长链按损坏拒绝）与 M10（被取代不可注入，pinned 不绕过；`search` 仍可见并携带状态）；取代关系只由 `apply_reflection` 承载，不新增 `MemoryPort` 写入口 | #1774 |

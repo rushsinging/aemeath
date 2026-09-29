@@ -31,6 +31,19 @@ pub fn is_injection_eligible(entry: &MemoryEntry, now: u64) -> bool {
     entry.superseded_by.is_none() && !entry.outdated && !entry.is_ttl_expired(now)
 }
 
+/// M12：反思输入排除失效条目。
+///
+/// 判定与 [`is_injection_eligible`] 同源（失效就是失效），但语义独立——注入
+/// 关心「当前对话要不要带这条」，反思关心「LLM 能不能基于这条产出新建议」。
+/// 051 §8.2 论证：读入失效条目会形成「建议 → 写入 → 下次反思基于它再产出
+/// 建议」的污染循环。
+///
+/// 不排斥 pinned 与归纳产物：反思需要看到来源事实与已成立的结论，才能判断
+/// 它们是否仍然有效。
+pub fn is_reflection_input_eligible(entry: &MemoryEntry, now: u64) -> bool {
+    is_injection_eligible(entry, now)
+}
+
 /// 把 `target` 的取代关系指向 `superseding`，返回是否写入。
 ///
 /// 找不到 `target` 时返回 `false`，调用方据此判定为「跳过」而非写坏

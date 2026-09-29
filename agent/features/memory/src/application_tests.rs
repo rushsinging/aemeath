@@ -56,10 +56,85 @@ fn build_prompt_reads_memory_and_owned_message_snapshot() {
         &[share::message::Message::user("remember the boundary")],
         "en",
         &NoOpMemory,
+        100,
     );
 
     assert!(prompt.contains("remember the boundary"));
     assert!(prompt.contains("Current project memory"));
+}
+
+/// M12：反思 prompt 不得包含失效条目。依据是 051 §8.2 的可见性矩阵与污染循环
+/// 论证——基于已失效事实产出的新建议会把失效内容复制进记忆。
+#[tokio::test]
+async fn build_prompt_excludes_entries_that_injection_would_reject() {
+    let memory = crate::adapters::InMemoryMemory::new(crate::adapters::MemoryPolicy::default())
+        .expect("policy must be valid");
+    let now = 1_000u64;
+
+    let mut stale = MemoryEntry::new(
+        MemoryId::now_v7(),
+        now,
+        MemoryLayer::Project,
+        MemoryCategory::Fact,
+        "the staging host is alpha",
+        MemorySource::User,
+    )
+    .unwrap();
+    stale.superseded_by = Some(MemoryId::now_v7());
+    memory.write(stale).await.unwrap();
+
+    let mut outdated = MemoryEntry::new(
+        MemoryId::now_v7(),
+        now,
+        MemoryLayer::Project,
+        MemoryCategory::Fact,
+        "the billing provider was stripe",
+        MemorySource::User,
+    )
+    .unwrap();
+    outdated.outdated = true;
+    memory.write(outdated).await.unwrap();
+
+    let mut expiring = MemoryEntry::new(
+        MemoryId::now_v7(),
+        now,
+        MemoryLayer::Project,
+        MemoryCategory::Fact,
+        "the incident runbook lives on paper",
+        MemorySource::User,
+    )
+    .unwrap();
+    expiring.ttl = Some(std::time::Duration::from_secs(10));
+    memory.write(expiring).await.unwrap();
+
+    let live = MemoryEntry::new(
+        MemoryId::now_v7(),
+        now,
+        MemoryLayer::Project,
+        MemoryCategory::Fact,
+        "the deploy target is the staging cluster",
+        MemorySource::User,
+    )
+    .unwrap();
+    memory.write(live).await.unwrap();
+
+    let prompt = ReflectionWorkflow::build_prompt(
+        &[share::message::Message::user("keep the deployment notes")],
+        "en",
+        &memory,
+        now + 20,
+    );
+
+    assert!(
+        prompt.contains("deploy target"),
+        "live memory must reach the reflection: {prompt}"
+    );
+    for excluded in ["staging host", "billing provider", "incident runbook"] {
+        assert!(
+            !prompt.contains(excluded),
+            "M12: `{excluded}` is no longer valid input, but it reached the prompt:\n{prompt}"
+        );
+    }
 }
 
 #[tokio::test]
