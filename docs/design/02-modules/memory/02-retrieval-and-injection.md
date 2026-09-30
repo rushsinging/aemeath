@@ -210,21 +210,11 @@ Compact 成功提交后         →  下一次 build window 重新检索并替�
 - Context Management（注入位置归 CM）：[../context-management/01-session.md](../context-management/01-session.md)
 - #551 Memory search 升级：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
 
-## 9. 已知信息缺口
-
-工具 description 精简后，以下两条 Memory 使用策略暂未在模型侧生效：
-
-| 策略 | 正确归属 | 状态 |
-|---|---|---|
-| Memory 不得覆盖系统、安全与当前用户指令 | 系统提示的 Memory 规范段 | 经确认延期 |
-| `superseded_by` 非空不再自动注入，但可由 search / list 查到 | 系统提示的 Memory 规范段 | 经确认延期 |
-
-两条当前仅存于本文档，模型不可见。待 prompt 侧补齐 Memory 规范段后闭合。
-
 ## 修改历史
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-09-30 | 删除「已知信息缺口」节：其中两条 Memory 使用策略（不得覆盖系统/安全/当前用户指令；`superseded_by` 非空仅可检索不注入）已下沉至系统提示 `i18n/prompt/system.rs` 的 `# Core contract`，缺口闭合 | #1805 |
 | 2026-08-21 | 闭合 archive/restore 与 typed eviction；将 access 字段治理为 confirmation 语义；增加稳定 ID tie-break、注入 token budget、LLM 使用策略和无正文诊断指标 | Memory governance |
 | 2026-08-11 | 在单一 Tier 1 BM25 tokenizer 中加入连续 Han 字符 bigram，补齐中文短语与中英代码混排召回，不引入词典或第二检索路径 | Chinese lexical retrieval |
 | 2026-07-26 | 落地共享确定性 BM25 词法排序与 typed Memory Tool PL；明确 Reflection 无需修改、search relevance 不复用写入去重 threshold | Tier 1 retrieval |
