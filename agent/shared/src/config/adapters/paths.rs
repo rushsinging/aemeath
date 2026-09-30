@@ -2,25 +2,12 @@
 
 use std::path::{Path, PathBuf};
 
-pub const AGENTS_DIR_ENV: &str = "AEMEATH_AGENTS_DIR";
-pub const NEW_CONFIG_FILE: &str = "aemeath.json";
-pub const OLD_CONFIG_FILE: &str = "config.json";
-pub const AGENTS_MD: &str = "AGENTS.md";
-pub const CLAUDE_MD: &str = "CLAUDE.md";
-pub const AGENTS_DIR_NAME: &str = ".agents";
-pub const CLAUDE_DIR_NAME: &str = ".claude";
-pub const OLD_AEMEATH_DIR_NAME: &str = ".aemeath";
-pub const SKILLS_DIR_NAME: &str = "skills";
-pub const LOGS_DIR_NAME: &str = "logs";
-pub const GUIDANCE_DIR_NAME: &str = "guidance";
-pub const MEMORY_DIR_NAME: &str = "memory";
-pub const SESSIONS_DIR_NAME: &str = "sessions";
-pub const WORKTREES_DIR_NAME: &str = "worktrees";
-pub const HOOKS_DIR_NAME: &str = "hooks";
-pub const TOOL_RESULTS_DIR_NAME: &str = "tool-results";
-pub const MCP_CONFIG_FILE: &str = "mcp.json";
-pub const HISTORY_FILE: &str = "history.json";
-pub const SETTINGS_FILE: &str = "settings.json";
+pub use super::constants::{
+    AGENTS_DIR_ENV, AGENTS_DIR_NAME, AGENTS_MD, CLAUDE_DIR_NAME, CLAUDE_MD, GUIDANCE_DIR_NAME,
+    HISTORY_FILE, HOOKS_DIR_NAME, LOGS_DIR_NAME, MCP_CONFIG_FILE, MEMORY_DIR_NAME, NEW_CONFIG_FILE,
+    OLD_AEMEATH_DIR_NAME, OLD_CONFIG_FILE, SESSIONS_DIR_NAME, SETTINGS_FILE, SKILLS_DIR_NAME,
+    TOOL_RESULTS_DIR_NAME, WORKTREES_DIR_NAME,
+};
 
 /// 解析 home 目录（读取 `$HOME`）。
 ///

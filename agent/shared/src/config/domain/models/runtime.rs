@@ -1,7 +1,7 @@
 use crate::config::models::{ModelResolveError, ModelsConfig, ResolvedModel};
 use std::fmt;
 
-pub const DEFAULT_MAX_TOKENS: u32 = 8192;
+pub use crate::config::domain::constants::DEFAULT_MAX_TOKENS;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MaxTokensSource {

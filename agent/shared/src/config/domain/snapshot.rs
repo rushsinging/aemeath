@@ -19,8 +19,7 @@ use crate::config::{
     AgentsConfig, Config, HooksConfig, MemoryConfig, SkillsConfig, ToolResultConfig, ToolSelection,
 };
 
-const DEFAULT_HOOK_EXECUTION_MAX_ATTEMPTS: u8 = 3;
-const DEFAULT_STOP_HOOK_MAX_BLOCKS: usize = 15;
+use super::constants::{DEFAULT_HOOK_EXECUTION_MAX_ATTEMPTS, DEFAULT_STOP_HOOK_MAX_BLOCKS};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct HookExecutionPolicy {

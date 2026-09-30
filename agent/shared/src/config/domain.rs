@@ -4,6 +4,7 @@
 
 pub mod audit;
 pub mod config;
+mod constants;
 pub mod context;
 pub mod driver_env;
 pub mod file_snapshot;

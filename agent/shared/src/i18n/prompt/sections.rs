@@ -2,23 +2,10 @@
 //!
 //! 迁自 runtime `prompt_build_ext.rs` 的 `append_skills` / `append_agent_roles` 内联文案。
 
-/// 技能列表分区 header（英文）。
-pub const SKILLS_HEADER_EN: &str =
-    "\n\n# Available Skills\nThe following skills can be invoked with the Skill tool:\n";
-/// 技能列表分区 header（中文）。
-pub const SKILLS_HEADER_ZH: &str = "\n\n# Available Skills\n以下 skill 可通过 Skill 工具调用：\n";
-
-/// Agent 角色分区 header（英文）。
-pub const AGENT_ROLES_HEADER_EN: &str = "\n\n# Available Agent Roles\nThe following agent instances are available for the Agent tool's `agent` parameter. Choose the most appropriate agent for each task:\n";
-/// Agent 角色分区 header（中文）。
-pub const AGENT_ROLES_HEADER_ZH: &str = "\n\n# Available Agent Roles\n以下 agent 实例可用于 Agent 工具的 `agent` 参数。请为每个任务选择最合适的 agent：\n";
-
-/// Agent 角色分区 footer（英文）。
-pub const AGENT_ROLES_FOOTER_EN: &str =
-    "\nThe `agent` parameter is required; pick the closest agent from this roster when none fits exactly.";
-/// Agent 角色分区 footer（中文）。
-pub const AGENT_ROLES_FOOTER_ZH: &str =
-    "\n`agent` 参数必填；没有完全合适的 agent 时，从上方名单中选择职能最接近的一个。";
+pub use super::constants::{
+    AGENT_ROLES_FOOTER_EN, AGENT_ROLES_FOOTER_ZH, AGENT_ROLES_HEADER_EN, AGENT_ROLES_HEADER_ZH,
+    SKILLS_HEADER_EN, SKILLS_HEADER_ZH,
+};
 
 /// 按语言选择技能列表 header。未知 lang 回退英文。
 pub fn skills_header(lang: &str) -> &'static str {

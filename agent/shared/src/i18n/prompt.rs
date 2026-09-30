@@ -3,6 +3,7 @@
 //! 迁自 `prompt::business::guidance::constants` 与 `runtime::prompt::build` 的面向 LLM 注入文案。
 
 pub mod commit;
+mod constants;
 pub mod discipline;
 pub mod git_context_labels;
 pub mod sections;

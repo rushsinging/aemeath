@@ -8,17 +8,7 @@ fn default_auto_compact_failure_limit() -> u8 {
     3
 }
 
-/// `auto_compact_threshold_ratio` 的安全区间下限。
-///
-/// 低于该值时阈值过小，任意一轮对话即可能恒触发 auto-compact，
-/// 形成 compact 风暴直至熔断（#1626 教训）。
-pub const AUTO_COMPACT_THRESHOLD_RATIO_MIN: f64 = 0.5;
-
-/// `auto_compact_threshold_ratio` 的安全区间上限。
-///
-/// 高于该值时估算误差缓冲过薄——compact 请求自身占用的上下文可能
-/// 超出窗口，触发后已无空间完成压缩。
-pub const AUTO_COMPACT_THRESHOLD_RATIO_MAX: f64 = 0.95;
+pub use super::constants::{AUTO_COMPACT_THRESHOLD_RATIO_MAX, AUTO_COMPACT_THRESHOLD_RATIO_MIN};
 
 fn default_auto_compact_threshold_ratio() -> f64 {
     0.8

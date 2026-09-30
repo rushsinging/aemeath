@@ -14,6 +14,7 @@ use std::fmt;
 
 use uuid::Uuid;
 
+use super::constants::HEX;
 use crate::catalog::ProviderSource;
 
 /// Connect 向导的当前阶段。
@@ -123,7 +124,6 @@ impl fmt::Display for ConnectSessionId {
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
         out.push(HEX[(byte >> 4) as usize] as char);

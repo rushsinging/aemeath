@@ -1248,6 +1248,7 @@
         "catalog.rs",
         "catalog_tests.rs",
         "connect.rs",
+        "constants.rs",
         "core",
         "domain",
         "domain.rs",
