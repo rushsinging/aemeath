@@ -112,7 +112,11 @@ impl TypedTool for GrepTool {
         };
         let mut search_child = match search_command.spawn() {
             Ok(child) => child,
-            Err(error) => return TypedToolResult::error(format!("Search failed: {error}")),
+            Err(error) => {
+                let message = utils::describe_cwd_gone_failure(&error, &workspace_root, "搜索命令")
+                    .unwrap_or_else(|| format!("Search failed: {error}"));
+                return TypedToolResult::error(message);
+            }
         };
         let cancellation = ctx.cancellation();
         let search_started = std::time::Instant::now();

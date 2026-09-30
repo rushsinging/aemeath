@@ -239,6 +239,8 @@ pub(crate) enum RepositoryProbe {
 
 pub enum GitProbeError {
     GitUnavailable,
+    /// spawn 时工作目录已不存在：携带面向 LLM 的中文 cwd 归因文案。
+    CwdGone(String),
     PermissionDenied,
     CommandFailed { exit_code: Option<i32> },
     InvalidOutput,
@@ -246,6 +248,8 @@ pub enum GitProbeError {
 
 pub enum GitOperationError {
     GitUnavailable,
+    /// spawn 时工作目录已不存在：携带面向 LLM 的中文 cwd 归因文案。
+    CwdGone(String),
     PermissionDenied,
     CommandFailed { exit_code: Option<i32> },
     InvalidOutput,
@@ -253,6 +257,8 @@ pub enum GitOperationError {
 ```
 
 `GitCli::probe_repository` 只有在 git 明确返回“not a repository”时才产生 `RepositoryProbe::NonGit`；可执行文件不存在、权限拒绝、信号退出、非预期 status 或不可解析输出 **MUST** 返回 `GitProbeError`。这一区分是 NonGit 支持的前提，**NEVER** 用 `Result<PathBuf, String>` 把探测失败吞成普通目录。
+
+spawn 报 `NotFound` 且工作目录在文件系统上确实缺失（worktree 会话期间被清理）时 **MUST** 归因为 `CwdGone`（文案由 `utils::describe_cwd_gone_failure` 单一提供，含路径、可能原因与建议动作），**NEVER** 退化为不带 cwd 线索的 `GitUnavailable` 裸错误；`NotFound` 但工作目录完好（git 可执行文件缺失）仍映射 `GitUnavailable`。
 
 ### 5.1 适配器
 

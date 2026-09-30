@@ -58,10 +58,24 @@ fn git_output(root: &str, args: &[&str]) -> Option<std::process::Output> {
     let mut command = std::process::Command::new("git");
     command.args(args).current_dir(root);
     utils::configure_std_noninteractive(&mut command).ok()?;
-    command
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
+    let output = match command.output() {
+        Ok(output) => output,
+        Err(error) => {
+            // TUI 展示数据不进 LLM：cwd 缺失时以归因日志供诊断，行为保持静默回退。
+            if let Some(attribution) =
+                utils::describe_cwd_gone(std::path::Path::new(root), "TUI 工作区元数据")
+            {
+                log::warn!(target: crate::LOG_TARGET, "{attribution}");
+            } else {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "git metadata probe failed: root={root} error={error}"
+                );
+            }
+            return None;
+        }
+    };
+    Some(output).filter(|output| output.status.success())
 }
 
 fn resolve_workspace_metadata(root: &str) -> (Option<String>, WorktreeKind) {

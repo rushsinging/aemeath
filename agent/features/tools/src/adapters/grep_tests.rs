@@ -240,3 +240,34 @@ async fn grep_running_search_observes_cancellation_and_terminates_child() {
         execution.text
     );
 }
+
+#[tokio::test]
+async fn search_when_workspace_root_deleted_returns_cwd_attribution() {
+    let workspace = tempfile::tempdir().unwrap();
+    let root = workspace.path().to_path_buf();
+    let ctx = test_ctx(root.clone());
+    let tool = GrepTool;
+
+    // 模拟事故：会话运行中工作目录（worktree）被清理后仍发起搜索。
+    drop(workspace);
+
+    let result = tool
+        .call(serde_json::json!({ "pattern": "match_me" }), &ctx)
+        .await;
+
+    assert!(
+        result.is_error,
+        "工作目录缺失时搜索必须失败：{}",
+        result.text
+    );
+    assert!(
+        result.text.contains("工作目录已不存在"),
+        "错误必须包含 cwd 归因，实际：{}",
+        result.text
+    );
+    assert!(
+        result.text.contains(&root.display().to_string()),
+        "错误必须包含缺失路径，实际：{}",
+        result.text
+    );
+}

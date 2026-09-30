@@ -270,6 +270,38 @@ async fn build_system_prompt_parts_captures_git_once_without_changing_static_pro
 }
 
 #[tokio::test]
+async fn build_system_prompt_parts_when_cwd_deleted_reports_attribution() {
+    let cwd_dir = tempfile::tempdir().unwrap();
+    let removed_cwd = cwd_dir.path().to_path_buf();
+    drop(cwd_dir);
+    let hook_runner: Arc<dyn HookDispatcher> = hook::wire_hook_dispatcher(
+        &share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config::default()),
+    )
+    .unwrap();
+    let context = PromptContextData::new(
+        &removed_cwd,
+        None,
+        None,
+        share::config::PermissionModeConfig::Ask,
+    );
+
+    let parts = build_system_prompt_parts(&context, &hook_runner, "en").await;
+
+    assert!(
+        parts.initial_git_context.contains("工作目录已不存在"),
+        "cwd 缺失时 git 上下文必须给出归因，实际：{}",
+        parts.initial_git_context
+    );
+    assert!(
+        parts
+            .initial_git_context
+            .contains(&removed_cwd.display().to_string()),
+        "归因必须包含缺失路径，实际：{}",
+        parts.initial_git_context
+    );
+}
+
+#[tokio::test]
 async fn test_load_agents_md_prefers_agents_over_claude_in_same_layer() {
     let base = tempfile::tempdir().unwrap();
     let agents_path = base.path().join("AGENTS.md");

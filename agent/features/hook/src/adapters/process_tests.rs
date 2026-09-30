@@ -373,3 +373,30 @@ async fn untruncated_stream_leaves_no_output_file() {
         "未截断时不得产生任何全量输出文件"
     );
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn execute_when_cwd_deleted_returns_attribution() {
+    let tempdir = tempfile::tempdir().expect("创建临时目录");
+    let removed_cwd = tempdir.path().to_path_buf();
+    let mut hook_request = request("true");
+    hook_request.cwd = removed_cwd.clone();
+    drop(tempdir);
+
+    let failure = ProcessDriver
+        .execute(hook_request, &CancellationToken::new())
+        .await
+        .expect_err("工作目录缺失时 hook spawn 必须失败");
+
+    assert_eq!(failure.kind, ProcessFailureKind::Spawn);
+    assert!(
+        failure.message.contains("工作目录已不存在"),
+        "错误必须包含 cwd 归因，实际：{}",
+        failure.message
+    );
+    assert!(
+        failure.message.contains(&removed_cwd.display().to_string()),
+        "错误必须包含缺失路径，实际：{}",
+        failure.message
+    );
+}
