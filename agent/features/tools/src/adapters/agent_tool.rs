@@ -3,7 +3,7 @@ use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 
-const SUB_AGENT_DEFAULT_TIMEOUT_SECS: u64 = 1800;
+const SUB_AGENT_DEFAULT_TIMEOUT_SECS: u64 = 3600;
 const SUB_AGENT_TIMEOUT_CAP_SECS: u64 = 10800;
 
 pub struct AgentTool;
@@ -41,7 +41,7 @@ impl TypedTool for AgentTool {
     }
 
     fn timeout_secs(&self) -> u64 {
-        1800 // 30 minutes — sub-agents run multi-run LLM conversations
+        3600 // 60 minutes — sub-agents run multi-run LLM conversations
     }
 
     fn cancellation(&self) -> crate::domain::published_language::CancellationDeclaration {
