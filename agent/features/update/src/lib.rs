@@ -4,6 +4,7 @@
 
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:update";
 
-pub mod api;
-mod contract;
-mod gateway;
+mod release;
+mod service;
+
+pub use service::UpdateGateway;
