@@ -352,6 +352,26 @@ impl crate::application::loop_engine::ManualReflectionPort for ChatManualReflect
             cancel.clone(),
         )
         .await;
+        // 成功手动反思复用 `RuntimeReflection` 同一记账路径
+        // （共享 `record_successful_usage`）；Manual Run 无 RunStep，
+        // `run_step_id=None` → 仅记账 UUIDv7。Failed/Cancelled/TimedOut/
+        // DisabledSkipped 不在此分支，不记账。
+        if let crate::application::reflection::ReflectionRunOutcome::Completed(completion) =
+            &outcome
+        {
+            if completion.status
+                == crate::application::reflection::ReflectionTaskCompletionStatus::Succeeded
+            {
+                if let Some(metadata) = &completion.metadata {
+                    crate::application::loop_engine::run_services::RuntimeReflection::record_succeeded_usage(
+                        &self.runtime_context,
+                        run_id,
+                        None,
+                        metadata,
+                    );
+                }
+            }
+        }
         let (text, is_error) =
             crate::application::loop_engine::chat::reflection::manual_reflection_outcome_text(
                 &outcome,

@@ -223,10 +223,14 @@ fn recording_binding(prompts: Arc<Mutex<Vec<String>>>) -> Arc<crate::ports::Prov
 }
 
 /// 生产装配形态的 `ChatManualReflection`：runtime context + 反思 adapter +
-/// system prompt + language + 冻结的 committed 快照。
+/// system prompt + language + 冻结的 committed 快照。usage sink 由调用方注入
+/// 以断言 Usage 记账。
 fn manual_reflection_port(
     config: share::config::Config,
     prompts: Arc<Mutex<Vec<String>>>,
+    usage_sink: Arc<
+        crate::application::loop_engine::chat::pre_compact_trigger_tests::RecordingUsageSink,
+    >,
 ) -> (SessionRunFixture, ChatManualReflection) {
     let fixture = SessionRunFixture::builder()
         .with_config(ConfigSnapshot::new(config))
@@ -235,6 +239,7 @@ fn manual_reflection_port(
             crate::application::reflection::test_support::noop_reflection_history(),
         )
         .with_session_id("manual-reflection".to_string())
+        .with_usage_sink(usage_sink)
         .build();
     let runtime_context = fixture
         .create(RunSpec::manual_reflection())
@@ -257,8 +262,13 @@ fn manual_reflection_port(
 #[tokio::test]
 async fn chat_manual_reflection_runs_frozen_snapshot_and_publishes_success_text() {
     let prompts: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-    let (fixture, mut port) =
-        manual_reflection_port(share::config::Config::default(), Arc::clone(&prompts));
+    let (fixture, mut port) = manual_reflection_port(
+        share::config::Config::default(),
+        Arc::clone(&prompts),
+        Arc::new(
+            crate::application::loop_engine::chat::pre_compact_trigger_tests::RecordingUsageSink::default(),
+        ),
+    );
 
     let outcome = port
         .run_manual_reflection(&sdk::RunId::new_v7(), &CancellationToken::new())
@@ -292,10 +302,17 @@ async fn chat_manual_reflection_runs_frozen_snapshot_and_publishes_success_text(
 #[tokio::test]
 async fn chat_manual_reflection_maps_cancelled_and_disabled_outcomes() {
     // ① 预先取消的 token：run_complete 折叠为 Completed(Cancelled) → 端口映射 Cancelled。
-    let (_fixture, mut port) = manual_reflection_port(share::config::Config::default(), {
-        let prompts: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-        prompts
-    });
+    let cancelled_sink = Arc::new(
+        crate::application::loop_engine::chat::pre_compact_trigger_tests::RecordingUsageSink::default(),
+    );
+    let (_fixture, mut port) = manual_reflection_port(
+        share::config::Config::default(),
+        {
+            let prompts: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+            prompts
+        },
+        cancelled_sink.clone(),
+    );
     let cancel = CancellationToken::new();
     cancel.cancel();
     let outcome = port
@@ -303,6 +320,11 @@ async fn chat_manual_reflection_maps_cancelled_and_disabled_outcomes() {
         .await
         .expect("取消不是错误");
     assert_eq!(outcome, ManualReflectionOutcome::Cancelled);
+    assert!(
+        cancelled_sink.records().is_empty(),
+        "Cancelled 手动反思不得计入 Usage: {:?}",
+        cancelled_sink.records()
+    );
 
     // ② 禁用竞态：run_complete 返回 DisabledSkipped → Ready(Failed) + 未启用文案。
     let disabled = share::config::Config {
@@ -312,10 +334,17 @@ async fn chat_manual_reflection_maps_cancelled_and_disabled_outcomes() {
         },
         ..Default::default()
     };
-    let (fixture, mut port) = manual_reflection_port(disabled, {
-        let prompts: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-        prompts
-    });
+    let disabled_sink = Arc::new(
+        crate::application::loop_engine::chat::pre_compact_trigger_tests::RecordingUsageSink::default(),
+    );
+    let (fixture, mut port) = manual_reflection_port(
+        disabled,
+        {
+            let prompts: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+            prompts
+        },
+        disabled_sink.clone(),
+    );
     let outcome = port
         .run_manual_reflection(&sdk::RunId::new_v7(), &CancellationToken::new())
         .await
@@ -324,11 +353,74 @@ async fn chat_manual_reflection_maps_cancelled_and_disabled_outcomes() {
         outcome,
         ManualReflectionOutcome::Ready(ReflectionTaskCompletionStatus::Failed)
     );
+    assert!(
+        disabled_sink.records().is_empty(),
+        "DisabledSkipped 手动反思不得计入 Usage: {:?}",
+        disabled_sink.records()
+    );
     let texts = fixture.event_sink().command_result_texts();
     assert!(
         texts
             .iter()
             .any(|(text, is_error)| text.contains("未启用") && !is_error),
         "禁用竞态必须发布未启用文案且非错误: {texts:?}"
+    );
+}
+
+/// Manual Reflection Run 无 RunStep——成功终态经共享
+/// `record_successful_usage` 仍恰好记 1 条，`run_step_id`/`model_invocation_id`
+/// 用仅记账的 UUIDv7，run/session/model identity 与 provider 报告的 tokens 正确。
+#[tokio::test]
+async fn chat_manual_reflection_success_records_usage_without_run_step() {
+    let usage_sink = Arc::new(
+        crate::application::loop_engine::chat::pre_compact_trigger_tests::RecordingUsageSink::default(),
+    );
+    let (_fixture, mut port) = manual_reflection_port(
+        share::config::Config::default(),
+        Arc::new(Mutex::new(Vec::new())),
+        usage_sink.clone(),
+    );
+    let run_id = sdk::RunId::new("manual-usage-run");
+
+    let outcome = port
+        .run_manual_reflection(&run_id, &CancellationToken::new())
+        .await
+        .expect("端口执行不得返回 Err");
+    assert_eq!(
+        outcome,
+        ManualReflectionOutcome::Ready(ReflectionTaskCompletionStatus::Succeeded)
+    );
+
+    let records = usage_sink.records();
+    assert_eq!(
+        records.len(),
+        1,
+        "成功 Manual 反思必须恰好记 1 条 UsageRecord: {records:?}"
+    );
+    let record = &records[0];
+    assert_eq!(record.run_id, run_id, "run identity 必须是手动反思 Run");
+    assert_eq!(
+        record.session_id,
+        sdk::SessionId::new(port.runtime_context.skill_load_session_id())
+    );
+    assert_eq!(record.provider, "manual-reflect-test");
+    assert_eq!(record.model, "manual-test-model");
+    assert_eq!(
+        record.input_tokens, 1,
+        "provider 报告的 input tokens 原样入账"
+    );
+    assert_eq!(
+        record.output_tokens, 1,
+        "provider 报告的 output tokens 原样入账"
+    );
+    assert_eq!(
+        record.run_step_id.as_uuid().get_version_num(),
+        7,
+        "Manual Run 无 RunStep：run_step_id 必须是仅记账的 UUIDv7"
+    );
+    assert_eq!(
+        record.model_invocation_id.as_uuid().get_version_num(),
+        7,
+        "model_invocation_id 必须是仅记账的 UUIDv7"
     );
 }
