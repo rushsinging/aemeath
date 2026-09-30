@@ -153,10 +153,38 @@ pub(crate) fn register_named_scope(
         }
     );
     builtin!(
-        "Memory",
+        "MemoryAdd",
         Caps::All,
-        memory_tool::MemoryTool {
-            source: memory_source.clone(),
+        memory_tool::MemoryAddTool {
+            source: memory_source.clone()
+        }
+    );
+    builtin!(
+        "MemorySearch",
+        Caps::All,
+        memory_tool::MemorySearchTool {
+            source: memory_source.clone()
+        }
+    );
+    builtin!(
+        "MemoryList",
+        Caps::All,
+        memory_tool::MemoryListTool {
+            source: memory_source.clone()
+        }
+    );
+    builtin!(
+        "MemoryUpdate",
+        Caps::All,
+        memory_tool::MemoryUpdateTool {
+            source: memory_source.clone()
+        }
+    );
+    builtin!(
+        "MemoryDelete",
+        Caps::All,
+        memory_tool::MemoryDeleteTool {
+            source: memory_source.clone()
         }
     );
     builtin!(
@@ -264,7 +292,11 @@ mod tests {
         "TaskListComplete",
         "TaskGet",
         "TaskStop",
-        "Memory",
+        "MemoryAdd",
+        "MemorySearch",
+        "MemoryList",
+        "MemoryUpdate",
+        "MemoryDelete",
         "AskUserQuestion",
         "Brief",
         "ToolSearch",
@@ -309,6 +341,37 @@ mod tests {
                 .unwrap();
             assert_eq!(spec.required_capabilities(), Caps::TaskWrite);
         }
+    }
+
+    #[test]
+    fn registry_exposes_five_memory_tools_and_no_legacy_memory() {
+        let registry = ToolRegistry::new();
+        let task_access: Arc<dyn TaskAccess> = Arc::new(TaskStore::new());
+        let workspace = tempfile::tempdir().expect("workspace");
+        let control = project::wire_production_workspace(workspace.path().to_path_buf(), None)
+            .expect("workspace wiring")
+            .control();
+        register_named_scope(
+            &registry,
+            task_access,
+            test_memory_source(),
+            control,
+            crate::composition::wire_skills().loader(),
+            BuiltinRegistryScope::Main,
+        );
+        for name in [
+            "MemoryAdd",
+            "MemorySearch",
+            "MemoryList",
+            "MemoryUpdate",
+            "MemoryDelete",
+        ] {
+            assert!(registry.get(name).is_some(), "missing {name}");
+        }
+        assert!(
+            registry.get("Memory").is_none(),
+            "legacy Memory tool must be gone"
+        );
     }
 
     #[test]
