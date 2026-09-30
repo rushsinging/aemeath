@@ -145,8 +145,11 @@ pub enum RuntimeStreamEvent {
     },
     /// loop 执行 reset 清理（messages + pending）后发出，通知 TUI 同步清镜像。
     SessionReset,
-    /// 批量撤回 pending 输入：texts 为被撤回的 UserMessage 文本（#391 S3）。
-    /// TUI 收到后清全部占位 + texts.join("\n") 还原输入框。
+    /// 批量撤回 pending 输入（#391 S3）。
+    ///
+    /// texts 为被撤回输入的文本：用户消息原文 + 排队控制命令的展示文本
+    /// （#1816 撤回语义覆盖所有待处理输入）。TUI 收到后清全部占位并
+    /// `texts.join("\n")` 还原输入框，用户可编辑后重新提交。
     UserMessagesWithdrawn {
         texts: Vec<String>,
     },

@@ -550,6 +550,12 @@ impl ConversationUpdate for SyncQueuedCommands {
     }
 }
 
+impl ConversationUpdate for ClearQueuedCommands {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        model.clear_queued_commands()
+    }
+}
+
 impl ConversationUpdate for ClearCompactRuntime {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         model.clear_compact_runtime()
@@ -629,6 +635,7 @@ impl ConversationUpdate for ConversationIntent {
             Self::SetTransientStatusNotice(s) => s.update(model),
             Self::SyncQueuedSubmissions(s) => s.update(model),
             Self::SyncQueuedCommands(s) => s.update(model),
+            Self::ClearQueuedCommands(s) => s.update(model),
             Self::ClearCompactRuntime(s) => s.update(model),
         }
     }

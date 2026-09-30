@@ -479,10 +479,21 @@ where
         match event {
             sdk::ChatInputEvent::UserMessage { .. } => self.input.admit_user_message(event).await,
             sdk::ChatInputEvent::WithdrawAll => {
-                let texts = self
+                // 撤回语义覆盖所有待处理输入：Run 内消息 + 排队的控制命令（#1816）。
+                let mut texts = self
                     .input
                     .run_input_buffer
                     .with_lock(|buffer| buffer.withdraw_all_user_texts());
+                let withdrawn_commands = self.input.pending_input.drain_for_withdraw();
+                if !withdrawn_commands.is_empty() {
+                    texts.extend(withdrawn_commands);
+                    self.runtime_context
+                        .event_sink()
+                        .send_event(RuntimeStreamEvent::ControlCommandsQueued {
+                            queued: self.input.pending_input.command_snapshot(),
+                        })
+                        .await;
+                }
                 self.runtime_context
                     .event_sink()
                     .send_event(RuntimeStreamEvent::UserMessagesWithdrawn { texts })

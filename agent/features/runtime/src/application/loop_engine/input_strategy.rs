@@ -228,9 +228,16 @@ where
                     self.admit_user_message(event).await
                 }
                 ChatInputEvent::WithdrawAll => {
-                    let texts = self
+                    // 撤回语义覆盖所有待处理输入：Run 内消息 + 排队的控制命令（#1816）。
+                    let mut texts = self
                         .run_input_buffer
                         .with_lock(|b| b.withdraw_all_user_texts());
+                    let withdrawn_commands = self.pending_input.drain_for_withdraw();
+                    if !withdrawn_commands.is_empty() {
+                        // 命令队列已清空：发空快照让 UI 撤下命令行（#1816）。
+                        texts.extend(withdrawn_commands);
+                        self.publish_command_queue_snapshot().await;
+                    }
                     if !texts.is_empty() {
                         self.sink
                             .send_event(RuntimeStreamEvent::UserMessagesWithdrawn { texts })

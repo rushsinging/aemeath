@@ -913,3 +913,66 @@ async fn idle_gate_publishes_empty_snapshot_after_consuming_command() {
         .expect("gate 必须发布命令队列快照");
     assert!(snapshot.is_empty(), "命令被消费后快照必须为空");
 }
+
+/// #1816：WithdrawAll 必须一并撤回排队的控制命令，Up 键才等于「全部撤回」。
+#[tokio::test]
+async fn withdraw_all_retracts_queued_control_commands_too() {
+    let buffer = PendingInputBuffer::default();
+    buffer.push(ChatInputEvent::user_message("queued", Vec::new()));
+    buffer.push(ChatInputEvent::WithdrawAll);
+    buffer.push(ChatInputEvent::Compact);
+    buffer.push(ChatInputEvent::SwitchModel {
+        selection: "anthropic/claude".to_string(),
+    });
+    let sink = TestSink::default();
+
+    let outcome = apply_gate(
+        GateKind::BeforeLlm,
+        &buffer,
+        &sink,
+        &task::TaskStore::new(),
+        true,
+    )
+    .await;
+
+    assert!(outcome.pending_command.is_none(), "撤回后不得执行命令");
+    assert!(
+        buffer.is_empty(),
+        "控制命令必须随撤回离开队列，NEVER 留在队列里执行"
+    );
+    let snapshot = sink
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .find_map(|event| match event {
+            RuntimeStreamEvent::ControlCommandsQueued { queued } => Some(queued.clone()),
+            _ => None,
+        })
+        .expect("gate 必须发布命令队列快照");
+    assert!(snapshot.is_empty(), "撤回后命令队列快照必须为空");
+}
+
+/// #1816：撤回排队控制命令的 buffer 级原语——取出展示文本并清空队列。
+#[test]
+fn pending_buffer_drain_for_withdraw_returns_command_texts_and_clears_queue() {
+    let buffer = PendingInputBuffer::default();
+    buffer.push(ChatInputEvent::Compact);
+    buffer.push(ChatInputEvent::user_message("queued", Vec::new()));
+    buffer.push(ChatInputEvent::SwitchModel {
+        selection: "anthropic/claude".to_string(),
+    });
+
+    let withdrawn = buffer.drain_for_withdraw();
+
+    assert_eq!(
+        withdrawn,
+        vec![
+            "/compact".to_string(),
+            "/model anthropic/claude".to_string()
+        ],
+        "撤回必须给出命令展示文本，TUI 才能还原输入框"
+    );
+    assert!(buffer.is_empty(), "撤回后队列必须清空");
+    assert!(buffer.command_snapshot().is_empty());
+}

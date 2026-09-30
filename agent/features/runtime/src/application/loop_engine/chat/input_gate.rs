@@ -192,6 +192,17 @@ impl PendingInputBuffer {
             .collect()
     }
 
+    /// 撤回全部排队控制命令，返回它们的展示文本（#1816）。
+    ///
+    /// `WithdrawAll` 的语义是「撤回所有待处理输入」：控制命令尚未执行，
+    /// 撤回无副作用，因此与用户消息同批撤回，Up 键才等于「全部撤回」。
+    pub fn drain_for_withdraw(&self) -> Vec<String> {
+        self.drain_all()
+            .iter()
+            .filter_map(ChatInputEvent::queue_display_text)
+            .collect()
+    }
+
     /// 批量取走未遍历的剩余事件，原序放回缓冲区等待下一轮 idle（#1816）。
     ///
     /// 与 `drain_all` 成对使用：gate 一次 drain 后只消费到第一个控制命令，

@@ -465,6 +465,12 @@ impl ConversationModel {
         }]
     }
 
+    /// 清空命令占位（#1816）：撤回与 session 重置后命令不再排队。
+    pub(super) fn clear_queued_commands(&mut self) -> Vec<ConversationChange> {
+        self.queued_commands.clear();
+        vec![ConversationChange::QueuedCommandsSynced { count: 0 }]
+    }
+
     pub(super) fn clear_compact_runtime(&mut self) -> Vec<ConversationChange> {
         self.runtime.clear_compact_runtime();
         vec![ConversationChange::CompactRuntimeCleared]
