@@ -55,13 +55,13 @@ async fn test_agent_tool_uses_finite_default_timeout() {
     assert!(!result.is_error);
     assert_eq!(
         *runner.captured_timeout.lock().unwrap(),
-        std::time::Duration::from_secs(1800)
+        std::time::Duration::from_secs(3600)
     );
     assert!(runner
         .captured_system
         .lock()
         .unwrap()
-        .contains("wall-clock timeout: 1800 seconds"));
+        .contains("wall-clock timeout: 3600 seconds"));
 }
 
 #[tokio::test]
