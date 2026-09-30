@@ -2,7 +2,8 @@
 //!
 //! 对应设计文档：`docs/snapshot/release-update-design.md`
 
-pub(crate) const LOG_TARGET: &str = "aemeath:agent:update";
+mod constants;
+pub(crate) use constants::LOG_TARGET;
 
 mod release;
 mod service;

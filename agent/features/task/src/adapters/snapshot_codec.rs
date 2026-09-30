@@ -1,3 +1,4 @@
+use super::constants::CURRENT_SCHEMA_VERSION;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -5,8 +6,6 @@ use crate::domain::{
     BatchData, BatchIdData, BatchStatusData, TaskData, TaskIdData, TaskPriorityData,
     TaskRevisionData, TaskSnapshotData, TaskSnapshotFields, TaskStatusData,
 };
-
-const CURRENT_SCHEMA_VERSION: u64 = 2;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum TaskSnapshotCodecError {

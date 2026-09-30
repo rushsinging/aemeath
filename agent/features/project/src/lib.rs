@@ -12,8 +12,9 @@
 //! `ProjectIdentityData`/`WorkspaceId`/`WorktreeKind` 定义于 `share::session_types`，
 //! 消费方直连 share（本 crate 零转发）。
 
-pub(crate) const LOG_TARGET: &str = "aemeath:agent:project";
 mod adapters;
+mod constants;
+pub(crate) use constants::LOG_TARGET;
 pub(crate) mod application;
 mod domain;
 pub(crate) mod service;

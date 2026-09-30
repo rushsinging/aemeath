@@ -1,6 +1,7 @@
 mod atomic_blob;
 mod atomic_dataset;
 mod blob_recovery;
+mod constants;
 mod published_language;
 mod safe_path;
 

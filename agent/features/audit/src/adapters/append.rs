@@ -1,3 +1,4 @@
+use super::constants::{JSONL_SUFFIX, USAGE_NAMESPACE};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::str::FromStr;
@@ -11,9 +12,6 @@ use crate::ports::{
     AppendLogError, AppendLogLine, AppendLogNamespace, AppendLogReader, AppendLogStream,
     UsageAppendStorePort,
 };
-
-const USAGE_NAMESPACE: &str = "usage";
-const JSONL_SUFFIX: &str = ".jsonl";
 
 type StreamLock = Arc<Mutex<()>>;
 
