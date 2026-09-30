@@ -631,6 +631,7 @@ struct PlanApprovalFake;
 struct InteractionMailboxFake {
     state: Arc<std::sync::Mutex<ScriptedState>>,
     interaction_bridge: Arc<InteractionBridge>,
+    interaction_port_override: Option<Arc<dyn InteractionPort>>,
     published_interactions: Arc<std::sync::Mutex<Vec<InteractionRequest>>>,
     pending_work: Arc<std::sync::Mutex<Option<super::engine::PendingInteractionWork>>>,
     fake_tool_port: Option<Arc<FakeToolExecutionPort>>,
@@ -755,6 +756,7 @@ struct ScriptedScenario {
     needs_compaction: bool,
     fail_emit_once: bool,
     interaction_bridge: Arc<InteractionBridge>,
+    interaction_port_override: Option<Arc<dyn InteractionPort>>,
     published_interactions: Arc<std::sync::Mutex<Vec<InteractionRequest>>>,
     pending_work: Arc<std::sync::Mutex<Option<super::engine::PendingInteractionWork>>>,
     fake_tool_port: Option<Arc<FakeToolExecutionPort>>,
@@ -801,6 +803,7 @@ impl Default for ScriptedScenario {
             needs_compaction: false,
             fail_emit_once: false,
             interaction_bridge: Arc::new(InteractionBridge::new()),
+            interaction_port_override: None,
             published_interactions: Arc::new(std::sync::Mutex::new(Vec::new())),
             pending_work: Arc::new(std::sync::Mutex::new(None)),
             fake_tool_port: None,
@@ -851,6 +854,7 @@ impl ScriptedScenario {
                 interaction: InteractionMailboxFake {
                     state: Arc::clone(&state),
                     interaction_bridge: Arc::clone(&self.interaction_bridge),
+                    interaction_port_override: self.interaction_port_override.clone(),
                     published_interactions: Arc::clone(&self.published_interactions),
                     pending_work: Arc::clone(&self.pending_work),
                     fake_tool_port: self.fake_tool_port.clone(),
@@ -1425,7 +1429,9 @@ impl crate::application::interaction::coordinator::InteractionCompletionContextP
 #[async_trait::async_trait]
 impl InteractionMailboxPort for InteractionMailboxFake {
     fn interaction_port(&self) -> &dyn InteractionPort {
-        self.interaction_bridge.as_ref()
+        self.interaction_port_override
+            .as_deref()
+            .unwrap_or(self.interaction_bridge.as_ref())
     }
 
     async fn publish_interaction(

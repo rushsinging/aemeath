@@ -4,6 +4,11 @@ pub use share::ids::RunStepId;
 pub struct PendingInteraction {
     pub request_id: share::ids::InteractionRequestId,
     pub continuation: InteractionContinuation,
+    /// HardPause 挂起前的 run 相位（`ApplyingResponse` / `AwaitingToolApproval`
+    /// / `ExecutingTools`）。仅 `ContinueAfterHardPause` 时为 `Some`；恢复时
+    /// run 必须回到该相位，后续收口（`ContinueAfterResponse` / `ToolsApproved`）
+    /// 才能沿原状态机路径推进。其他 continuation 保持 `resume_status()` 语义。
+    pub hard_pause_resume_status: Option<RunStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

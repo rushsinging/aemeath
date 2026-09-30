@@ -369,8 +369,19 @@ pub(super) async fn execute_step_with_scope(
                         _ => unreachable!(),
                     };
                     record_stuck(run, execution, port, &decision).await?;
-                    handle_hard_pause(run, execution, port, &step_id, reason).await?;
-                    return Ok(());
+                    let begin = handle_hard_pause(
+                        run,
+                        execution,
+                        port,
+                        &step_id,
+                        reason,
+                        HardPauseStepClose::CloseNow,
+                    )
+                    .await?;
+                    if matches!(begin, HardPauseBegin::Suspended) {
+                        return Ok(());
+                    }
+                    // Degraded：守卫降级，落入下方常规 ContinueAfterResponse 收口。
                 }
                 StuckDecision::Allow => {}
             }
@@ -397,8 +408,19 @@ pub(super) async fn execute_step_with_scope(
                 StuckDecision::HardPause { ref reason } => {
                     let reason = reason.clone();
                     record_stuck(run, execution, port, &decision).await?;
-                    handle_hard_pause(run, execution, port, &step_id, reason).await?;
-                    return Ok(());
+                    let begin = handle_hard_pause(
+                        run,
+                        execution,
+                        port,
+                        &step_id,
+                        reason,
+                        HardPauseStepClose::CloseNow,
+                    )
+                    .await?;
+                    if matches!(begin, HardPauseBegin::Suspended) {
+                        return Ok(());
+                    }
+                    // Degraded：守卫降级，落入下方常规 ContinueAfterResponse 收口。
                 }
                 StuckDecision::Allow => {}
             }
@@ -421,8 +443,20 @@ pub(super) async fn execute_step_with_scope(
             }
             transition_and_emit(run, execution, port, RunTransition::ResponseWithTools).await?;
             let mut guarded_calls = Vec::with_capacity(calls.len());
+            // fuse 升级 HardPause 后不立即挂起：本批调用全部按 SoftBlock 物化收口，
+            // 工具轮结束、step 收口到 DrainingInput 后再挂起，恢复时无需重放工具轮。
+            let mut hard_pause_reason: Option<String> = None;
             for call in calls {
                 run.add_tool_call(&step_id, call.clone())?;
+                if let Some(block_reason) = &hard_pause_reason {
+                    guarded_calls.push((
+                        call,
+                        ToolGuardDecision::SoftBlock {
+                            reason: block_reason.clone(),
+                        },
+                    ));
+                    continue;
+                }
                 match guard.inspect_tool(&call) {
                     StuckDecision::SoftBlock { reason } => {
                         record_stuck(
@@ -446,8 +480,8 @@ pub(super) async fn execute_step_with_scope(
                             },
                         )
                         .await?;
-                        handle_hard_pause(run, execution, port, &step_id, reason).await?;
-                        return Ok(());
+                        hard_pause_reason = Some(reason.clone());
+                        guarded_calls.push((call, ToolGuardDecision::SoftBlock { reason }));
                     }
                     StuckDecision::Allow => {
                         guarded_calls.push((call, ToolGuardDecision::Allow));
@@ -678,6 +712,20 @@ pub(super) async fn execute_step_with_scope(
                     // #1248 TaskData 5: Resolve tool approvals through coordinator
                     handle_tool_approvals(run, execution, port, calls_needing_approval).await?;
                 }
+            }
+            // fuse HardPause：工具轮与 step 已收口到 DrainingInput，此刻挂起等待
+            // 用户确认。审批交互分支若已挂起（pending 未清），begin 会因
+            // InteractionAlreadyPending 走 Degraded 降级，不会打死 run。
+            if let Some(reason) = hard_pause_reason.take() {
+                handle_hard_pause(
+                    run,
+                    execution,
+                    port,
+                    &step_id,
+                    reason,
+                    HardPauseStepClose::AlreadyClosed,
+                )
+                .await?;
             }
         }
     }
