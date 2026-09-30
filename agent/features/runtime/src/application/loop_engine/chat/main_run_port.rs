@@ -6,9 +6,6 @@ use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
 use crate::application::loop_engine::chat::post_batch::run_post_tool_batch;
-use crate::application::loop_engine::chat::reflection::{
-    announce_memory_update, maybe_run_pre_compact_reflection,
-};
 use crate::application::loop_engine::chat::stream_handler::InvocationEventReducer;
 use crate::application::loop_engine::chat::{ChatEventSink, RuntimeRunContext, RuntimeStreamEvent};
 use crate::application::loop_engine::event_strategy::{ChatStreamEventObserver, RunEventObserver};
@@ -239,11 +236,12 @@ impl crate::application::loop_engine::step_persistence::AcceptedInputObserver
     }
 }
 
+/// 自动压缩观察者：不在回调内执行反思（回调拿不到 `&mut Run`，无法驱动状态机），
+/// 仅在 `Committed` 时把将被丢弃的消息暂存进与反思端口共享的材料槽，由 engine 的
+/// reflection phase 在 Compacting 内取出执行；`Skipped` 不动槽位。
 pub(crate) struct ChatCompactionObserver {
-    pub runtime_context: RuntimeContext,
-    pub reflection_tasks: crate::application::reflection::ReflectionTaskAdapter,
-    pub system_prompt: String,
-    pub language: String,
+    pub pre_compact_material:
+        crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot,
 }
 
 #[async_trait]
@@ -253,26 +251,8 @@ impl crate::application::loop_engine::compaction::CompactionObserver for ChatCom
         outcome: &crate::ports::CompactOutcome,
         discarded_messages: &[Message],
     ) -> Result<(), LoopEngineError> {
-        let reflection_outcome = maybe_run_pre_compact_reflection(
-            outcome,
-            discarded_messages,
-            &self.reflection_tasks,
-            self.runtime_context.config_ref().config().memory(),
-            self.runtime_context.provider_ref(),
-            &self.system_prompt,
-            &self.language,
-            self.runtime_context.memory_ref(),
-            self.runtime_context.reflection_history_ref(),
-            tokio_util::sync::CancellationToken::new(),
-        )
-        .await;
-        if let Some(reflection_outcome) = reflection_outcome {
-            announce_memory_update(
-                &self.runtime_context.event_sink(),
-                &reflection_outcome,
-                &self.language,
-            )
-            .await;
+        if matches!(outcome, crate::ports::CompactOutcome::Committed(_)) {
+            self.pre_compact_material.stage(discarded_messages.to_vec());
         }
         Ok(())
     }

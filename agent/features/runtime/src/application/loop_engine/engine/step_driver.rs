@@ -109,6 +109,10 @@ pub(super) async fn execute_step_with_scope(
                 return Ok(());
             }
         }
+        // PreCompact 反思：材料已在压缩时暂存，压缩 activity 收口后、
+        // CompactionCompleted 放行前，于 Compacting 内完成 Reflecting 往返。
+        run_pre_compact_reflection_phase_if_staged(run, execution, port, &step_id, &step_cancel)
+            .await?;
         transition_and_emit(run, execution, port, RunTransition::CompactionCompleted).await?;
     }
 
@@ -198,6 +202,16 @@ pub(super) async fn execute_step_with_scope(
                         return Ok(());
                     }
                 }
+                // PreCompact 反思：同 needs_compaction 路径，在 Compacting 内
+                // 完成 Reflecting 往返后再放行压缩收口。
+                run_pre_compact_reflection_phase_if_staged(
+                    run,
+                    execution,
+                    port,
+                    &step_id,
+                    &step_cancel,
+                )
+                .await?;
                 transition_and_emit(run, execution, port, RunTransition::CompactionCompleted)
                     .await?;
                 transition_and_emit(run, execution, port, RunTransition::ContextPrepared).await?;

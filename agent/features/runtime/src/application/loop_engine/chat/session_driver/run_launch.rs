@@ -767,14 +767,15 @@ where
                         model_observer,
                         false,
                     );
+                // PreCompact 材料共享槽：压缩观察者在 Committed 时暂存将被丢弃的
+                // 消息，反思端口在 Compacting 内取出执行（材料收集与状态机分离）。
+                let pre_compact_material =
+                    crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot::default();
                 let mut compaction =
                     crate::application::loop_engine::run_services::RuntimeCompaction::new(
                         &runtime_context,
                         main_run_port::ChatCompactionObserver {
-                            runtime_context: runtime_context.clone(),
-                            reflection_tasks: reflection_tasks.clone(),
-                            system_prompt: cacheable_system_prompt.clone(),
-                            language: language.clone(),
+                            pre_compact_material: pre_compact_material.clone(),
                         },
                     );
                 let mut interaction =
@@ -840,7 +841,7 @@ where
                     system_prompt: cacheable_system_prompt.clone(),
                     context_size,
                 };
-                // Main Run 都绑反思端口——Interval 反思的判定与执行
+                // Main Run 都绑反思端口——Interval/PreCompact 反思的判定与执行
                 // 由 engine reflection phase 驱动。
                 let mut reflection =
                     crate::application::loop_engine::run_services::RuntimeReflection::new(
@@ -848,6 +849,7 @@ where
                         reflection_tasks.clone(),
                         cacheable_system_prompt.clone(),
                         language.clone(),
+                        pre_compact_material,
                     );
                 let mut loop_context = crate::application::loop_engine::RunLoop::new(
                     &mut launch_input,

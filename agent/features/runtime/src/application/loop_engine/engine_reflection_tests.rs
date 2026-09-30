@@ -1,4 +1,4 @@
-/// Interval 反思执行点上移 engine 后的 L2 协作测试。
+/// 反思执行点上移 engine 后的 L2 协作测试（Interval 与 PreCompact 两触发）。
 ///
 /// 端口只提供判定材料与执行能力：`Reflecting` 状态转移、`Reflection` activity 的
 /// 发布/终态收口，以及「任何 outcome 都不终止宿主 Run」的语义全部由 engine 的
@@ -26,6 +26,10 @@ struct ReflectionFake {
     activities: std::sync::Arc<crate::application::activity::ActivityCoordinator>,
     runs: Vec<ReflectionTaskTrigger>,
     state_during_run: Option<sdk::ActivityStateView>,
+    /// 与压缩侧共享的 PreCompact 材料槽；取材料走生产门禁语义（禁用即丢弃）。
+    pre_compact_material:
+        crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot,
+    memory_config: share::config::MemoryConfig,
 }
 
 #[async_trait::async_trait]
@@ -42,6 +46,11 @@ impl crate::application::loop_engine::ReflectionPhasePort for ReflectionFake {
             }
             IntervalJudgment::Interval(_) => None,
         }
+    }
+
+    fn take_pre_compact_messages(&self) -> Option<Vec<share::message::Message>> {
+        self.pre_compact_material
+            .take_for_reflection(&self.memory_config)
     }
 
     async fn run_reflection(
@@ -98,6 +107,8 @@ async fn drive_interval_run(
         activities: activities.clone(),
         runs: Vec::new(),
         state_during_run: None,
+        pre_compact_material: Default::default(),
+        memory_config: share::config::MemoryConfig::default(),
     };
     let mut scenario = ScriptedScenario {
         model_steps: VecDeque::from([ModelStep::Complete {
@@ -370,4 +381,270 @@ async fn interval_reflection_not_triggered_when_step_count_missed() {
         "频控未命中时端口执行不得被调用"
     );
     assert_eq!(result.run.status(), RunStatus::Completed);
+}
+
+// ---------------------------------------------------------------------------
+// PreCompact：自动压缩 Ready 后在 Compacting 内往返 Reflecting
+// ---------------------------------------------------------------------------
+
+struct PreCompactRunResult {
+    run: Run,
+    activities: std::sync::Arc<crate::application::activity::ActivityCoordinator>,
+    events: Vec<RuntimeLifecycleEvent>,
+    reflection_runs: Vec<ReflectionTaskTrigger>,
+    state_during_run: Option<sdk::ActivityStateView>,
+    slot: crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot,
+}
+
+fn pre_compact_outcome(status: ReflectionTaskCompletionStatus) -> ReflectionRunOutcome {
+    ReflectionRunOutcome::Completed(ReflectionTaskCompletion {
+        trigger: ReflectionTaskTrigger::PreCompact,
+        status,
+        metadata: None,
+    })
+}
+
+/// 跑一次「自动压缩触发 → PreCompact 反思」的完整 Main Run。
+///
+/// `material` 是压缩 Committed 时观察者将暂存进共享槽的被丢弃消息；`None` 模拟
+/// `CompactOutcome::Skipped`（观察者不暂存）。生产链路为
+/// `ChatCompactionObserver::on_compacted` 暂存 → engine 反思 phase 取出。
+async fn drive_pre_compact_run(
+    material: Option<Vec<share::message::Message>>,
+    memory_config: share::config::MemoryConfig,
+) -> PreCompactRunResult {
+    let slot = crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot::default();
+    let mut run = new_run(Duration::ZERO);
+    let cancel = CancellationToken::new();
+    let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+    execution.initialize_for_launch(Vec::new(), 1);
+    let activities = std::sync::Arc::new(
+        crate::application::activity::ActivityCoordinator::production_without_publisher(
+            run.id().clone(),
+            crate::application::activity::RunPurpose::Main,
+        ),
+    );
+    let mut reflection = ReflectionFake {
+        // PreCompact 场景关闭 Interval 判定，聚焦压缩材料路径。
+        judgment: IntervalJudgment::Disabled,
+        outcome: pre_compact_outcome(ReflectionTaskCompletionStatus::Succeeded),
+        activities: activities.clone(),
+        runs: Vec::new(),
+        state_during_run: None,
+        pre_compact_material: slot.clone(),
+        memory_config,
+    };
+    let mut scenario = ScriptedScenario {
+        model_steps: VecDeque::from([ModelStep::Complete {
+            text: "done".to_string(),
+        }]),
+        needs_compaction: true,
+        pre_compact_material: material,
+        pre_compact_slot: Some(slot.clone()),
+        ..Default::default()
+    };
+    {
+        let mut port = scenario.ports().run_loop();
+        port.bind_activity_context(activities.clone(), "test-model".to_string());
+        port.bind_reflection(&mut reflection);
+        run_loop(&mut run, &mut execution, &cancel, &mut port)
+            .await
+            .expect("engine 必须正常完成：PreCompact 反思不得终止宿主 Run");
+    }
+    PreCompactRunResult {
+        run,
+        activities,
+        events: scenario.events(),
+        reflection_runs: reflection.runs,
+        state_during_run: reflection.state_during_run,
+        slot,
+    }
+}
+
+/// 无反思断言：不进入 Reflecting、不发布 Reflection activity、端口执行不被调用。
+fn assert_no_reflection_phase(
+    events: &[RuntimeLifecycleEvent],
+    activities: &crate::application::activity::ActivityCoordinator,
+    reflection_runs: &[ReflectionTaskTrigger],
+    context: &str,
+) {
+    let transitions = transition_events(events);
+    assert!(
+        transition_index(
+            &transitions,
+            RunStatus::Compacting,
+            RunStatus::Reflecting,
+            RunTransitionReason::BeginReflection,
+        )
+        .is_none(),
+        "{context}：不得进入 Compacting→Reflecting；实际转移: {transitions:?}"
+    );
+    assert!(
+        reflection_activities(activities).is_empty(),
+        "{context}：不得发布 Reflection activity"
+    );
+    assert!(
+        reflection_runs.is_empty(),
+        "{context}：反思端口执行不得被调用"
+    );
+}
+
+#[tokio::test]
+async fn pre_compact_reflection_runs_inside_compacting_state_with_activity() {
+    // 压缩返回 Committed：观察者暂存被丢弃消息 → engine 在 Compacting 内取出执行。
+    let result = drive_pre_compact_run(
+        Some(vec![
+            share::message::Message::user("discarded-1"),
+            share::message::Message::user("discarded-2"),
+        ]),
+        share::config::MemoryConfig::default(),
+    )
+    .await;
+
+    // ① 事件序列：BeginCompaction 进入 Compacting 后，Reflecting 往返完整嵌在
+    //    Compacting 内，且在 CompactionCompleted 之前。
+    let transitions = transition_events(&result.events);
+    let begin_compact = transition_index(
+        &transitions,
+        RunStatus::PreparingContext,
+        RunStatus::Compacting,
+        RunTransitionReason::BeginCompaction,
+    )
+    .expect("必须发布 PreparingContext→Compacting (BeginCompaction) 转移");
+    let begin_reflect = transition_index(
+        &transitions,
+        RunStatus::Compacting,
+        RunStatus::Reflecting,
+        RunTransitionReason::BeginReflection,
+    )
+    .expect("压缩材料暂存后必须进入 Compacting→Reflecting (BeginReflection)");
+    let complete_reflect = transition_index(
+        &transitions,
+        RunStatus::Reflecting,
+        RunStatus::Compacting,
+        RunTransitionReason::ReflectionCompleted,
+    )
+    .expect("反思必须返回 Compacting (ReflectionCompleted)");
+    let complete_compact = transition_index(
+        &transitions,
+        RunStatus::Compacting,
+        RunStatus::PreparingContext,
+        RunTransitionReason::CompactionCompleted,
+    )
+    .expect("反思收口后必须发布 Compacting→PreparingContext (CompactionCompleted)");
+    assert!(
+        begin_compact < begin_reflect
+            && begin_reflect < complete_reflect
+            && complete_reflect < complete_compact,
+        "Reflecting 往返必须嵌在 Compacting 内且先于 CompactionCompleted；实际转移: {transitions:?}"
+    );
+
+    // ② activity：恰好一次 Reflection{trigger:PreCompact}，parent = 当前 Run root，
+    //    执行期 Running、终态 Succeeded。
+    let reflections = reflection_activities(&result.activities);
+    assert_eq!(reflections.len(), 1, "必须恰好发布一次 Reflection activity");
+    let root_id = result
+        .activities
+        .snapshot()
+        .activities
+        .iter()
+        .find(|activity| matches!(activity.source, sdk::ActivitySourceView::Run))
+        .map(|activity| activity.id.clone())
+        .expect("Run root activity 必须存在");
+    assert_eq!(
+        reflections[0].parent_activity_id.as_ref(),
+        Some(&root_id),
+        "Reflection activity 必须挂在当前 Run root 下"
+    );
+    assert_eq!(
+        reflections[0].detail,
+        sdk::ActivityDetailView::Reflection {
+            trigger: sdk::ReflectionTriggerView::PreCompact,
+        }
+    );
+    assert_eq!(
+        result.state_during_run,
+        Some(sdk::ActivityStateView::Running),
+        "反思执行期间 begin activity 必须处于 Running"
+    );
+    assert_eq!(
+        reflections[0].state,
+        sdk::ActivityStateView::Succeeded,
+        "Succeeded 反思必须以 Succeeded 终态收口 activity"
+    );
+
+    // ③ 端口收到 PreCompact 触发；Run 正常推进。
+    assert!(
+        matches!(
+            result.reflection_runs.as_slice(),
+            [ReflectionTaskTrigger::PreCompact]
+        ),
+        "端口必须收到 PreCompact 触发；实际: {:?}",
+        result.reflection_runs
+    );
+    assert_eq!(result.run.status(), RunStatus::Completed);
+    assert_eq!(result.run.steps().len(), 1);
+    assert_eq!(
+        result.run.steps()[0].invocation().unwrap().response(),
+        "done"
+    );
+    assert!(
+        result.slot.staged().is_none(),
+        "材料被取出执行后槽位必须清空"
+    );
+}
+
+#[tokio::test]
+async fn pre_compact_reflection_skipped_when_compact_skipped() {
+    // 压缩返回 Skipped：观察者不暂存材料 → engine 取不到材料，不进反思 phase。
+    let result = drive_pre_compact_run(None, share::config::MemoryConfig::default()).await;
+
+    assert_no_reflection_phase(
+        &result.events,
+        &result.activities,
+        &result.reflection_runs,
+        "compact Skipped",
+    );
+    // 压缩本身照常收口（Skipped 在生产中也是 Ok(Ready) 路径），只是不带反思往返。
+    let transitions = transition_events(&result.events);
+    assert!(
+        transition_index(
+            &transitions,
+            RunStatus::Compacting,
+            RunStatus::PreparingContext,
+            RunTransitionReason::CompactionCompleted,
+        )
+        .is_some(),
+        "Skipped 也必须照常收口 CompactionCompleted；实际转移: {transitions:?}"
+    );
+    assert_eq!(result.run.status(), RunStatus::Completed);
+    assert_eq!(result.run.steps().len(), 1);
+    assert!(result.slot.staged().is_none());
+}
+
+#[tokio::test]
+async fn pre_compact_reflection_disabled_drops_material_without_phase() {
+    // Committed 已暂存材料，但反思配置关闭：取出即丢弃，不进 phase、不滞留。
+    let disabled = share::config::MemoryConfig {
+        enabled: false,
+        ..Default::default()
+    };
+    let result = drive_pre_compact_run(
+        Some(vec![share::message::Message::user("discarded")]),
+        disabled,
+    )
+    .await;
+
+    assert_no_reflection_phase(
+        &result.events,
+        &result.activities,
+        &result.reflection_runs,
+        "反思配置关闭",
+    );
+    assert!(
+        result.slot.staged().is_none(),
+        "反思禁用时暂存材料必须被丢弃，NEVER 滞留到下一次 compact"
+    );
+    assert_eq!(result.run.status(), RunStatus::Completed);
+    assert_eq!(result.run.steps().len(), 1);
 }

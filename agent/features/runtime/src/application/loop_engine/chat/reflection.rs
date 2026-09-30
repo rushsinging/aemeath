@@ -9,38 +9,8 @@ use crate::application::reflection::{
     ReflectionRunOutcome, ReflectionTaskAdapter, ReflectionTaskCompletionStatus,
     ReflectionTaskRequest, ReflectionTaskTrigger,
 };
-use crate::ports::{CompactOutcome, ProviderBindingData};
+use crate::ports::ProviderBindingData;
 use memory::api::{MemoryPort, ReflectionHistoryStore};
-
-/// Run pre-compact reflection with an owned message snapshot. Only the
-/// production automatic compact path (engine-driven `NeedsCompaction`) must call
-/// this after `CompactOutcome::Committed`; failures or `Skipped` never run.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn run_pre_compact_reflection(
-    adapter: &ReflectionTaskAdapter,
-    config: &share::config::MemoryConfig,
-    messages: &[share::message::Message],
-    binding: &Arc<ProviderBindingData>,
-    system_prompt_text: &str,
-    lang: &str,
-    memory: &Arc<dyn MemoryPort>,
-    history: &Arc<dyn ReflectionHistoryStore>,
-    cancel: tokio_util::sync::CancellationToken,
-) -> ReflectionRunOutcome {
-    run(
-        adapter,
-        ReflectionTaskTrigger::PreCompact,
-        config,
-        messages.to_vec(),
-        binding,
-        system_prompt_text,
-        lang,
-        memory,
-        history,
-        cancel,
-    )
-    .await
-}
 
 /// Run manual reflection with an owned message snapshot. Only the
 /// `/reflect-now` idle command path calls this after freezing the
@@ -120,40 +90,6 @@ pub(crate) fn memory_updated_notice_text(changed: usize, lang: &str) -> String {
     }
 }
 
-/// Decide whether to run a PreCompact reflection based on the compact outcome.
-/// Only `CompactOutcome::Committed` runs reflection; `Skipped` returns `None`.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn maybe_run_pre_compact_reflection(
-    outcome: &CompactOutcome,
-    pre_compact_messages: &[share::message::Message],
-    adapter: &ReflectionTaskAdapter,
-    config: &share::config::MemoryConfig,
-    binding: &Arc<ProviderBindingData>,
-    system_prompt_text: &str,
-    lang: &str,
-    memory: &Arc<dyn MemoryPort>,
-    history: &Arc<dyn ReflectionHistoryStore>,
-    cancel: tokio_util::sync::CancellationToken,
-) -> Option<ReflectionRunOutcome> {
-    match outcome {
-        CompactOutcome::Committed(_) => Some(
-            run_pre_compact_reflection(
-                adapter,
-                config,
-                pre_compact_messages,
-                binding,
-                system_prompt_text,
-                lang,
-                memory,
-                history,
-                cancel,
-            )
-            .await,
-        ),
-        CompactOutcome::Skipped(_) => None,
-    }
-}
-
 /// Send the TUI notice for a completed reflection that changed memory. Returns
 /// the number announced, so callers can also report it in the LLM reminder slot.
 pub(crate) async fn announce_memory_update(
@@ -214,6 +150,13 @@ pub(crate) async fn run(
         .await
 }
 
+/// 反思配置门禁（等价 `run_complete` 内 `ReflectionDisabledReason::of` 的布尔
+/// 判定；reason 标签记录仍留在 `run_complete` 内）：memory 关、reflection 关或
+/// `interval_runs == 0` 都视为禁用。
+pub(crate) fn reflection_enabled(config: &share::config::MemoryConfig) -> bool {
+    config.enabled && config.reflection.enabled && config.reflection.interval_runs > 0
+}
+
 /// Interval 频控判定：配置开启且 step_count 命中 interval 时才反思。
 ///
 /// 唯一生产调用点是 engine 的 Interval 插入点（`ModelStep::Complete` 路径，
@@ -223,8 +166,43 @@ pub(crate) fn should_run_turn_reflection(
     config: &share::config::MemoryConfig,
     step_count: usize,
 ) -> bool {
-    if !config.enabled || !config.reflection.enabled || config.reflection.interval_runs == 0 {
+    if !reflection_enabled(config) {
         return false;
     }
     step_count.is_multiple_of(config.reflection.interval_runs)
+}
+
+/// PreCompact 反思材料的共享槽：compaction observer 在 `CompactOutcome::Committed`
+/// 时暂存将被压缩丢弃的早期消息，engine 的 reflection phase 在 Compacting 内经
+/// 反思端口取出执行。observer 回调拿不到 `&mut Run`，材料收集与状态机经本槽分离。
+#[derive(Clone, Default)]
+pub(crate) struct PreCompactMaterialSlot(
+    std::sync::Arc<std::sync::Mutex<Option<Vec<share::message::Message>>>>,
+);
+
+impl PreCompactMaterialSlot {
+    /// 暂存材料。仅 `Committed` 调用；`Skipped` 不动槽位。
+    pub(crate) fn stage(&self, messages: Vec<share::message::Message>) {
+        *self.0.lock().expect("pre-compact 材料槽锁中毒") = Some(messages);
+    }
+
+    /// 反思端口取出材料：反思配置关闭时丢弃暂存材料并返回 None——材料既不滞留到
+    /// 下次 compact，也不让 engine 空走一次 Reflecting 往返；开启时取走材料返回。
+    pub(crate) fn take_for_reflection(
+        &self,
+        config: &share::config::MemoryConfig,
+    ) -> Option<Vec<share::message::Message>> {
+        let staged = self.0.lock().expect("pre-compact 材料槽锁中毒").take();
+        if reflection_enabled(config) {
+            staged
+        } else {
+            None
+        }
+    }
+
+    /// 观察当前暂存材料（不清空）。
+    #[cfg(test)]
+    pub(crate) fn staged(&self) -> Option<Vec<share::message::Message>> {
+        self.0.lock().expect("pre-compact 材料槽锁中毒").clone()
+    }
 }

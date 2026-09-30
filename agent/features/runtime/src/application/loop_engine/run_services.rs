@@ -220,11 +220,14 @@ where
 
 /// 生产反思端口：判定材料与反思执行的唯一装配点（状态机与
 /// activity 由 engine phase 持有，本端口只回答「有没有要做的事」并执行反思）。
+/// 持有与压缩观察者共享的 PreCompact 材料槽：观察者在 Committed 时暂存，本端口
+/// 在 engine 的 Compacting 相位内取出（反思禁用时取出即丢弃，不滞留不空走往返）。
 pub(crate) struct RuntimeReflection<'a> {
     runtime_context: &'a RuntimeContext,
     reflection_tasks: ReflectionTaskAdapter,
     system_prompt: String,
     language: String,
+    pre_compact_material: crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot,
 }
 
 impl<'a> RuntimeReflection<'a> {
@@ -233,12 +236,14 @@ impl<'a> RuntimeReflection<'a> {
         reflection_tasks: ReflectionTaskAdapter,
         system_prompt: String,
         language: String,
+        pre_compact_material: crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot,
     ) -> Self {
         Self {
             runtime_context,
             reflection_tasks,
             system_prompt,
             language,
+            pre_compact_material,
         }
     }
 }
@@ -259,6 +264,11 @@ impl ReflectionPhasePort for RuntimeReflection<'_> {
         } else {
             None
         }
+    }
+
+    fn take_pre_compact_messages(&self) -> Option<Vec<Message>> {
+        self.pre_compact_material
+            .take_for_reflection(self.runtime_context.config_ref().config().memory())
     }
 
     async fn run_reflection(

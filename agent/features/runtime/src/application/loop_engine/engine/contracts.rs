@@ -653,6 +653,12 @@ pub trait ReflectionPhasePort: Send {
         messages: &[share::message::Message],
     ) -> Option<Vec<share::message::Message>>;
 
+    /// 取走 compaction observer 暂存的 PreCompact 材料；未暂存返回 None。
+    ///
+    /// 语义由生产端口实现：反思配置关闭时丢弃暂存材料并返回 None——材料不滞留到
+    /// 下次 compact，engine 也不空走一次 Reflecting 往返。
+    fn take_pre_compact_messages(&self) -> Option<Vec<share::message::Message>>;
+
     /// 执行一次反思（内部含 timeout/cancel select），返回终态 outcome。
     /// 任何 outcome（含 Failed/Cancelled/TimedOut）都不得终止宿主 Run——收口语义由 engine phase 统一负责。
     async fn run_reflection(

@@ -2,8 +2,8 @@
 //! ReflectionCompleted 返回进入前状态。反思任何 outcome 都不终止宿主 Run（与现状一致，
 //! 宿主 Run 的取消由 `handle_interrupt`/`handle_step_control` 既有路径负责）。
 //!
-//! Interval / PreCompact / Manual 三触发共用本 phase（当前仅 Interval 接线，其余随
-//! 后续批次接入）；调用点负责触发判定与材料收集。
+//! Interval / PreCompact / Manual 三触发共用本 phase（Interval/PreCompact 已接线，
+//! Manual 随后续批次接入）；调用点负责触发判定与材料收集。
 //!
 //! 观测降级的有意设计：activity 发布/收口失败只记 warn 并继续执行（反思是
 //! best-effort 观测，NEVER 因观测失败阻断反思本体）；端口 Err 视为契约违约，
@@ -79,4 +79,34 @@ pub(super) async fn run_reflection_phase(
     }
     transition_and_emit(run, execution, port, RunTransition::ReflectionCompleted).await?;
     Ok(())
+}
+
+/// PreCompact 插入点：两处自动压缩（needs_compaction 与 ModelContextExceeded）在
+/// `ContextCompactionOutcome::Ready`、压缩 activity 收口之后、`CompactionCompleted`
+/// 转移之前调用。材料由 compaction observer 在 Committed 时暂存进反思端口的共享槽，
+/// 此处取出后在 Compacting 内完成 `Compacting → Reflecting → Compacting` 往返，
+/// 再放行压缩收口；未暂存（Skipped/未绑定反思端口）为 noop。
+pub(super) async fn run_pre_compact_reflection_phase_if_staged(
+    run: &mut Run,
+    execution: &mut RunExecutionState,
+    port: &mut RunLoop<'_>,
+    run_step_id: &sdk::RunStepId,
+    step_cancel: &CancellationToken,
+) -> Result<(), LoopEngineError> {
+    let messages = port
+        .reflection_mut()
+        .and_then(|reflection| reflection.take_pre_compact_messages());
+    let Some(messages) = messages else {
+        return Ok(());
+    };
+    run_reflection_phase(
+        run,
+        execution,
+        port,
+        crate::application::reflection::ReflectionTaskTrigger::PreCompact,
+        messages,
+        Some(run_step_id),
+        step_cancel,
+    )
+    .await
 }
