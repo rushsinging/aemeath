@@ -12,9 +12,19 @@ use crate::application::reflection::{
 use crate::ports::ProviderBindingData;
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 
-/// `/reflect-now` 受理结果的用户可见文案。返回 `(text, is_error)`。
-pub(crate) fn manual_reflection_outcome_text(outcome: &ReflectionRunOutcome) -> (String, bool) {
-    match outcome {
+/// `/reflect-now` 终态的用户可见回执：文案与错误样式成对产出，调用方不得
+/// 分开推断两者。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ManualReflectionNotice {
+    pub text: String,
+    pub is_error: bool,
+}
+
+/// Manual Reflection 终态到 `(文案, is_error)` 的唯一生产策略。六种终态
+/// （DisabledSkipped、Succeeded 有/无变更、Failed、Cancelled、TimedOut）在此
+/// 一次性映射，保证文案与错误标志不会分叉。
+pub(crate) fn manual_outcome_notice(outcome: &ReflectionRunOutcome) -> ManualReflectionNotice {
+    let (text, is_error) = match outcome {
         ReflectionRunOutcome::DisabledSkipped => (
             "Memory 或 Reflection 未启用；请在配置中开启后重试。".to_string(),
             false,
@@ -25,27 +35,34 @@ pub(crate) fn manual_reflection_outcome_text(outcome: &ReflectionRunOutcome) -> 
                 .as_ref()
                 .map(|metadata| metadata.applied_changes())
                 .unwrap_or_default();
-            (
-                manual_completion_text(completion.status, changed),
-                completion.status == ReflectionTaskCompletionStatus::Failed,
-            )
-        }
-    }
-}
-
-fn manual_completion_text(status: ReflectionTaskCompletionStatus, changed: usize) -> String {
-    match status {
-        ReflectionTaskCompletionStatus::Succeeded => {
-            if changed > 0 {
-                format!("Reflection 已完成：更新 {changed} 条记忆；摘要可用 /reflect 查询。")
-            } else {
-                "Reflection 已完成：没有记忆变更。".to_string()
+            match completion.status {
+                ReflectionTaskCompletionStatus::Succeeded if changed > 0 => (
+                    format!("Reflection 已完成：更新 {changed} 条记忆；摘要可用 /reflect 查询。"),
+                    false,
+                ),
+                ReflectionTaskCompletionStatus::Succeeded => {
+                    ("Reflection 已完成：没有记忆变更。".to_string(), false)
+                }
+                ReflectionTaskCompletionStatus::Cancelled => {
+                    ("Reflection 已取消。".to_string(), false)
+                }
+                ReflectionTaskCompletionStatus::TimedOut => {
+                    ("Reflection 超时，已中止。".to_string(), false)
+                }
+                ReflectionTaskCompletionStatus::Failed => {
+                    ("Reflection 执行失败；详情见日志。".to_string(), true)
+                }
             }
         }
-        ReflectionTaskCompletionStatus::Cancelled => "Reflection 已取消。".to_string(),
-        ReflectionTaskCompletionStatus::TimedOut => "Reflection 超时，已中止。".to_string(),
-        ReflectionTaskCompletionStatus::Failed => "Reflection 执行失败；详情见日志。".to_string(),
-    }
+    };
+    ManualReflectionNotice { text, is_error }
+}
+
+/// `/reflect-now` 受理结果的用户可见文案。返回 `(text, is_error)`；两者来自
+/// 同一条 `manual_outcome_notice` 策略。
+pub(crate) fn manual_reflection_outcome_text(outcome: &ReflectionRunOutcome) -> (String, bool) {
+    let ManualReflectionNotice { text, is_error } = manual_outcome_notice(outcome);
+    (text, is_error)
 }
 
 /// TUI notice text for a reflection that changed memory. Shown as soon as the

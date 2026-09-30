@@ -6,7 +6,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::application::loop_engine::chat::reflection::manual_reflection_outcome_text;
+use crate::application::loop_engine::chat::reflection::{
+    manual_outcome_notice, manual_reflection_outcome_text, ManualReflectionNotice,
+};
 use crate::application::reflection::{
     ReflectionRunOutcome, ReflectionTaskAdapter, ReflectionTaskCompletion,
     ReflectionTaskCompletionStatus,
@@ -62,7 +64,7 @@ fn completed(status: ReflectionTaskCompletionStatus, changed: usize) -> Reflecti
 fn manual_outcome_text_reports_disabled_without_error() {
     let (text, is_error) = manual_reflection_outcome_text(&ReflectionRunOutcome::DisabledSkipped);
     assert!(!is_error);
-    assert!(text.contains("未启用"));
+    assert_eq!(text, "Memory 或 Reflection 未启用；请在配置中开启后重试。");
 }
 
 #[test]
@@ -71,8 +73,10 @@ fn manual_outcome_text_reports_the_completed_change_count() {
         completed(ReflectionTaskCompletionStatus::Succeeded, 3),
     ));
     assert!(!is_error);
-    assert!(text.contains('3'), "the count must reach the user: {text}");
-    assert!(text.contains("已完成"));
+    assert_eq!(
+        text,
+        "Reflection 已完成：更新 3 条记忆；摘要可用 /reflect 查询。"
+    );
 }
 
 #[test]
@@ -81,7 +85,7 @@ fn manual_outcome_text_reports_zero_changes_without_a_count() {
         completed(ReflectionTaskCompletionStatus::Succeeded, 0),
     ));
     assert!(!is_error);
-    assert!(text.contains("没有记忆变更"), "{text}");
+    assert_eq!(text, "Reflection 已完成：没有记忆变更。");
 }
 
 #[test]
@@ -90,7 +94,7 @@ fn only_a_failed_run_reports_error_semantics() {
         completed(ReflectionTaskCompletionStatus::Failed, 0),
     ));
     assert!(is_error);
-    assert!(text.contains("失败"), "{text}");
+    assert_eq!(text, "Reflection 执行失败；详情见日志。");
 
     for status in [
         ReflectionTaskCompletionStatus::Succeeded,
@@ -100,6 +104,90 @@ fn only_a_failed_run_reports_error_semantics() {
         let (_, is_error) =
             manual_reflection_outcome_text(&ReflectionRunOutcome::Completed(completed(status, 0)));
         assert!(!is_error, "{status:?} is not an execution error");
+    }
+}
+
+/// 取消与超时是正常终态：各自有独立的用户解释文案，且都不得按错误样式发布。
+#[test]
+fn manual_outcome_text_explains_cancellation_and_timeout_without_error() {
+    let (cancelled_text, cancelled_is_error) = manual_reflection_outcome_text(
+        &ReflectionRunOutcome::Completed(completed(ReflectionTaskCompletionStatus::Cancelled, 0)),
+    );
+    assert!(!cancelled_is_error);
+    assert_eq!(cancelled_text, "Reflection 已取消。");
+
+    let (timed_out_text, timed_out_is_error) = manual_reflection_outcome_text(
+        &ReflectionRunOutcome::Completed(completed(ReflectionTaskCompletionStatus::TimedOut, 0)),
+    );
+    assert!(!timed_out_is_error);
+    assert_eq!(timed_out_text, "Reflection 超时，已中止。");
+}
+
+/// 文案与 `is_error` 必须由同一条终态映射策略成对产出：六种终态各自的
+/// `(text, is_error)` 精确落表，且外部 `(String, bool)` 入口只是该策略的投影——
+/// 两者永远不会分叉。
+#[test]
+fn manual_outcome_notice_pairs_text_and_error_from_one_policy() {
+    let expected_states: [(&ReflectionRunOutcome, &str, bool); 6] = [
+        (
+            &ReflectionRunOutcome::DisabledSkipped,
+            "Memory 或 Reflection 未启用；请在配置中开启后重试。",
+            false,
+        ),
+        (
+            &ReflectionRunOutcome::Completed(completed(
+                ReflectionTaskCompletionStatus::Succeeded,
+                3,
+            )),
+            "Reflection 已完成：更新 3 条记忆；摘要可用 /reflect 查询。",
+            false,
+        ),
+        (
+            &ReflectionRunOutcome::Completed(completed(
+                ReflectionTaskCompletionStatus::Succeeded,
+                0,
+            )),
+            "Reflection 已完成：没有记忆变更。",
+            false,
+        ),
+        (
+            &ReflectionRunOutcome::Completed(completed(ReflectionTaskCompletionStatus::Failed, 0)),
+            "Reflection 执行失败；详情见日志。",
+            true,
+        ),
+        (
+            &ReflectionRunOutcome::Completed(completed(
+                ReflectionTaskCompletionStatus::Cancelled,
+                0,
+            )),
+            "Reflection 已取消。",
+            false,
+        ),
+        (
+            &ReflectionRunOutcome::Completed(completed(
+                ReflectionTaskCompletionStatus::TimedOut,
+                0,
+            )),
+            "Reflection 超时，已中止。",
+            false,
+        ),
+    ];
+
+    for (outcome, expected_text, expected_is_error) in expected_states {
+        let notice = manual_outcome_notice(outcome);
+        assert_eq!(
+            notice,
+            ManualReflectionNotice {
+                text: expected_text.to_string(),
+                is_error: expected_is_error,
+            },
+            "终态文案与错误语义必须出自同一策略: {outcome:?}"
+        );
+        assert_eq!(
+            manual_reflection_outcome_text(outcome),
+            (notice.text.clone(), notice.is_error),
+            "外部 (String, bool) 入口必须是策略结果的投影: {outcome:?}"
+        );
     }
 }
 
