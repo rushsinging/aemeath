@@ -136,7 +136,7 @@ async fn main_and_sub_catalog_publish_exact_skill_schema_and_execute_body() {
                 extra_dirs: Vec::<PathBuf>::new(),
                 available_tools: BTreeSet::from(["Skill".to_string()]),
             })
-            .with_memory_context(Some("session".to_string()), None)
+            .with_memory_context(Some("session".to_string()))
             .with_skill_load_state(
                 if scope == "main" {
                     SkillLoadScope::main()
@@ -208,7 +208,7 @@ async fn skill_state_decision_controls_body_without_leaking_on_failure() {
                     language: "zh".into(),
                 }),
             )
-            .with_memory_context(Some("session".to_string()), None)
+            .with_memory_context(Some("session".to_string()))
             .with_skill_load_state(SkillLoadScope::main(), Arc::new(FixedSkillState(decision))),
         );
         let outcome = wiring

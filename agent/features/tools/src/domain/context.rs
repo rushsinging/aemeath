@@ -4,8 +4,8 @@ mod tests;
 
 use crate::domain::CatalogQuery;
 use crate::domain::{
-    AgentDispatch, AgentProgressEvent, RegistryScopeName, SessionReminders, SkillLoadScope,
-    SkillLoadStatePort, SkillQuerySnapshot, ToolProfileName, ToolProgressEvent,
+    AgentDispatch, AgentProgressEvent, RegistryScopeName, SkillLoadScope, SkillLoadStatePort,
+    SkillQuerySnapshot, ToolProfileName, ToolProgressEvent,
 };
 use async_trait::async_trait;
 use project::WorkspaceReader;
@@ -152,7 +152,6 @@ pub struct ToolExecutionPorts {
     plan_mode: Arc<dyn PlanModeState>,
     memory: Arc<dyn memory::api::MemoryPort>,
     parent_session_id: Option<String>,
-    reminders: Option<Arc<Mutex<SessionReminders>>>,
     guidance: Arc<dyn Guidance>,
     user_agent: String,
     authorization: AuthorizationContext,
@@ -180,7 +179,6 @@ impl ToolExecutionPorts {
             plan_mode,
             memory,
             parent_session_id: None,
-            reminders: None,
             guidance,
             user_agent: share::config::Config::default().api.user_agent,
             authorization: AuthorizationContext::STANDARD,
@@ -227,13 +225,8 @@ impl ToolExecutionPorts {
         self
     }
 
-    pub fn with_memory_context(
-        mut self,
-        parent_session_id: Option<String>,
-        reminders: Option<Arc<Mutex<SessionReminders>>>,
-    ) -> Self {
+    pub fn with_memory_context(mut self, parent_session_id: Option<String>) -> Self {
         self.parent_session_id = parent_session_id;
-        self.reminders = reminders;
         self
     }
 }
@@ -290,9 +283,6 @@ impl ToolExecutionContext {
     }
     pub fn parent_session_id(&self) -> Option<String> {
         self.ports.parent_session_id.clone()
-    }
-    pub fn session_reminders(&self) -> Option<Arc<Mutex<SessionReminders>>> {
-        self.ports.reminders.clone()
     }
     pub fn guidance(&self) -> Arc<dyn Guidance> {
         self.ports.guidance.clone()
