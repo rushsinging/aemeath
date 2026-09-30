@@ -100,9 +100,14 @@ async fn test_busy_gate_reset_defers_to_buffer() {
     assert!(!has_reset, "busy gate 不应发 SessionReset");
 }
 
-/// #391 S1-3：idle Reset 后跟 UserMessage → 先清空再 append（Reset break，UserMessage 丢弃）。
+/// #391 S1-3：idle Reset 后跟 UserMessage → 先清空会话，消息回到缓冲区等待下一轮。
+///
+/// #1816 改写：原断言 `dropped_events == 1`（"Reset 后的 UserMessage 应被丢弃"）
+/// 固化了静默丢弃行为。替代证据是本测试断言剩余事件回到 `PendingInputBuffer`
+/// 且计数落在 `requeued_events`；被替代的保护目标（Reset 优先、不把 Reset 后的
+/// 消息塞进本轮 Context）改由 `accepted_inputs.is_empty()` 继续覆盖。
 #[tokio::test]
-async fn test_idle_gate_reset_drops_following_events_in_same_batch() {
+async fn test_idle_gate_reset_requeues_following_events_in_same_batch() {
     let buffer = PendingInputBuffer::default();
     let input = TestInputEventPort::new(vec![
         ChatInputEvent::Reset,
@@ -139,11 +144,19 @@ async fn test_idle_gate_reset_drops_following_events_in_same_batch() {
     )
     .await;
 
-    assert_eq!(outcome.dropped_events, 1, "Reset 后的 UserMessage 应被丢弃");
+    assert_eq!(
+        outcome.requeued_events, 1,
+        "Reset 后的 UserMessage 必须回到缓冲区"
+    );
     assert!(outcome.reset_requested, "idle Reset 应请求清空会话");
     assert!(
         outcome.accepted_inputs.is_empty(),
         "Reset 清空后不应 adopt 后续消息"
+    );
+    assert_eq!(
+        buffer.drain_all(),
+        vec![ChatInputEvent::user_message("after-reset", Vec::new())],
+        "重新排队的事件必须保持原序留待下一轮"
     );
 }
 

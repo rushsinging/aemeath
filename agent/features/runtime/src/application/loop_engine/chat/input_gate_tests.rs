@@ -722,3 +722,104 @@ fn loop_input_message_without_accepted_stamps_user_input_timestamp() {
     );
     assert_eq!(message.text_content(), "hi");
 }
+
+/// #1816：idle 受理控制命令后，剩余事件必须原序重新排队，NEVER 静默丢弃。
+#[tokio::test]
+async fn control_command_requeues_following_commands_instead_of_dropping_them() {
+    let buffer = PendingInputBuffer::default();
+    buffer.push(ChatInputEvent::Compact);
+    buffer.push(ChatInputEvent::SwitchModel {
+        selection: "anthropic/claude".to_string(),
+    });
+
+    let outcome = apply_gate(
+        GateKind::BeforeLlm,
+        &buffer,
+        &TestSink::default(),
+        &task::TaskStore::new(),
+        true,
+    )
+    .await;
+
+    assert!(matches!(
+        outcome.pending_command,
+        Some(PendingCommand::Compact)
+    ));
+    let remaining = buffer.drain_all();
+    assert_eq!(
+        remaining,
+        vec![ChatInputEvent::SwitchModel {
+            selection: "anthropic/claude".to_string(),
+        }],
+        "首个命令之后的命令必须留待下一轮 idle 执行"
+    );
+}
+
+/// #1816：命令之前的用户消息被接纳，命令之后的消息留待下一轮，NEVER 丢弃。
+#[tokio::test]
+async fn user_messages_around_control_command_are_split_not_dropped() {
+    let buffer = PendingInputBuffer::default();
+    buffer.push(ChatInputEvent::user_message("before", Vec::new()));
+    buffer.push(ChatInputEvent::Compact);
+    buffer.push(ChatInputEvent::user_message("after", Vec::new()));
+
+    let outcome = apply_gate(
+        GateKind::BeforeLlm,
+        &buffer,
+        &TestSink::default(),
+        &task::TaskStore::new(),
+        true,
+    )
+    .await;
+
+    assert!(matches!(
+        outcome.pending_command,
+        Some(PendingCommand::Compact)
+    ));
+    assert_eq!(outcome.appended_user_messages, 1);
+    assert_eq!(outcome.accepted_inputs.len(), 1);
+    assert_eq!(
+        outcome.accepted_inputs[0].model_message().text_content(),
+        "before"
+    );
+    let remaining = buffer.drain_all();
+    assert_eq!(
+        remaining,
+        vec![ChatInputEvent::user_message("after", Vec::new())],
+        "命令之后的消息必须留待下一轮，而不是被丢弃"
+    );
+}
+
+/// #1816：idle Reset 之前已接纳、之后未消费的用户消息都必须回到缓冲区，
+/// `reset_requested` 优先级高于 `Resumed`，否则它们会被静默丢弃。
+#[tokio::test]
+async fn user_messages_around_reset_are_requeued_instead_of_silently_dropped() {
+    let buffer = PendingInputBuffer::default();
+    buffer.push(ChatInputEvent::user_message("before", Vec::new()));
+    buffer.push(ChatInputEvent::Reset);
+    buffer.push(ChatInputEvent::user_message("after", Vec::new()));
+
+    let outcome = apply_gate(
+        GateKind::BeforeLlm,
+        &buffer,
+        &TestSink::default(),
+        &task::TaskStore::new(),
+        true,
+    )
+    .await;
+
+    assert!(outcome.reset_requested, "idle Reset 应请求清空会话");
+    assert!(
+        outcome.accepted_inputs.is_empty(),
+        "Reset 优先于 Resumed，已接纳输入必须回到缓冲区"
+    );
+    let remaining = buffer.drain_all();
+    assert_eq!(
+        remaining,
+        vec![
+            ChatInputEvent::user_message("before", Vec::new()),
+            ChatInputEvent::user_message("after", Vec::new()),
+        ],
+        "Reset 前后的消息都必须留待下一轮"
+    );
+}

@@ -122,6 +122,10 @@ pub struct GateOutcome {
     pub appended_user_messages: usize,
     #[cfg(test)]
     pub dropped_events: usize,
+    /// 重新排队等待下一轮 idle 的事件数（#1816）。gate 只消费到第一个控制
+    /// 命令，其余事件原序回到 `PendingInputBuffer`，NEVER 静默丢弃。
+    #[cfg(test)]
+    pub requeued_events: usize,
     /// 本次 gate 接纳的 typed 用户输入。它是后续模型消息、持久化与
     /// UserMessagesAdopted 的唯一真相，禁止并行维护 event/message 双轨。
     pub accepted_inputs: Vec<crate::application::loop_engine::AcceptedUserInput>,
@@ -144,12 +148,20 @@ impl PendingInputBuffer {
             .push_back(event);
     }
 
-    #[cfg(test)]
-    pub fn extend(&self, events: impl IntoIterator<Item = ChatInputEvent>) {
+    /// 批量取走未遍历的剩余事件，原序放回缓冲区等待下一轮 idle（#1816）。
+    ///
+    /// 与 `drain_all` 成对使用：gate 一次 drain 后只消费到第一个控制命令，
+    /// 其余事件必须回到缓冲区，否则会静默丢失。
+    pub fn requeue(&self, events: impl IntoIterator<Item = ChatInputEvent>) {
         self.events
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .extend(events);
+    }
+
+    #[cfg(test)]
+    pub fn extend(&self, events: impl IntoIterator<Item = ChatInputEvent>) {
+        self.requeue(events);
     }
 
     pub fn is_empty(&self) -> bool {
@@ -224,6 +236,7 @@ where
     let mut commands = Vec::new();
     let mut appended_user_messages = 0usize;
     let mut dropped_events = 0usize;
+    let mut requeued_events = 0usize;
     let mut decision = GateDecision::Proceed;
     let mut pending_command: Option<PendingCommand> = None;
     let mut accepted_inputs = Vec::new();
@@ -311,13 +324,17 @@ where
                         // untouched. Do not emit SessionReset or clear the
                         // compatibility store while Tasks still exist.
                         log::error!(target: crate::LOG_TARGET, "failed to clear authoritative tasks: {error}");
-                        dropped_events = iter.count();
+                        requeued_events = requeue_remaining(buffer, &mut iter);
                         decision = GateDecision::Proceed;
                         break;
                     }
                     // idle：权威 TaskData 清理成功后请求 Context owner 清空会话。
                     reset_requested = true;
-                    dropped_events = iter.count();
+                    // `reset_requested` 在调用方优先于 `Resumed`，本批已接纳输入
+                    // 不会进入 Context；必须原序回队，否则会被静默丢弃（#1816）。
+                    requeued_events += requeue_accepted_inputs(buffer, &accepted_inputs);
+                    accepted_inputs.clear();
+                    requeued_events += requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -353,7 +370,7 @@ where
             ChatInputEvent::Compact => {
                 if is_idle {
                     pending_command = Some(PendingCommand::Compact);
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -364,7 +381,7 @@ where
             ChatInputEvent::ReflectNow => {
                 if is_idle {
                     pending_command = Some(PendingCommand::ReflectNow);
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 }
@@ -380,7 +397,7 @@ where
             ChatInputEvent::SwitchModel { selection } => {
                 if is_idle {
                     pending_command = Some(PendingCommand::SwitchModel { selection });
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -391,7 +408,7 @@ where
             ChatInputEvent::SetThinking { desired } => {
                 if is_idle {
                     pending_command = Some(PendingCommand::SetThinking { desired });
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -402,7 +419,7 @@ where
             ChatInputEvent::InitProject { force } => {
                 if is_idle {
                     pending_command = Some(PendingCommand::InitProject { force });
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -412,7 +429,7 @@ where
             ChatInputEvent::ManageSession { args } => {
                 if is_idle {
                     pending_command = Some(PendingCommand::ManageSession { args });
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -422,7 +439,7 @@ where
             ChatInputEvent::ManageMemory { args } => {
                 if is_idle {
                     pending_command = Some(PendingCommand::ManageMemory { args });
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -432,7 +449,7 @@ where
             ChatInputEvent::ResumeSession { id } => {
                 if is_idle {
                     pending_command = Some(PendingCommand::ResumeSession { id });
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -442,7 +459,7 @@ where
             ChatInputEvent::QueryReflectionHistory { limit } => {
                 if is_idle {
                     pending_command = Some(PendingCommand::QueryReflectionHistory { limit });
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -452,7 +469,7 @@ where
             ChatInputEvent::ListModels => {
                 if is_idle {
                     pending_command = Some(PendingCommand::ListModels);
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -498,7 +515,7 @@ where
     }
 
     #[cfg(not(test))]
-    let _ = (&commands, dropped_events);
+    let _ = (&commands, dropped_events, requeued_events);
 
     GateOutcome {
         #[cfg(test)]
@@ -508,10 +525,45 @@ where
         appended_user_messages,
         #[cfg(test)]
         dropped_events,
+        #[cfg(test)]
+        requeued_events,
         accepted_inputs,
         reset_requested,
         pending_command,
     }
+}
+
+/// 把已接纳但本轮不会进入 Context 的输入原序放回等待缓冲区（#1816）。
+///
+/// `reset_requested` 优先于 `Resumed`，因此 idle Reset 分支必须回放本批输入；
+/// 回退事件而非丢弃，输入顺序对用户保持可见。
+fn requeue_accepted_inputs(
+    buffer: &PendingInputBuffer,
+    accepted: &[crate::application::loop_engine::AcceptedUserInput],
+) -> usize {
+    let events: Vec<ChatInputEvent> = accepted
+        .iter()
+        .cloned()
+        .map(crate::application::loop_engine::AcceptedUserInput::into_event)
+        .collect();
+    let count = events.len();
+    buffer.requeue(events);
+    count
+}
+
+/// 把 gate 未消费的事件原序放回等待缓冲区，返回重新排队的事件数（#1816）。
+///
+/// gate 一轮只消费到第一个控制命令（`pending_command` 单值语义），其余事件
+/// 必须回到 `PendingInputBuffer` 等待下一轮 idle；Abort 分支是唯一例外——
+/// 用户主动中止时整批丢弃，并连同已接纳输入一起回滚。
+fn requeue_remaining(
+    buffer: &PendingInputBuffer,
+    iter: &mut impl Iterator<Item = ChatInputEvent>,
+) -> usize {
+    let remaining: Vec<ChatInputEvent> = iter.by_ref().collect();
+    let count = remaining.len();
+    buffer.requeue(remaining);
+    count
 }
 
 fn classify_control_command(raw: &str) -> ControlCommandKind {
