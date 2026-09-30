@@ -22,6 +22,7 @@ mod control_driver;
 mod interaction_driver;
 mod manual_compaction;
 mod phases;
+mod reflection;
 mod step_driver;
 
 pub use contracts::*;
@@ -30,6 +31,7 @@ use control_driver::*;
 use interaction_driver::*;
 use manual_compaction::*;
 use phases::*;
+use reflection::*;
 use step_driver::*;
 
 pub async fn execute_prepared_loop(

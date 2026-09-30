@@ -13,6 +13,7 @@ fn engine_sources() -> String {
         include_str!("engine.rs"),
         include_str!("engine/contracts.rs"),
         include_str!("engine/phases.rs"),
+        include_str!("engine/reflection.rs"),
         include_str!("engine/step_driver.rs"),
         include_str!("engine/interaction_driver.rs"),
         include_str!("engine/control_driver.rs"),

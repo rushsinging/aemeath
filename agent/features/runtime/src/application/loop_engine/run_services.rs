@@ -22,9 +22,10 @@ use crate::application::loop_engine::step_persistence::{
 };
 use crate::application::loop_engine::{
     CompactProgressView, CompactionPort, InteractionMailboxPort, LoopEngineError,
-    ModelInvocationPort, PendingInteractionWork, StepCommit, StepPersistencePort,
-    ToolGuardDecision, ToolOrchestrationPort,
+    ModelInvocationPort, PendingInteractionWork, ReflectionPhasePort, StepCommit,
+    StepPersistencePort, ToolGuardDecision, ToolOrchestrationPort,
 };
+use crate::application::reflection::{ReflectionRunOutcome, ReflectionTaskAdapter};
 use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::tool_result_materializer::ToolResultMaterializer;
@@ -214,6 +215,83 @@ where
                 cancel.clone(),
             )
             .await
+    }
+}
+
+/// 生产反思端口：判定材料与反思执行的唯一装配点（状态机与
+/// activity 由 engine phase 持有，本端口只回答「有没有要做的事」并执行反思）。
+pub(crate) struct RuntimeReflection<'a> {
+    runtime_context: &'a RuntimeContext,
+    reflection_tasks: ReflectionTaskAdapter,
+    system_prompt: String,
+    language: String,
+}
+
+impl<'a> RuntimeReflection<'a> {
+    pub(crate) fn new(
+        runtime_context: &'a RuntimeContext,
+        reflection_tasks: ReflectionTaskAdapter,
+        system_prompt: String,
+        language: String,
+    ) -> Self {
+        Self {
+            runtime_context,
+            reflection_tasks,
+            system_prompt,
+            language,
+        }
+    }
+}
+
+#[async_trait]
+impl ReflectionPhasePort for RuntimeReflection<'_> {
+    fn interval_reflection_messages(
+        &self,
+        step_count: usize,
+        messages: &[Message],
+    ) -> Option<Vec<Message>> {
+        let memory_config = self.runtime_context.config_ref().config().memory();
+        if crate::application::loop_engine::chat::reflection::should_run_turn_reflection(
+            memory_config,
+            step_count,
+        ) {
+            Some(messages.to_vec())
+        } else {
+            None
+        }
+    }
+
+    async fn run_reflection(
+        &mut self,
+        trigger: crate::application::reflection::ReflectionTaskTrigger,
+        messages: Vec<Message>,
+        _run_id: &sdk::RunId,
+        _run_step_id: Option<&sdk::RunStepId>,
+        cancel: CancellationToken,
+    ) -> Result<ReflectionRunOutcome, LoopEngineError> {
+        // 反思 Usage 记账（复用 record_successful_usage 路径）在后续批次接线：
+        // `run_id`/`run_step_id` 签名已就位。
+        let outcome = crate::application::loop_engine::chat::reflection::run(
+            &self.reflection_tasks,
+            trigger,
+            self.runtime_context.config_ref().config().memory(),
+            messages,
+            self.runtime_context.provider_ref(),
+            &self.system_prompt,
+            &self.language,
+            self.runtime_context.memory_ref(),
+            self.runtime_context.reflection_history_ref(),
+            cancel,
+        )
+        .await;
+        // 行为从 classify_terminal 原样搬迁：成功且有记忆变更时发布 TUI notice。
+        crate::application::loop_engine::chat::reflection::announce_memory_update(
+            &self.runtime_context.event_sink(),
+            &outcome,
+            &self.language,
+        )
+        .await;
+        Ok(outcome)
     }
 }
 

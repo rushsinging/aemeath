@@ -637,6 +637,34 @@ pub trait ManualCompactionPort: Send {
     ) -> Result<ManualCompactionOutcome, LoopEngineError>;
 }
 
+/// 反思执行端口：engine 持有状态机与 activity，端口只提供判定材料与执行能力。
+///
+/// 反思的执行点在 engine（`BeginReflection`/`ReflectionCompleted`
+/// 转移与 `Reflection` activity 只在 engine 可达），端口不得自行驱动状态机。
+#[async_trait]
+pub trait ReflectionPhasePort: Send {
+    /// Interval 判定：命中频控且配置开启时返回待反思消息快照；未命中/禁用返回 None。
+    ///
+    /// 唯一生产调用形态是 `ModelStep::Complete` 路径（必然无未完成工具轮），
+    /// 因此判定只需配置与 step_count，不需要 stop_reason。
+    fn interval_reflection_messages(
+        &self,
+        step_count: usize,
+        messages: &[share::message::Message],
+    ) -> Option<Vec<share::message::Message>>;
+
+    /// 执行一次反思（内部含 timeout/cancel select），返回终态 outcome。
+    /// 任何 outcome（含 Failed/Cancelled/TimedOut）都不得终止宿主 Run——收口语义由 engine phase 统一负责。
+    async fn run_reflection(
+        &mut self,
+        trigger: crate::application::reflection::ReflectionTaskTrigger,
+        messages: Vec<share::message::Message>,
+        run_id: &sdk::RunId,
+        run_step_id: Option<&sdk::RunStepId>,
+        cancel: CancellationToken,
+    ) -> Result<crate::application::reflection::ReflectionRunOutcome, LoopEngineError>;
+}
+
 #[async_trait]
 pub trait ModelInvocationPort: Send {
     async fn invoke_model(

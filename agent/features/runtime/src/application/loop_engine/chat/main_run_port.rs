@@ -7,8 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::application::loop_engine::chat::post_batch::run_post_tool_batch;
 use crate::application::loop_engine::chat::reflection::{
-    announce_memory_update, maybe_run_pre_compact_reflection, run_interval_reflection,
-    should_run_turn_reflection,
+    announce_memory_update, maybe_run_pre_compact_reflection,
 };
 use crate::application::loop_engine::chat::stream_handler::InvocationEventReducer;
 use crate::application::loop_engine::chat::{ChatEventSink, RuntimeRunContext, RuntimeStreamEvent};
@@ -460,10 +459,7 @@ where
 {
     pub runtime_context: RuntimeContext,
     pub input: BufferedInputAdapter<I>,
-    pub system_prompt: String,
     pub context_size: usize,
-    pub reflection_tasks: crate::application::reflection::ReflectionTaskAdapter,
-    pub language: String,
     pub turn_context: RuntimeRunContext,
     pub tool_identity: crate::application::tool::coordination::identity::ToolIdentityRegistry,
     /// #1494：边流边执行句柄（流中 ToolCallCompleted → 立即执行，结果缓冲）。
@@ -617,11 +613,11 @@ where
 
     async fn classify_terminal(
         &mut self,
-        execution: &mut RunExecutionState,
+        _execution: &mut RunExecutionState,
         response: &crate::application::loop_engine::chat::InvocationResponse,
         calls: Vec<ToolCall>,
         usage: crate::application::loop_engine::StepTokenUsage,
-        cancel: &CancellationToken,
+        _cancel: &CancellationToken,
     ) -> Result<(ModelStep, crate::application::loop_engine::StepTokenUsage), LoopEngineError> {
         if !calls.is_empty() {
             return Ok((
@@ -632,30 +628,8 @@ where
                 usage,
             ));
         }
-        let memory_config = self.runtime_context.config_ref().config().memory();
-        if should_run_turn_reflection(
-            memory_config,
-            execution.step_count(),
-            false,
-            &response.stop_reason,
-            false,
-        ) {
-            let outcome = run_interval_reflection(
-                &self.reflection_tasks,
-                memory_config,
-                execution.step_count(),
-                execution.messages(),
-                self.runtime_context.provider_ref(),
-                &self.system_prompt,
-                &self.language,
-                self.runtime_context.memory_ref(),
-                self.runtime_context.reflection_history_ref(),
-                cancel.clone(),
-            )
-            .await;
-            announce_memory_update(&self.runtime_context.event_sink(), &outcome, &self.language)
-                .await;
-        }
+        // Interval 反思的判定与执行在 engine reflection phase
+        // （状态机只在 engine 可达），本函数只做纯终态分类。
         Ok((
             ModelStep::Complete {
                 text: response.assistant_message.text_content(),

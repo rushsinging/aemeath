@@ -757,10 +757,7 @@ where
                 let model_observer = main_run_port::ChatModelObserver {
                     runtime_context: runtime_context.clone(),
                     input: input_source.clone(),
-                    system_prompt: cacheable_system_prompt.clone(),
                     context_size,
-                    reflection_tasks: reflection_tasks.clone(),
-                    language: language.clone(),
                     turn_context: turn_context.clone(),
                     tool_identity: tool_identity.clone(),
                     streaming_tool: Some(streaming_tool),
@@ -843,6 +840,15 @@ where
                     system_prompt: cacheable_system_prompt.clone(),
                     context_size,
                 };
+                // Main Run 都绑反思端口——Interval 反思的判定与执行
+                // 由 engine reflection phase 驱动。
+                let mut reflection =
+                    crate::application::loop_engine::run_services::RuntimeReflection::new(
+                        &runtime_context,
+                        reflection_tasks.clone(),
+                        cacheable_system_prompt.clone(),
+                        language.clone(),
+                    );
                 let mut loop_context = crate::application::loop_engine::RunLoop::new(
                     &mut launch_input,
                     &mut events,
@@ -857,6 +863,7 @@ where
                     &mut stuck,
                     &plan_approval,
                 );
+                loop_context.bind_reflection(&mut reflection);
                 if manual_compaction_run {
                     loop_context.bind_manual_compaction(&mut manual_compaction);
                 }

@@ -12,39 +12,6 @@ use crate::application::reflection::{
 use crate::ports::{CompactOutcome, ProviderBindingData};
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 
-use provider::ProviderStopReasonData;
-
-/// Run interval reflection with an owned message snapshot. The run is awaited so
-/// the caller can report the outcome before this turn's terminal step, and the
-/// generated reflection text never reaches the chat UI.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn run_interval_reflection(
-    adapter: &ReflectionTaskAdapter,
-    config: &share::config::MemoryConfig,
-    step_count: usize,
-    messages: &[share::message::Message],
-    binding: &Arc<ProviderBindingData>,
-    system_prompt_text: &str,
-    lang: &str,
-    memory: &Arc<dyn MemoryPort>,
-    history: &Arc<dyn ReflectionHistoryStore>,
-    cancel: tokio_util::sync::CancellationToken,
-) -> ReflectionRunOutcome {
-    run(
-        adapter,
-        ReflectionTaskTrigger::Interval { step_count },
-        config,
-        messages.to_vec(),
-        binding,
-        system_prompt_text,
-        lang,
-        memory,
-        history,
-        cancel,
-    )
-    .await
-}
-
 /// Run pre-compact reflection with an owned message snapshot. Only the
 /// production automatic compact path (engine-driven `NeedsCompaction`) must call
 /// this after `CompactOutcome::Committed`; failures or `Skipped` never run.
@@ -215,8 +182,10 @@ pub(crate) async fn announce_memory_update(
     Some(changed)
 }
 
+/// 三触发共用的反思编排（Interval/PreCompact/Manual），由端口实现
+/// （`RuntimeReflection::run_reflection`）复用；触发判定与状态机收口在 engine phase。
 #[allow(clippy::too_many_arguments)]
-async fn run(
+pub(crate) async fn run(
     adapter: &ReflectionTaskAdapter,
     trigger: ReflectionTaskTrigger,
     config: &share::config::MemoryConfig,
@@ -245,21 +214,16 @@ async fn run(
         .await
 }
 
+/// Interval 频控判定：配置开启且 step_count 命中 interval 时才反思。
+///
+/// 唯一生产调用点是 engine 的 Interval 插入点（`ModelStep::Complete` 路径，
+/// 必然无未完成工具轮），因此 has_tool_calls/stop_reason/before_finish_gate
+/// 三个历史参数已随执行点上移 engine 而删除——它们在该路径上从不参与判定。
 pub(crate) fn should_run_turn_reflection(
     config: &share::config::MemoryConfig,
     step_count: usize,
-    has_tool_calls: bool,
-    stop_reason: &ProviderStopReasonData,
-    before_finish_gate_continue: bool,
 ) -> bool {
-    if before_finish_gate_continue
-        || !config.enabled
-        || !config.reflection.enabled
-        || config.reflection.interval_runs == 0
-    {
-        return false;
-    }
-    if has_tool_calls && stop_reason != &ProviderStopReasonData::EndTurn {
+    if !config.enabled || !config.reflection.enabled || config.reflection.interval_runs == 0 {
         return false;
     }
     step_count.is_multiple_of(config.reflection.interval_runs)

@@ -5,8 +5,8 @@ use crate::application::hook::stop_coordination::{StopHookObserver, StopHookOutc
 use crate::application::loop_engine::{
     CompactProgressView, CompactionPort, EventSinkPort, InputPort, InteractionMailboxPort,
     InternalContinuationKind, LoopEngineError, ManualCompactionPort, ModelInvocationPort,
-    PendingInteractionWork, PlanApprovalPort, RunControlPort, RunLifecyclePort,
-    StepPersistencePort, StuckDecision, StuckHandlingPort, ToolOrchestrationPort,
+    PendingInteractionWork, PlanApprovalPort, ReflectionPhasePort, RunControlPort,
+    RunLifecyclePort, StepPersistencePort, StuckDecision, StuckHandlingPort, ToolOrchestrationPort,
 };
 use crate::application::run::execution_state::RunExecutionState;
 use crate::domain::agent_run::RuntimeLifecycleEvent;
@@ -61,6 +61,7 @@ pub struct RunLoop<'a> {
     persistence: &'a mut dyn StepPersistencePort,
     compaction: &'a mut dyn CompactionPort,
     manual_compaction: Option<&'a mut dyn ManualCompactionPort>,
+    reflection: Option<&'a mut dyn ReflectionPhasePort>,
     model: &'a mut dyn ModelInvocationPort,
     stop_hook: &'a mut dyn StopHookObserver,
     tools: &'a mut dyn ToolOrchestrationPort,
@@ -95,6 +96,7 @@ impl<'a> RunLoop<'a> {
             persistence,
             compaction,
             manual_compaction: None,
+            reflection: None,
             model,
             stop_hook,
             tools,
@@ -253,6 +255,16 @@ impl<'a> RunLoop<'a> {
             .start_manual_compaction(sdk::CompactStageView::Preparing)
     }
 
+    /// 启动反思 activity（Interval/PreCompact 归属当前对话 Run 的给定父节点下）。
+    /// 触发来源的 SDK 视图映射在此收口，调用方只传领域触发类型。
+    pub(super) fn start_reflection_activity(
+        &self,
+        trigger: crate::application::reflection::ReflectionTaskTrigger,
+    ) -> Result<sdk::ActivityId, ActivityError> {
+        self.activities()?
+            .start_reflection(self.activity_parent_id()?, reflection_trigger_view(trigger))
+    }
+
     /// #1500：构造 compact 进度视图回调——把 Context 压缩管线进度
     /// （Preparing/Summarizing chunk 计数/Finalizing）转发到 Activity 观测。
     /// 闭包只捕获 `Arc<ActivityCoordinator>` 与 activity_id，不借用自身。
@@ -310,6 +322,15 @@ impl<'a> RunLoop<'a> {
 
     pub(super) fn manual_compaction_mut(&mut self) -> Option<&mut (dyn ManualCompactionPort + 'a)> {
         self.manual_compaction.as_deref_mut()
+    }
+
+    /// 绑定反思端口；Main Run 的装配方绑定（反思判定与执行的调用点在 engine phase内）。
+    pub(crate) fn bind_reflection(&mut self, port: &'a mut dyn ReflectionPhasePort) {
+        self.reflection = Some(port);
+    }
+
+    pub(super) fn reflection_mut(&mut self) -> Option<&mut (dyn ReflectionPhasePort + 'a)> {
+        self.reflection.as_deref_mut()
     }
 
     pub(super) fn model_mut(&mut self) -> &mut dyn ModelInvocationPort {
@@ -435,5 +456,17 @@ impl<'a> RunLoop<'a> {
 
     pub(super) fn needs_plan_approval(&self) -> bool {
         self.plan_approval.needs_plan_approval()
+    }
+}
+
+/// `ReflectionTaskTrigger` → SDK 观测视图（Reflection activity detail 用）。
+fn reflection_trigger_view(
+    trigger: crate::application::reflection::ReflectionTaskTrigger,
+) -> sdk::ReflectionTriggerView {
+    use crate::application::reflection::ReflectionTaskTrigger;
+    match trigger {
+        ReflectionTaskTrigger::Interval { .. } => sdk::ReflectionTriggerView::Interval,
+        ReflectionTaskTrigger::PreCompact => sdk::ReflectionTriggerView::PreCompact,
+        ReflectionTaskTrigger::Manual => sdk::ReflectionTriggerView::Manual,
     }
 }

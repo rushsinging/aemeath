@@ -274,6 +274,28 @@ pub(super) async fn execute_step_with_scope(
     let assistant_text = model_step_text(&model_step);
     *terminal_text = Some(assistant_text);
 
+    // 反思 phase：Interval 触发判定与执行（执行点在 engine——状态机与 activity 的
+    // 唯一真相在 engine；端口只回答「有没有要做的事」）。
+    if matches!(model_step, ModelStep::Complete { .. }) {
+        let interval_messages = port.reflection_mut().and_then(|reflection| {
+            reflection.interval_reflection_messages(execution.step_count(), execution.messages())
+        });
+        if let Some(messages) = interval_messages {
+            run_reflection_phase(
+                run,
+                execution,
+                port,
+                crate::application::reflection::ReflectionTaskTrigger::Interval {
+                    step_count: execution.step_count(),
+                },
+                messages,
+                Some(&step_id),
+                &step_cancel,
+            )
+            .await?;
+        }
+    }
+
     match model_step {
         ModelStep::Complete { text } => {
             // Text-only completion is handled by the static reasoning level.
