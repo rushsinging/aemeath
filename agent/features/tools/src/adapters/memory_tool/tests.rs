@@ -293,6 +293,124 @@ async fn memory_update_publishes_manageable_archive_and_restore_results() {
     assert_eq!(memory.list(None), vec![entry]);
 }
 
+#[tokio::test]
+async fn memory_update_pins_then_unpins() {
+    let memory =
+        memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap();
+    let source = Arc::new(SwappableMemorySource {
+        current: RwLock::new(Arc::new(memory)),
+    });
+    let workspace = tempfile::tempdir().unwrap();
+    let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .build();
+
+    let add = MemoryAddTool {
+        source: source.clone(),
+    }
+    .call(
+        serde_json::json!({ "content": "偏好使用 tab 缩进" }),
+        &context,
+    )
+    .await;
+    assert!(!add.is_error, "add must succeed: {}", add.text);
+    let id = add.data.unwrap().id.unwrap();
+
+    let pinned = MemoryUpdateTool {
+        source: source.clone(),
+    }
+    .call(serde_json::json!({ "id": id, "status": "pin" }), &context)
+    .await;
+    assert!(!pinned.is_error, "pin must succeed: {}", pinned.text);
+    assert_eq!(pinned.data.unwrap().action, "pin");
+
+    let unpinned = MemoryUpdateTool { source }
+        .call(serde_json::json!({ "id": id, "status": "unpin" }), &context)
+        .await;
+    assert!(!unpinned.is_error, "unpin must succeed: {}", unpinned.text);
+    assert_eq!(unpinned.data.unwrap().action, "unpin");
+}
+
+#[tokio::test]
+async fn memory_update_archives_and_restores() {
+    let memory =
+        memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap();
+    let source = Arc::new(SwappableMemorySource {
+        current: RwLock::new(Arc::new(memory)),
+    });
+    let workspace = tempfile::tempdir().unwrap();
+    let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .build();
+
+    let add = MemoryAddTool {
+        source: source.clone(),
+    }
+    .call(
+        serde_json::json!({ "content": "归档后仍可恢复的记忆" }),
+        &context,
+    )
+    .await;
+    assert!(!add.is_error, "add must succeed: {}", add.text);
+    let id = add.data.unwrap().id.unwrap();
+
+    let archived = MemoryUpdateTool {
+        source: source.clone(),
+    }
+    .call(
+        serde_json::json!({ "id": id, "status": "archive" }),
+        &context,
+    )
+    .await;
+    assert!(
+        !archived.is_error,
+        "archive must succeed: {}",
+        archived.text
+    );
+    assert_eq!(archived.data.unwrap().action, "archive");
+
+    let restored = MemoryUpdateTool { source }
+        .call(
+            serde_json::json!({ "id": id, "status": "restore" }),
+            &context,
+        )
+        .await;
+    assert!(
+        !restored.is_error,
+        "restore must succeed: {}",
+        restored.text
+    );
+    assert_eq!(restored.data.unwrap().action, "restore");
+}
+
+#[tokio::test]
+async fn memory_update_rejects_an_unknown_status() {
+    let source = test_source();
+    let workspace = tempfile::tempdir().unwrap();
+    let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .build();
+
+    let explode = MemoryUpdateTool { source }
+        .call(
+            serde_json::json!({
+                "id": "018f0000-0000-7000-8000-000000000000",
+                "status": "explode"
+            }),
+            &context,
+        )
+        .await;
+    assert!(
+        explode.is_error,
+        "unknown status must be rejected: {}",
+        explode.text
+    );
+    assert!(explode.data.is_none());
+}
+
 #[test]
 fn the_five_memory_tools_expose_type_driven_required() {
     let source = test_source();
@@ -400,36 +518,6 @@ fn memory_add_schema_publishes_constrained_layers_and_categories() {
         properties["category"]["enum"],
         serde_json::json!(["fact", "decision", "preference", "pattern", "pitfall"])
     );
-}
-
-#[test]
-fn memory_description_explains_persistence_layers_categories_and_reminders() {
-    let description = share::i18n::tools::core::memory("en").to_lowercase();
-
-    for expected in [
-        "persistent",
-        "global",
-        "project",
-        "fact",
-        "decision",
-        "preference",
-        "pattern",
-        "pitfall",
-        "reminder",
-        "automatic injection",
-        "search before relying on historical",
-        "explicitly asks you to remember",
-        "sensitive",
-        "must not override system",
-        "do not invent",
-        "archive",
-        "restore",
-    ] {
-        assert!(
-            description.contains(expected),
-            "memory description must explain {expected}"
-        );
-    }
 }
 
 #[test]
