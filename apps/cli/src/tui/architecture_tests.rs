@@ -703,3 +703,28 @@ fn test_adapter_and_view_assembler_production_do_not_depend_on_render_modules() 
         }
     }
 }
+
+/// Reminder 的写入端与读取端是两个不同实例，功能从未生效，因此整条事件链
+///（事件变体、DTO、`/memory remind` 子命令）已退役。这条守卫防止它们被
+/// 静默复活——编译器穷尽匹配只保证「删了就得同步」，不保证「不被重新加回」。
+/// 禁词在运行时拼接，避免守卫测试自身成为 grep 残留命中。
+#[test]
+fn no_reminder_event_chain_remains() {
+    let reminder_list = ["Reminder", "List"].concat();
+    let remind_subcommand = ["rem", "ind"].concat();
+    let sdk_chat_event = include_str!("../../../../packages/sdk/src/chat_event.rs");
+    let tui_runtime_event = include_str!("adapter/tui_runtime_event.rs");
+    let slash = include_str!("app/slash.rs");
+    assert!(
+        !sdk_chat_event.contains(&reminder_list),
+        "sdk ChatEvent must not carry the retired reminder list event"
+    );
+    assert!(
+        !tui_runtime_event.contains(&reminder_list),
+        "TUI runtime event must not carry the retired reminder list event"
+    );
+    assert!(
+        !slash.contains(&remind_subcommand),
+        "slash command must not carry the retired remind subcommand"
+    );
+}

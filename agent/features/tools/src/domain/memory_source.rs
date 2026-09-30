@@ -1,9 +1,10 @@
 //! Narrow tools-owned seam for obtaining the current Memory port.
 //!
-//! [`MemoryTool`](crate::adapters::memory_tool::MemoryTool) must not capture an
+//! The Memory tools (`MemoryAdd` et al., `crate::adapters::memory_tool`) must
+//! not capture an
 //! `Arc<dyn MemoryPort>` at bootstrap because resume swaps the committed Memory
-//! under the same registry. Instead the tool holds an [`Arc<dyn MemoryPortSource>`]
-//! and calls [`MemoryPortSource::current`] at execution time. Runtime/Composition
+//! under the same registry. Instead the tools hold an [`Arc<dyn MemoryPortSource>`]
+//! and call [`MemoryPortSource::current`] at execution time. Runtime/Composition
 //! provides the implementation; the canonical production source delegates to
 //! `MainSessionWiring::committed_memory()`.
 //!

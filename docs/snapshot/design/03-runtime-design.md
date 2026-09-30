@@ -1,5 +1,7 @@
 # Runtime 设计
 
+> **后续变更（2026-09-30）**：本文描述记录的是当时的设计，正文保持原样（含 `session_reminders` 字段描述）。Memory 工具现已拆为 5 个单一职责工具（`MemoryAdd` / `MemorySearch` / `MemoryList` / `MemoryUpdate` / `MemoryDelete`）；session reminder 已因写入端与读取端是两个不同实例、且从不注入 LLM 上下文而全量退役。当前实现见 [`docs/design/02-modules/memory/`](../../design/02-modules/memory/)。
+
 ## 定位
 
 Runtime 是核心域的**唯一应用服务**，所有入站适配器（TUI / CLI / Server）接入同一组 `AgentClient` API。它不关心请求来自哪里——本地终端还是远端 WebSocket——只负责把一次用户输入推进成完整的 Agent 协作过程。

@@ -410,14 +410,6 @@ pub(crate) struct TuiModelSummary {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct TuiReminder {
-    pub(crate) id: String,
-    pub(crate) content: String,
-    pub(crate) done: bool,
-    pub(crate) created_at: u64,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TuiSessionSummary {
     pub(crate) id: String,
     pub(crate) title: Option<String>,
@@ -722,9 +714,6 @@ pub(crate) enum TuiRuntimeEvent {
     },
     ModelList {
         models: Vec<TuiModelSummary>,
-    },
-    ReminderList {
-        reminders: Vec<TuiReminder>,
     },
     SessionList {
         sessions: Vec<TuiSessionSummary>,

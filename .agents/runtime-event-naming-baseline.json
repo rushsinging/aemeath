@@ -16,7 +16,7 @@
         "ToolOutputDelta", "SubRunStarted", "SubRunActivity", "SkillsUpdated",
         "WorkingDirectoryChanged", "ConfigReloaded", "ModelSwitched", "ThinkingChanged",
         "ContextEstimated", "CommandResultText", "SessionResumed", "SessionResumeFailed",
-        "ReflectionHistory", "ModelList", "ReminderList", "SessionList", "ProjectInfo",
+        "ReflectionHistory", "ModelList", "SessionList", "ProjectInfo",
         "TaskStateChanged", "RuntimeStatusChanged"
       ]
     },
@@ -40,7 +40,7 @@
         "WorkingDirectoryChanged", "ConfigChanged", "ConfigReloaded", "SessionReset",
         "UserMessagesWithdrawn", "Result", "ModelSwitched", "ThinkingChanged",
         "ContextEstimated", "CommandResultText", "SessionResumed", "SessionResumeFailed",
-        "ReflectionHistory", "ModelList", "ReminderList", "SessionList", "ProjectInfo",
+        "ReflectionHistory", "ModelList", "SessionList", "ProjectInfo",
         "TaskStateChanged", "RuntimeStatusChanged"
       ]
     },
@@ -58,7 +58,7 @@
         "Cancelled", "LiveTps", "RunChanged", "WorkspaceSnapshot", "SessionReset",
         "UserMessagesWithdrawn",  "ThinkingChanged", "CommandResultText",
         "ModelSwitched", "ContextEstimated", "SessionResumed", "SessionResumeFailed",
-        "ReflectionHistory", "ModelList", "ReminderList", "SessionList", "ProjectInfo",
+        "ReflectionHistory", "ModelList", "SessionList", "ProjectInfo",
         "RuntimeStatusChanged", "TaskStateChanged", "ConfigChanged",
         "ConfigReloaded"
       ]
@@ -140,10 +140,10 @@
     "LiveTps", "RunChanged",
     "WorkingDirectoryChanged", "ConfigReloaded", "ModelSwitched", "ThinkingChanged",
     "ContextEstimated", "CommandResultText", "ReflectionHistory", "ModelList",
-    "ReminderList", "SessionList", "ProjectInfo"
+    "SessionList", "ProjectInfo"
   ],
   "retired_symbols": [
-    "CompactProgress", "TasksSnapshot", "AskUserBatch"
+    "CompactProgress", "TasksSnapshot", "AskUserBatch", "ReminderList"
   ],
   "ack_terminal_patterns": [
     "^(?:Cancel|Terminate|Reply|Reject|Accept).*(?:Completed|Cancelled|Terminated|Failed)$"

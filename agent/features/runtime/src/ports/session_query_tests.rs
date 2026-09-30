@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use sdk::{ModelSummary, ReflectionHistoryView, ReminderView, SdkError, SessionSummary};
+use sdk::{ModelSummary, ReflectionHistoryView, SdkError, SessionSummary};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::SessionQueryPort;
@@ -29,15 +29,6 @@ fn canned_session() -> SessionSummary {
     }
 }
 
-fn canned_reminder() -> ReminderView {
-    ReminderView {
-        id: "reminder-1".into(),
-        content: "test reminder".into(),
-        done: false,
-        created_at: 1700000000,
-    }
-}
-
 fn canned_reflection() -> ReflectionHistoryView {
     ReflectionHistoryView {
         id: "ref-1".into(),
@@ -59,7 +50,6 @@ struct RecordingFake {
     should_error: bool,
     model_calls: AtomicUsize,
     session_calls: AtomicUsize,
-    reminder_calls: AtomicUsize,
     reflection_calls: AtomicUsize,
     last_reflection_limit: std::sync::Mutex<Option<usize>>,
 }
@@ -70,7 +60,6 @@ impl RecordingFake {
             should_error: false,
             model_calls: AtomicUsize::new(0),
             session_calls: AtomicUsize::new(0),
-            reminder_calls: AtomicUsize::new(0),
             reflection_calls: AtomicUsize::new(0),
             last_reflection_limit: std::sync::Mutex::new(None),
         }
@@ -97,15 +86,6 @@ impl SessionQueryPort for RecordingFake {
         }
     }
 
-    async fn list_reminders(&self) -> Result<Vec<ReminderView>, SdkError> {
-        self.reminder_calls.fetch_add(1, Ordering::SeqCst);
-        if self.should_error {
-            Err(SdkError::Internal("reminders unavailable".into()))
-        } else {
-            Ok(vec![canned_reminder()])
-        }
-    }
-
     async fn list_reflection_history(
         &self,
         limit: usize,
@@ -121,7 +101,7 @@ impl SessionQueryPort for RecordingFake {
 }
 
 #[tokio::test]
-async fn session_query_port_object_carries_four_query_methods() {
+async fn session_query_port_object_carries_three_query_methods() {
     let fake = RecordingFake::new();
 
     // Exercise list_models
@@ -136,12 +116,6 @@ async fn session_query_port_object_carries_four_query_methods() {
     assert_eq!(sessions[0].id, "session-1");
     assert_eq!(sessions[0].title.as_deref(), Some("Test Session"));
     assert_eq!(fake.session_calls.load(Ordering::SeqCst), 1);
-
-    // Exercise list_reminders
-    let reminders = fake.list_reminders().await.unwrap();
-    assert_eq!(reminders.len(), 1);
-    assert_eq!(reminders[0].id, "reminder-1");
-    assert_eq!(fake.reminder_calls.load(Ordering::SeqCst), 1);
 
     // Exercise list_reflection_history with a specific limit
     let reflections = fake.list_reflection_history(7).await.unwrap();
@@ -163,9 +137,6 @@ async fn session_query_port_error_propagation() {
 
     let sessions_err = error_fake.list_sessions().await.unwrap_err();
     assert!(matches!(sessions_err, SdkError::Session(_)));
-
-    let reminders_err = error_fake.list_reminders().await.unwrap_err();
-    assert!(matches!(reminders_err, SdkError::Internal(_)));
 
     let reflection_err = error_fake.list_reflection_history(3).await.unwrap_err();
     assert!(matches!(reflection_err, SdkError::Internal(_)));

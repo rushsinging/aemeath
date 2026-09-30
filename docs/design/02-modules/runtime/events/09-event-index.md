@@ -127,7 +127,6 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | `ContextEstimated` | 同名 | estimate presentation | model/config | observation | 否 | Target Clarify |
 | `ReflectionHistory` | 同名 | safe history view | query | snapshot response | 否 | Target Rename |
 | `ModelList` | 同名 | model catalog | query/revision | snapshot | Catalog | Target Rename |
-| `ReminderList` | 同名 | reminder catalog | query/revision | snapshot | Catalog | Target Rename |
 | `SessionList` | 同名 | session catalog | query/revision | snapshot | Catalog | Target Rename |
 | `ProjectInfo` | 同名 | project projection | workspace/project | snapshot | Workspace | Target Rename/Merge |
 | `CommandResultText` | 同名 | system/error message | command | string result | 否 | Compatibility |
@@ -160,7 +159,6 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | `CostUpdate` / `CostInfo` / `cost_usd` | 无生产定价 owner 的 Cost 空壳跨层传播 | 已从 SDK/Runtime/TUI 物理退役；当前只保留 `Usage` token 事实，历史 `/cost` 命令名映射 token Usage | Removed；Cost retirement Guard 禁止恢复 |
 | `SkillsUpdated` | plural + Updated | `SkillCatalogChanged` | 跨层 wire |
 | `ModelList` | query response 与 event 混淆 | `ModelCatalogSnapshot/Changed` | 语义澄清 |
-| `ReminderList` | 同上 | `ReminderCatalogSnapshot/Changed` | 语义澄清 |
 | `SessionList` | 同上 | `SessionCatalogSnapshot/Changed` | 语义澄清 |
 | `ModelSwitched` | ACK 与 state fact 混合风险 | 拆 command ACK 与 `ModelChanged` | 语义冲突 |
 | `WorkingDirectoryChanged` | Subject 不稳定 | `WorkspaceChanged` | 跨层 wire |

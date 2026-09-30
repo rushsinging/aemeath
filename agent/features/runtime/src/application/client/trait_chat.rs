@@ -25,7 +25,6 @@ pub(super) async fn chat_impl(
                 input_events,
                 session: shell.clone(),
                 read_files: Arc::new(Mutex::new(std::collections::HashSet::new())),
-                session_reminders: Arc::new(Mutex::new(Default::default())),
                 session_queries: Arc::new(AgentSessionQuery::new(Arc::new(AgentClientImpl {
                     inner: inner.clone(),
                 }))),

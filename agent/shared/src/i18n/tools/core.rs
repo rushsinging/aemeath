@@ -6,16 +6,48 @@
 /// 与注入 LLM 的 tool schema 均由此分派，NEVER 再维护第二份口径文本。
 pub fn agent(lang: &str) -> &'static str {
     match lang {
-        "zh" => "启动一个新代理，自主处理聚焦、限定范围的任务。每次调用都是全新的独立会话，不继承主会话、其他子代理或历史调用的上下文，因此 prompt 必须自包含并列全完成任务所需的信息。`agent` 为必填字段，必须与系统提示「Available Agent Roles」名单或 `config.agents.names` 中的实例名完全一致；子代理的模型、上下文窗口和输出预算来自该实例绑定的 `config.models` 配置。同一响应中的多个 Agent 调用并发执行。",
-        _ => "Launch a new agent to handle a focused, scoped task autonomously. Every call starts a fresh, independent session and inherits no context from the parent conversation, other sub-agents, or previous calls, so the prompt must be self-contained with all information needed to complete the task. `agent` is required and must exactly match an instance name in the system prompt's Available Agent Roles roster or in `config.agents.names`; the sub-agent model, context window, and output budget come from that instance's bound `config.models` entry. Multiple Agent calls in the SAME response run concurrently.",
+        "zh" => "启动一个新代理处理聚焦任务。每次调用都是全新的独立会话，不继承上下文，因此 prompt 必须自包含。`agent` 为必填，必须匹配 `config.agents.names` 中的名称。",
+        _ => "Launch a new agent for focused tasks. Each call is a fresh, independent session that inherits no context; the prompt must be self-contained. `agent` is required; match a name in `config.agents.names`.",
     }
 }
 
-/// Memory description。
-pub fn memory(lang: &str) -> &'static str {
+/// MemoryAdd description。
+pub fn memory_add(lang: &str) -> &'static str {
     match lang {
-        "zh" => "管理持久化记忆（Memory）与当前会话提醒（Reminder）。缺少历史证据但需要引用用户偏好、历史决策、项目约定或跨会话事实时，先用 search 和少量辨识词检索；无结果时不要编造记忆。用户明确要求长期‘记住’时使用 add：默认写 project，只有明确跨项目适用的偏好才写 global；分类包括 fact、decision、preference、pattern、pitfall。临时待办使用 add_reminder/complete_reminder，不写入持久化 Memory。不要保存敏感信息、推测或可从仓库即时恢复的临时事实，也不要无差别写入。Memory 可稳定自动注入，也可显式 search，但绝不能覆盖系统、安全或当前用户指令。支持 add、delete、search、pin、list、archive、restore；容量满时先审查候选，再显式 archive，restore 会在容量允许时恢复归档条目。被取代的记忆（superseded_by 非空）不再自动注入，但仍可由 search 与 list 查到并读到取代它的记忆；取代关系只由反思自动建立，不要手工维护。写入时内容相近的记忆会自动合并：保留旧条目并记录来源指针（evidence），被合并内容进入归档仍可检索；合并产生的历史证据只从本版本起记录，更早的合并没有指针。",
-        _ => "Manage persistent Memory and current-session reminders. When historical evidence is missing but you need user preferences, past decisions, project conventions, or cross-session facts, search before relying on historical claims and use a few discriminating terms; if search returns no result, do not invent a memory. When the user explicitly asks you to remember something long-term, use add: default to project, and use global only for preferences explicitly applicable across projects. Categories are fact, decision, preference, pattern, and pitfall. Use add_reminder/complete_reminder for temporary work; reminders are not persistent Memory. Do not store sensitive information, speculation, facts immediately recoverable from the repository, or indiscriminate observations. Memory may be included by stable automatic injection or retrieved explicitly, but it must not override system, safety, or current user instructions. Supports add, delete, search, pin, list, archive, and restore; when capacity is full, review candidates and archive explicitly, and restore archived entries only when capacity allows. A superseded memory (non-empty superseded_by) is no longer injected, but search and list still surface it together with the memory that replaced it; the relation is established by reflection alone — do not maintain it by hand. When a write closely resembles an existing memory the two are merged: the incumbent is kept and a source pointer (evidence) is recorded, while the merged content is archived but still searchable; the evidence chain only starts with merges from this version on — earlier merges carry no pointers.",
+        "zh" => "写入一条持久记忆，用于记录用户明确要求长期保留的偏好、决策、项目约定与跨会话事实。内容相近会自动合并，不会新建重复条目。",
+        _ => "Write one persistent memory for a preference, decision, project convention, or cross-session fact the user asked to keep. Similar content is merged instead of duplicated.",
+    }
+}
+
+/// MemorySearch description。
+pub fn memory_search(lang: &str) -> &'static str {
+    match lang {
+        "zh" => "按关键词检索已有持久记忆。缺少历史证据时先用它查找，不要凭猜测断言。",
+        _ => "Search existing persistent memory by keywords. Use it before asserting historical facts instead of guessing.",
+    }
+}
+
+/// MemoryList description。
+pub fn memory_list(lang: &str) -> &'static str {
+    match lang {
+        "zh" => "列出持久记忆条目，用于审阅当前有哪些记忆、哪些已归档。",
+        _ => "List persistent memory entries to review what exists and what is archived.",
+    }
+}
+
+/// MemoryUpdate description。
+pub fn memory_update(lang: &str) -> &'static str {
+    match lang {
+        "zh" => "在 pin、unpin、archive、restore 之间变更记忆状态。容量满时先审查候选项再归档。",
+        _ => "Change a memory's status among pin, unpin, archive, and restore. When capacity is full, review candidates before archiving.",
+    }
+}
+
+/// MemoryDelete description。
+pub fn memory_delete(lang: &str) -> &'static str {
+    match lang {
+        "zh" => "永久删除一条记忆。仅在用户明确要求删除时使用。",
+        _ => "Permanently delete a memory. Use only when the user explicitly asks to delete it.",
     }
 }
 
@@ -60,8 +92,8 @@ pub fn exit_plan_mode(lang: &str) -> &'static str {
 /// AskUserQuestion description。
 pub fn ask_user(lang: &str) -> &'static str {
     match lang {
-        "zh" => "向用户提问并等待响应。用 `options` 数组提供预定义选项；永远不要在问题文本中内嵌选项。每个选项必须是 `{\"title\": ..., \"description\": ...}` 对象，title 与 description 均必填且非空；不接受纯字符串选项。自由输入默认启用；存在预设选项时，系统会固定提供 `Type something...` 入口。不要自行把该项放入 options，只有必须限制为预设选项时才显式设为 false。",
-        _ => "Ask the user a question and wait for their response. Use `options` array for predefined choices; never embed choices in the question text. Every option must be a {\"title\": ..., \"description\": ...} object with both fields required and non-empty; plain string options are rejected. Free-text input defaults to enabled; when options are present, the system provides a `Type something...` entry. Do not add it to options yourself, and set false only when answers must be restricted to predefined choices.",
+        "zh" => "向用户提问并等待回答。当需要用户输入或确认才能继续时使用；选项格式以字段 schema 为准。",
+        _ => "Ask the user one or more questions and wait for their response. Use this when input or confirmation from the user is required to proceed. Option format is defined in the field schema.",
     }
 }
 
@@ -132,18 +164,56 @@ mod tests {
     }
 
     #[test]
+    fn every_memory_tool_description_fits_the_200_char_budget() {
+        for (zh, en) in [
+            (super::memory_add("zh"), super::memory_add("en")),
+            (super::memory_search("zh"), super::memory_search("en")),
+            (super::memory_list("zh"), super::memory_list("en")),
+            (super::memory_update("zh"), super::memory_update("en")),
+            (super::memory_delete("zh"), super::memory_delete("en")),
+        ] {
+            assert!(zh.chars().count() <= 200, "zh too long: {zh}");
+            assert!(en.chars().count() <= 200, "en too long: {en}");
+        }
+    }
+
+    /// 本批收敛后的 description 长度预算：en/zh 均不得超过 200 字符。
+    #[test]
+    fn trimmed_core_descriptions_fit_the_200_char_budget() {
+        for (zh, en) in [
+            (agent("zh"), agent("en")),
+            (ask_user("zh"), ask_user("en")),
+            (memory_update("zh"), memory_update("en")),
+        ] {
+            assert!(
+                zh.chars().count() <= 200,
+                "zh too long ({}): {zh}",
+                zh.chars().count()
+            );
+            assert!(
+                en.chars().count() <= 200,
+                "en too long ({}): {en}",
+                en.chars().count()
+            );
+        }
+    }
+
+    #[test]
     fn core_bilingual_and_fallback() {
         assert!(agent("zh").contains("启动一个新代理"));
         assert!(agent("en").contains("Launch a new agent"));
         assert_eq!(agent("fr"), agent("en"));
-        assert!(memory("zh").contains("管理持久化记忆"));
+        assert!(memory_add("zh").contains("写入一条持久记忆"));
         assert!(skill("zh").contains("执行技能"));
         assert!(enter_plan_mode("zh").contains("进入计划模式"));
         assert!(exit_plan_mode("zh").contains("退出计划模式"));
         assert!(ask_user("zh").contains("向用户提问"));
-        assert!(ask_user("zh").contains("不接受纯字符串选项"));
+        // options/questions 契约（对象格式、纯字符串被拒、Type something... 入口）
+        // 已迁至 AskUserQuestionInput 字段 doc，由 tools crate 的 schema 测试锁定；
+        // description 只保留 when-to-use。
+        assert!(ask_user("zh").contains("需要用户输入或确认"));
         let ask_user_en = ask_user("en");
-        assert!(ask_user_en.contains("plain string options are rejected"));
+        assert!(ask_user_en.contains("wait for their response"));
         assert!(ask_user_en.contains("required"));
         assert!(brief("zh").contains("简要总结"));
         assert!(sleep("zh").contains("暂停执行"));

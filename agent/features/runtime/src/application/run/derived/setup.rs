@@ -432,7 +432,6 @@ impl AgentRunner for CliAgentRunner {
                 .with_user_agent(&runtime_provider.user_agent)
                 .with_memory_context(
                     Some(parent_frame.context.skill_load_session_id().to_string()),
-                    None,
                 )
                 .with_skill_load_state(
                     derived.skill_load_scope.clone(),

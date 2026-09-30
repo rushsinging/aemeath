@@ -633,9 +633,6 @@ pub(crate) fn map_stream_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::ModelList { models } => {
             ChatEvent::ModelList { models }
         }
-        crate::application::loop_engine::chat::RuntimeStreamEvent::ReminderList { reminders } => {
-            ChatEvent::ReminderList { reminders }
-        }
         crate::application::loop_engine::chat::RuntimeStreamEvent::SessionList { sessions } => {
             ChatEvent::SessionList { sessions }
         }

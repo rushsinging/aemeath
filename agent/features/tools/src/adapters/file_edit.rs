@@ -12,7 +12,7 @@ impl TypedTool for FileEditTool {
         "Edit"
     }
     fn description(&self) -> &str {
-        "Performs exact string replacements in files. Read must be called first. Fails if `old_string` is not unique — use `replace_all` for multiple occurrences."
+        share::i18n::tools::filesystem::file_edit("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::filesystem::file_edit(lang))

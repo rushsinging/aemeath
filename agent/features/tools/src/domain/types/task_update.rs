@@ -73,7 +73,7 @@ pub struct TaskUpdateInput {
     /// The ID of the task to update
     #[serde(alias = "taskId")]
     pub task_id: String,
-    /// Field to update. One of: status, subject, description, priority. Use TaskBlockBy to replace task dependencies.
+    /// Field to update. One of: status (pending / in_progress / completed / deleted — normal workflow is pending → in_progress → completed; use TaskStop to delete a task), subject (string), description (string), priority (low / medium / high). Use TaskBlockBy to replace task dependencies.
     pub key: String,
     /// New value for the field (always a string)
     pub value: serde_json::Value,

@@ -132,14 +132,6 @@ impl App {
                     spawn_effect: None,
                 }
             }
-            "memory"
-                if matches!(
-                    arguments.first().map(String::as_str),
-                    Some("remind" | "reminder" | "reminders")
-                ) =>
-            {
-                UpdateResult::one(Effect::FetchMemoryList)
-            }
             "update" => UpdateResult::one(Effect::RunSelfUpdate),
             "version" => {
                 let info = format!(
@@ -235,18 +227,12 @@ Build info:
                     spawn_effect: None,
                 }
             }
-            // /memory 的 remind 子命令已被上面截胡
-            // 非 remind 子命令走事件流
+            // /memory 的所有子命令统一走事件流，由 runtime idle 分支执行。
             "memory" => {
                 let args = args.clone();
-                // 排除 remind 子命令（已被上面截胡）
-                let first_arg = arguments.first().map(String::as_str).unwrap_or("");
-                if first_arg != "remind" && first_arg != "reminder" && first_arg != "reminders" {
-                    return UpdateResult::one(Effect::SendChatInputEvent {
-                        event: sdk::ChatInputEvent::ManageMemory { args },
-                    });
-                }
-                UpdateResult::none()
+                UpdateResult::one(Effect::SendChatInputEvent {
+                    event: sdk::ChatInputEvent::ManageMemory { args },
+                })
             }
             _ => {
                 self.append_error_notice(format!("Unsupported command route: /{command}"));

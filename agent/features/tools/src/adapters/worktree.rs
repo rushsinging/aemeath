@@ -55,7 +55,7 @@ impl TypedTool for EnterWorktreeTool {
     }
 
     fn description(&self) -> &'static str {
-        t::enter_description(share::i18n::DEFAULT_LANG)
+        t::enter_description("en")
     }
 
     fn description_for(&self, lang: &str) -> Cow<'_, str> {
@@ -141,7 +141,7 @@ impl TypedTool for ExitWorktreeTool {
     }
 
     fn description(&self) -> &'static str {
-        t::exit_description(share::i18n::DEFAULT_LANG)
+        t::exit_description("en")
     }
 
     fn description_for(&self, lang: &str) -> Cow<'_, str> {

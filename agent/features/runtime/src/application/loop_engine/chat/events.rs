@@ -234,10 +234,6 @@ pub enum RuntimeStreamEvent {
     ModelList {
         models: Vec<sdk::ModelSummary>,
     },
-    /// #567：提醒列表回传。
-    ReminderList {
-        reminders: Vec<sdk::ReminderView>,
-    },
     /// #567：会话列表回传。
     SessionList {
         sessions: Vec<sdk::SessionSummary>,

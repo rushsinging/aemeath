@@ -29,7 +29,7 @@ impl TypedTool for TaskGetTool {
         "TaskGet"
     }
     fn description(&self) -> &str {
-        "Retrieve a task by ID. Returns task details including subject, description, status, and dependencies."
+        share::i18n::tools::task::task_get("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::task::task_get(lang))

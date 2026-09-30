@@ -9,7 +9,6 @@ mod skill_catalog_refresh;
 mod startup_resume;
 mod trait_chat;
 mod trait_impl;
-mod trait_memory;
 pub(crate) mod trait_model;
 mod trait_reflection;
 mod trait_session;

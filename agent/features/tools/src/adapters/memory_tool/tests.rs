@@ -1,5 +1,8 @@
 use super::helpers::*;
 use super::*;
+use crate::adapters::memory_tool::{
+    MemoryAddTool, MemoryDeleteTool, MemoryListTool, MemorySearchTool, MemoryUpdateTool,
+};
 use crate::domain::types::{
     MemoryCategoryInput, MemoryLayerInput, MemoryLocationResult, ToolSchema,
 };
@@ -22,8 +25,14 @@ impl MemoryPortSource for SwappableMemorySource {
     }
 }
 
+fn test_source() -> Arc<SwappableMemorySource> {
+    Arc::new(SwappableMemorySource {
+        current: RwLock::new(Arc::new(memory::api::NoOpMemory)),
+    })
+}
+
 #[tokio::test]
-async fn memory_tool_resolves_current_committed_port_for_each_call() {
+async fn memory_search_tool_resolves_current_committed_port_for_each_call() {
     let first = Arc::new(
         memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap(),
     );
@@ -41,7 +50,7 @@ async fn memory_tool_resolves_current_committed_port_for_each_call() {
     let source = Arc::new(SwappableMemorySource {
         current: RwLock::new(first),
     });
-    let tool = MemoryTool {
+    let tool = MemorySearchTool {
         source: source.clone(),
     };
     let workspace = tempfile::tempdir().unwrap();
@@ -51,46 +60,17 @@ async fn memory_tool_resolves_current_committed_port_for_each_call() {
     .build();
 
     let first_result = tool
-        .call(
-            serde_json::json!({"action": "search", "query": "committed memory"}),
-            &context,
-        )
+        .call(serde_json::json!({"query": "committed memory"}), &context)
         .await;
     *source.current.write().unwrap() = second;
     let resumed_result = tool
-        .call(
-            serde_json::json!({"action": "search", "query": "committed memory"}),
-            &context,
-        )
+        .call(serde_json::json!({"query": "committed memory"}), &context)
         .await;
 
     assert!(first_result.text.contains("first committed memory"));
     assert!(!first_result.text.contains("resumed committed memory"));
     assert!(resumed_result.text.contains("resumed committed memory"));
     assert!(!resumed_result.text.contains("first committed memory"));
-}
-
-#[test]
-fn memory_registry_schema_preserves_action_specific_contract() {
-    let registry = crate::adapters::tool_registry::ToolRegistry::new();
-    registry.register(MemoryTool {
-        source: Arc::new(SwappableMemorySource {
-            current: RwLock::new(Arc::new(memory::api::NoOpMemory)),
-        }),
-    });
-
-    let descriptor = registry
-        .schemas_for("en")
-        .into_iter()
-        .find(|schema| schema["name"] == "Memory")
-        .unwrap();
-
-    assert_eq!(descriptor["input_schema"], memory_input_schema());
-    assert_eq!(descriptor["data_schema"], MemoryResult::data_schema());
-    assert!(descriptor["description"]
-        .as_str()
-        .unwrap()
-        .contains("automatic injection"));
 }
 
 fn test_entry(content: &str, category: MemoryCategory) -> MemoryEntry {
@@ -277,7 +257,7 @@ async fn full_add_returns_actionable_typed_eviction_candidates_without_mutation(
 }
 
 #[tokio::test]
-async fn archive_and_restore_actions_publish_manageable_terminal_results() {
+async fn memory_update_publishes_manageable_archive_and_restore_results() {
     let memory = Arc::new(
         memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap(),
     );
@@ -286,7 +266,7 @@ async fn archive_and_restore_actions_publish_manageable_terminal_results() {
     let source = Arc::new(SwappableMemorySource {
         current: RwLock::new(memory.clone()),
     });
-    let tool = MemoryTool { source };
+    let tool = MemoryUpdateTool { source };
     let workspace = tempfile::tempdir().unwrap();
     let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
         workspace.path().to_path_buf(),
@@ -295,13 +275,13 @@ async fn archive_and_restore_actions_publish_manageable_terminal_results() {
 
     let archived = tool
         .call(
-            serde_json::json!({"action": "archive", "id": entry.id.to_string()}),
+            serde_json::json!({"id": entry.id.to_string(), "status": "archive"}),
             &context,
         )
         .await;
     let restored = tool
         .call(
-            serde_json::json!({"action": "restore", "id": entry.id.to_string()}),
+            serde_json::json!({"id": entry.id.to_string(), "status": "restore"}),
             &context,
         )
         .await;
@@ -313,25 +293,223 @@ async fn archive_and_restore_actions_publish_manageable_terminal_results() {
     assert_eq!(memory.list(None), vec![entry]);
 }
 
+#[tokio::test]
+async fn memory_update_pins_then_unpins() {
+    let memory =
+        memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap();
+    let source = Arc::new(SwappableMemorySource {
+        current: RwLock::new(Arc::new(memory)),
+    });
+    let workspace = tempfile::tempdir().unwrap();
+    let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .build();
+
+    let add = MemoryAddTool {
+        source: source.clone(),
+    }
+    .call(
+        serde_json::json!({ "content": "偏好使用 tab 缩进" }),
+        &context,
+    )
+    .await;
+    assert!(!add.is_error, "add must succeed: {}", add.text);
+    let id = add.data.unwrap().id.unwrap();
+
+    let pinned = MemoryUpdateTool {
+        source: source.clone(),
+    }
+    .call(serde_json::json!({ "id": id, "status": "pin" }), &context)
+    .await;
+    assert!(!pinned.is_error, "pin must succeed: {}", pinned.text);
+    assert_eq!(pinned.data.unwrap().action, "pin");
+
+    let unpinned = MemoryUpdateTool { source }
+        .call(serde_json::json!({ "id": id, "status": "unpin" }), &context)
+        .await;
+    assert!(!unpinned.is_error, "unpin must succeed: {}", unpinned.text);
+    assert_eq!(unpinned.data.unwrap().action, "unpin");
+}
+
+#[tokio::test]
+async fn memory_update_archives_and_restores() {
+    let memory =
+        memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap();
+    let source = Arc::new(SwappableMemorySource {
+        current: RwLock::new(Arc::new(memory)),
+    });
+    let workspace = tempfile::tempdir().unwrap();
+    let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .build();
+
+    let add = MemoryAddTool {
+        source: source.clone(),
+    }
+    .call(
+        serde_json::json!({ "content": "归档后仍可恢复的记忆" }),
+        &context,
+    )
+    .await;
+    assert!(!add.is_error, "add must succeed: {}", add.text);
+    let id = add.data.unwrap().id.unwrap();
+
+    let archived = MemoryUpdateTool {
+        source: source.clone(),
+    }
+    .call(
+        serde_json::json!({ "id": id, "status": "archive" }),
+        &context,
+    )
+    .await;
+    assert!(
+        !archived.is_error,
+        "archive must succeed: {}",
+        archived.text
+    );
+    assert_eq!(archived.data.unwrap().action, "archive");
+
+    let restored = MemoryUpdateTool { source }
+        .call(
+            serde_json::json!({ "id": id, "status": "restore" }),
+            &context,
+        )
+        .await;
+    assert!(
+        !restored.is_error,
+        "restore must succeed: {}",
+        restored.text
+    );
+    assert_eq!(restored.data.unwrap().action, "restore");
+}
+
+#[tokio::test]
+async fn memory_update_rejects_an_unknown_status() {
+    let source = test_source();
+    let workspace = tempfile::tempdir().unwrap();
+    let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .build();
+
+    let explode = MemoryUpdateTool { source }
+        .call(
+            serde_json::json!({
+                "id": "018f0000-0000-7000-8000-000000000000",
+                "status": "explode"
+            }),
+            &context,
+        )
+        .await;
+    assert!(
+        explode.is_error,
+        "unknown status must be rejected: {}",
+        explode.text
+    );
+    assert!(explode.data.is_none());
+}
+
 #[test]
-fn memory_schema_publishes_constrained_actions_layers_and_categories() {
-    let schema = memory_input_schema();
+fn the_five_memory_tools_expose_type_driven_required() {
+    let source = test_source();
+    let add = MemoryAddTool {
+        source: source.clone(),
+    }
+    .input_schema();
+    assert_eq!(add["required"], serde_json::json!(["content"]));
+
+    let search = MemorySearchTool {
+        source: source.clone(),
+    }
+    .input_schema();
+    assert_eq!(search["required"], serde_json::json!(["query"]));
+
+    let list = MemoryListTool {
+        source: source.clone(),
+    }
+    .input_schema();
+    assert!(
+        list.get("required").is_none(),
+        "MemoryList has no required field"
+    );
+
+    let update = MemoryUpdateTool {
+        source: source.clone(),
+    }
+    .input_schema();
+    assert_eq!(update["required"], serde_json::json!(["id", "status"]));
+    assert_eq!(
+        update["properties"]["status"]["enum"],
+        serde_json::json!(["pin", "unpin", "archive", "restore"])
+    );
+
+    let delete = MemoryDeleteTool {
+        source: source.clone(),
+    }
+    .input_schema();
+    assert_eq!(delete["required"], serde_json::json!(["id"]));
+}
+
+#[test]
+fn no_memory_tool_schema_uses_combinator_keywords() {
+    let source = test_source();
+    for schema in [
+        MemoryAddTool {
+            source: source.clone(),
+        }
+        .input_schema(),
+        MemorySearchTool {
+            source: source.clone(),
+        }
+        .input_schema(),
+        MemoryListTool {
+            source: source.clone(),
+        }
+        .input_schema(),
+        MemoryUpdateTool {
+            source: source.clone(),
+        }
+        .input_schema(),
+        MemoryDeleteTool {
+            source: source.clone(),
+        }
+        .input_schema(),
+    ] {
+        let text = schema.to_string();
+        for keyword in ["oneOf", "anyOf", "allOf"] {
+            assert!(
+                !text.contains(keyword),
+                "schema must not use {keyword}: {text}"
+            );
+        }
+    }
+}
+
+#[test]
+fn memory_add_content_description_states_the_limit() {
+    let schema = MemoryAddTool {
+        source: test_source(),
+    }
+    .input_schema();
+    let desc = schema["properties"]["content"]["description"]
+        .as_str()
+        .unwrap();
+    assert!(
+        desc.contains("500"),
+        "description must state the 500-char limit: {desc}"
+    );
+}
+
+#[test]
+fn memory_add_schema_publishes_constrained_layers_and_categories() {
+    let schema = MemoryAddTool {
+        source: test_source(),
+    }
+    .input_schema();
     let properties = schema["properties"].as_object().unwrap();
 
-    assert_eq!(
-        properties["action"]["enum"],
-        serde_json::json!([
-            "add",
-            "delete",
-            "search",
-            "pin",
-            "list",
-            "archive",
-            "restore",
-            "add_reminder",
-            "complete_reminder"
-        ])
-    );
     assert_eq!(
         properties["layer"]["enum"],
         serde_json::json!(["global", "project"])
@@ -340,54 +518,6 @@ fn memory_schema_publishes_constrained_actions_layers_and_categories() {
         properties["category"]["enum"],
         serde_json::json!(["fact", "decision", "preference", "pattern", "pitfall"])
     );
-    let action_contracts = schema["oneOf"].as_array().unwrap();
-    for (action, required) in [
-        ("add", vec!["action", "content"]),
-        ("delete", vec!["action", "id"]),
-        ("search", vec!["action", "query"]),
-        ("pin", vec!["action", "id"]),
-        ("list", vec!["action"]),
-        ("archive", vec!["action", "id"]),
-        ("restore", vec!["action", "id"]),
-        ("add_reminder", vec!["action", "content"]),
-        ("complete_reminder", vec!["action", "id"]),
-    ] {
-        let contract = action_contracts
-            .iter()
-            .find(|contract| contract["properties"]["action"]["const"] == action)
-            .unwrap_or_else(|| panic!("missing action contract {action}"));
-        assert_eq!(contract["required"], serde_json::json!(required));
-    }
-}
-
-#[test]
-fn memory_description_explains_persistence_layers_categories_and_reminders() {
-    let description = share::i18n::tools::core::memory("en").to_lowercase();
-
-    for expected in [
-        "persistent",
-        "global",
-        "project",
-        "fact",
-        "decision",
-        "preference",
-        "pattern",
-        "pitfall",
-        "reminder",
-        "automatic injection",
-        "search before relying on historical",
-        "explicitly asks you to remember",
-        "sensitive",
-        "must not override system",
-        "do not invent",
-        "archive",
-        "restore",
-    ] {
-        assert!(
-            description.contains(expected),
-            "memory description must explain {expected}"
-        );
-    }
 }
 
 #[test]

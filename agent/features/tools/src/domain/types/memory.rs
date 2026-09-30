@@ -2,22 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Supported Memory actions.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum MemoryAction {
-    Add,
-    Delete,
-    Search,
-    Pin,
-    #[default]
-    List,
-    Archive,
-    Restore,
-    AddReminder,
-    CompleteReminder,
-}
-
 /// Durable Memory layer.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -118,29 +102,66 @@ pub struct MemoryResult {
     pub eviction_candidates: Option<Vec<MemoryEvictionCandidateResult>>,
 }
 
-/// Typed input for the `memory` tool.
-///
-/// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
-#[derive(Debug, Clone, Deserialize, Default)]
-pub struct MemoryInput {
-    /// Memory action to perform
-    pub action: MemoryAction,
-    /// Memory id for delete, pin, archive, restore, or complete_reminder actions
-    pub id: Option<String>,
-    /// Persistent memory or session reminder content, max 500 chars
-    pub content: Option<String>,
-    /// Lexical search query for persistent memory
-    pub query: Option<String>,
-    /// Maximum number of search or list results
-    pub limit: Option<u64>,
-    /// Persistent memory layer; global applies across projects, project applies only to the current project
+/// Memory write status transition applied by `MemoryUpdate`.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryStatus {
+    Pin,
+    Unpin,
+    Archive,
+    Restore,
+}
+
+/// Input for the `MemoryAdd` tool: write one persistent memory entry.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MemoryAddInput {
+    /// 要记住的文本，上限 500 字符。Content to remember, up to 500 chars.
+    pub content: String,
+    /// 层级：global 仅用于明确跨项目适用的偏好。默认 project。
+    /// Layer: global only for preferences explicitly applicable across projects. Defaults to project.
     pub layer: Option<MemoryLayerInput>,
-    /// Persistent memory category
+    /// 分类：fact 事实 / decision 决策 / preference 偏好 / pattern 模式 / pitfall 陷阱。默认 fact。
+    /// Category: fact / decision / preference / pattern / pitfall. Defaults to fact.
     pub category: Option<MemoryCategoryInput>,
-    /// Optional persistent memory tags
+    /// 标签，上限 10 个，每个不超过 32 字符。Tags, up to 10, each up to 32 chars.
     pub tags: Option<Vec<String>>,
-    /// Whether to pin persistent memory
+    /// 是否置顶以避免容量淘汰。Pin to protect from capacity eviction.
     pub pinned: Option<bool>,
-    /// Session reminder priority; reminders are not persistent memory
-    pub priority: Option<ReminderPriorityInput>,
+}
+
+/// Input for the `MemorySearch` tool: lexical search over memory entries.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MemorySearchInput {
+    /// 检索词，使用少量辨识词。Search terms; use a few discriminating words.
+    pub query: String,
+    /// 返回条数，上限 50。默认 10。Max results, capped at 50. Defaults to 10.
+    pub limit: Option<u64>,
+    /// 限定层级。Restrict to a layer.
+    pub layer: Option<MemoryLayerInput>,
+    /// 限定分类。Restrict to a category.
+    pub category: Option<MemoryCategoryInput>,
+}
+
+/// Input for the `MemoryList` tool: list memory entries.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MemoryListInput {
+    /// 限定层级。Restrict to a layer.
+    pub layer: Option<MemoryLayerInput>,
+}
+
+/// Input for the `MemoryUpdate` tool: pin, unpin, archive, or restore one entry.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MemoryUpdateInput {
+    /// 目标记忆 ID。Target memory ID.
+    pub id: String,
+    /// 状态变更：pin 置顶避免淘汰、unpin 取消置顶、archive 归档释放容量、restore 恢复归档条目。
+    /// Status transition: pin protects from eviction, unpin, archive frees capacity, restore an archived entry.
+    pub status: MemoryStatus,
+}
+
+/// Input for the `MemoryDelete` tool: permanently delete one entry.
+#[derive(Debug, Clone, Deserialize)]
+pub struct MemoryDeleteInput {
+    /// 目标记忆 ID。Target memory ID.
+    pub id: String,
 }

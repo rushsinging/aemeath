@@ -20,7 +20,8 @@ pub use tools::types::exit_worktree::ExitWorktreeInput;
 pub use tools::types::glob::GlobInput;
 pub use tools::types::grep::GrepInput;
 pub use tools::types::memory::{
-    MemoryAction, MemoryCategoryInput, MemoryInput, MemoryLayerInput, ReminderPriorityInput,
+    MemoryAddInput, MemoryCategoryInput, MemoryDeleteInput, MemoryLayerInput, MemoryListInput,
+    MemorySearchInput, MemoryUpdateInput, ReminderPriorityInput,
 };
 pub use tools::types::plan_mode::{EnterPlanModeInput, ExitPlanModeInput};
 pub use tools::types::read::ReadInput;

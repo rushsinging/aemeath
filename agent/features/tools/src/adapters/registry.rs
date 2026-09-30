@@ -153,10 +153,38 @@ pub(crate) fn register_named_scope(
         }
     );
     builtin!(
-        "Memory",
+        "MemoryAdd",
         Caps::All,
-        memory_tool::MemoryTool {
-            source: memory_source.clone(),
+        memory_tool::MemoryAddTool {
+            source: memory_source.clone()
+        }
+    );
+    builtin!(
+        "MemorySearch",
+        Caps::All,
+        memory_tool::MemorySearchTool {
+            source: memory_source.clone()
+        }
+    );
+    builtin!(
+        "MemoryList",
+        Caps::All,
+        memory_tool::MemoryListTool {
+            source: memory_source.clone()
+        }
+    );
+    builtin!(
+        "MemoryUpdate",
+        Caps::All,
+        memory_tool::MemoryUpdateTool {
+            source: memory_source.clone()
+        }
+    );
+    builtin!(
+        "MemoryDelete",
+        Caps::All,
+        memory_tool::MemoryDeleteTool {
+            source: memory_source.clone()
         }
     );
     builtin!(
@@ -264,7 +292,11 @@ mod tests {
         "TaskListComplete",
         "TaskGet",
         "TaskStop",
-        "Memory",
+        "MemoryAdd",
+        "MemorySearch",
+        "MemoryList",
+        "MemoryUpdate",
+        "MemoryDelete",
         "AskUserQuestion",
         "Brief",
         "ToolSearch",
@@ -308,6 +340,75 @@ mod tests {
                 .get(&crate::domain::published_language::ToolName::new(name))
                 .unwrap();
             assert_eq!(spec.required_capabilities(), Caps::TaskWrite);
+        }
+    }
+
+    #[test]
+    fn registry_exposes_five_memory_tools_and_no_legacy_memory() {
+        let registry = ToolRegistry::new();
+        let task_access: Arc<dyn TaskAccess> = Arc::new(TaskStore::new());
+        let workspace = tempfile::tempdir().expect("workspace");
+        let control = project::wire_production_workspace(workspace.path().to_path_buf(), None)
+            .expect("workspace wiring")
+            .control();
+        register_named_scope(
+            &registry,
+            task_access,
+            test_memory_source(),
+            control,
+            crate::composition::wire_skills().loader(),
+            BuiltinRegistryScope::Main,
+        );
+        for name in [
+            "MemoryAdd",
+            "MemorySearch",
+            "MemoryList",
+            "MemoryUpdate",
+            "MemoryDelete",
+        ] {
+            assert!(registry.get(name).is_some(), "missing {name}");
+        }
+        assert!(
+            registry.get("Memory").is_none(),
+            "legacy Memory tool must be gone"
+        );
+    }
+
+    /// i18n 是 description 的唯一真相源：ToolSearch 发现通道（`description()`）与
+    /// LLM 注入通道（`description_for`）在英文下必须逐字一致，否则将来改 i18n
+    /// 忘了改 adapter 会静默漂移。未覆盖 `description_for` 的工具（如 Skill）经
+    /// domain 默认回落天然相等，断言同样成立，无需豁免。
+    #[test]
+    fn every_tool_description_matches_its_english_i18n_text() {
+        let registry = ToolRegistry::new();
+        let task_access: Arc<dyn TaskAccess> = Arc::new(TaskStore::new());
+        let workspace = tempfile::tempdir().expect("workspace");
+        let control = project::wire_production_workspace(workspace.path().to_path_buf(), None)
+            .expect("workspace wiring")
+            .control();
+        register_named_scope(
+            &registry,
+            task_access,
+            test_memory_source(),
+            control,
+            crate::composition::wire_skills().loader(),
+            BuiltinRegistryScope::Main,
+        );
+
+        // 覆盖率护栏：内置全量名单里的每个工具都必须被本断言扫到。
+        let checked: BTreeSet<String> = registry.names().into_iter().collect();
+        assert!(
+            set(FULL).is_subset(&checked),
+            "guard must cover every builtin tool"
+        );
+
+        for name in registry.names() {
+            let tool = registry.get(&name).expect("registered tool");
+            assert_eq!(
+                tool.description(),
+                tool.description_for("en"),
+                "tool {name} has a divergent hard-coded description"
+            );
         }
     }
 

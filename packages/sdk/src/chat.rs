@@ -102,7 +102,7 @@ pub enum ChatInputEvent {
     ManageSession {
         args: String,
     },
-    /// 管理记忆。由 `/memory` 触发（非 remind 子命令）。
+    /// 管理记忆。由 `/memory` 触发。
     /// args: "" / "list" / "add ..." / "delete ..." / "pin ..." / "search ..." / "compact" / "stats"
     ManageMemory {
         args: String,
@@ -118,8 +118,6 @@ pub enum ChatInputEvent {
     },
     /// 查询可用模型列表。由 TUI 启动时或 `/model` 触发。
     ListModels,
-    /// 查询提醒列表。由 `/reminders` 触发。
-    ListReminders,
 }
 
 // #567: 手动实现 PartialEq/Eq，不比较变体内数据（测试只检查是否产生了事件）。

@@ -151,7 +151,7 @@ Run 的差异分成两个正交维度：
 - 当前模型选择或 binding revision；
 - committed config revision；
 - resume/恢复状态；
-- session reminders 与 read-files tracking；
+- read-files tracking；
 - 当前 workspace/session 投影；
 - active run identity；
 - 当前 parent-run frame；

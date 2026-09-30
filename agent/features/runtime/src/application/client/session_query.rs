@@ -4,7 +4,7 @@
 //! by `RuntimeContext`. Each method delegates to an existing `*_impl` function.
 
 use async_trait::async_trait;
-use sdk::{ModelSummary, ReflectionHistoryView, ReminderView, SdkError, SessionSummary};
+use sdk::{ModelSummary, ReflectionHistoryView, SdkError, SessionSummary};
 use std::sync::Arc;
 
 use super::accessors::AgentClientImpl;
@@ -29,10 +29,6 @@ impl SessionQueryPort for AgentSessionQuery {
 
     async fn list_sessions(&self) -> Result<Vec<SessionSummary>, SdkError> {
         super::trait_session::list_sessions_impl(&self.client).await
-    }
-
-    async fn list_reminders(&self) -> Result<Vec<ReminderView>, SdkError> {
-        super::trait_memory::list_reminders_impl(&self.client).await
     }
 
     async fn list_reflection_history(

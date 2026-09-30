@@ -33,7 +33,7 @@ impl TypedTool for TaskBlockByTool {
     }
 
     fn description(&self) -> &str {
-        "Replace all blocking dependencies of a task. Pass id and the complete block_by_ids list; an empty list clears dependencies."
+        share::i18n::tools::task::task_block_by("en")
     }
 
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {

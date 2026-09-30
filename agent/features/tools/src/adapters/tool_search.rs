@@ -16,7 +16,7 @@ impl TypedTool for ToolSearchTool {
         "ToolSearch"
     }
     fn description(&self) -> &str {
-        "Search for available tools by name or functionality. Use this to discover tools that can help with specific tasks."
+        share::i18n::tools::core::tool_search("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::core::tool_search(lang))

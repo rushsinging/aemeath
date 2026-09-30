@@ -1,6 +1,6 @@
 use crate::domain::types::memory::{
     MemoryCategoryInput, MemoryEntryResult, MemoryEvictionCandidateResult, MemoryLayerInput,
-    MemoryLocationResult, MemoryResult, MemorySearchHitResult,
+    MemoryLocationResult, MemoryResult, MemorySearchHitResult, MemoryStatus,
 };
 use crate::domain::{ToolExecutionContext, TypedToolResult};
 use memory::api::search::MemorySearchHit;
@@ -162,21 +162,25 @@ pub(super) fn search_memory(input: Value, port: &dyn MemoryPort) -> TypedToolRes
     )
 }
 
-pub(super) async fn pin_memory(
-    input: Value,
+pub(super) async fn update_memory(
+    id: &str,
+    status: MemoryStatus,
     port: &dyn MemoryPort,
 ) -> TypedToolResult<MemoryResult> {
-    let id =
-        match required_string(&input, "id").and_then(|id| Id::new(id).map_err(|e| e.to_string())) {
-            Ok(id) => id,
-            Err(error) => return TypedToolResult::error(error),
-        };
-    let pinned = input
-        .get("pinned")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(true);
+    let id = match Id::new(id).map_err(|error| error.to_string()) {
+        Ok(id) => id,
+        Err(error) => return TypedToolResult::error(error),
+    };
+    match status {
+        MemoryStatus::Pin => update_pin(&id, true, port).await,
+        MemoryStatus::Unpin => update_pin(&id, false, port).await,
+        MemoryStatus::Archive => update_archive(&id, port).await,
+        MemoryStatus::Restore => update_restore(&id, port).await,
+    }
+}
 
-    match port.pin(&id, pinned).await {
+async fn update_pin(id: &Id, pinned: bool, port: &dyn MemoryPort) -> TypedToolResult<MemoryResult> {
+    match port.pin(id, pinned).await {
         Ok(true) => TypedToolResult::success(
             if pinned {
                 "记忆已固定。"
@@ -184,7 +188,11 @@ pub(super) async fn pin_memory(
                 "记忆已取消固定。"
             },
             MemoryResult {
-                action: "pin".to_string(),
+                action: if pinned {
+                    "pin".to_string()
+                } else {
+                    "unpin".to_string()
+                },
                 id: Some(id.to_string()),
                 ..MemoryResult::default()
             },
@@ -194,64 +202,23 @@ pub(super) async fn pin_memory(
     }
 }
 
-pub(super) fn list_memory(input: Value, port: &dyn MemoryPort) -> TypedToolResult<MemoryResult> {
-    let layer = match optional_layer(&input) {
-        Ok(layer) => layer,
-        Err(error) => return TypedToolResult::error(error),
-    };
-    let entries = port.list(layer);
-    let message = render_memory_entries(&entries, current_timestamp_secs());
-    TypedToolResult::success(
-        message,
-        MemoryResult {
-            action: "list".to_string(),
-            entries: Some(
-                entries
-                    .iter()
-                    .map(|entry| memory_entry_result(entry, current_timestamp_secs()))
-                    .collect(),
-            ),
-            ..MemoryResult::default()
-        },
-    )
-}
-
-pub(super) async fn archive_memory(
-    input: Value,
-    port: &dyn MemoryPort,
-) -> TypedToolResult<MemoryResult> {
-    let id = match required_string(&input, "id")
-        .and_then(|id| Id::new(id).map_err(|error| error.to_string()))
-    {
-        Ok(id) => id,
-        Err(error) => return TypedToolResult::error(error),
-    };
-    match port.archive(std::slice::from_ref(&id)).await {
-        Ok(true) => {}
-        Ok(false) => return TypedToolResult::error("记忆不存在、已归档或已固定。"),
-        Err(error) => return TypedToolResult::error(error.to_string()),
+async fn update_archive(id: &Id, port: &dyn MemoryPort) -> TypedToolResult<MemoryResult> {
+    match port.archive(std::slice::from_ref(id)).await {
+        Ok(true) => TypedToolResult::success(
+            format!("记忆已归档。ID: {id}"),
+            MemoryResult {
+                action: "archive".to_string(),
+                id: Some(id.to_string()),
+                ..MemoryResult::default()
+            },
+        ),
+        Ok(false) => TypedToolResult::error("记忆不存在、已归档或已固定。"),
+        Err(error) => TypedToolResult::error(error.to_string()),
     }
-    TypedToolResult::success(
-        format!("记忆已归档。ID: {id}"),
-        MemoryResult {
-            action: "archive".to_string(),
-            id: Some(id.to_string()),
-            ..MemoryResult::default()
-        },
-    )
 }
 
-pub(super) async fn restore_memory(
-    input: Value,
-    port: &dyn MemoryPort,
-) -> TypedToolResult<MemoryResult> {
-    let id = match required_string(&input, "id")
-        .and_then(|id| Id::new(id).map_err(|error| error.to_string()))
-    {
-        Ok(id) => id,
-        Err(error) => return TypedToolResult::error(error),
-    };
-    match port.restore(&id).await {
+async fn update_restore(id: &Id, port: &dyn MemoryPort) -> TypedToolResult<MemoryResult> {
+    match port.restore(id).await {
         Ok(RestoreResult::Restored { id }) => TypedToolResult::success(
             format!("记忆已恢复。ID: {id}"),
             MemoryResult {
@@ -282,6 +249,28 @@ pub(super) async fn restore_memory(
         ),
         Err(error) => TypedToolResult::error(error.to_string()),
     }
+}
+
+pub(super) fn list_memory(input: Value, port: &dyn MemoryPort) -> TypedToolResult<MemoryResult> {
+    let layer = match optional_layer(&input) {
+        Ok(layer) => layer,
+        Err(error) => return TypedToolResult::error(error),
+    };
+    let entries = port.list(layer);
+    let message = render_memory_entries(&entries, current_timestamp_secs());
+    TypedToolResult::success(
+        message,
+        MemoryResult {
+            action: "list".to_string(),
+            entries: Some(
+                entries
+                    .iter()
+                    .map(|entry| memory_entry_result(entry, current_timestamp_secs()))
+                    .collect(),
+            ),
+            ..MemoryResult::default()
+        },
+    )
 }
 
 fn render_eviction_candidates(candidates: &[EvictionCandidate]) -> String {
@@ -466,74 +455,4 @@ fn current_timestamp_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
-}
-
-pub(super) fn add_reminder(
-    input: Value,
-    ctx: &ToolExecutionContext,
-) -> TypedToolResult<MemoryResult> {
-    let content = match required_string(&input, "content") {
-        Ok(content) => content,
-        Err(error) => return TypedToolResult::error(error),
-    };
-    if let Err(error) = validate_content(content) {
-        return TypedToolResult::error(error);
-    }
-    let priority = input
-        .get("priority")
-        .and_then(|value| value.as_str())
-        .unwrap_or("normal");
-    if !matches!(priority, "low" | "normal" | "high") {
-        return TypedToolResult::error(format!("无效 reminder priority: {priority}"));
-    }
-
-    let Some(reminders) = ctx.session_reminders() else {
-        return TypedToolResult::error("当前运行环境不支持 session reminder。");
-    };
-    let result = match reminders.lock() {
-        Ok(mut reminders) => {
-            let id = uuid::Uuid::now_v7().to_string();
-            match reminders.add(id.clone(), content.to_string(), current_timestamp_secs()) {
-                Ok(id) => TypedToolResult::success(
-                    format!("已添加会话提醒: {id}"),
-                    MemoryResult {
-                        action: "add_reminder".to_string(),
-                        id: Some(id),
-                        ..MemoryResult::default()
-                    },
-                ),
-                Err(error) => TypedToolResult::error(error.to_string()),
-            }
-        }
-        Err(_) => TypedToolResult::error("session reminder 状态锁已损坏"),
-    };
-    result
-}
-
-pub(super) fn complete_reminder(
-    input: Value,
-    ctx: &ToolExecutionContext,
-) -> TypedToolResult<MemoryResult> {
-    let id = match required_string(&input, "id") {
-        Ok(id) => id,
-        Err(error) => return TypedToolResult::error(error),
-    };
-    let Some(reminders) = ctx.session_reminders() else {
-        return TypedToolResult::error("当前运行环境不支持 session reminder。");
-    };
-    let result = match reminders.lock() {
-        Ok(mut reminders) => match reminders.complete(id) {
-            Ok(()) => TypedToolResult::success(
-                "会话提醒已完成。",
-                MemoryResult {
-                    action: "complete_reminder".to_string(),
-                    id: Some(id.to_string()),
-                    ..MemoryResult::default()
-                },
-            ),
-            Err(error) => TypedToolResult::error(error.to_string()),
-        },
-        Err(_) => TypedToolResult::error("session reminder 状态锁已损坏"),
-    };
-    result
 }

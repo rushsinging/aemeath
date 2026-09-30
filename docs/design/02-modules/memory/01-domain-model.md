@@ -221,12 +221,19 @@ enum WriteResult {
 >
 > **TTL 过期检查**：`is_ttl_expired(now)` = `ttl.is_some() && now > created_at + ttl.unwrap()`。基准时间点固定为 `created_at`（创建时间），不是 last_confirmed_at 或 updated_at。
 
-## 8. SessionReminder 所有权边界
+## 8. SessionReminder（已退役）
 
-`SessionReminder` 是**会话级**提醒（非跨会话记忆），所有权属于 **Context Management** 的 Session 聚合，**NEVER** 进入 Memory BC 的模型或公开面。
+`SessionReminder` 曾是会话级提醒（非跨会话记忆），所有权归 Context Management 的 Session 聚合，但经 `ToolExecutionContext` 的 reminder 端口借道 Memory 工具暴露，属跨 BC 借道。现已全量退役。
 
-- SessionReminder 的 `recap_line` 是 session 级上下文注入，不是跨会话记忆检索。
-- Memory BC 只管跨会话的 MemoryEntry；SessionReminder 不归 Memory。
+退役依据（三重断裂，任一即足以判定不可用）：
+
+1. **写入端与读取端是两个不同实例**。写入端在每次 chat 流启动时新建一个 `Arc<Mutex<…>>`，读取端持有另一个 `Arc<RwLock<…>>`；两者类型不同、生命周期不同，NEVER 相遇——模型写入的 reminder 连用户查询都读不到。
+2. **写入实例随 chat 流重建**，会话重启即丢。
+3. **从不注入 LLM 上下文**。Context 侧只有 `InvocationReminder` 通道，模型写入后自己读不到。
+
+`SessionReminder` / `SessionReminders` 类型、`ToolExecutionContext` reminder 端口、`list_reminders` 查询链、`ReminderList` 事件与 `/memory remind` 命令已删除，并有架构守卫测试防止复活。
+
+需要「会话级待办」时应另立设计议题：缺的不是工具入口，而是 LLM 上下文注入路径。
 
 ## 9. 聚合与服务边界
 

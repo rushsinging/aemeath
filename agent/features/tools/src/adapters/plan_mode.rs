@@ -21,8 +21,7 @@ impl TypedTool for EnterPlanModeTool {
     }
 
     fn description(&self) -> &'static str {
-        "Enter plan mode. In plan mode, tool calls are simulated and not actually executed. \
-         Use this when you need to create a detailed plan before taking actions."
+        share::i18n::tools::core::enter_plan_mode("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::core::enter_plan_mode(lang))
@@ -70,8 +69,7 @@ impl TypedTool for ExitPlanModeTool {
     }
 
     fn description(&self) -> &'static str {
-        "Exit plan mode and return to normal execution. \
-         Optionally execute the planned actions that were simulated."
+        share::i18n::tools::core::exit_plan_mode("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::core::exit_plan_mode(lang))

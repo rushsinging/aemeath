@@ -40,7 +40,6 @@ where
                 input_events,
                 session: shell,
                 read_files,
-                session_reminders,
                 session_queries,
             } = input;
 
@@ -403,23 +402,6 @@ where
                         continue;
                     }
                 },
-                PendingCommand::ListReminders => match session_queries.list_reminders().await {
-                    Ok(reminders) => {
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::ReminderList { reminders })
-                            .await;
-                        continue;
-                    }
-                    Err(e) => {
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::CommandResultText {
-                                text: format!("List reminders failed: {e}"),
-                                is_error: true,
-                            })
-                            .await;
-                        continue;
-                    }
-                },
             }
         };
     }
@@ -753,7 +735,6 @@ where
                     &workspace,
                     &cancel,
                     read_files.clone(),
-                    session_reminders.clone(),
                     max_tool_concurrency,
                     agent_semaphore.clone(),
                     &session_id,

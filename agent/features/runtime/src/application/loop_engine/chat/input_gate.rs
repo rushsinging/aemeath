@@ -28,7 +28,6 @@ pub(crate) fn event_kind_name(event: &ChatInputEvent) -> &'static str {
         ChatInputEvent::ResumeSession { .. } => "ResumeSession",
         ChatInputEvent::QueryReflectionHistory { .. } => "QueryReflectionHistory",
         ChatInputEvent::ListModels => "ListModels",
-        ChatInputEvent::ListReminders => "ListReminders",
     }
 }
 
@@ -104,8 +103,6 @@ pub enum PendingCommand {
     },
     /// 查询模型列表。
     ListModels,
-    /// 查询提醒列表。
-    ListReminders,
 }
 
 // #567: 手动实现 PartialEq/Eq，不比较变体内数据。
@@ -460,16 +457,6 @@ where
                     break;
                 } else {
                     buffer.push(ChatInputEvent::ListModels);
-                }
-            }
-            ChatInputEvent::ListReminders => {
-                if is_idle {
-                    pending_command = Some(PendingCommand::ListReminders);
-                    dropped_events = iter.count();
-                    decision = GateDecision::Proceed;
-                    break;
-                } else {
-                    buffer.push(ChatInputEvent::ListReminders);
                 }
             }
         }

@@ -23,7 +23,7 @@ impl TypedTool for TaskListsTool {
     }
 
     fn description(&self) -> &str {
-        "List current and historical task lists. Use their IDs with TaskListGet to inspect a specific list."
+        share::i18n::tools::task::task_lists("en")
     }
 
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {

@@ -55,7 +55,7 @@ impl TypedTool for TaskListTool {
         "TaskListGet"
     }
     fn description(&self) -> &str {
-        "List all tasks and their status. Use to discover pending work with no unresolved dependencies."
+        share::i18n::tools::task::task_list("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::task::task_list(lang))

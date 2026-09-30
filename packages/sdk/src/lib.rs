@@ -128,8 +128,7 @@ pub use task::{
 pub use tui::{
     classify_paste, resolve_local_image_path, ChatEventSink, ChatHandle, ChatInputEventPort,
     ClipboardImageView, InputEventFuture, InputEventOptFuture, MemoryConfigView, PasteKind,
-    ReflectionConfigView, ReminderView, SkillSlashRouteView, SkillView, SkillsUpdatedEvent,
-    TuiLaunchContext,
+    ReflectionConfigView, SkillSlashRouteView, SkillView, SkillsUpdatedEvent, TuiLaunchContext,
 };
 pub use types::{
     char_to_byte, format_tokens, ByteIdx, CharIdx, PermissionPrompt, StatusInfo, StrSlice,

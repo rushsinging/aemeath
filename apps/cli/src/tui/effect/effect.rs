@@ -35,8 +35,6 @@ pub enum Effect {
         root: String,
         revision: u64,
     },
-    /// 拉取 reminder 列表（/memory 命令），结果经 UiEvent::MemoryList 回灌。
-    FetchMemoryList,
     CopyToClipboard {
         text: String,
     },

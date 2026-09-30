@@ -451,8 +451,7 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
         // These metadata/list events are intentionally omitted from trace logging.
         sdk::ChatEvent::SkillsUpdated { .. }
         | sdk::ChatEvent::ModelList { .. }
-         | sdk::ChatEvent::ReminderList { .. }
-         | sdk::ChatEvent::SessionList { .. }
+        | sdk::ChatEvent::SessionList { .. }
          | sdk::ChatEvent::ProjectInfo { .. }
          | sdk::ChatEvent::RuntimeStatusChanged { .. }
          | sdk::ChatEvent::SessionResumeFailed { .. } => {}    }

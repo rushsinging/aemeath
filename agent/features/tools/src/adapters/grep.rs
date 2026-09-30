@@ -17,7 +17,7 @@ impl TypedTool for GrepTool {
         "Grep"
     }
     fn description(&self) -> &str {
-        "Search file contents using ripgrep regex syntax. Supports glob file filters."
+        share::i18n::tools::filesystem::grep("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::filesystem::grep(lang))
