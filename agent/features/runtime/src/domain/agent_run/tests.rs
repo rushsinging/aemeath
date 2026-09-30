@@ -2177,6 +2177,28 @@ fn compaction_only_run_never_enters_model_invocation() {
     );
 }
 
+#[test]
+fn reflection_only_run_never_enters_model_invocation() {
+    let mut run = Run::new(RunSpec::manual_reflection(), None);
+    run.start_draining().unwrap();
+    run.apply_drain_decision(DrainDecision::InternalContinuation, None)
+        .unwrap();
+
+    assert_eq!(
+        run.transition(RunTransition::ContextPrepared),
+        Err(RunTransitionError::IllegalTransition {
+            from: RunStatus::PreparingContext,
+            transition: RunTransition::ContextPrepared,
+        }),
+        "manual-reflection Run 不得进入 InvokingModel"
+    );
+    assert_eq!(run.status(), RunStatus::PreparingContext);
+    assert!(
+        !run.events().iter().any(event_run_entered_invoking_model),
+        "被拒绝的上下文准备不得留下 InvokingModel 迁移事件"
+    );
+}
+
 // ── 命令式状态设置的唯一 gate ──────────────────────────────────────────
 
 #[test]

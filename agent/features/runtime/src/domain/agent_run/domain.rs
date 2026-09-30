@@ -309,11 +309,14 @@ impl Run {
             });
         }
         if transition == RunTransition::ContextPrepared
-            && self.spec.intent() == RunIntent::ManualCompaction
+            && matches!(
+                self.spec.intent(),
+                RunIntent::ManualCompaction | RunIntent::ManualReflection
+            )
         {
             log::warn!(
                 target: crate::LOG_TARGET,
-                "run state transition rejected: run_id={} intent={:?} requested_transition={:?} 手动压缩 Run 不得进入模型调用",
+                "run state transition rejected: run_id={} intent={:?} requested_transition={:?} 手动压缩/反思 Run 不得进入模型调用",
                 self.id,
                 self.spec.intent(),
                 transition,
