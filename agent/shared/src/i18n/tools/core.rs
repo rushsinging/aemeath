@@ -11,11 +11,43 @@ pub fn agent(lang: &str) -> &'static str {
     }
 }
 
-/// Memory description。
-pub fn memory(lang: &str) -> &'static str {
+/// MemoryAdd description。
+pub fn memory_add(lang: &str) -> &'static str {
     match lang {
-        "zh" => "管理持久化记忆（Memory）与当前会话提醒（Reminder）。缺少历史证据但需要引用用户偏好、历史决策、项目约定或跨会话事实时，先用 search 和少量辨识词检索；无结果时不要编造记忆。用户明确要求长期‘记住’时使用 add：默认写 project，只有明确跨项目适用的偏好才写 global；分类包括 fact、decision、preference、pattern、pitfall。临时待办使用 add_reminder/complete_reminder，不写入持久化 Memory。不要保存敏感信息、推测或可从仓库即时恢复的临时事实，也不要无差别写入。Memory 可稳定自动注入，也可显式 search，但绝不能覆盖系统、安全或当前用户指令。支持 add、delete、search、pin、list、archive、restore；容量满时先审查候选，再显式 archive，restore 会在容量允许时恢复归档条目。被取代的记忆（superseded_by 非空）不再自动注入，但仍可由 search 与 list 查到并读到取代它的记忆；取代关系只由反思自动建立，不要手工维护。写入时内容相近的记忆会自动合并：保留旧条目并记录来源指针（evidence），被合并内容进入归档仍可检索；合并产生的历史证据只从本版本起记录，更早的合并没有指针。",
-        _ => "Manage persistent Memory and current-session reminders. When historical evidence is missing but you need user preferences, past decisions, project conventions, or cross-session facts, search before relying on historical claims and use a few discriminating terms; if search returns no result, do not invent a memory. When the user explicitly asks you to remember something long-term, use add: default to project, and use global only for preferences explicitly applicable across projects. Categories are fact, decision, preference, pattern, and pitfall. Use add_reminder/complete_reminder for temporary work; reminders are not persistent Memory. Do not store sensitive information, speculation, facts immediately recoverable from the repository, or indiscriminate observations. Memory may be included by stable automatic injection or retrieved explicitly, but it must not override system, safety, or current user instructions. Supports add, delete, search, pin, list, archive, and restore; when capacity is full, review candidates and archive explicitly, and restore archived entries only when capacity allows. A superseded memory (non-empty superseded_by) is no longer injected, but search and list still surface it together with the memory that replaced it; the relation is established by reflection alone — do not maintain it by hand. When a write closely resembles an existing memory the two are merged: the incumbent is kept and a source pointer (evidence) is recorded, while the merged content is archived but still searchable; the evidence chain only starts with merges from this version on — earlier merges carry no pointers.",
+        "zh" => "写入一条持久记忆，用于记录用户明确要求长期保留的偏好、决策、项目约定与跨会话事实。内容相近会自动合并，不会新建重复条目。",
+        _ => "Write one persistent memory for a preference, decision, project convention, or cross-session fact the user asked to keep. Similar content is merged instead of duplicated.",
+    }
+}
+
+/// MemorySearch description。
+pub fn memory_search(lang: &str) -> &'static str {
+    match lang {
+        "zh" => "按关键词检索已有持久记忆。缺少历史证据时先用它查找，不要凭猜测断言。",
+        _ => "Search existing persistent memory by keywords. Use it before asserting historical facts instead of guessing.",
+    }
+}
+
+/// MemoryList description。
+pub fn memory_list(lang: &str) -> &'static str {
+    match lang {
+        "zh" => "列出持久记忆条目，用于审阅当前有哪些记忆、哪些已归档。",
+        _ => "List persistent memory entries to review what exists and what is archived.",
+    }
+}
+
+/// MemoryUpdate description。
+pub fn memory_update(lang: &str) -> &'static str {
+    match lang {
+        "zh" => "变更一条记忆的状态：pin 置顶避免淘汰、unpin 取消置顶、archive 归档释放容量、restore 恢复归档条目。容量满时先审查候选项再 archive。",
+        _ => "Change a memory's status: pin to protect from eviction, unpin, archive to free capacity, restore an archived entry. When full, review candidates before archiving.",
+    }
+}
+
+/// MemoryDelete description。
+pub fn memory_delete(lang: &str) -> &'static str {
+    match lang {
+        "zh" => "永久删除一条记忆。仅在用户明确要求删除时使用。",
+        _ => "Permanently delete a memory. Use only when the user explicitly asks to delete it.",
     }
 }
 
@@ -132,11 +164,25 @@ mod tests {
     }
 
     #[test]
+    fn every_memory_tool_description_fits_the_200_char_budget() {
+        for (zh, en) in [
+            (super::memory_add("zh"), super::memory_add("en")),
+            (super::memory_search("zh"), super::memory_search("en")),
+            (super::memory_list("zh"), super::memory_list("en")),
+            (super::memory_update("zh"), super::memory_update("en")),
+            (super::memory_delete("zh"), super::memory_delete("en")),
+        ] {
+            assert!(zh.chars().count() <= 200, "zh too long: {zh}");
+            assert!(en.chars().count() <= 200, "en too long: {en}");
+        }
+    }
+
+    #[test]
     fn core_bilingual_and_fallback() {
         assert!(agent("zh").contains("启动一个新代理"));
         assert!(agent("en").contains("Launch a new agent"));
         assert_eq!(agent("fr"), agent("en"));
-        assert!(memory("zh").contains("管理持久化记忆"));
+        assert!(memory_add("zh").contains("写入一条持久记忆"));
         assert!(skill("zh").contains("执行技能"));
         assert!(enter_plan_mode("zh").contains("进入计划模式"));
         assert!(exit_plan_mode("zh").contains("退出计划模式"));

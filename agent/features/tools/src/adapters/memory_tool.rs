@@ -54,13 +54,10 @@ impl TypedTool for MemoryAddTool {
     }
 
     fn description(&self) -> &str {
-        // Task 5 replaces this inline string with
-        // `share::i18n::tools::core::memory_add(lang)`.
-        "Write one persistent memory entry."
+        share::i18n::tools::core::memory_add("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
-        let _ = lang;
-        std::borrow::Cow::Borrowed(self.description())
+        std::borrow::Cow::Borrowed(share::i18n::tools::core::memory_add(lang))
     }
 
     fn input_schema(&self) -> Value {
@@ -101,13 +98,10 @@ impl TypedTool for MemorySearchTool {
     }
 
     fn description(&self) -> &str {
-        // Task 5 replaces this inline string with
-        // `share::i18n::tools::core::memory_search(lang)`.
-        "Search persistent memory entries by keywords."
+        share::i18n::tools::core::memory_search("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
-        let _ = lang;
-        std::borrow::Cow::Borrowed(self.description())
+        std::borrow::Cow::Borrowed(share::i18n::tools::core::memory_search(lang))
     }
 
     fn input_schema(&self) -> Value {
@@ -148,13 +142,10 @@ impl TypedTool for MemoryListTool {
     }
 
     fn description(&self) -> &str {
-        // Task 5 replaces this inline string with
-        // `share::i18n::tools::core::memory_list(lang)`.
-        "List persistent memory entries."
+        share::i18n::tools::core::memory_list("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
-        let _ = lang;
-        std::borrow::Cow::Borrowed(self.description())
+        std::borrow::Cow::Borrowed(share::i18n::tools::core::memory_list(lang))
     }
 
     fn input_schema(&self) -> Value {
@@ -195,13 +186,10 @@ impl TypedTool for MemoryUpdateTool {
     }
 
     fn description(&self) -> &str {
-        // Task 5 replaces this inline string with
-        // `share::i18n::tools::core::memory_update(lang)`.
-        "Pin, unpin, archive, or restore a memory entry."
+        share::i18n::tools::core::memory_update("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
-        let _ = lang;
-        std::borrow::Cow::Borrowed(self.description())
+        std::borrow::Cow::Borrowed(share::i18n::tools::core::memory_update(lang))
     }
 
     fn input_schema(&self) -> Value {
@@ -242,13 +230,10 @@ impl TypedTool for MemoryDeleteTool {
     }
 
     fn description(&self) -> &str {
-        // Task 5 replaces this inline string with
-        // `share::i18n::tools::core::memory_delete(lang)`.
-        "Permanently delete a memory entry."
+        share::i18n::tools::core::memory_delete("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
-        let _ = lang;
-        std::borrow::Cow::Borrowed(self.description())
+        std::borrow::Cow::Borrowed(share::i18n::tools::core::memory_delete(lang))
     }
 
     fn input_schema(&self) -> Value {
