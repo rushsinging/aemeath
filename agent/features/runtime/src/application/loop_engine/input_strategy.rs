@@ -201,6 +201,18 @@ where
         }
     }
 
+    /// 发布控制类命令队列的全量快照（#1816）。
+    ///
+    /// 与 `apply_gate` 内的快照同源同形：入队是 gate 之外的三条路径之一，
+    /// 必须在入队后立刻发布，否则 UI 会漏掉刚排队的命令。
+    async fn publish_command_queue_snapshot(&self) {
+        self.sink
+            .send_event(RuntimeStreamEvent::ControlCommandsQueued {
+                queued: self.pending_input.command_snapshot(),
+            })
+            .await;
+    }
+
     /// Collect events from channel sources and check for internal
     /// continuations (stop-hook feedback or tool results).  Returns
     /// `Some(outcome)` if a continuation is ready, `None` if control
@@ -225,7 +237,11 @@ where
                             .await;
                     }
                 }
-                other => self.pending_input.push(other),
+                other => {
+                    // 控制类命令入队：发布全量快照，UI 才知道命令已排队（#1816）。
+                    self.pending_input.push(other);
+                    self.publish_command_queue_snapshot().await;
+                }
             }
         }
 
@@ -479,6 +495,7 @@ where
             Some(other) => {
                 // Non-UserMessage command: defer to session idle gate.
                 self.pending_input.push(other);
+                self.publish_command_queue_snapshot().await;
                 Ok(DrainOutcome::EmptyAndSealed {
                     epoch: expected_epoch,
                 })

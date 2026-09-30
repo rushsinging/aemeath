@@ -74,6 +74,23 @@ macro_rules! impl_id_type {
 
         impl Eq for $ty {}
 
+        /// UUIDv7 的字节序即时间序，跨队列按 id 排序等价于按生成顺序排序
+        /// （排队回显需要把消息与命令还原成提交顺序，#1816）。
+        impl Ord for $ty {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                self.0.cmp(&other.0)
+            }
+        }
+
+        impl PartialOrd for $ty {
+            fn partial_cmp(
+                &self,
+                other: &Self,
+            ) -> Option<std::cmp::Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+
         impl Hash for $ty {
             fn hash<H: Hasher>(&self, state: &mut H) {
                 self.0.hash(state);

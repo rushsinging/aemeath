@@ -150,6 +150,14 @@ pub enum RuntimeStreamEvent {
     UserMessagesWithdrawn {
         texts: Vec<String>,
     },
+    /// 控制类命令队列的全量快照（#1816）。
+    ///
+    /// queued 为 `(入队序号, 展示文本)`：序号是跨「消息队列 / 命令队列」的
+    /// 全局排序依据（UUIDv7 单调），文本由 `ChatInputEvent::queue_display_text`
+    /// 单点派生。入队、重新排队与消费后各发一次，UI 整列重渲染。
+    ControlCommandsQueued {
+        queued: Vec<(sdk::InputId, String)>,
+    },
     Done {
         context: RuntimeRunContext,
     },

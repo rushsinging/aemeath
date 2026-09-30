@@ -488,7 +488,16 @@ where
                     .send_event(RuntimeStreamEvent::UserMessagesWithdrawn { texts })
                     .await;
             }
-            other => self.input.pending_input.push(other),
+            other => {
+                // busy 期间的控制类命令入队：发布全量快照供 UI 回显（#1816）。
+                self.input.pending_input.push(other);
+                self.runtime_context
+                    .event_sink()
+                    .send_event(RuntimeStreamEvent::ControlCommandsQueued {
+                        queued: self.input.pending_input.command_snapshot(),
+                    })
+                    .await;
+            }
         }
     }
 }

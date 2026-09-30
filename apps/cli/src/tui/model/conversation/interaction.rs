@@ -18,6 +18,23 @@ impl UiInteractionRequestId {
     }
 }
 
+/// 排队输入的入队序号（#1816）。TUI 侧不直接持有 SDK 的 `InputId`，
+/// 只保留其字符串形式；UUIDv7 字符串序即入队序，可与消息占位合并排序。
+#[derive(Clone, Debug, Eq, PartialEq, Hash, PartialOrd, Ord)]
+pub(crate) struct UiQueuedInputId(String);
+
+impl From<&str> for UiQueuedInputId {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl UiQueuedInputId {
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct UiRunId(String);
 

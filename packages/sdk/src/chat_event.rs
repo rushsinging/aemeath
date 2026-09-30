@@ -782,6 +782,11 @@ pub enum ChatEvent {
     UserMessagesWithdrawn {
         texts: Vec<String>,
     },
+    /// 控制类命令队列的全量快照（#1816）。queued 为 `(入队序号, 展示文本)`，
+    /// 入队序号是跨消息队列与命令队列还原提交顺序的依据。
+    ControlCommandsQueued {
+        queued: Vec<(crate::InputId, String)>,
+    },
     /// 兼容旧 ChatInput 流结果。
     Result(ChatResult),
     /// 模型切换完成通知（#497）。TUI 据此更新 5 个本地状态 + 回显。

@@ -575,6 +575,9 @@ pub(crate) fn map_stream_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::UserMessagesWithdrawn {
             texts,
         } => ChatEvent::UserMessagesWithdrawn { texts },
+        crate::application::loop_engine::chat::RuntimeStreamEvent::ControlCommandsQueued {
+            queued,
+        } => ChatEvent::ControlCommandsQueued { queued },
         crate::application::loop_engine::chat::RuntimeStreamEvent::ModelSwitched { result } => {
             ChatEvent::ModelSwitched { result }
         }

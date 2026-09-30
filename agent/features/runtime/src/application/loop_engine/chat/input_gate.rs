@@ -135,28 +135,74 @@ pub struct GateOutcome {
     pub pending_command: Option<PendingCommand>,
 }
 
+/// 缓冲区里的一项待处理输入：事件本身 + 它的入队序号（#1816）。
+///
+/// 序号是排队回显的排序依据：用户消息用事件自带的 `InputId`，控制类命令
+/// 在入队时分配一个新的 v7 id，因此跨「消息队列 / 命令队列」按 id 排序
+/// 等价于按提交顺序排序。
+#[derive(Debug, Clone)]
+struct QueuedInput {
+    id: sdk::InputId,
+    event: ChatInputEvent,
+}
+
+impl QueuedInput {
+    fn new(event: ChatInputEvent) -> Self {
+        let id = match &event {
+            ChatInputEvent::UserMessage { id, .. } => id.clone(),
+            ChatInputEvent::SkillRequest(request) => request.input_id.clone(),
+            _ => sdk::InputId::new_v7(),
+        };
+        Self { id, event }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct PendingInputBuffer {
-    events: Arc<Mutex<VecDeque<ChatInputEvent>>>,
+    events: Arc<Mutex<VecDeque<QueuedInput>>>,
 }
 
 impl PendingInputBuffer {
-    pub fn push(&self, event: ChatInputEvent) {
+    /// 入队一项待处理输入，返回它的入队序号。
+    pub fn push(&self, event: ChatInputEvent) -> sdk::InputId {
+        let queued = QueuedInput::new(event);
+        let id = queued.id.clone();
         self.events
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .push_back(event);
+            .push_back(queued);
+        id
+    }
+
+    /// 队列中的控制类命令全量快照：入队序号 + 展示文本（#1816）。
+    ///
+    /// 快照是排队回显的唯一数据源，调用方按它整列渲染，不自建增量状态。
+    /// 用户消息与技能请求不在其中——它们由 `UserMessagesQueued` 承载。
+    pub fn command_snapshot(&self) -> Vec<(sdk::InputId, String)> {
+        self.events
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .iter()
+            .filter_map(|queued| {
+                queued
+                    .event
+                    .queue_display_text()
+                    .map(|text| (queued.id.clone(), text))
+            })
+            .collect()
     }
 
     /// 批量取走未遍历的剩余事件，原序放回缓冲区等待下一轮 idle（#1816）。
     ///
     /// 与 `drain_all` 成对使用：gate 一次 drain 后只消费到第一个控制命令，
-    /// 其余事件必须回到缓冲区，否则会静默丢失。
+    /// 其余事件必须回到缓冲区，否则会静默丢失。回队事件重新分配入队序号，
+    /// 因此 id 单调顺序始终等于队列顺序。
     pub fn requeue(&self, events: impl IntoIterator<Item = ChatInputEvent>) {
-        self.events
+        let mut buffer = self
+            .events
             .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .extend(events);
+            .unwrap_or_else(|error| error.into_inner());
+        buffer.extend(events.into_iter().map(QueuedInput::new));
     }
 
     #[cfg(test)]
@@ -176,6 +222,7 @@ impl PendingInputBuffer {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .pop_front()
+            .map(|queued| queued.event)
     }
 
     #[cfg(test)]
@@ -193,6 +240,7 @@ impl PendingInputBuffer {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .drain(..)
+            .map(|queued| queued.event)
             .collect()
     }
 }
@@ -505,6 +553,13 @@ where
 
     // [loop_debug] DEBUG 级：gate 最终决策 + 追加用户消息数。仅在有事件 / 有 append /
     // 非 Proceed 决策时打点，避免刷屏。默认不输出，调试时拉高级别可见。
+    // gate 是 pending_input 的收口：入队、busy 放回、idle 消费与重新排队
+    // 都体现在这一份全量快照里，UI 只需按快照整列重渲染（#1816）。
+    sink.send_event(RuntimeStreamEvent::ControlCommandsQueued {
+        queued: buffer.command_snapshot(),
+    })
+    .await;
+
     if event_count > 0 || appended_user_messages > 0 || decision != GateDecision::Proceed {
         log::debug!(
             target: crate::LOG_TARGET,

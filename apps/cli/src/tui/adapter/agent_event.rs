@@ -241,6 +241,11 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 queued: queued.clone(),
             }),
         ),
+        TuiRuntimeEvent::ControlCommandsQueued { queued } => {
+            conversation(ConversationIntent::SyncQueuedCommands(SyncQueuedCommands {
+                queued: queued.clone(),
+            }))
+        }
         TuiRuntimeEvent::Done {
             context,
             duration_ms,
