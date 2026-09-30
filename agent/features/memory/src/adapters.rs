@@ -1,3 +1,9 @@
+use super::constants::{
+    ACTIVE_MEMBER, ARCHIVE_MEMBER, GLOBAL_DATASET_SEGMENT, LEGACY_ARCHIVE_SUFFIX, LEGACY_FILE_EXT,
+    LEGACY_GLOBAL_STEM, MEMORY_MEMBER_NAMES, REFLECTION_HISTORY_CAS_ATTEMPTS,
+    REFLECTION_HISTORY_SEGMENT, REFLECTION_RECORDS_MEMBER,
+};
+use crate::domain::constants::MIN_SYNTHESIS_EVIDENCE;
 use crate::domain::*;
 use crate::ports::*;
 use crate::service::MemoryService;
@@ -12,17 +18,6 @@ use storage as storage_api;
 #[cfg(test)]
 #[path = "adapters_tests.rs"]
 mod tests;
-
-const ACTIVE_MEMBER: &str = "active";
-const ARCHIVE_MEMBER: &str = "archive";
-/// Members are canonicalized into name order by Storage; "active" sorts before
-/// "archive".
-const MEMORY_MEMBER_NAMES: [&str; 2] = [ACTIVE_MEMBER, ARCHIVE_MEMBER];
-/// Fixed, project-independent segment for the shared global layer generation.
-const GLOBAL_DATASET_SEGMENT: &str = "global";
-const REFLECTION_HISTORY_SEGMENT: &str = "reflection-history";
-const REFLECTION_RECORDS_MEMBER: &str = "records";
-const REFLECTION_HISTORY_CAS_ATTEMPTS: usize = 8;
 
 /// Memory-owned translation from the per-layer persistence contract to Storage
 /// atomic datasets. Each `MemoryLayer` maps to its own dataset key with exactly
@@ -542,11 +537,6 @@ impl MemoryOpener for DatasetMemoryOpener {
         Box::new(self.clone())
     }
 }
-
-/// Fixed segments used by the predecessor flat-file layout.
-const LEGACY_GLOBAL_STEM: &str = "_global";
-const LEGACY_ARCHIVE_SUFFIX: &str = "_archive";
-const LEGACY_FILE_EXT: &str = ".json";
 
 /// Production [`LegacyMemorySource`] backed by the predecessor memory file
 /// layout (`~/.agents/memory/`).

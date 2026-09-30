@@ -1,11 +1,10 @@
+use super::constants::PROJECT_KEY_DOMAIN;
 use super::{MemoryEntry, MemoryLayer};
 use std::{
     collections::HashSet,
     hash::{Hash, Hasher},
 };
 use thiserror::Error;
-
-const PROJECT_KEY_DOMAIN: &[u8] = b"aemeath.memory.project-key.v2\0";
 
 /// Opaque project identity for Memory layers.
 ///

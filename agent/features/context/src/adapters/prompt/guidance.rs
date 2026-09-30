@@ -15,11 +15,10 @@
 //! 这些内容应该由用户在 `~/.agents/guidance/` 下的 md 文件中自行配置。
 //! 此处仅提供最小可用的初始模板，让用户知道文件格式和可用选项。
 
+#[cfg(test)]
+use super::state::GUIDANCE_ENV_LOCK;
 use share::config::paths;
 use std::path::PathBuf;
-
-#[cfg(test)]
-pub(super) static GUIDANCE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub mod constants;
 pub mod resolver;

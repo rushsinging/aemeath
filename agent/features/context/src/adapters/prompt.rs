@@ -7,6 +7,8 @@ mod constants;
 #[allow(dead_code, unused_imports)]
 pub(crate) mod guidance;
 pub(crate) mod security;
+#[allow(dead_code)]
+mod state;
 
 #[cfg(test)]
 pub(crate) use guidance::resolve_guidance;

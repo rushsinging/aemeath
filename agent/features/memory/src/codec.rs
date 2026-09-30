@@ -1,7 +1,6 @@
+use super::constants::SCHEMA_VERSION;
 use crate::domain::*;
 use serde::{Deserialize, Serialize};
-
-const SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
