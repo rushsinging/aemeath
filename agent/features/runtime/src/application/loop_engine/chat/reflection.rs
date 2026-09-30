@@ -43,7 +43,7 @@ pub(crate) async fn run_pre_compact_reflection(
 }
 
 /// Run manual reflection with an owned message snapshot. Only the
-/// `/reflect-now` idle command path (#1289) calls this after freezing the
+/// `/reflect-now` idle command path calls this after freezing the
 /// committed session's visible messages.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_manual_reflection(
