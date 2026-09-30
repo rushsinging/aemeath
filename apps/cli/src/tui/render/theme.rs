@@ -1,3 +1,3 @@
-mod palette;
+mod constants;
 
-pub use palette::*;
+pub use constants::*;
