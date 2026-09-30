@@ -29,7 +29,7 @@ impl TypedTool for TaskStopTool {
         "TaskStop"
     }
     fn description(&self) -> &str {
-        "Stop a running or pending task. Marks the task as deleted and cancels any associated work."
+        share::i18n::tools::task::task_stop("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::task::task_stop(lang))

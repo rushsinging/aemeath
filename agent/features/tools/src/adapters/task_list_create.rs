@@ -17,7 +17,7 @@ impl TypedTool for TaskListCreateTool {
     }
 
     fn description(&self) -> &str {
-        "Create a task list for a complex multi-step request (3+ steps, multiple dependencies, or parallel sub-agent coordination). Tasks created afterwards auto-attach to this list."
+        share::i18n::tools::task::task_list_create("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::task::task_list_create(lang))

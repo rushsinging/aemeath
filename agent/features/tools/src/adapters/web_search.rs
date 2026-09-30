@@ -13,7 +13,7 @@ impl TypedTool for WebSearchTool {
         "WebSearch"
     }
     fn description(&self) -> &str {
-        "Search the web for current information, documentation, or answers to questions. Returns titles, URLs, and snippets; follow up with WebFetch to read a full page."
+        share::i18n::tools::web::web_search("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::web::web_search(lang))

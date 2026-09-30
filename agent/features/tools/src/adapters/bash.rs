@@ -91,7 +91,7 @@ impl TypedTool for BashTool {
         "Bash"
     }
     fn description(&self) -> &str {
-        "Executes a bash command and returns its output. The working directory persists between calls, but shell state does not — chain commands with `&&`."
+        share::i18n::tools::filesystem::bash("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::filesystem::bash(lang))

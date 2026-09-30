@@ -12,7 +12,7 @@ impl TypedTool for GlobTool {
         "Glob"
     }
     fn description(&self) -> &str {
-        "Fast file pattern matching tool. Supports glob patterns (e.g. \"**/*.rs\"). Returns paths sorted by modification time."
+        share::i18n::tools::filesystem::glob("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::filesystem::glob(lang))
