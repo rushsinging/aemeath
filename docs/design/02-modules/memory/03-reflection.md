@@ -197,7 +197,7 @@ Reflection 的运行时可见性是结构化 Activity（SDK typed view），**�
 
 ### 取消 / 超时 / 失败语义（当前实现）
 
-- **Manual Reflection Run**：取消与超时是 Run 终态——`Cancelled` 走中断收口（Run → `Terminated`，Reflection leaf → `Cancelled`），`TimedOut` 走超时收口（Run → `Terminated`，leaf → `Terminated`）；Run root activity 随 Run 终态收口。
+- **Manual Reflection Run**：取消与超时是 Run 终态——`Cancelled` 走中断收口（Run → `Terminated`，Reflection leaf → `Cancelled`），`TimedOut` 经 `timeout_run`/`fail_run` 收口为 Run → `Failed`（timeout 按 fail 收口），Reflection leaf → `Terminated`；Run root activity 随 Run 终态收口（`TimedOut` 时随 `Failed` 收口）。
 - **Interval / PreCompact**：反思的失败、取消与超时 **不终止宿主 Run**——Reflection leaf 按对应终态收口，状态机经 `ReflectionCompleted` 返回进入前状态后继续原流程；宿主 Run 的取消仍由既有 interrupt / step control 路径负责（反思复用该 step 的 cancellation token）。
 - **执行期间可取消**：取消只形成安全终态 metadata，不泄漏 prompt、provider raw response 或 Reflection 正文。
 - **任务超时**：执行通道对反思施加 timeout，超时形成安全终态（Manual 为 Run 终态；Interval / PreCompact 只收口 leaf activity）。
