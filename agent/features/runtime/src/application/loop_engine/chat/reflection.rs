@@ -1,4 +1,4 @@
-//! Shared reflection orchestration used by both TUI and REPL paths.
+//! Shared reflection orchestration used by Interval, PreCompact, and Manual Run paths.
 
 use std::sync::Arc;
 
@@ -11,35 +11,6 @@ use crate::application::reflection::{
 };
 use crate::ports::ProviderBindingData;
 use memory::api::{MemoryPort, ReflectionHistoryStore};
-
-/// Run manual reflection with an owned message snapshot. Only the
-/// `/reflect-now` idle command path calls this after freezing the
-/// committed session's visible messages.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn run_manual_reflection(
-    adapter: &ReflectionTaskAdapter,
-    config: &share::config::MemoryConfig,
-    messages: &[share::message::Message],
-    binding: &Arc<ProviderBindingData>,
-    system_prompt_text: &str,
-    lang: &str,
-    memory: &Arc<dyn MemoryPort>,
-    history: &Arc<dyn ReflectionHistoryStore>,
-) -> ReflectionRunOutcome {
-    run(
-        adapter,
-        ReflectionTaskTrigger::Manual,
-        config,
-        messages.to_vec(),
-        binding,
-        system_prompt_text,
-        lang,
-        memory,
-        history,
-        tokio_util::sync::CancellationToken::new(),
-    )
-    .await
-}
 
 /// `/reflect-now` 受理结果的用户可见文案。返回 `(text, is_error)`。
 pub(crate) fn manual_reflection_outcome_text(outcome: &ReflectionRunOutcome) -> (String, bool) {

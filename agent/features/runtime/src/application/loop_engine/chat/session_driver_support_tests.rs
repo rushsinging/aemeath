@@ -155,8 +155,7 @@ impl memory::api::MemoryOpener for TestMemoryOpener {
 
 fn test_wiring() -> Arc<context::MainSessionWiring> {
     let workspace = project::wire_production_workspace(std::env::current_dir().unwrap(), None)
-        .expect("workspace 初始化成功")
-        ;
+        .expect("workspace 初始化成功");
     let persist = workspace.persist();
     let config = Arc::new(config::ConfigAppService::with_global_path(Some(
         &workspace.read().initial_cwd(),
@@ -636,6 +635,9 @@ struct RecordingSink {
     adopted_ids: Arc<Mutex<Vec<Vec<String>>>>,
     /// Captures TurnStarted message counts per turn (#1272).
     llm_message_counts: Arc<Mutex<Vec<usize>>>,
+    lifecycle_events: Arc<Mutex<Vec<crate::domain::agent_run::RuntimeLifecycleEvent>>>,
+    /// Captures every `CommandResultText` payload for manual reflection assertions.
+    command_result_texts: Arc<Mutex<Vec<(String, bool)>>>,
 }
 
 impl ChatEventSink for RecordingSink {
@@ -650,6 +652,14 @@ impl ChatEventSink for RecordingSink {
 
     fn try_send_event(&self, event: RuntimeStreamEvent) {
         self.record(event);
+    }
+
+    fn send_lifecycle_event<'a>(
+        &'a self,
+        event: crate::domain::agent_run::RuntimeLifecycleEvent,
+    ) -> crate::application::loop_engine::chat::EventFuture<'a> {
+        self.lifecycle_events.lock().unwrap().push(event);
+        Box::pin(async {})
     }
 
     fn send_activity_event(
@@ -787,7 +797,13 @@ impl RecordingSink {
             RuntimeStreamEvent::ModelList { .. } => "ModelList".to_string(),
             RuntimeStreamEvent::ThinkingChanged { .. } => "ThinkingChanged".to_string(),
             RuntimeStreamEvent::ContextEstimated { .. } => "ContextEstimated".to_string(),
-            RuntimeStreamEvent::CommandResultText { .. } => "CommandResultText".to_string(),
+            RuntimeStreamEvent::CommandResultText { text, is_error } => {
+                self.command_result_texts
+                    .lock()
+                    .unwrap()
+                    .push((text.clone(), *is_error));
+                "CommandResultText".to_string()
+            }
             RuntimeStreamEvent::ReflectionHistory { records } => {
                 format!("ReflectionHistory:{}", records.len())
             }
@@ -814,6 +830,15 @@ impl RecordingSink {
 
     fn adopted_ids(&self) -> Vec<Vec<String>> {
         self.adopted_ids.lock().unwrap().clone()
+    }
+
+    /// 每条 `CommandResultText` 的 `(text, is_error)` 载荷。
+    fn command_result_texts(&self) -> Vec<(String, bool)> {
+        self.command_result_texts.lock().unwrap().clone()
+    }
+
+    fn lifecycle_events(&self) -> Vec<crate::domain::agent_run::RuntimeLifecycleEvent> {
+        self.lifecycle_events.lock().unwrap().clone()
     }
 }
 

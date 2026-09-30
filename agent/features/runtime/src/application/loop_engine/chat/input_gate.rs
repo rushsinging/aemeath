@@ -73,7 +73,7 @@ pub struct ControlCommand {
 #[derive(Debug, Clone)]
 pub enum PendingCommand {
     Compact,
-    /// 立即执行一次 Reflection（/reflect-now，#1289）。
+    /// 立即执行一次 Reflection（/reflect-now）。
     ReflectNow,
     SwitchModel {
         selection: String,
@@ -368,7 +368,7 @@ where
                     decision = GateDecision::Proceed;
                     break;
                 }
-                // #1289 busy：Manual 触发 NEVER 排队；提示后丢弃本事件，
+                // busy：Manual 触发 NEVER 排队；提示后丢弃本事件，
                 // 不放回 buffer（与 Compact 的 busy 排队语义相反）。
                 sink.send_event(RuntimeStreamEvent::CommandResultText {
                     text: "Reflection 已在运行或等待运行结束，已跳过本次手动触发；稍后再试。"

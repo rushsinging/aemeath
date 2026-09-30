@@ -1,14 +1,12 @@
-//! External tests for the Manual reflection trigger (#1289).
+//! External tests for the Manual reflection trigger.
 //!
-//! `/reflect-now` 在 idle 路径同步等待反思完成后回显结果文案：只有配置禁用
+//! `/reflect-now` 在 idle 路径受理为 Manual Reflection Run；执行结果回显文案：只有配置禁用
 //! 是显式跳过，执行失败按 `is_error` 上报，其余为正常完成。
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::application::loop_engine::chat::reflection::{
-    manual_reflection_outcome_text, run_manual_reflection,
-};
+use crate::application::loop_engine::chat::reflection::manual_reflection_outcome_text;
 use crate::application::reflection::{
     ReflectionRunOutcome, ReflectionTaskAdapter, ReflectionTaskCompletion,
     ReflectionTaskCompletionStatus,
@@ -112,15 +110,17 @@ async fn manual_run_awaits_completion_and_freezes_the_visible_messages() {
     let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::api::NoOpMemory);
     let history = crate::application::reflection::test_support::noop_reflection_history();
 
-    let outcome = run_manual_reflection(
+    let outcome = crate::application::loop_engine::chat::reflection::run(
         &adapter,
+        crate::application::reflection::ReflectionTaskTrigger::Manual,
         &enabled_memory_config(),
-        &[Message::user("visible history")],
+        vec![Message::user("visible history")],
         &binding,
         "system",
         "zh",
         &memory,
         &history,
+        CancellationToken::new(),
     )
     .await;
 
@@ -139,5 +139,196 @@ async fn manual_run_awaits_completion_and_freezes_the_visible_messages() {
             .map(|metadata| metadata.applied_changes()),
         Some(0),
         "auto-apply is off, so a completed run must not claim a change",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Manual Run：ChatManualReflection 生产端口（快照传递 + outcome 映射 + 文案）
+// ---------------------------------------------------------------------------
+
+use std::sync::Mutex;
+
+use tokio_util::sync::CancellationToken;
+
+use crate::application::loop_engine::chat::main_run_port::ChatManualReflection;
+use crate::application::loop_engine::{ManualReflectionOutcome, ManualReflectionPort};
+use crate::application::run::run_factory_support::SessionRunFixture;
+use crate::domain::agent_run::RunSpec;
+use share::config::domain::snapshot::ConfigSnapshot;
+
+/// 记录反思 prompt 的 Provider：`execute_reflection` 把冻结的会话快照经
+/// `build_prompt` 汇入单条 user prompt，因此 prompt 文本是快照到达执行层的直接证据。
+#[derive(Clone)]
+struct RecordingReflectionProvider {
+    prompts: Arc<Mutex<Vec<String>>>,
+}
+
+#[async_trait::async_trait]
+impl crate::ports::ProviderPort for RecordingReflectionProvider {
+    fn capabilities(
+        &self,
+        model: &provider::ModelIdData,
+    ) -> Result<
+        crate::ports::provider_port::ModelCapabilityData,
+        crate::ports::provider_port::ProviderError,
+    > {
+        Ok(crate::ports::provider_port::ModelCapabilityData {
+            model: model.clone(),
+            supports_tools: false,
+            supports_parallel_tool_calls: false,
+            supports_streaming: true,
+            reasoning: crate::ports::provider_port::ReasoningCapabilityData::none(),
+            context_limit: Some(128_000),
+            output_limit: Some(8_192),
+        })
+    }
+
+    async fn invoke(
+        &self,
+        request: crate::ports::provider_port::InvocationRequestData,
+        _cancel: &dyn crate::ports::provider_port::CancellationSignal,
+    ) -> Result<
+        crate::ports::provider_port::InvocationStreamData,
+        crate::ports::provider_port::ProviderError,
+    > {
+        self.prompts.lock().unwrap().push(
+            request
+                .messages
+                .iter()
+                .map(|message| message.text_content())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        Ok(
+            crate::application::model::test_support::text_completion_stream(
+                r#"{"deviations":[],"suggested_memories":[],"outdated_memories":[]}"#,
+                1,
+                1,
+            ),
+        )
+    }
+}
+
+fn recording_binding(prompts: Arc<Mutex<Vec<String>>>) -> Arc<crate::ports::ProviderBindingData> {
+    Arc::new(crate::ports::ProviderBindingData {
+        provider: Arc::new(RecordingReflectionProvider { prompts }),
+        model: provider::ModelIdData {
+            provider: "manual-reflect-test".to_string(),
+            model: "manual-test-model".to_string(),
+        },
+        max_tokens: 8_192,
+        requested_reasoning: share::reasoning::ReasoningLevel::Off,
+        context_window: Some(128_000),
+    })
+}
+
+/// 生产装配形态的 `ChatManualReflection`：runtime context + 反思 adapter +
+/// system prompt + language + 冻结的 committed 快照。
+fn manual_reflection_port(
+    config: share::config::Config,
+    prompts: Arc<Mutex<Vec<String>>>,
+) -> (SessionRunFixture, ChatManualReflection) {
+    let fixture = SessionRunFixture::builder()
+        .with_config(ConfigSnapshot::new(config))
+        .with_provider_binding(recording_binding(prompts))
+        .with_reflection_history(
+            crate::application::reflection::test_support::noop_reflection_history(),
+        )
+        .with_session_id("manual-reflection".to_string())
+        .build();
+    let runtime_context = fixture
+        .create(RunSpec::manual_reflection())
+        .expect("create manual reflection run")
+        .context()
+        .clone();
+    let port = ChatManualReflection {
+        runtime_context,
+        reflection_tasks: ReflectionTaskAdapter::production(Duration::from_secs(5)),
+        system_prompt: "system".to_string(),
+        language: "zh".to_string(),
+        messages: vec![Message::user("visible committed history")],
+    };
+    (fixture, port)
+}
+
+/// 端口把装配前冻结的 committed 快照原样交给反思执行（prompt 必须携带快照文本），
+/// Succeeded 映射为 `Ready(Succeeded)`，并按 `manual_reflection_outcome_text`
+/// 发布终态 CommandResultText。
+#[tokio::test]
+async fn chat_manual_reflection_runs_frozen_snapshot_and_publishes_success_text() {
+    let prompts: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let (fixture, mut port) =
+        manual_reflection_port(share::config::Config::default(), Arc::clone(&prompts));
+
+    let outcome = port
+        .run_manual_reflection(&sdk::RunId::new_v7(), &CancellationToken::new())
+        .await
+        .expect("端口执行不得返回 Err");
+
+    assert_eq!(
+        outcome,
+        ManualReflectionOutcome::Ready(ReflectionTaskCompletionStatus::Succeeded)
+    );
+    assert!(
+        prompts
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|prompt| prompt.contains("visible committed history")),
+        "冻结的 committed 快照必须到达反思 prompt: {:?}",
+        prompts.lock().unwrap()
+    );
+    let texts = fixture.event_sink().command_result_texts();
+    assert!(
+        texts
+            .iter()
+            .any(|(text, is_error)| text.contains("已完成") && !is_error),
+        "Succeeded 必须发布成功文案且非错误: {texts:?}"
+    );
+}
+
+/// 取消折叠与禁用竞态的映射：预取消 token → `Cancelled`；受理后配置被关闭 →
+/// `DisabledSkipped` 折叠为 `Ready(Failed)` 并发布「未启用」文案（Run 照常收口）。
+#[tokio::test]
+async fn chat_manual_reflection_maps_cancelled_and_disabled_outcomes() {
+    // ① 预先取消的 token：run_complete 折叠为 Completed(Cancelled) → 端口映射 Cancelled。
+    let (_fixture, mut port) = manual_reflection_port(share::config::Config::default(), {
+        let prompts: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        prompts
+    });
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+    let outcome = port
+        .run_manual_reflection(&sdk::RunId::new_v7(), &cancel)
+        .await
+        .expect("取消不是错误");
+    assert_eq!(outcome, ManualReflectionOutcome::Cancelled);
+
+    // ② 禁用竞态：run_complete 返回 DisabledSkipped → Ready(Failed) + 未启用文案。
+    let disabled = share::config::Config {
+        memory: share::config::MemoryConfig {
+            enabled: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let (fixture, mut port) = manual_reflection_port(disabled, {
+        let prompts: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        prompts
+    });
+    let outcome = port
+        .run_manual_reflection(&sdk::RunId::new_v7(), &CancellationToken::new())
+        .await
+        .expect("禁用竞态不是错误");
+    assert_eq!(
+        outcome,
+        ManualReflectionOutcome::Ready(ReflectionTaskCompletionStatus::Failed)
+    );
+    let texts = fixture.event_sink().command_result_texts();
+    assert!(
+        texts
+            .iter()
+            .any(|(text, is_error)| text.contains("未启用") && !is_error),
+        "禁用竞态必须发布未启用文案且非错误: {texts:?}"
     );
 }

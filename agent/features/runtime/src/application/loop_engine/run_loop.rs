@@ -4,9 +4,10 @@ use crate::application::activity::{ActivityCoordinator, ActivityError, ActivityT
 use crate::application::hook::stop_coordination::{StopHookObserver, StopHookOutcome};
 use crate::application::loop_engine::{
     CompactProgressView, CompactionPort, EventSinkPort, InputPort, InteractionMailboxPort,
-    InternalContinuationKind, LoopEngineError, ManualCompactionPort, ModelInvocationPort,
-    PendingInteractionWork, PlanApprovalPort, ReflectionPhasePort, RunControlPort,
-    RunLifecyclePort, StepPersistencePort, StuckDecision, StuckHandlingPort, ToolOrchestrationPort,
+    InternalContinuationKind, LoopEngineError, ManualCompactionPort, ManualReflectionPort,
+    ModelInvocationPort, PendingInteractionWork, PlanApprovalPort, ReflectionPhasePort,
+    RunControlPort, RunLifecyclePort, StepPersistencePort, StuckDecision, StuckHandlingPort,
+    ToolOrchestrationPort,
 };
 use crate::application::run::execution_state::RunExecutionState;
 use crate::domain::agent_run::RuntimeLifecycleEvent;
@@ -61,6 +62,7 @@ pub struct RunLoop<'a> {
     persistence: &'a mut dyn StepPersistencePort,
     compaction: &'a mut dyn CompactionPort,
     manual_compaction: Option<&'a mut dyn ManualCompactionPort>,
+    manual_reflection: Option<&'a mut dyn ManualReflectionPort>,
     reflection: Option<&'a mut dyn ReflectionPhasePort>,
     model: &'a mut dyn ModelInvocationPort,
     stop_hook: &'a mut dyn StopHookObserver,
@@ -96,6 +98,7 @@ impl<'a> RunLoop<'a> {
             persistence,
             compaction,
             manual_compaction: None,
+            manual_reflection: None,
             reflection: None,
             model,
             stop_hook,
@@ -255,6 +258,14 @@ impl<'a> RunLoop<'a> {
             .start_manual_compaction(sdk::CompactStageView::Preparing)
     }
 
+    /// 启动“无 Run Step”的手动反思 activity（手动反思 Run 没有 RunStep；归属 Run 根下）。
+    pub(super) fn start_manual_reflection_activity(
+        &self,
+    ) -> Result<sdk::ActivityId, ActivityError> {
+        self.activities()?
+            .start_manual_reflection(sdk::ReflectionTriggerView::Manual)
+    }
+
     /// 启动反思 activity（Interval/PreCompact 归属当前对话 Run 的给定父节点下）。
     /// 触发来源的 SDK 视图映射在此收口，调用方只传领域触发类型。
     pub(super) fn start_reflection_activity(
@@ -331,6 +342,15 @@ impl<'a> RunLoop<'a> {
 
     pub(super) fn reflection_mut(&mut self) -> Option<&mut (dyn ReflectionPhasePort + 'a)> {
         self.reflection.as_deref_mut()
+    }
+
+    /// 绑动手动反思端口；只有手动反思 Run 的装配方需要绑动。
+    pub(crate) fn bind_manual_reflection(&mut self, port: &'a mut dyn ManualReflectionPort) {
+        self.manual_reflection = Some(port);
+    }
+
+    pub(super) fn manual_reflection_mut(&mut self) -> Option<&mut (dyn ManualReflectionPort + 'a)> {
+        self.manual_reflection.as_deref_mut()
     }
 
     pub(super) fn model_mut(&mut self) -> &mut dyn ModelInvocationPort {

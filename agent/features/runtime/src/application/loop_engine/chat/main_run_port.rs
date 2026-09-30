@@ -321,6 +321,74 @@ impl crate::application::loop_engine::ManualCompactionPort for ChatManualCompact
     }
 }
 
+/// idle `/reflect-now` 的手动反思端口：由会话驱动装配，承载装配前冻结的 committed
+/// 会话消息快照，执行一次反思并按 `manual_reflection_outcome_text` 发布终态文案。
+/// 状态机与 `Reflection` activity 由 engine 的 `execute_manual_reflection` 持有。
+pub(crate) struct ChatManualReflection {
+    pub runtime_context: RuntimeContext,
+    pub reflection_tasks: crate::application::reflection::ReflectionTaskAdapter,
+    pub system_prompt: String,
+    pub language: String,
+    pub messages: Vec<Message>,
+}
+
+#[async_trait]
+impl crate::application::loop_engine::ManualReflectionPort for ChatManualReflection {
+    async fn run_manual_reflection(
+        &mut self,
+        run_id: &sdk::RunId,
+        cancel: &CancellationToken,
+    ) -> Result<crate::application::loop_engine::ManualReflectionOutcome, LoopEngineError> {
+        let outcome = crate::application::loop_engine::chat::reflection::run(
+            &self.reflection_tasks,
+            crate::application::reflection::ReflectionTaskTrigger::Manual,
+            self.runtime_context.config_ref().config().memory(),
+            std::mem::take(&mut self.messages),
+            self.runtime_context.provider_ref(),
+            &self.system_prompt,
+            &self.language,
+            self.runtime_context.memory_ref(),
+            self.runtime_context.reflection_history_ref(),
+            cancel.clone(),
+        )
+        .await;
+        let (text, is_error) =
+            crate::application::loop_engine::chat::reflection::manual_reflection_outcome_text(
+                &outcome,
+            );
+        self.runtime_context
+            .event_sink()
+            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+            .await;
+        Ok(match outcome {
+            crate::application::reflection::ReflectionRunOutcome::Completed(completion) => {
+                match completion.status {
+                    crate::application::reflection::ReflectionTaskCompletionStatus::Cancelled => {
+                        crate::application::loop_engine::ManualReflectionOutcome::Cancelled
+                    }
+                    crate::application::reflection::ReflectionTaskCompletionStatus::TimedOut => {
+                        crate::application::loop_engine::ManualReflectionOutcome::TimedOut
+                    }
+                    status => {
+                        crate::application::loop_engine::ManualReflectionOutcome::Ready(status)
+                    }
+                }
+            }
+            crate::application::reflection::ReflectionRunOutcome::DisabledSkipped => {
+                // 受理门禁已在 idle 时判定过；这里只可能是配置在受理后被关闭的竞态
+                // （文案已按「未启用」发布，Run 照常收口，activity 记 Failed）。
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "[manual_reflection] 反思配置在受理后被关闭，按失败收口 run_id={run_id}"
+                );
+                crate::application::loop_engine::ManualReflectionOutcome::Ready(
+                    crate::application::reflection::ReflectionTaskCompletionStatus::Failed,
+                )
+            }
+        })
+    }
+}
+
 fn compact_stage_view(stage: context::compact::CompactStageData) -> sdk::CompactStageView {
     match stage {
         context::compact::CompactStageData::Preparing => sdk::CompactStageView::Preparing,

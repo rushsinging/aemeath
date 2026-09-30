@@ -99,9 +99,7 @@ impl ActivityCoordinator {
     }
 
     /// 手动反思 activity（Manual Reflection Run 无 RunStep；归属 Run 根下）。
-    /// 当前仅测试调用；Manual Reflection Run 的 engine 接线落地后移除 allow。
     /// `trigger` 语义上恒为 `Manual`，参数化只为与 `start_reflection` 对齐。
-    #[allow(dead_code)]
     pub(crate) fn start_manual_reflection(
         &self,
         trigger: sdk::ReflectionTriggerView,

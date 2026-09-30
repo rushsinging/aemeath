@@ -150,7 +150,7 @@ fn transition_events(
         .filter_map(|event| match event {
             RuntimeLifecycleEvent::Transitioned {
                 from, to, reason, ..
-            } => Some((from.clone(), to.clone(), reason.clone())),
+            } => Some((*from, *to, *reason)),
             _ => None,
         })
         .collect()
@@ -647,4 +647,287 @@ async fn pre_compact_reflection_disabled_drops_material_without_phase() {
     );
     assert_eq!(result.run.status(), RunStatus::Completed);
     assert_eq!(result.run.steps().len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// Manual：/reflect-now 走真 Run——Created→DrainingInput→Reflecting→DrainingInput→Completed
+// ---------------------------------------------------------------------------
+
+use crate::application::loop_engine::{ManualReflectionOutcome, ManualReflectionPort};
+
+/// 手动反思端口的脚本化终态；`PortError` 模拟端口 Err（契约违约）。
+enum ManualReflectionScript {
+    Ready(ReflectionTaskCompletionStatus),
+    Cancelled,
+    TimedOut,
+    PortError,
+}
+
+/// 脚本化手动反思端口：记录执行次数与执行期 activity 状态。
+struct ManualReflectionFake {
+    script: ManualReflectionScript,
+    activities: std::sync::Arc<crate::application::activity::ActivityCoordinator>,
+    calls: usize,
+    state_during_run: Option<sdk::ActivityStateView>,
+}
+
+#[async_trait::async_trait]
+impl ManualReflectionPort for ManualReflectionFake {
+    async fn run_manual_reflection(
+        &mut self,
+        _run_id: &sdk::RunId,
+        _cancel: &CancellationToken,
+    ) -> Result<ManualReflectionOutcome, LoopEngineError> {
+        // 执行期 Reflection activity 必须已发布且处于 Running。
+        self.state_during_run = reflection_activities(&self.activities)
+            .first()
+            .map(|activity| activity.state);
+        self.calls += 1;
+        match &self.script {
+            ManualReflectionScript::Ready(status) => {
+                Ok(ManualReflectionOutcome::Ready(*status))
+            }
+            ManualReflectionScript::Cancelled => Ok(ManualReflectionOutcome::Cancelled),
+            ManualReflectionScript::TimedOut => Ok(ManualReflectionOutcome::TimedOut),
+            ManualReflectionScript::PortError => {
+                Err(LoopEngineError::Adapter("手动反思端口故障".to_string()))
+            }
+        }
+    }
+}
+
+struct ManualReflectionRunResult {
+    run: Run,
+    activities: std::sync::Arc<crate::application::activity::ActivityCoordinator>,
+    events: Vec<RuntimeLifecycleEvent>,
+    calls: usize,
+    state_during_run: Option<sdk::ActivityStateView>,
+    directive: Result<LoopDirective, LoopEngineError>,
+    observed_calls: Vec<&'static str>,
+}
+
+/// 跑一次完整的 Manual Reflection Run：无 accepted 输入（空 drain 脚本），
+/// 反思由 engine 的 `execute_manual_reflection` 在主循环之前执行。
+async fn drive_manual_reflection_run(
+    script: ManualReflectionScript,
+) -> ManualReflectionRunResult {
+    let mut run = Run::new(RunSpec::manual_reflection(), None);
+    let cancel = CancellationToken::new();
+    let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+    execution.initialize_for_launch(Vec::new(), 0);
+    let activities = std::sync::Arc::new(
+        crate::application::activity::ActivityCoordinator::production_without_publisher(
+            run.id().clone(),
+            crate::application::activity::RunPurpose::Reflection,
+        ),
+    );
+    let mut fake = ManualReflectionFake {
+        script,
+        activities: activities.clone(),
+        calls: 0,
+        state_during_run: None,
+    };
+    let mut scenario = ScriptedScenario {
+        drain_outcomes: manual_compaction_drain_outcomes(),
+        ..Default::default()
+    };
+    let directive = {
+        let mut port = scenario.ports().run_loop();
+        port.bind_activity_context(activities.clone(), "test-model".to_string());
+        port.bind_manual_reflection(&mut fake);
+        run_loop(&mut run, &mut execution, &cancel, &mut port).await
+    };
+    ManualReflectionRunResult {
+        run,
+        activities,
+        events: scenario.events(),
+        calls: fake.calls,
+        state_during_run: fake.state_during_run,
+        directive,
+        observed_calls: scenario.calls(),
+    }
+}
+
+fn assert_manual_reflection_round_trip(result: &ManualReflectionRunResult) {
+    let transitions = transition_events(&result.events);
+    let draining = transition_index(
+        &transitions,
+        RunStatus::Created,
+        RunStatus::DrainingInput,
+        RunTransitionReason::DrainStarted,
+    )
+    .expect("手动反思 Run 必须发布 Created→DrainingInput (DrainStarted)");
+    let begin = transition_index(
+        &transitions,
+        RunStatus::DrainingInput,
+        RunStatus::Reflecting,
+        RunTransitionReason::BeginReflection,
+    )
+    .expect("手动反思必须发布 DrainingInput→Reflecting (BeginReflection)");
+    let settle = transition_index(
+        &transitions,
+        RunStatus::Reflecting,
+        RunStatus::DrainingInput,
+        RunTransitionReason::ManualReflectionSettled,
+    )
+    .expect("反思收口必须回到 DrainingInput (ManualReflectionSettled)");
+    let completed = transition_index(
+        &transitions,
+        RunStatus::DrainingInput,
+        RunStatus::Completed,
+        RunTransitionReason::DrainEmptyAndSealed,
+    )
+    .expect("Completed 的唯一来源必须是 drain 的 EmptyAndSealed");
+    assert!(
+        draining < begin && begin < settle && settle < completed,
+        "lifecycle 必须是 Created→DrainingInput→Reflecting→DrainingInput→Completed；实际转移: {transitions:?}"
+    );
+}
+
+#[tokio::test]
+async fn manual_reflection_run_completes_reflecting_round_trip_without_model() {
+    let result = drive_manual_reflection_run(ManualReflectionScript::Ready(
+        ReflectionTaskCompletionStatus::Succeeded,
+    ))
+    .await;
+
+    match &result.directive {
+        Ok(LoopDirective::Terminal) => {}
+        other => panic!("手动反思 Run 应以 Terminal 收口: {other:?}"),
+    }
+    assert_eq!(result.run.status(), RunStatus::Completed);
+
+    // ① lifecycle 完整闭环。
+    assert_manual_reflection_round_trip(&result);
+
+    // ② root purpose=Reflection；Reflection{trigger:Manual} 执行期 Running、终态 Succeeded。
+    let snapshot = result.activities.snapshot();
+    let root = snapshot
+        .activities
+        .iter()
+        .find(|activity| activity.kind == sdk::ActivityKindView::Run)
+        .expect("Run root activity 必须存在");
+    assert_eq!(
+        root.detail,
+        sdk::ActivityDetailView::Run {
+            purpose: sdk::RunPurposeView::Reflection,
+        },
+        "手动反思 Run 的根 activity 必须携带 Reflection 目的"
+    );
+    let reflections = reflection_activities(&result.activities);
+    assert_eq!(reflections.len(), 1, "必须恰好发布一次 Reflection activity");
+    assert_eq!(
+        reflections[0].parent_activity_id.as_ref(),
+        Some(&root.id),
+        "Reflection activity 必须挂在当前 Run root 下"
+    );
+    assert_eq!(
+        reflections[0].detail,
+        sdk::ActivityDetailView::Reflection {
+            trigger: sdk::ReflectionTriggerView::Manual,
+        }
+    );
+    assert_eq!(
+        result.state_during_run,
+        Some(sdk::ActivityStateView::Running),
+        "反思执行期间 activity 必须处于 Running"
+    );
+    assert_eq!(reflections[0].state, sdk::ActivityStateView::Succeeded);
+
+    // ③ 无 RunStep、无模型调用；端口恰好执行一次。
+    assert_eq!(result.calls, 1, "手动反思端口必须恰好执行一次");
+    assert!(
+        result.run.steps().is_empty(),
+        "手动反思 Run 不得创建 RunStep"
+    );
+    assert!(
+        !result.observed_calls.contains(&"model"),
+        "手动反思 Run 不得调用模型: {:?}",
+        result.observed_calls
+    );
+}
+
+#[tokio::test]
+async fn manual_reflection_port_error_settles_activity_and_state_before_propagating() {
+    let result = drive_manual_reflection_run(ManualReflectionScript::PortError).await;
+
+    match &result.directive {
+        Err(LoopEngineError::Adapter(message)) => {
+            assert!(message.contains("手动反思"), "错误信息应指明手动反思端口: {message}");
+        }
+        other => panic!("端口 Err 必须上抛: {other:?}"),
+    }
+    assert_eq!(result.calls, 1);
+
+    // 状态机必须收口回 DrainingInput，NEVER 悬挂 Reflecting。
+    let transitions = transition_events(&result.events);
+    transition_index(
+        &transitions,
+        RunStatus::Reflecting,
+        RunStatus::DrainingInput,
+        RunTransitionReason::ManualReflectionSettled,
+    )
+    .expect("端口 Err 也必须先把 Reflecting 收口回 DrainingInput");
+    assert_eq!(
+        result.run.status(),
+        RunStatus::DrainingInput,
+        "端口 Err 上抛前状态机必须已收口"
+    );
+
+    // activity 必须按 Failed 收口，NEVER 留下 Running 悬挂。
+    let reflections = reflection_activities(&result.activities);
+    assert_eq!(reflections.len(), 1, "必须恰好发布一次 Reflection activity");
+    assert_eq!(reflections[0].state, sdk::ActivityStateView::Failed);
+    assert!(
+        !result.observed_calls.contains(&"model"),
+        "端口 Err 路径不得调用模型: {:?}",
+        result.observed_calls
+    );
+}
+
+#[tokio::test]
+async fn manual_reflection_cancelled_terminates_run_and_closes_activity() {
+    let result = drive_manual_reflection_run(ManualReflectionScript::Cancelled).await;
+
+    match &result.directive {
+        Ok(LoopDirective::Terminal) => {}
+        other => panic!("取消的手动反思 Run 应以 Terminal 收口: {other:?}"),
+    }
+    assert_eq!(result.run.status(), RunStatus::Terminated);
+    assert_manual_reflection_round_trip_status(&result, RunStatus::Terminated);
+    let reflections = reflection_activities(&result.activities);
+    assert_eq!(reflections.len(), 1, "必须恰好发布一次 Reflection activity");
+    assert_eq!(reflections[0].state, sdk::ActivityStateView::Cancelled);
+    assert_eq!(result.calls, 1);
+}
+
+#[tokio::test]
+async fn manual_reflection_timeout_fails_run_and_closes_activity() {
+    let result = drive_manual_reflection_run(ManualReflectionScript::TimedOut).await;
+
+    match &result.directive {
+        Ok(LoopDirective::Terminal) => {}
+        other => panic!("超时的手动反思 Run 应以 Terminal 收口: {other:?}"),
+    }
+    assert_eq!(result.run.status(), RunStatus::Failed);
+    let reflections = reflection_activities(&result.activities);
+    assert_eq!(reflections.len(), 1, "必须恰好发布一次 Reflection activity");
+    assert_eq!(reflections[0].state, sdk::ActivityStateView::Terminated);
+    assert_eq!(result.calls, 1);
+}
+
+/// 取消/超时路径也必须先完成 DrainingInput→Reflecting 的入口转移。
+fn assert_manual_reflection_round_trip_status(
+    result: &ManualReflectionRunResult,
+    final_status: RunStatus,
+) {
+    let transitions = transition_events(&result.events);
+    transition_index(
+        &transitions,
+        RunStatus::DrainingInput,
+        RunStatus::Reflecting,
+        RunTransitionReason::BeginReflection,
+    )
+    .expect("手动反思必须发布 DrainingInput→Reflecting (BeginReflection)");
+    assert_eq!(result.run.status(), final_status);
 }

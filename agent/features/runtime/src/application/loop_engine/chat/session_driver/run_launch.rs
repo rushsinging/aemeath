@@ -88,6 +88,8 @@ where
             let mut pending_input = PendingInputBuffer::default();
             // idle `/compact` 已受理，等待下一次循环启动手动压缩 Run。
             let mut manual_compaction_requested = false;
+            // idle `/reflect-now` 已受理（配置门禁已过），等待下一次循环启动手动反思 Run。
+            let mut manual_reflection_requested = false;
                 let tool_identity =
                     crate::application::tool::coordination::identity::ToolIdentityRegistry::new();
             let mut config_snapshot =
@@ -347,42 +349,26 @@ where
                     }
                     continue;
                 }
-                // #1289：/reflect-now 冻结 committed 可见历史快照提交共享单槽；
-                // 受理结果只映射安全提示，执行结果仅写入 history（/reflect 查询）。
+                // `/reflect-now` 不再裸 await 反思——idle 受理先做
+                // 配置门禁（关闭时直接回「未启用」文案，不创建 Run、不产生 activity）；
+                // 开启时只置标志，下一次循环创建 ManualReflection intent 的真实 Run，
+                // 消息快照在 run launch 装配前从 committed session 冻结。
                 PendingCommand::ReflectNow => {
-                    let bound = match wiring.bind_main_run().await {
-                        Ok(bound) => bound,
-                        Err(error) => {
-                            sink.send_event(RuntimeStreamEvent::CommandResultText {
-                                text: format!("无法绑定当前 Session：{error}"),
-                                is_error: true,
-                            })
-                            .await;
-                            continue;
-                        }
-                    };
-                    let visible_messages = bound.session().structured_messages();
-                    let memory = wiring.committed_memory();
-                    let reflection_history = shell
-                        .runtime_context_factory
-                        .services()
-                        .reflection_history
-                        .clone();
-                    let outcome = crate::application::loop_engine::chat::reflection::run_manual_reflection(
-                        &reflection_tasks,
+                    if !crate::application::loop_engine::chat::reflection::reflection_enabled(
                         &memory_config,
-                        &visible_messages,
-                        &binding,
-                        &system_prompt_text,
-                        &language,
-                        &memory,
-                        &reflection_history,
-                    )
-                    .await;
-                    let (text, is_error) =
-                        crate::application::loop_engine::chat::reflection::manual_reflection_outcome_text(&outcome);
-                    sink.send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
-                        .await;
+                    ) {
+                        let (text, is_error) = crate::application::loop_engine::chat::reflection::manual_reflection_outcome_text(
+                            &crate::application::reflection::ReflectionRunOutcome::DisabledSkipped,
+                        );
+                        sink.send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+                            .await;
+                        continue;
+                    }
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "[reflect-now] idle command accepted; 启动手动反思 Run"
+                    );
+                    manual_reflection_requested = true;
                     continue;
                 }
                 PendingCommand::ListModels => match session_queries.list_models().await {
@@ -411,7 +397,9 @@ where
                           // accumulate in the Run-scoped buffer and are consumed within the
                           // same Run (#1272).
                           let idle_result = if manual_compaction_requested {
-    IdleResult::ManualCompactionRequested
+  IdleResult::ManualCompactionRequested
+} else if manual_reflection_requested {
+  IdleResult::ManualReflectionRequested
 } else if !pending_input.is_empty() {
                               // Busy control events are serviced at idle before the next queued user Run. They are
                               // never appended to model context.
@@ -447,6 +435,11 @@ where
 
                 let manual_compaction_run =
                     matches!(idle_result, IdleResult::ManualCompactionRequested);
+                let manual_reflection_run =
+                    matches!(idle_result, IdleResult::ManualReflectionRequested);
+                // 手动反思的材料快照必须在 run launch 装配前取自当前 committed session
+                // 的可见结构化消息（对齐原 ReflectNow 分支的取法），不能用 Run buffer 猜历史。
+                let mut manual_reflection_messages: Vec<Message> = Vec::new();
                 let (segment_id, accepted_inputs) = match idle_result {
                     IdleResult::Shutdown => break 'session,
                     IdleResult::ResetRequested => {
@@ -484,6 +477,21 @@ where
                         manual_compaction_requested = false;
                         (ChatId::new_v7().to_string(), Vec::new())
                     }
+                    IdleResult::ManualReflectionRequested => {
+                        manual_reflection_requested = false;
+                        let bound = match wiring.bind_main_run().await {
+                            Ok(bound) => bound,
+                            Err(error) => {
+                                sink.send_event(RuntimeStreamEvent::CommandResultText {
+                                    text: format!("无法绑定当前 Session：{error}"),
+                                    is_error: true,
+                                }).await;
+                                continue;
+                            }
+                        };
+                        manual_reflection_messages = bound.session().structured_messages();
+                        (ChatId::new_v7().to_string(), Vec::new())
+                    }
                     IdleResult::Resumed {
                         segment_id: next_segment,
                         accepted_inputs,
@@ -500,11 +508,15 @@ where
                         (next_segment, accepted_inputs)
                     }                };
 
-                run_count += 1;
+                // 硬约束：手动反思不增加 session `run_count`，也不发 `RunChanged`
+                // （它不是用户回合，不消耗 Interval 反思的频控计数）。
+                if !manual_reflection_run {
+                    run_count += 1;
+                    sink.send_event(RuntimeStreamEvent::RunChanged(run_count))
+                        .await;
+                }
                 let run_id = ChatRunId::new_v7();
                 let turn_context = RuntimeRunContext::new(chat_id.clone(), run_id.clone());
-                sink.send_event(RuntimeStreamEvent::RunChanged(run_count))
-                    .await;
                 cwd = workspace.read().current_workspace_root();
                 shell
                     .session_state
@@ -534,6 +546,8 @@ where
                     &session_usage,
                     if manual_compaction_run {
                         RunSpec::manual_compaction()
+                    } else if manual_reflection_run {
+                        RunSpec::manual_reflection()
                     } else {
                         RunSpec::main()
                     },
@@ -841,6 +855,15 @@ where
                     system_prompt: cacheable_system_prompt.clone(),
                     context_size,
                 };
+                // 手动反思端口：messages 是 idle 受理时冻结的 committed 快照；
+                // accepted_inputs 为空也必须装配（端口的空输入仍被反思执行使用）。
+                let mut manual_reflection = main_run_port::ChatManualReflection {
+                    runtime_context: runtime_context.clone(),
+                    reflection_tasks: reflection_tasks.clone(),
+                    system_prompt: system_prompt_text.clone(),
+                    language: language.clone(),
+                    messages: manual_reflection_messages,
+                };
                 // Main Run 都绑反思端口——Interval/PreCompact 反思的判定与执行
                 // 由 engine reflection phase 驱动。
                 let mut reflection =
@@ -868,6 +891,9 @@ where
                 loop_context.bind_reflection(&mut reflection);
                 if manual_compaction_run {
                     loop_context.bind_manual_compaction(&mut manual_compaction);
+                }
+                if manual_reflection_run {
+                    loop_context.bind_manual_reflection(&mut manual_reflection);
                 }
                 // `run_step` stays unset at Run level: it is the schema's LLM
                 // step counter, and a Run has none. `run_services` sets it per

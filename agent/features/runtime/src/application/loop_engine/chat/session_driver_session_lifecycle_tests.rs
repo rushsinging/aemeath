@@ -1521,3 +1521,149 @@ async fn test_clear_resets_run_counter_for_new_session_epoch() {
         "clear 重置后新回合 NEVER 延续旧 epoch 计数: {events:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// `/reflect-now` 走真 Run：idle 受理 → ManualReflection intent Run
+// ---------------------------------------------------------------------------
+
+/// 配置关闭时的 `/reflect-now` 是纯 no-op：idle 受理前直接回「未启用」文案，
+/// NEVER 创建 Run（无 Run 根 activity 快照）、NEVER 递增 run_count / 发 RunChanged。
+#[tokio::test]
+async fn test_reflect_now_disabled_is_noop_without_run() {
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    input_tx.send(sdk::ChatInputEvent::ReflectNow).unwrap();
+
+    let mut shell = test_shell();
+    shell.memory_config = share::config::MemoryConfig {
+        enabled: false,
+        ..Default::default()
+    };
+    shell.set_test_session_id("test-reflect-now-disabled");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+
+    let run = tokio::spawn(run_session_command_driver(ctx));
+    wait_for_retry_test_condition("disabled 受理文案", || {
+        sink.command_result_texts()
+            .iter()
+            .any(|(text, _)| text.contains("未启用"))
+    })
+    .await;
+    drop(input_tx);
+    tokio::time::timeout(std::time::Duration::from_secs(10), run)
+        .await
+        .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang")
+        .unwrap();
+
+    let events = sink.events();
+    let texts = sink.command_result_texts();
+    let (text, is_error) = texts
+        .first()
+        .expect("禁用受理必须发布未启用文案 CommandResultText");
+    assert!(
+        text.contains("未启用"),
+        "配置关闭必须直接回「未启用」文案: {text}"
+    );
+    assert!(!*is_error, "未启用是跳过提示，不是执行错误: {text}");
+    assert!(
+        events.iter().all(|event| !event.starts_with("RunChanged")),
+        "禁用 no-op 不得递增 run_count / 发 RunChanged: {events:?}"
+    );
+    assert!(
+        events.iter().all(|event| !event.starts_with("ActivitySnapshot")),
+        "禁用 no-op 不得创建 Run（无 Run 根 activity 快照）: {events:?}"
+    );
+    assert!(
+        events.iter().all(|event| !event.starts_with("TurnStarted")),
+        "禁用 no-op 不得进入模型回合: {events:?}"
+    );
+}
+
+/// 配置开启时的 `/reflect-now` 受理后创建真实 ManualReflection Run 执行一次反思：
+/// Run 根 activity 快照必须出现（Run 已创建）；但 NEVER 递增 run_count / 发 RunChanged，
+/// 也 NEVER 进入模型回合（不从主 run flow 注入模型）。
+#[tokio::test]
+async fn test_reflect_now_runs_a_real_run_without_run_changed() {
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    input_tx.send(sdk::ChatInputEvent::ReflectNow).unwrap();
+
+    let mut shell = test_shell();
+    shell.memory_config = share::config::MemoryConfig {
+        enabled: true,
+        reflection: share::config::ReflectionConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    shell.set_test_session_id("test-reflect-now-run");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+
+    let run = tokio::spawn(run_session_command_driver(ctx));
+    wait_for_retry_test_condition("手动反思终态文案", || {
+        !sink.command_result_texts().is_empty()
+    })
+    .await;
+    drop(input_tx);
+    tokio::time::timeout(std::time::Duration::from_secs(10), run)
+        .await
+        .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang")
+        .unwrap();
+
+    let events = sink.events();
+    // Run 已创建：ManualReflection Run 的根 activity 至少发布一次快照。
+    assert!(
+        events
+            .iter()
+            .any(|event| event.starts_with("ActivitySnapshot:")),
+        "手动反思必须创建真实 Run（Run 根 activity 快照）: {events:?}"
+    );
+    // 硬约束 3：手动反思不增加 session run_count，不发 RunChanged。
+    assert!(
+        events.iter().all(|event| !event.starts_with("RunChanged")),
+        "手动反思 Run 不得递增 run_count / 发 RunChanged: {events:?}"
+    );
+    // 手动反思 Run NEVER 进入模型回合（不从 messages 主 run flow 注入模型）。
+    assert!(
+        events.iter().all(|event| !event.starts_with("TurnStarted")),
+        "手动反思 Run 不得调用模型: {events:?}"
+    );
+    let lifecycle = sink.lifecycle_events();
+    let transitions = lifecycle
+        .iter()
+        .filter_map(|event| match event {
+            crate::domain::agent_run::RuntimeLifecycleEvent::Transitioned {
+                from, to, ..
+            } => Some((*from, *to)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        transitions.windows(2).any(|window| {
+            window[0].0 == crate::domain::agent_run::RunStatus::Created
+                && window[0].1 == crate::domain::agent_run::RunStatus::DrainingInput
+                && window[1].0 == crate::domain::agent_run::RunStatus::DrainingInput
+                && window[1].1 == crate::domain::agent_run::RunStatus::Reflecting
+        }),
+        "真实 /reflect-now 路径必须进入 DrainingInput→Reflecting: {transitions:?}"
+    );
+    assert!(
+        transitions.windows(2).any(|window| {
+            window[0].0 == crate::domain::agent_run::RunStatus::Reflecting
+                && window[0].1 == crate::domain::agent_run::RunStatus::DrainingInput
+                && window[1].0 == crate::domain::agent_run::RunStatus::DrainingInput
+                && window[1].1 == crate::domain::agent_run::RunStatus::Completed
+        }),
+        "真实 /reflect-now 路径必须从反思返回并完成: {transitions:?}"
+    );
+    let texts = sink.command_result_texts();
+    let (text, is_error) = texts
+        .first()
+        .expect("手动反思 Run 结束必须发布终态 CommandResultText");
+    assert!(
+        text.contains("执行失败"),
+        "生产反思 adapter 无 LLM 出口，终态应为失败态文案: {text}"
+    );
+    assert!(*is_error, "执行失败必须按 is_error 上报: {text}");
+}

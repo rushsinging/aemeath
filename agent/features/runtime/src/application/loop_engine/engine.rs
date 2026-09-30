@@ -21,6 +21,7 @@ mod contracts;
 mod control_driver;
 mod interaction_driver;
 mod manual_compaction;
+mod manual_reflection;
 mod phases;
 mod reflection;
 mod step_driver;
@@ -30,6 +31,7 @@ pub(crate) use control_driver::fail_run;
 use control_driver::*;
 use interaction_driver::*;
 use manual_compaction::*;
+use manual_reflection::*;
 use phases::*;
 use reflection::*;
 use step_driver::*;
@@ -89,6 +91,18 @@ async fn run_loop_body(
         && matches!(
             execute_manual_compaction(run, execution, cancel, port).await?,
             ManualCompactionDirective::Terminal
+        )
+    {
+        return Ok(LoopDirective::Terminal);
+    }
+
+    // 手动反思 Run：runtime 已受理 `/reflect-now`，反思前置到主循环之前——命令直接把
+    // Run 置为 `Reflecting`，反思完成后回到 `DrainingInput`，收口仍由主循环里 drain 的
+    // `EmptyAndSealed` 完成（`Completed` 的唯一来源）。
+    if run.spec().intent() == RunIntent::ManualReflection
+        && matches!(
+            execute_manual_reflection(run, execution, cancel, port).await?,
+            ManualReflectionDirective::Terminal
         )
     {
         return Ok(LoopDirective::Terminal);

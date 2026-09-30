@@ -186,7 +186,7 @@ async fn compact_input_becomes_idle_command_and_is_buffered_while_busy() {
     assert!(!busy_buffer.is_empty());
 }
 
-/// #1289：`/reflect-now` idle 受理为 PendingCommand；busy 直接提示丢弃，NEVER 排队。
+/// `/reflect-now` idle 受理为 PendingCommand；busy 直接提示丢弃，NEVER 排队。
 #[tokio::test]
 async fn reflect_now_idle_becomes_pending_command_and_busy_drops_with_notice() {
     let idle_buffer = PendingInputBuffer::default();

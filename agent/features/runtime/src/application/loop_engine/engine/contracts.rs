@@ -637,6 +637,29 @@ pub trait ManualCompactionPort: Send {
     ) -> Result<ManualCompactionOutcome, LoopEngineError>;
 }
 
+/// 手动反思执行结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManualReflectionOutcome {
+    /// 反思到达终态（成功或失败），Run 继续收口 `Completed`。
+    Ready(crate::application::reflection::ReflectionTaskCompletionStatus),
+    /// 反思被取消，Run 已进入终态。
+    Cancelled,
+    /// 反思超时，Run 已进入终态。
+    TimedOut,
+}
+
+/// 手动反思端口：只由产生手动反思 Run 的来源装配，承载装配前冻结的 committed
+/// 会话消息快照并发布用户可见终态文案。状态机与 `Reflection` activity 由
+/// engine 的 `execute_manual_reflection` 持有，端口只执行反思并映射终态。
+#[async_trait]
+pub trait ManualReflectionPort: Send {
+    async fn run_manual_reflection(
+        &mut self,
+        run_id: &sdk::RunId,
+        cancel: &CancellationToken,
+    ) -> Result<ManualReflectionOutcome, LoopEngineError>;
+}
+
 /// 反思执行端口：engine 持有状态机与 activity，端口只提供判定材料与执行能力。
 ///
 /// 反思的执行点在 engine（`BeginReflection`/`ReflectionCompleted`
