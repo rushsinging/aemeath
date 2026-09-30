@@ -1,6 +1,7 @@
 use crate::args::Args;
 use std::io::IsTerminal;
 
+mod constants;
 pub(crate) mod no_tui;
 
 /// 从 CLI args 创建 AgentClient（原 runtime_adapter::agent_client_from_args）。

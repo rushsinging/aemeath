@@ -1,3 +1,4 @@
+pub(crate) use super::constants::CTRL_C_TIMEOUT_SECS;
 use super::key_nav::handle_dialog_key;
 use super::key_scroll::handle_scroll_key;
 use super::UpdateResult;
@@ -23,9 +24,6 @@ pub(super) enum CtrlCAction {
     /// 请求取消当前处理
     RequestCancel,
 }
-
-/// Ctrl+C 两段式退出超时（秒）
-pub(crate) const CTRL_C_TIMEOUT_SECS: f64 = 3.0;
 
 /// 根据 input 是否为空、上次 Ctrl+C 时间戳和处理生命周期状态决定动作。
 fn ctrlc_action(

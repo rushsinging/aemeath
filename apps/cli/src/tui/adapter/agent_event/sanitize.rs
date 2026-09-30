@@ -1,13 +1,12 @@
+use super::constants::{
+    TOOL_LARGE_FIELD_PREVIEW_LIMIT, TOOL_RESULT_PREVIEW_LIMIT, TOOL_STREAM_PREVIEW_LIMIT,
+};
 use crate::tui::text::safe_str_slice_by_char;
 use serde_json::{Map, Value};
 
 // ════════════════════════════════════════════════════════════════════
 //  Helpers — tool output sanitization (inlined from tool_flow_projector)
 // ════════════════════════════════════════════════════════════════════
-
-pub(super) const TOOL_RESULT_PREVIEW_LIMIT: usize = 16 * 1024;
-pub(super) const TOOL_STREAM_PREVIEW_LIMIT: usize = 512;
-const TOOL_LARGE_FIELD_PREVIEW_LIMIT: usize = 256;
 
 pub(super) fn sanitize_tool_arguments_delta(tool_name: &str, partial_args: &str) -> String {
     match serde_json::from_str::<Value>(partial_args) {

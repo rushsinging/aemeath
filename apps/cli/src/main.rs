@@ -5,6 +5,7 @@ mod command_contract_tests;
 mod fatal_error;
 mod panic_hook;
 mod session_lock;
+mod state;
 mod subcommand;
 mod tui;
 

@@ -1,6 +1,5 @@
+use super::constants::DEFAULT_REFLECTION_HISTORY_LIMIT;
 use crate::tui::effect::effect::Effect;
-
-const DEFAULT_REFLECTION_HISTORY_LIMIT: usize = 10;
 
 impl super::super::App {
     /// `/reflect [limit]` only queries safe reflection history metadata.

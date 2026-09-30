@@ -1,3 +1,4 @@
+use super::constants::MAX_RUNTIME_EVENTS_PER_FRAME;
 use super::App;
 use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::app::event::UiEvent;
@@ -73,8 +74,6 @@ impl App {
 }
 
 use tokio::sync::mpsc;
-
-const MAX_RUNTIME_EVENTS_PER_FRAME: usize = 256;
 
 fn collect_runtime_batch(
     first: TuiRuntimeEvent,

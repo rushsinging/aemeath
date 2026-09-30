@@ -1,6 +1,5 @@
+use super::constants::MAX_TOOL_OUTPUT_CHARS;
 use std::io::IsTerminal;
-
-const MAX_TOOL_OUTPUT_CHARS: usize = 2_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum InputMode {

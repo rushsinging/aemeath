@@ -8,6 +8,7 @@ use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
 use crate::tui::model::runtime::session_intent::SessionIntent;
 use crate::tui::model::workspace_provider::WorkspaceIntent;
 
+mod constants;
 mod sanitize;
 
 #[cfg(test)]

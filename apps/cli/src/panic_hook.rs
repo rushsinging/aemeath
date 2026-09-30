@@ -2,14 +2,10 @@
 //! 将 panic 信息写入 ~/.agents/logs/panic.log。
 #![allow(dead_code)]
 
+use super::constants::TERMINAL_RESTORE_SEQ;
+use super::state::{CURRENT_RUN, SESSION_ID, TUI_ACTIVE};
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
-
-static SESSION_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-static CURRENT_RUN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-/// TUI 是否持有终端（raw mode + alternate screen）。为真时向 stderr 写 panic
-/// 会糊到屏幕上，故此时只落 panic.log，不打印 stderr。
-static TUI_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 pub fn set_session_id(id: String) {
     let _ = SESSION_ID.set(id);
@@ -30,10 +26,6 @@ fn current_run_for_log() -> Option<usize> {
         run_step => Some(run_step),
     }
 }
-
-/// 终端恢复转义序列：LeaveAlternateScreen + DisableMouseCapture + DisableBracketedPaste + show cursor。
-/// 与 TerminalGuard::drop 的恢复语义保持一致（此处为 panic hook 的最后兜底，不依赖 crossterm execute）。
-const TERMINAL_RESTORE_SEQ: &[u8] = b"\x1b[?1049l\x1b[?1000l\x1b[?2004l\x1b[?25h";
 
 /// panic hook 的终端恢复兜底：best-effort，忽略所有错误。
 /// 覆盖 RAII guard 触达不到的场景（后台线程 panic、guard 被绕过）。

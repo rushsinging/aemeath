@@ -1,3 +1,4 @@
+mod constants;
 pub mod event;
 pub(crate) mod frame_driver;
 mod resize;
@@ -5,6 +6,7 @@ mod run_loop;
 mod runtime;
 pub mod state;
 
+use super::constants::{RSS_SAMPLE_INTERVAL, SLOW_FRAME_LOG_COOLDOWN, SLOW_FRAME_THRESHOLD};
 use crate::tui::app::state::{ChatState, InputState, SessionState, UiLayout};
 use crate::tui::frame_diagnostics::{
     FrameDiagnosticContext, FrameDiagnosticEvent, FrameDiagnosticKind, FrameDiagnostics,
@@ -33,10 +35,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-
-const SLOW_FRAME_THRESHOLD: Duration = Duration::from_millis(50);
-const SLOW_FRAME_LOG_COOLDOWN: Duration = Duration::from_secs(5);
-const RSS_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 
 pub use event::UiEvent;
 
