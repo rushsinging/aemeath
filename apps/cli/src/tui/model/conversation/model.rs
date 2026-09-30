@@ -244,6 +244,7 @@ impl ConversationModel {
                     activity.detail,
                     crate::tui::adapter::tui_runtime_event::TuiActivityDetail::Run {
                         purpose: crate::tui::adapter::tui_runtime_event::TuiRunPurpose::Main
+                            | crate::tui::adapter::tui_runtime_event::TuiRunPurpose::Reflection
                     }
                 )
         });
