@@ -10,6 +10,7 @@ serde.workspace = true
 serde_json.workspace = true
 sdk = { path = "../../packages/sdk" }
 quote = "1"
+regex = "1"
 syn = { version = "2", features = ["full"] }
 
 [target.'cfg(unix)'.dependencies]

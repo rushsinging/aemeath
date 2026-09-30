@@ -652,3 +652,167 @@ fn pattern_exclusion_strips_pub_crate_cfg_test_module() {
         "pub(crate) mod tests 内的命中必须被剥离：{violations:?}"
     );
 }
+
+#[test]
+fn pattern_exclusion_regex_flags_matching_lines() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/service.rs"),
+        "struct DataProjection;\nstruct DataView;\n",
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "pattern.test.no-broad-name",
+        "assertion": "pattern_exclusion",
+        "scope": { "kind": "path_prefix", "value": "crates/x/src" },
+        "forbidden_patterns": [],
+        "forbidden_regex": ["\\b(?:struct|enum|trait)\\s+\\w*Projection\\w*"],
+        "exclusions": [],
+        "reason": "test",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/service.rs")
+            .expect("enforce");
+
+    assert_eq!(violations.len(), 1);
+    assert_eq!(violations[0].location, "crates/x/src/service.rs:1");
+}
+
+#[test]
+fn pattern_exclusion_regex_respects_exclusions_and_allow_marker() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/allowed.rs"),
+        "struct DataProjection;\n",
+    );
+    write_source(
+        &temp.path().join("crates/x/src/marked.rs"),
+        "struct DataProjection; // allow broad_name: legacy seam\n",
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "pattern.test.no-broad-name",
+        "assertion": "pattern_exclusion",
+        "scope": { "kind": "path_prefix", "value": "crates/x/src" },
+        "forbidden_patterns": [],
+        "forbidden_regex": ["\\bstruct\\s+\\w*Projection\\w*"],
+        "exclusions": [{"path": "crates/x/src/allowed.rs", "reason": "legacy"}],
+        "allow_marker": "allow broad_name",
+        "reason": "test",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    for file in ["crates/x/src/allowed.rs", "crates/x/src/marked.rs"] {
+        let violations =
+            crate::guards_rules::enforce_rule(&rule, temp.path(), file).expect("enforce");
+        assert!(violations.is_empty(), "{file} 必须被豁免：{violations:?}");
+    }
+}
+
+#[test]
+fn parse_registry_rejects_invalid_regex() {
+    let bytes = br#"{
+  "version": 1,
+  "entries": [],
+  "rules": [{
+    "id": "pattern.test.bad-regex",
+    "assertion": "pattern_exclusion",
+    "scope": { "kind": "path_prefix", "value": "crates" },
+    "forbidden_patterns": [],
+    "forbidden_regex": ["[unclosed"],
+    "exclusions": [],
+    "reason": "test",
+    "profile": "full"
+  }],
+  "retired_symbols": []
+}"#;
+
+    let error = crate::guards_rules::parse_registry(bytes).expect_err("非法 regex 必须 fail");
+    assert!(
+        format!("{error:#}").contains("[unclosed"),
+        "错误应指出非法 regex: {error:#}"
+    );
+}
+
+fn count_ratio_rule(exclusions: serde_json::Value) -> crate::guards_rules::Rule {
+    serde_json::from_value(serde_json::json!({
+        "id": "count.process.isolation",
+        "assertion": "count_ratio",
+        "scope": { "kind": "workspace" },
+        "numerator_patterns": ["std::process::Command::new", "tokio::process::Command::new"],
+        "denominator_patterns": ["utils::configure_std_noninteractive", "utils::configure_tokio_noninteractive"],
+        "exclusions": exclusions,
+        "reason": "每个外部进程构造必须配对 session 隔离",
+        "profile": "fast"
+    }))
+    .expect("deserialize rule")
+}
+
+#[test]
+fn count_ratio_flags_unbalanced_construction() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/run.rs"),
+        "fn run() {\n    let mut a = std::process::Command::new(\"git\");\n    utils::configure_std_noninteractive(&mut a)?;\n    let _ = std::process::Command::new(\"curl\").output();\n}\n",
+    );
+
+    let violations = crate::guards_rules::enforce_rule(
+        &count_ratio_rule(serde_json::json!([])),
+        temp.path(),
+        "crates/x/src/run.rs",
+    )
+    .expect("enforce");
+
+    assert_eq!(violations.len(), 1);
+    assert!(violations[0].location.contains("crates/x/src/run.rs"));
+    assert!(
+        violations[0].message.contains('2') && violations[0].message.contains('1'),
+        "消息应含两侧计数: {}",
+        violations[0].message
+    );
+}
+
+#[test]
+fn count_ratio_passes_when_isolation_covers_construction() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/run.rs"),
+        "fn run() {\n    let mut a = std::process::Command::new(\"git\");\n    utils::configure_std_noninteractive(&mut a)?;\n    let mut b = tokio::process::Command::new(\"curl\");\n    utils::configure_tokio_noninteractive(&mut b)?;\n}\n",
+    );
+
+    let violations = crate::guards_rules::enforce_rule(
+        &count_ratio_rule(serde_json::json!([])),
+        temp.path(),
+        "crates/x/src/run.rs",
+    )
+    .expect("enforce");
+
+    assert!(violations.is_empty(), "配比满足必须放行: {violations:?}");
+}
+
+#[test]
+fn count_ratio_strips_cfg_test_module_and_exclusions() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/run.rs"),
+        "#[cfg(test)]\nmod tests {\n    fn t() { let _ = std::process::Command::new(\"git\"); }\n}\n",
+    );
+    write_source(
+        &temp.path().join("crates/x/src/exempt.rs"),
+        "fn f() { let _ = std::process::Command::new(\"git\"); }\n",
+    );
+
+    let rule = count_ratio_rule(serde_json::json!([
+        {"path": "crates/x/src/exempt.rs", "reason": "owner boundary"}
+    ]));
+    for file in ["crates/x/src/run.rs", "crates/x/src/exempt.rs"] {
+        let violations =
+            crate::guards_rules::enforce_rule(&rule, temp.path(), file).expect("enforce");
+        assert!(
+            violations.is_empty(),
+            "{file} 必须被豁免/剥离: {violations:?}"
+        );
+    }
+}

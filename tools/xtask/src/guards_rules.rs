@@ -44,15 +44,30 @@ pub enum RuleSpec {
     },
     PatternExclusion {
         forbidden_patterns: Vec<String>,
+        /// 正则形态的禁模式（切片区间、声明限定标识符等子串无法表达的形态）。
+        /// 与子串模式共用 exclusions / allow_marker / 测试区剥离机制。
+        #[serde(default)]
+        forbidden_regex: Vec<String>,
         #[serde(default)]
         exclusions: Vec<Exclusion>,
         /// 行级豁免标记（如 `allow unsafe_text_op`）：含标记的命中行放行。
         #[serde(default)]
         allow_marker: Option<String>,
+        /// 行级豁免标记数组（任一命中即放行，如安全写法函数名/空上限形态）。
+        #[serde(default)]
+        allow_markers: Vec<String>,
     },
     ConstructionWhitelist {
         symbol: String,
         allowed_paths: Vec<String>,
+    },
+    /// 计数配比：每文件 denominator 命中行数必须 ≥ numerator 命中行数
+    /// （如「外部进程构造数 ≤ session 隔离调用数」）。
+    CountRatio {
+        numerator_patterns: Vec<String>,
+        denominator_patterns: Vec<String>,
+        #[serde(default)]
+        exclusions: Vec<Exclusion>,
     },
     ForbiddenFileNames {
         forbidden_file_names: Vec<String>,
@@ -141,7 +156,27 @@ pub struct Violation {
 }
 
 pub fn parse_registry(bytes: &[u8]) -> Result<GuardsRegistry> {
-    Ok(serde_json::from_slice(bytes)?)
+    let registry: GuardsRegistry = serde_json::from_slice(bytes)?;
+    for rule in &registry.rules {
+        let regex_fields: Vec<&[String]> = match &rule.spec {
+            RuleSpec::PatternExclusion {
+                forbidden_regex, ..
+            } => vec![forbidden_regex],
+            RuleSpec::CountRatio {
+                numerator_patterns,
+                denominator_patterns,
+                ..
+            } => vec![numerator_patterns, denominator_patterns],
+            _ => vec![],
+        };
+        for patterns in regex_fields {
+            for pattern in patterns {
+                regex::Regex::new(pattern)
+                    .with_context(|| format!("规则 {} 的正则非法: {pattern}", rule.id))?;
+            }
+        }
+    }
+    Ok(registry)
 }
 
 /// 按规则数据对单文件执行断言。scope 不匹配或豁免命中的文件返回空；
@@ -191,20 +226,41 @@ pub fn enforce_rule_with_context(
         }
         RuleSpec::PatternExclusion {
             forbidden_patterns,
+            forbidden_regex,
             exclusions,
             allow_marker,
-        } => enforce_pattern_exclusion(
-            rule,
-            relative_file,
-            context,
-            forbidden_patterns,
-            exclusions,
-            allow_marker.as_deref(),
-        ),
+            allow_markers,
+        } => {
+            let mut markers: Vec<&str> = allow_markers.iter().map(String::as_str).collect();
+            if let Some(marker) = allow_marker {
+                markers.push(marker.as_str());
+            }
+            enforce_pattern_exclusion(
+                rule,
+                relative_file,
+                context,
+                forbidden_patterns,
+                forbidden_regex,
+                exclusions,
+                &markers,
+            )
+        }
         RuleSpec::ConstructionWhitelist {
             symbol,
             allowed_paths,
         } => enforce_construction_whitelist(rule, relative_file, context, symbol, allowed_paths),
+        RuleSpec::CountRatio {
+            numerator_patterns,
+            denominator_patterns,
+            exclusions,
+        } => enforce_count_ratio(
+            rule,
+            relative_file,
+            context,
+            numerator_patterns,
+            denominator_patterns,
+            exclusions,
+        ),
         RuleSpec::ForbiddenFileNames {
             forbidden_file_names,
         } => enforce_forbidden_file_names(rule, relative_file, forbidden_file_names),
@@ -415,8 +471,9 @@ fn enforce_pattern_exclusion(
     relative_file: &str,
     context: &guards_engine::FileContext,
     forbidden_patterns: &[String],
+    forbidden_regex: &[String],
     exclusions: &[Exclusion],
-    allow_marker: Option<&str>,
+    allow_markers: &[&str],
 ) -> Result<Vec<Violation>> {
     if exclusions
         .iter()
@@ -428,13 +485,14 @@ fn enforce_pattern_exclusion(
         return Ok(Vec::new());
     };
     let production = strip_inline_cfg_test_region(source);
+    let compiled = compile_regexes(forbidden_regex)?;
     let mut violations = Vec::new();
     for (offset, line) in production.lines().enumerate() {
         let code = line.trim_start();
         if code.starts_with("//") {
             continue;
         }
-        if allow_marker.is_some_and(|marker| line.contains(marker)) {
+        if allow_markers.iter().any(|marker| line.contains(marker)) {
             continue;
         }
         for pattern in forbidden_patterns {
@@ -446,8 +504,39 @@ fn enforce_pattern_exclusion(
                 });
             }
         }
+        for (pattern, compiled_regex) in forbidden_regex.iter().zip(compiled.iter()) {
+            if compiled_regex.is_match(line) {
+                violations.push(Violation {
+                    rule_id: rule.id.clone(),
+                    location: format!("{relative_file}:{}", offset + 1),
+                    message: format!("命中禁用正则 `{pattern}`"),
+                });
+            }
+        }
     }
     Ok(violations)
+}
+
+/// regex 编译缓存：同一 pattern 全运行期至多编译一次
+/// （每条规则 × 每文件调用 enforce，重复编译成本不可忽视）。
+fn compile_regexes(patterns: &[String]) -> Result<Vec<std::sync::Arc<regex::Regex>>> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    static CACHE: OnceLock<Mutex<HashMap<String, Arc<regex::Regex>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut compiled = Vec::with_capacity(patterns.len());
+    let mut guard = cache.lock().expect("regex cache poisoned");
+    for pattern in patterns {
+        if !guard.contains_key(pattern) {
+            let compiled_regex = regex::Regex::new(pattern)
+                .map(Arc::new)
+                .with_context(|| format!("非法正则 `{pattern}`"))?;
+            guard.insert(pattern.clone(), compiled_regex);
+        }
+        compiled.push(Arc::clone(&guard[pattern]));
+    }
+    Ok(compiled)
 }
 
 /// 剥离内联 `#[cfg(test)] mod name { ... }` 区块（保留区块前的生产行号语义：
@@ -852,4 +941,48 @@ fn contains_symbol(line: &str, symbol: &str) -> bool {
         search_from = end;
     }
     false
+}
+
+/// 计数配比断言：剥离 cfg(test) 后逐文件统计两侧命中行数
+/// （一行命中多个 pattern 只计一次），denominator < numerator 即违规。
+/// pattern 按 regex 编译（子串字面量即合法 regex），支持 `\b` 词边界精确化。
+fn enforce_count_ratio(
+    rule: &Rule,
+    relative_file: &str,
+    context: &guards_engine::FileContext,
+    numerator_patterns: &[String],
+    denominator_patterns: &[String],
+    exclusions: &[Exclusion],
+) -> Result<Vec<Violation>> {
+    if exclusions
+        .iter()
+        .any(|exclusion| relative_file.starts_with(exclusion.path.as_str()))
+    {
+        return Ok(Vec::new());
+    }
+    let Some(source) = context.text() else {
+        return Ok(Vec::new());
+    };
+    let production = strip_inline_cfg_test_region(source);
+    let numerator_regexes = compile_regexes(numerator_patterns)?;
+    let denominator_regexes = compile_regexes(denominator_patterns)?;
+    let count_hits = |regexes: &[std::sync::Arc<regex::Regex>]| -> usize {
+        production
+            .lines()
+            .filter(|line| {
+                let code = line.trim_start();
+                !code.starts_with("//") && regexes.iter().any(|regex| regex.is_match(line))
+            })
+            .count()
+    };
+    let numerator = count_hits(&numerator_regexes);
+    let denominator = count_hits(&denominator_regexes);
+    if denominator < numerator {
+        return Ok(vec![Violation {
+            rule_id: rule.id.clone(),
+            location: relative_file.to_owned(),
+            message: format!("配比失衡：构造侧 {numerator} 处 > 配对侧 {denominator} 处"),
+        }]);
+    }
+    Ok(Vec::new())
 }

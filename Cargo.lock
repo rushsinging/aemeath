@@ -5316,6 +5316,7 @@ dependencies = [
  "anyhow",
  "libc",
  "quote",
+ "regex",
  "sdk",
  "serde",
  "serde_json",

@@ -445,93 +445,7 @@
       "tracking_issue": 1707
     }
   ],
-  "entries": [
-    {
-      "id": "policy.repository.projection-naming",
-      "guard": "check-projection-naming.sh",
-      "module": "repository",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "architecture",
-      "reason": "生产 Rust 标识符必须表达具体目标或用途，禁止用宽泛 Projection/projection 掩盖职责混合",
-      "tracking_issue": 1457,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent repository-wide semantic naming guard",
-      "status": "active"
-    },
-    {
-      "id": "scope.tui.safe-text-owners",
-      "guard": "check-tui-unsafe-text-ops.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "pattern",
-        "value": "safe_text.rs,text.rs"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "tui",
-      "reason": "Safe text helper implementations are the owner of the operations prohibited to consumers",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace if helper ownership changes",
-      "status": "active"
-    },
-    {
-      "id": "false-positive.tui.unsafe-text-inline-allow",
-      "guard": "check-tui-unsafe-text-ops.sh",
-      "module": "tui",
-      "scope": {
-        "kind": "pattern",
-        "value": "allow unsafe_text_op"
-      },
-      "classification": "false_positive_suppression",
-      "mechanism_type": "whitelist-backed",
-      "owner": "tui",
-      "reason": "Line-local escape only for a proven non-string slice false positive",
-      "tracking_issue": 1021,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "remove when no source line uses the marker",
-      "status": "active"
-    },
-    {
-      "id": "scope.all.unsafe-text-long-statement-files",
-      "guard": "check-tui-unsafe-text-ops.sh",
-      "module": "shared",
-      "scope": {
-        "kind": "pattern",
-        "value": "tool_result.rs,reflection.rs,conversion.rs,append.rs,routing_guard.rs"
-      },
-      "classification": "scope_exclusion",
-      "mechanism_type": "structural",
-      "owner": "shared",
-      "reason": "Long-statement files where rustfmt reflow moves trailing comments, making line-level allow comments unstable; all slices confirmed find/char_indices offsets or Vec/byte slices",
-      "tracking_issue": 1545,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "retain while these files contain only offset/byte-safe slices; prefer line-level allow for new short statements",
-      "status": "active"
-    },
-    {
-      "id": "policy.process.noninteractive-child-session",
-      "guard": "check-noninteractive-child-session.sh",
-      "module": "repository",
-      "scope": {
-        "kind": "path",
-        "value": "packages/global/utils/src/process.rs"
-      },
-      "classification": "target_capability_policy",
-      "mechanism_type": "structural",
-      "owner": "architecture",
-      "reason": "All production noninteractive external processes must enter a detached Unix session through the single utils boundary",
-      "tracking_issue": 1577,
-      "introduced_baseline": "v0.1.0",
-      "exit_condition": "replace only with an equivalent cross-platform controlling-terminal isolation policy",
-      "status": "active"
-    }
-  ],
+  "entries": [],
   "rules": [
     {
       "id": "pattern.config.no-blob-construction",
@@ -3334,6 +3248,115 @@
       "exclusions": [],
       "reason": "domain 层纯值域：文件/网络/进程 IO 只经 ports 出站；领域策略 NEVER 直接 IO",
       "profile": "full"
+    },
+    {
+      "id": "pattern.all.no-broad-projection-naming",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "workspace"
+      },
+      "forbidden_patterns": [],
+      "forbidden_regex": [
+        "\\b(?:struct|enum|trait|fn|mod)\\s+[A-Za-z_][A-Za-z0-9_]*(?:Projection|projection)[A-Za-z0-9_]*",
+        "\\b(?:let|const|static)\\s+(?:mut\\s+)?[A-Za-z_][A-Za-z0-9_]*(?:Projection|projection)[A-Za-z0-9_]*"
+      ],
+      "exclusions": [],
+      "reason": "宽泛命名禁令：标识符 MUST 表达单一业务职责（check-projection-naming.sh 数据化）",
+      "profile": "fast"
+    },
+    {
+      "id": "pattern.all.no-unsafe-text-range-slicing",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefixes",
+        "values": [
+          "apps/",
+          "agent/",
+          "packages/"
+        ]
+      },
+      "forbidden_patterns": [],
+      "forbidden_regex": [
+        "&\\s*[A-Za-z_][A-Za-z0-9_]*\\s*\\[[^\\]]*\\.\\.[^\\]]*\\]",
+        "[A-Za-z_][A-Za-z0-9_]*\\s*\\[\\s*[A-Za-z_][A-Za-z0-9_]*\\s*\\.\\.\\s*[A-Za-z_][A-Za-z0-9_]*\\s*\\]",
+        "(?:&\\s*)?[A-Za-z_][A-Za-z0-9_.]*\\s*\\[\\s*\\.\\.=\\s*(?:\\d|[A-Za-z_][A-Za-z0-9_.]*\\.len\\(|len\\()",
+        "(?:&\\s*)?[A-Za-z_][A-Za-z0-9_.]*\\s*\\[\\s*\\.\\.\\s*(?:\\d|[A-Za-z_][A-Za-z0-9_.]*\\.len\\(|len\\()"
+      ],
+      "exclusions": [
+        {
+          "path": "apps/cli/src/tui/render/display/safe_text.rs",
+          "reason": "safe-text owner（guard-registry:scope.tui.safe-text-owners）"
+        },
+        {
+          "path": "apps/cli/src/tui/display/safe_text.rs",
+          "reason": "safe-text owner（guard-registry:scope.tui.safe-text-owners）"
+        },
+        {
+          "path": "apps/cli/src/tui/text.rs",
+          "reason": "safe-text owner（guard-registry:scope.tui.safe-text-owners）"
+        },
+        {
+          "path": "apps/cli/src/tui/render/output/blocks/tool_result.rs",
+          "reason": "长语句文件，命中均为 find/char_indices 偏移（guard-registry:scope.all.unsafe-text-long-statement-files）"
+        },
+        {
+          "path": "agent/features/memory/src/domain/reflection.rs",
+          "reason": "长语句文件（guard-registry:scope.all.unsafe-text-long-statement-files）"
+        },
+        {
+          "path": "agent/features/provider/src/adapters/ollama/conversion.rs",
+          "reason": "长语句文件（guard-registry:scope.all.unsafe-text-long-statement-files）"
+        },
+        {
+          "path": "agent/features/audit/src/adapters/append.rs",
+          "reason": "长语句文件（guard-registry:scope.all.unsafe-text-long-statement-files）"
+        },
+        {
+          "path": "packages/global/logging/src/domain/routing_guard.rs",
+          "reason": "长语句文件（guard-registry:scope.all.unsafe-text-long-statement-files）"
+        }
+      ],
+      "allow_markers": [
+        "allow unsafe_text_op",
+        "floor_char_boundary",
+        "is_char_boundary",
+        "[..]"
+      ],
+      "reason": "裸字节区间切片禁令（check-tui-unsafe-text-ops.sh 区间正则残段数据化）；chars().nth/split_at 由 pattern.all.no-unsafe-text-slicing 承接",
+      "profile": "fast"
+    },
+    {
+      "id": "count.process.noninteractive-isolation",
+      "assertion": "count_ratio",
+      "scope": {
+        "kind": "path_prefixes",
+        "values": [
+          "apps/",
+          "agent/",
+          "packages/"
+        ]
+      },
+      "numerator_patterns": [
+        "std::process::Command::new",
+        "tokio::process::Command::new",
+        "\\bCommand::new"
+      ],
+      "denominator_patterns": [
+        "utils::configure_std_noninteractive",
+        "utils::configure_tokio_noninteractive"
+      ],
+      "exclusions": [
+        {
+          "path": "packages/global/utils/src/process.rs",
+          "reason": "session 隔离边界 owner（guard-registry:policy.process.noninteractive-child-session）"
+        },
+        {
+          "path": "agent/features/project/src/lib.rs",
+          "reason": "原脚本豁免（worktree 创建走独立边界）"
+        }
+      ],
+      "reason": "每个外部进程构造必须配对非交互 session 隔离（check-noninteractive-child-session.sh 数据化）",
+      "profile": "fast"
     }
   ],
   "retired_symbols": [
