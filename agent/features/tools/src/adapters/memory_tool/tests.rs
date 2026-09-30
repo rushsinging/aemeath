@@ -1,5 +1,8 @@
 use super::helpers::*;
 use super::*;
+use crate::adapters::memory_tool::{
+    MemoryAddTool, MemoryDeleteTool, MemoryListTool, MemorySearchTool, MemoryUpdateTool,
+};
 use crate::domain::types::{
     MemoryCategoryInput, MemoryLayerInput, MemoryLocationResult, ToolSchema,
 };
@@ -22,8 +25,14 @@ impl MemoryPortSource for SwappableMemorySource {
     }
 }
 
+fn test_source() -> Arc<SwappableMemorySource> {
+    Arc::new(SwappableMemorySource {
+        current: RwLock::new(Arc::new(memory::api::NoOpMemory)),
+    })
+}
+
 #[tokio::test]
-async fn memory_tool_resolves_current_committed_port_for_each_call() {
+async fn memory_search_tool_resolves_current_committed_port_for_each_call() {
     let first = Arc::new(
         memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap(),
     );
@@ -41,7 +50,7 @@ async fn memory_tool_resolves_current_committed_port_for_each_call() {
     let source = Arc::new(SwappableMemorySource {
         current: RwLock::new(first),
     });
-    let tool = MemoryTool {
+    let tool = MemorySearchTool {
         source: source.clone(),
     };
     let workspace = tempfile::tempdir().unwrap();
@@ -51,46 +60,17 @@ async fn memory_tool_resolves_current_committed_port_for_each_call() {
     .build();
 
     let first_result = tool
-        .call(
-            serde_json::json!({"action": "search", "query": "committed memory"}),
-            &context,
-        )
+        .call(serde_json::json!({"query": "committed memory"}), &context)
         .await;
     *source.current.write().unwrap() = second;
     let resumed_result = tool
-        .call(
-            serde_json::json!({"action": "search", "query": "committed memory"}),
-            &context,
-        )
+        .call(serde_json::json!({"query": "committed memory"}), &context)
         .await;
 
     assert!(first_result.text.contains("first committed memory"));
     assert!(!first_result.text.contains("resumed committed memory"));
     assert!(resumed_result.text.contains("resumed committed memory"));
     assert!(!resumed_result.text.contains("first committed memory"));
-}
-
-#[test]
-fn memory_registry_schema_preserves_action_specific_contract() {
-    let registry = crate::adapters::tool_registry::ToolRegistry::new();
-    registry.register(MemoryTool {
-        source: Arc::new(SwappableMemorySource {
-            current: RwLock::new(Arc::new(memory::api::NoOpMemory)),
-        }),
-    });
-
-    let descriptor = registry
-        .schemas_for("en")
-        .into_iter()
-        .find(|schema| schema["name"] == "Memory")
-        .unwrap();
-
-    assert_eq!(descriptor["input_schema"], memory_input_schema());
-    assert_eq!(descriptor["data_schema"], MemoryResult::data_schema());
-    assert!(descriptor["description"]
-        .as_str()
-        .unwrap()
-        .contains("automatic injection"));
 }
 
 fn test_entry(content: &str, category: MemoryCategory) -> MemoryEntry {
@@ -277,7 +257,7 @@ async fn full_add_returns_actionable_typed_eviction_candidates_without_mutation(
 }
 
 #[tokio::test]
-async fn archive_and_restore_actions_publish_manageable_terminal_results() {
+async fn memory_update_publishes_manageable_archive_and_restore_results() {
     let memory = Arc::new(
         memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap(),
     );
@@ -286,7 +266,7 @@ async fn archive_and_restore_actions_publish_manageable_terminal_results() {
     let source = Arc::new(SwappableMemorySource {
         current: RwLock::new(memory.clone()),
     });
-    let tool = MemoryTool { source };
+    let tool = MemoryUpdateTool { source };
     let workspace = tempfile::tempdir().unwrap();
     let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
         workspace.path().to_path_buf(),
@@ -295,13 +275,13 @@ async fn archive_and_restore_actions_publish_manageable_terminal_results() {
 
     let archived = tool
         .call(
-            serde_json::json!({"action": "archive", "id": entry.id.to_string()}),
+            serde_json::json!({"id": entry.id.to_string(), "status": "archive"}),
             &context,
         )
         .await;
     let restored = tool
         .call(
-            serde_json::json!({"action": "restore", "id": entry.id.to_string()}),
+            serde_json::json!({"id": entry.id.to_string(), "status": "restore"}),
             &context,
         )
         .await;
@@ -314,24 +294,104 @@ async fn archive_and_restore_actions_publish_manageable_terminal_results() {
 }
 
 #[test]
-fn memory_schema_publishes_constrained_actions_layers_and_categories() {
-    let schema = memory_input_schema();
+fn the_five_memory_tools_expose_type_driven_required() {
+    let source = test_source();
+    let add = MemoryAddTool {
+        source: source.clone(),
+    }
+    .input_schema();
+    assert_eq!(add["required"], serde_json::json!(["content"]));
+
+    let search = MemorySearchTool {
+        source: source.clone(),
+    }
+    .input_schema();
+    assert_eq!(search["required"], serde_json::json!(["query"]));
+
+    let list = MemoryListTool {
+        source: source.clone(),
+    }
+    .input_schema();
+    assert!(
+        list.get("required").is_none(),
+        "MemoryList has no required field"
+    );
+
+    let update = MemoryUpdateTool {
+        source: source.clone(),
+    }
+    .input_schema();
+    assert_eq!(update["required"], serde_json::json!(["id", "status"]));
+    assert_eq!(
+        update["properties"]["status"]["enum"],
+        serde_json::json!(["pin", "unpin", "archive", "restore"])
+    );
+
+    let delete = MemoryDeleteTool {
+        source: source.clone(),
+    }
+    .input_schema();
+    assert_eq!(delete["required"], serde_json::json!(["id"]));
+}
+
+#[test]
+fn no_memory_tool_schema_uses_combinator_keywords() {
+    let source = test_source();
+    for schema in [
+        MemoryAddTool {
+            source: source.clone(),
+        }
+        .input_schema(),
+        MemorySearchTool {
+            source: source.clone(),
+        }
+        .input_schema(),
+        MemoryListTool {
+            source: source.clone(),
+        }
+        .input_schema(),
+        MemoryUpdateTool {
+            source: source.clone(),
+        }
+        .input_schema(),
+        MemoryDeleteTool {
+            source: source.clone(),
+        }
+        .input_schema(),
+    ] {
+        let text = schema.to_string();
+        for keyword in ["oneOf", "anyOf", "allOf"] {
+            assert!(
+                !text.contains(keyword),
+                "schema must not use {keyword}: {text}"
+            );
+        }
+    }
+}
+
+#[test]
+fn memory_add_content_description_states_the_limit() {
+    let schema = MemoryAddTool {
+        source: test_source(),
+    }
+    .input_schema();
+    let desc = schema["properties"]["content"]["description"]
+        .as_str()
+        .unwrap();
+    assert!(
+        desc.contains("500"),
+        "description must state the 500-char limit: {desc}"
+    );
+}
+
+#[test]
+fn memory_add_schema_publishes_constrained_layers_and_categories() {
+    let schema = MemoryAddTool {
+        source: test_source(),
+    }
+    .input_schema();
     let properties = schema["properties"].as_object().unwrap();
 
-    assert_eq!(
-        properties["action"]["enum"],
-        serde_json::json!([
-            "add",
-            "delete",
-            "search",
-            "pin",
-            "list",
-            "archive",
-            "restore",
-            "add_reminder",
-            "complete_reminder"
-        ])
-    );
     assert_eq!(
         properties["layer"]["enum"],
         serde_json::json!(["global", "project"])
@@ -340,24 +400,6 @@ fn memory_schema_publishes_constrained_actions_layers_and_categories() {
         properties["category"]["enum"],
         serde_json::json!(["fact", "decision", "preference", "pattern", "pitfall"])
     );
-    let action_contracts = schema["oneOf"].as_array().unwrap();
-    for (action, required) in [
-        ("add", vec!["action", "content"]),
-        ("delete", vec!["action", "id"]),
-        ("search", vec!["action", "query"]),
-        ("pin", vec!["action", "id"]),
-        ("list", vec!["action"]),
-        ("archive", vec!["action", "id"]),
-        ("restore", vec!["action", "id"]),
-        ("add_reminder", vec!["action", "content"]),
-        ("complete_reminder", vec!["action", "id"]),
-    ] {
-        let contract = action_contracts
-            .iter()
-            .find(|contract| contract["properties"]["action"]["const"] == action)
-            .unwrap_or_else(|| panic!("missing action contract {action}"));
-        assert_eq!(contract["required"], serde_json::json!(required));
-    }
 }
 
 #[test]
