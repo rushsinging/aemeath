@@ -695,6 +695,9 @@ fn activity_source(value: sdk::ActivitySourceView) -> TuiActivitySource {
         sdk::ActivitySourceView::Compaction(id) => {
             TuiActivitySource::Compaction(UiActivityId::from(id.as_str()))
         }
+        sdk::ActivitySourceView::Reflection(id) => {
+            TuiActivitySource::Reflection(UiActivityId::from(id.as_str()))
+        }
         sdk::ActivitySourceView::Interaction(id) => {
             TuiActivitySource::Interaction(id.as_str().to_string())
         }
@@ -712,6 +715,7 @@ fn activity_kind(value: sdk::ActivityKindView) -> TuiActivityKind {
         sdk::ActivityKindView::ToolCall => TuiActivityKind::ToolCall,
         sdk::ActivityKindView::HookDispatch => TuiActivityKind::HookDispatch,
         sdk::ActivityKindView::Compaction => TuiActivityKind::Compaction,
+        sdk::ActivityKindView::Reflection => TuiActivityKind::Reflection,
         sdk::ActivityKindView::Interaction => TuiActivityKind::Interaction,
         sdk::ActivityKindView::SubRun => TuiActivityKind::SubRun,
     }
@@ -755,6 +759,7 @@ fn activity_detail(value: sdk::ActivityDetailView) -> TuiActivityDetail {
             purpose: match purpose {
                 sdk::RunPurposeView::Main => TuiRunPurpose::Main,
                 sdk::RunPurposeView::Derived => TuiRunPurpose::Derived,
+                sdk::RunPurposeView::Reflection => TuiRunPurpose::Reflection,
             },
         },
         sdk::ActivityDetailView::Phase { phase } => TuiActivityDetail::Phase {
@@ -809,6 +814,9 @@ fn activity_detail(value: sdk::ActivityDetailView) -> TuiActivityDetail {
                     TuiCompactWork::Determinate { completed, total }
                 }
             },
+        },
+        sdk::ActivityDetailView::Reflection { trigger } => TuiActivityDetail::Reflection {
+            trigger: reflection_trigger(trigger),
         },
         sdk::ActivityDetailView::Interaction { kind } => TuiActivityDetail::Interaction {
             kind: match kind {

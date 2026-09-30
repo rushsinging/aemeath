@@ -2,7 +2,8 @@ use super::{sdk_event_to_tui_event, SdkEventMapping};
 use crate::tui::adapter::tui_runtime_event::{
     TuiActivityAudience, TuiActivityChangeKind, TuiActivityDetail, TuiActivityKind,
     TuiActivitySource, TuiActivityState, TuiCompactStage, TuiCompactWork, TuiHookPoint,
-    TuiInteractionKind, TuiModelStreamState, TuiRunPhaseKind, TuiRunPurpose, TuiRuntimeEvent,
+    TuiInteractionKind, TuiModelStreamState, TuiReflectionTrigger, TuiRunPhaseKind, TuiRunPurpose,
+    TuiRuntimeEvent,
 };
 
 #[test]
@@ -526,6 +527,54 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
                 && matches!(snapshot.activities[5].detail, TuiActivityDetail::SubRun { ref role, ref model } if role == "reviewer" && model == "claude-opus")
                 && matches!(snapshot.activities[6].source, TuiActivitySource::Compaction(ref id) if id.as_str() == expected_compaction_id)
                 && matches!(snapshot.activities[6].detail, TuiActivityDetail::Compact { stage: TuiCompactStage::Finalizing, work: TuiCompactWork::Determinate { completed: 2, total: 3 } })
+    ));
+}
+
+#[test]
+fn activity_reflection_variants_map_to_tui_enums() {
+    // sdk Reflection activity → TUI 镜像枚举：kind / detail(trigger) / purpose / source。
+    assert_eq!(
+        super::activity_kind(sdk::ActivityKindView::Reflection),
+        TuiActivityKind::Reflection
+    );
+
+    let triggers = [
+        (
+            sdk::ReflectionTriggerView::Interval,
+            TuiReflectionTrigger::Interval,
+        ),
+        (
+            sdk::ReflectionTriggerView::PreCompact,
+            TuiReflectionTrigger::PreCompact,
+        ),
+        (
+            sdk::ReflectionTriggerView::Manual,
+            TuiReflectionTrigger::Manual,
+        ),
+    ];
+    for (sdk_trigger, expected) in triggers {
+        assert_eq!(
+            super::activity_detail(sdk::ActivityDetailView::Reflection {
+                trigger: sdk_trigger
+            }),
+            TuiActivityDetail::Reflection { trigger: expected }
+        );
+    }
+
+    assert_eq!(
+        super::activity_detail(sdk::ActivityDetailView::Run {
+            purpose: sdk::RunPurposeView::Reflection,
+        }),
+        TuiActivityDetail::Run {
+            purpose: TuiRunPurpose::Reflection,
+        }
+    );
+
+    let reflection_id = sdk::ActivityId::new("reflection-source");
+    let expected_reflection_id = reflection_id.as_str().to_string();
+    assert!(matches!(
+        super::activity_source(sdk::ActivitySourceView::Reflection(reflection_id)),
+        TuiActivitySource::Reflection(id) if id.as_str() == expected_reflection_id
     ));
 }
 
