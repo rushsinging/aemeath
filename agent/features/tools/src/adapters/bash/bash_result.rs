@@ -1,4 +1,5 @@
 #[cfg(unix)]
+pub(crate) use super::constants::PREVIEW_MAX;
 use std::os::unix::process::ExitStatusExt;
 
 /// 从 ExitStatus 提取 (exit_code, failure_detail)。
@@ -43,7 +44,6 @@ pub(super) fn signal_name(sig: i32) -> &'static str {
 
 /// 截断字符串到 PREVIEW_MAX 字节（按 char boundary），超长时附加截断标记。
 /// 用于日志预览，避免大输出把日志刷爆。
-pub(super) const PREVIEW_MAX: usize = 512;
 pub(super) fn preview(s: &str) -> String {
     if s.len() <= PREVIEW_MAX {
         s.to_string()

@@ -1,13 +1,9 @@
+use super::constants::{MAX_CAPTURE_BYTES, MAX_STREAM_LINE_BYTES};
 use crate::domain::{ProgressSink, ToolProgressEvent};
 use std::sync::Arc;
 use tokio::process::{ChildStderr, ChildStdout};
 
-use super::cwd::CWD_MARKER;
-
-/// Maximum bytes to capture from a single pipe (stdout or stderr).
-/// Prevents OOM from commands that produce massive output.
-pub(super) const MAX_CAPTURE_BYTES: usize = 10 * 1024 * 1024; // 10 MB
-const MAX_STREAM_LINE_BYTES: usize = 16 * 1024;
+use super::constants::CWD_MARKER;
 
 struct ProgressLineBuffer<'a> {
     marker: &'a str,

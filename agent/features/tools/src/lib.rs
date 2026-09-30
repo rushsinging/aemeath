@@ -1,13 +1,14 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
-pub(crate) const LOG_TARGET: &str = "aemeath:agent:tools";
-
 /// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
 mod adapters;
 mod domain;
 
 /// Composition-only adapter construction. Concrete adapter and backing types
 /// remain private; production business code consumes the returned ports.
+mod constants;
+pub(crate) use constants::LOG_TARGET;
+
 pub mod composition;
 
 /// Published tool-domain DTO types (kept as a public module facade).

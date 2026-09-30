@@ -1,6 +1,7 @@
 //! OpenAI 兼容 provider 实现
 //! 使用 OpenAIProviderConfig 替代旧 Provider enum
 
+mod constants;
 mod driver;
 mod message_conversion;
 #[cfg(test)]

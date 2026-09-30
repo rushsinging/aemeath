@@ -1,5 +1,6 @@
 //! Anthropic message conversion helpers
 
+use crate::adapters::constants::ANTHROPIC_TOOL_ALLOWED_KEYS;
 use share::message::{ContentBlock, Message, Role};
 
 // ---------------------------------------------------------------------------
@@ -7,15 +8,6 @@ use share::message::{ContentBlock, Message, Role};
 // before sending to the Anthropic Messages API. Only spec-allowed keys
 // survive: name, description, input_schema, cache_control, type.
 // ---------------------------------------------------------------------------
-
-/// Anthropic Messages API tool spec 允许的字段白名单。
-const ANTHROPIC_TOOL_ALLOWED_KEYS: &[&str] = &[
-    "name",
-    "description",
-    "input_schema",
-    "cache_control",
-    "type",
-];
 
 /// 将内部 tool schema（含 `data_schema` 等扩展字段）清洗为 Anthropic
 /// Messages API 兼容格式，只保留白名单字段。

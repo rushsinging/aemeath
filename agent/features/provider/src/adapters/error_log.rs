@@ -7,13 +7,11 @@
 //!   migrated onto `HttpAttemptExecutor` get this HTTP/network diagnostic
 //!   logging automatically through `failure.log()`.
 
+pub(crate) use super::constants::LLM_API_ERROR_TARGET;
+use super::constants::{PREVIEW_LIMIT, SOURCE_CHAIN_LIMIT};
 use serde::Serialize;
 
 use super::http_attempt::{BoundedErrorBody, SafeResponseHeaders};
-
-pub(crate) const LLM_API_ERROR_TARGET: &str = "aemeath:llm-api-error";
-const PREVIEW_LIMIT: usize = 1_024;
-const SOURCE_CHAIN_LIMIT: usize = 8;
 
 pub(crate) struct ErrorLogContext<'a> {
     pub driver: &'a str,

@@ -608,7 +608,7 @@ mod tests {
         }
 
         fn log(&self, record: &log::Record) {
-            if record.target() == crate::adapters::error_log::LLM_API_ERROR_TARGET {
+            if record.target() == crate::adapters::constants::LLM_API_ERROR_TARGET {
                 let level = record.level();
                 let payload = format!("{}", record.args());
                 CAPTURED_LLM_API_ERROR_LOGS.with(|cell| cell.borrow_mut().push((level, payload)));

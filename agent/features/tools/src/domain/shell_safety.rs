@@ -1,10 +1,8 @@
-/// List of commands allowed at the start of a chain (directory changes, etc.)
-const CHAIN_START_COMMANDS: &[&str] = &["cd", "pushd", "popd", "dirs"];
-
 /// Detect redirection to a real device path (excluding the safe sinks
 /// `/dev/null`, `/dev/stdout`, `/dev/stderr`, `/dev/fd/*`, `/dev/tty`).
 /// Writes to these are universally safe; writes to e.g. `/dev/sda` are
 /// genuinely destructive and must be blocked.
+use super::constants::{CHAIN_START_COMMANDS, DEDICATED_FILE_READ_COMMANDS, READONLY_COMMANDS};
 pub fn is_suspicious_dev_write(cmd: &str) -> bool {
     const SAFE_DEVS: &[&str] = &["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"];
     let mut rest = cmd;
@@ -297,8 +295,6 @@ pub(crate) fn check_command_safety(command: &str) -> Option<&'static str> {
     None
 }
 
-const DEDICATED_FILE_READ_COMMANDS: &[&str] = &["cat", "head", "tail"];
-
 fn is_dedicated_file_read_command(command: &str) -> bool {
     let first = command.split('|').next().unwrap_or(command).trim();
     let first = first.split("&&").next().unwrap_or(first).trim();
@@ -311,84 +307,6 @@ fn is_dedicated_file_read_command(command: &str) -> bool {
     }
     cmd == "sed" && first.split_whitespace().any(|part| part == "-n")
 }
-
-/// List of commands considered read-only / safe to auto-approve.
-/// Aligned with Claude Code TS READONLY_COMMANDS.
-///
-/// NOTE: Commands that can execute arbitrary code or modify state are NOT included
-/// here and will go through normal approval flow. Removed dangerous entries:
-/// - `python -c`, `node -e`, `ruby -e`: can execute arbitrary code
-/// - `curl -s`, `wget -q`: can download content, access internal networks
-/// - `xargs`: takes arbitrary commands as arguments
-/// - `tee`: writes to files
-/// - `gh api`: can make POST/PUT/DELETE requests
-/// - `command`: shell builtin that can bypass command lookup
-const READONLY_COMMANDS: &[&str] = &[
-    "ls",
-    "cat",
-    "head",
-    "tail",
-    "wc",
-    "nl",
-    "stat",
-    "file",
-    "du",
-    "df",
-    "pwd",
-    "whoami",
-    "hostname",
-    "uname",
-    "date",
-    "uptime",
-    "env",
-    "printenv",
-    "echo",
-    "printf",
-    "which",
-    "where",
-    "type",
-    "find",
-    "locate",
-    "tree",
-    "grep",
-    "rg",
-    "ag",
-    "ack",
-    "git status",
-    "git log",
-    "git diff",
-    "git show",
-    "git branch",
-    "git remote",
-    "git tag",
-    "git blame",
-    "git stash list",
-    "cargo check",
-    "cargo test",
-    "cargo clippy",
-    "cargo doc",
-    "npm test",
-    "npm run lint",
-    "npx tsc --noEmit",
-    "jq",
-    "yq",
-    "sort",
-    "uniq",
-    "cut",
-    "tr",
-    "docker ps",
-    "docker images",
-    "docker logs",
-    "kubectl get",
-    "kubectl describe",
-    "kubectl logs",
-    "gh pr view",
-    "gh issue view",
-    "man",
-    "help",
-    "less",
-    "more",
-];
 
 /// Check if a command is read-only (safe to auto-approve)
 pub fn is_readonly_command(command: &str) -> bool {

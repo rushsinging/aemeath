@@ -6,6 +6,7 @@
 pub mod agent_port;
 pub mod command_pl;
 pub mod command_ports;
+mod constants;
 pub mod context;
 pub mod memory_source;
 pub mod ports;

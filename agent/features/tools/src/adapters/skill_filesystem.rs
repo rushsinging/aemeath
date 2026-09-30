@@ -10,6 +10,7 @@
 //! 其他 Skill 的加载；仅当被请求 identity 的入口自身读取或解析失败时，`load`
 //! 才返回对应的 typed [`SkillError`]。
 
+use super::constants::BUILTIN_COMMIT_URI;
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -444,8 +445,6 @@ fn apply_namespace(mut raw: RawSkill, namespace: Option<&str>) -> RawSkill {
 }
 
 // ── 内部：单文件解析（typed） ──────────────────────────────────────────
-
-const BUILTIN_COMMIT_URI: &str = "aemeath-builtin://commit";
 
 /// 解析单个 Skill 文件（frontmatter + 正文），失败返回 typed 错误。
 fn parse_skill_file(path: &Path, kind: SkillSourceKind) -> Result<RawSkill, SkillError> {

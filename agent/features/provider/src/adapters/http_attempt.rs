@@ -1,18 +1,10 @@
 //! Unified HTTP attempt execution for provider adapters.
 
+use super::constants::{ERROR_BODY_LIMIT, REQUEST_ID_HEADERS};
 use futures_util::StreamExt;
 use reqwest::header::{HeaderMap, CONTENT_TYPE, RETRY_AFTER};
 
 use super::error_log::{self, ErrorLogContext};
-
-pub(crate) const ERROR_BODY_LIMIT: usize = 16 * 1024;
-
-const REQUEST_ID_HEADERS: [&str; 4] = [
-    "request-id",
-    "x-request-id",
-    "anthropic-request-id",
-    "openai-request-id",
-];
 
 /// Single-attempt disposition — the adapter makes exactly one request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

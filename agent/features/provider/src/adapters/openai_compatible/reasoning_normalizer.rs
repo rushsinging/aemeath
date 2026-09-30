@@ -11,6 +11,7 @@
 //! 与应追加到最终 message 的净增量」，避免重复内容。
 
 /// 归一化器对单个 chunk 采取的去重动作。
+use super::constants::{MIN_OVERLAP_LEN, PREVIEW_CHARS};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DedupAction {
     /// 无去重 — raw delta 是真增量，原样通过。
@@ -72,9 +73,6 @@ impl Default for ReasoningDeltaNormalizer {
         Self::new()
     }
 }
-
-/// 用于诊断的 preview 参数：首尾各记录的字符数。
-const PREVIEW_CHARS: usize = 60;
 
 /// 生成 reasoning 内容的安全 preview（首尾各 `PREVIEW_CHARS` 字符）。
 pub fn safe_preview(text: &str) -> String {
@@ -187,9 +185,6 @@ impl ReasoningDeltaNormalizer {
 /// 例：`accumulated = "Hello Wor"`, `raw = "World!"`
 /// → 重叠 = `"Wor"`, 净增量 = `"ld!"`
 ///
-/// 为避免误伤短字符串的正常重复，设置最小重叠长度阈值。
-const MIN_OVERLAP_LEN: usize = 3;
-
 fn trim_overlap<'a>(accumulated: &str, raw: &'a str) -> Option<NormalizedReasoningDelta<'a>> {
     let acc_chars: Vec<char> = accumulated.chars().collect();
     let raw_chars: Vec<char> = raw.chars().collect();
