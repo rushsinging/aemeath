@@ -40,10 +40,9 @@ pub(crate) mod process_cleanup;
 // 同 list_mcp_resources：尚未注册的 MCP 资源读取 Tool，保留实现（refs #61 D3）。
 #[allow(dead_code)]
 pub mod read_mcp_resource;
-// Filesystem Skill adapter（Issue #912）：双端口实现已完成，但生产装配
-// （Composition Root）接线归 #913，故暂以 #[allow(dead_code)] 抑制非测试
-// 构建的未用告警。端口与 PL 类型已在 domain.rs / lib.rs 正式 re-export。
-#[allow(dead_code)]
+// Filesystem Skill adapter（#912/#913）：双端口实现已完成并经
+// adapters::composition 接线生产装配。端口与 PL 类型已在 domain.rs /
+// lib.rs 正式 re-export。
 pub mod skill_filesystem;
 pub mod skill_tool;
 pub mod task_block_by;
