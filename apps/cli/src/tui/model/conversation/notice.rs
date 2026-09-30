@@ -1,15 +1,8 @@
 use super::change::ConversationChange;
+use super::constants::BANNER_LINES;
 use super::model::ConversationModel;
 use super::system_reminder::strip_system_reminder_envelope_owned;
 use crate::tui::model::output_timeline::OutputTimelineItem;
-
-/// 启动横幅文本，作为对话起始的 System block 注入单一真相源。
-pub const BANNER_LINES: [&str; 4] = [
-    "Aemeath - AI Agent",
-    "",
-    "Type /help for available commands",
-    "",
-];
 
 impl ConversationModel {
     /// 注入启动横幅。横幅纳入 ConversationModel，`/clear` reset 会一并清除。

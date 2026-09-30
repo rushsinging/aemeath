@@ -3,7 +3,7 @@ use crate::tui::effect::effect::Effect;
 use crate::tui::model::conversation::intent::*;
 use crate::tui::model::runtime::status_notice::StatusNotice;
 use crate::tui::update::intent::AgentIntent;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 impl super::App {
     /// 设置临时 status notice，`TRANSIENT_NOTICE_TTL` 后由 SpinnerTick 自动回退到

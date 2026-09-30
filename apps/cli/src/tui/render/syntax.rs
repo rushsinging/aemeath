@@ -2,6 +2,7 @@
 //!
 //! 基于 syntect，将代码行高亮为 `Vec<SpanPart>` 供 ratatui 渲染。
 
+use super::constants::SYNTAX_SET;
 use std::str::FromStr;
 
 use once_cell::sync::Lazy;
@@ -10,36 +11,10 @@ use syntect::highlighting::{
     Color as SyntectColor, FontStyle, StyleModifier, Theme as SyntectTheme, ThemeItem,
     ThemeSettings,
 };
-use syntect::parsing::SyntaxDefinition;
-use syntect::parsing::SyntaxSet;
 
 use crate::tui::render::{output_area::SpanPart, theme};
 
-/// 全局语法集（懒加载，只加载一次）。
-///
-/// 在 syntect 默认语法集基础上合并内置的 TypeScript / TSX 语法（默认集不含 TS，
-/// 资产由 microsoft/TypeScript-TmLanguage 转换而来，见 `assets/syntaxes/`）。
-static SYNTAX_SET: Lazy<SyntaxSet> = Lazy::new(|| {
-    let mut builder = SyntaxSet::load_defaults_newlines().into_builder();
-    for (asset_name, source) in [
-        (
-            "TypeScript.sublime-syntax",
-            include_str!("../../../assets/syntaxes/TypeScript.sublime-syntax"),
-        ),
-        (
-            "TSX.sublime-syntax",
-            include_str!("../../../assets/syntaxes/TSX.sublime-syntax"),
-        ),
-    ] {
-        let definition = SyntaxDefinition::load_from_str(source, true, None)
-            .unwrap_or_else(|error| panic!("内置语法资产 {asset_name} 加载失败: {error}"));
-        builder.add(definition);
-    }
-    builder.build()
-});
-
-/// 全局主题集，使用 Catppuccin Macchiato，与 TUI palette 保持一致。
-static THEME: Lazy<SyntectTheme> = Lazy::new(catppuccin_macchiato_theme);
+pub(crate) static THEME: Lazy<SyntectTheme> = Lazy::new(catppuccin_macchiato_theme);
 
 fn catppuccin_macchiato_theme() -> SyntectTheme {
     SyntectTheme {

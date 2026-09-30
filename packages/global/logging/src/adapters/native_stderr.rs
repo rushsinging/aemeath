@@ -1,4 +1,5 @@
 use super::constants::{STDERR_FD, STDOUT_FD};
+use super::state::SAVED_STDERR;
 use crate::domain::{LoggingSettings, NativeStderrRouting};
 #[cfg(unix)]
 use std::fs::{File, OpenOptions};
@@ -10,12 +11,9 @@ use std::os::fd::AsRawFd;
 
 /// 路由前保存的原生 stderr 描述符副本，供致命错误重新在终端可见。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct SavedStderr {
+pub(crate) struct SavedStderr {
     fd: i32,
 }
-
-/// 进程级保存位：stderr 只路由一次，副本随首次路由写入。
-static SAVED_STDERR: std::sync::OnceLock<SavedStderr> = std::sync::OnceLock::new();
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct TerminalIdentity {

@@ -1,13 +1,12 @@
 use super::agent_activity::SubRunActivityWatermark;
 use super::change::ConversationChange;
+use super::constants::STREAM_CAP;
 use super::ids::{ChatId, ChatRunId, ToolCallId};
 use super::model::ConversationModel;
 use super::streaming_preview::{ToolStreamingPreviewBuffer, ToolStreamingPreviewPolicy};
 use super::tool_call::{AgentMeta, ToolCall, ToolCallChange, ToolCallStatus};
 use crate::tui::model::conversation::agent_activity::AgentActivityLine;
 use crate::tui::render::output::tool_display::{result_policy, ResultPolicy};
-
-const STREAM_CAP: usize = 4 * 1024;
 
 fn push_streaming_preview_activity(call: &mut ToolCall, activities: &[AgentActivityLine]) {
     let policy = match call.name.as_str() {

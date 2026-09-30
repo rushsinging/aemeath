@@ -3,31 +3,7 @@
 //! 位于 view_model 层，render 和 view_assembler 均可引用，
 //! 避免 view_assembler 反向依赖 render 层。
 
-use std::collections::HashMap;
-use std::sync::LazyLock;
-
-static TOOL_DISPLAY_NAMES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
-    HashMap::from([
-        ("Bash", "Run"),
-        ("Glob", "Find"),
-        ("Grep", "Search"),
-        ("EnterWorktree", "Enter Worktree"),
-        ("ExitWorktree", "Exit Worktree"),
-        ("EnterPlanMode", "Enter Plan Mode"),
-        ("ExitPlanMode", "Exit Plan Mode"),
-        ("AskUserQuestion", "Ask"),
-        ("TaskCreate", "New Task"),
-        ("TaskUpdate", "Update Task"),
-        ("TaskBlockBy", "Block Task"),
-        ("TaskGet", "Task"),
-        ("TaskListGet", "Tasks"),
-        ("TaskList", "Tasks"),
-        ("TaskLists", "Task Lists"),
-        ("TaskListCreate", "New Task List"),
-        ("TaskListComplete", "Complete List"),
-        ("TaskStop", "Stop Task"),
-    ])
-});
+use super::state::TOOL_DISPLAY_NAMES;
 
 /// 返回工具的用户可见 display name。未注册的工具原样返回内部名。
 pub fn tool_display_name(name: &str) -> &str {

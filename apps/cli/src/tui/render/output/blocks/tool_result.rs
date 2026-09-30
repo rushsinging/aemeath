@@ -3,6 +3,7 @@
 //! 作为 ToolCall 的 depth-1 子节点，结果行不再自拼缩进/marker——块级缩进由
 //! gutter 在组合期注入（续行等宽空白），结构上隔离 #65 的 fence 状态机泄漏。
 
+use super::constants::OMITTED_LINE_COUNT_LIMIT;
 use crate::tui::render::output::blocks::edit_diff::render_edit_diff;
 use crate::tui::render::output::primitives::wrap::{wrap_spans_with_prefix, WrapMode};
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
@@ -15,8 +16,6 @@ use ratatui::style::Style;
 use ratatui::text::Span;
 use serde_json::Value;
 use std::rc::Rc;
-
-const OMITTED_LINE_COUNT_LIMIT: usize = 10_000;
 
 /// 从结构化 JSON content 中提取显示文本。
 /// 优先级：display > message > text > 序列化 JSON

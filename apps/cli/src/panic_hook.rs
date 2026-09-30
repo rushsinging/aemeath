@@ -5,7 +5,7 @@
 use super::constants::TERMINAL_RESTORE_SEQ;
 use super::state::{CURRENT_RUN, SESSION_ID, TUI_ACTIVE};
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 
 pub fn set_session_id(id: String) {
     let _ = SESSION_ID.set(id);

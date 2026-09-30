@@ -18,7 +18,8 @@ pub mod types;
 
 // 重新导出核心类型，方便外部使用
 pub(crate) use render::SCROLLBAR_RESERVE_COLS;
-pub use types::{SpanPart, INDENT};
+pub use types::SpanPart;
+pub(crate) use types::INDENT;
 
 /// 可滚动输出区域，显示对话历史
 pub struct OutputArea {

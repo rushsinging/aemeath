@@ -7,14 +7,15 @@ use super::constants::{
 use super::formatter::format_diag_json_line;
 use super::lifecycle::{EmergencyWriter, FileSinkLifecycle, StdFileOps, StdMonotonicClock};
 use super::native_stderr::route_native_stderr;
+use super::state::LOGGER;
+use super::state::UNKNOWN_TARGET_REPORTS;
 use crate::domain::{DiagnosticSinkId, LoggingOutputMode, LoggingSettings, TargetCatalog};
 use log::{Log, Metadata, Record};
 use std::collections::HashMap;
 use std::io::{self, stderr, BufWriter, Stderr, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
-static UNKNOWN_TARGET_REPORTS: AtomicUsize = AtomicUsize::new(0);
+use std::sync::{Arc, Mutex};
 
 /// emergency 兜底专用的日志文件名。TUI（alternate screen）下 stderr 越过双缓冲直接糊屏，
 struct SinkEntry {
@@ -89,8 +90,6 @@ pub struct UnifiedLogger {
     output_mode: LoggingOutputMode,
     filter: env_logger::Logger,
 }
-
-static LOGGER: OnceLock<&'static UnifiedLogger> = OnceLock::new();
 
 impl UnifiedLogger {
     /// Installs the global logger. Failure to open one sink degrades only that sink.

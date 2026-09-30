@@ -1,4 +1,5 @@
 mod blocks;
+mod constants;
 mod convert;
 pub mod diff;
 pub mod fenced;

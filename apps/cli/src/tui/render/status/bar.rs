@@ -16,7 +16,7 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 pub use status_bar_format::WorktreeKind;
-use status_bar_format::{context_row_text, StatusLineContext, FIELD_SEPARATOR};
+pub(crate) use status_bar_format::{context_row_text, StatusLineContext, FIELD_SEPARATOR};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StatusBarRow {

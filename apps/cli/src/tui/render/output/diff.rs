@@ -1,14 +1,9 @@
+use super::constants::{DIFF_ADD_FG, DIFF_REMOVE_FG, LINE_NUM_COLOR};
 use similar::{ChangeTag, TextDiff};
 
-use crate::tui::render::output_area::types::{SpanPart, INDENT};
+pub(crate) use crate::tui::render::output_area::types::{SpanPart, INDENT};
 use crate::tui::render::syntax::{language_by_extension, SyntaxHighlighter};
-use crate::tui::render::theme;
 use ratatui::style::Color;
-
-/// Diff 行号 / 高亮颜色常量。
-const LINE_NUM_COLOR: Color = theme::TEXT_DIM;
-const DIFF_ADD_FG: Color = theme::DIFF_ADD_FG;
-const DIFF_REMOVE_FG: Color = theme::DIFF_REMOVE_FG;
 
 /// 对比 old_content 与 new_content，生成带行号和语法高亮的 diff 输出行。
 ///

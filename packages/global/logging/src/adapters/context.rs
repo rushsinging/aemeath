@@ -3,9 +3,11 @@
 //! 执行字段通过不可变 [`LogContext`] task-local scope 传播；scope 外使用空快照。
 //! `BOOT_TS`、`APP_VERSION` 与 `PID` 是进程级只读元数据，不承载执行上下文。
 
+use super::state::APP_VERSION;
+use super::state::BOOT_TS;
+use super::state::PID;
 use crate::domain::{LogContext, LogContextPatch};
 use std::future::Future;
-use std::sync::OnceLock;
 
 tokio::task_local! {
     static SCOPED_CONTEXT: LogContext;
@@ -44,10 +46,6 @@ where
 {
     tokio::spawn(instrument(context, future))
 }
-
-static BOOT_TS: OnceLock<String> = OnceLock::new();
-static APP_VERSION: OnceLock<String> = OnceLock::new();
-static PID: OnceLock<u32> = OnceLock::new();
 
 /// 设置进程启动时间戳（本地时间 RFC3339）。`init_logging` 时调用一次。
 pub fn set_boot_ts(ts: String) {

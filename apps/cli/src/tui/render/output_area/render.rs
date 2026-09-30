@@ -1,3 +1,4 @@
+mod constants;
 mod diagnostics;
 mod paint;
 mod scrollbar;

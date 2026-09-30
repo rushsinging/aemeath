@@ -3,44 +3,8 @@
 //! Run 生命周期与活动文案均由 typed Run snapshot 派生；这里只承载每 90ms
 //! SpinnerTick 推进的 frame 与活动区间内稳定的随机 verb。
 
+use super::constants::{DEFAULT_VERB, SPINNER_VERBS};
 use rand::prelude::IndexedRandom;
-
-/// 装饰性动词池。verb 选定移入 view_state 后，此处为该池的唯一真相来源
-/// （TaskData 4.1 已删除原 `render/output_area/spinner.rs::SPINNER_VERBS`）。
-const SPINNER_VERBS: &[&str] = &[
-    "Thinking",
-    "Pondering",
-    "Crafting",
-    "Computing",
-    "Brewing",
-    "Weaving",
-    "Conjuring",
-    "Forging",
-    "Hatching",
-    "Cooking",
-    "Channeling",
-    "Ruminating",
-    "Composing",
-    "Imagining",
-    "Processing",
-    "Puzzling",
-    "Mulling",
-    "Noodling",
-    "Tinkering",
-    "Crystallizing",
-    "Synthesizing",
-    "Architecting",
-    "Orchestrating",
-    "Incubating",
-    "Fermenting",
-    "Simmering",
-    "Percolating",
-    "Cogitating",
-    "Meandering",
-    "Harmonizing",
-];
-
-const DEFAULT_VERB: &str = "Thinking";
 
 /// Spinner 动画易变态。`verb` 在 active 期间稳定，仅在 `pick_verb` 调用时重选。
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

@@ -1,9 +1,4 @@
-/// 默认终端宽度
-pub const DEFAULT_WIDTH: usize = 120;
-
-/// 工具调用详情行的缩进
-pub const INDENT: &str = "  ";
-
+pub(crate) use super::constants::{DEFAULT_WIDTH, INDENT};
 use ratatui::style::Color;
 
 /// 带颜色的一段文本，用于行内分段着色（如 diff 语法高亮）。

@@ -493,7 +493,7 @@ fn output_view_item_id_for_change(change: &ConversationChange) -> Option<String>
 }
 
 #[cfg(test)]
-use super::output_view_change::OUTPUT_VIEW_JOURNAL_CAPACITY;
+pub(crate) use super::output_view_change::OUTPUT_VIEW_JOURNAL_CAPACITY;
 
 #[cfg(test)]
 #[path = "output_view_change_tests.rs"]

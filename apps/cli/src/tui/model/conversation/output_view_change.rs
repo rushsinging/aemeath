@@ -1,6 +1,5 @@
+pub(crate) use super::constants::OUTPUT_VIEW_JOURNAL_CAPACITY;
 use std::collections::VecDeque;
-
-pub(super) const OUTPUT_VIEW_JOURNAL_CAPACITY: usize = 256;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct OutputViewCursor(pub(super) u64);

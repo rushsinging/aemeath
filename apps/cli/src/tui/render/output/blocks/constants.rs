@@ -12,3 +12,4 @@ pub(crate) const RENDER_MAX_SIDE_LINES: usize = 100_000;
 pub(crate) const RENDER_MAX_TOTAL_BYTES: usize = 16 * 1024 * 1024;
 pub(crate) const RENDER_MAX_LINE_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const RETAINED_LINES_PER_END: usize = 250;
+pub(crate) const OMITTED_LINE_COUNT_LIMIT: usize = 10_000;

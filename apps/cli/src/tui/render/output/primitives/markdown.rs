@@ -5,6 +5,7 @@
 //! - 列表项：`- ` / `* ` / `+ ` 无序、`N. ` 有序，保留缩进层级，标记着强调色，
 //!   正文（含 bold/code/link）仍走 inline markdown。
 
+use super::constants::{BULLET, QUOTE_BAR};
 use crate::tui::render::output::markdown as md;
 use crate::tui::render::output::primitives::wrap::{wrap_spans_with_prefix, WrapMode};
 use crate::tui::render::output::rendered::RenderedLine;
@@ -12,11 +13,6 @@ use crate::tui::render::theme;
 use crate::tui::text::split_at_ascii;
 use ratatui::style::Style;
 use ratatui::text::Span;
-
-/// 引用块竖线标记（弱化色），每层一个。
-const QUOTE_BAR: &str = "│ ";
-/// 无序列表渲染用圆点标记。
-const BULLET: &str = "• ";
 
 pub fn markdown(text: &str, base_style: Style, width: u16) -> Vec<RenderedLine> {
     // 空文本（包括无换行符的空串）仍产出一行，保持与历史行为一致。

@@ -1,9 +1,8 @@
 //! block 级渲染缓存：key=(block_version,width)，命中复用，未命中重渲。
 
+pub(crate) use super::constants::DEFAULT_RENDER_CACHE_CAPACITY;
 use crate::tui::render::output::bounded_lru::BoundedLruMap;
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock};
-
-pub(crate) const DEFAULT_RENDER_CACHE_CAPACITY: usize = 4_096;
 
 /// block cache key。`text_width` 与 `RenderCtx.text_width` 同义：
 /// 已扣除 gutter 的可用文本宽度（参见 #329 语义约定）。

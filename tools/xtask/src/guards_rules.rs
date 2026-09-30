@@ -1003,11 +1003,25 @@ fn enforce_constant_placement(
     if leaf == "constants.rs" || leaf == "consts.rs" || leaf == "state.rs" {
         return Ok(Vec::new());
     }
+    // 守卫工具自身的表数据（同 guard 真相源口径）。
+    if relative_file.starts_with("tools/xtask/") {
+        return Ok(Vec::new());
+    }
+    // logging 的 TargetCatalog 真相源（routing/routing_guard）：其常量位置
+    // 本身就是 routing_guard 测试校验的契约，迁移破坏守卫。
+    if relative_file.ends_with("logging/src/domain/routing.rs")
+        || relative_file.ends_with("logging/src/domain/routing_guard.rs")
+    {
+        return Ok(Vec::new());
+    }
     let Some(source) = context.text() else {
         return Ok(Vec::new());
     };
     let production = strip_inline_cfg_test_region(source);
     let lines: Vec<&str> = production.lines().collect();
+
+    /// 惰性初始化内函数调用检测（进程级编译一次）。
+    static CALL_PATTERN: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
 
     let mut violations = Vec::new();
     for (index, line) in lines.iter().enumerate() {
@@ -1017,6 +1031,31 @@ fn enforce_constant_placement(
         let name = constant_name(line);
         // `const fn` 是常量函数而非常量定义，不治理。
         if name.is_empty() || name == "fn" {
+            continue;
+        }
+        // 类型占位常量（const X: X 形态，#[allow(non_upper_case_globals)]）：
+        // 值命名空间兼容占位（如 ReflectionOutput），是类型 API 的一部分而非数据常量。
+        if line.contains(&format!("const {name}: {name}")) {
+            continue;
+        }
+        // 函数依赖：初始化表达式调用同文件定义的函数 → 与行为共置豁免
+        // （如 THEME 的 Lazy::new(catppuccin_macchiato_theme)、reflection 构造器）。
+        let init_window: String = lines[index..(index + 3).min(lines.len())].join(" ");
+        // 仅惰性初始化形态（Lazy/OnceLock/LazyLock::new）内的函数调用参与判定，
+        // 避免后续普通代码行的短名函数（如测试 fn g）误判。
+        let lazy_init = ["Lazy::new", "OnceLock::new", "LazyLock::new"]
+            .iter()
+            .any(|marker| init_window.contains(marker));
+        #[allow(clippy::regex_creation_in_loops)] // OnceLock 保证仅首次编译
+        let pattern = CALL_PATTERN.get_or_init(|| {
+            regex::Regex::new(r"\b[a-z][a-z0-9_]*\s*\(").expect("local call regex")
+        });
+        let calls_local_fn = lazy_init
+            && pattern.find_iter(&init_window).any(|found| {
+                let fname = found.as_str().trim_end_matches('(');
+                lines.iter().any(|l| l.starts_with(&format!("fn {fname}")))
+            });
+        if calls_local_fn {
             continue;
         }
         violations.push(Violation {

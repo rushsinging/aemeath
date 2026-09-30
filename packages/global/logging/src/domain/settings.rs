@@ -1,3 +1,4 @@
+use super::constants::NATIVE_STDERR_FILE;
 use log::LevelFilter;
 use std::path::{Path, PathBuf};
 
@@ -13,8 +14,6 @@ pub enum NativeStderrRouting {
     Preserve,
     AppendToFile,
 }
-
-const NATIVE_STDERR_FILE: &str = "native-stderr.log";
 
 /// Logging 初始化所需的完整不可变静态设置。
 #[derive(Clone, Debug, PartialEq, Eq)]

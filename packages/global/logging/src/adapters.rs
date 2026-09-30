@@ -5,6 +5,7 @@ mod file_sink;
 mod formatter;
 mod lifecycle;
 mod native_stderr;
+mod state;
 
 pub use context::{
     app_version, boot_ts, capture, instrument, set_app_version, set_boot_ts, spawn_instrumented,

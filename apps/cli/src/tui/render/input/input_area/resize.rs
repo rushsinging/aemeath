@@ -1,9 +1,7 @@
+use super::constants::{INPUT_AREA_MAX_HEIGHT, INPUT_AREA_MIN_HEIGHT};
 use super::InputArea;
 use crate::tui::render::input::input_area::wrap::wrap_input_lines_for_width;
 use crate::tui::view_model::InputAreaViewModel;
-
-const INPUT_AREA_MIN_HEIGHT: u16 = 3;
-const INPUT_AREA_MAX_HEIGHT: u16 = 8;
 
 impl InputArea {
     pub fn input_content_width(area_width: u16) -> u16 {

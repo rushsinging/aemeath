@@ -1,3 +1,4 @@
+use super::constants::MAX_LOADED_HISTORY_STEPS;
 use crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause;
 use sdk::{
     LocalResumeContentBlock as ContentBlock, LocalResumeMessage as Message,
@@ -5,8 +6,6 @@ use sdk::{
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-
-const MAX_LOADED_HISTORY_STEPS: usize = 128;
 
 #[derive(Clone, Debug)]
 pub(crate) struct DisplayHistoryStepSlot {

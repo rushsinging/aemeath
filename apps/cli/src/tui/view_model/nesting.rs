@@ -1,8 +1,6 @@
 //! ViewModel block nesting legality rules.
+pub use super::constants::MAX_BLOCK_DEPTH;
 use crate::tui::view_model::output::OutputBlockKind;
-
-/// 最大嵌套深度：top(0) → tool_call(1) → result-content(2)。深度从 0 计，最深合法子层级为 2。
-pub const MAX_BLOCK_DEPTH: usize = 3;
 
 /// 仅 ToolCall 可含子（ToolResult 结果子块，或 AssistantMessage 文本 / Diagnostic / SystemNotice）；其余为叶子。
 pub fn allowed_child(parent: &OutputBlockKind, child: &OutputBlockKind) -> bool {

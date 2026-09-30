@@ -1,7 +1,5 @@
+use super::constants::{CLOSE_TAG, OPEN_TAG};
 use std::borrow::Cow;
-
-const OPEN_TAG: &str = "<system-reminder>";
-const CLOSE_TAG: &str = "</system-reminder>";
 
 pub fn strip_system_reminder_envelope(text: &str) -> Cow<'_, str> {
     let trimmed = text.trim();
