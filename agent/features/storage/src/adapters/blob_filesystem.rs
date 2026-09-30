@@ -35,9 +35,46 @@ enum FaultPoint {
 }
 
 #[cfg(any(test, feature = "test-fault-injection"))]
-fn inject_fault(point: FaultPoint) -> Result<(), StorageError> {
-    let requested = std::env::var_os("AEMEATH_STORAGE_FAULT_POINT");
-    let name = match point {
+const FAULT_POINT_ENV: &str = "AEMEATH_STORAGE_FAULT_POINT";
+#[cfg(any(test, feature = "test-fault-injection"))]
+const FAULT_ABORT_ENV: &str = "AEMEATH_STORAGE_FAULT_ABORT";
+
+/// 故障注入配置：**adapter 实例状态**，不是进程全局状态。
+///
+/// 构造时快照一次（`from_env` 供崩溃恢复子进程从启动 env 接收父进程配置），
+/// 此后运行期绝不读进程 env——从机制上消除跨测试 env 污染与 env 并发读写的数据竞争。
+#[cfg(any(test, feature = "test-fault-injection"))]
+#[derive(Clone, Debug, Default)]
+pub(crate) struct BlobFaultInjector {
+    requested: Option<String>,
+    abort: bool,
+}
+
+#[cfg(any(test, feature = "test-fault-injection"))]
+impl BlobFaultInjector {
+    /// 请求在指定故障点注入（如 `cleanup`、`after_replace`）。
+    /// 仅单元测试显式构造使用；feature 形态经 `from_env` 接收子进程配置。
+    #[cfg(test)]
+    pub(crate) fn requested(point: impl Into<String>) -> Self {
+        Self {
+            requested: Some(point.into()),
+            abort: false,
+        }
+    }
+
+    /// 构造时从启动 env 快照一次：子进程无法接收 Rust 对象，
+    /// 崩溃恢复演练经父进程 spawn 时的 env 传递注入配置。
+    pub(crate) fn from_env() -> Self {
+        Self {
+            requested: std::env::var(FAULT_POINT_ENV).ok(),
+            abort: std::env::var_os(FAULT_ABORT_ENV).is_some(),
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-fault-injection"))]
+fn fault_point_name(point: &FaultPoint) -> &'static str {
+    match point {
         FaultPoint::StageWrite => "stage_write",
         FaultPoint::FileSync => "file_sync",
         FaultPoint::UnsupportedDurability => "unsupported_durability",
@@ -48,39 +85,61 @@ fn inject_fault(point: FaultPoint) -> Result<(), StorageError> {
         FaultPoint::CommittedJournal => "committed_journal",
         FaultPoint::PreviousPromotion => "previous_promotion",
         FaultPoint::Cleanup => "cleanup",
-    };
-    if requested.as_deref() != Some(std::ffi::OsStr::new(name)) {
-        return Ok(());
     }
-    if matches!(point, FaultPoint::UnsupportedDurability) {
-        return Err(StorageError::new(
-            StorageErrorKind::UnsupportedDurability,
-            "injected unsupported durability capability",
-        ));
-    }
-    if std::env::var_os("AEMEATH_STORAGE_FAULT_ABORT").is_some() {
-        std::process::abort();
-    }
-    Err(StorageError::new(
-        StorageErrorKind::Io,
-        format!("injected storage fault: {name}"),
-    ))
-}
-
-#[cfg(not(any(test, feature = "test-fault-injection")))]
-fn inject_fault(_point: FaultPoint) -> Result<(), StorageError> {
-    Ok(())
 }
 
 pub struct FileSystemBlobAdapter {
     root: Dir,
+    #[cfg(any(test, feature = "test-fault-injection"))]
+    faults: BlobFaultInjector,
 }
 
 impl FileSystemBlobAdapter {
     pub fn new(root: impl AsRef<Path>) -> Result<Self, StorageError> {
         std::fs::create_dir_all(root.as_ref()).map_err(map_io)?;
         let root = Dir::open_ambient_dir(root.as_ref(), ambient_authority()).map_err(map_io)?;
-        Ok(Self { root })
+        Ok(Self {
+            root,
+            #[cfg(any(test, feature = "test-fault-injection"))]
+            faults: BlobFaultInjector::from_env(),
+        })
+    }
+
+    /// 注入配置仅作用于本 adapter 实例（测试内显式切换故障点）。
+    #[cfg(test)]
+    pub(crate) fn set_faults(&mut self, faults: BlobFaultInjector) {
+        self.faults = faults;
+    }
+
+    #[cfg(any(test, feature = "test-fault-injection"))]
+    fn inject_fault(&self, point: FaultPoint) -> Result<(), StorageError> {
+        let name = fault_point_name(&point);
+        let requested_matches = self
+            .faults
+            .requested
+            .as_deref()
+            .is_some_and(|requested| requested == name);
+        if !requested_matches {
+            return Ok(());
+        }
+        if matches!(point, FaultPoint::UnsupportedDurability) {
+            return Err(StorageError::new(
+                StorageErrorKind::UnsupportedDurability,
+                "injected unsupported durability capability",
+            ));
+        }
+        if self.faults.abort {
+            std::process::abort();
+        }
+        Err(StorageError::new(
+            StorageErrorKind::Io,
+            format!("injected storage fault: {name}"),
+        ))
+    }
+
+    #[cfg(not(any(test, feature = "test-fault-injection")))]
+    fn inject_fault(&self, _point: FaultPoint) -> Result<(), StorageError> {
+        Ok(())
     }
 
     fn relative_primary(key: &StorageKeyData) -> PathBuf {
@@ -367,11 +426,11 @@ impl FileSystemBlobAdapter {
             options.write(true).create_new(true);
             let mut stage = parent.open_with(&stage_name, &options).map_err(map_io)?;
             stage.write_all(bytes).map_err(map_io)?;
-            inject_fault(FaultPoint::StageWrite)?;
+            self.inject_fault(FaultPoint::StageWrite)?;
             if durability == DurabilityData::ProcessCrashSafe {
-                inject_fault(FaultPoint::UnsupportedDurability)?;
+                self.inject_fault(FaultPoint::UnsupportedDurability)?;
                 stage.sync_all().map_err(map_durability)?;
-                inject_fault(FaultPoint::FileSync)?;
+                self.inject_fault(FaultPoint::FileSync)?;
             }
             drop(stage);
             let primary_exists = parent.symlink_metadata(&primary_name).is_ok();
@@ -401,7 +460,7 @@ impl FileSystemBlobAdapter {
                 parent
                     .hard_link(&primary_name, &parent, &previous_next_name)
                     .map_err(map_io)?;
-                inject_fault(FaultPoint::PreviousNext)?;
+                self.inject_fault(FaultPoint::PreviousNext)?;
                 if durability == DurabilityData::ProcessCrashSafe {
                     let previous_next = parent.open(&previous_next_name).map_err(map_io)?;
                     previous_next.sync_all().map_err(map_durability)?;
@@ -412,14 +471,14 @@ impl FileSystemBlobAdapter {
                     &journal,
                     durability == DurabilityData::ProcessCrashSafe,
                 )?;
-                inject_fault(FaultPoint::PreparedJournal)?;
+                self.inject_fault(FaultPoint::PreparedJournal)?;
                 sync_directory(&parent, durability)?;
-                inject_fault(FaultPoint::DirectorySync)?;
+                self.inject_fault(FaultPoint::DirectorySync)?;
                 parent
                     .rename(&stage_name, &parent, &primary_name)
                     .map_err(map_io)?;
                 crossed_commit = true;
-                inject_fault(FaultPoint::AfterReplace)?;
+                self.inject_fault(FaultPoint::AfterReplace)?;
                 if let Ok(metadata) = parent.symlink_metadata(&previous_name) {
                     if metadata.file_type().is_symlink() {
                         return Err(StorageError::new(
@@ -432,7 +491,7 @@ impl FileSystemBlobAdapter {
                 parent
                     .rename(&previous_next_name, &parent, &previous_name)
                     .map_err(map_io)?;
-                inject_fault(FaultPoint::PreviousPromotion)?;
+                self.inject_fault(FaultPoint::PreviousPromotion)?;
             } else {
                 write_journal(
                     &parent,
@@ -440,16 +499,16 @@ impl FileSystemBlobAdapter {
                     &journal,
                     durability == DurabilityData::ProcessCrashSafe,
                 )?;
-                inject_fault(FaultPoint::PreparedJournal)?;
+                self.inject_fault(FaultPoint::PreparedJournal)?;
                 sync_directory(&parent, durability)?;
-                inject_fault(FaultPoint::DirectorySync)?;
+                self.inject_fault(FaultPoint::DirectorySync)?;
                 parent
                     .rename(&stage_name, &parent, &primary_name)
                     .map_err(map_io)?;
                 crossed_commit = true;
-                inject_fault(FaultPoint::AfterReplace)?;
+                self.inject_fault(FaultPoint::AfterReplace)?;
             }
-            inject_fault(FaultPoint::CommittedJournal)?;
+            self.inject_fault(FaultPoint::CommittedJournal)?;
             let committed = BlobJournal {
                 phase: JournalPhase::Committed,
                 ..journal
@@ -460,13 +519,13 @@ impl FileSystemBlobAdapter {
                 &committed,
                 durability == DurabilityData::ProcessCrashSafe,
             )?;
-            inject_fault(FaultPoint::CommittedJournal)?;
+            self.inject_fault(FaultPoint::CommittedJournal)?;
             let _ = parent.remove_file(promoted_marker_name(&primary_name));
             sync_directory(&parent, durability)?;
             parent
                 .remove_file(journal_name(&primary_name))
                 .map_err(map_io)?;
-            inject_fault(FaultPoint::Cleanup)?;
+            self.inject_fault(FaultPoint::Cleanup)?;
             sync_directory(&parent, durability)?;
             Ok(WriteReceiptData::committed(None))
         })();

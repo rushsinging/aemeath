@@ -1,8 +1,6 @@
-use std::ffi::OsString;
 use std::str::FromStr;
-use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use super::FileSystemDatasetAdapter;
+use super::{DatasetFaultInjector, FileSystemDatasetAdapter};
 use crate::domain::{
     revision_member_digest, DatasetChangeSetData, DatasetCommitVisibilityData, DatasetKeyData,
     DatasetManifestData, DatasetMemberChangeData, DatasetMemberData, DatasetMemberReferenceData,
@@ -11,49 +9,6 @@ use crate::domain::{
 };
 use crate::ports::AtomicDatasetPort;
 use crate::test_log;
-
-fn fault_env_lock() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-}
-
-fn without_fault_env() -> FaultEnvGuard {
-    let lock = fault_env_lock();
-    let previous = std::env::var_os("AEMEATH_STORAGE_DATASET_FAULT_POINT");
-    std::env::remove_var("AEMEATH_STORAGE_DATASET_FAULT_POINT");
-    FaultEnvGuard {
-        previous,
-        _lock: lock,
-    }
-}
-
-struct FaultEnvGuard {
-    previous: Option<OsString>,
-    _lock: MutexGuard<'static, ()>,
-}
-
-impl FaultEnvGuard {
-    fn after_prepared() -> Self {
-        let lock = fault_env_lock();
-        let previous = std::env::var_os("AEMEATH_STORAGE_DATASET_FAULT_POINT");
-        std::env::set_var("AEMEATH_STORAGE_DATASET_FAULT_POINT", "after_prepared");
-        Self {
-            previous,
-            _lock: lock,
-        }
-    }
-}
-
-impl Drop for FaultEnvGuard {
-    fn drop(&mut self) {
-        match self.previous.take() {
-            Some(value) => std::env::set_var("AEMEATH_STORAGE_DATASET_FAULT_POINT", value),
-            None => std::env::remove_var("AEMEATH_STORAGE_DATASET_FAULT_POINT"),
-        }
-    }
-}
 
 fn root() -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
@@ -89,12 +44,6 @@ fn member_reference(
 
 #[tokio::test]
 async fn incremental_commit_persists_only_changed_member_content() {
-    // 全程持锁排除故障注入 env：本测试期望提交完整落盘（Visible），而并行的
-    // 故障测试（FaultEnvGuard::after_prepared）会在进程级 env 上设置
-    // AEMEATH_STORAGE_DATASET_FAULT_POINT；未持锁时该窗口会污染本测试的第二次
-    // 提交，在 AfterPrepared 注入点被中断并经 crossed_commit 降级为
-    // Ok(RecoveryPending)，导致成员内容断言间歇性失败。
-    let _fault_env = without_fault_env();
     let root = root();
     let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
     let key = key();
@@ -298,13 +247,8 @@ fn dataset_member_content_file_count(dataset_path: &std::path::Path) -> usize {
         .unwrap_or_default()
 }
 
-#[allow(
-    clippy::await_holding_lock,
-    reason = "故障环境变量是进程全局状态，迁移提交测试必须在整个异步提交期间排除故障注入"
-)]
 #[tokio::test(flavor = "current_thread")]
 async fn legacy_manifest_without_member_evidence_reads_and_migrates_on_incremental_commit() {
-    let _fault_env = without_fault_env();
     let root = root();
     let dataset_path = root.join("memory").join("conv-log");
     let primary_blobs = dataset_path.join("primary").join("blobs");
@@ -376,13 +320,8 @@ async fn legacy_manifest_without_member_evidence_reads_and_migrates_on_increment
     let _ = std::fs::remove_dir_all(&root);
 }
 
-#[allow(
-    clippy::await_holding_lock,
-    reason = "故障环境变量是进程全局状态，迁移提交测试必须在整个异步提交期间排除故障注入"
-)]
 #[tokio::test(flavor = "current_thread")]
 async fn legacy_manifest_with_revision_evidence_but_without_content_digests_reads_and_migrates() {
-    let _fault_env = without_fault_env();
     let root = root();
     let dataset_path = root.join("memory").join("conv-log");
     let primary_blobs = dataset_path.join("primary").join("blobs");
@@ -715,14 +654,10 @@ async fn incremental_commit_removes_only_explicit_omitted_member() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-#[allow(
-    clippy::await_holding_lock,
-    reason = "故障环境变量是进程全局状态，测试必须在整个异步提交期间独占它"
-)]
 #[tokio::test(flavor = "current_thread")]
 async fn incremental_commit_after_prepared_recovers_complete_generation() {
     let root = root();
-    let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
+    let mut adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
     let key = key();
     let empty_revision = adapter
         .read_manifest(&key)
@@ -752,7 +687,7 @@ async fn incremental_commit_after_prepared_recovers_complete_generation() {
     )
     .expect("valid incremental change set");
 
-    let fault = FaultEnvGuard::after_prepared();
+    adapter.set_faults(DatasetFaultInjector::requested("after_prepared"));
     let receipt = adapter
         .commit_incremental(
             &key,
@@ -765,7 +700,7 @@ async fn incremental_commit_after_prepared_recovers_complete_generation() {
         receipt.visibility(),
         DatasetCommitVisibilityData::RecoveryPending
     );
-    drop(fault);
+    adapter.clear_faults();
 
     let requested = [
         SafePathSegmentData::from_str("active").expect("safe member name"),
@@ -829,14 +764,10 @@ fn init_failure_emits_enter_then_failed_at_error() {
     );
 }
 
-#[allow(
-    clippy::await_holding_lock,
-    reason = "故障环境变量是进程全局状态，测试必须在整个异步提交期间独占它"
-)]
 #[tokio::test(flavor = "current_thread")]
 async fn commit_recovery_pending_emits_warn() {
     let root = root();
-    let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
+    let mut adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
     let key = key();
 
     let expected: DatasetRevisionData = adapter
@@ -862,7 +793,7 @@ async fn commit_recovery_pending_emits_warn() {
         .revision()
         .clone();
 
-    let _fault = FaultEnvGuard::after_prepared();
+    adapter.set_faults(DatasetFaultInjector::requested("after_prepared"));
     let capture = test_log::begin();
     let receipt = adapter
         .commit_atomic(
@@ -892,13 +823,8 @@ async fn commit_recovery_pending_emits_warn() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-#[allow(
-    clippy::await_holding_lock,
-    reason = "故障环境变量是进程全局状态，孤儿回收测试在多次异步提交期间必须排除故障注入"
-)]
 #[tokio::test(flavor = "current_thread")]
 async fn incremental_commit_collects_member_content_orphaned_by_older_generation() {
-    let _fault_env = without_fault_env();
     let root = root();
     let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
     let key = key();
@@ -1014,13 +940,8 @@ async fn incremental_commit_collects_member_content_orphaned_by_older_generation
     let _ = std::fs::remove_dir_all(&root);
 }
 
-#[allow(
-    clippy::await_holding_lock,
-    reason = "故障环境变量是进程全局状态，存量孤儿清理测试在读入口期间必须排除故障注入"
-)]
 #[tokio::test(flavor = "current_thread")]
 async fn dataset_read_entry_collects_pre_existing_orphan_member_content() {
-    let _fault_env = without_fault_env();
     let root = root();
     let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
     let key = key();
@@ -1070,4 +991,55 @@ async fn dataset_read_entry_collects_pre_existing_orphan_member_content() {
     );
 
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[tokio::test]
+async fn fault_injection_scopes_to_the_adapter_that_requested_it() {
+    // 根因修复的行为表达：故障注入是 adapter 实例状态，不是进程全局 env——
+    // 同进程内普通 adapter 的提交必须完整落盘，显式注入的 adapter 必须命中注入。
+    let clean_root = root();
+    let injected_root = root();
+    let clean = FileSystemDatasetAdapter::new(&clean_root).expect("clean adapter");
+    let mut injected = FileSystemDatasetAdapter::new(&injected_root).expect("injected adapter");
+    injected.set_faults(DatasetFaultInjector::requested("after_prepared"));
+
+    let empty_revision = clean
+        .read_manifest(&key())
+        .await
+        .expect("read empty manifest")
+        .revision()
+        .clone();
+
+    let clean_receipt = clean
+        .commit_atomic(
+            &key(),
+            &empty_revision,
+            &[member("active", b"a1")],
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
+        .await
+        .expect("clean adapter commit");
+    assert_eq!(
+        clean_receipt.visibility(),
+        DatasetCommitVisibilityData::Visible,
+        "普通 adapter 不得受同进程显式注入影响"
+    );
+
+    let injected_receipt = injected
+        .commit_atomic(
+            &key(),
+            &empty_revision,
+            &[member("active", b"a1")],
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
+        .await
+        .expect("injected adapter commit");
+    assert_eq!(
+        injected_receipt.visibility(),
+        DatasetCommitVisibilityData::RecoveryPending,
+        "显式注入必须命中目标 adapter"
+    );
+
+    let _ = std::fs::remove_dir_all(&clean_root);
+    let _ = std::fs::remove_dir_all(&injected_root);
 }

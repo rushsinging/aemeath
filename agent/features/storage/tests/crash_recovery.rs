@@ -3,8 +3,8 @@ use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use storage::{
-    AtomicBlobPort, DurabilityData, GenerationData, ReadOutcomeData, SafePathSegmentData,
-    StorageKeyData, StorageNamespaceData, WriteOptionsData,
+    DurabilityData, GenerationData, ReadOutcomeData, SafePathSegmentData, StorageKeyData,
+    StorageNamespaceData, WriteOptionsData,
 };
 use uuid::Uuid;
 
@@ -388,7 +388,7 @@ fn os_lock_serializes_another_process_for_same_key() {
     let lock_attempt_for_read = lock_attempt.clone();
     let reader = std::thread::spawn(move || {
         std::env::set_var("AEMEATH_STORAGE_BLOB_LOCK_ATTEMPT", &lock_attempt_for_read);
-        let adapter = FileSystemBlobAdapter::new(&root_for_read).unwrap();
+        let adapter = storage::wire_file_system_blob(&root_for_read).unwrap();
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let result = runtime.block_on(adapter.read(&key(), GenerationData::Primary));
         std::env::remove_var("AEMEATH_STORAGE_BLOB_LOCK_ATTEMPT");
@@ -414,7 +414,7 @@ fn os_lock_serializes_another_process_for_same_key() {
 #[tokio::test]
 async fn orphan_previous_next_is_cleaned_only_when_matching_primary() {
     let matching_root = root("orphan-match");
-    let adapter = FileSystemBlobAdapter::new(&matching_root).unwrap();
+    let adapter = storage::wire_file_system_blob(&matching_root).unwrap();
     adapter
         .write_atomic(
             &key(),
@@ -435,7 +435,7 @@ async fn orphan_previous_next_is_cleaned_only_when_matching_primary() {
     std::fs::remove_dir_all(&matching_root).unwrap();
 
     let mismatch_root = root("orphan-mismatch");
-    let adapter = FileSystemBlobAdapter::new(&mismatch_root).unwrap();
+    let adapter = storage::wire_file_system_blob(&mismatch_root).unwrap();
     adapter
         .write_atomic(
             &key(),
