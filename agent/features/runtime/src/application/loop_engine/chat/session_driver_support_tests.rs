@@ -375,9 +375,6 @@ fn test_shell_with_catalog(
                 crate::adapters::input_buffer::RuntimeInputEventDrainPort::new(ingress),
             )
         }),
-        session_reminders: Arc::new(std::sync::RwLock::new(
-            share::memory::SessionReminders::default(),
-        )),
         runtime_context_factory: Arc::new(
             crate::application::run::context_factory::RuntimeContextFactory::new(
                 factory.catalog_port(),
@@ -481,9 +478,6 @@ fn test_shell_with_task_store(
                 crate::adapters::input_buffer::RuntimeInputEventDrainPort::new(ingress),
             )
         }),
-        session_reminders: Arc::new(std::sync::RwLock::new(
-            share::memory::SessionReminders::default(),
-        )),
         runtime_context_factory: Arc::new(
             crate::application::run::context_factory::RuntimeContextFactory::new(
                 factory.catalog_port(),
@@ -506,9 +500,6 @@ impl crate::ports::SessionQueryPort for FakeSessionQuery {
         Ok(Vec::new())
     }
     async fn list_sessions(&self) -> Result<Vec<sdk::SessionSummary>, sdk::SdkError> {
-        Ok(Vec::new())
-    }
-    async fn list_reminders(&self) -> Result<Vec<sdk::ReminderView>, sdk::SdkError> {
         Ok(Vec::new())
     }
     async fn list_reflection_history(
@@ -538,7 +529,6 @@ where
         input_events,
         session,
         read_files: Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
-        session_reminders: Arc::new(std::sync::Mutex::new(::tools::published::session_reminder::SessionReminders::new())),
         session_queries: test_session_query_port(),
     }
 }

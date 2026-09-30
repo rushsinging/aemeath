@@ -109,7 +109,6 @@ pub(crate) fn make_agent(
     workspace: &project::Workspace,
     cancel: &CancellationToken,
     read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    session_reminders: Arc<std::sync::Mutex<tools::published::session_reminder::SessionReminders>>,
     max_tool_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
     session_id: &str,
@@ -160,7 +159,7 @@ pub(crate) fn make_agent(
                 }),
             )
             .with_user_agent(&runtime_provider.user_agent)
-            .with_memory_context(Some(session_id.to_string()), Some(session_reminders))
+            .with_memory_context(Some(session_id.to_string()))
             .with_skill_load_state(
                 tools::published::skill::SkillLoadScope::main(),
                 runtime_context.skill_load_state(),

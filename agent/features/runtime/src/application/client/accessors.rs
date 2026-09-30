@@ -192,9 +192,6 @@ pub struct SessionRuntime {
     pub(crate) event_sink_factory: Arc<EventSinkFactory>,
     pub(crate) input_port_factory: Arc<InputPortFactory>,
 
-    // ── Session reminders ──
-    pub session_reminders: std::sync::Arc<std::sync::RwLock<share::memory::SessionReminders>>,
-
     // ── Parent capability ports (cloned into per-Run RuntimeContext) ──
     // #1248 TaskData 3: These ports are held in RuntimeContextFactory → RuntimeServices.
     // Access them via shell.runtime_context_factory.services() rather than
@@ -286,9 +283,6 @@ impl SessionRuntime {
             session_ingress,
             event_sink_factory,
             input_port_factory,
-            session_reminders: Arc::new(std::sync::RwLock::new(
-                share::memory::SessionReminders::new(),
-            )),
             runtime_context_factory,
         }
     }

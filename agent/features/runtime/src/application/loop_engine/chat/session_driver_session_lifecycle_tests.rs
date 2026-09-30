@@ -386,12 +386,12 @@ async fn test_idle_control_command_does_not_run_spurious_turn() {
 
 #[tokio::test]
 async fn test_idle_pending_command_does_not_run_spurious_turn() {
-    // 回归 #628：idle 收到的 PendingCommand（ListReminders 等纯查询或动作命令）
+    // 回归 #628：idle 收到的 PendingCommand（ListModels 等纯查询或动作命令）
     // 处理后应回 idle 等下一条输入，而不是掉进 execute_tool_round 跑一轮幽灵 LLM turn。
     // bug 表现：命令处理完无 continue，掉进 step_count += 1 / StartTurn，用陈旧 tool_calls 跑一整轮。
     //
     // 与 test_idle_control_command_does_not_run_spurious_turn 的区别：前者走 ControlCommand 路径
-    // （busy 期排队 / busy 期 drain），本测试走 ChatInputEvent::ListReminders → PendingCommand 路径，
+    // （busy 期排队 / busy 期 drain），本测试走 ChatInputEvent::ListModels → PendingCommand 路径，
     // 命中 loop_runner.rs 中 6 处漏 continue 的 match 臂。
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();
@@ -416,8 +416,8 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
             }
             tokio::task::yield_now().await;
         }
-        // 空闲期投递 ListReminders（PendingCommand 路径）。
-        let _ = input_tx.send(sdk::ChatInputEvent::ListReminders);
+        // 空闲期投递 ListModels（PendingCommand 路径）。
+        let _ = input_tx.send(sdk::ChatInputEvent::ListModels);
         // 给 loop 充分调度机会去（错误地）消费命令、退出空闲、跑陈旧历史空回合。
         for _ in 0..200 {
             tokio::task::yield_now().await;
@@ -426,7 +426,7 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
         assert_eq!(
             driver_provider.calls(),
             vec!["first".to_string()],
-            "空闲期单独 PendingCommand::ListReminders 不得触发 LLM 调用（应仍只有 first 一次）"
+            "空闲期单独 PendingCommand::ListModels 不得触发 LLM 调用（应仍只有 first 一次）"
         );
 
         // 现在投递真实用户消息，应恢复运行并完成回合 2（第 2 次 LLM 调用）。
@@ -462,14 +462,14 @@ async fn test_idle_pending_command_does_not_run_spurious_turn() {
     assert_eq!(
         provider.calls(),
         vec!["first".to_string(), "second".to_string()],
-        "ListReminders 命令不得引发陈旧历史空回合: {:?}",
+        "ListModels 命令不得引发陈旧历史空回合: {:?}",
         sink.events()
     );
 }
 
 #[tokio::test]
-async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
-    // 回归 #628：idle 收到 ChatInputEvent::ListReminders（PendingCommand 路径）应直接回 idle，
+async fn test_idle_pending_command_list_models_does_not_run_spurious_turn() {
+    // 回归 #628：idle 收到 ChatInputEvent::ListModels（PendingCommand 路径）应直接回 idle，
     // 不应掉进 turn 跑一轮幽灵 LLM 调用。
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();
@@ -493,14 +493,14 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
             }
             tokio::task::yield_now().await;
         }
-        let _ = input_tx.send(sdk::ChatInputEvent::ListReminders);
+        let _ = input_tx.send(sdk::ChatInputEvent::ListModels);
         for _ in 0..200 {
             tokio::task::yield_now().await;
         }
         assert_eq!(
             driver_provider.calls(),
             vec!["first".to_string()],
-            "空闲期单独 PendingCommand::ListReminders 不得触发 LLM 调用"
+            "空闲期单独 PendingCommand::ListModels 不得触发 LLM 调用"
         );
 
         input_tx
@@ -521,7 +521,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
             provider.clone(),
         )),
     );
-    shell.set_test_session_id("test-idle-pending-list-reminders");
+    shell.set_test_session_id("test-idle-pending-list-models");
     let ctx = test_session_driver_input(sink.clone(), input_events, shell);
 
     tokio::time::timeout(
@@ -535,7 +535,7 @@ async fn test_idle_pending_command_list_reminders_does_not_run_spurious_turn() {
     assert_eq!(
         provider.calls(),
         vec!["first".to_string(), "second".to_string()],
-        "ListReminders 命令不得引发陈旧历史空回合: {:?}",
+        "ListModels 命令不得引发陈旧历史空回合: {:?}",
         sink.events()
     );
 }

@@ -28,7 +28,9 @@ pub(crate) fn event_kind_name(event: &ChatInputEvent) -> &'static str {
         ChatInputEvent::ResumeSession { .. } => "ResumeSession",
         ChatInputEvent::QueryReflectionHistory { .. } => "QueryReflectionHistory",
         ChatInputEvent::ListModels => "ListModels",
-        ChatInputEvent::ListReminders => "ListReminders",
+        // 提醒查询已退役（写入端与读取端是两个不同实例，功能从未生效）；
+        // sdk 事件变体尚在，归入兜底名直到外层删除该事件。
+        _ => "Other",
     }
 }
 
@@ -104,8 +106,6 @@ pub enum PendingCommand {
     },
     /// 查询模型列表。
     ListModels,
-    /// 查询提醒列表。
-    ListReminders,
 }
 
 // #567: 手动实现 PartialEq/Eq，不比较变体内数据。
@@ -462,16 +462,9 @@ where
                     buffer.push(ChatInputEvent::ListModels);
                 }
             }
-            ChatInputEvent::ListReminders => {
-                if is_idle {
-                    pending_command = Some(PendingCommand::ListReminders);
-                    dropped_events = iter.count();
-                    decision = GateDecision::Proceed;
-                    break;
-                } else {
-                    buffer.push(ChatInputEvent::ListReminders);
-                }
-            }
+            // 提醒查询链已退役：该事件不再映射为 PendingCommand，直接丢弃；
+            // 外层删除事件来源后此兜底可移除。
+            _ => {}
         }
     }
 

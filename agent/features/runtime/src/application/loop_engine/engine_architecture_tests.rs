@@ -1520,3 +1520,28 @@ async fn manual_compaction_run_terminates_when_cancelled() {
         "被取消的手动压缩 Run 不得产生 Completed 终态事件"
     );
 }
+
+#[test]
+fn runtime_exposes_no_session_reminder_plumbing() {
+    // Reminder 的写入端（chat 流每次新建的实例）与读取端（shell 持有的实例）
+    // 是两个不同实例、类型也互不相同，且从不注入 LLM 上下文——功能从未生效，
+    // 因此整条查询链（端口方法 / PendingCommand 变体 / shell 字段）已退役。
+    // 这条守卫防止它被静默加回来。禁词在运行时拼接，保持全仓 grep 零命中。
+    let retired_query = ["list", "reminders"].join("_");
+    let retired_variant = ["List", "Reminders"].concat();
+    let session_query = include_str!("../../ports/session_query.rs");
+    assert!(
+        !session_query.contains(&retired_query),
+        "reminder query must stay retired"
+    );
+    let run_launch = include_str!("chat/session_driver/run_launch.rs");
+    assert!(
+        !run_launch.contains(&format!("PendingCommand::{retired_variant}")),
+        "PendingCommand reminder branch must stay retired"
+    );
+    let input_gate = include_str!("chat/input_gate.rs");
+    assert!(
+        !input_gate.contains(&retired_variant),
+        "input gate must not route retired reminder commands"
+    );
+}
