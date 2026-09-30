@@ -5,6 +5,7 @@ mod atomic_blob_session;
 mod atomic_blob_session_management;
 mod canonical_session;
 pub(crate) mod compact_summary;
+mod constants;
 mod dataset_session_management;
 mod dataset_session_reader;
 mod dataset_session_writer;

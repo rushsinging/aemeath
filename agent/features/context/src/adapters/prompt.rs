@@ -3,6 +3,7 @@
 //! 原 `agent/features/prompt/` crate 整体并入。
 
 #[allow(dead_code, unused_imports)]
+mod constants;
 pub(crate) mod guidance;
 pub(crate) mod security;
 

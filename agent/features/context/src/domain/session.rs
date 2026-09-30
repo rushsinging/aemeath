@@ -9,6 +9,8 @@ pub(crate) use generation::{
 
 pub use share::session_types::PersistedWorkspaceContext;
 
+mod constants;
+pub(crate) use constants::CURRENT_SESSION_SCHEMA_VERSION;
 mod chat_chain;
 mod envelope;
 mod generation;
@@ -23,7 +25,6 @@ pub use chat_chain::SegmentKind;
 pub(crate) use envelope::{
     AcceptedInputRecord, ActiveCompactMarker, CommittedRunSlice, CommittedRunStep,
     FinalizedOutcomeRecord, RunStepCursor, SessionCodec, SessionCodecError, SessionHistory,
-    CURRENT_SESSION_SCHEMA_VERSION,
 };
 pub use envelope::{
     CanonicalSession, CommittedStep, CommittedStepLedger, CommittedStepMessages, DecodedSession,

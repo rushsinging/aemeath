@@ -1,17 +1,8 @@
 use share::message::{ContentBlock, Message};
 
+use super::constants::EXPLORATORY_TOOLS;
 use super::context_read_candidate::{ContextReadCandidate, ContextReadStep};
 use crate::domain::{ToolCallReceiptData, ToolCallState, ToolOutcomeKindData};
-
-const EXPLORATORY_TOOLS: &[&str] = &[
-    "Read",
-    "Grep",
-    "Glob",
-    "WebFetch",
-    "WebSearch",
-    "LS",
-    "ToolSearch",
-];
 
 pub fn microcompact_exploration(candidate: &ContextReadCandidate) -> ContextReadCandidate {
     candidate.map_unprotected_outcomes(|run_index, _, step, messages| {

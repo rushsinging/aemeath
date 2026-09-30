@@ -1,3 +1,4 @@
+use super::constants::CURRENT_SESSION_SCHEMA_VERSION;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use share::message::Message;
@@ -9,8 +10,6 @@ use task::TaskSnapshotData;
 use crate::domain::{FinalizeCause, StepReceiptData, ToolCallReceiptData, ToolReceiptMutationData};
 
 use super::{ChatSegment, PersistedWorkspaceContext, SessionMetadata};
-
-pub(crate) const CURRENT_SESSION_SCHEMA_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", content = "value", rename_all = "snake_case")]

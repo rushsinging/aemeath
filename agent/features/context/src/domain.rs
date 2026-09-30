@@ -1,6 +1,7 @@
 //! Context Management 领域策略、Published Language 与内部能力。
 
 pub mod compact;
+mod constants;
 pub(crate) mod context_decision;
 #[cfg(test)]
 #[path = "domain/context_decision_tests.rs"]

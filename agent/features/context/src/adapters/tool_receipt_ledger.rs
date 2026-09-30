@@ -6,10 +6,9 @@ use storage::{
     SafePathSegmentData, StorageKeyData, StorageNamespaceData, WriteOptionsData,
 };
 
+use super::constants::RECEIPT_LEDGER_SCHEMA_VERSION;
 use crate::domain::session::CanonicalSession;
 use crate::domain::ToolCallReceiptData;
-
-const RECEIPT_LEDGER_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct PersistedToolReceipt {

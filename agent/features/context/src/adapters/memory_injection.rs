@@ -5,12 +5,12 @@ use async_trait::async_trait;
 use memory::api::search::{MemoryRetrievalMode, MemorySearchHit};
 use memory::api::{MemoryPort, MemoryQuery};
 
+use super::constants::INJECTION_CANDIDATE_LIMIT;
 use crate::domain::{ContextRequestData, SystemBlock};
 use crate::ports::{ContextMemorySource, MemoryMaterialization};
 
 /// 注入候选的检索窗口上限。token 预算才是真正的约束（#1777 移除了条数
 /// 上限），这里只保证排序与让位顺序有足够素材。
-const INJECTION_CANDIDATE_LIMIT: usize = 200;
 
 /// Read-only bridge from the Memory BC retrieval port into Context system blocks.
 pub(crate) struct MemoryRetrieveAdapter {
