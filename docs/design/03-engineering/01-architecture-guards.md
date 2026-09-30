@@ -36,7 +36,7 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-`--fast` 档只跑结构类规则（`forbidden_segments` / `facade_whitelist` / `layer_order` / `layout` / `dependency_matrix`），秒级完成；`--full` 档跑全部规则与 `construction_symbols` 文本扫描。档位归属由每条规则的 `profile` 字段决定，文本扫描类规则 **NEVER** 进入 fast 档。
+`--fast` 档跑结构类规则（`forbidden_segments` / `facade_whitelist` / `layer_order` / `layout` / `dependency_matrix`）与少量安全关键文本规则（`pattern.all.no-broad-projection-naming`、`pattern.all.no-unsafe-text-range-slicing`、`count.process.noninteractive-isolation`，经 `guard_profile.rs` 白名单锁定），秒级完成；`--full` 档跑全部规则与 `construction_symbols` 文本扫描。档位归属由每条规则的 `profile` 字段决定，新增文本扫描类规则 **NEVER** 进入 fast 档。
 
 ## registry 数据区
 
@@ -61,7 +61,8 @@
 | `layer_order` | 同 crate Hexagonal 层内依赖方向（`crate::` 路径段比对） | `layer_order` 层序数组 | fast |
 | `layout` | 目录/顶层文件布局白名单 | `allowed_entries` | fast |
 | `dependency_matrix` | workspace path 依赖边矩阵（cargo metadata） | `business_allow` | fast |
-| `pattern_exclusion` | 禁用文本模式（子串）+ 豁免清单 + 行级 allow marker | `forbidden_patterns` / `exclusions` / `allow_marker` | full |
+| `pattern_exclusion` | 禁用文本模式（子串 + `forbidden_regex` 正则）+ 豁免清单 + 行级 allow marker | `forbidden_patterns` / `forbidden_regex` / `exclusions` / `allow_markers` | full（安全关键白名单规则可 fast） |
+| `count_ratio` | 每文件计数配比（如「外部进程构造数 ≤ session 隔离调用数」，pattern 按 regex 编译） | `numerator_patterns` / `denominator_patterns` / `exclusions` | fast/full 按安全关键性 |
 | `construction_whitelist` | 构造符号出现点白名单（由 `construction_symbols` 合成） | `symbol` + `allowed_paths` | full |
 | `forbidden_file_names` | 禁文件名（如 `mod.rs`） | `forbidden_file_names` | full |
 | `line_budget` | 单文件行数预算（职责不回缩锁） | `max_lines` 等 | full |
@@ -113,11 +114,8 @@
 | `check-agent-stop.sh` | Stop hook 入口（转发 `--fast`） | 长期保留 |
 | `reject-main-edit.sh`(+tests) | PreToolUse 流程防护（强制 worktree 开发） | 长期保留（非静态结构事实） |
 | `check-gate-layering-tests.sh` | gate 分层契约回归 | 保留（进程级契约测试） |
-| `check-noninteractive-child-session.sh`(+tests) | 子进程 session 隔离（计数配比半段） | 待计数断言器批次退役 |
-| `check-projection-naming.sh` | 命名守卫（标识符级正则） | 待 regex/标识符断言器批次退役 |
-| `check-tui-unsafe-text-ops.sh` | 切片区间正则残段 | 待 regex 断言器批次退役（子串两模式已由 `pattern.all.no-unsafe-text-slicing` 承接） |
 
-`xtask guard-registry check` 与 `xtask sdk-wire-schema check`、`xtask source-guard` 为 full 档内联调用，不再保留独立壳脚本。
+业务守卫脚本已全部引擎化退役：命名禁令（`pattern.all.no-broad-projection-naming`）、unsafe 文本区间切片（`pattern.all.no-unsafe-text-range-slicing` + `pattern.all.no-unsafe-text-slicing` 子串）、非交互子进程隔离（`count.process.noninteractive-isolation` 计数配比）。`xtask guard-registry check` 与 `xtask sdk-wire-schema check`、`xtask source-guard` 为 full 档内联调用，不再保留独立壳脚本。
 
 ## 元守卫（registry 对账）
 

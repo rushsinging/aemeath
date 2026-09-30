@@ -230,6 +230,13 @@ F 组 29 项 + D/E 组切出的白名单子项，收敛为 4 个通用断言器�
 
 `retired_symbols` 为纯数据区（不设断言器），供 review 对照，不再机械拦截。
 
+### 3.11 执行进度（#1676 regex/计数断言器批次）
+
+- 引擎新增：`pattern_exclusion.forbidden_regex`（regex 编译缓存）、`count_ratio` 断言器（计数配比，pattern 按 regex 编译支持 `\b`）、`allow_markers` 行级豁免数组、剥离器支持 `pub(crate)/pub mod tests` 前缀。
+- 三脚本数据化并退役：`check-projection-naming.sh` → `pattern.all.no-broad-projection-naming`；`check-tui-unsafe-text-ops.sh` 区间残段 → `pattern.all.no-unsafe-text-range-slicing`（8 豁免 + 4 行级标记迁入）；`check-noninteractive-child-session.sh(+tests)` → `count.process.noninteractive-isolation`（自测由断言器单测承接）。故意违规双边对账一致。
+- registry entries 清零（5 条随脚本删除并入规则 exclusions/reason）；三条安全关键文本规则保留 fast 档（Stop hook 覆盖等价，`guard_profile.rs` 白名单锁定）。
+- `.agents/hooks/` 9 → **5 文件**（编排器+agent-stop+reject-main-edit(+tests)+gate-layering-tests），业务守卫脚本全清零；编排器 fast 段无独立脚本，legacy 段仅剩 full 档 cargo/xtask 内联与 gate 契约。
+
 ### 3.10 执行进度（#1675/#1676 引擎收口批次，PR #1790）
 
 - **fast 档修复**：43 条结构规则（forbidden_segments/facade_whitelist/layer_order/dependency_matrix/layout）标 `profile:"fast"`，修复 fast 档 0 规则空跑；construction_symbols 文本扫描归入 full 档。

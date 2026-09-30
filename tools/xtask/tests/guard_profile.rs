@@ -36,6 +36,7 @@ fn assertion_name(rule: &guards_rules::Rule) -> &'static str {
         RuleSpec::DependencyMatrix { .. } => "dependency_matrix",
         RuleSpec::LineBudget { .. } => "line_budget",
         RuleSpec::ConstructionWhitelist { .. } => "construction_whitelist",
+        RuleSpec::CountRatio { .. } => "count_ratio",
     }
 }
 
@@ -83,14 +84,22 @@ fn fast_profile_covers_structural_assertions() {
 fn text_scan_assertions_stay_in_full_profile() {
     let rules = load_rules();
     let text_scan_kinds = ["pattern_exclusion", "line_budget", "forbidden_file_names"];
+    // 安全关键文本规则保留 fast 身份（原 fast 档独立脚本数据化而来，
+    // Stop hook 必须持续覆盖进程隔离 / unsafe 切片 / 宽泛命名约束）；
+    // 新增文本扫描规则 NEVER 进 fast（防快档膨胀）。
+    let fast_text_scan_allowlist = [
+        "pattern.all.no-broad-projection-naming",
+        "pattern.all.no-unsafe-text-range-slicing",
+    ];
     let misplaced: Vec<&str> = rules
         .iter()
         .filter(|rule| rule.profile == Profile::Fast)
         .filter(|rule| text_scan_kinds.contains(&assertion_name(rule)))
+        .filter(|rule| !fast_text_scan_allowlist.contains(&rule.id.as_str()))
         .map(|rule| rule.id.as_str())
         .collect();
     assert!(
         misplaced.is_empty(),
-        "文本扫描类规则不应进入 fast 档: {misplaced:?}"
+        "文本扫描类规则不应进入 fast 档（安全关键白名单除外）: {misplaced:?}"
     );
 }
