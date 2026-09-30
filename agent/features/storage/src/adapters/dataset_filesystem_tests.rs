@@ -89,6 +89,12 @@ fn member_reference(
 
 #[tokio::test]
 async fn incremental_commit_persists_only_changed_member_content() {
+    // 全程持锁排除故障注入 env：本测试期望提交完整落盘（Visible），而并行的
+    // 故障测试（FaultEnvGuard::after_prepared）会在进程级 env 上设置
+    // AEMEATH_STORAGE_DATASET_FAULT_POINT；未持锁时该窗口会污染本测试的第二次
+    // 提交，在 AfterPrepared 注入点被中断并经 crossed_commit 降级为
+    // Ok(RecoveryPending)，导致成员内容断言间歇性失败。
+    let _fault_env = without_fault_env();
     let root = root();
     let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
     let key = key();
@@ -175,7 +181,7 @@ async fn incremental_commit_persists_only_changed_member_content() {
     .expect("valid post-migration incremental change set");
     let content_files_before = dataset_member_content_file_count(&dataset_path);
 
-    adapter
+    let receipt = adapter
         .commit_incremental(
             &key,
             &second_changes,
@@ -183,21 +189,72 @@ async fn incremental_commit_persists_only_changed_member_content() {
         )
         .await
         .expect("incremental commit");
+    // 提交必须完整落盘：RecoveryPending 意味着事务在成员发布链路中被中断
+    // （crossed_commit 降级的 Ok 不是成功），后续内容断言将全部失真。
+    assert_eq!(
+        receipt.visibility(),
+        DatasetCommitVisibilityData::Visible,
+        "第二次增量提交必须完整落盘，实际 receipt={receipt:?}"
+    );
+    assert!(
+        receipt.warning().is_none(),
+        "第二次增量提交不得携带降级警告，实际 receipt={receipt:?}"
+    );
 
     let content_files_after = dataset_member_content_file_count(&dataset_path);
     let member_store = dataset_path.join("members");
     // 替换一个成员恰好持久化一个新内容文件、回收一个被两代丢弃的最旧内容；
     // 历史成员内容永不重写，净增量归零而非无限累积。
+    let member_store_listing = || -> Vec<String> {
+        std::fs::read_dir(&member_store)
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_else(|error| vec![format!("<read_dir failed: {error}>")])
+    };
+    // 事务状态现场：数据集根条目 + 两代 manifest + journal 的存在性与大小，
+    // 用于在断言失败时区分「提交未执行 / 事务未完成 / GC 误删」。
+    let transaction_listing = || -> Vec<String> {
+        let mut items = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&dataset_path) {
+            for entry in entries.filter_map(Result::ok) {
+                let path = entry.path();
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                items.push(format!(
+                    "{}({}B{})",
+                    entry.file_name().to_string_lossy(),
+                    size,
+                    if path.is_dir() { "/" } else { "" }
+                ));
+            }
+        }
+        for generation in ["primary", "previous"] {
+            let manifest = dataset_path.join(generation).join("manifest");
+            match std::fs::metadata(&manifest) {
+                Ok(meta) => items.push(format!("{generation}/manifest:{}B", meta.len())),
+                Err(error) => items.push(format!("{generation}/manifest:<{error}>")),
+            }
+        }
+        items.sort();
+        items
+    };
     assert_eq!(
         content_files_after - content_files_before,
         0,
-        "replacing one member must persist exactly one new immutable content file and collect the single orphaned predecessor regardless of historical member count"
+        "replacing one member must persist exactly one new immutable content file and collect the single orphaned predecessor regardless of historical member count; before={content_files_before} after={content_files_after} members={:?}",
+        member_store_listing()
     );
     assert!(
         member_store
             .join(super::proto::digest_bytes(b"changed-again"))
             .exists(),
-        "the replaced member's new content must be persisted"
+        "the replaced member's new content must be persisted; expected={} members={:?} dataset={:?}",
+        member_store.join(super::proto::digest_bytes(b"changed-again")).display(),
+        member_store_listing(),
+        transaction_listing()
     );
     assert!(
         member_store
