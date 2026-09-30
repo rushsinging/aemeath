@@ -309,3 +309,22 @@ async fn test_agent_tool_text_fallback_when_output_empty() {
     assert!(!result.is_error);
     assert_eq!(result.text, "子代理执行完成（无输出）");
 }
+
+/// #801 瘦参数回归：schema 由 AgentInput 结构体生成，结构体无
+/// model/task_id 字段即编译期不可回填；此断言把该结构性事实显式化，
+/// 防 build.rs 生成机制变化时静默回退。
+#[test]
+fn test_agent_tool_schema_excludes_model_and_task_id() {
+    let tool = AgentTool;
+
+    let schema = tool.input_schema().to_string();
+
+    assert!(
+        !schema.contains("task_id"),
+        "agent tool schema MUST NOT re-expose task_id: {schema}"
+    );
+    assert!(
+        !schema.contains("\"model\""),
+        "agent tool schema MUST NOT re-expose model: {schema}"
+    );
+}
