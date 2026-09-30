@@ -18,7 +18,7 @@ pub struct EnterWorktreeResult {
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct EnterWorktreeInput {
-    /// 可选：worktree 根目录路径（绝对或相对路径）。无 path 时必须省略该字段，禁止传空字符串；系统从 branch 推导为 <worktrees 根>/<仓库名>/<安全分支名>，根默认 ~/.agents/worktrees，可经 storage.worktrees_dir / AEMEATH_WORKTREES_DIR 配置
+    /// 可选：worktree 根目录路径（绝对或相对路径）。无 path 时必须省略该字段，禁止传空字符串；系统从 branch 推导为 <worktrees 根>/<仓库名>/<安全分支名>，推导时路径分隔符与敏感字符替换为 -。worktrees 根默认 ~/.agents/worktrees（跟随 AEMEATH_AGENTS_DIR），可经 storage.worktrees_dir（json）/ AEMEATH_WORKTREES_DIR（env）配置，相对配置值相对仓库根解析。目标路径不存在时，本工具基于 base（见下）执行 `git worktree add` 创建后再进入
     pub path: Option<String>,
     /// 可选：目标路径不存在时创建的新分支名；path 省略时必须提供
     pub branch: Option<String>,

@@ -228,7 +228,7 @@ impl TypedTool for TaskUpdateTool {
         "TaskUpdate"
     }
     fn description(&self) -> &str {
-        "Update a single field on a task. Valid keys: status, subject, description, priority."
+        share::i18n::tools::task::task_update("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::task::task_update(lang))

@@ -43,9 +43,7 @@ impl TypedTool for TaskCreateTool {
         "TaskCreate"
     }
     fn description(&self) -> &str {
-        "Create a task to track progress on complex multi-step work only.\n\n\
-         Call TaskListCreate before TaskCreate so the task is attached to the active request batch.\n\
-         Each task must be a single, concrete, verifiable step."
+        share::i18n::tools::task::task_create("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::task::task_create(lang))

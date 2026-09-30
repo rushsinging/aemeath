@@ -4,53 +4,10 @@
 pub fn task_create(lang: &str) -> &'static str {
     match lang {
         "zh" => {
-            r#"仅为复杂的多步骤工作创建任务以跟踪进度。
-
-仅当用户请求需要至少 3 个实质性执行步骤、多个相互依赖的改动，或并行子代理协调时，才使用任务管理。不要为简单的单步请求创建任务，例如回答问题、查看文件、检查 bug 状态、运行单个命令或做微小的局部编辑。对简单请求直接执行。
-
-重要：每个任务必须是单一、具体、可验证的步骤。糟糕的任务会把多个改动混在一起，如"实施并验证功能"或"修复所有相关问题"。好的任务是具体的："读 X.rs 理解当前错误处理"、"为 Y::send 加重试逻辑"、"为 Z 边界用例加单元测试"、"运行 cargo clippy 并修复警告"。当任务涉及实现时，拆成按文件或按函数的改动，外加单独的验证步骤。
-
-真正需要任务管理时的重要工作流：
-1. 首先，以文字描述完整计划——列出所有计划任务，让用户看到全貌
-2. 对新的复杂多步骤用户请求，先调用 TaskListCreate 再调用 TaskCreate，使任务挂载到请求摘要
-3. 然后用 TaskCreate 逐个创建任务
-4. 用 TaskBlockBy 设置依赖，用 TaskUpdate 更新任务字段
-
-创建任务后：
-- 用 TaskBlockBy 设置任务间的完整依赖列表
-- 用 TaskUpdate 在开始工作前标记为 in_progress
-- 完成后标记为 completed——系统会显示哪些任务已解除阻塞
-
-用 TaskListGet 发现无未解决依赖的待处理任务。
-为可并行执行的独立任务启动 Agent。"#
+            r#"仅为复杂的多步骤工作（3+ 步骤、相互依赖的改动或并行子代理）创建任务以跟踪进度；简单单步请求直接执行，不要建任务。调用前须已有 active 任务列表（没有时先用 TaskListCreate 创建），否则会报"当前没有 active 批次"。"#
         }
         _ => {
-            r#"Create a task to track progress on complex multi-step work only.
-
-Use task management only when the user request requires at least 3 substantial execution steps,
-multiple dependent changes, or parallel sub-agent coordination. Do NOT create tasks for simple
-one-step requests such as answering a question, inspecting a file, checking bug status, running a
-single command, or making a tiny localized edit. For simple requests, execute directly.
-
-IMPORTANT: each task must be a SINGLE, CONCRETE, VERIFIABLE step. BAD tasks lump multiple
-changes together, such as "Implement and verify feature" or "Fix all related issues". GOOD tasks
-are specific: "Read X.rs to understand current error handling", "Add retry logic to Y::send",
-"Add unit test for Z edge case", "Run cargo clippy and fix warnings". When a task involves
-implementation, split it into per-file or per-function changes plus separate verification steps.
-
-IMPORTANT workflow when task management is actually needed:
-1. First, describe your complete plan as text — list ALL planned tasks so the user can see the full picture
-2. For a new complex multi-step user request, call TaskListCreate before TaskCreate so tasks attach to a request summary
-3. Then create tasks one by one with TaskCreate
-4. Use TaskBlockBy to set dependencies and TaskUpdate to update task fields
-
-After creating tasks:
-- Use TaskBlockBy to set the complete dependency list between tasks
-- Use TaskUpdate to mark tasks as in_progress before starting work
-- Mark as completed when done — the system will show which tasks are unblocked
-
-Use TaskListGet to discover pending tasks with no unresolved dependencies.
-Launch Agent for independent tasks that can run in parallel."#
+            r#"Create a task to track progress on complex multi-step work only (3+ steps, dependent changes, or parallel sub-agents). For simple one-step requests, execute directly. Requires an active task list (create one with TaskListCreate first), otherwise the call fails."#
         }
     }
 }
@@ -87,30 +44,10 @@ pub fn task_stop(lang: &str) -> &'static str {
 pub fn task_update(lang: &str) -> &'static str {
     match lang {
         "zh" => {
-            r#"更新任务的**单个**字段。每次调用只改一个字段，value 始终为字符串。
-
-参数：task_id（任务 ID）、key（字段名）、value（新值，字符串）。
-
-可用 key：
-- status: 状态（pending / in_progress / completed / deleted）
-- subject / description: 字符串
-- priority: 优先级（low / medium / high）
-
-状态工作流：pending → in_progress → completed。`task_list_id` 可指定历史任务列表；省略时使用当前 active 列表。删除任务使用 TaskStop。
-TaskUpdate(status) 会直接返回最近完成、全部进行中及最多两个可执行任务的进度摘要；优先使用该摘要决定下一步，仅当摘要不足时才调用 TaskListGet。"#
+            r#"更新任务的单个字段。用于在工作推进时跟踪任务状态：开始一项任务前标记 in_progress，完成后标记 completed。每次调用只改一个字段，合法字段与取值见参数说明。"#
         }
         _ => {
-            r#"Update a **single** field on a task. Each call changes exactly one field. Value is always a string.
-
-Parameters: task_id (task ID), key (field name), value (new value, string).
-
-Valid keys:
-- status: status (pending / in_progress / completed / deleted)
-- subject / description: string
-- priority: priority (low / medium / high)
-
-Status workflow: pending → in_progress → completed. Set `task_list_id` to target a historical task list; omit it to use the current active list. Use TaskStop to delete a task.
-TaskUpdate(status) directly returns a progress summary with recent completions, all in-progress tasks, and up to two ready tasks. Prefer this summary when choosing the next step; call TaskListGet only when the summary is insufficient."#
+            r#"Update a single field on a task. Use to track progress through the task lifecycle: mark a task in_progress before starting work on it and completed when finished. Each call changes exactly one field; valid fields and accepted values are documented on the parameters."#
         }
     }
 }
@@ -161,10 +98,14 @@ mod tests {
         assert!(task_stop("zh").contains("停止"));
         assert!(task_block_by("zh").contains("完整替换"));
         assert!(task_block_by("en").contains("Replace all"));
-        for text in [task_update("zh"), task_update("en")] {
-            assert!(text.contains("status:"));
-            assert!(text.contains("subject / description:"));
-            assert!(text.contains("priority:"));
+        // 合法 key 列表属参数契约，走 schema 字段注释（由 tools crate 的
+        // task_update_schema_only_advertises_supported_fields 锁定）；
+        // description 只保留 when-to-use，这里锁定其不含被移除的 key 枚举。
+        for (text, phrase) in [
+            (task_update("zh"), "单个字段"),
+            (task_update("en"), "single field"),
+        ] {
+            assert!(text.contains(phrase));
             assert!(!text.contains("blocked_by_id"));
             assert!(!text.contains("owner:"));
         }
