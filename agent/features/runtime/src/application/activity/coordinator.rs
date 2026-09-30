@@ -1,6 +1,6 @@
 use super::model::{
     ActivityDetail, ActivityKind, ActivityObservation, ActivitySource, ActivityState,
-    ActivityTiming,
+    ActivityTiming, RunPurpose,
 };
 use sdk::{
     ActivityAudienceView, ActivityChangeKind, ActivityId, ActivityKindView, ActivitySnapshotView,
@@ -196,6 +196,8 @@ impl ActivityChangePublisher for NoopActivityChangePublisher {
 #[derive(Clone)]
 pub(crate) struct ActivityCoordinator {
     run_id: RunId,
+    /// Run 根 Activity 的目的投影（由 Run intent 在装配期传入）。
+    run_purpose: RunPurpose,
     clock: Arc<dyn ActivityClock>,
     ids: Arc<dyn ActivityIdSource>,
     publisher: Arc<dyn ActivityChangePublisher>,
@@ -205,13 +207,20 @@ pub(crate) struct ActivityCoordinator {
 }
 
 impl ActivityCoordinator {
+    /// 测试构造：固定时钟与 ID 源，默认 `RunPurpose::Main`（会话 Run）。
     #[cfg(test)]
     pub(crate) fn new(
         run_id: RunId,
         clock: Arc<dyn ActivityClock>,
         ids: Arc<dyn ActivityIdSource>,
     ) -> Self {
-        Self::new_with_publisher(run_id, clock, ids, Arc::new(NoopActivityChangePublisher))
+        Self::new_with_publisher(
+            run_id,
+            clock,
+            ids,
+            Arc::new(NoopActivityChangePublisher),
+            RunPurpose::Main,
+        )
     }
 
     pub(crate) fn new_with_publisher(
@@ -219,9 +228,11 @@ impl ActivityCoordinator {
         clock: Arc<dyn ActivityClock>,
         ids: Arc<dyn ActivityIdSource>,
         publisher: Arc<dyn ActivityChangePublisher>,
+        run_purpose: RunPurpose,
     ) -> Self {
         Self {
             run_id,
+            run_purpose,
             clock,
             ids,
             publisher,
@@ -231,26 +242,37 @@ impl ActivityCoordinator {
         }
     }
 
-    pub(crate) fn production(run_id: RunId, publisher: Arc<dyn ActivityChangePublisher>) -> Self {
+    pub(crate) fn production(
+        run_id: RunId,
+        publisher: Arc<dyn ActivityChangePublisher>,
+        run_purpose: RunPurpose,
+    ) -> Self {
         Self::new_with_publisher(
             run_id,
             Arc::new(SystemActivityClock),
             Arc::new(UuidV7ActivityIdSource),
             publisher,
+            run_purpose,
         )
     }
 
     #[cfg(test)]
-    pub(crate) fn production_without_publisher(run_id: RunId) -> Self {
-        Self::new(
+    pub(crate) fn production_without_publisher(run_id: RunId, run_purpose: RunPurpose) -> Self {
+        Self::new_with_publisher(
             run_id,
             Arc::new(SystemActivityClock),
             Arc::new(UuidV7ActivityIdSource),
+            Arc::new(NoopActivityChangePublisher),
+            run_purpose,
         )
     }
 
     pub(crate) fn run_id(&self) -> &RunId {
         &self.run_id
+    }
+
+    pub(crate) fn run_purpose(&self) -> RunPurpose {
+        self.run_purpose
     }
 
     pub(super) fn has_activity_source(
@@ -301,7 +323,9 @@ impl ActivityCoordinator {
             parent_activity_id: None,
             source: ActivitySource::Run,
             kind: ActivityKind::Run,
-            detail: ActivityDetail::Run,
+            detail: ActivityDetail::Run {
+                purpose: self.run_purpose,
+            },
             audience: ActivityAudienceView::User,
         })?;
         Ok(())

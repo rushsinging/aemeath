@@ -58,7 +58,9 @@ impl ActivityCoordinator {
             parent_activity_id: None,
             source: ActivitySource::Run,
             kind: ActivityKind::Run,
-            detail: ActivityDetail::Run,
+            detail: ActivityDetail::Run {
+                purpose: self.run_purpose(),
+            },
             audience: ActivityAudienceView::User,
         })?;
         Ok(())

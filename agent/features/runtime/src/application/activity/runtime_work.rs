@@ -98,6 +98,45 @@ impl ActivityCoordinator {
         })
     }
 
+    /// 手动反思 activity（Manual Reflection Run 无 RunStep；归属 Run 根下）。
+    #[allow(dead_code)]
+    pub(crate) fn start_manual_reflection(
+        &self,
+        trigger: sdk::ReflectionTriggerView,
+    ) -> Result<ActivityId, ActivityError> {
+        self.transaction(|| {
+            self.ensure_run_observation_started()?;
+            let parent_activity_id = self
+                .live_run_root_id()
+                .ok_or_else(|| ActivityError::UnknownActivity(ActivityId::new("run-activity")))?;
+            self.start(StartActivity {
+                run_step_id: None,
+                parent_activity_id: Some(parent_activity_id),
+                source: ActivitySource::Reflection(ActivityId::new_v7()),
+                kind: ActivityKind::Reflection,
+                detail: ActivityDetail::Reflection { trigger },
+                audience: ActivityAudienceView::User,
+            })
+        })
+    }
+
+    /// Interval / PreCompact 反思 activity（归属当前对话 Run 给定父节点下）。
+    #[allow(dead_code)]
+    pub(crate) fn start_reflection(
+        &self,
+        parent_activity_id: ActivityId,
+        trigger: sdk::ReflectionTriggerView,
+    ) -> Result<ActivityId, ActivityError> {
+        self.start(StartActivity {
+            run_step_id: None,
+            parent_activity_id: Some(parent_activity_id),
+            source: ActivitySource::Reflection(ActivityId::new_v7()),
+            kind: ActivityKind::Reflection,
+            detail: ActivityDetail::Reflection { trigger },
+            audience: ActivityAudienceView::User,
+        })
+    }
+
     pub(crate) fn start_interaction(
         &self,
         run_step_id: RunStepId,

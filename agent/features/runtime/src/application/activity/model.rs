@@ -11,6 +11,7 @@ pub(crate) enum ActivitySource {
     ToolCall(sdk::ToolCallId),
     HookDispatch(ActivityId),
     Compaction(ActivityId),
+    Reflection(ActivityId),
     Interaction(sdk::InteractionRequestId),
     SubRun(RunId),
 }
@@ -24,8 +25,36 @@ impl ActivitySource {
             Self::ToolCall(id) => ActivitySourceView::ToolCall(id.clone()),
             Self::HookDispatch(id) => ActivitySourceView::HookDispatch(id.clone()),
             Self::Compaction(id) => ActivitySourceView::Compaction(id.clone()),
+            Self::Reflection(id) => ActivitySourceView::Reflection(id.clone()),
             Self::Interaction(id) => ActivitySourceView::Interaction(id.clone()),
             Self::SubRun(id) => ActivitySourceView::SubRun(id.clone()),
+        }
+    }
+}
+
+/// Run 根 Activity 的目的：会话对话 Run 或 Manual Reflection Run。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RunPurpose {
+    Main,
+    Reflection,
+}
+
+impl RunPurpose {
+    fn to_sdk(self) -> sdk::RunPurposeView {
+        match self {
+            Self::Main => sdk::RunPurposeView::Main,
+            Self::Reflection => sdk::RunPurposeView::Reflection,
+        }
+    }
+}
+
+impl From<crate::domain::agent_run::RunIntent> for RunPurpose {
+    /// 只有手动反思 Run 投影 Reflection；会话与手动压缩保持 Main（压缩现状不变）。
+    fn from(intent: crate::domain::agent_run::RunIntent) -> Self {
+        match intent {
+            crate::domain::agent_run::RunIntent::ManualReflection => Self::Reflection,
+            crate::domain::agent_run::RunIntent::Conversation
+            | crate::domain::agent_run::RunIntent::ManualCompaction => Self::Main,
         }
     }
 }
@@ -65,6 +94,7 @@ pub(crate) enum ActivityKind {
     ToolCall,
     HookDispatch,
     Compaction,
+    Reflection,
     Interaction,
     SubRun,
 }
@@ -78,6 +108,7 @@ impl ActivityKind {
             Self::ToolCall => ActivityKindView::ToolCall,
             Self::HookDispatch => ActivityKindView::HookDispatch,
             Self::Compaction => ActivityKindView::Compaction,
+            Self::Reflection => ActivityKindView::Reflection,
             Self::Interaction => ActivityKindView::Interaction,
             Self::SubRun => ActivityKindView::SubRun,
         }
@@ -86,7 +117,9 @@ impl ActivityKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ActivityDetail {
-    Run,
+    Run {
+        purpose: RunPurpose,
+    },
     Phase(RunPhaseKind),
     Model {
         model: String,
@@ -107,6 +140,10 @@ pub(crate) enum ActivityDetail {
         stage: sdk::CompactStageView,
         work: sdk::CompactWorkView,
     },
+    /// 反思活动：记录触发来源（Manual / Interval / PreCompact）。
+    Reflection {
+        trigger: sdk::ReflectionTriggerView,
+    },
     Interaction {
         kind: sdk::InteractionKindView,
     },
@@ -119,8 +156,8 @@ pub(crate) enum ActivityDetail {
 impl ActivityDetail {
     fn to_sdk(&self) -> ActivityDetailView {
         match self {
-            Self::Run => ActivityDetailView::Run {
-                purpose: sdk::RunPurposeView::Main,
+            Self::Run { purpose } => ActivityDetailView::Run {
+                purpose: purpose.to_sdk(),
             },
             Self::Phase(phase) => ActivityDetailView::Phase {
                 phase: phase.to_sdk(),
@@ -156,6 +193,7 @@ impl ActivityDetail {
                 stage: *stage,
                 work: *work,
             },
+            Self::Reflection { trigger } => ActivityDetailView::Reflection { trigger: *trigger },
             Self::Interaction { kind } => ActivityDetailView::Interaction { kind: *kind },
             Self::SubRun { role, model } => ActivityDetailView::SubRun {
                 role: role.clone(),

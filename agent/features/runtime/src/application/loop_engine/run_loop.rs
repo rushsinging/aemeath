@@ -137,7 +137,10 @@ impl<'a> RunLoop<'a> {
             .is_none_or(|activities| activities.run_id() != run_id);
         if needs_coordinator {
             self.activities = Some(std::sync::Arc::new(
-                ActivityCoordinator::production_without_publisher(run_id.clone()),
+                ActivityCoordinator::production_without_publisher(
+                    run_id.clone(),
+                    crate::application::activity::RunPurpose::Main,
+                ),
             ));
         }
     }

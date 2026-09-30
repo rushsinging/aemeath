@@ -9,6 +9,7 @@ async fn compact_progress_view_updates_activity_with_chunk_counts() {
     let activities = std::sync::Arc::new(
         crate::application::activity::ActivityCoordinator::production_without_publisher(
             run_id.clone(),
+            crate::application::activity::RunPurpose::Main,
         ),
     );
     let mut run_loop = scenario.ports().run_loop();

@@ -25,4 +25,4 @@ pub(crate) use coordinator::{
 };
 #[cfg(test)]
 pub(crate) use coordinator::{SystemActivityClock, UuidV7ActivityIdSource};
-pub(crate) use model::{ActivityDetail, ActivityKind, ActivitySource};
+pub(crate) use model::{ActivityDetail, ActivityKind, ActivitySource, RunPurpose};
