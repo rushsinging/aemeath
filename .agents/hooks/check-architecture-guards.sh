@@ -10,6 +10,12 @@ if [ -n "${AEMEATH_PROJECT_DIR:-}" ] && [ ! -d "${AEMEATH_PROJECT_DIR}/.agents/h
 fi
 HOOKS_DIR="$ROOT/.agents/hooks"
 
+# 隔离 git 注入的仓库本地环境变量：worktree 场景下 git 会注入
+# GIT_DIR=<主仓>/.git/worktrees/<worktree>；一旦泄漏给本 hook 的子进程
+# （guard 脚本 → cargo test → 测试 fixture 的 git init），git 会把主仓 config
+# 判成 bare 仓库并写入 core.bare=true，导致主仓不可用。
+while IFS= read -r git_local_var; do unset "$git_local_var"; done < <(git rev-parse --local-env-vars 2>/dev/null || true)
+
 # 守卫引擎薄壳（#1675/#1676 终态）：xtask guard 为唯一架构守卫入口，
 # registry 数据驱动；尾部仅保留尚未引擎化的 legacy 检查（退役各自归所属 issue）。
 mode="${1:---full}"
