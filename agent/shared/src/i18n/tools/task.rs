@@ -24,10 +24,10 @@ pub fn task_get(lang: &str) -> &'static str {
 pub fn task_list(lang: &str) -> &'static str {
     match lang {
         "zh" => {
-            r#"列出所有任务及其状态。仅当最近一次 TaskUpdate(status) 返回的进度摘要不足以决定下一步，或用户明确要求查看完整任务列表时使用。不要仅因存在 pending/in_progress 任务就调用本工具。"#
+            r#"列出所有任务及其状态。仅当最近一次 TaskUpdate(status) 返回的进度摘要不足以决定下一步，或用户明确要求查看完整任务列表时使用。"#
         }
         _ => {
-            r#"List all tasks and their status. Use only when the latest TaskUpdate(status) progress summary is insufficient to choose the next step, or when the user explicitly requests the full task list. Do not call this tool merely because pending/in_progress tasks exist."#
+            r#"List all tasks and their status. Use only when the latest TaskUpdate(status) progress summary is insufficient to choose the next step, or when the user explicitly requests the full task list."#
         }
     }
 }
@@ -55,8 +55,8 @@ pub fn task_update(lang: &str) -> &'static str {
 /// TaskBlockBy description。
 pub fn task_block_by(lang: &str) -> &'static str {
     match lang {
-        "zh" => "完整替换任务的前置依赖。传入 id 和完整的 block_by_ids 列表；空列表清空依赖。所有 ID 必须属于当前任务列表，且更新不得形成环。",
-        _ => "Replace all blocking dependencies of a task. Pass id and the complete block_by_ids list; an empty list clears dependencies. All IDs must belong to the current task list and the update must remain acyclic.",
+        "zh" => "完整替换任务的前置依赖。所有 ID 必须属于当前任务列表，且更新不得形成环。",
+        _ => "Replace all blocking dependencies of a task. All IDs must belong to the current task list, and the update must remain acyclic.",
     }
 }
 
@@ -98,6 +98,14 @@ mod tests {
         assert!(task_stop("zh").contains("停止"));
         assert!(task_block_by("zh").contains("完整替换"));
         assert!(task_block_by("en").contains("Replace all"));
+        // 校验会拒绝的前提（ID 归属 + 无环）schema 未承载，必须留在 description。
+        assert!(task_block_by("zh").contains("当前任务列表"));
+        assert!(task_block_by("zh").contains("不得形成环"));
+        assert!(task_block_by("en").contains("current task list"));
+        assert!(task_block_by("en").contains("acyclic"));
+        // when-to-use：保留「仅当…时使用」正向前提。
+        assert!(task_list("zh").contains("仅当"));
+        assert!(task_list("en").contains("Use only when"));
         // 合法 key 列表属参数契约，走 schema 字段注释（由 tools crate 的
         // task_update_schema_only_advertises_supported_fields 锁定）；
         // description 只保留 when-to-use，这里锁定其不含被移除的 key 枚举。
@@ -111,5 +119,25 @@ mod tests {
         }
         assert!(task_list_create("zh").contains("创建任务列表"));
         assert!(task_list_complete("zh").contains("完成当前活动任务列表"));
+    }
+
+    /// 收敛后的 description 长度预算：en/zh 均不得超过 200 字符。
+    #[test]
+    fn trimmed_task_descriptions_fit_the_200_char_budget() {
+        for (zh, en) in [
+            (task_block_by("zh"), task_block_by("en")),
+            (task_list("zh"), task_list("en")),
+        ] {
+            assert!(
+                zh.chars().count() <= 200,
+                "zh too long ({}): {zh}",
+                zh.chars().count()
+            );
+            assert!(
+                en.chars().count() <= 200,
+                "en too long ({}): {en}",
+                en.chars().count()
+            );
+        }
     }
 }

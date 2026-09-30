@@ -33,7 +33,7 @@ impl TypedTool for TaskBlockByTool {
     }
 
     fn description(&self) -> &str {
-        "Replace all blocking dependencies of a task. Pass id and the complete block_by_ids list; an empty list clears dependencies."
+        "Replace all blocking dependencies of a task. All IDs must belong to the current task list, and the update must remain acyclic."
     }
 
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {

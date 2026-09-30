@@ -91,7 +91,7 @@ impl TypedTool for BashTool {
         "Bash"
     }
     fn description(&self) -> &str {
-        "Executes a bash command and returns its output. The `goal` parameter (required) is a short description of the command intent, shown in the TUI header. Working directory persists between calls but shell state does not. Chain commands with &&. Optional timeout parameter (default 120s, max 3600s)."
+        "Executes a bash command and returns its output. The working directory persists between calls, but shell state does not — chain commands with `&&`."
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::filesystem::bash(lang))

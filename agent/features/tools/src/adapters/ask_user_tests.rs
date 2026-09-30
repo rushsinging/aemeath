@@ -114,6 +114,26 @@ fn ask_user_schema_requires_object_options_with_description() {
     assert!(description.contains("object"));
     assert!(description.contains("description"));
     assert!(description.contains("required"));
+    // options 对象契约的完整语义（非空、拒绝纯字符串）唯一真相源是字段 doc：
+    // description 已收敛为 when-to-use，这里锁住迁入 schema 的原文。
+    assert!(description.contains("non-empty"));
+    assert!(description.contains("Plain string choices are NOT accepted"));
+}
+
+/// 单题/多题两种提问形态的互斥契约（原 description 第三版口径）同样下沉到字段 doc，
+/// 必须能从 schema 中读到。
+#[test]
+fn ask_user_schema_explains_single_and_multiple_question_forms() {
+    let schema = AskUserQuestionTool.input_schema();
+    let questions = schema["properties"]["questions"]["description"]
+        .as_str()
+        .expect("questions description");
+    let question = schema["properties"]["question"]["description"]
+        .as_str()
+        .expect("question description");
+
+    assert!(questions.contains("never provide both"));
+    assert!(question.contains("do not provide both"));
 }
 
 #[test]

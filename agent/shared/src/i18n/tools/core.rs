@@ -6,8 +6,8 @@
 /// 与注入 LLM 的 tool schema 均由此分派，NEVER 再维护第二份口径文本。
 pub fn agent(lang: &str) -> &'static str {
     match lang {
-        "zh" => "启动一个新代理，自主处理聚焦、限定范围的任务。每次调用都是全新的独立会话，不继承主会话、其他子代理或历史调用的上下文，因此 prompt 必须自包含并列全完成任务所需的信息。`agent` 为必填字段，必须与系统提示「Available Agent Roles」名单或 `config.agents.names` 中的实例名完全一致；子代理的模型、上下文窗口和输出预算来自该实例绑定的 `config.models` 配置。同一响应中的多个 Agent 调用并发执行。",
-        _ => "Launch a new agent to handle a focused, scoped task autonomously. Every call starts a fresh, independent session and inherits no context from the parent conversation, other sub-agents, or previous calls, so the prompt must be self-contained with all information needed to complete the task. `agent` is required and must exactly match an instance name in the system prompt's Available Agent Roles roster or in `config.agents.names`; the sub-agent model, context window, and output budget come from that instance's bound `config.models` entry. Multiple Agent calls in the SAME response run concurrently.",
+        "zh" => "启动一个新代理处理聚焦任务。每次调用都是全新的独立会话，不继承上下文，因此 prompt 必须自包含。`agent` 为必填，必须匹配 `config.agents.names` 中的名称。",
+        _ => "Launch a new agent for focused tasks. Each call is a fresh, independent session that inherits no context; the prompt must be self-contained. `agent` is required; match a name in `config.agents.names`.",
     }
 }
 
@@ -38,8 +38,8 @@ pub fn memory_list(lang: &str) -> &'static str {
 /// MemoryUpdate description。
 pub fn memory_update(lang: &str) -> &'static str {
     match lang {
-        "zh" => "变更一条记忆的状态：pin 置顶避免淘汰、unpin 取消置顶、archive 归档释放容量、restore 恢复归档条目。容量满时先审查候选项再 archive。",
-        _ => "Change a memory's status: pin to protect from eviction, unpin, archive to free capacity, restore an archived entry. When full, review candidates before archiving.",
+        "zh" => "在 pin、unpin、archive、restore 之间变更记忆状态。容量满时先审查候选项再归档。",
+        _ => "Change a memory's status among pin, unpin, archive, and restore. When capacity is full, review candidates before archiving.",
     }
 }
 
@@ -92,8 +92,8 @@ pub fn exit_plan_mode(lang: &str) -> &'static str {
 /// AskUserQuestion description。
 pub fn ask_user(lang: &str) -> &'static str {
     match lang {
-        "zh" => "向用户提问并等待响应。用 `options` 数组提供预定义选项；永远不要在问题文本中内嵌选项。每个选项必须是 `{\"title\": ..., \"description\": ...}` 对象，title 与 description 均必填且非空；不接受纯字符串选项。自由输入默认启用；存在预设选项时，系统会固定提供 `Type something...` 入口。不要自行把该项放入 options，只有必须限制为预设选项时才显式设为 false。",
-        _ => "Ask the user a question and wait for their response. Use `options` array for predefined choices; never embed choices in the question text. Every option must be a {\"title\": ..., \"description\": ...} object with both fields required and non-empty; plain string options are rejected. Free-text input defaults to enabled; when options are present, the system provides a `Type something...` entry. Do not add it to options yourself, and set false only when answers must be restricted to predefined choices.",
+        "zh" => "向用户提问并等待回答。当需要用户输入或确认才能继续时使用；选项格式以字段 schema 为准。",
+        _ => "Ask the user one or more questions and wait for their response. Use this when input or confirmation from the user is required to proceed. Option format is defined in the field schema.",
     }
 }
 
@@ -177,6 +177,27 @@ mod tests {
         }
     }
 
+    /// 本批收敛后的 description 长度预算：en/zh 均不得超过 200 字符。
+    #[test]
+    fn trimmed_core_descriptions_fit_the_200_char_budget() {
+        for (zh, en) in [
+            (agent("zh"), agent("en")),
+            (ask_user("zh"), ask_user("en")),
+            (memory_update("zh"), memory_update("en")),
+        ] {
+            assert!(
+                zh.chars().count() <= 200,
+                "zh too long ({}): {zh}",
+                zh.chars().count()
+            );
+            assert!(
+                en.chars().count() <= 200,
+                "en too long ({}): {en}",
+                en.chars().count()
+            );
+        }
+    }
+
     #[test]
     fn core_bilingual_and_fallback() {
         assert!(agent("zh").contains("启动一个新代理"));
@@ -187,9 +208,12 @@ mod tests {
         assert!(enter_plan_mode("zh").contains("进入计划模式"));
         assert!(exit_plan_mode("zh").contains("退出计划模式"));
         assert!(ask_user("zh").contains("向用户提问"));
-        assert!(ask_user("zh").contains("不接受纯字符串选项"));
+        // options/questions 契约（对象格式、纯字符串被拒、Type something... 入口）
+        // 已迁至 AskUserQuestionInput 字段 doc，由 tools crate 的 schema 测试锁定；
+        // description 只保留 when-to-use。
+        assert!(ask_user("zh").contains("需要用户输入或确认"));
         let ask_user_en = ask_user("en");
-        assert!(ask_user_en.contains("plain string options are rejected"));
+        assert!(ask_user_en.contains("wait for their response"));
         assert!(ask_user_en.contains("required"));
         assert!(brief("zh").contains("简要总结"));
         assert!(sleep("zh").contains("暂停执行"));

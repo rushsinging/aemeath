@@ -15,7 +15,7 @@ impl TypedTool for AskUserQuestionTool {
         "AskUserQuestion"
     }
     fn description(&self) -> &str {
-        "Ask the user one or more questions and wait for their response. Use the `questions` array to ask multiple questions in one call — the user answers them in order and all answers are returned together; leave the top-level `question` empty in that case (never provide both). Use `options` array for predefined choices; never embed choices in the question text. Every option must be an object with required `title` and `description` fields; plain string options are rejected. Free-text input defaults to enabled; when options are present, the system supplies `Type something...` as its entry. Do not add that option yourself."
+        "Ask the user one or more questions and wait for their response. Use this when input or confirmation from the user is required to proceed. Option format is defined in the field schema."
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::core::ask_user(lang))

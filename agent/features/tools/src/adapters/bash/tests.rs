@@ -786,8 +786,11 @@ fn bash_tool_timeout_secs_allows_up_to_one_hour() {
     assert_eq!(tool.timeout_secs(), 3600);
 }
 
+/// timeout 默认值/上限属参数契约，唯一真相源是 `BashInput::timeout` 字段 doc
+/// （schema 注入 LLM）；description 只答 when-to-use。两条 description 通道必须
+/// 同口径，且都不得出现已被 schema 取代的 600s 过时上限。
 #[test]
-fn bash_tool_description_advertises_60_minute_max() {
+fn bash_tool_timeout_max_lives_in_schema_and_both_description_channels_agree() {
     let workspace = tempdir().unwrap();
     let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
         workspace.path().to_path_buf(),
@@ -795,9 +798,24 @@ fn bash_tool_description_advertises_60_minute_max() {
     .allow_all(true)
     .build();
     let tool = bash_tool(&ctx);
+    let schema = tool.input_schema();
+    let timeout_desc = schema["properties"]["timeout"]["description"]
+        .as_str()
+        .expect("timeout description");
     assert!(
-        tool.description().contains("max 3600s"),
-        "description should advertise 60-minute max, got: {}",
-        tool.description()
+        timeout_desc.contains("max 3600000"),
+        "schema should advertise the 60-minute max, got: {timeout_desc}"
     );
+    assert_eq!(
+        tool.description_for("en"),
+        tool.description(),
+        "ToolSearch channel and i18n channel must carry the same en text"
+    );
+    let en_desc = tool.description_for("en");
+    for text in [tool.description(), en_desc.as_ref()] {
+        assert!(
+            !text.contains("600s") && !text.contains("600 秒"),
+            "description must not advertise the stale 600s cap: {text}"
+        );
+    }
 }

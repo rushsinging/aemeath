@@ -5,8 +5,8 @@
 /// Bash description。
 pub fn bash(lang: &str) -> &'static str {
     match lang {
-        "zh" => "执行 bash 命令并返回输出。必填参数 `goal` 为命令目标/意图的简短描述，显示在 TUI header 中。工作目录在多次调用间保持，但 shell 状态不保持。用 && 链接命令。可选 timeout 参数（默认 120 秒，最大 600 秒）。",
-        _ => "Executes a bash command and returns its output. The `goal` parameter (required) is a short description of the command intent, shown in the TUI header. Working directory persists between calls but shell state does not. Chain commands with &&. Optional timeout parameter (default 120s, max 600s).",
+        "zh" => "执行 bash 命令并返回输出。工作目录在多次调用间保持，但 shell 状态不保持——用 && 链接命令。",
+        _ => "Executes a bash command and returns its output. The working directory persists between calls, but shell state does not — chain commands with `&&`.",
     }
 }
 
@@ -37,8 +37,8 @@ pub fn file_edit(lang: &str) -> &'static str {
 /// FileWrite description。
 pub fn file_write(lang: &str) -> &'static str {
     match lang {
-        "zh" => "向本地文件系统写入文件。需要 `file_path` 和 `content`。对已存在文件，必须先调用 Read。修改优先用 Edit；Write 用于新建文件或完全重写。",
-        _ => "Writes a file to the local filesystem. Requires `file_path` and `content`. For existing files, Read must be called first. Prefer Edit for modifications; use Write for new files or complete rewrites.",
+        "zh" => "向本地文件系统写入文件。对已存在文件，必须先调用 Read。修改优先用 Edit；Write 用于新建文件或完全重写。",
+        _ => "Writes a file to the local filesystem. For existing files, Read must be called first. Prefer Edit for modifications; use Write for new files or complete rewrites.",
     }
 }
 
@@ -57,14 +57,41 @@ mod tests {
     #[test]
     fn filesystem_bilingual_and_fallback() {
         assert!(bash("zh").contains("执行 bash 命令"));
-        assert!(bash("zh").contains("goal"));
+        // 跨调用状态前提（schema 未承载，必须留在 description）。
+        assert!(bash("zh").contains("工作目录在多次调用间保持"));
+        assert!(bash("zh").contains("shell 状态不保持"));
+        assert!(bash("zh").contains("&&"));
         assert!(bash("en").contains("Executes a bash command"));
-        assert!(bash("en").contains("goal"));
+        assert!(bash("en").contains("working directory persists"));
+        assert!(bash("en").contains("shell state does not"));
+        // `goal` 必填与 timeout 默认/上限属参数契约，迁至 BashInput 字段 doc
+        //（tools crate 由 schema required + 字段 description 锁定）。
         assert_eq!(bash("fr"), bash("en"));
         assert!(grep("zh").contains("搜索文件内容"));
         assert!(file_read("zh").contains("读取文件"));
         assert!(file_edit("zh").contains("精确字符串替换"));
         assert!(file_write("zh").contains("写入文件"));
+        assert!(file_write("zh").contains("必须先调用 Read"));
+        assert!(file_write("en").contains("Read must be called first"));
         assert!(glob("zh").contains("文件模式匹配"));
+    }
+
+    #[test]
+    fn trimmed_descriptions_fit_the_200_char_budget() {
+        for (zh, en) in [
+            (bash("zh"), bash("en")),
+            (file_write("zh"), file_write("en")),
+        ] {
+            assert!(
+                zh.chars().count() <= 200,
+                "zh too long ({}): {zh}",
+                zh.chars().count()
+            );
+            assert!(
+                en.chars().count() <= 200,
+                "en too long ({}): {en}",
+                en.chars().count()
+            );
+        }
     }
 }

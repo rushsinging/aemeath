@@ -154,8 +154,8 @@ pub struct MemoryListInput {
 pub struct MemoryUpdateInput {
     /// 目标记忆 ID。Target memory ID.
     pub id: String,
-    /// 状态变更：pin 置顶 / unpin 取消置顶 / archive 归档 / restore 恢复。
-    /// Status transition: pin / unpin / archive / restore.
+    /// 状态变更：pin 置顶避免淘汰、unpin 取消置顶、archive 归档释放容量、restore 恢复归档条目。
+    /// Status transition: pin protects from eviction, unpin, archive frees capacity, restore an archived entry.
     pub status: MemoryStatus,
 }
 

@@ -23,7 +23,7 @@ impl TypedTool for FileWriteTool {
         "Write"
     }
     fn description(&self) -> &str {
-        "Writes a file to the local filesystem. Requires `file_path` and `content`. For existing files, Read must be called first. Prefer Edit for modifications; use Write for new files or complete rewrites."
+        "Writes a file to the local filesystem. For existing files, Read must be called first. Prefer Edit for modifications; use Write for new files or complete rewrites."
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
         std::borrow::Cow::Borrowed(share::i18n::tools::filesystem::file_write(lang))
