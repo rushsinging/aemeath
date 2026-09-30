@@ -130,7 +130,6 @@ impl App {
                 path,
                 fallback_text,
             } => self.process_image_file_effect(path, fallback_text, ui_tx),
-            Effect::FetchMemoryList => self.fetch_memory_list_effect(ui_tx),
             Effect::QueryReflectionHistory { limit } => self.query_reflection_history_effect(limit),
             Effect::CopyToClipboard { text } => self.copy_to_clipboard_effect(&text),
             Effect::RunSelfUpdate => self.run_self_update_effect(ui_tx).await,
@@ -392,13 +391,6 @@ impl App {
             std::mem::discriminant(&event)
         );
         self.chat.push_input_event(event);
-    }
-
-    fn fetch_memory_list_effect(&mut self, _ui_tx: &mpsc::Sender<UiEvent>) {
-        // #567：list_reminders 走事件流（ChatInputEvent::ListReminders）。
-        // runtime idle 分支查询，结果通过 ReminderList 事件回传。
-        self.chat
-            .push_input_event(sdk::ChatInputEvent::ListReminders);
     }
 
     fn run_hook_effect(&mut self, message: String, name: String) {

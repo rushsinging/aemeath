@@ -5,7 +5,6 @@ mod key_nav;
 mod key_scroll;
 mod notice;
 mod paste;
-mod reminder;
 mod spawn_context;
 mod ui_event;
 
@@ -565,8 +564,7 @@ impl App {
                 ));
             }
             // #740：ModelList / SessionList 是 /model 对话框与 /resume 补全的
-            // 唯一数据源，在此显式消费写入 SessionState 缓存（与 ReminderList
-            // 同模式），NEVER 静默丢弃。
+            // 唯一数据源，在此显式消费写入 SessionState 缓存，NEVER 静默丢弃。
             TuiRuntimeEvent::ModelList { models } => {
                 let models = models
                     .iter()
@@ -590,25 +588,6 @@ impl App {
                         .map(|session| (session.id.clone(), session.summary.clone()))
                         .collect(),
                 );
-            }
-            // `/memory remind` 结果渲染：ReminderList 在 Intent 层无投影，
-            // 必须在此显式消费，NEVER 静默丢弃（#1092 终审修复）。
-            TuiRuntimeEvent::ReminderList { reminders } => {
-                if reminders.is_empty() {
-                    self.append_system_notice("No reminders.");
-                } else {
-                    let active_count = reminders.iter().filter(|r| !r.done).count();
-                    let mut lines = vec![format!(
-                        "Reminders ({}/{} active):",
-                        active_count,
-                        reminders.len()
-                    )];
-                    for reminder in reminders {
-                        let marker = if reminder.done { "[x]" } else { "[ ]" };
-                        lines.push(format!("  {marker} {}", reminder.content));
-                    }
-                    self.append_system_notice(lines.join("\n"));
-                }
             }
             TuiRuntimeEvent::Done { duration_ms, .. } => {
                 // Done 只收敛 App 级 processing；活动展示由 typed Run status 收敛。

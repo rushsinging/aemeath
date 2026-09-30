@@ -1522,7 +1522,7 @@ async fn manual_compaction_run_terminates_when_cancelled() {
 }
 
 #[test]
-fn runtime_exposes_no_session_reminder_plumbing() {
+fn runtime_exposes_no_retired_reminder_plumbing() {
     // Reminder 的写入端（chat 流每次新建的实例）与读取端（shell 持有的实例）
     // 是两个不同实例、类型也互不相同，且从不注入 LLM 上下文——功能从未生效，
     // 因此整条查询链（端口方法 / PendingCommand 变体 / shell 字段）已退役。

@@ -533,17 +533,6 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
                 })
                 .collect(),
         },
-        ChatEvent::ReminderList { reminders } => TuiRuntimeEvent::ReminderList {
-            reminders: reminders
-                .into_iter()
-                .map(|reminder| TuiReminder {
-                    id: reminder.id,
-                    content: reminder.content,
-                    done: reminder.done,
-                    created_at: reminder.created_at,
-                })
-                .collect(),
-        },
         ChatEvent::SessionList { sessions } => TuiRuntimeEvent::SessionList {
             sessions: sessions
                 .into_iter()

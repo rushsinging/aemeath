@@ -28,9 +28,6 @@ pub(crate) fn event_kind_name(event: &ChatInputEvent) -> &'static str {
         ChatInputEvent::ResumeSession { .. } => "ResumeSession",
         ChatInputEvent::QueryReflectionHistory { .. } => "QueryReflectionHistory",
         ChatInputEvent::ListModels => "ListModels",
-        // 提醒查询已退役（写入端与读取端是两个不同实例，功能从未生效）；
-        // sdk 事件变体尚在，归入兜底名直到外层删除该事件。
-        _ => "Other",
     }
 }
 
@@ -462,9 +459,6 @@ where
                     buffer.push(ChatInputEvent::ListModels);
                 }
             }
-            // 提醒查询链已退役：该事件不再映射为 PendingCommand，直接丢弃；
-            // 外层删除事件来源后此兜底可移除。
-            _ => {}
         }
     }
 

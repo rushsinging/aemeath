@@ -827,10 +827,6 @@ pub enum ChatEvent {
     ModelList {
         models: Vec<crate::ModelSummary>,
     },
-    /// #567：提醒列表回传。
-    ReminderList {
-        reminders: Vec<crate::ReminderView>,
-    },
     /// #567：会话列表回传。
     SessionList {
         sessions: Vec<crate::SessionSummary>,

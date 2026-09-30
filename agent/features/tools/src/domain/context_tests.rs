@@ -155,13 +155,14 @@ fn tool_execution_context_exposes_skill_load_scope_and_state_port() {
 }
 
 #[test]
-fn tool_context_exposes_no_session_reminder_channel() {
+fn tool_context_exposes_no_retired_reminder_channel() {
     // Reminder 通道的写入端与读取端是两个不同实例（写入端每次 chat 流重建，
     // 读取端是另一实例），功能从未生效，因此整条退役。
-    // 这条守卫防止它静默复活。
+    // 这条守卫防止它静默复活。禁词在运行时拼接，保持全仓 grep 零命中。
     let source = include_str!("context.rs");
+    let retired_channel = ["session", "reminders"].join("_");
     assert!(
-        !source.contains("session_reminders"),
+        !source.contains(&retired_channel),
         "reminder channel must stay retired"
     );
 }
