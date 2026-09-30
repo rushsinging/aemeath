@@ -387,6 +387,7 @@ pub enum RunStatusView {
     ExecutingTools,
     AwaitingUser,
     Compacting,
+    Reflecting,
     CancellingStep,
     FinalizingStep,
     Cancelling,

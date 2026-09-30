@@ -167,6 +167,7 @@ fn run_status_to_sdk(status: crate::domain::agent_run::RunStatus) -> RunStatusVi
         RunStatus::ExecutingTools => RunStatusView::ExecutingTools,
         RunStatus::AwaitingUser => RunStatusView::AwaitingUser,
         RunStatus::Compacting => RunStatusView::Compacting,
+        RunStatus::Reflecting => RunStatusView::Reflecting,
         RunStatus::CancellingStep => RunStatusView::CancellingStep,
         RunStatus::FinalizingStep => RunStatusView::FinalizingStep,
         RunStatus::Terminating => RunStatusView::Terminating,
