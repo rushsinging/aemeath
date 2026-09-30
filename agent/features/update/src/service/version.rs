@@ -1,7 +1,7 @@
 use sdk::{SdkError, VersionCheck};
 use semver::Version;
 
-use crate::contract::GitHubRelease;
+use crate::release::GitHubRelease;
 
 /// 从 tag_name 去掉 `v` 前缀。
 pub(super) fn strip_v_prefix(tag: &str) -> &str {

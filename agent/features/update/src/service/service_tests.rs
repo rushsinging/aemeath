@@ -1,6 +1,6 @@
 use std::io::Write;
 
-use crate::contract::GitHubRelease;
+use crate::release::GitHubRelease;
 
 use super::archive::extract_binary_from_tar_gz;
 use super::checksum::{parse_checksums, sha256_hex};

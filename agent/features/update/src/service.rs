@@ -9,9 +9,10 @@ mod platform;
 mod version;
 
 #[cfg(test)]
+#[path = "service/service_tests.rs"]
 mod tests;
 
-use crate::contract::GitHubRelease;
+use crate::release::GitHubRelease;
 use archive::extract_binary_from_tar_gz;
 use async_trait::async_trait;
 use checksum::{parse_checksums, sha256_hex};

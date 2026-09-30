@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use sdk::UpdateService;
-use update::api::UpdateGateway;
+use update::UpdateGateway;
 
 /// Update service handle。
 pub type UpdateServiceHandle = Arc<dyn UpdateService>;
