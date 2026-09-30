@@ -299,6 +299,16 @@ impl RunSpec {
         }
     }
 
+    /// 手动反思 Run：只执行一次 Memory 反思，完成后回到输入排空阶段收口，
+    /// **NEVER** 进入模型调用、**NEVER** 走 ContextPort::build_window。
+    /// 装配与主会话 Run 一致，仅目的不同。
+    pub fn manual_reflection() -> Self {
+        Self {
+            intent: RunIntent::ManualReflection,
+            ..Self::full("main", Duration::ZERO)
+        }
+    }
+
     fn restricted(name: impl Into<String>, timeout: Duration) -> Self {
         Self {
             name: name.into(),

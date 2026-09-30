@@ -668,7 +668,7 @@ fn parent_identity_is_carried_by_every_domain_event() {
         .all(|event| event.parent_run_id() == Some(&parent)));
 }
 
-const ALL_RUN_STATUSES: [RunStatus; 15] = [
+const ALL_RUN_STATUSES: [RunStatus; 16] = [
     RunStatus::Created,
     RunStatus::DrainingInput,
     RunStatus::PreparingContext,
@@ -678,6 +678,7 @@ const ALL_RUN_STATUSES: [RunStatus; 15] = [
     RunStatus::ExecutingTools,
     RunStatus::AwaitingUser,
     RunStatus::Compacting,
+    RunStatus::Reflecting,
     RunStatus::CancellingStep,
     RunStatus::FinalizingStep,
     RunStatus::Terminating,
@@ -686,13 +687,15 @@ const ALL_RUN_STATUSES: [RunStatus; 15] = [
     RunStatus::Terminated,
 ];
 
-const ALL_RUN_TRANSITIONS: [RunTransition; 18] = [
+const ALL_RUN_TRANSITIONS: [RunTransition; 20] = [
     RunTransition::StartDraining,
     RunTransition::DrainInputs,
     RunTransition::DrainInternalContinuation,
     RunTransition::DrainEmptyAndSealed,
     RunTransition::BeginCompaction,
     RunTransition::CompactionCompleted,
+    RunTransition::BeginReflection,
+    RunTransition::ReflectionCompleted,
     RunTransition::ContextPrepared,
     RunTransition::RetryModel,
     RunTransition::ModelContextExceeded,
@@ -725,12 +728,19 @@ fn run_at_status(status: RunStatus) -> Run {
         run.start_draining().unwrap();
         return run;
     }
+    if status == RunStatus::Reflecting {
+        // 反思相位只能由手动反思意图从排空阶段进入，无法从会话 Run 推进而来。
+        let mut reflecting = Run::new(RunSpec::manual_reflection(), None);
+        reflecting.start_draining().unwrap();
+        reflecting.begin_manual_reflection().unwrap();
+        return reflecting;
+    }
 
     run.start_draining().unwrap();
     run.apply_drain_decision(DrainDecision::Inputs, None)
         .unwrap();
     match status {
-        RunStatus::Created | RunStatus::DrainingInput => unreachable!(),
+        RunStatus::Created | RunStatus::DrainingInput | RunStatus::Reflecting => unreachable!(),
         RunStatus::PreparingContext => {}
         RunStatus::Compacting => {
             run.transition(RunTransition::BeginCompaction).unwrap();
@@ -838,6 +848,14 @@ fn expected_transition(from: RunStatus, transition: RunTransition) -> Option<Run
         }
         (RunStatus::FinalizingStep, RunTransition::StepCancelled) => Some(RunStatus::DrainingInput),
         (RunStatus::DrainingInput, RunTransition::BeginCompaction) => Some(RunStatus::Compacting),
+        // 反思入口：排空阶段仅手动反思意图合法，模型响应/压缩相位仅会话 Run 合法；
+        // 收口回到进入前的相位（矩阵 fixture 以手动反思 Run 的排空阶段为规范来源）。
+        (RunStatus::DrainingInput, RunTransition::BeginReflection)
+        | (RunStatus::ApplyingResponse, RunTransition::BeginReflection)
+        | (RunStatus::Compacting, RunTransition::BeginReflection) => Some(RunStatus::Reflecting),
+        (RunStatus::Reflecting, RunTransition::ReflectionCompleted) => {
+            Some(RunStatus::DrainingInput)
+        }
         (RunStatus::Terminating, RunTransition::TerminationFinished) => Some(RunStatus::Terminated),
         _ => None,
     }
@@ -871,7 +889,8 @@ fn run_transition_matrix_exhaustively_accepts_only_documented_edges() {
 
 /// 迁移合法性依赖 Run 形态：手动压缩入口只在 `ManualCompaction` 意图下合法；
 /// `CompactionCompleted` 的收口目标取决于是否存在活动 Step，因此矩阵测试需要为
-/// 这两类组合构造对应形态的 Run。
+/// 这两类组合构造对应形态的 Run。反思入口同理：排空阶段仅 `ManualReflection`
+/// 意图合法，`Reflecting` 的收口目标是进入前的相位（fixture 统一取排空阶段来源）。
 fn run_at_status_for_transition(status: RunStatus, transition: RunTransition) -> Run {
     if transition == RunTransition::BeginCompaction && status == RunStatus::DrainingInput {
         return manual_compaction_run_at_status(status);
@@ -879,7 +898,26 @@ fn run_at_status_for_transition(status: RunStatus, transition: RunTransition) ->
     if transition == RunTransition::CompactionCompleted && status == RunStatus::Compacting {
         return automatic_compaction_run_at_compacting();
     }
+    if transition == RunTransition::BeginReflection && status == RunStatus::DrainingInput {
+        return manual_reflection_run_at_status(status);
+    }
+    if status == RunStatus::Reflecting {
+        return manual_reflection_run_at_status(status);
+    }
     run_at_status(status)
+}
+
+fn manual_reflection_run_at_status(status: RunStatus) -> Run {
+    let mut run = Run::new(RunSpec::manual_reflection(), None);
+    run.start_draining().unwrap();
+    match status {
+        RunStatus::DrainingInput => run,
+        RunStatus::Reflecting => {
+            run.begin_manual_reflection().unwrap();
+            run
+        }
+        other => panic!("手动反思 fixture 不支持状态: {other:?}"),
+    }
 }
 
 fn manual_compaction_run_at_status(status: RunStatus) -> Run {
@@ -2198,4 +2236,137 @@ fn event_run_entered_invoking_model(event: &RuntimeLifecycleEvent) -> bool {
         event,
         RuntimeLifecycleEvent::Transitioned { to, .. } if *to == RunStatus::InvokingModel
     )
+}
+
+// ── Memory 反思纳入 Run 状态机 ────────────────────────────────────────
+
+#[test]
+fn reflecting_is_not_terminal() {
+    assert!(
+        !RunStatus::Reflecting.is_terminal(),
+        "Reflecting 是可恢复的工作相位，不得视为终态"
+    );
+}
+
+#[test]
+fn conversation_reflection_from_applying_response_returns_to_applying_response() {
+    let mut run = run_at_status(RunStatus::ApplyingResponse);
+    assert_eq!(
+        run.transition(RunTransition::BeginReflection),
+        Ok(RunStatus::Reflecting)
+    );
+    assert_eq!(run.status(), RunStatus::Reflecting);
+    assert_eq!(
+        run.transition(RunTransition::ReflectionCompleted),
+        Ok(RunStatus::ApplyingResponse)
+    );
+    assert_eq!(run.status(), RunStatus::ApplyingResponse);
+}
+
+#[test]
+fn conversation_reflection_from_compacting_returns_to_compacting() {
+    let mut run = run_at_status(RunStatus::Compacting);
+    assert_eq!(
+        run.transition(RunTransition::BeginReflection),
+        Ok(RunStatus::Reflecting)
+    );
+    assert_eq!(
+        run.transition(RunTransition::ReflectionCompleted),
+        Ok(RunStatus::Compacting)
+    );
+    assert_eq!(run.status(), RunStatus::Compacting);
+}
+
+#[test]
+fn reflection_completed_outside_reflecting_is_illegal() {
+    for status in [
+        RunStatus::Created,
+        RunStatus::DrainingInput,
+        RunStatus::ApplyingResponse,
+        RunStatus::Compacting,
+    ] {
+        let mut run = run_at_status(status);
+        assert_eq!(
+            run.transition(RunTransition::ReflectionCompleted),
+            Err(RunTransitionError::IllegalTransition {
+                from: status,
+                transition: RunTransition::ReflectionCompleted,
+            }),
+            "{status:?} 不得接受 ReflectionCompleted"
+        );
+        assert_eq!(run.status(), status, "非法迁移不得修改状态");
+    }
+}
+
+#[test]
+fn conversation_run_rejects_begin_reflection_from_draining_input() {
+    let mut run = run_at_status(RunStatus::DrainingInput);
+    let events_before = run.events().len();
+
+    assert_eq!(
+        run.transition(RunTransition::BeginReflection),
+        Err(RunTransitionError::IllegalTransition {
+            from: RunStatus::DrainingInput,
+            transition: RunTransition::BeginReflection,
+        }),
+        "排空阶段的反思入口仅对 ManualReflection 意图开放"
+    );
+    assert_eq!(run.status(), RunStatus::DrainingInput);
+    assert_eq!(
+        run.events().len(),
+        events_before,
+        "被拒绝的反思入口不得发布迁移事件"
+    );
+}
+
+#[test]
+fn manual_reflection_run_settles_back_to_draining_input() {
+    let mut run = Run::new(RunSpec::manual_reflection(), None);
+    run.start_draining().unwrap();
+    assert_eq!(run.status(), RunStatus::DrainingInput);
+
+    run.begin_manual_reflection().unwrap();
+    assert_eq!(run.status(), RunStatus::Reflecting);
+
+    run.transition(RunTransition::ReflectionCompleted).unwrap();
+    assert_eq!(run.status(), RunStatus::DrainingInput);
+    assert!(
+        run.events().iter().any(|event| matches!(
+            event,
+            RuntimeLifecycleEvent::Transitioned { reason, .. }
+                if *reason == RunTransitionReason::ManualReflectionSettled
+        )),
+        "手动反思收口必须以 ManualReflectionSettled reason 记录"
+    );
+}
+
+#[test]
+fn conversation_run_rejects_manual_reflection_command() {
+    let mut run = run_at_status(RunStatus::DrainingInput);
+    let events_before = run.events().len();
+
+    assert_eq!(
+        run.begin_manual_reflection(),
+        Err(RunTransitionError::IllegalTransition {
+            from: RunStatus::DrainingInput,
+            transition: RunTransition::BeginReflection,
+        })
+    );
+    assert_eq!(run.status(), RunStatus::DrainingInput);
+    assert_eq!(
+        run.events().len(),
+        events_before,
+        "被拒绝的手动反思命令不得发布迁移事件"
+    );
+}
+
+#[test]
+fn manual_reflection_spec_carries_reflection_intent() {
+    let spec = RunSpec::manual_reflection();
+    assert_eq!(spec.intent(), RunIntent::ManualReflection);
+    assert_eq!(
+        spec.name,
+        RunSpec::main().name,
+        "与 manual_compaction 同构：装配与主会话一致，仅目的不同"
+    );
 }
