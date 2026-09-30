@@ -130,11 +130,13 @@ Memory BC 只输出"这些条目值得注入，格式如下"；Context Managemen
 `Memory` Tool 必须让模型明确区分两类状态：
 
 - `global` / `project` 是持久化 Memory 层；分类固定为 `fact`、`decision`、`preference`、`pattern`、`pitfall`。
-- `add_reminder` / `complete_reminder` 是当前 Session reminder，不写入持久化 Memory。
-- input schema 对 action、layer、category、priority 发布枚举约束，而不是无边界字符串。
+- `MemoryUpdate` 的 `status`（`pin`/`unpin`/`archive`/`restore`）、`layer`（`global`/`project`）、`category`（`fact`/`decision`/`preference`/`pattern`/`pitfall`）由 build.rs 从 Rust 类型生成枚举约束，而不是无边界字符串。
 - `search` 的 typed result 返回 id、content、layer、category、tags、pinned、location、outdated、ttl_expired、superseded_by、evidence、relevance；`list` 返回完整 entries。由于 Tool pipeline 对 LLM 使用 text-first 投影，search/list 的 text **MUST** 同样保留有序条目与可管理完整 ID；structured data 服务 TUI/server，不能替代 LLM 文本契约。
 - Tool 同时发布 `archive` / `restore`。满容量 add/restore 返回 `action=needs_eviction` 与 typed candidates（完整 ID、正文、层/分类/状态、confirmation_count、last_confirmed_at、eviction score/reason），写入保持 NotCommitted；调用方只能显式 archive，禁止静默自动淘汰。
-- Tool description 承载 Memory 使用策略：历史证据不足先 search；用户明确要求长期记住时 add；默认 project，明确跨项目才 global；临时工作用 reminder；敏感、推测和仓库可即时恢复的临时事实不写；无命中不伪造；Memory 不覆盖更高优先级指令。
+- Memory 以 5 个单一职责工具暴露：`MemoryAdd` / `MemorySearch` / `MemoryList` / `MemoryUpdate` / `MemoryDelete`。
+- **参数契约走字段级 `description`**：哪个字段必填、默认值、长度与数量上限都写在字段的文档注释上，由 build.rs 注入 schema。这是模型实际会读的参数级通道。
+- **工具级 `description` 只回答「何时该用我」**，每条 ≤200 字符。行为策略不再堆在工具描述里。
+- `MemoryUpdate` 用 `status` 枚举表达状态迁移，取代原先多个 action 加 `pinned: Option<bool>` 的三态歧义。
 - Reflection 写入的 `MemorySuggestion` 经同一个 `MemoryPort` 成为普通 `MemoryEntry`，因此无需修改 Reflection trigger/workflow 即可被 Tool search 检索。
 
 ## 6. 自动注入配置
@@ -207,6 +209,17 @@ Compact 成功提交后         →  下一次 build window 重新检索并替�
 - 端口与适配器（MemoryPort.search）：[04-ports-and-adapters.md](04-ports-and-adapters.md)
 - Context Management（注入位置归 CM）：[../context-management/01-session.md](../context-management/01-session.md)
 - #551 Memory search 升级：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
+
+## 9. 已知信息缺口
+
+工具 description 精简后，以下两条 Memory 使用策略暂未在模型侧生效：
+
+| 策略 | 正确归属 | 状态 |
+|---|---|---|
+| Memory 不得覆盖系统、安全与当前用户指令 | 系统提示的 Memory 规范段 | 经确认延期 |
+| `superseded_by` 非空不再自动注入，但可由 search / list 查到 | 系统提示的 Memory 规范段 | 经确认延期 |
+
+两条当前仅存于本文档，模型不可见。待 prompt 侧补齐 Memory 规范段后闭合。
 
 ## 修改历史
 

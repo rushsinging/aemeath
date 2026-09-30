@@ -1,5 +1,7 @@
 # Memory 记忆架构增强变更设计（Hindsight 对照）
 
+> **后续变更（2026-09-30）**：本文描述记录的是当时的设计，正文保持原样（含 9 个工具 action 的清单）。Memory 工具现已拆为 5 个单一职责工具（`MemoryAdd` / `MemorySearch` / `MemoryList` / `MemoryUpdate` / `MemoryDelete`，`MemoryUpdate` 以 `status` 枚举表达状态迁移）；session reminder 已因写入端与读取端是两个不同实例、且从不注入 LLM 上下文而全量退役。当前实现见 [`docs/design/02-modules/memory/`](../../design/02-modules/memory/)。
+
 > 对应 Issue: https://github.com/rushsinging/aemeath/issues/1764
 
 **日期**：2026-09-28

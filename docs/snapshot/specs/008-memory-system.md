@@ -1,5 +1,7 @@
 # Feature #8 Memory 系统（重新设计）
 
+> **后续变更（2026-09-30）**：本文描述记录的是当时的设计，正文保持原样。Memory 工具现已拆为 5 个单一职责工具（`MemoryAdd` / `MemorySearch` / `MemoryList` / `MemoryUpdate` / `MemoryDelete`）；session reminder（本文中的 `SessionReminders`、`add_reminder` / `complete_reminder`、`/memory remind` 等）已因写入端与读取端是两个不同实例、且从不注入 LLM 上下文而全量退役。当前实现见 [`docs/design/02-modules/memory/`](../../design/02-modules/memory/)。
+
 > 对应 Issue: https://github.com/rushsinging/aemeath/issues/114
 
 **日期**：2026-05-01

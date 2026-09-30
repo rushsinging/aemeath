@@ -102,10 +102,9 @@ enum MemoryStorageErrorKind {
 Tools BC 的 `MemoryTool` 持有 `MemoryPortSource`，每次 action 执行时调用 `current()`，**NEVER** 在 registry bootstrap 捕获旧的 `Arc<dyn MemoryPort>`；因此 Resume / Session 切换后 search、list 与 mutation 都读取当前 committed port。
 
 - Memory BC 发布过滤、排序、hit identity、location/status/relevance；Tools 只做 typed input/output 与 text-first 映射，**NEVER** 二次排序。
-- ToolRegistry 向 Provider 发布 add/delete/search/pin/list/archive/restore/reminder 的 action 枚举和 action-specific required 约束；SDK 只薄 re-export 同一类型。
+- ToolRegistry 向 Provider 发布 5 个独立 Tool descriptor（`MemoryAdd` / `MemorySearch` / `MemoryList` / `MemoryUpdate` / `MemoryDelete`），每个 descriptor 的 `required` 由 Rust 类型驱动生成（build.rs：非 `Option` 字段 → `required`，`Option<T>` → `nullable` 且不 required，字段文档注释 → `description`，public enum → `{"enum": [...]}`）；SDK 只薄 re-export 同一类型。NEVER 手写条件必填 schema——历史上手写的 `oneOf` 对模型不可见、对校验器也不解析（校验器只读顶层 `required`），属必填信息既未告知模型也未被校验的双重失效，已删除。
 - 满容量结果将 Memory-owned `EvictionCandidate` 映射为 typed Tool result，保留完整 ID、确认元数据与 score/reason；Tool 不复制评分，也不自动归档。
 - search/list 的 LLM text 与 structured data 都必须携完整可管理 ID 和有序内容；TUI/server 可消费 structured data，Provider 仅消费 text-first view。
-- `add_reminder` / `complete_reminder` 通过 Session reminder port，不进入持久化 Memory dataset。
 
 ## 2. ReflectionWorkflow
 

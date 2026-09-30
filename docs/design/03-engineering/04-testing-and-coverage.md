@@ -6,7 +6,7 @@
 
 ## 0. TUI 域终审结论（#1092）
 
-#860 全部执行叶子（#943/#944/#742/#612/#946/#945/#947/#1534 及历史 #1001）的 L0–L5 证据矩阵见 #1092 追踪评论。终审结论：各层证据可追溯、无未解释空白；L5 仅保留单一 PTY smoke。终审修复两项：`ReminderList` 事件的显式渲染消费（此前 reducer 空映射导致 `/memory remind` 结果静默丢弃）、A 类 slash 命令表驱动回归。Run 控制的权威表述为**单一 `CancelRunStep` Effect + runtime `CancelRunStepOutcome::RunTerminating` 升级语义**（SDK PL 层保留 `TerminateRun` outcome 契约）；TUI Effect 枚举不设独立 `TerminateRun` 变体。
+#860 全部执行叶子（#943/#944/#742/#612/#946/#945/#947/#1534 及历史 #1001）的 L0–L5 证据矩阵见 #1092 追踪评论。终审结论：各层证据可追溯、无未解释空白；L5 仅保留单一 PTY smoke。终审修复两项：`ReminderList` 事件的显式渲染消费（此前 reducer 空映射导致 `/memory remind` 结果静默丢弃）、A 类 slash 命令表驱动回归。Run 控制的权威表述为**单一 `CancelRunStep` Effect + runtime `CancelRunStepOutcome::RunTerminating` 升级语义**（SDK PL 层保留 `TerminateRun` outcome 契约）；TUI Effect 枚举不设独立 `TerminateRun` 变体。上述 `ReminderList` 渲染消费修复记录的是当时的机制；该事件链连同 `/memory remind` 命令已随后整体退役（见 [`docs/design/02-modules/memory/01-domain-model.md`](../02-modules/memory/01-domain-model.md) §8），本段仅保留为历史审计结论。
 
 ## 1. 目标与非目标
 

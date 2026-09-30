@@ -39,7 +39,6 @@ Workspace payload 应包含 path base、workspace root、branch、worktree kind 
 |---|---|---|---|---|
 | `SkillsUpdated` | 同名 | 同名 | revisioned full catalog | Target Rename：`SkillCatalogChanged` |
 | `ModelList` | 同名 | 同名 | full model catalog | Target Rename：`ModelCatalogChanged` / `Snapshot` |
-| `ReminderList` | 同名 | 同名 | full reminder collection | Target Rename：`ReminderCatalogChanged` |
 | `SessionList` | 同名 | 同名 | full session catalog | Target Rename：`SessionCatalogChanged` |
 
 复数名词 + `Updated/List` 不表达 Subject 和 delivery。迁移时 MUST 明确这些 payload 是 revisioned Changed 还是 query response Snapshot。
