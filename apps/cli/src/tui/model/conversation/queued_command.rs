@@ -7,12 +7,3 @@ pub struct QueuedCommand {
     pub input_id: String,
     pub text: String,
 }
-
-impl QueuedCommand {
-    pub fn new(input_id: impl Into<String>, text: impl Into<String>) -> Self {
-        Self {
-            input_id: input_id.into(),
-            text: text.into(),
-        }
-    }
-}

@@ -458,7 +458,10 @@ impl ConversationModel {
     ) -> Vec<ConversationChange> {
         self.queued_commands = queued
             .into_iter()
-            .map(|(input_id, text)| QueuedCommand::new(input_id.as_str(), text))
+            .map(|(input_id, text)| QueuedCommand {
+                input_id: input_id.as_str().to_string(),
+                text,
+            })
             .collect();
         vec![ConversationChange::QueuedCommandsSynced {
             count: self.queued_commands.len(),
