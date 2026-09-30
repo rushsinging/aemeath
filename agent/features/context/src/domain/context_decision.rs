@@ -4,9 +4,6 @@ use crate::domain::{
     MIN_EFFECTIVE_WINDOW,
 };
 
-/// Heuristic 校准系数的有效区间（#1626）。
-/// 区间外的值视为不可信观测，按 1.0（不校准）处理。
-
 /// 解析 request 携带的 heuristic 校准系数；越界或缺失按 1.0。
 pub(crate) fn resolve_calibration_factor(request: &ContextRequestData) -> f64 {
     request

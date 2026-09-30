@@ -2,6 +2,7 @@
 
 pub mod ask_user;
 pub mod assistant_message;
+mod constants;
 pub mod diagnostic;
 pub mod edit_diff;
 pub mod hook_notice;

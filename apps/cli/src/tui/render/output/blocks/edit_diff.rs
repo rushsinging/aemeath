@@ -9,6 +9,11 @@
 //! 复用 `primitives::diff::diff`（行号 + 加减语义色 + 语法高亮 + 缩进）渲染为
 //! `RenderedLine`，下游统一经 `apply_selection_overlay` 可选中并保留前景色（bug #61）。
 
+use super::constants::{
+    DIFF_LINE_PREFIX, DIFF_MARKER_PREFIX, DIFF_MARKER_SUFFIX, HIGHLIGHT_MAX_LINE_BYTES,
+    HIGHLIGHT_MAX_SIDE_LINES, HIGHLIGHT_MAX_TOTAL_BYTES, LEGACY_DIFF_MARKER, RENDER_MAX_LINE_BYTES,
+    RENDER_MAX_SIDE_LINES, RENDER_MAX_TOTAL_BYTES, RETAINED_LINES_PER_END,
+};
 use crate::tui::render::output::primitives::diff::diff_from;
 use crate::tui::render::output::rendered::RenderedLine;
 use crate::tui::render::syntax::extension_from_path;
@@ -18,18 +23,6 @@ use ratatui::text::Span;
 use serde_json::Value;
 
 /// Edit 工具结果中包裹 old/new 文本的旧标记。
-pub(crate) const LEGACY_DIFF_MARKER: &str = "---DIFF---";
-const DIFF_MARKER_PREFIX: &str = "---DIFF";
-const DIFF_MARKER_SUFFIX: &str = "---";
-const DIFF_LINE_PREFIX: &str = ":LINE:";
-
-const HIGHLIGHT_MAX_SIDE_LINES: usize = 20_000;
-const HIGHLIGHT_MAX_TOTAL_BYTES: usize = 4 * 1024 * 1024;
-const HIGHLIGHT_MAX_LINE_BYTES: usize = 2 * 1024 * 1024;
-const RENDER_MAX_SIDE_LINES: usize = 100_000;
-const RENDER_MAX_TOTAL_BYTES: usize = 16 * 1024 * 1024;
-const RENDER_MAX_LINE_BYTES: usize = 4 * 1024 * 1024;
-const RETAINED_LINES_PER_END: usize = 250;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DiffRenderMode {

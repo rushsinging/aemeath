@@ -1,25 +1,17 @@
 //! 行首标志槽 gutter：depth 缩进 + marker 列。组合期注入，只进 spans 不进 plain。
 //! marker 按 kind/status 决定；运行态工具 marker 可随动画帧闪烁，仅首行画，后续行等宽空白。
 
+use super::constants::{
+    GUTTER_WIDTH, MAX_GUTTER_DEPTH, NARROW_DISABLE_TABLE_THRESHOLD, NARROW_NO_GUTTER_THRESHOLD,
+    NARROW_NO_INDENT_THRESHOLD, NARROW_STATUS_HINT_THRESHOLD, PER_DEPTH_INDENT,
+    TOOL_MARKER_BLINK_DIVISOR,
+};
 use crate::tui::render::display::safe_text::str_display_width;
 use crate::tui::render::output::rendered::{LineAnimation, RenderedLine};
 use crate::tui::render::theme;
 use crate::tui::view_model::output::{OutputBlockKind, ToolSemanticStatus};
 use ratatui::style::Style;
 use ratatui::text::Span;
-
-/// marker 列字符宽度（字形 1 + 空格 1）。
-pub const GUTTER_WIDTH: usize = 2;
-const PER_DEPTH_INDENT: usize = 2;
-pub const TOOL_MARKER_BLINK_DIVISOR: u64 = 4;
-/// 窄屏阈值：低于此宽度时缩减 gutter 缩进为 0（仅保留 marker）。
-const NARROW_NO_INDENT_THRESHOLD: u16 = 50;
-/// 极窄屏阈值：低于此宽度时完全移除 gutter。
-const NARROW_NO_GUTTER_THRESHOLD: u16 = 30;
-/// 窄屏阈值：低于此宽度时状态栏显示提示。
-pub const NARROW_STATUS_HINT_THRESHOLD: u16 = 40;
-/// 窄屏阈值：低于此宽度时禁用 markdown 表格，改逐行输出。
-pub const NARROW_DISABLE_TABLE_THRESHOLD: u16 = 60;
 
 /// 窄屏模式下实际使用的 per-depth 缩进列数。
 fn effective_per_depth_indent(outer_width: u16) -> usize {
@@ -46,7 +38,6 @@ pub fn is_gutter_suppressed(outer_width: u16) -> bool {
 
 /// depth 上限防御（防 `" ".repeat()` 爆内存）。实际对话树深度通常 ≤ 4
 /// （root + tool result 子块），256 已是巨幅冗余，仅用于 fuzz / 错误输入。
-const MAX_GUTTER_DEPTH: usize = 256;
 
 /// 按 block 类型 / 工具状态映射 marker 字形。多数为单列字形，宽字符（如 💭）由
 /// `apply_gutter` 按显示宽度补白填满 marker 槽。

@@ -1,6 +1,9 @@
 //! Unified diagnostic logger with independently recoverable file sinks.
 
 use super::async_sink::AsyncSinkWorker;
+use super::constants::{
+    ASYNC_SINK_CHANNEL_CAPACITY, EMERGENCY_LOG_FILE, UNKNOWN_TARGET_REPORT_LIMIT,
+};
 use super::formatter::format_diag_json_line;
 use super::lifecycle::{EmergencyWriter, FileSinkLifecycle, StdFileOps, StdMonotonicClock};
 use super::native_stderr::route_native_stderr;
@@ -11,18 +14,9 @@ use std::io::{self, stderr, BufWriter, Stderr, Write};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-
-const UNKNOWN_TARGET_REPORT_LIMIT: usize = 3;
 static UNKNOWN_TARGET_REPORTS: AtomicUsize = AtomicUsize::new(0);
 
-/// 异步落盘 channel 容量：按平均 512B/行计约 4MB 内存上限，
-/// 远高于日志峰值速率，饱和时丢弃计数而非反压调用线程。
-const ASYNC_SINK_CHANNEL_CAPACITY: usize = 8192;
-
 /// emergency 兜底专用的日志文件名。TUI（alternate screen）下 stderr 越过双缓冲直接糊屏，
-/// 因此 File 模式的兜底 **NEVER** 走 stderr，统一落到 `<logs_dir>/emergency.log`。
-const EMERGENCY_LOG_FILE: &str = "emergency.log";
-
 struct SinkEntry {
     #[cfg_attr(not(test), allow(dead_code))]
     path: PathBuf,

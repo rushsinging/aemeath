@@ -1,3 +1,6 @@
+use super::constants::{
+    COMPACT_BAR_MAX_WIDTH, SPINNER_BASE, SPINNER_DIM, SPINNER_FRAMES, SPINNER_HIGHLIGHT,
+};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -6,14 +9,6 @@ use ratatui::{
 use crate::tui::render::theme;
 use crate::tui::view_model::live_status::CompactProgressView;
 use crate::tui::view_model::SpinnerLineView;
-
-/// Spinner glyph frames — forward then reverse for a breathing effect
-const SPINNER_FRAMES: &[char] = &['·', '✢', '✳', '✶', '✻', '✽', '✻', '✶', '✳', '✢', '·'];
-
-/// Spinner colors (theme accent)
-const SPINNER_BASE: Color = theme::SPINNER_BASE;
-const SPINNER_HIGHLIGHT: Color = theme::SPINNER_HIGHLIGHT;
-const SPINNER_DIM: Color = theme::SPINNER_DIM;
 
 fn format_duration(total_secs: u64) -> String {
     let hours = total_secs / 3600;
@@ -123,9 +118,6 @@ impl super::OutputArea {
         Line::from(spans)
     }
 }
-
-/// Compact 进度条的最大宽度（字符）。
-const COMPACT_BAR_MAX_WIDTH: usize = 30;
 
 /// 由 `CompactProgressView` 构造手绘 Span 进度条片段。
 ///

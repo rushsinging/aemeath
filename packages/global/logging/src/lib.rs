@@ -11,6 +11,8 @@
 //! 越过 TUI alternate screen 的双缓冲直接糊屏（见 #1215）。
 //! `panic.log` 由 panic hook 直写，不纳入 UnifiedLogger。
 
+mod constants;
+pub use constants::{LOG_MAX_BACKUPS, LOG_MAX_BYTES, LOG_RETENTION_DAYS};
 mod adapters;
 mod domain;
 
@@ -45,7 +47,3 @@ pub fn flush_diagnostic_logs() {
         log::Log::flush(logger);
     }
 }
-
-pub const LOG_MAX_BYTES: u64 = 100 * 1024 * 1024;
-pub const LOG_MAX_BACKUPS: usize = 5;
-pub const LOG_RETENTION_DAYS: u64 = 30;

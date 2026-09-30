@@ -44,7 +44,7 @@ pub fn render_fenced_markdown(
 fn render_block(block: &MarkdownBlock<'_>, base_style: Style, width: u16) -> Vec<RenderedLine> {
     match block.kind {
         MarkdownElement::Table
-            if width >= crate::tui::render::output::gutter::NARROW_DISABLE_TABLE_THRESHOLD =>
+            if width >= crate::tui::render::output::constants::NARROW_DISABLE_TABLE_THRESHOLD =>
         {
             table(&block.lines, base_style, width)
         }

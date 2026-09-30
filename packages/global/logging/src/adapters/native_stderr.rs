@@ -1,3 +1,4 @@
+use super::constants::{STDERR_FD, STDOUT_FD};
 use crate::domain::{LoggingSettings, NativeStderrRouting};
 #[cfg(unix)]
 use std::fs::{File, OpenOptions};
@@ -6,9 +7,6 @@ use std::path::Path;
 
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
-
-const STDOUT_FD: i32 = 1;
-const STDERR_FD: i32 = 2;
 
 /// 路由前保存的原生 stderr 描述符副本，供致命错误重新在终端可见。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

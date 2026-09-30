@@ -5,6 +5,7 @@ use sdk::CharIdx;
 use crate::tui::render::output::rendered::RenderedDocument;
 use crate::tui::render::output_area::types::DEFAULT_WIDTH;
 
+pub(crate) mod constants;
 pub mod content;
 pub mod display;
 pub mod render;
