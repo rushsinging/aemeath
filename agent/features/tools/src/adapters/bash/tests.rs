@@ -801,3 +801,34 @@ fn bash_tool_description_advertises_60_minute_max() {
         tool.description()
     );
 }
+
+#[tokio::test]
+async fn bash_when_workspace_deleted_returns_cwd_attribution() {
+    let workspace = tempdir().unwrap();
+    let root = workspace.path().to_path_buf();
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(root.clone())
+        .allow_all(true)
+        .build();
+    let tool = bash_tool(&ctx);
+
+    // 模拟事故：会话运行中工作目录（worktree）被清理后仍执行命令。
+    drop(workspace);
+
+    let result = tool.call(json!({ "command": "true" }), &ctx).await;
+
+    assert!(
+        result.is_error,
+        "工作目录缺失时 Bash 必须失败：{}",
+        result.text
+    );
+    assert!(
+        result.text.contains("工作目录已不存在"),
+        "错误必须包含 cwd 归因，实际：{}",
+        result.text
+    );
+    assert!(
+        result.text.contains(&root.display().to_string()),
+        "错误必须包含缺失路径，实际：{}",
+        result.text
+    );
+}

@@ -52,47 +52,61 @@ enum FaultPoint {
     PromoteAfterPreviousToPrimary,
 }
 
+/// 故障注入配置：**adapter 实例状态**，不是进程全局状态。
+///
+/// 构造时快照一次（`from_env` 供崩溃恢复子进程从启动 env 接收父进程配置），
+/// 此后运行期绝不读进程 env——从机制上消除跨测试 env 污染与 env 并发读写的数据竞争。
 #[cfg(any(test, feature = "test-fault-injection"))]
-fn fault_requested(point: &FaultPoint) -> bool {
-    let Some(requested) = std::env::var_os(FAULT_POINT_ENV) else {
-        return false;
-    };
-    let requested = requested.to_string_lossy();
-    match point {
-        FaultPoint::AfterPrepared => requested == "after_prepared",
-        FaultPoint::AfterMemberPublish(name) => requested == format!("after_member_publish:{name}"),
-        FaultPoint::PromoteAfterPrepared => requested == "promote_after_prepared",
-        FaultPoint::PromoteAfterPrimaryToSwap => requested == "promote_after_primary_to_swap",
-        FaultPoint::PromoteAfterPreviousToPrimary => {
-            requested == "promote_after_previous_to_primary"
+#[derive(Clone, Debug, Default)]
+pub(crate) struct DatasetFaultInjector {
+    requested: Option<String>,
+    abort: bool,
+}
+
+#[cfg(any(test, feature = "test-fault-injection"))]
+impl DatasetFaultInjector {
+    /// 请求在指定故障点注入（如 `after_prepared`、`after_member_publish:<name>`）。
+    /// 仅单元测试显式构造使用；feature 形态经 `from_env` 接收子进程配置。
+    #[cfg(test)]
+    pub(crate) fn requested(point: impl Into<String>) -> Self {
+        Self {
+            requested: Some(point.into()),
+            abort: false,
         }
     }
-}
 
-/// 在 post-Prepared 故障点触发注入。命中且设置了 `FAULT_ABORT` → 直接 abort；
-/// 否则返回一个普通 I/O 错误，由提交路径转化为 committed `RecoveryPending` 收据。
-#[cfg(any(test, feature = "test-fault-injection"))]
-fn inject_post_prepared_fault(point: &FaultPoint) -> Result<(), StorageError> {
-    if !fault_requested(point) {
-        return Ok(());
+    /// 构造时从启动 env 快照一次：子进程无法接收 Rust 对象，
+    /// 崩溃恢复演练经父进程 spawn 时的 env 传递注入配置。
+    pub(crate) fn from_env() -> Self {
+        Self {
+            requested: std::env::var(FAULT_POINT_ENV).ok(),
+            abort: std::env::var_os(FAULT_ABORT_ENV).is_some(),
+        }
     }
-    if std::env::var_os(FAULT_ABORT_ENV).is_some() {
-        std::process::abort();
-    }
-    Err(StorageError::new(
-        StorageErrorKind::Io,
-        "注入的数据集事务故障（post-Prepared）",
-    ))
-}
 
-#[cfg(not(any(test, feature = "test-fault-injection")))]
-fn inject_post_prepared_fault(_point: &FaultPoint) -> Result<(), StorageError> {
-    Ok(())
+    fn is_requested(&self, point: &FaultPoint) -> bool {
+        let Some(requested) = &self.requested else {
+            return false;
+        };
+        match point {
+            FaultPoint::AfterPrepared => requested == "after_prepared",
+            FaultPoint::AfterMemberPublish(name) => {
+                *requested == format!("after_member_publish:{name}")
+            }
+            FaultPoint::PromoteAfterPrepared => requested == "promote_after_prepared",
+            FaultPoint::PromoteAfterPrimaryToSwap => requested == "promote_after_primary_to_swap",
+            FaultPoint::PromoteAfterPreviousToPrimary => {
+                requested == "promote_after_previous_to_primary"
+            }
+        }
+    }
 }
 
 /// 受约束目录内的多成员数据集事务 adapter。
 pub struct FileSystemDatasetAdapter {
     root: Dir,
+    #[cfg(any(test, feature = "test-fault-injection"))]
+    faults: DatasetFaultInjector,
 }
 
 impl FileSystemDatasetAdapter {
@@ -102,13 +116,50 @@ impl FileSystemDatasetAdapter {
             std::fs::create_dir_all(root.as_ref()).map_err(proto::map_io)?;
             let root =
                 Dir::open_ambient_dir(root.as_ref(), ambient_authority()).map_err(proto::map_io)?;
-            Ok::<Self, StorageError>(Self { root })
+            Ok::<Self, StorageError>(Self {
+                root,
+                #[cfg(any(test, feature = "test-fault-injection"))]
+                faults: DatasetFaultInjector::from_env(),
+            })
         })();
         match &result {
             Ok(_) => log::info!(target: crate::LOG_TARGET, "dataset_adapter init ok"),
             Err(_) => log::error!(target: crate::LOG_TARGET, "dataset_adapter init failed"),
         }
         result
+    }
+
+    /// 注入配置仅作用于本 adapter 实例（测试内显式切换故障点）。
+    #[cfg(test)]
+    pub(crate) fn set_faults(&mut self, faults: DatasetFaultInjector) {
+        self.faults = faults;
+    }
+
+    /// 恢复为启动 env 快照的配置（默认无注入）。
+    #[cfg(test)]
+    pub(crate) fn clear_faults(&mut self) {
+        self.faults = DatasetFaultInjector::from_env();
+    }
+
+    /// 在 post-Prepared 故障点触发注入。命中且请求了 abort → 直接 abort；
+    /// 否则返回一个普通 I/O 错误，由提交路径转化为 committed `RecoveryPending` 收据。
+    #[cfg(any(test, feature = "test-fault-injection"))]
+    fn inject_post_prepared_fault(&self, point: &FaultPoint) -> Result<(), StorageError> {
+        if !self.faults.is_requested(point) {
+            return Ok(());
+        }
+        if self.faults.abort {
+            std::process::abort();
+        }
+        Err(StorageError::new(
+            StorageErrorKind::Io,
+            "注入的数据集事务故障（post-Prepared）",
+        ))
+    }
+
+    #[cfg(not(any(test, feature = "test-fault-injection")))]
+    fn inject_post_prepared_fault(&self, _point: &FaultPoint) -> Result<(), StorageError> {
+        Ok(())
     }
 
     fn dataset_rel(key: &DatasetKeyData) -> PathBuf {
@@ -1118,7 +1169,7 @@ impl FileSystemDatasetAdapter {
             proto::write_journal(dir, &journal)?;
             proto::sync_dir(dir)?;
             crossed_commit = true;
-            inject_post_prepared_fault(&FaultPoint::AfterPrepared)?;
+            self.inject_post_prepared_fault(&FaultPoint::AfterPrepared)?;
 
             let member_store = PathBuf::from(MEMBERS_DIR);
             dir.create_dir_all(&member_store).map_err(proto::map_io)?;
@@ -1132,7 +1183,7 @@ impl FileSystemDatasetAdapter {
                     proto::sync_subdir(dir, &stage_members)?;
                     proto::sync_subdir(dir, &member_store)?;
                 }
-                inject_post_prepared_fault(&FaultPoint::AfterMemberPublish(
+                self.inject_post_prepared_fault(&FaultPoint::AfterMemberPublish(
                     member.name().as_str().to_string(),
                 ))?;
             }
@@ -1354,7 +1405,7 @@ impl FileSystemDatasetAdapter {
             proto::write_journal(dir, &journal)?;
             proto::sync_dir(dir)?;
             crossed_commit = true;
-            inject_post_prepared_fault(&FaultPoint::PromoteAfterPrepared)?;
+            self.inject_post_prepared_fault(&FaultPoint::PromoteAfterPrepared)?;
 
             // 前滚三次 rename 交换（含中途故障点）。
             self.advance_promote_swap(dir, &journal)?;
@@ -1440,12 +1491,12 @@ impl FileSystemDatasetAdapter {
                     .map_err(proto::map_io)?;
                 proto::sync_dir(dir)?;
             }
-            inject_post_prepared_fault(&FaultPoint::PromoteAfterPrimaryToSwap)?;
+            self.inject_post_prepared_fault(&FaultPoint::PromoteAfterPrimaryToSwap)?;
             // previous→primary。
             dir.rename(&previous_dir, dir, &primary_dir)
                 .map_err(proto::map_io)?;
             proto::sync_dir(dir)?;
-            inject_post_prepared_fault(&FaultPoint::PromoteAfterPreviousToPrimary)?;
+            self.inject_post_prepared_fault(&FaultPoint::PromoteAfterPreviousToPrimary)?;
             // swap→previous（如存在）。
             if proto::exists(dir, &swap)? {
                 dir.rename(&swap, dir, &previous_dir)
@@ -1466,7 +1517,7 @@ impl FileSystemDatasetAdapter {
             dir.rename(&previous_dir, dir, &primary_dir)
                 .map_err(proto::map_io)?;
             proto::sync_dir(dir)?;
-            inject_post_prepared_fault(&FaultPoint::PromoteAfterPreviousToPrimary)?;
+            self.inject_post_prepared_fault(&FaultPoint::PromoteAfterPreviousToPrimary)?;
             dir.rename(&swap, dir, &previous_dir)
                 .map_err(proto::map_io)?;
             proto::sync_dir(dir)?;

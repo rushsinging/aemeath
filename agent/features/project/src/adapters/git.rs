@@ -102,17 +102,21 @@ impl<R: GitCommandRunner> GitOps<R> {
     }
 }
 
-fn probe_spawn(error: io::Error) -> GitProbeError {
+fn probe_spawn(error: io::Error, cwd: &Path) -> GitProbeError {
     match error.kind() {
-        ErrorKind::NotFound => GitProbeError::GitUnavailable,
+        ErrorKind::NotFound => utils::describe_cwd_gone_failure(&error, cwd, "git 命令")
+            .map(GitProbeError::CwdGone)
+            .unwrap_or(GitProbeError::GitUnavailable),
         ErrorKind::PermissionDenied => GitProbeError::PermissionDenied,
         _ => GitProbeError::CommandFailed { exit_code: None },
     }
 }
 
-fn operation_spawn(error: io::Error) -> GitOperationError {
+fn operation_spawn(error: io::Error, cwd: &Path) -> GitOperationError {
     match error.kind() {
-        ErrorKind::NotFound => GitOperationError::GitUnavailable,
+        ErrorKind::NotFound => utils::describe_cwd_gone_failure(&error, cwd, "git 命令")
+            .map(GitOperationError::CwdGone)
+            .unwrap_or(GitOperationError::GitUnavailable),
         ErrorKind::PermissionDenied => GitOperationError::PermissionDenied,
         _ => GitOperationError::CommandFailed { exit_code: None },
     }
@@ -163,7 +167,7 @@ impl<R: GitCommandRunner> GitWorktreeOps for GitOps<R> {
                     "--git-dir",
                 ]),
             )
-            .map_err(probe_spawn)?;
+            .map_err(|error| probe_spawn(error, path))?;
         if !output.success {
             let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
             if stderr.contains("not a git repository") {
@@ -215,7 +219,7 @@ impl<R: GitCommandRunner> GitWorktreeOps for GitOps<R> {
         let output = self
             .runner
             .run(path, &os_args(["rev-parse", "--show-toplevel"]))
-            .map_err(operation_spawn)?;
+            .map_err(|error| operation_spawn(error, path))?;
         let value = operation_output(output)?;
         PathBuf::from(value)
             .canonicalize()
@@ -229,6 +233,9 @@ impl<R: GitCommandRunner> GitWorktreeOps for GitOps<R> {
             }
             Ok(RepositoryProbe::NonGit) => Ok(false),
             Err(GitProbeError::GitUnavailable) => Err(GitOperationError::GitUnavailable),
+            Err(GitProbeError::CwdGone(attribution)) => {
+                Err(GitOperationError::CwdGone(attribution))
+            }
             Err(GitProbeError::PermissionDenied) => Err(GitOperationError::PermissionDenied),
             Err(GitProbeError::CommandFailed { exit_code }) => {
                 Err(GitOperationError::CommandFailed { exit_code })
@@ -245,7 +252,7 @@ impl<R: GitCommandRunner> GitWorktreeOps for GitOps<R> {
         base: &str,
     ) -> Result<(), GitOperationError> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(operation_spawn)?;
+            std::fs::create_dir_all(parent).map_err(|error| operation_spawn(error, repo_root))?;
         }
         let args = vec![
             OsString::from("worktree"),
@@ -256,7 +263,10 @@ impl<R: GitCommandRunner> GitWorktreeOps for GitOps<R> {
             path.as_os_str().to_os_string(),
             OsString::from(base),
         ];
-        let output = self.runner.run(repo_root, &args).map_err(operation_spawn)?;
+        let output = self
+            .runner
+            .run(repo_root, &args)
+            .map_err(|error| operation_spawn(error, repo_root))?;
         if output.success {
             Ok(())
         } else {
@@ -270,7 +280,7 @@ impl<R: GitCommandRunner> GitWorktreeOps for GitOps<R> {
         let output = self
             .runner
             .run(path, &os_args(["rev-parse", "--abbrev-ref", "HEAD"]))
-            .map_err(operation_spawn)?;
+            .map_err(|error| operation_spawn(error, path))?;
         let branch = operation_output(output)?;
         if branch == "HEAD" {
             Ok(None)
@@ -593,13 +603,17 @@ mod tests {
 
     #[test]
     fn probe_maps_missing_git_to_unavailable() {
+        // cwd 必须真实存在：NotFound + cwd 缺失会归因为 CwdGone（由
+        // probe_repository_when_cwd_deleted_returns_attribution 覆盖），本测试
+        // 专注「git 可执行文件缺失」这一 NotFound 来源。
+        let temp = TestTempDir::new();
         let git = GitCli::with_runner(ScriptedRunner::new([Err(io::Error::new(
             ErrorKind::NotFound,
             "missing git",
         ))]));
 
         assert_eq!(
-            git.probe_repository(Path::new("/repo")),
+            git.probe_repository(temp.path()),
             Err(GitProbeError::GitUnavailable)
         );
     }

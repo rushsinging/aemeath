@@ -157,7 +157,8 @@ pub async fn build_system_prompt_parts(
     let initial_git_context = if is_git {
         collect_git_context(cwd, lang).await
     } else {
-        String::new()
+        // cwd 缺失时不静默跳过：向会话注入归因，让 LLM 立即知情。
+        utils::describe_cwd_gone(cwd, "git 上下文").unwrap_or_default()
     };
 
     // --- Project instructions: will be injected as a separate user-context message ---

@@ -168,7 +168,11 @@ impl TypedTool for BashTool {
         }
         let mut child = match command_process.spawn() {
             Ok(c) => c,
-            Err(e) => return TypedToolResult::error(format!("failed to execute: {e}")),
+            Err(e) => {
+                let message = utils::describe_cwd_gone_failure(&e, &path_base, "Bash 命令")
+                    .unwrap_or_else(|| format!("failed to execute: {e}"));
+                return TypedToolResult::error(message);
+            }
         };
         // [DIAG] 记录耗时起点与子进程 PID，便于 #286 / 复现诊断
         let start = Instant::now();
@@ -404,7 +408,9 @@ impl TypedTool for BashTool {
                     preview(&stdout_lossy),
                     preview(&stderr_lossy),
                 );
-                TypedToolResult::error(format!("failed to execute: {e}"))
+                let attribution = utils::describe_cwd_gone_failure(&e, &path_base, "Bash 命令");
+                let message = attribution.unwrap_or_else(|| format!("failed to execute: {e}"));
+                TypedToolResult::error(message)
             }
         }
     }

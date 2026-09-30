@@ -1,8 +1,6 @@
-use std::ffi::OsString;
 use std::str::FromStr;
-use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use super::FileSystemDatasetAdapter;
+use super::{DatasetFaultInjector, FileSystemDatasetAdapter};
 use crate::domain::{
     revision_member_digest, DatasetChangeSetData, DatasetCommitVisibilityData, DatasetKeyData,
     DatasetManifestData, DatasetMemberChangeData, DatasetMemberData, DatasetMemberReferenceData,
@@ -11,49 +9,6 @@ use crate::domain::{
 };
 use crate::ports::AtomicDatasetPort;
 use crate::test_log;
-
-fn fault_env_lock() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-}
-
-fn without_fault_env() -> FaultEnvGuard {
-    let lock = fault_env_lock();
-    let previous = std::env::var_os("AEMEATH_STORAGE_DATASET_FAULT_POINT");
-    std::env::remove_var("AEMEATH_STORAGE_DATASET_FAULT_POINT");
-    FaultEnvGuard {
-        previous,
-        _lock: lock,
-    }
-}
-
-struct FaultEnvGuard {
-    previous: Option<OsString>,
-    _lock: MutexGuard<'static, ()>,
-}
-
-impl FaultEnvGuard {
-    fn after_prepared() -> Self {
-        let lock = fault_env_lock();
-        let previous = std::env::var_os("AEMEATH_STORAGE_DATASET_FAULT_POINT");
-        std::env::set_var("AEMEATH_STORAGE_DATASET_FAULT_POINT", "after_prepared");
-        Self {
-            previous,
-            _lock: lock,
-        }
-    }
-}
-
-impl Drop for FaultEnvGuard {
-    fn drop(&mut self) {
-        match self.previous.take() {
-            Some(value) => std::env::set_var("AEMEATH_STORAGE_DATASET_FAULT_POINT", value),
-            None => std::env::remove_var("AEMEATH_STORAGE_DATASET_FAULT_POINT"),
-        }
-    }
-}
 
 fn root() -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
@@ -175,7 +130,7 @@ async fn incremental_commit_persists_only_changed_member_content() {
     .expect("valid post-migration incremental change set");
     let content_files_before = dataset_member_content_file_count(&dataset_path);
 
-    adapter
+    let receipt = adapter
         .commit_incremental(
             &key,
             &second_changes,
@@ -183,21 +138,72 @@ async fn incremental_commit_persists_only_changed_member_content() {
         )
         .await
         .expect("incremental commit");
+    // 提交必须完整落盘：RecoveryPending 意味着事务在成员发布链路中被中断
+    // （crossed_commit 降级的 Ok 不是成功），后续内容断言将全部失真。
+    assert_eq!(
+        receipt.visibility(),
+        DatasetCommitVisibilityData::Visible,
+        "第二次增量提交必须完整落盘，实际 receipt={receipt:?}"
+    );
+    assert!(
+        receipt.warning().is_none(),
+        "第二次增量提交不得携带降级警告，实际 receipt={receipt:?}"
+    );
 
     let content_files_after = dataset_member_content_file_count(&dataset_path);
     let member_store = dataset_path.join("members");
     // 替换一个成员恰好持久化一个新内容文件、回收一个被两代丢弃的最旧内容；
     // 历史成员内容永不重写，净增量归零而非无限累积。
+    let member_store_listing = || -> Vec<String> {
+        std::fs::read_dir(&member_store)
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_else(|error| vec![format!("<read_dir failed: {error}>")])
+    };
+    // 事务状态现场：数据集根条目 + 两代 manifest + journal 的存在性与大小，
+    // 用于在断言失败时区分「提交未执行 / 事务未完成 / GC 误删」。
+    let transaction_listing = || -> Vec<String> {
+        let mut items = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&dataset_path) {
+            for entry in entries.filter_map(Result::ok) {
+                let path = entry.path();
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                items.push(format!(
+                    "{}({}B{})",
+                    entry.file_name().to_string_lossy(),
+                    size,
+                    if path.is_dir() { "/" } else { "" }
+                ));
+            }
+        }
+        for generation in ["primary", "previous"] {
+            let manifest = dataset_path.join(generation).join("manifest");
+            match std::fs::metadata(&manifest) {
+                Ok(meta) => items.push(format!("{generation}/manifest:{}B", meta.len())),
+                Err(error) => items.push(format!("{generation}/manifest:<{error}>")),
+            }
+        }
+        items.sort();
+        items
+    };
     assert_eq!(
         content_files_after - content_files_before,
         0,
-        "replacing one member must persist exactly one new immutable content file and collect the single orphaned predecessor regardless of historical member count"
+        "replacing one member must persist exactly one new immutable content file and collect the single orphaned predecessor regardless of historical member count; before={content_files_before} after={content_files_after} members={:?}",
+        member_store_listing()
     );
     assert!(
         member_store
             .join(super::proto::digest_bytes(b"changed-again"))
             .exists(),
-        "the replaced member's new content must be persisted"
+        "the replaced member's new content must be persisted; expected={} members={:?} dataset={:?}",
+        member_store.join(super::proto::digest_bytes(b"changed-again")).display(),
+        member_store_listing(),
+        transaction_listing()
     );
     assert!(
         member_store
@@ -241,13 +247,8 @@ fn dataset_member_content_file_count(dataset_path: &std::path::Path) -> usize {
         .unwrap_or_default()
 }
 
-#[allow(
-    clippy::await_holding_lock,
-    reason = "故障环境变量是进程全局状态，迁移提交测试必须在整个异步提交期间排除故障注入"
-)]
 #[tokio::test(flavor = "current_thread")]
 async fn legacy_manifest_without_member_evidence_reads_and_migrates_on_incremental_commit() {
-    let _fault_env = without_fault_env();
     let root = root();
     let dataset_path = root.join("memory").join("conv-log");
     let primary_blobs = dataset_path.join("primary").join("blobs");
@@ -319,13 +320,8 @@ async fn legacy_manifest_without_member_evidence_reads_and_migrates_on_increment
     let _ = std::fs::remove_dir_all(&root);
 }
 
-#[allow(
-    clippy::await_holding_lock,
-    reason = "故障环境变量是进程全局状态，迁移提交测试必须在整个异步提交期间排除故障注入"
-)]
 #[tokio::test(flavor = "current_thread")]
 async fn legacy_manifest_with_revision_evidence_but_without_content_digests_reads_and_migrates() {
-    let _fault_env = without_fault_env();
     let root = root();
     let dataset_path = root.join("memory").join("conv-log");
     let primary_blobs = dataset_path.join("primary").join("blobs");
@@ -658,14 +654,10 @@ async fn incremental_commit_removes_only_explicit_omitted_member() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-#[allow(
-    clippy::await_holding_lock,
-    reason = "故障环境变量是进程全局状态，测试必须在整个异步提交期间独占它"
-)]
 #[tokio::test(flavor = "current_thread")]
 async fn incremental_commit_after_prepared_recovers_complete_generation() {
     let root = root();
-    let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
+    let mut adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
     let key = key();
     let empty_revision = adapter
         .read_manifest(&key)
@@ -695,7 +687,7 @@ async fn incremental_commit_after_prepared_recovers_complete_generation() {
     )
     .expect("valid incremental change set");
 
-    let fault = FaultEnvGuard::after_prepared();
+    adapter.set_faults(DatasetFaultInjector::requested("after_prepared"));
     let receipt = adapter
         .commit_incremental(
             &key,
@@ -708,7 +700,7 @@ async fn incremental_commit_after_prepared_recovers_complete_generation() {
         receipt.visibility(),
         DatasetCommitVisibilityData::RecoveryPending
     );
-    drop(fault);
+    adapter.clear_faults();
 
     let requested = [
         SafePathSegmentData::from_str("active").expect("safe member name"),
@@ -772,14 +764,10 @@ fn init_failure_emits_enter_then_failed_at_error() {
     );
 }
 
-#[allow(
-    clippy::await_holding_lock,
-    reason = "故障环境变量是进程全局状态，测试必须在整个异步提交期间独占它"
-)]
 #[tokio::test(flavor = "current_thread")]
 async fn commit_recovery_pending_emits_warn() {
     let root = root();
-    let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
+    let mut adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
     let key = key();
 
     let expected: DatasetRevisionData = adapter
@@ -805,7 +793,7 @@ async fn commit_recovery_pending_emits_warn() {
         .revision()
         .clone();
 
-    let _fault = FaultEnvGuard::after_prepared();
+    adapter.set_faults(DatasetFaultInjector::requested("after_prepared"));
     let capture = test_log::begin();
     let receipt = adapter
         .commit_atomic(
@@ -835,13 +823,8 @@ async fn commit_recovery_pending_emits_warn() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-#[allow(
-    clippy::await_holding_lock,
-    reason = "故障环境变量是进程全局状态，孤儿回收测试在多次异步提交期间必须排除故障注入"
-)]
 #[tokio::test(flavor = "current_thread")]
 async fn incremental_commit_collects_member_content_orphaned_by_older_generation() {
-    let _fault_env = without_fault_env();
     let root = root();
     let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
     let key = key();
@@ -957,13 +940,8 @@ async fn incremental_commit_collects_member_content_orphaned_by_older_generation
     let _ = std::fs::remove_dir_all(&root);
 }
 
-#[allow(
-    clippy::await_holding_lock,
-    reason = "故障环境变量是进程全局状态，存量孤儿清理测试在读入口期间必须排除故障注入"
-)]
 #[tokio::test(flavor = "current_thread")]
 async fn dataset_read_entry_collects_pre_existing_orphan_member_content() {
-    let _fault_env = without_fault_env();
     let root = root();
     let adapter = FileSystemDatasetAdapter::new(&root).expect("adapter init");
     let key = key();
@@ -1013,4 +991,55 @@ async fn dataset_read_entry_collects_pre_existing_orphan_member_content() {
     );
 
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[tokio::test]
+async fn fault_injection_scopes_to_the_adapter_that_requested_it() {
+    // 根因修复的行为表达：故障注入是 adapter 实例状态，不是进程全局 env——
+    // 同进程内普通 adapter 的提交必须完整落盘，显式注入的 adapter 必须命中注入。
+    let clean_root = root();
+    let injected_root = root();
+    let clean = FileSystemDatasetAdapter::new(&clean_root).expect("clean adapter");
+    let mut injected = FileSystemDatasetAdapter::new(&injected_root).expect("injected adapter");
+    injected.set_faults(DatasetFaultInjector::requested("after_prepared"));
+
+    let empty_revision = clean
+        .read_manifest(&key())
+        .await
+        .expect("read empty manifest")
+        .revision()
+        .clone();
+
+    let clean_receipt = clean
+        .commit_atomic(
+            &key(),
+            &empty_revision,
+            &[member("active", b"a1")],
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
+        .await
+        .expect("clean adapter commit");
+    assert_eq!(
+        clean_receipt.visibility(),
+        DatasetCommitVisibilityData::Visible,
+        "普通 adapter 不得受同进程显式注入影响"
+    );
+
+    let injected_receipt = injected
+        .commit_atomic(
+            &key(),
+            &empty_revision,
+            &[member("active", b"a1")],
+            WriteOptionsData::new(DurabilityData::BestEffort),
+        )
+        .await
+        .expect("injected adapter commit");
+    assert_eq!(
+        injected_receipt.visibility(),
+        DatasetCommitVisibilityData::RecoveryPending,
+        "显式注入必须命中目标 adapter"
+    );
+
+    let _ = std::fs::remove_dir_all(&clean_root);
+    let _ = std::fs::remove_dir_all(&injected_root);
 }

@@ -32,17 +32,47 @@ impl WorkspaceData {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitProbeError {
     GitUnavailable,
+    /// spawn 时工作目录已不存在：携带面向 LLM 的 cwd 归因文案。
+    CwdGone(String),
     PermissionDenied,
-    CommandFailed { exit_code: Option<i32> },
+    CommandFailed {
+        exit_code: Option<i32>,
+    },
     InvalidOutput,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitOperationError {
     GitUnavailable,
+    /// spawn 时工作目录已不存在：携带面向 LLM 的 cwd 归因文案。
+    CwdGone(String),
     PermissionDenied,
-    CommandFailed { exit_code: Option<i32> },
+    CommandFailed {
+        exit_code: Option<i32>,
+    },
     InvalidOutput,
+}
+
+/// 上层 Display 统一出口：`CwdGone` 输出归因文案，其余保持既有前缀 + Debug 形态。
+pub(crate) fn write_git_probe_error(
+    f: &mut std::fmt::Formatter<'_>,
+    error: &GitProbeError,
+) -> std::fmt::Result {
+    match error {
+        GitProbeError::CwdGone(attribution) => write!(f, "{attribution}"),
+        error => write!(f, "Git 仓库探测失败：{error:?}"),
+    }
+}
+
+/// 上层 Display 统一出口：`CwdGone` 输出归因文案，其余保持既有前缀 + Debug 形态。
+pub(crate) fn write_git_operation_error(
+    f: &mut std::fmt::Formatter<'_>,
+    error: &GitOperationError,
+) -> std::fmt::Result {
+    match error {
+        GitOperationError::CwdGone(attribution) => write!(f, "{attribution}"),
+        error => write!(f, "Git 操作失败：{error:?}"),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,7 +93,7 @@ impl std::fmt::Display for WorkspaceInitError {
             Self::CanonicalizeFailed { path } => {
                 write!(f, "无法规范化路径：{}", path.display())
             }
-            Self::GitProbeFailed(error) => write!(f, "Git 仓库探测失败：{error:?}"),
+            Self::GitProbeFailed(error) => write_git_probe_error(f, error),
         }
     }
 }
@@ -150,8 +180,8 @@ impl std::fmt::Display for WorkspaceError {
                 "上下文栈为空，没有可恢复的 worktree。可能已经在主工作区。"
             ),
             WorkspaceError::UnsupportedForNonGit => write!(f, "非 Git 项目不支持 worktree 操作"),
-            WorkspaceError::GitProbeFailed(error) => write!(f, "Git 仓库探测失败：{error:?}"),
-            WorkspaceError::GitOperationFailed(error) => write!(f, "Git 操作失败：{error:?}"),
+            WorkspaceError::GitProbeFailed(error) => write_git_probe_error(f, error),
+            WorkspaceError::GitOperationFailed(error) => write_git_operation_error(f, error),
         }
     }
 }
@@ -179,7 +209,10 @@ impl std::fmt::Display for WorkspaceRestoreError {
             Self::InvalidStackShape => write!(f, "恢复工作区失败：上下文栈形状无效"),
             Self::RepositoryMismatch => write!(f, "恢复工作区失败：仓库身份或类型不匹配"),
             Self::WorkspaceIdMismatch => write!(f, "恢复工作区失败：workspace ID 不匹配"),
-            Self::GitProbeFailed(error) => write!(f, "恢复工作区失败：Git 仓库探测失败：{error:?}"),
+            Self::GitProbeFailed(error) => {
+                write!(f, "恢复工作区失败：")?;
+                write_git_probe_error(f, error)
+            }
         }
     }
 }
@@ -302,3 +335,7 @@ impl From<WorkspaceInitError> for share::error::DomainError {
             .with_source(std::sync::Arc::new(inner))
     }
 }
+
+#[cfg(test)]
+#[path = "types_tests.rs"]
+mod tests;

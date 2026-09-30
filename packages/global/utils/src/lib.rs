@@ -3,9 +3,16 @@ use sha2::{Digest, Sha256};
 mod process;
 pub use process::{configure_std_noninteractive, configure_tokio_noninteractive};
 
+mod spawn_failure;
+pub use spawn_failure::{describe_cwd_gone, describe_cwd_gone_failure};
+
 #[cfg(test)]
 #[path = "process_tests.rs"]
 mod process_tests;
+
+#[cfg(test)]
+#[path = "spawn_failure_tests.rs"]
+mod spawn_failure_tests;
 
 /// 对多个已分隔字段生成稳定 SHA-256 十六进制摘要。
 pub fn stable_sha256_hex(domain: &[u8], fields: &[&[u8]]) -> String {

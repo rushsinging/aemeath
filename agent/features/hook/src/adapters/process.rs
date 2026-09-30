@@ -111,10 +111,10 @@ impl ProcessDriver {
         })?;
 
         let mut child = command.spawn().map_err(|error| {
-            ProcessFailure::new(
-                ProcessFailureKind::Spawn,
-                format!("启动 hook 命令失败: {error}"),
-            )
+            let message = utils::describe_cwd_gone_failure(&error, &request.cwd, "hook 命令")
+                .map(|attribution| format!("启动 hook 命令失败：{attribution}"))
+                .unwrap_or_else(|| format!("启动 hook 命令失败: {error}"));
+            ProcessFailure::new(ProcessFailureKind::Spawn, message)
         })?;
         let process_group = child
             .id()
