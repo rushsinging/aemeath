@@ -128,24 +128,6 @@ fn empty_materialization() -> MemoryMaterialization {
     }
 }
 
-fn take_ordered_prefix_within_budget(
-    hits: impl IntoIterator<Item = MemorySearchHit>,
-    token_budget: usize,
-) -> Vec<MemorySearchHit> {
-    let mut selected = Vec::new();
-    let mut used_tokens = 0usize;
-    for hit in hits {
-        let rendered = render_memory_line(&hit);
-        let tokens = crate::domain::token_budget::estimate_tokens(&rendered);
-        if used_tokens.saturating_add(tokens) > token_budget {
-            break;
-        }
-        used_tokens = used_tokens.saturating_add(tokens);
-        selected.push(hit);
-    }
-    selected
-}
-
 /// 覆盖式让位的注入填充（#1777）。
 ///
 /// Memory 侧已把 `kind = Synthesized` 的结论排到全部普通条目之前，组内保持
@@ -199,7 +181,7 @@ fn fill_within_budget(
     used_tokens: &mut usize,
     covered: &mut std::collections::HashSet<memory::api::MemoryId>,
 ) -> bool {
-    let tokens = crate::domain::token_budget::estimate_tokens(&render_memory_line(&hit));
+    let tokens = crate::domain::token_budget::estimate_tokens(&render_memory_line(hit));
     if used_tokens.saturating_add(tokens) > token_budget {
         return false;
     }

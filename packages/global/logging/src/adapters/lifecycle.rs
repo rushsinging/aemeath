@@ -1,6 +1,6 @@
 //! File sink lifecycle, rotation, recovery, and retention.
 
-use super::constants::RECOVERY_INTERVAL;
+pub(crate) use super::constants::RECOVERY_INTERVAL;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};

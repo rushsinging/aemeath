@@ -28,13 +28,6 @@ fn raw_entry(content: &str, confirmed: u32) -> MemoryEntry {
     entry
 }
 
-fn conclusion(content: &str, sources: Vec<MemoryId>, confirmed: u32) -> MemoryEntry {
-    let mut entry = raw_entry(content, confirmed);
-    entry.kind = MemoryKind::Synthesized;
-    entry.evidence = sources;
-    entry
-}
-
 fn port() -> InMemoryMemory {
     InMemoryMemory::new(MemoryPolicy {
         max_entries: 50,

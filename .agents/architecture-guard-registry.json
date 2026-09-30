@@ -986,6 +986,7 @@
       "allowed_entries": [
         "adapters",
         "adapters.rs",
+        "constants.rs",
         "contract",
         "contract.rs",
         "domain",
@@ -2122,19 +2123,20 @@
         "value": "agent/composition/src"
       },
       "allowed_entries": [
-        "lib.rs",
         "app.rs",
         "audit.rs",
+        "constants.rs",
         "delivery_logging.rs",
+        "lib.rs",
+        "lib_tests.rs",
         "memory.rs",
         "provider.rs",
-        "runtime.rs",
-        "tools.rs",
-        "update.rs",
-        "lib_tests.rs",
+        "provider_probe_tests.rs",
         "provider_tests.rs",
+        "runtime.rs",
         "runtime_tests.rs",
-        "provider_probe_tests.rs"
+        "tools.rs",
+        "update.rs"
       ],
       "reason": "F-8：composition 顶层文件白名单（lib_tests.rs 现状冻结；mod 声明集与文件白名单一致）",
       "profile": "fast"
@@ -3367,6 +3369,39 @@
         }
       ],
       "reason": "每个外部进程构造必须配对非交互 session 隔离（check-noninteractive-child-session.sh 数据化）",
+      "profile": "fast"
+    },
+    {
+      "id": "pattern.all.lib-rs-no-const-definitions",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefixes",
+        "values": [
+          "agent/features/audit/src/lib.rs",
+          "agent/features/config/src/lib.rs",
+          "agent/features/context/src/lib.rs",
+          "agent/features/hook/src/lib.rs",
+          "agent/features/memory/src/lib.rs",
+          "agent/features/policy/src/lib.rs",
+          "agent/features/project/src/lib.rs",
+          "agent/features/provider/src/lib.rs",
+          "agent/features/runtime/src/lib.rs",
+          "agent/features/storage/src/lib.rs",
+          "agent/features/task/src/lib.rs",
+          "agent/features/tools/src/lib.rs",
+          "agent/features/update/src/lib.rs",
+          "agent/shared/src/lib.rs",
+          "agent/composition/src/lib.rs",
+          "packages/global/logging/src/lib.rs",
+          "apps/cli/src/main.rs"
+        ]
+      },
+      "forbidden_patterns": [],
+      "forbidden_regex": [
+        "^(?:pub(?:\\([a-z]+\\))?\\s+)?(?:const|static(?:\\s+mut)?)\\s+[A-Z][A-Z0-9_]*"
+      ],
+      "exclusions": [],
+      "reason": "lib.rs 零常量定义例外：crate 身份/共享常量 MUST 定义于 src/constants.rs，lib.rs 只允许 pub use 精确 re-export（#1146 双轨模型）",
       "profile": "fast"
     }
   ],

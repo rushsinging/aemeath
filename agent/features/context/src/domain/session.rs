@@ -10,6 +10,7 @@ pub(crate) use generation::{
 pub use share::session_types::PersistedWorkspaceContext;
 
 mod constants;
+#[cfg_attr(not(test), allow(unused_imports))]
 pub(crate) use constants::CURRENT_SESSION_SCHEMA_VERSION;
 mod chat_chain;
 mod envelope;

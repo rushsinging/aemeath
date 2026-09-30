@@ -165,7 +165,9 @@ fn workspace_members(root: &Path) -> std::io::Result<Vec<String>> {
 }
 
 fn crate_root(member: &Path) -> std::io::Result<PathBuf> {
-    for name in ["lib.rs", "main.rs"] {
+    // #1146 双轨归位：crate 身份常量（LOG_TARGET）的家是 src/constants.rs，
+    // lib.rs/main.rs 只做 re-export；优先探测 constants.rs，回退旧根。
+    for name in ["constants.rs", "lib.rs", "main.rs"] {
         let root = member.join("src").join(name);
         if root.is_file() {
             return Ok(root);
@@ -380,7 +382,9 @@ fn contains_identifier(source: &str, identifier: &str) -> bool {
 fn inspect_source(raw: &str, owner: &OwnerRule, relative: &str) -> Vec<Violation> {
     let source = production_source(raw);
     let mut violations = Vec::new();
-    let inspect_constants = relative.ends_with("/lib.rs") || relative.ends_with("/main.rs");
+    let inspect_constants = relative.ends_with("/lib.rs")
+        || relative.ends_with("/main.rs")
+        || relative.ends_with("/constants.rs");
     let mut search = 0;
     while let Some(offset) = source[search..].find("use") {
         let start = search + offset;

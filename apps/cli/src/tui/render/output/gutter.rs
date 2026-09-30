@@ -2,9 +2,8 @@
 //! marker 按 kind/status 决定；运行态工具 marker 可随动画帧闪烁，仅首行画，后续行等宽空白。
 
 use super::constants::{
-    GUTTER_WIDTH, MAX_GUTTER_DEPTH, NARROW_DISABLE_TABLE_THRESHOLD, NARROW_NO_GUTTER_THRESHOLD,
-    NARROW_NO_INDENT_THRESHOLD, NARROW_STATUS_HINT_THRESHOLD, PER_DEPTH_INDENT,
-    TOOL_MARKER_BLINK_DIVISOR,
+    GUTTER_WIDTH, MAX_GUTTER_DEPTH, NARROW_NO_GUTTER_THRESHOLD, NARROW_NO_INDENT_THRESHOLD,
+    PER_DEPTH_INDENT, TOOL_MARKER_BLINK_DIVISOR,
 };
 use crate::tui::render::display::safe_text::str_display_width;
 use crate::tui::render::output::rendered::{LineAnimation, RenderedLine};
@@ -35,9 +34,6 @@ fn effective_gutter_width(outer_width: u16, depth: usize) -> usize {
 pub fn is_gutter_suppressed(outer_width: u16) -> bool {
     outer_width < NARROW_NO_GUTTER_THRESHOLD
 }
-
-/// depth 上限防御（防 `" ".repeat()` 爆内存）。实际对话树深度通常 ≤ 4
-/// （root + tool result 子块），256 已是巨幅冗余，仅用于 fuzz / 错误输入。
 
 /// 按 block 类型 / 工具状态映射 marker 字形。多数为单列字形，宽字符（如 💭）由
 /// `apply_gutter` 按显示宽度补白填满 marker 槽。

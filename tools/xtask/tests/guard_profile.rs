@@ -90,6 +90,7 @@ fn text_scan_assertions_stay_in_full_profile() {
     let fast_text_scan_allowlist = [
         "pattern.all.no-broad-projection-naming",
         "pattern.all.no-unsafe-text-range-slicing",
+        "pattern.all.lib-rs-no-const-definitions",
     ];
     let misplaced: Vec<&str> = rules
         .iter()

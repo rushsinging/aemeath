@@ -1,6 +1,7 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
-pub(crate) const LOG_TARGET: &str = "aemeath:composition";
+mod constants;
+pub(crate) use constants::LOG_TARGET;
 
 pub mod app;
 pub mod audit;
