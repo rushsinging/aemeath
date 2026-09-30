@@ -816,3 +816,60 @@ fn count_ratio_strips_cfg_test_module_and_exclusions() {
         );
     }
 }
+
+#[test]
+fn constant_placement_rejects_unplaced_module_constant() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/service.rs"),
+        "pub fn helper() {}\nconst NEW_LIMIT: usize = 10;\npub fn f() {}\n",
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "constant.test.placement",
+        "assertion": "constant_placement",
+        "scope": { "kind": "workspace" },
+        "reason": "test",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/service.rs")
+            .expect("enforce");
+
+    assert_eq!(violations.len(), 1);
+    assert!(
+        violations[0].message.contains("NEW_LIMIT"),
+        "{}",
+        violations[0].message
+    );
+}
+
+#[test]
+fn constant_placement_cfg_gated_must_also_relocate() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/service.rs"),
+        "#[cfg(any(test, feature = \"fault\"))]\nconst FAULT_ENV: &str = \"X\";\n\nfn g() {\n    const LOCAL: usize = 2;\n}\n",
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "constant.test.placement",
+        "assertion": "constant_placement",
+        "scope": { "kind": "workspace" },
+        "reason": "test",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/service.rs")
+            .expect("enforce");
+    assert!(
+        violations.iter().any(|v| v.message.contains("FAULT_ENV")),
+        "cfg 门控常量同样必须归位（cfg 属性随常量走）: {violations:?}"
+    );
+    assert!(
+        violations.iter().all(|v| !v.message.contains("LOCAL")),
+        "函数内缩进 const 仍不治理: {violations:?}"
+    );
+}

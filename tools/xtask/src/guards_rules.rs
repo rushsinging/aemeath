@@ -61,6 +61,11 @@ pub enum RuleSpec {
         symbol: String,
         allowed_paths: Vec<String>,
     },
+    /// 常量放置规则：模块级纯值 const/static 只允许出现在
+    /// `constants.rs`/`consts.rs`（归位目的地）或代码形态可判的合法类别
+    /// （cfg 门控共置 / 函数与 impl 内缩进 / 宏体 / 状态容器 /
+    /// 常量表文件）。零登记：合法性全部由静态判定（#1146）。
+    ConstantPlacement,
     /// 计数配比：每文件 denominator 命中行数必须 ≥ numerator 命中行数
     /// （如「外部进程构造数 ≤ session 隔离调用数」）。
     CountRatio {
@@ -249,6 +254,7 @@ pub fn enforce_rule_with_context(
             symbol,
             allowed_paths,
         } => enforce_construction_whitelist(rule, relative_file, context, symbol, allowed_paths),
+        RuleSpec::ConstantPlacement => enforce_constant_placement(rule, relative_file, context),
         RuleSpec::CountRatio {
             numerator_patterns,
             denominator_patterns,
@@ -985,4 +991,70 @@ fn enforce_count_ratio(
         }]);
     }
     Ok(Vec::new())
+}
+
+/// 常量放置规则断言：合法性按判定序静态裁决，零登记。
+fn enforce_constant_placement(
+    rule: &Rule,
+    relative_file: &str,
+    context: &guards_engine::FileContext,
+) -> Result<Vec<Violation>> {
+    let leaf = relative_file.rsplit('/').next().unwrap_or(relative_file);
+    if leaf == "constants.rs" || leaf == "consts.rs" || leaf == "state.rs" {
+        return Ok(Vec::new());
+    }
+    let Some(source) = context.text() else {
+        return Ok(Vec::new());
+    };
+    let production = strip_inline_cfg_test_region(source);
+    let lines: Vec<&str> = production.lines().collect();
+
+    let mut violations = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        if !is_module_level_constant(line) {
+            continue;
+        }
+        let name = constant_name(line);
+        if name.is_empty() {
+            continue;
+        }
+        violations.push(Violation {
+            rule_id: rule.id.clone(),
+            location: format!("{relative_file}:{}", index + 1),
+            message: format!(
+                "常量 `{name}` 未归位：模块级纯值常量 MUST 位于 constants.rs（cfg 门控/宏体/状态容器/常量表文件除外，#1146）"
+            ),
+        });
+    }
+    Ok(violations)
+}
+
+fn is_module_level_constant(line: &str) -> bool {
+    if line.starts_with(char::is_whitespace) {
+        return false;
+    }
+    let prefixes = [
+        "pub const ",
+        "pub static ",
+        "pub(crate) const ",
+        "pub(crate) static ",
+        "pub(super) const ",
+        "pub(super) static ",
+        "const ",
+        "static ",
+    ];
+    prefixes.iter().any(|prefix| line.starts_with(prefix))
+}
+
+fn constant_name(line: &str) -> String {
+    line.trim_start_matches("pub(super) ")
+        .trim_start_matches("pub(crate) ")
+        .trim_start_matches("pub ")
+        .trim_start_matches("static mut ")
+        .trim_start_matches("static ")
+        .trim_start_matches("const ")
+        .split(|ch: char| ch.is_whitespace() || ch == ':')
+        .next()
+        .unwrap_or("")
+        .to_owned()
 }
