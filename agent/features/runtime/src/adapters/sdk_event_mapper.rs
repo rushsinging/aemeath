@@ -726,7 +726,8 @@ mod run_status_mapping_tests {
 
     #[test]
     fn transitioned_status_maps_every_runtime_variant() {
-        let statuses = [
+        // 长度标注与运行时变体数对齐，新增变体时编译器强制同步本表
+        let statuses: [(RunStatus, RunStatusView); 16] = [
             (RunStatus::Created, RunStatusView::Created),
             (RunStatus::DrainingInput, RunStatusView::DrainingInput),
             (RunStatus::PreparingContext, RunStatusView::PreparingContext),
@@ -739,6 +740,7 @@ mod run_status_mapping_tests {
             (RunStatus::ExecutingTools, RunStatusView::ExecutingTools),
             (RunStatus::AwaitingUser, RunStatusView::AwaitingUser),
             (RunStatus::Compacting, RunStatusView::Compacting),
+            (RunStatus::Reflecting, RunStatusView::Reflecting),
             (RunStatus::CancellingStep, RunStatusView::CancellingStep),
             (RunStatus::FinalizingStep, RunStatusView::FinalizingStep),
             (RunStatus::Terminating, RunStatusView::Terminating),
