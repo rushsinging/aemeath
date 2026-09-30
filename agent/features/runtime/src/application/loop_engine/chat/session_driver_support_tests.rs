@@ -154,6 +154,16 @@ impl memory::api::MemoryOpener for TestMemoryOpener {
 }
 
 fn test_wiring() -> Arc<context::MainSessionWiring> {
+    test_wiring_with_context_factory(Arc::new(context::ProductionMainContextFactory::new(
+        Arc::new(context::NoOpCanonicalSessionWriter),
+    )))
+}
+
+/// 允许测试注入自定义 `MainContextFactory`（如装饰 production context、
+/// 记录 session 落盘类端口调用的 fake 工厂）。
+fn test_wiring_with_context_factory(
+    context_factory: Arc<dyn context::MainContextFactory>,
+) -> Arc<context::MainSessionWiring> {
     let workspace = project::wire_production_workspace(std::env::current_dir().unwrap(), None)
         .expect("workspace 初始化成功");
     let persist = workspace.persist();
@@ -186,9 +196,7 @@ fn test_wiring() -> Arc<context::MainSessionWiring> {
                 skill_load_records: Vec::new(),
             },
             initial_memory: Arc::new(memory::api::NoOpMemory),
-            context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-                context::NoOpCanonicalSessionWriter,
-            ))),
+            context_factory,
         },
     ))
 }

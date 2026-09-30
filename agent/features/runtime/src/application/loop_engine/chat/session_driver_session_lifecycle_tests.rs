@@ -1570,12 +1570,35 @@ async fn test_reflect_now_disabled_is_noop_without_run() {
         "禁用 no-op 不得递增 run_count / 发 RunChanged: {events:?}"
     );
     assert!(
-        events.iter().all(|event| !event.starts_with("ActivitySnapshot")),
+        events
+            .iter()
+            .all(|event| !event.starts_with("ActivitySnapshot")
+                && !event.starts_with("HookActivitySnapshot")),
         "禁用 no-op 不得创建 Run（无 Run 根 activity 快照）: {events:?}"
     );
     assert!(
         events.iter().all(|event| !event.starts_with("TurnStarted")),
         "禁用 no-op 不得进入模型回合: {events:?}"
+    );
+    let lifecycle = sink.lifecycle_events();
+    assert!(
+        lifecycle.is_empty(),
+        "禁用 no-op 不得产生任何 Run 生命周期事件: {lifecycle:?}"
+    );
+    assert!(
+        events.iter().all(|event| event.as_str() != "Usage"),
+        "禁用 no-op 不得发布 Usage: {events:?}"
+    );
+    assert!(
+        events
+            .iter()
+            .all(|event| !event.starts_with("SystemMessage") && !event.starts_with("HookNotice")),
+        "禁用 no-op 不得发布 notice: {events:?}"
+    );
+    assert_eq!(
+        texts.len(),
+        1,
+        "禁用受理只回一条「未启用」CommandResultText，不得夹带其他文案: {texts:?}"
     );
 }
 
@@ -1666,4 +1689,272 @@ async fn test_reflect_now_runs_a_real_run_without_run_changed() {
         "生产反思 adapter 无 LLM 出口，终态应为失败态文案: {text}"
     );
     assert!(*is_error, "执行失败必须按 is_error 上报: {text}");
+}
+
+// ---------------------------------------------------------------------------
+// 裁决 2：Manual Reflection Run 不落盘、不刷新 session updated_at
+// ---------------------------------------------------------------------------
+
+/// 装饰 production context 的 `MainContextFactory`：统计 session 落盘类端口
+/// 调用（`append_and_persist` 等持久化方法），读路径原样转发给内层。
+struct RecordingContextFactory {
+    inner: context::ProductionMainContextFactory,
+    persistence_calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl RecordingContextFactory {
+    fn new() -> (Arc<Self>, Arc<Mutex<Vec<String>>>) {
+        let persistence_calls = Arc::new(Mutex::new(Vec::new()));
+        let factory = Self {
+            inner: context::ProductionMainContextFactory::new(Arc::new(
+                context::NoOpCanonicalSessionWriter,
+            )),
+            persistence_calls: persistence_calls.clone(),
+        };
+        (Arc::new(factory), persistence_calls)
+    }
+}
+
+impl context::MainContextFactory for RecordingContextFactory {
+    fn build(
+        &self,
+        session: Arc<std::sync::RwLock<Arc<context::CanonicalSession>>>,
+        task_persist: Arc<dyn task::TaskPersist>,
+        workspace_persist: Arc<dyn project::WorkspaceWriter>,
+        memory: Arc<std::sync::RwLock<Arc<dyn memory::api::MemoryPort>>>,
+        mutation_gate: Arc<tokio::sync::Mutex<()>>,
+    ) -> Arc<dyn context::ContextPort> {
+        let inner = <context::ProductionMainContextFactory as context::MainContextFactory>::build(
+            &self.inner,
+            session,
+            task_persist,
+            workspace_persist,
+            memory,
+            mutation_gate,
+        );
+        Arc::new(RecordingContextPort {
+            inner,
+            persistence_calls: self.persistence_calls.clone(),
+        })
+    }
+}
+
+struct RecordingContextPort {
+    inner: Arc<dyn context::ContextPort>,
+    persistence_calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl RecordingContextPort {
+    fn record_persistence(&self, call: &'static str) {
+        self.persistence_calls.lock().unwrap().push(call.to_string());
+    }
+}
+
+#[async_trait]
+impl context::ContextPort for RecordingContextPort {
+    async fn build_window(
+        &self,
+        request: &crate::ports::ContextRequestData,
+    ) -> Result<crate::ports::ContextWindowData, crate::ports::ContextPortError> {
+        context::ContextPort::build_window(&*self.inner, request).await
+    }
+
+    async fn needs_compaction(
+        &self,
+        request: &crate::ports::ContextRequestData,
+    ) -> Result<crate::ports::CompactionDecisionData, crate::ports::ContextPortError> {
+        context::ContextPort::needs_compaction(&*self.inner, request).await
+    }
+
+    async fn compact(
+        &self,
+        request: &crate::ports::CompactRequestData,
+    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
+        self.record_persistence("compact");
+        context::ContextPort::compact(&*self.inner, request).await
+    }
+
+    async fn manual_compact(
+        &self,
+        request: &crate::ports::ManualCompactRequestData,
+    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
+        self.record_persistence("manual_compact");
+        context::ContextPort::manual_compact(&*self.inner, request).await
+    }
+
+    async fn clear_session(
+        &self,
+        session_id: &crate::ports::SessionId,
+    ) -> Result<(), crate::ports::ContextPortError> {
+        self.record_persistence("clear_session");
+        context::ContextPort::clear_session(&*self.inner, session_id).await
+    }
+
+    async fn append_accepted_input(
+        &self,
+        append: &crate::ports::AcceptedInputAppendData,
+    ) -> Result<crate::ports::AcceptedInputReceiptData, crate::ports::AcceptedInputError> {
+        self.record_persistence("append_accepted_input");
+        context::ContextPort::append_accepted_input(&*self.inner, append).await
+    }
+
+    async fn advance_tool_receipt(
+        &self,
+        mutation: context::ToolReceiptMutationData,
+    ) -> Result<context::ToolReceiptMutationReceiptData, context::ToolReceiptMutationError> {
+        self.record_persistence("advance_tool_receipt");
+        context::ContextPort::advance_tool_receipt(&*self.inner, mutation).await
+    }
+
+    async fn step_receipts(
+        &self,
+        session_id: &crate::ports::SessionId,
+        run_id: &sdk::RunId,
+        step_id: &sdk::RunStepId,
+    ) -> Result<Vec<crate::ports::StepReceiptData>, context::ToolReceiptMutationError> {
+        context::ContextPort::step_receipts(&*self.inner, session_id, run_id, step_id).await
+    }
+
+    async fn compare_and_record_skill_load(
+        &self,
+        mutation: ::tools::published::skill::SkillLoadMutation,
+    ) -> Result<
+        ::tools::published::skill::SkillLoadDecision,
+        ::tools::published::skill::SkillLoadStateError,
+    > {
+        self.record_persistence("compare_and_record_skill_load");
+        context::ContextPort::compare_and_record_skill_load(&*self.inner, mutation).await
+    }
+
+    async fn append_and_persist(
+        &self,
+        append: &crate::ports::ContextAppendData,
+    ) -> Result<crate::ports::AppendReceiptData, crate::ports::ContextAppendError> {
+        self.record_persistence("append_and_persist");
+        context::ContextPort::append_and_persist(&*self.inner, append).await
+    }
+}
+
+/// 裁决 2：Manual Reflection Run 没有 RunStep —— ContextPort 上零落盘调用；
+/// canonical session 的 `message_count`、`updated_at` 与 run slices 在 run
+/// 前后完全不变。
+#[tokio::test]
+async fn manual_reflection_run_does_not_persist_session_or_touch_updated_at() {
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    input_tx.send(sdk::ChatInputEvent::ReflectNow).unwrap();
+
+    let (factory, persistence_calls) = RecordingContextFactory::new();
+    let mut shell = test_shell();
+    shell.wiring = test_wiring_with_context_factory(factory);
+    shell.memory_config = share::config::MemoryConfig {
+        enabled: true,
+        reflection: share::config::ReflectionConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    shell.set_test_session_id("test-reflect-now-no-persist");
+    let wiring = shell.wiring.clone();
+
+    let before = wiring.committed_session();
+    let before_message_count = before.structured_messages().len();
+    let before_updated_at = before.updated_at.clone();
+    let before_steps = before
+        .run_slices
+        .iter()
+        .flat_map(|slice| slice.steps.iter())
+        .count();
+
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+    let run = tokio::spawn(run_session_command_driver(ctx));
+    wait_for_retry_test_condition("手动反思终态文案", || {
+        !sink.command_result_texts().is_empty()
+    })
+    .await;
+    drop(input_tx);
+    tokio::time::timeout(std::time::Duration::from_secs(10), run)
+        .await
+        .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang")
+        .unwrap();
+
+    // 前置：必须真的走了 enabled 分支的真实 ManualReflection Run，
+    // 否则「零落盘」会因没跑 Run 而空过。
+    let events = sink.events();
+    assert!(
+        events.iter().any(|event| event.starts_with("ActivitySnapshot:")),
+        "前置：手动反思必须创建真实 Run（Run 根 activity 快照）: {events:?}"
+    );
+    let texts = sink.command_result_texts();
+    let (terminal_text, _) = texts
+        .first()
+        .expect("手动反思 Run 结束必须发布终态 CommandResultText");
+    assert!(
+        terminal_text.contains("执行失败"),
+        "前置：应走真实 Run 的失败终态，而非禁用跳过文案: {terminal_text}"
+    );
+
+    let recorded = persistence_calls.lock().unwrap().clone();
+    assert!(
+        recorded.is_empty(),
+        "Manual Reflection Run 不得调用任何 session 落盘端口: {recorded:?}"
+    );
+    let after = wiring.committed_session();
+    assert_eq!(
+        after.structured_messages().len(),
+        before_message_count,
+        "Manual Reflection Run 不得改变 canonical message_count"
+    );
+    assert_eq!(
+        after.updated_at.as_str(),
+        before_updated_at.as_str(),
+        "Manual Reflection Run 不得刷新 session updated_at"
+    );
+    let after_steps = after
+        .run_slices
+        .iter()
+        .flat_map(|slice| slice.steps.iter())
+        .count();
+    assert_eq!(before_steps, 0, "前置：初始 session 不应已有 RunStep");
+    assert_eq!(
+        after_steps, before_steps,
+        "Manual Reflection Run 不得写入 RunStep"
+    );
+}
+
+/// 对照组：普通用户回合必须走 `append_and_persist` 落盘——证明上面的手动反思
+/// 「零落盘」断言不是空过（装饰器确实装在 Run 的 ContextPort 路径上）。
+#[tokio::test]
+async fn control_normal_run_records_session_persistence() {
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("hello", Vec::new()))
+        .unwrap();
+    let (factory, calls) = RecordingContextFactory::new();
+    let mut shell = test_shell();
+    shell.wiring = test_wiring_with_context_factory(factory);
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(Arc::new(
+            SequenceProvider::new(vec!["r1"]),
+        )),
+    );
+    shell.set_test_session_id("test-control-persist");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+    let run = tokio::spawn(run_session_command_driver(ctx));
+    wait_for_retry_test_condition("control run done", || {
+        sink.events().iter().any(|event| event.as_str() == "DoneWithDuration")
+    })
+    .await;
+    drop(input_tx);
+    tokio::time::timeout(std::time::Duration::from_secs(10), run)
+        .await
+        .expect("driver should return")
+        .unwrap();
+    let recorded = calls.lock().unwrap().clone();
+    assert!(
+        !recorded.is_empty(),
+        "对照组：普通回合必须记录到 session 落盘调用: {recorded:?}"
+    );
 }
