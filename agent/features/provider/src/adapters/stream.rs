@@ -7,6 +7,7 @@
 //! per-driver call sites unchanged while routing every emission through the
 //! unified [`InvocationSink::on_delta`] entry point.
 
+use super::constants::INVOCATION_STREAM_CAPACITY;
 use crate::domain::capability::ReasoningLevel;
 use crate::domain::invoke::*;
 use crate::{
@@ -102,8 +103,6 @@ pub(crate) trait InvocationSink: Send {
         });
     }
 }
-
-const INVOCATION_STREAM_CAPACITY: usize = 1;
 
 #[derive(Clone, Copy)]
 pub(crate) enum InvocationDecoder {

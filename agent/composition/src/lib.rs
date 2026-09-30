@@ -1,6 +1,7 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
 mod constants;
+mod state;
 pub(crate) use constants::LOG_TARGET;
 
 pub mod app;

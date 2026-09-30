@@ -1015,7 +1015,8 @@ fn enforce_constant_placement(
             continue;
         }
         let name = constant_name(line);
-        if name.is_empty() {
+        // `const fn` 是常量函数而非常量定义，不治理。
+        if name.is_empty() || name == "fn" {
             continue;
         }
         violations.push(Violation {

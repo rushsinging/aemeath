@@ -1,10 +1,10 @@
 //! Hook 子进程的受管执行边界。
 
 pub(crate) use super::constants::DEFAULT_OUTPUT_LIMIT;
-use super::constants::TERMINATION_GRACE;
+#[cfg(not(unix))]
+use super::constants::UNSUPPORTED_PLATFORM_MESSAGE;
 
-#[cfg(any(not(unix), test))]
-pub(crate) const UNSUPPORTED_PLATFORM_MESSAGE: &str = "当前平台不支持 Hook 命令执行";
+use super::constants::TERMINATION_GRACE;
 use std::collections::HashMap;
 use std::io::Write as _;
 use std::path::PathBuf;

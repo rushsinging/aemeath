@@ -1,5 +1,6 @@
+use super::state::LOGGING_INIT_LOCK;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use runtime::ProviderFactory;
 use sdk::{AgentClient, MemoryConfigView, SdkError};
@@ -1188,8 +1189,6 @@ fn logging_settings_from_bootstrap(
         native_stderr_routing,
     )
 }
-
-static LOGGING_INIT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LoggingInitDecision {

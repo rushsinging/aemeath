@@ -1,6 +1,7 @@
 //! Ollama provider implementation — 主模块
 //! 本地 Ollama 推理服务优化：更长超时、可选认证、无 stream_options、空响应检测。
 
+use super::constants::STREAM_IDLE_TIMEOUT;
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE, USER_AGENT};
 use share::message::Message;
@@ -25,10 +26,6 @@ pub struct OllamaProvider {
     pub(crate) http: reqwest::Client,
     pub(crate) timeout_secs: u64,
 }
-
-/// Stream idle timeout（单一真相源：`business::OLLAMA_STREAM_IDLE_TIMEOUT_SECS`）
-pub(crate) const STREAM_IDLE_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(crate::OLLAMA_STREAM_IDLE_TIMEOUT_SECS);
 
 impl OllamaProvider {
     /// `max_tokens` / `reasoning` 不再作为可变运行时状态保留：每次调用的实际

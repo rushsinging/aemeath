@@ -12,3 +12,5 @@ pub(crate) const TERMINATION_GRACE: Duration = Duration::from_millis(250);
 /// `AEMEATH_*` 前缀的按次权威变量命名空间：仅由 Dispatcher 注入，
 /// 语义上与 `CLAUDE_*` 前缀兼容层共享归属。
 pub(crate) const RESERVED_PREFIX: &str = "AEMEATH_";
+#[cfg(any(not(unix), test))]
+pub(crate) const UNSUPPORTED_PLATFORM_MESSAGE: &str = "当前平台不支持 Hook 命令执行";

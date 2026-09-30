@@ -1,3 +1,5 @@
+#[cfg(any(test, feature = "test-fault-injection"))]
+use super::constants::{FAULT_ABORT_ENV, FAULT_POINT_ENV};
 use crate::domain::PreviousPolicy;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -33,11 +35,6 @@ enum FaultPoint {
     PreviousPromotion,
     Cleanup,
 }
-
-#[cfg(any(test, feature = "test-fault-injection"))]
-const FAULT_POINT_ENV: &str = "AEMEATH_STORAGE_FAULT_POINT";
-#[cfg(any(test, feature = "test-fault-injection"))]
-const FAULT_ABORT_ENV: &str = "AEMEATH_STORAGE_FAULT_ABORT";
 
 /// 故障注入配置：**adapter 实例状态**，不是进程全局状态。
 ///

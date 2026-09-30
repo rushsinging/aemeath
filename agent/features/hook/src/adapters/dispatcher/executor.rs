@@ -18,7 +18,7 @@ use crate::domain::subscription::HookCommand;
 use crate::ports::HookCancellationSignal;
 
 #[cfg(any(not(unix), test))]
-use crate::adapters::process::UNSUPPORTED_PLATFORM_MESSAGE;
+use crate::adapters::constants::UNSUPPORTED_PLATFORM_MESSAGE;
 use crate::adapters::process::{
     ProcessDriver, ProcessFailure, ProcessFailureKind, ProcessRequest, DEFAULT_OUTPUT_LIMIT,
 };
