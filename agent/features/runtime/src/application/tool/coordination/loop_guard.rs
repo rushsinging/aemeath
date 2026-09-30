@@ -1,14 +1,11 @@
 use crate::application::tool::agent::ToolCall;
+use crate::application::tool::coordination::constants::{
+    CONSECUTIVE_TOOL_CALL_HARD_LIMIT, CONSECUTIVE_TOOL_CALL_SOFT_LIMIT, MAX_INPUT_SUMMARY_CHARS,
+    PERIOD_MAX_LEN, PERIOD_MIN_LEN, PERIOD_REPEAT_LIMIT, RECENT_TOOL_CALL_LIMIT,
+    TOOL_FUSE_HARD_PAUSE_LIMIT,
+};
 use serde_json::Value;
 use std::collections::VecDeque;
-
-const RECENT_TOOL_CALL_LIMIT: usize = 64;
-const CONSECUTIVE_TOOL_CALL_SOFT_LIMIT: usize = 3;
-const CONSECUTIVE_TOOL_CALL_HARD_LIMIT: usize = 5;
-const PERIOD_MIN_LEN: usize = 2;
-const PERIOD_MAX_LEN: usize = 5;
-const PERIOD_REPEAT_LIMIT: usize = 3;
-const TOOL_FUSE_HARD_PAUSE_LIMIT: usize = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ToolFuseDecision {
@@ -32,7 +29,6 @@ impl ToolCallFingerprint {
     }
 
     fn summary(&self) -> String {
-        const MAX_INPUT_SUMMARY_CHARS: usize = 160;
         let mut input = self.normalized_input.clone();
         if input.chars().count() > MAX_INPUT_SUMMARY_CHARS {
             input = input

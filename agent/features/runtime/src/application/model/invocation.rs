@@ -24,6 +24,7 @@ use futures::{Stream, StreamExt};
 use provider::{InvocationEventData, ProviderError, ProviderErrorKind};
 use tokio_util::sync::CancellationToken;
 
+use crate::application::constants::{DEFAULT_MAX_ATTEMPTS, INITIAL_BACKOFF, MAX_BACKOFF};
 use crate::application::context::coordination::ContextCoordinator;
 use crate::application::loop_engine::chat::{
     ChatEventSinkHandle, InvocationEventReducer, InvocationResponse,
@@ -36,11 +37,6 @@ use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::ToolCall;
 use crate::ports::{InvocationOptionsData, InvocationRequestData};
-
-/// One initial invocation plus at most ten retries.
-const DEFAULT_MAX_ATTEMPTS: u32 = 11;
-const INITIAL_BACKOFF: Duration = Duration::from_secs(10);
-const MAX_BACKOFF: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RetryDecision {

@@ -21,6 +21,7 @@ use sdk::ChatInputEvent;
 use tokio_util::sync::CancellationToken;
 
 use crate::application::activity::ActivityCoordinator;
+use crate::application::constants::{CALIBRATION_CLAMP, CALIBRATION_EMA_ALPHA};
 use crate::application::interaction::port::InteractionPort;
 use crate::application::loop_engine::chat::run_input_buffer::RunInputBuffer;
 use crate::application::loop_engine::chat::ChatEventSinkHandle;
@@ -161,11 +162,6 @@ pub struct RunUsageTracker {
     /// 估算值的 EMA，初始 1.0；compact reset 后保留（估算偏差与 compact 无关）。
     heuristic_calibration: Arc<std::sync::RwLock<f64>>,
 }
-
-/// EMA 平滑系数（#1626）：新观测占 0.3，历史占 0.7。
-const CALIBRATION_EMA_ALPHA: f64 = 0.3;
-/// 单次观测与滑动系数的 clamp 区间（#1626）：区间外视为异常，截断或丢弃。
-const CALIBRATION_CLAMP: std::ops::RangeInclusive<f64> = 0.5..=2.0;
 
 impl RunUsageTracker {
     /// Create a new tracker with no recorded usage.

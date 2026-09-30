@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 
+use crate::application::constants::MAX_RETAINED_TERMINAL_ACTIVITIES;
+
 pub(crate) trait ActivityClock: Send + Sync {
     fn now_monotonic_ms(&self) -> u64;
     fn now_unix_ms(&self) -> u64;
@@ -111,8 +113,6 @@ struct ActivityPublicationState {
     published_revision: u64,
     heartbeat_sequence: u64,
 }
-
-const MAX_RETAINED_TERMINAL_ACTIVITIES: usize = 64;
 
 #[allow(dead_code)]
 pub(crate) struct ActivitySnapshot {

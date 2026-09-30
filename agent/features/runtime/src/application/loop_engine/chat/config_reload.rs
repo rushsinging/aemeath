@@ -4,6 +4,7 @@
 //! 检测到变更时返回 `ConfigDiff`，由调用方决定如何处理。
 
 use super::snapshot_registry::SourceSnapshotRegistry;
+use crate::application::constants::WATCH_DEPTH;
 use share::config::file_snapshot::{FileChange, FileChangeKind};
 use share::config::paths;
 use std::path::{Path, PathBuf};
@@ -35,7 +36,6 @@ pub fn collect_watched_files(cwd: &Path) -> Vec<PathBuf> {
 
     // ── 指令文件 ──
     // 项目指令：从 cwd 向上 5 级祖先目录，每层 CLAUDE.md + AGENTS.md
-    const WATCH_DEPTH: u32 = 5;
     for dir in paths::project_instruction_dirs(cwd, WATCH_DEPTH) {
         files.push(dir.join(paths::CLAUDE_MD));
         files.push(dir.join(paths::AGENTS_MD));

@@ -16,9 +16,9 @@
 //! （零 crate 外消费，内部走真实模块路径；定义处 pub 由架构测试钉住）。
 //! 按 docs/design/03-engineering/05-published-language.md SOP。
 
-pub(crate) const LOG_TARGET: &str = "aemeath:agent:runtime";
+mod constants;
 
-/// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量.
+pub(crate) use crate::constants::LOG_TARGET;
 pub(crate) mod adapters;
 pub(crate) mod application;
 pub mod composition;
@@ -70,6 +70,7 @@ mod boundary_tests {
             "activity",
             "client",
             "compact_generator",
+            "constants",
             "context",
             "hook",
             "interaction",

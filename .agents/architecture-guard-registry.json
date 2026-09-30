@@ -832,6 +832,7 @@
         "application",
         "application.rs",
         "composition.rs",
+        "constants.rs",
         "domain",
         "domain.rs",
         "lib.rs",

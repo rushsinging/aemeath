@@ -22,16 +22,7 @@ use crate::application::client::{
     CompactModelOrigin, CompactModelResolveError, CompactModelResolver,
 };
 
-/// Compact 摘要请求的最大输出 token（摘要可长，给足预算）。
-///
-/// 实际取值还受所选模型自身 `max_tokens` 上限约束（取两者较小值）。
-const COMPACT_MAX_OUTPUT_TOKENS: u32 = 16_384;
-
-/// 已配置 compact 模型但模型未声明输入窗口时的保守窗口。
-///
-/// 未知窗口 **MUST** fail closed：使用保守下限而不是注入窗口，避免向小窗口
-/// 模型发出超窗口请求。
-const COMPACT_UNKNOWN_MODEL_WINDOW: usize = 32_000;
+use crate::application::constants::{COMPACT_MAX_OUTPUT_TOKENS, COMPACT_UNKNOWN_MODEL_WINDOW};
 
 /// Provider-backed [`CompactGenerator`]：通过真实 LLM 生成压缩摘要。
 ///
