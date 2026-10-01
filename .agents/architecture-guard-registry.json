@@ -499,27 +499,6 @@
       "profile": "full"
     },
     {
-      "id": "pattern.runtime.no-hook-dispatcher-construction",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src"
-      },
-      "forbidden_patterns": [
-        "hook::build_dispatcher(",
-        "hook::Dispatcher::new(",
-        "hook::Dispatcher::try_new(",
-        "build_hook_runner("
-      ],
-      "exclusions": [
-        {
-          "path": "agent/features/runtime/src/application/run/context_factory.rs"
-        }
-      ],
-      "reason": "Hook dispatcher/HookRunner 只由 composition 构造注入（跨 crate 无排除可见性，编译期不可表达；runtime_context_factory 注入断言由 from_args 类型签名承载）；context_factory.rs 豁免：cfg!(test) 分支注入与生产自建双通道为现状架构，收口需 runtime context 装配重构（另行立项），豁免精确到单文件",
-      "profile": "full"
-    },
-    {
       "id": "pattern.runtime.no-tool-self-assembly",
       "assertion": "pattern_exclusion",
       "scope": {
@@ -535,7 +514,8 @@
       ],
       "exclusions": [
         {
-          "path": "agent/features/runtime/src/application/run/active_registry.rs"
+          "path": "agent/features/runtime/src/application/run/active_registry.rs",
+          "reason": "ActiveRunRegistry 是 Tool 装配的唯一登记点"
         }
       ],
       "reason": "Tool/Skill/ToolResult/ActiveRun 依赖由 composition 装配注入；ActiveRunRegistry 生产构造已收敛 wire_active_run_registry 工厂（Default 仅测试），正向装配完整性由 RuntimeBootstrapDependencies 必填字段类型承载；active_registry.rs 豁免：wire_active_run_registry 工厂定义与 Default(test) impl 所在文件，无生产违规面",
@@ -557,24 +537,6 @@
       "profile": "full"
     },
     {
-      "id": "pattern.features.no-provider-composition-penetration",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features"
-      },
-      "forbidden_patterns": [
-        "provider::composition"
-      ],
-      "exclusions": [
-        {
-          "path": "agent/features/provider/"
-        }
-      ],
-      "reason": "provider 构造面（LlmClient/TransportPool 等）仅 Composition Root 引用；构造符号已从 provider crate-root 退役，根路径穿透编译期拦截；apps/packages 不依赖 provider（薄入口），风险面为 features 内其余 crate",
-      "profile": "full"
-    },
-    {
       "id": "pattern.provider.no-mutable-invocation-state",
       "assertion": "pattern_exclusion",
       "scope": {
@@ -592,27 +554,6 @@
       ],
       "exclusions": [],
       "reason": "invocation 状态经 &InvocationScope 不可变传递；trait 签名由类型系统锁定（改签名全实现面编译失败）",
-      "profile": "full"
-    },
-    {
-      "id": "pattern.runtime.activity-construction-single-owner",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src"
-      },
-      "forbidden_patterns": [
-        "ActivityObservation {"
-      ],
-      "exclusions": [
-        {
-          "path": "agent/features/runtime/src/application/activity/coordinator.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/activity/model.rs"
-        }
-      ],
-      "reason": "ActivityObservation 构造限 ActivityCoordinator 与 activity model 两文件；TUI 变更入口 activity_observations_mut 已 #[cfg(test)] 方法级锁定（生产调用编译失败）；legacy 黑名单符号已物理删除（④），复活归 review",
       "profile": "full"
     },
     {
@@ -647,42 +588,21 @@
       "profile": "full"
     },
     {
-      "id": "pattern.features.workspace-control-call-sites",
+      "id": "pattern.all.git-command-single-owner",
       "assertion": "pattern_exclusion",
       "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features"
-      },
-      "forbidden_patterns": [
-        ".workspace_control("
-      ],
-      "exclusions": [
-        {
-          "path": "agent/features/tools/src/adapters/bash.rs"
-        },
-        {
-          "path": "agent/features/tools/src/adapters/worktree.rs"
-        }
-      ],
-      "reason": "R4：生产 .workspace_control() 仅 tools bash/worktree 两调用点",
-      "profile": "full"
-    },
-    {
-      "id": "pattern.project.git-command-single-owner",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/project/src"
+        "kind": "workspace"
       },
       "forbidden_patterns": [
         "Command::new(\"git\")"
       ],
       "exclusions": [
         {
-          "path": "agent/features/project/src/adapters/git.rs"
+          "path": "agent/features/project/src/adapters/git.rs",
+          "reason": "git 子进程全仓唯一 spawn owner（run_git_command 窄面；context probe / runtime git 上下文统一经此执行）"
         }
       ],
-      "reason": "R5：project 内 git 子进程仅 adapters/git.rs 单一 owner",
+      "reason": "R5：git 子进程 spawn 全仓收敛至 project run_git_command 窄面单一 owner；违规即绕过统一 locale/非交互隔离",
       "profile": "full"
     },
     {
@@ -718,25 +638,6 @@
       "profile": "full"
     },
     {
-      "id": "pattern.runtime.context-construction-single-factory",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src"
-      },
-      "forbidden_patterns": [
-        "RuntimeContext::new(",
-        "RuntimeContextAssemblyToken::new("
-      ],
-      "exclusions": [
-        {
-          "path": "agent/features/runtime/src/application/run/context_factory.rs"
-        }
-      ],
-      "reason": "RuntimeContext/AssemblyToken 构造限单一工厂文件；工厂正向完整性（must wire 一串）由必填参数与构造点编译承接；BoundaryHookPort filtering/proceed 行为断言归测试（#1056 范围）；crate-root façade 白名单由 crate-api-boundary（F-2 数据化承接）",
-      "profile": "full"
-    },
-    {
       "id": "pattern.tui.render-output-purity",
       "assertion": "pattern_exclusion",
       "scope": {
@@ -752,7 +653,8 @@
       ],
       "exclusions": [
         {
-          "path": "apps/cli/src/tui/render/output/selection_overlay.rs"
+          "path": "apps/cli/src/tui/render/output/selection_overlay.rs",
+          "reason": "selection_overlay 是唯一合法上色路径"
         }
       ],
       "reason": "F-19：render/output 纯渲染——禁 Model 可变依赖/IO/旁路选区上色（selection_overlay 唯一上色路径豁免）",
@@ -769,11 +671,7 @@
         "model.conversation",
         "model.runtime"
       ],
-      "exclusions": [
-        {
-          "path": "apps/cli/src/tui/render/display/render.rs"
-        }
-      ],
+      "exclusions": [],
       "reason": "F-20：render 只读 view model/view_state 投影（display bridge 豁免）",
       "profile": "full"
     },
@@ -832,6 +730,7 @@
         "application",
         "application.rs",
         "composition.rs",
+        "constants.rs",
         "domain",
         "domain.rs",
         "lib.rs",
@@ -901,11 +800,15 @@
       "allowed_entries": [
         "adapters",
         "adapters.rs",
+        "constants.rs",
         "domain",
         "domain.rs",
         "lib.rs",
+        "lib_tests.rs",
         "ports.rs",
-        "published_language.rs"
+        "ports_tests.rs",
+        "published_language.rs",
+        "published_language_tests.rs"
       ],
       "reason": "F-3：provider Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
       "profile": "fast"
@@ -943,6 +846,8 @@
         "application.rs",
         "application_tests.rs",
         "codec.rs",
+        "codec_tests.rs",
+        "constants.rs",
         "domain",
         "domain.rs",
         "lib.rs",
@@ -950,8 +855,10 @@
         "noop.rs",
         "ports",
         "ports.rs",
+        "ports_tests.rs",
         "service.rs",
-        "service_reflection_tests.rs"
+        "service_reflection_tests.rs",
+        "service_tests.rs"
       ],
       "reason": "F-3：memory Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
       "profile": "fast"
@@ -983,6 +890,7 @@
       "allowed_entries": [
         "adapters",
         "adapters.rs",
+        "constants.rs",
         "contract",
         "contract.rs",
         "domain",
@@ -1019,6 +927,7 @@
       "allowed_entries": [
         "adapters",
         "adapters.rs",
+        "constants.rs",
         "domain",
         "domain.rs",
         "lib.rs",
@@ -1058,9 +967,11 @@
         "adapters",
         "adapters.rs",
         "application.rs",
+        "constants.rs",
         "domain",
         "domain.rs",
         "lib.rs",
+        "lib_tests.rs",
         "service.rs"
       ],
       "reason": "F-3：project Hexagonal 层目录与顶层文件白名单（#1022 矩阵；application.rs 用例编排层 / service.rs 持锁状态容器，#1746 归位）",
@@ -1094,6 +1005,7 @@
         "adapters",
         "adapters.rs",
         "composition.rs",
+        "constants.rs",
         "domain",
         "domain.rs",
         "lib.rs",
@@ -1130,6 +1042,7 @@
       "allowed_entries": [
         "adapters",
         "adapters.rs",
+        "constants.rs",
         "domain",
         "domain.rs",
         "lib.rs"
@@ -1168,6 +1081,7 @@
         "application.rs",
         "client",
         "client.rs",
+        "constants.rs",
         "contract",
         "contract.rs",
         "domain",
@@ -1207,6 +1121,7 @@
         "adapters",
         "adapters.rs",
         "capabilities.rs",
+        "constants.rs",
         "domain",
         "domain.rs",
         "lib.rs",
@@ -1248,6 +1163,7 @@
         "catalog.rs",
         "catalog_tests.rs",
         "connect.rs",
+        "constants.rs",
         "core",
         "domain",
         "domain.rs",
@@ -1295,12 +1211,13 @@
         "adapters.rs",
         "application",
         "application.rs",
+        "constants.rs",
         "domain",
         "domain.rs",
+        "integration_tests",
         "lib.rs",
         "ports",
-        "ports.rs",
-        "integration_tests"
+        "ports.rs"
       ],
       "reason": "F-3：context Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
       "profile": "fast"
@@ -1704,12 +1621,15 @@
         "value": "agent/features/project/src"
       },
       "allowed_symbols": [
+        "GitCommandOutcome",
+        "GitOperationError",
         "Workspace",
         "WorkspaceControl",
         "WorkspaceData",
         "WorkspaceReader",
         "WorkspaceRestoreData",
         "WorkspaceWriter",
+        "run_git_command",
         "wire_production_workspace"
       ],
       "reason": "F-2：project crate 根窄 façade（#1022 登记，消费者证明制）",
@@ -2078,7 +1998,9 @@
         "adapter.rs",
         "app",
         "app.rs",
+        "app_tests.rs",
         "architecture_tests.rs",
+        "constants.rs",
         "effect",
         "effect.rs",
         "frame_diagnostics.rs",
@@ -2090,15 +2012,19 @@
         "process_memory_tests.rs",
         "render",
         "render.rs",
+        "state.rs",
         "text.rs",
+        "text_tests.rs",
         "update",
         "update.rs",
         "view_assembler",
         "view_assembler.rs",
         "view_model",
         "view_model.rs",
+        "view_model_tests.rs",
         "view_state",
-        "view_state.rs"
+        "view_state.rs",
+        "view_state_tests.rs"
       ],
       "reason": "F-22：tui 顶层目录白名单；旧命名空间 import 防复活④（模块已删编译失败）",
       "profile": "fast"
@@ -2111,19 +2037,24 @@
         "value": "agent/composition/src"
       },
       "allowed_entries": [
-        "lib.rs",
         "app.rs",
+        "app_tests.rs",
         "audit.rs",
+        "constants.rs",
         "delivery_logging.rs",
-        "memory.rs",
-        "provider.rs",
-        "runtime.rs",
-        "tools.rs",
-        "update.rs",
+        "delivery_logging_tests.rs",
+        "lib.rs",
         "lib_tests.rs",
+        "memory.rs",
+        "memory_tests.rs",
+        "provider.rs",
+        "provider_probe_tests.rs",
         "provider_tests.rs",
+        "runtime.rs",
         "runtime_tests.rs",
-        "provider_probe_tests.rs"
+        "state.rs",
+        "tools.rs",
+        "update.rs"
       ],
       "reason": "F-8：composition 顶层文件白名单（lib_tests.rs 现状冻结；mod 声明集与文件白名单一致）",
       "profile": "fast"
@@ -2173,43 +2104,6 @@
       ],
       "exclusions": [],
       "reason": "F-27：runtime 禁组装/初始化 Logging",
-      "profile": "full"
-    },
-    {
-      "id": "pattern.all.no-unified-logger-spread",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "workspace"
-      },
-      "forbidden_patterns": [
-        "UnifiedLogger::init("
-      ],
-      "exclusions": [
-        {
-          "path": "agent/composition/src/app.rs"
-        }
-      ],
-      "reason": "F-27：UnifiedLogger::init 仅 Composition app.rs 唯一点",
-      "profile": "full"
-    },
-    {
-      "id": "pattern.all.no-from-args-direct-call",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "workspace"
-      },
-      "forbidden_patterns": [
-        "from_args_with_workspace("
-      ],
-      "exclusions": [
-        {
-          "path": "agent/composition/src/runtime.rs"
-        },
-        {
-          "path": "agent/features/runtime/"
-        }
-      ],
-      "reason": "F-27：bootstrap 唯一调用点在 composition/runtime.rs；runtime 内豁免定义侧",
       "profile": "full"
     },
     {
@@ -2298,8 +2192,11 @@
       "id": "pattern.runtime-tools.no-task-persistence-symbols",
       "assertion": "pattern_exclusion",
       "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/"
+        "kind": "path_prefixes",
+        "values": [
+          "agent/features/runtime/",
+          "agent/features/tools/"
+        ]
       },
       "forbidden_patterns": [
         "TaskStore",
@@ -2310,18 +2207,8 @@
         "SessionTaskAdapters",
         "TaskWiring"
       ],
-      "exclusions": [
-        {
-          "path": "agent/features/task/"
-        },
-        {
-          "path": "agent/features/storage/"
-        },
-        {
-          "path": "agent/features/context/"
-        }
-      ],
-      "reason": "F-12：Task 持久化类型对 runtime/tools 不可见，消费注入 TaskAccess（task/storage/context 为 owner 与协调方豁免；wire_task 由 cross-bc fail-closed 承接）",
+      "exclusions": [],
+      "reason": "F-12：Task 持久化类型对 runtime/tools 不可见，消费注入 TaskAccess（wire_task 由 cross-bc fail-closed 承接）",
       "profile": "full"
     },
     {
@@ -2362,644 +2249,10 @@
       "forbidden_patterns": [
         "mod tests {"
       ],
-      "exclusions": [
-        {
-          "path": "agent/composition/src/app.rs"
-        },
-        {
-          "path": "agent/composition/src/delivery_logging.rs"
-        },
-        {
-          "path": "agent/composition/src/memory.rs"
-        },
-        {
-          "path": "agent/features/context/src/adapters/memory_injection.rs"
-        },
-        {
-          "path": "agent/features/context/src/adapters/prompt/guidance.rs"
-        },
-        {
-          "path": "agent/features/context/src/adapters/prompt/security.rs"
-        },
-        {
-          "path": "agent/features/context/src/domain/session/chat_chain.rs"
-        },
-        {
-          "path": "agent/features/hook/src/adapters/dispatcher/executor.rs"
-        },
-        {
-          "path": "agent/features/memory/src/codec.rs"
-        },
-        {
-          "path": "agent/features/memory/src/domain/model.rs"
-        },
-        {
-          "path": "agent/features/memory/src/domain/persistence.rs"
-        },
-        {
-          "path": "agent/features/memory/src/domain/reflection.rs"
-        },
-        {
-          "path": "agent/features/memory/src/ports.rs"
-        },
-        {
-          "path": "agent/features/memory/src/service.rs"
-        },
-        {
-          "path": "agent/features/project/src/adapters/git.rs"
-        },
-        {
-          "path": "agent/features/project/src/domain/service.rs"
-        },
-        {
-          "path": "agent/features/project/src/lib.rs"
-        },
-        {
-          "path": "agent/features/provider/src/adapters/anthropic.rs"
-        },
-        {
-          "path": "agent/features/provider/src/adapters/anthropic/message_conversion.rs"
-        },
-        {
-          "path": "agent/features/provider/src/adapters/error_log.rs"
-        },
-        {
-          "path": "agent/features/provider/src/adapters/http_attempt.rs"
-        },
-        {
-          "path": "agent/features/provider/src/adapters/ollama.rs"
-        },
-        {
-          "path": "agent/features/provider/src/adapters/openai_compatible/reasoning_normalizer.rs"
-        },
-        {
-          "path": "agent/features/provider/src/adapters/stream.rs"
-        },
-        {
-          "path": "agent/features/provider/src/domain/capability.rs"
-        },
-        {
-          "path": "agent/features/provider/src/domain/invoke.rs"
-        },
-        {
-          "path": "agent/features/provider/src/lib.rs"
-        },
-        {
-          "path": "agent/features/provider/src/ports.rs"
-        },
-        {
-          "path": "agent/features/provider/src/published_language.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/adapters/sdk_event_mapper.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/client/bootstrap/agent_runner.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/client/bootstrap/concurrency.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/client/bootstrap/model_runtime.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/client/mapping.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/client/trait_model.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/client/trait_reflection.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/compact_generator.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/loop_engine/chat/agent_calls.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/loop_engine/chat/config_reload.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/loop_engine/chat/idle_commands.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/loop_engine/chat/input_log.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/loop_engine/chat/snapshot_registry.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/loop_engine/chat/stream_handler.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/loop_engine/chat/tools.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/loop_engine/input.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/model/invocation.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/model/token_usage.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/prompt/prompt_build_ext.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/published_state/registry.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/run/chat_launch.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/run/derived/loop_run.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/tool/coordination/identity.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/application/tool/coordination/loop_guard.rs"
-        },
-        {
-          "path": "agent/features/runtime/src/lib.rs"
-        },
-        {
-          "path": "agent/features/task/src/adapters/wiring.rs"
-        },
-        {
-          "path": "agent/features/tools/src/adapters/bash/safety.rs"
-        },
-        {
-          "path": "agent/features/tools/src/adapters/mcp/tests.rs"
-        },
-        {
-          "path": "agent/features/tools/src/adapters/registry.rs"
-        },
-        {
-          "path": "agent/features/tools/src/adapters/task_list_complete.rs"
-        },
-        {
-          "path": "agent/features/tools/src/adapters/task_list_create.rs"
-        },
-        {
-          "path": "agent/features/tools/src/adapters/tool_registry.rs"
-        },
-        {
-          "path": "agent/features/tools/src/adapters/tool_search.rs"
-        },
-        {
-          "path": "agent/features/tools/src/domain/shell_safety.rs"
-        },
-        {
-          "path": "agent/features/tools/src/domain/tool_types.rs"
-        },
-        {
-          "path": "agent/features/tools/src/domain/types/agent.rs"
-        },
-        {
-          "path": "agent/features/tools/src/domain/types/task_create.rs"
-        },
-        {
-          "path": "agent/features/tools/src/domain/types/task_stop.rs"
-        },
-        {
-          "path": "agent/features/tools/src/domain/types/task_update.rs"
-        },
-        {
-          "path": "agent/features/update/src/contract.rs"
-        },
-        {
-          "path": "agent/shared/src/adapter/fs.rs"
-        },
-        {
-          "path": "agent/shared/src/adapter/git.rs"
-        },
-        {
-          "path": "agent/shared/src/adapter/mcp.rs"
-        },
-        {
-          "path": "agent/shared/src/adapter/process.rs"
-        },
-        {
-          "path": "agent/shared/src/adapter/storage.rs"
-        },
-        {
-          "path": "agent/shared/src/adapter/telemetry.rs"
-        },
-        {
-          "path": "agent/shared/src/config.rs"
-        },
-        {
-          "path": "agent/shared/src/config/adapters/paths.rs"
-        },
-        {
-          "path": "agent/shared/src/config/domain/driver_env.rs"
-        },
-        {
-          "path": "agent/shared/src/config/domain/logging.rs"
-        },
-        {
-          "path": "agent/shared/src/config/domain/memory.rs"
-        },
-        {
-          "path": "agent/shared/src/config/domain/merge.rs"
-        },
-        {
-          "path": "agent/shared/src/config/domain/models/deserialize.rs"
-        },
-        {
-          "path": "agent/shared/src/config/domain/models/runtime.rs"
-        },
-        {
-          "path": "agent/shared/src/config/domain/snapshot.rs"
-        },
-        {
-          "path": "agent/shared/src/config/domain/tools.rs"
-        },
-        {
-          "path": "agent/shared/src/config/domain/update.rs"
-        },
-        {
-          "path": "agent/shared/src/i18n/prompt/commit.rs"
-        },
-        {
-          "path": "agent/shared/src/i18n/prompt/discipline.rs"
-        },
-        {
-          "path": "agent/shared/src/i18n/prompt/git_context_labels.rs"
-        },
-        {
-          "path": "agent/shared/src/i18n/prompt/sections.rs"
-        },
-        {
-          "path": "agent/shared/src/i18n/prompt/system.rs"
-        },
-        {
-          "path": "agent/shared/src/i18n/runtime/command.rs"
-        },
-        {
-          "path": "agent/shared/src/i18n/runtime/reflection.rs"
-        },
-        {
-          "path": "agent/shared/src/i18n/tools/core.rs"
-        },
-        {
-          "path": "agent/shared/src/i18n/tools/filesystem.rs"
-        },
-        {
-          "path": "agent/shared/src/i18n/tools/task.rs"
-        },
-        {
-          "path": "agent/shared/src/i18n/tools/web.rs"
-        },
-        {
-          "path": "agent/shared/src/i18n/tools/worktree.rs"
-        },
-        {
-          "path": "agent/shared/src/memory/dedup.rs"
-        },
-        {
-          "path": "agent/shared/src/memory/entry.rs"
-        },
-        {
-          "path": "agent/shared/src/memory/error.rs"
-        },
-        {
-          "path": "agent/shared/src/memory/format.rs"
-        },
-        {
-          "path": "agent/shared/src/memory/result.rs"
-        },
-        {
-          "path": "agent/shared/src/memory/scoring.rs"
-        },
-        {
-          "path": "agent/shared/src/memory/session_reminder.rs"
-        },
-        {
-          "path": "agent/shared/src/message/types.rs"
-        },
-        {
-          "path": "agent/shared/src/session_types.rs"
-        },
-        {
-          "path": "agent/shared/src/string_idx.rs"
-        },
-        {
-          "path": "agent/shared/src/string_idx/byte_idx.rs"
-        },
-        {
-          "path": "agent/shared/src/string_idx/char_idx.rs"
-        },
-        {
-          "path": "agent/shared/src/string_idx/col_idx.rs"
-        },
-        {
-          "path": "apps/cli/src/args.rs"
-        },
-        {
-          "path": "apps/cli/src/chat/no_tui.rs"
-        },
-        {
-          "path": "apps/cli/src/panic_hook.rs"
-        },
-        {
-          "path": "apps/cli/src/subcommand/model_selection.rs"
-        },
-        {
-          "path": "apps/cli/src/tui.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/adapter/live_status_widget.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/adapter/output_widget.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/adapter/status_widget.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/app.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/app/resize.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/app/runtime.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/app/slash/dialog.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/app/slash/reflection.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/app/state/session.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/app/state/tests.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/app/update/enter.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/app/util.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/effect/session/processing.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/effect/session/resume.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/effect/spawn_guard.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/model/change.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/model/conversation/history_parse.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/model/conversation/intent_impls.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/model/conversation/model.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/model/conversation/notice.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/model/conversation/queued_submission.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/model/conversation/stream.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/model/conversation/streaming_preview.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/model/conversation/system_reminder.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/model/conversation/tool_call.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/model/diagnostic/model.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/model/input/change.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/model/input/completion.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/model/input/completion_item.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/model/input/mode.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/model/output_timeline/model.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/model/root.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/model/runtime/session_model.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/input/input_area/render.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/input/input_area/selection.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/input/input_area/suggestions.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/input/input_area/wrap.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/input/input_render_model.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/block_cache.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/block_component.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/blocks.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/blocks/ask_user.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/blocks/assistant_message.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/blocks/diagnostic.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/blocks/edit_diff.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/blocks/thinking.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/blocks/tool_call.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/blocks/tool_result.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/blocks/user_message.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/gutter.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/markdown/table.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/primitives/convert.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/primitives/diff.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/primitives/markdown.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/primitives/table.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/primitives/unified_diff.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/primitives/wrap.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/rendered.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/selection_overlay.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/status_line.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/tool_display/common.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/agent.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/ask_user.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/helpers.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/shell.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/skill.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output_area.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output_area/display.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output_area/selection.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/text.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/update/coordinator.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/update/dirty.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/view_assembler/dialog.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/view_assembler/input.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/view_assembler/live_status.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/view_assembler/status.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/view_model.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/view_model/live_status.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/view_model/nesting.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/view_model/output.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/view_model/tool_name.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/view_state.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/view_state/input_selection.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/view_state/spinner_anim.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/view_state/status.rs"
-        },
-        {
-          "path": "packages/sdk/src/chat.rs"
-        },
-        {
-          "path": "packages/sdk/src/chat_event.rs"
-        },
-        {
-          "path": "packages/sdk/src/chat_result.rs"
-        },
-        {
-          "path": "packages/sdk/src/chat_view.rs"
-        },
-        {
-          "path": "packages/sdk/src/config_view.rs"
-        },
-        {
-          "path": "packages/sdk/src/content.rs"
-        },
-        {
-          "path": "packages/sdk/src/session_lock.rs"
-        },
-        {
-          "path": "agent/features/project/src/domain/git.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/input/input_area/resize.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output_area/resize.rs"
-        }
-      ],
-      "reason": "F-28：分离测试约定，禁新增内联 mod tests {；存量基线 211（原始 213 随迁移净减，逐批收缩；exclusion_baseline 机器校验只降不升），迁移完成 MUST 收缩 exclusions 与基线",
+      "exclusions": [],
+      "reason": "F-28：分离测试约定，禁内联 mod tests {（存量 211 已于 #1146 W5 全量外置为同级 foo_tests.rs + #[path] 引入，exclusions 与基线归零；新增内联将被直接拦截）",
       "profile": "full",
-      "exclusion_baseline": 211
+      "exclusion_baseline": 0
     },
     {
       "id": "budget.runtime.responsibility",
@@ -3044,35 +2297,13 @@
         ".chars().nth(",
         ".split_at("
       ],
-      "exclusions": [
-        {
-          "path": "apps/cli/src/tui/render/display/safe_text.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/display/safe_text.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/text.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/blocks/tool_result.rs"
-        },
-        {
-          "path": "agent/features/memory/src/domain/reflection.rs"
-        },
-        {
-          "path": "agent/features/provider/src/adapters/ollama/conversion.rs"
-        },
-        {
-          "path": "agent/features/audit/src/adapters/append.rs"
-        },
-        {
-          "path": "packages/global/logging/src/domain/routing_guard.rs"
-        }
-      ],
+      "exclusions": [],
       "reason": "F-23 部分迁移：裸字节切片/chars().nth 两大子串模式（8 安全 owner 豁免与原脚本一致）；切片区间正则特征仍需原脚本，待 regex 断言器批次全量退役",
       "profile": "full",
-      "allow_marker": "allow unsafe_text_op"
+      "allow_marker": "allow unsafe_text_op",
+      "allow_markers": [
+        "allow unsafe_text_op"
+      ]
     },
     {
       "id": "pattern.provider.no-pull-stream-retry-loop",
@@ -3087,67 +2318,6 @@
       ],
       "exclusions": [],
       "reason": "#1679：拉流段禁 backoff/重试循环（idle-timeout select sleep 合法保留；流中断 fail-fast 可重试语义已由 stream_contract_tests 覆盖）",
-      "profile": "full"
-    },
-    {
-      "id": "pattern.all.session-setup-single-owner",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "workspace"
-      },
-      "forbidden_patterns": [
-        ".process_group(",
-        ".pre_exec(",
-        "libc::setsid("
-      ],
-      "exclusions": [
-        {
-          "path": "packages/global/utils/src/process.rs"
-        }
-      ],
-      "reason": "#1679：子进程 session 隔离唯一 owner 在 utils process.rs；无 TTY 行为已由 hook process_tests 覆盖；Command 计数配比半段留原脚本（#1696 计数断言器/工厂化另立项）",
-      "profile": "full"
-    },
-    {
-      "id": "pattern.provider.http-send-single-executor",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/provider/src"
-      },
-      "forbidden_patterns": [
-        ".send().await",
-        "request.send()"
-      ],
-      "exclusions": [
-        {
-          "path": "agent/features/provider/src/adapters/http_attempt.rs"
-        }
-      ],
-      "reason": "#1679（判据修正②→③）：HTTP 发送唯一经 http_attempt executor；诊断 API（log_network_error/log_http_error 等）限点同理由编译可见性收窄承接；transport_tests 已覆盖发送/超时行为",
-      "profile": "full"
-    },
-    {
-      "id": "pattern.provider.error-log-diag-single-caller",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/provider/src/adapters"
-      },
-      "forbidden_patterns": [
-        "log_network_error(",
-        "log_http_error(",
-        "LlmApiErrorRecord"
-      ],
-      "exclusions": [
-        {
-          "path": "agent/features/provider/src/adapters/error_log.rs"
-        },
-        {
-          "path": "agent/features/provider/src/adapters/http_attempt.rs"
-        }
-      ],
-      "reason": "#1679：error_log HTTP/network 诊断 API 仅 executor 可调，driver 仅 log_stream_protocol_error 窄口",
       "profile": "full"
     },
     {
@@ -3187,7 +2357,6 @@
       "scope": {
         "kind": "path_prefixes",
         "values": [
-          "apps/cli/src/tui/app",
           "apps/cli/src/tui/view_assembler",
           "apps/cli/src/tui/view_model"
         ]
@@ -3201,18 +2370,8 @@
         "copypasta::",
         ".await"
       ],
-      "exclusions": [
-        {
-          "path": "apps/cli/src/tui/app/run_loop.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/app/runtime.rs"
-        },
-        {
-          "path": "apps/cli/src/tui/app/testing/"
-        }
-      ],
-      "reason": "F-21：tui app TEA 与 view_assembler/view_model 纯度（run_loop/runtime/testing 编排层豁免，#59 S5-gap 裁定；合并原三条同 pattern 重复规则，#1696③）",
+      "exclusions": [],
+      "reason": "F-21：view_assembler/view_model 纯净度（TEA 编排层 app/ 不在本规则 scope；#59 S5-gap 裁定后 scope 收窄，#1696③）",
       "profile": "full"
     },
     {
@@ -3282,40 +2441,7 @@
         "(?:&\\s*)?[A-Za-z_][A-Za-z0-9_.]*\\s*\\[\\s*\\.\\.=\\s*(?:\\d|[A-Za-z_][A-Za-z0-9_.]*\\.len\\(|len\\()",
         "(?:&\\s*)?[A-Za-z_][A-Za-z0-9_.]*\\s*\\[\\s*\\.\\.\\s*(?:\\d|[A-Za-z_][A-Za-z0-9_.]*\\.len\\(|len\\()"
       ],
-      "exclusions": [
-        {
-          "path": "apps/cli/src/tui/render/display/safe_text.rs",
-          "reason": "safe-text owner（guard-registry:scope.tui.safe-text-owners）"
-        },
-        {
-          "path": "apps/cli/src/tui/display/safe_text.rs",
-          "reason": "safe-text owner（guard-registry:scope.tui.safe-text-owners）"
-        },
-        {
-          "path": "apps/cli/src/tui/text.rs",
-          "reason": "safe-text owner（guard-registry:scope.tui.safe-text-owners）"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/blocks/tool_result.rs",
-          "reason": "长语句文件，命中均为 find/char_indices 偏移（guard-registry:scope.all.unsafe-text-long-statement-files）"
-        },
-        {
-          "path": "agent/features/memory/src/domain/reflection.rs",
-          "reason": "长语句文件（guard-registry:scope.all.unsafe-text-long-statement-files）"
-        },
-        {
-          "path": "agent/features/provider/src/adapters/ollama/conversion.rs",
-          "reason": "长语句文件（guard-registry:scope.all.unsafe-text-long-statement-files）"
-        },
-        {
-          "path": "agent/features/audit/src/adapters/append.rs",
-          "reason": "长语句文件（guard-registry:scope.all.unsafe-text-long-statement-files）"
-        },
-        {
-          "path": "packages/global/logging/src/domain/routing_guard.rs",
-          "reason": "长语句文件（guard-registry:scope.all.unsafe-text-long-statement-files）"
-        }
-      ],
+      "exclusions": [],
       "allow_markers": [
         "allow unsafe_text_op",
         "floor_char_boundary",
@@ -3357,6 +2483,54 @@
       ],
       "reason": "每个外部进程构造必须配对非交互 session 隔离（check-noninteractive-child-session.sh 数据化）",
       "profile": "fast"
+    },
+    {
+      "id": "pattern.all.lib-rs-no-const-definitions",
+      "assertion": "pattern_exclusion",
+      "scope": {
+        "kind": "path_prefixes",
+        "values": [
+          "agent/features/audit/src/lib.rs",
+          "agent/features/config/src/lib.rs",
+          "agent/features/context/src/lib.rs",
+          "agent/features/hook/src/lib.rs",
+          "agent/features/memory/src/lib.rs",
+          "agent/features/policy/src/lib.rs",
+          "agent/features/project/src/lib.rs",
+          "agent/features/provider/src/lib.rs",
+          "agent/features/runtime/src/lib.rs",
+          "agent/features/storage/src/lib.rs",
+          "agent/features/task/src/lib.rs",
+          "agent/features/tools/src/lib.rs",
+          "agent/features/update/src/lib.rs",
+          "agent/shared/src/lib.rs",
+          "agent/composition/src/lib.rs",
+          "packages/global/logging/src/lib.rs",
+          "apps/cli/src/main.rs"
+        ]
+      },
+      "forbidden_patterns": [],
+      "forbidden_regex": [
+        "^(?:pub(?:\\([a-z]+\\))?\\s+)?(?:const|static(?:\\s+mut)?)\\s+[A-Z][A-Z0-9_]*"
+      ],
+      "exclusions": [],
+      "reason": "lib.rs 零常量定义例外：crate 身份/共享常量 MUST 定义于 src/constants.rs，lib.rs 只允许 pub use 精确 re-export（#1146 双轨模型）",
+      "profile": "fast"
+    },
+    {
+      "id": "pattern.all.constant-placement",
+      "assertion": "constant_placement",
+      "scope": {
+        "kind": "workspace"
+      },
+      "reason": "常量放置规则（#1146）：模块级 const/static 只允许位于 constants.rs/consts.rs（纯值）或 state.rs（状态容器）；豁免（全部代码形态静态判定）：缩进形态（函数/impl/宏体）、const fn；守卫工具自身（tools/xtask 前缀）；exclusions 仅测试域声明点门控文件。宏依赖豁免已退役（target! 展开为纯值后归位）",
+      "profile": "fast",
+      "exclusions": [
+        {
+          "path": "packages/global/logging/src/domain/routing_guard.rs",
+          "reason": "整个模块经 domain.rs 声明点 #[cfg(test)] 门控，属测试域；OWNERS/NON_RUNTIME_MEMBERS/GUARD_SELF_PATH 为测试基建数据与自引用路径"
+        }
+      ]
     }
   ],
   "retired_symbols": [
@@ -3374,6 +2548,11 @@
       "symbol": "AtomicDatasetReflectionHistoryStore",
       "retired_by": "memory",
       "reason": "实现体构造已收窄 pub(crate)，跨 BC 不可达；构造由 wire 工厂承接（construction_symbols 三条 wire 条目，tracking 1709）"
+    },
+    {
+      "symbol": ".workspace_control(",
+      "retired_by": "pattern.features.workspace-control-call-sites",
+      "reason": "R4 调用点已灭绝：workspace_control 调用重构为 WorkspaceControl trait 对象经 registry/composition 注入（tools/adapters/registry.rs），全仓无 .workspace_control( 方法调用文本；复活归 review"
     }
   ]
 }

@@ -4,8 +4,6 @@ use crate::connect::{ConnectStage, ConnectView, ProbeStatusView};
 
 use super::*;
 
-pub const PROVIDER_CONNECT_WORKFLOW_ID: &str = "provider_connect";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderConnectFormError {
     Form(ConfigFormError),

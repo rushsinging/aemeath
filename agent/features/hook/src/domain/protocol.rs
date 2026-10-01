@@ -9,11 +9,9 @@
 //! - 能力矩阵违规 → `Err(Protocol{...})`；
 //! - exit 1/2/127（任意非零）→ 阻塞 point `Ok(Block)`，非阻塞 point `Err(Protocol{BlockOnNonBlocking})`。
 
+pub(crate) use super::constants::OUTPUT_MAX_BYTES;
 use crate::domain::invocation::HookPointData;
 use crate::domain::outcome::{ClassifyError, HookDirectiveData, HookReasonData, ProtocolViolation};
-
-/// stdout/stderr 大小上限（字节）。超出部分截断。
-pub(crate) const OUTPUT_MAX_BYTES: usize = 8192;
 
 /// Hook stdout 的 JSON 输出（exit 0 时 stdout 可包含此 JSON）。
 ///

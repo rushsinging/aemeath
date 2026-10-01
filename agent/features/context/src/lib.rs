@@ -14,11 +14,12 @@
 //! 集成测试 20 文件（9782 行）搬 src/integration_tests/。
 //! 按 docs/design/03-engineering/05-published-language.md SOP。
 
-pub(crate) const LOG_TARGET: &str = "aemeath:context";
-
 /// Context Management crate — 对话历史容器、上下文压缩、token 预算、提示组装、记忆注入。
 ///
 /// 设计文档：`docs/design/02-modules/context-management/README.md`
+mod constants;
+pub(crate) use constants::LOG_TARGET;
+
 mod adapters;
 // dev 门控契约测试经 crate 根消费（canonical_session_repository / isolated_context_with_skill）。
 #[cfg(any(test, feature = "dev"))]

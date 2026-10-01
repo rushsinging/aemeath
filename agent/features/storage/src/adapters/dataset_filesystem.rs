@@ -8,6 +8,9 @@
 //!
 //! 协议独立于 blob，不复用 `AtomicBlobPort`。
 
+#[cfg(any(test, feature = "test-fault-injection"))]
+#[cfg(any(test, feature = "test-fault-injection"))]
+use super::constants::{DATASET_FAULT_ABORT_ENV, DATASET_FAULT_POINT_ENV};
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -37,11 +40,6 @@ use crate::{
 };
 
 // ---- 私有、仅供 crash 测试驱动的故障注入接缝（不对外导出） ----
-
-#[cfg(any(test, feature = "test-fault-injection"))]
-const FAULT_POINT_ENV: &str = "AEMEATH_STORAGE_DATASET_FAULT_POINT";
-#[cfg(any(test, feature = "test-fault-injection"))]
-const FAULT_ABORT_ENV: &str = "AEMEATH_STORAGE_DATASET_FAULT_ABORT";
 
 /// 受测的 post-Prepared 故障点。
 enum FaultPoint {
@@ -79,8 +77,8 @@ impl DatasetFaultInjector {
     /// 崩溃恢复演练经父进程 spawn 时的 env 传递注入配置。
     pub(crate) fn from_env() -> Self {
         Self {
-            requested: std::env::var(FAULT_POINT_ENV).ok(),
-            abort: std::env::var_os(FAULT_ABORT_ENV).is_some(),
+            requested: std::env::var(DATASET_FAULT_POINT_ENV).ok(),
+            abort: std::env::var_os(DATASET_FAULT_ABORT_ENV).is_some(),
         }
     }
 

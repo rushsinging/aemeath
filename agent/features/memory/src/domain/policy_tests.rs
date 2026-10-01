@@ -1,3 +1,4 @@
+use super::constants::MAX_SUPERSEDE_CHAIN_DEPTH;
 use std::collections::HashMap;
 use std::time::Duration;
 

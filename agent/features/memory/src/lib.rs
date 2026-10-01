@@ -29,8 +29,6 @@
 //! 测试独占符号（`CompactResult`、`MemorySuggestion` 等）暂留 `api`，
 //! 判定记录：随测试迁移批收窄。
 
-pub(crate) const LOG_TARGET: &str = "aemeath:agent:memory";
-
 // ---------- composition-only wiring（根级 wire 工厂，config crate 同判） ----------
 //
 // 三个实现体（`DatasetMemoryOpener`、`FileLegacyMemorySourceFactory`、
@@ -75,6 +73,9 @@ pub fn wire_reflection_history_store(
         storage, project,
     ))
 }
+
+mod constants;
+pub(crate) use constants::LOG_TARGET;
 
 mod adapters;
 mod application;

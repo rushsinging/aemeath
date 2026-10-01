@@ -1,9 +1,8 @@
+pub(crate) use super::constants::MAX_USAGE_QUERY_LIMIT;
 use crate::domain::{
     UsageEnvelopeV1, UsageQueryData, UsageQueryError, UsageQueryWarning, UsageRecordData,
     UsageTimeRangeData, CURRENT_USAGE_SCHEMA_VERSION,
 };
-
-pub(crate) const MAX_USAGE_QUERY_LIMIT: usize = 1_000;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct CursorPosition {

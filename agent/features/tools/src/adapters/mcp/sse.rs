@@ -10,6 +10,7 @@
 //! Each `send_request` POSTs the request then directly reads the response from the
 //! stream — no background task, no channel, no race conditions.
 
+use super::constants::{SSE_CONNECT_TIMEOUT_SECS, SSE_REQUEST_TIMEOUT_SECS};
 use crate::adapters::mcp::sse_stream::SseReadStream;
 use reqwest::Client;
 use serde_json::Value;
@@ -63,16 +64,6 @@ pub fn resolve_endpoint_url(base_url: &str, endpoint_path: &str) -> Result<Strin
         .map_err(|e| format!("failed to resolve endpoint url: {e}"))?;
     Ok(resolved.to_string())
 }
-
-/// Default timeout for SSE endpoint handshake (seconds).
-const SSE_CONNECT_TIMEOUT_SECS: u64 = 10;
-
-/// Default timeout for individual JSON-RPC requests via SSE stream (seconds).
-///
-/// Some SSE servers (e.g. z.ai) split large responses across multiple chunks
-/// with long pauses between them. A shorter timeout with retries via stale
-/// response acceptance is more reliable than a single long timeout.
-const SSE_REQUEST_TIMEOUT_SECS: u64 = 15;
 
 fn default_headers(
     default_user_agent: &str,

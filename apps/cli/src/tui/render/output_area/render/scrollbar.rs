@@ -1,7 +1,5 @@
+pub(crate) use super::constants::SCROLLBAR_RESERVE_COLS;
 use ratatui::layout::Rect;
-
-/// 输出区右侧保留的呼吸空间列数（原 scrollbar 占位，现仅保留间距）。
-pub(crate) const SCROLLBAR_RESERVE_COLS: u16 = 2;
 
 /// 从 area 中扣除右侧呼吸空间。
 /// `needs_scrollbar` 参数保留兼容但不再影响行为（scrollbar 已移除）。

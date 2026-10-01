@@ -1,5 +1,10 @@
 //! Hook 子进程的受管执行边界。
 
+pub(crate) use super::constants::DEFAULT_OUTPUT_LIMIT;
+#[cfg(not(unix))]
+use super::constants::UNSUPPORTED_PLATFORM_MESSAGE;
+
+use super::constants::TERMINATION_GRACE;
 use std::collections::HashMap;
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -10,11 +15,6 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
 
 use crate::ports::HookCancellationSignal;
-
-pub(crate) const DEFAULT_OUTPUT_LIMIT: usize = 8 * 1024;
-#[cfg(any(not(unix), test))]
-pub(crate) const UNSUPPORTED_PLATFORM_MESSAGE: &str = "当前平台不支持 Hook 命令执行";
-const TERMINATION_GRACE: Duration = Duration::from_millis(250);
 
 #[derive(Debug)]
 pub(crate) struct ProcessRequest {

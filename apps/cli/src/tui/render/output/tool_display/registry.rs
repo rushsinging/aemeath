@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use std::sync::LazyLock;
+use super::state::TOOL_DISPLAYS;
 
 use super::traits::ToolDisplay;
 
@@ -9,18 +8,6 @@ pub struct ToolDisplayEntry {
 }
 
 inventory::collect!(ToolDisplayEntry);
-
-static TOOL_DISPLAYS: LazyLock<HashMap<&'static str, Box<dyn ToolDisplay>>> = LazyLock::new(|| {
-    let mut map: HashMap<&'static str, Box<dyn ToolDisplay>> = HashMap::new();
-    for entry in inventory::iter::<ToolDisplayEntry> {
-        assert!(
-            map.insert(entry.name, (entry.display)()).is_none(),
-            "duplicate ToolDisplay registration: {}",
-            entry.name
-        );
-    }
-    map
-});
 
 #[cfg(test)]
 pub(crate) fn registration_count(name: &str) -> usize {

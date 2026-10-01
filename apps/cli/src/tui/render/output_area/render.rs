@@ -1,3 +1,4 @@
+mod constants;
 mod diagnostics;
 mod paint;
 mod scrollbar;
@@ -28,7 +29,8 @@ fn animate_visible_line(line: &RenderedLine, frame: u64) -> Option<RenderedLine>
     match line.animation? {
         LineAnimation::RunningToolMarker => {
             let mut animated = line.clone();
-            let glyph = if (frame / crate::tui::render::output::gutter::TOOL_MARKER_BLINK_DIVISOR)
+            let glyph = if (frame
+                / crate::tui::render::output::constants::TOOL_MARKER_BLINK_DIVISOR)
                 .is_multiple_of(2)
             {
                 "●"

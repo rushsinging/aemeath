@@ -223,7 +223,7 @@ Main 与每个 Sub Run 都可共享同一个 `Arc<ProviderTransport>`，但不�
 
 ## 9. Composition Root 与 Factory
 
-> **当前落地**：Composition Root 已通过 Runtime-owned `ProviderFactory` trait（`runtime::ports::provider_factory`）独占 provider 构造。`ProviderFactory::build(spec: ProviderBuildSpec) -> Result<ProviderBinding, ProviderError>` 接收纯值 spec 并返回 `ProviderBinding`（`Arc<dyn ProviderPort>` + model / max_tokens / reasoning / context_window）。Provider crate 的 `provider::composition` 模块是 Composition Root 专用构造面，重新导出 `LlmClient` / `LlmConfigOptions` / `InvocationScope` / `SystemBlock` / `LlmProvider` 等具体构造符号；非 Composition crate **NEVER** 引用 `provider::composition` 或构造符号。引擎规则 `pattern.features.no-provider-composition-penetration` 与 `construction_symbols` 白名单锁定此边界并含负向探针证据。生产 factory（`DefaultProviderFactory`）持有进程级 `TransportPool` 并经 `from_config_with_pool` 构造，"构造和缓存不可变 ProviderTransport"职责随之落地（见 §6）。
+> **当前落地**：Composition Root 已通过 Runtime-owned `ProviderFactory` trait（`runtime::ports::provider_factory`）独占 provider 构造。`ProviderFactory::build(spec: ProviderBuildSpec) -> Result<ProviderBinding, ProviderError>` 接收纯值 spec 并返回 `ProviderBinding`（`Arc<dyn ProviderPort>` + model / max_tokens / reasoning / context_window）。Provider crate 的 `provider::composition` 模块是 Composition Root 专用构造面，重新导出 `LlmClient` / `LlmConfigOptions` / `InvocationScope` / `SystemBlock` / `LlmProvider` 等具体构造符号；非 Composition crate **NEVER** 引用 `provider::composition` 或构造符号，由 `construction_symbols` 白名单锁定。生产 factory（`DefaultProviderFactory`）持有进程级 `TransportPool` 并经 `from_config_with_pool` 构造，"构造和缓存不可变 ProviderTransport"职责随之落地（见 §6）。
 
 Composition Root 唯一负责：
 
@@ -298,7 +298,7 @@ Deny: production set_model/set_max_tokens/set_reasoning_level on shared Provider
 
 守卫应优先检查 AST/path 与公开 re-export，不依赖简单文件名黑名单。新增白名单必须记录 owner、理由和退出条件。
 
-> **已落地**：引擎规则 `pattern.provider.http-send-single-executor` 与 `pattern.provider.error-log-diag-single-caller` 锁定"driver 只能经 `HttpAttemptExecutor::execute` 发送请求、只能经其 `BoundedErrorBody` 读取失败响应体、HTTP/network 诊断日志 API 仅限 `http_attempt.rs` + `error_log.rs` 调用"三条不变量。`pattern.features.no-provider-composition-penetration` 与 `construction_symbols` 白名单锁定构造所有权：非 Composition crate 禁止引用 `provider::composition` 或具体构造符号（`LlmClient` / `LlmConfigOptions` / `InvocationScope` / `SystemBlock` / `LlmProvider` / `TransportPool`），正向断言 `provider::composition` 至少被 Composition 生产代码引用；负向探针（在非 Composition 源文件中追加 `provider::composition::LlmClient` 引用）以 exit 2 命中，移除后 clean pass。详见 [Architecture Guards](../../03-engineering/01-architecture-guards.md) 断言器目录。
+> **已落地**："driver 只能经 `HttpAttemptExecutor::execute` 发送请求、只能经其 `BoundedErrorBody` 读取失败响应体、HTTP/network 诊断日志 API 仅限 `http_attempt.rs` + `error_log.rs` 调用"三条不变量由 crate 内部纪律与 code review 承担（L0-L2 测试覆盖行为面）。`construction_symbols` 白名单锁定构造所有权：非 Composition crate 禁止引用 `provider::composition` 或具体构造符号（`LlmClient` / `LlmConfigOptions` / `InvocationScope` / `SystemBlock` / `LlmProvider` / `TransportPool`）。详见 [Architecture Guards](../../03-engineering/01-architecture-guards.md) 断言器目录。
 
 ## 13. 相关文档
 

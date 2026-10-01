@@ -1,14 +1,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-const INSTRUCTION_SEARCH_DEPTH: u32 = 5;
-
 use hook::{HookDispatchContextData, HookDispatcher, HookInvocationData};
 use share::config::paths;
 use share::config::PermissionModeConfig;
 use share::i18n::prompt::system::static_system_prompt;
 
 use super::git_context::{collect_git_context, is_git_repo};
+use crate::application::constants::INSTRUCTION_SEARCH_DEPTH;
 
 /// System prompt and the one-time Git context snapshot for a chat session.
 #[derive(Clone)]

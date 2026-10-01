@@ -1,3 +1,4 @@
+pub(crate) mod constants;
 mod dialog;
 pub mod help;
 mod help_display;

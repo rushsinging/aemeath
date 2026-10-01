@@ -12,6 +12,7 @@ mod version;
 #[path = "service/service_tests.rs"]
 mod tests;
 
+use crate::constants::{DOWNLOAD_TIMEOUT_SECS, GITHUB_API_URL, REQUEST_TIMEOUT_SECS};
 use crate::release::GitHubRelease;
 use archive::extract_binary_from_tar_gz;
 use async_trait::async_trait;
@@ -19,17 +20,6 @@ use checksum::{parse_checksums, sha256_hex};
 use platform::{download_url, platform_target};
 use sdk::{SdkError, UpdateResult, UpdateService, VersionCheck};
 use version::build_version_check;
-
-/// GitHub Releases API endpoint（匿名访问，限速 60 次/小时）。
-const GITHUB_API_URL: &str = "https://api.github.com/repos/rushsinging/aemeath/releases/latest";
-
-/// HTTP 请求超时（秒）—— 用于元数据请求（GitHub API JSON / checksums.txt）。
-const REQUEST_TIMEOUT_SECS: u64 = 5;
-
-/// 二进制下载超时（秒）—— 用于 tar.gz artifact（可达数 MB）。
-/// 5s 对 6.5MB tar.gz 经常不够（含 TLS 握手 + GitHub 302 跳转），
-/// 过短会中断 body 流导致 `error decoding response body`。见 issue #350。
-const DOWNLOAD_TIMEOUT_SECS: u64 = 120;
 
 // ── public API ───────────────────────────────────────────────────
 

@@ -35,8 +35,9 @@
 //! - `CliArgsAdapter`/`EnvAdapter`/`FileAdapter` 为 wire 内部实现收窄 crate 内（此前消费
 //!   分析误报：share/config 存在另一套同名独立实现，词命中假阳性）。
 
-/// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
-pub(crate) const LOG_TARGET: &str = "aemeath:agent:config";
+mod constants;
+
+pub(crate) use crate::constants::LOG_TARGET;
 mod adapters;
 pub mod catalog;
 pub mod connect;

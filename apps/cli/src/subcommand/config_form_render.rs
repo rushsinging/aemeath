@@ -1,11 +1,10 @@
+use super::constants::WIDE_LAYOUT_MIN_WIDTH;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 
 use crate::tui::render::theme;
-
-const WIDE_LAYOUT_MIN_WIDTH: u16 = 72;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ConfigFormInteraction {

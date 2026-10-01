@@ -1,4 +1,5 @@
 pub(crate) mod append;
+mod constants;
 pub(crate) mod query;
 
 #[cfg(test)]

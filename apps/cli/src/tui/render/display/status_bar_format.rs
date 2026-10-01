@@ -1,3 +1,6 @@
+pub(crate) use crate::tui::render::display::constants::{
+    DEFAULT_PATH_WIDTH, ELLIPSIS_WIDTH, FIELD_SEPARATOR, MIN_PATH_WIDTH,
+};
 use crate::tui::render::display::safe_text::str_display_width;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -37,11 +40,6 @@ impl Default for StatusLineContext {
         }
     }
 }
-
-pub(crate) const FIELD_SEPARATOR: &str = "  ";
-const MIN_PATH_WIDTH: usize = 12;
-const DEFAULT_PATH_WIDTH: usize = 54;
-const ELLIPSIS_WIDTH: usize = 1;
 
 pub(crate) fn shorten_path(path: &str, max_cols: usize) -> String {
     if max_cols == 0 || path.is_empty() {

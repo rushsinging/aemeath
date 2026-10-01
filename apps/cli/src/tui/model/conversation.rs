@@ -8,6 +8,7 @@ pub mod block;
 pub mod change;
 pub mod chat;
 pub mod chat_turn;
+mod constants;
 pub mod history_parse;
 pub mod ids;
 pub mod intent;

@@ -1,3 +1,5 @@
+mod constants;
+
 #[cfg(test)]
 mod ask_user_tests;
 #[cfg(test)]

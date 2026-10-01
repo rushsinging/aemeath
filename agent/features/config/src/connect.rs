@@ -19,6 +19,8 @@
 mod command;
 #[path = "core/connect/commit.rs"]
 mod commit;
+#[path = "core/connect/constants.rs"]
+mod constants;
 #[path = "core/connect/draft.rs"]
 mod draft;
 #[path = "core/connect/error.rs"]

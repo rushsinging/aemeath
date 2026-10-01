@@ -3,6 +3,7 @@
 //! 从 `dispatcher.rs` 拆出：这些纯函数不依赖 `&self`，按职责分组在此，
 //! 保持 `dispatcher.rs` 只含编排逻辑（struct + dispatch 主循环 + 重试循环）。
 
+use crate::adapters::constants::CONTEXT_SEPARATOR;
 use crate::domain::invocation::{HookInvocationData, HookPointData};
 use crate::domain::outcome::{
     ClassifyError, HookDirectiveData, HookExecutionData, HookExecutionStatusData, HookReasonData,
@@ -11,9 +12,6 @@ use crate::domain::outcome::{
 use crate::domain::subscription::{HookFailurePolicy, HookMatcherData};
 
 use super::executor::ExecutionFault;
-
-/// 上下文合并的分隔符（多个 ContinueWithContext 的 context 按执行顺序拼接）。
-pub(super) const CONTEXT_SEPARATOR: &str = "\n";
 
 /// matcher 是否命中 invocation。
 ///

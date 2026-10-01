@@ -127,7 +127,9 @@
 //! }
 //! ```
 
-pub(crate) const LOG_TARGET: &str = "aemeath:agent:task";
+mod constants;
+pub(crate) use constants::LOG_TARGET;
+
 mod adapters;
 mod domain;
 

@@ -5,12 +5,10 @@
 
 use super::block::{AskUserCompletion, AskUserPhase, AskUserSlot};
 use super::change::ConversationChange;
+use super::constants::ASK_USER_BLOCK_ID_PREFIX;
 use super::interaction::UiInteractionRequestId;
 use super::model::ConversationModel;
 use crate::tui::model::output_timeline::OutputTimelineItem;
-
-/// AskUser 交互块的 id 前缀。
-pub const ASK_USER_BLOCK_ID_PREFIX: &str = "ask-user-";
 
 fn ask_user_block_id(slots: &[AskUserSlot]) -> String {
     slots

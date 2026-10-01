@@ -16,7 +16,7 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 pub use status_bar_format::WorktreeKind;
-use status_bar_format::{context_row_text, StatusLineContext, FIELD_SEPARATOR};
+pub(crate) use status_bar_format::{context_row_text, StatusLineContext, FIELD_SEPARATOR};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum StatusBarRow {
@@ -97,7 +97,7 @@ impl StatusBar {
         }
 
         // 窄屏提示：终端宽度 < 40 时，状态栏只显示提示
-        if area.width < crate::tui::render::output::gutter::NARROW_STATUS_HINT_THRESHOLD {
+        if area.width < crate::tui::render::output::constants::NARROW_STATUS_HINT_THRESHOLD {
             let base = Style::default().bg(theme::STATUS_BG).fg(theme::WARNING);
             let hint = "[窄屏] 窗口过窄，建议调整终端大小";
             let spans = vec![Span::styled(hint, base)];

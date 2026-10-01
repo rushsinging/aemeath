@@ -1,3 +1,4 @@
+use crate::application::constants::REFLECT_NOW_BUSY_DROP_NOTICE;
 use crate::application::loop_engine::chat::events::{ChatEventSink, RuntimeStreamEvent};
 use sdk::ChatInputEvent;
 use std::collections::VecDeque;
@@ -156,12 +157,6 @@ impl QueuedInput {
         Self { id, event }
     }
 }
-
-/// `/reflect-now` 在 busy 期间被丢弃时的统一提示文案（裁决 3：busy NEVER 排队）。
-/// gate busy 分支与 run_launch pending 消费丢弃点（`drop_queued_reflect_now`）
-/// 共用本常量，NEVER 复制第二份。
-pub(crate) const REFLECT_NOW_BUSY_DROP_NOTICE: &str =
-    "Reflection 已在运行或等待运行结束，已跳过本次手动触发；稍后再试。";
 
 /// 裁决 3：丢弃 pending buffer 中全部积压的 `/reflect-now`，逐条发布丢弃提示，
 /// 并在有丢弃时同步一次排队快照（TUI 占位与权威队列保持一致，#1816）。

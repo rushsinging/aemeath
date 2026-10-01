@@ -5,6 +5,7 @@
 //!
 //! 本模块不实现 dispatcher/process/retry（#923/#924）。
 
+mod constants;
 pub mod invocation;
 pub mod metadata;
 pub mod outcome;

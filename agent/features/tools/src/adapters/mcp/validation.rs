@@ -1,24 +1,5 @@
+use super::constants::BLOCKED_ENV_KEYS;
 use std::collections::HashMap;
-
-/// Environment variable keys that are too dangerous to allow MCP servers to override.
-const BLOCKED_ENV_KEYS: &[&str] = &[
-    "PATH",
-    "LD_PRELOAD",
-    "LD_LIBRARY_PATH",
-    "DYLD_INSERT_LIBRARIES",
-    "DYLD_LIBRARY_PATH",
-    "HOME",
-    "USER",
-    "SHELL",
-    "IFS",
-    "CDPATH",
-    "ENV",
-    "BASH_ENV",
-    "TERMINFO",
-    "TERMINFO_DIRS",
-    "LOCPATH",
-    "NLSPATH",
-];
 
 /// Validate that the MCP server command is safe to execute.
 ///

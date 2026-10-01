@@ -1,3 +1,4 @@
+use super::constants::{SNIPPABLE_TOOLS, WRITE_TOOLS};
 use std::path::{Component, Path, PathBuf};
 
 use serde_json::Value;
@@ -5,9 +6,6 @@ use share::message::{ContentBlock, Message};
 
 use super::context_read_candidate::{ContextReadCandidate, ContextReadStep};
 use crate::domain::{ToolCallReceiptData, ToolCallState, ToolOutcomeKindData};
-
-const SNIPPABLE_TOOLS: &[&str] = &["Read", "Grep", "Glob"];
-const WRITE_TOOLS: &[&str] = &["Edit", "Write"];
 
 pub fn snip_superseded_exploration(candidate: &ContextReadCandidate) -> ContextReadCandidate {
     let successful_writes = successful_writes(candidate);

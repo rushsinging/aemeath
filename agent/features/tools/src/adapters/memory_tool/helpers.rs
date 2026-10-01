@@ -1,9 +1,6 @@
+use super::constants::{MAX_CONTENT_CHARS, MAX_TAGS, MAX_TAG_CHARS};
 use memory::api::{MemoryCategory, MemoryLayer};
 use serde_json::Value;
-
-pub(super) const MAX_CONTENT_CHARS: usize = 500;
-pub(super) const MAX_TAGS: usize = 10;
-pub(super) const MAX_TAG_CHARS: usize = 32;
 
 pub(super) fn required_string<'a>(input: &'a Value, key: &str) -> Result<&'a str, String> {
     input

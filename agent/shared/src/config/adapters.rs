@@ -7,5 +7,6 @@
 
 pub mod claude;
 pub mod cli_args;
+mod constants;
 pub mod file;
 pub mod paths;

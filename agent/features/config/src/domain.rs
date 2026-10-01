@@ -1,6 +1,9 @@
 //! 领域层：config 的值对象、领域事件、错误分类与 port 间传递的预备状态。
 //!
 //! R8 方向：domain NEVER 依赖 application / ports / adapters。
+
+pub(crate) mod constants;
+
 use share::config::domain::merge::ConfigPatch;
 use share::config::domain::scope::ConfigApplicationScope;
 use share::config::domain::snapshot::ConfigSnapshot;

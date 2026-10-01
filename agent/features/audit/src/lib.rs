@@ -13,11 +13,11 @@
 //! 数据一律 `Data` 尾缀；错误一律 `Error` 尾缀；工厂一律 `wire_` 前缀；
 //! 读写配套由同一 wire 工厂产出（Writer+Reader），不造全能 Client。
 
-/// Audit 模块自身的运行诊断 target；Audit Usage Fact 使用独立 append store。
-pub(crate) const LOG_TARGET: &str = "aemeath:diagnostic:audit";
-
 mod adapters;
 mod application;
+mod constants;
+pub(crate) use constants::LOG_TARGET;
+
 pub mod client;
 pub(crate) mod contract;
 mod domain;

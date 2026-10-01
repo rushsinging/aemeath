@@ -1,3 +1,3 @@
-mod palette;
+pub(crate) mod constants;
 
-pub use palette::*;
+pub use constants::*;

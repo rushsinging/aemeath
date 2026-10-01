@@ -14,6 +14,10 @@
 //! manifest 是权威的完整成员集合；一致性读取按内容摘要从共享 member store 取回字节。
 //! 旧版 `primary|previous/blobs/<成员>` 仅用于首次增量提交时迁移。
 
+pub(crate) use super::constants::{
+    BLOBS_DIR, CORRUPTION_MARKER, JOURNAL_FILE, LOCK_FILE, MANIFEST_FILE, MEMBERS_DIR,
+    PREVIOUS_DIR, PREVIOUS_NEXT_DIR, PRIMARY_DIR,
+};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -23,18 +27,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{SafePathSegmentData, StorageError, StorageErrorKind};
-
-pub(super) const LOCK_FILE: &str = "dataset.lock";
-pub(super) const JOURNAL_FILE: &str = "journal.json";
-pub(super) const MANIFEST_FILE: &str = "manifest.json";
-pub(super) const BLOBS_DIR: &str = "blobs";
-pub(super) const MEMBERS_DIR: &str = "members";
-pub(super) const PRIMARY_DIR: &str = "primary";
-pub(super) const PREVIOUS_DIR: &str = "previous";
-pub(super) const PREVIOUS_NEXT_DIR: &str = "previous.next";
-/// 持久损坏标记：一旦无法隔离被篡改的 primary 代即落盘此文件。恢复入口据此持续
-/// fail-closed，绝不再打开仍在原位的矛盾数据；清除只经显式 quarantine。
-pub(super) const CORRUPTION_MARKER: &str = "corruption.marker";
 
 /// 事务阶段：跨越「已提交」即为逻辑提交点。
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

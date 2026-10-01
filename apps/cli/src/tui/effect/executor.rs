@@ -54,38 +54,36 @@ fn interaction_failure_from_sdk(
     }
 }
 
-fn git_output(root: &str, args: &[&str]) -> Option<std::process::Output> {
-    let mut command = std::process::Command::new("git");
-    command.args(args).current_dir(root);
-    utils::configure_std_noninteractive(&mut command).ok()?;
-    let output = match command.output() {
-        Ok(output) => output,
+fn git_output(root: &str, args: &[&str]) -> Option<composition::GitCommandOutcome> {
+    match composition::run_git_command(std::path::Path::new(root), args) {
+        Ok(outcome) if outcome.is_success() => Some(outcome),
+        Ok(_) => None,
         Err(error) => {
             // TUI 展示数据不进 LLM：cwd 缺失时以归因日志供诊断，行为保持静默回退。
-            if let Some(attribution) =
-                utils::describe_cwd_gone(std::path::Path::new(root), "TUI 工作区元数据")
-            {
-                log::warn!(target: crate::LOG_TARGET, "{attribution}");
-            } else {
-                log::warn!(
-                    target: crate::LOG_TARGET,
-                    "git metadata probe failed: root={root} error={error}"
-                );
+            match error {
+                composition::GitOperationError::CwdGone(attribution) => {
+                    log::warn!(target: crate::LOG_TARGET, "{attribution}");
+                }
+                spawn_error => {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "git metadata probe failed: root={root} error={spawn_error:?}"
+                    );
+                }
             }
-            return None;
+            None
         }
-    };
-    Some(output).filter(|output| output.status.success())
+    }
 }
 
 fn resolve_workspace_metadata(root: &str) -> (Option<String>, WorktreeKind) {
     let branch = git_output(root, &["branch", "--show-current"])
-        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .and_then(|outcome| String::from_utf8(outcome.stdout_bytes().to_vec()).ok())
         .map(|branch| branch.trim().to_string())
         .filter(|branch| !branch.is_empty());
 
     let kind = git_output(root, &["rev-parse", "--git-dir", "--git-common-dir"])
-        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .and_then(|outcome| String::from_utf8(outcome.stdout_bytes().to_vec()).ok())
         .map(|stdout| {
             let mut lines = stdout.lines().map(str::trim);
             match (lines.next(), lines.next()) {

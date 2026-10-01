@@ -1,16 +1,19 @@
 mod bash_result;
+mod constants;
 mod cwd;
 
 mod stream;
 
 #[cfg(test)]
 mod tests;
+use self::constants::CWD_MARKER;
+use self::constants::READER_DRAIN_TIMEOUT_MS;
 use crate::domain::shell_safety::{check_command_safety, check_shell_injection};
 use crate::domain::types::bash::{BashInput, BashResult};
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use bash_result::{exit_status_description, preview};
-use cwd::{split_stdout_and_cwd, CWD_MARKER};
+use cwd::split_stdout_and_cwd;
 
 use super::process_cleanup::terminate_process_tree;
 
@@ -25,10 +28,6 @@ use project::WorkspaceControl;
 use std::sync::Arc;
 
 type ReaderTask = tokio::task::JoinHandle<Vec<u8>>;
-
-/// 取消 / 超时后排干 reader 的保护时限：正常情况下进程树被终止后管道立即
-/// EOF，该超时只兜底“后台进程持有管道写端”等极端场景。
-const READER_DRAIN_TIMEOUT_MS: u64 = 500;
 
 /// 进程树被终止后管道写端关闭，reader 读到 EOF 自然返回——已读内容保留。
 /// 带保护超时兜底：后台进程持有管道写端等极端场景下放弃等待并丢弃输出，

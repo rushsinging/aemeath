@@ -40,7 +40,9 @@ async fn noop_memory_is_explicitly_disabled_and_has_no_mutation_effects() {
     assert!(!port.pin(&id, true).await.unwrap());
     assert!(!port.mark_outdated(&id).await.unwrap());
     assert_eq!(
-        port.apply_reflection(&ReflectionOutput).await.unwrap(),
+        port.apply_reflection(&ReflectionOutput::default())
+            .await
+            .unwrap(),
         ReflectionApplyResult::default()
     );
     port.archive(&[id]).await.unwrap();

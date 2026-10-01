@@ -6,9 +6,8 @@ use storage::{
     SafePathSegmentData, StorageKeyData, StorageNamespaceData, WriteOptionsData,
 };
 
+use super::constants::ACCEPTED_INPUT_LEDGER_SCHEMA_VERSION;
 use crate::domain::session::{AcceptedInputRecord, CanonicalSession};
-
-const ACCEPTED_INPUT_LEDGER_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct PersistedAcceptedInput {

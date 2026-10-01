@@ -451,8 +451,8 @@ fn test_phase_four_workspace_metadata_git_is_executor_only() {
         "Workspace snapshot intent must not carry branch metadata"
     );
     assert!(
-        executor.contains("Command::new(\"git\")") && executor.contains("spawn_blocking"),
-        "executor must be the only asynchronous Git metadata resolver"
+        executor.contains("run_git_command") && executor.contains("spawn_blocking"),
+        "executor must be the only asynchronous Git metadata resolver (via project run_git_command)"
     );
 }
 

@@ -1,12 +1,10 @@
 //! Anti-corruption adapter for workspace data written by pre-envelope Sessions.
 //!
 //! Project owns the wire types and deterministic ID derivation (published from `share`).
-//! Context only reproduces the read-only repository probe needed to translate old snapshots; it
-//! deliberately does not depend on Project's private git port/adapter.
+//! git 子进程统一经 project 的 `run_git_command` 窄面执行（全仓唯一 spawn 点）。
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -70,15 +68,6 @@ struct Probe {
     kind: WorktreeKind,
 }
 
-/// `git` invocation pinned to the `C` locale so stderr sentinels (e.g. "not a git repository")
-/// stay stable regardless of the ambient locale.
-fn git_command() -> Command {
-    let mut command = Command::new("git");
-    utils::configure_std_noninteractive(&mut command).expect("当前平台必须支持非交互进程隔离");
-    command.env("LC_ALL", "C").env("LANG", "C");
-    command
-}
-
 fn canonicalize(path: &Path) -> Result<PathBuf, SessionCodecError> {
     path.canonicalize().map_err(|error| match error.kind() {
         ErrorKind::NotFound => SessionCodecError::LegacyWorkspacePathNotFound {
@@ -117,28 +106,41 @@ fn resolve_git_path(base: &Path, value: &str) -> Result<PathBuf, SessionCodecErr
 }
 
 fn probe(path: &Path) -> Result<Probe, SessionCodecError> {
-    let output = git_command()
-        .args([
+    let outcome = project::run_git_command(
+        path,
+        &[
             "rev-parse",
             "--show-toplevel",
             "--git-common-dir",
             "--git-dir",
-        ])
-        .current_dir(path)
-        .output()
-        .map_err(|error| match error.kind() {
-            ErrorKind::NotFound => SessionCodecError::LegacyWorkspaceGitUnavailable,
-            ErrorKind::PermissionDenied => {
-                SessionCodecError::LegacyWorkspacePermissionDenied { path: path.into() }
+        ],
+    )
+    .map_err(|error| match error {
+        project::GitOperationError::GitUnavailable => {
+            SessionCodecError::LegacyWorkspaceGitUnavailable
+        }
+        project::GitOperationError::CwdGone(_) => {
+            SessionCodecError::LegacyWorkspacePathNotFound { path: path.into() }
+        }
+        project::GitOperationError::PermissionDenied => {
+            SessionCodecError::LegacyWorkspacePermissionDenied { path: path.into() }
+        }
+        project::GitOperationError::CommandFailed { exit_code } => {
+            SessionCodecError::LegacyWorkspaceGitProbeFailed {
+                path: path.into(),
+                exit_code,
             }
-            _ => SessionCodecError::LegacyWorkspaceGitProbeFailed {
+        }
+        project::GitOperationError::InvalidOutput => {
+            SessionCodecError::LegacyWorkspaceGitProbeFailed {
                 path: path.into(),
                 exit_code: None,
-            },
-        })?;
+            }
+        }
+    })?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+    if !outcome.is_success() {
+        let stderr = String::from_utf8_lossy(outcome.stderr_bytes()).to_ascii_lowercase();
         if stderr.contains("not a git repository") {
             return Ok(Probe {
                 top_level: path.into(),
@@ -151,11 +153,11 @@ fn probe(path: &Path) -> Result<Probe, SessionCodecError> {
         }
         return Err(SessionCodecError::LegacyWorkspaceGitProbeFailed {
             path: path.into(),
-            exit_code: output.status.code(),
+            exit_code: outcome.exit_code(),
         });
     }
 
-    let stdout = std::str::from_utf8(&output.stdout)
+    let stdout = std::str::from_utf8(outcome.stdout_bytes())
         .map_err(|_| SessionCodecError::LegacyWorkspaceInvalidGitOutput { path: path.into() })?;
     let mut lines = stdout.lines().map(str::trim);
     let top = lines
