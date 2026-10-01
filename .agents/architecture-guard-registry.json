@@ -3413,7 +3413,7 @@
       "scope": {
         "kind": "workspace"
       },
-      "reason": "常量放置规则（#1146）：模块级 const/static 只允许位于 constants.rs/consts.rs（纯值）或 state.rs（状态容器）；豁免（全部代码形态静态判定）：缩进形态（函数/impl/宏体）、宏依赖初始化（同文件 macro_rules! 调用）、守卫工具自身（tools/xtask）；exclusions 仅测试域声明点门控文件",
+      "reason": "常量放置规则（#1146）：模块级 const/static 只允许位于 constants.rs/consts.rs（纯值）或 state.rs（状态容器）；豁免（全部代码形态静态判定）：缩进形态（函数/impl/宏体）、const fn；守卫工具自身（tools/xtask 前缀）；exclusions 仅测试域声明点门控文件。宏依赖豁免已退役（target! 展开为纯值后归位）",
       "profile": "fast",
       "exclusions": [
         {

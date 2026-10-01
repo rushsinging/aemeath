@@ -1036,24 +1036,6 @@ fn enforce_constant_placement(
         if name.is_empty() || name == "fn" {
             continue;
         }
-        // 宏依赖：初始化调用同文件定义的 macro_rules! 宏 → 宏表与宏共置
-        // （如 routing.rs TARGETS 用同文件 target! 构造 TargetSpec）。
-        let init_window: String = lines[index..(index + 3).min(lines.len())].join(" ");
-        let local_macros: Vec<&str> = lines
-            .iter()
-            .filter_map(|l| {
-                l.strip_prefix("macro_rules! ").and_then(|rest| {
-                    rest.split(|ch: char| ch.is_whitespace() || ch == '{')
-                        .next()
-                })
-            })
-            .collect();
-        let calls_local_macro = local_macros
-            .iter()
-            .any(|macro_name| init_window.contains(&format!("{macro_name}!(")));
-        if calls_local_macro {
-            continue;
-        }
         violations.push(Violation {
             rule_id: rule.id.clone(),
             location: format!("{relative_file}:{}", index + 1),

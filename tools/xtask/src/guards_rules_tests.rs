@@ -934,11 +934,13 @@ fn constant_placement_rejects_constant_table_file() {
 
 /// 宏依赖豁免：初始化调用同文件 macro_rules! 宏（如 TARGETS 用 target! 构造）。
 #[test]
-fn constant_placement_macro_dependent_table_stays_with_macro() {
+fn constant_placement_macro_initialized_tables_must_relocate() {
+    // 宏依赖豁免已退役（C10）：初始化用宏的表应展开为纯值后归位
+    // （routing.rs TARGETS 的 18 个 target! 已展开迁移 domain/constants.rs）。
     let temp = tempfile::tempdir().expect("create tempdir");
     write_source(
         &temp.path().join("crates/x/src/catalog.rs"),
-        "macro_rules! entry {\n    ($name:expr) => { { name: $name } };\n}\nconst TABLE: &[Entry] = &[\n    entry!(\"a\"),\n    entry!(\"b\"),\n];\n",
+        "macro_rules! entry {\n    ($name:expr) => { { name: $name } };\n}\nconst TABLE: &[Entry] = &entry_table!();\n",
     );
     let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
         "id": "constant.test.placement",
@@ -954,12 +956,11 @@ fn constant_placement_macro_dependent_table_stays_with_macro() {
         crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/catalog.rs")
             .expect("enforce");
     assert!(
-        violations.iter().all(|v| !v.message.contains("TABLE")),
-        "宏表与宏共置（target! 类）: {violations:?}"
+        violations.iter().any(|v| v.message.contains("TABLE")),
+        "宏初始化表不再豁免（展开归位）: {violations:?}"
     );
 }
 
-/// 规则级 exclusions：声明点 #[cfg(test)] 门控的测试域文件。
 #[test]
 fn constant_placement_rule_exclusions_skip_test_domain_file() {
     let temp = tempfile::tempdir().expect("create tempdir");
