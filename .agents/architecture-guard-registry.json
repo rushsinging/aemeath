@@ -513,7 +513,8 @@
       ],
       "exclusions": [
         {
-          "path": "agent/features/runtime/src/application/run/context_factory.rs"
+          "path": "agent/features/runtime/src/application/run/context_factory.rs",
+          "reason": "HookDispatcher 唯一合法构造点（Context 工厂装配线）"
         }
       ],
       "reason": "Hook dispatcher/HookRunner 只由 composition 构造注入（跨 crate 无排除可见性，编译期不可表达；runtime_context_factory 注入断言由 from_args 类型签名承载）；context_factory.rs 豁免：cfg!(test) 分支注入与生产自建双通道为现状架构，收口需 runtime context 装配重构（另行立项），豁免精确到单文件",
@@ -535,7 +536,8 @@
       ],
       "exclusions": [
         {
-          "path": "agent/features/runtime/src/application/run/active_registry.rs"
+          "path": "agent/features/runtime/src/application/run/active_registry.rs",
+          "reason": "ActiveRunRegistry 是 Tool 装配的唯一登记点"
         }
       ],
       "reason": "Tool/Skill/ToolResult/ActiveRun 依赖由 composition 装配注入；ActiveRunRegistry 生产构造已收敛 wire_active_run_registry 工厂（Default 仅测试），正向装配完整性由 RuntimeBootstrapDependencies 必填字段类型承载；active_registry.rs 豁免：wire_active_run_registry 工厂定义与 Default(test) impl 所在文件，无生产违规面",
@@ -568,7 +570,8 @@
       ],
       "exclusions": [
         {
-          "path": "agent/features/provider/"
+          "path": "agent/features/provider/",
+          "reason": "provider crate 内部自引用合法（规则管外部穿透）"
         }
       ],
       "reason": "provider 构造面（LlmClient/TransportPool 等）仅 Composition Root 引用；构造符号已从 provider crate-root 退役，根路径穿透编译期拦截；apps/packages 不依赖 provider（薄入口），风险面为 features 内其余 crate",
@@ -606,10 +609,12 @@
       ],
       "exclusions": [
         {
-          "path": "agent/features/runtime/src/application/activity/coordinator.rs"
+          "path": "agent/features/runtime/src/application/activity/coordinator.rs",
+          "reason": "ActivityObservation 唯一 owner（coordinator 与 model 两文件）"
         },
         {
-          "path": "agent/features/runtime/src/application/activity/model.rs"
+          "path": "agent/features/runtime/src/application/activity/model.rs",
+          "reason": "ActivityObservation 唯一 owner（coordinator 与 model 两文件）"
         }
       ],
       "reason": "ActivityObservation 构造限 ActivityCoordinator 与 activity model 两文件；TUI 变更入口 activity_observations_mut 已 #[cfg(test)] 方法级锁定（生产调用编译失败）；legacy 黑名单符号已物理删除（④），复活归 review",
@@ -658,10 +663,12 @@
       ],
       "exclusions": [
         {
-          "path": "agent/features/tools/src/adapters/bash.rs"
+          "path": "agent/features/tools/src/adapters/bash.rs",
+          "reason": ".workspace_control() 唯二调用点（bash/worktree tool 构造期）"
         },
         {
-          "path": "agent/features/tools/src/adapters/worktree.rs"
+          "path": "agent/features/tools/src/adapters/worktree.rs",
+          "reason": ".workspace_control() 唯二调用点（bash/worktree tool 构造期）"
         }
       ],
       "reason": "R4：生产 .workspace_control() 仅 tools bash/worktree 两调用点",
@@ -679,7 +686,8 @@
       ],
       "exclusions": [
         {
-          "path": "agent/features/project/src/adapters/git.rs"
+          "path": "agent/features/project/src/adapters/git.rs",
+          "reason": "git 子进程唯一 owner（adapters/git.rs）"
         }
       ],
       "reason": "R5：project 内 git 子进程仅 adapters/git.rs 单一 owner",
@@ -730,7 +738,8 @@
       ],
       "exclusions": [
         {
-          "path": "agent/features/runtime/src/application/run/context_factory.rs"
+          "path": "agent/features/runtime/src/application/run/context_factory.rs",
+          "reason": "RuntimeContext 唯一工厂文件"
         }
       ],
       "reason": "RuntimeContext/AssemblyToken 构造限单一工厂文件；工厂正向完整性（must wire 一串）由必填参数与构造点编译承接；BoundaryHookPort filtering/proceed 行为断言归测试（#1056 范围）；crate-root façade 白名单由 crate-api-boundary（F-2 数据化承接）",
@@ -752,7 +761,8 @@
       ],
       "exclusions": [
         {
-          "path": "apps/cli/src/tui/render/output/selection_overlay.rs"
+          "path": "apps/cli/src/tui/render/output/selection_overlay.rs",
+          "reason": "selection_overlay 是唯一合法上色路径"
         }
       ],
       "reason": "F-19：render/output 纯渲染——禁 Model 可变依赖/IO/旁路选区上色（selection_overlay 唯一上色路径豁免）",
@@ -769,11 +779,7 @@
         "model.conversation",
         "model.runtime"
       ],
-      "exclusions": [
-        {
-          "path": "apps/cli/src/tui/render/display/render.rs"
-        }
-      ],
+      "exclusions": [],
       "reason": "F-20：render 只读 view model/view_state 投影（display bridge 豁免）",
       "profile": "full"
     },
@@ -2202,7 +2208,8 @@
       ],
       "exclusions": [
         {
-          "path": "agent/composition/src/app.rs"
+          "path": "agent/composition/src/app.rs",
+          "reason": "UnifiedLogger::init 唯一点（composition app）"
         }
       ],
       "reason": "F-27：UnifiedLogger::init 仅 Composition app.rs 唯一点",
@@ -2219,10 +2226,12 @@
       ],
       "exclusions": [
         {
-          "path": "agent/composition/src/runtime.rs"
+          "path": "agent/composition/src/runtime.rs",
+          "reason": "from_args 唯一生产入口（composition runtime.rs）+ runtime 定义侧"
         },
         {
-          "path": "agent/features/runtime/"
+          "path": "agent/features/runtime/",
+          "reason": "from_args 唯一生产入口（composition runtime.rs）+ runtime 定义侧"
         }
       ],
       "reason": "F-27：bootstrap 唯一调用点在 composition/runtime.rs；runtime 内豁免定义侧",
@@ -2328,13 +2337,16 @@
       ],
       "exclusions": [
         {
-          "path": "agent/features/task/"
+          "path": "agent/features/task/",
+          "reason": "task/storage/context 是 Task 持久化类型 owner"
         },
         {
-          "path": "agent/features/storage/"
+          "path": "agent/features/storage/",
+          "reason": "task/storage/context 是 Task 持久化类型 owner"
         },
         {
-          "path": "agent/features/context/"
+          "path": "agent/features/context/",
+          "reason": "task/storage/context 是 Task 持久化类型 owner"
         }
       ],
       "reason": "F-12：Task 持久化类型对 runtime/tools 不可见，消费注入 TaskAccess（task/storage/context 为 owner 与协调方豁免；wire_task 由 cross-bc fail-closed 承接）",
@@ -2380,637 +2392,848 @@
       ],
       "exclusions": [
         {
-          "path": "agent/composition/src/app.rs"
+          "path": "agent/composition/src/app.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/composition/src/delivery_logging.rs"
+          "path": "agent/composition/src/delivery_logging.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/composition/src/memory.rs"
+          "path": "agent/composition/src/memory.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/context/src/adapters/memory_injection.rs"
+          "path": "agent/features/context/src/adapters/memory_injection.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/context/src/adapters/prompt/guidance.rs"
+          "path": "agent/features/context/src/adapters/prompt/guidance.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/context/src/adapters/prompt/security.rs"
+          "path": "agent/features/context/src/adapters/prompt/security.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/context/src/domain/session/chat_chain.rs"
+          "path": "agent/features/context/src/domain/session/chat_chain.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/hook/src/adapters/dispatcher/executor.rs"
+          "path": "agent/features/hook/src/adapters/dispatcher/executor.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/memory/src/codec.rs"
+          "path": "agent/features/memory/src/codec.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/memory/src/domain/model.rs"
+          "path": "agent/features/memory/src/domain/model.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/memory/src/domain/persistence.rs"
+          "path": "agent/features/memory/src/domain/persistence.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/memory/src/domain/reflection.rs"
+          "path": "agent/features/memory/src/domain/reflection.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/memory/src/ports.rs"
+          "path": "agent/features/memory/src/ports.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/memory/src/service.rs"
+          "path": "agent/features/memory/src/service.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/project/src/adapters/git.rs"
+          "path": "agent/features/project/src/adapters/git.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/project/src/domain/service.rs"
+          "path": "agent/features/project/src/domain/service.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/project/src/lib.rs"
+          "path": "agent/features/project/src/lib.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/provider/src/adapters/anthropic.rs"
+          "path": "agent/features/provider/src/adapters/anthropic.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/provider/src/adapters/anthropic/message_conversion.rs"
+          "path": "agent/features/provider/src/adapters/anthropic/message_conversion.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/provider/src/adapters/error_log.rs"
+          "path": "agent/features/provider/src/adapters/error_log.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/provider/src/adapters/http_attempt.rs"
+          "path": "agent/features/provider/src/adapters/http_attempt.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/provider/src/adapters/ollama.rs"
+          "path": "agent/features/provider/src/adapters/ollama.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/provider/src/adapters/openai_compatible/reasoning_normalizer.rs"
+          "path": "agent/features/provider/src/adapters/openai_compatible/reasoning_normalizer.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/provider/src/adapters/stream.rs"
+          "path": "agent/features/provider/src/adapters/stream.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/provider/src/domain/capability.rs"
+          "path": "agent/features/provider/src/domain/capability.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/provider/src/domain/invoke.rs"
+          "path": "agent/features/provider/src/domain/invoke.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/provider/src/lib.rs"
+          "path": "agent/features/provider/src/lib.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/provider/src/ports.rs"
+          "path": "agent/features/provider/src/ports.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/provider/src/published_language.rs"
+          "path": "agent/features/provider/src/published_language.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/adapters/sdk_event_mapper.rs"
+          "path": "agent/features/runtime/src/adapters/sdk_event_mapper.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/client/bootstrap/agent_runner.rs"
+          "path": "agent/features/runtime/src/application/client/bootstrap/agent_runner.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/client/bootstrap/concurrency.rs"
+          "path": "agent/features/runtime/src/application/client/bootstrap/concurrency.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/client/bootstrap/model_runtime.rs"
+          "path": "agent/features/runtime/src/application/client/bootstrap/model_runtime.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/client/mapping.rs"
+          "path": "agent/features/runtime/src/application/client/mapping.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/client/trait_model.rs"
+          "path": "agent/features/runtime/src/application/client/trait_model.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/client/trait_reflection.rs"
+          "path": "agent/features/runtime/src/application/client/trait_reflection.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/compact_generator.rs"
+          "path": "agent/features/runtime/src/application/compact_generator.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/loop_engine/chat/agent_calls.rs"
+          "path": "agent/features/runtime/src/application/loop_engine/chat/agent_calls.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/loop_engine/chat/config_reload.rs"
+          "path": "agent/features/runtime/src/application/loop_engine/chat/config_reload.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/loop_engine/chat/idle_commands.rs"
+          "path": "agent/features/runtime/src/application/loop_engine/chat/idle_commands.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/loop_engine/chat/input_log.rs"
+          "path": "agent/features/runtime/src/application/loop_engine/chat/input_log.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/loop_engine/chat/snapshot_registry.rs"
+          "path": "agent/features/runtime/src/application/loop_engine/chat/snapshot_registry.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/loop_engine/chat/stream_handler.rs"
+          "path": "agent/features/runtime/src/application/loop_engine/chat/stream_handler.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/loop_engine/chat/tools.rs"
+          "path": "agent/features/runtime/src/application/loop_engine/chat/tools.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/loop_engine/input.rs"
+          "path": "agent/features/runtime/src/application/loop_engine/input.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/model/invocation.rs"
+          "path": "agent/features/runtime/src/application/model/invocation.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/model/token_usage.rs"
+          "path": "agent/features/runtime/src/application/model/token_usage.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/prompt/prompt_build_ext.rs"
+          "path": "agent/features/runtime/src/application/prompt/prompt_build_ext.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/published_state/registry.rs"
+          "path": "agent/features/runtime/src/application/published_state/registry.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/run/chat_launch.rs"
+          "path": "agent/features/runtime/src/application/run/chat_launch.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/run/derived/loop_run.rs"
+          "path": "agent/features/runtime/src/application/run/derived/loop_run.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/tool/coordination/identity.rs"
+          "path": "agent/features/runtime/src/application/tool/coordination/identity.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/application/tool/coordination/loop_guard.rs"
+          "path": "agent/features/runtime/src/application/tool/coordination/loop_guard.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/runtime/src/lib.rs"
+          "path": "agent/features/runtime/src/lib.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/task/src/adapters/wiring.rs"
+          "path": "agent/features/task/src/adapters/wiring.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/tools/src/adapters/bash/safety.rs"
+          "path": "agent/features/tools/src/adapters/bash/safety.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/tools/src/adapters/mcp/tests.rs"
+          "path": "agent/features/tools/src/adapters/mcp/tests.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/tools/src/adapters/registry.rs"
+          "path": "agent/features/tools/src/adapters/registry.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/tools/src/adapters/task_list_complete.rs"
+          "path": "agent/features/tools/src/adapters/task_list_complete.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/tools/src/adapters/task_list_create.rs"
+          "path": "agent/features/tools/src/adapters/task_list_create.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/tools/src/adapters/tool_registry.rs"
+          "path": "agent/features/tools/src/adapters/tool_registry.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/tools/src/adapters/tool_search.rs"
+          "path": "agent/features/tools/src/adapters/tool_search.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/tools/src/domain/shell_safety.rs"
+          "path": "agent/features/tools/src/domain/shell_safety.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/tools/src/domain/tool_types.rs"
+          "path": "agent/features/tools/src/domain/tool_types.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/tools/src/domain/types/agent.rs"
+          "path": "agent/features/tools/src/domain/types/agent.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/tools/src/domain/types/task_create.rs"
+          "path": "agent/features/tools/src/domain/types/task_create.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/tools/src/domain/types/task_stop.rs"
+          "path": "agent/features/tools/src/domain/types/task_stop.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/tools/src/domain/types/task_update.rs"
+          "path": "agent/features/tools/src/domain/types/task_update.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/update/src/contract.rs"
+          "path": "agent/features/update/src/contract.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/adapter/fs.rs"
+          "path": "agent/shared/src/adapter/fs.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/adapter/git.rs"
+          "path": "agent/shared/src/adapter/git.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/adapter/mcp.rs"
+          "path": "agent/shared/src/adapter/mcp.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/adapter/process.rs"
+          "path": "agent/shared/src/adapter/process.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/adapter/storage.rs"
+          "path": "agent/shared/src/adapter/storage.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/adapter/telemetry.rs"
+          "path": "agent/shared/src/adapter/telemetry.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/config.rs"
+          "path": "agent/shared/src/config.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/config/adapters/paths.rs"
+          "path": "agent/shared/src/config/adapters/paths.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/config/domain/driver_env.rs"
+          "path": "agent/shared/src/config/domain/driver_env.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/config/domain/logging.rs"
+          "path": "agent/shared/src/config/domain/logging.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/config/domain/memory.rs"
+          "path": "agent/shared/src/config/domain/memory.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/config/domain/merge.rs"
+          "path": "agent/shared/src/config/domain/merge.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/config/domain/models/deserialize.rs"
+          "path": "agent/shared/src/config/domain/models/deserialize.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/config/domain/models/runtime.rs"
+          "path": "agent/shared/src/config/domain/models/runtime.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/config/domain/snapshot.rs"
+          "path": "agent/shared/src/config/domain/snapshot.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/config/domain/tools.rs"
+          "path": "agent/shared/src/config/domain/tools.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/config/domain/update.rs"
+          "path": "agent/shared/src/config/domain/update.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/i18n/prompt/commit.rs"
+          "path": "agent/shared/src/i18n/prompt/commit.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/i18n/prompt/discipline.rs"
+          "path": "agent/shared/src/i18n/prompt/discipline.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/i18n/prompt/git_context_labels.rs"
+          "path": "agent/shared/src/i18n/prompt/git_context_labels.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/i18n/prompt/sections.rs"
+          "path": "agent/shared/src/i18n/prompt/sections.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/i18n/prompt/system.rs"
+          "path": "agent/shared/src/i18n/prompt/system.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/i18n/runtime/command.rs"
+          "path": "agent/shared/src/i18n/runtime/command.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/i18n/runtime/reflection.rs"
+          "path": "agent/shared/src/i18n/runtime/reflection.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/i18n/tools/core.rs"
+          "path": "agent/shared/src/i18n/tools/core.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/i18n/tools/filesystem.rs"
+          "path": "agent/shared/src/i18n/tools/filesystem.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/i18n/tools/task.rs"
+          "path": "agent/shared/src/i18n/tools/task.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/i18n/tools/web.rs"
+          "path": "agent/shared/src/i18n/tools/web.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/i18n/tools/worktree.rs"
+          "path": "agent/shared/src/i18n/tools/worktree.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/memory/dedup.rs"
+          "path": "agent/shared/src/memory/dedup.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/memory/entry.rs"
+          "path": "agent/shared/src/memory/entry.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/memory/error.rs"
+          "path": "agent/shared/src/memory/error.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/memory/format.rs"
+          "path": "agent/shared/src/memory/format.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/memory/result.rs"
+          "path": "agent/shared/src/memory/result.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/memory/scoring.rs"
+          "path": "agent/shared/src/memory/scoring.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/memory/session_reminder.rs"
+          "path": "agent/shared/src/memory/session_reminder.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/message/types.rs"
+          "path": "agent/shared/src/message/types.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/session_types.rs"
+          "path": "agent/shared/src/session_types.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/string_idx.rs"
+          "path": "agent/shared/src/string_idx.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/string_idx/byte_idx.rs"
+          "path": "agent/shared/src/string_idx/byte_idx.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/string_idx/char_idx.rs"
+          "path": "agent/shared/src/string_idx/char_idx.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/shared/src/string_idx/col_idx.rs"
+          "path": "agent/shared/src/string_idx/col_idx.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/args.rs"
+          "path": "apps/cli/src/args.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/chat/no_tui.rs"
+          "path": "apps/cli/src/chat/no_tui.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/panic_hook.rs"
+          "path": "apps/cli/src/panic_hook.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/subcommand/model_selection.rs"
+          "path": "apps/cli/src/subcommand/model_selection.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui.rs"
+          "path": "apps/cli/src/tui.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/adapter/live_status_widget.rs"
+          "path": "apps/cli/src/tui/adapter/live_status_widget.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/adapter/output_widget.rs"
+          "path": "apps/cli/src/tui/adapter/output_widget.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/adapter/status_widget.rs"
+          "path": "apps/cli/src/tui/adapter/status_widget.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/app.rs"
+          "path": "apps/cli/src/tui/app.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/app/resize.rs"
+          "path": "apps/cli/src/tui/app/resize.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/app/runtime.rs"
+          "path": "apps/cli/src/tui/app/runtime.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/app/slash/dialog.rs"
+          "path": "apps/cli/src/tui/app/slash/dialog.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/app/slash/reflection.rs"
+          "path": "apps/cli/src/tui/app/slash/reflection.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/app/state/session.rs"
+          "path": "apps/cli/src/tui/app/state/session.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/app/state/tests.rs"
+          "path": "apps/cli/src/tui/app/state/tests.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/app/update/enter.rs"
+          "path": "apps/cli/src/tui/app/update/enter.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/app/util.rs"
+          "path": "apps/cli/src/tui/app/util.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/effect/session/processing.rs"
+          "path": "apps/cli/src/tui/effect/session/processing.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/effect/session/resume.rs"
+          "path": "apps/cli/src/tui/effect/session/resume.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/effect/spawn_guard.rs"
+          "path": "apps/cli/src/tui/effect/spawn_guard.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/model/change.rs"
+          "path": "apps/cli/src/tui/model/change.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/model/conversation/history_parse.rs"
+          "path": "apps/cli/src/tui/model/conversation/history_parse.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/model/conversation/intent_impls.rs"
+          "path": "apps/cli/src/tui/model/conversation/intent_impls.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/model/conversation/model.rs"
+          "path": "apps/cli/src/tui/model/conversation/model.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/model/conversation/notice.rs"
+          "path": "apps/cli/src/tui/model/conversation/notice.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/model/conversation/queued_submission.rs"
+          "path": "apps/cli/src/tui/model/conversation/queued_submission.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/model/conversation/stream.rs"
+          "path": "apps/cli/src/tui/model/conversation/stream.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/model/conversation/streaming_preview.rs"
+          "path": "apps/cli/src/tui/model/conversation/streaming_preview.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/model/conversation/system_reminder.rs"
+          "path": "apps/cli/src/tui/model/conversation/system_reminder.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/model/conversation/tool_call.rs"
+          "path": "apps/cli/src/tui/model/conversation/tool_call.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/model/diagnostic/model.rs"
+          "path": "apps/cli/src/tui/model/diagnostic/model.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/model/input/change.rs"
+          "path": "apps/cli/src/tui/model/input/change.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/model/input/completion.rs"
+          "path": "apps/cli/src/tui/model/input/completion.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/model/input/completion_item.rs"
+          "path": "apps/cli/src/tui/model/input/completion_item.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/model/input/mode.rs"
+          "path": "apps/cli/src/tui/model/input/mode.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/model/output_timeline/model.rs"
+          "path": "apps/cli/src/tui/model/output_timeline/model.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/model/root.rs"
+          "path": "apps/cli/src/tui/model/root.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/model/runtime/session_model.rs"
+          "path": "apps/cli/src/tui/model/runtime/session_model.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/input/input_area/render.rs"
+          "path": "apps/cli/src/tui/render/input/input_area/render.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/input/input_area/selection.rs"
+          "path": "apps/cli/src/tui/render/input/input_area/selection.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/input/input_area/suggestions.rs"
+          "path": "apps/cli/src/tui/render/input/input_area/suggestions.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/input/input_area/wrap.rs"
+          "path": "apps/cli/src/tui/render/input/input_area/wrap.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/input/input_render_model.rs"
+          "path": "apps/cli/src/tui/render/input/input_render_model.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/block_cache.rs"
+          "path": "apps/cli/src/tui/render/output/block_cache.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/block_component.rs"
+          "path": "apps/cli/src/tui/render/output/block_component.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/blocks.rs"
+          "path": "apps/cli/src/tui/render/output/blocks.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/blocks/ask_user.rs"
+          "path": "apps/cli/src/tui/render/output/blocks/ask_user.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/blocks/assistant_message.rs"
+          "path": "apps/cli/src/tui/render/output/blocks/assistant_message.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/blocks/diagnostic.rs"
+          "path": "apps/cli/src/tui/render/output/blocks/diagnostic.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/blocks/edit_diff.rs"
+          "path": "apps/cli/src/tui/render/output/blocks/edit_diff.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/blocks/thinking.rs"
+          "path": "apps/cli/src/tui/render/output/blocks/thinking.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/blocks/tool_call.rs"
+          "path": "apps/cli/src/tui/render/output/blocks/tool_call.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/blocks/tool_result.rs"
+          "path": "apps/cli/src/tui/render/output/blocks/tool_result.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/blocks/user_message.rs"
+          "path": "apps/cli/src/tui/render/output/blocks/user_message.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/gutter.rs"
+          "path": "apps/cli/src/tui/render/output/gutter.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/markdown/table.rs"
+          "path": "apps/cli/src/tui/render/output/markdown/table.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/primitives/convert.rs"
+          "path": "apps/cli/src/tui/render/output/primitives/convert.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/primitives/diff.rs"
+          "path": "apps/cli/src/tui/render/output/primitives/diff.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/primitives/markdown.rs"
+          "path": "apps/cli/src/tui/render/output/primitives/markdown.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/primitives/table.rs"
+          "path": "apps/cli/src/tui/render/output/primitives/table.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/primitives/unified_diff.rs"
+          "path": "apps/cli/src/tui/render/output/primitives/unified_diff.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/primitives/wrap.rs"
+          "path": "apps/cli/src/tui/render/output/primitives/wrap.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/rendered.rs"
+          "path": "apps/cli/src/tui/render/output/rendered.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/selection_overlay.rs"
+          "path": "apps/cli/src/tui/render/output/selection_overlay.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/status_line.rs"
+          "path": "apps/cli/src/tui/render/output/status_line.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/tool_display/common.rs"
+          "path": "apps/cli/src/tui/render/output/tool_display/common.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/agent.rs"
+          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/agent.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/ask_user.rs"
+          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/ask_user.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/helpers.rs"
+          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/helpers.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/shell.rs"
+          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/shell.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/skill.rs"
+          "path": "apps/cli/src/tui/render/output/tool_display/tool_impls/skill.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output_area.rs"
+          "path": "apps/cli/src/tui/render/output_area.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output_area/display.rs"
+          "path": "apps/cli/src/tui/render/output_area/display.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output_area/selection.rs"
+          "path": "apps/cli/src/tui/render/output_area/selection.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/text.rs"
+          "path": "apps/cli/src/tui/text.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/update/coordinator.rs"
+          "path": "apps/cli/src/tui/update/coordinator.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/update/dirty.rs"
+          "path": "apps/cli/src/tui/update/dirty.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/view_assembler/dialog.rs"
+          "path": "apps/cli/src/tui/view_assembler/dialog.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/view_assembler/input.rs"
+          "path": "apps/cli/src/tui/view_assembler/input.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/view_assembler/live_status.rs"
+          "path": "apps/cli/src/tui/view_assembler/live_status.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/view_assembler/status.rs"
+          "path": "apps/cli/src/tui/view_assembler/status.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/view_model.rs"
+          "path": "apps/cli/src/tui/view_model.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/view_model/live_status.rs"
+          "path": "apps/cli/src/tui/view_model/live_status.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/view_model/nesting.rs"
+          "path": "apps/cli/src/tui/view_model/nesting.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/view_model/output.rs"
+          "path": "apps/cli/src/tui/view_model/output.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/view_model/tool_name.rs"
+          "path": "apps/cli/src/tui/view_model/tool_name.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/view_state.rs"
+          "path": "apps/cli/src/tui/view_state.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/view_state/input_selection.rs"
+          "path": "apps/cli/src/tui/view_state/input_selection.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/view_state/spinner_anim.rs"
+          "path": "apps/cli/src/tui/view_state/spinner_anim.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/view_state/status.rs"
+          "path": "apps/cli/src/tui/view_state/status.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "packages/sdk/src/chat.rs"
+          "path": "packages/sdk/src/chat.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "packages/sdk/src/chat_event.rs"
+          "path": "packages/sdk/src/chat_event.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "packages/sdk/src/chat_result.rs"
+          "path": "packages/sdk/src/chat_result.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "packages/sdk/src/chat_view.rs"
+          "path": "packages/sdk/src/chat_view.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "packages/sdk/src/config_view.rs"
+          "path": "packages/sdk/src/config_view.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "packages/sdk/src/content.rs"
+          "path": "packages/sdk/src/content.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "packages/sdk/src/session_lock.rs"
+          "path": "packages/sdk/src/session_lock.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "agent/features/project/src/domain/git.rs"
+          "path": "agent/features/project/src/domain/git.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/input/input_area/resize.rs"
+          "path": "apps/cli/src/tui/render/input/input_area/resize.rs",
+          "reason": "owner 边界（历史登记）"
         },
         {
-          "path": "apps/cli/src/tui/render/output_area/resize.rs"
+          "path": "apps/cli/src/tui/render/output_area/resize.rs",
+          "reason": "owner 边界（历史登记）"
         }
       ],
       "reason": "F-28：分离测试约定，禁新增内联 mod tests {；存量基线 211（原始 213 随迁移净减，逐批收缩；exclusion_baseline 机器校验只降不升），迁移完成 MUST 收缩 exclusions 与基线",
@@ -3062,28 +3285,32 @@
       ],
       "exclusions": [
         {
-          "path": "apps/cli/src/tui/render/display/safe_text.rs"
+          "path": "apps/cli/src/tui/render/display/safe_text.rs",
+          "reason": "safe-text owner / 人工确认的偏移切片文件"
         },
         {
-          "path": "apps/cli/src/tui/display/safe_text.rs"
+          "path": "apps/cli/src/tui/text.rs",
+          "reason": "safe-text owner / 人工确认的偏移切片文件"
         },
         {
-          "path": "apps/cli/src/tui/text.rs"
+          "path": "apps/cli/src/tui/render/output/blocks/tool_result.rs",
+          "reason": "safe-text owner / 人工确认的偏移切片文件"
         },
         {
-          "path": "apps/cli/src/tui/render/output/blocks/tool_result.rs"
+          "path": "agent/features/memory/src/domain/reflection.rs",
+          "reason": "safe-text owner / 人工确认的偏移切片文件"
         },
         {
-          "path": "agent/features/memory/src/domain/reflection.rs"
+          "path": "agent/features/provider/src/adapters/ollama/conversion.rs",
+          "reason": "safe-text owner / 人工确认的偏移切片文件"
         },
         {
-          "path": "agent/features/provider/src/adapters/ollama/conversion.rs"
+          "path": "agent/features/audit/src/adapters/append.rs",
+          "reason": "safe-text owner / 人工确认的偏移切片文件"
         },
         {
-          "path": "agent/features/audit/src/adapters/append.rs"
-        },
-        {
-          "path": "packages/global/logging/src/domain/routing_guard.rs"
+          "path": "packages/global/logging/src/domain/routing_guard.rs",
+          "reason": "safe-text owner / 人工确认的偏移切片文件"
         }
       ],
       "reason": "F-23 部分迁移：裸字节切片/chars().nth 两大子串模式（8 安全 owner 豁免与原脚本一致）；切片区间正则特征仍需原脚本，待 regex 断言器批次全量退役",
@@ -3118,7 +3345,8 @@
       ],
       "exclusions": [
         {
-          "path": "packages/global/utils/src/process.rs"
+          "path": "packages/global/utils/src/process.rs",
+          "reason": "session 隔离边界唯一 owner（utils process.rs）"
         }
       ],
       "reason": "#1679：子进程 session 隔离唯一 owner 在 utils process.rs；无 TTY 行为已由 hook process_tests 覆盖；Command 计数配比半段留原脚本（#1696 计数断言器/工厂化另立项）",
@@ -3137,7 +3365,8 @@
       ],
       "exclusions": [
         {
-          "path": "agent/features/provider/src/adapters/http_attempt.rs"
+          "path": "agent/features/provider/src/adapters/http_attempt.rs",
+          "reason": "HTTP 发送唯一经 executor（http_attempt.rs 自身）"
         }
       ],
       "reason": "#1679（判据修正②→③）：HTTP 发送唯一经 http_attempt executor；诊断 API（log_network_error/log_http_error 等）限点同理由编译可见性收窄承接；transport_tests 已覆盖发送/超时行为",
@@ -3157,10 +3386,12 @@
       ],
       "exclusions": [
         {
-          "path": "agent/features/provider/src/adapters/error_log.rs"
+          "path": "agent/features/provider/src/adapters/error_log.rs",
+          "reason": "诊断 API owner（error_log.rs）与唯一调用方（http_attempt.rs）"
         },
         {
-          "path": "agent/features/provider/src/adapters/http_attempt.rs"
+          "path": "agent/features/provider/src/adapters/http_attempt.rs",
+          "reason": "诊断 API owner（error_log.rs）与唯一调用方（http_attempt.rs）"
         }
       ],
       "reason": "#1679：error_log HTTP/network 诊断 API 仅 executor 可调，driver 仅 log_stream_protocol_error 窄口",
@@ -3219,13 +3450,16 @@
       ],
       "exclusions": [
         {
-          "path": "apps/cli/src/tui/app/run_loop.rs"
+          "path": "apps/cli/src/tui/app/run_loop.rs",
+          "reason": "app 编排层（run_loop/runtime/testing 豁免 view 交互）"
         },
         {
-          "path": "apps/cli/src/tui/app/runtime.rs"
+          "path": "apps/cli/src/tui/app/runtime.rs",
+          "reason": "app 编排层（run_loop/runtime/testing 豁免 view 交互）"
         },
         {
-          "path": "apps/cli/src/tui/app/testing/"
+          "path": "apps/cli/src/tui/app/testing/",
+          "reason": "app 编排层（run_loop/runtime/testing 豁免 view 交互）"
         }
       ],
       "reason": "F-21：tui app TEA 与 view_assembler/view_model 纯度（run_loop/runtime/testing 编排层豁免，#59 S5-gap 裁定；合并原三条同 pattern 重复规则，#1696③）",
@@ -3301,10 +3535,6 @@
       "exclusions": [
         {
           "path": "apps/cli/src/tui/render/display/safe_text.rs",
-          "reason": "safe-text owner（guard-registry:scope.tui.safe-text-owners）"
-        },
-        {
-          "path": "apps/cli/src/tui/display/safe_text.rs",
           "reason": "safe-text owner（guard-registry:scope.tui.safe-text-owners）"
         },
         {
