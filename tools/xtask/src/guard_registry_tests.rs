@@ -85,7 +85,7 @@ fn registry_rejects_exclusion_count_above_baseline() {
                 "assertion": "pattern_exclusion",
                 "scope": { "kind": "workspace", "value": "" },
                 "forbidden_patterns": ["mod tests {"],
-                "exclusions": [{ "path": "a.rs" }, { "path": "b.rs" }],
+                "exclusions": [{"path": "a.rs", "reason": "测试豁免", "owner": "测试owner", "exit_condition": "测试退出", "since": "#fixture"}, {"path": "b.rs", "reason": "测试豁免", "owner": "测试owner", "exit_condition": "测试退出", "since": "#fixture"}],
                 "exclusion_baseline": 1,
                 "reason": "test",
                 "profile": "full"
@@ -115,7 +115,7 @@ fn registry_accepts_exclusion_count_below_baseline() {
                 "assertion": "pattern_exclusion",
                 "scope": { "kind": "workspace", "value": "" },
                 "forbidden_patterns": ["mod tests {"],
-                "exclusions": [{ "path": "a.rs" }],
+                "exclusions": [{"path": "a.rs", "reason": "测试豁免", "owner": "测试owner", "exit_condition": "测试退出", "since": "#fixture"}],
                 "exclusion_baseline": 2,
                 "reason": "test",
                 "profile": "full"

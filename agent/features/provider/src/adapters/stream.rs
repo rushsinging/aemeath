@@ -7,7 +7,9 @@
 //! per-driver call sites unchanged while routing every emission through the
 //! unified [`InvocationSink::on_delta`] entry point.
 
-use super::constants::INVOCATION_STREAM_CAPACITY;
+use super::constants::{
+    ANTHROPIC_STREAM_IDLE_TIMEOUT, INVOCATION_STREAM_CAPACITY, STALL_THRESHOLD,
+};
 use crate::domain::capability::ReasoningLevel;
 use crate::domain::invoke::*;
 use crate::{
@@ -417,10 +419,6 @@ pub async fn parse_stream(
     };
     let mut stop_reason = StopReason::EndTurn;
 
-    const STREAM_IDLE_TIMEOUT: std::time::Duration =
-        std::time::Duration::from_secs(crate::ANTHROPIC_STREAM_IDLE_TIMEOUT_SECS);
-    const STALL_THRESHOLD: std::time::Duration =
-        std::time::Duration::from_secs(crate::STALL_THRESHOLD_SECS);
     let mut last_event_time: Option<std::time::Instant> = None;
     let mut tool_index: usize = 0;
     let mut current_signature: String = String::new();
@@ -432,8 +430,8 @@ pub async fn parse_stream(
     loop {
         // Calculate remaining idle timeout based on time since last event
         let idle_deadline = match last_event_time {
-            Some(last) => last + STREAM_IDLE_TIMEOUT,
-            None => std::time::Instant::now() + STREAM_IDLE_TIMEOUT,
+            Some(last) => last + ANTHROPIC_STREAM_IDLE_TIMEOUT,
+            None => std::time::Instant::now() + ANTHROPIC_STREAM_IDLE_TIMEOUT,
         };
         let remaining = idle_deadline.saturating_duration_since(std::time::Instant::now());
 
@@ -443,9 +441,9 @@ pub async fn parse_stream(
                 return Err(crate::LlmError::Cancelled);
             }
             _ = tokio::time::sleep(remaining) => {
-                handler.on_diagnostic(&format!("Stream idle timeout: no data for {}s", STREAM_IDLE_TIMEOUT.as_secs()));
+                handler.on_diagnostic(&format!("Stream idle timeout: no data for {}s", ANTHROPIC_STREAM_IDLE_TIMEOUT.as_secs()));
                 return Err(crate::LlmError::Stream(format!(
-                    "Stream idle timeout: no data received for {}s", STREAM_IDLE_TIMEOUT.as_secs()
+                    "Stream idle timeout: no data received for {}s", ANTHROPIC_STREAM_IDLE_TIMEOUT.as_secs()
                 )));
             }
             result = lines.next_line() => {

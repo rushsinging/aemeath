@@ -52,7 +52,7 @@ pub(crate) struct RenderPerformanceSnapshot {
 }
 
 thread_local! {
-    static ACTIVE_CAPTURE: RefCell<Option<RenderPerformanceSnapshot>> = const { RefCell::new(None) };
+    static RENDER_CAPTURE: RefCell<Option<RenderPerformanceSnapshot>> = const { RefCell::new(None) };
 }
 
 struct CaptureGuard {
@@ -61,7 +61,7 @@ struct CaptureGuard {
 
 impl CaptureGuard {
     fn start() -> Self {
-        ACTIVE_CAPTURE.with(|capture| {
+        RENDER_CAPTURE.with(|capture| {
             assert!(
                 capture.borrow().is_none(),
                 "render performance capture 不支持嵌套"
@@ -73,7 +73,7 @@ impl CaptureGuard {
 
     fn finish(mut self) -> RenderPerformanceSnapshot {
         self.active = false;
-        ACTIVE_CAPTURE.with(|capture| {
+        RENDER_CAPTURE.with(|capture| {
             capture
                 .borrow_mut()
                 .take()
@@ -85,7 +85,7 @@ impl CaptureGuard {
 impl Drop for CaptureGuard {
     fn drop(&mut self) {
         if self.active {
-            ACTIVE_CAPTURE.with(|capture| {
+            RENDER_CAPTURE.with(|capture| {
                 capture.borrow_mut().take();
             });
         }
@@ -99,11 +99,11 @@ pub(crate) fn capture<T>(run: impl FnOnce() -> T) -> (T, RenderPerformanceSnapsh
 }
 
 pub(crate) fn is_active() -> bool {
-    ACTIVE_CAPTURE.with(|capture| capture.borrow().is_some())
+    RENDER_CAPTURE.with(|capture| capture.borrow().is_some())
 }
 
 fn update(update: impl FnOnce(&mut RenderPerformanceSnapshot)) {
-    ACTIVE_CAPTURE.with(|capture| {
+    RENDER_CAPTURE.with(|capture| {
         if let Some(snapshot) = capture.borrow_mut().as_mut() {
             update(snapshot);
         }

@@ -98,9 +98,15 @@ pub struct LineBudgetEntry {
     pub max_lines: usize,
 }
 
+/// 结构化豁免条目：每项 MUST 可追溯（owner）、可退出（exit_condition）、
+/// 可定位来源（since）；缺失时 registry 解析 fail-closed。
 #[derive(Debug, Deserialize)]
 pub struct Exclusion {
     pub path: String,
+    pub reason: String,
+    pub owner: String,
+    pub exit_condition: String,
+    pub since: String,
 }
 
 /// registry `rules` 数据区中的一行规则。

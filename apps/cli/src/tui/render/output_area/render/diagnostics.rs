@@ -1,5 +1,6 @@
+use super::constants::MAX_CHARS;
+
 pub(super) fn diagnostic_plain(value: &str) -> String {
-    const MAX_CHARS: usize = 96;
     let mut out = value
         .chars()
         .take(MAX_CHARS)

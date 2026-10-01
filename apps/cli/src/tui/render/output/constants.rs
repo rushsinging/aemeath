@@ -20,3 +20,10 @@ pub(crate) const DIFF_ADD_FG: Color = theme::DIFF_ADD_FG;
 /// Diff 行号 / 高亮颜色常量。
 /// Diff 行号 / 高亮颜色常量。
 pub(crate) const LINE_NUM_COLOR: Color = theme::TEXT_DIM;
+
+// ─── markdown.rs ───
+// 或以常见代码文件扩展名结尾。
+pub(crate) const EXTENSIONS: &[&str] = &[
+    ".rs", ".toml", ".md", ".json", ".yaml", ".yml", ".txt", ".sh", ".py", ".ts", ".js", ".tsx",
+    ".jsx", ".go", ".c", ".h", ".cpp", ".hpp",
+];

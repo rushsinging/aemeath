@@ -34,7 +34,7 @@ pub(crate) struct ContextBuildPerformanceSnapshot {
 }
 
 thread_local! {
-    static ACTIVE_CAPTURE: RefCell<Option<ContextBuildPerformanceSnapshot>> = const { RefCell::new(None) };
+    static CONTEXT_BUILD_CAPTURE: RefCell<Option<ContextBuildPerformanceSnapshot>> = const { RefCell::new(None) };
 }
 
 struct CaptureGuard {
@@ -43,7 +43,7 @@ struct CaptureGuard {
 
 impl CaptureGuard {
     fn start() -> Self {
-        ACTIVE_CAPTURE.with(|capture| {
+        CONTEXT_BUILD_CAPTURE.with(|capture| {
             assert!(
                 capture.borrow().is_none(),
                 "context performance capture 不支持嵌套"
@@ -55,7 +55,7 @@ impl CaptureGuard {
 
     fn finish(mut self) -> ContextBuildPerformanceSnapshot {
         self.active = false;
-        ACTIVE_CAPTURE.with(|capture| {
+        CONTEXT_BUILD_CAPTURE.with(|capture| {
             capture
                 .borrow_mut()
                 .take()
@@ -67,7 +67,7 @@ impl CaptureGuard {
 impl Drop for CaptureGuard {
     fn drop(&mut self) {
         if self.active {
-            ACTIVE_CAPTURE.with(|capture| {
+            CONTEXT_BUILD_CAPTURE.with(|capture| {
                 capture.borrow_mut().take();
             });
         }
@@ -83,7 +83,7 @@ pub(crate) async fn capture<T>(
 }
 
 fn update(update: impl FnOnce(&mut ContextBuildPerformanceSnapshot)) {
-    ACTIVE_CAPTURE.with(|capture| {
+    CONTEXT_BUILD_CAPTURE.with(|capture| {
         if let Some(snapshot) = capture.borrow_mut().as_mut() {
             update(snapshot);
         }

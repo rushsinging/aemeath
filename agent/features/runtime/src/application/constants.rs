@@ -31,6 +31,11 @@ pub(crate) const TUI_STDERR_PREVIEW_LINES: usize = 5;
 
 pub(crate) const WATCH_DEPTH: u32 = 5;
 
+// ─── loop_engine/chat/stall.rs ───
+
+pub(crate) const FINGERPRINT_WINDOW: usize = 4;
+pub(crate) const FINGERPRINT_MAX_REPEAT: usize = 3;
+
 // ─── loop_engine/chat/input_gate.rs ───
 
 /// `/reflect-now` 在 busy 期间被丢弃时的统一提示文案（裁决 3：busy NEVER 排队）。

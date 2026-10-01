@@ -26,3 +26,10 @@ pub(crate) const STREAM_IDLE_TIMEOUT: std::time::Duration =
     std::time::Duration::from_secs(crate::OLLAMA_STREAM_IDLE_TIMEOUT_SECS);
 
 pub(crate) const INVOCATION_STREAM_CAPACITY: usize = 1;
+
+// ─── stream.rs ───
+
+pub(crate) const ANTHROPIC_STREAM_IDLE_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(crate::ANTHROPIC_STREAM_IDLE_TIMEOUT_SECS);
+pub(crate) const STALL_THRESHOLD: std::time::Duration =
+    std::time::Duration::from_secs(crate::STALL_THRESHOLD_SECS);

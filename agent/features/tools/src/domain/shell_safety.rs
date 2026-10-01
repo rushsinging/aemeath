@@ -2,9 +2,10 @@
 /// `/dev/null`, `/dev/stdout`, `/dev/stderr`, `/dev/fd/*`, `/dev/tty`).
 /// Writes to these are universally safe; writes to e.g. `/dev/sda` are
 /// genuinely destructive and must be blocked.
-use super::constants::{CHAIN_START_COMMANDS, DEDICATED_FILE_READ_COMMANDS, READONLY_COMMANDS};
+use super::constants::{
+    CHAIN_START_COMMANDS, DEDICATED_FILE_READ_COMMANDS, READONLY_COMMANDS, SAFE_DEVS,
+};
 pub fn is_suspicious_dev_write(cmd: &str) -> bool {
-    const SAFE_DEVS: &[&str] = &["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"];
     let mut rest = cmd;
     loop {
         let Some(pos) = rest.find("/dev/") else {

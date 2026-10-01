@@ -227,7 +227,7 @@ pub fn api_key_env_name(driver: &str) -> Option<&'static str> {
 /// 静态不变数据）。当前契约允许 `recommended_models` 为空（无核验证据）。
 #[doc(hidden)]
 pub fn static_assert_catalog_invariants() -> Result<(), &'static str> {
-    match crate::domain::constants::CACHE
+    match crate::domain::constants::VALIDATION_CACHE
         .get_or_init(|| check_unique_sources().and(check_recommended_models()))
     {
         Ok(()) => Ok(()),

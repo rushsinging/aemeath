@@ -301,3 +301,29 @@ fn guard_run_rejects_invalid_registry_schema() {
         "错误应指向 registry 自检: {error:#}"
     );
 }
+
+/// 结构化例外 schema：exclusion 必须携带 owner / exit_condition / since，
+/// 缺任一字段 fail-closed（白名单消灭后的豁免终态：每项可追溯、可退出）。
+#[test]
+fn guard_run_rejects_exclusion_missing_structured_fields() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    let root = temp.path().join("repo");
+    fs::create_dir_all(root.join(".agents")).expect("create .agents");
+    // exclusion 只有 path + reason，缺 owner / exit_condition / since。
+    fs::write(
+        root.join(".agents/architecture-guard-registry.json"),
+        r#"{"version": 1, "budgets": {"repository_migration_debt": 0, "modules": {}}, "entries": [], "construction_symbols": [], "rules": [{"id": "pattern.x.demo", "assertion": "pattern_exclusion", "scope": {"kind": "workspace"}, "forbidden_patterns": ["demo("], "exclusions": [{"path": "crates/x/owner.rs", "reason": "唯一 owner"}], "reason": "测试", "profile": "full"}], "retired_symbols": []}"#,
+    )
+    .expect("write registry");
+
+    let result = crate::guards::run(&root, crate::guards::Profile::Fast, None);
+
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => panic!("缺结构化字段的 exclusion 必须 fail-closed"),
+    };
+    assert!(
+        format!("{error:#}").contains("owner") || format!("{error:#}").contains("exit_condition"),
+        "错误应指向 exclusion 结构化字段缺失: {error:#}"
+    );
+}

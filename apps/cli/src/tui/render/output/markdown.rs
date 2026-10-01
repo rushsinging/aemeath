@@ -3,6 +3,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::text::Span;
 
+use super::constants::EXTENSIONS;
 #[cfg(test)]
 use crate::tui::render::output::primitives::wrap::{wrap_spans_with_prefix, WrapMode};
 use crate::tui::render::output::rendered::LinkSpan;
@@ -259,11 +260,6 @@ fn looks_like_file_path(s: &str) -> bool {
     if s.contains('/') || s.contains('\\') {
         return true;
     }
-    // 或以常见代码文件扩展名结尾
-    const EXTENSIONS: &[&str] = &[
-        ".rs", ".toml", ".md", ".json", ".yaml", ".yml", ".txt", ".sh", ".py", ".ts", ".js",
-        ".tsx", ".jsx", ".go", ".c", ".h", ".cpp", ".hpp",
-    ];
     EXTENSIONS.iter().any(|ext| s.ends_with(ext))
 }
 

@@ -1,3 +1,5 @@
+#[cfg(test)]
+use super::constants::DEFAULT_WORKTREE_DIR;
 use super::constants::{DEFAULT_WORKTREE_BASE, UNNAMED_WORKSPACE_SEGMENT};
 use std::path::{Path, PathBuf};
 
@@ -8,10 +10,6 @@ use share::session_types::{
 
 use crate::domain::git::{GitWorktreeOps, RepositoryProbe};
 use crate::domain::types::{GitProbeError, WorkspaceData, WorkspaceError, WorkspaceRestoreError};
-
-/// 测试构造器默认：repo 根下 `.worktrees`（生产链路由 wiring 注入配置值）。
-#[cfg(test)]
-const DEFAULT_WORKTREE_DIR: &str = ".worktrees";
 
 /// Workspace 聚合根：字段全私有，不变量（containment / git 位置 / 栈形态）
 /// 只能经本 impl 的方法修改。生产代码 NEVER 直接读写字段；白盒测试位于

@@ -35,7 +35,7 @@ pub struct SessionLifecycleSnapshot {
 }
 
 thread_local! {
-    static ACTIVE_CAPTURE: RefCell<Option<SessionLifecycleSnapshot>> = const { RefCell::new(None) };
+    static SESSION_LIFECYCLE_CAPTURE: RefCell<Option<SessionLifecycleSnapshot>> = const { RefCell::new(None) };
 }
 
 struct CaptureGuard {
@@ -44,7 +44,7 @@ struct CaptureGuard {
 
 impl CaptureGuard {
     fn start() -> Self {
-        ACTIVE_CAPTURE.with(|capture| {
+        SESSION_LIFECYCLE_CAPTURE.with(|capture| {
             assert!(
                 capture.borrow().is_none(),
                 "session lifecycle capture 不支持嵌套"
@@ -56,7 +56,7 @@ impl CaptureGuard {
 
     fn finish(mut self) -> SessionLifecycleSnapshot {
         self.active = false;
-        ACTIVE_CAPTURE.with(|capture| {
+        SESSION_LIFECYCLE_CAPTURE.with(|capture| {
             capture
                 .borrow_mut()
                 .take()
@@ -68,7 +68,7 @@ impl CaptureGuard {
 impl Drop for CaptureGuard {
     fn drop(&mut self) {
         if self.active {
-            ACTIVE_CAPTURE.with(|capture| {
+            SESSION_LIFECYCLE_CAPTURE.with(|capture| {
                 capture.borrow_mut().take();
             });
         }
@@ -85,7 +85,7 @@ pub(crate) fn record_generation_transition(
     before: &Arc<CanonicalSession>,
     after: &CanonicalSession,
 ) {
-    ACTIVE_CAPTURE.with(|capture| {
+    SESSION_LIFECYCLE_CAPTURE.with(|capture| {
         let mut capture = capture.borrow_mut();
         let Some(snapshot) = capture.as_mut() else {
             return;

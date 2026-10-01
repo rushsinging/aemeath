@@ -14,4 +14,4 @@ pub const COMPILED_VERSION: &str = match option_env!("AEMEATH_VERSION") {
 };
 
 /// [`crate::version`] 的运行时缓存：首次调用后进程内返回同一个值。
-pub(crate) static CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+pub(crate) static VERSION_CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
