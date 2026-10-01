@@ -184,9 +184,14 @@ def audit(root: Path):
 
 
 def mirror_candidates(all_entries: list[Entry]):
-    """跨 crate 同名（排除规范形态；同值不等于同语义，仅报告不裁定）。"""
+    """跨 crate 同名（排除规范形态与可变单例；同值不等于同语义，仅报告不裁定）。
+
+    可变单例（OnceLock/RefCell 等）同名属命名规范问题而非常量镜像债务，
+    不参与镜像判定。"""
     by_symbol = defaultdict(list)
     for entry in all_entries:
+        if entry.is_mutable_singleton:
+            continue
         by_symbol[entry.symbol].append(entry)
     candidates, exempt = [], []
     for symbol, entries in sorted(by_symbol.items()):

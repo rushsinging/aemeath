@@ -495,4 +495,5 @@ pub static PROVIDER_CATALOG: &[ProviderCatalogEntry] = &[
 // ==========================================================================
 // `Result<(), &'static str>` 本身不是 `Copy`（discriminant + 变体大小异质），
 // 但内部字符串字面量是 `'static`，因此这里只需在首次失败时把消息搬到外面。
-pub(crate) static CACHE: std::sync::OnceLock<Result<(), &'static str>> = std::sync::OnceLock::new();
+pub(crate) static VALIDATION_CACHE: std::sync::OnceLock<Result<(), &'static str>> =
+    std::sync::OnceLock::new();

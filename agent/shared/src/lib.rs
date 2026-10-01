@@ -13,7 +13,7 @@ pub(crate) use crate::constants::LOG_TARGET;
 /// 全仓库所有需要版本号的地方 MUST 引用此函数，NEVER 直接用 `CARGO_PKG_VERSION`。
 /// 首次调用后用 `OnceLock` 缓存，保证整个进程返回同一个值。
 pub fn version() -> &'static str {
-    constants::CACHE.get_or_init(|| {
+    constants::VERSION_CACHE.get_or_init(|| {
         std::env::var("AEMEATH_VERSION").unwrap_or_else(|_| COMPILED_VERSION.to_string())
     })
 }
