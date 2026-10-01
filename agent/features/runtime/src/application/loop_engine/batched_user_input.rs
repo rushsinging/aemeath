@@ -65,16 +65,15 @@ impl MergedUserMessage {
         }
         // 占位符在本条消息内从 [Image #1] 起算，合并后要接着已并入的图片继续
         // 编号，否则两条都含 `[Image #1]` 时无法区分是哪张图。
-        let first_new_order = self.images.len();
-        let placeholders = renumbered_placeholders(
-            &text,
-            images
-                .iter()
-                .enumerate()
-                .map(|(offset, image)| (image.id.clone(), first_new_order + offset))
-                .collect(),
-        );
-        self.text.push_str(&placeholders);
+        //
+        // 逐条重编号：本条消息的占位符换成接着已有图片继续的全局序号。
+        let assignments: Vec<(String, usize)> = images
+            .iter()
+            .enumerate()
+            .map(|(offset, image)| (image.id.clone(), self.images.len() + offset))
+            .collect();
+        self.text
+            .push_str(&renumber_placeholders(&text, &assignments));
         self.images.extend(images);
     }
 
@@ -87,41 +86,53 @@ impl MergedUserMessage {
     }
 }
 
-/// 把 `text` 里的图片占位符替换为按合并顺序重新编号的占位符。
+/// 把 `text` 里的图片占位符按 `assignments`（`原占位符 → 新序号`）重写。
 ///
-/// `assignments` 为 `(原占位符, 合并后的零基序号)`。替换从左往右单遍扫描、
-/// 匹配到的片段直接从搜索区间移除，避免新占位符被后续规则二次匹配。
-fn renumbered_placeholders(text: &str, assignments: Vec<(String, usize)>) -> String {
+/// 必须逐位置重建而不能逐个 `str::replace`：把 `[Image #1]` 改成
+/// `[Image #2]` 之后，下一个待替换的旧占位符恰好就是 `[Image #2]`，
+/// 替换结果会被二次匹配。这里先收集全部匹配位置再单遍重建，
+/// 已写出的区间不会重新进入匹配范围。
+fn renumber_placeholders(text: &str, assignments: &[(String, usize)]) -> String {
     if assignments.is_empty() {
         return text.to_string();
     }
-    let mut rewritten = String::with_capacity(text.len());
-    let mut remaining = text;
-    while !remaining.is_empty() {
-        let next = assignments
-            .iter()
-            .filter_map(|(placeholder, order)| {
-                remaining
-                    .find(placeholder.as_str())
-                    .map(|start| (start, placeholder.len(), *order))
-            })
-            .min_by_key(|(start, _, _)| *start);
-        match next {
-            Some((start, placeholder_len, order)) => {
-                // `find` 返回的偏移一定落在字符边界上，split_at 不会 panic。
-                let (before, rest) = remaining.split_at(start);
-                let (_, after) = rest.split_at(placeholder_len);
-                rewritten.push_str(before);
-                rewritten.push_str(&image_placeholder(order));
-                remaining = after;
-            }
-            None => {
-                rewritten.push_str(remaining);
-                break;
-            }
+    let mut matches: Vec<(usize, usize, usize)> = Vec::new();
+    for (placeholder, order) in assignments {
+        for (start, _) in text.match_indices(placeholder.as_str()) {
+            matches.push((start, placeholder.len(), *order));
         }
     }
+    matches.sort_unstable();
+    matches.dedup();
+
+    let mut rewritten = String::with_capacity(text.len());
+    let mut copied_up_to = 0usize;
+    for (start, placeholder_len, order) in matches {
+        // 防御重叠匹配（理论上占位符互不为前缀）：已复制过的区间不再重复输出。
+        if start < copied_up_to {
+            continue;
+        }
+        push_char_range(&mut rewritten, text, copied_up_to, start);
+        rewritten.push_str(&image_placeholder(order));
+        copied_up_to = start + placeholder_len;
+    }
+    push_char_range(&mut rewritten, text, copied_up_to, text.len());
     rewritten
+}
+
+/// 把 `text` 的 `[from, to)` 字节区间逐字符追加到 `out`。
+///
+/// 区间边界来自 `match_indices`，必落在字符边界上；用 `char_indices` 遍历
+/// 而非字符串切片，RELEASE 下也不会有潜在 panic 路径。
+fn push_char_range(out: &mut String, text: &str, from: usize, to: usize) {
+    for (offset, character) in text.char_indices() {
+        if offset >= to {
+            break;
+        }
+        if offset >= from {
+            out.push(character);
+        }
+    }
 }
 
 fn image_placeholder(order: usize) -> String {
@@ -288,18 +299,21 @@ mod tests {
 
     #[test]
     fn placeholder_rewrite_does_not_rematch_rewritten_tokens() {
-        // 旧占位符 [Image #1] 被改成 [Image #2] 后，不能被下一条规则当成
-        // 「旧的 [Image #2]」再次替换。
-        let rewritten = renumbered_placeholders(
+        // 旧占位符 [Image #1] 被改成 [Image #2] 后，不能再被「旧的
+        // [Image #2]」规则二次匹配——这正是逐个 str::replace 会出错的地方。
+        let rewritten = renumber_placeholders(
             "旧 [Image #1] 然后 [Image #2]",
-            vec![("[Image #1]".to_string(), 1), ("[Image #2]".to_string(), 2)],
+            &[("[Image #1]".to_string(), 1), ("[Image #2]".to_string(), 2)],
         );
 
         assert_eq!(rewritten, "旧 [Image #2] 然后 [Image #3]");
     }
 
     #[test]
-    fn text_without_placeholders_is_copied_verbatim() {
-        assert_eq!(renumbered_placeholders("没有图片", vec![]), "没有图片");
+    fn placeholder_rewrite_keeps_text_untouched_when_no_assignment_matches() {
+        assert_eq!(
+            renumber_placeholders("没有图片", &[("[Image #1]".to_string(), 0)]),
+            "没有图片"
+        );
     }
 }
