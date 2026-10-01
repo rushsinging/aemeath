@@ -615,7 +615,10 @@ where
         response: &crate::application::loop_engine::chat::InvocationResponse,
         elapsed_secs: f64,
     ) {
-        for event in self.input.input_events.drain_input_events().await {
+        // #1818：一次 drain 就是一批，同批连续用户消息折叠为一条再入队。
+        for event in crate::application::loop_engine::batched_user_input::fold_batched_user_inputs(
+            self.input.input_events.drain_input_events().await,
+        ) {
             self.queue_busy_event(event).await;
         }
         self.runtime_context

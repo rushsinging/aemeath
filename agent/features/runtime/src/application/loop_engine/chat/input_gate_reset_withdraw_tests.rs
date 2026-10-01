@@ -205,10 +205,12 @@ async fn test_withdraw_all_non_empty_emits_withdrawn_with_texts() {
         _ => None,
     });
     let texts = texts.expect("应发出 UserMessagesWithdrawn");
+    // #1818 改写：WithdrawAll 之前的同批消息已折叠为一条，撤回回执随之是
+    // 合并文本；两份内容都还在，用户可编辑后重新提交。
     assert_eq!(
         texts,
-        vec!["aaa".to_string(), "bbb".to_string()],
-        "应收集所有 UserMessage text（含已 append 的）"
+        vec!["aaa\n\nbbb".to_string()],
+        "撤回回执给出合并后的文本，两份内容都不得丢失"
     );
     assert!(
         outcome.accepted_inputs.is_empty(),
