@@ -32,4 +32,4 @@ pub(crate) trait GitWorktreeOps: Send + Sync {
 
 #[cfg(test)]
 #[path = "git_tests.rs"]
-mod tests;
+pub(crate) mod tests;

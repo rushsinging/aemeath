@@ -1,11 +1,11 @@
 use project::GitCommandOutcome;
 use share::i18n::prompt::git_context_labels::git_context_labels;
-use std::path::PathBuf;
+use std::path::Path;
 
 /// 经 project 的全仓唯一 git spawn 窄面执行；git 子命令为短阻塞 IO，
 /// 用 `spawn_blocking` 保持本模块的 async 签名不阻塞 worker 线程。
-async fn git_output(cwd: &PathBuf, args: &[&str]) -> Option<GitCommandOutcome> {
-    let cwd = cwd.clone();
+async fn git_output(cwd: &Path, args: &[&str]) -> Option<GitCommandOutcome> {
+    let cwd = cwd.to_owned();
     let owned_args: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
     tokio::task::spawn_blocking(move || {
         let arg_refs: Vec<&str> = owned_args.iter().map(String::as_str).collect();
@@ -16,14 +16,14 @@ async fn git_output(cwd: &PathBuf, args: &[&str]) -> Option<GitCommandOutcome> {
     .flatten()
 }
 
-pub async fn is_git_repo(cwd: &PathBuf) -> bool {
+pub async fn is_git_repo(cwd: &Path) -> bool {
     git_output(cwd, &["rev-parse", "--is-inside-work-tree"])
         .await
         .map(|outcome| outcome.is_success())
         .unwrap_or(false)
 }
 
-pub async fn collect_git_context(cwd: &PathBuf, lang: &str) -> String {
+pub async fn collect_git_context(cwd: &Path, lang: &str) -> String {
     let labels = git_context_labels(lang);
 
     let mut parts: Vec<String> = Vec::new();

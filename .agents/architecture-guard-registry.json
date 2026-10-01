@@ -804,8 +804,11 @@
         "domain",
         "domain.rs",
         "lib.rs",
+        "lib_tests.rs",
         "ports.rs",
-        "published_language.rs"
+        "ports_tests.rs",
+        "published_language.rs",
+        "published_language_tests.rs"
       ],
       "reason": "F-3：provider Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
       "profile": "fast"
@@ -843,6 +846,7 @@
         "application.rs",
         "application_tests.rs",
         "codec.rs",
+        "codec_tests.rs",
         "constants.rs",
         "domain",
         "domain.rs",
@@ -851,8 +855,10 @@
         "noop.rs",
         "ports",
         "ports.rs",
+        "ports_tests.rs",
         "service.rs",
-        "service_reflection_tests.rs"
+        "service_reflection_tests.rs",
+        "service_tests.rs"
       ],
       "reason": "F-3：memory Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
       "profile": "fast"
@@ -965,6 +971,7 @@
         "domain",
         "domain.rs",
         "lib.rs",
+        "lib_tests.rs",
         "service.rs"
       ],
       "reason": "F-3：project Hexagonal 层目录与顶层文件白名单（#1022 矩阵；application.rs 用例编排层 / service.rs 持锁状态容器，#1746 归位）",
@@ -1991,6 +1998,7 @@
         "adapter.rs",
         "app",
         "app.rs",
+        "app_tests.rs",
         "architecture_tests.rs",
         "constants.rs",
         "effect",
@@ -2006,14 +2014,17 @@
         "render.rs",
         "state.rs",
         "text.rs",
+        "text_tests.rs",
         "update",
         "update.rs",
         "view_assembler",
         "view_assembler.rs",
         "view_model",
         "view_model.rs",
+        "view_model_tests.rs",
         "view_state",
-        "view_state.rs"
+        "view_state.rs",
+        "view_state_tests.rs"
       ],
       "reason": "F-22：tui 顶层目录白名单；旧命名空间 import 防复活④（模块已删编译失败）",
       "profile": "fast"
@@ -2027,12 +2038,15 @@
       },
       "allowed_entries": [
         "app.rs",
+        "app_tests.rs",
         "audit.rs",
         "constants.rs",
         "delivery_logging.rs",
+        "delivery_logging_tests.rs",
         "lib.rs",
         "lib_tests.rs",
         "memory.rs",
+        "memory_tests.rs",
         "provider.rs",
         "provider_probe_tests.rs",
         "provider_tests.rs",
