@@ -19,7 +19,10 @@ use crate::config::{
     AgentsConfig, Config, HooksConfig, MemoryConfig, SkillsConfig, ToolResultConfig, ToolSelection,
 };
 
-use super::constants::{DEFAULT_HOOK_EXECUTION_MAX_ATTEMPTS, DEFAULT_STOP_HOOK_MAX_BLOCKS};
+use super::constants::{
+    DEFAULT_HOOK_EXECUTION_MAX_ATTEMPTS, DEFAULT_STOP_HOOK_MAX_BLOCKS,
+    MIN_WINDOW_SCALED_THRESHOLD_CHARS, WINDOW_SCALED_THRESHOLD_RATIO_DIVISOR,
+};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct HookExecutionPolicy {
@@ -87,15 +90,6 @@ pub struct ToolResultPolicy {
 }
 
 impl ToolResultPolicy {
-    /// 截断阈值占 context window 的比例上限（1/20 = 5%）。
-    ///
-    /// 定量阈值只对大窗口合理：128k 窗口下单条 50k chars（中文场景约
-    /// 50k tokens）即占 40%，会直接把启发式估算顶到 auto-compact 阈值。
-    const WINDOW_SCALED_THRESHOLD_RATIO_DIVISOR: usize = 20;
-
-    /// 窗口收紧后的阈值下限：过小的 preview 无法容纳有效的 head/tail 提示。
-    const MIN_WINDOW_SCALED_THRESHOLD_CHARS: usize = 4_000;
-
     fn from_config(config: &ToolResultConfig) -> Self {
         let valid = config.threshold_chars > 0
             && config.preview_head_chars + config.preview_tail_chars <= config.threshold_chars;
@@ -122,10 +116,10 @@ impl ToolResultPolicy {
         if context_size == 0 {
             return self;
         }
-        let ratio_cap = context_size / Self::WINDOW_SCALED_THRESHOLD_RATIO_DIVISOR;
+        let ratio_cap = context_size / WINDOW_SCALED_THRESHOLD_RATIO_DIVISOR;
         let threshold_chars = self
             .threshold_chars
-            .min(ratio_cap.max(Self::MIN_WINDOW_SCALED_THRESHOLD_CHARS));
+            .min(ratio_cap.max(MIN_WINDOW_SCALED_THRESHOLD_CHARS));
         Self {
             threshold_chars,
             preview_head_chars: self.preview_head_chars.min(threshold_chars / 4),

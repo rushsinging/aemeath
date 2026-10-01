@@ -11,8 +11,8 @@
 
 use super::constants::{
     DIFF_LINE_PREFIX, DIFF_MARKER_PREFIX, DIFF_MARKER_SUFFIX, HIGHLIGHT_MAX_LINE_BYTES,
-    HIGHLIGHT_MAX_SIDE_LINES, HIGHLIGHT_MAX_TOTAL_BYTES, LEGACY_DIFF_MARKER, RENDER_MAX_LINE_BYTES,
-    RENDER_MAX_SIDE_LINES, RENDER_MAX_TOTAL_BYTES, RETAINED_LINES_PER_END,
+    HIGHLIGHT_MAX_SIDE_LINES, HIGHLIGHT_MAX_TOTAL_BYTES, LABEL_RESERVE_BYTES, LEGACY_DIFF_MARKER,
+    RENDER_MAX_LINE_BYTES, RENDER_MAX_SIDE_LINES, RENDER_MAX_TOTAL_BYTES, RETAINED_LINES_PER_END,
 };
 use crate::tui::render::output::primitives::diff::diff_from;
 use crate::tui::render::output::rendered::RenderedLine;
@@ -126,7 +126,6 @@ fn truncate_render_line(line: &str) -> String {
     if line.len() <= RENDER_MAX_LINE_BYTES {
         return line.to_string();
     }
-    const LABEL_RESERVE_BYTES: usize = 128;
     let prefix = crate::tui::text::safe_byte_prefix(
         line,
         RENDER_MAX_LINE_BYTES.saturating_sub(LABEL_RESERVE_BYTES),

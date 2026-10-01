@@ -27,3 +27,13 @@ pub(crate) const DEFAULT_STOP_HOOK_MAX_BLOCKS: usize = 15;
 
 // ── ui.rs：markdown 间距行数上限 ──
 pub(crate) const MAX_MARKDOWN_SPACING_LINES: u8 = 8;
+
+// ─── snapshot.rs ───
+/// 截断阈值占 context window 的比例上限（1/20 = 5%）。
+///
+/// 定量阈值只对大窗口合理：128k 窗口下单条 50k chars（中文场景约
+/// 50k tokens）即占 40%，会直接把启发式估算顶到 auto-compact 阈值。
+pub(crate) const WINDOW_SCALED_THRESHOLD_RATIO_DIVISOR: usize = 20;
+
+/// 窗口收紧后的阈值下限：过小的 preview 无法容纳有效的 head/tail 提示。
+pub(crate) const MIN_WINDOW_SCALED_THRESHOLD_CHARS: usize = 4_000;

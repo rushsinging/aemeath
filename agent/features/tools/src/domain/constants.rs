@@ -72,3 +72,7 @@ pub(crate) const READONLY_COMMANDS: &[&str] = &[
     "less",
     "more",
 ];
+
+// ─── shell_safety.rs ───
+
+pub(crate) const SAFE_DEVS: &[&str] = &["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"];

@@ -1,12 +1,11 @@
+use crate::application::constants::{FINGERPRINT_MAX_REPEAT, FINGERPRINT_WINDOW};
+
 pub(crate) struct StallDetector {
     recent_fingerprints: Vec<String>,
     max_fingerprint_repeat: usize,
 }
 
 impl StallDetector {
-    const FINGERPRINT_WINDOW: usize = 4;
-    const FINGERPRINT_MAX_REPEAT: usize = 3;
-
     pub(crate) fn new() -> Self {
         Self {
             recent_fingerprints: Vec::new(),
@@ -19,12 +18,12 @@ impl StallDetector {
         if !trimmed.is_empty() {
             let fp: String = trimmed.chars().take(200).collect();
             self.recent_fingerprints.push(fp);
-            if self.recent_fingerprints.len() > Self::FINGERPRINT_WINDOW {
+            if self.recent_fingerprints.len() > FINGERPRINT_WINDOW {
                 self.recent_fingerprints.remove(0);
             }
         }
 
-        if self.recent_fingerprints.len() < Self::FINGERPRINT_MAX_REPEAT {
+        if self.recent_fingerprints.len() < FINGERPRINT_MAX_REPEAT {
             return false;
         }
 
@@ -33,7 +32,7 @@ impl StallDetector {
             .recent_fingerprints
             .iter()
             .rev()
-            .take(Self::FINGERPRINT_MAX_REPEAT)
+            .take(FINGERPRINT_MAX_REPEAT)
             .filter(|fp| *fp == last)
             .count();
         if repeat_count > self.max_fingerprint_repeat {
@@ -44,7 +43,7 @@ impl StallDetector {
                 self.max_fingerprint_repeat
             );
         }
-        if repeat_count >= Self::FINGERPRINT_MAX_REPEAT {
+        if repeat_count >= FINGERPRINT_MAX_REPEAT {
             log::warn!(target: crate::LOG_TARGET,
                 "[stall] assistant text repeated {} times in recent {} run steps (max: {})",
                 repeat_count,

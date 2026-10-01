@@ -31,6 +31,11 @@ pub(crate) const TUI_STDERR_PREVIEW_LINES: usize = 5;
 
 pub(crate) const WATCH_DEPTH: u32 = 5;
 
+// ─── loop_engine/chat/stall.rs ───
+
+pub(crate) const FINGERPRINT_WINDOW: usize = 4;
+pub(crate) const FINGERPRINT_MAX_REPEAT: usize = 3;
+
 // ─── model/invocation.rs ───
 
 /// One initial invocation plus at most ten retries.
