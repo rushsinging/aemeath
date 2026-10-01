@@ -139,7 +139,7 @@ Manual Run 硬约束（当前实现）：
 - **不落盘**：不写 canonical session——`message_count`、`updated_at` 与 run slices 保持不变。
 - **不递增 session 主 `run_count`、不发 `RunChanged`**：它不是用户回合，不消耗 Interval 频控计数。
 - **busy 丢弃不排队**：input gate 对 `ReflectNow` 提示后丢弃（与 `Compact` 的 busy 排队语义相反）。
-- **disabled 不创建 Run**：配置门禁在创建 Run 前直接回 DisabledSkipped 文案，因此 `DisabledSkipped` 常态下不是 Run/Activity 终态。
+- **disabled 不创建 Run（创建前常态 no-op）**：配置门禁在创建 Run 前直接回 DisabledSkipped 文案，不创建 Run、不发布任何 activity——`DisabledSkipped` 常态下不是 Run/Activity 终态，而是创建前的 no-op。
 - **消息快照来源**：idle 受理时经 `MainSessionWiring::bind_main_run` 读取 committed CanonicalSession 的 `structured_messages()`（与 `/sessions` 列表同一投影），即当前可见 active 历史；不包含 system 注入。
 - **等待终态再回显**：handler await 反思终态，只回显安全文案/计数，NEVER 向 chat 投影反思正文。
 - **两层门控**：input gate 的 busy 判定（Run 进行中直接丢弃）与配置门控（DisabledSkipped 文案）相互独立。
@@ -155,7 +155,10 @@ Interval / PreCompact / Manual
       ├─ Reflection activity 发布（kind = Reflection，detail.trigger = Interval/PreCompact/Manual）
       └─ 端口执行:
           ├─ 配置禁用（判定后配置被关闭的竞态）→ DisabledSkipped（记录 [reflection_disabled]）；
-          │   反思端口未绑定 → 同样按 DisabledSkipped 跳过（warn 日志）
+          │   反思端口未绑定 → Interval/PreCompact 同样按 DisabledSkipped 跳过（warn 日志）
+          │   （phase 内 DisabledSkipped 的 leaf 终态有差异：Interval/PreCompact 按
+          │    Cancelled 收口；Manual 在端口层折叠为失败按 Failed 收口，其端口未绑定
+          │    走端口 Err 路径先 Failed 收口再上抛——与创建前 no-op 不同）
           └─ append Running → build_prompt → call_llm → parse → optional apply
                             → upsert terminal record
                             → Reflection activity 按终态收口
@@ -171,6 +174,7 @@ Reflection 的运行时可见性是结构化 Activity（SDK typed view），**�
 - **Run root**：`ActivityDetailView::Run { purpose }`，`purpose` 由 Run intent 映射为 `Main` 或 `Reflection`（见上文映射）。
 - **Reflection leaf**：`ActivityKindView::Reflection` + `ActivityDetailView::Reflection { trigger }`，`trigger ∈ {Interval, PreCompact, Manual}`。Interval / PreCompact 归属当前对话 Run 的 activity 树；Manual 归属 purpose = Reflection 的 Run 根下（该 Run 没有 RunStep）。
 - **状态集合**：`ActivityStateView` ∈ {`Running`, `Waiting`, `Succeeded`, `Failed`, `Cancelled`, `Terminated`}，终态为后四个。Reflection leaf 终态映射：反思 `Succeeded` → `Succeeded`、`Failed` → `Failed`、`Cancelled` → `Cancelled`、`TimedOut` → `Terminated`。
+- **DisabledSkipped：创建前 no-op 与 phase 内终态的差异**：常态下 `DisabledSkipped` 在创建 Run 前的配置门禁就已返回——创建前常态 no-op，不创建 Run、不发布任何 activity。仅当配置在判定/受理后被关闭（竞态）或反思端口未绑定、Reflection leaf 已在 phase 内发布时，`DisabledSkipped` 才作为 phase 内 outcome 出现，且 leaf 终态按路径不同：Interval/PreCompact 的 shared phase 按 **`Cancelled`** 收口（状态机照常 Reflecting 往返）；Manual 在端口层将其折叠为失败、leaf 按 **`Failed`** 收口（Run 照常收口），Manual 反思端口未绑定则走端口 Err 路径先 `Failed` 收口再上抛错误。
 - **Run root 终态**由 Run 状态映射：`Completed` → `Succeeded`、`Failed` → `Failed`、`Terminated` → `Terminated`；`Reflecting` 期间 Run root 保持 `Running`，leaf 先收口、root 后收口。
 - **观测降级**：activity 发布/收口失败只记 warn 并继续执行（best-effort 观测，NEVER 阻断反思）；端口 Err 先把 activity 按 `Failed` 收口、状态机 `ReflectionCompleted` 返回后才上抛错误，NEVER 留下 Running 态 activity 或悬挂的 `Reflecting`。
 
@@ -206,7 +210,7 @@ Reflection 的运行时可见性是结构化 Activity（SDK typed view），**�
 ### Usage 记账口径（当前实现）
 
 - 仅反思 `Succeeded` 且携带 usage metadata 的终态记账；Interval / PreCompact / Manual 共用同一条共享成功记账路径（`record_successful_usage`），恰好落 1 条 `UsageRecordData` 计入 `/usage`。
-- Manual Reflection Run 没有 RunStep：`run_step_id = None` 时生成仅记账用的 `RunStepId`（UUIDv7）与 `ModelInvocationId`；不发布 cost。
+- Manual Reflection Run 无真实 RunStep（`run_step_id = None`）：此时生成仅记账用的 `RunStepId`（UUIDv7）与 `ModelInvocationId` 作为记账 id；不发布 cost。Interval / PreCompact 携带宿主 Run 的真实 `run_step_id`。
 - `Failed` / `Cancelled` / `TimedOut` / `DisabledSkipped` 不记账。retry / fallback 发生在执行层内部，只有最终 `Succeeded` 经过记账点，不重复记账。
 
 ### 计数口径
@@ -214,6 +218,7 @@ Reflection 的运行时可见性是结构化 Activity（SDK typed view），**�
 Interval 频控读数是 engine 执行态的 `step_count`；当前实现中会话 Run 启动时以 session `run_count` 播种该读数、主会话 Run 内不递增，因此命中条件等价于「每 `interval_runs` 个 Main Run」：
 
 - 判定唯一入口在 engine 的 `ModelStep::Complete` 收尾路径（`record_model_invocation` 与 `ModelInvoked` 之后）；`ModelStep::Tools`（该跳有 tool call）从不判定。历史上独立的 `has_tool_calls` / `stop_reason` / `before_finish_gate_continue` 跳过参数已随执行点上移 engine 而删除。
+- 同一 Run 内多个 `Complete` step（含 Stop Hook 等内部 continuation）共享该读数：engine 以 Run 级一次性闸门保证 Interval 反思在同一 Run 内至多执行一次——判定命中并即将开始反思 phase 时消耗闸门，未命中不消耗（后续判定仍可触发）；一旦开始 phase，端口错误/任务失败/取消也视为该 Run 已执行过，不再重复反思。
 - `run_count` 在每个 Main Run 启动前递增（Manual Reflection Run 除外，见「Manual 显式入口链路」），`/clear` 与 resume 切换 session 时归零，NEVER 延续旧 session 计数。
 - 门禁 `should_run_turn_reflection(config, step_count)`：memory 总开关、`reflection.enabled` 开启且 `interval_runs > 0`，并且 `step_count.is_multiple_of(interval_runs)`。
 

@@ -17,6 +17,8 @@ enum IntervalJudgment {
     Disabled,
     /// 频控判定（等价 `step_count.is_multiple_of(interval)`），命中时携带消息快照。
     Interval(usize),
+    /// 首次判定未命中、其后命中：覆盖「未命中不得消耗 Run 级 Interval 一次性闸门」。
+    MissThenHit,
 }
 
 /// 脚本化反思端口：判定与执行终态全部由测试指定，执行次数与执行期 activity 状态被记录。
@@ -30,6 +32,8 @@ struct ReflectionFake {
     pre_compact_material:
         crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot,
     memory_config: share::config::MemoryConfig,
+    /// `interval_reflection_messages` 的调用计数（`&self` 判定，供 MissThenHit 脚本）。
+    judgment_calls: std::cell::Cell<usize>,
 }
 
 #[async_trait::async_trait]
@@ -39,12 +43,18 @@ impl crate::application::loop_engine::ReflectionPhasePort for ReflectionFake {
         step_count: usize,
         _messages: &[share::message::Message],
     ) -> Option<Vec<share::message::Message>> {
+        let call = self.judgment_calls.get();
+        self.judgment_calls.set(call + 1);
         match self.judgment {
             IntervalJudgment::Disabled => None,
             IntervalJudgment::Interval(runs) if runs > 0 && step_count.is_multiple_of(runs) => {
                 Some(vec![share::message::Message::user("reflect snapshot")])
             }
             IntervalJudgment::Interval(_) => None,
+            IntervalJudgment::MissThenHit if call > 0 => {
+                Some(vec![share::message::Message::user("reflect snapshot")])
+            }
+            IntervalJudgment::MissThenHit => None,
         }
     }
 
@@ -109,6 +119,7 @@ async fn drive_interval_run(
         state_during_run: None,
         pre_compact_material: Default::default(),
         memory_config: share::config::MemoryConfig::default(),
+        judgment_calls: std::cell::Cell::new(0),
     };
     let mut scenario = ScriptedScenario {
         model_steps: VecDeque::from([ModelStep::Complete {
@@ -418,6 +429,7 @@ async fn drive_two_complete_step_interval_run(
         state_during_run: None,
         pre_compact_material: Default::default(),
         memory_config: share::config::MemoryConfig::default(),
+        judgment_calls: std::cell::Cell::new(0),
     };
     let mut scenario = ScriptedScenario {
         drain_outcomes: VecDeque::from([
@@ -542,6 +554,34 @@ async fn interval_reflection_runs_once_per_run_across_two_complete_steps() {
     );
 }
 
+/// 同一 Run 内 Interval 判定先未命中、后命中（如判定后配置被改回开启的竞态）：
+/// 未命中 MUST NOT 消耗 Run 级一次性闸门——命中后反思仍触发，且只触发一次。
+#[tokio::test]
+async fn interval_reflection_miss_then_hit_still_triggers_once() {
+    let result = drive_two_complete_step_interval_run(2, IntervalJudgment::MissThenHit).await;
+
+    assert_eq!(result.run.status(), RunStatus::Completed);
+    assert_eq!(
+        result.run.steps().len(),
+        2,
+        "fixture 必须让同一 Run 走完两个 Run step"
+    );
+    assert!(
+        matches!(
+            result.reflection_runs.as_slice(),
+            [ReflectionTaskTrigger::Interval { step_count: 2 }]
+        ),
+        "未命中不得消耗闸门：命中后必须反思一次且仅一次；实际触发: {:?}",
+        result.reflection_runs
+    );
+    assert_eq!(
+        begin_reflection_count(&result),
+        1,
+        "同一 Run 只允许进入 Reflecting 一次；实际转移: {:?}",
+        transition_events(&result.events)
+    );
+}
+
 // ---------------------------------------------------------------------------
 // PreCompact：自动压缩 Ready 后在 Compacting 内往返 Reflecting
 // ---------------------------------------------------------------------------
@@ -592,6 +632,7 @@ async fn drive_pre_compact_run(
         state_during_run: None,
         pre_compact_material: slot.clone(),
         memory_config,
+        judgment_calls: std::cell::Cell::new(0),
     };
     let mut scenario = ScriptedScenario {
         model_steps: VecDeque::from([ModelStep::Complete {

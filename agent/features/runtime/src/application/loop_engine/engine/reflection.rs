@@ -2,8 +2,10 @@
 //! ReflectionCompleted 返回进入前状态。反思任何 outcome 都不终止宿主 Run（与现状一致，
 //! 宿主 Run 的取消由 `handle_interrupt`/`handle_step_control` 既有路径负责）。
 //!
-//! Interval / PreCompact / Manual 三触发共用本 phase（Interval/PreCompact 已接线，
-//! Manual 随后续批次接入）；调用点负责触发判定与材料收集。
+//! Interval / PreCompact 走本文件的 shared phase（`run_reflection_phase`），Manual
+//! 走 `engine/manual_reflection.rs` 的独立入口；三者仅共享底层
+//! `chat::reflection::run` / 端口层编排，状态机与 activity 由各自 engine/port 负责。
+//! 调用点负责触发判定与材料收集。
 //!
 //! 观测降级的有意设计：activity 发布/收口失败只记 warn 并继续执行（反思是
 //! best-effort 观测，NEVER 因观测失败阻断反思本体）；端口 Err 视为契约违约，

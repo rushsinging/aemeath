@@ -290,11 +290,19 @@ pub(super) async fn execute_step_with_scope(
 
     // 反思 phase：Interval 触发判定与执行（执行点在 engine——状态机与 activity 的
     // 唯一真相在 engine；端口只回答「有没有要做的事」）。
-    if matches!(model_step, ModelStep::Complete { .. }) {
+    //
+    // Run 级去重：主会话 Run 内 `execution.step_count` 不递增，同一 Run 的多个
+    // `ModelStep::Complete`（含内部 continuation）会拿同一 step_count 重复判定。
+    // 因此判定前先查 Run 的一次性闸门，命中且即将开始 phase 时才消耗——未命中
+    // 不消耗（配置竞态下后续判定仍可触发）；一旦开始 phase，端口错误/任务失败/
+    // 取消也都算该 Run 已执行过，不再自动重试重复反思。
+    if matches!(model_step, ModelStep::Complete { .. }) && !execution.interval_reflection_started()
+    {
         let interval_messages = port.reflection_mut().and_then(|reflection| {
             reflection.interval_reflection_messages(execution.step_count(), execution.messages())
         });
         if let Some(messages) = interval_messages {
+            execution.mark_interval_reflection_started();
             run_reflection_phase(
                 run,
                 execution,

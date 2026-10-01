@@ -1,4 +1,7 @@
-//! Shared reflection orchestration used by Interval, PreCompact, and Manual Run paths.
+//! Shared adapter-level reflection orchestration used by Interval, PreCompact, and
+//! Manual Run paths. The three triggers only share this adapter orchestration
+//! (`run` → `ReflectionTaskAdapter`); the state machine and `Reflection` activity
+//! stay with each owning engine/port path.
 
 use std::sync::Arc;
 
@@ -106,8 +109,10 @@ pub(crate) async fn announce_memory_update(
     Some(changed)
 }
 
-/// 三触发共用的反思编排（Interval/PreCompact/Manual），由端口实现
-/// （`RuntimeReflection::run_reflection`）复用；触发判定与状态机收口在 engine phase。
+/// 三触发（Interval/PreCompact/Manual）共享的底层 adapter 编排：只执行一次反思任务，
+/// 不驱动状态机也不发布 activity——状态机与 `Reflection` activity 由各自 owner 负责：
+/// Interval/PreCompact 由 engine 的 reflection phase 经 `ReflectionPhasePort::run_reflection`
+/// 驱动，Manual 由 `engine/manual_reflection.rs` 经 `ManualReflectionPort` 驱动。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run(
     adapter: &ReflectionTaskAdapter,

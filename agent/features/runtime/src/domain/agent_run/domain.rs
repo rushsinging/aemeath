@@ -372,10 +372,23 @@ impl Run {
             (RunStatus::DrainingInput, RunTransition::BeginReflection)
             | (RunStatus::ApplyingResponse, RunTransition::BeginReflection)
             | (RunStatus::Compacting, RunTransition::BeginReflection) => RunStatus::Reflecting,
-            (RunStatus::Reflecting, RunTransition::ReflectionCompleted) => self
-                .reflection_return_status
-                .take()
-                .expect("BeginReflection 转移时已记录 reflection_return_status"),
+            (RunStatus::Reflecting, RunTransition::ReflectionCompleted) => {
+                // 畸形内部状态（生产不可达）：`BeginReflection` 过意图 gate 时必然
+                // 记录返回相位，此处缺失说明状态被破坏——与其余拒绝路径一致返回
+                // IllegalTransition 并保持状态不变，NEVER panic。
+                let Some(return_status) = self.reflection_return_status.take() else {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "run state transition rejected: run_id={} 反思收口缺少 reflection_return_status（畸形内部状态）",
+                        self.id,
+                    );
+                    return Err(RunTransitionError::IllegalTransition {
+                        from: RunStatus::Reflecting,
+                        transition: RunTransition::ReflectionCompleted,
+                    });
+                };
+                return_status
+            }
             (RunStatus::PreparingContext, RunTransition::ContextPrepared) => {
                 RunStatus::InvokingModel
             }
@@ -704,6 +717,15 @@ impl Run {
     #[cfg(test)]
     pub fn set_pending_completion_result(&mut self, result: String) {
         self.pending_completion_result = Some(result);
+    }
+
+    /// 测试 seam：清空 `reflection_return_status`，构造畸形内部状态——处于
+    /// `Reflecting` 却缺失返回相位（生产不可达：`BeginReflection` 过意图 gate
+    /// 时必然记录）。用于验证 `ReflectionCompleted` 收口以 `IllegalTransition`
+    /// 报错而不是 panic。
+    #[cfg(test)]
+    pub fn clear_reflection_return_status_for_test(&mut self) {
+        self.reflection_return_status = None;
     }
 
     /// #1272: The next drain epoch the engine should expect.

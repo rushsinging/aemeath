@@ -134,6 +134,30 @@ fn step_count_is_owned_by_execution_state() {
 }
 
 #[test]
+fn interval_reflection_latch_is_one_shot_per_run() {
+    let mut state = RunExecutionState::new();
+    assert!(
+        !state.interval_reflection_started(),
+        "新 Run 的 Interval 反思闸门必须未消耗"
+    );
+
+    state.mark_interval_reflection_started();
+    assert!(state.interval_reflection_started());
+
+    state.mark_interval_reflection_started();
+    assert!(
+        state.interval_reflection_started(),
+        "重复标记必须保持已消耗（幂等）"
+    );
+
+    state.begin_step();
+    assert!(
+        state.interval_reflection_started(),
+        "闸门属于 Run 而非单个 step，begin_step 不得重置"
+    );
+}
+
+#[test]
 fn context_projection_is_replaced_as_one_step_snapshot() {
     let mut state = RunExecutionState::new();
     state.replace_context_state(context_request("step-1"), None);

@@ -2321,6 +2321,31 @@ fn reflection_completed_outside_reflecting_is_illegal() {
 }
 
 #[test]
+fn reflection_completed_without_return_status_is_illegal_not_panic() {
+    // 畸形内部状态（生产不可达）：处于 `Reflecting` 但 `reflection_return_status`
+    // 缺失。收口必须与其余拒绝路径一致返回 `IllegalTransition`，NEVER panic。
+    let mut run = Run::new(RunSpec::manual_reflection(), None);
+    run.start_draining().unwrap();
+    run.begin_manual_reflection().unwrap();
+    assert_eq!(run.status(), RunStatus::Reflecting);
+    run.clear_reflection_return_status_for_test();
+
+    assert_eq!(
+        run.transition(RunTransition::ReflectionCompleted),
+        Err(RunTransitionError::IllegalTransition {
+            from: RunStatus::Reflecting,
+            transition: RunTransition::ReflectionCompleted,
+        }),
+        "缺失返回相位的反思收口必须以 IllegalTransition 报错"
+    );
+    assert_eq!(
+        run.status(),
+        RunStatus::Reflecting,
+        "被拒绝的迁移不得修改状态"
+    );
+}
+
+#[test]
 fn conversation_run_rejects_begin_reflection_from_draining_input() {
     let mut run = run_at_status(RunStatus::DrainingInput);
     let events_before = run.events().len();
