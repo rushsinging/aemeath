@@ -873,3 +873,61 @@ fn constant_placement_cfg_gated_must_also_relocate() {
         "函数内缩进 const 仍不治理: {violations:?}"
     );
 }
+
+#[test]
+fn constant_placement_state_containers_must_live_in_state_rs() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/state.rs"),
+        "static BOOT_TS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();\n",
+    );
+    write_source(
+        &temp.path().join("crates/x/src/service.rs"),
+        "static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n",
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "constant.test.placement",
+        "assertion": "constant_placement",
+        "scope": { "kind": "workspace" },
+        "reason": "test",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let ok = crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/state.rs")
+        .expect("enforce");
+    assert!(ok.is_empty(), "state.rs 是状态容器的家: {ok:?}");
+
+    let bad = crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/service.rs")
+        .expect("enforce");
+    assert!(
+        bad.iter().any(|v| v.message.contains("COUNTER")),
+        "行为文件内的状态容器同样必须归位 state.rs: {bad:?}"
+    );
+}
+
+#[test]
+fn constant_placement_rejects_constant_table_file() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    let table = "const A_COLOR: Color = Color::Red;\n".repeat(6);
+    write_source(
+        &temp.path().join("crates/x/src/palette.rs"),
+        &format!("{table}pub fn mix()\n"),
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "constant.test.placement",
+        "assertion": "constant_placement",
+        "scope": { "kind": "workspace" },
+        "reason": "test",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/palette.rs")
+            .expect("enforce");
+    assert!(
+        !violations.is_empty(),
+        "常量表文件同样必须归位 mod 内 constants.rs: {violations:?}"
+    );
+}

@@ -47,14 +47,6 @@ pub struct ReflectionOutput {
     pub outdated_memories: Vec<String>,
 }
 
-// Value-namespace compatibility for callers of the former unit placeholder.
-#[allow(non_upper_case_globals)]
-pub const ReflectionOutput: ReflectionOutput = ReflectionOutput {
-    deviations: Vec::new(),
-    suggested_memories: Vec::new(),
-    outdated_memories: Vec::new(),
-};
-
 #[derive(Debug, Error)]
 pub enum ReflectionError {
     #[error("reflection response JSON is invalid")]
