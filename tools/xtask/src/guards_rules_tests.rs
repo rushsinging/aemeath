@@ -191,7 +191,7 @@ fn pattern_exclusion_flags_forbidden_pattern_with_file_exemption() {
         "assertion": "pattern_exclusion",
         "scope": { "kind": "path_prefix", "value": "crates/tui" },
         "forbidden_patterns": ["tokio::spawn"],
-        "exclusions": [{ "path": "crates/tui/runtime" }],
+        "exclusions": [{"path": "crates/tui/runtime", "reason": "测试豁免", "owner": "测试owner", "exit_condition": "测试退出", "since": "#fixture"}],
         "reason": "model/update 目录禁止副作用",
         "profile": "full"
     }))
@@ -639,7 +639,7 @@ fn pattern_exclusion_multi_prefix_keeps_file_exemptions() {
             "values": ["apps/cli/src/tui/app", "apps/cli/src/tui/view_model"]
         },
         "forbidden_patterns": ["Command::new("],
-        "exclusions": [{ "path": "apps/cli/src/tui/app/run_loop.rs" }],
+        "exclusions": [{"path": "apps/cli/src/tui/app/run_loop.rs", "reason": "测试豁免", "owner": "测试owner", "exit_condition": "测试退出", "since": "#fixture"}],
         "reason": "编排层豁免",
         "profile": "full"
     }))
@@ -728,7 +728,7 @@ fn pattern_exclusion_regex_respects_exclusions_and_allow_marker() {
         "scope": { "kind": "path_prefix", "value": "crates/x/src" },
         "forbidden_patterns": [],
         "forbidden_regex": ["\\bstruct\\s+\\w*Projection\\w*"],
-        "exclusions": [{"path": "crates/x/src/allowed.rs", "reason": "legacy"}],
+        "exclusions": [{"path": "crates/x/src/allowed.rs", "reason": "测试豁免", "owner": "测试owner", "exit_condition": "测试退出", "since": "#fixture"}],
         "allow_marker": "allow broad_name",
         "reason": "test",
         "profile": "full"
@@ -836,7 +836,7 @@ fn count_ratio_strips_cfg_test_module_and_exclusions() {
     );
 
     let rule = count_ratio_rule(serde_json::json!([
-        {"path": "crates/x/src/exempt.rs", "reason": "owner boundary"}
+        {"path": "crates/x/src/exempt.rs", "reason": "测试豁免", "owner": "测试owner", "exit_condition": "测试退出", "since": "#fixture"}
     ]));
     for file in ["crates/x/src/run.rs", "crates/x/src/exempt.rs"] {
         let violations =
@@ -1003,7 +1003,7 @@ fn constant_placement_rule_exclusions_skip_test_domain_file() {
         "id": "constant.test.placement",
         "assertion": "constant_placement",
         "scope": { "kind": "workspace" },
-        "exclusions": [{"path": "crates/x/src/guard_fixture.rs", "reason": "cfg(test) 声明点门控"}],
+        "exclusions": [{"path": "crates/x/src/guard_fixture.rs", "reason": "测试豁免", "owner": "测试owner", "exit_condition": "测试退出", "since": "#fixture"}],
         "reason": "test",
         "profile": "full"
     }))

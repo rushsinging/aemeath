@@ -46,6 +46,7 @@ Simon Brown 的 [Package by Component](https://simonbrown.je/modular-monolith/) 
 7. 具体实现选择与 factory 调用 **MUST** 收敛到 Composition Root；能力 **MAY** 用 composition-only opaque factory 构造模块私有 detail，但内部 **NEVER** 自行读取全局配置、选择候选生产实现或从业务路径触发 factory；**factory 只限生产代码路径**，测试代码 **MAY** 绕过 factory 与 Composition Root 直接构造轻量 fake / stub 实现注入被测策略。
 8. 公共抽象 **MUST** 有真实消费者与契约测试；没有行为差异的转发接口 **SHOULD** 内联或删除。
 9. 架构边界 **MUST** 尽可能由编译器和机械守卫验证；评审约定 **NEVER** 是循环依赖、越界 import 或公开面膨胀的唯一防线。
+10. 模块级 `const` / `static` 的**双轨归位**：纯值 **MUST** 位于 owning 层的 `constants.rs` / `consts.rs`（分节注释标明来源文件），进程/线程状态容器 **MUST** 位于 `state.rs` 或紧贴其领域的诊断模块；`lib.rs` **MUST** 零常量定义，只允许 `pub use constants::{...}` 精确 re-export。机械锁定由 `pattern.all.constant-placement` 与 `pattern.all.lib-rs-no-const-definitions`（均 fast 档）承担；断言器静态豁免形态：函数/impl/宏体内缩进形态（局部 `const`、关联常量、bitflags 位标志）、`const fn`、守卫工具自身。可变全局单例（`OnceLock` / `Mutex` / `Atomic*` / `RefCell` const-block）是状态而非常量债务，不参与镜像判定，但命名 **MUST** 表达职责——**NEVER** 使用 `CACHE` 类泛化名造成跨 crate 同名异物。审计工具 `scripts/audit_constants.py` 是归位真相源（可再生成；收口基线为违规 A/B/C 三零）。
 
 ## 3. Hexagonal 默认分层与按证据启用的结构选项
 
@@ -476,3 +477,4 @@ components/foo/
 | 2026-07-16 | 在决定层明确 Hexagonal 默认结构的工程依据：稳定层名与单向依赖易由 Guard 证明，可阻止 domain→adapter、I/O 下沉、PL 泄漏、循环依赖与 façade 膨胀；例外结构必须提供等价依赖矩阵和故意违规证据 | [#880](https://github.com/rushsinging/aemeath/issues/880) |
 | 2026-07-15 | 增加大包递归能力拆分、叶子按证据塑形、CQRS-lite 与 REPR 启用判据；Runtime 经事实复核确认为单一 `agent_execution` 能力，crate 根采用轻量六边形且当前不触发 CQRS-lite/REPR | [#995](https://github.com/rushsinging/aemeath/issues/995) / [#874](https://github.com/rushsinging/aemeath/issues/874) |
 | 2026-07-15 | **v2 修订**：Hexagonal 成为 crate 内部默认组织方式；`capabilities/` 降格为可选；COLA 层名退役映射；§4 投影全部改写为 Hexagonal 形状；§7 精确化“拒绝固定横向目录”措辞 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-10-01 | §2 新增不变量 10：模块级常量双轨归位（纯值→owning 层 `constants.rs`、状态→`state.rs`；`lib.rs` 零定义；placement 守卫 + `audit_constants.py` 真相源三零基线），并冻结豁免形态清单（缩进形态/`const fn`/可变单例命名规范） | [#1146](https://github.com/rushsinging/aemeath/issues/1146) |

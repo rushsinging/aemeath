@@ -515,7 +515,10 @@
       "exclusions": [
         {
           "path": "agent/features/runtime/src/application/run/active_registry.rs",
-          "reason": "ActiveRunRegistry 是 Tool 装配的唯一登记点"
+          "reason": "ActiveRunRegistry 是 Tool 装配的唯一登记点",
+          "owner": "runtime",
+          "exit_condition": "Tool 装配出现第二个登记点或装配收口类型化",
+          "since": "#972"
         }
       ],
       "reason": "Tool/Skill/ToolResult/ActiveRun 依赖由 composition 装配注入；ActiveRunRegistry 生产构造已收敛 wire_active_run_registry 工厂（Default 仅测试），正向装配完整性由 RuntimeBootstrapDependencies 必填字段类型承载；active_registry.rs 豁免：wire_active_run_registry 工厂定义与 Default(test) impl 所在文件，无生产违规面",
@@ -599,7 +602,10 @@
       "exclusions": [
         {
           "path": "agent/features/project/src/adapters/git.rs",
-          "reason": "git 子进程全仓唯一 spawn owner（run_git_command 窄面；context probe / runtime git 上下文统一经此执行）"
+          "reason": "git 子进程全仓唯一 spawn owner（run_git_command 窄面；context probe / runtime git 上下文统一经此执行）",
+          "owner": "project",
+          "exit_condition": "git spawn 窄面类型化或迁移时同步更新",
+          "since": "#1146"
         }
       ],
       "reason": "R5：git 子进程 spawn 全仓收敛至 project run_git_command 窄面单一 owner；违规即绕过统一 locale/非交互隔离",
@@ -654,7 +660,10 @@
       "exclusions": [
         {
           "path": "apps/cli/src/tui/render/output/selection_overlay.rs",
-          "reason": "selection_overlay 是唯一合法上色路径"
+          "reason": "selection_overlay 是唯一合法上色路径",
+          "owner": "cli/tui",
+          "exit_condition": "选区上色路径并入统一渲染管线时移除",
+          "since": "#59"
         }
       ],
       "reason": "F-19：render/output 纯渲染——禁 Model 可变依赖/IO/旁路选区上色（selection_overlay 唯一上色路径豁免）",
@@ -2474,11 +2483,17 @@
       "exclusions": [
         {
           "path": "packages/global/utils/src/process.rs",
-          "reason": "session 隔离边界 owner（guard-registry:policy.process.noninteractive-child-session）"
+          "reason": "session 隔离边界 owner（guard-registry:policy.process.noninteractive-child-session）",
+          "owner": "utils",
+          "exit_condition": "session 隔离边界并入类型化构造器",
+          "since": "#1679"
         },
         {
           "path": "agent/features/project/src/lib.rs",
-          "reason": "原脚本豁免（worktree 创建走独立边界）"
+          "reason": "原脚本豁免（worktree 创建走独立边界）",
+          "owner": "project",
+          "exit_condition": "worktree 创建走统一进程构造器",
+          "since": "#1679"
         }
       ],
       "reason": "每个外部进程构造必须配对非交互 session 隔离（check-noninteractive-child-session.sh 数据化）",
@@ -2528,7 +2543,10 @@
       "exclusions": [
         {
           "path": "packages/global/logging/src/domain/routing_guard.rs",
-          "reason": "整个模块经 domain.rs 声明点 #[cfg(test)] 门控，属测试域；OWNERS/NON_RUNTIME_MEMBERS/GUARD_SELF_PATH 为测试基建数据与自引用路径"
+          "reason": "整个模块经 domain.rs 声明点 #[cfg(test)] 门控，属测试域；OWNERS/NON_RUNTIME_MEMBERS/GUARD_SELF_PATH 为测试基建数据与自引用路径",
+          "owner": "logging",
+          "exit_condition": "routing_guard 转为生产域或移除 #[cfg(test)] 门控时迁移其常量",
+          "since": "#1146"
         }
       ]
     }

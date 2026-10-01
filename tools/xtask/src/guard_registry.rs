@@ -350,6 +350,23 @@ fn validate_registry(registry: &Registry) -> Result<RegistryReport> {
                 }
             }
         }
+        // 结构化豁免：owner / exit_condition / since 非空（白名单消灭后的豁免终态契约）。
+        if let crate::guards_rules::RuleSpec::PatternExclusion { exclusions, .. } = &rule.spec {
+            for exclusion in exclusions {
+                for (field, value) in [
+                    ("owner", &exclusion.owner),
+                    ("exit_condition", &exclusion.exit_condition),
+                    ("since", &exclusion.since),
+                ] {
+                    if value.trim().is_empty() {
+                        violations.push(format!(
+                            "规则 {} 的豁免 {} 缺少结构化字段 {}：豁免 MUST 可追溯可退出",
+                            rule.id, exclusion.path, field
+                        ));
+                    }
+                }
+            }
+        }
     }
     if !violations.is_empty() {
         anyhow::bail!(violations.join("\n"));
