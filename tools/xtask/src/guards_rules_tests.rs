@@ -250,7 +250,7 @@ fn pattern_exclusion_skips_inline_cfg_test_region() {
     );
 
     let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
-        "id": "pattern.runtime.no-hook-dispatcher-construction",
+        "id": "pattern.runtime.fixture-dispatcher-construction",
         "assertion": "pattern_exclusion",
         "scope": { "kind": "path_prefix", "value": "crates/runtime" },
         "forbidden_patterns": ["build_dispatcher("],

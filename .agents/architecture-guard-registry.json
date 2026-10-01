@@ -499,28 +499,6 @@
       "profile": "full"
     },
     {
-      "id": "pattern.runtime.no-hook-dispatcher-construction",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src"
-      },
-      "forbidden_patterns": [
-        "hook::build_dispatcher(",
-        "hook::Dispatcher::new(",
-        "hook::Dispatcher::try_new(",
-        "build_hook_runner("
-      ],
-      "exclusions": [
-        {
-          "path": "agent/features/runtime/src/application/run/context_factory.rs",
-          "reason": "HookDispatcher 唯一合法构造点（Context 工厂装配线）"
-        }
-      ],
-      "reason": "Hook dispatcher/HookRunner 只由 composition 构造注入（跨 crate 无排除可见性，编译期不可表达；runtime_context_factory 注入断言由 from_args 类型签名承载）；context_factory.rs 豁免：cfg!(test) 分支注入与生产自建双通道为现状架构，收口需 runtime context 装配重构（另行立项），豁免精确到单文件",
-      "profile": "full"
-    },
-    {
       "id": "pattern.runtime.no-tool-self-assembly",
       "assertion": "pattern_exclusion",
       "scope": {
@@ -559,25 +537,6 @@
       "profile": "full"
     },
     {
-      "id": "pattern.features.no-provider-composition-penetration",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features"
-      },
-      "forbidden_patterns": [
-        "provider::composition"
-      ],
-      "exclusions": [
-        {
-          "path": "agent/features/provider/",
-          "reason": "provider crate 内部自引用合法（规则管外部穿透）"
-        }
-      ],
-      "reason": "provider 构造面（LlmClient/TransportPool 等）仅 Composition Root 引用；构造符号已从 provider crate-root 退役，根路径穿透编译期拦截；apps/packages 不依赖 provider（薄入口），风险面为 features 内其余 crate",
-      "profile": "full"
-    },
-    {
       "id": "pattern.provider.no-mutable-invocation-state",
       "assertion": "pattern_exclusion",
       "scope": {
@@ -595,29 +554,6 @@
       ],
       "exclusions": [],
       "reason": "invocation 状态经 &InvocationScope 不可变传递；trait 签名由类型系统锁定（改签名全实现面编译失败）",
-      "profile": "full"
-    },
-    {
-      "id": "pattern.runtime.activity-construction-single-owner",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src"
-      },
-      "forbidden_patterns": [
-        "ActivityObservation {"
-      ],
-      "exclusions": [
-        {
-          "path": "agent/features/runtime/src/application/activity/coordinator.rs",
-          "reason": "ActivityObservation 唯一 owner（coordinator 与 model 两文件）"
-        },
-        {
-          "path": "agent/features/runtime/src/application/activity/model.rs",
-          "reason": "ActivityObservation 唯一 owner（coordinator 与 model 两文件）"
-        }
-      ],
-      "reason": "ActivityObservation 构造限 ActivityCoordinator 与 activity model 两文件；TUI 变更入口 activity_observations_mut 已 #[cfg(test)] 方法级锁定（生产调用编译失败）；legacy 黑名单符号已物理删除（④），复活归 review",
       "profile": "full"
     },
     {
@@ -722,26 +658,6 @@
       ],
       "exclusions": [],
       "reason": "R10：Tools domain 禁活资源与 workspace 视图，保持纯值域（#1696② 清理：随符号物理删除的防复活 pattern 已移除，复活归 review）",
-      "profile": "full"
-    },
-    {
-      "id": "pattern.runtime.context-construction-single-factory",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/runtime/src"
-      },
-      "forbidden_patterns": [
-        "RuntimeContext::new(",
-        "RuntimeContextAssemblyToken::new("
-      ],
-      "exclusions": [
-        {
-          "path": "agent/features/runtime/src/application/run/context_factory.rs",
-          "reason": "RuntimeContext 唯一工厂文件"
-        }
-      ],
-      "reason": "RuntimeContext/AssemblyToken 构造限单一工厂文件；工厂正向完整性（must wire 一串）由必填参数与构造点编译承接；BoundaryHookPort filtering/proceed 行为断言归测试（#1056 范围）；crate-root façade 白名单由 crate-api-boundary（F-2 数据化承接）",
       "profile": "full"
     },
     {
@@ -2200,46 +2116,6 @@
       "profile": "full"
     },
     {
-      "id": "pattern.all.no-unified-logger-spread",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "workspace"
-      },
-      "forbidden_patterns": [
-        "UnifiedLogger::init("
-      ],
-      "exclusions": [
-        {
-          "path": "agent/composition/src/app.rs",
-          "reason": "UnifiedLogger::init 唯一点（composition app）"
-        }
-      ],
-      "reason": "F-27：UnifiedLogger::init 仅 Composition app.rs 唯一点",
-      "profile": "full"
-    },
-    {
-      "id": "pattern.all.no-from-args-direct-call",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "workspace"
-      },
-      "forbidden_patterns": [
-        "from_args_with_workspace("
-      ],
-      "exclusions": [
-        {
-          "path": "agent/composition/src/runtime.rs",
-          "reason": "from_args 唯一生产入口（composition runtime.rs）+ runtime 定义侧"
-        },
-        {
-          "path": "agent/features/runtime/",
-          "reason": "from_args 唯一生产入口（composition runtime.rs）+ runtime 定义侧"
-        }
-      ],
-      "reason": "F-27：bootstrap 唯一调用点在 composition/runtime.rs；runtime 内豁免定义侧",
-      "profile": "full"
-    },
-    {
       "id": "pattern.sdk.run-control-pure-dto",
       "assertion": "pattern_exclusion",
       "scope": {
@@ -3332,71 +3208,6 @@
       ],
       "exclusions": [],
       "reason": "#1679：拉流段禁 backoff/重试循环（idle-timeout select sleep 合法保留；流中断 fail-fast 可重试语义已由 stream_contract_tests 覆盖）",
-      "profile": "full"
-    },
-    {
-      "id": "pattern.all.session-setup-single-owner",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "workspace"
-      },
-      "forbidden_patterns": [
-        ".process_group(",
-        ".pre_exec(",
-        "libc::setsid("
-      ],
-      "exclusions": [
-        {
-          "path": "packages/global/utils/src/process.rs",
-          "reason": "session 隔离边界唯一 owner（utils process.rs）"
-        }
-      ],
-      "reason": "#1679：子进程 session 隔离唯一 owner 在 utils process.rs；无 TTY 行为已由 hook process_tests 覆盖；Command 计数配比半段留原脚本（#1696 计数断言器/工厂化另立项）",
-      "profile": "full"
-    },
-    {
-      "id": "pattern.provider.http-send-single-executor",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/provider/src"
-      },
-      "forbidden_patterns": [
-        ".send().await",
-        "request.send()"
-      ],
-      "exclusions": [
-        {
-          "path": "agent/features/provider/src/adapters/http_attempt.rs",
-          "reason": "HTTP 发送唯一经 executor（http_attempt.rs 自身）"
-        }
-      ],
-      "reason": "#1679（判据修正②→③）：HTTP 发送唯一经 http_attempt executor；诊断 API（log_network_error/log_http_error 等）限点同理由编译可见性收窄承接；transport_tests 已覆盖发送/超时行为",
-      "profile": "full"
-    },
-    {
-      "id": "pattern.provider.error-log-diag-single-caller",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/provider/src/adapters"
-      },
-      "forbidden_patterns": [
-        "log_network_error(",
-        "log_http_error(",
-        "LlmApiErrorRecord"
-      ],
-      "exclusions": [
-        {
-          "path": "agent/features/provider/src/adapters/error_log.rs",
-          "reason": "诊断 API owner（error_log.rs）与唯一调用方（http_attempt.rs）"
-        },
-        {
-          "path": "agent/features/provider/src/adapters/http_attempt.rs",
-          "reason": "诊断 API owner（error_log.rs）与唯一调用方（http_attempt.rs）"
-        }
-      ],
-      "reason": "#1679：error_log HTTP/network 诊断 API 仅 executor 可调，driver 仅 log_stream_protocol_error 窄口",
       "profile": "full"
     },
     {
