@@ -255,6 +255,81 @@ async fn reflect_now_idle_becomes_pending_command_and_busy_drops_with_notice() {
     }
 }
 
+/// 裁决 3：`drop_queued_reflect_now` 丢弃 pending buffer 中全部积压的
+/// `/reflect-now`（busy 期间 NEVER 排队执行），逐条发布既有丢弃提示并同步
+/// 排队快照；其余事件原序保留。run_launch 循环顶 gate 消费 pending buffer 前
+/// 经本函数统一丢弃——idle 受理路径（idle_lifecycle gate）不经此函数。
+#[tokio::test]
+async fn drop_queued_reflect_now_discards_all_with_notice_and_keeps_rest_in_order() {
+    let buffer = PendingInputBuffer::default();
+    buffer.push(ChatInputEvent::Compact);
+    buffer.push(ChatInputEvent::ReflectNow);
+    buffer.push(ChatInputEvent::WithdrawAll);
+    buffer.push(ChatInputEvent::ReflectNow);
+    let sink = TestSink::default();
+
+    let dropped = drop_queued_reflect_now(&buffer, &sink);
+
+    assert_eq!(dropped, 2, "必须丢弃全部两条 ReflectNow");
+    let remaining = buffer.drain_all();
+    assert_eq!(remaining.len(), 2, "其余事件必须保留: {remaining:?}");
+    assert!(
+        matches!(remaining[0], ChatInputEvent::Compact),
+        "保留事件必须原序: {remaining:?}"
+    );
+    assert!(
+        matches!(remaining[1], ChatInputEvent::WithdrawAll),
+        "保留事件必须原序: {remaining:?}"
+    );
+
+    let events = sink.events.lock().unwrap();
+    let notices: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            RuntimeStreamEvent::CommandResultText { text, is_error } => Some((text, is_error)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        notices.len(),
+        2,
+        "每条被丢弃的 ReflectNow 都必须各发一条提示"
+    );
+    for (text, is_error) in &notices {
+        assert!(!**is_error, "丢弃是提示而非错误: {text}");
+        assert!(
+            text.contains("Reflection"),
+            "提示必须沿用既有文案（含 Reflection）: {text}"
+        );
+    }
+    let snapshots: Vec<_> = events
+        .iter()
+        .filter(|event| matches!(event, RuntimeStreamEvent::ControlCommandsQueued { .. }))
+        .collect();
+    assert_eq!(
+        snapshots.len(),
+        1,
+        "丢弃后必须同步一次排队快照，让 TUI 占位与权威队列一致"
+    );
+}
+
+/// 无积压 ReflectNow 时 no-op：不发提示、不发快照。
+#[tokio::test]
+async fn drop_queued_reflect_now_without_reflect_now_is_noop() {
+    let buffer = PendingInputBuffer::default();
+    buffer.push(ChatInputEvent::Compact);
+    let sink = TestSink::default();
+
+    let dropped = drop_queued_reflect_now(&buffer, &sink);
+
+    assert_eq!(dropped, 0);
+    assert_eq!(buffer.len(), 1, "无 ReflectNow 时 buffer 不得变化");
+    assert!(
+        sink.events.lock().unwrap().is_empty(),
+        "无丢弃时不得发任何事件"
+    );
+}
+
 #[tokio::test]
 async fn test_run_loop_gate_before_finish_continues_on_user_message() {
     let buffer = PendingInputBuffer::default();

@@ -11,6 +11,134 @@ fn make_spawn_refs() -> SpawnContextRefs {
     SpawnContextRefs { agent_client: None }
 }
 
+/// 构造 live main root activity（purpose 可参），注入 conversation 的 activity 镜像，
+/// 模拟 Runtime 权威快照中 Main / Manual Reflection Run 正在执行的事实。
+fn inject_live_main_root(
+    app: &mut App,
+    run_id: &str,
+    purpose: crate::tui::adapter::tui_runtime_event::TuiRunPurpose,
+) {
+    use crate::tui::adapter::tui_runtime_event::*;
+    use crate::tui::model::conversation::interaction::UiRunId;
+    let root = TuiActivityObservation {
+        id: UiActivityId::from("root"),
+        run_id: UiRunId::from(run_id),
+        run_step_id: None,
+        parent_activity_id: None,
+        source: TuiActivitySource::Run,
+        kind: TuiActivityKind::Run,
+        state: TuiActivityState::Running,
+        detail: TuiActivityDetail::Run { purpose },
+        audience: TuiActivityAudience::User,
+        revision: 1,
+        timing: TuiActivityTiming::default(),
+    };
+    app.model
+        .conversation
+        .activity_observations_mut()
+        .replace_for_test(UiRunId::from(run_id), 1, vec![root]);
+}
+
+/// Manual Reflection Run 不产生 RunStep（`active_run_step` 为 None）且 slash 事件不开
+/// turn（`is_processing` 为 false）：Esc 必须经 `CancelCurrentRun` 让 Runtime 裁决取消，
+/// NEVER 静默无效。
+#[test]
+fn esc_during_live_reflection_run_requests_current_run_cancel() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    inject_live_main_root(
+        &mut app,
+        "reflection-run",
+        crate::tui::adapter::tui_runtime_event::TuiRunPurpose::Reflection,
+    );
+    let spawn_refs = make_spawn_refs();
+
+    let result = app.update_key(
+        crossterm::event::KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        &spawn_refs,
+    );
+
+    assert_eq!(result.effects, vec![Effect::CancelCurrentRun]);
+}
+
+/// Ctrl-C 与 Esc 同一取消面：reflection 运行期间视为有活跃执行，优先 RequestCancel
+/// 而非 ClearInput / WarnExit。
+#[test]
+fn ctrl_c_during_live_reflection_run_requests_current_run_cancel() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    inject_live_main_root(
+        &mut app,
+        "reflection-run",
+        crate::tui::adapter::tui_runtime_event::TuiRunPurpose::Reflection,
+    );
+    let spawn_refs = make_spawn_refs();
+
+    let result = app.update_key(
+        crossterm::event::KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        &spawn_refs,
+    );
+
+    assert_eq!(result.effects, vec![Effect::CancelCurrentRun]);
+}
+
+/// Main Run 的 step 间隙（`is_processing` 仍为 true、live Main root 存在）：Esc
+/// 发 `CancelCurrentRun`，由 Runtime 裁决（间隙无执行单元 → NoActiveStep 提示），
+/// TUI 不自行判断间隙语义。
+#[test]
+fn esc_in_step_gap_of_processing_run_requests_current_run_cancel() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    app.chat.start_processing();
+    inject_live_main_root(
+        &mut app,
+        "main-run",
+        crate::tui::adapter::tui_runtime_event::TuiRunPurpose::Main,
+    );
+    let spawn_refs = make_spawn_refs();
+
+    let result = app.update_key(
+        crossterm::event::KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        &spawn_refs,
+    );
+
+    assert_eq!(result.effects, vec![Effect::CancelCurrentRun]);
+}
+
+/// 有 live Main root 且 step 执行中（processing）：Esc 同样发 `CancelCurrentRun`——
+/// 统一入口不区分 step 是否可寻址，registry 内部有 step 走 CancelStep 协议。
+#[test]
+fn esc_with_live_main_root_sends_cancel_current_run() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    app.chat.start_processing();
+    inject_live_main_root(
+        &mut app,
+        "run-1",
+        crate::tui::adapter::tui_runtime_event::TuiRunPurpose::Main,
+    );
+    let spawn_refs = make_spawn_refs();
+
+    let result = app.update_key(
+        crossterm::event::KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        &spawn_refs,
+    );
+
+    assert_eq!(result.effects, vec![Effect::CancelCurrentRun]);
+}
+
 /// 忙碌时 slash 仍必须交给统一 CommandRouter/handler，不能压成 Runtime 无法执行的
 /// `ControlCommand`。否则 `/compact` 会在 busy gate 后被静默丢弃。
 #[test]
@@ -53,8 +181,11 @@ fn busy_slash_dispatches_synchronously_without_placeholder() {
     );
 }
 
+/// processing（turn 进行中）时 Esc / Ctrl-C 统一发 `CancelCurrentRun`（无 identity，
+/// Runtime 控制面裁决当前执行单元：有 step 走 step 取消协议，无 step 按 intent
+/// 分流）。TUI 不再持有 run/step identity 取消面。
 #[test]
-fn esc_and_ctrl_c_without_active_step_do_not_fall_back_to_identity_free_cancel() {
+fn esc_and_ctrl_c_during_processing_send_cancel_current_run() {
     let mut esc_app = App::new(
         "test-session".to_string(),
         std::path::PathBuf::from("/tmp"),
@@ -78,35 +209,50 @@ fn esc_and_ctrl_c_without_active_step_do_not_fall_back_to_identity_free_cancel()
         &spawn_refs,
     );
 
-    assert!(esc.effects.is_empty());
-    assert!(ctrl_c.effects.is_empty());
+    assert_eq!(esc.effects, vec![Effect::CancelCurrentRun]);
+    assert_eq!(ctrl_c.effects, vec![Effect::CancelCurrentRun]);
 }
 
+/// 无活跃执行（非 processing 且无 live main root）时 Esc / Ctrl-C 不发取消：
+/// idle 的 Ctrl-C 走 ClearInput / 双击 terminate（退出）路径，Esc 无效果。
 #[test]
-fn esc_and_ctrl_c_target_the_active_run_step_identity() {
-    let active_run_id = sdk::RunId::from_legacy_or_new("run-1");
-    let active_step_id = sdk::RunStepId::from_legacy_or_new("step-1");
-    let expected = Effect::CancelRunStep {
-        run_id: active_run_id.clone(),
-        step_id: active_step_id.clone(),
-    };
-
+fn esc_and_ctrl_c_without_active_execution_send_no_cancel() {
     let mut esc_app = App::new(
         "test-session".to_string(),
         std::path::PathBuf::from("/tmp"),
         "test-model".to_string(),
     );
-    esc_app.chat.start_processing();
-    esc_app.chat.active_run_step = Some((active_run_id, active_step_id));
     let spawn_refs = SpawnContextRefs { agent_client: None };
-
-    let result = esc_app.update_key(
+    let esc = esc_app.update_key(
         crossterm::event::KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
         &spawn_refs,
     );
 
-    assert_eq!(result.effects, vec![expected]);
-    assert!(esc_app.chat.is_processing);
+    let mut ctrl_c_app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    let ctrl_c = ctrl_c_app.update_key(
+        crossterm::event::KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        &spawn_refs,
+    );
+
+    assert!(
+        !esc.effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::CancelCurrentRun)),
+        "无活跃执行时 Esc 不得发取消: {:?}",
+        esc.effects
+    );
+    assert!(
+        !ctrl_c
+            .effects
+            .iter()
+            .any(|effect| matches!(effect, Effect::CancelCurrentRun)),
+        "无活跃执行时 Ctrl-C 不得发取消（走清空/退出路径）: {:?}",
+        ctrl_c.effects
+    );
 }
 
 #[test]

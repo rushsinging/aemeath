@@ -1,6 +1,6 @@
 use crate::tui::adapter::tui_runtime_event::{
     TuiActivityAudience, TuiActivityDetail, TuiActivityKind, TuiActivityObservation,
-    TuiActivityState, TuiModelStreamState, TuiRunPhaseKind, TuiRunPurpose,
+    TuiActivityState, TuiModelStreamState, TuiRunPhaseKind,
 };
 use crate::tui::model::conversation::activity_observation::ActivityObservationModel;
 use crate::tui::model::conversation::interaction::UiRunId;
@@ -31,7 +31,7 @@ impl ActivitySummaryAssembler {
         let root = model
             .activities()
             .iter()
-            .filter(|activity| is_live_main_root(activity))
+            .filter(|activity| activity.is_live_main_root())
             .max_by_key(|activity| activity.revision)?;
         if model.is_stale(&root.run_id) {
             return None;
@@ -82,22 +82,6 @@ impl ActivitySummaryAssembler {
             primary,
         })
     }
-}
-
-fn is_live_main_root(activity: &TuiActivityObservation) -> bool {
-    activity.kind == TuiActivityKind::Run
-        && activity.parent_activity_id.is_none()
-        && matches!(
-            activity.state,
-            TuiActivityState::Running | TuiActivityState::Waiting
-        )
-        && matches!(
-            activity.detail,
-            TuiActivityDetail::Run {
-                // Manual Reflection Run 的 root purpose=Reflection，同样驱动主 spinner。
-                purpose: TuiRunPurpose::Main | TuiRunPurpose::Reflection
-            }
-        )
 }
 
 fn is_live_phase(activity: &TuiActivityObservation) -> bool {

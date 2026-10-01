@@ -397,13 +397,24 @@ where
                           // accumulate in the Run-scoped buffer and are consumed within the
                           // same Run (#1272).
                           let idle_result = if manual_compaction_requested {
-  IdleResult::ManualCompactionRequested
-} else if manual_reflection_requested {
-  IdleResult::ManualReflectionRequested
-} else if !pending_input.is_empty() {
-                              // Busy control events are serviced at idle before the next queued user Run. They are
-                              // never appended to model context.
-                              let next_segment = ChatId::new_v7().to_string();
+      IdleResult::ManualCompactionRequested
+    } else if manual_reflection_requested {
+      IdleResult::ManualReflectionRequested
+    } else if !pending_input.is_empty() {
+                                  // 裁决 3：busy 期间积压的 `/reflect-now` NEVER 排队执行——
+                                  // 在 gate 消费 pending buffer 前统一丢弃并逐条提示（gate
+                                  // requeue 残留的拦截点；busy 积压的主拦截点在 Run 收尾的
+                                  // drain_remaining_events；idle 受理路径不经此分支）。
+                                  crate::application::loop_engine::chat::input_gate::drop_queued_reflect_now(
+                                      &pending_input,
+                                      &sink,
+                                  );
+                                  if pending_input.is_empty() {
+                                      continue;
+                                  }
+                                  // Busy control events are serviced at idle before the next queued user Run. They are
+                                  // never appended to model context.
+                                  let next_segment = ChatId::new_v7().to_string();
                               let gate = apply_gate(
                                   GateKind::BeforeLlm,
                                   &pending_input,

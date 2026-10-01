@@ -9,9 +9,7 @@ pub(crate) enum ExpectedEffect {
         text: String,
         replies: Vec<TuiMsg>,
     },
-    CancelRunStep {
-        run_id: sdk::RunId,
-        step_id: sdk::RunStepId,
+    CancelCurrentRun {
         replies: Vec<TuiMsg>,
     },
     ReadClipboardImage,
@@ -88,15 +86,9 @@ impl ScriptedEffectDriver {
                     replies.extend(scripted);
                 }
                 (
-                    Effect::CancelRunStep { run_id, step_id },
-                    ExpectedEffect::CancelRunStep {
-                        run_id: expected_run_id,
-                        step_id: expected_step_id,
-                        replies: scripted,
-                    },
+                    Effect::CancelCurrentRun,
+                    ExpectedEffect::CancelCurrentRun { replies: scripted },
                 ) => {
-                    assert_eq!(run_id, &expected_run_id, "cancel run id mismatch");
-                    assert_eq!(step_id, &expected_step_id, "cancel step id mismatch");
                     replies.extend(scripted);
                 }
                 (Effect::ReadClipboardImage, ExpectedEffect::ReadClipboardImage) => {}

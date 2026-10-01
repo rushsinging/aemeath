@@ -34,7 +34,11 @@ pub async fn launch(
 ) -> RunLaunchResult {
     let run_id = instance.run().id().clone();
     if instance.run().parent_id().is_none() {
-        active_run.activate_main(run_id.clone(), cancel.clone());
+        active_run.activate_main(
+            run_id.clone(),
+            cancel.clone(),
+            instance.run().spec().intent(),
+        );
     } else {
         active_run.activate_child(run_id.clone(), cancel.clone());
     }

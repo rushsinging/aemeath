@@ -397,6 +397,18 @@ pub trait InputPort: Send {
         expected_epoch: DrainEpoch,
     ) -> Result<DrainOutcome, LoopEngineError>;
 
+    /// 把 drain 出的用户输入批回流 session 输入队列：单用途 Run（Manual
+    /// Compaction/Reflection）NEVER 进入模型调用，busy 期间到达的 user message
+    /// 必须由下一个会话 Run 消费，本 Run 走向 `EmptyAndSealed` 正常收口。
+    /// 仅 `InputMode::SessionQueue` 的 adapter（`BufferedInputAdapter`）需要覆写；
+    /// 默认实现报错以暴露未接线（单用途 Run 只在 session 主流上创建）。
+    fn defer_user_batch(&mut self, batch: Vec<LoopInput>) -> Result<(), LoopEngineError> {
+        let _ = batch;
+        Err(LoopEngineError::Adapter(
+            "InputPort::defer_user_batch 未覆写：单用途 Run 的用户输入回流未接线".to_string(),
+        ))
+    }
+
     fn schedule_internal_continuation(&mut self, _kind: InternalContinuationKind) {}
 
     /// Drain input while the Run is AwaitingUser without sealing the input source.
