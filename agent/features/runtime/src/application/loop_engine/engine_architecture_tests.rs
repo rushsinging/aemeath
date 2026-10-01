@@ -540,6 +540,8 @@ struct ScriptedObservations {
     cancelled_steps: Vec<sdk::RunStepId>,
     finalized_steps: Vec<sdk::RunStepId>,
     frozen_steps: Vec<sdk::RunStepId>,
+    /// 单用途 Run 回流的用户输入批（`defer_user_batch` 记录，每批取文本）。
+    deferred_batches: Vec<Vec<String>>,
 }
 
 struct ScriptedState {
@@ -913,6 +915,15 @@ impl ScriptedScenario {
         self.state.lock().unwrap().observations.calls.clone()
     }
 
+    fn deferred_batches(&self) -> Vec<Vec<String>> {
+        self.state
+            .lock()
+            .unwrap()
+            .observations
+            .deferred_batches
+            .clone()
+    }
+
     fn events(&self) -> Vec<RuntimeLifecycleEvent> {
         self.state.lock().unwrap().observations.events.clone()
     }
@@ -972,6 +983,20 @@ impl ScriptedPorts {
 
 #[async_trait::async_trait]
 impl InputPort for InputFake {
+    fn defer_user_batch(
+        &mut self,
+        batch: Vec<crate::application::loop_engine::engine::LoopInput>,
+    ) -> Result<(), LoopEngineError> {
+        let texts = batch.into_iter().map(|input| input.text).collect();
+        self.0
+            .lock()
+            .unwrap()
+            .observations
+            .deferred_batches
+            .push(texts);
+        Ok(())
+    }
+
     async fn drain_input(
         &mut self,
         expected_epoch: DrainEpoch,

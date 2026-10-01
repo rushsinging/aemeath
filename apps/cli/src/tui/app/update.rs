@@ -553,17 +553,9 @@ impl App {
                     self.show_ask_user_batch(req.request_id.clone(), slots);
                 }
             }
-            TuiRuntimeEvent::RunStep {
-                run_id,
-                parent_run_id: None,
-                step_id,
-                event: crate::tui::adapter::tui_runtime_event::TuiRunStepEvent::Started,
-            } => {
-                self.chat.active_run_step = Some((
-                    sdk::RunId::from_legacy_or_new(run_id.as_str()),
-                    sdk::RunStepId::from_legacy_or_new(step_id.as_str()),
-                ));
-            }
+            // RunStep Started 不再用于取消 identity（取消统一经无 identity 的
+            // `CancelCurrentRun`，Runtime 控制面裁决当前执行单元）；该事件仅经
+            // 下游 adapter/activity 链路驱动展示。
             // #740：ModelList / SessionList 是 /model 对话框与 /resume 补全的
             // 唯一数据源，在此显式消费写入 SessionState 缓存，NEVER 静默丢弃。
             TuiRuntimeEvent::ModelList { models } => {
@@ -592,7 +584,6 @@ impl App {
             }
             TuiRuntimeEvent::Done { duration_ms, .. } => {
                 // Done 只收敛 App 级 processing；活动展示由 typed Run status 收敛。
-                self.chat.active_run_step = None;
                 self.chat.stop_processing();
                 self.mark_output_dirty();
                 // 回合完成 → OSC 777 桌面通知（副作用经 Effect 由 executor 执行），
@@ -616,7 +607,6 @@ impl App {
             }
             TuiRuntimeEvent::Cancelled { .. } => {
                 // Cancelled 是用户主动取消，不是回合完成，NEVER 发送通知。
-                self.chat.active_run_step = None;
                 self.chat.stop_processing();
                 self.mark_output_dirty();
             }

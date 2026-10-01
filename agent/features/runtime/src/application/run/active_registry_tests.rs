@@ -1,5 +1,5 @@
 use super::*;
-use crate::domain::agent_run::{ActiveRunPort, RunControl};
+use crate::domain::agent_run::{ActiveRunPort, RunControl, RunIntent};
 
 #[test]
 fn registry_does_not_duplicate_run_lifecycle_or_expose_legacy_cancel() {
@@ -28,27 +28,47 @@ fn registry_does_not_duplicate_run_lifecycle_or_expose_legacy_cancel() {
     }
 }
 
+/// cancel 的语义是「cancel 当前执行单元，drain and settle」，NEVER 是 cancel run：
+/// Manual Reflection Run 无 RunStep，其执行体由 root token 承载——取消只 cancel
+/// root token 驱动执行体收口，NEVER 置 `Terminate` control（那是 terminate 建模）。
 #[test]
-fn cancel_current_main_without_active_step_terminates_current_run() {
+fn cancel_current_main_without_active_step_on_manual_reflection_cancels_execution_only() {
     let registry = wire_active_run_registry();
     let run_id = sdk::RunId::new_v7();
     let root = CancellationToken::new();
     let deadline = sdk::ControlDeadline::from_unix_millis(1);
 
-    registry.activate_main(run_id.clone(), root.clone());
+    registry.activate_main(run_id.clone(), root.clone(), RunIntent::ManualReflection);
 
     assert_eq!(
         registry.cancel_current_main(deadline),
         sdk::CancelCurrentRunOutcome::Accepted
     );
-    assert!(root.is_cancelled());
+    assert!(root.is_cancelled(), "执行体 token 必须被取消");
     assert_eq!(
         registry.take_control(&run_id),
-        Some(RunControl::Terminate {
-            reason: sdk::RunTerminationReason::UserExit,
-            deadline,
-        })
+        None,
+        "cancel 不得置 Terminate control（cancel 不是 terminate）"
     );
+}
+
+/// Main Run 的 step 间隙（Conversation intent 且无 active step）没有执行单元
+/// 可 cancel：返回 NoActiveStep，NEVER 回落为 cancel run。
+#[test]
+fn cancel_current_main_without_active_step_on_conversation_is_no_active_step() {
+    let registry = wire_active_run_registry();
+    let run_id = sdk::RunId::new_v7();
+    let root = CancellationToken::new();
+    let deadline = sdk::ControlDeadline::from_unix_millis(1);
+
+    registry.activate_main(run_id.clone(), root.clone(), RunIntent::Conversation);
+
+    assert_eq!(
+        registry.cancel_current_main(deadline),
+        sdk::CancelCurrentRunOutcome::NoActiveStep
+    );
+    assert!(!root.is_cancelled(), "step 间隙无执行单元，root 不得被取消");
+    assert_eq!(registry.take_control(&run_id), None);
 }
 
 #[test]
@@ -60,7 +80,7 @@ fn cancel_current_main_step_does_not_require_run_identity() {
     let step = root.child_token();
     let deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_123);
 
-    registry.activate_main(run_id.clone(), root.clone());
+    registry.activate_main(run_id.clone(), root.clone(), RunIntent::Conversation);
     registry.set_main_active_step(&run_id, step_id.clone(), step.clone());
 
     assert_eq!(
@@ -86,7 +106,7 @@ fn sub_run_does_not_replace_current_main_run() {
     let sub_root = CancellationToken::new();
     let deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_123);
 
-    registry.activate_main(main_id.clone(), main_root.clone());
+    registry.activate_main(main_id.clone(), main_root.clone(), RunIntent::Conversation);
     registry.set_main_active_step(&main_id, main_step_id, main_step.clone());
     registry.activate_child(sub_id, sub_root.clone());
 
@@ -109,8 +129,12 @@ fn clearing_old_main_does_not_clear_new_current_main() {
     let new_step = new_root.child_token();
     let deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_123);
 
-    registry.activate_main(old_id.clone(), CancellationToken::new());
-    registry.activate_main(new_id.clone(), new_root);
+    registry.activate_main(
+        old_id.clone(),
+        CancellationToken::new(),
+        RunIntent::Conversation,
+    );
+    registry.activate_main(new_id.clone(), new_root, RunIntent::Conversation);
     registry.set_main_active_step(&new_id, new_step_id, new_step.clone());
     registry.clear(&old_id);
 
@@ -132,8 +156,16 @@ fn stale_main_cannot_register_step_after_foreground_replacement() {
     let current_step = CancellationToken::new();
     let deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_123);
 
-    registry.activate_main(stale_run_id.clone(), CancellationToken::new());
-    registry.activate_main(current_run_id.clone(), CancellationToken::new());
+    registry.activate_main(
+        stale_run_id.clone(),
+        CancellationToken::new(),
+        RunIntent::Conversation,
+    );
+    registry.activate_main(
+        current_run_id.clone(),
+        CancellationToken::new(),
+        RunIntent::Conversation,
+    );
     registry.set_main_active_step(&stale_run_id, stale_step_id, stale_step.clone());
     registry.set_main_active_step(
         &current_run_id,
@@ -165,8 +197,11 @@ fn cancel_current_main_without_active_run_is_explicit() {
     );
 }
 
+/// Conversation Run 的 step scope 清除后（step 间隙）：cancel 返回 NoActiveStep，
+/// root 不被取消、无 control——cancel 只作用于当前执行单元，NEVER 回落为
+/// 「无 step 就 terminate 整个 Run」的 cancel-run 建模。
 #[test]
-fn clearing_completed_step_scope_makes_current_cancel_terminate_run() {
+fn clearing_completed_step_scope_makes_current_cancel_no_active_step() {
     let registry = wire_active_run_registry();
     let run_id = sdk::RunId::new_v7();
     let step_id = sdk::RunStepId::new_v7();
@@ -174,23 +209,17 @@ fn clearing_completed_step_scope_makes_current_cancel_terminate_run() {
     let step = CancellationToken::new();
     let deadline = sdk::ControlDeadline::from_unix_millis(1);
 
-    registry.activate_main(run_id.clone(), root.clone());
+    registry.activate_main(run_id.clone(), root.clone(), RunIntent::Conversation);
     registry.set_main_active_step(&run_id, step_id.clone(), step.clone());
     registry.clear_main_active_step(&run_id, &step_id);
 
     assert_eq!(
         registry.cancel_current_main(deadline),
-        sdk::CancelCurrentRunOutcome::Accepted
+        sdk::CancelCurrentRunOutcome::NoActiveStep
     );
-    assert!(root.is_cancelled());
+    assert!(!root.is_cancelled());
     assert!(!step.is_cancelled());
-    assert_eq!(
-        registry.take_control(&run_id),
-        Some(RunControl::Terminate {
-            reason: sdk::RunTerminationReason::UserExit,
-            deadline,
-        })
-    );
+    assert_eq!(registry.take_control(&run_id), None);
 }
 
 #[test]
@@ -201,7 +230,11 @@ fn stale_step_cleanup_does_not_clear_replacement_step() {
     let current_step_id = sdk::RunStepId::new_v7();
     let current_step = CancellationToken::new();
 
-    registry.activate_main(run_id.clone(), CancellationToken::new());
+    registry.activate_main(
+        run_id.clone(),
+        CancellationToken::new(),
+        RunIntent::Conversation,
+    );
     registry.set_main_active_step(&run_id, old_step_id.clone(), CancellationToken::new());
     registry.set_main_active_step(&run_id, current_step_id.clone(), current_step.clone());
     registry.clear_main_active_step(&run_id, &old_step_id);
@@ -222,7 +255,11 @@ fn cancelled_step_cleanup_clears_delivered_control_before_next_step() {
     let deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_123);
     let next_step = CancellationToken::new();
 
-    registry.activate_main(run_id.clone(), CancellationToken::new());
+    registry.activate_main(
+        run_id.clone(),
+        CancellationToken::new(),
+        RunIntent::Conversation,
+    );
     registry.set_main_active_step(&run_id, cancelled_step_id.clone(), CancellationToken::new());
     assert_eq!(
         registry.cancel_current_main(deadline),
@@ -255,7 +292,7 @@ fn cancel_step_only_cancels_current_step_scope() {
     let step = root.child_token();
     let deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_123);
 
-    registry.activate_main(run_id.clone(), root.clone());
+    registry.activate_main(run_id.clone(), root.clone(), RunIntent::Conversation);
     registry.set_main_active_step(&run_id, step_id.clone(), step.clone());
 
     assert_eq!(
@@ -280,7 +317,7 @@ fn terminate_preempts_cancel_step_and_cancels_root_scope() {
     let cancel_deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_123);
     let terminate_deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_456);
 
-    registry.activate_main(run_id.clone(), root.clone());
+    registry.activate_main(run_id.clone(), root.clone(), RunIntent::Conversation);
     registry.set_main_active_step(&run_id, step_id.clone(), step.clone());
     assert_eq!(
         registry.cancel_step(&run_id, Some(&step_id), cancel_deadline),
@@ -312,7 +349,11 @@ fn repeated_main_control_commands_are_idempotent() {
     let step_id = sdk::RunStepId::new_v7();
     let deadline = sdk::ControlDeadline::from_unix_millis(1_725_000_000_123);
 
-    registry.activate_main(run_id.clone(), CancellationToken::new());
+    registry.activate_main(
+        run_id.clone(),
+        CancellationToken::new(),
+        RunIntent::Conversation,
+    );
     registry.set_main_active_step(&run_id, step_id.clone(), CancellationToken::new());
     assert_eq!(
         registry.cancel_step(&run_id, Some(&step_id), deadline),

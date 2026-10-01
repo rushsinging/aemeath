@@ -19,10 +19,12 @@ pub enum Effect {
     LoadDisplayHistoryWindow {
         request: sdk::DisplayHistoryWindowRequest,
     },
-    CancelRunStep {
-        run_id: sdk::RunId,
-        step_id: sdk::RunStepId,
-    },
+    /// 取消当前执行单元（无 identity，Runtime 控制面裁决唯一当前 Main Run：
+    /// 有 active step 走 CancelStep 协议；Manual Reflection 按 intent 取消执行体；
+    /// Conversation 的 step 间隙返回 NoActiveStep）。这是 TUI 唯一取消入口——
+    /// TUI 不持有 run/step identity 取消面（可寻址控制面仅供 Server/Coordinator
+    /// 管理端使用）。
+    CancelCurrentRun,
     ReplyInteraction {
         request_id: UiInteractionRequestId,
         reply: UiInteractionReply,

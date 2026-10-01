@@ -21,19 +21,12 @@ use super::super::testing::{input, ExpectedEffect, TuiScenarioHarness};
 fn cancel_and_quit_effects_are_explicit() {
     let mut busy = TuiScenarioHarness::new(100, 30);
     busy.app.chat.start_processing();
-    let run_id = sdk::RunId::from_legacy_or_new("run-cancel");
-    let step_id = sdk::RunStepId::from_legacy_or_new("step-cancel");
-    busy.app.chat.active_run_step = Some((run_id.clone(), step_id.clone()));
-    busy.expect_effect(ExpectedEffect::CancelRunStep {
-        run_id,
-        step_id,
-        replies: vec![],
-    });
+    busy.expect_effect(ExpectedEffect::CancelCurrentRun { replies: vec![] });
     busy.key(input::press(KeyCode::Esc, KeyModifiers::NONE));
-    assert!(busy.effects().iter().any(|effect| matches!(
-        effect,
-        crate::tui::effect::effect::Effect::CancelRunStep { .. }
-    )));
+    assert!(busy
+        .effects()
+        .iter()
+        .any(|effect| matches!(effect, crate::tui::effect::effect::Effect::CancelCurrentRun)));
     busy.assert_idle();
 
     let mut idle = TuiScenarioHarness::new(100, 30);
@@ -740,10 +733,10 @@ fn ask_user_cancel_emits_cancel_interaction_effect() {
         })
         .count();
     assert_eq!(cancel_effects, 1);
-    assert!(!harness.effects().iter().any(|effect| matches!(
-        effect,
-        crate::tui::effect::effect::Effect::CancelRunStep { .. }
-    )));
+    assert!(!harness
+        .effects()
+        .iter()
+        .any(|effect| matches!(effect, crate::tui::effect::effect::Effect::CancelCurrentRun)));
     harness.assert_idle();
 }
 

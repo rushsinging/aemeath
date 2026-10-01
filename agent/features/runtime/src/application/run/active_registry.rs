@@ -9,6 +9,9 @@ struct MainStepScope {
 #[derive(Debug, Clone)]
 pub(crate) struct ActiveRun {
     pub cancel: CancellationToken,
+    /// `run.spec().intent()`：`cancel_current_main` 的无 step 分支按它区分
+    /// 「Manual Reflection 的执行体取消」与「Conversation 的 step 间隙」。
+    intent: crate::domain::agent_run::RunIntent,
     main_step: Option<MainStepScope>,
     control: Option<crate::domain::agent_run::RunControl>,
     control_delivered: bool,
@@ -53,6 +56,7 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
             run_id.clone(),
             ActiveRun {
                 cancel,
+                intent: crate::domain::agent_run::RunIntent::Conversation,
                 main_step: None,
                 control: None,
                 control_delivered: false,
@@ -60,7 +64,12 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
         );
     }
 
-    fn activate_main(&self, run_id: sdk::RunId, cancel: CancellationToken) {
+    fn activate_main(
+        &self,
+        run_id: sdk::RunId,
+        cancel: CancellationToken,
+        intent: crate::domain::agent_run::RunIntent,
+    ) {
         let mut guard = self
             .active
             .lock()
@@ -70,6 +79,7 @@ impl crate::domain::agent_run::ActiveRunPort for ActiveRunRegistry {
             run_id.clone(),
             ActiveRun {
                 cancel,
+                intent,
                 main_step: None,
                 control: None,
                 control_delivered: false,
@@ -251,14 +261,17 @@ impl ActiveRunRegistry {
                 Some(crate::domain::agent_run::RunControl::CancelStep { step_id, deadline });
             active.control_delivered = false;
             sdk::CancelCurrentRunOutcome::Accepted
-        } else {
+        } else if active.intent == crate::domain::agent_run::RunIntent::ManualReflection {
+            // cancel 的语义是「cancel 当前执行单元，drain and settle」，NEVER 是
+            // cancel run：Manual Reflection Run 无 RunStep，其执行体由 root token
+            // 承载——只取消执行体 token，由反思执行体自行 Cancelled 收口；
+            // NEVER 置 Terminate control（那是 terminate 建模，idle 双击 Ctrl+C
+            // 的退出路径才使用）。
             active.cancel.cancel();
-            active.control = Some(crate::domain::agent_run::RunControl::Terminate {
-                reason: sdk::RunTerminationReason::UserExit,
-                deadline,
-            });
-            active.control_delivered = false;
             sdk::CancelCurrentRunOutcome::Accepted
+        } else {
+            // Conversation 的 step 间隙：无执行单元可 cancel。
+            sdk::CancelCurrentRunOutcome::NoActiveStep
         };
         log::debug!(            target: crate::LOG_TARGET,
             "cancel current main completed: run_id={} step_id={:?} outcome={:?} root_cancelled={} step_cancelled={} control={:?}",

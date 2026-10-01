@@ -118,7 +118,7 @@ TUI "/reflect-now"
   → SDK ChatInputEvent::ReflectNow
   → Runtime input gate:
       idle → PendingCommand::ReflectNow（只置受理标志，不裸 await 反思）
-      busy → CommandResultText（非 error 跳过文案）后丢弃；NEVER 排队、不放回 buffer
+      busy → 入队 pending buffer 仅作排队回显；Run 收尾时统一丢弃+提示（见下）
   → 会话驱动 idle 分支:
       未启用（memory/reflection 关或 interval_runs == 0）
         → 直接 CommandResultText（DisabledSkipped 文案）；不创建 Run、不产生 activity
@@ -133,12 +133,15 @@ TUI "/reflect-now"
         （取消 / 超时则 Run 直接进入终态，见「取消 / 超时 / 失败语义」）
 ```
 
+busy 丢弃的真实落点（裁决：busy NEVER 排队执行）：busy 期间 `ReflectNow` 先入队 session pending buffer 供 TUI 回显（#1816 快照），随后经 Runtime 侧两个丢弃点之一被剔除并逐条发布「已跳过本次手动触发」提示——①Run 收尾 `BufferedInputAdapter::drain_remaining_events` 回流 pending buffer 前（busy 积压的主拦截点）；②run_launch 循环顶 gate 消费 pending buffer 前（gate requeue 残留的拦截点）。两点共用 `input_gate::drop_queued_reflect_now`；idle 受理路径（idle_lifecycle gate）不经任一丢弃点。
+
 Manual Run 硬约束（当前实现）：
 
 - **不创建 RunStep、不调用主模型**：该 Run 只执行一次 Memory 反思。
+- **不消费用户输入**：Run 期间 drain 出的 user message 经 `defer_user_batch` 回流 session 输入队列，由下一个会话 Run 消费；本 Run 走向 `EmptyAndSealed` 正常 `Completed`（Manual Compaction Run 同型），NEVER 因用户输入进入模型调用或 `Failed`。
 - **不落盘**：不写 canonical session——`message_count`、`updated_at` 与 run slices 保持不变。
 - **不递增 session 主 `run_count`、不发 `RunChanged`**：它不是用户回合，不消耗 Interval 频控计数。
-- **busy 丢弃不排队**：input gate 对 `ReflectNow` 提示后丢弃（与 `Compact` 的 busy 排队语义相反）。
+- **busy 丢弃不排队**：busy 期间的 `ReflectNow` 在 Run 收尾回流点与 gate 消费 pending buffer 前被统一剔除并提示（`drop_queued_reflect_now`，与 `Compact` 的 busy 排队语义相反）；NEVER 排队到 Run 结束后执行第二次。
 - **disabled 不创建 Run（创建前常态 no-op）**：配置门禁在创建 Run 前直接回 DisabledSkipped 文案，不创建 Run、不发布任何 activity——`DisabledSkipped` 常态下不是 Run/Activity 终态，而是创建前的 no-op。
 - **消息快照来源**：idle 受理时经 `MainSessionWiring::bind_main_run` 读取 committed CanonicalSession 的 `structured_messages()`（与 `/sessions` 列表同一投影），即当前可见 active 历史；不包含 system 注入。
 - **等待终态再回显**：handler await 反思终态，只回显安全文案/计数，NEVER 向 chat 投影反思正文。
@@ -201,8 +204,17 @@ Reflection 的运行时可见性是结构化 Activity（SDK typed view），**�
 
 ### 取消 / 超时 / 失败语义（当前实现）
 
-- **Manual Reflection Run**：取消与超时是 Run 终态——`Cancelled` 走中断收口（Run → `Terminated`，Reflection leaf → `Cancelled`），`TimedOut` 经 `timeout_run`/`fail_run` 收口为 Run → `Failed`（timeout 按 fail 收口），Reflection leaf → `Terminated`；Run root activity 随 Run 终态收口（`TimedOut` 时随 `Failed` 收口）。
+三触发的取消入口（cancel 的语义是「cancel 当前执行单元，drain and settle」，NEVER 是 cancel run）：
+
+| 触发 | 取消入口 | 执行单元载体 |
+|---|---|---|
+| Interval / PreCompact | TUI Esc / Ctrl-C → `AgentClient::cancel_current_run`（registry 有 active step 时走 CancelStep 协议）；或 root 取消联动 | engine 的 step token（`cancel.child_token()`）原样传入反思端口 |
+| Manual | TUI Esc / Ctrl-C → `AgentClient::cancel_current_run`（registry 按 `RunIntent::ManualReflection` 只取消执行体 token，**NEVER** 置 `Terminate` control） | Run root token 经 `ActiveRunRegistry::activate_main` 注册，取消 root 联动反思执行体 |
+| Conversation 的 step 间隙 | 同上入口返回 `NoActiveStep`（无执行单元可 cancel） | — |
+
+- **Manual Reflection Run**：取消与超时是 Run 终态——取消经 root token 传入执行体、以 `Cancelled` 收口（Reflection leaf → `Cancelled`，Run → `Terminated(UserExit)`；NEVER 投影为 `SessionShutdown`，二者语义不同），`TimedOut` 经 `timeout_run`/`fail_run` 收口为 Run → `Failed`（timeout 按 fail 收口），Reflection leaf → `Terminated`；Run root activity 随 Run 终态收口（`TimedOut` 时随 `Failed` 收口）。
 - **Interval / PreCompact**：反思的失败、取消与超时 **不终止宿主 Run**——Reflection leaf 按对应终态收口，状态机经 `ReflectionCompleted` 返回进入前状态后继续原流程；宿主 Run 的取消仍由既有 interrupt / step control 路径负责（反思复用该 step 的 cancellation token）。
+- **取消的 history 落盘**：取消后 durable fact 以同一 stable id `upsert` 终态——`status = Failed`、`error_category = Cancelled`（NEVER 留下悬挂的 `Running`，也 NEVER 写入 `Succeeded`；冲突终态互斥）。
 - **执行期间可取消**：取消只形成安全终态 metadata，不泄漏 prompt、provider raw response 或 Reflection 正文。
 - **任务超时**：执行通道对反思施加 timeout，超时形成安全终态（Manual 为 Run 终态；Interval / PreCompact 只收口 leaf activity）。
 - **无后台残留**：三种 trigger 都在所属调用点 await 完成，Session teardown 不需要 drain 或等待后台 job。

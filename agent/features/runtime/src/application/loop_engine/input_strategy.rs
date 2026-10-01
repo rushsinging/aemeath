@@ -146,6 +146,12 @@ where
             }
             self.input_events.defer(event);
         }
+        // 裁决 3：busy 期间积压的 `/reflect-now` NEVER 排队执行——Run 收尾回流
+        // pending buffer 前统一丢弃并逐条提示（busy 积压的主拦截点）。
+        crate::application::loop_engine::chat::input_gate::drop_queued_reflect_now(
+            &self.pending_input,
+            &self.sink,
+        );
         for event in self.pending_input.drain_all() {
             self.input_events.defer(event);
         }
@@ -520,6 +526,26 @@ impl<I> crate::application::loop_engine::InputPort for BufferedInputAdapter<I>
 where
     I: SessionInputPort + Send,
 {
+    /// 单用途 Run（Manual Compaction/Reflection）drain 出的用户输入回流 session
+    /// 输入队列，由下一个会话 Run 消费；保留 accepted 元数据（原事件形态）。
+    fn defer_user_batch(
+        &mut self,
+        batch: Vec<crate::application::loop_engine::engine::LoopInput>,
+    ) -> Result<(), LoopEngineError> {
+        for input in batch {
+            let event = match input.accepted {
+                Some(accepted) => accepted.into_event(),
+                None => ChatInputEvent::UserMessage {
+                    id: input.input_id.unwrap_or_else(sdk::InputId::new_v7),
+                    text: input.text,
+                    images: input.images,
+                },
+            };
+            self.input_events.defer(event);
+        }
+        Ok(())
+    }
+
     async fn drain_input(
         &mut self,
         expected_epoch: DrainEpoch,
@@ -677,6 +703,7 @@ mod batched_user_input_tests {
         ChatEventSink, EventFuture, InputEventDrainPort, InputEventFuture, InputEventOptFuture,
         RuntimeStreamEvent,
     };
+    use crate::application::loop_engine::InputPort;
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
@@ -805,5 +832,51 @@ mod batched_user_input_tests {
 
         let snapshot = queued_snapshot(&sink).expect("接纳后必须发布排队快照");
         assert_eq!(snapshot.len(), 3, "消息、技能、消息各占一条");
+    }
+
+    /// 单用途 Run 的用户输入回流：plain 输入生成新 InputId、accepted 输入保留原
+    /// accepted 元数据与 InputId，批内顺序原样保持（下一个会话 Run 按序消费）。
+    #[test]
+    fn defer_user_batch_returns_events_to_session_input_preserving_order_and_identity() {
+        let (mut adapter, _sink) = adapter_with(vec![]);
+        let accepted_id = sdk::InputId::new_v7();
+        let batch = vec![
+            crate::application::loop_engine::engine::LoopInput {
+                text: "plain".to_string(),
+                input_id: None,
+                images: Vec::new(),
+                accepted: None,
+            },
+            crate::application::loop_engine::engine::LoopInput::accepted(
+                crate::application::loop_engine::AcceptedUserInput::UserMessage {
+                    input_id: accepted_id.clone(),
+                    text: "accepted".to_string(),
+                    images: Vec::new(),
+                },
+            ),
+        ];
+
+        adapter
+            .defer_user_batch(batch)
+            .expect("defer_user_batch 必须成功");
+
+        let deferred = adapter.input_events.deferred.lock().unwrap().clone();
+        assert_eq!(deferred.len(), 2, "整批必须全部回流");
+        match &deferred[0] {
+            ChatInputEvent::UserMessage { text, .. } => {
+                assert_eq!(text, "plain");
+            }
+            other => panic!("plain 输入必须回流为 UserMessage: {other:?}"),
+        }
+        match &deferred[1] {
+            ChatInputEvent::UserMessage { id, text, .. } => {
+                assert_eq!(text, "accepted");
+                assert_eq!(
+                    *id, accepted_id,
+                    "accepted 输入必须保留原 InputId（撤回/归属依赖它）"
+                );
+            }
+            other => panic!("accepted 输入必须保留原事件形态: {other:?}"),
+        }
     }
 }

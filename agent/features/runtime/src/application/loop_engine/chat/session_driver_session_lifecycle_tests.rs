@@ -1958,3 +1958,177 @@ async fn control_normal_run_records_session_persistence() {
         "对照组：普通回合必须记录到 session 落盘调用: {recorded:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// 裁决 3：busy 期间积压的 `/reflect-now` NEVER 排队执行
+// ---------------------------------------------------------------------------
+
+/// Main Run busy（模型调用期）触发的 `/reflect-now` 在 Run 结束后由 run_launch
+/// 循环顶统一丢弃并提示，NEVER 作为第二次反思排队执行。memory 配置开启，
+/// 排除 disabled 路径干扰——若被误执行，一定产生 Reflecting 转移。
+/// 门控 provider 保证 busy 窗口确定：注入 ReflectNow 时模型调用仍挂起。
+#[tokio::test]
+async fn reflect_now_queued_while_busy_is_dropped_after_run_not_executed() {
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    input_tx
+        .send(sdk::ChatInputEvent::user_message("hello", Vec::new()))
+        .unwrap();
+
+    let release = Arc::new(tokio::sync::Notify::new());
+    let provider = Arc::new(GatedProvider::new(release.clone()));
+
+    let mut shell = test_shell();
+    shell.memory_config = share::config::MemoryConfig {
+        enabled: true,
+        reflection: share::config::ReflectionConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    shell.model_state.update_binding(
+        crate::application::model::test_support::binding_from_llm_provider(provider.clone()),
+    );
+    shell.set_test_session_id("test-reflect-now-busy-drop");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+    let run = tokio::spawn(run_session_command_driver(ctx));
+
+    // 等 Main Run 进入模型调用（busy），此时 ReflectNow 必经 busy 排队路径。
+    wait_for_retry_test_condition("模型调用开始（busy 窗口）", || {
+        provider.request_count() >= 1
+    })
+    .await;
+    input_tx.send(sdk::ChatInputEvent::ReflectNow).unwrap();
+    // 等 busy 排队快照确认 ReflectNow 已进入 pending_input（#1816 回显）。
+    wait_for_retry_test_condition("ReflectNow 已入队（busy 排队快照）", || {
+        sink.events().iter().any(|event| {
+            matches!(event, e if e.starts_with("ControlCommandsQueued") && e.contains("reflect-now"))
+        })
+    })
+    .await;
+
+    // 放行模型 → Main Run 完成 → 循环顶丢弃积压的 ReflectNow 并提示。
+    // 裸循环等待：Run 收口→循环顶丢弃的链路在 debug build 下可能超过有限轮询
+    // 窗口；上限耗尽时带现场事件 panic 以便诊断。
+    release.notify_one();
+    for _ in 0..200_000 {
+        let done = sink
+            .events()
+            .iter()
+            .any(|event| event.as_str() == "DoneWithDuration");
+        let dropped_notice = sink
+            .command_result_texts()
+            .iter()
+            .any(|(text, _)| text.contains("已跳过本次手动触发"));
+        if done && dropped_notice {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    {
+        let done = sink
+            .events()
+            .iter()
+            .any(|event| event.as_str() == "DoneWithDuration");
+        let dropped_notice = sink
+            .command_result_texts()
+            .iter()
+            .any(|(text, _)| text.contains("已跳过本次手动触发"));
+        assert!(
+            done && dropped_notice,
+            "Main Run 完成与丢弃提示都必须出现: done={done} dropped_notice={dropped_notice} events={:?} texts={:?}",
+            sink.events(),
+            sink.command_result_texts(),
+        );
+    }
+    drop(input_tx);
+    tokio::time::timeout(std::time::Duration::from_secs(10), run)
+        .await
+        .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang")
+        .unwrap();
+
+    // 丢弃提示必须发布（非错误语义）。
+    let notices: Vec<(String, bool)> = sink
+        .command_result_texts()
+        .into_iter()
+        .filter(|(text, _)| text.contains("已跳过本次手动触发"))
+        .collect();
+    assert_eq!(notices.len(), 1, "busy 积压的 ReflectNow 必须丢弃并提示一次");
+    assert!(!notices[0].1, "丢弃是提示而非错误: {}", notices[0].0);
+
+    // NEVER 执行第二次反思：lifecycle 不得出现任何 Reflecting 转移。
+    let transitions: Vec<(crate::domain::agent_run::RunStatus, crate::domain::agent_run::RunStatus)> = sink
+        .lifecycle_events()
+        .iter()
+        .filter_map(|event| match event {
+            crate::domain::agent_run::RuntimeLifecycleEvent::Transitioned { from, to, .. } => {
+                Some((*from, *to))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        transitions
+            .iter()
+            .all(|(_, to)| *to != crate::domain::agent_run::RunStatus::Reflecting),
+        "busy 积压的 ReflectNow 不得执行反思（无 Reflecting 转移）: {transitions:?}"
+    );
+}
+
+/// 对照组：idle 触发的 `/reflect-now` 仍被正常受理执行——证明丢弃点只作用于
+/// busy 积压路径（run_launch pending 消费），不误伤 idle gate 受理。
+/// 覆盖由既有 `test_reflect_now_runs_a_real_run_without_run_changed` 提供，
+/// 本测试仅锚定「idle 受理后 pending buffer 无 ReflectNow 残留可丢弃」。
+#[tokio::test]
+async fn reflect_now_idle_still_accepted_without_drop_notice() {
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    input_tx.send(sdk::ChatInputEvent::ReflectNow).unwrap();
+
+    let mut shell = test_shell();
+    shell.memory_config = share::config::MemoryConfig {
+        enabled: true,
+        reflection: share::config::ReflectionConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    shell.set_test_session_id("test-reflect-now-idle-accepted");
+    let ctx = test_session_driver_input(sink.clone(), input_events, shell);
+    let run = tokio::spawn(run_session_command_driver(ctx));
+    wait_for_retry_test_condition("手动反思终态文案", || {
+        !sink.command_result_texts().is_empty()
+    })
+    .await;
+    drop(input_tx);
+    tokio::time::timeout(std::time::Duration::from_secs(10), run)
+        .await
+        .expect("run_session_command_driver 应在 shutdown 后返回，而非 hang")
+        .unwrap();
+
+    // idle 受理：出现 Reflecting 转移（真 Run 执行），且无丢弃提示。
+    let transitions: Vec<(crate::domain::agent_run::RunStatus, crate::domain::agent_run::RunStatus)> = sink
+        .lifecycle_events()
+        .iter()
+        .filter_map(|event| match event {
+            crate::domain::agent_run::RuntimeLifecycleEvent::Transitioned { from, to, .. } => {
+                Some((*from, *to))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        transitions
+            .iter()
+            .any(|(_, to)| *to == crate::domain::agent_run::RunStatus::Reflecting),
+        "idle 触发的 ReflectNow 必须被受理执行（存在 Reflecting 转移）: {transitions:?}"
+    );
+    assert!(
+        sink.command_result_texts()
+            .iter()
+            .all(|(text, _)| !text.contains("已跳过本次手动触发")),
+        "idle 受理路径不得发布丢弃提示"
+    );
+}

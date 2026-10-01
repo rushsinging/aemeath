@@ -1,6 +1,8 @@
+#[cfg(test)]
+use super::execution::ReflectionExecutionError;
 use super::execution::{
-    execute_reflection, CompleteReflectionResult, ReflectionExecutionError,
-    ReflectionExecutionResultType, ReflectionInvocation,
+    execute_reflection, CompleteReflectionResult, ReflectionExecutionResultType,
+    ReflectionInvocation,
 };
 use crate::ports::ProviderPort;
 use memory::api::reflection::{
@@ -9,6 +11,7 @@ use memory::api::reflection::{
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 
 pub type ReflectionResultPayload = CompleteReflectionResult;
+#[cfg(test)]
 pub(crate) type ReflectionError = ReflectionExecutionError;
 pub type ReflectionResult<T> = ReflectionExecutionResultType<T>;
 pub type ReflectionInputMessage = share::message::Message;
@@ -114,9 +117,11 @@ struct ReflectionPersistence {
     history: std::sync::Arc<dyn ReflectionHistoryStore>,
 }
 
+#[cfg(test)]
 type ReflectionTaskFuture = std::pin::Pin<
     Box<dyn std::future::Future<Output = ReflectionResult<ReflectionResultPayload>> + Send>,
 >;
+#[cfg(test)]
 type ReflectionTaskExecutor = dyn Fn(ReflectionTaskRequest, tokio_util::sync::CancellationToken) -> ReflectionTaskFuture
     + Send
     + Sync;
@@ -143,11 +148,15 @@ impl ReflectionDisabledReason {
 #[derive(Clone)]
 pub struct ReflectionTaskAdapter {
     timeout: std::time::Duration,
+    /// 仅测试注入的执行体：生产路径（`run_future` / `run_complete`）由调用方
+    /// 提供 future，`production` 构造不携带执行体。
+    #[cfg(test)]
     executor: std::sync::Arc<ReflectionTaskExecutor>,
     pending_memory_updates: std::sync::Arc<std::sync::Mutex<usize>>,
 }
 
 impl ReflectionTaskAdapter {
+    #[cfg(test)]
     pub fn new<F, Fut>(timeout: std::time::Duration, executor: F) -> Self
     where
         F: Fn(ReflectionTaskRequest, tokio_util::sync::CancellationToken) -> Fut
@@ -168,14 +177,23 @@ impl ReflectionTaskAdapter {
     }
 
     pub fn production(timeout: std::time::Duration) -> Self {
-        Self::new(timeout, |_request, _cancel| async {
-            Err(ReflectionError::LlmCall)
-        })
+        Self {
+            timeout,
+            #[cfg(test)]
+            executor: std::sync::Arc::new(|_request, _cancel| {
+                Box::pin(async { Err(ReflectionError::LlmCall) })
+            }),
+            pending_memory_updates: std::sync::Arc::new(std::sync::Mutex::new(0)),
+        }
     }
 
     /// Run the stage without configuration gating, for callers that own their own
     /// trigger decision. `cancel` is the caller's Run token; the stage also
     /// enforces its own timeout.
+    ///
+    /// 仅测试使用的便捷入口（内部新建 detached token，不可取消）：生产路径
+    /// 一律经 `run_future` / `run_complete` 传入 Run/step 谱系的 cancel token。
+    #[cfg(test)]
     pub async fn run(&self, request: ReflectionTaskRequest) -> ReflectionRunOutcome {
         self.run_future(
             request.trigger,

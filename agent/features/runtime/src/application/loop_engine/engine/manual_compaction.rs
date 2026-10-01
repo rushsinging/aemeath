@@ -74,7 +74,9 @@ pub(super) async fn execute_manual_compaction(
             if let Some(activity_id) = activity_id {
                 let _ = port.finish_activity(activity_id, ActivityTerminal::Cancelled);
             }
-            terminate_interrupted_run(run, execution, port).await?;
+            // 用户取消（Esc/Ctrl-C 经 registry cancel root）→ UserExit 终止语义。
+            terminate_interrupted_run(run, execution, port, sdk::RunTerminationReason::UserExit)
+                .await?;
             Ok(ManualCompactionDirective::Terminal)
         }
         ManualCompactionPhaseOutcome::TimedOut => {

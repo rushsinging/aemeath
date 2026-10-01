@@ -126,7 +126,7 @@ impl App {
             Effect::LoadDisplayHistoryWindow { request } => {
                 self.load_display_history_window_effect(request, ui_tx)
             }
-            Effect::CancelRunStep { run_id, step_id } => self.cancel_run_step(&run_id, &step_id),
+            Effect::CancelCurrentRun => self.cancel_current_run_effect(),
             Effect::ReplyInteraction { request_id, reply } => {
                 self.execute_interaction_reply(request_id, reply)
             }
@@ -309,7 +309,10 @@ impl App {
         self.apply_agent_intent(AgentIntent::Conversation(intent));
     }
 
-    fn cancel_run_step(&mut self, run_id: &sdk::RunId, step_id: &sdk::RunStepId) {
+    /// 无 identity 的当前 Run 取消（`Effect::CancelCurrentRun`）：Manual Reflection
+    /// Run 不产生 RunStep、Main Run 存在 step 间隙，这两条路径没有可寻址 step，
+    /// 由 Runtime 控制面裁决当前活跃 Main Run；TUI 只映射 outcome，不推断状态机。
+    pub(crate) fn cancel_current_run_effect(&mut self) {
         let deadline = sdk::ControlDeadline::from_unix_millis(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -317,12 +320,13 @@ impl App {
                 .unwrap_or(0),
         );
         let outcome = self
-            .run_control_client
+            .agent_client
             .as_ref()
-            .map(|client| client.cancel_run_step(run_id, Some(step_id), deadline))
-            .unwrap_or(sdk::CancelRunStepOutcome::NotFound);
+            .map(|client| client.cancel_current_run(deadline))
+            .unwrap_or(sdk::CancelCurrentRunOutcome::NoActiveRun);
         match outcome {
-            sdk::CancelRunStepOutcome::Accepted | sdk::CancelRunStepOutcome::AlreadyCancelling => {
+            sdk::CancelCurrentRunOutcome::Accepted
+            | sdk::CancelCurrentRunOutcome::AlreadyCancelling => {
                 self.chat.start_cancelling();
                 self.apply_agent_intent(AgentIntent::Conversation(
                     ConversationIntent::SetStatusNotice(SetStatusNotice(StatusNotice::warning(
@@ -330,18 +334,18 @@ impl App {
                     ))),
                 ));
             }
-            sdk::CancelRunStepOutcome::RunTerminating => {
+            sdk::CancelCurrentRunOutcome::RunTerminating => {
                 self.chat.start_cancelling();
                 self.set_transient_notice(StatusNotice::warning("Current run is terminating"));
             }
-            sdk::CancelRunStepOutcome::NoActiveStep => {
+            // NoActiveStep：Runtime 裁决当前无可取消的执行体（防御分支，SDK 的
+            // cancel_current_run 无 step 时已自行回落 root cancel，正常不可达）。
+            sdk::CancelCurrentRunOutcome::NoActiveRun
+            | sdk::CancelCurrentRunOutcome::NoActiveStep => {
                 self.set_transient_notice(StatusNotice::warning("No active response to cancel"));
             }
-            sdk::CancelRunStepOutcome::RunTerminal => {
+            sdk::CancelCurrentRunOutcome::RunTerminal => {
                 self.set_transient_notice(StatusNotice::warning("Current run already finished"));
-            }
-            sdk::CancelRunStepOutcome::NotFound => {
-                self.set_transient_notice(StatusNotice::warning("Current run step was not found"));
             }
         }
     }

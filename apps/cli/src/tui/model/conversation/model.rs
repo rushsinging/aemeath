@@ -191,6 +191,16 @@ impl ConversationModel {
         &self.activity_observations
     }
 
+    /// 是否存在可作为取消目标的 live main root（Main / Manual Reflection Run）。
+    /// Esc / Ctrl-C 在无可寻址 RunStep 时以此为据发 `CancelCurrentRun`；事实来自
+    /// Runtime 权威 activity 快照镜像，TUI 不自行推断 Run 生命周期。
+    pub(crate) fn has_live_main_root(&self) -> bool {
+        self.activity_observations
+            .activities()
+            .iter()
+            .any(|activity| activity.is_live_main_root())
+    }
+
     #[cfg(test)]
     pub(crate) fn activity_observations_mut(&mut self) -> &mut ActivityObservationModel {
         &mut self.activity_observations
@@ -239,22 +249,10 @@ impl ConversationModel {
         let run_id = snapshot.run_id.clone();
         let snapshot_revision = snapshot.revision;
         let activity_count = snapshot.activities.len();
-        let root = snapshot.activities.iter().find(|activity| {
-            activity.kind == crate::tui::adapter::tui_runtime_event::TuiActivityKind::Run
-                && activity.parent_activity_id.is_none()
-                && matches!(
-                    activity.state,
-                    crate::tui::adapter::tui_runtime_event::TuiActivityState::Running
-                        | crate::tui::adapter::tui_runtime_event::TuiActivityState::Waiting
-                )
-                && matches!(
-                    activity.detail,
-                    crate::tui::adapter::tui_runtime_event::TuiActivityDetail::Run {
-                        purpose: crate::tui::adapter::tui_runtime_event::TuiRunPurpose::Main
-                            | crate::tui::adapter::tui_runtime_event::TuiRunPurpose::Reflection
-                    }
-                )
-        });
+        let root = snapshot
+            .activities
+            .iter()
+            .find(|activity| activity.is_live_main_root());
         let root_activity_id = root
             .map(|activity| activity.id.as_str().to_string())
             .unwrap_or_else(|| "-".to_string());

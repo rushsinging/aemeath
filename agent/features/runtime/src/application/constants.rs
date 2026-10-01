@@ -31,6 +31,14 @@ pub(crate) const TUI_STDERR_PREVIEW_LINES: usize = 5;
 
 pub(crate) const WATCH_DEPTH: u32 = 5;
 
+// ─── loop_engine/chat/input_gate.rs ───
+
+/// `/reflect-now` 在 busy 期间被丢弃时的统一提示文案（裁决 3：busy NEVER 排队）。
+/// gate busy 分支与 run_launch pending 消费丢弃点（`drop_queued_reflect_now`）
+/// 共用本常量，NEVER 复制第二份。
+pub(crate) const REFLECT_NOW_BUSY_DROP_NOTICE: &str =
+    "Reflection 已在运行或等待运行结束，已跳过本次手动触发；稍后再试。";
+
 // ─── model/invocation.rs ───
 
 /// One initial invocation plus at most ten retries.

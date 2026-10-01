@@ -28,6 +28,9 @@ struct ReflectionFake {
     activities: std::sync::Arc<crate::application::activity::ActivityCoordinator>,
     runs: Vec<ReflectionTaskTrigger>,
     state_during_run: Option<sdk::ActivityStateView>,
+    /// engine 传入的 cancel token 谱系证据：root cancel 后这些 token 必须联动
+    /// 取消（证明 token 来自 run/step 谱系，NEVER 是端口侧新建 detached token）。
+    received_cancels: Vec<CancellationToken>,
     /// 与压缩侧共享的 PreCompact 材料槽；取材料走生产门禁语义（禁用即丢弃）。
     pre_compact_material:
         crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot,
@@ -69,7 +72,7 @@ impl crate::application::loop_engine::ReflectionPhasePort for ReflectionFake {
         _messages: Vec<share::message::Message>,
         _run_id: &sdk::RunId,
         _run_step_id: Option<&sdk::RunStepId>,
-        _cancel: CancellationToken,
+        cancel: CancellationToken,
     ) -> Result<ReflectionRunOutcome, LoopEngineError> {
         // 进入执行时 begin activity 必须已经发布且处于 Running。
         self.state_during_run = self
@@ -81,6 +84,7 @@ impl crate::application::loop_engine::ReflectionPhasePort for ReflectionFake {
                 matches!(activity.detail, sdk::ActivityDetailView::Reflection { .. })
             })
             .map(|activity| activity.state);
+        self.received_cancels.push(cancel);
         self.runs.push(trigger);
         Ok(self.outcome.clone())
     }
@@ -92,6 +96,10 @@ struct IntervalRunResult {
     events: Vec<RuntimeLifecycleEvent>,
     reflection_runs: Vec<ReflectionTaskTrigger>,
     state_during_run: Option<sdk::ActivityStateView>,
+    /// engine 传给反思端口的 cancel token（谱系证据）。
+    received_cancels: Vec<CancellationToken>,
+    /// run root token：取消它必须联动端口收到的 token。
+    root_cancel: CancellationToken,
 }
 
 /// 跑一次 text-only Complete 的完整 Main Run：`step_count` 由调用方指定以覆盖
@@ -119,6 +127,7 @@ async fn drive_interval_run(
         state_during_run: None,
         pre_compact_material: Default::default(),
         memory_config: share::config::MemoryConfig::default(),
+        received_cancels: Vec::new(),
         judgment_calls: std::cell::Cell::new(0),
     };
     let mut scenario = ScriptedScenario {
@@ -142,6 +151,8 @@ async fn drive_interval_run(
         events,
         reflection_runs: reflection.runs,
         state_during_run: reflection.state_during_run,
+        received_cancels: reflection.received_cancels,
+        root_cancel: cancel,
     }
 }
 
@@ -330,6 +341,34 @@ async fn interval_reflection_cancelled_records_cancelled_activity_and_continues(
     assert_eq!(result.run.steps().len(), 1);
 }
 
+/// Interval 取消 token 谱系证据：engine 传给反思端口的 token 派生自 run root
+/// （`cancel.child_token()` 的 step 谱系）——root 取消必须联动端口收到的 token；
+/// 若端口收到的是 detached 新建 token，本断言失败。
+#[tokio::test]
+async fn interval_reflection_receives_cancel_token_from_run_lineage() {
+    let result = drive_interval_run(
+        2,
+        IntervalJudgment::Interval(2),
+        interval_outcome(ReflectionTaskCompletionStatus::Succeeded),
+    )
+    .await;
+
+    assert_eq!(
+        result.received_cancels.len(),
+        1,
+        "反思端口必须恰好被调用一次"
+    );
+    assert!(
+        !result.received_cancels[0].is_cancelled(),
+        "Run 正常完成时端口 token 不得处于取消态"
+    );
+    result.root_cancel.cancel();
+    assert!(
+        result.received_cancels[0].is_cancelled(),
+        "root 取消必须联动端口 token（证明 token 来自 run/step 谱系）"
+    );
+}
+
 #[tokio::test]
 async fn interval_reflection_disabled_is_noop() {
     // 配置关闭时端口判定即返回 None（生产实现等价 DisabledSkipped 场景），engine 不进入 phase。
@@ -429,6 +468,7 @@ async fn drive_two_complete_step_interval_run(
         state_during_run: None,
         pre_compact_material: Default::default(),
         memory_config: share::config::MemoryConfig::default(),
+        received_cancels: Vec::new(),
         judgment_calls: std::cell::Cell::new(0),
     };
     let mut scenario = ScriptedScenario {
@@ -483,6 +523,8 @@ async fn drive_two_complete_step_interval_run(
         events,
         reflection_runs: reflection.runs,
         state_during_run: reflection.state_during_run,
+        received_cancels: reflection.received_cancels,
+        root_cancel: cancel,
     }
 }
 
@@ -592,6 +634,10 @@ struct PreCompactRunResult {
     events: Vec<RuntimeLifecycleEvent>,
     reflection_runs: Vec<ReflectionTaskTrigger>,
     state_during_run: Option<sdk::ActivityStateView>,
+    /// engine 传给反思端口的 cancel token（谱系证据）。
+    received_cancels: Vec<CancellationToken>,
+    /// run root token：取消它必须联动端口收到的 token。
+    root_cancel: CancellationToken,
     slot: crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot,
 }
 
@@ -612,6 +658,20 @@ async fn drive_pre_compact_run(
     material: Option<Vec<share::message::Message>>,
     memory_config: share::config::MemoryConfig,
 ) -> PreCompactRunResult {
+    drive_pre_compact_run_with_status(
+        material,
+        memory_config,
+        ReflectionTaskCompletionStatus::Succeeded,
+    )
+    .await
+}
+
+/// `status` 参数化的 PreCompact drive：覆盖取消/失败等终态的收口语义。
+async fn drive_pre_compact_run_with_status(
+    material: Option<Vec<share::message::Message>>,
+    memory_config: share::config::MemoryConfig,
+    status: ReflectionTaskCompletionStatus,
+) -> PreCompactRunResult {
     let slot = crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot::default();
     let mut run = new_run(Duration::ZERO);
     let cancel = CancellationToken::new();
@@ -626,12 +686,13 @@ async fn drive_pre_compact_run(
     let mut reflection = ReflectionFake {
         // PreCompact 场景关闭 Interval 判定，聚焦压缩材料路径。
         judgment: IntervalJudgment::Disabled,
-        outcome: pre_compact_outcome(ReflectionTaskCompletionStatus::Succeeded),
+        outcome: pre_compact_outcome(status),
         activities: activities.clone(),
         runs: Vec::new(),
         state_during_run: None,
         pre_compact_material: slot.clone(),
         memory_config,
+        received_cancels: Vec::new(),
         judgment_calls: std::cell::Cell::new(0),
     };
     let mut scenario = ScriptedScenario {
@@ -657,6 +718,8 @@ async fn drive_pre_compact_run(
         events: scenario.events(),
         reflection_runs: reflection.runs,
         state_during_run: reflection.state_during_run,
+        received_cancels: reflection.received_cancels,
+        root_cancel: cancel,
         slot,
     }
 }
@@ -794,6 +857,70 @@ async fn pre_compact_reflection_runs_inside_compacting_state_with_activity() {
     );
 }
 
+/// PreCompact 取消场景：端口以 Cancelled 收口时，activity 记 Cancelled、状态机
+/// Compacting→Reflecting→Compacting 往返完整、宿主 Run 照常完成（反思取消
+/// 不杀宿主 Run，与 Interval 取消语义一致）。
+#[tokio::test]
+async fn pre_compact_reflection_cancelled_records_cancelled_activity_and_completes_run() {
+    let result = drive_pre_compact_run_with_status(
+        Some(vec![share::message::Message::user("discarded-1")]),
+        share::config::MemoryConfig::default(),
+        ReflectionTaskCompletionStatus::Cancelled,
+    )
+    .await;
+
+    let transitions = transition_events(&result.events);
+    transition_index(
+        &transitions,
+        RunStatus::Compacting,
+        RunStatus::Reflecting,
+        RunTransitionReason::BeginReflection,
+    )
+    .expect("必须进入 Compacting→Reflecting");
+    transition_index(
+        &transitions,
+        RunStatus::Reflecting,
+        RunStatus::Compacting,
+        RunTransitionReason::ReflectionCompleted,
+    )
+    .expect("取消后必须返回 Compacting（ReflectionCompleted）");
+    let reflections = reflection_activities(&result.activities);
+    assert_eq!(reflections.len(), 1, "必须恰好发布一次 Reflection activity");
+    assert_eq!(
+        reflections[0].state,
+        sdk::ActivityStateView::Cancelled,
+        "Cancelled 反思必须以 Cancelled 终态收口 activity，NEVER 伪装成成功"
+    );
+    assert_eq!(result.run.status(), RunStatus::Completed);
+    assert_eq!(result.run.steps().len(), 1);
+}
+
+/// PreCompact 取消 token 谱系证据：与 Interval 同源的 step 谱系 token——
+/// root 取消必须联动端口收到的 token。
+#[tokio::test]
+async fn pre_compact_reflection_receives_cancel_token_from_run_lineage() {
+    let result = drive_pre_compact_run(
+        Some(vec![share::message::Message::user("discarded-1")]),
+        share::config::MemoryConfig::default(),
+    )
+    .await;
+
+    assert_eq!(
+        result.received_cancels.len(),
+        1,
+        "反思端口必须恰好被调用一次"
+    );
+    assert!(
+        !result.received_cancels[0].is_cancelled(),
+        "Run 正常完成时端口 token 不得处于取消态"
+    );
+    result.root_cancel.cancel();
+    assert!(
+        result.received_cancels[0].is_cancelled(),
+        "root 取消必须联动端口 token（证明 token 来自 run/step 谱系）"
+    );
+}
+
 #[tokio::test]
 async fn pre_compact_reflection_skipped_when_compact_skipped() {
     // 压缩返回 Skipped：观察者不暂存材料 → engine 取不到材料，不进反思 phase。
@@ -904,12 +1031,22 @@ struct ManualReflectionRunResult {
     state_during_run: Option<sdk::ActivityStateView>,
     directive: Result<LoopDirective, LoopEngineError>,
     observed_calls: Vec<&'static str>,
+    deferred_batches: Vec<Vec<String>>,
 }
 
 /// 跑一次完整的 Manual Reflection Run：无 accepted 输入（空 drain 脚本），
 /// 反思由 engine 的 `execute_manual_reflection` 在主循环之前执行。
 async fn drive_manual_reflection_run(
     script: ManualReflectionScript,
+) -> ManualReflectionRunResult {
+    drive_manual_reflection_run_with_drain(script, manual_compaction_drain_outcomes()).await
+}
+
+/// `drain_outcomes` 可脚本化的 drive 变体：覆盖「反思 Run 期间 drain 出用户输入」
+/// 的回流场景。
+async fn drive_manual_reflection_run_with_drain(
+    script: ManualReflectionScript,
+    drain_outcomes: VecDeque<DrainOutcome>,
 ) -> ManualReflectionRunResult {
     let mut run = Run::new(RunSpec::manual_reflection(), None);
     let cancel = CancellationToken::new();
@@ -928,7 +1065,7 @@ async fn drive_manual_reflection_run(
         state_during_run: None,
     };
     let mut scenario = ScriptedScenario {
-        drain_outcomes: manual_compaction_drain_outcomes(),
+        drain_outcomes,
         ..Default::default()
     };
     let directive = {
@@ -945,6 +1082,7 @@ async fn drive_manual_reflection_run(
         state_during_run: fake.state_during_run,
         directive,
         observed_calls: scenario.calls(),
+        deferred_batches: scenario.deferred_batches(),
     }
 }
 
@@ -1099,6 +1237,36 @@ async fn manual_reflection_cancelled_terminates_run_and_closes_activity() {
     assert_eq!(reflections.len(), 1, "必须恰好发布一次 Reflection activity");
     assert_eq!(reflections[0].state, sdk::ActivityStateView::Cancelled);
     assert_eq!(result.calls, 1);
+
+    // 用户取消（Esc/Ctrl-C 经 `cancel_current_run` cancel root token）必须投影为
+    // `UserExit` 终止语义——registry 侧 control 同为 UserExit；NEVER 伪装成
+    // `SessionShutdown`（会话关闭），二者在 TUI/审计语义上不同。
+    let terminated_reasons: Vec<sdk::RunTerminationReason> = result
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            RuntimeLifecycleEvent::Terminated { reason, .. } => Some(*reason),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        terminated_reasons,
+        vec![sdk::RunTerminationReason::UserExit],
+        "手动反思取消的权威终态必须是 UserExit"
+    );
+    let requested_reasons: Vec<sdk::RunTerminationReason> = result
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            RuntimeLifecycleEvent::TerminationRequested { reason, .. } => Some(*reason),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        requested_reasons,
+        vec![sdk::RunTerminationReason::UserExit],
+        "手动反思取消的终止请求必须是 UserExit"
+    );
 }
 
 #[tokio::test]
@@ -1130,4 +1298,117 @@ fn assert_manual_reflection_round_trip_status(
     )
     .expect("手动反思必须发布 DrainingInput→Reflecting (BeginReflection)");
     assert_eq!(result.run.status(), final_status);
+}
+
+// ---------------------------------------------------------------------------
+// 单用途 Run 的用户输入回流（Manual Run 期间 user message NEVER 驱动模型调用）
+// ---------------------------------------------------------------------------
+
+/// 反思 Run 期间 drain 出用户输入：单用途 Run NEVER 进入模型调用——batch 经
+/// `defer_user_batch` 回流 session 队列，Run 走向 EmptyAndSealed 正常 Completed，
+/// 反思本身照常执行一次。
+#[tokio::test]
+async fn manual_reflection_run_defers_drained_user_batch_and_completes() {
+    let result = drive_manual_reflection_run_with_drain(
+        ManualReflectionScript::Ready(ReflectionTaskCompletionStatus::Succeeded),
+        VecDeque::from([
+            DrainOutcome::ready(
+                vec![LoopInput {
+                    text: "user during reflection".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
+                    accepted: None,
+                }],
+                DrainEpoch(0),
+            ),
+            DrainOutcome::EmptyAndSealed {
+                epoch: DrainEpoch(1),
+            },
+        ]),
+    )
+    .await;
+
+    match &result.directive {
+        Ok(LoopDirective::Terminal) => {}
+        other => panic!("反思 Run 必须以 Terminal 收口: {other:?}"),
+    }
+    assert_eq!(
+        result.run.status(),
+        RunStatus::Completed,
+        "用户输入不得把单用途 Run 打成 Failed"
+    );
+    assert_eq!(result.calls, 1, "反思本身必须照常执行一次");
+    assert!(
+        !result.observed_calls.contains(&"model"),
+        "单用途 Run 不得进入模型调用: {:?}",
+        result.observed_calls
+    );
+    assert_eq!(
+        result.deferred_batches,
+        vec![vec!["user during reflection".to_string()]],
+        "用户输入必须回流 session 队列"
+    );
+}
+
+/// 同型的 Manual Compaction Run：drain 出用户输入同样回流、正常 Completed，
+/// 压缩本身照常执行一次。
+#[tokio::test]
+async fn manual_compaction_run_defers_drained_user_batch_and_completes() {
+    let mut run = Run::new(RunSpec::manual_compaction(), None);
+    let cancel = CancellationToken::new();
+    let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+    execution.initialize_for_launch(Vec::new(), 0);
+    let activities = std::sync::Arc::new(
+        crate::application::activity::ActivityCoordinator::production_without_publisher(
+            run.id().clone(),
+            crate::application::activity::RunPurpose::Main,
+        ),
+    );
+    let mut scenario = ScriptedScenario {
+        drain_outcomes: VecDeque::from([
+            DrainOutcome::ready(
+                vec![LoopInput {
+                    text: "user during compaction".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
+                    accepted: None,
+                }],
+                DrainEpoch(0),
+            ),
+            DrainOutcome::EmptyAndSealed {
+                epoch: DrainEpoch(1),
+            },
+        ]),
+        ..Default::default()
+    };
+    let directive = {
+        let mut port = scenario.ports().run_loop();
+        port.bind_activity_context(activities.clone(), "test-model".to_string());
+        run_loop(&mut run, &mut execution, &cancel, &mut port).await
+    };
+
+    match &directive {
+        Ok(LoopDirective::Terminal) => {}
+        other => panic!("压缩 Run 必须以 Terminal 收口: {other:?}"),
+    }
+    assert_eq!(
+        run.status(),
+        RunStatus::Completed,
+        "用户输入不得把单用途 Run 打成 Failed"
+    );
+    let calls = scenario.calls();
+    assert_eq!(
+        calls.iter().filter(|call| **call == "manual_compact").count(),
+        1,
+        "压缩本身必须照常执行一次: {calls:?}"
+    );
+    assert!(
+        !calls.contains(&"model"),
+        "单用途 Run 不得进入模型调用: {calls:?}"
+    );
+    assert_eq!(
+        scenario.deferred_batches(),
+        vec![vec!["user during compaction".to_string()]],
+        "用户输入必须回流 session 队列"
+    );
 }

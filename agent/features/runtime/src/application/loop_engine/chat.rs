@@ -10,7 +10,7 @@ pub(crate) mod hook_ui;
 mod hook_ui_tests;
 mod idle_commands;
 mod idle_lifecycle;
-mod input_gate;
+pub(crate) mod input_gate;
 #[cfg(test)]
 mod input_gate_reset_withdraw_tests;
 #[cfg(test)]

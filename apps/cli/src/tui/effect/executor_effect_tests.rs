@@ -1,5 +1,120 @@
 use super::*;
 
+/// `CancelCurrentRun` executor 契约：Esc/Ctrl-C 在无可寻址 RunStep 时（Manual
+/// Reflection Run、Main Run step 间隙）经 `AgentClient::cancel_current_run` 让
+/// Runtime 控制面裁决当前活跃 Run，TUI 不自行推断 identity。
+mod cancel_current_run {
+    use super::*;
+    use async_trait::async_trait;
+    use std::sync::{Arc, Mutex};
+
+    struct StubAgentClient {
+        outcome: sdk::CancelCurrentRunOutcome,
+        calls: Mutex<Vec<sdk::ControlDeadline>>,
+    }
+
+    impl StubAgentClient {
+        fn new(outcome: sdk::CancelCurrentRunOutcome) -> Self {
+            Self {
+                outcome,
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl sdk::AgentClient for StubAgentClient {
+        fn cancel_current_run(
+            &self,
+            deadline: sdk::ControlDeadline,
+        ) -> sdk::CancelCurrentRunOutcome {
+            self.calls.lock().expect("calls").push(deadline);
+            self.outcome
+        }
+
+        async fn chat(&self, _input: sdk::ChatRequest) -> Result<sdk::ChatStream, sdk::SdkError> {
+            unreachable!("cancel stub 不提供 chat")
+        }
+    }
+
+    fn app_with_client(outcome: sdk::CancelCurrentRunOutcome) -> (App, Arc<StubAgentClient>) {
+        let mut app = App::new(
+            "s".to_string(),
+            std::path::PathBuf::from("/tmp"),
+            "m".to_string(),
+        );
+        let client = Arc::new(StubAgentClient::new(outcome));
+        app.agent_client = Some(client.clone());
+        (app, client)
+    }
+
+    #[test]
+    fn accepted_outcome_enters_cancelling_and_announces() {
+        let (mut app, client) = app_with_client(sdk::CancelCurrentRunOutcome::Accepted);
+
+        app.cancel_current_run_effect();
+
+        assert_eq!(client.calls.lock().expect("calls").len(), 1);
+        assert!(
+            app.chat.is_cancelling,
+            "Accepted 必须进入 cancelling 展示态"
+        );
+        assert!(
+            app.model
+                .conversation
+                .runtime
+                .status_notice
+                .text
+                .contains("Cancelling"),
+            "Accepted 必须提示取消受理，实际: {}",
+            app.model.conversation.runtime.status_notice.text
+        );
+    }
+
+    #[test]
+    fn no_active_run_does_not_enter_cancelling() {
+        let (mut app, client) = app_with_client(sdk::CancelCurrentRunOutcome::NoActiveRun);
+
+        app.cancel_current_run_effect();
+
+        assert_eq!(client.calls.lock().expect("calls").len(), 1);
+        assert!(
+            !app.chat.is_cancelling,
+            "NoActiveRun 不得伪造 cancelling 展示态"
+        );
+        assert!(
+            app.model
+                .conversation
+                .runtime
+                .status_notice
+                .text
+                .contains("No active response"),
+            "NoActiveRun 必须提示无可取消目标，实际: {}",
+            app.model.conversation.runtime.status_notice.text
+        );
+    }
+
+    #[test]
+    fn run_terminating_enters_cancelling_with_terminating_notice() {
+        let (mut app, client) = app_with_client(sdk::CancelCurrentRunOutcome::RunTerminating);
+
+        app.cancel_current_run_effect();
+
+        assert_eq!(client.calls.lock().expect("calls").len(), 1);
+        assert!(app.chat.is_cancelling);
+        assert!(
+            app.model
+                .conversation
+                .runtime
+                .status_notice
+                .text
+                .contains("terminating"),
+            "RunTerminating 必须提示终止中，实际: {}",
+            app.model.conversation.runtime.status_notice.text
+        );
+    }
+}
+
 #[test]
 fn effect_runtime_ignores_noop_effect() {
     let app = App::new(

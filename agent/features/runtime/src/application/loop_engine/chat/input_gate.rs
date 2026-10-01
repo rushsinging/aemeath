@@ -1,3 +1,4 @@
+use crate::application::constants::REFLECT_NOW_BUSY_DROP_NOTICE;
 use crate::application::loop_engine::chat::events::{ChatEventSink, RuntimeStreamEvent};
 use sdk::ChatInputEvent;
 use std::collections::VecDeque;
@@ -157,6 +158,31 @@ impl QueuedInput {
     }
 }
 
+/// 裁决 3：丢弃 pending buffer 中全部积压的 `/reflect-now`，逐条发布丢弃提示，
+/// 并在有丢弃时同步一次排队快照（TUI 占位与权威队列保持一致，#1816）。
+/// 返回丢弃条数。调用点（Runtime 侧仅有的两个丢弃点，idle 受理路径均不经过）：
+/// ①Run 收尾回流（`BufferedInputAdapter::drain_remaining_events`，busy 积压的
+/// 主拦截点）；②run_launch 循环顶 gate 消费 pending buffer 前（gate requeue
+/// 残留的拦截点）。
+pub(crate) fn drop_queued_reflect_now<S>(pending: &PendingInputBuffer, sink: &S) -> usize
+where
+    S: ChatEventSink + Sync,
+{
+    let dropped = pending.drain_reflect_now_events();
+    for _ in 0..dropped {
+        sink.try_send_event(RuntimeStreamEvent::CommandResultText {
+            text: REFLECT_NOW_BUSY_DROP_NOTICE.to_string(),
+            is_error: false,
+        });
+    }
+    if dropped > 0 {
+        sink.try_send_event(RuntimeStreamEvent::ControlCommandsQueued {
+            queued: pending.command_snapshot(),
+        });
+    }
+    dropped
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct PendingInputBuffer {
     events: Arc<Mutex<VecDeque<QueuedInput>>>,
@@ -253,6 +279,18 @@ impl PendingInputBuffer {
             .drain(..)
             .map(|queued| queued.event)
             .collect()
+    }
+
+    /// 丢弃缓冲区中全部 `/reflect-now` 事件（其余事件原序保留），返回丢弃条数。
+    /// 裁决 3 的唯一剔除入口，由 `drop_queued_reflect_now` 调用。
+    pub fn drain_reflect_now_events(&self) -> usize {
+        let mut buffer = self
+            .events
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let before = buffer.len();
+        buffer.retain(|queued| !matches!(queued.event, ChatInputEvent::ReflectNow));
+        before - buffer.len()
     }
 }
 
@@ -451,8 +489,7 @@ where
                 // busy：Manual 触发 NEVER 排队；提示后丢弃本事件，
                 // 不放回 buffer（与 Compact 的 busy 排队语义相反）。
                 sink.send_event(RuntimeStreamEvent::CommandResultText {
-                    text: "Reflection 已在运行或等待运行结束，已跳过本次手动触发；稍后再试。"
-                        .to_string(),
+                    text: REFLECT_NOW_BUSY_DROP_NOTICE.to_string(),
                     is_error: false,
                 })
                 .await;
