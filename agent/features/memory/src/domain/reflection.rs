@@ -263,7 +263,9 @@ impl ReflectionEngine {
                 '}' if !in_string => {
                     depth = depth.saturating_sub(1);
                     if depth == 0 {
+                        // 偏移累计自 char_indices 的 len_utf8()，边界由遍历构造保证。
                         return Some(&text[start..start + offset + ch.len_utf8()]);
+                        // allow unsafe_text_op
                     }
                 }
                 _ => {}

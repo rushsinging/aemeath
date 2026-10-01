@@ -119,7 +119,8 @@ pub fn safe_byte_prefix(s: &str, offset: usize) -> &str {
 /// ```
 pub fn split_at_ascii<F: Fn(char) -> bool>(s: &str, predicate: F) -> (&str, &str) {
     let byte_len = s.bytes().take_while(|&b| predicate(b as char)).count();
-    s.split_at(byte_len)
+    // byte_len 由 ASCII 前缀逐字节计数得出，必然落在 char 边界。
+    s.split_at(byte_len) // allow unsafe_text_op
 }
 
 fn char_display_width(ch: char) -> usize {

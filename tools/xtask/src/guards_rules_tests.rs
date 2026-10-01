@@ -469,6 +469,37 @@ fn pattern_exclusion_skips_comments_and_inline_allow_marker() {
 }
 
 #[test]
+fn pattern_exclusion_respects_allow_marker_on_next_comment_line() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    // rustfmt 会把控制流语句（if/for）的行尾注释归一化到块内首行，
+    // marker 判定必须容忍这一形态：命中行的紧邻下一行是纯注释行且含 marker 时放行。
+    write_source(
+        &temp.path().join("crates/x/control.rs"),
+        "if predicate() { let pair = s.split_at(8);\n    // allow unsafe_text_op\n    consume(pair); }\nlet t = b.split_at(4);\n",
+    );
+
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "pattern.all.no-unsafe-text-slicing",
+        "assertion": "pattern_exclusion",
+        "scope": { "kind": "workspace" },
+        "forbidden_patterns": [".split_at("],
+        "allow_marker": "allow unsafe_text_op",
+        "reason": "测试",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations = crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/control.rs")
+        .expect("enforce");
+
+    assert_eq!(
+        violations.len(),
+        1,
+        "仅无标记的末行违规；首行命中由下一行注释 marker 放行：{violations:#?}"
+    );
+}
+
+#[test]
 fn construction_whitelist_flags_symbol_outside_allowed_paths() {
     let temp = tempfile::tempdir().expect("create tempdir");
     write_source(

@@ -140,6 +140,7 @@ fn lexical_mask(source: &str) -> String {
     while i < bytes.len() {
         if block > 0 {
             if i + 1 < bytes.len() && &bytes[i..i + 2] == b"/*" {
+                // 字节切片两字节 ASCII 比较。allow unsafe_text_op
                 block += 1;
                 out[i] = b' ';
                 out[i + 1] = b' ';
@@ -147,6 +148,7 @@ fn lexical_mask(source: &str) -> String {
                 continue;
             }
             if i + 1 < bytes.len() && &bytes[i..i + 2] == b"*/" {
+                // allow unsafe_text_op
                 block -= 1;
                 out[i] = b' ';
                 out[i + 1] = b' ';
@@ -160,11 +162,13 @@ fn lexical_mask(source: &str) -> String {
             continue;
         }
         if i + 1 < bytes.len() && &bytes[i..i + 2] == b"//" {
+            // allow unsafe_text_op
             while i < bytes.len() && bytes[i] != b'\n' {
                 out[i] = b' ';
                 i += 1;
             }
         } else if i + 1 < bytes.len() && &bytes[i..i + 2] == b"/*" {
+            // allow unsafe_text_op
             block = 1;
             out[i] = b' ';
             out[i + 1] = b' ';
@@ -248,7 +252,9 @@ fn production_source(source: &str) -> String {
                 continue;
             }
         };
-        for byte in &mut out[start..end] {
+        // 语句边界由 ASCII 空白与 {;} 判定构造，落在字节安全点。
+        let statement_range = &mut out[start..end]; // allow unsafe_text_op
+        for byte in statement_range {
             if *byte != b'\n' {
                 *byte = b' ';
             }
@@ -302,16 +308,15 @@ fn inspect_source(raw: &str, owner: &OwnerRule, relative: &str) -> Vec<Violation
             break;
         };
         let end = start + end_rel + 1;
-        let statement = compact(&source[start..end]);
+        // start/end 偏移由 ASCII 语句边界扫描构造。
+        let statement = compact(&source[start..end]); // allow unsafe_text_op
         let starts_at_boundary = start == 0
             || source.as_bytes()[start - 1].is_ascii_whitespace()
             || matches!(source.as_bytes()[start - 1], b'{' | b';');
-        if starts_at_boundary
-            && statement.starts_with("uselog::")
-            && ["trace", "debug", "info", "warn", "error"]
-                .iter()
-                .any(|level| contains_identifier(&source[start..end], level))
-        {
+        let level_in_statement = ["trace", "debug", "info", "warn", "error"]
+            .iter()
+            .any(|level| contains_identifier(&source[start..end], level)); // allow unsafe_text_op
+        if starts_at_boundary && statement.starts_with("uselog::") && level_in_statement {
             violations.push(Violation {
                 path: relative.into(),
                 line: line_at(&source, start),

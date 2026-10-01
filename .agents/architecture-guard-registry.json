@@ -3128,39 +3128,13 @@
         ".chars().nth(",
         ".split_at("
       ],
-      "exclusions": [
-        {
-          "path": "apps/cli/src/tui/render/display/safe_text.rs",
-          "reason": "safe-text owner / 人工确认的偏移切片文件"
-        },
-        {
-          "path": "apps/cli/src/tui/text.rs",
-          "reason": "safe-text owner / 人工确认的偏移切片文件"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/blocks/tool_result.rs",
-          "reason": "safe-text owner / 人工确认的偏移切片文件"
-        },
-        {
-          "path": "agent/features/memory/src/domain/reflection.rs",
-          "reason": "safe-text owner / 人工确认的偏移切片文件"
-        },
-        {
-          "path": "agent/features/provider/src/adapters/ollama/conversion.rs",
-          "reason": "safe-text owner / 人工确认的偏移切片文件"
-        },
-        {
-          "path": "agent/features/audit/src/adapters/append.rs",
-          "reason": "safe-text owner / 人工确认的偏移切片文件"
-        },
-        {
-          "path": "packages/global/logging/src/domain/routing_guard.rs",
-          "reason": "safe-text owner / 人工确认的偏移切片文件"
-        }
-      ],
+      "exclusions": [],
       "reason": "F-23 部分迁移：裸字节切片/chars().nth 两大子串模式（8 安全 owner 豁免与原脚本一致）；切片区间正则特征仍需原脚本，待 regex 断言器批次全量退役",
       "profile": "full",
-      "allow_marker": "allow unsafe_text_op"
+      "allow_marker": "allow unsafe_text_op",
+      "allow_markers": [
+        "allow unsafe_text_op"
+      ]
     },
     {
       "id": "pattern.provider.no-pull-stream-retry-loop",
@@ -3298,36 +3272,7 @@
         "(?:&\\s*)?[A-Za-z_][A-Za-z0-9_.]*\\s*\\[\\s*\\.\\.=\\s*(?:\\d|[A-Za-z_][A-Za-z0-9_.]*\\.len\\(|len\\()",
         "(?:&\\s*)?[A-Za-z_][A-Za-z0-9_.]*\\s*\\[\\s*\\.\\.\\s*(?:\\d|[A-Za-z_][A-Za-z0-9_.]*\\.len\\(|len\\()"
       ],
-      "exclusions": [
-        {
-          "path": "apps/cli/src/tui/render/display/safe_text.rs",
-          "reason": "safe-text owner（guard-registry:scope.tui.safe-text-owners）"
-        },
-        {
-          "path": "apps/cli/src/tui/text.rs",
-          "reason": "safe-text owner（guard-registry:scope.tui.safe-text-owners）"
-        },
-        {
-          "path": "apps/cli/src/tui/render/output/blocks/tool_result.rs",
-          "reason": "长语句文件，命中均为 find/char_indices 偏移（guard-registry:scope.all.unsafe-text-long-statement-files）"
-        },
-        {
-          "path": "agent/features/memory/src/domain/reflection.rs",
-          "reason": "长语句文件（guard-registry:scope.all.unsafe-text-long-statement-files）"
-        },
-        {
-          "path": "agent/features/provider/src/adapters/ollama/conversion.rs",
-          "reason": "长语句文件（guard-registry:scope.all.unsafe-text-long-statement-files）"
-        },
-        {
-          "path": "agent/features/audit/src/adapters/append.rs",
-          "reason": "长语句文件（guard-registry:scope.all.unsafe-text-long-statement-files）"
-        },
-        {
-          "path": "packages/global/logging/src/domain/routing_guard.rs",
-          "reason": "长语句文件（guard-registry:scope.all.unsafe-text-long-statement-files）"
-        }
-      ],
+      "exclusions": [],
       "allow_markers": [
         "allow unsafe_text_op",
         "floor_char_boundary",

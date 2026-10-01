@@ -497,14 +497,26 @@ fn enforce_pattern_exclusion(
     };
     let production = strip_inline_cfg_test_region(source);
     let compiled = compile_regexes(forbidden_regex)?;
+    let lines: Vec<&str> = production.lines().collect();
     let mut violations = Vec::new();
-    for (offset, line) in production.lines().enumerate() {
+    for (offset, line) in lines.iter().enumerate() {
         let code = line.trim_start();
         if code.starts_with("//") {
             continue;
         }
         if allow_markers.iter().any(|marker| line.contains(marker)) {
             continue;
+        }
+        // rustfmt 会把控制流语句（if/for）的行尾注释归一化到块内首行；
+        // 命中行的紧邻下一行是纯注释行且含 marker 时同样放行。
+        if let Some(next_line) = lines.get(offset + 1) {
+            let next_is_marker_comment = next_line.trim_start().starts_with("//")
+                && allow_markers
+                    .iter()
+                    .any(|marker| next_line.contains(marker));
+            if next_is_marker_comment {
+                continue;
+            }
         }
         for pattern in forbidden_patterns {
             if line.contains(pattern.as_str()) {

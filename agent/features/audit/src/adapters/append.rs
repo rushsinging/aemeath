@@ -73,6 +73,7 @@ impl FileUsageAppendStore {
         if bytes.is_empty()
             || bytes.last() != Some(&b'\n')
             || bytes[..bytes.len() - 1].contains(&b'\n')
+        // 字节切片非文本切片。allow unsafe_text_op
         {
             return Err(AppendLogError::InvalidPayload);
         }
