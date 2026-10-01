@@ -221,7 +221,11 @@ where
         &mut self,
         expected_epoch: DrainEpoch,
     ) -> Result<Option<DrainOutcome>, LoopEngineError> {
-        let events = self.input_events.drain_input_events().await;
+        // #1818：一次 drain 就是一批，同批连续用户消息折叠为一条再接纳，
+        // 这样 UserMessagesQueued 快照只含 1 条，TUI 排队行随之收敛为 1 组。
+        let events = crate::application::loop_engine::batched_user_input::fold_batched_user_inputs(
+            self.input_events.drain_input_events().await,
+        );
         for event in events {
             match event {
                 ChatInputEvent::UserMessage { .. } | ChatInputEvent::SkillRequest(_) => {
@@ -661,5 +665,145 @@ impl crate::application::loop_engine::InputPort for FixedInputAdapter<'_> {
         expected_epoch: DrainEpoch,
     ) -> Result<DrainOutcome, LoopEngineError> {
         InputStrategy::await_user_input(self, expected_epoch).await
+    }
+}
+
+#[cfg(test)]
+mod batched_user_input_tests {
+    //! #1818：drain 路径同批折叠——快照必须只含 1 条，TUI 排队行才收敛为 1 组。
+
+    use super::*;
+    use crate::application::loop_engine::chat::{
+        ChatEventSink, EventFuture, InputEventDrainPort, InputEventFuture, InputEventOptFuture,
+        RuntimeStreamEvent,
+    };
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default)]
+    struct ScriptedInput {
+        events: Arc<Mutex<Vec<ChatInputEvent>>>,
+        deferred: Arc<Mutex<Vec<ChatInputEvent>>>,
+    }
+
+    impl ScriptedInput {
+        fn with_events(events: Vec<ChatInputEvent>) -> Self {
+            Self {
+                events: Arc::new(Mutex::new(events)),
+                deferred: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    impl InputEventDrainPort for ScriptedInput {
+        fn drain_input_events<'a>(&'a self) -> InputEventFuture<'a> {
+            Box::pin(async move { std::mem::take(&mut *self.events.lock().unwrap()) })
+        }
+
+        fn recv_next_input<'a>(&'a self) -> InputEventOptFuture<'a> {
+            Box::pin(async move { self.events.lock().unwrap().pop() })
+        }
+    }
+
+    impl SessionInputPort for ScriptedInput {
+        fn defer(&self, event: ChatInputEvent) {
+            self.deferred.lock().unwrap().push(event);
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct RecordingSink {
+        events: Arc<Mutex<Vec<RuntimeStreamEvent>>>,
+    }
+
+    impl ChatEventSink for RecordingSink {
+        fn send_event<'a>(&'a self, event: RuntimeStreamEvent) -> EventFuture<'a> {
+            Box::pin(async move {
+                self.events.lock().unwrap().push(event);
+            })
+        }
+
+        fn try_send_event(&self, event: RuntimeStreamEvent) {
+            self.events.lock().unwrap().push(event);
+        }
+    }
+
+    fn adapter_with(
+        events: Vec<ChatInputEvent>,
+    ) -> (BufferedInputAdapter<ScriptedInput>, RecordingSink) {
+        let sink = RecordingSink::default();
+        let adapter = BufferedInputAdapter {
+            input_events: ScriptedInput::with_events(events),
+            sink: ChatEventSinkHandle::new(sink.clone()),
+            pending_input: PendingInputBuffer::default(),
+            run_input_buffer: crate::application::run::context::RunInputBufferHandle::new(),
+            continuation: InputContinuationState::default(),
+            run_id: share::ids::RunId::new_v7(),
+        };
+        (adapter, sink)
+    }
+
+    /// 最后一次排队快照的 (InputId, 文本) 投影——消息类型细节与本测试无关。
+    ///
+    /// 取最后一条而非第一条：每接纳一条都会发一次快照，只有最后一次反映
+    /// 整批接纳后的队列状态。
+    fn queued_snapshot(sink: &RecordingSink) -> Option<Vec<(sdk::InputId, String)>> {
+        sink.events
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find_map(|event| match event {
+                RuntimeStreamEvent::UserMessagesQueued { queued } => Some(
+                    queued
+                        .iter()
+                        .map(|(id, message)| (id.clone(), message.text_content().to_string()))
+                        .collect(),
+                ),
+                _ => None,
+            })
+    }
+
+    #[tokio::test]
+    async fn drain_merges_same_batch_so_queued_snapshot_carries_one_message() {
+        let (mut adapter, sink) = adapter_with(vec![
+            ChatInputEvent::user_message("第一段", Vec::new()),
+            ChatInputEvent::user_message("第二段", Vec::new()),
+        ]);
+
+        let outcome = adapter
+            .drain_collect_continuations(DrainEpoch(0))
+            .await
+            .expect("drain 不应失败");
+
+        assert!(outcome.is_none(), "没有内部 continuation 时返回 None");
+        let snapshot = queued_snapshot(&sink).expect("接纳后必须发布排队快照");
+        assert_eq!(
+            snapshot.len(),
+            1,
+            "同批两条消息在快照里必须是 1 条，否则 TUI 会显示 2 组排队行"
+        );
+        assert_eq!(snapshot[0].1, "第一段\n\n第二段");
+    }
+
+    #[tokio::test]
+    async fn drain_snapshot_keeps_skill_request_separate_from_merged_messages() {
+        let (mut adapter, sink) = adapter_with(vec![
+            ChatInputEvent::user_message("技能之前", Vec::new()),
+            ChatInputEvent::SkillRequest(sdk::SkillRequest {
+                input_id: sdk::InputId::new_v7(),
+                skill: "superpowers:brainstorming".to_string(),
+                arguments: "scope".to_string(),
+                raw_input: "/superpowers:brainstorming scope".to_string(),
+            }),
+            ChatInputEvent::user_message("技能之后", Vec::new()),
+        ]);
+
+        adapter
+            .drain_collect_continuations(DrainEpoch(0))
+            .await
+            .expect("drain 不应失败");
+
+        let snapshot = queued_snapshot(&sink).expect("接纳后必须发布排队快照");
+        assert_eq!(snapshot.len(), 3, "消息、技能、消息各占一条");
     }
 }

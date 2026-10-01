@@ -254,10 +254,11 @@ enum AcceptedUserInput {
 
 1. `SessionInputMailbox` 先读取 deferred，再读取外部 source，因而跨 Run 保持 producer identity 与 FIFO；任何其他 Runtime 类型都不得直接 poll `ChatInputEventPort`。
 2. Session idle gate 对事件分类：可接纳的 `UserMessage` / `SkillRequest` 转成 `AcceptedUserInput` 并激活一个 Run；控制命令留在 Session 边界执行或调度；输入 source 关闭触发 Session shutdown。gate 一轮只消费到第一个控制命令，其余事件原序回到等待缓冲区等待下一轮，NEVER 静默丢弃（唯一例外是用户主动 Abort）；命令入队、重新排队与消费后各发布一次 `ControlCommandsQueued` 全量快照，UI 据此回显排队中的命令。
-3. `AcceptedUserInput` 是接纳后的唯一真相。`UserMessage` 保留文本与图片；`SkillRequest` 保留 `skill`、`arguments`、`raw_input` 与 `InputId`。模型 `Message`、Context accepted input 和 `UserMessagesAdopted` 都从同一实例派生，**NEVER** 同时维护 `adopted_messages` / `adopted_events` 或任何同义双轨。
-4. 每个 `RuntimeContext` 拥有独立 `RunInputBufferHandle`。Session 将 canonical `AcceptedUserInput` 移入当前 Run buffer；首条与后续输入走同一 typed admission 路径。Run buffer 内部可同时暂存 Session 控制事件，但用户输入不再退回 `ChatInputEvent` 后重新 materialize。
-5. Run buffer 以 `DrainEpoch` 线性化 drain/seal。Run 进入 sealed 后到达的用户输入不会丢弃或串入旧 Run，而是转换回边界 `ChatInputEvent` 并退回 `SessionInputMailbox::defer`，供下一 Run 优先消费；该转换只发生在 ownership 退回边界，不参与模型消息构造。
-6. Run 结束时，尚未归属该 Run 的控制事件同样退回 Session mailbox；Run buffer 不执行 Session 命令。
+3. 同批用户消息在**接纳层**折叠为一条（#1818）：一次原子 drain 里的连续 `UserMessage` 以空行分隔合并，图片按拼接顺序并入同一条消息并全局重编号 `[Image #N]` 占位符；`SkillRequest` 及其余事件是合并边界。折叠必须发生在进入 `run_input_buffer` / `accepted_inputs` 之前——`NEVER` 只在 `model_message()` 层合并，否则 `user_message_snapshot()` 仍返回 N 条，SDK 排队快照与 TUI 排队行不会收敛。
+4. `AcceptedUserInput` 是接纳后的唯一真相。`UserMessage` 保留文本与图片；`SkillRequest` 保留 `skill`、`arguments`、`raw_input` 与 `InputId`。模型 `Message`、Context accepted input 和 `UserMessagesAdopted` 都从同一实例派生，**NEVER** 同时维护 `adopted_messages` / `adopted_events` 或任何同义双轨。
+5. 每个 `RuntimeContext` 拥有独立 `RunInputBufferHandle`。Session 将 canonical `AcceptedUserInput` 移入当前 Run buffer；首条与后续输入走同一 typed admission 路径。Run buffer 内部可同时暂存 Session 控制事件，但用户输入不再退回 `ChatInputEvent` 后重新 materialize。
+6. Run buffer 以 `DrainEpoch` 线性化 drain/seal。Run 进入 sealed 后到达的用户输入不会丢弃或串入旧 Run，而是转换回边界 `ChatInputEvent` 并退回 `SessionInputMailbox::defer`，供下一 Run 优先消费；该转换只发生在 ownership 退回边界，不参与模型消息构造。
+7. Run 结束时，尚未归属该 Run 的控制事件同样退回 Session mailbox；Run buffer 不执行 Session 命令。
 
 `RunInputBuffer` 只管理当前 Run 的输入接纳生命周期，不复制 Run 状态机。它以 `BufferedRunInput::Accepted(AcceptedUserInput)` 保存用户输入，以独立 control 变体保存待退回 Session 的命令；drain 时 `LoopInput` 携带同一 `AcceptedUserInput`，避免 `ChatInputEvent → Message → ChatInputEvent → LoopInput → Message` 的有损往返：
 

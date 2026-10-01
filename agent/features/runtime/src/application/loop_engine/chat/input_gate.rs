@@ -301,7 +301,11 @@ where
     let mut accepted_inputs = Vec::new();
     let mut reset_requested = false;
 
-    let events = buffer.drain_all();
+    // #1818：同批连续用户消息在接纳层折叠为一条——快照、回显与 TUI 排队行
+    // 由此自动收敛，NEVER 只在模型消息层合并（那样快照仍是 N 条）。
+    let events = crate::application::loop_engine::batched_user_input::fold_batched_user_inputs(
+        buffer.drain_all(),
+    );
     let event_count = events.len();
     // [loop_debug] DEBUG 级诊断：列出本次 gate 收到的所有事件类型。排查「无用户输入
     // 却持续跑」时是关键证据——若含 UserMessage/其它事件，说明有输入被送进来（TUI 误发

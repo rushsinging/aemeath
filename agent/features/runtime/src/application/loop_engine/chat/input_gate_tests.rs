@@ -534,23 +534,22 @@ async fn test_apply_gate_emits_user_messages_added_batch_no_dedup() {
     )
     .await;
 
-    assert_eq!(outcome.appended_user_messages, 2, "不去重：两条都 append");
-    assert_eq!(outcome.accepted_inputs.len(), 2);
+    // #1818 改写：原断言逐条比对两条 accepted message，固化「同批逐条接纳」。
+    // 「不去重」的保护目标改由「合并后的文本仍是两份 same」覆盖——重复内容
+    // 不会被丢弃，只是不再拆成两条结构。
+    assert_eq!(outcome.appended_user_messages, 1, "同批折叠为一条");
+    assert_eq!(outcome.accepted_inputs.len(), 1);
     // #1272: apply_gate no longer emits UserMessagesAdopted.
     // Adopted data is carried in outcome.accepted_inputs for RunPort.
     assert_eq!(
         outcome.accepted_inputs[0].model_message().text_content(),
-        "same"
+        "same\n\nsame",
+        "重复文本的两条消息都要保留，不能因内容相同被丢弃"
     );
-    assert_eq!(
-        outcome.accepted_inputs[1].model_message().text_content(),
-        "same"
-    );
-    assert_ne!(
-        outcome.accepted_inputs[0].input_id(),
-        outcome.accepted_inputs[1].input_id(),
-        "每条提交一个独立 id"
-    );
+    // #1818 改写：原断言「每条提交一个独立 id」在同批折叠后不再成立——合并消息
+    // 沿用批次首条 InputId（其余 id 随合并失去独立意义，TUI 消费走全量替换，
+    // 不依赖 id 匹配）。跨批次的 id 独立性由 accepted_message 与 input_id
+    // 保留测试覆盖。
     // Verify no semantic events were emitted through the sink（快照除外，#1816）。
     assert_eq!(semantic_event_count(&sink), 0);
 }
@@ -575,8 +574,14 @@ async fn test_run_loop_gate_preserves_duplicate_typed_events() {
     )
     .await;
 
-    assert_eq!(outcome.appended_user_messages, 2, "不去重：两条都 append");
-    assert_eq!(outcome.accepted_inputs.len(), 2);
+    // #1818 改写：同批两条相同文本的消息折叠为一条，但两份内容都保留在
+    // 合并文本里——「不去重」的保护目标不变。
+    assert_eq!(outcome.appended_user_messages, 1, "同批折叠为一条");
+    assert_eq!(outcome.accepted_inputs.len(), 1);
+    assert_eq!(
+        outcome.accepted_inputs[0].model_message().text_content(),
+        "same\n\nsame"
+    );
 }
 
 /// #391 S3-1：drain_all 非空 → 返回全部事件 + buffer 清空。
@@ -669,8 +674,15 @@ async fn test_apply_gate_no_premature_adopted_emission() {
     )
     .await;
 
-    assert_eq!(outcome.appended_user_messages, 2);
-    assert_eq!(outcome.accepted_inputs.len(), 2);
+    // #1818 改写：原断言 `appended_user_messages == 2` / `accepted_inputs.len() == 2`
+    // 固化了「同批逐条接纳」的旧结构。替代证据是本测试断言两条消息折叠为一条
+    // 且文本按空行拼接——两条内容都没有丢，只是结构上成为一条连续输入。
+    assert_eq!(outcome.appended_user_messages, 1);
+    assert_eq!(outcome.accepted_inputs.len(), 1);
+    assert_eq!(
+        outcome.accepted_inputs[0].model_message().text_content(),
+        "hello\n\nworld"
+    );
     // 确认没有语义事件通过 sink 发出（排队快照是状态同步，#1816）
     assert_eq!(
         semantic_event_count(&sink),
@@ -975,4 +987,69 @@ fn pending_buffer_drain_for_withdraw_returns_command_texts_and_clears_queue() {
     );
     assert!(buffer.is_empty(), "撤回后队列必须清空");
     assert!(buffer.command_snapshot().is_empty());
+}
+
+/// #1818：同一批 gate 里的连续用户消息合并为一条，文本空行分隔。
+#[tokio::test]
+async fn apply_gate_merges_consecutive_user_messages_in_one_batch() {
+    let buffer = PendingInputBuffer::default();
+    let input = TestInputEventPort::new(vec![
+        ChatInputEvent::user_message("第一段", Vec::new()),
+        ChatInputEvent::user_message("第二段", Vec::new()),
+    ]);
+    let sink = TestSink::default();
+
+    let outcome = run_loop_gate(
+        GateKind::BeforeLlm,
+        &buffer,
+        &input,
+        &sink,
+        &task::TaskStore::new(),
+        true,
+    )
+    .await;
+
+    assert_eq!(outcome.accepted_inputs.len(), 1, "同批连续消息折叠为一条");
+    assert_eq!(
+        outcome.accepted_inputs[0].model_message().text_content(),
+        "第一段\n\n第二段"
+    );
+    assert_eq!(outcome.appended_user_messages, 1);
+}
+
+/// #1818：SkillRequest 是合并边界，其两侧消息各自折叠。
+#[tokio::test]
+async fn apply_gate_keeps_skill_request_as_merge_boundary() {
+    let buffer = PendingInputBuffer::default();
+    let input = TestInputEventPort::new(vec![
+        ChatInputEvent::user_message("技能之前", Vec::new()),
+        ChatInputEvent::SkillRequest(sdk::SkillRequest {
+            input_id: sdk::InputId::new_v7(),
+            skill: "superpowers:brainstorming".to_string(),
+            arguments: "scope".to_string(),
+            raw_input: "/superpowers:brainstorming scope".to_string(),
+        }),
+        ChatInputEvent::user_message("技能之后", Vec::new()),
+    ]);
+    let sink = TestSink::default();
+
+    let outcome = run_loop_gate(
+        GateKind::BeforeLlm,
+        &buffer,
+        &input,
+        &sink,
+        &task::TaskStore::new(),
+        true,
+    )
+    .await;
+
+    assert_eq!(
+        outcome.accepted_inputs.len(),
+        3,
+        "技能两侧的消息各自只有一条，折叠后仍是三条，技能不被吸收进消息"
+    );
+    assert!(matches!(
+        &outcome.accepted_inputs[1],
+        crate::application::loop_engine::AcceptedUserInput::SkillRequest(_)
+    ));
 }

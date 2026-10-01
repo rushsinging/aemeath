@@ -1,3 +1,4 @@
+pub(crate) mod batched_user_input;
 pub mod chat;
 pub(crate) mod compaction;
 pub(crate) mod context_request;
