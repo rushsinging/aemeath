@@ -398,3 +398,119 @@ async fn each_configuration_gate_reports_its_own_reason() {
         assert!(disabled[0].contains(expected_reason), "{}", disabled[0]);
     }
 }
+
+// ---------------------------------------------------------------------------
+// 取消的 history 持久化证据（#1797 取消协议：terminal receipt 必须落盘）
+// ---------------------------------------------------------------------------
+
+/// 记录 append/upsert 的 history 替身：取消路径的持久化断言需要区分
+/// 「写入过 Running」与「终态以 Cancelled 语义 upsert」两个事实。
+#[derive(Clone, Default)]
+struct RecordingReflectionHistory {
+    appends: Arc<Mutex<Vec<memory::api::reflection::ReflectionRecord>>>,
+    upserts: Arc<Mutex<Vec<memory::api::reflection::ReflectionRecord>>>,
+}
+
+#[async_trait::async_trait]
+impl memory::api::ReflectionHistoryQuery for RecordingReflectionHistory {
+    async fn list(
+        &self,
+        _limit: usize,
+    ) -> Result<Vec<memory::api::reflection::ReflectionSafeSummary>, memory::api::MemoryError> {
+        Ok(Vec::new())
+    }
+}
+
+#[async_trait::async_trait]
+impl memory::api::ReflectionHistoryStore for RecordingReflectionHistory {
+    async fn append(
+        &self,
+        record: &memory::api::reflection::ReflectionRecord,
+    ) -> Result<(), memory::api::MemoryError> {
+        self.appends.lock().await.push(record.clone());
+        Ok(())
+    }
+
+    async fn upsert(
+        &self,
+        record: &memory::api::reflection::ReflectionRecord,
+    ) -> Result<(), memory::api::MemoryError> {
+        self.upserts.lock().await.push(record.clone());
+        Ok(())
+    }
+}
+
+/// 取消后 history 必须写入 Cancelled 语义的终态记录（status=Failed +
+/// error_category=Cancelled），NEVER 留下悬挂的 Running 或伪装成成功；
+/// 同时断言没有成功终态记录（冲突终态互斥）。
+#[tokio::test]
+async fn cancelled_run_persists_cancelled_history_record() {
+    let adapter = ReflectionTaskAdapter::new(Duration::from_secs(5), |_request, _cancel| async {
+        pending::<()>().await;
+        #[allow(unreachable_code)]
+        Ok(successful_payload())
+    });
+    let history = RecordingReflectionHistory::default();
+    let binding = crate::application::run::run_factory_support::doubles::fake_provider_binding();
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+
+    let outcome = adapter
+        .run_complete(
+            ReflectionTaskRequest::new(
+                ReflectionTaskTrigger::Manual,
+                vec![share::message::Message::user("reflect me")],
+            ),
+            share::config::MemoryConfig {
+                enabled: true,
+                reflection: share::config::ReflectionConfig {
+                    enabled: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            binding.provider.clone(),
+            binding.model.clone(),
+            binding.max_tokens,
+            binding.requested_reasoning,
+            "system".to_string(),
+            "en".to_string(),
+            std::sync::Arc::new(memory::api::NoOpMemory),
+            std::sync::Arc::new(history.clone()),
+            cancel,
+        )
+        .await;
+
+    let ReflectionRunOutcome::Completed(completion) = &outcome else {
+        panic!("取消必须折叠为 Completed(Cancelled): {outcome:?}");
+    };
+    assert_eq!(completion.status, ReflectionTaskCompletionStatus::Cancelled);
+
+    let appends = history.appends.lock().await;
+    assert_eq!(appends.len(), 1, "执行前必须恰好写入一条 Running 记录");
+    assert_eq!(
+        appends[0].status,
+        memory::api::reflection::ReflectionStatus::Running
+    );
+
+    let upserts = history.upserts.lock().await;
+    assert_eq!(upserts.len(), 1, "取消终态必须恰好 upsert 一条记录");
+    assert_eq!(
+        upserts[0].status,
+        memory::api::reflection::ReflectionStatus::Failed,
+        "取消按失败态落盘（非 Succeeded）"
+    );
+    assert_eq!(
+        upserts[0].error_category,
+        Some(memory::api::reflection::ReflectionErrorCategory::Cancelled),
+        "取消的 error_category 必须是 Cancelled"
+    );
+    assert!(
+        upserts
+            .iter()
+            .all(|record| record.status != memory::api::reflection::ReflectionStatus::Succeeded),
+        "冲突终态互斥：取消后不得出现成功记录"
+    );
+    // 同一 stable id：Running 与终态是同一条记录的两次写入。
+    assert_eq!(appends[0].id, upserts[0].id);
+}

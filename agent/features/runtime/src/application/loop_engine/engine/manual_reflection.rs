@@ -84,7 +84,11 @@ pub(super) async fn execute_manual_reflection(
             if let Some(activity_id) = activity_id {
                 let _ = port.finish_activity(activity_id, ActivityTerminal::Cancelled);
             }
-            terminate_interrupted_run(run, execution, port).await?;
+            // 用户取消（Esc/Ctrl-C 经 `cancel_current_run` cancel root token）→
+            // UserExit 终止语义，与 registry 侧 control 一致；NEVER 伪装成
+            // SessionShutdown（会话关闭）。
+            terminate_interrupted_run(run, execution, port, sdk::RunTerminationReason::UserExit)
+                .await?;
             Ok(ManualReflectionDirective::Terminal)
         }
         ManualReflectionOutcome::TimedOut => {

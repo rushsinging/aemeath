@@ -493,12 +493,23 @@ fn run_control_ack_cannot_become_a_terminal_source() {
     let executor = fs::read_to_string(root.join("effect/executor.rs")).expect("read executor");
     let key = fs::read_to_string(root.join("app/update/key.rs")).expect("read key update");
 
-    assert!(key.contains("Effect::CancelRunStep"));
-    assert!(executor.contains("CancelRunStepOutcome::Accepted"));
+    // 取消的唯一 TUI 入口是无 identity 的 `CancelCurrentRun`（Runtime 控制面裁决
+    // 当前执行单元）；可寻址 `CancelRunStep` 仅供 Server/Coordinator 管理端，
+    // TUI 键位与 executor NEVER 重新引入 identity 取消面。
+    assert!(key.contains("Effect::CancelCurrentRun"));
+    assert!(
+        !key.contains("CancelRunStep"),
+        "TUI key handling must not reintroduce identity-addressed cancellation"
+    );
+    assert!(
+        !executor.contains("CancelRunStep"),
+        "TUI executor must not reintroduce identity-addressed cancellation"
+    );
+    assert!(executor.contains("CancelCurrentRunOutcome::Accepted"));
     for forbidden in [
-        "CancelRunStepOutcome::Accepted => self.chat.stop_processing",
-        "CancelRunStepOutcome::Accepted => ConversationIntent::TerminalNotice",
-        "CancelRunStepOutcome::Accepted => ConversationIntent::PresentCancelledStep",
+        "CancelCurrentRunOutcome::Accepted => self.chat.stop_processing",
+        "CancelCurrentRunOutcome::Accepted => ConversationIntent::TerminalNotice",
+        "CancelCurrentRunOutcome::Accepted => ConversationIntent::PresentCancelledStep",
     ] {
         assert!(
             !executor.contains(forbidden),
@@ -515,7 +526,6 @@ fn issue_947_legacy_runtime_and_view_paths_are_retired() {
         fs::read_to_string(root.join("adapter/agent_event.rs")).expect("read local event mapper");
     let local_event_update =
         fs::read_to_string(root.join("app/update/ui_event.rs")).expect("read local event update");
-    let effects = fs::read_to_string(root.join("effect/effect.rs")).expect("read effects");
     let output_view_model =
         fs::read_to_string(root.join("view_model/output.rs")).expect("read output view model");
 
@@ -559,10 +569,17 @@ fn issue_947_legacy_runtime_and_view_paths_are_retired() {
             && !local_event_update.contains("UiEvent::InteractionRequested"),
         "local event update must not retain Runtime no-op branches"
     );
-    assert!(
-        !effects.contains("CancelCurrentRun"),
-        "TUI Effects must not retain the identity-free cancellation fallback"
-    );
+    // #1797：`CancelCurrentRun` 是 TUI 唯一取消入口（无 identity，经 SDK 官方
+    // `AgentClient::cancel_current_run`，Runtime 控制面裁决当前执行单元）；key.rs
+    // 发送点必须带活跃执行门控（`is_processing || has_live_main_root`），NEVER
+    // 无门控发送。identity-free 的 per-step fallback 维持退役。
+    let key_source = fs::read_to_string(root.join("app/update/key.rs")).expect("read key update");
+    if key_source.contains("Effect::CancelCurrentRun") {
+        assert!(
+            key_source.contains("has_live_main_root"),
+            "CancelCurrentRun 发送点必须有活跃执行门控（is_processing || has_live_main_root）"
+        );
+    }
     assert!(
         !output_view_model.contains("follow_tail_hint"),
         "OutputViewModel must not duplicate follow-tail state"

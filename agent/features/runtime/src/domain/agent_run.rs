@@ -21,7 +21,10 @@ pub enum RunControl {
 
 pub trait ActiveRunPort: Send + Sync {
     fn activate_child(&self, run_id: RunId, cancel: CancellationToken);
-    fn activate_main(&self, run_id: RunId, cancel: CancellationToken);
+    /// `intent` 来自 `run.spec().intent()`：`cancel_current_main` 的无 step 分支
+    /// 按它区分「Manual Reflection 的执行体取消」（cancel root）与「Conversation
+    /// 的 step 间隙」（NoActiveStep，无执行单元可 cancel）。
+    fn activate_main(&self, run_id: RunId, cancel: CancellationToken, intent: RunIntent);
     fn set_main_active_step(
         &self,
         _run_id: &RunId,

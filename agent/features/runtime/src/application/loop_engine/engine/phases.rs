@@ -20,6 +20,33 @@ pub(super) fn drain_outcome_kind(outcome: &DrainOutcome) -> &'static str {
     }
 }
 
+/// 单用途 Run（手动压缩/反思）的用户输入回流：NEVER 进入模型调用——busy 期间
+/// drain 出的 batch 回流 session 队列，由下一个会话 Run 消费；本 Run 继续
+/// drain 走向 `EmptyAndSealed` 正常收口。返回 `true` 表示已按回流处理
+/// （调用方 `continue` 进入下一轮 drain）。
+pub(super) fn defer_user_batch_if_single_purpose(
+    run: &Run,
+    batch: &mut Vec<LoopInput>,
+    port: &mut RunLoop<'_>,
+) -> Result<bool, LoopEngineError> {
+    if !matches!(
+        run.spec().intent(),
+        crate::domain::agent_run::RunIntent::ManualCompaction
+            | crate::domain::agent_run::RunIntent::ManualReflection
+    ) {
+        return Ok(false);
+    }
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "[run_loop] single-purpose run defers user batch: run_id={} intent={:?} batch_size={}",
+        run.id(),
+        run.spec().intent(),
+        batch.len(),
+    );
+    port.input_mut().defer_user_batch(std::mem::take(batch))?;
+    Ok(true)
+}
+
 pub(super) fn interaction_resolution_kind(
     resolution: &crate::application::interaction::port::InteractionResolution,
 ) -> &'static str {

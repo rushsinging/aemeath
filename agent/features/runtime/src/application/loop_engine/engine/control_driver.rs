@@ -130,7 +130,13 @@ pub(super) async fn handle_step_control(
         Some(ControlDirective::Continue) => Ok(()),
         Some(ControlDirective::Terminal) => Ok(()),
         None => {
-            terminate_interrupted_run(run, execution, port).await?;
+            terminate_interrupted_run(
+                run,
+                execution,
+                port,
+                sdk::RunTerminationReason::SessionShutdown,
+            )
+            .await?;
             Ok(())
         }
     }
@@ -143,7 +149,13 @@ pub(super) async fn handle_interrupt(
     port: &mut RunLoop<'_>,
 ) -> Result<bool, LoopEngineError> {
     if cancel.is_cancelled() {
-        terminate_interrupted_run(run, execution, port).await?;
+        terminate_interrupted_run(
+            run,
+            execution,
+            port,
+            sdk::RunTerminationReason::SessionShutdown,
+        )
+        .await?;
         return Ok(true);
     }
     if run.status().is_terminal() {
@@ -186,19 +198,37 @@ pub(crate) async fn fail_run(
     emit_events(run, execution, port).await
 }
 
+/// 引擎中断兜底的 terminate：drain 中断且无 registry control 信息（非用户取消），
+/// 收口为 `Terminated(SessionShutdown)`。用户取消路径（Esc/Ctrl-C）由
+/// manual_compaction / manual_reflection 以 `UserExit` 显式调用下方通用函数。
+pub(super) async fn terminate_engine_interrupted_run(
+    run: &mut Run,
+    execution: &mut RunExecutionState,
+    port: &mut RunLoop<'_>,
+) -> Result<(), LoopEngineError> {
+    terminate_interrupted_run(
+        run,
+        execution,
+        port,
+        sdk::RunTerminationReason::SessionShutdown,
+    )
+    .await
+}
+
+/// 把被中断的 Run 收口为 `Terminated`。`reason` 由调用点按中断来源给出：
+/// 用户取消（Esc/Ctrl-C 经 registry cancel root）传 `UserExit`，会话关闭/引擎
+/// 中断传 `SessionShutdown`——NEVER 把用户取消伪装成会话关闭。
 pub(super) async fn terminate_interrupted_run(
     run: &mut Run,
     execution: &mut RunExecutionState,
     port: &mut RunLoop<'_>,
+    reason: sdk::RunTerminationReason,
 ) -> Result<(), LoopEngineError> {
     if run.status().is_terminal() {
         return Ok(());
     }
     let active_step = run.active_step_id();
-    match run.request_termination(
-        sdk::RunTerminationReason::SessionShutdown,
-        sdk::ControlDeadline::from_unix_millis(0),
-    ) {
+    match run.request_termination(reason, sdk::ControlDeadline::from_unix_millis(0)) {
         crate::domain::agent_run::RunTerminationRequest::Accepted => {
             emit_events(run, execution, port).await?;
         }

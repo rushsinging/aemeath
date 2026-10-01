@@ -192,7 +192,7 @@ async fn run_loop_body(
                                 ControlDirective::Terminal => LoopDirective::Terminal,
                             });
                         }
-                        terminate_interrupted_run(run, execution, port).await?;
+                        terminate_engine_interrupted_run(run, execution, port).await?;
                         return Ok(LoopDirective::Terminal);
                     }
                     InputDrainOutcome::TimedOut => {
@@ -245,7 +245,7 @@ async fn run_loop_body(
                             ControlDirective::Terminal => LoopDirective::Terminal,
                         });
                     }
-                    terminate_interrupted_run(run, execution, port).await?;
+                    terminate_engine_interrupted_run(run, execution, port).await?;
                     return Ok(LoopDirective::Terminal);
                 }
                 InputDrainOutcome::TimedOut => {
@@ -272,7 +272,7 @@ async fn run_loop_body(
         }
 
         match outcome {
-            DrainOutcome::Ready { batch, .. } => {
+            DrainOutcome::Ready { mut batch, .. } => {
                 // #1272 close-out: an empty Ready batch is a contract
                 // violation (Ready must carry non-empty user input).
                 // Detect it here — before any epoch advance or state
@@ -297,6 +297,12 @@ async fn run_loop_body(
                 // prevents a poisoned epoch on failure retry).
                 run.advance_drain_epoch();
                 expected_epoch = expected_epoch.next();
+
+                // 单用途 Run（手动压缩/反思）NEVER 进入模型调用：busy 期间
+                // drain 出的用户输入回流 session 队列（详见 phases 回流函数）。
+                if defer_user_batch_if_single_purpose(run, &mut batch, port)? {
+                    continue;
+                }
 
                 // User input: resume if awaiting, then drain into work.
                 if run.status() == RunStatus::AwaitingUser {

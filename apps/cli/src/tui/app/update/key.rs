@@ -27,14 +27,16 @@ pub(super) enum CtrlCAction {
 /// Ctrl+C 两段式退出超时（秒）
 pub(crate) const CTRL_C_TIMEOUT_SECS: f64 = 3.0;
 
-/// 根据 input 是否为空、上次 Ctrl+C 时间戳和处理生命周期状态决定动作。
+/// 根据 input 是否为空、上次 Ctrl+C 时间戳和执行生命周期状态决定动作。
+/// `has_active_execution` 为「存在可取消的活跃执行」（turn processing 或快照中存在
+/// live Main/Reflection Run root），此时 Ctrl+C 优先请求取消而非清空输入/退出。
 fn ctrlc_action(
     input_empty: bool,
     last_ctrlc: Option<std::time::Instant>,
-    is_processing: bool,
+    has_active_execution: bool,
     _is_cancelling: bool,
 ) -> CtrlCAction {
-    if is_processing {
+    if has_active_execution {
         CtrlCAction::RequestCancel
     } else if !input_empty {
         CtrlCAction::ClearInput
@@ -53,14 +55,12 @@ fn ctrlc_action(
 }
 
 impl App {
-    fn cancel_active_step_effect(&self) -> Option<Effect> {
-        self.chat
-            .active_run_step
-            .as_ref()
-            .map(|(run_id, step_id)| Effect::CancelRunStep {
-                run_id: run_id.clone(),
-                step_id: step_id.clone(),
-            })
+    /// 当前取消动作：统一发 `CancelCurrentRun`（无 identity，Runtime 控制面裁决
+    /// 当前执行单元——有 step 走 CancelStep 协议，Manual Reflection 按 intent
+    /// 取消执行体，Conversation 间隙 NoActiveStep）。调用点已用
+    /// `is_processing || has_live_main_root` 门控，此处直接返回。
+    fn cancel_active_execution_effect(&self) -> Option<Effect> {
+        Some(Effect::CancelCurrentRun)
     }
 
     pub(crate) fn handle_input_intent(&mut self, intent: InputIntent) {
@@ -111,7 +111,7 @@ impl App {
                 match ctrlc_action(
                     self.model.input.document.is_empty(),
                     self.layout.last_ctrlc,
-                    self.chat.is_processing,
+                    self.chat.is_processing || self.model.conversation.has_live_main_root(),
                     self.chat.is_cancelling,
                 ) {
                     CtrlCAction::RequestCancel => {
@@ -123,7 +123,7 @@ impl App {
                         );
                         self.layout.mark_ctrlc_now();
                         return self
-                            .cancel_active_step_effect()
+                            .cancel_active_execution_effect()
                             .map_or_else(UpdateResult::none, UpdateResult::one);
                     }
                     CtrlCAction::ClearInput => {
@@ -164,7 +164,9 @@ impl App {
                     items: Vec::new(),
                 });
             }
-            (KeyModifiers::NONE, KeyCode::Esc) if self.chat.is_processing => {
+            (KeyModifiers::NONE, KeyCode::Esc)
+                if self.chat.is_processing || self.model.conversation.has_live_main_root() =>
+            {
                 crate::tui::log_debug!(
                     "cancel_current_run key accepted: key=esc is_processing={} is_cancelling={} processing_handle_present={}",
                     self.chat.is_processing,
@@ -172,7 +174,7 @@ impl App {
                     self.chat.processing_handle.is_some()
                 );
                 return self
-                    .cancel_active_step_effect()
+                    .cancel_active_execution_effect()
                     .map_or_else(UpdateResult::none, UpdateResult::one);
             }
             (_, KeyCode::Enter) if self.chat.is_processing => {

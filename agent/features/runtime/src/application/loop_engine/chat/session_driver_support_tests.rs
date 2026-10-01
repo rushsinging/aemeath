@@ -819,6 +819,14 @@ impl RecordingSink {
             RuntimeStreamEvent::ModelInvocationRetrying { attempt, delay, .. } => {
                 format!("ModelInvocationRetrying:{attempt}:{}", delay.as_millis())
             }
+            RuntimeStreamEvent::ControlCommandsQueued { queued } => {
+                let commands = queued
+                    .iter()
+                    .map(|(_, text)| text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("ControlCommandsQueued:{commands}")
+            }
             _ => "Other".to_string(),
         };
         self.events.lock().unwrap().push(name);
@@ -972,4 +980,53 @@ async fn wait_for_retry_test_condition(description: &str, condition: impl Fn() -
         tokio::task::yield_now().await;
     }
     panic!("timed out waiting for {description}");
+}
+
+/// 门控 provider：首次（及后续每次）调用在 `release` 放行前挂起，使测试能在
+/// Main Run busy（模型调用期）窗口内确定性注入输入，NEVER 依赖 sleep 竞态。
+struct GatedProvider {
+    requests: Arc<Mutex<Vec<Vec<Message>>>>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+impl GatedProvider {
+    fn new(release: Arc<tokio::sync::Notify>) -> Self {
+        Self {
+            requests: Arc::new(Mutex::new(Vec::new())),
+            release,
+        }
+    }
+
+    fn request_count(&self) -> usize {
+        self.requests.lock().unwrap().len()
+    }
+}
+
+#[async_trait]
+impl LlmProvider for GatedProvider {
+    async fn invocation_stream(
+        &self,
+        _scope: &InvocationScopeData,
+        _system: &[SystemBlockData],
+        messages: &[Message],
+        _tool_schemas: &[serde_json::Value],
+        _cancel: &CancellationToken,
+    ) -> Result<InvocationStreamData, ProviderError> {
+        // 先 enable 再记录请求：`request_count >= 1` 必然意味着 waiter 已注册，
+        // 调用方的 `notify_one` 不会因时序丢失（notify_one 同时会存 permit）。
+        let notified = self.release.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        self.requests.lock().unwrap().push(messages.to_vec());
+        notified.await;
+        Ok(text_completion_stream("gated final", 1, 1))
+    }
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
 }

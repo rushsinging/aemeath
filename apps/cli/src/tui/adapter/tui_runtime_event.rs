@@ -222,6 +222,26 @@ pub(crate) struct TuiActivityObservation {
     pub(crate) timing: TuiActivityTiming,
 }
 
+impl TuiActivityObservation {
+    /// 主 spinner / 取消目标的 live root 判据：Main 或 Manual Reflection Run 的
+    /// 根活动处于 Running/Waiting。spinner 摘要、快照落账与 Esc/Ctrl-C 取消目标
+    /// 三处共用本判据（DRY），NEVER 在各消费点复制内联 match。
+    pub(crate) fn is_live_main_root(&self) -> bool {
+        self.kind == TuiActivityKind::Run
+            && self.parent_activity_id.is_none()
+            && matches!(
+                self.state,
+                TuiActivityState::Running | TuiActivityState::Waiting
+            )
+            && matches!(
+                self.detail,
+                TuiActivityDetail::Run {
+                    purpose: TuiRunPurpose::Main | TuiRunPurpose::Reflection
+                }
+            )
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TuiActivitySnapshot {
     pub(crate) run_id: UiRunId,
