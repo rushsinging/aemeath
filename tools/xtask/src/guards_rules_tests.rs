@@ -931,3 +931,54 @@ fn constant_placement_rejects_constant_table_file() {
         "常量表文件同样必须归位 mod 内 constants.rs: {violations:?}"
     );
 }
+
+/// 宏依赖豁免：初始化调用同文件 macro_rules! 宏（如 TARGETS 用 target! 构造）。
+#[test]
+fn constant_placement_macro_dependent_table_stays_with_macro() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/catalog.rs"),
+        "macro_rules! entry {\n    ($name:expr) => { { name: $name } };\n}\nconst TABLE: &[Entry] = &[\n    entry!(\"a\"),\n    entry!(\"b\"),\n];\n",
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "constant.test.placement",
+        "assertion": "constant_placement",
+        "scope": { "kind": "workspace" },
+        "exclusions": [],
+        "reason": "test",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/catalog.rs")
+            .expect("enforce");
+    assert!(
+        violations.iter().all(|v| !v.message.contains("TABLE")),
+        "宏表与宏共置（target! 类）: {violations:?}"
+    );
+}
+
+/// 规则级 exclusions：声明点 #[cfg(test)] 门控的测试域文件。
+#[test]
+fn constant_placement_rule_exclusions_skip_test_domain_file() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/guard_fixture.rs"),
+        "const TEST_ONLY: u32 = 1;\n",
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "constant.test.placement",
+        "assertion": "constant_placement",
+        "scope": { "kind": "workspace" },
+        "exclusions": [{"path": "crates/x/src/guard_fixture.rs", "reason": "cfg(test) 声明点门控"}],
+        "reason": "test",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/guard_fixture.rs")
+            .expect("enforce");
+    assert!(violations.is_empty(), "{violations:?}");
+}

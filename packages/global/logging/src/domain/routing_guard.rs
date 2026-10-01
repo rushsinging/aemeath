@@ -9,22 +9,6 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Copy)]
-struct OwnerRule {
-    name: &'static str,
-    target: &'static str,
-    target_expr: &'static str,
-}
-impl OwnerRule {
-    const fn new(name: &'static str, target: &'static str, target_expr: &'static str) -> Self {
-        Self {
-            name,
-            target,
-            target_expr,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ViolationKind {
     BareLogMacro,
@@ -59,84 +43,10 @@ impl fmt::Display for Violation {
     }
 }
 
-const OWNERS: &[(&str, OwnerRule)] = &[
-    (
-        "apps/cli",
-        OwnerRule::new("tui", "aemeath:tui", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/composition",
-        OwnerRule::new("composition", "aemeath:composition", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/audit",
-        OwnerRule::new("audit", "aemeath:diagnostic:audit", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/config",
-        OwnerRule::new("config", "aemeath:agent:config", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/hook",
-        OwnerRule::new("hook", "aemeath:agent:hook", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/memory",
-        OwnerRule::new("memory", "aemeath:agent:memory", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/policy",
-        OwnerRule::new("policy", "aemeath:agent:policy", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/context",
-        OwnerRule::new("context", "aemeath:context", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/project",
-        OwnerRule::new("project", "aemeath:agent:project", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/provider",
-        OwnerRule::new("provider", "aemeath:agent:provider", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/runtime",
-        OwnerRule::new("runtime", "aemeath:agent:runtime", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/storage",
-        OwnerRule::new("storage", "aemeath:agent:storage", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/task",
-        OwnerRule::new("task", "aemeath:agent:task", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/tools",
-        OwnerRule::new("tools", "aemeath:agent:tools", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/update",
-        OwnerRule::new("update", "aemeath:agent:update", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/shared",
-        OwnerRule::new("share", "aemeath:shared", "crate::LOG_TARGET"),
-    ),
-];
-
 /// Workspace members that are intentionally NOT runtime owners: they must not
 /// define LOG_TARGET, register a Catalog entry, or directly depend on
 /// logging/log. xtask may emit ordinary CLI output but must not apply the
 /// logging target architecture.
-const NON_RUNTIME_MEMBERS: &[&str] = &[
-    "packages/sdk",
-    "packages/global/logging",
-    "packages/global/utils",
-    "tools/xtask",
-];
-
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
@@ -511,6 +421,96 @@ fn inspect_source(raw: &str, owner: &OwnerRule, relative: &str) -> Vec<Violation
     }
     violations
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OwnerRule {
+    name: &'static str,
+    target: &'static str,
+    target_expr: &'static str,
+}
+impl OwnerRule {
+    const fn new(name: &'static str, target: &'static str, target_expr: &'static str) -> Self {
+        Self {
+            name,
+            target,
+            target_expr,
+        }
+    }
+}
+
+const OWNERS: &[(&str, OwnerRule)] = &[
+    (
+        "apps/cli",
+        OwnerRule::new("tui", "aemeath:tui", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/composition",
+        OwnerRule::new("composition", "aemeath:composition", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/audit",
+        OwnerRule::new("audit", "aemeath:diagnostic:audit", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/config",
+        OwnerRule::new("config", "aemeath:agent:config", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/hook",
+        OwnerRule::new("hook", "aemeath:agent:hook", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/memory",
+        OwnerRule::new("memory", "aemeath:agent:memory", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/policy",
+        OwnerRule::new("policy", "aemeath:agent:policy", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/context",
+        OwnerRule::new("context", "aemeath:context", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/project",
+        OwnerRule::new("project", "aemeath:agent:project", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/provider",
+        OwnerRule::new("provider", "aemeath:agent:provider", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/runtime",
+        OwnerRule::new("runtime", "aemeath:agent:runtime", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/storage",
+        OwnerRule::new("storage", "aemeath:agent:storage", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/task",
+        OwnerRule::new("task", "aemeath:agent:task", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/tools",
+        OwnerRule::new("tools", "aemeath:agent:tools", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/update",
+        OwnerRule::new("update", "aemeath:agent:update", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/shared",
+        OwnerRule::new("share", "aemeath:shared", "crate::LOG_TARGET"),
+    ),
+];
+
+const NON_RUNTIME_MEMBERS: &[&str] = &[
+    "packages/sdk",
+    "packages/global/logging",
+    "packages/global/utils",
+    "tools/xtask",
+];
 
 /// Path of the guard source file itself; excluded from scans because it
 /// legitimately references LOG_TARGET as part of the checking logic.

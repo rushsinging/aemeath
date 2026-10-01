@@ -65,7 +65,10 @@ pub enum RuleSpec {
     /// `constants.rs`/`consts.rs`（归位目的地）或代码形态可判的合法类别
     /// （cfg 门控共置 / 函数与 impl 内缩进 / 宏体 / 状态容器 /
     /// 常量表文件）。零登记：合法性全部由静态判定（#1146）。
-    ConstantPlacement,
+    ConstantPlacement {
+        #[serde(default)]
+        exclusions: Vec<Exclusion>,
+    },
     /// 计数配比：每文件 denominator 命中行数必须 ≥ numerator 命中行数
     /// （如「外部进程构造数 ≤ session 隔离调用数」）。
     CountRatio {
@@ -254,7 +257,9 @@ pub fn enforce_rule_with_context(
             symbol,
             allowed_paths,
         } => enforce_construction_whitelist(rule, relative_file, context, symbol, allowed_paths),
-        RuleSpec::ConstantPlacement => enforce_constant_placement(rule, relative_file, context),
+        RuleSpec::ConstantPlacement { exclusions } => {
+            enforce_constant_placement(rule, relative_file, context, exclusions)
+        }
         RuleSpec::CountRatio {
             numerator_patterns,
             denominator_patterns,
@@ -998,7 +1003,14 @@ fn enforce_constant_placement(
     rule: &Rule,
     relative_file: &str,
     context: &guards_engine::FileContext,
+    exclusions: &[Exclusion],
 ) -> Result<Vec<Violation>> {
+    if exclusions
+        .iter()
+        .any(|exclusion| relative_file.starts_with(exclusion.path.as_str()))
+    {
+        return Ok(Vec::new());
+    }
     let leaf = relative_file.rsplit('/').next().unwrap_or(relative_file);
     if leaf == "constants.rs" || leaf == "consts.rs" || leaf == "state.rs" {
         return Ok(Vec::new());
@@ -1007,13 +1019,7 @@ fn enforce_constant_placement(
     if relative_file.starts_with("tools/xtask/") {
         return Ok(Vec::new());
     }
-    // logging 的 TargetCatalog 真相源（routing/routing_guard）：其常量位置
-    // 本身就是 routing_guard 测试校验的契约，迁移破坏守卫。
-    if relative_file.ends_with("logging/src/domain/routing.rs")
-        || relative_file.ends_with("logging/src/domain/routing_guard.rs")
-    {
-        return Ok(Vec::new());
-    }
+
     let Some(source) = context.text() else {
         return Ok(Vec::new());
     };
@@ -1028,6 +1034,24 @@ fn enforce_constant_placement(
         let name = constant_name(line);
         // `const fn` 是常量函数而非常量定义，不治理。
         if name.is_empty() || name == "fn" {
+            continue;
+        }
+        // 宏依赖：初始化调用同文件定义的 macro_rules! 宏 → 宏表与宏共置
+        // （如 routing.rs TARGETS 用同文件 target! 构造 TargetSpec）。
+        let init_window: String = lines[index..(index + 3).min(lines.len())].join(" ");
+        let local_macros: Vec<&str> = lines
+            .iter()
+            .filter_map(|l| {
+                l.strip_prefix("macro_rules! ").and_then(|rest| {
+                    rest.split(|ch: char| ch.is_whitespace() || ch == '{')
+                        .next()
+                })
+            })
+            .collect();
+        let calls_local_macro = local_macros
+            .iter()
+            .any(|macro_name| init_window.contains(&format!("{macro_name}!(")));
+        if calls_local_macro {
             continue;
         }
         violations.push(Violation {

@@ -1,3 +1,4 @@
+use super::constants::FALLBACK;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct LogTarget(&'static str);
 
@@ -62,13 +63,6 @@ pub(crate) struct TargetSpec {
     pub(crate) sink: DiagnosticSinkId,
     pub(crate) file_name: &'static str,
 }
-
-const FALLBACK: TargetSpec = TargetSpec {
-    target: LogTarget::new("aemeath"),
-    owner: ModuleOwner::Shared,
-    sink: DiagnosticSinkId::Fallback,
-    file_name: "aemeath.log",
-};
 
 macro_rules! target {
     ($target:literal, $owner:ident, $sink:ident, $file:literal) => {
