@@ -384,6 +384,165 @@ async fn interval_reflection_not_triggered_when_step_count_missed() {
 }
 
 // ---------------------------------------------------------------------------
+// 同一 Run 多次 Complete step：Interval 反思必须按 Run 去重
+// ---------------------------------------------------------------------------
+
+/// 同一 Run 内两个 Complete step 的 Interval 场景：第一个 step 由 Ready 用户输入
+/// 进入，第二个 step 由 Stop Hook 反馈续跑进入——与生产
+/// `BufferedInputAdapter::drain_collect_continuations` 的 `StopHookFeedback` 分支
+/// 同构（文本停滞等其他 continuation 同样落到该入口）。
+///
+/// 该场景存在的理由：主模型端口 `advance_step=false`（`run_launch.rs` 装配
+/// `RuntimeModelInvocation::new(.., false)`），`RunExecutionState.step_count` 由
+/// `run_count` 初始化后在同一 Run 内不再增长；同一 Run 又可能连续走多个 Complete
+/// step，于是同一个命中 interval 的 step_count 会被逐个 Complete step 判定。
+async fn drive_two_complete_step_interval_run(
+    step_count: usize,
+    judgment: IntervalJudgment,
+) -> IntervalRunResult {
+    let mut run = new_run(Duration::ZERO);
+    let cancel = CancellationToken::new();
+    let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+    execution.initialize_for_launch(Vec::new(), step_count);
+    let activities = std::sync::Arc::new(
+        crate::application::activity::ActivityCoordinator::production_without_publisher(
+            run.id().clone(),
+            crate::application::activity::RunPurpose::Main,
+        ),
+    );
+    let mut reflection = ReflectionFake {
+        judgment,
+        outcome: interval_outcome(ReflectionTaskCompletionStatus::Succeeded),
+        activities: activities.clone(),
+        runs: Vec::new(),
+        state_during_run: None,
+        pre_compact_material: Default::default(),
+        memory_config: share::config::MemoryConfig::default(),
+    };
+    let mut scenario = ScriptedScenario {
+        drain_outcomes: VecDeque::from([
+            DrainOutcome::ready(
+                vec![LoopInput {
+                    text: "first".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
+                    accepted: None,
+                }],
+                DrainEpoch(0),
+            ),
+            DrainOutcome::InternalContinuation {
+                kind: InternalContinuationKind::StopHookFeedback {
+                    feedback: "stop hook feedback".to_string(),
+                },
+                batch: vec![LoopInput {
+                    text: "stop hook feedback".to_string(),
+                    input_id: None,
+                    images: Vec::new(),
+                    accepted: None,
+                }],
+                epoch: DrainEpoch(1),
+            },
+            DrainOutcome::EmptyAndSealed {
+                epoch: DrainEpoch(2),
+            },
+        ]),
+        model_steps: VecDeque::from([
+            ModelStep::Complete {
+                text: "first completion".to_string(),
+            },
+            ModelStep::Complete {
+                text: "second completion".to_string(),
+            },
+        ]),
+        ..Default::default()
+    };
+    {
+        let mut port = scenario.ports().run_loop();
+        port.bind_activity_context(activities.clone(), "test-model".to_string());
+        port.bind_reflection(&mut reflection);
+        run_loop(&mut run, &mut execution, &cancel, &mut port)
+            .await
+            .expect("engine 必须正常完成：反思 outcome 不得终止宿主 Run");
+    }
+    let events = scenario.events();
+    IntervalRunResult {
+        run,
+        activities,
+        events,
+        reflection_runs: reflection.runs,
+        state_during_run: reflection.state_during_run,
+    }
+}
+
+fn begin_reflection_count(result: &IntervalRunResult) -> usize {
+    transition_events(&result.events)
+        .into_iter()
+        .filter(|(from, to, reason)| {
+            *from == RunStatus::ApplyingResponse
+                && *to == RunStatus::Reflecting
+                && *reason == RunTransitionReason::BeginReflection
+        })
+        .count()
+}
+
+/// 同一 Run 在命中 interval 的 step_count 上走完两个 `ModelStep::Complete` 时，
+/// Interval 反思（状态机往返 + Reflection activity + 端口执行）必须只发生一次。
+///
+/// usage 记账发生在 `ReflectionPhasePort` 之下（生产 `RuntimeReflection` 内），
+/// engine 级 fake 不可观测，因此以端口触发次数与 activity 数量作为等价覆盖。
+#[tokio::test]
+async fn interval_reflection_runs_once_per_run_across_two_complete_steps() {
+    let result = drive_two_complete_step_interval_run(2, IntervalJudgment::Interval(2)).await;
+
+    // fixture 自检：同一 Run 内确实完成了两个 Complete step，且它们看到的
+    // step_count 相同（主模型端口不推进 step_count）。
+    assert_eq!(result.run.status(), RunStatus::Completed);
+    assert_eq!(
+        result.run.steps().len(),
+        2,
+        "fixture 必须让同一 Run 走完两个 Run step"
+    );
+    assert_eq!(
+        result.run.steps()[0].invocation().unwrap().response(),
+        "first completion"
+    );
+    assert_eq!(
+        result.run.steps()[1].invocation().unwrap().response(),
+        "second completion"
+    );
+
+    // 端口只允许收到一次 Interval 触发：同 Run 内重复判定同一 step_count
+    // 不得重复反思。
+    assert!(
+        matches!(
+            result.reflection_runs.as_slice(),
+            [ReflectionTaskTrigger::Interval { step_count: 2 }]
+        ),
+        "同一 Run 的多个 Complete step 命中同一 step_count 时只允许反思一次；\
+         实际触发: {:?}",
+        result.reflection_runs
+    );
+
+    // 观测侧同样只允许一次：一次 Reflecting 往返、一次 Reflection activity。
+    assert_eq!(
+        begin_reflection_count(&result),
+        1,
+        "同一 Run 只允许进入 Reflecting 一次；实际转移: {:?}",
+        transition_events(&result.events)
+    );
+    assert_eq!(
+        reflection_activities(&result.activities).len(),
+        1,
+        "同一 Run 只允许发布一次 Reflection activity；实际: {:?}",
+        reflection_activities(&result.activities)
+    );
+    assert_eq!(
+        reflection_activities(&result.activities)[0].state,
+        sdk::ActivityStateView::Succeeded
+    );
+}
+
+// ---------------------------------------------------------------------------
 // PreCompact：自动压缩 Ready 后在 Compacting 内往返 Reflecting
 // ---------------------------------------------------------------------------
 
