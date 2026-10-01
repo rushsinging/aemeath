@@ -588,29 +588,6 @@
       "profile": "full"
     },
     {
-      "id": "pattern.features.workspace-control-call-sites",
-      "assertion": "pattern_exclusion",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features"
-      },
-      "forbidden_patterns": [
-        ".workspace_control("
-      ],
-      "exclusions": [
-        {
-          "path": "agent/features/tools/src/adapters/bash.rs",
-          "reason": ".workspace_control() 唯二调用点（bash/worktree tool 构造期）"
-        },
-        {
-          "path": "agent/features/tools/src/adapters/worktree.rs",
-          "reason": ".workspace_control() 唯二调用点（bash/worktree tool 构造期）"
-        }
-      ],
-      "reason": "R4：生产 .workspace_control() 仅 tools bash/worktree 两调用点",
-      "profile": "full"
-    },
-    {
       "id": "pattern.all.git-command-single-owner",
       "assertion": "pattern_exclusion",
       "scope": {
@@ -2201,8 +2178,11 @@
       "id": "pattern.runtime-tools.no-task-persistence-symbols",
       "assertion": "pattern_exclusion",
       "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/"
+        "kind": "path_prefixes",
+        "values": [
+          "agent/features/runtime/",
+          "agent/features/tools/"
+        ]
       },
       "forbidden_patterns": [
         "TaskStore",
@@ -2213,21 +2193,8 @@
         "SessionTaskAdapters",
         "TaskWiring"
       ],
-      "exclusions": [
-        {
-          "path": "agent/features/task/",
-          "reason": "task/storage/context 是 Task 持久化类型 owner"
-        },
-        {
-          "path": "agent/features/storage/",
-          "reason": "task/storage/context 是 Task 持久化类型 owner"
-        },
-        {
-          "path": "agent/features/context/",
-          "reason": "task/storage/context 是 Task 持久化类型 owner"
-        }
-      ],
-      "reason": "F-12：Task 持久化类型对 runtime/tools 不可见，消费注入 TaskAccess（task/storage/context 为 owner 与协调方豁免；wire_task 由 cross-bc fail-closed 承接）",
+      "exclusions": [],
+      "reason": "F-12：Task 持久化类型对 runtime/tools 不可见，消费注入 TaskAccess（wire_task 由 cross-bc fail-closed 承接）",
       "profile": "full"
     },
     {
@@ -3247,7 +3214,6 @@
       "scope": {
         "kind": "path_prefixes",
         "values": [
-          "apps/cli/src/tui/app",
           "apps/cli/src/tui/view_assembler",
           "apps/cli/src/tui/view_model"
         ]
@@ -3261,21 +3227,8 @@
         "copypasta::",
         ".await"
       ],
-      "exclusions": [
-        {
-          "path": "apps/cli/src/tui/app/run_loop.rs",
-          "reason": "app 编排层（run_loop/runtime/testing 豁免 view 交互）"
-        },
-        {
-          "path": "apps/cli/src/tui/app/runtime.rs",
-          "reason": "app 编排层（run_loop/runtime/testing 豁免 view 交互）"
-        },
-        {
-          "path": "apps/cli/src/tui/app/testing/",
-          "reason": "app 编排层（run_loop/runtime/testing 豁免 view 交互）"
-        }
-      ],
-      "reason": "F-21：tui app TEA 与 view_assembler/view_model 纯度（run_loop/runtime/testing 编排层豁免，#59 S5-gap 裁定；合并原三条同 pattern 重复规则，#1696③）",
+      "exclusions": [],
+      "reason": "F-21：view_assembler/view_model 纯净度（TEA 编排层 app/ 不在本规则 scope；#59 S5-gap 裁定后 scope 收窄，#1696③）",
       "profile": "full"
     },
     {
@@ -3481,6 +3434,11 @@
       "symbol": "AtomicDatasetReflectionHistoryStore",
       "retired_by": "memory",
       "reason": "实现体构造已收窄 pub(crate)，跨 BC 不可达；构造由 wire 工厂承接（construction_symbols 三条 wire 条目，tracking 1709）"
+    },
+    {
+      "symbol": ".workspace_control(",
+      "retired_by": "pattern.features.workspace-control-call-sites",
+      "reason": "R4 调用点已灭绝：workspace_control 调用重构为 WorkspaceControl trait 对象经 registry/composition 注入（tools/adapters/registry.rs），全仓无 .workspace_control( 方法调用文本；复活归 review"
     }
   ]
 }
