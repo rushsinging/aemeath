@@ -4,6 +4,7 @@ use ratatui::{
     widgets::{Block, Borders},
 };
 
+mod constants;
 mod editing;
 mod history;
 mod render;

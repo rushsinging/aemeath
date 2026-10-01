@@ -128,13 +128,13 @@ Provider 发布原始 usage；Runtime 将其关联到 Model Invocation 并发出
 | Invocation Scope 不可变、Main/Sub 配置隔离 | L0/L2/L4 | 引擎规则 `pattern.provider.no-mutable-invocation-state`；Provider scope 单测；Composition/Runtime 的 factory、scope 翻译与并发消费测试 | 闭合 |
 | Pull stream 顺序、单终结、终结后结束、取消与 drop | L2/L3/L4 | `adapters/stream_contract_tests.rs` 共享 decoder contract；各 driver 单请求 fixture；Runtime reducer/attempt 场景 | 闭合 |
 | Driver ACL、未知/非法组合 fail-closed | L0/L1/L2 | `domain/capability.rs`；Composition factory tests；`DriverSpec` 类型化解析与 `construction_symbols` 构造白名单 | 闭合 |
-| 单 attempt HTTP、错误/Retry-After、敏感 body 清洗 | L0/L1/L2 | `http_attempt.rs` / `error_log.rs` 测试；三个 driver HTTP fixtures；引擎规则 `pattern.provider.http-send-single-executor` 与 `pattern.provider.error-log-diag-single-caller` | 闭合 |
+| 单 attempt HTTP、错误/Retry-After、敏感 body 清洗 | L0/L1/L2 | `http_attempt.rs` / `error_log.rs` 测试；三个 driver HTTP fixtures | 闭合 |
 | Retry/fallback 所有权、usage/capability clamp | L0-L4 | Runtime attempt tests；Provider usage/capability tests；引擎规则 `pattern.provider.no-pull-stream-retry-loop` | 闭合；resolver 生产接线明确延期 |
 | 真进程、平台、安装或发布资产 | L5 | Provider 能力均可由进程内 HTTP/stream harness 覆盖，不承担 PTY、安装或发布资产职责 | 不适用 |
 
 覆盖率百分比只作为风险信号，不替代上述矩阵。PR #1259 的 CI（cargo-llvm-cov 0.8.7）记录 Provider：regions `6469/8064`（80.22%）、functions `491/593`（82.80%）、lines `4747/5793`（81.94%）；workspace 对照为 77.99% / 78.63% / 78.02%。当前统一 coverage 脚本只输出 workspace/per-crate summary，不产出 changed-lines 指标，因此该项明确记为工具链暂不提供，而非以 workspace 百分比替代。未覆盖分支主要集中在真实上游异常组合、超时防御和日志降级路径；关键 HTTP 分类、stream 生命周期、取消、consumer drop、四类 decoder 与 ACL 已有行为矩阵证据。
 
-L0 复核同时通过 Provider `--no-default-features` / `--all-features` check、all-features/all-targets clippy 与 all-features tests；Provider 唯一 feature 是 test-only `test-harness`，无平台专属 `cfg`，故无需额外 OS matrix。crate-root public surface 由引擎规则 `facade.provider.root-exports`、`pattern.features.no-provider-composition-penetration` 与 `tests/crate_root_facade.rs` 共同锁定，test-only surface 仅在显式 feature 下出现。其余定向证据包括 `cargo test -p provider`、Provider production/all-targets clippy、架构守卫和 workspace 格式门禁；新增共享契约针对历史重复 driver 断言与 consumer-drop 空白，不批量搬迁无关旧测试。
+L0 复核同时通过 Provider `--no-default-features` / `--all-features` check、all-features/all-targets clippy 与 all-features tests；Provider 唯一 feature 是 test-only `test-harness`，无平台专属 `cfg`，故无需额外 OS matrix。crate-root public surface 由引擎规则 `facade.provider.root-exports` 与 `tests/crate_root_facade.rs` 共同锁定，test-only surface 仅在显式 feature 下出现。其余定向证据包括 `cargo test -p provider`、Provider production/all-targets clippy、架构守卫和 workspace 格式门禁；新增共享契约针对历史重复 driver 断言与 consumer-drop 空白，不批量搬迁无关旧测试。
 
 ## 9. 相关文档
 

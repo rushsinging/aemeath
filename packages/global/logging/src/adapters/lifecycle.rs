@@ -1,12 +1,11 @@
 //! File sink lifecycle, rotation, recovery, and retention.
 
+pub(crate) use super::constants::RECOVERY_INTERVAL;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
-
-pub(super) const RECOVERY_INTERVAL: Duration = Duration::from_secs(5);
 
 pub(super) trait SinkWriter: Send {
     fn write_all(&mut self, bytes: &[u8]) -> io::Result<()>;

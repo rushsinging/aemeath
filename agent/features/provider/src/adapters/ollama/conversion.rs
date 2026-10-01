@@ -76,7 +76,9 @@ impl OllamaProviderConversion for OllamaProvider {
         }
 
         // Process remaining messages (skip the leading system-reminder ones)
+        // 数组索引切片（消息列表），非文本字节切片。
         for msg in &messages[first_non_reminder..] {
+            // allow unsafe_text_op
             let mut text_parts: Vec<String> = Vec::new();
             let mut images: Vec<String> = Vec::new();
             let mut tool_calls: Vec<serde_json::Value> = Vec::new();

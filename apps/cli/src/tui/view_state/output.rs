@@ -1,9 +1,7 @@
+use super::constants::{
+    HISTORY_LOAD_PERCENT, INITIAL_RENDER_LINES, MAX_RENDER_LINES, MIN_HISTORY_LOAD_BATCH_LINES,
+};
 use sdk::CharIdx;
-
-const INITIAL_RENDER_LINES: usize = 1_000;
-const HISTORY_LOAD_PERCENT: usize = 60;
-const MIN_HISTORY_LOAD_BATCH_LINES: usize = 15;
-const MAX_RENDER_LINES: usize = 3_000;
 
 /// 选区锚点：`(逻辑行, plain CharIdx)`（#63 坐标系）。
 ///

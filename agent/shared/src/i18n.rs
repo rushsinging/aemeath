@@ -11,8 +11,9 @@
 //!
 //! 默认分支（`_`）返回英文，`"zh"` 分支返回中文。
 
-/// 默认语言代码。所有 `match lang` 的默认分支（`_`）对应此语言。
-pub const DEFAULT_LANG: &str = "en";
+mod constants;
+
+pub use crate::i18n::constants::DEFAULT_LANG;
 
 /// 语言代码类型别名。全仓库面向 LLM 的文案统一用此类型传递 lang。
 ///

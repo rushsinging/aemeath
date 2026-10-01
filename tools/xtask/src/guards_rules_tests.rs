@@ -250,7 +250,7 @@ fn pattern_exclusion_skips_inline_cfg_test_region() {
     );
 
     let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
-        "id": "pattern.runtime.no-hook-dispatcher-construction",
+        "id": "pattern.runtime.fixture-dispatcher-construction",
         "assertion": "pattern_exclusion",
         "scope": { "kind": "path_prefix", "value": "crates/runtime" },
         "forbidden_patterns": ["build_dispatcher("],
@@ -466,6 +466,37 @@ fn pattern_exclusion_skips_comments_and_inline_allow_marker() {
         crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/s.rs").expect("enforce");
 
     assert_eq!(violations.len(), 1, "仅无标记的第三行违规：{violations:#?}");
+}
+
+#[test]
+fn pattern_exclusion_respects_allow_marker_on_next_comment_line() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    // rustfmt 会把控制流语句（if/for）的行尾注释归一化到块内首行，
+    // marker 判定必须容忍这一形态：命中行的紧邻下一行是纯注释行且含 marker 时放行。
+    write_source(
+        &temp.path().join("crates/x/control.rs"),
+        "if predicate() { let pair = s.split_at(8);\n    // allow unsafe_text_op\n    consume(pair); }\nlet t = b.split_at(4);\n",
+    );
+
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "pattern.all.no-unsafe-text-slicing",
+        "assertion": "pattern_exclusion",
+        "scope": { "kind": "workspace" },
+        "forbidden_patterns": [".split_at("],
+        "allow_marker": "allow unsafe_text_op",
+        "reason": "测试",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations = crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/control.rs")
+        .expect("enforce");
+
+    assert_eq!(
+        violations.len(),
+        1,
+        "仅无标记的末行违规；首行命中由下一行注释 marker 放行：{violations:#?}"
+    );
 }
 
 #[test]
@@ -815,4 +846,171 @@ fn count_ratio_strips_cfg_test_module_and_exclusions() {
             "{file} 必须被豁免/剥离: {violations:?}"
         );
     }
+}
+
+#[test]
+fn constant_placement_rejects_unplaced_module_constant() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/service.rs"),
+        "pub fn helper() {}\nconst NEW_LIMIT: usize = 10;\npub fn f() {}\n",
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "constant.test.placement",
+        "assertion": "constant_placement",
+        "scope": { "kind": "workspace" },
+        "reason": "test",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/service.rs")
+            .expect("enforce");
+
+    assert_eq!(violations.len(), 1);
+    assert!(
+        violations[0].message.contains("NEW_LIMIT"),
+        "{}",
+        violations[0].message
+    );
+}
+
+#[test]
+fn constant_placement_cfg_gated_must_also_relocate() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/service.rs"),
+        "#[cfg(any(test, feature = \"fault\"))]\nconst FAULT_ENV: &str = \"X\";\n\nfn g() {\n    const LOCAL: usize = 2;\n}\n",
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "constant.test.placement",
+        "assertion": "constant_placement",
+        "scope": { "kind": "workspace" },
+        "reason": "test",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/service.rs")
+            .expect("enforce");
+    assert!(
+        violations.iter().any(|v| v.message.contains("FAULT_ENV")),
+        "cfg 门控常量同样必须归位（cfg 属性随常量走）: {violations:?}"
+    );
+    assert!(
+        violations.iter().all(|v| !v.message.contains("LOCAL")),
+        "函数内缩进 const 仍不治理: {violations:?}"
+    );
+}
+
+#[test]
+fn constant_placement_state_containers_must_live_in_state_rs() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/state.rs"),
+        "static BOOT_TS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();\n",
+    );
+    write_source(
+        &temp.path().join("crates/x/src/service.rs"),
+        "static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);\n",
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "constant.test.placement",
+        "assertion": "constant_placement",
+        "scope": { "kind": "workspace" },
+        "reason": "test",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let ok = crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/state.rs")
+        .expect("enforce");
+    assert!(ok.is_empty(), "state.rs 是状态容器的家: {ok:?}");
+
+    let bad = crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/service.rs")
+        .expect("enforce");
+    assert!(
+        bad.iter().any(|v| v.message.contains("COUNTER")),
+        "行为文件内的状态容器同样必须归位 state.rs: {bad:?}"
+    );
+}
+
+#[test]
+fn constant_placement_rejects_constant_table_file() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    let table = "const A_COLOR: Color = Color::Red;\n".repeat(6);
+    write_source(
+        &temp.path().join("crates/x/src/palette.rs"),
+        &format!("{table}pub fn mix()\n"),
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "constant.test.placement",
+        "assertion": "constant_placement",
+        "scope": { "kind": "workspace" },
+        "reason": "test",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/palette.rs")
+            .expect("enforce");
+    assert!(
+        !violations.is_empty(),
+        "常量表文件同样必须归位 mod 内 constants.rs: {violations:?}"
+    );
+}
+
+/// 宏依赖豁免：初始化调用同文件 macro_rules! 宏（如 TARGETS 用 target! 构造）。
+#[test]
+fn constant_placement_macro_initialized_tables_must_relocate() {
+    // 宏依赖豁免已退役（C10）：初始化用宏的表应展开为纯值后归位
+    // （routing.rs TARGETS 的 18 个 target! 已展开迁移 domain/constants.rs）。
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/catalog.rs"),
+        "macro_rules! entry {\n    ($name:expr) => { { name: $name } };\n}\nconst TABLE: &[Entry] = &entry_table!();\n",
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "constant.test.placement",
+        "assertion": "constant_placement",
+        "scope": { "kind": "workspace" },
+        "exclusions": [],
+        "reason": "test",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/catalog.rs")
+            .expect("enforce");
+    assert!(
+        violations.iter().any(|v| v.message.contains("TABLE")),
+        "宏初始化表不再豁免（展开归位）: {violations:?}"
+    );
+}
+
+#[test]
+fn constant_placement_rule_exclusions_skip_test_domain_file() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/guard_fixture.rs"),
+        "const TEST_ONLY: u32 = 1;\n",
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "constant.test.placement",
+        "assertion": "constant_placement",
+        "scope": { "kind": "workspace" },
+        "exclusions": [{"path": "crates/x/src/guard_fixture.rs", "reason": "cfg(test) 声明点门控"}],
+        "reason": "test",
+        "profile": "full"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/guard_fixture.rs")
+            .expect("enforce");
+    assert!(violations.is_empty(), "{violations:?}");
 }

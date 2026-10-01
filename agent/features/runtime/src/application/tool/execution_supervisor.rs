@@ -12,9 +12,8 @@ use tools::published::execution::{
 };
 use tools::ToolCatalogSnapshot;
 
+use crate::application::constants::DEFAULT_GRACE;
 use crate::application::context::coordination::ContextCoordinator;
-
-const DEFAULT_GRACE: Duration = Duration::from_millis(250);
 
 #[derive(Clone)]
 pub(crate) struct ToolExecutionSupervisor {

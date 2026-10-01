@@ -14,7 +14,9 @@
 //! 按 docs/design/03-engineering/05-published-language.md SOP。
 
 /// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
-pub(crate) const LOG_TARGET: &str = "aemeath:agent:storage";
+mod constants;
+pub(crate) use constants::LOG_TARGET;
+
 mod adapters;
 mod domain;
 mod ports;

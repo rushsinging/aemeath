@@ -1,13 +1,7 @@
 //! Hook 子进程的受管环境白名单与可配置透传。
 
+use super::constants::{BASIC_ENVIRONMENT_VARIABLES, RESERVED_PREFIX};
 use std::collections::HashMap;
-
-pub(super) const BASIC_ENVIRONMENT_VARIABLES: [&str; 6] =
-    ["PATH", "HOME", "SHELL", "LANG", "LC_ALL", "TERM"];
-
-/// `AEMEATH_*` 前缀的按次权威变量命名空间：仅由 Dispatcher 注入，
-/// 父环境同名值 **NEVER** 透传（防伪造）。
-const RESERVED_PREFIX: &str = "AEMEATH_";
 
 pub(super) fn capture_basic_environment() -> HashMap<String, String> {
     basic_environment_from(|name| std::env::var(name).ok())

@@ -1,3 +1,4 @@
+use crate::constants::MAX_PATH_DEPTH;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -12,8 +13,6 @@ use crate::domain::state::WorkspaceState;
 use crate::domain::types::{
     WorkspaceControl, WorkspaceData, WorkspaceError, WorkspaceReader, WorkspaceWriter,
 };
-
-const MAX_PATH_DEPTH: usize = 64;
 
 fn resolve_path(
     path: &Path,

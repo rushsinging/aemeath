@@ -1,11 +1,8 @@
+use super::constants::HEURISTIC_CALIBRATION_RANGE;
 use crate::domain::{
     CompactionDecisionData, ContextRequestData, DecisionReason, SystemBlock, TokenBudget, Urgency,
     MIN_EFFECTIVE_WINDOW,
 };
-
-/// Heuristic 校准系数的有效区间（#1626）。
-/// 区间外的值视为不可信观测，按 1.0（不校准）处理。
-pub(crate) const HEURISTIC_CALIBRATION_RANGE: std::ops::RangeInclusive<f64> = 0.5..=2.0;
 
 /// 解析 request 携带的 heuristic 校准系数；越界或缺失按 1.0。
 pub(crate) fn resolve_calibration_factor(request: &ContextRequestData) -> f64 {

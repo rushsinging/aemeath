@@ -1,6 +1,5 @@
+use super::constants::CWD_MARKER;
 use std::path::PathBuf;
-
-pub(super) const CWD_MARKER: &str = "__AEMEATH_CWD__=";
 
 pub(super) fn split_stdout_and_cwd(stdout: &str) -> (String, Option<PathBuf>) {
     let Some(pos) = stdout.rfind(CWD_MARKER) else {

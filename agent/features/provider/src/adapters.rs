@@ -2,6 +2,7 @@
 
 mod anthropic;
 pub(crate) mod client;
+mod constants;
 pub(crate) mod error_log;
 pub(crate) mod http_attempt;
 pub(crate) mod json_recovery;

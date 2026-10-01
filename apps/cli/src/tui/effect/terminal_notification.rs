@@ -11,6 +11,7 @@
 //!
 //! 长度防护：prompt 首行超 60 字符截断；长路径 title 只保留末两段。
 
+use super::constants::PROMPT_SUMMARY_MAX_CHARS;
 use std::io;
 
 use crate::tui::model::output_timeline::OutputTimelineItem;
@@ -18,9 +19,6 @@ use crate::tui::model::output_timeline::OutputTimelineItem;
 #[cfg(test)]
 #[path = "terminal_notification_tests.rs"]
 mod tests;
-
-/// prompt 摘要的最大字符数（超出截断加省略号）。
-const PROMPT_SUMMARY_MAX_CHARS: usize = 60;
 
 /// 回合完成通知的 session 上下文；`None`/空的段在组装时省略。
 pub(crate) struct TurnCompleteNotificationContext<'a> {

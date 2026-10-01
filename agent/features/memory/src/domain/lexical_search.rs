@@ -1,15 +1,11 @@
+use super::constants::{
+    BM25_B, BM25_K1, CONTENT_WEIGHT, EXACT_MATCH_BOOST, FACET_WEIGHT, TAG_WEIGHT,
+};
 use std::collections::{HashMap, HashSet};
 
 use super::MemoryLocation;
 use super::{search_tie_break_score, MemoryEntry};
 use super::{MemorySearchHit, MemorySearchQuery};
-
-const EXACT_MATCH_BOOST: f64 = 100.0;
-const CONTENT_WEIGHT: f64 = 3.0;
-const TAG_WEIGHT: f64 = 2.0;
-const FACET_WEIGHT: f64 = 1.0;
-const BM25_K1: f64 = 1.2;
-const BM25_B: f64 = 0.75;
 
 pub(crate) fn rank_explicit_search<'a>(
     candidates: impl IntoIterator<Item = (&'a MemoryEntry, MemoryLocation)>,

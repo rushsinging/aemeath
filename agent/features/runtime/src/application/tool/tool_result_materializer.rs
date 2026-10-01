@@ -1,12 +1,11 @@
 use std::sync::Arc;
 
+use crate::application::constants::COMPLETED_MATERIALIZATION_CAPACITY;
 use crate::ports::ToolResultBlobPort;
 use share::message::Message;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 use tools::ImageData;
-
-const COMPLETED_MATERIALIZATION_CAPACITY: usize = 256;
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
     use sha2::{Digest, Sha256};

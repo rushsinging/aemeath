@@ -1,0 +1,69 @@
+use super::*;
+
+#[test]
+fn test_diff_emits_add_remove_with_color_and_plain() {
+    let lines = diff("a\nb\n", "a\nc\n", Some("rs"), 80);
+    let plains = lines
+        .iter()
+        .map(|line| line.plain.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(
+        plains
+            .iter()
+            .any(|plain| plain.contains('-') && plain.contains('b')),
+        "应含删除行 b"
+    );
+    assert!(
+        plains
+            .iter()
+            .any(|plain| plain.contains('+') && plain.contains('c')),
+        "应含新增行 c"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.spans.iter().any(|span| span.style.fg.is_some())),
+        "至少一行带颜色 span（语义色）"
+    );
+}
+
+#[test]
+fn test_diff_line_no_leading_block_indent() {
+    // 块缩进由 gutter 注入（#60/#63）：diff 行不再自拼行首 INDENT，删除行从行号区起。
+    let lines = diff("a\nb\n", "a\nc\n", Some("rs"), 80);
+    let del = lines
+        .iter()
+        .find(|line| line.plain.contains("- ") && line.plain.contains('b'))
+        .expect("删除行存在");
+
+    assert!(
+        !del.plain.starts_with("  "),
+        "删除行不应自拼行首块缩进（由 gutter 注入），got: {:?}",
+        del.plain
+    );
+}
+
+#[test]
+fn test_diff_from_uses_real_start_line_numbers() {
+    let lines = diff_from("a\nb\n", "a\nc\n", 42, 42, Some("rs"), 80);
+    let delete = lines
+        .iter()
+        .find(|line| line.plain.contains("- ") && line.plain.contains('b'))
+        .expect("删除行存在");
+    let insert = lines
+        .iter()
+        .find(|line| line.plain.contains("+ ") && line.plain.contains('c'))
+        .expect("新增行存在");
+
+    assert!(
+        delete.plain.starts_with("43"),
+        "删除行应显示真实 old 行号 43，got: {:?}",
+        delete.plain
+    );
+    assert!(
+        insert.plain.starts_with("    43"),
+        "新增行应显示真实 new 行号 43，got: {:?}",
+        insert.plain
+    );
+}

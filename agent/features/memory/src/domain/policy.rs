@@ -1,12 +1,9 @@
+use super::constants::{MAX_SUPERSEDE_CHAIN_DEPTH, MIN_SYNTHESIS_EVIDENCE};
 use super::EvictionCandidate;
 use super::MemoryEntry;
 use super::MemoryId;
 use super::MemoryKind;
 use std::collections::HashSet;
-
-/// M13 的证据下限（#1776）：少于两条来源的「归纳」等价于复制既有条目，
-/// MUST NOT 产出。
-pub const MIN_SYNTHESIS_EVIDENCE: usize = 2;
 
 /// 把建议声明的 `synthesizes` 映射为归纳产物的类型与证据，返回是否构成归纳。
 ///
@@ -20,10 +17,6 @@ pub fn apply_synthesis(entry: &mut MemoryEntry, synthesizes: &[MemoryId]) -> boo
     entry.evidence = synthesizes.to_vec();
     true
 }
-
-/// 取代链上溯的最大步数（#1774）。合法链长不会超过 `max_entries`；
-/// 超过该上限说明数据已损坏，按成环处理以收敛写入路径。
-pub const MAX_SUPERSEDE_CHAIN_DEPTH: usize = 256;
 
 /// M10：被取代条目不可注入。与 M5（outdated）、M8（TTL）同层，
 /// `pinned` 不绕过——pinned 保护「不要淘汰」，不保护「不要被取代」。

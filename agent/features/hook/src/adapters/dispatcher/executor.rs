@@ -18,7 +18,7 @@ use crate::domain::subscription::HookCommand;
 use crate::ports::HookCancellationSignal;
 
 #[cfg(any(not(unix), test))]
-use crate::adapters::process::UNSUPPORTED_PLATFORM_MESSAGE;
+use crate::adapters::constants::UNSUPPORTED_PLATFORM_MESSAGE;
 use crate::adapters::process::{
     ProcessDriver, ProcessFailure, ProcessFailureKind, ProcessRequest, DEFAULT_OUTPUT_LIMIT,
 };
@@ -180,19 +180,5 @@ fn map_process_failure(failure: ProcessFailure) -> ExecutionFault {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn spawn_failure_preserves_os_detail_in_execution_message() {
-        let fault = map_process_failure(ProcessFailure {
-            kind: ProcessFailureKind::Spawn,
-            message: "启动 hook 命令失败: Too many open files (os error 24)".to_string(),
-        });
-
-        assert_eq!(
-            fault.message(),
-            "hook 子进程启动失败: 启动 hook 命令失败: Too many open files (os error 24)"
-        );
-    }
-}
+#[path = "executor_tests.rs"]
+mod tests;

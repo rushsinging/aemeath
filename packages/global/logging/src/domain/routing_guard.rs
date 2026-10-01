@@ -9,22 +9,6 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Copy)]
-struct OwnerRule {
-    name: &'static str,
-    target: &'static str,
-    target_expr: &'static str,
-}
-impl OwnerRule {
-    const fn new(name: &'static str, target: &'static str, target_expr: &'static str) -> Self {
-        Self {
-            name,
-            target,
-            target_expr,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ViolationKind {
     BareLogMacro,
@@ -59,84 +43,10 @@ impl fmt::Display for Violation {
     }
 }
 
-const OWNERS: &[(&str, OwnerRule)] = &[
-    (
-        "apps/cli",
-        OwnerRule::new("tui", "aemeath:tui", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/composition",
-        OwnerRule::new("composition", "aemeath:composition", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/audit",
-        OwnerRule::new("audit", "aemeath:diagnostic:audit", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/config",
-        OwnerRule::new("config", "aemeath:agent:config", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/hook",
-        OwnerRule::new("hook", "aemeath:agent:hook", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/memory",
-        OwnerRule::new("memory", "aemeath:agent:memory", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/policy",
-        OwnerRule::new("policy", "aemeath:agent:policy", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/context",
-        OwnerRule::new("context", "aemeath:context", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/project",
-        OwnerRule::new("project", "aemeath:agent:project", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/provider",
-        OwnerRule::new("provider", "aemeath:agent:provider", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/runtime",
-        OwnerRule::new("runtime", "aemeath:agent:runtime", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/storage",
-        OwnerRule::new("storage", "aemeath:agent:storage", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/task",
-        OwnerRule::new("task", "aemeath:agent:task", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/tools",
-        OwnerRule::new("tools", "aemeath:agent:tools", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/features/update",
-        OwnerRule::new("update", "aemeath:agent:update", "crate::LOG_TARGET"),
-    ),
-    (
-        "agent/shared",
-        OwnerRule::new("share", "aemeath:shared", "crate::LOG_TARGET"),
-    ),
-];
-
 /// Workspace members that are intentionally NOT runtime owners: they must not
 /// define LOG_TARGET, register a Catalog entry, or directly depend on
 /// logging/log. xtask may emit ordinary CLI output but must not apply the
 /// logging target architecture.
-const NON_RUNTIME_MEMBERS: &[&str] = &[
-    "packages/sdk",
-    "packages/global/logging",
-    "packages/global/utils",
-    "tools/xtask",
-];
-
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
@@ -165,7 +75,9 @@ fn workspace_members(root: &Path) -> std::io::Result<Vec<String>> {
 }
 
 fn crate_root(member: &Path) -> std::io::Result<PathBuf> {
-    for name in ["lib.rs", "main.rs"] {
+    // #1146 双轨归位：crate 身份常量（LOG_TARGET）的家是 src/constants.rs，
+    // lib.rs/main.rs 只做 re-export；优先探测 constants.rs，回退旧根。
+    for name in ["constants.rs", "lib.rs", "main.rs"] {
         let root = member.join("src").join(name);
         if root.is_file() {
             return Ok(root);
@@ -228,6 +140,7 @@ fn lexical_mask(source: &str) -> String {
     while i < bytes.len() {
         if block > 0 {
             if i + 1 < bytes.len() && &bytes[i..i + 2] == b"/*" {
+                // 字节切片两字节 ASCII 比较。allow unsafe_text_op
                 block += 1;
                 out[i] = b' ';
                 out[i + 1] = b' ';
@@ -235,6 +148,7 @@ fn lexical_mask(source: &str) -> String {
                 continue;
             }
             if i + 1 < bytes.len() && &bytes[i..i + 2] == b"*/" {
+                // allow unsafe_text_op
                 block -= 1;
                 out[i] = b' ';
                 out[i + 1] = b' ';
@@ -248,11 +162,13 @@ fn lexical_mask(source: &str) -> String {
             continue;
         }
         if i + 1 < bytes.len() && &bytes[i..i + 2] == b"//" {
+            // allow unsafe_text_op
             while i < bytes.len() && bytes[i] != b'\n' {
                 out[i] = b' ';
                 i += 1;
             }
         } else if i + 1 < bytes.len() && &bytes[i..i + 2] == b"/*" {
+            // allow unsafe_text_op
             block = 1;
             out[i] = b' ';
             out[i + 1] = b' ';
@@ -336,7 +252,9 @@ fn production_source(source: &str) -> String {
                 continue;
             }
         };
-        for byte in &mut out[start..end] {
+        // 语句边界由 ASCII 空白与 {;} 判定构造，落在字节安全点。
+        let statement_range = &mut out[start..end]; // allow unsafe_text_op
+        for byte in statement_range {
             if *byte != b'\n' {
                 *byte = b' ';
             }
@@ -380,7 +298,9 @@ fn contains_identifier(source: &str, identifier: &str) -> bool {
 fn inspect_source(raw: &str, owner: &OwnerRule, relative: &str) -> Vec<Violation> {
     let source = production_source(raw);
     let mut violations = Vec::new();
-    let inspect_constants = relative.ends_with("/lib.rs") || relative.ends_with("/main.rs");
+    let inspect_constants = relative.ends_with("/lib.rs")
+        || relative.ends_with("/main.rs")
+        || relative.ends_with("/constants.rs");
     let mut search = 0;
     while let Some(offset) = source[search..].find("use") {
         let start = search + offset;
@@ -388,16 +308,15 @@ fn inspect_source(raw: &str, owner: &OwnerRule, relative: &str) -> Vec<Violation
             break;
         };
         let end = start + end_rel + 1;
-        let statement = compact(&source[start..end]);
+        // start/end 偏移由 ASCII 语句边界扫描构造。
+        let statement = compact(&source[start..end]); // allow unsafe_text_op
         let starts_at_boundary = start == 0
             || source.as_bytes()[start - 1].is_ascii_whitespace()
             || matches!(source.as_bytes()[start - 1], b'{' | b';');
-        if starts_at_boundary
-            && statement.starts_with("uselog::")
-            && ["trace", "debug", "info", "warn", "error"]
-                .iter()
-                .any(|level| contains_identifier(&source[start..end], level))
-        {
+        let level_in_statement = ["trace", "debug", "info", "warn", "error"]
+            .iter()
+            .any(|level| contains_identifier(&source[start..end], level)); // allow unsafe_text_op
+        if starts_at_boundary && statement.starts_with("uselog::") && level_in_statement {
             violations.push(Violation {
                 path: relative.into(),
                 line: line_at(&source, start),
@@ -507,6 +426,96 @@ fn inspect_source(raw: &str, owner: &OwnerRule, relative: &str) -> Vec<Violation
     }
     violations
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OwnerRule {
+    name: &'static str,
+    target: &'static str,
+    target_expr: &'static str,
+}
+impl OwnerRule {
+    const fn new(name: &'static str, target: &'static str, target_expr: &'static str) -> Self {
+        Self {
+            name,
+            target,
+            target_expr,
+        }
+    }
+}
+
+const OWNERS: &[(&str, OwnerRule)] = &[
+    (
+        "apps/cli",
+        OwnerRule::new("tui", "aemeath:tui", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/composition",
+        OwnerRule::new("composition", "aemeath:composition", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/audit",
+        OwnerRule::new("audit", "aemeath:diagnostic:audit", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/config",
+        OwnerRule::new("config", "aemeath:agent:config", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/hook",
+        OwnerRule::new("hook", "aemeath:agent:hook", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/memory",
+        OwnerRule::new("memory", "aemeath:agent:memory", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/policy",
+        OwnerRule::new("policy", "aemeath:agent:policy", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/context",
+        OwnerRule::new("context", "aemeath:context", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/project",
+        OwnerRule::new("project", "aemeath:agent:project", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/provider",
+        OwnerRule::new("provider", "aemeath:agent:provider", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/runtime",
+        OwnerRule::new("runtime", "aemeath:agent:runtime", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/storage",
+        OwnerRule::new("storage", "aemeath:agent:storage", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/task",
+        OwnerRule::new("task", "aemeath:agent:task", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/tools",
+        OwnerRule::new("tools", "aemeath:agent:tools", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/update",
+        OwnerRule::new("update", "aemeath:agent:update", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/shared",
+        OwnerRule::new("share", "aemeath:shared", "crate::LOG_TARGET"),
+    ),
+];
+
+const NON_RUNTIME_MEMBERS: &[&str] = &[
+    "packages/sdk",
+    "packages/global/logging",
+    "packages/global/utils",
+    "tools/xtask",
+];
 
 /// Path of the guard source file itself; excluded from scans because it
 /// legitimately references LOG_TARGET as part of the checking logic.

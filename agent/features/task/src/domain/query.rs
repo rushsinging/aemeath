@@ -1,3 +1,4 @@
+pub(crate) use super::constants::{READY_LIMIT, RECENT_LIMIT};
 use super::{
     detect_batch_all_completed, detect_interrupted_batch, detect_stale_batches, BatchData,
     BatchIdData, InterruptedBatchInfoData, StaleBatchInfoData, TaskData, TaskIdData,
@@ -215,9 +216,6 @@ impl TaskStoreState {
         auto_closed: bool,
         auto_reopened: bool,
     ) -> Option<TaskProgressSnapshotData> {
-        const RECENT_LIMIT: usize = 2;
-        const READY_LIMIT: usize = 2;
-
         let batch = self.batches().get(&batch_id)?;
         let updated = self.tasks().get(&updated_id)?;
         let mut tasks = self

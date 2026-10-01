@@ -29,8 +29,18 @@ fn routes_exact_and_child_targets_by_longest_legal_prefix() {
 
 #[test]
 fn longest_match_is_independent_of_catalog_order() {
-    let parent = target!("aemeath:agent", Runtime, Runtime, "parent.log");
-    let child = target!("aemeath:agent:runtime", Runtime, Tools, "child.log");
+    let parent = TargetSpec {
+        target: LogTarget::new("aemeath:agent"),
+        owner: ModuleOwner::Runtime,
+        sink: DiagnosticSinkId::Runtime,
+        file_name: "parent.log",
+    };
+    let child = TargetSpec {
+        target: LogTarget::new("aemeath:agent:runtime"),
+        owner: ModuleOwner::Runtime,
+        sink: DiagnosticSinkId::Tools,
+        file_name: "child.log",
+    };
     for specs in [[parent, child], [child, parent]] {
         assert_eq!(
             route_specs(&specs, "aemeath:agent:runtime:loop")

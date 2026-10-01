@@ -1,4 +1,4 @@
-pub const DEFAULT_MAX_TOOL_RESPONSE_BYTES: usize = 1_048_576;
+use super::constants::DEFAULT_MAX_TOOL_RESPONSE_BYTES;
 pub fn limit_tool_response(output: &str, max_bytes: usize) -> String {
     if output.len() <= max_bytes {
         return output.to_string();

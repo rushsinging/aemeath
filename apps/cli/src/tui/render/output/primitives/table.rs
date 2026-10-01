@@ -12,18 +12,5 @@ pub fn table(src_lines: &[&str], base_style: Style, width: u16) -> Vec<RenderedL
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use ratatui::style::Style;
-
-    #[test]
-    fn test_table_renders_rows_with_aligned_plain() {
-        let src = ["| a | bb |", "|---|----|", "| 1 | 2 |"];
-        let lines = table(&src, Style::default(), 40);
-
-        assert!(!lines.is_empty());
-        assert!(lines
-            .iter()
-            .any(|line| line.plain.contains('│') || line.plain.contains('|')));
-    }
-}
+#[path = "table_tests.rs"]
+mod tests;

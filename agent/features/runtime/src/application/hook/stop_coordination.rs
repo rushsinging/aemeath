@@ -14,6 +14,9 @@
 //! - **feedback materialization**：Main/Sub 都调用本模块的统一异步函数，
 //!   使用同一语言、预览截断和长输出落盘规则。
 
+use crate::application::constants::{
+    INLINE_HOOK_OUTPUT_LIMIT, TUI_STDERR_PREVIEW_LINES, TUI_STDOUT_PREVIEW_LINES,
+};
 use crate::application::hook::outcome_mapper::{
     map_hook_outcome, RuntimeHookDirective, RuntimeHookReason,
 };
@@ -282,10 +285,6 @@ pub async fn orchestrate_stop_hook(
 }
 
 // ─── Feedback materialization helpers ─────────────────────────────
-
-const INLINE_HOOK_OUTPUT_LIMIT: usize = 4_000;
-const TUI_STDOUT_PREVIEW_LINES: usize = 3;
-const TUI_STDERR_PREVIEW_LINES: usize = 5;
 
 /// Materialize Stop Hook feedback with the same behavior for Main and Sub.
 /// Long output is persisted under a per-session temp directory and the model

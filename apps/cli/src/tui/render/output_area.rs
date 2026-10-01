@@ -5,6 +5,7 @@ use sdk::CharIdx;
 use crate::tui::render::output::rendered::RenderedDocument;
 use crate::tui::render::output_area::types::DEFAULT_WIDTH;
 
+pub(crate) mod constants;
 pub mod content;
 pub mod display;
 pub mod render;
@@ -17,7 +18,8 @@ pub mod types;
 
 // 重新导出核心类型，方便外部使用
 pub(crate) use render::SCROLLBAR_RESERVE_COLS;
-pub use types::{SpanPart, INDENT};
+pub use types::SpanPart;
+pub(crate) use types::INDENT;
 
 /// 可滚动输出区域，显示对话历史
 pub struct OutputArea {
@@ -90,21 +92,5 @@ impl OutputArea {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::tui::render::output::rendered::{RenderedBlock, RenderedLine};
-    use ratatui::text::Span;
-    use std::rc::Rc;
-
-    #[test]
-    fn test_output_area_replace_document_replaces_content() {
-        let mut area = OutputArea::new();
-        let document = RenderedDocument::new(vec![RenderedBlock {
-            block_id: "a".into(),
-            lines: Rc::new(vec![RenderedLine::new(vec![Span::raw("x")])]),
-        }]);
-        area.replace_document(document);
-
-        assert_eq!(area.document().total_lines(), 1);
-    }
-}
+#[path = "output_area_tests.rs"]
+mod tests;

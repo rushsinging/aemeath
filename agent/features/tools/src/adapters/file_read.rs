@@ -1,3 +1,4 @@
+use super::constants::IMAGE_EXTENSIONS;
 use crate::domain::types::read::{ReadInput, ReadResult};
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
@@ -148,8 +149,6 @@ async fn read_text_window(path: &Path, offset: usize, limit: usize) -> std::io::
         reached_eof,
     })
 }
-
-const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
 
 fn is_image_extension(path: &str) -> bool {
     Path::new(path)

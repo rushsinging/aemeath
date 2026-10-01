@@ -11,8 +11,10 @@
 //! `allow_all()` 工厂返回 `Arc<dyn Policy>`——策略实现不单独占导出类，
 //! mode 注入经 `Fn() -> PolicyModeData` 闭包（无需 trait）。
 
-pub(crate) const LOG_TARGET: &str = "aemeath:agent:policy";
 /// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
+mod constants;
+pub(crate) use constants::LOG_TARGET;
+
 mod adapters;
 pub(crate) mod contract;
 mod domain;

@@ -5,11 +5,8 @@
 //! （child 的 `PID = PGID = SID`），因此按负 PID 发送信号只会命中子进程
 //! 自身的进程组，不会波及宿主进程。
 
-use std::time::Duration;
+use super::constants::TERM_GRACE;
 use tokio::process::Command;
-
-/// SIGTERM 后等待子进程自然退出的宽限；超时即 SIGKILL。
-const TERM_GRACE: Duration = Duration::from_millis(200);
 
 /// 终止子进程的整个进程组并完成回收（reap）。
 ///

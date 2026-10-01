@@ -1,24 +1,20 @@
+use super::constants::{
+    CURRENT_SESSION_GENERATION_SCHEMA_VERSION, MANIFEST_MEMBER_NAME, SESSION_METADATA_MEMBER_NAME,
+    SESSION_RECEIPT_MEMBER_NAME, SESSION_SKILL_MEMBER_NAME, SESSION_STATE_MEMBER_NAME,
+    SESSION_TASK_MEMBER_NAME, SESSION_WORKSPACE_MEMBER_NAME,
+};
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use super::constants::CURRENT_SESSION_SCHEMA_VERSION;
 use super::{
     envelope::task_snapshot_state, ActiveCompactMarker, CanonicalSession, ChatSegment,
     CommittedRunStep, CommittedStepLedger, PersistedWorkspaceContext, RunStepCursor,
     SessionHistory, SessionMetadata, SkillLoadRecord, SnapshotState,
-    CURRENT_SESSION_SCHEMA_VERSION,
 };
 use task::TaskSnapshotData;
-
-pub const CURRENT_SESSION_GENERATION_SCHEMA_VERSION: u32 = 1;
-const MANIFEST_MEMBER_NAME: &str = "manifest.json";
-const SESSION_STATE_MEMBER_NAME: &str = "session-state.json";
-const SESSION_METADATA_MEMBER_NAME: &str = "metadata.json";
-const SESSION_TASK_MEMBER_NAME: &str = "task-state.json";
-const SESSION_WORKSPACE_MEMBER_NAME: &str = "workspace-state.json";
-const SESSION_RECEIPT_MEMBER_NAME: &str = "receipt-ledger.json";
-const SESSION_SKILL_MEMBER_NAME: &str = "skill-loads.json";
 
 #[derive(Debug, Clone)]
 pub struct DisplayHistoryStepWindowData {

@@ -1,3 +1,4 @@
+use super::constants::DONE_VERBS;
 use std::time::Duration;
 
 #[cfg(test)]
@@ -11,29 +12,6 @@ pub enum TerminalCause {
     UserCancelled,
     RunTerminated,
 }
-
-const DONE_VERBS: [&str; 20] = [
-    "Sautéed",
-    "Baked",
-    "Grilled",
-    "Simmered",
-    "Roasted",
-    "Brewed",
-    "Toasted",
-    "Stewed",
-    "Marinated",
-    "Charred",
-    "Poached",
-    "Steamed",
-    "Smoked",
-    "Brûléed",
-    "Flambéed",
-    "Fermented",
-    "Pickled",
-    "Cured",
-    "Seared",
-    "Blanched",
-];
 
 pub(crate) fn format_duration(duration: Duration) -> String {
     let secs = duration.as_secs();

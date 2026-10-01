@@ -1,8 +1,7 @@
 //! UI 配置
 
+use super::constants::MAX_MARKDOWN_SPACING_LINES;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
-
-const MAX_MARKDOWN_SPACING_LINES: u8 = 8;
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

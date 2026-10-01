@@ -1,17 +1,8 @@
+use super::constants::{
+    CONTENT_ESCAPE_PREFIX, LEGACY_TASK_STATE_HEADING, SECTION_HEADINGS, TASK_STATE_HEADING,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-
-const SECTION_HEADINGS: [&str; 9] = [
-    "Immutable Constraints",
-    "Current Objective",
-    "Committed Facts",
-    "Uncommitted Working Set",
-    "Open Decisions / Risks",
-    "Resume Cursor",
-    "Required Revalidation",
-    "Archived Milestones",
-    "Continuation Status",
-];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -607,8 +598,6 @@ impl ContinuationCheckpoint {
     }
 }
 
-const CONTENT_ESCAPE_PREFIX: &str = "\\";
-
 fn encode_content_line(line: &str) -> String {
     if line.starts_with("## ") || line.starts_with(CONTENT_ESCAPE_PREFIX) {
         format!("{CONTENT_ESCAPE_PREFIX}{line}")
@@ -671,11 +660,6 @@ pub(crate) fn is_compact_protocol_text(text: &str) -> bool {
     .iter()
     .any(|marker| normalized.contains(marker))
 }
-
-/// task companion 的当前写入标题（写入侧与解析侧共用的唯一真相）。
-pub const TASK_STATE_HEADING: &str = "\n\n## Current Task State\n";
-/// 历史 session summary 的旧标题，解析侧必须兼容。
-const LEGACY_TASK_STATE_HEADING: &str = "\n\n## Current TaskData State\n";
 
 pub fn split_checkpoint_and_task_state(source: &str) -> (&str, Option<&str>) {
     source

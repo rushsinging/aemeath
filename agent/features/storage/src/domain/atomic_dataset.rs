@@ -1,3 +1,4 @@
+use super::constants::{MEMBER_BYTES_DOMAIN, REVISION_DOMAIN};
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -6,9 +7,6 @@ use sha2::{Digest, Sha256};
 use super::{
     CommitWarningData, SafePathSegmentData, StorageError, StorageErrorKind, StorageNamespaceData,
 };
-
-const REVISION_DOMAIN: &[u8] = b"aemeath.storage.dataset.revision.v1\0";
-const MEMBER_BYTES_DOMAIN: &[u8] = b"aemeath.storage.dataset.member.bytes.v1\0";
 
 /// 计算单个成员字节参与修订号运算的领域摘要（`MEMBER_BYTES_DOMAIN`）。
 ///

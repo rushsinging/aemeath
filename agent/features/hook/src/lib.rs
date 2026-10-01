@@ -11,7 +11,8 @@
 //!
 //! 按 docs/design/03-engineering/05-published-language.md 执行 SOP 收敛。
 
-pub(crate) const LOG_TARGET: &str = "aemeath:agent:hook";
+mod constants;
+pub(crate) use constants::LOG_TARGET;
 
 mod adapters;
 mod domain;

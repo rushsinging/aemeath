@@ -1,5 +1,6 @@
 //! 流式解析：解析 OpenAI 风格的 SSE 流
 
+use super::constants::{STALL_THRESHOLD, STREAM_IDLE_TIMEOUT};
 use super::reasoning_normalizer::{self, ReasoningDeltaNormalizer};
 use super::usage::parse_chat_usage;
 use crate::adapters::stream::InvocationSink;
@@ -10,13 +11,6 @@ use std::io;
 use tokio::io::AsyncBufReadExt;
 use tokio_util::io::StreamReader;
 use tokio_util::sync::CancellationToken;
-
-/// 流空闲超时（单一真相源：`business::OPENAI_STREAM_IDLE_TIMEOUT_SECS`）
-pub(crate) const STREAM_IDLE_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(crate::OPENAI_STREAM_IDLE_TIMEOUT_SECS);
-/// 流停滞检测阈值（单一真相源：`business::STALL_THRESHOLD_SECS`）
-pub(crate) const STALL_THRESHOLD: std::time::Duration =
-    std::time::Duration::from_secs(crate::STALL_THRESHOLD_SECS);
 
 // 截断 JSON 恢复函数已提取到 `provider::adapters::json_recovery`，
 // 由 stream / non_stream / Anthropic 路径共享。

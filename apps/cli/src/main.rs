@@ -1,5 +1,3 @@
-pub(crate) const LOG_TARGET: &str = "aemeath:tui";
-
 mod args;
 mod chat;
 #[cfg(test)]
@@ -7,11 +5,15 @@ mod command_contract_tests;
 mod fatal_error;
 mod panic_hook;
 mod session_lock;
+mod state;
 mod subcommand;
 mod tui;
 
 use args::{Args, Cli, Commands};
 use clap::Parser;
+
+mod constants;
+pub(crate) use constants::LOG_TARGET;
 
 #[tokio::main]
 async fn main() {

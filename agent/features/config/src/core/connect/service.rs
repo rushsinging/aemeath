@@ -12,8 +12,8 @@
 //! - `SetCustomModel` 校验；catalog 推荐为空时**禁止**构造假推荐；
 //!   用户走 `EnterCustomModel` 直接编辑。
 
+use super::constants::PROBE_TIMEOUT;
 use std::sync::Arc;
-use std::time::Duration;
 
 use tokio::sync::Mutex;
 
@@ -36,10 +36,6 @@ use crate::ports::{ProviderProbePort, ProviderProbeRequest, SystemInformation};
 use crate::user_agent::{
     assemble_provider_user_agent_inputs, resolve_provider_user_agent_str, ProviderUserAgentRequest,
 };
-
-/// Probe 调用注入的合法超时上限。该值是 Connect 服务的策略常量，不在
-/// 客户端控制范围内，避免各入口漂移。
-const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// single shot Session。承载 draft、当前 stage、revision 与 probe 状态。
 struct ConnectSession {

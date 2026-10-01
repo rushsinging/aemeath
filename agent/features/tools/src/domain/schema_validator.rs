@@ -14,14 +14,8 @@
 //!   check.
 //! - `nullable: true` fields accept `null`.
 
+use super::constants::RUNTIME_META_KEYS;
 use serde_json::Value;
-
-/// Runtime metadata keys injected by the system prompt (e.g. `phase` for
-/// reasoning graph classification). These are NOT part of any tool's business
-/// schema and MUST be stripped before validation/dispatch, otherwise strictly-
-/// schemad tools (no `additionalProperties`) will reject them as "unexpected
-/// fields" (issue #491).
-pub const RUNTIME_META_KEYS: &[&str] = &["phase"];
 
 /// Remove runtime meta keys from a tool input in-place.
 ///

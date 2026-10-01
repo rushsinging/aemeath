@@ -1,9 +1,8 @@
+pub(crate) use super::constants::CURRENT_USAGE_SCHEMA_VERSION;
 use std::num::NonZeroUsize;
 
 use serde::{Deserialize, Serialize};
 use share::ids::{ModelInvocationId, RunId, RunStepId, SessionId};
-
-pub const CURRENT_USAGE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UsageRecordData {

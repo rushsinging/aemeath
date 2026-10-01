@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const DEFAULT_USAGE_QUEUE_CAPACITY: usize = 1024;
-pub const DEFAULT_USAGE_SHUTDOWN_TIMEOUT_MS: u64 = 5_000;
+pub use super::constants::{DEFAULT_USAGE_QUEUE_CAPACITY, DEFAULT_USAGE_SHUTDOWN_TIMEOUT_MS};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditConfig {
