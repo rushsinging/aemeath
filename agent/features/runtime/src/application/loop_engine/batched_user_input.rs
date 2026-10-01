@@ -103,14 +103,17 @@ fn renumbered_placeholders(text: &str, assignments: Vec<(String, usize)>) -> Str
             .filter_map(|(placeholder, order)| {
                 remaining
                     .find(placeholder.as_str())
-                    .map(|start| (start, start + placeholder.len(), *order))
+                    .map(|start| (start, placeholder.len(), *order))
             })
             .min_by_key(|(start, _, _)| *start);
         match next {
-            Some((start, end, order)) => {
-                rewritten.push_str(&remaining[..start]);
+            Some((start, placeholder_len, order)) => {
+                // `find` 返回的偏移一定落在字符边界上，split_at 不会 panic。
+                let (before, rest) = remaining.split_at(start);
+                let (_, after) = rest.split_at(placeholder_len);
+                rewritten.push_str(before);
                 rewritten.push_str(&image_placeholder(order));
-                remaining = &remaining[end..];
+                remaining = after;
             }
             None => {
                 rewritten.push_str(remaining);
