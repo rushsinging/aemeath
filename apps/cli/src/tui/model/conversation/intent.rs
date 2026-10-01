@@ -351,6 +351,19 @@ impl PartialEq for SyncQueuedSubmissions {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClearCompactRuntime;
 
+/// 清空命令占位（#1816）：撤回与 session 重置后命令不再排队。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClearQueuedCommands;
+
+/// 控制类命令队列的全量快照（#1816）。
+///
+/// 独立于消息占位：撤回（`ClearAllQueuedSubmissions`）与消息同批处理，
+/// 但 runtime 的 `WithdrawAll` 语义与展示语义需要分别演进，故分列存储。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SyncQueuedCommands {
+    pub queued: Vec<(super::interaction::UiQueuedInputId, String)>,
+}
+
 // ════════════════════════════════════════════════════════════════════
 //  传输容器 enum
 // ════════════════════════════════════════════════════════════════════
@@ -413,5 +426,7 @@ pub enum ConversationIntent {
     SetStatusNotice(SetStatusNotice),
     SetTransientStatusNotice(SetTransientStatusNotice),
     SyncQueuedSubmissions(SyncQueuedSubmissions),
+    SyncQueuedCommands(SyncQueuedCommands),
+    ClearQueuedCommands(ClearQueuedCommands),
     ClearCompactRuntime(ClearCompactRuntime),
 }

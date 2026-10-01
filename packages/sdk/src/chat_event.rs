@@ -778,9 +778,15 @@ pub enum ChatEvent {
         event: crate::ConfigReloadedEvent,
     },
     SessionReset,
-    /// 批量撤回 pending 输入（#391 S3）。texts 为被撤回文本，TUI join("\n") 还原输入框。
+    /// 批量撤回 pending 输入（#391 S3）。texts 为被撤回文本（用户消息原文 +
+    /// 排队控制命令的展示文本，#1816），TUI join("\n") 还原输入框。
     UserMessagesWithdrawn {
         texts: Vec<String>,
+    },
+    /// 控制类命令队列的全量快照（#1816）。queued 为 `(入队序号, 展示文本)`，
+    /// 入队序号是跨消息队列与命令队列还原提交顺序的依据。
+    ControlCommandsQueued {
+        queued: Vec<(crate::InputId, String)>,
     },
     /// 兼容旧 ChatInput 流结果。
     Result(ChatResult),

@@ -149,6 +149,56 @@ impl ChatInputEvent {
             }
         }
     }
+
+    /// 排队展示文本：控制类事件在队列里回显给用户的样子（#1816）。
+    ///
+    /// 它是排队回显的唯一真相：runtime 派生、SDK 透传、TUI 只渲染，
+    /// NEVER 由 TUI 另建一套文本映射（否则两处必然漂移）。
+    /// 用户消息、技能请求与撤回指令不进入命令队列，返回 `None`。
+    pub fn queue_display_text(&self) -> Option<String> {
+        let command = match self {
+            Self::ControlCommand { raw } => return Some(raw.clone()),
+            Self::Reset => "/clear",
+            Self::Compact => "/compact",
+            Self::ReflectNow => "/reflect-now",
+            Self::ListModels => "/model",
+            Self::SwitchModel { selection } => {
+                return Some(with_argument("/model", selection));
+            }
+            Self::SetThinking { desired } => {
+                return Some(match desired {
+                    Some(true) => "/think on".to_string(),
+                    Some(false) => "/think off".to_string(),
+                    None => "/think".to_string(),
+                });
+            }
+            Self::InitProject { force } => {
+                return Some(if *force {
+                    "/init --force".to_string()
+                } else {
+                    "/init".to_string()
+                });
+            }
+            Self::ManageSession { args } => return Some(with_argument("/session", args)),
+            Self::ManageMemory { args } => return Some(with_argument("/memory", args)),
+            Self::ResumeSession { id } => return Some(with_argument("/resume", id)),
+            Self::QueryReflectionHistory { limit } => {
+                return Some(with_argument("/reflect", &limit.to_string()));
+            }
+            Self::UserMessage { .. } | Self::SkillRequest(_) | Self::WithdrawAll => return None,
+        };
+        Some(command.to_string())
+    }
+}
+
+/// 拼接命令与其参数，参数为空时只保留命令本身。
+fn with_argument(command: &str, argument: &str) -> String {
+    let argument = argument.trim();
+    if argument.is_empty() {
+        command.to_string()
+    } else {
+        format!("{command} {argument}")
+    }
 }
 
 /// TUI 发起的一次 Chat 请求。
@@ -161,6 +211,93 @@ pub struct ChatRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn queue_display_text_derives_command_text_for_every_control_event() {
+        // 排队回显的文本必须与用户输入的命令一致（#1816）。
+        let cases = [
+            (ChatInputEvent::Compact, "/compact"),
+            (ChatInputEvent::Reset, "/clear"),
+            (ChatInputEvent::ReflectNow, "/reflect-now"),
+            (ChatInputEvent::ListModels, "/model"),
+            (
+                ChatInputEvent::SwitchModel {
+                    selection: "anthropic/claude".to_string(),
+                },
+                "/model anthropic/claude",
+            ),
+            (
+                ChatInputEvent::SetThinking {
+                    desired: Some(true),
+                },
+                "/think on",
+            ),
+            (
+                ChatInputEvent::SetThinking {
+                    desired: Some(false),
+                },
+                "/think off",
+            ),
+            (ChatInputEvent::SetThinking { desired: None }, "/think"),
+            (ChatInputEvent::InitProject { force: true }, "/init --force"),
+            (ChatInputEvent::InitProject { force: false }, "/init"),
+            (
+                ChatInputEvent::ManageSession {
+                    args: "list".to_string(),
+                },
+                "/session list",
+            ),
+            (
+                ChatInputEvent::ManageMemory {
+                    args: String::new(),
+                },
+                "/memory",
+            ),
+            (
+                ChatInputEvent::ResumeSession {
+                    id: "s-1".to_string(),
+                },
+                "/resume s-1",
+            ),
+            (
+                ChatInputEvent::QueryReflectionHistory { limit: 3 },
+                "/reflect 3",
+            ),
+            (
+                ChatInputEvent::ControlCommand {
+                    raw: "/custom raw".to_string(),
+                },
+                "/custom raw",
+            ),
+        ];
+        for (event, expected) in cases {
+            assert_eq!(
+                event.queue_display_text().as_deref(),
+                Some(expected),
+                "{event:?} 的排队展示文本必须与命令一致"
+            );
+        }
+    }
+
+    #[test]
+    fn queue_display_text_is_absent_for_non_command_events() {
+        // 用户消息、技能请求与撤回指令不进入命令队列（#1816）。
+        assert_eq!(
+            ChatInputEvent::user_message("hi", Vec::new()).queue_display_text(),
+            None
+        );
+        assert_eq!(ChatInputEvent::WithdrawAll.queue_display_text(), None);
+        assert_eq!(
+            ChatInputEvent::SkillRequest(SkillRequest {
+                input_id: crate::InputId::new_v7(),
+                skill: "skill".to_string(),
+                arguments: String::new(),
+                raw_input: "/skill".to_string(),
+            })
+            .queue_display_text(),
+            None
+        );
+    }
 
     #[test]
     fn skill_request_preserves_identity_and_raw_arguments() {

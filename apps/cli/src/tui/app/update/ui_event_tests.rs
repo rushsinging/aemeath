@@ -4,6 +4,7 @@ use crate::tui::adapter::runtime_view::{
 };
 use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::effect::session::processing::SpawnContextRefs;
+use crate::tui::model::conversation::interaction::UiQueuedInputId;
 use crate::tui::update::msg::TuiMsg;
 use std::path::PathBuf;
 
@@ -733,5 +734,77 @@ fn paste_fallback_inserts_original_text_while_processing() {
     assert_eq!(
         app.model.input.document.buffer,
         "https://example.com/assets/diagram.png"
+    );
+}
+
+/// #1816 跨层场景：runtime 快照事件 → intent → model → 队列行渲染。
+///
+/// 覆盖 busy 期间提交控制类斜杠命令的回显链路：命令进入排队行，
+/// runtime 执行后发空快照，队列行随之消失。
+#[test]
+fn test_control_command_queue_event_renders_and_clears_queue_lines() {
+    let mut app = test_app();
+    let spawn_refs = make_spawn_refs();
+
+    let (ui_tx, _ui_rx) = mpsc::channel(4);
+    app.update(
+        TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::ControlCommandsQueued {
+            queued: vec![
+                (
+                    UiQueuedInputId::from("01920000-0000-7000-8000-000000000001"),
+                    "/compact".to_string(),
+                ),
+                (
+                    UiQueuedInputId::from("01920000-0000-7000-8000-000000000002"),
+                    "/model anthropic/claude".to_string(),
+                ),
+            ],
+        }]),
+        &ui_tx,
+        &spawn_refs,
+    );
+
+    assert_eq!(
+        app.live_status_view_model().queued_lines,
+        vec!["> /compact", "> /model anthropic/claude"],
+        "排队命令必须出现在状态行，否则用户看不到命令已被接收"
+    );
+
+    app.update(
+        TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::ControlCommandsQueued {
+            queued: vec![],
+        }]),
+        &ui_tx,
+        &spawn_refs,
+    );
+
+    assert!(
+        app.live_status_view_model().queued_lines.is_empty(),
+        "命令执行后 runtime 发空快照，队列行必须清空"
+    );
+}
+
+/// #1816：消息与命令混排时按入队序号合并成提交顺序。
+#[test]
+fn test_queued_messages_and_commands_merge_in_arrival_order() {
+    let mut app = test_app();
+    app.enqueue_submission_echo("01920000-0000-7000-8000-000000000001", "先到的消息");
+    let (ui_tx, _ui_rx) = mpsc::channel(4);
+    let spawn_refs = make_spawn_refs();
+    app.update(
+        TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::ControlCommandsQueued {
+            queued: vec![(
+                UiQueuedInputId::from("01920000-0000-7000-8000-000000000002"),
+                "/compact".to_string(),
+            )],
+        }]),
+        &ui_tx,
+        &spawn_refs,
+    );
+
+    assert_eq!(
+        app.live_status_view_model().queued_lines,
+        vec!["> 先到的消息", "> /compact"],
+        "两类占位必须按入队序号合并，否则用户看到的顺序与提交顺序不符"
     );
 }

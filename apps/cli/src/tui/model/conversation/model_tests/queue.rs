@@ -74,3 +74,53 @@ fn test_clear_queued_by_id_removes_only_matching_entry() {
     assert!(!queued_timeline.iter().any(|(iid, _)| iid == &id_b));
 }
 
+
+/// #1816：命令队列全量快照整列替换，命令不进输出时间线。
+#[test]
+fn test_sync_queued_commands_replaces_snapshot_without_timeline_entries() {
+    let mut model = ConversationModel::default();
+    let changes = model.apply(SyncQueuedCommands {
+        queued: vec![
+            (UiQueuedInputId::from("01920000-0000-7000-8000-000000000001"), "/compact".to_string()),
+            (
+                UiQueuedInputId::from("01920000-0000-7000-8000-000000000002"),
+                "/model anthropic/claude".to_string(),
+            ),
+        ],
+    });
+
+    assert!(changes
+        .iter()
+        .any(|change| matches!(change, ConversationChange::QueuedCommandsSynced { count: 2 })));
+    assert_eq!(model.queued_commands.len(), 2);
+    assert_eq!(model.queued_commands[0].text, "/compact");
+    assert!(!model.timeline.items().iter().any(|item| matches!(
+        item,
+        OutputTimelineItem::QueuedUserMessage { text, .. } if text == "/compact"
+    )));
+
+    // 快照是全量语义：空快照清空命令占位
+    model.apply(SyncQueuedCommands { queued: vec![] });
+    assert!(model.queued_commands.is_empty());
+}
+
+/// #1816：撤回消息（ClearAllQueuedSubmissions）不误清命令占位。
+#[test]
+fn test_clear_all_queued_submissions_keeps_queued_commands() {
+    let mut model = ConversationModel::default();
+    model.apply(SyncQueuedCommands {
+        queued: vec![(
+            UiQueuedInputId::from("01920000-0000-7000-8000-000000000001"),
+            "/compact".to_string(),
+        )],
+    });
+    model.apply(QueueSubmission {
+        input_id: "input-a".to_string(),
+        text: "排队的消息".to_string(),
+    });
+
+    model.apply(ClearAllQueuedSubmissions);
+
+    assert!(model.queued_submissions.is_empty());
+    assert_eq!(model.queued_commands.len(), 1, "命令占位有独立生命周期");
+}

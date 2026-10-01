@@ -152,6 +152,20 @@ impl ChatEventSink for TestSink {
     }
 }
 
+/// 除排队快照外发出的语义事件数量（#1816）。
+///
+/// `ControlCommandsQueued` 是队列状态同步，不改变 gate 的业务判定；
+/// 断言「gate 不发 Adopted / SessionMessageStateChanged」时必须排除它，
+/// 否则会把新增的状态同步误判成语义回归。
+fn semantic_event_count(sink: &TestSink) -> usize {
+    sink.events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|event| !matches!(event, RuntimeStreamEvent::ControlCommandsQueued { .. }))
+        .count()
+}
+
 #[tokio::test]
 async fn compact_input_becomes_idle_command_and_is_buffered_while_busy() {
     let idle_buffer = PendingInputBuffer::default();
@@ -206,8 +220,9 @@ async fn reflect_now_idle_becomes_pending_command_and_busy_drops_with_notice() {
         Some(PendingCommand::ReflectNow)
     ));
     assert!(idle_buffer.is_empty(), "idle 受理后事件消费完毕");
-    assert!(
-        idle_sink.events.lock().unwrap().is_empty(),
+    assert_eq!(
+        semantic_event_count(&idle_sink),
+        0,
         "受理提示由 run_launch handler 发出，gate 不重复提示"
     );
 
@@ -226,7 +241,12 @@ async fn reflect_now_idle_becomes_pending_command_and_busy_drops_with_notice() {
     assert!(busy_outcome.pending_command.is_none());
     assert!(busy_buffer.is_empty(), "busy 不排队：事件被丢弃");
     let busy_events = busy_sink.events.lock().unwrap();
-    match busy_events.as_slice() {
+    // 排队快照是状态同步（#1816），busy 丢弃路径另发一条空快照。
+    let semantic: Vec<_> = busy_events
+        .iter()
+        .filter(|event| !matches!(event, RuntimeStreamEvent::ControlCommandsQueued { .. }))
+        .collect();
+    match semantic.as_slice() {
         [RuntimeStreamEvent::CommandResultText { text, is_error }] => {
             assert!(!is_error, "busy 跳过是提示而非错误");
             assert!(text.contains("Reflection"), "提示应说明跳过原因：{text}");
@@ -260,7 +280,8 @@ async fn test_run_loop_gate_before_finish_continues_on_user_message() {
     );
     // #1272: apply_gate no longer emits Adopted or SessionMessageStateChanged.
     // Adopted is deferred to accept_step_input after durable Context accept.
-    assert_eq!(sink.events.lock().unwrap().len(), 0);
+    // #1816: 排队快照是状态同步，不计入语义事件。
+    assert_eq!(semantic_event_count(&sink), 0);
 }
 
 /// #402 回归 + #fix-tui-image-input-output 拆块回归：
@@ -530,8 +551,8 @@ async fn test_apply_gate_emits_user_messages_added_batch_no_dedup() {
         outcome.accepted_inputs[1].input_id(),
         "每条提交一个独立 id"
     );
-    // Verify no events were emitted through the sink.
-    assert_eq!(sink.events.lock().unwrap().len(), 0);
+    // Verify no semantic events were emitted through the sink（快照除外，#1816）。
+    assert_eq!(semantic_event_count(&sink), 0);
 }
 
 #[tokio::test]
@@ -602,8 +623,8 @@ async fn test_apply_gate_accepted_inputs_preserve_input_id_and_images() {
     .await;
 
     assert_eq!(outcome.appended_user_messages, 1);
-    // Gate 不再 emit 事件（Adopted deferred to accept_step_input）
-    assert_eq!(sink.events.lock().unwrap().len(), 0);
+    // Gate 不再 emit 语义事件（Adopted deferred to accept_step_input；快照除外，#1816）
+    assert_eq!(semantic_event_count(&sink), 0);
     // accepted_inputs 唯一保留 InputId、images 与模型消息。
     assert_eq!(outcome.accepted_inputs.len(), 1);
     match &outcome.accepted_inputs[0] {
@@ -650,11 +671,11 @@ async fn test_apply_gate_no_premature_adopted_emission() {
 
     assert_eq!(outcome.appended_user_messages, 2);
     assert_eq!(outcome.accepted_inputs.len(), 2);
-    // 确认没有事件通过 sink 发出
-    let events = sink.events.lock().unwrap();
-    assert!(
-        events.is_empty(),
-        "apply_gate must not emit any events; Adopted is deferred to accept_step_input"
+    // 确认没有语义事件通过 sink 发出（排队快照是状态同步，#1816）
+    assert_eq!(
+        semantic_event_count(&sink),
+        0,
+        "apply_gate must not emit semantic events; Adopted is deferred to accept_step_input"
     );
 }
 
@@ -721,4 +742,237 @@ fn loop_input_message_without_accepted_stamps_user_input_timestamp() {
         "created_at {created_at:?} 应落在构造调用时间区间 [{before:?}, {after:?}] 内"
     );
     assert_eq!(message.text_content(), "hi");
+}
+
+/// #1816：idle 受理控制命令后，剩余事件必须原序重新排队，NEVER 静默丢弃。
+#[tokio::test]
+async fn control_command_requeues_following_commands_instead_of_dropping_them() {
+    let buffer = PendingInputBuffer::default();
+    buffer.push(ChatInputEvent::Compact);
+    buffer.push(ChatInputEvent::SwitchModel {
+        selection: "anthropic/claude".to_string(),
+    });
+
+    let outcome = apply_gate(
+        GateKind::BeforeLlm,
+        &buffer,
+        &TestSink::default(),
+        &task::TaskStore::new(),
+        true,
+    )
+    .await;
+
+    assert!(matches!(
+        outcome.pending_command,
+        Some(PendingCommand::Compact)
+    ));
+    let remaining = buffer.drain_all();
+    assert_eq!(
+        remaining,
+        vec![ChatInputEvent::SwitchModel {
+            selection: "anthropic/claude".to_string(),
+        }],
+        "首个命令之后的命令必须留待下一轮 idle 执行"
+    );
+}
+
+/// #1816：命令之前的用户消息被接纳，命令之后的消息留待下一轮，NEVER 丢弃。
+#[tokio::test]
+async fn user_messages_around_control_command_are_split_not_dropped() {
+    let buffer = PendingInputBuffer::default();
+    buffer.push(ChatInputEvent::user_message("before", Vec::new()));
+    buffer.push(ChatInputEvent::Compact);
+    buffer.push(ChatInputEvent::user_message("after", Vec::new()));
+
+    let outcome = apply_gate(
+        GateKind::BeforeLlm,
+        &buffer,
+        &TestSink::default(),
+        &task::TaskStore::new(),
+        true,
+    )
+    .await;
+
+    assert!(matches!(
+        outcome.pending_command,
+        Some(PendingCommand::Compact)
+    ));
+    assert_eq!(outcome.appended_user_messages, 1);
+    assert_eq!(outcome.accepted_inputs.len(), 1);
+    assert_eq!(
+        outcome.accepted_inputs[0].model_message().text_content(),
+        "before"
+    );
+    let remaining = buffer.drain_all();
+    assert_eq!(
+        remaining,
+        vec![ChatInputEvent::user_message("after", Vec::new())],
+        "命令之后的消息必须留待下一轮，而不是被丢弃"
+    );
+}
+
+/// #1816：idle Reset 之前已接纳、之后未消费的用户消息都必须回到缓冲区，
+/// `reset_requested` 优先级高于 `Resumed`，否则它们会被静默丢弃。
+#[tokio::test]
+async fn user_messages_around_reset_are_requeued_instead_of_silently_dropped() {
+    let buffer = PendingInputBuffer::default();
+    buffer.push(ChatInputEvent::user_message("before", Vec::new()));
+    buffer.push(ChatInputEvent::Reset);
+    buffer.push(ChatInputEvent::user_message("after", Vec::new()));
+
+    let outcome = apply_gate(
+        GateKind::BeforeLlm,
+        &buffer,
+        &TestSink::default(),
+        &task::TaskStore::new(),
+        true,
+    )
+    .await;
+
+    assert!(outcome.reset_requested, "idle Reset 应请求清空会话");
+    assert!(
+        outcome.accepted_inputs.is_empty(),
+        "Reset 优先于 Resumed，已接纳输入必须回到缓冲区"
+    );
+    let remaining = buffer.drain_all();
+    assert_eq!(
+        remaining,
+        vec![
+            ChatInputEvent::user_message("before", Vec::new()),
+            ChatInputEvent::user_message("after", Vec::new()),
+        ],
+        "Reset 前后的消息都必须留待下一轮"
+    );
+}
+
+/// #1816：busy gate 把命令放回缓冲区后必须发布全量快照，UI 才知道命令已排队。
+#[tokio::test]
+async fn busy_gate_publishes_command_queue_snapshot() {
+    let buffer = PendingInputBuffer::default();
+    let sink = TestSink::default();
+
+    buffer.push(ChatInputEvent::Compact);
+    buffer.push(ChatInputEvent::SwitchModel {
+        selection: "anthropic/claude".to_string(),
+    });
+    let outcome = apply_gate(
+        GateKind::BeforeLlm,
+        &buffer,
+        &sink,
+        &task::TaskStore::new(),
+        false,
+    )
+    .await;
+
+    assert!(outcome.pending_command.is_none(), "busy 不执行命令");
+    let events = sink.events.lock().unwrap();
+    let snapshot = events
+        .iter()
+        .find_map(|event| match event {
+            RuntimeStreamEvent::ControlCommandsQueued { queued } => Some(queued.clone()),
+            _ => None,
+        })
+        .expect("gate 必须发布命令队列快照");
+    assert_eq!(
+        snapshot
+            .iter()
+            .map(|(_, text)| text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["/compact", "/model anthropic/claude"],
+        "快照按入队顺序给出全部待执行命令"
+    );
+    assert!(
+        snapshot[0].0 < snapshot[1].0,
+        "入队序号必须单调，UI 据此跨队列排序"
+    );
+}
+
+/// #1816：idle 消费掉命令后快照变空，UI 据此清空命令行。
+#[tokio::test]
+async fn idle_gate_publishes_empty_snapshot_after_consuming_command() {
+    let buffer = PendingInputBuffer::default();
+    let sink = TestSink::default();
+    buffer.push(ChatInputEvent::Compact);
+
+    apply_gate(
+        GateKind::BeforeLlm,
+        &buffer,
+        &sink,
+        &task::TaskStore::new(),
+        true,
+    )
+    .await;
+
+    let events = sink.events.lock().unwrap();
+    let snapshot = events
+        .iter()
+        .find_map(|event| match event {
+            RuntimeStreamEvent::ControlCommandsQueued { queued } => Some(queued.clone()),
+            _ => None,
+        })
+        .expect("gate 必须发布命令队列快照");
+    assert!(snapshot.is_empty(), "命令被消费后快照必须为空");
+}
+
+/// #1816：WithdrawAll 必须一并撤回排队的控制命令，Up 键才等于「全部撤回」。
+#[tokio::test]
+async fn withdraw_all_retracts_queued_control_commands_too() {
+    let buffer = PendingInputBuffer::default();
+    buffer.push(ChatInputEvent::user_message("queued", Vec::new()));
+    buffer.push(ChatInputEvent::WithdrawAll);
+    buffer.push(ChatInputEvent::Compact);
+    buffer.push(ChatInputEvent::SwitchModel {
+        selection: "anthropic/claude".to_string(),
+    });
+    let sink = TestSink::default();
+
+    let outcome = apply_gate(
+        GateKind::BeforeLlm,
+        &buffer,
+        &sink,
+        &task::TaskStore::new(),
+        true,
+    )
+    .await;
+
+    assert!(outcome.pending_command.is_none(), "撤回后不得执行命令");
+    assert!(
+        buffer.is_empty(),
+        "控制命令必须随撤回离开队列，NEVER 留在队列里执行"
+    );
+    let snapshot = sink
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .find_map(|event| match event {
+            RuntimeStreamEvent::ControlCommandsQueued { queued } => Some(queued.clone()),
+            _ => None,
+        })
+        .expect("gate 必须发布命令队列快照");
+    assert!(snapshot.is_empty(), "撤回后命令队列快照必须为空");
+}
+
+/// #1816：撤回排队控制命令的 buffer 级原语——取出展示文本并清空队列。
+#[test]
+fn pending_buffer_drain_for_withdraw_returns_command_texts_and_clears_queue() {
+    let buffer = PendingInputBuffer::default();
+    buffer.push(ChatInputEvent::Compact);
+    buffer.push(ChatInputEvent::user_message("queued", Vec::new()));
+    buffer.push(ChatInputEvent::SwitchModel {
+        selection: "anthropic/claude".to_string(),
+    });
+
+    let withdrawn = buffer.drain_for_withdraw();
+
+    assert_eq!(
+        withdrawn,
+        vec![
+            "/compact".to_string(),
+            "/model anthropic/claude".to_string()
+        ],
+        "撤回必须给出命令展示文本，TUI 才能还原输入框"
+    );
+    assert!(buffer.is_empty(), "撤回后队列必须清空");
+    assert!(buffer.command_snapshot().is_empty());
 }

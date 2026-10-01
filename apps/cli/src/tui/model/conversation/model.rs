@@ -8,6 +8,7 @@ use super::interaction::InteractionState;
 use super::output_view_change::{
     OutputViewChange, OutputViewChanges, OutputViewCursor, OutputViewJournal,
 };
+use super::queued_command::QueuedCommand;
 use super::queued_submission::QueuedSubmission;
 use super::runtime_state::RuntimeState;
 use super::update::ConversationUpdate;
@@ -35,6 +36,11 @@ pub struct ConversationModel {
     pub active_chat_id: Option<ChatId>,
     pub timeline: OutputTimelineModel,
     pub queued_submissions: Vec<QueuedSubmission>,
+    /// 排队的控制类命令（#1816），按入队序号升序。
+    ///
+    /// 与 `queued_submissions` 分列：消息占位进输出时间线，命令不进；
+    /// 两者只在渲染时按入队序号合并成队列行。
+    pub queued_commands: Vec<QueuedCommand>,
     pub sub_run_watermarks: Vec<SubRunActivityWatermark>,
     next_chat_sequence: usize,
     next_block_sequence: usize,
@@ -60,6 +66,7 @@ impl Default for ConversationModel {
             active_chat_id: None,
             timeline: OutputTimelineModel::default(),
             queued_submissions: Vec::new(),
+            queued_commands: Vec::new(),
             sub_run_watermarks: Vec::new(),
             next_chat_sequence: 0,
             next_block_sequence: 0,
@@ -437,6 +444,34 @@ impl ConversationModel {
         vec![ConversationChange::QueuedSubmissionsSynced {
             count: self.queued_submissions.len(),
         }]
+    }
+
+    /// 以 runtime 的命令队列全量快照为准重渲染命令占位（#1816）。
+    ///
+    /// 快照即真相：命令被消费后 runtime 发空快照，占位随之清空。
+    pub(super) fn sync_queued_commands(
+        &mut self,
+        queued: Vec<(
+            crate::tui::model::conversation::interaction::UiQueuedInputId,
+            String,
+        )>,
+    ) -> Vec<ConversationChange> {
+        self.queued_commands = queued
+            .into_iter()
+            .map(|(input_id, text)| QueuedCommand {
+                input_id: input_id.as_str().to_string(),
+                text,
+            })
+            .collect();
+        vec![ConversationChange::QueuedCommandsSynced {
+            count: self.queued_commands.len(),
+        }]
+    }
+
+    /// 清空命令占位（#1816）：撤回与 session 重置后命令不再排队。
+    pub(super) fn clear_queued_commands(&mut self) -> Vec<ConversationChange> {
+        self.queued_commands.clear();
+        vec![ConversationChange::QueuedCommandsSynced { count: 0 }]
     }
 
     pub(super) fn clear_compact_runtime(&mut self) -> Vec<ConversationChange> {
