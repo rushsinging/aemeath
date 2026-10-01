@@ -7,9 +7,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::reflection::{
-    announce_memory_update, memory_updated_notice_text, run_manual_reflection,
-};
+use super::reflection::{announce_memory_update, memory_updated_notice_text};
 use crate::application::loop_engine::chat::{
     ChatEventSink, ChatEventSinkHandle, EventFuture, RuntimeStreamEvent,
 };
@@ -161,10 +159,11 @@ async fn run_with(
     config: share::config::MemoryConfig,
 ) -> (ReflectionTaskAdapter, ReflectionRunOutcome) {
     let adapter = ReflectionTaskAdapter::production(Duration::from_secs(5));
-    let outcome = run_manual_reflection(
+    let outcome = super::reflection::run(
         &adapter,
+        crate::application::reflection::ReflectionTaskTrigger::Manual,
         &config,
-        &[share::message::Message::user(
+        vec![share::message::Message::user(
             "a conversation worth reflecting on",
         )],
         &binding(provider),
@@ -172,6 +171,7 @@ async fn run_with(
         "en",
         &in_memory(),
         &crate::application::reflection::test_support::noop_reflection_history(),
+        tokio_util::sync::CancellationToken::new(),
     )
     .await;
     (adapter, outcome)
@@ -243,10 +243,11 @@ async fn two_runs_before_the_next_one_merge_into_a_single_reminder() {
     let adapter = ReflectionTaskAdapter::production(Duration::from_secs(5));
     let history = crate::application::reflection::test_support::noop_reflection_history();
     for _ in 0..2 {
-        run_manual_reflection(
+        super::reflection::run(
             &adapter,
+            crate::application::reflection::ReflectionTaskTrigger::Manual,
             &auto_apply_config(),
-            &[share::message::Message::user(
+            vec![share::message::Message::user(
                 "a conversation worth reflecting on",
             )],
             &binding(provider_proposing(1)),
@@ -254,6 +255,7 @@ async fn two_runs_before_the_next_one_merge_into_a_single_reminder() {
             "en",
             &in_memory(),
             &history,
+            tokio_util::sync::CancellationToken::new(),
         )
         .await;
     }

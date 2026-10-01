@@ -43,6 +43,7 @@ pub(crate) enum TuiActivitySource {
     ToolCall(String),
     HookDispatch(UiActivityId),
     Compaction(UiActivityId),
+    Reflection(UiActivityId),
     Interaction(String),
     SubRun(UiRunId),
 }
@@ -67,6 +68,7 @@ pub(crate) enum TuiActivityKind {
     ToolCall,
     HookDispatch,
     Compaction,
+    Reflection,
     Interaction,
     SubRun,
 }
@@ -92,6 +94,7 @@ pub(crate) enum TuiActivityAudience {
 pub(crate) enum TuiRunPurpose {
     Main,
     Derived,
+    Reflection,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -182,6 +185,9 @@ pub(crate) enum TuiActivityDetail {
     Compact {
         stage: TuiCompactStage,
         work: TuiCompactWork,
+    },
+    Reflection {
+        trigger: TuiReflectionTrigger,
     },
     Interaction {
         kind: TuiInteractionKind,

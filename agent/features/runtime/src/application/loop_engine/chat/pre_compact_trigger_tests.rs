@@ -1,13 +1,11 @@
-//! External tests for the production PreCompact reflection trigger (#1284).
+//! PreCompact 反思触发的外部测试（新路径：材料暂存 + engine 反思 phase 取出执行）。
 //!
-//! These tests verify that the production automatic compact path
-//! (`RuntimeCompaction` + `ChatCompactionObserver`) submits a
-//! `ReflectionTaskTrigger::PreCompact` job using the **pre-compact** messages
-//! snapshot only when the context port returns `CompactOutcome::Committed`.
-//! Errors and `CompactOutcome::Skipped` must never enqueue a job. The
-//! submission shares the session-scoped `ReflectionTaskAdapter` slot with
-//! `Interval` and `Manual` triggers; the single-slot contention contract itself
-//! is already covered by the `task_adapter_tests` in the reflection runner.
+//! 生产自动压缩路径（`RuntimeCompaction` + `ChatCompactionObserver`）在
+//! `CompactOutcome::Committed` 时把压缩将丢弃的早期消息快照暂存进共享槽
+//! （`PreCompactMaterialSlot`），`Skipped`/错误不暂存；执行点在 engine 的
+//! reflection phase——经 `RuntimeReflection::take_pre_compact_messages` 取出材料、
+//! 以 `ReflectionTaskTrigger::PreCompact` 执行。反思执行与历史持久化本身由
+//! `task_adapter_tests` 覆盖，此处覆盖暂存/取出/执行的协作语义。
 
 #![allow(clippy::type_complexity)]
 
@@ -23,10 +21,10 @@ use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
 use super::main_run_port::ChatCompactionObserver;
-use crate::application::loop_engine::chat::reflection::{
-    maybe_run_pre_compact_reflection, run_pre_compact_reflection,
-};
-use crate::application::loop_engine::CompactionPort;
+use crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot;
+use crate::application::loop_engine::compaction::CompactionObserver;
+use crate::application::loop_engine::run_services::RuntimeReflection;
+use crate::application::loop_engine::{CompactionPort, ReflectionPhasePort};
 use crate::application::reflection::{
     ReflectionRunOutcome, ReflectionTaskAdapter, ReflectionTaskCompletionStatus,
     ReflectionTaskTrigger,
@@ -44,7 +42,7 @@ use crate::ports::{
 /// helpers via the production adapter and a real provider whose response
 /// parses as an empty reflection output. The integration tests exercise the
 /// production `RuntimeCompaction` and `ChatCompactionObserver` seam, then use
-/// `adapter.drain()` to join the spawned task and inspect its trigger.
+/// `persisted_triggers()` to inspect which trigger reached persistence.
 fn production_adapter() -> ReflectionTaskAdapter {
     ReflectionTaskAdapter::production(Duration::from_secs(5))
 }
@@ -170,6 +168,14 @@ impl ContextPort for StubContextPort {
     }
 }
 
+/// `Message` 无 PartialEq：断言统一经文本快照比较。
+fn texts(messages: &[Message]) -> Vec<String> {
+    messages
+        .iter()
+        .map(|message| message.text_content())
+        .collect()
+}
+
 fn failing_append_reflection_history() -> Arc<dyn memory::api::ReflectionHistoryStore> {
     struct FailingAppendHistory;
     #[async_trait]
@@ -213,37 +219,88 @@ fn build_compact_test_port(
     crate::application::loop_engine::run_services::RuntimeCompaction::new(
         &harness.runtime_context,
         ChatCompactionObserver {
-            runtime_context: harness.runtime_context.clone(),
-            reflection_tasks: harness.adapter.clone(),
-            system_prompt: "system".to_string(),
-            language: "en".to_string(),
+            pre_compact_material: harness.material_slot.clone(),
         },
     )
 }
 
-/// Per-test harness for the production compaction service and observer.
+/// 生产反思端口（装配同 `run_launch`：与压缩观察者共享同一材料槽）。
+fn build_reflection_port(harness: &CompactHarness) -> RuntimeReflection<'_> {
+    RuntimeReflection::new(
+        &harness.runtime_context,
+        harness.adapter.clone(),
+        "system prompt text".to_string(),
+        "en".to_string(),
+        harness.material_slot.clone(),
+    )
+}
+
+/// Per-test harness for the production compaction service, chat observer and
+/// reflection port (三者经 `material_slot` 共享 PreCompact 材料)。
 struct CompactHarness {
     adapter: ReflectionTaskAdapter,
     stub: Arc<StubContextPort>,
     runtime_context: crate::application::run::context::RuntimeContext,
     context_port: Arc<dyn ContextPort>,
-    reflection_history: Arc<RecordingReflectionHistory>,
+    /// 记录型反思历史；注入非记录实现的构造（`with_history`）时为 None。
+    reflection_history: Option<Arc<RecordingReflectionHistory>>,
+    /// 与 ChatCompactionObserver 共享的 PreCompact 材料槽（同 run_launch 装配）。
+    material_slot: PreCompactMaterialSlot,
+    /// 记录型 Usage sink：断言反思终态的记账条数与字段。
+    usage_sink: Arc<RecordingUsageSink>,
 }
 
 impl CompactHarness {
     fn new(outcome: Result<CompactOutcome, ContextPortError>) -> Self {
+        let recording = Arc::new(RecordingReflectionHistory::default());
+        Self::with_options(
+            outcome,
+            ConfigSnapshot::new(Config::default()),
+            recording.clone(),
+            Some(recording),
+        )
+    }
+
+    /// 自定义配置（如关闭反思门禁）；反思历史为默认记录实现。
+    fn with_config(
+        outcome: Result<CompactOutcome, ContextPortError>,
+        config: ConfigSnapshot,
+    ) -> Self {
+        let recording = Arc::new(RecordingReflectionHistory::default());
+        Self::with_options(outcome, config, recording.clone(), Some(recording))
+    }
+
+    /// 自定义反思历史（如注入 append 失败的实现）；配置为默认值。
+    fn with_history(
+        outcome: Result<CompactOutcome, ContextPortError>,
+        history: Arc<dyn memory::api::ReflectionHistoryStore>,
+    ) -> Self {
+        Self::with_options(
+            outcome,
+            ConfigSnapshot::new(Config::default()),
+            history,
+            None,
+        )
+    }
+
+    fn with_options(
+        outcome: Result<CompactOutcome, ContextPortError>,
+        config_snapshot: ConfigSnapshot,
+        reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
+        recording_history: Option<Arc<RecordingReflectionHistory>>,
+    ) -> Self {
         let adapter = production_adapter();
         let stub = StubContextPort::new(outcome);
         let binding = pre_compact_test_binding();
-        let config_snapshot = ConfigSnapshot::new(Config::default());
-        let reflection_history = Arc::new(RecordingReflectionHistory::default());
+        let usage_sink = Arc::new(RecordingUsageSink::default());
         let runtime_context =
             crate::application::run::run_factory_support::SessionRunFixture::builder()
                 .with_context_port(stub.clone())
                 .with_provider_binding(binding)
                 .with_config(config_snapshot)
                 .with_session_id("session".to_string())
-                .with_reflection_history(reflection_history.clone())
+                .with_reflection_history(reflection_history)
+                .with_usage_sink(usage_sink.clone())
                 .build()
                 .create(crate::domain::agent_run::RunSpec::main())
                 .expect("pre-compact parent run creation must succeed")
@@ -255,7 +312,9 @@ impl CompactHarness {
             stub,
             runtime_context,
             context_port,
-            reflection_history,
+            reflection_history: recording_history,
+            material_slot: PreCompactMaterialSlot::default(),
+            usage_sink,
         }
     }
 
@@ -263,7 +322,30 @@ impl CompactHarness {
     /// run writes its `Running` marker before calling the provider, so this is
     /// a deterministic observation rather than a race with a background task.
     fn persisted_triggers(&self) -> Vec<memory::api::reflection::ReflectionTrigger> {
-        self.reflection_history.triggers()
+        self.reflection_history
+            .as_ref()
+            .map(|history| history.triggers())
+            .unwrap_or_default()
+    }
+}
+
+/// Non-blocking Usage sink that keeps every `UsageRecordData` a reflection
+/// terminal state tries to record（记账条数与字段断言）。
+#[derive(Default)]
+pub(super) struct RecordingUsageSink {
+    records: Mutex<Vec<audit::UsageRecordData>>,
+}
+
+impl RecordingUsageSink {
+    pub(super) fn records(&self) -> Vec<audit::UsageRecordData> {
+        self.records.lock().expect("usage sink lock").clone()
+    }
+}
+
+impl crate::ports::UsageSink for RecordingUsageSink {
+    fn try_record(&self, record: audit::UsageRecordData) -> audit::UsageEmitOutcomeData {
+        self.records.lock().expect("usage sink lock").push(record);
+        audit::UsageEmitOutcomeData::Accepted
     }
 }
 
@@ -384,102 +466,106 @@ fn pre_compact_test_binding() -> Arc<crate::ports::ProviderBindingData> {
     })
 }
 
-/// Unit-level assertion: when `maybe_submit_pre_compact_reflection` sees
-/// `Committed`, the production adapter receives exactly one PreCompact job.
-/// We verify the trigger via `adapter.drain()` because `submit_complete`
-/// writes a `ReflectionTaskCompletion` carrying the trigger after the
-/// Unit-level: `maybe_run_pre_compact_reflection` only runs on `Committed`.
-#[tokio::test]
-async fn maybe_run_pre_compact_reflection_only_runs_on_committed() {
-    let adapter = production_adapter();
-    let binding = pre_compact_test_binding();
-    let memory_config = share::config::MemoryConfig::default();
-    let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::api::NoOpMemory);
-    let history = crate::application::reflection::test_support::noop_reflection_history();
-    let snapshot = vec![
-        Message::user("kept-by-compact"),
-        Message::user("discarded-by-compact"),
-    ];
-
-    let committed = CompactOutcome::Committed(CompactResult {
+fn committed_outcome() -> CompactOutcome {
+    CompactOutcome::Committed(CompactResult {
         summary: "summary".to_string(),
         recent_messages: vec![],
         source_revision: SessionRevision::new(7),
         quality: context::CompactSummaryQuality::LocalOnly,
-    });
-    let skipped = CompactOutcome::Skipped(CompactSkipReason::ResumeProtection);
-
-    let outcome_committed = maybe_run_pre_compact_reflection(
-        &committed,
-        &snapshot,
-        &adapter,
-        &memory_config,
-        &binding,
-        "system",
-        "en",
-        &memory,
-        &history,
-        CancellationToken::new(),
-    )
-    .await;
-    let ReflectionRunOutcome::Completed(completion) =
-        outcome_committed.expect("Committed must run reflection")
-    else {
-        panic!("an enabled configuration must not skip the run");
-    };
-    assert_eq!(
-        completion.trigger,
-        ReflectionTaskTrigger::PreCompact,
-        "Committed must run the PreCompact trigger"
-    );
-
-    let outcome_skipped = maybe_run_pre_compact_reflection(
-        &skipped,
-        &snapshot,
-        &adapter,
-        &memory_config,
-        &binding,
-        "system",
-        "en",
-        &memory,
-        &history,
-        CancellationToken::new(),
-    )
-    .await;
-    assert!(
-        outcome_skipped.is_none(),
-        "Skipped must report that no PreCompact run happened"
-    );
+    })
 }
 
-/// Unit-level assertion: `run_pre_compact_reflection` (the production helper)
-/// returns a `PreCompact` completion for the production adapter.
+/// 旧 `maybe_run_pre_compact_reflection_only_runs_on_committed` 的等价新路径：
+/// 材料暂存语义取代「观察者内直接执行」——Committed 暂存被丢弃消息进共享槽，
+/// Skipped 不暂存也不改动已暂存材料；执行点已上移 engine reflection phase。
 #[tokio::test]
-async fn run_pre_compact_reflection_reports_a_precompact_completion() {
-    let adapter = production_adapter();
-    let binding = pre_compact_test_binding();
-    let memory_config = share::config::MemoryConfig::default();
-    let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::api::NoOpMemory);
-    let history = crate::application::reflection::test_support::noop_reflection_history();
+async fn pre_compact_observer_stages_material_only_on_committed() {
+    let snapshot = vec![
+        Message::user("kept-by-compact"),
+        Message::user("discarded-by-compact"),
+    ];
+    let skipped = CompactOutcome::Skipped(CompactSkipReason::ResumeProtection);
+
+    let slot = PreCompactMaterialSlot::default();
+    let mut observer = ChatCompactionObserver {
+        pre_compact_material: slot.clone(),
+    };
+
+    observer
+        .on_compacted(&skipped, &snapshot)
+        .await
+        .expect("Skipped 不得报错");
+    assert!(
+        slot.staged().is_none(),
+        "Skipped 不得暂存材料（对齐 only_runs_on_committed 语义）"
+    );
+
+    observer
+        .on_compacted(&committed_outcome(), &snapshot)
+        .await
+        .expect("Committed 不得报错");
+    assert_eq!(
+        slot.staged().as_ref().map(|messages| texts(messages)),
+        Some(texts(&snapshot)),
+        "Committed 必须把被丢弃消息快照暂存进共享槽"
+    );
+
+    observer
+        .on_compacted(&skipped, &snapshot)
+        .await
+        .expect("Skipped 不得报错");
+    assert_eq!(
+        slot.staged().as_ref().map(|messages| texts(messages)),
+        Some(texts(&snapshot)),
+        "Skipped 不得改动已暂存材料"
+    );
+
+    // 反思端口取出语义（反思开启时）：取走材料并清空槽位，供 engine phase 执行。
+    let taken = slot.take_for_reflection(&share::config::MemoryConfig::default());
+    assert_eq!(
+        taken.as_ref().map(|messages| texts(messages)),
+        Some(texts(&snapshot)),
+        "开启时必须取走暂存材料"
+    );
+    assert!(slot.staged().is_none(), "取出后槽位必须清空");
+}
+
+/// 旧 `run_pre_compact_reflection_reports_a_precompact_completion` 的等价新路径：
+/// 经生产反思端口取出材料并执行，得到 PreCompact 的 Succeeded completion。
+#[tokio::test]
+async fn pre_compact_execution_reports_a_precompact_completion() {
+    let harness = CompactHarness::new(Ok(committed_outcome()));
     let snapshot = vec![
         Message::user("alpha"),
         Message::user("beta"),
         Message::user("gamma"),
     ];
+    harness.material_slot.stage(snapshot.clone());
 
-    let outcome = run_pre_compact_reflection(
-        &adapter,
-        &memory_config,
-        &snapshot,
-        &binding,
-        "system prompt text",
-        "en",
-        &memory,
-        &history,
-        CancellationToken::new(),
-    )
-    .await;
+    let mut reflection = build_reflection_port(&harness);
+    let messages = reflection
+        .take_pre_compact_messages()
+        .expect("反思开启时必须取走暂存材料");
+    assert_eq!(
+        texts(&messages),
+        texts(&snapshot),
+        "取出的必须是暂存的被丢弃消息"
+    );
+    assert!(
+        harness.material_slot.staged().is_none(),
+        "取出后槽位必须清空"
+    );
 
+    let outcome = reflection
+        .run_reflection(
+            ReflectionTaskTrigger::PreCompact,
+            messages,
+            &RunId::new("run"),
+            None,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("反思端口执行不得返回 Err");
     let ReflectionRunOutcome::Completed(completion) = outcome else {
         panic!("an enabled configuration must not skip the run");
     };
@@ -487,25 +573,30 @@ async fn run_pre_compact_reflection_reports_a_precompact_completion() {
     assert_eq!(completion.status, ReflectionTaskCompletionStatus::Succeeded);
 }
 
+/// 旧 `run_pre_compact_reflection_reports_history_failure` 的等价新路径：
+/// 历史 append 失败时 PreCompact completion 落 Failed 且不发布记忆更新。
 #[tokio::test]
-async fn run_pre_compact_reflection_reports_history_failure() {
-    let adapter = production_adapter();
-    let binding = pre_compact_test_binding();
-    let memory_config = share::config::MemoryConfig::default();
-    let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::api::NoOpMemory);
+async fn pre_compact_execution_reports_history_failure() {
+    let harness =
+        CompactHarness::with_history(Ok(committed_outcome()), failing_append_reflection_history());
+    harness
+        .material_slot
+        .stage(vec![Message::user("must not invoke provider")]);
 
-    let outcome = run_pre_compact_reflection(
-        &adapter,
-        &memory_config,
-        &[Message::user("must not invoke provider")],
-        &binding,
-        "system prompt text",
-        "en",
-        &memory,
-        &failing_append_reflection_history(),
-        CancellationToken::new(),
-    )
-    .await;
+    let mut reflection = build_reflection_port(&harness);
+    let messages = reflection
+        .take_pre_compact_messages()
+        .expect("反思开启时必须取走暂存材料");
+    let outcome = reflection
+        .run_reflection(
+            ReflectionTaskTrigger::PreCompact,
+            messages,
+            &RunId::new("run"),
+            None,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("反思端口执行不得返回 Err");
 
     let ReflectionRunOutcome::Completed(completion) = outcome else {
         panic!("an enabled configuration must not skip the run");
@@ -520,17 +611,16 @@ async fn run_pre_compact_reflection_reports_history_failure() {
         Some(memory::api::reflection::ReflectionErrorCategory::History)
     );
     assert_eq!(
-        adapter.take_memory_update_notice(),
+        harness.adapter.take_memory_update_notice(),
         None,
         "a history failure must not announce a memory update"
     );
 }
 
-/// Integration: the production compaction service and chat observer submit a PreCompact job exactly once
-/// on `CompactOutcome::Committed`, using the early window the compact will
-/// discard (not the empty recent tail).
+/// Integration: 生产压缩服务在 `CompactOutcome::Committed` 后把压缩将丢弃的
+/// 早期窗口暂存进共享槽（尚未执行反思）；取出执行后恰好落一条 PreCompact 记录。
 #[tokio::test]
-async fn pre_compact_trigger_submits_after_compact_outcome_committed() {
+async fn pre_compact_trigger_stages_material_after_compact_outcome_committed() {
     let pre_compact_messages: Vec<Message> = (0..10)
         .map(|idx| Message::user(format!("u-{idx}")))
         .collect();
@@ -538,12 +628,7 @@ async fn pre_compact_trigger_submits_after_compact_outcome_committed() {
     let window = window_with(pre_compact_messages);
     let request = frozen_request();
 
-    let harness = CompactHarness::new(Ok(CompactOutcome::Committed(CompactResult {
-        summary: "summary".to_string(),
-        recent_messages: vec![],
-        source_revision: SessionRevision::new(7),
-        quality: context::CompactSummaryQuality::LocalOnly,
-    })));
+    let harness = CompactHarness::new(Ok(committed_outcome()));
 
     let mut execution = crate::application::run::execution_state::RunExecutionState::new();
     execution.initialize_for_launch(port_messages, 1);
@@ -558,20 +643,64 @@ async fn pre_compact_trigger_submits_after_compact_outcome_committed() {
         "compact should succeed on Committed: {result:?}"
     );
 
-    // The observer runs reflection synchronously inside `compact`, so by the
-    // time it returns the PreCompact run already wrote its durable records.
+    // Committed：观察者只暂存材料，不在此执行反思（执行点在 engine）。
+    let staged = harness
+        .material_slot
+        .staged()
+        .expect("Committed 必须把被丢弃消息暂存进共享槽");
+    assert!(!staged.is_empty(), "被丢弃的早期窗口非空");
+    assert_eq!(
+        staged.first().map(|message| message.text_content()),
+        Some("u-0".to_string()),
+        "必须暂存压缩前窗口的早期消息"
+    );
+    assert!(
+        !staged.iter().any(|message| message.text_content() == "u-9"),
+        "不得暂存压缩保留的 recent tail"
+    );
+    assert!(
+        harness.persisted_triggers().is_empty(),
+        "暂存阶段不得执行反思"
+    );
+    assert_eq!(harness.stub.compact_calls().len(), 1);
+
+    // 执行点在 engine：反思端口取出材料并以 PreCompact 执行。
+    let mut reflection = build_reflection_port(&harness);
+    let messages = reflection
+        .take_pre_compact_messages()
+        .expect("反思开启时必须取走暂存材料");
+    assert_eq!(
+        texts(&messages),
+        texts(&staged),
+        "取出的必须是暂存的被丢弃消息"
+    );
+    reflection
+        .run_reflection(
+            ReflectionTaskTrigger::PreCompact,
+            messages,
+            &RunId::new("run"),
+            None,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("反思端口执行不得返回 Err");
+
     let triggers = harness.persisted_triggers();
     assert!(
         triggers.contains(&memory::api::reflection::ReflectionTrigger::PreCompact),
-        "Committed must run exactly one PreCompact reflection: {triggers:?}"
+        "Committed 最终必须执行 PreCompact reflection: {triggers:?}"
     );
-    assert_eq!(harness.stub.compact_calls().len(), 1);
+    // 材料一次取出后槽位即空，杜绝同一份材料被重复执行。
+    assert!(
+        harness.material_slot.staged().is_none(),
+        "材料被取出执行后槽位必须清空"
+    );
 }
 
-/// Integration: the production compaction service treats a Context-owned skip as a
-/// non-fatal no-op and does not submit a PreCompact reflection.
+/// Integration: `CompactOutcome::Skipped` 是非致命 no-op——不暂存材料，
+/// engine 反思 phase 取不到材料，不会执行 PreCompact 反思。
 #[tokio::test]
-async fn pre_compact_trigger_skips_on_compact_outcome_skipped() {
+async fn pre_compact_trigger_stages_nothing_on_compact_outcome_skipped() {
     let window = window_with(vec![Message::user("only")]);
     let request = frozen_request();
 
@@ -592,8 +721,15 @@ async fn pre_compact_trigger_skips_on_compact_outcome_skipped() {
         "automatic compact skip must continue the current Run: {result:?}"
     );
 
-    // Reflection runs inside the synchronous compact call, so the absence of a
-    // persisted record is a deterministic observation, not a race.
+    assert!(
+        harness.material_slot.staged().is_none(),
+        "Skipped 不得暂存材料"
+    );
+    let reflection = build_reflection_port(&harness);
+    assert!(
+        reflection.take_pre_compact_messages().is_none(),
+        "无材料时 engine 不得进入反思 phase"
+    );
     let triggers = harness.persisted_triggers();
     assert!(
         triggers.is_empty(),
@@ -602,9 +738,8 @@ async fn pre_compact_trigger_skips_on_compact_outcome_skipped() {
     assert_eq!(harness.stub.compact_calls().len(), 1);
 }
 
-/// Integration: the production compaction service does NOT submit when the context port
-/// returns an error from `compact`. The pre-compact snapshot must never be
-/// observed by the reflection job because compact did not commit.
+/// Integration: context port 的 `compact` 报错时观察者不被调用——不暂存材料，
+/// PreCompact 反思绝不执行（压缩没有提交，早期窗口不得被反思观察）。
 #[tokio::test]
 async fn pre_compact_trigger_skips_when_context_compact_call_errors() {
     let window = window_with(vec![Message::user("only")]);
@@ -627,12 +762,202 @@ async fn pre_compact_trigger_skips_when_context_compact_call_errors() {
         "compact must propagate context port errors"
     );
 
-    // Reflection only runs after a committed compact, so the failed port call
-    // must leave the pre-compact snapshot unobserved.
+    assert!(
+        harness.material_slot.staged().is_none(),
+        "compact 失败时不得暂存材料"
+    );
+    let reflection = build_reflection_port(&harness);
+    assert!(
+        reflection.take_pre_compact_messages().is_none(),
+        "无材料时 engine 不得进入反思 phase"
+    );
     let triggers = harness.persisted_triggers();
     assert!(
         triggers.is_empty(),
         "context port errors must NOT run a PreCompact reflection: {triggers:?}"
     );
     assert_eq!(harness.stub.compact_calls().len(), 1);
+}
+
+/// 反思配置关闭时的取出语义：丢弃暂存材料并返回 None——材料不滞留到下一次
+/// compact，engine 也不空走一次 Reflecting 往返。
+#[tokio::test]
+async fn pre_compact_take_drops_material_when_reflection_disabled() {
+    let mut config = Config::default();
+    config.memory.enabled = false;
+    let harness = CompactHarness::with_config(
+        Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection)),
+        ConfigSnapshot::new(config),
+    );
+    harness
+        .material_slot
+        .stage(vec![Message::user("discarded")]);
+
+    let reflection = build_reflection_port(&harness);
+    assert!(
+        reflection.take_pre_compact_messages().is_none(),
+        "反思禁用时不得返回材料给 engine phase"
+    );
+    assert!(
+        harness.material_slot.staged().is_none(),
+        "反思禁用时材料必须被丢弃，NEVER 滞留到下一次 compact"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 反思成功 terminal 复用 record_successful_usage 计入 /usage
+// ---------------------------------------------------------------------------
+
+/// Succeeded 终态（含 usage metadata）经共享 `record_successful_usage` 恰好记
+/// 1 条 UsageRecord：run/step/session/model identity 与 provider 报告的
+/// input/output tokens 原样进入记录（`StaticReflectionProvider` 报 1/1）。
+#[tokio::test]
+async fn succeeded_reflection_records_usage_via_shared_path() {
+    let harness = CompactHarness::new(Ok(committed_outcome()));
+    harness
+        .material_slot
+        .stage(vec![Message::user("reflect me")]);
+
+    let mut reflection = build_reflection_port(&harness);
+    let messages = reflection
+        .take_pre_compact_messages()
+        .expect("反思开启时必须取走暂存材料");
+    let run_id = RunId::new("usage-run");
+    let run_step_id = RunStepId::new("usage-step");
+    let outcome = reflection
+        .run_reflection(
+            ReflectionTaskTrigger::PreCompact,
+            messages,
+            &run_id,
+            Some(&run_step_id),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("反思端口执行不得返回 Err");
+
+    let ReflectionRunOutcome::Completed(completion) = outcome else {
+        panic!("an enabled configuration must not skip the run");
+    };
+    assert_eq!(completion.status, ReflectionTaskCompletionStatus::Succeeded);
+
+    let records = harness.usage_sink.records();
+    assert_eq!(
+        records.len(),
+        1,
+        "Succeeded 反思必须恰好记 1 条 UsageRecord: {records:?}"
+    );
+    let record = &records[0];
+    assert_eq!(record.run_id, run_id, "run identity 必须是当前反思 Run");
+    assert_eq!(record.run_step_id, run_step_id);
+    assert_eq!(
+        record.session_id,
+        sdk::SessionId::new(harness.runtime_context.skill_load_session_id())
+    );
+    assert_eq!(record.provider, "pre-compact-test");
+    assert_eq!(record.model, "pre-compact-test-model");
+    assert_eq!(
+        record.input_tokens, 1,
+        "provider 报告的 input tokens 必须原样入账"
+    );
+    assert_eq!(
+        record.output_tokens, 1,
+        "provider 报告的 output tokens 必须原样入账"
+    );
+    assert_ne!(
+        record.model_invocation_id,
+        sdk::ModelInvocationId::new(""),
+        "记账必须携带 model_invocation_id"
+    );
+}
+
+/// Failed 终态不记账（即使执行层报告过 usage 数字）。
+#[tokio::test]
+async fn failed_reflection_records_no_usage() {
+    let harness =
+        CompactHarness::with_history(Ok(committed_outcome()), failing_append_reflection_history());
+    harness
+        .material_slot
+        .stage(vec![Message::user("will fail on history")]);
+
+    let mut reflection = build_reflection_port(&harness);
+    let messages = reflection
+        .take_pre_compact_messages()
+        .expect("反思开启时必须取走暂存材料");
+    let outcome = reflection
+        .run_reflection(
+            ReflectionTaskTrigger::PreCompact,
+            messages,
+            &RunId::new("failed-run"),
+            Some(&RunStepId::new("failed-step")),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("反思端口执行不得返回 Err");
+
+    let ReflectionRunOutcome::Completed(completion) = outcome else {
+        panic!("an enabled configuration must not skip the run");
+    };
+    assert_eq!(completion.status, ReflectionTaskCompletionStatus::Failed);
+    assert!(
+        harness.usage_sink.records().is_empty(),
+        "Failed 反思不得计入 Usage: {:?}",
+        harness.usage_sink.records()
+    );
+}
+
+/// Cancelled 终态不记账。
+#[tokio::test]
+async fn cancelled_reflection_records_no_usage() {
+    let harness = CompactHarness::new(Ok(committed_outcome()));
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+
+    let mut reflection = build_reflection_port(&harness);
+    let outcome = reflection
+        .run_reflection(
+            ReflectionTaskTrigger::PreCompact,
+            vec![Message::user("cancelled before start")],
+            &RunId::new("cancelled-run"),
+            None,
+            cancel,
+        )
+        .await
+        .expect("取消不是错误");
+
+    let ReflectionRunOutcome::Completed(completion) = outcome else {
+        panic!("an enabled configuration must not skip the run");
+    };
+    assert_eq!(completion.status, ReflectionTaskCompletionStatus::Cancelled);
+    assert!(
+        harness.usage_sink.records().is_empty(),
+        "Cancelled 反思不得计入 Usage: {:?}",
+        harness.usage_sink.records()
+    );
+}
+
+/// DisabledSkipped 不记账（配置禁用时空跑一趟）。
+#[tokio::test]
+async fn disabled_reflection_records_no_usage() {
+    let mut config = Config::default();
+    config.memory.enabled = false;
+    let harness = CompactHarness::with_config(Ok(committed_outcome()), ConfigSnapshot::new(config));
+
+    let mut reflection = build_reflection_port(&harness);
+    let outcome = reflection
+        .run_reflection(
+            ReflectionTaskTrigger::PreCompact,
+            vec![Message::user("disabled")],
+            &RunId::new("disabled-run"),
+            None,
+            CancellationToken::new(),
+        )
+        .await
+        .expect("禁用不是错误");
+
+    assert_eq!(outcome, ReflectionRunOutcome::DisabledSkipped);
+    assert!(
+        harness.usage_sink.records().is_empty(),
+        "DisabledSkipped 不得计入 Usage: {:?}",
+        harness.usage_sink.records()
+    );
 }

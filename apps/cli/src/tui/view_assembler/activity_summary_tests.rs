@@ -1,7 +1,7 @@
 use crate::tui::adapter::tui_runtime_event::{
     TuiActivityAudience, TuiActivityDetail, TuiActivityKind, TuiActivityObservation,
-    TuiActivitySource, TuiActivityState, TuiActivityTiming, TuiHookPoint, TuiRunPhaseKind,
-    TuiRunPurpose, UiActivityId,
+    TuiActivitySource, TuiActivityState, TuiActivityTiming, TuiHookPoint, TuiReflectionTrigger,
+    TuiRunPhaseKind, TuiRunPurpose, UiActivityId,
 };
 use crate::tui::model::conversation::activity_observation::ActivityObservationModel;
 use crate::tui::model::conversation::interaction::{UiRunId, UiRunStepId};
@@ -27,6 +27,7 @@ fn activity(
                 TuiActivitySource::HookDispatch(UiActivityId::from(id))
             }
             TuiActivityKind::Compaction => TuiActivitySource::Compaction(UiActivityId::from(id)),
+            TuiActivityKind::Reflection => TuiActivitySource::Reflection(UiActivityId::from(id)),
             _ => TuiActivitySource::Interaction(id.to_string()),
         },
         kind,
@@ -232,4 +233,67 @@ fn failed_hook_remains_visible_but_fast_success_does_not_pollute_status() {
         summary.primary.as_ref().unwrap().phase_text,
         "Calling tools…"
     );
+}
+
+#[test]
+fn reflection_purpose_root_is_live_main_root() {
+    // Manual Reflection Run 的 root activity purpose=Reflection，仍要参与主 spinner。
+    let mut root = activity(
+        "root",
+        3,
+        TuiActivityKind::Run,
+        TuiActivityState::Running,
+        TuiActivityDetail::Run {
+            purpose: TuiRunPurpose::Reflection,
+        },
+        TuiActivityAudience::User,
+    );
+    root.run_step_id = None;
+    root.timing.total_elapsed_ms = 9_000;
+    let mut model = ActivityObservationModel::default();
+    model.replace_for_test(UiRunId::from("run"), 3, vec![root]);
+
+    let summary = ActivitySummaryAssembler::assemble(&model).expect("reflection root spinner");
+
+    assert_eq!(summary.root_activity_id, "root");
+    assert_eq!(summary.total_elapsed_ms, 9_000);
+}
+
+#[test]
+fn reflection_leaf_shows_reflecting_label() {
+    // Reflection leaf 作为可见叶子时，phase 文案为 "Reflecting…"。
+    let reflection = activity(
+        "reflection",
+        3,
+        TuiActivityKind::Reflection,
+        TuiActivityState::Running,
+        TuiActivityDetail::Reflection {
+            trigger: TuiReflectionTrigger::Manual,
+        },
+        TuiActivityAudience::User,
+    );
+    let summary =
+        ActivitySummaryAssembler::assemble(&model_with_leaf(reflection)).expect("summary");
+
+    assert_eq!(summary.primary.as_ref().unwrap().phase_text, "Reflecting…");
+}
+
+#[test]
+fn derived_purpose_root_stays_hidden_from_spinner() {
+    // 回归：Derived purpose 的 root 不进入主 spinner。
+    let mut root = activity(
+        "root",
+        3,
+        TuiActivityKind::Run,
+        TuiActivityState::Running,
+        TuiActivityDetail::Run {
+            purpose: TuiRunPurpose::Derived,
+        },
+        TuiActivityAudience::User,
+    );
+    root.run_step_id = None;
+    let mut model = ActivityObservationModel::default();
+    model.replace_for_test(UiRunId::from("run"), 3, vec![root]);
+
+    assert!(ActivitySummaryAssembler::assemble(&model).is_none());
 }

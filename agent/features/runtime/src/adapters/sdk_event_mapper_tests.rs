@@ -1,7 +1,27 @@
-use super::sdk_event_mapper::{map_activity_event, map_stream_event};
+use super::sdk_event_mapper::{map_activity_event, map_lifecycle_event, map_stream_event};
 use crate::application::loop_engine::chat::{
     RuntimeActivityEvent, RuntimeResumedSessionStep, RuntimeRunContext, RuntimeStreamEvent,
 };
+use crate::domain::agent_run::{RunStatus, RunTransitionReason, RuntimeLifecycleEvent};
+#[test]
+fn reflecting_status_maps_to_sdk_run_status_view() {
+    let event = RuntimeLifecycleEvent::Transitioned {
+        run_id: sdk::RunId::new_v7(),
+        parent_run_id: None,
+        from: RunStatus::ApplyingResponse,
+        to: RunStatus::Reflecting,
+        reason: RunTransitionReason::BeginReflection,
+        timing: crate::domain::agent_run::RunTimingSnapshot::default(),
+    };
+
+    match map_lifecycle_event(event) {
+        sdk::ChatEvent::RunTransitioned { status, .. } => {
+            assert_eq!(status, sdk::RunStatusView::Reflecting);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
 #[test]
 fn adopted_input_mapping_preserves_input_ids_and_order_for_sdk() {
     let first_id = sdk::InputId::new("input-a");

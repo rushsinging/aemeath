@@ -52,6 +52,8 @@ pub(crate) enum IdleResult {
     CommandRequested(PendingCommand),
     /// idle `/compact`：启动一次只执行压缩、不调用模型的 Run。
     ManualCompactionRequested,
+    /// idle `/reflect-now`：启动一次只执行反思、不调用模型的 Run。
+    ManualReflectionRequested,
 }
 
 async fn await_idle_input<I: InputEventDrainPort>(
@@ -112,6 +114,9 @@ where
             IdleResult::CommandRequested(command) => return IdleResult::CommandRequested(command),
             IdleResult::ManualCompactionRequested => {
                 return IdleResult::ManualCompactionRequested;
+            }
+            IdleResult::ManualReflectionRequested => {
+                return IdleResult::ManualReflectionRequested;
             }
         }
     }

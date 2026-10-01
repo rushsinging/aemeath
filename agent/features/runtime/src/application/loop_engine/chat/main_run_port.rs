@@ -6,10 +6,6 @@ use share::message::Message;
 use tokio_util::sync::CancellationToken;
 
 use crate::application::loop_engine::chat::post_batch::run_post_tool_batch;
-use crate::application::loop_engine::chat::reflection::{
-    announce_memory_update, maybe_run_pre_compact_reflection, run_interval_reflection,
-    should_run_turn_reflection,
-};
 use crate::application::loop_engine::chat::stream_handler::InvocationEventReducer;
 use crate::application::loop_engine::chat::{ChatEventSink, RuntimeRunContext, RuntimeStreamEvent};
 use crate::application::loop_engine::event_strategy::{ChatStreamEventObserver, RunEventObserver};
@@ -240,11 +236,12 @@ impl crate::application::loop_engine::step_persistence::AcceptedInputObserver
     }
 }
 
+/// 自动压缩观察者：不在回调内执行反思（回调拿不到 `&mut Run`，无法驱动状态机），
+/// 仅在 `Committed` 时把将被丢弃的消息暂存进与反思端口共享的材料槽，由 engine 的
+/// reflection phase 在 Compacting 内取出执行；`Skipped` 不动槽位。
 pub(crate) struct ChatCompactionObserver {
-    pub runtime_context: RuntimeContext,
-    pub reflection_tasks: crate::application::reflection::ReflectionTaskAdapter,
-    pub system_prompt: String,
-    pub language: String,
+    pub pre_compact_material:
+        crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot,
 }
 
 #[async_trait]
@@ -254,26 +251,8 @@ impl crate::application::loop_engine::compaction::CompactionObserver for ChatCom
         outcome: &crate::ports::CompactOutcome,
         discarded_messages: &[Message],
     ) -> Result<(), LoopEngineError> {
-        let reflection_outcome = maybe_run_pre_compact_reflection(
-            outcome,
-            discarded_messages,
-            &self.reflection_tasks,
-            self.runtime_context.config_ref().config().memory(),
-            self.runtime_context.provider_ref(),
-            &self.system_prompt,
-            &self.language,
-            self.runtime_context.memory_ref(),
-            self.runtime_context.reflection_history_ref(),
-            tokio_util::sync::CancellationToken::new(),
-        )
-        .await;
-        if let Some(reflection_outcome) = reflection_outcome {
-            announce_memory_update(
-                &self.runtime_context.event_sink(),
-                &reflection_outcome,
-                &self.language,
-            )
-            .await;
+        if matches!(outcome, crate::ports::CompactOutcome::Committed(_)) {
+            self.pre_compact_material.stage(discarded_messages.to_vec());
         }
         Ok(())
     }
@@ -339,6 +318,94 @@ impl crate::application::loop_engine::ManualCompactionPort for ChatManualCompact
                 "Session compact 失败：{error}"
             ))),
         }
+    }
+}
+
+/// idle `/reflect-now` 的手动反思端口：由会话驱动装配，承载装配前冻结的 committed
+/// 会话消息快照，执行一次反思并按 `manual_reflection_outcome_text` 发布终态文案。
+/// 状态机与 `Reflection` activity 由 engine 的 `execute_manual_reflection` 持有。
+pub(crate) struct ChatManualReflection {
+    pub runtime_context: RuntimeContext,
+    pub reflection_tasks: crate::application::reflection::ReflectionTaskAdapter,
+    pub system_prompt: String,
+    pub language: String,
+    pub messages: Vec<Message>,
+}
+
+#[async_trait]
+impl crate::application::loop_engine::ManualReflectionPort for ChatManualReflection {
+    async fn run_manual_reflection(
+        &mut self,
+        run_id: &sdk::RunId,
+        cancel: &CancellationToken,
+    ) -> Result<crate::application::loop_engine::ManualReflectionOutcome, LoopEngineError> {
+        let outcome = crate::application::loop_engine::chat::reflection::run(
+            &self.reflection_tasks,
+            crate::application::reflection::ReflectionTaskTrigger::Manual,
+            self.runtime_context.config_ref().config().memory(),
+            std::mem::take(&mut self.messages),
+            self.runtime_context.provider_ref(),
+            &self.system_prompt,
+            &self.language,
+            self.runtime_context.memory_ref(),
+            self.runtime_context.reflection_history_ref(),
+            cancel.clone(),
+        )
+        .await;
+        // 成功手动反思复用 `RuntimeReflection` 同一记账路径
+        // （共享 `record_successful_usage`）；Manual Run 无 RunStep，
+        // `run_step_id=None` → 仅记账 UUIDv7。Failed/Cancelled/TimedOut/
+        // DisabledSkipped 不在此分支，不记账。
+        if let crate::application::reflection::ReflectionRunOutcome::Completed(completion) =
+            &outcome
+        {
+            if completion.status
+                == crate::application::reflection::ReflectionTaskCompletionStatus::Succeeded
+            {
+                if let Some(metadata) = &completion.metadata {
+                    crate::application::loop_engine::run_services::RuntimeReflection::record_succeeded_usage(
+                        &self.runtime_context,
+                        run_id,
+                        None,
+                        metadata,
+                    );
+                }
+            }
+        }
+        let (text, is_error) =
+            crate::application::loop_engine::chat::reflection::manual_reflection_outcome_text(
+                &outcome,
+            );
+        self.runtime_context
+            .event_sink()
+            .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
+            .await;
+        Ok(match outcome {
+            crate::application::reflection::ReflectionRunOutcome::Completed(completion) => {
+                match completion.status {
+                    crate::application::reflection::ReflectionTaskCompletionStatus::Cancelled => {
+                        crate::application::loop_engine::ManualReflectionOutcome::Cancelled
+                    }
+                    crate::application::reflection::ReflectionTaskCompletionStatus::TimedOut => {
+                        crate::application::loop_engine::ManualReflectionOutcome::TimedOut
+                    }
+                    status => {
+                        crate::application::loop_engine::ManualReflectionOutcome::Ready(status)
+                    }
+                }
+            }
+            crate::application::reflection::ReflectionRunOutcome::DisabledSkipped => {
+                // 受理门禁已在 idle 时判定过；这里只可能是配置在受理后被关闭的竞态
+                // （文案已按「未启用」发布，Run 照常收口，activity 记 Failed）。
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "[manual_reflection] 反思配置在受理后被关闭，按失败收口 run_id={run_id}"
+                );
+                crate::application::loop_engine::ManualReflectionOutcome::Ready(
+                    crate::application::reflection::ReflectionTaskCompletionStatus::Failed,
+                )
+            }
+        })
     }
 }
 
@@ -460,10 +527,7 @@ where
 {
     pub runtime_context: RuntimeContext,
     pub input: BufferedInputAdapter<I>,
-    pub system_prompt: String,
     pub context_size: usize,
-    pub reflection_tasks: crate::application::reflection::ReflectionTaskAdapter,
-    pub language: String,
     pub turn_context: RuntimeRunContext,
     pub tool_identity: crate::application::tool::coordination::identity::ToolIdentityRegistry,
     /// #1494：边流边执行句柄（流中 ToolCallCompleted → 立即执行，结果缓冲）。
@@ -640,11 +704,11 @@ where
 
     async fn classify_terminal(
         &mut self,
-        execution: &mut RunExecutionState,
+        _execution: &mut RunExecutionState,
         response: &crate::application::loop_engine::chat::InvocationResponse,
         calls: Vec<ToolCall>,
         usage: crate::application::loop_engine::StepTokenUsage,
-        cancel: &CancellationToken,
+        _cancel: &CancellationToken,
     ) -> Result<(ModelStep, crate::application::loop_engine::StepTokenUsage), LoopEngineError> {
         if !calls.is_empty() {
             return Ok((
@@ -655,30 +719,8 @@ where
                 usage,
             ));
         }
-        let memory_config = self.runtime_context.config_ref().config().memory();
-        if should_run_turn_reflection(
-            memory_config,
-            execution.step_count(),
-            false,
-            &response.stop_reason,
-            false,
-        ) {
-            let outcome = run_interval_reflection(
-                &self.reflection_tasks,
-                memory_config,
-                execution.step_count(),
-                execution.messages(),
-                self.runtime_context.provider_ref(),
-                &self.system_prompt,
-                &self.language,
-                self.runtime_context.memory_ref(),
-                self.runtime_context.reflection_history_ref(),
-                cancel.clone(),
-            )
-            .await;
-            announce_memory_update(&self.runtime_context.event_sink(), &outcome, &self.language)
-                .await;
-        }
+        // Interval 反思的判定与执行在 engine reflection phase
+        // （状态机只在 engine 可达），本函数只做纯终态分类。
         Ok((
             ModelStep::Complete {
                 text: response.assistant_message.text_content(),

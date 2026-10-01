@@ -43,7 +43,8 @@ mod run_status_view_tests {
 
     #[test]
     fn run_status_view_serializes_all_variants() {
-        let statuses = [
+        // 长度标注与枚举变体数对齐，新增变体时编译器强制同步本表
+        let statuses: [(RunStatusView, &str); 18] = [
             (RunStatusView::Created, "created"),
             (RunStatusView::DrainingInput, "draining_input"),
             (RunStatusView::PreparingContext, "preparing_context"),
@@ -56,6 +57,7 @@ mod run_status_view_tests {
             (RunStatusView::ExecutingTools, "executing_tools"),
             (RunStatusView::AwaitingUser, "awaiting_user"),
             (RunStatusView::Compacting, "compacting"),
+            (RunStatusView::Reflecting, "reflecting"),
             (RunStatusView::CancellingStep, "cancelling_step"),
             (RunStatusView::FinalizingStep, "finalizing_step"),
             (RunStatusView::Cancelling, "cancelling"),
@@ -387,6 +389,7 @@ pub enum RunStatusView {
     ExecutingTools,
     AwaitingUser,
     Compacting,
+    Reflecting,
     CancellingStep,
     FinalizingStep,
     Cancelling,

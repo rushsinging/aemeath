@@ -58,7 +58,9 @@ impl ActivityCoordinator {
             parent_activity_id: None,
             source: ActivitySource::Run,
             kind: ActivityKind::Run,
-            detail: ActivityDetail::Run,
+            detail: ActivityDetail::Run {
+                purpose: self.run_purpose(),
+            },
             audience: ActivityAudienceView::User,
         })?;
         Ok(())
@@ -143,6 +145,7 @@ fn to_phase(status: RunStatus) -> Option<RunPhaseKind> {
         | RunStatus::InvokingModel
         | RunStatus::AwaitingUser
         | RunStatus::Compacting
+        | RunStatus::Reflecting
         | RunStatus::Completed
         | RunStatus::Failed
         | RunStatus::Terminated => None,
@@ -163,6 +166,7 @@ fn terminal_for_status(status: RunStatus) -> Option<ActivityTerminal> {
         | RunStatus::ExecutingTools
         | RunStatus::AwaitingUser
         | RunStatus::Compacting
+        | RunStatus::Reflecting
         | RunStatus::CancellingStep
         | RunStatus::FinalizingStep
         | RunStatus::Terminating => None,

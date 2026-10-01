@@ -229,6 +229,22 @@ impl RecordingEventSink {
             })
             .collect()
     }
+
+    /// 每条 `CommandResultText` 的 `(text, is_error)` 载荷（不触发 SystemMessage
+    /// 之外的 panic 映射）。
+    pub(crate) fn command_result_texts(&self) -> Vec<(String, bool)> {
+        self.events
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .iter()
+            .filter_map(|event| match event {
+                RuntimeStreamEvent::CommandResultText { text, is_error } => {
+                    Some((text.clone(), *is_error))
+                }
+                _ => None,
+            })
+            .collect()
+    }
 }
 
 impl ChatEventSink for RecordingEventSink {

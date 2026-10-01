@@ -13,6 +13,7 @@ fn engine_sources() -> String {
         include_str!("engine.rs"),
         include_str!("engine/contracts.rs"),
         include_str!("engine/phases.rs"),
+        include_str!("engine/reflection.rs"),
         include_str!("engine/step_driver.rs"),
         include_str!("engine/interaction_driver.rs"),
         include_str!("engine/control_driver.rs"),
@@ -563,6 +564,10 @@ struct ScriptedState {
     fail_emit_once: bool,
     drain_outcomes: VecDeque<DrainOutcome>,
     drain_epoch: DrainEpoch,
+    /// 与反思端口共享的 PreCompact 材料槽；`None` 时脚本化 compact 不做暂存。
+    pre_compact_slot: Option<crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot>,
+    /// 压缩成功（Committed 等价）时暂存进共享槽的被丢弃消息；`None` 模拟 Skipped。
+    pre_compact_material: Option<Vec<share::message::Message>>,
     observations: ScriptedObservations,}
 
 impl Default for ScriptedState {
@@ -589,6 +594,8 @@ impl Default for ScriptedState {
             fail_emit_once: false,
             drain_outcomes: VecDeque::new(),
             drain_epoch: DrainEpoch(0),
+            pre_compact_slot: None,
+            pre_compact_material: None,
             observations: ScriptedObservations::default(),
         }
     }}
@@ -760,6 +767,11 @@ struct ScriptedScenario {
     published_interactions: Arc<std::sync::Mutex<Vec<InteractionRequest>>>,
     pending_work: Arc<std::sync::Mutex<Option<super::engine::PendingInteractionWork>>>,
     fake_tool_port: Option<Arc<FakeToolExecutionPort>>,
+    /// 与反思端口共享的 PreCompact 材料槽（生产中由 ChatCompactionObserver 持有）。
+    pre_compact_slot:
+        Option<crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot>,
+    /// 压缩成功（Committed 等价）时暂存的被丢弃消息；`None` 模拟 Skipped 不暂存。
+    pre_compact_material: Option<Vec<share::message::Message>>,
     state: Arc<std::sync::Mutex<ScriptedState>>,
     ports: Option<ScriptedPorts>,
 }
@@ -807,6 +819,8 @@ impl Default for ScriptedScenario {
             published_interactions: Arc::new(std::sync::Mutex::new(Vec::new())),
             pending_work: Arc::new(std::sync::Mutex::new(None)),
             fake_tool_port: None,
+            pre_compact_slot: None,
+            pre_compact_material: None,
             state: Arc::new(std::sync::Mutex::new(ScriptedState::default())),
             ports: None,
         }
@@ -836,6 +850,8 @@ impl ScriptedScenario {
                 fail_emit_once: self.fail_emit_once,
                 drain_outcomes: std::mem::take(&mut self.drain_outcomes),
                 drain_epoch: self.drain_epoch,
+                pre_compact_slot: self.pre_compact_slot.clone(),
+                pre_compact_material: self.pre_compact_material.clone(),
                 ..ScriptedState::default()
             };
             self.state = Arc::new(std::sync::Mutex::new(state));
@@ -1205,6 +1221,18 @@ impl CompactionPort for CompactionFake {
         if block_until_cancelled {
             cancel.cancelled().await;
             return Err(LoopEngineError::Cancelled);
+        }
+        // 生产中 Committed 材料由 ChatCompactionObserver 暂存进共享槽；脚本化
+        // compact 成功返回（Committed 等价）时模拟同一暂存动作，Skipped 由
+        // `pre_compact_material: None` 表达（不暂存）。
+        {
+            let state = self.state.lock().unwrap();
+            if let (Some(slot), Some(material)) = (
+                state.pre_compact_slot.as_ref(),
+                state.pre_compact_material.as_ref(),
+            ) {
+                slot.stage(material.clone());
+            }
         }
         Ok(())
     }

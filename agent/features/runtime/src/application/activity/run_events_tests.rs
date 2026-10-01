@@ -1,9 +1,10 @@
 use super::ActivityCoordinator;
-use crate::domain::agent_run::{Run, RunStatus, RunTransition};
-use sdk::{ActivityKindView, ActivityStateView, RunId, RunPhaseKindView};
+use crate::domain::agent_run::{Run, RunIntent, RunStatus, RunTransition, RuntimeLifecycleEvent};
+use sdk::{ActivityDetailView, ActivityKindView, ActivityStateView, RunId, RunPhaseKindView};
 use std::sync::{Arc, Mutex};
 
 use super::coordinator::{ActivityClock, ActivityIdSource};
+use super::model::RunPurpose;
 
 #[derive(Clone)]
 struct FixedActivityClock(Arc<Mutex<u64>>);
@@ -146,6 +147,7 @@ fn phase_transition_publishes_one_committed_snapshot_with_new_primary() {
         Arc::new(clock),
         Arc::new(FixedActivityIdSource::default()),
         Arc::new(publisher.clone()),
+        RunPurpose::Main,
     );
     observe_draining(&coordinator, &mut run);
     let before = publisher.snapshot_count();
@@ -300,4 +302,72 @@ impl ActivityStateTerminal for ActivityStateView {
             Self::Succeeded | Self::Failed | Self::Cancelled | Self::Terminated
         )
     }
+}
+
+/// 仅包含 Started 事件，用于观察 Run 根 Activity 的创建。
+fn started_events(run_id: RunId) -> Vec<RuntimeLifecycleEvent> {
+    vec![RuntimeLifecycleEvent::Started {
+        run_id,
+        parent_run_id: None,
+    }]
+}
+
+fn run_root_detail(coordinator: &ActivityCoordinator) -> sdk::ActivityDetailView {
+    coordinator
+        .snapshot()
+        .activities
+        .into_iter()
+        .find(|activity| activity.kind == ActivityKindView::Run)
+        .expect("run root activity")
+        .detail
+}
+
+#[test]
+fn manual_reflection_run_root_activity_carries_reflection_purpose() {
+    let run_id = RunId::new("run-manual-reflection");
+    let coordinator =
+        ActivityCoordinator::production_without_publisher(run_id.clone(), RunPurpose::Reflection);
+
+    coordinator
+        .observe_run_events(&started_events(run_id))
+        .expect("observe started events");
+
+    assert_eq!(
+        run_root_detail(&coordinator),
+        ActivityDetailView::Run {
+            purpose: sdk::RunPurposeView::Reflection,
+        }
+    );
+}
+
+#[test]
+fn conversation_run_root_activity_keeps_main_purpose() {
+    let run_id = RunId::new("run-conversation");
+    let coordinator =
+        ActivityCoordinator::production_without_publisher(run_id.clone(), RunPurpose::Main);
+
+    coordinator
+        .observe_run_events(&started_events(run_id))
+        .expect("observe started events");
+
+    assert_eq!(
+        run_root_detail(&coordinator),
+        ActivityDetailView::Run {
+            purpose: sdk::RunPurposeView::Main,
+        }
+    );
+}
+
+#[test]
+fn run_purpose_follows_run_intent() {
+    // 只有手动反思 Run 投影 Reflection 目的；会话与手动压缩保持 Main（压缩现状不变）。
+    assert_eq!(
+        RunPurpose::from(RunIntent::ManualReflection),
+        RunPurpose::Reflection
+    );
+    assert_eq!(RunPurpose::from(RunIntent::Conversation), RunPurpose::Main);
+    assert_eq!(
+        RunPurpose::from(RunIntent::ManualCompaction),
+        RunPurpose::Main
+    );
 }

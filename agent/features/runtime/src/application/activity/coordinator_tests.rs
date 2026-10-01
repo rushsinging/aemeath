@@ -2,7 +2,7 @@ use super::coordinator::{
     ActivityChangePublisher, ActivityClock, ActivityCoordinator, ActivityIdSource,
     ActivityTerminal, StartActivity, UpdateActivity,
 };
-use super::model::{ActivityDetail, ActivityKind, ActivitySource, RunPhaseKind};
+use super::model::{ActivityDetail, ActivityKind, ActivitySource, RunPhaseKind, RunPurpose};
 use sdk::{ActivityAudienceView, ActivityId, ActivitySnapshotView, RunId};
 use std::sync::{Arc, Mutex};
 
@@ -61,7 +61,9 @@ fn start_tool() -> StartActivity {
         parent_activity_id: None,
         source: ActivitySource::Run,
         kind: ActivityKind::Run,
-        detail: ActivityDetail::Run,
+        detail: ActivityDetail::Run {
+            purpose: RunPurpose::Main,
+        },
         audience: ActivityAudienceView::User,
     }
 }
@@ -330,6 +332,7 @@ fn heartbeat_snapshot_keeps_business_revision_and_refreshes_root_total() {
         Arc::new(clock.clone()),
         Arc::new(FixedActivityIdSource::default()),
         Arc::new(publisher),
+        RunPurpose::Main,
     );
     coordinator.start(start_tool()).expect("start activity");
     let business_revision = coordinator.snapshot().revision;
@@ -387,6 +390,7 @@ fn coordinator_publishes_snapshot_instead_of_changed_event_after_mutation() {
         Arc::new(clock),
         Arc::new(FixedActivityIdSource::default()),
         Arc::new(publisher.clone()),
+        RunPurpose::Main,
     );
 
     coordinator.start(start_tool()).expect("start activity");
@@ -423,6 +427,7 @@ fn coordinator_publishes_complete_change_after_each_successful_mutation() {
         Arc::new(clock.clone()),
         Arc::new(FixedActivityIdSource::default()),
         Arc::new(publisher.clone()),
+        RunPurpose::Main,
     );
 
     let activity_id = coordinator.start(start_tool()).expect("start activity");
@@ -472,6 +477,7 @@ fn coordinator_publishes_initial_and_recovery_snapshots() {
         Arc::new(clock),
         Arc::new(FixedActivityIdSource::default()),
         Arc::new(publisher.clone()),
+        RunPurpose::Main,
     );
 
     coordinator.publish_snapshot();
@@ -496,6 +502,7 @@ fn idempotent_transition_does_not_publish_a_duplicate_change() {
         Arc::new(clock),
         Arc::new(FixedActivityIdSource::default()),
         Arc::new(publisher.clone()),
+        RunPurpose::Main,
     );
 
     let activity_id = coordinator.start(start_tool()).expect("start activity");
@@ -539,4 +546,76 @@ fn phase_activity_keeps_explicit_kind_and_detail() {
         observation.kind,
         sdk::ActivityKindView::RunPhase(sdk::RunPhaseKindView::PreparingContext)
     );
+}
+
+#[test]
+fn start_manual_reflection_publishes_user_activity_under_run_root() {
+    let (coordinator, _) = coordinator();
+
+    let activity_id = coordinator
+        .start_manual_reflection(sdk::ReflectionTriggerView::Manual)
+        .expect("start manual reflection");
+
+    let root_id = coordinator.live_run_root_id().expect("run root");
+    let observation = coordinator
+        .snapshot()
+        .find(&activity_id)
+        .expect("reflection activity")
+        .clone();
+    assert_eq!(observation.kind, sdk::ActivityKindView::Reflection);
+    assert!(matches!(
+        observation.source,
+        sdk::ActivitySourceView::Reflection(_)
+    ));
+    assert_eq!(
+        observation.detail,
+        sdk::ActivityDetailView::Reflection {
+            trigger: sdk::ReflectionTriggerView::Manual,
+        }
+    );
+    assert_eq!(observation.audience, ActivityAudienceView::User);
+    assert_eq!(observation.parent_activity_id.as_ref(), Some(&root_id));
+    assert_eq!(observation.run_step_id, None);
+    assert_eq!(observation.state, sdk::ActivityStateView::Running);
+
+    coordinator
+        .finish(activity_id.clone(), ActivityTerminal::Succeeded)
+        .expect("finish reflection");
+    assert_eq!(
+        coordinator
+            .snapshot()
+            .find(&activity_id)
+            .expect("finished reflection")
+            .state,
+        sdk::ActivityStateView::Succeeded
+    );
+}
+
+#[test]
+fn start_reflection_attaches_to_given_parent() {
+    let (coordinator, _) = coordinator();
+    let parent_id = coordinator.start(start_tool()).expect("run root");
+
+    for trigger in [
+        sdk::ReflectionTriggerView::Interval,
+        sdk::ReflectionTriggerView::PreCompact,
+    ] {
+        let activity_id = coordinator
+            .start_reflection(parent_id.clone(), trigger)
+            .expect("start reflection");
+        let observation = coordinator
+            .snapshot()
+            .find(&activity_id)
+            .expect("reflection activity")
+            .clone();
+
+        assert_eq!(observation.parent_activity_id.as_ref(), Some(&parent_id));
+        assert_eq!(observation.kind, sdk::ActivityKindView::Reflection);
+        assert_eq!(
+            observation.detail,
+            sdk::ActivityDetailView::Reflection { trigger }
+        );
+        assert_eq!(observation.audience, ActivityAudienceView::User);
+        assert_eq!(observation.run_step_id, None);
+    }
 }

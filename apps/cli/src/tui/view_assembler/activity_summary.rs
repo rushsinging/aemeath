@@ -94,7 +94,8 @@ fn is_live_main_root(activity: &TuiActivityObservation) -> bool {
         && matches!(
             activity.detail,
             TuiActivityDetail::Run {
-                purpose: TuiRunPurpose::Main
+                // Manual Reflection Run 的 root purpose=Reflection，同样驱动主 spinner。
+                purpose: TuiRunPurpose::Main | TuiRunPurpose::Reflection
             }
         )
 }
@@ -147,6 +148,7 @@ fn phase_label(activity: &TuiActivityObservation) -> Option<String> {
             });
         }
         TuiActivityDetail::Compact { .. } => "Compacting…",
+        TuiActivityDetail::Reflection { .. } => "Reflecting…",
         TuiActivityDetail::Interaction { .. } => "Waiting for input…",
         TuiActivityDetail::SubRun { .. } => "Running agent…",
         TuiActivityDetail::Run { .. } => return None,

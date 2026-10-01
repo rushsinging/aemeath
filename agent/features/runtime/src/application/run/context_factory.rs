@@ -249,6 +249,8 @@ impl RuntimeContextFactory {
         let activity_publisher = Arc::new(event_route.sink.clone());
         let lifecycle = self.select_lifecycle(request, bindings, parent.as_deref())?;
         let skill_load = self.select_skill_load(&context, parent.as_deref(), &session);
+        // Run 根 Activity 目的由 spec intent 决定（Manual Reflection Run 投影 Reflection）。
+        let run_purpose = crate::application::activity::RunPurpose::from(request.spec().intent());
         let bindings = RunCapabilityBindings {
             model: crate::application::run::context::ModelBindings {
                 context: context.port,
@@ -275,6 +277,7 @@ impl RuntimeContextFactory {
                 .cloned()
                 .unwrap_or_else(crate::domain::agent_run::RunId::new_v7),
             activity_publisher,
+            run_purpose,
             bindings,
             hook,
             skill_load.state,
@@ -286,6 +289,7 @@ impl RuntimeContextFactory {
         &self,
         run_id: crate::domain::agent_run::RunId,
         activity_publisher: Arc<dyn crate::application::activity::ActivityChangePublisher>,
+        run_purpose: crate::application::activity::RunPurpose,
         bindings: RunCapabilityBindings,
         hook: HookSelection,
         skill_load_state: Arc<dyn tools::published::skill::SkillLoadStatePort>,
@@ -315,6 +319,7 @@ impl RuntimeContextFactory {
                 crate::application::activity::ActivityCoordinator::production(
                     run_id,
                     activity_publisher,
+                    run_purpose,
                 ),
             ),
             RuntimeContextAssemblyToken::new(),

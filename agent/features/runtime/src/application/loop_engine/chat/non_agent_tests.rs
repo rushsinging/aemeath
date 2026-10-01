@@ -261,6 +261,7 @@ async fn dispatch_task_facts(outcome: tools::ToolOutcome) -> Vec<&'static str> {
             hook_port,
             Arc::new(ActivityCoordinator::production_without_publisher(
                 sdk::RunId::new_v7(),
+                crate::application::activity::RunPurpose::Main,
             )),
             std::env::current_dir().unwrap(),
         ))]);
