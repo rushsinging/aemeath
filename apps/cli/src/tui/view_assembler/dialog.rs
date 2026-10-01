@@ -19,6 +19,3 @@ impl DialogViewAssembler {
         })
     }
 }
-
-#[cfg(test)]
-mod tests {}

@@ -159,19 +159,24 @@ def migrate(path: Path, dry_run: bool) -> str:
     target = path.with_name(path.stem + "_tests.rs")
     if target.exists():
         return "CONFLICT"
-    body = lines[attr_start + 1 : close] if False else extract_body(lines, attr_start, close)
+    body = extract_body(lines, attr_start, close)
     if body is None:
         return "SKIP-NESTED-ATTR"
     intro = "#[cfg(test)]\n#[path = \"{name}\"]\nmod tests;".format(name=target.name)
-    new_lines = lines[:attr_start] + intro.split("\n") + lines[close + 1 :]
+    if not body:
+        # 空测试块：直接删除，无外置与引入
+        new_lines = lines[:attr_start] + lines[close + 1 :]
+    else:
+        new_lines = lines[:attr_start] + intro.split("\n") + lines[close + 1 :]
     if not dry_run:
-        target.write_text("\n".join(body) + "\n")
+        if body:
+            target.write_text("\n".join(body) + "\n")
         path.write_text("\n".join(new_lines) + "\n")
     return "MIGRATED"
 
 
 def extract_body(lines: list[str], attr_start: int, close: int) -> list[str] | None:
-    """提取 mod tests { ... } 花括号内的行（含 mod 行到闭合行之间）。"""
+    """提取 mod tests { ... } 花括号内的行；空块返回空列表。"""
     mod_line = None
     for index in range(attr_start, close + 1):
         if "mod tests {" in lines[index]:
@@ -179,13 +184,17 @@ def extract_body(lines: list[str], attr_start: int, close: int) -> list[str] | N
             break
     if mod_line is None:
         return None
+    if mod_line == close:
+        # 单行块：`mod tests { ... }` 或空块 `mod tests {}`
+        inner = lines[mod_line].split("mod tests {", 1)[1].rsplit("}", 1)[0].strip()
+        return [inner] if inner else []
     tail = lines[mod_line].split("mod tests {", 1)[1].strip()
     body = []
     if tail:
         body.append(tail)
     body.extend(lines[mod_line + 1 : close])
     head = lines[close].rsplit("}", 1)[0].rstrip()
-    if head:
+    if head.strip():
         body.append(head)
     return body
 
