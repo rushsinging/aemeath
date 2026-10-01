@@ -2,6 +2,8 @@ use super::change::ConversationChange;
 use super::model::ConversationModel;
 use super::tool_call::ToolCallStatus;
 use crate::tui::model::conversation::intent::*;
+use crate::tui::model::conversation::interaction::UiQueuedInputId;
+use crate::tui::adapter::runtime_view::{TuiChatMessage, TuiContentBlock, TuiMessageSource};
 use crate::tui::model::output_timeline::OutputTimelineItem;
 
 fn tool_call<'a>(

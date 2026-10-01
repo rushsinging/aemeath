@@ -889,19 +889,39 @@ impl App {
     /// 据 typed Main Run snapshot、task lines、queued submissions 与纯动画态
     /// 派生实时状态行 ViewModel。
     pub(crate) fn live_status_view_model(&self) -> crate::tui::view_model::LiveStatusViewModel {
-        let queued_texts: Vec<String> = self
-            .model
-            .conversation
-            .queued_submissions
-            .iter()
-            .map(|q| q.text.clone())
-            .collect();
+        let queued_texts = self.queued_input_texts_by_arrival_order();
         crate::tui::view_assembler::live_status::LiveStatusAssembler::assemble(
             &self.model.conversation,
             &self.view_state.run_activity,
             &self.view_state.spinner,
             &queued_texts,
         )
+    }
+
+    /// 排队中的消息与控制命令，按入队序号合并成提交顺序（#1816）。
+    ///
+    /// 两类占位分列存储（消息进输出时间线、命令不进），但对用户是同一条队列；
+    /// 入队序号同源（UUIDv7），因此字符串序即提交序。
+    fn queued_input_texts_by_arrival_order(&self) -> Vec<String> {
+        let mut queued: Vec<(&str, &str)> = self
+            .model
+            .conversation
+            .queued_submissions
+            .iter()
+            .map(|submission| (submission.input_id.as_str(), submission.text.as_str()))
+            .chain(
+                self.model
+                    .conversation
+                    .queued_commands
+                    .iter()
+                    .map(|command| (command.input_id.as_str(), command.text.as_str())),
+            )
+            .collect();
+        queued.sort_unstable_by(|left, right| left.0.cmp(right.0));
+        queued
+            .into_iter()
+            .map(|(_, text)| text.to_string())
+            .collect()
     }
 
     /// 渲染前维护 live-status 相关 view_state：

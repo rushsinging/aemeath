@@ -242,6 +242,11 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 queued: queued.clone(),
             }),
         ),
+        TuiRuntimeEvent::ControlCommandsQueued { queued } => {
+            conversation(ConversationIntent::SyncQueuedCommands(SyncQueuedCommands {
+                queued: queued.clone(),
+            }))
+        }
         TuiRuntimeEvent::Done {
             context,
             duration_ms,
@@ -281,9 +286,14 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             ConversationIntent::ReplaceTaskState(ReplaceTaskState((**state).clone())),
         ),
         TuiRuntimeEvent::SessionReset => AgentEventMapping::default(),
-        TuiRuntimeEvent::UserMessagesWithdrawn { texts: _ } => conversation(
-            ConversationIntent::ClearAllQueuedSubmissions(ClearAllQueuedSubmissions),
-        ),
+        TuiRuntimeEvent::UserMessagesWithdrawn { texts: _ } => AgentEventMapping {
+            // 撤回覆盖所有待处理输入：消息与命令占位一并清掉（#1816）。
+            conversation: vec![
+                ConversationIntent::ClearAllQueuedSubmissions(ClearAllQueuedSubmissions),
+                ConversationIntent::ClearQueuedCommands(ClearQueuedCommands),
+            ],
+            ..AgentEventMapping::default()
+        },
         TuiRuntimeEvent::ModelInvocationRetrying {
             attempt, delay_ms, ..
         } => conversation(ConversationIntent::AppendSystemMessage(

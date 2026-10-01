@@ -47,7 +47,9 @@ fn root_and_phase(coordinator: &ActivityCoordinator, step_id: &RunStepId) -> sdk
             parent_activity_id: None,
             source: super::ActivitySource::Run,
             kind: super::ActivityKind::Run,
-            detail: super::ActivityDetail::Run,
+            detail: super::ActivityDetail::Run {
+                purpose: super::model::RunPurpose::Main,
+            },
             audience: sdk::ActivityAudienceView::User,
         })
         .expect("start root");

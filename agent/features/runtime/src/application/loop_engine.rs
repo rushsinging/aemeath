@@ -1,3 +1,4 @@
+pub(crate) mod batched_user_input;
 pub mod chat;
 pub(crate) mod compaction;
 pub(crate) mod context_request;
@@ -23,10 +24,11 @@ pub use engine::{
     execute_prepared_loop, AcceptedUserInput, ApprovalRequiredCall, CompactProgressView,
     CompactionPort, DrainEpoch, DrainOutcome, EventSinkPort, InputPort, InteractionMailboxPort,
     InteractionWorkOutcome, InternalContinuationKind, LoopDirective, LoopEngineError, LoopInput,
-    ManualCompactionOutcome, ManualCompactionPort, ModelInvocationPort, ModelStep,
-    PendingInteractionItem, PendingInteractionWork, PlanApprovalPort, RunControlPort,
-    RunLifecyclePort, StepCommit, StepPersistencePort, StepTokenUsage, StuckHandlingPort,
-    SuspendedQuestion, SuspendedToolCall, ToolGuardDecision, ToolOrchestrationPort, ToolStep,
+    ManualCompactionOutcome, ManualCompactionPort, ManualReflectionOutcome, ManualReflectionPort,
+    ModelInvocationPort, ModelStep, PendingInteractionItem, PendingInteractionWork,
+    PlanApprovalPort, ReflectionPhasePort, RunControlPort, RunLifecyclePort, StepCommit,
+    StepPersistencePort, StepTokenUsage, StuckHandlingPort, SuspendedQuestion, SuspendedToolCall,
+    ToolGuardDecision, ToolOrchestrationPort, ToolStep,
 };
 pub use run_loop::RunLoop;
 pub use stuck_guard::{StuckDecision, StuckGuard};

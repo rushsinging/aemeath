@@ -508,3 +508,24 @@ fn run_context_factory_does_not_construct_context_concrete_adapters() {
         "RuntimeContextFactory 不得触达 Context 内部层模块路径"
     );
 }
+
+#[test]
+fn run_root_activity_purpose_follows_spec_intent() {
+    // 装配点把 spec intent 映射为 Run 根 Activity 目的：
+    // ManualReflection Run 投影 Reflection，会话与手动压缩保持 Main。
+    let fixture = SessionRunFixture::default();
+
+    let reflection = fixture
+        .create(RunSpec::manual_reflection())
+        .expect("create manual reflection run");
+    assert_eq!(
+        reflection.context().activities().run_purpose(),
+        crate::application::activity::RunPurpose::Reflection
+    );
+
+    let main = fixture.create(main_spec()).expect("create main run");
+    assert_eq!(
+        main.context().activities().run_purpose(),
+        crate::application::activity::RunPurpose::Main
+    );
+}

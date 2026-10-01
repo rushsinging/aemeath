@@ -323,7 +323,7 @@ async fn invoke_model_impl(
             model_invocation_id: invocation_id.clone(),
             model: binding.model.clone(),
         },
-        &response,
+        response.usage.clone(),
         unix_timestamp_millis,
     );
     observer.runtime_context().usage().update_with_heuristic(
@@ -478,28 +478,26 @@ fn deterministic_jitter_millis(attempt: u32) -> u64 {
     }
 }
 
-fn record_successful_usage(
+/// 共享 Usage 记账路径：模型调用成功与反思成功 terminal 都经此函数落一条
+/// `UsageRecordData`；`usage` 未报告任何 token 时静默跳过。
+pub(crate) fn record_successful_usage(
     sink: &dyn crate::ports::UsageSink,
     context: crate::application::model::usage::UsageRecordContext,
-    response: &InvocationResponse,
+    usage: crate::ports::RawUsageSnapshotData,
     clock: impl Fn() -> u64,
 ) {
     let factory = crate::application::model::usage::UsageRecordFactory::new(clock);
-    if let Some(record) = factory.build_from_raw_usage(context, response.usage.clone()) {
+    if let Some(record) = factory.build_from_raw_usage(context, usage) {
         let _ = sink.try_record(record);
     }
 }
 
-fn unix_timestamp_millis() -> u64 {
+pub(crate) fn unix_timestamp_millis() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
         .unwrap_or_default()
 }
-
-#[cfg(test)]
-#[path = "invocation_usage_tests.rs"]
-mod usage_tests;
 
 #[cfg(test)]
 #[path = "invocation_tests.rs"]

@@ -88,6 +88,7 @@ Activity detail 中的 `CompactOperation` 使用 typed stage/work，不建立顶
 | `UserMessagesAdopted` | 同名 | adopt echo + queue sync | session/input ids | full batch fact | 否 | Current |
 | `UserMessagesQueued` | 同名 | replace queued submissions | session/input ids | full-state | 否 | Target Rename |
 | `UserMessagesWithdrawn` | 同名 | clear/restore input | session/input ids | fact | 否 | Current |
+| `ControlCommandsQueued` | 同名 | replace queued commands | session/input ids | full-state | 是（命令队列权威） | Current |
 | `SystemMessage` | 同名 | append system message | session/run | content fact | 否 | Target Clarify |
 | `HookNotice` | 同名 | append typed notice | run/hook | notice fact | 否 | Current |
 | `Done` | `Done` | `CompleteChat` | chat processing | terminal | processing only | Compatibility |

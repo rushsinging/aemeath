@@ -43,7 +43,8 @@ mod run_status_view_tests {
 
     #[test]
     fn run_status_view_serializes_all_variants() {
-        let statuses = [
+        // 长度标注与枚举变体数对齐，新增变体时编译器强制同步本表
+        let statuses: [(RunStatusView, &str); 18] = [
             (RunStatusView::Created, "created"),
             (RunStatusView::DrainingInput, "draining_input"),
             (RunStatusView::PreparingContext, "preparing_context"),
@@ -56,6 +57,7 @@ mod run_status_view_tests {
             (RunStatusView::ExecutingTools, "executing_tools"),
             (RunStatusView::AwaitingUser, "awaiting_user"),
             (RunStatusView::Compacting, "compacting"),
+            (RunStatusView::Reflecting, "reflecting"),
             (RunStatusView::CancellingStep, "cancelling_step"),
             (RunStatusView::FinalizingStep, "finalizing_step"),
             (RunStatusView::Cancelling, "cancelling"),
@@ -387,6 +389,7 @@ pub enum RunStatusView {
     ExecutingTools,
     AwaitingUser,
     Compacting,
+    Reflecting,
     CancellingStep,
     FinalizingStep,
     Cancelling,
@@ -778,9 +781,15 @@ pub enum ChatEvent {
         event: crate::ConfigReloadedEvent,
     },
     SessionReset,
-    /// 批量撤回 pending 输入（#391 S3）。texts 为被撤回文本，TUI join("\n") 还原输入框。
+    /// 批量撤回 pending 输入（#391 S3）。texts 为被撤回文本（用户消息原文 +
+    /// 排队控制命令的展示文本，#1816），TUI join("\n") 还原输入框。
     UserMessagesWithdrawn {
         texts: Vec<String>,
+    },
+    /// 控制类命令队列的全量快照（#1816）。queued 为 `(入队序号, 展示文本)`，
+    /// 入队序号是跨消息队列与命令队列还原提交顺序的依据。
+    ControlCommandsQueued {
+        queued: Vec<(crate::InputId, String)>,
     },
     /// 兼容旧 ChatInput 流结果。
     Result(ChatResult),

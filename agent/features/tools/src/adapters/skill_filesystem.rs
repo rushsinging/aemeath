@@ -42,7 +42,9 @@ impl FilesystemSkillAdapter {
         Self { global }
     }
 
-    /// 加载一个显式路径的 Skill，用于 typed I/O 契约测试。
+    /// 加载一个显式路径的 Skill（typed I/O 契约测试专用组合面；
+    /// 生产路径经 `load`/`catalog`，故仅测试构建可达）。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn load_one(path: &Path, kind: SkillSourceKind) -> Result<LoadedSkill, SkillError> {
         let raw = parse_skill_file(path, kind)?;
         Ok(raw.into_loaded())

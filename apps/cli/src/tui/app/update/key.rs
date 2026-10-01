@@ -239,7 +239,8 @@ impl App {
                 if completion_visible {
                     self.handle_input_intent(InputIntent::SelectCompletionPrevious);
                 } else if self.chat.is_processing
-                    && !self.model.conversation.queued_submissions.is_empty()
+                    && !(self.model.conversation.queued_submissions.is_empty()
+                        && self.model.conversation.queued_commands.is_empty())
                 {
                     // #391 S3：busy + 有 pending → 发 WithdrawAll（runtime gate 批量撤回 +
                     // 回传 texts → handler 清占位 + join("\n") 还原输入框）。
@@ -248,18 +249,19 @@ impl App {
                     // 本地立即清空 queued 显示 + 还原输入框，避免等待 runtime
                     // round-trip 期间 UI 卡顿。runtime 回传 UserMessagesWithdrawn
                     // 时 sync_queued_from_runtime 做权威校正（若状态漂移则修正）。
-                    let texts: Vec<String> = self
-                        .model
-                        .conversation
-                        .queued_submissions
-                        .iter()
-                        .map(|q| q.text.clone())
-                        .collect();
+                    //
+                    // #1816：撤回覆盖排队的控制命令，按入队序号合并成提交顺序还原。
+                    let texts = self.queued_input_texts_by_arrival_order();
                     let restored_input = texts.join("\n");
-                    // 乐观清空 queued 占位
+                    // 乐观清空 queued 占位（消息与命令各自清空）
                     self.apply_agent_intent(AgentIntent::Conversation(
                         crate::tui::model::conversation::intent::ConversationIntent::ClearAllQueuedSubmissions(
                             crate::tui::model::conversation::intent::ClearAllQueuedSubmissions,
+                        ),
+                    ));
+                    self.apply_agent_intent(AgentIntent::Conversation(
+                        crate::tui::model::conversation::intent::ConversationIntent::ClearQueuedCommands(
+                            crate::tui::model::conversation::intent::ClearQueuedCommands,
                         ),
                     ));
                     // 还原输入框（合并所有 queued 文本到 input buffer）

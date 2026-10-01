@@ -109,6 +109,10 @@ pub enum ConversationChange {
     QueuedSubmissionsSynced {
         count: usize,
     },
+    /// 命令队列快照已同步（#1816）；count 为当前排队命令数。
+    QueuedCommandsSynced {
+        count: usize,
+    },
     CompactRuntimeCleared,
     TaskLinesChanged,
     StatusNoticeChanged,

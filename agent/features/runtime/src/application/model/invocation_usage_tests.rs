@@ -1,10 +1,8 @@
-use super::record_successful_usage;
-use crate::application::loop_engine::chat::InvocationResponse;
+use super::invocation::record_successful_usage;
 use crate::application::model::usage::UsageRecordContext;
 use crate::ports::{ModelIdData, RawUsageSnapshotData, UsageSink};
 use audit::{UsageDropReasonData, UsageEmitOutcomeData, UsageRecordData};
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
-use share::message::Message;
 use std::sync::Mutex;
 
 struct RecordingSink {
@@ -41,14 +39,6 @@ fn context() -> UsageRecordContext {
     }
 }
 
-fn response(usage: RawUsageSnapshotData) -> InvocationResponse {
-    InvocationResponse {
-        assistant_message: Message::user("done"),
-        usage,
-        stop_reason: provider::ProviderStopReasonData::EndTurn,
-    }
-}
-
 #[test]
 fn successful_reported_usage_records_all_fields_once_and_ignores_queue_full() {
     let sink = RecordingSink::new(UsageEmitOutcomeData::Dropped(
@@ -59,13 +49,13 @@ fn successful_reported_usage_records_all_fields_once_and_ignores_queue_full() {
     record_successful_usage(
         &sink,
         expected_context.clone(),
-        &response(RawUsageSnapshotData {
+        RawUsageSnapshotData {
             input_tokens: Some(10),
             output_tokens: Some(2),
             cache_write_tokens: Some(3),
             cache_read_tokens: Some(4),
             reasoning_tokens: Some(5),
-        }),
+        },
         || 99,
     );
 
@@ -94,12 +84,7 @@ fn successful_unreported_usage_does_not_call_sink() {
         UsageDropReasonData::WorkerUnavailable,
     ));
 
-    record_successful_usage(
-        &sink,
-        context(),
-        &response(RawUsageSnapshotData::default()),
-        || 99,
-    );
+    record_successful_usage(&sink, context(), RawUsageSnapshotData::default(), || 99);
 
     assert!(sink.records.lock().expect("record lock").is_empty());
 }

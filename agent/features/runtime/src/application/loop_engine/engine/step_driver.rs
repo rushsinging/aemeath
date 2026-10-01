@@ -109,6 +109,10 @@ pub(super) async fn execute_step_with_scope(
                 return Ok(());
             }
         }
+        // PreCompact 反思：材料已在压缩时暂存，压缩 activity 收口后、
+        // CompactionCompleted 放行前，于 Compacting 内完成 Reflecting 往返。
+        run_pre_compact_reflection_phase_if_staged(run, execution, port, &step_id, &step_cancel)
+            .await?;
         transition_and_emit(run, execution, port, RunTransition::CompactionCompleted).await?;
     }
 
@@ -198,6 +202,16 @@ pub(super) async fn execute_step_with_scope(
                         return Ok(());
                     }
                 }
+                // PreCompact 反思：同 needs_compaction 路径，在 Compacting 内
+                // 完成 Reflecting 往返后再放行压缩收口。
+                run_pre_compact_reflection_phase_if_staged(
+                    run,
+                    execution,
+                    port,
+                    &step_id,
+                    &step_cancel,
+                )
+                .await?;
                 transition_and_emit(run, execution, port, RunTransition::CompactionCompleted)
                     .await?;
                 transition_and_emit(run, execution, port, RunTransition::ContextPrepared).await?;
@@ -273,6 +287,36 @@ pub(super) async fn execute_step_with_scope(
     // #1272: track the last assistant text for terminal claim
     let assistant_text = model_step_text(&model_step);
     *terminal_text = Some(assistant_text);
+
+    // 反思 phase：Interval 触发判定与执行（执行点在 engine——状态机与 activity 的
+    // 唯一真相在 engine；端口只回答「有没有要做的事」）。
+    //
+    // Run 级去重：主会话 Run 内 `execution.step_count` 不递增，同一 Run 的多个
+    // `ModelStep::Complete`（含内部 continuation）会拿同一 step_count 重复判定。
+    // 因此判定前先查 Run 的一次性闸门，命中且即将开始 phase 时才消耗——未命中
+    // 不消耗（配置竞态下后续判定仍可触发）；一旦开始 phase，端口错误/任务失败/
+    // 取消也都算该 Run 已执行过，不再自动重试重复反思。
+    if matches!(model_step, ModelStep::Complete { .. }) && !execution.interval_reflection_started()
+    {
+        let interval_messages = port.reflection_mut().and_then(|reflection| {
+            reflection.interval_reflection_messages(execution.step_count(), execution.messages())
+        });
+        if let Some(messages) = interval_messages {
+            execution.mark_interval_reflection_started();
+            run_reflection_phase(
+                run,
+                execution,
+                port,
+                crate::application::reflection::ReflectionTaskTrigger::Interval {
+                    step_count: execution.step_count(),
+                },
+                messages,
+                Some(&step_id),
+                &step_cancel,
+            )
+            .await?;
+        }
+    }
 
     match model_step {
         ModelStep::Complete { text } => {

@@ -1,7 +1,27 @@
-use super::sdk_event_mapper::{map_activity_event, map_stream_event};
+use super::sdk_event_mapper::{map_activity_event, map_lifecycle_event, map_stream_event};
 use crate::application::loop_engine::chat::{
     RuntimeActivityEvent, RuntimeResumedSessionStep, RuntimeRunContext, RuntimeStreamEvent,
 };
+use crate::domain::agent_run::{RunStatus, RunTransitionReason, RuntimeLifecycleEvent};
+#[test]
+fn reflecting_status_maps_to_sdk_run_status_view() {
+    let event = RuntimeLifecycleEvent::Transitioned {
+        run_id: sdk::RunId::new_v7(),
+        parent_run_id: None,
+        from: RunStatus::ApplyingResponse,
+        to: RunStatus::Reflecting,
+        reason: RunTransitionReason::BeginReflection,
+        timing: crate::domain::agent_run::RunTimingSnapshot::default(),
+    };
+
+    match map_lifecycle_event(event) {
+        sdk::ChatEvent::RunTransitioned { status, .. } => {
+            assert_eq!(status, sdk::RunStatusView::Reflecting);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
 #[test]
 fn adopted_input_mapping_preserves_input_ids_and_order_for_sdk() {
     let first_id = sdk::InputId::new("input-a");
@@ -641,6 +661,30 @@ fn thinking_changed_mapping_preserves_reasoning_level_for_sdk() {
         sdk::ChatEvent::ThinkingChanged { enabled, level } => {
             assert!(!enabled);
             assert_eq!(level, share::reasoning::ReasoningLevel::Off);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}
+
+/// #1816：命令队列快照映射必须保序保文本，UI 才能整列重渲染。
+#[test]
+fn control_command_queue_mapping_preserves_order_and_text_for_sdk() {
+    let first_id = sdk::InputId::new("command-a");
+    let second_id = sdk::InputId::new("command-b");
+    let event = RuntimeStreamEvent::ControlCommandsQueued {
+        queued: vec![
+            (first_id.clone(), "/compact".to_string()),
+            (second_id.clone(), "/model anthropic/claude".to_string()),
+        ],
+    };
+
+    match map_stream_event(event) {
+        sdk::ChatEvent::ControlCommandsQueued { queued } => {
+            assert_eq!(queued.len(), 2);
+            assert_eq!(queued[0].0, first_id);
+            assert_eq!(queued[0].1, "/compact");
+            assert_eq!(queued[1].0, second_id);
+            assert_eq!(queued[1].1, "/model anthropic/claude");
         }
         other => panic!("unexpected event: {other:?}"),
     }

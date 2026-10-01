@@ -24,6 +24,7 @@ mod model_extra_tests;
 mod model_tests;
 pub mod notice;
 pub(crate) mod output_view_change;
+pub mod queued_command;
 pub mod queued_submission;
 #[cfg(test)]
 #[path = "conversation/resume_performance_tests.rs"]

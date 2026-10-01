@@ -3,10 +3,11 @@ use crate::tui::adapter::tui_runtime_event::{
     TuiActivityAudience, TuiActivityChangeKind, TuiActivityDetail, TuiActivityKind,
     TuiActivityObservation, TuiActivitySnapshot, TuiActivitySource, TuiActivityState,
     TuiActivityTiming, TuiCompactStage, TuiCompactWork, TuiHookPoint, TuiInteractionKind,
-    TuiModelStreamState, TuiRunContext, TuiRunPhaseKind, TuiRunPurpose, TuiRuntimeEvent,
-    UiActivityId,
+    TuiModelStreamState, TuiReflectionTrigger, TuiRunContext, TuiRunPhaseKind, TuiRunPurpose,
+    TuiRuntimeEvent, UiActivityId,
 };
 use crate::tui::model::conversation::interaction::UiRunId;
+use crate::tui::model::output_timeline::OutputTimelineItem;
 
 use super::super::testing::TuiScenarioHarness;
 
@@ -92,6 +93,40 @@ fn root_activity(revision: u64, state: TuiActivityState) -> TuiActivityObservati
         state,
         detail: TuiActivityDetail::Run {
             purpose: TuiRunPurpose::Main,
+        },
+        audience: TuiActivityAudience::User,
+        total_elapsed_ms: revision * 1_000,
+        state_elapsed_ms: revision * 1_000,
+    })
+}
+
+fn reflection_root(revision: u64, state: TuiActivityState) -> TuiActivityObservation {
+    activity(ActivityFixture {
+        id: "reflection-root",
+        revision,
+        parent_activity_id: None,
+        source: TuiActivitySource::Run,
+        kind: TuiActivityKind::Run,
+        state,
+        detail: TuiActivityDetail::Run {
+            purpose: TuiRunPurpose::Reflection,
+        },
+        audience: TuiActivityAudience::User,
+        total_elapsed_ms: revision * 1_000,
+        state_elapsed_ms: revision * 1_000,
+    })
+}
+
+fn reflection_leaf(revision: u64, state: TuiActivityState) -> TuiActivityObservation {
+    activity(ActivityFixture {
+        id: "reflection-leaf",
+        revision,
+        parent_activity_id: Some("reflection-root"),
+        source: TuiActivitySource::Reflection(UiActivityId::from("reflection-source")),
+        kind: TuiActivityKind::Reflection,
+        state,
+        detail: TuiActivityDetail::Reflection {
+            trigger: TuiReflectionTrigger::Manual,
         },
         audience: TuiActivityAudience::User,
         total_elapsed_ms: revision * 1_000,
@@ -746,5 +781,197 @@ fn chat_retry_after_partial_preserves_output_append_only() {
         "chat_retry_after_partial__100x30",
         normalize_completed_terminal_verb(&screen)
     );
+    harness.assert_idle();
+}
+
+/// Manual Reflection run 生命周期（L4 全链路：runtime 事件 → model → render）：
+/// purpose=Reflection 的 root 与 Running Manual leaf 共同驱动唯一 "Reflecting…" spinner；
+/// leaf 终态先收口 phase 文案（root 仍 Running → 外层 spinner 保留），
+/// root 终态才让 spinner 整体消失、TUI 回到 idle。
+#[test]
+fn live_reflection_activity_shows_spinner_until_run_terminal() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.runtime_event(TuiRuntimeEvent::ActivityChanged {
+        kind: TuiActivityChangeKind::Started,
+        activity: reflection_root(1, TuiActivityState::Running),
+    });
+    harness.runtime_event(TuiRuntimeEvent::ActivityChanged {
+        kind: TuiActivityChangeKind::Updated,
+        activity: reflection_leaf(2, TuiActivityState::Running),
+    });
+    let running_screen = activity_screen(&mut harness);
+    assert_single_activity_summary(&running_screen, "Reflecting…");
+    assert!(
+        harness.app.view_state.run_activity.is_active(),
+        "运行态反思必须激活外层 spinner，实际屏幕：\n{running_screen}"
+    );
+
+    harness.runtime_event(TuiRuntimeEvent::ActivityChanged {
+        kind: TuiActivityChangeKind::Updated,
+        activity: reflection_leaf(3, TuiActivityState::Succeeded),
+    });
+    let leaf_terminal_screen = activity_screen(&mut harness);
+    assert!(
+        !leaf_terminal_screen.contains("Reflecting…"),
+        "leaf 终态后 phase 文案必须收口，实际屏幕：\n{leaf_terminal_screen}"
+    );
+    assert!(
+        harness.app.view_state.run_activity.is_active(),
+        "root 仍 Running 时外层 spinner 不得消失"
+    );
+
+    harness.runtime_event(TuiRuntimeEvent::ActivityChanged {
+        kind: TuiActivityChangeKind::Updated,
+        activity: reflection_root(4, TuiActivityState::Succeeded),
+    });
+    let terminal_screen = activity_screen(&mut harness);
+    assert!(
+        !terminal_screen.contains("Reflecting…"),
+        "root 终态后 spinner 文案必须消失，实际屏幕：\n{terminal_screen}"
+    );
+    assert!(
+        !harness.app.view_state.run_activity.is_active(),
+        "root 终态后外层 spinner 必须失活"
+    );
+    harness.assert_idle();
+}
+
+/// 终态 notice 在 screen buffer 中：每个宽字符占两格（后一格为空白），
+/// 因此 CJK 文案渲染为「字符+空格」交替，断言前按显示宽度补齐。
+fn rendered_wide_text(text: &str) -> String {
+    use unicode_width::UnicodeWidthChar;
+    let mut rendered = String::with_capacity(text.len());
+    for ch in text.chars() {
+        rendered.push(ch);
+        if ch.width().unwrap_or(0) >= 2 {
+            rendered.push(' ');
+        }
+    }
+    rendered.trim_end().to_string()
+}
+
+/// 三态终态 notice 全链路：`TuiRuntimeEvent::CommandResultText { text, is_error }`
+/// 经 reducer 落入 timeline——成功/取消为 System 块（非 error 样式），
+/// 失败为 Error 块（error 样式），且三段文案都渲染到屏幕各一次。
+#[test]
+fn reflection_result_notices_render_success_error_and_cancel_styles() {
+    let success_text = "Reflection 已完成：没有记忆变更。";
+    let failure_text = "Reflection 执行失败；详情见日志。";
+    let cancelled_text = "Reflection 已取消。";
+
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.runtime_event(TuiRuntimeEvent::CommandResultText {
+        text: success_text.to_string(),
+        is_error: false,
+    });
+    harness.runtime_event(TuiRuntimeEvent::CommandResultText {
+        text: failure_text.to_string(),
+        is_error: true,
+    });
+    harness.runtime_event(TuiRuntimeEvent::CommandResultText {
+        text: cancelled_text.to_string(),
+        is_error: false,
+    });
+    let screen = activity_screen(&mut harness);
+
+    let mut system_texts = Vec::new();
+    let mut error_texts = Vec::new();
+    for item in harness.app.model.conversation.timeline.items() {
+        match item {
+            OutputTimelineItem::System { text, .. } if text.starts_with("Reflection") => {
+                system_texts.push(text.as_str())
+            }
+            OutputTimelineItem::Error { text, .. } => error_texts.push(text.as_str()),
+            _ => {}
+        }
+    }
+    assert_eq!(
+        system_texts,
+        vec![success_text, cancelled_text],
+        "成功/取消 notice 必须走非 error 样式（System 块），实际 timeline：{system_texts:?}"
+    );
+    assert_eq!(
+        error_texts,
+        vec![failure_text],
+        "失败 notice 必须走 error 样式（Error 块），实际 timeline：{error_texts:?}"
+    );
+
+    for text in [success_text, failure_text, cancelled_text] {
+        let rendered = rendered_wide_text(text);
+        assert!(
+            screen.contains(&rendered),
+            "终态 notice 文案 {text} 应渲染到屏幕（{rendered}），实际屏幕：\n{screen}"
+        );
+        assert_eq!(
+            screen.matches(&rendered).count(),
+            1,
+            "终态 notice 文案 {text} 必须唯一，实际屏幕：\n{screen}"
+        );
+    }
+    harness.assert_idle();
+}
+
+/// 队列语义：活跃 run 期间注入 purpose=Reflection root + Manual reflection leaf——
+/// 普通会话队列（queued_submissions 占位/预览）不得被反思活动污染；
+/// Done 事件是 processing 的权威收口（终态后必须回到 false，下一条输入不进队列），
+/// 活动终态独立收口 spinner。
+#[test]
+fn reflection_run_keeps_conversation_queue_clean_until_terminal() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    // 场景惯例：活跃 run 的 processing=true 由提交路径驱动（此处直接驱动同一状态）。
+    harness.app.chat.start_processing();
+    assert!(harness.app.chat.is_processing);
+
+    harness.runtime_event(TuiRuntimeEvent::ActivityChanged {
+        kind: TuiActivityChangeKind::Started,
+        activity: reflection_root(1, TuiActivityState::Running),
+    });
+    harness.runtime_event(TuiRuntimeEvent::ActivityChanged {
+        kind: TuiActivityChangeKind::Updated,
+        activity: reflection_leaf(2, TuiActivityState::Running),
+    });
+    let running_screen = activity_screen(&mut harness);
+    assert_single_activity_summary(&running_screen, "Reflecting…");
+    assert!(
+        harness.app.chat.is_processing,
+        "run 期间 processing 必须保持 true"
+    );
+    assert!(
+        harness.app.model.conversation.queued_submissions.is_empty(),
+        "purpose=Reflection root 不得向普通会话队列写入占位，实际：{:?}",
+        harness.app.model.conversation.queued_submissions
+    );
+
+    // Done 收口 processing；外层 spinner 由 root 活动独立驱动，此时尚未终态。
+    harness.runtime_event(TuiRuntimeEvent::Done {
+        context: ctx(),
+        duration_ms: Some(2_000),
+    });
+    assert!(
+        !harness.app.chat.is_processing,
+        "Done 终态后 processing 必须回到 false（下一条输入不进队列）"
+    );
+    assert!(
+        harness.app.view_state.run_activity.is_active(),
+        "活动未终态时 Done 不得提前收口 spinner"
+    );
+
+    harness.runtime_event(TuiRuntimeEvent::ActivityChanged {
+        kind: TuiActivityChangeKind::Updated,
+        activity: reflection_leaf(3, TuiActivityState::Succeeded),
+    });
+    harness.runtime_event(TuiRuntimeEvent::ActivityChanged {
+        kind: TuiActivityChangeKind::Updated,
+        activity: reflection_root(4, TuiActivityState::Succeeded),
+    });
+    let terminal_screen = activity_screen(&mut harness);
+    assert!(!terminal_screen.contains("Reflecting…"));
+    assert!(!harness.app.view_state.run_activity.is_active());
+    assert!(
+        harness.app.model.conversation.queued_submissions.is_empty(),
+        "反思终态后普通会话队列仍须为空，实际：{:?}",
+        harness.app.model.conversation.queued_submissions
+    );
+    assert!(!harness.app.chat.is_processing);
     harness.assert_idle();
 }

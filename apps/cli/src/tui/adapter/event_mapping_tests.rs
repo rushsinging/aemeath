@@ -2,7 +2,8 @@ use super::{sdk_event_to_tui_event, SdkEventMapping};
 use crate::tui::adapter::tui_runtime_event::{
     TuiActivityAudience, TuiActivityChangeKind, TuiActivityDetail, TuiActivityKind,
     TuiActivitySource, TuiActivityState, TuiCompactStage, TuiCompactWork, TuiHookPoint,
-    TuiInteractionKind, TuiModelStreamState, TuiRunPhaseKind, TuiRunPurpose, TuiRuntimeEvent,
+    TuiInteractionKind, TuiModelStreamState, TuiReflectionTrigger, TuiRunPhaseKind, TuiRunPurpose,
+    TuiRuntimeEvent,
 };
 
 #[test]
@@ -530,6 +531,54 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
 }
 
 #[test]
+fn activity_reflection_variants_map_to_tui_enums() {
+    // sdk Reflection activity → TUI 镜像枚举：kind / detail(trigger) / purpose / source。
+    assert_eq!(
+        super::activity_kind(sdk::ActivityKindView::Reflection),
+        TuiActivityKind::Reflection
+    );
+
+    let triggers = [
+        (
+            sdk::ReflectionTriggerView::Interval,
+            TuiReflectionTrigger::Interval,
+        ),
+        (
+            sdk::ReflectionTriggerView::PreCompact,
+            TuiReflectionTrigger::PreCompact,
+        ),
+        (
+            sdk::ReflectionTriggerView::Manual,
+            TuiReflectionTrigger::Manual,
+        ),
+    ];
+    for (sdk_trigger, expected) in triggers {
+        assert_eq!(
+            super::activity_detail(sdk::ActivityDetailView::Reflection {
+                trigger: sdk_trigger
+            }),
+            TuiActivityDetail::Reflection { trigger: expected }
+        );
+    }
+
+    assert_eq!(
+        super::activity_detail(sdk::ActivityDetailView::Run {
+            purpose: sdk::RunPurposeView::Reflection,
+        }),
+        TuiActivityDetail::Run {
+            purpose: TuiRunPurpose::Reflection,
+        }
+    );
+
+    let reflection_id = sdk::ActivityId::new("reflection-source");
+    let expected_reflection_id = reflection_id.as_str().to_string();
+    assert!(matches!(
+        super::activity_source(sdk::ActivitySourceView::Reflection(reflection_id)),
+        TuiActivitySource::Reflection(id) if id.as_str() == expected_reflection_id
+    ));
+}
+
+#[test]
 fn activity_closed_enum_helpers_map_every_variant() {
     let phases = [
         (
@@ -1004,4 +1053,27 @@ fn model_and_session_list_map_every_field_to_tui_owned_dto() {
     assert_eq!(sessions[0].summary, "first session");
     assert_eq!(sessions[0].message_count, 7);
     assert_eq!(sessions[0].title.as_deref(), Some("custom title"));
+}
+
+/// #1816：命令队列快照跨 SDK 边界映射后保序保文本，UI 才能整列渲染。
+#[test]
+fn control_commands_queued_mapping_preserves_order_and_text() {
+    let first_id = sdk::InputId::new("01920000-0000-7000-8000-000000000001");
+    let second_id = sdk::InputId::new("01920000-0000-7000-8000-000000000002");
+    let mapping = sdk_event_to_tui_event(sdk::ChatEvent::ControlCommandsQueued {
+        queued: vec![
+            (first_id.clone(), "/compact".to_owned()),
+            (second_id.clone(), "/model anthropic/claude".to_owned()),
+        ],
+    });
+
+    let SdkEventMapping::Runtime(TuiRuntimeEvent::ControlCommandsQueued { queued }) = mapping
+    else {
+        panic!("ControlCommandsQueued must map to one runtime event");
+    };
+    assert_eq!(queued.len(), 2);
+    assert_eq!(queued[0].0.as_str(), first_id.as_str());
+    assert_eq!(queued[0].1, "/compact");
+    assert_eq!(queued[1].0.as_str(), second_id.as_str());
+    assert_eq!(queued[1].1, "/model anthropic/claude");
 }

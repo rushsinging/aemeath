@@ -2,7 +2,9 @@
 //!
 //! 本模块只包含客户端无关的完整事实值，不包含 TUI 文案、颜色、布局或原始 payload。
 
-use crate::{InteractionRequestId, ModelInvocationId, RunId, RunStepId, ToolCallId};
+use crate::{
+    InteractionRequestId, ModelInvocationId, ReflectionTriggerView, RunId, RunStepId, ToolCallId,
+};
 use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
@@ -122,6 +124,7 @@ pub enum ActivitySourceView {
     ToolCall(ToolCallId),
     HookDispatch(ActivityId),
     Compaction(ActivityId),
+    Reflection(ActivityId),
     Interaction(InteractionRequestId),
     SubRun(RunId),
 }
@@ -148,6 +151,7 @@ pub enum ActivityKindView {
     ToolCall,
     HookDispatch,
     Compaction,
+    Reflection,
     Interaction,
     SubRun,
 }
@@ -176,6 +180,7 @@ pub enum ActivityAudienceView {
 pub enum RunPurposeView {
     Main,
     Derived,
+    Reflection,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -272,6 +277,9 @@ pub enum ActivityDetailView {
     Compact {
         stage: CompactStageView,
         work: CompactWorkView,
+    },
+    Reflection {
+        trigger: ReflectionTriggerView,
     },
     Interaction {
         kind: InteractionKindView,

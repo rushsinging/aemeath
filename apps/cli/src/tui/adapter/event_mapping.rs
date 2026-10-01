@@ -5,7 +5,9 @@ use super::runtime_view::{
     TuiTaskPriority, TuiTaskState, TuiToolResultImage,
 };
 use super::tui_runtime_event::*;
-use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
+use crate::tui::model::conversation::interaction::{
+    UiInteractionRequestId, UiQueuedInputId, UiRunId, UiRunStepId,
+};
 
 #[allow(clippy::large_enum_variant)] // Single facts stay allocation-free; only legacy batch expansion allocates.
 pub(crate) enum SdkEventMapping {
@@ -262,6 +264,12 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         },
         ChatEvent::UserMessagesQueued { queued } => TuiRuntimeEvent::UserMessagesQueued {
             queued: queued.into_iter().map(chat_message).collect(),
+        },
+        ChatEvent::ControlCommandsQueued { queued } => TuiRuntimeEvent::ControlCommandsQueued {
+            queued: queued
+                .into_iter()
+                .map(|(input_id, text)| (UiQueuedInputId::from(input_id.as_str()), text))
+                .collect(),
         },
         ChatEvent::Done { context } => TuiRuntimeEvent::Done {
             context: turn_context(context),
@@ -695,6 +703,9 @@ fn activity_source(value: sdk::ActivitySourceView) -> TuiActivitySource {
         sdk::ActivitySourceView::Compaction(id) => {
             TuiActivitySource::Compaction(UiActivityId::from(id.as_str()))
         }
+        sdk::ActivitySourceView::Reflection(id) => {
+            TuiActivitySource::Reflection(UiActivityId::from(id.as_str()))
+        }
         sdk::ActivitySourceView::Interaction(id) => {
             TuiActivitySource::Interaction(id.as_str().to_string())
         }
@@ -712,6 +723,7 @@ fn activity_kind(value: sdk::ActivityKindView) -> TuiActivityKind {
         sdk::ActivityKindView::ToolCall => TuiActivityKind::ToolCall,
         sdk::ActivityKindView::HookDispatch => TuiActivityKind::HookDispatch,
         sdk::ActivityKindView::Compaction => TuiActivityKind::Compaction,
+        sdk::ActivityKindView::Reflection => TuiActivityKind::Reflection,
         sdk::ActivityKindView::Interaction => TuiActivityKind::Interaction,
         sdk::ActivityKindView::SubRun => TuiActivityKind::SubRun,
     }
@@ -755,6 +767,7 @@ fn activity_detail(value: sdk::ActivityDetailView) -> TuiActivityDetail {
             purpose: match purpose {
                 sdk::RunPurposeView::Main => TuiRunPurpose::Main,
                 sdk::RunPurposeView::Derived => TuiRunPurpose::Derived,
+                sdk::RunPurposeView::Reflection => TuiRunPurpose::Reflection,
             },
         },
         sdk::ActivityDetailView::Phase { phase } => TuiActivityDetail::Phase {
@@ -809,6 +822,9 @@ fn activity_detail(value: sdk::ActivityDetailView) -> TuiActivityDetail {
                     TuiCompactWork::Determinate { completed, total }
                 }
             },
+        },
+        sdk::ActivityDetailView::Reflection { trigger } => TuiActivityDetail::Reflection {
+            trigger: reflection_trigger(trigger),
         },
         sdk::ActivityDetailView::Interaction { kind } => TuiActivityDetail::Interaction {
             kind: match kind {

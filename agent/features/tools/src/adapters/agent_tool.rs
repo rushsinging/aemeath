@@ -39,7 +39,7 @@ impl TypedTool for AgentTool {
     }
 
     fn timeout_secs(&self) -> u64 {
-        1800 // 30 minutes — sub-agents run multi-run LLM conversations
+        3600 // 60 minutes — sub-agents run multi-run LLM conversations
     }
 
     fn cancellation(&self) -> crate::domain::published_language::CancellationDeclaration {

@@ -2,7 +2,7 @@ use crate::{
     ActivityAudienceView, ActivityChangeKind, ActivityDetailView, ActivityId, ActivityKindView,
     ActivitySnapshotView, ActivitySourceView, ActivityStateView, ActivityTimingView, ActivityView,
     ChatEvent, CompactStageView, CompactWorkView, HookPointView, InteractionKindView,
-    ModelStreamStateView, RunPhaseKindView, RunPurposeView,
+    ModelStreamStateView, ReflectionTriggerView, RunPhaseKindView, RunPurposeView,
 };
 
 fn activity_fixture() -> ActivityView {
@@ -81,6 +81,7 @@ fn activity_published_language_serializes_every_closed_variant() {
         serde_json::to_value(ActivityKindView::ToolCall).unwrap(),
         serde_json::to_value(ActivityKindView::HookDispatch).unwrap(),
         serde_json::to_value(ActivityKindView::Compaction).unwrap(),
+        serde_json::to_value(ActivityKindView::Reflection).unwrap(),
         serde_json::to_value(ActivityKindView::Interaction).unwrap(),
         serde_json::to_value(ActivityKindView::SubRun).unwrap(),
         serde_json::to_value(ActivityStateView::Waiting).unwrap(),
@@ -116,6 +117,10 @@ fn activity_published_language_serializes_every_closed_variant() {
                 completed: 2,
                 total: 4,
             },
+        })
+        .unwrap(),
+        serde_json::to_value(ActivityDetailView::Reflection {
+            trigger: ReflectionTriggerView::Manual,
         })
         .unwrap(),
         serde_json::to_value(ActivityDetailView::Interaction {
@@ -171,4 +176,53 @@ fn wire_document_registers_activity_components() {
     ] {
         assert!(definitions.contains_key(component), "missing {component}");
     }
+}
+
+#[test]
+fn activity_kind_view_reflection_serializes_and_round_trips() {
+    let encoded = serde_json::to_value(ActivityKindView::Reflection).expect("encode kind");
+    assert_eq!(encoded, serde_json::json!({ "kind": "reflection" }));
+
+    let decoded: ActivityKindView = serde_json::from_value(encoded).expect("decode kind");
+    assert_eq!(decoded, ActivityKindView::Reflection);
+}
+
+#[test]
+fn activity_detail_view_reflection_round_trips_every_trigger() {
+    // 三个 trigger 变体各一例；JSON 必须携带 "detail_type":"reflection" 标签
+    let cases = [
+        (ReflectionTriggerView::Interval, "interval"),
+        (ReflectionTriggerView::PreCompact, "pre_compact"),
+        (ReflectionTriggerView::Manual, "manual"),
+    ];
+
+    for (trigger, expected_trigger) in cases {
+        let encoded = serde_json::to_value(ActivityDetailView::Reflection { trigger })
+            .expect("encode detail");
+        assert_eq!(encoded["detail_type"], "reflection");
+        assert_eq!(encoded["trigger"], expected_trigger);
+
+        let decoded: ActivityDetailView = serde_json::from_value(encoded).expect("decode detail");
+        assert_eq!(decoded, ActivityDetailView::Reflection { trigger });
+    }
+}
+
+#[test]
+fn run_purpose_view_reflection_serializes_and_round_trips() {
+    let encoded = serde_json::to_value(RunPurposeView::Reflection).expect("encode purpose");
+    assert_eq!(encoded, serde_json::json!("reflection"));
+
+    let decoded: RunPurposeView = serde_json::from_value(encoded).expect("decode purpose");
+    assert_eq!(decoded, RunPurposeView::Reflection);
+}
+
+#[test]
+fn activity_source_view_reflection_round_trips_activity_id() {
+    let source = ActivitySourceView::Reflection(ActivityId::new_v7());
+    let encoded = serde_json::to_value(&source).expect("encode source");
+    assert_eq!(encoded["kind"], "reflection");
+    assert!(encoded["value"].is_string(), "value 应为 ActivityId 字符串");
+
+    let decoded: ActivitySourceView = serde_json::from_value(encoded).expect("decode source");
+    assert_eq!(decoded, source);
 }

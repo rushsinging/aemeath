@@ -54,6 +54,7 @@
 | `UserMessagesAdopted` | 同名 | 同名 | accepted inputs full batch | Current |
 | `UserMessagesQueued` | 同名 | 同名 | queued submissions full replacement | Target Rename：`QueuedUserMessagesChanged` 候选 |
 | `UserMessagesWithdrawn` | 同名 | 同名 | queued inputs withdrawn | Current |
+| `ControlCommandsQueued` | 同名 | 同名 | queued control commands full replacement | Current |
 | `SystemMessage` | 同名 | 同名 | system content fact | Target Rename：需区分 delta/append |
 | `HookNotice` | 同名 | 同名 | typed visible notice | Current |
 

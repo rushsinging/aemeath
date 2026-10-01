@@ -149,6 +149,56 @@ impl ChatInputEvent {
             }
         }
     }
+
+    /// 排队展示文本：控制类事件在队列里回显给用户的样子（#1816）。
+    ///
+    /// 它是排队回显的唯一真相：runtime 派生、SDK 透传、TUI 只渲染，
+    /// NEVER 由 TUI 另建一套文本映射（否则两处必然漂移）。
+    /// 用户消息、技能请求与撤回指令不进入命令队列，返回 `None`。
+    pub fn queue_display_text(&self) -> Option<String> {
+        let command = match self {
+            Self::ControlCommand { raw } => return Some(raw.clone()),
+            Self::Reset => "/clear",
+            Self::Compact => "/compact",
+            Self::ReflectNow => "/reflect-now",
+            Self::ListModels => "/model",
+            Self::SwitchModel { selection } => {
+                return Some(with_argument("/model", selection));
+            }
+            Self::SetThinking { desired } => {
+                return Some(match desired {
+                    Some(true) => "/think on".to_string(),
+                    Some(false) => "/think off".to_string(),
+                    None => "/think".to_string(),
+                });
+            }
+            Self::InitProject { force } => {
+                return Some(if *force {
+                    "/init --force".to_string()
+                } else {
+                    "/init".to_string()
+                });
+            }
+            Self::ManageSession { args } => return Some(with_argument("/session", args)),
+            Self::ManageMemory { args } => return Some(with_argument("/memory", args)),
+            Self::ResumeSession { id } => return Some(with_argument("/resume", id)),
+            Self::QueryReflectionHistory { limit } => {
+                return Some(with_argument("/reflect", &limit.to_string()));
+            }
+            Self::UserMessage { .. } | Self::SkillRequest(_) | Self::WithdrawAll => return None,
+        };
+        Some(command.to_string())
+    }
+}
+
+/// 拼接命令与其参数，参数为空时只保留命令本身。
+fn with_argument(command: &str, argument: &str) -> String {
+    let argument = argument.trim();
+    if argument.is_empty() {
+        command.to_string()
+    } else {
+        format!("{command} {argument}")
+    }
 }
 
 /// TUI 发起的一次 Chat 请求。

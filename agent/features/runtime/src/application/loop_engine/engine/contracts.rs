@@ -637,6 +637,63 @@ pub trait ManualCompactionPort: Send {
     ) -> Result<ManualCompactionOutcome, LoopEngineError>;
 }
 
+/// 手动反思执行结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManualReflectionOutcome {
+    /// 反思到达终态（成功或失败），Run 继续收口 `Completed`。
+    Ready(crate::application::reflection::ReflectionTaskCompletionStatus),
+    /// 反思被取消，Run 已进入终态。
+    Cancelled,
+    /// 反思超时，Run 已进入终态。
+    TimedOut,
+}
+
+/// 手动反思端口：只由产生手动反思 Run 的来源装配，承载装配前冻结的 committed
+/// 会话消息快照并发布用户可见终态文案。状态机与 `Reflection` activity 由
+/// engine 的 `execute_manual_reflection` 持有，端口只执行反思并映射终态。
+#[async_trait]
+pub trait ManualReflectionPort: Send {
+    async fn run_manual_reflection(
+        &mut self,
+        run_id: &sdk::RunId,
+        cancel: &CancellationToken,
+    ) -> Result<ManualReflectionOutcome, LoopEngineError>;
+}
+
+/// 反思执行端口：engine 持有状态机与 activity，端口只提供判定材料与执行能力。
+///
+/// 反思的执行点在 engine（`BeginReflection`/`ReflectionCompleted`
+/// 转移与 `Reflection` activity 只在 engine 可达），端口不得自行驱动状态机。
+#[async_trait]
+pub trait ReflectionPhasePort: Send {
+    /// Interval 判定：命中频控且配置开启时返回待反思消息快照；未命中/禁用返回 None。
+    ///
+    /// 唯一生产调用形态是 `ModelStep::Complete` 路径（必然无未完成工具轮），
+    /// 因此判定只需配置与 step_count，不需要 stop_reason。
+    fn interval_reflection_messages(
+        &self,
+        step_count: usize,
+        messages: &[share::message::Message],
+    ) -> Option<Vec<share::message::Message>>;
+
+    /// 取走 compaction observer 暂存的 PreCompact 材料；未暂存返回 None。
+    ///
+    /// 语义由生产端口实现：反思配置关闭时丢弃暂存材料并返回 None——材料不滞留到
+    /// 下次 compact，engine 也不空走一次 Reflecting 往返。
+    fn take_pre_compact_messages(&self) -> Option<Vec<share::message::Message>>;
+
+    /// 执行一次反思（内部含 timeout/cancel select），返回终态 outcome。
+    /// 任何 outcome（含 Failed/Cancelled/TimedOut）都不得终止宿主 Run——收口语义由 engine phase 统一负责。
+    async fn run_reflection(
+        &mut self,
+        trigger: crate::application::reflection::ReflectionTaskTrigger,
+        messages: Vec<share::message::Message>,
+        run_id: &sdk::RunId,
+        run_step_id: Option<&sdk::RunStepId>,
+        cancel: CancellationToken,
+    ) -> Result<crate::application::reflection::ReflectionRunOutcome, LoopEngineError>;
+}
+
 #[async_trait]
 pub trait ModelInvocationPort: Send {
     async fn invoke_model(

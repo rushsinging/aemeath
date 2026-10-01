@@ -22,6 +22,9 @@ pub struct Run {
     spec: RunSpec,
     parent_id: Option<RunId>,
     status: RunStatus,
+    /// `Reflecting` 的返回相位：`BeginReflection` 通过意图 gate 时记录来源状态，
+    /// `ReflectionCompleted` 用 `take()` 取回并清零，反思收口后回到进入前的相位。
+    reflection_return_status: Option<RunStatus>,
     termination: Option<(sdk::RunTerminationReason, sdk::ControlDeadline)>,
     pending_interaction: Option<PendingInteraction>,
     /// #1272: explicit completion result, consumed by
@@ -94,6 +97,7 @@ impl Run {
             spec,
             parent_id,
             status: RunStatus::Created,
+            reflection_return_status: None,
             termination: None,
             pending_interaction: None,
             pending_completion_result: None,
@@ -305,11 +309,14 @@ impl Run {
             });
         }
         if transition == RunTransition::ContextPrepared
-            && self.spec.intent() == RunIntent::ManualCompaction
+            && matches!(
+                self.spec.intent(),
+                RunIntent::ManualCompaction | RunIntent::ManualReflection
+            )
         {
             log::warn!(
                 target: crate::LOG_TARGET,
-                "run state transition rejected: run_id={} intent={:?} requested_transition={:?} 手动压缩 Run 不得进入模型调用",
+                "run state transition rejected: run_id={} intent={:?} requested_transition={:?} 手动压缩/反思 Run 不得进入模型调用",
                 self.id,
                 self.spec.intent(),
                 transition,
@@ -318,6 +325,31 @@ impl Run {
                 from: self.status,
                 transition,
             });
+        }
+        // 反思入口按状态×意图放行：会话 Run 只能从模型响应/压缩相位切入，
+        // 手动反思 Run 只能从排空阶段切入；通过后记录返回相位供收口取回。
+        if transition == RunTransition::BeginReflection {
+            let allowed = match self.status {
+                RunStatus::DrainingInput => self.spec.intent() == RunIntent::ManualReflection,
+                RunStatus::ApplyingResponse | RunStatus::Compacting => {
+                    self.spec.intent() == RunIntent::Conversation
+                }
+                _ => false,
+            };
+            if !allowed {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "run state transition rejected: run_id={} intent={:?} requested_transition={:?} 反思入口状态或意图不合法",
+                    self.id,
+                    self.spec.intent(),
+                    transition,
+                );
+                return Err(RunTransitionError::IllegalTransition {
+                    from: self.status,
+                    transition,
+                });
+            }
+            self.reflection_return_status = Some(self.status);
         }
         let next = match (self.status, transition) {
             (RunStatus::Created, RunTransition::StartDraining) => RunStatus::DrainingInput,
@@ -337,6 +369,26 @@ impl Run {
                 }
             }
             (RunStatus::DrainingInput, RunTransition::BeginCompaction) => RunStatus::Compacting,
+            (RunStatus::DrainingInput, RunTransition::BeginReflection)
+            | (RunStatus::ApplyingResponse, RunTransition::BeginReflection)
+            | (RunStatus::Compacting, RunTransition::BeginReflection) => RunStatus::Reflecting,
+            (RunStatus::Reflecting, RunTransition::ReflectionCompleted) => {
+                // 畸形内部状态（生产不可达）：`BeginReflection` 过意图 gate 时必然
+                // 记录返回相位，此处缺失说明状态被破坏——与其余拒绝路径一致返回
+                // IllegalTransition 并保持状态不变，NEVER panic。
+                let Some(return_status) = self.reflection_return_status.take() else {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "run state transition rejected: run_id={} 反思收口缺少 reflection_return_status（畸形内部状态）",
+                        self.id,
+                    );
+                    return Err(RunTransitionError::IllegalTransition {
+                        from: RunStatus::Reflecting,
+                        transition: RunTransition::ReflectionCompleted,
+                    });
+                };
+                return_status
+            }
             (RunStatus::PreparingContext, RunTransition::ContextPrepared) => {
                 RunStatus::InvokingModel
             }
@@ -377,6 +429,9 @@ impl Run {
         let reason = match (next, transition) {
             (RunStatus::DrainingInput, RunTransition::CompactionCompleted) => {
                 RunTransitionReason::ManualCompactionSettled
+            }
+            (RunStatus::DrainingInput, RunTransition::ReflectionCompleted) => {
+                RunTransitionReason::ManualReflectionSettled
             }
             _ => RunTransitionReason::from(transition),
         };
@@ -631,6 +686,30 @@ impl Run {
         self.transition(RunTransition::BeginCompaction).map(|_| ())
     }
 
+    /// 命令驱动：手动反思 Run 直接进入 `Reflecting`。
+    ///
+    /// 只接受 `ManualReflection` 意图与 `DrainingInput` 起点，其余组合返回
+    /// `IllegalTransition`。迁移仍经状态矩阵（`(DrainingInput, BeginReflection)`），
+    /// 因此事件发布与 activity 观察与其它迁移完全一致。
+    pub fn begin_manual_reflection(&mut self) -> Result<(), RunTransitionError> {
+        if self.spec.intent() != RunIntent::ManualReflection
+            || self.status != RunStatus::DrainingInput
+        {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "manual reflection command rejected: run_id={} intent={:?} status={:?} 仅手动反思 Run 可从排空阶段进入反思",
+                self.id,
+                self.spec.intent(),
+                self.status,
+            );
+            return Err(RunTransitionError::IllegalTransition {
+                from: self.status,
+                transition: RunTransition::BeginReflection,
+            });
+        }
+        self.transition(RunTransition::BeginReflection).map(|_| ())
+    }
+
     /// #1272: Set the completion result text that will be used by
     /// `apply_drain_decision(EmptyAndSealed, …)` when sealing the
     /// run as Completed.  Callers that know they are going to seal
@@ -638,6 +717,15 @@ impl Run {
     #[cfg(test)]
     pub fn set_pending_completion_result(&mut self, result: String) {
         self.pending_completion_result = Some(result);
+    }
+
+    /// 测试 seam：清空 `reflection_return_status`，构造畸形内部状态——处于
+    /// `Reflecting` 却缺失返回相位（生产不可达：`BeginReflection` 过意图 gate
+    /// 时必然记录）。用于验证 `ReflectionCompleted` 收口以 `IllegalTransition`
+    /// 报错而不是 panic。
+    #[cfg(test)]
+    pub fn clear_reflection_return_status_for_test(&mut self) {
+        self.reflection_return_status = None;
     }
 
     /// #1272: The next drain epoch the engine should expect.

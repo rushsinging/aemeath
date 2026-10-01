@@ -34,6 +34,11 @@ pub struct RunExecutionState {
     pending_interaction_work: Option<PendingInteractionWork>,
     adopted_input: Vec<(sdk::InputId, Message)>,
     active_interaction: Option<ActiveInteractionReceiver>,
+    /// Interval 反思的 Run 级一次性闸门：主会话 Run 内 `step_count` 不递增，
+    /// 多个 `ModelStep::Complete`（含内部 continuation）会命中同一 step_count，
+    /// 因此 Interval 反思在同 Run 内至多开始一次。命中并开始 phase 时消耗，
+    /// 未命中不消耗；与消息/step 临时状态不同，本字段跨 `begin_step` 保留。
+    interval_reflection_started: bool,
 }
 
 impl RunExecutionState {
@@ -205,6 +210,19 @@ impl RunExecutionState {
 
     pub(crate) fn step_count(&self) -> usize {
         self.step_count
+    }
+
+    /// Interval 反思的 Run 级一次性闸门是否已消耗（本 Run 已开始过 Interval phase）。
+    pub(crate) fn interval_reflection_started(&self) -> bool {
+        self.interval_reflection_started
+    }
+
+    /// 判定命中、即将进入 Interval reflection phase 时消耗本 Run 的一次性闸门。
+    ///
+    /// 幂等；仅在命中后调用（未命中不得消耗）。phase 内端口错误、任务失败或取消
+    /// 都不回滚——该 Run 已执行过反思，后续 Complete step 不得再判定重复反思。
+    pub(crate) fn mark_interval_reflection_started(&mut self) {
+        self.interval_reflection_started = true;
     }
 
     pub(crate) fn advance_step(&mut self) -> usize {

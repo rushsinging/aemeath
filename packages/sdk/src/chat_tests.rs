@@ -1,6 +1,93 @@
 use super::*;
 
 #[test]
+fn queue_display_text_derives_command_text_for_every_control_event() {
+    // 排队回显的文本必须与用户输入的命令一致（#1816）。
+    let cases = [
+        (ChatInputEvent::Compact, "/compact"),
+        (ChatInputEvent::Reset, "/clear"),
+        (ChatInputEvent::ReflectNow, "/reflect-now"),
+        (ChatInputEvent::ListModels, "/model"),
+        (
+            ChatInputEvent::SwitchModel {
+                selection: "anthropic/claude".to_string(),
+            },
+            "/model anthropic/claude",
+        ),
+        (
+            ChatInputEvent::SetThinking {
+                desired: Some(true),
+            },
+            "/think on",
+        ),
+        (
+            ChatInputEvent::SetThinking {
+                desired: Some(false),
+            },
+            "/think off",
+        ),
+        (ChatInputEvent::SetThinking { desired: None }, "/think"),
+        (ChatInputEvent::InitProject { force: true }, "/init --force"),
+        (ChatInputEvent::InitProject { force: false }, "/init"),
+        (
+            ChatInputEvent::ManageSession {
+                args: "list".to_string(),
+            },
+            "/session list",
+        ),
+        (
+            ChatInputEvent::ManageMemory {
+                args: String::new(),
+            },
+            "/memory",
+        ),
+        (
+            ChatInputEvent::ResumeSession {
+                id: "s-1".to_string(),
+            },
+            "/resume s-1",
+        ),
+        (
+            ChatInputEvent::QueryReflectionHistory { limit: 3 },
+            "/reflect 3",
+        ),
+        (
+            ChatInputEvent::ControlCommand {
+                raw: "/custom raw".to_string(),
+            },
+            "/custom raw",
+        ),
+    ];
+    for (event, expected) in cases {
+        assert_eq!(
+            event.queue_display_text().as_deref(),
+            Some(expected),
+            "{event:?} 的排队展示文本必须与命令一致"
+        );
+    }
+}
+
+#[test]
+fn queue_display_text_is_absent_for_non_command_events() {
+    // 用户消息、技能请求与撤回指令不进入命令队列（#1816）。
+    assert_eq!(
+        ChatInputEvent::user_message("hi", Vec::new()).queue_display_text(),
+        None
+    );
+    assert_eq!(ChatInputEvent::WithdrawAll.queue_display_text(), None);
+    assert_eq!(
+        ChatInputEvent::SkillRequest(SkillRequest {
+            input_id: crate::InputId::new_v7(),
+            skill: "skill".to_string(),
+            arguments: String::new(),
+            raw_input: "/skill".to_string(),
+        })
+        .queue_display_text(),
+        None
+    );
+}
+
+#[test]
 fn skill_request_preserves_identity_and_raw_arguments() {
     let input_id = crate::InputId::new_v7();
     let event = ChatInputEvent::SkillRequest(SkillRequest {

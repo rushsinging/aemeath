@@ -22,8 +22,11 @@ use crate::application::loop_engine::step_persistence::{
 };
 use crate::application::loop_engine::{
     CompactProgressView, CompactionPort, InteractionMailboxPort, LoopEngineError,
-    ModelInvocationPort, PendingInteractionWork, StepCommit, StepPersistencePort,
-    ToolGuardDecision, ToolOrchestrationPort,
+    ModelInvocationPort, PendingInteractionWork, ReflectionPhasePort, StepCommit,
+    StepPersistencePort, ToolGuardDecision, ToolOrchestrationPort,
+};
+use crate::application::reflection::{
+    ReflectionRunOutcome, ReflectionTaskAdapter, ReflectionTaskCompletionStatus,
 };
 use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
@@ -214,6 +217,142 @@ where
                 cancel.clone(),
             )
             .await
+    }
+}
+
+/// 生产反思端口：判定材料与反思执行的唯一装配点（状态机与
+/// activity 由 engine phase 持有，本端口只回答「有没有要做的事」并执行反思）。
+/// 持有与压缩观察者共享的 PreCompact 材料槽：观察者在 Committed 时暂存，本端口
+/// 在 engine 的 Compacting 相位内取出（反思禁用时取出即丢弃，不滞留不空走往返）。
+pub(crate) struct RuntimeReflection<'a> {
+    runtime_context: &'a RuntimeContext,
+    reflection_tasks: ReflectionTaskAdapter,
+    system_prompt: String,
+    language: String,
+    pre_compact_material: crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot,
+}
+
+impl<'a> RuntimeReflection<'a> {
+    pub(crate) fn new(
+        runtime_context: &'a RuntimeContext,
+        reflection_tasks: ReflectionTaskAdapter,
+        system_prompt: String,
+        language: String,
+        pre_compact_material: crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot,
+    ) -> Self {
+        Self {
+            runtime_context,
+            reflection_tasks,
+            system_prompt,
+            language,
+            pre_compact_material,
+        }
+    }
+
+    /// 反思成功 terminal 的 Usage 记账唯一实现。
+    ///
+    /// Interval/PreCompact（本端口 `run_reflection`）与 Manual
+    /// （`ChatManualReflection`）共用本函数，经共享
+    /// [`crate::application::model::invocation::record_successful_usage`]
+    /// 恰好落 1 条 `UsageRecordData`；Failed/Cancelled/TimedOut/DisabledSkipped
+    /// 不调用故不记账，retry/fallback 发生在执行层内部，只有最终
+    /// `Succeeded` 终态会经过这里（不重复记账）。
+    ///
+    /// Manual Reflection Run 无 RunStep：`run_step_id=None` 时生成仅记账用的
+    /// UUIDv7；`model_invocation_id` 同理。不发布 cost。
+    pub(crate) fn record_succeeded_usage(
+        runtime_context: &RuntimeContext,
+        run_id: &sdk::RunId,
+        run_step_id: Option<&sdk::RunStepId>,
+        metadata: &crate::application::reflection::ReflectionTaskMetadata,
+    ) {
+        let usage = crate::ports::RawUsageSnapshotData {
+            input_tokens: Some(metadata.input_tokens),
+            output_tokens: Some(metadata.output_tokens),
+            ..crate::ports::RawUsageSnapshotData::default()
+        };
+        crate::application::model::invocation::record_successful_usage(
+            runtime_context.usage_sink().as_ref(),
+            crate::application::model::usage::UsageRecordContext {
+                session_id: sdk::SessionId::new(runtime_context.skill_load_session_id()),
+                run_id: run_id.clone(),
+                // Manual Reflection Run 无 RunStep：仅记账 id（PR 披露）。
+                run_step_id: run_step_id.cloned().unwrap_or_else(sdk::RunStepId::new_v7),
+                model_invocation_id: sdk::ModelInvocationId::new_v7(),
+                model: runtime_context.provider_ref().model.clone(),
+            },
+            usage,
+            crate::application::model::invocation::unix_timestamp_millis,
+        );
+    }
+}
+
+#[async_trait]
+impl ReflectionPhasePort for RuntimeReflection<'_> {
+    fn interval_reflection_messages(
+        &self,
+        step_count: usize,
+        messages: &[Message],
+    ) -> Option<Vec<Message>> {
+        let memory_config = self.runtime_context.config_ref().config().memory();
+        if crate::application::loop_engine::chat::reflection::should_run_turn_reflection(
+            memory_config,
+            step_count,
+        ) {
+            Some(messages.to_vec())
+        } else {
+            None
+        }
+    }
+
+    fn take_pre_compact_messages(&self) -> Option<Vec<Message>> {
+        self.pre_compact_material
+            .take_for_reflection(self.runtime_context.config_ref().config().memory())
+    }
+
+    async fn run_reflection(
+        &mut self,
+        trigger: crate::application::reflection::ReflectionTaskTrigger,
+        messages: Vec<Message>,
+        run_id: &sdk::RunId,
+        run_step_id: Option<&sdk::RunStepId>,
+        cancel: CancellationToken,
+    ) -> Result<ReflectionRunOutcome, LoopEngineError> {
+        let outcome = crate::application::loop_engine::chat::reflection::run(
+            &self.reflection_tasks,
+            trigger,
+            self.runtime_context.config_ref().config().memory(),
+            messages,
+            self.runtime_context.provider_ref(),
+            &self.system_prompt,
+            &self.language,
+            self.runtime_context.memory_ref(),
+            self.runtime_context.reflection_history_ref(),
+            cancel,
+        )
+        .await;
+        // 仅 Succeeded 且带 usage metadata 的终态经共享
+        // `record_successful_usage` 计入 /usage（Interval/PreCompact/Manual 同路径）。
+        if let ReflectionRunOutcome::Completed(completion) = &outcome {
+            if completion.status == ReflectionTaskCompletionStatus::Succeeded {
+                if let Some(metadata) = &completion.metadata {
+                    Self::record_succeeded_usage(
+                        self.runtime_context,
+                        run_id,
+                        run_step_id,
+                        metadata,
+                    );
+                }
+            }
+        }
+        // 行为从 classify_terminal 原样搬迁：成功且有记忆变更时发布 TUI notice。
+        crate::application::loop_engine::chat::reflection::announce_memory_update(
+            &self.runtime_context.event_sink(),
+            &outcome,
+            &self.language,
+        )
+        .await;
+        Ok(outcome)
     }
 }
 

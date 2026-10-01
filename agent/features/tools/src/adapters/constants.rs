@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-pub(crate) const SUB_AGENT_DEFAULT_TIMEOUT_SECS: u64 = 1800;
+pub(crate) const SUB_AGENT_DEFAULT_TIMEOUT_SECS: u64 = 3600;
 pub(crate) const SUB_AGENT_TIMEOUT_CAP_SECS: u64 = 10800;
 
 pub(crate) const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
