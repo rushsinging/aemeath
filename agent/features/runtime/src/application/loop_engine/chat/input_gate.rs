@@ -122,6 +122,10 @@ pub struct GateOutcome {
     pub appended_user_messages: usize,
     #[cfg(test)]
     pub dropped_events: usize,
+    /// 重新排队等待下一轮 idle 的事件数（#1816）。gate 只消费到第一个控制
+    /// 命令，其余事件原序回到 `PendingInputBuffer`，NEVER 静默丢弃。
+    #[cfg(test)]
+    pub requeued_events: usize,
     /// 本次 gate 接纳的 typed 用户输入。它是后续模型消息、持久化与
     /// UserMessagesAdopted 的唯一真相，禁止并行维护 event/message 双轨。
     pub accepted_inputs: Vec<crate::application::loop_engine::AcceptedUserInput>,
@@ -131,25 +135,90 @@ pub struct GateOutcome {
     pub pending_command: Option<PendingCommand>,
 }
 
+/// 缓冲区里的一项待处理输入：事件本身 + 它的入队序号（#1816）。
+///
+/// 序号是排队回显的排序依据：用户消息用事件自带的 `InputId`，控制类命令
+/// 在入队时分配一个新的 v7 id，因此跨「消息队列 / 命令队列」按 id 排序
+/// 等价于按提交顺序排序。
+#[derive(Debug, Clone)]
+struct QueuedInput {
+    id: sdk::InputId,
+    event: ChatInputEvent,
+}
+
+impl QueuedInput {
+    fn new(event: ChatInputEvent) -> Self {
+        let id = match &event {
+            ChatInputEvent::UserMessage { id, .. } => id.clone(),
+            ChatInputEvent::SkillRequest(request) => request.input_id.clone(),
+            _ => sdk::InputId::new_v7(),
+        };
+        Self { id, event }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct PendingInputBuffer {
-    events: Arc<Mutex<VecDeque<ChatInputEvent>>>,
+    events: Arc<Mutex<VecDeque<QueuedInput>>>,
 }
 
 impl PendingInputBuffer {
-    pub fn push(&self, event: ChatInputEvent) {
+    /// 入队一项待处理输入，返回它的入队序号。
+    pub fn push(&self, event: ChatInputEvent) -> sdk::InputId {
+        let queued = QueuedInput::new(event);
+        let id = queued.id.clone();
         self.events
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .push_back(event);
+            .push_back(queued);
+        id
+    }
+
+    /// 队列中的控制类命令全量快照：入队序号 + 展示文本（#1816）。
+    ///
+    /// 快照是排队回显的唯一数据源，调用方按它整列渲染，不自建增量状态。
+    /// 用户消息与技能请求不在其中——它们由 `UserMessagesQueued` 承载。
+    pub fn command_snapshot(&self) -> Vec<(sdk::InputId, String)> {
+        self.events
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .iter()
+            .filter_map(|queued| {
+                queued
+                    .event
+                    .queue_display_text()
+                    .map(|text| (queued.id.clone(), text))
+            })
+            .collect()
+    }
+
+    /// 撤回全部排队控制命令，返回它们的展示文本（#1816）。
+    ///
+    /// `WithdrawAll` 的语义是「撤回所有待处理输入」：控制命令尚未执行，
+    /// 撤回无副作用，因此与用户消息同批撤回，Up 键才等于「全部撤回」。
+    pub fn drain_for_withdraw(&self) -> Vec<String> {
+        self.drain_all()
+            .iter()
+            .filter_map(ChatInputEvent::queue_display_text)
+            .collect()
+    }
+
+    /// 批量取走未遍历的剩余事件，原序放回缓冲区等待下一轮 idle（#1816）。
+    ///
+    /// 与 `drain_all` 成对使用：gate 一次 drain 后只消费到第一个控制命令，
+    /// 其余事件必须回到缓冲区，否则会静默丢失。回队事件重新分配入队序号，
+    /// 因此 id 单调顺序始终等于队列顺序。
+    pub fn requeue(&self, events: impl IntoIterator<Item = ChatInputEvent>) {
+        let mut buffer = self
+            .events
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        buffer.extend(events.into_iter().map(QueuedInput::new));
     }
 
     #[cfg(test)]
     pub fn extend(&self, events: impl IntoIterator<Item = ChatInputEvent>) {
-        self.events
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .extend(events);
+        self.requeue(events);
     }
 
     pub fn is_empty(&self) -> bool {
@@ -164,6 +233,7 @@ impl PendingInputBuffer {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .pop_front()
+            .map(|queued| queued.event)
     }
 
     #[cfg(test)]
@@ -181,6 +251,7 @@ impl PendingInputBuffer {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .drain(..)
+            .map(|queued| queued.event)
             .collect()
     }
 }
@@ -224,6 +295,7 @@ where
     let mut commands = Vec::new();
     let mut appended_user_messages = 0usize;
     let mut dropped_events = 0usize;
+    let mut requeued_events = 0usize;
     let mut decision = GateDecision::Proceed;
     let mut pending_command: Option<PendingCommand> = None;
     let mut accepted_inputs = Vec::new();
@@ -311,13 +383,17 @@ where
                         // untouched. Do not emit SessionReset or clear the
                         // compatibility store while Tasks still exist.
                         log::error!(target: crate::LOG_TARGET, "failed to clear authoritative tasks: {error}");
-                        dropped_events = iter.count();
+                        requeued_events = requeue_remaining(buffer, &mut iter);
                         decision = GateDecision::Proceed;
                         break;
                     }
                     // idle：权威 TaskData 清理成功后请求 Context owner 清空会话。
                     reset_requested = true;
-                    dropped_events = iter.count();
+                    // `reset_requested` 在调用方优先于 `Resumed`，本批已接纳输入
+                    // 不会进入 Context；必须原序回队，否则会被静默丢弃（#1816）。
+                    requeued_events += requeue_accepted_inputs(buffer, &accepted_inputs);
+                    accepted_inputs.clear();
+                    requeued_events += requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -353,7 +429,7 @@ where
             ChatInputEvent::Compact => {
                 if is_idle {
                     pending_command = Some(PendingCommand::Compact);
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -364,7 +440,7 @@ where
             ChatInputEvent::ReflectNow => {
                 if is_idle {
                     pending_command = Some(PendingCommand::ReflectNow);
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 }
@@ -380,7 +456,7 @@ where
             ChatInputEvent::SwitchModel { selection } => {
                 if is_idle {
                     pending_command = Some(PendingCommand::SwitchModel { selection });
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -391,7 +467,7 @@ where
             ChatInputEvent::SetThinking { desired } => {
                 if is_idle {
                     pending_command = Some(PendingCommand::SetThinking { desired });
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -402,7 +478,7 @@ where
             ChatInputEvent::InitProject { force } => {
                 if is_idle {
                     pending_command = Some(PendingCommand::InitProject { force });
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -412,7 +488,7 @@ where
             ChatInputEvent::ManageSession { args } => {
                 if is_idle {
                     pending_command = Some(PendingCommand::ManageSession { args });
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -422,7 +498,7 @@ where
             ChatInputEvent::ManageMemory { args } => {
                 if is_idle {
                     pending_command = Some(PendingCommand::ManageMemory { args });
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -432,7 +508,7 @@ where
             ChatInputEvent::ResumeSession { id } => {
                 if is_idle {
                     pending_command = Some(PendingCommand::ResumeSession { id });
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -442,7 +518,7 @@ where
             ChatInputEvent::QueryReflectionHistory { limit } => {
                 if is_idle {
                     pending_command = Some(PendingCommand::QueryReflectionHistory { limit });
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -452,7 +528,7 @@ where
             ChatInputEvent::ListModels => {
                 if is_idle {
                     pending_command = Some(PendingCommand::ListModels);
-                    dropped_events = iter.count();
+                    requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
@@ -488,6 +564,13 @@ where
 
     // [loop_debug] DEBUG 级：gate 最终决策 + 追加用户消息数。仅在有事件 / 有 append /
     // 非 Proceed 决策时打点，避免刷屏。默认不输出，调试时拉高级别可见。
+    // gate 是 pending_input 的收口：入队、busy 放回、idle 消费与重新排队
+    // 都体现在这一份全量快照里，UI 只需按快照整列重渲染（#1816）。
+    sink.send_event(RuntimeStreamEvent::ControlCommandsQueued {
+        queued: buffer.command_snapshot(),
+    })
+    .await;
+
     if event_count > 0 || appended_user_messages > 0 || decision != GateDecision::Proceed {
         log::debug!(
             target: crate::LOG_TARGET,
@@ -498,7 +581,7 @@ where
     }
 
     #[cfg(not(test))]
-    let _ = (&commands, dropped_events);
+    let _ = (&commands, dropped_events, requeued_events);
 
     GateOutcome {
         #[cfg(test)]
@@ -508,10 +591,45 @@ where
         appended_user_messages,
         #[cfg(test)]
         dropped_events,
+        #[cfg(test)]
+        requeued_events,
         accepted_inputs,
         reset_requested,
         pending_command,
     }
+}
+
+/// 把已接纳但本轮不会进入 Context 的输入原序放回等待缓冲区（#1816）。
+///
+/// `reset_requested` 优先于 `Resumed`，因此 idle Reset 分支必须回放本批输入；
+/// 回退事件而非丢弃，输入顺序对用户保持可见。
+fn requeue_accepted_inputs(
+    buffer: &PendingInputBuffer,
+    accepted: &[crate::application::loop_engine::AcceptedUserInput],
+) -> usize {
+    let events: Vec<ChatInputEvent> = accepted
+        .iter()
+        .cloned()
+        .map(crate::application::loop_engine::AcceptedUserInput::into_event)
+        .collect();
+    let count = events.len();
+    buffer.requeue(events);
+    count
+}
+
+/// 把 gate 未消费的事件原序放回等待缓冲区，返回重新排队的事件数（#1816）。
+///
+/// gate 一轮只消费到第一个控制命令（`pending_command` 单值语义），其余事件
+/// 必须回到 `PendingInputBuffer` 等待下一轮 idle；Abort 分支是唯一例外——
+/// 用户主动中止时整批丢弃，并连同已接纳输入一起回滚。
+fn requeue_remaining(
+    buffer: &PendingInputBuffer,
+    iter: &mut impl Iterator<Item = ChatInputEvent>,
+) -> usize {
+    let remaining: Vec<ChatInputEvent> = iter.by_ref().collect();
+    let count = remaining.len();
+    buffer.requeue(remaining);
+    count
 }
 
 fn classify_control_command(raw: &str) -> ControlCommandKind {

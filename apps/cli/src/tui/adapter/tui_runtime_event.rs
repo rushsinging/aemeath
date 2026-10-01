@@ -7,7 +7,9 @@
 //! for #1246 / #944 5B.
 
 use super::runtime_view::{TuiChatMessage, TuiToolResultImage};
-use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
+use crate::tui::model::conversation::interaction::{
+    UiInteractionRequestId, UiQueuedInputId, UiRunId, UiRunStepId,
+};
 use crate::tui::view_model::markdown_spacing::MarkdownSpacingPolicy;
 use crate::tui::view_model::status::ReasoningLevelView;
 
@@ -645,6 +647,10 @@ pub(crate) enum TuiRuntimeEvent {
     },
     UserMessagesQueued {
         queued: Vec<TuiChatMessage>,
+    },
+    /// 控制类命令队列的全量快照（#1816）。入队序号用于与消息队列合并排序。
+    ControlCommandsQueued {
+        queued: Vec<(UiQueuedInputId, String)>,
     },
     Done {
         context: TuiRunContext,

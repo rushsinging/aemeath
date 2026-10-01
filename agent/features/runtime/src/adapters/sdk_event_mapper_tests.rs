@@ -665,3 +665,27 @@ fn thinking_changed_mapping_preserves_reasoning_level_for_sdk() {
         other => panic!("unexpected event: {other:?}"),
     }
 }
+
+/// #1816：命令队列快照映射必须保序保文本，UI 才能整列重渲染。
+#[test]
+fn control_command_queue_mapping_preserves_order_and_text_for_sdk() {
+    let first_id = sdk::InputId::new("command-a");
+    let second_id = sdk::InputId::new("command-b");
+    let event = RuntimeStreamEvent::ControlCommandsQueued {
+        queued: vec![
+            (first_id.clone(), "/compact".to_string()),
+            (second_id.clone(), "/model anthropic/claude".to_string()),
+        ],
+    };
+
+    match map_stream_event(event) {
+        sdk::ChatEvent::ControlCommandsQueued { queued } => {
+            assert_eq!(queued.len(), 2);
+            assert_eq!(queued[0].0, first_id);
+            assert_eq!(queued[0].1, "/compact");
+            assert_eq!(queued[1].0, second_id);
+            assert_eq!(queued[1].1, "/model anthropic/claude");
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+}

@@ -1,7 +1,15 @@
 use super::*;
+use crate::tui::adapter::tui_runtime_event::TuiRuntimeEvent;
 use crate::tui::effect::effect::Effect;
+use crate::tui::effect::session::processing::SpawnContextRefs;
+use crate::tui::model::conversation::interaction::UiQueuedInputId;
 use crate::tui::model::input::completion::SuggestionType;
 use crate::tui::model::input::completion_item::CompletionItem;
+use crate::tui::update::msg::TuiMsg;
+
+fn make_spawn_refs() -> SpawnContextRefs {
+    SpawnContextRefs { agent_client: None }
+}
 
 /// 忙碌时 slash 仍必须交给统一 CommandRouter/handler，不能压成 Runtime 无法执行的
 /// `ControlCommand`。否则 `/compact` 会在 busy gate 后被静默丢弃。
@@ -36,6 +44,12 @@ fn busy_slash_dispatches_synchronously_without_placeholder() {
     assert!(
         app.model.conversation.queued_submissions.is_empty(),
         "busy slash 后不应建占位 QueuedUserMessage"
+    );
+    // #1816：命令占位改由 runtime 的 ControlCommandsQueued 权威快照驱动，
+    // 提交瞬间 TUI 侧刻意不建占位——避免与 runtime 快照双轨、也避免假回显。
+    assert!(
+        app.model.conversation.queued_commands.is_empty(),
+        "命令占位必须等 runtime 快照，NEVER 由 TUI 乐观创建"
     );
 }
 
@@ -500,4 +514,82 @@ fn test_up_arrow_history_recall() {
 
     // Up 键走 history recall
     assert_eq!(app.model.input.document.buffer, "past input");
+}
+
+/// #1816：排队里只有控制命令时，Up 键同样撤回（此前命令完全撤不掉）。
+#[test]
+fn test_up_arrow_busy_with_queued_command_only_sends_withdraw_all() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    app.chat.start_processing();
+    let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel(4);
+    let spawn_refs = make_spawn_refs();
+    app.update(
+        TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::ControlCommandsQueued {
+            queued: vec![(
+                UiQueuedInputId::from("01920000-0000-7000-8000-000000000001"),
+                "/compact".to_string(),
+            )],
+        }]),
+        &ui_tx,
+        &spawn_refs,
+    );
+
+    let key = crossterm::event::KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
+    let result = app.update_key(key, &spawn_refs);
+
+    let has_withdraw = result.effects.iter().any(|effect| {
+        matches!(
+            effect,
+            Effect::SendChatInputEvent {
+                event: sdk::ChatInputEvent::WithdrawAll
+            }
+        )
+    });
+    assert!(has_withdraw, "只有排队命令时 Up 键也必须能撤回（#1816）");
+    assert!(
+        app.model.conversation.queued_commands.is_empty(),
+        "Up 键乐观清空命令占位"
+    );
+    assert_eq!(
+        app.model.input.document.display_text(),
+        "/compact",
+        "撤回的命令文本应还原到输入框，用户可编辑后重新提交"
+    );
+}
+
+/// #1816：消息与命令混排时按入队序号合并还原。
+#[test]
+fn test_up_arrow_restores_messages_and_commands_in_arrival_order() {
+    let mut app = App::new(
+        "test-session".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    app.chat.start_processing();
+    app.enqueue_submission_echo("01920000-0000-7000-8000-000000000001", "先到的消息");
+    let (ui_tx, _ui_rx) = tokio::sync::mpsc::channel(4);
+    let spawn_refs = make_spawn_refs();
+    app.update(
+        TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::ControlCommandsQueued {
+            queued: vec![(
+                UiQueuedInputId::from("01920000-0000-7000-8000-000000000002"),
+                "/compact".to_string(),
+            )],
+        }]),
+        &ui_tx,
+        &spawn_refs,
+    );
+
+    let key = crossterm::event::KeyEvent::new(KeyCode::Up, KeyModifiers::NONE);
+    app.update_key(key, &spawn_refs);
+
+    assert_eq!(
+        app.model.input.document.display_text(),
+        "先到的消息\n/compact",
+        "还原顺序必须等于提交顺序（#1816）"
+    );
 }

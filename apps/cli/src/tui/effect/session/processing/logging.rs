@@ -365,6 +365,11 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             stage,
             texts.len()
         ),
+        sdk::ChatEvent::ControlCommandsQueued { queued } => crate::tui::log_trace!(
+            "{} control_commands_queued count={}",
+            stage,
+            queued.len()
+        ),
         sdk::ChatEvent::ModelSwitched { result } => crate::tui::log_trace!(
             "{} model_switched display={} context_window={} reasoning={:?}",
             stage,

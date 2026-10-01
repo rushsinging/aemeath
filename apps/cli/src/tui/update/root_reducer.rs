@@ -206,6 +206,7 @@ impl From<&ConversationChange> for ModelChange {
                 ModelChange::output_and_status_dirty()
             }
             ConversationChange::QueuedSubmissionsSynced { .. }
+            | ConversationChange::QueuedCommandsSynced { .. }
             | ConversationChange::CompactRuntimeCleared
             | ConversationChange::StyleBoundaryResetRequired => ModelChange::output_dirty(),
             ConversationChange::ChatCompleting { .. }

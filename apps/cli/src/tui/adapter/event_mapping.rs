@@ -5,7 +5,9 @@ use super::runtime_view::{
     TuiTaskPriority, TuiTaskState, TuiToolResultImage,
 };
 use super::tui_runtime_event::*;
-use crate::tui::model::conversation::interaction::{UiInteractionRequestId, UiRunId, UiRunStepId};
+use crate::tui::model::conversation::interaction::{
+    UiInteractionRequestId, UiQueuedInputId, UiRunId, UiRunStepId,
+};
 
 #[allow(clippy::large_enum_variant)] // Single facts stay allocation-free; only legacy batch expansion allocates.
 pub(crate) enum SdkEventMapping {
@@ -262,6 +264,12 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         },
         ChatEvent::UserMessagesQueued { queued } => TuiRuntimeEvent::UserMessagesQueued {
             queued: queued.into_iter().map(chat_message).collect(),
+        },
+        ChatEvent::ControlCommandsQueued { queued } => TuiRuntimeEvent::ControlCommandsQueued {
+            queued: queued
+                .into_iter()
+                .map(|(input_id, text)| (UiQueuedInputId::from(input_id.as_str()), text))
+                .collect(),
         },
         ChatEvent::Done { context } => TuiRuntimeEvent::Done {
             context: turn_context(context),
