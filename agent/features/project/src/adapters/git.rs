@@ -102,6 +102,55 @@ impl<R: GitCommandRunner> GitOps<R> {
     }
 }
 
+/// 跨 crate 公开的 git 子进程执行结果值对象（字段私有，只读访问器）。
+/// 与 `GitCommandOutput` 解耦：内部 SPI 保留测试注入，公开面仅暴露消费
+/// 方（context probe / runtime git 上下文）所需的最小读取能力。
+#[derive(Debug)]
+pub struct GitCommandOutcome {
+    success: bool,
+    exit_code: Option<i32>,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+impl GitCommandOutcome {
+    pub fn is_success(&self) -> bool {
+        self.success
+    }
+
+    pub fn exit_code(&self) -> Option<i32> {
+        self.exit_code
+    }
+
+    pub fn stdout_bytes(&self) -> &[u8] {
+        &self.stdout
+    }
+
+    pub fn stderr_bytes(&self) -> &[u8] {
+        &self.stderr
+    }
+}
+
+/// 全仓唯一 git 子进程 spawn 窄面：context/runtime 经此执行 git，统一
+/// `LC_ALL=C` locale 与非交互 session 隔离。spawn 层失败映射
+/// [`GitOperationError`]；命令非零退出不属于 `Err`，由
+/// `outcome.is_success()` 表达，供消费方按 sentinel 自行分流。
+pub fn run_git_command(
+    cwd: &Path,
+    args: &[&str],
+) -> Result<GitCommandOutcome, crate::domain::types::GitOperationError> {
+    let os_args: Vec<OsString> = args.iter().map(OsString::from).collect();
+    SystemGitRunner
+        .run(cwd, &os_args)
+        .map(|output| GitCommandOutcome {
+            success: output.success,
+            exit_code: output.exit_code,
+            stdout: output.stdout,
+            stderr: output.stderr,
+        })
+        .map_err(|error| operation_spawn(error, cwd))
+}
+
 fn probe_spawn(error: io::Error, cwd: &Path) -> GitProbeError {
     match error.kind() {
         ErrorKind::NotFound => utils::describe_cwd_gone_failure(&error, cwd, "git 命令")
@@ -680,3 +729,7 @@ mod tests {
 #[cfg(test)]
 #[path = "git_option_tests.rs"]
 mod option_tests;
+
+#[cfg(test)]
+#[path = "git_command_tests.rs"]
+mod command_tests;

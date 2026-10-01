@@ -1,18 +1,25 @@
+use project::GitCommandOutcome;
 use share::i18n::prompt::git_context_labels::git_context_labels;
 use std::path::PathBuf;
-use tokio::process::Command;
 
-async fn git_output(cwd: &PathBuf, args: &[&str]) -> Option<std::process::Output> {
-    let mut command = Command::new("git");
-    command.args(args).current_dir(cwd);
-    utils::configure_tokio_noninteractive(&mut command).ok()?;
-    command.output().await.ok()
+/// 经 project 的全仓唯一 git spawn 窄面执行；git 子命令为短阻塞 IO，
+/// 用 `spawn_blocking` 保持本模块的 async 签名不阻塞 worker 线程。
+async fn git_output(cwd: &PathBuf, args: &[&str]) -> Option<GitCommandOutcome> {
+    let cwd = cwd.clone();
+    let owned_args: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+    tokio::task::spawn_blocking(move || {
+        let arg_refs: Vec<&str> = owned_args.iter().map(String::as_str).collect();
+        project::run_git_command(&cwd, &arg_refs).ok()
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 pub async fn is_git_repo(cwd: &PathBuf) -> bool {
     git_output(cwd, &["rev-parse", "--is-inside-work-tree"])
         .await
-        .map(|output| output.status.success())
+        .map(|outcome| outcome.is_success())
         .unwrap_or(false)
 }
 
@@ -22,15 +29,19 @@ pub async fn collect_git_context(cwd: &PathBuf, lang: &str) -> String {
     let mut parts: Vec<String> = Vec::new();
     parts.push(labels.header.to_string());
 
-    if let Some(output) = git_output(cwd, &["branch", "--show-current"]).await {
-        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if let Some(outcome) = git_output(cwd, &["branch", "--show-current"]).await {
+        let branch = String::from_utf8_lossy(outcome.stdout_bytes())
+            .trim()
+            .to_string();
         if !branch.is_empty() {
             parts.push(format!("{}: {branch}", labels.branch));
         }
     }
 
-    if let Some(output) = git_output(cwd, &["rev-parse", "--abbrev-ref", "origin/HEAD"]).await {
-        let default_branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if let Some(outcome) = git_output(cwd, &["rev-parse", "--abbrev-ref", "origin/HEAD"]).await {
+        let default_branch = String::from_utf8_lossy(outcome.stdout_bytes())
+            .trim()
+            .to_string();
         if !default_branch.is_empty() && default_branch != "origin/HEAD" {
             let branch = default_branch
                 .strip_prefix("origin/")
@@ -39,25 +50,31 @@ pub async fn collect_git_context(cwd: &PathBuf, lang: &str) -> String {
         }
     }
 
-    if let Some(output) = git_output(cwd, &["config", "user.name"]).await {
-        let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if let Some(outcome) = git_output(cwd, &["config", "user.name"]).await {
+        let name = String::from_utf8_lossy(outcome.stdout_bytes())
+            .trim()
+            .to_string();
         if !name.is_empty() {
             parts.push(format!("{}: {name}", labels.git_user));
         }
     }
 
-    if let Some(output) = git_output(cwd, &["--no-optional-locks", "status", "--short"]).await {
-        let status = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if let Some(outcome) = git_output(cwd, &["--no-optional-locks", "status", "--short"]).await {
+        let status = String::from_utf8_lossy(outcome.stdout_bytes())
+            .trim()
+            .to_string();
         if !status.is_empty() {
             let lines: Vec<&str> = status.lines().take(20).collect();
             parts.push(format!("{}:\n{}", labels.status, lines.join("\n")));
         }
     }
 
-    if let Some(output) =
+    if let Some(outcome) =
         git_output(cwd, &["--no-optional-locks", "log", "--oneline", "-n", "5"]).await
     {
-        let recent_commits = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let recent_commits = String::from_utf8_lossy(outcome.stdout_bytes())
+            .trim()
+            .to_string();
         if !recent_commits.is_empty() {
             parts.push(format!("{}:\n{recent_commits}", labels.recent_commits));
         }

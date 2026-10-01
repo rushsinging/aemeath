@@ -675,11 +675,10 @@
       "profile": "full"
     },
     {
-      "id": "pattern.project.git-command-single-owner",
+      "id": "pattern.all.git-command-single-owner",
       "assertion": "pattern_exclusion",
       "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/project/src"
+        "kind": "workspace"
       },
       "forbidden_patterns": [
         "Command::new(\"git\")"
@@ -687,10 +686,10 @@
       "exclusions": [
         {
           "path": "agent/features/project/src/adapters/git.rs",
-          "reason": "git 子进程唯一 owner（adapters/git.rs）"
+          "reason": "git 子进程全仓唯一 spawn owner（run_git_command 窄面；context probe / runtime git 上下文统一经此执行）"
         }
       ],
-      "reason": "R5：project 内 git 子进程仅 adapters/git.rs 单一 owner",
+      "reason": "R5：git 子进程 spawn 全仓收敛至 project run_git_command 窄面单一 owner；违规即绕过统一 locale/非交互隔离",
       "profile": "full"
     },
     {
@@ -1722,12 +1721,15 @@
         "value": "agent/features/project/src"
       },
       "allowed_symbols": [
+        "GitCommandOutcome",
+        "GitOperationError",
         "Workspace",
         "WorkspaceControl",
         "WorkspaceData",
         "WorkspaceReader",
         "WorkspaceRestoreData",
         "WorkspaceWriter",
+        "run_git_command",
         "wire_production_workspace"
       ],
       "reason": "F-2：project crate 根窄 façade（#1022 登记，消费者证明制）",
