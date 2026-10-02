@@ -26,12 +26,14 @@ export CARGO_LLVM_COV_BUILD_DIR="${CARGO_LLVM_COV_BUILD_DIR:-$CARGO_TARGET_DIR/l
 report_json="$(mktemp "${TMPDIR:-/tmp}/aemeath-coverage.XXXXXX.json")"
 trap 'rm -f "$report_json"' EXIT
 
+# --locked：与发版 CI 一致，防止依赖重新解析引入未验证的 crate 版本。
 cargo llvm-cov \
     --workspace \
     --exclude xtask \
+    --locked \
     --quiet \
     --json \
     --summary-only \
     --output-path "$report_json"
 
-cargo run --quiet -p xtask -- coverage-summary "$report_json" "$ROOT"
+cargo run --quiet --locked -p xtask -- coverage-summary "$report_json" "$ROOT"
