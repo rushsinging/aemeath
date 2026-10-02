@@ -100,10 +100,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      # channel 见 rust-toolchain.toml（pin 1.97.0）。
+      # channel 与全部发版 targets 均由 rust-toolchain.toml 声明：
+      # action 的 targets 参数会装到 stable 工具链上，而实际构建被
+      # toml override 到 pinned channel，导致 cross-compile 缺 std。
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
