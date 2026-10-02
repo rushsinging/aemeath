@@ -1,9 +1,19 @@
 # 统一本地与 CI 的 Rust 工具链版本，保证发版可复现：
-# - CI 各 workflow 的 dtolnay/rust-toolchain action 不带版本时读取本文件；
+# - rustup 读取本文件解析 channel；CI 各 workflow 的
+#   dtolnay/rust-toolchain@stable 只是 action 版本 ref，不影响 channel；
 # - 防止 stable 升级引入的新 clippy 规则在发版时才暴露（如 1.99 的
 #   double_must_use 与 async-trait 0.1.90+ 宏展开冲突导致发版阻断）；
+# - targets：rustup 安装 channel 时一并装齐全部发版目标，覆盖
+#   action 的 targets 参数只装到 stable 工具链、cross-compile 时
+#   pinned 工具链缺 std 的缺口（E0463 can't find crate for `core`）；
 # - 升级工具链时修改本文件的 channel，并在本地跑
 #   `cargo clippy --workspace --locked -- -D warnings` 确认后再合入。
 [toolchain]
 channel = "1.97.0"
 components = ["rustfmt", "clippy"]
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
