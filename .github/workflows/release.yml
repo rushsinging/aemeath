@@ -33,7 +33,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@stable
+      # 不带 @stable：读取 rust-toolchain.toml 的 pinned 版本，
+      # 与本地开发工具链一致，避免 stable 升级引入新 clippy 规则阻断发版。
+      - uses: dtolnay/rust-toolchain
         with:
           components: rustfmt, clippy
 
@@ -65,10 +67,12 @@ jobs:
         run: cargo fmt --check
 
       - name: cargo clippy
-        run: cargo clippy --workspace -- -D warnings
+        # --locked：Cargo.lock 与本地验证一致，防止 CI 重新解析依赖
+        # 拉入新版 crate（如 async-trait 0.1.90+）触发 lint 差异。
+        run: cargo clippy --workspace --locked -- -D warnings
 
       - name: cargo test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
   # ── Job 2: 多平台构建（macOS 双架构 + Linux x86_64/aarch64）────
   # Linux 说明：
@@ -96,7 +100,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain
         with:
           targets: ${{ matrix.target }}
 
@@ -115,7 +119,7 @@ jobs:
         # 默认 0.0.0；发布版本必须在此显式注入。
         env:
           AEMEATH_VERSION: ${{ needs.validate.outputs.version }}
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Package tarball
         shell: bash

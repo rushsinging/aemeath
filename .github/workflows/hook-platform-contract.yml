@@ -21,14 +21,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      # 不带 @stable：读取 rust-toolchain.toml 的 pinned 版本，与发版一致。
+      - uses: dtolnay/rust-toolchain
 
       - uses: Swatinem/rust-cache@v2
         with:
           key: hook-non-unix-contract
 
       - name: Check Hook crate on Windows
-        run: cargo check -p hook --all-targets
+        run: cargo check -p hook --all-targets --locked
 
       - name: Run non-Unix Hook contract tests
-        run: cargo test -p hook unsupported_platform --lib
+        run: cargo test -p hook unsupported_platform --lib --locked
