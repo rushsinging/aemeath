@@ -234,6 +234,8 @@ fn reflection_history_displays_safe_metadata_without_body() {
                     output_tokens: 7,
                 }),
                 duration_ms: 432,
+                deviation_texts: vec![],
+                suggested_memories: vec![],
             }],
         },
     );
@@ -243,14 +245,20 @@ fn reflection_history_displays_safe_metadata_without_body() {
     apply_runtime_event(&mut app, event);
 
     let rendered = system_texts(&app).join("\n");
-    assert!(rendered.contains("timestamp=1700000000"));
-    assert!(rendered.contains("trigger=Manual"));
-    assert!(rendered.contains("status=Failed"));
-    assert!(rendered.contains("2/3/1"));
-    assert!(rendered.contains("apply=PartiallyApplied"));
-    assert!(rendered.contains("error=Parse"));
-    assert!(rendered.contains("tokens(in/out)=11/7"));
-    assert!(rendered.contains("duration=432ms"));
+    let expected_local = chrono::DateTime::from_timestamp(1_700_000_000, 0)
+        .expect("valid timestamp")
+        .with_timezone(&chrono::Local)
+        .format("%Y-%m-%d %H:%M")
+        .to_string();
+    assert!(rendered.contains(&expected_local), "本地时间: {rendered}");
+    assert!(rendered.contains("Manual"));
+    assert!(rendered.contains("✗ Failed (Parse)"));
+    assert!(rendered.contains("PartiallyApplied"));
+    assert!(rendered.contains("432ms"));
+    assert!(rendered.contains("11→7 tok"));
+    assert!(rendered.contains("Deviations (2):"));
+    assert!(rendered.contains("Suggestions (3):"));
+    assert!(rendered.contains("1 outdated"));
     assert!(!rendered.contains("reflection-secret-body-must-not-appear"));
 }
 

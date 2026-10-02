@@ -229,6 +229,15 @@ pub trait ReflectionHistoryQuery: Send + Sync {
     /// Only safe metadata summaries cross this boundary; full records
     /// (including output content) stay internal to the adapter.
     async fn list(&self, limit: usize) -> Result<Vec<ReflectionSafeSummary>, MemoryError>;
+
+    /// 显式内容投影查询：摘要同时携带偏差文本与建议内容（`safe_summary_with_content`）。
+    /// 仅供本地 /reflect 历史查询使用；默认实现回落为无内容摘要，生产 adapter 覆写。
+    async fn list_with_content(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<ReflectionSafeSummary>, MemoryError> {
+        self.list(limit).await
+    }
 }
 
 /// Memory-owned write boundary for completed Reflection facts. Implementations

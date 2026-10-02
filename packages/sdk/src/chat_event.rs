@@ -451,8 +451,40 @@ pub struct ReflectionTokenUsageView {
     pub output_tokens: u32,
 }
 
-/// Safe reflection history projection. It intentionally contains only metadata
-/// and aggregate counts, never reflection output, prompts, or conversation text.
+/// 建议记忆的层级视图（与 Memory BC 的 snake_case 序列化对齐）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryLayerView {
+    Global,
+    Project,
+}
+
+/// 建议记忆的分类视图（与 Memory BC 的 snake_case 序列化对齐）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryCategoryView {
+    Fact,
+    Decision,
+    Preference,
+    Pattern,
+    Pitfall,
+}
+
+/// 单条建议记忆的内容视图：仅结构化建议字段（content/category/layer/tags/reason），
+/// 不含 supersedes/synthesizes 等 apply 内部语义，也 NEVER 含 LLM 原文/prompt。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MemorySuggestionView {
+    pub layer: MemoryLayerView,
+    pub category: MemoryCategoryView,
+    pub content: String,
+    pub tags: Vec<String>,
+    pub reason: String,
+}
+
+/// Safe reflection history projection. By default it intentionally contains only
+/// metadata and aggregate counts; `deviation_texts` / `suggested_memories` are
+/// populated only for the explicit local `/reflect` content query (never LLM raw
+/// output, prompts, or conversation text).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ReflectionHistoryView {
     pub id: String,
@@ -466,6 +498,12 @@ pub struct ReflectionHistoryView {
     pub error_category: Option<ReflectionErrorCategoryView>,
     pub token_usage: Option<ReflectionTokenUsageView>,
     pub duration_ms: u64,
+    /// 偏差观察文本：仅显式内容查询时非空，否则为空 vec。
+    #[serde(default)]
+    pub deviation_texts: Vec<String>,
+    /// 建议记忆内容：同 `deviation_texts` 的显式查询口径。
+    #[serde(default)]
+    pub suggested_memories: Vec<MemorySuggestionView>,
 }
 
 /// Chat 事件流中的单个事件。

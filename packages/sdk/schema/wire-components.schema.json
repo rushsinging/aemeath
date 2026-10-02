@@ -2266,6 +2266,56 @@
       },
       "type": "object"
     },
+    "MemoryCategoryView": {
+      "description": "建议记忆的分类视图（与 Memory BC 的 snake_case 序列化对齐）。",
+      "enum": [
+        "fact",
+        "decision",
+        "preference",
+        "pattern",
+        "pitfall"
+      ],
+      "type": "string"
+    },
+    "MemoryLayerView": {
+      "description": "建议记忆的层级视图（与 Memory BC 的 snake_case 序列化对齐）。",
+      "enum": [
+        "global",
+        "project"
+      ],
+      "type": "string"
+    },
+    "MemorySuggestionView": {
+      "description": "单条建议记忆的内容视图：仅结构化建议字段（content/category/layer/tags/reason），\n不含 supersedes/synthesizes 等 apply 内部语义，也 NEVER 含 LLM 原文/prompt。",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/MemoryCategoryView"
+        },
+        "content": {
+          "type": "string"
+        },
+        "layer": {
+          "$ref": "#/$defs/MemoryLayerView"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "layer",
+        "category",
+        "content",
+        "tags",
+        "reason"
+      ],
+      "type": "object"
+    },
     "ModelInvocationId": {
       "format": "uuid",
       "type": "string",
@@ -2412,10 +2462,18 @@
       "type": "string"
     },
     "ReflectionHistoryView": {
-      "description": "Safe reflection history projection. It intentionally contains only metadata\nand aggregate counts, never reflection output, prompts, or conversation text.",
+      "description": "Safe reflection history projection. By default it intentionally contains only\nmetadata and aggregate counts; `deviation_texts` / `suggested_memories` are\npopulated only for the explicit local `/reflect` content query (never LLM raw\noutput, prompts, or conversation text).",
       "properties": {
         "apply_status": {
           "$ref": "#/$defs/ReflectionApplyStatusView"
+        },
+        "deviation_texts": {
+          "default": [],
+          "description": "偏差观察文本：仅显式内容查询时非空，否则为空 vec。",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "deviations": {
           "format": "uint",
@@ -2447,6 +2505,14 @@
         },
         "status": {
           "$ref": "#/$defs/ReflectionStatusView"
+        },
+        "suggested_memories": {
+          "default": [],
+          "description": "建议记忆内容：同 `deviation_texts` 的显式查询口径。",
+          "items": {
+            "$ref": "#/$defs/MemorySuggestionView"
+          },
+          "type": "array"
         },
         "suggestions": {
           "format": "uint",

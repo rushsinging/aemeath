@@ -24,10 +24,31 @@ pub(super) async fn list_reflection_history_impl(
         .services()
         .reflection_history
         .clone()
-        .list(limit)
+        // /reflect 是本地用户的显式内容查询：投影偏差文本与建议内容
+        // （Safe 边界由 Memory 默认 `list` 保留，此处走显式内容投影）。
+        .list_with_content(limit)
         .await
         .map_err(|error| SdkError::Internal(format!("List reflection history failed: {error}")))?;
     Ok(records.into_iter().map(summary_to_sdk).collect())
+}
+
+fn suggestion_to_sdk(suggestion: memory::api::MemorySuggestion) -> sdk::MemorySuggestionView {
+    sdk::MemorySuggestionView {
+        layer: match suggestion.layer {
+            memory::api::MemoryLayer::Global => sdk::MemoryLayerView::Global,
+            memory::api::MemoryLayer::Project => sdk::MemoryLayerView::Project,
+        },
+        category: match suggestion.category {
+            memory::api::MemoryCategory::Fact => sdk::MemoryCategoryView::Fact,
+            memory::api::MemoryCategory::Decision => sdk::MemoryCategoryView::Decision,
+            memory::api::MemoryCategory::Preference => sdk::MemoryCategoryView::Preference,
+            memory::api::MemoryCategory::Pattern => sdk::MemoryCategoryView::Pattern,
+            memory::api::MemoryCategory::Pitfall => sdk::MemoryCategoryView::Pitfall,
+        },
+        content: suggestion.content,
+        tags: suggestion.tags,
+        reason: suggestion.reason,
+    }
 }
 
 fn summary_to_sdk(summary: ReflectionSafeSummary) -> ReflectionHistoryView {
@@ -69,6 +90,13 @@ fn summary_to_sdk(summary: ReflectionSafeSummary) -> ReflectionHistoryView {
             output_tokens: usage.output_tokens,
         }),
         duration_ms: summary.duration_ms,
+        deviation_texts: summary.deviation_texts.unwrap_or_default(),
+        suggested_memories: summary
+            .suggested_memories
+            .unwrap_or_default()
+            .into_iter()
+            .map(suggestion_to_sdk)
+            .collect(),
     }
 }
 

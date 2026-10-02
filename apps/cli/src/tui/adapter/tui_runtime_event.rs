@@ -413,6 +413,30 @@ pub(crate) enum TuiReflectionErrorCategory {
     TimedOut,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiMemoryLayer {
+    Global,
+    Project,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiMemoryCategory {
+    Fact,
+    Decision,
+    Preference,
+    Pattern,
+    Pitfall,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct TuiMemorySuggestion {
+    pub(crate) layer: TuiMemoryLayer,
+    pub(crate) category: TuiMemoryCategory,
+    pub(crate) content: String,
+    pub(crate) tags: Vec<String>,
+    pub(crate) reason: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TuiReflectionRecord {
     pub(crate) id: String,
@@ -426,6 +450,10 @@ pub(crate) struct TuiReflectionRecord {
     pub(crate) error_category: Option<TuiReflectionErrorCategory>,
     pub(crate) token_usage: Option<(u32, u32)>,
     pub(crate) duration_ms: u64,
+    /// 偏差观察文本（仅显式内容查询时非空）。
+    pub(crate) deviation_texts: Vec<String>,
+    /// 建议记忆内容（仅显式内容查询时非空）。
+    pub(crate) suggested_memories: Vec<TuiMemorySuggestion>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

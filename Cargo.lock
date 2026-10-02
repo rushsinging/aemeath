@@ -414,6 +414,7 @@ dependencies = [
  "arboard",
  "async-trait",
  "base64",
+ "chrono",
  "clap",
  "composition",
  "console 0.15.11",

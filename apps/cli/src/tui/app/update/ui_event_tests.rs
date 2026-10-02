@@ -638,11 +638,109 @@ fn format_reflection_history_renders_optional_metadata_as_absent() {
         error_category: None,
         token_usage: None,
         duration_ms: 0,
+        deviation_texts: vec![],
+        suggested_memories: vec![],
     };
 
     let rendered = crate::tui::app::update::format_reflection_history(&[record]);
-    assert!(rendered.contains("error=none"));
-    assert!(rendered.contains("tokens(in/out)=n/a"));
+    assert!(rendered.contains("… Running"), "状态必须符号化: {rendered}");
+    assert!(
+        !rendered.contains("tok"),
+        "无 token 数据时不得显示 tokens 段: {rendered}"
+    );
+    assert!(
+        !rendered.contains("Deviations"),
+        "零计数时不得显示 Deviations 组: {rendered}"
+    );
+}
+
+/// 卡片式渲染：本地时间、状态符号、apply、耗时秒化、tokens、偏差与建议内容全展开。
+#[test]
+fn format_reflection_history_renders_card_with_content() {
+    use crate::tui::adapter::tui_runtime_event::*;
+    let record = TuiReflectionRecord {
+        id: "r-1".to_string(),
+        timestamp: 1_790_878_426,
+        trigger: TuiReflectionTrigger::Manual,
+        status: TuiReflectionStatus::Succeeded,
+        deviations: 1,
+        suggestions: 1,
+        outdated: 0,
+        apply_status: TuiReflectionApplyStatus::Applied,
+        error_category: None,
+        token_usage: Some((16100, 6312)),
+        duration_ms: 84_896,
+        deviation_texts: vec!["first deviation\ntwo-line".to_string()],
+        suggested_memories: vec![TuiMemorySuggestion {
+            layer: TuiMemoryLayer::Project,
+            category: TuiMemoryCategory::Decision,
+            content: "P5 正在将统一 Runtime Loop 的 fat RunLoopPort 拆分为窄能力边界".to_string(),
+            tags: vec![],
+            reason: "why".to_string(),
+        }],
+    };
+
+    let rendered = crate::tui::app::update::format_reflection_history(&[record]);
+
+    let expected_local = chrono::DateTime::from_timestamp(1_790_878_426, 0)
+        .expect("valid timestamp")
+        .with_timezone(&chrono::Local)
+        .format("%Y-%m-%d %H:%M")
+        .to_string();
+    assert!(
+        rendered.contains(&expected_local),
+        "必须显示本地时间 {expected_local}: {rendered}"
+    );
+    assert!(rendered.contains("Manual"));
+    assert!(rendered.contains("✓ Succeeded"), "状态符号化: {rendered}");
+    assert!(rendered.contains("Applied"), "apply 状态: {rendered}");
+    assert!(rendered.contains("84.9s"), "耗时秒化: {rendered}");
+    assert!(
+        rendered.contains("16100→6312 tok"),
+        "tokens 紧凑显示: {rendered}"
+    );
+    assert!(rendered.contains("Deviations (1):"));
+    assert!(
+        rendered.contains("first deviation two-line"),
+        "多行内容必须折叠为单行: {rendered}"
+    );
+    assert!(rendered.contains("Suggestions (1):"));
+    assert!(rendered.contains("[project/decision]"));
+    assert!(rendered.contains("P5 正在将统一 Runtime Loop"));
+}
+
+/// 超长内容单行截断（100 字符 + …），不破坏卡片排版。
+#[test]
+fn format_reflection_history_truncates_long_content() {
+    use crate::tui::adapter::tui_runtime_event::*;
+    let long = "长".repeat(200);
+    let record = TuiReflectionRecord {
+        id: "r-2".to_string(),
+        timestamp: 1,
+        trigger: TuiReflectionTrigger::Interval,
+        status: TuiReflectionStatus::Succeeded,
+        deviations: 1,
+        suggestions: 0,
+        outdated: 0,
+        apply_status: TuiReflectionApplyStatus::NotApplied,
+        error_category: None,
+        token_usage: None,
+        duration_ms: 500,
+        deviation_texts: vec![long.clone()],
+        suggested_memories: vec![],
+    };
+
+    let rendered = crate::tui::app::update::format_reflection_history(&[record]);
+    let truncated = format!("{}…", "长".repeat(100));
+    assert!(
+        rendered.contains(&truncated),
+        "必须截断为 100 字符: {rendered}"
+    );
+    assert!(
+        !rendered.contains(&"长".repeat(150)),
+        "不得保留完整长文: {rendered}"
+    );
+    assert!(rendered.contains("500ms"), "短耗时保持毫秒: {rendered}");
 }
 
 #[test]

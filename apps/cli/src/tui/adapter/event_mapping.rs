@@ -1330,6 +1330,33 @@ fn reflection_record(value: sdk::ReflectionHistoryView) -> TuiReflectionRecord {
             .token_usage
             .map(|usage| (usage.input_tokens, usage.output_tokens)),
         duration_ms: value.duration_ms,
+        deviation_texts: value.deviation_texts,
+        suggested_memories: value
+            .suggested_memories
+            .into_iter()
+            .map(memory_suggestion)
+            .collect(),
+    }
+}
+fn memory_suggestion(
+    value: sdk::MemorySuggestionView,
+) -> crate::tui::adapter::tui_runtime_event::TuiMemorySuggestion {
+    use crate::tui::adapter::tui_runtime_event::{TuiMemoryCategory, TuiMemoryLayer};
+    crate::tui::adapter::tui_runtime_event::TuiMemorySuggestion {
+        layer: match value.layer {
+            sdk::MemoryLayerView::Global => TuiMemoryLayer::Global,
+            sdk::MemoryLayerView::Project => TuiMemoryLayer::Project,
+        },
+        category: match value.category {
+            sdk::MemoryCategoryView::Fact => TuiMemoryCategory::Fact,
+            sdk::MemoryCategoryView::Decision => TuiMemoryCategory::Decision,
+            sdk::MemoryCategoryView::Preference => TuiMemoryCategory::Preference,
+            sdk::MemoryCategoryView::Pattern => TuiMemoryCategory::Pattern,
+            sdk::MemoryCategoryView::Pitfall => TuiMemoryCategory::Pitfall,
+        },
+        content: value.content,
+        tags: value.tags,
+        reason: value.reason,
     }
 }
 fn reflection_trigger(value: sdk::ReflectionTriggerView) -> TuiReflectionTrigger {

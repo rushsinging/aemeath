@@ -51,10 +51,89 @@ fn reflection_record_summary_is_safe_and_deterministic() {
                 output_tokens: 5,
             }),
             duration_ms: 12,
+            deviation_texts: None,
+            suggested_memories: None,
         }
     );
     let json = serde_json::to_string(&record.safe_summary()).unwrap();
     assert!(!json.contains("secret"));
+}
+
+/// 可选内容投影：`safe_summary()` 默认不携带内容（Safe 边界保留）；
+/// `safe_summary_with_content()` 显式携带偏差文本与建议内容（仅本地
+/// /reflect 查询使用）。两条路径的计数与状态字段必须一致。
+#[test]
+fn safe_summary_with_content_carries_texts_and_suggestions() {
+    let record = ReflectionRecord {
+        id: "reflection-c".into(),
+        timestamp: 43,
+        trigger: ReflectionTrigger::Manual,
+        status: ReflectionStatus::Succeeded,
+        output: Some(ReflectionOutput {
+            deviations: vec!["deviation one".into(), "deviation two".into()],
+            suggested_memories: vec![MemorySuggestion {
+                layer: MemoryLayer::Project,
+                category: MemoryCategory::Decision,
+                content: "memory content".into(),
+                tags: vec!["tag-a".into()],
+                reason: "why".into(),
+                supersedes: vec![],
+                synthesizes: Vec::new(),
+            }],
+            outdated_memories: vec![],
+        }),
+        apply_result: None,
+        error_category: None,
+        token_usage: None,
+        duration_ms: 7,
+    };
+
+    let plain = record.safe_summary();
+    assert_eq!(plain.deviations, 2);
+    assert_eq!(plain.suggestions, 1);
+    assert!(
+        plain.deviation_texts.is_none(),
+        "默认摘要不得携带偏差文本（Safe 边界）"
+    );
+    assert!(
+        plain.suggested_memories.is_none(),
+        "默认摘要不得携带建议内容（Safe 边界）"
+    );
+    let json = serde_json::to_string(&plain).unwrap();
+    assert!(!json.contains("deviation one"));
+    assert!(!json.contains("memory content"));
+
+    let with_content = record.safe_summary_with_content();
+    assert_eq!(with_content.deviations, 2);
+    assert_eq!(with_content.suggestions, 1);
+    assert_eq!(
+        with_content.deviation_texts.as_deref(),
+        Some(&["deviation one".to_string(), "deviation two".to_string()][..])
+    );
+    let suggestions = with_content
+        .suggested_memories
+        .as_ref()
+        .expect("内容投影必须携带建议");
+    assert_eq!(suggestions.len(), 1);
+    assert_eq!(suggestions[0].content, "memory content");
+    assert_eq!(suggestions[0].category, MemoryCategory::Decision);
+    assert_eq!(suggestions[0].layer, MemoryLayer::Project);
+    assert_eq!(suggestions[0].reason, "why");
+}
+
+/// 无 output 的记录（Failed/Running）：内容投影同样不携带内容字段。
+#[test]
+fn safe_summary_with_content_without_output_stays_empty() {
+    let record = ReflectionRecord::failed(
+        "reflection-f",
+        44,
+        ReflectionTrigger::Interval,
+        ReflectionErrorCategory::LlmCall,
+        3,
+    );
+    let with_content = record.safe_summary_with_content();
+    assert!(with_content.deviation_texts.is_none());
+    assert!(with_content.suggested_memories.is_none());
 }
 
 #[test]

@@ -135,6 +135,13 @@ pub struct ReflectionSafeSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<ReflectionTokenUsage>,
     pub duration_ms: u64,
+    /// 偏差观察文本：仅 `safe_summary_with_content()` 显式投影时携带（本地
+    /// /reflect 查询）；默认 `safe_summary()` 为 None（Safe 边界不携带内容）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deviation_texts: Option<Vec<String>>,
+    /// 建议记忆内容：同 `deviation_texts` 的显式投影口径。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_memories: Option<Vec<MemorySuggestion>>,
 }
 
 /// 申请结果值对象：Reflection 建议的应用完成度（原摆放于 ports，依赖方向回归 domain）。
@@ -236,7 +243,20 @@ impl ReflectionRecord {
             error_category: self.error_category,
             token_usage: self.token_usage,
             duration_ms: self.duration_ms,
+            deviation_texts: None,
+            suggested_memories: None,
         }
+    }
+
+    /// 显式内容投影：在 `safe_summary()` 基础上携带偏差文本与建议内容。
+    /// 仅供本地 /reflect 历史查询使用——Safe 边界（默认摘要不携带内容）不变。
+    pub fn safe_summary_with_content(&self) -> ReflectionSafeSummary {
+        let mut summary = self.safe_summary();
+        if let Some(output) = &self.output {
+            summary.deviation_texts = Some(output.deviations.clone());
+            summary.suggested_memories = Some(output.suggested_memories.clone());
+        }
+        summary
     }
 }
 

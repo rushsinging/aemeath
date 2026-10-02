@@ -14,6 +14,7 @@ utils = { path = "../../packages/global/utils" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+chrono = "0.4"
 clap = { version = "4", features = ["derive", "env"] }
 crossterm = { version = "0.28", features = ["events", "event-stream"] }
 futures = "0.3"

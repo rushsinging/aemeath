@@ -149,7 +149,7 @@ Manual Run 硬约束（当前实现）：
 
 ### 同步执行模型
 
-三种 trigger 全部进入 Runtime-owned 的同一执行通道，调用方 await 到终态：`Completed`（携带不含正文的状态与计数）或 `DisabledSkipped`。执行开始前 append `Running` durable fact；成功、失败、partial apply、timeout 或 cancel 时再以同一 id `upsert` 终态。Runtime **NEVER** 把反思正文投影到 TUI 或 chat，只发布计数事实。`/reflect [limit]` 是只读 history query，不触发 LLM，也不执行 apply。
+三种 trigger 全部进入 Runtime-owned 的同一执行通道，调用方 await 到终态：`Completed`（携带不含正文的状态与计数）或 `DisabledSkipped`。执行开始前 append `Running` durable fact；成功、失败、partial apply、timeout 或 cancel 时再以同一 id `upsert` 终态。Runtime **NEVER** 把反思正文投影到 TUI 或 chat，只发布计数事实。`/reflect [limit]` 是只读 history query，不触发 LLM，也不执行 apply；其内容展示走显式内容投影（`ReflectionHistoryQuery::list_with_content` → `safe_summary_with_content`），偏差文本与建议内容仅在该查询路径跨 SDK 边界，默认 `list` 的 Safe 摘要保持零内容。
 
 ```text
 Interval / PreCompact / Manual

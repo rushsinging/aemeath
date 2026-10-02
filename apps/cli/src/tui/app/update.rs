@@ -49,31 +49,101 @@ fn markdown_spacing_overrides_to_sdk(
     }
 }
 
+/// 内容单行化：换行折叠为空格，按字符数截断到 `max_chars`（超出追加 …）。
+fn single_line_truncated(text: &str, max_chars: usize) -> String {
+    let flattened = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flattened.chars().count() <= max_chars {
+        return flattened;
+    }
+    let truncated: String = flattened.chars().take(max_chars).collect();
+    format!("{truncated}…")
+}
+
+fn reflection_status_label(
+    status: &crate::tui::adapter::tui_runtime_event::TuiReflectionStatus,
+    error_category: &Option<crate::tui::adapter::tui_runtime_event::TuiReflectionErrorCategory>,
+) -> String {
+    use crate::tui::adapter::tui_runtime_event::TuiReflectionStatus;
+    match status {
+        TuiReflectionStatus::Succeeded => "✓ Succeeded".to_string(),
+        TuiReflectionStatus::Running => "… Running".to_string(),
+        TuiReflectionStatus::Failed => match error_category {
+            Some(category) => format!("✗ Failed ({category:?})"),
+            None => "✗ Failed".to_string(),
+        },
+    }
+}
+
+fn reflection_duration_label(duration_ms: u64) -> String {
+    if duration_ms >= 1000 {
+        format!("{:.1}s", duration_ms as f64 / 1000.0)
+    } else {
+        format!("{duration_ms}ms")
+    }
+}
+
 fn format_reflection_history(
     records: &[crate::tui::adapter::tui_runtime_event::TuiReflectionRecord],
 ) -> String {
+    use crate::tui::adapter::tui_runtime_event::{TuiMemoryCategory, TuiMemoryLayer};
+    fn layer_label(layer: &TuiMemoryLayer) -> &'static str {
+        match layer {
+            TuiMemoryLayer::Global => "global",
+            TuiMemoryLayer::Project => "project",
+        }
+    }
+    fn category_label(category: &TuiMemoryCategory) -> &'static str {
+        match category {
+            TuiMemoryCategory::Fact => "fact",
+            TuiMemoryCategory::Decision => "decision",
+            TuiMemoryCategory::Preference => "preference",
+            TuiMemoryCategory::Pattern => "pattern",
+            TuiMemoryCategory::Pitfall => "pitfall",
+        }
+    }
+
     let mut lines = vec![format!("Reflection history ({}):", records.len())];
     for record in records {
-        let tokens = record.token_usage.map_or_else(
-            || "n/a".to_string(),
-            |(input_tokens, output_tokens)| format!("{input_tokens}/{output_tokens}"),
-        );
-        let error = record
-            .error_category
-            .map_or_else(|| "none".to_string(), |category| format!("{category:?}"));
-        lines.push(format!(
-            "- timestamp={} trigger={:?} status={:?} counts(deviations/suggestions/outdated)={}/{}/{} apply={:?} error={} tokens(in/out)={} duration={}ms",
-            record.timestamp,
+        lines.push(String::new());
+        let local_time = chrono::DateTime::from_timestamp(record.timestamp as i64, 0)
+            .map(|utc| {
+                utc.with_timezone(&chrono::Local)
+                    .format("%Y-%m-%d %H:%M")
+                    .to_string()
+            })
+            .unwrap_or_else(|| format!("timestamp={}", record.timestamp));
+        let mut header = format!(
+            "  {local_time}  {:?}  {} · {:?} · {}",
             record.trigger,
-            record.status,
-            record.deviations,
-            record.suggestions,
-            record.outdated,
+            reflection_status_label(&record.status, &record.error_category),
             record.apply_status,
-            error,
-            tokens,
-            record.duration_ms,
-        ));
+            reflection_duration_label(record.duration_ms),
+        );
+        if let Some((input_tokens, output_tokens)) = record.token_usage {
+            header.push_str(&format!(" · {input_tokens}→{output_tokens} tok"));
+        }
+        if record.outdated > 0 {
+            header.push_str(&format!(" · {} outdated", record.outdated));
+        }
+        lines.push(header);
+
+        if record.deviations > 0 {
+            lines.push(format!("  Deviations ({}):", record.deviations));
+            for text in &record.deviation_texts {
+                lines.push(format!("    · {}", single_line_truncated(text, 100)));
+            }
+        }
+        if record.suggestions > 0 {
+            lines.push(format!("  Suggestions ({}):", record.suggestions));
+            for suggestion in &record.suggested_memories {
+                lines.push(format!(
+                    "    + [{}/{}] {}",
+                    layer_label(&suggestion.layer),
+                    category_label(&suggestion.category),
+                    single_line_truncated(&suggestion.content, 100),
+                ));
+            }
+        }
     }
     lines.join("\n")
 }
