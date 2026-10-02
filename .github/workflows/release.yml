@@ -33,9 +33,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      # 不带 @stable：读取 rust-toolchain.toml 的 pinned 版本，
-      # 与本地开发工具链一致，避免 stable 升级引入新 clippy 规则阻断发版。
-      - uses: dtolnay/rust-toolchain
+      # @stable 仅是 action 版本 ref；实际安装的 channel 由仓库根
+      # rust-toolchain.toml（pin 1.97.0）决定，与本地开发工具链一致。
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
@@ -100,7 +100,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain
+      # channel 见 rust-toolchain.toml（pin 1.97.0）。
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 

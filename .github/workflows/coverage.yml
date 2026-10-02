@@ -25,8 +25,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 不带 @stable：读取 rust-toolchain.toml 的 pinned 版本，与发版一致。
-      - uses: dtolnay/rust-toolchain
+      # @stable 仅是 action 版本 ref；channel 由 rust-toolchain.toml 决定。
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
 
