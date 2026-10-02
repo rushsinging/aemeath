@@ -42,6 +42,8 @@ fn canned_reflection() -> ReflectionHistoryView {
         error_category: None,
         token_usage: None,
         duration_ms: 100,
+        deviation_texts: vec![],
+        suggested_memories: vec![],
     }
 }
 

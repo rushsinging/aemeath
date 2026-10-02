@@ -386,6 +386,23 @@ impl AtomicDatasetReflectionHistoryStore {
 #[async_trait]
 impl ReflectionHistoryQuery for AtomicDatasetReflectionHistoryStore {
     async fn list(&self, limit: usize) -> Result<Vec<ReflectionSafeSummary>, MemoryError> {
+        self.list_projecting(limit, false).await
+    }
+
+    async fn list_with_content(
+        &self,
+        limit: usize,
+    ) -> Result<Vec<ReflectionSafeSummary>, MemoryError> {
+        self.list_projecting(limit, true).await
+    }
+}
+
+impl AtomicDatasetReflectionHistoryStore {
+    async fn list_projecting(
+        &self,
+        limit: usize,
+        with_content: bool,
+    ) -> Result<Vec<ReflectionSafeSummary>, MemoryError> {
         for attempt in 0..REFLECTION_HISTORY_CAS_ATTEMPTS {
             match self.load_records().await {
                 Ok((records, _)) => {
@@ -393,7 +410,13 @@ impl ReflectionHistoryQuery for AtomicDatasetReflectionHistoryStore {
                         .into_iter()
                         .rev()
                         .take(limit)
-                        .map(|record| record.safe_summary())
+                        .map(|record| {
+                            if with_content {
+                                record.safe_summary_with_content()
+                            } else {
+                                record.safe_summary()
+                            }
+                        })
                         .collect());
                 }
                 Err(MemoryError::Storage {
