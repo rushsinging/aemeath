@@ -88,9 +88,7 @@ L2 是白盒测试，可以访问 crate 私有模块，但不得穿越 crate 边
 
 ### 2.5 L4 场景测试
 
-L4 验证用户可感知或业务可验收旅程。TUI 的 crossterm → update → Effect → Runtime 回灌 → ViewAssembler → TestBackend → insta 属于 L4，详见 [../02-modules/tui/05-e2e-scenario-testing.md](../02-modules/tui/05-e2e-scenario-testing.md)。
-
-L4 不替代 reducer、Buffer cell 和契约测试。跨层链路应在每个边界保留相邻测试，并由场景测试证明最终组合成立。
+L4 验证用户可感知或业务可验收旅程。TUI 的 crossterm → update → Effect → Runtime 回灌 → ViewAssembler → TestBackend → insta 属于 L4，详见 [../02-modules/tui/05-e2e-scenario-testing.md](../02-modules/tui/05-e2e-scenario-testing.md)。真实 CLI/PTY 的向导和终端生命周期测试统一使用 `tui-test-rs`，属于 L5；当前断言使用终端语义状态，不额外保留 raw PTY。L4 不替代 reducer、Buffer cell 和契约测试。跨层链路应在每个边界保留相邻测试，并由场景测试证明最终组合成立。
 
 对于 Provider-visible Context 链路，L0 **MUST** 以架构守卫禁止 Context window 生成后的 Runtime 文本装饰；L1 覆盖 reminder renderer、guidance 选择/扫描与 breakpoint 纯逻辑；L2 覆盖 Runtime typed intent → `ContextRequest` 及 Context window 组装；L3 覆盖 `ContextWindow → InvocationRequest` 机械映射、Provider wire 与 invocation-only 非持久化契约；L4 覆盖同 Session guidance source change、model switch、不同模型 Subagent 和 Task reminder 场景。Main/Sub 的每个相邻边界都必须有证据，**NEVER** 只测 intent 源头和最终 Provider payload。
 
@@ -459,12 +457,11 @@ cargo check --workspace
 
 P1、feature/platform matrix 与真实 PTY smoke 由 #1050 落地为 `scripts/check-slow-test-matrix.sh`：
 
-- host-native：fmt、workspace all-target clippy、workspace tests、TUI P0/P1、CLI build、真实 PTY smoke；
-- cross target：设置 `AEMEATH_MATRIX_CROSS=1` 后按 macOS/Linux host 尝试双架构 build；target/linker 不可用时明确 `SKIP`，编译失败仍阻断；
-- PTY 使用 allowlist 环境和隔离 HOME/agents config，验证 alternate screen 进入、Ctrl+C 退出、alternate screen/cursor 恢复，不访问真实 provider；CLI build 通过 Cargo JSON 输出解析实际 executable（显式 `AEMEATH_PTY_BIN` 可覆盖），子进程等待有上限，失败路径 kill/reap；
-- host-native 各层只执行一次：workspace 排除 CLI，P0/P1 精确过滤，PTY 在 build 后单独执行；当前完整热运行 77.48s（其中 all-target clippy 为主要成本），PTY 约 2s、P1 约 0.04s；跨 target 首次运行因额外构建成本较高，仅手动/release 前执行；
+- host-native：fmt、workspace all-target clippy、workspace tests、TUI P0/P1、CLI build、`tui-test-rs` 真实 CLI/PTY 慢测；
+- 真实 CLI/PTY 慢测使用 `tui-test-rs` 和 `env -i` allowlist 环境、隔离 HOME/cwd/agents config，覆盖 `connect_wizard_tui.rs`（向导流程与受控慢探测）与 `pty_smoke.rs`（alternate screen 进入、Ctrl+C 退出、alternate screen/cursor 恢复、legacy 目录隔离），不访问真实 provider；binary 由 `CARGO_BIN_EXE` 自动构建注入（显式 `AEMEATH_PTY_BIN` 可覆盖），测试串行执行，失败路径由 `tui-test-rs` session close 负责收尾；
+- 真实终端断言使用语义状态（alternate screen、cursor、退出码），当前不保留 raw PTY；未来若需要原始 ANSI 字节顺序或真实 Unix signal 语义，再增加极小低层 PTY 兜底；
+- host-native 各层只执行一次：workspace 排除 CLI，P0/P1 精确过滤，真实 CLI/PTY 慢测在 build 后单独串行执行；当前完整热运行 77.48s（其中 all-target clippy 为主要成本），PTY 约 2s、P1 约 0.04s；跨 target 首次运行因额外构建成本较高，仅手动/release 前执行；
 - 不新增 PR workflow。
-
 ## 10. v0.1.0 落地关系
 
 ```text
@@ -845,6 +842,7 @@ Hook 类型化协议、受管进程、Dispatcher、Runtime adapter、legacy 退�
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-10-02 | L5 真实终端测试迁移至 `tui-test-rs`：`connect_wizard_tui.rs`（向导端到端、`env -i` 隔离、进程内慢探测服务）与 `pty_smoke.rs`（终端恢复 smoke）统一 L5 `#[ignore]`，慢测矩阵改经 `CARGO_BIN_EXE` 自动构建、串行执行，去除 python3 解析依赖 | [#1730](https://github.com/rushsinging/aemeath/issues/1730) |
 | 2026-08-09 | #1053 完成 #649 Runtime L0–L5 行为/风险审计：建立 RuntimeContext、Run/control、model/context/tool、Interaction、typed terminal、Activity Snapshot、streaming FIFO、live/resume 与 recovery 证据矩阵；纠正 production reachability 挂载表述；完整守卫、workspace/slow matrix 与 coverage 通过 | [#1053](https://github.com/rushsinging/aemeath/issues/1053)、[#649](https://github.com/rushsinging/aemeath/issues/649) |
 | 2026-08-08 | 完成 Hook 类型化协议、受管进程、Runtime→SDK→TUI 与治理门禁的 L0–L5 最终审查：补公共 HookPort L3 契约；修正文档漂移；纳入 typed snapshot policies 与 Windows typed unsupported/no-retry 证据；记录最终 coverage | Hook 测试治理审查 |
 | 2026-08-07 | #1543 明确 Windows/non-Unix 暂不支持 Hook command execution，登记 Windows compile/typed unsupported/no-retry 契约与 Unix 真实进程组回收证据边界 | [#1543](https://github.com/rushsinging/aemeath/issues/1543) |
