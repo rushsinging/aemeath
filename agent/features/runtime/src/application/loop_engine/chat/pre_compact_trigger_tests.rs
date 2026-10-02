@@ -232,6 +232,8 @@ fn build_reflection_port(harness: &CompactHarness) -> RuntimeReflection<'_> {
         "system prompt text".to_string(),
         "en".to_string(),
         harness.material_slot.clone(),
+        crate::application::loop_engine::chat::reflection::IntervalReflectionMaterialSlot::default(
+        ),
     )
 }
 
@@ -398,72 +400,10 @@ impl memory::api::ReflectionHistoryStore for RecordingReflectionHistory {
     }
 }
 
-/// A test-only `ProviderPort` whose `invoke` always returns a valid reflection
-/// JSON so `submit_complete` can complete end-to-end and reach the slot.
-pub(super) struct StaticReflectionProvider;
-
-#[async_trait]
-impl crate::ports::ProviderPort for StaticReflectionProvider {
-    fn capabilities(
-        &self,
-        model: &provider::ModelIdData,
-    ) -> Result<
-        crate::ports::provider_port::ModelCapabilityData,
-        crate::ports::provider_port::ProviderError,
-    > {
-        use crate::ports::provider_port::{
-            ModelCapabilityData, ProviderError, ProviderErrorKind, ReasoningCapabilityData,
-        };
-        if model.provider == "pre-compact-test" {
-            Ok(ModelCapabilityData {
-                model: model.clone(),
-                supports_tools: false,
-                supports_parallel_tool_calls: false,
-                supports_streaming: true,
-                reasoning: ReasoningCapabilityData::none(),
-                context_limit: Some(128_000),
-                output_limit: Some(8_192),
-            })
-        } else {
-            Err(ProviderError::fatal(
-                ProviderErrorKind::ModelUnavailable,
-                format!("unknown model: {model}"),
-            ))
-        }
-    }
-
-    async fn invoke(
-        &self,
-        _request: crate::ports::provider_port::InvocationRequestData,
-        _cancel: &dyn crate::ports::provider_port::CancellationSignal,
-    ) -> Result<
-        crate::ports::provider_port::InvocationStreamData,
-        crate::ports::provider_port::ProviderError,
-    > {
-        Ok(
-            crate::application::model::test_support::text_completion_stream(
-                r#"{"deviations":[],"suggested_memories":[],"outdated_memories":[]}"#,
-                1,
-                1,
-            ),
-        )
-    }
-}
-
 /// Build a `ProviderBindingData` whose provider returns a parseable reflection
 /// response so `submit_complete` can drain the adapter to a terminal state.
 fn pre_compact_test_binding() -> Arc<crate::ports::ProviderBindingData> {
-    let model = provider::ModelIdData {
-        provider: "pre-compact-test".to_string(),
-        model: "pre-compact-test-model".to_string(),
-    };
-    Arc::new(crate::ports::ProviderBindingData {
-        provider: Arc::new(StaticReflectionProvider),
-        model,
-        max_tokens: 8_192,
-        requested_reasoning: share::reasoning::ReasoningLevel::Off,
-        context_window: Some(128_000),
-    })
+    crate::application::reflection::test_support::static_reflection_binding()
 }
 
 fn committed_outcome() -> CompactOutcome {
@@ -562,6 +502,7 @@ async fn pre_compact_execution_reports_a_precompact_completion() {
             messages,
             &RunId::new("run"),
             None,
+            None,
             CancellationToken::new(),
         )
         .await
@@ -592,6 +533,7 @@ async fn pre_compact_execution_reports_history_failure() {
             ReflectionTaskTrigger::PreCompact,
             messages,
             &RunId::new("run"),
+            None,
             None,
             CancellationToken::new(),
         )
@@ -679,6 +621,7 @@ async fn pre_compact_trigger_stages_material_after_compact_outcome_committed() {
             ReflectionTaskTrigger::PreCompact,
             messages,
             &RunId::new("run"),
+            None,
             None,
             CancellationToken::new(),
         )
@@ -830,6 +773,7 @@ async fn succeeded_reflection_records_usage_via_shared_path() {
             messages,
             &run_id,
             Some(&run_step_id),
+            None,
             CancellationToken::new(),
         )
         .await
@@ -853,8 +797,8 @@ async fn succeeded_reflection_records_usage_via_shared_path() {
         record.session_id,
         sdk::SessionId::new(harness.runtime_context.skill_load_session_id())
     );
-    assert_eq!(record.provider, "pre-compact-test");
-    assert_eq!(record.model, "pre-compact-test-model");
+    assert_eq!(record.provider, "reflection-test");
+    assert_eq!(record.model, "reflection-test-model");
     assert_eq!(
         record.input_tokens, 1,
         "provider 报告的 input tokens 必须原样入账"
@@ -889,6 +833,7 @@ async fn failed_reflection_records_no_usage() {
             messages,
             &RunId::new("failed-run"),
             Some(&RunStepId::new("failed-step")),
+            None,
             CancellationToken::new(),
         )
         .await
@@ -918,6 +863,7 @@ async fn cancelled_reflection_records_no_usage() {
             ReflectionTaskTrigger::PreCompact,
             vec![Message::user("cancelled before start")],
             &RunId::new("cancelled-run"),
+            None,
             None,
             cancel,
         )
@@ -949,6 +895,7 @@ async fn disabled_reflection_records_no_usage() {
             vec![Message::user("disabled")],
             &RunId::new("disabled-run"),
             None,
+            None,
             CancellationToken::new(),
         )
         .await
@@ -959,5 +906,81 @@ async fn disabled_reflection_records_no_usage() {
         harness.usage_sink.records().is_empty(),
         "DisabledSkipped 不得计入 Usage: {:?}",
         harness.usage_sink.records()
+    );
+}
+
+// ── Interval 游标增量材料（#1827）：生产端口的拼接与回退 ──────────
+
+use crate::application::loop_engine::chat::reflection::IntervalReflectionMaterialSlot;
+
+/// interval=1 的开启配置（频控每 Run 命中，测试只需 1 个 step_count）。
+fn interval_one_config() -> ConfigSnapshot {
+    let mut config = Config::default();
+    config.memory.enabled = true;
+    config.memory.reflection.enabled = true;
+    config.memory.reflection.interval_runs = 1;
+    ConfigSnapshot::new(config)
+}
+
+/// 装了历史增量的槽：材料 = 增量 + Run 内消息（顺序拼接），
+/// coverage_end = 装槽时历史总长 + Run 内消息数（游标推进基准）。
+#[test]
+fn interval_reflection_messages_merges_staged_increment_with_run_messages() {
+    let harness = CompactHarness::with_config(Ok(committed_outcome()), interval_one_config());
+    let interval_slot = IntervalReflectionMaterialSlot::default();
+    interval_slot.stage(
+        vec![
+            share::message::Message::user("history delta 1"),
+            share::message::Message::user("history delta 2"),
+        ],
+        30, // 装槽时 session 历史总长
+    );
+    let reflection = crate::application::loop_engine::run_services::RuntimeReflection::new(
+        &harness.runtime_context,
+        harness.adapter.clone(),
+        "system".to_string(),
+        "en".to_string(),
+        harness.material_slot.clone(),
+        interval_slot,
+    );
+
+    let run_messages = [share::message::Message::user("in-run message")];
+    let material = reflection
+        .interval_reflection_messages(1, &run_messages)
+        .expect("频控命中必须返回材料（step_count=1 × interval=1 的默认配置）");
+
+    assert_eq!(material.messages.len(), 3, "增量 2 条 + Run 内 1 条");
+    assert_eq!(material.messages[0].text_content(), "history delta 1");
+    assert_eq!(material.messages[2].text_content(), "in-run message");
+    assert_eq!(
+        material.coverage_end,
+        Some(31),
+        "游标推进基准 = 装槽历史总长 30 + Run 内消息数 1"
+    );
+}
+
+/// 空槽（无游标回退）：材料 = 仅 Run 内消息，coverage_end=None（不推进游标）。
+#[test]
+fn interval_reflection_messages_empty_slot_falls_back_to_run_messages_only() {
+    let harness = CompactHarness::with_config(Ok(committed_outcome()), interval_one_config());
+    let reflection = crate::application::loop_engine::run_services::RuntimeReflection::new(
+        &harness.runtime_context,
+        harness.adapter.clone(),
+        "system".to_string(),
+        "en".to_string(),
+        harness.material_slot.clone(),
+        IntervalReflectionMaterialSlot::default(),
+    );
+
+    let run_messages = [share::message::Message::user("only run message")];
+    let material = reflection
+        .interval_reflection_messages(1, &run_messages)
+        .expect("频控命中必须返回材料");
+
+    assert_eq!(material.messages.len(), 1);
+    assert_eq!(material.messages[0].text_content(), "only run message");
+    assert_eq!(
+        material.coverage_end, None,
+        "回退路径不推进游标（保持现状语义）"
     );
 }

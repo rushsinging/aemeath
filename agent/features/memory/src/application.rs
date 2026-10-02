@@ -10,6 +10,9 @@ pub struct ReflectionExecutionIdentity {
     pub id: String,
     pub timestamp: u64,
     pub trigger: ReflectionTrigger,
+    /// 反思游标：本次快照覆盖到的 session active 历史终点（消息计数）。
+    /// 仅 Succeeded 落盘时写入 record；失败/取消不推进（None）。
+    pub coverage_end: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,7 +63,11 @@ impl ReflectionWorkflow {
                 ReflectionMessage::new(role, message.text_content())
             })
             .collect::<Vec<_>>();
-        let recent_summary = engine.recent_messages_summary(&messages, usize::MAX);
+        // 消息摘要字符预算（#1827）：增量路径天然小于预算；PreCompact 被丢弃段与
+        // Manual 游标失效回退全量时由预算截断（取最近部分），NEVER 无界进入 prompt。
+        const REFLECTION_MESSAGE_BUDGET_CHARS: usize = 24_000;
+        let recent_summary =
+            engine.recent_messages_summary(&messages, REFLECTION_MESSAGE_BUDGET_CHARS);
         engine.build_prompt(&project_memory, &recent_summary, lang)
     }
 
@@ -152,6 +159,11 @@ impl ReflectionWorkflow {
             error_category,
             token_usage: Some(token_usage),
             duration_ms,
+            coverage_end: if error_category.is_none() {
+                identity.coverage_end
+            } else {
+                None
+            },
         };
         history
             .upsert(&record)

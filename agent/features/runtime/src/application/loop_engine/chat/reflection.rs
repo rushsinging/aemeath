@@ -124,11 +124,14 @@ pub(crate) async fn run(
     lang: &str,
     memory: &Arc<dyn MemoryPort>,
     history: &Arc<dyn ReflectionHistoryStore>,
+    coverage_end: Option<u64>,
     cancel: tokio_util::sync::CancellationToken,
 ) -> ReflectionRunOutcome {
+    let mut request = ReflectionTaskRequest::new(trigger, messages);
+    request.coverage_end = coverage_end;
     adapter
         .run_complete(
-            ReflectionTaskRequest::new(trigger, messages),
+            request,
             config.clone(),
             Arc::clone(&binding.provider),
             binding.model.clone(),
@@ -197,5 +200,62 @@ impl PreCompactMaterialSlot {
     #[cfg(test)]
     pub(crate) fn staged(&self) -> Option<Vec<share::message::Message>> {
         self.0.lock().expect("pre-compact 材料槽锁中毒").clone()
+    }
+}
+
+// ── 反思游标（#1827）─────────────────────────────────────────────
+
+/// 游标增量切片：cursor 有效（≤ 历史长度）→ `历史[cursor..]`（可为空切片）；
+/// 缺失（None）或失效（cursor > len，如 compact 截断后）→ None，调用方回退。
+pub(crate) fn slice_increment_since_cursor(
+    messages: &[share::message::Message],
+    cursor: Option<u64>,
+) -> Option<Vec<share::message::Message>> {
+    let cursor = cursor? as usize;
+    if cursor > messages.len() {
+        return None;
+    }
+    Some(messages[cursor..].to_vec())
+}
+
+/// 从 history 读最新游标：newest-first 列表中第一条 `Succeeded` 且带
+/// `coverage_end` 的记录的游标值。读取失败/无记录/无游标 → None（回退路径）。
+pub(crate) async fn latest_coverage_cursor(
+    history: &Arc<dyn memory::api::ReflectionHistoryStore>,
+) -> Option<u64> {
+    let records = history.list(usize::MAX).await.ok()?;
+    records
+        .iter()
+        .find(|record| {
+            record.status == memory::api::reflection::ReflectionStatus::Succeeded
+                && record.coverage_end.is_some()
+        })
+        .and_then(|record| record.coverage_end)
+}
+
+/// Interval 反思材料：历史增量切片 + 装槽时的历史总长（游标推进基准）。
+pub(crate) struct IntervalReflectionMaterial {
+    pub messages: Vec<share::message::Message>,
+    pub history_len_at_stage: u64,
+}
+
+/// Interval 反思材料的共享槽：session driver 在 Main Run 启动时读游标、切片
+/// session 历史增量装入；engine 的 reflection phase 经反思端口取出（与 Run 内
+/// 增量消息拼接）。与 `PreCompactMaterialSlot` 同构——装配层与状态机分离。
+#[derive(Clone, Default)]
+pub(crate) struct IntervalReflectionMaterialSlot(
+    std::sync::Arc<std::sync::Mutex<Option<IntervalReflectionMaterial>>>,
+);
+
+impl IntervalReflectionMaterialSlot {
+    pub(crate) fn stage(&self, messages: Vec<share::message::Message>, history_len: u64) {
+        *self.0.lock().expect("interval 反思材料槽锁中毒") = Some(IntervalReflectionMaterial {
+            messages,
+            history_len_at_stage: history_len,
+        });
+    }
+
+    pub(crate) fn take(&self) -> Option<IntervalReflectionMaterial> {
+        self.0.lock().expect("interval 反思材料槽锁中毒").take()
     }
 }

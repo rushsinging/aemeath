@@ -32,6 +32,7 @@ fn reflection_record_summary_is_safe_and_deterministic() {
             output_tokens: 5,
         }),
         duration_ms: 12,
+        coverage_end: None,
     };
 
     assert_eq!(
@@ -51,6 +52,7 @@ fn reflection_record_summary_is_safe_and_deterministic() {
                 output_tokens: 5,
             }),
             duration_ms: 12,
+            coverage_end: None,
             deviation_texts: None,
             suggested_memories: None,
         }
@@ -86,6 +88,7 @@ fn safe_summary_with_content_carries_texts_and_suggestions() {
         error_category: None,
         token_usage: None,
         duration_ms: 7,
+        coverage_end: None,
     };
 
     let plain = record.safe_summary();
@@ -244,4 +247,32 @@ fn message_summary_keeps_recent_messages_and_truncates_by_char() {
     assert_eq!(truncated.chars().count(), 8);
     assert!(truncated.starts_with("[Assistant]".chars().take(8).collect::<String>().as_str()));
     assert_eq!(engine().recent_messages_summary(&messages, 0), "");
+}
+
+// ── 反思游标（coverage_end）─────────────────────────────────────
+
+/// 游标字段的序列化兼容：旧记录（无 coverage_end）反序列化为 None；
+/// 新记录往返保持；safe summary 携带游标（元数据非内容，Safe 边界允许）。
+#[test]
+fn coverage_end_is_optional_and_round_trips() {
+    let mut record = ReflectionRecord::running("r-1", 10, ReflectionTrigger::Interval);
+    assert_eq!(record.coverage_end, None);
+
+    // 旧数据（JSON 无 coverage_end）必须可反序列化。
+    let legacy = serde_json::json!({
+        "id": "r-0",
+        "timestamp": 1,
+        "trigger": "interval",
+        "status": "succeeded",
+        "apply_result": null,
+        "duration_ms": 0
+    });
+    let restored: ReflectionRecord = serde_json::from_value(legacy).expect("旧记录必须可反序列化");
+    assert_eq!(restored.coverage_end, None);
+
+    record.coverage_end = Some(42);
+    let json = serde_json::to_string(&record).unwrap();
+    let round_trip: ReflectionRecord = serde_json::from_str(&json).unwrap();
+    assert_eq!(round_trip.coverage_end, Some(42));
+    assert_eq!(record.safe_summary().coverage_end, Some(42));
 }

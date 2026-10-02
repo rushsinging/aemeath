@@ -451,6 +451,8 @@ where
                 // 手动反思的材料快照必须在 run launch 装配前取自当前 committed session
                 // 的可见结构化消息（对齐原 ReflectNow 分支的取法），不能用 Run buffer 猜历史。
                 let mut manual_reflection_messages: Vec<Message> = Vec::new();
+                // 反思游标推进基准（#1827）：Manual 快照时 session 历史总长。
+                let mut manual_reflection_coverage_end: Option<u64> = None;
                 let (segment_id, accepted_inputs) = match idle_result {
                     IdleResult::Shutdown => break 'session,
                     IdleResult::ResetRequested => {
@@ -500,7 +502,37 @@ where
                                 continue;
                             }
                         };
-                        manual_reflection_messages = bound.session().structured_messages();
+                        // 游标增量切片（#1827）：有效游标 → 只带增量；缺失/失效
+                        // （首次或 compact 截断）→ 回退全量。增量为空（上次反思后无
+                        // 新对话）→ 跳过执行，NEVER 为空跑支付 token。
+                        let history_messages = bound.session().structured_messages();
+                        let history_len = history_messages.len() as u64;
+                        let cursor = crate::application::loop_engine::chat::reflection::latest_coverage_cursor(
+                            &shell.runtime_context_factory.services().reflection_history,
+                        )
+                        .await;
+                        match crate::application::loop_engine::chat::reflection::slice_increment_since_cursor(
+                            &history_messages,
+                            cursor,
+                        ) {
+                            Some(increment) if increment.is_empty() => {
+                                sink.send_event(RuntimeStreamEvent::CommandResultText {
+                                    text: "自上次反思以来无新增对话内容，已跳过本次手动反思。"
+                                        .to_string(),
+                                    is_error: false,
+                                })
+                                .await;
+                                continue;
+                            }
+                            Some(increment) => {
+                                manual_reflection_messages = increment;
+                            }
+                            None => {
+                                manual_reflection_messages = history_messages;
+                            }
+                        }
+                        // 游标推进基准 = 快照时历史总长（增量与回退全量同值）。
+                        manual_reflection_coverage_end = Some(history_len);
                         (ChatId::new_v7().to_string(), Vec::new())
                     }
                     IdleResult::Resumed {
@@ -796,6 +828,26 @@ where
                 // 消息，反思端口在 Compacting 内取出执行（材料收集与状态机分离）。
                 let pre_compact_material =
                     crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot::default();
+                // Interval 反思材料槽（#1827 游标增量）：读游标切片 session 历史增量
+                // 装槽；游标缺失（首次）或失效（compact 截断）时装空槽，Interval 回退为
+                // 仅当前 Run 消息（不推进游标）。单用途 Run（手动压缩/反思）不装槽。
+                let interval_material =
+                    crate::application::loop_engine::chat::reflection::IntervalReflectionMaterialSlot::default();
+                if !manual_reflection_run && !manual_compaction_run {
+                    if let Ok(bound) = wiring.bind_main_run().await {
+                        let history_messages = bound.session().structured_messages();
+                        let cursor = crate::application::loop_engine::chat::reflection::latest_coverage_cursor(
+                            &shell.runtime_context_factory.services().reflection_history,
+                        )
+                        .await;
+                        if let Some(increment) = crate::application::loop_engine::chat::reflection::slice_increment_since_cursor(
+                            &history_messages,
+                            cursor,
+                        ) {
+                            interval_material.stage(increment, history_messages.len() as u64);
+                        }
+                    }
+                }
                 let mut compaction =
                     crate::application::loop_engine::run_services::RuntimeCompaction::new(
                         &runtime_context,
@@ -874,6 +926,7 @@ where
                     system_prompt: system_prompt_text.clone(),
                     language: language.clone(),
                     messages: manual_reflection_messages,
+                    coverage_end: manual_reflection_coverage_end,
                 };
                 // Main Run 都绑反思端口——Interval/PreCompact 反思的判定与执行
                 // 由 engine reflection phase 驱动。
@@ -884,6 +937,7 @@ where
                         cacheable_system_prompt.clone(),
                         language.clone(),
                         pre_compact_material,
+                        interval_material,
                     );
                 let mut loop_context = crate::application::loop_engine::RunLoop::new(
                     &mut launch_input,

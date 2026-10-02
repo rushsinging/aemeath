@@ -92,6 +92,7 @@ fn identity() -> ReflectionExecutionIdentity {
         id: "reflection-id".to_string(),
         timestamp: 42,
         trigger: memory::api::reflection::ReflectionTrigger::Manual,
+        coverage_end: None,
     }
 }
 

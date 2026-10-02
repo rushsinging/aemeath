@@ -95,6 +95,17 @@ Runtime 对三种来源统一做 enable 判定（等价 `reflection_enabled`：m
 | **Pre-compact** | `PreCompact` | Conversation Run 内 `Compacting → Reflecting → Compacting` | engine 的 pre-compact 插入点 | compact 前冻结“将被丢弃”的 messages 快照；只有 `CompactOutcome::Committed` 后才在 `Compacting` 内进入 `Reflecting`，压缩收口在反思返回后放行；compact 失败、被 hook block、消息不足或取消时不执行 |
 | **手动请求** | `Manual` | 独立 `RunIntent::ManualReflection` 的真实 Run：`DrainingInput → Reflecting → DrainingInput` | `/reflect-now` 命令 | idle 受理后创建真实 Run（Run root activity `purpose = Reflection`）；与另两种 trigger 共用同一执行通道；`/reflect [limit]` **NEVER** 进入此入口 |
 
+### 反思游标（消息起止点，#1827）
+
+反思消息快照的起止点由**游标**（`ReflectionRecord.coverage_end`，session active 历史的消息计数）驱动：
+
+- **Interval**：Main Run 启动时读游标切片 session 历史增量（`IntervalReflectionMaterialSlot` 装槽），触发时与当前 Run 内消息拼接——覆盖上次反思以来的**所有中间 turn**（修复「只看当前 Run」的覆盖缺口）。Succeeded 后游标推进到「装槽时历史总长 + Run 内消息数」。
+- **Manual**：`/reflect-now` 受理时读游标切片增量（修复全量历史无界的 token 浪费）；**增量为空（上次反思后无新对话）时跳过执行并提示**，NEVER 为空跑支付 token。Succeeded 后游标推进到快照时历史总长。
+- **PreCompact**：保持「被丢弃段」抢救语义，**不读也不推进游标**（被丢弃段不是 session 历史切片）。
+- **游标失效回退**：游标缺失（首次/旧记录）或失效（`cursor > 当前历史长度`，如 compact 截断后位置重排）→ Interval 退化为仅当前 Run 消息（不推进游标）、Manual 回退全量历史。
+- **失败/取消不推进**：只有 `Succeeded` 终态把 `coverage_end` 写入记录；Failed/Cancelled/TimedOut 落盘时游标字段为空。
+- **消息摘要预算**：`recent_messages_summary` 按字符预算（24,000）截断取最近部分——PreCompact 被丢弃段与 Manual 回退全量的防爆闸，NEVER 无界进入 prompt。
+
 ### Run 状态：`Reflecting`（非终态）
 
 `RunStatus::Reflecting` 是可恢复的工作相位，**NEVER** 是 Run 终态（`is_terminal()` 只含 `Completed` / `Failed` / `Terminated`）。三条路径都经状态矩阵的 `RunTransition::BeginReflection` 进入、`RunTransition::ReflectionCompleted` 返回进入前状态（`reflection_return_status`）：

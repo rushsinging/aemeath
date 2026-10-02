@@ -17,6 +17,7 @@ fn safe_sdk_view_contains_only_metadata_and_counts() {
             output_tokens: 20,
         }),
         duration_ms: 30,
+        coverage_end: None,
         deviation_texts: None,
         suggested_memories: None,
     });
@@ -46,6 +47,7 @@ fn sdk_view_maps_content_projection_with_layer_and_category() {
         error_category: None,
         token_usage: None,
         duration_ms: 5,
+        coverage_end: None,
         deviation_texts: Some(vec!["deviation one".into(), "deviation two".into()]),
         suggested_memories: Some(vec![memory::api::MemorySuggestion {
             layer: memory::api::MemoryLayer::Project,

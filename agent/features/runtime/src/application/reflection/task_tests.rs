@@ -514,3 +514,108 @@ async fn cancelled_run_persists_cancelled_history_record() {
     // 同一 stable id：Running 与终态是同一条记录的两次写入。
     assert_eq!(appends[0].id, upserts[0].id);
 }
+
+// ---------------------------------------------------------------------------
+// 反思游标写入链（#1827）：request 携带 coverage_end → Succeeded 落盘写入；
+// 取消/失败不推进
+// ---------------------------------------------------------------------------
+
+/// Succeeded 且 request 带 coverage_end：终态 upsert 的记录必须携带游标。
+#[tokio::test]
+async fn succeeded_run_persists_coverage_end_cursor() {
+    let adapter = ReflectionTaskAdapter::new(Duration::from_secs(5), |_request, _cancel| async {
+        Ok(successful_payload())
+    });
+    let history = RecordingReflectionHistory::default();
+    let binding = crate::application::reflection::test_support::static_reflection_binding();
+    let mut request = ReflectionTaskRequest::new(
+        ReflectionTaskTrigger::Manual,
+        vec![share::message::Message::user("delta")],
+    );
+    request.coverage_end = Some(42);
+
+    let outcome = adapter
+        .run_complete(
+            request,
+            share::config::MemoryConfig {
+                enabled: true,
+                reflection: share::config::ReflectionConfig {
+                    enabled: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            binding.provider.clone(),
+            binding.model.clone(),
+            binding.max_tokens,
+            binding.requested_reasoning,
+            "system".to_string(),
+            "en".to_string(),
+            std::sync::Arc::new(memory::api::NoOpMemory),
+            std::sync::Arc::new(history.clone()),
+            CancellationToken::new(),
+        )
+        .await;
+
+    let ReflectionRunOutcome::Completed(completion) = &outcome else {
+        panic!("必须成功收口: {outcome:?}");
+    };
+    assert_eq!(completion.status, ReflectionTaskCompletionStatus::Succeeded);
+    let upserts = history.upserts.lock().await;
+    assert_eq!(upserts.len(), 1);
+    assert_eq!(
+        upserts[0].coverage_end,
+        Some(42),
+        "Succeeded 落盘必须携带游标"
+    );
+}
+
+/// 取消不推进游标：request 带 coverage_end 但取消时，落盘记录不得携带游标。
+#[tokio::test]
+async fn cancelled_run_does_not_advance_cursor() {
+    let adapter = ReflectionTaskAdapter::new(Duration::from_secs(5), |_request, _cancel| async {
+        pending::<()>().await;
+        #[allow(unreachable_code)]
+        Ok(successful_payload())
+    });
+    let history = RecordingReflectionHistory::default();
+    let binding = crate::application::run::run_factory_support::doubles::fake_provider_binding();
+    let mut request = ReflectionTaskRequest::new(
+        ReflectionTaskTrigger::Manual,
+        vec![share::message::Message::user("delta")],
+    );
+    request.coverage_end = Some(42);
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+
+    let outcome = adapter
+        .run_complete(
+            request,
+            share::config::MemoryConfig {
+                enabled: true,
+                reflection: share::config::ReflectionConfig {
+                    enabled: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            binding.provider.clone(),
+            binding.model.clone(),
+            binding.max_tokens,
+            binding.requested_reasoning,
+            "system".to_string(),
+            "en".to_string(),
+            std::sync::Arc::new(memory::api::NoOpMemory),
+            std::sync::Arc::new(history.clone()),
+            cancel,
+        )
+        .await;
+
+    let ReflectionRunOutcome::Completed(completion) = &outcome else {
+        panic!("取消必须折叠为 Completed(Cancelled): {outcome:?}");
+    };
+    assert_eq!(completion.status, ReflectionTaskCompletionStatus::Cancelled);
+    let upserts = history.upserts.lock().await;
+    assert_eq!(upserts.len(), 1);
+    assert_eq!(upserts[0].coverage_end, None, "取消/失败不得推进游标");
+}
