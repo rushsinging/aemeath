@@ -429,7 +429,6 @@ dependencies = [
  "libc",
  "log",
  "once_cell",
- "portable-pty",
  "rand 0.9.5",
  "ratatui",
  "ratatui-textarea",
