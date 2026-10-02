@@ -298,10 +298,10 @@ pub(super) async fn execute_step_with_scope(
     // 取消也都算该 Run 已执行过，不再自动重试重复反思。
     if matches!(model_step, ModelStep::Complete { .. }) && !execution.interval_reflection_started()
     {
-        let interval_messages = port.reflection_mut().and_then(|reflection| {
+        let interval_material = port.reflection_mut().and_then(|reflection| {
             reflection.interval_reflection_messages(execution.step_count(), execution.messages())
         });
-        if let Some(messages) = interval_messages {
+        if let Some(material) = interval_material {
             execution.mark_interval_reflection_started();
             run_reflection_phase(
                 run,
@@ -310,8 +310,9 @@ pub(super) async fn execute_step_with_scope(
                 crate::application::reflection::ReflectionTaskTrigger::Interval {
                     step_count: execution.step_count(),
                 },
-                messages,
+                material.messages,
                 Some(&step_id),
+                material.coverage_end,
                 &step_cancel,
             )
             .await?;

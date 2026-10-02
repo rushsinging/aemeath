@@ -45,18 +45,23 @@ impl crate::application::loop_engine::ReflectionPhasePort for ReflectionFake {
         &self,
         step_count: usize,
         _messages: &[share::message::Message],
-    ) -> Option<Vec<share::message::Message>> {
+    ) -> Option<crate::application::loop_engine::engine::IntervalReflectionMaterial> {
         let call = self.judgment_calls.get();
         self.judgment_calls.set(call + 1);
+        // engine 测试不装历史增量槽：材料=脚本化快照，不推进游标（None）。
+        let snapshot = || {
+            crate::application::loop_engine::engine::IntervalReflectionMaterial {
+                messages: vec![share::message::Message::user("reflect snapshot")],
+                coverage_end: None,
+            }
+        };
         match self.judgment {
             IntervalJudgment::Disabled => None,
             IntervalJudgment::Interval(runs) if runs > 0 && step_count.is_multiple_of(runs) => {
-                Some(vec![share::message::Message::user("reflect snapshot")])
+                Some(snapshot())
             }
             IntervalJudgment::Interval(_) => None,
-            IntervalJudgment::MissThenHit if call > 0 => {
-                Some(vec![share::message::Message::user("reflect snapshot")])
-            }
+            IntervalJudgment::MissThenHit if call > 0 => Some(snapshot()),
             IntervalJudgment::MissThenHit => None,
         }
     }
@@ -72,6 +77,7 @@ impl crate::application::loop_engine::ReflectionPhasePort for ReflectionFake {
         _messages: Vec<share::message::Message>,
         _run_id: &sdk::RunId,
         _run_step_id: Option<&sdk::RunStepId>,
+        _coverage_end: Option<u64>,
         cancel: CancellationToken,
     ) -> Result<ReflectionRunOutcome, LoopEngineError> {
         // 进入执行时 begin activity 必须已经发布且处于 Running。

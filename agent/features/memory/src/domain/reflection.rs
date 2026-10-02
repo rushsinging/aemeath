@@ -135,6 +135,9 @@ pub struct ReflectionSafeSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<ReflectionTokenUsage>,
     pub duration_ms: u64,
+    /// 反思游标（元数据非内容，Safe 边界允许携带）：见 `ReflectionRecord::coverage_end`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage_end: Option<u64>,
     /// 偏差观察文本：仅 `safe_summary_with_content()` 显式投影时携带（本地
     /// /reflect 查询）；默认 `safe_summary()` 为 None（Safe 边界不携带内容）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -175,6 +178,10 @@ pub struct ReflectionRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<ReflectionTokenUsage>,
     pub duration_ms: u64,
+    /// 反思游标：本次反思覆盖到的 session active 历史终点（structured_messages 的
+    /// 消息计数）。仅 Succeeded 终态推进；缺失（旧记录/未推进）时调用方回退。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage_end: Option<u64>,
 }
 
 impl ReflectionRecord {
@@ -189,6 +196,7 @@ impl ReflectionRecord {
             error_category: None,
             token_usage: None,
             duration_ms: 0,
+            coverage_end: None,
         }
     }
 
@@ -209,6 +217,7 @@ impl ReflectionRecord {
             error_category: Some(error_category),
             token_usage: None,
             duration_ms,
+            coverage_end: None,
         }
     }
 
@@ -243,6 +252,7 @@ impl ReflectionRecord {
             error_category: self.error_category,
             token_usage: self.token_usage,
             duration_ms: self.duration_ms,
+            coverage_end: self.coverage_end,
             deviation_texts: None,
             suggested_memories: None,
         }

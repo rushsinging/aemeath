@@ -21,6 +21,7 @@ pub(super) async fn run_reflection_phase(
     trigger: crate::application::reflection::ReflectionTaskTrigger,
     messages: Vec<share::message::Message>,
     run_step_id: Option<&sdk::RunStepId>,
+    coverage_end: Option<u64>,
     step_cancel: &CancellationToken,
 ) -> Result<(), LoopEngineError> {
     transition_and_emit(run, execution, port, RunTransition::BeginReflection).await?;
@@ -42,6 +43,7 @@ pub(super) async fn run_reflection_phase(
                     messages,
                     run.id(),
                     run_step_id,
+                    coverage_end,
                     step_cancel.clone(),
                 )
                 .await
@@ -101,6 +103,7 @@ pub(super) async fn run_pre_compact_reflection_phase_if_staged(
     let Some(messages) = messages else {
         return Ok(());
     };
+    // PreCompact 反思的是被丢弃段（非 session 历史增量），不推进游标（None）。
     run_reflection_phase(
         run,
         execution,
@@ -108,6 +111,7 @@ pub(super) async fn run_pre_compact_reflection_phase_if_staged(
         crate::application::reflection::ReflectionTaskTrigger::PreCompact,
         messages,
         Some(run_step_id),
+        None,
         step_cancel,
     )
     .await

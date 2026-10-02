@@ -28,10 +28,9 @@ fn enabled_memory_config() -> share::config::MemoryConfig {
 
 fn fake_binding() -> Arc<crate::ports::ProviderBindingData> {
     Arc::new(crate::ports::ProviderBindingData {
-        provider: Arc::new(crate::application::loop_engine::chat::pre_compact_trigger_tests::StaticReflectionProvider),
+        provider: Arc::new(crate::application::reflection::test_support::StaticReflectionProvider),
         model: provider::ModelIdData {
-            // `StaticReflectionProvider` only answers for this provider name.
-            provider: "pre-compact-test".to_string(),
+            provider: "reflection-test".to_string(),
             model: "manual-test-model".to_string(),
         },
         max_tokens: 8_192,
@@ -208,6 +207,7 @@ async fn manual_run_awaits_completion_and_freezes_the_visible_messages() {
         "zh",
         &memory,
         &history,
+        None,
         CancellationToken::new(),
     )
     .await;
@@ -340,6 +340,7 @@ fn manual_reflection_port(
         system_prompt: "system".to_string(),
         language: "zh".to_string(),
         messages: vec![Message::user("visible committed history")],
+        coverage_end: None,
     };
     (fixture, port)
 }

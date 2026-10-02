@@ -47,6 +47,7 @@ fn identity() -> ReflectionExecutionIdentity {
         id: "reflection-id".to_string(),
         timestamp: 42,
         trigger: ReflectionTrigger::PreCompact,
+        coverage_end: None,
     }
 }
 
@@ -214,4 +215,25 @@ async fn runtime_failure_is_materialized_by_memory_history_workflow() {
         Some(ReflectionErrorCategory::TimedOut)
     );
     assert_eq!(summaries[0].duration_ms, 12);
+}
+
+/// 消息摘要字符预算（#1827）：超预算时最早消息被截出 prompt（取最近部分），
+/// NEVER 无界进入 prompt——PreCompact 被丢弃段与 Manual 回退全量的防爆闸。
+#[test]
+fn build_prompt_truncates_messages_beyond_budget() {
+    let memory = crate::noop::NoOpMemory;
+
+    let mut messages = Vec::new();
+    for index in 0..6000 {
+        messages.push(share::message::Message::user(format!(
+            "marker-{index:04}-padding-padding-padding"
+        )));
+    }
+
+    let prompt = ReflectionWorkflow::build_prompt(&messages, "en", &memory, 1);
+    assert!(
+        !prompt.contains("marker-0000"),
+        "超预算时最早消息必须被截出 prompt"
+    );
+    assert!(prompt.contains("marker-5999"), "最近消息必须保留");
 }

@@ -230,6 +230,10 @@ pub(crate) struct RuntimeReflection<'a> {
     system_prompt: String,
     language: String,
     pre_compact_material: crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot,
+    /// Interval 反思材料槽（#1827 游标增量）：session driver 在 Run 启动时读游标、
+    /// 切片历史增量装入；判定时取出与 Run 内消息拼接。
+    interval_material:
+        crate::application::loop_engine::chat::reflection::IntervalReflectionMaterialSlot,
 }
 
 impl<'a> RuntimeReflection<'a> {
@@ -239,6 +243,7 @@ impl<'a> RuntimeReflection<'a> {
         system_prompt: String,
         language: String,
         pre_compact_material: crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot,
+        interval_material: crate::application::loop_engine::chat::reflection::IntervalReflectionMaterialSlot,
     ) -> Self {
         Self {
             runtime_context,
@@ -246,6 +251,7 @@ impl<'a> RuntimeReflection<'a> {
             system_prompt,
             language,
             pre_compact_material,
+            interval_material,
         }
     }
 
@@ -289,20 +295,37 @@ impl<'a> RuntimeReflection<'a> {
 
 #[async_trait]
 impl ReflectionPhasePort for RuntimeReflection<'_> {
+    /// Interval 判定与材料组装（#1827 游标增量）：频控命中时取材料槽的历史增量
+    /// 切片，与当前 Run 内消息拼接；游标推进基准 = 装槽时历史总长 + Run 内消息数
+    /// （Run 内消息 commit 后恰好接在历史尾部）。槽空（无游标/失效回退）时退化为
+    /// 仅当前 Run 消息且 coverage_end=None（不推进游标）。
     fn interval_reflection_messages(
         &self,
         step_count: usize,
         messages: &[Message],
-    ) -> Option<Vec<Message>> {
+    ) -> Option<crate::application::loop_engine::engine::IntervalReflectionMaterial> {
         let memory_config = self.runtime_context.config_ref().config().memory();
-        if crate::application::loop_engine::chat::reflection::should_run_turn_reflection(
+        if !crate::application::loop_engine::chat::reflection::should_run_turn_reflection(
             memory_config,
             step_count,
         ) {
-            Some(messages.to_vec())
-        } else {
-            None
+            return None;
         }
+        Some(match self.interval_material.take() {
+            Some(staged) => {
+                let coverage_end = staged.history_len_at_stage + messages.len() as u64;
+                let mut combined = staged.messages;
+                combined.extend_from_slice(messages);
+                crate::application::loop_engine::engine::IntervalReflectionMaterial {
+                    messages: combined,
+                    coverage_end: Some(coverage_end),
+                }
+            }
+            None => crate::application::loop_engine::engine::IntervalReflectionMaterial {
+                messages: messages.to_vec(),
+                coverage_end: None,
+            },
+        })
     }
 
     fn take_pre_compact_messages(&self) -> Option<Vec<Message>> {
@@ -316,6 +339,7 @@ impl ReflectionPhasePort for RuntimeReflection<'_> {
         messages: Vec<Message>,
         run_id: &sdk::RunId,
         run_step_id: Option<&sdk::RunStepId>,
+        coverage_end: Option<u64>,
         cancel: CancellationToken,
     ) -> Result<ReflectionRunOutcome, LoopEngineError> {
         let outcome = crate::application::loop_engine::chat::reflection::run(
@@ -328,6 +352,7 @@ impl ReflectionPhasePort for RuntimeReflection<'_> {
             &self.language,
             self.runtime_context.memory_ref(),
             self.runtime_context.reflection_history_ref(),
+            coverage_end,
             cancel,
         )
         .await;

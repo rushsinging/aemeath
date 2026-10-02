@@ -171,6 +171,7 @@ async fn run_with(
         "en",
         &in_memory(),
         &crate::application::reflection::test_support::noop_reflection_history(),
+        None,
         tokio_util::sync::CancellationToken::new(),
     )
     .await;
@@ -255,6 +256,7 @@ async fn two_runs_before_the_next_one_merge_into_a_single_reminder() {
             "en",
             &in_memory(),
             &history,
+            None,
             tokio_util::sync::CancellationToken::new(),
         )
         .await;

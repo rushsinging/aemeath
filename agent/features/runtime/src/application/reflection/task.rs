@@ -45,11 +45,18 @@ impl ReflectionTaskTrigger {
 pub struct ReflectionTaskRequest {
     pub trigger: ReflectionTaskTrigger,
     pub messages: Vec<ReflectionInputMessage>,
+    /// 反思游标：本次快照覆盖到的 session active 历史终点（消息计数）。
+    /// 由触发编排层（知道快照来源）填写；仅 Succeeded 落盘时推进。
+    pub coverage_end: Option<u64>,
 }
 
 impl ReflectionTaskRequest {
     pub fn new(trigger: ReflectionTaskTrigger, messages: Vec<ReflectionInputMessage>) -> Self {
-        Self { trigger, messages }
+        Self {
+            trigger,
+            messages,
+            coverage_end: None,
+        }
     }
 }
 
@@ -250,6 +257,7 @@ impl ReflectionTaskAdapter {
             id: uuid::Uuid::now_v7().to_string(),
             timestamp: chrono::Utc::now().timestamp().max(0) as u64,
             trigger: trigger.memory_trigger(),
+            coverage_end: request.coverage_end,
         };
         self.run_persisted(
             trigger,

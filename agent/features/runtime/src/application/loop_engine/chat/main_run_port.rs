@@ -330,6 +330,8 @@ pub(crate) struct ChatManualReflection {
     pub system_prompt: String,
     pub language: String,
     pub messages: Vec<Message>,
+    /// 反思游标推进基准（#1827）：装配时快照的 session 历史总长；Succeeded 落盘写入。
+    pub coverage_end: Option<u64>,
 }
 
 #[async_trait]
@@ -349,6 +351,7 @@ impl crate::application::loop_engine::ManualReflectionPort for ChatManualReflect
             &self.language,
             self.runtime_context.memory_ref(),
             self.runtime_context.reflection_history_ref(),
+            self.coverage_end,
             cancel.clone(),
         )
         .await;

@@ -676,9 +676,17 @@ pub trait ManualReflectionPort: Send {
 ///
 /// 反思的执行点在 engine（`BeginReflection`/`ReflectionCompleted`
 /// 转移与 `Reflection` activity 只在 engine 可达），端口不得自行驱动状态机。
+/// Interval 反思材料（#1827 游标增量）：待反思消息快照 + 游标推进基准。
+/// `messages` = 历史增量切片（装槽时）+ 当前 Run 内增量（判定时拼接）；
+/// `coverage_end` = 装槽时历史总长 + Run 内消息数（Succeeded 后推进游标到此）。
+pub struct IntervalReflectionMaterial {
+    pub messages: Vec<share::message::Message>,
+    pub coverage_end: Option<u64>,
+}
+
 #[async_trait]
 pub trait ReflectionPhasePort: Send {
-    /// Interval 判定：命中频控且配置开启时返回待反思消息快照；未命中/禁用返回 None。
+    /// Interval 判定：命中频控且配置开启时返回待反思材料；未命中/禁用返回 None。
     ///
     /// 唯一生产调用形态是 `ModelStep::Complete` 路径（必然无未完成工具轮），
     /// 因此判定只需配置与 step_count，不需要 stop_reason。
@@ -686,7 +694,7 @@ pub trait ReflectionPhasePort: Send {
         &self,
         step_count: usize,
         messages: &[share::message::Message],
-    ) -> Option<Vec<share::message::Message>>;
+    ) -> Option<IntervalReflectionMaterial>;
 
     /// 取走 compaction observer 暂存的 PreCompact 材料；未暂存返回 None。
     ///
@@ -696,12 +704,14 @@ pub trait ReflectionPhasePort: Send {
 
     /// 执行一次反思（内部含 timeout/cancel select），返回终态 outcome。
     /// 任何 outcome（含 Failed/Cancelled/TimedOut）都不得终止宿主 Run——收口语义由 engine phase 统一负责。
+    /// `coverage_end`：反思游标推进基准（#1827），仅 Succeeded 落盘时写入记录。
     async fn run_reflection(
         &mut self,
         trigger: crate::application::reflection::ReflectionTaskTrigger,
         messages: Vec<share::message::Message>,
         run_id: &sdk::RunId,
         run_step_id: Option<&sdk::RunStepId>,
+        coverage_end: Option<u64>,
         cancel: CancellationToken,
     ) -> Result<crate::application::reflection::ReflectionRunOutcome, LoopEngineError>;
 }
