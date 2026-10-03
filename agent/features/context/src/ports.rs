@@ -10,10 +10,12 @@ use crate::domain::{
 };
 
 pub mod context_port;
+pub mod reminder_port;
 pub mod session_management;
 pub mod session_snapshot_store;
 pub(crate) use crate::domain::PromptMaterializationError;
 pub use context_port::ContextPort;
+pub use reminder_port::ReminderControlPort;
 pub use session_management::SessionManagementPort;
 pub(crate) use session_snapshot_store::{
     SessionGeneration, SessionSnapshotStore, SessionStoreError,

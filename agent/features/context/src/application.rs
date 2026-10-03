@@ -1,6 +1,10 @@
 pub mod main_session;
 #[cfg(test)]
 pub(crate) mod performance;
+pub(crate) mod reminder_pipeline;
+#[cfg(test)]
+#[path = "application/reminder_pipeline_tests.rs"]
+mod reminder_pipeline_tests;
 mod service;
 #[cfg(test)]
 #[path = "application/service_tests.rs"]
