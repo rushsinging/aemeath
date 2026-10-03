@@ -9,6 +9,10 @@ mod context_decision_tests;
 #[cfg(test)]
 #[path = "domain/context_messages_map_tests.rs"]
 mod context_messages_map_tests;
+pub mod reminder;
+#[cfg(test)]
+#[path = "domain/reminder_tests.rs"]
+mod reminder_tests;
 pub mod session;
 pub(crate) mod token_budget;
 pub mod tool_receipt;
@@ -16,10 +20,12 @@ pub mod tool_receipt;
 mod tool_receipt_tests;
 
 pub use compact::CompactProgressFn;
+pub use constants::REMINDER_INJECTION_TOKEN_BUDGET;
 pub use token_budget::{
     autocompact_threshold, effective_context_window, estimate_message_tokens,
     estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens, MIN_EFFECTIVE_WINDOW,
 };
+
 pub use tool_receipt::{
     CleanupConfirmation, ToolCallIdentityData, ToolReceiptMutationData, ToolReceiptMutationError,
     ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
@@ -34,8 +40,7 @@ use std::sync::Arc;
 use provider::ModelToolSchemaData;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::AgentRoleDefinition;
-use share::ids::RunId;
-pub use share::ids::{RunStepId, SessionId};
+pub use share::ids::{RunId, RunStepId, SessionId};
 pub use share::message::Message as ContextMessage;
 use share::reasoning::ReasoningLevel;
 

@@ -742,3 +742,110 @@ fn render_user_input_timestamp_prefixes_only_first_text_block() {
         .count();
     assert_eq!(image_blocks, 1, "图片块不得被改动");
 }
+
+// ---------------------------------------------------------------------------
+// Reminder 统一管线（07-reminder-pipeline.md）：build_window 集成
+// ---------------------------------------------------------------------------
+
+struct PipelineTestSource {
+    kind: crate::domain::reminder::ReminderKind,
+    placement: crate::domain::reminder::ReminderPlacement,
+    body: String,
+}
+
+impl crate::domain::reminder::ReminderSource for PipelineTestSource {
+    fn kind(&self) -> crate::domain::reminder::ReminderKind {
+        self.kind.clone()
+    }
+
+    fn policy(&self) -> crate::domain::reminder::ReminderPolicy {
+        crate::domain::reminder::ReminderPolicy {
+            refresh: crate::domain::reminder::RefreshTrigger::OnRunStart,
+            placement: self.placement,
+            inject: crate::domain::reminder::InjectBehavior {
+                dedup: crate::domain::reminder::ReminderDedup::SkipIfUnchanged,
+                priority: crate::domain::reminder::ReminderPriority::task_state(),
+            },
+            compact: crate::domain::reminder::CompactBehavior::Reinstate,
+        }
+    }
+
+    fn build(&self) -> crate::domain::reminder::ReminderSnapshot {
+        crate::domain::reminder::ReminderSnapshot {
+            data: self.body.clone(),
+        }
+    }
+
+    fn render(
+        &self,
+        _snapshot: &crate::domain::reminder::ReminderSnapshot,
+        language: &str,
+    ) -> String {
+        format!("[{language}] {}", self.body)
+    }
+}
+
+#[tokio::test]
+async fn build_window_injects_reminder_pipeline_tail_and_system_tail() {
+    let tail_source = Arc::new(PipelineTestSource {
+        kind: crate::domain::reminder::ReminderKind::task_progress(),
+        placement: crate::domain::reminder::ReminderPlacement::TailUserMessage,
+        body: "total=2 completed=1".to_string(),
+    });
+    let system_source = Arc::new(PipelineTestSource {
+        kind: crate::domain::reminder::ReminderKind::new("model_guidance_mismatch"),
+        placement: crate::domain::reminder::ReminderPlacement::SystemTail,
+        body: "session=a run=b".to_string(),
+    });
+    let service = service(vec![], 1);
+    let run_id = request(None).run_id;
+    crate::ports::ReminderControlPort::create_reminder_pipeline(
+        &service,
+        run_id.clone(),
+        vec![tail_source, system_source],
+    );
+    crate::ports::ReminderControlPort::reminder_run_started(&service, &run_id);
+
+    let window = service
+        .build_window(&request(None))
+        .await
+        .expect("构建 window");
+
+    let tail_user = window
+        .messages
+        .iter()
+        .rev()
+        .filter(|message| matches!(message.role, share::message::Role::User))
+        .flat_map(|message| message.content.iter())
+        .filter_map(|content_block| match content_block {
+            ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .find(|text| text.contains("kind=\"task-progress\""))
+        .expect("尾部 user message 含 reminder 块");
+    assert!(tail_user.contains("[zh] total=2 completed=1"));
+
+    let reminder_block = window
+        .system_blocks
+        .iter()
+        .find(|block| block.kind == "reminder")
+        .expect("SystemTail reminder 进 system blocks");
+    assert!(reminder_block.cacheable);
+    assert!(!reminder_block.cache_break);
+    assert!(reminder_block
+        .content
+        .contains("kind=\"model-guidance-mismatch\""));
+
+    crate::ports::ReminderControlPort::drop_reminder_pipeline(&service, &run_id);
+    let window_after_drop = service
+        .build_window(&request(None))
+        .await
+        .expect("销毁后构建 window");
+    assert!(
+        !window_after_drop
+            .system_blocks
+            .iter()
+            .any(|block| block.kind == "reminder"),
+        "句柄销毁后不再注入"
+    );
+}

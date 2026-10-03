@@ -1,0 +1,314 @@
+use std::sync::{Arc, Mutex};
+
+use super::reminder_pipeline::{ReminderPipeline, ReminderWindowInjection};
+use crate::domain::reminder::{
+    CompactBehavior, InjectBehavior, RefreshTrigger, ReminderDedup, ReminderEventSource,
+    ReminderKind, ReminderPlacement, ReminderPolicy, ReminderSnapshot, ReminderSource,
+};
+
+const LANGUAGE_ZH: &str = "zh";
+
+fn inject_behavior(priority: ReminderPriorityAlias) -> InjectBehavior {
+    InjectBehavior {
+        dedup: ReminderDedup::SkipIfUnchanged,
+        priority,
+    }
+}
+
+use crate::domain::reminder::ReminderPriority as ReminderPriorityAlias;
+
+/// 测试 source：开闭原则的证据——只实现 `ReminderSource` 即全链路工作。
+struct CountingTestSource {
+    kind: ReminderKind,
+    policy: ReminderPolicy,
+    build_count: Mutex<usize>,
+    current: Mutex<String>,
+}
+
+impl CountingTestSource {
+    fn new(kind: ReminderKind, policy: ReminderPolicy) -> Self {
+        Self {
+            kind,
+            policy,
+            build_count: Mutex::new(0),
+            current: Mutex::new(String::new()),
+        }
+    }
+
+    fn set_snapshot(&self, data: &str) {
+        *self.current.lock().expect("current lock poisoned") = data.to_string();
+    }
+
+    fn build_count(&self) -> usize {
+        *self.build_count.lock().expect("build_count lock poisoned")
+    }
+}
+
+impl ReminderSource for CountingTestSource {
+    fn kind(&self) -> ReminderKind {
+        self.kind.clone()
+    }
+
+    fn policy(&self) -> ReminderPolicy {
+        self.policy.clone()
+    }
+
+    fn build(&self) -> ReminderSnapshot {
+        *self.build_count.lock().expect("build_count lock poisoned") += 1;
+        ReminderSnapshot {
+            data: self.current.lock().expect("current lock poisoned").clone(),
+        }
+    }
+
+    fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String {
+        format!("[{language}] {}", snapshot.data)
+    }
+}
+
+fn interval_policy(interval: u32, placement: ReminderPlacement) -> ReminderPolicy {
+    ReminderPolicy {
+        refresh: RefreshTrigger::OnStepInterval(interval),
+        placement,
+        inject: inject_behavior(ReminderPriorityAlias::task_state()),
+        compact: CompactBehavior::Rebuild,
+    }
+}
+
+fn event_policy(source: &str) -> ReminderPolicy {
+    ReminderPolicy {
+        refresh: RefreshTrigger::OnEvent(ReminderEventSource::new(source)),
+        placement: ReminderPlacement::TailUserMessage,
+        inject: inject_behavior(ReminderPriorityAlias::event()),
+        compact: CompactBehavior::Rebuild,
+    }
+}
+
+fn run_start_policy(placement: ReminderPlacement) -> ReminderPolicy {
+    ReminderPolicy {
+        refresh: RefreshTrigger::OnRunStart,
+        placement,
+        inject: inject_behavior(ReminderPriorityAlias::environment()),
+        compact: CompactBehavior::Reinstate,
+    }
+}
+
+// ---------- 注册 → 触发 → 注入 → 渲染 全链路 ----------
+
+#[test]
+fn run_started_source_flows_to_tail_user_message() {
+    let source = Arc::new(CountingTestSource::new(
+        ReminderKind::task_progress(),
+        run_start_policy(ReminderPlacement::TailUserMessage),
+    ));
+    source.set_snapshot("total=3 completed=1");
+    let mut pipeline = ReminderPipeline::new(vec![source.clone()]);
+
+    pipeline.run_started();
+    let injection = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512);
+
+    let tail = injection
+        .tail_user_message
+        .expect("Run 启动 reminder 注入尾部 user message");
+    assert!(tail.contains("kind=\"task-progress\""), "统一 envelope");
+    assert!(tail.contains("version=\"1\""));
+    assert!(tail.contains("[zh] total=3 completed=1"), "按语言渲染 body");
+    assert_eq!(source.build_count(), 1);
+    assert!(injection.system_tail_blocks.is_empty());
+}
+
+#[test]
+fn event_source_flows_only_on_matching_event() {
+    let source = Arc::new(CountingTestSource::new(
+        ReminderKind::memory_updated(),
+        event_policy("memory"),
+    ));
+    source.set_snapshot("changed=2");
+    let mut pipeline = ReminderPipeline::new(vec![source.clone()]);
+
+    pipeline.handle_event(&ReminderEventSource::new("background_task"));
+    assert!(
+        pipeline
+            .inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512)
+            .tail_user_message
+            .is_none(),
+        "非匹配事件源不触发"
+    );
+
+    pipeline.handle_event(&ReminderEventSource::new("memory"));
+    let injection = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512);
+    assert!(injection
+        .tail_user_message
+        .expect("匹配事件源触发注入")
+        .contains("[zh] changed=2"));
+}
+
+#[test]
+fn step_interval_rebuilds_snapshot_at_configured_cadence() {
+    let source = Arc::new(CountingTestSource::new(
+        ReminderKind::task_progress(),
+        interval_policy(3, ReminderPlacement::TailUserMessage),
+    ));
+    let mut pipeline = ReminderPipeline::new(vec![source.clone()]);
+
+    pipeline.step_advanced(1);
+    pipeline.step_advanced(2);
+    assert!(
+        pipeline
+            .inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512)
+            .tail_user_message
+            .is_none(),
+        "间隔未到不重建"
+    );
+
+    source.set_snapshot("total=3 completed=2");
+    pipeline.step_advanced(3);
+    let injection = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:01+08:00", 512);
+    assert!(
+        injection
+            .tail_user_message
+            .expect("间隔到达触发现场重建注入")
+            .contains("[zh] total=3 completed=2"),
+        "注入的是当下最新快照，NEVER 陈旧 payload"
+    );
+    assert_eq!(source.build_count(), 1, "只在间隔点 build");
+}
+
+#[test]
+fn system_tail_source_flows_to_system_blocks() {
+    let source = Arc::new(CountingTestSource::new(
+        ReminderKind::new("model_guidance_mismatch"),
+        run_start_policy(ReminderPlacement::SystemTail),
+    ));
+    source.set_snapshot("session=a run=b");
+    let mut pipeline = ReminderPipeline::new(vec![source]);
+
+    pipeline.run_started();
+    let injection = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512);
+
+    assert!(injection.tail_user_message.is_none());
+    assert_eq!(injection.system_tail_blocks.len(), 1);
+    let block = &injection.system_tail_blocks[0];
+    assert_eq!(block.kind, "reminder");
+    assert!(block.cacheable, "SystemTail 属 cacheable prefix");
+    assert!(!block.cache_break);
+    assert!(block.content.contains("kind=\"model-guidance-mismatch\""));
+}
+
+#[test]
+fn compact_committed_reinstates_run_start_snapshot() {
+    let source = Arc::new(CountingTestSource::new(
+        ReminderKind::new("guidance_sources_changed"),
+        run_start_policy(ReminderPlacement::TailUserMessage),
+    ));
+    source.set_snapshot("guidance changed");
+    let mut pipeline = ReminderPipeline::new(vec![source]);
+
+    pipeline.run_started();
+    let first = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512);
+    assert!(first.tail_user_message.is_some());
+
+    pipeline.compact_committed();
+    let second = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:05+08:00", 512);
+    assert!(
+        second
+            .tail_user_message
+            .expect("Reinstate 重新注入")
+            .contains("guidance changed"),
+        "compact 后 Run 级恒定 reminder 原样复位"
+    );
+}
+
+#[test]
+fn token_budget_defers_low_priority_block_until_next_round() {
+    let high = Arc::new(CountingTestSource::new(
+        ReminderKind::memory_updated(),
+        event_policy("memory"),
+    ));
+    high.set_snapshot(&"e".repeat(80));
+    let low = Arc::new(CountingTestSource::new(
+        ReminderKind::task_progress(),
+        interval_policy(1, ReminderPlacement::TailUserMessage),
+    ));
+    low.set_snapshot(&"t".repeat(400));
+    let mut pipeline = ReminderPipeline::new(vec![high, low]);
+
+    pipeline.run_started();
+    pipeline.handle_event(&ReminderEventSource::new("memory"));
+    pipeline.step_advanced(1);
+
+    // 预算只够高优先级块：memory envelope 约 45 tokens，task 约 110 tokens。
+    let first = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 60);
+    let tail = first.tail_user_message.expect("高优先级块注入");
+    assert!(tail.contains("kind=\"memory-updated\""));
+    assert!(!tail.contains("kind=\"task-progress\""), "低优先级被截断");
+
+    let second = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:02+08:00", 512);
+    assert!(
+        second
+            .tail_user_message
+            .expect("滞留块下一轮补入")
+            .contains("kind=\"task-progress\""),
+        "截断 entry 滞留回队，NEVER 静默丢弃"
+    );
+}
+
+#[test]
+fn rebuild_flag_rebuilds_from_source_before_injection() {
+    let source = Arc::new(CountingTestSource::new(
+        ReminderKind::task_progress(),
+        interval_policy(1, ReminderPlacement::TailUserMessage),
+    ));
+    source.set_snapshot("total=3 completed=1");
+    let mut pipeline = ReminderPipeline::new(vec![source.clone()]);
+
+    pipeline.step_advanced(1);
+    let first = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512);
+    assert!(first.tail_user_message.is_some());
+
+    source.set_snapshot("total=3 completed=3");
+    pipeline.compact_committed();
+    let second = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:05+08:00", 512);
+    assert!(
+        second
+            .tail_user_message
+            .expect("Rebuild 注入前从 source 现场重建")
+            .contains("[zh] total=3 completed=3"),
+        "Rebuild NEVER 注入 compact 前的陈旧快照"
+    );
+}
+
+// ---------- 多 reminder 拼装 ----------
+
+#[test]
+fn multiple_reminders_merge_into_single_tail_message() {
+    let first_source = Arc::new(CountingTestSource::new(
+        ReminderKind::memory_updated(),
+        event_policy("memory"),
+    ));
+    first_source.set_snapshot("changed=1");
+    let second_source = Arc::new(CountingTestSource::new(
+        ReminderKind::task_progress(),
+        interval_policy(1, ReminderPlacement::TailUserMessage),
+    ));
+    second_source.set_snapshot("total=2 completed=0");
+    let mut pipeline = ReminderPipeline::new(vec![first_source, second_source]);
+
+    pipeline.run_started();
+    pipeline.handle_event(&ReminderEventSource::new("memory"));
+    pipeline.step_advanced(1);
+
+    let injection: ReminderWindowInjection =
+        pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512);
+    let tail = injection.tail_user_message.expect("两块均有候选");
+    assert_eq!(
+        tail.matches("<system-reminder").count(),
+        2,
+        "多 reminder 合并为单条消息多块"
+    );
+    let memory_pos = tail.find("kind=\"memory-updated\"").expect("memory 块存在");
+    let progress_pos = tail.find("kind=\"task-progress\"").expect("task 块存在");
+    assert!(
+        memory_pos < progress_pos,
+        "事件类 priority 高于任务状态类，排在前"
+    );
+}
