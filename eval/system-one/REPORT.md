@@ -106,6 +106,32 @@ v3.0 管线：SFT（266,131 题 / 36 源，软标签，16,416 步 ≈ 5h @ 1×H1
 
 迁移到 coding-agent 决策的可复用件：训练/评测骨架、Case schema、corpus_gate、PL listwise loss、校准管线。耦合点：评测目标写死、校准 group 权重绑其 suite、2048 token 左截断（长 agent trace 硬伤）、两个输入文件未发布。官方指路：「真实 agent 循环（工具选择/重试/停止，成功信号延迟出现）」正是其缺失而 aemeath 天然拥有的数据形态。
 
+## 宣称 vs 实测 交叉验证
+
+各家 repo 自我宣称与本机实测的对照（完整矩阵见 #1751 评论）：
+
+**速度**：kev（29-71ms vs 宣称 28-149ms @ M5）✅ 吻合；laya ✅ 速度属实；rsi-jev（宣称 ~10ms 实为 CUDA 口径，MPS 实测 235-440ms）⚠️；jevos（宣称 25-110ms/1GB，实测 97-517ms/2.2GB）⚠️；CLM（9× 对比对象是生成式 LLM）⚠️；anyjev（推理成本被淡化，L0 实测 0.7-2.8s）⚠️。
+
+**质量**：kev/anyjev 实测超预期（L0 零标签 ECE 0-6%）；rsi-jev/jevos/semif 宣称与实测一致（含自曝短板）；CLM 中文失效 ❌；laya 严重夸大（R@1 17-33%、flip 67%，与第三方 local-jev-bench 结论一致）❌。
+
+**部署**：kev 最顺滑（一条 uv 命令）、jevos 最佳形态（22MB 单二进制）、CLM 淡化双层栈复杂度、anyjev 官方 pipeline 文档有误导（HF 后端可绕开 vLLM）。
+
+**规律**：研究型 repo（rsi-jev/anyjev/semif）宣称保守、实测超预期；营销型 repo（laya，30k★）星数与质量倒挂；延迟宣称普遍偏乐观约一个量级（均挑最优硬件/缓存命中口径）。验收门禁应固定采用「冷路径 + 中文长文本 + 无 CUDA」口径。
+
+## 选择决定
+
+**D1（默认引擎）：kev 0.8B**。理由：全场景质量满分（R@1/acc 100%）+ p50 29-71ms 最低档 + MLX 原生 Apple Silicon + 出厂温度校准 + Apache-2.0 + 部署一条命令。0.8B 打平 2B/4B，无理由上更大模型。
+
+**D2（高质量档）：rsi-jev v3.0**。理由：perm 场景 acc 81%/MAE 0.40 最优；唯一为重排做 RL listwise 训练（实测 R@1 100% 印证）；与 kev 同 Jev 协议零适配成本；其**自训练管线完整开源**（SFT→RL→OOF 校准三段式 + EDITABLE/PROTECTED 纪律 + 注册预测），为 aemeath 自训练专属模型预留路径（利用我们独有的真实 agent 决策轨迹数据）。
+
+**D3（高校准档，后置备选）：anyjev**。理由：ECE 0-6% 全场最优 + order-flip 0%，适合权限预筛等置信度敏感场景；但库内调用需服务化封装且延迟 0.7-2.8s，后置。其分级校准与在线自举（observe→攒标签→自动解头）作为**能力吸收**进入 port 设计，与引擎选型解耦。
+
+**D4（淘汰/留存）**：laya 淘汰（质量不可用 + order-flip 67%）；CLM 降级备选（中文失效，其嵌入解耦缓存思想留待阶段三内嵌化吸收）；semif 不作在线引擎（仅 CLI 形态），其 revision 钉版 + prompt hash 溯源接入审计设计；jevos 保留为边缘/零依赖形态备选；NanoJev 不投入（质量上限不超已测梯队）。
+
+**D5（接入架构）**：单 adapter（Jev `/v1/systemone` 协议，kev/rsi-jev 同协议配置切换，禁止两套代码）+ 三题型 port（noul/choice/score，rank 场景 choice 降级）+ 逐场景开关默认关闭 + 静默降级。
+
+**验收口径**：冷路径延迟、中文 case 子集、order-flip 率三项固定进场景接入门禁（宣称最容易藏水的位置）。
+
 ## 部署注记（附录）
 
 - **clm-serve on macOS**：`pip install contrastive-lm` 在 macOS 因 vllm 无条件依赖失败（官方 issue #16/#17），需 `--no-deps` + 手动装依赖；embedding 后端用 llama.cpp `llama-server --embedding --pooling last`（复用 Ollama 的 qwen3:8b GGUF blob，零额外下载）；option/criteria 文案必须用完整句子（短标签退化，官方 issue #3）。
