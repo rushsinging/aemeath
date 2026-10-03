@@ -26,7 +26,7 @@
 | [policy/](policy/README.md) | AllowAll-only Policy 实现范围与三态 PolicyPort 扩展边界 |
 | [hook/](hook/README.md) | 单 HookPort、类型化协议、3 次执行重试与 Stop / Run 15 次阻断语义 |
 | [audit/](audit/README.md) | Usage-only Audit MVP、非阻塞 Sink / Query 与独立 JSONL 存储 |
-| [scoring/](scoring/README.md) | System One 三题型评分端口、jev_http adapter、校准子系统与场景开关接入 |
+| [systemone/](systemone/README.md) | System One 三题型评分端口、jev_http adapter、校准子系统与场景开关接入 |
 | [server/](server/README.md) | WS 协议、控制面 / worker 拓扑的 Future 设计边界 |
 
 ## 目录结构决策
@@ -93,4 +93,4 @@
 | 2026-07-16 | 将 Storage 冻结为 `domain + ports + adapters`：以稳定层名和单向依赖降低 Guard 成本，机械防止物理 I/O 下沉、adapter 类型泄漏与 façade 漂移 | [#880](https://github.com/rushsinging/aemeath/issues/880) |
 | 2026-08-01 | 补充统一 Activity 观测目标：ActivityCoordinator / ActivityObservation / ActivitySnapshot / ActivityChange / ActivitySummary 的职责、跨层边界与 gap 修复语义；明确 Activity 不构成独立 BC 或第二 Run 状态机 | 统一 Activity 观测 |
 | 2026-08-01 | 补充统一 Activity 观测目标：ActivityCoordinator / ActivityObservation / ActivitySnapshot / ActivityChange / ActivitySummary 的职责、跨层边界与 gap 修复语义；明确 Activity 不构成独立 BC 或第二 Run 状态机 | 统一 Activity 观测 |
-| 2026-10-03 | 新增 scoring/ 战术设计：System One 三题型评分端口、kev 单引擎 jev_http adapter、校准子系统与 Rust 化三步演进 | [#1831](https://github.com/rushsinging/aemeath/issues/1831) |
+| 2026-10-03 | 新增 systemone/ 战术设计：System One 三题型评分端口、kev 单引擎 jev_http adapter、校准子系统与 Rust 化三步演进 | [#1831](https://github.com/rushsinging/aemeath/issues/1831) |

@@ -1,8 +1,8 @@
-# Scoring · System One 决策评分服务
+# SystemOne · 决策评分服务
 
-> 层级：02-modules / scoring（模块战术设计）
+> 层级：02-modules / systemone（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.2.0
-> 本文定义 Scoring BC 的领域模型、端口、引擎接入、校准子系统与各消费场景的接入设计。选型与实测依据见 `eval/system-one/REPORT.md`（System One 决策模型同场对比效果报告）。
+> 本文定义 SystemOne BC 的领域模型、端口、引擎接入、校准子系统与各消费场景的接入设计。选型与实测依据见 `eval/system-one/REPORT.md`（System One 决策模型同场对比效果报告）。
 
 ## 1. 背景与定位
 

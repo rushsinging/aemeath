@@ -1,11 +1,11 @@
-# Scoring（支撑域）
+# SystemOne（支撑域）
 
-> 层级：02-modules / scoring（模块战术设计）
+> 层级：02-modules / systemone（模块战术设计）
 > 状态：Target｜Milestone：v0.2.0
 
 ## 模块定位
 
-Scoring 拥有 System One 决策评分的唯一端口语言：三题型（Noul/Choice/Score）+ 校准级别。消费方（memory 重排、Skill 匹配、policy 预筛）只经 `ScoringPort` 获取校准概率分布，NEVER 感知引擎型号与传输细节。服务为可选增强：不可用、超时、开关关闭时消费点静默回退原路径，NEVER 阻断主循环。
+SystemOne 拥有 System One 决策评分的唯一端口语言：三题型（Noul/Choice/Score）+ 校准级别。消费方（memory 重排、Skill 匹配、policy 预筛）只经 `ScoringPort` 获取校准概率分布，NEVER 感知引擎型号与传输细节。服务为可选增强：不可用、超时、开关关闭时消费点静默回退原路径，NEVER 阻断主循环。
 
 ## 文档
 
