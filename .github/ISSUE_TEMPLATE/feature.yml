@@ -50,10 +50,19 @@ body:
     validations:
       required: true
   - type: textarea
+    id: entry-guide
+    attributes:
+      label: 入口指引（新 session 接手）
+      description: >-
+        让一个新 session 仅凭本 issue 就能接手：按顺序列出必读的文档/代码路径、
+        上游决策位置、第一步动作。Issue 必须自包含——不依赖会话记忆。
+    validations:
+      required: false
+  - type: textarea
     id: acceptance-criteria
     attributes:
       label: Acceptance criteria
-      description: How we will know it's done. Prefer testable statements.
+      description: How we will know it's done. Prefer testable statements. 每条必须可机器/人工验证；量化指标给阈值与测量口径（冷路径/热路径、数据集）。
     validations:
       required: true
   - type: textarea
