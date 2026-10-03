@@ -81,6 +81,31 @@
 5. **CLM 处理**：保留其 agentic 基准（Terminal-Bench 87.6%）参考价值，但本机实测路径（clm-serve + llama.cpp last-token pooling）已走通存档，中文问题解决前不作为落地候选。
 6. **遗留**：NanoJev 未实测（推理入口硬编码 CUDA，改 ~10 行可跑，估 0.5-1 天，质量上限预期不超过已测梯队，建议仅在需要 0.6B 极致小模型时补测）；真实会话数据集的第二阶段构造（本测试集为手工构造，规模 46 case，结论方向可信但统计功效有限，阶段二接入时应在真实数据上复验）。
 
+## 技术路线对比（训练 / 推理 / 校准机制）
+
+| 候选 | 模型构造 | 训练方式 | 校准机制 | 推理机制 |
+|---|---|---|---|---|
+| kev | Qwen3.5-0.8B 冻结 + LoRA r16（11.3M）+ pointer head | 离线训练（管线未开源） | 出厂温度缩放 | MLX 单次前向读 option logits；state 前缀 KV 缓存 |
+| rsi-jev | Qwen3.5-2B 全参微调：塔 + 交叉注意力 scorer + 置信度头 | SFT（教师软标签 CE，266k 题）→ RL（listwise Plackett-Luce + NDCG@5，RLOO + KL 锚定，1,500 步/21min）→ OOF 校准 | per-input 温度头（OOF 拟合；argmax 不变；score 只能软化） | 每候选一次前向 + state 前缀缓存 |
+| anyjev | 任意 LLM 截断 2/3 + 闭式读出头 | 零梯度：shrunk-LDA/ridge 闭式解 | 分级 raw→L0（cyclic shifts）→L1（温度）→L2（闭式头），在线自举 | L0 每题 K 次前向 |
+| jevos | 单模型 INT8（OpenVINO） | 未公开 | 无独立校准层 | choice 分解为逐选项 yes/no + 前缀树共享 state |
+| semif | 公开底座直用（Qwen3.5-4B），无自有权重 | 不训练 | 无 | 单次前向直读 option logits |
+| CLM | Qwen3-8B 冻结 + 双投影头（各 20M） | 对比学习 InfoNCE | 无 | 嵌入点积 + softmax；状态/动作嵌入解耦可缓存 |
+| laya | ModernBERT/mmBERT encoder + 分类头 | 非自回归微调 | 有温度但部分非法（启动告警） | 单编码器前向 |
+| NanoJev | 0.6B 端到端 | 游戏化多任务（管线开源） | 无 | 单次前向 |
+
+### RSI-Jev 自训练体系（RSI = Recursive Self-Improvement）
+
+v3.0 管线：SFT（266,131 题 / 36 源，软标签，16,416 步 ≈ 5h @ 1×H100）→ listwise RL（16 候选 = 1 正例 + 15 BM25 难负例，PL 采样排序 × NDCG@5 reward，REINFORCE + LOO 基线 + KL=0.1，每步混入 SFT replay 防遗忘；记忆重排 R@1 +60%，McNemar p=2.4e-13）→ OOF 温度头校准（9,862 留出题，泄漏防护丢弃 534 条）。
+
+方法论亮点（对 aemeath 最有迁移价值）：
+- **EDITABLE/PROTECTED 护栏**：模型/数据/配方可改，决策契约与评测代码受保护——"改模型永远不能悄悄变成改评测"，与架构守卫思想同构
+- **注册预测纪律**：假设先注册再花 GPU；374 个 arm 全部留档（含 61 个失败的 RL reward 设计）；错过自定门槛的版本按失败发布
+- **弱点定向数据生成**：profile 当前模型 dev 弱点 → 定向造 case → 验证 grounding/平凡性；corpus_gate 闸门拒绝标签先验漂移的语料
+- **自改进闭环**：错答案 → 测试用例 → 注册预测 → 下一周期 KEEP/淘汰；执行者为 AutoScientists 多 agent 团队（GPU 之前先互相批评提案）
+
+迁移到 coding-agent 决策的可复用件：训练/评测骨架、Case schema、corpus_gate、PL listwise loss、校准管线。耦合点：评测目标写死、校准 group 权重绑其 suite、2048 token 左截断（长 agent trace 硬伤）、两个输入文件未发布。官方指路：「真实 agent 循环（工具选择/重试/停止，成功信号延迟出现）」正是其缺失而 aemeath 天然拥有的数据形态。
+
 ## 部署注记（附录）
 
 - **clm-serve on macOS**：`pip install contrastive-lm` 在 macOS 因 vllm 无条件依赖失败（官方 issue #16/#17），需 `--no-deps` + 手动装依赖；embedding 后端用 llama.cpp `llama-server --embedding --pooling last`（复用 Ollama 的 qwen3:8b GGUF blob，零额外下载）；option/criteria 文案必须用完整句子（短标签退化，官方 issue #3）。
