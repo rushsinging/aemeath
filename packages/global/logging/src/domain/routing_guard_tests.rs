@@ -575,6 +575,13 @@ fn catalog_covers_exactly_runtime_owners() {
             "agent-storage.log",
         ),
         (
+            "agent/features/systemone",
+            "aemeath:agent:systemone",
+            Owner::Systemone,
+            Sink::Systemone,
+            "agent-systemone.log",
+        ),
+        (
             "agent/features/task",
             "aemeath:agent:task",
             Owner::TaskData,

@@ -13,6 +13,7 @@ members = [
     "agent/features/provider",
     "agent/features/runtime",
     "agent/features/storage",
+    "agent/features/systemone",
     "agent/features/task",
     "agent/features/tools",
     "agent/features/update",

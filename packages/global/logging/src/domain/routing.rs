@@ -31,6 +31,7 @@ pub(crate) enum ModuleOwner {
     Config,
     Memory,
     TaskData,
+    Systemone,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -54,6 +55,7 @@ pub(crate) enum DiagnosticSinkId {
     Config,
     Memory,
     TaskData,
+    Systemone,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

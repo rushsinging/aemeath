@@ -111,6 +111,12 @@ pub(crate) const TARGETS: &[TargetSpec] = &[
         sink: DiagnosticSinkId::Context,
         file_name: "context.log",
     },
+    TargetSpec {
+        target: LogTarget::new("aemeath:agent:systemone"),
+        owner: ModuleOwner::Systemone,
+        sink: DiagnosticSinkId::Systemone,
+        file_name: "agent-systemone.log",
+    },
 ];
 
 pub(crate) const FALLBACK: TargetSpec = TargetSpec {
