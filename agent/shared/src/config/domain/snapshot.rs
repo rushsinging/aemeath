@@ -571,6 +571,11 @@ impl ConfigSnapshot {
         &self.inner.memory
     }
 
+    /// 返回完整 `ScoringConfig`，供 composition 装配评分服务消费。
+    pub fn scoring(&self) -> &crate::config::scoring::ScoringConfig {
+        &self.inner.scoring
+    }
+
     /// 返回完整 `SkillsConfig`，供 `load_configured_skills` 消费。
     pub fn skills(&self) -> &SkillsConfig {
         &self.inner.skills

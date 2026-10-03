@@ -13,7 +13,7 @@ pub mod domain;
 pub use adapters::paths;
 pub use domain::{
     audit, context, file_snapshot, hooks, legacy, logging, memory, models, permissions, scope,
-    skills, storage, tools, ui, update,
+    scoring, skills, storage, tools, ui, update,
 };
 
 // Re-exports for backward compatibility
@@ -27,6 +27,7 @@ pub use logging::LoggingConfig;
 pub use memory::{MemoryConfig, ReflectionConfig};
 pub use models::{ModelEntryConfig, ModelsConfig, ProviderModelsConfig};
 pub use permissions::{PermissionConfig, PermissionModeConfig};
+pub use scoring::ScoringConfig;
 pub use skills::SkillsConfig;
 pub use storage::StorageConfig;
 pub use tools::{

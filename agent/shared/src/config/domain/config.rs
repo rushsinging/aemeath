@@ -110,6 +110,10 @@ pub struct Config {
     #[serde(default)]
     pub storage: StorageConfig,
 
+    /// System One 评分服务配置（引擎端点与逐场景开关）
+    #[serde(default)]
+    pub scoring: crate::config::scoring::ScoringConfig,
+
     /// Hook configuration
     #[serde(default)]
     pub hooks: HooksConfig,
@@ -151,6 +155,7 @@ impl Default for Config {
             skills: SkillsConfig::default(),
             audit: AuditConfig::default(),
             storage: StorageConfig::default(),
+            scoring: crate::config::scoring::ScoringConfig::default(),
             hooks: HooksConfig::default(),
             memory: MemoryConfig::default(),
             logging: LoggingConfig::default(),

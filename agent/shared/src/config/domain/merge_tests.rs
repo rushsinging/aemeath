@@ -24,6 +24,53 @@ fn storage_worktrees_dir_patch_overrides_lower_layer_value() {
 }
 
 #[test]
+fn scoring_patch_overrides_only_set_fields_and_reaches_snapshot() {
+    let global: ConfigPatch =
+        serde_json::from_str(r#"{"scoring":{"url":"http://global:8009","memoryRerank":true}}"#)
+            .unwrap();
+    let env_layer = ConfigPatch {
+        scoring: Some(ScoringConfigPatch {
+            timeout_ms: Some(500),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let config = apply_patch(apply_patch(Config::default(), global), env_layer);
+    let snapshot = ConfigSnapshot::new(config);
+
+    let scoring = snapshot.scoring();
+    assert_eq!(
+        scoring.url, "http://global:8009",
+        "未被高层覆盖的字段应保留低层值"
+    );
+    assert_eq!(scoring.timeout_ms, 500, "高层字段应覆盖");
+    assert!(scoring.memory_rerank, "低层开关应保留");
+    assert_eq!(scoring.model, "kev-latest", "未设置字段应落默认值");
+    assert!(!scoring.skill_match);
+    assert!(!scoring.policy_triage);
+}
+
+#[test]
+fn scoring_explicit_env_false_overrides_lower_layer_true() {
+    let global: ConfigPatch = serde_json::from_str(r#"{"scoring":{"policyTriage":true}}"#).unwrap();
+    let env_layer = ConfigPatch {
+        scoring: Some(ScoringConfigPatch {
+            policy_triage: Some(false),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let config = apply_patch(apply_patch(Config::default(), global), env_layer);
+
+    assert!(
+        !ConfigSnapshot::new(config).scoring().policy_triage,
+        "显式 false 必须覆盖低层 true"
+    );
+}
+
+#[test]
 fn storage_worktrees_dir_defaults_to_none_without_patch() {
     let snapshot = ConfigSnapshot::new(Config::default());
 

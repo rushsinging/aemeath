@@ -40,6 +40,40 @@ fn env_adapter_ignores_invalid_and_retired_reasoning_env() {
 }
 
 #[test]
+fn env_adapter_maps_scoring_envs_into_patch() {
+    let source = FakeEnv(HashMap::from([
+        ("AEMEATH_SCORING_URL".into(), "http://10.0.0.2:9000".into()),
+        ("AEMEATH_SCORING_MODEL".into(), "kev-0.8b".into()),
+        ("AEMEATH_SCORING_TIMEOUT_MS".into(), "1500".into()),
+        ("AEMEATH_SCORING_MEMORY_RERANK".into(), "true".into()),
+        ("AEMEATH_SCORING_SKILL_MATCH".into(), "1".into()),
+        ("AEMEATH_SCORING_POLICY_TRIAGE".into(), "off".into()),
+    ]));
+    let patch = EnvAdapter::read(&source);
+    let scoring = patch.scoring.expect("scoring env 应产出 patch");
+    assert_eq!(scoring.url.as_deref(), Some("http://10.0.0.2:9000"));
+    assert_eq!(scoring.model.as_deref(), Some("kev-0.8b"));
+    assert_eq!(scoring.timeout_ms, Some(1500));
+    assert_eq!(scoring.memory_rerank, Some(true));
+    assert_eq!(scoring.skill_match, Some(true));
+    assert_eq!(scoring.policy_triage, Some(false), "off 应解析为显式关闭");
+}
+
+#[test]
+fn env_adapter_ignores_invalid_scoring_envs() {
+    let source = FakeEnv(HashMap::from([
+        ("AEMEATH_SCORING_TIMEOUT_MS".into(), "0".into()),
+        ("AEMEATH_SCORING_MEMORY_RERANK".into(), "maybe".into()),
+    ]));
+    let patch = EnvAdapter::read(&source);
+    assert!(
+        patch.scoring.is_none(),
+        "全部 scoring env 非法时不得产出 patch：{:?}",
+        patch.scoring
+    );
+}
+
+#[test]
 fn env_adapter_maps_supported_scalar_values() {
     let source = FakeEnv(HashMap::from([
         ("AEMEATH_BASE_URL".into(), "https://example.test".into()),
