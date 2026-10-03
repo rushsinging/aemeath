@@ -120,19 +120,17 @@ v3.0 管线：SFT（266,131 题 / 36 源，软标签，16,416 步 ≈ 5h @ 1×H1
 
 ## 选择决定
 
-**D1（默认引擎）：kev 0.8B**。理由：全场景质量满分（R@1/acc 100%）+ p50 29-71ms 最低档 + MLX 原生 Apple Silicon + 出厂温度校准 + Apache-2.0 + 部署一条命令。0.8B 打平 2B/4B，无理由上更大模型。
+**总方针（2026-10-03 定稿）：只保留一个引擎（kev），推理侧 Rust 内嵌化；其余引擎只吸收设计优点，不作为运行时依赖。**
 
-**D2（高质量档）：rsi-jev v3.0**。理由：perm 场景 acc 81%/MAE 0.40 最优；唯一为重排做 RL listwise 训练（实测 R@1 100% 印证）；与 kev 同 Jev 协议零适配成本；其**自训练管线完整开源**（SFT→RL→OOF 校准三段式 + EDITABLE/PROTECTED 纪律 + 注册预测），为 aemeath 自训练专属模型预留路径（利用我们独有的真实 agent 决策轨迹数据）。
+- **D1 唯一引擎：kev 0.8B** —— 全场景质量满分 + p50 29-71ms + 0.8B + 出厂校准。不选 rsi-jev（perm 质量略优）的原因：其交叉注意力 scorer 为自定义架构，llama.cpp/candle 均不支持，Rust 化工作量远高于 kev。
+- **D2 Rust 化三步**：阶段二外部 HTTP 服务（kev.serve/MLX）；阶段三 llama.cpp 内嵌（llama-cpp-2；llama.cpp 已支持 Qwen3.5 且 LoRA 转换已修 #28324；kev = Qwen3.5-0.8B + LoRA 合并 GGUF + letter logits 读取；用本评测 46-case 做与 MLX 版的数值对分，一致率 ≥99% 对齐 AnyJev 跨引擎口径）；远期 candle 原生（Qwen3.5 支持在途，PR #3897）。
+- **D3 校准子系统**（吸收 anyjev 分级校准/在线自举 + rsi-jev OOF 温度头，引擎无关，port 层）。
+- **D4 淘汰/留存**：laya 淘汰；CLM 降级（中文失效，嵌入解耦缓存思想备用）；semif 只吸收审计溯源；jevos 留边缘形态；NanoJev 不投入。
+- **D5 接入架构**：单 Jev adapter + 三题型 port（rank 用 choice 降级）+ 逐场景开关默认关 + 静默降级。
+- **D6 自训练路线**：rsi-jev 开源管线 + aemeath 真实 agent 决策轨迹，训练与 kev 同架构的专属权重（训练在 Python/GPU，产出无缝接入 Rust 引擎）。
+- **验收口径**：冷路径延迟、中文 case、order-flip 率进门禁；Rust 化后指标劣化不得超过 MLX 基线 1 个百分点。
 
-**D3（高校准档，后置备选）：anyjev**。理由：ECE 0-6% 全场最优 + order-flip 0%，适合权限预筛等置信度敏感场景；但库内调用需服务化封装且延迟 0.7-2.8s，后置。其分级校准与在线自举（observe→攒标签→自动解头）作为**能力吸收**进入 port 设计，与引擎选型解耦。
-
-**D4（淘汰/留存）**：laya 淘汰（质量不可用 + order-flip 67%）；CLM 降级备选（中文失效，其嵌入解耦缓存思想留待阶段三内嵌化吸收）；semif 不作在线引擎（仅 CLI 形态），其 revision 钉版 + prompt hash 溯源接入审计设计；jevos 保留为边缘/零依赖形态备选；NanoJev 不投入（质量上限不超已测梯队）。
-
-**D5（接入架构）**：单 adapter（Jev `/v1/systemone` 协议，kev/rsi-jev 同协议配置切换，禁止两套代码）+ 三题型 port（noul/choice/score，rank 场景 choice 降级）+ 逐场景开关默认关闭 + 静默降级。
-
-**验收口径**：冷路径延迟、中文 case 子集、order-flip 率三项固定进场景接入门禁（宣称最容易藏水的位置）。
-
-## 部署注记（附录）
+## 部署注记（附录）## 部署注记（附录）
 
 - **clm-serve on macOS**：`pip install contrastive-lm` 在 macOS 因 vllm 无条件依赖失败（官方 issue #16/#17），需 `--no-deps` + 手动装依赖；embedding 后端用 llama.cpp `llama-server --embedding --pooling last`（复用 Ollama 的 qwen3:8b GGUF blob，零额外下载）；option/criteria 文案必须用完整句子（短标签退化，官方 issue #3）。
 - **Ollama 0.34.4 的 chat 模型不再支持 `/v1/embeddings`**（报 "Start it with --embeddings"），CLM 链路必须走 llama-server 而非 Ollama。
