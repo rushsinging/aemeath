@@ -196,17 +196,44 @@ fn parse_answer(
                 .get("score")
                 .and_then(|value| value.as_f64())
                 .ok_or_else(|| WireRejected::InvalidAnswer("score 缺分数".to_owned()))?;
-            let probabilities: Vec<f64> = answer
-                .get("probabilities")
-                .and_then(|value| value.as_array())
-                .ok_or_else(|| WireRejected::InvalidAnswer("score 缺 probabilities".to_owned()))?
-                .iter()
-                .map(|value| {
-                    value
-                        .as_f64()
-                        .ok_or_else(|| WireRejected::InvalidAnswer("概率非数值".to_owned()))
-                })
-                .collect::<Result<_, _>>()?;
+            // kev 实测：score 的 probabilities 为序号 keyed dict（{"0": p0, ...}）；
+            // 兼容数组形态（其他引擎）。
+            let probabilities: Vec<f64> = match answer.get("probabilities") {
+                Some(serde_json::Value::Array(items)) => items
+                    .iter()
+                    .map(|value| {
+                        value
+                            .as_f64()
+                            .ok_or_else(|| WireRejected::InvalidAnswer("概率非数值".to_owned()))
+                    })
+                    .collect::<Result<_, _>>()?,
+                Some(serde_json::Value::Object(entries)) => {
+                    let mut indexed: Vec<(usize, f64)> = entries
+                        .iter()
+                        .map(|(key, value)| {
+                            let index = key.parse::<usize>().map_err(|_| {
+                                WireRejected::InvalidAnswer(format!("概率 key 非序号：{key}"))
+                            })?;
+                            let probability = value.as_f64().ok_or_else(|| {
+                                WireRejected::InvalidAnswer("概率非数值".to_owned())
+                            })?;
+                            Ok((index, probability))
+                        })
+                        .collect::<Result<_, WireRejected>>()?;
+                    indexed.sort_by_key(|(index, _)| *index);
+                    indexed
+                        .iter()
+                        .enumerate()
+                        .all(|(position, (index, _))| position == *index)
+                        .then(|| indexed.iter().map(|(_, p)| *p).collect())
+                        .ok_or_else(|| WireRejected::InvalidAnswer("概率序号不连续".to_owned()))?
+                }
+                _ => {
+                    return Err(WireRejected::InvalidAnswer(
+                        "score 缺 probabilities".to_owned(),
+                    ))
+                }
+            };
             if probabilities.len() != levels.len() {
                 return Err(WireRejected::InvalidAnswer(format!(
                     "score probabilities 数量 {} 与 levels 数量 {} 不一致",

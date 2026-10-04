@@ -119,16 +119,12 @@ fn rescale_with_temperature(answer: ScoringAnswer, temperature: f64) -> ScoringA
     }
 }
 
-/// 分档期望值：第 i 档取值 i/(n-1)，score = Σ p_i × value_i。
+/// 分档期望值：第 i 档取值 i（kev 口径 Σ p_i·i，范围 [0, n-1]），score 与引擎语义一致。
 fn weighted_expectation(probabilities: &[f64]) -> f64 {
-    let count = probabilities.len();
-    if count < 2 {
-        return probabilities.first().copied().unwrap_or(0.0);
-    }
     probabilities
         .iter()
         .enumerate()
-        .map(|(index, probability)| probability * index as f64 / (count - 1) as f64)
+        .map(|(index, probability)| probability * index as f64)
         .sum()
 }
 

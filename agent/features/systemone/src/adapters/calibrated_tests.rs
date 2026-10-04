@@ -171,11 +171,11 @@ async fn temperature_rescale_recomputes_score_expectation() {
             let expected: f64 = probabilities
                 .iter()
                 .enumerate()
-                .map(|(index, p)| p * index as f64 / 2.0)
+                .map(|(index, p)| p * index as f64)
                 .sum();
             assert!(
                 (*score - expected).abs() < 1e-9,
-                "score 应为重缩放后分档期望值：{score} vs {expected}"
+                "score 应为重缩放后分档期望值（Σ p_i·i）：{score} vs {expected}"
             );
             assert_eq!(*calibration, CalibrationLevel::Temperature);
         }

@@ -238,10 +238,13 @@ impl ScoringAnswer {
         if probabilities.is_empty() {
             return Err(AnswerRejected::EmptyProbabilities);
         }
+        // score 是分档加权和（kev 口径 Σ p_i·i，范围 [0, n-1]），不是概率，
+        // 只校验有限非负；probabilities/confidence 仍是概率校验。
         if probabilities
             .iter()
             .any(|probability| !is_valid_probability(*probability))
-            || !is_valid_probability(score)
+            || !score.is_finite()
+            || score < 0.0
             || !is_valid_probability(confidence)
         {
             return Err(AnswerRejected::ProbabilityOutOfRange);
