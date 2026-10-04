@@ -147,7 +147,7 @@ impl EnvAdapter {
                 || memory_rerank.is_some()
                 || skill_match.is_some()
                 || policy_triage.is_some())
-            .then(|| share::config::domain::merge::ScoringConfigPatch {
+            .then_some(share::config::domain::merge::ScoringConfigPatch {
                 url,
                 model,
                 timeout_ms,

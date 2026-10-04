@@ -8,18 +8,11 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use crate::adapters::jev_wire::{parse_answers, WireRequest};
+use crate::constants::{PREFLIGHT_TIMEOUT, SYSTEMONE_PATH};
 use crate::domain::{
     ScoringAnswer, ScoringQuestion, ScoringState, ScoringUnavailable, UnavailableKind,
 };
 use crate::ports::ScoringPort;
-
-const SYSTEMONE_PATH: &str = "/v1/systemone";
-
-/// 连接预检窗口：hyper-util legacy client 对可重用 body 的请求在 connect 失败时
-/// 会无限重试直至总超时（实测 connect refused 等满 2s 报 timeout）。
-/// 评分前先做廉价 TCP 预检（loopback ~100µs），把「服务未启动」这一最常见
-/// 不可用形态的回退延迟降到毫秒级；预检通过后的请求仍走完整超时窗口。
-const PREFLIGHT_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Jev 线格式 HTTP adapter（kev / rsi-jev 同协议复用，配置切换）。
 pub struct JevHttpScoringAdapter {

@@ -9,11 +9,9 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use serde::Deserialize;
 
+use crate::constants::{CALIBRATION_FILE, OBSERVATIONS_FILE};
 use crate::domain::CalibrationLevel;
 use crate::ports::{CalibrationObservation, CalibrationPort};
-
-const OBSERVATIONS_FILE: &str = "observations.jsonl";
-const CALIBRATION_FILE: &str = "calibration.json";
 
 /// 温度校准 artifact：离线拟合产物的最小形态。
 #[derive(Debug, Clone, Copy, PartialEq)]
