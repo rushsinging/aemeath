@@ -1,3 +1,4 @@
+pub mod audited;
 pub mod calibrated;
 pub mod calibration_store;
 pub mod jev_http;

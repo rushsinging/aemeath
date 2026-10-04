@@ -105,24 +105,30 @@ async fn append_observation(
     directory: &Path,
     record: &CalibrationObservation,
 ) -> std::io::Result<()> {
-    use std::io::Write;
-
     let mut line = serde_json::to_string(record)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     line.push('\n');
     let directory = directory.to_path_buf();
-    // 同步写 + 同步 close（随 File drop）在 spawn_blocking 内一次完成：
-    // tokio::fs::File 的 close 延迟到 blocking 池异步执行，fd 复用窗口下
-    // 存在 write 成功但数据落到复用 fd 的实测风险（并行测试环境复现）。
     tokio::task::spawn_blocking(move || -> std::io::Result<()> {
         std::fs::create_dir_all(&directory)?;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(directory.join(OBSERVATIONS_FILE))?;
-        file.write_all(line.as_bytes())
+        append_jsonl_line_sync(&directory.join(OBSERVATIONS_FILE), &line)
     })
     .await?
+}
+
+/// 同步追加一行 JSONL（供 crate 内落盘路径复用）。
+///
+/// 同步 write + 同步 close（随 File drop）一次完成：tokio::fs::File 的 close
+/// 延迟到 blocking 池异步执行，fd 复用窗口下存在 write 成功但数据落到复用 fd
+/// 的实测风险（并行测试环境复现），故 NEVER 改用 tokio::fs 写路径。
+pub(crate) fn append_jsonl_line_sync(path: &Path, line: &str) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    file.write_all(line.as_bytes())
 }
 
 #[cfg(test)]

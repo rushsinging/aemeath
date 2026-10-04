@@ -18,6 +18,7 @@ mod adapters;
 mod domain;
 mod ports;
 
+pub use adapters::audited::{AuditedScoringAdapter, ScoringAuditEvent};
 pub use adapters::calibrated::CalibratedScoringAdapter;
 pub use adapters::calibration_store::{CalibrationArtifact, CalibrationStore};
 pub use adapters::jev_http::JevHttpScoringAdapter;
