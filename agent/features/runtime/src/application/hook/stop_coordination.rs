@@ -260,7 +260,7 @@ pub async fn orchestrate_stop_hook(
             .await;
             let message = Message::hook_notice(
                 format!(
-                    "<system-reminder>\n{}\n</system-reminder>",
+                    "<hook-feedback kind=\"stop\" version=\"1\">\n{}\n</hook-feedback>",
                     feedback.llm_text
                 ),
                 feedback.notice.clone(),
@@ -393,7 +393,27 @@ fn build_stop_hook_feedback(
     if language == "zh" {
         llm_text = llm_text.replace("Stop hook prevented stopping.", "Stop hook 阻止了停止。");
     }
+    llm_text = format!("{}\n{}", stop_hook_action_protocol(language), llm_text);
     HookNoticeMaterial { llm_text, notice }
+}
+
+/// Stop Hook 阻断的行动协议头：明确「阻断 = 修复授权已预先授予」，
+/// 防止 LLM 按全局「修改前须用户同意」规则申请授权、无人应答后空转
+/// 结束、再次触发 Stop Hook 的循环；豁免范围只覆盖阻断根因相关修改。
+fn stop_hook_action_protocol(language: &str) -> &'static str {
+    if language == "zh" {
+        "Stop Hook 阻断反馈。修复阻断根因的授权已预先授予（等同用户已确认）：\n\
+         直接诊断并修复相关代码 / 测试 / 配置，NEVER 再次向用户申请授权，\n\
+         NEVER 因等待授权而空转结束；确实无法修复时，明确说明原因与建议后结束。\n\
+         ─── 以下为 hook 原始输出 ───"
+    } else {
+        "Stop Hook block feedback. Authorization to fix the blocking root cause is \n\
+         pre-granted (equivalent to user confirmation): diagnose and fix the related \n\
+         code / tests / config directly. NEVER ask the user for authorization again \n\
+         and NEVER end the turn idle waiting for it. If the issue truly cannot be \n\
+         fixed, state the reason and a recommendation, then finish.\n\
+         ─── hook raw output below ───"
+    }
 }
 
 fn full_hook_output(detail: &RuntimeHookBlockDetail, reason: &RuntimeHookReason) -> String {

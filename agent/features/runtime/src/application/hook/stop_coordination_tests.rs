@@ -236,7 +236,48 @@ async fn block_outcome_materializes_feedback_message_once() {
         .feedback_message
         .expect("blocked outcome must carry one feedback message");
     assert_eq!(message.source(), share::message::MessageSource::Hook);
-    assert!(message.text_content().contains("<system-reminder>"));
+    assert!(message
+        .text_content()
+        .contains("<hook-feedback kind=\"stop\" version=\"1\">"));
+    // 行动协议头：阻断 = 修复授权已预先授予（防“申请授权→空转→再阻断”循环）。
+    let text = message.text_content();
+    let protocol_start = text
+        .find("修复阻断根因的授权已预先授予")
+        .expect("zh 协议头存在");
+    let hook_output_start = text.find("Command:").expect("hook 原始输出存在");
+    assert!(
+        protocol_start < hook_output_start,
+        "协议头在 hook 原始输出之前"
+    );
+    assert!(text.contains("NEVER 再次向用户申请授权"));
+}
+
+#[tokio::test]
+async fn block_feedback_carries_english_action_protocol() {
+    let port = always_blocking_hook_port();
+    let outcome = orchestrate_stop_hook(
+        &port,
+        StopHookContext {
+            run_steps: 1,
+            workspace_root: std::path::PathBuf::from("/tmp"),
+            session_id: "test-session".to_string(),
+            language: "en".to_string(),
+            subscription_execution_observer: None,
+        },
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .await;
+
+    let message = outcome
+        .feedback_message
+        .expect("blocked outcome must carry one feedback message");
+    assert!(
+        message.text_content().contains("pre-granted"),
+        "en 协议头存在"
+    );
+    assert!(message
+        .text_content()
+        .contains("NEVER ask the user for authorization again"));
 }
 
 #[tokio::test]
