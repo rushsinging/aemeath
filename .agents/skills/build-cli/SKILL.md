@@ -30,7 +30,6 @@ description: Use when building and installing the aemeath CLI binary from the cu
 
 - **MUST** 使用 `./build_cli.sh` 安装二进制；**NEVER** 手工 `cp target/release/aemeath ~/.local/bin/`——脚本负责 xattr 清理与重签名，手工复制会让二进制在 macOS 上无法启动。
 - **MUST** 在目标 commit 上构建：主仓落后时先 `git pull --ff-only`，worktree 中先确认分支内容。
-- **SHOULD** 构建前检查磁盘余量；不足时按 `clean-worktree` 技能清理构建缓存（`scripts/clean-worktree-targets.sh --dry-run --max-size-gb 20`，确认后再加 `--yes`）。
 - **NEVER** 在 `build_cli.sh` 之外复制或替换 `$INSTALL_DIR` 下的二进制来“热修”。
 
 ## 常见错误
