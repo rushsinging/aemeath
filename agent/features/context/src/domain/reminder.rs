@@ -467,10 +467,19 @@ pub fn render_invocation_reminder_body(
                 _ => format!("Current task progress:\n{}", lines.join("\n")),
             }
         }
-        crate::domain::InvocationReminderData::GuidanceSourcesChanged => match language {
-            "zh" => "guidance 来源已变更；当前 Session 的冻结系统提示保持不变。新 Session 才会重新物化这些来源。".to_string(),
-            _ => "Guidance sources changed. This Session's frozen system prompt remains unchanged; a new Session will materialize the updated sources.".to_string(),
-        },
+        crate::domain::InvocationReminderData::GuidanceSourcesChanged { paths } => {
+            let path_list = paths.join("\n");
+            match language {
+                "zh" if paths.is_empty() => "guidance 来源已变更；当前 Session 的冻结系统提示保持不变。新 Session 才会重新物化这些来源。".to_string(),
+                "zh" => format!(
+                    "guidance 来源已变更；当前 Session 的冻结系统提示保持不变。需要最新内容时用 Read 工具重新读取以下文件，NEVER 凭记忆假设其内容：\n{path_list}"
+                ),
+                _ if paths.is_empty() => "Guidance sources changed. This Session's frozen system prompt remains unchanged; a new Session will materialize the updated sources.".to_string(),
+                _ => format!(
+                    "Guidance sources changed. This Session's frozen system prompt remains unchanged. Use the Read tool to reload the following files when you need their latest content instead of assuming from memory:\n{path_list}"
+                ),
+            }
+        }
         crate::domain::InvocationReminderData::ModelGuidanceMismatch {
             session_model_id,
             run_model_id,

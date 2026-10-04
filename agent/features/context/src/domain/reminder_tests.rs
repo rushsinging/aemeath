@@ -483,9 +483,24 @@ fn render_invocation_reminder_body_covers_all_kinds_bilingually() {
     let en = render_invocation_reminder_body(&progress, "en");
     assert!(en.contains("Current task progress:"));
 
-    let guidance = crate::domain::InvocationReminderData::GuidanceSourcesChanged;
-    assert!(render_invocation_reminder_body(&guidance, "zh").contains("guidance 来源已变更"));
-    assert!(render_invocation_reminder_body(&guidance, "en").contains("Guidance sources changed"));
+    let guidance = crate::domain::InvocationReminderData::GuidanceSourcesChanged {
+        paths: vec!["~/.agents/guidance/_default.md".to_string()],
+    };
+    let guidance_zh = render_invocation_reminder_body(&guidance, "zh");
+    assert!(guidance_zh.contains("guidance 来源已变更"));
+    assert!(
+        guidance_zh.contains("用 Read 工具重新读取"),
+        "Remind 形态带 Read 引导（specs/3.9 §155）：{guidance_zh}"
+    );
+    assert!(guidance_zh.contains("~/.agents/guidance/_default.md"));
+    let guidance_en = render_invocation_reminder_body(&guidance, "en");
+    assert!(guidance_en.contains("Use the Read tool"));
+
+    let guidance_no_paths =
+        crate::domain::InvocationReminderData::GuidanceSourcesChanged { paths: vec![] };
+    assert!(
+        render_invocation_reminder_body(&guidance_no_paths, "zh").contains("guidance 来源已变更")
+    );
 
     let mismatch = crate::domain::InvocationReminderData::ModelGuidanceMismatch {
         session_model_id: "a<b".to_string(),

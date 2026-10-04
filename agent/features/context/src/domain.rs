@@ -93,7 +93,10 @@ impl SessionRevision {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InvocationReminderData {
     TaskProgress(TaskProgressReminderData),
-    GuidanceSourcesChanged,
+    GuidanceSourcesChanged {
+        /// 变更的 guidance / instruction 文件路径（Remind 引导 LLM Read 的目标）。
+        paths: Vec<String>,
+    },
     ModelGuidanceMismatch {
         session_model_id: String,
         run_model_id: String,
@@ -107,8 +110,8 @@ pub enum InvocationReminderData {
 }
 
 impl InvocationReminderData {
-    pub fn guidance_sources_changed() -> Self {
-        Self::GuidanceSourcesChanged
+    pub fn guidance_sources_changed(paths: Vec<String>) -> Self {
+        Self::GuidanceSourcesChanged { paths }
     }
 
     pub fn model_guidance_mismatch(
@@ -132,7 +135,7 @@ impl InvocationReminderData {
     pub const fn kind(&self) -> &'static str {
         match self {
             Self::TaskProgress(_) => "task_progress",
-            Self::GuidanceSourcesChanged => "guidance_sources_changed",
+            Self::GuidanceSourcesChanged { .. } => "guidance_sources_changed",
             Self::ModelGuidanceMismatch { .. } => "model_guidance_mismatch",
             Self::MemoryUpdated { .. } => "memory_updated",
         }

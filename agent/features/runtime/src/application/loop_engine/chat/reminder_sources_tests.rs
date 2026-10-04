@@ -96,13 +96,24 @@ fn task_progress_source_policy_declares_interval_rebuild_and_tail_placement() {
 
 #[test]
 fn run_start_fact_source_carries_frozen_data_and_matching_policy() {
-    let guidance = RunStartFactReminderSource::guidance_sources_changed();
+    let guidance = RunStartFactReminderSource::guidance_sources_changed(
+        vec!["~/.agents/guidance/_default.md".to_string()],
+        share::config::domain::config::GuidanceReloadPolicy::Remind,
+    );
     assert_eq!(guidance.kind().as_str(), "guidance_sources_changed");
     let snapshot = guidance.build().expect("事实型恒有内容");
     assert_eq!(
         serde_json::from_str::<context::InvocationReminderData>(&snapshot.data).unwrap(),
-        context::InvocationReminderData::GuidanceSourcesChanged
+        context::InvocationReminderData::GuidanceSourcesChanged {
+            paths: vec!["~/.agents/guidance/_default.md".to_string()],
+        }
     );
+    let rendered = guidance.render(&snapshot, "zh");
+    assert!(
+        rendered.contains("用 Read 工具重新读取"),
+        "Remind 形态带 Read 引导：{rendered}"
+    );
+    assert!(rendered.contains("~/.agents/guidance/_default.md"));
     let policy = guidance.policy();
     assert_eq!(policy.placement, context::ReminderPlacement::SystemTail);
 

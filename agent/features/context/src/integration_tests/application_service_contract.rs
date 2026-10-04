@@ -626,7 +626,7 @@ impl FactSourceFixture {
     fn guidance_changed() -> Self {
         Self {
             kind: crate::ReminderKind::new("guidance_sources_changed"),
-            data: crate::domain::InvocationReminderData::GuidanceSourcesChanged,
+            data: crate::domain::InvocationReminderData::GuidanceSourcesChanged { paths: vec![] },
             placement: crate::ReminderPlacement::SystemTail,
             priority: crate::ReminderPriority::environment(),
         }

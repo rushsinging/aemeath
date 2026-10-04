@@ -72,10 +72,25 @@ pub(crate) struct RunStartFactReminderSource {
 }
 
 impl RunStartFactReminderSource {
-    pub(crate) fn guidance_sources_changed() -> Self {
+    /// guidance 来源变更：paths 为变更文件（guidance / instruction 前缀），
+    /// reload_policy 决定渲染分支——Remind（specs/3.9 §155 规定形态）带
+    /// 路径与 Read 引导；Inject / Confirm 尚未实现，按 Remind 兜底并 warn。
+    pub(crate) fn guidance_sources_changed(
+        paths: Vec<String>,
+        reload_policy: share::config::domain::config::GuidanceReloadPolicy,
+    ) -> Self {
+        if !matches!(
+            reload_policy,
+            share::config::domain::config::GuidanceReloadPolicy::Remind
+        ) {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "guidance_reload_policy 未实现（policy={reload_policy:?}），按 Remind 兜底渲染",
+            );
+        }
         Self {
             kind: ReminderKind::new("guidance_sources_changed"),
-            data: context::InvocationReminderData::GuidanceSourcesChanged,
+            data: context::InvocationReminderData::guidance_sources_changed(paths),
             policy: ReminderPolicy {
                 refresh: context::RefreshTrigger::OnRunStart,
                 placement: ReminderPlacement::SystemTail,

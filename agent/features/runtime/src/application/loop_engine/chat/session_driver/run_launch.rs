@@ -718,13 +718,20 @@ where
                         ),
                     ),
                 ];
-                if turn_boundary_config.guidance_sources_changed {
+                if !turn_boundary_config.guidance_changed_paths.is_empty() {
                     log::debug!(
                         target: crate::LOG_TARGET,
-                        "reminder_source_registered kind=guidance_sources_changed trigger=turn_boundary_config",
+                        "reminder_source_registered kind=guidance_sources_changed trigger=turn_boundary_config paths={:?}",
+                        turn_boundary_config.guidance_changed_paths,
                     );
                     reminder_sources.push(std::sync::Arc::new(
-                        crate::application::loop_engine::chat::reminder_sources::RunStartFactReminderSource::guidance_sources_changed(),
+                        crate::application::loop_engine::chat::reminder_sources::RunStartFactReminderSource::guidance_sources_changed(
+                            turn_boundary_config.guidance_changed_paths.clone(),
+                            runtime_context
+                                .config_ref()
+                                .config()
+                                .guidance_reload_policy(),
+                        ),
                     ));
                 }
                 if runtime_context.provider_ref().model.model != shell.prompt_model_id {

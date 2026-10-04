@@ -137,11 +137,19 @@ Runtime 推送 typed 事件（Context 定义事件 PL，Runtime 实现/转发）
 | kind | 数据源 | refresh | compact | placement |
 |---|---|---|---|---|
 | TaskProgress | task 快照（计数 + 可见窗口） | `OnStepInterval(8)`（`run_started` 以 step=0 提供首次注入——0 是任意间隔的倍数，无需 OnRunStart 双声明） | Rebuild | TailUserMessage |
-| GuidanceSourcesChanged | turn 边界 config diff | `OnRunStart` | Reinstate | SystemTail |
+| GuidanceSourcesChanged | turn 边界 config diff（变更文件路径列表） | `OnRunStart` | Reinstate | SystemTail |
 | ModelGuidanceMismatch | session 冻结模型 vs run 模型 | `OnRunStart` | Reinstate | SystemTail |
 | MemoryUpdated | memory 更新通知（Run 边界一次性取走） | `OnRunStart`（reflection notice 为 Run 边界事实；`OnEvent(memory)` 留待 reflection 运行态演进接入） | Drop | TailUserMessage |
 
 迁移后快路径行为等价：Run 启动 build → 首个 invocation 注入，与现状一致；差异只在 compact 后重开、周期重注入与去重按 policy 生效。
+
+### 受众边界
+
+reminder 管线只承载 **LLM 受众**（invocation-only、可重算快照）；用户受众（TUI 提示、状态栏）走 Runtime 事件流 / SDK 事件通道。双受众事实由触发点扇出两个独立产物（如 config 变化：LLM 收 GuidanceSourcesChanged reminder，用户收 `ConfigReloaded` 事件），**NEVER** 在 reminder source 上声明 audience。Stop Hook 反馈同理不并入：它是 canonical 落盘的一次性事件事实（resume 后仍须可见），与 invocation-only 的可重算快照生命周期相反。
+
+### GuidanceReloadPolicy 的落地口径
+
+`GuidanceConfig.reload_policy` 三变体中，`Remind`（默认）是 `specs/3.9-config-compat.md` §155 规定形态：guidance / instruction 文件变更时，下一 Run 注入**带路径的 Read 引导 reminder**（LLM 自行 Read 重新读取，NEVER 重建 cacheable system prompt）——已由 `GuidanceSourcesChanged { paths }` 载体落地。`Inject`（前置 diff head）与 3.7 冻结、3.9 NEVER 重建规则冲突，待 spec 裁决后废弃或另行设计；`Confirm`（InteractionPort 用户确认）挂后续 issue。未实现变体按 Remind 兜底渲染并 warn。
 
 ## 8. 与后台任务事件的对接
 
