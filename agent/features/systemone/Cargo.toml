@@ -1,0 +1,17 @@
+[package]
+name = "systemone"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+share = { path = "../../shared" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+sha2 = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+log = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

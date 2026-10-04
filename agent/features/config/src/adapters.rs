@@ -134,6 +134,28 @@ impl EnvAdapter {
                 level: Some(level),
                 ..Default::default()
             });
+        let scoring = {
+            let url = source.get("AEMEATH_SCORING_URL");
+            let model = source.get("AEMEATH_SCORING_MODEL");
+            let timeout_ms = parse_positive(source.get("AEMEATH_SCORING_TIMEOUT_MS"));
+            let memory_rerank = parse_bool_switch(source.get("AEMEATH_SCORING_MEMORY_RERANK"));
+            let skill_match = parse_bool_switch(source.get("AEMEATH_SCORING_SKILL_MATCH"));
+            let policy_triage = parse_bool_switch(source.get("AEMEATH_SCORING_POLICY_TRIAGE"));
+            (url.is_some()
+                || model.is_some()
+                || timeout_ms.is_some()
+                || memory_rerank.is_some()
+                || skill_match.is_some()
+                || policy_triage.is_some())
+            .then_some(share::config::domain::merge::ScoringConfigPatch {
+                url,
+                model,
+                timeout_ms,
+                memory_rerank,
+                skill_match,
+                policy_triage,
+            })
+        };
         let storage = source.get("AEMEATH_WORKTREES_DIR").map(|directory| {
             share::config::domain::merge::StorageConfigPatch {
                 worktrees_dir: Some(directory.into()),
@@ -154,8 +176,18 @@ impl EnvAdapter {
             ui,
             logging,
             storage,
+            scoring,
             ..Default::default()
         }
+    }
+}
+
+/// 布尔开关 env：`1/true/yes/on` 开，`0/false/no/off` 关；其余值忽略（None）。
+fn parse_bool_switch(value: Option<String>) -> Option<bool> {
+    match value?.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
     }
 }
 

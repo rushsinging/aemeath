@@ -493,6 +493,10 @@ const OWNERS: &[(&str, OwnerRule)] = &[
         OwnerRule::new("storage", "aemeath:agent:storage", "crate::LOG_TARGET"),
     ),
     (
+        "agent/features/systemone",
+        OwnerRule::new("systemone", "aemeath:agent:systemone", "crate::LOG_TARGET"),
+    ),
+    (
         "agent/features/task",
         OwnerRule::new("task", "aemeath:agent:task", "crate::LOG_TARGET"),
     ),

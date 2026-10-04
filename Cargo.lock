@@ -4031,6 +4031,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "systemone"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "log",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "share",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "tar"
 version = "0.4.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"

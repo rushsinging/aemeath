@@ -135,6 +135,7 @@ fn test_substructure_accessors_return_config_fields() {
     );
     assert_eq!(snap.memory().enabled, Config::default().memory.enabled);
     assert_eq!(snap.skills().dirs, Config::default().skills.dirs);
+    assert_eq!(snap.scoring(), &Config::default().scoring);
     assert_eq!(snap.logging_level(), Config::default().logging.level);
 }
 

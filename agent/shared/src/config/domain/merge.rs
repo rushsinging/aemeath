@@ -57,6 +57,8 @@ pub struct ConfigPatch {
     #[serde(default)]
     pub storage: Option<StorageConfigPatch>,
     #[serde(default)]
+    pub scoring: Option<ScoringConfigPatch>,
+    #[serde(default)]
     pub hooks: Option<HooksConfig>,
     #[serde(default)]
     pub memory: Option<MemoryConfigPatch>,
@@ -88,6 +90,7 @@ impl ConfigPatch {
             && self.skills.is_none()
             && self.audit.is_none()
             && self.storage.is_none()
+            && self.scoring.is_none()
             && self.memory.is_none()
             && self.logging.is_none()
             && self.guidance.is_none()
@@ -420,6 +423,9 @@ pub fn apply_patch(mut base: Config, patch: ConfigPatch) -> Config {
     if let Some(storage) = patch.storage {
         base.storage = apply_storage_patch(base.storage, storage);
     }
+    if let Some(scoring) = patch.scoring {
+        base.scoring = apply_scoring_patch(base.scoring, scoring);
+    }
     if let Some(hooks) = patch.hooks {
         base.hooks = merge_hooks(base.hooks, hooks);
     }
@@ -544,6 +550,22 @@ pub(crate) fn apply_context_patch(
     base
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct ScoringConfigPatch {
+    #[serde(default, alias = "baseUrl")]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default, alias = "timeoutMs")]
+    pub timeout_ms: Option<u64>,
+    #[serde(default, alias = "memoryRerank")]
+    pub memory_rerank: Option<bool>,
+    #[serde(default, alias = "skillMatch")]
+    pub skill_match: Option<bool>,
+    #[serde(default, alias = "policyTriage")]
+    pub policy_triage: Option<bool>,
+}
+
 pub(crate) fn apply_tools_patch(mut base: ToolsConfig, patch: ToolsConfigPatch) -> ToolsConfig {
     if let Some(v) = patch.enabled {
         base.enabled = v;
@@ -561,6 +583,31 @@ pub(crate) fn apply_tools_patch(mut base: ToolsConfig, patch: ToolsConfigPatch) 
     }
     if let Some(v) = patch.tool_result {
         base.tool_result = apply_tool_result_patch(base.tool_result, v);
+    }
+    base
+}
+
+pub(crate) fn apply_scoring_patch(
+    mut base: super::scoring::ScoringConfig,
+    patch: ScoringConfigPatch,
+) -> super::scoring::ScoringConfig {
+    if let Some(v) = patch.url {
+        base.url = v;
+    }
+    if let Some(v) = patch.model {
+        base.model = v;
+    }
+    if let Some(v) = patch.timeout_ms {
+        base.timeout_ms = v;
+    }
+    if let Some(v) = patch.memory_rerank {
+        base.memory_rerank = v;
+    }
+    if let Some(v) = patch.skill_match {
+        base.skill_match = v;
+    }
+    if let Some(v) = patch.policy_triage {
+        base.policy_triage = v;
     }
     base
 }
