@@ -10,8 +10,7 @@ use crate::domain::{
     CompactOutcome, CompactRequestData, CompactionDecisionData, ContextAppendData,
     ContextAppendError, ContextPortError, ContextRequestData, ContextWindowData,
     InvocationReminderData, ManualCompactRequestData, RunId, SessionId, SystemBlock,
-    TaskProgressStatus, ToolReceiptMutationData, ToolReceiptMutationError,
-    ToolReceiptMutationReceiptData,
+    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
 use crate::ports::{ContextMemorySource, ContextPort, ContextPromptSource, SessionRepository};
 
@@ -404,102 +403,28 @@ pub(crate) fn invocation_reminder_log_payloads(
     language: &str,
     reminders: &[InvocationReminderData],
 ) -> Vec<ReminderLogPayload> {
+    // 文案单一真相在 domain::reminder::render_invocation_reminder_body；
+    // 本函数只负责旧 kind 固定序（迁移期行为等价）、envelope 包裹与日志
+    // preview / redaction。
+    let kind_order = |data: &InvocationReminderData| match data {
+        InvocationReminderData::TaskProgress(_) => 0_u8,
+        InvocationReminderData::GuidanceSourcesChanged => 1,
+        InvocationReminderData::ModelGuidanceMismatch { .. } => 2,
+        InvocationReminderData::MemoryUpdated { .. } => 3,
+    };
+    let mut ordered = reminders.to_vec();
+    ordered.sort_by_key(kind_order);
     let mut rendered = Vec::new();
-    for reminder_kind in [0_u8, 1, 2, 3] {
-        for reminder in reminders {
-            let text = match (reminder_kind, reminder) {
-                (0, InvocationReminderData::TaskProgress(progress)) => {
-                    let mut lines = vec![match language {
-                        "zh" => format!("━━ 任务：{}/{} ━━", progress.completed, progress.total),
-                        _ => format!("━━ Tasks: {}/{} ━━", progress.completed, progress.total),
-                    }];
-                    for item in &progress.items {
-                        let status = match item.status {
-                            TaskProgressStatus::Completed => "✓",
-                            TaskProgressStatus::InProgress => "■",
-                            TaskProgressStatus::Pending => "□",
-                        };
-                        let blocked = if item.blocked_by_sequences.is_empty() {
-                            String::new()
-                        } else {
-                            let sequences = item
-                                .blocked_by_sequences
-                                .iter()
-                                .map(u64::to_string)
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            match language {
-                                "zh" => format!("（被 #{sequences} 阻塞）"),
-                                _ => format!(" (blocked by #{sequences})"),
-                            }
-                        };
-                        lines.push(format!(
-                            "{status} #{} {}{blocked}",
-                            item.sequence,
-                            escape_reminder_text(&item.subject)
-                        ));
-                    }
-                    if progress.hidden_count > 0 {
-                        lines.push(match language {
-                            "zh" => format!("另有 {} 个任务未显示", progress.hidden_count),
-                            _ => format!("{} additional tasks are omitted", progress.hidden_count),
-                        });
-                    }
-                    let heading = match language {
-                        "zh" => "当前任务进度：",
-                        _ => "Current task progress:",
-                    };
-                    Some(format!(
-                        "<system-reminder>{heading}\n{}\n</system-reminder>",
-                        lines.join("\n")
-                    ))
-                }
-                (1, InvocationReminderData::GuidanceSourcesChanged) => {
-                    Some(match language {
-                        "zh" => "<system-reminder>guidance 来源已变更；当前 Session 的冻结系统提示保持不变。新 Session 才会重新物化这些来源。</system-reminder>".to_string(),
-                        _ => "<system-reminder>Guidance sources changed. This Session's frozen system prompt remains unchanged; a new Session will materialize the updated sources.</system-reminder>".to_string(),
-                    })
-                }
-                (
-                    2,
-                    InvocationReminderData::ModelGuidanceMismatch {
-                        session_model_id,
-                        run_model_id,
-                    },
-                ) => Some(match language {
-                    "zh" => format!(
-                        "<system-reminder>Session 冻结模型 {} 与当前 Run 模型 {} 不同；继续使用 Session 冻结的系统提示。</system-reminder>",
-                        escape_reminder_text(session_model_id),
-                        escape_reminder_text(run_model_id)
-                    ),
-                    _ => format!(
-                        "<system-reminder>The Session-frozen model {} differs from the current Run model {}; continue using the Session-frozen system prompt.</system-reminder>",
-                        escape_reminder_text(session_model_id),
-                        escape_reminder_text(run_model_id)
-                    ),
-                }),
-                (3, InvocationReminderData::MemoryUpdated { changed }) => {
-                    Some(match language {
-                        "zh" => format!(
-                            "<system-reminder>记忆已更新 {changed} 条；需要最新内容时用 memory tool 的 list / search 查看，不要凭记忆假设。</system-reminder>"
-                        ),
-                        _ => format!(
-                            "<system-reminder>Memory was updated ({changed} entries). Use the memory tool's list / search actions to read the current content instead of assuming what it says.</system-reminder>"
-                        ),
-                    })
-                }
-                _ => None,
-            };
-            if let Some(text) = text {
-                let body = redact_reminder_log_text(&text);
-                rendered.push(ReminderLogPayload {
-                    kind: reminder.kind(),
-                    preview: reminder_log_preview(&body),
-                    body,
-                    rendered_body: text,
-                });
-            }
-        }
+    for reminder in &ordered {
+        let body = crate::domain::reminder::render_invocation_reminder_body(reminder, language);
+        let text = format!("<system-reminder>{body}</system-reminder>");
+        let redacted_body = redact_reminder_log_text(&text);
+        rendered.push(ReminderLogPayload {
+            kind: reminder.kind(),
+            preview: reminder_log_preview(&redacted_body),
+            body: redacted_body,
+            rendered_body: text,
+        });
     }
     rendered
 }
@@ -546,12 +471,6 @@ fn looks_like_secret(normalized: &str) -> bool {
     normalized.starts_with("sk-")
         || normalized.starts_with("ghp_")
         || normalized.starts_with("github_pat_")
-}
-
-fn escape_reminder_text(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 #[cfg(test)]
@@ -681,30 +600,9 @@ impl ContextPort for ContextApplicationService {
     ) -> Result<AppendReceiptData, ContextAppendError> {
         self.session.append_finalized(append).await
     }
-}
 
-/// 为带用户输入时刻的 user 消息渲染 LLM 时间前缀 `[YYYY-MM-DD HH:MM ±ZZZZ] `，
-/// 仅作用于 ContextWindow 视图（canonical message 与落盘 JSON 不变）。
-/// 返回 `None` 表示原样保留：非 user、无 `created_at`（系统生成 / tool result /
-/// reminder）或无 Text block 的消息都不加前缀。
-pub(crate) fn render_user_input_timestamp_prefix(
-    message: &share::message::Message,
-) -> Option<share::message::Message> {
-    if message.role != share::message::Role::User {
-        return None;
-    }
-    let created_at = message.metadata.as_ref()?.created_at?;
-    let prefix = format!("[{}]: ", created_at.format("%Y-%m-%d %H:%M %z"));
-    let mut rendered = message.clone();
-    let first_text = rendered.content.iter_mut().find_map(|block| match block {
-        share::message::ContentBlock::Text { text } => Some(text),
-        _ => None,
-    })?;
-    *first_text = format!("{prefix}{first_text}");
-    Some(rendered)
-}
+    // ─── Reminder 统一管线控制面（ContextPort 默认方法的生产实现）───
 
-impl crate::ports::ReminderControlPort for ContextApplicationService {
     /// Reminder 管线句柄：Run 启动创建（同 RunId 重复创建替换旧管线）。
     fn create_reminder_pipeline(&self, run_id: RunId, sources: Vec<Arc<dyn ReminderSource>>) {
         self.reminder_pipelines
@@ -768,4 +666,25 @@ impl crate::ports::ReminderControlPort for ContextApplicationService {
             pipeline.step_advanced(step);
         }
     }
+}
+
+/// 为带用户输入时刻的 user 消息渲染 LLM 时间前缀 `[YYYY-MM-DD HH:MM ±ZZZZ] `，
+/// 仅作用于 ContextWindow 视图（canonical message 与落盘 JSON 不变）。
+/// 返回 `None` 表示原样保留：非 user、无 `created_at`（系统生成 / tool result /
+/// reminder）或无 Text block 的消息都不加前缀。
+pub(crate) fn render_user_input_timestamp_prefix(
+    message: &share::message::Message,
+) -> Option<share::message::Message> {
+    if message.role != share::message::Role::User {
+        return None;
+    }
+    let created_at = message.metadata.as_ref()?.created_at?;
+    let prefix = format!("[{}]: ", created_at.format("%Y-%m-%d %H:%M %z"));
+    let mut rendered = message.clone();
+    let first_text = rendered.content.iter_mut().find_map(|block| match block {
+        share::message::ContentBlock::Text { text } => Some(text),
+        _ => None,
+    })?;
+    *first_text = format!("{prefix}{first_text}");
+    Some(rendered)
 }

@@ -146,6 +146,12 @@ where
         step_id: &RunStepId,
     ) -> Result<(), LoopEngineError> {
         self.reminder_intents_available = false;
+        // Reminder 统一管线：step 边界推进 OnStepInterval 周期重建
+        // （07-reminder-pipeline.md；run_started 已以 step=0 提供首次注入）。
+        self.context_request
+            .runtime_context
+            .context()
+            .reminder_step_advanced(&self.run_id, execution.step_count() as u64);
         StepPersistenceCoordinator::from_context(self.context_request.runtime_context)
             .accept_step_input(execution, step_id, &mut self.accepted_input)
             .await

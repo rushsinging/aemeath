@@ -38,18 +38,23 @@ impl ReminderPipeline {
         }
     }
 
-    /// Run 启动：`OnRunStart` 类 source 现场快照入队（快照替换语义）。
+    /// Run 启动：`OnRunStart` 类 source 现场快照入队（快照替换语义）；
+    /// `OnStepInterval` 以 step=0 推进（0 是任意间隔的倍数——
+    /// 「启动即一次 + 周期重注入」的 kind 无需双声明）。
     pub fn run_started(&mut self) {
         for source in self.sources_matching(|trigger| matches!(trigger, RefreshTrigger::OnRunStart))
         {
-            self.queue
-                .push_snapshot(source.kind(), source.build(), source.policy().inject);
+            if let Some(snapshot) = source.build() {
+                self.queue
+                    .push_snapshot(source.kind(), snapshot, source.policy().inject);
+            }
             log::debug!(
                 target: crate::LOG_TARGET,
                 "reminder_enqueued trigger=run_started kind={}",
                 source.kind().as_str(),
             );
         }
+        self.enqueue_interval_sources(0);
     }
 
     /// Runtime 推送事件：`OnEvent(source)` 匹配的 source 入队（事件累积语义）。
@@ -57,8 +62,10 @@ impl ReminderPipeline {
         for source in self.sources_matching(
             |trigger| matches!(trigger, RefreshTrigger::OnEvent(owned) if owned == event_source),
         ) {
-            self.queue
-                .push_event(source.kind(), source.build(), source.policy().inject);
+            if let Some(snapshot) = source.build() {
+                self.queue
+                    .push_event(source.kind(), snapshot, source.policy().inject);
+            }
             log::debug!(
                 target: crate::LOG_TARGET,
                 "reminder_enqueued trigger=event source={} kind={}",
@@ -73,19 +80,32 @@ impl ReminderPipeline {
         for source in
             self.sources_matching(|trigger| matches!(trigger, RefreshTrigger::OnTaskMutation))
         {
-            self.queue
-                .push_snapshot(source.kind(), source.build(), source.policy().inject);
+            if let Some(snapshot) = source.build() {
+                self.queue
+                    .push_snapshot(source.kind(), snapshot, source.policy().inject);
+            }
         }
     }
 
     /// step 边界推进：`OnStepInterval(n)` 在 step 为 n 的倍数时现场重建入队。
     pub fn step_advanced(&mut self, step: u64) {
+        self.enqueue_interval_sources(step);
+    }
+
+    fn enqueue_interval_sources(&mut self, step: u64) {
         for source in self.sources_matching(|trigger| {
             matches!(trigger, RefreshTrigger::OnStepInterval(interval)
                 if *interval > 0 && step.is_multiple_of(u64::from(*interval)))
         }) {
-            self.queue
-                .push_snapshot(source.kind(), source.build(), source.policy().inject);
+            if let Some(snapshot) = source.build() {
+                self.queue
+                    .push_snapshot(source.kind(), snapshot, source.policy().inject);
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "reminder_enqueued trigger=step_interval step={step} kind={}",
+                    source.kind().as_str(),
+                );
+            }
         }
     }
 
@@ -182,8 +202,10 @@ impl ReminderPipeline {
             .collect::<Vec<_>>();
         for kind in flagged {
             if let Some(source) = self.source_for_kind(&kind) {
-                self.queue
-                    .push_snapshot(kind.clone(), source.build(), source.policy().inject);
+                if let Some(snapshot) = source.build() {
+                    self.queue
+                        .push_snapshot(kind.clone(), snapshot, source.policy().inject);
+                }
             }
             self.queue.clear_rebuild_flag(&kind);
         }

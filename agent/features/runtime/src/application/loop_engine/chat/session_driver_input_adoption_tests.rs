@@ -973,7 +973,7 @@ async fn task_reminder_injected_once_per_run_and_never_synced_to_tui() {
         "expected exactly two model invocations (tool call + final text)"
     );
 
-    let reminder_text = "<system-reminder>Current task progress:";
+    let reminder_text = "Current task progress:";
     // 首请求注入；同 run 第二次请求不重复。
     assert!(
         recorded[0]

@@ -35,13 +35,17 @@ mod ports;
 pub(crate) use adapters::wire_isolated_context_with_skill;
 pub use adapters::{wire_isolated_context, wire_isolated_context_with_workspace_skills};
 pub use adapters::{NoOpCanonicalSessionWriter, ProductionMainContextFactory};
-pub use domain::reminder::{ReminderEventSource, ReminderSource};
+pub use domain::reminder::{
+    render_invocation_reminder_body, CompactBehavior, InjectBehavior, RefreshTrigger,
+    ReminderDedup, ReminderEventSource, ReminderKind, ReminderPlacement, ReminderPolicy,
+    ReminderPriority, ReminderSnapshot, ReminderSource,
+};
 pub use domain::session::{
     DisplayHistoryStepIndexData, DisplayHistoryStepWindowData, SessionListEntryData,
     SessionManagementError, SessionMetadataUpdateData, SessionRestoreStepData,
     SessionResumeViewData,
 };
-pub use ports::{ReminderControlPort, SessionManagementPort};
+pub use ports::SessionManagementPort;
 
 // Main Session coordinator — cross-BC wiring for Runtime bootstrap.
 #[cfg(any(test, feature = "dev"))]

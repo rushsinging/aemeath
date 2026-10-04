@@ -1,7 +1,10 @@
 //! ContextPort — Context Management 对 Runtime 发布的类型化 OHS。
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 
+use crate::domain::reminder::{ReminderEventSource, ReminderSource};
 pub use crate::domain::*;
 
 /// Context Management 对 Agent Runtime 开放的唯一端口。
@@ -77,4 +80,29 @@ pub trait ContextPort: Send + Sync {
         &self,
         append: &ContextAppendData,
     ) -> Result<AppendReceiptData, ContextAppendError>;
+
+    // ─── Reminder 统一管线控制面（07-reminder-pipeline.md）────────────
+    //
+    // Run 生命周期句柄与 typed 事件推送。默认 no-op：测试替身与不接入
+    // reminder 管线的 ContextPort 实现保持兼容；生产实现由
+    // ContextApplicationService 提供。注入决策在 build_window 内部
+    // 按 policy 自动完成，Runtime 不感知 placement / dedup / 预算。
+
+    /// Run 启动：为该 Run 创建 reminder 管线（同 RunId 重复创建替换旧管线）。
+    fn create_reminder_pipeline(&self, _run_id: RunId, _sources: Vec<Arc<dyn ReminderSource>>) {}
+
+    /// Run 结束：销毁该 Run 的 reminder 管线。
+    fn drop_reminder_pipeline(&self, _run_id: &RunId) {}
+
+    /// Run 启动事件：`OnRunStart` 类 source 入队。
+    fn reminder_run_started(&self, _run_id: &RunId) {}
+
+    /// 业务事件推送：`OnEvent(source)` 匹配的 source 入队。
+    fn reminder_handle_event(&self, _run_id: &RunId, _event_source: &ReminderEventSource) {}
+
+    /// task store 变更事件：`OnTaskMutation` 类 source 入队。
+    fn reminder_task_mutated(&self, _run_id: &RunId) {}
+
+    /// step 边界事件：`OnStepInterval(n)` 在步数为 n 的倍数时重建入队。
+    fn reminder_step_advanced(&self, _run_id: &RunId, _step: u64) {}
 }

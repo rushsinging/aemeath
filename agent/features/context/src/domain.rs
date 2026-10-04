@@ -90,7 +90,7 @@ impl SessionRevision {
 ///
 /// Runtime 负责产生 intent 与生命周期；Context 负责本地化渲染、排序和预算。
 /// 这些值 **NEVER** 写入 canonical Session。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InvocationReminderData {
     TaskProgress(TaskProgressReminderData),
     GuidanceSourcesChanged,
@@ -139,7 +139,7 @@ impl InvocationReminderData {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskProgressReminderData {
     pub total: usize,
     pub completed: usize,
@@ -147,7 +147,7 @@ pub struct TaskProgressReminderData {
     pub hidden_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskProgressReminderItemData {
     pub sequence: u64,
     pub subject: String,
@@ -155,7 +155,7 @@ pub struct TaskProgressReminderItemData {
     pub blocked_by_sequences: Vec<u64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TaskProgressStatus {
     Completed,
     InProgress,

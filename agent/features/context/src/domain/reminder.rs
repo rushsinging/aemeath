@@ -152,8 +152,8 @@ pub struct ReminderSnapshot {
 pub trait ReminderSource: Send + Sync {
     fn kind(&self) -> ReminderKind;
     fn policy(&self) -> ReminderPolicy;
-    /// 读当前快照（自包含数据，NEVER 回查业务 store 由调用方保证）。
-    fn build(&self) -> ReminderSnapshot;
+    /// 读当前快照；`None` 表示本轮无内容（如当前无任务），不入队。
+    fn build(&self) -> Option<ReminderSnapshot>;
     /// 按语言渲染 body。
     fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String;
 }
@@ -405,4 +405,94 @@ pub fn compose_reminder_envelope(input: &ReminderEnvelopeInput) -> String {
 /// 多 reminder 拼装：合并为单条尾部 user message（NEVER 相邻 user-user 轮次）。
 pub fn compose_tail_user_message(blocks: &[String]) -> String {
     blocks.join("\n")
+}
+
+/// reminder 文案的 HTML 转义（subject / model id 等不可信文本）。
+pub(crate) fn escape_reminder_text(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// 既有 4 类 reminder（`InvocationReminderData` 载体）的 body 渲染：
+/// zh/en 双语、不含 envelope 包裹（envelope 由
+/// [`compose_reminder_envelope`] 统一添加）。
+///
+/// runtime 侧 source 的 `render` 经 serde 反序列化后委托本函数，
+/// 保持文案单一真相在 Context。
+pub fn render_invocation_reminder_body(
+    data: &crate::domain::InvocationReminderData,
+    language: &str,
+) -> String {
+    match data {
+        crate::domain::InvocationReminderData::TaskProgress(progress) => {
+            let mut lines = vec![match language {
+                "zh" => format!("━━ 任务：{}/{} ━━", progress.completed, progress.total),
+                _ => format!("━━ Tasks: {}/{} ━━", progress.completed, progress.total),
+            }];
+            for item in &progress.items {
+                let status = match item.status {
+                    crate::domain::TaskProgressStatus::Completed => "✓",
+                    crate::domain::TaskProgressStatus::InProgress => "■",
+                    crate::domain::TaskProgressStatus::Pending => "□",
+                };
+                let blocked = if item.blocked_by_sequences.is_empty() {
+                    String::new()
+                } else {
+                    let sequences = item
+                        .blocked_by_sequences
+                        .iter()
+                        .map(u64::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    match language {
+                        "zh" => format!("（被 #{sequences} 阻塞）"),
+                        _ => format!(" (blocked by #{sequences})"),
+                    }
+                };
+                lines.push(format!(
+                    "{status} #{} {}{blocked}",
+                    item.sequence,
+                    escape_reminder_text(&item.subject)
+                ));
+            }
+            if progress.hidden_count > 0 {
+                lines.push(match language {
+                    "zh" => format!("另有 {} 个任务未显示", progress.hidden_count),
+                    _ => format!("{} additional tasks are omitted", progress.hidden_count),
+                });
+            }
+            match language {
+                "zh" => format!("当前任务进度：\n{}", lines.join("\n")),
+                _ => format!("Current task progress:\n{}", lines.join("\n")),
+            }
+        }
+        crate::domain::InvocationReminderData::GuidanceSourcesChanged => match language {
+            "zh" => "guidance 来源已变更；当前 Session 的冻结系统提示保持不变。新 Session 才会重新物化这些来源。".to_string(),
+            _ => "Guidance sources changed. This Session's frozen system prompt remains unchanged; a new Session will materialize the updated sources.".to_string(),
+        },
+        crate::domain::InvocationReminderData::ModelGuidanceMismatch {
+            session_model_id,
+            run_model_id,
+        } => match language {
+            "zh" => format!(
+                "Session 冻结模型 {} 与当前 Run 模型 {} 不同；继续使用 Session 冻结的系统提示。",
+                escape_reminder_text(session_model_id),
+                escape_reminder_text(run_model_id)
+            ),
+            _ => format!(
+                "The Session-frozen model {} differs from the current Run model {}; continue using the Session-frozen system prompt.",
+                escape_reminder_text(session_model_id),
+                escape_reminder_text(run_model_id)
+            ),
+        },
+        crate::domain::InvocationReminderData::MemoryUpdated { changed } => match language {
+            "zh" => format!(
+                "记忆已更新 {changed} 条；需要最新内容时用 memory tool 的 list / search 查看，不要凭记忆假设。"
+            ),
+            _ => format!(
+                "Memory was updated ({changed} entries). Use the memory tool's list / search actions to read the current content instead of assuming what it says."
+            ),
+        },
+    }
 }

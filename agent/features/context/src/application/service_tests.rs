@@ -770,10 +770,10 @@ impl crate::domain::reminder::ReminderSource for PipelineTestSource {
         }
     }
 
-    fn build(&self) -> crate::domain::reminder::ReminderSnapshot {
-        crate::domain::reminder::ReminderSnapshot {
+    fn build(&self) -> Option<crate::domain::reminder::ReminderSnapshot> {
+        Some(crate::domain::reminder::ReminderSnapshot {
             data: self.body.clone(),
-        }
+        })
     }
 
     fn render(
@@ -799,12 +799,12 @@ async fn build_window_injects_reminder_pipeline_tail_and_system_tail() {
     });
     let service = service(vec![], 1);
     let run_id = request(None).run_id;
-    crate::ports::ReminderControlPort::create_reminder_pipeline(
+    crate::ports::ContextPort::create_reminder_pipeline(
         &service,
         run_id.clone(),
         vec![tail_source, system_source],
     );
-    crate::ports::ReminderControlPort::reminder_run_started(&service, &run_id);
+    crate::ports::ContextPort::reminder_run_started(&service, &run_id);
 
     let window = service
         .build_window(&request(None))
@@ -836,7 +836,7 @@ async fn build_window_injects_reminder_pipeline_tail_and_system_tail() {
         .content
         .contains("kind=\"model-guidance-mismatch\""));
 
-    crate::ports::ReminderControlPort::drop_reminder_pipeline(&service, &run_id);
+    crate::ports::ContextPort::drop_reminder_pipeline(&service, &run_id);
     let window_after_drop = service
         .build_window(&request(None))
         .await

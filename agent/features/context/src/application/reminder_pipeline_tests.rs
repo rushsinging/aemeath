@@ -53,11 +53,11 @@ impl ReminderSource for CountingTestSource {
         self.policy.clone()
     }
 
-    fn build(&self) -> ReminderSnapshot {
+    fn build(&self) -> Option<ReminderSnapshot> {
         *self.build_count.lock().expect("build_count lock poisoned") += 1;
-        ReminderSnapshot {
+        Some(ReminderSnapshot {
             data: self.current.lock().expect("current lock poisoned").clone(),
-        }
+        })
     }
 
     fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String {
