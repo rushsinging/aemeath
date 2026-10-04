@@ -11,7 +11,8 @@ use config::{ConfigReader, ConfigRefreshOutcomeData};
 /// Turn 边界配置与 Prompt source 变更检测结果。
 pub(crate) struct TurnBoundaryConfigOutcome {
     pub refresh: Result<ConfigRefreshOutcomeData, share::error::DomainError>,
-    pub guidance_sources_changed: bool,
+    /// 变更的 guidance / instruction 文件路径（空 = 无变化）。
+    pub guidance_changed_paths: Vec<String>,
 }
 
 /// Turn 边界配置变更检测与 diagnostic 通知。
@@ -71,10 +72,15 @@ where
     }
 
     let config_diff = check_config_changes(config_snapshot);
-    let guidance_sources_changed = config_diff
-        .changed_keys
+    // changed_keys 与 changes 同序（classify_change_key 逐条映射），zip 过滤
+    // guidance / instruction 前缀并保留完整路径（Read 引导目标）。
+    let guidance_changed_paths = config_diff
+        .changes
         .iter()
-        .any(|key| key.starts_with("guidance:") || key.starts_with("instruction:"));
+        .zip(config_diff.changed_keys.iter())
+        .filter(|(_, key)| key.starts_with("guidance:") || key.starts_with("instruction:"))
+        .map(|(change, _)| change.path.display().to_string())
+        .collect::<Vec<_>>();
     if config_diff.has_changes() {
         log::info!(target: crate::LOG_TARGET,
             "[config_reload] run step {} detected changes: {:?}",
@@ -92,6 +98,6 @@ where
     }
     TurnBoundaryConfigOutcome {
         refresh,
-        guidance_sources_changed,
+        guidance_changed_paths,
     }
 }

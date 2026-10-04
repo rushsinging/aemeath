@@ -707,49 +707,65 @@ where
                     sink: runtime_context.event_sink(),
                     input: runtime_context.input(),
                 };
-                let mut invocation_reminders = crate::application::loop_engine::chat::task_snapshot::build_task_reminder_intent(
-                    runtime_context.task().as_ref(),
-                    share::config::TaskListConfig::default().max_lines,
-                )
-                .into_iter()
-                .collect::<Vec<_>>();
-                if turn_boundary_config.guidance_sources_changed {
-                    let reminder =
-                        context::InvocationReminderData::guidance_sources_changed();
+                // Reminder 统一管线（07-reminder-pipeline.md）：数据获取在
+                // Runtime、注入决策在 Context（placement / dedup / 预算 /
+                // compact 处置）。sources 按启动期事实条件注册。
+                let mut reminder_sources: Vec<std::sync::Arc<dyn context::ReminderSource>> = vec![
+                    std::sync::Arc::new(
+                        crate::application::loop_engine::chat::reminder_sources::TaskProgressReminderSource::new(
+                            runtime_context.task(),
+                            share::config::TaskListConfig::default().max_lines,
+                        ),
+                    ),
+                ];
+                if !turn_boundary_config.guidance_changed_paths.is_empty() {
                     log::debug!(
                         target: crate::LOG_TARGET,
-                        "invocation_reminder_created kind={} trigger=guidance_sources_changed",
-                        reminder.kind(),
+                        "reminder_source_registered kind=guidance_sources_changed trigger=turn_boundary_config paths={:?}",
+                        turn_boundary_config.guidance_changed_paths,
                     );
-                    invocation_reminders.push(reminder);
+                    reminder_sources.push(std::sync::Arc::new(
+                        crate::application::loop_engine::chat::reminder_sources::RunStartFactReminderSource::guidance_sources_changed(
+                            turn_boundary_config.guidance_changed_paths.clone(),
+                            runtime_context
+                                .config_ref()
+                                .config()
+                                .guidance_reload_policy(),
+                        ),
+                    ));
                 }
                 if runtime_context.provider_ref().model.model != shell.prompt_model_id {
-                    let reminder = context::InvocationReminderData::model_guidance_mismatch(
-                        shell.prompt_model_id.clone(),
-                        runtime_context.provider_ref().model.model.clone(),
-                    );
                     log::debug!(
                         target: crate::LOG_TARGET,
-                        "invocation_reminder_created kind={} session_model={} run_model={}",
-                        reminder.kind(),
+                        "reminder_source_registered kind=model_guidance_mismatch session_model={} run_model={}",
                         shell.prompt_model_id,
                         runtime_context.provider_ref().model.model,
                     );
-                    invocation_reminders.push(reminder);
+                    reminder_sources.push(std::sync::Arc::new(
+                        crate::application::loop_engine::chat::reminder_sources::RunStartFactReminderSource::model_guidance_mismatch(
+                            shell.prompt_model_id.clone(),
+                            runtime_context.provider_ref().model.model.clone(),
+                        ),
+                    ));
                 }
                 if let Some(notice) = reflection_tasks.take_memory_update_notice() {
                     // The TUI already showed the notice when reflection finished;
                     // the model needs the same facts in the turn that follows it.
-                    let reminder =
-                        context::InvocationReminderData::memory_updated(notice.changed);
                     log::debug!(
                         target: crate::LOG_TARGET,
-                        "invocation_reminder_created kind={} trigger=memory_updated changed={}",
-                        reminder.kind(),
+                        "reminder_source_registered kind=memory_updated changed={}",
                         notice.changed,
                     );
-                    invocation_reminders.push(reminder);
+                    reminder_sources.push(std::sync::Arc::new(
+                        crate::application::loop_engine::chat::reminder_sources::RunStartFactReminderSource::memory_updated(notice.changed),
+                    ));
                 }
+                let reminder_context_port = runtime_context.context();
+                reminder_context_port.create_reminder_pipeline(
+                    run_id.clone(),
+                    std::mem::take(&mut reminder_sources),
+                );
+                reminder_context_port.reminder_run_started(&run_id);
                 let context_request =
                     crate::application::loop_engine::run_services::ContextRequest {
                         runtime_context: &runtime_context,
@@ -769,7 +785,6 @@ where
                             )
                             .map(|snapshot| snapshot.model_schemas())
                             .unwrap_or_default(),
-                        invocation_reminders,
                     };
                 let mut persistence =
                     crate::application::loop_engine::run_services::RuntimeStepPersistence::new(
@@ -983,6 +998,11 @@ where
                         log::error!(target: crate::LOG_TARGET, "main shared run loop failed: {error}");
                     }
                 }
+                // Reminder 管线句柄随 Run 销毁：Run-scoped 状态不跨 Run 泄漏
+                //（07-reminder-pipeline.md）。
+                runtime_context
+                    .context()
+                    .drop_reminder_pipeline(&run_id);
                 // Return any remaining Run-scoped events (control commands
                 // buffered during await_user_input) to the session idle gate.
                 input_source.drain_remaining_events();

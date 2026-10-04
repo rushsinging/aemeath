@@ -96,7 +96,6 @@ async fn a_new_session_injects_again() {
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![],
-        invocation_reminders: vec![],
         system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: share::reasoning::ReasoningLevel::Off,

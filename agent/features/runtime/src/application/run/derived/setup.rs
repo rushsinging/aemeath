@@ -533,6 +533,35 @@ impl AgentRunner for CliAgentRunner {
                 },
                 true,
             );
+            // Reminder 统一管线（07-reminder-pipeline.md）：sub run 与 main 同一
+            // 机制——sources 按 derived 启动期事实条件注册，句柄随 derived run 销毁。
+            let mut derived_reminder_sources: Vec<std::sync::Arc<dyn context::ReminderSource>> =
+                vec![std::sync::Arc::new(
+                    crate::application::loop_engine::chat::reminder_sources::TaskProgressReminderSource::new(
+                        runtime_context.task(),
+                        share::config::TaskListConfig::default().max_lines,
+                    ),
+                )];
+            if model_name != parent_frame.context.provider_ref().model.model {
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "reminder_source_registered kind=model_guidance_mismatch session_model={} run_model={} scope=derived",
+                    parent_frame.context.provider_ref().model.model,
+                    model_name,
+                );
+                derived_reminder_sources.push(std::sync::Arc::new(
+                    crate::application::loop_engine::chat::reminder_sources::RunStartFactReminderSource::model_guidance_mismatch(
+                        parent_frame.context.provider_ref().model.model.clone(),
+                        model_name.clone(),
+                    ),
+                ));
+            }
+            let derived_context_port = runtime_context.context();
+            derived_context_port.create_reminder_pipeline(
+                run_id.clone(),
+                std::mem::take(&mut derived_reminder_sources),
+            );
+            derived_context_port.reminder_run_started(&run_id);
             let persistence =
                 crate::application::loop_engine::run_services::RuntimeStepPersistence::new(
                     run_id.clone(),
@@ -547,29 +576,6 @@ impl AgentRunner for CliAgentRunner {
                         context_size,
                         max_output_tokens: max_tokens as usize,
                         raw_tool_schemas: tool_schemas,
-                        invocation_reminders: {
-                            let mut reminders = crate::application::loop_engine::chat::task_snapshot::build_task_reminder_intent(
-                                runtime_context.task().as_ref(),
-                                share::config::TaskListConfig::default().max_lines,
-                            )
-                            .into_iter()
-                            .collect::<Vec<_>>();
-                            if model_name != parent_frame.context.provider_ref().model.model {
-                                let reminder = context::InvocationReminderData::model_guidance_mismatch(
-                                    parent_frame.context.provider_ref().model.model.clone(),
-                                    model_name.clone(),
-                                );
-                                log::debug!(
-                                    target: crate::LOG_TARGET,
-                                    "invocation_reminder_created kind={} session_model={} run_model={} scope=derived",
-                                    reminder.kind(),
-                                    parent_frame.context.provider_ref().model.model,
-                                    model_name,
-                                );
-                                reminders.push(reminder);
-                            }
-                            reminders
-                        },
                     },
                     None,
                     crate::application::loop_engine::step_persistence::NoopAcceptedInputObserver,
@@ -632,7 +638,7 @@ impl AgentRunner for CliAgentRunner {
                 progress_sink,
                 source_context,
             };
-            super::loop_run::launch_sub_run(
+            let sub_run_terminal = super::loop_run::launch_sub_run(
                 &mut derived.instance,
                 self.active_run.clone(),
                 tool_execution_context,
@@ -648,7 +654,10 @@ impl AgentRunner for CliAgentRunner {
                 plan_mode_active,
                 finalizer,
             )
-            .await
+            .await;
+            // Reminder 管线句柄随 derived run 销毁（07-reminder-pipeline.md）。
+            runtime_context.context().drop_reminder_pipeline(&run_id);
+            sub_run_terminal
         })
         .await
     }

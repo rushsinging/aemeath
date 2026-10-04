@@ -36,6 +36,7 @@ mod reflection_manual_tests;
 mod reflection_notice_tests;
 #[cfg(test)]
 mod reflection_trigger_tests;
+pub(crate) mod reminder_sources;
 pub(crate) mod run_input_buffer;
 mod session_driver;
 mod snapshot_registry;

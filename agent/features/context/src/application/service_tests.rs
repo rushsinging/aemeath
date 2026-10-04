@@ -9,15 +9,10 @@ use share::message::{ContentBlock, Message};
 use share::reasoning::ReasoningLevel;
 
 use super::performance::{capture, percentiles_ns};
-use super::service::{
-    invocation_reminder_log_payloads, render_user_input_timestamp_prefix,
-    ContextApplicationService, ReminderLogPayload,
-};
+use super::service::{render_user_input_timestamp_prefix, ContextApplicationService};
 use crate::domain::{
-    ContextAppendData, ContextMessages, ContextRequestData, ContextRequestId,
-    InvocationReminderData, Language, RunStepId, SessionId, SessionRevision, SystemBlock,
-    SystemPromptSpecData, TaskProgressReminderData, TaskProgressReminderItemData,
-    TaskProgressStatus,
+    ContextAppendData, ContextMessages, ContextRequestData, ContextRequestId, Language, RunStepId,
+    SessionId, SessionRevision, SystemBlock, SystemPromptSpecData,
 };
 use crate::ports::{
     ContextMemorySource, ContextPort, ContextPromptSource, MemoryMaterialization,
@@ -136,7 +131,6 @@ fn request(last_api_total_tokens: Option<u64>) -> ContextRequestData {
         run_id: RunId::new("baseline-run"),
         step_id: RunStepId::new("baseline-step"),
         pending_messages: vec![Message::user("pending")],
-        invocation_reminders: vec![],
         system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
@@ -381,91 +375,6 @@ async fn post_compaction_usage_check_below_half_threshold_for_small_history() {
         .expect("compact 后占用体检不应失败");
 
     assert!(!report.exceeds_half_threshold());
-}
-
-#[test]
-fn invocation_reminder_log_payloads_include_summary_preview_and_redacted_body() {
-    let secret = "sk-ant-api03-secret-value";
-    let reminders = vec![
-        InvocationReminderData::model_guidance_mismatch("session/model", "run/model"),
-        InvocationReminderData::guidance_sources_changed(),
-        InvocationReminderData::task_progress(TaskProgressReminderData {
-            total: 1,
-            completed: 0,
-            items: vec![TaskProgressReminderItemData {
-                sequence: 7,
-                subject: format!("diagnose Authorization: Bearer {secret}"),
-                status: TaskProgressStatus::InProgress,
-                blocked_by_sequences: vec![],
-            }],
-            hidden_count: 0,
-        }),
-    ];
-
-    let payloads = invocation_reminder_log_payloads("zh", &reminders);
-
-    assert_eq!(payloads.len(), 3);
-    assert!(matches!(
-        &payloads[0],
-        ReminderLogPayload {
-            kind,
-            preview: _,
-            body: _,
-            rendered_body: _,
-        } if *kind == "task_progress"
-    ));
-    assert!(payloads[0].preview.chars().count() <= 200);
-    assert!(payloads[0]
-        .body
-        .contains("diagnose Authorization: Bearer [REDACTED]"));
-    assert!(!payloads[0].body.contains(secret));
-    assert_eq!(payloads[1].kind, "guidance_sources_changed");
-    assert_eq!(payloads[2].kind, "model_guidance_mismatch");
-    assert!(payloads[2].body.contains("session/model"));
-    assert!(payloads[2].body.contains("run/model"));
-}
-
-#[test]
-fn memory_updated_reminder_points_at_the_memory_tool_without_quoting_content() {
-    let reminders = vec![InvocationReminderData::memory_updated(3)];
-
-    let zh = invocation_reminder_log_payloads("zh", &reminders);
-    assert_eq!(zh.len(), 1);
-    assert_eq!(zh[0].kind, "memory_updated");
-    assert!(zh[0].rendered_body.starts_with("<system-reminder>"));
-    assert!(zh[0].rendered_body.contains('3'));
-    // Must tell the model how to look the change up.
-    assert!(
-        zh[0].rendered_body.contains("list"),
-        "{}",
-        zh[0].rendered_body
-    );
-    assert!(
-        zh[0].rendered_body.contains("search"),
-        "{}",
-        zh[0].rendered_body
-    );
-
-    let en = invocation_reminder_log_payloads("en", &reminders);
-    assert_eq!(en.len(), 1);
-    assert!(en[0].rendered_body.contains("3"));
-    assert!(en[0].rendered_body.contains("list"));
-    assert!(en[0].rendered_body.contains("search"));
-}
-
-#[test]
-fn the_memory_updated_reminder_keeps_its_place_after_the_other_reminders() {
-    let payloads = invocation_reminder_log_payloads(
-        "en",
-        &[
-            InvocationReminderData::memory_updated(1),
-            InvocationReminderData::guidance_sources_changed(),
-        ],
-    );
-
-    assert_eq!(payloads.len(), 2);
-    assert_eq!(payloads[0].kind, "guidance_sources_changed");
-    assert_eq!(payloads[1].kind, "memory_updated");
 }
 
 #[tokio::test]
@@ -741,4 +650,111 @@ fn render_user_input_timestamp_prefixes_only_first_text_block() {
         .filter(|block| matches!(block, share::message::ContentBlock::Image { .. }))
         .count();
     assert_eq!(image_blocks, 1, "图片块不得被改动");
+}
+
+// ---------------------------------------------------------------------------
+// Reminder 统一管线（07-reminder-pipeline.md）：build_window 集成
+// ---------------------------------------------------------------------------
+
+struct PipelineTestSource {
+    kind: crate::domain::reminder::ReminderKind,
+    placement: crate::domain::reminder::ReminderPlacement,
+    body: String,
+}
+
+impl crate::domain::reminder::ReminderSource for PipelineTestSource {
+    fn kind(&self) -> crate::domain::reminder::ReminderKind {
+        self.kind.clone()
+    }
+
+    fn policy(&self) -> crate::domain::reminder::ReminderPolicy {
+        crate::domain::reminder::ReminderPolicy {
+            refresh: crate::domain::reminder::RefreshTrigger::OnRunStart,
+            placement: self.placement,
+            inject: crate::domain::reminder::InjectBehavior {
+                dedup: crate::domain::reminder::ReminderDedup::SkipIfUnchanged,
+                priority: crate::domain::reminder::ReminderPriority::task_state(),
+            },
+            compact: crate::domain::reminder::CompactBehavior::Reinstate,
+        }
+    }
+
+    fn build(&self) -> Option<crate::domain::reminder::ReminderSnapshot> {
+        Some(crate::domain::reminder::ReminderSnapshot {
+            data: self.body.clone(),
+        })
+    }
+
+    fn render(
+        &self,
+        _snapshot: &crate::domain::reminder::ReminderSnapshot,
+        language: &str,
+    ) -> String {
+        format!("[{language}] {}", self.body)
+    }
+}
+
+#[tokio::test]
+async fn build_window_injects_reminder_pipeline_tail_and_system_tail() {
+    let tail_source = Arc::new(PipelineTestSource {
+        kind: crate::domain::reminder::ReminderKind::task_progress(),
+        placement: crate::domain::reminder::ReminderPlacement::TailUserMessage,
+        body: "total=2 completed=1".to_string(),
+    });
+    let system_source = Arc::new(PipelineTestSource {
+        kind: crate::domain::reminder::ReminderKind::new("model_guidance_mismatch"),
+        placement: crate::domain::reminder::ReminderPlacement::SystemTail,
+        body: "session=a run=b".to_string(),
+    });
+    let service = service(vec![], 1);
+    let run_id = request(None).run_id;
+    crate::ports::ContextPort::create_reminder_pipeline(
+        &service,
+        run_id.clone(),
+        vec![tail_source, system_source],
+    );
+    crate::ports::ContextPort::reminder_run_started(&service, &run_id);
+
+    let window = service
+        .build_window(&request(None))
+        .await
+        .expect("构建 window");
+
+    let tail_user = window
+        .messages
+        .iter()
+        .rev()
+        .filter(|message| matches!(message.role, share::message::Role::User))
+        .flat_map(|message| message.content.iter())
+        .filter_map(|content_block| match content_block {
+            ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .find(|text| text.contains("kind=\"task-progress\""))
+        .expect("尾部 user message 含 reminder 块");
+    assert!(tail_user.contains("[zh] total=2 completed=1"));
+
+    let reminder_block = window
+        .system_blocks
+        .iter()
+        .find(|block| block.kind == "reminder")
+        .expect("SystemTail reminder 进 system blocks");
+    assert!(reminder_block.cacheable);
+    assert!(!reminder_block.cache_break);
+    assert!(reminder_block
+        .content
+        .contains("kind=\"model-guidance-mismatch\""));
+
+    crate::ports::ContextPort::drop_reminder_pipeline(&service, &run_id);
+    let window_after_drop = service
+        .build_window(&request(None))
+        .await
+        .expect("销毁后构建 window");
+    assert!(
+        !window_after_drop
+            .system_blocks
+            .iter()
+            .any(|block| block.kind == "reminder"),
+        "句柄销毁后不再注入"
+    );
 }

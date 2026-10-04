@@ -94,7 +94,6 @@ fn request() -> ContextRequestData {
         run_id: RunId::new("run"),
         step_id: crate::RunStepId::new("step"),
         pending_messages: vec![],
-        invocation_reminders: vec![],
         system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,

@@ -4,9 +4,9 @@ use crate::CommittedMemoryRetrieveAdapter;
 use crate::ContextApplicationService;
 use crate::{
     CleanupConfirmation, ContextAppendData, ContextMessages, ContextRequestData, ContextRequestId,
-    FinalizeCause, InvocationReminderData, Language, RunStepId, SessionId, SessionRevision,
-    SystemBlock, SystemPromptSpecData, ToolCallIdentityData, ToolCallReceiptData,
-    ToolOutcomeKindData, ToolTerminalReceiptData,
+    FinalizeCause, Language, RunStepId, SessionId, SessionRevision, SystemBlock,
+    SystemPromptSpecData, ToolCallIdentityData, ToolCallReceiptData, ToolOutcomeKindData,
+    ToolTerminalReceiptData,
 };
 use crate::{
     CommittedRunSlice, CommittedRunStep, CommittedStepMessages, FinalizedOutcomeRecord,
@@ -280,7 +280,6 @@ pub(super) fn request() -> ContextRequestData {
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("pending")],
-        invocation_reminders: vec![],
         system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
@@ -585,45 +584,143 @@ fn fixed_user_input_time() -> chrono::DateTime<chrono::FixedOffset> {
         .expect("固定测试时刻必须唯一")
 }
 
-#[tokio::test]
-async fn build_window_renders_invocation_reminders_once_in_stable_order() {
-    let mut request = request();
-    request.invocation_reminders = vec![
-        InvocationReminderData::model_guidance_mismatch("session/model", "run/model"),
-        InvocationReminderData::guidance_sources_changed(),
-        InvocationReminderData::task_progress(crate::TaskProgressReminderData {
-            total: 2,
-            completed: 0,
-            items: vec![
-                crate::TaskProgressReminderItemData {
-                    sequence: 1,
-                    subject: "task one".into(),
-                    status: crate::TaskProgressStatus::InProgress,
-                    blocked_by_sequences: vec![],
-                },
-                crate::TaskProgressReminderItemData {
-                    sequence: 2,
-                    subject: "task two".into(),
-                    status: crate::TaskProgressStatus::Pending,
-                    blocked_by_sequences: vec![1],
-                },
-            ],
-            hidden_count: 0,
-        }),
-    ];
+/// Reminder source 测试替身：Run 启动冻结事实型（与 runtime 的
+/// `RunStartFactReminderSource` 同 policy 映射）。
+struct FactSourceFixture {
+    kind: crate::ReminderKind,
+    data: crate::domain::InvocationReminderData,
+    placement: crate::ReminderPlacement,
+    priority: crate::ReminderPriority,
+}
 
-    let window = service().build_window(&request).await.unwrap();
-    let rendered: Vec<_> = window
+impl FactSourceFixture {
+    fn task_progress() -> Self {
+        Self {
+            kind: crate::ReminderKind::task_progress(),
+            data: crate::domain::InvocationReminderData::TaskProgress(
+                crate::TaskProgressReminderData {
+                    total: 2,
+                    completed: 0,
+                    items: vec![
+                        crate::TaskProgressReminderItemData {
+                            sequence: 1,
+                            subject: "task one".into(),
+                            status: crate::TaskProgressStatus::InProgress,
+                            blocked_by_sequences: vec![],
+                        },
+                        crate::TaskProgressReminderItemData {
+                            sequence: 2,
+                            subject: "task two".into(),
+                            status: crate::TaskProgressStatus::Pending,
+                            blocked_by_sequences: vec![1],
+                        },
+                    ],
+                    hidden_count: 0,
+                },
+            ),
+            placement: crate::ReminderPlacement::TailUserMessage,
+            priority: crate::ReminderPriority::task_state(),
+        }
+    }
+
+    fn guidance_changed() -> Self {
+        Self {
+            kind: crate::ReminderKind::new("guidance_sources_changed"),
+            data: crate::domain::InvocationReminderData::GuidanceSourcesChanged { paths: vec![] },
+            placement: crate::ReminderPlacement::SystemTail,
+            priority: crate::ReminderPriority::environment(),
+        }
+    }
+
+    fn model_mismatch(session_model: &str, run_model: &str) -> Self {
+        Self {
+            kind: crate::ReminderKind::new("model_guidance_mismatch"),
+            data: crate::domain::InvocationReminderData::model_guidance_mismatch(
+                session_model,
+                run_model,
+            ),
+            placement: crate::ReminderPlacement::SystemTail,
+            priority: crate::ReminderPriority::environment(),
+        }
+    }
+}
+
+impl crate::ReminderSource for FactSourceFixture {
+    fn kind(&self) -> crate::ReminderKind {
+        self.kind.clone()
+    }
+
+    fn policy(&self) -> crate::ReminderPolicy {
+        crate::ReminderPolicy {
+            refresh: crate::RefreshTrigger::OnRunStart,
+            placement: self.placement,
+            inject: crate::InjectBehavior {
+                dedup: crate::ReminderDedup::SkipIfUnchanged,
+                priority: self.priority,
+            },
+            compact: crate::CompactBehavior::Reinstate,
+        }
+    }
+
+    fn build(&self) -> Option<crate::ReminderSnapshot> {
+        Some(crate::ReminderSnapshot {
+            data: serde_json::to_string(&self.data).expect("快照序列化"),
+        })
+    }
+
+    fn render(&self, snapshot: &crate::ReminderSnapshot, language: &str) -> String {
+        let data: crate::domain::InvocationReminderData =
+            serde_json::from_str(&snapshot.data).expect("快照反序列化");
+        crate::render_invocation_reminder_body(&data, language)
+    }
+}
+
+#[tokio::test]
+async fn build_window_renders_reminder_pipeline_injection_by_placement() {
+    // Reminder 统一管线（07-reminder-pipeline.md）：注入走 Run-scoped 管线，
+    // 事件/任务类进尾部单条 user message，Run 级恒定类进 SystemTail。
+    let task_source = std::sync::Arc::new(FactSourceFixture::task_progress());
+    let guidance_source = std::sync::Arc::new(FactSourceFixture::guidance_changed());
+    let mismatch_source = std::sync::Arc::new(FactSourceFixture::model_mismatch(
+        "session/model",
+        "run/model",
+    ));
+    let context_service = service();
+    let run_id = request().run_id;
+    ContextPort::create_reminder_pipeline(
+        &context_service,
+        run_id.clone(),
+        vec![task_source.clone(), guidance_source, mismatch_source],
+    );
+    ContextPort::reminder_run_started(&context_service, &run_id);
+
+    let window = context_service.build_window(&request()).await.unwrap();
+
+    let tail_reminders: Vec<_> = window
         .messages
         .iter()
         .map(Message::text_content)
-        .filter(|text| text.contains("<system-reminder>"))
+        .filter(|text| text.contains("<system-reminder"))
         .collect();
+    assert_eq!(tail_reminders.len(), 1, "多 reminder 合并为单条消息");
+    assert!(
+        tail_reminders[0].contains("当前任务进度"),
+        "{}",
+        tail_reminders[0]
+    );
 
-    assert_eq!(rendered.len(), 3);
-    assert!(rendered[0].contains("当前任务进度"));
-    assert!(rendered[1].contains("guidance 来源已变更"));
-    assert!(rendered[2].contains("Session 冻结模型 session/model"));
+    let reminder_blocks: Vec<_> = window
+        .system_blocks
+        .iter()
+        .filter(|block| block.kind == "reminder")
+        .collect();
+    assert_eq!(reminder_blocks.len(), 2, "SystemTail 双块");
+    assert!(reminder_blocks
+        .iter()
+        .any(|block| block.content.contains("guidance 来源已变更")));
+    assert!(reminder_blocks
+        .iter()
+        .any(|block| block.content.contains("Session 冻结模型 session/model")));
     assert!(window.token_estimation.message_tokens > 0);
     assert_eq!(
         window
@@ -631,12 +728,21 @@ async fn build_window_renders_invocation_reminders_once_in_stable_order() {
             .iter()
             .filter(|block| block.cache_break)
             .count(),
-        1
+        1,
+        "reminder 块不占用唯一 cache_break"
     );
+
+    let task_kind_positions: Vec<_> = tail_reminders[0]
+        .match_indices("kind=\"task-progress\"")
+        .collect();
+    assert_eq!(task_kind_positions.len(), 1);
+    assert!(task_kind_positions[0].0 < tail_reminders[0].len());
+
+    ContextPort::drop_reminder_pipeline(&context_service, &run_id);
 }
 
 #[tokio::test]
-async fn build_window_without_invocation_reminders_keeps_messages_unchanged() {
+async fn build_window_without_reminder_pipeline_keeps_messages_unchanged() {
     let window = service().build_window(&request()).await.unwrap();
 
     assert_eq!(window.messages.len(), 3);

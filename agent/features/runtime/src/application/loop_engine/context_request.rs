@@ -57,7 +57,6 @@ impl<'a> ContextRequestCoordinator<'a> {
             run_id: run_id.clone(),
             step_id: step_id.clone(),
             pending_messages,
-            invocation_reminders: vec![],
             system_prompt: SystemPromptSpecData::new(self.source.system_prompt),
             model_id: self.source.model_id.to_string(),
             effective_reasoning: *self

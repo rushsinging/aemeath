@@ -47,3 +47,31 @@ pub const MIN_EFFECTIVE_WINDOW: usize = 1_024;
 /// auto-compact，形成 compact 风暴直至熔断。预留 clamp 到窗口 25% 后
 /// threshold 永不为 0；大窗口常规配置（如 200k 窗口 + 16k output）不受影响。
 pub const MAX_OUTPUT_WINDOW_RATIO_CAP: usize = 4;
+
+// ---------------------------------------------------------------------------
+// Reminder 统一管线（domain/reminder.rs）——kind 标识、优先级缺省与 envelope 版本
+// ---------------------------------------------------------------------------
+
+/// reminder kind：任务进度（周期重注入，快照类）。
+pub const KIND_TASK_PROGRESS: &str = "task_progress";
+
+/// reminder kind：记忆更新（事件类）。
+pub const KIND_MEMORY_UPDATED: &str = "memory_updated";
+
+/// 注入优先级缺省：事件类（后台任务完成、memory 更新）最高。
+pub const PRIORITY_EVENT: i32 = 300;
+
+/// 注入优先级缺省：任务状态类。
+pub const PRIORITY_TASK_STATE: i32 = 200;
+
+/// 注入优先级缺省：环境类（guidance 变化、模型不匹配）最低。
+pub const PRIORITY_ENVIRONMENT: i32 = 100;
+
+/// 统一 envelope 的格式版本：解析兼容与格式演进的依据。
+pub const ENVELOPE_VERSION: u32 = 1;
+
+/// 单次 build_window 的 reminder 注入 token 预算封顶（07-reminder-pipeline.md）。
+///
+/// reminder 是注意力补偿通道而非正文载体：超预算的低优先级块按
+/// priority 截断滞留，下一轮优先补入。
+pub const REMINDER_INJECTION_TOKEN_BUDGET: usize = 512;

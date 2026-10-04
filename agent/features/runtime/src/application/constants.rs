@@ -69,3 +69,10 @@ pub(crate) const DEFAULT_GRACE: Duration = Duration::from_millis(250);
 // ─── tool/tool_result_materializer.rs ───
 
 pub(crate) const COMPLETED_MATERIALIZATION_CAPACITY: usize = 256;
+
+// ─── loop_engine/chat/reminder_sources.rs ───
+
+/// TaskProgress 周期重注入间隔（step 数）。`run_started` 以 step=0 推进，
+/// 提供首次注入；此后每达间隔现场重建（对抗注意力衰减）。
+/// specs/3.4 修订前先以常量落地，可配置化随 config 演进。
+pub(crate) const TASK_PROGRESS_REFRESH_INTERVAL_STEPS: u32 = 8;

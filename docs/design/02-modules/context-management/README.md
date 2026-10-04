@@ -28,6 +28,7 @@ Context Management 是 Agent Runtime 的"记忆中枢"——管理"喂给 LLM �
 5. **Prompt 组装内聚于 ContextPort**：系统提示组装是 async `build_window` 的内部步骤，由私有 `PromptPipeline` 完成。文件 Guidance 经 Context-owned `GuidanceSourcePort`，Skill 只经供应方 `SkillCatalogPort` 取得 metadata；Prompt policy **NEVER** 读取 Skill 正文或文件系统。
 6. **Memory 检索经供应方 OHS**：Memory BC 独占检索、scoring、ranking 与 semantic retrieval；Context 的 `memory_inject` integration 经 `MemoryPort` 获取已排序条目，只负责 SystemBlock render / placement、token budget 与跨轮去重。
 7. **跨 BC 快照组装**：Session 落盘时内嵌 Task / Project 快照（经端口收集，恢复时分发回去）——边界经端口，不共享内部结构。
+8. **Reminder 管线归 Context、事件归 Runtime**：reminder 的 build → 队列 → 注入管线与广义 ReminderPolicy（refresh / placement / inject / compact 四维）收在 Context；Run 生命周期信号与业务事件由 Runtime 推送 typed 事件；类型增长只经 source 注册，机制零改动。以 [07-reminder-pipeline.md](07-reminder-pipeline.md) 为唯一真相。
 
 ## 3. Target 物理目录与六边形边界
 
@@ -88,7 +89,7 @@ Runtime 与 Context Management 的上下文交互经 6 个方法：
 
 | 方法 | 语义 | 内部步骤 |
 |---|---|---|
-| `build_window` | 构建本轮 Context Window | L2-L4 compact 读模型投影 → async Guidance + Skill metadata directory → Memory → summary → 唯一 block 顺序；L1 已在 ToolResult 入链前完成 |
+| `build_window` | 构建本轮 Context Window | L2-L4 compact 读模型投影 → async Guidance + Skill metadata directory → Memory → summary → reminder 注入 → 唯一 block 顺序；L1 已在 ToolResult 入链前完成 |
 | `needs_compaction` | 是否需要压缩 | token budget 计算 → 返回 compaction urgency |
 | `compact` | 执行自动 L5 持久压缩 | 在稳定 Session backing 上按冻结 revision 生成并提交 Compact segment |
 | `manual_compact` | 执行 idle `/compact` | 绕过自动阈值，但仍复用 canonical backing、mutation gate 与 AtomicBlob writer |
@@ -138,6 +139,7 @@ Storage 提供原子写与损坏兜底**机制**，不拥有 Session 数据本�
 | [04-prompt-guidance.md](04-prompt-guidance.md) | PromptPipeline、GuidanceSourcePort、Skill 物化、安全扫描覆盖、prompt cache 稳定性 |
 | [05-memory-injection.md](05-memory-injection.md) | MemoryPort consumption、SystemBlock render / placement、token budget、跨轮 dedup、Reflection 时序 |
 | [06-persistent-summary-tree.md](06-persistent-summary-tree.md) | L5 持久化增量摘要树、checkpoint、projection、scheduler、恢复与 compact usage |
+| [07-reminder-pipeline.md](07-reminder-pipeline.md) | Reminder 统一管线：source 注册、Run 级队列、invocation 注入、广义 ReminderPolicy、placement 与格式契约 |
 
 ## 9. 相关文档
 
@@ -154,6 +156,7 @@ Storage 提供原子写与损坏兜底**机制**，不拥有 Session 数据本�
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-10-04 | 新增 Reminder 统一管线（07 文档）：域归属决策、三段管线、广义 ReminderPolicy、placement 缓存不变量与多 reminder 拼装 | [#1695](https://github.com/rushsinging/aemeath/issues/1695) |
 | 2026-07-28 | #1438 将 Context 的 Skill 消费收窄为 metadata-only SkillCatalogPort；完整正文只在 Skill Tool 调用后进入模型上下文 | [#1438](https://github.com/rushsinging/aemeath/issues/1438) |
 | 2026-07-12 | 初稿：Context Management 模块入口、7 条核心决策、ContextPort OHS、四方法、跨 BC 快照组装 | #743 |
 | 2026-07-13 | 补代码落点章节（`agent/features/context` crate + prompt 合并 + 目录映射表） | #762 |

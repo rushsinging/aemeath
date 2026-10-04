@@ -9,6 +9,10 @@ mod context_decision_tests;
 #[cfg(test)]
 #[path = "domain/context_messages_map_tests.rs"]
 mod context_messages_map_tests;
+pub mod reminder;
+#[cfg(test)]
+#[path = "domain/reminder_tests.rs"]
+mod reminder_tests;
 pub mod session;
 pub(crate) mod token_budget;
 pub mod tool_receipt;
@@ -16,10 +20,12 @@ pub mod tool_receipt;
 mod tool_receipt_tests;
 
 pub use compact::CompactProgressFn;
+pub use constants::REMINDER_INJECTION_TOKEN_BUDGET;
 pub use token_budget::{
     autocompact_threshold, effective_context_window, estimate_message_tokens,
     estimate_messages_tokens, estimate_tokens, estimate_tool_schemas_tokens, MIN_EFFECTIVE_WINDOW,
 };
+
 pub use tool_receipt::{
     CleanupConfirmation, ToolCallIdentityData, ToolReceiptMutationData, ToolReceiptMutationError,
     ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
@@ -34,8 +40,7 @@ use std::sync::Arc;
 use provider::ModelToolSchemaData;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::AgentRoleDefinition;
-use share::ids::RunId;
-pub use share::ids::{RunStepId, SessionId};
+pub use share::ids::{RunId, RunStepId, SessionId};
 pub use share::message::Message as ContextMessage;
 use share::reasoning::ReasoningLevel;
 
@@ -85,10 +90,13 @@ impl SessionRevision {
 ///
 /// Runtime 负责产生 intent 与生命周期；Context 负责本地化渲染、排序和预算。
 /// 这些值 **NEVER** 写入 canonical Session。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InvocationReminderData {
     TaskProgress(TaskProgressReminderData),
-    GuidanceSourcesChanged,
+    GuidanceSourcesChanged {
+        /// 变更的 guidance / instruction 文件路径（Remind 引导 LLM Read 的目标）。
+        paths: Vec<String>,
+    },
     ModelGuidanceMismatch {
         session_model_id: String,
         run_model_id: String,
@@ -102,8 +110,8 @@ pub enum InvocationReminderData {
 }
 
 impl InvocationReminderData {
-    pub fn guidance_sources_changed() -> Self {
-        Self::GuidanceSourcesChanged
+    pub fn guidance_sources_changed(paths: Vec<String>) -> Self {
+        Self::GuidanceSourcesChanged { paths }
     }
 
     pub fn model_guidance_mismatch(
@@ -127,14 +135,14 @@ impl InvocationReminderData {
     pub const fn kind(&self) -> &'static str {
         match self {
             Self::TaskProgress(_) => "task_progress",
-            Self::GuidanceSourcesChanged => "guidance_sources_changed",
+            Self::GuidanceSourcesChanged { .. } => "guidance_sources_changed",
             Self::ModelGuidanceMismatch { .. } => "model_guidance_mismatch",
             Self::MemoryUpdated { .. } => "memory_updated",
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskProgressReminderData {
     pub total: usize,
     pub completed: usize,
@@ -142,7 +150,7 @@ pub struct TaskProgressReminderData {
     pub hidden_count: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskProgressReminderItemData {
     pub sequence: u64,
     pub subject: String,
@@ -150,7 +158,7 @@ pub struct TaskProgressReminderItemData {
     pub blocked_by_sequences: Vec<u64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TaskProgressStatus {
     Completed,
     InProgress,
@@ -165,7 +173,6 @@ pub struct ContextRequestData {
     pub run_id: RunId,
     pub step_id: RunStepId,
     pub pending_messages: Vec<ContextMessage>,
-    pub invocation_reminders: Vec<InvocationReminderData>,
     pub system_prompt: SystemPromptSpecData,
     pub model_id: String,
     pub effective_reasoning: ReasoningLevel,
