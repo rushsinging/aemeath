@@ -119,14 +119,16 @@ priority 全序约定（仅作缺省，kind 可覆写声明）：**事件类 > �
 
 Runtime 推送 typed 事件（Context 定义事件 PL，Runtime 实现/转发）：
 
-| 事件 | 触发点 | 消费 kind |
-|---|---|---|
-| `RunStarted` | Run 启动 | OnRunStart 类 rebuild |
-| `TaskMutated` | task store 变更后 | TaskProgress |
-| `BackgroundTaskCompleted` | 后台任务终态 | BackgroundTaskEvent（见 §8） |
-| `MemoryUpdated` | memory 更新通知 | MemoryUpdated |
-| `CompactCommitted` | auto-compact 提交 | 各 kind 的 compact 处置 |
-| `StepAdvanced` | step 边界 | OnStepInterval 计数 |
+| 事件 | 触发点 | 消费 kind | 落地状态 |
+|---|---|---|---|
+| `RunStarted` | Run 启动（main / derived） | OnRunStart 类入队 + OnStepInterval 以 step=0 推进（首次注入） | ✅ |
+| `StepAdvanced` | step 边界（accept_step_input） | OnStepInterval 计数 | ✅ |
+| `CompactCommitted` | auto-compact 提交（Context `compact` 的 `Committed` 分支内部对接，不经 Runtime 推送——run_id 取自 CompactRequestData，少一次跨域往返） | 各 kind 的 compact 处置 | ✅ |
+| `TaskMutated` | task store 变更后 | TaskProgress | 未接线：OnStepInterval 周期已覆盖 task 变更反映，即时触发留后续按需接入 |
+| `BackgroundTaskCompleted` | 后台任务终态 | BackgroundTaskEvent（见 §8） | 随后台任务模型落地 |
+| `MemoryUpdated` | memory 更新通知 | MemoryUpdated | 按 Run 启动事实 source 承载（见 §7 映射注记） |
+
+事件 payload 为自包含快照数据；Context **NEVER** 回查业务 store，**NEVER** 持有 task / 后台任务内部句柄。
 
 事件 payload 为自包含快照数据；Context **NEVER** 回查业务 store，**NEVER** 持有 task / 后台任务内部句柄。
 
@@ -134,10 +136,10 @@ Runtime 推送 typed 事件（Context 定义事件 PL，Runtime 实现/转发）
 
 | kind | 数据源 | refresh | compact | placement |
 |---|---|---|---|---|
-| TaskProgress | task 快照（计数 + 可见窗口） | `OnRunStart + OnStepInterval` | Rebuild | TailUserMessage |
+| TaskProgress | task 快照（计数 + 可见窗口） | `OnStepInterval(8)`（`run_started` 以 step=0 提供首次注入——0 是任意间隔的倍数，无需 OnRunStart 双声明） | Rebuild | TailUserMessage |
 | GuidanceSourcesChanged | turn 边界 config diff | `OnRunStart` | Reinstate | SystemTail |
 | ModelGuidanceMismatch | session 冻结模型 vs run 模型 | `OnRunStart` | Reinstate | SystemTail |
-| MemoryUpdated | memory 更新通知（一次性取走） | `OnEvent(memory)` | Drop | TailUserMessage |
+| MemoryUpdated | memory 更新通知（Run 边界一次性取走） | `OnRunStart`（reflection notice 为 Run 边界事实；`OnEvent(memory)` 留待 reflection 运行态演进接入） | Drop | TailUserMessage |
 
 迁移后快路径行为等价：Run 启动 build → 首个 invocation 注入，与现状一致；差异只在 compact 后重开、周期重注入与去重按 policy 生效。
 

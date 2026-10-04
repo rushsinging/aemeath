@@ -31,7 +31,21 @@ pub struct ReminderPipeline {
 }
 
 impl ReminderPipeline {
-    pub fn new(sources: Vec<Arc<dyn ReminderSource>>) -> Self {
+    pub fn new(candidate_sources: Vec<Arc<dyn ReminderSource>>) -> Self {
+        // 注册期校验缓存不变量（07-reminder-pipeline.md §4）：动态 refresh
+        //（OnStepInterval / OnEvent）强制 TailUserMessage，违规 source 拒绝注册。
+        let mut sources = Vec::with_capacity(candidate_sources.len());
+        for source in candidate_sources {
+            if source.policy().is_valid() {
+                sources.push(source);
+            } else {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "reminder_source_rejected reason=dynamic_refresh_with_system_tail kind={}",
+                    source.kind().as_str(),
+                );
+            }
+        }
         Self {
             queue: ReminderQueue::new(),
             sources,

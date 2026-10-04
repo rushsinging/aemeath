@@ -3,19 +3,18 @@ use std::sync::{Arc, Mutex};
 use super::reminder_pipeline::{ReminderPipeline, ReminderWindowInjection};
 use crate::domain::reminder::{
     CompactBehavior, InjectBehavior, RefreshTrigger, ReminderDedup, ReminderEventSource,
-    ReminderKind, ReminderPlacement, ReminderPolicy, ReminderSnapshot, ReminderSource,
+    ReminderKind, ReminderPlacement, ReminderPolicy, ReminderPriority, ReminderSnapshot,
+    ReminderSource,
 };
 
 const LANGUAGE_ZH: &str = "zh";
 
-fn inject_behavior(priority: ReminderPriorityAlias) -> InjectBehavior {
+fn inject_behavior(priority: ReminderPriority) -> InjectBehavior {
     InjectBehavior {
         dedup: ReminderDedup::SkipIfUnchanged,
         priority,
     }
 }
-
-use crate::domain::reminder::ReminderPriority as ReminderPriorityAlias;
 
 /// 测试 source：开闭原则的证据——只实现 `ReminderSource` 即全链路工作。
 struct CountingTestSource {
@@ -69,7 +68,7 @@ fn interval_policy(interval: u32, placement: ReminderPlacement) -> ReminderPolic
     ReminderPolicy {
         refresh: RefreshTrigger::OnStepInterval(interval),
         placement,
-        inject: inject_behavior(ReminderPriorityAlias::task_state()),
+        inject: inject_behavior(ReminderPriority::task_state()),
         compact: CompactBehavior::Rebuild,
     }
 }
@@ -78,7 +77,7 @@ fn event_policy(source: &str) -> ReminderPolicy {
     ReminderPolicy {
         refresh: RefreshTrigger::OnEvent(ReminderEventSource::new(source)),
         placement: ReminderPlacement::TailUserMessage,
-        inject: inject_behavior(ReminderPriorityAlias::event()),
+        inject: inject_behavior(ReminderPriority::event()),
         compact: CompactBehavior::Rebuild,
     }
 }
@@ -87,7 +86,7 @@ fn run_start_policy(placement: ReminderPlacement) -> ReminderPolicy {
     ReminderPolicy {
         refresh: RefreshTrigger::OnRunStart,
         placement,
-        inject: inject_behavior(ReminderPriorityAlias::environment()),
+        inject: inject_behavior(ReminderPriority::environment()),
         compact: CompactBehavior::Reinstate,
     }
 }
@@ -310,5 +309,51 @@ fn multiple_reminders_merge_into_single_tail_message() {
     assert!(
         memory_pos < progress_pos,
         "事件类 priority 高于任务状态类，排在前"
+    );
+}
+
+// ---------- 注册期 policy 校验：动态 kind 强制 TailUserMessage ----------
+
+struct InvalidPlacementTestSource;
+
+impl ReminderSource for InvalidPlacementTestSource {
+    fn kind(&self) -> ReminderKind {
+        ReminderKind::memory_updated()
+    }
+
+    fn policy(&self) -> ReminderPolicy {
+        ReminderPolicy {
+            // 违反缓存不变量：事件驱动 kind 不得使用 SystemTail。
+            refresh: RefreshTrigger::OnEvent(ReminderEventSource::new("memory")),
+            placement: ReminderPlacement::SystemTail,
+            inject: InjectBehavior {
+                dedup: ReminderDedup::SkipIfUnchanged,
+                priority: ReminderPriority::event(),
+            },
+            compact: CompactBehavior::Drop,
+        }
+    }
+
+    fn build(&self) -> Option<ReminderSnapshot> {
+        Some(ReminderSnapshot {
+            data: "changed=1".to_string(),
+        })
+    }
+
+    fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String {
+        format!("[{language}] {}", snapshot.data)
+    }
+}
+
+#[test]
+fn pipeline_rejects_source_with_invalid_placement_policy() {
+    let mut pipeline = ReminderPipeline::new(vec![Arc::new(InvalidPlacementTestSource)]);
+    pipeline.run_started();
+    pipeline.handle_event(&ReminderEventSource::new("memory"));
+
+    let injection = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512);
+    assert!(
+        injection.tail_user_message.is_none() && injection.system_tail_blocks.is_empty(),
+        "违反缓存不变量（动态 refresh + SystemTail）的 source 在注册期被拒绝，零注入"
     );
 }
