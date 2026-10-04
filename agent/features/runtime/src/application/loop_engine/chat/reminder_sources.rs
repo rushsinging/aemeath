@@ -10,11 +10,6 @@ use context::{
     ReminderPolicy, ReminderPriority, ReminderSnapshot, ReminderSource,
 };
 
-/// TaskProgress 周期重注入间隔（step 数）。`run_started` 以 step=0 推进，
-/// 提供首次注入；此后每达间隔现场重建（对抗注意力衰减）。
-/// specs/3.4 修订前先以常量落地，可配置化随 config 演进。
-pub(crate) const TASK_PROGRESS_REFRESH_INTERVAL_STEPS: u32 = 8;
-
 /// 任务进度 source：从 `TaskAccess` 读当前 batch 快照。
 pub(crate) struct TaskProgressReminderSource {
     task: Arc<dyn task::TaskAccess>,
@@ -34,7 +29,9 @@ impl ReminderSource for TaskProgressReminderSource {
 
     fn policy(&self) -> ReminderPolicy {
         ReminderPolicy {
-            refresh: context::RefreshTrigger::OnStepInterval(TASK_PROGRESS_REFRESH_INTERVAL_STEPS),
+            refresh: context::RefreshTrigger::OnStepInterval(
+                crate::application::constants::TASK_PROGRESS_REFRESH_INTERVAL_STEPS,
+            ),
             placement: ReminderPlacement::TailUserMessage,
             inject: InjectBehavior {
                 dedup: ReminderDedup::SkipIfUnchanged,

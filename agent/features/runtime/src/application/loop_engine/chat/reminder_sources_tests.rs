@@ -1,6 +1,7 @@
 use super::*;
+use crate::application::constants::TASK_PROGRESS_REFRESH_INTERVAL_STEPS;
 use crate::application::loop_engine::chat::reminder_sources::{
-    RunStartFactReminderSource, TaskProgressReminderSource, TASK_PROGRESS_REFRESH_INTERVAL_STEPS,
+    RunStartFactReminderSource, TaskProgressReminderSource,
 };
 
 fn access_with_progress(completed: usize) -> task::TaskStore {
