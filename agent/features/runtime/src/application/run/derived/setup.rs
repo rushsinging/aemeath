@@ -576,7 +576,6 @@ impl AgentRunner for CliAgentRunner {
                         context_size,
                         max_output_tokens: max_tokens as usize,
                         raw_tool_schemas: tool_schemas,
-                        invocation_reminders: Vec::new(),
                     },
                     None,
                     crate::application::loop_engine::step_persistence::NoopAcceptedInputObserver,

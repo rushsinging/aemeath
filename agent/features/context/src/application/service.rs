@@ -9,8 +9,8 @@ use crate::domain::{
     AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
     CompactOutcome, CompactRequestData, CompactionDecisionData, ContextAppendData,
     ContextAppendError, ContextPortError, ContextRequestData, ContextWindowData,
-    InvocationReminderData, ManualCompactRequestData, RunId, SessionId, SystemBlock,
-    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
+    ManualCompactRequestData, RunId, SessionId, SystemBlock, ToolReceiptMutationData,
+    ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
 use crate::ports::{ContextMemorySource, ContextPort, ContextPromptSource, SessionRepository};
 
@@ -175,47 +175,8 @@ impl ContextApplicationService {
             snapshot.messages.clone()
         };
         let mut messages = committed_messages.with_pending(request.pending_messages.clone());
-        let reminder_payloads = invocation_reminder_log_payloads(
-            request.language.as_str(),
-            &request.invocation_reminders,
-        );
-        if !reminder_payloads.is_empty() {
-            let kinds = reminder_payloads
-                .iter()
-                .map(|payload| payload.kind)
-                .collect::<Vec<_>>()
-                .join(",");
-            log::debug!(
-                target: crate::LOG_TARGET,
-                "invocation_reminders_rendered count={} kinds={} request_id={}",
-                reminder_payloads.len(),
-                kinds,
-                request.request_id.as_str(),
-            );
-            for (placement, payload) in reminder_payloads.iter().enumerate() {
-                log::debug!(
-                    target: crate::LOG_TARGET,
-                    "invocation_reminder_placed kind={} placement={} preview={}",
-                    payload.kind,
-                    placement,
-                    payload.preview,
-                );
-                log::trace!(
-                    target: crate::LOG_TARGET,
-                    "invocation_reminder_body kind={} body={}",
-                    payload.kind,
-                    payload.body,
-                );
-            }
-            messages = messages.with_pending(
-                reminder_payloads
-                    .into_iter()
-                    .map(|payload| share::message::Message::user(payload.rendered_body))
-                    .collect(),
-            );
-        }
-        // Reminder 统一管线注入（07-reminder-pipeline.md）：Run-scoped 管线
-        // 存在时按 policy 注入；W2 迁移完成前与上方旧 invocation_reminders 并存。
+        // Reminder 统一管线注入（07-reminder-pipeline.md）：Run-scoped
+        // 管线按 policy 注入（placement / dedup / 预算 / 拼装）。
         let reminder_injection = self.reminder_injection_for(request);
         if let Some(tail_message) = reminder_injection.tail_user_message.clone() {
             messages = messages.with_pending(vec![share::message::Message::user(tail_message)]);
@@ -389,88 +350,6 @@ impl PostCompactionUsageReport {
     pub fn exceeds_half_threshold(&self) -> bool {
         self.decision_token_count > self.threshold / 2
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ReminderLogPayload {
-    pub kind: &'static str,
-    pub preview: String,
-    pub body: String,
-    pub(crate) rendered_body: String,
-}
-
-pub(crate) fn invocation_reminder_log_payloads(
-    language: &str,
-    reminders: &[InvocationReminderData],
-) -> Vec<ReminderLogPayload> {
-    // 文案单一真相在 domain::reminder::render_invocation_reminder_body；
-    // 本函数只负责旧 kind 固定序（迁移期行为等价）、envelope 包裹与日志
-    // preview / redaction。
-    let kind_order = |data: &InvocationReminderData| match data {
-        InvocationReminderData::TaskProgress(_) => 0_u8,
-        InvocationReminderData::GuidanceSourcesChanged => 1,
-        InvocationReminderData::ModelGuidanceMismatch { .. } => 2,
-        InvocationReminderData::MemoryUpdated { .. } => 3,
-    };
-    let mut ordered = reminders.to_vec();
-    ordered.sort_by_key(kind_order);
-    let mut rendered = Vec::new();
-    for reminder in &ordered {
-        let body = crate::domain::reminder::render_invocation_reminder_body(reminder, language);
-        let text = format!("<system-reminder>{body}</system-reminder>");
-        let redacted_body = redact_reminder_log_text(&text);
-        rendered.push(ReminderLogPayload {
-            kind: reminder.kind(),
-            preview: reminder_log_preview(&redacted_body),
-            body: redacted_body,
-            rendered_body: text,
-        });
-    }
-    rendered
-}
-
-fn reminder_log_preview(body: &str) -> String {
-    let mut preview = body.chars().take(200).collect::<String>();
-    if body.chars().count() > 200 {
-        preview.push('…');
-    }
-    preview
-}
-
-fn redact_reminder_log_text(text: &str) -> String {
-    let words = text.split_whitespace().collect::<Vec<_>>();
-    let mut redacted = Vec::with_capacity(words.len());
-    let mut redact_next = false;
-    for word in words {
-        let normalized = word
-            .trim_matches(|character: char| !character.is_ascii_alphanumeric() && character != '-')
-            .to_ascii_lowercase();
-        if redact_next {
-            if normalized == "bearer" {
-                redacted.push(word);
-                continue;
-            }
-            redacted.push("[REDACTED]");
-            redact_next = false;
-            continue;
-        }
-        if looks_like_secret(&normalized) {
-            redacted.push("[REDACTED]");
-            continue;
-        }
-        redacted.push(word);
-        redact_next = matches!(
-            normalized.as_str(),
-            "authorization" | "api_key" | "api-key" | "token" | "secret"
-        );
-    }
-    redacted.join(" ")
-}
-
-fn looks_like_secret(normalized: &str) -> bool {
-    normalized.starts_with("sk-")
-        || normalized.starts_with("ghp_")
-        || normalized.starts_with("github_pat_")
 }
 
 #[cfg(test)]

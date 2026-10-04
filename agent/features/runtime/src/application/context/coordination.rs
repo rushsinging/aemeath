@@ -67,9 +67,8 @@ impl ContextCoordinator {
     ) -> Result<ContextWindowData, ContextPortError> {
         log::debug!(
             target: crate::LOG_TARGET,
-            "context_request_forwarded request_id={} reminders={} run_id={} step_id={}",
+            "context_request_forwarded request_id={} run_id={} step_id={}",
             request.request_id.as_str(),
-            request.invocation_reminders.len(),
             request.run_id,
             request.step_id.as_str(),
         );

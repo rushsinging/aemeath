@@ -20,7 +20,6 @@ fn context_request(step_id: &str) -> ContextRequestData {
         run_id: RunId::new("run"),
         step_id: RunStepId::new(step_id),
         pending_messages: vec![],
-        invocation_reminders: vec![],
         system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,

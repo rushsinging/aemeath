@@ -170,7 +170,6 @@ pub struct ContextRequestData {
     pub run_id: RunId,
     pub step_id: RunStepId,
     pub pending_messages: Vec<ContextMessage>,
-    pub invocation_reminders: Vec<InvocationReminderData>,
     pub system_prompt: SystemPromptSpecData,
     pub model_id: String,
     pub effective_reasoning: ReasoningLevel,

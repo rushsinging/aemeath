@@ -226,7 +226,6 @@ fn request(enabled: bool, inject_token_budget: Option<usize>) -> ContextRequestD
         run_id: RunId::new("run"),
         step_id: sdk::RunStepId::new("step"),
         pending_messages: vec![Message::user("pending")],
-        invocation_reminders: vec![],
         system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,

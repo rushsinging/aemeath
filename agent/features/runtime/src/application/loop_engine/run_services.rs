@@ -44,7 +44,6 @@ pub(crate) struct ContextRequest<'a> {
     pub context_size: usize,
     pub max_output_tokens: usize,
     pub raw_tool_schemas: Vec<serde_json::Value>,
-    pub invocation_reminders: Vec<context::InvocationReminderData>,
 }
 
 pub(crate) struct RuntimeStepPersistence<'a, O> {
@@ -52,7 +51,6 @@ pub(crate) struct RuntimeStepPersistence<'a, O> {
     context_request: ContextRequest<'a>,
     input_prefix: Option<Message>,
     accepted_input: O,
-    reminder_intents_available: bool,
 }
 
 impl<'a, O> RuntimeStepPersistence<'a, O>
@@ -70,7 +68,6 @@ where
             context_request,
             input_prefix,
             accepted_input,
-            reminder_intents_available: true,
         }
     }
 
@@ -105,38 +102,11 @@ where
         _run_id: &sdk::RunId,
         step_id: &RunStepId,
     ) -> Option<_CtxRequestData> {
-        let mut request = ContextRequestCoordinator::new(self.source()).build_request(
+        let request = ContextRequestCoordinator::new(self.source()).build_request(
             &self.run_id,
             step_id,
             execution.step_outcome(),
         );
-        if self.reminder_intents_available {
-            request.invocation_reminders = self.context_request.invocation_reminders.clone();
-            if !request.invocation_reminders.is_empty() {
-                let kinds = request
-                    .invocation_reminders
-                    .iter()
-                    .map(context::InvocationReminderData::kind)
-                    .collect::<Vec<_>>()
-                    .join(",");
-                log::debug!(
-                    target: crate::LOG_TARGET,
-                    "invocation_reminders_attached count={} kinds={} run_id={} step_id={}",
-                    request.invocation_reminders.len(),
-                    kinds,
-                    self.run_id,
-                    step_id.as_str(),
-                );
-            }
-        } else if !self.context_request.invocation_reminders.is_empty() {
-            log::debug!(
-                target: crate::LOG_TARGET,
-                "invocation_reminders_skipped reason=already_consumed count={} run_id={} step_id={}",
-                self.context_request.invocation_reminders.len(),
-                self.run_id,
-                step_id.as_str(),
-            );
-        }
         Some(request)
     }
 
@@ -145,7 +115,6 @@ where
         execution: &mut RunExecutionState,
         step_id: &RunStepId,
     ) -> Result<(), LoopEngineError> {
-        self.reminder_intents_available = false;
         // Reminder 统一管线：step 边界推进 OnStepInterval 周期重建
         // （07-reminder-pipeline.md；run_started 已以 step=0 提供首次注入）。
         self.context_request

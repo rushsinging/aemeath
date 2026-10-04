@@ -9,15 +9,10 @@ use share::message::{ContentBlock, Message};
 use share::reasoning::ReasoningLevel;
 
 use super::performance::{capture, percentiles_ns};
-use super::service::{
-    invocation_reminder_log_payloads, render_user_input_timestamp_prefix,
-    ContextApplicationService, ReminderLogPayload,
-};
+use super::service::{render_user_input_timestamp_prefix, ContextApplicationService};
 use crate::domain::{
-    ContextAppendData, ContextMessages, ContextRequestData, ContextRequestId,
-    InvocationReminderData, Language, RunStepId, SessionId, SessionRevision, SystemBlock,
-    SystemPromptSpecData, TaskProgressReminderData, TaskProgressReminderItemData,
-    TaskProgressStatus,
+    ContextAppendData, ContextMessages, ContextRequestData, ContextRequestId, Language, RunStepId,
+    SessionId, SessionRevision, SystemBlock, SystemPromptSpecData,
 };
 use crate::ports::{
     ContextMemorySource, ContextPort, ContextPromptSource, MemoryMaterialization,
@@ -136,7 +131,6 @@ fn request(last_api_total_tokens: Option<u64>) -> ContextRequestData {
         run_id: RunId::new("baseline-run"),
         step_id: RunStepId::new("baseline-step"),
         pending_messages: vec![Message::user("pending")],
-        invocation_reminders: vec![],
         system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
@@ -381,91 +375,6 @@ async fn post_compaction_usage_check_below_half_threshold_for_small_history() {
         .expect("compact 后占用体检不应失败");
 
     assert!(!report.exceeds_half_threshold());
-}
-
-#[test]
-fn invocation_reminder_log_payloads_include_summary_preview_and_redacted_body() {
-    let secret = "sk-ant-api03-secret-value";
-    let reminders = vec![
-        InvocationReminderData::model_guidance_mismatch("session/model", "run/model"),
-        InvocationReminderData::guidance_sources_changed(),
-        InvocationReminderData::task_progress(TaskProgressReminderData {
-            total: 1,
-            completed: 0,
-            items: vec![TaskProgressReminderItemData {
-                sequence: 7,
-                subject: format!("diagnose Authorization: Bearer {secret}"),
-                status: TaskProgressStatus::InProgress,
-                blocked_by_sequences: vec![],
-            }],
-            hidden_count: 0,
-        }),
-    ];
-
-    let payloads = invocation_reminder_log_payloads("zh", &reminders);
-
-    assert_eq!(payloads.len(), 3);
-    assert!(matches!(
-        &payloads[0],
-        ReminderLogPayload {
-            kind,
-            preview: _,
-            body: _,
-            rendered_body: _,
-        } if *kind == "task_progress"
-    ));
-    assert!(payloads[0].preview.chars().count() <= 200);
-    assert!(payloads[0]
-        .body
-        .contains("diagnose Authorization: Bearer [REDACTED]"));
-    assert!(!payloads[0].body.contains(secret));
-    assert_eq!(payloads[1].kind, "guidance_sources_changed");
-    assert_eq!(payloads[2].kind, "model_guidance_mismatch");
-    assert!(payloads[2].body.contains("session/model"));
-    assert!(payloads[2].body.contains("run/model"));
-}
-
-#[test]
-fn memory_updated_reminder_points_at_the_memory_tool_without_quoting_content() {
-    let reminders = vec![InvocationReminderData::memory_updated(3)];
-
-    let zh = invocation_reminder_log_payloads("zh", &reminders);
-    assert_eq!(zh.len(), 1);
-    assert_eq!(zh[0].kind, "memory_updated");
-    assert!(zh[0].rendered_body.starts_with("<system-reminder>"));
-    assert!(zh[0].rendered_body.contains('3'));
-    // Must tell the model how to look the change up.
-    assert!(
-        zh[0].rendered_body.contains("list"),
-        "{}",
-        zh[0].rendered_body
-    );
-    assert!(
-        zh[0].rendered_body.contains("search"),
-        "{}",
-        zh[0].rendered_body
-    );
-
-    let en = invocation_reminder_log_payloads("en", &reminders);
-    assert_eq!(en.len(), 1);
-    assert!(en[0].rendered_body.contains("3"));
-    assert!(en[0].rendered_body.contains("list"));
-    assert!(en[0].rendered_body.contains("search"));
-}
-
-#[test]
-fn the_memory_updated_reminder_keeps_its_place_after_the_other_reminders() {
-    let payloads = invocation_reminder_log_payloads(
-        "en",
-        &[
-            InvocationReminderData::memory_updated(1),
-            InvocationReminderData::guidance_sources_changed(),
-        ],
-    );
-
-    assert_eq!(payloads.len(), 2);
-    assert_eq!(payloads[0].kind, "guidance_sources_changed");
-    assert_eq!(payloads[1].kind, "memory_updated");
 }
 
 #[tokio::test]

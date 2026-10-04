@@ -778,7 +778,6 @@ where
                             )
                             .map(|snapshot| snapshot.model_schemas())
                             .unwrap_or_default(),
-                        invocation_reminders: Vec::new(),
                     };
                 let mut persistence =
                     crate::application::loop_engine::run_services::RuntimeStepPersistence::new(

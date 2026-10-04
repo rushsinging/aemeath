@@ -173,7 +173,6 @@ async fn build_window_applies_l3_to_isolated_subagent_history() {
         run_id: RunId::new("active"),
         step_id: RunStepId::new("active-step"),
         pending_messages: vec![],
-        invocation_reminders: vec![],
         system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,

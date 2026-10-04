@@ -280,7 +280,6 @@ fn request(session_id: &str, run_id: &str) -> ContextRequestData {
         run_id: RunId::new(run_id),
         step_id: RunStepId::new("active-step"),
         pending_messages: vec![],
-        invocation_reminders: vec![],
         system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
