@@ -11,6 +11,8 @@ mod provider;
 mod reasoning;
 pub(crate) mod reasoning_normalizer;
 mod request_body;
+#[cfg(test)]
+mod request_body_tests;
 mod responses;
 mod responses_stream;
 mod stream;

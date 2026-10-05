@@ -1,7 +1,9 @@
 //! `agent/features/config/src/user_agent.rs` 的契约测试。
 //!
 //! 覆盖目标：
-//! - 四级优先级严格：Provider 专属 → Catalog 官方 SDK 默认 → 全局配置 → 全局默认；
+//! - 四级优先级严格：Provider 专属 → 全局配置 → Catalog 官方 SDK 默认 → 全局默认；
+//! - Catalog 官方 SDK UA 的 driver 兜底**仅限** `source_key` 缺失：
+//!   catalog 外的自定义 source（如 OmniRoute）NEVER 继承其它平台的官方客户端 UA；
 //! - 空白字符串等同未配置并继续回退；
 //! - 系统版本不可用时降级为 `Aemeath/<version> cli <os>/<arch>`；
 //! - 动态片段必须 HeaderValue 安全（不含控制字符）；
@@ -110,6 +112,60 @@ fn assembled_inputs_carry_global_config_user_agent() {
 }
 
 #[test]
+fn custom_source_outside_catalog_never_inherits_driver_catalog_ua() {
+    // 回归：OmniRoute 这类 catalog 外自定义 provider 常用 openai driver（协议形状），
+    // 但 driver 不代表身份——它 NEVER 继承 OpenAI 官方 codex CLI UA，否则网关会把
+    // 请求当作 Codex 客户端路由到不支持目标模型的账号渠道（实际故障：gpt-6.1-sol 400）。
+    let inputs = assemble_provider_user_agent_inputs(
+        ProviderUserAgentRequest {
+            provider_user_agent: None,
+            source_key: Some("OmniRoute"),
+            driver: Some("openai"),
+            global_user_agent: Some("claude-cli/2.1.215 (external, cli)"),
+        },
+        system("macos", "aarch64", Some("15.5")),
+        "0.1.0",
+    );
+
+    assert!(
+        inputs.catalog_official_sdk_user_agent.is_none(),
+        "catalog 外 source MUST NOT 通过 driver 兜底继承其它平台的官方 UA"
+    );
+    assert_eq!(
+        resolve_provider_user_agent_str(inputs),
+        "claude-cli/2.1.215 (external, cli)",
+        "自定义 provider 必须回落到全局配置 UA"
+    );
+}
+
+#[test]
+fn driver_catalog_ua_fallback_applies_only_when_source_key_missing() {
+    // driver 兜底的既有语义：source_key 缺失时按 driver 兼容查询（见
+    // ProviderUserAgentRequest::driver 文档）。全局未配置时 catalog UA 兜底。
+    let inputs = assemble_provider_user_agent_inputs(
+        ProviderUserAgentRequest {
+            provider_user_agent: None,
+            source_key: None,
+            driver: Some("openai"),
+            global_user_agent: None,
+        },
+        system("macos", "aarch64", Some("15.5")),
+        "0.1.0",
+    );
+
+    assert_eq!(
+        inputs
+            .catalog_official_sdk_user_agent
+            .as_ref()
+            .and_then(|value| value.to_str().ok()),
+        Some(
+            "codex_exec/0.154.0 (Mac OS 26.2.0; arm64) ghostty/1.3.2-HEAD-_bb30526 (codex_exec; 0.154.0)"
+        ),
+        "source_key 缺失时 driver 兜底必须带回 catalog 官方 UA"
+    );
+}
+
+#[test]
 fn assembled_inputs_take_catalog_user_agent_and_keep_absence_for_unverified() {
     // Anthropic 已接入抓包核验过的官方客户端 UA，装配层必须把它带进输入；
     // 尚无逐字符证据的 Provider 必须保持 None，交给下一级回退，禁止伪造。
@@ -159,7 +215,9 @@ fn assembled_inputs_take_catalog_user_agent_and_keep_absence_for_unverified() {
 }
 
 #[test]
-fn catalog_official_sdk_user_agent_used_when_provider_missing() {
+fn global_user_agent_precedes_catalog_official_sdk() {
+    // 全局 `api.user_agent` 是用户显式表达的身份意图，优先于 Catalog 自动 UA；
+    // Catalog UA 只在全局未配置（或空白/非法）时兜底。
     let inputs = ProviderUserAgentInputs {
         provider_user_agent: None,
         catalog_official_sdk_user_agent: Some(HeaderValue::from_static("anthropic-sdk/0.1")),
@@ -168,7 +226,26 @@ fn catalog_official_sdk_user_agent_used_when_provider_missing() {
         version: "0.1.0",
     };
     let resolved = resolve_provider_user_agent_str(inputs);
-    assert_eq!(resolved, "anthropic-sdk/0.1");
+    assert_eq!(
+        resolved, "global/2.0",
+        "全局配置必须优先于 Catalog 官方 SDK UA"
+    );
+}
+
+#[test]
+fn catalog_official_sdk_user_agent_used_only_when_global_missing() {
+    let inputs = ProviderUserAgentInputs {
+        provider_user_agent: None,
+        catalog_official_sdk_user_agent: Some(HeaderValue::from_static("anthropic-sdk/0.1")),
+        global_user_agent: None,
+        system: system("linux", "x86_64", Some("6.1.0")),
+        version: "0.1.0",
+    };
+    let resolved = resolve_provider_user_agent_str(inputs);
+    assert_eq!(
+        resolved, "anthropic-sdk/0.1",
+        "全局未配置时 Catalog 官方 SDK UA 必须兜底"
+    );
 }
 
 #[test]
@@ -286,8 +363,8 @@ fn invalid_provider_user_agent_falls_through_to_next_source() {
     };
     let resolved = resolve_provider_user_agent_str(inputs);
     assert_eq!(
-        resolved, "anthropic-sdk/0.1",
-        "含控制字符的 provider UA 必须被拒绝并回退到 Catalog"
+        resolved, "global/2.0",
+        "含控制字符的 provider UA 必须被拒绝并回退到全局配置"
     );
 }
 
@@ -391,8 +468,8 @@ fn parse_header_value_rejects_blank_and_nul_in_provider_user_agent() {
     };
     let resolved = resolve_provider_user_agent_str(inputs);
     assert_eq!(
-        resolved, "anthropic-sdk/0.1",
-        "含 NUL 的 provider UA 必须拒绝并回退到 Catalog"
+        resolved, "global/2.0",
+        "含 NUL 的 provider UA 必须拒绝并回退到全局配置"
     );
 }
 
@@ -409,8 +486,8 @@ fn parse_header_value_rejects_non_ascii_provider_user_agent() {
     };
     let resolved = resolve_provider_user_agent_str(inputs);
     assert_eq!(
-        resolved, "anthropic-sdk/0.1",
-        "含非 ASCII 的 provider UA 必须拒绝并回退到 Catalog（不能让 to_str 失败）"
+        resolved, "global/2.0",
+        "含非 ASCII 的 provider UA 必须拒绝并回退到全局配置（不能让 to_str 失败）"
     );
 }
 

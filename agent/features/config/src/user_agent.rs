@@ -4,9 +4,13 @@
 //! [`docs/design/02-modules/config/02-provider-catalog-and-connect.md §5`](../../../../docs/design/02-modules/config/02-provider-catalog-and-connect.md)：
 //!
 //! 1. Provider 专属配置 `models.providers.<source>.userAgent`；
-//! 2. Provider Catalog 中对应已核验官方 SDK 的默认 UA；
-//! 3. 全局配置 `api.user_agent`；
+//! 2. 全局配置 `api.user_agent`（用户显式表达的身份意图）；
+//! 3. Provider Catalog 中对应已核验官方 SDK 的默认 UA（仅在全局未配置时兜底）；
 //! 4. 全局内置默认 UA `Aemeath/<version> cli <os>/<os-version>/<arch>`。
+//!
+//! Catalog 官方 SDK UA 的查询边界：`source_key` 有值时只按 source 查询，catalog
+//! 外的自定义 source NEVER 继承 driver 平台的官方 UA（driver 只是协议形状，不代表
+//! 身份）；`source_key` 缺失时才按 driver 兼容兜底。
 //!
 //! 任何空白或非法 HeaderValue 必须跳过该级并继续回退；系统版本不可用时降级为
 //! `Aemeath/<version> cli <os>/<arch>`。UA 不得泄漏 API Key、session id、路径。
@@ -127,7 +131,8 @@ pub(crate) struct ProviderUserAgentRequest<'a> {
     pub provider_user_agent: Option<&'a str>,
     /// Catalog `source` key；用于查询该 source 的官方 SDK UA。
     pub source_key: Option<&'a str>,
-    /// `source_key` 缺失时的 driver 兼容查询键。
+    /// **仅当 `source_key` 为 `None` 时**使用的 driver 兼容查询键。
+    /// `source_key` 有值但不在 Catalog（自定义 provider）时，本字段不参与查询。
     pub driver: Option<&'a str>,
     /// 全局配置 `api.user_agent` 原始值（未归一化）。
     pub global_user_agent: Option<&'a str>,
@@ -136,17 +141,20 @@ pub(crate) struct ProviderUserAgentRequest<'a> {
 /// 唯一装配入口：把原始请求 + 环境信息装配为 resolver 输入。
 ///
 /// - Provider 专属与全局 UA 先做空白归一：空白等同未配置，继续回退；
-/// - Catalog 官方 SDK UA 按 `source_key` 优先、`driver` 兜底查询；无证据时保持
+/// - Catalog 官方 SDK UA：`source_key` 有值时**只**按 source 查询——catalog 外的
+///   自定义 source（如 OmniRoute）NEVER 继承 driver 对应平台的官方 UA，driver 只是
+///   协议形状而非身份；`source_key` 缺失时才按 `driver` 兼容兜底。无证据时保持
 ///   `None`，**NEVER** 伪造数值。
 pub(crate) fn assemble_provider_user_agent_inputs<'a>(
     request: ProviderUserAgentRequest<'a>,
     system: SystemInformation,
     version: &'a str,
 ) -> ProviderUserAgentInputs<'a> {
-    let catalog_official_sdk_user_agent = request
-        .source_key
-        .and_then(crate::catalog::find_by_source)
-        .or_else(|| request.driver.and_then(crate::catalog::find_by_driver))
+    let catalog_entry = match request.source_key {
+        Some(source_key) => crate::catalog::find_by_source(source_key),
+        None => request.driver.and_then(crate::catalog::find_by_driver),
+    };
+    let catalog_official_sdk_user_agent = catalog_entry
         .and_then(|entry| entry.official_sdk_user_agent.as_ref())
         .and_then(|official| official.header_value());
 
@@ -178,7 +186,7 @@ pub(crate) fn resolve_provider_user_agent_str(inputs: ProviderUserAgentInputs<'_
 /// 计算 Provider 请求最终 UA 并以 [`HeaderValue`] 形式返回。
 ///
 /// 严格四级优先级，每级遇空白或非法 HeaderValue 时跳过该级；系统版本不可用时
-/// 降级为 `<os>/<arch>` 双段。Catalog 官方 SDK UA 直接使用 `Option<HeaderValue>`：
+/// 降级为 `<os>/<arch>` 双段。Catalog 官方 SDK 直接使用 `Option<HeaderValue>`：
 /// 构造方需保证它代表通过 `to_str()` 的可见 ASCII；构造入口（[`crate::catalog`]）
 /// 在构造期已做 HeaderValue 安全校验。
 pub(crate) fn resolve_provider_user_agent(inputs: ProviderUserAgentInputs<'_>) -> HeaderValue {
@@ -187,16 +195,16 @@ pub(crate) fn resolve_provider_user_agent(inputs: ProviderUserAgentInputs<'_>) -
         return raw;
     }
 
-    // 2. Catalog 官方 SDK 默认
+    // 2. 全局配置（用户显式表达的身份意图，优先于 Catalog 自动 UA）
+    if let Some(raw) = inputs.global_user_agent.and_then(parse_header_value) {
+        return raw;
+    }
+
+    // 3. Catalog 官方 SDK 默认（仅在全局未配置时兜底）
     if let Some(value) = inputs.catalog_official_sdk_user_agent {
         if value.to_str().is_ok() {
             return value;
         }
-    }
-
-    // 3. 全局配置
-    if let Some(raw) = inputs.global_user_agent.and_then(parse_header_value) {
-        return raw;
     }
 
     // 4. 全局默认
