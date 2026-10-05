@@ -40,7 +40,7 @@ impl MemoryPort for FakeMemory {
         self.result.clone()
     }
 
-    fn search(&self, _query: &MemorySearchQuery) -> MemorySearchResult {
+    async fn search(&self, _query: &MemorySearchQuery) -> MemorySearchResult {
         panic!("search must not be used for context injection")
     }
 

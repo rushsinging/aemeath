@@ -92,8 +92,8 @@ pub use domain::{
     CompactResult, CompactSkipReason, CompactSummaryQuality, CompactTrigger,
     CompactionDecisionData, ContentFingerprint, ContextAppendError, ContextPortError,
     ContextRequestData, ContextWindowData, DecisionReason, FinalizeCause, InvocationReminderData,
-    Language, ManualCompactRequestData, RunStepId, SessionId, StepReceiptData,
-    SystemPromptSpecData, TaskProgressReminderData, TaskProgressReminderItemData,
+    Language, ManualCompactRequestData, MemoryRecallEntryData, RunStepId, SessionId,
+    StepReceiptData, SystemPromptSpecData, TaskProgressReminderData, TaskProgressReminderItemData,
     TaskProgressStatus, ToolCallIdentityData, ToolOutcomeKindData, ToolReceiptMutationData,
     ToolReceiptMutationError, ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
 };

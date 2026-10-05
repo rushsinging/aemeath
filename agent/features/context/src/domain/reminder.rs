@@ -8,8 +8,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::domain::constants::{
-    ENVELOPE_VERSION, KIND_MEMORY_UPDATED, KIND_TASK_PROGRESS, PRIORITY_ENVIRONMENT,
-    PRIORITY_EVENT, PRIORITY_TASK_STATE,
+    ENVELOPE_VERSION, KIND_MEMORY_RECALL, KIND_MEMORY_UPDATED, KIND_TASK_PROGRESS,
+    PRIORITY_ENVIRONMENT, PRIORITY_EVENT, PRIORITY_MEMORY_RECALL, PRIORITY_TASK_STATE,
 };
 
 /// reminder kind 开放标识：新增 kind 只注册新 source，NEVER 扩展闭合 enum。
@@ -27,6 +27,10 @@ impl ReminderKind {
 
     pub fn memory_updated() -> Self {
         Self::new(KIND_MEMORY_UPDATED)
+    }
+
+    pub fn memory_recall() -> Self {
+        Self::new(KIND_MEMORY_RECALL)
     }
 
     pub fn as_str(&self) -> &str {
@@ -62,12 +66,17 @@ pub enum RefreshTrigger {
     OnStepInterval(u32),
     /// 指定事件源到达时入队。
     OnEvent(ReminderEventSource),
+    /// 每条用户消息到达时重建（per-message 相关性召回类）。
+    OnUserMessage,
 }
 
 impl RefreshTrigger {
     /// 动态触发（Run 内内容会变）的 kind MUST 使用 `TailUserMessage`。
     fn is_dynamic(&self) -> bool {
-        matches!(self, Self::OnStepInterval(_) | Self::OnEvent(_))
+        matches!(
+            self,
+            Self::OnStepInterval(_) | Self::OnEvent(_) | Self::OnUserMessage
+        )
     }
 }
 
@@ -100,6 +109,11 @@ impl ReminderPriority {
 
     pub const fn environment() -> Self {
         Self(PRIORITY_ENVIRONMENT)
+    }
+
+    /// 记忆召回（辅助上下文，低于任务状态）。
+    pub const fn memory_recall() -> Self {
+        Self(PRIORITY_MEMORY_RECALL)
     }
 
     pub const fn value(self) -> i32 {
@@ -503,5 +517,26 @@ pub fn render_invocation_reminder_body(
                 "Memory was updated ({changed} entries). Use the memory tool's list / search actions to read the current content instead of assuming what it says."
             ),
         },
+        crate::domain::InvocationReminderData::MemoryRecall { entries } => {
+            let mut lines = vec![match language {
+                "zh" => "━━ 与当前消息相关的记忆 ━━".to_owned(),
+                _ => "━━ Memories related to the current message ━━".to_owned(),
+            }];
+            for entry in entries {
+                lines.push(format!(
+                    "- #{} {}",
+                    escape_reminder_text(&entry.id),
+                    escape_reminder_text(&entry.content_preview)
+                ));
+            }
+            match language {
+                "zh" => lines.push("可参考以上记忆；需要全文时用 memory tool 的 search 查看。".to_owned()),
+                _ => lines.push(
+                    "You may draw on these memories; use the memory tool's search for full text."
+                        .to_owned(),
+                ),
+            }
+            lines.join("\n")
+        }
     }
 }

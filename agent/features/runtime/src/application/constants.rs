@@ -76,3 +76,19 @@ pub(crate) const COMPLETED_MATERIALIZATION_CAPACITY: usize = 256;
 /// 提供首次注入；此后每达间隔现场重建（对抗注意力衰减）。
 /// specs/3.4 修订前先以常量落地，可配置化随 config 演进。
 pub(crate) const TASK_PROGRESS_REFRESH_INTERVAL_STEPS: u32 = 8;
+
+/// 记忆召回：词法召回候选数（重排在其 top-N 内进行）。
+pub(crate) const MEMORY_RECALL_RECALL_LIMIT: usize = 20;
+
+/// 记忆召回：注入条数上限。
+pub(crate) const MEMORY_RECALL_TOP_K: usize = 3;
+
+/// 记忆召回：注入内容的字符预算（超预算依次减条，宁可不注入不超预算）。
+pub(crate) const MEMORY_RECALL_BUDGET_CHARS: usize = 1_200;
+
+/// 记忆召回：单条内容预览字符上限。
+pub(crate) const MEMORY_RECALL_PREVIEW_CHARS: usize = 200;
+
+/// 记忆召回：相关性阈值门——top1 评分概率低于此值时本 turn 不注入
+///（防噪音稀释上下文）。
+pub(crate) const MEMORY_RECALL_THRESHOLD: f64 = 0.5;

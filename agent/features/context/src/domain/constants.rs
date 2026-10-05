@@ -58,6 +58,9 @@ pub const KIND_TASK_PROGRESS: &str = "task_progress";
 /// reminder kind：记忆更新（事件类）。
 pub const KIND_MEMORY_UPDATED: &str = "memory_updated";
 
+/// per-message 记忆主动召回（System One 重排后的相关记忆）。
+pub const KIND_MEMORY_RECALL: &str = "memory_recall";
+
 /// 注入优先级缺省：事件类（后台任务完成、memory 更新）最高。
 pub const PRIORITY_EVENT: i32 = 300;
 
@@ -66,6 +69,9 @@ pub const PRIORITY_TASK_STATE: i32 = 200;
 
 /// 注入优先级缺省：环境类（guidance 变化、模型不匹配）最低。
 pub const PRIORITY_ENVIRONMENT: i32 = 100;
+
+/// 记忆召回 reminder：辅助上下文，低于任务状态（先砍它保任务态）。
+pub const PRIORITY_MEMORY_RECALL: i32 = 150;
 
 /// 统一 envelope 的格式版本：解析兼容与格式演进的依据。
 pub const ENVELOPE_VERSION: u32 = 1;

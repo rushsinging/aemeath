@@ -184,6 +184,7 @@ impl RuntimeContextFactory {
                     crate::application::published_state::PublishedStateRegistry::default(),
                 hooks,
                 usage_sink,
+                memory_recall: None,
             },
             provider_factory: None,
             skill_catalog: None,

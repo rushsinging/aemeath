@@ -347,6 +347,13 @@ pub struct RuntimeServices {
     pub task: Arc<dyn TaskAccess>,
     /// Runtime Published State（会话级，跨 Run 复用）。
     pub(crate) published_state: crate::application::published_state::PublishedStateRegistry,
+    /// per-message 记忆召回 reminder source（None = 开关关闭）。
+    /// Run 级管道，turn 边界 refresh 预物化后由 reminder pipeline 注入。
+    pub memory_recall: Option<
+        std::sync::Arc<
+            crate::application::loop_engine::chat::reminder_sources::MemoryRecallReminderSource,
+        >,
+    >,
     /// Hook BC 出站端口。
     pub hooks: Arc<dyn HookDispatcher>,
     /// Audit Usage 事实的非阻塞出站端口。
@@ -436,6 +443,10 @@ pub struct RuntimeContext {
     published_state: crate::application::published_state::PublishedStateRegistry,
     /// Optional session lease held for the full Run lifetime.
     session_lease: Option<Arc<context::OwnedSessionSharedPermit>>,
+    /// per-message 记忆召回 source（None = 开关关闭）。
+    memory_recall: Option<
+        Arc<crate::application::loop_engine::chat::reminder_sources::MemoryRecallReminderSource>,
+    >,
 }
 
 /// Token that gates [`RuntimeContext::new`] — only [`RuntimeContextFactory`]
@@ -484,6 +495,7 @@ impl RuntimeContext {
             activities,
             published_state: services.published_state.clone(),
             session_lease: None,
+            memory_recall: services.memory_recall.clone(),
         }
     }
 
@@ -521,6 +533,14 @@ impl RuntimeContext {
     /// Memory 端口，`Arc` clone。
     pub fn memory(&self) -> Arc<dyn MemoryPort> {
         self.memory.clone()
+    }
+    /// per-message 记忆召回 source（开关关闭时为 None）。
+    pub fn memory_recall(
+        &self,
+    ) -> Option<
+        Arc<crate::application::loop_engine::chat::reminder_sources::MemoryRecallReminderSource>,
+    > {
+        self.memory_recall.clone()
     }
     /// Reflection 历史存储，`Arc` clone。
     pub fn reflection_history(&self) -> Arc<dyn ReflectionHistoryStore> {

@@ -43,3 +43,6 @@ pub(crate) const RERANK_TOP_N: usize = 10;
 /// 评分开启时的召回下限：词法多召回、重排后再截断到 query.limit，
 /// 让词法 limit 之外的候选有机会被重排提升（两级架构召回边界）。
 pub(crate) const RERANK_RECALL_LIMIT: usize = 20;
+
+/// 单候选召回的 Noul 门 instructions（唯一候选无法构成 Choice，转 Noul 判定）。
+pub(crate) const RECALL_SINGLE_NOUL_INSTRUCTIONS: &str = "Is the candidate memory entry      relevant to the user's current message and worth recalling into context?";
