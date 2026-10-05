@@ -257,7 +257,7 @@ def run_http_engine(engine: str, cfg: dict, scenarios: list[str]) -> None:
             for case in load_cases(scenario):
                 for order in ("forward", "reversed"):
                     try:
-                        if scenario in ("memory_rerank", "skill_match"):
+                        if scenario in ("memory_rerank", "skill_match", "memory_rerank_real"):
                             answers = list(case["answers"])
                             if order == "reversed":
                                 answers = list(reversed(answers))
@@ -307,7 +307,7 @@ def run_semif_engine(cfg: dict, scenarios: list[str]) -> None:
         meta = {}
         for case in cases:
             for order in ("forward", "reversed"):
-                if scenario in ("memory_rerank", "skill_match"):
+                if scenario in ("memory_rerank", "skill_match", "memory_rerank_real"):
                     answers = list(case["answers"])
                     if order == "reversed":
                         answers = list(reversed(answers))
@@ -332,7 +332,7 @@ def run_semif_engine(cfg: dict, scenarios: list[str]) -> None:
                 probs_by_idx = res.get("probabilities_by_index") or {}
                 probs = {answers[i]: p for i, p in probs_by_idx.items()
                          if i < len(answers)}
-                if scenario in ("memory_rerank", "skill_match"):
+                if scenario in ("memory_rerank", "skill_match", "memory_rerank_real"):
                     ranked = sorted(probs, key=probs.get, reverse=True)
                     record = {"id": case_id, "order": order,
                               "answers_order": answers, "probabilities": probs,
@@ -365,7 +365,7 @@ def run_anyjev_engine(cfg: dict, scenarios: list[str]) -> None:
             for case in load_cases(scenario):
                 for order in ("forward", "reversed"):
                     try:
-                        if scenario in ("memory_rerank", "skill_match"):
+                        if scenario in ("memory_rerank", "skill_match", "memory_rerank_real"):
                             answers = list(case["answers"])
                             if order == "reversed":
                                 answers = list(reversed(answers))
@@ -428,7 +428,8 @@ def main() -> None:
     engine = args.engine
     cfg = ENGINES[engine]
     scenarios = [args.scenario] if args.scenario else [
-        "memory_rerank", "stop_verify", "permission_triage", "skill_match"]
+        "memory_rerank", "stop_verify", "permission_triage", "skill_match",
+                        "memory_rerank_real"]
     if engine == "semif":
         run_semif_engine(cfg, scenarios)
     elif engine == "anyjev":

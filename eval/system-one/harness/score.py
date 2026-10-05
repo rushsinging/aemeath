@@ -21,7 +21,7 @@ EVAL_ROOT = HERE.parent
 RESULTS = EVAL_ROOT / "results"
 DATASETS = EVAL_ROOT / "datasets"
 
-RANK_SCENARIOS = ("memory_rerank", "skill_match")
+RANK_SCENARIOS = ("memory_rerank", "skill_match", "memory_rerank_real")
 NOUL_SCENARIOS = ("stop_verify",)
 
 
@@ -244,8 +244,8 @@ def main() -> None:
     summary: dict[str, dict[str, dict]] = {}
     for engine in engines:
         summary[engine] = {}
-        for scenario in ("memory_rerank", "skill_match", "stop_verify",
-                         "permission_triage"):
+        for scenario in ("memory_rerank", "skill_match", "memory_rerank_real",
+                         "stop_verify", "permission_triage"):
             records = load_jsonl(RESULTS / engine / f"{scenario}.jsonl")
             if not records:
                 continue
