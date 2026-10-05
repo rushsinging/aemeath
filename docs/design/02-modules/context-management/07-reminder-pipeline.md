@@ -145,7 +145,7 @@ Runtime 推送 typed 事件（Context 定义事件 PL，Runtime 实现/转发）
 
 ### 受众边界
 
-reminder 管线只承载 **LLM 受众**（invocation-only、可重算快照）；用户受众（TUI 提示、状态栏）走 Runtime 事件流 / SDK 事件通道。双受众事实由触发点扇出两个独立产物（如 config 变化：LLM 收 GuidanceSourcesChanged reminder，用户收 `ConfigReloaded` 事件），**NEVER** 在 reminder source 上声明 audience。Stop Hook 反馈同理不并入：它是 canonical 落盘的一次性事件事实（resume 后仍须可见），与 invocation-only 的可重算快照生命周期相反。
+reminder 管线只承载 **LLM 受众**（invocation-only、可重算快照）；用户受众（TUI 提示、状态栏）走 Runtime 事件流 / SDK 事件通道。双受众事实由触发点扇出两个独立产物（如 config 变化：LLM 收 GuidanceSourcesChanged reminder，用户收 `ConfigReloaded` 事件），**NEVER** 在 reminder source 上声明 audience。Stop Hook 反馈同理不并入：它是 canonical 落盘的一次性事件事实（resume 后仍须可见），与 reminder 的可重算快照生命周期相反（reminder 尾部注入类已改为显式落盘，但仍随 compact 清理、非一次性事件事实）。
 
 ### GuidanceReloadPolicy 的落地口径
 
@@ -161,9 +161,11 @@ reminder 管线只承载 **LLM 受众**（invocation-only、可重算快照）�
 
 本管线（source 注册 + 策略分发 + 队列）**MUST** 先于后台任务 reminder 部分落地，否则事件注入会被迫硬编码返工。
 
-## 9. 不变量
+## 9. 落盘语义与不变量（#1848 修订）
 
-1. reminder **NEVER** 进入 canonical Session / SDK 事件 / TUI 事件（渲染层 envelope 剥离保持；invocation-only）
+尾部注入类（TailUserMessage）reminder **显式落盘**：注入轮的完整消息记入管线 `pending_persist`，step 收口时由 `append_and_persist` 在 Context 内部 flush 并前置到提交消息头部（canonical 顺序 user 输入 → reminder → assistant/tool）。收益：注入轮后的请求前缀逐 token 稳定——上轮 assistant 回复全部 cache 命中，断点仅在最新注入处（invocation-only 形态下每注入一次即损失上轮回复缓存）。SystemTail 类不落盘；重试路径 fingerprint 幂等早退。
+
+1. 尾部注入类 reminder 显式落盘（统一 envelope、随 compact 清理、fingerprint 幂等）；SystemTail 类与 SDK/TUI 事件流零落盘零影响（渲染层 envelope 剥离保持）
 2. reminder **NEVER** 进入 cacheable prefix；动态 kind 强制 `TailUserMessage`
 3. 注入内容永远是当下快照或显式事件，**NEVER** 陈旧 payload
 4. 注入机制只解释 `ReminderPolicy`，**NEVER** 按 kind 硬编码时机 / 位置 / 去重 / 处置
