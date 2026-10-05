@@ -67,14 +67,16 @@ async fn in_memory_fake_satisfies_memory_port_contract() {
     port.archive(std::slice::from_ref(&first.id)).await.unwrap();
     assert!(port.restore(&first.id).await.unwrap().is_restored());
     port.archive(std::slice::from_ref(&first.id)).await.unwrap();
-    let search = port.search(&MemorySearchQuery {
-        text: "memory".to_string(),
-        limit: 10,
-        layer: None,
-        category: None,
-        include_archive: true,
-        now: 200,
-    });
+    let search = port
+        .search(&MemorySearchQuery {
+            text: "memory".to_string(),
+            limit: 10,
+            layer: None,
+            category: None,
+            include_archive: true,
+            now: 200,
+        })
+        .await;
     assert_eq!(search.mode, MemoryRetrievalMode::ExplicitSearch);
     assert!(search.hits.iter().any(|hit| {
         hit.entry.id == first.id
@@ -93,14 +95,16 @@ async fn explicit_search_returns_ineligible_archive_without_panicking() {
     port.archive(std::slice::from_ref(&old.id)).await.unwrap();
 
     let before = port.revision();
-    let result = port.search(&MemorySearchQuery {
-        text: "searchable".to_string(),
-        limit: 10,
-        layer: None,
-        category: None,
-        include_archive: true,
-        now: 102,
-    });
+    let result = port
+        .search(&MemorySearchQuery {
+            text: "searchable".to_string(),
+            limit: 10,
+            layer: None,
+            category: None,
+            include_archive: true,
+            now: 102,
+        })
+        .await;
     let hit = &result.hits[0];
     assert!(hit.outdated);
     assert!(hit.ttl_expired);
@@ -128,14 +132,16 @@ async fn mutations_are_typed_and_queries_do_not_change_revision() {
         category: None,
         now: 100,
     });
-    let _ = port.search(&MemorySearchQuery {
-        text: "query".to_string(),
-        limit: 1,
-        layer: None,
-        category: None,
-        include_archive: true,
-        now: 100,
-    });
+    let _ = port
+        .search(&MemorySearchQuery {
+            text: "query".to_string(),
+            limit: 1,
+            layer: None,
+            category: None,
+            include_archive: true,
+            now: 100,
+        })
+        .await;
     assert_eq!(port.revision(), revision);
 }
 
@@ -163,14 +169,16 @@ async fn restore_when_layer_is_full_is_not_committed_and_returns_candidates() {
             if candidates.len() == 1 && candidates[0].entry.id == active.id
     ));
     assert_eq!(port.revision(), revision);
-    let archived_hit = port.search(&MemorySearchQuery {
-        text: "archived".to_string(),
-        limit: 10,
-        layer: Some(MemoryLayer::Project),
-        category: None,
-        include_archive: true,
-        now: 200,
-    });
+    let archived_hit = port
+        .search(&MemorySearchQuery {
+            text: "archived".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: true,
+            now: 200,
+        })
+        .await;
     assert_eq!(archived_hit.hits[0].location, MemoryLocation::Archive);
 }
 

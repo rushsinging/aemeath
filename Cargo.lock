@@ -2241,6 +2241,7 @@ dependencies = [
  "serde_json",
  "share",
  "storage",
+ "systemone",
  "thiserror 2.0.18",
  "tokio",
  "utils",

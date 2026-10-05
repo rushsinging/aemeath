@@ -29,3 +29,17 @@ pub(crate) const ARCHIVE_MEMBER: &str = "archive";
 pub(crate) const ACTIVE_MEMBER: &str = "active";
 
 pub(crate) const SCHEMA_VERSION: u32 = 1;
+
+/// 重排 instructions（与 eval/system-one harness rank 场景同文案，保证基线可比）。
+pub(crate) const RERANK_INSTRUCTIONS: &str =
+    "Which option is the most relevant answer to the question?";
+
+/// 重排 criteria 单条内容字符上限（kev 评分头按 prose 训练，截断防爆 token）。
+pub(crate) const RERANK_CRITERION_MAX_CHARS: usize = 500;
+
+/// 重排段大小：词法召回 top-N 参与 kev Choice 重排。
+pub(crate) const RERANK_TOP_N: usize = 10;
+
+/// 评分开启时的召回下限：词法多召回、重排后再截断到 query.limit，
+/// 让词法 limit 之外的候选有机会被重排提升（两级架构召回边界）。
+pub(crate) const RERANK_RECALL_LIMIT: usize = 20;

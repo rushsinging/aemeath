@@ -43,6 +43,8 @@ pub(crate) struct MemoryService<S: MemoryDatasetStore> {
     state: RwLock<CommittedState<S::Revision>>,
     mutation_gate: Mutex<()>,
     clock: MemoryClock,
+    /// System One 评分端口（None = 重排关闭，词法序原样返回）。
+    scorer: Option<Arc<dyn systemone::ScoringPort>>,
 }
 
 impl<S: MemoryDatasetStore> MemoryService<S> {
@@ -55,8 +57,19 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
         policy: MemoryPolicy,
         clock: impl Fn() -> u64 + Send + Sync + 'static,
     ) -> Result<Self, MemoryError> {
+        Self::open_with_clock_and_scorer(store, policy, clock, None).await
+    }
+
+    /// 带评分端口的装配入口：composition 在场景开关开启时注入重排能力
+    ///（生产消费者随 composition wiring 落地，见 wire_memory_opener 扩展）。
+    pub async fn open_with_clock_and_scorer(
+        store: S,
+        policy: MemoryPolicy,
+        clock: impl Fn() -> u64 + Send + Sync + 'static,
+        scorer: Option<Arc<dyn systemone::ScoringPort>>,
+    ) -> Result<Self, MemoryError> {
         log::debug!(target: crate::LOG_TARGET, "open_with_clock enter");
-        let outcome = Self::load_open(store, policy, clock).await;
+        let outcome = Self::load_open(store, policy, clock, scorer).await;
         match &outcome {
             Ok(_) => log::debug!(target: crate::LOG_TARGET, "open_with_clock ok"),
             Err(error) => log::debug!(target: crate::LOG_TARGET, "open_with_clock error: {error}"),
@@ -73,6 +86,7 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
         store: S,
         policy: MemoryPolicy,
         clock: impl Fn() -> u64 + Send + Sync + 'static,
+        scorer: Option<Arc<dyn systemone::ScoringPort>>,
     ) -> Result<Self, MemoryError> {
         validate_policy(policy)?;
         let global = load_layer(&store, MemoryLayer::Global).await?;
@@ -83,7 +97,43 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
             state: RwLock::new(CommittedState { global, project }),
             mutation_gate: Mutex::new(()),
             clock: Arc::new(clock),
+            scorer,
         })
+    }
+
+    /// 评分开启时重排词法召回的 top-N；评分失败静默回退词法序（NEVER 阻断搜索）。
+    async fn rerank_if_scored(
+        &self,
+        query: &MemorySearchQuery,
+        hits: Vec<MemorySearchHit>,
+    ) -> Vec<MemorySearchHit> {
+        let Some(scorer) = &self.scorer else {
+            return hits;
+        };
+        let top_n = hits.len().min(crate::constants::RERANK_TOP_N);
+        let Some((state, question)) =
+            crate::domain::rerank::build_rerank_request(&query.text, &hits[..top_n])
+        else {
+            return hits;
+        };
+        let reranked = match scorer.answer(&state, &[question]).await {
+            Ok(answers) => match answers.first() {
+                Some(systemone::ScoringAnswer::Choice { probabilities, .. }) => {
+                    crate::domain::rerank::apply_rerank_order(hits, top_n, probabilities)
+                }
+                _ => hits,
+            },
+            Err(unavailable) => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "memory_rerank_fallback reason={unavailable}"
+                );
+                hits
+            }
+        };
+        let mut reranked = reranked;
+        reranked.truncate(query.limit);
+        reranked
     }
 
     /// Serializes and commits a change scoped to exactly one layer. Only the
@@ -319,8 +369,22 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
         }
     }
 
-    fn search(&self, query: &MemorySearchQuery) -> MemorySearchResult {
+    async fn search(&self, query: &MemorySearchQuery) -> MemorySearchResult {
         let (global, project) = self.snapshot();
+        // 评分开启时扩大词法召回（重排后可被提升的候选不局限于 query.limit）。
+        let recall_limit = if self.scorer.is_some() {
+            query.limit.max(crate::constants::RERANK_RECALL_LIMIT)
+        } else {
+            query.limit
+        };
+        let recall_query = MemorySearchQuery {
+            text: query.text.clone(),
+            limit: recall_limit,
+            layer: query.layer,
+            category: query.category,
+            include_archive: query.include_archive,
+            now: query.now,
+        };
         let active = global
             .active()
             .iter()
@@ -339,7 +403,8 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
         .into_iter()
         .filter(|(entry, _)| matches_filters(entry, query.layer, query.category));
         let candidate_count = candidates.clone().count();
-        let hits = crate::domain::lexical_search::rank_explicit_search(candidates, query);
+        let hits = crate::domain::lexical_search::rank_explicit_search(candidates, &recall_query);
+        let hits = self.rerank_if_scored(query, hits).await;
         let min_relevance = hits
             .iter()
             .filter_map(|hit| hit.relevance)

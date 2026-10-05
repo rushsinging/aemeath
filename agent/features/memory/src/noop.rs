@@ -19,7 +19,7 @@ impl MemoryPort for NoOpMemory {
         disabled_result()
     }
 
-    fn search(&self, _query: &MemorySearchQuery) -> MemorySearchResult {
+    async fn search(&self, _query: &MemorySearchQuery) -> MemorySearchResult {
         disabled_result()
     }
 

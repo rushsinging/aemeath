@@ -749,7 +749,7 @@ impl MemoryPort for InMemoryMemory {
         }
     }
 
-    fn search(&self, query: &MemorySearchQuery) -> MemorySearchResult {
+    async fn search(&self, query: &MemorySearchQuery) -> MemorySearchResult {
         let state = self.state.read().expect("memory state lock poisoned");
         let active = state
             .active

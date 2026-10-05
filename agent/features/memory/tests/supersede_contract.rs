@@ -66,7 +66,7 @@ fn inject(memory: &dyn MemoryPort) -> Vec<MemoryId> {
         .collect()
 }
 
-fn search(memory: &dyn MemoryPort, text: &str) -> Vec<MemorySearchHit> {
+async fn search(memory: &dyn MemoryPort, text: &str) -> Vec<MemorySearchHit> {
     memory
         .search(&MemorySearchQuery {
             text: text.to_string(),
@@ -76,6 +76,7 @@ fn search(memory: &dyn MemoryPort, text: &str) -> Vec<MemorySearchHit> {
             include_archive: false,
             now: now(),
         })
+        .await
         .hits
 }
 
@@ -275,7 +276,7 @@ async fn a_superseded_entry_stays_searchable_with_its_supersede_state() {
         "the superseded entry must leave injection"
     );
 
-    let hits = search(&memory, "staging host");
+    let hits = search(&memory, "staging host").await;
     let hit = hits
         .iter()
         .find(|hit| hit.entry.id == old.id)
