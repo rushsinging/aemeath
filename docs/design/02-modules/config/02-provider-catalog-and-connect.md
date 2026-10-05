@@ -209,11 +209,13 @@ trait ProviderProbePort: Send + Sync {
 Config domain 的 UA resolver 必须按以下顺序选择第一个非空白且合法的 HeaderValue：
 
 1. Provider 专属配置：`models.providers.<source>.userAgent`；
-2. Provider Catalog 中对应已核验官方 SDK 的默认 UA；
-3. 全局配置：`api.user_agent`；
+2. 全局配置：`api.user_agent`（用户显式表达的身份意图）；
+3. Provider Catalog 中对应已核验官方 SDK 的默认 UA（仅在全局未配置时兜底）；
 4. 全局内置默认 UA。
 
-该顺序有意让 Provider 官方 SDK 默认高于全局配置。只要 Catalog 为该 Provider 定义了可靠官方 UA，全局配置便不会作用于它；全局配置只覆盖没有 Provider 默认 UA 的调用。空白字符串等同未配置并继续回退。
+该顺序让用户显式配置的全局身份优先于 Catalog 自动 UA：Catalog 官方 UA 是「用户未表达偏好时的平台默认」，**MUST NOT** 压过显式全局配置。空白字符串等同未配置并继续回退。
+
+Catalog UA 的查询边界：`source_key` 有值时只按 source 查询；Catalog 外的自定义 source（如自建 OpenAI 兼容网关）**NEVER** 通过 driver 兜底继承其它平台的官方客户端 UA——driver 只是协议形状（chat/responses 兼容），不代表客户端身份；伪装成官方客户端会让上游按错误渠道路由（实证：codex CLI UA 使网关把请求路由到不支持目标模型的 ChatGPT 账号渠道）。仅 `source_key` 缺失时才按 driver 兼容兜底。
 
 ### 5.1.1 Catalog 官方客户端 UA 的准入
 

@@ -687,8 +687,9 @@ async fn probe_user_agent_uses_global_config_when_catalog_has_no_client_ua() {
 }
 
 #[tokio::test]
-async fn probe_user_agent_uses_catalog_client_ua_when_available() {
-    // Anthropic 已核验 Claude Code CLI UA：probe 必须使用它而不是全局 UA。
+async fn probe_user_agent_precedes_catalog_client_ua_when_global_is_set() {
+    // 全局 `api.user_agent` 是用户显式身份意图：probe 与正式请求同源解析，
+    // 必须优先于 Catalog 自动 UA（Anthropic 已核验官方客户端 UA 亦然）。
     let probe = CapturingProbe::success();
     let service = ConnectAppService::builder()
         .with_catalog(PROVIDER_CATALOG)
@@ -702,8 +703,28 @@ async fn probe_user_agent_uses_catalog_client_ua_when_available() {
 
     assert_eq!(
         probe.captured_user_agents().await,
+        vec!["global-agent/9.9".to_string()],
+        "全局配置 UA 必须优先于 Catalog 官方客户端 UA"
+    );
+}
+
+#[tokio::test]
+async fn probe_user_agent_uses_catalog_client_ua_when_global_missing() {
+    // 全局未配置时，Anthropic 已核验的 Claude Code CLI UA 必须兜底生效。
+    let probe = CapturingProbe::success();
+    let service = ConnectAppService::builder()
+        .with_catalog(PROVIDER_CATALOG)
+        .with_probe(probe.clone())
+        .build();
+
+    let view = ready_to_probe(&service).await;
+    let running = advance(&service, view, ConnectCommand::BeginProbe).await;
+    wait_for_probe_result(&service, running.session_id).await;
+
+    assert_eq!(
+        probe.captured_user_agents().await,
         vec!["claude-cli/2.1.267 (external, sdk-cli)".to_string()],
-        "Catalog 官方客户端 UA 必须优先于全局配置"
+        "全局未配置时 Catalog 官方客户端 UA 必须兜底"
     );
 }
 
