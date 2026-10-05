@@ -26,6 +26,7 @@ async fn wire_memory_opener_returns_object_safe_cloneable_opener() {
     let opener: Box<dyn MemoryOpener> = crate::wire_memory_opener(
         storage::wire_file_system_dataset(&root).unwrap(),
         crate::wire_legacy_memory_source_factory(root.join("legacy")),
+        None,
     );
     let port = opener
         .open_memory(&project_key(), &share::config::MemoryConfig::default())

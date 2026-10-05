@@ -11,6 +11,7 @@ fn default_scoring_config_disables_all_scenarios() {
     assert!(!config.memory_rerank);
     assert!(!config.skill_match);
     assert!(!config.policy_triage);
+    assert!(!config.memory_recall);
 }
 
 #[test]

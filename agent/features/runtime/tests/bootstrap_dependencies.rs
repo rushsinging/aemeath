@@ -233,6 +233,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     let memory_opener = memory::wire_memory_opener(
         storage::wire_file_system_dataset(temp.path()).unwrap(),
         memory::wire_legacy_memory_source_factory(temp.path()),
+        None,
     );
     let session_management: Arc<dyn context::SessionManagementPort> =
         Arc::new(NoopSessionManagement);
@@ -276,6 +277,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         access.clone(),
         hook_runner.clone(),
         Arc::new(runtime::UnavailableUsageSink),
+        None,
     ));
     let dependencies = runtime::RuntimeBootstrapDependenciesData::new(
         runtime::RuntimeCoreDependenciesData::new(

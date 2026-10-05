@@ -44,11 +44,9 @@
 pub fn wire_memory_opener(
     storage: std::sync::Arc<dyn storage::AtomicDatasetPort>,
     legacy_factory: std::sync::Arc<dyn crate::ports::LegacyMemorySourceFactory>,
+    scorer: Option<std::sync::Arc<dyn systemone::ScoringPort>>,
 ) -> Box<dyn crate::ports::MemoryOpener> {
-    Box::new(crate::adapters::DatasetMemoryOpener::new(
-        storage,
-        legacy_factory,
-    ))
+    Box::new(crate::adapters::DatasetMemoryOpener::new(storage, legacy_factory).with_scorer(scorer))
 }
 
 /// Composition 构造 legacy 发现工厂的唯一入口：返回

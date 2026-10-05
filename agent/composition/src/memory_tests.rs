@@ -59,8 +59,8 @@ async fn preparing_the_active_identity_reuses_arc_without_opening() {
     assert!(Arc::ptr_eq(prepared.memory(), &active));
 }
 
-#[test]
-fn sub_disabled_is_noop_and_shared_reuses_active_without_opening() {
+#[tokio::test]
+async fn sub_disabled_is_noop_and_shared_reuses_active_without_opening() {
     let active = service();
     let wiring = ActiveMemoryWiring::new(PreparedMemory::new("project-a", active.clone()));
 
@@ -77,5 +77,8 @@ fn sub_disabled_is_noop_and_shared_reuses_active_without_opening() {
         include_archive: false,
         now: 0,
     };
-    assert_eq!(disabled.search(&query).mode, MemoryRetrievalMode::Disabled);
+    assert_eq!(
+        disabled.search(&query).await.mode,
+        MemoryRetrievalMode::Disabled
+    );
 }

@@ -354,6 +354,7 @@ impl SessionRunFixtureBuilder {
                 task_store,
                 self.hooks.clone(),
                 self.usage_sink.clone(),
+                None,
             ))
         });
         SessionRunFixture {

@@ -349,6 +349,18 @@
       "tracking_issue": 1714
     },
     {
+      "id": "construction.systemone.wire-scoring-port",
+      "symbol": "wire_scoring_port",
+      "owner_crate": "systemone",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "System One scoring port wiring is invoked only by the Composition Root (#1831)",
+      "tracking_issue": 1831
+    },
+    {
       "id": "construction.runtime.agent-runner",
       "symbol": "wire_agent_runner",
       "owner_crate": "runtime",
@@ -1517,6 +1529,7 @@
         "MainSessionWiring",
         "MainSessionWiringBuilder",
         "ManualCompactRequestData",
+        "MemoryRecallEntryData",
         "NoOpCanonicalSessionWriter",
         "OwnedSessionSharedPermit",
         "PersistedWorkspaceContext",

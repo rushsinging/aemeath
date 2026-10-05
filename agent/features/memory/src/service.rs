@@ -52,6 +52,15 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
         Self::open_with_clock(store, policy, system_time_seconds).await
     }
 
+    /// 带评分端口的装配入口（生产消费者：DatasetMemoryOpener 经场景开关注入）。
+    pub async fn open_with_scorer(
+        store: S,
+        policy: MemoryPolicy,
+        scorer: Option<Arc<dyn systemone::ScoringPort>>,
+    ) -> Result<Self, MemoryError> {
+        Self::open_with_clock_and_scorer(store, policy, system_time_seconds, scorer).await
+    }
+
     pub async fn open_with_clock(
         store: S,
         policy: MemoryPolicy,
@@ -111,8 +120,9 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
             return hits;
         };
         let top_n = hits.len().min(crate::constants::RERANK_TOP_N);
+        let top_hits = &hits[..top_n]; // allow unsafe_text_op: Vec slice (MemorySearchHit)
         let Some((state, question)) =
-            crate::domain::rerank::build_rerank_request(&query.text, &hits[..top_n])
+            crate::domain::rerank::build_rerank_request(&query.text, top_hits)
         else {
             return hits;
         };
