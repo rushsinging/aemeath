@@ -994,12 +994,18 @@ async fn task_reminder_injected_once_per_run_and_never_synced_to_tui() {
     assert!(first_reminder
         .text_content()
         .contains("■ #1 修复 compact 收敛"));
-    assert!(
-        !recorded[1]
-            .iter()
-            .any(|m| m.text_content().contains(reminder_text)),
-        "second invocation (tool round continuation) must NOT re-inject the reminder"
+    // #1848 落盘语义：首个 step 的 reminder 已随 append_and_persist 提交
+    // canonical，第二次请求**包含**它（历史前缀稳定，cache 命中），
+    // 但不再**新增注入**（出现次数仍为 1）。
+    let second_request_reminder_count = recorded[1]
+        .iter()
+        .filter(|m| m.text_content().contains(reminder_text))
+        .count();
+    assert_eq!(
+        second_request_reminder_count, 1,
+        "第二次请求含已落盘 reminder（前缀稳定）且不新增注入"
     );
+
 
     // TUI 同步快照不含注入内容。
     let synced = sink.synced_messages();
