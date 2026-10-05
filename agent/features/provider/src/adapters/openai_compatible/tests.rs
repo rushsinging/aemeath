@@ -24,6 +24,9 @@ mod clamp_effort;
 #[path = "tests/common.rs"]
 mod common;
 #[cfg(test)]
+#[path = "tests/omniroute_replay.rs"]
+mod omniroute_replay;
+#[cfg(test)]
 #[path = "tests/provider_config.rs"]
 mod provider_config;
 #[cfg(test)]
