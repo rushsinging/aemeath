@@ -54,6 +54,7 @@ impl OpenAICompatibleProvider {
         let request_bytes = serde_json::to_string(&request_body)
             .map(|value| value.len())
             .unwrap_or(0);
+        log_request_body(api, &url, &request_body, request_bytes);
         let context = HttpAttemptContext {
             driver: "openai_compatible",
             api,
@@ -151,6 +152,65 @@ impl OpenAICompatibleProvider {
 
 fn provider_error_from_attempt(failure: HttpAttemptFailure) -> crate::ProviderError {
     failure.into_provider_error()
+}
+
+/// 构造 debug 级请求摘要 payload：api、endpoint、序列化字节数、
+/// 顶层字段名（`serde_json` 默认字典序，排障取字段名集合）与前 200 字符 preview。
+///
+/// 终点字段不含任何 header / 凭据——headers 不进入本函数签名。
+pub(crate) fn build_request_log_summary(
+    api: &str,
+    endpoint: &str,
+    request_bytes: usize,
+    body: &serde_json::Value,
+) -> serde_json::Value {
+    let top_level_keys: Vec<&str> = body
+        .as_object()
+        .map(|object| object.keys().map(String::as_str).collect())
+        .unwrap_or_default();
+    let body_text = body.to_string();
+    let preview: String = body_text.chars().take(200).collect();
+    serde_json::json!({
+        "event_type": "llm_request",
+        "api": api,
+        "endpoint": endpoint,
+        "request_bytes": request_bytes,
+        "top_level_keys": top_level_keys,
+        "preview": preview,
+    })
+}
+
+/// 构造 trace 级完整 wire body payload（排障开关下可复现完整请求）。
+///
+/// 终点字段不含任何 header / 凭据——headers 不进入本函数签名。
+pub(crate) fn build_request_body_log(
+    api: &str,
+    endpoint: &str,
+    body: &serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "event_type": "llm_request_body",
+        "api": api,
+        "endpoint": endpoint,
+        "body": body,
+    })
+}
+
+/// 记录实际发出的 LLM 请求：debug 摘要（3.15.4.7.1「请求摘要已截断」）+
+/// trace 完整 body（3.15.5 TRACE 行「可记录完整 JSON」，默认关闭）。
+fn log_request_body(api: &str, endpoint: &str, body: &serde_json::Value, request_bytes: usize) {
+    let summary = build_request_log_summary(api, endpoint, request_bytes, body);
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "{}",
+        serde_json::to_string(&summary).unwrap_or_default()
+    );
+    let full = build_request_body_log(api, endpoint, body);
+    log::trace!(
+        target: crate::LOG_TARGET,
+        "{}",
+        serde_json::to_string(&full).unwrap_or_default()
+    );
 }
 
 #[async_trait]
