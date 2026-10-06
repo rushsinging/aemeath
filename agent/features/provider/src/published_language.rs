@@ -9,6 +9,7 @@
 //!
 //! #901 冻结契约；现有 `contract.rs` 的 legacy 类型保留兼容，后续逐步退役。
 
+use share::reasoning::ReasoningLevel;
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -57,9 +58,6 @@ impl std::fmt::Display for ModelIdData {
 }
 
 // ─── Reasoning ──────────────────────────────────────────
-
-/// Re-export ReasoningLevel from core::provider for PL consumers.
-pub use crate::domain::capability::ReasoningLevel;
 
 /// Reasoning 映射方式——driver 如何把 ReasoningLevel 映射到 wire。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

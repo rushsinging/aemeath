@@ -281,18 +281,6 @@ impl OpenAIProviderConfig {
     }
 }
 
-pub struct LlmProviderOptions {
-    pub driver: ProviderDriverKind,
-    pub api_key: String,
-    pub base_url: Option<String>,
-    pub model: Option<String>,
-    pub max_tokens: u32,
-    pub reasoning: bool,
-    pub reasoning_config: Option<ReasoningConfig>,
-    pub timeout_secs: u64,
-    pub user_agent: Option<String>,
-}
-
 pub struct LlmConfigOptionsData {
     pub driver: String,
     pub source_key: String,
@@ -332,98 +320,6 @@ impl LlmClient {
 }
 
 impl LlmClient {
-    pub fn new(api_key: String) -> Self {
-        Self::with_provider(LlmProviderOptions {
-            driver: ProviderDriverKind::Anthropic,
-            api_key,
-            base_url: None,
-            model: Some("claude-sonnet-5".to_string()),
-            max_tokens: 8192,
-            reasoning: false,
-            reasoning_config: None,
-            timeout_secs: crate::DEFAULT_TIMEOUT_SECS,
-            user_agent: Some(share::config::Config::default().api.user_agent),
-        })
-    }
-
-    pub fn with_provider(options: LlmProviderOptions) -> Self {
-        let model = options.model.clone();
-        let requested_reasoning =
-            reasoning_level_from_options(options.reasoning, options.reasoning_config.as_ref());
-        let provider_impl: Arc<dyn LlmProvider> = match options.driver {
-            ProviderDriverKind::Anthropic => {
-                Arc::new(crate::adapters::AnthropicProvider::new_with_user_agent(
-                    options.api_key,
-                    options.base_url,
-                    options.model,
-                    options.max_tokens,
-                    crate::domain::capability::ReasoningLevel::Off,
-                    options.timeout_secs,
-                    options
-                        .user_agent
-                        .unwrap_or_else(|| share::config::Config::default().api.user_agent),
-                ))
-            }
-            ProviderDriverKind::Ollama => {
-                Arc::new(crate::adapters::OllamaProvider::new_with_user_agent(
-                    options.api_key,
-                    options.base_url,
-                    options.model,
-                    options.max_tokens,
-                    options.reasoning,
-                    options.timeout_secs,
-                    options
-                        .user_agent
-                        .unwrap_or_else(|| share::config::Config::default().api.user_agent),
-                ))
-            }
-            ProviderDriverKind::OpenAI
-            | ProviderDriverKind::Zhipu
-            | ProviderDriverKind::LiteLLM
-            | ProviderDriverKind::Volcengine
-            | ProviderDriverKind::Minimax
-            | ProviderDriverKind::Mimo
-            | ProviderDriverKind::DeepSeek
-            | ProviderDriverKind::Agnes => {
-                let config =
-                    OpenAIProviderConfig::from_driver(options.driver, options.driver.as_str());
-                Arc::new(
-                    crate::adapters::OpenAICompatibleProvider::new_with_user_agent(
-                        config,
-                        options.api_key,
-                        options.base_url,
-                        options.model,
-                        options.max_tokens,
-                        options.reasoning,
-                        options.reasoning_config,
-                        options.timeout_secs,
-                        options
-                            .user_agent
-                            .unwrap_or_else(|| share::config::Config::default().api.user_agent),
-                    ),
-                )
-            }
-        };
-        let effective_reasoning =
-            requested_reasoning.clamped_to(provider_impl.max_reasoning_level());
-        let default_scope = crate::InvocationScopeData::new(
-            model.unwrap_or_else(|| provider_impl.model_name().to_string()),
-            if options.max_tokens == 0 {
-                share::config::models::DEFAULT_MAX_TOKENS
-            } else {
-                options.max_tokens
-            },
-            requested_reasoning,
-            effective_reasoning,
-        )
-        .expect("provider options must form a valid invocation scope");
-        Self {
-            provider: provider_impl,
-            default_scope,
-            transport_id: None,
-        }
-    }
-
     pub fn from_config(options: LlmConfigOptionsData) -> Result<Self, crate::LlmError> {
         ensure_resolved_invocation_inputs(&options)?;
         let spec = parse_driver_spec(&options)?;

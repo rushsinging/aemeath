@@ -130,12 +130,6 @@ fn from_config_rejects_missing_user_agent_instead_of_using_global_default() {
 }
 
 #[test]
-#[should_panic(expected = "Provider construction 必须传入已解析 base URL")]
-fn legacy_provider_constructor_no_longer_supplies_endpoint_fallback() {
-    let _ = LlmClient::new(String::new());
-}
-
-#[test]
 fn thinking_budget_only_controls_disabled_or_enabled_fallback_level() {
     assert_eq!(
         reasoning_level_from_options(false, Some(&ReasoningConfig::ThinkingBudget(0))),
