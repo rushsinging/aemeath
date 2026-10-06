@@ -48,6 +48,7 @@ fn env_adapter_maps_scoring_envs_into_patch() {
         ("AEMEATH_SCORING_MEMORY_RERANK".into(), "true".into()),
         ("AEMEATH_SCORING_SKILL_MATCH".into(), "1".into()),
         ("AEMEATH_SCORING_POLICY_TRIAGE".into(), "off".into()),
+        ("AEMEATH_SCORING_MEMORY_RECALL".into(), "on".into()),
     ]));
     let patch = EnvAdapter::read(&source);
     let scoring = patch.scoring.expect("scoring env 应产出 patch");
@@ -57,6 +58,7 @@ fn env_adapter_maps_scoring_envs_into_patch() {
     assert_eq!(scoring.memory_rerank, Some(true));
     assert_eq!(scoring.skill_match, Some(true));
     assert_eq!(scoring.policy_triage, Some(false), "off 应解析为显式关闭");
+    assert_eq!(scoring.memory_recall, Some(true), "on 应解析为开启");
 }
 
 #[test]

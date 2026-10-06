@@ -147,12 +147,14 @@ impl EnvAdapter {
             let memory_rerank = parse_bool_switch(source.get("AEMEATH_SCORING_MEMORY_RERANK"));
             let skill_match = parse_bool_switch(source.get("AEMEATH_SCORING_SKILL_MATCH"));
             let policy_triage = parse_bool_switch(source.get("AEMEATH_SCORING_POLICY_TRIAGE"));
+            let memory_recall = parse_bool_switch(source.get("AEMEATH_SCORING_MEMORY_RECALL"));
             (url.is_some()
                 || model.is_some()
                 || timeout_ms.is_some()
                 || memory_rerank.is_some()
                 || skill_match.is_some()
-                || policy_triage.is_some())
+                || policy_triage.is_some()
+                || memory_recall.is_some())
             .then_some(share::config::domain::merge::ScoringConfigPatch {
                 url,
                 model,
@@ -160,6 +162,7 @@ impl EnvAdapter {
                 memory_rerank,
                 skill_match,
                 policy_triage,
+                memory_recall,
             })
         };
         let storage = source.get("AEMEATH_WORKTREES_DIR").map(|directory| {

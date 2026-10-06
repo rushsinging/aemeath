@@ -25,6 +25,7 @@ pub mod reflection {
 }
 
 pub mod search {
+    pub use crate::application::recall::{recall_relevant, RecalledMemory};
     pub use crate::ports::{
         MemoryRetrievalMode, MemorySearchHit, MemorySearchQuery, MemorySearchResult,
     };

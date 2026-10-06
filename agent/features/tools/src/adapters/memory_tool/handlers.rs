@@ -124,7 +124,10 @@ pub(super) async fn delete_memory(
     }
 }
 
-pub(super) fn search_memory(input: Value, port: &dyn MemoryPort) -> TypedToolResult<MemoryResult> {
+pub(super) async fn search_memory(
+    input: Value,
+    port: &dyn MemoryPort,
+) -> TypedToolResult<MemoryResult> {
     let text = match required_string(&input, "query") {
         Ok(query) => query.to_string(),
         Err(error) => return TypedToolResult::error(error),
@@ -150,7 +153,7 @@ pub(super) fn search_memory(input: Value, port: &dyn MemoryPort) -> TypedToolRes
         include_archive: false,
         now,
     };
-    let result = port.search(&query);
+    let result = port.search(&query).await;
     let message = render_search_hits(&result.hits);
     TypedToolResult::success(
         message,

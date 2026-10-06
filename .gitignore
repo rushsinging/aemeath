@@ -61,3 +61,4 @@ coverage/
 .cache/
 tmp/
 agent/shared/build
+eval/system-one/harness/__pycache__/

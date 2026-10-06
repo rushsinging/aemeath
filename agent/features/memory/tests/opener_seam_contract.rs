@@ -77,7 +77,7 @@ impl LegacyMemorySourceFactory for NoLegacyFactory {
 async fn opener_is_object_safe_dyn_dispatchable_and_cloneable() {
     let root = unique_root("dyn");
     let opener: Box<dyn MemoryOpener> =
-        memory::wire_memory_opener(storage(&root), Arc::new(NoLegacyFactory));
+        memory::wire_memory_opener(storage(&root), Arc::new(NoLegacyFactory), None);
 
     // Object-safe: method is callable behind `dyn MemoryOpener`.
     let port = opener
@@ -100,7 +100,7 @@ async fn opener_is_object_safe_dyn_dispatchable_and_cloneable() {
 #[tokio::test]
 async fn opener_eagerly_opens_and_returns_usable_memory_port() {
     let root = unique_root("eager");
-    let opener = memory::wire_memory_opener(storage(&root), Arc::new(NoLegacyFactory));
+    let opener = memory::wire_memory_opener(storage(&root), Arc::new(NoLegacyFactory), None);
 
     let port: Arc<dyn MemoryPort> = opener
         .open_memory(&key("/eager/project"), &MemoryConfig::default())
@@ -119,7 +119,7 @@ async fn opener_eagerly_opens_and_returns_usable_memory_port() {
 #[tokio::test]
 async fn opener_config_drives_memory_policy() {
     let root = unique_root("policy");
-    let opener = memory::wire_memory_opener(storage(&root), Arc::new(NoLegacyFactory));
+    let opener = memory::wire_memory_opener(storage(&root), Arc::new(NoLegacyFactory), None);
 
     let config = MemoryConfig {
         max_entries: 1,
@@ -151,7 +151,7 @@ async fn opener_config_drives_memory_policy() {
 async fn opener_distinct_project_keys_isolate_project_and_share_global() {
     let root = unique_root("isolation");
     let shared = storage(&root);
-    let opener = memory::wire_memory_opener(Arc::clone(&shared), Arc::new(NoLegacyFactory));
+    let opener = memory::wire_memory_opener(Arc::clone(&shared), Arc::new(NoLegacyFactory), None);
 
     let port_a = opener
         .open_memory(&key("/iso/a"), &MemoryConfig::default())
@@ -196,7 +196,7 @@ async fn opener_distinct_project_keys_isolate_project_and_share_global() {
 #[tokio::test]
 async fn opener_clone_shares_storage_wiring() {
     let root = unique_root("clone-share");
-    let opener = memory::wire_memory_opener(storage(&root), Arc::new(NoLegacyFactory));
+    let opener = memory::wire_memory_opener(storage(&root), Arc::new(NoLegacyFactory), None);
     let cloned = opener.clone();
 
     // Both the original and the clone open against the same Storage root.
@@ -223,9 +223,9 @@ async fn opener_clone_shares_storage_wiring() {
 async fn opener_can_be_used_as_dyn_in_a_collection() {
     let root = unique_root("dyn-collect");
     let openers: Vec<Box<dyn MemoryOpener>> = vec![
-        memory::wire_memory_opener(storage(&root), Arc::new(NoLegacyFactory)),
+        memory::wire_memory_opener(storage(&root), Arc::new(NoLegacyFactory), None),
         // Cloned entry to exercise `Box<dyn MemoryOpener>: Clone`.
-        memory::wire_memory_opener(storage(&root), Arc::new(NoLegacyFactory)).clone(),
+        memory::wire_memory_opener(storage(&root), Arc::new(NoLegacyFactory), None).clone(),
     ];
 
     for opener in &openers {

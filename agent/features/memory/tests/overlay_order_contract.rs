@@ -186,27 +186,17 @@ async fn explicit_search_keeps_the_conclusion_and_its_sources_side_by_side() {
 
     // Each side is reachable through its own wording — search never trades
     // detail reachability for budget.
-    let search_by = |text: &str| {
-        memory
-            .search(&MemorySearchQuery {
-                text: text.to_string(),
-                limit: 50,
-                layer: Some(MemoryLayer::Project),
-                category: None,
-                include_archive: false,
-                now: now(),
-            })
-            .hits
-    };
 
     assert!(
-        search_by("deploy")
+        search_project_hits(&memory, "deploy")
+            .await
             .iter()
             .any(|hit| hit.entry.id == fact.id),
         "the source stays reachable"
     );
     assert!(
-        search_by("ownership")
+        search_project_hits(&memory, "ownership")
+            .await
             .iter()
             .any(|hit| hit.entry.kind == MemoryKind::Synthesized),
         "the conclusion stays reachable"
@@ -220,4 +210,19 @@ fn conclusion_of(memory: &InMemoryMemory) -> MemoryId {
         .find(|entry| entry.kind == MemoryKind::Synthesized)
         .expect("a synthesized entry was written")
         .id
+}
+
+/// 项目层词法搜索的命中集（async port 签名迁移后的测试辅助）。
+async fn search_project_hits(memory: &InMemoryMemory, text: &str) -> Vec<MemorySearchHit> {
+    memory
+        .search(&MemorySearchQuery {
+            text: text.to_string(),
+            limit: 50,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: now(),
+        })
+        .await
+        .hits
 }

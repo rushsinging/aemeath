@@ -130,7 +130,7 @@ impl TypedTool for MemorySearchTool {
             Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
         };
         let port = self.source.current();
-        handlers::search_memory(input, &*port)
+        handlers::search_memory(input, &*port).await
     }
 }
 

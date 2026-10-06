@@ -4,6 +4,7 @@ mod model;
 mod persistence;
 mod policy;
 mod reflection;
+pub(crate) mod rerank;
 
 #[cfg(test)]
 #[path = "domain/policy_tests.rs"]

@@ -22,6 +22,7 @@ use tools::published::execution::ToolExecutionContext;
 fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeContextFactory> {
     let tool_ports = tools::composition::TestCatalogExecutionFactory::empty();
     let services = crate::application::run::context::RuntimeServices {
+        scoring: None,
         tool_catalog: tool_ports.catalog_port(),
         tool_execution: tool_ports.execution(),
         policy: policy::allow_all(),
@@ -83,6 +84,7 @@ fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeCon
             services.task,
             services.hooks,
             services.usage_sink,
+            None,
         ),
     )
 }

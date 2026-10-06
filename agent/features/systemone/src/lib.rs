@@ -29,3 +29,23 @@ pub use domain::{
     ScoringQuestion, ScoringState, ScoringUnavailable, UnavailableKind,
 };
 pub use ports::{CalibrationObservation, CalibrationPort, ScoringPort};
+
+/// 评分端口的生产装配链：JevHttp → Calibrated（读温度 artifact）→ Audited（落审计）。
+///
+/// composition 在任一场景开关开启时调用一次，全场景共享同一实例。
+pub fn wire_scoring_port(
+    base_url: &str,
+    model: &str,
+    timeout: std::time::Duration,
+    scoring_dir: std::path::PathBuf,
+) -> std::sync::Arc<dyn ScoringPort> {
+    let http = std::sync::Arc::new(JevHttpScoringAdapter::new(base_url, model, timeout));
+    let store = CalibrationStore::new(scoring_dir.clone());
+    let calibrated = std::sync::Arc::new(CalibratedScoringAdapter::new(http, &store));
+    std::sync::Arc::new(AuditedScoringAdapter::new(
+        calibrated,
+        model.to_owned(),
+        scoring_dir.join("audit.jsonl"),
+        std::sync::Arc::new(|| chrono::Utc::now().to_rfc3339()),
+    ))
+}

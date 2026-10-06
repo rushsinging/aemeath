@@ -121,6 +121,34 @@ where
             .runtime_context
             .context()
             .reminder_step_advanced(&self.run_id, execution.step_count() as u64);
+        // per-message 记忆召回（#1834）：开关开启时先预物化（评分 await），
+        // 再触发 pipeline 的 OnUserMessage 重建——保证注入的是当轮快照。
+        if let Some(recall_source) = self.context_request.runtime_context.memory_recall() {
+            let latest_user_text = execution
+                .accepted_input_snapshot()
+                .iter()
+                .rev()
+                .find(|message| message.role == share::message::Role::User)
+                .map(|message| {
+                    message
+                        .content
+                        .iter()
+                        .filter_map(|block| match block {
+                            share::message::ContentBlock::Text { text } => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .filter(|text| !text.trim().is_empty());
+            if let Some(text) = latest_user_text {
+                recall_source.refresh(&text).await;
+            }
+            self.context_request
+                .runtime_context
+                .context()
+                .reminder_user_message_received(&self.run_id);
+        }
         StepPersistenceCoordinator::from_context(self.context_request.runtime_context)
             .accept_step_input(execution, step_id, &mut self.accepted_input)
             .await

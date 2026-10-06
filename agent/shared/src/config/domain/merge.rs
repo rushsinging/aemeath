@@ -587,6 +587,8 @@ pub struct ScoringConfigPatch {
     pub skill_match: Option<bool>,
     #[serde(default, alias = "policyTriage")]
     pub policy_triage: Option<bool>,
+    #[serde(default, alias = "memoryRecall")]
+    pub memory_recall: Option<bool>,
 }
 
 pub(crate) fn apply_tools_patch(mut base: ToolsConfig, patch: ToolsConfigPatch) -> ToolsConfig {
@@ -631,6 +633,9 @@ pub(crate) fn apply_scoring_patch(
     }
     if let Some(v) = patch.policy_triage {
         base.policy_triage = v;
+    }
+    if let Some(v) = patch.memory_recall {
+        base.memory_recall = v;
     }
     base
 }

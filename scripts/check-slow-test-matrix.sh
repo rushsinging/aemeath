@@ -14,16 +14,10 @@ run clippy cargo clippy --workspace --all-targets -- -D warnings
 run workspace cargo test --workspace --locked --exclude cli
 run tui-p0 scripts/check-tui-snapshots.sh
 run tui-p1 cargo test -p cli 'scenario_tests::p1'
-cli_binary="${AEMEATH_PTY_BIN:-}"
-if [[ -z "$cli_binary" ]]; then
-  cli_binary="$(cargo build -p cli --bin aemeath --locked --message-format=json 2>/dev/null \
-    | python3 -c 'import json, sys; paths = [item["executable"] for item in map(json.loads, sys.stdin) if item.get("reason") == "compiler-artifact" and item.get("target", {}).get("name") == "aemeath" and item.get("executable")]; print(paths[-1] if paths else "")')"
-fi
-if [[ -z "$cli_binary" || ! -f "$cli_binary" ]]; then
-  echo "PTY binary missing after cli build: ${cli_binary:-<none>}" >&2
-  exit 1
-fi
-run pty env AEMEATH_PTY_BIN="$cli_binary" cargo test -p cli --test pty_smoke -- --ignored --nocapture
+# L5 真实 CLI/PTY 测试：cargo 为集成测试自动构建 aemeath bin 并经
+# CARGO_BIN_EXE 注入路径（跟随 worktree target-dir），无需单独定位；
+# AEMEATH_PTY_BIN 仍可在测试内作显式覆盖。串行执行避免 PTY 抢占。
+run real-terminal cargo test -p cli --locked --test connect_wizard_tui --test pty_smoke -- --ignored --nocapture --test-threads=1
 
 targets=()
 if [[ "${AEMEATH_MATRIX_CROSS:-0}" == "1" ]]; then

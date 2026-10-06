@@ -10,6 +10,7 @@ serde.workspace = true
 serde_json.workspace = true
 share = { path = "../../shared" }
 storage = { path = "../storage" }
+systemone = { path = "../systemone" }
 thiserror.workspace = true
 tokio.workspace = true
 utils = { path = "../../../packages/global/utils" }

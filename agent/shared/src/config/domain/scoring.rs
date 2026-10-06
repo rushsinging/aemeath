@@ -41,6 +41,11 @@ pub struct ScoringConfig {
     /// 场景开关：权限/风险预筛（policy）。
     #[serde(default, alias = "policyTriage")]
     pub policy_triage: bool,
+
+    /// 场景开关：per-message 记忆主动召回（reminder 注入，含 token 预算与
+    /// 相关性阈值门）。
+    #[serde(default, alias = "memoryRecall")]
+    pub memory_recall: bool,
 }
 
 impl Default for ScoringConfig {
@@ -52,6 +57,7 @@ impl Default for ScoringConfig {
             memory_rerank: false,
             skill_match: false,
             policy_triage: false,
+            memory_recall: false,
         }
     }
 }

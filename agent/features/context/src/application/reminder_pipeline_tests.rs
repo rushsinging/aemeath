@@ -358,6 +358,80 @@ fn pipeline_rejects_source_with_invalid_placement_policy() {
     );
 }
 
+fn user_message_policy() -> ReminderPolicy {
+    ReminderPolicy {
+        refresh: RefreshTrigger::OnUserMessage,
+        placement: ReminderPlacement::TailUserMessage,
+        inject: inject_behavior(ReminderPriority::memory_recall()),
+        compact: CompactBehavior::Rebuild,
+    }
+}
+
+#[test]
+fn user_message_trigger_rebuilds_on_each_message() {
+    let source = Arc::new(CountingTestSource::new(
+        ReminderKind::memory_updated(),
+        user_message_policy(),
+    ));
+    source.set_snapshot("recall=第一轮");
+    let mut pipeline = ReminderPipeline::new(vec![source.clone()]);
+
+    pipeline.user_message_received();
+    let first = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-05T18:00:00+08:00", 512);
+    assert!(first
+        .tail_user_message
+        .expect("用户消息到达应触发注入")
+        .contains("[zh] recall=第一轮"));
+
+    source.set_snapshot("recall=第二轮");
+    pipeline.user_message_received();
+    let second = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-05T18:01:00+08:00", 512);
+    assert!(
+        second
+            .tail_user_message
+            .expect("第二条消息应再次触发")
+            .contains("[zh] recall=第二轮"),
+        "快照替换语义：注入当下最新快照，NEVER 陈旧 payload"
+    );
+    assert_eq!(source.build_count(), 2, "每条消息现场重建一次");
+}
+
+#[test]
+fn user_message_trigger_leaves_other_triggers_untouched() {
+    let interval_source = Arc::new(CountingTestSource::new(
+        ReminderKind::task_progress(),
+        interval_policy(3, ReminderPlacement::TailUserMessage),
+    ));
+    let mut pipeline = ReminderPipeline::new(vec![interval_source.clone()]);
+
+    pipeline.user_message_received();
+
+    assert!(
+        pipeline
+            .inject_into_window(LANGUAGE_ZH, "2026-10-05T18:00:00+08:00", 512)
+            .tail_user_message
+            .is_none(),
+        "OnUserMessage 不得触发 OnStepInterval source"
+    );
+    assert_eq!(interval_source.build_count(), 0);
+}
+
+#[test]
+fn user_message_is_dynamic_and_must_not_use_system_tail() {
+    // is_dynamic 不变量：OnUserMessage 内容随消息变化，MUST TailUserMessage。
+    let invalid = ReminderPolicy {
+        refresh: RefreshTrigger::OnUserMessage,
+        placement: ReminderPlacement::SystemTail,
+        inject: inject_behavior(ReminderPriority::memory_recall()),
+        compact: CompactBehavior::Rebuild,
+    };
+    assert!(
+        !invalid.is_valid(),
+        "OnUserMessage + SystemTail 必须被策略校验拒绝"
+    );
+    assert!(user_message_policy().is_valid());
+}
+
 // ---------- #1848 注入清单落盘：pending_persist 生命周期 ----------
 
 #[test]

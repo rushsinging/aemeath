@@ -20,6 +20,7 @@ port_of() {
     clm)      echo 8700 ;;
     rsi-jev)  echo 8200 ;;
     kev)      echo 8009 ;;
+    qwen3-reranker) echo 8210 ;;
     laya)     echo 8000 ;;
     *) return 1 ;;
   esac
@@ -32,6 +33,7 @@ health_url_of() {
     clm)      echo "http://127.0.0.1:8700/health" ;;
     rsi-jev)  echo "http://127.0.0.1:8200/health" ;;
     kev)      echo "http://127.0.0.1:8009/v1/models" ;;
+    qwen3-reranker) echo "http://127.0.0.1:8210/v1/models" ;;
     laya)     echo "http://127.0.0.1:8000/health" ;;
     *) return 1 ;;
   esac
@@ -113,6 +115,10 @@ PYEOF
       spawn_daemon "$pid_file" "$log_file" "$RUNTIME/kev" "$HOME/.local/bin/uv" run --extra serve python -m kev.serve \
         --run jaredpalmer/kev-0.8b --port "$port"
       ;;
+    qwen3-reranker)
+      spawn_daemon "$pid_file" "$log_file" "$EVAL_ROOT" \
+        "$RUNTIME/qwen3-reranker/.venv/bin/python" harness/qwen3_reranker_serve.py --port "$port"
+      ;;
     laya)
       spawn_daemon "$pid_file" "$log_file" "$RUNTIME/laya" env LAYA_DEVICE=mps LAYA_PRELOAD=1 \
         .venv/bin/laya-serve --port "$port"
@@ -152,7 +158,7 @@ wait_engine() { # $1=engine $2=超时秒（默认 120）——轮询直到健康
   echo "[$engine] 健康检查超时 (${timeout}s)，见 $LOG_DIR/$engine.log" >&2; return 1
 }
 
-ENGINES=(jevos llama-emb clm rsi-jev kev laya)
+ENGINES=(jevos llama-emb clm rsi-jev kev laya qwen3-reranker)
 cmd="${1:-status}"; target="${2:-all}"
 case "$cmd" in
   start|stop|restart|status|wait) ;;

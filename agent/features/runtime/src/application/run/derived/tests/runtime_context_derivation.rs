@@ -317,6 +317,7 @@ fn make_test_factory() -> RuntimeContextFactory {
         crate::application::run::test_task_access(),
         Arc::new(FakeHookPort),
         Arc::new(crate::ports::UnavailableUsageSink),
+        None,
     )
 }
 

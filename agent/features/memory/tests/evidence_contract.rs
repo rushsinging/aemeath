@@ -39,7 +39,7 @@ fn active_entries(memory: &InMemoryMemory) -> Vec<MemoryEntry> {
 
 /// 列出 archive 条目。`search` 是唯一能触达 archive 的读取口（`list` 只返回
 /// active），且空查询不产生 hit，因此必须给内容词。
-fn archived_entries(memory: &InMemoryMemory, text: &str) -> Vec<MemoryEntry> {
+async fn archived_entries(memory: &InMemoryMemory, text: &str) -> Vec<MemoryEntry> {
     memory
         .search(&MemorySearchQuery {
             text: text.to_string(),
@@ -49,6 +49,7 @@ fn archived_entries(memory: &InMemoryMemory, text: &str) -> Vec<MemoryEntry> {
             include_archive: true,
             now: now(),
         })
+        .await
         .hits
         .into_iter()
         .filter(|hit| hit.location == MemoryLocation::Archive)
@@ -138,7 +139,7 @@ async fn a_merge_archives_the_incoming_entry_and_records_the_pointer() {
         "confirmation counting is unchanged"
     );
 
-    let archived = archived_entries(&memory, "deploy");
+    let archived = archived_entries(&memory, "deploy").await;
     assert_eq!(
         archived.len(),
         1,
@@ -166,7 +167,7 @@ async fn a_write_without_a_dedup_hit_stays_unchanged() {
     let active = active_entries(&memory);
     assert_eq!(active.len(), 2);
     assert!(active.iter().all(|stored| stored.evidence.is_empty()));
-    assert!(archived_entries(&memory, "deploy").is_empty());
+    assert!(archived_entries(&memory, "deploy").await.is_empty());
 }
 
 /// Repeated merges accumulate pointers in write order.
@@ -251,7 +252,7 @@ async fn compaction_never_dangles_an_evidence_pointer() {
     memory.compact().await.unwrap();
 
     let active = active_entries(&memory);
-    let archived = archived_entries(&memory, "deploy");
+    let archived = archived_entries(&memory, "deploy").await;
     for stored in &active {
         for pointer in &stored.evidence {
             assert!(
@@ -296,7 +297,7 @@ async fn restoring_a_referenced_entry_keeps_the_pointers_valid() {
         "the restored entry now lives in active, where the pointer resolves"
     );
     assert!(
-        archived_entries(&memory, "deploy").is_empty(),
+        archived_entries(&memory, "deploy").await.is_empty(),
         "restoring removed the entry from the archive without breaking anything"
     );
 }

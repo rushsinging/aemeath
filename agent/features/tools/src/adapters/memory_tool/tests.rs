@@ -140,7 +140,8 @@ async fn search_result_publishes_ranked_memory_details_for_llm_and_tui() {
             "limit": 10
         }),
         &memory,
-    );
+    )
+    .await;
 
     assert!(!result.is_error);
     assert!(result.text.contains("cargo clippy"));
@@ -185,7 +186,8 @@ async fn reflection_generated_memory_remains_searchable_through_tool_contract() 
             "category": "preference"
         }),
         &memory,
-    );
+    )
+    .await;
 
     let hits = result.data.unwrap().hits.unwrap();
     assert_eq!(hits.len(), 1);

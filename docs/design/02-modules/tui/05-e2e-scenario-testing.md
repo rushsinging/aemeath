@@ -2,7 +2,7 @@
 
 > 层级：02-modules / tui（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：[#1006](https://github.com/rushsinging/aemeath/issues/1006)
-> 本文定义基于 ratatui `TestBackend`、crossterm 事件类型与 insta 快照的进程内 TUI 端到端场景测试流程。
+> 本文定义两类 TUI 场景测试的边界：基于 ratatui `TestBackend`、crossterm 事件类型与 insta 快照的进程内测试，以及基于 `tui-test-rs` 的真实 CLI/PTY 测试。
 
 ## 1. 定位与边界
 
@@ -29,10 +29,9 @@ crossterm Event
 | 纯逻辑单元测试 | Intent、reducer、状态转换、格式化 | 完整屏幕组合 |
 | Buffer/widget 测试 | 单个 widget、cell 样式、选区与 gutter | 上游事件和 Effect |
 | **进程内场景测试** | 事件到 framebuffer 的完整 TUI 链路 | 真实 TTY、转义序列、raw mode |
-| PTY smoke test | 进程启动、alternate screen、raw mode、退出恢复 | 细粒度状态组合 |
-
-`TestBackend` 不模拟真实终端协议。因此 raw mode、alternate screen、`EventStream`、信号和 panic 后终端恢复属于少量 PTY smoke test，不进入本文的快照基线。
-
+| **真实 CLI/PTY 场景测试** | `tui-test-rs` 驱动真实二进制、键盘输入、终端模式、进程退出 | 细粒度 reducer、Effect payload 和 TestBackend 帧性能 |
+| raw PTY 兜底测试 | 当前无直接操作 raw PTY 的保留测试；若未来需要原始 ANSI 字节序、真实 Unix signal 或 `tui-test-rs` 无法等价表达的平台语义，再增加最小低层 PTY 兜底 | 细粒度状态组合 |
+`TestBackend` 不模拟真实终端协议。因此 raw mode、alternate screen、`EventStream`、信号和 panic 后终端恢复属于真实 CLI/PTY 测试，不进入本文的进程内快照基线。`tui-test-rs` 是真实 CLI/PTY 测试的统一入口；仅在需要原始字节序或真实 Unix signal 语义时保留极小的低层 PTY 兜底。
 ### 1.2 核心原则
 
 1. **MUST** 使用生产的 update、Effect 协议、ViewAssembler 与 Render 路径，不复制业务状态转换。
@@ -43,7 +42,17 @@ crossterm Event
 6. **NEVER** 在测试中调用全局 `crossterm::event::read`、真实 `EventStream` 或真实系统剪贴板。
 7. **NEVER** 通过修改全局 cwd、共享环境变量或系统时钟构造 fixture。
 
-## 2. 方案选择
+## 1.3 真实 CLI/PTY 测试边界
+
+`tui-test-rs` 通过 portable PTY 驱动真实 `aemeath` binary，负责验证进程级而不是应用内 framebuffer 级行为。真实测试必须使用 `RunOptions` 启动 binary，并通过 `/usr/bin/env -i` 建立白名单环境与隔离的 `HOME`、cwd、`AEMEATH_AGENTS_DIR`，不继承宿主 `AEMEATH_*` 配置或凭证；binary 路径由 Cargo 的 `CARGO_BIN_EXE` 自动注入（跟随 worktree target-dir），`AEMEATH_PTY_BIN` 仅作显式覆盖。测试优先使用 locator/expectation 等框架等待能力；仅 beta.5 对 CJK wide-cell locator 不可见时，允许同一 Session 的有上限文本条件等待（只读当前可视区域），禁止固定 sleep。受控慢探测由进程内 `TcpListener` 同步握手驱动，不依赖外部解释器。
+
+当前统一迁移的入口为：
+
+- `apps/cli/tests/connect_wizard_tui.rs`：真实 CLI 向导流程，使用 `RunOptions`、`get_by_text` 和分类 timeout；长探测用例由进程内 `TcpListener` 慢探测服务同步控制；
+- `apps/cli/tests/pty_smoke.rs`：真实 binary 的 alternate screen、Ctrl+C、退出码、光标恢复和 legacy 目录隔离；与向导测试同属 L5 慢测，统一经 `scripts/check-slow-test-matrix.sh` 串行执行。
+
+该框架的终端断言是仿真后的语义状态（例如 `alternate_screen` 和 `cursor_visible`），不等价于原始 ANSI 字节顺序或真实 Unix signal 投递。若未来出现这两类专门需求，只增加最小低层 PTY 兜底，不将 TestBackend 场景测试迁移到进程级。
+
 
 ### 2.1 最小方案
 
@@ -389,9 +398,8 @@ apps/cli/src/tui/app/scenario_tests/
 3. P0 场景测试；
 4. P1 场景测试；
 5. CLI 全量测试与 clippy；
-6. 独立的少量 PTY smoke test。
-
-P0/P1、快照草稿检查和 PTY smoke 均先提供本地/离线入口并记录冷/热耗时。已落地 `scripts/check-slow-test-matrix.sh`：host-native fmt/clippy/workspace/P0/P1/PTY 为必跑，跨 target build 仅在显式 `AEMEATH_MATRIX_CROSS=1` 且 toolchain/linker 可用时运行；不新增普通 PR workflow。
+6. 独立的少量 `tui-test-rs` CLI/PTY smoke test。
+P0/P1、快照草稿检查和真实 CLI/PTY 慢测均先提供本地/离线入口并记录冷/热耗时。已落地 `scripts/check-slow-test-matrix.sh`：host-native fmt/clippy/workspace/P0/P1/真实 CLI-PTY 为必跑（`connect_wizard_tui` 与 `pty_smoke` 经 `CARGO_BIN_EXE` 自动构建、串行执行），跨 target build 仅在显式 `AEMEATH_MATRIX_CROSS=1` 且 toolchain/linker 可用时运行；不新增普通 PR workflow。
 
 ### 10.2 设计验收
 
@@ -402,10 +410,9 @@ P0/P1、快照草稿检查和 PTY smoke 均先提供本地/离线入口并记录
 - Runtime/SDK/TUI ACL/Model/ViewAssembler/Render 关键层均有相邻测试或场景检查点；
 - P0 场景在固定尺寸和固定 fixture 下可重复通过；
 - 本地/离线快照检查禁止自动更新并拒绝遗留草稿；执行位置由 #1018 决定；
-- 真实终端职责由单独 PTY smoke test 覆盖，边界不混淆。
+- 真实终端职责由 `tui-test-rs` 驱动的 CLI/PTY 测试覆盖，必要时由极小 raw PTY 兜底补充，边界不混淆。
 
 ## 11. 相关文档
-
 - [01-architecture-and-dataflow.md](01-architecture-and-dataflow.md)：TEA 总体管线
 - [03-event-flow-and-acl.md](03-event-flow-and-acl.md)：Runtime/SDK 事件进入 TUI 的 ACL
 - [04-view-layer.md](04-view-layer.md)：ViewAssembler、ViewModel、ViewState 与 Render
@@ -421,3 +428,4 @@ P0/P1、快照草稿检查和 PTY smoke 均先提供本地/离线入口并记录
 | 2026-07-15 | 落地共享同步 Frame Driver、任意 Backend 基础 Harness 和 startup/input 证明场景；修正无 mod.rs 与耗时先行规则 | [#1016](https://github.com/rushsinging/aemeath/issues/1016) |
 | 2026-07-15 | 扩展 Scripted Effect/Runtime 注入/离散 tick，落地 P0 快照、本地草稿检查和 completion busy Enter 根因修复 | [#1017](https://github.com/rushsinging/aemeath/issues/1017)、[#1009](https://github.com/rushsinging/aemeath/issues/1009) |
 | 2026-07-16 | 落地代表性 P1 组合场景、真实 PTY 启动/恢复 smoke 与 host/cross 慢速矩阵入口 | [#1050](https://github.com/rushsinging/aemeath/issues/1050) |
+| 2026-10-02 | 真实 CLI/PTY 测试迁移至 `tui-test-rs`：Connect 向导流程（`env -i` 白名单隔离、进程内 `TcpListener` 慢探测服务、CJK 可视区有界等待）与 PTY 终端恢复 smoke，统一 L5 `#[ignore]` + 慢测矩阵串行入口 | [#1730](https://github.com/rushsinging/aemeath/issues/1730) |

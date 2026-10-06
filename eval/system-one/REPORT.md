@@ -130,6 +130,43 @@ v3.0 管线：SFT（266,131 题 / 36 源，软标签，16,416 步 ≈ 5h @ 1×H1
 - **D6 自训练路线**：rsi-jev 开源管线 + aemeath 真实 agent 决策轨迹，训练与 kev 同架构的专属权重（训练在 Python/GPU，产出无缝接入 Rust 引擎）。
 - **验收口径**：冷路径延迟、中文 case、order-flip 率进门禁；Rust 化后指标劣化不得超过 MLX 基线 1 个百分点。
 
+## 真实会话复验与引擎切换（2026-10-06，#1834 记忆重排接入验收）
+
+阶段一 46-case 手工集上全场景满分的结论在真实分布上不成立。本节记录真实复验协议、引擎终榜与切换决策。
+
+### 复验协议（`datasets/memory_rerank_real.jsonl`，`harness/build_real_cases.py` 幂等重建）
+
+- 20 条 case = aemeath 项目历史会话真实用户消息 × 项目记忆库 48 条（另 2 条因 gold 未入词法 top-5 记为召回失败，不参与重排评分）
+- 候选 = Python 复刻 BM25 词法召回的 top-5 **实际序**（`harness/lexical_baseline.py`，与 Rust `lexical_search.rs` 同算法同常量）——生产路径「词法 top-N → 引擎重排」的端到端模拟
+- gold = 人工标注的最相关记忆；引擎正反序各跑一遍（flip 检测）
+
+### 引擎终榜（n=20，真实分布）
+
+| 引擎 | 路线 | R@1 | MRR | flip | p50 延迟 | 生产形态 |
+|---|---|---|---|---|---|---|
+| anyjev 4B | 直读 logits（HF） | 0.85 | 0.908 | 0.05 | 78s | 库内，不可生产 |
+| semif 4B-4bit | 直读 logits（MLX CLI） | 0.75 | 0.867 | 0.65 | 2.7s | flip 爆炸淘汰 |
+| **Qwen3-Reranker-0.6B（MLX mxfp8）** | **pointwise yes/no** | **0.65** | **0.808** | **0.05** | **616ms** | **Jev 兼容 serve，已切换** |
+| kev 0.8B | pointer head（MLX） | 0.65 | 0.804 | 0.30 | 300ms | 两轮复现一致，降级备选 |
+| rsi-jev 2B | pointer head（torch） | 0.60 | 0.758 | 0.45 | 54s | 淘汰 |
+| jevos INT8 | choice 分解 | 0.50 | 0.703 | 0.40 | 3.6s | 不如词法基线，淘汰 |
+| 词法基线（BM25） | — | 0.55 | — | — | ~0 | 现状对照 |
+
+### 关键发现
+
+1. **手工集与真实分布断裂**：kev 手工 12 case R@1=1.0，真实 0.65——手工集干扰项太弱（随机抽样），真实词法 top-5 全是同主题难负例。「离线对分达标」必须以真实候选构造口径为准。
+2. **0.65 是小模型能力天花板而非 kev 缺陷**：Qwen3-Reranker-0.6B（llama.cpp Q8_0）独立复现 R@1=0.65；anyjev 的 0.85 是 4B 规模红利。
+3. **pointwise 架构根治 flip**：Qwen3-Reranker 每候选独立打分，顺序天然无关（flip 0.00-0.05）；kev pointer head 的竞争性归一化使 flip=0.30 成为架构固有性质。
+4. **instruct 定向杠杆不稳**：全文口径（候选 ≤524 字符）下定向 instruct 使 R@1 0.65→0.70，但生产口径（500 截断）下通用/定向均为 0.65——±1 题属 n=20 噪声，instruct 不作为收益依据；生产仍采用定向 instruct（与 kev 基线语义对齐且无害）。同一杠杆对 kev 无效（中文/任务导向两版均不改善）。
+5. **cyclic shifts 对 pointer head 无效**：K=2 仅 flip 微降（0.30→0.20，R@1 不变），K≥4 R@1 反降至 0.55——移位改变竞争结构而非纯位置噪声；anyjev L0 有效是因逐选项独立打分。
+6. **截断保护语义**：候选截断 200 字符 R@1 崩至 0.30；全文（≤524 字符）与 500 持平——`RERANK_CRITERION_MAX_CHARS=500` 不能下调。
+
+### 切换决策（替代 D1）
+
+**memory_rerank 场景引擎切换为 Qwen3-Reranker-0.6B（MLX mxfp8）**，经 `harness/qwen3_reranker_serve.py` 提供 Jev 兼容 `/v1/systemone`（choice 内部展开为逐候选 yes/no，softmax 归一化；noul 单次；score 映射最近等级）——Rust 侧 `jev_http` adapter 零改动复用，生产切换仅改 `AEMEATH_SCORING_URL`。kev 保留为备选引擎；D2 Rust 化路径对 Qwen3-Reranker 更直（llama.cpp 原生支持 Qwen3，rerank 仅需读 yes/no logit，无 LoRA 合并）。
+
+质量仍不达 issue 原阈值（R@1≥0.99 系手工集口径过乐观）；切换论据为 flip 根治（0.30→0.05，结果可复现）+ R@1 持平（0.65）+ 净增益（词法 0.55→0.65）+ Rust 化路径更直，而非质量提升。冲 anyjev 0.85 的路径只剩 D6 自训练（rsi-jev 难负例 + listwise RL 管线，需 GPU 环境，另行立项）。冲 anyjev 0.85 的路径只剩 D6 自训练（rsi-jev 难负例 + listwise RL 管线，需 GPU 环境，另行立项）。
+
 ## 部署注记（附录）## 部署注记（附录）
 
 - **clm-serve on macOS**：`pip install contrastive-lm` 在 macOS 因 vllm 无条件依赖失败（官方 issue #16/#17），需 `--no-deps` + 手动装依赖；embedding 后端用 llama.cpp `llama-server --embedding --pooling last`（复用 Ollama 的 qwen3:8b GGUF blob，零额外下载）；option/criteria 文案必须用完整句子（短标签退化，官方 issue #3）。
