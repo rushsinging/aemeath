@@ -431,3 +431,38 @@ fn user_message_is_dynamic_and_must_not_use_system_tail() {
     );
     assert!(user_message_policy().is_valid());
 }
+
+// ---------- #1848 注入清单落盘：pending_persist 生命周期 ----------
+
+#[test]
+fn injected_reminders_persist_on_finalize_and_flush_once() {
+    // 注入轮：confirm 后记 pending_persist；
+    // finalize 提交消息头插入 reminder；flush 幂等（一次后清空）。
+    let source = Arc::new(CountingTestSource::new(
+        ReminderKind::task_progress(),
+        run_start_policy(ReminderPlacement::TailUserMessage),
+    ));
+    source.set_snapshot("total=3 completed=1");
+    let mut pipeline = ReminderPipeline::new(vec![source]);
+
+    pipeline.run_started();
+    let injection = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-05T18:00:00+08:00", 512);
+    assert!(injection.tail_user_message.is_some());
+
+    let pending = pipeline.take_pending_persist_messages();
+    assert_eq!(pending.len(), 1, "注入轮产出待落盘消息");
+    assert!(
+        pending[0].text_content().contains("kind=\"task-progress\""),
+        "落盘消息带统一 envelope"
+    );
+    assert_eq!(
+        pipeline.take_pending_persist_messages().len(),
+        0,
+        "take 后清空（幂等）"
+    );
+
+    // 第二轮无注入：无新 pending。
+    let second = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-05T18:00:01+08:00", 512);
+    assert!(second.tail_user_message.is_none());
+    assert_eq!(pipeline.take_pending_persist_messages().len(), 0);
+}

@@ -9,7 +9,7 @@ use crate::domain::reminder::{
     ReminderEnvelopeInput, ReminderEventSource, ReminderKind, ReminderPlacement, ReminderPolicy,
     ReminderQueue, ReminderSource,
 };
-use crate::domain::{estimate_tokens, SystemBlock};
+use crate::domain::{estimate_tokens, ContextMessage, SystemBlock};
 
 /// 一次 build_window 的 reminder 注入产物：尾部合并消息 + SystemTail 块。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -28,6 +28,10 @@ pub struct ReminderWindowInjection {
 pub struct ReminderPipeline {
     queue: ReminderQueue,
     sources: Vec<Arc<dyn ReminderSource>>,
+    /// 本 Run 已注入、待 step 收口落盘的尾部 reminder 消息（#1848）：
+    /// append_finalized 时取走并插入提交消息头部（u 之后 a 之前），
+    /// 使注入轮后的请求前缀逐 token 稳定（prompt cache 命中）。
+    pending_persist: Vec<ContextMessage>,
 }
 
 impl ReminderPipeline {
@@ -49,6 +53,7 @@ impl ReminderPipeline {
         Self {
             queue: ReminderQueue::new(),
             sources,
+            pending_persist: Vec::new(),
         }
     }
 
@@ -209,6 +214,12 @@ impl ReminderPipeline {
         self.queue.confirm_injection(&injected_seqs);
         self.queue.defer_injection(&deferred_seqs);
 
+        if !tail_blocks.is_empty() {
+            let tail_message = compose_tail_user_message(&tail_blocks);
+            self.pending_persist
+                .push(ContextMessage::user(tail_message));
+        }
+
         ReminderWindowInjection {
             tail_user_message: (!tail_blocks.is_empty())
                 .then(|| compose_tail_user_message(&tail_blocks)),
@@ -222,6 +233,11 @@ impl ReminderPipeline {
                 })
                 .collect(),
         }
+    }
+
+    /// 取走待落盘的注入消息（append_finalized 提交前调用；一次后清空）。
+    pub fn take_pending_persist_messages(&mut self) -> Vec<ContextMessage> {
+        std::mem::take(&mut self.pending_persist)
     }
 
     fn rebuild_flagged_sources(&mut self) {

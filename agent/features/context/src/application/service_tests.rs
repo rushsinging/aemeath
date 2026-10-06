@@ -26,6 +26,8 @@ struct BaselineSession {
     /// `true` 时 commit_compaction 返回 Committed（真实提交语义），
     /// `false`（默认）返回 Skipped(ResumeProtection)。
     committed_compaction: bool,
+    /// 每次append_and_persist 实际提交的消息（#1848 断言用）。
+    finalized_appends: std::sync::Mutex<Vec<Vec<Message>>>,
 }
 
 #[async_trait]
@@ -43,6 +45,10 @@ impl SessionRepository for BaselineSession {
         &self,
         append: &ContextAppendData,
     ) -> Result<crate::domain::AppendReceiptData, crate::domain::ContextAppendError> {
+        self.finalized_appends
+            .lock()
+            .expect("finalized appends lock poisoned")
+            .push(append.messages.clone());
         Ok(crate::domain::AppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
@@ -174,6 +180,7 @@ fn service_with_session(
             ),
             active_summary: Some("summary".into()),
             committed_compaction,
+            finalized_appends: std::sync::Mutex::new(Vec::new()),
         }),
         Arc::new(BaselinePrompt),
         Arc::new(BaselineMemory),
@@ -197,6 +204,7 @@ fn service_with_summary(
             ),
             active_summary: Some(active_summary),
             committed_compaction: false,
+            finalized_appends: std::sync::Mutex::new(Vec::new()),
         }),
         Arc::new(BaselinePrompt),
         Arc::new(BaselineMemory),
@@ -842,4 +850,95 @@ async fn reminder_user_message_received_enqueues_snapshot_into_window() {
         window_text(&after).contains("召回的记忆内容"),
         "用户消息事件触发后应注入"
     );
+}
+
+#[tokio::test]
+async fn append_and_persist_prepends_pending_reminder_before_step_messages() {
+    // #1848：注入轮的 reminder 在 step 收口随 append_and_persist 提交——
+    // 插入提交消息头部（canonical 顺序 u(已落) → R → a/tool），
+    // 使下一请求 [.., u, R, a, ..] 前缀逐 token 稳定（cache 命中）。
+    let tail_source = Arc::new(PipelineTestSource {
+        kind: crate::domain::reminder::ReminderKind::task_progress(),
+        placement: crate::domain::reminder::ReminderPlacement::TailUserMessage,
+        body: "total=2 completed=1".to_string(),
+    });
+    let baseline = Arc::new(BaselineSession {
+        revision: SessionRevision::new(1),
+        messages: ContextMessages::from_committed_steps(Vec::new(), Vec::new()),
+        active_summary: None,
+        committed_compaction: false,
+        finalized_appends: std::sync::Mutex::new(Vec::new()),
+    });
+    let service = ContextApplicationService::new(
+        baseline.clone(),
+        Arc::new(BaselinePrompt),
+        Arc::new(BaselineMemory),
+    );
+    let context_request = request(None);
+    let run_id = context_request.run_id.clone();
+    crate::ports::ContextPort::create_reminder_pipeline(
+        &service,
+        run_id.clone(),
+        vec![tail_source],
+    );
+    crate::ports::ContextPort::reminder_run_started(&service, &run_id);
+    let window = service
+        .build_window(&context_request)
+        .await
+        .expect("构建 window");
+    assert!(
+        window
+            .messages
+            .iter()
+            .any(|message| message.text_content().contains("kind=\"task-progress\"")),
+        "注入轮视图含 reminder"
+    );
+
+    let mut recorded = crate::domain::ContextAppendData {
+        session_id: context_request.session_id.clone(),
+        expected_revision: window.backing_revision,
+        run_id: run_id.clone(),
+        step_id: context_request.step_id.clone(),
+        source_request_id: context_request.request_id.clone(),
+        finalize_cause: crate::domain::FinalizeCause::Completed,
+        duration_ms: None,
+        messages: vec![Message::placeholder(share::message::Role::Assistant)],
+        receipts: vec![],
+        api_input_tokens: Some(120),
+        fingerprint: crate::domain::ContentFingerprint::new("f"),
+    };
+    crate::ports::ContextPort::append_and_persist(&service, &recorded)
+        .await
+        .expect("提交");
+
+    // 第二次提交（无新注入）。
+    recorded.messages = vec![Message::placeholder(share::message::Role::Assistant)];
+    crate::ports::ContextPort::append_and_persist(&service, &recorded)
+        .await
+        .expect("第二次提交");
+
+    crate::ports::ContextPort::drop_reminder_pipeline(&service, &run_id);
+
+    let appends = baseline
+        .finalized_appends
+        .lock()
+        .expect("finalized appends lock poisoned")
+        .clone();
+    assert_eq!(appends.len(), 2, "两次 append 均到达 session");
+    assert_eq!(
+        appends[0].len(),
+        2,
+        "第一次提交 = [reminder, step 消息]（Context 内部 flush 插入头部）"
+    );
+    assert!(
+        appends[0][0]
+            .text_content()
+            .contains("kind=\"task-progress\""),
+        "reminder 为第一条（canonical 顺序 u → R → a）"
+    );
+    assert!(
+        !appends[0][1].text_content().contains("task-progress"),
+        "原 step 消息保持在后"
+    );
+    assert_eq!(appends[1].len(), 1, "第二次提交（无新注入）不重复插入");
 }

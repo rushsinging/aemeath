@@ -23,8 +23,18 @@ fn snapshot(
     base_url: &str,
     user_agent: Option<&str>,
 ) -> ConfigSnapshot {
+    snapshot_with_global_user_agent(source, driver, base_url, user_agent, "global/1.0")
+}
+
+fn snapshot_with_global_user_agent(
+    source: &str,
+    driver: &str,
+    base_url: &str,
+    user_agent: Option<&str>,
+    global_user_agent: &str,
+) -> ConfigSnapshot {
     let mut config = Config::default();
-    config.api.user_agent = "global/1.0".to_string();
+    config.api.user_agent = global_user_agent.to_string();
     config.models.default = format!("{source}/model");
     config.models.providers.insert(
         source.to_string(),
@@ -106,10 +116,21 @@ fn runtime_resolution_uses_explicit_endpoint_override_before_catalog() {
 }
 
 #[test]
-fn runtime_resolution_prefers_catalog_official_sdk_user_agent_over_global() {
-    // Anthropic 已核验官方客户端 UA（Claude Code CLI 2.1.267，本地抓包）；
-    // Catalog 级必须优先于全局配置 `api.user_agent`。
+fn runtime_resolution_prefers_global_user_agent_over_catalog_official_sdk() {
+    // 全局 `api.user_agent` 是用户显式表达的身份意图，优先于 Catalog 自动 UA
+    // （Anthropic 已核验官方客户端 UA 也不得压过显式全局配置）。
     let snapshot = snapshot("Anthropic", "anthropic", "", None);
+
+    let resolved = resolve(&snapshot, "Anthropic", "anthropic", None);
+
+    assert_eq!(resolved.user_agent, "global/1.0");
+}
+
+#[test]
+fn runtime_resolution_falls_back_to_catalog_official_sdk_when_global_is_blank() {
+    // 全局 UA 空白等同未配置；此时 Anthropic（已核验官方客户端 UA）的
+    // Catalog 级必须兜底生效。
+    let snapshot = snapshot_with_global_user_agent("Anthropic", "anthropic", "", None, "   ");
 
     let resolved = resolve(&snapshot, "Anthropic", "anthropic", None);
 

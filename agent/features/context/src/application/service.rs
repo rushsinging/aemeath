@@ -8,7 +8,7 @@ use crate::domain::reminder::{ReminderEventSource, ReminderSource};
 use crate::domain::{
     AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
     CompactOutcome, CompactRequestData, CompactionDecisionData, ContextAppendData,
-    ContextAppendError, ContextPortError, ContextRequestData, ContextWindowData,
+    ContextAppendError, ContextMessage, ContextPortError, ContextRequestData, ContextWindowData,
     ManualCompactRequestData, RunId, SessionId, SystemBlock, ToolReceiptMutationData,
     ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
@@ -90,6 +90,16 @@ impl ContextApplicationService {
     }
 
     /// compact 改写了对话历史，冻结的注入内容随之过期。
+    /// 取走本 Run 待落盘的注入 reminder 消息（无管线返回空）。
+    fn take_pending_reminder_messages(&self, run_id: &RunId) -> Vec<ContextMessage> {
+        self.reminder_pipelines
+            .lock()
+            .expect("reminder pipelines lock poisoned")
+            .get_mut(run_id)
+            .map(|pipeline| pipeline.take_pending_persist_messages())
+            .unwrap_or_default()
+    }
+
     fn mark_injection_stale(&self) {
         self.injection_refresh_pending
             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -477,7 +487,20 @@ impl ContextPort for ContextApplicationService {
         &self,
         append: &ContextAppendData,
     ) -> Result<AppendReceiptData, ContextAppendError> {
-        self.session.append_finalized(append).await
+        // #1848 尾部注入类 reminder 显式落盘：flush 本 Run 待落盘的注入
+        // 消息并前置到提交消息头部（canonical 顺序 u → R → a/tool），
+        // 使注入轮后的请求前缀逐 token 稳定（prompt cache 命中）。
+        // runtime 调用零改动；fingerprint 保留调用方原值——重试路径
+        //（pending 已 flush）幂等早退不重复插入。
+        let pending_reminders = self.take_pending_reminder_messages(&append.run_id);
+        if pending_reminders.is_empty() {
+            return self.session.append_finalized(append).await;
+        }
+        let mut enriched = append.clone();
+        let mut messages = pending_reminders;
+        messages.extend(append.messages.iter().cloned());
+        enriched.messages = messages;
+        self.session.append_finalized(&enriched).await
     }
 
     // ─── Reminder 统一管线控制面（ContextPort 默认方法的生产实现）───
