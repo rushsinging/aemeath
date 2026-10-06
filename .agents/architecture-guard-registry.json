@@ -250,6 +250,18 @@
       "tracking_issue": 1645
     },
     {
+      "id": "construction.provider.wire-provider-client",
+      "symbol": "wire_provider_client",
+      "owner_crate": "provider",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Provider client assembly (from_config_with_pool + default reasoning) is provided by the crate as a wire factory; composition never constructs LlmClient directly (#1861)",
+      "tracking_issue": 1861
+    },
+    {
       "id": "construction.runtime.wire-active-run-registry",
       "symbol": "wire_active_run_registry",
       "owner_crate": "runtime",

@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use crate::adapters::openai_compatible::ReasoningConfig;
+use crate::domain::capability::ReasoningLevel;
 use crate::domain::invoke::SystemBlockData;
 use crate::ports::LlmProvider;
 use crate::ProviderDriverKind;
@@ -165,6 +166,25 @@ fn build_provider_and_scope(
         effective_reasoning,
     )?;
     Ok((provider_impl, default_scope))
+}
+
+/// 组合根获得 provider 客户端的唯一装配入口：构造配置 + 共享 transport
+/// pool + 默认推理档位 → 就绪客户端。
+///
+/// 收编 composition 侧 `from_config_with_pool` + `with_default_reasoning`
+/// 手写装配链（含 `LlmError → ProviderError` 权威映射）；组合根 NEVER
+/// 直调 `LlmClient` 构造器。
+pub fn wire_provider_client(
+    options: LlmConfigOptionsData,
+    pool: &crate::adapters::pool::TransportPool,
+    default_reasoning: ReasoningLevel,
+) -> Result<Arc<LlmClient>, crate::ProviderError> {
+    let client =
+        LlmClient::from_config_with_pool(options, pool).map_err(crate::ProviderError::from)?;
+    let client = client
+        .with_default_reasoning(default_reasoning)
+        .map_err(crate::ProviderError::from)?;
+    Ok(Arc::new(client))
 }
 
 #[cfg(test)]

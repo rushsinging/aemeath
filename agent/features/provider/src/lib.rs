@@ -35,8 +35,9 @@ pub(crate) use domain::invoke::InvocationScopeData;
 
 /// Composition Root 专用构造面；业务消费者不得引用。
 pub mod composition {
-    pub use crate::adapters::client::{LlmClient, LlmConfigOptionsData};
+    pub use crate::adapters::client::{wire_provider_client, LlmClient, LlmConfigOptionsData};
     pub use crate::adapters::pool::TransportPool;
+    pub use crate::domain::capability::reasoning_capability_from_max;
     pub use crate::domain::invoke::{InvocationScopeData, SystemBlockData};
     pub use crate::ports::LlmProvider;
     pub use crate::LlmError;

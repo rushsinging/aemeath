@@ -5,8 +5,7 @@ use async_trait::async_trait;
 use provider::composition::{LlmClient, LlmConfigOptionsData};
 use provider::{
     CancellationSignal, InvocationRequestData, InvocationStreamData, ModelCapabilityData,
-    ModelIdData, ProviderError, ProviderErrorKind, ReasoningCapabilityData,
-    ReasoningMappingKindData,
+    ModelIdData, ProviderError, ProviderErrorKind,
 };
 
 use runtime::{
@@ -134,21 +133,16 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
             user_agent: Some(spec.user_agent),
         };
 
-        let client = LlmClient::from_config_with_pool(config, self.pool.as_ref())
-            .map_err(ProviderError::from)?;
-
-        let client = Arc::new(
-            client
-                .with_default_reasoning(spec.requested_reasoning)
-                .map_err(|error| {
-                    ProviderError::fatal(ProviderErrorKind::Configuration, error.to_string())
-                })?,
-        );
+        let client = provider::composition::wire_provider_client(
+            config,
+            self.pool.as_ref(),
+            spec.requested_reasoning,
+        )?;
 
         // Build a ReasoningCapabilityData whose supported levels are every level
         // from Off up to the client's reported max reasoning level (inclusive).
         let max_reasoning = client.max_reasoning_level();
-        let reasoning_cap = reasoning_capability_from_max(max_reasoning);
+        let reasoning_cap = provider::composition::reasoning_capability_from_max(max_reasoning);
 
         let requested_reasoning = client.default_scope().requested_reasoning();
 
@@ -173,23 +167,6 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
             context_window: spec.context_window,
         })
     }
-}
-
-/// Build a `ReasoningCapabilityData` that supports every level from `Off` up to
-/// and including `max`.
-fn reasoning_capability_from_max(max: ReasoningLevel) -> ReasoningCapabilityData {
-    let all_levels = [
-        ReasoningLevel::Off,
-        ReasoningLevel::Minimal,
-        ReasoningLevel::Low,
-        ReasoningLevel::Medium,
-        ReasoningLevel::High,
-        ReasoningLevel::Xhigh,
-        ReasoningLevel::Max,
-    ];
-    let supported: Vec<_> = all_levels.into_iter().filter(|l| *l <= max).collect();
-    ReasoningCapabilityData::new(supported, ReasoningMappingKindData::Effort)
-        .unwrap_or_else(|_| ReasoningCapabilityData::none())
 }
 
 use std::time::Instant;

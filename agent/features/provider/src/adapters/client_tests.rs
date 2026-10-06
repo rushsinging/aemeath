@@ -150,3 +150,45 @@ fn thinking_budget_only_controls_disabled_or_enabled_fallback_level() {
         ReasoningLevel::High
     );
 }
+
+/// wire_provider_client 是组合根获得 provider 客户端的唯一装配入口：
+/// 收编 from_config_with_pool + with_default_reasoning 装配链。
+#[test]
+fn wire_provider_client_applies_default_reasoning_over_pooled_transport() {
+    let pool = TransportPool::new();
+    let pooled = LlmClient::from_config_with_pool(
+        pooled_config("claude-a", 8192, Some("https://api.anthropic.com")),
+        &pool,
+    )
+    .expect("manual assembly baseline must build");
+
+    let wired = super::wire_provider_client(
+        pooled_config("claude-a", 8192, Some("https://api.anthropic.com")),
+        &pool,
+        ReasoningLevel::Medium,
+    )
+    .expect("wire assembly must build");
+
+    assert_eq!(
+        wired.transport_id(),
+        pooled.transport_id(),
+        "wire 装配与手工装配共享同一 transport pool 语义"
+    );
+    assert_eq!(
+        wired.default_scope().requested_reasoning(),
+        ReasoningLevel::Medium
+    );
+}
+
+#[test]
+fn wire_provider_client_maps_configuration_failures_to_provider_error() {
+    let pool = TransportPool::new();
+    let mut config = pooled_config("claude-a", 16, None);
+    config.driver = "not-a-real-driver".to_string();
+
+    let error = match super::wire_provider_client(config, &pool, ReasoningLevel::Off) {
+        Err(error) => error,
+        Ok(_) => panic!("unknown driver must fail"),
+    };
+    assert_eq!(error.kind, crate::ProviderErrorKind::Configuration);
+}
