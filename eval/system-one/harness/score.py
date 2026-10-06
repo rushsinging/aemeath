@@ -21,7 +21,7 @@ EVAL_ROOT = HERE.parent
 RESULTS = EVAL_ROOT / "results"
 DATASETS = EVAL_ROOT / "datasets"
 
-RANK_SCENARIOS = ("memory_rerank", "skill_match", "memory_rerank_real")
+RANK_SCENARIOS = ("memory_rerank", "skill_match", "skill_match_real", "memory_rerank_real")
 NOUL_SCENARIOS = ("stop_verify",)
 
 
@@ -173,6 +173,13 @@ GATES: dict[str, dict[str, tuple[str, float]]] = {
         "MRR": (">=", 0.99),
         "order_flip_rate": ("<=", 0.02),
         "latency_p95_ms": ("<=", 2000.0),
+        "chinese_r_at_1": ("==", 1.0),
+    },
+    "skill_match": {
+        "R@1": (">=", 0.99),
+        "MRR": (">=", 0.99),
+        "order_flip_rate": ("<=", 0.02),
+        "latency_p95_ms": ("<=", 1000.0),
         "chinese_r_at_1": ("==", 1.0),
     },
 }
