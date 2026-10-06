@@ -82,28 +82,28 @@ impl TypedTool for ToolSearchTool {
         // 低置信（仅 desc contains）或零命中时交 System One 语义重排，失败静默回退。
         let lexical_scores: Vec<f64> = matching.iter().map(|(_, score)| *score).collect();
         let scoring_port = ctx.scoring();
-        let result_tools: Vec<ToolInfo> = if scoring_port.is_some()
-            && !crate::domain::tool_search_scoring::is_lexical_confident(&lexical_scores)
-        {
-            let candidates: Vec<ToolInfo> = if matching.is_empty() {
-                tools.clone()
-            } else {
-                matching.iter().map(|(tool, _)| tool.clone()).collect()
-            };
-            log::debug!(
-                target: crate::LOG_TARGET,
-                "tool_search_scoring_triggered query={query} candidates={} zero_hit={}",
-                candidates.len(),
-                matching.is_empty(),
-            );
-            match semantic_rerank(&query, &candidates, scoring_port.as_ref().expect("checked"))
-                .await
-            {
-                Some(reranked) => reranked,
-                None => matching.into_iter().map(|(tool, _)| tool).collect(),
+        let result_tools: Vec<ToolInfo> = match (
+            scoring_port.as_ref(),
+            crate::domain::tool_search_scoring::is_lexical_confident(&lexical_scores),
+        ) {
+            (Some(port), false) => {
+                let candidates: Vec<ToolInfo> = if matching.is_empty() {
+                    tools.clone()
+                } else {
+                    matching.iter().map(|(tool, _)| tool.clone()).collect()
+                };
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "tool_search_scoring_triggered query={query} candidates={} zero_hit={}",
+                    candidates.len(),
+                    matching.is_empty(),
+                );
+                match semantic_rerank(&query, &candidates, port).await {
+                    Some(reranked) => reranked,
+                    None => matching.into_iter().map(|(tool, _)| tool).collect(),
+                }
             }
-        } else {
-            matching.into_iter().map(|(tool, _)| tool).collect()
+            _ => matching.into_iter().map(|(tool, _)| tool).collect(),
         };
 
         if result_tools.is_empty() {
