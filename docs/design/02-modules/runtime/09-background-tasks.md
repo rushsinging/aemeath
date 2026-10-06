@@ -87,6 +87,11 @@ BackgroundTaskRecord
   直接按文件区间读取（LLM 增量游标与 TUI 翻全量共用同一文件真相源），
   token budget 截断在读取层叠加。
 - 生命周期随 session：会话任务日志 GC 与 resume 失效对账同步（§6）。
+- **Agent（sub-agent 派发）的输出形态**：无字节流可直绑。终态输出（子代理总结
+  文本）由 runtime 终态兜底 append 进任务日志文件（与非流式工具同路径）；
+  中间过程**不复制**进任务日志——sub-run 的过程真相已由现有 Activity / 事件流 /
+  子代理诊断日志（`SubAgentLogConfig`）承担，`logs` 对 agent 任务返回终态总结
+  并引用其 Activity / 事件流，过程细节走子代理自身体系查询。
 
 ### 2.4 阈值配置
 
