@@ -538,5 +538,44 @@ pub fn render_invocation_reminder_body(
             }
             lines.join("\n")
         }
+        crate::domain::InvocationReminderData::BackgroundTaskCompleted { items } => {
+            let status_text = |status: &crate::domain::BackgroundTaskCompletionStatus| match status {
+                crate::domain::BackgroundTaskCompletionStatus::Succeeded => ("成功", "succeeded"),
+                crate::domain::BackgroundTaskCompletionStatus::Failed => ("失败", "failed"),
+                crate::domain::BackgroundTaskCompletionStatus::TimedOut => ("超时", "timed out"),
+                crate::domain::BackgroundTaskCompletionStatus::Cancelled => ("已取消", "cancelled"),
+            };
+            let mut lines = vec![match language {
+                "zh" => "━━ 后台任务已完成 ━━".to_owned(),
+                _ => "━━ Background task completed ━━".to_owned(),
+            }];
+            for item in items {
+                let (status_zh, status_en) = status_text(&item.status);
+                lines.push(format!(
+                    "- {} [{}] {}",
+                    escape_reminder_text(&item.task_id),
+                    match language {
+                        "zh" => status_zh,
+                        _ => status_en,
+                    },
+                    escape_reminder_text(&item.tool_name),
+                ));
+                if !item.output_tail.is_empty() {
+                    lines.push(format!(
+                        "  {}",
+                        escape_reminder_text(item.output_tail.trim())
+                    ));
+                }
+            }
+            match language {
+                "zh" => lines.push(
+                    "结果已回注；日志或后续输出可用 background_tasks 工具查询。".to_owned(),
+                ),
+                _ => lines.push(
+                    "Use the background_tasks tool to inspect logs or further output.".to_owned(),
+                ),
+            }
+            lines.join("\n")
+        }
     }
 }

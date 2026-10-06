@@ -111,6 +111,11 @@ pub enum InvocationReminderData {
     MemoryRecall {
         entries: Vec<MemoryRecallEntryData>,
     },
+    /// 后台任务完成通知（#252）：转后台 tool call 的终态事实。
+    /// 轻量通知只带输出尾部截断；完整数据由 background_tasks tool 查询。
+    BackgroundTaskCompleted {
+        items: Vec<BackgroundTaskReminderItemData>,
+    },
 }
 
 /// 记忆召回条目预览（id + 截断内容）。
@@ -118,6 +123,25 @@ pub enum InvocationReminderData {
 pub struct MemoryRecallEntryData {
     pub id: String,
     pub content_preview: String,
+}
+
+/// 后台任务完成通知条目（渲染语义枚举归 Context；runtime 侧终态转换映射）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackgroundTaskReminderItemData {
+    pub task_id: String,
+    pub tool_name: String,
+    pub status: BackgroundTaskCompletionStatus,
+    /// 输出尾部截断（注入 token 预算内；完整输出经 background_tasks logs 查询）。
+    pub output_tail: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BackgroundTaskCompletionStatus {
+    Succeeded,
+    Failed,
+    TimedOut,
+    Cancelled,
 }
 
 impl InvocationReminderData {
@@ -147,6 +171,10 @@ impl InvocationReminderData {
         Self::MemoryRecall { entries }
     }
 
+    pub fn background_task_completed(items: Vec<BackgroundTaskReminderItemData>) -> Self {
+        Self::BackgroundTaskCompleted { items }
+    }
+
     pub const fn kind(&self) -> &'static str {
         match self {
             Self::TaskProgress(_) => "task_progress",
@@ -154,6 +182,7 @@ impl InvocationReminderData {
             Self::ModelGuidanceMismatch { .. } => "model_guidance_mismatch",
             Self::MemoryUpdated { .. } => "memory_updated",
             Self::MemoryRecall { .. } => "memory_recall",
+            Self::BackgroundTaskCompleted { .. } => "background_task",
         }
     }
 }
