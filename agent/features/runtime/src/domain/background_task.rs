@@ -138,6 +138,17 @@ impl BackgroundTaskRecord {
             (BackgroundTaskState::ForegroundWaiting, BackgroundTaskState::Backgrounded { .. })
             | (BackgroundTaskState::ForegroundWaiting, BackgroundTaskState::Terminal(_))
             | (BackgroundTaskState::Backgrounded { .. }, BackgroundTaskState::Terminal(_)) => true,
+            // 重复转后台幂等：已 Backgrounded 时忽略新时间戳（首次数据为准）。
+            // Backgrounded 携带时间字段，全等比较在两次 now() 间天然不稳定。
+            (
+                BackgroundTaskState::Backgrounded { .. },
+                BackgroundTaskState::Backgrounded { .. },
+            ) => {
+                return Ok(BackgroundTaskAdvance {
+                    record: self,
+                    changed: false,
+                });
+            }
             (BackgroundTaskState::Terminal(_), _) => {
                 return Err(BackgroundTaskTransitionError::TerminalConflict {
                     task_id: self.task_id.as_str().to_string(),
