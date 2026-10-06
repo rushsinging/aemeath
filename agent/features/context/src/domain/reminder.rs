@@ -8,8 +8,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::domain::constants::{
-    ENVELOPE_VERSION, KIND_MEMORY_RECALL, KIND_MEMORY_UPDATED, KIND_TASK_PROGRESS,
-    PRIORITY_ENVIRONMENT, PRIORITY_EVENT, PRIORITY_MEMORY_RECALL, PRIORITY_TASK_STATE,
+    ENVELOPE_VERSION, KIND_BACKGROUND_TASK, KIND_MEMORY_RECALL, KIND_MEMORY_UPDATED,
+    KIND_TASK_PROGRESS, PRIORITY_ENVIRONMENT, PRIORITY_EVENT, PRIORITY_MEMORY_RECALL,
+    PRIORITY_TASK_STATE,
 };
 
 /// reminder kind 开放标识：新增 kind 只注册新 source，NEVER 扩展闭合 enum。
@@ -33,6 +34,10 @@ impl ReminderKind {
         Self::new(KIND_MEMORY_RECALL)
     }
 
+    pub fn background_task() -> Self {
+        Self::new(KIND_BACKGROUND_TASK)
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -45,6 +50,10 @@ pub struct ReminderEventSource(Arc<str>);
 impl ReminderEventSource {
     pub fn new(value: impl Into<Arc<str>>) -> Self {
         Self(value.into())
+    }
+
+    pub fn background_task() -> Self {
+        Self::new(KIND_BACKGROUND_TASK)
     }
 
     pub fn as_str(&self) -> &str {

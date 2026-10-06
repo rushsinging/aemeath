@@ -363,3 +363,79 @@ async fn recall_snapshot_data_stable_for_same_result_set() {
         "相同结果集的快照 data 必须稳定（SkipIfUnchanged 去重前提）"
     );
 }
+
+#[test]
+fn background_task_source_policy_is_event_tail_dedup_rebuild() {
+    let supervisor =
+        Arc::new(crate::application::background_task::supervisor::BackgroundTaskSupervisor::new());
+    let source = BackgroundTaskReminderSource::new(supervisor);
+
+    assert_eq!(source.kind().as_str(), "background_task");
+    let policy = source.policy();
+    assert!(matches!(
+        policy.refresh,
+        context::RefreshTrigger::OnEvent(ref event)
+            if *event == context::ReminderEventSource::background_task()
+    ));
+    assert!(matches!(
+        policy.placement,
+        context::ReminderPlacement::TailUserMessage
+    ));
+    assert!(matches!(
+        policy.inject.dedup,
+        context::ReminderDedup::SkipIfUnchanged
+    ));
+    assert!(matches!(policy.compact, context::CompactBehavior::Rebuild));
+}
+
+#[test]
+fn background_task_source_build_takes_terminal_items_once_and_renders() {
+    let supervisor =
+        Arc::new(crate::application::background_task::supervisor::BackgroundTaskSupervisor::new());
+    let source = BackgroundTaskReminderSource::new(supervisor.clone());
+
+    // 无终态任务：build 为 None（本轮无内容不入队）。
+    assert!(source.build().is_none());
+
+    // 推进一个终态：build 携带完成条目（take 语义）。
+    let task_id = supervisor.register(background_task_identity(), "command=cargo test");
+    supervisor.record_output(&task_id, b"ok 3 passed\n");
+    supervisor
+        .finish(
+            &task_id,
+            crate::domain::background_task::BackgroundTaskTerminalKind::Success,
+            None,
+        )
+        .unwrap();
+    let snapshot = source.build().expect("终态后应有快照");
+    let decoded: context::InvocationReminderData =
+        serde_json::from_str(&snapshot.data).expect("快照为 InvocationReminderData JSON");
+    match decoded {
+        context::InvocationReminderData::BackgroundTaskCompleted { items } => {
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].tool_name, "Bash");
+            assert!(items[0].output_tail.contains("ok 3 passed"));
+        }
+        other => panic!("应为 BackgroundTaskCompleted，实际 {other:?}"),
+    }
+
+    // take 语义：再 build 为空。
+    assert!(source.build().is_none());
+
+    // render 委托 context 双语渲染。
+    let rendered = source.render(&snapshot, "zh");
+    assert!(rendered.contains("后台任务已完成"));
+}
+
+fn background_task_identity() -> context::ToolCallIdentityData {
+    context::ToolCallIdentityData {
+        session_id: context::SessionId::new("session-1"),
+        run_id: sdk::RunId::new("run-1"),
+        step_id: sdk::RunStepId::new("step-1"),
+        runtime_call_id: "runtime-call-1".to_string(),
+        provider_call_id: None,
+        tool_name: "Bash".to_string(),
+        call_index: 0,
+        agent: false,
+    }
+}

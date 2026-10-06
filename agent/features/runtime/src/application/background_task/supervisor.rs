@@ -22,6 +22,8 @@ struct SupervisedBackgroundTask {
     record: BackgroundTaskRecord,
     output: OutputRingBuffer,
     terminal_output: Option<String>,
+    /// 完成事实是否已进入通知通道（take_unnotified 语义）。
+    notified: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -63,6 +65,7 @@ impl BackgroundTaskSupervisor {
             record: BackgroundTaskRecord::dispatch(identity, invocation_summary),
             output: OutputRingBuffer::new(BACKGROUND_TASK_OUTPUT_CAPACITY_BYTES),
             terminal_output: None,
+            notified: false,
         };
         let task_id = task.record.task_id.clone();
         self.tasks
@@ -189,6 +192,71 @@ impl BackgroundTaskSupervisor {
         let advanced = task.record.clone().advance(next)?;
         task.record = advanced.record;
         Ok(())
+    }
+
+    /// 取走「终态且未通知」的任务完成条目（take 语义，#252 通知链路）。
+    ///
+    /// - 每条完成事实只通知一次：注入确认前由 reminder 队列持有，
+    ///   取走即视为已进入通知通道；注入前 Run 被取消的极端窗口由
+    ///   background_tasks 查询工具兜底（设计 §12 风险表）。
+    /// - `Invalidated` 是生命周期失效（resume / terminate 场景走失效
+    ///   投影），不产生 LLM 通知。
+    pub(crate) fn take_unnotified_terminal_items(
+        &self,
+    ) -> Vec<context::BackgroundTaskReminderItemData> {
+        let mut tasks = self.tasks.lock().expect("后台任务表锁中毒");
+        let mut items = Vec::new();
+        for task in tasks.values_mut() {
+            if task.notified {
+                continue;
+            }
+            let Some(kind) = task.record.terminal_kind() else {
+                continue;
+            };
+            let Some(status) = terminal_completion_status(&kind) else {
+                task.notified = true;
+                continue;
+            };
+            let (output_tail, _) = task.output.read_tail_text(
+                crate::application::constants::BACKGROUND_TASK_NOTIFICATION_TAIL_BYTES,
+            );
+            let output_tail = if output_tail.is_empty() {
+                task.terminal_output.clone().unwrap_or_default()
+            } else {
+                output_tail
+            };
+            task.notified = true;
+            items.push(context::BackgroundTaskReminderItemData {
+                task_id: task.record.task_id.as_str().to_string(),
+                tool_name: task.record.identity.tool_name.clone(),
+                status,
+                output_tail,
+            });
+        }
+        // 稳定顺序：按 task_id（UUIDv7 单调）排序，注入内容可复现。
+        items.sort_by(|left, right| left.task_id.cmp(&right.task_id));
+        items
+    }
+}
+
+/// 任务终态 → reminder 通知状态映射；`Invalidated` 返回 None（不通知）。
+fn terminal_completion_status(
+    kind: &BackgroundTaskTerminalKind,
+) -> Option<context::BackgroundTaskCompletionStatus> {
+    match kind {
+        BackgroundTaskTerminalKind::Success => {
+            Some(context::BackgroundTaskCompletionStatus::Succeeded)
+        }
+        BackgroundTaskTerminalKind::Failure => {
+            Some(context::BackgroundTaskCompletionStatus::Failed)
+        }
+        BackgroundTaskTerminalKind::TimedOut => {
+            Some(context::BackgroundTaskCompletionStatus::TimedOut)
+        }
+        BackgroundTaskTerminalKind::Stopped => {
+            Some(context::BackgroundTaskCompletionStatus::Cancelled)
+        }
+        BackgroundTaskTerminalKind::Invalidated { .. } => None,
     }
 }
 

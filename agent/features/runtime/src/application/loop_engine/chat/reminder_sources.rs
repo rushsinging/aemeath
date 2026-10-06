@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use crate::application::background_task::supervisor::BackgroundTaskSupervisor;
 use context::{
     CompactBehavior, InjectBehavior, ReminderDedup, ReminderKind, ReminderPlacement,
     ReminderPolicy, ReminderPriority, ReminderSnapshot, ReminderSource,
@@ -178,6 +179,65 @@ impl ReminderSource for RunStartFactReminderSource {
 #[cfg(test)]
 #[path = "reminder_sources_tests.rs"]
 mod tests;
+
+/// 后台任务完成通知 source（#252 PR2）：`OnEvent("background_task")` 触发。
+///
+/// `build` 是 take 语义（取走监督器内未通知终态条目）——每次完成事件
+/// 由管线 `handle_event` 调一次 build 入事件队列；`SkipIfUnchanged`
+/// 兜底同批重复。数据获取在 Runtime（监督器），渲染委托 Context。
+pub(crate) struct BackgroundTaskReminderSource {
+    supervisor: Arc<BackgroundTaskSupervisor>,
+}
+
+impl BackgroundTaskReminderSource {
+    pub(crate) fn new(supervisor: Arc<BackgroundTaskSupervisor>) -> Self {
+        Self { supervisor }
+    }
+}
+
+impl ReminderSource for BackgroundTaskReminderSource {
+    fn kind(&self) -> ReminderKind {
+        ReminderKind::background_task()
+    }
+
+    fn policy(&self) -> ReminderPolicy {
+        ReminderPolicy {
+            refresh: context::RefreshTrigger::OnEvent(
+                context::ReminderEventSource::background_task(),
+            ),
+            placement: ReminderPlacement::TailUserMessage,
+            inject: InjectBehavior {
+                dedup: ReminderDedup::SkipIfUnchanged,
+                priority: ReminderPriority::event(),
+            },
+            compact: CompactBehavior::Rebuild,
+        }
+    }
+
+    fn build(&self) -> Option<ReminderSnapshot> {
+        let items = self.supervisor.take_unnotified_terminal_items();
+        if items.is_empty() {
+            return None;
+        }
+        let data = context::InvocationReminderData::background_task_completed(items);
+        Some(ReminderSnapshot {
+            data: serde_json::to_string(&data).expect("reminder 快照序列化不可失败"),
+        })
+    }
+
+    fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String {
+        match serde_json::from_str::<context::InvocationReminderData>(&snapshot.data) {
+            Ok(data) => context::render_invocation_reminder_body(&data, language),
+            Err(error) => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "reminder 快照反序列化失败 kind=background_task error={error}"
+                );
+                String::new()
+            }
+        }
+    }
+}
 
 /// per-message 记忆主动召回 source（#1834）：`refresh` 预物化（async）+
 /// `build` 读缓存（sync）。
