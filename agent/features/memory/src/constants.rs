@@ -30,9 +30,10 @@ pub(crate) const ACTIVE_MEMBER: &str = "active";
 
 pub(crate) const SCHEMA_VERSION: u32 = 1;
 
-/// 重排 instructions（与 eval/system-one harness rank 场景同文案，保证基线可比）。
+/// 重排 instructions（与 eval/system-one harness rank 场景同文案，保证基线可比；
+/// Qwen3-Reranker instruct 定向口径——该引擎对任务定向 instruct 敏感，实测 R@1 +5pp）。
 pub(crate) const RERANK_INSTRUCTIONS: &str =
-    "Which option is the most relevant answer to the question?";
+    "Given a user message from a coding-agent session, retrieve the most relevant memory.";
 
 /// 重排 criteria 单条内容字符上限（kev 评分头按 prose 训练，截断防爆 token）。
 pub(crate) const RERANK_CRITERION_MAX_CHARS: usize = 500;

@@ -17,6 +17,7 @@
 | clm | clm-serve (CPU) + llama-server qwen3:8b Q4_K_M `--embedding --pooling last` | 8700 / 8090 | `contrastive-lm --no-deps` 安装绕开 vllm；embedding 后端必须 last-token pooling |
 | jevos | 官方 macOS arm64 二进制（OpenVINO INT8） | 8017 | 零 Python，约 1-2GB 内存 |
 | kev | `uv sync --extra serve`，MLX bf16 on MPS，kev-0.8b | 8009 | Python 3.13（uv 自动管理） |
+| qwen3-reranker | `harness/qwen3_reranker_serve.py`（独立 venv，mlx-lm + fastapi），Jev 兼容包装 | 8210 | memory_rerank 场景现役引擎；pointwise yes/no 服务端展开，flip 天然为 0 |
 | rsi-jev | `scripts/serve.py`，torch MPS fp32，v3.0 2B | 8200 | transformers 必须 5.17.x；fla 内核 CUDA-only，MPS/CPU 走参考实现 |
 | laya | `laya[serve]` pip 包，三 checkpoint preload | 8000 | `laya-serve` 不支持 `--port` 参数（固定 8000）；中文走 multilingual |
 | semif | CLI `semif-score --backend mlx --mlx-bits 4`，Qwen3.5-4B | —（CLI） | 仅 choice 形态，无 HTTP |

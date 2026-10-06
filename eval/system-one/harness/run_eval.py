@@ -40,6 +40,9 @@ ENGINES = {
               "rank": None, "model": "jev-latest"},
     "kev": {"kind": "http", "systemone": "http://127.0.0.1:8009/v1/systemone",
             "rank": None, "model": "kev-latest"},
+    "qwen3-reranker": {"kind": "http",
+                       "systemone": "http://127.0.0.1:8210/v1/systemone",
+                       "rank": None, "model": "qwen3-reranker-0.6b-mxfp8"},
     "rsi-jev": {"kind": "http", "systemone": "http://127.0.0.1:8200/v1/systemone",
                 "rank": None, "model": "jev-latest"},
     "laya": {"kind": "http", "systemone": "http://127.0.0.1:8000/v1/systemone",
@@ -123,7 +126,12 @@ def run_rank_case(engine: str, cfg: dict, case: dict,
         # choice 降级：候选原文作 criteria（key 为序号，避免文案注入）
         options = {str(i): text for i, text in enumerate(answers)}
         out = http_choice(cfg, case["context"] + "\n" + case["question"],
-                          "Which option is the most relevant answer to the question?",
+                          ("Which option is the most relevant answer to the question?"
+                           if __import__("os").environ.get("EVAL_GENERIC_INSTRUCT") else
+                           ("Given a user message from a coding-agent session, "
+                            "retrieve the most relevant memory."
+                            if "memory_rerank" in case.get("scenario", "") else
+                            "Which option is the most relevant answer to the question?")),
                           options)
         probs = {}
         for key, p in (out.get("probabilities") or {}).items():
