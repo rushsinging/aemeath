@@ -21,6 +21,7 @@
 | D11 | Wakeup Run 触发事实走 reminder 落盘（TailUserMessage 显式落盘机制，与 #1848 同构）+ SDK 事件渲染 TUI 卡片；不合成用户 turn |
 | D12 | `logs` 查询含增量游标 + 非消耗性读取，运行中与完成后皆可查 |
 | D13 | wakeup 到来直接启动 Wakeup Run（用户可 Esc 标准取消），竞争仲裁暂不实现 |
+| D14 | 自动转后台仅对 Main Run 生效；Sub Run（含子代理内部 tool call）一律禁用——子代理收口后占位无处回注、通知无法语义路由、多层嵌套 active Run 判定错乱；子代理整体已作为父侧后台任务的执行体 |
 
 ## 1. 目标 / 非目标
 
@@ -204,13 +205,21 @@ reminder 不携带完整输出（管线预算纪律）。
   - 消息流系统样式卡片（可折叠）：「⏙ 后台任务完成：task-xxx『cargo test』已完成，已唤醒 agent 继续」——用户清楚看到 agent 为何自己动起来；
   - 后台任务面板：活动任务状态 / 输出预览（复用 Bash 输出渲染），管理入口。
 
-### 8.1 自动转后台覆盖面
+### 8.1 自动转后台覆盖面（D14）
 
-普通工具与 Agent（sub-agent 派发）共用同一 `ToolExecutionPort` 执行路径，**天然全部
-自动转后台**（Agent timeout 3600s，是最需要后台化的场景）；交互类（AskUser）的 tool
-future 以 `Suspended` 即时返回（等待由 Runtime interaction waiter 承担），不会触发
-阈值，天然安全。流式路径（#1494 边流边执行）的超阈值转后台在收尾 PR 接入
-（此前保持 detach-cancel 现状，零退化）。
+**Main Run** 内的普通工具与 Agent（sub-agent 派发）共用同一 `ToolExecutionPort`
+执行路径，天然全部自动转后台（Agent timeout 3600s，是最需要后台化的场景）；
+交互类（AskUser）的 tool future 以 `Suspended` 即时返回（等待由 Runtime
+interaction waiter 承担），不会触发阈值，天然安全。
+
+**Sub Run 一律禁用自动转后台**：子代理收口后，其内部转后台 tool call 的占位
+无处回注、完成通知无法语义路由（该 `tool_use_id` 不在任何存活 Run 的 canonical
+中）、多层 agent 嵌套时 active Run 判定错乱；且子代理整体已作为父侧后台任务的
+执行体（父转后台后子代理继续跑），内部保持同步语义不损失并发性。派生装配点
+显式 `background_threshold: None`。
+
+流式路径（#1494 边流边执行）的超阈值转后台在收尾 PR 接入（此前保持
+detach-cancel 现状，零退化）。
 
 ## 9. 与 Workflow 设计的对接修订
 
