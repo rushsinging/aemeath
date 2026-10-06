@@ -5,8 +5,6 @@ pub enum HeaderPolicy {
     Standard,
     /// 紧凑 header：单行，无 marker（如 TaskUpdate）
     Compact,
-    /// 自定义图标：用指定 emoji（如 📋 EnterPlanMode）
-    CustomIcon(&'static str),
 }
 
 /// Details 渲染策略

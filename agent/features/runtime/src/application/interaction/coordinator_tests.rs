@@ -301,21 +301,11 @@ fn shared_validate_tool_approval_rejects_variant_mismatch() {
         args_summary: "...".into(),
         risk_level: sdk::RiskLevel::Low,
     });
-    let reply = InteractionReply::PlanApproval(sdk::ApprovalDecision::Approve);
+    let reply = InteractionReply::UserQuestions(vec![]);
     assert_eq!(
         validate_reply(&body, &reply).unwrap_err(),
         InteractionReplyError::VariantMismatch
     );
-}
-
-#[test]
-fn shared_validate_plan_approval_accepts_matching() {
-    let body = sdk::InteractionRequestBody::PlanApproval(sdk::PlanApprovalPrompt {
-        plan_title: "Plan".into(),
-        steps: vec![],
-    });
-    let reply = InteractionReply::PlanApproval(sdk::ApprovalDecision::Approve);
-    assert!(validate_reply(&body, &reply).is_ok());
 }
 
 #[test]

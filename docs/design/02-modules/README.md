@@ -19,7 +19,7 @@
 | [provider/](provider/README.md) | Provider ACL、统一调用流、模型能力、reasoning 映射与不可变 Invocation Scope |
 | [workflow/](workflow/README.md) | ReasoningNode 状态机、effort 调节、ReasoningPort OHS 与 clamp 不变量 |
 | [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、Config-owned OHS / project participant、Provider Catalog、Connect 向导、首次聊天初始化与 CompatibilityAdapter ACL |
-| [tui/](tui/README.md) | 八层 TEA 管线、六 Context 投影、Intent / Change / Effect、SDK ACL、ViewAssembler / ViewModel / Render 与四类 Interaction 资源隔离 |
+| [tui/](tui/README.md) | 八层 TEA 管线、六 Context 投影、Intent / Change / Effect、SDK ACL、ViewAssembler / ViewModel / Render 与三类 Interaction 资源隔离 |
 | [storage/](storage/README.md) | 原子读写、backup / quarantine、路径安全及数据所有权边界 |
 | [logging/](logging/README.md) | 14 字段诊断 schema、TargetCatalog、scope-local context、sink / rotation 与 Audit 分离 |
 | [application-version-control/](application-version-control/README.md) | typed channel、检查缓存、Release ACL、VerifiedUpdatePlan 与安装事务 |

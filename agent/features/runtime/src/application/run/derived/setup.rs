@@ -210,8 +210,6 @@ impl AgentRunner for CliAgentRunner {
         let request_progress = request.progress;
         // #1385: request catalog/memory are NOT used for child;
         // all catalog/memory access comes from derived.instance.context().
-        let plan_mode = request.plan_mode;
-        let plan_mode_active = plan_mode.is_plan_mode().unwrap_or(false);
         let guidance = request.guidance;
         let timeout = request.timeout;
         let agent_name = request.agent_name;
@@ -425,7 +423,6 @@ impl AgentRunner for CliAgentRunner {
                     Arc::new(tools::MutexReadSet(Arc::new(std::sync::Mutex::new(
                         std::collections::HashSet::new(),
                     )))),
-                    plan_mode,
                     derived.instance.context().memory(),
                     guidance,
                 )
@@ -651,7 +648,6 @@ impl AgentRunner for CliAgentRunner {
                 stop_hook,
                 tools,
                 stuck,
-                plan_mode_active,
                 finalizer,
             )
             .await;

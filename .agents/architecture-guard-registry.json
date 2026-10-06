@@ -1867,7 +1867,6 @@
         "CommittedTaskChange",
         "ExecutionScope",
         "FixedGuidance",
-        "FixedPlanMode",
         "Guidance",
         "ImageData",
         "McpTool",

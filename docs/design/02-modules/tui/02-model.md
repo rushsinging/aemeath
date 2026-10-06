@@ -43,7 +43,7 @@ struct TuiModel {
 **设计决策**：
 
 1. Runtime 事件按投影来源进入不同 Context：Run 生命周期字段内聚在 `RunRuntimeState`，Config 投影属于 `ConfigProjection`，Workspace 投影属于 `WorkspaceProjection`，Task 投影属于 `SessionModel`。
-2. Interaction **不拆出独立 Context**——同一时刻至多一个 Interaction 块，交互状态内嵌在 OutputTimeline 中；四种 body 共享 request identity 与生命周期，但各自保留 typed draft / reply。
+2. Interaction **不拆出独立 Context**——同一时刻至多一个 Interaction 块，交互状态内嵌在 OutputTimeline 中；三种 body 共享 request identity 与生命周期，但各自保留 typed draft / reply。
 3. 六个 Context 之间 **无直接引用**——跨 Context 通信通过 Coordinator 在 `update()` 中拆分 Intent 并分别 apply。
 4. 六个 Context 的核心字段全部私有；ViewAssembler / key translator 只能通过不可变 accessor 或只读 projection view 读取。只有 root reducer 可持有 `&mut TuiModel` 并调用 crate-private mutation facade，架构守卫禁止其他模块调用 `apply` / `reduce_*`。
 
@@ -286,7 +286,7 @@ ConversationModel 维护两套**互补投影**：
 | `SystemMessage` | 系统消息 |
 | `HookNotice` | Hook 通知 |
 | `Error` | 错误消息 |
-| `Interaction` | UserQuestions / ToolApproval / PlanApproval / HardPause 交互块（同一时刻至多一个） |
+| `Interaction` | UserQuestions / ToolApproval / HardPause 交互块（同一时刻至多一个） |
 - Agent 子 Run activity 不创建独立 block 或 timeline variant；它仅作为 owning Agent ToolCall 的 bounded `activities` preview，由 `RecordAgentActivities` / `AgentActivitiesRecorded` 更新并内联渲染，避免双显示
 
 **一致性保证**：
@@ -437,7 +437,7 @@ Compact operation progress 不存入 `RunRuntimeState`，而是由 Activity fact
 
 #### 3.6.6 InteractionState
 
-Interaction 块**内嵌在 OutputTimeline** 中（`OutputTimelineItem::Interaction`），同一时刻至多一个。块持有 Runtime run/request identity 的 TUI-owned 无损投影、四种 TUI-owned body、typed draft 与本地 phase，**NEVER** 持有 sender、pending waiter、SDK DTO 或 AgentClient handle。
+Interaction 块**内嵌在 OutputTimeline** 中（`OutputTimelineItem::Interaction`），同一时刻至多一个。块持有 Runtime run/request identity 的 TUI-owned 无损投影、三种 TUI-owned body、typed draft 与本地 phase，**NEVER** 持有 sender、pending waiter、SDK DTO 或 AgentClient handle。
 
 ```rust
 struct InteractionState {
@@ -452,7 +452,6 @@ struct InteractionState {
 enum UiInteractionDraft {
     UserQuestions { slots: Vec<UserAnswerSlot>, current: usize },
     ToolApproval { decision: Option<UiApprovalDecision> },
-    PlanApproval { decision: Option<UiApprovalDecision> },
     HardPause { decision: Option<UiHardPauseDecision> },
 }
 
@@ -476,16 +475,16 @@ Collecting ──draft 完整──→ Confirming ──ConfirmInteraction──
     └────────────CancelInteraction────────→ CancelPending ──InteractionCancelled（CancelAccepted）──→ Cancelled
 
 ReplyPending ──InvalidReply（UserQuestions，保留 draft）──────────────────────────→ Collecting
-ReplyPending ──InvalidReply（ToolApproval / PlanApproval / HardPause，保留 draft）───→ Confirming
+ReplyPending ──InvalidReply（ToolApproval / HardPause，保留 draft）───→ Confirming
 CancelPending ──CancelRejected（UserQuestions，保留 draft）───────────────────────→ Collecting
-CancelPending ──CancelRejected（ToolApproval / PlanApproval / HardPause，保留 draft）→ Confirming
+CancelPending ──CancelRejected（ToolApproval / HardPause，保留 draft）→ Confirming
 ```
 
 - UserQuestions 的 Collecting 维护题目索引、选项与自由文本；draft 完整后生成 `UserAnswers`。
-- ToolApproval / PlanApproval 的 Collecting 只允许 Approve / Deny，并分别生成对应 reply variant。
+- ToolApproval 的 Collecting 只允许 Approve / Deny，并生成对应 reply variant。
 - HardPause 展示 stuck diagnostic；Continue 生成 `HardPause(Continue)`，Cancel 走 typed cancel command，**NEVER** 伪造空 reply。
-- `InvalidReply` 是 `reply_interaction` 的校验失败结果：**NEVER** 消费 pending request、**NEVER** 进入终态。它把 `ReplyPending` 按原 body variant 退回 `Collecting`（UserQuestions）或 `Confirming`（ToolApproval / PlanApproval / HardPause），`draft` 原样保留，用户可修正后对同一 `request_id` 重试。
-- `CancelRejected` 是 `cancel_interaction` 的对称校验失败结果（例如目标 request 已被并发命令抢先终态化但尚未同步到 TUI）：**NEVER** 消费原 pending request、**NEVER** 进入终态。它把 `CancelPending` 按原 body variant 退回 `Collecting`（UserQuestions）或 `Confirming`（ToolApproval / PlanApproval / HardPause），`draft` 原样保留；用户可继续原 draft 或重新发起取消。
+- `InvalidReply` 是 `reply_interaction` 的校验失败结果：**NEVER** 消费 pending request、**NEVER** 进入终态。它把 `ReplyPending` 按原 body variant 退回 `Collecting`（UserQuestions）或 `Confirming`（ToolApproval / HardPause），`draft` 原样保留，用户可修正后对同一 `request_id` 重试。
+- `CancelRejected` 是 `cancel_interaction` 的对称校验失败结果（例如目标 request 已被并发命令抢先终态化但尚未同步到 TUI）：**NEVER** 消费原 pending request、**NEVER** 进入终态。它把 `CancelPending` 按原 body variant 退回 `Collecting`（UserQuestions）或 `Confirming`（ToolApproval / HardPause），`draft` 原样保留；用户可继续原 draft 或重新发起取消。
 - 完整 `InteractionCommandOutcome` 类型化投影表（`ReplySent` / `CancelAccepted` / `InvalidReply` / `CancelRejected` / `NotFound` / `AlreadyCompleted` / `RunCancelling` / `IrrecoverableError`）见 [03-event-flow-and-acl.md §4.6](03-event-flow-and-acl.md#46-interaction-command-outcome-类型化投影)。
 
 | 方法 | 说明 |
@@ -961,7 +960,7 @@ Model 中的状态均不是领域权威：
 | RunStep 展示状态 | Runtime `RunStepStatus` | SDK 事件形成的展示事实 |
 | ToolCallStatus | Runtime ToolCallStatus | SDK 事件形成的展示事实 |
 | RunActivityView | 无独立权威态 | 从 Main snapshot、detail 与瞬时活动状态纯派生 |
-| InteractionPhase | Runtime request identity + TUI 用户交互 | 四类 body 的本地交互状态；AgentClient command result 不代表 Run 转换 |
+| InteractionPhase | Runtime request identity + TUI 用户交互 | 三类 body 的本地交互状态；AgentClient command result 不代表 Run 转换 |
 | SessionSaveStatus | Runtime StorageService | 从 SDK 事件形成的展示事实 |
 | WorkspaceProjection | `WorkingDirectoryChanged` 的 core snapshot + TUI Effect metadata | ACL 转换后的展示事实；metadata 仅在 root/revision 匹配时回填 |
 
@@ -998,7 +997,7 @@ Model 中的状态均不是领域权威：
 
 - `RunActivityState` 的 Main identity、Runtime 双计时单调插值基线、动画 frame 与 verb；
 - InputMode；
-- InteractionPhase 与四类 typed draft；
+- InteractionPhase 与三类 typed draft；
 - OutputTimeline 块顺序；
 - DiagnosticNotice 列表；
 - SessionResumeCandidate 列表。
@@ -1051,7 +1050,7 @@ Model 层 `MUST NOT` import 以下 crate：
 1. Model architecture test **MUST** 拦截 ratatui、tokio、process、channel、AgentClient、SDK DTO 与 Project 类型的越界 import。
 2. Model encapsulation guard **MUST** 证明六 Context 核心字段私有，`apply` / `reduce_*` 的生产调用点只有 root reducer；ViewAssembler 只取得不可变 accessor / projection view。
 3. reducer 单元测试 **MUST** 逐 Intent 断言 Model 与 Change，不启动异步 runtime。
-4. Interaction 场景测试 **MUST** 穷尽 UserQuestions / ToolApproval / PlanApproval / HardPause，并分层覆盖 Runtime request-id DTO → Intent、Intent → Change、Change → AgentClient Effect、Effect result → Intent；sender / pending waiter 不得出现在 TUI fixture；`InteractionReplySent` / `InteractionCancelled` **MUST NOT** 改 Run 状态，只有 `RunResumed` / `RunCancelling` / `RunCancelled` 推进对应投影。另有场景证明两个并发 Tool suspension 被 Runtime 串行发布，第二个 request 不覆盖第一个。
+4. Interaction 场景测试 **MUST** 穷尽 UserQuestions / ToolApproval / HardPause，并分层覆盖 Runtime request-id DTO → Intent、Intent → Change、Change → AgentClient Effect、Effect result → Intent；sender / pending waiter 不得出现在 TUI fixture；`InteractionReplySent` / `InteractionCancelled` **MUST NOT** 改 Run 状态，只有 `RunResumed` / `RunCancelling` / `RunCancelled` 推进对应投影。另有场景证明两个并发 Tool suspension 被 Runtime 串行发布，第二个 request 不覆盖第一个。
 5. structured Conversation / timeline invariant test **MUST** 覆盖 append、tool result 乱序、queued、progress、complete 与 resume，并只校验重叠稳定 ID、相对顺序、关联与终态；**NEVER** 伪造“二者可全量互相重建”的测试。
 6. Workspace metadata test **MUST** 证明陈旧 `(root, revision)` 结果不会覆盖新 snapshot。
 

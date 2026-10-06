@@ -370,7 +370,6 @@ async fn default_await_user_input_returns_error_not_delegating_to_drain() {
         &mut ports.stop_hook,
         &mut ports.tools,
         &mut ports.stuck,
-        &ports.plan_approval,
     );
 
     loop_context.bind_test_activity_context();

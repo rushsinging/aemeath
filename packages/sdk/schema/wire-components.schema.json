@@ -2022,7 +2022,6 @@
       "enum": [
         "tool_approval",
         "user_question",
-        "plan_approval",
         "stuck_diagnostic"
       ],
       "type": "string"
@@ -2059,18 +2058,6 @@
           },
           "required": [
             "ToolApproval"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "PlanApproval": {
-              "$ref": "#/$defs/ApprovalDecision"
-            }
-          },
-          "required": [
-            "PlanApproval"
           ],
           "type": "object"
         }
@@ -2153,18 +2140,6 @@
           },
           "required": [
             "ToolApproval"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "PlanApproval": {
-              "$ref": "#/$defs/PlanApprovalPrompt"
-            }
-          },
-          "required": [
-            "PlanApproval"
           ],
           "type": "object"
         },
@@ -2390,24 +2365,6 @@
         "allow_all"
       ],
       "type": "string"
-    },
-    "PlanApprovalPrompt": {
-      "properties": {
-        "plan_title": {
-          "type": "string"
-        },
-        "steps": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "plan_title",
-        "steps"
-      ],
-      "type": "object"
     },
     "ProjectContext": {
       "description": "项目上下文快照（Copy 语义，零开销）。",

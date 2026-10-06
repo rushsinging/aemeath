@@ -246,7 +246,6 @@ pub enum CompactWorkView {
 pub enum InteractionKindView {
     ToolApproval,
     UserQuestion,
-    PlanApproval,
     StuckDiagnostic,
 }
 

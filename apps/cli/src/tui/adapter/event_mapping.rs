@@ -830,7 +830,6 @@ fn activity_detail(value: sdk::ActivityDetailView) -> TuiActivityDetail {
             kind: match kind {
                 sdk::InteractionKindView::ToolApproval => TuiInteractionKind::ToolApproval,
                 sdk::InteractionKindView::UserQuestion => TuiInteractionKind::UserQuestion,
-                sdk::InteractionKindView::PlanApproval => TuiInteractionKind::PlanApproval,
                 sdk::InteractionKindView::StuckDiagnostic => TuiInteractionKind::StuckDiagnostic,
             },
         },
@@ -955,12 +954,6 @@ fn interaction_request(value: sdk::InteractionRequest) -> TuiInteractionRequest 
                         sdk::RiskLevel::Medium => TuiRiskLevel::Medium,
                         sdk::RiskLevel::High => TuiRiskLevel::High,
                     },
-                })
-            }
-            sdk::InteractionRequestBody::PlanApproval(prompt) => {
-                TuiInteractionBody::PlanApproval(TuiPlanApprovalPrompt {
-                    plan_title: prompt.plan_title,
-                    steps: prompt.steps,
                 })
             }
             sdk::InteractionRequestBody::HardPause(diagnostic) => {

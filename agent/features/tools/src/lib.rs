@@ -17,11 +17,10 @@ pub use domain::types;
 
 // Published language: shared-kernel tool types, DTOs, and ports.
 pub use domain::{
-    AuthorizationContext, CommittedTaskChange, ExecutionScope, FixedGuidance, FixedPlanMode,
-    Guidance, ImageData, MemoryPortSource, MutexReadSet, RegistryScopeName, TaskChangeFact, Tool,
-    ToolCapabilities, ToolCapability, ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot,
-    ToolErrorKind, ToolName, ToolOutcome, ToolProfile, ToolProfileName, ToolResult,
-    WorkspaceReadAccess,
+    AuthorizationContext, CommittedTaskChange, ExecutionScope, FixedGuidance, Guidance, ImageData,
+    MemoryPortSource, MutexReadSet, RegistryScopeName, TaskChangeFact, Tool, ToolCapabilities,
+    ToolCapability, ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot, ToolErrorKind,
+    ToolName, ToolOutcome, ToolProfile, ToolProfileName, ToolResult, WorkspaceReadAccess,
 };
 
 // Role-policy compilation: config strings → narrowed ToolProfile.

@@ -114,7 +114,6 @@ fn capability_parse_and_display_are_symmetric() {
         "TaskRead",
         "TaskWrite",
         "WorkspaceControl",
-        "Plan",
         "All",
     ] {
         let capability = ToolCapability::parse(name).unwrap_or_else(|| {

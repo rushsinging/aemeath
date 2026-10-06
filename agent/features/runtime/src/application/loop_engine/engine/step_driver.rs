@@ -320,14 +320,8 @@ pub(super) async fn execute_step_with_scope(
     }
 
     match model_step {
-        ModelStep::Complete { text } => {
+        ModelStep::Complete { .. } => {
             // Text-only completion is handled by the static reasoning level.
-
-            // #1248 TaskData 5: Plan approval before proceeding when in plan mode.
-            if port.needs_plan_approval() && !text.trim().is_empty() {
-                handle_plan_approval(run, execution, port, &step_id, &text).await?;
-                return Ok(());
-            }
 
             // #1248 TaskData 6: Evaluate Stop hook BEFORE text stall check.
             // A blocking stop hook with repeated output should continue

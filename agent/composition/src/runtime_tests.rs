@@ -87,7 +87,6 @@ fn tool_context(
         Arc::new(tools::MutexReadSet(Arc::new(std::sync::Mutex::new(
             std::collections::HashSet::new(),
         )))),
-        Arc::new(tools::FixedPlanMode(None)),
         Arc::new(memory::api::NoOpMemory),
         Arc::new(tools::FixedGuidance {
             language: "en".to_string(),

@@ -766,9 +766,3 @@ pub trait StuckHandlingPort: Send {
         decision: &StuckDecision,
     ) -> Result<(), LoopEngineError>;
 }
-
-pub trait PlanApprovalPort: Send + Sync {
-    fn needs_plan_approval(&self) -> bool {
-        false
-    }
-}

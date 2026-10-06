@@ -10,10 +10,10 @@ use serde_json::json;
 use crate::composition::{wire_builtin_catalog_execution, wire_skills};
 use crate::domain::memory_source::MemoryPortSource;
 use crate::domain::{
-    CancellationSignal, ExecutionScope, FixedGuidance, FixedPlanMode, MutexReadSet,
-    RegistryScopeName, SkillLoadDecision, SkillLoadMutation, SkillLoadScope, SkillLoadStateError,
-    SkillLoadStatePort, SkillQuerySnapshot, ToolExecutionContext, ToolExecutionPorts,
-    ToolInvocation, ToolName, ToolProfileName, WorkspaceReadAccess,
+    CancellationSignal, ExecutionScope, FixedGuidance, MutexReadSet, RegistryScopeName,
+    SkillLoadDecision, SkillLoadMutation, SkillLoadScope, SkillLoadStateError, SkillLoadStatePort,
+    SkillQuerySnapshot, ToolExecutionContext, ToolExecutionPorts, ToolInvocation, ToolName,
+    ToolProfileName, WorkspaceReadAccess,
 };
 
 struct NeverCancelled;
@@ -126,7 +126,6 @@ async fn main_and_sub_catalog_publish_exact_skill_schema_and_execute_body() {
                 Arc::new(NeverCancelled),
                 WorkspaceReadAccess::new(workspace.read()),
                 Arc::new(MutexReadSet(Arc::new(Mutex::new(HashSet::new())))),
-                Arc::new(FixedPlanMode(None)),
                 Arc::new(memory::api::NoOpMemory),
                 Arc::new(FixedGuidance {
                     language: "en".into(),
@@ -202,7 +201,6 @@ async fn skill_state_decision_controls_body_without_leaking_on_failure() {
                 Arc::new(NeverCancelled),
                 WorkspaceReadAccess::new(workspace.read()),
                 Arc::new(MutexReadSet(Arc::new(Mutex::new(HashSet::new())))),
-                Arc::new(FixedPlanMode(None)),
                 Arc::new(memory::api::NoOpMemory),
                 Arc::new(FixedGuidance {
                     language: "zh".into(),
@@ -263,7 +261,6 @@ async fn deleted_skill_returns_failure_without_panicking() {
             Arc::new(NeverCancelled),
             WorkspaceReadAccess::new(workspace.read()),
             Arc::new(MutexReadSet(Arc::new(Mutex::new(HashSet::new())))),
-            Arc::new(FixedPlanMode(None)),
             Arc::new(memory::api::NoOpMemory),
             Arc::new(FixedGuidance {
                 language: "en".into(),

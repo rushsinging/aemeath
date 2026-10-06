@@ -22,7 +22,7 @@
 | **Main Agent** | 发起顶层 Run（**Main Run**）的主体，由用户输入直接触发，拥有完整交互（可 ask_user）与工具能力，是 SubAgent 的父级。 |
 | **SubAgent** | 由 Main Agent（或另一 SubAgent）经工具派生的子执行主体，其执行是一个 **Sub Run**；共用同一状态机与 Loop，差异由 `ExecutionPolicy` 表达（受限交互、独立轮次 / timeout、结果回传父级）。 |
 | **ExecutionPolicy** | 表达 Main Agent / SubAgent 差异的策略：输入源、交互能力、轮次上限、timeout、结果出口。 |
-| **Interaction** | Run 执行中断、等待外部（人）决策、再恢复的**用例族**（非 BC）：ask_user / 权限审批 / plan mode / pause-resume。对应状态 `AwaitingUser` / `AwaitingToolApproval`。 |
+| **Interaction** | Run 执行中断、等待外部（人）决策、再恢复的**用例族**（非 BC）：ask_user / 权限审批 / pause-resume。对应状态 `AwaitingUser` / `AwaitingToolApproval`。 |
 | **Activity** | Runtime 为观察执行过程而维护的**应用层观测实体集合**；每个 Activity 有稳定身份、父子关系、类型、状态、细节与计时，但不拥有 Run 的执行决策、不构成新的聚合根，也不替代 Run 状态机。 |
 | **Activity Observation** | 一次由 `ActivityCoordinator` 创建或变更的完整 typed 事实，描述一个 Activity 在某个 revision 的状态与 detail；是 Runtime → SDK 的发布输入，不是领域命令。 |
 | **Activity Snapshot** | 某个 Run 当前 Activity 事实集合及 revision 的一致性快照；用于 TUI 初始化、丢帧修复与重连，不是持久化的 Run checkpoint。 |
