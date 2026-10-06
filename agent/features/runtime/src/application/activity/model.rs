@@ -49,12 +49,13 @@ impl RunPurpose {
 }
 
 impl From<crate::domain::agent_run::RunIntent> for RunPurpose {
-    /// 只有手动反思 Run 投影 Reflection；会话与手动压缩保持 Main（压缩现状不变）。
+    /// 只有手动反思 Run 投影 Reflection；会话、手动压缩与后台任务唤醒保持 Main。
     fn from(intent: crate::domain::agent_run::RunIntent) -> Self {
         match intent {
             crate::domain::agent_run::RunIntent::ManualReflection => Self::Reflection,
             crate::domain::agent_run::RunIntent::Conversation
-            | crate::domain::agent_run::RunIntent::ManualCompaction => Self::Main,
+            | crate::domain::agent_run::RunIntent::ManualCompaction
+            | crate::domain::agent_run::RunIntent::BackgroundTaskWakeup => Self::Main,
         }
     }
 }
