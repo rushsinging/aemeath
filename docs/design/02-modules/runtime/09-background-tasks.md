@@ -158,11 +158,12 @@ reminder 不携带完整输出（管线预算纪律）。
 
 ### 4.4 无 active Run：Wakeup Run（D11 / D13）
 
-- `RunIntent` 新增变体 `BackgroundTaskWakeup { task_ids: Vec<TaskId> }`。
-- `WakeupMailbox`（Runtime 内部 mpsc，session 级）：任务终态时若无 active run → send。
-- session driver idle 等待 select { 用户输入, wakeup }；收到 wakeup → 以 `BackgroundTaskWakeup` intent 启动 Main Run（直接启动，用户可 Esc 走标准取消协议）。
-- 触发事实由 `BackgroundTaskEvent` reminder 承载：TailUserMessage 类 reminder 随 step 收口**显式落盘 canonical**（envelope 标识、compact 可清理、resume 可见），与既有尾部注入机制同构；**不合成用户 turn**。Run 的 `user_input` 为最小内部触发标记（空输入可行性在通知链路 PR 实现时验证，不行则用极简标记文本）。
-- 用户侧显示走 SDK `BackgroundTask` 生命周期事件渲染卡片（见 §8），不依赖 canonical 消息样式。
+- `RunIntent` 新增变体 `BackgroundTaskWakeup`（**无 payload**——task_ids 经 reminder 承载即 D11 本义，intent 保持 `Copy`；投影 `RunPurpose::Main`，行为与 `Conversation` 同构）。
+- `WakeupMailbox`（Runtime 内部 unbounded mpsc，session 级，挂在 `SessionRuntime.background_tasks`）：任务终态时若无 active run → send；idle 等待点 `select { 用户输入, wakeup }`（D13 不仲裁，输入侧选中时信号保留给下一轮 idle）。
+- session driver idle 等待 select { 用户输入, wakeup }；收到 wakeup → 以 `BackgroundTaskWakeup` intent 启动 Main Run（直接启动，用户可 Esc 走标准取消协议），空输入（`ManualCompactionRequested` 同构先例）。
+- 触发事实由 `background_task` reminder 承载：TailUserMessage 类 reminder 随 step 收口**显式落盘 canonical**（envelope 标识、compact 可清理、resume 可见），与既有尾部注入机制同构；**不合成用户 turn**。
+- **Wakeup Run 启动时显式触发事件（PR2 实现事实）**：OnEvent source 只在 `reminder_handle_event` 时 build（take 语义），Wakeup Run 本身无用户消息与事件触发点——`run_launch` 在 `create_reminder_pipeline` 后对 wakeup Run 显式调用 `reminder_handle_event(run_id, "background_task")`，把监督器内「终态未通知」事实注入本轮。若 handle_event 时 pipeline 尚未建（竞争窗口），take 未发生、数据留在监督器，由下一个 Run 补注入（无丢失，仅延迟）。
+- 用户侧显示走 SDK `BackgroundTask` 生命周期事件渲染卡片（见 §8，PR3 交付），不依赖 canonical 消息样式。
 
 ## 5. 后台任务查询 tool
 
