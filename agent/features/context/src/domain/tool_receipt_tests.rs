@@ -107,3 +107,80 @@ fn timed_out_is_a_distinct_tool_outcome_kind() {
         ToolOutcomeKindData::CancellationUnconfirmed
     );
 }
+
+#[test]
+fn running_receipt_advances_to_backgrounded_then_terminal() {
+    let running = ToolCallReceiptData::pending(identity(), "command=cargo test")
+        .advance(ToolReceiptMutationData::running(identity()))
+        .unwrap()
+        .receipt;
+
+    let backgrounded = running
+        .advance(ToolReceiptMutationData::backgrounded(identity()))
+        .expect("Running -> Backgrounded 应合法（转后台）")
+        .receipt;
+    assert!(matches!(backgrounded.state, ToolCallState::Backgrounded));
+    assert!(
+        backgrounded.to_step_receipt().is_none(),
+        "Backgrounded 非终态，不应产出 step receipt"
+    );
+
+    let terminal = backgrounded
+        .advance(ToolReceiptMutationData::terminal(
+            identity(),
+            ToolTerminalReceiptData::new(
+                ToolOutcomeKindData::Success,
+                "tool completed",
+                CleanupConfirmation::NotApplicable,
+            ),
+        ))
+        .expect("Backgrounded -> Terminal 应合法（后台真实完成）")
+        .receipt;
+    assert!(matches!(terminal.state, ToolCallState::Terminal(_)));
+    assert!(terminal.to_step_receipt().is_some());
+}
+
+#[test]
+fn backgrounded_mutation_is_idempotent_and_rejects_regression() {
+    let backgrounded = ToolCallReceiptData::pending(identity(), "command=build")
+        .advance(ToolReceiptMutationData::running(identity()))
+        .unwrap()
+        .receipt
+        .advance(ToolReceiptMutationData::backgrounded(identity()))
+        .unwrap()
+        .receipt;
+
+    let repeated = backgrounded
+        .clone()
+        .advance(ToolReceiptMutationData::backgrounded(identity()))
+        .expect("重复 Backgrounded mutation 应幂等");
+    assert!(!repeated.changed);
+
+    assert!(matches!(
+        backgrounded
+            .clone()
+            .advance(ToolReceiptMutationData::running(identity())),
+        Err(ToolReceiptMutationError::InvalidTransition)
+    ));
+
+    let pending = ToolCallReceiptData::pending(identity(), "safe");
+    assert!(matches!(
+        pending.advance(ToolReceiptMutationData::backgrounded(identity())),
+        Err(ToolReceiptMutationError::InvalidTransition)
+    ));
+}
+
+#[test]
+fn backgrounded_state_serde_round_trips() {
+    let backgrounded = ToolCallReceiptData::pending(identity(), "command=build")
+        .advance(ToolReceiptMutationData::running(identity()))
+        .unwrap()
+        .receipt
+        .advance(ToolReceiptMutationData::backgrounded(identity()))
+        .unwrap()
+        .receipt;
+
+    let encoded = serde_json::to_string(&backgrounded).unwrap();
+    let decoded: ToolCallReceiptData = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(decoded, backgrounded);
+}

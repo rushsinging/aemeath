@@ -505,3 +505,17 @@ fn test_snapshot_language_default() {
     // Act & Assert
     assert_eq!(snap.language(), "en");
 }
+
+#[test]
+fn snapshot_exposes_tool_background_threshold_default() {
+    let snap = ConfigSnapshot::new(Config::default());
+    assert_eq!(snap.tool_background_threshold_secs(), 10);
+}
+
+#[test]
+fn snapshot_exposes_configured_tool_background_threshold() {
+    let mut config = Config::default();
+    config.runtime.tool_background_threshold_secs = 60;
+    let snap = ConfigSnapshot::new(config);
+    assert_eq!(snap.tool_background_threshold_secs(), 60);
+}

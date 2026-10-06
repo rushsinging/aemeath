@@ -121,6 +121,12 @@ impl EnvAdapter {
                 ..Default::default()
             }
         });
+        let runtime =
+            parse_non_negative(source.get("AEMEATH_TOOL_BACKGROUND_THRESHOLD_SECS")).map(|secs| {
+                share::config::domain::merge::RuntimeConfigPatch {
+                    tool_background_threshold_secs: Some(secs),
+                }
+            });
         let verbose = source.get("AEMEATH_VERBOSE").map(|_| true);
         let color = source.get("NO_COLOR").map(|_| false);
         let ui = (verbose.is_some() || color.is_some()).then_some(UiConfigPatch {
@@ -173,6 +179,7 @@ impl EnvAdapter {
             permissions,
             tools,
             agents,
+            runtime,
             ui,
             logging,
             storage,
@@ -198,6 +205,16 @@ where
     value
         .and_then(|value| value.parse::<T>().ok())
         .filter(|value| *value > T::from(0))
+}
+
+/// 非负整数 env：`0` 是合法值（如后台化阈值 0 = 禁用）；负数与非法值忽略。
+fn parse_non_negative<T>(value: Option<String>) -> Option<T>
+where
+    T: std::str::FromStr + PartialOrd + From<u8>,
+{
+    value
+        .and_then(|value| value.parse::<T>().ok())
+        .filter(|value| *value >= T::from(0))
 }
 
 fn driver_key_envs() -> &'static [(&'static str, &'static str)] {

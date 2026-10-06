@@ -134,6 +134,10 @@ pub struct Config {
     #[serde(default)]
     pub update: UpdateConfig,
 
+    /// Runtime engine configuration
+    #[serde(default)]
+    pub runtime: crate::config::runtime::RuntimeConfig,
+
     /// Language preference for guidance files. Supported values: "en", "zh".
     /// Default: "en". Guidance files are loaded from `{language}/` subdirectory first,
     /// then fallback to root directory files.
@@ -161,6 +165,7 @@ impl Default for Config {
             logging: LoggingConfig::default(),
             guidance: GuidanceConfig::default(),
             update: UpdateConfig::default(),
+            runtime: crate::config::runtime::RuntimeConfig::default(),
             language: default_language(),
         }
     }
