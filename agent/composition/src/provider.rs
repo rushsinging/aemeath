@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use provider::composition::{LlmClient, LlmConfigOptionsData, LlmError};
+use provider::composition::{LlmClient, LlmConfigOptionsData};
 use provider::{
     CancellationSignal, InvocationRequestData, InvocationStreamData, ModelCapabilityData,
     ModelIdData, ProviderError, ProviderErrorKind, ReasoningCapabilityData,
@@ -134,22 +134,8 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
             user_agent: Some(spec.user_agent),
         };
 
-        let client =
-            LlmClient::from_config_with_pool(config, self.pool.as_ref()).map_err(|err| {
-                let kind = match &err {
-                    LlmError::Cancelled => ProviderErrorKind::Cancelled,
-                    LlmError::RateLimited => ProviderErrorKind::RateLimited,
-                    LlmError::ContextTooLong => ProviderErrorKind::ContextTooLong,
-                    LlmError::Network(_) => ProviderErrorKind::Network,
-                    LlmError::Api { .. } => ProviderErrorKind::UpstreamUnavailable,
-                    LlmError::Stream(_) => ProviderErrorKind::Protocol,
-                    LlmError::StreamInterrupted(_) | LlmError::StreamTruncated { .. } => {
-                        ProviderErrorKind::StreamTruncated
-                    }
-                    LlmError::Config(_) => ProviderErrorKind::Configuration,
-                };
-                ProviderError::fatal(kind, err.to_string())
-            })?;
+        let client = LlmClient::from_config_with_pool(config, self.pool.as_ref())
+            .map_err(ProviderError::from)?;
 
         let client = Arc::new(
             client
