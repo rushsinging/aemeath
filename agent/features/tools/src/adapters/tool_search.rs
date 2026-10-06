@@ -68,26 +68,53 @@ impl TypedTool for ToolSearchTool {
 
         // 搜索并按相关度排序
         let mut matching: Vec<(ToolInfo, f64)> = tools
-            .into_iter()
+            .iter()
             .filter_map(|tool| {
-                let score = compute_relevance(&query, &tool)?;
-                Some((tool, score))
+                let score = compute_relevance(&query, tool)?;
+                Some((tool.clone(), score))
             })
             .collect();
 
         // 按分数降序排序
         matching.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
-        if matching.is_empty() {
+        // #1835：词法高置信短路（exact/name contains 命中）直接用词法序；
+        // 低置信（仅 desc contains）或零命中时交 System One 语义重排，失败静默回退。
+        let lexical_scores: Vec<f64> = matching.iter().map(|(_, score)| *score).collect();
+        let scoring_port = ctx.scoring();
+        let result_tools: Vec<ToolInfo> = if scoring_port.is_some()
+            && !crate::domain::tool_search_scoring::is_lexical_confident(&lexical_scores)
+        {
+            let candidates: Vec<ToolInfo> = if matching.is_empty() {
+                tools.clone()
+            } else {
+                matching.iter().map(|(tool, _)| tool.clone()).collect()
+            };
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "tool_search_scoring_triggered query={query} candidates={} zero_hit={}",
+                candidates.len(),
+                matching.is_empty(),
+            );
+            match semantic_rerank(&query, &candidates, scoring_port.as_ref().expect("checked"))
+                .await
+            {
+                Some(reranked) => reranked,
+                None => matching.into_iter().map(|(tool, _)| tool).collect(),
+            }
+        } else {
+            matching.into_iter().map(|(tool, _)| tool).collect()
+        };
+
+        if result_tools.is_empty() {
             return TypedToolResult::success(
                 format!("No tools found matching '{query}'"),
                 ToolSearchResult { tools: vec![] },
             );
         }
 
-        let count = matching.len();
-        let names: Vec<String> = matching.iter().map(|(t, _)| t.name.clone()).collect();
-        let result_tools: Vec<ToolInfo> = matching.into_iter().map(|(t, _)| t).collect();
+        let count = result_tools.len();
+        let names: Vec<String> = result_tools.iter().map(|t| t.name.clone()).collect();
         TypedToolResult::success(
             format!(
                 "Found {count} tool(s) matching '{query}'\n{}",
@@ -97,6 +124,52 @@ impl TypedTool for ToolSearchTool {
                 tools: result_tools,
             },
         )
+    }
+}
+
+/// 低置信路径：候选交 System One Choice 语义重排；失败/不可用返回 None（调用方回退词法序）。
+async fn semantic_rerank(
+    query: &str,
+    candidates: &[ToolInfo],
+    port: &std::sync::Arc<dyn systemone::ScoringPort>,
+) -> Option<Vec<ToolInfo>> {
+    use systemone::{ScoringQuestion, ScoringState};
+
+    if candidates.len() < 2 {
+        return None;
+    }
+    let state = ScoringState::new(query.to_owned())?;
+    let criteria: Vec<(String, String)> = candidates
+        .iter()
+        .enumerate()
+        .take(systemone::ScoringQuestion::CHOICE_CRITERIA_MAX)
+        .map(|(index, tool)| {
+            let text: String = format!("{}: {}", tool.name, tool.description)
+                .chars()
+                .take(crate::constants::TOOL_SEARCH_CRITERIA_MAX_CHARS)
+                .collect();
+            (index.to_string(), text)
+        })
+        .collect();
+    let question = ScoringQuestion::choice(crate::constants::TOOL_SEARCH_INSTRUCTIONS, criteria)
+        .expect("criteria 数量与内容已受本函数约束，构造不可失败");
+    match port.answer(&state, &[question]).await {
+        Ok(answers) => match answers.first() {
+            Some(systemone::ScoringAnswer::Choice { probabilities, .. }) => {
+                Some(crate::domain::tool_search_scoring::apply_scoring_order(
+                    candidates.to_vec(),
+                    probabilities.as_slice(),
+                ))
+            }
+            _ => None,
+        },
+        Err(unavailable) => {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "tool_search_scoring_fallback reason={unavailable}"
+            );
+            None
+        }
     }
 }
 

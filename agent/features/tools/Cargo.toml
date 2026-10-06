@@ -10,6 +10,7 @@ test-harness = []
 share = { path = "../../shared" }
 project = { path = "../project" }
 memory = { path = "../memory" }
+systemone = { path = "../systemone" }
 task = { path = "../task" }
 utils = { path = "../../../packages/global/utils" }
 tokio = { workspace = true }
