@@ -728,6 +728,13 @@ where
                             share::config::TaskListConfig::default().max_lines,
                         ),
                     ),
+                    // #252 PR2：后台任务完成通知（OnEvent；Wakeup Run 内的
+                    // 完成事实注入同源——build take 语义保证只通知一次）。
+                    std::sync::Arc::new(
+                        crate::application::loop_engine::chat::reminder_sources::BackgroundTaskReminderSource::new(
+                            shell.background_task_supervisor(),
+                        ),
+                    ),
                 ];
                 if !turn_boundary_config.guidance_changed_paths.is_empty() {
                     log::debug!(
@@ -844,6 +851,7 @@ where
                     max_tool_concurrency,
                     agent_semaphore.clone(),
                     &session_id,
+                    Some(shell.background_tasks.clone()),
                     &run_id,
                     tool_result_materializer.clone(),
                 );

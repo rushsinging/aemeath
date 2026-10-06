@@ -92,6 +92,11 @@ pub struct Agent {
     pub runtime_cancellation: tokio_util::sync::CancellationToken,
     /// tool call 前台等待阈值（Run scope 冻结；`None` 禁用后台化）。
     pub background_threshold: Option<std::time::Duration>,
+    /// #252 PR2 通知链路：session 级后台任务运行时（Main Run 注入；
+    /// Sub Run 禁用后台化故为 None）。
+    pub background_tasks: Option<
+        std::sync::Arc<crate::application::background_task::session_runtime::BackgroundTaskRuntime>,
+    >,
 }
 
 pub use crate::domain::agent_run::ToolCall;
@@ -159,6 +164,7 @@ impl Agent {
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
             runtime_cancellation: tokio_util::sync::CancellationToken::new(),
             background_threshold: None,
+            background_tasks: None,
         }
     }
 
@@ -292,7 +298,8 @@ impl Agent {
             Arc::clone(&self.execution),
             self.catalog.clone(),
             self.context.clone(),
-        );
+        )
+        .with_background_runtime_opt(self.background_tasks.clone());
         supervisor
             .execute(SupervisedToolCall {
                 identity: ToolCallIdentityData {

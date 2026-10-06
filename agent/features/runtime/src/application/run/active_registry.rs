@@ -40,6 +40,33 @@ pub fn wire_active_run_registry() -> ActiveRunRegistry {
     }
 }
 
+impl ActiveRunRegistry {
+    /// 当前 active Main Run（#252 通知路由判定：有 → reminder 事件）。
+    pub fn current_main_run_id(&self) -> Option<sdk::RunId> {
+        self.active
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .current_main_run_id
+            .clone()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn activate_main_for_test(&self, run_id: sdk::RunId) {
+        use crate::domain::agent_run::ActiveRunPort as _;
+        self.activate_main(
+            run_id,
+            tokio_util::sync::CancellationToken::new(),
+            crate::domain::agent_run::RunIntent::Conversation,
+        );
+    }
+
+    #[cfg(test)]
+    pub(crate) fn clear_for_test(&self, run_id: &sdk::RunId) {
+        use crate::domain::agent_run::ActiveRunPort as _;
+        self.clear(run_id);
+    }
+}
+
 #[derive(Debug, Default)]
 struct ActiveRunState {
     runs: std::collections::HashMap<sdk::RunId, ActiveRun>,

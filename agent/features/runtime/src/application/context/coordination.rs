@@ -61,6 +61,15 @@ impl ContextCoordinator {
         Self { port }
     }
 
+    /// Reminder 事件触发转发（#252：后台任务完成 → OnEvent source 重建）。
+    pub(crate) fn reminder_handle_event(
+        &self,
+        run_id: &sdk::RunId,
+        event_source: &context::ReminderEventSource,
+    ) {
+        self.port.reminder_handle_event(run_id, event_source);
+    }
+
     pub(crate) async fn build_window(
         &self,
         request: &ContextRequestData,

@@ -209,6 +209,7 @@ pub struct SessionRuntime {
 
 impl SessionRuntime {
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         session_state: Arc<std::sync::RwLock<crate::application::run::creation::SessionState>>,
         workspace: project::Workspace,
@@ -251,6 +252,10 @@ impl SessionRuntime {
         let session_ingress = Arc::new(crate::application::session::ingress::SessionIngress::new(
             interaction_bridge.clone(),
         ));
+        let background_tasks = Arc::new(
+            crate::application::background_task::session_runtime::BackgroundTaskRuntime::new(),
+        );
+        background_tasks.bind_active_run(active_run.clone());
         Self {
             session_state,
             workspace,
@@ -284,9 +289,7 @@ impl SessionRuntime {
             active_run,
             interaction_bridge,
             session_ingress,
-            background_tasks: Arc::new(
-                crate::application::background_task::session_runtime::BackgroundTaskRuntime::new(),
-            ),
+            background_tasks,
             event_sink_factory,
             input_port_factory,
             runtime_context_factory,

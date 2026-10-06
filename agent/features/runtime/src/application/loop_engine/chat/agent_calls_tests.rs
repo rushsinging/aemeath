@@ -316,6 +316,7 @@ fn spawn_calls(
             committed_side_effects: Default::default(),
             runtime_cancellation: cancel.clone(),
             background_threshold: None,
+            background_tasks: None,
         };
         let step_tool_context = ctx.with_cancellation(Arc::new(
             crate::application::run::context::RunCancellationScope::from_token(cancel.clone()),
