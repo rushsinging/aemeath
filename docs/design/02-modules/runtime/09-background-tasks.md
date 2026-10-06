@@ -68,14 +68,23 @@ BackgroundTaskRecord
 - 职责：派发登记、阈值判定、后台 `JoinHandle` 托管、输出收集、终态推进、通知路由（§4）、持久化（§6）。
 - 摆放：runtime feature `application/tool/` 旁新模块；**NEVER** 流入 tools domain（工具执行编排边界不变）。
 
-### 2.3 输出缓冲与实时性边界
+### 2.3 输出管理与持久化（任务日志文件，方案 B）
 
-`ToolExecutionOutcome` 为一次性返回，无内置增量输出流。输出来源两档：
+`ToolExecutionOutcome` 为一次性返回，无内置增量输出流。输出采集两档：tool 经
+`ToolExecutionContext` progress 通道上报的增量（Bash 类长命令）与终态完整结果。
 
-- tool 经 `ToolExecutionContext` progress 通道上报的增量（Bash 类长命令）写入 ring buffer；
-- 无 progress 的工具只有终态完整输出。
+**完整输出零丢失**（2026-10-07 拍板，方案 B）：
 
-ring buffer 字节上限（64KB）+ 读写游标分离：**非消耗性读取**（读取不推进写入游标，多次读取幂等）+ **增量游标**（`logs` 返回读取游标，下次携带游标只读新增，避免重复消耗 token）。
+- progress 增量**实时 append 到 per-task 任务日志文件**（`~/.agents/` 运行时目录，
+  会话任务日志命名空间）；终态完整结果同样落文件。
+- 内存 `OutputRingBuffer`（64KB）退化为**运行中尾部视图**：供占位/通知摘要与
+  低成本轮询；溢出丢弃只影响内存视图，文件是完整真相。
+- 读取：运行中与完成后皆可按**任意区间**读取文件（LLM 的 `logs` 增量游标与
+  TUI 翻阅全量输出共用同一文件真相）；token budget 截断在读取层叠加。
+- 生命周期随 session：会话任务日志 GC 与 resume 失效对账同步（§6）。
+
+ring buffer 核心不变量（保留）：读写游标分离（非消耗性读取，多次读取幂等，
+不破坏回注）；全局写入游标单调（增量坐标）；过期游标 clamp 到可用窗口。
 
 ### 2.4 阈值配置
 
@@ -162,7 +171,8 @@ reminder 不携带完整输出（管线预算纪律）。
 
 ## 6. 持久化与 resume
 
-- 新 storage namespace `BackgroundTask`（AtomicBlob，ProcessCrashSafe），key `background-tasks-{session_id}`；存 task record + 输出尾部截断快照。
+- 新 storage namespace `BackgroundTask`（AtomicBlob，ProcessCrashSafe），key `background-tasks-{session_id}`；存 task record 与任务日志文件引用。
+- 任务日志文件（§2.3 方案 B）：per-task 增量 append，完整输出真相源；会话任务日志随 session GC。
 - resume：`Backgrounded` / `Running` → `Invalidated(reason: process_exit)`；查询 tool 可见失效任务。
 - **对账**：receipt 恢复路径（`has_unfinished_receipts` → unconfirmed 投影）遇 `Backgrounded` receipt 时与任务账本对账——有对应 task record 则投影为「任务已失效」而非 unconfirmed。specs 3.10 同步。
 
@@ -174,13 +184,26 @@ reminder 不携带完整输出（管线预算纪律）。
 - **审计**：任务终态事实与现有 tool 终态审计同构。
 - **Usage**：后台任务无 model invocation，不构造 `UsageRecord`。
 
-## 8. TUI / SDK
+## 8. TUI / SDK 与 LLM 引导
 
 - 转后台瞬间：工具块追加「已转后台（task_id）」状态行。
-- TUI 新增后台任务查看 / 管理 slash 命令（D10；经 Tools-owned Command Catalog，Runtime PendingCommand 为 handler adapter）。
+- TUI 新增后台任务查看 / 管理 slash 命令（D10；经 Tools-owned Command Catalog，Runtime PendingCommand 为 handler adapter）；可翻阅任务日志文件全量输出（§2.3）。
+- **LLM 行为引导（2026-10-07 拍板）**：除占位 tool_result 文案外，Main/Sub 的 system
+  prompt 经 guidance 系统注入后台任务特性说明——统一模型（所有 tool call 超阈值自动
+  转后台）、占位结果语义（非终态，完成会主动通知）、`background_tasks` 查询/停止用法、
+  sequential 顺序提示（前序转后台后同轮后续命令可能与未完成前序并行，有顺序依赖时
+  应等待通知或先查状态）。随查询 tool（PR3）落地时一并接线 prompt BC。
 - SDK 新增 `BackgroundTask` 生命周期事件（PL）→ TUI reducer：
   - 消息流系统样式卡片（可折叠）：「⏙ 后台任务完成：task-xxx『cargo test』已完成，已唤醒 agent 继续」——用户清楚看到 agent 为何自己动起来；
   - 后台任务面板：活动任务状态 / 输出预览（复用 Bash 输出渲染），管理入口。
+
+### 8.1 自动转后台覆盖面
+
+普通工具与 Agent（sub-agent 派发）共用同一 `ToolExecutionPort` 执行路径，**天然全部
+自动转后台**（Agent timeout 3600s，是最需要后台化的场景）；交互类（AskUser）的 tool
+future 以 `Suspended` 即时返回（等待由 Runtime interaction waiter 承担），不会触发
+阈值，天然安全。流式路径（#1494 边流边执行）的超阈值转后台在收尾 PR 接入
+（此前保持 detach-cancel 现状，零退化）。
 
 ## 9. 与 Workflow 设计的对接修订
 
