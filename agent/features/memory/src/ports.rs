@@ -253,7 +253,7 @@ pub trait ReflectionHistoryStore: ReflectionHistoryQuery {
 #[async_trait]
 pub trait MemoryPort: Send + Sync {
     fn retrieve_for_inject(&self, query: &MemoryQuery) -> MemorySearchResult;
-    fn search(&self, query: &MemorySearchQuery) -> MemorySearchResult;
+    async fn search(&self, query: &MemorySearchQuery) -> MemorySearchResult;
     async fn write(&self, entry: MemoryEntry) -> Result<WriteResult, MemoryError>;
     async fn update(&self, id: &MemoryId, content: &str) -> Result<bool, MemoryError>;
     async fn delete(&self, id: &MemoryId) -> Result<bool, MemoryError>;

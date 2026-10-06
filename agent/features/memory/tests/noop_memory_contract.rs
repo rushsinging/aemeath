@@ -13,14 +13,16 @@ async fn noop_memory_is_explicitly_disabled_and_has_no_mutation_effects() {
     assert_eq!(inject.mode, MemoryRetrievalMode::Disabled);
     assert!(inject.hits.is_empty());
 
-    let search = port.search(&MemorySearchQuery {
-        text: "anything".into(),
-        limit: 10,
-        layer: None,
-        category: None,
-        include_archive: true,
-        now: 100,
-    });
+    let search = port
+        .search(&MemorySearchQuery {
+            text: "anything".into(),
+            limit: 10,
+            layer: None,
+            category: None,
+            include_archive: true,
+            now: 100,
+        })
+        .await;
     assert_eq!(search.mode, MemoryRetrievalMode::Disabled);
     assert!(search.hits.is_empty());
 

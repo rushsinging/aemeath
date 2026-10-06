@@ -152,6 +152,7 @@ impl RuntimeContextFactory {
         task: Arc<dyn TaskAccess>,
         hooks: Arc<dyn HookDispatcher>,
         usage_sink: Arc<dyn crate::ports::UsageSink>,
+        scoring: Option<Arc<dyn systemone::ScoringPort>>,
     ) -> Self {
         Self::from_services(
             tool_catalog,
@@ -161,6 +162,7 @@ impl RuntimeContextFactory {
             task,
             hooks,
             usage_sink,
+            scoring,
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -172,6 +174,7 @@ impl RuntimeContextFactory {
         task: Arc<dyn TaskAccess>,
         hooks: Arc<dyn HookDispatcher>,
         usage_sink: Arc<dyn crate::ports::UsageSink>,
+        scoring: Option<Arc<dyn systemone::ScoringPort>>,
     ) -> Self {
         Self {
             services: RuntimeServices {
@@ -184,6 +187,7 @@ impl RuntimeContextFactory {
                     crate::application::published_state::PublishedStateRegistry::default(),
                 hooks,
                 usage_sink,
+                scoring,
             },
             provider_factory: None,
             skill_catalog: None,

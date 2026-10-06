@@ -105,4 +105,7 @@ pub trait ContextPort: Send + Sync {
 
     /// step 边界事件：`OnStepInterval(n)` 在步数为 n 的倍数时重建入队。
     fn reminder_step_advanced(&self, _run_id: &RunId, _step: u64) {}
+
+    /// 用户消息到达事件：`OnUserMessage` 类 source 重建入队。
+    fn reminder_user_message_received(&self, _run_id: &RunId) {}
 }

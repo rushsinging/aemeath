@@ -82,6 +82,7 @@ fn build_agent_runner_constructs_without_panic() {
                 crate::application::run::test_task_access(),
                 hooks,
                 Arc::new(crate::ports::UnavailableUsageSink),
+                None,
             )
         }),
     );

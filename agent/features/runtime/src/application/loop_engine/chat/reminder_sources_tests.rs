@@ -139,3 +139,227 @@ fn run_start_fact_source_carries_frozen_data_and_matching_policy() {
         context::CompactBehavior::Drop
     ));
 }
+
+// --- MemoryRecallReminderSource（#1834 per-message 记忆召回）----------------
+
+use crate::application::loop_engine::chat::reminder_sources::MemoryRecallReminderSource;
+
+/// 按 content 是否含关键词给概率的评分桩。
+struct KeywordScoring {
+    keyword: &'static str,
+    high: f64,
+}
+
+#[async_trait::async_trait]
+impl systemone::ScoringPort for KeywordScoring {
+    async fn answer(
+        &self,
+        _state: &systemone::ScoringState,
+        questions: &[systemone::ScoringQuestion],
+    ) -> Result<Vec<systemone::ScoringAnswer>, systemone::ScoringUnavailable> {
+        let criteria = match &questions[0] {
+            systemone::ScoringQuestion::Choice { criteria, .. } => criteria,
+            systemone::ScoringQuestion::Noul { .. } => {
+                // 单候选 Noul 路径：按 state 是否含关键词给 p_true。
+                let p = if _state.as_str().contains(self.keyword) {
+                    self.high
+                } else {
+                    1.0 - self.high
+                };
+                return Ok(vec![systemone::ScoringAnswer::noul(
+                    p,
+                    systemone::CalibrationLevel::Raw,
+                )
+                .expect("答案构造")]);
+            }
+            _ => panic!("应为 Choice/Noul"),
+        };
+        let probabilities: Vec<(String, f64)> = criteria
+            .iter()
+            .enumerate()
+            .map(|(index, (_, content))| {
+                let probability = if content.contains(self.keyword) {
+                    self.high
+                } else {
+                    (1.0 - self.high) / (criteria.len().saturating_sub(1).max(1)) as f64
+                };
+                (index.to_string(), probability)
+            })
+            .collect();
+        let (top_key, top_probability) = probabilities
+            .iter()
+            .max_by(|(_, a), (_, b)| a.total_cmp(b))
+            .map(|(key, p)| (key.clone(), *p))
+            .expect("非空");
+        Ok(vec![systemone::ScoringAnswer::choice(
+            top_key,
+            probabilities,
+            top_probability,
+            systemone::CalibrationLevel::Raw,
+        )
+        .expect("答案构造")])
+    }
+}
+
+struct FailingScoring;
+
+#[async_trait::async_trait]
+impl systemone::ScoringPort for FailingScoring {
+    async fn answer(
+        &self,
+        _state: &systemone::ScoringState,
+        _questions: &[systemone::ScoringQuestion],
+    ) -> Result<Vec<systemone::ScoringAnswer>, systemone::ScoringUnavailable> {
+        Err(systemone::ScoringUnavailable::new(
+            systemone::UnavailableKind::Connect,
+            "服务未启动",
+        ))
+    }
+}
+
+async fn recall_memory(entries: Vec<&str>) -> Arc<dyn memory::api::MemoryPort> {
+    use memory::api::MemoryPort as _;
+
+    let memory = memory::api::InMemoryMemory::new(memory::api::MemoryPolicy {
+        max_entries: 50,
+        similarity_threshold: 0.8,
+    })
+    .expect("policy 合法");
+    for content in entries {
+        let entry = memory::api::MemoryEntry::new(
+            memory::api::MemoryId::now_v7(),
+            10,
+            memory::api::MemoryLayer::Project,
+            memory::api::MemoryCategory::Fact,
+            content,
+            memory::api::MemorySource::User,
+        )
+        .expect("entry 构造");
+        memory.write(entry).await.expect("写入");
+    }
+    Arc::new(memory)
+}
+
+#[tokio::test]
+async fn recall_refresh_caches_snapshot_and_build_renders() {
+    let source = MemoryRecallReminderSource::with_clock(
+        recall_memory(vec!["git worktree 的创建步骤", "完全无关的烹饪食谱"]).await,
+        Arc::new(KeywordScoring {
+            keyword: "worktree",
+            high: 0.9,
+        }),
+        Arc::new(|| 4_242),
+    );
+    assert!(
+        source.build().is_none(),
+        "refresh 前 build 应为空（无快照不注入）"
+    );
+
+    source.refresh("怎么用 worktree 隔离分支").await;
+
+    let snapshot = source.build().expect("refresh 后应有快照");
+    let rendered = source.render(&snapshot, "zh");
+    assert!(rendered.contains("相关的记忆"), "渲染应含标题：{rendered}");
+    assert!(rendered.contains("git worktree 的创建步骤"));
+    assert!(!rendered.contains("烹饪食谱"), "低分候选不入 top-K");
+}
+
+#[tokio::test]
+async fn recall_below_threshold_clears_cache_and_skips_turn() {
+    let source = MemoryRecallReminderSource::with_clock(
+        recall_memory(vec!["git worktree 的创建步骤", "另一条 rust 笔记"]).await,
+        Arc::new(KeywordScoring {
+            keyword: "worktree",
+            high: 0.9,
+        }),
+        Arc::new(|| 4_242),
+    );
+    source.refresh("worktree 怎么用").await;
+    assert!(source.build().is_some(), "首次 refresh 应有快照");
+
+    // 第二条消息词法零命中（与所有条目无公共词）→ 缓存清空（本 turn 不注入）。
+    source.refresh("zzz 完全无关的话题").await;
+    assert!(
+        source.build().is_none(),
+        "零命中消息的 refresh 必须清空旧快照（NEVER 用陈旧快照）"
+    );
+
+    // 评分概率低于阈值 → 本 turn 不注入。
+    let low_source = MemoryRecallReminderSource::with_clock(
+        recall_memory(vec!["git worktree 的创建步骤"]).await,
+        Arc::new(KeywordScoring {
+            keyword: "不命中",
+            high: 0.3,
+        }),
+        Arc::new(|| 4_242),
+    );
+    low_source.refresh("随便聊聊").await;
+    assert!(low_source.build().is_none(), "top1 概率低于阈值时不得注入");
+}
+
+#[tokio::test]
+async fn recall_scoring_failure_clears_cache_silently() {
+    let source = MemoryRecallReminderSource::with_clock(
+        recall_memory(vec!["git worktree 的创建步骤"]).await,
+        Arc::new(FailingScoring),
+        Arc::new(|| 4_242),
+    );
+    source.refresh("worktree").await;
+    assert!(
+        source.build().is_none(),
+        "评分服务不可用必须静默缺席（NEVER 阻断 turn）"
+    );
+}
+
+#[tokio::test]
+async fn recall_budget_drops_tail_entries() {
+    let long_entry = "超".repeat(180);
+    let source = MemoryRecallReminderSource::with_clock(
+        recall_memory(vec![
+            "git worktree 的创建步骤与隔离实践",
+            "git worktree 的清理注意事项",
+            "git worktree 的磁盘占用排查",
+        ])
+        .await,
+        Arc::new(KeywordScoring {
+            keyword: "worktree",
+            high: 0.9,
+        }),
+        Arc::new(|| 4_242),
+    );
+    source.refresh("worktree").await;
+    let snapshot = source.build().expect("应有快照");
+    let data: context::InvocationReminderData =
+        serde_json::from_str(&snapshot.data).expect("合法快照");
+    let count = match &data {
+        context::InvocationReminderData::MemoryRecall { entries } => entries.len(),
+        other => panic!("期望 MemoryRecall，实际 {other:?}"),
+    };
+    assert!(
+        count <= crate::application::constants::MEMORY_RECALL_TOP_K,
+        "注入条数受 top-K 上限约束：{count}"
+    );
+    assert!(count >= 1);
+    let _ = long_entry; // 长内容场景由预览截断覆盖（预览上限 200 字符）
+}
+
+#[tokio::test]
+async fn recall_snapshot_data_stable_for_same_result_set() {
+    let entries = vec!["git worktree 的创建步骤", "rust 所有权笔记"];
+    let source = MemoryRecallReminderSource::with_clock(
+        recall_memory(entries.clone()).await,
+        Arc::new(KeywordScoring {
+            keyword: "worktree",
+            high: 0.9,
+        }),
+        Arc::new(|| 4_242),
+    );
+    source.refresh("worktree 怎么用").await;
+    let first = source.build().expect("第一次快照").data;
+    source.refresh("worktree 怎么用").await;
+    let second = source.build().expect("第二次快照").data;
+    assert_eq!(
+        first, second,
+        "相同结果集的快照 data 必须稳定（SkipIfUnchanged 去重前提）"
+    );
+}

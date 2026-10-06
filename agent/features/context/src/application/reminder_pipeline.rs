@@ -106,6 +106,23 @@ impl ReminderPipeline {
         }
     }
 
+    /// 用户消息到达：`OnUserMessage` 类 source 现场重建入队（快照替换语义）。
+    pub fn user_message_received(&mut self) {
+        for source in
+            self.sources_matching(|trigger| matches!(trigger, RefreshTrigger::OnUserMessage))
+        {
+            if let Some(snapshot) = source.build() {
+                self.queue
+                    .push_snapshot(source.kind(), snapshot, source.policy().inject);
+            }
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "reminder_enqueued trigger=user_message kind={}",
+                source.kind().as_str(),
+            );
+        }
+    }
+
     /// step 边界推进：`OnStepInterval(n)` 在 step 为 n 的倍数时现场重建入队。
     pub fn step_advanced(&mut self, step: u64) {
         self.enqueue_interval_sources(step);

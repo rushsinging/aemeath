@@ -767,6 +767,91 @@ async fn build_window_injects_reminder_pipeline_tail_and_system_tail() {
     );
 }
 
+/// 提取 window 全部 user 消息文本（断言注入用）。
+fn window_text(window: &crate::domain::ContextWindowData) -> String {
+    window
+        .messages
+        .iter()
+        .filter(|message| matches!(message.role, share::message::Role::User))
+        .flat_map(|message| message.content.iter())
+        .filter_map(|content_block| match content_block {
+            ContentBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `OnUserMessage` 触发的测试 source。
+struct UserMessageTestSource {
+    body: String,
+}
+
+impl crate::domain::reminder::ReminderSource for UserMessageTestSource {
+    fn kind(&self) -> crate::domain::reminder::ReminderKind {
+        crate::domain::reminder::ReminderKind::memory_recall()
+    }
+
+    fn policy(&self) -> crate::domain::reminder::ReminderPolicy {
+        crate::domain::reminder::ReminderPolicy {
+            refresh: crate::domain::reminder::RefreshTrigger::OnUserMessage,
+            placement: crate::domain::reminder::ReminderPlacement::TailUserMessage,
+            inject: crate::domain::reminder::InjectBehavior {
+                dedup: crate::domain::reminder::ReminderDedup::SkipIfUnchanged,
+                priority: crate::domain::reminder::ReminderPriority::memory_recall(),
+            },
+            compact: crate::domain::reminder::CompactBehavior::Rebuild,
+        }
+    }
+
+    fn build(&self) -> Option<crate::domain::reminder::ReminderSnapshot> {
+        Some(crate::domain::reminder::ReminderSnapshot {
+            data: self.body.clone(),
+        })
+    }
+
+    fn render(
+        &self,
+        snapshot: &crate::domain::reminder::ReminderSnapshot,
+        _language: &str,
+    ) -> String {
+        snapshot.data.clone()
+    }
+}
+
+#[tokio::test]
+async fn reminder_user_message_received_enqueues_snapshot_into_window() {
+    let service = service(vec![], 1);
+    let run_id = request(None).run_id;
+    crate::ports::ContextPort::create_reminder_pipeline(
+        &service,
+        run_id.clone(),
+        vec![Arc::new(UserMessageTestSource {
+            body: "召回的记忆内容".to_string(),
+        })],
+    );
+
+    let before = service
+        .build_window(&request(None))
+        .await
+        .expect("构建 window");
+    assert!(
+        !window_text(&before).contains("召回的记忆内容"),
+        "未触发用户消息事件前不得注入"
+    );
+
+    crate::ports::ContextPort::reminder_user_message_received(&service, &run_id);
+
+    let after = service
+        .build_window(&request(None))
+        .await
+        .expect("构建 window");
+    assert!(
+        window_text(&after).contains("召回的记忆内容"),
+        "用户消息事件触发后应注入"
+    );
+}
+
 #[tokio::test]
 async fn append_and_persist_prepends_pending_reminder_before_step_messages() {
     // #1848：注入轮的 reminder 在 step 收口随 append_and_persist 提交——

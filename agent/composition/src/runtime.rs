@@ -193,6 +193,37 @@ pub(crate) async fn from_args_with_gateways(
     // 动态解析调用模型（未配置时跟随当前会话模型）。context_factory 依赖
     // initial_binding，因此 MainSession 装配延后到 provider 构建之后。
     let agents_dir_buf = agents_dir.to_path_buf();
+    // System One 评分端口（#1831/#1834）：任一场景开关开启时装配，全关为 None 零成本。
+    let scoring_config = snapshot.scoring();
+    let scoring_port: Option<std::sync::Arc<dyn systemone::ScoringPort>> = (scoring_config
+        .memory_rerank
+        || scoring_config.memory_recall
+        || scoring_config.skill_match
+        || scoring_config.policy_triage)
+        .then(|| {
+            log::info!(
+                target: crate::LOG_TARGET,
+                "systemone scoring enabled url={} model={} rerank={} recall={}",
+                scoring_config.url,
+                scoring_config.model,
+                scoring_config.memory_rerank,
+                scoring_config.memory_recall,
+            );
+            systemone::wire_scoring_port(
+                &scoring_config.url,
+                &scoring_config.model,
+                std::time::Duration::from_millis(scoring_config.timeout_ms),
+                agents_dir.join("scoring"),
+            )
+        });
+    let scoring_port_for_rerank = scoring_port
+        .as_ref()
+        .filter(|_| scoring_config.memory_rerank)
+        .cloned();
+    let scoring_port_for_recall = scoring_port
+        .as_ref()
+        .filter(|_| scoring_config.memory_recall)
+        .cloned();
     let compact_generator =
         runtime::ProviderCompactGenerator::new(Arc::new(runtime::CompactModelResolver::new(
             config.reader(),
@@ -205,9 +236,10 @@ pub(crate) async fn from_args_with_gateways(
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener: memory::wire_memory_opener(
-            storage::wire_file_system_dataset(agents_dir_buf)
+            storage::wire_file_system_dataset(agents_dir_buf.clone())
                 .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
             memory::wire_legacy_memory_source_factory(agents_dir.join("memory")),
+            scoring_port_for_rerank.clone(),
         ),
         session_management: session_management.clone(),
         context_factory: Arc::new(
@@ -273,6 +305,7 @@ pub(crate) async fn from_args_with_gateways(
         task_wiring.access(),
         hook_runner.clone(),
         usage_sink,
+        scoring_port_for_recall.clone(),
     ));
     context::guidance::init_guidance_dir();
     let cwd = args

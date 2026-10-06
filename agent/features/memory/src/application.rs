@@ -1,3 +1,4 @@
+pub mod recall;
 use crate::domain::{
     MemoryError, MemoryLayer, ReflectionEngine, ReflectionError, ReflectionErrorCategory,
     ReflectionMessage, ReflectionOutput, ReflectionRecord, ReflectionStatus, ReflectionTokenUsage,

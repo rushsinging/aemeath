@@ -347,6 +347,9 @@ pub struct RuntimeServices {
     pub task: Arc<dyn TaskAccess>,
     /// Runtime Published State（会话级，跨 Run 复用）。
     pub(crate) published_state: crate::application::published_state::PublishedStateRegistry,
+    /// System One 评分端口（任一场景开关开启时由 composition 装配；
+    /// 全关为 None，零成本）。session 级共享。
+    pub scoring: Option<std::sync::Arc<dyn systemone::ScoringPort>>,
     /// Hook BC 出站端口。
     pub hooks: Arc<dyn HookDispatcher>,
     /// Audit Usage 事实的非阻塞出站端口。
@@ -436,6 +439,17 @@ pub struct RuntimeContext {
     published_state: crate::application::published_state::PublishedStateRegistry,
     /// Optional session lease held for the full Run lifetime.
     session_lease: Option<Arc<context::OwnedSessionSharedPermit>>,
+    /// System One 评分端口（session 级，来自 RuntimeServices）。
+    scoring: Option<Arc<dyn systemone::ScoringPort>>,
+    /// per-message 记忆召回 source 槽：run_launch 装配 pipeline 时一次性写入
+    ///（recall 依赖 per-Run memory binding，Run 启动前不可得）。
+    memory_recall: Arc<
+        std::sync::OnceLock<
+            Arc<
+                crate::application::loop_engine::chat::reminder_sources::MemoryRecallReminderSource,
+            >,
+        >,
+    >,
 }
 
 /// Token that gates [`RuntimeContext::new`] — only [`RuntimeContextFactory`]
@@ -484,6 +498,8 @@ impl RuntimeContext {
             activities,
             published_state: services.published_state.clone(),
             session_lease: None,
+            scoring: services.scoring.clone(),
+            memory_recall: Arc::new(std::sync::OnceLock::new()),
         }
     }
 
@@ -521,6 +537,32 @@ impl RuntimeContext {
     /// Memory 端口，`Arc` clone。
     pub fn memory(&self) -> Arc<dyn MemoryPort> {
         self.memory.clone()
+    }
+    /// System One 评分端口（任一场景开关开启时存在）。
+    pub(crate) fn scoring(&self) -> Option<Arc<dyn systemone::ScoringPort>> {
+        self.scoring.clone()
+    }
+
+    /// per-message 记忆召回 source 槽（run_launch 一次性装配）。
+    pub(crate) fn memory_recall_slot(
+        &self,
+    ) -> Arc<
+        std::sync::OnceLock<
+            Arc<
+                crate::application::loop_engine::chat::reminder_sources::MemoryRecallReminderSource,
+            >,
+        >,
+    > {
+        self.memory_recall.clone()
+    }
+
+    /// 已装配的记忆召回 source（未装配为 None）。
+    pub(crate) fn memory_recall(
+        &self,
+    ) -> Option<
+        Arc<crate::application::loop_engine::chat::reminder_sources::MemoryRecallReminderSource>,
+    > {
+        self.memory_recall.get().cloned()
     }
     /// Reflection 历史存储，`Arc` clone。
     pub fn reflection_history(&self) -> Arc<dyn ReflectionHistoryStore> {

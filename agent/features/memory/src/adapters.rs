@@ -453,11 +453,23 @@ impl ReflectionHistoryStore for AtomicDatasetReflectionHistoryStore {
 pub(crate) struct ProjectMemoryOpener {
     store: AtomicDatasetMemoryStore,
     legacy: Arc<dyn LegacyMemorySource>,
+    /// System One 评分端口（None = 重排关闭）。
+    scorer: Option<Arc<dyn systemone::ScoringPort>>,
 }
 
 impl ProjectMemoryOpener {
     pub fn new(store: AtomicDatasetMemoryStore, legacy: Arc<dyn LegacyMemorySource>) -> Self {
-        Self { store, legacy }
+        Self {
+            store,
+            legacy,
+            scorer: None,
+        }
+    }
+
+    /// 装配评分端口（composition 在场景开关开启时调用）。
+    pub fn with_scorer(mut self, scorer: Option<Arc<dyn systemone::ScoringPort>>) -> Self {
+        self.scorer = scorer;
+        self
     }
 
     pub async fn open(
@@ -499,9 +511,12 @@ impl ProjectMemoryOpener {
                 .await
                 .map_err(map_memory_open_error)?;
         }
-        MemoryService::open(self.store, policy)
-            .await
-            .map_err(map_memory_open_error)
+        // 双入口保持各自生产消费者语义：无评分走精简 open，有评分走 scorer 链。
+        match self.scorer {
+            Some(scorer) => MemoryService::open_with_scorer(self.store, policy, Some(scorer)).await,
+            None => MemoryService::open(self.store, policy).await,
+        }
+        .map_err(map_memory_open_error)
     }
 }
 
@@ -525,6 +540,8 @@ impl ProjectMemoryOpener {
 pub(crate) struct DatasetMemoryOpener {
     storage: Arc<dyn storage_api::AtomicDatasetPort>,
     legacy_factory: Arc<dyn LegacyMemorySourceFactory>,
+    /// System One 评分端口（None = 重排关闭）。
+    scorer: Option<Arc<dyn systemone::ScoringPort>>,
 }
 
 impl DatasetMemoryOpener {
@@ -535,7 +552,13 @@ impl DatasetMemoryOpener {
         Self {
             storage,
             legacy_factory,
+            scorer: None,
         }
+    }
+
+    pub(crate) fn with_scorer(mut self, scorer: Option<Arc<dyn systemone::ScoringPort>>) -> Self {
+        self.scorer = scorer;
+        self
     }
 }
 
@@ -552,7 +575,10 @@ impl MemoryOpener for DatasetMemoryOpener {
             similarity_threshold: config.similarity_threshold,
         };
         let legacy = self.legacy_factory.create_for(key);
-        let service = ProjectMemoryOpener::new(store, legacy).open(policy).await?;
+        let service = ProjectMemoryOpener::new(store, legacy)
+            .with_scorer(self.scorer.clone())
+            .open(policy)
+            .await?;
         Ok(Arc::new(service))
     }
 
@@ -749,7 +775,7 @@ impl MemoryPort for InMemoryMemory {
         }
     }
 
-    fn search(&self, query: &MemorySearchQuery) -> MemorySearchResult {
+    async fn search(&self, query: &MemorySearchQuery) -> MemorySearchResult {
         let state = self.state.read().expect("memory state lock poisoned");
         let active = state
             .active

@@ -511,6 +511,7 @@ dependencies = [
  "serde_json",
  "share",
  "storage",
+ "systemone",
  "task",
  "tempfile",
  "tokio",
@@ -2240,6 +2241,7 @@ dependencies = [
  "serde_json",
  "share",
  "storage",
+ "systemone",
  "thiserror 2.0.18",
  "tokio",
  "utils",
@@ -3346,6 +3348,7 @@ dependencies = [
  "sha2",
  "share",
  "storage",
+ "systemone",
  "task",
  "tempfile",
  "thiserror 2.0.18",
@@ -4034,6 +4037,7 @@ name = "systemone"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "log",
  "reqwest",
  "serde",

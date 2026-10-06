@@ -229,7 +229,7 @@ pub async fn execute_memory(
                     include_archive: false,
                     now: unix_now(),
                 };
-                let result = port.search(&query);
+                let result = port.search(&query).await;
                 if result.hits.is_empty() {
                     return ("(no results)".to_string(), false);
                 }

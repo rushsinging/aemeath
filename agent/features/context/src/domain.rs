@@ -107,6 +107,17 @@ pub enum InvocationReminderData {
     MemoryUpdated {
         changed: usize,
     },
+    /// per-message 记忆主动召回：与当前用户消息最相关的记忆条目预览。
+    MemoryRecall {
+        entries: Vec<MemoryRecallEntryData>,
+    },
+}
+
+/// 记忆召回条目预览（id + 截断内容）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryRecallEntryData {
+    pub id: String,
+    pub content_preview: String,
 }
 
 impl InvocationReminderData {
@@ -132,12 +143,17 @@ impl InvocationReminderData {
         Self::MemoryUpdated { changed }
     }
 
+    pub fn memory_recall(entries: Vec<MemoryRecallEntryData>) -> Self {
+        Self::MemoryRecall { entries }
+    }
+
     pub const fn kind(&self) -> &'static str {
         match self {
             Self::TaskProgress(_) => "task_progress",
             Self::GuidanceSourcesChanged { .. } => "guidance_sources_changed",
             Self::ModelGuidanceMismatch { .. } => "model_guidance_mismatch",
             Self::MemoryUpdated { .. } => "memory_updated",
+            Self::MemoryRecall { .. } => "memory_recall",
         }
     }
 }

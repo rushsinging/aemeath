@@ -568,6 +568,16 @@ impl ContextPort for ContextApplicationService {
             pipeline.step_advanced(step);
         }
     }
+    fn reminder_user_message_received(&self, run_id: &RunId) {
+        if let Some(pipeline) = self
+            .reminder_pipelines
+            .lock()
+            .expect("reminder pipelines lock poisoned")
+            .get_mut(run_id)
+        {
+            pipeline.user_message_received();
+        }
+    }
 }
 
 /// 为带用户输入时刻的 user 消息渲染 LLM 时间前缀 `[YYYY-MM-DD HH:MM ±ZZZZ] `，

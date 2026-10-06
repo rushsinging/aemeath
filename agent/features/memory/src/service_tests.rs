@@ -354,14 +354,16 @@ async fn explicit_search_ranks_non_contiguous_multi_term_matches() {
         .await
         .unwrap();
 
-    let result = service.search(&MemorySearchQuery {
-        text: "rust safety".to_string(),
-        limit: 10,
-        layer: Some(MemoryLayer::Project),
-        category: None,
-        include_archive: false,
-        now: 4_242,
-    });
+    let result = service
+        .search(&MemorySearchQuery {
+            text: "rust safety".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: 4_242,
+        })
+        .await;
 
     let contents = result
         .hits
@@ -403,27 +405,31 @@ async fn explicit_search_matches_chinese_subphrases_and_mixed_code_terms() {
         .await
         .unwrap();
 
-    let chinese = service.search(&MemorySearchQuery {
-        text: "中文回复".to_string(),
-        limit: 10,
-        layer: Some(MemoryLayer::Project),
-        category: None,
-        include_archive: false,
-        now: 4_242,
-    });
+    let chinese = service
+        .search(&MemorySearchQuery {
+            text: "中文回复".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: 4_242,
+        })
+        .await;
     assert_eq!(chinese.hits.len(), 2);
     assert_eq!(chinese.hits[0].entry.content, "用户偏好使用中文回复");
     assert_eq!(chinese.hits[1].entry.content, "MemoryPort 支持中文检索");
     assert!(chinese.hits[0].relevance > chinese.hits[1].relevance);
 
-    let mixed = service.search(&MemorySearchQuery {
-        text: "MemoryPort 中文".to_string(),
-        limit: 10,
-        layer: Some(MemoryLayer::Project),
-        category: None,
-        include_archive: false,
-        now: 4_242,
-    });
+    let mixed = service
+        .search(&MemorySearchQuery {
+            text: "MemoryPort 中文".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: 4_242,
+        })
+        .await;
     assert_eq!(mixed.hits[0].entry.content, "MemoryPort 支持中文检索");
     assert!(
         mixed.hits[0].relevance > mixed.hits[1].relevance,
@@ -458,8 +464,8 @@ async fn explicit_search_chinese_bigram_ranking_is_deterministic() {
         now: 4_242,
     };
 
-    let first_result = service.search(&query);
-    let second_result = service.search(&query);
+    let first_result = service.search(&query).await;
+    let second_result = service.search(&query).await;
     let first_ids = first_result
         .hits
         .iter()
@@ -506,8 +512,8 @@ async fn explicit_search_is_deterministic_and_empty_query_returns_no_hits() {
         now: 4_242,
     };
 
-    let first_result = service.search(&query);
-    let second_result = service.search(&query);
+    let first_result = service.search(&query).await;
+    let second_result = service.search(&query).await;
     let first_ids = first_result
         .hits
         .iter()
@@ -521,10 +527,12 @@ async fn explicit_search_is_deterministic_and_empty_query_returns_no_hits() {
     assert_eq!(first_ids, second_ids);
     assert_eq!(first_ids, vec![first_id, second_id]);
 
-    let empty = service.search(&MemorySearchQuery {
-        text: "  ".to_string(),
-        ..query
-    });
+    let empty = service
+        .search(&MemorySearchQuery {
+            text: "  ".to_string(),
+            ..query
+        })
+        .await;
     assert!(empty.hits.is_empty());
 }
 
@@ -583,14 +591,16 @@ async fn explicit_search_filters_by_tag_category_and_layer() {
         .await
         .unwrap();
 
-    let result = service.search(&MemorySearchQuery {
-        text: "clippy".to_string(),
-        limit: 10,
-        layer: Some(MemoryLayer::Project),
-        category: Some(MemoryCategory::Pattern),
-        include_archive: false,
-        now: 4_242,
-    });
+    let result = service
+        .search(&MemorySearchQuery {
+            text: "clippy".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: Some(MemoryCategory::Pattern),
+            include_archive: false,
+            now: 4_242,
+        })
+        .await;
 
     assert_eq!(result.hits.len(), 1);
     assert_eq!(result.hits[0].entry.tags, vec!["clippy"]);
@@ -621,14 +631,16 @@ async fn explicit_search_includes_archive_status_without_mutation() {
         .await
         .unwrap();
 
-    let result = service.search(&MemorySearchQuery {
-        text: "archive query".to_string(),
-        limit: 10,
-        layer: Some(MemoryLayer::Project),
-        category: None,
-        include_archive: true,
-        now: 4_242,
-    });
+    let result = service
+        .search(&MemorySearchQuery {
+            text: "archive query".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: true,
+            now: 4_242,
+        })
+        .await;
 
     assert_eq!(result.hits.len(), 2);
     let archived_hit = result
@@ -734,14 +746,16 @@ async fn queries_never_call_store() {
         category: None,
         now: 10,
     });
-    service.search(&MemorySearchQuery {
-        text: "searchable".to_string(),
-        limit: 10,
-        layer: None,
-        category: None,
-        include_archive: true,
-        now: 10,
-    });
+    service
+        .search(&MemorySearchQuery {
+            text: "searchable".to_string(),
+            limit: 10,
+            layer: None,
+            category: None,
+            include_archive: true,
+            now: 10,
+        })
+        .await;
     service.list(None);
     service.stats();
     assert_eq!(observer.calls(MemoryLayer::Global), (1, 0));
@@ -878,5 +892,171 @@ async fn open_with_clock_logs_enter_and_failure_exit_without_memory_content() {
     assert!(
         !payloads.iter().any(|msg| msg.contains(secret)),
         "open_with_clock logs must not contain memory content, got {payloads:?}"
+    );
+}
+
+// --- System One 重排（RERANK）------------------------------------------------
+
+use async_trait::async_trait as rerank_async_trait;
+
+/// 固定应答的评分桩：`preferred` 序号的候选给 0.9，其余平分 0.1。
+struct StubScoringPort {
+    outcome: Result<usize, systemone::UnavailableKind>,
+}
+
+#[rerank_async_trait]
+impl systemone::ScoringPort for StubScoringPort {
+    async fn answer(
+        &self,
+        _state: &systemone::ScoringState,
+        questions: &[systemone::ScoringQuestion],
+    ) -> Result<Vec<systemone::ScoringAnswer>, systemone::ScoringUnavailable> {
+        let criterion_count = match &questions[0] {
+            systemone::ScoringQuestion::Choice { criteria, .. } => criteria.len(),
+            _ => panic!("重排应使用 Choice 题型"),
+        };
+        let preferred = self
+            .outcome
+            .map_err(|kind| systemone::ScoringUnavailable::new(kind, "stub 故障"))?;
+        let probabilities: Vec<(String, f64)> = (0..criterion_count)
+            .map(|index| {
+                let probability = if index == preferred {
+                    0.9
+                } else {
+                    0.1 / (criterion_count.saturating_sub(1).max(1)) as f64
+                };
+                (index.to_string(), probability)
+            })
+            .collect();
+        Ok(vec![systemone::ScoringAnswer::choice(
+            preferred.to_string(),
+            probabilities,
+            0.9,
+            systemone::CalibrationLevel::Raw,
+        )
+        .expect("答案构造")])
+    }
+}
+
+fn rerank_service(
+    entries: Vec<MemoryEntry>,
+    scorer: Option<std::sync::Arc<dyn systemone::ScoringPort>>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = MemoryService<ScriptedStore>> + Send>> {
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(
+            vec![Ok(committed(1, MemoryLayer::Project, entries))],
+            vec![],
+        ),
+    );
+    Box::pin(async move {
+        MemoryService::open_with_clock_and_scorer(store, MemoryPolicy::default(), || 4_242, scorer)
+            .await
+            .unwrap()
+    })
+}
+
+fn rerank_query(text: &str, limit: usize) -> MemorySearchQuery {
+    MemorySearchQuery {
+        text: text.to_string(),
+        limit,
+        layer: Some(MemoryLayer::Project),
+        category: None,
+        include_archive: false,
+        now: 4_242,
+    }
+}
+
+#[tokio::test]
+async fn search_with_scorer_reranks_top_candidates() {
+    let service = rerank_service(
+        vec![
+            entry(MemoryLayer::Project, "rust ownership memory safety guide"),
+            entry(MemoryLayer::Project, "rust ownership basics"),
+            entry(MemoryLayer::Project, "python memory safety notes"),
+        ],
+        Some(std::sync::Arc::new(StubScoringPort { outcome: Ok(2) })),
+    )
+    .await;
+
+    let result = service
+        .search(&rerank_query("rust memory safety", 10))
+        .await;
+
+    // 词法序为 [guide(三词全中), python(两词), basics(一词)]；stub 偏好序号 2 = basics。
+    assert_eq!(
+        result.hits.first().map(|hit| hit.entry.content.as_str()),
+        Some("rust ownership basics"),
+        "词法第三名应被评分提升到第一，实际 {:?}",
+        result
+            .hits
+            .iter()
+            .map(|hit| hit.entry.content.as_str())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        result.hits.last().map(|hit| hit.entry.content.as_str()),
+        Some("python memory safety notes"),
+        "词法第二名被压到最后（等概率保持相对序）"
+    );
+}
+
+#[tokio::test]
+async fn search_with_failing_scorer_falls_back_to_lexical_order() {
+    let entries = vec![
+        entry(MemoryLayer::Project, "rust ownership memory safety guide"),
+        entry(MemoryLayer::Project, "python memory safety notes"),
+    ];
+    let scorer: std::sync::Arc<dyn systemone::ScoringPort> = std::sync::Arc::new(StubScoringPort {
+        outcome: Err(systemone::UnavailableKind::Timeout),
+    });
+    let failing = rerank_service(entries.clone(), Some(scorer)).await;
+    let plain = rerank_service(entries, None).await;
+
+    let with_failure = failing
+        .search(&rerank_query("rust memory safety", 10))
+        .await;
+    let without_scorer = plain.search(&rerank_query("rust memory safety", 10)).await;
+
+    let failure_ids: Vec<_> = with_failure.hits.iter().map(|hit| &hit.entry.id).collect();
+    let plain_ids: Vec<_> = without_scorer
+        .hits
+        .iter()
+        .map(|hit| &hit.entry.id)
+        .collect();
+    assert_eq!(
+        failure_ids, plain_ids,
+        "评分失败必须静默回退词法序（与无评分一致）"
+    );
+}
+
+#[tokio::test]
+async fn search_recall_expansion_lets_rerank_promote_beyond_limit() {
+    // limit=1 时：无评分 → 词法 top1；有评分 → 召回扩大后重排可提升词法非 top1 的候选。
+    let entries = vec![
+        entry(MemoryLayer::Project, "rust ownership memory safety guide"),
+        entry(MemoryLayer::Project, "python memory safety notes"),
+    ];
+    let scorer: std::sync::Arc<dyn systemone::ScoringPort> =
+        std::sync::Arc::new(StubScoringPort { outcome: Ok(1) });
+    let scored = rerank_service(entries.clone(), Some(scorer)).await;
+    let plain = rerank_service(entries, None).await;
+
+    let scored_result = scored.search(&rerank_query("rust memory safety", 1)).await;
+    let plain_result = plain.search(&rerank_query("rust memory safety", 1)).await;
+
+    assert_eq!(scored_result.hits.len(), 1);
+    assert_eq!(plain_result.hits.len(), 1);
+    assert_eq!(
+        scored_result.hits[0].entry.content, "python memory safety notes",
+        "召回扩大 + 重排应提升词法第二名"
+    );
+    assert_eq!(
+        plain_result.hits[0].entry.content, "rust ownership memory safety guide",
+        "无评分时应保持词法 top1"
+    );
+    assert_ne!(
+        scored_result.hits[0].entry.id, plain_result.hits[0].entry.id,
+        "重排应改变 top1"
     );
 }

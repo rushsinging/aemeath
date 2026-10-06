@@ -16,6 +16,7 @@ storage = { path = "../features/storage" }
 context = { path = "../features/context" }
 hook = { path = "../features/hook" }
 memory = { path = "../features/memory" }
+systemone = { path = "../features/systemone" }
 task = { path = "../features/task" }
 share = { path = "../shared" }
 sdk = { path = "../../packages/sdk" }
