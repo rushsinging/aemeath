@@ -2,6 +2,9 @@
 
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:tools";
 
+/// 词法高置信阈值：命中分数 ≥ 该值（exact=100 / name contains=80）短路评分。
+pub(crate) const LEXICAL_CONFIDENT_THRESHOLD: f64 = 80.0;
+
 /// ToolSearch 语义重排候选文案字符上限（与 memory 重排同口径，prose 评分头截断防爆 token）。
 pub(crate) const TOOL_SEARCH_CRITERIA_MAX_CHARS: usize = 500;
 

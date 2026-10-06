@@ -437,6 +437,18 @@ impl AgentRunner for CliAgentRunner {
                     derived.skill_load_scope.clone(),
                     derived.instance.context().skill_load_state(),
                 )
+                // #1835：skill_match 开关开启且评分端口装配时注入（与 main run 同判定）。
+                .with_scoring(
+                    derived.instance.context().scoring().filter(|_| {
+                        derived
+                            .instance
+                            .context()
+                            .config_ref()
+                            .config()
+                            .scoring()
+                            .skill_match
+                    }),
+                )
                 .with_progress(progress_sink.clone()),
             );
             let agent = Agent {

@@ -4,14 +4,11 @@
 //! 低置信（仅 desc contains 或零命中）才把候选交 ScoringPort Choice 重排。
 //! 本模块只做判定与排序，不感知 IO 与错误（评分失败由调用方整体回退词法序）。
 
-/// 词法高置信阈值：命中分数 ≥ 该值（exact=100 / name contains=80）短路评分。
-pub(crate) const LEXICAL_CONFIDENT_THRESHOLD: f64 = 80.0;
-
 /// 词法命中是否高置信（短路评分，直接用词法序）。
 pub(crate) fn is_lexical_confident(lexical_scores: &[f64]) -> bool {
     lexical_scores
         .iter()
-        .any(|score| *score >= LEXICAL_CONFIDENT_THRESHOLD)
+        .any(|score| *score >= crate::constants::LEXICAL_CONFIDENT_THRESHOLD)
 }
 
 /// 按评分概率重排候选；缺失 key 的候选按原相对序沉底，概率相等保持原序（稳定）。
