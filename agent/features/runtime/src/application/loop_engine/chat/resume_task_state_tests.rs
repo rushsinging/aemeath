@@ -179,6 +179,7 @@ async fn run_resume(
 ) -> ResumeRecordingSink {
     let sink = ResumeRecordingSink::default();
     let input = SessionCommandDriverInput {
+        background_wakeup: None,
         sink: sink.clone(),
         input_events: ResumeInputEvents::new(session_id),
         session: shell,

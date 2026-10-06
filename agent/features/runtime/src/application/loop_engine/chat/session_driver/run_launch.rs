@@ -41,6 +41,7 @@ where
                 session: shell,
                 read_files,
                 session_queries,
+                mut background_wakeup,
             } = input;
 
             // #1385 TaskData 12: Construct real ChatEventSinkHandle from session sink.
@@ -440,12 +441,15 @@ where
                                   &sink,
                                   &mut pending_input,
                                   task_access.as_ref(),
+                                  background_wakeup.as_mut(),
                               )
                               .await
                           };
 
                 let manual_compaction_run =
                     matches!(idle_result, IdleResult::ManualCompactionRequested);
+                let background_wakeup_run =
+                    matches!(idle_result, IdleResult::BackgroundTaskWakeup);
                 let manual_reflection_run =
                     matches!(idle_result, IdleResult::ManualReflectionRequested);
                 // 手动反思的材料快照必须在 run launch 装配前取自当前 committed session
@@ -488,6 +492,11 @@ where
                     IdleResult::CommandRequested(command) => handle_pending_command!(command),
                     IdleResult::ManualCompactionRequested => {
                         manual_compaction_requested = false;
+                        (ChatId::new_v7().to_string(), Vec::new())
+                    }
+                    IdleResult::BackgroundTaskWakeup => {
+                        // 无用户输入的唤醒 Run（#252）：完成事实由 background_task
+                        // reminder 在本轮注入（D11：不合成用户 turn）。
                         (ChatId::new_v7().to_string(), Vec::new())
                     }
                     IdleResult::ManualReflectionRequested => {
@@ -591,6 +600,8 @@ where
                         RunSpec::manual_compaction()
                     } else if manual_reflection_run {
                         RunSpec::manual_reflection()
+                    } else if background_wakeup_run {
+                        RunSpec::background_task_wakeup()
                     } else {
                         RunSpec::main()
                     },

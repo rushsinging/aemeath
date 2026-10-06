@@ -187,6 +187,9 @@ pub struct SessionRuntime {
     pub(crate) active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
     pub(crate) interaction_bridge: Arc<crate::application::interaction::port::InteractionBridge>,
     pub(crate) session_ingress: Arc<crate::application::session::ingress::SessionIngress>,
+    /// 后台任务运行时（#252 PR2）：session 级监督器 + 唤醒信箱。
+    pub(crate) background_tasks:
+        Arc<crate::application::background_task::session_runtime::BackgroundTaskRuntime>,
 
     // ── Event/Input factories ──
     pub(crate) event_sink_factory: Arc<EventSinkFactory>,
@@ -281,10 +284,29 @@ impl SessionRuntime {
             active_run,
             interaction_bridge,
             session_ingress,
+            background_tasks: Arc::new(
+                crate::application::background_task::session_runtime::BackgroundTaskRuntime::new(),
+            ),
             event_sink_factory,
             input_port_factory,
             runtime_context_factory,
         }
+    }
+
+    /// 取走后台任务唤醒等待端（#252 PR2）：session driver idle 等待点接线。
+    /// 仅首个 driver 有效（一个 session 一个等待端）。
+    pub(crate) fn take_background_wakeup_waiter(
+        &self,
+    ) -> Option<crate::application::session::wakeup::WakeupWaiter> {
+        self.background_tasks.take_wakeup_waiter()
+    }
+
+    /// 后台任务监督器（session 级共享）。
+    pub(crate) fn background_task_supervisor(
+        &self,
+    ) -> std::sync::Arc<crate::application::background_task::supervisor::BackgroundTaskSupervisor>
+    {
+        self.background_tasks.supervisor()
     }
 
     #[cfg(test)]

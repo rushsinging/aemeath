@@ -28,6 +28,7 @@ pub(super) async fn chat_impl(
                 session_queries: Arc::new(AgentSessionQuery::new(Arc::new(AgentClientImpl {
                     inner: inner.clone(),
                 }))),
+                background_wakeup: shell.take_background_wakeup_waiter(),
             },
         )
         .await;

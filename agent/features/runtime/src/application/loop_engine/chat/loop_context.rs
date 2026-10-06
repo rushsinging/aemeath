@@ -41,4 +41,6 @@ where
     pub session: crate::application::client::SessionRuntime,
     pub read_files: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     pub session_queries: Arc<dyn crate::ports::SessionQueryPort>,
+    /// 后台任务唤醒等待端（#252 PR2）：session 级一份，idle 等待点 select。
+    pub background_wakeup: Option<crate::application::session::wakeup::WakeupWaiter>,
 }
