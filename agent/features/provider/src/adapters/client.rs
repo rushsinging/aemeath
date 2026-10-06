@@ -187,6 +187,47 @@ pub fn wire_provider_client(
     Ok(Arc::new(client))
 }
 
+/// 单模型装配产物：就绪客户端 + 该模型的 capability + 生效推理档位。
+///
+/// factory build 的 provider 侧内核产物（runtime 的 binding 组装由组合根
+/// 桥接完成，BC 翻译不进 provider）。
+pub struct ProviderAssemblyWiring {
+    pub client: Arc<LlmClient>,
+    pub capability: crate::published_language::ModelCapabilityData,
+    pub requested_reasoning: ReasoningLevel,
+}
+
+/// factory build 的 provider 侧装配内核：构造配置 + 模型元数据 →
+/// (client, capability, 生效推理档位)。
+///
+/// capability 构造（推理阶梯 + 调用限制）全部收编于此；跨 BC 的
+/// spec→config 翻译与 binding 组装留在组合根桥接层。
+pub fn wire_provider_assembly(
+    options: LlmConfigOptionsData,
+    model: crate::published_language::ModelIdData,
+    pool: &crate::adapters::pool::TransportPool,
+    default_reasoning: ReasoningLevel,
+    context_limit: Option<usize>,
+    max_output_tokens: u32,
+) -> Result<ProviderAssemblyWiring, crate::ProviderError> {
+    let client = wire_provider_client(options, pool, default_reasoning)?;
+    let max_reasoning = client.max_reasoning_level();
+    let capability = crate::published_language::ModelCapabilityData {
+        model,
+        supports_tools: true,
+        supports_parallel_tool_calls: true,
+        supports_streaming: true,
+        reasoning: crate::domain::capability::reasoning_capability_from_max(max_reasoning),
+        context_limit,
+        output_limit: Some(max_output_tokens as usize),
+    };
+    Ok(ProviderAssemblyWiring {
+        requested_reasoning: client.default_scope().requested_reasoning(),
+        client,
+        capability,
+    })
+}
+
 #[cfg(test)]
 #[path = "client_tests.rs"]
 mod tests;

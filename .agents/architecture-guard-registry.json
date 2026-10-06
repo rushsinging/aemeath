@@ -262,6 +262,18 @@
       "tracking_issue": 1861
     },
     {
+      "id": "construction.provider.wire-provider-assembly",
+      "symbol": "wire_provider_assembly",
+      "owner_crate": "provider",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Factory build kernel (client assembly + capability derivation) is owned by provider; composition only bridges runtime spec translation and binding assembly (#1861)",
+      "tracking_issue": 1861
+    },
+    {
       "id": "construction.runtime.wire-active-run-registry",
       "symbol": "wire_active_run_registry",
       "owner_crate": "runtime",

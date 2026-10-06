@@ -133,37 +133,23 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
             user_agent: Some(spec.user_agent),
         };
 
-        let client = provider::composition::wire_provider_client(
+        let assembly = provider::composition::wire_provider_assembly(
             config,
+            spec.model.clone(),
             self.pool.as_ref(),
             spec.requested_reasoning,
+            spec.context_window,
+            spec.max_tokens,
         )?;
 
-        // Build a ReasoningCapabilityData whose supported levels are every level
-        // from Off up to the client's reported max reasoning level (inclusive).
-        let max_reasoning = client.max_reasoning_level();
-        let reasoning_cap = provider::composition::reasoning_capability_from_max(max_reasoning);
-
-        let requested_reasoning = client.default_scope().requested_reasoning();
-
-        let capability = ModelCapabilityData {
-            model: spec.model.clone(),
-            supports_tools: true,
-            supports_parallel_tool_calls: true,
-            supports_streaming: true,
-            reasoning: reasoning_cap,
-            context_limit: spec.context_window,
-            output_limit: Some(spec.max_tokens as usize),
-        };
-
-        let capabilities = HashMap::from([(spec.model.clone(), capability)]);
-        let port = provider_port(client, capabilities);
+        let capabilities = HashMap::from([(spec.model.clone(), assembly.capability)]);
+        let port = provider_port(assembly.client, capabilities);
 
         Ok(ProviderBindingData {
             provider: port,
             model: spec.model,
             max_tokens: spec.max_tokens,
-            requested_reasoning,
+            requested_reasoning: assembly.requested_reasoning,
             context_window: spec.context_window,
         })
     }

@@ -192,3 +192,67 @@ fn wire_provider_client_maps_configuration_failures_to_provider_error() {
     };
     assert_eq!(error.kind, crate::ProviderErrorKind::Configuration);
 }
+
+/// wire_provider_assembly 是 factory build 的 provider 侧装配内核：
+/// config + 模型元数据 → (client, capability, 生效推理档位)，
+/// capability 的 supports_*/reasoning/limits 构造全部收编于此。
+#[test]
+fn wire_provider_assembly_builds_capability_from_client_and_model_meta() {
+    use crate::published_language::ModelIdData;
+    use crate::published_language::ReasoningMappingKindData;
+
+    let pool = TransportPool::new();
+    let assembly = super::wire_provider_assembly(
+        pooled_config("claude-a", 8192, Some("https://api.anthropic.com")),
+        ModelIdData {
+            provider: "Anthropic".to_string(),
+            model: "claude-a".to_string(),
+        },
+        &pool,
+        ReasoningLevel::Medium,
+        Some(200_000),
+        8192,
+    )
+    .expect("assembly must build");
+
+    assert_eq!(assembly.requested_reasoning, ReasoningLevel::Medium);
+    assert!(assembly.capability.supports_tools);
+    assert!(assembly.capability.supports_streaming);
+    assert_eq!(assembly.capability.context_limit, Some(200_000));
+    assert_eq!(assembly.capability.output_limit, Some(8192));
+    assert!(assembly
+        .capability
+        .reasoning
+        .supported()
+        .contains(&ReasoningLevel::Medium));
+    assert_eq!(
+        assembly.capability.reasoning.mapping,
+        ReasoningMappingKindData::Effort
+    );
+    assert_eq!(assembly.client.model_name(), "claude-a");
+}
+
+#[test]
+fn wire_provider_assembly_maps_config_failures_to_provider_error() {
+    use crate::published_language::ModelIdData;
+
+    let pool = TransportPool::new();
+    let mut config = pooled_config("claude-a", 16, None);
+    config.driver = "not-a-real-driver".to_string();
+
+    let error = match super::wire_provider_assembly(
+        config,
+        ModelIdData {
+            provider: "Anthropic".to_string(),
+            model: "claude-a".to_string(),
+        },
+        &pool,
+        ReasoningLevel::Off,
+        Some(200_000),
+        16,
+    ) {
+        Err(error) => error,
+        Ok(_) => panic!("unknown driver must fail"),
+    };
+    assert_eq!(error.kind, crate::ProviderErrorKind::Configuration);
+}
