@@ -1,6 +1,6 @@
 use crate::domain::{
-    AgentDispatch, CancellationSignal, ExecutionScope, FixedGuidance, FixedPlanMode, MutexReadSet,
-    ProgressSink, ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
+    AgentDispatch, CancellationSignal, ExecutionScope, FixedGuidance, MutexReadSet, ProgressSink,
+    ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
 };
 use async_trait::async_trait;
 use project::{WorkspaceControl, WorkspaceData, WorkspaceReader};
@@ -174,7 +174,7 @@ pub(crate) fn workspace_control(ctx: &ToolExecutionContext) -> Arc<dyn Workspace
 }
 
 /// Purpose-built, runtime-free fixture for domain and ordinary adapter unit tests.
-pub(crate) struct TestToolExecutionContextBuilder {
+pub struct TestToolExecutionContextBuilder {
     root: PathBuf,
     allow_all: bool,
     read_files: HashSet<String>,
@@ -183,7 +183,7 @@ pub(crate) struct TestToolExecutionContextBuilder {
 }
 
 impl TestToolExecutionContextBuilder {
-    pub(crate) fn new(root: PathBuf) -> Self {
+    pub fn new(root: PathBuf) -> Self {
         Self {
             root,
             allow_all: false,
@@ -192,23 +192,23 @@ impl TestToolExecutionContextBuilder {
             progress: None,
         }
     }
-    pub(crate) fn allow_all(mut self, value: bool) -> Self {
+    pub fn allow_all(mut self, value: bool) -> Self {
         self.allow_all = value;
         self
     }
-    pub(crate) fn read_file(mut self, path: impl Into<String>) -> Self {
+    pub fn read_file(mut self, path: impl Into<String>) -> Self {
         self.read_files.insert(path.into());
         self
     }
-    pub(crate) fn agent(mut self, agent: Arc<dyn AgentDispatch>) -> Self {
+    pub fn agent(mut self, agent: Arc<dyn AgentDispatch>) -> Self {
         self.agent = Some(agent);
         self
     }
-    pub(crate) fn progress_sink(mut self, sink: Arc<dyn ProgressSink>) -> Self {
+    pub fn progress_sink(mut self, sink: Arc<dyn ProgressSink>) -> Self {
         self.progress = Some(sink);
         self
     }
-    pub(crate) fn build(self) -> ToolExecutionContext {
+    pub fn build(self) -> ToolExecutionContext {
         let authorization = if self.allow_all {
             crate::domain::context::AuthorizationContext::ALLOW_ALL
         } else {
@@ -225,7 +225,6 @@ impl TestToolExecutionContextBuilder {
             Arc::new(FakeCancellation),
             fake_workspace_read_access(workspace),
             Arc::new(MutexReadSet(Arc::new(Mutex::new(self.read_files)))),
-            Arc::new(FixedPlanMode(None)),
             Arc::new(memory::api::NoOpMemory),
             Arc::new(FixedGuidance {
                 language: "en".into(),
@@ -235,4 +234,24 @@ impl TestToolExecutionContextBuilder {
         .with_progress(self.progress);
         ToolExecutionContext::new(scope, ports).with_authorization(authorization)
     }
+}
+
+/// 测试用单工具 Catalog：sequential / NonCooperative / 指定 timeout。
+pub fn sequential_test_tool_catalog(
+    tool_name: &str,
+    timeout_secs: u64,
+) -> crate::ToolCatalogSnapshot {
+    let descriptor = crate::domain::published_language::ToolDescriptor {
+        name: crate::ToolName::new(tool_name),
+        description: format!("test tool {tool_name}"),
+        input_schema: serde_json::json!({}),
+        required_capabilities: crate::ToolCapabilities::empty(),
+        concurrency: crate::domain::published_language::ConcurrencyDeclaration::serialized(),
+        cancellation: crate::domain::published_language::CancellationDeclaration::NonCooperative,
+        timeout_secs,
+        read_only: true,
+        input_safety: crate::domain::published_language::InputSafetyDeclaration::Always,
+        data_schema: serde_json::json!({}),
+    };
+    crate::ToolCatalogSnapshot::new("main", "standard", vec![descriptor])
 }

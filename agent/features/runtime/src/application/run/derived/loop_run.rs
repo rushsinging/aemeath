@@ -104,7 +104,6 @@ pub(super) async fn launch_sub_run(
         ProgressToolRoundObserver,
     >,
     mut stuck: DerivedStuckObserver,
-    plan_mode: bool,
     finalizer: SubRunFinalizer,
 ) -> AgentRunTerminal {
     let runtime_context = instance.context().clone();
@@ -117,8 +116,6 @@ pub(super) async fn launch_sub_run(
         lifecycle_active_run.as_ref(),
         crate::application::loop_engine::run_ports::StepScopeRegistration::Disabled,
     );
-    let plan_approval =
-        crate::application::loop_engine::run_ports::FixedPlanApproval::new(plan_mode);
     let mut loop_context = crate::application::loop_engine::RunLoop::new(
         &mut input,
         &mut events,
@@ -131,7 +128,6 @@ pub(super) async fn launch_sub_run(
         &mut stop_hook,
         &mut tools,
         &mut stuck,
-        &plan_approval,
     );
     let launch_result =
         crate::application::run::launcher::launch(instance, cancel, active_run, &mut loop_context)

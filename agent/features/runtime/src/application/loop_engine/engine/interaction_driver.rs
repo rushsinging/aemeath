@@ -412,23 +412,6 @@ pub(super) async fn dispatch_continuation(
             // 这里按相位补收口 transition，使 run 回到可 drain 的状态。
             close_out_hard_pause_resume(run, execution, port).await?;
         }
-        InteractionContinuation::ContinuePlanApproval => {
-            if matches!(
-                reply,
-                sdk::InteractionReply::PlanApproval(sdk::ApprovalDecision::Deny { .. })
-            ) {
-                InteractionCoordinator::cleanup_run(
-                    run,
-                    execution,
-                    port.interaction_port(),
-                    &metadata.run_id,
-                    sdk::InteractionCancelReason::UserCancelled,
-                );
-                emit_events(run, execution, port).await?;
-            }
-            // On approve: complete_interaction already transitioned back;
-            // the step was already completed in handle_plan_approval.
-        }
         InteractionContinuation::ContinueToolApproval(tool_call_id) => {
             if matches!(
                 reply,
@@ -778,78 +761,4 @@ pub(super) async fn close_out_hard_pause_resume(
             "HardPause 恢复相位非法：期望 DrainingInput 或 ApplyingResponse，实际 {other:?}"
         ))),
     }
-}
-
-/// #1248 TaskData 5: Handle plan approval via the interaction coordinator.
-/// When the model produces a Complete response in plan mode, the user must review
-/// the plan before the run proceeds. On approve, the run continues; on reject,
-/// the run is cancelled.
-pub(super) async fn handle_plan_approval(
-    run: &mut Run,
-    execution: &mut RunExecutionState,
-    port: &mut RunLoop<'_>,
-    step_id: &sdk::RunStepId,
-    plan_text: &str,
-) -> Result<(), LoopEngineError> {
-    use crate::application::interaction::coordinator::InteractionCoordinator;
-
-    let request_id = sdk::InteractionRequestId::new_v7();
-    let body = sdk::InteractionRequestBody::PlanApproval(sdk::PlanApprovalPrompt {
-        plan_title: String::new(),
-        steps: vec![plan_text.to_string()],
-    });
-    let continuation = InteractionContinuation::ContinuePlanApproval;
-    let run_id = run.id().clone();
-
-    let (_rid, receiver) = InteractionCoordinator::begin(
-        run,
-        port.interaction_port(),
-        request_id.clone(),
-        run_id.clone(),
-        body.clone(),
-        continuation.clone(),
-    )
-    .map_err(|e| {
-        log::error!(target: crate::LOG_TARGET, "PlanApproval interaction begin failed: {e:?}");
-        LoopEngineError::Adapter(format!("PlanApproval interaction unavailable: {e:?}"))
-    })?;
-
-    let request = sdk::InteractionRequest {
-        id: request_id.clone(),
-        run_id: run_id.clone(),
-        tool_call_id: None,
-        body: body.clone(),
-    };
-    let _interaction_activity_id = port.start_interaction_activity(
-        step_id.clone(),
-        request_id.clone(),
-        sdk::InteractionKindView::PlanApproval,
-    )?;
-    port.publish_interaction(execution, &request).await?;
-    let metadata = crate::application::interaction::port::InteractionRequestMetadata::new(
-        request_id.clone(),
-        run_id.clone(),
-        body.clone(),
-        continuation.clone(),
-    );
-    crate::application::interaction::coordinator::InteractionCoordinator::store_mailbox_receiver(
-        execution, metadata, receiver,
-    )
-    .map_err(|error| {
-        LoopEngineError::Adapter(format!(
-            "interaction mailbox registration failed: {error:?}"
-        ))
-    })?;
-
-    run.complete_step(step_id)?;
-    run_step_finalization_phase(
-        execution,
-        port.persistence_mut(),
-        step_id,
-        crate::ports::FinalizeCause::Completed,
-    )
-    .await?;
-    emit_events(run, execution, port).await?;
-
-    Ok(())
 }

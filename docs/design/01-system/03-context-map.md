@@ -134,7 +134,7 @@ Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启
 ## 10. 四条 Context Map 决策
 
 1. **Audit = Pub/Sub 单向 Usage 事实**：Runtime 只做非阻塞 try_record，不等待 Audit IO；Audit MVP 只记录 Usage metadata，不影响 Runtime。Cost/Pricing 保留为 Future。
-2. **Interaction 不成 BC**：ask_user / 权限审批 / plan mode / pause-resume 是 Runtime 的用例族，经唯一 Runtime-owned `InteractionPort` + Policy-owned `PolicyPort` 协作，由不同触发源（tool suspension / policy / user）复用。
+2. **Interaction 不成 BC**：ask_user / 权限审批 / pause-resume 是 Runtime 的用例族，经唯一 Runtime-owned `InteractionPort` + Policy-owned `PolicyPort` 协作，由不同触发源（tool suspension / policy / user）复用。
 3. **Task 类型 = Task BC 的 Published Language**（非 Shared Kernel）：由 Task BC 独占不变量，其他 BC 引用其发布类型。
 4. **Runtime 无 Project 端口**：`WorkspaceMode` 只驱动 Composition 的 scope 策略；Main 复用 active-main-session-slot 的同一 Project wiring，Sub 才从父 scope 派生 isolated run scope。Tool 与 Context Management 直接消费对应 wiring 发布的窄 view，**NEVER** 再叠加 Runtime 或 Tool Workspace façade。
 

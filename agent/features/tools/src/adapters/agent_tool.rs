@@ -109,7 +109,6 @@ Instructions:- Complete the task described in the user message
                 memory: ctx.memory(),
                 catalog: ctx.catalog_query(),
                 read_set: ctx.read_set(),
-                plan_mode: ctx.plan_mode_state(),
                 guidance: ctx.guidance(),
                 timeout,
                 agent_name: args.agent.as_str(),

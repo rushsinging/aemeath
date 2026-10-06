@@ -160,9 +160,6 @@ impl Run {
                 InteractionContinuation::ContinueToolApproval(_),
                 RunStatus::AwaitingToolApproval
             ) | (
-                InteractionContinuation::ContinuePlanApproval,
-                RunStatus::ApplyingResponse
-            ) | (
                 InteractionContinuation::ContinueAfterHardPause,
                 RunStatus::ExecutingTools
                     | RunStatus::ApplyingResponse

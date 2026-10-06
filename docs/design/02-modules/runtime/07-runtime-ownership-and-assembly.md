@@ -568,7 +568,7 @@ async fn run_loop(
 
 ### 6.1 fat capability trait 是伪聚合根
 
-`LoopCapabilityAdapter`、fat `RunLoopPort` 以及任何同构替代物都不是合法的领域抽象。它们没有领域 identity、生命周期或自身不变量，却要求同一个对象同时承担输入、事件、控制、生命周期、Interaction、Step 持久化、Compaction、模型调用、Stop Hook、工具轮次、stuck handling 与 plan approval，因而在调用图中成为与 `Run`、`RunExecutionState`、`RuntimeContext` 并列的第四个状态中心。
+`LoopCapabilityAdapter`、fat `RunLoopPort` 以及任何同构替代物都不是合法的领域抽象。它们没有领域 identity、生命周期或自身不变量，却要求同一个对象同时承担输入、事件、控制、生命周期、Interaction、Step 持久化、Compaction、模型调用、Stop Hook、工具轮次、stuck handling，因而在调用图中成为与 `Run`、`RunExecutionState`、`RuntimeContext` 并列的第四个状态中心。
 
 这种技术性能力全集会产生三个后果：
 

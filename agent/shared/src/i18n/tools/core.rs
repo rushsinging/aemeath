@@ -1,4 +1,4 @@
-//! 核心工具文案（agent/memory/skill/plan_mode/ask_user/brief/sleep/tool_search 的 description）。
+//! 核心工具文案（agent/memory/skill/ask_user/brief/sleep/tool_search 的 description）。
 
 /// Agent description。
 ///
@@ -70,22 +70,6 @@ Usage:
 - Optional args are passed to the skill content
 - Available skills are listed in system messages"#
         }
-    }
-}
-
-/// EnterPlanMode description。
-pub fn enter_plan_mode(lang: &str) -> &'static str {
-    match lang {
-        "zh" => "进入计划模式。计划模式下工具调用被模拟、不会真正执行。当需要在采取行动前制定详细计划时使用。",
-        _ => "Enter plan mode. In plan mode, tool calls are simulated and not actually executed. Use this when you need to create a detailed plan before taking actions.",
-    }
-}
-
-/// ExitPlanMode description。
-pub fn exit_plan_mode(lang: &str) -> &'static str {
-    match lang {
-        "zh" => "退出计划模式并恢复正常执行。可选地执行模拟过的计划动作。",
-        _ => "Exit plan mode and return to normal execution. Optionally execute the planned actions that were simulated.",
     }
 }
 

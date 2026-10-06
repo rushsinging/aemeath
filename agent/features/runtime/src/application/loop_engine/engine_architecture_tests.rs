@@ -636,7 +636,6 @@ struct ToolOrchestrationFake {
 #[derive(Clone)]
 struct StuckHandlingFake(Arc<std::sync::Mutex<ScriptedState>>);
 struct StopHookFake;
-struct PlanApprovalFake;
 struct InteractionMailboxFake {
     state: Arc<std::sync::Mutex<ScriptedState>>,
     interaction_bridge: Arc<InteractionBridge>,
@@ -659,7 +658,6 @@ struct ScriptedPorts {
     stop_hook: StopHookFake,
     tools: ToolOrchestrationFake,
     stuck: StuckHandlingFake,
-    plan_approval: PlanApprovalFake,
 }
 
 pub(crate) struct ScenarioLoopHarness {
@@ -895,7 +893,6 @@ impl ScriptedScenario {
                     controls,
                 },
                 stuck: StuckHandlingFake(state),
-                plan_approval: PlanApprovalFake,
             });
         }
         self.ports.as_mut().expect("scripted ports must exist")
@@ -974,7 +971,6 @@ impl ScriptedPorts {
             &mut self.stop_hook,
             &mut self.tools,
             &mut self.stuck,
-            &self.plan_approval,
         );
         run_loop.bind_manual_compaction(&mut self.manual_compaction);
         run_loop
@@ -1441,8 +1437,6 @@ impl StuckHandlingPort for StuckHandlingFake {
         Ok(())
     }
 }
-
-impl PlanApprovalPort for PlanApprovalFake {}
 
 impl crate::application::interaction::coordinator::InteractionCompletionContextProvider
     for InteractionMailboxFake

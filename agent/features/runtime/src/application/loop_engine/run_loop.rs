@@ -5,9 +5,8 @@ use crate::application::hook::stop_coordination::{StopHookObserver, StopHookOutc
 use crate::application::loop_engine::{
     CompactProgressView, CompactionPort, EventSinkPort, InputPort, InteractionMailboxPort,
     InternalContinuationKind, LoopEngineError, ManualCompactionPort, ManualReflectionPort,
-    ModelInvocationPort, PendingInteractionWork, PlanApprovalPort, ReflectionPhasePort,
-    RunControlPort, RunLifecyclePort, StepPersistencePort, StuckDecision, StuckHandlingPort,
-    ToolOrchestrationPort,
+    ModelInvocationPort, PendingInteractionWork, ReflectionPhasePort, RunControlPort,
+    RunLifecyclePort, StepPersistencePort, StuckDecision, StuckHandlingPort, ToolOrchestrationPort,
 };
 use crate::application::run::execution_state::RunExecutionState;
 use crate::domain::agent_run::RuntimeLifecycleEvent;
@@ -68,7 +67,6 @@ pub struct RunLoop<'a> {
     stop_hook: &'a mut dyn StopHookObserver,
     tools: &'a mut dyn ToolOrchestrationPort,
     stuck: &'a mut dyn StuckHandlingPort,
-    plan_approval: &'a dyn PlanApprovalPort,
     activities: Option<std::sync::Arc<ActivityCoordinator>>,
     model_name: Option<String>,
 }
@@ -87,7 +85,6 @@ impl<'a> RunLoop<'a> {
         stop_hook: &'a mut dyn StopHookObserver,
         tools: &'a mut dyn ToolOrchestrationPort,
         stuck: &'a mut dyn StuckHandlingPort,
-        plan_approval: &'a dyn PlanApprovalPort,
     ) -> Self {
         Self {
             input,
@@ -104,7 +101,6 @@ impl<'a> RunLoop<'a> {
             stop_hook,
             tools,
             stuck,
-            plan_approval,
             activities: None,
             model_name: None,
         }
@@ -472,10 +468,6 @@ impl<'a> RunLoop<'a> {
         decision: &StuckDecision,
     ) -> Result<(), LoopEngineError> {
         self.stuck.on_stuck(execution, decision).await
-    }
-
-    pub(super) fn needs_plan_approval(&self) -> bool {
-        self.plan_approval.needs_plan_approval()
     }
 }
 

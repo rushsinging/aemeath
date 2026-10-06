@@ -74,8 +74,6 @@ const FULL: &[&str] = &[
     "AskUserQuestion",
     "Brief",
     "ToolSearch",
-    "EnterPlanMode",
-    "ExitPlanMode",
     "EnterWorktree",
     "ExitWorktree",
     "Skill",

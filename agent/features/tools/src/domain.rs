@@ -27,8 +27,8 @@ pub mod skill_ports;
 pub mod skill_state;
 pub mod skill_tool;
 pub mod suspension;
-#[cfg(test)]
-pub(crate) mod test_support;
+#[cfg(any(test, feature = "test-harness"))]
+pub mod test_support;
 pub mod tool;
 #[cfg(test)]
 #[path = "domain/tool_tests.rs"]
@@ -62,9 +62,9 @@ pub use command_pl::{
 };
 pub use command_ports::{CommandCatalogPort, CommandRouterPort};
 pub use context::{
-    AuthorizationContext, CancellationSignal, ExecutionScope, FixedGuidance, FixedPlanMode,
-    Guidance, InvocationSource, MutexReadSet, PlanModeState, ProgressSink, ReadSet,
-    ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
+    AuthorizationContext, CancellationSignal, ExecutionScope, FixedGuidance, Guidance,
+    InvocationSource, MutexReadSet, ProgressSink, ReadSet, ToolExecutionContext,
+    ToolExecutionPorts, WorkspaceReadAccess,
 };
 pub use memory_source::MemoryPortSource;
 pub use ports::{ToolCatalogPort, ToolExecutionPort};

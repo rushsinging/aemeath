@@ -1,6 +1,6 @@
 use crate::domain::{
-    CancellationSignal, ExecutionScope, FixedGuidance, FixedPlanMode, MutexReadSet,
-    ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
+    CancellationSignal, ExecutionScope, FixedGuidance, MutexReadSet, ToolExecutionContext,
+    ToolExecutionPorts, WorkspaceReadAccess,
 };
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
@@ -59,7 +59,6 @@ pub(crate) fn production_execution_context(root: PathBuf) -> ToolExecutionContex
             Arc::new(TestCancellation),
             WorkspaceReadAccess::new(read),
             Arc::new(MutexReadSet(Arc::new(Mutex::new(HashSet::new())))),
-            Arc::new(FixedPlanMode(None)),
             Arc::new(memory::api::NoOpMemory),
             Arc::new(FixedGuidance {
                 language: "en".into(),

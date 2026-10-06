@@ -57,7 +57,6 @@ enum ToolCapability {
     TaskRead,
     TaskMutation,
     WorkspaceControl,
-    PlanControl,
 }
 ```
 

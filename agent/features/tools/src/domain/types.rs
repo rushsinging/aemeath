@@ -55,7 +55,6 @@ pub mod list_mcp_resources;
 pub mod mcp_manager;
 pub mod mcp_tool;
 pub mod memory;
-pub mod plan_mode;
 pub mod read_mcp_resource;
 pub mod task_block_by;
 pub mod task_create;
@@ -79,7 +78,6 @@ pub use memory::{
     MemoryEvictionCandidateResult, MemoryLayerInput, MemoryListInput, MemoryLocationResult,
     MemoryResult, MemorySearchHitResult, MemorySearchInput, MemoryStatus, MemoryUpdateInput,
 };
-pub use plan_mode::{EnterPlanModeInput, ExitPlanModeInput, PlanModeResult};
 pub use read_mcp_resource::ReadMcpResourceResult;
 pub use task_block_by::{TaskBlockByInput, TaskBlockByResult};
 pub use task_create::{TaskCreateInput, TaskCreateResult};

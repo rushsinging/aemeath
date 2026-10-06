@@ -1,8 +1,7 @@
 use tokio_util::sync::CancellationToken;
 
 use crate::application::loop_engine::{
-    LoopEngineError, PlanApprovalPort, RunControlPort, RunLifecyclePort, StuckDecision,
-    StuckHandlingPort,
+    LoopEngineError, RunControlPort, RunLifecyclePort, StuckDecision, StuckHandlingPort,
 };
 use crate::application::run::execution_state::RunExecutionState;
 use crate::domain::agent_run::ActiveRunPort;
@@ -67,22 +66,6 @@ impl RunLifecyclePort for ActiveRunLifecycle<'_> {
         if let StepScopeRegistration::Active(active_run) = self.step_scope {
             active_run.clear_main_active_step(run_id, step_id);
         }
-    }
-}
-
-pub(crate) struct FixedPlanApproval {
-    required: bool,
-}
-
-impl FixedPlanApproval {
-    pub(crate) fn new(required: bool) -> Self {
-        Self { required }
-    }
-}
-
-impl PlanApprovalPort for FixedPlanApproval {
-    fn needs_plan_approval(&self) -> bool {
-        self.required
     }
 }
 

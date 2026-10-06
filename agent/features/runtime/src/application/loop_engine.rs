@@ -26,9 +26,9 @@ pub use engine::{
     InteractionWorkOutcome, InternalContinuationKind, LoopDirective, LoopEngineError, LoopInput,
     ManualCompactionOutcome, ManualCompactionPort, ManualReflectionOutcome, ManualReflectionPort,
     ModelInvocationPort, ModelStep, PendingInteractionItem, PendingInteractionWork,
-    PlanApprovalPort, ReflectionPhasePort, RunControlPort, RunLifecyclePort, StepCommit,
-    StepPersistencePort, StepTokenUsage, StuckHandlingPort, SuspendedQuestion, SuspendedToolCall,
-    ToolGuardDecision, ToolOrchestrationPort, ToolStep,
+    ReflectionPhasePort, RunControlPort, RunLifecyclePort, StepCommit, StepPersistencePort,
+    StepTokenUsage, StuckHandlingPort, SuspendedQuestion, SuspendedToolCall, ToolGuardDecision,
+    ToolOrchestrationPort, ToolStep,
 };
 pub use run_loop::RunLoop;
 pub use stuck_guard::{StuckDecision, StuckGuard};

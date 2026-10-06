@@ -210,8 +210,6 @@ impl AgentRunner for CliAgentRunner {
         let request_progress = request.progress;
         // #1385: request catalog/memory are NOT used for child;
         // all catalog/memory access comes from derived.instance.context().
-        let plan_mode = request.plan_mode;
-        let plan_mode_active = plan_mode.is_plan_mode().unwrap_or(false);
         let guidance = request.guidance;
         let timeout = request.timeout;
         let agent_name = request.agent_name;
@@ -425,7 +423,6 @@ impl AgentRunner for CliAgentRunner {
                     Arc::new(tools::MutexReadSet(Arc::new(std::sync::Mutex::new(
                         std::collections::HashSet::new(),
                     )))),
-                    plan_mode,
                     derived.instance.context().memory(),
                     guidance,
                 )
@@ -481,6 +478,10 @@ impl AgentRunner for CliAgentRunner {
                             .current_workspace_root(),
                     ),
                 runtime_cancellation: runtime_token.clone(),
+                // Sub Run 禁用自动转后台（#252 D14）：子代理收口后其占位
+                // 无处回注、通知无法语义路由；子代理整体已作为父侧后台
+                // 任务的执行体，内部保持同步语义。
+                background_threshold: None,
             };
 
             if let Some(ref sink) = progress_sink {
@@ -663,7 +664,6 @@ impl AgentRunner for CliAgentRunner {
                 stop_hook,
                 tools,
                 stuck,
-                plan_mode_active,
                 finalizer,
             )
             .await;

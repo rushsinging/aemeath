@@ -148,7 +148,6 @@ pub(crate) fn make_agent(
                 crate::application::run::workspace::RuntimeWorkspaceAccess::new(workspace.clone())
                     .read_access(),
                 Arc::new(tools::MutexReadSet(read_files)),
-                Arc::new(tools::FixedPlanMode(None)),
                 runtime_context.memory(),
                 Arc::new(tools::FixedGuidance {
                     language: language.to_string(),
@@ -179,6 +178,9 @@ pub(crate) fn make_agent(
                 workspace.read().current_workspace_root(),
             ),
         runtime_cancellation: cancel.clone(),
+        background_threshold: crate::application::run::config::background_threshold_from_context(
+            runtime_context,
+        ),
     }
 }
 

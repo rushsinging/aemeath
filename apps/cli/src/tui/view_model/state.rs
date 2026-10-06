@@ -10,8 +10,6 @@ pub(crate) static TOOL_DISPLAY_NAMES: LazyLock<HashMap<&'static str, &'static st
             ("Grep", "Search"),
             ("EnterWorktree", "Enter Worktree"),
             ("ExitWorktree", "Exit Worktree"),
-            ("EnterPlanMode", "Enter Plan Mode"),
-            ("ExitPlanMode", "Exit Plan Mode"),
             ("AskUserQuestion", "Ask"),
             ("TaskCreate", "New Task"),
             ("TaskUpdate", "Update Task"),

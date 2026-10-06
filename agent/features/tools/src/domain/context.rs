@@ -117,9 +117,6 @@ pub trait ReadSet: Send + Sync {
     fn record(&self, path: &str);
     fn contains(&self, path: &str) -> bool;
 }
-pub trait PlanModeState: Send + Sync {
-    fn is_plan_mode(&self) -> Option<bool>;
-}
 pub trait Guidance: Send + Sync {
     fn language(&self) -> &str;
 }
@@ -149,7 +146,6 @@ pub struct ToolExecutionPorts {
     progress: Option<Arc<dyn ProgressSink>>,
     workspace: WorkspaceReadAccess,
     read_set: Arc<dyn ReadSet>,
-    plan_mode: Arc<dyn PlanModeState>,
     memory: Arc<dyn memory::api::MemoryPort>,
     parent_session_id: Option<String>,
     guidance: Arc<dyn Guidance>,
@@ -166,7 +162,6 @@ impl ToolExecutionPorts {
         cancellation: Arc<dyn CancellationSignal>,
         workspace: WorkspaceReadAccess,
         read_set: Arc<dyn ReadSet>,
-        plan_mode: Arc<dyn PlanModeState>,
         memory: Arc<dyn memory::api::MemoryPort>,
         guidance: Arc<dyn Guidance>,
     ) -> Self {
@@ -177,7 +172,6 @@ impl ToolExecutionPorts {
             progress: None,
             workspace,
             read_set,
-            plan_mode,
             memory,
             parent_session_id: None,
             guidance,
@@ -278,12 +272,6 @@ impl ToolExecutionContext {
     pub fn read_set(&self) -> Arc<dyn ReadSet> {
         self.ports.read_set.clone()
     }
-    pub fn plan_mode(&self) -> Option<bool> {
-        self.ports.plan_mode.is_plan_mode()
-    }
-    pub fn plan_mode_state(&self) -> Arc<dyn PlanModeState> {
-        self.ports.plan_mode.clone()
-    }
     pub fn memory(&self) -> Arc<dyn memory::api::MemoryPort> {
         self.ports.memory.clone()
     }
@@ -344,12 +332,6 @@ impl ReadSet for MutexReadSet {
     }
     fn contains(&self, p: &str) -> bool {
         self.0.lock().is_ok_and(|s| s.contains(p))
-    }
-}
-pub struct FixedPlanMode(pub Option<bool>);
-impl PlanModeState for FixedPlanMode {
-    fn is_plan_mode(&self) -> Option<bool> {
-        self.0
     }
 }
 pub struct FixedGuidance {

@@ -343,6 +343,10 @@ define_id_type!(
     InteractionRequestId,
     "Published identity for one Runtime-owned interaction request (UUIDv7)."
 );
+define_id_type!(
+    BackgroundTaskId,
+    "Runtime-owned identity for one background task record (UUIDv7)."
+);
 
 // ---------------------------------------------------------------------------
 // ToolCallId

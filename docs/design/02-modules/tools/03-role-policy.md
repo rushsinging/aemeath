@@ -14,13 +14,13 @@
 2. **role policy 取代注册表 `[main, sub]` 静态布尔**，成为 sub run 工具裁剪的唯一机制。
 3. 全链路防提权：子工具集 ⊆ 父工具集，越权即 `CapabilityEscalation`。
 
-role 只作用于 sub run；main agent 不做 role 裁剪（规划态 main 由既有 EnterPlanMode 承担）。bash 命令白名单断言、可写路径 glob、sub run 向用户提问的交互代理均不在本期范围。
+role 只作用于 sub run；main agent 不做 role 裁剪。bash 命令白名单断言、可写路径 glob、sub run 向用户提问的交互代理均不在本期范围。
 
 ## 2. 核心决策
 
 | # | 决策 | 理由 |
 |---|---|---|
-| D1 | **role 是 sub run 的策略绑定**；main agent 不绑 role | main 裁剪由 EnterPlanMode（交互式软审批）承担，避免双机制重叠 |
+| D1 | **role 是 sub run 的策略绑定**；main agent 不绑 role | main 不做裁剪，避免双机制重叠 |
 | D2 | **role policy 取代 `[main, sub]` 静态布尔** | 静态归属无法表达"planner-as-sub 可派发、coder-as-sub 不可"；裁剪点唯一化 |
 | D3 | **capability 组装语义，未配置 = 默认 sub 集** | 唯一配置维度是 capability 组；不写 policy 的实例使用 `Read|Write|Execute|NetworkAccess` 默认 sub 集 |
 | D4 | **内置 5 role，config 同名整条覆盖**（不做字段级合并） | 开箱即用 + 用户完全控制权；避免半内置半自定义的组合不可预期 |
@@ -85,7 +85,6 @@ capability → 工具组映射（由工具的语义归类决定，Tools 层唯�
 | `Interact` | AskUserQuestion |
 | `Dispatch` | Agent |
 | `WorkspaceControl` | EnterWorktree, ExitWorktree |
-| `Plan` | EnterPlanMode, ExitPlanMode |
 | `All` | Memory, Brief, ToolSearch（main 专属杂项；config 显式声明 `All` 才对受限职能放行） |
 
 `allowed_tools` 工具名单维度已删除（与 capability 冗余、可配置性过强）。空 `capabilities` = 无 policy = 默认 sub 集。
@@ -138,7 +137,6 @@ config.json
 | `RegistryScope`（Main/Sub） | 静态归属退役，统一注册池；scope 概念保留用于装配单元测试分组 |
 | `ToolProfile`（capability allow-set） | 扩展 `allowed_tool_names` 维度，`derive_restricted` 同步校验名单不扩张 |
 | `PolicyPort` / `PolicyReason::RestrictedTool` | 直接复用，evaluate 增加按 run 的 ToolFilter 判定 |
-| `EnterPlanMode/ExitPlanMode` | 分工：main 的规划态由 plan mode（交互式软审批）承担，role 只裁剪 sub run，二者不重叠 |
 | `tools.enabled/disabled`（全局） | 保留为全局粗粒度开关，先于 role ToolFilter 生效（全局禁用 > role 名单） |
 
 ## 7. 测试策略（跨层每层覆盖）

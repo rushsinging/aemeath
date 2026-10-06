@@ -62,7 +62,6 @@ pub(crate) struct InteractionRequest {
 pub(crate) enum InteractionBody {
     UserQuestions(Vec<UiUserQuestion>),
     ToolApproval(UiApprovalPrompt),
-    PlanApproval(UiPlanApprovalPrompt),
     HardPause(UiStuckDiagnostic),
 }
 
@@ -84,12 +83,6 @@ pub(crate) struct UiApprovalPrompt {
     pub(crate) title: String,
     pub(crate) detail: String,
     pub(crate) risk: UiRiskLevel,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct UiPlanApprovalPrompt {
-    pub(crate) title: String,
-    pub(crate) steps: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

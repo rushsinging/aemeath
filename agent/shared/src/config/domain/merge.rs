@@ -15,6 +15,7 @@ use crate::config::{
     memory::{MemoryConfig, ReflectionConfig},
     models::{ModelsConfig, ProviderModelsConfig},
     permissions::{PermissionConfig, PermissionModeConfig},
+    runtime::RuntimeConfig,
     skills::SkillsConfig,
     storage::StorageConfig,
     tools::{
@@ -66,6 +67,8 @@ pub struct ConfigPatch {
     pub logging: Option<LoggingConfigPatch>,
     #[serde(default)]
     pub guidance: Option<GuidanceConfigPatch>,
+    #[serde(default)]
+    pub runtime: Option<RuntimeConfigPatch>,
 }
 
 impl ConfigPatch {
@@ -95,6 +98,7 @@ impl ConfigPatch {
             && self.logging.is_none()
             && self.guidance.is_none()
             && self.hooks.is_none()
+            && self.runtime.is_none()
     }
 }
 
@@ -438,12 +442,31 @@ pub fn apply_patch(mut base: Config, patch: ConfigPatch) -> Config {
     if let Some(guidance) = patch.guidance {
         base.guidance = apply_guidance_patch(base.guidance, guidance);
     }
+    if let Some(runtime) = patch.runtime {
+        base.runtime = apply_runtime_patch(base.runtime, runtime);
+    }
     base
 }
 
 // ---------------------------------------------------------------------------
 // Section-level helpers
 // ---------------------------------------------------------------------------
+
+pub(crate) fn apply_runtime_patch(
+    mut base: RuntimeConfig,
+    patch: RuntimeConfigPatch,
+) -> RuntimeConfig {
+    if let Some(secs) = patch.tool_background_threshold_secs {
+        base.tool_background_threshold_secs = secs;
+    }
+    base
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct RuntimeConfigPatch {
+    #[serde(default, alias = "toolBackgroundThresholdSecs")]
+    pub tool_background_threshold_secs: Option<u64>,
+}
 
 pub(crate) fn apply_api_patch(mut base: ApiConfig, patch: ApiConfigPatch) -> ApiConfig {
     if let Some(v) = patch.provider {

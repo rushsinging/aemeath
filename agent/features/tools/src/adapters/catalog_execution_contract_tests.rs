@@ -23,10 +23,10 @@ use super::{
 use crate::domain::published_language::ToolOutcome as ExecutionOutcome;
 use crate::domain::{
     scope_profile::{RegistryScopeBuilder, ToolRegistrationSpec},
-    CancellationSignal, ExecutionScope, FixedGuidance, FixedPlanMode, MutexReadSet,
-    RegistryScopeName, ToolCapabilities, ToolCatalogPort, ToolExecutionContext, ToolExecutionPort,
-    ToolExecutionPorts, ToolInvocation, ToolName, ToolProfile, ToolProfileName, ToolSuspension,
-    TypedTool, TypedToolResult, WorkspaceReadAccess,
+    CancellationSignal, ExecutionScope, FixedGuidance, MutexReadSet, RegistryScopeName,
+    ToolCapabilities, ToolCatalogPort, ToolExecutionContext, ToolExecutionPort, ToolExecutionPorts,
+    ToolInvocation, ToolName, ToolProfile, ToolProfileName, ToolSuspension, TypedTool,
+    TypedToolResult, WorkspaceReadAccess,
 };
 use share::config::ToolSelection;
 
@@ -674,7 +674,6 @@ fn context_for_run_profile_cancellation_and_selection(
         Arc::new(MutexReadSet(Arc::new(std::sync::Mutex::new(
             Default::default(),
         )))),
-        Arc::new(FixedPlanMode(None)),
         Arc::new(memory::api::NoOpMemory),
         Arc::new(FixedGuidance {
             language: "en".into(),

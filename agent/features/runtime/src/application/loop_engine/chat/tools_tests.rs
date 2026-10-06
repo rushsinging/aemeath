@@ -607,3 +607,231 @@ async fn test_materialized_tool_results_persist_oversized_tui_result() {
 // (interaction_routing module in loop_engine/tests.rs).
 // resolve_ask_user_via_bridge is deleted — the engine handles
 // all interaction routing via InteractionCoordinator.
+
+// ── #252 后台任务：工具轮级快路径等价与转后台场景 ─────────────────────
+//
+// 计时断言在高负载（pre-push 并发全量测试）下易 flaky，改用确定性信号：
+// fast 工具完成时刻观察 slow 是否已真实完成。
+
+/// 慢工具完成时置位的信号（观察"fast 先于 slow 真实完成"的确定性证据）。
+type SlowCompletionSignal = Arc<std::sync::atomic::AtomicBool>;
+
+struct SlowSequentialTool {
+    finished: SlowCompletionSignal,
+}
+
+#[async_trait]
+impl TypedTool for SlowSequentialTool {
+    type Output = Value;
+
+    fn name(&self) -> &str {
+        "SlowSequential"
+    }
+
+    fn description(&self) -> &str {
+        "slow sequential tool for backgrounding tests"
+    }
+
+    fn input_schema(&self) -> Value {
+        serde_json::json!({"type":"object"})
+    }
+
+    fn is_concurrency_safe(&self) -> bool {
+        false
+    }
+
+    async fn call(
+        &self,
+        input: Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<Self::Output> {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        self.finished
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        TypedToolResult::success(
+            input
+                .get("label")
+                .and_then(Value::as_str)
+                .unwrap_or("slow-done"),
+            Value::Null,
+        )
+    }
+}
+
+fn slow_sequential_call(index: usize) -> ToolCall {
+    ToolCall {
+        id: ToolCallId::from_legacy_or_new(&format!("slow-{index}")),
+        provider_id: format!("provider-slow-{index}"),
+        name: "SlowSequential".to_string(),
+        index,
+        input: serde_json::json!({"label": format!("slow-{index}")}),
+    }
+}
+
+/// 快速 sequential 工具：立即返回，作为「前序转后台后的同轮后续调用」探针；
+/// 完成时记录 slow 是否已真实完成（false = fast 先于 slow，证明未被前序阻塞）。
+struct FastSequentialTool {
+    slow_finished_at_fast_completion: Arc<Mutex<Option<bool>>>,
+    slow_finished: SlowCompletionSignal,
+}
+
+#[async_trait]
+impl TypedTool for FastSequentialTool {
+    type Output = Value;
+
+    fn name(&self) -> &str {
+        "FastSequential"
+    }
+
+    fn description(&self) -> &str {
+        "fast sequential probe tool"
+    }
+
+    fn input_schema(&self) -> Value {
+        serde_json::json!({"type":"object"})
+    }
+
+    fn is_concurrency_safe(&self) -> bool {
+        false
+    }
+
+    async fn call(
+        &self,
+        input: Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<Self::Output> {
+        let observed = self.slow_finished.load(std::sync::atomic::Ordering::SeqCst);
+        *self
+            .slow_finished_at_fast_completion
+            .lock()
+            .expect("fast 探针观察锁") = Some(observed);
+        TypedToolResult::success(
+            input
+                .get("label")
+                .and_then(Value::as_str)
+                .unwrap_or("fast-done"),
+            Value::Null,
+        )
+    }
+}
+
+fn fast_sequential_call(index: usize) -> ToolCall {
+    ToolCall {
+        id: ToolCallId::from_legacy_or_new(&format!("fast-{index}")),
+        provider_id: format!("provider-fast-{index}"),
+        name: "FastSequential".to_string(),
+        index,
+        input: serde_json::json!({"label": format!("fast-{index}")}),
+    }
+}
+
+#[tokio::test]
+async fn sequential_round_launches_following_call_after_first_moves_to_background() {
+    let slow_finished: SlowCompletionSignal = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let observed_slow_finished: Arc<Mutex<Option<bool>>> = Arc::new(Mutex::new(None));
+    let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
+    registry.register(SlowSequentialTool {
+        finished: slow_finished.clone(),
+    });
+    registry.register(FastSequentialTool {
+        slow_finished_at_fast_completion: observed_slow_finished.clone(),
+        slow_finished: slow_finished.clone(),
+    });
+    let ctx = test_tool_context();
+    let workspace_read = ctx.workspace_read();
+    let mut agent = Agent::for_test(registry.as_ref(), ctx, 10);
+    agent.background_threshold = Some(std::time::Duration::from_millis(30));
+    let sink = RecordingSink::default();
+    let activities = crate::application::activity::ActivityCoordinator::new(
+        sdk::RunId::new_v7(),
+        Arc::new(crate::application::activity::SystemActivityClock),
+        Arc::new(crate::application::activity::UuidV7ActivityIdSource),
+    );
+    // 第一个 slow 超阈值转后台；第二个 fast 应在前序转后台后立即启动并真实完成。
+    let calls = [slow_sequential_call(0), fast_sequential_call(1)];
+    let guard_decisions = [
+        (calls[0].clone(), ToolGuardDecision::Allow),
+        (calls[1].clone(), ToolGuardDecision::Allow),
+    ];
+
+    let result = execute_tool_round(
+        &RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn")),
+        &calls,
+        &agent.catalog,
+        &*policy::allow_all(),
+        &sdk::RunId::new_v7(),
+        &sdk::RunStepId::new_v7(),
+        &agent,
+        &sink,
+        &noop_hook_port(),
+        &activities,
+        &tokio_util::sync::CancellationToken::new(),
+        "en",
+        &workspace_read,
+        &guard_decisions,
+    )
+    .await;
+
+    assert_eq!(result.results.len(), 2, "两个 sequential 调用都应有结果");
+    assert!(
+        result.results[0].outcome.text.contains("background"),
+        "超阈值的第一调用应返回占位结果：{}",
+        result.results[0].outcome.text
+    );
+    assert!(
+        result.results[1].outcome.text.contains("fast-1"),
+        "后续 sequential 调用应真实完成：{}",
+        result.results[1].outcome.text
+    );
+    assert_eq!(
+        *observed_slow_finished.lock().expect("fast 探针观察锁"),
+        Some(false),
+        "fast 后续调用完成时 slow 尚未真实完成——证明前序转后台后未被阻塞"
+    );
+}
+
+#[tokio::test]
+async fn sequential_round_fast_path_within_threshold_returns_real_results() {
+    let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
+    registry.register(SlowSequentialTool {
+        finished: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    });
+    let ctx = test_tool_context();
+    let workspace_read = ctx.workspace_read();
+    let mut agent = Agent::for_test(registry.as_ref(), ctx, 10);
+    agent.background_threshold = Some(std::time::Duration::from_secs(5));
+    let sink = RecordingSink::default();
+    let activities = crate::application::activity::ActivityCoordinator::new(
+        sdk::RunId::new_v7(),
+        Arc::new(crate::application::activity::SystemActivityClock),
+        Arc::new(crate::application::activity::UuidV7ActivityIdSource),
+    );
+    let calls = [slow_sequential_call(0)];
+    let guard_decisions = [(calls[0].clone(), ToolGuardDecision::Allow)];
+
+    let result = execute_tool_round(
+        &RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn")),
+        &calls,
+        &agent.catalog,
+        &*policy::allow_all(),
+        &sdk::RunId::new_v7(),
+        &sdk::RunStepId::new_v7(),
+        &agent,
+        &sink,
+        &noop_hook_port(),
+        &activities,
+        &tokio_util::sync::CancellationToken::new(),
+        "en",
+        &workspace_read,
+        &guard_decisions,
+    )
+    .await;
+
+    assert_eq!(result.results.len(), 1);
+    assert!(
+        result.results[0].outcome.text.contains("slow-0"),
+        "阈值内完成应返回真实结果（快路径等价）：{}",
+        result.results[0].outcome.text
+    );
+    assert!(!result.results[0].outcome.is_error);
+}

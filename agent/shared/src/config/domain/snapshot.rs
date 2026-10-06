@@ -329,6 +329,11 @@ impl ConfigSnapshot {
 
     // ── Tools / Agents ───────────────────────────────────────
 
+    /// tool call 前台等待阈值（秒）；`0` 表示禁用后台化（合法值，不回退默认）。
+    pub fn tool_background_threshold_secs(&self) -> u64 {
+        self.inner.runtime.tool_background_threshold_secs
+    }
+
     pub fn tool_selection(&self) -> ToolSelection {
         ToolSelection::new(&self.inner.tools.enabled, &self.inner.tools.disabled)
     }
