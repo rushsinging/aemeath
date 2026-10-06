@@ -8,8 +8,8 @@ use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use sdk::tool_input::{
-    EnterPlanModeInput, ExitPlanModeInput, TaskBlockByInput, TaskCreateInput, TaskGetInput,
-    TaskListCreateInput, TaskStopInput, TaskUpdateInput,
+    TaskBlockByInput, TaskCreateInput, TaskGetInput, TaskListCreateInput, TaskStopInput,
+    TaskUpdateInput,
 };
 use sdk::tool_result::TaskUpdateResult;
 use std::path::Path;
@@ -390,70 +390,4 @@ impl ToolDisplay for TaskStopDisplay {
 inventory::submit!(ToolDisplayEntry {
     name: "TaskStop",
     display: || Box::new(TaskStopDisplay)
-});
-
-// ── EnterPlanMode ────────────────────────────────────────────────
-
-struct EnterPlanModeDisplay;
-impl ToolDisplay for EnterPlanModeDisplay {
-    fn name(&self) -> &str {
-        "EnterPlanMode"
-    }
-    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let args = parse_input::<EnterPlanModeInput>(input);
-        match args.reason.as_deref() {
-            Some(reason) if !reason.is_empty() => format!("Plan: {reason}"),
-            _ => self.display_name().to_string(),
-        }
-    }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        vec!["Tool calls will be simulated, not executed.".to_string()]
-    }
-    fn render_policy(&self) -> ToolRenderPolicy {
-        ToolRenderPolicy {
-            header: HeaderPolicy::CustomIcon("📋"),
-            details: DetailsPolicy::Expanded,
-            result: ResultPolicy::Hidden,
-        }
-    }
-}
-inventory::submit!(ToolDisplayEntry {
-    name: "EnterPlanMode",
-    display: || Box::new(EnterPlanModeDisplay)
-});
-
-// ── ExitPlanMode ─────────────────────────────────────────────────
-
-struct ExitPlanModeDisplay;
-impl ToolDisplay for ExitPlanModeDisplay {
-    fn name(&self) -> &str {
-        "ExitPlanMode"
-    }
-    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        let args = parse_input::<ExitPlanModeInput>(input);
-        if args.execute.unwrap_or(false) {
-            "Execute Plan".to_string()
-        } else {
-            self.display_name().to_string()
-        }
-    }
-    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
-        let args = parse_input::<ExitPlanModeInput>(input);
-        if args.execute.unwrap_or(false) {
-            vec!["Planned actions will now be executed.".to_string()]
-        } else {
-            vec!["Returning to normal execution.".to_string()]
-        }
-    }
-    fn render_policy(&self) -> ToolRenderPolicy {
-        ToolRenderPolicy {
-            header: HeaderPolicy::CustomIcon("▶"),
-            details: DetailsPolicy::Expanded,
-            result: ResultPolicy::Hidden,
-        }
-    }
-}
-inventory::submit!(ToolDisplayEntry {
-    name: "ExitPlanMode",
-    display: || Box::new(ExitPlanModeDisplay)
 });

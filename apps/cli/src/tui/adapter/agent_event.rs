@@ -29,8 +29,8 @@ pub struct AgentEventMapping {
 pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
     use crate::tui::adapter::tui_runtime_event::{TuiInteractionBody, TuiRunStepEvent};
     use crate::tui::model::conversation::interaction::{
-        InteractionBody, InteractionRequest, UiApprovalPrompt, UiOptionItem, UiPlanApprovalPrompt,
-        UiRiskLevel, UiStuckDiagnostic, UiUserQuestion,
+        InteractionBody, InteractionRequest, UiApprovalPrompt, UiOptionItem, UiRiskLevel,
+        UiStuckDiagnostic, UiUserQuestion,
     };
 
     match event {
@@ -450,12 +450,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                                 UiRiskLevel::High
                             }
                         },
-                    })
-                }
-                TuiInteractionBody::PlanApproval(prompt) => {
-                    InteractionBody::PlanApproval(UiPlanApprovalPrompt {
-                        title: prompt.plan_title.clone(),
-                        steps: prompt.steps.clone(),
                     })
                 }
                 TuiInteractionBody::HardPause(diagnostic) => {

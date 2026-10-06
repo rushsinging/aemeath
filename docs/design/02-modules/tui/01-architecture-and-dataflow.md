@@ -115,7 +115,7 @@ Runtime ChatStream → tokio::spawn task → sdk::ChatEvent
   → ViewModelDirty → ViewAssembler → Render
 ```
 
-Interaction request id 由 Runtime 生成并作为纯值 SDK DTO 进入同一事件链；UserQuestions、ToolApproval、PlanApproval、HardPause 四种 body 都走这条链。processing 不生成 id、不接管 sender，也不写 UI 状态。
+Interaction request id 由 Runtime 生成并作为纯值 SDK DTO 进入同一事件链；UserQuestions、ToolApproval、HardPause 三种 body 都走这条链。processing 不生成 id、不接管 sender，也不写 UI 状态。
 
 ### 4.3 视图反馈流
 
@@ -284,7 +284,7 @@ Runtime wire DTO **MUST** 在 `adapter/event_mapping.rs` 一次性转换成 TUI-
 
 ### 8.2 Interaction reply 边界
 
-Runtime-owned `ChatEvent::InteractionRequested` 只携可序列化 run/request identity 与纯值 body；`event_mapping` 穷尽转换 `UserQuestions`、`ToolApproval`、`PlanApproval`、`HardPause` 为 TUI-owned `UiInteractionBody`，无损保留 `run_id` 并把 request ID 包装为 `UiInteractionRequestId`。Model 用 run identity 拒绝旧、未知或未路由 Run 的迟到投影；Composition 已登记 parent-mediated adapter 的 Sub Run 仍是合法来源，并保留 parent/sub correlation。Effect runner 把 request ID 与 body-specific reply 无损映回 SDK `InteractionRequestId` / `InteractionReply`，调用 `AgentClient::reply_interaction` / `cancel_interaction`；TUI 任一层 **NEVER** 持有 sender 或 Runtime continuation。完整协议见 [03-event-flow-and-acl.md](03-event-flow-and-acl.md) §4。
+Runtime-owned `ChatEvent::InteractionRequested` 只携可序列化 run/request identity 与纯值 body；`event_mapping` 穷尽转换 `UserQuestions`、`ToolApproval`、`HardPause` 为 TUI-owned `UiInteractionBody`，无损保留 `run_id` 并把 request ID 包装为 `UiInteractionRequestId`。Model 用 run identity 拒绝旧、未知或未路由 Run 的迟到投影；Composition 已登记 parent-mediated adapter 的 Sub Run 仍是合法来源，并保留 parent/sub correlation。Effect runner 把 request ID 与 body-specific reply 无损映回 SDK `InteractionRequestId` / `InteractionReply`，调用 `AgentClient::reply_interaction` / `cancel_interaction`；TUI 任一层 **NEVER** 持有 sender 或 Runtime continuation。完整协议见 [03-event-flow-and-acl.md](03-event-flow-and-acl.md) §4。
 
 ## 9. 架构门禁
 
@@ -299,7 +299,7 @@ Runtime-owned `ChatEvent::InteractionRequested` 只携可序列化 run/request i
 | 5 | ViewModel dependency | 纯数据，不依赖可变 Model 或 ratatui |
 | 6 | Agent event adapter | SDK event DTO 只出现在 processing boundary 与 `adapter/event_mapping.rs`；`UiEvent` 之后零 SDK DTO |
 | 7 | TEA purity | `update/`、reducer 与 ACL **NEVER** spawn、await、执行命令、发 channel 或直接调用 AgentClient |
-| 8 | Interaction resource isolation | 四类 Runtime request body 的 id 贯穿 SDK / TUI ACL / AgentClient command；TUI 全树零 sender、pending waiter 与自生成协议 id |
+| 8 | Interaction resource isolation | 三类 Runtime request body 的 id 贯穿 SDK / TUI ACL / AgentClient command；TUI 全树零 sender、pending waiter 与自生成协议 id |
 | 9 | Event exhaustiveness | 构造每个 UiEvent 变体，断言第二层 ACL 产生显式 Context Intent；禁止 wildcard 与默认空 mapping |
 | 10 | Model write isolation | 六 Context 核心字段私有；`apply` / `reduce_*` 生产调用点只有 `update/root_reducer.rs`，adapter / Coordinator / ViewAssembler 只取得不可变 projection |
 

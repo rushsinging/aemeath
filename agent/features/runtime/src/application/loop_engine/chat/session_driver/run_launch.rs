@@ -948,8 +948,6 @@ where
                         ),
                     );
                 let mut stuck = crate::application::loop_engine::run_ports::NoopStuckObserver;
-                let plan_approval =
-                    crate::application::loop_engine::run_ports::FixedPlanApproval::new(false);
                 let mut manual_compaction = main_run_port::ChatManualCompaction {
                     runtime_context: runtime_context.clone(),
                     session_id: session_id.clone(),
@@ -989,7 +987,6 @@ where
                     &mut stop_hook,
                     &mut tools,
                     &mut stuck,
-                    &plan_approval,
                 );
                 loop_context.bind_reflection(&mut reflection);
                 if manual_compaction_run {

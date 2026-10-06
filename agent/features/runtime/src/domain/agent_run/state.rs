@@ -15,7 +15,6 @@ pub struct PendingInteraction {
 pub enum InteractionContinuation {
     CompleteToolCall(share::ids::ToolCallId),
     ContinueToolApproval(share::ids::ToolCallId),
-    ContinuePlanApproval,
     ContinueAfterHardPause,
 }
 
@@ -24,7 +23,6 @@ impl InteractionContinuation {
         match self {
             Self::CompleteToolCall(_) | Self::ContinueAfterHardPause => RunStatus::ExecutingTools,
             Self::ContinueToolApproval(_) => RunStatus::ExecutingTools,
-            Self::ContinuePlanApproval => RunStatus::PreparingContext,
         }
     }
 }

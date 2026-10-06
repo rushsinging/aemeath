@@ -7,8 +7,6 @@ fn test_known_mappings() {
     assert_eq!(tool_display_name("Grep"), "Search");
     assert_eq!(tool_display_name("EnterWorktree"), "Enter Worktree");
     assert_eq!(tool_display_name("ExitWorktree"), "Exit Worktree");
-    assert_eq!(tool_display_name("EnterPlanMode"), "Enter Plan Mode");
-    assert_eq!(tool_display_name("ExitPlanMode"), "Exit Plan Mode");
     assert_eq!(tool_display_name("AskUserQuestion"), "Ask");
     assert_eq!(tool_display_name("TaskCreate"), "New Task");
     assert_eq!(tool_display_name("TaskUpdate"), "Update Task");

@@ -153,11 +153,6 @@ fn interaction_continuation_exhaustively_restores_its_origin_phase() {
             RunStatus::ExecutingTools,
         ),
         (
-            RunStatus::ApplyingResponse,
-            InteractionContinuation::ContinuePlanApproval,
-            RunStatus::PreparingContext,
-        ),
-        (
             RunStatus::ExecutingTools,
             InteractionContinuation::ContinueAfterHardPause,
             RunStatus::ExecutingTools,

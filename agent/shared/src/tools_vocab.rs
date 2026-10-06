@@ -136,8 +136,6 @@ pub enum ToolCapability {
     TaskWrite,
     /// 控制 workspace（worktree 进入 / 退出）。
     WorkspaceControl,
-    /// 控制 plan mode。
-    Plan,
     /// 全量类：main 专属杂项工具。
     All,
 }
@@ -156,7 +154,6 @@ impl ToolCapability {
             "TaskRead" => Some(Self::TaskRead),
             "TaskWrite" => Some(Self::TaskWrite),
             "WorkspaceControl" => Some(Self::WorkspaceControl),
-            "Plan" => Some(Self::Plan),
             "All" => Some(Self::All),
             _ => None,
         }
@@ -176,7 +173,6 @@ impl fmt::Display for ToolCapability {
             Self::TaskRead => "TaskRead",
             Self::TaskWrite => "TaskWrite",
             Self::WorkspaceControl => "WorkspaceControl",
-            Self::Plan => "Plan",
             Self::All => "All",
         })
     }
@@ -198,7 +194,7 @@ bitflags::bitflags! {
         const Dispatch         = 1 << 5;
         const TaskWrite        = 1 << 6;
         const WorkspaceControl = 1 << 7;
-        const Plan             = 1 << 8;
+        // 1 << 8 已随 plan mode 机制退役，保留空缺防止历史持久化数值重映射。
         const TaskRead         = 1 << 9;
         /// 全量类：main 专属。Brief / ToolSearch / Memory 等杂项工具归此位，
         /// 受限 profile 默认组装不出；config 显式声明 "All" 才放行。
@@ -241,7 +237,6 @@ impl From<ToolCapability> for ToolCapabilities {
             ToolCapability::TaskRead => Self::TaskRead,
             ToolCapability::TaskWrite => Self::TaskWrite,
             ToolCapability::WorkspaceControl => Self::WorkspaceControl,
-            ToolCapability::Plan => Self::Plan,
             ToolCapability::All => Self::All,
         }
     }

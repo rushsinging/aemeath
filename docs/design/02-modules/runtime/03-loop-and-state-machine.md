@@ -63,7 +63,6 @@ TerminateRun: 任意非终态 → Terminating → Terminated
 | InvokingModel | context 超限 | Compacting（compact 后重跑，非重试）|
 | InvokingModel | Fatal 错误(4xx) / 重试耗尽 | Failed |
 | ApplyingResponse | 有 tool_calls | AwaitingToolApproval |
-| ApplyingResponse | 需要 plan approval | AwaitingInteraction（`ContinuePlanApproval`） |
 | ApplyingResponse | 无 tool_calls / EndTurn | FinalizingStep → DrainingInput |
 | ApplyingResponse | Stop Hook Block（未超过上限） | FinalizingStep → DrainingInput（feedback 经 `InternalContinuation(StopHookFeedback)` 进入下一 Step） |
 | AwaitingToolApproval | 全部放行 | ExecutingTools |
@@ -75,7 +74,7 @@ TerminateRun: 任意非终态 → Terminating → Terminated
 | ExecutingTools | 结果回收完 | FinalizingStep → DrainingInput |
 | AwaitingInteraction | 匹配 reply | 按 typed continuation 恢复到 ExecutingTools / AwaitingToolApproval / PreparingContext；`ContinueAfterHardPause` 恢复到挂起源相位（ApplyingResponse / DrainingInput）并按来源收口 |
 | AwaitingInteraction | completion=`Cancelled` + Tool continuation | ToolCall 得到 typed Cancelled，回原 Tool 状态继续 |
-| AwaitingInteraction | completion=`Cancelled` + Plan/HardPause continuation | Failed（typed PlanApprovalCancelled / HardPauseCancelled） |
+| AwaitingInteraction | completion=`Cancelled` + HardPause continuation | Failed（typed HardPauseCancelled） |
 | 任意 active Step 态 | `CancelRunStep` 获胜 | CancellingStep |
 | CancellingStep | StepFinalizer 完成或 10s deadline 到达 | FinalizingStep（持久化 deterministic receipts / partial step） |
 | FinalizingStep | cancel 原因的 Step 已持久化（`StepCancelled → DrainingInput`） | DrainingInput |
@@ -87,7 +86,7 @@ TerminateRun: 任意非终态 → Terminating → Terminated
 
 **控制优先级**：一旦接受 `CancelRunStep`，当前 Step 进入 `CancellingStep`；该 Step 后续普通完成、timeout 或错误只作为收口诊断，NEVER 把它伪装为普通 Completed。Step 收口并持久化后 Run 必须进入 `DrainingInput`。一旦接受 `TerminateRun`，Run 进入 `Terminating`；后续 Step 完成仅作为终止收口事实，Run 最终只能进入 `Terminated`。重复控制命令必须幂等。
 
-**等待边界**：`AwaitingInput` 不保存 interaction continuation，只等待 InputQueue；`AwaitingInteraction` 必须与唯一 `PendingInteraction` 同时存活，等待 `run_id + request_id` 的答复。reply / interaction cancellation 只能恢复或终结该 typed continuation，NEVER 统一跳到 `PreparingContext`。四类 completion 的穷尽映射见 [端口与适配器](06-ports-and-adapters.md) §2。
+**等待边界**：`AwaitingInput` 不保存 interaction continuation，只等待 InputQueue；`AwaitingInteraction` 必须与唯一 `PendingInteraction` 同时存活，等待 `run_id + request_id` 的答复。reply / interaction cancellation 只能恢复或终结该 typed continuation，NEVER 统一跳到 `PreparingContext`。三类 completion 的穷尽映射见 [端口与适配器](06-ports-and-adapters.md) §2。
 
 ## 2. Loop Engine 骨架（统一执行，零来源分支）
 

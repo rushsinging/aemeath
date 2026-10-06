@@ -2,9 +2,9 @@
 
 use crate::adapters::{
     agent_tool, ask_user, bash, brief, file_edit, file_read, file_write, glob_tool, grep,
-    memory_tool, plan_mode, skill_tool, task_block_by, task_create, task_get, task_list,
-    task_list_complete, task_list_create, task_lists, task_stop, task_update, tool_search,
-    web_fetch, web_search, worktree,
+    memory_tool, skill_tool, task_block_by, task_create, task_get, task_list, task_list_complete,
+    task_list_create, task_lists, task_stop, task_update, tool_search, web_fetch, web_search,
+    worktree,
 };
 use crate::domain::memory_source::MemoryPortSource;
 use crate::domain::published_language::ToolCapabilities as Caps;
@@ -199,8 +199,6 @@ pub(crate) fn register_named_scope(
     );
     builtin!("Brief", Caps::All, brief::BriefTool);
     builtin!("ToolSearch", Caps::All, tool_search::ToolSearchTool);
-    builtin!("EnterPlanMode", Caps::Plan, plan_mode::EnterPlanModeTool);
-    builtin!("ExitPlanMode", Caps::Plan, plan_mode::ExitPlanModeTool);
     builtin!(
         "EnterWorktree",
         Caps::Read | Caps::WorkspaceControl,

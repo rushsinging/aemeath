@@ -1,6 +1,6 @@
 use crate::domain::{
-    AgentDispatch, CancellationSignal, ExecutionScope, FixedGuidance, FixedPlanMode, MutexReadSet,
-    ProgressSink, ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
+    AgentDispatch, CancellationSignal, ExecutionScope, FixedGuidance, MutexReadSet, ProgressSink,
+    ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
 };
 use async_trait::async_trait;
 use project::{WorkspaceControl, WorkspaceData, WorkspaceReader};
@@ -225,7 +225,6 @@ impl TestToolExecutionContextBuilder {
             Arc::new(FakeCancellation),
             fake_workspace_read_access(workspace),
             Arc::new(MutexReadSet(Arc::new(Mutex::new(self.read_files)))),
-            Arc::new(FixedPlanMode(None)),
             Arc::new(memory::api::NoOpMemory),
             Arc::new(FixedGuidance {
                 language: "en".into(),

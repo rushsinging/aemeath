@@ -207,7 +207,6 @@ struct PendingInteraction {
 enum InteractionContinuation {
     CompleteToolCall(ToolCallId),
     ContinueToolApproval(ToolCallId),
-    ContinuePlanApproval,
     ContinueAfterHardPause,
 }
 
@@ -459,7 +458,7 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 | `ParentMediated` | ❌（无父 capability）| ✅ 创建 child-scoped mediated adapter | ❌ → `InteractionUnavailable` |
 | `Unavailable` | ❌ | ✅ typed unavailable（不悬挂）| ✅ typed unavailable |
 
-四种 `InteractionContinuation`（UserQuestions、ToolApproval、PlanApproval、HardPause）均由统一 `InteractionCoordinator` 驱动 Run continuation；`reply` / `cancel` 均经 `InteractionPort` 分派。parent-mediated 复用父 context 的同一 Arc<dyn InteractionPort>——identity 与 reply/cancel 语义不变。
+三种 `InteractionContinuation`（UserQuestions、ToolApproval、HardPause）均由统一 `InteractionCoordinator` 驱动 Run continuation；`reply` / `cancel` 均经 `InteractionPort` 分派。parent-mediated 复用父 context 的同一 Arc<dyn InteractionPort>——identity 与 reply/cancel 语义不变。
 
 ### 8.2 Reasoning 隔离
 

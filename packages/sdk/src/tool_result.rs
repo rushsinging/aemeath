@@ -34,7 +34,6 @@ pub use tools::types::memory::{
     MemoryCategoryInput, MemoryEntryResult, MemoryEvictionCandidateResult, MemoryLayerInput,
     MemoryLocationResult, MemoryResult, MemorySearchHitResult,
 };
-pub use tools::types::plan_mode::PlanModeResult;
 pub use tools::types::read::ReadResult;
 pub use tools::types::read_mcp_resource::ReadMcpResourceResult;
 pub use tools::types::task_block_by::TaskBlockByResult;
@@ -67,7 +66,6 @@ pub mod list_mcp_resources;
 pub mod mcp_manager;
 pub mod mcp_tool;
 pub mod memory;
-pub mod plan_mode;
 pub mod read;
 pub mod read_mcp_resource;
 pub mod task_block_by;

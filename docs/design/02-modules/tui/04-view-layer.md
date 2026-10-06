@@ -35,7 +35,7 @@ OutputViewModel 的核心是 `roots: Vec<OutputBlockView>`——一个块树。�
 | 6 | `ToolCall` | ToolCallBlockView | `ToolCall` timeline item + `runs` 重叠投影 | 工具调用（含子块） |
 | 7 | `ToolResult` | ToolResultBlockView | `ToolResult` timeline item + `runs` 重叠投影 | 工具结果（嵌入或独立） |
 | 8 | `HookNotice` | TextBlockView | `HookNotice` timeline item | Hook 执行通知 |
-| 9 | `Interaction` | InteractionBlockView | `Interaction` timeline item | UserQuestions / ToolApproval / PlanApproval / HardPause typed 交互 |
+| 9 | `Interaction` | InteractionBlockView | `Interaction` timeline item | UserQuestions / ToolApproval / HardPause typed 交互 |
 
 ### 2.2 结构体定义
 
@@ -82,7 +82,6 @@ struct InteractionBlockView {
 enum InteractionBodyView {
     UserQuestions { questions: Vec<UserQuestionView>, current: usize },
     ToolApproval { title: String, detail: String, selected: Option<ApprovalDecisionView> },
-    PlanApproval { title: String, detail: String, selected: Option<ApprovalDecisionView> },
     HardPause { reason: String, recent_actions: Vec<String>, continue_selected: bool },
 }
 
@@ -156,7 +155,7 @@ ConversationModel.timeline().items()
   │   ├─ Error → TextBlockView (DiagnosticNotice)
   │   ├─ QueuedUserMessage → UserMessage (delivery=Queued)
   │   ├─ AgentProgress → owning ToolCall 下的 SystemNotice child
-  │   └─ Interaction → InteractionBlockView（穷尽四种 body）
+  │   └─ Interaction → InteractionBlockView（穷尽三种 body）
   │
   ├─ 组装 OutputBlockView 树（按嵌套规则）
   └─ 产出 OutputViewModel { roots: Vec<OutputBlockView> }
@@ -519,7 +518,7 @@ Effect 是 Model Change 的副作用反馈分支，与 ViewAssembler 渲染分�
 | V5 | ViewState direction | `view_state/` **NEVER** import `render/`；共享 display enum 由 ViewModel / presentation contract 拥有 |
 | V6 | Model write isolation（= 全局门禁 #10） | ViewAssembler / Render **NEVER** 获得 `&mut TuiModel`；Model mutation 调用点只有 root reducer |
 | V7 | Cache boundedness | BlockCache / GuttedCache 容量测试证明 entry 数不超过配置上限，淘汰前后渲染等价 |
-| V8 | Exhaustive presentation | 每个 OutputTimelineItem 都显式 assemble；queued / 四类 Interaction / progress **NEVER** 静默丢弃 |
+| V8 | Exhaustive presentation | 每个 OutputTimelineItem 都显式 assemble；queued / 三类 Interaction / progress **NEVER** 静默丢弃 |
 
 每条门禁 **MUST** 有 architecture test 或 invariant test，并保留一次故意违规能失败的证据。实现差距与退役清单只在 [Migration Governance](../../03-engineering/03-migration-governance.md) O6 / TUI-7 维护。
 

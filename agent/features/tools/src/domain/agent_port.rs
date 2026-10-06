@@ -1,6 +1,4 @@
-use crate::domain::{
-    CancellationSignal, ExecutionScope, Guidance, PlanModeState, ProgressSink, ReadSet,
-};
+use crate::domain::{CancellationSignal, ExecutionScope, Guidance, ProgressSink, ReadSet};
 use async_trait::async_trait;
 use std::sync::Arc;
 #[derive(Clone)]
@@ -13,7 +11,6 @@ pub struct AgentRunRequest<'a> {
     pub memory: Arc<dyn memory::api::MemoryPort>,
     pub catalog: Option<Arc<dyn crate::domain::CatalogQuery>>,
     pub read_set: Arc<dyn ReadSet>,
-    pub plan_mode: Arc<dyn PlanModeState>,
     pub guidance: Arc<dyn Guidance>,
     pub timeout: std::time::Duration,
     pub agent_name: &'a str,

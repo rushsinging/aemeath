@@ -188,7 +188,6 @@ struct InteractionRequest {
 enum InteractionRequestBody {
     UserQuestions(Vec<UserQuestion>),
     ToolApproval(ToolApprovalPrompt),
-    PlanApproval(PlanApprovalPrompt),
     HardPause(StuckDiagnostic),
 }
 
@@ -211,11 +210,6 @@ struct ToolApprovalPrompt {
     risk_level: RiskLevel,          // Low / Medium / High
 }
 
-struct PlanApprovalPrompt {
-    plan_title: String,
-    steps: Vec<String>,             // 计划步骤列表
-}
-
 struct StuckDiagnostic {
     reason: String,                 // StuckGuard 触发原因
     recent_actions: Vec<String>,    // 最近 N 个 action 描述
@@ -231,16 +225,10 @@ enum ApprovalDecision {
 enum InteractionReply {
     UserQuestions(Vec<UserAnswer>),
     ToolApproval(ApprovalDecision),
-    PlanApproval(ApprovalDecision),
     HardPauseContinue,
 }
 
 struct UserAnswer(String); // 与 UserQuestions 按位置一一对应；不得丢项、重排或附加隐式默认值
-
-enum PlanApprovalOutcome {
-    Approved,
-    Deny { feedback: String }, // 作为下一 invocation 的 typed context input
-}
 
 enum InteractionCompletion {
     Replied(InteractionReply),
@@ -256,7 +244,6 @@ reply 必须与 request body 同 variant；`InvalidReply` 不消费 waiter。`In
 |---|---|---|---|
 | `CompleteToolCall(id)` | answers → 同一 ToolCall 的 `ToolSuccess` | `ToolCancelled(UserInteractionCancelled(reason))` | `ExecutingTools`；继续下一个 suspension |
 | `ContinueToolApproval(id)` | Approve → Ready；Deny → `ToolCancelled(ApprovalDenied)` | `ToolCancelled(ApprovalCancelled(reason))` | `AwaitingToolApproval`；继续处理其余原始调用 |
-| `ContinuePlanApproval` | Approve → `PlanApproved`；Deny → `PlanRejected` feedback；决定随当前无 tool_calls 的 step 恰好一次提交 | `RunFailed(PlanApprovalCancelled(reason))` | reply 回 `PreparingContext` 并启动下一 invocation；cancel 回 `Failed` |
 | `ContinueAfterHardPause` | `HardPauseContinue` | `RunFailed(HardPauseCancelled(reason))` | reply 回 `ExecutingTools` 并继续 continuation 记录的未完成 tool phase；cancel 回 `Failed` |
 
 Run root / Step cancellation scope 若与 reply/cancel 竞争则永远优先：`CancelRunStep` 进入 `CancellingStep` 并收口到 `DrainingInput`；`TerminateRun` 进入 `Terminating` 并最终 `Terminated`，**NEVER** 套用上表的普通 completion。

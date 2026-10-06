@@ -80,8 +80,6 @@ fn core_bilingual_and_fallback() {
     assert_eq!(agent("fr"), agent("en"));
     assert!(memory_add("zh").contains("写入一条持久记忆"));
     assert!(skill("zh").contains("执行技能"));
-    assert!(enter_plan_mode("zh").contains("进入计划模式"));
-    assert!(exit_plan_mode("zh").contains("退出计划模式"));
     assert!(ask_user("zh").contains("向用户提问"));
     // options/questions 契约（对象格式、纯字符串被拒、Type something... 入口）
     // 已迁至 AskUserQuestionInput 字段 doc，由 tools crate 的 schema 测试锁定；

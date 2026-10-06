@@ -466,7 +466,7 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
             sdk::ActivityKindView::Interaction,
             sdk::ActivityStateView::Terminated,
             sdk::ActivityDetailView::Interaction {
-                kind: sdk::InteractionKindView::PlanApproval,
+                kind: sdk::InteractionKindView::UserQuestion,
             },
             sdk::ActivityAudienceView::Operational,
         ),
@@ -522,7 +522,7 @@ fn activity_snapshot_maps_all_closed_enum_variants() {
                 && matches!(snapshot.activities[3].source, TuiActivitySource::HookDispatch(ref id) if id.as_str() == expected_hook_dispatch_id)
                 && matches!(snapshot.activities[3].detail, TuiActivityDetail::Hook { point: TuiHookPoint::StopFailure, ref script, attempt: 4 } if script == "check-stop-failure.sh")
                 && matches!(snapshot.activities[4].source, TuiActivitySource::Interaction(ref id) if id == &expected_interaction_id)
-                && matches!(snapshot.activities[4].detail, TuiActivityDetail::Interaction { kind: TuiInteractionKind::PlanApproval })
+                && matches!(snapshot.activities[4].detail, TuiActivityDetail::Interaction { kind: TuiInteractionKind::UserQuestion })
                 && matches!(snapshot.activities[5].source, TuiActivitySource::SubRun(ref id) if id.as_str() == expected_sub_run_id)
                 && matches!(snapshot.activities[5].detail, TuiActivityDetail::SubRun { ref role, ref model } if role == "reviewer" && model == "claude-opus")
                 && matches!(snapshot.activities[6].source, TuiActivitySource::Compaction(ref id) if id.as_str() == expected_compaction_id)

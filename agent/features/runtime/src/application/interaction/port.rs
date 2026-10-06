@@ -155,10 +155,9 @@ pub trait InteractionPort: Send + Sync {
 /// [`InteractionBridge`] and [`InteractionCoordinator`].  No duplicate
 /// match arms.
 ///
-/// Exhaustive match covers all four body variants:
+/// Exhaustive match covers all body variants:
 /// - `UserQuestions` → `UserQuestions` with matching answer count
 /// - `ToolApproval` → `ToolApproval`
-/// - `PlanApproval` → `PlanApproval`
 /// - `HardPause` → `HardPauseContinue`
 pub fn validate_reply(
     body: &InteractionRequestBody,
@@ -176,7 +175,6 @@ pub fn validate_reply(
             }
         }
         (InteractionRequestBody::ToolApproval(_), InteractionReply::ToolApproval(_))
-        | (InteractionRequestBody::PlanApproval(_), InteractionReply::PlanApproval(_))
         | (InteractionRequestBody::HardPause(_), InteractionReply::HardPauseContinue) => Ok(()),
         _ => Err(InteractionReplyError::VariantMismatch),
     }

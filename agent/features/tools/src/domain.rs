@@ -62,9 +62,9 @@ pub use command_pl::{
 };
 pub use command_ports::{CommandCatalogPort, CommandRouterPort};
 pub use context::{
-    AuthorizationContext, CancellationSignal, ExecutionScope, FixedGuidance, FixedPlanMode,
-    Guidance, InvocationSource, MutexReadSet, PlanModeState, ProgressSink, ReadSet,
-    ToolExecutionContext, ToolExecutionPorts, WorkspaceReadAccess,
+    AuthorizationContext, CancellationSignal, ExecutionScope, FixedGuidance, Guidance,
+    InvocationSource, MutexReadSet, ProgressSink, ReadSet, ToolExecutionContext,
+    ToolExecutionPorts, WorkspaceReadAccess,
 };
 pub use memory_source::MemoryPortSource;
 pub use ports::{ToolCatalogPort, ToolExecutionPort};

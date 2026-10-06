@@ -102,8 +102,8 @@ impl From<InteractionPortError> for CoordinationError {
 
 /// Stateless coordinator that bridges an [`InteractionPort`] and a domain [`Run`].
 ///
-/// A single coordinator handles all four body types
-/// (`UserQuestions`, `ToolApproval`, `PlanApproval`, `HardPause`)
+/// A single coordinator handles all body types
+/// (`UserQuestions`, `ToolApproval`, `HardPause`)
 /// via exhaustive matching.
 #[derive(Debug, Default)]
 pub struct InteractionCoordinator;

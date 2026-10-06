@@ -61,7 +61,6 @@ fn capability_parse_round_trips_all_variants() {
         ToolCapability::TaskRead,
         ToolCapability::TaskWrite,
         ToolCapability::WorkspaceControl,
-        ToolCapability::Plan,
         ToolCapability::All,
     ];
     for cap in all {

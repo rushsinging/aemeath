@@ -88,7 +88,7 @@ Session 采用两阶段 per-RunStep 持久化：`freeze_step` 已绑定的 user 
 - assistant 已声明的 Tool Calls，以及按原 ToolCall 顺序排列的协议完整 terminal results；
 - 普通完成路径中每个 Tool Call 的最终 `ToolOutcome`，包括 Success、业务 Failure、Denied、Cancelled；
 - 控制收口路径中的 deterministic Tool/Agent summary 和 terminal receipt；Safety receipt 至少保留 child/run/tool identity、terminal status、artifact references、可能副作用、未完成调用与 `CancellationUnconfirmed`，Full receipt再包含 completed actions、verified facts 与 remaining work；
-- `FinalizeCause`、适用的 finalization detail，以及 Plan approval 等已经收敛为对话事实的 typed decision；
+- `FinalizeCause` 与适用的 finalization detail；
 - 已提交 active compact marker 的 summary、`start_at` 与 source revision；
 - `(RunId, RunStepId)` 幂等键、内容 fingerprint 与 committed revision/receipt；
 - 本次提交时收集的 Task Published Snapshot 与 Workspace Published Snapshot；Target writer 即使为空也 **MUST** 显式写出。
