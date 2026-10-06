@@ -92,3 +92,7 @@ pub use tool_types::{
     ImageData, SubRunActivityEvent, SubRunActivityKind, SubRunIdentity, SubRunStartedEvent,
     SubRunTerminalOutcome, ToolOutcome, ToolProgressEvent, ToolResult,
 };
+pub mod tool_search_scoring;
+#[cfg(test)]
+#[path = "domain/tool_search_scoring_tests.rs"]
+mod tool_search_scoring_tests;

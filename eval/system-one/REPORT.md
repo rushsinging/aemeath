@@ -146,7 +146,7 @@ v3.0 管线：SFT（266,131 题 / 36 源，软标签，16,416 步 ≈ 5h @ 1×H1
 |---|---|---|---|---|---|---|
 | anyjev 4B | 直读 logits（HF） | 0.85 | 0.908 | 0.05 | 78s | 库内，不可生产 |
 | semif 4B-4bit | 直读 logits（MLX CLI） | 0.75 | 0.867 | 0.65 | 2.7s | flip 爆炸淘汰 |
-| **Qwen3-Reranker-0.6B（MLX mxfp8）** | **pointwise yes/no** | **0.65** | **0.808** | **0.05** | **616ms** | **Jev 兼容 serve，已切换** |
+| **Qwen3-Reranker-0.6B（MLX mxfp8）** | **pointwise yes/no** | **0.70** | **0.833** | **0.10** | **~600ms** | **Jev 兼容 serve，已切换** |
 | kev 0.8B | pointer head（MLX） | 0.65 | 0.804 | 0.30 | 300ms | 两轮复现一致，降级备选 |
 | rsi-jev 2B | pointer head（torch） | 0.60 | 0.758 | 0.45 | 54s | 淘汰 |
 | jevos INT8 | choice 分解 | 0.50 | 0.703 | 0.40 | 3.6s | 不如词法基线，淘汰 |

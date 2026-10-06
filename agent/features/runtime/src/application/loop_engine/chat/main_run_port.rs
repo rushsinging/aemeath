@@ -159,6 +159,12 @@ pub(crate) fn make_agent(
                 tools::published::skill::SkillLoadScope::main(),
                 runtime_context.skill_load_state(),
             )
+            .with_scoring(
+                // #1835：skill_match 开关开启且评分端口装配时注入 ToolSearch 语义重排。
+                runtime_context
+                    .scoring()
+                    .filter(|_| runtime_context.config_ref().config().scoring().skill_match),
+            )
             .with_agent(agent_runner),
         ),
         max_tool_concurrency,

@@ -45,7 +45,7 @@ def yes_probability(state: str, instructions: str, document: str) -> float:
     prefix = (f"<|im_start|>system\n{SYSTEM}<|im_end|>\n"
               f"<|im_start|>user\n<Instruct>: {instructions}\n<Query>: {state}\n")
     ids = _tokenizer.encode(prefix) + _tokenizer.encode(
-        f"<Document>: {document}<|im_end|>\n<|im_start|>assistant\n")
+        f"<Document>: {document}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n")
     cache = make_prompt_cache(_model)
     logits = _model(mx.array([ids]), cache=cache)
     last = logits[0, -1]

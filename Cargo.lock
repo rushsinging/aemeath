@@ -4396,6 +4396,7 @@ dependencies = [
  "sha2",
  "share",
  "syn 2.0.119",
+ "systemone",
  "task",
  "tempfile",
  "thiserror 2.0.18",

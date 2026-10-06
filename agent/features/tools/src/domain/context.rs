@@ -154,6 +154,7 @@ pub struct ToolExecutionPorts {
     skill_query: SkillQuerySnapshot,
     skill_load_scope: Option<SkillLoadScope>,
     skill_load_state: Option<Arc<dyn SkillLoadStatePort>>,
+    scoring: Option<Arc<dyn systemone::ScoringPort>>,
     selection: share::config::ToolSelection,
 }
 impl ToolExecutionPorts {
@@ -179,12 +180,22 @@ impl ToolExecutionPorts {
             skill_query: SkillQuerySnapshot::default(),
             skill_load_scope: None,
             skill_load_state: None,
+            scoring: None,
             selection: share::config::ToolSelection::default(),
         }
     }
     pub fn with_agent(mut self, agent: Option<Arc<dyn AgentDispatch>>) -> Self {
         self.agent = agent;
         self
+    }
+    /// 注入 System One 评分端口（`AEMEATH_SCORING_SKILL_MATCH` 开关开启时由装配层注入）。
+    pub fn with_scoring(mut self, scoring: Option<Arc<dyn systemone::ScoringPort>>) -> Self {
+        self.scoring = scoring;
+        self
+    }
+    /// System One 评分端口（未注入即开关关闭，消费点走纯词法路径）。
+    pub fn scoring(&self) -> Option<Arc<dyn systemone::ScoringPort>> {
+        self.scoring.clone()
     }
     pub fn with_catalog(mut self, catalog: Option<Arc<dyn CatalogQuery>>) -> Self {
         self.catalog = catalog;
@@ -244,6 +255,10 @@ impl ToolExecutionContext {
     }
     pub fn catalog_query(&self) -> Option<Arc<dyn CatalogQuery>> {
         self.ports.catalog.clone()
+    }
+    /// System One 评分端口委托（skill_match 开关关闭时为 None）。
+    pub fn scoring(&self) -> Option<Arc<dyn systemone::ScoringPort>> {
+        self.ports.scoring()
     }
     pub fn cancellation(&self) -> Arc<dyn CancellationSignal> {
         self.ports.cancellation.clone()

@@ -430,6 +430,20 @@ SCENARIOS = {
 }
 
 
+# skill_match 候选加工具 name 前缀（对齐生产 criteria "name: description" 口径，#1835）
+SKILL_MATCH_NAMES = {
+    "skill-001": ["commit", "archify", "web-search", "playwright"],
+    "skill-002": ["playwright", "commit", "clean-worktree", "promptfolio-summarize"],
+    "skill-003": ["commit", "release", "merge", "build-cli"],
+    "skill-004": ["archify", "wanaka", "promptfolio-logout", "promptfolio-search-people"],
+    "skill-005": ["clean-worktree", "frontend-design", "agent-browser", "grilling"],
+    "skill-006": ["open", "merge", "commit", "find-skills"],
+}
+for _case in SKILL_MATCH:
+    _names = SKILL_MATCH_NAMES[_case["id"]]
+    _case["answers"] = [f"{n}: {a}" for n, a in zip(_names, _case["answers"])]
+
+
 def main() -> None:
     DATASETS.mkdir(parents=True, exist_ok=True)
     total = 0

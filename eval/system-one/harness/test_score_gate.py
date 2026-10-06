@@ -116,3 +116,18 @@ class CheckGateTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SkillMatchGateTest(unittest.TestCase):
+    def passing_metrics(self) -> dict:
+        return {"n_forward": 6, "errors": 0, "R@1": 1.0, "MRR": 1.0,
+                "order_flip_rate": 0.0, "latency_p95_ms": 230.0,
+                "chinese_r_at_1": 1.0}
+
+    def test_pass_when_all_thresholds_met(self):
+        self.assertEqual(score.check_gate("skill_match", self.passing_metrics()), [])
+
+    def test_fail_when_p95_exceeds_1s_budget(self):
+        metrics = self.passing_metrics()
+        metrics["latency_p95_ms"] = 1500.0
+        self.assertTrue(any("latency" in v for v in score.check_gate("skill_match", metrics)))
