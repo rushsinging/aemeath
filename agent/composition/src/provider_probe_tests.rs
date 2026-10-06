@@ -1,92 +1,5 @@
 use super::*;
-use async_trait::async_trait;
-use config::ports::{ProviderProbeErrorKind, ProviderProbePort, ProviderProbeRequest};
-use futures_util::stream;
-use provider::composition::{InvocationScopeData, LlmClient, LlmProvider, SystemBlockData};
-use provider::{
-    InvocationEventData, ProviderCompletionData, ProviderContentBlockData, ProviderError,
-    ProviderErrorKind, ProviderStopReasonData,
-};
-use share::message::Message;
-use share::reasoning::ReasoningLevel;
-use std::sync::{Arc, Mutex};
-use tokio_util::sync::CancellationToken;
-
-#[derive(Default)]
-struct CapturedInvocation {
-    count: usize,
-    max_tokens: Option<u32>,
-}
-
-struct EventProvider {
-    events: Vec<InvocationEventData>,
-    captured: Arc<Mutex<CapturedInvocation>>,
-}
-
-#[async_trait]
-impl LlmProvider for EventProvider {
-    async fn invocation_stream(
-        &self,
-        scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
-        _messages: &[Message],
-        _tools: &[serde_json::Value],
-        _cancel: &CancellationToken,
-    ) -> Result<provider::InvocationStreamData, ProviderError> {
-        let mut captured = self.captured.lock().unwrap();
-        captured.count += 1;
-        captured.max_tokens = Some(scope.max_tokens());
-        Ok(Box::pin(stream::iter(self.events.clone())))
-    }
-
-    fn model_name(&self) -> &str {
-        "probe-model"
-    }
-
-    fn provider_name(&self) -> &str {
-        "Anthropic"
-    }
-}
-
-#[derive(Clone)]
-struct CapturedClientSpec {
-    driver: String,
-    api_key: String,
-    base_url: Option<String>,
-    model: String,
-    max_tokens: u32,
-    timeout_secs: u64,
-    user_agent: String,
-}
-
-struct FakeProbeClientFactory {
-    client: Arc<LlmClient>,
-    specs: Arc<Mutex<Vec<CapturedClientSpec>>>,
-}
-
-impl ProbeClientFactory for FakeProbeClientFactory {
-    fn build(&self, spec: ProbeClientSpec) -> Result<Arc<LlmClient>, ProviderError> {
-        self.specs.lock().unwrap().push(CapturedClientSpec {
-            driver: spec.driver,
-            api_key: spec.api_key,
-            base_url: spec.base_url,
-            model: spec.model,
-            max_tokens: spec.max_tokens,
-            timeout_secs: spec.timeout_secs,
-            user_agent: spec.user_agent,
-        });
-        Ok(self.client.clone())
-    }
-}
-
-fn completed() -> InvocationEventData {
-    InvocationEventData::Completed(ProviderCompletionData {
-        output: vec![ProviderContentBlockData::Text("OK".to_string())],
-        stop_reason: ProviderStopReasonData::EndTurn,
-        usage: None,
-        effective_reasoning: ReasoningLevel::Off,
-    })
-}
+use config::ports::{ProviderProbeErrorKind, ProviderProbeRequest};
 
 fn request() -> ProviderProbeRequest {
     ProviderProbeRequest {
@@ -102,70 +15,31 @@ fn request() -> ProviderProbeRequest {
     }
 }
 
-struct ProbeFixture {
-    adapter: ProviderProbeAdapter,
-    specs: Arc<Mutex<Vec<CapturedClientSpec>>>,
-    invocation: Arc<Mutex<CapturedInvocation>>,
+/// 请求 → provider 构造配置的翻译语义：单 token 探测、秒级超时
+/// （亚秒抬到 1s）、独立 source_key、透传凭据与 UA。
+#[test]
+fn probe_config_from_request_applies_probe_semantics() {
+    let config = probe_config_from_request(&request());
+    assert_eq!(config.driver, "anthropic");
+    assert_eq!(config.source_key, "connect-probe");
+    assert_eq!(config.api_key, "sk-probe-secret");
+    assert_eq!(config.base_url.as_deref(), Some("https://probe.test"));
+    assert_eq!(config.model, "probe-model");
+    assert_eq!(config.max_tokens, 1);
+    assert!(!config.reasoning);
+    assert_eq!(config.timeout_secs, 9);
+    assert_eq!(config.user_agent.as_deref(), Some("probe-agent/1.0"));
 }
 
-fn adapter(events: Vec<InvocationEventData>) -> ProbeFixture {
-    let invocation = Arc::new(Mutex::new(CapturedInvocation::default()));
-    let client = Arc::new(LlmClient::from_provider(Arc::new(EventProvider {
-        events,
-        captured: invocation.clone(),
-    })));
-    let specs = Arc::new(Mutex::new(Vec::new()));
-    let factory = Arc::new(FakeProbeClientFactory {
-        client,
-        specs: specs.clone(),
-    });
-    ProbeFixture {
-        adapter: ProviderProbeAdapter::with_factory(factory),
-        specs,
-        invocation,
-    }
+#[test]
+fn probe_config_subsecond_timeout_floors_to_one_second() {
+    let mut probe_request = request();
+    probe_request.timeout = std::time::Duration::from_millis(150);
+    assert_eq!(probe_config_from_request(&probe_request).timeout_secs, 1);
 }
 
-#[tokio::test]
-async fn probe_maps_request_and_invokes_once() {
-    let fixture = adapter(vec![completed()]);
-    fixture.adapter.probe(request()).await.unwrap();
-
-    let specs = fixture.specs.lock().unwrap();
-    assert_eq!(specs.len(), 1);
-    assert_eq!(specs[0].driver, "anthropic");
-    assert_eq!(specs[0].api_key, "sk-probe-secret");
-    assert_eq!(specs[0].base_url.as_deref(), Some("https://probe.test"));
-    assert_eq!(specs[0].model, "probe-model");
-    assert_eq!(specs[0].max_tokens, 1);
-    assert_eq!(specs[0].timeout_secs, 9);
-    assert_eq!(specs[0].user_agent, "probe-agent/1.0");
-    let invocation = fixture.invocation.lock().unwrap();
-    assert_eq!(invocation.count, 1);
-    assert_eq!(invocation.max_tokens, Some(1));
-}
-
-#[tokio::test]
-async fn probe_requires_completed_terminal_event() {
-    let fixture = adapter(Vec::new());
-    let error = fixture.adapter.probe(request()).await.unwrap_err();
-    assert_eq!(error.kind, ProviderProbeErrorKind::Protocol);
-}
-
-#[tokio::test]
-async fn probe_maps_failed_event_without_sensitive_message() {
-    let secret = "sk-probe-secret";
-    let failed = InvocationEventData::Failed(ProviderError::fatal(
-        ProviderErrorKind::Authentication,
-        format!("Authorization Bearer {secret}"),
-    ));
-    let fixture = adapter(vec![failed]);
-    let error = fixture.adapter.probe(request()).await.unwrap_err();
-    assert_eq!(error.kind, ProviderProbeErrorKind::Authentication);
-    assert!(!error.message.contains(secret));
-    assert!(!error.message.contains("Authorization"));
-}
-
+/// ProviderError → ProviderProbeError 的分类稳定性与脱敏（上游 wire
+/// 细节 NEVER 进入向导文案）。
 #[test]
 fn provider_error_mapping_is_stable_and_redacted() {
     let cases = [

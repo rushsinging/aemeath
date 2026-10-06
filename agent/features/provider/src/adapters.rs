@@ -9,6 +9,7 @@ pub(crate) mod json_recovery;
 mod ollama;
 pub(crate) mod openai_compatible;
 pub(crate) mod pool;
+pub(crate) mod probe;
 pub(crate) mod stream;
 pub(crate) mod transport;
 

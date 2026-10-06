@@ -40,6 +40,7 @@ pub mod composition {
         ProviderAssemblyWiring,
     };
     pub use crate::adapters::pool::TransportPool;
+    pub use crate::adapters::probe::{run_connectivity_probe, wire_probe_client};
     pub use crate::domain::capability::reasoning_capability_from_max;
     pub use crate::domain::invoke::{InvocationScopeData, SystemBlockData};
     pub use crate::ports::LlmProvider;

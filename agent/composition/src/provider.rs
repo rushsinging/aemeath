@@ -155,68 +155,20 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
     }
 }
 
-use std::time::Instant;
-
 use config::ports::{
     ProviderProbeError, ProviderProbeErrorKind, ProviderProbePort, ProviderProbeRequest,
     ProviderProbeResult,
 };
-use futures_util::StreamExt;
-use provider::InvocationEventData;
-use tokio_util::sync::CancellationToken;
 
-#[derive(Debug, Clone)]
-struct ProbeClientSpec {
-    driver: String,
-    api_key: String,
-    base_url: Option<String>,
-    model: String,
-    max_tokens: u32,
-    timeout_secs: u64,
-    user_agent: String,
-    api_style: Option<String>,
-}
-
-trait ProbeClientFactory: Send + Sync {
-    fn build(&self, spec: ProbeClientSpec) -> Result<Arc<LlmClient>, ProviderError>;
-}
-
-struct DefaultProbeClientFactory;
-
-impl ProbeClientFactory for DefaultProbeClientFactory {
-    fn build(&self, spec: ProbeClientSpec) -> Result<Arc<LlmClient>, ProviderError> {
-        let client = LlmClient::from_config(LlmConfigOptionsData {
-            driver: spec.driver,
-            source_key: "connect-probe".to_string(),
-            api_style: spec.api_style,
-            api_key: spec.api_key,
-            base_url: spec.base_url,
-            model: spec.model,
-            max_tokens: spec.max_tokens,
-            reasoning: false,
-            reasoning_config: None,
-            timeout_secs: spec.timeout_secs,
-            user_agent: Some(spec.user_agent),
-        })
-        .map_err(|_| ProviderError::fatal(ProviderErrorKind::Configuration, "连接测试配置无效"))?;
-        Ok(Arc::new(client))
-    }
-}
-
-pub struct ProviderProbeAdapter {
-    factory: Arc<dyn ProbeClientFactory>,
-}
+/// Connect 向导探测桥接：config 端口请求 → provider 探测内核。
+///
+/// 探测调用语义（单 token/Off/事件消费/超时取消）归 provider
+/// `run_connectivity_probe`；本层只做请求翻译与错误文案映射。
+pub struct ProviderProbeAdapter;
 
 impl ProviderProbeAdapter {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self {
-            factory: Arc::new(DefaultProbeClientFactory),
-        })
-    }
-
-    #[cfg(test)]
-    fn with_factory(factory: Arc<dyn ProbeClientFactory>) -> Self {
-        Self { factory }
+        Arc::new(Self)
     }
 }
 
@@ -226,68 +178,29 @@ impl ProviderProbePort for ProviderProbeAdapter {
         &self,
         request: ProviderProbeRequest,
     ) -> Result<ProviderProbeResult, ProviderProbeError> {
-        let started = Instant::now();
-        let timeout = request.timeout;
-        let client = self
-            .factory
-            .build(ProbeClientSpec {
-                driver: request.driver.as_str().to_string(),
-                api_key: request.credential.unwrap_or_default(),
-                base_url: Some(request.base_url),
-                model: request.model_id,
-                max_tokens: 1,
-                timeout_secs: timeout.as_secs().max(1),
-                user_agent: request.final_user_agent,
-                api_style: request.api_style,
-            })
-            .map_err(map_probe_error)?;
-        let scope = client
-            .invocation_scope(
-                client.model_name(),
-                Some(1),
-                share::reasoning::ReasoningLevel::Off,
-            )
-            .map_err(|_| ProviderProbeError {
-                kind: ProviderProbeErrorKind::Internal,
-                message: "连接测试初始化失败".to_string(),
-            })?;
-        let messages = [share::message::Message::user("Reply with OK.")];
-        let cancellation = CancellationToken::new();
-        let operation = async {
-            let mut stream = client
-                .invocation_stream(&scope, &[], &messages, &[], &cancellation)
-                .await
-                .map_err(map_probe_error)?;
-            while let Some(event) = stream.next().await {
-                match event {
-                    InvocationEventData::Completed(_) => {
-                        return Ok(ProviderProbeResult {
-                            latency: started.elapsed(),
-                        });
-                    }
-                    InvocationEventData::Failed(error) => return Err(map_probe_error(error)),
-                    InvocationEventData::Delta(_) => {}
-                }
-            }
-            Err(protocol_error())
-        };
-        match tokio::time::timeout(timeout, operation).await {
-            Ok(result) => result,
-            Err(_) => {
-                cancellation.cancel();
-                Err(ProviderProbeError {
-                    kind: ProviderProbeErrorKind::Timeout,
-                    message: "连接测试超时".to_string(),
-                })
-            }
-        }
+        let config = probe_config_from_request(&request);
+        let client = provider::composition::wire_probe_client(config).map_err(map_probe_error)?;
+        provider::composition::run_connectivity_probe(&client, request.timeout)
+            .await
+            .map(|latency| ProviderProbeResult { latency })
+            .map_err(map_probe_error)
     }
 }
 
-fn protocol_error() -> ProviderProbeError {
-    ProviderProbeError {
-        kind: ProviderProbeErrorKind::Protocol,
-        message: "服务响应未包含完成事件".to_string(),
+/// Connect 探测请求 → provider 构造配置的纯翻译（无 IO）。
+fn probe_config_from_request(request: &ProviderProbeRequest) -> LlmConfigOptionsData {
+    LlmConfigOptionsData {
+        driver: request.driver.as_str().to_string(),
+        source_key: "connect-probe".to_string(),
+        api_style: request.api_style.clone(),
+        api_key: request.credential.clone().unwrap_or_default(),
+        base_url: Some(request.base_url.clone()),
+        model: request.model_id.clone(),
+        max_tokens: 1,
+        reasoning: false,
+        reasoning_config: None,
+        timeout_secs: request.timeout.as_secs().max(1),
+        user_agent: Some(request.final_user_agent.clone()),
     }
 }
 

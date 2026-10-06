@@ -274,6 +274,18 @@
       "tracking_issue": 1861
     },
     {
+      "id": "construction.provider.wire-probe-client",
+      "symbol": "wire_probe_client",
+      "owner_crate": "provider",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Connect probe client construction and probe execution semantics (run_connectivity_probe) are owned by provider; composition bridges config request translation only (#1861)",
+      "tracking_issue": 1861
+    },
+    {
       "id": "construction.runtime.wire-active-run-registry",
       "symbol": "wire_active_run_registry",
       "owner_crate": "runtime",
