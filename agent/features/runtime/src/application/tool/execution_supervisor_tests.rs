@@ -15,9 +15,7 @@ fn supervisor_uses_earliest_deadline() {
 }
 
 use crate::application::context::coordination::ContextCoordinator;
-use crate::application::tool::execution_supervisor::{
-    SupervisedToolCall, ToolExecutionSupervisor, ToolExecutionSupervisorError,
-};
+use crate::application::tool::execution_supervisor::{SupervisedToolCall, ToolExecutionSupervisor};
 use async_trait::async_trait;
 use context::SessionId;
 use context::{

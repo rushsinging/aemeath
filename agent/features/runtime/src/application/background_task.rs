@@ -8,5 +8,3 @@
 //! （reminder / Wakeup Run）挂接点在通知链路交付中落地。
 
 pub(crate) mod supervisor;
-
-pub(crate) use supervisor::BackgroundTaskSupervisor;

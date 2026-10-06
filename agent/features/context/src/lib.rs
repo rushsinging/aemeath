@@ -99,8 +99,6 @@ pub use domain::{
     ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
 };
 #[cfg(test)]
-pub(crate) use domain::{ToolCallReceiptData, ToolCallState};
-#[cfg(test)]
 pub(crate) use ports::{
     ContextMemorySource, ContextPromptSource, MemoryMaterialization, PromptMaterialization,
     PromptMaterializationError, SessionGeneration, SessionRepository, SessionSnapshot,

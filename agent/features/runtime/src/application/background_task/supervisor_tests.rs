@@ -1,7 +1,6 @@
 use super::*;
 use crate::domain::background_task::{
-    BackgroundInvalidationReason, BackgroundTaskRecord, BackgroundTaskState,
-    BackgroundTaskTerminalKind,
+    BackgroundInvalidationReason, BackgroundTaskState, BackgroundTaskTerminalKind,
 };
 use context::{SessionId, ToolCallIdentityData};
 use sdk::{RunId, RunStepId};
