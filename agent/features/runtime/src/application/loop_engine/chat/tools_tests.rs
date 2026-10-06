@@ -609,8 +609,16 @@ async fn test_materialized_tool_results_persist_oversized_tui_result() {
 // all interaction routing via InteractionCoordinator.
 
 // ── #252 后台任务：工具轮级快路径等价与转后台场景 ─────────────────────
+//
+// 计时断言在高负载（pre-push 并发全量测试）下易 flaky，改用确定性信号：
+// fast 工具完成时刻观察 slow 是否已真实完成。
 
-struct SlowSequentialTool;
+/// 慢工具完成时置位的信号（观察"fast 先于 slow 真实完成"的确定性证据）。
+type SlowCompletionSignal = Arc<std::sync::atomic::AtomicBool>;
+
+struct SlowSequentialTool {
+    finished: SlowCompletionSignal,
+}
 
 #[async_trait]
 impl TypedTool for SlowSequentialTool {
@@ -638,6 +646,8 @@ impl TypedTool for SlowSequentialTool {
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<Self::Output> {
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        self.finished
+            .store(true, std::sync::atomic::Ordering::SeqCst);
         TypedToolResult::success(
             input
                 .get("label")
@@ -658,8 +668,12 @@ fn slow_sequential_call(index: usize) -> ToolCall {
     }
 }
 
-/// 快速 sequential 工具：立即返回，作为「前序转后台后的同轮后续调用」探针。
-struct FastSequentialTool;
+/// 快速 sequential 工具：立即返回，作为「前序转后台后的同轮后续调用」探针；
+/// 完成时记录 slow 是否已真实完成（false = fast 先于 slow，证明未被前序阻塞）。
+struct FastSequentialTool {
+    slow_finished_at_fast_completion: Arc<Mutex<Option<bool>>>,
+    slow_finished: SlowCompletionSignal,
+}
 
 #[async_trait]
 impl TypedTool for FastSequentialTool {
@@ -686,6 +700,11 @@ impl TypedTool for FastSequentialTool {
         input: Value,
         _ctx: &ToolExecutionContext,
     ) -> TypedToolResult<Self::Output> {
+        let observed = self.slow_finished.load(std::sync::atomic::Ordering::SeqCst);
+        *self
+            .slow_finished_at_fast_completion
+            .lock()
+            .expect("fast 探针观察锁") = Some(observed);
         TypedToolResult::success(
             input
                 .get("label")
@@ -708,9 +727,16 @@ fn fast_sequential_call(index: usize) -> ToolCall {
 
 #[tokio::test]
 async fn sequential_round_launches_following_call_after_first_moves_to_background() {
+    let slow_finished: SlowCompletionSignal = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let observed_slow_finished: Arc<Mutex<Option<bool>>> = Arc::new(Mutex::new(None));
     let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
-    registry.register(SlowSequentialTool);
-    registry.register(FastSequentialTool);
+    registry.register(SlowSequentialTool {
+        finished: slow_finished.clone(),
+    });
+    registry.register(FastSequentialTool {
+        slow_finished_at_fast_completion: observed_slow_finished.clone(),
+        slow_finished: slow_finished.clone(),
+    });
     let ctx = test_tool_context();
     let workspace_read = ctx.workspace_read();
     let mut agent = Agent::for_test(registry.as_ref(), ctx, 10);
@@ -728,7 +754,6 @@ async fn sequential_round_launches_following_call_after_first_moves_to_backgroun
         (calls[1].clone(), ToolGuardDecision::Allow),
     ];
 
-    let started_at = std::time::Instant::now();
     let result = execute_tool_round(
         &RuntimeRunContext::new(ChatId::new("chat"), ChatRunId::new("turn")),
         &calls,
@@ -746,7 +771,6 @@ async fn sequential_round_launches_following_call_after_first_moves_to_backgroun
         &guard_decisions,
     )
     .await;
-    let elapsed = started_at.elapsed();
 
     assert_eq!(result.results.len(), 2, "两个 sequential 调用都应有结果");
     assert!(
@@ -759,16 +783,19 @@ async fn sequential_round_launches_following_call_after_first_moves_to_backgroun
         "后续 sequential 调用应真实完成：{}",
         result.results[1].outcome.text
     );
-    assert!(
-        elapsed < std::time::Duration::from_millis(250),
-        "转后台后同轮后续调用不得等待前序真实完成（前序 sleep 300ms），实际 {elapsed:?}"
+    assert_eq!(
+        *observed_slow_finished.lock().expect("fast 探针观察锁"),
+        Some(false),
+        "fast 后续调用完成时 slow 尚未真实完成——证明前序转后台后未被阻塞"
     );
 }
 
 #[tokio::test]
 async fn sequential_round_fast_path_within_threshold_returns_real_results() {
     let registry = Arc::new(tools::composition::TestCatalogExecutionFactory::new());
-    registry.register(SlowSequentialTool);
+    registry.register(SlowSequentialTool {
+        finished: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    });
     let ctx = test_tool_context();
     let workspace_read = ctx.workspace_read();
     let mut agent = Agent::for_test(registry.as_ref(), ctx, 10);
