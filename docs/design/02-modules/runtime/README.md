@@ -39,6 +39,7 @@
 | [06-ports-and-adapters.md](06-ports-and-adapters.md) | 入站 OHS、Runtime 消费的能力契约、RuntimeContext 装配、Composition Root |
 | [07-runtime-ownership-and-assembly.md](07-runtime-ownership-and-assembly.md) | Runtime IoC 终态：去除 Main/Sub 生产类型、静动态所有权、统一 prepare/factory、Interaction/Hook capability adapter 与 Composition 边界 |
 | [08-event-pipeline-and-published-language.md](08-event-pipeline-and-published-language.md) | Runtime 事件体系稳定入口：事实 owner、authority、identity、ordering、delivery、Published Language 与变更门禁 |
+| [09-background-tasks.md](09-background-tasks.md) | 后台任务系统：tool call 统一后台任务模型、超阈值自动转后台、占位协议与异步回注、reminder / Wakeup Run 主动提醒、后台任务查询 tool |
 | [events/README.md](events/README.md) | 编号事件分片导航；包含统一命名规范、事件族、Lifecycle、Activity、Published State、Content Stream、Interaction/Control、Catalog/Config 与全量索引 |
 
 ## 相关文档
@@ -57,3 +58,4 @@
 | 2026-07-15 | 明确 CancelRunStep/TerminateRun 共用 deterministic StepFinalizer；Session committed content 是唯一回放源，未入 Session 的 InputBuffer 在 Terminate 时可丢弃 | [#700](https://github.com/rushsinging/aemeath/issues/700) |
 | 2026-08-01 | 补充统一 Activity 观测机制与 Runtime / SDK / TUI 边界 | 统一 Activity 观测 |
 | 2026-08-08 | 将 Runtime 事件目录按事实 owner 与事件族拆为编号分片，新增统一命名规范、全量跨层索引和历史名称迁移清单 | 事件体系治理 |
+| 2026-10-06 | 新增后台任务系统设计（09）：tool call 统一后台任务模型、双状态机、sequential FIFO 修订、Wakeup Run | #252 |
