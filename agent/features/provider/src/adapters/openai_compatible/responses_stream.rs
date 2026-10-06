@@ -8,7 +8,8 @@
 
 use super::usage::parse_responses_usage;
 use crate::adapters::stream::InvocationSink;
-use crate::domain::invoke::{StopReason, StreamResponse, Usage};
+use crate::domain::invoke::{StreamResponse, Usage};
+use crate::published_language::StopReason;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, Role};
 use std::io;
@@ -207,7 +208,7 @@ pub(crate) async fn parse_responses_stream(
                         .and_then(|s| s.as_str())
                         .unwrap_or("completed");
                     if status == "incomplete" {
-                        stop_reason = StopReason::MaxTokens;
+                        stop_reason = StopReason::MaxOutputTokens;
                     }
 
                     // 检查 output items 判断是否有 tool calls
@@ -230,7 +231,7 @@ pub(crate) async fn parse_responses_stream(
 
     // 流中的 function_call 是权威信号：部分 Responses 兼容端点不会在
     // response.completed.response.output 中重复列出它们。
-    if !function_calls.is_empty() && stop_reason != StopReason::MaxTokens {
+    if !function_calls.is_empty() && stop_reason != StopReason::MaxOutputTokens {
         stop_reason = StopReason::ToolUse;
     }
 

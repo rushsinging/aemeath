@@ -301,28 +301,10 @@ mod usage_tests {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum StopReason {
-    EndTurn,
-    ToolUse,
-    MaxTokens,
-}
-
-impl StopReason {
-    pub fn parse(s: &str) -> Self {
-        match s {
-            "end_turn" => Self::EndTurn,
-            "tool_use" => Self::ToolUse,
-            "max_tokens" => Self::MaxTokens,
-            _ => Self::EndTurn,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct StreamResponse {
     pub assistant_message: share::message::Message,
-    pub stop_reason: StopReason,
+    pub stop_reason: crate::published_language::StopReason,
 }
 
 #[derive(Debug, Deserialize)]

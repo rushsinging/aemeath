@@ -63,7 +63,7 @@ pub(crate) async fn parse_openai_stream(
         reasoning_tokens: None,
         total_tokens: None,
     };
-    let mut stop_reason = crate::domain::invoke::StopReason::EndTurn;
+    let mut stop_reason = crate::published_language::StopReason::EndTurn;
     let mut last_event_time: Option<std::time::Instant> = None;
     let mut chunk_index: u64 = 0;
 
@@ -175,10 +175,10 @@ pub(crate) async fn parse_openai_stream(
                 // 检查 finish_reason
                 if let Some(finish) = choice.get("finish_reason").and_then(|f| f.as_str()) {
                     stop_reason = match finish {
-                        "stop" => crate::domain::invoke::StopReason::EndTurn,
-                        "tool_calls" => crate::domain::invoke::StopReason::ToolUse,
-                        "length" => crate::domain::invoke::StopReason::MaxTokens,
-                        _ => crate::domain::invoke::StopReason::EndTurn,
+                        "stop" => crate::published_language::StopReason::EndTurn,
+                        "tool_calls" => crate::published_language::StopReason::ToolUse,
+                        "length" => crate::published_language::StopReason::MaxOutputTokens,
+                        _ => crate::published_language::StopReason::EndTurn,
                     };
                 }
 

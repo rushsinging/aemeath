@@ -379,11 +379,7 @@ fn completion_from_legacy(
         .collect();
     ProviderCompletionData {
         output,
-        stop_reason: match response.stop_reason {
-            StopReason::EndTurn => ProviderStopReasonData::EndTurn,
-            StopReason::ToolUse => ProviderStopReasonData::ToolUse,
-            StopReason::MaxTokens => ProviderStopReasonData::MaxOutputTokens,
-        },
+        stop_reason: response.stop_reason,
         usage,
         effective_reasoning,
     }
@@ -417,7 +413,7 @@ pub async fn parse_stream(
         reasoning_tokens: None,
         total_tokens: None,
     };
-    let mut stop_reason = StopReason::EndTurn;
+    let mut stop_reason = ProviderStopReasonData::EndTurn;
 
     let mut last_event_time: Option<std::time::Instant> = None;
     let mut tool_index: usize = 0;
@@ -623,7 +619,13 @@ pub async fn parse_stream(
                 usage: delta_usage,
             } => {
                 if let Some(reason) = delta.stop_reason {
-                    stop_reason = StopReason::parse(&reason);
+                    stop_reason = match reason.as_str() {
+                        "end_turn" => ProviderStopReasonData::EndTurn,
+                        "tool_use" => ProviderStopReasonData::ToolUse,
+                        "max_tokens" => ProviderStopReasonData::MaxOutputTokens,
+                        "stop_sequence" => ProviderStopReasonData::StopSequence,
+                        other => ProviderStopReasonData::Other(other.to_string()),
+                    };
                 }
                 if let Some(du) = delta_usage {
                     usage.output_tokens = du.output_tokens;
