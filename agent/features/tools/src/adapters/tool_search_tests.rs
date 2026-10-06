@@ -44,8 +44,8 @@ fn test_compute_relevance_case_insensitive() {
 // ---------- #1835 System One 语义重排 ----------
 
 use crate::domain::{
-    ExecutionScope, FixedGuidance, FixedPlanMode, MutexReadSet, ToolExecutionContext,
-    ToolExecutionPorts, ToolListProvider, WorkspaceReadAccess,
+    ExecutionScope, FixedGuidance, MutexReadSet, ToolExecutionContext, ToolExecutionPorts,
+    ToolListProvider, WorkspaceReadAccess,
 };
 use async_trait::async_trait;
 use project::WorkspaceReader;
@@ -186,7 +186,6 @@ fn search_context(
         Arc::new(MutexReadSet(Arc::new(std::sync::Mutex::new(
             Default::default(),
         )))),
-        Arc::new(FixedPlanMode(None)),
         Arc::new(memory::api::NoOpMemory),
         Arc::new(FixedGuidance {
             language: "en".into(),
