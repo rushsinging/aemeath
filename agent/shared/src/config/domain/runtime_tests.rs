@@ -1,15 +1,16 @@
 use super::RuntimeConfig;
 
 #[test]
-fn runtime_default_threshold_is_ten_seconds() {
+fn runtime_default_threshold_disables_backgrounding_until_delivery_completes() {
     let config = RuntimeConfig::default();
-    assert_eq!(config.tool_background_threshold_secs, 10);
+    // #252 PR1 feature flag 关闭交付：默认 0（禁用），查询工具（PR3）落地后开 10s。
+    assert_eq!(config.tool_background_threshold_secs, 0);
 }
 
 #[test]
 fn runtime_serde_missing_section_falls_back_to_default() {
     let document: RuntimeConfig = serde_json::from_str("{}").unwrap();
-    assert_eq!(document.tool_background_threshold_secs, 10);
+    assert_eq!(document.tool_background_threshold_secs, 0);
 }
 
 #[test]

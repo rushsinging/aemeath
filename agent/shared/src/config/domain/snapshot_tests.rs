@@ -507,9 +507,9 @@ fn test_snapshot_language_default() {
 }
 
 #[test]
-fn snapshot_exposes_tool_background_threshold_default() {
+fn snapshot_exposes_tool_background_threshold_default_disabled() {
     let snap = ConfigSnapshot::new(Config::default());
-    assert_eq!(snap.tool_background_threshold_secs(), 10);
+    assert_eq!(snap.tool_background_threshold_secs(), 0);
 }
 
 #[test]
