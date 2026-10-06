@@ -1,6 +1,5 @@
 //! Provider driver capability.
 
-use serde::{Deserialize, Serialize};
 pub use share::reasoning::ReasoningLevel;
 
 use crate::published_language::{ReasoningCapabilityData, ReasoningMappingKindData};
