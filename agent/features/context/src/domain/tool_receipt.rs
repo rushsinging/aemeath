@@ -68,6 +68,9 @@ impl ToolTerminalReceiptData {
 pub enum ToolCallState {
     Pending,
     Running,
+    /// 已转后台：前台等待结束但执行未完成，terminal 推迟到真实完成时写入。
+    /// step finalize 允许携带该状态挂起；恢复时按后台任务失效语义对账。
+    Backgrounded,
     Terminal(ToolTerminalReceiptData),
 }
 
@@ -132,6 +135,10 @@ impl ToolCallReceiptData {
                 ToolCallState::Pending | ToolCallState::Running,
                 ToolCallState::Terminal(terminal),
             ) => ToolCallState::Terminal(terminal),
+            (ToolCallState::Running, ToolCallState::Backgrounded) => ToolCallState::Backgrounded,
+            (ToolCallState::Backgrounded, ToolCallState::Terminal(terminal)) => {
+                ToolCallState::Terminal(terminal)
+            }
             (ToolCallState::Running, ToolCallState::Running) => {
                 return Ok(ToolReceiptMutationReceiptData {
                     receipt: self,
@@ -191,6 +198,14 @@ impl ToolReceiptMutationData {
             identity,
             input_preview: None,
             next: ToolCallState::Running,
+        }
+    }
+
+    pub fn backgrounded(identity: ToolCallIdentityData) -> Self {
+        Self {
+            identity,
+            input_preview: None,
+            next: ToolCallState::Backgrounded,
         }
     }
 

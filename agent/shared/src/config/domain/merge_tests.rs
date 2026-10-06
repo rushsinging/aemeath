@@ -278,3 +278,50 @@ fn markdown_spacing_patch_merges_element_edges_sparsely() {
     assert_eq!(overrides.heading.unwrap().after.unwrap().get(), 0);
     assert_eq!(overrides.paragraph.unwrap().after.unwrap().get(), 1);
 }
+
+#[test]
+fn runtime_patch_overrides_threshold_and_reaches_snapshot() {
+    let global: ConfigPatch =
+        serde_json::from_str(r#"{"runtime":{"tool_background_threshold_secs":30}}"#).unwrap();
+    let env_layer = ConfigPatch {
+        runtime: Some(RuntimeConfigPatch {
+            tool_background_threshold_secs: Some(45),
+        }),
+        ..Default::default()
+    };
+
+    let config = apply_patch(apply_patch(Config::default(), global), env_layer);
+    let snapshot = ConfigSnapshot::new(config);
+
+    assert_eq!(
+        snapshot.tool_background_threshold_secs(),
+        45,
+        "高层字段应覆盖"
+    );
+}
+
+#[test]
+fn runtime_patch_zero_disables_backgrounding() {
+    let layer: ConfigPatch =
+        serde_json::from_str(r#"{"runtime":{"tool_background_threshold_secs":0}}"#).unwrap();
+
+    let config = apply_patch(Config::default(), layer);
+    let snapshot = ConfigSnapshot::new(config);
+
+    assert_eq!(
+        snapshot.tool_background_threshold_secs(),
+        0,
+        "显式 0 表示禁用后台化，不得回退默认值"
+    );
+}
+
+#[test]
+fn runtime_patch_some_makes_config_patch_non_empty() {
+    let layer = ConfigPatch {
+        runtime: Some(RuntimeConfigPatch {
+            tool_background_threshold_secs: Some(10),
+        }),
+        ..Default::default()
+    };
+    assert!(!layer.is_empty(), "runtime Some 时 is_empty 必须为 false");
+}

@@ -469,6 +469,10 @@ impl AgentRunner for CliAgentRunner {
                             .current_workspace_root(),
                     ),
                 runtime_cancellation: runtime_token.clone(),
+                // Sub Run 禁用自动转后台（#252 D14）：子代理收口后其占位
+                // 无处回注、通知无法语义路由；子代理整体已作为父侧后台
+                // 任务的执行体，内部保持同步语义。
+                background_threshold: None,
             };
 
             if let Some(ref sink) = progress_sink {

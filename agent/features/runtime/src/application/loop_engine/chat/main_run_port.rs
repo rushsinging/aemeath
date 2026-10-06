@@ -173,6 +173,9 @@ pub(crate) fn make_agent(
                 workspace.read().current_workspace_root(),
             ),
         runtime_cancellation: cancel.clone(),
+        background_threshold: crate::application::run::config::background_threshold_from_context(
+            runtime_context,
+        ),
     }
 }
 

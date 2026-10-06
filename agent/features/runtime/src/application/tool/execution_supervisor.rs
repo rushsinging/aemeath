@@ -5,6 +5,7 @@ use context::{
     CleanupConfirmation as ReceiptCleanupConfirmation, ToolCallIdentityData,
     ToolReceiptMutationData, ToolTerminalReceiptData,
 };
+use share::ids::BackgroundTaskId;
 use tools::published::execution::ToolExecutionOutcome as PublishedToolOutcome;
 use tools::published::execution::{
     CancellationDeclaration, CancellationSignal, CleanupConfirmation, ToolExecutionContext,
@@ -33,6 +34,9 @@ pub(crate) struct SupervisedToolCall {
     /// per-call child cancellation：deadline 到期或用户取消时由 supervisor
     /// 触发，经 `context.cancellation()` 传播给 Cooperative 工具。
     pub child_cancellation: tokio_util::sync::CancellationToken,
+    /// 前台等待阈值：超过即自动转后台（占位结果 + 异步回注）。
+    /// `None` 或 `Some(0)` 表示禁用后台化（纯快路径）。随 RunConfigSnapshot 冻结。
+    pub background_threshold: Option<Duration>,
 }
 
 impl ToolExecutionSupervisor {
@@ -56,6 +60,90 @@ impl ToolExecutionSupervisor {
         self
     }
 
+    /// 超阈值转后台：receipt 推进 Backgrounded，spawn detached 驱动在
+    /// 后台等待真实终态（唯一取消源 = deadline 快照），前台立即返回占位结果。
+    async fn move_to_background(
+        &self,
+        mut call: SupervisedToolCall,
+        mut join_handle: tokio::task::JoinHandle<PublishedToolOutcome>,
+        deadline_snapshot: Option<SystemTime>,
+        cancellation_declaration: CancellationDeclaration,
+        started: std::time::Instant,
+    ) -> Result<(PublishedToolOutcome, Duration), ToolExecutionSupervisorError> {
+        let task_id = BackgroundTaskId::new_v7();
+        log::info!(
+            target: crate::LOG_TARGET,
+            "tool moved to background: run_id={} step_id={} call_id={} tool={} task_id={} elapsed_ms={} deadline_snapshot={:?}",
+            call.identity.run_id,
+            call.identity.step_id,
+            call.identity.runtime_call_id,
+            call.identity.tool_name,
+            task_id.as_str(),
+            started.elapsed().as_millis(),
+            deadline_snapshot,
+        );
+        self.context
+            .advance_tool_receipt(ToolReceiptMutationData::backgrounded(call.identity.clone()))
+            .await?;
+
+        let driver_context = self.context.clone();
+        let grace = self.grace;
+        let identity = call.identity.clone();
+        let child_cancellation = call.child_cancellation.clone();
+        let task_id_for_logs = task_id.clone();
+        tokio::spawn(async move {
+            let outcome = match deadline_snapshot {
+                Some(deadline) => {
+                    let wait = deadline
+                        .duration_since(SystemTime::now())
+                        .unwrap_or_default();
+                    tokio::select! {
+                        result = &mut join_handle => join_result_to_outcome(result),
+                        _ = tokio::time::sleep(wait) => {
+                            log::warn!(
+                                target: crate::LOG_TARGET,
+                                "background task reached deadline snapshot: run_id={} step_id={} call_id={} tool={} task_id={}",
+                                identity.run_id,
+                                identity.step_id,
+                                identity.runtime_call_id,
+                                identity.tool_name,
+                                task_id_for_logs.as_str(),
+                            );
+                            child_cancellation.cancel();
+                            cancellation_outcome(cancellation_declaration, join_handle, grace, true).await
+                        }
+                    }
+                }
+                None => join_result_to_outcome(join_handle.await),
+            };
+            let terminal = terminal_receipt(&outcome);
+            log::info!(
+                target: crate::LOG_TARGET,
+                "background task terminal: run_id={} step_id={} call_id={} tool={} task_id={} outcome={:?}",
+                identity.run_id,
+                identity.step_id,
+                identity.runtime_call_id,
+                identity.tool_name,
+                task_id_for_logs.as_str(),
+                terminal.outcome,
+            );
+            if let Err(error) = driver_context
+                .advance_tool_receipt(ToolReceiptMutationData::terminal(identity, terminal))
+                .await
+            {
+                log::error!(
+                    target: crate::LOG_TARGET,
+                    "background task terminal receipt failed: task_id={} error={error:?}",
+                    task_id_for_logs.as_str(),
+                );
+            }
+        });
+
+        let placeholder = placeholder_tool_result(&task_id, &call.identity.tool_name);
+        call.background_threshold = None; // 已转后台，防止重复判定
+        Ok((placeholder, started.elapsed()))
+    }
+
     pub(crate) async fn execute(
         &self,
         call: SupervisedToolCall,
@@ -69,7 +157,7 @@ impl ToolExecutionSupervisor {
         self.context
             .advance_tool_receipt(ToolReceiptMutationData::pending(
                 call.identity.clone(),
-                call.input_preview,
+                call.input_preview.clone(),
             ))
             .await?;
         log::debug!(
@@ -121,8 +209,16 @@ impl ToolExecutionSupervisor {
             call.cancellation.is_cancelled(),
             effective_deadline
         );
-        let future = self.execution.execute(call.invocation, &call.context);
-        tokio::pin!(future);
+
+        // spawn-first：执行体独立于前台等待，转后台时不 abort 继续运行。
+        let mut join_handle = spawn_tool_execution(
+            Arc::clone(&self.execution),
+            call.invocation.clone(),
+            call.context.clone(),
+        );
+        let backgrounding = call
+            .background_threshold
+            .filter(|threshold| threshold > &Duration::ZERO);
 
         let outcome = match effective_deadline {
             Some(deadline) => {
@@ -130,7 +226,7 @@ impl ToolExecutionSupervisor {
                     .duration_since(SystemTime::now())
                     .unwrap_or_default();
                 tokio::select! {
-                    result = &mut future => result,
+                    result = &mut join_handle => join_result_to_outcome(result),
                     _ = call.cancellation.cancelled() => {
                         log::debug!(
                             target: crate::LOG_TARGET,
@@ -142,7 +238,7 @@ impl ToolExecutionSupervisor {
                             started.elapsed().as_millis()
                         );
                         call.child_cancellation.cancel();
-                        cancellation_outcome(descriptor.cancellation, &mut future, self.grace, false).await
+                        cancellation_outcome(descriptor.cancellation, join_handle, self.grace, false).await
                     }
                     _ = tokio::time::sleep(wait) => {
                         log::debug!(
@@ -155,12 +251,23 @@ impl ToolExecutionSupervisor {
                             started.elapsed().as_millis()
                         );
                         call.child_cancellation.cancel();
-                        cancellation_outcome(descriptor.cancellation, &mut future, self.grace, true).await
+                        cancellation_outcome(descriptor.cancellation, join_handle, self.grace, true).await
+                    }
+                    _ = backgrounding_sleep(backgrounding) => {
+                        return self
+                            .move_to_background(
+                                call,
+                                join_handle,
+                                effective_deadline,
+                                descriptor.cancellation,
+                                started,
+                            )
+                            .await;
                     }
                 }
             }
             None => tokio::select! {
-                result = &mut future => result,
+                result = &mut join_handle => join_result_to_outcome(result),
                 _ = call.cancellation.cancelled() => {
                     log::debug!(
                         target: crate::LOG_TARGET,
@@ -172,7 +279,18 @@ impl ToolExecutionSupervisor {
                         started.elapsed().as_millis()
                     );
                     call.child_cancellation.cancel();
-                    cancellation_outcome(descriptor.cancellation, &mut future, self.grace, false).await
+                    cancellation_outcome(descriptor.cancellation, join_handle, self.grace, false).await
+                }
+                _ = backgrounding_sleep(backgrounding) => {
+                    return self
+                        .move_to_background(
+                            call,
+                            join_handle,
+                            effective_deadline,
+                            descriptor.cancellation,
+                            started,
+                        )
+                        .await;
                 }
             },
         };
@@ -211,17 +329,55 @@ impl ToolExecutionSupervisor {
     }
 }
 
-async fn cancellation_outcome<F>(
+/// spawn 执行体：owned context move 进独立 task，执行体生命周期独立于前台等待。
+fn spawn_tool_execution(
+    execution: Arc<dyn ToolExecutionPort>,
+    invocation: ToolInvocation,
+    context: ToolExecutionContext,
+) -> tokio::task::JoinHandle<PublishedToolOutcome> {
+    tokio::spawn(async move { execution.execute(invocation, &context).await })
+}
+
+/// 阈值等待分支：`None` / 零值时永不触发（前台不转后台）。
+async fn backgrounding_sleep(threshold: Option<Duration>) {
+    match threshold {
+        Some(duration) if duration > Duration::ZERO => tokio::time::sleep(duration).await,
+        _ => std::future::pending::<()>().await,
+    }
+}
+
+/// JoinHandle 结果归一：task panic 投影为 Internal failure。
+fn join_result_to_outcome(
+    result: Result<PublishedToolOutcome, tokio::task::JoinError>,
+) -> PublishedToolOutcome {
+    match result {
+        Ok(outcome) => outcome,
+        Err(join_error) => PublishedToolOutcome::failure(
+            tools::ToolErrorKind::Internal,
+            format!("tool execution task failed: {join_error}"),
+        ),
+    }
+}
+
+/// 占位 tool result：转后台后立即发布给 LLM 的合法成功结果。
+fn placeholder_tool_result(task_id: &BackgroundTaskId, tool_name: &str) -> PublishedToolOutcome {
+    PublishedToolOutcome::success_text(format!(
+        "Tool call is still running in the background (task-{} for tool {tool_name}). \
+         The result is not final yet and will be delivered when the task completes. \
+         You may continue with other work; use the background tasks tool to inspect \
+         status or logs, or to stop the task.",
+        task_id.as_str(),
+    ))
+}
+
+async fn cancellation_outcome(
     declaration: CancellationDeclaration,
-    future: &mut std::pin::Pin<&mut F>,
+    mut join_handle: tokio::task::JoinHandle<PublishedToolOutcome>,
     grace: Duration,
     timed_out: bool,
-) -> PublishedToolOutcome
-where
-    F: std::future::Future<Output = PublishedToolOutcome>,
-{
+) -> PublishedToolOutcome {
     if declaration == CancellationDeclaration::Cooperative
-        && tokio::time::timeout(grace, future).await.is_ok()
+        && tokio::time::timeout(grace, &mut join_handle).await.is_ok()
     {
         return if timed_out {
             PublishedToolOutcome::timed_out(

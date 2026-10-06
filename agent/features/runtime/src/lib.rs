@@ -68,6 +68,7 @@ mod boundary_tests {
         let application = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/application");
         let allowed = [
             "activity",
+            "background_task",
             "client",
             "compact_generator",
             "constants",

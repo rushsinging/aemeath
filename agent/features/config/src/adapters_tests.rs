@@ -376,3 +376,35 @@ fn format_detection_rejects_unknown_settings() {
         ConfigFormat::Unknown
     );
 }
+
+#[test]
+fn env_adapter_maps_tool_background_threshold_into_patch() {
+    let source = FakeEnv(HashMap::from([(
+        "AEMEATH_TOOL_BACKGROUND_THRESHOLD_SECS".into(),
+        "25".into(),
+    )]));
+    let patch = EnvAdapter::read(&source);
+    let runtime = patch.runtime.expect("threshold env 应产出 runtime patch");
+    assert_eq!(runtime.tool_background_threshold_secs, Some(25));
+}
+
+#[test]
+fn env_adapter_accepts_zero_threshold_as_disabled() {
+    let source = FakeEnv(HashMap::from([(
+        "AEMEATH_TOOL_BACKGROUND_THRESHOLD_SECS".into(),
+        "0".into(),
+    )]));
+    let patch = EnvAdapter::read(&source);
+    let runtime = patch.runtime.expect("0 是合法禁用值，应产出 patch");
+    assert_eq!(runtime.tool_background_threshold_secs, Some(0));
+}
+
+#[test]
+fn env_adapter_ignores_invalid_tool_background_threshold() {
+    let source = FakeEnv(HashMap::from([(
+        "AEMEATH_TOOL_BACKGROUND_THRESHOLD_SECS".into(),
+        "fast".into(),
+    )]));
+    let patch = EnvAdapter::read(&source);
+    assert!(patch.runtime.is_none());
+}
