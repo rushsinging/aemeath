@@ -27,6 +27,10 @@ pub use domain::{
 // Role-policy compilation: config strings → narrowed ToolProfile.
 pub use domain::role_policy::role_profile_name;
 
+// Test-only context builder（`test-harness` feature；生产构建不启用）。
+#[cfg(any(test, feature = "test-harness"))]
+pub use domain::test_support;
+
 // Runtime's phase-peel seam delegates to this Tools-owned typed parser.
 
 // Adapter façade: only MCP protocol values and the read-only command classifier.

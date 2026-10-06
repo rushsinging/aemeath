@@ -469,6 +469,9 @@ impl AgentRunner for CliAgentRunner {
                             .current_workspace_root(),
                     ),
                 runtime_cancellation: runtime_token.clone(),
+                background_threshold: crate::application::run::config::background_threshold_from_context(
+                    derived.instance.context(),
+                ),
             };
 
             if let Some(ref sink) = progress_sink {

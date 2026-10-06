@@ -90,6 +90,8 @@ pub struct Agent {
     pub(crate) committed_side_effects:
         crate::application::loop_engine::chat::committed_side_effect::CommittedSideEffectDispatcher,
     pub runtime_cancellation: tokio_util::sync::CancellationToken,
+    /// tool call 前台等待阈值（Run scope 冻结；`None` 禁用后台化）。
+    pub background_threshold: Option<std::time::Duration>,
 }
 
 pub use crate::domain::agent_run::ToolCall;
@@ -156,6 +158,7 @@ impl Agent {
             max_tool_concurrency,
             agent_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
             runtime_cancellation: tokio_util::sync::CancellationToken::new(),
+            background_threshold: None,
         }
     }
 
@@ -308,6 +311,7 @@ impl Agent {
                 run_deadline: ctx.scope().deadline(),
                 cancellation: ctx.cancellation(),
                 child_cancellation: child_token,
+                background_threshold: self.background_threshold,
             })
             .await
             .map(|(outcome, duration)| (outcome, Some(duration.as_millis() as u64)))

@@ -94,8 +94,9 @@ pub use domain::{
     ContextRequestData, ContextWindowData, DecisionReason, FinalizeCause, InvocationReminderData,
     Language, ManualCompactRequestData, RunStepId, SessionId, StepReceiptData,
     SystemPromptSpecData, TaskProgressReminderData, TaskProgressReminderItemData,
-    TaskProgressStatus, ToolCallIdentityData, ToolOutcomeKindData, ToolReceiptMutationData,
-    ToolReceiptMutationError, ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
+    TaskProgressStatus, ToolCallIdentityData, ToolCallReceiptData, ToolCallState,
+    ToolOutcomeKindData, ToolReceiptMutationData, ToolReceiptMutationError,
+    ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
 };
 #[cfg(test)]
 pub(crate) use domain::{ToolCallReceiptData, ToolCallState};

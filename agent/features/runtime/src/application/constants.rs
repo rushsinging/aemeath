@@ -66,6 +66,11 @@ pub(crate) const CALIBRATION_CLAMP: std::ops::RangeInclusive<f64> = 0.5..=2.0;
 
 pub(crate) const DEFAULT_GRACE: Duration = Duration::from_millis(250);
 
+// ─── background_task/supervisor.rs ───
+
+/// 单任务输出环形缓冲容量（字节）。
+pub(crate) const BACKGROUND_TASK_OUTPUT_CAPACITY_BYTES: usize = 64 * 1024;
+
 // ─── tool/tool_result_materializer.rs ───
 
 pub(crate) const COMPLETED_MATERIALIZATION_CAPACITY: usize = 256;

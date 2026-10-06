@@ -27,8 +27,8 @@ pub mod skill_ports;
 pub mod skill_state;
 pub mod skill_tool;
 pub mod suspension;
-#[cfg(test)]
-pub(crate) mod test_support;
+#[cfg(any(test, feature = "test-harness"))]
+pub mod test_support;
 pub mod tool;
 #[cfg(test)]
 #[path = "domain/tool_tests.rs"]

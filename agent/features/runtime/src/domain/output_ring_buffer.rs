@@ -28,7 +28,9 @@ impl OutputRingBuffer {
     /// 追加输出字节；超出容量时丢弃最老字节。
     pub fn append(&mut self, chunk: &[u8]) {
         if chunk.len() >= self.capacity_bytes {
-            let tail = &chunk[chunk.len() - self.capacity_bytes..];
+            let tail = chunk
+                .get(chunk.len() - self.capacity_bytes..)
+                .expect("chunk.len() >= capacity 分支内尾部区间必然合法");
             self.buffer = tail.to_vec();
             self.total_written += chunk.len() as u64;
             self.buffer_start_cursor = self.total_written - self.capacity_bytes as u64;
@@ -48,7 +50,11 @@ impl OutputRingBuffer {
     /// 尾部视图（非消耗性）：返回最近 `max_bytes` 字节与读后游标。
     pub fn read_tail_bytes(&self, max_bytes: usize) -> (Vec<u8>, u64) {
         let start = self.buffer.len().saturating_sub(max_bytes);
-        let bytes = self.buffer[start..].to_vec();
+        let bytes = self
+            .buffer
+            .get(start..)
+            .expect("saturating_sub 起点必然不越界")
+            .to_vec();
         let cursor = self.buffer_start_cursor + start as u64 + bytes.len() as u64;
         (bytes, cursor)
     }
@@ -62,7 +68,11 @@ impl OutputRingBuffer {
             .min(self.total_written());
         let buffer_offset_start = (effective_start - self.buffer_start_cursor) as usize;
         let buffer_offset_end = (end - self.buffer_start_cursor) as usize;
-        let bytes = self.buffer[buffer_offset_start..buffer_offset_end].to_vec();
+        let bytes = self
+            .buffer
+            .get(buffer_offset_start..buffer_offset_end)
+            .expect("游标区间已由 buffer_start_cursor 与 total_written clamp 保证合法")
+            .to_vec();
         (bytes, end)
     }
 

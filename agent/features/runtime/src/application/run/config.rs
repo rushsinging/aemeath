@@ -54,3 +54,14 @@ impl RunConfigSnapshot {
 #[cfg(test)]
 #[path = "config_tests.rs"]
 mod tests;
+
+/// Run scope 冻结的 tool call 前台等待阈值；配置 0 表示禁用后台化。
+pub(crate) fn background_threshold_from_context(
+    runtime_context: &crate::application::run::context::RuntimeContext,
+) -> Option<std::time::Duration> {
+    let secs = runtime_context
+        .config_ref()
+        .config()
+        .tool_background_threshold_secs();
+    (secs > 0).then(|| std::time::Duration::from_secs(secs))
+}

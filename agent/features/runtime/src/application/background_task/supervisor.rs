@@ -7,14 +7,12 @@ use std::time::SystemTime;
 use context::ToolCallIdentityData;
 use share::ids::BackgroundTaskId;
 
+use crate::application::constants::BACKGROUND_TASK_OUTPUT_CAPACITY_BYTES;
 use crate::domain::background_task::{
     BackgroundInvalidationReason, BackgroundTaskAdvance, BackgroundTaskRecord, BackgroundTaskState,
     BackgroundTaskTerminalKind, BackgroundTaskTransitionError,
 };
 use crate::domain::output_ring_buffer::OutputRingBuffer;
-
-/// 单任务输出环形缓冲容量（字节）。
-const OUTPUT_RING_BUFFER_CAPACITY_BYTES: usize = 64 * 1024;
 
 /// 监督中的后台任务：领域记录 + 输出缓冲 + 终态结果。
 ///
@@ -63,7 +61,7 @@ impl BackgroundTaskSupervisor {
     ) -> BackgroundTaskId {
         let task = SupervisedBackgroundTask {
             record: BackgroundTaskRecord::dispatch(identity, invocation_summary),
-            output: OutputRingBuffer::new(OUTPUT_RING_BUFFER_CAPACITY_BYTES),
+            output: OutputRingBuffer::new(BACKGROUND_TASK_OUTPUT_CAPACITY_BYTES),
             terminal_output: None,
         };
         let task_id = task.record.task_id.clone();

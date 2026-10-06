@@ -1549,6 +1549,8 @@
         "TaskProgressStatus",
         "TokenBudget",
         "ToolCallIdentityData",
+        "ToolCallReceiptData",
+        "ToolCallState",
         "ToolOutcomeKindData",
         "ToolReceiptMutationData",
         "ToolReceiptMutationError",
@@ -1570,7 +1572,7 @@
         "wire_isolated_context_with_workspace_skills",
         "wire_main_session"
       ],
-      "reason": "F-2：context crate 根窄 façade（#1022 登记，消费者证明制）",
+      "reason": "F-2：context crate 根窄 façade（#1022 登记，消费者证明制）；+ToolCallReceiptData/ToolCallState：后台任务 Backgrounded 中间态跨 crate 消费（receipt 状态语义）",
       "profile": "fast"
     },
     {
@@ -1876,9 +1878,10 @@
         "ToolResult",
         "WorkspaceReadAccess",
         "role_profile_name",
+        "test_support",
         "types"
       ],
-      "reason": "F-2：tools crate 根窄 façade（DDD 五类判据；published/ 九子命名空间承载词汇族；composition 独立装配面；#1716 收敛）",
+      "reason": "F-2：tools crate 根窄 façade（DDD 五类判据；published/ 九子命名空间承载词汇族；composition 独立装配面；#1716 收敛）；+test_support：test-harness feature 门控的 test-only 出口（runtime 执行流测试复用 TestToolExecutionContextBuilder）",
       "profile": "fast"
     },
     {
