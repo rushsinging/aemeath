@@ -68,23 +68,25 @@ BackgroundTaskRecord
 - 职责：派发登记、阈值判定、后台 `JoinHandle` 托管、输出收集、终态推进、通知路由（§4）、持久化（§6）。
 - 摆放：runtime feature `application/tool/` 旁新模块；**NEVER** 流入 tools domain（工具执行编排边界不变）。
 
-### 2.3 输出管理与持久化（任务日志文件，方案 B）
+### 2.3 输出管理与持久化（任务日志文件：直绑优先 + 终态兜底）
 
-`ToolExecutionOutcome` 为一次性返回，无内置增量输出流。输出采集两档：tool 经
-`ToolExecutionContext` progress 通道上报的增量（Bash 类长命令）与终态完整结果。
+`ToolExecutionOutcome` 为一次性返回，无内置增量输出流。完整输出零丢失
+（2026-10-07 拍板，方案 B；同日修订为输出直绑形态）：
 
-**完整输出零丢失**（2026-10-07 拍板，方案 B）：
-
-- progress 增量**实时 append 到 per-task 任务日志文件**（`~/.agents/` 运行时目录，
-  会话任务日志命名空间）；终态完整结果同样落文件。
-- 内存 `OutputRingBuffer`（64KB）退化为**运行中尾部视图**：供占位/通知摘要与
-  低成本轮询；溢出丢弃只影响内存视图，文件是完整真相。
-- 读取：运行中与完成后皆可按**任意区间**读取文件（LLM 的 `logs` 增量游标与
-  TUI 翻阅全量输出共用同一文件真相）；token budget 截断在读取层叠加。
+- **子进程类工具（Bash 优先）直绑任务日志文件**：派发即创建 per-task 日志文件
+  （append 模式），路径经 `ToolExecutionContext` 注入；工具把子进程
+  stdout/stderr 直接重定向到该 fd——零跳转、字节保真、无捕获上限、
+  子进程退出由 OS 关闭 fd（规避 runtime 侧延迟 close 的丢记录窗口）。
+  工具层以 opt-in 能力声明参与（descriptor 声明输出直绑），**NEVER** 强制
+  全部工具感知日志文件。
+- **非流式工具**：无中间输出；runtime 在终态把 `ToolExecutionOutcome` 结果
+  append 进同一文件（唯一写入方）。
+- **progress 通道职责分离**：保留用于 TUI 实时滚动直播，**不再作为日志文件的
+  数据源**——文件是持久真相，progress 是 UI 即时视图。
+- 内存 `OutputRingBuffer` 退化为可选优化（文件 tail 读取代）；`logs` 查询
+  直接按文件区间读取（LLM 增量游标与 TUI 翻全量共用同一文件真相源），
+  token budget 截断在读取层叠加。
 - 生命周期随 session：会话任务日志 GC 与 resume 失效对账同步（§6）。
-
-ring buffer 核心不变量（保留）：读写游标分离（非消耗性读取，多次读取幂等，
-不破坏回注）；全局写入游标单调（增量坐标）；过期游标 clamp 到可用窗口。
 
 ### 2.4 阈值配置
 
