@@ -1729,6 +1729,7 @@
         "ModelCapabilityData",
         "ModelIdData",
         "ModelToolSchemaData",
+        "ProviderAssemblyWiring",
         "ProviderCompletionData",
         "ProviderContentBlockData",
         "ProviderDriverKind",
@@ -1742,7 +1743,12 @@
         "ReasoningMappingKindData",
         "RequestSystemBlockData",
         "SystemBlockData",
-        "TransportPool"
+        "TransportPool",
+        "reasoning_capability_from_max",
+        "run_connectivity_probe",
+        "wire_probe_client",
+        "wire_provider_assembly",
+        "wire_provider_client"
       ],
       "reason": "F-2：provider crate 根窄 façade（#1022 登记，消费者证明制）",
       "profile": "fast"
