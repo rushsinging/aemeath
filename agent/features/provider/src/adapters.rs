@@ -12,6 +12,7 @@ pub(crate) mod pool;
 pub(crate) mod probe;
 pub(crate) mod stream;
 pub(crate) mod transport;
+pub(crate) mod wire;
 
 pub(crate) use anthropic::AnthropicProvider;
 pub(crate) use ollama::OllamaProvider;

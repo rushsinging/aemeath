@@ -6,7 +6,8 @@ use tokio_util::sync::CancellationToken;
 use crate::adapters::http_attempt::{
     AttemptDisposition, HttpAttemptContext, HttpAttemptExecutor, HttpAttemptFailure,
 };
-use crate::domain::invoke::{InvocationScopeData, SystemBlockData};
+use crate::adapters::wire::SystemBlockData;
+use crate::domain::invoke::InvocationScopeData;
 use crate::ports::{LlmProvider, ReasoningLevel};
 
 use super::{OpenAICompatibleProvider, ReasoningConfig};

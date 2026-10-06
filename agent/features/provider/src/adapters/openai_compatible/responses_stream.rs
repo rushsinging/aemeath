@@ -8,7 +8,7 @@
 
 use super::usage::parse_responses_usage;
 use crate::adapters::stream::InvocationSink;
-use crate::domain::invoke::{StreamResponse, Usage};
+use crate::adapters::wire::{StreamResponse, Usage};
 use crate::published_language::StopReason;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, Role};

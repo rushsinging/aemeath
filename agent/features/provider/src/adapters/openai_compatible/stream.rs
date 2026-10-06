@@ -4,7 +4,7 @@ use super::constants::{STALL_THRESHOLD, STREAM_IDLE_TIMEOUT};
 use super::reasoning_normalizer::{self, ReasoningDeltaNormalizer};
 use super::usage::parse_chat_usage;
 use crate::adapters::stream::InvocationSink;
-use crate::domain::invoke::StreamResponse;
+use crate::adapters::wire::StreamResponse;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, Role};
 use std::io;
@@ -55,7 +55,7 @@ pub(crate) async fn parse_openai_stream(
     // #1494：已发出 ToolCallCompleted 的 index（index 切换先发，流结束兜底跳过）。
     let mut completed_tool_indices: std::collections::HashSet<usize> =
         std::collections::HashSet::new();
-    let mut usage = crate::domain::invoke::Usage {
+    let mut usage = crate::adapters::wire::Usage {
         input_tokens: 0,
         output_tokens: 0,
         cached_tokens: None,

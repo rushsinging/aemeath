@@ -5,7 +5,8 @@ use share::message::Message;
 pub(crate) use share::reasoning::ReasoningLevel;
 use tokio_util::sync::CancellationToken;
 
-use crate::domain::invoke::{InvocationScopeData, SystemBlockData};
+use crate::adapters::wire::SystemBlockData;
+use crate::domain::invoke::InvocationScopeData;
 
 /// LLM Provider trait - all providers must implement this
 #[async_trait]

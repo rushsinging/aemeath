@@ -10,8 +10,8 @@
 use super::constants::{
     ANTHROPIC_STREAM_IDLE_TIMEOUT, INVOCATION_STREAM_CAPACITY, STALL_THRESHOLD,
 };
+use crate::adapters::wire::*;
 use crate::domain::capability::ReasoningLevel;
-use crate::domain::invoke::*;
 use crate::{
     InvocationDeltaData, InvocationEventData, InvocationStreamData, ProviderCompletionData,
     ProviderContentBlockData, ProviderError, ProviderErrorKind, ProviderStopReasonData,

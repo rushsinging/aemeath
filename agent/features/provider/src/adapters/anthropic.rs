@@ -11,7 +11,7 @@ use crate::adapters::http_attempt::{
     AttemptDisposition, HttpAttemptContext, HttpAttemptExecutor, HttpAttemptFailure,
 };
 use crate::adapters::stream::parse_invocation_stream;
-use crate::domain::invoke::{CreateMessageRequest, SystemBlockData};
+use crate::adapters::wire::{CreateMessageRequest, SystemBlockData};
 use crate::ports::LlmProvider;
 
 use message_conversion::{apply_message_cache_breakpoint, convert_messages, sanitize_tool_schemas};

@@ -20,8 +20,8 @@
 //! - 出现「provider rejected the request」→ 稳定复现，打印错误证据
 //! - 全部成功 → 上游 400 为瞬态，未复现
 
+use crate::adapters::wire::SystemBlockData;
 use crate::composition::{LlmClient, LlmConfigOptionsData};
-use crate::domain::invoke::SystemBlockData;
 use crate::InvocationScopeData;
 use futures_util::StreamExt;
 use serde_json::Value;

@@ -1,6 +1,6 @@
 use super::{bridge_context_observations, invocation_stream_from_decoder, InvocationDecoder};
+use crate::adapters::wire::StreamEvent;
 use crate::domain::capability::ReasoningLevel;
-use crate::domain::invoke::StreamEvent;
 use futures_util::StreamExt;
 use tokio_util::sync::CancellationToken;
 

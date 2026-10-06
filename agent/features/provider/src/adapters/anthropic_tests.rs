@@ -1,5 +1,6 @@
 use super::AnthropicProvider;
-use crate::domain::invoke::{CreateMessageRequest, InvocationScopeData};
+use crate::adapters::wire::CreateMessageRequest;
+use crate::domain::invoke::InvocationScopeData;
 use crate::ports::{LlmProvider, ReasoningLevel};
 use share::message::Message;
 use std::sync::atomic::{AtomicUsize, Ordering};

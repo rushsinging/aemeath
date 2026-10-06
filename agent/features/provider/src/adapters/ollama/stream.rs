@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::STREAM_IDLE_TIMEOUT;
 use crate::adapters::openai_compatible::reasoning_normalizer::ReasoningDeltaNormalizer;
-use crate::domain::invoke::StreamResponse;
+use crate::adapters::wire::StreamResponse;
 
 /// Parse ollama's native `/api/chat` NDJSON stream.
 ///
@@ -26,7 +26,7 @@ pub(crate) async fn parse_ollama_stream(
     let mut current_text = String::new();
     let mut reasoning_normalizer = ReasoningDeltaNormalizer::new();
     let mut final_tool_calls: Vec<(String, String, serde_json::Value)> = Vec::new();
-    let mut usage = crate::domain::invoke::Usage {
+    let mut usage = crate::adapters::wire::Usage {
         input_tokens: 0,
         output_tokens: 0,
         cached_tokens: None,

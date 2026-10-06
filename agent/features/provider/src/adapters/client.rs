@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use crate::adapters::openai_compatible::ReasoningConfig;
+use crate::adapters::wire::SystemBlockData;
 use crate::domain::capability::ReasoningLevel;
-use crate::domain::invoke::SystemBlockData;
 use crate::ports::LlmProvider;
 use crate::ProviderDriverKind;
 use share::message::Message;

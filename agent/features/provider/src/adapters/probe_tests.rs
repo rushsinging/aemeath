@@ -8,7 +8,8 @@ use share::reasoning::ReasoningLevel;
 use tokio_util::sync::CancellationToken;
 
 use super::super::client::{LlmClient, LlmConfigOptionsData};
-use crate::domain::invoke::{InvocationScopeData, SystemBlockData};
+use crate::adapters::wire::SystemBlockData;
+use crate::domain::invoke::InvocationScopeData;
 use crate::ports::LlmProvider;
 use crate::published_language::{
     InvocationEventData, InvocationStreamData, ProviderCompletionData, ProviderContentBlockData,

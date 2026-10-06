@@ -30,7 +30,7 @@ mod domain;
 mod ports;
 pub mod published_language;
 
-pub(crate) use domain::capability::ProviderDriverKind;
+pub use domain::capability::ProviderDriverKind;
 pub(crate) use domain::invoke::InvocationScopeData;
 
 /// Composition Root 专用构造面；业务消费者不得引用。
@@ -41,8 +41,9 @@ pub mod composition {
     };
     pub use crate::adapters::pool::TransportPool;
     pub use crate::adapters::probe::{run_connectivity_probe, wire_probe_client};
+    pub use crate::adapters::wire::SystemBlockData;
     pub use crate::domain::capability::reasoning_capability_from_max;
-    pub use crate::domain::invoke::{InvocationScopeData, SystemBlockData};
+    pub use crate::domain::invoke::InvocationScopeData;
     pub use crate::ports::LlmProvider;
     pub use crate::LlmError;
 }

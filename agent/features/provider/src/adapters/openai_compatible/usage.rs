@@ -1,4 +1,4 @@
-use crate::domain::invoke::Usage;
+use crate::adapters::wire::Usage;
 use crate::RawUsageSnapshotData;
 
 fn optional_token_field(value: &serde_json::Value, field: &str) -> Option<u32> {
