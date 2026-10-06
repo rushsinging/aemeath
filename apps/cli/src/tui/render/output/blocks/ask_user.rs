@@ -82,6 +82,29 @@ fn truncate(text: &str, max_width: usize) -> String {
     result
 }
 
+/// 构造 Type something 输入行的 spans：按 `chat_input_cursor`（byte offset，
+/// 先钳制到合法 char 边界）拆成 before / 光标字符 / after 三段，光标字符
+/// 用 ACCENT 背景块状高亮；光标在文本末尾时高亮一个空格。
+fn chat_input_spans(input_text: &str, chat_input_cursor: usize) -> Vec<Span<'static>> {
+    let raw_cursor = chat_input_cursor.min(input_text.len());
+    let cursor = input_text.floor_char_boundary(raw_cursor);
+    let before = input_text.get(..cursor).unwrap_or("");
+    let after = input_text.get(cursor..).unwrap_or("");
+    let cursor_style = Style::default().bg(theme::ACCENT).fg(theme::BASE);
+    vec![
+        Span::raw(before.to_string()),
+        Span::styled(
+            after
+                .chars()
+                .next()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| " ".to_string()),
+            cursor_style,
+        ),
+        Span::raw(after.chars().skip(1).collect::<String>()),
+    ]
+}
+
 /// 渲染 Q→A 摘要行（用于确认页和折叠摘要）。
 fn qa_summary_lines(
     index: usize,
@@ -245,25 +268,12 @@ fn render_answering(
         }
         lines.push(RenderedLine::new(vec![Span::raw("")]));
         // Type something 输入框（带光标）
-        let input_text = &view.chat_input_text;
-        let raw_cursor = view.chat_input_cursor.min(input_text.len());
-        let cursor = input_text.floor_char_boundary(raw_cursor);
-        let before = input_text.get(..cursor).unwrap_or("");
-        let after = input_text.get(cursor..).unwrap_or("");
-        let cursor_style = Style::default().bg(theme::ACCENT).fg(theme::BASE);
-        lines.push(RenderedLine::new(vec![
-            Span::styled("  ❯ Type something: ", header_style),
-            Span::raw(before.to_string()),
-            Span::styled(
-                after
-                    .chars()
-                    .next()
-                    .map(|c| c.to_string())
-                    .unwrap_or_else(|| " ".to_string()),
-                cursor_style,
-            ),
-            Span::raw(after.chars().skip(1).collect::<String>()),
-        ]));
+        let mut spans = vec![Span::styled("  ❯ Type something: ", header_style)];
+        spans.extend(chat_input_spans(
+            &view.chat_input_text,
+            view.chat_input_cursor,
+        ));
+        lines.push(RenderedLine::new(spans));
         lines.push(RenderedLine::new(vec![Span::raw("")]));
         lines.push(RenderedLine::new(vec![Span::styled(
             "  [Enter] 确认  [Esc] 取消  [←→] 移动光标  [Ctrl+W] 删词".to_string(),
@@ -305,12 +315,12 @@ fn render_answering(
     // Type something 子态（LLM 选项中的最后一项被选中时激活）
     if view.chat_input_active {
         lines.push(RenderedLine::new(vec![Span::raw("")]));
-        let input_text = &view.chat_input_text;
-        let prompt = format!("  ❯ Type something: {input_text}");
-        lines.push(RenderedLine::new(vec![
-            Span::styled(prompt, header_style),
-            Span::styled(" ", Style::default().bg(theme::ACCENT)),
-        ]));
+        let mut spans = vec![Span::styled("  ❯ Type something: ", header_style)];
+        spans.extend(chat_input_spans(
+            &view.chat_input_text,
+            view.chat_input_cursor,
+        ));
+        lines.push(RenderedLine::new(spans));
     }
 
     lines.push(RenderedLine::new(vec![Span::raw("")]));
