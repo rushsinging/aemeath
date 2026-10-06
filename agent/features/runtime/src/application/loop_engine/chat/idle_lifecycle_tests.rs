@@ -3,7 +3,6 @@
 use std::collections::VecDeque;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::task::Poll;
 
 use super::idle_lifecycle::{idle_until_resume_or_shutdown, IdleResult};
 use crate::application::loop_engine::chat::input_gate::{

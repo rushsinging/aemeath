@@ -98,7 +98,6 @@ pub(crate) fn fixture_two_step_accepted(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn make_agent(
     runtime_context: &RuntimeContext,
     agent_runner: Option<Arc<dyn tools::published::agent::AgentRunner>>,

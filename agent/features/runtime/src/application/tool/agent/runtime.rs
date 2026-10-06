@@ -299,7 +299,7 @@ impl Agent {
             self.catalog.clone(),
             self.context.clone(),
         )
-        .with_background_runtime_opt(self.background_tasks.clone());
+        .with_background_runtime(self.background_tasks.clone());
         supervisor
             .execute(SupervisedToolCall {
                 identity: ToolCallIdentityData {

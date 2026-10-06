@@ -105,10 +105,6 @@ impl BackgroundTaskRuntime {
         self.supervisor.clone()
     }
 
-    pub(crate) fn notifier(&self) -> &WakeupNotifier {
-        &self.notifier
-    }
-
     /// 取走等待端（session driver 首次接线；一个 session 一个等待端）。
     pub(crate) fn take_wakeup_waiter(&self) -> Option<WakeupWaiter> {
         self.waiter.lock().expect("后台任务唤醒信箱锁中毒").take()

@@ -39,6 +39,7 @@ impl WakeupWaiter {
     }
 
     /// 非消耗性探测：有待处理信号时取一个（合流语义，只用于测试与诊断）。
+    #[cfg(test)]
     pub(crate) fn try_wait(&mut self) -> Option<()> {
         self.receiver.try_recv().ok()
     }

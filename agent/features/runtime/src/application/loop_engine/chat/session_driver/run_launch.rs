@@ -807,6 +807,15 @@ where
                     std::mem::take(&mut reminder_sources),
                 );
                 reminder_context_port.reminder_run_started(&run_id);
+                // Wakeup Run（#252 D11）：本 Run 无用户消息、无 handle_event
+                // 触发点——启动时显式触发 background_task 事件，把监督器内
+                // 「终态未通知」事实经 OnEvent source build（take）进注入队列。
+                if background_wakeup_run {
+                    reminder_context_port.reminder_handle_event(
+                        &run_id,
+                        &context::ReminderEventSource::background_task(),
+                    );
+                }
                 let context_request =
                     crate::application::loop_engine::run_services::ContextRequest {
                         runtime_context: &runtime_context,

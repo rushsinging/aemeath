@@ -366,3 +366,102 @@ async fn placeholder_outcome_is_error_free_success() {
         .expect("转后台执行应成功");
     assert!(!success_text(&outcome).is_empty(), "占位文案不得为空");
 }
+
+// ── #252 PR2：spawn body 终态通知路由（L4 场景） ─────────────────────
+
+#[tokio::test]
+async fn background_terminal_sends_wakeup_signal_without_active_run() {
+    let (mut supervisor, states) = supervisor_with(Duration::from_millis(50));
+    let background = std::sync::Arc::new(
+        crate::application::background_task::session_runtime::BackgroundTaskRuntime::new(),
+    );
+    // 无 active run（不 bind registry）→ 终态路由 wakeup 信号。
+    supervisor = supervisor.with_background_runtime(Some(background.clone()));
+
+    let (outcome, _) = supervisor
+        .execute(supervised_call(
+            test_context(),
+            Some(Duration::from_millis(10)),
+            None,
+        ))
+        .await
+        .expect("execute 不可失败");
+    assert!(
+        matches!(outcome, ToolExecutionOutcome::Success(_)),
+        "占位结果"
+    );
+    let _ = states;
+
+    // spawn body 真实完成（sleep 50ms）后：监督器登记 + 终态 + wakeup 信号。
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let terminal_count = background
+            .supervisor()
+            .snapshots()
+            .iter()
+            .filter(|record| record.is_terminal())
+            .count();
+        if terminal_count == 1 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "后台任务应在超时前到达终态（监督器账本）"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // 终态未通知条目仍在（无 active run 走信号，不 build take），
+    // 等 wakeup run 启动后 handle_event 消费。
+    let waiter = background.take_wakeup_waiter().expect("等待端未被取走");
+    let mut waiter = waiter;
+    // waiter 可探测信号（unbounded，已投递）。
+    assert!(
+        waiter.try_wait().is_some(),
+        "无 active Run 时终态必须发 wakeup 信号"
+    );
+}
+
+#[tokio::test]
+async fn background_terminal_task_recorded_with_terminal_kind() {
+    let (mut supervisor, _) = supervisor_with(Duration::from_millis(30));
+    let background = std::sync::Arc::new(
+        crate::application::background_task::session_runtime::BackgroundTaskRuntime::new(),
+    );
+    supervisor = supervisor.with_background_runtime(Some(background.clone()));
+
+    let (outcome, _) = supervisor
+        .execute(supervised_call(
+            test_context(),
+            Some(Duration::from_millis(10)),
+            None,
+        ))
+        .await
+        .expect("execute 不可失败");
+    assert!(matches!(outcome, ToolExecutionOutcome::Success(_)));
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let snapshots = background.supervisor().snapshots();
+        if snapshots.iter().any(|record| record.is_terminal()) {
+            let record = snapshots
+                .iter()
+                .find(|record| record.is_terminal())
+                .expect("已确认存在终态");
+            assert_eq!(record.identity.tool_name, "SleepTool");
+            assert!(
+                matches!(
+                    record.terminal_kind(),
+                    Some(crate::domain::background_task::BackgroundTaskTerminalKind::Success)
+                ),
+                "SleepTool 正常完成应记 Success 终态"
+            );
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "后台任务应在超时前到达终态"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
