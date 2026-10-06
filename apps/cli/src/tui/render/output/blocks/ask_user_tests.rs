@@ -172,6 +172,32 @@ fn test_chat_input_uses_block_cursor() {
 }
 
 #[test]
+fn test_chat_input_with_options_renders_block_cursor_at_cursor_offset() {
+    // 有选项 + Type something 子态：光标 span 必须覆盖 chat_input_cursor
+    // 处的字符，而非固定画在文本末尾。
+    let mut view = batch_view(
+        vec![make_slot("选哪个?", &["A"])],
+        0,
+        AskUserPhaseView::Answering,
+    );
+    view.chat_input_active = true;
+    view.chat_input_text = "hello".to_string();
+    view.chat_input_cursor = 2; // 光标应覆盖 'l'（第 3 个字符）
+    let block = render_ask_user_batch("ask", &view, &RenderCtx::for_width(80));
+    let type_line = block
+        .lines
+        .iter()
+        .find(|l| l.plain.contains("Type something:"))
+        .expect("type something input line");
+    let cursor_span = type_line
+        .spans
+        .iter()
+        .find(|s| s.style.bg.is_some())
+        .expect("块状光标 span");
+    assert_eq!(cursor_span.content.as_ref(), "l");
+}
+
+#[test]
 fn test_answering_wraps_long_option_description() {
     // issue #403：长 description 应按可用宽度自动换行，而非整段溢出
     let long_desc =
