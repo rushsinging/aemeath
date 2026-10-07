@@ -40,6 +40,25 @@ pub fn sha256_hex(data: &[u8]) -> String {
     encode_hex(&hasher.finalize())
 }
 
+/// 从 `reader` 流式计算标准 SHA-256 十六进制摘要，不把输入整体读入内存。
+///
+/// reader 按值接收（`sha256_reader_hex(file)` 即可直接喂入文件句柄）；
+/// 供大文件（如数百 MB 的模型权重）哈希校验使用：内部按固定缓冲分块读取，
+/// **NEVER** `read_to_end`。读取错误按 [`std::io::Error`] 原样传播，
+/// 调用方据以区分「读失败」与「摘要不符」。
+pub fn sha256_reader_hex(mut reader: impl std::io::Read) -> std::io::Result<String> {
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read_bytes = reader.read(&mut buffer)?;
+        if read_bytes == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read_bytes]); // allow unsafe_text_op: read_bytes ≤ buffer.len() 由 Read 契约保证
+    }
+    Ok(encode_hex(&hasher.finalize()))
+}
+
 /// 将摘要字节编码为小写十六进制字符串。
 fn encode_hex(digest: &[u8]) -> String {
     use std::fmt::Write as _;

@@ -297,7 +297,7 @@ fn project(
     let mut output = Vec::with_capacity(output_len);
     for (row_index, bias_value) in bias.iter().enumerate() {
         let row_start = row_index * hidden.len();
-        let row = &matrix[row_start..row_start + hidden.len()];
+        let row = &matrix[row_start..row_start + hidden.len()]; // allow unsafe_text_op: 行区间由 weights 长度校验与 enumerate 行数保障
         let value: f32 = row
             .iter()
             .zip(hidden.iter())

@@ -95,3 +95,54 @@ fn stable_sha256_hex_changes_digest_when_domain_changes() {
         stable_sha256_hex(STABLE_GOLDEN_DOMAIN_V2, &[b"project-key", b"alpha"])
     );
 }
+
+// --- sha256_reader_hex：流式 Reader 摘要（大文件哈希必须流式，禁止 read_to_end） ---
+
+#[test]
+fn sha256_reader_hex_of_empty_reader_returns_standard_digest() {
+    // SHA256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    let digest =
+        sha256_reader_hex(&mut std::io::Cursor::new(Vec::new())).expect("空 reader 应可读");
+    assert_eq!(
+        digest,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+}
+
+#[test]
+fn sha256_reader_hex_of_hello_returns_standard_digest() {
+    let digest = sha256_reader_hex(&mut std::io::Cursor::new(b"hello")).expect("hello 应可读");
+    assert_eq!(
+        digest,
+        "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    );
+}
+
+#[test]
+fn sha256_reader_hex_streams_multi_chunk_input_matching_memory_helper() {
+    // 超过内部读缓冲（64KiB）的输入，确保分块循环与一次性内存哈希结果一致。
+    let source: Vec<u8> = (0..300_000_u32).map(|index| (index % 251) as u8).collect();
+    let digest =
+        sha256_reader_hex(&mut std::io::Cursor::new(source.clone())).expect("多块输入应可读");
+    assert_eq!(digest, sha256_hex(&source), "流式与内存摘要必须一致");
+}
+
+#[test]
+fn sha256_reader_hex_propagates_read_error() {
+    struct FailingReader;
+
+    impl std::io::Read for FailingReader {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            if buffer.is_empty() {
+                return Ok(0);
+            }
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "读取中断",
+            ))
+        }
+    }
+
+    let error = sha256_reader_hex(&mut FailingReader).expect_err("读错误应被传播");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+}

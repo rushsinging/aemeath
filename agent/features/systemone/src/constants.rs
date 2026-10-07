@@ -38,3 +38,15 @@ pub(crate) const POINTER_HEAD_FILE_NAME: &str = "pointer_head.safetensors";
 
 /// tokenizer 资产目录前缀（其下至少一个文件）。
 pub(crate) const TOKENIZER_DIR_PREFIX: &str = "tokenizer/";
+
+// --- System One 模型本地存储（来源：adapters/model_assets.rs，§4.2 原子安装）---
+
+/// revision 安装目录内的 canonical manifest 文件名。
+pub(crate) const MODEL_MANIFEST_FILE_NAME: &str = "manifest.json";
+
+/// 暂存目录隐藏前缀：runtime 只解析 canonical revision 目录名，
+/// canonical segment 规则要求首字符为字母数字，`.tmp-` 永不冲突。
+pub(crate) const STAGING_DIR_PREFIX: &str = ".tmp-";
+
+/// 单次安装创建暂存目录的最大命名冲突重试次数（pid + 原子序号仍撞名时失败）。
+pub(crate) const STAGING_ATTEMPT_LIMIT: usize = 128;

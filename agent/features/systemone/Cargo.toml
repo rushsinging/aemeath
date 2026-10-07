@@ -5,10 +5,10 @@ edition.workspace = true
 
 [dependencies]
 share = { path = "../../shared" }
+utils = { path = "../../../packages/global/utils" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
-sha2 = { workspace = true }
 chrono = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
@@ -16,3 +16,9 @@ log = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
+
+# 原子 no-replace rename（renameat2 / renameatx_np + RENAME_EXCL）与 O_NOFOLLOW
+# 需要 POSIX 平台原语：unix 上引入 rustix safe API；其余 target 由 cfg 编译的
+# fail-closed 分支处理（NEVER 回退会覆盖空目录的 std::fs::rename）。
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true }

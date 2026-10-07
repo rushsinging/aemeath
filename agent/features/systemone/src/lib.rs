@@ -14,6 +14,7 @@
 
 mod constants;
 pub(crate) use constants::LOG_TARGET;
+mod state;
 
 mod adapters;
 mod domain;
@@ -23,6 +24,10 @@ pub use adapters::audited::{AuditedScoringAdapter, ScoringAuditEvent};
 pub use adapters::calibrated::CalibratedScoringAdapter;
 pub use adapters::calibration_store::{CalibrationArtifact, CalibrationStore};
 pub use adapters::jev_http::JevHttpScoringAdapter;
+pub use adapters::model_assets::{
+    LocalModelAssetStore, ModelInstallError, PreparedStagedInstall, StagedInstallCommit,
+    StagingDirectory,
+};
 pub use adapters::null::NullScoringAdapter;
 
 pub use domain::{

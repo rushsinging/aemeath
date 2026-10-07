@@ -41,7 +41,8 @@ pub trait CalibrationPort: Send + Sync {
 
 /// 已通过全部校验的模型资产：manifest 单一来源 + 安装根目录。
 ///
-/// 字段私有：外部 NEVER 可凭字段直接构造，只能经先校验 manifest 的构造器 `new` 装配。
+/// 字段私有，构造器收窄为 `pub(crate)`：外部 NEVER 可凭字段或构造器自行装配，
+/// 只能消费先校验 manifest 的实例，并经只读 getters 读取。
 #[derive(Debug, Clone, PartialEq)]
 pub struct InstalledAssets {
     /// 校验通过的 manifest（路径、URL、字节数、SHA-256 的唯一声明处）。
@@ -51,10 +52,14 @@ pub struct InstalledAssets {
 }
 
 impl InstalledAssets {
-    /// 装配入口：先全量校验 manifest（`validate()`，非法/空资产即拒绝），通过才装配。
+    /// 装配入口（`pub(crate)`）：先全量校验 manifest（`validate()`，非法/空资产即拒绝），通过才装配。
     ///
-    /// 本 crate 的存储 adapter 与测试经此装配；字段仍私有，实例不可自行拼装。
-    pub fn new(manifest: ModelManifest, install_root: PathBuf) -> Result<Self, ModelManifestError> {
+    /// 仅本 crate 的存储 adapter 与测试经此装配；crate 外只有只读 getters
+    /// （[`Self::manifest`] / [`Self::install_root`]），NEVER 暴露可拼装的构造能力。
+    pub(crate) fn new(
+        manifest: ModelManifest,
+        install_root: PathBuf,
+    ) -> Result<Self, ModelManifestError> {
         manifest.validate()?;
         Ok(Self {
             manifest,
