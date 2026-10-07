@@ -41,13 +41,11 @@ pub use policy_port::Policy;
 pub use policy_port::{PolicyDecisionData, PolicyRequestData};
 pub use provider_factory::{ProviderBindingData, ProviderBuildSpecData, ProviderFactory};
 pub use provider_port::{
-    CancellationSignal, InvocationRequestData, ModelIdData, ProviderPort, RequestSystemBlockData,
+    CancellationSignal, InvocationRequestData, ModelInfo, ProviderPort, RequestSystemBlockData,
     StopReason, TokenUsageData,
 };
 #[cfg(test)]
-pub use provider_port::{
-    ModelCapabilityData, ProviderError, ProviderResponseStream, ReasoningCapabilityData,
-};
+pub use provider_port::{ProviderError, ProviderResponseStream, ReasoningCapabilityData};
 pub use session_query::SessionQueryPort;
 pub use tool_result_blob::ToolResultBlobPort;
 pub(crate) use tool_result_blob::{ToolResultBlobError, ToolResultBlobRef};

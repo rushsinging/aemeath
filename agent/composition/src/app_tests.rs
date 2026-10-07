@@ -160,22 +160,7 @@ struct ReportedUsageProvider {
 
 #[async_trait::async_trait]
 impl runtime::ProviderPort for ReportedUsageProvider {
-    fn capabilities(
-        &self,
-        model: &provider::ModelIdData,
-    ) -> Result<provider::ModelCapabilityData, ProviderError> {
-        Ok(provider::ModelCapabilityData {
-            model: model.clone(),
-            supports_tools: true,
-            supports_parallel_tool_calls: true,
-            supports_streaming: true,
-            reasoning: provider::ReasoningCapabilityData::new([
-                share::reasoning::ReasoningLevel::Off,
-            ])?,
-            context_limit: Some(128_000),
-            output_limit: Some(8_192),
-        })
-    }
+    // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
 
     async fn invoke(
         &self,
@@ -257,10 +242,18 @@ impl ProviderFactory for ReportedUsageProviderFactory {
             provider: Arc::new(ReportedUsageProvider {
                 invocation_count: self.invocation_count.clone(),
             }),
-            model: spec.model,
+            model: provider::ModelInfo {
+                provider: spec.source_key.clone(),
+                model: spec.model.clone(),
+                supports_tools: true,
+                supports_parallel_tool_calls: true,
+                supports_streaming: true,
+                reasoning: provider::ReasoningCapabilityData::none(),
+                context_limit: spec.context_window,
+                output_limit: Some(spec.max_tokens as usize),
+            },
             max_tokens: spec.max_tokens,
             requested_reasoning: spec.requested_reasoning,
-            context_window: spec.context_window,
         })
     }
 }

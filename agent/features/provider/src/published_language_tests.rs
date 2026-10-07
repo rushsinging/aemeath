@@ -1,12 +1,22 @@
 use super::*;
 
 #[test]
-fn model_id_display() {
-    let id = ModelIdData {
+fn model_info_unifies_identity_and_capability() {
+    // #1880：model 信息只有一个实体来源——身份与能力不可分。
+    let info = ModelInfo {
         provider: "Anthropic".to_string(),
         model: "claude-sonnet-4".to_string(),
+        supports_tools: true,
+        supports_parallel_tool_calls: true,
+        supports_streaming: true,
+        reasoning: ReasoningCapabilityData::none(),
+        context_limit: Some(200_000),
+        output_limit: Some(8_192),
     };
-    assert_eq!(id.to_string(), "Anthropic/claude-sonnet-4");
+    assert_eq!(info.provider, "Anthropic");
+    assert_eq!(info.model, "claude-sonnet-4");
+    assert!(info.supports_tools);
+    assert_eq!(info.context_limit, Some(200_000));
 }
 
 #[test]
@@ -40,11 +50,9 @@ fn reasoning_capability_none() {
 
 #[test]
 fn resolver_selects_highest_supported_level_not_above_requested() {
-    let capability = ModelCapabilityData {
-        model: ModelIdData {
-            provider: "fake".to_string(),
-            model: "sparse-levels".to_string(),
-        },
+    let capability = ModelInfo {
+        provider: "fake".to_string(),
+        model: "sparse-levels".to_string(),
         supports_tools: true,
         supports_parallel_tool_calls: true,
         supports_streaming: true,
@@ -175,29 +183,13 @@ fn raw_usage_snapshot_default_all_none() {
 
 #[test]
 fn invocation_request_new_has_empty_tools() {
-    let req = InvocationRequestData::new(
-        ModelIdData {
-            provider: "test".to_string(),
-            model: "m".to_string(),
-        },
-        Vec::new(),
-        8192,
-        ReasoningLevel::Off,
-    );
+    let req = InvocationRequestData::new("m".to_string(), Vec::new(), 8192, ReasoningLevel::Off);
     assert!(req.tools.is_empty());
 }
 
 #[test]
 fn invocation_request_new_has_empty_system() {
-    let req = InvocationRequestData::new(
-        ModelIdData {
-            provider: "test".to_string(),
-            model: "m".to_string(),
-        },
-        Vec::new(),
-        8192,
-        ReasoningLevel::Off,
-    );
+    let req = InvocationRequestData::new("m".to_string(), Vec::new(), 8192, ReasoningLevel::Off);
     assert!(req.system.is_empty());
 }
 

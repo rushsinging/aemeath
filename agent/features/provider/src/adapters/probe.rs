@@ -44,12 +44,10 @@ pub async fn run_connectivity_probe(
 ) -> Result<Duration, crate::ProviderError> {
     let started = std::time::Instant::now();
     let timeout_secs = timeout.as_secs().max(1);
-    let model = crate::ModelIdData {
+    // 探测调用按最小能力面构造 ModelInfo：单 token / Off / 不用工具。
+    let model = crate::ModelInfo {
         provider: client.provider_name().to_string(),
         model: client.model_name().to_string(),
-    };
-    let capability = crate::ModelCapabilityData {
-        model: model.clone(),
         supports_tools: false,
         supports_parallel_tool_calls: false,
         supports_streaming: true,
@@ -58,7 +56,7 @@ pub async fn run_connectivity_probe(
         output_limit: None,
     };
     let mut request = crate::InvocationRequestData::new(
-        model,
+        client.model_name().to_string(),
         [Message::user("Reply with OK.")],
         1,
         ReasoningLevel::Off,
@@ -66,7 +64,7 @@ pub async fn run_connectivity_probe(
     let cancellation = tokio_util::sync::CancellationToken::new();
     request.cancellation = cancellation.clone();
     let operation = async {
-        let response = client.invoke(&capability, &request).await?;
+        let response = client.invoke(&model, &request).await?;
         if response.ok {
             return Ok(started.elapsed());
         }

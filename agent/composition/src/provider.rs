@@ -1,11 +1,10 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use provider::composition::{LlmClient, LlmConfigOptionsData};
 use provider::{
-    InvocationRequestData, ModelCapabilityData, ModelIdData, ProviderError, ProviderErrorKind,
-    ProviderResponseStream,
+    InvocationRequestData, ModelInfo, ProviderError, ProviderErrorKind, ProviderResponseStream,
+    ReasoningCapabilityData,
 };
 
 use runtime::{
@@ -16,50 +15,36 @@ use share::reasoning::ReasoningLevel;
 
 // ─── New adapter: ProviderPort via LlmClient ────────────────
 
-/// Composition-owned adapter: wraps the Provider construction handle and a set of
-/// model capabilities to expose the `runtime::ports::ProviderPort` contract.
+/// Composition-owned adapter: wraps the Provider construction handle together
+/// with the binding's single `ModelInfo` to expose the `runtime::ports::ProviderPort`
+/// contract.
+///
+/// 每 binding 一个 adapter 实例（单模型绑定）：invoke 用持有的 `ModelInfo`
+/// 直调 client——运行时零查询（#1880：能力查询随 capabilities() 删除）。
 ///
 /// The adapter lives in the Composition crate because the dependency
 /// direction is `runtime → provider`; Composition depends on both.
 pub struct ProviderAdapter {
     client: Arc<LlmClient>,
-    capabilities: HashMap<ModelIdData, ModelCapabilityData>,
+    model: ModelInfo,
 }
 
 impl ProviderAdapter {
-    /// Create a new adapter over an opaque LLM client and its known capabilities.
-    pub fn new(
-        client: Arc<LlmClient>,
-        capabilities: HashMap<ModelIdData, ModelCapabilityData>,
-    ) -> Self {
-        Self {
-            client,
-            capabilities,
-        }
+    /// Create a new adapter over an opaque LLM client and the bound model metadata.
+    pub fn new(client: Arc<LlmClient>, model: ModelInfo) -> Self {
+        Self { client, model }
     }
 }
 
-/// Production factory: accepts an opaque Provider construction handle and a map of
-/// model capabilities, returns `Arc<dyn ProviderPort>` backed by a
+/// Production factory: accepts an opaque Provider construction handle plus the
+/// bound model's `ModelInfo`, returns `Arc<dyn ProviderPort>` backed by a
 /// Composition-owned adapter.
-pub fn provider_port(
-    client: Arc<LlmClient>,
-    capabilities: HashMap<ModelIdData, ModelCapabilityData>,
-) -> Arc<dyn ProviderPort> {
-    Arc::new(ProviderAdapter::new(client, capabilities))
+pub fn provider_port(client: Arc<LlmClient>, model: ModelInfo) -> Arc<dyn ProviderPort> {
+    Arc::new(ProviderAdapter::new(client, model))
 }
 
 #[async_trait]
 impl ProviderPort for ProviderAdapter {
-    fn capabilities(&self, model: &ModelIdData) -> Result<ModelCapabilityData, ProviderError> {
-        self.capabilities.get(model).cloned().ok_or_else(|| {
-            ProviderError::fatal(
-                ProviderErrorKind::ModelUnavailable,
-                format!("unknown model: {model}"),
-            )
-        })
-    }
-
     async fn invoke(
         &self,
         request: InvocationRequestData,
@@ -69,9 +54,8 @@ impl ProviderPort for ProviderAdapter {
         if cancellation.is_cancelled() {
             return Err(ProviderError::cancelled());
         }
-        let capability = self.capabilities(&request.model)?;
         // #1880 v3：runtime 消费流式（渐进 UI），转发 invoke_stream 片段流。
-        self.client.invoke_stream(&capability, &request).await
+        self.client.invoke_stream(&self.model, &request).await
     }
 }
 
@@ -79,8 +63,9 @@ impl ProviderPort for ProviderAdapter {
 
 /// Default `ProviderFactory` implementation: builds a `ProviderBindingData` from a
 /// `ProviderBuildSpecData` through the Provider-owned Composition construction API,
-/// building a `ModelCapabilityData` from the client's max reasoning level and spec
-/// limits, and wrapping the client in the existing `ProviderAdapter`.
+/// constructing the binding's single `ModelInfo` (身份/支持面/调用限制来自 spec，
+/// reasoning 阶梯由装配时 client 推导——provider 读侧权威)，and wrapping the
+/// client in the existing `ProviderAdapter`.
 ///
 /// 持有进程级 `TransportPool`：同 transport key（driver/endpoint/认证域/
 /// user-agent/timeout）的多次 build 复用同一不可变 transport；model /
@@ -124,7 +109,7 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
             api_style: spec.api_style.clone(),
             api_key: spec.api_key.clone(),
             base_url: spec.base_url.clone(),
-            model: spec.model.model.clone(),
+            model: spec.model.clone(),
             max_tokens: spec.max_tokens,
             reasoning: spec.requested_reasoning != ReasoningLevel::Off,
             reasoning_config: None,
@@ -132,24 +117,33 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
             user_agent: Some(spec.user_agent),
         };
 
+        // 组合根从 config/spec 投影构造 ModelInfo；reasoning 阶梯由装配
+        // （client.max_reasoning_level）覆盖——此处填占位。
+        let model = ModelInfo {
+            provider: spec.source_key.clone(),
+            model: spec.model.clone(),
+            supports_tools: true,
+            supports_parallel_tool_calls: true,
+            supports_streaming: true,
+            reasoning: ReasoningCapabilityData::none(),
+            context_limit: spec.context_window,
+            output_limit: Some(spec.max_tokens as usize),
+        };
+
         let assembly = provider::composition::wire_provider_assembly(
             config,
-            spec.model.clone(),
+            model,
             self.pool.as_ref(),
             spec.requested_reasoning,
-            spec.context_window,
-            spec.max_tokens,
         )?;
 
-        let capabilities = HashMap::from([(spec.model.clone(), assembly.capability)]);
-        let port = provider_port(assembly.client, capabilities);
+        let port = provider_port(assembly.client, assembly.model.clone());
 
         Ok(ProviderBindingData {
             provider: port,
-            model: spec.model,
+            model: assembly.model,
             max_tokens: spec.max_tokens,
             requested_reasoning: assembly.requested_reasoning,
-            context_window: spec.context_window,
         })
     }
 }

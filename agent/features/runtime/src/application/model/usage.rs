@@ -1,7 +1,7 @@
 use audit::UsageRecordData;
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 
-use crate::ports::{ModelIdData, TokenUsageData};
+use crate::ports::{ModelInfo, TokenUsageData};
 
 #[derive(Clone)]
 pub(crate) struct UsageRecordContext {
@@ -9,7 +9,7 @@ pub(crate) struct UsageRecordContext {
     pub run_id: RunId,
     pub run_step_id: RunStepId,
     pub model_invocation_id: ModelInvocationId,
-    pub model: ModelIdData,
+    pub model: ModelInfo,
 }
 
 pub(crate) struct UsageRecordFactory<Clock> {

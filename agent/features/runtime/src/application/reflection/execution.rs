@@ -57,7 +57,7 @@ impl From<ReflectionWorkflowError> for ReflectionExecutionError {
 
 pub(crate) struct ReflectionInvocation<'a> {
     pub provider: &'a dyn ProviderPort,
-    pub model: &'a provider::ModelIdData,
+    pub model: &'a provider::ModelInfo,
     pub max_tokens: u32,
     pub requested_reasoning: share::reasoning::ReasoningLevel,
     pub system_prompt_text: &'a str,
@@ -122,7 +122,7 @@ async fn call_provider(
     use crate::ports::provider_port::{InvocationRequestData, RequestSystemBlockData};
 
     let request = InvocationRequestData {
-        model: invocation.model.clone(),
+        model: invocation.model.model.clone(),
         cancellation: cancel.clone(),
         messages: vec![share::message::Message::user(prompt)].into(),
         system: vec![RequestSystemBlockData::Text(

@@ -29,13 +29,18 @@ fn enabled_memory_config() -> share::config::MemoryConfig {
 fn fake_binding() -> Arc<crate::ports::ProviderBindingData> {
     Arc::new(crate::ports::ProviderBindingData {
         provider: Arc::new(crate::application::reflection::test_support::StaticReflectionProvider),
-        model: provider::ModelIdData {
+        model: provider::ModelInfo {
             provider: "reflection-test".to_string(),
             model: "manual-test-model".to_string(),
+            supports_tools: false,
+            supports_parallel_tool_calls: false,
+            supports_streaming: true,
+            reasoning: provider::ReasoningCapabilityData::none(),
+            context_limit: Some(128_000),
+            output_limit: Some(8_192),
         },
         max_tokens: 8_192,
         requested_reasoning: share::reasoning::ReasoningLevel::Off,
-        context_window: Some(128_000),
     })
 }
 
@@ -253,23 +258,7 @@ struct RecordingReflectionProvider {
 
 #[async_trait::async_trait]
 impl crate::ports::ProviderPort for RecordingReflectionProvider {
-    fn capabilities(
-        &self,
-        model: &provider::ModelIdData,
-    ) -> Result<
-        crate::ports::provider_port::ModelCapabilityData,
-        crate::ports::provider_port::ProviderError,
-    > {
-        Ok(crate::ports::provider_port::ModelCapabilityData {
-            model: model.clone(),
-            supports_tools: false,
-            supports_parallel_tool_calls: false,
-            supports_streaming: true,
-            reasoning: crate::ports::provider_port::ReasoningCapabilityData::none(),
-            context_limit: Some(128_000),
-            output_limit: Some(8_192),
-        })
-    }
+    // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
 
     async fn invoke(
         &self,
@@ -300,13 +289,18 @@ impl crate::ports::ProviderPort for RecordingReflectionProvider {
 fn recording_binding(prompts: Arc<Mutex<Vec<String>>>) -> Arc<crate::ports::ProviderBindingData> {
     Arc::new(crate::ports::ProviderBindingData {
         provider: Arc::new(RecordingReflectionProvider { prompts }),
-        model: provider::ModelIdData {
+        model: provider::ModelInfo {
             provider: "manual-reflect-test".to_string(),
             model: "manual-test-model".to_string(),
+            supports_tools: false,
+            supports_parallel_tool_calls: false,
+            supports_streaming: true,
+            reasoning: provider::ReasoningCapabilityData::none(),
+            context_limit: Some(128_000),
+            output_limit: Some(8_192),
         },
         max_tokens: 8_192,
         requested_reasoning: share::reasoning::ReasoningLevel::Off,
-        context_window: Some(128_000),
     })
 }
 

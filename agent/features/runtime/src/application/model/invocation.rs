@@ -251,7 +251,7 @@ async fn invoke_model_impl(
         let request_context = observer.request_log_context(&logging::capture());
         let mut reducer = observer.build_reducer();
         let provider = binding.provider.clone();
-        let model = binding.model.clone();
+        let model = binding.model.model.clone();
         let max_tokens = binding.max_tokens;
         let messages = invocation_context.messages_for_api().to_vec();
         let system = invocation_context.system_blocks.clone();
@@ -271,7 +271,7 @@ async fn invoke_model_impl(
             log::debug!(
                 target: crate::LOG_TARGET,
                 "provider_invocation_request_ready model={} messages={} system_blocks={} tool_schemas={}",
-                request.model.model,
+                request.model,
                 request.messages.len(),
                 request.system.len(),
                 request.tools.len(),

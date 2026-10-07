@@ -84,29 +84,16 @@ async fn model_switch_reads_injected_snapshot_once() {
 // Does NOT construct a provider client; uses the runtime port's FakeProvider contract.
 fn test_factory() -> Arc<dyn ProviderFactory> {
     use crate::ports::provider_port::{
-        CancellationSignal, InvocationRequestData, ModelCapabilityData, ProviderError,
-        ProviderErrorKind, ProviderResponseStream, ReasoningCapabilityData, ReasoningLevel,
+        CancellationSignal, InvocationRequestData, ProviderError, ProviderErrorKind,
+        ProviderResponseStream, ReasoningCapabilityData, ReasoningLevel,
     };
     use crate::ports::ProviderPort as ProviderPortTrait;
 
-    struct TestPort {
-        capabilities: std::collections::HashMap<provider::ModelIdData, ModelCapabilityData>,
-    }
+    // 能力查询已删除（#1880）：binding 持全量 ModelInfo，port 只负责 invoke。
+    struct TestPort;
 
     #[async_trait::async_trait]
     impl ProviderPortTrait for TestPort {
-        fn capabilities(
-            &self,
-            model: &provider::ModelIdData,
-        ) -> std::result::Result<ModelCapabilityData, ProviderError> {
-            self.capabilities.get(model).cloned().ok_or_else(|| {
-                ProviderError::fatal(
-                    ProviderErrorKind::ModelUnavailable,
-                    format!("unknown model: {model}"),
-                )
-            })
-        }
-
         async fn invoke(
             &self,
             _request: InvocationRequestData,
@@ -125,7 +112,8 @@ fn test_factory() -> Arc<dyn ProviderFactory> {
             &self,
             spec: ProviderBuildSpecData,
         ) -> std::result::Result<crate::ports::ProviderBindingData, ProviderError> {
-            let capability = ModelCapabilityData {
+            let model = provider::ModelInfo {
+                provider: spec.source_key.clone(),
                 model: spec.model.clone(),
                 supports_tools: true,
                 supports_parallel_tool_calls: true,
@@ -139,14 +127,12 @@ fn test_factory() -> Arc<dyn ProviderFactory> {
                 context_limit: spec.context_window,
                 output_limit: Some(spec.max_tokens as usize),
             };
-            let capabilities = std::collections::HashMap::from([(spec.model.clone(), capability)]);
-            let port: Arc<dyn ProviderPortTrait> = Arc::new(TestPort { capabilities });
+            let port: Arc<dyn ProviderPortTrait> = Arc::new(TestPort);
             Ok(crate::ports::ProviderBindingData {
                 provider: port,
-                model: spec.model,
+                model,
                 max_tokens: spec.max_tokens,
                 requested_reasoning: spec.requested_reasoning,
-                context_window: spec.context_window,
             })
         }
     }

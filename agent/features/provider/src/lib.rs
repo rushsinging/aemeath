@@ -9,8 +9,8 @@
 //! |---|---|
 //! | **输入（1）** | `InvocationRequestData`（model + max_output_tokens + reasoning + system 中性块 + messages + wire-ready tools + cancellation token 全内聚；判定：不更名 ProviderRequestData——现名已表意，更名无行为收益。Options/Scope 等中间形态已消失） |
 //! | **输出（两类）** | 非流式 `ProviderResponse`（自带 ok/error，单通道）+ 流式 `ProviderResponseChunk`（Content/Usage/Stop/Error 帧，Error 即失败终止帧）→ `ProviderResponseStream`；载荷 `ProviderContentData`（终态块+流增量合并家族）/`ProviderToolCallData`/`ProviderStopReasonData`/`TokenUsageData`（LLM token 计量；audit 快照由 audit 域组装）
-//! | 模型元数据 | `ModelIdData`/`ModelCapabilityData`（判定：ModelInfo 单实体合并待 C15——model 是 config/catalog 的外部数据投影） |
-//! | 工厂（2 入口） | `wire_provider_assembly`（主链路：client + capability + resolved 档位，返回 `ProviderAssemblyWiring` 构造面句柄包）、`probe_connectivity`（connect 探测构造+执行合一） |
+//! | 模型元数据 | `ModelInfo`（单实体：身份 + 能力，config/catalog 外部数据在 provider 读侧的完整投影——#1880 裁决：model 信息只有一个实体来源，provider 不负责写入） |
+//! | 工厂（2 入口） | `wire_provider_assembly`（主链路：client + ModelInfo + resolved 档位，返回 `ProviderAssemblyWiring` 构造面句柄包）、`probe_connectivity`（connect 探测构造+执行合一） |
 //! | 构造面豁免 | `LlmClient`/`LlmConfigOptionsData`/`TransportPool`——仅组合根桥接所需 |
 //! | Error | `ProviderError` + `ProviderErrorKind`（13 变体；LlmError 已内部化，折叠归 #1740） |
 //! | 身份 | `ProviderDriverKind`（= share DriverKind 词表，#1850 单一真相源） |
@@ -38,10 +38,9 @@ mod ports;
 pub mod published_language;
 
 pub use published_language::{
-    InvocationRequestData, ModelCapabilityData, ModelIdData, ProviderContentData, ProviderError,
-    ProviderErrorKind, ProviderResponse, ProviderResponseChunk, ProviderResponseStream,
-    ProviderStopReasonData, ProviderToolCallData, ReasoningCapabilityData, RequestSystemBlockData,
-    TokenUsageData,
+    InvocationRequestData, ModelInfo, ProviderContentData, ProviderError, ProviderErrorKind,
+    ProviderResponse, ProviderResponseChunk, ProviderResponseStream, ProviderStopReasonData,
+    ProviderToolCallData, ReasoningCapabilityData, RequestSystemBlockData, TokenUsageData,
 };
 
 pub(crate) use domain::capability::ProviderDriverKind;

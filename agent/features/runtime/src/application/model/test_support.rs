@@ -179,7 +179,7 @@ pub(crate) type TestInvocationFn = Arc<
 pub(crate) struct TestProviderPort {
     pub responses: Arc<Mutex<VecDeque<String>>>,
     pub error: Option<crate::ports::provider_port::ProviderError>,
-    pub model: provider::ModelIdData,
+    pub model: provider::ModelInfo,
     pub blocking: bool,
     pub seen: Option<Arc<Mutex<Vec<::logging::LogContext>>>>,
     pub calls: Arc<Mutex<usize>>,
@@ -188,7 +188,7 @@ pub(crate) struct TestProviderPort {
 }
 
 impl TestProviderPort {
-    pub fn new(responses: Vec<&str>, model: provider::ModelIdData) -> Self {
+    pub fn new(responses: Vec<&str>, model: provider::ModelInfo) -> Self {
         Self {
             responses: Arc::new(Mutex::new(
                 responses.into_iter().map(str::to_string).collect(),
@@ -211,33 +211,8 @@ impl TestProviderPort {
 
 #[async_trait]
 impl crate::ports::ProviderPort for TestProviderPort {
-    fn capabilities(
-        &self,
-        model: &provider::ModelIdData,
-    ) -> Result<
-        crate::ports::provider_port::ModelCapabilityData,
-        crate::ports::provider_port::ProviderError,
-    > {
-        use crate::ports::provider_port::{
-            ModelCapabilityData, ProviderError, ProviderErrorKind, ReasoningCapabilityData,
-        };
-        if model == &self.model {
-            Ok(ModelCapabilityData {
-                model: model.clone(),
-                supports_tools: true,
-                supports_parallel_tool_calls: true,
-                supports_streaming: true,
-                reasoning: ReasoningCapabilityData::none(),
-                context_limit: Some(128_000),
-                output_limit: Some(8192),
-            })
-        } else {
-            Err(ProviderError::fatal(
-                ProviderErrorKind::ModelUnavailable,
-                format!("unknown model: {model}"),
-            ))
-        }
-    }
+    // `capabilities()` 已删除（#1880）：fake 与生产一致——binding 持全量
+    // ModelInfo，运行时零查询（unknown model 门禁在装配时）。
 
     async fn invoke(
         &self,
@@ -282,35 +257,39 @@ impl crate::ports::ProviderPort for TestProviderPort {
 }
 
 pub(crate) fn test_binding(responses: Vec<&str>) -> Arc<crate::ports::ProviderBindingData> {
-    let model_id = test_model_id();
-    let port = Arc::new(TestProviderPort::new(responses, model_id.clone()));
+    let model = test_model_info();
+    let port = Arc::new(TestProviderPort::new(responses, model.clone()));
     Arc::new(crate::ports::ProviderBindingData {
         provider: port,
-        model: model_id,
+        model,
         max_tokens: 8192,
         requested_reasoning: crate::ports::provider_port::ReasoningLevel::Off,
-        context_window: Some(128_000),
     })
 }
 
 pub(crate) fn test_binding_from_port(
     port: TestProviderPort,
 ) -> Arc<crate::ports::ProviderBindingData> {
-    let model_id = port.model.clone();
+    let model = port.model.clone();
     Arc::new(crate::ports::ProviderBindingData {
         provider: Arc::new(port),
-        model: model_id,
+        model,
         max_tokens: 8192,
         requested_reasoning: crate::ports::provider_port::ReasoningLevel::Off,
-        context_window: Some(128_000),
     })
 }
 
-/// Default `ModelIdData` used by `test_binding*` helpers.
-pub(crate) fn test_model_id() -> provider::ModelIdData {
-    provider::ModelIdData {
+/// Default `ModelInfo` used by `test_binding*` helpers.
+pub(crate) fn test_model_info() -> provider::ModelInfo {
+    provider::ModelInfo {
         provider: "test".to_string(),
         model: "test-model".to_string(),
+        supports_tools: true,
+        supports_parallel_tool_calls: true,
+        supports_streaming: true,
+        reasoning: crate::ports::provider_port::ReasoningCapabilityData::none(),
+        context_limit: Some(128_000),
+        output_limit: Some(8192),
     }
 }
 
@@ -357,49 +336,16 @@ pub(crate) fn constant_factory(
 /// every test to the new `ProviderPort` trait.
 struct ScriptedProviderPortAdapter {
     provider: std::sync::Arc<dyn ScriptedLlmProvider>,
-    model: provider::ModelIdData,
 }
 
 impl ScriptedProviderPortAdapter {
     fn new(provider: std::sync::Arc<dyn ScriptedLlmProvider>) -> Self {
-        let model = provider::ModelIdData {
-            provider: provider.provider_name().to_string(),
-            model: provider.model_name().to_string(),
-        };
-        Self { provider, model }
+        Self { provider }
     }
 }
 
 #[async_trait]
 impl crate::ports::ProviderPort for ScriptedProviderPortAdapter {
-    fn capabilities(
-        &self,
-        model: &provider::ModelIdData,
-    ) -> Result<
-        crate::ports::provider_port::ModelCapabilityData,
-        crate::ports::provider_port::ProviderError,
-    > {
-        use crate::ports::provider_port::{
-            ModelCapabilityData, ProviderError, ProviderErrorKind, ReasoningCapabilityData,
-        };
-        if model == &self.model {
-            Ok(ModelCapabilityData {
-                model: model.clone(),
-                supports_tools: true,
-                supports_parallel_tool_calls: true,
-                supports_streaming: true,
-                reasoning: ReasoningCapabilityData::none(),
-                context_limit: Some(128_000),
-                output_limit: Some(8_192),
-            })
-        } else {
-            Err(ProviderError::fatal(
-                ProviderErrorKind::ModelUnavailable,
-                format!("unknown model: {model}"),
-            ))
-        }
-    }
-
     async fn invoke(
         &self,
         request: crate::ports::provider_port::InvocationRequestData,
@@ -418,20 +364,25 @@ impl crate::ports::ProviderPort for ScriptedProviderPortAdapter {
 /// `ProviderBindingData` so session-driver and agent tests can reuse their scripted
 /// providers without rewriting the fake bodies.
 ///
-/// The binding's `model`/`max_tokens`/`context_window` mirror the values used by
+/// The binding's `model`/`max_tokens` mirror the values used by
 /// the script fakes' default `LlmClient::from_provider(...)` construction.
 pub(crate) fn binding_from_llm_provider(
     provider: std::sync::Arc<dyn ScriptedLlmProvider>,
 ) -> std::sync::Arc<crate::ports::ProviderBindingData> {
-    let model = provider::ModelIdData {
+    let model = provider::ModelInfo {
         provider: provider.provider_name().to_string(),
         model: provider.model_name().to_string(),
+        supports_tools: true,
+        supports_parallel_tool_calls: true,
+        supports_streaming: true,
+        reasoning: crate::ports::provider_port::ReasoningCapabilityData::none(),
+        context_limit: Some(128_000),
+        output_limit: Some(8_192),
     };
     std::sync::Arc::new(crate::ports::ProviderBindingData {
         provider: std::sync::Arc::new(ScriptedProviderPortAdapter::new(provider)),
         model,
         max_tokens: 8192,
         requested_reasoning: crate::ports::provider_port::ReasoningLevel::Off,
-        context_window: Some(128_000),
     })
 }

@@ -40,33 +40,7 @@ pub(crate) struct StaticReflectionProvider;
 
 #[async_trait::async_trait]
 impl crate::ports::ProviderPort for StaticReflectionProvider {
-    fn capabilities(
-        &self,
-        model: &provider::ModelIdData,
-    ) -> Result<
-        crate::ports::provider_port::ModelCapabilityData,
-        crate::ports::provider_port::ProviderError,
-    > {
-        use crate::ports::provider_port::{
-            ModelCapabilityData, ProviderError, ProviderErrorKind, ReasoningCapabilityData,
-        };
-        if model.provider == "reflection-test" {
-            Ok(ModelCapabilityData {
-                model: model.clone(),
-                supports_tools: false,
-                supports_parallel_tool_calls: false,
-                supports_streaming: true,
-                reasoning: ReasoningCapabilityData::none(),
-                context_limit: Some(128_000),
-                output_limit: Some(8_192),
-            })
-        } else {
-            Err(ProviderError::fatal(
-                ProviderErrorKind::ModelUnavailable,
-                format!("unknown model: {model}"),
-            ))
-        }
-    }
+    // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
 
     async fn invoke(
         &self,
@@ -86,17 +60,22 @@ impl crate::ports::ProviderPort for StaticReflectionProvider {
     }
 }
 
-/// 与 `StaticReflectionProvider` 配套的 binding（provider 名匹配 capabilities 门禁）。
+/// 与 `StaticReflectionProvider` 配套的 binding（身份/能力与 fake invoke 一致）。
 pub(crate) fn static_reflection_binding() -> Arc<crate::ports::ProviderBindingData> {
     Arc::new(crate::ports::ProviderBindingData {
         provider: Arc::new(StaticReflectionProvider),
-        model: provider::ModelIdData {
+        model: provider::ModelInfo {
             provider: "reflection-test".to_string(),
             model: "reflection-test-model".to_string(),
+            supports_tools: false,
+            supports_parallel_tool_calls: false,
+            supports_streaming: true,
+            reasoning: provider::ReasoningCapabilityData::none(),
+            context_limit: Some(128_000),
+            output_limit: Some(8_192),
         },
         max_tokens: 8_192,
         requested_reasoning: share::reasoning::ReasoningLevel::Off,
-        context_window: Some(128_000),
     })
 }
 

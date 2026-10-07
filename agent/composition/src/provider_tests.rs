@@ -13,31 +13,24 @@
 //   - invoke_clamps_requested_reasoning_to_capability（capability clamp）
 //   - invoke_invokes_provider_exactly_once（单次 invoke 单次上游调用）
 //   - invoke_returns_cancelled_when_signal_fires_during_establishment（establishment 取消竞速）
-// 本文件保留 adapter 自有逻辑测试：capability 查表（capabilities_*、
-// invoke_rejects_unknown_model）、invoke fast-path（信号已置位直返 Cancelled）、
-// factory 装配与 transport pool 复用契约。
+// 本文件保留 adapter 自有逻辑测试：invoke fast-path（信号已置位直返
+// Cancelled）、factory 装配与 transport pool 复用契约。
+// 原 capability 查表测试（capabilities_*、invoke_rejects_unknown_model）
+// 已删除（#1880）：ProviderPort 不再暴露能力查询——unknown model 门禁语义
+// 移到装配时（factory build 构造 ModelInfo），运行时零查询。
 
 use super::*;
 use provider::composition::{wire_provider_assembly, LlmConfigOptionsData, TransportPool};
-use provider::{
-    InvocationRequestData, ModelCapabilityData, ModelIdData, ProviderErrorKind,
-    ReasoningCapabilityData,
-};
+use provider::{InvocationRequestData, ModelInfo, ProviderErrorKind, ReasoningCapabilityData};
 use share::reasoning::ReasoningLevel;
 use tokio_util::sync::CancellationToken;
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
-fn test_model_id() -> ModelIdData {
-    ModelIdData {
+fn test_model_info() -> ModelInfo {
+    ModelInfo {
         provider: "fake-provider".to_string(),
         model: "fake-model".to_string(),
-    }
-}
-
-fn test_capability() -> ModelCapabilityData {
-    ModelCapabilityData {
-        model: test_model_id(),
         supports_tools: true,
         supports_parallel_tool_calls: false,
         supports_streaming: true,
@@ -47,14 +40,11 @@ fn test_capability() -> ModelCapabilityData {
     }
 }
 
-/// Build a port over a real (wire-assembled) client and the given capability.
-/// Adapter 自有逻辑测试只走 capability 查表与 fast-path，不触发上游调用；
-/// LlmProvider 构造面已撤空（见文件头迁移记录），客户端经组合根唯一装配
-/// 入口 `wire_provider_assembly` 构造。
-fn build_port_with_capability(
-    capability: ModelCapabilityData,
-) -> (Arc<dyn ProviderPort>, ModelIdData) {
-    let model = capability.model.clone();
+/// Build a port over a real (wire-assembled) client and the given `ModelInfo`.
+/// Adapter 自有逻辑测试只走 fast-path，不触发上游调用；LlmProvider 构造面已
+/// 撤空（见文件头迁移记录），客户端经组合根唯一装配入口
+/// `wire_provider_assembly` 构造。
+fn build_port_with_model_info(model: ModelInfo) -> (Arc<dyn ProviderPort>, ModelInfo) {
     let client = wire_provider_assembly(
         LlmConfigOptionsData {
             driver: "openai".to_string(),
@@ -72,18 +62,15 @@ fn build_port_with_capability(
         model.clone(),
         &TransportPool::new(),
         ReasoningLevel::Off,
-        Some(128_000),
-        8_192,
     )
     .expect("test client must wire through the composition entry")
     .client;
-    let caps = HashMap::from([(model.clone(), capability)]);
-    (provider_port(client, caps), model)
+    (provider_port(client, model.clone()), model)
 }
 
 /// Build a port for tests that only exercise adapter-owned behaviour.
-fn build_port() -> (Arc<dyn ProviderPort>, ModelIdData) {
-    build_port_with_capability(test_capability())
+fn build_port() -> (Arc<dyn ProviderPort>, ModelInfo) {
+    build_port_with_model_info(test_model_info())
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────
@@ -96,36 +83,11 @@ fn factory_returns_provider_port_that_is_send_sync() {
     assert_send_sync(port.as_ref());
 }
 
-#[test]
-fn capabilities_returns_for_known_model() {
-    let (port, model) = build_port();
-
-    let cap = port.capabilities(&model).unwrap();
-    assert!(cap.supports_tools);
-    assert!(!cap.supports_parallel_tool_calls);
-    assert!(cap.supports_streaming);
-    assert_eq!(cap.context_limit, Some(128_000));
-    assert_eq!(cap.output_limit, Some(8_192));
-}
-
-#[test]
-fn capabilities_rejects_unknown_model() {
-    let (port, _) = build_port();
-
-    let unknown = ModelIdData {
-        provider: "unknown".to_string(),
-        model: "x".to_string(),
-    };
-    let err = port.capabilities(&unknown).unwrap_err();
-    assert_eq!(err.kind, ProviderErrorKind::ModelUnavailable);
-    assert!(!err.retryable);
-}
-
 #[tokio::test]
 async fn invoke_returns_cancelled_when_signal_already_set() {
     let (port, model) = build_port();
 
-    let request = InvocationRequestData::new(model, vec![], 8192, ReasoningLevel::Off);
+    let request = InvocationRequestData::new(model.model, vec![], 8192, ReasoningLevel::Off);
     let cancel = CancellationToken::new();
     cancel.cancel();
 
@@ -133,24 +95,6 @@ async fn invoke_returns_cancelled_when_signal_already_set() {
     assert!(
         matches!(result, Err(ref e) if e.is_cancelled()),
         "expected cancelled error"
-    );
-}
-
-#[tokio::test]
-async fn invoke_rejects_unknown_model() {
-    let (port, _known) = build_port();
-
-    let unknown = ModelIdData {
-        provider: "nope".to_string(),
-        model: "ghost".to_string(),
-    };
-    let request = InvocationRequestData::new(unknown, vec![], 8192, ReasoningLevel::Off);
-    let cancel = CancellationToken::new();
-
-    let result = port.invoke(request, &cancel).await;
-    assert!(
-        matches!(result, Err(ref e) if e.kind == ProviderErrorKind::ModelUnavailable),
-        "expected ModelUnavailable for a model with no declared capability"
     );
 }
 
@@ -163,10 +107,7 @@ fn valid_spec() -> ProviderBuildSpecData {
         api_style: None,
         api_key: "sk-test-key".to_string(),
         base_url: Some("https://api.anthropic.com".to_string()),
-        model: ModelIdData {
-            provider: "Anthropic".to_string(),
-            model: "claude-sonnet-4-20250514".to_string(),
-        },
+        model: "claude-sonnet-4-20250514".to_string(),
         max_tokens: 8192,
         requested_reasoning: ReasoningLevel::Off,
         context_window: Some(200_000),
@@ -184,24 +125,21 @@ fn factory_build_valid_spec_returns_binding() {
         .build(spec.clone())
         .expect("valid spec should build");
 
-    assert_eq!(binding.model, spec.model);
+    assert_eq!(binding.model.model, spec.model);
+    assert_eq!(binding.model.provider, spec.source_key);
     assert_eq!(binding.max_tokens, spec.max_tokens);
-    assert_eq!(binding.context_window, spec.context_window);
+    assert_eq!(binding.model.context_limit, spec.context_window);
     assert_eq!(
         binding.requested_reasoning,
         ReasoningLevel::Off,
         "reasoning=false => Off"
     );
 
-    // The binding's provider port must be callable.
-    let cap = binding
-        .provider
-        .capabilities(&binding.model)
-        .expect("capabilities for the built model");
-    assert!(cap.supports_tools);
-    assert!(cap.supports_streaming);
-    assert_eq!(cap.context_limit, spec.context_window);
-    assert_eq!(cap.output_limit, Some(spec.max_tokens as usize));
+    // binding 持全量 ModelInfo——能力面可直接读取（运行时零查询）。
+    assert!(binding.model.supports_tools);
+    assert!(binding.model.supports_streaming);
+    assert_eq!(binding.model.context_limit, spec.context_window);
+    assert_eq!(binding.model.output_limit, Some(spec.max_tokens as usize));
 }
 
 #[test]
@@ -262,10 +200,7 @@ fn factory_build_preserves_requested_reasoning() {
     spec.requested_reasoning = ReasoningLevel::High;
     // Use "openai" which supports reasoning via Effort mapping.
     spec.driver = "openai".to_string();
-    spec.model = ModelIdData {
-        provider: "OpenAI".to_string(),
-        model: "gpt-4o".to_string(),
-    };
+    spec.model = "gpt-4o".to_string();
 
     let binding = factory.build(spec).expect("valid spec with reasoning");
 
@@ -311,10 +246,7 @@ fn spec_with(
         api_style: None,
         api_key: api_key.to_string(),
         base_url: base_url.map(str::to_string),
-        model: ModelIdData {
-            provider: "Anthropic".to_string(),
-            model: model.to_string(),
-        },
+        model: model.to_string(),
         max_tokens: 8192,
         requested_reasoning: ReasoningLevel::Off,
         context_window: Some(200_000),
@@ -436,11 +368,9 @@ fn rebuild_keeps_prior_binding_port_frozen() {
         std::sync::Arc::ptr_eq(&first_port, &first.provider),
         "rebuilding must never rewrite a prior binding's port in place"
     );
-    let capability = first
-        .provider
-        .capabilities(&first.model)
-        .expect("prior binding port must stay usable");
-    assert_eq!(capability.model, first.model);
+    // binding 持全量 ModelInfo——旧 binding 的模型元数据保持不变。
+    assert_eq!(first.model.model, "claude-a");
+    assert_eq!(first.model.context_limit, Some(200_000));
 }
 
 #[test]

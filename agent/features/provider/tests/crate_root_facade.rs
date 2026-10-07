@@ -1,7 +1,7 @@
 use provider::{
-    InvocationRequestData, ModelCapabilityData, ModelIdData, ProviderContentData, ProviderError,
-    ProviderErrorKind, ProviderResponse, ProviderResponseChunk, ProviderStopReasonData,
-    ProviderToolCallData, ReasoningCapabilityData, RequestSystemBlockData, TokenUsageData,
+    InvocationRequestData, ModelInfo, ProviderContentData, ProviderError, ProviderErrorKind,
+    ProviderResponse, ProviderResponseChunk, ProviderStopReasonData, ProviderToolCallData,
+    ReasoningCapabilityData, RequestSystemBlockData, TokenUsageData,
 };
 use share::message::Message;
 use share::reasoning::ReasoningLevel;
@@ -10,8 +10,7 @@ use share::reasoning::ReasoningLevel;
 fn crate_root_exposes_complete_provider_published_language_as_send_sync_values() {
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<InvocationRequestData>();
-    assert_send_sync::<ModelCapabilityData>();
-    assert_send_sync::<ModelIdData>();
+    assert_send_sync::<ModelInfo>();
     assert_send_sync::<ProviderContentData>();
     assert_send_sync::<ProviderError>();
     assert_send_sync::<ProviderErrorKind>();
@@ -27,10 +26,7 @@ fn crate_root_exposes_complete_provider_published_language_as_send_sync_values()
 #[test]
 fn invocation_request_clone_shares_message_backing() {
     let request = InvocationRequestData::new(
-        ModelIdData {
-            provider: "contract-provider".to_string(),
-            model: "contract-model".to_string(),
-        },
+        "contract-model".to_string(),
         vec![Message::user("history")],
         8_192,
         ReasoningLevel::Off,
@@ -43,10 +39,7 @@ fn invocation_request_clone_shares_message_backing() {
 
 #[test]
 fn crate_root_published_language_preserves_boundary_semantics() {
-    let model = ModelIdData {
-        provider: "contract-provider".to_string(),
-        model: "contract-model".to_string(),
-    };
+    let model = "contract-model".to_string();
 
     let request = InvocationRequestData::new(model, Vec::new(), 8_192, ReasoningLevel::Medium);
     assert!(request.system.is_empty());

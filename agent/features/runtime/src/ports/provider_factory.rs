@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::ports::provider_port::{ModelIdData, ProviderError, ProviderPort, ReasoningLevel};
+use crate::ports::provider_port::{ModelInfo, ProviderError, ProviderPort, ReasoningLevel};
 
 // ─── ProviderBuildSpecData ──────────────────────────────────────
 
@@ -16,7 +16,7 @@ use crate::ports::provider_port::{ModelIdData, ProviderError, ProviderPort, Reas
 /// via provider config options and wrap it in a `ProviderPort`.
 ///
 /// All fields map directly to provider config options except `context_window`, which
-/// feeds the `ModelCapabilityData.context_limit` constructed alongside the client.
+/// feeds the `ModelInfo.context_limit` constructed alongside the client.
 #[derive(Debug, Clone)]
 pub struct ProviderBuildSpecData {
     /// Driver kind (e.g. `"Anthropic"`, `"OpenAI"`, `"Zhipu"`).
@@ -29,8 +29,9 @@ pub struct ProviderBuildSpecData {
     pub api_key: String,
     /// Base URL override.
     pub base_url: Option<String>,
-    /// Model identifier.
-    pub model: ModelIdData,
+    /// 模型名（模型身份的 provider 侧名——装配时与 source_key 组成
+    /// `ModelInfo` 的 provider/model 身份）。
+    pub model: String,
     /// Maximum output tokens.
     pub max_tokens: u32,
     /// Requested reasoning level before Provider capability clamp.
@@ -46,19 +47,17 @@ pub struct ProviderBuildSpecData {
 // ─── ProviderBindingData ────────────────────────────────────────
 
 /// An active provider binding: a ready-to-use `ProviderPort` together with the
-/// model and constraints that were used to build it.
+/// `ModelInfo` and constraints that were used to build it.
 #[derive(Clone)]
 pub struct ProviderBindingData {
     /// The built provider port.
     pub provider: Arc<dyn ProviderPort>,
-    /// Model identifier.
-    pub model: ModelIdData,
+    /// 该 binding 绑定模型的完整元数据（身份 + 能力——config/catalog 投影）。
+    pub model: ModelInfo,
     /// Maximum output tokens for invocations through this binding.
     pub max_tokens: u32,
     /// Requested reasoning level (before clamping).
     pub requested_reasoning: ReasoningLevel,
-    /// Context window size in tokens (`None` = unknown).
-    pub context_window: Option<usize>,
 }
 
 impl std::fmt::Debug for ProviderBindingData {
@@ -67,7 +66,6 @@ impl std::fmt::Debug for ProviderBindingData {
             .field("model", &self.model)
             .field("max_tokens", &self.max_tokens)
             .field("requested_reasoning", &self.requested_reasoning)
-            .field("context_window", &self.context_window)
             .finish_non_exhaustive()
     }
 }
@@ -77,7 +75,7 @@ impl std::fmt::Debug for ProviderBindingData {
 /// Factory that builds a [`ProviderBindingData`] from a [`ProviderBuildSpecData`].
 ///
 /// The factory owns the knowledge of how to construct a provider client and
-/// how to construct a `ModelCapabilityData`. The caller (Runtime) only provides the
+/// how to construct a `ModelInfo`. The caller (Runtime) only provides the
 /// spec — the factory **never** queries external config.
 pub trait ProviderFactory: Send + Sync {
     /// Build a provider binding from the given spec.

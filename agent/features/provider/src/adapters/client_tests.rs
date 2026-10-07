@@ -188,33 +188,37 @@ fn wire_provider_client_maps_configuration_failures_to_provider_error() {
 }
 
 /// wire_provider_assembly 是 factory build 的 provider 侧装配内核：
-/// config + 模型元数据 → (client, capability, 生效推理档位)，
-/// capability 的 supports_*/reasoning/limits 构造全部收编于此。
+/// config + 模型元数据 → (client, ModelInfo, 生效推理档位)；
+/// reasoning 阶梯由 client 推导覆盖，身份/supports_*/limits 来自组合根投影。
 #[test]
-fn wire_provider_assembly_builds_capability_from_client_and_model_meta() {
-    use crate::published_language::ModelIdData;
+fn wire_provider_assembly_builds_model_info_from_client_and_model_meta() {
+    use crate::published_language::ModelInfo;
 
     let pool = TransportPool::new();
     let assembly = super::wire_provider_assembly(
         pooled_config("claude-a", 8192, Some("https://api.anthropic.com")),
-        ModelIdData {
+        ModelInfo {
             provider: "Anthropic".to_string(),
             model: "claude-a".to_string(),
+            supports_tools: true,
+            supports_parallel_tool_calls: true,
+            supports_streaming: true,
+            reasoning: crate::ReasoningCapabilityData::none(),
+            context_limit: Some(200_000),
+            output_limit: Some(8192),
         },
         &pool,
         ReasoningLevel::Medium,
-        Some(200_000),
-        8192,
     )
     .expect("assembly must build");
 
     assert_eq!(assembly.requested_reasoning, ReasoningLevel::Medium);
-    assert!(assembly.capability.supports_tools);
-    assert!(assembly.capability.supports_streaming);
-    assert_eq!(assembly.capability.context_limit, Some(200_000));
-    assert_eq!(assembly.capability.output_limit, Some(8192));
+    assert!(assembly.model.supports_tools);
+    assert!(assembly.model.supports_streaming);
+    assert_eq!(assembly.model.context_limit, Some(200_000));
+    assert_eq!(assembly.model.output_limit, Some(8192));
     assert!(assembly
-        .capability
+        .model
         .reasoning
         .supported()
         .contains(&ReasoningLevel::Medium));
@@ -223,7 +227,7 @@ fn wire_provider_assembly_builds_capability_from_client_and_model_meta() {
 
 #[test]
 fn wire_provider_assembly_maps_config_failures_to_provider_error() {
-    use crate::published_language::ModelIdData;
+    use crate::published_language::ModelInfo;
 
     let pool = TransportPool::new();
     let mut config = pooled_config("claude-a", 16, None);
@@ -231,14 +235,18 @@ fn wire_provider_assembly_maps_config_failures_to_provider_error() {
 
     let error = match super::wire_provider_assembly(
         config,
-        ModelIdData {
+        ModelInfo {
             provider: "Anthropic".to_string(),
             model: "claude-a".to_string(),
+            supports_tools: true,
+            supports_parallel_tool_calls: true,
+            supports_streaming: true,
+            reasoning: crate::ReasoningCapabilityData::none(),
+            context_limit: Some(200_000),
+            output_limit: Some(16),
         },
         &pool,
         ReasoningLevel::Off,
-        Some(200_000),
-        16,
     ) {
         Err(error) => error,
         Ok(_) => panic!("unknown driver must fail"),

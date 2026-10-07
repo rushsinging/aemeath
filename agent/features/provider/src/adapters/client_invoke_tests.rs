@@ -14,7 +14,7 @@ use crate::{
     InvocationRequestData, ProviderContentData, ProviderError, ProviderErrorKind,
     ProviderResponseChunk, RequestSystemBlockData, TokenUsageData,
 };
-use crate::{ModelCapabilityData, ModelIdData, ReasoningCapabilityData};
+use crate::{ModelInfo, ReasoningCapabilityData};
 
 use async_trait::async_trait;
 use share::message::Message;
@@ -153,16 +153,10 @@ impl LlmProvider for RecordingProvider {
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
-fn test_model_id() -> ModelIdData {
-    ModelIdData {
+fn test_model_info() -> ModelInfo {
+    ModelInfo {
         provider: "fake-provider".to_string(),
         model: "fake-model".to_string(),
-    }
-}
-
-fn test_capability() -> ModelCapabilityData {
-    ModelCapabilityData {
-        model: test_model_id(),
         supports_tools: true,
         supports_parallel_tool_calls: false,
         supports_streaming: true,
@@ -193,11 +187,12 @@ async fn invoke_aggregates_stream_into_provider_response() {
         "fake-model",
         fresh_captured(),
     ));
-    let capability = test_capability();
+    let model = test_model_info();
 
-    let request = InvocationRequestData::new(test_model_id(), vec![], 8192, ReasoningLevel::Off);
+    let request =
+        InvocationRequestData::new("fake-model".to_string(), vec![], 8192, ReasoningLevel::Off);
 
-    let response = client.invoke(&capability, &request).await.unwrap();
+    let response = client.invoke(&model, &request).await.unwrap();
 
     assert!(response.ok, "aggregated happy-path response must be ok");
     assert!(
@@ -224,10 +219,11 @@ async fn invoke_stream_emits_content_then_usage_then_stop_frames() {
         "fake-model",
         fresh_captured(),
     ));
-    let capability = test_capability();
+    let model = test_model_info();
 
-    let request = InvocationRequestData::new(test_model_id(), vec![], 8192, ReasoningLevel::Off);
-    let mut stream = client.invoke_stream(&capability, &request).await.unwrap();
+    let request =
+        InvocationRequestData::new("fake-model".to_string(), vec![], 8192, ReasoningLevel::Off);
+    let mut stream = client.invoke_stream(&model, &request).await.unwrap();
 
     let mut events = Vec::new();
     while let Some(evt) = stream.next().await {
@@ -257,11 +253,9 @@ async fn invoke_propagates_provider_error() {
             ProviderError::fatal(ProviderErrorKind::RateLimited, "too many requests"),
         ),
     );
-    let capability = ModelCapabilityData {
-        model: ModelIdData {
-            provider: "bad-provider".to_string(),
-            model: "bad-model".to_string(),
-        },
+    let model = ModelInfo {
+        provider: "bad-provider".to_string(),
+        model: "bad-model".to_string(),
         supports_tools: false,
         supports_parallel_tool_calls: false,
         supports_streaming: true,
@@ -271,9 +265,9 @@ async fn invoke_propagates_provider_error() {
     };
 
     let request =
-        InvocationRequestData::new(capability.model.clone(), vec![], 8192, ReasoningLevel::Off);
+        InvocationRequestData::new(model.model.clone(), vec![], 8192, ReasoningLevel::Off);
 
-    let result = client.invoke(&capability, &request).await;
+    let result = client.invoke(&model, &request).await;
     assert!(
         matches!(result, Err(ref e) if e.kind == ProviderErrorKind::RateLimited && !e.retryable),
         "expected terminal rate-limited error"
@@ -287,12 +281,13 @@ async fn invoke_rejects_invalid_scope() {
         "fake-model",
         fresh_captured(),
     ));
-    let capability = test_capability();
+    let model = test_model_info();
 
     // max_output_tokens = 0 should trigger a scope validation error.
-    let request = InvocationRequestData::new(test_model_id(), vec![], 0, ReasoningLevel::Off);
+    let request =
+        InvocationRequestData::new("fake-model".to_string(), vec![], 0, ReasoningLevel::Off);
 
-    let result = client.invoke(&capability, &request).await;
+    let result = client.invoke(&model, &request).await;
     assert!(
         matches!(result, Err(ref e) if e.kind == ProviderErrorKind::Configuration),
         "expected configuration error for zero max tokens"
@@ -306,10 +301,10 @@ async fn invoke_converts_system_blocks_tools_and_uses_neutral_scope_model() {
         "fake-model",
         fresh_captured(),
     ));
-    let capability = test_capability();
+    let model = test_model_info();
 
     let mut request =
-        InvocationRequestData::new(test_model_id(), vec![], 8192, ReasoningLevel::Off);
+        InvocationRequestData::new("fake-model".to_string(), vec![], 8192, ReasoningLevel::Off);
     // Provider-neutral system blocks: one cacheable, one dynamic.
     request.system = vec![
         RequestSystemBlockData::Text("stable prefix first part".to_string()),
@@ -327,7 +322,7 @@ async fn invoke_converts_system_blocks_tools_and_uses_neutral_scope_model() {
     })];
 
     let _response = client
-        .invoke(&capability, &request)
+        .invoke(&model, &request)
         .await
         .expect("invoke must succeed");
 
@@ -360,11 +355,10 @@ async fn invoke_converts_system_blocks_tools_and_uses_neutral_scope_model() {
 
 #[tokio::test]
 async fn invoke_clamps_requested_reasoning_to_capability() {
-    // Capability supports only Off and Medium; requesting Max must clamp to Medium.
-    let mut capability = test_capability();
-    capability.reasoning =
-        ReasoningCapabilityData::new([ReasoningLevel::Off, ReasoningLevel::Medium])
-            .expect("valid capability");
+    // ModelInfo 的 reasoning 只支持 Off 和 Medium；请求 Max 必须 clamp 到 Medium。
+    let mut model = test_model_info();
+    model.reasoning = ReasoningCapabilityData::new([ReasoningLevel::Off, ReasoningLevel::Medium])
+        .expect("valid capability");
 
     let (client, captured) = build_client(RecordingProvider::new(
         "fake-provider",
@@ -372,8 +366,9 @@ async fn invoke_clamps_requested_reasoning_to_capability() {
         fresh_captured(),
     ));
 
-    let request = InvocationRequestData::new(test_model_id(), vec![], 4096, ReasoningLevel::Max);
-    let _ = client.invoke(&capability, &request).await.unwrap();
+    let request =
+        InvocationRequestData::new("fake-model".to_string(), vec![], 4096, ReasoningLevel::Max);
+    let _ = client.invoke(&model, &request).await.unwrap();
 
     let c = captured.lock().expect("captured lock poisoned");
     assert_eq!(
@@ -399,11 +394,12 @@ async fn invoke_invokes_provider_exactly_once() {
         "fake-model",
         fresh_captured(),
     ));
-    let capability = test_capability();
+    let model = test_model_info();
 
-    let request = InvocationRequestData::new(test_model_id(), vec![], 8192, ReasoningLevel::Off);
+    let request =
+        InvocationRequestData::new("fake-model".to_string(), vec![], 8192, ReasoningLevel::Off);
     let _response = client
-        .invoke(&capability, &request)
+        .invoke(&model, &request)
         .await
         .expect("invoke must succeed");
 
@@ -423,18 +419,18 @@ async fn invoke_returns_cancelled_when_signal_fires_during_establishment() {
         "fake-model",
         fresh_captured(),
     ));
-    let capability = test_capability();
+    let model = test_model_info();
 
     // 单通道取消：request.cancellation 是唯一取消载体（v2 C13——生产侧
     // runtime 以同一 token 注入 request 与 advisory 信号，语义同源）。
     let mut request =
-        InvocationRequestData::new(test_model_id(), vec![], 8192, ReasoningLevel::Off);
+        InvocationRequestData::new("fake-model".to_string(), vec![], 8192, ReasoningLevel::Off);
     let cancel = CancellationToken::new();
     request.cancellation = cancel.clone();
     let client_for_task = client.clone();
 
     // Drive invoke() on a task so we can fire the external signal mid-flight.
-    let handle = tokio::spawn(async move { client_for_task.invoke(&capability, &request).await });
+    let handle = tokio::spawn(async move { client_for_task.invoke(&model, &request).await });
 
     // Let the spawned invoke reach call establishment (the fake now awaits its
     // invocation-local cancellation token).

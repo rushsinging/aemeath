@@ -11,15 +11,7 @@ impl runtime::ProviderFactory for TestProviderFactory {
         struct UnusedPort;
         #[async_trait::async_trait]
         impl runtime::ProviderPort for UnusedPort {
-            fn capabilities(
-                &self,
-                _model: &provider::ModelIdData,
-            ) -> Result<provider::ModelCapabilityData, provider::ProviderError> {
-                Err(provider::ProviderError::fatal(
-                    provider::ProviderErrorKind::ModelUnavailable,
-                    "unused test provider",
-                ))
-            }
+            // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
 
             async fn invoke(
                 &self,
@@ -34,10 +26,18 @@ impl runtime::ProviderFactory for TestProviderFactory {
         }
         Ok(runtime::ProviderBindingData {
             provider: Arc::new(UnusedPort),
-            model: spec.model,
+            model: provider::ModelInfo {
+                provider: spec.source_key.clone(),
+                model: spec.model.clone(),
+                supports_tools: true,
+                supports_parallel_tool_calls: true,
+                supports_streaming: true,
+                reasoning: provider::ReasoningCapabilityData::none(),
+                context_limit: spec.context_window,
+                output_limit: Some(spec.max_tokens as usize),
+            },
             max_tokens: spec.max_tokens,
             requested_reasoning: spec.requested_reasoning,
-            context_window: spec.context_window,
         })
     }
 }
@@ -49,10 +49,7 @@ fn initial_provider_assembly() -> runtime::InitialProviderAssemblyData {
         api_style: None,
         api_key: "test-key".to_string(),
         base_url: None,
-        model: provider::ModelIdData {
-            provider: "test".to_string(),
-            model: "test-model".to_string(),
-        },
+        model: "test-model".to_string(),
         max_tokens: 8192,
         requested_reasoning: share::reasoning::ReasoningLevel::Off,
         context_window: Some(8192),

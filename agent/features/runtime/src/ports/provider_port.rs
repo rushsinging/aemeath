@@ -5,7 +5,7 @@
 //! - `docs/design/02-modules/provider/02-ports-stream-and-client-scope.md`
 //!
 //! #901 冻结契约：
-//! - PL 类型（ModelIdData、ModelCapabilityData、ProviderError、ProviderResponse 等）
+//! - PL 类型（ModelInfo、ProviderError、ProviderResponse 等）
 //!   由 Provider crate 的 `published_language` 模块定义。
 //! - Runtime 定义 `ProviderPort` trait，引用 Provider PL 类型，
 //!   **NEVER** 引用 vendor wire DTO。
@@ -18,7 +18,7 @@ use async_trait::async_trait;
 // 通过 provider:: 根导出访问，不直接引用 published_language 模块。
 // 新 PL StopReason 通过别名 ProviderStopReasonData 导出，此处还原为 StopReason。
 pub use provider::{
-    InvocationRequestData, ModelCapabilityData, ModelIdData, ProviderError, ProviderResponseStream,
+    InvocationRequestData, ModelInfo, ProviderError, ProviderResponseStream,
     ProviderStopReasonData as StopReason, RequestSystemBlockData, TokenUsageData,
 };
 
@@ -62,8 +62,9 @@ impl CancellationSignal for tokio_util::sync::CancellationToken {
 /// 跨调用 retry、compact、fallback 由 Runtime 负责。
 #[async_trait]
 pub trait ProviderPort: Send + Sync {
-    /// 查询模型能力。
-    fn capabilities(&self, model: &ModelIdData) -> Result<ModelCapabilityData, ProviderError>;
+    // 能力查询 `capabilities()` 已删除（#1880）：binding 持全量
+    // ModelInfo，运行时零查询——unknown model 门禁在装配时（catalog/wire
+    // 阶段决定 ModelInfo），不再于调用侧查询。
 
     /// 发起一次 LLM 调用，返回单次 attempt 的有序片段流。
     ///
@@ -89,27 +90,12 @@ pub(crate) mod fake {
     use tokio_util::sync::CancellationToken;
 
     /// 可编程的 fake provider：按预设事件列表依次产出。
-    pub struct FakeProvider {
-        capabilities: ModelCapabilityData,
-    }
+    pub struct FakeProvider;
 
     impl FakeProvider {
-        /// 构造一个默认 fake provider（supports_tools=true, streaming=true）。
+        /// 构造一个默认 fake provider。
         pub fn new() -> Self {
-            Self {
-                capabilities: ModelCapabilityData {
-                    model: ModelIdData {
-                        provider: "fake".to_string(),
-                        model: "test-model".to_string(),
-                    },
-                    supports_tools: true,
-                    supports_parallel_tool_calls: true,
-                    supports_streaming: true,
-                    reasoning: ReasoningCapabilityData::none(),
-                    context_limit: Some(128_000),
-                    output_limit: Some(8_192),
-                },
-            }
+            Self
         }
 
         /// 生成一个产出 `chunks` 后终结的 ProviderResponseStream。
@@ -145,17 +131,6 @@ pub(crate) mod fake {
 
     #[async_trait]
     impl ProviderPort for FakeProvider {
-        fn capabilities(&self, model: &ModelIdData) -> Result<ModelCapabilityData, ProviderError> {
-            if model.provider == "fake" {
-                Ok(self.capabilities.clone())
-            } else {
-                Err(ProviderError::fatal(
-                    ProviderErrorKind::ModelUnavailable,
-                    format!("unknown model: {model}"),
-                ))
-            }
-        }
-
         async fn invoke(
             &self,
             _request: InvocationRequestData,
@@ -177,40 +152,27 @@ pub(crate) mod fake {
         ) -> Result<crate::ports::ProviderBindingData, ProviderError> {
             Ok(crate::ports::ProviderBindingData {
                 provider: Arc::new(FakeProvider::new()),
-                model: spec.model,
+                model: crate::ports::ModelInfo {
+                    provider: spec.source_key.clone(),
+                    model: spec.model.clone(),
+                    supports_tools: true,
+                    supports_parallel_tool_calls: true,
+                    supports_streaming: true,
+                    reasoning: ReasoningCapabilityData::none(),
+                    context_limit: spec.context_window,
+                    output_limit: Some(spec.max_tokens as usize),
+                },
                 max_tokens: spec.max_tokens,
                 requested_reasoning: spec.requested_reasoning,
-                context_window: spec.context_window,
             })
         }
     }
 
     // ─── 契约测试 ───
-
-    #[test]
-    fn fake_provider_capabilities_returns_for_matching_model() {
-        let provider = FakeProvider::new();
-        let model = ModelIdData {
-            provider: "fake".to_string(),
-            model: "test-model".to_string(),
-        };
-        let cap = provider.capabilities(&model).unwrap();
-        assert!(cap.supports_tools);
-        assert!(cap.supports_streaming);
-        assert_eq!(cap.context_limit, Some(128_000));
-    }
-
-    #[test]
-    fn fake_provider_capabilities_rejects_unknown_model() {
-        let provider = FakeProvider::new();
-        let model = ModelIdData {
-            provider: "unknown".to_string(),
-            model: "x".to_string(),
-        };
-        let err = provider.capabilities(&model).unwrap_err();
-        assert_eq!(err.kind, ProviderErrorKind::ModelUnavailable);
-        assert!(!err.retryable);
-    }
+    //
+    // `fake_provider_capabilities_*` 两个查询契约测试已删除（#1880）：
+    // ProviderPort 不再暴露 capabilities()——unknown model 门禁语义移到
+    // 装配时（factory build 构造 ModelInfo），运行时零查询。
 
     #[tokio::test]
     async fn happy_path_stream_emits_content_then_usage_then_stop() {
@@ -262,10 +224,7 @@ pub(crate) mod fake {
         cancel.cancel();
 
         let request = InvocationRequestData::new(
-            ModelIdData {
-                provider: "fake".to_string(),
-                model: "test-model".to_string(),
-            },
+            "test-model".to_string(),
             Vec::new(),
             8192,
             ReasoningLevel::Off,
@@ -283,10 +242,7 @@ pub(crate) mod fake {
         let provider = FakeProvider::new();
         let cancel = CancellationToken::new();
         let request = InvocationRequestData::new(
-            ModelIdData {
-                provider: "fake".to_string(),
-                model: "test-model".to_string(),
-            },
+            "test-model".to_string(),
             Vec::new(),
             8192,
             ReasoningLevel::Off,
@@ -324,10 +280,7 @@ pub(crate) mod fake {
 
         let provider = FakeProvider::new();
         let request = InvocationRequestData::new(
-            ModelIdData {
-                provider: "fake".to_string(),
-                model: "test-model".to_string(),
-            },
+            "test-model".to_string(),
             Vec::new(),
             8192,
             ReasoningLevel::Off,

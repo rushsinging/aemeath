@@ -1,6 +1,6 @@
 use super::invocation::record_successful_usage;
 use crate::application::model::usage::UsageRecordContext;
-use crate::ports::{ModelIdData, TokenUsageData, UsageSink};
+use crate::ports::{ModelInfo, TokenUsageData, UsageSink};
 use audit::{UsageDropReasonData, UsageEmitOutcomeData, UsageRecordData};
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 use std::sync::Mutex;
@@ -32,9 +32,15 @@ fn context() -> UsageRecordContext {
         run_id: RunId::new("run"),
         run_step_id: RunStepId::new("step"),
         model_invocation_id: ModelInvocationId::new("01900000-0000-7000-8000-000000000004"),
-        model: ModelIdData {
+        model: ModelInfo {
             provider: "provider".to_string(),
             model: "model".to_string(),
+            supports_tools: true,
+            supports_parallel_tool_calls: true,
+            supports_streaming: true,
+            reasoning: provider::ReasoningCapabilityData::none(),
+            context_limit: Some(128_000),
+            output_limit: Some(8_192),
         },
     }
 }

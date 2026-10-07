@@ -14,23 +14,30 @@ use std::time::Duration;
 
 use share::message::Message;
 
-// ─── 模型标识 ───────────────────────────────────────────
+// ─── ModelInfo ─────────────────────────────────────────
 
-/// 模型标识符（provider/model）。
+/// 模型元数据——config/catalog 外部数据的单一实体投影。
 ///
-/// 跨 BC 稳定标识一个 LLM 模型源，不携带 driver 或 transport 细节。
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ModelIdData {
-    /// provider 名称（如 "Anthropic"、"Zhipu"）。
+/// provider 是读侧（不写入）；身份（provider/model）与能力（supports_*、
+/// reasoning、调用限制）不可分：不存在脱离能力的纯标识场景。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelInfo {
+    /// provider 名称（如 "Anthropic"）。
     pub provider: String,
-    /// 模型名称（如 "claude-fable-5-1"）。
+    /// 模型名。
     pub model: String,
-}
-
-impl std::fmt::Display for ModelIdData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}/{}", self.provider, self.model)
-    }
+    /// 是否支持 tool use。
+    pub supports_tools: bool,
+    /// 是否支持并行 tool calls。
+    pub supports_parallel_tool_calls: bool,
+    /// 是否支持流式。
+    pub supports_streaming: bool,
+    /// Reasoning 能力。
+    pub reasoning: ReasoningCapabilityData,
+    /// 上下文窗口大小（token 数），`None` 表示未知。
+    pub context_limit: Option<usize>,
+    /// 最大输出 token 数，`None` 表示未知。
+    pub output_limit: Option<usize>,
 }
 
 // ─── Reasoning ──────────────────────────────────────────
@@ -82,31 +89,6 @@ impl ReasoningCapabilityData {
             .unwrap_or(ReasoningLevel::Off)
     }
 }
-
-// ─── ModelCapabilityData ────────────────────────────────────
-
-/// 模型能力声明。
-///
-/// Runtime 可用于前置校验和展示；Provider 在请求编码前仍必须复核。
-#[derive(Debug, Clone)]
-pub struct ModelCapabilityData {
-    /// 模型标识。
-    pub model: ModelIdData,
-    /// 是否支持 tool use。
-    pub supports_tools: bool,
-    /// 是否支持并行 tool calls。
-    pub supports_parallel_tool_calls: bool,
-    /// 是否支持流式。
-    pub supports_streaming: bool,
-    /// Reasoning 能力。
-    pub reasoning: ReasoningCapabilityData,
-    /// 上下文窗口大小（token 数），`None` 表示未知。
-    pub context_limit: Option<usize>,
-    /// 最大输出 token 数，`None` 表示未知。
-    pub output_limit: Option<usize>,
-}
-
-impl ModelCapabilityData {}
 
 // ─── Tool Call（Provider 边界） ─────────────────────────
 
@@ -422,8 +404,8 @@ impl RequestSystemBlockData {
 /// 一个 `InvocationRequestData` 固定一个 model 和一份不可变 options。
 #[derive(Debug, Clone)]
 pub struct InvocationRequestData {
-    /// 目标模型。
-    pub model: ModelIdData,
+    /// 目标模型名（binding 已绑定具体客户端与 [`ModelInfo`]，请求只携带名字）。
+    pub model: String,
     /// Runtime-owned cancellation token for this invocation.
     ///
     /// The Provider adapter uses the same token for stream establishment and the
@@ -444,7 +426,7 @@ pub struct InvocationRequestData {
 impl InvocationRequestData {
     /// 构造一个最小请求（无 system、无 tools）。
     pub fn new(
-        model: ModelIdData,
+        model: String,
         messages: impl Into<std::sync::Arc<[Message]>>,
         max_output_tokens: u32,
         reasoning: ReasoningLevel,

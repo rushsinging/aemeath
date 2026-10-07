@@ -185,44 +185,40 @@ pub(crate) fn wire_provider_client(
     Ok(Arc::new(client))
 }
 
-/// 单模型装配产物：就绪客户端 + 该模型的 capability + 生效推理档位。
+/// 单模型装配产物：就绪客户端 + 该模型的 `ModelInfo` + 生效推理档位。
 ///
 /// factory build 的 provider 侧内核产物（runtime 的 binding 组装由组合根
 /// 桥接完成，BC 翻译不进 provider）。
 pub struct ProviderAssemblyWiring {
     pub client: Arc<LlmClient>,
-    pub capability: crate::published_language::ModelCapabilityData,
+    pub model: crate::published_language::ModelInfo,
     pub requested_reasoning: ReasoningLevel,
 }
 
 /// factory build 的 provider 侧装配内核：构造配置 + 模型元数据 →
-/// (client, capability, 生效推理档位)。
+/// (client, ModelInfo, 生效推理档位)。
 ///
-/// capability 构造（推理阶梯 + 调用限制）全部收编于此；跨 BC 的
-/// spec→config 翻译与 binding 组装留在组合根桥接层。
+/// `model` 携带身份、supports_* 与调用限制（组合根从 config/catalog 投影
+/// 构造）；reasoning 阶梯由 client 推导覆盖（provider 读侧权威——阶梯取决
+/// 于 driver 能力，装配时才可知）。跨 BC 的 spec→config 翻译与 binding 组装
+/// 留在组合根桥接层。
 pub fn wire_provider_assembly(
     options: LlmConfigOptionsData,
-    model: crate::published_language::ModelIdData,
+    model: crate::published_language::ModelInfo,
     pool: &crate::adapters::pool::TransportPool,
     default_reasoning: ReasoningLevel,
-    context_limit: Option<usize>,
-    max_output_tokens: u32,
 ) -> Result<ProviderAssemblyWiring, crate::ProviderError> {
     let client = wire_provider_client(options, pool, default_reasoning)?;
-    let max_reasoning = client.max_reasoning_level();
-    let capability = crate::published_language::ModelCapabilityData {
-        model,
-        supports_tools: true,
-        supports_parallel_tool_calls: true,
-        supports_streaming: true,
-        reasoning: crate::domain::capability::reasoning_capability_from_max(max_reasoning),
-        context_limit,
-        output_limit: Some(max_output_tokens as usize),
+    let model = crate::published_language::ModelInfo {
+        reasoning: crate::domain::capability::reasoning_capability_from_max(
+            client.max_reasoning_level(),
+        ),
+        ..model
     };
     Ok(ProviderAssemblyWiring {
         requested_reasoning: client.default_scope().requested_reasoning(),
         client,
-        capability,
+        model,
     })
 }
 
@@ -386,7 +382,7 @@ impl LlmClient {
     /// establishment 失败仍走 `Err(ProviderError)`（与流式路径一致）。
     pub async fn invoke(
         &self,
-        capability: &crate::ModelCapabilityData,
+        model: &crate::ModelInfo,
         request: &crate::InvocationRequestData,
     ) -> Result<crate::ProviderResponse, crate::ProviderError> {
         use crate::published_language::{ProviderContentData, ProviderResponseChunk};
@@ -394,8 +390,8 @@ impl LlmClient {
         use futures_util::StreamExt;
 
         // 与 invoke_stream 的 resolve 同源：capability clamp 后的生效档位。
-        let effective_reasoning = capability.reasoning.resolve(request.reasoning);
-        let mut stream = self.invoke_stream(capability, request).await?;
+        let effective_reasoning = model.reasoning.resolve(request.reasoning);
+        let mut stream = self.invoke_stream(model, request).await?;
         let mut response = crate::ProviderResponse {
             ok: false,
             error: None,
@@ -455,11 +451,11 @@ impl LlmClient {
     }
 
     /// 流式请求入口：runtime PL 的 [`InvocationRequestData`] 在 crate 内
-    /// 完成 capability clamp、scope 构造、system block / tool schema 转换与
+    /// 完成 reasoning clamp、scope 构造、system block / tool schema 转换与
     /// 取消竞速（原 composition ProviderAdapter 编排收编）。
     pub async fn invoke_stream(
         &self,
-        capability: &crate::ModelCapabilityData,
+        model: &crate::ModelInfo,
         request: &crate::InvocationRequestData,
     ) -> Result<crate::ProviderResponseStream, crate::ProviderError> {
         use crate::ProviderError;
@@ -470,11 +466,11 @@ impl LlmClient {
             return Err(ProviderError::cancelled());
         }
 
-        // clamp：请求 reasoning 不超过声明能力（resolve 属 client 编排职责）。
+        // clamp：请求 reasoning 不超过 ModelInfo 声明能力（resolve 属 client 编排职责）。
         let requested_reasoning = request.reasoning;
-        let effective_reasoning = capability.reasoning.resolve(requested_reasoning);
+        let effective_reasoning = model.reasoning.resolve(requested_reasoning);
         let resolved = crate::ports::ResolvedInvocation::new(
-            request.model.model.clone(),
+            request.model.clone(),
             request.max_output_tokens,
             requested_reasoning,
             effective_reasoning,
@@ -485,7 +481,7 @@ impl LlmClient {
 
         log::debug!(target: crate::LOG_TARGET,
             "[LLM REQUEST] invocation params: model={} max_tokens={} requested_reasoning={:?} effective_reasoning={:?}",
-            request.model.model, request.max_output_tokens, resolved.requested_reasoning, resolved.effective_reasoning,
+            request.model, request.max_output_tokens, resolved.requested_reasoning, resolved.effective_reasoning,
         );
         self.log_request(&request.system, &request.messages, &request.tools);
         // request 携带的 token 与调用方信号竞速 establishment。

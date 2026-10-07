@@ -51,7 +51,7 @@ impl CompactGenerator for ProviderCompactGenerator {
         let binding = target.binding();
         let max_output_tokens = self.max_output_tokens.min(binding.max_tokens.max(1));
         let mut invocation = InvocationRequestData::new(
-            binding.model.clone(),
+            binding.model.model.clone(),
             request,
             max_output_tokens,
             ReasoningLevel::Off,

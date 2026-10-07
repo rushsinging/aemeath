@@ -366,7 +366,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
         name: "spy".to_string(),
         arguments: serde_json::json!({}),
     };
-    let model = crate::application::model::test_support::test_model_id();
+    let model = crate::application::model::test_support::test_model_info();
     let port = TestProviderPort::new(Vec::new(), model.clone()).with_invocation_fn(Arc::new(
         move |_call_idx, request, _cancel| {
             let is_second = second_call2.swap(true, Ordering::SeqCst);
@@ -584,7 +584,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
         name: "blocking_cancel".to_string(),
         arguments: serde_json::json!({}),
     };
-    let model = crate::application::model::test_support::test_model_id();
+    let model = crate::application::model::test_support::test_model_info();
     let port = TestProviderPort::new(Vec::new(), model.clone()).with_invocation_fn(Arc::new(
         move |_call_idx, _request, _cancel| {
             let tc = tool_call.clone();

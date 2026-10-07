@@ -1,5 +1,5 @@
 use super::{UsageRecordContext, UsageRecordFactory};
-use crate::ports::{ModelIdData, TokenUsageData};
+use crate::ports::{ModelInfo, TokenUsageData};
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 
 fn context() -> UsageRecordContext {
@@ -8,9 +8,15 @@ fn context() -> UsageRecordContext {
         run_id: RunId::new("01900000-0000-7000-8000-000000000002"),
         run_step_id: RunStepId::new("01900000-0000-7000-8000-000000000003"),
         model_invocation_id: ModelInvocationId::new("01900000-0000-7000-8000-000000000004"),
-        model: ModelIdData {
+        model: ModelInfo {
             provider: "provider-a".to_string(),
             model: "model-b".to_string(),
+            supports_tools: true,
+            supports_parallel_tool_calls: true,
+            supports_streaming: true,
+            reasoning: provider::ReasoningCapabilityData::none(),
+            context_limit: Some(128_000),
+            output_limit: Some(8_192),
         },
     }
 }

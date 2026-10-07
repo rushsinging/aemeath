@@ -63,20 +63,7 @@ pub(crate) struct FakeProviderPort;
 
 #[async_trait::async_trait]
 impl ProviderPort for FakeProviderPort {
-    fn capabilities(
-        &self,
-        model: &crate::ports::ModelIdData,
-    ) -> Result<crate::ports::ModelCapabilityData, ProviderError> {
-        Ok(crate::ports::ModelCapabilityData {
-            model: model.clone(),
-            supports_tools: true,
-            supports_parallel_tool_calls: false,
-            supports_streaming: true,
-            reasoning: crate::ports::ReasoningCapabilityData::none(),
-            context_limit: None,
-            output_limit: None,
-        })
-    }
+    // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
 
     async fn invoke(
         &self,
@@ -90,13 +77,18 @@ impl ProviderPort for FakeProviderPort {
 pub(crate) fn fake_provider_binding() -> Arc<ProviderBindingData> {
     Arc::new(ProviderBindingData {
         provider: Arc::new(FakeProviderPort),
-        model: crate::ports::ModelIdData {
+        model: crate::ports::ModelInfo {
             provider: "test-provider".into(),
             model: "test-model".into(),
+            supports_tools: true,
+            supports_parallel_tool_calls: false,
+            supports_streaming: true,
+            reasoning: crate::ports::ReasoningCapabilityData::none(),
+            context_limit: Some(128_000),
+            output_limit: Some(8_192),
         },
         max_tokens: 8192,
         requested_reasoning: share::reasoning::ReasoningLevel::Medium,
-        context_window: Some(128_000),
     })
 }
 
@@ -106,10 +98,18 @@ impl ProviderFactory for FakeProviderFactory {
     fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
         Ok(ProviderBindingData {
             provider: Arc::new(FakeProviderPort),
-            model: spec.model,
+            model: crate::ports::ModelInfo {
+                provider: spec.source_key.clone(),
+                model: spec.model.clone(),
+                supports_tools: true,
+                supports_parallel_tool_calls: true,
+                supports_streaming: true,
+                reasoning: crate::ports::ReasoningCapabilityData::none(),
+                context_limit: spec.context_window,
+                output_limit: Some(spec.max_tokens as usize),
+            },
             max_tokens: spec.max_tokens,
             requested_reasoning: spec.requested_reasoning,
-            context_window: spec.context_window,
         })
     }
 }
