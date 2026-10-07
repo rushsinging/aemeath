@@ -108,9 +108,9 @@ impl BackgroundTaskSupervisor {
         task_id: &BackgroundTaskId,
     ) -> Result<StopRequestOutcome, BackgroundTaskSupervisorError> {
         let tasks = self.tasks.lock().expect("后台任务表锁中毒");
-        let task = tasks
-            .get(task_id)
-            .ok_or_else(|| BackgroundTaskSupervisorError::TaskNotFound(task_id.display()))?;
+        let task = tasks.get(task_id).ok_or_else(|| {
+            BackgroundTaskSupervisorError::TaskNotFound(task_id.as_str().to_string())
+        })?;
         if let Some(kind) = task.record.terminal_kind() {
             return Ok(StopRequestOutcome::AlreadyTerminal(kind));
         }
@@ -167,9 +167,9 @@ impl BackgroundTaskSupervisor {
         terminal_output: Option<String>,
     ) -> Result<bool, BackgroundTaskSupervisorError> {
         let mut tasks = self.tasks.lock().expect("后台任务表锁中毒");
-        let task = tasks
-            .get_mut(task_id)
-            .ok_or_else(|| BackgroundTaskSupervisorError::TaskNotFound(task_id.display()))?;
+        let task = tasks.get_mut(task_id).ok_or_else(|| {
+            BackgroundTaskSupervisorError::TaskNotFound(task_id.as_str().to_string())
+        })?;
         if terminal_output.is_some() {
             task.terminal_output = terminal_output;
         }
@@ -255,9 +255,9 @@ impl BackgroundTaskSupervisor {
         next: BackgroundTaskState,
     ) -> Result<(), BackgroundTaskSupervisorError> {
         let mut tasks = self.tasks.lock().expect("后台任务表锁中毒");
-        let task = tasks
-            .get_mut(task_id)
-            .ok_or_else(|| BackgroundTaskSupervisorError::TaskNotFound(task_id.display()))?;
+        let task = tasks.get_mut(task_id).ok_or_else(|| {
+            BackgroundTaskSupervisorError::TaskNotFound(task_id.as_str().to_string())
+        })?;
         let advanced = task.record.clone().advance(next)?;
         task.record = advanced.record;
         Ok(())
@@ -296,7 +296,7 @@ impl BackgroundTaskSupervisor {
             };
             task.notified = true;
             items.push(context::BackgroundTaskReminderItemData {
-                task_id: task.record.task_id.display(),
+                task_id: task.record.task_id.as_str().to_string(),
                 tool_name: task.record.identity.tool_name.clone(),
                 status,
                 output_tail,

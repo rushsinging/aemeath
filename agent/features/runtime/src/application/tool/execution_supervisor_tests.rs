@@ -280,9 +280,9 @@ async fn execute_exceeding_threshold_returns_placeholder_and_backgrounds_receipt
     assert!(
         placeholder_text
             .split_whitespace()
-            .find(|word| word.contains("task-"))
+            .find(|word| word.contains("task_"))
             .map(|word| { word.trim_start_matches('(').trim_end_matches(['.', ')']) })
-            .and_then(|task_id| BackgroundTaskId::parse_display(task_id).ok())
+            .and_then(|task_id| BackgroundTaskId::parse(task_id).ok())
             .is_some(),
         "占位文案应携带合法 task id：{placeholder_text}"
     );

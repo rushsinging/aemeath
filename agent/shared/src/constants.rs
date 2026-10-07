@@ -15,3 +15,6 @@ pub const COMPILED_VERSION: &str = match option_env!("AEMEATH_VERSION") {
 
 /// [`crate::version`] 的运行时缓存：首次调用后进程内返回同一个值。
 pub(crate) static VERSION_CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// 前缀 typed id 的统一分隔符（wanaka 方向，#252）。
+pub const TYPED_ID_SEPARATOR: &str = "_";

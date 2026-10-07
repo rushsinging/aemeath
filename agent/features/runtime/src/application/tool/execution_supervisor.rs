@@ -416,7 +416,7 @@ fn join_result_to_outcome(
 fn placeholder_tool_result(task_id: &BackgroundTaskId) -> PublishedToolOutcome {
     PublishedToolOutcome::success_text(format!(
         "Running in the background ({}). Result will be delivered on completion.",
-        task_id.display(),
+        task_id.as_str(),
     ))
 }
 
