@@ -15,7 +15,7 @@ fn disabled_result() -> MemorySearchResult {
 
 #[async_trait]
 impl MemoryPort for NoOpMemory {
-    fn retrieve_for_inject(&self, _query: &MemoryQuery) -> MemorySearchResult {
+    async fn retrieve_for_inject(&self, _query: &MemoryQuery) -> MemorySearchResult {
         disabled_result()
     }
 
@@ -65,11 +65,11 @@ impl MemoryPort for NoOpMemory {
         })
     }
 
-    fn list(&self, _layer: Option<MemoryLayer>) -> Vec<MemoryEntry> {
+    async fn list(&self, _layer: Option<MemoryLayer>) -> Vec<MemoryEntry> {
         Vec::new()
     }
 
-    fn stats(&self) -> MemoryStats {
+    async fn stats(&self) -> MemoryStats {
         MemoryStats::default()
     }
 }

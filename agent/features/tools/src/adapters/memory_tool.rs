@@ -174,7 +174,7 @@ impl TypedTool for MemoryListTool {
             Err(e) => return TypedToolResult::error(format!("invalid input: {e}")),
         };
         let port = self.source.current();
-        handlers::list_memory(input, &*port)
+        handlers::list_memory(input, &*port).await
     }
 }
 

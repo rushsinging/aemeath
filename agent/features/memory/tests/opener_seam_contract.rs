@@ -84,7 +84,7 @@ async fn opener_is_object_safe_dyn_dispatchable_and_cloneable() {
         .open_memory(&key("/dyn/project"), &MemoryConfig::default())
         .await
         .unwrap();
-    assert_eq!(port.stats().project_count, 0);
+    assert_eq!(port.stats().await.project_count, 0);
 
     // Cloneable: `Box<dyn MemoryOpener>: Clone` via `boxed_clone`.
     let cloned = opener.clone();
@@ -92,7 +92,7 @@ async fn opener_is_object_safe_dyn_dispatchable_and_cloneable() {
         .open_memory(&key("/dyn/other"), &MemoryConfig::default())
         .await
         .unwrap();
-    assert_eq!(port2.stats().project_count, 0);
+    assert_eq!(port2.stats().await.project_count, 0);
 
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -110,8 +110,11 @@ async fn opener_eagerly_opens_and_returns_usable_memory_port() {
     // The returned Arc<dyn MemoryPort> is immediately usable.
     let fact = entry(MemoryLayer::Project, "eagerly opened project fact");
     port.write(fact.clone()).await.unwrap();
-    assert_eq!(port.list(Some(MemoryLayer::Project)), vec![fact.clone()]);
-    assert_eq!(port.stats().project_count, 1);
+    assert_eq!(
+        port.list(Some(MemoryLayer::Project)).await,
+        vec![fact.clone()]
+    );
+    assert_eq!(port.stats().await.project_count, 1);
 
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -171,7 +174,7 @@ async fn opener_distinct_project_keys_isolate_project_and_share_global() {
     port_a.write(project_a_fact.clone()).await.unwrap();
 
     // Project isolation: port_b does not see project-a entries.
-    assert!(port_b.list(Some(MemoryLayer::Project)).is_empty());
+    assert!(port_b.list(Some(MemoryLayer::Project)).await.is_empty());
     // Shared global: port_b sees the global generation committed by port_a.
     // (Both ports point at committed generations; port_b loaded the global
     // layer at open time which may be before port_a wrote. So we re-open
@@ -184,11 +187,14 @@ async fn opener_distinct_project_keys_isolate_project_and_share_global() {
         .await
         .unwrap();
     assert_eq!(
-        port_b_reopened.list(Some(MemoryLayer::Global)),
+        port_b_reopened.list(Some(MemoryLayer::Global)).await,
         vec![global_fact]
     );
     // Project-b still isolated.
-    assert!(port_b_reopened.list(Some(MemoryLayer::Project)).is_empty());
+    assert!(port_b_reopened
+        .list(Some(MemoryLayer::Project))
+        .await
+        .is_empty());
 
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -214,7 +220,10 @@ async fn opener_clone_shares_storage_wiring() {
         .open_memory(&key("/clone/project"), &MemoryConfig::default())
         .await
         .unwrap();
-    assert_eq!(port_via_clone.list(Some(MemoryLayer::Project)).len(), 1);
+    assert_eq!(
+        port_via_clone.list(Some(MemoryLayer::Project)).await.len(),
+        1
+    );
 
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -233,7 +242,7 @@ async fn opener_can_be_used_as_dyn_in_a_collection() {
             .open_memory(&key("/collect/project"), &MemoryConfig::default())
             .await
             .unwrap();
-        assert_eq!(port.stats().global_count, 0);
+        assert_eq!(port.stats().await.global_count, 0);
     }
 
     std::fs::remove_dir_all(root).unwrap();

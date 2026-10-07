@@ -35,7 +35,7 @@ impl FakeMemory {
 
 #[async_trait]
 impl MemoryPort for FakeMemory {
-    fn retrieve_for_inject(&self, query: &MemoryQuery) -> MemorySearchResult {
+    async fn retrieve_for_inject(&self, query: &MemoryQuery) -> MemorySearchResult {
         self.queries.lock().unwrap().push(query.clone());
         self.result.clone()
     }
@@ -74,10 +74,10 @@ impl MemoryPort for FakeMemory {
     async fn compact(&self) -> Result<CompactResult, MemoryError> {
         panic!("context injection must not mutate memory")
     }
-    fn list(&self, _layer: Option<MemoryLayer>) -> Vec<MemoryEntry> {
+    async fn list(&self, _layer: Option<MemoryLayer>) -> Vec<MemoryEntry> {
         panic!("context injection must use retrieve_for_inject")
     }
-    fn stats(&self) -> MemoryStats {
+    async fn stats(&self) -> MemoryStats {
         panic!("context injection must use retrieve_for_inject")
     }
 }

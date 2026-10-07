@@ -155,7 +155,7 @@ pub async fn execute_memory(
 
     let parts: Vec<&str> = args.split_whitespace().collect();
     if parts.is_empty() || parts[0] == "list" {
-        let entries = port.list(None);
+        let entries = port.list(None).await;
         if entries.is_empty() {
             return ("(no memories stored)".to_string(), false);
         }
@@ -247,7 +247,7 @@ pub async fn execute_memory(
                 ),
                 Err(e) => (format!("Failed: {e}"), true),
             },
-            "stats" => (format_stats(&port.stats()), false),
+            "stats" => (format_stats(&port.stats().await), false),
             _ => (format!("Unknown memory subcommand: {}", parts[0]), true),
         }
     }

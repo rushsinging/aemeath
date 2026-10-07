@@ -748,7 +748,7 @@ impl InMemoryMemory {
 
 #[async_trait]
 impl MemoryPort for InMemoryMemory {
-    fn retrieve_for_inject(&self, query: &MemoryQuery) -> MemorySearchResult {
+    async fn retrieve_for_inject(&self, query: &MemoryQuery) -> MemorySearchResult {
         let state = self.state.read().expect("memory state lock poisoned");
         let mut entries = state
             .active
@@ -1041,7 +1041,7 @@ impl MemoryPort for InMemoryMemory {
         })
     }
 
-    fn list(&self, layer: Option<MemoryLayer>) -> Vec<MemoryEntry> {
+    async fn list(&self, layer: Option<MemoryLayer>) -> Vec<MemoryEntry> {
         self.state
             .read()
             .expect("memory state lock poisoned")
@@ -1052,7 +1052,7 @@ impl MemoryPort for InMemoryMemory {
             .collect()
     }
 
-    fn stats(&self) -> MemoryStats {
+    async fn stats(&self) -> MemoryStats {
         let state = self.state.read().expect("memory state lock poisoned");
         MemoryStats {
             global_count: count_layer(&state.active, MemoryLayer::Global),

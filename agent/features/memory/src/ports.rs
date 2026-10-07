@@ -252,7 +252,7 @@ pub trait ReflectionHistoryStore: ReflectionHistoryQuery {
 
 #[async_trait]
 pub trait MemoryPort: Send + Sync {
-    fn retrieve_for_inject(&self, query: &MemoryQuery) -> MemorySearchResult;
+    async fn retrieve_for_inject(&self, query: &MemoryQuery) -> MemorySearchResult;
     async fn search(&self, query: &MemorySearchQuery) -> MemorySearchResult;
     async fn write(&self, entry: MemoryEntry) -> Result<WriteResult, MemoryError>;
     async fn update(&self, id: &MemoryId, content: &str) -> Result<bool, MemoryError>;
@@ -266,8 +266,8 @@ pub trait MemoryPort: Send + Sync {
     async fn archive(&self, ids: &[MemoryId]) -> Result<bool, MemoryError>;
     async fn restore(&self, id: &MemoryId) -> Result<RestoreResult, MemoryError>;
     async fn compact(&self) -> Result<CompactResult, MemoryError>;
-    fn list(&self, layer: Option<MemoryLayer>) -> Vec<MemoryEntry>;
-    fn stats(&self) -> MemoryStats;
+    async fn list(&self, layer: Option<MemoryLayer>) -> Vec<MemoryEntry>;
+    async fn stats(&self) -> MemoryStats;
 }
 
 /// Object-safe, cloneable project-aware Memory opener seam.

@@ -51,14 +51,15 @@ fn identity() -> ReflectionExecutionIdentity {
     }
 }
 
-#[test]
-fn build_prompt_reads_memory_and_owned_message_snapshot() {
+#[tokio::test]
+async fn build_prompt_reads_memory_and_owned_message_snapshot() {
     let prompt = ReflectionWorkflow::build_prompt(
         &[share::message::Message::user("remember the boundary")],
         "en",
         &NoOpMemory,
         100,
-    );
+    )
+    .await;
 
     assert!(prompt.contains("remember the boundary"));
     assert!(prompt.contains("Current project memory"));
@@ -124,7 +125,8 @@ async fn build_prompt_excludes_entries_that_injection_would_reject() {
         "en",
         &memory,
         now + 20,
-    );
+    )
+    .await;
 
     assert!(
         prompt.contains("deploy target"),
@@ -219,8 +221,8 @@ async fn runtime_failure_is_materialized_by_memory_history_workflow() {
 
 /// 消息摘要字符预算（#1827）：超预算时最早消息被截出 prompt（取最近部分），
 /// NEVER 无界进入 prompt——PreCompact 被丢弃段与 Manual 回退全量的防爆闸。
-#[test]
-fn build_prompt_truncates_messages_beyond_budget() {
+#[tokio::test]
+async fn build_prompt_truncates_messages_beyond_budget() {
     let memory = crate::noop::NoOpMemory;
 
     let mut messages = Vec::new();
@@ -230,7 +232,7 @@ fn build_prompt_truncates_messages_beyond_budget() {
         )));
     }
 
-    let prompt = ReflectionWorkflow::build_prompt(&messages, "en", &memory, 1);
+    let prompt = ReflectionWorkflow::build_prompt(&messages, "en", &memory, 1).await;
     assert!(
         !prompt.contains("marker-0000"),
         "超预算时最早消息必须被截出 prompt"

@@ -136,9 +136,9 @@ fn small_policy() -> MemoryPolicy {
 async fn commit_error_keeps_old_committed_state() {
     let old = entry(MemoryLayer::Project, "old");
     let store = ScriptedStore::new(
-        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
         layer_script(
-            vec![Ok(committed(1, MemoryLayer::Project, vec![old.clone()]))],
+            vec![Ok(committed(1, MemoryLayer::Project, vec![old.clone()])); 2],
             vec![Err(storage(MemoryStorageErrorKind::Io))],
         ),
     );
@@ -150,36 +150,45 @@ async fn commit_error_keeps_old_committed_state() {
         .write(entry(MemoryLayer::Project, "candidate"))
         .await
         .is_err());
-    assert_eq!(service.list(None), vec![old]);
+    assert_eq!(service.list(None).await, vec![old]);
 }
 
 #[tokio::test]
 async fn recovery_pending_receipt_publishes_candidate() {
+    let candidate = entry(MemoryLayer::Project, "committed");
     let store = ScriptedStore::new(
-        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
         layer_script(
-            vec![Ok(empty_layer(1, MemoryLayer::Project))],
+            vec![
+                Ok(empty_layer(1, MemoryLayer::Project)),
+                Ok(committed(2, MemoryLayer::Project, vec![candidate.clone()])),
+            ],
             vec![Ok(receipt(2, MemoryCommitVisibility::RecoveryPending))],
         ),
     );
     let service = MemoryService::open(store, MemoryPolicy::default())
         .await
         .unwrap();
-    let candidate = entry(MemoryLayer::Project, "committed");
 
     service.write(candidate.clone()).await.unwrap();
-    assert_eq!(service.list(None), vec![candidate]);
+    assert_eq!(service.list(None).await, vec![candidate]);
 }
 
 #[tokio::test]
 async fn concurrent_write_reloads_and_recomputes_once() {
     let external = entry(MemoryLayer::Project, "external");
+    let local = entry(MemoryLayer::Project, "local");
     let store = ScriptedStore::new(
-        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
         layer_script(
             vec![
                 Ok(empty_layer(1, MemoryLayer::Project)),
                 Ok(committed(2, MemoryLayer::Project, vec![external.clone()])),
+                Ok(committed(
+                    3,
+                    MemoryLayer::Project,
+                    vec![external.clone(), local.clone()],
+                )),
             ],
             vec![
                 Err(storage(MemoryStorageErrorKind::ConcurrentWrite)),
@@ -191,23 +200,26 @@ async fn concurrent_write_reloads_and_recomputes_once() {
     let service = MemoryService::open(store, MemoryPolicy::default())
         .await
         .unwrap();
-    let local = entry(MemoryLayer::Project, "local");
 
     service.write(local.clone()).await.unwrap();
     // Only the project layer refreshed and recomputed exactly once; the
     // global layer was only loaded at open and never committed.
     assert_eq!(observer.calls(MemoryLayer::Project), (2, 2));
     assert_eq!(observer.calls(MemoryLayer::Global), (1, 0));
-    assert_eq!(service.list(None), vec![external, local]);
+    assert_eq!(service.list(None).await, vec![external, local]);
+    // open + write 的 CAS 重读 + list 现读；读路径不提交。
+    assert_eq!(observer.calls(MemoryLayer::Project), (3, 2));
+    assert_eq!(observer.calls(MemoryLayer::Global), (2, 0));
 }
 
 #[tokio::test]
 async fn second_concurrent_write_is_typed_and_not_retried_again() {
     let store = ScriptedStore::new(
-        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
         layer_script(
             vec![
                 Ok(empty_layer(1, MemoryLayer::Project)),
+                Ok(empty_layer(2, MemoryLayer::Project)),
                 Ok(empty_layer(2, MemoryLayer::Project)),
             ],
             vec![
@@ -227,7 +239,7 @@ async fn second_concurrent_write_is_typed_and_not_retried_again() {
         .unwrap_err();
     assert!(is_concurrent_write(&error));
     assert_eq!(observer.calls(MemoryLayer::Project), (2, 2));
-    assert!(service.list(None).is_empty());
+    assert!(service.list(None).await.is_empty());
 }
 
 #[tokio::test]
@@ -235,23 +247,26 @@ async fn write_commits_only_the_targeted_layer() {
     // A global write commits the global generation and never touches the
     // project generation; the empty project commit script would panic if
     // the service tried to commit it.
+    let global_fact = entry(MemoryLayer::Global, "global fact");
     let store = ScriptedStore::new(
         layer_script(
-            vec![Ok(empty_layer(1, MemoryLayer::Global))],
+            vec![
+                Ok(empty_layer(1, MemoryLayer::Global)),
+                Ok(committed(2, MemoryLayer::Global, vec![global_fact.clone()])),
+            ],
             vec![Ok(receipt(2, MemoryCommitVisibility::Visible))],
         ),
-        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Project))], vec![]),
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Project)); 2], vec![]),
     );
     let observer = store.clone();
     let service = MemoryService::open(store, MemoryPolicy::default())
         .await
         .unwrap();
-    let global_fact = entry(MemoryLayer::Global, "global fact");
 
     service.write(global_fact.clone()).await.unwrap();
     assert_eq!(observer.calls(MemoryLayer::Global), (1, 1));
     assert_eq!(observer.calls(MemoryLayer::Project), (1, 0));
-    assert_eq!(service.list(None), vec![global_fact]);
+    assert_eq!(service.list(None).await, vec![global_fact]);
 }
 
 #[tokio::test]
@@ -293,27 +308,36 @@ async fn compact_commits_each_layer_as_its_own_mutation() {
 
 #[tokio::test]
 async fn compact_layer_failure_returns_real_error_without_hiding_partial_commit() {
+    let g1 = entry(MemoryLayer::Global, "g1");
+    let g2 = entry(MemoryLayer::Global, "g2");
+    let p1 = entry(MemoryLayer::Project, "p1");
+    let p2 = entry(MemoryLayer::Project, "p2");
     let store = ScriptedStore::new(
         layer_script(
-            vec![Ok(committed(
-                1,
-                MemoryLayer::Global,
-                vec![
-                    entry(MemoryLayer::Global, "g1"),
-                    entry(MemoryLayer::Global, "g2"),
-                ],
-            ))],
+            vec![
+                Ok(committed(
+                    1,
+                    MemoryLayer::Global,
+                    vec![g1.clone(), g2.clone()],
+                )),
+                // stats() 现读磁盘：全局层已提交压缩代（一条 active + 一条 archive）。
+                Ok(CommittedMemoryDataset {
+                    dataset: MemoryDataset::new(MemoryLayer::Global, vec![g1], vec![g2]).unwrap(),
+                    revision: 2,
+                }),
+            ],
             vec![Ok(receipt(2, MemoryCommitVisibility::Visible))],
         ),
         layer_script(
-            vec![Ok(committed(
-                1,
-                MemoryLayer::Project,
-                vec![
-                    entry(MemoryLayer::Project, "p1"),
-                    entry(MemoryLayer::Project, "p2"),
-                ],
-            ))],
+            vec![
+                Ok(committed(
+                    1,
+                    MemoryLayer::Project,
+                    vec![p1.clone(), p2.clone()],
+                )),
+                // 项目层提交失败，磁盘保持原提交态。
+                Ok(committed(1, MemoryLayer::Project, vec![p1, p2])),
+            ],
             vec![Err(storage(MemoryStorageErrorKind::Io))],
         ),
     );
@@ -326,7 +350,7 @@ async fn compact_layer_failure_returns_real_error_without_hiding_partial_commit(
     assert_eq!(observer.calls(MemoryLayer::Project), (1, 1));
     // The global layer's compaction is published as its own observable
     // mutation; the failed project layer keeps its prior committed state.
-    let stats = service.stats();
+    let stats = service.stats().await;
     assert_eq!(stats.global_count, 1);
     assert_eq!(stats.global_archive_count, 1);
     assert_eq!(stats.project_count, 2);
@@ -336,17 +360,20 @@ async fn compact_layer_failure_returns_real_error_without_hiding_partial_commit(
 #[tokio::test]
 async fn explicit_search_ranks_non_contiguous_multi_term_matches() {
     let store = ScriptedStore::new(
-        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
         layer_script(
-            vec![Ok(committed(
-                1,
-                MemoryLayer::Project,
-                vec![
-                    entry(MemoryLayer::Project, "rust ownership memory safety"),
-                    entry(MemoryLayer::Project, "rust ownership"),
-                    entry(MemoryLayer::Project, "python memory safety"),
-                ],
-            ))],
+            vec![
+                Ok(committed(
+                    1,
+                    MemoryLayer::Project,
+                    vec![
+                        entry(MemoryLayer::Project, "rust ownership memory safety"),
+                        entry(MemoryLayer::Project, "rust ownership"),
+                        entry(MemoryLayer::Project, "python memory safety"),
+                    ],
+                ));
+                2
+            ],
             vec![],
         ),
     );
@@ -387,17 +414,20 @@ async fn explicit_search_ranks_non_contiguous_multi_term_matches() {
 #[tokio::test]
 async fn explicit_search_matches_chinese_subphrases_and_mixed_code_terms() {
     let store = ScriptedStore::new(
-        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 3], vec![]),
         layer_script(
-            vec![Ok(committed(
-                1,
-                MemoryLayer::Project,
-                vec![
-                    entry(MemoryLayer::Project, "用户偏好使用中文回复"),
-                    entry(MemoryLayer::Project, "MemoryPort 支持中文检索"),
-                    entry(MemoryLayer::Project, "用户偏好启用英文日志"),
-                ],
-            ))],
+            vec![
+                Ok(committed(
+                    1,
+                    MemoryLayer::Project,
+                    vec![
+                        entry(MemoryLayer::Project, "用户偏好使用中文回复"),
+                        entry(MemoryLayer::Project, "MemoryPort 支持中文检索"),
+                        entry(MemoryLayer::Project, "用户偏好启用英文日志"),
+                    ],
+                ));
+                3
+            ],
             vec![],
         ),
     );
@@ -446,9 +476,9 @@ async fn explicit_search_chinese_bigram_ranking_is_deterministic() {
     let mut second = entry(MemoryLayer::Project, "始终使用中文回答");
     second.id = second_id;
     let store = ScriptedStore::new(
-        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 3], vec![]),
         layer_script(
-            vec![Ok(committed(1, MemoryLayer::Project, vec![second, first]))],
+            vec![Ok(committed(1, MemoryLayer::Project, vec![second, first])); 3],
             vec![],
         ),
     );
@@ -494,9 +524,9 @@ async fn explicit_search_is_deterministic_and_empty_query_returns_no_hits() {
     let mut second = entry(MemoryLayer::Project, "stable lexical match");
     second.id = second_id;
     let store = ScriptedStore::new(
-        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 4], vec![]),
         layer_script(
-            vec![Ok(committed(1, MemoryLayer::Project, vec![second, first]))],
+            vec![Ok(committed(1, MemoryLayer::Project, vec![second, first])); 4],
             vec![],
         ),
     );
@@ -571,19 +601,18 @@ async fn explicit_search_filters_by_tag_category_and_layer() {
     .unwrap();
     let store = ScriptedStore::new(
         layer_script(
-            vec![Ok(committed(
-                1,
-                MemoryLayer::Global,
-                vec![filtered_by_layer],
-            ))],
+            vec![Ok(committed(1, MemoryLayer::Global, vec![filtered_by_layer],)); 2],
             vec![],
         ),
         layer_script(
-            vec![Ok(committed(
-                1,
-                MemoryLayer::Project,
-                vec![matching, filtered_by_category],
-            ))],
+            vec![
+                Ok(committed(
+                    1,
+                    MemoryLayer::Project,
+                    vec![matching, filtered_by_category],
+                ));
+                2
+            ],
             vec![],
         ),
     );
@@ -617,12 +646,15 @@ async fn explicit_search_includes_archive_status_without_mutation() {
     let dataset =
         MemoryDataset::new(MemoryLayer::Project, vec![active], vec![archived.clone()]).unwrap();
     let store = ScriptedStore::new(
-        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
         layer_script(
-            vec![Ok(CommittedMemoryDataset {
-                dataset,
-                revision: 1,
-            })],
+            vec![
+                Ok(CommittedMemoryDataset {
+                    dataset,
+                    revision: 1,
+                });
+                2
+            ],
             vec![],
         ),
     );
@@ -651,7 +683,8 @@ async fn explicit_search_includes_archive_status_without_mutation() {
     assert!(archived_hit.outdated);
     assert!(archived_hit.ttl_expired);
     assert_eq!(archived_hit.entry.id, archived.id);
-    assert_eq!(observer.calls(MemoryLayer::Project), (1, 0));
+    // open 1 次 + search 现读 1 次；搜索不提交。
+    assert_eq!(observer.calls(MemoryLayer::Project), (2, 0));
 }
 
 fn reflection_output(layer: MemoryLayer, content: &str) -> ReflectionOutput {
@@ -672,9 +705,9 @@ fn reflection_output(layer: MemoryLayer, content: &str) -> ReflectionOutput {
 #[tokio::test]
 async fn reflection_commit_failure_propagates_and_keeps_committed_state() {
     let store = ScriptedStore::new(
-        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
         layer_script(
-            vec![Ok(empty_layer(1, MemoryLayer::Project))],
+            vec![Ok(empty_layer(1, MemoryLayer::Project)); 2],
             vec![Err(storage(MemoryStorageErrorKind::Io))],
         ),
     );
@@ -688,18 +721,37 @@ async fn reflection_commit_failure_propagates_and_keeps_committed_state() {
         .unwrap_err();
 
     assert_eq!(error, storage(MemoryStorageErrorKind::Io));
-    assert!(service.list(None).is_empty());
+    assert!(service.list(None).await.is_empty());
 }
 
 #[tokio::test]
 async fn reflection_recomputes_once_after_cas_conflict() {
     let external = entry(MemoryLayer::Project, "external fact");
+    // list() 现读磁盘：CAS 冲突后的提交代 = external + 本次反思新增条目。
+    let reflected = {
+        let mut entry = MemoryEntry::new(
+            reflection_memory_id(4242).unwrap(),
+            4242,
+            MemoryLayer::Project,
+            MemoryCategory::Fact,
+            "new reflection",
+            MemorySource::Llm,
+        )
+        .unwrap();
+        entry.tags = vec!["reflected".to_string()];
+        entry
+    };
     let store = ScriptedStore::new(
-        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
         layer_script(
             vec![
                 Ok(empty_layer(1, MemoryLayer::Project)),
                 Ok(committed(2, MemoryLayer::Project, vec![external.clone()])),
+                Ok(committed(
+                    3,
+                    MemoryLayer::Project,
+                    vec![external.clone(), reflected],
+                )),
             ],
             vec![
                 Err(storage(MemoryStorageErrorKind::ConcurrentWrite)),
@@ -719,19 +771,21 @@ async fn reflection_recomputes_once_after_cas_conflict() {
 
     assert_eq!(result.suggestions_added, 1);
     assert_eq!(observer.calls(MemoryLayer::Project), (2, 2));
-    let entries = service.list(Some(MemoryLayer::Project));
+    let entries = service.list(Some(MemoryLayer::Project)).await;
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[1].created_at, 4242);
     assert_eq!(entries[1].id.as_uuid().get_version_num(), 7);
 }
 
 #[tokio::test]
-async fn queries_never_call_store() {
+async fn queries_read_latest_from_store_per_call() {
+    // #1886 新契约：每个读方法每次调用都现读磁盘（open 后外部提交立即可见），
+    // 但查询永不提交（commits 恒 0）。
     let initial = entry(MemoryLayer::Project, "searchable");
     let store = ScriptedStore::new(
-        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 5], vec![]),
         layer_script(
-            vec![Ok(committed(1, MemoryLayer::Project, vec![initial]))],
+            vec![Ok(committed(1, MemoryLayer::Project, vec![initial])); 5],
             vec![],
         ),
     );
@@ -740,12 +794,14 @@ async fn queries_never_call_store() {
         .await
         .unwrap();
 
-    service.retrieve_for_inject(&MemoryQuery {
-        limit: 10,
-        layer: None,
-        category: None,
-        now: 10,
-    });
+    service
+        .retrieve_for_inject(&MemoryQuery {
+            limit: 10,
+            layer: None,
+            category: None,
+            now: 10,
+        })
+        .await;
     service
         .search(&MemorySearchQuery {
             text: "searchable".to_string(),
@@ -756,10 +812,11 @@ async fn queries_never_call_store() {
             now: 10,
         })
         .await;
-    service.list(None);
-    service.stats();
-    assert_eq!(observer.calls(MemoryLayer::Global), (1, 0));
-    assert_eq!(observer.calls(MemoryLayer::Project), (1, 0));
+    service.list(None).await;
+    service.stats().await;
+    // open 1 次 + 四读各 1 次；零提交。
+    assert_eq!(observer.calls(MemoryLayer::Global), (5, 0));
+    assert_eq!(observer.calls(MemoryLayer::Project), (5, 0));
 }
 
 // -----------------------------------------------------------------
@@ -943,9 +1000,9 @@ fn rerank_service(
     scorer: Option<std::sync::Arc<dyn systemone::ScoringPort>>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = MemoryService<ScriptedStore>> + Send>> {
     let store = ScriptedStore::new(
-        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
         layer_script(
-            vec![Ok(committed(1, MemoryLayer::Project, entries))],
+            vec![Ok(committed(1, MemoryLayer::Project, entries)); 2],
             vec![],
         ),
     );
@@ -1059,4 +1116,145 @@ async fn search_recall_expansion_lets_rerank_promote_beyond_limit() {
         scored_result.hits[0].entry.id, plain_result.hits[0].entry.id,
         "重排应改变 top1"
     );
+}
+
+// ── #1886：读路径必须现读磁盘，外部（跨进程）提交后立即可见 ──────────────
+
+#[tokio::test]
+async fn read_methods_reflect_dataset_committed_after_open() {
+    // open 时两层为空；之后外部进程提交了一条 project 记忆。
+    // 四个读方法各自现读磁盘，都必须看到该记录。
+    let external = entry(MemoryLayer::Project, "external fact");
+    let project_load = || Ok(committed(2, MemoryLayer::Project, vec![external.clone()]));
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 5], vec![]),
+        layer_script(vec![project_load(); 5], vec![]),
+    );
+    let observer = store.clone();
+    let service = MemoryService::open(store, MemoryPolicy::default())
+        .await
+        .unwrap();
+
+    let searched = service
+        .search(&MemorySearchQuery {
+            text: "external".to_string(),
+            limit: 10,
+            layer: None,
+            category: None,
+            include_archive: false,
+            now: 100,
+        })
+        .await;
+    assert_eq!(
+        searched
+            .hits
+            .iter()
+            .map(|hit| hit.entry.content.clone())
+            .collect::<Vec<_>>(),
+        vec!["external fact".to_string()],
+        "search 必须看到 open 后外部提交的记录"
+    );
+
+    let listed = service.list(None).await;
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].content, "external fact");
+
+    let stats = service.stats().await;
+    assert_eq!(stats.project_count, 1);
+    assert_eq!(stats.global_count, 0);
+
+    let injected = service
+        .retrieve_for_inject(&MemoryQuery {
+            limit: 10,
+            layer: None,
+            category: None,
+            now: 100,
+        })
+        .await;
+    assert!(injected
+        .hits
+        .iter()
+        .any(|hit| hit.entry.content == "external fact"));
+
+    // open 1 次 + 四读各 1 次。
+    assert_eq!(observer.calls(MemoryLayer::Project), (5, 0));
+    assert_eq!(observer.calls(MemoryLayer::Global), (5, 0));
+}
+
+#[tokio::test]
+async fn read_hits_concurrent_write_and_reloads_once() {
+    // 读路径撞 ConcurrentWrite（读 manifest 与成员之间被外部提交换代）
+    // 时必须立即重读一次；第二次落在稳定代上并返回新数据。
+    let external = entry(MemoryLayer::Project, "external fact");
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
+        layer_script(
+            vec![
+                Ok(empty_layer(1, MemoryLayer::Project)),
+                Err(storage(MemoryStorageErrorKind::ConcurrentWrite)),
+                Ok(committed(2, MemoryLayer::Project, vec![external.clone()])),
+            ],
+            vec![],
+        ),
+    );
+    let observer = store.clone();
+    let service = MemoryService::open(store, MemoryPolicy::default())
+        .await
+        .unwrap();
+
+    let searched = service
+        .search(&MemorySearchQuery {
+            text: "external".to_string(),
+            limit: 10,
+            layer: None,
+            category: None,
+            include_archive: false,
+            now: 100,
+        })
+        .await;
+    assert!(searched
+        .hits
+        .iter()
+        .any(|hit| hit.entry.content == "external fact"));
+    // open 1 + 失败 1 + 重读 1。
+    assert_eq!(observer.calls(MemoryLayer::Project), (3, 0));
+}
+
+#[tokio::test]
+async fn read_falls_back_to_snapshot_when_store_keeps_failing() {
+    // 读路径两次（初读 + 重读）都失败时回退内存快照，绝不向上抛错。
+    let old = entry(MemoryLayer::Project, "old fact");
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 5], vec![]),
+        layer_script(
+            vec![
+                Ok(committed(1, MemoryLayer::Project, vec![old.clone()])),
+                Err(storage(MemoryStorageErrorKind::Io)),
+                Err(storage(MemoryStorageErrorKind::Io)),
+                Err(storage(MemoryStorageErrorKind::Io)),
+                Err(storage(MemoryStorageErrorKind::Io)),
+            ],
+            vec![],
+        ),
+    );
+    let service = MemoryService::open(store, MemoryPolicy::default())
+        .await
+        .unwrap();
+
+    let searched = service
+        .search(&MemorySearchQuery {
+            text: "old".to_string(),
+            limit: 10,
+            layer: None,
+            category: None,
+            include_archive: false,
+            now: 100,
+        })
+        .await;
+    assert!(searched
+        .hits
+        .iter()
+        .any(|hit| hit.entry.content == "old fact"));
+    let listed = service.list(None).await;
+    assert_eq!(listed.len(), 1);
 }

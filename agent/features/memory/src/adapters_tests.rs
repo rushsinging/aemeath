@@ -160,7 +160,7 @@ async fn opener_reads_legacy_storage_manifest_without_member_evidence() {
     .await
     .expect("legacy storage manifest should open");
     assert_eq!(
-        opened.list(Some(MemoryLayer::Project)),
+        opened.list(Some(MemoryLayer::Project)).await,
         vec![expected_entry]
     );
 
@@ -339,7 +339,7 @@ async fn opener_migrates_legacy_active_only_and_reopens_new_dataset() {
         .await
         .unwrap();
     assert_eq!(
-        service.list(Some(MemoryLayer::Project)),
+        service.list(Some(MemoryLayer::Project)).await,
         vec![legacy_entry.clone()]
     );
     drop(service);
@@ -355,7 +355,7 @@ async fn opener_migrates_legacy_active_only_and_reopens_new_dataset() {
     .await
     .unwrap();
     assert_eq!(
-        reopened.list(Some(MemoryLayer::Project)),
+        reopened.list(Some(MemoryLayer::Project)).await,
         vec![legacy_entry]
     );
     std::fs::remove_dir_all(root).unwrap();

@@ -254,12 +254,15 @@ async fn update_restore(id: &Id, port: &dyn MemoryPort) -> TypedToolResult<Memor
     }
 }
 
-pub(super) fn list_memory(input: Value, port: &dyn MemoryPort) -> TypedToolResult<MemoryResult> {
+pub(super) async fn list_memory(
+    input: Value,
+    port: &dyn MemoryPort,
+) -> TypedToolResult<MemoryResult> {
     let layer = match optional_layer(&input) {
         Ok(layer) => layer,
         Err(error) => return TypedToolResult::error(error),
     };
-    let entries = port.list(layer);
+    let entries = port.list(layer).await;
     let message = render_memory_entries(&entries, current_timestamp_secs());
     TypedToolResult::success(
         message,

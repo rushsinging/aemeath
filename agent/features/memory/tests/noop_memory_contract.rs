@@ -4,12 +4,14 @@ use memory::api::{reflection::*, search::*};
 #[tokio::test]
 async fn noop_memory_is_explicitly_disabled_and_has_no_mutation_effects() {
     let port = NoOpMemory;
-    let inject = port.retrieve_for_inject(&MemoryQuery {
-        limit: 10,
-        layer: None,
-        category: None,
-        now: 100,
-    });
+    let inject = port
+        .retrieve_for_inject(&MemoryQuery {
+            limit: 10,
+            layer: None,
+            category: None,
+            now: 100,
+        })
+        .await;
     assert_eq!(inject.mode, MemoryRetrievalMode::Disabled);
     assert!(inject.hits.is_empty());
 
@@ -55,6 +57,6 @@ async fn noop_memory_is_explicitly_disabled_and_has_no_mutation_effects() {
             remaining: 0,
         }
     );
-    assert!(port.list(None).is_empty());
-    assert_eq!(port.stats(), MemoryStats::default());
+    assert!(port.list(None).await.is_empty());
+    assert_eq!(port.stats().await, MemoryStats::default());
 }

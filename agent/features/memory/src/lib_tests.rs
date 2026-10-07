@@ -32,7 +32,7 @@ async fn wire_memory_opener_returns_object_safe_cloneable_opener() {
         .open_memory(&project_key(), &share::config::MemoryConfig::default())
         .await
         .unwrap();
-    assert_eq!(port.stats().project_count, 0);
+    assert_eq!(port.stats().await.project_count, 0);
 
     // `Box<dyn MemoryOpener>: Clone` 经 `boxed_clone` 生效。
     let cloned = opener.clone();
@@ -40,7 +40,7 @@ async fn wire_memory_opener_returns_object_safe_cloneable_opener() {
         .open_memory(&project_key(), &share::config::MemoryConfig::default())
         .await
         .unwrap();
-    assert_eq!(port2.stats().project_count, 0);
+    assert_eq!(port2.stats().await.project_count, 0);
 
     std::fs::remove_dir_all(root).unwrap();
 }

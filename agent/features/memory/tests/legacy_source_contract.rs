@@ -374,11 +374,11 @@ async fn opener_migrates_legacy_global_and_project() {
         .unwrap();
 
     // Migration should have brought the legacy entries into the new dataset.
-    let global = port.list(Some(MemoryLayer::Global));
+    let global = port.list(Some(MemoryLayer::Global)).await;
     assert_eq!(global.len(), 1);
     assert_eq!(global[0].content, "legacy global fact");
 
-    let project_entries = port.list(Some(MemoryLayer::Project));
+    let project_entries = port.list(Some(MemoryLayer::Project)).await;
     assert_eq!(project_entries.len(), 1);
     assert_eq!(project_entries[0].content, "legacy project fact");
 

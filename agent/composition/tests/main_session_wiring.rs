@@ -226,7 +226,7 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
         "write should add the entry, got {write_result:?}"
     );
 
-    let entries = memory.list(Some(memory::api::MemoryLayer::Project));
+    let entries = memory.list(Some(memory::api::MemoryLayer::Project)).await;
     assert!(
         entries
             .iter()
