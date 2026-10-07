@@ -346,19 +346,20 @@ define_id_type!(
     "Published identity for one Runtime-owned interaction request (UUIDv7)."
 );
 
-/// 生成前缀形态 typed id：`<prefix>_<uuidv7 无连字符 hex>`。
+/// 生成前缀形态 typed id：`<prefix>_<11 字符 base62 雪花>`。
 ///
-/// uuidv7 高位是毫秒时间戳，同前缀下**字典序 = 时间序**。
-/// 前缀词汇表逐步接入（先 `task`，其余 id 渐进迁移）。
+/// 64 bit 雪花（41 时间 + 10 进程随机 + 12 序列）经有序 base62 定长
+/// 编码——同前缀下**字典序 = 时间序**。前缀词汇表逐步接入（先 `task`，
+/// 其余 id 渐进迁移）。
 pub fn new_typed_id(prefix: &str) -> String {
     format!(
         "{prefix}{}{}",
         crate::constants::TYPED_ID_SEPARATOR,
-        Uuid::now_v7().simple()
+        encode_base62_fixed(generate_snowflake())
     )
 }
 
-/// 校验前缀形态 typed id：`<prefix>_<32 位 hex>`（全锚定形状）。
+/// 校验前缀形态 typed id：`<prefix>_<11 位 base62>`（全锚定形状）。
 pub fn is_typed_id(value: &str, prefix: &str) -> bool {
     let Some(rest) = value.strip_prefix(prefix) else {
         return false;
@@ -366,7 +367,94 @@ pub fn is_typed_id(value: &str, prefix: &str) -> bool {
     let Some(suffix) = rest.strip_prefix(crate::constants::TYPED_ID_SEPARATOR) else {
         return false;
     };
-    suffix.len() == 32 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+    suffix.len() == 11
+        && suffix.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        && decode_base62(suffix).is_some()
+}
+
+// ── 雪花 id（#1884）：41 时间 + 10 进程随机 + 12 序列 ────────────────
+
+/// 生成 64 bit 雪花 id（线程安全；时钟回拨时借用上次毫秒继续序列）。
+///
+/// 生成状态（函数内 static，使用点内聚）：
+/// - `process_id`：进程随机 10 bit（防多 CLI 实例跨进程碰撞）；
+/// - `state`：高 52 bit 上次毫秒（epoch 相对）+ 低 12 bit 序列，CAS 推进。
+pub fn generate_snowflake() -> u64 {
+    static SNOWFLAKE_PROCESS_ID: std::sync::OnceLock<u16> = std::sync::OnceLock::new();
+    static SNOWFLAKE_STATE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    let process_id = *SNOWFLAKE_PROCESS_ID.get_or_init(|| {
+        // 进程随机 10 bit（uuid 高位熵源足够）。
+        (Uuid::now_v7().as_u64_pair().0 & 0x3FF) as u16
+    });
+    loop {
+        let state = SNOWFLAKE_STATE.load(std::sync::atomic::Ordering::Relaxed);
+        let (last_ms, seq) = (state >> 12, state & 0xFFF);
+        let now_ms = current_millis_since_epoch();
+        let (ms, next_seq) = if now_ms > last_ms {
+            (now_ms, 0)
+        } else {
+            // 同毫秒或时钟回拨：沿用上次毫秒，序列递增。
+            (last_ms, seq + 1)
+        };
+        if next_seq > 0xFFF {
+            // 序列耗尽：等待下一毫秒（不阻塞.spin_yield 让出）。
+            std::thread::yield_now();
+            continue;
+        }
+        let next_state = (ms << 12) | next_seq;
+        if SNOWFLAKE_STATE
+            .compare_exchange(
+                state,
+                next_state,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Relaxed,
+            )
+            .is_ok()
+        {
+            return ((ms - crate::constants::SNOWFLAKE_EPOCH_MS) << 22)
+                | ((process_id as u64) << 12)
+                | next_seq;
+        }
+    }
+}
+
+/// 当前 unix 毫秒（经 uuid v7 时间戳提取——share minimal-kernel 禁
+/// 直连 `SystemTime::now`，uuid crate 的时间源是既有内核依赖）。
+fn current_millis_since_epoch() -> u64 {
+    // uuid v7 布局：前 48 bit（大端）= unix 毫秒时间戳；
+    // `as_u64_pair().0` 是前 8 字节 → 时间戳 = 高 48 bit = `>> 16`。
+    Uuid::now_v7().as_u64_pair().0 >> 16
+}
+
+/// 64 bit → base62 定长 11 字符（前导补零；有序 alphabet）。
+pub fn encode_base62_fixed(value: u64) -> String {
+    let alphabet = crate::constants::BASE62_CHARS;
+    let mut digits = [0u8; 11];
+    let mut rest = value;
+    for slot in digits.iter_mut().rev() {
+        *slot = alphabet[(rest % 62) as usize];
+        rest /= 62;
+    }
+    String::from_utf8(digits.to_vec()).expect("base62 字符表必然是合法 UTF-8")
+}
+
+/// base62 字符串 → 64 bit（非法字符返回 None）。
+pub fn decode_base62(value: &str) -> Option<u64> {
+    if value.is_empty() || value.len() > 11 {
+        return None;
+    }
+    let mut result: u64 = 0;
+    for byte in value.bytes() {
+        let digit = match byte {
+            b'0'..=b'9' => byte - b'0',
+            b'A'..=b'Z' => byte - b'A' + 10,
+            b'a'..=b'z' => byte - b'a' + 36,
+            _ => return None,
+        } as u64;
+        result = result.checked_mul(62)?.checked_add(digit)?;
+    }
+    Some(result)
 }
 
 /// Runtime-owned 后台任务记录标识（前缀 typed id，`task_<uuidv7hex>`）。

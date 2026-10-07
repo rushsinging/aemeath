@@ -3,9 +3,9 @@
 use crate::domain::background_task_port::BackgroundTaskAccessSource;
 use crate::domain::types::background_tasks::{
     BackgroundTaskDetailData, BackgroundTaskListInput, BackgroundTaskListResult,
-    BackgroundTaskLogData, BackgroundTaskLogsInput, BackgroundTaskLogsResult,
-    BackgroundTaskStatusInput, BackgroundTaskStatusResult, BackgroundTaskStopData,
-    BackgroundTaskStopInput, BackgroundTaskStopResult, BackgroundTaskSummaryData,
+    BackgroundTaskLogsInput, BackgroundTaskLogsResult, BackgroundTaskStatusInput,
+    BackgroundTaskStatusResult, BackgroundTaskStopInput, BackgroundTaskStopResult,
+    BackgroundTaskSummaryData,
 };
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;

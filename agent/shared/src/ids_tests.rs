@@ -189,16 +189,14 @@ fn test_input_id_serde_roundtrip_preserves_uuid() {
 // ── 前缀 typed id（wanaka 方向，#252 先接入 BackgroundTaskId） ────────
 
 #[test]
-fn typed_id_generates_prefix_separator_and_hex_suffix() {
+fn typed_id_generates_prefix_separator_and_base62_snowflake() {
     let value = crate::ids::new_typed_id("task");
     assert!(value.starts_with("task_"), "前缀+下划线：{value}");
     let suffix = &value["task_".len()..];
-    assert_eq!(suffix.len(), 32, "uuidv7 无连字符 hex：{value}");
+    assert_eq!(suffix.len(), 11, "64bit 雪花 base62 定长 11 字符：{value}");
     assert!(
-        suffix
-            .chars()
-            .all(|character| character.is_ascii_hexdigit()),
-        "后缀为 hex：{value}"
+        suffix.bytes().all(|byte| byte.is_ascii_alphanumeric()),
+        "后缀为 base62：{value}"
     );
     assert!(
         crate::ids::is_typed_id(&value, "task"),
@@ -244,4 +242,40 @@ fn background_task_id_is_prefixed_form_with_typed_parse() {
     assert!(BackgroundTaskId::parse("run_018f3a2b0d0000000000000000000000").is_err());
     assert!(BackgroundTaskId::parse("task-not-a-suffix").is_err());
     assert!(BackgroundTaskId::parse("").is_err());
+}
+
+// ── #1884：雪花生成与 base62 编解码 ─────────────────────────────────
+
+#[test]
+fn snowflake_ids_are_unique_under_concurrent_generation() {
+    let generated: Vec<u64> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                scope.spawn(|| {
+                    (0..1000)
+                        .map(|_| crate::ids::generate_snowflake())
+                        .collect::<Vec<u64>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap())
+            .collect()
+    });
+    let mut unique = generated.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(unique.len(), generated.len(), "并发生成不得重复");
+}
+
+#[test]
+fn base62_round_trips_sixty_four_bit_values() {
+    for value in [0u64, 1, 61, 62, 4095, u32::MAX as u64, u64::MAX] {
+        let encoded = crate::ids::encode_base62_fixed(value);
+        assert_eq!(encoded.len(), 11, "定长 11：{encoded}");
+        assert_eq!(crate::ids::decode_base62(&encoded), Some(value));
+    }
+    // 有序 alphabet + 定长 → 字典序 = 数值序。
+    assert!(crate::ids::encode_base62_fixed(12345) < crate::ids::encode_base62_fixed(54321));
 }
