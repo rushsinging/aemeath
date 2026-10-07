@@ -6,10 +6,12 @@ use share::message::{ContentBlock, Message, Role};
 
 impl OpenAICompatibleProvider {
     /// 将 Anthropic 风格的 system 块转换为 OpenAI 风格的 system 消息
-    pub(crate) fn convert_system_to_message(system: &[SystemBlockData]) -> serde_json::Value {
+    pub(crate) fn convert_system_to_message(
+        system: &[crate::RequestSystemBlockData],
+    ) -> serde_json::Value {
         let system_text: String = system
             .iter()
-            .map(|block| block.text.as_str())
+            .map(|block| block.text())
             .collect::<Vec<_>>()
             .join("\n\n");
 
@@ -25,7 +27,7 @@ impl OpenAICompatibleProvider {
     /// emitted on assistant messages that lack thinking blocks—needed for
     /// DeepSeek compatibility when thinking mode is active.
     pub(crate) fn convert_messages(
-        system: &[SystemBlockData],
+        system: &[crate::RequestSystemBlockData],
         messages: &[Message],
         reasoning_enabled: bool,
     ) -> Result<Vec<serde_json::Value>, crate::LlmError> {

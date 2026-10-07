@@ -109,7 +109,13 @@ fn build_provider_and_scope(
     spec: crate::domain::driver_acl::DriverSpec,
     options: LlmConfigOptionsData,
     http: reqwest::Client,
-) -> Result<(Arc<dyn LlmProvider>, crate::InvocationScopeData), crate::ProviderError> {
+) -> Result<
+    (
+        Arc<dyn LlmProvider>,
+        crate::domain::invoke::InvocationScopeData,
+    ),
+    crate::ProviderError,
+> {
     use crate::domain::driver_acl::{ApiStyle, ProtocolFamily};
 
     let driver = spec.kind();
@@ -155,7 +161,7 @@ fn build_provider_and_scope(
         }
     };
     let effective_reasoning = requested_reasoning.clamped_to(provider_impl.max_reasoning_level());
-    let default_scope = crate::InvocationScopeData::new(
+    let default_scope = crate::domain::invoke::InvocationScopeData::new(
         model,
         if options.max_tokens == 0 {
             share::config::models::DEFAULT_MAX_TOKENS
@@ -294,14 +300,14 @@ pub struct LlmConfigOptionsData {
 
 pub struct LlmClient {
     provider: Arc<dyn LlmProvider>,
-    default_scope: crate::InvocationScopeData,
+    default_scope: crate::domain::invoke::InvocationScopeData,
     /// 底层共享 transport 的诊断 id；`None` 表示独占（非 pool）HTTP client。
     transport_id: Option<u64>,
 }
 
 impl LlmClient {
     pub fn from_provider(provider: Arc<dyn LlmProvider>) -> Self {
-        let default_scope = crate::InvocationScopeData::new(
+        let default_scope = crate::domain::invoke::InvocationScopeData::new(
             provider.model_name(),
             share::config::models::DEFAULT_MAX_TOKENS,
             crate::domain::capability::ReasoningLevel::Off,
@@ -351,17 +357,17 @@ impl LlmClient {
         })
     }
 
-    pub async fn invocation_stream(
+    /// 直调 driver 流（probe 与集成测试用；invoke 是生产唯一入口）。
+    pub(crate) async fn invocation_stream(
         &self,
-        scope: &crate::InvocationScopeData,
-        system: &[SystemBlockData],
+        resolved: &crate::ports::ResolvedInvocation,
+        system: &[crate::RequestSystemBlockData],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
     ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
-        self.log_request(system, messages, tool_schemas);
         self.provider
-            .invocation_stream(scope, system, messages, tool_schemas, cancel)
+            .invocation_stream(resolved, system, messages, tool_schemas, cancel)
             .await
     }
 
@@ -381,33 +387,15 @@ impl LlmClient {
             return Err(ProviderError::cancelled());
         }
 
-        // clamp：请求 reasoning 不超过声明能力；scope 用 provider 中性的 model 名。
+        // clamp：请求 reasoning 不超过声明能力（resolve 属 client 编排职责）。
         let requested_reasoning = request.reasoning;
         let effective_reasoning = capability.reasoning.resolve(requested_reasoning);
-        let scope = crate::InvocationScopeData::new(
+        let resolved = crate::ports::ResolvedInvocation::new(
             request.model.model.clone(),
             request.max_output_tokens,
             requested_reasoning,
             effective_reasoning,
-        )
-        .map_err(|error| {
-            ProviderError::fatal(
-                ProviderErrorKind::Configuration,
-                format!("invalid scope: {error}"),
-            )
-        })?;
-
-        // provider 中性 system blocks → legacy 驱动块（Cacheable→cached，Text→dynamic）。
-        let system: Vec<SystemBlockData> = request
-            .system
-            .iter()
-            .map(|block| match block {
-                crate::RequestSystemBlockData::Text(text) => SystemBlockData::dynamic(text.clone()),
-                crate::RequestSystemBlockData::Cacheable(text) => {
-                    SystemBlockData::cached(text.clone())
-                }
-            })
-            .collect();
+        )?;
 
         // request.tools 已是 wire-ready tool 定义（context::ToolSchemaData 投影产物）。
         let tool_schemas = request.tools.clone();
@@ -415,8 +403,8 @@ impl LlmClient {
         // request 携带的 token 与调用方信号竞速 establishment。
         let cancel_token = request.cancellation.clone();
         let establishment = Box::pin(self.invocation_stream(
-            &scope,
-            &system,
+            &resolved,
+            request.system.as_slice(),
             &request.messages,
             &tool_schemas,
             &cancel_token,
@@ -496,7 +484,7 @@ impl LlmClient {
         mut self,
         requested_reasoning: crate::domain::capability::ReasoningLevel,
     ) -> Result<Self, crate::ProviderError> {
-        self.default_scope = crate::InvocationScopeData::new(
+        self.default_scope = crate::domain::invoke::InvocationScopeData::new(
             self.default_scope.model(),
             self.default_scope.max_tokens(),
             requested_reasoning,
@@ -505,7 +493,7 @@ impl LlmClient {
         Ok(self)
     }
 
-    pub fn default_scope(&self) -> &crate::InvocationScopeData {
+    pub fn default_scope(&self) -> &crate::domain::invoke::InvocationScopeData {
         &self.default_scope
     }
 
@@ -520,8 +508,8 @@ impl LlmClient {
         model: impl Into<String>,
         max_tokens: Option<u32>,
         requested_reasoning: crate::domain::capability::ReasoningLevel,
-    ) -> Result<crate::InvocationScopeData, crate::ProviderError> {
-        crate::InvocationScopeData::new(
+    ) -> Result<crate::domain::invoke::InvocationScopeData, crate::ProviderError> {
+        crate::domain::invoke::InvocationScopeData::new(
             model,
             max_tokens.unwrap_or_else(|| self.default_scope.max_tokens()),
             requested_reasoning,

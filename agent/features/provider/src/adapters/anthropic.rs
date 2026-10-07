@@ -123,8 +123,8 @@ impl AnthropicProvider {
 
     pub(crate) async fn invoke_stream(
         &self,
-        scope: &crate::InvocationScopeData,
-        system: &[SystemBlockData],
+        resolved: &crate::ports::ResolvedInvocation,
+        system: &[crate::RequestSystemBlockData],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
@@ -143,15 +143,18 @@ impl AnthropicProvider {
                 );
             }
         }
-        let effort = match scope.effective_reasoning() {
+        let effort = match resolved.effective_reasoning {
             crate::domain::capability::ReasoningLevel::Off => None,
             level => Some(level.as_str().to_string()),
         };
         let request = CreateMessageRequest::new(
-            scope.model().to_string(),
-            scope.max_tokens(),
+            resolved.model.clone(),
+            resolved.max_tokens,
             effort,
-            system.to_vec(),
+            system
+                .iter()
+                .map(|block| SystemBlockData::from_request_block(block))
+                .collect(),
             api_messages,
             cached_tools,
             true,
@@ -165,7 +168,7 @@ impl AnthropicProvider {
             driver: "anthropic",
             api: "messages_stream",
             provider: "anthropic",
-            model: scope.model(),
+            model: &resolved.model,
             method: "POST",
             endpoint: &endpoint,
             attempt: 1,
@@ -193,7 +196,7 @@ impl AnthropicProvider {
         .response;
         Ok(parse_invocation_stream(
             response,
-            scope.effective_reasoning(),
+            resolved.effective_reasoning,
             cancel.child_token(),
         ))
     }
@@ -213,13 +216,13 @@ fn provider_error_from_attempt(failure: HttpAttemptFailure) -> crate::ProviderEr
 impl LlmProvider for AnthropicProvider {
     async fn invocation_stream(
         &self,
-        scope: &crate::InvocationScopeData,
-        system: &[SystemBlockData],
+        resolved: &crate::ports::ResolvedInvocation,
+        system: &[crate::RequestSystemBlockData],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
     ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
-        self.invoke_stream(scope, system, messages, tool_schemas, cancel)
+        self.invoke_stream(resolved, system, messages, tool_schemas, cancel)
             .await
     }
 

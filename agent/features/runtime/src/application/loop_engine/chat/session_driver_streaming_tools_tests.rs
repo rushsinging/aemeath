@@ -56,8 +56,8 @@ struct StepCancelledStreamingToolProvider {
 impl LlmProvider for StepCancelledStreamingToolProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
@@ -324,8 +324,8 @@ impl StreamingToolRetryProvider {
 impl LlmProvider for StreamingToolRetryProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,
@@ -490,8 +490,8 @@ impl StreamingToolRetryOrphanProvider {
 impl LlmProvider for StreamingToolRetryOrphanProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,

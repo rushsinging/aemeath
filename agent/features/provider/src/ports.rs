@@ -1,21 +1,65 @@
-//! LLM Provider trait and common types
+//! LLM Provider driver trait（crate 内部分派接口）与调用解析参数。
 
 use async_trait::async_trait;
 use share::message::Message;
 pub(crate) use share::reasoning::ReasoningLevel;
 use tokio_util::sync::CancellationToken;
 
-use crate::adapters::wire::SystemBlockData;
-use crate::domain::invoke::InvocationScopeData;
+use crate::RequestSystemBlockData;
 
-/// LLM Provider trait - all providers must implement this
+/// driver 调用的解析参数（client.invoke 经能力 resolve 后的执行细节，
+/// crate 私有——PL 只见 request/response）。
+#[derive(Debug, Clone)]
+pub struct ResolvedInvocation {
+    /// provider 中性模型名。
+    pub model: String,
+    pub max_tokens: u32,
+    pub requested_reasoning: ReasoningLevel,
+    pub effective_reasoning: ReasoningLevel,
+}
+
+impl ResolvedInvocation {
+    pub fn new(
+        model: impl Into<String>,
+        max_tokens: u32,
+        requested_reasoning: ReasoningLevel,
+        effective_reasoning: ReasoningLevel,
+    ) -> Result<Self, crate::ProviderError> {
+        let model = model.into();
+        let configuration = |message: &str| {
+            crate::ProviderError::fatal(crate::ProviderErrorKind::Configuration, message)
+        };
+        if model.trim().is_empty() {
+            return Err(configuration("invocation model must not be empty"));
+        }
+        if max_tokens == 0 {
+            return Err(configuration(
+                "invocation max_tokens must be greater than zero",
+            ));
+        }
+        if effective_reasoning > requested_reasoning {
+            return Err(configuration(
+                "effective reasoning must not exceed requested reasoning",
+            ));
+        }
+        Ok(Self {
+            model,
+            max_tokens,
+            requested_reasoning,
+            effective_reasoning,
+        })
+    }
+}
+
+/// LLM Provider driver trait - all providers must implement this.
+/// system 块为 provider 中性形态；driver 内部各自转换 wire 形态。
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
     /// 返回由 Runtime 主动 poll 的单请求事件流。
     async fn invocation_stream(
         &self,
-        scope: &InvocationScopeData,
-        system: &[SystemBlockData],
+        resolved: &ResolvedInvocation,
+        system: &[RequestSystemBlockData],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,

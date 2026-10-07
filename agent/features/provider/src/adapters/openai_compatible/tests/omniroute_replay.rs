@@ -20,9 +20,9 @@
 //! - 出现「provider rejected the request」→ 稳定复现，打印错误证据
 //! - 全部成功 → 上游 400 为瞬态，未复现
 
-use crate::adapters::wire::SystemBlockData;
 use crate::composition::{LlmClient, LlmConfigOptionsData};
-use crate::InvocationScopeData;
+use crate::ports::ResolvedInvocation;
+use crate::RequestSystemBlockData;
 use futures_util::StreamExt;
 use serde_json::Value;
 use share::message::{ContentBlock, Message, Role};
@@ -222,9 +222,9 @@ async fn replay_one_capture(client: &LlmClient, capture_label: &str, capture_jso
     let fixture: Value =
         serde_json::from_str(capture_json).expect("captured wire body must be valid JSON");
     let scope =
-        InvocationScopeData::new(MODEL, 20_000, ReasoningLevel::Xhigh, ReasoningLevel::Xhigh)
+        ResolvedInvocation::new(MODEL, 20_000, ReasoningLevel::Xhigh, ReasoningLevel::Xhigh)
             .expect("valid invocation scope");
-    let system = [SystemBlockData::cached(
+    let system = [RequestSystemBlockData::Cacheable(
         fixture["instructions"]
             .as_str()
             .expect("captured body must carry instructions")

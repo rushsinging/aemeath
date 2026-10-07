@@ -53,8 +53,8 @@ impl ScriptedInvocationProvider {
 impl provider::composition::LlmProvider for ScriptedInvocationProvider {
     async fn invocation_stream(
         &self,
-        _scope: &provider::composition::InvocationScopeData,
-        _system: &[provider::composition::SystemBlockData],
+        _resolved: &provider::composition::ResolvedInvocation,
+        _system: &[provider::RequestSystemBlockData],
         _messages: &[share::message::Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &tokio_util::sync::CancellationToken,
@@ -401,19 +401,14 @@ impl crate::ports::ProviderPort for LlmProviderPortAdapter {
         crate::ports::provider_port::InvocationStreamData,
         crate::ports::provider_port::ProviderError,
     > {
-        // Convert InvocationRequestData into the legacy LlmProvider argument list.
-        let system_blocks: Vec<provider::composition::SystemBlockData> = request
-            .system
-            .iter()
-            .map(|block| provider::composition::SystemBlockData::dynamic(block.text().to_string()))
-            .collect();
+        // request.system 已是 provider 中性 RequestSystemBlockData，直接转发。
         // request.tools 已是 wire-ready tool 定义（Value）。
         let tool_schemas: Vec<serde_json::Value> = request.tools.clone();
         // Forward the cancellation token that the request carries; the
         // `CancellationSignal` arg from ProviderPort::invoke is treated as
         // advisory (real cancellation originates from `request.cancellation`).
         let _ = cancellation;
-        let scope = provider::composition::InvocationScopeData::new(
+        let resolved = provider::composition::ResolvedInvocation::new(
             self.model.model.clone(),
             request.max_output_tokens.max(1),
             share::reasoning::ReasoningLevel::Off,
@@ -427,8 +422,8 @@ impl crate::ports::ProviderPort for LlmProviderPortAdapter {
         })?;
         self.provider
             .invocation_stream(
-                &scope,
-                &system_blocks,
+                &resolved,
+                &request.system,
                 &request.messages,
                 &tool_schemas,
                 &request.cancellation,

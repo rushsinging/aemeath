@@ -32,12 +32,17 @@ pub async fn run_connectivity_probe(
 ) -> Result<Duration, crate::ProviderError> {
     let started = std::time::Instant::now();
     let timeout_secs = timeout.as_secs().max(1);
-    let scope = client.invocation_scope(client.model_name(), Some(1), ReasoningLevel::Off)?;
+    let resolved = crate::ports::ResolvedInvocation::new(
+        client.model_name(),
+        1,
+        ReasoningLevel::Off,
+        ReasoningLevel::Off,
+    )?;
     let messages = [Message::user("Reply with OK.")];
     let cancellation = tokio_util::sync::CancellationToken::new();
     let operation = async {
         let mut stream = client
-            .invocation_stream(&scope, &[], &messages, &[], &cancellation)
+            .invocation_stream(&resolved, &[], &messages, &[], &cancellation)
             .await?;
         use futures_util::StreamExt;
         while let Some(event) = stream.next().await {

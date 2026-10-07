@@ -866,8 +866,8 @@ struct TwoTurnProvider;
 impl LlmProvider for TwoTurnProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,
@@ -917,8 +917,8 @@ impl SequenceProvider {
 impl LlmProvider for SequenceProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,
@@ -1008,8 +1008,8 @@ impl GatedProvider {
 impl LlmProvider for GatedProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,

@@ -8,8 +8,6 @@ use share::reasoning::ReasoningLevel;
 use tokio_util::sync::CancellationToken;
 
 use super::super::client::{LlmClient, LlmConfigOptionsData};
-use crate::adapters::wire::SystemBlockData;
-use crate::domain::invoke::InvocationScopeData;
 use crate::ports::LlmProvider;
 use crate::published_language::{
     InvocationEventData, InvocationStreamData, ProviderCompletionData, ProviderContentBlockData,
@@ -35,8 +33,8 @@ struct EventProvider {
 impl LlmProvider for EventProvider {
     async fn invocation_stream(
         &self,
-        scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &crate::ports::ResolvedInvocation,
+        _system: &[crate::RequestSystemBlockData],
         messages: &[Message],
         _tools: &[serde_json::Value],
         _cancel: &CancellationToken,
@@ -45,8 +43,8 @@ impl LlmProvider for EventProvider {
             tokio::time::sleep(delay).await;
         }
         // 探测调用语义锁定：单 token + Off 推理 + 单条 user 消息。
-        assert_eq!(scope.max_tokens(), 1);
-        assert_eq!(scope.requested_reasoning(), ReasoningLevel::Off);
+        assert_eq!(resolved.max_tokens, 1);
+        assert_eq!(resolved.requested_reasoning, ReasoningLevel::Off);
         assert_eq!(messages.len(), 1);
         Ok(Box::pin(stream::iter(self.events.clone())))
     }

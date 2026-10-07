@@ -136,8 +136,8 @@ fn provider_error_from_attempt(failure: HttpAttemptFailure) -> crate::ProviderEr
 impl LlmProvider for OllamaProvider {
     async fn invocation_stream(
         &self,
-        scope: &InvocationScopeData,
-        system: &[SystemBlockData],
+        resolved: &crate::ports::ResolvedInvocation,
+        system: &[crate::RequestSystemBlockData],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
@@ -146,7 +146,7 @@ impl LlmProvider for OllamaProvider {
             return Err(crate::ProviderError::cancelled());
         }
         let request_body = self
-            .build_request_body(scope, system, messages, tool_schemas, true)
+            .build_request_body(resolved, system, messages, tool_schemas, true)
             .map_err(<crate::ProviderError as From<crate::LlmError>>::from)?;
         let url = format!("{}/api/chat", self.base_url);
         let request_bytes = serde_json::to_string(&request_body)
@@ -156,7 +156,7 @@ impl LlmProvider for OllamaProvider {
             driver: "ollama",
             api: "chat_stream",
             provider: "ollama",
-            model: scope.model(),
+            model: resolved.model.as_str(),
             method: "POST",
             endpoint: &url,
             attempt: 1,
@@ -184,7 +184,7 @@ impl LlmProvider for OllamaProvider {
         .response;
         Ok(crate::adapters::stream::invocation_stream_from_decoder(
             response,
-            scope.effective_reasoning(),
+            resolved.effective_reasoning,
             cancel.child_token(),
             crate::adapters::stream::InvocationDecoder::Ollama,
         ))

@@ -320,8 +320,8 @@ impl ToolThenTextProvider {
 impl LlmProvider for ToolThenTextProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,
@@ -421,8 +421,8 @@ impl TextOnlyProvider {
 impl LlmProvider for TextOnlyProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,
@@ -1098,8 +1098,8 @@ impl StreamingToolDeltaProvider {
 impl LlmProvider for StreamingToolDeltaProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,

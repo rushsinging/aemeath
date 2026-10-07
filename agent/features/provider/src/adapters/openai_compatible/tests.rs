@@ -89,7 +89,7 @@ async fn llm_client_chat_invocation_stream_is_single_request_pull_stream() {
             user_agent: Some("aemeath-test/1.0".to_string()),
         })
         .expect("valid OpenAI chat config");
-    let scope = crate::InvocationScopeData::new(
+    let scope = crate::ports::ResolvedInvocation::new(
         "test-model",
         8192,
         crate::domain::capability::ReasoningLevel::Off,
@@ -154,7 +154,7 @@ async fn llm_client_responses_invocation_stream_is_single_request_pull_stream() 
             user_agent: Some("aemeath-test/1.0".to_string()),
         })
         .expect("valid OpenAI responses config");
-    let scope = crate::InvocationScopeData::new(
+    let scope = crate::ports::ResolvedInvocation::new(
         "test-model",
         8192,
         crate::domain::capability::ReasoningLevel::Off,
@@ -226,7 +226,7 @@ async fn responses_stream_keeps_tool_use_when_completed_output_omits_function_ca
             user_agent: Some("aemeath-test/1.0".to_string()),
         })
         .expect("valid OpenAI responses config");
-    let scope = crate::InvocationScopeData::new(
+    let scope = crate::ports::ResolvedInvocation::new(
         "test-model",
         8192,
         crate::domain::capability::ReasoningLevel::Off,

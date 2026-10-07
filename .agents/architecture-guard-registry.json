@@ -1740,6 +1740,7 @@
         "ReasoningCapabilityData",
         "ReasoningMappingKindData",
         "RequestSystemBlockData",
+        "ResolvedInvocation",
         "SystemBlockData",
         "TransportPool",
         "reasoning_capability_from_max",

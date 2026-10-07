@@ -107,8 +107,8 @@ impl IdenticalReplyProvider {
 impl LlmProvider for IdenticalReplyProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,
@@ -250,8 +250,8 @@ impl RecordingProvider {
 impl LlmProvider for RecordingProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,
@@ -620,8 +620,8 @@ impl CancellableThenNormalProvider {
 impl LlmProvider for CancellableThenNormalProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
@@ -793,8 +793,8 @@ impl CompleteThenCancellableProvider {
 impl LlmProvider for CompleteThenCancellableProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
@@ -992,8 +992,8 @@ async fn test_chat_impl_idle_until_first_input_event() {
     impl LlmProvider for CountingProvider {
         async fn invocation_stream(
             &self,
-            _scope: &InvocationScopeData,
-            _system: &[SystemBlockData],
+            _resolved: &provider::composition::ResolvedInvocation,
+            _system: &[provider::RequestSystemBlockData],
             _messages: &[Message],
             _tool_schemas: &[serde_json::Value],
             _cancel: &CancellationToken,
@@ -1326,8 +1326,8 @@ impl ApiErrorThenNormalProvider {
 impl LlmProvider for ApiErrorThenNormalProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,

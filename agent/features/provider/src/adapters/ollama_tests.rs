@@ -73,7 +73,7 @@ async fn llm_client_ollama_invocation_stream_is_single_request_pull_stream() {
             user_agent: Some("aemeath-test/1.0".to_string()),
         })
         .expect("valid ollama config");
-    let scope = InvocationScopeData::new(
+    let resolved = crate::ports::ResolvedInvocation::new(
         "test-model",
         8192,
         crate::domain::capability::ReasoningLevel::Off,
@@ -83,7 +83,7 @@ async fn llm_client_ollama_invocation_stream_is_single_request_pull_stream() {
 
     let events: Vec<_> = client
         .invocation_stream(
-            &scope,
+            &resolved,
             &[],
             &[Message::user("hi")],
             &[],

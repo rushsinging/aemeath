@@ -460,8 +460,8 @@ struct ExitWorktreeBeforeStopProvider {
 impl LlmProvider for ExitWorktreeBeforeStopProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &CancellationToken,

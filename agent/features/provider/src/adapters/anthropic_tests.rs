@@ -1,6 +1,5 @@
 use super::AnthropicProvider;
 use crate::adapters::wire::CreateMessageRequest;
-use crate::domain::invoke::InvocationScopeData;
 use crate::ports::{LlmProvider, ReasoningLevel};
 use share::message::Message;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -67,13 +66,17 @@ async fn anthropic_invocation_stream_returns_non_retryable_rate_limited_error_af
         ReasoningLevel::Off,
         60,
     );
-    let scope =
-        InvocationScopeData::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
-            .expect("valid scope");
+    let resolved = crate::ports::ResolvedInvocation::new(
+        "test-model",
+        8192,
+        ReasoningLevel::Off,
+        ReasoningLevel::Off,
+    )
+    .expect("valid scope");
 
     let error = match provider
         .invocation_stream(
-            &scope,
+            &resolved,
             &[],
             &[Message::user("hi")],
             &[],
@@ -125,13 +128,17 @@ async fn llm_client_invocation_stream_reaches_anthropic_without_callback() {
             user_agent: Some("aemeath-test/1.0".to_string()),
         })
         .expect("valid anthropic config");
-    let scope =
-        InvocationScopeData::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
-            .expect("valid scope");
+    let resolved = crate::ports::ResolvedInvocation::new(
+        "test-model",
+        8192,
+        ReasoningLevel::Off,
+        ReasoningLevel::Off,
+    )
+    .expect("valid scope");
 
     let events: Vec<_> = client
         .invocation_stream(
-            &scope,
+            &resolved,
             &[],
             &[Message::user("hi")],
             &[],
@@ -180,13 +187,17 @@ async fn invoke_stream_emits_ordered_deltas_and_single_completion_from_one_reque
         ReasoningLevel::Off,
         60,
     );
-    let scope =
-        InvocationScopeData::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
-            .expect("valid scope");
+    let resolved = crate::ports::ResolvedInvocation::new(
+        "test-model",
+        8192,
+        ReasoningLevel::Off,
+        ReasoningLevel::Off,
+    )
+    .expect("valid scope");
     let cancel = CancellationToken::new();
 
     let mut stream = provider
-        .invoke_stream(&scope, &[], &[Message::user("hi")], &[], &cancel)
+        .invoke_stream(&resolved, &[], &[Message::user("hi")], &[], &cancel)
         .await
         .expect("stream creation succeeds");
     let mut events = Vec::new();
@@ -230,13 +241,17 @@ async fn invocation_stream_returns_context_too_long_on_413_without_retrying() {
         ReasoningLevel::Off,
         60,
     );
-    let scope =
-        InvocationScopeData::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
-            .expect("valid scope");
+    let resolved = crate::ports::ResolvedInvocation::new(
+        "test-model",
+        8192,
+        ReasoningLevel::Off,
+        ReasoningLevel::Off,
+    )
+    .expect("valid scope");
     let cancel = CancellationToken::new();
 
     let result = provider
-        .invocation_stream(&scope, &[], &[Message::user("hi")], &[], &cancel)
+        .invocation_stream(&resolved, &[], &[Message::user("hi")], &[], &cancel)
         .await;
     let err = match result {
         Ok(_) => panic!("expected 413 → ProviderError::ContextTooLong, got Ok"),
@@ -270,13 +285,17 @@ async fn invocation_stream_returns_upstream_unavailable_on_400_without_retrying(
         ReasoningLevel::Off,
         60,
     );
-    let scope =
-        InvocationScopeData::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
-            .expect("valid scope");
+    let resolved = crate::ports::ResolvedInvocation::new(
+        "test-model",
+        8192,
+        ReasoningLevel::Off,
+        ReasoningLevel::Off,
+    )
+    .expect("valid scope");
     let cancel = CancellationToken::new();
 
     let result = provider
-        .invocation_stream(&scope, &[], &[Message::user("hi")], &[], &cancel)
+        .invocation_stream(&resolved, &[], &[Message::user("hi")], &[], &cancel)
         .await;
     let err = match result {
         Ok(_) => panic!("expected 400 → ProviderError::InvalidRequest, got Ok"),
@@ -310,13 +329,17 @@ async fn invocation_stream_returns_non_retryable_rate_limited_on_429() {
         ReasoningLevel::Off,
         60,
     );
-    let scope =
-        InvocationScopeData::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
-            .expect("valid scope");
+    let resolved = crate::ports::ResolvedInvocation::new(
+        "test-model",
+        8192,
+        ReasoningLevel::Off,
+        ReasoningLevel::Off,
+    )
+    .expect("valid scope");
     let cancel = CancellationToken::new();
 
     let result = provider
-        .invocation_stream(&scope, &[], &[Message::user("hi")], &[], &cancel)
+        .invocation_stream(&resolved, &[], &[Message::user("hi")], &[], &cancel)
         .await;
     let err = match result {
         Ok(_) => panic!("expected single-attempt 429 → ProviderError::RateLimited, got Ok"),
@@ -423,13 +446,17 @@ async fn invocation_stream_400_logs_final_failure_disposition() {
         ReasoningLevel::Off,
         60,
     );
-    let scope =
-        InvocationScopeData::new("test-model", 8192, ReasoningLevel::Off, ReasoningLevel::Off)
-            .expect("valid scope");
+    let resolved = crate::ports::ResolvedInvocation::new(
+        "test-model",
+        8192,
+        ReasoningLevel::Off,
+        ReasoningLevel::Off,
+    )
+    .expect("valid scope");
     let cancel = CancellationToken::new();
 
     let result = provider
-        .invocation_stream(&scope, &[], &[Message::user("hi")], &[], &cancel)
+        .invocation_stream(&resolved, &[], &[Message::user("hi")], &[], &cancel)
         .await;
     match result {
         Ok(_) => panic!("expected 400 → terminal ProviderError::InvalidRequest, got Ok"),

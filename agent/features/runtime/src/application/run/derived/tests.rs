@@ -9,7 +9,8 @@ use crate::application::model::test_support::{
 };
 use ::logging as scoped_logging;
 use async_trait::async_trait;
-use provider::composition::{InvocationScopeData, LlmProvider, SystemBlockData};
+
+use provider::composition::LlmProvider;
 use provider::{InvocationStreamData, ProviderError, ProviderErrorKind};
 use share::config::AgentInstanceConfig;
 use share::message::Message;
@@ -127,14 +128,17 @@ impl CapturingBuildFactory {
 impl LlmProvider for CapturingProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         _messages: &[Message],
         tool_schemas: &[serde_json::Value],
         _cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<InvocationStreamData, ProviderError> {
         let mut captured = self.captured.lock().unwrap();
-        captured.system = system.iter().map(|block| block.text.clone()).collect();
+        captured.system = system
+            .iter()
+            .map(|block| block.text().to_string())
+            .collect();
         captured.tool_names = tool_schemas
             .iter()
             .filter_map(|schema| schema.get("name")?.as_str().map(str::to_string))
@@ -1718,8 +1722,8 @@ struct BlockingThenCancelledProvider {
 impl LlmProvider for BlockingThenCancelledProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         cancel: &tokio_util::sync::CancellationToken,
@@ -1756,8 +1760,8 @@ struct ContextRecordingProvider {
 impl LlmProvider for ContextRecordingProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &tokio_util::sync::CancellationToken,
@@ -1783,8 +1787,8 @@ struct ErrorProvider {
 impl LlmProvider for ErrorProvider {
     async fn invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
+        resolved: &provider::composition::ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         _messages: &[Message],
         _tool_schemas: &[serde_json::Value],
         _cancel: &tokio_util::sync::CancellationToken,

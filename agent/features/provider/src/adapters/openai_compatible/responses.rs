@@ -16,8 +16,8 @@ impl OpenAICompatibleProvider {
     /// 构造 Responses API 请求 body
     pub(crate) fn build_responses_request_body(
         &self,
-        scope: &InvocationScopeData,
-        system: &[SystemBlockData],
+        resolved: &crate::ports::ResolvedInvocation,
+        system: &[crate::RequestSystemBlockData],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         stream: bool,
@@ -28,7 +28,7 @@ impl OpenAICompatibleProvider {
         } else {
             system
                 .iter()
-                .map(|b| b.text.as_str())
+                .map(|b| b.text())
                 .collect::<Vec<_>>()
                 .join("\n\n")
         };
@@ -36,10 +36,10 @@ impl OpenAICompatibleProvider {
         // 将 messages 转换为 input 格式
         let input = messages_to_responses_input(messages);
 
-        let max_tokens = scope.max_tokens().max(16);
+        let max_tokens = resolved.max_tokens.max(16);
 
         let mut body = serde_json::json!({
-            "model": scope.model(),
+            "model": resolved.model.as_str(),
             "input": input,
             "max_output_tokens": max_tokens,
             "stream": stream,
@@ -51,9 +51,9 @@ impl OpenAICompatibleProvider {
 
         // reasoning effort is resolved per invocation scope via the driver's shared
         // capability→wire mapping (resolve_effort), not a duplicated special case.
-        if !matches!(scope.effective_reasoning(), ReasoningLevel::Off) {
+        if !matches!(resolved.effective_reasoning, ReasoningLevel::Off) {
             body["reasoning"] = serde_json::json!({
-                "effort": self.driver.resolve_effort(scope.effective_reasoning())
+                "effort": self.driver.resolve_effort(resolved.effective_reasoning)
             });
         }
 

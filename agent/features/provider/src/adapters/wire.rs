@@ -24,6 +24,14 @@ pub struct CacheControl {
 
 impl SystemBlockData {
     /// Create a static block with ephemeral cache control.
+    /// provider 中性块 → wire 形态（Cacheable→cached，Text→dynamic）。
+    pub fn from_request_block(block: &crate::RequestSystemBlockData) -> Self {
+        match block {
+            crate::RequestSystemBlockData::Text(text) => SystemBlockData::dynamic(text.clone()),
+            crate::RequestSystemBlockData::Cacheable(text) => SystemBlockData::cached(text.clone()),
+        }
+    }
+
     pub fn cached(text: String) -> Self {
         Self {
             block_type: "text".to_string(),

@@ -1,6 +1,6 @@
 use super::*;
 use async_trait::async_trait;
-use provider::composition::{InvocationScopeData, LlmClient, LlmProvider, SystemBlockData};
+use provider::composition::{LlmClient, LlmProvider, ResolvedInvocation};
 use provider::{
     InvocationDeltaData, InvocationEventData, InvocationRequestData, ModelCapabilityData,
     ModelIdData, ProviderCompletionData, ProviderContentBlockData, ProviderErrorKind,
@@ -83,8 +83,8 @@ impl FakeLlmProvider {
 impl LlmProvider for FakeLlmProvider {
     async fn invocation_stream(
         &self,
-        scope: &InvocationScopeData,
-        system: &[SystemBlockData],
+        resolved: &ResolvedInvocation,
+        system: &[provider::RequestSystemBlockData],
         _messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
@@ -92,13 +92,13 @@ impl LlmProvider for FakeLlmProvider {
         // Record exactly what the adapter passed down.
         {
             let mut c = self.captured.lock().expect("captured lock poisoned");
-            c.scope_model = Some(scope.model().to_string());
-            c.scope_max_tokens = Some(scope.max_tokens());
-            c.scope_requested_reasoning = Some(scope.requested_reasoning());
-            c.scope_effective_reasoning = Some(scope.effective_reasoning());
+            c.scope_model = Some(resolved.model.clone());
+            c.scope_max_tokens = Some(resolved.max_tokens);
+            c.scope_requested_reasoning = Some(resolved.requested_reasoning);
+            c.scope_effective_reasoning = Some(resolved.effective_reasoning);
             c.system_blocks = system
                 .iter()
-                .map(|b| (b.text.clone(), b.cache_control.is_some()))
+                .map(|b| (b.text().to_string(), b.is_cacheable()))
                 .collect();
             c.tool_schemas = tool_schemas.to_vec();
             c.invocation_count += 1;
