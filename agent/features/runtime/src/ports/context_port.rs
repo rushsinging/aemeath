@@ -5,10 +5,10 @@ pub use context::{
     CompactOutcome, CompactRequestData, CompactResult, CompactSkipReason, CompactTrigger,
     CompactionDecisionData, ContentFingerprint, ContextAppendData, ContextAppendError, ContextPort,
     ContextPortError, ContextRequestData, ContextRequestId, ContextWindowData, DecisionReason,
-    FinalizeCause, Language, ManualCompactRequestData, RunStepId, SessionId, SessionRevision,
-    StepReceiptData, SystemBlock, SystemPromptSpecData, TokenBudget, ToolOutcomeKindData,
-    ToolSchemaData, Urgency,
+    FinalizeCause, Language, ManualCompactRequestData, SessionRevision, StepReceiptData,
+    SystemBlock, SystemPromptSpecData, TokenBudget, ToolOutcomeKindData, ToolSchemaData, Urgency,
 };
+pub use share::ids::{RunStepId, SessionId};
 
 #[cfg(test)]
 #[path = "context_port_tests.rs"]

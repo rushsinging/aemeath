@@ -6,12 +6,13 @@
 //! point — a committed compaction, which rewrites the conversation the memory
 //! was retrieved for.
 
+use share::ids::SessionId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::{
     ContextApplicationService, ContextMemorySource, ContextPort, ContextRequestData,
-    ContextRequestId, MemoryMaterialization, SessionId, SystemBlock, SystemPromptSpecData,
+    ContextRequestId, MemoryMaterialization, SystemBlock, SystemPromptSpecData,
 };
 use async_trait::async_trait;
 use sdk::{RunId, RunStepId};

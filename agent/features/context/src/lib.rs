@@ -94,11 +94,11 @@ pub use domain::{
     CompactSkipReason, CompactSummaryQuality, CompactTrigger, CompactionDecisionData,
     ContentFingerprint, ContextAppendError, ContextPortError, ContextRequestData,
     ContextWindowData, DecisionReason, FinalizeCause, InvocationReminderData, Language,
-    ManualCompactRequestData, MemoryRecallEntryData, RunStepId, SessionId, StepReceiptData,
-    SystemPromptSpecData, TaskProgressReminderData, TaskProgressReminderItemData,
-    TaskProgressStatus, TokenBudget, ToolCallIdentityData, ToolCallReceiptData,
-    ToolOutcomeKindData, ToolReceiptMutationData, ToolReceiptMutationError,
-    ToolReceiptMutationReceiptData, ToolSchemaData, ToolTerminalReceiptData,
+    ManualCompactRequestData, MemoryRecallEntryData, StepReceiptData, SystemPromptSpecData,
+    TaskProgressReminderData, TaskProgressReminderItemData, TaskProgressStatus, TokenBudget,
+    ToolCallIdentityData, ToolCallReceiptData, ToolOutcomeKindData, ToolReceiptMutationData,
+    ToolReceiptMutationError, ToolReceiptMutationReceiptData, ToolSchemaData,
+    ToolTerminalReceiptData,
 };
 #[cfg(test)]
 pub(crate) use ports::{
@@ -141,9 +141,7 @@ pub mod guidance {
 }
 
 pub mod session {
-    pub use crate::domain::session::{
-        CanonicalSession, PersistedWorkspaceContext, SessionMetadata, SnapshotState,
-    };
+    pub use crate::domain::session::{CanonicalSession, SessionMetadata, SnapshotState};
 }
 
 #[cfg(test)]

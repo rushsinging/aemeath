@@ -37,6 +37,7 @@ impl SkillQueryFactory for FixedQueryFactory {
 
 fn base_request() -> ContextRequestData {
     use crate::*;
+    use share::ids::{RunStepId, SessionId};
     ContextRequestData {
         session_id: SessionId::new("isolated-session"),
         request_id: ContextRequestId::new("request"),

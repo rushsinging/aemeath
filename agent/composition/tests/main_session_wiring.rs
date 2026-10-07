@@ -14,14 +14,14 @@
 //! 3. **Config query/writer gate-aware** — `config_query()` and
 //!    `config_writer()` from the wiring return working façades.
 
+use share::ids::{RunStepId, SessionId};
 use std::sync::Arc;
 
 use context::ContextPort;
 use context::MainSessionDependencies;
 use context::SessionManagementPort;
 use context::{
-    ContentFingerprint, ContextAppendData, ContextRequestId, FinalizeCause, RunStepId, SessionId,
-    SessionRevision,
+    ContentFingerprint, ContextAppendData, ContextRequestId, FinalizeCause, SessionRevision,
 };
 use sdk::{ChatBootstrapArgs, RunId};
 use share::message::Message;

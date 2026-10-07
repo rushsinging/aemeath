@@ -359,7 +359,7 @@ async fn test_run_session_command_driver_uses_workspace_workspace_root_for_stop_
         git_common_dir: Some(common_dir.display().to_string()),
     };
     let workspace_root_str = workspace_root.display().to_string();
-    let workspace_dto = context::session::PersistedWorkspaceContext {
+    let workspace_dto = share::session_types::PersistedWorkspaceContext {
         workspace_id: share::session_types::WorkspaceId::derive(&identity, &workspace_root_str),
         project_identity: identity,
         path_base: workspace_root_str.clone(),

@@ -304,7 +304,7 @@ fn spawn_calls(
             context: crate::application::context::coordination::ContextCoordinator::new(
                 context::wire_isolated_context("test-session"),
             ),
-            session_id: context::SessionId::new("test-session"),
+            session_id: share::ids::SessionId::new("test-session"),
             ctx: ctx.clone(),
             max_tool_concurrency: 1,
             agent_semaphore: agent_semaphore.clone(),

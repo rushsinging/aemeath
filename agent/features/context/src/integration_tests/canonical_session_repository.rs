@@ -1,3 +1,4 @@
+use share::ids::{RunStepId, SessionId};
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::domain::ToolCallState;
@@ -5,8 +6,8 @@ use crate::SessionRepository;
 use crate::{
     AcceptedInputAppendData, AcceptedInputError, CompactRequestData, CompactTrigger,
     ContentFingerprint, ContextAppendData, ContextAppendError, ContextRequestData,
-    ContextRequestId, FinalizeCause, Language, ManualCompactRequestData, RunStepId, SessionId,
-    SessionRevision, SystemPromptSpecData, ToolCallIdentityData, ToolReceiptMutationData,
+    ContextRequestId, FinalizeCause, Language, ManualCompactRequestData, SessionRevision,
+    SystemPromptSpecData, ToolCallIdentityData, ToolReceiptMutationData,
 };
 use crate::{
     AcceptedInputRecord, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,

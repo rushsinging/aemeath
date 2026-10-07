@@ -1,9 +1,10 @@
+use share::ids::{RunStepId, SessionId};
 use std::sync::Arc;
 
 use crate::decode_session;
 use crate::SessionManagementPort;
+use crate::ToolCallIdentityData;
 use crate::{CanonicalSession, SessionCodec, SnapshotState};
-use crate::{SessionId, ToolCallIdentityData};
 use share::session_types::{
     PersistedWorkspaceContext, ProjectIdentityData, WorkspaceId, WorktreeKind,
 };
@@ -51,7 +52,7 @@ async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
     let identity = ToolCallIdentityData {
         session_id: session_id.clone(),
         run_id: sdk::RunId::new("run"),
-        step_id: crate::RunStepId::new("step"),
+        step_id: share::ids::RunStepId::new("step"),
         runtime_call_id: "call-1".to_string(),
         provider_call_id: Some("provider-1".to_string()),
         tool_name: "Glob".to_string(),

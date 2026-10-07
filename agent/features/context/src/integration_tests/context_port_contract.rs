@@ -1,3 +1,4 @@
+use share::ids::{RunStepId, SessionId};
 use std::collections::HashMap;
 
 use crate::domain::ContextMessage;
@@ -6,8 +7,8 @@ use crate::{
     CompactRequestData, CompactResult, CompactTrigger, CompactionDecisionData, ContentFingerprint,
     ContextAppendData, ContextAppendError, ContextPort, ContextPortError, ContextRequestData,
     ContextRequestId, ContextWindowData, DecisionReason, FinalizeCause, Language,
-    ManualCompactRequestData, RunStepId, SessionId, SessionRevision, StepReceiptData,
-    SystemPromptSpecData, TokenBudget, ToolOutcomeKindData, Urgency,
+    ManualCompactRequestData, SessionRevision, StepReceiptData, SystemPromptSpecData, TokenBudget,
+    ToolOutcomeKindData, Urgency,
 };
 use async_trait::async_trait;
 use sdk::RunId;

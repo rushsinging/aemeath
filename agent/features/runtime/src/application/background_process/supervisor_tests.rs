@@ -2,7 +2,8 @@ use super::*;
 use crate::domain::background_process::{
     BackgroundInvalidationReason, BackgroundProcessState, BackgroundProcessTerminalKind,
 };
-use context::{SessionId, ToolCallIdentityData};
+use context::ToolCallIdentityData;
+use share::ids::SessionId;
 use sdk::{RunId, RunStepId};
 use share::ids::BackgroundProcessId;
 use std::time::{Duration, SystemTime};

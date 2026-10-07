@@ -7,6 +7,7 @@
 //! Only the `MemoryOpener` is mocked.
 
 use config::{ConfigAppService, ConfigReader, ProjectConfigParticipant};
+use share::ids::{RunStepId, SessionId};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -16,9 +17,9 @@ use crate::application::main_session::{
 use crate::ContextPort;
 use crate::{
     AcceptedInputAppendData, CleanupConfirmation, ContentFingerprint, ContextAppendData,
-    ContextRequestData, ContextRequestId, FinalizeCause, Language, RunStepId, SessionId,
-    SessionRevision, StepReceiptData, SystemPromptSpecData, ToolCallIdentityData,
-    ToolCallReceiptData, ToolOutcomeKindData, ToolTerminalReceiptData,
+    ContextRequestData, ContextRequestId, FinalizeCause, Language, SessionRevision,
+    StepReceiptData, SystemPromptSpecData, ToolCallIdentityData, ToolCallReceiptData,
+    ToolOutcomeKindData, ToolTerminalReceiptData,
 };
 use crate::{
     CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStepMessages,

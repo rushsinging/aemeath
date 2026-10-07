@@ -19,7 +19,6 @@ use crate::application::tool::execution_supervisor::{
     dispatch_started_time, SupervisedToolCall, ToolExecutionSupervisor,
 };
 use async_trait::async_trait;
-use context::SessionId;
 use context::{
     CompactOutcome, CompactRequestData, CompactionDecisionData, ContextAppendData,
     ContextPortError, ContextRequestData, ContextWindowData, ManualCompactRequestData,
@@ -27,6 +26,7 @@ use context::{
 };
 use sdk::{RunId, RunStepId};
 use share::ids::BackgroundProcessId;
+use share::ids::SessionId;
 use std::sync::{Arc, Mutex};
 use tools::published::execution::{
     CancellationSignal, ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort,
@@ -110,7 +110,7 @@ impl context::ContextPort for RecordingContextPort {
     }
     async fn clear_session(
         &self,
-        _session_id: &context::SessionId,
+        _session_id: &share::ids::SessionId,
     ) -> Result<(), ContextPortError> {
         Ok(())
     }
