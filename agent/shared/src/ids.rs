@@ -348,6 +348,22 @@ define_id_type!(
     "Runtime-owned identity for one background task record (UUIDv7)."
 );
 
+impl BackgroundTaskId {
+    /// 用户/LLM 可见的 display 形态（`task-<uuid>`）。
+    ///
+    /// 占位 tool_result、reminder 渲染与 BackgroundTasks 工具族的输入
+    /// 输出统一使用本形态（typed id 单一真相，NEVER 手动拼前缀）。
+    pub fn display(&self) -> String {
+        format!("task-{}", self.as_str())
+    }
+
+    /// 解析 display 形态（`task-<uuid>` 或裸 uuid），宽松接受。
+    pub fn parse_display(value: &str) -> Result<Self, IdParseError> {
+        let uuid_part = value.strip_prefix("task-").unwrap_or(value);
+        Self::parse_uuid7(uuid_part)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ToolCallId
 // ---------------------------------------------------------------------------

@@ -191,7 +191,7 @@ impl tools::BackgroundTaskAccess for BackgroundTaskRuntime {
         &self,
         task_id: &str,
     ) -> Option<tools::types::background_tasks::BackgroundTaskDetailData> {
-        let parsed = share::ids::BackgroundTaskId::parse_uuid7(task_id).ok()?;
+        let parsed = share::ids::BackgroundTaskId::parse_display(task_id).ok()?;
         let record = self.supervisor().snapshot(&parsed)?;
         let deadline_remaining_ms = match &record.state {
             crate::domain::background_task::BackgroundTaskState::Backgrounded {
@@ -216,7 +216,7 @@ impl tools::BackgroundTaskAccess for BackgroundTaskRuntime {
         cursor: Option<u64>,
         max_bytes: usize,
     ) -> Option<tools::types::background_tasks::BackgroundTaskLogData> {
-        let parsed = share::ids::BackgroundTaskId::parse_uuid7(task_id).ok()?;
+        let parsed = share::ids::BackgroundTaskId::parse_display(task_id).ok()?;
         let (text, cursor, total_written) = self
             .supervisor()
             .read_task_log(&parsed, cursor, max_bytes)?;
@@ -231,7 +231,7 @@ impl tools::BackgroundTaskAccess for BackgroundTaskRuntime {
         &self,
         task_id: &str,
     ) -> Result<tools::types::background_tasks::BackgroundTaskStopData, String> {
-        let parsed = share::ids::BackgroundTaskId::parse_uuid7(task_id)
+        let parsed = share::ids::BackgroundTaskId::parse_display(task_id)
             .map_err(|error| format!("invalid task id {task_id}: {error}"))?;
         let outcome = self
             .supervisor()
@@ -268,7 +268,7 @@ fn task_summary_data(
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0);
     tools::types::background_tasks::BackgroundTaskSummaryData {
-        task_id: record.task_id.as_str().to_string(),
+        task_id: record.task_id.display(),
         tool_name: record.identity.tool_name.clone(),
         state,
         summary: record.invocation_summary.clone(),

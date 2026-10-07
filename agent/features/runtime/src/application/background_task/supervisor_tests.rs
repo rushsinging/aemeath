@@ -184,7 +184,7 @@ fn take_unnotified_terminal_items_returns_each_completion_once() {
 
     let items = supervisor.take_unnotified_terminal_items();
     assert_eq!(items.len(), 1, "终态后应有一条待通知条目");
-    assert_eq!(items[0].task_id, task_id.as_str());
+    assert_eq!(items[0].task_id, task_id.display());
     assert_eq!(items[0].tool_name, "Bash");
     assert!(matches!(
         items[0].status,
@@ -225,8 +225,8 @@ fn take_unnotified_terminal_items_skips_invalidated_and_keeps_order() {
     let items = supervisor.take_unnotified_terminal_items();
     // Invalidated 是生命周期失效（resume 场景走失效投影），不产生 LLM 通知。
     assert_eq!(items.len(), 2);
-    assert_eq!(items[0].task_id, first.as_str(), "按终态顺序");
-    assert_eq!(items[1].task_id, third.as_str());
+    assert_eq!(items[0].task_id, first.display(), "按终态顺序");
+    assert_eq!(items[1].task_id, third.display());
     assert!(matches!(
         items[1].status,
         context::BackgroundTaskCompletionStatus::Cancelled

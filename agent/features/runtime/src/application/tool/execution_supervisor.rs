@@ -415,8 +415,8 @@ fn join_result_to_outcome(
 /// 占位 tool result：转后台后立即发布给 LLM 的合法成功结果。
 fn placeholder_tool_result(task_id: &BackgroundTaskId) -> PublishedToolOutcome {
     PublishedToolOutcome::success_text(format!(
-        "Running in the background (task-{}). Result will be delivered on completion.",
-        task_id.as_str(),
+        "Running in the background ({}). Result will be delivered on completion.",
+        task_id.display(),
     ))
 }
 

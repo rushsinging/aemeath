@@ -110,7 +110,7 @@ impl BackgroundTaskSupervisor {
         let tasks = self.tasks.lock().expect("后台任务表锁中毒");
         let task = tasks
             .get(task_id)
-            .ok_or_else(|| BackgroundTaskSupervisorError::TaskNotFound(task_id.as_str().into()))?;
+            .ok_or_else(|| BackgroundTaskSupervisorError::TaskNotFound(task_id.display()))?;
         if let Some(kind) = task.record.terminal_kind() {
             return Ok(StopRequestOutcome::AlreadyTerminal(kind));
         }
@@ -169,7 +169,7 @@ impl BackgroundTaskSupervisor {
         let mut tasks = self.tasks.lock().expect("后台任务表锁中毒");
         let task = tasks
             .get_mut(task_id)
-            .ok_or_else(|| BackgroundTaskSupervisorError::TaskNotFound(task_id.as_str().into()))?;
+            .ok_or_else(|| BackgroundTaskSupervisorError::TaskNotFound(task_id.display()))?;
         if terminal_output.is_some() {
             task.terminal_output = terminal_output;
         }
@@ -257,7 +257,7 @@ impl BackgroundTaskSupervisor {
         let mut tasks = self.tasks.lock().expect("后台任务表锁中毒");
         let task = tasks
             .get_mut(task_id)
-            .ok_or_else(|| BackgroundTaskSupervisorError::TaskNotFound(task_id.as_str().into()))?;
+            .ok_or_else(|| BackgroundTaskSupervisorError::TaskNotFound(task_id.display()))?;
         let advanced = task.record.clone().advance(next)?;
         task.record = advanced.record;
         Ok(())
@@ -296,7 +296,7 @@ impl BackgroundTaskSupervisor {
             };
             task.notified = true;
             items.push(context::BackgroundTaskReminderItemData {
-                task_id: task.record.task_id.as_str().to_string(),
+                task_id: task.record.task_id.display(),
                 tool_name: task.record.identity.tool_name.clone(),
                 status,
                 output_tail,

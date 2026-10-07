@@ -62,7 +62,7 @@ fn background_task_access_projects_summaries_logs_and_stop() {
     let detail = runtime
         .task_status(task_id.as_str())
         .expect("已登记任务详情可见");
-    assert_eq!(detail.summary.task_id, task_id.as_str());
+    assert_eq!(detail.summary.task_id, task_id.display());
 
     // logs：尾部读取 + 增量。
     let log = runtime.read_task_log(task_id.as_str(), None, 4096).unwrap();
