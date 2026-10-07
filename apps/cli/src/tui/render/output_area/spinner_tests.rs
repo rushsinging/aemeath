@@ -11,6 +11,7 @@ fn line_text(elapsed_secs: u64, phase_elapsed_secs: u64) -> String {
         phase_elapsed_secs: Some(phase_elapsed_secs),
         phase_text: Some("Running tool".to_string()),
         detail_text: None,
+        background_tasks_active: 0,
     };
 
     output
@@ -30,6 +31,7 @@ fn line_text_with_detail(detail_text: Option<&str>) -> String {
         phase_elapsed_secs: Some(6),
         phase_text: Some("Running tool".to_string()),
         detail_text: detail_text.map(str::to_string),
+        background_tasks_active: 0,
     };
 
     output
@@ -69,4 +71,35 @@ fn spinner_total_and_phase_elapsed_share_readable_duration_format() {
     assert!(text.contains("  1h 2m 3s"), "actual spinner line: {text}");
     assert!(text.contains("  ⏱ 1m 5s"), "actual spinner line: {text}");
     assert!(!text.contains("3723s"), "actual spinner line: {text}");
+}
+
+#[test]
+fn spinner_line_appends_background_task_count_when_active() {
+    let mut view = SpinnerLineView {
+        frame: 0,
+        verb: "Working".to_string(),
+        elapsed_secs: 3,
+        phase_elapsed_secs: None,
+        phase_text: None,
+        detail_text: None,
+        background_tasks_active: 0,
+    };
+    let area = super::super::OutputArea::default();
+    let line_zero = area.build_spinner_line(&view, None);
+    assert!(
+        !line_zero
+            .spans
+            .iter()
+            .any(|span| span.content.contains("bg")),
+        "活动数为 0 时不显示后台任务标记"
+    );
+
+    view.background_tasks_active = 2;
+    let line_two = area.build_spinner_line(&view, None);
+    let text: String = line_two
+        .spans
+        .iter()
+        .map(|span| span.content.to_string())
+        .collect();
+    assert!(text.contains("⚷2 bg"), "应显示后台任务计数：{text}");
 }

@@ -496,6 +496,10 @@ pub async fn wire_agent_client_from_args(
             .unwrap_or_else(|error| error.into_inner())
             .replace(shell.background_tasks.clone());
     }
+    // #252 PR3：spinner 活动数事件 sink 工厂（per-chat）。
+    shell
+        .background_tasks
+        .bind_event_sink_factory(shell.event_sink_factory.clone());
     if let Some(blob) = background_ledger_blob {
         if let Err(error) = shell
             .background_tasks

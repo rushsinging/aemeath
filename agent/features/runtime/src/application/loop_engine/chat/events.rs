@@ -259,6 +259,10 @@ pub enum RuntimeStreamEvent {
     RuntimeStatusChanged {
         status: Box<sdk::RuntimeStatusView>,
     },
+    /// #252：后台任务活动数变化（spinner 显示）。
+    BackgroundTaskCountChanged {
+        active: usize,
+    },
 }
 
 pub trait ChatEventSink: Clone + Send + Sync + 'static {

@@ -505,6 +505,16 @@ impl ConversationUpdate for ReplaceRuntimeStatus {
     }
 }
 
+impl ConversationUpdate for ReplaceBackgroundTaskCount {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        if model.runtime.background_tasks_active == self.0 {
+            return Vec::new();
+        }
+        model.runtime.background_tasks_active = self.0;
+        vec![ConversationChange::OutputDirty]
+    }
+}
+
 impl ConversationUpdate for ReplaceTaskState {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         if model.runtime.task_status.replace(self.0) {
@@ -629,6 +639,7 @@ impl ConversationUpdate for ConversationIntent {
             Self::RecordUsage(s) => s.update(model),
             Self::RecordLiveTps(s) => s.update(model),
             Self::ReplaceRuntimeStatus(status) => status.update(model),
+            Self::ReplaceBackgroundTaskCount(count) => count.update(model),
             Self::ReplaceTaskState(state) => state.update(model),
             Self::UpdateTaskLines(state) => state.update(model),
             Self::SetStatusNotice(s) => s.update(model),

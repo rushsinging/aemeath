@@ -18,6 +18,16 @@ pub(crate) struct BackgroundTaskRuntime {
         std::sync::OnceLock<Arc<crate::application::run::active_registry::ActiveRunRegistry>>,
     /// #252 PR3：账本持久化目标（blob + session id；session 就绪后绑定）。
     persistence: std::sync::OnceLock<(std::sync::Arc<dyn storage::AtomicBlobPort>, String)>,
+    /// #252 PR3：事件 sink 工厂（spinner 活动数事件；per-chat 创建）。
+    event_sink_factory: std::sync::OnceLock<
+        std::sync::Arc<
+            dyn Fn(
+                    tokio::sync::mpsc::UnboundedSender<sdk::ChatEvent>,
+                ) -> crate::application::loop_engine::chat::ChatEventSinkHandle
+                + Send
+                + Sync,
+        >,
+    >,
 }
 
 /// 终态通知路由决策（纯判定，#252 PR2 §4.2/§4.4）。
@@ -38,7 +48,45 @@ impl BackgroundTaskRuntime {
             waiter: Mutex::new(Some(waiter)),
             active_run: std::sync::OnceLock::new(),
             persistence: std::sync::OnceLock::new(),
+            event_sink_factory: std::sync::OnceLock::new(),
         }
+    }
+
+    /// 绑定事件 sink 工厂（session 就绪后；spinner 活动数事件）。
+    pub(crate) fn bind_event_sink_factory(
+        &self,
+        factory: std::sync::Arc<
+            dyn Fn(
+                    tokio::sync::mpsc::UnboundedSender<sdk::ChatEvent>,
+                ) -> crate::application::loop_engine::chat::ChatEventSinkHandle
+                + Send
+                + Sync,
+        >,
+    ) {
+        let _ = self.event_sink_factory.set(factory);
+    }
+
+    /// 发送后台任务活动数事件（try_send：sink 满时丢弃，显示尽力而为）。
+    pub(crate) fn emit_active_count(&self) {
+        let Some(factory) = self.event_sink_factory.get() else {
+            return;
+        };
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let sink = factory(sender);
+        let active = self
+            .supervisor()
+            .snapshots()
+            .iter()
+            .filter(|record| !record.is_terminal())
+            .count();
+        use crate::application::loop_engine::chat::ChatEventSink as _;
+        sink.try_send_event(
+            crate::application::loop_engine::chat::RuntimeStreamEvent::BackgroundTaskCountChanged {
+                active,
+            },
+        );
+        // receiver 由 sink 生命周期外丢弃（try_send 即投递到 tx）。
+        drop(receiver);
     }
 
     /// 绑定 active run registry（SessionRuntime::new 收尾时调用，一次绑定）。
@@ -94,6 +142,8 @@ impl BackgroundTaskRuntime {
                 "background task ledger persist failed: {error}"
             );
         }
+        // #252 PR3：活动数 -1 → spinner 显示。
+        self.emit_active_count();
         match self.notify_route() {
             BackgroundNotifyRoute::Reminder(run_id) => {
                 context.reminder_handle_event(

@@ -111,6 +111,15 @@ impl super::OutputArea {
             ));
         }
 
+        // #252：后台任务活动数（>0 才显示；与主执行并行）。
+        if s.background_tasks_active > 0 {
+            spans.push(Span::styled("  ·  ", Style::default().fg(theme::TEXT_DIM)));
+            spans.push(Span::styled(
+                format!("⚷{} bg", s.background_tasks_active),
+                Style::default().fg(theme::TEXT_DIM),
+            ));
+        }
+
         if let Some(cp) = compact_progress {
             spans.extend(compact_progress_spans(cp));
         }
