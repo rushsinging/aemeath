@@ -1,8 +1,8 @@
 //! Stream parsing utilities for Anthropic API format.
 //!
-//! Internal decoders emit `InvocationDeltaData` events through the crate-private
+//! Internal decoders emit `ProviderContentData` events through the crate-private
 //! [`InvocationSink`] trait; the [`InvocationEventHandler`] converts those
-//! deltas into a pull-based `InvocationStreamData` of `InvocationEventData`s. The
+//! deltas into a pull-based `ProviderResponseStream` of `ProviderResponseChunk`s. The
 //! decoder-side helper methods (`on_text`, `on_tool_use_start`, …) keep the
 //! per-driver call sites unchanged while routing every emission through the
 //! unified [`InvocationSink::on_delta`] entry point.
@@ -10,12 +10,11 @@
 use super::constants::{
     ANTHROPIC_STREAM_IDLE_TIMEOUT, INVOCATION_STREAM_CAPACITY, STALL_THRESHOLD,
 };
+use crate::adapters::wire::*;
 use crate::domain::capability::ReasoningLevel;
-use crate::domain::invoke::*;
 use crate::{
-    InvocationDeltaData, InvocationEventData, InvocationStreamData, ProviderCompletionData,
-    ProviderContentBlockData, ProviderError, ProviderErrorKind, ProviderStopReasonData,
-    ProviderToolCallData, ProviderToolCallIdData, RawUsageSnapshotData,
+    ProviderContentData, ProviderError, ProviderErrorKind, ProviderResponseChunk,
+    ProviderResponseStream, ResponseStopReason, TokenUsageData,
 };
 use futures_util::StreamExt;
 use reqwest::Response;
@@ -28,15 +27,15 @@ use tokio_util::sync::CancellationToken;
 /// Provider 内部 decoder 用来发射流式 delta 的内部接收器。
 ///
 /// 此 trait **不**对外暴露——它只在 Provider crate 内部被 SSE/NDJSON decoder
-/// 与 `InvocationStreamData` 构造器共享。Runtime/Context 与测试替身不得依赖。
+/// 与 `ProviderResponseStream` 构造器共享。Runtime/Context 与测试替身不得依赖。
 /// 旧 sink 迁移桥已物理清零（#907）；本 trait 是 decoder 与
-/// pull-based `InvocationStreamData` 之间的唯一内部契约。
+/// pull-based `ProviderResponseStream` 之间的唯一内部契约。
 pub(crate) trait InvocationSink: Send {
-    /// 推入一个流式增量；Runtime 通过 `InvocationStreamData` 收到同样的事件。
-    fn on_delta(&mut self, delta: InvocationDeltaData);
+    /// 推入一个流式增量；Runtime 通过 `ProviderResponseStream` 收到同样的事件。
+    fn on_delta(&mut self, delta: ProviderContentData);
 
     /// 推入原始 SSE/NDJSON 行——仅供内部 usage 提取使用，不出现在
-    /// `InvocationStreamData` 上。
+    /// `ProviderResponseStream` 上。
     fn on_raw_line(&mut self, _line: &str) {}
 
     /// 流式中途诊断消息（idle timeout、retry/retry-able 等）；记录到 provider
@@ -55,20 +54,20 @@ pub(crate) trait InvocationSink: Send {
     }
 
     fn emit_text(&mut self, text: &str) {
-        self.on_delta(InvocationDeltaData::Text(text.to_string()));
+        self.on_delta(ProviderContentData::Text(text.to_string()));
     }
 
     fn emit_thinking(&mut self, text: &str) {
-        self.on_delta(InvocationDeltaData::Thinking {
+        self.on_delta(ProviderContentData::Thinking {
             thinking: text.to_string(),
             signature: None,
         });
     }
 
     fn emit_tool_use_start(&mut self, name: &str, provider_id: Option<&str>, index: usize) {
-        self.on_delta(InvocationDeltaData::ToolCallStarted {
+        self.on_delta(ProviderContentData::ToolCallStarted {
             index,
-            provider_id: provider_id.map(|id| ProviderToolCallIdData(id.to_string())),
+            provider_id: provider_id.map(|id| id.to_string()),
             name: name.to_string(),
         });
     }
@@ -80,9 +79,9 @@ pub(crate) trait InvocationSink: Send {
         provider_id: Option<&str>,
         partial_args: &str,
     ) {
-        self.on_delta(InvocationDeltaData::ToolArgumentsDelta {
+        self.on_delta(ProviderContentData::ToolArgumentsDelta {
             index,
-            provider_id: provider_id.map(|id| ProviderToolCallIdData(id.to_string())),
+            provider_id: provider_id.map(|id| id.to_string()),
             partial_json: partial_args.to_string(),
         });
     }
@@ -95,13 +94,11 @@ pub(crate) trait InvocationSink: Send {
         name: String,
         arguments: serde_json::Value,
     ) {
-        self.on_delta(InvocationDeltaData::ToolCallCompleted {
+        self.on_delta(ProviderContentData::ToolCallCompleted {
             index,
-            call: ProviderToolCallData {
-                id: ProviderToolCallIdData(id),
-                name,
-                arguments,
-            },
+            id,
+            name,
+            arguments,
         });
     }
 }
@@ -115,7 +112,7 @@ pub(crate) enum InvocationDecoder {
 }
 
 impl InvocationDecoder {
-    fn raw_usage_from_line(self, line: &str) -> Option<RawUsageSnapshotData> {
+    fn raw_usage_from_line(self, line: &str) -> Option<TokenUsageData> {
         match self {
             Self::Anthropic => anthropic_raw_usage_from_line(line),
             Self::OpenAiChat => openai_chat_raw_usage_from_line(line),
@@ -132,14 +129,14 @@ fn json_payload(line: &str) -> Option<&str> {
         .filter(|payload| !payload.is_empty() && *payload != "[DONE]")
 }
 
-fn anthropic_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshotData> {
+fn anthropic_raw_usage_from_line(line: &str) -> Option<TokenUsageData> {
     let value: serde_json::Value = serde_json::from_str(json_payload(line)?).ok()?;
     let usage = match value.get("type").and_then(|kind| kind.as_str()) {
         Some("message_start") => value.get("message")?.get("usage")?,
         Some("message_delta") => value.get("usage")?,
         _ => return None,
     };
-    Some(RawUsageSnapshotData {
+    Some(TokenUsageData {
         input_tokens: optional_u32(usage, "input_tokens"),
         output_tokens: optional_u32(usage, "output_tokens"),
         cache_read_tokens: optional_u32(usage, "cache_read_input_tokens"),
@@ -148,7 +145,7 @@ fn anthropic_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshotData> {
     })
 }
 
-fn openai_chat_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshotData> {
+fn openai_chat_raw_usage_from_line(line: &str) -> Option<TokenUsageData> {
     let value: serde_json::Value = serde_json::from_str(json_payload(line)?).ok()?;
     value
         .get("usage")
@@ -156,7 +153,7 @@ fn openai_chat_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshotData> {
         .map(crate::adapters::openai_compatible::parse_chat_raw_usage)
 }
 
-fn openai_responses_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshotData> {
+fn openai_responses_raw_usage_from_line(line: &str) -> Option<TokenUsageData> {
     let value: serde_json::Value = serde_json::from_str(json_payload(line)?).ok()?;
     (value.get("type").and_then(|kind| kind.as_str()) == Some("response.completed"))
         .then(|| value.get("response")?.get("usage"))
@@ -164,16 +161,16 @@ fn openai_responses_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshotDa
         .map(crate::adapters::openai_compatible::parse_responses_raw_usage)
 }
 
-fn ollama_raw_usage_from_line(line: &str) -> Option<RawUsageSnapshotData> {
+fn ollama_raw_usage_from_line(line: &str) -> Option<TokenUsageData> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
-    Some(RawUsageSnapshotData {
+    Some(TokenUsageData {
         input_tokens: optional_u32(&value, "prompt_eval_count"),
         output_tokens: optional_u32(&value, "eval_count"),
         cache_read_tokens: None,
         cache_write_tokens: None,
         reasoning_tokens: None,
     })
-    .filter(RawUsageSnapshotData::was_reported)
+    .filter(TokenUsageData::was_reported)
 }
 
 fn optional_u32(value: &serde_json::Value, field: &str) -> Option<u32> {
@@ -187,7 +184,7 @@ pub(crate) fn parse_invocation_stream(
     response: Response,
     effective_reasoning: ReasoningLevel,
     cancel: CancellationToken,
-) -> InvocationStreamData {
+) -> ProviderResponseStream {
     invocation_stream_from_decoder(
         response,
         effective_reasoning,
@@ -221,7 +218,7 @@ pub(crate) fn invocation_stream_from_decoder(
     effective_reasoning: ReasoningLevel,
     cancel: CancellationToken,
     decoder: InvocationDecoder,
-) -> InvocationStreamData {
+) -> ProviderResponseStream {
     let (sender, receiver) = std::sync::mpsc::sync_channel(INVOCATION_STREAM_CAPACITY);
     let runtime = tokio::runtime::Handle::current();
     let bridge_context = logging::capture();
@@ -231,7 +228,7 @@ pub(crate) fn invocation_stream_from_decoder(
     tokio::task::spawn_blocking(move || {
         producer_runtime.block_on(logging::instrument(producer_context, async move {
             observe_bridge_context("producer");
-            let usage = std::sync::Arc::new(std::sync::Mutex::new(RawUsageSnapshotData::default()));
+            let usage = std::sync::Arc::new(std::sync::Mutex::new(TokenUsageData::default()));
             let mut handler = InvocationEventHandler::new(
                 sender.clone(),
                 producer_cancel.clone(),
@@ -268,16 +265,44 @@ pub(crate) fn invocation_stream_from_decoder(
                 }
             };
             let terminal = match result {
-                Ok(response) => InvocationEventData::Completed(completion_from_legacy(
-                    response,
-                    usage
+                Ok(response) => {
+                    // #1880 v3 拆帧：原 `Completed` 终态事件拆为 `Usage`（若上报）+
+                    // `Stop` 两帧。Text/ToolCall 依赖流增量（增量即完整），尾帧不
+                    // 重发；但 **Thinking 完整块补发**——signature 仅存在于终态
+                    // 块（delta 不携带），anthropic 多轮 thinking 回传依赖它，
+                    // 聚合端以后到的完整 Thinking 帧覆盖先前累计。
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "[provider stream] completed: blocks={} stop={:?} effective_reasoning={:?}",
+                        response.assistant_message.content.len(),
+                        response.stop_reason,
+                        effective_reasoning,
+                    );
+                    for block in &response.assistant_message.content {
+                        if let share::message::ContentBlock::Thinking {
+                            thinking,
+                            signature,
+                        } = block
+                        {
+                            let _ = sender.send(ProviderResponseChunk::Content(
+                                crate::ProviderContentData::Thinking {
+                                    thinking: thinking.clone(),
+                                    signature: signature.clone(),
+                                },
+                            ));
+                        }
+                    }
+                    if let Some(usage) = usage
                         .lock()
                         .expect("usage lock poisoned")
                         .clone()
-                        .into_reported(),
-                    effective_reasoning,
-                )),
-                Err(error) => InvocationEventData::Failed(provider_error_from_legacy(error)),
+                        .into_reported()
+                    {
+                        let _ = sender.send(ProviderResponseChunk::Usage(usage));
+                    }
+                    ProviderResponseChunk::Stop(response.stop_reason)
+                }
+                Err(error) => ProviderResponseChunk::Error(provider_error_from_legacy(error)),
             };
             let _ = sender.send(terminal);
         }));
@@ -305,18 +330,18 @@ pub(crate) fn invocation_stream_from_decoder(
 }
 
 struct InvocationEventHandler {
-    sender: std::sync::mpsc::SyncSender<InvocationEventData>,
+    sender: std::sync::mpsc::SyncSender<ProviderResponseChunk>,
     cancel: CancellationToken,
     decoder: InvocationDecoder,
-    usage: std::sync::Arc<std::sync::Mutex<RawUsageSnapshotData>>,
+    usage: std::sync::Arc<std::sync::Mutex<TokenUsageData>>,
 }
 
 impl InvocationEventHandler {
     fn new(
-        sender: std::sync::mpsc::SyncSender<InvocationEventData>,
+        sender: std::sync::mpsc::SyncSender<ProviderResponseChunk>,
         cancel: CancellationToken,
         decoder: InvocationDecoder,
-        usage: std::sync::Arc<std::sync::Mutex<RawUsageSnapshotData>>,
+        usage: std::sync::Arc<std::sync::Mutex<TokenUsageData>>,
     ) -> Self {
         Self {
             sender,
@@ -326,16 +351,20 @@ impl InvocationEventHandler {
         }
     }
 
-    fn send_delta(&self, delta: InvocationDeltaData) {
+    fn send_delta(&self, delta: ProviderContentData) {
         observe_bridge_context("event");
-        if self.sender.send(InvocationEventData::Delta(delta)).is_err() {
+        if self
+            .sender
+            .send(ProviderResponseChunk::Content(delta))
+            .is_err()
+        {
             self.cancel.cancel();
         }
     }
 }
 
 impl InvocationSink for InvocationEventHandler {
-    fn on_delta(&mut self, delta: InvocationDeltaData) {
+    fn on_delta(&mut self, delta: ProviderContentData) {
         self.send_delta(delta);
     }
 
@@ -346,46 +375,6 @@ impl InvocationSink for InvocationEventHandler {
                 .expect("usage lock poisoned")
                 .merge_reported(latest);
         }
-    }
-}
-
-fn completion_from_legacy(
-    response: StreamResponse,
-    usage: Option<RawUsageSnapshotData>,
-    effective_reasoning: ReasoningLevel,
-) -> ProviderCompletionData {
-    let output = response
-        .assistant_message
-        .content
-        .into_iter()
-        .filter_map(|block| match block {
-            ContentBlock::Text { text } => Some(ProviderContentBlockData::Text(text)),
-            ContentBlock::Thinking {
-                thinking,
-                signature,
-            } => Some(ProviderContentBlockData::Thinking {
-                thinking,
-                signature,
-            }),
-            ContentBlock::ToolUse { id, name, input } => {
-                Some(ProviderContentBlockData::ToolCall(ProviderToolCallData {
-                    id: ProviderToolCallIdData(id),
-                    name,
-                    arguments: input,
-                }))
-            }
-            ContentBlock::ToolResult { .. } | ContentBlock::Image { .. } => None,
-        })
-        .collect();
-    ProviderCompletionData {
-        output,
-        stop_reason: match response.stop_reason {
-            StopReason::EndTurn => ProviderStopReasonData::EndTurn,
-            StopReason::ToolUse => ProviderStopReasonData::ToolUse,
-            StopReason::MaxTokens => ProviderStopReasonData::MaxOutputTokens,
-        },
-        usage,
-        effective_reasoning,
     }
 }
 
@@ -417,7 +406,7 @@ pub async fn parse_stream(
         reasoning_tokens: None,
         total_tokens: None,
     };
-    let mut stop_reason = StopReason::EndTurn;
+    let mut stop_reason = ResponseStopReason::EndTurn;
 
     let mut last_event_time: Option<std::time::Instant> = None;
     let mut tool_index: usize = 0;
@@ -623,7 +612,13 @@ pub async fn parse_stream(
                 usage: delta_usage,
             } => {
                 if let Some(reason) = delta.stop_reason {
-                    stop_reason = StopReason::parse(&reason);
+                    stop_reason = match reason.as_str() {
+                        "end_turn" => ResponseStopReason::EndTurn,
+                        "tool_use" => ResponseStopReason::ToolUse,
+                        "max_tokens" => ResponseStopReason::MaxOutputTokens,
+                        "stop_sequence" => ResponseStopReason::StopSequence,
+                        other => ResponseStopReason::Other(other.to_string()),
+                    };
                 }
                 if let Some(du) = delta_usage {
                     usage.output_tokens = du.output_tokens;
@@ -666,15 +661,10 @@ mod contract_tests;
 fn provider_error_from_legacy(error: crate::LlmError) -> ProviderError {
     let retryable = matches!(
         &error,
-        crate::LlmError::Network(_)
-            | crate::LlmError::StreamInterrupted(_)
-            | crate::LlmError::StreamTruncated { .. }
+        crate::LlmError::StreamInterrupted(_) | crate::LlmError::StreamTruncated { .. }
     );
     let kind = match &error {
         crate::LlmError::Cancelled => ProviderErrorKind::Cancelled,
-        crate::LlmError::RateLimited => ProviderErrorKind::RateLimited,
-        crate::LlmError::ContextTooLong => ProviderErrorKind::ContextTooLong,
-        crate::LlmError::Network(_) => ProviderErrorKind::Network,
         crate::LlmError::Api { .. } => ProviderErrorKind::UpstreamUnavailable,
         crate::LlmError::StreamInterrupted(_) | crate::LlmError::StreamTruncated { .. } => {
             ProviderErrorKind::StreamTruncated

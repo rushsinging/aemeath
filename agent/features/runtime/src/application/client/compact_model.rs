@@ -101,7 +101,7 @@ impl CompactModelTarget {
 
     /// compact 调用模型的输入窗口；`None` 表示未知，调用方 **MUST** fail closed。
     pub fn context_window(&self) -> Option<usize> {
-        self.binding.context_window
+        self.binding.model.context_limit
     }
 
     /// 日志用模型标识（`provider/model`），不含 prompt 或凭据。

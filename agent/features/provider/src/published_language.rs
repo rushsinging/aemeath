@@ -9,191 +9,44 @@
 //!
 //! #901 冻结契约；现有 `contract.rs` 的 legacy 类型保留兼容，后续逐步退役。
 
-use std::pin::Pin;
+use share::reasoning::ReasoningLevel;
 use std::time::Duration;
 
-use async_trait::async_trait;
-use futures_util::Stream;
 use share::message::Message;
 
-/// Provider 只读消费的取消信号。
+// ─── ModelInfo ─────────────────────────────────────────
+
+/// 模型元数据——config/catalog 外部数据的单一实体投影。
 ///
-/// 端口不暴露取消发起、child token 或 deadline；consumer drop 由私有
-/// stream owner 负责转为 invocation-local 取消。
-#[async_trait]
-pub trait CancellationSignal: Send + Sync {
-    fn is_cancelled(&self) -> bool;
-    async fn cancelled(&self);
-}
-
-#[async_trait]
-impl CancellationSignal for tokio_util::sync::CancellationToken {
-    fn is_cancelled(&self) -> bool {
-        tokio_util::sync::CancellationToken::is_cancelled(self)
-    }
-
-    async fn cancelled(&self) {
-        tokio_util::sync::CancellationToken::cancelled(self).await;
-    }
-}
-
-// ─── 模型标识 ───────────────────────────────────────────
-
-/// 模型标识符（provider/model）。
-///
-/// 跨 BC 稳定标识一个 LLM 模型源，不携带 driver 或 transport 细节。
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ModelIdData {
-    /// provider 名称（如 "Anthropic"、"Zhipu"）。
+/// provider 是读侧（不写入）；身份（provider/model）与能力（supports_*、
+/// reasoning、调用限制）不可分：不存在脱离能力的纯标识场景。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelInfo {
+    /// provider 名称（如 "Anthropic"）。
     pub provider: String,
-    /// 模型名称（如 "claude-fable-5-1"）。
+    /// 模型名。
     pub model: String,
-}
-
-impl std::fmt::Display for ModelIdData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}/{}", self.provider, self.model)
-    }
-}
-
-// ─── Reasoning ──────────────────────────────────────────
-
-/// Re-export ReasoningLevel from core::provider for PL consumers.
-pub use crate::domain::capability::ReasoningLevel;
-
-/// Reasoning 映射方式——driver 如何把 ReasoningLevel 映射到 wire。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ReasoningMappingKindData {
-    /// OpenAI 风格 effort 字符串。
-    Effort,
-    /// Anthropic 风格 thinking 开关。
-    ThinkingToggle,
-    /// Thinking budget（token 数）。
-    ThinkingBudget,
-    /// Adaptive 模式（provider 内部决定）。
-    Adaptive,
-    /// 不支持 reasoning。
-    None,
-}
-
-/// 模型 reasoning 能力声明。
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ReasoningCapabilityData {
-    supported: Vec<ReasoningLevel>,
-    /// 映射方式。
-    pub mapping: ReasoningMappingKindData,
-}
-
-impl ReasoningCapabilityData {
-    pub fn new(
-        supported: impl IntoIterator<Item = ReasoningLevel>,
-        mapping: ReasoningMappingKindData,
-    ) -> Result<Self, ProviderError> {
-        let mut supported: Vec<_> = supported.into_iter().collect();
-        supported.sort_unstable();
-        supported.dedup();
-        if supported.first() != Some(&ReasoningLevel::Off) {
-            return Err(ProviderError::fatal(
-                ProviderErrorKind::Configuration,
-                "reasoning capability 必须包含 off 档位",
-            ));
-        }
-        Ok(Self { supported, mapping })
-    }
-
-    /// 构造不支持 reasoning 的默认能力。
-    pub fn none() -> Self {
-        Self {
-            supported: vec![ReasoningLevel::Off],
-            mapping: ReasoningMappingKindData::None,
-        }
-    }
-
-    pub fn supported(&self) -> &[ReasoningLevel] {
-        &self.supported
-    }
-
-    pub fn maximum(&self) -> ReasoningLevel {
-        self.supported
-            .last()
-            .copied()
-            .unwrap_or(ReasoningLevel::Off)
-    }
-
-    pub fn resolve(&self, requested: ReasoningLevel) -> ReasoningLevel {
-        self.supported
-            .iter()
-            .rev()
-            .copied()
-            .find(|level| *level <= requested)
-            .unwrap_or(ReasoningLevel::Off)
-    }
-}
-
-// ─── ModelCapabilityData ────────────────────────────────────
-
-/// 模型能力声明。
-///
-/// Runtime 可用于前置校验和展示；Provider 在请求编码前仍必须复核。
-#[derive(Debug, Clone)]
-pub struct ModelCapabilityData {
-    /// 模型标识。
-    pub model: ModelIdData,
     /// 是否支持 tool use。
     pub supports_tools: bool,
     /// 是否支持并行 tool calls。
     pub supports_parallel_tool_calls: bool,
     /// 是否支持流式。
     pub supports_streaming: bool,
-    /// Reasoning 能力。
-    pub reasoning: ReasoningCapabilityData,
+    /// Reasoning 支持阶梯（升序去重；由 client 装配时按 driver 能力覆盖）。
+    pub supported_reasoning: Vec<ReasoningLevel>,
     /// 上下文窗口大小（token 数），`None` 表示未知。
     pub context_limit: Option<usize>,
     /// 最大输出 token 数，`None` 表示未知。
     pub output_limit: Option<usize>,
 }
 
-impl ModelCapabilityData {}
-
-// ─── Tool Call（Provider 边界） ─────────────────────────
-
-/// Provider 边界的 tool call 标识。
-///
-/// 这是 Provider 返回的原始 tool-call ID（如 Anthropic 的 `toolu_*` 或
-/// OpenAI 的 `call_*`）。Runtime 在写入 Run Step 时创建领域 `ToolCallId`
-/// 并维护双 ID 映射。Provider **NEVER** 生成领域 ID。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderToolCallIdData(pub String);
-
-impl std::fmt::Display for ProviderToolCallIdData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+impl ModelInfo {
+    /// 请求档位在支持阶梯内的 clamp：阶梯中 ≤requested 的最大档，Off 兜底。
+    ///
+    /// 原 reasoning 能力数据类型的 resolve 逻辑（#1861 v4 摊平进实体）。
+    pub fn resolve_reasoning(&self, requested: ReasoningLevel) -> ReasoningLevel {
+        crate::domain::capability::resolve_supported(&self.supported_reasoning, requested)
     }
-}
-
-/// Provider 边界的 tool call 完整形态。
-#[derive(Debug, Clone)]
-pub struct ProviderToolCallData {
-    /// Provider 原始 tool-call ID。
-    pub id: ProviderToolCallIdData,
-    /// 工具名称。
-    pub name: String,
-    /// 验证过的 JSON 参数。
-    pub arguments: serde_json::Value,
-}
-
-/// Provider 返回的 assistant 内容块。
-#[derive(Debug, Clone)]
-pub enum ProviderContentBlockData {
-    /// 文本内容。
-    Text(String),
-    /// Thinking/reasoning 内容（签名可选）。
-    Thinking {
-        thinking: String,
-        signature: Option<String>,
-    },
-    /// Tool call。
-    ToolCall(ProviderToolCallData),
 }
 
 // ─── Raw Usage ──────────────────────────────────────────
@@ -203,7 +56,7 @@ pub enum ProviderContentBlockData {
 /// 所有字段区分"未报告"（`None`）与真实零值（`Some(0)`）。
 /// Provider 只做协议标准化，不计算 cost。
 #[derive(Debug, Clone, Default)]
-pub struct RawUsageSnapshotData {
+pub struct TokenUsageData {
     pub input_tokens: Option<u32>,
     pub output_tokens: Option<u32>,
     pub cache_read_tokens: Option<u32>,
@@ -211,7 +64,7 @@ pub struct RawUsageSnapshotData {
     pub reasoning_tokens: Option<u32>,
 }
 
-impl RawUsageSnapshotData {
+impl TokenUsageData {
     pub fn was_reported(&self) -> bool {
         self.input_tokens.is_some()
             || self.output_tokens.is_some()
@@ -248,7 +101,7 @@ impl RawUsageSnapshotData {
 /// 统一停止原因。
 ///
 /// 注意：与 legacy `business::types::StopReason`（3 变体）不同。
-/// 对外 re-export 时使用别名 `ProviderStopReasonData` 以避免命名冲突。
+/// 对外 re-export 时使用别名 `ResponseStopReason` 以避免命名冲突。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StopReason {
     /// 模型自然结束回复。
@@ -266,61 +119,99 @@ pub enum StopReason {
 }
 
 /// 别名导出——contract.rs 用此名 re-export，避免与 legacy StopReason 冲突。
-pub use StopReason as ProviderStopReasonData;
+pub use StopReason as ResponseStopReason;
 
-// ─── ProviderCompletionData ─────────────────────────────────
+// ─── Response（输出侧唯一契约：非流式终态 + 流式片段）──────────────
 
-/// 一次调用的终结完成态。
+/// 一次调用的完整响应（非流式终态；自带成败——单通道形态）。
 ///
-/// `output` 必须是所有已发 delta 的完整最终形态，
-/// 并保留 provider tool-call ID。
+/// `ok=false` 时仅 `error` 有意义；流式调用的消费方聚合片段后组装同构
+/// 实例（Usage/Stop 片段归位于此）。
 #[derive(Debug, Clone)]
-pub struct ProviderCompletionData {
-    /// 最终 assistant 内容块。
-    pub output: Vec<ProviderContentBlockData>,
-    /// 停止原因。
-    pub stop_reason: StopReason,
-    /// 最终 usage 快照（`None` = provider 未返回 usage）。
-    pub usage: Option<RawUsageSnapshotData>,
-    /// 有效 reasoning level（clamp 后的实际档位）。
+pub struct ProviderResponse {
+    pub ok: bool,
+    pub error: Option<ProviderError>,
+    pub output: Vec<ProviderContentData>,
+    pub stop_reason: Option<ResponseStopReason>,
+    pub token_usage: Option<TokenUsageData>,
     pub effective_reasoning: ReasoningLevel,
 }
 
-// ─── Invocation Delta ───────────────────────────────────
-
-/// 流式 delta——非终结增量。
-///
-/// 终结增量通过 `InvocationEventData::Completed` / `InvocationEventData::Failed` 表达，
-/// 不出现在 `InvocationDeltaData` 中。
+/// 流式响应的增量片段；`Error` 为失败终止帧（取消同归于此）。
 #[derive(Debug, Clone)]
-pub enum InvocationDeltaData {
-    /// 文本增量。
+pub enum ProviderResponseChunk {
+    /// 内容片段（文本/thinking/工具调用增量与完整块）。
+    Content(ProviderContentData),
+    /// LLM token 用量（流尾）。
+    Usage(TokenUsageData),
+    /// 停止原因（流尾，正常闭合）。
+    Stop(ResponseStopReason),
+    /// 失败终止帧。
+    Error(ProviderError),
+}
+
+/// 内容片段——「终态块」与「流增量」合并的同构家族。
+#[derive(Debug, Clone)]
+pub enum ProviderContentData {
+    /// 文本（增量或完整块）。
     Text(String),
-    /// Thinking/reasoning 增量。
+    /// Thinking/reasoning 内容（签名可选）。
     Thinking {
         thinking: String,
         signature: Option<String>,
     },
-    /// Tool call 开始。
+    /// 完整 tool call（终态块 / 增量完成帧）。
+    ///
+    /// ID 为 Provider 返回的原始 tool-call 标识（如 Anthropic 的 `toolu_*` 或
+    /// OpenAI 的 `call_*`）。Runtime 在写入 Run Step 时创建领域 `ToolCallId`
+    /// 并维护双 ID 映射。Provider **NEVER** 生成领域 ID。
+    ToolCall {
+        /// Provider 原始 tool-call ID。
+        id: String,
+        /// 工具名称。
+        name: String,
+        /// 验证过的 JSON 参数。
+        arguments: serde_json::Value,
+    },
+    /// Tool call 开始（流增量）。
     ToolCallStarted {
         index: usize,
-        provider_id: Option<ProviderToolCallIdData>,
+        provider_id: Option<String>,
         name: String,
     },
-    /// Tool arguments 增量字符串片段。
+    /// Tool arguments 增量字符串片段（流增量）。
     ToolArgumentsDelta {
         index: usize,
-        provider_id: Option<ProviderToolCallIdData>,
+        provider_id: Option<String>,
         partial_json: String,
     },
-    /// Tool call 完成（给出验证过的 JSON 值）。
+    /// Tool call 增量完成帧：参数已完整并校验为合法 JSON（`index` 与
+    /// `ToolCallStarted`/`ToolArgumentsDelta` 同源），与终态 `ToolCall`
+    /// 块同构——runtime 据此边流边执行。
     ToolCallCompleted {
         index: usize,
-        call: ProviderToolCallData,
+        /// Provider 原始 tool-call ID。
+        id: String,
+        /// 工具名称。
+        name: String,
+        /// 验证过的 JSON 参数。
+        arguments: serde_json::Value,
     },
-    /// Usage 快照更新。
-    UsageSnapshot(RawUsageSnapshotData),
 }
+
+/// 流式响应类型。
+pub type ProviderResponseStream =
+    std::pin::Pin<Box<dyn futures_util::Stream<Item = ProviderResponseChunk> + Send>>;
+
+impl ProviderResponseChunk {
+    /// 终止帧：`Stop`（正常闭合）或 `Error`（失败闭合，含取消）；
+    /// 终止帧之后流必须结束。
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Stop(_) | Self::Error(_))
+    }
+}
+
+// ─── Invocation Delta ───────────────────────────────────
 
 // ─── Error ──────────────────────────────────────────────
 
@@ -435,96 +326,15 @@ impl std::fmt::Display for ProviderError {
 
 impl std::error::Error for ProviderError {}
 
-// ─── Model Tool Schema ──────────────────────────────────
-
-/// 模型可见的 tool schema。
-///
-/// 这是 Tool Catalog 的模型可见投影。driver 转换时只保留供应商允许字段。
-#[derive(Debug, Clone)]
-pub struct ModelToolSchemaData {
-    /// 工具名称。
-    pub name: String,
-    /// 工具描述。
-    pub description: String,
-    /// 输入 JSON schema。
-    pub input_schema: serde_json::Value,
-}
-
-impl ModelToolSchemaData {
-    /// 渲染为完整的 tool 定义 JSON 对象
-    /// `{ "name", "description", "input_schema" }`。
-    ///
-    /// provider-internal helper：Composition adapter 和各 driver 共用它，
-    /// 保证 tool wire shape 一致，且避免在 Composition（不直接依赖 serde_json）
-    /// 里手写 JSON 拼装。
-    pub fn to_tool_definition(&self) -> serde_json::Value {
-        serde_json::json!({
-            "name": self.name,
-            "description": self.description,
-            "input_schema": self.input_schema,
-        })
-    }
-}
-
-// ─── InvocationOptionsData ──────────────────────────────────
-
-/// Legacy 一次调用选项；生产 resolver 接线延期到 v0.2.0 决策。
-#[derive(Debug, Clone)]
-pub struct InvocationOptionsData {
-    /// 最大输出 token。
-    pub max_output_tokens: u32,
-    /// 期望 reasoning level（Workflow 已应用 Config 静态上限）。
-    pub reasoning: ReasoningLevel,
-}
-
-impl InvocationOptionsData {
-    /// 构造默认选项。
-    pub fn new(max_output_tokens: u32, reasoning: ReasoningLevel) -> Self {
-        Self {
-            max_output_tokens,
-            reasoning,
-        }
-    }
-}
-
-// ─── System Blocks (provider-neutral) ──────────────────
-
-/// Provider-neutral system prompt 块。
-///
-/// Runtime 构造的 system prompt 内容，区分可缓存（静态、稳定）与动态文本。
-/// `Cacheable` 表示该块适合 prompt caching；是否真正命中缓存由 provider 决定。
-/// driver/adapter 负责转换到 vendor wire DTO（如 Anthropic 的 `SystemBlockData`）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RequestSystemBlockData {
-    /// 动态文本块，不参与 prompt caching。
-    Text(String),
-    /// 静态文本块，建议 provider 应用 prompt caching（如 Anthropic ephemeral）。
-    Cacheable(String),
-}
-
-impl RequestSystemBlockData {
-    /// 块的文本内容。
-    pub fn text(&self) -> &str {
-        match self {
-            RequestSystemBlockData::Text(t) | RequestSystemBlockData::Cacheable(t) => t,
-        }
-    }
-
-    /// 是否建议 provider 缓存。
-    pub fn is_cacheable(&self) -> bool {
-        matches!(self, RequestSystemBlockData::Cacheable(_))
-    }
-}
-
-// ─── InvocationRequestData ──────────────────────────────────
+// ─── ProviderRequestData ──────────────────────────────────
 
 /// 一次 LLM 调用请求。
 ///
-/// 一个 `InvocationRequestData` 固定一个 model 和一份不可变 options。
+/// 一个 `ProviderRequestData` 固定一个 model 和一份不可变 options。
 #[derive(Debug, Clone)]
-pub struct InvocationRequestData {
-    /// 目标模型。
-    pub model: ModelIdData,
+pub struct ProviderRequestData {
+    /// 目标模型名（binding 已绑定具体客户端与 [`ModelInfo`]，请求只携带名字）。
+    pub model: String,
     /// Runtime-owned cancellation token for this invocation.
     ///
     /// The Provider adapter uses the same token for stream establishment and the
@@ -532,57 +342,42 @@ pub struct InvocationRequestData {
     pub cancellation: tokio_util::sync::CancellationToken,
     /// 本轮上下文窗口消息。
     pub messages: std::sync::Arc<[Message]>,
-    /// 本轮 system prompt 块（provider-neutral）。
-    pub system: Vec<RequestSystemBlockData>,
-    /// 模型可见 tool schema 列表。
-    pub tools: Vec<ModelToolSchemaData>,
-    /// 调用选项。
-    pub options: InvocationOptionsData,
+    /// 本轮 system prompt——context/runtime 拼好的整段文本（#1861 v4：
+    /// 原块级 system 数据类型消除，拼接职责归上游）。
+    pub system: String,
+    /// 可缓存前缀的字节长度（prompt caching 分界；0 = 无）。
+    ///
+    /// 分界天然落在原块边界上（`llm_strategy` 拼接时按 `cache_break` 计算），
+    /// 因此按字节切分不会切断 UTF-8 字符。
+    pub static_prefix_len: usize,
+    /// 模型可见 tool schema 列表（wire-ready）。
+    pub tools: Vec<serde_json::Value>,
+    /// 单次调用最大输出 token。
+    pub max_output_tokens: u32,
+    /// 请求推理档位（clamp 前的原始请求值）。
+    pub reasoning: ReasoningLevel,
 }
 
-impl InvocationRequestData {
+impl ProviderRequestData {
     /// 构造一个最小请求（无 system、无 tools）。
     pub fn new(
-        model: ModelIdData,
+        model: String,
         messages: impl Into<std::sync::Arc<[Message]>>,
-        options: InvocationOptionsData,
+        max_output_tokens: u32,
+        reasoning: ReasoningLevel,
     ) -> Self {
         Self {
             model,
             cancellation: tokio_util::sync::CancellationToken::new(),
             messages: messages.into(),
-            system: Vec::new(),
+            system: String::new(),
+            static_prefix_len: 0,
             tools: Vec::new(),
-            options,
+            max_output_tokens,
+            reasoning,
         }
     }
 }
-
-// ─── InvocationEventData ────────────────────────────────────
-
-/// 一次调用的流式事件。
-///
-/// Delta 是非终结增量；Completed 和 Failed 是互斥终结事件，恰好出现一个。
-/// 取消以 `Failed(ProviderError::cancelled())` 终结。
-/// 终结事件后下一次 `next()` 返回 `None`。
-#[derive(Debug, Clone)]
-pub enum InvocationEventData {
-    /// 非终结增量。
-    Delta(InvocationDeltaData),
-    /// 完成终结（恰好出现一次）。
-    Completed(ProviderCompletionData),
-    /// 失败终结（恰好出现一次，取消也归入此变体）。
-    Failed(ProviderError),
-}
-
-impl InvocationEventData {
-    pub fn is_terminal(&self) -> bool {
-        matches!(self, Self::Completed(_) | Self::Failed(_))
-    }
-}
-
-/// 一次上游语义请求的有序 pull stream。
-pub type InvocationStreamData = Pin<Box<dyn Stream<Item = InvocationEventData> + Send>>;
 
 #[cfg(test)]
 #[path = "published_language_tests.rs"]

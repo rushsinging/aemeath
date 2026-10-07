@@ -88,7 +88,7 @@ fn responses_request_body_keeps_typed_image_input() {
         None,
         60,
     );
-    let scope = InvocationScopeData::new(
+    let resolved = crate::ports::ResolvedInvocation::new(
         "test-model",
         8192,
         crate::domain::capability::ReasoningLevel::Off,
@@ -101,7 +101,7 @@ fn responses_request_body_keeps_typed_image_input() {
         "image/png".to_string(),
     )];
 
-    let body = provider.build_responses_request_body(&scope, &[], &messages, &[], false);
+    let body = provider.build_responses_request_body(&resolved, "", &messages, &[], false);
 
     assert_eq!(body["input"].as_array().map(Vec::len), Some(1));
     assert_eq!(
@@ -173,16 +173,16 @@ fn responses_instructions_omit_anthropic_cache_control() {
         None,
         60,
     );
-    let scope = InvocationScopeData::new(
+    let resolved = crate::ports::ResolvedInvocation::new(
         "test-model",
         8192,
         crate::domain::capability::ReasoningLevel::Off,
         crate::domain::capability::ReasoningLevel::Off,
     )
     .expect("valid scope");
-    let system = vec![SystemBlockData::cached("stable instructions".to_string())];
+    let system = "stable instructions";
 
-    let body = provider.build_responses_request_body(&scope, &system, &[], &[], false);
+    let body = provider.build_responses_request_body(&resolved, system, &[], &[], false);
     assert_eq!(body["instructions"], "stable instructions");
     assert!(body.get("cache_control").is_none());
 }
@@ -210,14 +210,14 @@ fn test_build_responses_request_body_injects_tools_from_flat_schema() {
         None,
         60,
     );
-    let scope = InvocationScopeData::new(
+    let resolved = crate::ports::ResolvedInvocation::new(
         "test-model",
         8192,
         crate::domain::capability::ReasoningLevel::Off,
         crate::domain::capability::ReasoningLevel::Off,
     )
     .expect("valid scope");
-    let body = provider.build_responses_request_body(&scope, &[], &[], &flat_schemas, false);
+    let body = provider.build_responses_request_body(&resolved, "", &[], &flat_schemas, false);
 
     // tools 必须被注入（修复前 schema.get("function") = None 导致 tools 丢失）
     let tools = body.get("tools").expect("tools should be injected");

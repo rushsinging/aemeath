@@ -1,21 +1,20 @@
 //! 消息格式转换：将 Anthropic 风格转换为 Ollama 原生 /api/chat 格式。
 
 use super::OllamaProvider;
-use crate::domain::invoke::{InvocationScopeData, SystemBlockData};
 use share::message::{ContentBlock, Message, Role};
 
 /// 将转换方法封装为 trait，方便在 mod.rs 中通过 `self.convert_messages(...)` 调用。
 pub(crate) trait OllamaProviderConversion {
     fn convert_messages(
         &self,
-        system: &[SystemBlockData],
+        system: &str,
         messages: &[Message],
     ) -> Result<Vec<serde_json::Value>, crate::LlmError>;
     fn convert_tools(tool_schemas: &[serde_json::Value]) -> Vec<serde_json::Value>;
     fn build_request_body(
         &self,
-        scope: &InvocationScopeData,
-        system: &[SystemBlockData],
+        resolved: &crate::ports::ResolvedInvocation,
+        system: &str,
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         stream: bool,
@@ -32,7 +31,7 @@ impl OllamaProviderConversion for OllamaProvider {
     ///   (no `tool_call_id` / `tool_name` fields required)
     fn convert_messages(
         &self,
-        system: &[SystemBlockData],
+        system: &str,
         messages: &[Message],
     ) -> Result<Vec<serde_json::Value>, crate::LlmError> {
         let mut ollama_messages = Vec::new();
@@ -62,9 +61,12 @@ impl OllamaProviderConversion for OllamaProvider {
             }
         }
 
-        // Build system message: original system blocks + extracted reminders
-        let mut system_parts: Vec<String> =
-            system.iter().map(|b| b.text.as_str().to_string()).collect();
+        // Build system message: 整段 system prompt + extracted reminders
+        // （#1861 v4：上游已拼接为整串，块级 join 消除）。
+        let mut system_parts: Vec<String> = Vec::new();
+        if !system.is_empty() {
+            system_parts.push(system.to_string());
+        }
         system_parts.extend(system_extras);
 
         if !system_parts.is_empty() {
@@ -189,8 +191,8 @@ impl OllamaProviderConversion for OllamaProvider {
     /// and non-streaming paths; toggle `stream` accordingly.
     fn build_request_body(
         &self,
-        scope: &InvocationScopeData,
-        system: &[SystemBlockData],
+        resolved: &crate::ports::ResolvedInvocation,
+        system: &str,
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         stream: bool,
@@ -199,15 +201,15 @@ impl OllamaProviderConversion for OllamaProvider {
         let tools = Self::convert_tools(tool_schemas);
 
         let mut request_body = serde_json::json!({
-            "model": scope.model(),
+            "model": resolved.model.as_str(),
             "messages": ollama_messages,
             "stream": stream,
             // think toggles reasoning mode natively (qwen3, deepseek-r1, gpt-oss...)
-            "think": scope.effective_reasoning() != crate::domain::capability::ReasoningLevel::Off,
+            "think": resolved.effective_reasoning != crate::domain::capability::ReasoningLevel::Off,
         });
 
         // ollama uses `options.num_predict` for max tokens
-        let max_tokens = scope.max_tokens();
+        let max_tokens = resolved.max_tokens;
         if max_tokens > 0 && max_tokens <= 128000 {
             request_body["options"] = serde_json::json!({
                 "num_predict": max_tokens

@@ -234,7 +234,7 @@ impl ReflectionTaskAdapter {
         request: ReflectionTaskRequest,
         config: share::config::MemoryConfig,
         provider: std::sync::Arc<dyn ProviderPort>,
-        model: provider::ModelIdData,
+        model: provider::ModelInfo,
         max_tokens: u32,
         requested_reasoning: share::reasoning::ReasoningLevel,
         system_prompt_text: String,

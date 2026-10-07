@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::adapters::openai_compatible::ReasoningConfig;
-use crate::domain::invoke::SystemBlockData;
+use crate::domain::capability::ReasoningLevel;
 use crate::ports::LlmProvider;
 use crate::ProviderDriverKind;
 use share::message::Message;
@@ -46,7 +46,7 @@ fn reasoning_level_from_options(
 /// 校验 invocation 构造输入已完成 Config 解析；base URL / 模型 / UA
 /// 任一缺失时 fail-closed 返回 Configuration 错误，禁止回落 adapter 内置默认值。
 fn ensure_resolved_invocation_inputs(
-    options: &LlmConfigOptionsData,
+    options: &ProviderClientSpecData,
 ) -> Result<(), crate::LlmError> {
     if options
         .base_url
@@ -76,7 +76,7 @@ fn ensure_resolved_invocation_inputs(
 
 /// 解析 driver 字符串与 API style；无效输入显式报 Configuration 错误。
 fn parse_driver_spec(
-    options: &LlmConfigOptionsData,
+    options: &ProviderClientSpecData,
 ) -> Result<crate::domain::driver_acl::DriverSpec, crate::LlmError> {
     crate::domain::driver_acl::DriverSpec::parse(&options.driver, options.api_style.as_deref())
         .map_err(|error| crate::LlmError::Config(error.to_string()))
@@ -85,7 +85,7 @@ fn parse_driver_spec(
 /// 从构造配置推导 transport key；model / max_tokens / reasoning 是
 /// invocation 配置，MUST NOT 进入 key。
 fn transport_key_for(
-    options: &LlmConfigOptionsData,
+    options: &ProviderClientSpecData,
     spec: &crate::domain::driver_acl::DriverSpec,
 ) -> crate::adapters::transport::TransportKey {
     crate::adapters::transport::TransportKey {
@@ -106,9 +106,15 @@ fn transport_key_for(
 /// `from_config` 与 `from_config_with_pool` 的共用实现。
 fn build_provider_and_scope(
     spec: crate::domain::driver_acl::DriverSpec,
-    options: LlmConfigOptionsData,
+    options: ProviderClientSpecData,
     http: reqwest::Client,
-) -> Result<(Arc<dyn LlmProvider>, crate::InvocationScopeData), crate::LlmError> {
+) -> Result<
+    (
+        Arc<dyn LlmProvider>,
+        crate::domain::invoke::InvocationScopeData,
+    ),
+    crate::ProviderError,
+> {
     use crate::domain::driver_acl::{ApiStyle, ProtocolFamily};
 
     let driver = spec.kind();
@@ -154,7 +160,7 @@ fn build_provider_and_scope(
         }
     };
     let effective_reasoning = requested_reasoning.clamped_to(provider_impl.max_reasoning_level());
-    let default_scope = crate::InvocationScopeData::new(
+    let default_scope = crate::domain::invoke::InvocationScopeData::new(
         model,
         if options.max_tokens == 0 {
             share::config::models::DEFAULT_MAX_TOKENS
@@ -167,9 +173,52 @@ fn build_provider_and_scope(
     Ok((provider_impl, default_scope))
 }
 
+/// 客户端装配内核（`wire_provider_client` 内部复用；探测走独立
+/// transport 的 `wire_probe_client`）。
+pub(crate) fn assemble_client(
+    options: ProviderClientSpecData,
+    pool: &crate::adapters::pool::TransportPool,
+    default_reasoning: ReasoningLevel,
+) -> Result<Arc<LlmClient>, crate::ProviderError> {
+    let client = LlmClient::from_config_with_pool(options, pool)?;
+    let client = client.with_default_reasoning(default_reasoning)?;
+    Ok(Arc::new(client))
+}
+
+/// factory build 的 provider 侧装配单入口（#1861 v4：构造配置 + 模型元数据
+/// → `(client, 修正版 ModelInfo)`；原装配句柄包消除）。
+///
+/// `model` 携带身份、supports_* 与调用限制（组合根从 config/catalog 投影
+/// 构造）；`supported_reasoning` 阶梯由 client 推导覆盖（provider 读侧权威
+/// ——阶梯取决于 driver 能力，装配时才可知）。跨 BC 的 spec→config 翻译与
+/// binding 组装留在组合根桥接层（binding.requested_reasoning 由 spec 直取，
+/// 与输入重复的 wiring.requested_reasoning 随句柄包一并消除）。
+pub fn wire_provider_client(
+    config: ProviderClientSpecData,
+    model: crate::published_language::ModelInfo,
+    pool: &crate::adapters::pool::TransportPool,
+) -> Result<(Arc<LlmClient>, crate::published_language::ModelInfo), crate::ProviderError> {
+    // 构造面内核的默认推理档位由 config 自身推导（bool/reasoning_config）；
+    // binding 级 requested_reasoning 由组合根从 spec 直取，不经此处。
+    let default_reasoning =
+        reasoning_level_from_options(config.reasoning, config.reasoning_config.as_ref());
+    let client = assemble_client(config, pool, default_reasoning)?;
+    let model = crate::published_language::ModelInfo {
+        supported_reasoning: crate::domain::capability::supported_reasoning_from_max(
+            client.max_reasoning_level(),
+        ),
+        ..model
+    };
+    Ok((client, model))
+}
+
 #[cfg(test)]
 #[path = "client_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "client_invoke_tests.rs"]
+mod invoke_tests;
 
 /// Truncate a string to at most `max_bytes`, snapping to the nearest char boundary.
 fn truncate_preview(s: &str, max_bytes: usize) -> String {
@@ -220,19 +269,7 @@ impl OpenAIProviderConfig {
     }
 }
 
-pub struct LlmProviderOptions {
-    pub driver: ProviderDriverKind,
-    pub api_key: String,
-    pub base_url: Option<String>,
-    pub model: Option<String>,
-    pub max_tokens: u32,
-    pub reasoning: bool,
-    pub reasoning_config: Option<ReasoningConfig>,
-    pub timeout_secs: u64,
-    pub user_agent: Option<String>,
-}
-
-pub struct LlmConfigOptionsData {
+pub struct ProviderClientSpecData {
     pub driver: String,
     pub source_key: String,
     pub api_style: Option<String>,
@@ -248,14 +285,15 @@ pub struct LlmConfigOptionsData {
 
 pub struct LlmClient {
     provider: Arc<dyn LlmProvider>,
-    default_scope: crate::InvocationScopeData,
+    default_scope: crate::domain::invoke::InvocationScopeData,
     /// 底层共享 transport 的诊断 id；`None` 表示独占（非 pool）HTTP client。
     transport_id: Option<u64>,
 }
 
 impl LlmClient {
+    #[cfg(test)]
     pub fn from_provider(provider: Arc<dyn LlmProvider>) -> Self {
-        let default_scope = crate::InvocationScopeData::new(
+        let default_scope = crate::domain::invoke::InvocationScopeData::new(
             provider.model_name(),
             share::config::models::DEFAULT_MAX_TOKENS,
             crate::domain::capability::ReasoningLevel::Off,
@@ -271,99 +309,7 @@ impl LlmClient {
 }
 
 impl LlmClient {
-    pub fn new(api_key: String) -> Self {
-        Self::with_provider(LlmProviderOptions {
-            driver: ProviderDriverKind::Anthropic,
-            api_key,
-            base_url: None,
-            model: Some("claude-sonnet-5".to_string()),
-            max_tokens: 8192,
-            reasoning: false,
-            reasoning_config: None,
-            timeout_secs: crate::DEFAULT_TIMEOUT_SECS,
-            user_agent: Some(share::config::Config::default().api.user_agent),
-        })
-    }
-
-    pub fn with_provider(options: LlmProviderOptions) -> Self {
-        let model = options.model.clone();
-        let requested_reasoning =
-            reasoning_level_from_options(options.reasoning, options.reasoning_config.as_ref());
-        let provider_impl: Arc<dyn LlmProvider> = match options.driver {
-            ProviderDriverKind::Anthropic => {
-                Arc::new(crate::adapters::AnthropicProvider::new_with_user_agent(
-                    options.api_key,
-                    options.base_url,
-                    options.model,
-                    options.max_tokens,
-                    crate::domain::capability::ReasoningLevel::Off,
-                    options.timeout_secs,
-                    options
-                        .user_agent
-                        .unwrap_or_else(|| share::config::Config::default().api.user_agent),
-                ))
-            }
-            ProviderDriverKind::Ollama => {
-                Arc::new(crate::adapters::OllamaProvider::new_with_user_agent(
-                    options.api_key,
-                    options.base_url,
-                    options.model,
-                    options.max_tokens,
-                    options.reasoning,
-                    options.timeout_secs,
-                    options
-                        .user_agent
-                        .unwrap_or_else(|| share::config::Config::default().api.user_agent),
-                ))
-            }
-            ProviderDriverKind::OpenAI
-            | ProviderDriverKind::Zhipu
-            | ProviderDriverKind::LiteLLM
-            | ProviderDriverKind::Volcengine
-            | ProviderDriverKind::Minimax
-            | ProviderDriverKind::Mimo
-            | ProviderDriverKind::DeepSeek
-            | ProviderDriverKind::Agnes => {
-                let config =
-                    OpenAIProviderConfig::from_driver(options.driver, options.driver.as_str());
-                Arc::new(
-                    crate::adapters::OpenAICompatibleProvider::new_with_user_agent(
-                        config,
-                        options.api_key,
-                        options.base_url,
-                        options.model,
-                        options.max_tokens,
-                        options.reasoning,
-                        options.reasoning_config,
-                        options.timeout_secs,
-                        options
-                            .user_agent
-                            .unwrap_or_else(|| share::config::Config::default().api.user_agent),
-                    ),
-                )
-            }
-        };
-        let effective_reasoning =
-            requested_reasoning.clamped_to(provider_impl.max_reasoning_level());
-        let default_scope = crate::InvocationScopeData::new(
-            model.unwrap_or_else(|| provider_impl.model_name().to_string()),
-            if options.max_tokens == 0 {
-                share::config::models::DEFAULT_MAX_TOKENS
-            } else {
-                options.max_tokens
-            },
-            requested_reasoning,
-            effective_reasoning,
-        )
-        .expect("provider options must form a valid invocation scope");
-        Self {
-            provider: provider_impl,
-            default_scope,
-            transport_id: None,
-        }
-    }
-
-    pub fn from_config(options: LlmConfigOptionsData) -> Result<Self, crate::LlmError> {
+    pub fn from_config(options: ProviderClientSpecData) -> Result<Self, crate::ProviderError> {
         ensure_resolved_invocation_inputs(&options)?;
         let spec = parse_driver_spec(&options)?;
         let http =
@@ -381,9 +327,9 @@ impl LlmClient {
     /// 的多次构造共享同一连接池；model / max_tokens / reasoning 属于
     /// invocation 配置，不影响 transport 复用。
     pub fn from_config_with_pool(
-        options: LlmConfigOptionsData,
+        options: ProviderClientSpecData,
         pool: &crate::adapters::pool::TransportPool,
-    ) -> Result<Self, crate::LlmError> {
+    ) -> Result<Self, crate::ProviderError> {
         ensure_resolved_invocation_inputs(&options)?;
         let spec = parse_driver_spec(&options)?;
         let key = transport_key_for(&options, &spec);
@@ -397,75 +343,160 @@ impl LlmClient {
         })
     }
 
-    pub async fn invocation_stream(
+    /// 直调 driver 流（probe 与集成测试用；invoke 是生产唯一入口）。
+    pub(crate) async fn invocation_stream(
         &self,
-        scope: &crate::InvocationScopeData,
-        system: &[SystemBlockData],
+        resolved: &crate::ports::ResolvedInvocation,
+        system: &str,
+        static_prefix_len: usize,
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
-        self.log_request(system, messages, tool_schemas);
+    ) -> Result<crate::ProviderResponseStream, crate::ProviderError> {
         self.provider
-            .invocation_stream(scope, system, messages, tool_schemas, cancel)
+            .invocation_stream(
+                resolved,
+                system,
+                static_prefix_len,
+                messages,
+                tool_schemas,
+                cancel,
+            )
             .await
     }
 
-    /// 统一请求模型入口：runtime PL 的 [`InvocationRequestData`] 在 crate 内
-    /// 完成 capability clamp、scope 构造、system block / tool schema 转换与
-    /// 取消竞速（原 composition ProviderAdapter 编排收编）。
+    /// 非流式请求入口（#1880 v3 单通道输出）：经 [`Self::invoke_stream`]
+    /// 建立流后 drain 全部片段，聚合为 [`crate::ProviderResponse`]（自带
+    /// 成败——无需 Result 双通道）。
+    ///
+    /// 聚合规则：
+    /// - `Content`：终态内容块（Text/Thinking/ToolCall 与 `ToolCallCompleted`
+    ///   携带的完整调用）累计进 `output`；流式增量帧
+    ///   （`ToolCallStarted`/`ToolArgumentsDelta`）不进终态输出；
+    /// - `Usage` → `token_usage`；`Stop` → `stop_reason`；
+    /// - `Error`：失败终止帧 → `ok=false` + `error=Some` 并提前返回；
+    /// - 流耗尽未见 `Stop`：协议错误 → `ok=false`。
+    ///
+    /// establishment 失败仍走 `Err(ProviderError)`（与流式路径一致）。
     pub async fn invoke(
         &self,
-        capability: &crate::ModelCapabilityData,
-        request: &crate::InvocationRequestData,
-        cancellation: &dyn crate::CancellationSignal,
-    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
-        use crate::{ProviderError, ProviderErrorKind};
+        model: &crate::ModelInfo,
+        request: &crate::ProviderRequestData,
+    ) -> Result<crate::ProviderResponse, crate::ProviderError> {
+        use crate::published_language::{ProviderContentData, ProviderResponseChunk};
+        use crate::ProviderError;
+        use futures_util::StreamExt;
 
-        // fast path：调用方信号已触发。
-        if cancellation.is_cancelled() {
+        // 与 invoke_stream 的 resolve 同源：capability clamp 后的生效档位。
+        let effective_reasoning = model.resolve_reasoning(request.reasoning);
+        let mut stream = self.invoke_stream(model, request).await?;
+        let mut response = crate::ProviderResponse {
+            ok: false,
+            error: None,
+            output: Vec::new(),
+            stop_reason: None,
+            token_usage: None,
+            effective_reasoning,
+        };
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                ProviderResponseChunk::Content(block) => match block {
+                    // 流增量帧只服务渐进消费，不进终态 output。尾部 Thinking
+                    // 完整帧（含 signature）后到——覆盖先前累计的同位块。
+                    ProviderContentData::Text(_) | ProviderContentData::ToolCall { .. } => {
+                        response.output.push(block);
+                    }
+                    thinking_block @ ProviderContentData::Thinking { .. } => {
+                        // 尾部完整帧（含 signature）覆盖同文本的累计块。
+                        let same_text = |existing: &ProviderContentData| {
+                            matches!(
+                                (existing, &thinking_block),
+                                (
+                                    ProviderContentData::Thinking { thinking: t, .. },
+                                    ProviderContentData::Thinking { thinking, .. },
+                                ) if t == thinking
+                            )
+                        };
+                        response.output.retain(|existing| !same_text(existing));
+                        response.output.push(thinking_block);
+                    }
+                    ProviderContentData::ToolCallCompleted {
+                        id,
+                        name,
+                        arguments,
+                        ..
+                    } => {
+                        response.output.push(ProviderContentData::ToolCall {
+                            id,
+                            name,
+                            arguments,
+                        });
+                    }
+                    ProviderContentData::ToolCallStarted { .. }
+                    | ProviderContentData::ToolArgumentsDelta { .. } => {}
+                },
+                ProviderResponseChunk::Usage(usage) => response.token_usage = Some(usage),
+                ProviderResponseChunk::Stop(reason) => {
+                    response.stop_reason = Some(reason);
+                    response.ok = true;
+                }
+                ProviderResponseChunk::Error(error) => {
+                    response.ok = false;
+                    response.error = Some(error);
+                    return Ok(response);
+                }
+            }
+        }
+        if !response.ok {
+            // 流耗尽无 Stop 终止帧 = 协议错误（成功路径由 Stop 置位）。
+            response.error = Some(ProviderError::fatal(
+                crate::ProviderErrorKind::Protocol,
+                "流结束未包含 Stop 终止帧",
+            ));
+        }
+        Ok(response)
+    }
+
+    /// 流式请求入口：runtime PL 的 [`ProviderRequestData`] 在 crate 内
+    /// 完成 reasoning clamp、scope 构造、system block / tool schema 转换与
+    /// 取消竞速（原 composition ProviderAdapter 编排收编）。
+    pub async fn invoke_stream(
+        &self,
+        model: &crate::ModelInfo,
+        request: &crate::ProviderRequestData,
+    ) -> Result<crate::ProviderResponseStream, crate::ProviderError> {
+        use crate::ProviderError;
+
+        // fast path：请求携带的取消 token 已触发（取消真相源在 runtime，
+        // provider 只消费意图——v2 单通道）。
+        if request.cancellation.is_cancelled() {
             return Err(ProviderError::cancelled());
         }
 
-        // clamp：请求 reasoning 不超过声明能力；scope 用 provider 中性的 model 名。
-        let requested_reasoning = request.options.reasoning;
-        let effective_reasoning = capability.reasoning.resolve(requested_reasoning);
-        let scope = crate::InvocationScopeData::new(
-            request.model.model.clone(),
-            request.options.max_output_tokens,
+        // clamp：请求 reasoning 不超过 ModelInfo 声明能力（resolve 属 client 编排职责）。
+        let requested_reasoning = request.reasoning;
+        let effective_reasoning = model.resolve_reasoning(requested_reasoning);
+        let resolved = crate::ports::ResolvedInvocation::new(
+            request.model.clone(),
+            request.max_output_tokens,
             requested_reasoning,
             effective_reasoning,
-        )
-        .map_err(|error| {
-            ProviderError::fatal(
-                ProviderErrorKind::Configuration,
-                format!("invalid scope: {error}"),
-            )
-        })?;
+        )?;
 
-        // provider 中性 system blocks → legacy 驱动块（Cacheable→cached，Text→dynamic）。
-        let system: Vec<SystemBlockData> = request
-            .system
-            .iter()
-            .map(|block| match block {
-                crate::RequestSystemBlockData::Text(text) => SystemBlockData::dynamic(text.clone()),
-                crate::RequestSystemBlockData::Cacheable(text) => {
-                    SystemBlockData::cached(text.clone())
-                }
-            })
-            .collect();
+        // request.tools 已是 wire-ready tool 定义（context::ToolSchemaData 投影产物）。
+        let tool_schemas = request.tools.clone();
 
-        let tool_schemas: Vec<serde_json::Value> = request
-            .tools
-            .iter()
-            .map(crate::ModelToolSchemaData::to_tool_definition)
-            .collect();
-
+        log::debug!(target: crate::LOG_TARGET,
+            "[LLM REQUEST] invocation params: model={} max_tokens={} requested_reasoning={:?} effective_reasoning={:?}",
+            request.model, request.max_output_tokens, resolved.requested_reasoning, resolved.effective_reasoning,
+        );
+        self.log_request(&request.system, &request.messages, &request.tools);
         // request 携带的 token 与调用方信号竞速 establishment。
         let cancel_token = request.cancellation.clone();
         let establishment = Box::pin(self.invocation_stream(
-            &scope,
-            &system,
+            &resolved,
+            &request.system,
+            request.static_prefix_len,
             &request.messages,
             &tool_schemas,
             &cancel_token,
@@ -474,7 +505,7 @@ impl LlmClient {
 
         tokio::select! {
             biased;
-            _ = cancellation.cancelled() => {
+            _ = request.cancellation.cancelled() => {
                 cancel_token.cancel();
                 Err(ProviderError::cancelled())
             }
@@ -482,12 +513,7 @@ impl LlmClient {
         }
     }
 
-    fn log_request(
-        &self,
-        system: &[SystemBlockData],
-        messages: &[Message],
-        tool_schemas: &[serde_json::Value],
-    ) {
+    fn log_request(&self, system: &str, messages: &[Message], tool_schemas: &[serde_json::Value]) {
         if !log::log_enabled!(log::Level::Debug) {
             return;
         }
@@ -513,10 +539,7 @@ impl LlmClient {
             }).collect();
             serde_json::json!({"index":i,"role":format!("{:?}",msg.role).to_lowercase(),"blocks":blocks})
         }).collect();
-        let system_preview: Vec<String> = system
-            .iter()
-            .map(|b| truncate_preview(&b.text, 200))
-            .collect();
+        let system_preview = truncate_preview(system, 200);
         // 计算 messages 总字符数用于 DEBUG 摘要
         let total_chars: usize = messages
             .iter()
@@ -532,7 +555,7 @@ impl LlmClient {
             })
             .sum();
         log::debug!(target: crate::LOG_TARGET,
-            "[LLM REQUEST] provider={} model={} system_blocks={} messages={}({} chars) tools={}",
+            "[LLM REQUEST] provider={} model={} system_len={} messages={}({} chars) tools={}",
             self.provider_name(), self.model_name(), system.len(), messages.len(), total_chars, tool_schemas.len(),
         );
         log::trace!(target: crate::LOG_TARGET,
@@ -544,8 +567,8 @@ impl LlmClient {
     pub fn with_default_reasoning(
         mut self,
         requested_reasoning: crate::domain::capability::ReasoningLevel,
-    ) -> Result<Self, crate::LlmError> {
-        self.default_scope = crate::InvocationScopeData::new(
+    ) -> Result<Self, crate::ProviderError> {
+        self.default_scope = crate::domain::invoke::InvocationScopeData::new(
             self.default_scope.model(),
             self.default_scope.max_tokens(),
             requested_reasoning,
@@ -554,7 +577,7 @@ impl LlmClient {
         Ok(self)
     }
 
-    pub fn default_scope(&self) -> &crate::InvocationScopeData {
+    pub fn default_scope(&self) -> &crate::domain::invoke::InvocationScopeData {
         &self.default_scope
     }
 
@@ -569,8 +592,8 @@ impl LlmClient {
         model: impl Into<String>,
         max_tokens: Option<u32>,
         requested_reasoning: crate::domain::capability::ReasoningLevel,
-    ) -> Result<crate::InvocationScopeData, crate::LlmError> {
-        crate::InvocationScopeData::new(
+    ) -> Result<crate::domain::invoke::InvocationScopeData, crate::ProviderError> {
+        crate::domain::invoke::InvocationScopeData::new(
             model,
             max_tokens.unwrap_or_else(|| self.default_scope.max_tokens()),
             requested_reasoning,

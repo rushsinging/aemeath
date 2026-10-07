@@ -6,7 +6,6 @@ use tokio_util::sync::CancellationToken;
 use crate::adapters::http_attempt::{
     AttemptDisposition, HttpAttemptContext, HttpAttemptExecutor, HttpAttemptFailure,
 };
-use crate::domain::invoke::{InvocationScopeData, SystemBlockData};
 use crate::ports::{LlmProvider, ReasoningLevel};
 
 use super::{OpenAICompatibleProvider, ReasoningConfig};
@@ -14,18 +13,18 @@ use super::{OpenAICompatibleProvider, ReasoningConfig};
 impl OpenAICompatibleProvider {
     pub(crate) async fn invoke_single_request_stream(
         &self,
-        scope: &InvocationScopeData,
-        system: &[SystemBlockData],
+        resolved: &crate::ports::ResolvedInvocation,
+        system: &str,
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
+    ) -> Result<crate::ProviderResponseStream, crate::ProviderError> {
         if cancel.is_cancelled() {
             return Err(crate::ProviderError::cancelled());
         }
         let (request_body, url, api, decoder) = if self.config.use_responses_api {
             (
-                self.build_responses_request_body(scope, system, messages, tool_schemas, true),
+                self.build_responses_request_body(resolved, system, messages, tool_schemas, true),
                 self.responses_url(),
                 "responses_stream",
                 crate::adapters::stream::InvocationDecoder::OpenAiResponses,
@@ -34,12 +33,12 @@ impl OpenAICompatibleProvider {
             let openai_messages = Self::convert_messages(
                 system,
                 messages,
-                !matches!(scope.effective_reasoning(), ReasoningLevel::Off),
+                !matches!(resolved.effective_reasoning, ReasoningLevel::Off),
             )
             .map_err(<crate::ProviderError as From<crate::LlmError>>::from)?;
             let tools = Self::convert_tools(tool_schemas);
-            let mut body = self.base_request_body(scope, openai_messages, true);
-            self.apply_reasoning_fields(&mut body, scope);
+            let mut body = self.base_request_body(resolved, openai_messages, true);
+            self.apply_reasoning_fields(&mut body, resolved);
             if !tools.is_empty() {
                 body["tools"] = serde_json::Value::Array(tools);
                 body["parallel_tool_calls"] = serde_json::Value::Bool(true);
@@ -59,7 +58,7 @@ impl OpenAICompatibleProvider {
             driver: "openai_compatible",
             api,
             provider: &self.config.source_key,
-            model: scope.model(),
+            model: resolved.model.as_str(),
             method: "POST",
             endpoint: &url,
             attempt: 1,
@@ -87,7 +86,7 @@ impl OpenAICompatibleProvider {
         .response;
         Ok(crate::adapters::stream::invocation_stream_from_decoder(
             response,
-            scope.effective_reasoning(),
+            resolved.effective_reasoning,
             cancel.child_token(),
             decoder,
         ))
@@ -95,15 +94,15 @@ impl OpenAICompatibleProvider {
 
     pub(crate) fn base_request_body(
         &self,
-        scope: &InvocationScopeData,
+        resolved: &crate::ports::ResolvedInvocation,
         messages: Vec<serde_json::Value>,
         stream: bool,
     ) -> serde_json::Value {
         let max_tokens_field = self.driver.max_tokens_field();
         let mut request_body = serde_json::json!({
-            "model": scope.model(),
+            "model": resolved.model.as_str(),
             "messages": messages,
-            max_tokens_field: scope.max_tokens(),
+            max_tokens_field: resolved.max_tokens,
             "stream": stream,
         });
 
@@ -135,15 +134,15 @@ impl OpenAICompatibleProvider {
     pub(crate) fn apply_reasoning_fields(
         &self,
         request_body: &mut serde_json::Value,
-        scope: &InvocationScopeData,
+        resolved: &crate::ports::ResolvedInvocation,
     ) {
-        let reasoning_enabled = !matches!(scope.effective_reasoning(), ReasoningLevel::Off);
+        let reasoning_enabled = !matches!(resolved.effective_reasoning, ReasoningLevel::Off);
         let scoped_config = self
             .reasoning_config
             .as_ref()
-            .map(|config| config.for_scope(scope.effective_reasoning(), self.driver.as_ref()))
+            .map(|config| config.for_scope(resolved.effective_reasoning, self.driver.as_ref()))
             .unwrap_or_else(|| {
-                ReasoningConfig::from_scope(scope.effective_reasoning(), self.driver.as_ref())
+                ReasoningConfig::from_scope(resolved.effective_reasoning, self.driver.as_ref())
             });
         self.driver
             .apply_reasoning_fields(request_body, Some(&scoped_config), reasoning_enabled);
@@ -217,13 +216,14 @@ fn log_request_body(api: &str, endpoint: &str, body: &serde_json::Value, request
 impl LlmProvider for OpenAICompatibleProvider {
     async fn invocation_stream(
         &self,
-        scope: &InvocationScopeData,
-        system: &[SystemBlockData],
+        resolved: &crate::ports::ResolvedInvocation,
+        system: &str,
+        _static_prefix_len: usize,
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
-        self.invoke_single_request_stream(scope, system, messages, tool_schemas, cancel)
+    ) -> Result<crate::ProviderResponseStream, crate::ProviderError> {
+        self.invoke_single_request_stream(resolved, system, messages, tool_schemas, cancel)
             .await
     }
 

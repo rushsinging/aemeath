@@ -50,7 +50,7 @@ fn minimax_provider_uses_max_completion_tokens_field() {
         30,
     );
 
-    let scope = crate::domain::invoke::InvocationScopeData::new(
+    let scope = crate::ports::ResolvedInvocation::new(
         "MiniMax-M3",
         8192,
         crate::domain::capability::ReasoningLevel::High,
@@ -373,7 +373,7 @@ fn openai_provider_uses_scope_max_tokens_in_request_body() {
     );
 
     // max_tokens is now immutable; the scope carries the per-request value
-    let scope = crate::domain::invoke::InvocationScopeData::new(
+    let scope = crate::ports::ResolvedInvocation::new(
         "test-model",
         8192,
         crate::domain::capability::ReasoningLevel::Off,
@@ -399,7 +399,7 @@ fn invocation_scope_requires_non_zero_max_tokens() {
     );
 
     // InvocationScopeData enforces max_tokens > 0 at construction time
-    let scope = crate::domain::invoke::InvocationScopeData::new(
+    let scope = crate::ports::ResolvedInvocation::new(
         "test-model",
         32000,
         crate::domain::capability::ReasoningLevel::Off,
@@ -425,7 +425,7 @@ fn volcengine_provider_uses_max_output_tokens_field() {
         30,
     );
 
-    let scope = crate::domain::invoke::InvocationScopeData::new(
+    let scope = crate::ports::ResolvedInvocation::new(
         "test-model",
         8192,
         crate::domain::capability::ReasoningLevel::Off,

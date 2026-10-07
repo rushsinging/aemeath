@@ -48,34 +48,14 @@ struct ReflectionProvider {
 
 #[async_trait::async_trait]
 impl crate::ports::ProviderPort for ReflectionProvider {
-    fn capabilities(
-        &self,
-        model: &provider::ModelIdData,
-    ) -> Result<
-        crate::ports::provider_port::ModelCapabilityData,
-        crate::ports::provider_port::ProviderError,
-    > {
-        use crate::ports::provider_port::{
-            ModelCapabilityData, ProviderError, ProviderErrorKind, ReasoningCapabilityData,
-        };
-        Ok(ModelCapabilityData {
-            model: model.clone(),
-            supports_tools: false,
-            supports_parallel_tool_calls: false,
-            supports_streaming: true,
-            reasoning: ReasoningCapabilityData::none(),
-            context_limit: Some(128_000),
-            output_limit: Some(8_192),
-        })
-        .map_err(|_: ProviderError| ProviderError::fatal(ProviderErrorKind::ModelUnavailable, "x"))
-    }
+    // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
 
     async fn invoke(
         &self,
-        _request: crate::ports::provider_port::InvocationRequestData,
+        _request: crate::ports::provider_port::ProviderRequestData,
         _cancel: &dyn crate::ports::provider_port::CancellationSignal,
     ) -> Result<
-        crate::ports::provider_port::InvocationStreamData,
+        crate::ports::provider_port::ProviderResponseStream,
         crate::ports::provider_port::ProviderError,
     > {
         Ok(
@@ -91,13 +71,18 @@ impl crate::ports::ProviderPort for ReflectionProvider {
 fn binding(provider: Arc<ReflectionProvider>) -> Arc<crate::ports::ProviderBindingData> {
     Arc::new(crate::ports::ProviderBindingData {
         provider,
-        model: provider::ModelIdData {
+        model: provider::ModelInfo {
             provider: "notice-test".to_string(),
             model: "notice-test-model".to_string(),
+            supports_tools: false,
+            supports_parallel_tool_calls: false,
+            supports_streaming: true,
+            supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+            context_limit: Some(128_000),
+            output_limit: Some(8_192),
         },
         max_tokens: 8_192,
         requested_reasoning: share::reasoning::ReasoningLevel::Off,
-        context_window: Some(128_000),
     })
 }
 

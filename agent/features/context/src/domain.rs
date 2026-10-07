@@ -37,7 +37,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use provider::ModelToolSchemaData;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::AgentRoleDefinition;
 pub use share::ids::{RunId, RunStepId, SessionId};
@@ -210,6 +209,41 @@ pub enum TaskProgressStatus {
     Pending,
 }
 
+/// LLM 工具 schema 投影（结构化真相：name/description/input_schema）。
+///
+/// 归属 context（工具装配域）：由 tools 目录投影生成，wire 形态
+/// （`to_tool_definition`）与其 raw JSON 同构。provider 侧请求直接
+/// 携带 wire-ready `serde_json::Value`，不再定义跨域类型。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolSchemaData {
+    pub name: String,
+    pub description: String,
+    pub input_schema: serde_json::Value,
+}
+
+impl ToolSchemaData {
+    /// 从 wire JSON 反构（runtime raw_tool_schemas 入口）。
+    pub fn from_wire(value: &serde_json::Value) -> Option<Self> {
+        let name = value.get("name")?.as_str()?.to_string();
+        let description = value.get("description")?.as_str()?.to_string();
+        let input_schema = value.get("input_schema")?.clone();
+        Some(Self {
+            name,
+            description,
+            input_schema,
+        })
+    }
+
+    /// 渲染为完整 tool 定义 JSON（`{name, description, input_schema}`）。
+    pub fn to_tool_definition(&self) -> serde_json::Value {
+        serde_json::json!({
+            "name": self.name,
+            "description": self.description,
+            "input_schema": self.input_schema,
+        })
+    }
+}
+
 /// 构建 window 的不可变输入；历史由 Context backing 独占。
 #[derive(Debug, Clone)]
 pub struct ContextRequestData {
@@ -234,7 +268,7 @@ pub struct ContextRequestData {
     /// [`DecisionReason::HeuristicFallback`] 路径；`None` 或超出
     /// `[0.5, 2.0]` 的值按 1.0（不校准）处理。
     pub heuristic_calibration: Option<f64>,
-    pub tool_schemas: Vec<ModelToolSchemaData>,
+    pub tool_schemas: Vec<ToolSchemaData>,
     pub tool_schema_tokens: usize,
 }
 
@@ -415,7 +449,7 @@ pub struct ContextWindowData {
     pub backing_revision: SessionRevision,
     pub system_blocks: Vec<SystemBlock>,
     pub messages: ContextMessages,
-    pub tool_schemas: Vec<ModelToolSchemaData>,
+    pub tool_schemas: Vec<ToolSchemaData>,
     pub token_estimation: TokenBudget,
     pub compaction_decision: CompactionDecisionData,
 }

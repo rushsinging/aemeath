@@ -5,44 +5,49 @@
 //! - `docs/design/02-modules/provider/02-ports-stream-and-client-scope.md`
 //!
 //! #901 冻结契约：
-//! - PL 类型（ModelIdData、ModelCapabilityData、ProviderError、ProviderCompletionData 等）
+//! - PL 类型（ModelInfo、ProviderError、ProviderResponse 等）
 //!   由 Provider crate 的 `published_language` 模块定义。
-//! - Runtime 定义 `ProviderPort` trait、`InvocationStreamData` 和 `InvocationEventData`，
-//!   引用 Provider PL 类型，**NEVER** 引用 vendor wire DTO。
-//! - `invoke` 返回 pull-based 有序流，终结语义由 `InvocationEventData` 表达。
-
-use std::pin::Pin;
+//! - Runtime 定义 `ProviderPort` trait，引用 Provider PL 类型，
+//!   **NEVER** 引用 vendor wire DTO。
+//! - `invoke` 返回 pull-based 有序流，终结语义由 `ProviderResponseChunk`
+//!   （`Stop`/`Error` 终止帧）表达（#1880 v3 契约）。
 
 use async_trait::async_trait;
-use futures::Stream;
 
 // Provider PL 类型 re-export —— 消费方只需 `use crate::ports::provider_port::*`。
-// 通过 provider::api（API facade）访问，不直接引用 published_language 模块。
-// 新 PL StopReason 通过别名 ProviderStopReasonData 导出，此处还原为 StopReason。
+// 通过 provider:: 根导出访问，不直接引用 published_language 模块。
+// 新 PL StopReason 通过别名 ResponseStopReason 导出，此处还原为 StopReason。
 pub use provider::{
-    CancellationSignal, InvocationEventData, InvocationOptionsData, InvocationRequestData,
-    ModelCapabilityData, ModelIdData, ModelToolSchemaData, ProviderError,
-    ProviderStopReasonData as StopReason, RawUsageSnapshotData, RequestSystemBlockData,
+    ModelInfo, ProviderError, ProviderRequestData, ProviderResponseStream,
+    ResponseStopReason as StopReason, TokenUsageData,
 };
 
 #[cfg(test)]
-pub use provider::{
-    InvocationDeltaData, ProviderCompletionData, ProviderContentBlockData, ProviderErrorKind,
-    ReasoningCapabilityData, ReasoningMappingKindData,
-};
+pub use provider::{ProviderContentData, ProviderErrorKind, ProviderResponseChunk};
 
 // ReasoningLevel 已由 provider crate 从 core::provider re-export。
 pub use share::reasoning::ReasoningLevel;
 
-// ─── InvocationStreamData ────────────────────────────────────
+/// 取消信号（真相源在 runtime Run 生命周期；provider 只消费意图）。
+///
+/// 端口不暴露取消发起、child token 或 deadline；consumer drop 由私有
+/// stream owner 负责转为 invocation-local 取消。
+#[async_trait::async_trait]
+pub trait CancellationSignal: Send + Sync {
+    fn is_cancelled(&self) -> bool;
+    async fn cancelled(&self);
+}
 
-/// 一次 LLM 调用的有序 pull-based 流。
-///
-/// Provider 返回单次 attempt 的有序事件流；Runtime 负责流汇聚、
-/// tool_call 提取和领域事件投影。
-///
-/// consumer drop 等价于取消意图，adapter 应停止继续读取和缓冲。
-pub type InvocationStreamData = Pin<Box<dyn Stream<Item = InvocationEventData> + Send>>;
+#[async_trait::async_trait]
+impl CancellationSignal for tokio_util::sync::CancellationToken {
+    fn is_cancelled(&self) -> bool {
+        tokio_util::sync::CancellationToken::is_cancelled(self)
+    }
+
+    async fn cancelled(&self) {
+        tokio_util::sync::CancellationToken::cancelled(self).await;
+    }
+}
 
 // ─── Port trait ───
 
@@ -55,17 +60,18 @@ pub type InvocationStreamData = Pin<Box<dyn Stream<Item = InvocationEventData> +
 /// 跨调用 retry、compact、fallback 由 Runtime 负责。
 #[async_trait]
 pub trait ProviderPort: Send + Sync {
-    /// 查询模型能力。
-    fn capabilities(&self, model: &ModelIdData) -> Result<ModelCapabilityData, ProviderError>;
+    // 能力查询 `capabilities()` 已删除（#1880）：binding 持全量
+    // ModelInfo，运行时零查询——unknown model 门禁在装配时（catalog/wire
+    // 阶段决定 ModelInfo），不再于调用侧查询。
 
-    /// 发起一次 LLM 调用，返回单次 attempt 的有序流。
+    /// 发起一次 LLM 调用，返回单次 attempt 的有序片段流。
     ///
     /// 取消通过 `CancellationToken` 传播；取消后返回 `ProviderError::cancelled()`。
     async fn invoke(
         &self,
-        request: InvocationRequestData,
+        request: ProviderRequestData,
         cancellation: &dyn CancellationSignal,
-    ) -> Result<InvocationStreamData, ProviderError>;
+    ) -> Result<ProviderResponseStream, ProviderError>;
 }
 
 // ─── Fake / Contract harness ───────────────────────────
@@ -82,55 +88,36 @@ pub(crate) mod fake {
     use tokio_util::sync::CancellationToken;
 
     /// 可编程的 fake provider：按预设事件列表依次产出。
-    pub struct FakeProvider {
-        capabilities: ModelCapabilityData,
-    }
+    pub struct FakeProvider;
 
     impl FakeProvider {
-        /// 构造一个默认 fake provider（supports_tools=true, streaming=true）。
+        /// 构造一个默认 fake provider。
         pub fn new() -> Self {
-            Self {
-                capabilities: ModelCapabilityData {
-                    model: ModelIdData {
-                        provider: "fake".to_string(),
-                        model: "test-model".to_string(),
-                    },
-                    supports_tools: true,
-                    supports_parallel_tool_calls: true,
-                    supports_streaming: true,
-                    reasoning: ReasoningCapabilityData::none(),
-                    context_limit: Some(128_000),
-                    output_limit: Some(8_192),
-                },
-            }
+            Self
         }
 
-        /// 生成一个产出 `events` 后终结的 InvocationStreamData。
-        pub fn stream_from(events: Vec<InvocationEventData>) -> InvocationStreamData {
-            Box::pin(stream::iter(events))
+        /// 生成一个产出 `chunks` 后终结的 ProviderResponseStream。
+        pub fn stream_from(chunks: Vec<ProviderResponseChunk>) -> ProviderResponseStream {
+            Box::pin(stream::iter(chunks))
         }
 
-        /// 生成一个文本 delta + Completed 终结的正常流。
-        pub fn happy_path_stream(text: &str) -> InvocationStreamData {
-            let events = vec![
-                InvocationEventData::Delta(InvocationDeltaData::Text(text.to_string())),
-                InvocationEventData::Completed(ProviderCompletionData {
-                    output: vec![ProviderContentBlockData::Text(text.to_string())],
-                    stop_reason: StopReason::EndTurn,
-                    usage: Some(RawUsageSnapshotData {
-                        input_tokens: Some(10),
-                        output_tokens: Some(5),
-                        ..Default::default()
-                    }),
-                    effective_reasoning: ReasoningLevel::Off,
+        /// 生成一个文本 Content 帧 + Usage/Stop 尾帧的正常流。
+        pub fn happy_path_stream(text: &str) -> ProviderResponseStream {
+            let chunks = vec![
+                ProviderResponseChunk::Content(ProviderContentData::Text(text.to_string())),
+                ProviderResponseChunk::Usage(TokenUsageData {
+                    input_tokens: Some(10),
+                    output_tokens: Some(5),
+                    ..Default::default()
                 }),
+                ProviderResponseChunk::Stop(StopReason::EndTurn),
             ];
-            Self::stream_from(events)
+            Self::stream_from(chunks)
         }
 
-        /// 生成一个直接失败的流。
-        pub fn error_stream(error: ProviderError) -> InvocationStreamData {
-            Self::stream_from(vec![InvocationEventData::Failed(error)])
+        /// 生成一个直接失败的流（Error 终止帧）。
+        pub fn error_stream(error: ProviderError) -> ProviderResponseStream {
+            Self::stream_from(vec![ProviderResponseChunk::Error(error)])
         }
     }
 
@@ -142,22 +129,11 @@ pub(crate) mod fake {
 
     #[async_trait]
     impl ProviderPort for FakeProvider {
-        fn capabilities(&self, model: &ModelIdData) -> Result<ModelCapabilityData, ProviderError> {
-            if model.provider == "fake" {
-                Ok(self.capabilities.clone())
-            } else {
-                Err(ProviderError::fatal(
-                    ProviderErrorKind::ModelUnavailable,
-                    format!("unknown model: {model}"),
-                ))
-            }
-        }
-
         async fn invoke(
             &self,
-            _request: InvocationRequestData,
+            _request: ProviderRequestData,
             cancellation: &dyn CancellationSignal,
-        ) -> Result<InvocationStreamData, ProviderError> {
+        ) -> Result<ProviderResponseStream, ProviderError> {
             if cancellation.is_cancelled() {
                 return Err(ProviderError::cancelled());
             }
@@ -174,43 +150,30 @@ pub(crate) mod fake {
         ) -> Result<crate::ports::ProviderBindingData, ProviderError> {
             Ok(crate::ports::ProviderBindingData {
                 provider: Arc::new(FakeProvider::new()),
-                model: spec.model,
+                model: crate::ports::ModelInfo {
+                    provider: spec.source_key.clone(),
+                    model: spec.model.clone(),
+                    supports_tools: true,
+                    supports_parallel_tool_calls: true,
+                    supports_streaming: true,
+                    supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+                    context_limit: spec.context_window,
+                    output_limit: Some(spec.max_tokens as usize),
+                },
                 max_tokens: spec.max_tokens,
                 requested_reasoning: spec.requested_reasoning,
-                context_window: spec.context_window,
             })
         }
     }
 
     // ─── 契约测试 ───
-
-    #[test]
-    fn fake_provider_capabilities_returns_for_matching_model() {
-        let provider = FakeProvider::new();
-        let model = ModelIdData {
-            provider: "fake".to_string(),
-            model: "test-model".to_string(),
-        };
-        let cap = provider.capabilities(&model).unwrap();
-        assert!(cap.supports_tools);
-        assert!(cap.supports_streaming);
-        assert_eq!(cap.context_limit, Some(128_000));
-    }
-
-    #[test]
-    fn fake_provider_capabilities_rejects_unknown_model() {
-        let provider = FakeProvider::new();
-        let model = ModelIdData {
-            provider: "unknown".to_string(),
-            model: "x".to_string(),
-        };
-        let err = provider.capabilities(&model).unwrap_err();
-        assert_eq!(err.kind, ProviderErrorKind::ModelUnavailable);
-        assert!(!err.retryable);
-    }
+    //
+    // `fake_provider_capabilities_*` 两个查询契约测试已删除（#1880）：
+    // ProviderPort 不再暴露 capabilities()——unknown model 门禁语义移到
+    // 装配时（factory build 构造 ModelInfo），运行时零查询。
 
     #[tokio::test]
-    async fn happy_path_stream_emits_delta_then_completed() {
+    async fn happy_path_stream_emits_content_then_usage_then_stop() {
         let stream = FakeProvider::happy_path_stream("hi");
         futures::pin_mut!(stream);
         use futures::StreamExt;
@@ -218,30 +181,35 @@ pub(crate) mod fake {
         let first = stream.next().await.unwrap();
         assert!(matches!(
             first,
-            InvocationEventData::Delta(InvocationDeltaData::Text(ref t)) if t == "hi"
+            ProviderResponseChunk::Content(ProviderContentData::Text(ref t)) if t == "hi"
         ));
 
         let second = stream.next().await.unwrap();
         match second {
-            InvocationEventData::Completed(c) => {
-                assert_eq!(c.stop_reason, StopReason::EndTurn);
-                assert_eq!(c.usage.unwrap().input_tokens, Some(10));
+            ProviderResponseChunk::Usage(usage) => {
+                assert_eq!(usage.input_tokens, Some(10));
             }
-            _ => panic!("expected Completed"),
+            other => panic!("expected Usage frame, got {other:?}"),
         }
+
+        let third = stream.next().await.unwrap();
+        assert!(
+            matches!(third, ProviderResponseChunk::Stop(StopReason::EndTurn)),
+            "expected Stop frame, got {third:?}"
+        );
 
         // 终结后 next() 返回 None
         assert!(stream.next().await.is_none());
     }
 
     #[tokio::test]
-    async fn error_stream_emits_failed_then_none() {
+    async fn error_stream_emits_error_then_none() {
         let stream = FakeProvider::error_stream(ProviderError::cancelled());
         futures::pin_mut!(stream);
         use futures::StreamExt;
 
         let first = stream.next().await.unwrap();
-        assert!(matches!(first, InvocationEventData::Failed(_)));
+        assert!(matches!(first, ProviderResponseChunk::Error(_)));
 
         // 终结后 next() 返回 None
         assert!(stream.next().await.is_none());
@@ -253,13 +221,11 @@ pub(crate) mod fake {
         let cancel = CancellationToken::new();
         cancel.cancel();
 
-        let request = InvocationRequestData::new(
-            ModelIdData {
-                provider: "fake".to_string(),
-                model: "test-model".to_string(),
-            },
+        let request = ProviderRequestData::new(
+            "test-model".to_string(),
             Vec::new(),
-            InvocationOptionsData::new(8192, ReasoningLevel::Off),
+            8192,
+            ReasoningLevel::Off,
         );
 
         let result = provider.invoke(request, &cancel).await;
@@ -273,28 +239,28 @@ pub(crate) mod fake {
     async fn invoke_returns_stream_with_correct_terminal_semantics() {
         let provider = FakeProvider::new();
         let cancel = CancellationToken::new();
-        let request = InvocationRequestData::new(
-            ModelIdData {
-                provider: "fake".to_string(),
-                model: "test-model".to_string(),
-            },
+        let request = ProviderRequestData::new(
+            "test-model".to_string(),
             Vec::new(),
-            InvocationOptionsData::new(8192, ReasoningLevel::Off),
+            8192,
+            ReasoningLevel::Off,
         );
 
         let mut stream = provider.invoke(request, &cancel).await.unwrap();
         use futures::StreamExt;
 
-        // 收集所有事件
-        let mut events = Vec::new();
-        while let Some(evt) = stream.next().await {
-            events.push(evt);
+        // 收集所有片段
+        let mut chunks = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            chunks.push(chunk);
         }
 
-        // 恰好 2 个事件：1 个 Delta + 1 个 Completed
-        assert_eq!(events.len(), 2);
-        assert!(matches!(events[0], InvocationEventData::Delta(_)));
-        assert!(matches!(events[1], InvocationEventData::Completed(_)));
+        // 恰好 3 帧：1 Content + 1 Usage + 1 Stop 终止帧
+        assert_eq!(chunks.len(), 3);
+        assert!(matches!(chunks[0], ProviderResponseChunk::Content(_)));
+        assert!(matches!(chunks[1], ProviderResponseChunk::Usage(_)));
+        assert!(matches!(chunks[2], ProviderResponseChunk::Stop(_)));
+        assert!(chunks[2].is_terminal());
     }
 
     #[tokio::test]
@@ -311,13 +277,11 @@ pub(crate) mod fake {
         }
 
         let provider = FakeProvider::new();
-        let request = InvocationRequestData::new(
-            ModelIdData {
-                provider: "fake".to_string(),
-                model: "test-model".to_string(),
-            },
+        let request = ProviderRequestData::new(
+            "test-model".to_string(),
             Vec::new(),
-            InvocationOptionsData::new(8192, ReasoningLevel::Off),
+            8192,
+            ReasoningLevel::Off,
         );
 
         let result = provider.invoke(request, &AlwaysCancelled).await;
@@ -325,9 +289,9 @@ pub(crate) mod fake {
     }
 
     #[test]
-    fn invocation_event_is_the_provider_published_language_type() {
-        fn accepts_provider_event(_: provider::InvocationEventData) {}
-        accepts_provider_event(InvocationEventData::Failed(ProviderError::cancelled()));
+    fn response_chunk_is_the_provider_published_language_type() {
+        fn accepts_provider_chunk(_: provider::ProviderResponseChunk) {}
+        accepts_provider_chunk(ProviderResponseChunk::Error(ProviderError::cancelled()));
     }
 
     #[test]

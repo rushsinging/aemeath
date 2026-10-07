@@ -137,7 +137,8 @@ impl SkillBootstrapAssemblyData {
 }
 
 pub struct PromptAssemblyData {
-    pub system_blocks: Vec<crate::ports::RequestSystemBlockData>,
+    /// Composition 拼好的整段静态 system prompt（#1861 v4：块级
+    /// 原块级 system 数据类型消除，拼接职责归组合根）。
     pub system_prompt_text: String,
     pub initial_git_context: String,
     pub user_context: String,
@@ -146,18 +147,12 @@ pub struct PromptAssemblyData {
 
 impl PromptAssemblyData {
     pub fn new(
-        system_blocks: Vec<crate::ports::RequestSystemBlockData>,
+        system_prompt_text: String,
         initial_git_context: String,
         user_context: String,
         model_id: impl Into<String>,
     ) -> Self {
-        let system_prompt_text = system_blocks
-            .iter()
-            .map(crate::ports::RequestSystemBlockData::text)
-            .collect::<Vec<_>>()
-            .join("\n\n");
         Self {
-            system_blocks,
             system_prompt_text,
             initial_git_context,
             user_context,
@@ -428,7 +423,6 @@ pub async fn wire_agent_client_from_args(
 
     // Prompt content is assembled by Composition and frozen for this session.
     let PromptAssemblyData {
-        system_blocks,
         system_prompt_text,
         initial_git_context,
         user_context,
@@ -465,7 +459,6 @@ pub async fn wire_agent_client_from_args(
         max_tool_concurrency,
         max_agent_concurrency,
         agent_semaphore.clone(),
-        system_blocks,
         system_prompt_text,
         initial_git_context,
         user_context,

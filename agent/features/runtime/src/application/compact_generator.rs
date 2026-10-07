@@ -10,9 +10,7 @@ use context::{
     CompactGenerationFailureData, CompactGenerationFailureKind, CompactGenerationOutputData,
 };
 use futures::StreamExt;
-use provider::{
-    InvocationDeltaData, InvocationEventData, InvocationOptionsData, InvocationRequestData,
-};
+use provider::{ProviderContentData, ProviderRequestData, ProviderResponseChunk};
 use share::message::Message;
 use share::reasoning::ReasoningLevel;
 use std::sync::Arc;
@@ -52,10 +50,11 @@ impl CompactGenerator for ProviderCompactGenerator {
         let target = self.resolver.resolve().map_err(compact_model_failure)?;
         let binding = target.binding();
         let max_output_tokens = self.max_output_tokens.min(binding.max_tokens.max(1));
-        let mut invocation = InvocationRequestData::new(
-            binding.model.clone(),
+        let mut invocation = ProviderRequestData::new(
+            binding.model.model.clone(),
             request,
-            InvocationOptionsData::new(max_output_tokens, ReasoningLevel::Off),
+            max_output_tokens,
+            ReasoningLevel::Off,
         );
         // 摘要生成不携带上下文窗口消息；压缩提示词本身就是全部输入。
         invocation.cancellation = cancel.clone();
@@ -72,20 +71,22 @@ impl CompactGenerator for ProviderCompactGenerator {
         let mut stream = stream;
         while let Some(event) = stream.next().await {
             match event {
-                InvocationEventData::Delta(InvocationDeltaData::Text(part)) => {
+                ProviderResponseChunk::Content(ProviderContentData::Text(part)) => {
                     text_delta_count += 1;
                     text.push_str(&part);
                 }
-                InvocationEventData::Delta(_) => non_text_delta_count += 1,
-                InvocationEventData::Completed(completion) => {
+                ProviderResponseChunk::Content(_) => non_text_delta_count += 1,
+                // Usage 帧不属于内容增量（原 completion.usage 不计数）。
+                ProviderResponseChunk::Usage(_) => {}
+                ProviderResponseChunk::Stop(stop_reason) => {
                     return Ok(CompactGenerationOutputData::completed(
                         text,
-                        Some(completion_reason(&completion.stop_reason)),
+                        Some(completion_reason(&stop_reason)),
                         text_delta_count,
                         non_text_delta_count,
                     ));
                 }
-                InvocationEventData::Failed(error) => {
+                ProviderResponseChunk::Error(error) => {
                     return Err(compact_generation_failure(error));
                 }
             }
@@ -120,14 +121,14 @@ impl CompactGenerator for ProviderCompactGenerator {
     }
 }
 
-fn completion_reason(reason: &provider::ProviderStopReasonData) -> String {
+fn completion_reason(reason: &provider::ResponseStopReason) -> String {
     match reason {
-        provider::ProviderStopReasonData::EndTurn => "end_turn".to_string(),
-        provider::ProviderStopReasonData::ToolUse => "tool_use".to_string(),
-        provider::ProviderStopReasonData::MaxOutputTokens => "max_output_tokens".to_string(),
-        provider::ProviderStopReasonData::ContentFiltered => "content_filtered".to_string(),
-        provider::ProviderStopReasonData::StopSequence => "stop_sequence".to_string(),
-        provider::ProviderStopReasonData::Other(reason) => format!("other:{reason}"),
+        provider::ResponseStopReason::EndTurn => "end_turn".to_string(),
+        provider::ResponseStopReason::ToolUse => "tool_use".to_string(),
+        provider::ResponseStopReason::MaxOutputTokens => "max_output_tokens".to_string(),
+        provider::ResponseStopReason::ContentFiltered => "content_filtered".to_string(),
+        provider::ResponseStopReason::StopSequence => "stop_sequence".to_string(),
+        provider::ResponseStopReason::Other(reason) => format!("other:{reason}"),
     }
 }
 

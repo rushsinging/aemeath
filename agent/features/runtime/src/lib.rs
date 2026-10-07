@@ -51,8 +51,8 @@ pub use application::reflection::{
 pub use application::run::context::ParentRunContextSource;
 pub use application::run::context_factory::RuntimeContextFactory;
 pub use ports::{
-    ProviderBindingData, ProviderBuildSpecData, ProviderFactory, ProviderPort, ToolResultBlobPort,
-    UnavailableUsageSink, UsageSink,
+    CancellationSignal, ProviderBindingData, ProviderBuildSpecData, ProviderFactory, ProviderPort,
+    ToolResultBlobPort, UnavailableUsageSink, UsageSink,
 };
 
 #[cfg(test)]

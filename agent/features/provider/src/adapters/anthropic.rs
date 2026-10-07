@@ -11,7 +11,7 @@ use crate::adapters::http_attempt::{
     AttemptDisposition, HttpAttemptContext, HttpAttemptExecutor, HttpAttemptFailure,
 };
 use crate::adapters::stream::parse_invocation_stream;
-use crate::domain::invoke::{CreateMessageRequest, SystemBlockData};
+use crate::adapters::wire::{CreateMessageRequest, SystemBlockData};
 use crate::ports::LlmProvider;
 
 use message_conversion::{apply_message_cache_breakpoint, convert_messages, sanitize_tool_schemas};
@@ -123,12 +123,13 @@ impl AnthropicProvider {
 
     pub(crate) async fn invoke_stream(
         &self,
-        scope: &crate::InvocationScopeData,
-        system: &[SystemBlockData],
+        resolved: &crate::ports::ResolvedInvocation,
+        system: &str,
+        static_prefix_len: usize,
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
+    ) -> Result<crate::ProviderResponseStream, crate::ProviderError> {
         if cancel.is_cancelled() {
             return Err(crate::ProviderError::cancelled());
         }
@@ -143,15 +144,15 @@ impl AnthropicProvider {
                 );
             }
         }
-        let effort = match scope.effective_reasoning() {
+        let effort = match resolved.effective_reasoning {
             crate::domain::capability::ReasoningLevel::Off => None,
             level => Some(level.as_str().to_string()),
         };
         let request = CreateMessageRequest::new(
-            scope.model().to_string(),
-            scope.max_tokens(),
+            resolved.model.clone(),
+            resolved.max_tokens,
             effort,
-            system.to_vec(),
+            SystemBlockData::from_prompt(system, static_prefix_len),
             api_messages,
             cached_tools,
             true,
@@ -165,7 +166,7 @@ impl AnthropicProvider {
             driver: "anthropic",
             api: "messages_stream",
             provider: "anthropic",
-            model: scope.model(),
+            model: &resolved.model,
             method: "POST",
             endpoint: &endpoint,
             attempt: 1,
@@ -193,7 +194,7 @@ impl AnthropicProvider {
         .response;
         Ok(parse_invocation_stream(
             response,
-            scope.effective_reasoning(),
+            resolved.effective_reasoning,
             cancel.child_token(),
         ))
     }
@@ -213,14 +214,22 @@ fn provider_error_from_attempt(failure: HttpAttemptFailure) -> crate::ProviderEr
 impl LlmProvider for AnthropicProvider {
     async fn invocation_stream(
         &self,
-        scope: &crate::InvocationScopeData,
-        system: &[SystemBlockData],
+        resolved: &crate::ports::ResolvedInvocation,
+        system: &str,
+        static_prefix_len: usize,
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
-        self.invoke_stream(scope, system, messages, tool_schemas, cancel)
-            .await
+    ) -> Result<crate::ProviderResponseStream, crate::ProviderError> {
+        self.invoke_stream(
+            resolved,
+            system,
+            static_prefix_len,
+            messages,
+            tool_schemas,
+            cancel,
+        )
+        .await
     }
 
     fn model_name(&self) -> &str {

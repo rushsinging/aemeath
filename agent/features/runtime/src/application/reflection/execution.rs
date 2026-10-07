@@ -57,7 +57,7 @@ impl From<ReflectionWorkflowError> for ReflectionExecutionError {
 
 pub(crate) struct ReflectionInvocation<'a> {
     pub provider: &'a dyn ProviderPort,
-    pub model: &'a provider::ModelIdData,
+    pub model: &'a provider::ModelInfo,
     pub max_tokens: u32,
     pub requested_reasoning: share::reasoning::ReasoningLevel,
     pub system_prompt_text: &'a str,
@@ -119,52 +119,51 @@ async fn call_provider(
     prompt: &str,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> ReflectionExecutionResultType<(String, u32, u32)> {
-    use crate::ports::provider_port::{
-        InvocationOptionsData, InvocationRequestData, RequestSystemBlockData,
-    };
+    use crate::ports::provider_port::ProviderRequestData;
 
-    let request = InvocationRequestData {
-        model: invocation.model.clone(),
+    // 整段 system prompt 直收（#1861 v4）；反射提示词不参与 prompt caching
+    // ——static_prefix_len 保持 0（原 Text 块语义等价）。
+    let request = ProviderRequestData {
+        model: invocation.model.model.clone(),
         cancellation: cancel.clone(),
         messages: vec![share::message::Message::user(prompt)].into(),
-        system: vec![RequestSystemBlockData::Text(
-            invocation.system_prompt_text.to_string(),
-        )],
+        system: invocation.system_prompt_text.to_string(),
+        static_prefix_len: 0,
         tools: vec![],
-        options: InvocationOptionsData::new(invocation.max_tokens, invocation.requested_reasoning),
+        max_output_tokens: invocation.max_tokens,
+        reasoning: invocation.requested_reasoning,
     };
     let mut stream = invocation
         .provider
         .invoke(request, cancel)
         .await
         .map_err(|_| ReflectionExecutionError::LlmCall)?;
-    while let Some(event) = stream.next().await {
-        match event {
-            provider::InvocationEventData::Completed(completion) => {
-                let text = completion
-                    .output
-                    .iter()
-                    .filter_map(|block| match block {
-                        provider::ProviderContentBlockData::Text(text) => Some(text.as_str()),
-                        _ => None,
-                    })
-                    .collect::<String>()
-                    .trim()
-                    .to_string();
+    // 流式端口 → 本地聚合到终止帧（非流式语义经 Stop 帧获得）。
+    let mut text = String::new();
+    let mut usage = provider::TokenUsageData::default();
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            provider::ProviderResponseChunk::Content(provider::ProviderContentData::Text(part)) => {
+                text.push_str(&part);
+            }
+            provider::ProviderResponseChunk::Content(_) => {}
+            provider::ProviderResponseChunk::Usage(reported) => {
+                usage.merge_reported(reported);
+            }
+            provider::ProviderResponseChunk::Stop(_) => {
+                let text = text.trim().to_string();
                 if text.is_empty() {
                     return Err(ReflectionExecutionError::EmptyResponse);
                 }
-                let usage = completion.usage.unwrap_or_default();
                 return Ok((
                     text,
                     usage.input_tokens.unwrap_or(0),
                     usage.output_tokens.unwrap_or(0),
                 ));
             }
-            provider::InvocationEventData::Failed(_) => {
+            provider::ProviderResponseChunk::Error(_) => {
                 return Err(ReflectionExecutionError::LlmCall);
             }
-            provider::InvocationEventData::Delta(_) => {}
         }
     }
     Err(ReflectionExecutionError::LlmCall)

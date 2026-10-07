@@ -2,13 +2,10 @@
 async fn main_partial_stream_failure_retries_without_rollback() {
     let provider = Arc::new(ScriptedInvocationProvider::new(vec![
         vec![
-            InvocationEventData::Delta(InvocationDeltaData::Text("partial".to_string())),
+            ProviderResponseChunk::Content(ProviderContentData::Text("partial".to_string())),
             retryable_stream_failure(),
         ],
-        vec![
-            InvocationEventData::Delta(InvocationDeltaData::Text("complete".to_string())),
-            successful_completion("complete"),
-        ],
+        successful_completion("complete"),
     ]));
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();
@@ -57,11 +54,8 @@ async fn main_partial_stream_failure_retries_without_rollback() {
 #[tokio::test(start_paused = true)]
 async fn main_empty_completion_retries_and_succeeds() {
     let provider = Arc::new(ScriptedInvocationProvider::new(vec![
-        vec![empty_completion()],
-        vec![
-            InvocationEventData::Delta(InvocationDeltaData::Text("complete".to_string())),
-            successful_completion("complete"),
-        ],
+        empty_completion(),
+        successful_completion("complete"),
     ]));
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();
@@ -122,7 +116,7 @@ async fn main_empty_completion_retries_and_succeeds() {
 #[tokio::test(start_paused = true)]
 async fn main_empty_completion_exhaustion_fails_instead_of_completing() {
     let provider = Arc::new(ScriptedInvocationProvider::new(
-        (0..11).map(|_| vec![empty_completion()]).collect(),
+        (0..11).map(|_| empty_completion()).collect(),
     ));
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();

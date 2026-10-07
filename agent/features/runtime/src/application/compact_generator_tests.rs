@@ -2,7 +2,7 @@ use super::*;
 use crate::application::client::SessionModelSlotData;
 use crate::ports::provider_port::fake::FakeProvider;
 use crate::ports::{ProviderBindingData, ProviderBuildSpecData, ProviderFactory};
-use provider::ModelIdData;
+use provider::ModelInfo;
 use share::config::models::{ModelEntryConfig, ProviderModelsConfig};
 use share::config::Config;
 
@@ -55,10 +55,18 @@ impl ProviderFactory for UnusedFactory {
     ) -> Result<ProviderBindingData, provider::ProviderError> {
         Ok(ProviderBindingData {
             provider: Arc::new(FakeProvider::new()),
-            model: spec.model,
+            model: provider::ModelInfo {
+                provider: spec.source_key.clone(),
+                model: spec.model.clone(),
+                supports_tools: true,
+                supports_parallel_tool_calls: true,
+                supports_streaming: true,
+                supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+                context_limit: spec.context_window,
+                output_limit: Some(spec.max_tokens as usize),
+            },
             max_tokens: spec.max_tokens,
             requested_reasoning: spec.requested_reasoning,
-            context_window: spec.context_window,
         })
     }
 }
@@ -117,13 +125,18 @@ fn session_slot() -> SessionModelSlotData {
         resolved,
         Arc::new(ProviderBindingData {
             provider: Arc::new(FakeProvider::new()),
-            model: ModelIdData {
+            model: ModelInfo {
                 provider: "fake".into(),
                 model: "test-model".into(),
+                supports_tools: true,
+                supports_parallel_tool_calls: true,
+                supports_streaming: true,
+                supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+                context_limit: Some(100_000),
+                output_limit: Some(8_192),
             },
             max_tokens: 8_192,
             requested_reasoning: ReasoningLevel::Off,
-            context_window: Some(100_000),
         }),
     ));
     slot

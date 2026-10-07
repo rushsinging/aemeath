@@ -6,7 +6,6 @@
 use crate::application::loop_engine::chat::logged_input_messages;
 use crate::application::loop_engine::chat::InvocationResponse;
 use crate::application::tool::agent::ToolCall;
-use provider::RequestSystemBlockData;
 use sdk::ids::ToolCallId;
 use share::message::Message;
 #[cfg(test)]
@@ -19,20 +18,11 @@ use std::collections::HashMap;
 pub(crate) fn log_llm_input(
     messages_for_api: &[Message],
     persisted_message_count: usize,
-    system_blocks: &[RequestSystemBlockData],
+    system: &str,
     tool_schemas: &[serde_json::Value],
     role: &str,
 ) {
     let new_msgs = logged_input_messages(messages_for_api, persisted_message_count);
-    let sb_summary: Vec<serde_json::Value> = system_blocks
-        .iter()
-        .map(|sb| {
-            serde_json::json!({
-                "type": if sb.is_cacheable() { "cacheable" } else { "text" },
-                "len": sb.text().len(),
-            })
-        })
-        .collect();
     let schema_names: Vec<&str> = tool_schemas
         .iter()
         .map(|s| s.get("name").and_then(|v| v.as_str()).unwrap_or("?"))
@@ -41,8 +31,8 @@ pub(crate) fn log_llm_input(
         "event_type": "llm_input",
         "role": role,
         "messages": new_msgs,
-        "system_blocks_count": system_blocks.len(),
-        "system_blocks": sb_summary,
+        // #1861 v4：块级 system 消除——块计数改整段字节长度。
+        "system_len": system.len(),
         "tool_schemas_count": tool_schemas.len(),
         "tool_schemas_names": schema_names,
     });

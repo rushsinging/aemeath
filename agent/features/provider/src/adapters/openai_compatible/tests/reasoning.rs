@@ -14,7 +14,7 @@ use super::super::{OpenAICompatibleProvider, ReasoningConfig};
 use super::common::{assert_no_reasoning_fields, base_body};
 
 use crate::domain::capability::ReasoningLevel;
-use crate::domain::invoke::InvocationScopeData;
+use crate::ports::ResolvedInvocation;
 use crate::ProviderDriverKind;
 
 fn openai_provider_with_reasoning_config(
@@ -35,8 +35,8 @@ fn openai_provider_with_reasoning_config(
     )
 }
 
-fn scope_with_effective_reasoning(effective: ReasoningLevel) -> InvocationScopeData {
-    InvocationScopeData::new("test-model", 8192, effective, effective).expect("valid scope")
+fn scope_with_effective_reasoning(effective: ReasoningLevel) -> ResolvedInvocation {
+    ResolvedInvocation::new("test-model", 8192, effective, effective).expect("valid scope")
 }
 
 #[test]

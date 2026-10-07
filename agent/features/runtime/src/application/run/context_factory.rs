@@ -447,14 +447,11 @@ impl RuntimeContextFactory {
             .ok_or(RunCreationError::ContextAssembly)?
             .build(crate::ports::ProviderBuildSpecData {
                 driver: source.driver.clone(),
-                source_key: source_key.clone(),
+                source_key,
                 api_style: model.api_style.clone(),
                 api_key: source.api_key.clone(),
                 base_url: runtime_provider.base_url,
-                model: crate::ports::ModelIdData {
-                    provider: source_key,
-                    model: model.id.clone(),
-                },
+                model: model.id.clone(),
                 max_tokens,
                 requested_reasoning,
                 context_window: (model.context_window > 0).then_some(model.context_window),

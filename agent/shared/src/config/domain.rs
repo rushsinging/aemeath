@@ -7,6 +7,7 @@ pub mod config;
 mod constants;
 pub mod context;
 pub mod driver_env;
+pub mod driver_kind;
 pub mod file_snapshot;
 pub mod hooks;
 pub mod legacy;

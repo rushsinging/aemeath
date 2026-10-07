@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::STREAM_IDLE_TIMEOUT;
 use crate::adapters::openai_compatible::reasoning_normalizer::ReasoningDeltaNormalizer;
-use crate::domain::invoke::StreamResponse;
+use crate::adapters::wire::StreamResponse;
 
 /// Parse ollama's native `/api/chat` NDJSON stream.
 ///
@@ -26,7 +26,7 @@ pub(crate) async fn parse_ollama_stream(
     let mut current_text = String::new();
     let mut reasoning_normalizer = ReasoningDeltaNormalizer::new();
     let mut final_tool_calls: Vec<(String, String, serde_json::Value)> = Vec::new();
-    let mut usage = crate::domain::invoke::Usage {
+    let mut usage = crate::adapters::wire::Usage {
         input_tokens: 0,
         output_tokens: 0,
         cached_tokens: None,
@@ -34,7 +34,7 @@ pub(crate) async fn parse_ollama_stream(
         reasoning_tokens: None,
         total_tokens: None,
     };
-    let mut stop_reason = crate::domain::invoke::StopReason::EndTurn;
+    let mut stop_reason = crate::published_language::StopReason::EndTurn;
 
     let byte_stream = response.bytes_stream().map(|r| r.map_err(io::Error::other));
     let reader = StreamReader::new(byte_stream);
@@ -141,9 +141,9 @@ pub(crate) async fn parse_ollama_stream(
         if chunk.get("done").and_then(|v| v.as_bool()).unwrap_or(false) {
             if let Some(reason) = chunk.get("done_reason").and_then(|v| v.as_str()) {
                 stop_reason = match reason {
-                    "stop" => crate::domain::invoke::StopReason::EndTurn,
-                    "length" => crate::domain::invoke::StopReason::MaxTokens,
-                    _ => crate::domain::invoke::StopReason::EndTurn,
+                    "stop" => crate::published_language::StopReason::EndTurn,
+                    "length" => crate::published_language::StopReason::MaxOutputTokens,
+                    _ => crate::published_language::StopReason::EndTurn,
                 };
             }
             if let Some(n) = chunk.get("prompt_eval_count").and_then(|v| v.as_u64()) {
@@ -154,7 +154,7 @@ pub(crate) async fn parse_ollama_stream(
             }
             // Tool calls override the stop reason
             if !final_tool_calls.is_empty() {
-                stop_reason = crate::domain::invoke::StopReason::ToolUse;
+                stop_reason = crate::published_language::StopReason::ToolUse;
             }
             break;
         }

@@ -5,12 +5,12 @@ use crate::application::loop_engine::llm_log::{
 };
 use crate::application::model::test_support::{
     advance_until_retry_condition, empty_completion, successful_completion,
-    ScriptedInvocationProvider, RETRY_ADVANCE_LIMITS,
+    ScriptedInvocationProvider, ScriptedLlmProvider, RETRY_ADVANCE_LIMITS,
 };
 use ::logging as scoped_logging;
 use async_trait::async_trait;
-use provider::composition::{InvocationScopeData, LlmProvider, SystemBlockData};
-use provider::{InvocationStreamData, ProviderError, ProviderErrorKind};
+
+use provider::{ProviderError, ProviderErrorKind, ProviderResponseStream};
 use share::config::AgentInstanceConfig;
 use share::message::Message;
 use std::sync::Arc;
@@ -91,7 +91,7 @@ fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeCon
 
 #[derive(Default)]
 struct CapturedInvocation {
-    system: Vec<String>,
+    system: String,
     tool_names: Vec<String>,
 }
 
@@ -124,18 +124,15 @@ impl CapturingBuildFactory {
 }
 
 #[async_trait]
-impl LlmProvider for CapturingProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for CapturingProvider {
+    async fn scripted_invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        system: &[SystemBlockData],
-        _messages: &[Message],
-        tool_schemas: &[serde_json::Value],
-        _cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<InvocationStreamData, ProviderError> {
+        request: &crate::ports::provider_port::ProviderRequestData,
+    ) -> Result<ProviderResponseStream, ProviderError> {
         let mut captured = self.captured.lock().unwrap();
-        captured.system = system.iter().map(|block| block.text.clone()).collect();
-        captured.tool_names = tool_schemas
+        captured.system = request.system.clone();
+        captured.tool_names = request
+            .tools
             .iter()
             .filter_map(|schema| schema.get("name")?.as_str().map(str::to_string))
             .collect();
@@ -562,8 +559,8 @@ fn llm_output_log_preserves_per_invocation_elapsed_time() {
             }],
             metadata: None,
         },
-        stop_reason: provider::ProviderStopReasonData::EndTurn,
-        usage: crate::ports::RawUsageSnapshotData::default(),
+        stop_reason: provider::ResponseStopReason::EndTurn,
+        usage: crate::ports::TokenUsageData::default(),
     };
 
     let data = build_llm_output_log("test-provider", &response, 1.25, "subagent:test");
@@ -1248,14 +1245,8 @@ async fn sub_agent_sends_context_window_skills_and_tool_schemas_to_provider() {
         tools::published::agent::AgentRunTerminal::Failed { .. }
     ));
     let captured = captured.lock().unwrap();
-    assert!(captured
-        .system
-        .iter()
-        .all(|block| !block.contains("SUBAGENT_SKILL_SENTINEL")));
-    assert!(captured
-        .system
-        .iter()
-        .any(|block| block.contains("Available Skills")));
+    assert!(!captured.system.contains("SUBAGENT_SKILL_SENTINEL"));
+    assert!(captured.system.contains("Available Skills"));
     assert!(captured.tool_names.iter().any(|name| name == "Read"));
 }
 
@@ -1410,8 +1401,8 @@ async fn test_run_agent_non_cancel_provider_error_returns_sub_agent_error() {
 #[tokio::test(start_paused = true)]
 async fn sub_empty_completion_retries_and_succeeds() {
     let provider = Arc::new(ScriptedInvocationProvider::new(vec![
-        vec![empty_completion()],
-        vec![successful_completion("sub recovered")],
+        empty_completion(),
+        successful_completion("sub recovered"),
     ]));
     let (runner, _parent_guard) = test_runner_with_provider(provider.clone());
     let ctx = test_ctx();
@@ -1454,7 +1445,7 @@ async fn sub_empty_completion_retries_and_succeeds() {
 #[tokio::test(start_paused = true)]
 async fn sub_empty_completion_exhaustion_is_typed_failure() {
     let provider = Arc::new(ScriptedInvocationProvider::new(
-        (0..11).map(|_| vec![empty_completion()]).collect(),
+        (0..11).map(|_| empty_completion()).collect(),
     ));
     let (runner, _parent_guard) = test_runner_with_provider(provider.clone());
     let ctx = test_ctx();
@@ -1639,7 +1630,7 @@ fn test_config_snapshot() -> share::config::domain::snapshot::ConfigSnapshot {
 }
 
 fn test_runner_with_provider(
-    provider: Arc<dyn LlmProvider>,
+    provider: Arc<dyn ScriptedLlmProvider>,
 ) -> (
     CliAgentRunner,
     crate::application::run::context::ParentRunFrameGuard,
@@ -1715,20 +1706,16 @@ struct BlockingThenCancelledProvider {
 }
 
 #[async_trait]
-impl LlmProvider for BlockingThenCancelledProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for BlockingThenCancelledProvider {
+    async fn scripted_invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
-        _messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<InvocationStreamData, ProviderError> {
+        request: &crate::ports::provider_port::ProviderRequestData,
+    ) -> Result<ProviderResponseStream, ProviderError> {
         {
             let mut guard = self.calls.lock().unwrap();
             *guard += 1;
         }
-        cancel.cancelled().await;
+        request.cancellation.cancelled().await;
         Err(ProviderError::cancelled())
     }
 
@@ -1753,15 +1740,11 @@ struct ContextRecordingProvider {
 }
 
 #[async_trait]
-impl LlmProvider for ContextRecordingProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for ContextRecordingProvider {
+    async fn scripted_invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
-        _messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        _cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<InvocationStreamData, ProviderError> {
+        _request: &crate::ports::provider_port::ProviderRequestData,
+    ) -> Result<ProviderResponseStream, ProviderError> {
         self.seen.lock().unwrap().push(scoped_logging::capture());
         Err(ProviderError::fatal(ProviderErrorKind::Network, "recorded"))
     }
@@ -1780,15 +1763,11 @@ struct ErrorProvider {
 }
 
 #[async_trait]
-impl LlmProvider for ErrorProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for ErrorProvider {
+    async fn scripted_invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
-        _messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        _cancel: &tokio_util::sync::CancellationToken,
-    ) -> Result<InvocationStreamData, ProviderError> {
+        _request: &crate::ports::provider_port::ProviderRequestData,
+    ) -> Result<ProviderResponseStream, ProviderError> {
         Err(self.error.clone())
     }
 

@@ -3,7 +3,6 @@
 use super::*;
 use crate::ports::provider_port::fake::FakeProvider;
 use crate::ports::ProviderBuildSpecData;
-use provider::ModelIdData;
 use share::config::models::{ModelEntryConfig, ProviderModelsConfig};
 use share::config::Config;
 use share::reasoning::ReasoningLevel;
@@ -77,10 +76,18 @@ impl ProviderFactory for RecordingFactory {
         self.builds.fetch_add(1, Ordering::SeqCst);
         Ok(ProviderBindingData {
             provider: Arc::new(FakeProvider::new()),
-            model: spec.model,
+            model: provider::ModelInfo {
+                provider: spec.source_key.clone(),
+                model: spec.model.clone(),
+                supports_tools: true,
+                supports_parallel_tool_calls: true,
+                supports_streaming: true,
+                supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+                context_limit: spec.context_window,
+                output_limit: Some(spec.max_tokens as usize),
+            },
             max_tokens: spec.max_tokens,
             requested_reasoning: spec.requested_reasoning,
-            context_window: spec.context_window,
         })
     }
 }
@@ -151,13 +158,18 @@ fn session_state(
         resolved,
         Arc::new(ProviderBindingData {
             provider: Arc::new(FakeProvider::new()),
-            model: ModelIdData {
+            model: provider::ModelInfo {
                 provider: "local".into(),
                 model: model_id,
+                supports_tools: true,
+                supports_parallel_tool_calls: true,
+                supports_streaming: true,
+                supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+                context_limit: Some(context_window),
+                output_limit: Some(8_192),
             },
             max_tokens: 8_192,
             requested_reasoning: ReasoningLevel::Off,
-            context_window: Some(context_window),
         }),
     )
 }

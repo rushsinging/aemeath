@@ -408,10 +408,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         api_style: None,
         api_key: "test-api-key".to_string(),
         base_url: Some("http://127.0.0.1:1/v1".to_string()),
-        model: provider::ModelIdData {
-            provider: "local".to_string(),
-            model: "test-model".to_string(),
-        },
+        model: "test-model".to_string(),
         max_tokens: 8192,
         requested_reasoning: share::reasoning::ReasoningLevel::Off,
         context_window: Some(8192),
@@ -489,7 +486,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         runtime::composition::wire_sdk_chat_ingress(),
         initial_provider,
         runtime::SessionBootstrapAssemblyData::new(root.clone(), 8192, true, false, None),
-        runtime::PromptAssemblyData::new(Vec::new(), String::new(), String::new(), "test-model"),
+        runtime::PromptAssemblyData::new(String::new(), String::new(), String::new(), "test-model"),
         runtime::SkillBootstrapAssemblyData::new(
             tools::composition::wire_skills().catalog(),
             workspace.clone(),

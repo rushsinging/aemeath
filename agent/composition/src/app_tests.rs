@@ -160,79 +160,65 @@ struct ReportedUsageProvider {
 
 #[async_trait::async_trait]
 impl runtime::ProviderPort for ReportedUsageProvider {
-    fn capabilities(
-        &self,
-        model: &provider::ModelIdData,
-    ) -> Result<provider::ModelCapabilityData, ProviderError> {
-        Ok(provider::ModelCapabilityData {
-            model: model.clone(),
-            supports_tools: true,
-            supports_parallel_tool_calls: true,
-            supports_streaming: true,
-            reasoning: provider::ReasoningCapabilityData::new(
-                [share::reasoning::ReasoningLevel::Off],
-                provider::ReasoningMappingKindData::None,
-            )?,
-            context_limit: Some(128_000),
-            output_limit: Some(8_192),
-        })
-    }
+    // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
 
     async fn invoke(
         &self,
-        _request: provider::InvocationRequestData,
-        _cancellation: &dyn provider::CancellationSignal,
-    ) -> Result<provider::InvocationStreamData, ProviderError> {
+        _request: provider::ProviderRequestData,
+        _cancellation: &dyn runtime::CancellationSignal,
+    ) -> Result<provider::ProviderResponseStream, ProviderError> {
         let invocation_index = self.invocation_count.fetch_add(1, Ordering::SeqCst);
-        let completion = match invocation_index {
-            0 => provider::ProviderCompletionData {
-                output: vec![provider::ProviderContentBlockData::ToolCall(
-                    provider::ProviderToolCallData {
-                        id: provider::ProviderToolCallIdData("call-sub-agent".to_string()),
-                        name: "Agent".to_string(),
-                        arguments: serde_json::json!({
-                            "description": "record child usage",
-                            "prompt": "finish successfully",
-                            "agent": "coder"
-                        }),
-                    },
-                )],
-                stop_reason: provider::ProviderStopReasonData::ToolUse,
-                usage: Some(provider::RawUsageSnapshotData {
+        // v3 拆帧：原 Completed{output, usage, stop} → Content… + Usage + Stop。
+        let (output, usage, stop_reason) = match invocation_index {
+            0 => (
+                vec![provider::ProviderContentData::ToolCall {
+                    id: "call-sub-agent".to_string(),
+                    name: "Agent".to_string(),
+                    arguments: serde_json::json!({
+                        "description": "record child usage",
+                        "prompt": "finish successfully",
+                        "agent": "coder"
+                    }),
+                }],
+                Some(provider::TokenUsageData {
                     input_tokens: Some(13),
                     output_tokens: Some(8),
                     cache_write_tokens: Some(0),
                     cache_read_tokens: None,
                     reasoning_tokens: None,
                 }),
-                effective_reasoning: share::reasoning::ReasoningLevel::Off,
-            },
-            1 => provider::ProviderCompletionData {
-                output: vec![provider::ProviderContentBlockData::Text(
+                provider::ResponseStopReason::ToolUse,
+            ),
+            1 => (
+                vec![provider::ProviderContentData::Text(
                     "sub-agent complete".to_string(),
                 )],
-                stop_reason: provider::ProviderStopReasonData::EndTurn,
-                usage: Some(provider::RawUsageSnapshotData {
+                Some(provider::TokenUsageData {
                     input_tokens: Some(21),
                     output_tokens: Some(5),
                     cache_write_tokens: None,
                     cache_read_tokens: Some(3),
                     reasoning_tokens: None,
                 }),
-                effective_reasoning: share::reasoning::ReasoningLevel::Off,
-            },
-            _ => provider::ProviderCompletionData {
-                output: vec![provider::ProviderContentBlockData::Text(
+                provider::ResponseStopReason::EndTurn,
+            ),
+            _ => (
+                vec![provider::ProviderContentData::Text(
                     "main-agent complete".to_string(),
                 )],
-                stop_reason: provider::ProviderStopReasonData::EndTurn,
-                usage: None,
-                effective_reasoning: share::reasoning::ReasoningLevel::Off,
-            },
+                None,
+                provider::ResponseStopReason::EndTurn,
+            ),
         };
-        Ok(Box::pin(futures_util::stream::iter(vec![
-            provider::InvocationEventData::Completed(completion),
-        ])))
+        let mut chunks: Vec<provider::ProviderResponseChunk> = output
+            .into_iter()
+            .map(provider::ProviderResponseChunk::Content)
+            .collect();
+        if let Some(usage) = usage {
+            chunks.push(provider::ProviderResponseChunk::Usage(usage));
+        }
+        chunks.push(provider::ProviderResponseChunk::Stop(stop_reason));
+        Ok(Box::pin(futures_util::stream::iter(chunks)))
     }
 }
 
@@ -254,10 +240,18 @@ impl ProviderFactory for ReportedUsageProviderFactory {
             provider: Arc::new(ReportedUsageProvider {
                 invocation_count: self.invocation_count.clone(),
             }),
-            model: spec.model,
+            model: provider::ModelInfo {
+                provider: spec.source_key.clone(),
+                model: spec.model.clone(),
+                supports_tools: true,
+                supports_parallel_tool_calls: true,
+                supports_streaming: true,
+                supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+                context_limit: spec.context_window,
+                output_limit: Some(spec.max_tokens as usize),
+            },
             max_tokens: spec.max_tokens,
             requested_reasoning: spec.requested_reasoning,
-            context_window: spec.context_window,
         })
     }
 }

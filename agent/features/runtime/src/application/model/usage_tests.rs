@@ -1,5 +1,5 @@
 use super::{UsageRecordContext, UsageRecordFactory};
-use crate::ports::{ModelIdData, RawUsageSnapshotData};
+use crate::ports::{ModelInfo, TokenUsageData};
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 
 fn context() -> UsageRecordContext {
@@ -8,9 +8,15 @@ fn context() -> UsageRecordContext {
         run_id: RunId::new("01900000-0000-7000-8000-000000000002"),
         run_step_id: RunStepId::new("01900000-0000-7000-8000-000000000003"),
         model_invocation_id: ModelInvocationId::new("01900000-0000-7000-8000-000000000004"),
-        model: ModelIdData {
+        model: ModelInfo {
             provider: "provider-a".to_string(),
             model: "model-b".to_string(),
+            supports_tools: true,
+            supports_parallel_tool_calls: true,
+            supports_streaming: true,
+            supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+            context_limit: Some(128_000),
+            output_limit: Some(8_192),
         },
     }
 }
@@ -19,7 +25,7 @@ fn context() -> UsageRecordContext {
 fn factory_maps_reported_usage_and_preserves_correlation() {
     let context = context();
     let expected_context = context.clone();
-    let usage = RawUsageSnapshotData {
+    let usage = TokenUsageData {
         input_tokens: Some(u32::MAX),
         output_tokens: Some(23),
         cache_write_tokens: Some(7),
@@ -53,15 +59,15 @@ fn factory_distinguishes_unreported_usage_from_reported_zero() {
     let factory = UsageRecordFactory::new(|| 42);
 
     assert!(factory
-        .build_from_raw_usage(context(), RawUsageSnapshotData::default())
+        .build_from_raw_usage(context(), TokenUsageData::default())
         .is_none());
 
     let record = factory
         .build_from_raw_usage(
             context(),
-            RawUsageSnapshotData {
+            TokenUsageData {
                 cache_read_tokens: Some(0),
-                ..RawUsageSnapshotData::default()
+                ..TokenUsageData::default()
             },
         )
         .expect("reported zero must produce a record");

@@ -1,27 +1,40 @@
-//! Provider：LLM 上游的 HTTP/stream 实现与请求编排。
+//! Provider：LLM 上游的防腐网关服务（request → response）。
 //!
-//! # Published Language（四类语法，#1712 收敛·第一 PR）
+//! # Published Language（#1861 v4 收敛，#1880 review 拍板）
 //!
-//! | 组 | 实体 |
+//! provider 无自有聚合（invocation 是行为、model 是外部数据）——PL 只
+//! 发布端口函数签名：一类输入 + 一族输出 + 工厂 + 错误。
+//!
+//! | 组 | 实体与判定 |
 //! |---|---|
-//! | 工厂 | 零根工厂（判定：`composition` 构造面逻辑收进 provider 自有 wire 是本 issue 第二 PR——composition 不留复杂逻辑，wire 由 crate 提供） |
-//! | 角色和职能 | `LlmProvider`（上游驱动 trait，Arc<dyn>）、`LlmClient`（具体客户端；composition 直包——同 ConfigAppService 判例，收窄随 #1696）、`TransportPool`（传输池构造面）、`CancellationSignal`（**归 #1739 信号统一，本批不动**） |
-//! | 数据和生命周期 | 21 个 Data：`InvocationRequestData`（生命周期载体：含 cancellation 按值）、`InvocationStreamData`、`InvocationEventData`、`InvocationDeltaData`、`ModelIdData`、`ModelCapabilityData`、`ModelToolSchemaData`、`RequestSystemBlockData`、`SystemBlockData`、`InvocationScopeData`、`LlmConfigOptionsData`、`InvocationOptionsData`、`ProviderCompletionData`、`ProviderContentBlockData`、`ProviderToolCallData`、`ProviderToolCallIdData`、`ProviderStopReasonData`、`RawUsageSnapshotData`、`ReasoningCapabilityData`、`ReasoningMappingKindData` |
-//! | Error | `ProviderError`（事实三字段；retryable/retry_after 迁出归 **#1740**）、`ProviderErrorKind`（13 变体）、`LlmError`（9 变体）——Error 类**不 Data 化** |
+//! | **输入（1）** | `ProviderRequestData`（model + max_output_tokens + reasoning + 整段 system prompt + static_prefix_len 缓存前缀分界 + messages + wire-ready tools + cancellation token 全内聚；判定：不更名 ProviderRequestData——现名已表意，更名无行为收益。Options/Scope 等中间形态已消失；#1861 v4 块级 system 块类型消除，拼接归 context/runtime） |
+//! | **输出（两类）** | 非流式 `ProviderResponse`（自带 ok/error，单通道）+ 流式 `ProviderResponseChunk`（Content/Usage/Stop/Error 帧，Error 即失败终止帧）→ `ProviderResponseStream`；载荷 `ProviderContentData`（终态块+流增量合并家族；tool call 以 `ToolCall{id,name,arguments}` / `ToolCallCompleted{index,id,name,arguments}` 命名字段内联——#1861 v4 tool call 独立载荷类型消除）/`ResponseStopReason`/`TokenUsageData`（LLM token 计量；audit 快照由 audit 域组装） |
+//! | 模型元数据 | `ModelInfo`（单实体：身份 + 能力，config/catalog 外部数据在 provider 读侧的完整投影 + `supported_reasoning` 阶梯与 `resolve_reasoning` clamp 方法——#1861 v4 reasoning 能力数据类型摊平进实体；#1880 裁决：model 信息只有一个实体来源，provider 不负责写入） |
+//! | 工厂（2 入口） | `wire_provider_client`（主链路：config + 模型元数据 → `(client, 修正版 ModelInfo)`，阶梯由 client 推导覆盖）、`wire_test_provider_client`（connect 探测构造+执行合一） |
+//! | 构造面豁免 | `LlmClient`/`ProviderClientSpecData`/`TransportPool`——仅组合根桥接所需 |
+//! | Error | `ProviderError` + `ProviderErrorKind`（13 变体；LlmError 已内部化，折叠归 #1740） |
+//! | 身份 | `ProviderDriverKind`（= share DriverKind 词表，#1850 单一真相源） |
 //!
-//! 本批删除（零消费/转发）：`CapabilityFingerprint`、`RequestedInvocationOptions`、
-//! `ResolvedInvocationOptions`、`ProviderDriverKind`（组内）、6 超时常量降 `pub(crate)`、
-//! `ReasoningLevel` 转发（消费方直连 share::reasoning）。
+//! #1861 v2 收敛记录：C10 LlmError 内部化；C11 ToolSchemaData 归 context
+//! （request.tools wire-ready Value）；C12 request 单载体 + trait 中性化
+//! （ResolvedInvocation/scope 内部化、中性 system 块、wire DTO 下移
+//! adapters）；C12c runtime fake 自产事件流、构造面撤空；C13
+//! CancellationSignal 归 runtime（取消单通道 request.cancellation）；
+//! C14 工厂收敛 2 入口。
+//! #1861 v4 收敛记录（用户逐项拍板 7 项）：客户端构造配置类型更名
+//! ProviderClientSpecData；工厂收敛为 wire_provider_client（装配句柄包
+//! 消除）；tool call 载荷摊平进 ProviderContentData 命名字段；reasoning
+//! 能力数据摊平进 ModelInfo.supported_reasoning + resolve_reasoning；
+//! system 块类型消除（整串 + static_prefix_len）；探测入口更名
+//! wire_test_provider_client；白名单随行更新。
 //! 按 docs/design/03-engineering/05-published-language.md SOP。
-
-//! LLM client library for aemeath.
 
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 
 /// 本 crate 的日志 target。所有 log::xxx! 调用必须引用此常量。
 mod constants;
 pub(crate) use constants::{
-    ANTHROPIC_STREAM_IDLE_TIMEOUT_SECS, CONNECT_TIMEOUT_SECS, DEFAULT_TIMEOUT_SECS, LOG_TARGET,
+    ANTHROPIC_STREAM_IDLE_TIMEOUT_SECS, CONNECT_TIMEOUT_SECS, LOG_TARGET,
     OLLAMA_STREAM_IDLE_TIMEOUT_SECS, OPENAI_STREAM_IDLE_TIMEOUT_SECS, STALL_THRESHOLD_SECS,
 };
 
@@ -30,37 +43,25 @@ mod domain;
 mod ports;
 pub mod published_language;
 
+pub use published_language::{
+    ModelInfo, ProviderContentData, ProviderError, ProviderErrorKind, ProviderRequestData,
+    ProviderResponse, ProviderResponseChunk, ProviderResponseStream, ResponseStopReason,
+    TokenUsageData,
+};
+
 pub(crate) use domain::capability::ProviderDriverKind;
-pub(crate) use domain::invoke::InvocationScopeData;
 
 /// Composition Root 专用构造面；业务消费者不得引用。
 pub mod composition {
-    pub use crate::adapters::client::{LlmClient, LlmConfigOptionsData};
+    pub use crate::adapters::client::{wire_provider_client, LlmClient, ProviderClientSpecData};
     pub use crate::adapters::pool::TransportPool;
-    pub use crate::domain::invoke::{InvocationScopeData, SystemBlockData};
-    pub use crate::ports::LlmProvider;
-    pub use crate::LlmError;
+    pub use crate::adapters::probe::wire_test_provider_client;
 }
 
-pub use published_language::{
-    CancellationSignal, InvocationDeltaData, InvocationEventData, InvocationOptionsData,
-    InvocationRequestData, InvocationStreamData, ModelCapabilityData, ModelIdData,
-    ModelToolSchemaData, ProviderCompletionData, ProviderContentBlockData, ProviderError,
-    ProviderErrorKind, ProviderStopReasonData, ProviderToolCallData, ProviderToolCallIdData,
-    RawUsageSnapshotData, ReasoningCapabilityData, ReasoningMappingKindData,
-    RequestSystemBlockData,
-};
-
 #[derive(Debug, thiserror::Error)]
-pub enum LlmError {
-    #[error("network error: {0}")]
-    Network(String),
+pub(crate) enum LlmError {
     #[error("API error [{error_type}]: {message}")]
     Api { error_type: String, message: String },
-    #[error("rate limited")]
-    RateLimited,
-    #[error("context too long")]
-    ContextTooLong,
     #[error("request cancelled by user")]
     Cancelled,
     #[error("stream error: {0}")]
@@ -82,25 +83,12 @@ pub enum LlmError {
     },
 }
 
-impl LlmError {
-    pub fn is_cancelled(&self) -> bool {
-        matches!(self, LlmError::Cancelled)
-    }
-
-    pub fn is_stream_truncated(&self) -> bool {
-        matches!(self, LlmError::StreamTruncated { .. })
-    }
-}
-
 // ─── LlmError → ProviderError 权威映射（crate 内三 driver + stream + runtime 装配共用）───
 
 impl From<LlmError> for ProviderError {
     fn from(error: LlmError) -> Self {
         let kind = match &error {
             LlmError::Cancelled => ProviderErrorKind::Cancelled,
-            LlmError::RateLimited => ProviderErrorKind::RateLimited,
-            LlmError::ContextTooLong => ProviderErrorKind::ContextTooLong,
-            LlmError::Network(_) => ProviderErrorKind::Network,
             LlmError::Api { .. } => ProviderErrorKind::UpstreamUnavailable,
             LlmError::StreamInterrupted(_) | LlmError::StreamTruncated { .. } => {
                 ProviderErrorKind::StreamTruncated

@@ -123,7 +123,7 @@ pub mod context_port {
         ContextPortError, ContextRequestData, ContextRequestId, ContextWindowData, DecisionReason,
         FinalizeCause, Language, ManualCompactRequestData, RunStepId, SessionId, SessionRevision,
         StepReceiptData, SystemBlock, SystemPromptSpecData, TokenBudget, ToolOutcomeKindData,
-        Urgency,
+        ToolSchemaData, Urgency,
     };
     pub use crate::ports::ContextPort;
 }

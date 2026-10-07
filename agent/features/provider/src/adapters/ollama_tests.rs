@@ -59,7 +59,7 @@ async fn llm_client_ollama_invocation_stream_is_single_request_pull_stream() {
     let leaked = Box::leak(response.into_boxed_str());
     let (base_url, requests) = spawn_counting_server(leaked).await;
     let client =
-        crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
+        crate::composition::LlmClient::from_config(crate::composition::ProviderClientSpecData {
             driver: crate::ProviderDriverKind::Ollama.as_str().to_string(),
             source_key: "ollama".to_string(),
             api_style: None,
@@ -73,7 +73,7 @@ async fn llm_client_ollama_invocation_stream_is_single_request_pull_stream() {
             user_agent: Some("aemeath-test/1.0".to_string()),
         })
         .expect("valid ollama config");
-    let scope = InvocationScopeData::new(
+    let resolved = crate::ports::ResolvedInvocation::new(
         "test-model",
         8192,
         crate::domain::capability::ReasoningLevel::Off,
@@ -83,8 +83,9 @@ async fn llm_client_ollama_invocation_stream_is_single_request_pull_stream() {
 
     let events: Vec<_> = client
         .invocation_stream(
-            &scope,
-            &[],
+            &resolved,
+            "",
+            0,
             &[Message::user("hi")],
             &[],
             &CancellationToken::new(),
@@ -98,16 +99,20 @@ async fn llm_client_ollama_invocation_stream_is_single_request_pull_stream() {
     assert!(matches!(
         &events[..],
         [
-            crate::InvocationEventData::Delta(crate::InvocationDeltaData::Text(first)),
-            crate::InvocationEventData::Delta(crate::InvocationDeltaData::Text(second)),
-            crate::InvocationEventData::Completed(_)
+            crate::ProviderResponseChunk::Content(crate::ProviderContentData::Text(first)),
+            crate::ProviderResponseChunk::Content(crate::ProviderContentData::Text(second)),
+            crate::ProviderResponseChunk::Usage(_),
+            crate::ProviderResponseChunk::Stop(_)
         ] if first == "ol" && second == "lama"
     ));
     assert_eq!(events.iter().filter(|event| event.is_terminal()).count(), 1);
-    let crate::InvocationEventData::Completed(completion) = events.last().unwrap() else {
-        panic!("expected completed event");
-    };
-    let usage = completion.usage.as_ref().expect("ollama usage reported");
+    let usage = events
+        .iter()
+        .find_map(|event| match event {
+            crate::ProviderResponseChunk::Usage(usage) => Some(usage),
+            _ => None,
+        })
+        .expect("ollama usage reported");
     assert_eq!(usage.input_tokens, Some(1));
     assert_eq!(usage.output_tokens, Some(1));
 }

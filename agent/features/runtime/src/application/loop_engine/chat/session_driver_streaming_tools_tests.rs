@@ -53,15 +53,11 @@ struct StepCancelledStreamingToolProvider {
 }
 
 #[async_trait]
-impl LlmProvider for StepCancelledStreamingToolProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for StepCancelledStreamingToolProvider {
+    async fn scripted_invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
-        _messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        cancel: &CancellationToken,
-    ) -> Result<InvocationStreamData, ProviderError> {
+        request: &crate::ports::provider_port::ProviderRequestData,
+    ) -> Result<ProviderResponseStream, ProviderError> {
         let invocation_number = {
             let mut count = self.invocation_count.lock().unwrap();
             *count += 1;
@@ -69,41 +65,28 @@ impl LlmProvider for StepCancelledStreamingToolProvider {
         };
         if invocation_number > 1 {
             return Ok(Box::pin(futures::stream::iter(vec![
-                InvocationEventData::Completed(ProviderCompletionData {
-                    output: vec![ProviderContentBlockData::Text("after cancellation".to_string())],
-                    stop_reason: ProviderStopReasonData::EndTurn,
-                    usage: None,
-                    effective_reasoning: ReasoningLevel::Off,
-                }),
+                ProviderResponseChunk::Content(ProviderContentData::Text("after cancellation".to_string())),
+                ProviderResponseChunk::Stop(ResponseStopReason::EndTurn),
             ])));
         }
-        let provider_id = ProviderToolCallIdData(format!("toolu_{}_cancel", self.tool_name));
-        let tool_call = ProviderToolCallData {
-            id: provider_id.clone(),
-            name: self.tool_name.to_string(),
-            arguments: serde_json::json!({}),
-        };
-        let cancel = cancel.clone();
-        let completed_call = tool_call.clone();
+        let provider_id = format!("toolu_{}_cancel", self.tool_name);
+        let cancel = request.cancellation.clone();
         let stream = futures::stream::iter(vec![
-            InvocationEventData::Delta(InvocationDeltaData::ToolCallStarted {
+            ProviderResponseChunk::Content(ProviderContentData::ToolCallStarted {
                 index: 0,
-                provider_id: Some(provider_id),
+                provider_id: Some(provider_id.clone()),
                 name: self.tool_name.to_string(),
             }),
-            InvocationEventData::Delta(InvocationDeltaData::ToolCallCompleted {
+            ProviderResponseChunk::Content(ProviderContentData::ToolCallCompleted {
                 index: 0,
-                call: tool_call,
+                id: provider_id.clone(),
+                name: self.tool_name.to_string(),
+                arguments: serde_json::json!({}),
             }),
         ])
         .chain(futures::stream::once(async move {
             cancel.cancelled().await;
-            InvocationEventData::Completed(ProviderCompletionData {
-                output: vec![ProviderContentBlockData::ToolCall(completed_call)],
-                stop_reason: ProviderStopReasonData::ToolUse,
-                usage: None,
-                effective_reasoning: ReasoningLevel::Off,
-            })
+            ProviderResponseChunk::Stop(ResponseStopReason::ToolUse)
         }));
         Ok(Box::pin(stream))
     }
@@ -321,15 +304,11 @@ impl StreamingToolRetryProvider {
 }
 
 #[async_trait]
-impl LlmProvider for StreamingToolRetryProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for StreamingToolRetryProvider {
+    async fn scripted_invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
-        messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        _cancel: &CancellationToken,
-    ) -> Result<InvocationStreamData, ProviderError> {
+        request: &crate::ports::provider_port::ProviderRequestData,
+    ) -> Result<ProviderResponseStream, ProviderError> {
         let call_num = {
             let mut count = self.call_count.lock().unwrap();
             *count += 1;
@@ -338,30 +317,27 @@ impl LlmProvider for StreamingToolRetryProvider {
         self.recorded_messages
             .lock()
             .unwrap()
-            .push(messages.to_vec());
+            .push(request.messages.to_vec());
         if call_num == 1 {
             // 先发完整的 ToolCallCompleted delta（旁路执行已触发），随后流失败。
-            let tool_call = ProviderToolCallData {
-                id: ProviderToolCallIdData("toolu_retry_001".to_string()),
-                name: "NoopMarker".to_string(),
-                arguments: serde_json::json!({"marker": "retry-drop"}),
-            };
             let stream = futures::stream::iter(vec![
-                InvocationEventData::Delta(InvocationDeltaData::ToolCallStarted {
+                ProviderResponseChunk::Content(ProviderContentData::ToolCallStarted {
                     index: 0,
-                    provider_id: Some(ProviderToolCallIdData("toolu_retry_001".to_string())),
+                    provider_id: Some("toolu_retry_001".to_string()),
                     name: "NoopMarker".to_string(),
                 }),
-                InvocationEventData::Delta(InvocationDeltaData::ToolArgumentsDelta {
+                ProviderResponseChunk::Content(ProviderContentData::ToolArgumentsDelta {
                     index: 0,
-                    provider_id: Some(ProviderToolCallIdData("toolu_retry_001".to_string())),
+                    provider_id: Some("toolu_retry_001".to_string()),
                     partial_json: r#"{"marker":"retry-drop"}"#.to_string(),
                 }),
-                InvocationEventData::Delta(InvocationDeltaData::ToolCallCompleted {
+                ProviderResponseChunk::Content(ProviderContentData::ToolCallCompleted {
                     index: 0,
-                    call: tool_call,
+                    id: "toolu_retry_001".to_string(),
+                    name: "NoopMarker".to_string(),
+                    arguments: serde_json::json!({"marker": "retry-drop"}),
                 }),
-                InvocationEventData::Failed(ProviderError::retryable(
+                ProviderResponseChunk::Error(ProviderError::retryable(
                     ProviderErrorKind::Protocol,
                     "stream broke after tool call",
                 )),
@@ -370,17 +346,15 @@ impl LlmProvider for StreamingToolRetryProvider {
         } else {
             // 重试：纯文本成功。
             Ok(Box::pin(futures::stream::iter(vec![
-                InvocationEventData::Delta(InvocationDeltaData::Text("retry succeeded".to_string())),
-                InvocationEventData::Completed(ProviderCompletionData {
-                    output: vec![ProviderContentBlockData::Text("retry succeeded".to_string())],
-                    stop_reason: ProviderStopReasonData::EndTurn,
-                    usage: Some(RawUsageSnapshotData {
-                        input_tokens: Some(10),
-                        output_tokens: Some(3),
-                        ..RawUsageSnapshotData::default()
-                    }),
-                    effective_reasoning: ReasoningLevel::Off,
+                ProviderResponseChunk::Content(ProviderContentData::Text(
+                    "retry succeeded".to_string(),
+                )),
+                ProviderResponseChunk::Usage(TokenUsageData {
+                    input_tokens: Some(10),
+                    output_tokens: Some(3),
+                    ..TokenUsageData::default()
                 }),
+                ProviderResponseChunk::Stop(ResponseStopReason::EndTurn),
             ])))
         }
     }
@@ -487,15 +461,11 @@ impl StreamingToolRetryOrphanProvider {
 }
 
 #[async_trait]
-impl LlmProvider for StreamingToolRetryOrphanProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for StreamingToolRetryOrphanProvider {
+    async fn scripted_invocation_stream(
         &self,
-        _scope: &InvocationScopeData,
-        _system: &[SystemBlockData],
-        messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        _cancel: &CancellationToken,
-    ) -> Result<InvocationStreamData, ProviderError> {
+        request: &crate::ports::provider_port::ProviderRequestData,
+    ) -> Result<ProviderResponseStream, ProviderError> {
         let call_num = {
             let mut count = self.call_count.lock().unwrap();
             *count += 1;
@@ -504,31 +474,29 @@ impl LlmProvider for StreamingToolRetryOrphanProvider {
         self.recorded_messages
             .lock()
             .unwrap()
-            .push(messages.to_vec());
+            .push(request.messages.to_vec());
         let usage = || {
-            Some(RawUsageSnapshotData {
+            Some(TokenUsageData {
                 input_tokens: Some(10),
                 output_tokens: Some(3),
-                ..RawUsageSnapshotData::default()
+                ..TokenUsageData::default()
             })
         };
         if call_num == 1 {
             // 流 1：完整 ToolCallCompleted（旁路执行已触发），随后流失败触发 retry。
             let stream = futures::stream::iter(vec![
-                InvocationEventData::Delta(InvocationDeltaData::ToolCallStarted {
+                ProviderResponseChunk::Content(ProviderContentData::ToolCallStarted {
                     index: 0,
-                    provider_id: Some(ProviderToolCallIdData("toolu_retry_orphan_a".to_string())),
+                    provider_id: Some("toolu_retry_orphan_a".to_string()),
                     name: "NoopMarker".to_string(),
                 }),
-                InvocationEventData::Delta(InvocationDeltaData::ToolCallCompleted {
+                ProviderResponseChunk::Content(ProviderContentData::ToolCallCompleted {
                     index: 0,
-                    call: ProviderToolCallData {
-                        id: ProviderToolCallIdData("toolu_retry_orphan_a".to_string()),
-                        name: "NoopMarker".to_string(),
-                        arguments: serde_json::json!({"marker": "orphan-a"}),
-                    },
+                    id: "toolu_retry_orphan_a".to_string(),
+                    name: "NoopMarker".to_string(),
+                    arguments: serde_json::json!({"marker": "orphan-a"}),
                 }),
-                InvocationEventData::Failed(ProviderError::retryable(
+                ProviderResponseChunk::Error(ProviderError::retryable(
                     ProviderErrorKind::Protocol,
                     "stream broke after tool call",
                 )),
@@ -536,39 +504,30 @@ impl LlmProvider for StreamingToolRetryOrphanProvider {
             Ok(Box::pin(stream))
         } else if call_num == 2 {
             // 流 2（retry）：重新发出同参数工具调用并正常完成。
-            let completed_call = ProviderToolCallData {
-                id: ProviderToolCallIdData("toolu_retry_pair_b".to_string()),
-                name: "NoopMarker".to_string(),
-                arguments: serde_json::json!({"marker": "pair-b"}),
-            };
             let stream = futures::stream::iter(vec![
-                InvocationEventData::Delta(InvocationDeltaData::ToolCallStarted {
+                ProviderResponseChunk::Content(ProviderContentData::ToolCallStarted {
                     index: 0,
-                    provider_id: Some(ProviderToolCallIdData("toolu_retry_pair_b".to_string())),
+                    provider_id: Some("toolu_retry_pair_b".to_string()),
                     name: "NoopMarker".to_string(),
                 }),
-                InvocationEventData::Delta(InvocationDeltaData::ToolCallCompleted {
+                ProviderResponseChunk::Content(ProviderContentData::ToolCallCompleted {
                     index: 0,
-                    call: completed_call.clone(),
+                    id: "toolu_retry_pair_b".to_string(),
+                    name: "NoopMarker".to_string(),
+                    arguments: serde_json::json!({"marker": "pair-b"}),
                 }),
-                InvocationEventData::Completed(ProviderCompletionData {
-                    output: vec![ProviderContentBlockData::ToolCall(completed_call)],
-                    stop_reason: ProviderStopReasonData::ToolUse,
-                    usage: usage(),
-                    effective_reasoning: ReasoningLevel::Off,
-                }),
+                ProviderResponseChunk::Usage(usage().unwrap_or_default()),
+                ProviderResponseChunk::Stop(ResponseStopReason::ToolUse),
             ]);
             Ok(Box::pin(stream))
         } else {
             // 流 3（工具轮次后的 continuation）：纯文本收尾。
             Ok(Box::pin(futures::stream::iter(vec![
-                InvocationEventData::Delta(InvocationDeltaData::Text("turn complete".to_string())),
-                InvocationEventData::Completed(ProviderCompletionData {
-                    output: vec![ProviderContentBlockData::Text("turn complete".to_string())],
-                    stop_reason: ProviderStopReasonData::EndTurn,
-                    usage: usage(),
-                    effective_reasoning: ReasoningLevel::Off,
-                }),
+                ProviderResponseChunk::Content(ProviderContentData::Text(
+                    "turn complete".to_string(),
+                )),
+                ProviderResponseChunk::Usage(usage().unwrap_or_default()),
+                ProviderResponseChunk::Stop(ResponseStopReason::EndTurn),
             ])))
         }
     }

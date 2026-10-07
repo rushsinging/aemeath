@@ -205,10 +205,7 @@ pub(crate) async fn from_args_with_gateways(
             (!resolved_model.source_config.base_url.is_empty())
                 .then(|| resolved_model.source_config.base_url.clone())
         }),
-        model: provider::ModelIdData {
-            provider: resolved_model.source_key.clone(),
-            model: resolved_model.model.id.clone(),
-        },
+        model: resolved_model.model.id.clone(),
         max_tokens: runtime_model.max_tokens(),
         requested_reasoning: runtime_settings
             .reasoning_effort
@@ -394,7 +391,7 @@ pub(crate) async fn from_args_with_gateways(
     )
     .await;
     let prompt = runtime::PromptAssemblyData::new(
-        vec![provider::RequestSystemBlockData::Cacheable(static_prompt)],
+        static_prompt,
         prompt_parts.initial_git_context,
         prompt_parts.claude_md,
         initial_provider.binding().model.model.clone(),

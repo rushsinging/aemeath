@@ -1,8 +1,7 @@
 use super::*;
 use crate::application::model::test_support::text_completion_stream;
 use crate::ports::provider_port::{
-    InvocationRequestData, InvocationStreamData, ModelCapabilityData, ModelIdData, ProviderError,
-    ProviderErrorKind, ReasoningCapabilityData,
+    ModelInfo, ProviderError, ProviderRequestData, ProviderResponseStream,
 };
 use async_trait::async_trait;
 use memory::api::reflection::{ReflectionRecord, ReflectionSafeSummary};
@@ -15,29 +14,14 @@ struct StaticProvider {
 
 #[async_trait]
 impl ProviderPort for StaticProvider {
-    fn capabilities(&self, model: &ModelIdData) -> Result<ModelCapabilityData, ProviderError> {
-        if model.provider != "reflection-test-provider" {
-            return Err(ProviderError::fatal(
-                ProviderErrorKind::ModelUnavailable,
-                format!("unknown model: {model}"),
-            ));
-        }
-        Ok(ModelCapabilityData {
-            model: model.clone(),
-            supports_tools: false,
-            supports_parallel_tool_calls: false,
-            supports_streaming: true,
-            reasoning: ReasoningCapabilityData::none(),
-            context_limit: Some(8_192),
-            output_limit: Some(4_096),
-        })
-    }
+    // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询
+    // ——unknown model 门禁语义已在装配时。
 
     async fn invoke(
         &self,
-        _request: InvocationRequestData,
+        _request: ProviderRequestData,
         _cancel: &dyn crate::ports::provider_port::CancellationSignal,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         Ok(text_completion_stream(self.response.clone(), 11, 22))
     }
 }
@@ -80,10 +64,16 @@ impl ReflectionHistoryStore for RecordingHistory {
     }
 }
 
-fn model() -> ModelIdData {
-    ModelIdData {
+fn model() -> ModelInfo {
+    ModelInfo {
         provider: "reflection-test-provider".to_string(),
         model: "reflection-test-model".to_string(),
+        supports_tools: false,
+        supports_parallel_tool_calls: false,
+        supports_streaming: true,
+        supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+        context_limit: Some(8_192),
+        output_limit: Some(4_096),
     }
 }
 

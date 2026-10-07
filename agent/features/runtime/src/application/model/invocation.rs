@@ -6,7 +6,7 @@
 //! - 调 `ProviderPort` 发起 LLM 调用
 //! - 组装流式响应
 //! - 提取 tool_calls
-//! - 记录 `RawUsageSnapshotData` -> 构造 `UsageRecordData` 经 `RuntimeStreamEvent::Usage` 路径发出
+//! - 记录 `TokenUsageData` -> 构造 `UsageRecordData` 经 `RuntimeStreamEvent::Usage` 路径发出
 //! - 退避重试：仅对 Retryable(超时/5xx/429/流中断) 指数退避重试
 //! - Fatal(4xx) 直接失败；context 超限 -> compact
 //! - 重试期 emit `ModelInvocationRetrying{attempt}`
@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
-use provider::{InvocationEventData, ProviderError, ProviderErrorKind};
+use provider::{ProviderError, ProviderErrorKind, ProviderResponseChunk};
 use tokio_util::sync::CancellationToken;
 
 use crate::application::constants::{DEFAULT_MAX_ATTEMPTS, INITIAL_BACKOFF, MAX_BACKOFF};
@@ -36,7 +36,7 @@ use crate::application::loop_engine::{LoopEngineError, ModelStep, StepTokenUsage
 use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::ToolCall;
-use crate::ports::{InvocationOptionsData, InvocationRequestData};
+use crate::ports::ProviderRequestData;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RetryDecision {
@@ -218,16 +218,16 @@ async fn invoke_model_impl(
         );
     log::debug!(
         target: crate::LOG_TARGET,
-        "context_window_mapped_to_invocation messages={} system_blocks={} tool_schemas={} reminder_messages={}",
+        "context_window_mapped_to_invocation messages={} system_len={} tool_schemas={} reminder_messages={}",
         mapping_summary.messages,
-        mapping_summary.system_blocks,
+        mapping_summary.system_len,
         mapping_summary.tool_schemas,
         mapping_summary.reminder_messages,
     );
     crate::application::loop_engine::llm_log::log_llm_input(
         invocation_context.messages_for_api(),
         window.messages.len(),
-        &invocation_context.system_blocks,
+        &invocation_context.system,
         &invocation_context.tool_schemas,
         observer.role(),
     );
@@ -251,26 +251,29 @@ async fn invoke_model_impl(
         let request_context = observer.request_log_context(&logging::capture());
         let mut reducer = observer.build_reducer();
         let provider = binding.provider.clone();
-        let model = binding.model.clone();
+        let model = binding.model.model.clone();
         let max_tokens = binding.max_tokens;
         let messages = invocation_context.messages_for_api().to_vec();
-        let system = invocation_context.system_blocks.clone();
-        let tools = window.tool_schemas.clone();
+        let system = invocation_context.system.clone();
+        let static_prefix_len = invocation_context.static_prefix_len;
+        // context 结构化投影 → wire-ready tool 定义（Value）。
+        let tools: Vec<serde_json::Value> = window
+            .tool_schemas
+            .iter()
+            .map(crate::ports::ToolSchemaData::to_tool_definition)
+            .collect();
         let stream_cancel = cancel.clone();
         let committed_delta = observer.committed_delta();
         let invocation = async {
-            let mut request = InvocationRequestData::new(
-                model,
-                messages,
-                InvocationOptionsData::new(max_tokens, reasoning),
-            );
+            let mut request = ProviderRequestData::new(model, messages, max_tokens, reasoning);
             request.system = system;
+            request.static_prefix_len = static_prefix_len;
             request.tools = tools;
             request.cancellation = stream_cancel.clone();
             log::debug!(
                 target: crate::LOG_TARGET,
-                "provider_invocation_request_ready model={} messages={} system_blocks={} tool_schemas={}",
-                request.model.model,
+                "provider_invocation_request_ready model={} messages={} system_len={} tool_schemas={}",
+                request.model,
                 request.messages.len(),
                 request.system.len(),
                 request.tools.len(),
@@ -384,8 +387,8 @@ impl ModelInvocationCoordinator {
         mut apply: Apply,
     ) -> Result<(T, bool), (ProviderError, bool)>
     where
-        S: Stream<Item = InvocationEventData> + Unpin,
-        Apply: FnMut(InvocationEventData) -> Result<Option<T>, ProviderError>,
+        S: Stream<Item = ProviderResponseChunk> + Unpin,
+        Apply: FnMut(ProviderResponseChunk) -> Result<Option<T>, ProviderError>,
     {
         let mut committed_delta = false;
         loop {
@@ -396,7 +399,7 @@ impl ModelInvocationCoordinator {
                     // active text/thinking block), so cancellation must pass through
                     // the same terminal failure path before control returns.
                     let error = ProviderError::cancelled();
-                    let _ = apply(InvocationEventData::Failed(error.clone()));
+                    let _ = apply(ProviderResponseChunk::Error(error.clone()));
                     return Err((error, committed_delta));
                 }
                 event = stream.next() => event,
@@ -404,18 +407,15 @@ impl ModelInvocationCoordinator {
 
             let Some(event) = event else {
                 let error = missing_terminal_error();
-                // A raw EOF has no provider terminal event, so synthesize the
+                // A raw EOF has no provider terminal frame, so synthesize the
                 // retryable failure through the reducer before returning to the
                 // coordinator. This lets stream consumers close any active
                 // text/thinking block before the next attempt starts.
-                let _ = apply(InvocationEventData::Failed(error.clone()));
+                let _ = apply(ProviderResponseChunk::Error(error.clone()));
                 return Err((error, committed_delta));
             };
-            let terminal_event = matches!(
-                event,
-                InvocationEventData::Completed(_) | InvocationEventData::Failed(_)
-            );
-            if matches!(event, InvocationEventData::Delta(_)) && delta_is_committed {
+            let terminal_event = event.is_terminal();
+            if matches!(event, ProviderResponseChunk::Content(_)) && delta_is_committed {
                 committed_delta = true;
             }
             match apply(event) {
@@ -483,7 +483,7 @@ fn deterministic_jitter_millis(attempt: u32) -> u64 {
 pub(crate) fn record_successful_usage(
     sink: &dyn crate::ports::UsageSink,
     context: crate::application::model::usage::UsageRecordContext,
-    usage: crate::ports::RawUsageSnapshotData,
+    usage: crate::ports::TokenUsageData,
     clock: impl Fn() -> u64,
 ) {
     let factory = crate::application::model::usage::UsageRecordFactory::new(clock);

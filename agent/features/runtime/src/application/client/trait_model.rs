@@ -47,10 +47,6 @@ pub(crate) fn build_provider_binding_from_runtime_model(
 
     let runtime_provider = resolve_provider_runtime(snapshot, &resolved_model, base_url_override);
     let base_url = runtime_provider.base_url;
-    let model_id = provider::ModelIdData {
-        provider: resolved_model.source_key.clone(),
-        model: resolved_model.model.id.clone(),
-    };
 
     let requested_reasoning = resolved_model
         .model
@@ -69,7 +65,7 @@ pub(crate) fn build_provider_binding_from_runtime_model(
         api_style: resolved_model.model.api_style.clone(),
         api_key,
         base_url,
-        model: model_id.clone(),
+        model: resolved_model.model.id.clone(),
         max_tokens: runtime_model.max_tokens(),
         requested_reasoning,
         context_window: if resolved_model.model.context_window > 0 {

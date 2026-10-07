@@ -1,12 +1,9 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use provider::composition::{LlmClient, LlmConfigOptionsData, LlmError};
+use provider::composition::{LlmClient, ProviderClientSpecData};
 use provider::{
-    CancellationSignal, InvocationRequestData, InvocationStreamData, ModelCapabilityData,
-    ModelIdData, ProviderError, ProviderErrorKind, ReasoningCapabilityData,
-    ReasoningMappingKindData,
+    ModelInfo, ProviderError, ProviderErrorKind, ProviderRequestData, ProviderResponseStream,
 };
 
 use runtime::{
@@ -17,63 +14,47 @@ use share::reasoning::ReasoningLevel;
 
 // ─── New adapter: ProviderPort via LlmClient ────────────────
 
-/// Composition-owned adapter: wraps the Provider construction handle and a set of
-/// model capabilities to expose the `runtime::ports::ProviderPort` contract.
+/// Composition-owned adapter: wraps the Provider construction handle together
+/// with the binding's single `ModelInfo` to expose the `runtime::ports::ProviderPort`
+/// contract.
+///
+/// 每 binding 一个 adapter 实例（单模型绑定）：invoke 用持有的 `ModelInfo`
+/// 直调 client——运行时零查询（#1880：能力查询随 capabilities() 删除）。
 ///
 /// The adapter lives in the Composition crate because the dependency
 /// direction is `runtime → provider`; Composition depends on both.
 pub struct ProviderAdapter {
     client: Arc<LlmClient>,
-    capabilities: HashMap<ModelIdData, ModelCapabilityData>,
+    model: ModelInfo,
 }
 
 impl ProviderAdapter {
-    /// Create a new adapter over an opaque LLM client and its known capabilities.
-    pub fn new(
-        client: Arc<LlmClient>,
-        capabilities: HashMap<ModelIdData, ModelCapabilityData>,
-    ) -> Self {
-        Self {
-            client,
-            capabilities,
-        }
+    /// Create a new adapter over an opaque LLM client and the bound model metadata.
+    pub fn new(client: Arc<LlmClient>, model: ModelInfo) -> Self {
+        Self { client, model }
     }
 }
 
-/// Production factory: accepts an opaque Provider construction handle and a map of
-/// model capabilities, returns `Arc<dyn ProviderPort>` backed by a
+/// Production factory: accepts an opaque Provider construction handle plus the
+/// bound model's `ModelInfo`, returns `Arc<dyn ProviderPort>` backed by a
 /// Composition-owned adapter.
-pub fn provider_port(
-    client: Arc<LlmClient>,
-    capabilities: HashMap<ModelIdData, ModelCapabilityData>,
-) -> Arc<dyn ProviderPort> {
-    Arc::new(ProviderAdapter::new(client, capabilities))
+pub fn provider_port(client: Arc<LlmClient>, model: ModelInfo) -> Arc<dyn ProviderPort> {
+    Arc::new(ProviderAdapter::new(client, model))
 }
 
 #[async_trait]
 impl ProviderPort for ProviderAdapter {
-    fn capabilities(&self, model: &ModelIdData) -> Result<ModelCapabilityData, ProviderError> {
-        self.capabilities.get(model).cloned().ok_or_else(|| {
-            ProviderError::fatal(
-                ProviderErrorKind::ModelUnavailable,
-                format!("unknown model: {model}"),
-            )
-        })
-    }
-
     async fn invoke(
         &self,
-        request: InvocationRequestData,
-        cancellation: &dyn CancellationSignal,
-    ) -> Result<InvocationStreamData, ProviderError> {
+        request: ProviderRequestData,
+        cancellation: &dyn runtime::CancellationSignal,
+    ) -> Result<ProviderResponseStream, ProviderError> {
         // fast path：调用方信号已触发。
         if cancellation.is_cancelled() {
             return Err(ProviderError::cancelled());
         }
-        let capability = self.capabilities(&request.model)?;
-        self.client
-            .invoke(&capability, &request, cancellation)
-            .await
+        // #1880 v3：runtime 消费流式（渐进 UI），转发 invoke_stream 片段流。
+        self.client.invoke_stream(&self.model, &request).await
     }
 }
 
@@ -81,8 +62,9 @@ impl ProviderPort for ProviderAdapter {
 
 /// Default `ProviderFactory` implementation: builds a `ProviderBindingData` from a
 /// `ProviderBuildSpecData` through the Provider-owned Composition construction API,
-/// building a `ModelCapabilityData` from the client's max reasoning level and spec
-/// limits, and wrapping the client in the existing `ProviderAdapter`.
+/// constructing the binding's single `ModelInfo` (身份/支持面/调用限制来自 spec，
+/// reasoning 阶梯由装配时 client 推导——provider 读侧权威)，and wrapping the
+/// client in the existing `ProviderAdapter`.
 ///
 /// 持有进程级 `TransportPool`：同 transport key（driver/endpoint/认证域/
 /// user-agent/timeout）的多次 build 复用同一不可变 transport；model /
@@ -120,13 +102,13 @@ pub fn provider_factory() -> Arc<DefaultProviderFactory> {
 
 impl ProviderFactoryTrait for DefaultProviderFactory {
     fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
-        let config = LlmConfigOptionsData {
+        let config = ProviderClientSpecData {
             driver: spec.driver.clone(),
             source_key: spec.source_key.clone(),
             api_style: spec.api_style.clone(),
             api_key: spec.api_key.clone(),
             base_url: spec.base_url.clone(),
-            model: spec.model.model.clone(),
+            model: spec.model.clone(),
             max_tokens: spec.max_tokens,
             reasoning: spec.requested_reasoning != ReasoningLevel::Off,
             reasoning_config: None,
@@ -134,140 +116,49 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
             user_agent: Some(spec.user_agent),
         };
 
-        let client =
-            LlmClient::from_config_with_pool(config, self.pool.as_ref()).map_err(|err| {
-                let kind = match &err {
-                    LlmError::Cancelled => ProviderErrorKind::Cancelled,
-                    LlmError::RateLimited => ProviderErrorKind::RateLimited,
-                    LlmError::ContextTooLong => ProviderErrorKind::ContextTooLong,
-                    LlmError::Network(_) => ProviderErrorKind::Network,
-                    LlmError::Api { .. } => ProviderErrorKind::UpstreamUnavailable,
-                    LlmError::Stream(_) => ProviderErrorKind::Protocol,
-                    LlmError::StreamInterrupted(_) | LlmError::StreamTruncated { .. } => {
-                        ProviderErrorKind::StreamTruncated
-                    }
-                    LlmError::Config(_) => ProviderErrorKind::Configuration,
-                };
-                ProviderError::fatal(kind, err.to_string())
-            })?;
-
-        let client = Arc::new(
-            client
-                .with_default_reasoning(spec.requested_reasoning)
-                .map_err(|error| {
-                    ProviderError::fatal(ProviderErrorKind::Configuration, error.to_string())
-                })?,
-        );
-
-        // Build a ReasoningCapabilityData whose supported levels are every level
-        // from Off up to the client's reported max reasoning level (inclusive).
-        let max_reasoning = client.max_reasoning_level();
-        let reasoning_cap = reasoning_capability_from_max(max_reasoning);
-
-        let requested_reasoning = client.default_scope().requested_reasoning();
-
-        let capability = ModelCapabilityData {
+        // 组合根从 config/spec 投影构造 ModelInfo；supported_reasoning 阶梯
+        // 由装配（client.max_reasoning_level）覆盖——此处填占位。
+        let model = ModelInfo {
+            provider: spec.source_key.clone(),
             model: spec.model.clone(),
             supports_tools: true,
             supports_parallel_tool_calls: true,
             supports_streaming: true,
-            reasoning: reasoning_cap,
+            supported_reasoning: vec![ReasoningLevel::Off],
             context_limit: spec.context_window,
             output_limit: Some(spec.max_tokens as usize),
         };
 
-        let capabilities = HashMap::from([(spec.model.clone(), capability)]);
-        let port = provider_port(client, capabilities);
+        let (client, model) =
+            provider::composition::wire_provider_client(config, model, self.pool.as_ref())?;
+
+        let port = provider_port(client, model.clone());
 
         Ok(ProviderBindingData {
             provider: port,
-            model: spec.model,
+            model,
             max_tokens: spec.max_tokens,
-            requested_reasoning,
-            context_window: spec.context_window,
+            // #1861 v4：binding 档位从 spec 直取（原 wiring.requested_reasoning
+            // 与输入重复，随装配句柄包消除）。
+            requested_reasoning: spec.requested_reasoning,
         })
     }
 }
-
-/// Build a `ReasoningCapabilityData` that supports every level from `Off` up to
-/// and including `max`.
-fn reasoning_capability_from_max(max: ReasoningLevel) -> ReasoningCapabilityData {
-    let all_levels = [
-        ReasoningLevel::Off,
-        ReasoningLevel::Minimal,
-        ReasoningLevel::Low,
-        ReasoningLevel::Medium,
-        ReasoningLevel::High,
-        ReasoningLevel::Xhigh,
-        ReasoningLevel::Max,
-    ];
-    let supported: Vec<_> = all_levels.into_iter().filter(|l| *l <= max).collect();
-    ReasoningCapabilityData::new(supported, ReasoningMappingKindData::Effort)
-        .unwrap_or_else(|_| ReasoningCapabilityData::none())
-}
-
-use std::time::Instant;
 
 use config::ports::{
     ProviderProbeError, ProviderProbeErrorKind, ProviderProbePort, ProviderProbeRequest,
     ProviderProbeResult,
 };
-use futures_util::StreamExt;
-use provider::InvocationEventData;
-use tokio_util::sync::CancellationToken;
 
-#[derive(Debug, Clone)]
-struct ProbeClientSpec {
-    driver: String,
-    api_key: String,
-    base_url: Option<String>,
-    model: String,
-    max_tokens: u32,
-    timeout_secs: u64,
-    user_agent: String,
-    api_style: Option<String>,
-}
-
-trait ProbeClientFactory: Send + Sync {
-    fn build(&self, spec: ProbeClientSpec) -> Result<Arc<LlmClient>, ProviderError>;
-}
-
-struct DefaultProbeClientFactory;
-
-impl ProbeClientFactory for DefaultProbeClientFactory {
-    fn build(&self, spec: ProbeClientSpec) -> Result<Arc<LlmClient>, ProviderError> {
-        let client = LlmClient::from_config(LlmConfigOptionsData {
-            driver: spec.driver,
-            source_key: "connect-probe".to_string(),
-            api_style: spec.api_style,
-            api_key: spec.api_key,
-            base_url: spec.base_url,
-            model: spec.model,
-            max_tokens: spec.max_tokens,
-            reasoning: false,
-            reasoning_config: None,
-            timeout_secs: spec.timeout_secs,
-            user_agent: Some(spec.user_agent),
-        })
-        .map_err(|_| ProviderError::fatal(ProviderErrorKind::Configuration, "连接测试配置无效"))?;
-        Ok(Arc::new(client))
-    }
-}
-
-pub struct ProviderProbeAdapter {
-    factory: Arc<dyn ProbeClientFactory>,
-}
+/// Connect 向导探测桥接：config 端口请求 → provider 探测内核。
+///
+/// 探测调用语义（单 token/Off/事件消费/超时取消）归 provider
+/// `run_connectivity_probe`；本层只做请求翻译与错误文案映射。
+pub struct ProviderProbeAdapter;
 
 impl ProviderProbeAdapter {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self {
-            factory: Arc::new(DefaultProbeClientFactory),
-        })
-    }
-
-    #[cfg(test)]
-    fn with_factory(factory: Arc<dyn ProbeClientFactory>) -> Self {
-        Self { factory }
+        Arc::new(Self)
     }
 }
 
@@ -277,68 +168,28 @@ impl ProviderProbePort for ProviderProbeAdapter {
         &self,
         request: ProviderProbeRequest,
     ) -> Result<ProviderProbeResult, ProviderProbeError> {
-        let started = Instant::now();
-        let timeout = request.timeout;
-        let client = self
-            .factory
-            .build(ProbeClientSpec {
-                driver: request.driver.as_str().to_string(),
-                api_key: request.credential.unwrap_or_default(),
-                base_url: Some(request.base_url),
-                model: request.model_id,
-                max_tokens: 1,
-                timeout_secs: timeout.as_secs().max(1),
-                user_agent: request.final_user_agent,
-                api_style: request.api_style,
-            })
-            .map_err(map_probe_error)?;
-        let scope = client
-            .invocation_scope(
-                client.model_name(),
-                Some(1),
-                share::reasoning::ReasoningLevel::Off,
-            )
-            .map_err(|_| ProviderProbeError {
-                kind: ProviderProbeErrorKind::Internal,
-                message: "连接测试初始化失败".to_string(),
-            })?;
-        let messages = [share::message::Message::user("Reply with OK.")];
-        let cancellation = CancellationToken::new();
-        let operation = async {
-            let mut stream = client
-                .invocation_stream(&scope, &[], &messages, &[], &cancellation)
-                .await
-                .map_err(map_probe_error)?;
-            while let Some(event) = stream.next().await {
-                match event {
-                    InvocationEventData::Completed(_) => {
-                        return Ok(ProviderProbeResult {
-                            latency: started.elapsed(),
-                        });
-                    }
-                    InvocationEventData::Failed(error) => return Err(map_probe_error(error)),
-                    InvocationEventData::Delta(_) => {}
-                }
-            }
-            Err(protocol_error())
-        };
-        match tokio::time::timeout(timeout, operation).await {
-            Ok(result) => result,
-            Err(_) => {
-                cancellation.cancel();
-                Err(ProviderProbeError {
-                    kind: ProviderProbeErrorKind::Timeout,
-                    message: "连接测试超时".to_string(),
-                })
-            }
-        }
+        let config = probe_config_from_request(&request);
+        provider::composition::wire_test_provider_client(config, request.timeout)
+            .await
+            .map(|latency| ProviderProbeResult { latency })
+            .map_err(map_probe_error)
     }
 }
 
-fn protocol_error() -> ProviderProbeError {
-    ProviderProbeError {
-        kind: ProviderProbeErrorKind::Protocol,
-        message: "服务响应未包含完成事件".to_string(),
+/// Connect 探测请求 → provider 构造配置的纯翻译（无 IO）。
+fn probe_config_from_request(request: &ProviderProbeRequest) -> ProviderClientSpecData {
+    ProviderClientSpecData {
+        driver: request.driver.as_str().to_string(),
+        source_key: "connect-probe".to_string(),
+        api_style: request.api_style.clone(),
+        api_key: request.credential.clone().unwrap_or_default(),
+        base_url: Some(request.base_url.clone()),
+        model: request.model_id.clone(),
+        max_tokens: 1,
+        reasoning: false,
+        reasoning_config: None,
+        timeout_secs: request.timeout.as_secs().max(1),
+        user_agent: Some(request.final_user_agent.clone()),
     }
 }
 

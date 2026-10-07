@@ -160,3 +160,40 @@ fn test_from_str_deepseek() {
 fn test_as_str_deepseek() {
     assert_eq!(ProviderDriverKind::DeepSeek.as_str(), "deepseek");
 }
+
+/// 组合根装配依赖此阶梯推导（Off..=max 全支持）构造 supported_reasoning；
+/// 锁定边界值防漂移。
+#[test]
+fn reasoning_capability_from_max_builds_inclusive_level_ladder() {
+    use super::supported_reasoning_from_max;
+
+    let off_only = supported_reasoning_from_max(super::ReasoningLevel::Off);
+    assert_eq!(off_only, [super::ReasoningLevel::Off]);
+
+    let up_to_medium = supported_reasoning_from_max(super::ReasoningLevel::Medium);
+    assert_eq!(
+        up_to_medium,
+        [
+            super::ReasoningLevel::Off,
+            super::ReasoningLevel::Minimal,
+            super::ReasoningLevel::Low,
+            super::ReasoningLevel::Medium,
+        ]
+    );
+
+    let full = supported_reasoning_from_max(super::ReasoningLevel::Max);
+    assert_eq!(super::maximum_supported(&full), super::ReasoningLevel::Max);
+    assert_eq!(full.len(), 7);
+}
+
+#[test]
+fn reasoning_capability_from_max_includes_minimal_when_supported() {
+    let minimal = supported_reasoning_from_max(super::ReasoningLevel::Minimal);
+    assert_eq!(
+        minimal,
+        [super::ReasoningLevel::Off, super::ReasoningLevel::Minimal]
+    );
+
+    let max = supported_reasoning_from_max(super::ReasoningLevel::Max);
+    assert!(max.contains(&super::ReasoningLevel::Minimal));
+}

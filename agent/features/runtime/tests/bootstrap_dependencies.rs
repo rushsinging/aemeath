@@ -11,21 +11,13 @@ impl runtime::ProviderFactory for TestProviderFactory {
         struct UnusedPort;
         #[async_trait::async_trait]
         impl runtime::ProviderPort for UnusedPort {
-            fn capabilities(
-                &self,
-                _model: &provider::ModelIdData,
-            ) -> Result<provider::ModelCapabilityData, provider::ProviderError> {
-                Err(provider::ProviderError::fatal(
-                    provider::ProviderErrorKind::ModelUnavailable,
-                    "unused test provider",
-                ))
-            }
+            // `capabilities()` 已删除（#1880）：binding 持全量 ModelInfo，运行时零查询。
 
             async fn invoke(
                 &self,
-                _request: provider::InvocationRequestData,
-                _cancellation: &dyn provider::CancellationSignal,
-            ) -> Result<provider::InvocationStreamData, provider::ProviderError> {
+                _request: provider::ProviderRequestData,
+                _cancellation: &dyn runtime::CancellationSignal,
+            ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
                 Err(provider::ProviderError::fatal(
                     provider::ProviderErrorKind::UpstreamUnavailable,
                     "unused test provider",
@@ -34,10 +26,18 @@ impl runtime::ProviderFactory for TestProviderFactory {
         }
         Ok(runtime::ProviderBindingData {
             provider: Arc::new(UnusedPort),
-            model: spec.model,
+            model: provider::ModelInfo {
+                provider: spec.source_key.clone(),
+                model: spec.model.clone(),
+                supports_tools: true,
+                supports_parallel_tool_calls: true,
+                supports_streaming: true,
+                supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+                context_limit: spec.context_window,
+                output_limit: Some(spec.max_tokens as usize),
+            },
             max_tokens: spec.max_tokens,
             requested_reasoning: spec.requested_reasoning,
-            context_window: spec.context_window,
         })
     }
 }
@@ -49,10 +49,7 @@ fn initial_provider_assembly() -> runtime::InitialProviderAssemblyData {
         api_style: None,
         api_key: "test-key".to_string(),
         base_url: None,
-        model: provider::ModelIdData {
-            provider: "test".to_string(),
-            model: "test-model".to_string(),
-        },
+        model: "test-model".to_string(),
         max_tokens: 8192,
         requested_reasoning: share::reasoning::ReasoningLevel::Off,
         context_window: Some(8192),
@@ -98,7 +95,7 @@ impl tools::published::agent::AgentRunner for NoopAgentRunner {
 }
 
 fn test_prompt_assembly() -> runtime::PromptAssemblyData {
-    runtime::PromptAssemblyData::new(Vec::new(), String::new(), String::new(), "test-model")
+    runtime::PromptAssemblyData::new(String::new(), String::new(), String::new(), "test-model")
 }
 
 fn test_session_bootstrap_assembly(

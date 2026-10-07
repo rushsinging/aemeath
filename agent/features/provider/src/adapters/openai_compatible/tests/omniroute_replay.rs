@@ -20,9 +20,8 @@
 //! - 出现「provider rejected the request」→ 稳定复现，打印错误证据
 //! - 全部成功 → 上游 400 为瞬态，未复现
 
-use crate::composition::{LlmClient, LlmConfigOptionsData};
-use crate::domain::invoke::SystemBlockData;
-use crate::InvocationScopeData;
+use crate::composition::{LlmClient, ProviderClientSpecData};
+use crate::ports::ResolvedInvocation;
 use futures_util::StreamExt;
 use serde_json::Value;
 use share::message::{ContentBlock, Message, Role};
@@ -137,7 +136,7 @@ async fn provider_stream_against_real_omniroute_classifies_upstream_400() {
         return;
     };
 
-    let client = LlmClient::from_config(LlmConfigOptionsData {
+    let client = LlmClient::from_config(ProviderClientSpecData {
         driver: crate::domain::capability::ProviderDriverKind::OpenAI
             .as_str()
             .to_string(),
@@ -186,7 +185,7 @@ async fn provider_stream_with_codex_ua_reproduces_400() {
         );
         return;
     };
-    let client = LlmClient::from_config(LlmConfigOptionsData {
+    let client = LlmClient::from_config(ProviderClientSpecData {
         driver: crate::domain::capability::ProviderDriverKind::OpenAI
             .as_str()
             .to_string(),
@@ -222,14 +221,13 @@ async fn replay_one_capture(client: &LlmClient, capture_label: &str, capture_jso
     let fixture: Value =
         serde_json::from_str(capture_json).expect("captured wire body must be valid JSON");
     let scope =
-        InvocationScopeData::new(MODEL, 20_000, ReasoningLevel::Xhigh, ReasoningLevel::Xhigh)
+        ResolvedInvocation::new(MODEL, 20_000, ReasoningLevel::Xhigh, ReasoningLevel::Xhigh)
             .expect("valid invocation scope");
-    let system = [SystemBlockData::cached(
-        fixture["instructions"]
-            .as_str()
-            .expect("captured body must carry instructions")
-            .to_string(),
-    )];
+    // 现场 captured 的 instructions 整段即原 Cacheable 块——可缓存前缀=整段。
+    let system = fixture["instructions"]
+        .as_str()
+        .expect("captured body must carry instructions")
+        .to_string();
     // 输入等价还原现场失败请求的完整 input，少任何一条都会让重放
     // 失去与 400 现场的可比性。
     let messages = fixture_messages(&fixture);
@@ -241,6 +239,7 @@ async fn replay_one_capture(client: &LlmClient, capture_label: &str, capture_jso
             .invocation_stream(
                 &scope,
                 &system,
+                system.len(),
                 &messages,
                 &tools,
                 &CancellationToken::new(),

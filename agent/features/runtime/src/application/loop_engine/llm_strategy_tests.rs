@@ -3,7 +3,6 @@ use crate::ports::{
     CompactionDecisionData, ContextWindowData, DecisionReason, SessionRevision, SystemBlock,
     TokenBudget, Urgency,
 };
-use provider::RequestSystemBlockData;
 use share::message::{ContentBlock, Message, MessageMetadata, MessageSource, Role};
 
 fn window(messages: Vec<Message>) -> ContextWindowData {
@@ -160,7 +159,7 @@ fn invocation_mapping_log_summary_reports_mechanical_field_counts() {
     let summary = invocation_mapping_log_summary(&context);
 
     assert_eq!(summary.messages, 2);
-    assert_eq!(summary.system_blocks, 0);
+    assert_eq!(summary.system_len, 0);
     assert_eq!(summary.tool_schemas, 0);
     assert_eq!(summary.reminder_messages, 1);
 }
@@ -198,9 +197,8 @@ fn continuation_checkpoint_system_block_is_consumed_verbatim_once() {
 
     let invocation = extract_invocation_context(&context_window);
 
-    assert_eq!(invocation.system_blocks.len(), 1);
-    assert_eq!(
-        invocation.system_blocks[0],
-        RequestSystemBlockData::Cacheable(checkpoint.to_string())
-    );
+    // #1861 v4：块映射改拼接——单个 cache_break 块即整段 system，
+    // 可缓存前缀 = 整段字节长度。
+    assert_eq!(invocation.system, checkpoint);
+    assert_eq!(invocation.static_prefix_len, checkpoint.len());
 }

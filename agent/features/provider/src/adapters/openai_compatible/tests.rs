@@ -73,7 +73,7 @@ async fn llm_client_chat_invocation_stream_is_single_request_pull_stream() {
     let leaked = Box::leak(response.into_boxed_str());
     let (base_url, requests) = spawn_openai_counting_server(leaked).await;
     let client =
-        crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
+        crate::composition::LlmClient::from_config(crate::composition::ProviderClientSpecData {
             driver: crate::domain::capability::ProviderDriverKind::OpenAI
                 .as_str()
                 .to_string(),
@@ -89,7 +89,7 @@ async fn llm_client_chat_invocation_stream_is_single_request_pull_stream() {
             user_agent: Some("aemeath-test/1.0".to_string()),
         })
         .expect("valid OpenAI chat config");
-    let scope = crate::InvocationScopeData::new(
+    let scope = crate::ports::ResolvedInvocation::new(
         "test-model",
         8192,
         crate::domain::capability::ReasoningLevel::Off,
@@ -100,7 +100,8 @@ async fn llm_client_chat_invocation_stream_is_single_request_pull_stream() {
     let events: Vec<_> = client
         .invocation_stream(
             &scope,
-            &[],
+            "",
+            0,
             &[Message::user("hi")],
             &[],
             &CancellationToken::new(),
@@ -114,9 +115,9 @@ async fn llm_client_chat_invocation_stream_is_single_request_pull_stream() {
     assert!(matches!(
         &events[..],
         [
-            crate::InvocationEventData::Delta(crate::InvocationDeltaData::Text(first)),
-            crate::InvocationEventData::Delta(crate::InvocationDeltaData::Text(second)),
-            crate::InvocationEventData::Completed(_)
+            crate::ProviderResponseChunk::Content(crate::ProviderContentData::Text(first)),
+            crate::ProviderResponseChunk::Content(crate::ProviderContentData::Text(second)),
+            crate::ProviderResponseChunk::Stop(_)
         ] if first == "open" && second == "ai"
     ));
     assert_eq!(events.iter().filter(|event| event.is_terminal()).count(), 1);
@@ -138,7 +139,7 @@ async fn llm_client_responses_invocation_stream_is_single_request_pull_stream() 
     let leaked = Box::leak(response.into_boxed_str());
     let (base_url, requests) = spawn_openai_counting_server(leaked).await;
     let client =
-        crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
+        crate::composition::LlmClient::from_config(crate::composition::ProviderClientSpecData {
             driver: crate::domain::capability::ProviderDriverKind::OpenAI
                 .as_str()
                 .to_string(),
@@ -154,7 +155,7 @@ async fn llm_client_responses_invocation_stream_is_single_request_pull_stream() 
             user_agent: Some("aemeath-test/1.0".to_string()),
         })
         .expect("valid OpenAI responses config");
-    let scope = crate::InvocationScopeData::new(
+    let scope = crate::ports::ResolvedInvocation::new(
         "test-model",
         8192,
         crate::domain::capability::ReasoningLevel::Off,
@@ -165,7 +166,8 @@ async fn llm_client_responses_invocation_stream_is_single_request_pull_stream() 
     let events: Vec<_> = client
         .invocation_stream(
             &scope,
-            &[],
+            "",
+            0,
             &[Message::user("hi")],
             &[],
             &CancellationToken::new(),
@@ -179,15 +181,19 @@ async fn llm_client_responses_invocation_stream_is_single_request_pull_stream() 
     assert!(matches!(
         &events[..],
         [
-            crate::InvocationEventData::Delta(crate::InvocationDeltaData::Text(text)),
-            crate::InvocationEventData::Completed(_)
+            crate::ProviderResponseChunk::Content(crate::ProviderContentData::Text(text)),
+            crate::ProviderResponseChunk::Usage(_),
+            crate::ProviderResponseChunk::Stop(_)
         ] if text == "response"
     ));
     assert_eq!(events.iter().filter(|event| event.is_terminal()).count(), 1);
-    let crate::InvocationEventData::Completed(completion) = events.last().unwrap() else {
-        panic!("expected completed event");
-    };
-    let usage = completion.usage.as_ref().expect("responses usage reported");
+    let usage = events
+        .iter()
+        .find_map(|event| match event {
+            crate::ProviderResponseChunk::Usage(usage) => Some(usage),
+            _ => None,
+        })
+        .expect("responses usage reported");
     assert_eq!(usage.input_tokens, Some(1));
     assert_eq!(usage.output_tokens, Some(1));
 }
@@ -210,7 +216,7 @@ async fn responses_stream_keeps_tool_use_when_completed_output_omits_function_ca
     let leaked = Box::leak(response.into_boxed_str());
     let (base_url, _) = spawn_openai_counting_server(leaked).await;
     let client =
-        crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
+        crate::composition::LlmClient::from_config(crate::composition::ProviderClientSpecData {
             driver: crate::domain::capability::ProviderDriverKind::OpenAI
                 .as_str()
                 .to_string(),
@@ -226,7 +232,7 @@ async fn responses_stream_keeps_tool_use_when_completed_output_omits_function_ca
             user_agent: Some("aemeath-test/1.0".to_string()),
         })
         .expect("valid OpenAI responses config");
-    let scope = crate::InvocationScopeData::new(
+    let scope = crate::ports::ResolvedInvocation::new(
         "test-model",
         8192,
         crate::domain::capability::ReasoningLevel::Off,
@@ -237,7 +243,8 @@ async fn responses_stream_keeps_tool_use_when_completed_output_omits_function_ca
     let events: Vec<_> = client
         .invocation_stream(
             &scope,
-            &[],
+            "",
+            0,
             &[Message::user("create an example")],
             &[],
             &CancellationToken::new(),
@@ -247,20 +254,36 @@ async fn responses_stream_keeps_tool_use_when_completed_output_omits_function_ca
         .collect()
         .await;
 
-    let crate::InvocationEventData::Completed(completion) = events.last().unwrap() else {
-        panic!("expected completed event");
+    let crate::ProviderResponseChunk::Stop(stop_reason) = events.last().unwrap() else {
+        panic!("expected stop frame as stream terminal");
     };
-    assert_eq!(
-        completion.stop_reason,
-        crate::published_language::StopReason::ToolUse
+    assert_eq!(*stop_reason, crate::published_language::StopReason::ToolUse);
+    // v3 拆帧：原 Completed.output 的终态 ToolCall 块由流中的
+    // ToolCallCompleted 完成帧携带（值同 wire `response.completed.output` 缺失的调用）。
+    let completed_calls: Vec<_> = events
+        .iter()
+        .filter_map(|event| match event {
+            crate::ProviderResponseChunk::Content(
+                crate::ProviderContentData::ToolCallCompleted {
+                    id,
+                    name,
+                    arguments,
+                    ..
+                },
+            ) => Some((id.clone(), name.clone(), arguments.clone())),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        matches!(
+            completed_calls.as_slice(),
+            [(id, name, arguments)]
+                if id.as_str() == "call_hello"
+                    && name == "Write"
+                    && *arguments == serde_json::json!({"file_path": "examples/hello.rs"})
+        ),
+        "expected exactly the streamed tool call, got {completed_calls:?}"
     );
-    assert!(matches!(
-        &completion.output[..],
-        [crate::ProviderContentBlockData::ToolCall(call)]
-            if call.id.0 == "call_hello"
-                && call.name == "Write"
-                && call.arguments == serde_json::json!({"file_path": "examples/hello.rs"})
-    ));
 }
 
 #[test]

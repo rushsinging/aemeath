@@ -309,10 +309,8 @@ impl tools::published::typed::TypedTool for SpyTool {
 async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     use crate::application::model::test_support::{test_binding_from_port, TestProviderPort};
     use provider::{
-        InvocationEventData, ProviderCompletionData, ProviderContentBlockData,
-        ProviderStopReasonData, ProviderToolCallData, ProviderToolCallIdData, RawUsageSnapshotData,
+        ProviderContentData, ProviderResponseChunk, ResponseStopReason, TokenUsageData,
     };
-    use share::reasoning::ReasoningLevel;
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::mpsc;
 
@@ -362,12 +360,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     // ── Provider: first call → tool call, second call → end_turn ──
     let second_call = Arc::new(AtomicBool::new(false));
     let second_call2 = second_call.clone();
-    let tool_call = ProviderToolCallData {
-        id: ProviderToolCallIdData("toolu_test_001".to_string()),
-        name: "spy".to_string(),
-        arguments: serde_json::json!({}),
-    };
-    let model = crate::application::model::test_support::test_model_id();
+    let model = crate::application::model::test_support::test_model_info();
     let port = TestProviderPort::new(Vec::new(), model.clone()).with_invocation_fn(Arc::new(
         move |_call_idx, request, _cancel| {
             let is_second = second_call2.swap(true, Ordering::SeqCst);
@@ -383,33 +376,31 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
                     has_tool_result,
                     "second request must contain tool result backfill"
                 );
-                futures::stream::iter(vec![InvocationEventData::Completed(
-                    ProviderCompletionData {
-                        output: vec![ProviderContentBlockData::Text("all done".into())],
-                        stop_reason: ProviderStopReasonData::EndTurn,
-                        usage: Some(RawUsageSnapshotData {
-                            input_tokens: Some(10),
-                            output_tokens: Some(3),
-                            ..RawUsageSnapshotData::default()
-                        }),
-                        effective_reasoning: ReasoningLevel::Off,
-                    },
-                )])
+                futures::stream::iter(vec![
+                    ProviderResponseChunk::Content(ProviderContentData::Text("all done".into())),
+                    ProviderResponseChunk::Usage(TokenUsageData {
+                        input_tokens: Some(10),
+                        output_tokens: Some(3),
+                        ..TokenUsageData::default()
+                    }),
+                    ProviderResponseChunk::Stop(ResponseStopReason::EndTurn),
+                ])
             } else {
-                futures::stream::iter(vec![InvocationEventData::Completed(
-                    ProviderCompletionData {
-                        output: vec![ProviderContentBlockData::ToolCall(tool_call.clone())],
-                        stop_reason: ProviderStopReasonData::ToolUse,
-                        usage: Some(RawUsageSnapshotData {
-                            input_tokens: Some(5),
-                            output_tokens: Some(8),
-                            ..RawUsageSnapshotData::default()
-                        }),
-                        effective_reasoning: ReasoningLevel::Off,
-                    },
-                )])
+                futures::stream::iter(vec![
+                    ProviderResponseChunk::Content(ProviderContentData::ToolCall {
+                        id: "toolu_test_001".to_string(),
+                        name: "spy".to_string(),
+                        arguments: serde_json::json!({}),
+                    }),
+                    ProviderResponseChunk::Usage(TokenUsageData {
+                        input_tokens: Some(5),
+                        output_tokens: Some(8),
+                        ..TokenUsageData::default()
+                    }),
+                    ProviderResponseChunk::Stop(ResponseStopReason::ToolUse),
+                ])
             };
-            Box::pin(async move { Ok(Box::pin(stream) as InvocationStreamData) })
+            Box::pin(async move { Ok(Box::pin(stream) as ProviderResponseStream) })
         },
     ));
 
@@ -549,10 +540,8 @@ impl tools::published::typed::TypedTool for BlockingCancelTool {
 async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
     use crate::application::model::test_support::{test_binding_from_port, TestProviderPort};
     use provider::{
-        InvocationEventData, ProviderCompletionData, ProviderContentBlockData,
-        ProviderStopReasonData, ProviderToolCallData, ProviderToolCallIdData, RawUsageSnapshotData,
+        ProviderContentData, ProviderResponseChunk, ResponseStopReason, TokenUsageData,
     };
-    use share::reasoning::ReasoningLevel;
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::mpsc;
 
@@ -585,30 +574,24 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
         }));
 
     // Provider: returns a tool call for blocking_cancel.
-    let tool_call = ProviderToolCallData {
-        id: ProviderToolCallIdData("toolu_block_001".to_string()),
-        name: "blocking_cancel".to_string(),
-        arguments: serde_json::json!({}),
-    };
-    let model = crate::application::model::test_support::test_model_id();
+    let model = crate::application::model::test_support::test_model_info();
     let port = TestProviderPort::new(Vec::new(), model.clone()).with_invocation_fn(Arc::new(
         move |_call_idx, _request, _cancel| {
-            let tc = tool_call.clone();
+            let tc = ProviderContentData::ToolCall {
+                id: "toolu_block_001".to_string(),
+                name: "blocking_cancel".to_string(),
+                arguments: serde_json::json!({}),
+            };
             Box::pin(async move {
-                Ok(
-                    Box::pin(futures::stream::iter(vec![InvocationEventData::Completed(
-                        ProviderCompletionData {
-                            output: vec![ProviderContentBlockData::ToolCall(tc)],
-                            stop_reason: ProviderStopReasonData::ToolUse,
-                            usage: Some(RawUsageSnapshotData {
-                                input_tokens: Some(5),
-                                output_tokens: Some(8),
-                                ..RawUsageSnapshotData::default()
-                            }),
-                            effective_reasoning: ReasoningLevel::Off,
-                        },
-                    )])) as crate::ports::InvocationStreamData,
-                )
+                Ok(Box::pin(futures::stream::iter(vec![
+                    ProviderResponseChunk::Content(tc),
+                    ProviderResponseChunk::Usage(TokenUsageData {
+                        input_tokens: Some(5),
+                        output_tokens: Some(8),
+                        ..TokenUsageData::default()
+                    }),
+                    ProviderResponseChunk::Stop(ResponseStopReason::ToolUse),
+                ])) as crate::ports::ProviderResponseStream)
             })
         },
     ));

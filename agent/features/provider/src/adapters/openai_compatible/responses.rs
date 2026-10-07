@@ -8,37 +8,28 @@
 
 use super::OpenAICompatibleProvider;
 use crate::domain::capability::ReasoningLevel;
-use crate::domain::invoke::{InvocationScopeData, SystemBlockData};
 use share::message::Message;
 
 impl OpenAICompatibleProvider {
     /// 构造 Responses API 请求 body
     pub(crate) fn build_responses_request_body(
         &self,
-        scope: &InvocationScopeData,
-        system: &[SystemBlockData],
+        resolved: &crate::ports::ResolvedInvocation,
+        system: &str,
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         stream: bool,
     ) -> serde_json::Value {
-        // 将 system blocks 合并为 instructions
-        let instructions: String = if system.is_empty() {
-            String::new()
-        } else {
-            system
-                .iter()
-                .map(|b| b.text.as_str())
-                .collect::<Vec<_>>()
-                .join("\n\n")
-        };
+        // 整段 system prompt 即 instructions（#1861 v4：上游已拼接）。
+        let instructions = system.to_string();
 
         // 将 messages 转换为 input 格式
         let input = messages_to_responses_input(messages);
 
-        let max_tokens = scope.max_tokens().max(16);
+        let max_tokens = resolved.max_tokens.max(16);
 
         let mut body = serde_json::json!({
-            "model": scope.model(),
+            "model": resolved.model.as_str(),
             "input": input,
             "max_output_tokens": max_tokens,
             "stream": stream,
@@ -50,9 +41,9 @@ impl OpenAICompatibleProvider {
 
         // reasoning effort is resolved per invocation scope via the driver's shared
         // capability→wire mapping (resolve_effort), not a duplicated special case.
-        if !matches!(scope.effective_reasoning(), ReasoningLevel::Off) {
+        if !matches!(resolved.effective_reasoning, ReasoningLevel::Off) {
             body["reasoning"] = serde_json::json!({
-                "effort": self.driver.resolve_effort(scope.effective_reasoning())
+                "effort": self.driver.resolve_effort(resolved.effective_reasoning)
             });
         }
 

@@ -250,6 +250,54 @@
       "tracking_issue": 1645
     },
     {
+      "id": "construction.provider.wire-provider-client",
+      "symbol": "wire_provider_client",
+      "owner_crate": "provider",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Provider client assembly (from_config_with_pool + default reasoning) is provided by the crate as a wire factory; composition never constructs LlmClient directly (#1861)",
+      "tracking_issue": 1861
+    },
+    {
+      "id": "construction.provider.wire-test-provider-client",
+      "symbol": "wire_test_provider_client",
+      "owner_crate": "provider",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Connect probe construction+execution is owned by provider; composition bridges config request translation only (#1861 v4 rename from probe_connectivity)",
+      "tracking_issue": 1861
+    },
+    {
+      "id": "construction.provider.wire-provider-assembly",
+      "symbol": "wire_provider_assembly",
+      "owner_crate": "provider",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Factory build kernel (client assembly + capability derivation) is owned by provider; composition only bridges runtime spec translation and binding assembly (#1861)",
+      "tracking_issue": 1861
+    },
+    {
+      "id": "construction.provider.wire-probe-client",
+      "symbol": "wire_probe_client",
+      "owner_crate": "provider",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Connect probe client construction and probe execution semantics (run_connectivity_probe) are owned by provider; composition bridges config request translation only (#1861)",
+      "tracking_issue": 1861
+    },
+    {
       "id": "construction.runtime.wire-active-run-registry",
       "symbol": "wire_active_run_registry",
       "owner_crate": "runtime",
@@ -1570,6 +1618,7 @@
         "ToolReceiptMutationData",
         "ToolReceiptMutationError",
         "ToolReceiptMutationReceiptData",
+        "ToolSchemaData",
         "ToolTerminalReceiptData",
         "Urgency",
         "WorkspaceSkillQueryFactory",
@@ -1681,33 +1730,21 @@
         "value": "agent/features/provider/src"
       },
       "allowed_symbols": [
-        "CancellationSignal",
-        "InvocationDeltaData",
-        "InvocationEventData",
-        "InvocationOptionsData",
-        "InvocationRequestData",
-        "InvocationScopeData",
-        "InvocationStreamData",
         "LlmClient",
-        "LlmConfigOptionsData",
-        "LlmError",
-        "LlmProvider",
-        "ModelCapabilityData",
-        "ModelIdData",
-        "ModelToolSchemaData",
-        "ProviderCompletionData",
-        "ProviderContentBlockData",
+        "ModelInfo",
+        "ProviderClientSpecData",
+        "ProviderContentData",
         "ProviderError",
         "ProviderErrorKind",
-        "ProviderStopReasonData",
-        "ProviderToolCallData",
-        "ProviderToolCallIdData",
-        "RawUsageSnapshotData",
-        "ReasoningCapabilityData",
-        "ReasoningMappingKindData",
-        "RequestSystemBlockData",
-        "SystemBlockData",
-        "TransportPool"
+        "ProviderRequestData",
+        "ProviderResponse",
+        "ProviderResponseChunk",
+        "ProviderResponseStream",
+        "ResponseStopReason",
+        "TokenUsageData",
+        "TransportPool",
+        "wire_provider_client",
+        "wire_test_provider_client"
       ],
       "reason": "F-2：provider crate 根窄 façade（#1022 登记，消费者证明制）",
       "profile": "fast"
@@ -1724,6 +1761,7 @@
         "AgentClientImpl",
         "AgentRunnerAssemblyData",
         "AtomicBlobToolResultStore",
+        "CancellationSignal",
         "CompactModelResolver",
         "CompleteReflectionResult",
         "InitialProviderAssemblyData",
