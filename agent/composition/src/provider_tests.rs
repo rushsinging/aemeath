@@ -2,10 +2,10 @@ use super::*;
 use async_trait::async_trait;
 use provider::composition::{InvocationScopeData, LlmClient, LlmProvider, SystemBlockData};
 use provider::{
-    InvocationDeltaData, InvocationEventData, InvocationOptionsData, InvocationRequestData,
-    ModelCapabilityData, ModelIdData, ProviderCompletionData, ProviderContentBlockData,
-    ProviderErrorKind, ProviderStopReasonData as StopReason, RawUsageSnapshotData,
-    ReasoningCapabilityData, ReasoningMappingKindData,
+    InvocationDeltaData, InvocationEventData, InvocationRequestData, ModelCapabilityData,
+    ModelIdData, ProviderCompletionData, ProviderContentBlockData, ProviderErrorKind,
+    ProviderStopReasonData as StopReason, RawUsageSnapshotData, ReasoningCapabilityData,
+    ReasoningMappingKindData,
 };
 use share::message::Message;
 use share::reasoning::ReasoningLevel;
@@ -242,11 +242,7 @@ fn capabilities_rejects_unknown_model() {
 async fn invoke_returns_stream_with_delta_then_completed() {
     let (port, model) = build_port();
 
-    let request = InvocationRequestData::new(
-        model,
-        vec![],
-        InvocationOptionsData::new(8192, ReasoningLevel::Off),
-    );
+    let request = InvocationRequestData::new(model, vec![], 8192, ReasoningLevel::Off);
     let cancel = CancellationToken::new();
 
     let mut stream = port.invoke(request, &cancel).await.unwrap();
@@ -277,11 +273,7 @@ async fn invoke_returns_stream_with_delta_then_completed() {
 async fn invoke_returns_cancelled_when_signal_already_set() {
     let (port, model) = build_port();
 
-    let request = InvocationRequestData::new(
-        model,
-        vec![],
-        InvocationOptionsData::new(8192, ReasoningLevel::Off),
-    );
+    let request = InvocationRequestData::new(model, vec![], 8192, ReasoningLevel::Off);
     let cancel = CancellationToken::new();
     cancel.cancel();
 
@@ -319,11 +311,7 @@ async fn invoke_propagates_provider_error() {
     };
     let port = provider_port(client, HashMap::from([(model.clone(), capability)]));
 
-    let request = InvocationRequestData::new(
-        model,
-        vec![],
-        InvocationOptionsData::new(8192, ReasoningLevel::Off),
-    );
+    let request = InvocationRequestData::new(model, vec![], 8192, ReasoningLevel::Off);
     let cancel = CancellationToken::new();
 
     let result = port.invoke(request, &cancel).await;
@@ -338,11 +326,7 @@ async fn invoke_rejects_invalid_scope() {
     let (port, model) = build_port();
 
     // max_output_tokens = 0 should trigger a scope validation error.
-    let request = InvocationRequestData::new(
-        model,
-        vec![],
-        InvocationOptionsData::new(0, ReasoningLevel::Off),
-    );
+    let request = InvocationRequestData::new(model, vec![], 0, ReasoningLevel::Off);
     let cancel = CancellationToken::new();
 
     let result = port.invoke(request, &cancel).await;
@@ -358,11 +342,7 @@ async fn invoke_rejects_invalid_scope() {
 async fn invoke_converts_system_blocks_tools_and_uses_neutral_scope_model() {
     let (port, model, captured) = build_port_capturing();
 
-    let mut request = InvocationRequestData::new(
-        model,
-        vec![],
-        InvocationOptionsData::new(8192, ReasoningLevel::Off),
-    );
+    let mut request = InvocationRequestData::new(model, vec![], 8192, ReasoningLevel::Off);
     // Provider-neutral system blocks: one cacheable, one dynamic.
     request.system = vec![
         provider::RequestSystemBlockData::Text("stable prefix first part".to_string()),
@@ -423,11 +403,7 @@ async fn invoke_clamps_requested_reasoning_to_capability() {
 
     let (port, model, captured) = build_port_with_capability(capability);
 
-    let request = InvocationRequestData::new(
-        model,
-        vec![],
-        InvocationOptionsData::new(4096, ReasoningLevel::Max),
-    );
+    let request = InvocationRequestData::new(model, vec![], 4096, ReasoningLevel::Max);
     let cancel = CancellationToken::new();
     let _ = port.invoke(request, &cancel).await.unwrap();
 
@@ -452,11 +428,7 @@ async fn invoke_clamps_requested_reasoning_to_capability() {
 async fn invoke_invokes_provider_exactly_once() {
     let (port, model, captured) = build_port_capturing();
 
-    let request = InvocationRequestData::new(
-        model,
-        vec![],
-        InvocationOptionsData::new(8192, ReasoningLevel::Off),
-    );
+    let request = InvocationRequestData::new(model, vec![], 8192, ReasoningLevel::Off);
     let cancel = CancellationToken::new();
     let mut stream = port.invoke(request, &cancel).await.unwrap();
 
@@ -478,11 +450,7 @@ async fn invoke_rejects_unknown_model() {
         provider: "nope".to_string(),
         model: "ghost".to_string(),
     };
-    let request = InvocationRequestData::new(
-        unknown,
-        vec![],
-        InvocationOptionsData::new(8192, ReasoningLevel::Off),
-    );
+    let request = InvocationRequestData::new(unknown, vec![], 8192, ReasoningLevel::Off);
     let cancel = CancellationToken::new();
 
     let result = port.invoke(request, &cancel).await;
@@ -512,11 +480,7 @@ async fn invoke_returns_cancelled_when_signal_fires_during_establishment() {
 
     // Drive invoke() on a task so we can fire the external signal mid-flight.
     let handle = tokio::spawn(async move {
-        let request = InvocationRequestData::new(
-            model,
-            vec![],
-            InvocationOptionsData::new(8192, ReasoningLevel::Off),
-        );
+        let request = InvocationRequestData::new(model, vec![], 8192, ReasoningLevel::Off);
         port_for_task.invoke(request, &cancel_for_task).await
     });
 

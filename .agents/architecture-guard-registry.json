@@ -1719,7 +1719,6 @@
         "CancellationSignal",
         "InvocationDeltaData",
         "InvocationEventData",
-        "InvocationOptionsData",
         "InvocationRequestData",
         "InvocationScopeData",
         "InvocationStreamData",

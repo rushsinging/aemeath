@@ -10,9 +10,7 @@ use context::{
     CompactGenerationFailureData, CompactGenerationFailureKind, CompactGenerationOutputData,
 };
 use futures::StreamExt;
-use provider::{
-    InvocationDeltaData, InvocationEventData, InvocationOptionsData, InvocationRequestData,
-};
+use provider::{InvocationDeltaData, InvocationEventData, InvocationRequestData};
 use share::message::Message;
 use share::reasoning::ReasoningLevel;
 use std::sync::Arc;
@@ -55,7 +53,8 @@ impl CompactGenerator for ProviderCompactGenerator {
         let mut invocation = InvocationRequestData::new(
             binding.model.clone(),
             request,
-            InvocationOptionsData::new(max_output_tokens, ReasoningLevel::Off),
+            max_output_tokens,
+            ReasoningLevel::Off,
         );
         // 摘要生成不携带上下文窗口消息；压缩提示词本身就是全部输入。
         invocation.cancellation = cancel.clone();

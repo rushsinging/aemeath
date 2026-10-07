@@ -20,9 +20,9 @@ use futures::Stream;
 // 通过 provider::api（API facade）访问，不直接引用 published_language 模块。
 // 新 PL StopReason 通过别名 ProviderStopReasonData 导出，此处还原为 StopReason。
 pub use provider::{
-    CancellationSignal, InvocationEventData, InvocationOptionsData, InvocationRequestData,
-    ModelCapabilityData, ModelIdData, ProviderError, ProviderStopReasonData as StopReason,
-    RawUsageSnapshotData, RequestSystemBlockData,
+    CancellationSignal, InvocationEventData, InvocationRequestData, ModelCapabilityData,
+    ModelIdData, ProviderError, ProviderStopReasonData as StopReason, RawUsageSnapshotData,
+    RequestSystemBlockData,
 };
 
 #[cfg(test)]
@@ -259,7 +259,8 @@ pub(crate) mod fake {
                 model: "test-model".to_string(),
             },
             Vec::new(),
-            InvocationOptionsData::new(8192, ReasoningLevel::Off),
+            8192,
+            ReasoningLevel::Off,
         );
 
         let result = provider.invoke(request, &cancel).await;
@@ -279,7 +280,8 @@ pub(crate) mod fake {
                 model: "test-model".to_string(),
             },
             Vec::new(),
-            InvocationOptionsData::new(8192, ReasoningLevel::Off),
+            8192,
+            ReasoningLevel::Off,
         );
 
         let mut stream = provider.invoke(request, &cancel).await.unwrap();
@@ -317,7 +319,8 @@ pub(crate) mod fake {
                 model: "test-model".to_string(),
             },
             Vec::new(),
-            InvocationOptionsData::new(8192, ReasoningLevel::Off),
+            8192,
+            ReasoningLevel::Off,
         );
 
         let result = provider.invoke(request, &AlwaysCancelled).await;

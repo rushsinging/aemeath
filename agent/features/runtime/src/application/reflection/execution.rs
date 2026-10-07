@@ -119,9 +119,7 @@ async fn call_provider(
     prompt: &str,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> ReflectionExecutionResultType<(String, u32, u32)> {
-    use crate::ports::provider_port::{
-        InvocationOptionsData, InvocationRequestData, RequestSystemBlockData,
-    };
+    use crate::ports::provider_port::{InvocationRequestData, RequestSystemBlockData};
 
     let request = InvocationRequestData {
         model: invocation.model.clone(),
@@ -131,7 +129,8 @@ async fn call_provider(
             invocation.system_prompt_text.to_string(),
         )],
         tools: vec![],
-        options: InvocationOptionsData::new(invocation.max_tokens, invocation.requested_reasoning),
+        max_output_tokens: invocation.max_tokens,
+        reasoning: invocation.requested_reasoning,
     };
     let mut stream = invocation
         .provider

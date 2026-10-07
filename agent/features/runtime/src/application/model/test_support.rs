@@ -415,7 +415,7 @@ impl crate::ports::ProviderPort for LlmProviderPortAdapter {
         let _ = cancellation;
         let scope = provider::composition::InvocationScopeData::new(
             self.model.model.clone(),
-            request.options.max_output_tokens.max(1),
+            request.max_output_tokens.max(1),
             share::reasoning::ReasoningLevel::Off,
             share::reasoning::ReasoningLevel::Off,
         )

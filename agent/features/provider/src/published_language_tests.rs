@@ -195,7 +195,8 @@ fn invocation_request_new_has_empty_tools() {
             model: "m".to_string(),
         },
         Vec::new(),
-        InvocationOptionsData::new(8192, ReasoningLevel::Off),
+        8192,
+        ReasoningLevel::Off,
     );
     assert!(req.tools.is_empty());
 }
@@ -208,7 +209,8 @@ fn invocation_request_new_has_empty_system() {
             model: "m".to_string(),
         },
         Vec::new(),
-        InvocationOptionsData::new(8192, ReasoningLevel::Off),
+        8192,
+        ReasoningLevel::Off,
     );
     assert!(req.system.is_empty());
 }

@@ -36,7 +36,7 @@ use crate::application::loop_engine::{LoopEngineError, ModelStep, StepTokenUsage
 use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::agent::ToolCall;
-use crate::ports::{InvocationOptionsData, InvocationRequestData};
+use crate::ports::InvocationRequestData;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RetryDecision {
@@ -264,11 +264,7 @@ async fn invoke_model_impl(
         let stream_cancel = cancel.clone();
         let committed_delta = observer.committed_delta();
         let invocation = async {
-            let mut request = InvocationRequestData::new(
-                model,
-                messages,
-                InvocationOptionsData::new(max_tokens, reasoning),
-            );
+            let mut request = InvocationRequestData::new(model, messages, max_tokens, reasoning);
             request.system = system;
             request.tools = tools;
             request.cancellation = stream_cancel.clone();

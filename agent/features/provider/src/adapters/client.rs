@@ -382,11 +382,11 @@ impl LlmClient {
         }
 
         // clamp：请求 reasoning 不超过声明能力；scope 用 provider 中性的 model 名。
-        let requested_reasoning = request.options.reasoning;
+        let requested_reasoning = request.reasoning;
         let effective_reasoning = capability.reasoning.resolve(requested_reasoning);
         let scope = crate::InvocationScopeData::new(
             request.model.model.clone(),
-            request.options.max_output_tokens,
+            request.max_output_tokens,
             requested_reasoning,
             effective_reasoning,
         )

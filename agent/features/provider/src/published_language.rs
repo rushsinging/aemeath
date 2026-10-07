@@ -433,27 +433,6 @@ impl std::fmt::Display for ProviderError {
 
 impl std::error::Error for ProviderError {}
 
-// ─── InvocationOptionsData ──────────────────────────────────
-
-/// Legacy 一次调用选项；生产 resolver 接线延期到 v0.2.0 决策。
-#[derive(Debug, Clone)]
-pub struct InvocationOptionsData {
-    /// 最大输出 token。
-    pub max_output_tokens: u32,
-    /// 期望 reasoning level（Workflow 已应用 Config 静态上限）。
-    pub reasoning: ReasoningLevel,
-}
-
-impl InvocationOptionsData {
-    /// 构造默认选项。
-    pub fn new(max_output_tokens: u32, reasoning: ReasoningLevel) -> Self {
-        Self {
-            max_output_tokens,
-            reasoning,
-        }
-    }
-}
-
 // ─── System Blocks (provider-neutral) ──────────────────
 
 /// Provider-neutral system prompt 块。
@@ -501,10 +480,12 @@ pub struct InvocationRequestData {
     pub messages: std::sync::Arc<[Message]>,
     /// 本轮 system prompt 块（provider-neutral）。
     pub system: Vec<RequestSystemBlockData>,
-    /// 模型可见 tool schema 列表。
+    /// 模型可见 tool schema 列表（wire-ready）。
     pub tools: Vec<serde_json::Value>,
-    /// 调用选项。
-    pub options: InvocationOptionsData,
+    /// 单次调用最大输出 token。
+    pub max_output_tokens: u32,
+    /// 请求推理档位（clamp 前的原始请求值）。
+    pub reasoning: ReasoningLevel,
 }
 
 impl InvocationRequestData {
@@ -512,7 +493,8 @@ impl InvocationRequestData {
     pub fn new(
         model: ModelIdData,
         messages: impl Into<std::sync::Arc<[Message]>>,
-        options: InvocationOptionsData,
+        max_output_tokens: u32,
+        reasoning: ReasoningLevel,
     ) -> Self {
         Self {
             model,
@@ -520,7 +502,8 @@ impl InvocationRequestData {
             messages: messages.into(),
             system: Vec::new(),
             tools: Vec::new(),
-            options,
+            max_output_tokens,
+            reasoning,
         }
     }
 }
