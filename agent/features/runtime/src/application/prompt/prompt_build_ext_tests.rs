@@ -259,3 +259,24 @@ fn test_append_agent_roles_with_snapshot_language_zh() {
         "应包含中文 description（language=zh 已正确传递）"
     );
 }
+
+#[test]
+fn background_task_section_injected_only_when_threshold_enabled() {
+    // 默认（阈值>0）：注入后台任务特性说明。
+    let enabled = background_tasks_guidance_section("zh");
+    assert!(enabled.contains("后台任务"), "zh 段落：{enabled}");
+    assert!(enabled.contains("BackgroundTasks"));
+    let enabled_en = background_tasks_guidance_section("en");
+    assert!(enabled_en.contains("Background tasks"));
+    assert!(enabled_en.contains("sequential"));
+}
+
+#[test]
+fn background_task_section_is_bilingual_and_covers_core_semantics() {
+    let zh = background_tasks_guidance_section("zh");
+    assert!(zh.contains("自动转后台"), "统一模型");
+    assert!(zh.contains("完成会主动通知"), "占位结果语义");
+    let en = background_tasks_guidance_section("en");
+    assert!(en.contains("moved to the background"));
+    assert!(en.contains("will be notified"));
+}

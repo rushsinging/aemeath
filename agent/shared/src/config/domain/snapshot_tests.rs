@@ -507,9 +507,10 @@ fn test_snapshot_language_default() {
 }
 
 #[test]
-fn snapshot_exposes_tool_background_threshold_default_disabled() {
+fn snapshot_exposes_tool_background_threshold_default_enabled() {
     let snap = ConfigSnapshot::new(Config::default());
-    assert_eq!(snap.tool_background_threshold_secs(), 0);
+    // PR3 交付完成：默认开启 10s。
+    assert_eq!(snap.tool_background_threshold_secs(), 10);
 }
 
 #[test]

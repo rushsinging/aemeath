@@ -13,7 +13,7 @@
 | D3 | 完成提醒双路：有 active Run → 完成事实作为 reminder 注入当前 Run 后续 step；无 active Run → Runtime 创建 Wakeup Run 回注。agent 发起转后台即视为该任务的唤醒授权 |
 | D4 | 任务生命周期随 CLI 进程终止，标记失效，不做 daemon 化 |
 | D5 | 不挂 Goal / Loop。tool call 后台任务是独立轻量任务记录，与 Workflow 的 `continuation_authorization` 是独立通道，不得混同 |
-| D6 | 阈值可配置，随 `RunConfigSnapshot` 冻结（Run scope）；交付期默认 0（禁用，feature flag 关闭），查询工具（PR3）落地后开启默认 10s |
+| D6 | 阈值可配置，随 `RunConfigSnapshot` 冻结（Run scope）；默认 10（PR3 交付完成起开启；此前交付期临时为 0） |
 | D7 | 设计文档随核心引擎 PR 落地（含 workflow 设计文档落地与修订） |
 | D8 | 交付拆分为 3 个 PR：核心引擎+文档 → 通知链路 → 查询+持久化+TUI+收尾 |
 | D9 | sequential FIFO 修订：前序调用转后台后，同轮后续 sequential-only 调用 MAY 启动（启动顺序仍严格 FIFO）；`ToolCallState` 增加 `Backgrounded` 中间态 |
