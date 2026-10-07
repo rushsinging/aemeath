@@ -13,7 +13,6 @@ use share::reasoning::ReasoningLevel;
 use std::pin::Pin;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use futures_util::Stream;
 use share::message::Message;
 

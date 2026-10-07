@@ -20,6 +20,17 @@ pub fn wire_probe_client(
     })
 }
 
+/// Connect 向导探测唯一入口：构造探测客户端并执行一次连通性探测。
+///
+/// 组合根 NEVER 自行拼装探测客户端（#1861 C14 收敛：构造与执行合一）。
+pub async fn probe_connectivity(
+    options: LlmConfigOptionsData,
+    timeout: Duration,
+) -> Result<Duration, crate::ProviderError> {
+    let client = wire_probe_client(options)?;
+    run_connectivity_probe(&client, timeout).await
+}
+
 /// 执行一次连通性探测：单 token、Off 推理、"Reply with OK." 单条消息，
 /// 消费事件流直到 Completed 终态；`timeout` 到期即取消并返回 Timeout。
 ///

@@ -177,8 +177,7 @@ impl ProviderProbePort for ProviderProbeAdapter {
         request: ProviderProbeRequest,
     ) -> Result<ProviderProbeResult, ProviderProbeError> {
         let config = probe_config_from_request(&request);
-        let client = provider::composition::wire_probe_client(config).map_err(map_probe_error)?;
-        provider::composition::run_connectivity_probe(&client, request.timeout)
+        provider::composition::probe_connectivity(config, request.timeout)
             .await
             .map(|latency| ProviderProbeResult { latency })
             .map_err(map_probe_error)

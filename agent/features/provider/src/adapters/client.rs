@@ -173,13 +173,9 @@ fn build_provider_and_scope(
     Ok((provider_impl, default_scope))
 }
 
-/// 组合根获得 provider 客户端的唯一装配入口：构造配置 + 共享 transport
-/// pool + 默认推理档位 → 就绪客户端。
-///
-/// 收编 composition 侧 `from_config_with_pool` + `with_default_reasoning`
-/// 手写装配链（含 `LlmError → ProviderError` 权威映射）；组合根 NEVER
-/// 直调 `LlmClient` 构造器。
-pub fn wire_provider_client(
+/// 客户端装配内核（`wire_provider_assembly` 内部复用；探测走独立
+/// transport 的 `wire_probe_client`）。
+pub(crate) fn wire_provider_client(
     options: LlmConfigOptionsData,
     pool: &crate::adapters::pool::TransportPool,
     default_reasoning: ReasoningLevel,
@@ -404,6 +400,10 @@ impl LlmClient {
         // request.tools 已是 wire-ready tool 定义（context::ToolSchemaData 投影产物）。
         let tool_schemas = request.tools.clone();
 
+        log::debug!(target: crate::LOG_TARGET,
+            "[LLM REQUEST] invocation params: model={} max_tokens={} requested_reasoning={:?} effective_reasoning={:?}",
+            request.model.model, request.max_output_tokens, resolved.requested_reasoning, resolved.effective_reasoning,
+        );
         self.log_request(&request.system, &request.messages, &request.tools);
         // request 携带的 token 与调用方信号竞速 establishment。
         let cancel_token = request.cancellation.clone();
