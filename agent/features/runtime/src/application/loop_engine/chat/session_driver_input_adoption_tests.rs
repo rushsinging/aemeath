@@ -334,7 +334,7 @@ impl ScriptedLlmProvider for ToolThenTextProvider {
 
         if call_num == 1 {
             let tool_call = ProviderToolCallData {
-                id: ProviderToolCallIdData("toolu_noop_001".to_string()),
+                id: "toolu_noop_001".to_string(),
                 name: "NoopMarker".to_string(),
                 arguments: serde_json::json!({"marker": "noop-marker-result"}),
             };
@@ -342,12 +342,12 @@ impl ScriptedLlmProvider for ToolThenTextProvider {
             Ok(Box::pin(futures::stream::iter(vec![
                 InvocationEventData::Delta(InvocationDeltaData::ToolCallStarted {
                     index: 0,
-                    provider_id: Some(ProviderToolCallIdData("toolu_noop_001".to_string())),
+                    provider_id: Some("toolu_noop_001".to_string()),
                     name: "NoopMarker".to_string(),
                 }),
                 InvocationEventData::Delta(InvocationDeltaData::ToolArgumentsDelta {
                     index: 0,
-                    provider_id: Some(ProviderToolCallIdData("toolu_noop_001".to_string())),
+                    provider_id: Some("toolu_noop_001".to_string()),
                     partial_json: r#"{"marker":"noop-marker-result"}"#.to_string(),
                 }),
                 InvocationEventData::Delta(InvocationDeltaData::ToolCallCompleted {
@@ -356,7 +356,7 @@ impl ScriptedLlmProvider for ToolThenTextProvider {
                 }),
                 InvocationEventData::Completed(ProviderCompletionData {
                     output: vec![ProviderContentBlockData::ToolCall(ProviderToolCallData {
-                        id: ProviderToolCallIdData("toolu_noop_001".to_string()),
+                        id: "toolu_noop_001".to_string(),
                         name: "NoopMarker".to_string(),
                         arguments: serde_json::json!({"marker": "noop-marker-result"}),
                     })],
@@ -1104,19 +1104,19 @@ impl ScriptedLlmProvider for StreamingToolDeltaProvider {
         if call_num == 1 {
             self.after_tool_completed.notify_one();
             let tool_call = ProviderToolCallData {
-                id: ProviderToolCallIdData("toolu_stream_001".to_string()),
+                id: "toolu_stream_001".to_string(),
                 name: "NoopMarker".to_string(),
                 arguments: serde_json::json!({"marker": "noop-marker-result"}),
             };
             let deltas = vec![
                 InvocationEventData::Delta(InvocationDeltaData::ToolCallStarted {
                     index: 0,
-                    provider_id: Some(ProviderToolCallIdData("toolu_stream_001".to_string())),
+                    provider_id: Some("toolu_stream_001".to_string()),
                     name: "NoopMarker".to_string(),
                 }),
                 InvocationEventData::Delta(InvocationDeltaData::ToolArgumentsDelta {
                     index: 0,
-                    provider_id: Some(ProviderToolCallIdData("toolu_stream_001".to_string())),
+                    provider_id: Some("toolu_stream_001".to_string()),
                     partial_json: r#"{"marker":"noop-marker-result"}"#.to_string(),
                 }),
                 InvocationEventData::Delta(InvocationDeltaData::ToolCallCompleted {

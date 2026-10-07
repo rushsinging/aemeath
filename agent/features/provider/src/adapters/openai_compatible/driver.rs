@@ -1,7 +1,7 @@
 //! Chat Provider driver 抽象：不同供应商的推理字段差异化处理
 
 use crate::domain::capability::ReasoningLevel;
-use crate::{ProviderDriverKind, ReasoningCapabilityData, ReasoningMappingKindData};
+use crate::{ProviderDriverKind, ReasoningCapabilityData};
 
 use super::ReasoningConfig;
 
@@ -17,17 +17,13 @@ fn effort_capability(maximum: ReasoningLevel) -> ReasoningCapabilityData {
         ]
         .into_iter()
         .filter(|level| *level <= maximum),
-        ReasoningMappingKindData::Effort,
     )
     .expect("driver capability includes off")
 }
 
 fn toggle_capability(on_level: ReasoningLevel) -> ReasoningCapabilityData {
-    ReasoningCapabilityData::new(
-        [ReasoningLevel::Off, on_level],
-        ReasoningMappingKindData::ThinkingToggle,
-    )
-    .expect("toggle capability includes off")
+    ReasoningCapabilityData::new([ReasoningLevel::Off, on_level])
+        .expect("toggle capability includes off")
 }
 
 pub trait ChatApiDriver: Send + Sync {
@@ -97,18 +93,15 @@ pub struct AgnesDriver;
 
 impl ChatApiDriver for OpenAiDriver {
     fn reasoning_capability(&self) -> ReasoningCapabilityData {
-        ReasoningCapabilityData::new(
-            [
-                ReasoningLevel::Off,
-                ReasoningLevel::Minimal,
-                ReasoningLevel::Low,
-                ReasoningLevel::Medium,
-                ReasoningLevel::High,
-                ReasoningLevel::Xhigh,
-                ReasoningLevel::Max,
-            ],
-            ReasoningMappingKindData::Effort,
-        )
+        ReasoningCapabilityData::new([
+            ReasoningLevel::Off,
+            ReasoningLevel::Minimal,
+            ReasoningLevel::Low,
+            ReasoningLevel::Medium,
+            ReasoningLevel::High,
+            ReasoningLevel::Xhigh,
+            ReasoningLevel::Max,
+        ])
         .expect("OpenAI capability includes off")
     }
 

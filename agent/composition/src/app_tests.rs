@@ -169,10 +169,9 @@ impl runtime::ProviderPort for ReportedUsageProvider {
             supports_tools: true,
             supports_parallel_tool_calls: true,
             supports_streaming: true,
-            reasoning: provider::ReasoningCapabilityData::new(
-                [share::reasoning::ReasoningLevel::Off],
-                provider::ReasoningMappingKindData::None,
-            )?,
+            reasoning: provider::ReasoningCapabilityData::new([
+                share::reasoning::ReasoningLevel::Off,
+            ])?,
             context_limit: Some(128_000),
             output_limit: Some(8_192),
         })
@@ -188,7 +187,7 @@ impl runtime::ProviderPort for ReportedUsageProvider {
             0 => provider::ProviderCompletionData {
                 output: vec![provider::ProviderContentBlockData::ToolCall(
                     provider::ProviderToolCallData {
-                        id: provider::ProviderToolCallIdData("call-sub-agent".to_string()),
+                        id: "call-sub-agent".to_string(),
                         name: "Agent".to_string(),
                         arguments: serde_json::json!({
                             "description": "record child usage",

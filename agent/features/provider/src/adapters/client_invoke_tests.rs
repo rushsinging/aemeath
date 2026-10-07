@@ -9,12 +9,14 @@
 use super::LlmClient;
 use crate::domain::capability::ReasoningLevel;
 use crate::ports::{LlmProvider, ResolvedInvocation};
+use crate::ProviderStopReasonData as StopReason;
 use crate::{
-    InvocationDeltaData, InvocationEventData, InvocationRequestData, ModelCapabilityData,
-    ModelIdData, ProviderCompletionData, ProviderContentBlockData, ProviderError,
-    ProviderErrorKind, ProviderStopReasonData as StopReason, RawUsageSnapshotData,
-    ReasoningCapabilityData, ReasoningMappingKindData, RequestSystemBlockData,
+    InvocationDeltaData, InvocationEventData, InvocationRequestData, InvocationStreamData,
+    ProviderCompletionData, ProviderContentBlockData, ProviderError, ProviderErrorKind,
+    ProviderStopReasonData, ProviderToolCallData, RawUsageSnapshotData, RequestSystemBlockData,
 };
+use crate::{ModelCapabilityData, ModelIdData, ReasoningCapabilityData};
+
 use async_trait::async_trait;
 use share::message::Message;
 use std::sync::{Arc, Mutex};
@@ -336,11 +338,9 @@ async fn invoke_converts_system_blocks_tools_and_uses_neutral_scope_model() {
 async fn invoke_clamps_requested_reasoning_to_capability() {
     // Capability supports only Off and Medium; requesting Max must clamp to Medium.
     let mut capability = test_capability();
-    capability.reasoning = ReasoningCapabilityData::new(
-        [ReasoningLevel::Off, ReasoningLevel::Medium],
-        ReasoningMappingKindData::Effort,
-    )
-    .expect("valid capability");
+    capability.reasoning =
+        ReasoningCapabilityData::new([ReasoningLevel::Off, ReasoningLevel::Medium])
+            .expect("valid capability");
 
     let (client, captured) = build_client(RecordingProvider::new(
         "fake-provider",

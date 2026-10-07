@@ -106,7 +106,7 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                         self.saw_visible_delta = true;
                         self.handler.on_tool_use_start(
                             &name,
-                            provider_id.as_ref().map(|id| id.0.as_str()),
+                            provider_id.as_ref().map(|id| id.as_str()),
                             index,
                         )
                     }
@@ -119,7 +119,7 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                         self.handler.on_tool_arguments_delta(
                             index,
                             "",
-                            provider_id.as_ref().map(|id| id.0.as_str()),
+                            provider_id.as_ref().map(|id| id.as_str()),
                             &partial_json,
                         )
                     }
@@ -147,7 +147,7 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                             }
                             provider::ProviderContentBlockData::ToolCall(call) => self
                                 .handler
-                                .on_tool_use_start(&call.name, Some(&call.id.0), 0),
+                                .on_tool_use_start(&call.name, Some(&call.id.as_str()), 0),
                         }
                     }
                     self.handler.complete_active_streaming_block();
@@ -168,7 +168,7 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                         },
                         provider::ProviderContentBlockData::ToolCall(call) => {
                             ContentBlock::ToolUse {
-                                id: call.id.0,
+                                id: call.id.clone(),
                                 name: call.name,
                                 input: call.arguments,
                             }
@@ -377,10 +377,10 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
         let Some(executor) = &self.streaming_tool else {
             return;
         };
-        let id = self.runtime_tool_id(index, Some(&call.id.0));
+        let id = self.runtime_tool_id(index, Some(&call.id.as_str()));
         executor.submit(crate::application::tool::agent::ToolCall {
             id,
-            provider_id: call.id.0.clone(),
+            provider_id: call.id.clone(),
             name: call.name.clone(),
             index,
             input: call.arguments.clone(),

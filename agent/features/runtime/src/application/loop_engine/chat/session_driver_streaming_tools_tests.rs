@@ -73,7 +73,7 @@ impl ScriptedLlmProvider for StepCancelledStreamingToolProvider {
                 }),
             ])));
         }
-        let provider_id = ProviderToolCallIdData(format!("toolu_{}_cancel", self.tool_name));
+        let provider_id = format!("toolu_{}_cancel", self.tool_name);
         let tool_call = ProviderToolCallData {
             id: provider_id.clone(),
             name: self.tool_name.to_string(),
@@ -334,19 +334,19 @@ impl ScriptedLlmProvider for StreamingToolRetryProvider {
         if call_num == 1 {
             // 先发完整的 ToolCallCompleted delta（旁路执行已触发），随后流失败。
             let tool_call = ProviderToolCallData {
-                id: ProviderToolCallIdData("toolu_retry_001".to_string()),
+                id: "toolu_retry_001".to_string(),
                 name: "NoopMarker".to_string(),
                 arguments: serde_json::json!({"marker": "retry-drop"}),
             };
             let stream = futures::stream::iter(vec![
                 InvocationEventData::Delta(InvocationDeltaData::ToolCallStarted {
                     index: 0,
-                    provider_id: Some(ProviderToolCallIdData("toolu_retry_001".to_string())),
+                    provider_id: Some("toolu_retry_001".to_string()),
                     name: "NoopMarker".to_string(),
                 }),
                 InvocationEventData::Delta(InvocationDeltaData::ToolArgumentsDelta {
                     index: 0,
-                    provider_id: Some(ProviderToolCallIdData("toolu_retry_001".to_string())),
+                    provider_id: Some("toolu_retry_001".to_string()),
                     partial_json: r#"{"marker":"retry-drop"}"#.to_string(),
                 }),
                 InvocationEventData::Delta(InvocationDeltaData::ToolCallCompleted {
@@ -505,13 +505,13 @@ impl ScriptedLlmProvider for StreamingToolRetryOrphanProvider {
             let stream = futures::stream::iter(vec![
                 InvocationEventData::Delta(InvocationDeltaData::ToolCallStarted {
                     index: 0,
-                    provider_id: Some(ProviderToolCallIdData("toolu_retry_orphan_a".to_string())),
+                    provider_id: Some("toolu_retry_orphan_a".to_string()),
                     name: "NoopMarker".to_string(),
                 }),
                 InvocationEventData::Delta(InvocationDeltaData::ToolCallCompleted {
                     index: 0,
                     call: ProviderToolCallData {
-                        id: ProviderToolCallIdData("toolu_retry_orphan_a".to_string()),
+                        id: "toolu_retry_orphan_a".to_string(),
                         name: "NoopMarker".to_string(),
                         arguments: serde_json::json!({"marker": "orphan-a"}),
                     },
@@ -525,14 +525,14 @@ impl ScriptedLlmProvider for StreamingToolRetryOrphanProvider {
         } else if call_num == 2 {
             // 流 2（retry）：重新发出同参数工具调用并正常完成。
             let completed_call = ProviderToolCallData {
-                id: ProviderToolCallIdData("toolu_retry_pair_b".to_string()),
+                id: "toolu_retry_pair_b".to_string(),
                 name: "NoopMarker".to_string(),
                 arguments: serde_json::json!({"marker": "pair-b"}),
             };
             let stream = futures::stream::iter(vec![
                 InvocationEventData::Delta(InvocationDeltaData::ToolCallStarted {
                     index: 0,
-                    provider_id: Some(ProviderToolCallIdData("toolu_retry_pair_b".to_string())),
+                    provider_id: Some("toolu_retry_pair_b".to_string()),
                     name: "NoopMarker".to_string(),
                 }),
                 InvocationEventData::Delta(InvocationDeltaData::ToolCallCompleted {

@@ -310,7 +310,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     use crate::application::model::test_support::{test_binding_from_port, TestProviderPort};
     use provider::{
         InvocationEventData, ProviderCompletionData, ProviderContentBlockData,
-        ProviderStopReasonData, ProviderToolCallData, ProviderToolCallIdData, RawUsageSnapshotData,
+        ProviderStopReasonData, ProviderToolCallData, RawUsageSnapshotData,
     };
     use share::reasoning::ReasoningLevel;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -363,7 +363,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     let second_call = Arc::new(AtomicBool::new(false));
     let second_call2 = second_call.clone();
     let tool_call = ProviderToolCallData {
-        id: ProviderToolCallIdData("toolu_test_001".to_string()),
+        id: "toolu_test_001".to_string(),
         name: "spy".to_string(),
         arguments: serde_json::json!({}),
     };
@@ -550,7 +550,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
     use crate::application::model::test_support::{test_binding_from_port, TestProviderPort};
     use provider::{
         InvocationEventData, ProviderCompletionData, ProviderContentBlockData,
-        ProviderStopReasonData, ProviderToolCallData, ProviderToolCallIdData, RawUsageSnapshotData,
+        ProviderStopReasonData, ProviderToolCallData, RawUsageSnapshotData,
     };
     use share::reasoning::ReasoningLevel;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -586,7 +586,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
 
     // Provider: returns a tool call for blocking_cancel.
     let tool_call = ProviderToolCallData {
-        id: ProviderToolCallIdData("toolu_block_001".to_string()),
+        id: "toolu_block_001".to_string(),
         name: "blocking_cancel".to_string(),
         arguments: serde_json::json!({}),
     };

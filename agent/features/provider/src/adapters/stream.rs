@@ -15,7 +15,7 @@ use crate::domain::capability::ReasoningLevel;
 use crate::{
     InvocationDeltaData, InvocationEventData, InvocationStreamData, ProviderCompletionData,
     ProviderContentBlockData, ProviderError, ProviderErrorKind, ProviderStopReasonData,
-    ProviderToolCallData, ProviderToolCallIdData, RawUsageSnapshotData,
+    ProviderToolCallData, RawUsageSnapshotData,
 };
 use futures_util::StreamExt;
 use reqwest::Response;
@@ -68,7 +68,7 @@ pub(crate) trait InvocationSink: Send {
     fn emit_tool_use_start(&mut self, name: &str, provider_id: Option<&str>, index: usize) {
         self.on_delta(InvocationDeltaData::ToolCallStarted {
             index,
-            provider_id: provider_id.map(|id| ProviderToolCallIdData(id.to_string())),
+            provider_id: provider_id.map(|id| id.to_string()),
             name: name.to_string(),
         });
     }
@@ -82,7 +82,7 @@ pub(crate) trait InvocationSink: Send {
     ) {
         self.on_delta(InvocationDeltaData::ToolArgumentsDelta {
             index,
-            provider_id: provider_id.map(|id| ProviderToolCallIdData(id.to_string())),
+            provider_id: provider_id.map(|id| id.to_string()),
             partial_json: partial_args.to_string(),
         });
     }
@@ -98,7 +98,7 @@ pub(crate) trait InvocationSink: Send {
         self.on_delta(InvocationDeltaData::ToolCallCompleted {
             index,
             call: ProviderToolCallData {
-                id: ProviderToolCallIdData(id),
+                id: id,
                 name,
                 arguments,
             },
@@ -369,7 +369,7 @@ fn completion_from_legacy(
             }),
             ContentBlock::ToolUse { id, name, input } => {
                 Some(ProviderContentBlockData::ToolCall(ProviderToolCallData {
-                    id: ProviderToolCallIdData(id),
+                    id: id,
                     name,
                     arguments: input,
                 }))

@@ -36,7 +36,6 @@ fn reasoning_capability_none() {
     let cap = ReasoningCapabilityData::none();
     assert_eq!(cap.supported(), &[ReasoningLevel::Off]);
     assert_eq!(cap.maximum(), ReasoningLevel::Off);
-    assert_eq!(cap.mapping, ReasoningMappingKindData::None);
 }
 
 #[test]
@@ -49,14 +48,11 @@ fn resolver_selects_highest_supported_level_not_above_requested() {
         supports_tools: true,
         supports_parallel_tool_calls: true,
         supports_streaming: true,
-        reasoning: ReasoningCapabilityData::new(
-            [
-                ReasoningLevel::Off,
-                ReasoningLevel::Medium,
-                ReasoningLevel::Max,
-            ],
-            ReasoningMappingKindData::Effort,
-        )
+        reasoning: ReasoningCapabilityData::new([
+            ReasoningLevel::Off,
+            ReasoningLevel::Medium,
+            ReasoningLevel::Max,
+        ])
         .expect("valid sparse capability"),
         context_limit: Some(128_000),
         output_limit: Some(8_192),
@@ -81,18 +77,15 @@ fn resolver_selects_highest_supported_level_not_above_requested() {
 fn resolver_preserves_minimal_and_max_when_capability_declares_minimal() {
     // OpenAI driver 的 capability 显式声明七档；resolver 必须把 Minimal 与
     // Max 原样下传，证明共享枚举新增档位不会自动丢失。
-    let openai = ReasoningCapabilityData::new(
-        [
-            ReasoningLevel::Off,
-            ReasoningLevel::Minimal,
-            ReasoningLevel::Low,
-            ReasoningLevel::Medium,
-            ReasoningLevel::High,
-            ReasoningLevel::Xhigh,
-            ReasoningLevel::Max,
-        ],
-        ReasoningMappingKindData::Effort,
-    )
+    let openai = ReasoningCapabilityData::new([
+        ReasoningLevel::Off,
+        ReasoningLevel::Minimal,
+        ReasoningLevel::Low,
+        ReasoningLevel::Medium,
+        ReasoningLevel::High,
+        ReasoningLevel::Xhigh,
+        ReasoningLevel::Max,
+    ])
     .expect("OpenAI capability includes off and seven levels");
 
     assert_eq!(
@@ -107,14 +100,11 @@ fn resolver_downgrades_minimal_to_off_when_capability_omits_minimal() {
     // Legacy driver（如 Zhipu/LiteLLM）的 capability 不包含 Minimal：
     // resolver 必须把 Minimal 向下退到 Off，禁止把 Off 静默升级到 Minimal，
     // 也禁止因为 Minimal 不在集合里而 panic 或返回任何非 Off 档位。
-    let legacy = ReasoningCapabilityData::new(
-        [
-            ReasoningLevel::Off,
-            ReasoningLevel::Low,
-            ReasoningLevel::Medium,
-        ],
-        ReasoningMappingKindData::Effort,
-    )
+    let legacy = ReasoningCapabilityData::new([
+        ReasoningLevel::Off,
+        ReasoningLevel::Low,
+        ReasoningLevel::Medium,
+    ])
     .expect("legacy capability includes off");
 
     assert_eq!(legacy.resolve(ReasoningLevel::Minimal), ReasoningLevel::Off);
@@ -122,12 +112,8 @@ fn resolver_downgrades_minimal_to_off_when_capability_omits_minimal() {
 
 #[test]
 fn reasoning_capability_rejects_empty_or_missing_off_levels() {
-    assert!(ReasoningCapabilityData::new([], ReasoningMappingKindData::None).is_err());
-    assert!(ReasoningCapabilityData::new(
-        [ReasoningLevel::Medium],
-        ReasoningMappingKindData::Effort,
-    )
-    .is_err());
+    assert!(ReasoningCapabilityData::new([]).is_err());
+    assert!(ReasoningCapabilityData::new([ReasoningLevel::Medium]).is_err());
 }
 
 #[test]
@@ -141,7 +127,7 @@ fn stop_reason_variants() {
 
 #[test]
 fn provider_tool_call_id_display() {
-    let id = ProviderToolCallIdData("toolu_123".to_string());
+    let id = "toolu_123".to_string();
     assert_eq!(id.to_string(), "toolu_123");
 }
 
@@ -253,7 +239,7 @@ fn tool_call_identity_can_bind_provider_id_after_start() {
     };
     let arguments = InvocationDeltaData::ToolArgumentsDelta {
         index: 2,
-        provider_id: Some(ProviderToolCallIdData("call_late".to_string())),
+        provider_id: Some("call_late".to_string()),
         partial_json: "{}".to_string(),
     };
 
@@ -269,7 +255,7 @@ fn tool_call_identity_can_bind_provider_id_after_start() {
         arguments,
         InvocationDeltaData::ToolArgumentsDelta {
             index: 2,
-            provider_id: Some(ProviderToolCallIdData(ref id)),
+            provider_id: Some(ref id),
             ..
         } if id == "call_late"
     ));

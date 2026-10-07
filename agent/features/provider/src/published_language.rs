@@ -37,34 +37,14 @@ impl std::fmt::Display for ModelIdData {
 
 // ─── Reasoning ──────────────────────────────────────────
 
-/// Reasoning 映射方式——driver 如何把 ReasoningLevel 映射到 wire。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ReasoningMappingKindData {
-    /// OpenAI 风格 effort 字符串。
-    Effort,
-    /// Anthropic 风格 thinking 开关。
-    ThinkingToggle,
-    /// Thinking budget（token 数）。
-    ThinkingBudget,
-    /// Adaptive 模式（provider 内部决定）。
-    Adaptive,
-    /// 不支持 reasoning。
-    None,
-}
-
 /// 模型 reasoning 能力声明。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ReasoningCapabilityData {
     supported: Vec<ReasoningLevel>,
-    /// 映射方式。
-    pub mapping: ReasoningMappingKindData,
 }
 
 impl ReasoningCapabilityData {
-    pub fn new(
-        supported: impl IntoIterator<Item = ReasoningLevel>,
-        mapping: ReasoningMappingKindData,
-    ) -> Result<Self, ProviderError> {
+    pub fn new(supported: impl IntoIterator<Item = ReasoningLevel>) -> Result<Self, ProviderError> {
         let mut supported: Vec<_> = supported.into_iter().collect();
         supported.sort_unstable();
         supported.dedup();
@@ -74,14 +54,13 @@ impl ReasoningCapabilityData {
                 "reasoning capability 必须包含 off 档位",
             ));
         }
-        Ok(Self { supported, mapping })
+        Ok(Self { supported })
     }
 
     /// 构造不支持 reasoning 的默认能力。
     pub fn none() -> Self {
         Self {
             supported: vec![ReasoningLevel::Off],
-            mapping: ReasoningMappingKindData::None,
         }
     }
 
@@ -138,20 +117,12 @@ impl ModelCapabilityData {}
 /// 这是 Provider 返回的原始 tool-call ID（如 Anthropic 的 `toolu_*` 或
 /// OpenAI 的 `call_*`）。Runtime 在写入 Run Step 时创建领域 `ToolCallId`
 /// 并维护双 ID 映射。Provider **NEVER** 生成领域 ID。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderToolCallIdData(pub String);
-
-impl std::fmt::Display for ProviderToolCallIdData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
 
 /// Provider 边界的 tool call 完整形态。
 #[derive(Debug, Clone)]
 pub struct ProviderToolCallData {
     /// Provider 原始 tool-call ID。
-    pub id: ProviderToolCallIdData,
+    pub id: String,
     /// 工具名称。
     pub name: String,
     /// 验证过的 JSON 参数。
@@ -280,13 +251,13 @@ pub enum InvocationDeltaData {
     /// Tool call 开始。
     ToolCallStarted {
         index: usize,
-        provider_id: Option<ProviderToolCallIdData>,
+        provider_id: Option<String>,
         name: String,
     },
     /// Tool arguments 增量字符串片段。
     ToolArgumentsDelta {
         index: usize,
-        provider_id: Option<ProviderToolCallIdData>,
+        provider_id: Option<String>,
         partial_json: String,
     },
     /// Tool call 完成（给出验证过的 JSON 值）。

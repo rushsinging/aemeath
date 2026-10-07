@@ -27,7 +27,7 @@ pub use provider::{
 #[cfg(test)]
 pub use provider::{
     InvocationDeltaData, ProviderCompletionData, ProviderContentBlockData, ProviderErrorKind,
-    ReasoningCapabilityData, ReasoningMappingKindData,
+    ReasoningCapabilityData,
 };
 
 // ReasoningLevel 已由 provider crate 从 core::provider re-export。

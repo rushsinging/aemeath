@@ -1,9 +1,8 @@
 use provider::{
     InvocationDeltaData, InvocationEventData, InvocationRequestData, ModelCapabilityData,
     ModelIdData, ProviderCompletionData, ProviderContentBlockData, ProviderError,
-    ProviderErrorKind, ProviderStopReasonData, ProviderToolCallData, ProviderToolCallIdData,
-    RawUsageSnapshotData, ReasoningCapabilityData, ReasoningMappingKindData,
-    RequestSystemBlockData,
+    ProviderErrorKind, ProviderStopReasonData, ProviderToolCallData, RawUsageSnapshotData,
+    ReasoningCapabilityData, RequestSystemBlockData,
 };
 use share::message::Message;
 use share::reasoning::ReasoningLevel;
@@ -22,10 +21,8 @@ fn crate_root_exposes_complete_provider_published_language_as_send_sync_values()
     assert_send_sync::<ProviderErrorKind>();
     assert_send_sync::<ProviderStopReasonData>();
     assert_send_sync::<ProviderToolCallData>();
-    assert_send_sync::<ProviderToolCallIdData>();
     assert_send_sync::<RawUsageSnapshotData>();
     assert_send_sync::<ReasoningCapabilityData>();
-    assert_send_sync::<ReasoningMappingKindData>();
     assert_send_sync::<RequestSystemBlockData>();
 }
 

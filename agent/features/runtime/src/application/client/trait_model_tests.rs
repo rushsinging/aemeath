@@ -86,7 +86,6 @@ fn test_factory() -> Arc<dyn ProviderFactory> {
     use crate::ports::provider_port::{
         CancellationSignal, InvocationRequestData, InvocationStreamData, ModelCapabilityData,
         ProviderError, ProviderErrorKind, ReasoningCapabilityData, ReasoningLevel,
-        ReasoningMappingKindData,
     };
     use crate::ports::ProviderPort as ProviderPortTrait;
 
@@ -131,14 +130,11 @@ fn test_factory() -> Arc<dyn ProviderFactory> {
                 supports_tools: true,
                 supports_parallel_tool_calls: true,
                 supports_streaming: true,
-                reasoning: ReasoningCapabilityData::new(
-                    vec![
-                        ReasoningLevel::Off,
-                        ReasoningLevel::Low,
-                        ReasoningLevel::Medium,
-                    ],
-                    ReasoningMappingKindData::Effort,
-                )
+                reasoning: ReasoningCapabilityData::new(vec![
+                    ReasoningLevel::Off,
+                    ReasoningLevel::Low,
+                    ReasoningLevel::Medium,
+                ])
                 .unwrap_or_else(|_| ReasoningCapabilityData::none()),
                 context_limit: spec.context_window,
                 output_limit: Some(spec.max_tokens as usize),

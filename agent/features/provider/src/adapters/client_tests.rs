@@ -193,7 +193,6 @@ fn wire_provider_client_maps_configuration_failures_to_provider_error() {
 #[test]
 fn wire_provider_assembly_builds_capability_from_client_and_model_meta() {
     use crate::published_language::ModelIdData;
-    use crate::published_language::ReasoningMappingKindData;
 
     let pool = TransportPool::new();
     let assembly = super::wire_provider_assembly(
@@ -219,10 +218,6 @@ fn wire_provider_assembly_builds_capability_from_client_and_model_meta() {
         .reasoning
         .supported()
         .contains(&ReasoningLevel::Medium));
-    assert_eq!(
-        assembly.capability.reasoning.mapping,
-        ReasoningMappingKindData::Effort
-    );
     assert_eq!(assembly.client.model_name(), "claude-a");
 }
 

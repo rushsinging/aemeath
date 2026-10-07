@@ -3,7 +3,7 @@ use super::stream_handler::InvocationEventReducer;
 use crate::application::tool::coordination::identity::ToolIdentityRegistry;
 use provider::{
     InvocationDeltaData, InvocationEventData, ProviderCompletionData, ProviderContentBlockData,
-    ProviderErrorKind, ProviderStopReasonData, ProviderToolCallData, ProviderToolCallIdData,
+    ProviderErrorKind, ProviderStopReasonData, ProviderToolCallData,
 };
 use share::reasoning::ReasoningLevel;
 use std::sync::{Arc, Mutex};
@@ -47,7 +47,7 @@ fn reducer_keeps_tool_identity_isolated_per_turn() {
         .apply(InvocationEventData::Delta(
             InvocationDeltaData::ToolCallStarted {
                 index: 0,
-                provider_id: Some(ProviderToolCallIdData("provider-a".into())),
+                provider_id: Some("provider-a".into()),
                 name: "Read".into(),
             },
         ))
@@ -56,7 +56,7 @@ fn reducer_keeps_tool_identity_isolated_per_turn() {
         .apply(InvocationEventData::Delta(
             InvocationDeltaData::ToolCallStarted {
                 index: 0,
-                provider_id: Some(ProviderToolCallIdData("provider-b".into())),
+                provider_id: Some("provider-b".into()),
                 name: "Read".into(),
             },
         ))
@@ -115,7 +115,7 @@ fn reducer_accepts_nonblank_text_and_tool_call_terminal_completions() {
     let cases = [
         vec![ProviderContentBlockData::Text("answer".into())],
         vec![ProviderContentBlockData::ToolCall(ProviderToolCallData {
-            id: ProviderToolCallIdData("tool-1".into()),
+            id: "tool-1".into(),
             name: "Read".into(),
             arguments: serde_json::json!({}),
         })],

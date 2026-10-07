@@ -11,7 +11,7 @@
 //! | **输出（1 族）** | `InvocationStreamData` → `InvocationEventData`（Delta/Completed/Failed）→ 载荷族 `Provider{Completion,ContentBlock,ToolCall,ToolCallId,StopReason}Data`/`RawUsageSnapshotData`（事件嵌套载荷，随字段可达） |
 //! | 模型元数据 | `ModelIdData`/`ModelCapabilityData`（判定：ModelInfo 单实体合并待 C15——model 是 config/catalog 的外部数据投影） |
 //! | 工厂（2 入口） | `wire_provider_assembly`（主链路：client + capability + resolved 档位，返回 `ProviderAssemblyWiring` 构造面句柄包）、`probe_connectivity`（connect 探测构造+执行合一） |
-//! | 构造面豁免 | `LlmClient`/`LlmConfigOptionsData`/`TransportPool`/`reasoning_capability_from_max`——仅组合根桥接所需 |
+//! | 构造面豁免 | `LlmClient`/`LlmConfigOptionsData`/`TransportPool`——仅组合根桥接所需 |
 //! | Error | `ProviderError` + `ProviderErrorKind`（13 变体；LlmError 已内部化，折叠归 #1740） |
 //! | 身份 | `ProviderDriverKind`（= share DriverKind 词表，#1850 单一真相源） |
 //!
@@ -37,7 +37,14 @@ mod domain;
 mod ports;
 pub mod published_language;
 
-pub use domain::capability::ProviderDriverKind;
+pub use published_language::{
+    InvocationDeltaData, InvocationEventData, InvocationRequestData, InvocationStreamData,
+    ModelCapabilityData, ModelIdData, ProviderCompletionData, ProviderContentBlockData,
+    ProviderError, ProviderErrorKind, ProviderStopReasonData, ProviderToolCallData,
+    RawUsageSnapshotData, ReasoningCapabilityData, RequestSystemBlockData,
+};
+
+pub(crate) use domain::capability::ProviderDriverKind;
 
 /// Composition Root 专用构造面；业务消费者不得引用。
 pub mod composition {
@@ -46,16 +53,7 @@ pub mod composition {
     };
     pub use crate::adapters::pool::TransportPool;
     pub use crate::adapters::probe::probe_connectivity;
-    pub use crate::domain::capability::reasoning_capability_from_max;
 }
-
-pub use published_language::{
-    InvocationDeltaData, InvocationEventData, InvocationRequestData, InvocationStreamData,
-    ModelCapabilityData, ModelIdData, ProviderCompletionData, ProviderContentBlockData,
-    ProviderError, ProviderErrorKind, ProviderStopReasonData, ProviderToolCallData,
-    ProviderToolCallIdData, RawUsageSnapshotData, ReasoningCapabilityData,
-    ReasoningMappingKindData, RequestSystemBlockData,
-};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum LlmError {

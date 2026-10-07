@@ -257,7 +257,7 @@ async fn responses_stream_keeps_tool_use_when_completed_output_omits_function_ca
     assert!(matches!(
         &completion.output[..],
         [crate::ProviderContentBlockData::ToolCall(call)]
-            if call.id.0 == "call_hello"
+            if call.id.as_str() == "call_hello"
                 && call.name == "Write"
                 && call.arguments == serde_json::json!({"file_path": "examples/hello.rs"})
     ));

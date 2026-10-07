@@ -474,7 +474,7 @@ fn catalog_driver_strings_are_covered_by_driver_vocab() {
     for entry in config::catalog::PROVIDER_CATALOG.iter() {
         let driver_str = entry.driver.as_str();
         assert!(
-            provider::ProviderDriverKind::parse(driver_str).is_some(),
+            share::config::domain::driver_kind::DriverKind::parse(driver_str).is_some(),
             "catalog driver `{driver_str}` 不在身份词表内"
         );
     }

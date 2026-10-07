@@ -212,7 +212,7 @@ use hook::HookDispatcher;
 use share::reasoning::ReasoningLevel;
 use provider::{
     InvocationDeltaData, InvocationEventData, InvocationStreamData, ProviderCompletionData, ProviderContentBlockData,
-    ProviderError, ProviderErrorKind, ProviderStopReasonData, ProviderToolCallData, ProviderToolCallIdData,
+    ProviderError, ProviderErrorKind, ProviderStopReasonData, ProviderToolCallData,
     RawUsageSnapshotData,
 };
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
