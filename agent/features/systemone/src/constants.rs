@@ -53,7 +53,35 @@ pub(crate) const STAGING_DIR_PREFIX: &str = ".tmp-";
 /// 单次安装创建暂存目录的最大命名冲突重试次数（pid + 原子序号仍撞名时失败）。
 pub(crate) const STAGING_ATTEMPT_LIMIT: usize = 128;
 
-// --- System One 模型资产 HTTP 抓取（来源：adapters/fetch_http.rs，§4.2 手动下载）---
+// --- System One 模型 HTTP 抓取（来源：adapters/fetch_http.rs，§4.2 手动下载）---
 
 /// 手动重定向的最大跟随跳数（逐跳仍校验 https；超过即 fail closed，禁止无界跳转）。
 pub(crate) const MAX_REDIRECT_HOPS: usize = 5;
+
+// --- embedded llama.cpp 评分（来源：kev.serve 上下文口径与 eval/system-one/REPORT.md 基线）---
+
+/// kev 编码 state 上限（`SERVE_MAX_STATE`，含 state 分隔 token；超出即截断）。
+#[cfg(feature = "embedded")]
+pub(crate) const KEV_MAX_STATE_TOKENS: usize = 65536;
+
+/// kev 单题 row 上限（`SERVE_MAX_BRANCH` = state 上限 + 8192；超出即拒绝）。
+#[cfg(feature = "embedded")]
+pub(crate) const KEV_MAX_BRANCH_TOKENS: usize = 73728;
+
+/// embedded worker 的上下文 / 批容量（REPORT 的 llama-server 基线 `--ctx-size 16384`，
+/// real case row 最大已观测 ~1.5k tokens）。
+#[cfg(feature = "embedded")]
+pub(crate) const EMBEDDED_CONTEXT_TOKENS: u32 = 16384;
+
+/// 单次计算 chunk（ubatch）容量。
+///
+/// REPORT 基线的 `--ubatch-size 16384` 在 16GiB Apple Silicon 上由当前 llama.cpp
+/// 预留最坏情况 Metal 计算缓冲（实测 ≈15.5GiB）必然 OOM，故收窄为 2048
+///（实测 ≈2GiB）；超长 row 由 llama.cpp 按 ubatch 切分解码，batch 上限仍为
+/// `EMBEDDED_CONTEXT_TOKENS`。
+#[cfg(feature = "embedded")]
+pub(crate) const EMBEDDED_UBATCH_TOKENS: u32 = 2048;
+
+/// 安装目录内 HF fast tokenizer 的相对路径（kev causal row 编码输入）。
+#[cfg(feature = "embedded")]
+pub(crate) const TOKENIZER_JSON_RELATIVE_PATH: &str = "tokenizer/tokenizer.json";

@@ -5,6 +5,7 @@
 //! | 类 | 实体 | 消费者 |
 //! |---|---|---|
 //! | `wire_*` 工厂 | `wire_http_scoring_port`（feature `http-adapter`，测试 / eval 对分专用；生产装配随后续 embedded 接线补充） | 测试 / eval |
+//! | 适配器 | `EmbeddedScoringAdapter` / `EmbeddedInitError`（feature `embedded`，macOS arm64 llama.cpp worker） | 生产评分装配 |
 //! | 数据 | `ScoringQuestion` / `ScoringAnswer` / `ScoringState` / `CalibrationLevel` | 消费场景（memory / skills / policy） |
 //! | 数据 | `ModelManifest` / `PointerHead` / `PointerHeadWeights` | 模型下载、存储与 embedded 评分装配 |
 //! | 端口 | `ScoringPort` / `CalibrationPort` / `ModelAssetPort` | 消费场景只依赖端口，NEVER 感知引擎型号 |
@@ -26,9 +27,13 @@ mod ports;
 pub use adapters::audited::{AuditedScoringAdapter, ScoringAuditEvent};
 pub use adapters::calibrated::CalibratedScoringAdapter;
 pub use adapters::calibration_store::{CalibrationArtifact, CalibrationStore};
+#[cfg(feature = "embedded")]
+pub use adapters::embedded::{EmbeddedInitError, EmbeddedScoringAdapter};
 pub use adapters::fetch_http::HttpArtifactFetcher;
 #[cfg(feature = "http-adapter")]
 pub use adapters::jev_http::JevHttpScoringAdapter;
+#[cfg(feature = "embedded")]
+pub use adapters::llama_worker::WorkerInitError;
 pub use adapters::model_assets::{
     LocalModelAssetStore, ModelInstallError, PreparedStagedInstall, StagedInstallCommit,
     StagingDirectory,
