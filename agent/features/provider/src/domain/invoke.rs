@@ -14,20 +14,23 @@ impl InvocationScopeData {
         max_tokens: u32,
         requested_reasoning: ReasoningLevel,
         effective_reasoning: ReasoningLevel,
-    ) -> Result<Self, crate::LlmError> {
+    ) -> Result<Self, crate::ProviderError> {
         let model = model.into();
         if model.trim().is_empty() {
-            return Err(crate::LlmError::Config(
+            return Err(crate::ProviderError::fatal(
+                crate::ProviderErrorKind::Configuration,
                 "invocation model must not be empty".to_string(),
             ));
         }
         if max_tokens == 0 {
-            return Err(crate::LlmError::Config(
+            return Err(crate::ProviderError::fatal(
+                crate::ProviderErrorKind::Configuration,
                 "invocation max_tokens must be greater than zero".to_string(),
             ));
         }
         if effective_reasoning > requested_reasoning {
-            return Err(crate::LlmError::Config(
+            return Err(crate::ProviderError::fatal(
+                crate::ProviderErrorKind::Configuration,
                 "effective reasoning must not exceed requested reasoning".to_string(),
             ));
         }

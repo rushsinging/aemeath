@@ -46,7 +46,6 @@ pub mod composition {
     pub use crate::domain::capability::reasoning_capability_from_max;
     pub use crate::domain::invoke::InvocationScopeData;
     pub use crate::ports::LlmProvider;
-    pub use crate::LlmError;
 }
 
 pub use published_language::{
@@ -59,15 +58,9 @@ pub use published_language::{
 };
 
 #[derive(Debug, thiserror::Error)]
-pub enum LlmError {
-    #[error("network error: {0}")]
-    Network(String),
+pub(crate) enum LlmError {
     #[error("API error [{error_type}]: {message}")]
     Api { error_type: String, message: String },
-    #[error("rate limited")]
-    RateLimited,
-    #[error("context too long")]
-    ContextTooLong,
     #[error("request cancelled by user")]
     Cancelled,
     #[error("stream error: {0}")]
@@ -89,25 +82,12 @@ pub enum LlmError {
     },
 }
 
-impl LlmError {
-    pub fn is_cancelled(&self) -> bool {
-        matches!(self, LlmError::Cancelled)
-    }
-
-    pub fn is_stream_truncated(&self) -> bool {
-        matches!(self, LlmError::StreamTruncated { .. })
-    }
-}
-
 // ─── LlmError → ProviderError 权威映射（crate 内三 driver + stream + runtime 装配共用）───
 
 impl From<LlmError> for ProviderError {
     fn from(error: LlmError) -> Self {
         let kind = match &error {
             LlmError::Cancelled => ProviderErrorKind::Cancelled,
-            LlmError::RateLimited => ProviderErrorKind::RateLimited,
-            LlmError::ContextTooLong => ProviderErrorKind::ContextTooLong,
-            LlmError::Network(_) => ProviderErrorKind::Network,
             LlmError::Api { .. } => ProviderErrorKind::UpstreamUnavailable,
             LlmError::StreamInterrupted(_) | LlmError::StreamTruncated { .. } => {
                 ProviderErrorKind::StreamTruncated

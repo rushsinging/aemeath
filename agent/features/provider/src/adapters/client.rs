@@ -109,7 +109,7 @@ fn build_provider_and_scope(
     spec: crate::domain::driver_acl::DriverSpec,
     options: LlmConfigOptionsData,
     http: reqwest::Client,
-) -> Result<(Arc<dyn LlmProvider>, crate::InvocationScopeData), crate::LlmError> {
+) -> Result<(Arc<dyn LlmProvider>, crate::InvocationScopeData), crate::ProviderError> {
     use crate::domain::driver_acl::{ApiStyle, ProtocolFamily};
 
     let driver = spec.kind();
@@ -179,11 +179,8 @@ pub fn wire_provider_client(
     pool: &crate::adapters::pool::TransportPool,
     default_reasoning: ReasoningLevel,
 ) -> Result<Arc<LlmClient>, crate::ProviderError> {
-    let client =
-        LlmClient::from_config_with_pool(options, pool).map_err(crate::ProviderError::from)?;
-    let client = client
-        .with_default_reasoning(default_reasoning)
-        .map_err(crate::ProviderError::from)?;
+    let client = LlmClient::from_config_with_pool(options, pool)?;
+    let client = client.with_default_reasoning(default_reasoning)?;
     Ok(Arc::new(client))
 }
 
@@ -320,7 +317,7 @@ impl LlmClient {
 }
 
 impl LlmClient {
-    pub fn from_config(options: LlmConfigOptionsData) -> Result<Self, crate::LlmError> {
+    pub fn from_config(options: LlmConfigOptionsData) -> Result<Self, crate::ProviderError> {
         ensure_resolved_invocation_inputs(&options)?;
         let spec = parse_driver_spec(&options)?;
         let http =
@@ -340,7 +337,7 @@ impl LlmClient {
     pub fn from_config_with_pool(
         options: LlmConfigOptionsData,
         pool: &crate::adapters::pool::TransportPool,
-    ) -> Result<Self, crate::LlmError> {
+    ) -> Result<Self, crate::ProviderError> {
         ensure_resolved_invocation_inputs(&options)?;
         let spec = parse_driver_spec(&options)?;
         let key = transport_key_for(&options, &spec);
@@ -501,7 +498,7 @@ impl LlmClient {
     pub fn with_default_reasoning(
         mut self,
         requested_reasoning: crate::domain::capability::ReasoningLevel,
-    ) -> Result<Self, crate::LlmError> {
+    ) -> Result<Self, crate::ProviderError> {
         self.default_scope = crate::InvocationScopeData::new(
             self.default_scope.model(),
             self.default_scope.max_tokens(),
@@ -526,7 +523,7 @@ impl LlmClient {
         model: impl Into<String>,
         max_tokens: Option<u32>,
         requested_reasoning: crate::domain::capability::ReasoningLevel,
-    ) -> Result<crate::InvocationScopeData, crate::LlmError> {
+    ) -> Result<crate::InvocationScopeData, crate::ProviderError> {
         crate::InvocationScopeData::new(
             model,
             max_tokens.unwrap_or_else(|| self.default_scope.max_tokens()),

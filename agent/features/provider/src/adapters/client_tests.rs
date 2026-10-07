@@ -79,7 +79,7 @@ fn from_config_rejects_missing_endpoint_instead_of_using_adapter_default() {
         Err(error) => error,
     };
 
-    assert!(matches!(error, crate::LlmError::Config(_)));
+    assert_eq!(error.kind, crate::ProviderErrorKind::Configuration);
     assert!(error.to_string().contains("base URL"));
 }
 
@@ -102,7 +102,7 @@ fn from_config_rejects_blank_model_instead_of_using_adapter_default() {
         Err(error) => error,
     };
 
-    assert!(matches!(error, crate::LlmError::Config(_)));
+    assert_eq!(error.kind, crate::ProviderErrorKind::Configuration);
     assert!(error.to_string().contains("模型"));
 }
 
@@ -125,7 +125,7 @@ fn from_config_rejects_missing_user_agent_instead_of_using_global_default() {
         Err(error) => error,
     };
 
-    assert!(matches!(error, crate::LlmError::Config(_)));
+    assert_eq!(error.kind, crate::ProviderErrorKind::Configuration);
     assert!(error.to_string().contains("User-Agent"));
 }
 

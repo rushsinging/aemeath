@@ -1724,7 +1724,6 @@
         "InvocationStreamData",
         "LlmClient",
         "LlmConfigOptionsData",
-        "LlmError",
         "LlmProvider",
         "ModelCapabilityData",
         "ModelIdData",

@@ -668,15 +668,10 @@ mod contract_tests;
 fn provider_error_from_legacy(error: crate::LlmError) -> ProviderError {
     let retryable = matches!(
         &error,
-        crate::LlmError::Network(_)
-            | crate::LlmError::StreamInterrupted(_)
-            | crate::LlmError::StreamTruncated { .. }
+        crate::LlmError::StreamInterrupted(_) | crate::LlmError::StreamTruncated { .. }
     );
     let kind = match &error {
         crate::LlmError::Cancelled => ProviderErrorKind::Cancelled,
-        crate::LlmError::RateLimited => ProviderErrorKind::RateLimited,
-        crate::LlmError::ContextTooLong => ProviderErrorKind::ContextTooLong,
-        crate::LlmError::Network(_) => ProviderErrorKind::Network,
         crate::LlmError::Api { .. } => ProviderErrorKind::UpstreamUnavailable,
         crate::LlmError::StreamInterrupted(_) | crate::LlmError::StreamTruncated { .. } => {
             ProviderErrorKind::StreamTruncated
