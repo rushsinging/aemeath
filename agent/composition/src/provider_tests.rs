@@ -18,7 +18,7 @@
 // factory 装配与 transport pool 复用契约。
 
 use super::*;
-use provider::composition::{wire_provider_client, LlmConfigOptionsData, TransportPool};
+use provider::composition::{wire_provider_assembly, LlmConfigOptionsData, TransportPool};
 use provider::{
     InvocationRequestData, ModelCapabilityData, ModelIdData, ProviderErrorKind,
     ReasoningCapabilityData,
@@ -50,12 +50,12 @@ fn test_capability() -> ModelCapabilityData {
 /// Build a port over a real (wire-assembled) client and the given capability.
 /// Adapter 自有逻辑测试只走 capability 查表与 fast-path，不触发上游调用；
 /// LlmProvider 构造面已撤空（见文件头迁移记录），客户端经组合根唯一装配
-/// 入口 `wire_provider_client` 构造。
+/// 入口 `wire_provider_assembly` 构造。
 fn build_port_with_capability(
     capability: ModelCapabilityData,
 ) -> (Arc<dyn ProviderPort>, ModelIdData) {
     let model = capability.model.clone();
-    let client = wire_provider_client(
+    let client = wire_provider_assembly(
         LlmConfigOptionsData {
             driver: "openai".to_string(),
             source_key: "test-source".to_string(),
@@ -69,10 +69,14 @@ fn build_port_with_capability(
             timeout_secs: 30,
             user_agent: Some("aemeath-test/1.0".to_string()),
         },
+        model.clone(),
         &TransportPool::new(),
         ReasoningLevel::Off,
+        Some(128_000),
+        8_192,
     )
-    .expect("test client must wire through the composition entry");
+    .expect("test client must wire through the composition entry")
+    .client;
     let caps = HashMap::from([(model.clone(), capability)]);
     (provider_port(client, caps), model)
 }
