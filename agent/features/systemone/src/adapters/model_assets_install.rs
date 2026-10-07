@@ -15,7 +15,11 @@
 //! 清理责任：正常失败/成功路径都在 `spawn_blocking` 内显式清理；
 //! [`StagingGuard`] / [`StagingDirectory`] 的 `Drop` 只是**同步 best-effort 兜底**
 //! （尽力同步清理元数据，失败仅记录日志、不重试），NEVER 作为常规清理手段——
-//! 正常 application 错误路径应显式清理（下载整合后 Task 5 会改为显式 await 清理）。
+//! 正常 application 错误路径应显式清理。进程中断（崩溃 / 取消）留下的 stale
+//! 暂存目录本轮不清理，后续由启动 / 下载前 sweep 承接，`Drop` 只是同步兜底。
+//!
+//! unix 权限边界：生产 root 与暂存目录创建 mode `0700`（owner 专属），
+//! 资产目标文件创建 mode `0600`（见同级 `fetch_http_destination.rs`）。
 
 use std::path::{Path, PathBuf};
 
@@ -74,7 +78,7 @@ pub(super) fn validate_install_root(root_dir: &Path) -> InstallRootState {
 /// typed 失败，**NEVER** 沿链接创建暂存或安装。
 pub(super) fn ensure_root_directory(root_dir: &Path) -> Result<(), ModelInstallError> {
     if let InstallRootState::Missing = validate_install_root(root_dir) {
-        std::fs::create_dir_all(root_dir).map_err(|error| {
+        create_root_directory(root_dir).map_err(|error| {
             ModelInstallError::StagingCreateFailed {
                 detail: format!("安装根目录创建失败：{error}"),
             }
@@ -83,8 +87,25 @@ pub(super) fn ensure_root_directory(root_dir: &Path) -> Result<(), ModelInstallE
     verify_root_directory(root_dir)
 }
 
-/// 要求 root 此刻已存在且形态合法（adopt / prepare 的 TOCTOU 复验：不创建、只校验）。
-fn require_existing_root(root_dir: &Path) -> Result<(), ModelInstallError> {
+/// 创建缺失的安装根目录（unix：DirBuilder mode `0700`，owner 专属；
+/// 非 unix：常规 `create_dir_all`）。仅作用于新建目录，NEVER chmod 既存目录。
+#[cfg(unix)]
+fn create_root_directory(root_dir: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(root_dir)
+}
+
+#[cfg(not(unix))]
+fn create_root_directory(root_dir: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(root_dir)
+}
+
+/// 要求 root 此刻已存在且形态合法（adopt / prepare / 端口绑定核对的 TOCTOU 复验：
+/// 不创建、只校验）。
+pub(super) fn require_existing_root(root_dir: &Path) -> Result<(), ModelInstallError> {
     match validate_install_root(root_dir) {
         InstallRootState::Directory => Ok(()),
         InstallRootState::Missing => Err(ModelInstallError::RootInvalid {
@@ -178,6 +199,14 @@ impl StagingDirectory {
         self.guard.path()
     }
 
+    /// 移交暂存目录路径（消费句柄并解除 RAII 清理责任）：
+    /// 供 [`ModelInstallerPort`](crate::ports::ModelInstallerPort) 实现把
+    /// 清理责任转移给端口层 [`ModelStagingArea`](crate::ports::ModelStagingArea)。
+    pub(crate) fn into_path(mut self) -> PathBuf {
+        self.guard.disarm();
+        self.guard.path().to_path_buf()
+    }
+
     /// 交出守卫（prepare / commit 消费；保持 armed）。
     fn into_guard(self) -> StagingGuard {
         self.guard
@@ -191,8 +220,8 @@ impl AsRef<Path> for StagingDirectory {
 }
 
 /// 创建暂存目录（blocking）：先 [`ensure_root_directory`]（root 缺失时安全创建，
-/// 创建后复验 root 本体非链接、是目录），再以 pid + 原子序号生成唯一名，
-/// 冲突则换下一个序号重试，超限失败。
+/// 创建后复验 root 本体非链接、是目录），再以 pid + 原子序号生成唯一名
+/// （unix 下创建 mode `0700`），冲突则换下一个序号重试，超限失败。
 ///
 /// 每次 `create_dir` 成功后**再复验一次 root 本体**（防「root 被并发换成符号链接」
 /// 的竞态）：复验不过立刻清理刚创建的目录并 typed 失败，
@@ -209,7 +238,7 @@ pub(super) fn create_staging_directory_sync(
             std::process::id()
         );
         let staging_path = root_dir.join(staging_name);
-        match std::fs::create_dir(&staging_path) {
+        match create_staging_dir(&staging_path) {
             Ok(()) => {
                 if let Err(root_error) = verify_root_directory(root_dir) {
                     discard_staging_directory(&staging_path);
@@ -230,23 +259,68 @@ pub(super) fn create_staging_directory_sync(
     })
 }
 
-/// 接管外部创建的暂存目录（blocking）：root 本体与暂存准入都通过才武装守卫。
+/// 创建单个暂存目录（unix：DirBuilder mode `0700`，owner 专属；
+/// 非 unix：常规 `create_dir`）。
+#[cfg(unix)]
+fn create_staging_dir(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new().mode(0o700).create(path)
+}
+
+#[cfg(not(unix))]
+fn create_staging_dir(path: &Path) -> std::io::Result<()> {
+    std::fs::create_dir(path)
+}
+
+/// 暂存目录全名精确契约：`.tmp-<engine_revision>-<pid>-<seq>`。
+///
+/// **不做 `starts_with` 前缀匹配**：暂存前缀、revision 段与 pid/seq 段都必须
+/// 逐字符精确（pid / seq 仅 ASCII 数字且非空，revision 段取自期望 manifest
+/// 的精确 engine revision），杜绝 `.tmp-<其他 revision>-…` 或
+/// `.tmp-<revision>-<garbage>` 之类的伪名混入安装 / 清理入口。
+pub(super) fn staging_name_matches(staging_name: &str, engine_revision: &str) -> bool {
+    let Some(after_prefix) = staging_name.strip_prefix(STAGING_DIR_PREFIX) else {
+        return false;
+    };
+    let Some(after_revision) = after_prefix
+        .strip_prefix(engine_revision)
+        .and_then(|rest| rest.strip_prefix('-'))
+    else {
+        return false;
+    };
+    let mut segments = after_revision.split('-');
+    match (segments.next(), segments.next(), segments.next()) {
+        (Some(pid), Some(sequence), None) => {
+            !pid.is_empty()
+                && pid.bytes().all(|byte| byte.is_ascii_digit())
+                && !sequence.is_empty()
+                && sequence.bytes().all(|byte| byte.is_ascii_digit())
+        }
+        _ => false,
+    }
+}
+
+/// 接管外部创建的暂存目录（blocking）：root 本体与暂存准入（含全名精确契约）
+/// 都通过才武装守卫。
 ///
 /// 被拒路径从不武装守卫，**NEVER** 被删除。
 pub(super) fn adopt_staging_directory(
     root_dir: &Path,
+    engine_revision: &str,
     staging_dir: PathBuf,
 ) -> Result<StagingDirectory, ModelInstallError> {
     // TOCTOU 复验：接管时 root 必须仍是真实目录，NEVER 沿符号链接接管暂存。
     require_existing_root(root_dir)?;
-    validate_staging_directory(root_dir, &staging_dir)?;
+    validate_staging_directory(root_dir, engine_revision, &staging_dir)?;
     Ok(StagingDirectory::armed(staging_dir))
 }
 
 /// 暂存目录准入（blocking）：必须是安装根的直接子目录（同文件系统 rename 的前提）、
-/// 带隐藏暂存前缀、真实存在的常规目录；否则拒绝且 **NEVER** 清理非自有路径。
+/// 全名精确匹配 `.tmp-<expected_revision>-<pid>-<seq>`、真实存在的常规目录；
+/// 否则拒绝且 **NEVER** 清理非自有路径。
 fn validate_staging_directory(
     root_dir: &Path,
+    engine_revision: &str,
     staging_dir: &Path,
 ) -> Result<(), ModelInstallError> {
     if staging_dir.parent() != Some(root_dir) {
@@ -262,9 +336,11 @@ fn validate_staging_directory(
             detail: format!("暂存目录名无效：{}", staging_dir.display()),
         });
     };
-    if !staging_name.starts_with(STAGING_DIR_PREFIX) {
+    if !staging_name_matches(staging_name, engine_revision) {
         return Err(ModelInstallError::StagingRejected {
-            detail: format!("暂存目录名必须以 {STAGING_DIR_PREFIX} 开头：{staging_name}"),
+            detail: format!(
+                "暂存目录名必须精确匹配 {STAGING_DIR_PREFIX}{engine_revision}-<pid>-<seq>（pid/seq 为 ASCII 数字）：{staging_name}"
+            ),
         });
     }
     match std::fs::symlink_metadata(staging_dir) {
@@ -299,7 +375,9 @@ pub(super) fn prepare_staged_install_sync(
         staging.guard.disarm(); // root 形态异常 → 暂存路径不可确认为自有，NEVER 删除
         return Err(root_error);
     }
-    if let Err(rejected) = validate_staging_directory(root_dir, &staging_path) {
+    if let Err(rejected) =
+        validate_staging_directory(root_dir, &expected_manifest.engine_revision, &staging_path)
+    {
         staging.guard.disarm(); // 准入复核失败 → 路径非自有，NEVER 删除
         return Err(rejected);
     }
@@ -529,16 +607,8 @@ fn rename_without_replace(_source: &Path, _target: &Path) -> std::io::Result<()>
     Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
 }
 
-/// 尽力同步清理自有暂存目录（blocking；清理失败仅记录，不掩盖原始错误）。
+/// 尽力同步清理自有暂存目录（blocking；共享实现在端口层，
+/// 清理失败仅记录日志、不掩盖原始错误）。
 fn discard_staging_directory(staging_dir: &Path) {
-    match std::fs::remove_dir_all(staging_dir) {
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-            log::warn!(
-                target: crate::LOG_TARGET,
-                "model_staging_cleanup_failed path={} error={error}",
-                staging_dir.display()
-            );
-        }
-        _ => {}
-    }
+    crate::ports::discard_staged_directory(staging_dir);
 }

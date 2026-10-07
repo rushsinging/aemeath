@@ -28,6 +28,8 @@ use crate::ports::{InstalledAssets, InvalidAssetKind, ModelAssetPort, ModelAsset
 
 #[path = "model_assets_install.rs"]
 mod install;
+#[path = "model_assets_installer_port.rs"]
+mod installer_port;
 #[path = "model_assets_verify.rs"]
 mod verify;
 
@@ -200,7 +202,8 @@ impl LocalModelAssetStore {
     /// root 缺失时安全创建后再复验本体。
     /// 暂存名带隐藏前缀，运行时解析（canonical revision 目录）永远无法识别它；
     /// downloader 经 [`StagingDirectory::path`] 拿到逐资产写入落点，
-    /// 未提交（或未走到显式清理点）即丢弃句柄时由 `Drop` 兜底清理。
+    /// 未提交（或未走到显式清理点）即丢弃句柄时由 `Drop` 兜底清理；
+    /// 进程中断留下的 stale 暂存由后续启动 / 下载前 sweep 承接（Drop 只是同步兜底）。
     pub async fn create_staging_directory(&self) -> Result<StagingDirectory, ModelInstallError> {
         let root_dir = self.root_dir.clone();
         let engine_revision = self.expected_manifest.engine_revision.clone();
@@ -210,16 +213,21 @@ impl LocalModelAssetStore {
         map_blocking_task_result(task.await)
     }
 
-    /// 接管一个外部创建的暂存目录：root 本体与暂存准入都通过才返回武装的 RAII 守卫。
+    /// 接管一个外部创建的暂存目录：root 本体与暂存准入（全名精确匹配
+    /// `.tmp-<expected_revision>-<pid>-<seq>`）都通过才返回武装的 RAII 守卫。
     ///
     /// root 不是真实目录（缺失 / 符号链接 / 非目录）→ [`ModelInstallError::RootInvalid`]；
-    /// 被拒路径（root 外、缺隐藏前缀、非常规目录或可疑符号链接）从不被武装，
+    /// 被拒路径（root 外、全名不符、非常规目录或可疑符号链接）从不被武装，
     /// **NEVER** 删除任何被拒路径。
     pub fn adopt_staging_directory(
         &self,
         staging_dir: PathBuf,
     ) -> Result<StagingDirectory, ModelInstallError> {
-        install::adopt_staging_directory(&self.root_dir, staging_dir)
+        install::adopt_staging_directory(
+            &self.root_dir,
+            &self.expected_manifest.engine_revision,
+            staging_dir,
+        )
     }
 
     /// 一步安装：复核暂存 → 写 canonical manifest → 完整重新校验 →

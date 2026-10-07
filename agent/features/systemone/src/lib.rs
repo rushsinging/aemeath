@@ -8,6 +8,8 @@
 //! | 数据 | `ScoringQuestion` / `ScoringAnswer` / `ScoringState` / `CalibrationLevel` | 消费场景（memory / skills / policy） |
 //! | 数据 | `ModelManifest` / `PointerHead` / `PointerHeadWeights` | 模型下载、存储与 embedded 评分装配 |
 //! | 端口 | `ScoringPort` / `CalibrationPort` / `ModelAssetPort` | 消费场景只依赖端口，NEVER 感知引擎型号 |
+//! | 端口 | `ArtifactFetcherPort` / `ModelInstallerPort` | 手动下载用例只依赖端口，application NEVER 反向依赖 adapter |
+//! | 服务 | `ModelDownloadService` / `DownloadOutcome` / `ModelDownloadError` | `aemeath systemone download` 编排（成功/幂等 → 0，失败 → 非零） |
 //! | 错误 | `ScoringUnavailable` / `PointerHeadError` / `ModelManifestError` | 消费点据此静默回退原路径 |
 //!
 //! 设计依据：`docs/design/02-modules/systemone/01-systemone-scoring.md`。
@@ -17,18 +19,23 @@ pub(crate) use constants::LOG_TARGET;
 mod state;
 
 mod adapters;
+mod application;
 mod domain;
 mod ports;
 
 pub use adapters::audited::{AuditedScoringAdapter, ScoringAuditEvent};
 pub use adapters::calibrated::CalibratedScoringAdapter;
 pub use adapters::calibration_store::{CalibrationArtifact, CalibrationStore};
+pub use adapters::fetch_http::HttpArtifactFetcher;
 pub use adapters::jev_http::JevHttpScoringAdapter;
 pub use adapters::model_assets::{
     LocalModelAssetStore, ModelInstallError, PreparedStagedInstall, StagedInstallCommit,
     StagingDirectory,
 };
 pub use adapters::null::NullScoringAdapter;
+pub use application::{
+    DownloadOutcome, ModelDownloadError, ModelDownloadErrorKind, ModelDownloadService,
+};
 
 pub use domain::{
     required_platform, AnswerRejected, CalibrationLevel, ModelAsset, ModelManifest,
@@ -37,8 +44,10 @@ pub use domain::{
     UnavailableKind,
 };
 pub use ports::{
-    CalibrationObservation, CalibrationPort, InstalledAssets, InvalidAssetKind, ModelAssetPort,
-    ModelAssetState, ScoringPort,
+    ArtifactFetchError, ArtifactFetchErrorKind, ArtifactFetcherPort, CalibrationObservation,
+    CalibrationPort, InstalledAssets, InvalidAssetKind, ModelAssetPort, ModelAssetState,
+    ModelInstallPortError, ModelInstallPortErrorKind, ModelInstallerPort, ModelStagingArea,
+    ScoringPort, StagedInstallOutcome,
 };
 
 /// 评分端口的生产装配链：JevHttp → Calibrated（读温度 artifact）→ Audited（落审计）。

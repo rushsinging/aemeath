@@ -50,3 +50,8 @@ pub(crate) const STAGING_DIR_PREFIX: &str = ".tmp-";
 
 /// 单次安装创建暂存目录的最大命名冲突重试次数（pid + 原子序号仍撞名时失败）。
 pub(crate) const STAGING_ATTEMPT_LIMIT: usize = 128;
+
+// --- System One 模型资产 HTTP 抓取（来源：adapters/fetch_http.rs，§4.2 手动下载）---
+
+/// 手动重定向的最大跟随跳数（逐跳仍校验 https；超过即 fail closed，禁止无界跳转）。
+pub(crate) const MAX_REDIRECT_HOPS: usize = 5;

@@ -430,9 +430,14 @@ async fn staging_directory_drop_and_adopt_guard_paths() {
     drop(staging);
     assert!(!staging_path.exists(), "guard Drop 应清理暂存目录");
 
-    // adopt：准入通过才武装，接管后 Drop 同样清理。
+    // adopt：准入通过才武装，接管后 Drop 同样清理
+    // （全名必须精确 `.tmp-<expected_revision>-<pid>-<seq>`）。
     std::fs::create_dir_all(&root_dir).expect("root 创建");
-    let adopted_path = root_dir.join(".tmp-adopted-external-1");
+    let adopted_name = format!(
+        "{STAGING_DIR_PREFIX}{TEST_ENGINE_REVISION}-{}-9999",
+        std::process::id()
+    );
+    let adopted_path = root_dir.join(adopted_name);
     std::fs::create_dir(&adopted_path).expect("手工暂存目录");
     let adopted = store
         .adopt_staging_directory(adopted_path.clone())
@@ -464,6 +469,29 @@ async fn staging_directory_drop_and_adopt_guard_paths() {
         "应为暂存准入拒绝：{error}"
     );
     assert!(plain.is_dir(), "被拒非暂存子目录 MUST 保持存在");
+
+    // adopt 拒绝「只带前缀但全名不精确」的伪暂存名（跨 revision / 垃圾 pid-seq），
+    // 且 NEVER 删除。
+    for forged_name in [
+        format!("{STAGING_DIR_PREFIX}other-revision-1-1"),
+        format!("{STAGING_DIR_PREFIX}{TEST_ENGINE_REVISION}-not-digits-1"),
+        format!("{STAGING_DIR_PREFIX}{TEST_ENGINE_REVISION}-1"),
+        format!("{STAGING_DIR_PREFIX}{TEST_ENGINE_REVISION}-1-1-2"),
+    ] {
+        let forged = root_dir.join(&forged_name);
+        std::fs::create_dir(&forged).expect("伪暂存目录");
+        let error = store
+            .adopt_staging_directory(forged.clone())
+            .expect_err("全名不精确必须拒绝");
+        assert!(
+            matches!(error, ModelInstallError::StagingRejected { .. }),
+            "应为暂存准入拒绝（{forged_name}）：{error}"
+        );
+        assert!(
+            forged.is_dir(),
+            "被拒伪暂存目录 MUST 保持存在：{forged_name}"
+        );
+    }
 }
 
 #[tokio::test]
