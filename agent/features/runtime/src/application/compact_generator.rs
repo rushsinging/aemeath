@@ -10,7 +10,7 @@ use context::{
     CompactGenerationFailureData, CompactGenerationFailureKind, CompactGenerationOutputData,
 };
 use futures::StreamExt;
-use provider::{InvocationRequestData, ProviderContentData, ProviderResponseChunk};
+use provider::{ProviderContentData, ProviderRequestData, ProviderResponseChunk};
 use share::message::Message;
 use share::reasoning::ReasoningLevel;
 use std::sync::Arc;
@@ -50,7 +50,7 @@ impl CompactGenerator for ProviderCompactGenerator {
         let target = self.resolver.resolve().map_err(compact_model_failure)?;
         let binding = target.binding();
         let max_output_tokens = self.max_output_tokens.min(binding.max_tokens.max(1));
-        let mut invocation = InvocationRequestData::new(
+        let mut invocation = ProviderRequestData::new(
             binding.model.model.clone(),
             request,
             max_output_tokens,
@@ -121,14 +121,14 @@ impl CompactGenerator for ProviderCompactGenerator {
     }
 }
 
-fn completion_reason(reason: &provider::ProviderStopReasonData) -> String {
+fn completion_reason(reason: &provider::ResponseStopReason) -> String {
     match reason {
-        provider::ProviderStopReasonData::EndTurn => "end_turn".to_string(),
-        provider::ProviderStopReasonData::ToolUse => "tool_use".to_string(),
-        provider::ProviderStopReasonData::MaxOutputTokens => "max_output_tokens".to_string(),
-        provider::ProviderStopReasonData::ContentFiltered => "content_filtered".to_string(),
-        provider::ProviderStopReasonData::StopSequence => "stop_sequence".to_string(),
-        provider::ProviderStopReasonData::Other(reason) => format!("other:{reason}"),
+        provider::ResponseStopReason::EndTurn => "end_turn".to_string(),
+        provider::ResponseStopReason::ToolUse => "tool_use".to_string(),
+        provider::ResponseStopReason::MaxOutputTokens => "max_output_tokens".to_string(),
+        provider::ResponseStopReason::ContentFiltered => "content_filtered".to_string(),
+        provider::ResponseStopReason::StopSequence => "stop_sequence".to_string(),
+        provider::ResponseStopReason::Other(reason) => format!("other:{reason}"),
     }
 }
 

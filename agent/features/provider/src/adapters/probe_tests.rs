@@ -11,14 +11,14 @@ use super::super::client::{LlmClient, ProviderClientSpecData};
 use crate::ports::LlmProvider;
 use crate::published_language::{
     ProviderContentData, ProviderError, ProviderErrorKind, ProviderResponseChunk,
-    ProviderResponseStream, ProviderStopReasonData,
+    ProviderResponseStream, ResponseStopReason,
 };
 
 /// v3 拆帧形态的探测成功序列：Content 片段 + 尾帧 Stop（无 usage 上报）。
 fn completed() -> Vec<ProviderResponseChunk> {
     vec![
         ProviderResponseChunk::Content(ProviderContentData::Text("OK".to_string())),
-        ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn),
+        ProviderResponseChunk::Stop(ResponseStopReason::EndTurn),
     ]
 }
 

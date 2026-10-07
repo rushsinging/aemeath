@@ -460,7 +460,7 @@ struct ExitWorktreeBeforeStopProvider {
 impl ScriptedLlmProvider for ExitWorktreeBeforeStopProvider {
     async fn scripted_invocation_stream(
         &self,
-        _request: &crate::ports::provider_port::InvocationRequestData,
+        _request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         self.workspace
             .control()

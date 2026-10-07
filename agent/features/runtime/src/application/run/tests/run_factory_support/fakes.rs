@@ -67,7 +67,7 @@ impl ProviderPort for FakeProviderPort {
 
     async fn invoke(
         &self,
-        _request: crate::ports::InvocationRequestData,
+        _request: crate::ports::ProviderRequestData,
         _cancellation: &dyn crate::ports::CancellationSignal,
     ) -> Result<crate::ports::ProviderResponseStream, ProviderError> {
         Err(ProviderError::cancelled())

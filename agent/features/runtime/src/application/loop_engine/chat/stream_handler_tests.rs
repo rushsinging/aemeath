@@ -1,9 +1,7 @@
 use super::events::{ChatEventSink, RuntimeRunContext, RuntimeStreamEvent};
 use super::stream_handler::{InvocationEventReducer, InvocationResponse};
 use crate::application::tool::coordination::identity::ToolIdentityRegistry;
-use provider::{
-    ProviderContentData, ProviderErrorKind, ProviderResponseChunk, ProviderStopReasonData,
-};
+use provider::{ProviderContentData, ProviderErrorKind, ProviderResponseChunk, ResponseStopReason};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Default)]
@@ -26,7 +24,7 @@ fn completion(output: Vec<ProviderContentData>) -> Vec<ProviderResponseChunk> {
         .into_iter()
         .map(ProviderResponseChunk::Content)
         .collect();
-    chunks.push(ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn));
+    chunks.push(ProviderResponseChunk::Stop(ResponseStopReason::EndTurn));
     chunks
 }
 
@@ -158,7 +156,7 @@ fn reducer_projects_block_transitions_without_callback_contract() {
         )))
         .unwrap();
     reducer
-        .apply(ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn))
+        .apply(ProviderResponseChunk::Stop(ResponseStopReason::EndTurn))
         .unwrap();
 
     let events = sink.0.lock().unwrap();

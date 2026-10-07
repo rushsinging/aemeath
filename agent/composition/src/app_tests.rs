@@ -164,7 +164,7 @@ impl runtime::ProviderPort for ReportedUsageProvider {
 
     async fn invoke(
         &self,
-        _request: provider::InvocationRequestData,
+        _request: provider::ProviderRequestData,
         _cancellation: &dyn runtime::CancellationSignal,
     ) -> Result<provider::ProviderResponseStream, ProviderError> {
         let invocation_index = self.invocation_count.fetch_add(1, Ordering::SeqCst);
@@ -187,7 +187,7 @@ impl runtime::ProviderPort for ReportedUsageProvider {
                     cache_read_tokens: None,
                     reasoning_tokens: None,
                 }),
-                provider::ProviderStopReasonData::ToolUse,
+                provider::ResponseStopReason::ToolUse,
             ),
             1 => (
                 vec![provider::ProviderContentData::Text(
@@ -200,14 +200,14 @@ impl runtime::ProviderPort for ReportedUsageProvider {
                     cache_read_tokens: Some(3),
                     reasoning_tokens: None,
                 }),
-                provider::ProviderStopReasonData::EndTurn,
+                provider::ResponseStopReason::EndTurn,
             ),
             _ => (
                 vec![provider::ProviderContentData::Text(
                     "main-agent complete".to_string(),
                 )],
                 None,
-                provider::ProviderStopReasonData::EndTurn,
+                provider::ResponseStopReason::EndTurn,
             ),
         };
         let mut chunks: Vec<provider::ProviderResponseChunk> = output

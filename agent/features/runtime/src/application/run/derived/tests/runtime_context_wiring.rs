@@ -309,7 +309,7 @@ impl tools::published::typed::TypedTool for SpyTool {
 async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     use crate::application::model::test_support::{test_binding_from_port, TestProviderPort};
     use provider::{
-        ProviderContentData, ProviderResponseChunk, ProviderStopReasonData, TokenUsageData,
+        ProviderContentData, ProviderResponseChunk, ResponseStopReason, TokenUsageData,
     };
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::mpsc;
@@ -383,7 +383,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
                         output_tokens: Some(3),
                         ..TokenUsageData::default()
                     }),
-                    ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn),
+                    ProviderResponseChunk::Stop(ResponseStopReason::EndTurn),
                 ])
             } else {
                 futures::stream::iter(vec![
@@ -397,7 +397,7 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
                         output_tokens: Some(8),
                         ..TokenUsageData::default()
                     }),
-                    ProviderResponseChunk::Stop(ProviderStopReasonData::ToolUse),
+                    ProviderResponseChunk::Stop(ResponseStopReason::ToolUse),
                 ])
             };
             Box::pin(async move { Ok(Box::pin(stream) as ProviderResponseStream) })
@@ -540,7 +540,7 @@ impl tools::published::typed::TypedTool for BlockingCancelTool {
 async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
     use crate::application::model::test_support::{test_binding_from_port, TestProviderPort};
     use provider::{
-        ProviderContentData, ProviderResponseChunk, ProviderStopReasonData, TokenUsageData,
+        ProviderContentData, ProviderResponseChunk, ResponseStopReason, TokenUsageData,
     };
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::mpsc;
@@ -590,7 +590,7 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
                         output_tokens: Some(8),
                         ..TokenUsageData::default()
                     }),
-                    ProviderResponseChunk::Stop(ProviderStopReasonData::ToolUse),
+                    ProviderResponseChunk::Stop(ResponseStopReason::ToolUse),
                 ])) as crate::ports::ProviderResponseStream)
             })
         },

@@ -1,6 +1,6 @@
 use provider::{
-    InvocationRequestData, ModelInfo, ProviderContentData, ProviderError, ProviderErrorKind,
-    ProviderResponse, ProviderResponseChunk, ProviderStopReasonData, TokenUsageData,
+    ModelInfo, ProviderContentData, ProviderError, ProviderErrorKind, ProviderRequestData,
+    ProviderResponse, ProviderResponseChunk, ResponseStopReason, TokenUsageData,
 };
 use share::message::Message;
 use share::reasoning::ReasoningLevel;
@@ -8,20 +8,20 @@ use share::reasoning::ReasoningLevel;
 #[test]
 fn crate_root_exposes_complete_provider_published_language_as_send_sync_values() {
     fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync::<InvocationRequestData>();
+    assert_send_sync::<ProviderRequestData>();
     assert_send_sync::<ModelInfo>();
     assert_send_sync::<ProviderContentData>();
     assert_send_sync::<ProviderError>();
     assert_send_sync::<ProviderErrorKind>();
     assert_send_sync::<ProviderResponse>();
     assert_send_sync::<ProviderResponseChunk>();
-    assert_send_sync::<ProviderStopReasonData>();
+    assert_send_sync::<ResponseStopReason>();
     assert_send_sync::<TokenUsageData>();
 }
 
 #[test]
 fn invocation_request_clone_shares_message_backing() {
-    let request = InvocationRequestData::new(
+    let request = ProviderRequestData::new(
         "contract-model".to_string(),
         vec![Message::user("history")],
         8_192,
@@ -37,7 +37,7 @@ fn invocation_request_clone_shares_message_backing() {
 fn crate_root_published_language_preserves_boundary_semantics() {
     let model = "contract-model".to_string();
 
-    let request = InvocationRequestData::new(model, Vec::new(), 8_192, ReasoningLevel::Medium);
+    let request = ProviderRequestData::new(model, Vec::new(), 8_192, ReasoningLevel::Medium);
     assert!(request.system.is_empty());
     assert!(request.tools.is_empty());
     assert!(!request.cancellation.is_cancelled());

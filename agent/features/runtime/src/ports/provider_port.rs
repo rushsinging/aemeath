@@ -16,10 +16,10 @@ use async_trait::async_trait;
 
 // Provider PL 类型 re-export —— 消费方只需 `use crate::ports::provider_port::*`。
 // 通过 provider:: 根导出访问，不直接引用 published_language 模块。
-// 新 PL StopReason 通过别名 ProviderStopReasonData 导出，此处还原为 StopReason。
+// 新 PL StopReason 通过别名 ResponseStopReason 导出，此处还原为 StopReason。
 pub use provider::{
-    InvocationRequestData, ModelInfo, ProviderError, ProviderResponseStream,
-    ProviderStopReasonData as StopReason, TokenUsageData,
+    ModelInfo, ProviderError, ProviderRequestData, ProviderResponseStream,
+    ResponseStopReason as StopReason, TokenUsageData,
 };
 
 #[cfg(test)]
@@ -69,7 +69,7 @@ pub trait ProviderPort: Send + Sync {
     /// 取消通过 `CancellationToken` 传播；取消后返回 `ProviderError::cancelled()`。
     async fn invoke(
         &self,
-        request: InvocationRequestData,
+        request: ProviderRequestData,
         cancellation: &dyn CancellationSignal,
     ) -> Result<ProviderResponseStream, ProviderError>;
 }
@@ -131,7 +131,7 @@ pub(crate) mod fake {
     impl ProviderPort for FakeProvider {
         async fn invoke(
             &self,
-            _request: InvocationRequestData,
+            _request: ProviderRequestData,
             cancellation: &dyn CancellationSignal,
         ) -> Result<ProviderResponseStream, ProviderError> {
             if cancellation.is_cancelled() {
@@ -221,7 +221,7 @@ pub(crate) mod fake {
         let cancel = CancellationToken::new();
         cancel.cancel();
 
-        let request = InvocationRequestData::new(
+        let request = ProviderRequestData::new(
             "test-model".to_string(),
             Vec::new(),
             8192,
@@ -239,7 +239,7 @@ pub(crate) mod fake {
     async fn invoke_returns_stream_with_correct_terminal_semantics() {
         let provider = FakeProvider::new();
         let cancel = CancellationToken::new();
-        let request = InvocationRequestData::new(
+        let request = ProviderRequestData::new(
             "test-model".to_string(),
             Vec::new(),
             8192,
@@ -277,7 +277,7 @@ pub(crate) mod fake {
         }
 
         let provider = FakeProvider::new();
-        let request = InvocationRequestData::new(
+        let request = ProviderRequestData::new(
             "test-model".to_string(),
             Vec::new(),
             8192,

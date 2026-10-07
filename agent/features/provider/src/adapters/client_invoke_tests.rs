@@ -10,9 +10,9 @@ use super::LlmClient;
 use crate::domain::capability::ReasoningLevel;
 use crate::ports::{LlmProvider, ResolvedInvocation};
 use crate::ModelInfo;
-use crate::ProviderStopReasonData as StopReason;
+use crate::ResponseStopReason as StopReason;
 use crate::{
-    InvocationRequestData, ProviderContentData, ProviderError, ProviderErrorKind,
+    ProviderContentData, ProviderError, ProviderErrorKind, ProviderRequestData,
     ProviderResponseChunk, TokenUsageData,
 };
 
@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 /// Snapshot of everything the fake provider observed in one `invocation_stream`
 /// call: the resolved `ResolvedInvocation` plus the converted system blocks and
 /// tool schemas. `LlmClient::invoke`'s job is to translate the provider-neutral
-/// `InvocationRequestData` into these provider-domain values; the tests
+/// `ProviderRequestData` into these provider-domain values; the tests
 /// assert that translation.
 #[derive(Debug, Default, Clone)]
 struct CapturedInvocation {
@@ -190,7 +190,7 @@ async fn invoke_aggregates_stream_into_provider_response() {
     let model = test_model_info();
 
     let request =
-        InvocationRequestData::new("fake-model".to_string(), vec![], 8192, ReasoningLevel::Off);
+        ProviderRequestData::new("fake-model".to_string(), vec![], 8192, ReasoningLevel::Off);
 
     let response = client.invoke(&model, &request).await.unwrap();
 
@@ -222,7 +222,7 @@ async fn invoke_stream_emits_content_then_usage_then_stop_frames() {
     let model = test_model_info();
 
     let request =
-        InvocationRequestData::new("fake-model".to_string(), vec![], 8192, ReasoningLevel::Off);
+        ProviderRequestData::new("fake-model".to_string(), vec![], 8192, ReasoningLevel::Off);
     let mut stream = client.invoke_stream(&model, &request).await.unwrap();
 
     let mut events = Vec::new();
@@ -264,8 +264,7 @@ async fn invoke_propagates_provider_error() {
         output_limit: None,
     };
 
-    let request =
-        InvocationRequestData::new(model.model.clone(), vec![], 8192, ReasoningLevel::Off);
+    let request = ProviderRequestData::new(model.model.clone(), vec![], 8192, ReasoningLevel::Off);
 
     let result = client.invoke(&model, &request).await;
     assert!(
@@ -285,7 +284,7 @@ async fn invoke_rejects_invalid_scope() {
 
     // max_output_tokens = 0 should trigger a scope validation error.
     let request =
-        InvocationRequestData::new("fake-model".to_string(), vec![], 0, ReasoningLevel::Off);
+        ProviderRequestData::new("fake-model".to_string(), vec![], 0, ReasoningLevel::Off);
 
     let result = client.invoke(&model, &request).await;
     assert!(
@@ -304,7 +303,7 @@ async fn invoke_converts_system_blocks_tools_and_uses_neutral_scope_model() {
     let model = test_model_info();
 
     let mut request =
-        InvocationRequestData::new("fake-model".to_string(), vec![], 8192, ReasoningLevel::Off);
+        ProviderRequestData::new("fake-model".to_string(), vec![], 8192, ReasoningLevel::Off);
     // 整段 system prompt（context/runtime 拼好），可缓存前缀止于最后一个
     // cache_break 块末尾（连接符归后缀段）。
     let static_prefix = "stable prefix first part\n\nstable prefix boundary";
@@ -362,7 +361,7 @@ async fn invoke_clamps_requested_reasoning_to_capability() {
     ));
 
     let request =
-        InvocationRequestData::new("fake-model".to_string(), vec![], 4096, ReasoningLevel::Max);
+        ProviderRequestData::new("fake-model".to_string(), vec![], 4096, ReasoningLevel::Max);
     let _ = client.invoke(&model, &request).await.unwrap();
 
     let c = captured.lock().expect("captured lock poisoned");
@@ -392,7 +391,7 @@ async fn invoke_invokes_provider_exactly_once() {
     let model = test_model_info();
 
     let request =
-        InvocationRequestData::new("fake-model".to_string(), vec![], 8192, ReasoningLevel::Off);
+        ProviderRequestData::new("fake-model".to_string(), vec![], 8192, ReasoningLevel::Off);
     let _response = client
         .invoke(&model, &request)
         .await
@@ -419,7 +418,7 @@ async fn invoke_returns_cancelled_when_signal_fires_during_establishment() {
     // 单通道取消：request.cancellation 是唯一取消载体（v2 C13——生产侧
     // runtime 以同一 token 注入 request 与 advisory 信号，语义同源）。
     let mut request =
-        InvocationRequestData::new("fake-model".to_string(), vec![], 8192, ReasoningLevel::Off);
+        ProviderRequestData::new("fake-model".to_string(), vec![], 8192, ReasoningLevel::Off);
     let cancel = CancellationToken::new();
     request.cancellation = cancel.clone();
     let client_for_task = client.clone();

@@ -320,7 +320,7 @@ impl ToolThenTextProvider {
 impl ScriptedLlmProvider for ToolThenTextProvider {
     async fn scripted_invocation_stream(
         &self,
-        request: &crate::ports::provider_port::InvocationRequestData,
+        request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         let call_num = {
             let mut count = self.call_count.lock().unwrap();
@@ -356,7 +356,7 @@ impl ScriptedLlmProvider for ToolThenTextProvider {
                                         output_tokens: Some(20),
                                         ..TokenUsageData::default()
                                     }),
-                ProviderResponseChunk::Stop(ProviderStopReasonData::ToolUse),
+                ProviderResponseChunk::Stop(ResponseStopReason::ToolUse),
             ])))
         } else {
             self.after_second.notify_one();
@@ -367,7 +367,7 @@ impl ScriptedLlmProvider for ToolThenTextProvider {
                     output_tokens: Some(3),
                     ..TokenUsageData::default()
                 }),
-                ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn),
+                ProviderResponseChunk::Stop(ResponseStopReason::EndTurn),
             ])))
         }
     }
@@ -402,7 +402,7 @@ impl TextOnlyProvider {
 impl ScriptedLlmProvider for TextOnlyProvider {
     async fn scripted_invocation_stream(
         &self,
-        request: &crate::ports::provider_port::InvocationRequestData,
+        request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         {
             let mut count = self.call_count.lock().unwrap();
@@ -422,7 +422,7 @@ impl ScriptedLlmProvider for TextOnlyProvider {
                 output_tokens: Some(3),
                 ..TokenUsageData::default()
             }),
-            ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn),
+            ProviderResponseChunk::Stop(ResponseStopReason::EndTurn),
         ])))
     }
 
@@ -1073,7 +1073,7 @@ impl StreamingToolDeltaProvider {
 impl ScriptedLlmProvider for StreamingToolDeltaProvider {
     async fn scripted_invocation_stream(
         &self,
-        request: &crate::ports::provider_port::InvocationRequestData,
+        request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         let call_num = {
             let mut count = self.call_count.lock().unwrap();
@@ -1114,7 +1114,7 @@ impl ScriptedLlmProvider for StreamingToolDeltaProvider {
                     })
                 }))
                 .chain(futures::stream::once(std::future::ready(
-                    ProviderResponseChunk::Stop(ProviderStopReasonData::ToolUse),
+                    ProviderResponseChunk::Stop(ResponseStopReason::ToolUse),
                 )));
             Ok(Box::pin(stream))
         } else {
@@ -1127,7 +1127,7 @@ impl ScriptedLlmProvider for StreamingToolDeltaProvider {
                     output_tokens: Some(3),
                     ..TokenUsageData::default()
                 }),
-                ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn),
+                ProviderResponseChunk::Stop(ResponseStopReason::EndTurn),
             ])))
         }
     }

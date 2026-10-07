@@ -56,7 +56,7 @@ pub async fn run_connectivity_probe(
         context_limit: None,
         output_limit: None,
     };
-    let mut request = crate::InvocationRequestData::new(
+    let mut request = crate::ProviderRequestData::new(
         client.model_name().to_string(),
         [Message::user("Reply with OK.")],
         1,

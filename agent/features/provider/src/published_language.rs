@@ -101,7 +101,7 @@ impl TokenUsageData {
 /// 统一停止原因。
 ///
 /// 注意：与 legacy `business::types::StopReason`（3 变体）不同。
-/// 对外 re-export 时使用别名 `ProviderStopReasonData` 以避免命名冲突。
+/// 对外 re-export 时使用别名 `ResponseStopReason` 以避免命名冲突。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StopReason {
     /// 模型自然结束回复。
@@ -119,7 +119,7 @@ pub enum StopReason {
 }
 
 /// 别名导出——contract.rs 用此名 re-export，避免与 legacy StopReason 冲突。
-pub use StopReason as ProviderStopReasonData;
+pub use StopReason as ResponseStopReason;
 
 // ─── Response（输出侧唯一契约：非流式终态 + 流式片段）──────────────
 
@@ -132,7 +132,7 @@ pub struct ProviderResponse {
     pub ok: bool,
     pub error: Option<ProviderError>,
     pub output: Vec<ProviderContentData>,
-    pub stop_reason: Option<ProviderStopReasonData>,
+    pub stop_reason: Option<ResponseStopReason>,
     pub token_usage: Option<TokenUsageData>,
     pub effective_reasoning: ReasoningLevel,
 }
@@ -145,7 +145,7 @@ pub enum ProviderResponseChunk {
     /// LLM token 用量（流尾）。
     Usage(TokenUsageData),
     /// 停止原因（流尾，正常闭合）。
-    Stop(ProviderStopReasonData),
+    Stop(ResponseStopReason),
     /// 失败终止帧。
     Error(ProviderError),
 }
@@ -326,13 +326,13 @@ impl std::fmt::Display for ProviderError {
 
 impl std::error::Error for ProviderError {}
 
-// ─── InvocationRequestData ──────────────────────────────────
+// ─── ProviderRequestData ──────────────────────────────────
 
 /// 一次 LLM 调用请求。
 ///
-/// 一个 `InvocationRequestData` 固定一个 model 和一份不可变 options。
+/// 一个 `ProviderRequestData` 固定一个 model 和一份不可变 options。
 #[derive(Debug, Clone)]
-pub struct InvocationRequestData {
+pub struct ProviderRequestData {
     /// 目标模型名（binding 已绑定具体客户端与 [`ModelInfo`]，请求只携带名字）。
     pub model: String,
     /// Runtime-owned cancellation token for this invocation.
@@ -358,7 +358,7 @@ pub struct InvocationRequestData {
     pub reasoning: ReasoningLevel,
 }
 
-impl InvocationRequestData {
+impl ProviderRequestData {
     /// 构造一个最小请求（无 system、无 tools）。
     pub fn new(
         model: String,

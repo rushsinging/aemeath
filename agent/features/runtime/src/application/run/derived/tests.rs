@@ -127,7 +127,7 @@ impl CapturingBuildFactory {
 impl ScriptedLlmProvider for CapturingProvider {
     async fn scripted_invocation_stream(
         &self,
-        request: &crate::ports::provider_port::InvocationRequestData,
+        request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         let mut captured = self.captured.lock().unwrap();
         captured.system = request.system.clone();
@@ -559,7 +559,7 @@ fn llm_output_log_preserves_per_invocation_elapsed_time() {
             }],
             metadata: None,
         },
-        stop_reason: provider::ProviderStopReasonData::EndTurn,
+        stop_reason: provider::ResponseStopReason::EndTurn,
         usage: crate::ports::TokenUsageData::default(),
     };
 
@@ -1709,7 +1709,7 @@ struct BlockingThenCancelledProvider {
 impl ScriptedLlmProvider for BlockingThenCancelledProvider {
     async fn scripted_invocation_stream(
         &self,
-        request: &crate::ports::provider_port::InvocationRequestData,
+        request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         {
             let mut guard = self.calls.lock().unwrap();
@@ -1743,7 +1743,7 @@ struct ContextRecordingProvider {
 impl ScriptedLlmProvider for ContextRecordingProvider {
     async fn scripted_invocation_stream(
         &self,
-        _request: &crate::ports::provider_port::InvocationRequestData,
+        _request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         self.seen.lock().unwrap().push(scoped_logging::capture());
         Err(ProviderError::fatal(ProviderErrorKind::Network, "recorded"))
@@ -1766,7 +1766,7 @@ struct ErrorProvider {
 impl ScriptedLlmProvider for ErrorProvider {
     async fn scripted_invocation_stream(
         &self,
-        _request: &crate::ports::provider_port::InvocationRequestData,
+        _request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         Err(self.error.clone())
     }

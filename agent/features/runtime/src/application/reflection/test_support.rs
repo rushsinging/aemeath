@@ -44,7 +44,7 @@ impl crate::ports::ProviderPort for StaticReflectionProvider {
 
     async fn invoke(
         &self,
-        _request: crate::ports::provider_port::InvocationRequestData,
+        _request: crate::ports::provider_port::ProviderRequestData,
         _cancel: &dyn crate::ports::provider_port::CancellationSignal,
     ) -> Result<
         crate::ports::provider_port::ProviderResponseStream,

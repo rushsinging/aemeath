@@ -262,7 +262,7 @@ impl crate::ports::ProviderPort for RecordingReflectionProvider {
 
     async fn invoke(
         &self,
-        request: crate::ports::provider_port::InvocationRequestData,
+        request: crate::ports::provider_port::ProviderRequestData,
         _cancel: &dyn crate::ports::provider_port::CancellationSignal,
     ) -> Result<
         crate::ports::provider_port::ProviderResponseStream,

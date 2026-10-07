@@ -84,7 +84,7 @@ async fn model_switch_reads_injected_snapshot_once() {
 // Does NOT construct a provider client; uses the runtime port's FakeProvider contract.
 fn test_factory() -> Arc<dyn ProviderFactory> {
     use crate::ports::provider_port::{
-        CancellationSignal, InvocationRequestData, ProviderError, ProviderErrorKind,
+        CancellationSignal, ProviderError, ProviderErrorKind, ProviderRequestData,
         ProviderResponseStream, ReasoningLevel,
     };
     use crate::ports::ProviderPort as ProviderPortTrait;
@@ -96,7 +96,7 @@ fn test_factory() -> Arc<dyn ProviderFactory> {
     impl ProviderPortTrait for TestPort {
         async fn invoke(
             &self,
-            _request: InvocationRequestData,
+            _request: ProviderRequestData,
             _cancellation: &dyn CancellationSignal,
         ) -> std::result::Result<ProviderResponseStream, ProviderError> {
             Err(ProviderError::fatal(

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use provider::composition::{LlmClient, ProviderClientSpecData};
 use provider::{
-    InvocationRequestData, ModelInfo, ProviderError, ProviderErrorKind, ProviderResponseStream,
+    ModelInfo, ProviderError, ProviderErrorKind, ProviderRequestData, ProviderResponseStream,
 };
 
 use runtime::{
@@ -46,7 +46,7 @@ pub fn provider_port(client: Arc<LlmClient>, model: ModelInfo) -> Arc<dyn Provid
 impl ProviderPort for ProviderAdapter {
     async fn invoke(
         &self,
-        request: InvocationRequestData,
+        request: ProviderRequestData,
         cancellation: &dyn runtime::CancellationSignal,
     ) -> Result<ProviderResponseStream, ProviderError> {
         // fast path：调用方信号已触发。

@@ -7,8 +7,8 @@
 //!
 //! | 组 | 实体与判定 |
 //! |---|---|
-//! | **输入（1）** | `InvocationRequestData`（model + max_output_tokens + reasoning + 整段 system prompt + static_prefix_len 缓存前缀分界 + messages + wire-ready tools + cancellation token 全内聚；判定：不更名 ProviderRequestData——现名已表意，更名无行为收益。Options/Scope 等中间形态已消失；#1861 v4 块级 system 块类型消除，拼接归 context/runtime） |
-//! | **输出（两类）** | 非流式 `ProviderResponse`（自带 ok/error，单通道）+ 流式 `ProviderResponseChunk`（Content/Usage/Stop/Error 帧，Error 即失败终止帧）→ `ProviderResponseStream`；载荷 `ProviderContentData`（终态块+流增量合并家族；tool call 以 `ToolCall{id,name,arguments}` / `ToolCallCompleted{index,id,name,arguments}` 命名字段内联——#1861 v4 tool call 独立载荷类型消除）/`ProviderStopReasonData`/`TokenUsageData`（LLM token 计量；audit 快照由 audit 域组装） |
+//! | **输入（1）** | `ProviderRequestData`（model + max_output_tokens + reasoning + 整段 system prompt + static_prefix_len 缓存前缀分界 + messages + wire-ready tools + cancellation token 全内聚；判定：不更名 ProviderRequestData——现名已表意，更名无行为收益。Options/Scope 等中间形态已消失；#1861 v4 块级 system 块类型消除，拼接归 context/runtime） |
+//! | **输出（两类）** | 非流式 `ProviderResponse`（自带 ok/error，单通道）+ 流式 `ProviderResponseChunk`（Content/Usage/Stop/Error 帧，Error 即失败终止帧）→ `ProviderResponseStream`；载荷 `ProviderContentData`（终态块+流增量合并家族；tool call 以 `ToolCall{id,name,arguments}` / `ToolCallCompleted{index,id,name,arguments}` 命名字段内联——#1861 v4 tool call 独立载荷类型消除）/`ResponseStopReason`/`TokenUsageData`（LLM token 计量；audit 快照由 audit 域组装） |
 //! | 模型元数据 | `ModelInfo`（单实体：身份 + 能力，config/catalog 外部数据在 provider 读侧的完整投影 + `supported_reasoning` 阶梯与 `resolve_reasoning` clamp 方法——#1861 v4 reasoning 能力数据类型摊平进实体；#1880 裁决：model 信息只有一个实体来源，provider 不负责写入） |
 //! | 工厂（2 入口） | `wire_provider_client`（主链路：config + 模型元数据 → `(client, 修正版 ModelInfo)`，阶梯由 client 推导覆盖）、`wire_test_provider_client`（connect 探测构造+执行合一） |
 //! | 构造面豁免 | `LlmClient`/`ProviderClientSpecData`/`TransportPool`——仅组合根桥接所需 |
@@ -44,8 +44,8 @@ mod ports;
 pub mod published_language;
 
 pub use published_language::{
-    InvocationRequestData, ModelInfo, ProviderContentData, ProviderError, ProviderErrorKind,
-    ProviderResponse, ProviderResponseChunk, ProviderResponseStream, ProviderStopReasonData,
+    ModelInfo, ProviderContentData, ProviderError, ProviderErrorKind, ProviderRequestData,
+    ProviderResponse, ProviderResponseChunk, ProviderResponseStream, ResponseStopReason,
     TokenUsageData,
 };
 

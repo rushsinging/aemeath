@@ -119,11 +119,11 @@ async fn call_provider(
     prompt: &str,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> ReflectionExecutionResultType<(String, u32, u32)> {
-    use crate::ports::provider_port::InvocationRequestData;
+    use crate::ports::provider_port::ProviderRequestData;
 
     // 整段 system prompt 直收（#1861 v4）；反射提示词不参与 prompt caching
     // ——static_prefix_len 保持 0（原 Text 块语义等价）。
-    let request = InvocationRequestData {
+    let request = ProviderRequestData {
         model: invocation.model.model.clone(),
         cancellation: cancel.clone(),
         messages: vec![share::message::Message::user(prompt)].into(),

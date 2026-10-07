@@ -3,7 +3,7 @@ use crate::application::loop_engine::chat::events::{
 };
 use crate::application::tool::coordination::identity::ToolIdentityRegistry;
 use crate::ports::TokenUsageData;
-use provider::{ProviderContentData, ProviderResponseChunk, ProviderStopReasonData};
+use provider::{ProviderContentData, ProviderResponseChunk, ResponseStopReason};
 use share::message::{ContentBlock, Message, Role};
 use std::sync::{Arc, Mutex};
 
@@ -18,7 +18,7 @@ pub struct InvocationResponse {
     /// Token usage snapshot from the `Usage` frames (optional fields, `None` = unreported).
     pub usage: TokenUsageData,
     /// Stop reason reported by the provider `Stop` frame.
-    pub stop_reason: ProviderStopReasonData,
+    pub stop_reason: ResponseStopReason,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -523,7 +523,7 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
 mod invocation_reducer_tests {
     use super::*;
     use crate::application::loop_engine::chat::events::EventFuture;
-    use provider::{ProviderError, ProviderStopReasonData};
+    use provider::{ProviderError, ResponseStopReason};
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
@@ -560,12 +560,12 @@ mod invocation_reducer_tests {
             .unwrap()
             .is_none());
         let response = reducer
-            .apply(ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn))
+            .apply(ProviderResponseChunk::Stop(ResponseStopReason::EndTurn))
             .unwrap()
             .expect("stop frame produces response");
         assert_eq!(response.assistant_message.text_content(), "hi");
         assert_eq!(response.usage.input_tokens, Some(2));
-        assert_eq!(response.stop_reason, ProviderStopReasonData::EndTurn);
+        assert_eq!(response.stop_reason, ResponseStopReason::EndTurn);
         assert!(matches!(
             events.lock().unwrap().first(),
             Some(RuntimeStreamEvent::AssistantTextDelta { delta, .. }) if delta == "hi"
@@ -589,7 +589,7 @@ mod invocation_reducer_tests {
             .unwrap()
             .is_none());
         let response = reducer
-            .apply(ProviderResponseChunk::Stop(ProviderStopReasonData::ToolUse))
+            .apply(ProviderResponseChunk::Stop(ResponseStopReason::ToolUse))
             .unwrap()
             .expect("stop frame produces response");
         assert!(matches!(
@@ -626,7 +626,7 @@ mod invocation_reducer_tests {
             ))
             .unwrap();
         let response = reducer
-            .apply(ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn))
+            .apply(ProviderResponseChunk::Stop(ResponseStopReason::EndTurn))
             .expect_err("thinking-only output is not actionable");
         assert_eq!(response.kind, provider::ProviderErrorKind::Protocol);
         // 只投影一次 thinking delta。

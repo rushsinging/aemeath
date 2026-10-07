@@ -15,7 +15,7 @@ impl runtime::ProviderFactory for TestProviderFactory {
 
             async fn invoke(
                 &self,
-                _request: provider::InvocationRequestData,
+                _request: provider::ProviderRequestData,
                 _cancellation: &dyn runtime::CancellationSignal,
             ) -> Result<provider::ProviderResponseStream, provider::ProviderError> {
                 Err(provider::ProviderError::fatal(

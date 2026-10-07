@@ -14,7 +14,7 @@ use crate::adapters::wire::*;
 use crate::domain::capability::ReasoningLevel;
 use crate::{
     ProviderContentData, ProviderError, ProviderErrorKind, ProviderResponseChunk,
-    ProviderResponseStream, ProviderStopReasonData, TokenUsageData,
+    ProviderResponseStream, ResponseStopReason, TokenUsageData,
 };
 use futures_util::StreamExt;
 use reqwest::Response;
@@ -406,7 +406,7 @@ pub async fn parse_stream(
         reasoning_tokens: None,
         total_tokens: None,
     };
-    let mut stop_reason = ProviderStopReasonData::EndTurn;
+    let mut stop_reason = ResponseStopReason::EndTurn;
 
     let mut last_event_time: Option<std::time::Instant> = None;
     let mut tool_index: usize = 0;
@@ -613,11 +613,11 @@ pub async fn parse_stream(
             } => {
                 if let Some(reason) = delta.stop_reason {
                     stop_reason = match reason.as_str() {
-                        "end_turn" => ProviderStopReasonData::EndTurn,
-                        "tool_use" => ProviderStopReasonData::ToolUse,
-                        "max_tokens" => ProviderStopReasonData::MaxOutputTokens,
-                        "stop_sequence" => ProviderStopReasonData::StopSequence,
-                        other => ProviderStopReasonData::Other(other.to_string()),
+                        "end_turn" => ResponseStopReason::EndTurn,
+                        "tool_use" => ResponseStopReason::ToolUse,
+                        "max_tokens" => ResponseStopReason::MaxOutputTokens,
+                        "stop_sequence" => ResponseStopReason::StopSequence,
+                        other => ResponseStopReason::Other(other.to_string()),
                     };
                 }
                 if let Some(du) = delta_usage {

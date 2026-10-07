@@ -56,7 +56,7 @@ struct StepCancelledStreamingToolProvider {
 impl ScriptedLlmProvider for StepCancelledStreamingToolProvider {
     async fn scripted_invocation_stream(
         &self,
-        request: &crate::ports::provider_port::InvocationRequestData,
+        request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         let invocation_number = {
             let mut count = self.invocation_count.lock().unwrap();
@@ -66,7 +66,7 @@ impl ScriptedLlmProvider for StepCancelledStreamingToolProvider {
         if invocation_number > 1 {
             return Ok(Box::pin(futures::stream::iter(vec![
                 ProviderResponseChunk::Content(ProviderContentData::Text("after cancellation".to_string())),
-                ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn),
+                ProviderResponseChunk::Stop(ResponseStopReason::EndTurn),
             ])));
         }
         let provider_id = format!("toolu_{}_cancel", self.tool_name);
@@ -86,7 +86,7 @@ impl ScriptedLlmProvider for StepCancelledStreamingToolProvider {
         ])
         .chain(futures::stream::once(async move {
             cancel.cancelled().await;
-            ProviderResponseChunk::Stop(ProviderStopReasonData::ToolUse)
+            ProviderResponseChunk::Stop(ResponseStopReason::ToolUse)
         }));
         Ok(Box::pin(stream))
     }
@@ -307,7 +307,7 @@ impl StreamingToolRetryProvider {
 impl ScriptedLlmProvider for StreamingToolRetryProvider {
     async fn scripted_invocation_stream(
         &self,
-        request: &crate::ports::provider_port::InvocationRequestData,
+        request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         let call_num = {
             let mut count = self.call_count.lock().unwrap();
@@ -354,7 +354,7 @@ impl ScriptedLlmProvider for StreamingToolRetryProvider {
                     output_tokens: Some(3),
                     ..TokenUsageData::default()
                 }),
-                ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn),
+                ProviderResponseChunk::Stop(ResponseStopReason::EndTurn),
             ])))
         }
     }
@@ -464,7 +464,7 @@ impl StreamingToolRetryOrphanProvider {
 impl ScriptedLlmProvider for StreamingToolRetryOrphanProvider {
     async fn scripted_invocation_stream(
         &self,
-        request: &crate::ports::provider_port::InvocationRequestData,
+        request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         let call_num = {
             let mut count = self.call_count.lock().unwrap();
@@ -517,7 +517,7 @@ impl ScriptedLlmProvider for StreamingToolRetryOrphanProvider {
                     arguments: serde_json::json!({"marker": "pair-b"}),
                 }),
                 ProviderResponseChunk::Usage(usage().unwrap_or_default()),
-                ProviderResponseChunk::Stop(ProviderStopReasonData::ToolUse),
+                ProviderResponseChunk::Stop(ResponseStopReason::ToolUse),
             ]);
             Ok(Box::pin(stream))
         } else {
@@ -527,7 +527,7 @@ impl ScriptedLlmProvider for StreamingToolRetryOrphanProvider {
                     "turn complete".to_string(),
                 )),
                 ProviderResponseChunk::Usage(usage().unwrap_or_default()),
-                ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn),
+                ProviderResponseChunk::Stop(ResponseStopReason::EndTurn),
             ])))
         }
     }

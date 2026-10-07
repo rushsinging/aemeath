@@ -381,7 +381,7 @@ impl LlmClient {
     pub async fn invoke(
         &self,
         model: &crate::ModelInfo,
-        request: &crate::InvocationRequestData,
+        request: &crate::ProviderRequestData,
     ) -> Result<crate::ProviderResponse, crate::ProviderError> {
         use crate::published_language::{ProviderContentData, ProviderResponseChunk};
         use crate::ProviderError;
@@ -457,13 +457,13 @@ impl LlmClient {
         Ok(response)
     }
 
-    /// 流式请求入口：runtime PL 的 [`InvocationRequestData`] 在 crate 内
+    /// 流式请求入口：runtime PL 的 [`ProviderRequestData`] 在 crate 内
     /// 完成 reasoning clamp、scope 构造、system block / tool schema 转换与
     /// 取消竞速（原 composition ProviderAdapter 编排收编）。
     pub async fn invoke_stream(
         &self,
         model: &crate::ModelInfo,
-        request: &crate::InvocationRequestData,
+        request: &crate::ProviderRequestData,
     ) -> Result<crate::ProviderResponseStream, crate::ProviderError> {
         use crate::ProviderError;
 

@@ -21,7 +21,7 @@
 
 use super::*;
 use provider::composition::{wire_provider_client, ProviderClientSpecData, TransportPool};
-use provider::{InvocationRequestData, ModelInfo, ProviderErrorKind};
+use provider::{ModelInfo, ProviderErrorKind, ProviderRequestData};
 use share::reasoning::ReasoningLevel;
 use tokio_util::sync::CancellationToken;
 
@@ -85,7 +85,7 @@ fn factory_returns_provider_port_that_is_send_sync() {
 async fn invoke_returns_cancelled_when_signal_already_set() {
     let (port, model) = build_port();
 
-    let request = InvocationRequestData::new(model.model, vec![], 8192, ReasoningLevel::Off);
+    let request = ProviderRequestData::new(model.model, vec![], 8192, ReasoningLevel::Off);
     let cancel = CancellationToken::new();
     cancel.cancel();
 

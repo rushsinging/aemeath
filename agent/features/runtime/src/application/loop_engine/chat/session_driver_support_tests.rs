@@ -211,7 +211,7 @@ use futures::StreamExt;
 use hook::HookDispatcher;
 use provider::{
     ProviderContentData, ProviderResponseChunk, ProviderResponseStream,
-    ProviderError, ProviderErrorKind, ProviderStopReasonData,
+    ProviderError, ProviderErrorKind, ResponseStopReason,
     TokenUsageData,
 };
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
@@ -861,7 +861,7 @@ struct TwoTurnProvider;
 impl ScriptedLlmProvider for TwoTurnProvider {
     async fn scripted_invocation_stream(
         &self,
-        request: &crate::ports::provider_port::InvocationRequestData,
+        request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         let text = if request
             .messages
@@ -909,7 +909,7 @@ impl SequenceProvider {
 impl ScriptedLlmProvider for SequenceProvider {
     async fn scripted_invocation_stream(
         &self,
-        request: &crate::ports::provider_port::InvocationRequestData,
+        request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         self.requests
             .lock()
@@ -999,7 +999,7 @@ impl GatedProvider {
 impl ScriptedLlmProvider for GatedProvider {
     async fn scripted_invocation_stream(
         &self,
-        request: &crate::ports::provider_port::InvocationRequestData,
+        request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         // 先 enable 再记录请求：`request_count >= 1` 必然意味着 waiter 已注册，
         // 调用方的 `notify_one` 不会因时序丢失（notify_one 同时会存 permit）。

@@ -1,7 +1,7 @@
 use super::*;
 use crate::application::model::test_support::text_completion_stream;
 use crate::ports::provider_port::{
-    InvocationRequestData, ModelInfo, ProviderError, ProviderResponseStream,
+    ModelInfo, ProviderError, ProviderRequestData, ProviderResponseStream,
 };
 use async_trait::async_trait;
 use memory::api::reflection::{ReflectionRecord, ReflectionSafeSummary};
@@ -19,7 +19,7 @@ impl ProviderPort for StaticProvider {
 
     async fn invoke(
         &self,
-        _request: InvocationRequestData,
+        _request: ProviderRequestData,
         _cancel: &dyn crate::ports::provider_port::CancellationSignal,
     ) -> Result<ProviderResponseStream, ProviderError> {
         Ok(text_completion_stream(self.response.clone(), 11, 22))

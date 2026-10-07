@@ -227,13 +227,13 @@ fn raw_usage_snapshot_default_all_none() {
 
 #[test]
 fn invocation_request_new_has_empty_tools() {
-    let req = InvocationRequestData::new("m".to_string(), Vec::new(), 8192, ReasoningLevel::Off);
+    let req = ProviderRequestData::new("m".to_string(), Vec::new(), 8192, ReasoningLevel::Off);
     assert!(req.tools.is_empty());
 }
 
 #[test]
 fn invocation_request_new_has_empty_system() {
-    let req = InvocationRequestData::new("m".to_string(), Vec::new(), 8192, ReasoningLevel::Off);
+    let req = ProviderRequestData::new("m".to_string(), Vec::new(), 8192, ReasoningLevel::Off);
     assert!(req.system.is_empty());
 }
 

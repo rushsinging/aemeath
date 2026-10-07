@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use futures::stream;
 use provider::{
     ProviderContentData, ProviderError, ProviderResponseChunk, ProviderResponseStream,
-    ProviderStopReasonData, TokenUsageData,
+    ResponseStopReason, TokenUsageData,
 };
 
 pub(crate) fn text_completion_stream(
@@ -21,7 +21,7 @@ pub(crate) fn text_completion_stream(
             output_tokens: Some(output_tokens),
             ..TokenUsageData::default()
         }),
-        ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn),
+        ProviderResponseChunk::Stop(ResponseStopReason::EndTurn),
     ]))
 }
 
@@ -53,7 +53,7 @@ impl ScriptedInvocationProvider {
 pub(crate) trait ScriptedLlmProvider: Send + Sync {
     async fn scripted_invocation_stream(
         &self,
-        request: &crate::ports::provider_port::InvocationRequestData,
+        request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError>;
 
     fn model_name(&self) -> &str {
@@ -69,7 +69,7 @@ pub(crate) trait ScriptedLlmProvider: Send + Sync {
 impl ScriptedLlmProvider for ScriptedInvocationProvider {
     async fn scripted_invocation_stream(
         &self,
-        _request: &crate::ports::provider_port::InvocationRequestData,
+        _request: &crate::ports::provider_port::ProviderRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         *self.calls.lock().unwrap() += 1;
         let events = self
@@ -92,14 +92,14 @@ impl ScriptedLlmProvider for ScriptedInvocationProvider {
 
 /// 空输出成功闭合帧序列：仅 `Stop` 终止帧（`usage: None` 等价 default）。
 pub(crate) fn empty_completion() -> Vec<ProviderResponseChunk> {
-    vec![ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn)]
+    vec![ProviderResponseChunk::Stop(ResponseStopReason::EndTurn)]
 }
 
 /// 文本成功闭合帧序列：`Content(Text)` + `Stop`。
 pub(crate) fn successful_completion(text: &str) -> Vec<ProviderResponseChunk> {
     vec![
         ProviderResponseChunk::Content(ProviderContentData::Text(text.to_string())),
-        ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn),
+        ProviderResponseChunk::Stop(ResponseStopReason::EndTurn),
     ]
 }
 
@@ -154,12 +154,12 @@ pub(crate) async fn advance_until_retry_condition(
 /// dispatch. Tests use this to keep `Sequence`/`recording`/`error`/`cancel` behavior
 /// without writing bespoke provider port impls.
 ///
-/// Uses `for<'a>` HRTB so closures can capture the borrowed `&InvocationRequestData`
+/// Uses `for<'a>` HRTB so closures can capture the borrowed `&ProviderRequestData`
 /// / `&dyn CancellationSignal` into their returned `Future + 'a`.
 pub(crate) type TestInvocationFn = Arc<
     dyn for<'a> Fn(
             usize,
-            &'a crate::ports::provider_port::InvocationRequestData,
+            &'a crate::ports::provider_port::ProviderRequestData,
             &'a dyn crate::ports::provider_port::CancellationSignal,
         ) -> std::pin::Pin<
             Box<
@@ -216,7 +216,7 @@ impl crate::ports::ProviderPort for TestProviderPort {
 
     async fn invoke(
         &self,
-        request: crate::ports::provider_port::InvocationRequestData,
+        request: crate::ports::provider_port::ProviderRequestData,
         cancellation: &dyn crate::ports::provider_port::CancellationSignal,
     ) -> Result<
         crate::ports::provider_port::ProviderResponseStream,
@@ -348,7 +348,7 @@ impl ScriptedProviderPortAdapter {
 impl crate::ports::ProviderPort for ScriptedProviderPortAdapter {
     async fn invoke(
         &self,
-        request: crate::ports::provider_port::InvocationRequestData,
+        request: crate::ports::provider_port::ProviderRequestData,
         cancellation: &dyn crate::ports::provider_port::CancellationSignal,
     ) -> Result<
         crate::ports::provider_port::ProviderResponseStream,
