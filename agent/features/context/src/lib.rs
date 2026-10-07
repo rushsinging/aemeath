@@ -77,11 +77,12 @@ pub(crate) use application::{SessionLoadError, SessionPersistenceService};
 #[cfg(test)]
 pub(crate) use domain::session::{
     project_dir_segment, AcceptedInputRecord, ActiveCompactMarker, ChatSegment, CommittedRunSlice,
-    CommittedRunStep, FinalizedOutcomeRecord, RunStepCursor, SessionCodec, SessionCodecError,
-    SessionCommitPlan, SessionGenerationCodec, SessionGenerationManifest,
-    SessionGenerationWireError, SessionHistory, CURRENT_SESSION_SCHEMA_VERSION,
+    CommittedRunStep, CommittedStep, CommittedStepMessages, FinalizedOutcomeRecord, RunStepCursor,
+    SessionCodec, SessionCodecError, SessionCommitPlan, SessionGenerationCodec,
+    SessionGenerationManifest, SessionGenerationWireError, SessionHistory,
+    CURRENT_SESSION_SCHEMA_VERSION,
 };
-pub use domain::session::{CanonicalSession, CommittedStep, CommittedStepMessages, SnapshotState};
+pub use domain::session::{CanonicalSession, SnapshotState};
 #[cfg(test)]
 pub(crate) use domain::ContextMessages;
 pub use domain::{
@@ -97,9 +98,9 @@ pub use domain::{
     ContextWindowData, DecisionReason, FinalizeCause, InvocationReminderData, Language,
     ManualCompactRequestData, MemoryRecallEntryData, RunStepId, SessionId, StepReceiptData,
     SystemPromptSpecData, TaskProgressReminderData, TaskProgressReminderItemData,
-    TaskProgressStatus, ToolCallIdentityData, ToolCallReceiptData, ToolCallState,
-    ToolOutcomeKindData, ToolReceiptMutationData, ToolReceiptMutationError,
-    ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
+    TaskProgressStatus, ToolCallIdentityData, ToolCallReceiptData, ToolOutcomeKindData,
+    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
+    ToolTerminalReceiptData,
 };
 #[cfg(test)]
 pub(crate) use ports::{

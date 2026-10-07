@@ -1,6 +1,7 @@
+use crate::domain::ToolCallState;
 use crate::{
-    CleanupConfirmation, SessionId, ToolCallIdentityData, ToolCallReceiptData, ToolCallState,
-    ToolOutcomeKindData, ToolReceiptMutationData, ToolTerminalReceiptData,
+    CleanupConfirmation, SessionId, ToolCallIdentityData, ToolCallReceiptData, ToolOutcomeKindData,
+    ToolReceiptMutationData, ToolTerminalReceiptData,
 };
 use sdk::{RunId, RunStepId};
 

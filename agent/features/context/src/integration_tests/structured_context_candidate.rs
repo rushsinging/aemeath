@@ -145,7 +145,7 @@ fn terminal_receipt(
             agent: false,
         },
         input_preview: input.to_string(),
-        state: crate::ToolCallState::Terminal(ToolTerminalReceiptData::new(
+        state: crate::domain::ToolCallState::Terminal(ToolTerminalReceiptData::new(
             outcome,
             "terminal",
             CleanupConfirmation::NotApplicable,

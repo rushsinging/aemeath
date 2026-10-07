@@ -348,7 +348,7 @@ fn finalized_tool_step(
                 agent: false,
             },
             input_preview: input.to_string(),
-            state: crate::ToolCallState::Terminal(ToolTerminalReceiptData::new(
+            state: crate::domain::ToolCallState::Terminal(ToolTerminalReceiptData::new(
                 ToolOutcomeKindData::Success,
                 "terminal",
                 CleanupConfirmation::NotApplicable,
