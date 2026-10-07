@@ -74,39 +74,9 @@ fn wire_runtime_tool_assembly(
     })
 }
 
-/// System One 评分端口的场景分配：按场景开关分发给 memory rerank 与 memory recall
-/// 消费点（skill match / policy triage 场景的端口接线随各自场景任务补充）。
-struct ScoringPortAssignment {
-    for_memory_rerank: Option<Arc<dyn systemone::ScoringPort>>,
-    for_memory_recall: Option<Arc<dyn systemone::ScoringPort>>,
-}
-
-/// System One 评分端口装配。评分 HTTP 生产工厂已随设计
-/// `docs/design/02-modules/systemone/01-systemone-scoring.md` §4.3 退役：
-/// embedded 装配接入前，任一场景开关开启时端口也暂为 `None`，消费点回退原有
-/// 词法/启发式路径；**NEVER** 在此构造 HTTP 评分客户端作 fallback。
-/// 全场景开关关闭时零成本（不检查模型、不加载引擎）。
-fn assign_scoring_ports(scoring: &share::config::ScoringConfig) -> ScoringPortAssignment {
-    let any_scenario_enabled = scoring.memory_rerank
-        || scoring.memory_recall
-        || scoring.skill_match
-        || scoring.policy_triage;
-    if any_scenario_enabled {
-        log::info!(
-            target: crate::LOG_TARGET,
-            "systemone scoring switches enabled rerank={} recall={} skill={} triage={}; \
-             embedded 装配未接入，端口暂为 None（消费点回退原路径）",
-            scoring.memory_rerank,
-            scoring.memory_recall,
-            scoring.skill_match,
-            scoring.policy_triage,
-        );
-    }
-    ScoringPortAssignment {
-        for_memory_rerank: None,
-        for_memory_recall: None,
-    }
-}
+// System One 评分端口装配入口已收窄到 `crate::systemone`（embedded 链 +
+// typed startup outcome）：本文件只消费装配结果，NEVER 自行构造评分端口、
+// NEVER 构造 HTTP 评分客户端作 fallback（HTTP 生产工厂已随设计 §4.3 退役）。
 
 pub(crate) struct SessionRuntimeAssembly {
     pub client: AgentClientImpl,
@@ -227,9 +197,18 @@ pub(crate) async fn from_args_with_gateways(
     // 动态解析调用模型（未配置时跟随当前会话模型）。context_factory 依赖
     // initial_binding，因此 MainSession 装配延后到 provider 构建之后。
     let agents_dir_buf = agents_dir.to_path_buf();
-    // System One 评分端口：全场景开关关闭时零成本；开关开启也只经
-    // assign_scoring_ports 装配（见其契约与对应 contract test）。
-    let scoring_ports = assign_scoring_ports(snapshot.scoring());
+    // System One 评分端口：全场景开关关闭时零成本（不读模型、不解析 manifest、
+    // 不启动 worker）；开启时经 embedded 链装配并取 typed startup outcome——
+    // 本 runtime 只消费该 outcome（日志），启动提醒透传由后续任务接手。
+    let scoring_assembly = crate::systemone::assemble_scoring_ports(snapshot.scoring()).await;
+    match &scoring_assembly.outcome {
+        crate::systemone::ScoringStartupOutcome::Disabled => {}
+        outcome => log::info!(
+            target: crate::LOG_TARGET,
+            "systemone scoring startup: {outcome}"
+        ),
+    }
+    let scoring_ports = scoring_assembly.assignment;
     let compact_generator =
         runtime::ProviderCompactGenerator::new(Arc::new(runtime::CompactModelResolver::new(
             config.reader(),

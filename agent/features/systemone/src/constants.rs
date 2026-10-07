@@ -15,6 +15,16 @@ pub(crate) const OBSERVATIONS_FILE: &str = "observations.jsonl";
 /// 温度校准 artifact 文件名（{scoring_dir}/calibration.json）。
 pub(crate) const CALIBRATION_FILE: &str = "calibration.json";
 
+/// 评分审计事件文件名（{scoring_dir}/audit.jsonl）。
+#[cfg(any(feature = "embedded", feature = "http-adapter", test))]
+pub(crate) const AUDIT_FILE: &str = "audit.jsonl";
+
+/// 本构建是否提供 embedded 生产装配（feature `embedded` 编译开关）。
+///
+/// composition 据此在装配前判定 EmbeddedUnavailable（typed startup outcome），
+/// 保证「feature 关闭」路径连 manifest 都不解析、也不链接 llama.cpp。
+pub const EMBEDDED_SCORING_AVAILABLE: bool = cfg!(feature = "embedded");
+
 // --- System One 模型 manifest 契约（来源：docs/design/02-modules/systemone/01-systemone-scoring.md §4.2）---
 
 /// manifest 当前 schema 版本。

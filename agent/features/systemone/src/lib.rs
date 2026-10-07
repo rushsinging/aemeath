@@ -4,7 +4,7 @@
 //!
 //! | 类 | 实体 | 消费者 |
 //! |---|---|---|
-//! | `wire_*` 工厂 | `wire_http_scoring_port`（feature `http-adapter`，测试 / eval 对分专用；生产装配随后续 embedded 接线补充） | 测试 / eval |
+//! | `wire_*` 工厂 | `wire_embedded_scoring`（生产 embedded 装配链：资产解析 → llama worker → 校准 → 审计）；`wire_http_scoring_port`（feature `http-adapter`，测试 / eval 对分专用） | 生产 composition / 测试 / eval |
 //! | 适配器 | `EmbeddedScoringAdapter` / `EmbeddedInitError`（feature `embedded`，macOS arm64 llama.cpp worker） | 生产评分装配 |
 //! | 数据 | `ScoringQuestion` / `ScoringAnswer` / `ScoringState` / `CalibrationLevel` | 消费场景（memory / skills / policy） |
 //! | 数据 | `ModelManifest` / `PointerHead` / `PointerHeadWeights` | 模型下载、存储与 embedded 评分装配 |
@@ -23,6 +23,7 @@ mod adapters;
 mod application;
 mod domain;
 mod ports;
+mod wiring;
 
 pub use adapters::audited::{AuditedScoringAdapter, ScoringAuditEvent};
 pub use adapters::calibrated::CalibratedScoringAdapter;
@@ -43,6 +44,7 @@ pub use application::{
     DownloadOutcome, ModelDownloadError, ModelDownloadErrorKind, ModelDownloadService,
 };
 
+pub use constants::EMBEDDED_SCORING_AVAILABLE;
 pub use domain::{
     required_platform, AnswerRejected, CalibrationLevel, ModelAsset, ModelManifest,
     ModelManifestError, NoulCriteria, PointerHead, PointerHeadError, PointerHeadWeights,
@@ -55,6 +57,7 @@ pub use ports::{
     ModelInstallPortError, ModelInstallPortErrorKind, ModelInstallerPort, ModelStagingArea,
     ScoringPort, StagedInstallOutcome,
 };
+pub use wiring::{wire_embedded_scoring, EmbeddedScoringWiringError};
 
 /// Jev HTTP 评分装配链：JevHttp → Calibrated（读温度 artifact）→ Audited（落审计）。
 ///

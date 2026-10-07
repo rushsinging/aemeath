@@ -361,6 +361,18 @@
       "tracking_issue": 1831
     },
     {
+      "id": "construction.systemone.wire-embedded-scoring",
+      "symbol": "wire_embedded_scoring",
+      "owner_crate": "systemone",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src/systemone.rs"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Production embedded scoring chain (asset resolve → llama worker → calibrated → audited) has its single cross-BC call site in the composition systemone assembly module; HTTP wiring stays forbidden to production",
+      "tracking_issue": 1833
+    },
+    {
       "id": "construction.runtime.agent-runner",
       "symbol": "wire_agent_runner",
       "owner_crate": "runtime",
@@ -2096,6 +2108,8 @@
         "runtime.rs",
         "runtime_tests.rs",
         "state.rs",
+        "systemone.rs",
+        "systemone_tests.rs",
         "tools.rs",
         "update.rs"
       ],
