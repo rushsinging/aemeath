@@ -93,9 +93,11 @@ impl ToolExecutionSupervisor {
             .background
             .as_ref()
             .map_or_else(BackgroundTaskId::new_v7, |runtime| {
-                runtime
-                    .supervisor()
-                    .register(call.identity.clone(), invocation_summary_text(&call))
+                runtime.supervisor().register_with_cancellation(
+                    call.identity.clone(),
+                    invocation_summary_text(&call),
+                    call.child_cancellation.clone(),
+                )
             });
         log::info!(
             target: crate::LOG_TARGET,
@@ -169,12 +171,14 @@ impl ToolExecutionSupervisor {
             );
             // #252 PR2：终态推进监督器账本并路由通知（无装配时只推进 receipt）。
             if let Some(runtime) = background_runtime.as_ref() {
-                runtime.notify_terminal(
-                    &driver_context,
-                    &task_id_for_logs,
-                    terminal_kind_from_outcome(&terminal),
-                    terminal_output_text(&outcome),
-                );
+                runtime
+                    .notify_terminal(
+                        &driver_context,
+                        &task_id_for_logs,
+                        terminal_kind_from_outcome(&terminal),
+                        terminal_output_text(&outcome),
+                    )
+                    .await;
             }
             if let Err(error) = driver_context
                 .advance_tool_receipt(ToolReceiptMutationData::terminal(identity, terminal))
@@ -188,7 +192,7 @@ impl ToolExecutionSupervisor {
             }
         });
 
-        let placeholder = placeholder_tool_result(&task_id, &call.identity.tool_name);
+        let placeholder = placeholder_tool_result(&task_id);
         call.background_threshold = None; // 已转后台，防止重复判定
         Ok((placeholder, started.elapsed()))
     }
@@ -409,12 +413,9 @@ fn join_result_to_outcome(
 }
 
 /// 占位 tool result：转后台后立即发布给 LLM 的合法成功结果。
-fn placeholder_tool_result(task_id: &BackgroundTaskId, tool_name: &str) -> PublishedToolOutcome {
+fn placeholder_tool_result(task_id: &BackgroundTaskId) -> PublishedToolOutcome {
     PublishedToolOutcome::success_text(format!(
-        "Tool call is still running in the background (task-{} for tool {tool_name}). \
-         The result is not final yet and will be delivered when the task completes. \
-         You may continue with other work; use the background tasks tool to inspect \
-         status or logs, or to stop the task.",
+        "Running in the background ({}). Result will be delivered on completion.",
         task_id.as_str(),
     ))
 }

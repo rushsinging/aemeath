@@ -88,6 +88,7 @@ pub fn wire_builtin_catalog_execution(
     memory_source: Arc<dyn crate::domain::MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
     skill_loader: Arc<dyn crate::domain::SkillLoadPort>,
+    background_source: Arc<dyn crate::domain::background_task_port::BackgroundTaskAccessSource>,
     role_policies: Vec<(String, share::config::RolePolicyConfig)>,
 ) -> Result<CatalogExecutionWiring, BuiltinWiringError> {
     let registry = Arc::new(ToolRegistry::new());
@@ -101,6 +102,7 @@ pub fn wire_builtin_catalog_execution(
             memory_source.clone(),
             workspace_control.clone(),
             skill_loader.clone(),
+            background_source.clone(),
             scope_kind,
         );
         let profile = profile_for(scope_kind, &main_profile);

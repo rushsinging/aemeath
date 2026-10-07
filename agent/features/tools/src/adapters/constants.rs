@@ -10,3 +10,6 @@ pub(crate) const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "web
 pub(crate) const TERM_GRACE: Duration = Duration::from_millis(200);
 
 pub(crate) const BUILTIN_COMMIT_URI: &str = "aemeath-builtin://commit";
+
+/// `BackgroundTasks` logs action 缺省尾部/增量读取字节数（#252）。
+pub(crate) const DEFAULT_BACKGROUND_LOG_MAX_BYTES: usize = 4096;

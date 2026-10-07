@@ -13,7 +13,7 @@
 | D3 | 完成提醒双路：有 active Run → 完成事实作为 reminder 注入当前 Run 后续 step；无 active Run → Runtime 创建 Wakeup Run 回注。agent 发起转后台即视为该任务的唤醒授权 |
 | D4 | 任务生命周期随 CLI 进程终止，标记失效，不做 daemon 化 |
 | D5 | 不挂 Goal / Loop。tool call 后台任务是独立轻量任务记录，与 Workflow 的 `continuation_authorization` 是独立通道，不得混同 |
-| D6 | 阈值可配置，随 `RunConfigSnapshot` 冻结（Run scope）；交付期默认 0（禁用，feature flag 关闭），查询工具（PR3）落地后开启默认 10s |
+| D6 | 阈值可配置，随 `RunConfigSnapshot` 冻结（Run scope）；默认 0=禁用（PR1-3 全套链路已交付，2026-10-07 用户拍板暂关闭，真实使用验证后开启 10） |
 | D7 | 设计文档随核心引擎 PR 落地（含 workflow 设计文档落地与修订） |
 | D8 | 交付拆分为 3 个 PR：核心引擎+文档 → 通知链路 → 查询+持久化+TUI+收尾 |
 | D9 | sequential FIFO 修订：前序调用转后台后，同轮后续 sequential-only 调用 MAY 启动（启动顺序仍严格 FIFO）；`ToolCallState` 增加 `Backgrounded` 中间态 |
@@ -167,16 +167,16 @@ reminder 不携带完整输出（管线预算纪律）。
 
 ## 5. 后台任务查询 tool
 
-单一 tool `background_tasks`，action 枚举参数：
+后台任务工具族（对齐 task 族先例，2026-10-07 用户拍板由单 tool 多 action 拆分）：
 
-| action | 行为 |
+| tool | 行为 |
 |---|---|
-| `list` | 活动与近期任务（id / 工具 / 状态 / 时长） |
-| `status` | 单任务详情：状态、终态、deadline 剩余 |
-| `logs` | 查询任务日志（运行中与完成后皆可）：ring buffer 非消耗性读取；`tail` 参数指定尾部行数（默认 50）；返回读取游标，下次携带游标只读新增（增量游标）；token budget 截断；多次读取幂等、不破坏后续回注 |
-| `stop` | 请求取消：signal cancel + grace + terminal receipt，返回明确终态（含 `CancellationUnconfirmed` 不确定语义） |
+| `BackgroundTaskList` | 活动与近期任务（id / 工具 / 状态 / 时长） |
+| `BackgroundTaskStatus` | 单任务详情：状态、终态、deadline 剩余 |
+| `BackgroundTaskLogs` | 查询任务日志（运行中与完成后皆可）：ring buffer 非消耗性读取；缺省尾部（默认 4096 字节）；携带游标只读新增（增量游标）；token budget 截断；多次读取幂等、不破坏后续回注 |
+| `BackgroundTaskStop` | 请求取消：signal cancel，真实终态由执行体收口后经通知/查询可见（含取消不确定语义） |
 
-挂 Main + Sub Catalog，常规 profile 权限链；占位 tool_result 文案中显式引导 `logs` 用法。
+挂 Main Catalog（caps 对齐 task 族：查询 `TaskRead`、停止 `TaskWrite`，sub-agent-restricted profile 下不可见——Sub Run 本就禁用后台化，无需查询）；常规 profile 权限链；占位 tool_result 文案中显式引导 `Logs` 用法。
 
 ## 6. 持久化与 resume
 

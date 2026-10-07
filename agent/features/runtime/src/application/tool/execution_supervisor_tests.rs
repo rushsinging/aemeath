@@ -274,11 +274,15 @@ async fn execute_exceeding_threshold_returns_placeholder_and_backgrounds_receipt
         "占位文案应说明已转后台：{placeholder_text}"
     );
     assert!(
+        placeholder_text.split_whitespace().count() <= 12,
+        "占位文案应精简（task id + running in background）：{placeholder_text}"
+    );
+    assert!(
         placeholder_text
             .split_whitespace()
-            .find(|word| word.contains("task-"))
-            .map(|word| word.trim_start_matches('(').trim_start_matches("task-"))
-            .and_then(|task_id| BackgroundTaskId::parse_uuid7(task_id).ok())
+            .find(|word| word.contains("task_"))
+            .map(|word| { word.trim_start_matches('(').trim_end_matches(['.', ')']) })
+            .and_then(|task_id| BackgroundTaskId::parse(task_id).ok())
             .is_some(),
         "占位文案应携带合法 task id：{placeholder_text}"
     );

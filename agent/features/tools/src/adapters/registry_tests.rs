@@ -32,6 +32,7 @@ fn assembled_scope(scope: BuiltinRegistryScope) -> RegistryScope {
         test_memory_source(),
         control,
         crate::composition::wire_skills().loader(),
+        test_background_source(),
         scope,
     )
 }
@@ -45,6 +46,56 @@ fn names_for(scope: BuiltinRegistryScope) -> BTreeSet<String> {
 
 fn set(names: &[&str]) -> BTreeSet<String> {
     names.iter().map(|name| name.to_ascii_lowercase()).collect()
+}
+
+/// 空后台任务端口（注册期占位；查询工具装配的真实实现由 runtime 注入）。
+fn empty_background_access(
+) -> std::sync::Arc<dyn crate::domain::background_task_port::BackgroundTaskAccess> {
+    struct EmptyAccess;
+    impl crate::domain::background_task_port::BackgroundTaskAccess for EmptyAccess {
+        fn list_tasks(
+            &self,
+        ) -> Vec<crate::domain::types::background_tasks::BackgroundTaskSummaryData> {
+            Vec::new()
+        }
+        fn task_status(
+            &self,
+            _task_id: &str,
+        ) -> Option<crate::domain::types::background_tasks::BackgroundTaskDetailData> {
+            None
+        }
+        fn read_task_log(
+            &self,
+            _task_id: &str,
+            _cursor: Option<u64>,
+            _max_bytes: usize,
+        ) -> Option<crate::domain::types::background_tasks::BackgroundTaskLogData> {
+            None
+        }
+        fn stop_task(
+            &self,
+            _task_id: &str,
+        ) -> Result<crate::domain::types::background_tasks::BackgroundTaskStopData, String>
+        {
+            Err("background tasks unavailable".to_string())
+        }
+    }
+    std::sync::Arc::new(EmptyAccess)
+}
+
+fn test_background_source(
+) -> std::sync::Arc<dyn crate::domain::background_task_port::BackgroundTaskAccessSource> {
+    struct FixedSource(
+        std::sync::Arc<dyn crate::domain::background_task_port::BackgroundTaskAccess>,
+    );
+    impl crate::domain::background_task_port::BackgroundTaskAccessSource for FixedSource {
+        fn current(
+            &self,
+        ) -> std::sync::Arc<dyn crate::domain::background_task_port::BackgroundTaskAccess> {
+            self.0.clone()
+        }
+    }
+    std::sync::Arc::new(FixedSource(empty_background_access()))
 }
 
 const FULL: &[&str] = &[
@@ -77,6 +128,10 @@ const FULL: &[&str] = &[
     "EnterWorktree",
     "ExitWorktree",
     "Skill",
+    "BackgroundTaskList",
+    "BackgroundTaskStatus",
+    "BackgroundTaskLogs",
+    "BackgroundTaskStop",
 ];
 #[test]
 fn production_profiles_are_main_baseline_or_restricted_children() {
@@ -129,6 +184,7 @@ fn registry_exposes_five_memory_tools_and_no_legacy_memory() {
         test_memory_source(),
         control,
         crate::composition::wire_skills().loader(),
+        test_background_source(),
         BuiltinRegistryScope::Main,
     );
     for name in [
@@ -164,6 +220,7 @@ fn every_tool_description_matches_its_english_i18n_text() {
         test_memory_source(),
         control,
         crate::composition::wire_skills().loader(),
+        test_background_source(),
         BuiltinRegistryScope::Main,
     );
 

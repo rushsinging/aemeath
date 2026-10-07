@@ -1,9 +1,10 @@
 use super::RuntimeConfig;
 
 #[test]
-fn runtime_default_threshold_disables_backgrounding_until_delivery_completes() {
+fn runtime_default_threshold_disables_backgrounding_pending_real_usage() {
     let config = RuntimeConfig::default();
-    // #252 PR1 feature flag 关闭交付：默认 0（禁用），查询工具（PR3）落地后开 10s。
+    // #252 全套链路已交付（PR1-3）但默认暂关闭（2026-10-07 用户拍板）：
+    // 真实使用验证后再开启 10s；显式配置 >0 可提前启用。
     assert_eq!(config.tool_background_threshold_secs, 0);
 }
 

@@ -319,6 +319,10 @@ pub struct RecordLiveTps {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReplaceRuntimeStatus(pub crate::tui::adapter::runtime_status::TuiRuntimeStatus);
 
+/// #252：后台任务活动数更新（spinner 显示）。
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReplaceBackgroundTaskCount(pub usize);
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReplaceTaskState(pub crate::tui::adapter::runtime_view::TuiTaskState);
 
@@ -421,6 +425,7 @@ pub enum ConversationIntent {
     RecordUsage(RecordUsage),
     RecordLiveTps(RecordLiveTps),
     ReplaceRuntimeStatus(ReplaceRuntimeStatus),
+    ReplaceBackgroundTaskCount(ReplaceBackgroundTaskCount),
     ReplaceTaskState(ReplaceTaskState),
     UpdateTaskLines(UpdateTaskLines),
     SetStatusNotice(SetStatusNotice),

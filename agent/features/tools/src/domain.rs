@@ -4,6 +4,8 @@
 //! exposing tool execution internals.
 
 pub mod agent_port;
+pub mod background_task_port;
+pub use background_task_port::{BackgroundTaskAccess, BackgroundTaskAccessSource};
 pub mod command_pl;
 pub mod command_ports;
 mod constants;

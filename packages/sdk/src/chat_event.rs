@@ -888,6 +888,10 @@ pub enum ChatEvent {
     RuntimeStatusChanged {
         status: Box<crate::RuntimeStatusView>,
     },
+    /// #252：后台任务活动数变化（TUI spinner 显示）。
+    BackgroundTaskCountChanged {
+        active: usize,
+    },
 }
 
 /// `SessionResumeFailed` 的失败分类（#636 D2）。

@@ -35,6 +35,8 @@ pub enum IdParseError {
     InvalidUuid(String),
     #[error("UUID 不是 version 7: {0}")]
     NotVersion7(String),
+    #[error("无效的前缀 typed id 形态: {0}")]
+    InvalidPrefixedFormat(String),
 }
 
 /// Build the cached string for a UUID (single source of truth for formatting).
@@ -343,10 +345,57 @@ define_id_type!(
     InteractionRequestId,
     "Published identity for one Runtime-owned interaction request (UUIDv7)."
 );
-define_id_type!(
-    BackgroundTaskId,
-    "Runtime-owned identity for one background task record (UUIDv7)."
-);
+
+/// 生成前缀形态 typed id：`<prefix>_<uuidv7 无连字符 hex>`。
+///
+/// uuidv7 高位是毫秒时间戳，同前缀下**字典序 = 时间序**。
+/// 前缀词汇表逐步接入（先 `task`，其余 id 渐进迁移）。
+pub fn new_typed_id(prefix: &str) -> String {
+    format!(
+        "{prefix}{}{}",
+        crate::constants::TYPED_ID_SEPARATOR,
+        Uuid::now_v7().simple()
+    )
+}
+
+/// 校验前缀形态 typed id：`<prefix>_<32 位 hex>`（全锚定形状）。
+pub fn is_typed_id(value: &str, prefix: &str) -> bool {
+    let Some(rest) = value.strip_prefix(prefix) else {
+        return false;
+    };
+    let Some(suffix) = rest.strip_prefix(crate::constants::TYPED_ID_SEPARATOR) else {
+        return false;
+    };
+    suffix.len() == 32 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+/// Runtime-owned 后台任务记录标识（前缀 typed id，`task_<uuidv7hex>`）。
+///
+/// 本体即前缀形态（单一真相，无裸值/display 两套）；
+/// `parse` 按前缀+形状校验，跨种类误用在前缀层被拒。
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+pub struct BackgroundTaskId(String);
+
+impl BackgroundTaskId {
+    /// 生成新任务 id（`task_` + uuidv7 hex；字典序=时间序）。
+    pub fn new_v7() -> Self {
+        Self(new_typed_id("task"))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// 解析（严格前缀+形状校验）。
+    pub fn parse(value: &str) -> Result<Self, IdParseError> {
+        if !is_typed_id(value, "task") {
+            return Err(IdParseError::InvalidPrefixedFormat(value.to_string()));
+        }
+        Ok(Self(value.to_string()))
+    }
+}
 
 // ---------------------------------------------------------------------------
 // ToolCallId

@@ -19,6 +19,8 @@ pub struct SpinnerLineView {
     pub phase_text: Option<String>,
     /// 最多一条通过稳定性门槛的用户可见 Activity 摘要。
     pub detail_text: Option<String>,
+    /// #252：后台任务活动数（0 = 不显示；spinner 尾部 ⛙N）。
+    pub background_tasks_active: usize,
 }
 
 /// Compact 进度视图（spinner 行内嵌渲染用）。

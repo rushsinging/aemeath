@@ -497,6 +497,16 @@ where
                     IdleResult::BackgroundTaskWakeup => {
                         // 无用户输入的唤醒 Run（#252）：完成事实由 background_task
                         // reminder 在本轮注入（D11：不合成用户 turn）。
+                        // 用户侧系统卡片（设计 §8：用户清楚看到 agent 为何自己动起来）。
+                        sink.send_event(RuntimeStreamEvent::CommandResultText {
+                            text: if language == "zh" {
+                                "⏙ 后台任务已完成，已唤醒 agent 继续（详情可用 BackgroundTaskList 等工具查询）".to_string()
+                            } else {
+                                "⏙ Background task completed; agent resumed automatically (inspect with the BackgroundTaskList tool)".to_string()
+                            },
+                            is_error: false,
+                        })
+                        .await;
                         (ChatId::new_v7().to_string(), Vec::new())
                     }
                     IdleResult::ManualReflectionRequested => {

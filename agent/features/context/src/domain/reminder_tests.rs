@@ -538,15 +538,15 @@ fn background_task_completed_kind_and_render_are_bilingual() {
     assert!(zh.contains("失败"));
     assert!(zh.contains("test result: ok. 3 passed"));
     assert!(
-        zh.contains("日志或后续输出可用 background_tasks 工具查询"),
-        "引导查询：{zh}"
+        zh.contains("日志或后续输出可用 BackgroundTaskList / BackgroundTaskLogs 查询"),
+        "引导查询（新工具名）：{zh}"
     );
 
     let en = render_invocation_reminder_body(&data, "en");
     assert!(en.contains("Background task completed"), "en 标题：{en}");
     assert!(en.contains("succeeded"));
     assert!(en.contains("failed"));
-    assert!(en.contains("Use the background_tasks tool"));
+    assert!(en.contains("BackgroundTaskLogs"));
 }
 
 #[test]

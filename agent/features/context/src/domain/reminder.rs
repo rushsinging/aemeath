@@ -578,10 +578,12 @@ pub fn render_invocation_reminder_body(
             }
             match language {
                 "zh" => lines.push(
-                    "结果已回注；日志或后续输出可用 background_tasks 工具查询。".to_owned(),
+                    "结果已回注；日志或后续输出可用 BackgroundTaskList / BackgroundTaskLogs 查询。"
+                        .to_owned(),
                 ),
                 _ => lines.push(
-                    "Use the background_tasks tool to inspect logs or further output.".to_owned(),
+                    "Use BackgroundTaskList / BackgroundTaskLogs to inspect logs or further output."
+                        .to_owned(),
                 ),
             }
             lines.join("\n")

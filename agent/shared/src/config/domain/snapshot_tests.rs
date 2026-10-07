@@ -507,8 +507,9 @@ fn test_snapshot_language_default() {
 }
 
 #[test]
-fn snapshot_exposes_tool_background_threshold_default_disabled() {
+fn snapshot_exposes_tool_background_threshold_default_enabled() {
     let snap = ConfigSnapshot::new(Config::default());
+    // 全套链路已交付但默认暂关闭（真实使用验证后开 10）。
     assert_eq!(snap.tool_background_threshold_secs(), 0);
 }
 

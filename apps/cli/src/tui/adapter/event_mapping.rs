@@ -592,6 +592,9 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
                 },
             }),
         },
+        ChatEvent::BackgroundTaskCountChanged { active } => {
+            TuiRuntimeEvent::BackgroundTaskCountChanged { active }
+        }
         ChatEvent::TaskStateChanged { state } => TuiRuntimeEvent::TaskStateChanged {
             state: Box::new(TuiTaskState {
                 session_id: state.session_id,

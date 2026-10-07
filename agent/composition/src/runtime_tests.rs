@@ -25,6 +25,16 @@ impl tools::MemoryPortSource for TestMemoryPortSource {
     }
 }
 
+fn noop_background_source() -> std::sync::Arc<dyn tools::BackgroundTaskAccessSource> {
+    struct NoopSource;
+    impl tools::BackgroundTaskAccessSource for NoopSource {
+        fn current(&self) -> std::sync::Arc<dyn tools::BackgroundTaskAccess> {
+            unreachable!("background source 只作注册期占位，测试不调用")
+        }
+    }
+    std::sync::Arc::new(NoopSource)
+}
+
 fn noop_memory_source() -> Arc<dyn tools::MemoryPortSource> {
     Arc::new(TestMemoryPortSource {
         memory: Arc::new(memory::api::NoOpMemory),
@@ -141,6 +151,7 @@ async fn wire_runtime_tool_assembly_produces_working_catalog_and_execution() {
         memory_source,
         workspace.control(),
         tools::composition::wire_skills().loader(),
+        noop_background_source(),
         &snapshot,
         env_temp.path(),
         // 大窗口下比例收紧不生效，保持该测试原有的默认策略语义
@@ -208,6 +219,7 @@ async fn production_catalog_has_both_main_and_sub_agent_scopes() {
         noop_memory_source(),
         workspace.control(),
         tools::composition::wire_skills().loader(),
+        noop_background_source(),
         Vec::new(),
     )
     .expect("wire_builtin_catalog_execution");
@@ -273,6 +285,7 @@ async fn role_policies_surface_as_role_profiles() {
         noop_memory_source(),
         workspace.control(),
         tools::composition::wire_skills().loader(),
+        noop_background_source(),
         role_policies,
     )
     .expect("wire_builtin_catalog_execution");
@@ -321,6 +334,7 @@ async fn role_policy_with_unknown_capability_fails_wiring() {
         noop_memory_source(),
         workspace.control(),
         tools::composition::wire_skills().loader(),
+        noop_background_source(),
         role_policies,
     );
     assert!(result.is_err(), "unknown tool name must fail wiring");

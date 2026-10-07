@@ -41,6 +41,7 @@ impl LiveStatusAssembler {
                 phase_elapsed_secs: primary.as_ref().map(|_| activity.phase_elapsed_secs(now)),
                 phase_text: primary.as_ref().map(|primary| primary.phase_text.clone()),
                 detail_text: primary.and_then(|primary| primary.detail),
+                background_tasks_active: 0,
             }
         });
         let queued_lines = queued_texts
@@ -48,7 +49,10 @@ impl LiveStatusAssembler {
             .flat_map(|text| queued_preview_lines(text))
             .collect();
         LiveStatusViewModel {
-            spinner,
+            spinner: spinner.map(|mut view| {
+                view.background_tasks_active = conversation.runtime.background_tasks_active;
+                view
+            }),
             queued_lines,
             task_lines: conversation.runtime.task_status.lines.clone(),
             compact_progress,

@@ -16,6 +16,7 @@ fn test_spinner_line_view_holds_fields() {
         phase_elapsed_secs: Some(0),
         phase_text: Some("Thinking...".to_string()),
         detail_text: None,
+        background_tasks_active: 0,
     };
     assert_eq!(view.frame, 9);
     assert_eq!(view.elapsed_secs, 0);
@@ -33,6 +34,7 @@ fn test_live_status_view_model_equality() {
             phase_elapsed_secs: Some(0),
             phase_text: None,
             detail_text: None,
+            background_tasks_active: 0,
         }),
         queued_lines: vec!["> hello".to_string()],
         task_lines: vec!["□ #1".to_string()],

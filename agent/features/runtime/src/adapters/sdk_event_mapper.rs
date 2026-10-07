@@ -643,6 +643,9 @@ pub(crate) fn map_stream_event(
         crate::application::loop_engine::chat::RuntimeStreamEvent::ProjectInfo { project } => {
             ChatEvent::ProjectInfo { project }
         }
+        crate::application::loop_engine::chat::RuntimeStreamEvent::BackgroundTaskCountChanged {
+            active,
+        } => ChatEvent::BackgroundTaskCountChanged { active },
         crate::application::loop_engine::chat::RuntimeStreamEvent::TaskStateChanged { state } => {
             ChatEvent::TaskStateChanged { state }
         }

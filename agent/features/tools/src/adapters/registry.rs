@@ -1,10 +1,10 @@
 //! Built-in tool registration and named registry-scope assembly.
 
 use crate::adapters::{
-    agent_tool, ask_user, bash, brief, file_edit, file_read, file_write, glob_tool, grep,
-    memory_tool, skill_tool, task_block_by, task_create, task_get, task_list, task_list_complete,
-    task_list_create, task_lists, task_stop, task_update, tool_search, web_fetch, web_search,
-    worktree,
+    agent_tool, ask_user, background_tasks, bash, brief, file_edit, file_read, file_write,
+    glob_tool, grep, memory_tool, skill_tool, task_block_by, task_create, task_get, task_list,
+    task_list_complete, task_list_create, task_lists, task_stop, task_update, tool_search,
+    web_fetch, web_search, worktree,
 };
 use crate::domain::memory_source::MemoryPortSource;
 use crate::domain::published_language::ToolCapabilities as Caps;
@@ -55,6 +55,7 @@ pub(crate) fn register_named_scope(
     memory_source: Arc<dyn MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
     skill_loader: Arc<dyn crate::domain::SkillLoadPort>,
+    background_source: Arc<dyn crate::domain::background_task_port::BackgroundTaskAccessSource>,
     selected_scope: BuiltinRegistryScope,
 ) -> RegistryScope {
     let mut scope = RegistryScopeBuilder::new(selected_scope.name());
@@ -87,6 +88,34 @@ pub(crate) fn register_named_scope(
     builtin!("Glob", Caps::Read, glob_tool::GlobTool);
     builtin!("Grep", Caps::Read, grep::GrepTool);
     builtin!("WebFetch", Caps::NetworkAccess, web_fetch::WebFetchTool);
+    builtin!(
+        "BackgroundTaskList",
+        Caps::TaskRead,
+        background_tasks::BackgroundTaskListTool {
+            source: background_source.clone()
+        }
+    );
+    builtin!(
+        "BackgroundTaskStatus",
+        Caps::TaskRead,
+        background_tasks::BackgroundTaskStatusTool {
+            source: background_source.clone()
+        }
+    );
+    builtin!(
+        "BackgroundTaskLogs",
+        Caps::TaskRead,
+        background_tasks::BackgroundTaskLogsTool {
+            source: background_source.clone()
+        }
+    );
+    builtin!(
+        "BackgroundTaskStop",
+        Caps::TaskWrite,
+        background_tasks::BackgroundTaskStopTool {
+            source: background_source.clone()
+        }
+    );
     builtin!("WebSearch", Caps::NetworkAccess, web_search::WebSearchTool);
     builtin!("Agent", Caps::Dispatch, agent_tool::AgentTool);
     builtin!(
