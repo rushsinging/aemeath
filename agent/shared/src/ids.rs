@@ -350,7 +350,7 @@ define_id_type!(
 ///
 /// uuidv7 高位是毫秒时间戳，同前缀下**字典序 = 时间序**。
 /// 前缀词汇表逐步接入（先 `task`，其余 id 渐进迁移）。
-pub fn new_prefixed_id(prefix: &str) -> String {
+pub fn new_typed_id(prefix: &str) -> String {
     format!(
         "{prefix}{}{}",
         crate::constants::TYPED_ID_SEPARATOR,
@@ -359,7 +359,7 @@ pub fn new_prefixed_id(prefix: &str) -> String {
 }
 
 /// 校验前缀形态 typed id：`<prefix>_<32 位 hex>`（全锚定形状）。
-pub fn is_prefixed_id(value: &str, prefix: &str) -> bool {
+pub fn is_typed_id(value: &str, prefix: &str) -> bool {
     let Some(rest) = value.strip_prefix(prefix) else {
         return false;
     };
@@ -381,7 +381,7 @@ pub struct BackgroundTaskId(String);
 impl BackgroundTaskId {
     /// 生成新任务 id（`task_` + uuidv7 hex；字典序=时间序）。
     pub fn new_v7() -> Self {
-        Self(new_prefixed_id("task"))
+        Self(new_typed_id("task"))
     }
 
     pub fn as_str(&self) -> &str {
@@ -390,7 +390,7 @@ impl BackgroundTaskId {
 
     /// 解析（严格前缀+形状校验）。
     pub fn parse(value: &str) -> Result<Self, IdParseError> {
-        if !is_prefixed_id(value, "task") {
+        if !is_typed_id(value, "task") {
             return Err(IdParseError::InvalidPrefixedFormat(value.to_string()));
         }
         Ok(Self(value.to_string()))

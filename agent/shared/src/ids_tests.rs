@@ -189,8 +189,8 @@ fn test_input_id_serde_roundtrip_preserves_uuid() {
 // ── 前缀 typed id（wanaka 方向，#252 先接入 BackgroundTaskId） ────────
 
 #[test]
-fn prefixed_id_generates_prefix_separator_and_hex_suffix() {
-    let value = crate::ids::new_prefixed_id("task");
+fn typed_id_generates_prefix_separator_and_hex_suffix() {
+    let value = crate::ids::new_typed_id("task");
     assert!(value.starts_with("task_"), "前缀+下划线：{value}");
     let suffix = &value["task_".len()..];
     assert_eq!(suffix.len(), 32, "uuidv7 无连字符 hex：{value}");
@@ -201,31 +201,31 @@ fn prefixed_id_generates_prefix_separator_and_hex_suffix() {
         "后缀为 hex：{value}"
     );
     assert!(
-        crate::ids::is_prefixed_id(&value, "task"),
+        crate::ids::is_typed_id(&value, "task"),
         "自生成 id 校验通过"
     );
 }
 
 #[test]
-fn prefixed_id_rejects_wrong_prefix_and_malformed_suffix() {
-    let value = crate::ids::new_prefixed_id("task");
+fn typed_id_rejects_wrong_prefix_and_malformed_suffix() {
+    let value = crate::ids::new_typed_id("task");
     assert!(
-        !crate::ids::is_prefixed_id(&value, "run"),
+        !crate::ids::is_typed_id(&value, "run"),
         "前缀不匹配必须拒绝"
     );
     assert!(
-        !crate::ids::is_prefixed_id("task_xyz", "task"),
+        !crate::ids::is_typed_id("task_xyz", "task"),
         "非 hex 后缀拒绝"
     );
-    assert!(!crate::ids::is_prefixed_id("task_", "task"), "空后缀拒绝");
-    assert!(!crate::ids::is_prefixed_id("task", "task"), "缺分隔符拒绝");
+    assert!(!crate::ids::is_typed_id("task_", "task"), "空后缀拒绝");
+    assert!(!crate::ids::is_typed_id("task", "task"), "缺分隔符拒绝");
 }
 
 #[test]
-fn prefixed_ids_are_lexicographically_chronological() {
-    let early = crate::ids::new_prefixed_id("task");
+fn typed_ids_are_lexicographically_chronological() {
+    let early = crate::ids::new_typed_id("task");
     std::thread::sleep(std::time::Duration::from_millis(2));
-    let late = crate::ids::new_prefixed_id("task");
+    let late = crate::ids::new_typed_id("task");
     assert!(early < late, "同前缀字典序=时间序（uuidv7 高位时间戳）");
 }
 
@@ -235,7 +235,7 @@ fn background_task_id_is_prefixed_form_with_typed_parse() {
     let task_id = BackgroundTaskId::new_v7();
     let text = task_id.as_str();
     assert!(text.starts_with("task_"), "本体即前缀形态：{text}");
-    assert!(crate::ids::is_prefixed_id(text, "task"));
+    assert!(crate::ids::is_typed_id(text, "task"));
 
     let parsed = BackgroundTaskId::parse(text).expect("合法形态可解析");
     assert_eq!(parsed, task_id);
