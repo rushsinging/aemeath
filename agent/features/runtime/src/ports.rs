@@ -29,7 +29,7 @@ pub use context_port::{
     CompactOutcome, CompactRequestData, CompactTrigger, ContentFingerprint, ContextAppendData,
     ContextAppendError, ContextPort, ContextPortError, ContextRequestData, ContextRequestId,
     ContextWindowData, FinalizeCause, Language, ManualCompactRequestData, RunStepId, SessionId,
-    SessionRevision, StepReceiptData, SystemPromptSpecData,
+    SessionRevision, StepReceiptData, SystemPromptSpecData, ToolSchemaData,
 };
 #[cfg(test)]
 pub use context_port::{
@@ -41,8 +41,8 @@ pub use policy_port::Policy;
 pub use policy_port::{PolicyDecisionData, PolicyRequestData};
 pub use provider_factory::{ProviderBindingData, ProviderBuildSpecData, ProviderFactory};
 pub use provider_port::{
-    InvocationOptionsData, InvocationRequestData, ModelIdData, ModelToolSchemaData, ProviderPort,
-    RawUsageSnapshotData, RequestSystemBlockData, StopReason,
+    InvocationOptionsData, InvocationRequestData, ModelIdData, ProviderPort, RawUsageSnapshotData,
+    RequestSystemBlockData, StopReason,
 };
 #[cfg(test)]
 pub use provider_port::{

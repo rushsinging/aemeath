@@ -407,11 +407,8 @@ impl crate::ports::ProviderPort for LlmProviderPortAdapter {
             .iter()
             .map(|block| provider::composition::SystemBlockData::dynamic(block.text().to_string()))
             .collect();
-        let tool_schemas: Vec<serde_json::Value> = request
-            .tools
-            .iter()
-            .map(|tool| tool.to_tool_definition())
-            .collect();
+        // request.tools 已是 wire-ready tool 定义（Value）。
+        let tool_schemas: Vec<serde_json::Value> = request.tools.clone();
         // Forward the cancellation token that the request carries; the
         // `CancellationSignal` arg from ProviderPort::invoke is treated as
         // advisory (real cancellation originates from `request.cancellation`).

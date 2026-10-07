@@ -5,8 +5,8 @@ use share::message::Message;
 use crate::application::run::config::RunConfigSnapshot;
 use crate::application::run::context::RuntimeContext;
 use crate::ports::{
-    ContextRequestData, ContextRequestId, Language, ModelToolSchemaData, RunStepId, SessionId,
-    SystemPromptSpecData,
+    ContextRequestData, ContextRequestId, Language, RunStepId, SessionId, SystemPromptSpecData,
+    ToolSchemaData,
 };
 
 /// Frozen values required to build one Step's Context request.
@@ -43,13 +43,7 @@ impl<'a> ContextRequestCoordinator<'a> {
             .source
             .raw_tool_schemas
             .iter()
-            .filter_map(|schema| {
-                Some(ModelToolSchemaData {
-                    name: schema.get("name")?.as_str()?.to_string(),
-                    description: schema.get("description")?.as_str()?.to_string(),
-                    input_schema: schema.get("input_schema")?.clone(),
-                })
-            })
+            .filter_map(ToolSchemaData::from_wire)
             .collect();
         ContextRequestData {
             session_id: SessionId::new(self.source.session_id),

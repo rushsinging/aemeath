@@ -51,10 +51,9 @@ pub mod composition {
 pub use published_language::{
     CancellationSignal, InvocationDeltaData, InvocationEventData, InvocationOptionsData,
     InvocationRequestData, InvocationStreamData, ModelCapabilityData, ModelIdData,
-    ModelToolSchemaData, ProviderCompletionData, ProviderContentBlockData, ProviderError,
-    ProviderErrorKind, ProviderStopReasonData, ProviderToolCallData, ProviderToolCallIdData,
-    RawUsageSnapshotData, ReasoningCapabilityData, ReasoningMappingKindData,
-    RequestSystemBlockData,
+    ProviderCompletionData, ProviderContentBlockData, ProviderError, ProviderErrorKind,
+    ProviderStopReasonData, ProviderToolCallData, ProviderToolCallIdData, RawUsageSnapshotData,
+    ReasoningCapabilityData, ReasoningMappingKindData, RequestSystemBlockData,
 };
 
 #[derive(Debug, thiserror::Error)]

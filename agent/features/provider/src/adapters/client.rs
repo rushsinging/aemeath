@@ -409,11 +409,8 @@ impl LlmClient {
             })
             .collect();
 
-        let tool_schemas: Vec<serde_json::Value> = request
-            .tools
-            .iter()
-            .map(crate::ModelToolSchemaData::to_tool_definition)
-            .collect();
+        // request.tools 已是 wire-ready tool 定义（context::ToolSchemaData 投影产物）。
+        let tool_schemas = request.tools.clone();
 
         // request 携带的 token 与调用方信号竞速 establishment。
         let cancel_token = request.cancellation.clone();

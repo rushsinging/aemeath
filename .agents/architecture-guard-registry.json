@@ -1727,7 +1727,6 @@
         "LlmProvider",
         "ModelCapabilityData",
         "ModelIdData",
-        "ModelToolSchemaData",
         "ProviderAssemblyWiring",
         "ProviderCompletionData",
         "ProviderContentBlockData",

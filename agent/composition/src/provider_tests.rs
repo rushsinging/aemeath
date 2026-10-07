@@ -3,9 +3,9 @@ use async_trait::async_trait;
 use provider::composition::{InvocationScopeData, LlmClient, LlmProvider, SystemBlockData};
 use provider::{
     InvocationDeltaData, InvocationEventData, InvocationOptionsData, InvocationRequestData,
-    ModelCapabilityData, ModelIdData, ModelToolSchemaData, ProviderCompletionData,
-    ProviderContentBlockData, ProviderErrorKind, ProviderStopReasonData as StopReason,
-    RawUsageSnapshotData, ReasoningCapabilityData, ReasoningMappingKindData,
+    ModelCapabilityData, ModelIdData, ProviderCompletionData, ProviderContentBlockData,
+    ProviderErrorKind, ProviderStopReasonData as StopReason, RawUsageSnapshotData,
+    ReasoningCapabilityData, ReasoningMappingKindData,
 };
 use share::message::Message;
 use share::reasoning::ReasoningLevel;
@@ -370,14 +370,14 @@ async fn invoke_converts_system_blocks_tools_and_uses_neutral_scope_model() {
         provider::RequestSystemBlockData::Text("today is monday".to_string()),
     ];
     // A tool schema with full {name, description, input_schema}.
-    request.tools = vec![ModelToolSchemaData {
-        name: "get_weather".to_string(),
-        description: "Get current weather".to_string(),
-        input_schema: serde_json::json!({
+    request.tools = vec![serde_json::json!({
+        "name": "get_weather",
+        "description": "Get current weather",
+        "input_schema": {
             "type": "object",
             "properties": { "city": { "type": "string" } },
-        }),
-    }];
+        },
+    })];
 
     let cancel = CancellationToken::new();
     let mut stream = port.invoke(request, &cancel).await.unwrap();

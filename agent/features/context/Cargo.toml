@@ -17,7 +17,6 @@ project = { path = "../project" }
 memory = { path = "../memory" }
 config = { path = "../config" }
 sdk = { path = "../../../packages/sdk" }
-provider = { path = "../provider" }
 tools = { path = "../tools" }
 sha2 = { workspace = true }
 log = "0.4"

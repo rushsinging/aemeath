@@ -433,37 +433,6 @@ impl std::fmt::Display for ProviderError {
 
 impl std::error::Error for ProviderError {}
 
-// ─── Model Tool Schema ──────────────────────────────────
-
-/// 模型可见的 tool schema。
-///
-/// 这是 Tool Catalog 的模型可见投影。driver 转换时只保留供应商允许字段。
-#[derive(Debug, Clone)]
-pub struct ModelToolSchemaData {
-    /// 工具名称。
-    pub name: String,
-    /// 工具描述。
-    pub description: String,
-    /// 输入 JSON schema。
-    pub input_schema: serde_json::Value,
-}
-
-impl ModelToolSchemaData {
-    /// 渲染为完整的 tool 定义 JSON 对象
-    /// `{ "name", "description", "input_schema" }`。
-    ///
-    /// provider-internal helper：Composition adapter 和各 driver 共用它，
-    /// 保证 tool wire shape 一致，且避免在 Composition（不直接依赖 serde_json）
-    /// 里手写 JSON 拼装。
-    pub fn to_tool_definition(&self) -> serde_json::Value {
-        serde_json::json!({
-            "name": self.name,
-            "description": self.description,
-            "input_schema": self.input_schema,
-        })
-    }
-}
-
 // ─── InvocationOptionsData ──────────────────────────────────
 
 /// Legacy 一次调用选项；生产 resolver 接线延期到 v0.2.0 决策。
@@ -533,7 +502,7 @@ pub struct InvocationRequestData {
     /// 本轮 system prompt 块（provider-neutral）。
     pub system: Vec<RequestSystemBlockData>,
     /// 模型可见 tool schema 列表。
-    pub tools: Vec<ModelToolSchemaData>,
+    pub tools: Vec<serde_json::Value>,
     /// 调用选项。
     pub options: InvocationOptionsData,
 }

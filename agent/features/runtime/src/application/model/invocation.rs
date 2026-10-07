@@ -255,7 +255,12 @@ async fn invoke_model_impl(
         let max_tokens = binding.max_tokens;
         let messages = invocation_context.messages_for_api().to_vec();
         let system = invocation_context.system_blocks.clone();
-        let tools = window.tool_schemas.clone();
+        // context 结构化投影 → wire-ready tool 定义（Value）。
+        let tools: Vec<serde_json::Value> = window
+            .tool_schemas
+            .iter()
+            .map(crate::ports::ToolSchemaData::to_tool_definition)
+            .collect();
         let stream_cancel = cancel.clone();
         let committed_delta = observer.committed_delta();
         let invocation = async {

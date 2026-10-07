@@ -21,8 +21,8 @@ use futures::Stream;
 // 新 PL StopReason 通过别名 ProviderStopReasonData 导出，此处还原为 StopReason。
 pub use provider::{
     CancellationSignal, InvocationEventData, InvocationOptionsData, InvocationRequestData,
-    ModelCapabilityData, ModelIdData, ModelToolSchemaData, ProviderError,
-    ProviderStopReasonData as StopReason, RawUsageSnapshotData, RequestSystemBlockData,
+    ModelCapabilityData, ModelIdData, ProviderError, ProviderStopReasonData as StopReason,
+    RawUsageSnapshotData, RequestSystemBlockData,
 };
 
 #[cfg(test)]
