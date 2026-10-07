@@ -94,18 +94,6 @@ impl ReminderPipeline {
         }
     }
 
-    /// task store 变更后：`OnTaskMutation` 类 source 入队。
-    pub fn task_mutated(&mut self) {
-        for source in
-            self.sources_matching(|trigger| matches!(trigger, RefreshTrigger::OnTaskMutation))
-        {
-            if let Some(snapshot) = source.build() {
-                self.queue
-                    .push_snapshot(source.kind(), snapshot, source.policy().inject);
-            }
-        }
-    }
-
     /// 用户消息到达：`OnUserMessage` 类 source 现场重建入队（快照替换语义）。
     pub fn user_message_received(&mut self) {
         for source in

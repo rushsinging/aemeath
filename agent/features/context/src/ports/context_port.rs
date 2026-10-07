@@ -100,9 +100,6 @@ pub trait ContextPort: Send + Sync {
     /// 业务事件推送：`OnEvent(source)` 匹配的 source 入队。
     fn reminder_handle_event(&self, _run_id: &RunId, _event_source: &ReminderEventSource) {}
 
-    /// task store 变更事件：`OnTaskMutation` 类 source 入队。
-    fn reminder_task_mutated(&self, _run_id: &RunId) {}
-
     /// step 边界事件：`OnStepInterval(n)` 在步数为 n 的倍数时重建入队。
     fn reminder_step_advanced(&self, _run_id: &RunId, _step: u64) {}
 

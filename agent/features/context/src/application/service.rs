@@ -545,18 +545,6 @@ impl ContextPort for ContextApplicationService {
         }
     }
 
-    /// task store 变更事件：OnTaskMutation 类 source 入队。
-    fn reminder_task_mutated(&self, run_id: &RunId) {
-        if let Some(pipeline) = self
-            .reminder_pipelines
-            .lock()
-            .expect("reminder pipelines lock poisoned")
-            .get_mut(run_id)
-        {
-            pipeline.task_mutated();
-        }
-    }
-
     /// step 边界事件：OnStepInterval(n) 在步数为 n 的倍数时重建入队。
     fn reminder_step_advanced(&self, run_id: &RunId, step: u64) {
         if let Some(pipeline) = self

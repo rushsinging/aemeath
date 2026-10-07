@@ -70,7 +70,6 @@ impl ReminderEventSource {
 pub enum RefreshTrigger {
     OnRunStart,
     OnCompact,
-    OnTaskMutation,
     /// 稳定 step 间隔周期重注入（对抗注意力衰减）。
     OnStepInterval(u32),
     /// 指定事件源到达时入队。
