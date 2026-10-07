@@ -71,8 +71,10 @@ pub mod web_search;
 
 // Re-exports for non-core tool result structs.
 pub use background_tasks::{
-    BackgroundTaskDetailData, BackgroundTaskLogData, BackgroundTaskStopData,
-    BackgroundTaskSummaryData, BackgroundTasksAction, BackgroundTasksInput, BackgroundTasksResult,
+    BackgroundTaskDetailData, BackgroundTaskListInput, BackgroundTaskListResult,
+    BackgroundTaskLogData, BackgroundTaskLogsInput, BackgroundTaskLogsResult,
+    BackgroundTaskStatusInput, BackgroundTaskStatusResult, BackgroundTaskStopData,
+    BackgroundTaskStopInput, BackgroundTaskStopResult, BackgroundTaskSummaryData,
 };
 pub use brief::{BriefInput, BriefResult};
 pub use list_mcp_resources::ListMcpResourcesResult;

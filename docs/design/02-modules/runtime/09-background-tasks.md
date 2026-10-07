@@ -167,16 +167,16 @@ reminder 不携带完整输出（管线预算纪律）。
 
 ## 5. 后台任务查询 tool
 
-单一 tool `background_tasks`，action 枚举参数：
+后台任务工具族（对齐 task 族先例，2026-10-07 用户拍板由单 tool 多 action 拆分）：
 
-| action | 行为 |
+| tool | 行为 |
 |---|---|
-| `list` | 活动与近期任务（id / 工具 / 状态 / 时长） |
-| `status` | 单任务详情：状态、终态、deadline 剩余 |
-| `logs` | 查询任务日志（运行中与完成后皆可）：ring buffer 非消耗性读取；`tail` 参数指定尾部行数（默认 50）；返回读取游标，下次携带游标只读新增（增量游标）；token budget 截断；多次读取幂等、不破坏后续回注 |
-| `stop` | 请求取消：signal cancel + grace + terminal receipt，返回明确终态（含 `CancellationUnconfirmed` 不确定语义） |
+| `BackgroundTaskList` | 活动与近期任务（id / 工具 / 状态 / 时长） |
+| `BackgroundTaskStatus` | 单任务详情：状态、终态、deadline 剩余 |
+| `BackgroundTaskLogs` | 查询任务日志（运行中与完成后皆可）：ring buffer 非消耗性读取；缺省尾部（默认 4096 字节）；携带游标只读新增（增量游标）；token budget 截断；多次读取幂等、不破坏后续回注 |
+| `BackgroundTaskStop` | 请求取消：signal cancel，真实终态由执行体收口后经通知/查询可见（含取消不确定语义） |
 
-挂 Main + Sub Catalog，常规 profile 权限链；占位 tool_result 文案中显式引导 `logs` 用法。
+挂 Main Catalog（caps 对齐 task 族：查询 `TaskRead`、停止 `TaskWrite`，sub-agent-restricted profile 下不可见——Sub Run 本就禁用后台化，无需查询）；常规 profile 权限链；占位 tool_result 文案中显式引导 `Logs` 用法。
 
 ## 6. 持久化与 resume
 

@@ -128,7 +128,10 @@ const FULL: &[&str] = &[
     "EnterWorktree",
     "ExitWorktree",
     "Skill",
-    "BackgroundTasks",
+    "BackgroundTaskList",
+    "BackgroundTaskStatus",
+    "BackgroundTaskLogs",
+    "BackgroundTaskStop",
 ];
 #[test]
 fn production_profiles_are_main_baseline_or_restricted_children() {
@@ -283,7 +286,6 @@ fn sub_agent_restricted_profile_assembles_expected_toolset_from_caps() {
     assert_eq!(
         assembled,
         vec![
-            "BackgroundTasks",
             "Bash",
             "Edit",
             "Glob",

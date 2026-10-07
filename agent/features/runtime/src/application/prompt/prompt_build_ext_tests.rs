@@ -265,7 +265,7 @@ fn background_task_section_injected_only_when_threshold_enabled() {
     // 默认（阈值>0）：注入后台任务特性说明。
     let enabled = background_tasks_guidance_section("zh");
     assert!(enabled.contains("后台任务"), "zh 段落：{enabled}");
-    assert!(enabled.contains("BackgroundTasks"));
+    assert!(enabled.contains("BackgroundTaskList"));
     let enabled_en = background_tasks_guidance_section("en");
     assert!(enabled_en.contains("Background tasks"));
     assert!(enabled_en.contains("sequential"));

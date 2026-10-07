@@ -1,42 +1,227 @@
-//! `BackgroundTasks` 工具（#252）：后台任务查询与停止。
+//! 后台任务工具族（#252）：list / status / logs / stop 四个独立 tool。
 
 use crate::domain::background_task_port::BackgroundTaskAccessSource;
 use crate::domain::types::background_tasks::{
-    BackgroundTasksAction, BackgroundTasksInput, BackgroundTasksResult,
+    BackgroundTaskDetailData, BackgroundTaskListInput, BackgroundTaskListResult,
+    BackgroundTaskLogData, BackgroundTaskLogsInput, BackgroundTaskLogsResult,
+    BackgroundTaskStatusInput, BackgroundTaskStatusResult, BackgroundTaskStopData,
+    BackgroundTaskStopInput, BackgroundTaskStopResult, BackgroundTaskSummaryData,
 };
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
 
-pub struct BackgroundTasksTool {
-    /// 可换绑端口源（session 创建后绑定实现，先例 MemoryPortSource）。
-    pub source: Arc<dyn BackgroundTaskAccessSource>,
-}
-
 #[cfg(test)]
 #[path = "background_tasks_tests.rs"]
 mod tests;
 
+/// `BackgroundTaskList`：列出活动与近期后台任务。
+pub struct BackgroundTaskListTool {
+    pub source: Arc<dyn BackgroundTaskAccessSource>,
+}
+
 #[async_trait]
-impl TypedTool for BackgroundTasksTool {
-    type Output = BackgroundTasksResult;
+impl TypedTool for BackgroundTaskListTool {
+    type Output = BackgroundTaskListResult;
     fn name(&self) -> &str {
-        "BackgroundTasks"
+        "BackgroundTaskList"
     }
     fn description(&self) -> &str {
-        share::i18n::tools::background::background_tasks("en")
+        share::i18n::tools::background::background_task_list("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
-        std::borrow::Cow::Borrowed(share::i18n::tools::background::background_tasks(lang))
+        std::borrow::Cow::Borrowed(share::i18n::tools::background::background_task_list(lang))
     }
     fn input_schema(&self) -> Value {
         use crate::domain::types::ToolSchema;
-        BackgroundTasksInput::data_schema()
+        BackgroundTaskListInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use crate::domain::types::ToolSchema;
-        BackgroundTasksResult::data_schema()
+        BackgroundTaskListResult::data_schema()
+    }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+    fn is_concurrency_safe(&self) -> bool {
+        true
+    }
+
+    async fn call(
+        &self,
+        input: Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<BackgroundTaskListResult> {
+        if let Err(error) = serde_json::from_value::<BackgroundTaskListInput>(input) {
+            return TypedToolResult::error(format!("invalid input: {error}"));
+        }
+        let tasks = self.source.current().list_tasks();
+        let text = if tasks.is_empty() {
+            "No background tasks.".to_string()
+        } else {
+            tasks
+                .iter()
+                .map(|summary: &BackgroundTaskSummaryData| {
+                    format!(
+                        "{} [{}] {} ({}ms)",
+                        summary.task_id,
+                        summary.state,
+                        summary.tool_name,
+                        summary.duration_ms.unwrap_or(0)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        TypedToolResult::success(text, BackgroundTaskListResult { tasks })
+    }
+}
+
+/// `BackgroundTaskStatus`：单任务详情。
+pub struct BackgroundTaskStatusTool {
+    pub source: Arc<dyn BackgroundTaskAccessSource>,
+}
+
+#[async_trait]
+impl TypedTool for BackgroundTaskStatusTool {
+    type Output = BackgroundTaskStatusResult;
+    fn name(&self) -> &str {
+        "BackgroundTaskStatus"
+    }
+    fn description(&self) -> &str {
+        share::i18n::tools::background::background_task_status("en")
+    }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::background::background_task_status(lang))
+    }
+    fn input_schema(&self) -> Value {
+        use crate::domain::types::ToolSchema;
+        BackgroundTaskStatusInput::data_schema()
+    }
+    fn data_schema(&self) -> Value {
+        use crate::domain::types::ToolSchema;
+        BackgroundTaskStatusResult::data_schema()
+    }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+    fn is_concurrency_safe(&self) -> bool {
+        true
+    }
+
+    async fn call(
+        &self,
+        input: Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<BackgroundTaskStatusResult> {
+        let args: BackgroundTaskStatusInput = match serde_json::from_value(input) {
+            Ok(args) => args,
+            Err(error) => return TypedToolResult::error(format!("invalid input: {error}")),
+        };
+        match self.source.current().task_status(&args.task_id) {
+            Some(detail) => TypedToolResult::success(
+                status_text(&detail),
+                BackgroundTaskStatusResult { detail },
+            ),
+            None => TypedToolResult::error(format!("Task not found: {}", args.task_id)),
+        }
+    }
+}
+
+fn status_text(detail: &BackgroundTaskDetailData) -> String {
+    format!(
+        "{} [{}] {} — deadline in {:?}ms, log bytes {}",
+        detail.summary.task_id,
+        detail.summary.state,
+        detail.summary.summary,
+        detail.deadline_remaining_ms,
+        detail.total_written_bytes
+    )
+}
+
+/// `BackgroundTaskLogs`：任务日志读取（增量游标）。
+pub struct BackgroundTaskLogsTool {
+    pub source: Arc<dyn BackgroundTaskAccessSource>,
+}
+
+#[async_trait]
+impl TypedTool for BackgroundTaskLogsTool {
+    type Output = BackgroundTaskLogsResult;
+    fn name(&self) -> &str {
+        "BackgroundTaskLogs"
+    }
+    fn description(&self) -> &str {
+        share::i18n::tools::background::background_task_logs("en")
+    }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::background::background_task_logs(lang))
+    }
+    fn input_schema(&self) -> Value {
+        use crate::domain::types::ToolSchema;
+        BackgroundTaskLogsInput::data_schema()
+    }
+    fn data_schema(&self) -> Value {
+        use crate::domain::types::ToolSchema;
+        BackgroundTaskLogsResult::data_schema()
+    }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+    fn is_concurrency_safe(&self) -> bool {
+        true
+    }
+
+    async fn call(
+        &self,
+        input: Value,
+        _ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<BackgroundTaskLogsResult> {
+        let args: BackgroundTaskLogsInput = match serde_json::from_value(input) {
+            Ok(args) => args,
+            Err(error) => return TypedToolResult::error(format!("invalid input: {error}")),
+        };
+        let max_bytes = args
+            .max_bytes
+            .map(|value| value as usize)
+            .unwrap_or(crate::adapters::constants::DEFAULT_BACKGROUND_LOG_MAX_BYTES);
+        match self
+            .source
+            .current()
+            .read_task_log(&args.task_id, args.cursor, max_bytes)
+        {
+            Some(log) => {
+                TypedToolResult::success(log.text.clone(), BackgroundTaskLogsResult { log })
+            }
+            None => TypedToolResult::error(format!("Task not found: {}", args.task_id)),
+        }
+    }
+}
+
+/// `BackgroundTaskStop`：请求停止（发 cancel 信号，真实终态由执行体收口）。
+pub struct BackgroundTaskStopTool {
+    pub source: Arc<dyn BackgroundTaskAccessSource>,
+}
+
+#[async_trait]
+impl TypedTool for BackgroundTaskStopTool {
+    type Output = BackgroundTaskStopResult;
+    fn name(&self) -> &str {
+        "BackgroundTaskStop"
+    }
+    fn description(&self) -> &str {
+        share::i18n::tools::background::background_task_stop("en")
+    }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::background::background_task_stop(lang))
+    }
+    fn input_schema(&self) -> Value {
+        use crate::domain::types::ToolSchema;
+        BackgroundTaskStopInput::data_schema()
+    }
+    fn data_schema(&self) -> Value {
+        use crate::domain::types::ToolSchema;
+        BackgroundTaskStopResult::data_schema()
     }
     fn is_read_only(&self) -> bool {
         false
@@ -49,100 +234,20 @@ impl TypedTool for BackgroundTasksTool {
         &self,
         input: Value,
         _ctx: &ToolExecutionContext,
-    ) -> TypedToolResult<BackgroundTasksResult> {
-        let args: BackgroundTasksInput = match serde_json::from_value(input) {
+    ) -> TypedToolResult<BackgroundTaskStopResult> {
+        let args: BackgroundTaskStopInput = match serde_json::from_value(input) {
             Ok(args) => args,
             Err(error) => return TypedToolResult::error(format!("invalid input: {error}")),
         };
-        let access = self.source.current();
-        match args.action {
-            BackgroundTasksAction::List => {
-                let tasks = access.list_tasks();
-                let text = if tasks.is_empty() {
-                    "No background tasks.".to_string()
-                } else {
-                    tasks
-                        .iter()
-                        .map(|summary| {
-                            format!(
-                                "{} [{}] {} ({}ms)",
-                                summary.task_id,
-                                summary.state,
-                                summary.tool_name,
-                                summary.duration_ms.unwrap_or(0)
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                };
-                TypedToolResult::success(
-                    text,
-                    BackgroundTasksResult {
-                        action: Some("list".to_string()),
-                        tasks,
-                        ..Default::default()
-                    },
-                )
-            }
-            BackgroundTasksAction::Status => {
-                let Some(task_id) = args.task_id.as_deref() else {
-                    return TypedToolResult::error("status action requires task_id");
-                };
-                match access.task_status(task_id) {
-                    Some(detail) => TypedToolResult::success(
-                        format!(
-                            "{} [{}] {} — deadline in {:?}ms, log bytes {}",
-                            detail.summary.task_id,
-                            detail.summary.state,
-                            detail.summary.summary,
-                            detail.deadline_remaining_ms,
-                            detail.total_written_bytes
-                        ),
-                        BackgroundTasksResult {
-                            action: Some("status".to_string()),
-                            detail: Some(detail),
-                            ..Default::default()
-                        },
-                    ),
-                    None => TypedToolResult::error(format!("Task not found: {task_id}")),
-                }
-            }
-            BackgroundTasksAction::Logs => {
-                let Some(task_id) = args.task_id.as_deref() else {
-                    return TypedToolResult::error("logs action requires task_id");
-                };
-                let max_bytes = args
-                    .max_bytes
-                    .map(|value| value as usize)
-                    .unwrap_or(crate::adapters::constants::DEFAULT_BACKGROUND_LOG_MAX_BYTES);
-                match access.read_task_log(task_id, args.cursor, max_bytes) {
-                    Some(log) => TypedToolResult::success(
-                        log.text.clone(),
-                        BackgroundTasksResult {
-                            action: Some("logs".to_string()),
-                            log: Some(log),
-                            ..Default::default()
-                        },
-                    ),
-                    None => TypedToolResult::error(format!("Task not found: {task_id}")),
-                }
-            }
-            BackgroundTasksAction::Stop => {
-                let Some(task_id) = args.task_id.as_deref() else {
-                    return TypedToolResult::error("stop action requires task_id");
-                };
-                match access.stop_task(task_id) {
-                    Ok(stop) => TypedToolResult::success(
-                        format!("stop requested: {} state={}", task_id, stop.state),
-                        BackgroundTasksResult {
-                            action: Some("stop".to_string()),
-                            stop: Some(stop),
-                            ..Default::default()
-                        },
-                    ),
-                    Err(message) => TypedToolResult::error(message),
-                }
-            }
+        match self.source.current().stop_task(&args.task_id) {
+            Ok(stop) => TypedToolResult::success(
+                format!("stop requested: {} state={}", args.task_id, stop.state),
+                BackgroundTaskStopResult {
+                    task_id: args.task_id,
+                    stop,
+                },
+            ),
+            Err(message) => TypedToolResult::error(message),
         }
     }
 }

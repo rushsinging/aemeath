@@ -1,8 +1,8 @@
 use super::*;
-use crate::domain::background_task_port::{BackgroundTaskAccess, BackgroundTaskAccessSource};
+use crate::domain::background_task_port::BackgroundTaskAccess;
 use crate::domain::types::background_tasks::{
     BackgroundTaskDetailData, BackgroundTaskLogData, BackgroundTaskStopData,
-    BackgroundTaskSummaryData, BackgroundTasksAction, BackgroundTasksInput,
+    BackgroundTaskSummaryData,
 };
 use std::sync::Arc;
 
@@ -53,26 +53,24 @@ struct StaticSource {
     access: Arc<FakeAccess>,
 }
 
-impl BackgroundTaskAccessSource for StaticSource {
+impl crate::domain::background_task_port::BackgroundTaskAccessSource for StaticSource {
     fn current(&self) -> Arc<dyn BackgroundTaskAccess> {
         self.access.clone()
     }
 }
 
-fn tool() -> BackgroundTasksTool {
-    BackgroundTasksTool {
-        source: Arc::new(StaticSource {
-            access: Arc::new(FakeAccess {
-                summaries: vec![BackgroundTaskSummaryData {
-                    task_id: "task-1".to_string(),
-                    tool_name: "Bash".to_string(),
-                    state: "backgrounded".to_string(),
-                    summary: "tool=Bash input=cargo test".to_string(),
-                    duration_ms: Some(1500),
-                }],
-            }),
+fn source() -> Arc<StaticSource> {
+    Arc::new(StaticSource {
+        access: Arc::new(FakeAccess {
+            summaries: vec![BackgroundTaskSummaryData {
+                task_id: "task-1".to_string(),
+                tool_name: "Bash".to_string(),
+                state: "backgrounded".to_string(),
+                summary: "tool=Bash input=cargo test".to_string(),
+                duration_ms: Some(1500),
+            }],
         }),
-    }
+    })
 }
 
 fn test_context() -> crate::domain::context::ToolExecutionContext {
@@ -80,59 +78,66 @@ fn test_context() -> crate::domain::context::ToolExecutionContext {
 }
 
 #[tokio::test]
-async fn list_action_returns_summaries() {
-    let result = tool()
-        .call(serde_json::json!({"action": "list"}), &test_context())
-        .await;
+async fn list_tool_returns_summaries() {
+    let tool = BackgroundTaskListTool { source: source() };
+    let result = tool.call(serde_json::json!({}), &test_context()).await;
     assert!(!result.is_error, "list 不应失败");
-    let data = result.data.expect("结构化数据");
-    assert_eq!(data.tasks.len(), 1);
-    assert_eq!(data.tasks[0].tool_name, "Bash");
+    assert_eq!(result.data.expect("结构化数据").tasks.len(), 1);
     assert!(result.text.contains("task-1"));
+    assert!(result.text.contains("Bash"));
 }
 
 #[tokio::test]
-async fn logs_action_returns_chunk_and_cursor() {
-    let result = tool()
+async fn status_tool_returns_detail() {
+    let tool = BackgroundTaskStatusTool { source: source() };
+    let result = tool
+        .call(serde_json::json!({"task_id": "task-1"}), &test_context())
+        .await;
+    assert!(!result.is_error);
+    let detail = result.data.expect("结构化数据").detail;
+    assert_eq!(detail.summary.task_id, "task-1");
+    assert_eq!(detail.deadline_remaining_ms, Some(120_000));
+}
+
+#[tokio::test]
+async fn status_tool_unknown_task_errors() {
+    let tool = BackgroundTaskStatusTool { source: source() };
+    let result = tool
+        .call(serde_json::json!({"task_id": "task-none"}), &test_context())
+        .await;
+    assert!(result.is_error, "未知任务必须报错");
+}
+
+#[tokio::test]
+async fn logs_tool_returns_chunk_and_cursor() {
+    let tool = BackgroundTaskLogsTool { source: source() };
+    let result = tool
         .call(
-            serde_json::json!({"action": "logs", "task_id": "task-1", "cursor": 5}),
+            serde_json::json!({"task_id": "task-1", "cursor": 5}),
             &test_context(),
         )
         .await;
     assert!(!result.is_error);
-    let data = result.data.expect("结构化数据");
-    let log = data.log.expect("日志块");
+    let log = result.data.expect("结构化数据").log;
     assert!(log.text.contains("line-1"));
     assert_eq!(log.cursor, 14);
 }
 
 #[tokio::test]
-async fn stop_action_reports_signal() {
-    let result = tool()
-        .call(
-            serde_json::json!({"action": "stop", "task_id": "task-1"}),
-            &test_context(),
-        )
-        .await;
-    assert!(!result.is_error);
-    let data = result.data.expect("结构化数据");
-    let stop = data.stop.expect("stop 结果");
-    assert!(stop.signal_sent);
-    assert_eq!(stop.state, "backgrounded");
+async fn logs_tool_requires_task_id() {
+    let tool = BackgroundTaskLogsTool { source: source() };
+    let result = tool.call(serde_json::json!({}), &test_context()).await;
+    assert!(result.is_error, "缺 task_id 必须报错");
 }
 
 #[tokio::test]
-async fn status_without_task_id_is_input_error() {
-    let result = tool()
-        .call(serde_json::json!({"action": "status"}), &test_context())
+async fn stop_tool_reports_signal() {
+    let tool = BackgroundTaskStopTool { source: source() };
+    let result = tool
+        .call(serde_json::json!({"task_id": "task-1"}), &test_context())
         .await;
-    assert!(result.is_error, "status 缺 task_id 必须报错");
-}
-
-#[test]
-fn input_parses_action_enum() {
-    let input: BackgroundTasksInput =
-        serde_json::from_str(r#"{"action":"logs","task_id":"task-1","cursor":5}"#).unwrap();
-    assert_eq!(input.action, BackgroundTasksAction::Logs);
-    assert_eq!(input.cursor, Some(5));
+    assert!(!result.is_error);
+    let stop = result.data.expect("结构化数据").stop;
+    assert!(stop.signal_sent);
+    assert_eq!(stop.state, "backgrounded");
 }

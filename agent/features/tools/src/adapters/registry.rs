@@ -89,9 +89,30 @@ pub(crate) fn register_named_scope(
     builtin!("Grep", Caps::Read, grep::GrepTool);
     builtin!("WebFetch", Caps::NetworkAccess, web_fetch::WebFetchTool);
     builtin!(
-        "BackgroundTasks",
-        Caps::Read,
-        background_tasks::BackgroundTasksTool {
+        "BackgroundTaskList",
+        Caps::TaskRead,
+        background_tasks::BackgroundTaskListTool {
+            source: background_source.clone()
+        }
+    );
+    builtin!(
+        "BackgroundTaskStatus",
+        Caps::TaskRead,
+        background_tasks::BackgroundTaskStatusTool {
+            source: background_source.clone()
+        }
+    );
+    builtin!(
+        "BackgroundTaskLogs",
+        Caps::TaskRead,
+        background_tasks::BackgroundTaskLogsTool {
+            source: background_source.clone()
+        }
+    );
+    builtin!(
+        "BackgroundTaskStop",
+        Caps::TaskWrite,
+        background_tasks::BackgroundTaskStopTool {
             source: background_source.clone()
         }
     );
