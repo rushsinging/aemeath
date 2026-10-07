@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use provider::composition::{LlmClient, LlmConfigOptionsData};
+use provider::composition::{LlmClient, ProviderClientSpecData};
 use provider::{
     InvocationRequestData, ModelInfo, ProviderError, ProviderErrorKind, ProviderResponseStream,
-    ReasoningCapabilityData,
 };
 
 use runtime::{
@@ -103,7 +102,7 @@ pub fn provider_factory() -> Arc<DefaultProviderFactory> {
 
 impl ProviderFactoryTrait for DefaultProviderFactory {
     fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
-        let config = LlmConfigOptionsData {
+        let config = ProviderClientSpecData {
             driver: spec.driver.clone(),
             source_key: spec.source_key.clone(),
             api_style: spec.api_style.clone(),
@@ -117,33 +116,31 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
             user_agent: Some(spec.user_agent),
         };
 
-        // 组合根从 config/spec 投影构造 ModelInfo；reasoning 阶梯由装配
-        // （client.max_reasoning_level）覆盖——此处填占位。
+        // 组合根从 config/spec 投影构造 ModelInfo；supported_reasoning 阶梯
+        // 由装配（client.max_reasoning_level）覆盖——此处填占位。
         let model = ModelInfo {
             provider: spec.source_key.clone(),
             model: spec.model.clone(),
             supports_tools: true,
             supports_parallel_tool_calls: true,
             supports_streaming: true,
-            reasoning: ReasoningCapabilityData::none(),
+            supported_reasoning: vec![ReasoningLevel::Off],
             context_limit: spec.context_window,
             output_limit: Some(spec.max_tokens as usize),
         };
 
-        let assembly = provider::composition::wire_provider_assembly(
-            config,
-            model,
-            self.pool.as_ref(),
-            spec.requested_reasoning,
-        )?;
+        let (client, model) =
+            provider::composition::wire_provider_client(config, model, self.pool.as_ref())?;
 
-        let port = provider_port(assembly.client, assembly.model.clone());
+        let port = provider_port(client, model.clone());
 
         Ok(ProviderBindingData {
             provider: port,
-            model: assembly.model,
+            model,
             max_tokens: spec.max_tokens,
-            requested_reasoning: assembly.requested_reasoning,
+            // #1861 v4：binding 档位从 spec 直取（原 wiring.requested_reasoning
+            // 与输入重复，随装配句柄包消除）。
+            requested_reasoning: spec.requested_reasoning,
         })
     }
 }
@@ -172,7 +169,7 @@ impl ProviderProbePort for ProviderProbeAdapter {
         request: ProviderProbeRequest,
     ) -> Result<ProviderProbeResult, ProviderProbeError> {
         let config = probe_config_from_request(&request);
-        provider::composition::probe_connectivity(config, request.timeout)
+        provider::composition::wire_test_provider_client(config, request.timeout)
             .await
             .map(|latency| ProviderProbeResult { latency })
             .map_err(map_probe_error)
@@ -180,8 +177,8 @@ impl ProviderProbePort for ProviderProbeAdapter {
 }
 
 /// Connect 探测请求 → provider 构造配置的纯翻译（无 IO）。
-fn probe_config_from_request(request: &ProviderProbeRequest) -> LlmConfigOptionsData {
-    LlmConfigOptionsData {
+fn probe_config_from_request(request: &ProviderProbeRequest) -> ProviderClientSpecData {
+    ProviderClientSpecData {
         driver: request.driver.as_str().to_string(),
         source_key: "connect-probe".to_string(),
         api_style: request.api_style.clone(),

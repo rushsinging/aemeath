@@ -32,79 +32,21 @@ pub struct ModelInfo {
     pub supports_parallel_tool_calls: bool,
     /// 是否支持流式。
     pub supports_streaming: bool,
-    /// Reasoning 能力。
-    pub reasoning: ReasoningCapabilityData,
+    /// Reasoning 支持阶梯（升序去重；由 client 装配时按 driver 能力覆盖）。
+    pub supported_reasoning: Vec<ReasoningLevel>,
     /// 上下文窗口大小（token 数），`None` 表示未知。
     pub context_limit: Option<usize>,
     /// 最大输出 token 数，`None` 表示未知。
     pub output_limit: Option<usize>,
 }
 
-// ─── Reasoning ──────────────────────────────────────────
-
-/// 模型 reasoning 能力声明。
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ReasoningCapabilityData {
-    supported: Vec<ReasoningLevel>,
-}
-
-impl ReasoningCapabilityData {
-    pub fn new(supported: impl IntoIterator<Item = ReasoningLevel>) -> Result<Self, ProviderError> {
-        let mut supported: Vec<_> = supported.into_iter().collect();
-        supported.sort_unstable();
-        supported.dedup();
-        if supported.first() != Some(&ReasoningLevel::Off) {
-            return Err(ProviderError::fatal(
-                ProviderErrorKind::Configuration,
-                "reasoning capability 必须包含 off 档位",
-            ));
-        }
-        Ok(Self { supported })
+impl ModelInfo {
+    /// 请求档位在支持阶梯内的 clamp：阶梯中 ≤requested 的最大档，Off 兜底。
+    ///
+    /// 原 reasoning 能力数据类型的 resolve 逻辑（#1861 v4 摊平进实体）。
+    pub fn resolve_reasoning(&self, requested: ReasoningLevel) -> ReasoningLevel {
+        crate::domain::capability::resolve_supported(&self.supported_reasoning, requested)
     }
-
-    /// 构造不支持 reasoning 的默认能力。
-    pub fn none() -> Self {
-        Self {
-            supported: vec![ReasoningLevel::Off],
-        }
-    }
-
-    pub fn supported(&self) -> &[ReasoningLevel] {
-        &self.supported
-    }
-
-    pub fn maximum(&self) -> ReasoningLevel {
-        self.supported
-            .last()
-            .copied()
-            .unwrap_or(ReasoningLevel::Off)
-    }
-
-    pub fn resolve(&self, requested: ReasoningLevel) -> ReasoningLevel {
-        self.supported
-            .iter()
-            .rev()
-            .copied()
-            .find(|level| *level <= requested)
-            .unwrap_or(ReasoningLevel::Off)
-    }
-}
-
-// ─── Tool Call（Provider 边界） ─────────────────────────
-
-/// Provider 边界的 tool call 完整形态。
-///
-/// ID 为 Provider 返回的原始 tool-call 标识（如 Anthropic 的 `toolu_*` 或
-/// OpenAI 的 `call_*`）。Runtime 在写入 Run Step 时创建领域 `ToolCallId`
-/// 并维护双 ID 映射。Provider **NEVER** 生成领域 ID。
-#[derive(Debug, Clone)]
-pub struct ProviderToolCallData {
-    /// Provider 原始 tool-call ID。
-    pub id: String,
-    /// 工具名称。
-    pub name: String,
-    /// 验证过的 JSON 参数。
-    pub arguments: serde_json::Value,
 }
 
 // ─── Raw Usage ──────────────────────────────────────────
@@ -219,7 +161,18 @@ pub enum ProviderContentData {
         signature: Option<String>,
     },
     /// 完整 tool call（终态块 / 增量完成帧）。
-    ToolCall(ProviderToolCallData),
+    ///
+    /// ID 为 Provider 返回的原始 tool-call 标识（如 Anthropic 的 `toolu_*` 或
+    /// OpenAI 的 `call_*`）。Runtime 在写入 Run Step 时创建领域 `ToolCallId`
+    /// 并维护双 ID 映射。Provider **NEVER** 生成领域 ID。
+    ToolCall {
+        /// Provider 原始 tool-call ID。
+        id: String,
+        /// 工具名称。
+        name: String,
+        /// 验证过的 JSON 参数。
+        arguments: serde_json::Value,
+    },
     /// Tool call 开始（流增量）。
     ToolCallStarted {
         index: usize,
@@ -237,7 +190,12 @@ pub enum ProviderContentData {
     /// 块同构——runtime 据此边流边执行。
     ToolCallCompleted {
         index: usize,
-        call: ProviderToolCallData,
+        /// Provider 原始 tool-call ID。
+        id: String,
+        /// 工具名称。
+        name: String,
+        /// 验证过的 JSON 参数。
+        arguments: serde_json::Value,
     },
 }
 
@@ -368,35 +326,6 @@ impl std::fmt::Display for ProviderError {
 
 impl std::error::Error for ProviderError {}
 
-// ─── System Blocks (provider-neutral) ──────────────────
-
-/// Provider-neutral system prompt 块。
-///
-/// Runtime 构造的 system prompt 内容，区分可缓存（静态、稳定）与动态文本。
-/// `Cacheable` 表示该块适合 prompt caching；是否真正命中缓存由 provider 决定。
-/// driver/adapter 负责转换到 vendor wire DTO（如 Anthropic 的 `SystemBlockData`）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RequestSystemBlockData {
-    /// 动态文本块，不参与 prompt caching。
-    Text(String),
-    /// 静态文本块，建议 provider 应用 prompt caching（如 Anthropic ephemeral）。
-    Cacheable(String),
-}
-
-impl RequestSystemBlockData {
-    /// 块的文本内容。
-    pub fn text(&self) -> &str {
-        match self {
-            RequestSystemBlockData::Text(t) | RequestSystemBlockData::Cacheable(t) => t,
-        }
-    }
-
-    /// 是否建议 provider 缓存。
-    pub fn is_cacheable(&self) -> bool {
-        matches!(self, RequestSystemBlockData::Cacheable(_))
-    }
-}
-
 // ─── InvocationRequestData ──────────────────────────────────
 
 /// 一次 LLM 调用请求。
@@ -413,8 +342,14 @@ pub struct InvocationRequestData {
     pub cancellation: tokio_util::sync::CancellationToken,
     /// 本轮上下文窗口消息。
     pub messages: std::sync::Arc<[Message]>,
-    /// 本轮 system prompt 块（provider-neutral）。
-    pub system: Vec<RequestSystemBlockData>,
+    /// 本轮 system prompt——context/runtime 拼好的整段文本（#1861 v4：
+    /// 原块级 system 数据类型消除，拼接职责归上游）。
+    pub system: String,
+    /// 可缓存前缀的字节长度（prompt caching 分界；0 = 无）。
+    ///
+    /// 分界天然落在原块边界上（`llm_strategy` 拼接时按 `cache_break` 计算），
+    /// 因此按字节切分不会切断 UTF-8 字符。
+    pub static_prefix_len: usize,
     /// 模型可见 tool schema 列表（wire-ready）。
     pub tools: Vec<serde_json::Value>,
     /// 单次调用最大输出 token。
@@ -435,7 +370,8 @@ impl InvocationRequestData {
             model,
             cancellation: tokio_util::sync::CancellationToken::new(),
             messages: messages.into(),
-            system: Vec::new(),
+            system: String::new(),
+            static_prefix_len: 0,
             tools: Vec::new(),
             max_output_tokens,
             reasoning,

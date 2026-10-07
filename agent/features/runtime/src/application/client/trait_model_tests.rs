@@ -85,7 +85,7 @@ async fn model_switch_reads_injected_snapshot_once() {
 fn test_factory() -> Arc<dyn ProviderFactory> {
     use crate::ports::provider_port::{
         CancellationSignal, InvocationRequestData, ProviderError, ProviderErrorKind,
-        ProviderResponseStream, ReasoningCapabilityData, ReasoningLevel,
+        ProviderResponseStream, ReasoningLevel,
     };
     use crate::ports::ProviderPort as ProviderPortTrait;
 
@@ -118,12 +118,11 @@ fn test_factory() -> Arc<dyn ProviderFactory> {
                 supports_tools: true,
                 supports_parallel_tool_calls: true,
                 supports_streaming: true,
-                reasoning: ReasoningCapabilityData::new(vec![
+                supported_reasoning: vec![
                     ReasoningLevel::Off,
                     ReasoningLevel::Low,
                     ReasoningLevel::Medium,
-                ])
-                .unwrap_or_else(|_| ReasoningCapabilityData::none()),
+                ],
                 context_limit: spec.context_window,
                 output_limit: Some(spec.max_tokens as usize),
             };

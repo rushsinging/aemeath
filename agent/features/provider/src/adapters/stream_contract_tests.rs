@@ -386,9 +386,10 @@ async fn openai_compat_stream_emits_tool_call_completed_on_index_switch_and_stre
             }
             ProviderResponseChunk::Content(crate::ProviderContentData::ToolCallCompleted {
                 index,
-                call,
+                name,
+                ..
             }) => {
-                completed.push((index, call.name));
+                completed.push((index, name));
                 completed_positions.push(event_index);
             }
             ProviderResponseChunk::Stop(_) | ProviderResponseChunk::Usage(_) => {}
@@ -437,9 +438,11 @@ async fn anthropic_stream_emits_tool_call_completed_on_content_block_stop() {
         match event {
             ProviderResponseChunk::Content(crate::ProviderContentData::ToolCallCompleted {
                 index,
-                call,
+                name,
+                arguments,
+                ..
             }) => {
-                completed.push((index, call.name, call.arguments));
+                completed.push((index, name, arguments));
             }
             ProviderResponseChunk::Error(error) => panic!("fixture failed: {error:?}"),
             _ => {}

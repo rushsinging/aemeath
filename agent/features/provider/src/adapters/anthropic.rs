@@ -124,7 +124,8 @@ impl AnthropicProvider {
     pub(crate) async fn invoke_stream(
         &self,
         resolved: &crate::ports::ResolvedInvocation,
-        system: &[crate::RequestSystemBlockData],
+        system: &str,
+        static_prefix_len: usize,
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
@@ -151,10 +152,7 @@ impl AnthropicProvider {
             resolved.model.clone(),
             resolved.max_tokens,
             effort,
-            system
-                .iter()
-                .map(SystemBlockData::from_request_block)
-                .collect(),
+            SystemBlockData::from_prompt(system, static_prefix_len),
             api_messages,
             cached_tools,
             true,
@@ -217,13 +215,21 @@ impl LlmProvider for AnthropicProvider {
     async fn invocation_stream(
         &self,
         resolved: &crate::ports::ResolvedInvocation,
-        system: &[crate::RequestSystemBlockData],
+        system: &str,
+        static_prefix_len: usize,
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
     ) -> Result<crate::ProviderResponseStream, crate::ProviderError> {
-        self.invoke_stream(resolved, system, messages, tool_schemas, cancel)
-            .await
+        self.invoke_stream(
+            resolved,
+            system,
+            static_prefix_len,
+            messages,
+            tool_schemas,
+            cancel,
+        )
+        .await
     }
 
     fn model_name(&self) -> &str {

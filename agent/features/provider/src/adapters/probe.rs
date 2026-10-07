@@ -6,25 +6,26 @@ use std::time::Duration;
 use share::message::Message;
 use share::reasoning::ReasoningLevel;
 
-use super::client::{LlmClient, LlmConfigOptionsData};
+use super::client::{LlmClient, ProviderClientSpecData};
 
 /// 构造探测专用客户端（独立 transport，不走 pool）。
 ///
 /// 探测是 connect 向导的一次性调用，与主链路客户端生命周期无关；
 /// 构造失败统一折叠为 Configuration（"连接测试配置无效"）。
 pub fn wire_probe_client(
-    options: LlmConfigOptionsData,
+    options: ProviderClientSpecData,
 ) -> Result<Arc<LlmClient>, crate::ProviderError> {
     LlmClient::from_config(options).map(Arc::new).map_err(|_| {
         crate::ProviderError::fatal(crate::ProviderErrorKind::Configuration, "连接测试配置无效")
     })
 }
 
-/// Connect 向导探测唯一入口：构造探测客户端并执行一次连通性探测。
+/// Connect 向导探测唯一入口（#1861 v4 更名：测试型客户端装配+执行合一）：
+/// 构造探测客户端并执行一次连通性探测。
 ///
 /// 组合根 NEVER 自行拼装探测客户端（#1861 C14 收敛：构造与执行合一）。
-pub async fn probe_connectivity(
-    options: LlmConfigOptionsData,
+pub async fn wire_test_provider_client(
+    options: ProviderClientSpecData,
     timeout: Duration,
 ) -> Result<Duration, crate::ProviderError> {
     let client = wire_probe_client(options)?;
@@ -51,7 +52,7 @@ pub async fn run_connectivity_probe(
         supports_tools: false,
         supports_parallel_tool_calls: false,
         supports_streaming: true,
-        reasoning: crate::ReasoningCapabilityData::none(),
+        supported_reasoning: vec![ReasoningLevel::Off],
         context_limit: None,
         output_limit: None,
     };

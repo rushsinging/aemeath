@@ -91,7 +91,7 @@ fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeCon
 
 #[derive(Default)]
 struct CapturedInvocation {
-    system: Vec<String>,
+    system: String,
     tool_names: Vec<String>,
 }
 
@@ -130,11 +130,7 @@ impl ScriptedLlmProvider for CapturingProvider {
         request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<ProviderResponseStream, ProviderError> {
         let mut captured = self.captured.lock().unwrap();
-        captured.system = request
-            .system
-            .iter()
-            .map(|block| block.text().to_string())
-            .collect();
+        captured.system = request.system.clone();
         captured.tool_names = request
             .tools
             .iter()
@@ -1249,14 +1245,8 @@ async fn sub_agent_sends_context_window_skills_and_tool_schemas_to_provider() {
         tools::published::agent::AgentRunTerminal::Failed { .. }
     ));
     let captured = captured.lock().unwrap();
-    assert!(captured
-        .system
-        .iter()
-        .all(|block| !block.contains("SUBAGENT_SKILL_SENTINEL")));
-    assert!(captured
-        .system
-        .iter()
-        .any(|block| block.contains("Available Skills")));
+    assert!(!captured.system.contains("SUBAGENT_SKILL_SENTINEL"));
+    assert!(captured.system.contains("Available Skills"));
     assert!(captured.tool_names.iter().any(|name| name == "Read"));
 }
 

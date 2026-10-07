@@ -218,16 +218,16 @@ async fn invoke_model_impl(
         );
     log::debug!(
         target: crate::LOG_TARGET,
-        "context_window_mapped_to_invocation messages={} system_blocks={} tool_schemas={} reminder_messages={}",
+        "context_window_mapped_to_invocation messages={} system_len={} tool_schemas={} reminder_messages={}",
         mapping_summary.messages,
-        mapping_summary.system_blocks,
+        mapping_summary.system_len,
         mapping_summary.tool_schemas,
         mapping_summary.reminder_messages,
     );
     crate::application::loop_engine::llm_log::log_llm_input(
         invocation_context.messages_for_api(),
         window.messages.len(),
-        &invocation_context.system_blocks,
+        &invocation_context.system,
         &invocation_context.tool_schemas,
         observer.role(),
     );
@@ -254,7 +254,8 @@ async fn invoke_model_impl(
         let model = binding.model.model.clone();
         let max_tokens = binding.max_tokens;
         let messages = invocation_context.messages_for_api().to_vec();
-        let system = invocation_context.system_blocks.clone();
+        let system = invocation_context.system.clone();
+        let static_prefix_len = invocation_context.static_prefix_len;
         // context 结构化投影 → wire-ready tool 定义（Value）。
         let tools: Vec<serde_json::Value> = window
             .tool_schemas
@@ -266,11 +267,12 @@ async fn invoke_model_impl(
         let invocation = async {
             let mut request = InvocationRequestData::new(model, messages, max_tokens, reasoning);
             request.system = system;
+            request.static_prefix_len = static_prefix_len;
             request.tools = tools;
             request.cancellation = stream_cancel.clone();
             log::debug!(
                 target: crate::LOG_TARGET,
-                "provider_invocation_request_ready model={} messages={} system_blocks={} tool_schemas={}",
+                "provider_invocation_request_ready model={} messages={} system_len={} tool_schemas={}",
                 request.model,
                 request.messages.len(),
                 request.system.len(),

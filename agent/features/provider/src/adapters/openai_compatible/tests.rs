@@ -73,7 +73,7 @@ async fn llm_client_chat_invocation_stream_is_single_request_pull_stream() {
     let leaked = Box::leak(response.into_boxed_str());
     let (base_url, requests) = spawn_openai_counting_server(leaked).await;
     let client =
-        crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
+        crate::composition::LlmClient::from_config(crate::composition::ProviderClientSpecData {
             driver: crate::domain::capability::ProviderDriverKind::OpenAI
                 .as_str()
                 .to_string(),
@@ -100,7 +100,8 @@ async fn llm_client_chat_invocation_stream_is_single_request_pull_stream() {
     let events: Vec<_> = client
         .invocation_stream(
             &scope,
-            &[],
+            "",
+            0,
             &[Message::user("hi")],
             &[],
             &CancellationToken::new(),
@@ -138,7 +139,7 @@ async fn llm_client_responses_invocation_stream_is_single_request_pull_stream() 
     let leaked = Box::leak(response.into_boxed_str());
     let (base_url, requests) = spawn_openai_counting_server(leaked).await;
     let client =
-        crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
+        crate::composition::LlmClient::from_config(crate::composition::ProviderClientSpecData {
             driver: crate::domain::capability::ProviderDriverKind::OpenAI
                 .as_str()
                 .to_string(),
@@ -165,7 +166,8 @@ async fn llm_client_responses_invocation_stream_is_single_request_pull_stream() 
     let events: Vec<_> = client
         .invocation_stream(
             &scope,
-            &[],
+            "",
+            0,
             &[Message::user("hi")],
             &[],
             &CancellationToken::new(),
@@ -214,7 +216,7 @@ async fn responses_stream_keeps_tool_use_when_completed_output_omits_function_ca
     let leaked = Box::leak(response.into_boxed_str());
     let (base_url, _) = spawn_openai_counting_server(leaked).await;
     let client =
-        crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
+        crate::composition::LlmClient::from_config(crate::composition::ProviderClientSpecData {
             driver: crate::domain::capability::ProviderDriverKind::OpenAI
                 .as_str()
                 .to_string(),
@@ -241,7 +243,8 @@ async fn responses_stream_keeps_tool_use_when_completed_output_omits_function_ca
     let events: Vec<_> = client
         .invocation_stream(
             &scope,
-            &[],
+            "",
+            0,
             &[Message::user("create an example")],
             &[],
             &CancellationToken::new(),
@@ -261,18 +264,23 @@ async fn responses_stream_keeps_tool_use_when_completed_output_omits_function_ca
         .iter()
         .filter_map(|event| match event {
             crate::ProviderResponseChunk::Content(
-                crate::ProviderContentData::ToolCallCompleted { call, .. },
-            ) => Some(call),
+                crate::ProviderContentData::ToolCallCompleted {
+                    id,
+                    name,
+                    arguments,
+                    ..
+                },
+            ) => Some((id.clone(), name.clone(), arguments.clone())),
             _ => None,
         })
         .collect();
     assert!(
         matches!(
             completed_calls.as_slice(),
-            [call]
-                if call.id.as_str() == "call_hello"
-                    && call.name == "Write"
-                    && call.arguments == serde_json::json!({"file_path": "examples/hello.rs"})
+            [(id, name, arguments)]
+                if id.as_str() == "call_hello"
+                    && name == "Write"
+                    && *arguments == serde_json::json!({"file_path": "examples/hello.rs"})
         ),
         "expected exactly the streamed tool call, got {completed_calls:?}"
     );

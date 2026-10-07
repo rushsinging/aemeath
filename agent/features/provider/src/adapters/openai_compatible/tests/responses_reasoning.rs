@@ -49,7 +49,7 @@ fn responses_reasoning_effort(
     level: ReasoningLevel,
 ) -> Option<String> {
     let scope = scope_with_level(level);
-    let body = provider.build_responses_request_body(&scope, &[], &[], &[], false);
+    let body = provider.build_responses_request_body(&scope, "", &[], &[], false);
     body.get("reasoning")
         .and_then(|r| r.get("effort"))
         .and_then(|e| e.as_str())
@@ -75,7 +75,7 @@ fn off_chat_omits_reasoning() {
 fn off_responses_omits_reasoning() {
     let provider = openai_provider();
     let scope = scope_with_level(ReasoningLevel::Off);
-    let body = provider.build_responses_request_body(&scope, &[], &[], &[], false);
+    let body = provider.build_responses_request_body(&scope, "", &[], &[], false);
     assert!(
         body.get("reasoning").is_none(),
         "Responses Off must omit reasoning, got {:?}",
@@ -155,7 +155,7 @@ fn responses_effort_matches_driver_wire_effort_for_all_levels() {
         ReasoningLevel::Max,
     ] {
         let resp = responses_reasoning_effort(&provider, *level);
-        let expected = driver.wire_effort(driver.reasoning_capability().resolve(*level));
+        let expected = driver.resolve_effort(*level);
         assert_eq!(
             resp.as_deref(),
             Some(expected),

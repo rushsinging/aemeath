@@ -171,17 +171,15 @@ impl runtime::ProviderPort for ReportedUsageProvider {
         // v3 拆帧：原 Completed{output, usage, stop} → Content… + Usage + Stop。
         let (output, usage, stop_reason) = match invocation_index {
             0 => (
-                vec![provider::ProviderContentData::ToolCall(
-                    provider::ProviderToolCallData {
-                        id: "call-sub-agent".to_string(),
-                        name: "Agent".to_string(),
-                        arguments: serde_json::json!({
-                            "description": "record child usage",
-                            "prompt": "finish successfully",
-                            "agent": "coder"
-                        }),
-                    },
-                )],
+                vec![provider::ProviderContentData::ToolCall {
+                    id: "call-sub-agent".to_string(),
+                    name: "Agent".to_string(),
+                    arguments: serde_json::json!({
+                        "description": "record child usage",
+                        "prompt": "finish successfully",
+                        "agent": "coder"
+                    }),
+                }],
                 Some(provider::TokenUsageData {
                     input_tokens: Some(13),
                     output_tokens: Some(8),
@@ -248,7 +246,7 @@ impl ProviderFactory for ReportedUsageProviderFactory {
                 supports_tools: true,
                 supports_parallel_tool_calls: true,
                 supports_streaming: true,
-                reasoning: provider::ReasoningCapabilityData::none(),
+                supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
                 context_limit: spec.context_window,
                 output_limit: Some(spec.max_tokens as usize),
             },

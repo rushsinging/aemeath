@@ -211,7 +211,7 @@ use futures::StreamExt;
 use hook::HookDispatcher;
 use provider::{
     ProviderContentData, ProviderResponseChunk, ProviderResponseStream,
-    ProviderError, ProviderErrorKind, ProviderStopReasonData, ProviderToolCallData,
+    ProviderError, ProviderErrorKind, ProviderStopReasonData,
     TokenUsageData,
 };
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
@@ -341,7 +341,6 @@ fn test_shell_with_catalog(
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         initial_git_context: String::new(),
         user_context: String::new(),
@@ -445,7 +444,6 @@ fn test_shell_with_task_store(
         max_tool_concurrency: 1,
         max_agent_concurrency: 1,
         agent_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        system_blocks: Vec::new(),
         system_prompt_text: String::new(),
         initial_git_context: String::new(),
         user_context: String::new(),

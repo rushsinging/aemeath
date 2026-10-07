@@ -309,8 +309,7 @@ impl tools::published::typed::TypedTool for SpyTool {
 async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     use crate::application::model::test_support::{test_binding_from_port, TestProviderPort};
     use provider::{
-        ProviderContentData, ProviderResponseChunk, ProviderStopReasonData, ProviderToolCallData,
-        TokenUsageData,
+        ProviderContentData, ProviderResponseChunk, ProviderStopReasonData, TokenUsageData,
     };
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::mpsc;
@@ -361,11 +360,6 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     // ── Provider: first call → tool call, second call → end_turn ──
     let second_call = Arc::new(AtomicBool::new(false));
     let second_call2 = second_call.clone();
-    let tool_call = ProviderToolCallData {
-        id: "toolu_test_001".to_string(),
-        name: "spy".to_string(),
-        arguments: serde_json::json!({}),
-    };
     let model = crate::application::model::test_support::test_model_info();
     let port = TestProviderPort::new(Vec::new(), model.clone()).with_invocation_fn(Arc::new(
         move |_call_idx, request, _cancel| {
@@ -393,9 +387,11 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
                 ])
             } else {
                 futures::stream::iter(vec![
-                    ProviderResponseChunk::Content(ProviderContentData::ToolCall(
-                        tool_call.clone(),
-                    )),
+                    ProviderResponseChunk::Content(ProviderContentData::ToolCall {
+                        id: "toolu_test_001".to_string(),
+                        name: "spy".to_string(),
+                        arguments: serde_json::json!({}),
+                    }),
                     ProviderResponseChunk::Usage(TokenUsageData {
                         input_tokens: Some(5),
                         output_tokens: Some(8),
@@ -544,8 +540,7 @@ impl tools::published::typed::TypedTool for BlockingCancelTool {
 async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
     use crate::application::model::test_support::{test_binding_from_port, TestProviderPort};
     use provider::{
-        ProviderContentData, ProviderResponseChunk, ProviderStopReasonData, ProviderToolCallData,
-        TokenUsageData,
+        ProviderContentData, ProviderResponseChunk, ProviderStopReasonData, TokenUsageData,
     };
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::mpsc;
@@ -579,18 +574,17 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
         }));
 
     // Provider: returns a tool call for blocking_cancel.
-    let tool_call = ProviderToolCallData {
-        id: "toolu_block_001".to_string(),
-        name: "blocking_cancel".to_string(),
-        arguments: serde_json::json!({}),
-    };
     let model = crate::application::model::test_support::test_model_info();
     let port = TestProviderPort::new(Vec::new(), model.clone()).with_invocation_fn(Arc::new(
         move |_call_idx, _request, _cancel| {
-            let tc = tool_call.clone();
+            let tc = ProviderContentData::ToolCall {
+                id: "toolu_block_001".to_string(),
+                name: "blocking_cancel".to_string(),
+                arguments: serde_json::json!({}),
+            };
             Box::pin(async move {
                 Ok(Box::pin(futures::stream::iter(vec![
-                    ProviderResponseChunk::Content(ProviderContentData::ToolCall(tc)),
+                    ProviderResponseChunk::Content(tc),
                     ProviderResponseChunk::Usage(TokenUsageData {
                         input_tokens: Some(5),
                         output_tokens: Some(8),

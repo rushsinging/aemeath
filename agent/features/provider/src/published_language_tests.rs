@@ -9,7 +9,7 @@ fn model_info_unifies_identity_and_capability() {
         supports_tools: true,
         supports_parallel_tool_calls: true,
         supports_streaming: true,
-        reasoning: ReasoningCapabilityData::none(),
+        supported_reasoning: vec![ReasoningLevel::Off],
         context_limit: Some(200_000),
         output_limit: Some(8_192),
     };
@@ -43,9 +43,21 @@ fn provider_error_retryable() {
 
 #[test]
 fn reasoning_capability_none() {
-    let cap = ReasoningCapabilityData::none();
-    assert_eq!(cap.supported(), &[ReasoningLevel::Off]);
-    assert_eq!(cap.maximum(), ReasoningLevel::Off);
+    let info = ModelInfo {
+        provider: "fake".to_string(),
+        model: "off-only".to_string(),
+        supports_tools: false,
+        supports_parallel_tool_calls: false,
+        supports_streaming: true,
+        supported_reasoning: vec![ReasoningLevel::Off],
+        context_limit: None,
+        output_limit: None,
+    };
+    assert_eq!(info.supported_reasoning, &[ReasoningLevel::Off]);
+    assert_eq!(
+        info.resolve_reasoning(ReasoningLevel::High),
+        ReasoningLevel::Off
+    );
 }
 
 #[test]
@@ -56,12 +68,11 @@ fn resolver_selects_highest_supported_level_not_above_requested() {
         supports_tools: true,
         supports_parallel_tool_calls: true,
         supports_streaming: true,
-        reasoning: ReasoningCapabilityData::new([
+        supported_reasoning: vec![
             ReasoningLevel::Off,
             ReasoningLevel::Medium,
             ReasoningLevel::Max,
-        ])
-        .expect("valid sparse capability"),
+        ],
         context_limit: Some(128_000),
         output_limit: Some(8_192),
     };
@@ -75,9 +86,24 @@ fn resolver_selects_highest_supported_level_not_above_requested() {
         (ReasoningLevel::Xhigh, ReasoningLevel::Medium),
         (ReasoningLevel::Max, ReasoningLevel::Max),
     ] {
-        let effective = capability.reasoning.resolve(requested);
+        let effective = capability.resolve_reasoning(requested);
         assert_eq!(effective, expected);
         assert!(effective <= requested);
+    }
+}
+
+/// 测试用 ModelInfo：身份固定，仅阶梯按入参构造（#1861 v4 摊平后
+/// resolve 行为直接锁在实体方法上）。
+fn model_with_supported(supported_reasoning: Vec<ReasoningLevel>) -> ModelInfo {
+    ModelInfo {
+        provider: "fake".to_string(),
+        model: "capability".to_string(),
+        supports_tools: true,
+        supports_parallel_tool_calls: true,
+        supports_streaming: true,
+        supported_reasoning,
+        context_limit: Some(200_000),
+        output_limit: Some(8_192),
     }
 }
 
@@ -85,7 +111,7 @@ fn resolver_selects_highest_supported_level_not_above_requested() {
 fn resolver_preserves_minimal_and_max_when_capability_declares_minimal() {
     // OpenAI driver 的 capability 显式声明七档；resolver 必须把 Minimal 与
     // Max 原样下传，证明共享枚举新增档位不会自动丢失。
-    let openai = ReasoningCapabilityData::new([
+    let openai = model_with_supported(vec![
         ReasoningLevel::Off,
         ReasoningLevel::Minimal,
         ReasoningLevel::Low,
@@ -93,14 +119,16 @@ fn resolver_preserves_minimal_and_max_when_capability_declares_minimal() {
         ReasoningLevel::High,
         ReasoningLevel::Xhigh,
         ReasoningLevel::Max,
-    ])
-    .expect("OpenAI capability includes off and seven levels");
+    ]);
 
     assert_eq!(
-        openai.resolve(ReasoningLevel::Minimal),
+        openai.resolve_reasoning(ReasoningLevel::Minimal),
         ReasoningLevel::Minimal
     );
-    assert_eq!(openai.resolve(ReasoningLevel::Max), ReasoningLevel::Max);
+    assert_eq!(
+        openai.resolve_reasoning(ReasoningLevel::Max),
+        ReasoningLevel::Max
+    );
 }
 
 #[test]
@@ -108,20 +136,36 @@ fn resolver_downgrades_minimal_to_off_when_capability_omits_minimal() {
     // Legacy driver（如 Zhipu/LiteLLM）的 capability 不包含 Minimal：
     // resolver 必须把 Minimal 向下退到 Off，禁止把 Off 静默升级到 Minimal，
     // 也禁止因为 Minimal 不在集合里而 panic 或返回任何非 Off 档位。
-    let legacy = ReasoningCapabilityData::new([
+    let legacy = model_with_supported(vec![
         ReasoningLevel::Off,
         ReasoningLevel::Low,
         ReasoningLevel::Medium,
-    ])
-    .expect("legacy capability includes off");
+    ]);
 
-    assert_eq!(legacy.resolve(ReasoningLevel::Minimal), ReasoningLevel::Off);
+    assert_eq!(
+        legacy.resolve_reasoning(ReasoningLevel::Minimal),
+        ReasoningLevel::Off
+    );
 }
 
 #[test]
-fn reasoning_capability_rejects_empty_or_missing_off_levels() {
-    assert!(ReasoningCapabilityData::new([]).is_err());
-    assert!(ReasoningCapabilityData::new([ReasoningLevel::Medium]).is_err());
+fn resolver_falls_back_to_off_for_empty_or_missing_off_ladders() {
+    // 阶梯缺失 Off 甚至为空时，resolve 永远以 Off 兜底（不 panic）。
+    let empty = model_with_supported(vec![]);
+    assert_eq!(
+        empty.resolve_reasoning(ReasoningLevel::Medium),
+        ReasoningLevel::Off
+    );
+
+    let missing_off = model_with_supported(vec![ReasoningLevel::Medium]);
+    assert_eq!(
+        missing_off.resolve_reasoning(ReasoningLevel::Low),
+        ReasoningLevel::Off
+    );
+    assert_eq!(
+        missing_off.resolve_reasoning(ReasoningLevel::Max),
+        ReasoningLevel::Medium
+    );
 }
 
 #[test]
@@ -191,17 +235,6 @@ fn invocation_request_new_has_empty_tools() {
 fn invocation_request_new_has_empty_system() {
     let req = InvocationRequestData::new("m".to_string(), Vec::new(), 8192, ReasoningLevel::Off);
     assert!(req.system.is_empty());
-}
-
-#[test]
-fn request_system_block_exposes_text_and_cacheable_flag() {
-    let dynamic = RequestSystemBlockData::Text("dynamic".to_string());
-    assert_eq!(dynamic.text(), "dynamic");
-    assert!(!dynamic.is_cacheable());
-
-    let cached = RequestSystemBlockData::Cacheable("static".to_string());
-    assert_eq!(cached.text(), "static");
-    assert!(cached.is_cacheable());
 }
 
 #[test]

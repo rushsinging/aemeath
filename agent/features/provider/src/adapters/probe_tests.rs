@@ -7,7 +7,7 @@ use share::message::Message;
 use share::reasoning::ReasoningLevel;
 use tokio_util::sync::CancellationToken;
 
-use super::super::client::{LlmClient, LlmConfigOptionsData};
+use super::super::client::{LlmClient, ProviderClientSpecData};
 use crate::ports::LlmProvider;
 use crate::published_language::{
     ProviderContentData, ProviderError, ProviderErrorKind, ProviderResponseChunk,
@@ -33,7 +33,8 @@ impl LlmProvider for EventProvider {
     async fn invocation_stream(
         &self,
         resolved: &crate::ports::ResolvedInvocation,
-        _system: &[crate::RequestSystemBlockData],
+        _system: &str,
+        _static_prefix_len: usize,
         messages: &[Message],
         _tools: &[serde_json::Value],
         _cancel: &CancellationToken,
@@ -106,8 +107,8 @@ async fn connectivity_probe_times_out_and_reports_timeout_kind() {
     assert_eq!(error.kind, ProviderErrorKind::Timeout);
 }
 
-fn probe_config() -> LlmConfigOptionsData {
-    LlmConfigOptionsData {
+fn probe_config() -> ProviderClientSpecData {
+    ProviderClientSpecData {
         driver: "anthropic".to_string(),
         source_key: "connect-probe".to_string(),
         api_style: None,

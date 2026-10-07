@@ -14,7 +14,7 @@ impl OpenAICompatibleProvider {
     pub(crate) async fn invoke_single_request_stream(
         &self,
         resolved: &crate::ports::ResolvedInvocation,
-        system: &[crate::RequestSystemBlockData],
+        system: &str,
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
@@ -217,7 +217,8 @@ impl LlmProvider for OpenAICompatibleProvider {
     async fn invocation_stream(
         &self,
         resolved: &crate::ports::ResolvedInvocation,
-        system: &[crate::RequestSystemBlockData],
+        system: &str,
+        _static_prefix_len: usize,
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,

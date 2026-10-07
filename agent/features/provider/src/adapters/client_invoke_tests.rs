@@ -9,12 +9,12 @@
 use super::LlmClient;
 use crate::domain::capability::ReasoningLevel;
 use crate::ports::{LlmProvider, ResolvedInvocation};
+use crate::ModelInfo;
 use crate::ProviderStopReasonData as StopReason;
 use crate::{
     InvocationRequestData, ProviderContentData, ProviderError, ProviderErrorKind,
-    ProviderResponseChunk, RequestSystemBlockData, TokenUsageData,
+    ProviderResponseChunk, TokenUsageData,
 };
-use crate::{ModelInfo, ReasoningCapabilityData};
 
 use async_trait::async_trait;
 use share::message::Message;
@@ -34,8 +34,9 @@ struct CapturedInvocation {
     scope_max_tokens: Option<u32>,
     scope_requested_reasoning: Option<ReasoningLevel>,
     scope_effective_reasoning: Option<ReasoningLevel>,
-    /// `(text, is_cacheable)` per `RequestSystemBlockData`.
-    system_blocks: Vec<(String, bool)>,
+    /// 整段 system prompt 与其可缓存前缀分界（`static_prefix_len`）。
+    system: String,
+    static_prefix_len: usize,
     tool_schemas: Vec<serde_json::Value>,
     invocation_count: u32,
 }
@@ -94,7 +95,8 @@ impl LlmProvider for RecordingProvider {
     async fn invocation_stream(
         &self,
         resolved: &ResolvedInvocation,
-        system: &[RequestSystemBlockData],
+        system: &str,
+        static_prefix_len: usize,
         _messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
@@ -106,10 +108,8 @@ impl LlmProvider for RecordingProvider {
             c.scope_max_tokens = Some(resolved.max_tokens);
             c.scope_requested_reasoning = Some(resolved.requested_reasoning);
             c.scope_effective_reasoning = Some(resolved.effective_reasoning);
-            c.system_blocks = system
-                .iter()
-                .map(|b| (b.text().to_string(), b.is_cacheable()))
-                .collect();
+            c.system = system.to_string();
+            c.static_prefix_len = static_prefix_len;
             c.tool_schemas = tool_schemas.to_vec();
             c.invocation_count += 1;
         }
@@ -160,7 +160,7 @@ fn test_model_info() -> ModelInfo {
         supports_tools: true,
         supports_parallel_tool_calls: false,
         supports_streaming: true,
-        reasoning: ReasoningCapabilityData::none(),
+        supported_reasoning: vec![ReasoningLevel::Off],
         context_limit: Some(128_000),
         output_limit: Some(8_192),
     }
@@ -259,7 +259,7 @@ async fn invoke_propagates_provider_error() {
         supports_tools: false,
         supports_parallel_tool_calls: false,
         supports_streaming: true,
-        reasoning: ReasoningCapabilityData::none(),
+        supported_reasoning: vec![ReasoningLevel::Off],
         context_limit: None,
         output_limit: None,
     };
@@ -305,12 +305,11 @@ async fn invoke_converts_system_blocks_tools_and_uses_neutral_scope_model() {
 
     let mut request =
         InvocationRequestData::new("fake-model".to_string(), vec![], 8192, ReasoningLevel::Off);
-    // Provider-neutral system blocks: one cacheable, one dynamic.
-    request.system = vec![
-        RequestSystemBlockData::Text("stable prefix first part".to_string()),
-        RequestSystemBlockData::Cacheable("stable prefix boundary".to_string()),
-        RequestSystemBlockData::Text("today is monday".to_string()),
-    ];
+    // 整段 system prompt（context/runtime 拼好），可缓存前缀止于最后一个
+    // cache_break 块末尾（连接符归后缀段）。
+    let static_prefix = "stable prefix first part\n\nstable prefix boundary";
+    request.system = format!("{static_prefix}\n\ntoday is monday");
+    request.static_prefix_len = static_prefix.len();
     // A tool schema with full {name, description, input_schema}.
     request.tools = vec![serde_json::json!({
         "name": "get_weather",
@@ -333,16 +332,13 @@ async fn invoke_converts_system_blocks_tools_and_uses_neutral_scope_model() {
     assert_ne!(c.scope_model.as_deref(), Some("fake-provider/fake-model"));
     assert_eq!(c.scope_max_tokens, Some(8192));
 
-    // System blocks reach the provider unchanged:
-    //     Cacheable → cache_control present (ephemeral), Text → absent.
+    // System prompt reaches the provider unchanged, together with the
+    // byte-length cache boundary at the last cacheable block's end.
     assert_eq!(
-        c.system_blocks,
-        vec![
-            ("stable prefix first part".to_string(), false),
-            ("stable prefix boundary".to_string(), true),
-            ("today is monday".to_string(), false),
-        ]
+        c.system,
+        "stable prefix first part\n\nstable prefix boundary\n\ntoday is monday"
     );
+    assert_eq!(c.static_prefix_len, static_prefix.len());
 
     // (2) Tool schema converted to a complete JSON object
     //     {name, description, input_schema}, not the bare input_schema.
@@ -355,10 +351,9 @@ async fn invoke_converts_system_blocks_tools_and_uses_neutral_scope_model() {
 
 #[tokio::test]
 async fn invoke_clamps_requested_reasoning_to_capability() {
-    // ModelInfo 的 reasoning 只支持 Off 和 Medium；请求 Max 必须 clamp 到 Medium。
+    // ModelInfo 的 supported_reasoning 只有 Off 和 Medium；请求 Max 必须 clamp 到 Medium。
     let mut model = test_model_info();
-    model.reasoning = ReasoningCapabilityData::new([ReasoningLevel::Off, ReasoningLevel::Medium])
-        .expect("valid capability");
+    model.supported_reasoning = vec![ReasoningLevel::Off, ReasoningLevel::Medium];
 
     let (client, captured) = build_client(RecordingProvider::new(
         "fake-provider",

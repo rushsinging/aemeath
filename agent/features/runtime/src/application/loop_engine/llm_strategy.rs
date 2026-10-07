@@ -4,7 +4,6 @@
 #[path = "llm_strategy_tests.rs"]
 mod tests;
 
-use provider::RequestSystemBlockData;
 use share::message::Message;
 
 use crate::application::loop_engine::chat::InvocationResponse;
@@ -16,7 +15,12 @@ use crate::ports::ContextWindowData;
 pub(crate) struct InvocationContext {
     messages_for_api: Vec<Message>,
     pub tool_schemas: Vec<serde_json::Value>,
-    pub system_blocks: Vec<RequestSystemBlockData>,
+    /// 拼好的整段 system prompt（块间 `\n\n` 连接——#1861 v4：块级
+    /// 原块级 system 数据类型消除，拼接职责在此收口）。
+    pub system: String,
+    /// 可缓存前缀的字节长度：最后一个 `cache_break` 块末尾的累计字节数
+    /// （0 = 无分界；分界天然落在块间，按字节切分 char-safe）。
+    pub static_prefix_len: usize,
 }
 
 impl InvocationContext {
@@ -29,7 +33,7 @@ impl InvocationContext {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct InvocationMappingLogSummary {
     pub messages: usize,
-    pub system_blocks: usize,
+    pub system_len: usize,
     pub tool_schemas: usize,
     pub reminder_messages: usize,
 }
@@ -39,7 +43,7 @@ pub(crate) fn invocation_mapping_log_summary(
 ) -> InvocationMappingLogSummary {
     InvocationMappingLogSummary {
         messages: invocation_context.messages_for_api().len(),
-        system_blocks: invocation_context.system_blocks.len(),
+        system_len: invocation_context.system.len(),
         tool_schemas: invocation_context.tool_schemas.len(),
         reminder_messages: invocation_context
             .messages_for_api
@@ -50,7 +54,8 @@ pub(crate) fn invocation_mapping_log_summary(
 }
 
 /// Map a [`ContextWindowData`] into the three invocation primitives:
-/// LLM-visible messages, tool schema JSON objects, and provider system blocks.
+/// LLM-visible messages, tool schema JSON objects, and the joined system prompt
+/// (plus its cacheable-prefix byte boundary).
 ///
 /// This logic is character-identical between Main and Sub.
 pub(crate) fn extract_invocation_context(window: &ContextWindowData) -> InvocationContext {
@@ -64,22 +69,25 @@ pub(crate) fn extract_invocation_context(window: &ContextWindowData) -> Invocati
         .iter()
         .map(|schema| schema.to_tool_definition())
         .collect::<Vec<_>>();
-    let system_blocks = window
-        .system_blocks
-        .iter()
-        .map(|block| {
-            if block.cache_break {
-                debug_assert!(block.cacheable, "cache breakpoint 必须位于可缓存前缀");
-                RequestSystemBlockData::Cacheable(block.content.clone())
-            } else {
-                RequestSystemBlockData::Text(block.content.clone())
-            }
-        })
-        .collect::<Vec<_>>();
+    // 块映射改拼接：system = blocks.join("\n\n")；static_prefix_len = 最后一个
+    // cache_break 块末尾的累计字节长度（含该块，不含其后的连接符）。
+    let mut system = String::new();
+    let mut static_prefix_len = 0usize;
+    for (index, block) in window.system_blocks.iter().enumerate() {
+        if index > 0 {
+            system.push_str("\n\n");
+        }
+        system.push_str(&block.content);
+        if block.cache_break {
+            debug_assert!(block.cacheable, "cache breakpoint 必须位于可缓存前缀");
+            static_prefix_len = system.len();
+        }
+    }
     InvocationContext {
         messages_for_api,
         tool_schemas,
-        system_blocks,
+        system,
+        static_prefix_len,
     }
 }
 

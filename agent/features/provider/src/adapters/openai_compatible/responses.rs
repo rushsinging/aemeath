@@ -15,21 +15,13 @@ impl OpenAICompatibleProvider {
     pub(crate) fn build_responses_request_body(
         &self,
         resolved: &crate::ports::ResolvedInvocation,
-        system: &[crate::RequestSystemBlockData],
+        system: &str,
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         stream: bool,
     ) -> serde_json::Value {
-        // 将 system blocks 合并为 instructions
-        let instructions: String = if system.is_empty() {
-            String::new()
-        } else {
-            system
-                .iter()
-                .map(|b| b.text())
-                .collect::<Vec<_>>()
-                .join("\n\n")
-        };
+        // 整段 system prompt 即 instructions（#1861 v4：上游已拼接）。
+        let instructions = system.to_string();
 
         // 将 messages 转换为 input 格式
         let input = messages_to_responses_input(messages);

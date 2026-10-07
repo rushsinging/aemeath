@@ -7,14 +7,14 @@ use share::message::{ContentBlock, Message, Role};
 pub(crate) trait OllamaProviderConversion {
     fn convert_messages(
         &self,
-        system: &[crate::RequestSystemBlockData],
+        system: &str,
         messages: &[Message],
     ) -> Result<Vec<serde_json::Value>, crate::LlmError>;
     fn convert_tools(tool_schemas: &[serde_json::Value]) -> Vec<serde_json::Value>;
     fn build_request_body(
         &self,
         resolved: &crate::ports::ResolvedInvocation,
-        system: &[crate::RequestSystemBlockData],
+        system: &str,
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         stream: bool,
@@ -31,7 +31,7 @@ impl OllamaProviderConversion for OllamaProvider {
     ///   (no `tool_call_id` / `tool_name` fields required)
     fn convert_messages(
         &self,
-        system: &[crate::RequestSystemBlockData],
+        system: &str,
         messages: &[Message],
     ) -> Result<Vec<serde_json::Value>, crate::LlmError> {
         let mut ollama_messages = Vec::new();
@@ -61,8 +61,12 @@ impl OllamaProviderConversion for OllamaProvider {
             }
         }
 
-        // Build system message: original system blocks + extracted reminders
-        let mut system_parts: Vec<String> = system.iter().map(|b| b.text().to_string()).collect();
+        // Build system message: 整段 system prompt + extracted reminders
+        // （#1861 v4：上游已拼接为整串，块级 join 消除）。
+        let mut system_parts: Vec<String> = Vec::new();
+        if !system.is_empty() {
+            system_parts.push(system.to_string());
+        }
         system_parts.extend(system_extras);
 
         if !system_parts.is_empty() {
@@ -188,7 +192,7 @@ impl OllamaProviderConversion for OllamaProvider {
     fn build_request_body(
         &self,
         resolved: &crate::ports::ResolvedInvocation,
-        system: &[crate::RequestSystemBlockData],
+        system: &str,
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         stream: bool,

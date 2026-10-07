@@ -59,7 +59,7 @@ async fn llm_client_ollama_invocation_stream_is_single_request_pull_stream() {
     let leaked = Box::leak(response.into_boxed_str());
     let (base_url, requests) = spawn_counting_server(leaked).await;
     let client =
-        crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
+        crate::composition::LlmClient::from_config(crate::composition::ProviderClientSpecData {
             driver: crate::ProviderDriverKind::Ollama.as_str().to_string(),
             source_key: "ollama".to_string(),
             api_style: None,
@@ -84,7 +84,8 @@ async fn llm_client_ollama_invocation_stream_is_single_request_pull_stream() {
     let events: Vec<_> = client
         .invocation_stream(
             &resolved,
-            &[],
+            "",
+            0,
             &[Message::user("hi")],
             &[],
             &CancellationToken::new(),

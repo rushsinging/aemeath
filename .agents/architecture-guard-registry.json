@@ -1718,9 +1718,8 @@
       "allowed_symbols": [
         "InvocationRequestData",
         "LlmClient",
-        "LlmConfigOptionsData",
         "ModelInfo",
-        "ProviderAssemblyWiring",
+        "ProviderClientSpecData",
         "ProviderContentData",
         "ProviderError",
         "ProviderErrorKind",
@@ -1728,13 +1727,10 @@
         "ProviderResponseChunk",
         "ProviderResponseStream",
         "ProviderStopReasonData",
-        "ProviderToolCallData",
-        "ReasoningCapabilityData",
-        "RequestSystemBlockData",
         "TokenUsageData",
         "TransportPool",
-        "probe_connectivity",
-        "wire_provider_assembly"
+        "wire_provider_client",
+        "wire_test_provider_client"
       ],
       "reason": "F-2：provider crate 根窄 façade（#1022 登记，消费者证明制）",
       "profile": "fast"

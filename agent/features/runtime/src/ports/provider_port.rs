@@ -19,13 +19,11 @@ use async_trait::async_trait;
 // 新 PL StopReason 通过别名 ProviderStopReasonData 导出，此处还原为 StopReason。
 pub use provider::{
     InvocationRequestData, ModelInfo, ProviderError, ProviderResponseStream,
-    ProviderStopReasonData as StopReason, RequestSystemBlockData, TokenUsageData,
+    ProviderStopReasonData as StopReason, TokenUsageData,
 };
 
 #[cfg(test)]
-pub use provider::{
-    ProviderContentData, ProviderErrorKind, ProviderResponseChunk, ReasoningCapabilityData,
-};
+pub use provider::{ProviderContentData, ProviderErrorKind, ProviderResponseChunk};
 
 // ReasoningLevel 已由 provider crate 从 core::provider re-export。
 pub use share::reasoning::ReasoningLevel;
@@ -158,7 +156,7 @@ pub(crate) mod fake {
                     supports_tools: true,
                     supports_parallel_tool_calls: true,
                     supports_streaming: true,
-                    reasoning: ReasoningCapabilityData::none(),
+                    supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
                     context_limit: spec.context_window,
                     output_limit: Some(spec.max_tokens as usize),
                 },

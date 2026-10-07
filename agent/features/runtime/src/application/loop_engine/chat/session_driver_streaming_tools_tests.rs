@@ -70,21 +70,18 @@ impl ScriptedLlmProvider for StepCancelledStreamingToolProvider {
             ])));
         }
         let provider_id = format!("toolu_{}_cancel", self.tool_name);
-        let tool_call = ProviderToolCallData {
-            id: provider_id.clone(),
-            name: self.tool_name.to_string(),
-            arguments: serde_json::json!({}),
-        };
         let cancel = request.cancellation.clone();
         let stream = futures::stream::iter(vec![
             ProviderResponseChunk::Content(ProviderContentData::ToolCallStarted {
                 index: 0,
-                provider_id: Some(provider_id),
+                provider_id: Some(provider_id.clone()),
                 name: self.tool_name.to_string(),
             }),
             ProviderResponseChunk::Content(ProviderContentData::ToolCallCompleted {
                 index: 0,
-                call: tool_call,
+                id: provider_id.clone(),
+                name: self.tool_name.to_string(),
+                arguments: serde_json::json!({}),
             }),
         ])
         .chain(futures::stream::once(async move {
@@ -323,11 +320,6 @@ impl ScriptedLlmProvider for StreamingToolRetryProvider {
             .push(request.messages.to_vec());
         if call_num == 1 {
             // 先发完整的 ToolCallCompleted delta（旁路执行已触发），随后流失败。
-            let tool_call = ProviderToolCallData {
-                id: "toolu_retry_001".to_string(),
-                name: "NoopMarker".to_string(),
-                arguments: serde_json::json!({"marker": "retry-drop"}),
-            };
             let stream = futures::stream::iter(vec![
                 ProviderResponseChunk::Content(ProviderContentData::ToolCallStarted {
                     index: 0,
@@ -341,7 +333,9 @@ impl ScriptedLlmProvider for StreamingToolRetryProvider {
                 }),
                 ProviderResponseChunk::Content(ProviderContentData::ToolCallCompleted {
                     index: 0,
-                    call: tool_call,
+                    id: "toolu_retry_001".to_string(),
+                    name: "NoopMarker".to_string(),
+                    arguments: serde_json::json!({"marker": "retry-drop"}),
                 }),
                 ProviderResponseChunk::Error(ProviderError::retryable(
                     ProviderErrorKind::Protocol,
@@ -498,11 +492,9 @@ impl ScriptedLlmProvider for StreamingToolRetryOrphanProvider {
                 }),
                 ProviderResponseChunk::Content(ProviderContentData::ToolCallCompleted {
                     index: 0,
-                    call: ProviderToolCallData {
-                        id: "toolu_retry_orphan_a".to_string(),
-                        name: "NoopMarker".to_string(),
-                        arguments: serde_json::json!({"marker": "orphan-a"}),
-                    },
+                    id: "toolu_retry_orphan_a".to_string(),
+                    name: "NoopMarker".to_string(),
+                    arguments: serde_json::json!({"marker": "orphan-a"}),
                 }),
                 ProviderResponseChunk::Error(ProviderError::retryable(
                     ProviderErrorKind::Protocol,
@@ -512,11 +504,6 @@ impl ScriptedLlmProvider for StreamingToolRetryOrphanProvider {
             Ok(Box::pin(stream))
         } else if call_num == 2 {
             // 流 2（retry）：重新发出同参数工具调用并正常完成。
-            let completed_call = ProviderToolCallData {
-                id: "toolu_retry_pair_b".to_string(),
-                name: "NoopMarker".to_string(),
-                arguments: serde_json::json!({"marker": "pair-b"}),
-            };
             let stream = futures::stream::iter(vec![
                 ProviderResponseChunk::Content(ProviderContentData::ToolCallStarted {
                     index: 0,
@@ -525,7 +512,9 @@ impl ScriptedLlmProvider for StreamingToolRetryOrphanProvider {
                 }),
                 ProviderResponseChunk::Content(ProviderContentData::ToolCallCompleted {
                     index: 0,
-                    call: completed_call.clone(),
+                    id: "toolu_retry_pair_b".to_string(),
+                    name: "NoopMarker".to_string(),
+                    arguments: serde_json::json!({"marker": "pair-b"}),
                 }),
                 ProviderResponseChunk::Usage(usage().unwrap_or_default()),
                 ProviderResponseChunk::Stop(ProviderStopReasonData::ToolUse),

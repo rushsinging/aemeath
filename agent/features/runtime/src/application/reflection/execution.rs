@@ -119,15 +119,16 @@ async fn call_provider(
     prompt: &str,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> ReflectionExecutionResultType<(String, u32, u32)> {
-    use crate::ports::provider_port::{InvocationRequestData, RequestSystemBlockData};
+    use crate::ports::provider_port::InvocationRequestData;
 
+    // 整段 system prompt 直收（#1861 v4）；反射提示词不参与 prompt caching
+    // ——static_prefix_len 保持 0（原 Text 块语义等价）。
     let request = InvocationRequestData {
         model: invocation.model.model.clone(),
         cancellation: cancel.clone(),
         messages: vec![share::message::Message::user(prompt)].into(),
-        system: vec![RequestSystemBlockData::Text(
-            invocation.system_prompt_text.to_string(),
-        )],
+        system: invocation.system_prompt_text.to_string(),
+        static_prefix_len: 0,
         tools: vec![],
         max_output_tokens: invocation.max_tokens,
         reasoning: invocation.requested_reasoning,

@@ -77,7 +77,8 @@ async fn anthropic_invocation_stream_returns_non_retryable_rate_limited_error_af
     let error = match provider
         .invocation_stream(
             &resolved,
-            &[],
+            "",
+            0,
             &[Message::user("hi")],
             &[],
             &CancellationToken::new(),
@@ -114,7 +115,7 @@ async fn llm_client_invocation_stream_reaches_anthropic_without_callback() {
     let leaked: &'static str = Box::leak(response.into_boxed_str());
     let (base_url, request_count) = spawn_counting_server(leaked).await;
     let client =
-        crate::composition::LlmClient::from_config(crate::composition::LlmConfigOptionsData {
+        crate::composition::LlmClient::from_config(crate::composition::ProviderClientSpecData {
             driver: crate::ProviderDriverKind::Anthropic.as_str().to_string(),
             source_key: "anthropic".to_string(),
             api_style: None,
@@ -139,7 +140,8 @@ async fn llm_client_invocation_stream_reaches_anthropic_without_callback() {
     let events: Vec<_> = client
         .invocation_stream(
             &resolved,
-            &[],
+            "",
+            0,
             &[Message::user("hi")],
             &[],
             &CancellationToken::new(),
@@ -198,7 +200,7 @@ async fn invoke_stream_emits_ordered_deltas_and_single_completion_from_one_reque
     let cancel = CancellationToken::new();
 
     let mut stream = provider
-        .invoke_stream(&resolved, &[], &[Message::user("hi")], &[], &cancel)
+        .invoke_stream(&resolved, "", 0, &[Message::user("hi")], &[], &cancel)
         .await
         .expect("stream creation succeeds");
     let mut events = Vec::new();
@@ -256,7 +258,7 @@ async fn invocation_stream_returns_context_too_long_on_413_without_retrying() {
     let cancel = CancellationToken::new();
 
     let result = provider
-        .invocation_stream(&resolved, &[], &[Message::user("hi")], &[], &cancel)
+        .invocation_stream(&resolved, "", 0, &[Message::user("hi")], &[], &cancel)
         .await;
     let err = match result {
         Ok(_) => panic!("expected 413 → ProviderError::ContextTooLong, got Ok"),
@@ -300,7 +302,7 @@ async fn invocation_stream_returns_upstream_unavailable_on_400_without_retrying(
     let cancel = CancellationToken::new();
 
     let result = provider
-        .invocation_stream(&resolved, &[], &[Message::user("hi")], &[], &cancel)
+        .invocation_stream(&resolved, "", 0, &[Message::user("hi")], &[], &cancel)
         .await;
     let err = match result {
         Ok(_) => panic!("expected 400 → ProviderError::InvalidRequest, got Ok"),
@@ -344,7 +346,7 @@ async fn invocation_stream_returns_non_retryable_rate_limited_on_429() {
     let cancel = CancellationToken::new();
 
     let result = provider
-        .invocation_stream(&resolved, &[], &[Message::user("hi")], &[], &cancel)
+        .invocation_stream(&resolved, "", 0, &[Message::user("hi")], &[], &cancel)
         .await;
     let err = match result {
         Ok(_) => panic!("expected single-attempt 429 → ProviderError::RateLimited, got Ok"),
@@ -461,7 +463,7 @@ async fn invocation_stream_400_logs_final_failure_disposition() {
     let cancel = CancellationToken::new();
 
     let result = provider
-        .invocation_stream(&resolved, &[], &[Message::user("hi")], &[], &cancel)
+        .invocation_stream(&resolved, "", 0, &[Message::user("hi")], &[], &cancel)
         .await;
     match result {
         Ok(_) => panic!("expected 400 → terminal ProviderError::InvalidRequest, got Ok"),

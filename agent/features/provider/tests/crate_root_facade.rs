@@ -1,7 +1,6 @@
 use provider::{
     InvocationRequestData, ModelInfo, ProviderContentData, ProviderError, ProviderErrorKind,
-    ProviderResponse, ProviderResponseChunk, ProviderStopReasonData, ProviderToolCallData,
-    ReasoningCapabilityData, RequestSystemBlockData, TokenUsageData,
+    ProviderResponse, ProviderResponseChunk, ProviderStopReasonData, TokenUsageData,
 };
 use share::message::Message;
 use share::reasoning::ReasoningLevel;
@@ -17,10 +16,7 @@ fn crate_root_exposes_complete_provider_published_language_as_send_sync_values()
     assert_send_sync::<ProviderResponse>();
     assert_send_sync::<ProviderResponseChunk>();
     assert_send_sync::<ProviderStopReasonData>();
-    assert_send_sync::<ProviderToolCallData>();
     assert_send_sync::<TokenUsageData>();
-    assert_send_sync::<ReasoningCapabilityData>();
-    assert_send_sync::<RequestSystemBlockData>();
 }
 
 #[test]

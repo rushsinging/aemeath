@@ -23,13 +23,30 @@ pub struct CacheControl {
 }
 
 impl SystemBlockData {
-    /// Create a static block with ephemeral cache control.
-    /// provider 中性块 → wire 形态（Cacheable→cached，Text→dynamic）。
-    pub fn from_request_block(block: &crate::RequestSystemBlockData) -> Self {
-        match block {
-            crate::RequestSystemBlockData::Text(text) => SystemBlockData::dynamic(text.clone()),
-            crate::RequestSystemBlockData::Cacheable(text) => SystemBlockData::cached(text.clone()),
+    /// 整段 system prompt → wire 块序列（#1861 v4：上游拼好整串，
+    /// 可缓存前缀分界由 `static_prefix_len` 字节位置给出）。
+    ///
+    /// - 空 prompt → 空序列（保持现状 `system: []`）；
+    /// - `static_prefix_len == 0` → 整段一个无 cache 标记的块；
+    /// - 否则前缀段（`[..static_prefix_len]`）带 `cache_control: ephemeral`、
+    ///   余下段无标记（空则省略）。分界天然落在原块边界上，char-safe；
+    ///   越界/非字符边界按 0 处理（防御，不 panic）。
+    pub fn from_prompt(system: &str, static_prefix_len: usize) -> Vec<SystemBlockData> {
+        if system.is_empty() {
+            return Vec::new();
         }
+        let split_ok = static_prefix_len > 0
+            && static_prefix_len <= system.len()
+            && system.is_char_boundary(static_prefix_len);
+        if !split_ok {
+            return vec![SystemBlockData::dynamic(system.to_string())];
+        }
+        let (cached, rest) = system.split_at(static_prefix_len);
+        let mut blocks = vec![SystemBlockData::cached(cached.to_string())];
+        if !rest.is_empty() {
+            blocks.push(SystemBlockData::dynamic(rest.to_string()));
+        }
+        blocks
     }
 
     pub fn cached(text: String) -> Self {
@@ -211,6 +228,69 @@ mod usage_tests {
         };
 
         assert_eq!(usage.normalized_total_tokens(110), 230);
+    }
+}
+
+/// #1861 v4：整段 system + `static_prefix_len` 分界的 cache 切分契约。
+#[cfg(test)]
+mod prompt_cache_split_tests {
+    use super::SystemBlockData;
+
+    #[test]
+    fn prefix_block_carries_ephemeral_and_suffix_block_has_no_marker() {
+        let system = "static prefix\n\ndynamic suffix";
+        // 分界落在最后一个可缓存块末尾（连接符归后缀段）——llm_strategy 的
+        // static_prefix_len 语义。
+        let cut = "static prefix".len();
+        let blocks = SystemBlockData::from_prompt(system, cut);
+
+        assert_eq!(blocks.len(), 2, "两段 join：前缀段 + 后缀段");
+        assert_eq!(blocks[0].text, "static prefix");
+        assert_eq!(
+            blocks[0]
+                .cache_control
+                .as_ref()
+                .map(|control| control.control_type.as_str()),
+            Some("ephemeral"),
+            "前缀段必须带 cache_control: ephemeral"
+        );
+        assert_eq!(blocks[1].text, "\n\ndynamic suffix");
+        assert!(blocks[1].cache_control.is_none(), "后缀段必须无 cache 标记");
+    }
+
+    #[test]
+    fn zero_prefix_marks_whole_prompt_unmarked() {
+        let blocks = SystemBlockData::from_prompt("entire prompt", 0);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].text, "entire prompt");
+        assert!(blocks[0].cache_control.is_none());
+    }
+
+    #[test]
+    fn full_length_prefix_yields_single_cached_block() {
+        let blocks = SystemBlockData::from_prompt("fully cacheable", 15);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(
+            blocks[0]
+                .cache_control
+                .as_ref()
+                .map(|control| control.control_type.as_str()),
+            Some("ephemeral")
+        );
+    }
+
+    #[test]
+    fn empty_prompt_yields_no_blocks() {
+        assert!(SystemBlockData::from_prompt("", 0).is_empty());
+    }
+
+    #[test]
+    fn non_char_boundary_cut_falls_back_to_unmarked_whole_prompt() {
+        // "é" 2 字节——cut=1 落在字符中间，必须回退而非 panic。
+        let blocks = SystemBlockData::from_prompt("é prompt", 1);
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0].cache_control.is_none());
+        assert_eq!(blocks[0].text, "é prompt");
     }
 }
 

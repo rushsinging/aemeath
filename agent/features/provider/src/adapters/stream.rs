@@ -14,7 +14,7 @@ use crate::adapters::wire::*;
 use crate::domain::capability::ReasoningLevel;
 use crate::{
     ProviderContentData, ProviderError, ProviderErrorKind, ProviderResponseChunk,
-    ProviderResponseStream, ProviderStopReasonData, ProviderToolCallData, TokenUsageData,
+    ProviderResponseStream, ProviderStopReasonData, TokenUsageData,
 };
 use futures_util::StreamExt;
 use reqwest::Response;
@@ -96,11 +96,9 @@ pub(crate) trait InvocationSink: Send {
     ) {
         self.on_delta(ProviderContentData::ToolCallCompleted {
             index,
-            call: ProviderToolCallData {
-                id,
-                name,
-                arguments,
-            },
+            id,
+            name,
+            arguments,
         });
     }
 }

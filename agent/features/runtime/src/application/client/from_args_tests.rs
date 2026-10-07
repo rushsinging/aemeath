@@ -350,7 +350,6 @@ async fn make_test_shell(
         10,
         4,
         Arc::new(tokio::sync::Semaphore::new(4)),
-        Vec::new(),
         String::new(),
         String::new(),
         String::new(),
@@ -391,7 +390,6 @@ async fn session_runtime_holds_session_state_without_runtime_context() {
     let _session_id = shell.session_snapshot().session_id().to_string();
 
     // SessionRuntime has prompt bootstrap fields.
-    let _system_blocks = &shell.system_blocks;
     let _skill_snapshot = &shell.initial_skill_snapshot;
     let _initial_git = &shell.initial_git_context;
 
@@ -661,7 +659,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         crate::composition::wire_sdk_chat_ingress(),
         initial_provider,
         SessionBootstrapAssemblyData::new(root.clone(), 8192, true, false, None),
-        PromptAssemblyData::new(Vec::new(), String::new(), String::new(), "test-model"),
+        PromptAssemblyData::new(String::new(), String::new(), String::new(), "test-model"),
         SkillBootstrapAssemblyData::new(
             skill_wiring.catalog(),
             workspace.clone(),

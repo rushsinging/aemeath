@@ -14,7 +14,7 @@ fn context() -> UsageRecordContext {
             supports_tools: true,
             supports_parallel_tool_calls: true,
             supports_streaming: true,
-            reasoning: provider::ReasoningCapabilityData::none(),
+            supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
             context_limit: Some(128_000),
             output_limit: Some(8_192),
         },

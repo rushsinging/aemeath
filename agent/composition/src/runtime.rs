@@ -338,7 +338,7 @@ pub(crate) async fn from_args_with_gateways(
     )
     .await;
     let prompt = runtime::PromptAssemblyData::new(
-        vec![provider::RequestSystemBlockData::Cacheable(static_prompt)],
+        static_prompt,
         prompt_parts.initial_git_context,
         prompt_parts.claude_md,
         initial_provider.binding().model.model.clone(),

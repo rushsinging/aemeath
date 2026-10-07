@@ -3,10 +3,8 @@ use share::message::{ContentBlock, Message, Role};
 
 #[test]
 fn system_message_uses_stable_prefix_without_anthropic_cache_control() {
-    let system = vec![crate::RequestSystemBlockData::Text(
-        "stable instructions".to_string(),
-    )];
-    let converted = OpenAICompatibleProvider::convert_messages(&system, &[], false).unwrap();
+    let system = "stable instructions";
+    let converted = OpenAICompatibleProvider::convert_messages(system, &[], false).unwrap();
 
     assert_eq!(
         converted,
@@ -35,7 +33,7 @@ fn test_convert_messages_preserves_real_reasoning_content_with_tool_calls() {
         ],
         metadata: None,
     }];
-    let converted = OpenAICompatibleProvider::convert_messages(&[], &messages, true).unwrap();
+    let converted = OpenAICompatibleProvider::convert_messages("", &messages, true).unwrap();
     let assistant = converted
         .iter()
         .find(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))
@@ -63,7 +61,7 @@ fn test_convert_messages_preserves_real_reasoning_content_even_when_reasoning_di
         ],
         metadata: None,
     }];
-    let converted = OpenAICompatibleProvider::convert_messages(&[], &messages, true).unwrap();
+    let converted = OpenAICompatibleProvider::convert_messages("", &messages, true).unwrap();
     let assistant = converted
         .iter()
         .find(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))
@@ -87,7 +85,7 @@ fn test_convert_messages_omits_reasoning_content_when_reasoning_disabled() {
         }],
         metadata: None,
     }];
-    let converted = OpenAICompatibleProvider::convert_messages(&[], &messages, false).unwrap();
+    let converted = OpenAICompatibleProvider::convert_messages("", &messages, false).unwrap();
     let assistant = converted
         .iter()
         .find(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))
@@ -107,7 +105,7 @@ fn test_convert_messages_drops_reasoning_only_assistant() {
         }],
         metadata: None,
     }];
-    let converted = OpenAICompatibleProvider::convert_messages(&[], &messages, true).unwrap();
+    let converted = OpenAICompatibleProvider::convert_messages("", &messages, true).unwrap();
 
     assert!(converted.iter().all(|m| {
         m.get("role").and_then(|v| v.as_str()) != Some("assistant")
@@ -161,7 +159,7 @@ fn test_convert_messages_preserves_all_historical_thinking() {
             metadata: None,
         },
     ];
-    let converted = OpenAICompatibleProvider::convert_messages(&[], &messages, true).unwrap();
+    let converted = OpenAICompatibleProvider::convert_messages("", &messages, true).unwrap();
     let assistants: Vec<_> = converted
         .iter()
         .filter(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))
@@ -228,7 +226,7 @@ fn test_convert_messages_preserves_historical_thinking_with_tool_calls() {
             metadata: None,
         },
     ];
-    let converted = OpenAICompatibleProvider::convert_messages(&[], &messages, true).unwrap();
+    let converted = OpenAICompatibleProvider::convert_messages("", &messages, true).unwrap();
     let assistants: Vec<_> = converted
         .iter()
         .filter(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))
@@ -288,7 +286,7 @@ fn test_convert_messages_current_turn_without_thinking_keeps_historical() {
             metadata: None,
         },
     ];
-    let converted = OpenAICompatibleProvider::convert_messages(&[], &messages, true).unwrap();
+    let converted = OpenAICompatibleProvider::convert_messages("", &messages, true).unwrap();
     let assistants: Vec<_> = converted
         .iter()
         .filter(|m| m.get("role").and_then(|v| v.as_str()) == Some("assistant"))

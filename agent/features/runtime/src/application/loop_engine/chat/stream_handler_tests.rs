@@ -3,7 +3,6 @@ use super::stream_handler::{InvocationEventReducer, InvocationResponse};
 use crate::application::tool::coordination::identity::ToolIdentityRegistry;
 use provider::{
     ProviderContentData, ProviderErrorKind, ProviderResponseChunk, ProviderStopReasonData,
-    ProviderToolCallData,
 };
 use std::sync::{Arc, Mutex};
 
@@ -124,11 +123,11 @@ fn reducer_rejects_empty_terminal_completions_as_retryable_protocol_errors() {
 fn reducer_accepts_nonblank_text_and_tool_call_terminal_completions() {
     let cases = [
         vec![ProviderContentData::Text("answer".into())],
-        vec![ProviderContentData::ToolCall(ProviderToolCallData {
+        vec![ProviderContentData::ToolCall {
             id: "tool-1".into(),
             name: "Read".into(),
             arguments: serde_json::json!({}),
-        })],
+        }],
     ];
 
     for output in cases {

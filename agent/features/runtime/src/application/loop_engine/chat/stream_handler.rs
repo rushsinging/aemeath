@@ -60,7 +60,7 @@ pub struct InvocationEventReducer<S: ChatEventSink> {
 fn has_actionable_output(output: &[ProviderContentData]) -> bool {
     output.iter().any(|block| match block {
         ProviderContentData::Text(text) => !text.trim().is_empty(),
-        ProviderContentData::ToolCall(_) => true,
+        ProviderContentData::ToolCall { .. } => true,
         ProviderContentData::Thinking { .. } => false,
         // 增量帧不进聚合 output（见 InvocationEventReducer 文档）。
         ProviderContentData::ToolCallStarted { .. }
@@ -148,7 +148,7 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                     });
                 }
             }
-            ProviderContentData::ToolCall(_) => self.output.push(block),
+            ProviderContentData::ToolCall { .. } => self.output.push(block),
             // 增量帧不进终态输出（与 provider 非流式聚合同源）。
             ProviderContentData::ToolCallStarted { .. }
             | ProviderContentData::ToolArgumentsDelta { .. }
@@ -197,9 +197,17 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                             });
                         }
                     }
-                    ProviderContentData::ToolCall(call) => {
+                    ProviderContentData::ToolCall {
+                        id,
+                        name,
+                        arguments,
+                    } => {
                         // 终态完整块：仅聚合（等价原 completion.output 中的块）。
-                        self.push_output(ProviderContentData::ToolCall(call));
+                        self.push_output(ProviderContentData::ToolCall {
+                            id,
+                            name,
+                            arguments,
+                        });
                     }
                     ProviderContentData::ToolCallStarted {
                         index,
@@ -226,11 +234,21 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                             &partial_json,
                         );
                     }
-                    ProviderContentData::ToolCallCompleted { index, call } => {
+                    ProviderContentData::ToolCallCompleted {
+                        index,
+                        id,
+                        name,
+                        arguments,
+                    } => {
                         self.saw_visible_delta = true;
-                        self.handler.on_tool_call_completed(index, &call);
+                        self.handler
+                            .on_tool_call_completed(index, &id, &name, &arguments);
                         // 完整调用进聚合输出（原 completion.output 的 ToolUse 块来源）。
-                        self.push_output(ProviderContentData::ToolCall(call));
+                        self.push_output(ProviderContentData::ToolCall {
+                            id,
+                            name,
+                            arguments,
+                        });
                     }
                 }
                 Ok(None)
@@ -251,11 +269,9 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                             ProviderContentData::Thinking { thinking, .. } => {
                                 self.handler.on_thinking(thinking)
                             }
-                            ProviderContentData::ToolCall(call) => self.handler.on_tool_use_start(
-                                &call.name,
-                                Some(&call.id.as_str()),
-                                0,
-                            ),
+                            ProviderContentData::ToolCall { id, name, .. } => {
+                                self.handler.on_tool_use_start(name, Some(id.as_str()), 0)
+                            }
                             _ => {}
                         }
                     }
@@ -272,10 +288,14 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                             thinking,
                             signature,
                         },
-                        ProviderContentData::ToolCall(call) => ContentBlock::ToolUse {
-                            id: call.id.clone(),
-                            name: call.name,
-                            input: call.arguments,
+                        ProviderContentData::ToolCall {
+                            id,
+                            name,
+                            arguments,
+                        } => ContentBlock::ToolUse {
+                            id,
+                            name,
+                            input: arguments,
                         },
                         _ => unreachable!("only terminal content blocks accumulate"),
                     })
@@ -478,17 +498,23 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
     }
 
     /// #1494：provider 已给出完整验证过的 tool call → 立即旁路执行（边流边执行）。
-    fn on_tool_call_completed(&mut self, index: usize, call: &provider::ProviderToolCallData) {
+    fn on_tool_call_completed(
+        &mut self,
+        index: usize,
+        provider_id: &str,
+        name: &str,
+        arguments: &serde_json::Value,
+    ) {
         let Some(executor) = &self.streaming_tool else {
             return;
         };
-        let id = self.runtime_tool_id(index, Some(&call.id.as_str()));
+        let id = self.runtime_tool_id(index, Some(provider_id));
         executor.submit(crate::application::tool::agent::ToolCall {
             id,
-            provider_id: call.id.clone(),
-            name: call.name.clone(),
+            provider_id: provider_id.to_string(),
+            name: name.to_string(),
             index,
-            input: call.arguments.clone(),
+            input: arguments.clone(),
         });
     }
 }
@@ -497,7 +523,7 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
 mod invocation_reducer_tests {
     use super::*;
     use crate::application::loop_engine::chat::events::EventFuture;
-    use provider::{ProviderError, ProviderStopReasonData, ProviderToolCallData};
+    use provider::{ProviderError, ProviderStopReasonData};
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone, Default)]
@@ -554,11 +580,11 @@ mod invocation_reducer_tests {
         // 终态完整 ToolCall 帧：仅聚合，不即时投影（等价原 Completed.output）。
         assert!(reducer
             .apply(ProviderResponseChunk::Content(
-                ProviderContentData::ToolCall(ProviderToolCallData {
+                ProviderContentData::ToolCall {
                     id: "toolu_1".to_string(),
                     name: "echo".to_string(),
                     arguments: serde_json::json!({"text": "hi"}),
-                })
+                }
             ))
             .unwrap()
             .is_none());

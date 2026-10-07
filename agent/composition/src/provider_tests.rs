@@ -20,8 +20,8 @@
 // 移到装配时（factory build 构造 ModelInfo），运行时零查询。
 
 use super::*;
-use provider::composition::{wire_provider_assembly, LlmConfigOptionsData, TransportPool};
-use provider::{InvocationRequestData, ModelInfo, ProviderErrorKind, ReasoningCapabilityData};
+use provider::composition::{wire_provider_client, ProviderClientSpecData, TransportPool};
+use provider::{InvocationRequestData, ModelInfo, ProviderErrorKind};
 use share::reasoning::ReasoningLevel;
 use tokio_util::sync::CancellationToken;
 
@@ -34,7 +34,7 @@ fn test_model_info() -> ModelInfo {
         supports_tools: true,
         supports_parallel_tool_calls: false,
         supports_streaming: true,
-        reasoning: ReasoningCapabilityData::none(),
+        supported_reasoning: vec![ReasoningLevel::Off],
         context_limit: Some(128_000),
         output_limit: Some(8_192),
     }
@@ -43,10 +43,10 @@ fn test_model_info() -> ModelInfo {
 /// Build a port over a real (wire-assembled) client and the given `ModelInfo`.
 /// Adapter 自有逻辑测试只走 fast-path，不触发上游调用；LlmProvider 构造面已
 /// 撤空（见文件头迁移记录），客户端经组合根唯一装配入口
-/// `wire_provider_assembly` 构造。
+/// `wire_provider_client` 构造。
 fn build_port_with_model_info(model: ModelInfo) -> (Arc<dyn ProviderPort>, ModelInfo) {
-    let client = wire_provider_assembly(
-        LlmConfigOptionsData {
+    let (client, _) = wire_provider_client(
+        ProviderClientSpecData {
             driver: "openai".to_string(),
             source_key: "test-source".to_string(),
             api_style: None,
@@ -61,10 +61,8 @@ fn build_port_with_model_info(model: ModelInfo) -> (Arc<dyn ProviderPort>, Model
         },
         model.clone(),
         &TransportPool::new(),
-        ReasoningLevel::Off,
     )
-    .expect("test client must wire through the composition entry")
-    .client;
+    .expect("test client must wire through the composition entry");
     (provider_port(client, model.clone()), model)
 }
 

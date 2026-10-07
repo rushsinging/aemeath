@@ -32,7 +32,7 @@ impl runtime::ProviderFactory for TestProviderFactory {
                 supports_tools: true,
                 supports_parallel_tool_calls: true,
                 supports_streaming: true,
-                reasoning: provider::ReasoningCapabilityData::none(),
+                supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
                 context_limit: spec.context_window,
                 output_limit: Some(spec.max_tokens as usize),
             },
@@ -95,7 +95,7 @@ impl tools::published::agent::AgentRunner for NoopAgentRunner {
 }
 
 fn test_prompt_assembly() -> runtime::PromptAssemblyData {
-    runtime::PromptAssemblyData::new(Vec::new(), String::new(), String::new(), "test-model")
+    runtime::PromptAssemblyData::new(String::new(), String::new(), String::new(), "test-model")
 }
 
 fn test_session_bootstrap_assembly(

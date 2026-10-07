@@ -51,7 +51,6 @@ where
             // ── #1385: Compute session-level locals from shell (single source of truth) ──
             let initial_git_context = shell.initial_git_context.clone();
             let user_context = shell.user_context.clone();
-            let system_blocks = shell.system_blocks.clone();
             let system_prompt_text = shell.system_prompt_text.clone();
             let workspace = shell.workspace.clone();
             let wiring = shell.wiring.clone();
@@ -655,12 +654,14 @@ where
                         }
                     })
                 };
-                let cacheable_system_prompt = system_blocks
-                    .iter()
-                    .map(|block| block.text())
-                    .chain((!user_context.is_empty()).then_some(user_context.as_str()))
-                    .collect::<Vec<_>>()
-                    .join("\n\n");
+                // system_prompt_text 已是整段静态 prompt（块间 \n\n 拼好）——
+                // 与 user_context 续接保持原 join 语义（#1861 v4）。
+                let cacheable_system_prompt = match (system_prompt_text.is_empty(), user_context.is_empty()) {
+                    (true, true) => String::new(),
+                    (true, false) => user_context.clone(),
+                    (false, true) => system_prompt_text.clone(),
+                    (false, false) => format!("{system_prompt_text}\n\n{user_context}"),
+                };
               let input_continuation =
                     crate::application::loop_engine::input_strategy::InputContinuationState::default();
                 let mut input_source =

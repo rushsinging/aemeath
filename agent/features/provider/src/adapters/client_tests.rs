@@ -1,9 +1,9 @@
-use super::{reasoning_level_from_options, LlmClient, LlmConfigOptionsData, ReasoningConfig};
+use super::{reasoning_level_from_options, LlmClient, ProviderClientSpecData, ReasoningConfig};
 use crate::adapters::pool::TransportPool;
 use crate::domain::capability::ReasoningLevel;
 
-fn pooled_config(model: &str, max_tokens: u32, base_url: Option<&str>) -> LlmConfigOptionsData {
-    LlmConfigOptionsData {
+fn pooled_config(model: &str, max_tokens: u32, base_url: Option<&str>) -> ProviderClientSpecData {
+    ProviderClientSpecData {
         driver: "anthropic".to_string(),
         source_key: "anthropic".to_string(),
         api_style: None,
@@ -62,7 +62,7 @@ fn from_config_with_pool_builds_distinct_transport_for_distinct_endpoint() {
 
 #[test]
 fn from_config_rejects_missing_endpoint_instead_of_using_adapter_default() {
-    let error = match LlmClient::from_config(LlmConfigOptionsData {
+    let error = match LlmClient::from_config(ProviderClientSpecData {
         driver: "anthropic".to_string(),
         source_key: "Anthropic".to_string(),
         api_style: None,
@@ -85,7 +85,7 @@ fn from_config_rejects_missing_endpoint_instead_of_using_adapter_default() {
 
 #[test]
 fn from_config_rejects_blank_model_instead_of_using_adapter_default() {
-    let error = match LlmClient::from_config(LlmConfigOptionsData {
+    let error = match LlmClient::from_config(ProviderClientSpecData {
         driver: "openai".to_string(),
         source_key: "OpenAI".to_string(),
         api_style: None,
@@ -108,7 +108,7 @@ fn from_config_rejects_blank_model_instead_of_using_adapter_default() {
 
 #[test]
 fn from_config_rejects_missing_user_agent_instead_of_using_global_default() {
-    let error = match LlmClient::from_config(LlmConfigOptionsData {
+    let error = match LlmClient::from_config(ProviderClientSpecData {
         driver: "openai".to_string(),
         source_key: "OpenAI".to_string(),
         api_style: None,
@@ -145,10 +145,10 @@ fn thinking_budget_only_controls_disabled_or_enabled_fallback_level() {
     );
 }
 
-/// wire_provider_client 是组合根获得 provider 客户端的唯一装配入口：
+/// assemble_client 是 wire_provider_client 的装配内核：
 /// 收编 from_config_with_pool + with_default_reasoning 装配链。
 #[test]
-fn wire_provider_client_applies_default_reasoning_over_pooled_transport() {
+fn assemble_client_applies_default_reasoning_over_pooled_transport() {
     let pool = TransportPool::new();
     let pooled = LlmClient::from_config_with_pool(
         pooled_config("claude-a", 8192, Some("https://api.anthropic.com")),
@@ -156,7 +156,7 @@ fn wire_provider_client_applies_default_reasoning_over_pooled_transport() {
     )
     .expect("manual assembly baseline must build");
 
-    let wired = super::wire_provider_client(
+    let wired = super::assemble_client(
         pooled_config("claude-a", 8192, Some("https://api.anthropic.com")),
         &pool,
         ReasoningLevel::Medium,
@@ -175,27 +175,27 @@ fn wire_provider_client_applies_default_reasoning_over_pooled_transport() {
 }
 
 #[test]
-fn wire_provider_client_maps_configuration_failures_to_provider_error() {
+fn assemble_client_maps_configuration_failures_to_provider_error() {
     let pool = TransportPool::new();
     let mut config = pooled_config("claude-a", 16, None);
     config.driver = "not-a-real-driver".to_string();
 
-    let error = match super::wire_provider_client(config, &pool, ReasoningLevel::Off) {
+    let error = match super::assemble_client(config, &pool, ReasoningLevel::Off) {
         Err(error) => error,
         Ok(_) => panic!("unknown driver must fail"),
     };
     assert_eq!(error.kind, crate::ProviderErrorKind::Configuration);
 }
 
-/// wire_provider_assembly 是 factory build 的 provider 侧装配内核：
-/// config + 模型元数据 → (client, ModelInfo, 生效推理档位)；
-/// reasoning 阶梯由 client 推导覆盖，身份/supports_*/limits 来自组合根投影。
+/// wire_provider_client 是 factory build 的 provider 侧装配单入口：
+/// config + 模型元数据 → (client, 修正版 ModelInfo)；
+/// supported_reasoning 阶梯由 client 推导覆盖，身份/supports_*/limits 来自组合根投影。
 #[test]
-fn wire_provider_assembly_builds_model_info_from_client_and_model_meta() {
+fn wire_provider_client_builds_model_info_from_client_and_model_meta() {
     use crate::published_language::ModelInfo;
 
     let pool = TransportPool::new();
-    let assembly = super::wire_provider_assembly(
+    let (client, model) = super::wire_provider_client(
         pooled_config("claude-a", 8192, Some("https://api.anthropic.com")),
         ModelInfo {
             provider: "Anthropic".to_string(),
@@ -203,37 +203,36 @@ fn wire_provider_assembly_builds_model_info_from_client_and_model_meta() {
             supports_tools: true,
             supports_parallel_tool_calls: true,
             supports_streaming: true,
-            reasoning: crate::ReasoningCapabilityData::none(),
+            supported_reasoning: vec![ReasoningLevel::Off],
             context_limit: Some(200_000),
             output_limit: Some(8192),
         },
         &pool,
-        ReasoningLevel::Medium,
     )
     .expect("assembly must build");
 
-    assert_eq!(assembly.requested_reasoning, ReasoningLevel::Medium);
-    assert!(assembly.model.supports_tools);
-    assert!(assembly.model.supports_streaming);
-    assert_eq!(assembly.model.context_limit, Some(200_000));
-    assert_eq!(assembly.model.output_limit, Some(8192));
-    assert!(assembly
-        .model
-        .reasoning
-        .supported()
-        .contains(&ReasoningLevel::Medium));
-    assert_eq!(assembly.client.model_name(), "claude-a");
+    assert!(model.supports_tools);
+    assert!(model.supports_streaming);
+    assert_eq!(model.context_limit, Some(200_000));
+    assert_eq!(model.output_limit, Some(8192));
+    assert!(model.supported_reasoning.contains(&ReasoningLevel::Medium));
+    assert_eq!(
+        model.resolve_reasoning(ReasoningLevel::Medium),
+        ReasoningLevel::Medium,
+        "anthropic 阶梯覆盖占位后必须能解析 Medium"
+    );
+    assert_eq!(client.model_name(), "claude-a");
 }
 
 #[test]
-fn wire_provider_assembly_maps_config_failures_to_provider_error() {
+fn wire_provider_client_maps_config_failures_to_provider_error() {
     use crate::published_language::ModelInfo;
 
     let pool = TransportPool::new();
     let mut config = pooled_config("claude-a", 16, None);
     config.driver = "not-a-real-driver".to_string();
 
-    let error = match super::wire_provider_assembly(
+    let error = match super::wire_provider_client(
         config,
         ModelInfo {
             provider: "Anthropic".to_string(),
@@ -241,12 +240,11 @@ fn wire_provider_assembly_maps_config_failures_to_provider_error() {
             supports_tools: true,
             supports_parallel_tool_calls: true,
             supports_streaming: true,
-            reasoning: crate::ReasoningCapabilityData::none(),
+            supported_reasoning: vec![ReasoningLevel::Off],
             context_limit: Some(200_000),
             output_limit: Some(16),
         },
         &pool,
-        ReasoningLevel::Off,
     ) {
         Err(error) => error,
         Ok(_) => panic!("unknown driver must fail"),

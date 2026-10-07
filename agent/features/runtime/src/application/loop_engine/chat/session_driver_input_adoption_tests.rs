@@ -333,11 +333,6 @@ impl ScriptedLlmProvider for ToolThenTextProvider {
             .push(request.messages.to_vec());
 
         if call_num == 1 {
-            let tool_call = ProviderToolCallData {
-                id: "toolu_noop_001".to_string(),
-                name: "NoopMarker".to_string(),
-                arguments: serde_json::json!({"marker": "noop-marker-result"}),
-            };
             self.after_first.notify_one();
             Ok(Box::pin(futures::stream::iter(vec![
                 ProviderResponseChunk::Content(ProviderContentData::ToolCallStarted {
@@ -352,7 +347,9 @@ impl ScriptedLlmProvider for ToolThenTextProvider {
                 }),
                 ProviderResponseChunk::Content(ProviderContentData::ToolCallCompleted {
                     index: 0,
-                    call: tool_call,
+                    id: "toolu_noop_001".to_string(),
+                    name: "NoopMarker".to_string(),
+                    arguments: serde_json::json!({"marker": "noop-marker-result"}),
                 }),
                 ProviderResponseChunk::Usage(TokenUsageData {
                                         input_tokens: Some(10),
@@ -1089,11 +1086,6 @@ impl ScriptedLlmProvider for StreamingToolDeltaProvider {
             .push(request.messages.to_vec());
         if call_num == 1 {
             self.after_tool_completed.notify_one();
-            let tool_call = ProviderToolCallData {
-                id: "toolu_stream_001".to_string(),
-                name: "NoopMarker".to_string(),
-                arguments: serde_json::json!({"marker": "noop-marker-result"}),
-            };
             let deltas = vec![
                 ProviderResponseChunk::Content(ProviderContentData::ToolCallStarted {
                     index: 0,
@@ -1107,7 +1099,9 @@ impl ScriptedLlmProvider for StreamingToolDeltaProvider {
                 }),
                 ProviderResponseChunk::Content(ProviderContentData::ToolCallCompleted {
                     index: 0,
-                    call: tool_call.clone(),
+                    id: "toolu_stream_001".to_string(),
+                    name: "NoopMarker".to_string(),
+                    arguments: serde_json::json!({"marker": "noop-marker-result"}),
                 }),
             ];
             let stream = futures::stream::iter(deltas)
