@@ -18,8 +18,6 @@ pub struct BackgroundTasksTool {
 #[path = "background_tasks_tests.rs"]
 mod tests;
 
-const DEFAULT_LOG_MAX_BYTES: usize = 4096;
-
 #[async_trait]
 impl TypedTool for BackgroundTasksTool {
     type Output = BackgroundTasksResult;
@@ -116,7 +114,7 @@ impl TypedTool for BackgroundTasksTool {
                 let max_bytes = args
                     .max_bytes
                     .map(|value| value as usize)
-                    .unwrap_or(DEFAULT_LOG_MAX_BYTES);
+                    .unwrap_or(crate::adapters::constants::DEFAULT_BACKGROUND_LOG_MAX_BYTES);
                 match access.read_task_log(task_id, args.cursor, max_bytes) {
                     Some(log) => TypedToolResult::success(
                         log.text.clone(),
