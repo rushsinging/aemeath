@@ -139,7 +139,7 @@ async fn build_window_applies_l3_to_isolated_subagent_history() {
         async fn materialize(
             &self,
             _request: &ContextRequestData,
-        ) -> Result<PromptMaterialization, crate::PromptMaterializationError> {
+        ) -> Result<PromptMaterialization, String> {
             Ok(PromptMaterialization {
                 cacheable: vec![],
                 uncached: vec![],

@@ -9,10 +9,11 @@ use crate::domain::{
     SystemBlock, ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
 
+pub mod compact_generator;
 pub mod context_port;
 pub mod session_management;
 pub mod session_snapshot_store;
-pub(crate) use crate::domain::PromptMaterializationError;
+pub use compact_generator::CompactGenerator;
 pub use context_port::ContextPort;
 pub use session_management::SessionManagementPort;
 pub(crate) use session_snapshot_store::{
@@ -117,7 +118,7 @@ pub(crate) trait ContextPromptSource: Send + Sync {
     async fn materialize(
         &self,
         request: &ContextRequestData,
-    ) -> Result<PromptMaterialization, PromptMaterializationError>;
+    ) -> Result<PromptMaterialization, String>;
 }
 
 #[derive(Debug, Clone)]

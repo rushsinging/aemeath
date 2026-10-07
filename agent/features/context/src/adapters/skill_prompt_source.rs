@@ -6,9 +6,7 @@ use async_trait::async_trait;
 use tools::published::skill::{SkillCatalogPort, SkillDescriptor, SkillQuery};
 
 use crate::domain::ContextRequestData;
-use crate::ports::{
-    ContextPromptSource, PromptMaterialization, PromptMaterializationError, SkillQueryFactory,
-};
+use crate::ports::{ContextPromptSource, PromptMaterialization, SkillQueryFactory};
 
 pub(crate) struct SkillPromptSource {
     catalog: Arc<dyn SkillCatalogPort>,
@@ -110,7 +108,7 @@ impl ContextPromptSource for SkillPromptSource {
     async fn materialize(
         &self,
         request: &ContextRequestData,
-    ) -> Result<PromptMaterialization, PromptMaterializationError> {
+    ) -> Result<PromptMaterialization, String> {
         let (mut cacheable, uncached) =
             crate::adapters::BaselinePromptSource::baseline_blocks(request);
         let descriptors = sort_and_dedup(self.catalog.list(self.query_factory.query(request)));

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
 use crate::domain::{ContextRequestData, SystemBlock};
-use crate::ports::{ContextPromptSource, PromptMaterialization, PromptMaterializationError};
+use crate::ports::{ContextPromptSource, PromptMaterialization};
 
 /// Context-owned baseline prompt materializer. Produces the stable, always-present
 /// system blocks (system_prompt + execution_discipline). Rich guidance/skill
@@ -39,7 +39,7 @@ impl ContextPromptSource for BaselinePromptSource {
     async fn materialize(
         &self,
         request: &ContextRequestData,
-    ) -> Result<PromptMaterialization, PromptMaterializationError> {
+    ) -> Result<PromptMaterialization, String> {
         let (cacheable, uncached) = Self::baseline_blocks(request);
         Ok(PromptMaterialization {
             cacheable,

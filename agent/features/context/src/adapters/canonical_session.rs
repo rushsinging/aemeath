@@ -2,7 +2,7 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 
-use crate::adapters::compact_summary::{compact_messages_with_llm, CompactGenerator};
+use crate::adapters::compact_summary::compact_messages_with_llm;
 use crate::domain::session::{
     AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, CommittedStep,
     FinalizedOutcomeRecord, SessionCommitPlan, SnapshotState,
@@ -13,6 +13,7 @@ use crate::domain::{
     ContextPortError, ManualCompactRequestData, SessionId, SessionRevision,
     ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
+use crate::ports::CompactGenerator;
 use crate::ports::{ContextPort, MainContextFactory, SessionRepository, SessionSnapshot};
 
 #[async_trait]
@@ -486,7 +487,7 @@ impl CanonicalSessionRepository {
         progress: Option<std::sync::Arc<dyn crate::domain::CompactProgressFn>>,
         task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
         cancellation: &tokio_util::sync::CancellationToken,
-    ) -> Option<crate::adapters::compact_summary::CompactResult> {
+    ) -> Option<crate::adapters::compact_summary::LocalCompactResult> {
         let tail = crate::adapters::compact_summary::CompactTail::from_context(
             step_boundaries,
             context_size,

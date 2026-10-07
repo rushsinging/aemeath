@@ -15,6 +15,7 @@ use crate::domain::{
     CompactGenerationFailureData, CompactGenerationFailureKind, CompactGenerationOutputData,
     CompactSummaryQuality,
 };
+use crate::ports::CompactGenerator;
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, MessageSource, Role};
@@ -67,35 +68,6 @@ fn emit_progress_completed(
 
 /// Context-owned external-detail port for generating LLM text during compaction.
 ///
-/// The implementor (typically a runtime adapter wrapping a `ProviderPort`)
-/// invokes the LLM with the supplied request messages and returns the full
-/// text output. Context retains ownership of prompt construction, map-reduce
-/// orchestration, summary parsing, cancellation propagation, and fallback.
-///
-/// This trait is the sole boundary through which compact logic reaches an LLM;
-/// production code must not depend on a concrete Provider construction handle.
-#[async_trait]
-pub trait CompactGenerator: Send + Sync {
-    /// Generate the full text output for the given request messages.
-    ///
-    /// Returns the concatenated text content on success, or an error message
-    /// describing the failure. Cancellation is cooperative via `cancel`.
-    async fn generate(
-        &self,
-        request: Vec<Message>,
-        cancel: &CancellationToken,
-    ) -> Result<CompactGenerationOutputData, CompactGenerationFailureData>;
-
-    /// 本次 compact 调用模型的输入窗口。
-    ///
-    /// `None`（默认）表示与 summary 注入的对话模型窗口一致；实现方只有在
-    /// 确实使用不同模型时才返回更小窗口，Context 据此收紧 Map 分块目标，
-    /// **NEVER** 依据未知窗口放大预算。
-    async fn compact_context_window(&self) -> Option<usize> {
-        None
-    }
-}
-
 struct MapReduceCompactOutput {
     summary: String,
     degraded_chunks: usize,
@@ -118,9 +90,10 @@ impl MapReduceCompactOutput {
     }
 }
 
-/// compact 结果：summary 走 system 通道，recent_messages 作为新链的消息。
+/// 本地压缩结果：summary 走 system 通道，recent_messages 作为新链的消息。
+/// 与 domain::CompactResult（提交终态载荷，含 revision/ContextMessage）区隔。
 #[derive(Debug, Clone)]
-pub struct CompactResult {
+pub(crate) struct LocalCompactResult {
     /// 早期对话的结构化摘要（拼入 system_blocks）
     pub summary: String,
     /// recent tail（从 split_point 到末尾的原始消息）
@@ -189,7 +162,7 @@ async fn llm_refresh(
 /// 调用方已经根据归一化的 Provider usage 或无 usage 时的完整估算完成决策；
 /// 本函数只执行压缩。返回 `None` 仅表示消息太少，无法形成有效压缩窗口。
 /// summary 不再注入 messages，走 system 通道。
-pub fn compact_messages(messages: &[Message], tail: CompactTail<'_>) -> Option<CompactResult> {
+pub fn compact_messages(messages: &[Message], tail: CompactTail<'_>) -> Option<LocalCompactResult> {
     let total = messages.len();
     let window = compact_window_with_budget(messages, tail.step_boundaries, tail.token_cap)?;
     if total <= 4 {
@@ -208,7 +181,7 @@ pub fn compact_messages(messages: &[Message], tail: CompactTail<'_>) -> Option<C
     // 截断 recent tail 中超阈值的 ToolResult，避免大输出导致 compact 后仍超 context 阈值。
     placeholder_tool_results(&mut recent);
 
-    Some(CompactResult {
+    Some(LocalCompactResult {
         summary,
         recent_messages: recent,
         quality: CompactSummaryQuality::LocalOnly,
@@ -727,7 +700,7 @@ fn fallback_continuation(
 /// 使用 LLM 进行语义化压缩（对早期消息生成结构化摘要）。
 ///
 /// 如果 LLM 调用失败，回退到本地 `build_summary_text`。
-/// 返回 `Some(CompactResult)` 表示发生了压缩；`None` 表示无需压缩。
+/// 返回 `Some(LocalCompactResult)` 表示发生了压缩；`None` 表示无需压缩。
 /// summary 走 system 通道，不注入 messages。
 pub async fn compact_messages_with_llm(
     messages: &[Message],
@@ -738,7 +711,7 @@ pub async fn compact_messages_with_llm(
     task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
     cancel: &CancellationToken,
     tail: CompactTail<'_>,
-) -> Option<CompactResult> {
+) -> Option<LocalCompactResult> {
     // summary 预算归注入窗口；Map 分块归 compact 调用模型窗口（若不同）。
     let budgets = match generator {
         Some(generator) => crate::domain::compact::CompactBudgetSources::resolve(
@@ -845,7 +818,7 @@ pub async fn compact_messages_with_llm(
         recent.len(),
     );
 
-    Some(CompactResult {
+    Some(LocalCompactResult {
         summary,
         recent_messages: recent,
         quality,

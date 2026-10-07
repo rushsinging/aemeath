@@ -880,22 +880,13 @@ pub enum ContextAppendError {
 }
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
-pub enum PromptMaterializationError {
-    /// 集成测试构造用（基线块失败注入）。
-    #[cfg(test)]
-    #[cfg(test)]
-    #[error("Baseline prompt block failure: {0}")]
-    Baseline(String),
-}
-
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum ContextPortError {
     #[error("Session 不存在：{0}")]
     SessionNotFound(SessionId),
     #[error("Session backing 读取失败：{0}")]
     SessionRepository(String),
     #[error("Prompt 物化失败：{0}")]
-    PromptMaterialization(PromptMaterializationError),
+    PromptMaterialization(String),
     #[error("Memory 物化失败：{0}")]
     MemoryMaterialization(String),
     #[error("Context 压缩失败：{0}")]

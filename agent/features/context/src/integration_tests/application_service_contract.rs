@@ -242,7 +242,7 @@ impl ContextPromptSource for FakePrompt {
     async fn materialize(
         &self,
         _request: &ContextRequestData,
-    ) -> Result<PromptMaterialization, crate::PromptMaterializationError> {
+    ) -> Result<PromptMaterialization, String> {
         Ok(PromptMaterialization {
             cacheable: vec![block("system_prompt"), block("user_guidance")],
             uncached: Vec::new(),

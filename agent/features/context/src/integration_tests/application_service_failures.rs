@@ -66,10 +66,8 @@ impl ContextPromptSource for FailingPrompt {
     async fn materialize(
         &self,
         _request: &ContextRequestData,
-    ) -> Result<PromptMaterialization, crate::PromptMaterializationError> {
-        Err(crate::PromptMaterializationError::Baseline(
-            "guidance unavailable".into(),
-        ))
+    ) -> Result<PromptMaterialization, String> {
+        Err("guidance unavailable".to_string())
     }
 }
 
@@ -123,9 +121,7 @@ async fn prompt_failure_is_typed_and_stops_before_memory_materialization() {
 
     assert!(matches!(
         service.build_window(&request()).await,
-        Err(crate::ContextPortError::PromptMaterialization(
-            crate::PromptMaterializationError::Baseline(msg)
-        )) if msg == "guidance unavailable"
+        Err(crate::ContextPortError::PromptMaterialization(msg)) if msg == "guidance unavailable"
     ));
     assert_eq!(memory_calls.load(Ordering::SeqCst), 0);
 }

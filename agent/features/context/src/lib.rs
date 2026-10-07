@@ -103,8 +103,8 @@ pub use domain::{
 #[cfg(test)]
 pub(crate) use ports::{
     ContextMemorySource, ContextPromptSource, MemoryMaterialization, PromptMaterialization,
-    PromptMaterializationError, SessionGeneration, SessionRepository, SessionSnapshot,
-    SessionSnapshotStore, SessionStoreError, SkillQueryFactory,
+    SessionGeneration, SessionRepository, SessionSnapshot, SessionSnapshotStore, SessionStoreError,
+    SkillQueryFactory,
 };
 pub use ports::{ContextPort, MainContextFactory};
 
@@ -114,9 +114,7 @@ pub mod api {
 }
 
 pub mod compact {
-    pub use crate::adapters::compact_summary::{
-        messages_selected_for_precompact_memory, CompactGenerator,
-    };
+    pub use crate::adapters::compact_summary::messages_selected_for_precompact_memory;
     #[cfg(test)]
     pub(crate) use crate::domain::compact::{
         microcompact_exploration, snip_superseded_exploration, CheckpointSections,
@@ -130,6 +128,7 @@ pub mod compact {
     #[cfg(test)]
     pub(crate) use crate::domain::token_budget::{estimate_tokens, summary_budget};
     pub use crate::domain::{estimate_messages_tokens, estimate_tool_schemas_tokens};
+    pub use crate::ports::CompactGenerator;
 }
 
 pub mod guidance {

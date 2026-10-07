@@ -10,6 +10,7 @@ mod service;
 #[path = "application/service_tests.rs"]
 mod service_tests;
 mod session_persistence;
+mod session_resume;
 
 #[cfg(any(test, feature = "dev"))]
 pub use main_session::test_support;
