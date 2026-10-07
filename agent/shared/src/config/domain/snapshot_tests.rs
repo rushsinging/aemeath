@@ -509,8 +509,8 @@ fn test_snapshot_language_default() {
 #[test]
 fn snapshot_exposes_tool_background_threshold_default_enabled() {
     let snap = ConfigSnapshot::new(Config::default());
-    // PR3 交付完成：默认开启 10s。
-    assert_eq!(snap.tool_background_threshold_secs(), 10);
+    // 全套链路已交付但默认暂关闭（真实使用验证后开 10）。
+    assert_eq!(snap.tool_background_threshold_secs(), 0);
 }
 
 #[test]

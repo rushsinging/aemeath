@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 /// 合入后行为与现状零变化（feature flag 关闭交付）；查询工具落地后
 /// 再开启默认 10s。显式配置 >0 的用户不受此默认影响。
 pub(super) fn default_tool_background_threshold_secs() -> u64 {
-    10
+    // 暂时关闭（用户拍板 2026-10-07）：全套链路已交付（PR1-3），
+    // 真实使用验证后再开启默认 10。
+    0
 }
 
 /// Runtime 引擎分段配置。

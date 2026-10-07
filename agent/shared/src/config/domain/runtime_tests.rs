@@ -1,17 +1,17 @@
 use super::RuntimeConfig;
 
 #[test]
-fn runtime_default_threshold_enables_backgrounding_at_delivery() {
+fn runtime_default_threshold_disables_backgrounding_pending_real_usage() {
     let config = RuntimeConfig::default();
-    // #252 PR3 交付完成：通知链路（PR2）与 BackgroundTasks 查询工具（PR3）
-    // 已落地，默认开启 10s 前台等待阈值。
-    assert_eq!(config.tool_background_threshold_secs, 10);
+    // #252 全套链路已交付（PR1-3）但默认暂关闭（2026-10-07 用户拍板）：
+    // 真实使用验证后再开启 10s；显式配置 >0 可提前启用。
+    assert_eq!(config.tool_background_threshold_secs, 0);
 }
 
 #[test]
 fn runtime_serde_missing_section_falls_back_to_default() {
     let document: RuntimeConfig = serde_json::from_str("{}").unwrap();
-    assert_eq!(document.tool_background_threshold_secs, 10);
+    assert_eq!(document.tool_background_threshold_secs, 0);
 }
 
 #[test]
