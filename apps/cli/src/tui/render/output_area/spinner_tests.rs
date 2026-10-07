@@ -101,5 +101,8 @@ fn spinner_line_appends_background_task_count_when_active() {
         .iter()
         .map(|span| span.content.to_string())
         .collect();
-    assert!(text.contains("⚷2 bg"), "应显示后台任务计数：{text}");
+    assert!(
+        text.contains("2 Backend Progress"),
+        "应显示后台任务计数：{text}"
+    );
 }

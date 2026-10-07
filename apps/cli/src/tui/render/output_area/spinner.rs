@@ -115,7 +115,7 @@ impl super::OutputArea {
         if s.background_tasks_active > 0 {
             spans.push(Span::styled("  ·  ", Style::default().fg(theme::TEXT_DIM)));
             spans.push(Span::styled(
-                format!("⚷{} bg", s.background_tasks_active),
+                format!("{} Backend Progress", s.background_tasks_active),
                 Style::default().fg(theme::TEXT_DIM),
             ));
         }
