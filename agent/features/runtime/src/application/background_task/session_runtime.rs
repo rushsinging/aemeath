@@ -16,6 +16,8 @@ pub(crate) struct BackgroundTaskRuntime {
     waiter: Mutex<Option<WakeupWaiter>>,
     active_run:
         std::sync::OnceLock<Arc<crate::application::run::active_registry::ActiveRunRegistry>>,
+    /// #252 PR3：账本持久化目标（blob + session id；session 就绪后绑定）。
+    persistence: std::sync::OnceLock<(std::sync::Arc<dyn storage::AtomicBlobPort>, String)>,
 }
 
 /// 终态通知路由决策（纯判定，#252 PR2 §4.2/§4.4）。
@@ -35,6 +37,7 @@ impl BackgroundTaskRuntime {
             notifier,
             waiter: Mutex::new(Some(waiter)),
             active_run: std::sync::OnceLock::new(),
+            persistence: std::sync::OnceLock::new(),
         }
     }
 
@@ -66,10 +69,10 @@ impl BackgroundTaskRuntime {
         }
     }
 
-    /// 任务终态通知（spawn body 调用）：推进监督器终态并按路由送达。
+    /// 任务终态通知（spawn body 调用）：推进监督器账本、持久化快照并按路由送达。
     ///
     /// 重复终态幂等（finish 返回 changed=false 时不再通知）。
-    pub(crate) fn notify_terminal(
+    pub(crate) async fn notify_terminal(
         &self,
         context: &crate::application::context::coordination::ContextCoordinator,
         task_id: &share::ids::BackgroundTaskId,
@@ -82,6 +85,14 @@ impl BackgroundTaskRuntime {
             .unwrap_or(false);
         if !finished {
             return;
+        }
+        // #252 PR3：终态快照落盘（绑定失败/未绑定时静默跳过——
+        // 持久化尽力而为，不影响通知路由）。
+        if let Err(error) = self.persist_snapshot().await {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "background task ledger persist failed: {error}"
+            );
         }
         match self.notify_route() {
             BackgroundNotifyRoute::Reminder(run_id) => {
@@ -237,4 +248,66 @@ fn terminal_vocabulary(
             "invalidated"
         }
     }
+}
+
+// ── #252 PR3：账本持久化（snapshot 落盘 / resume 恢复） ───────────────
+
+impl BackgroundTaskRuntime {
+    /// 绑定持久化目标（session 就绪后调用一次）。
+    pub(crate) async fn bind_persistence(
+        &self,
+        blob: std::sync::Arc<dyn storage::AtomicBlobPort>,
+        session_id: String,
+    ) -> Result<(), storage::StorageError> {
+        // 提前构造 key 验证 session id 合法（fail fast）。
+        ledger_key(&session_id)?;
+        let _ = self.persistence.set((blob, session_id));
+        Ok(())
+    }
+
+    /// 全量快照落盘（终态推进后调用；任务量小，原子写可接受）。
+    pub(crate) async fn persist_snapshot(&self) -> Result<(), storage::StorageError> {
+        let Some((blob, session_id)) = self.persistence.get() else {
+            return Ok(());
+        };
+        let key = ledger_key(session_id)?;
+        let bytes = serde_json::to_vec(&self.supervisor().snapshots()).map_err(|error| {
+            storage::StorageError::new(storage::StorageErrorKind::Io, error.to_string())
+        })?;
+        blob.write_atomic(
+            &key,
+            &bytes,
+            storage::WriteOptionsData::new(storage::DurabilityData::ProcessCrashSafe),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// 从快照恢复（resume）：终态记录原样恢复，非终态标
+    /// `Invalidated(ProcessExit)`（执行体随原进程消亡）。返回恢复条数。
+    pub(crate) async fn restore_from_snapshot(
+        &self,
+        blob: &std::sync::Arc<dyn storage::AtomicBlobPort>,
+        session_id: &str,
+    ) -> Result<usize, storage::StorageError> {
+        let key = ledger_key(session_id)?;
+        let bytes = match blob.read(&key, storage::GenerationData::Primary).await? {
+            storage::ReadOutcomeData::Found(entry) => entry.bytes().to_vec(),
+            storage::ReadOutcomeData::NotFound => return Ok(0),
+        };
+        let records: Vec<crate::domain::background_task::BackgroundTaskRecord> =
+            serde_json::from_slice(&bytes).map_err(|error| {
+                storage::StorageError::new(storage::StorageErrorKind::Io, error.to_string())
+            })?;
+        let restored = self.supervisor().restore_records(records);
+        Ok(restored)
+    }
+}
+
+/// 账本 key：`background-task/<session-id>`。
+fn ledger_key(session_id: &str) -> Result<storage::StorageKeyData, storage::StorageError> {
+    let segment: storage::SafePathSegmentData = session_id
+        .parse()
+        .map_err(|error: storage::StorageError| error)?;
+    storage::StorageKeyData::new(storage::StorageNamespaceData::BackgroundTask, vec![segment])
 }

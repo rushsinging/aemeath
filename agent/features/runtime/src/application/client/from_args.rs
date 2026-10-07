@@ -19,6 +19,8 @@ pub struct RuntimeToolAssemblyDependenciesData {
     background_slot: Option<
         std::sync::Arc<std::sync::RwLock<Option<std::sync::Arc<dyn tools::BackgroundTaskAccess>>>>,
     >,
+    /// #252 PR3：后台任务账本 blob（session 就绪后绑定持久化并恢复快照）。
+    background_ledger_blob: Option<std::sync::Arc<dyn storage::AtomicBlobPort>>,
 }
 
 impl RuntimeToolAssemblyDependenciesData {
@@ -36,7 +38,17 @@ impl RuntimeToolAssemblyDependenciesData {
             tool_result_materializer,
             active_run,
             background_slot: None,
+            background_ledger_blob: None,
         }
+    }
+
+    /// 绑定后台任务账本 blob（#252 PR3：shell 构造后绑定持久化并恢复）。
+    pub fn with_background_ledger_blob(
+        mut self,
+        blob: std::sync::Arc<dyn storage::AtomicBlobPort>,
+    ) -> Self {
+        self.background_ledger_blob = Some(blob);
+        self
     }
 
     /// 绑定后台任务端口槽（#252 PR3：shell 构造后写入实现）。
@@ -329,6 +341,7 @@ pub async fn wire_agent_client_from_args(
         tool_result_materializer,
         active_run,
         background_slot,
+        background_ledger_blob,
     } = tool_assembly;
     let crate::application::client::bootstrap::AgentRunnerAssemblyData {
         runner: agent_runner,
@@ -476,11 +489,45 @@ pub async fn wire_agent_client_from_args(
         runtime_context_factory,
     );
 
-    // #252 PR3：session 就绪后绑定后台任务端口（查询 tool 的数据源）。
+    // #252 PR3：session 就绪后绑定后台任务端口（查询 tool 的数据源）、
+    // 绑定账本持久化并恢复快照（非终态任务标 Invalidated(ProcessExit)）。
     if let Some(slot) = background_slot {
         slot.write()
             .unwrap_or_else(|error| error.into_inner())
             .replace(shell.background_tasks.clone());
+    }
+    if let Some(blob) = background_ledger_blob {
+        if let Err(error) = shell
+            .background_tasks
+            .bind_persistence(blob.clone(), session_id.clone())
+            .await
+        {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "background task ledger bind failed: {error}"
+            );
+        } else {
+            match shell
+                .background_tasks
+                .restore_from_snapshot(&blob, &session_id)
+                .await
+            {
+                Ok(restored) if restored > 0 => {
+                    log::info!(
+                        target: crate::LOG_TARGET,
+                        "background task ledger restored: session={} tasks={restored}",
+                        session_id
+                    );
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "background task ledger restore failed: {error}"
+                    );
+                }
+            }
+        }
     }
 
     // 21. 构建 handle — #1385 TaskData 7: shell is the single source.

@@ -332,3 +332,38 @@ fn terminal_completion_status(
 #[cfg(test)]
 #[path = "supervisor_tests.rs"]
 mod tests;
+
+impl BackgroundTaskSupervisor {
+    /// 从持久化快照恢复记录（#252 PR3 resume）：终态记录原样恢复；
+    /// 非终态标 `Invalidated(ProcessExit)`（执行体随原进程消亡）。
+    /// 返回恢复条数（同 id 幂等覆盖）。
+    pub(crate) fn restore_records(&self, records: Vec<BackgroundTaskRecord>) -> usize {
+        let mut tasks = self.tasks.lock().expect("后台任务表锁中毒");
+        let mut restored = 0;
+        for mut record in records {
+            if !record.is_terminal() {
+                if let Ok(advanced) = record.clone().advance(BackgroundTaskState::Terminal(
+                    BackgroundTaskTerminalKind::Invalidated {
+                        reason: BackgroundInvalidationReason::ProcessExit,
+                    },
+                )) {
+                    record = advanced.record;
+                }
+            }
+            let task_id = record.task_id.clone();
+            tasks.insert(
+                task_id.clone(),
+                SupervisedBackgroundTask {
+                    record,
+                    output: OutputRingBuffer::new(BACKGROUND_TASK_OUTPUT_CAPACITY_BYTES),
+                    terminal_output: None,
+                    // 恢复记录不再进通知通道（resume 场景经失效投影展示）。
+                    notified: true,
+                    child_cancellation: tokio_util::sync::CancellationToken::new(),
+                },
+            );
+            restored += 1;
+        }
+        restored
+    }
+}

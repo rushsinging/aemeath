@@ -171,12 +171,14 @@ impl ToolExecutionSupervisor {
             );
             // #252 PR2：终态推进监督器账本并路由通知（无装配时只推进 receipt）。
             if let Some(runtime) = background_runtime.as_ref() {
-                runtime.notify_terminal(
-                    &driver_context,
-                    &task_id_for_logs,
-                    terminal_kind_from_outcome(&terminal),
-                    terminal_output_text(&outcome),
-                );
+                runtime
+                    .notify_terminal(
+                        &driver_context,
+                        &task_id_for_logs,
+                        terminal_kind_from_outcome(&terminal),
+                        terminal_output_text(&outcome),
+                    )
+                    .await;
             }
             if let Err(error) = driver_context
                 .advance_tool_receipt(ToolReceiptMutationData::terminal(identity, terminal))

@@ -452,7 +452,11 @@ pub(crate) async fn from_args_with_gateways(
             tool_assembly.tool_result_materializer,
             tool_assembly.active_run,
         )
-        .with_background_slot(background_slot),
+        .with_background_slot(background_slot)
+        .with_background_ledger_blob(
+            storage::wire_file_system_blob(agents_dir)
+                .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
+        ),
         runtime::composition::wire_sdk_chat_ingress(),
         initial_provider,
         session_bootstrap,

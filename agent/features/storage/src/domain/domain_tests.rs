@@ -421,3 +421,24 @@ fn omitted_members_are_old_names_absent_from_replacement() {
 
     assert_eq!(omitted, ["archive"]);
 }
+
+#[test]
+fn background_task_namespace_is_crash_safe_and_retained() {
+    // #252：后台任务账本跨进程可见（resume 失效对账与查询）。
+    assert_eq!(
+        StorageNamespaceData::BackgroundTask.as_str(),
+        "background-task"
+    );
+    assert_eq!(
+        StorageNamespaceData::BackgroundTask.minimum_durability(),
+        DurabilityData::ProcessCrashSafe
+    );
+    assert_eq!(
+        StorageNamespaceData::BackgroundTask.effective_durability(DurabilityData::BestEffort),
+        DurabilityData::ProcessCrashSafe
+    );
+    assert_eq!(
+        StorageNamespaceData::BackgroundTask.previous_policy(),
+        PreviousPolicy::Retain
+    );
+}
