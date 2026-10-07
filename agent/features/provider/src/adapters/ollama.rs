@@ -10,8 +10,6 @@ use tokio_util::sync::CancellationToken;
 use crate::adapters::http_attempt::{
     AttemptDisposition, HttpAttemptContext, HttpAttemptExecutor, HttpAttemptFailure,
 };
-use crate::adapters::wire::SystemBlockData;
-use crate::domain::invoke::InvocationScopeData;
 use crate::ports::LlmProvider;
 
 mod conversion;

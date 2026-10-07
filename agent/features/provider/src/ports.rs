@@ -10,7 +10,7 @@ use crate::RequestSystemBlockData;
 /// driver 调用的解析参数（client.invoke 经能力 resolve 后的执行细节，
 /// crate 私有——PL 只见 request/response）。
 #[derive(Debug, Clone)]
-pub struct ResolvedInvocation {
+pub(crate) struct ResolvedInvocation {
     /// provider 中性模型名。
     pub model: String,
     pub max_tokens: u32,
@@ -54,7 +54,7 @@ impl ResolvedInvocation {
 /// LLM Provider driver trait - all providers must implement this.
 /// system 块为 provider 中性形态；driver 内部各自转换 wire 形态。
 #[async_trait]
-pub trait LlmProvider: Send + Sync {
+pub(crate) trait LlmProvider: Send + Sync {
     /// 返回由 Runtime 主动 poll 的单请求事件流。
     async fn invocation_stream(
         &self,

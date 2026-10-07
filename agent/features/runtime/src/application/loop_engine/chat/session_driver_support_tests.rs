@@ -203,13 +203,12 @@ fn test_wiring_with_context_factory(
 
 use crate::application::model::test_support::{
     advance_until_retry_condition, empty_completion, successful_completion, text_completion_stream,
-    ScriptedInvocationProvider,
+    ScriptedInvocationProvider, ScriptedLlmProvider,
 };
 
 use async_trait::async_trait;
 use futures::StreamExt;
 use hook::HookDispatcher;
-use provider::composition::{InvocationScopeData, LlmProvider, SystemBlockData};
 use share::reasoning::ReasoningLevel;
 use provider::{
     InvocationDeltaData, InvocationEventData, InvocationStreamData, ProviderCompletionData, ProviderContentBlockData,
@@ -222,7 +221,6 @@ use share::message::{Message, MessageSource, Role};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::Mutex;
-use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
 struct TestReflectionHistory;
@@ -863,16 +861,13 @@ impl RecordingSink {
 struct TwoTurnProvider;
 
 #[async_trait]
-impl LlmProvider for TwoTurnProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for TwoTurnProvider {
+    async fn scripted_invocation_stream(
         &self,
-        resolved: &provider::composition::ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        _cancel: &CancellationToken,
+        request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
-        let text = if messages
+        let text = if request
+            .messages
             .iter()
             .any(|message| without_input_timestamp(&message.text_content()) == "stop-hook input")
         {
@@ -914,16 +909,15 @@ impl SequenceProvider {
 }
 
 #[async_trait]
-impl LlmProvider for SequenceProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for SequenceProvider {
+    async fn scripted_invocation_stream(
         &self,
-        resolved: &provider::composition::ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        _cancel: &CancellationToken,
+        request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
-        self.requests.lock().unwrap().push(messages.to_vec());
+        self.requests
+            .lock()
+            .unwrap()
+            .push(request.messages.to_vec());
         let text = self
             .responses
             .lock()
@@ -1005,21 +999,20 @@ impl GatedProvider {
 }
 
 #[async_trait]
-impl LlmProvider for GatedProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for GatedProvider {
+    async fn scripted_invocation_stream(
         &self,
-        resolved: &provider::composition::ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        _cancel: &CancellationToken,
+        request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
         // 先 enable 再记录请求：`request_count >= 1` 必然意味着 waiter 已注册，
         // 调用方的 `notify_one` 不会因时序丢失（notify_one 同时会存 permit）。
         let notified = self.release.notified();
         tokio::pin!(notified);
         notified.as_mut().enable();
-        self.requests.lock().unwrap().push(messages.to_vec());
+        self.requests
+            .lock()
+            .unwrap()
+            .push(request.messages.to_vec());
         notified.await;
         Ok(text_completion_stream("gated final", 1, 1))
     }

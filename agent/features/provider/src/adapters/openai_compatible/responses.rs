@@ -7,9 +7,7 @@
 //! - tools 扁平格式 `{ type:"function", name, description, parameters }`
 
 use super::OpenAICompatibleProvider;
-use crate::adapters::wire::SystemBlockData;
 use crate::domain::capability::ReasoningLevel;
-use crate::domain::invoke::InvocationScopeData;
 use share::message::Message;
 
 impl OpenAICompatibleProvider {

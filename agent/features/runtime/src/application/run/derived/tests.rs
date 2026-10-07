@@ -5,12 +5,11 @@ use crate::application::loop_engine::llm_log::{
 };
 use crate::application::model::test_support::{
     advance_until_retry_condition, empty_completion, successful_completion,
-    ScriptedInvocationProvider, RETRY_ADVANCE_LIMITS,
+    ScriptedInvocationProvider, ScriptedLlmProvider, RETRY_ADVANCE_LIMITS,
 };
 use ::logging as scoped_logging;
 use async_trait::async_trait;
 
-use provider::composition::LlmProvider;
 use provider::{InvocationStreamData, ProviderError, ProviderErrorKind};
 use share::config::AgentInstanceConfig;
 use share::message::Message;
@@ -125,21 +124,19 @@ impl CapturingBuildFactory {
 }
 
 #[async_trait]
-impl LlmProvider for CapturingProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for CapturingProvider {
+    async fn scripted_invocation_stream(
         &self,
-        resolved: &provider::composition::ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        _messages: &[Message],
-        tool_schemas: &[serde_json::Value],
-        _cancel: &tokio_util::sync::CancellationToken,
+        request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
         let mut captured = self.captured.lock().unwrap();
-        captured.system = system
+        captured.system = request
+            .system
             .iter()
             .map(|block| block.text().to_string())
             .collect();
-        captured.tool_names = tool_schemas
+        captured.tool_names = request
+            .tools
             .iter()
             .filter_map(|schema| schema.get("name")?.as_str().map(str::to_string))
             .collect();
@@ -1643,7 +1640,7 @@ fn test_config_snapshot() -> share::config::domain::snapshot::ConfigSnapshot {
 }
 
 fn test_runner_with_provider(
-    provider: Arc<dyn LlmProvider>,
+    provider: Arc<dyn ScriptedLlmProvider>,
 ) -> (
     CliAgentRunner,
     crate::application::run::context::ParentRunFrameGuard,
@@ -1719,20 +1716,16 @@ struct BlockingThenCancelledProvider {
 }
 
 #[async_trait]
-impl LlmProvider for BlockingThenCancelledProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for BlockingThenCancelledProvider {
+    async fn scripted_invocation_stream(
         &self,
-        resolved: &provider::composition::ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        _messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        cancel: &tokio_util::sync::CancellationToken,
+        request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
         {
             let mut guard = self.calls.lock().unwrap();
             *guard += 1;
         }
-        cancel.cancelled().await;
+        request.cancellation.cancelled().await;
         Err(ProviderError::cancelled())
     }
 
@@ -1757,14 +1750,10 @@ struct ContextRecordingProvider {
 }
 
 #[async_trait]
-impl LlmProvider for ContextRecordingProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for ContextRecordingProvider {
+    async fn scripted_invocation_stream(
         &self,
-        resolved: &provider::composition::ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        _messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        _cancel: &tokio_util::sync::CancellationToken,
+        _request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
         self.seen.lock().unwrap().push(scoped_logging::capture());
         Err(ProviderError::fatal(ProviderErrorKind::Network, "recorded"))
@@ -1784,14 +1773,10 @@ struct ErrorProvider {
 }
 
 #[async_trait]
-impl LlmProvider for ErrorProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for ErrorProvider {
+    async fn scripted_invocation_stream(
         &self,
-        resolved: &provider::composition::ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        _messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        _cancel: &tokio_util::sync::CancellationToken,
+        _request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
         Err(self.error.clone())
     }

@@ -1,9 +1,9 @@
 use provider::{
-    InvocationDeltaData, InvocationEventData, InvocationOptionsData, InvocationRequestData,
-    ModelCapabilityData, ModelIdData, ModelToolSchemaData, ProviderCompletionData,
-    ProviderContentBlockData, ProviderError, ProviderErrorKind, ProviderStopReasonData,
-    ProviderToolCallData, ProviderToolCallIdData, RawUsageSnapshotData, ReasoningCapabilityData,
-    ReasoningMappingKindData, RequestSystemBlockData,
+    InvocationDeltaData, InvocationEventData, InvocationRequestData, ModelCapabilityData,
+    ModelIdData, ProviderCompletionData, ProviderContentBlockData, ProviderError,
+    ProviderErrorKind, ProviderStopReasonData, ProviderToolCallData, ProviderToolCallIdData,
+    RawUsageSnapshotData, ReasoningCapabilityData, ReasoningMappingKindData,
+    RequestSystemBlockData,
 };
 use share::message::Message;
 use share::reasoning::ReasoningLevel;
@@ -13,11 +13,9 @@ fn crate_root_exposes_complete_provider_published_language_as_send_sync_values()
     fn assert_send_sync<T: Send + Sync>() {}
     assert_send_sync::<InvocationDeltaData>();
     assert_send_sync::<InvocationEventData>();
-    assert_send_sync::<InvocationOptionsData>();
     assert_send_sync::<InvocationRequestData>();
     assert_send_sync::<ModelCapabilityData>();
     assert_send_sync::<ModelIdData>();
-    assert_send_sync::<ModelToolSchemaData>();
     assert_send_sync::<ProviderCompletionData>();
     assert_send_sync::<ProviderContentBlockData>();
     assert_send_sync::<ProviderError>();
@@ -39,7 +37,8 @@ fn invocation_request_clone_shares_message_backing() {
             model: "contract-model".to_string(),
         },
         vec![Message::user("history")],
-        InvocationOptionsData::new(8_192, ReasoningLevel::Off),
+        8_192,
+        ReasoningLevel::Off,
     );
     let cloned = request.clone();
 
@@ -54,11 +53,7 @@ fn crate_root_published_language_preserves_boundary_semantics() {
         model: "contract-model".to_string(),
     };
 
-    let request = InvocationRequestData::new(
-        model,
-        Vec::new(),
-        InvocationOptionsData::new(8_192, ReasoningLevel::Medium),
-    );
+    let request = InvocationRequestData::new(model, Vec::new(), 8_192, ReasoningLevel::Medium);
     assert!(request.system.is_empty());
     assert!(request.tools.is_empty());
     assert!(!request.cancellation.is_cancelled());

@@ -1,146 +1,30 @@
+// ─── 迁移记录（provider invoke 转换断言组 → provider crate）────────────
+//
+// v2 后 ProviderAdapter::invoke 是纯直传：system block / tool schema 转换、
+// reasoning clamp、ResolvedInvocation 校验（max_tokens=0 → Configuration）、
+// 底层错误透传与 establishment 取消竞速全部归 provider crate 的
+// LlmClient::invoke。原 FakeLlmProvider（impl 已 pub(crate) 的 LlmProvider）
+// 基建随构造面撤空一并删除。以下测试已迁移至
+// agent/features/provider/src/adapters/client_invoke_tests.rs（断言语义等价）：
+//   - invoke_returns_stream_with_delta_then_completed（Delta→Completed 流序）
+//   - invoke_propagates_provider_error（底层错误透传）
+//   - invoke_rejects_invalid_scope（ResolvedInvocation 校验 → Configuration）
+//   - invoke_converts_system_blocks_tools_and_uses_neutral_scope_model（system/tool 转换）
+//   - invoke_clamps_requested_reasoning_to_capability（capability clamp）
+//   - invoke_invokes_provider_exactly_once（单次 invoke 单次上游调用）
+//   - invoke_returns_cancelled_when_signal_fires_during_establishment（establishment 取消竞速）
+// 本文件保留 adapter 自有逻辑测试：capability 查表（capabilities_*、
+// invoke_rejects_unknown_model）、invoke fast-path（信号已置位直返 Cancelled）、
+// factory 装配与 transport pool 复用契约。
+
 use super::*;
-use async_trait::async_trait;
-use provider::composition::{LlmClient, LlmProvider, ResolvedInvocation};
+use provider::composition::{wire_provider_client, LlmConfigOptionsData, TransportPool};
 use provider::{
-    InvocationDeltaData, InvocationEventData, InvocationRequestData, ModelCapabilityData,
-    ModelIdData, ProviderCompletionData, ProviderContentBlockData, ProviderErrorKind,
-    ProviderStopReasonData as StopReason, RawUsageSnapshotData, ReasoningCapabilityData,
-    ReasoningMappingKindData,
+    InvocationRequestData, ModelCapabilityData, ModelIdData, ProviderErrorKind,
+    ReasoningCapabilityData,
 };
-use share::message::Message;
 use share::reasoning::ReasoningLevel;
-use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
-
-// ─── Captured invocation (what the fake provider received) ────────────
-
-/// Snapshot of everything the fake provider observed in one `invocation_stream`
-/// call: the resolved `InvocationScopeData` plus the converted system blocks and
-/// tool schemas. The adapter's job is to translate the provider-neutral
-/// `InvocationRequestData` into these legacy provider-domain values; the tests
-/// assert that translation.
-#[derive(Debug, Default, Clone)]
-struct CapturedInvocation {
-    scope_model: Option<String>,
-    scope_max_tokens: Option<u32>,
-    scope_requested_reasoning: Option<ReasoningLevel>,
-    scope_effective_reasoning: Option<ReasoningLevel>,
-    /// `(text, is_cacheable)` per legacy `SystemBlockData`.
-    system_blocks: Vec<(String, bool)>,
-    tool_schemas: Vec<serde_json::Value>,
-    invocation_count: u32,
-}
-
-// ─── Minimal fake LlmProvider ─────────────────────────────────────────
-
-/// A minimal fake `LlmProvider` that records what it receives and returns a
-/// fixed happy-path stream. Two knobs:
-/// - `with_error`: make `invocation_stream` fail immediately with a given error.
-/// - `blocking`: make `invocation_stream` await the local cancellation token
-///   before returning, so a test can exercise establishment-phase cancellation.
-struct FakeLlmProvider {
-    model: String,
-    provider: String,
-    error: Option<provider::ProviderError>,
-    captured: Arc<Mutex<CapturedInvocation>>,
-    block_until_cancelled: bool,
-}
-
-impl FakeLlmProvider {
-    fn new(
-        provider_name: &str,
-        model_name: &str,
-        captured: Arc<Mutex<CapturedInvocation>>,
-    ) -> Self {
-        Self {
-            model: model_name.to_string(),
-            provider: provider_name.to_string(),
-            error: None,
-            captured,
-            block_until_cancelled: false,
-        }
-    }
-
-    fn with_error(mut self, err: provider::ProviderError) -> Self {
-        self.error = Some(err);
-        self
-    }
-
-    /// Variant that blocks call establishment until the (local) cancellation
-    /// token fires, simulating a slow / pending connection.
-    fn blocking(
-        provider_name: &str,
-        model_name: &str,
-        captured: Arc<Mutex<CapturedInvocation>>,
-    ) -> Self {
-        let mut this = Self::new(provider_name, model_name, captured);
-        this.block_until_cancelled = true;
-        this
-    }
-}
-
-#[async_trait]
-impl LlmProvider for FakeLlmProvider {
-    async fn invocation_stream(
-        &self,
-        resolved: &ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        _messages: &[Message],
-        tool_schemas: &[serde_json::Value],
-        cancel: &CancellationToken,
-    ) -> Result<provider::InvocationStreamData, provider::ProviderError> {
-        // Record exactly what the adapter passed down.
-        {
-            let mut c = self.captured.lock().expect("captured lock poisoned");
-            c.scope_model = Some(resolved.model.clone());
-            c.scope_max_tokens = Some(resolved.max_tokens);
-            c.scope_requested_reasoning = Some(resolved.requested_reasoning);
-            c.scope_effective_reasoning = Some(resolved.effective_reasoning);
-            c.system_blocks = system
-                .iter()
-                .map(|b| (b.text().to_string(), b.is_cacheable()))
-                .collect();
-            c.tool_schemas = tool_schemas.to_vec();
-            c.invocation_count += 1;
-        }
-
-        if self.block_until_cancelled {
-            // Simulate a pending connection: stay in establishment until the
-            // local token is cancelled by the adapter's select bridge.
-            cancel.cancelled().await;
-            return Err(provider::ProviderError::cancelled());
-        }
-        if cancel.is_cancelled() {
-            return Err(provider::ProviderError::cancelled());
-        }
-        if let Some(ref err) = self.error {
-            return Err(err.clone());
-        }
-        Ok(Box::pin(futures_util::stream::iter(vec![
-            InvocationEventData::Delta(InvocationDeltaData::Text("hello from fake".to_string())),
-            InvocationEventData::Completed(ProviderCompletionData {
-                output: vec![ProviderContentBlockData::Text(
-                    "hello from fake".to_string(),
-                )],
-                stop_reason: StopReason::EndTurn,
-                usage: Some(RawUsageSnapshotData {
-                    input_tokens: Some(5),
-                    output_tokens: Some(3),
-                    ..Default::default()
-                }),
-                effective_reasoning: ReasoningLevel::Off,
-            }),
-        ])))
-    }
-
-    fn model_name(&self) -> &str {
-        &self.model
-    }
-
-    fn provider_name(&self) -> &str {
-        &self.provider
-    }
-}
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -163,44 +47,39 @@ fn test_capability() -> ModelCapabilityData {
     }
 }
 
-fn fresh_captured() -> Arc<Mutex<CapturedInvocation>> {
-    Arc::new(Mutex::new(CapturedInvocation::default()))
-}
-
-/// Build a port over a recording fake provider and the given capability,
-/// returning shared access to what the fake observed.
+/// Build a port over a real (wire-assembled) client and the given capability.
+/// Adapter 自有逻辑测试只走 capability 查表与 fast-path，不触发上游调用；
+/// LlmProvider 构造面已撤空（见文件头迁移记录），客户端经组合根唯一装配
+/// 入口 `wire_provider_client` 构造。
 fn build_port_with_capability(
     capability: ModelCapabilityData,
-) -> (
-    Arc<dyn ProviderPort>,
-    ModelIdData,
-    Arc<Mutex<CapturedInvocation>>,
-) {
-    let captured = fresh_captured();
+) -> (Arc<dyn ProviderPort>, ModelIdData) {
     let model = capability.model.clone();
-    let fake = Arc::new(FakeLlmProvider::new(
-        &model.provider,
-        &model.model,
-        captured.clone(),
-    ));
-    let client = Arc::new(LlmClient::from_provider(fake));
+    let client = wire_provider_client(
+        LlmConfigOptionsData {
+            driver: "openai".to_string(),
+            source_key: "test-source".to_string(),
+            api_style: None,
+            api_key: "test-api-key".to_string(),
+            base_url: Some("https://example.test/v1".to_string()),
+            model: model.model.clone(),
+            max_tokens: 8192,
+            reasoning: false,
+            reasoning_config: None,
+            timeout_secs: 30,
+            user_agent: Some("aemeath-test/1.0".to_string()),
+        },
+        &TransportPool::new(),
+        ReasoningLevel::Off,
+    )
+    .expect("test client must wire through the composition entry");
     let caps = HashMap::from([(model.clone(), capability)]);
-    (provider_port(client, caps), model, captured)
+    (provider_port(client, caps), model)
 }
 
-/// Build a port whose fake records into a shared snapshot.
-fn build_port_capturing() -> (
-    Arc<dyn ProviderPort>,
-    ModelIdData,
-    Arc<Mutex<CapturedInvocation>>,
-) {
-    build_port_with_capability(test_capability())
-}
-
-/// Build a port for tests that don't inspect what the fake received.
+/// Build a port for tests that only exercise adapter-owned behaviour.
 fn build_port() -> (Arc<dyn ProviderPort>, ModelIdData) {
-    let (port, model, _captured) = build_port_capturing();
-    (port, model)
+    build_port_with_capability(test_capability())
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────
@@ -239,37 +118,6 @@ fn capabilities_rejects_unknown_model() {
 }
 
 #[tokio::test]
-async fn invoke_returns_stream_with_delta_then_completed() {
-    let (port, model) = build_port();
-
-    let request = InvocationRequestData::new(model, vec![], 8192, ReasoningLevel::Off);
-    let cancel = CancellationToken::new();
-
-    let mut stream = port.invoke(request, &cancel).await.unwrap();
-
-    use futures_util::StreamExt;
-
-    let mut events = Vec::new();
-    while let Some(evt) = stream.next().await {
-        events.push(evt);
-    }
-
-    assert_eq!(
-        events.len(),
-        2,
-        "expected exactly 2 events: Delta + Completed"
-    );
-    assert!(
-        matches!(events[0], InvocationEventData::Delta(InvocationDeltaData::Text(ref t)) if t == "hello from fake"),
-        "first event should be a text delta"
-    );
-    assert!(
-        matches!(events[1], InvocationEventData::Completed(_)),
-        "second event should be Completed"
-    );
-}
-
-#[tokio::test]
 async fn invoke_returns_cancelled_when_signal_already_set() {
     let (port, model) = build_port();
 
@@ -281,164 +129,6 @@ async fn invoke_returns_cancelled_when_signal_already_set() {
     assert!(
         matches!(result, Err(ref e) if e.is_cancelled()),
         "expected cancelled error"
-    );
-}
-
-#[tokio::test]
-async fn invoke_propagates_provider_error() {
-    let captured = fresh_captured();
-    let model = ModelIdData {
-        provider: "bad-provider".to_string(),
-        model: "bad-model".to_string(),
-    };
-    let fake = Arc::new(
-        FakeLlmProvider::new("bad-provider", "bad-model", captured).with_error(
-            provider::ProviderError::fatal(
-                provider::ProviderErrorKind::RateLimited,
-                "too many requests",
-            ),
-        ),
-    );
-    let client = Arc::new(LlmClient::from_provider(fake));
-    let capability = ModelCapabilityData {
-        model: model.clone(),
-        supports_tools: false,
-        supports_parallel_tool_calls: false,
-        supports_streaming: true,
-        reasoning: ReasoningCapabilityData::none(),
-        context_limit: None,
-        output_limit: None,
-    };
-    let port = provider_port(client, HashMap::from([(model.clone(), capability)]));
-
-    let request = InvocationRequestData::new(model, vec![], 8192, ReasoningLevel::Off);
-    let cancel = CancellationToken::new();
-
-    let result = port.invoke(request, &cancel).await;
-    assert!(
-        matches!(result, Err(ref e) if e.kind == provider::ProviderErrorKind::RateLimited && !e.retryable),
-        "expected terminal rate-limited error"
-    );
-}
-
-#[tokio::test]
-async fn invoke_rejects_invalid_scope() {
-    let (port, model) = build_port();
-
-    // max_output_tokens = 0 should trigger a scope validation error.
-    let request = InvocationRequestData::new(model, vec![], 0, ReasoningLevel::Off);
-    let cancel = CancellationToken::new();
-
-    let result = port.invoke(request, &cancel).await;
-    assert!(
-        matches!(result, Err(ref e) if e.kind == ProviderErrorKind::Configuration),
-        "expected configuration error for zero max tokens"
-    );
-}
-
-// ─── New: translation / clamp / single-invocation / cancel ────────────
-
-#[tokio::test]
-async fn invoke_converts_system_blocks_tools_and_uses_neutral_scope_model() {
-    let (port, model, captured) = build_port_capturing();
-
-    let mut request = InvocationRequestData::new(model, vec![], 8192, ReasoningLevel::Off);
-    // Provider-neutral system blocks: one cacheable, one dynamic.
-    request.system = vec![
-        provider::RequestSystemBlockData::Text("stable prefix first part".to_string()),
-        provider::RequestSystemBlockData::Cacheable("stable prefix boundary".to_string()),
-        provider::RequestSystemBlockData::Text("today is monday".to_string()),
-    ];
-    // A tool schema with full {name, description, input_schema}.
-    request.tools = vec![serde_json::json!({
-        "name": "get_weather",
-        "description": "Get current weather",
-        "input_schema": {
-            "type": "object",
-            "properties": { "city": { "type": "string" } },
-        },
-    })];
-
-    let cancel = CancellationToken::new();
-    let mut stream = port.invoke(request, &cancel).await.unwrap();
-    use futures_util::StreamExt;
-    while stream.next().await.is_some() {}
-
-    let c = captured.lock().expect("captured lock poisoned");
-
-    // (3) Scope model is the provider-neutral model name, NOT "provider/model".
-    assert_eq!(c.scope_model.as_deref(), Some("fake-model"));
-    assert_ne!(c.scope_model.as_deref(), Some("fake-provider/fake-model"));
-    assert_eq!(c.scope_max_tokens, Some(8192));
-
-    // System blocks converted at the Provider composition boundary:
-    //     Cacheable → cache_control present (ephemeral), Text → absent.
-    assert_eq!(
-        c.system_blocks,
-        vec![
-            ("stable prefix first part".to_string(), false),
-            ("stable prefix boundary".to_string(), true),
-            ("today is monday".to_string(), false),
-        ]
-    );
-
-    // (2) Tool schema converted to a complete JSON object
-    //     {name, description, input_schema}, not the bare input_schema.
-    assert_eq!(c.tool_schemas.len(), 1);
-    let tool = &c.tool_schemas[0];
-    assert_eq!(tool["name"], "get_weather");
-    assert_eq!(tool["description"], "Get current weather");
-    assert_eq!(tool["input_schema"]["properties"]["city"]["type"], "string");
-}
-
-#[tokio::test]
-async fn invoke_clamps_requested_reasoning_to_capability() {
-    // Capability supports only Off and Medium; requesting Max must clamp to Medium.
-    let mut capability = test_capability();
-    capability.reasoning = ReasoningCapabilityData::new(
-        [ReasoningLevel::Off, ReasoningLevel::Medium],
-        ReasoningMappingKindData::Effort,
-    )
-    .expect("valid capability");
-
-    let (port, model, captured) = build_port_with_capability(capability);
-
-    let request = InvocationRequestData::new(model, vec![], 4096, ReasoningLevel::Max);
-    let cancel = CancellationToken::new();
-    let _ = port.invoke(request, &cancel).await.unwrap();
-
-    let c = captured.lock().expect("captured lock poisoned");
-    assert_eq!(
-        c.scope_requested_reasoning,
-        Some(ReasoningLevel::Max),
-        "requested reasoning is preserved verbatim"
-    );
-    assert_eq!(
-        c.scope_effective_reasoning,
-        Some(ReasoningLevel::Medium),
-        "effective reasoning is clamped to the capability maximum"
-    );
-    assert!(
-        c.scope_effective_reasoning.unwrap() <= c.scope_requested_reasoning.unwrap(),
-        "effective must not exceed requested"
-    );
-}
-
-#[tokio::test]
-async fn invoke_invokes_provider_exactly_once() {
-    let (port, model, captured) = build_port_capturing();
-
-    let request = InvocationRequestData::new(model, vec![], 8192, ReasoningLevel::Off);
-    let cancel = CancellationToken::new();
-    let mut stream = port.invoke(request, &cancel).await.unwrap();
-
-    use futures_util::StreamExt;
-    while stream.next().await.is_some() {}
-
-    let c = captured.lock().expect("captured lock poisoned");
-    assert_eq!(
-        c.invocation_count, 1,
-        "a single invoke() must result in exactly one upstream invocation"
     );
 }
 
@@ -457,42 +147,6 @@ async fn invoke_rejects_unknown_model() {
     assert!(
         matches!(result, Err(ref e) if e.kind == ProviderErrorKind::ModelUnavailable),
         "expected ModelUnavailable for a model with no declared capability"
-    );
-}
-
-#[tokio::test]
-async fn invoke_returns_cancelled_when_signal_fires_during_establishment() {
-    // A fake that parks inside call establishment until its local token fires.
-    let captured = fresh_captured();
-    let model = test_model_id();
-    let fake = Arc::new(FakeLlmProvider::blocking(
-        "fake-provider",
-        "fake-model",
-        captured,
-    ));
-    let client = Arc::new(LlmClient::from_provider(fake));
-    let port: Arc<dyn ProviderPort> =
-        provider_port(client, HashMap::from([(model.clone(), test_capability())]));
-
-    let cancel = CancellationToken::new();
-    let cancel_for_task = cancel.clone();
-    let port_for_task = port.clone();
-
-    // Drive invoke() on a task so we can fire the external signal mid-flight.
-    let handle = tokio::spawn(async move {
-        let request = InvocationRequestData::new(model, vec![], 8192, ReasoningLevel::Off);
-        port_for_task.invoke(request, &cancel_for_task).await
-    });
-
-    // Let the spawned invoke reach call establishment (the fake now awaits its
-    // local cancellation token).
-    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    cancel.cancel();
-
-    let result = handle.await.expect("spawned invoke task panicked");
-    assert!(
-        matches!(result, Err(ref e) if e.is_cancelled()),
-        "expected Cancelled when the external signal fires during establishment"
     );
 }
 

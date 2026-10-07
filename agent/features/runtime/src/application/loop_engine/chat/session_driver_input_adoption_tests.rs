@@ -317,14 +317,10 @@ impl ToolThenTextProvider {
 }
 
 #[async_trait]
-impl LlmProvider for ToolThenTextProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for ToolThenTextProvider {
+    async fn scripted_invocation_stream(
         &self,
-        resolved: &provider::composition::ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        _cancel: &CancellationToken,
+        request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
         let call_num = {
             let mut count = self.call_count.lock().unwrap();
@@ -334,7 +330,7 @@ impl LlmProvider for ToolThenTextProvider {
         self.recorded_messages
             .lock()
             .unwrap()
-            .push(messages.to_vec());
+            .push(request.messages.to_vec());
 
         if call_num == 1 {
             let tool_call = ProviderToolCallData {
@@ -418,14 +414,10 @@ impl TextOnlyProvider {
 }
 
 #[async_trait]
-impl LlmProvider for TextOnlyProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for TextOnlyProvider {
+    async fn scripted_invocation_stream(
         &self,
-        resolved: &provider::composition::ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        _cancel: &CancellationToken,
+        request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
         {
             let mut count = self.call_count.lock().unwrap();
@@ -434,7 +426,7 @@ impl LlmProvider for TextOnlyProvider {
         self.recorded_messages
             .lock()
             .unwrap()
-            .push(messages.to_vec());
+            .push(request.messages.to_vec());
         self.after_response.notify_one();
         Ok(Box::pin(futures::stream::iter(vec![
             InvocationEventData::Delta(InvocationDeltaData::Text("hello from model".to_string())),
@@ -1095,14 +1087,10 @@ impl StreamingToolDeltaProvider {
 }
 
 #[async_trait]
-impl LlmProvider for StreamingToolDeltaProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for StreamingToolDeltaProvider {
+    async fn scripted_invocation_stream(
         &self,
-        resolved: &provider::composition::ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        _cancel: &CancellationToken,
+        request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
         let call_num = {
             let mut count = self.call_count.lock().unwrap();
@@ -1112,7 +1100,7 @@ impl LlmProvider for StreamingToolDeltaProvider {
         self.recorded_messages
             .lock()
             .unwrap()
-            .push(messages.to_vec());
+            .push(request.messages.to_vec());
         if call_num == 1 {
             self.after_tool_completed.notify_one();
             let tool_call = ProviderToolCallData {

@@ -104,14 +104,10 @@ impl IdenticalReplyProvider {
 }
 
 #[async_trait]
-impl LlmProvider for IdenticalReplyProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for IdenticalReplyProvider {
+    async fn scripted_invocation_stream(
         &self,
-        resolved: &provider::composition::ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        _messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        _cancel: &CancellationToken,
+        _request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
         tokio::time::sleep(self.per_turn_delay).await;
         Ok(text_completion_stream(self.reply.clone(), 1, 1))
@@ -247,16 +243,13 @@ impl RecordingProvider {
 }
 
 #[async_trait]
-impl LlmProvider for RecordingProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for RecordingProvider {
+    async fn scripted_invocation_stream(
         &self,
-        resolved: &provider::composition::ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        _cancel: &CancellationToken,
+        request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
-        let last_user = messages
+        let last_user = request
+            .messages
             .iter()
             .rev()
             .find(|message| message.role == Role::User)
@@ -617,14 +610,10 @@ impl CancellableThenNormalProvider {
 }
 
 #[async_trait]
-impl LlmProvider for CancellableThenNormalProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for CancellableThenNormalProvider {
+    async fn scripted_invocation_stream(
         &self,
-        resolved: &provider::composition::ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        _messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        cancel: &CancellationToken,
+        request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
         let call_index = {
             let mut guard = self.calls.lock().unwrap();
@@ -634,11 +623,11 @@ impl LlmProvider for CancellableThenNormalProvider {
         };
         if call_index == 0 {
             // 回合 1：阻塞等待 cancel，被取消后返回 Cancelled（模拟 provider 侧取消）。
-            cancel.cancelled().await;
+            request.cancellation.cancelled().await;
             return Err(ProviderError::cancelled());
         }
         // 回合 2+：正常完成（关键：此时若 token 未重置，会立刻 Cancelled）。
-        if cancel.is_cancelled() {
+        if request.cancellation.is_cancelled() {
             return Err(ProviderError::cancelled());
         }
         let text = format!("turn {} final", call_index + 1);
@@ -790,14 +779,10 @@ impl CompleteThenCancellableProvider {
 }
 
 #[async_trait]
-impl LlmProvider for CompleteThenCancellableProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for CompleteThenCancellableProvider {
+    async fn scripted_invocation_stream(
         &self,
-        resolved: &provider::composition::ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        _messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        cancel: &CancellationToken,
+        request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
         let call_index = {
             let mut guard = self.calls.lock().unwrap();
@@ -808,10 +793,10 @@ impl LlmProvider for CompleteThenCancellableProvider {
         // 回合 2（call_index == 1）：阻塞等 cancel，被取消后返回 Cancelled。
         // 回合 1 / 回合 3：正常完成（token 已重置，不应被陈旧 cancel 污染）。
         if call_index == 1 {
-            cancel.cancelled().await;
+            request.cancellation.cancelled().await;
             return Err(ProviderError::cancelled());
         }
-        if cancel.is_cancelled() {
+        if request.cancellation.is_cancelled() {
             return Err(ProviderError::cancelled());
         }
         let text = format!("turn {} assistant", call_index + 1);
@@ -989,14 +974,10 @@ async fn test_chat_impl_idle_until_first_input_event() {
         calls: Arc<std::sync::atomic::AtomicUsize>,
     }
     #[async_trait]
-    impl LlmProvider for CountingProvider {
-        async fn invocation_stream(
+    impl ScriptedLlmProvider for CountingProvider {
+        async fn scripted_invocation_stream(
             &self,
-            _resolved: &provider::composition::ResolvedInvocation,
-            _system: &[provider::RequestSystemBlockData],
-            _messages: &[Message],
-            _tool_schemas: &[serde_json::Value],
-            _cancel: &CancellationToken,
+            _request: &crate::ports::provider_port::InvocationRequestData,
         ) -> Result<InvocationStreamData, ProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(text_completion_stream("hi response", 1, 1))
@@ -1323,14 +1304,10 @@ impl ApiErrorThenNormalProvider {
 }
 
 #[async_trait]
-impl LlmProvider for ApiErrorThenNormalProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for ApiErrorThenNormalProvider {
+    async fn scripted_invocation_stream(
         &self,
-        resolved: &provider::composition::ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        _messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        _cancel: &CancellationToken,
+        _request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
         let call_index = {
             let mut guard = self.calls.lock().unwrap();

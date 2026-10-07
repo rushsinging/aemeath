@@ -53,14 +53,10 @@ struct StepCancelledStreamingToolProvider {
 }
 
 #[async_trait]
-impl LlmProvider for StepCancelledStreamingToolProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for StepCancelledStreamingToolProvider {
+    async fn scripted_invocation_stream(
         &self,
-        resolved: &provider::composition::ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        _messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        cancel: &CancellationToken,
+        request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
         let invocation_number = {
             let mut count = self.invocation_count.lock().unwrap();
@@ -83,7 +79,7 @@ impl LlmProvider for StepCancelledStreamingToolProvider {
             name: self.tool_name.to_string(),
             arguments: serde_json::json!({}),
         };
-        let cancel = cancel.clone();
+        let cancel = request.cancellation.clone();
         let completed_call = tool_call.clone();
         let stream = futures::stream::iter(vec![
             InvocationEventData::Delta(InvocationDeltaData::ToolCallStarted {
@@ -321,14 +317,10 @@ impl StreamingToolRetryProvider {
 }
 
 #[async_trait]
-impl LlmProvider for StreamingToolRetryProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for StreamingToolRetryProvider {
+    async fn scripted_invocation_stream(
         &self,
-        resolved: &provider::composition::ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        _cancel: &CancellationToken,
+        request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
         let call_num = {
             let mut count = self.call_count.lock().unwrap();
@@ -338,7 +330,7 @@ impl LlmProvider for StreamingToolRetryProvider {
         self.recorded_messages
             .lock()
             .unwrap()
-            .push(messages.to_vec());
+            .push(request.messages.to_vec());
         if call_num == 1 {
             // 先发完整的 ToolCallCompleted delta（旁路执行已触发），随后流失败。
             let tool_call = ProviderToolCallData {
@@ -487,14 +479,10 @@ impl StreamingToolRetryOrphanProvider {
 }
 
 #[async_trait]
-impl LlmProvider for StreamingToolRetryOrphanProvider {
-    async fn invocation_stream(
+impl ScriptedLlmProvider for StreamingToolRetryOrphanProvider {
+    async fn scripted_invocation_stream(
         &self,
-        resolved: &provider::composition::ResolvedInvocation,
-        system: &[provider::RequestSystemBlockData],
-        messages: &[Message],
-        _tool_schemas: &[serde_json::Value],
-        _cancel: &CancellationToken,
+        request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
         let call_num = {
             let mut count = self.call_count.lock().unwrap();
@@ -504,7 +492,7 @@ impl LlmProvider for StreamingToolRetryOrphanProvider {
         self.recorded_messages
             .lock()
             .unwrap()
-            .push(messages.to_vec());
+            .push(request.messages.to_vec());
         let usage = || {
             Some(RawUsageSnapshotData {
                 input_tokens: Some(10),

@@ -1,7 +1,6 @@
 //! 消息格式转换：将 Anthropic 风格的消息转换为 OpenAI 格式
 
 use super::{message_helpers::enforce_openai_tool_pairs, OpenAICompatibleProvider};
-use crate::adapters::wire::SystemBlockData;
 use share::message::{ContentBlock, Message, Role};
 
 impl OpenAICompatibleProvider {

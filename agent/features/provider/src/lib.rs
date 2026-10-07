@@ -41,10 +41,7 @@ pub mod composition {
     };
     pub use crate::adapters::pool::TransportPool;
     pub use crate::adapters::probe::{run_connectivity_probe, wire_probe_client};
-    pub use crate::adapters::wire::SystemBlockData;
     pub use crate::domain::capability::reasoning_capability_from_max;
-    pub use crate::domain::invoke::InvocationScopeData;
-    pub use crate::ports::{LlmProvider, ResolvedInvocation};
 }
 
 pub use published_language::{

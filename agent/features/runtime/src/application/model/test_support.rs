@@ -49,15 +49,32 @@ impl ScriptedInvocationProvider {
     }
 }
 
+/// runtime 测试自有的 scripted provider 契约（#1861 C12c：不再借用
+/// provider 内部 driver trait——fake 基建自产事件流）。
+///
+/// 消费完整 request（messages/system/tools/max_tokens 均可断言），
+/// 返回预设事件流；取消经 `request.cancellation` 表达。
 #[async_trait]
-impl provider::composition::LlmProvider for ScriptedInvocationProvider {
-    async fn invocation_stream(
+pub(crate) trait ScriptedLlmProvider: Send + Sync {
+    async fn scripted_invocation_stream(
         &self,
-        _resolved: &provider::composition::ResolvedInvocation,
-        _system: &[provider::RequestSystemBlockData],
-        _messages: &[share::message::Message],
-        _tool_schemas: &[serde_json::Value],
-        _cancel: &tokio_util::sync::CancellationToken,
+        request: &crate::ports::provider_port::InvocationRequestData,
+    ) -> Result<InvocationStreamData, ProviderError>;
+
+    fn model_name(&self) -> &str {
+        "test-model"
+    }
+
+    fn provider_name(&self) -> &str {
+        "test-provider"
+    }
+}
+
+#[async_trait]
+impl ScriptedLlmProvider for ScriptedInvocationProvider {
+    async fn scripted_invocation_stream(
+        &self,
+        _request: &crate::ports::provider_port::InvocationRequestData,
     ) -> Result<InvocationStreamData, ProviderError> {
         *self.calls.lock().unwrap() += 1;
         let events = self
@@ -339,22 +356,22 @@ pub(crate) fn constant_factory(
     Arc::new(ConstantTestFactory::new(binding))
 }
 
-// ─── LlmProvider → ProviderPort adapter (#907 loop test migration) ────────
+// ─── ScriptedLlmProvider → ProviderPort adapter (#907 loop test migration) ────
 
 /// Adapter that implements [`crate::ports::ProviderPort`] by delegating to an
-/// existing `provider::composition::LlmProvider` scripted fake.
+/// existing runtime-local [`ScriptedLlmProvider`] scripted fake.
 ///
-/// Used only by `runtime` lib tests as a minimal bridge so the legacy scripted
+/// Used only by `runtime` lib tests as a minimal bridge so the scripted
 /// fakes (e.g. `SequenceProvider`, `RecordingProvider`, `CountingProvider`,
 /// `ErrorProvider`) can be wrapped in a `ProviderBindingData` without rewriting
 /// every test to the new `ProviderPort` trait.
-struct LlmProviderPortAdapter {
-    provider: std::sync::Arc<dyn provider::composition::LlmProvider>,
+struct ScriptedProviderPortAdapter {
+    provider: std::sync::Arc<dyn ScriptedLlmProvider>,
     model: provider::ModelIdData,
 }
 
-impl LlmProviderPortAdapter {
-    fn new(provider: std::sync::Arc<dyn provider::composition::LlmProvider>) -> Self {
+impl ScriptedProviderPortAdapter {
+    fn new(provider: std::sync::Arc<dyn ScriptedLlmProvider>) -> Self {
         let model = provider::ModelIdData {
             provider: provider.provider_name().to_string(),
             model: provider.model_name().to_string(),
@@ -364,7 +381,7 @@ impl LlmProviderPortAdapter {
 }
 
 #[async_trait]
-impl crate::ports::ProviderPort for LlmProviderPortAdapter {
+impl crate::ports::ProviderPort for ScriptedProviderPortAdapter {
     fn capabilities(
         &self,
         model: &provider::ModelIdData,
@@ -401,52 +418,27 @@ impl crate::ports::ProviderPort for LlmProviderPortAdapter {
         crate::ports::provider_port::InvocationStreamData,
         crate::ports::provider_port::ProviderError,
     > {
-        // request.system 已是 provider 中性 RequestSystemBlockData，直接转发。
-        // request.tools 已是 wire-ready tool 定义（Value）。
-        let tool_schemas: Vec<serde_json::Value> = request.tools.clone();
-        // Forward the cancellation token that the request carries; the
-        // `CancellationSignal` arg from ProviderPort::invoke is treated as
-        // advisory (real cancellation originates from `request.cancellation`).
+        // 取消语义经 request.cancellation 表达（advisory 信号忽略）。
         let _ = cancellation;
-        let resolved = provider::composition::ResolvedInvocation::new(
-            self.model.model.clone(),
-            request.max_output_tokens.max(1),
-            share::reasoning::ReasoningLevel::Off,
-            share::reasoning::ReasoningLevel::Off,
-        )
-        .map_err(|error| {
-            crate::ports::provider_port::ProviderError::fatal(
-                crate::ports::provider_port::ProviderErrorKind::Configuration,
-                format!("invalid invocation scope: {error}"),
-            )
-        })?;
-        self.provider
-            .invocation_stream(
-                &resolved,
-                &request.system,
-                &request.messages,
-                &tool_schemas,
-                &request.cancellation,
-            )
-            .await
+        self.provider.scripted_invocation_stream(&request).await
     }
 }
 
-/// Wrap an existing `provider::composition::LlmProvider` scripted fake into a
+/// Wrap an existing runtime-local [`ScriptedLlmProvider`] scripted fake into a
 /// `ProviderBindingData` so session-driver and agent tests can reuse their scripted
 /// providers without rewriting the fake bodies.
 ///
 /// The binding's `model`/`max_tokens`/`context_window` mirror the values used by
 /// the script fakes' default `LlmClient::from_provider(...)` construction.
 pub(crate) fn binding_from_llm_provider(
-    provider: std::sync::Arc<dyn provider::composition::LlmProvider>,
+    provider: std::sync::Arc<dyn ScriptedLlmProvider>,
 ) -> std::sync::Arc<crate::ports::ProviderBindingData> {
     let model = provider::ModelIdData {
         provider: provider.provider_name().to_string(),
         model: provider.model_name().to_string(),
     };
     std::sync::Arc::new(crate::ports::ProviderBindingData {
-        provider: std::sync::Arc::new(LlmProviderPortAdapter::new(provider)),
+        provider: std::sync::Arc::new(ScriptedProviderPortAdapter::new(provider)),
         model,
         max_tokens: 8192,
         requested_reasoning: crate::ports::provider_port::ReasoningLevel::Off,

@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use crate::adapters::openai_compatible::ReasoningConfig;
-use crate::adapters::wire::SystemBlockData;
 use crate::domain::capability::ReasoningLevel;
 use crate::ports::LlmProvider;
 use crate::ProviderDriverKind;
@@ -235,6 +234,10 @@ pub fn wire_provider_assembly(
 #[path = "client_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "client_invoke_tests.rs"]
+mod invoke_tests;
+
 /// Truncate a string to at most `max_bytes`, snapping to the nearest char boundary.
 fn truncate_preview(s: &str, max_bytes: usize) -> String {
     if s.len() <= max_bytes {
@@ -380,7 +383,7 @@ impl LlmClient {
         request: &crate::InvocationRequestData,
         cancellation: &dyn crate::CancellationSignal,
     ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
-        use crate::{ProviderError, ProviderErrorKind};
+        use crate::ProviderError;
 
         // fast path：调用方信号已触发。
         if cancellation.is_cancelled() {
@@ -400,6 +403,7 @@ impl LlmClient {
         // request.tools 已是 wire-ready tool 定义（context::ToolSchemaData 投影产物）。
         let tool_schemas = request.tools.clone();
 
+        self.log_request(&request.system, &request.messages, &request.tools);
         // request 携带的 token 与调用方信号竞速 establishment。
         let cancel_token = request.cancellation.clone();
         let establishment = Box::pin(self.invocation_stream(
@@ -423,7 +427,7 @@ impl LlmClient {
 
     fn log_request(
         &self,
-        system: &[SystemBlockData],
+        system: &[crate::RequestSystemBlockData],
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
     ) {
@@ -454,7 +458,7 @@ impl LlmClient {
         }).collect();
         let system_preview: Vec<String> = system
             .iter()
-            .map(|b| truncate_preview(&b.text, 200))
+            .map(|b| truncate_preview(b.text(), 200))
             .collect();
         // 计算 messages 总字符数用于 DEBUG 摘要
         let total_chars: usize = messages
