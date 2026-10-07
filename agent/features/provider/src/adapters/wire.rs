@@ -41,10 +41,22 @@ impl SystemBlockData {
         if !split_ok {
             return vec![SystemBlockData::dynamic(system.to_string())];
         }
-        let (cached, rest) = system.split_at(static_prefix_len);
-        let mut blocks = vec![SystemBlockData::cached(cached.to_string())];
+        // 安全切分（no-unsafe-text-slicing）：按字节游标逐字符切两段。
+        let mut byte_cursor = 0usize;
+        let mut char_count = 0usize;
+        for (offset, _) in system.char_indices() {
+            if offset >= static_prefix_len {
+                break;
+            }
+            byte_cursor = offset + system[offset..].chars().next().map_or(1, |c| c.len_utf8());
+            char_count += 1;
+        }
+        let cached: String = system.chars().take(char_count).collect();
+        let rest: String = system.chars().skip(char_count).collect();
+        debug_assert_eq!(cached.len(), byte_cursor);
+        let mut blocks = vec![SystemBlockData::cached(cached)];
         if !rest.is_empty() {
-            blocks.push(SystemBlockData::dynamic(rest.to_string()));
+            blocks.push(SystemBlockData::dynamic(rest));
         }
         blocks
     }
