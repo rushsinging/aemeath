@@ -44,9 +44,8 @@ pub use domain::reminder::{
     ReminderPriority, ReminderSnapshot, ReminderSource,
 };
 pub use domain::session::{
-    DisplayHistoryStepIndexData, DisplayHistoryStepWindowData, SessionListEntryData,
-    SessionManagementError, SessionMetadataUpdateData, SessionRestoreStepData,
-    SessionResumeViewData,
+    SessionListEntryData, SessionManagementError, SessionMetadataUpdateData,
+    SessionRestoreStepData, SessionResumeViewData,
 };
 pub use ports::SessionManagementPort;
 
@@ -76,13 +75,12 @@ pub(crate) use application::ContextApplicationService;
 pub(crate) use application::{SessionLoadError, SessionPersistenceService};
 #[cfg(test)]
 pub(crate) use domain::session::{
-    project_dir_segment, AcceptedInputRecord, ActiveCompactMarker, ChatSegment, CommittedRunSlice,
-    CommittedRunStep, CommittedStep, CommittedStepMessages, FinalizedOutcomeRecord, RunStepCursor,
-    SessionCodec, SessionCodecError, SessionCommitPlan, SessionGenerationCodec,
-    SessionGenerationManifest, SessionGenerationWireError, SessionHistory,
-    CURRENT_SESSION_SCHEMA_VERSION,
+    project_dir_segment, AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, ChatSegment,
+    CommittedRunSlice, CommittedRunStep, CommittedStep, CommittedStepMessages,
+    FinalizedOutcomeRecord, RunStepCursor, SessionCodec, SessionCodecError, SessionCommitPlan,
+    SessionGenerationCodec, SessionGenerationManifest, SessionGenerationWireError, SessionHistory,
+    SnapshotState, CURRENT_SESSION_SCHEMA_VERSION,
 };
-pub use domain::session::{CanonicalSession, SnapshotState};
 #[cfg(test)]
 pub(crate) use domain::ContextMessages;
 pub use domain::{

@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use context::DisplayHistoryStepIndexData;
+use context::api::DisplayHistoryStepIndexData;
 use context::FinalizeCause;
 use context::SessionRestoreStepData;
 use context::SessionResumeViewData;

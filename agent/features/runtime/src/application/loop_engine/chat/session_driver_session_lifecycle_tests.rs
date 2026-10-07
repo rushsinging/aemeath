@@ -1695,7 +1695,7 @@ impl RecordingContextFactory {
 impl context::MainContextFactory for RecordingContextFactory {
     fn build(
         &self,
-        session: Arc<std::sync::RwLock<Arc<context::CanonicalSession>>>,
+        session: Arc<std::sync::RwLock<Arc<context::session::CanonicalSession>>>,
         task_persist: Arc<dyn task::TaskPersist>,
         workspace_persist: Arc<dyn project::WorkspaceWriter>,
         memory: Arc<std::sync::RwLock<Arc<dyn memory::api::MemoryPort>>>,
