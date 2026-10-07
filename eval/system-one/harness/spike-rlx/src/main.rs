@@ -20,8 +20,16 @@ use rlx_qwen35::{
 };
 use rlx_runtime::Device;
 
-const GGUF: &str = "/Users/guoyuqi/.cache/system-one-eval/kev-merged-f16.gguf";
-const LLAMA_EMBED_URL: &str = "http://127.0.0.1:8019/embedding";
+mod constants;
+
+use constants::LLAMA_EMBED_URL;
+
+/// kev 合并 GGUF 路径（本机产物，不入仓库；env SPIKE_GGUF 覆盖）。
+fn gguf_path() -> String {
+    std::env::var("SPIKE_GGUF").unwrap_or_else(|_| {
+        format!("{}/.cache/system-one-eval/kev-merged-f16.gguf", std::env::var("HOME").unwrap())
+    })
+}
 
 struct Ctx {
     cfg: Qwen35Config,
@@ -171,7 +179,7 @@ fn max_abs(a: &[f32], b: &[f32]) -> f32 {
 
 /// Mode 3b: forward a fixed sequence, compare per-position vs llama-server.
 fn mode_hidden(ids: &[u32]) -> Result<()> {
-    let mut ctx = Ctx::open(Path::new(GGUF))?;
+    let mut ctx = Ctx::open(Path::new(&gguf_path()))?;
     let h = ctx.hidden(ids)?;
     println!("[llama] fetching reference hidden for {} tokens...", ids.len());
     let t = Instant::now();
@@ -325,7 +333,7 @@ fn mode_head(case_path: &Path, head_dir: &Path) -> Result<()> {
         row_ids.len(), decide, opts, golden.len(), llama.len()
     );
 
-    let mut ctx = Ctx::open(Path::new(GGUF))?;
+    let mut ctx = Ctx::open(Path::new(&gguf_path()))?;
     let h = ctx.hidden(&row_ids)?;
     let d_model = ctx.cfg.hidden_size;
     let at = |i: usize| -> &[f32] { &h[i * d_model..(i + 1) * d_model] };
