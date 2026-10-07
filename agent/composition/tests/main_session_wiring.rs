@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use context::context_port::ContextPort;
+use context::ContextPort;
 use context::MainSessionDependencies;
 use context::SessionManagementPort;
 use context::{

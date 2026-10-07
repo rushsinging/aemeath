@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 
-use crate::context_port::{
+use crate::domain::ContextMessage;
+use crate::{
     AcceptedInputAppendData, AcceptedInputReceiptData, AppendReceiptData, CompactOutcome,
     CompactRequestData, CompactResult, CompactTrigger, CompactionDecisionData, ContentFingerprint,
-    ContextAppendData, ContextAppendError, ContextMessage, ContextPort, ContextPortError,
-    ContextRequestData, ContextRequestId, ContextWindowData, DecisionReason, FinalizeCause,
-    Language, ManualCompactRequestData, RunStepId, SessionId, SessionRevision, StepReceiptData,
+    ContextAppendData, ContextAppendError, ContextPort, ContextPortError, ContextRequestData,
+    ContextRequestId, ContextWindowData, DecisionReason, FinalizeCause, Language,
+    ManualCompactRequestData, RunStepId, SessionId, SessionRevision, StepReceiptData,
     SystemPromptSpecData, TokenBudget, ToolOutcomeKindData, Urgency,
 };
 use async_trait::async_trait;
@@ -106,7 +107,7 @@ impl ContextPort for FakeContextPort {
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, crate::context_port::AcceptedInputError> {
+    ) -> Result<AcceptedInputReceiptData, crate::AcceptedInputError> {
         Ok(AcceptedInputReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),

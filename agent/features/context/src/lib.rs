@@ -84,8 +84,8 @@ pub(crate) use domain::session::{
 #[cfg(test)]
 pub(crate) use domain::ContextMessages;
 pub use domain::{
-    AcceptedInputAppendData, AcceptedInputError, ContextAppendData, ContextRequestId,
-    SessionRevision, SystemBlock, Urgency,
+    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, ContextAppendData,
+    ContextRequestId, SessionRevision, SystemBlock, Urgency,
 };
 pub use domain::{
     AppendReceiptData, BackgroundProcessCompletionStatus, BackgroundProcessReminderItemData,
@@ -96,9 +96,9 @@ pub use domain::{
     ContextWindowData, DecisionReason, FinalizeCause, InvocationReminderData, Language,
     ManualCompactRequestData, MemoryRecallEntryData, RunStepId, SessionId, StepReceiptData,
     SystemPromptSpecData, TaskProgressReminderData, TaskProgressReminderItemData,
-    TaskProgressStatus, ToolCallIdentityData, ToolCallReceiptData, ToolOutcomeKindData,
-    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
-    ToolTerminalReceiptData,
+    TaskProgressStatus, TokenBudget, ToolCallIdentityData, ToolCallReceiptData,
+    ToolOutcomeKindData, ToolReceiptMutationData, ToolReceiptMutationError,
+    ToolReceiptMutationReceiptData, ToolSchemaData, ToolTerminalReceiptData,
 };
 #[cfg(test)]
 pub(crate) use ports::{
@@ -111,22 +111,6 @@ pub use ports::{ContextPort, MainContextFactory};
 pub mod api {
     pub use crate::adapters::migrate_flat_sessions_to_project_dirs;
     pub use crate::domain::session::{DisplayHistoryStepIndexData, DisplayHistoryStepWindowData};
-}
-
-pub mod context_port {
-    // 消费方（runtime::ports）显式转发集；新增消费先扩本列表。
-    #[cfg(test)]
-    pub(crate) use crate::domain::ContextMessage;
-    pub use crate::domain::{
-        AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-        CompactOutcome, CompactRequestData, CompactResult, CompactSkipReason, CompactTrigger,
-        CompactionDecisionData, ContentFingerprint, ContextAppendData, ContextAppendError,
-        ContextPortError, ContextRequestData, ContextRequestId, ContextWindowData, DecisionReason,
-        FinalizeCause, Language, ManualCompactRequestData, RunStepId, SessionId, SessionRevision,
-        StepReceiptData, SystemBlock, SystemPromptSpecData, TokenBudget, ToolOutcomeKindData,
-        ToolSchemaData, Urgency,
-    };
-    pub use crate::ports::ContextPort;
 }
 
 pub mod compact {
