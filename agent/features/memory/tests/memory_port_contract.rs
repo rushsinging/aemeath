@@ -49,12 +49,14 @@ async fn in_memory_fake_satisfies_memory_port_contract() {
     );
 
     let before = port.revision();
-    let injection = port.retrieve_for_inject(&MemoryQuery {
-        limit: 10,
-        layer: None,
-        category: None,
-        now: 200,
-    });
+    let injection = port
+        .retrieve_for_inject(&MemoryQuery {
+            limit: 10,
+            layer: None,
+            category: None,
+            now: 200,
+        })
+        .await;
     assert_eq!(injection.mode, MemoryRetrievalMode::InjectionPriority);
     assert!(injection.hits.iter().all(|hit| {
         hit.location == MemoryLocation::Active
@@ -124,14 +126,16 @@ async fn mutations_are_typed_and_queries_do_not_change_revision() {
     let item = entry("one", "query purity", 100);
     port.write(item).await.unwrap();
     let revision = port.revision();
-    let _ = port.list(None);
-    let _ = port.stats();
-    let _ = port.retrieve_for_inject(&MemoryQuery {
-        limit: 1,
-        layer: None,
-        category: None,
-        now: 100,
-    });
+    let _ = port.list(None).await;
+    let _ = port.stats().await;
+    let _ = port
+        .retrieve_for_inject(&MemoryQuery {
+            limit: 1,
+            layer: None,
+            category: None,
+            now: 100,
+        })
+        .await;
     let _ = port
         .search(&MemorySearchQuery {
             text: "query".to_string(),
@@ -204,12 +208,14 @@ async fn injection_order_uses_full_id_as_final_tie_break() {
         .unwrap();
     }
 
-    let result = port.retrieve_for_inject(&MemoryQuery {
-        limit: 10,
-        layer: None,
-        category: None,
-        now: 100,
-    });
+    let result = port
+        .retrieve_for_inject(&MemoryQuery {
+            limit: 10,
+            layer: None,
+            category: None,
+            now: 100,
+        })
+        .await;
 
     assert_eq!(
         result
@@ -250,7 +256,7 @@ async fn reflection_adds_and_merges_suggestions_with_injected_time() {
     let result = port.apply_reflection(&output).await.unwrap();
 
     assert_eq!(result.suggestions_added, 2);
-    let entries = port.list(Some(MemoryLayer::Project));
+    let entries = port.list(Some(MemoryLayer::Project)).await;
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].created_at, 4242);
     assert_eq!(entries[0].last_confirmed_at, 4242);
@@ -280,9 +286,9 @@ async fn reflection_evicts_unpinned_candidate_and_retries_once() {
         .unwrap();
 
     assert_eq!(result.suggestions_added, 1);
-    assert_eq!(port.stats().project_archive_count, 1);
+    assert_eq!(port.stats().await.project_archive_count, 1);
     assert_eq!(
-        port.list(Some(MemoryLayer::Project))[0].content,
+        port.list(Some(MemoryLayer::Project)).await[0].content,
         "brand new decision"
     );
 }
@@ -312,7 +318,7 @@ async fn reflection_reports_full_capacity_when_only_pinned_entries_exist() {
     assert!(
         matches!(error, MemoryError::InvalidEntry { message } if message.contains("淘汰") && message.contains("容量"))
     );
-    assert_eq!(port.list(None), vec![pinned]);
+    assert_eq!(port.list(None).await, vec![pinned]);
 }
 
 #[tokio::test]
@@ -329,7 +335,7 @@ async fn reflection_marks_existing_outdated_ids_and_rejects_invalid_ids() {
         .await
         .unwrap();
     assert_eq!(result.outdated_marked, 1);
-    assert!(port.list(None)[0].outdated);
+    assert!(port.list(None).await[0].outdated);
 
     let error = port
         .apply_reflection(&ReflectionOutput {
@@ -362,10 +368,12 @@ async fn reflection_applies_mixed_suggestion_and_outdated_id_as_one_result() {
     assert_eq!(result.outdated_marked, 1);
     assert!(port
         .list(Some(MemoryLayer::Project))
+        .await
         .iter()
         .any(|entry| entry.content == "current fact"));
     assert!(port
         .list(Some(MemoryLayer::Project))
+        .await
         .iter()
         .any(|entry| entry.id == existing.id && entry.outdated));
 }

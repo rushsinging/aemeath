@@ -36,12 +36,15 @@ impl MemoryRetrieveAdapter {
             return Ok(empty_materialization());
         }
 
-        let result = self.memory.retrieve_for_inject(&MemoryQuery {
-            limit: INJECTION_CANDIDATE_LIMIT,
-            layer: None,
-            category: None,
-            now: (self.now)(),
-        });
+        let result = self
+            .memory
+            .retrieve_for_inject(&MemoryQuery {
+                limit: INJECTION_CANDIDATE_LIMIT,
+                layer: None,
+                category: None,
+                now: (self.now)(),
+            })
+            .await;
 
         match result.mode {
             MemoryRetrievalMode::Disabled => return Ok(empty_materialization()),

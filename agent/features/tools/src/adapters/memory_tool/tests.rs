@@ -207,7 +207,7 @@ async fn list_result_publishes_manageable_entries_in_llm_text() {
         .await
         .unwrap();
 
-    let result = handlers::list_memory(serde_json::json!({"action": "list"}), &memory);
+    let result = handlers::list_memory(serde_json::json!({"action": "list"}), &memory).await;
     let entries = result.data.unwrap().entries.unwrap();
 
     assert_eq!(entries.len(), 1);
@@ -293,7 +293,7 @@ async fn memory_update_publishes_manageable_archive_and_restore_results() {
     assert_eq!(archived.data.unwrap().action, "archive");
     assert!(!restored.is_error);
     assert_eq!(restored.data.unwrap().action, "restore");
-    assert_eq!(memory.list(None), vec![entry]);
+    assert_eq!(memory.list(None).await, vec![entry]);
 }
 
 #[tokio::test]

@@ -36,7 +36,7 @@ fn port() -> InMemoryMemory {
     .expect("policy must be valid")
 }
 
-fn injected_order(memory: &InMemoryMemory) -> Vec<MemoryId> {
+async fn injected_order(memory: &InMemoryMemory) -> Vec<MemoryId> {
     memory
         .retrieve_for_inject(&MemoryQuery {
             limit: 50,
@@ -44,6 +44,7 @@ fn injected_order(memory: &InMemoryMemory) -> Vec<MemoryId> {
             category: None,
             now: now(),
         })
+        .await
         .hits
         .into_iter()
         .map(|hit| hit.entry.id)
@@ -85,8 +86,8 @@ async fn a_synthesized_conclusion_is_offered_before_the_facts_it_covers() {
         .await
         .unwrap();
 
-    let order = injected_order(&memory);
-    let conclusion_at = position_of(&order, conclusion_of(&memory));
+    let order = injected_order(&memory).await;
+    let conclusion_at = position_of(&order, conclusion_of(&memory).await);
     let fact_at = position_of(&order, fact.id);
     assert!(
         conclusion_at < fact_at,
@@ -122,10 +123,10 @@ async fn all_synthesized_entries_lead_the_injection_order() {
             })
             .await
             .unwrap();
-        conclusions.push(conclusion_of(&memory));
+        conclusions.push(conclusion_of(&memory).await);
     }
 
-    let order = injected_order(&memory);
+    let order = injected_order(&memory).await;
     let last_conclusion = conclusions
         .iter()
         .map(|id| position_of(&order, *id))
@@ -153,7 +154,7 @@ async fn score_order_is_preserved_inside_each_group() {
     memory.write(low.clone()).await.unwrap();
     memory.write(high.clone()).await.unwrap();
 
-    let order = injected_order(&memory);
+    let order = injected_order(&memory).await;
     assert!(
         position_of(&order, high.id) < position_of(&order, low.id),
         "score ordering still decides within the group: {order:?}"
@@ -203,9 +204,10 @@ async fn explicit_search_keeps_the_conclusion_and_its_sources_side_by_side() {
     );
 }
 
-fn conclusion_of(memory: &InMemoryMemory) -> MemoryId {
+async fn conclusion_of(memory: &InMemoryMemory) -> MemoryId {
     memory
         .list(Some(MemoryLayer::Project))
+        .await
         .into_iter()
         .find(|entry| entry.kind == MemoryKind::Synthesized)
         .expect("a synthesized entry was written")

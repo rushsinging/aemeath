@@ -33,8 +33,8 @@ fn port() -> InMemoryMemory {
     .expect("policy must be valid")
 }
 
-fn active_entries(memory: &InMemoryMemory) -> Vec<MemoryEntry> {
-    memory.list(Some(MemoryLayer::Project))
+async fn active_entries(memory: &InMemoryMemory) -> Vec<MemoryEntry> {
+    memory.list(Some(MemoryLayer::Project)).await
 }
 
 /// 列出 archive 条目。`search` 是唯一能触达 archive 的读取口（`list` 只返回
@@ -130,7 +130,7 @@ async fn a_merge_archives_the_incoming_entry_and_records_the_pointer() {
     };
     assert_eq!(existing_id, existing.id, "the incumbent stays active");
 
-    let active = active_entries(&memory);
+    let active = active_entries(&memory).await;
     assert_eq!(active.len(), 1, "the active set must not grow");
     assert_eq!(active[0].id, existing.id);
     assert_eq!(active[0].evidence, vec![incoming.id]);
@@ -164,7 +164,7 @@ async fn a_write_without_a_dedup_hit_stays_unchanged() {
     let result = memory.write(unrelated.clone()).await.unwrap();
     assert!(matches!(result, WriteResult::Added { .. }));
 
-    let active = active_entries(&memory);
+    let active = active_entries(&memory).await;
     assert_eq!(active.len(), 2);
     assert!(active.iter().all(|stored| stored.evidence.is_empty()));
     assert!(archived_entries(&memory, "deploy").await.is_empty());
@@ -185,7 +185,7 @@ async fn repeated_merges_accumulate_evidence_in_order() {
             .unwrap();
     }
 
-    let active = active_entries(&memory);
+    let active = active_entries(&memory).await;
     assert_eq!(active.len(), 1);
     assert_eq!(
         active[0].evidence.len(),
@@ -208,7 +208,10 @@ async fn a_write_with_dangling_evidence_is_rejected() {
         matches!(error, MemoryError::InvalidEntry { .. }),
         "dangling evidence must be rejected: {error:?}"
     );
-    assert!(active_entries(&memory).is_empty(), "nothing was written");
+    assert!(
+        active_entries(&memory).await.is_empty(),
+        "nothing was written"
+    );
 }
 
 /// Evidence may legitimately point at entries that already exist on the layer.
@@ -222,7 +225,7 @@ async fn a_write_with_resolvable_evidence_is_accepted() {
     derived.evidence = vec![source.id];
     memory.write(derived).await.unwrap();
 
-    let active = active_entries(&memory);
+    let active = active_entries(&memory).await;
     assert_eq!(active.len(), 2);
     assert_eq!(active[1].evidence, vec![source.id]);
 }
@@ -251,7 +254,7 @@ async fn compaction_never_dangles_an_evidence_pointer() {
 
     memory.compact().await.unwrap();
 
-    let active = active_entries(&memory);
+    let active = active_entries(&memory).await;
     let archived = archived_entries(&memory, "deploy").await;
     for stored in &active {
         for pointer in &stored.evidence {
@@ -285,7 +288,7 @@ async fn restoring_a_referenced_entry_keeps_the_pointers_valid() {
         matches!(restored, RestoreResult::Restored { id } if id == incoming.id),
         "a referenced archive entry can be restored"
     );
-    let active = active_entries(&memory);
+    let active = active_entries(&memory).await;
     assert!(
         active
             .iter()

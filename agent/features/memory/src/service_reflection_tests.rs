@@ -72,10 +72,20 @@ fn suggestion(layer: MemoryLayer, content: &str) -> MemorySuggestion {
 async fn reflection_partial_apply_reports_committed_suggestion_before_outdated_write_failure() {
     let existing = entry(MemoryLayer::Project, "obsolete fact");
     let existing_id = existing.id;
+    // list() 现读磁盘：suggestion 已提交、outdated 标记提交失败，
+    // 磁盘保持 suggestion 提交后的状态（existing 未被标 outdated）。
+    let current = entry(MemoryLayer::Project, "current fact");
     let store = ScriptedStore::new(
-        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
         layer_script(
-            vec![Ok(committed(1, MemoryLayer::Project, vec![existing]))],
+            vec![
+                Ok(committed(1, MemoryLayer::Project, vec![existing.clone()])),
+                Ok(committed(
+                    2,
+                    MemoryLayer::Project,
+                    vec![existing.clone(), current],
+                )),
+            ],
             vec![Ok(receipt(2)), Err(storage_error())],
         ),
     );
@@ -102,7 +112,7 @@ async fn reflection_partial_apply_reports_committed_suggestion_before_outdated_w
             superseded: 0,
         }
     ));
-    let entries = service.list(Some(MemoryLayer::Project));
+    let entries = service.list(Some(MemoryLayer::Project)).await;
     assert!(entries.iter().any(|entry| entry.content == "current fact"));
     assert!(entries
         .iter()
@@ -113,9 +123,9 @@ async fn reflection_partial_apply_reports_committed_suggestion_before_outdated_w
 async fn retrieve_for_inject_reads_committed_memory_without_write() {
     let stored = entry(MemoryLayer::Project, "read only fact");
     let store = ScriptedStore::new(
-        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
         layer_script(
-            vec![Ok(committed(1, MemoryLayer::Project, vec![stored.clone()]))],
+            vec![Ok(committed(1, MemoryLayer::Project, vec![stored.clone()])); 2],
             vec![],
         ),
     );
@@ -124,12 +134,14 @@ async fn retrieve_for_inject_reads_committed_memory_without_write() {
         .await
         .unwrap();
 
-    let result = service.retrieve_for_inject(&crate::ports::MemoryQuery {
-        limit: 1,
-        layer: Some(MemoryLayer::Project),
-        category: None,
-        now: 200,
-    });
+    let result = service
+        .retrieve_for_inject(&crate::ports::MemoryQuery {
+            limit: 1,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            now: 200,
+        })
+        .await;
 
     assert_eq!(
         result.mode,
@@ -137,9 +149,10 @@ async fn retrieve_for_inject_reads_committed_memory_without_write() {
     );
     assert_eq!(result.hits.len(), 1);
     assert_eq!(result.hits[0].entry, stored);
+    // open 1 次 + retrieve_for_inject 现读 1 次；读路径零提交。
     assert_eq!(
         observer.calls(MemoryLayer::Project),
-        (1, 0),
+        (2, 0),
         "injection retrieval must not write the committed project layer"
     );
 }

@@ -44,15 +44,16 @@ fn port() -> InMemoryMemory {
     .expect("policy must be valid")
 }
 
-fn superseded_by_of(memory: &InMemoryMemory, id: MemoryId) -> Option<MemoryId> {
+async fn superseded_by_of(memory: &InMemoryMemory, id: MemoryId) -> Option<MemoryId> {
     memory
         .list(Some(MemoryLayer::Project))
+        .await
         .into_iter()
         .find(|stored| stored.id == id)
         .and_then(|stored| stored.superseded_by)
 }
 
-fn inject(memory: &dyn MemoryPort) -> Vec<MemoryId> {
+async fn inject(memory: &dyn MemoryPort) -> Vec<MemoryId> {
     memory
         .retrieve_for_inject(&MemoryQuery {
             limit: 50,
@@ -60,6 +61,7 @@ fn inject(memory: &dyn MemoryPort) -> Vec<MemoryId> {
             category: None,
             now: now(),
         })
+        .await
         .hits
         .into_iter()
         .map(|hit| hit.entry.id)
@@ -97,10 +99,11 @@ async fn apply_establishes_the_supersede_relation_and_counts_it() {
 
     assert_eq!(result.suggestions_added, 1);
     assert_eq!(result.superseded, 1, "one relation was established");
-    assert_eq!(superseded_by_of(&memory, old.id), {
+    assert_eq!(superseded_by_of(&memory, old.id).await, {
         // The relation points at the entry that survived the apply.
         let replacement = memory
             .list(Some(MemoryLayer::Project))
+            .await
             .into_iter()
             .find(|stored| stored.content == "the deploy now runs on monday")
             .expect("replacement entry");
@@ -131,12 +134,16 @@ async fn one_suggestion_can_supersede_several_entries() {
     assert_eq!(result.superseded, 2);
     let replacement = memory
         .list(Some(MemoryLayer::Project))
+        .await
         .into_iter()
         .find(|stored| stored.content == "the api port comes from config")
         .expect("replacement entry")
         .id;
-    assert_eq!(superseded_by_of(&memory, first.id), Some(replacement));
-    assert_eq!(superseded_by_of(&memory, second.id), Some(replacement));
+    assert_eq!(superseded_by_of(&memory, first.id).await, Some(replacement));
+    assert_eq!(
+        superseded_by_of(&memory, second.id).await,
+        Some(replacement)
+    );
 }
 
 /// M9：会成环的关系被跳过，同批次先建立的合法关系不受影响——不半写入。
@@ -161,11 +168,12 @@ async fn a_relation_that_would_close_a_cycle_is_skipped_without_blocking_the_bat
         .unwrap();
     let v2 = memory
         .list(Some(MemoryLayer::Project))
+        .await
         .into_iter()
         .find(|stored| stored.content == "the schema version is two")
         .expect("v2 entry")
         .id;
-    assert_eq!(superseded_by_of(&memory, ancestor.id), Some(v2));
+    assert_eq!(superseded_by_of(&memory, ancestor.id).await, Some(v2));
 
     // 内容与 v1 相同 → 合并，留存 id 回到 v1；v1 再取代 v2 即闭合 v1 <- v2 <- v1。
     let cyclic = memory
@@ -180,12 +188,12 @@ async fn a_relation_that_would_close_a_cycle_is_skipped_without_blocking_the_bat
         "a cyclic relation must not be written"
     );
     assert_eq!(
-        superseded_by_of(&memory, v2),
+        superseded_by_of(&memory, v2).await,
         None,
         "the rejected relation left no trace on the target"
     );
     assert_eq!(
-        superseded_by_of(&memory, ancestor.id),
+        superseded_by_of(&memory, ancestor.id).await,
         Some(v2),
         "the relation established earlier survives the rejection"
     );
@@ -199,7 +207,10 @@ async fn a_relation_that_would_close_a_cycle_is_skipped_without_blocking_the_bat
         .await
         .unwrap();
     assert_eq!(legal.superseded, 1);
-    assert!(!inject(&memory).contains(&ancestor.id), "M10 applies to v1");
+    assert!(
+        !inject(&memory).await.contains(&ancestor.id),
+        "M10 applies to v1"
+    );
 }
 
 /// 合并会让关系指向被取代条目自身，形成自环——M9 因此拒绝该关系。
@@ -227,8 +238,11 @@ async fn a_suggestion_merged_into_its_own_target_yields_no_relation() {
         result.superseded, 0,
         "a self-reference is a cycle and must be rejected"
     );
-    assert_eq!(superseded_by_of(&memory, old.id), None);
-    assert!(inject(&memory).contains(&old.id), "M10 does not apply here");
+    assert_eq!(superseded_by_of(&memory, old.id).await, None);
+    assert!(
+        inject(&memory).await.contains(&old.id),
+        "M10 does not apply here"
+    );
 }
 
 /// M10：被取代条目不再注入，pinned 也不例外。
@@ -238,7 +252,7 @@ async fn a_pinned_superseded_entry_still_leaves_the_injection_set() {
     let mut pinned = entry("never evict the release checklist");
     pinned.pinned = true;
     memory.write(pinned.clone()).await.unwrap();
-    assert!(inject(&memory).contains(&pinned.id), "baseline");
+    assert!(inject(&memory).await.contains(&pinned.id), "baseline");
 
     memory
         .apply_reflection(&ReflectionOutput {
@@ -252,7 +266,7 @@ async fn a_pinned_superseded_entry_still_leaves_the_injection_set() {
         .unwrap();
 
     assert!(
-        !inject(&memory).contains(&pinned.id),
+        !inject(&memory).await.contains(&pinned.id),
         "pinned protects against eviction, not against being superseded"
     );
 }
@@ -272,7 +286,7 @@ async fn a_superseded_entry_stays_searchable_with_its_supersede_state() {
         .unwrap();
 
     assert!(
-        !inject(&memory).contains(&old.id),
+        !inject(&memory).await.contains(&old.id),
         "the superseded entry must leave injection"
     );
 
@@ -283,7 +297,7 @@ async fn a_superseded_entry_stays_searchable_with_its_supersede_state() {
         .expect("explicit search must still surface the entry");
     assert_eq!(
         hit.superseded_by,
-        superseded_by_of(&memory, old.id),
+        superseded_by_of(&memory, old.id).await,
         "the hit carries the same relation the store holds"
     );
     assert!(hit.superseded_by.is_some());
@@ -292,7 +306,7 @@ async fn a_superseded_entry_stays_searchable_with_its_supersede_state() {
         .superseded_by
         .expect("the relation names the replacement");
     assert!(
-        inject(&memory).contains(&replacement),
+        inject(&memory).await.contains(&replacement),
         "the replacement is what injection now serves"
     );
 }

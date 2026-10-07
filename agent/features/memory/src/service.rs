@@ -289,6 +289,55 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
         (state.global.dataset.clone(), state.project.dataset.clone())
     }
 
+    /// 读路径统一入口：现读磁盘最新已提交数据（#1886）。
+    ///
+    /// 每层独立「初读 + 撞错重读一次」；任一层最终失败则整体回退内存快照，
+    /// 保证读方法永不因存储抖动向上抛错。结果不写回 `state`——写路径的
+    /// CAS 基准仍由 `mutate_layer` 自持，避免读路径与写路径竞争导致 revision 回退。
+    async fn load_latest_layers(&self) -> (MemoryDataset, MemoryDataset) {
+        match self.try_load_latest_layers().await {
+            Some(layers) => layers,
+            None => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "memory_read_fallback reason=store_unavailable action=snapshot_fallback"
+                );
+                self.snapshot()
+            }
+        }
+    }
+
+    async fn try_load_latest_layers(&self) -> Option<(MemoryDataset, MemoryDataset)> {
+        let global = self.load_layer_with_retry(MemoryLayer::Global).await?;
+        let project = self.load_layer_with_retry(MemoryLayer::Project).await?;
+        Some((global.dataset, project.dataset))
+    }
+
+    async fn load_layer_with_retry(&self, layer: MemoryLayer) -> Option<LayerState<S::Revision>> {
+        let first_error = match load_layer(&self.store, layer).await {
+            Ok(dataset) => return Some(dataset),
+            Err(error) => error,
+        };
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "memory_read_retry layer={:?} first_error={:?}",
+            layer,
+            first_error
+        );
+        match load_layer(&self.store, layer).await {
+            Ok(dataset) => Some(dataset),
+            Err(second_error) => {
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "memory_read_retry_failed layer={:?} second_error={:?}",
+                    layer,
+                    second_error
+                );
+                None
+            }
+        }
+    }
+
     /// Compacts a single layer as one observable mutation, archiving entries
     /// that exceed the policy budget and reporting that layer's totals.
     async fn compact_layer(&self, layer: MemoryLayer) -> Result<CompactResult, MemoryError> {
@@ -330,8 +379,8 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
 
 #[async_trait]
 impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
-    fn retrieve_for_inject(&self, query: &MemoryQuery) -> MemorySearchResult {
-        let (global, project) = self.snapshot();
+    async fn retrieve_for_inject(&self, query: &MemoryQuery) -> MemorySearchResult {
+        let (global, project) = self.load_latest_layers().await;
         let eligible_global = global
             .active()
             .iter()
@@ -380,7 +429,7 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
     }
 
     async fn search(&self, query: &MemorySearchQuery) -> MemorySearchResult {
-        let (global, project) = self.snapshot();
+        let (global, project) = self.load_latest_layers().await;
         // 评分开启时扩大词法召回（重排后可被提升的候选不局限于 query.limit）。
         let recall_limit = if self.scorer.is_some() {
             query.limit.max(crate::constants::RERANK_RECALL_LIMIT)
@@ -748,8 +797,8 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
         })
     }
 
-    fn list(&self, layer: Option<MemoryLayer>) -> Vec<MemoryEntry> {
-        let (global, project) = self.snapshot();
+    async fn list(&self, layer: Option<MemoryLayer>) -> Vec<MemoryEntry> {
+        let (global, project) = self.load_latest_layers().await;
         global
             .active()
             .iter()
@@ -759,8 +808,8 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             .collect()
     }
 
-    fn stats(&self) -> MemoryStats {
-        let (global, project) = self.snapshot();
+    async fn stats(&self) -> MemoryStats {
+        let (global, project) = self.load_latest_layers().await;
         MemoryStats {
             global_count: global.active().len(),
             global_archive_count: global.archive().len(),

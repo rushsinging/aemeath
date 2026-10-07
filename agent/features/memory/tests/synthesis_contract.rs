@@ -52,12 +52,13 @@ fn synthesizing(content: &str, sources: Vec<MemoryId>) -> MemorySuggestion {
     }
 }
 
-fn project_entries(memory: &InMemoryMemory) -> Vec<MemoryEntry> {
-    memory.list(Some(MemoryLayer::Project))
+async fn project_entries(memory: &InMemoryMemory) -> Vec<MemoryEntry> {
+    memory.list(Some(MemoryLayer::Project)).await
 }
 
-fn find_by_content(memory: &InMemoryMemory, needle: &str) -> MemoryEntry {
+async fn find_by_content(memory: &InMemoryMemory, needle: &str) -> MemoryEntry {
     project_entries(memory)
+        .await
         .into_iter()
         .find(|stored| stored.content.contains(needle))
         .unwrap_or_else(|| panic!("no entry containing {needle}"))
@@ -88,7 +89,7 @@ async fn a_synthesis_carries_its_sources_as_evidence() {
         .await
         .unwrap();
 
-    let conclusion = find_by_content(&memory, "release ownership");
+    let conclusion = find_by_content(&memory, "release ownership").await;
     assert_eq!(conclusion.kind, MemoryKind::Synthesized);
     assert_eq!(conclusion.evidence.len(), 2);
     assert!(conclusion.evidence.contains(&deploy.id));
@@ -96,6 +97,7 @@ async fn a_synthesis_carries_its_sources_as_evidence() {
 
     for source in [deploy.id, window.id] {
         let stored = project_entries(&memory)
+            .await
             .into_iter()
             .find(|stored| stored.id == source)
             .expect("the source stays in active");
@@ -128,7 +130,7 @@ async fn a_single_source_never_produces_a_synthesized_entry() {
         .unwrap();
 
     assert_eq!(result.suggestions_added, 1, "the content is still written");
-    let restated = find_by_content(&memory, "written approval step");
+    let restated = find_by_content(&memory, "written approval step").await;
     assert_eq!(
         restated.kind,
         MemoryKind::Raw,
@@ -149,7 +151,7 @@ async fn a_suggestion_without_sources_stays_raw() {
         .await
         .unwrap();
 
-    let entry = find_by_content(&memory, "release checklist");
+    let entry = find_by_content(&memory, "release checklist").await;
     assert_eq!(entry.kind, MemoryKind::Raw);
     assert!(entry.evidence.is_empty());
 }
@@ -199,10 +201,11 @@ async fn a_suggestion_can_synthesize_and_supersede_at_once() {
     assert_eq!(result.superseded, 1, "the replace relation is established");
     assert_eq!(result.suggestions_added, 1);
 
-    let conclusion = find_by_content(&memory, "release ownership");
+    let conclusion = find_by_content(&memory, "release ownership").await;
     assert_eq!(conclusion.kind, MemoryKind::Synthesized);
     assert_eq!(conclusion.evidence.len(), 2);
     assert!(project_entries(&memory)
+        .await
         .iter()
         .any(|stored| stored.id == old.id && stored.superseded_by == Some(conclusion.id)));
 }
@@ -223,10 +226,11 @@ async fn stopping_the_synthesizes_output_degrades_to_the_previous_behaviour() {
         .await
         .unwrap();
 
-    let written = find_by_content(&memory, "read from the wiki");
+    let written = find_by_content(&memory, "read from the wiki").await;
     assert_eq!(written.kind, MemoryKind::Raw);
     assert!(written.evidence.is_empty());
     assert!(project_entries(&memory)
+        .await
         .iter()
         .all(|stored| stored.kind == MemoryKind::Raw));
 }
@@ -250,7 +254,10 @@ async fn a_synthesis_citing_unknown_sources_is_rejected() {
         matches!(result, Err(MemoryError::InvalidEntry { .. })),
         "sources that do not exist must be rejected: {result:?}"
     );
-    assert!(project_entries(&memory).is_empty(), "nothing was written");
+    assert!(
+        project_entries(&memory).await.is_empty(),
+        "nothing was written"
+    );
 }
 
 // --- L4: scenario ------------------------------------------------------------
@@ -278,12 +285,12 @@ async fn a_synthesized_conclusion_is_traceable_back_to_every_source() {
         .await
         .unwrap();
 
-    let conclusion = find_by_content(&memory, "release ownership");
+    let conclusion = find_by_content(&memory, "release ownership").await;
     assert_eq!(conclusion.kind, MemoryKind::Synthesized);
     assert_eq!(conclusion.evidence.len(), 3);
 
     // Every source is still listed and still injected on its own terms.
-    let active = project_entries(&memory);
+    let active = project_entries(&memory).await;
     for source in [&deploy, &window, &owner] {
         assert!(
             active.iter().any(|stored| stored.id == source.id),
