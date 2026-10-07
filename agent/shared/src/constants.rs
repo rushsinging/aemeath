@@ -18,3 +18,10 @@ pub(crate) static VERSION_CACHE: std::sync::OnceLock<String> = std::sync::OnceLo
 
 /// 前缀 typed id 的统一分隔符（wanaka 方向，#252）。
 pub const TYPED_ID_SEPARATOR: &str = "_";
+
+/// base62 有序字符表（#1884：typed id 雪花后缀编码；ASCII 升序保证字典序=数值序）。
+pub const BASE62_CHARS: &[u8; 62] =
+    b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+/// 雪花 id epoch（2026-01-01T00:00:00Z 毫秒，#1884）。
+pub const SNOWFLAKE_EPOCH_MS: u64 = 1_767_225_600_000;
