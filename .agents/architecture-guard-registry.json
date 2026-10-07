@@ -1604,6 +1604,7 @@
         "ToolReceiptMutationData",
         "ToolReceiptMutationError",
         "ToolReceiptMutationReceiptData",
+        "ToolSchemaData",
         "ToolTerminalReceiptData",
         "Urgency",
         "WorkspaceSkillQueryFactory",
