@@ -178,3 +178,39 @@ v3.0 管线：SFT（266,131 题 / 36 源，软标签，16,416 步 ≈ 5h @ 1×H1
 - **semif**：`semif-score` 必须显式传 `--revision`（40 位 commit）；`--mlx-bits 4` 内存友好；输出 schema 为 `option_ids` + 位置对齐 `probabilities` 数组（非 per-option 对象）。
 - **anyjev**：PyPI 包零 vLLM 依赖（仅 `pipeline` 一键命令硬依赖），`HFBackend(device="mps")` 显式适配 Apple Silicon；score 题型结果读 `Decision.value`（不是 `.score`）。
 - **新版 huggingface_hub（hf_xet）**：大文件落到 `~/.cache/huggingface/hub/blobs/` 共享池，模型目录仅符号链接，du 看模型目录会严重低估占用。
+
+## GGUF 内嵌化数值对分（2026-10-07，#1833 批次 1）
+
+### 口径修订
+
+kev 打分的真实机制是 **backbone hidden states → 外置 PointerHead**（`q`/`k` 各一个 hidden→256 线性投影 + 点积 + 校准温度 T=2.3510958，权重在 `head.pt`，训练时 `head_lr=0` 冻结），**不走 lm_head / letter logits**。内嵌化的真实需求因此是「引擎输出逐 token hidden states，PointerHead 在 Rust 侧外置前向」。#1833 原验收的「letter-logits 读取」表述按此修订。
+
+### 转换链（可复现）
+
+1. `harness/merge_kev_lora.py`：Qwen3.5-0.8B-Base@dc7cdfe2 + jaredpalmer/kev-0.8b LoRA（r16/α32）fp32 合并 → safetensors。注意点：adapter 必须对 backbone（`.model`）加载 peft，对 `ForCausalLM` 整体加载会因 key 前缀多一层而全部 missing（lora_B 零初始化会静默退化为纯底座，已验证权重 diff 非零）
+2. llama.cpp `convert_hf_to_gguf.py --no-nextn --outtype f16`（Qwen3.5 转换支持在 conversion/qwen.py `Qwen3_5TextModel`；MTP 层不需要，`--no-nextn` 排除，否则 GGUF 缺 `blk.24.*` 张量加载失败）
+3. `llama-quantize` 二次量化出 Q8_0 / Q4_K_M
+
+### 对分方法与结果
+
+`harness/parity_gguf.py`：同一 jev payload（与 run_eval.py 同构造）三口径——golden = kev.serve MLX（生产口径）；torch = 合并后 backbone fp32 forward；gguf = llama-server `--embedding --pooling none` 逐 row（encode 用 serve 口径 SERVE_MAX_STATE/BRANCH）。全量 79 case（6 数据集）：
+
+| 口径对比 | argmax 一致率 | max\|Δp\| | 结论 |
+|---|---|---|---|
+| torch 合并模型 vs MLX golden | 79/79 = 100% | ≤0.0154 | LoRA 合并正确 |
+| f16 GGUF vs golden | 79/79 = 100% | ≤0.0157 | 转换+llama.cpp 前向正确 |
+| **Q8_0 GGUF（775MB）vs golden** | **79/79 = 100%** | ≤0.0245 | ✅ **推荐内嵌形态**（1.5GB 内存预算内） |
+| Q4_K_M GGUF（505MB）vs golden | 75/79 = 94.9% | ≤0.16 | ❌ 量化损失对评分场景过大，否决 |
+
+逐 case 比对表：`results/parity_gguf.json`（f16）、`parity_gguf_q8.json`、`parity_gguf_q4.json`、`parity_torch_full.json`（三口径）。
+
+### spike A：rlx_qwen35（白盒 Rust）结论 = NO-GO
+
+`harness/spike-rlx/REPORT.md`：数值与 llama.cpp 在决策位等价（max|Δp| = 1e-5），`build_qwen35_prefill_flow_ext(export_normed_hidden=true)` 可用；但 **GPL-3.0-only license 阻断**、Metal/MLX GPU 路径均不可用（Metal MPSGraph 断言崩溃、MLX feature 构建失败）、CPU f32 常驻 ~3GB、crate 3 个月未发版（0.2.11，下载量 ~1.3k）。维持 D2 的 llama.cpp 内嵌路线。
+
+### 批次 2 建议（内嵌 adapter 实施输入）
+
+- GGUF 选型 **Q8_0**（775MB；f16 仅作对分基准，Q4_K_M 已否决）
+- adapter 形态：llama-cpp-2 embedding 模式（pooling=none）→ 逐 row token ids（encode 口径 = kev serve 的 SERVE_MAX_STATE=65536 / SERVE_MAX_BRANCH=+8192）→ hidden states → Rust PointerHead（q/k 线性 + 点积 + T=2.3510958，权重从 head.pt 导出为 safetensors）
+- llama-server 运行参数基线：`--ctx-size 16384 --ubatch-size 16384`（embedding 输入必须单 batch 装下；real case row 最大已观测 ~1.5k tokens，16k 余量充足）
+- 内存实测（M 系列 Mac）：f16 server ≈1.6G 常驻，Q8_0 ≈0.9G 常驻（含 16k ctx KV）——Q8_0 在 1.5GB 预算内

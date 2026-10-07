@@ -1,0 +1,22 @@
+[workspace]
+
+[package]
+name = "spike-rlx"
+version = "0.1.0"
+edition = "2021"
+
+# Spike A (aemeath#1833): rlx-qwen35 vs llama.cpp hidden-state parity.
+# Probe code — rough but reproducible via `cargo run -- <mode>`.
+
+[features]
+# Opt-in Metal backend (CPU is the default parity path).
+metal = ["rlx-qwen35/metal"]
+mlx = ["rlx-qwen35/mlx"]
+
+[dependencies]
+anyhow = "1"
+serde_json = "1"
+rlx-qwen35 = { version = "0.2", default-features = false }
+rlx-core = { package = "rlx-models-core", version = "0.2.11" }
+rlx-runtime = { version = "0.2.11", default-features = false, features = ["cpu"] }
+rlx-ir = "0.2.11"

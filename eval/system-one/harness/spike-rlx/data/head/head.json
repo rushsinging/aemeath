@@ -1,0 +1,9 @@
+{
+  "q_weight": "q_weight.f32",
+  "q_bias": "q_bias.f32",
+  "k_weight": "k_weight.f32",
+  "k_bias": "k_bias.f32",
+  "proj": 256,
+  "hidden": 1024,
+  "temperature": 2.3510958125672174
+}
