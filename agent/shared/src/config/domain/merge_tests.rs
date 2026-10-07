@@ -25,12 +25,13 @@ fn storage_worktrees_dir_patch_overrides_lower_layer_value() {
 
 #[test]
 fn scoring_patch_overrides_only_set_fields_and_reaches_snapshot() {
+    // 退役 HTTP 键（url）在旧配置文件残留时必须被忽略而非报错（设计 §4.3）。
     let global: ConfigPatch =
         serde_json::from_str(r#"{"scoring":{"url":"http://global:8009","memoryRerank":true}}"#)
             .unwrap();
     let env_layer = ConfigPatch {
         scoring: Some(ScoringConfigPatch {
-            timeout_ms: Some(500),
+            skill_match: Some(true),
             ..Default::default()
         }),
         ..Default::default()
@@ -40,15 +41,29 @@ fn scoring_patch_overrides_only_set_fields_and_reaches_snapshot() {
     let snapshot = ConfigSnapshot::new(config);
 
     let scoring = snapshot.scoring();
-    assert_eq!(
-        scoring.url, "http://global:8009",
-        "未被高层覆盖的字段应保留低层值"
-    );
-    assert_eq!(scoring.timeout_ms, 500, "高层字段应覆盖");
     assert!(scoring.memory_rerank, "低层开关应保留");
-    assert_eq!(scoring.model, "kev-latest", "未设置字段应落默认值");
-    assert!(!scoring.skill_match);
+    assert!(scoring.skill_match, "高层字段应覆盖低层缺省");
     assert!(!scoring.policy_triage);
+    assert!(!scoring.memory_recall);
+
+    let value = serde_json::to_value(scoring).expect("ScoringConfig 应可序列化");
+    let mut keys: Vec<&str> = value
+        .as_object()
+        .expect("对象")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        [
+            "memory_recall",
+            "memory_rerank",
+            "policy_triage",
+            "skill_match"
+        ],
+        "合并结果不得出现退役 HTTP 字段"
+    );
 }
 
 #[test]

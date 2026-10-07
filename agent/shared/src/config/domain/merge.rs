@@ -575,12 +575,6 @@ pub(crate) fn apply_context_patch(
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ScoringConfigPatch {
-    #[serde(default, alias = "baseUrl")]
-    pub url: Option<String>,
-    #[serde(default)]
-    pub model: Option<String>,
-    #[serde(default, alias = "timeoutMs")]
-    pub timeout_ms: Option<u64>,
     #[serde(default, alias = "memoryRerank")]
     pub memory_rerank: Option<bool>,
     #[serde(default, alias = "skillMatch")]
@@ -616,15 +610,6 @@ pub(crate) fn apply_scoring_patch(
     mut base: super::scoring::ScoringConfig,
     patch: ScoringConfigPatch,
 ) -> super::scoring::ScoringConfig {
-    if let Some(v) = patch.url {
-        base.url = v;
-    }
-    if let Some(v) = patch.model {
-        base.model = v;
-    }
-    if let Some(v) = patch.timeout_ms {
-        base.timeout_ms = v;
-    }
     if let Some(v) = patch.memory_rerank {
         base.memory_rerank = v;
     }

@@ -74,6 +74,40 @@ fn wire_runtime_tool_assembly(
     })
 }
 
+/// System One 评分端口的场景分配：按场景开关分发给 memory rerank 与 memory recall
+/// 消费点（skill match / policy triage 场景的端口接线随各自场景任务补充）。
+struct ScoringPortAssignment {
+    for_memory_rerank: Option<Arc<dyn systemone::ScoringPort>>,
+    for_memory_recall: Option<Arc<dyn systemone::ScoringPort>>,
+}
+
+/// System One 评分端口装配。评分 HTTP 生产工厂已随设计
+/// `docs/design/02-modules/systemone/01-systemone-scoring.md` §4.3 退役：
+/// embedded 装配接入前，任一场景开关开启时端口也暂为 `None`，消费点回退原有
+/// 词法/启发式路径；**NEVER** 在此构造 HTTP 评分客户端作 fallback。
+/// 全场景开关关闭时零成本（不检查模型、不加载引擎）。
+fn assign_scoring_ports(scoring: &share::config::ScoringConfig) -> ScoringPortAssignment {
+    let any_scenario_enabled = scoring.memory_rerank
+        || scoring.memory_recall
+        || scoring.skill_match
+        || scoring.policy_triage;
+    if any_scenario_enabled {
+        log::info!(
+            target: crate::LOG_TARGET,
+            "systemone scoring switches enabled rerank={} recall={} skill={} triage={}; \
+             embedded 装配未接入，端口暂为 None（消费点回退原路径）",
+            scoring.memory_rerank,
+            scoring.memory_recall,
+            scoring.skill_match,
+            scoring.policy_triage,
+        );
+    }
+    ScoringPortAssignment {
+        for_memory_rerank: None,
+        for_memory_recall: None,
+    }
+}
+
 pub(crate) struct SessionRuntimeAssembly {
     pub client: AgentClientImpl,
     pub audit: Option<crate::audit::SessionAudit>,
@@ -193,37 +227,9 @@ pub(crate) async fn from_args_with_gateways(
     // 动态解析调用模型（未配置时跟随当前会话模型）。context_factory 依赖
     // initial_binding，因此 MainSession 装配延后到 provider 构建之后。
     let agents_dir_buf = agents_dir.to_path_buf();
-    // System One 评分端口（#1831/#1834）：任一场景开关开启时装配，全关为 None 零成本。
-    let scoring_config = snapshot.scoring();
-    let scoring_port: Option<std::sync::Arc<dyn systemone::ScoringPort>> = (scoring_config
-        .memory_rerank
-        || scoring_config.memory_recall
-        || scoring_config.skill_match
-        || scoring_config.policy_triage)
-        .then(|| {
-            log::info!(
-                target: crate::LOG_TARGET,
-                "systemone scoring enabled url={} model={} rerank={} recall={}",
-                scoring_config.url,
-                scoring_config.model,
-                scoring_config.memory_rerank,
-                scoring_config.memory_recall,
-            );
-            systemone::wire_scoring_port(
-                &scoring_config.url,
-                &scoring_config.model,
-                std::time::Duration::from_millis(scoring_config.timeout_ms),
-                agents_dir.join("scoring"),
-            )
-        });
-    let scoring_port_for_rerank = scoring_port
-        .as_ref()
-        .filter(|_| scoring_config.memory_rerank)
-        .cloned();
-    let scoring_port_for_recall = scoring_port
-        .as_ref()
-        .filter(|_| scoring_config.memory_recall)
-        .cloned();
+    // System One 评分端口：全场景开关关闭时零成本；开关开启也只经
+    // assign_scoring_ports 装配（见其契约与对应 contract test）。
+    let scoring_ports = assign_scoring_ports(snapshot.scoring());
     let compact_generator =
         runtime::ProviderCompactGenerator::new(Arc::new(runtime::CompactModelResolver::new(
             config.reader(),
@@ -239,7 +245,7 @@ pub(crate) async fn from_args_with_gateways(
             storage::wire_file_system_dataset(agents_dir_buf.clone())
                 .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
             memory::wire_legacy_memory_source_factory(agents_dir.join("memory")),
-            scoring_port_for_rerank.clone(),
+            scoring_ports.for_memory_rerank.clone(),
         ),
         session_management: session_management.clone(),
         context_factory: Arc::new(
@@ -305,7 +311,7 @@ pub(crate) async fn from_args_with_gateways(
         task_wiring.access(),
         hook_runner.clone(),
         usage_sink,
-        scoring_port_for_recall.clone(),
+        scoring_ports.for_memory_recall.clone(),
     ));
     context::guidance::init_guidance_dir();
     let cwd = args

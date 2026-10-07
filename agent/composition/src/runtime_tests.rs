@@ -325,3 +325,53 @@ async fn role_policy_with_unknown_capability_fails_wiring() {
     );
     assert!(result.is_err(), "unknown tool name must fail wiring");
 }
+
+// ─── System One HTTP scoring retirement contract（设计 §4.3）──────────
+
+/// 场景开关全部开启时，生产 composition 也 **不得**出现 HTTP 评分端口：
+/// HTTP 装配工厂已退役，embedded 接线落地前端口暂为 `None`（消费点回退原路径）。
+#[test]
+fn scoring_port_assignment_with_all_switches_enabled_yields_no_http_port() {
+    let scoring = share::config::ScoringConfig {
+        memory_rerank: true,
+        memory_recall: true,
+        skill_match: true,
+        policy_triage: true,
+    };
+    let assignment = super::assign_scoring_ports(&scoring);
+    assert!(
+        assignment.for_memory_rerank.is_none(),
+        "开关开启也不得出现 HTTP scoring port"
+    );
+    assert!(assignment.for_memory_recall.is_none());
+}
+
+/// 开关全关时零成本：无端口、无模型检查。
+#[test]
+fn scoring_port_assignment_with_all_switches_disabled_yields_no_port() {
+    let assignment = super::assign_scoring_ports(&share::config::ScoringConfig::default());
+    assert!(assignment.for_memory_rerank.is_none());
+    assert!(assignment.for_memory_recall.is_none());
+}
+
+/// 生产 composition 源文件永远不得引用 HTTP 评分工厂或其配置 env。
+#[test]
+fn production_runtime_source_never_references_http_scoring_factory() {
+    let source = std::fs::read_to_string(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src/runtime.rs"),
+    )
+    .expect("读取 composition runtime.rs");
+    for forbidden in [
+        "wire_http_scoring_port",
+        "wire_scoring_port",
+        "JevHttpScoringAdapter",
+        "AEMEATH_SCORING_URL",
+        "AEMEATH_SCORING_MODEL",
+        "AEMEATH_SCORING_TIMEOUT_MS",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "production composition 不得引用 HTTP scoring 符号 `{forbidden}`"
+        );
+    }
+}

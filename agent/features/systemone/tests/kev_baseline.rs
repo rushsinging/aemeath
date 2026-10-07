@@ -1,7 +1,8 @@
 //! kev 46-case 基线复测（验收项：R@1/acc 与 eval/system-one 实测基线偏差 ≤1pt）。
 //!
 //! 需要本地 kev.serve（`~/.cache/system-one-eval/kev`，端口 8009）。
-//! 运行：`cargo test -p systemone --test kev_baseline -- --ignored --test-threads=1`
+//! 运行：`cargo test -p systemone --features http-adapter --test kev_baseline -- --ignored --test-threads=1`
+//! （`kev_baseline` 声明 `required-features = ["http-adapter"]`，默认构建不编译。）
 //!
 //! prompt 构造与指标口径严格复刻 `eval/system-one/harness/run_eval.py` / `score.py`，
 //! 基线值取自 `eval/system-one/results/summary.json` 的 kev 行。

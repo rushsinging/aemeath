@@ -4,7 +4,7 @@
 //!
 //! | 类 | 实体 | 消费者 |
 //! |---|---|---|
-//! | `wire_*` 工厂 | 随 adapter 落地补充 | composition |
+//! | `wire_*` 工厂 | `wire_http_scoring_port`（feature `http-adapter`，测试 / eval 对分专用；生产装配随后续 embedded 接线补充） | 测试 / eval |
 //! | 数据 | `ScoringQuestion` / `ScoringAnswer` / `ScoringState` / `CalibrationLevel` | 消费场景（memory / skills / policy） |
 //! | 数据 | `ModelManifest` / `PointerHead` / `PointerHeadWeights` | 模型下载、存储与 embedded 评分装配 |
 //! | 端口 | `ScoringPort` / `CalibrationPort` / `ModelAssetPort` | 消费场景只依赖端口，NEVER 感知引擎型号 |
@@ -27,6 +27,7 @@ pub use adapters::audited::{AuditedScoringAdapter, ScoringAuditEvent};
 pub use adapters::calibrated::CalibratedScoringAdapter;
 pub use adapters::calibration_store::{CalibrationArtifact, CalibrationStore};
 pub use adapters::fetch_http::HttpArtifactFetcher;
+#[cfg(feature = "http-adapter")]
 pub use adapters::jev_http::JevHttpScoringAdapter;
 pub use adapters::model_assets::{
     LocalModelAssetStore, ModelInstallError, PreparedStagedInstall, StagedInstallCommit,
@@ -50,10 +51,12 @@ pub use ports::{
     ScoringPort, StagedInstallOutcome,
 };
 
-/// 评分端口的生产装配链：JevHttp → Calibrated（读温度 artifact）→ Audited（落审计）。
+/// Jev HTTP 评分装配链：JevHttp → Calibrated（读温度 artifact）→ Audited（落审计）。
 ///
-/// composition 在任一场景开关开启时调用一次，全场景共享同一实例。
-pub fn wire_scoring_port(
+/// 设计 §4.3 HTTP adapter 退役边界：仅供测试 / eval 对分与回归基准使用，
+/// 生产 composition **NEVER** 调用；默认构建不提供本工厂。
+#[cfg(feature = "http-adapter")]
+pub fn wire_http_scoring_port(
     base_url: &str,
     model: &str,
     timeout: std::time::Duration,

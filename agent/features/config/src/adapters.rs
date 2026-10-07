@@ -141,24 +141,15 @@ impl EnvAdapter {
                 ..Default::default()
             });
         let scoring = {
-            let url = source.get("AEMEATH_SCORING_URL");
-            let model = source.get("AEMEATH_SCORING_MODEL");
-            let timeout_ms = parse_positive(source.get("AEMEATH_SCORING_TIMEOUT_MS"));
             let memory_rerank = parse_bool_switch(source.get("AEMEATH_SCORING_MEMORY_RERANK"));
             let skill_match = parse_bool_switch(source.get("AEMEATH_SCORING_SKILL_MATCH"));
             let policy_triage = parse_bool_switch(source.get("AEMEATH_SCORING_POLICY_TRIAGE"));
             let memory_recall = parse_bool_switch(source.get("AEMEATH_SCORING_MEMORY_RECALL"));
-            (url.is_some()
-                || model.is_some()
-                || timeout_ms.is_some()
-                || memory_rerank.is_some()
+            (memory_rerank.is_some()
                 || skill_match.is_some()
                 || policy_triage.is_some()
                 || memory_recall.is_some())
             .then_some(share::config::domain::merge::ScoringConfigPatch {
-                url,
-                model,
-                timeout_ms,
                 memory_rerank,
                 skill_match,
                 policy_triage,

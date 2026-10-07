@@ -1,10 +1,12 @@
 pub(crate) const LOG_TARGET: &str = "aemeath:agent:systemone";
 
-/// Jev 评分端点路径（拼在配置的 base URL 后）。
+/// Jev 评分端点路径（拼在配置的 base URL 后；仅 HTTP adapter 编译期存在）。
+#[cfg(any(test, feature = "http-adapter"))]
 pub(crate) const SYSTEMONE_PATH: &str = "/v1/systemone";
 
 /// 连接预检窗口：规避 hyper-util 对 reusable body 的 connect 重试循环
-///（实测 connect refused 等满总超时才失败）。
+///（实测 connect refused 等满总超时才失败）。仅 HTTP adapter 编译期存在。
+#[cfg(any(test, feature = "http-adapter"))]
 pub(crate) const PREFLIGHT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// 校准观测记录文件名（{scoring_dir}/observations.jsonl）。

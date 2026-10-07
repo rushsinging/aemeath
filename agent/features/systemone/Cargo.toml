@@ -3,6 +3,12 @@ name = "systemone"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# Jev HTTP 评分 adapter / wire 类型 / `wire_http_scoring_port` 的编译开关：
+# 仅测试、eval 对分与回归基准使用（设计 §4.3 HTTP adapter 退役边界）。
+# `HttpArtifactFetcher` 下载能力不受此 feature 影响，reqwest 始终是必选依赖。
+http-adapter = []
+
 [dependencies]
 share = { path = "../../shared" }
 utils = { path = "../../../packages/global/utils" }
@@ -17,6 +23,12 @@ log = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
+
+# kev HTTP 基线复测需要本地 kev.serve，默认构建不编译该集成测试。
+[[test]]
+name = "kev_baseline"
+path = "tests/kev_baseline.rs"
+required-features = ["http-adapter"]
 
 # 原子 no-replace rename（renameat2 / renameatx_np + RENAME_EXCL）与 O_NOFOLLOW
 # 需要 POSIX 平台原语：unix 上引入 rustix safe API；其余 target 由 cfg 编译的

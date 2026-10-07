@@ -350,14 +350,14 @@
     },
     {
       "id": "construction.systemone.wire-scoring-port",
-      "symbol": "wire_scoring_port",
+      "symbol": "wire_http_scoring_port",
       "owner_crate": "systemone",
       "kind": "wire",
       "allowed_paths": [
-        "agent/composition/src"
+        "agent/features/systemone/tests"
       ],
       "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "System One scoring port wiring is invoked only by the Composition Root (#1831)",
+      "reason": "Jev HTTP scoring wiring is feature http-adapter only (test/eval parity per design 01-systemone-scoring §4.3); production composition must never invoke it",
       "tracking_issue": 1831
     },
     {
