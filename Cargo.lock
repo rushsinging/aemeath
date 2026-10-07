@@ -4594,11 +4594,11 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
- "sha2",
  "share",
  "tar",
  "thiserror 2.0.18",
  "tokio",
+ "utils",
 ]
 
 [[package]]

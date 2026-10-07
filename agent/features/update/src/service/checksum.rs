@@ -23,15 +23,6 @@ pub(super) fn parse_checksums(content: &str, archive_name: &str) -> Option<Strin
 }
 
 /// 计算字节数组的 SHA256 十六进制摘要。
-pub(super) fn sha256_hex(data: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    let result = hasher.finalize();
-    // 手动 hex 编码，避免额外依赖 hex crate
-    let mut hex = String::with_capacity(64);
-    for byte in result {
-        hex.push_str(&format!("{byte:02x}"));
-    }
-    hex
-}
+///
+/// 委托公共 `utils::sha256_hex`，避免与全局 SHA-256 实现重复。
+pub(super) use utils::sha256_hex;

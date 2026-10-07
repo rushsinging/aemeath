@@ -15,6 +15,10 @@ mod process_tests;
 mod spawn_failure_tests;
 
 /// 对多个已分隔字段生成稳定 SHA-256 十六进制摘要。
+///
+/// 域前缀后按 `be64(字段长度) + 字段字节` 分帧，因此字段边界参与摘要：
+/// `["ab", "c"]` 与 `["a", "bc"]` 结果不同，domain 变化同样改变摘要。
+/// 兼容性由 `lib_tests.rs` 中的黄金向量锁定。
 pub fn stable_sha256_hex(domain: &[u8], fields: &[&[u8]]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(domain);
@@ -22,10 +26,25 @@ pub fn stable_sha256_hex(domain: &[u8], fields: &[&[u8]]) -> String {
         hasher.update((field.len() as u64).to_be_bytes());
         hasher.update(field);
     }
-    let digest = hasher.finalize();
+    encode_hex(&hasher.finalize())
+}
+
+/// 计算一段连续原始字节流的标准 SHA-256 十六进制摘要（对整个输入直接哈希）。
+///
+/// 不做任何分帧或域隔离：多字段自行拼接会产生边界歧义
+/// （`b"ab"+"c"` 与 `b"a"+"bc"` 摘要相同）。需要多字段、带域前缀的
+/// 稳定标识时应改用 [`stable_sha256_hex`]。
+pub fn sha256_hex(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    encode_hex(&hasher.finalize())
+}
+
+/// 将摘要字节编码为小写十六进制字符串。
+fn encode_hex(digest: &[u8]) -> String {
+    use std::fmt::Write as _;
     let mut value = String::with_capacity(digest.len() * 2);
     for byte in digest {
-        use std::fmt::Write as _;
         write!(&mut value, "{byte:02x}").expect("writing to String cannot fail");
     }
     value
