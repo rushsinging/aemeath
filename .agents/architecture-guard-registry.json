@@ -1757,6 +1757,7 @@
         "AgentClientImpl",
         "AgentRunnerAssemblyData",
         "AtomicBlobToolResultStore",
+        "CancellationSignal",
         "CompactModelResolver",
         "CompleteReflectionResult",
         "InitialProviderAssemblyData",
