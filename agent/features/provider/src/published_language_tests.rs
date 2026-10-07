@@ -133,13 +133,13 @@ fn provider_tool_call_id_display() {
 
 #[test]
 fn raw_usage_distinguishes_unreported_from_reported_zero() {
-    let unreported = RawUsageSnapshotData::default();
+    let unreported = TokenUsageData::default();
     assert!(!unreported.was_reported());
     assert!(unreported.into_reported().is_none());
 
-    let reported_zero = RawUsageSnapshotData {
+    let reported_zero = TokenUsageData {
         input_tokens: Some(0),
-        ..RawUsageSnapshotData::default()
+        ..TokenUsageData::default()
     };
     assert!(reported_zero.was_reported());
     assert_eq!(reported_zero.into_reported().unwrap().input_tokens, Some(0));
@@ -147,16 +147,16 @@ fn raw_usage_distinguishes_unreported_from_reported_zero() {
 
 #[test]
 fn raw_usage_latest_reported_fields_merge_without_erasing_previous_values() {
-    let mut usage = RawUsageSnapshotData {
+    let mut usage = TokenUsageData {
         input_tokens: Some(10),
         cache_read_tokens: Some(3),
-        ..RawUsageSnapshotData::default()
+        ..TokenUsageData::default()
     };
-    usage.merge_reported(RawUsageSnapshotData {
+    usage.merge_reported(TokenUsageData {
         output_tokens: Some(7),
         cache_read_tokens: None,
         reasoning_tokens: Some(0),
-        ..RawUsageSnapshotData::default()
+        ..TokenUsageData::default()
     });
 
     assert_eq!(usage.input_tokens, Some(10));
@@ -167,7 +167,7 @@ fn raw_usage_latest_reported_fields_merge_without_erasing_previous_values() {
 
 #[test]
 fn raw_usage_snapshot_default_all_none() {
-    let usage = RawUsageSnapshotData::default();
+    let usage = TokenUsageData::default();
     assert!(usage.input_tokens.is_none());
     assert!(usage.output_tokens.is_none());
     assert!(usage.cache_read_tokens.is_none());
@@ -213,31 +213,27 @@ fn request_system_block_exposes_text_and_cacheable_flag() {
 }
 
 #[test]
-fn invocation_event_delta_is_non_terminal() {
-    let evt = InvocationEventData::Delta(InvocationDeltaData::Text("hi".to_string()));
+fn invocation_event_content_is_non_terminal() {
+    let evt = ProviderResponseChunk::Content(ProviderContentData::Text("hi".to_string()));
     assert!(!evt.is_terminal());
 }
 
 #[test]
-fn invocation_event_completed_and_failed_are_terminal() {
-    let completion = ProviderCompletionData {
-        output: Vec::new(),
-        stop_reason: StopReason::EndTurn,
-        usage: None,
-        effective_reasoning: ReasoningLevel::Off,
-    };
-    assert!(InvocationEventData::Completed(completion).is_terminal());
-    assert!(InvocationEventData::Failed(ProviderError::cancelled()).is_terminal());
+fn invocation_event_stop_and_error_are_terminal() {
+    assert!(ProviderResponseChunk::Stop(StopReason::EndTurn).is_terminal());
+    assert!(ProviderResponseChunk::Error(ProviderError::cancelled()).is_terminal());
+    // Usage 只是归位片段，流仍在继续。
+    assert!(!ProviderResponseChunk::Usage(TokenUsageData::default()).is_terminal());
 }
 
 #[test]
 fn tool_call_identity_can_bind_provider_id_after_start() {
-    let started = InvocationDeltaData::ToolCallStarted {
+    let started = ProviderContentData::ToolCallStarted {
         index: 2,
         provider_id: None,
         name: "Write".to_string(),
     };
-    let arguments = InvocationDeltaData::ToolArgumentsDelta {
+    let arguments = ProviderContentData::ToolArgumentsDelta {
         index: 2,
         provider_id: Some("call_late".to_string()),
         partial_json: "{}".to_string(),
@@ -245,7 +241,7 @@ fn tool_call_identity_can_bind_provider_id_after_start() {
 
     assert!(matches!(
         started,
-        InvocationDeltaData::ToolCallStarted {
+        ProviderContentData::ToolCallStarted {
             index: 2,
             provider_id: None,
             ..
@@ -253,7 +249,7 @@ fn tool_call_identity_can_bind_provider_id_after_start() {
     ));
     assert!(matches!(
         arguments,
-        InvocationDeltaData::ToolArgumentsDelta {
+        ProviderContentData::ToolArgumentsDelta {
             index: 2,
             provider_id: Some(ref id),
             ..

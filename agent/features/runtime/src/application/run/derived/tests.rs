@@ -10,7 +10,7 @@ use crate::application::model::test_support::{
 use ::logging as scoped_logging;
 use async_trait::async_trait;
 
-use provider::{InvocationStreamData, ProviderError, ProviderErrorKind};
+use provider::{ProviderError, ProviderErrorKind, ProviderResponseStream};
 use share::config::AgentInstanceConfig;
 use share::message::Message;
 use std::sync::Arc;
@@ -128,7 +128,7 @@ impl ScriptedLlmProvider for CapturingProvider {
     async fn scripted_invocation_stream(
         &self,
         request: &crate::ports::provider_port::InvocationRequestData,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         let mut captured = self.captured.lock().unwrap();
         captured.system = request
             .system
@@ -564,7 +564,7 @@ fn llm_output_log_preserves_per_invocation_elapsed_time() {
             metadata: None,
         },
         stop_reason: provider::ProviderStopReasonData::EndTurn,
-        usage: crate::ports::RawUsageSnapshotData::default(),
+        usage: crate::ports::TokenUsageData::default(),
     };
 
     let data = build_llm_output_log("test-provider", &response, 1.25, "subagent:test");
@@ -1411,8 +1411,8 @@ async fn test_run_agent_non_cancel_provider_error_returns_sub_agent_error() {
 #[tokio::test(start_paused = true)]
 async fn sub_empty_completion_retries_and_succeeds() {
     let provider = Arc::new(ScriptedInvocationProvider::new(vec![
-        vec![empty_completion()],
-        vec![successful_completion("sub recovered")],
+        empty_completion(),
+        successful_completion("sub recovered"),
     ]));
     let (runner, _parent_guard) = test_runner_with_provider(provider.clone());
     let ctx = test_ctx();
@@ -1455,7 +1455,7 @@ async fn sub_empty_completion_retries_and_succeeds() {
 #[tokio::test(start_paused = true)]
 async fn sub_empty_completion_exhaustion_is_typed_failure() {
     let provider = Arc::new(ScriptedInvocationProvider::new(
-        (0..11).map(|_| vec![empty_completion()]).collect(),
+        (0..11).map(|_| empty_completion()).collect(),
     ));
     let (runner, _parent_guard) = test_runner_with_provider(provider.clone());
     let ctx = test_ctx();
@@ -1720,7 +1720,7 @@ impl ScriptedLlmProvider for BlockingThenCancelledProvider {
     async fn scripted_invocation_stream(
         &self,
         request: &crate::ports::provider_port::InvocationRequestData,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         {
             let mut guard = self.calls.lock().unwrap();
             *guard += 1;
@@ -1754,7 +1754,7 @@ impl ScriptedLlmProvider for ContextRecordingProvider {
     async fn scripted_invocation_stream(
         &self,
         _request: &crate::ports::provider_port::InvocationRequestData,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         self.seen.lock().unwrap().push(scoped_logging::capture());
         Err(ProviderError::fatal(ProviderErrorKind::Network, "recorded"))
     }
@@ -1777,7 +1777,7 @@ impl ScriptedLlmProvider for ErrorProvider {
     async fn scripted_invocation_stream(
         &self,
         _request: &crate::ports::provider_port::InvocationRequestData,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         Err(self.error.clone())
     }
 

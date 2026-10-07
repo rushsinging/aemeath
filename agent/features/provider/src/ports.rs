@@ -63,7 +63,7 @@ pub(crate) trait LlmProvider: Send + Sync {
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStreamData, crate::ProviderError>;
+    ) -> Result<crate::ProviderResponseStream, crate::ProviderError>;
 
     /// Get the model name
     fn model_name(&self) -> &str;

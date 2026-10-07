@@ -1,5 +1,5 @@
 use super::{UsageRecordContext, UsageRecordFactory};
-use crate::ports::{ModelIdData, RawUsageSnapshotData};
+use crate::ports::{ModelIdData, TokenUsageData};
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 
 fn context() -> UsageRecordContext {
@@ -19,7 +19,7 @@ fn context() -> UsageRecordContext {
 fn factory_maps_reported_usage_and_preserves_correlation() {
     let context = context();
     let expected_context = context.clone();
-    let usage = RawUsageSnapshotData {
+    let usage = TokenUsageData {
         input_tokens: Some(u32::MAX),
         output_tokens: Some(23),
         cache_write_tokens: Some(7),
@@ -53,15 +53,15 @@ fn factory_distinguishes_unreported_usage_from_reported_zero() {
     let factory = UsageRecordFactory::new(|| 42);
 
     assert!(factory
-        .build_from_raw_usage(context(), RawUsageSnapshotData::default())
+        .build_from_raw_usage(context(), TokenUsageData::default())
         .is_none());
 
     let record = factory
         .build_from_raw_usage(
             context(),
-            RawUsageSnapshotData {
+            TokenUsageData {
                 cache_read_tokens: Some(0),
-                ..RawUsageSnapshotData::default()
+                ..TokenUsageData::default()
             },
         )
         .expect("reported zero must produce a record");

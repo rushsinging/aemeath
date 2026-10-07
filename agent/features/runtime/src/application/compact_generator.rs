@@ -10,7 +10,7 @@ use context::{
     CompactGenerationFailureData, CompactGenerationFailureKind, CompactGenerationOutputData,
 };
 use futures::StreamExt;
-use provider::{InvocationDeltaData, InvocationEventData, InvocationRequestData};
+use provider::{InvocationRequestData, ProviderContentData, ProviderResponseChunk};
 use share::message::Message;
 use share::reasoning::ReasoningLevel;
 use std::sync::Arc;
@@ -71,20 +71,22 @@ impl CompactGenerator for ProviderCompactGenerator {
         let mut stream = stream;
         while let Some(event) = stream.next().await {
             match event {
-                InvocationEventData::Delta(InvocationDeltaData::Text(part)) => {
+                ProviderResponseChunk::Content(ProviderContentData::Text(part)) => {
                     text_delta_count += 1;
                     text.push_str(&part);
                 }
-                InvocationEventData::Delta(_) => non_text_delta_count += 1,
-                InvocationEventData::Completed(completion) => {
+                ProviderResponseChunk::Content(_) => non_text_delta_count += 1,
+                // Usage 帧不属于内容增量（原 completion.usage 不计数）。
+                ProviderResponseChunk::Usage(_) => {}
+                ProviderResponseChunk::Stop(stop_reason) => {
                     return Ok(CompactGenerationOutputData::completed(
                         text,
-                        Some(completion_reason(&completion.stop_reason)),
+                        Some(completion_reason(&stop_reason)),
                         text_delta_count,
                         non_text_delta_count,
                     ));
                 }
-                InvocationEventData::Failed(error) => {
+                ProviderResponseChunk::Error(error) => {
                     return Err(compact_generation_failure(error));
                 }
             }

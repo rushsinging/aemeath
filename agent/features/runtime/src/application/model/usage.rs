@@ -1,7 +1,7 @@
 use audit::UsageRecordData;
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 
-use crate::ports::{ModelIdData, RawUsageSnapshotData};
+use crate::ports::{ModelIdData, TokenUsageData};
 
 #[derive(Clone)]
 pub(crate) struct UsageRecordContext {
@@ -27,7 +27,7 @@ where
     pub(crate) fn build_from_raw_usage(
         &self,
         context: UsageRecordContext,
-        usage: RawUsageSnapshotData,
+        usage: TokenUsageData,
     ) -> Option<UsageRecordData> {
         usage.was_reported().then(|| UsageRecordData {
             recorded_at_unix_ms: (self.clock)(),

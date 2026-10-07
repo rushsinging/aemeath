@@ -137,33 +137,32 @@ async fn call_provider(
         .invoke(request, cancel)
         .await
         .map_err(|_| ReflectionExecutionError::LlmCall)?;
-    while let Some(event) = stream.next().await {
-        match event {
-            provider::InvocationEventData::Completed(completion) => {
-                let text = completion
-                    .output
-                    .iter()
-                    .filter_map(|block| match block {
-                        provider::ProviderContentBlockData::Text(text) => Some(text.as_str()),
-                        _ => None,
-                    })
-                    .collect::<String>()
-                    .trim()
-                    .to_string();
+    // 流式端口 → 本地聚合到终止帧（非流式语义经 Stop 帧获得）。
+    let mut text = String::new();
+    let mut usage = provider::TokenUsageData::default();
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            provider::ProviderResponseChunk::Content(provider::ProviderContentData::Text(part)) => {
+                text.push_str(&part);
+            }
+            provider::ProviderResponseChunk::Content(_) => {}
+            provider::ProviderResponseChunk::Usage(reported) => {
+                usage.merge_reported(reported);
+            }
+            provider::ProviderResponseChunk::Stop(_) => {
+                let text = text.trim().to_string();
                 if text.is_empty() {
                     return Err(ReflectionExecutionError::EmptyResponse);
                 }
-                let usage = completion.usage.unwrap_or_default();
                 return Ok((
                     text,
                     usage.input_tokens.unwrap_or(0),
                     usage.output_tokens.unwrap_or(0),
                 ));
             }
-            provider::InvocationEventData::Failed(_) => {
+            provider::ProviderResponseChunk::Error(_) => {
                 return Err(ReflectionExecutionError::LlmCall);
             }
-            provider::InvocationEventData::Delta(_) => {}
         }
     }
     Err(ReflectionExecutionError::LlmCall)

@@ -84,8 +84,8 @@ async fn model_switch_reads_injected_snapshot_once() {
 // Does NOT construct a provider client; uses the runtime port's FakeProvider contract.
 fn test_factory() -> Arc<dyn ProviderFactory> {
     use crate::ports::provider_port::{
-        CancellationSignal, InvocationRequestData, InvocationStreamData, ModelCapabilityData,
-        ProviderError, ProviderErrorKind, ReasoningCapabilityData, ReasoningLevel,
+        CancellationSignal, InvocationRequestData, ModelCapabilityData, ProviderError,
+        ProviderErrorKind, ProviderResponseStream, ReasoningCapabilityData, ReasoningLevel,
     };
     use crate::ports::ProviderPort as ProviderPortTrait;
 
@@ -111,7 +111,7 @@ fn test_factory() -> Arc<dyn ProviderFactory> {
             &self,
             _request: InvocationRequestData,
             _cancellation: &dyn CancellationSignal,
-        ) -> std::result::Result<InvocationStreamData, ProviderError> {
+        ) -> std::result::Result<ProviderResponseStream, ProviderError> {
             Err(ProviderError::fatal(
                 ProviderErrorKind::UpstreamUnavailable,
                 "test provider does not support invocation",

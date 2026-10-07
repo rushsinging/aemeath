@@ -82,7 +82,7 @@ impl ProviderPort for FakeProviderPort {
         &self,
         _request: crate::ports::InvocationRequestData,
         _cancellation: &dyn crate::ports::CancellationSignal,
-    ) -> Result<crate::ports::InvocationStreamData, ProviderError> {
+    ) -> Result<crate::ports::ProviderResponseStream, ProviderError> {
         Err(ProviderError::cancelled())
     }
 }

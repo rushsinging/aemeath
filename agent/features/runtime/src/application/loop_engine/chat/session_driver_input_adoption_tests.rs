@@ -321,7 +321,7 @@ impl ScriptedLlmProvider for ToolThenTextProvider {
     async fn scripted_invocation_stream(
         &self,
         request: &crate::ports::provider_port::InvocationRequestData,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         let call_num = {
             let mut count = self.call_count.lock().unwrap();
             *count += 1;
@@ -340,49 +340,37 @@ impl ScriptedLlmProvider for ToolThenTextProvider {
             };
             self.after_first.notify_one();
             Ok(Box::pin(futures::stream::iter(vec![
-                InvocationEventData::Delta(InvocationDeltaData::ToolCallStarted {
+                ProviderResponseChunk::Content(ProviderContentData::ToolCallStarted {
                     index: 0,
                     provider_id: Some("toolu_noop_001".to_string()),
                     name: "NoopMarker".to_string(),
                 }),
-                InvocationEventData::Delta(InvocationDeltaData::ToolArgumentsDelta {
+                ProviderResponseChunk::Content(ProviderContentData::ToolArgumentsDelta {
                     index: 0,
                     provider_id: Some("toolu_noop_001".to_string()),
                     partial_json: r#"{"marker":"noop-marker-result"}"#.to_string(),
                 }),
-                InvocationEventData::Delta(InvocationDeltaData::ToolCallCompleted {
+                ProviderResponseChunk::Content(ProviderContentData::ToolCallCompleted {
                     index: 0,
                     call: tool_call,
                 }),
-                InvocationEventData::Completed(ProviderCompletionData {
-                    output: vec![ProviderContentBlockData::ToolCall(ProviderToolCallData {
-                        id: "toolu_noop_001".to_string(),
-                        name: "NoopMarker".to_string(),
-                        arguments: serde_json::json!({"marker": "noop-marker-result"}),
-                    })],
-                    stop_reason: ProviderStopReasonData::ToolUse,
-                    usage: Some(RawUsageSnapshotData {
-                        input_tokens: Some(10),
-                        output_tokens: Some(20),
-                        ..RawUsageSnapshotData::default()
-                    }),
-                    effective_reasoning: ReasoningLevel::Off,
-                }),
+                ProviderResponseChunk::Usage(TokenUsageData {
+                                        input_tokens: Some(10),
+                                        output_tokens: Some(20),
+                                        ..TokenUsageData::default()
+                                    }),
+                ProviderResponseChunk::Stop(ProviderStopReasonData::ToolUse),
             ])))
         } else {
             self.after_second.notify_one();
             Ok(Box::pin(futures::stream::iter(vec![
-                InvocationEventData::Delta(InvocationDeltaData::Text("finished".to_string())),
-                InvocationEventData::Completed(ProviderCompletionData {
-                    output: vec![ProviderContentBlockData::Text("finished".to_string())],
-                    stop_reason: ProviderStopReasonData::EndTurn,
-                    usage: Some(RawUsageSnapshotData {
-                        input_tokens: Some(15),
-                        output_tokens: Some(3),
-                        ..RawUsageSnapshotData::default()
-                    }),
-                    effective_reasoning: ReasoningLevel::Off,
+                ProviderResponseChunk::Content(ProviderContentData::Text("finished".to_string())),
+                ProviderResponseChunk::Usage(TokenUsageData {
+                    input_tokens: Some(15),
+                    output_tokens: Some(3),
+                    ..TokenUsageData::default()
                 }),
+                ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn),
             ])))
         }
     }
@@ -418,7 +406,7 @@ impl ScriptedLlmProvider for TextOnlyProvider {
     async fn scripted_invocation_stream(
         &self,
         request: &crate::ports::provider_port::InvocationRequestData,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         {
             let mut count = self.call_count.lock().unwrap();
             *count += 1;
@@ -429,17 +417,15 @@ impl ScriptedLlmProvider for TextOnlyProvider {
             .push(request.messages.to_vec());
         self.after_response.notify_one();
         Ok(Box::pin(futures::stream::iter(vec![
-            InvocationEventData::Delta(InvocationDeltaData::Text("hello from model".to_string())),
-            InvocationEventData::Completed(ProviderCompletionData {
-                output: vec![ProviderContentBlockData::Text("hello from model".to_string())],
-                stop_reason: ProviderStopReasonData::EndTurn,
-                usage: Some(RawUsageSnapshotData {
-                    input_tokens: Some(5),
-                    output_tokens: Some(3),
-                    ..RawUsageSnapshotData::default()
-                }),
-                effective_reasoning: ReasoningLevel::Off,
+            ProviderResponseChunk::Content(ProviderContentData::Text(
+                "hello from model".to_string(),
+            )),
+            ProviderResponseChunk::Usage(TokenUsageData {
+                input_tokens: Some(5),
+                output_tokens: Some(3),
+                ..TokenUsageData::default()
             }),
+            ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn),
         ])))
     }
 
@@ -1091,7 +1077,7 @@ impl ScriptedLlmProvider for StreamingToolDeltaProvider {
     async fn scripted_invocation_stream(
         &self,
         request: &crate::ports::provider_port::InvocationRequestData,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         let call_num = {
             let mut count = self.call_count.lock().unwrap();
             *count += 1;
@@ -1109,48 +1095,45 @@ impl ScriptedLlmProvider for StreamingToolDeltaProvider {
                 arguments: serde_json::json!({"marker": "noop-marker-result"}),
             };
             let deltas = vec![
-                InvocationEventData::Delta(InvocationDeltaData::ToolCallStarted {
+                ProviderResponseChunk::Content(ProviderContentData::ToolCallStarted {
                     index: 0,
                     provider_id: Some("toolu_stream_001".to_string()),
                     name: "NoopMarker".to_string(),
                 }),
-                InvocationEventData::Delta(InvocationDeltaData::ToolArgumentsDelta {
+                ProviderResponseChunk::Content(ProviderContentData::ToolArgumentsDelta {
                     index: 0,
                     provider_id: Some("toolu_stream_001".to_string()),
                     partial_json: r#"{"marker":"noop-marker-result"}"#.to_string(),
                 }),
-                InvocationEventData::Delta(InvocationDeltaData::ToolCallCompleted {
+                ProviderResponseChunk::Content(ProviderContentData::ToolCallCompleted {
                     index: 0,
                     call: tool_call.clone(),
                 }),
             ];
-            let stream = futures::stream::iter(deltas).chain(futures::stream::once(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(800)).await;
-                InvocationEventData::Completed(ProviderCompletionData {
-                    output: vec![ProviderContentBlockData::ToolCall(tool_call)],
-                    stop_reason: ProviderStopReasonData::ToolUse,
-                    usage: Some(RawUsageSnapshotData {
+            let stream = futures::stream::iter(deltas)
+                .chain(futures::stream::once(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+                    ProviderResponseChunk::Usage(TokenUsageData {
                         input_tokens: Some(10),
                         output_tokens: Some(5),
-                        ..RawUsageSnapshotData::default()
-                    }),
-                    effective_reasoning: ReasoningLevel::Off,
-                })
-            }));
+                        ..TokenUsageData::default()
+                    })
+                }))
+                .chain(futures::stream::once(std::future::ready(
+                    ProviderResponseChunk::Stop(ProviderStopReasonData::ToolUse),
+                )));
             Ok(Box::pin(stream))
         } else {
             Ok(Box::pin(futures::stream::iter(vec![
-                InvocationEventData::Delta(InvocationDeltaData::Text("done after tool".to_string())),
-                InvocationEventData::Completed(ProviderCompletionData {
-                    output: vec![ProviderContentBlockData::Text("done after tool".to_string())],
-                    stop_reason: ProviderStopReasonData::EndTurn,
-                    usage: Some(RawUsageSnapshotData {
-                        input_tokens: Some(20),
-                        output_tokens: Some(3),
-                        ..RawUsageSnapshotData::default()
-                    }),
-                    effective_reasoning: ReasoningLevel::Off,
+                ProviderResponseChunk::Content(ProviderContentData::Text(
+                    "done after tool".to_string(),
+                )),
+                ProviderResponseChunk::Usage(TokenUsageData {
+                    input_tokens: Some(20),
+                    output_tokens: Some(3),
+                    ..TokenUsageData::default()
                 }),
+                ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn),
             ])))
         }
     }

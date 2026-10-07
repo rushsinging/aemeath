@@ -128,7 +128,7 @@ impl AnthropicProvider {
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
+    ) -> Result<crate::ProviderResponseStream, crate::ProviderError> {
         if cancel.is_cancelled() {
             return Err(crate::ProviderError::cancelled());
         }
@@ -221,7 +221,7 @@ impl LlmProvider for AnthropicProvider {
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
+    ) -> Result<crate::ProviderResponseStream, crate::ProviderError> {
         self.invoke_stream(resolved, system, messages, tool_schemas, cancel)
             .await
     }

@@ -1,8 +1,7 @@
 use provider::{
-    InvocationDeltaData, InvocationEventData, InvocationRequestData, ModelCapabilityData,
-    ModelIdData, ProviderCompletionData, ProviderContentBlockData, ProviderError,
-    ProviderErrorKind, ProviderStopReasonData, ProviderToolCallData, RawUsageSnapshotData,
-    ReasoningCapabilityData, RequestSystemBlockData,
+    InvocationRequestData, ModelCapabilityData, ModelIdData, ProviderContentData, ProviderError,
+    ProviderErrorKind, ProviderResponse, ProviderResponseChunk, ProviderStopReasonData,
+    ProviderToolCallData, ReasoningCapabilityData, RequestSystemBlockData, TokenUsageData,
 };
 use share::message::Message;
 use share::reasoning::ReasoningLevel;
@@ -10,18 +9,17 @@ use share::reasoning::ReasoningLevel;
 #[test]
 fn crate_root_exposes_complete_provider_published_language_as_send_sync_values() {
     fn assert_send_sync<T: Send + Sync>() {}
-    assert_send_sync::<InvocationDeltaData>();
-    assert_send_sync::<InvocationEventData>();
     assert_send_sync::<InvocationRequestData>();
     assert_send_sync::<ModelCapabilityData>();
     assert_send_sync::<ModelIdData>();
-    assert_send_sync::<ProviderCompletionData>();
-    assert_send_sync::<ProviderContentBlockData>();
+    assert_send_sync::<ProviderContentData>();
     assert_send_sync::<ProviderError>();
     assert_send_sync::<ProviderErrorKind>();
+    assert_send_sync::<ProviderResponse>();
+    assert_send_sync::<ProviderResponseChunk>();
     assert_send_sync::<ProviderStopReasonData>();
     assert_send_sync::<ProviderToolCallData>();
-    assert_send_sync::<RawUsageSnapshotData>();
+    assert_send_sync::<TokenUsageData>();
     assert_send_sync::<ReasoningCapabilityData>();
     assert_send_sync::<RequestSystemBlockData>();
 }
@@ -55,18 +53,20 @@ fn crate_root_published_language_preserves_boundary_semantics() {
     assert!(request.tools.is_empty());
     assert!(!request.cancellation.is_cancelled());
 
-    let reported_zero = RawUsageSnapshotData {
+    let reported_zero = TokenUsageData {
         input_tokens: Some(0),
-        ..RawUsageSnapshotData::default()
+        ..TokenUsageData::default()
     };
     assert!(reported_zero.was_reported());
     assert_eq!(reported_zero.into_reported().unwrap().input_tokens, Some(0));
-    assert!(RawUsageSnapshotData::default().into_reported().is_none());
+    assert!(TokenUsageData::default().into_reported().is_none());
 
     let cancelled = ProviderError::cancelled();
     assert_eq!(cancelled.kind, ProviderErrorKind::Cancelled);
     assert!(cancelled.is_cancelled());
     assert!(!cancelled.retryable);
-    assert!(InvocationEventData::Failed(cancelled).is_terminal());
-    assert!(!InvocationEventData::Delta(InvocationDeltaData::Text("x".to_string())).is_terminal());
+    assert!(ProviderResponseChunk::Error(cancelled).is_terminal());
+    assert!(
+        !ProviderResponseChunk::Content(ProviderContentData::Text("x".to_string())).is_terminal()
+    );
 }

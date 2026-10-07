@@ -153,8 +153,9 @@ async fn llm_client_invocation_stream_reaches_anthropic_without_callback() {
     assert!(matches!(
         &events[..],
         [
-            crate::InvocationEventData::Delta(crate::InvocationDeltaData::Text(text)),
-            crate::InvocationEventData::Completed(_)
+            crate::ProviderResponseChunk::Content(crate::ProviderContentData::Text(text)),
+            crate::ProviderResponseChunk::Usage(_),
+            crate::ProviderResponseChunk::Stop(_)
         ] if text == "production"
     ));
 }
@@ -209,16 +210,20 @@ async fn invoke_stream_emits_ordered_deltas_and_single_completion_from_one_reque
     assert!(matches!(
         &events[..],
         [
-            crate::InvocationEventData::Delta(crate::InvocationDeltaData::Text(first)),
-            crate::InvocationEventData::Delta(crate::InvocationDeltaData::Text(second)),
-            crate::InvocationEventData::Completed(_)
+            crate::ProviderResponseChunk::Content(crate::ProviderContentData::Text(first)),
+            crate::ProviderResponseChunk::Content(crate::ProviderContentData::Text(second)),
+            crate::ProviderResponseChunk::Usage(_),
+            crate::ProviderResponseChunk::Stop(_)
         ] if first == "hel" && second == "lo"
     ));
     assert_eq!(events.iter().filter(|event| event.is_terminal()).count(), 1);
-    let crate::InvocationEventData::Completed(completion) = events.last().unwrap() else {
-        panic!("expected completed event");
-    };
-    let usage = completion.usage.as_ref().expect("anthropic usage reported");
+    let usage = events
+        .iter()
+        .find_map(|event| match event {
+            crate::ProviderResponseChunk::Usage(usage) => Some(usage),
+            _ => None,
+        })
+        .expect("anthropic usage reported");
     assert_eq!(usage.input_tokens, Some(2));
     assert_eq!(usage.output_tokens, Some(1));
 }

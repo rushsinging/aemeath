@@ -1,5 +1,5 @@
 use super::*;
-use provider::InvocationDeltaData;
+use provider::ProviderContentData;
 
 fn retryable(kind: ProviderErrorKind) -> ProviderError {
     ProviderError::retryable(kind, "safe")
@@ -72,8 +72,8 @@ fn fatal_error_still_fails_after_visible_delta() {
 async fn main_committed_delta_remains_diagnostic_but_can_retry() {
     let coordinator = ModelInvocationCoordinator::new();
     let cancel = CancellationToken::new();
-    let events = futures::stream::iter(vec![InvocationEventData::Delta(
-        InvocationDeltaData::Text("shown".to_string()),
+    let events = futures::stream::iter(vec![ProviderResponseChunk::Content(
+        ProviderContentData::Text("shown".to_string()),
     )]);
 
     let outcome = coordinator
@@ -97,8 +97,8 @@ async fn main_committed_delta_remains_diagnostic_but_can_retry() {
 async fn raw_eof_dispatches_retryable_failure_through_reducer_for_stream_cleanup() {
     let coordinator = ModelInvocationCoordinator::new();
     let cancel = CancellationToken::new();
-    let events = futures::stream::iter(vec![InvocationEventData::Delta(
-        InvocationDeltaData::Text("partial".to_string()),
+    let events = futures::stream::iter(vec![ProviderResponseChunk::Content(
+        ProviderContentData::Text("partial".to_string()),
     )]);
     let reducer_events = std::cell::RefCell::new(Vec::new());
 
@@ -123,8 +123,8 @@ async fn raw_eof_dispatches_retryable_failure_through_reducer_for_stream_cleanup
     assert!(matches!(
         reducer_events.borrow().as_slice(),
         [
-            InvocationEventData::Delta(InvocationDeltaData::Text(_)),
-            InvocationEventData::Failed(ProviderError {
+            ProviderResponseChunk::Content(ProviderContentData::Text(_)),
+            ProviderResponseChunk::Error(ProviderError {
                 kind: ProviderErrorKind::StreamTruncated,
                 retryable: true,
                 ..
@@ -137,8 +137,8 @@ async fn raw_eof_dispatches_retryable_failure_through_reducer_for_stream_cleanup
 async fn sub_agent_uncommitted_delta_can_retry() {
     let coordinator = ModelInvocationCoordinator::new();
     let cancel = CancellationToken::new();
-    let events = futures::stream::iter(vec![InvocationEventData::Delta(
-        InvocationDeltaData::Text("not projected".to_string()),
+    let events = futures::stream::iter(vec![ProviderResponseChunk::Content(
+        ProviderContentData::Text("not projected".to_string()),
     )]);
 
     let Err((error, committed_delta)) = coordinator
@@ -163,14 +163,14 @@ async fn sub_agent_uncommitted_delta_can_retry() {
 async fn pull_stream_returns_terminal_value() {
     let coordinator = ModelInvocationCoordinator::new();
     let cancel = CancellationToken::new();
-    let events = futures::stream::iter(vec![InvocationEventData::Failed(ProviderError::fatal(
+    let events = futures::stream::iter(vec![ProviderResponseChunk::Error(ProviderError::fatal(
         ProviderErrorKind::Authentication,
         "denied",
     ))]);
 
     let outcome = coordinator
         .pull_stream(events, &cancel, true, |event| match event {
-            InvocationEventData::Failed(error) => Err(error),
+            ProviderResponseChunk::Error(error) => Err(error),
             _ => Ok(None::<()>),
         })
         .await;
@@ -191,8 +191,8 @@ async fn pull_stream_returns_terminal_value() {
 async fn cancellation_calls_reducer_failure_for_streaming_cleanup() {
     let coordinator = ModelInvocationCoordinator::new();
     let cancel = CancellationToken::new();
-    let events = futures::stream::iter(vec![InvocationEventData::Delta(
-        InvocationDeltaData::Text("partial".to_string()),
+    let events = futures::stream::iter(vec![ProviderResponseChunk::Content(
+        ProviderContentData::Text("partial".to_string()),
     )])
     .chain(futures::stream::pending());
     let reducer_events = std::cell::RefCell::new(Vec::new());
@@ -201,12 +201,12 @@ async fn cancellation_calls_reducer_failure_for_streaming_cleanup() {
     let outcome = coordinator
         .pull_stream(events, &cancel, true, |event| {
             match &event {
-                InvocationEventData::Delta(_) => {
+                ProviderResponseChunk::Content(_) => {
                     streaming_block_active.set(true);
                     // Force cancellation after the reducer has opened a streaming block.
                     cancel.cancel();
                 }
-                InvocationEventData::Failed(error) if error.is_cancelled() => {
+                ProviderResponseChunk::Error(error) if error.is_cancelled() => {
                     streaming_block_active.set(false);
                 }
                 _ => {}
@@ -230,8 +230,8 @@ async fn cancellation_calls_reducer_failure_for_streaming_cleanup() {
     assert!(matches!(
         reducer_events.borrow().as_slice(),
         [
-            InvocationEventData::Delta(InvocationDeltaData::Text(_)),
-            InvocationEventData::Failed(ProviderError {
+            ProviderResponseChunk::Content(ProviderContentData::Text(_)),
+            ProviderResponseChunk::Error(ProviderError {
                 kind: ProviderErrorKind::Cancelled,
                 ..
             })
@@ -243,8 +243,8 @@ async fn cancellation_calls_reducer_failure_for_streaming_cleanup() {
 async fn thinking_cancellation_calls_reducer_failure_for_streaming_cleanup() {
     let coordinator = ModelInvocationCoordinator::new();
     let cancel = CancellationToken::new();
-    let events = futures::stream::iter(vec![InvocationEventData::Delta(
-        InvocationDeltaData::Thinking {
+    let events = futures::stream::iter(vec![ProviderResponseChunk::Content(
+        ProviderContentData::Thinking {
             thinking: "partial thought".to_string(),
             signature: None,
         },
@@ -256,11 +256,11 @@ async fn thinking_cancellation_calls_reducer_failure_for_streaming_cleanup() {
     let outcome = coordinator
         .pull_stream(events, &cancel, true, |event| {
             match &event {
-                InvocationEventData::Delta(InvocationDeltaData::Thinking { .. }) => {
+                ProviderResponseChunk::Content(ProviderContentData::Thinking { .. }) => {
                     streaming_block_active.set(true);
                     cancel.cancel();
                 }
-                InvocationEventData::Failed(error) if error.is_cancelled() => {
+                ProviderResponseChunk::Error(error) if error.is_cancelled() => {
                     streaming_block_active.set(false);
                 }
                 _ => {}
@@ -284,8 +284,8 @@ async fn thinking_cancellation_calls_reducer_failure_for_streaming_cleanup() {
     assert!(matches!(
         reducer_events.borrow().as_slice(),
         [
-            InvocationEventData::Delta(InvocationDeltaData::Thinking { .. }),
-            InvocationEventData::Failed(ProviderError {
+            ProviderResponseChunk::Content(ProviderContentData::Thinking { .. }),
+            ProviderResponseChunk::Error(ProviderError {
                 kind: ProviderErrorKind::Cancelled,
                 ..
             })
@@ -297,8 +297,8 @@ async fn thinking_cancellation_calls_reducer_failure_for_streaming_cleanup() {
 async fn reducer_value_from_delta_is_protocol_failure() {
     let coordinator = ModelInvocationCoordinator::new();
     let cancel = CancellationToken::new();
-    let events = futures::stream::iter(vec![InvocationEventData::Delta(
-        InvocationDeltaData::Text("invalid terminal".to_string()),
+    let events = futures::stream::iter(vec![ProviderResponseChunk::Content(
+        ProviderContentData::Text("invalid terminal".to_string()),
     )]);
 
     let outcome = coordinator

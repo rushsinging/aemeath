@@ -108,7 +108,7 @@ impl ScriptedLlmProvider for IdenticalReplyProvider {
     async fn scripted_invocation_stream(
         &self,
         _request: &crate::ports::provider_port::InvocationRequestData,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         tokio::time::sleep(self.per_turn_delay).await;
         Ok(text_completion_stream(self.reply.clone(), 1, 1))
     }
@@ -247,7 +247,7 @@ impl ScriptedLlmProvider for RecordingProvider {
     async fn scripted_invocation_stream(
         &self,
         request: &crate::ports::provider_port::InvocationRequestData,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         let last_user = request
             .messages
             .iter()
@@ -614,7 +614,7 @@ impl ScriptedLlmProvider for CancellableThenNormalProvider {
     async fn scripted_invocation_stream(
         &self,
         request: &crate::ports::provider_port::InvocationRequestData,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         let call_index = {
             let mut guard = self.calls.lock().unwrap();
             let idx = *guard;
@@ -783,7 +783,7 @@ impl ScriptedLlmProvider for CompleteThenCancellableProvider {
     async fn scripted_invocation_stream(
         &self,
         request: &crate::ports::provider_port::InvocationRequestData,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         let call_index = {
             let mut guard = self.calls.lock().unwrap();
             let idx = *guard;
@@ -978,7 +978,7 @@ async fn test_chat_impl_idle_until_first_input_event() {
         async fn scripted_invocation_stream(
             &self,
             _request: &crate::ports::provider_port::InvocationRequestData,
-        ) -> Result<InvocationStreamData, ProviderError> {
+        ) -> Result<ProviderResponseStream, ProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(text_completion_stream("hi response", 1, 1))
         }
@@ -1308,7 +1308,7 @@ impl ScriptedLlmProvider for ApiErrorThenNormalProvider {
     async fn scripted_invocation_stream(
         &self,
         _request: &crate::ports::provider_port::InvocationRequestData,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         let call_index = {
             let mut guard = self.calls.lock().unwrap();
             let idx = *guard;

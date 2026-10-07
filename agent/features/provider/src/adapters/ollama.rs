@@ -139,7 +139,7 @@ impl LlmProvider for OllamaProvider {
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
+    ) -> Result<crate::ProviderResponseStream, crate::ProviderError> {
         if cancel.is_cancelled() {
             return Err(crate::ProviderError::cancelled());
         }

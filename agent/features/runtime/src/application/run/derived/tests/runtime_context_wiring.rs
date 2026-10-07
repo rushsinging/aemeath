@@ -309,10 +309,9 @@ impl tools::published::typed::TypedTool for SpyTool {
 async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
     use crate::application::model::test_support::{test_binding_from_port, TestProviderPort};
     use provider::{
-        InvocationEventData, ProviderCompletionData, ProviderContentBlockData,
-        ProviderStopReasonData, ProviderToolCallData, RawUsageSnapshotData,
+        ProviderContentData, ProviderResponseChunk, ProviderStopReasonData, ProviderToolCallData,
+        TokenUsageData,
     };
-    use share::reasoning::ReasoningLevel;
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::mpsc;
 
@@ -383,33 +382,29 @@ async fn run_agent_executes_tool_and_propagates_progress_policy_and_binding() {
                     has_tool_result,
                     "second request must contain tool result backfill"
                 );
-                futures::stream::iter(vec![InvocationEventData::Completed(
-                    ProviderCompletionData {
-                        output: vec![ProviderContentBlockData::Text("all done".into())],
-                        stop_reason: ProviderStopReasonData::EndTurn,
-                        usage: Some(RawUsageSnapshotData {
-                            input_tokens: Some(10),
-                            output_tokens: Some(3),
-                            ..RawUsageSnapshotData::default()
-                        }),
-                        effective_reasoning: ReasoningLevel::Off,
-                    },
-                )])
+                futures::stream::iter(vec![
+                    ProviderResponseChunk::Content(ProviderContentData::Text("all done".into())),
+                    ProviderResponseChunk::Usage(TokenUsageData {
+                        input_tokens: Some(10),
+                        output_tokens: Some(3),
+                        ..TokenUsageData::default()
+                    }),
+                    ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn),
+                ])
             } else {
-                futures::stream::iter(vec![InvocationEventData::Completed(
-                    ProviderCompletionData {
-                        output: vec![ProviderContentBlockData::ToolCall(tool_call.clone())],
-                        stop_reason: ProviderStopReasonData::ToolUse,
-                        usage: Some(RawUsageSnapshotData {
-                            input_tokens: Some(5),
-                            output_tokens: Some(8),
-                            ..RawUsageSnapshotData::default()
-                        }),
-                        effective_reasoning: ReasoningLevel::Off,
-                    },
-                )])
+                futures::stream::iter(vec![
+                    ProviderResponseChunk::Content(ProviderContentData::ToolCall(
+                        tool_call.clone(),
+                    )),
+                    ProviderResponseChunk::Usage(TokenUsageData {
+                        input_tokens: Some(5),
+                        output_tokens: Some(8),
+                        ..TokenUsageData::default()
+                    }),
+                    ProviderResponseChunk::Stop(ProviderStopReasonData::ToolUse),
+                ])
             };
-            Box::pin(async move { Ok(Box::pin(stream) as InvocationStreamData) })
+            Box::pin(async move { Ok(Box::pin(stream) as ProviderResponseStream) })
         },
     ));
 
@@ -549,10 +544,9 @@ impl tools::published::typed::TypedTool for BlockingCancelTool {
 async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
     use crate::application::model::test_support::{test_binding_from_port, TestProviderPort};
     use provider::{
-        InvocationEventData, ProviderCompletionData, ProviderContentBlockData,
-        ProviderStopReasonData, ProviderToolCallData, RawUsageSnapshotData,
+        ProviderContentData, ProviderResponseChunk, ProviderStopReasonData, ProviderToolCallData,
+        TokenUsageData,
     };
-    use share::reasoning::ReasoningLevel;
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::mpsc;
 
@@ -595,20 +589,15 @@ async fn parent_token_cancellation_propagates_to_tool_and_terminates_run() {
         move |_call_idx, _request, _cancel| {
             let tc = tool_call.clone();
             Box::pin(async move {
-                Ok(
-                    Box::pin(futures::stream::iter(vec![InvocationEventData::Completed(
-                        ProviderCompletionData {
-                            output: vec![ProviderContentBlockData::ToolCall(tc)],
-                            stop_reason: ProviderStopReasonData::ToolUse,
-                            usage: Some(RawUsageSnapshotData {
-                                input_tokens: Some(5),
-                                output_tokens: Some(8),
-                                ..RawUsageSnapshotData::default()
-                            }),
-                            effective_reasoning: ReasoningLevel::Off,
-                        },
-                    )])) as crate::ports::InvocationStreamData,
-                )
+                Ok(Box::pin(futures::stream::iter(vec![
+                    ProviderResponseChunk::Content(ProviderContentData::ToolCall(tc)),
+                    ProviderResponseChunk::Usage(TokenUsageData {
+                        input_tokens: Some(5),
+                        output_tokens: Some(8),
+                        ..TokenUsageData::default()
+                    }),
+                    ProviderResponseChunk::Stop(ProviderStopReasonData::ToolUse),
+                ])) as crate::ports::ProviderResponseStream)
             })
         },
     ));

@@ -5,43 +5,30 @@
 //! - `docs/design/02-modules/provider/02-ports-stream-and-client-scope.md`
 //!
 //! #901 冻结契约：
-//! - PL 类型（ModelIdData、ModelCapabilityData、ProviderError、ProviderCompletionData 等）
+//! - PL 类型（ModelIdData、ModelCapabilityData、ProviderError、ProviderResponse 等）
 //!   由 Provider crate 的 `published_language` 模块定义。
-//! - Runtime 定义 `ProviderPort` trait、`InvocationStreamData` 和 `InvocationEventData`，
-//!   引用 Provider PL 类型，**NEVER** 引用 vendor wire DTO。
-//! - `invoke` 返回 pull-based 有序流，终结语义由 `InvocationEventData` 表达。
-
-use std::pin::Pin;
+//! - Runtime 定义 `ProviderPort` trait，引用 Provider PL 类型，
+//!   **NEVER** 引用 vendor wire DTO。
+//! - `invoke` 返回 pull-based 有序流，终结语义由 `ProviderResponseChunk`
+//!   （`Stop`/`Error` 终止帧）表达（#1880 v3 契约）。
 
 use async_trait::async_trait;
-use futures::Stream;
 
 // Provider PL 类型 re-export —— 消费方只需 `use crate::ports::provider_port::*`。
-// 通过 provider::api（API facade）访问，不直接引用 published_language 模块。
+// 通过 provider:: 根导出访问，不直接引用 published_language 模块。
 // 新 PL StopReason 通过别名 ProviderStopReasonData 导出，此处还原为 StopReason。
 pub use provider::{
-    InvocationEventData, InvocationRequestData, ModelCapabilityData, ModelIdData, ProviderError,
-    ProviderStopReasonData as StopReason, RawUsageSnapshotData, RequestSystemBlockData,
+    InvocationRequestData, ModelCapabilityData, ModelIdData, ProviderError, ProviderResponseStream,
+    ProviderStopReasonData as StopReason, RequestSystemBlockData, TokenUsageData,
 };
 
 #[cfg(test)]
 pub use provider::{
-    InvocationDeltaData, ProviderCompletionData, ProviderContentBlockData, ProviderErrorKind,
-    ReasoningCapabilityData,
+    ProviderContentData, ProviderErrorKind, ProviderResponseChunk, ReasoningCapabilityData,
 };
 
 // ReasoningLevel 已由 provider crate 从 core::provider re-export。
 pub use share::reasoning::ReasoningLevel;
-
-// ─── InvocationStreamData ────────────────────────────────────
-
-/// 一次 LLM 调用的有序 pull-based 流。
-///
-/// Provider 返回单次 attempt 的有序事件流；Runtime 负责流汇聚、
-/// tool_call 提取和领域事件投影。
-///
-/// consumer drop 等价于取消意图，adapter 应停止继续读取和缓冲。
-pub type InvocationStreamData = Pin<Box<dyn Stream<Item = InvocationEventData> + Send>>;
 
 /// 取消信号（真相源在 runtime Run 生命周期；provider 只消费意图）。
 ///
@@ -78,14 +65,14 @@ pub trait ProviderPort: Send + Sync {
     /// 查询模型能力。
     fn capabilities(&self, model: &ModelIdData) -> Result<ModelCapabilityData, ProviderError>;
 
-    /// 发起一次 LLM 调用，返回单次 attempt 的有序流。
+    /// 发起一次 LLM 调用，返回单次 attempt 的有序片段流。
     ///
     /// 取消通过 `CancellationToken` 传播；取消后返回 `ProviderError::cancelled()`。
     async fn invoke(
         &self,
         request: InvocationRequestData,
         cancellation: &dyn CancellationSignal,
-    ) -> Result<InvocationStreamData, ProviderError>;
+    ) -> Result<ProviderResponseStream, ProviderError>;
 }
 
 // ─── Fake / Contract harness ───────────────────────────
@@ -125,32 +112,28 @@ pub(crate) mod fake {
             }
         }
 
-        /// 生成一个产出 `events` 后终结的 InvocationStreamData。
-        pub fn stream_from(events: Vec<InvocationEventData>) -> InvocationStreamData {
-            Box::pin(stream::iter(events))
+        /// 生成一个产出 `chunks` 后终结的 ProviderResponseStream。
+        pub fn stream_from(chunks: Vec<ProviderResponseChunk>) -> ProviderResponseStream {
+            Box::pin(stream::iter(chunks))
         }
 
-        /// 生成一个文本 delta + Completed 终结的正常流。
-        pub fn happy_path_stream(text: &str) -> InvocationStreamData {
-            let events = vec![
-                InvocationEventData::Delta(InvocationDeltaData::Text(text.to_string())),
-                InvocationEventData::Completed(ProviderCompletionData {
-                    output: vec![ProviderContentBlockData::Text(text.to_string())],
-                    stop_reason: StopReason::EndTurn,
-                    usage: Some(RawUsageSnapshotData {
-                        input_tokens: Some(10),
-                        output_tokens: Some(5),
-                        ..Default::default()
-                    }),
-                    effective_reasoning: ReasoningLevel::Off,
+        /// 生成一个文本 Content 帧 + Usage/Stop 尾帧的正常流。
+        pub fn happy_path_stream(text: &str) -> ProviderResponseStream {
+            let chunks = vec![
+                ProviderResponseChunk::Content(ProviderContentData::Text(text.to_string())),
+                ProviderResponseChunk::Usage(TokenUsageData {
+                    input_tokens: Some(10),
+                    output_tokens: Some(5),
+                    ..Default::default()
                 }),
+                ProviderResponseChunk::Stop(StopReason::EndTurn),
             ];
-            Self::stream_from(events)
+            Self::stream_from(chunks)
         }
 
-        /// 生成一个直接失败的流。
-        pub fn error_stream(error: ProviderError) -> InvocationStreamData {
-            Self::stream_from(vec![InvocationEventData::Failed(error)])
+        /// 生成一个直接失败的流（Error 终止帧）。
+        pub fn error_stream(error: ProviderError) -> ProviderResponseStream {
+            Self::stream_from(vec![ProviderResponseChunk::Error(error)])
         }
     }
 
@@ -177,7 +160,7 @@ pub(crate) mod fake {
             &self,
             _request: InvocationRequestData,
             cancellation: &dyn CancellationSignal,
-        ) -> Result<InvocationStreamData, ProviderError> {
+        ) -> Result<ProviderResponseStream, ProviderError> {
             if cancellation.is_cancelled() {
                 return Err(ProviderError::cancelled());
             }
@@ -230,7 +213,7 @@ pub(crate) mod fake {
     }
 
     #[tokio::test]
-    async fn happy_path_stream_emits_delta_then_completed() {
+    async fn happy_path_stream_emits_content_then_usage_then_stop() {
         let stream = FakeProvider::happy_path_stream("hi");
         futures::pin_mut!(stream);
         use futures::StreamExt;
@@ -238,30 +221,35 @@ pub(crate) mod fake {
         let first = stream.next().await.unwrap();
         assert!(matches!(
             first,
-            InvocationEventData::Delta(InvocationDeltaData::Text(ref t)) if t == "hi"
+            ProviderResponseChunk::Content(ProviderContentData::Text(ref t)) if t == "hi"
         ));
 
         let second = stream.next().await.unwrap();
         match second {
-            InvocationEventData::Completed(c) => {
-                assert_eq!(c.stop_reason, StopReason::EndTurn);
-                assert_eq!(c.usage.unwrap().input_tokens, Some(10));
+            ProviderResponseChunk::Usage(usage) => {
+                assert_eq!(usage.input_tokens, Some(10));
             }
-            _ => panic!("expected Completed"),
+            other => panic!("expected Usage frame, got {other:?}"),
         }
+
+        let third = stream.next().await.unwrap();
+        assert!(
+            matches!(third, ProviderResponseChunk::Stop(StopReason::EndTurn)),
+            "expected Stop frame, got {third:?}"
+        );
 
         // 终结后 next() 返回 None
         assert!(stream.next().await.is_none());
     }
 
     #[tokio::test]
-    async fn error_stream_emits_failed_then_none() {
+    async fn error_stream_emits_error_then_none() {
         let stream = FakeProvider::error_stream(ProviderError::cancelled());
         futures::pin_mut!(stream);
         use futures::StreamExt;
 
         let first = stream.next().await.unwrap();
-        assert!(matches!(first, InvocationEventData::Failed(_)));
+        assert!(matches!(first, ProviderResponseChunk::Error(_)));
 
         // 终结后 next() 返回 None
         assert!(stream.next().await.is_none());
@@ -307,16 +295,18 @@ pub(crate) mod fake {
         let mut stream = provider.invoke(request, &cancel).await.unwrap();
         use futures::StreamExt;
 
-        // 收集所有事件
-        let mut events = Vec::new();
-        while let Some(evt) = stream.next().await {
-            events.push(evt);
+        // 收集所有片段
+        let mut chunks = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            chunks.push(chunk);
         }
 
-        // 恰好 2 个事件：1 个 Delta + 1 个 Completed
-        assert_eq!(events.len(), 2);
-        assert!(matches!(events[0], InvocationEventData::Delta(_)));
-        assert!(matches!(events[1], InvocationEventData::Completed(_)));
+        // 恰好 3 帧：1 Content + 1 Usage + 1 Stop 终止帧
+        assert_eq!(chunks.len(), 3);
+        assert!(matches!(chunks[0], ProviderResponseChunk::Content(_)));
+        assert!(matches!(chunks[1], ProviderResponseChunk::Usage(_)));
+        assert!(matches!(chunks[2], ProviderResponseChunk::Stop(_)));
+        assert!(chunks[2].is_terminal());
     }
 
     #[tokio::test]
@@ -348,9 +338,9 @@ pub(crate) mod fake {
     }
 
     #[test]
-    fn invocation_event_is_the_provider_published_language_type() {
-        fn accepts_provider_event(_: provider::InvocationEventData) {}
-        accepts_provider_event(InvocationEventData::Failed(ProviderError::cancelled()));
+    fn response_chunk_is_the_provider_published_language_type() {
+        fn accepts_provider_chunk(_: provider::ProviderResponseChunk) {}
+        accepts_provider_chunk(ProviderResponseChunk::Error(ProviderError::cancelled()));
     }
 
     #[test]

@@ -275,10 +275,10 @@ impl<'a> RuntimeReflection<'a> {
         run_step_id: Option<&sdk::RunStepId>,
         metadata: &crate::application::reflection::ReflectionTaskMetadata,
     ) {
-        let usage = crate::ports::RawUsageSnapshotData {
+        let usage = crate::ports::TokenUsageData {
             input_tokens: Some(metadata.input_tokens),
             output_tokens: Some(metadata.output_tokens),
-            ..crate::ports::RawUsageSnapshotData::default()
+            ..crate::ports::TokenUsageData::default()
         };
         crate::application::model::invocation::record_successful_usage(
             runtime_context.usage_sink().as_ref(),

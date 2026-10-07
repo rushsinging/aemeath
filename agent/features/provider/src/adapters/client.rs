@@ -365,20 +365,103 @@ impl LlmClient {
         messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
+    ) -> Result<crate::ProviderResponseStream, crate::ProviderError> {
         self.provider
             .invocation_stream(resolved, system, messages, tool_schemas, cancel)
             .await
     }
 
-    /// 统一请求模型入口：runtime PL 的 [`InvocationRequestData`] 在 crate 内
-    /// 完成 capability clamp、scope 构造、system block / tool schema 转换与
-    /// 取消竞速（原 composition ProviderAdapter 编排收编）。
+    /// 非流式请求入口（#1880 v3 单通道输出）：经 [`Self::invoke_stream`]
+    /// 建立流后 drain 全部片段，聚合为 [`crate::ProviderResponse`]（自带
+    /// 成败——无需 Result 双通道）。
+    ///
+    /// 聚合规则：
+    /// - `Content`：终态内容块（Text/Thinking/ToolCall 与 `ToolCallCompleted`
+    ///   携带的完整调用）累计进 `output`；流式增量帧
+    ///   （`ToolCallStarted`/`ToolArgumentsDelta`）不进终态输出；
+    /// - `Usage` → `token_usage`；`Stop` → `stop_reason`；
+    /// - `Error`：失败终止帧 → `ok=false` + `error=Some` 并提前返回；
+    /// - 流耗尽未见 `Stop`：协议错误 → `ok=false`。
+    ///
+    /// establishment 失败仍走 `Err(ProviderError)`（与流式路径一致）。
     pub async fn invoke(
         &self,
         capability: &crate::ModelCapabilityData,
         request: &crate::InvocationRequestData,
-    ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
+    ) -> Result<crate::ProviderResponse, crate::ProviderError> {
+        use crate::published_language::{ProviderContentData, ProviderResponseChunk};
+        use crate::ProviderError;
+        use futures_util::StreamExt;
+
+        // 与 invoke_stream 的 resolve 同源：capability clamp 后的生效档位。
+        let effective_reasoning = capability.reasoning.resolve(request.reasoning);
+        let mut stream = self.invoke_stream(capability, request).await?;
+        let mut response = crate::ProviderResponse {
+            ok: false,
+            error: None,
+            output: Vec::new(),
+            stop_reason: None,
+            token_usage: None,
+            effective_reasoning,
+        };
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                ProviderResponseChunk::Content(block) => match block {
+                    // 流增量帧只服务渐进消费，不进终态 output。尾部 Thinking
+                    // 完整帧（含 signature）后到——覆盖先前累计的同位块。
+                    ProviderContentData::Text(_) | ProviderContentData::ToolCall(_) => {
+                        response.output.push(block);
+                    }
+                    thinking_block @ ProviderContentData::Thinking { .. } => {
+                        // 尾部完整帧（含 signature）覆盖同文本的累计块。
+                        let same_text = |existing: &ProviderContentData| {
+                            matches!(
+                                (existing, &thinking_block),
+                                (
+                                    ProviderContentData::Thinking { thinking: t, .. },
+                                    ProviderContentData::Thinking { thinking, .. },
+                                ) if t == thinking
+                            )
+                        };
+                        response.output.retain(|existing| !same_text(existing));
+                        response.output.push(thinking_block);
+                    }
+                    ProviderContentData::ToolCallCompleted { call, .. } => {
+                        response.output.push(ProviderContentData::ToolCall(call));
+                    }
+                    ProviderContentData::ToolCallStarted { .. }
+                    | ProviderContentData::ToolArgumentsDelta { .. } => {}
+                },
+                ProviderResponseChunk::Usage(usage) => response.token_usage = Some(usage),
+                ProviderResponseChunk::Stop(reason) => {
+                    response.stop_reason = Some(reason);
+                    response.ok = true;
+                }
+                ProviderResponseChunk::Error(error) => {
+                    response.ok = false;
+                    response.error = Some(error);
+                    return Ok(response);
+                }
+            }
+        }
+        if !response.ok {
+            // 流耗尽无 Stop 终止帧 = 协议错误（成功路径由 Stop 置位）。
+            response.error = Some(ProviderError::fatal(
+                crate::ProviderErrorKind::Protocol,
+                "流结束未包含 Stop 终止帧",
+            ));
+        }
+        Ok(response)
+    }
+
+    /// 流式请求入口：runtime PL 的 [`InvocationRequestData`] 在 crate 内
+    /// 完成 capability clamp、scope 构造、system block / tool schema 转换与
+    /// 取消竞速（原 composition ProviderAdapter 编排收编）。
+    pub async fn invoke_stream(
+        &self,
+        capability: &crate::ModelCapabilityData,
+        request: &crate::InvocationRequestData,
+    ) -> Result<crate::ProviderResponseStream, crate::ProviderError> {
         use crate::ProviderError;
 
         // fast path：请求携带的取消 token 已触发（取消真相源在 runtime，

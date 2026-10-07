@@ -10,22 +10,21 @@ use tokio_util::sync::CancellationToken;
 use super::super::client::{LlmClient, LlmConfigOptionsData};
 use crate::ports::LlmProvider;
 use crate::published_language::{
-    InvocationEventData, InvocationStreamData, ProviderCompletionData, ProviderContentBlockData,
-    ProviderError, ProviderErrorKind, ProviderStopReasonData,
+    ProviderContentData, ProviderError, ProviderErrorKind, ProviderResponseChunk,
+    ProviderResponseStream, ProviderStopReasonData,
 };
 
-fn completed() -> InvocationEventData {
-    InvocationEventData::Completed(ProviderCompletionData {
-        output: vec![ProviderContentBlockData::Text("OK".to_string())],
-        stop_reason: ProviderStopReasonData::EndTurn,
-        usage: None,
-        effective_reasoning: ReasoningLevel::Off,
-    })
+/// v3 拆帧形态的探测成功序列：Content 片段 + 尾帧 Stop（无 usage 上报）。
+fn completed() -> Vec<ProviderResponseChunk> {
+    vec![
+        ProviderResponseChunk::Content(ProviderContentData::Text("OK".to_string())),
+        ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn),
+    ]
 }
 
 /// 事件回放 fake：回放固定事件序列并断言探测调用的 scope 语义。
 struct EventProvider {
-    events: Vec<InvocationEventData>,
+    events: Vec<ProviderResponseChunk>,
     delay: Option<Duration>,
 }
 
@@ -38,7 +37,7 @@ impl LlmProvider for EventProvider {
         messages: &[Message],
         _tools: &[serde_json::Value],
         _cancel: &CancellationToken,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         if let Some(delay) = self.delay {
             tokio::time::sleep(delay).await;
         }
@@ -58,7 +57,7 @@ impl LlmProvider for EventProvider {
     }
 }
 
-fn probe_client(events: Vec<InvocationEventData>, delay: Option<Duration>) -> Arc<LlmClient> {
+fn probe_client(events: Vec<ProviderResponseChunk>, delay: Option<Duration>) -> Arc<LlmClient> {
     Arc::new(LlmClient::from_provider(Arc::new(EventProvider {
         events,
         delay,
@@ -67,7 +66,7 @@ fn probe_client(events: Vec<InvocationEventData>, delay: Option<Duration>) -> Ar
 
 #[tokio::test]
 async fn connectivity_probe_returns_latency_on_completed() {
-    let client = probe_client(vec![completed()], None);
+    let client = probe_client(completed(), None);
     let latency = super::run_connectivity_probe(&client, Duration::from_secs(5))
         .await
         .expect("completed event must resolve");
@@ -85,7 +84,7 @@ async fn connectivity_probe_requires_completed_terminal_event() {
 
 #[tokio::test]
 async fn connectivity_probe_propagates_failed_event_error() {
-    let failed = InvocationEventData::Failed(ProviderError::fatal(
+    let failed = ProviderResponseChunk::Error(ProviderError::fatal(
         ProviderErrorKind::Authentication,
         "upstream rejected",
     ));
@@ -100,7 +99,7 @@ async fn connectivity_probe_propagates_failed_event_error() {
 /// 语义）；paused clock 下即时验证：上游 120s 慢响应 + 30s 探测超时。
 #[tokio::test(start_paused = true)]
 async fn connectivity_probe_times_out_and_reports_timeout_kind() {
-    let client = probe_client(vec![completed()], Some(Duration::from_secs(120)));
+    let client = probe_client(completed(), Some(Duration::from_secs(120)));
     let error = super::run_connectivity_probe(&client, Duration::from_secs(30))
         .await
         .expect_err("slow upstream must time out");

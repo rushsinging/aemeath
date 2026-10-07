@@ -276,7 +276,7 @@ impl crate::ports::ProviderPort for RecordingReflectionProvider {
         request: crate::ports::provider_port::InvocationRequestData,
         _cancel: &dyn crate::ports::provider_port::CancellationSignal,
     ) -> Result<
-        crate::ports::provider_port::InvocationStreamData,
+        crate::ports::provider_port::ProviderResponseStream,
         crate::ports::provider_port::ProviderError,
     > {
         self.prompts.lock().unwrap().push(

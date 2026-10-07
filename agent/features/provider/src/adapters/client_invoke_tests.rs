@@ -11,9 +11,8 @@ use crate::domain::capability::ReasoningLevel;
 use crate::ports::{LlmProvider, ResolvedInvocation};
 use crate::ProviderStopReasonData as StopReason;
 use crate::{
-    InvocationDeltaData, InvocationEventData, InvocationRequestData, InvocationStreamData,
-    ProviderCompletionData, ProviderContentBlockData, ProviderError, ProviderErrorKind,
-    ProviderStopReasonData, ProviderToolCallData, RawUsageSnapshotData, RequestSystemBlockData,
+    InvocationRequestData, ProviderContentData, ProviderError, ProviderErrorKind,
+    ProviderResponseChunk, RequestSystemBlockData, TokenUsageData,
 };
 use crate::{ModelCapabilityData, ModelIdData, ReasoningCapabilityData};
 
@@ -99,7 +98,7 @@ impl LlmProvider for RecordingProvider {
         _messages: &[Message],
         tool_schemas: &[serde_json::Value],
         cancel: &CancellationToken,
-    ) -> Result<crate::InvocationStreamData, ProviderError> {
+    ) -> Result<crate::ProviderResponseStream, ProviderError> {
         // Record exactly what the client passed down.
         {
             let mut c = self.captured.lock().expect("captured lock poisoned");
@@ -127,20 +126,19 @@ impl LlmProvider for RecordingProvider {
         if let Some(ref err) = self.error {
             return Err(err.clone());
         }
+        // #1880 v3 拆帧：原 [Delta(Text), Completed{output, usage, stop}] 序列
+        // 改为 Content 片段 + 尾帧 Usage/Stop（output 内容块已由 Content 片段
+        // 携带，不重发）。
         Ok(Box::pin(futures_util::stream::iter(vec![
-            InvocationEventData::Delta(InvocationDeltaData::Text("hello from fake".to_string())),
-            InvocationEventData::Completed(ProviderCompletionData {
-                output: vec![ProviderContentBlockData::Text(
-                    "hello from fake".to_string(),
-                )],
-                stop_reason: StopReason::EndTurn,
-                usage: Some(RawUsageSnapshotData {
-                    input_tokens: Some(5),
-                    output_tokens: Some(3),
-                    ..Default::default()
-                }),
-                effective_reasoning: ReasoningLevel::Off,
+            ProviderResponseChunk::Content(ProviderContentData::Text(
+                "hello from fake".to_string(),
+            )),
+            ProviderResponseChunk::Usage(TokenUsageData {
+                input_tokens: Some(5),
+                output_tokens: Some(3),
+                ..Default::default()
             }),
+            ProviderResponseChunk::Stop(StopReason::EndTurn),
         ])))
     }
 
@@ -189,7 +187,7 @@ fn build_client(fake: RecordingProvider) -> (Arc<LlmClient>, Arc<Mutex<CapturedI
 // ─── Tests ────────────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn invoke_returns_stream_with_delta_then_completed() {
+async fn invoke_aggregates_stream_into_provider_response() {
     let (client, _captured) = build_client(RecordingProvider::new(
         "fake-provider",
         "fake-model",
@@ -198,30 +196,58 @@ async fn invoke_returns_stream_with_delta_then_completed() {
     let capability = test_capability();
 
     let request = InvocationRequestData::new(test_model_id(), vec![], 8192, ReasoningLevel::Off);
-    let cancel = CancellationToken::new();
 
-    let mut stream = client.invoke(&capability, &request).await.unwrap();
+    let response = client.invoke(&capability, &request).await.unwrap();
 
+    assert!(response.ok, "aggregated happy-path response must be ok");
+    assert!(
+        matches!(
+            &response.output[..],
+            [ProviderContentData::Text(ref t)] if t == "hello from fake"
+        ),
+        "output must carry the streamed text block, got {:?}",
+        response.output
+    );
+    assert_eq!(response.stop_reason, Some(StopReason::EndTurn));
+    let usage = response.token_usage.expect("usage frame must aggregate");
+    assert_eq!(usage.input_tokens, Some(5));
+    assert_eq!(usage.output_tokens, Some(3));
+    assert_eq!(response.effective_reasoning, ReasoningLevel::Off);
+}
+
+#[tokio::test]
+async fn invoke_stream_emits_content_then_usage_then_stop_frames() {
     use futures_util::StreamExt;
+
+    let (client, _captured) = build_client(RecordingProvider::new(
+        "fake-provider",
+        "fake-model",
+        fresh_captured(),
+    ));
+    let capability = test_capability();
+
+    let request = InvocationRequestData::new(test_model_id(), vec![], 8192, ReasoningLevel::Off);
+    let mut stream = client.invoke_stream(&capability, &request).await.unwrap();
 
     let mut events = Vec::new();
     while let Some(evt) = stream.next().await {
         events.push(evt);
     }
 
-    assert_eq!(
-        events.len(),
-        2,
-        "expected exactly 2 events: Delta + Completed"
-    );
+    // v3 拆帧：Content 片段在前，尾帧 Usage → Stop。
     assert!(
-        matches!(events[0], InvocationEventData::Delta(InvocationDeltaData::Text(ref t)) if t == "hello from fake"),
-        "first event should be a text delta"
+        matches!(
+            &events[..],
+            [
+                ProviderResponseChunk::Content(ProviderContentData::Text(ref t)),
+                ProviderResponseChunk::Usage(_),
+                ProviderResponseChunk::Stop(StopReason::EndTurn),
+            ] if t == "hello from fake"
+        ),
+        "expected Content + Usage + Stop frames, got {events:?}"
     );
-    assert!(
-        matches!(events[1], InvocationEventData::Completed(_)),
-        "second event should be Completed"
-    );
+    assert!(!events[0].is_terminal(), "content frame is not terminal");
+    assert!(events[2].is_terminal(), "stop frame is terminal");
 }
 
 #[tokio::test]
@@ -246,7 +272,6 @@ async fn invoke_propagates_provider_error() {
 
     let request =
         InvocationRequestData::new(capability.model.clone(), vec![], 8192, ReasoningLevel::Off);
-    let cancel = CancellationToken::new();
 
     let result = client.invoke(&capability, &request).await;
     assert!(
@@ -266,7 +291,6 @@ async fn invoke_rejects_invalid_scope() {
 
     // max_output_tokens = 0 should trigger a scope validation error.
     let request = InvocationRequestData::new(test_model_id(), vec![], 0, ReasoningLevel::Off);
-    let cancel = CancellationToken::new();
 
     let result = client.invoke(&capability, &request).await;
     assert!(
@@ -302,10 +326,10 @@ async fn invoke_converts_system_blocks_tools_and_uses_neutral_scope_model() {
         },
     })];
 
-    let cancel = CancellationToken::new();
-    let mut stream = client.invoke(&capability, &request).await.unwrap();
-    use futures_util::StreamExt;
-    while stream.next().await.is_some() {}
+    let _response = client
+        .invoke(&capability, &request)
+        .await
+        .expect("invoke must succeed");
 
     let c = captured.lock().expect("captured lock poisoned");
 
@@ -349,7 +373,6 @@ async fn invoke_clamps_requested_reasoning_to_capability() {
     ));
 
     let request = InvocationRequestData::new(test_model_id(), vec![], 4096, ReasoningLevel::Max);
-    let cancel = CancellationToken::new();
     let _ = client.invoke(&capability, &request).await.unwrap();
 
     let c = captured.lock().expect("captured lock poisoned");
@@ -379,11 +402,10 @@ async fn invoke_invokes_provider_exactly_once() {
     let capability = test_capability();
 
     let request = InvocationRequestData::new(test_model_id(), vec![], 8192, ReasoningLevel::Off);
-    let cancel = CancellationToken::new();
-    let mut stream = client.invoke(&capability, &request).await.unwrap();
-
-    use futures_util::StreamExt;
-    while stream.next().await.is_some() {}
+    let _response = client
+        .invoke(&capability, &request)
+        .await
+        .expect("invoke must succeed");
 
     let c = captured.lock().expect("captured lock poisoned");
     assert_eq!(

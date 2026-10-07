@@ -1,8 +1,8 @@
 use super::*;
 use crate::application::model::test_support::text_completion_stream;
 use crate::ports::provider_port::{
-    InvocationRequestData, InvocationStreamData, ModelCapabilityData, ModelIdData, ProviderError,
-    ProviderErrorKind, ReasoningCapabilityData,
+    InvocationRequestData, ModelCapabilityData, ModelIdData, ProviderError, ProviderErrorKind,
+    ProviderResponseStream, ReasoningCapabilityData,
 };
 use async_trait::async_trait;
 use memory::api::reflection::{ReflectionRecord, ReflectionSafeSummary};
@@ -37,7 +37,7 @@ impl ProviderPort for StaticProvider {
         &self,
         _request: InvocationRequestData,
         _cancel: &dyn crate::ports::provider_port::CancellationSignal,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         Ok(text_completion_stream(self.response.clone(), 11, 22))
     }
 }

@@ -461,7 +461,7 @@ impl ScriptedLlmProvider for ExitWorktreeBeforeStopProvider {
     async fn scripted_invocation_stream(
         &self,
         _request: &crate::ports::provider_port::InvocationRequestData,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         self.workspace
             .control()
             .exit()

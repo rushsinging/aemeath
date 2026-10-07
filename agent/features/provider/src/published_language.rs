@@ -10,10 +10,8 @@
 //! #901 冻结契约；现有 `contract.rs` 的 legacy 类型保留兼容，后续逐步退役。
 
 use share::reasoning::ReasoningLevel;
-use std::pin::Pin;
 use std::time::Duration;
 
-use futures_util::Stream;
 use share::message::Message;
 
 // ─── 模型标识 ───────────────────────────────────────────
@@ -112,13 +110,11 @@ impl ModelCapabilityData {}
 
 // ─── Tool Call（Provider 边界） ─────────────────────────
 
-/// Provider 边界的 tool call 标识。
+/// Provider 边界的 tool call 完整形态。
 ///
-/// 这是 Provider 返回的原始 tool-call ID（如 Anthropic 的 `toolu_*` 或
+/// ID 为 Provider 返回的原始 tool-call 标识（如 Anthropic 的 `toolu_*` 或
 /// OpenAI 的 `call_*`）。Runtime 在写入 Run Step 时创建领域 `ToolCallId`
 /// 并维护双 ID 映射。Provider **NEVER** 生成领域 ID。
-
-/// Provider 边界的 tool call 完整形态。
 #[derive(Debug, Clone)]
 pub struct ProviderToolCallData {
     /// Provider 原始 tool-call ID。
@@ -129,20 +125,6 @@ pub struct ProviderToolCallData {
     pub arguments: serde_json::Value,
 }
 
-/// Provider 返回的 assistant 内容块。
-#[derive(Debug, Clone)]
-pub enum ProviderContentBlockData {
-    /// 文本内容。
-    Text(String),
-    /// Thinking/reasoning 内容（签名可选）。
-    Thinking {
-        thinking: String,
-        signature: Option<String>,
-    },
-    /// Tool call。
-    ToolCall(ProviderToolCallData),
-}
-
 // ─── Raw Usage ──────────────────────────────────────────
 
 /// 原始 token 使用快照。
@@ -150,7 +132,7 @@ pub enum ProviderContentBlockData {
 /// 所有字段区分"未报告"（`None`）与真实零值（`Some(0)`）。
 /// Provider 只做协议标准化，不计算 cost。
 #[derive(Debug, Clone, Default)]
-pub struct RawUsageSnapshotData {
+pub struct TokenUsageData {
     pub input_tokens: Option<u32>,
     pub output_tokens: Option<u32>,
     pub cache_read_tokens: Option<u32>,
@@ -158,7 +140,7 @@ pub struct RawUsageSnapshotData {
     pub reasoning_tokens: Option<u32>,
 }
 
-impl RawUsageSnapshotData {
+impl TokenUsageData {
     pub fn was_reported(&self) -> bool {
         self.input_tokens.is_some()
             || self.output_tokens.is_some()
@@ -215,59 +197,81 @@ pub enum StopReason {
 /// 别名导出——contract.rs 用此名 re-export，避免与 legacy StopReason 冲突。
 pub use StopReason as ProviderStopReasonData;
 
-// ─── ProviderCompletionData ─────────────────────────────────
+// ─── Response（输出侧唯一契约：非流式终态 + 流式片段）──────────────
 
-/// 一次调用的终结完成态。
+/// 一次调用的完整响应（非流式终态；自带成败——单通道形态）。
 ///
-/// `output` 必须是所有已发 delta 的完整最终形态，
-/// 并保留 provider tool-call ID。
+/// `ok=false` 时仅 `error` 有意义；流式调用的消费方聚合片段后组装同构
+/// 实例（Usage/Stop 片段归位于此）。
 #[derive(Debug, Clone)]
-pub struct ProviderCompletionData {
-    /// 最终 assistant 内容块。
-    pub output: Vec<ProviderContentBlockData>,
-    /// 停止原因。
-    pub stop_reason: StopReason,
-    /// 最终 usage 快照（`None` = provider 未返回 usage）。
-    pub usage: Option<RawUsageSnapshotData>,
-    /// 有效 reasoning level（clamp 后的实际档位）。
+pub struct ProviderResponse {
+    pub ok: bool,
+    pub error: Option<ProviderError>,
+    pub output: Vec<ProviderContentData>,
+    pub stop_reason: Option<ProviderStopReasonData>,
+    pub token_usage: Option<TokenUsageData>,
     pub effective_reasoning: ReasoningLevel,
 }
 
-// ─── Invocation Delta ───────────────────────────────────
-
-/// 流式 delta——非终结增量。
-///
-/// 终结增量通过 `InvocationEventData::Completed` / `InvocationEventData::Failed` 表达，
-/// 不出现在 `InvocationDeltaData` 中。
+/// 流式响应的增量片段；`Error` 为失败终止帧（取消同归于此）。
 #[derive(Debug, Clone)]
-pub enum InvocationDeltaData {
-    /// 文本增量。
+pub enum ProviderResponseChunk {
+    /// 内容片段（文本/thinking/工具调用增量与完整块）。
+    Content(ProviderContentData),
+    /// LLM token 用量（流尾）。
+    Usage(TokenUsageData),
+    /// 停止原因（流尾，正常闭合）。
+    Stop(ProviderStopReasonData),
+    /// 失败终止帧。
+    Error(ProviderError),
+}
+
+/// 内容片段——「终态块」与「流增量」合并的同构家族。
+#[derive(Debug, Clone)]
+pub enum ProviderContentData {
+    /// 文本（增量或完整块）。
     Text(String),
-    /// Thinking/reasoning 增量。
+    /// Thinking/reasoning 内容（签名可选）。
     Thinking {
         thinking: String,
         signature: Option<String>,
     },
-    /// Tool call 开始。
+    /// 完整 tool call（终态块 / 增量完成帧）。
+    ToolCall(ProviderToolCallData),
+    /// Tool call 开始（流增量）。
     ToolCallStarted {
         index: usize,
         provider_id: Option<String>,
         name: String,
     },
-    /// Tool arguments 增量字符串片段。
+    /// Tool arguments 增量字符串片段（流增量）。
     ToolArgumentsDelta {
         index: usize,
         provider_id: Option<String>,
         partial_json: String,
     },
-    /// Tool call 完成（给出验证过的 JSON 值）。
+    /// Tool call 增量完成帧：参数已完整并校验为合法 JSON（`index` 与
+    /// `ToolCallStarted`/`ToolArgumentsDelta` 同源），与终态 `ToolCall`
+    /// 块同构——runtime 据此边流边执行。
     ToolCallCompleted {
         index: usize,
         call: ProviderToolCallData,
     },
-    /// Usage 快照更新。
-    UsageSnapshot(RawUsageSnapshotData),
 }
+
+/// 流式响应类型。
+pub type ProviderResponseStream =
+    std::pin::Pin<Box<dyn futures_util::Stream<Item = ProviderResponseChunk> + Send>>;
+
+impl ProviderResponseChunk {
+    /// 终止帧：`Stop`（正常闭合）或 `Error`（失败闭合，含取消）；
+    /// 终止帧之后流必须结束。
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Stop(_) | Self::Error(_))
+    }
+}
+
+// ─── Invocation Delta ───────────────────────────────────
 
 // ─── Error ──────────────────────────────────────────────
 
@@ -456,32 +460,6 @@ impl InvocationRequestData {
         }
     }
 }
-
-// ─── InvocationEventData ────────────────────────────────────
-
-/// 一次调用的流式事件。
-///
-/// Delta 是非终结增量；Completed 和 Failed 是互斥终结事件，恰好出现一个。
-/// 取消以 `Failed(ProviderError::cancelled())` 终结。
-/// 终结事件后下一次 `next()` 返回 `None`。
-#[derive(Debug, Clone)]
-pub enum InvocationEventData {
-    /// 非终结增量。
-    Delta(InvocationDeltaData),
-    /// 完成终结（恰好出现一次）。
-    Completed(ProviderCompletionData),
-    /// 失败终结（恰好出现一次，取消也归入此变体）。
-    Failed(ProviderError),
-}
-
-impl InvocationEventData {
-    pub fn is_terminal(&self) -> bool {
-        matches!(self, Self::Completed(_) | Self::Failed(_))
-    }
-}
-
-/// 一次上游语义请求的有序 pull stream。
-pub type InvocationStreamData = Pin<Box<dyn Stream<Item = InvocationEventData> + Send>>;
 
 #[cfg(test)]
 #[path = "published_language_tests.rs"]

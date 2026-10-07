@@ -1,11 +1,10 @@
 use super::events::{ChatEventSink, RuntimeRunContext, RuntimeStreamEvent};
-use super::stream_handler::InvocationEventReducer;
+use super::stream_handler::{InvocationEventReducer, InvocationResponse};
 use crate::application::tool::coordination::identity::ToolIdentityRegistry;
 use provider::{
-    InvocationDeltaData, InvocationEventData, ProviderCompletionData, ProviderContentBlockData,
-    ProviderErrorKind, ProviderStopReasonData, ProviderToolCallData,
+    ProviderContentData, ProviderErrorKind, ProviderResponseChunk, ProviderStopReasonData,
+    ProviderToolCallData,
 };
-use share::reasoning::ReasoningLevel;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Default)]
@@ -21,13 +20,27 @@ impl ChatEventSink for RecordingSink {
     }
 }
 
-fn completion(output: Vec<ProviderContentBlockData>) -> InvocationEventData {
-    InvocationEventData::Completed(ProviderCompletionData {
-        output,
-        stop_reason: ProviderStopReasonData::EndTurn,
-        usage: None,
-        effective_reasoning: ReasoningLevel::Off,
-    })
+/// v3 拆帧：原 `Completed{output}` → 每块一个 `Content` 帧 + `Stop` 终止帧
+/// （`usage: None` 等价于不发 `Usage` 帧——两者皆聚合为 default）。
+fn completion(output: Vec<ProviderContentData>) -> Vec<ProviderResponseChunk> {
+    let mut chunks: Vec<_> = output
+        .into_iter()
+        .map(ProviderResponseChunk::Content)
+        .collect();
+    chunks.push(ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn));
+    chunks
+}
+
+/// 依序应用一整段 completion 帧序列，返回末帧（`Stop`）结果。
+fn apply_completion(
+    reducer: &mut InvocationEventReducer<RecordingSink>,
+    output: Vec<ProviderContentData>,
+) -> Result<Option<InvocationResponse>, provider::ProviderError> {
+    let mut last = Ok(None);
+    for chunk in completion(output) {
+        last = reducer.apply(chunk);
+    }
+    last
 }
 
 #[test]
@@ -44,8 +57,8 @@ fn reducer_keeps_tool_identity_isolated_per_turn() {
         InvocationEventReducer::with_tool_identity(sink.clone(), registry, second_context);
 
     first
-        .apply(InvocationEventData::Delta(
-            InvocationDeltaData::ToolCallStarted {
+        .apply(ProviderResponseChunk::Content(
+            ProviderContentData::ToolCallStarted {
                 index: 0,
                 provider_id: Some("provider-a".into()),
                 name: "Read".into(),
@@ -53,8 +66,8 @@ fn reducer_keeps_tool_identity_isolated_per_turn() {
         ))
         .unwrap();
     second
-        .apply(InvocationEventData::Delta(
-            InvocationDeltaData::ToolCallStarted {
+        .apply(ProviderResponseChunk::Content(
+            ProviderContentData::ToolCallStarted {
                 index: 0,
                 provider_id: Some("provider-b".into()),
                 name: "Read".into(),
@@ -80,17 +93,14 @@ fn reducer_keeps_tool_identity_isolated_per_turn() {
 fn reducer_rejects_empty_terminal_completions_as_retryable_protocol_errors() {
     let cases = [
         ("empty output", Vec::new()),
-        (
-            "empty text",
-            vec![ProviderContentBlockData::Text(String::new())],
-        ),
+        ("empty text", vec![ProviderContentData::Text(String::new())]),
         (
             "whitespace text",
-            vec![ProviderContentBlockData::Text("   \n".into())],
+            vec![ProviderContentData::Text("   \n".into())],
         ),
         (
             "thinking only",
-            vec![ProviderContentBlockData::Thinking {
+            vec![ProviderContentData::Thinking {
                 thinking: "internal reasoning".into(),
                 signature: None,
             }],
@@ -99,7 +109,7 @@ fn reducer_rejects_empty_terminal_completions_as_retryable_protocol_errors() {
 
     for (label, output) in cases {
         let mut reducer = InvocationEventReducer::new(RecordingSink::default());
-        let error = reducer.apply(completion(output)).expect_err(label);
+        let error = apply_completion(&mut reducer, output).expect_err(label);
         assert_eq!(error.kind, ProviderErrorKind::Protocol, "{label}");
         assert!(error.retryable, "{label}");
         assert!(
@@ -113,8 +123,8 @@ fn reducer_rejects_empty_terminal_completions_as_retryable_protocol_errors() {
 #[test]
 fn reducer_accepts_nonblank_text_and_tool_call_terminal_completions() {
     let cases = [
-        vec![ProviderContentBlockData::Text("answer".into())],
-        vec![ProviderContentBlockData::ToolCall(ProviderToolCallData {
+        vec![ProviderContentData::Text("answer".into())],
+        vec![ProviderContentData::ToolCall(ProviderToolCallData {
             id: "tool-1".into(),
             name: "Read".into(),
             arguments: serde_json::json!({}),
@@ -123,7 +133,7 @@ fn reducer_accepts_nonblank_text_and_tool_call_terminal_completions() {
 
     for output in cases {
         let mut reducer = InvocationEventReducer::new(RecordingSink::default());
-        let response = reducer.apply(completion(output)).unwrap().unwrap();
+        let response = apply_completion(&mut reducer, output).unwrap().unwrap();
         assert_eq!(
             response.assistant_message.role,
             share::message::Role::Assistant
@@ -136,20 +146,20 @@ fn reducer_projects_block_transitions_without_callback_contract() {
     let sink = RecordingSink::default();
     let mut reducer = InvocationEventReducer::new(sink.clone());
     reducer
-        .apply(InvocationEventData::Delta(InvocationDeltaData::Thinking {
-            thinking: "thought".into(),
-            signature: None,
-        }))
+        .apply(ProviderResponseChunk::Content(
+            ProviderContentData::Thinking {
+                thinking: "thought".into(),
+                signature: None,
+            },
+        ))
         .unwrap();
     reducer
-        .apply(InvocationEventData::Delta(InvocationDeltaData::Text(
+        .apply(ProviderResponseChunk::Content(ProviderContentData::Text(
             "answer".into(),
         )))
         .unwrap();
     reducer
-        .apply(completion(vec![ProviderContentBlockData::Text(
-            "answer".into(),
-        )]))
+        .apply(ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn))
         .unwrap();
 
     let events = sink.0.lock().unwrap();
@@ -169,7 +179,7 @@ fn reducer_closes_active_block_for_synthetic_raw_eof_failure() {
     let sink = RecordingSink::default();
     let mut reducer = InvocationEventReducer::new(sink.clone());
     reducer
-        .apply(InvocationEventData::Delta(InvocationDeltaData::Text(
+        .apply(ProviderResponseChunk::Content(ProviderContentData::Text(
             "partial".into(),
         )))
         .unwrap();
@@ -179,7 +189,7 @@ fn reducer_closes_active_block_for_synthetic_raw_eof_failure() {
         "provider stream ended without terminal event",
     );
     let returned = reducer
-        .apply(InvocationEventData::Failed(error.clone()))
+        .apply(ProviderResponseChunk::Error(error.clone()))
         .expect_err("failure event should terminate the invocation");
     assert_eq!(returned.kind, ProviderErrorKind::StreamTruncated);
 

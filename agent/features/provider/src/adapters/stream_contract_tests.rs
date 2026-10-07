@@ -1,6 +1,6 @@
 use super::{invocation_stream_from_decoder, InvocationDecoder};
 use crate::domain::capability::ReasoningLevel;
-use crate::{InvocationEventData, ProviderErrorKind};
+use crate::{ProviderErrorKind, ProviderResponseChunk};
 use futures_util::StreamExt;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -61,12 +61,12 @@ async fn assert_success_contract(
     let mut terminal_count = 0;
     while let Some(event) = stream.next().await {
         match event {
-            InvocationEventData::Delta(crate::InvocationDeltaData::Text(delta)) => {
+            ProviderResponseChunk::Content(crate::ProviderContentData::Text(delta)) => {
                 text.push_str(&delta)
             }
-            InvocationEventData::Completed(_) => terminal_count += 1,
-            InvocationEventData::Failed(error) => panic!("successful fixture failed: {error:?}"),
-            InvocationEventData::Delta(_) => {}
+            ProviderResponseChunk::Stop(_) => terminal_count += 1,
+            ProviderResponseChunk::Error(error) => panic!("successful fixture failed: {error:?}"),
+            ProviderResponseChunk::Content(_) | ProviderResponseChunk::Usage(_) => {}
         }
     }
     assert_eq!(text, expected_text, "decoder must preserve wire order");
@@ -165,7 +165,7 @@ async fn openai_chunked_body_eof_emits_retryable_stream_interrupted_failure() {
     .collect()
     .await;
 
-    let [InvocationEventData::Failed(error)] = events.as_slice() else {
+    let [ProviderResponseChunk::Error(error)] = events.as_slice() else {
         panic!("chunk-size EOF must emit exactly one failed terminal event: {events:?}");
     };
     assert_eq!(error.kind, ProviderErrorKind::StreamTruncated);
@@ -197,7 +197,7 @@ async fn openai_complete_malformed_body_emits_fatal_protocol_failure() {
     .collect()
     .await;
 
-    let [InvocationEventData::Failed(error)] = events.as_slice() else {
+    let [ProviderResponseChunk::Error(error)] = events.as_slice() else {
         panic!("malformed complete body must emit exactly one failed terminal event: {events:?}");
     };
     assert_eq!(error.kind, ProviderErrorKind::Protocol);
@@ -231,7 +231,7 @@ async fn responses_duplicate_output_index_fails_fast_as_retryable_interruption()
     .collect()
     .await;
 
-    let Some(InvocationEventData::Failed(error)) = events.last() else {
+    let Some(ProviderResponseChunk::Error(error)) = events.last() else {
         panic!("duplicate output_index must fail fast instead of completing: {events:?}");
     };
     assert!(error.retryable, "must be retryable: {error:?}");
@@ -269,16 +269,15 @@ async fn responses_repeated_added_for_same_call_id_is_idempotent() {
     assert!(
         events
             .iter()
-            .all(|event| !matches!(event, InvocationEventData::Failed(_))),
+            .all(|event| !matches!(event, ProviderResponseChunk::Error(_))),
         "idempotent replay of the same call_id must not fail: {events:?}"
     );
     assert!(
         events.iter().any(|event| matches!(
             event,
-            InvocationEventData::Completed(completion)
-                if completion.stop_reason == crate::published_language::StopReason::ToolUse
+            ProviderResponseChunk::Stop(crate::published_language::StopReason::ToolUse)
         )),
-        "the single function_call must still produce a ToolUse completion: {events:?}"
+        "the single function_call must still produce a ToolUse stop frame: {events:?}"
     );
 }
 
@@ -315,7 +314,7 @@ async fn cancellation_during_stream_emits_failed_cancelled_then_ends() {
     first_delta_sent.notified().await;
     assert!(matches!(
         stream.next().await,
-        Some(InvocationEventData::Delta(_))
+        Some(ProviderResponseChunk::Content(_))
     ));
     cancel.cancel();
     let terminal = tokio::time::timeout(std::time::Duration::from_secs(1), stream.next())
@@ -323,7 +322,7 @@ async fn cancellation_during_stream_emits_failed_cancelled_then_ends() {
         .expect("cancelled stream must terminate promptly")
         .expect("cancelled stream must expose a terminal event");
     assert!(
-        matches!(terminal, InvocationEventData::Failed(ref error) if error.kind == ProviderErrorKind::Cancelled && !error.retryable)
+        matches!(terminal, ProviderResponseChunk::Error(ref error) if error.kind == ProviderErrorKind::Cancelled && !error.retryable)
     );
     assert!(stream.next().await.is_none());
 }
@@ -377,7 +376,7 @@ async fn openai_compat_stream_emits_tool_call_completed_on_index_switch_and_stre
     let mut event_index = 0;
     while let Some(event) = stream.next().await {
         match event {
-            InvocationEventData::Delta(crate::InvocationDeltaData::ToolCallStarted {
+            ProviderResponseChunk::Content(crate::ProviderContentData::ToolCallStarted {
                 index,
                 name,
                 ..
@@ -385,16 +384,16 @@ async fn openai_compat_stream_emits_tool_call_completed_on_index_switch_and_stre
                 started.push(index);
                 let _ = name;
             }
-            InvocationEventData::Delta(crate::InvocationDeltaData::ToolCallCompleted {
+            ProviderResponseChunk::Content(crate::ProviderContentData::ToolCallCompleted {
                 index,
                 call,
             }) => {
                 completed.push((index, call.name));
                 completed_positions.push(event_index);
             }
-            InvocationEventData::Completed(_) => {}
-            InvocationEventData::Failed(error) => panic!("fixture failed: {error:?}"),
-            InvocationEventData::Delta(_) => {}
+            ProviderResponseChunk::Stop(_) | ProviderResponseChunk::Usage(_) => {}
+            ProviderResponseChunk::Error(error) => panic!("fixture failed: {error:?}"),
+            ProviderResponseChunk::Content(_) => {}
         }
         event_index += 1;
     }
@@ -436,13 +435,13 @@ async fn anthropic_stream_emits_tool_call_completed_on_content_block_stop() {
     let mut completed: Vec<(usize, String, serde_json::Value)> = Vec::new();
     while let Some(event) = stream.next().await {
         match event {
-            InvocationEventData::Delta(crate::InvocationDeltaData::ToolCallCompleted {
+            ProviderResponseChunk::Content(crate::ProviderContentData::ToolCallCompleted {
                 index,
                 call,
             }) => {
                 completed.push((index, call.name, call.arguments));
             }
-            InvocationEventData::Failed(error) => panic!("fixture failed: {error:?}"),
+            ProviderResponseChunk::Error(error) => panic!("fixture failed: {error:?}"),
             _ => {}
         }
     }

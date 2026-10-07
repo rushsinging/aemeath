@@ -1,6 +1,6 @@
 use super::invocation::record_successful_usage;
 use crate::application::model::usage::UsageRecordContext;
-use crate::ports::{ModelIdData, RawUsageSnapshotData, UsageSink};
+use crate::ports::{ModelIdData, TokenUsageData, UsageSink};
 use audit::{UsageDropReasonData, UsageEmitOutcomeData, UsageRecordData};
 use sdk::{ModelInvocationId, RunId, RunStepId, SessionId};
 use std::sync::Mutex;
@@ -49,7 +49,7 @@ fn successful_reported_usage_records_all_fields_once_and_ignores_queue_full() {
     record_successful_usage(
         &sink,
         expected_context.clone(),
-        RawUsageSnapshotData {
+        TokenUsageData {
             input_tokens: Some(10),
             output_tokens: Some(2),
             cache_write_tokens: Some(3),
@@ -84,7 +84,7 @@ fn successful_unreported_usage_does_not_call_sink() {
         UsageDropReasonData::WorkerUnavailable,
     ));
 
-    record_successful_usage(&sink, context(), RawUsageSnapshotData::default(), || 99);
+    record_successful_usage(&sink, context(), TokenUsageData::default(), || 99);
 
     assert!(sink.records.lock().expect("record lock").is_empty());
 }

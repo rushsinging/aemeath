@@ -41,12 +41,12 @@ pub use policy_port::Policy;
 pub use policy_port::{PolicyDecisionData, PolicyRequestData};
 pub use provider_factory::{ProviderBindingData, ProviderBuildSpecData, ProviderFactory};
 pub use provider_port::{
-    CancellationSignal, InvocationRequestData, ModelIdData, ProviderPort, RawUsageSnapshotData,
-    RequestSystemBlockData, StopReason,
+    CancellationSignal, InvocationRequestData, ModelIdData, ProviderPort, RequestSystemBlockData,
+    StopReason, TokenUsageData,
 };
 #[cfg(test)]
 pub use provider_port::{
-    InvocationStreamData, ModelCapabilityData, ProviderError, ReasoningCapabilityData,
+    ModelCapabilityData, ProviderError, ProviderResponseStream, ReasoningCapabilityData,
 };
 pub use session_query::SessionQueryPort;
 pub use tool_result_blob::ToolResultBlobPort;

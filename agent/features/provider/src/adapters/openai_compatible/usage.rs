@@ -1,5 +1,5 @@
 use crate::adapters::wire::Usage;
-use crate::RawUsageSnapshotData;
+use crate::TokenUsageData;
 
 fn optional_token_field(value: &serde_json::Value, field: &str) -> Option<u32> {
     value
@@ -8,8 +8,8 @@ fn optional_token_field(value: &serde_json::Value, field: &str) -> Option<u32> {
         .and_then(|value| u32::try_from(value).ok())
 }
 
-pub(crate) fn parse_chat_raw_usage(value: &serde_json::Value) -> RawUsageSnapshotData {
-    RawUsageSnapshotData {
+pub(crate) fn parse_chat_raw_usage(value: &serde_json::Value) -> TokenUsageData {
+    TokenUsageData {
         input_tokens: optional_token_field(value, "prompt_tokens"),
         output_tokens: optional_token_field(value, "completion_tokens"),
         cache_read_tokens: nested_token_field(value, "prompt_tokens_details", "cached_tokens"),
@@ -22,8 +22,8 @@ pub(crate) fn parse_chat_raw_usage(value: &serde_json::Value) -> RawUsageSnapsho
     }
 }
 
-pub(crate) fn parse_responses_raw_usage(value: &serde_json::Value) -> RawUsageSnapshotData {
-    RawUsageSnapshotData {
+pub(crate) fn parse_responses_raw_usage(value: &serde_json::Value) -> TokenUsageData {
+    TokenUsageData {
         input_tokens: optional_token_field(value, "input_tokens"),
         output_tokens: optional_token_field(value, "output_tokens"),
         cache_read_tokens: nested_token_field(value, "input_tokens_details", "cached_tokens"),

@@ -6,7 +6,7 @@
 //! - 调 `ProviderPort` 发起 LLM 调用
 //! - 组装流式响应
 //! - 提取 tool_calls
-//! - 记录 `RawUsageSnapshotData` -> 构造 `UsageRecordData` 经 `RuntimeStreamEvent::Usage` 路径发出
+//! - 记录 `TokenUsageData` -> 构造 `UsageRecordData` 经 `RuntimeStreamEvent::Usage` 路径发出
 //! - 退避重试：仅对 Retryable(超时/5xx/429/流中断) 指数退避重试
 //! - Fatal(4xx) 直接失败；context 超限 -> compact
 //! - 重试期 emit `ModelInvocationRetrying{attempt}`
@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures::{Stream, StreamExt};
-use provider::{InvocationEventData, ProviderError, ProviderErrorKind};
+use provider::{ProviderError, ProviderErrorKind, ProviderResponseChunk};
 use tokio_util::sync::CancellationToken;
 
 use crate::application::constants::{DEFAULT_MAX_ATTEMPTS, INITIAL_BACKOFF, MAX_BACKOFF};
@@ -385,8 +385,8 @@ impl ModelInvocationCoordinator {
         mut apply: Apply,
     ) -> Result<(T, bool), (ProviderError, bool)>
     where
-        S: Stream<Item = InvocationEventData> + Unpin,
-        Apply: FnMut(InvocationEventData) -> Result<Option<T>, ProviderError>,
+        S: Stream<Item = ProviderResponseChunk> + Unpin,
+        Apply: FnMut(ProviderResponseChunk) -> Result<Option<T>, ProviderError>,
     {
         let mut committed_delta = false;
         loop {
@@ -397,7 +397,7 @@ impl ModelInvocationCoordinator {
                     // active text/thinking block), so cancellation must pass through
                     // the same terminal failure path before control returns.
                     let error = ProviderError::cancelled();
-                    let _ = apply(InvocationEventData::Failed(error.clone()));
+                    let _ = apply(ProviderResponseChunk::Error(error.clone()));
                     return Err((error, committed_delta));
                 }
                 event = stream.next() => event,
@@ -405,18 +405,15 @@ impl ModelInvocationCoordinator {
 
             let Some(event) = event else {
                 let error = missing_terminal_error();
-                // A raw EOF has no provider terminal event, so synthesize the
+                // A raw EOF has no provider terminal frame, so synthesize the
                 // retryable failure through the reducer before returning to the
                 // coordinator. This lets stream consumers close any active
                 // text/thinking block before the next attempt starts.
-                let _ = apply(InvocationEventData::Failed(error.clone()));
+                let _ = apply(ProviderResponseChunk::Error(error.clone()));
                 return Err((error, committed_delta));
             };
-            let terminal_event = matches!(
-                event,
-                InvocationEventData::Completed(_) | InvocationEventData::Failed(_)
-            );
-            if matches!(event, InvocationEventData::Delta(_)) && delta_is_committed {
+            let terminal_event = event.is_terminal();
+            if matches!(event, ProviderResponseChunk::Content(_)) && delta_is_committed {
                 committed_delta = true;
             }
             match apply(event) {
@@ -484,7 +481,7 @@ fn deterministic_jitter_millis(attempt: u32) -> u64 {
 pub(crate) fn record_successful_usage(
     sink: &dyn crate::ports::UsageSink,
     context: crate::application::model::usage::UsageRecordContext,
-    usage: crate::ports::RawUsageSnapshotData,
+    usage: crate::ports::TokenUsageData,
     clock: impl Fn() -> u64,
 ) {
     let factory = crate::application::model::usage::UsageRecordFactory::new(clock);

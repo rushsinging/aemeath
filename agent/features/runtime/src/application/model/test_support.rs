@@ -4,40 +4,35 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use futures::stream;
 use provider::{
-    InvocationDeltaData, InvocationEventData, InvocationStreamData, ProviderCompletionData,
-    ProviderContentBlockData, ProviderError, ProviderStopReasonData, RawUsageSnapshotData,
+    ProviderContentData, ProviderError, ProviderResponseChunk, ProviderResponseStream,
+    ProviderStopReasonData, TokenUsageData,
 };
-use share::reasoning::ReasoningLevel;
 
 pub(crate) fn text_completion_stream(
     text: impl Into<String>,
     input_tokens: u32,
     output_tokens: u32,
-) -> InvocationStreamData {
+) -> ProviderResponseStream {
     let text = text.into();
     Box::pin(stream::iter([
-        InvocationEventData::Delta(InvocationDeltaData::Text(text.clone())),
-        InvocationEventData::Completed(ProviderCompletionData {
-            output: vec![ProviderContentBlockData::Text(text)],
-            stop_reason: ProviderStopReasonData::EndTurn,
-            usage: Some(RawUsageSnapshotData {
-                input_tokens: Some(input_tokens),
-                output_tokens: Some(output_tokens),
-                ..RawUsageSnapshotData::default()
-            }),
-            effective_reasoning: ReasoningLevel::Off,
+        ProviderResponseChunk::Content(ProviderContentData::Text(text)),
+        ProviderResponseChunk::Usage(TokenUsageData {
+            input_tokens: Some(input_tokens),
+            output_tokens: Some(output_tokens),
+            ..TokenUsageData::default()
         }),
+        ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn),
     ]))
 }
 
 #[derive(Clone)]
 pub(crate) struct ScriptedInvocationProvider {
-    attempts: Arc<Mutex<VecDeque<Vec<InvocationEventData>>>>,
+    attempts: Arc<Mutex<VecDeque<Vec<ProviderResponseChunk>>>>,
     calls: Arc<Mutex<usize>>,
 }
 
 impl ScriptedInvocationProvider {
-    pub(crate) fn new(attempts: Vec<Vec<InvocationEventData>>) -> Self {
+    pub(crate) fn new(attempts: Vec<Vec<ProviderResponseChunk>>) -> Self {
         Self {
             attempts: Arc::new(Mutex::new(VecDeque::from(attempts))),
             calls: Arc::new(Mutex::new(0)),
@@ -59,7 +54,7 @@ pub(crate) trait ScriptedLlmProvider: Send + Sync {
     async fn scripted_invocation_stream(
         &self,
         request: &crate::ports::provider_port::InvocationRequestData,
-    ) -> Result<InvocationStreamData, ProviderError>;
+    ) -> Result<ProviderResponseStream, ProviderError>;
 
     fn model_name(&self) -> &str {
         "test-model"
@@ -75,7 +70,7 @@ impl ScriptedLlmProvider for ScriptedInvocationProvider {
     async fn scripted_invocation_stream(
         &self,
         _request: &crate::ports::provider_port::InvocationRequestData,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         *self.calls.lock().unwrap() += 1;
         let events = self
             .attempts
@@ -95,22 +90,17 @@ impl ScriptedLlmProvider for ScriptedInvocationProvider {
     }
 }
 
-pub(crate) fn empty_completion() -> InvocationEventData {
-    InvocationEventData::Completed(ProviderCompletionData {
-        output: Vec::new(),
-        stop_reason: ProviderStopReasonData::EndTurn,
-        usage: Some(RawUsageSnapshotData::default()),
-        effective_reasoning: ReasoningLevel::Off,
-    })
+/// 空输出成功闭合帧序列：仅 `Stop` 终止帧（`usage: None` 等价 default）。
+pub(crate) fn empty_completion() -> Vec<ProviderResponseChunk> {
+    vec![ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn)]
 }
 
-pub(crate) fn successful_completion(text: &str) -> InvocationEventData {
-    InvocationEventData::Completed(ProviderCompletionData {
-        output: vec![ProviderContentBlockData::Text(text.to_string())],
-        stop_reason: ProviderStopReasonData::EndTurn,
-        usage: Some(RawUsageSnapshotData::default()),
-        effective_reasoning: ReasoningLevel::Off,
-    })
+/// 文本成功闭合帧序列：`Content(Text)` + `Stop`。
+pub(crate) fn successful_completion(text: &str) -> Vec<ProviderResponseChunk> {
+    vec![
+        ProviderResponseChunk::Content(ProviderContentData::Text(text.to_string())),
+        ProviderResponseChunk::Stop(ProviderStopReasonData::EndTurn),
+    ]
 }
 
 pub(crate) const RETRY_ADVANCE_LIMITS: [std::time::Duration; 10] = [
@@ -175,7 +165,7 @@ pub(crate) type TestInvocationFn = Arc<
             Box<
                 dyn std::future::Future<
                         Output = Result<
-                            crate::ports::provider_port::InvocationStreamData,
+                            crate::ports::provider_port::ProviderResponseStream,
                             crate::ports::provider_port::ProviderError,
                         >,
                     > + Send
@@ -254,7 +244,7 @@ impl crate::ports::ProviderPort for TestProviderPort {
         request: crate::ports::provider_port::InvocationRequestData,
         cancellation: &dyn crate::ports::provider_port::CancellationSignal,
     ) -> Result<
-        crate::ports::provider_port::InvocationStreamData,
+        crate::ports::provider_port::ProviderResponseStream,
         crate::ports::provider_port::ProviderError,
     > {
         use crate::ports::provider_port::ProviderError;
@@ -415,7 +405,7 @@ impl crate::ports::ProviderPort for ScriptedProviderPortAdapter {
         request: crate::ports::provider_port::InvocationRequestData,
         cancellation: &dyn crate::ports::provider_port::CancellationSignal,
     ) -> Result<
-        crate::ports::provider_port::InvocationStreamData,
+        crate::ports::provider_port::ProviderResponseStream,
         crate::ports::provider_port::ProviderError,
     > {
         // 取消语义经 request.cancellation 表达（advisory 信号忽略）。

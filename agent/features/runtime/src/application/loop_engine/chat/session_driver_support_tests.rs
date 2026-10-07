@@ -209,11 +209,10 @@ use crate::application::model::test_support::{
 use async_trait::async_trait;
 use futures::StreamExt;
 use hook::HookDispatcher;
-use share::reasoning::ReasoningLevel;
 use provider::{
-    InvocationDeltaData, InvocationEventData, InvocationStreamData, ProviderCompletionData, ProviderContentBlockData,
+    ProviderContentData, ProviderResponseChunk, ProviderResponseStream,
     ProviderError, ProviderErrorKind, ProviderStopReasonData, ProviderToolCallData,
-    RawUsageSnapshotData,
+    TokenUsageData,
 };
 use share::config::hooks::{HookEntry, HookEvent, HooksConfig};
 use share::config::models::ResolvedModel;
@@ -865,7 +864,7 @@ impl ScriptedLlmProvider for TwoTurnProvider {
     async fn scripted_invocation_stream(
         &self,
         request: &crate::ports::provider_port::InvocationRequestData,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         let text = if request
             .messages
             .iter()
@@ -913,7 +912,7 @@ impl ScriptedLlmProvider for SequenceProvider {
     async fn scripted_invocation_stream(
         &self,
         request: &crate::ports::provider_port::InvocationRequestData,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         self.requests
             .lock()
             .unwrap()
@@ -936,8 +935,8 @@ impl ScriptedLlmProvider for SequenceProvider {
     }
 }
 
-fn retryable_stream_failure() -> InvocationEventData {
-    InvocationEventData::Failed(ProviderError::retryable(
+fn retryable_stream_failure() -> ProviderResponseChunk {
+    ProviderResponseChunk::Error(ProviderError::retryable(
         ProviderErrorKind::StreamTruncated,
         "stream connection interrupted: unexpected EOF during chunk size line",
     ))
@@ -1003,7 +1002,7 @@ impl ScriptedLlmProvider for GatedProvider {
     async fn scripted_invocation_stream(
         &self,
         request: &crate::ports::provider_port::InvocationRequestData,
-    ) -> Result<InvocationStreamData, ProviderError> {
+    ) -> Result<ProviderResponseStream, ProviderError> {
         // 先 enable 再记录请求：`request_count >= 1` 必然意味着 waiter 已注册，
         // 调用方的 `notify_one` 不会因时序丢失（notify_one 同时会存 permit）。
         let notified = self.release.notified();
