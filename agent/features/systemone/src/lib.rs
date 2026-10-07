@@ -6,8 +6,9 @@
 //! |---|---|---|
 //! | `wire_*` 工厂 | 随 adapter 落地补充 | composition |
 //! | 数据 | `ScoringQuestion` / `ScoringAnswer` / `ScoringState` / `CalibrationLevel` | 消费场景（memory / skills / policy） |
-//! | 端口 | `ScoringPort` / `CalibrationPort` | 消费场景只依赖端口，NEVER 感知引擎型号 |
-//! | 错误 | `ScoringUnavailable` | 消费点据此静默回退原路径 |
+//! | 数据 | `ModelManifest` / `PointerHead` / `PointerHeadWeights` | 模型下载、存储与 embedded 评分装配 |
+//! | 端口 | `ScoringPort` / `CalibrationPort` / `ModelAssetPort` | 消费场景只依赖端口，NEVER 感知引擎型号 |
+//! | 错误 | `ScoringUnavailable` / `PointerHeadError` / `ModelManifestError` | 消费点据此静默回退原路径 |
 //!
 //! 设计依据：`docs/design/02-modules/systemone/01-systemone-scoring.md`。
 
@@ -25,10 +26,15 @@ pub use adapters::jev_http::JevHttpScoringAdapter;
 pub use adapters::null::NullScoringAdapter;
 
 pub use domain::{
-    AnswerRejected, CalibrationLevel, NoulCriteria, QuestionRejected, ScoringAnswer,
-    ScoringQuestion, ScoringState, ScoringUnavailable, UnavailableKind,
+    required_platform, AnswerRejected, CalibrationLevel, ModelAsset, ModelManifest,
+    ModelManifestError, NoulCriteria, PointerHead, PointerHeadError, PointerHeadWeights,
+    QuestionRejected, ScoringAnswer, ScoringQuestion, ScoringState, ScoringUnavailable,
+    UnavailableKind,
 };
-pub use ports::{CalibrationObservation, CalibrationPort, ScoringPort};
+pub use ports::{
+    CalibrationObservation, CalibrationPort, InstalledAssets, InvalidAssetKind, ModelAssetPort,
+    ModelAssetState, ScoringPort,
+};
 
 /// 评分端口的生产装配链：JevHttp → Calibrated（读温度 artifact）→ Audited（落审计）。
 ///
