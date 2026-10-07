@@ -41,6 +41,7 @@ where
                 session: shell,
                 read_files,
                 session_queries,
+                mut background_wakeup,
             } = input;
 
             // #1385 TaskData 12: Construct real ChatEventSinkHandle from session sink.
@@ -440,12 +441,15 @@ where
                                   &sink,
                                   &mut pending_input,
                                   task_access.as_ref(),
+                                  background_wakeup.as_mut(),
                               )
                               .await
                           };
 
                 let manual_compaction_run =
                     matches!(idle_result, IdleResult::ManualCompactionRequested);
+                let background_wakeup_run =
+                    matches!(idle_result, IdleResult::BackgroundTaskWakeup);
                 let manual_reflection_run =
                     matches!(idle_result, IdleResult::ManualReflectionRequested);
                 // 手动反思的材料快照必须在 run launch 装配前取自当前 committed session
@@ -488,6 +492,11 @@ where
                     IdleResult::CommandRequested(command) => handle_pending_command!(command),
                     IdleResult::ManualCompactionRequested => {
                         manual_compaction_requested = false;
+                        (ChatId::new_v7().to_string(), Vec::new())
+                    }
+                    IdleResult::BackgroundTaskWakeup => {
+                        // 无用户输入的唤醒 Run（#252）：完成事实由 background_task
+                        // reminder 在本轮注入（D11：不合成用户 turn）。
                         (ChatId::new_v7().to_string(), Vec::new())
                     }
                     IdleResult::ManualReflectionRequested => {
@@ -591,6 +600,8 @@ where
                         RunSpec::manual_compaction()
                     } else if manual_reflection_run {
                         RunSpec::manual_reflection()
+                    } else if background_wakeup_run {
+                        RunSpec::background_task_wakeup()
                     } else {
                         RunSpec::main()
                     },
@@ -717,6 +728,13 @@ where
                             share::config::TaskListConfig::default().max_lines,
                         ),
                     ),
+                    // #252 PR2：后台任务完成通知（OnEvent；Wakeup Run 内的
+                    // 完成事实注入同源——build take 语义保证只通知一次）。
+                    std::sync::Arc::new(
+                        crate::application::loop_engine::chat::reminder_sources::BackgroundTaskReminderSource::new(
+                            shell.background_task_supervisor(),
+                        ),
+                    ),
                 ];
                 if !turn_boundary_config.guidance_changed_paths.is_empty() {
                     log::debug!(
@@ -789,6 +807,15 @@ where
                     std::mem::take(&mut reminder_sources),
                 );
                 reminder_context_port.reminder_run_started(&run_id);
+                // Wakeup Run（#252 D11）：本 Run 无用户消息、无 handle_event
+                // 触发点——启动时显式触发 background_task 事件，把监督器内
+                // 「终态未通知」事实经 OnEvent source build（take）进注入队列。
+                if background_wakeup_run {
+                    reminder_context_port.reminder_handle_event(
+                        &run_id,
+                        &context::ReminderEventSource::background_task(),
+                    );
+                }
                 let context_request =
                     crate::application::loop_engine::run_services::ContextRequest {
                         runtime_context: &runtime_context,
@@ -833,6 +860,7 @@ where
                     max_tool_concurrency,
                     agent_semaphore.clone(),
                     &session_id,
+                    Some(shell.background_tasks.clone()),
                     &run_id,
                     tool_result_materializer.clone(),
                 );

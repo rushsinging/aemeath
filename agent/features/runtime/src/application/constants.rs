@@ -71,6 +71,9 @@ pub(crate) const DEFAULT_GRACE: Duration = Duration::from_millis(250);
 /// 单任务输出环形缓冲容量（字节）。
 pub(crate) const BACKGROUND_TASK_OUTPUT_CAPACITY_BYTES: usize = 64 * 1024;
 
+/// 后台任务完成通知的输出尾部截断（reminder 注入 token 预算纪律，设计 §4.2）。
+pub(crate) const BACKGROUND_TASK_NOTIFICATION_TAIL_BYTES: usize = 2048;
+
 // ─── tool/tool_result_materializer.rs ───
 
 pub(crate) const COMPLETED_MATERIALIZATION_CAPACITY: usize = 256;

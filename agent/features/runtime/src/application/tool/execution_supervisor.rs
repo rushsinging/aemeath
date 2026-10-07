@@ -22,6 +22,10 @@ pub(crate) struct ToolExecutionSupervisor {
     catalog: ToolCatalogSnapshot,
     context: ContextCoordinator,
     grace: Duration,
+    /// #252 PR2 通知链路装配：session 级后台任务运行时（Main Run 注入；
+    /// Sub Run / 测试为 None，spawn body 只推进 receipt）。
+    background:
+        Option<Arc<crate::application::background_task::session_runtime::BackgroundTaskRuntime>>,
 }
 
 pub(crate) struct SupervisedToolCall {
@@ -50,7 +54,20 @@ impl ToolExecutionSupervisor {
             catalog,
             context,
             grace: DEFAULT_GRACE,
+            background: None,
         }
+    }
+
+    /// 注入 session 级后台任务运行时（Main Run 传 Some，#252 PR2；
+    /// Sub Run / 测试传 None——spawn body 只推进 receipt）。
+    pub(crate) fn with_background_runtime(
+        mut self,
+        runtime: Option<
+            Arc<crate::application::background_task::session_runtime::BackgroundTaskRuntime>,
+        >,
+    ) -> Self {
+        self.background = runtime;
+        self
     }
 
     #[cfg(test)]
@@ -70,7 +87,16 @@ impl ToolExecutionSupervisor {
         cancellation_declaration: CancellationDeclaration,
         started: std::time::Instant,
     ) -> Result<(PublishedToolOutcome, Duration), ToolExecutionSupervisorError> {
-        let task_id = BackgroundTaskId::new_v7();
+        // #252 PR2：有 session 级账本时以账本登记的 task id 为唯一身份
+        // （占位、receipt、通知同源）；无装配（Sub Run / 测试）则临时生成。
+        let task_id = self
+            .background
+            .as_ref()
+            .map_or_else(BackgroundTaskId::new_v7, |runtime| {
+                runtime
+                    .supervisor()
+                    .register(call.identity.clone(), invocation_summary_text(&call))
+            });
         log::info!(
             target: crate::LOG_TARGET,
             "tool moved to background: run_id={} step_id={} call_id={} tool={} task_id={} elapsed_ms={} deadline_snapshot={:?}",
@@ -91,6 +117,20 @@ impl ToolExecutionSupervisor {
         let identity = call.identity.clone();
         let child_cancellation = call.child_cancellation.clone();
         let task_id_for_logs = task_id.clone();
+        // PR2 通知链路：转后台即标记 Backgrounded（带 deadline 快照）。
+        let background_runtime = self.background.clone();
+        if let Some(runtime) = background_runtime.as_ref() {
+            if let Err(error) = runtime
+                .supervisor()
+                .mark_backgrounded(&task_id, deadline_snapshot)
+            {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "background task mark_backgrounded failed: task_id={} error={error:?}",
+                    task_id.as_str(),
+                );
+            }
+        }
         tokio::spawn(async move {
             let outcome = match deadline_snapshot {
                 Some(deadline) => {
@@ -127,6 +167,15 @@ impl ToolExecutionSupervisor {
                 task_id_for_logs.as_str(),
                 terminal.outcome,
             );
+            // #252 PR2：终态推进监督器账本并路由通知（无装配时只推进 receipt）。
+            if let Some(runtime) = background_runtime.as_ref() {
+                runtime.notify_terminal(
+                    &driver_context,
+                    &task_id_for_logs,
+                    terminal_kind_from_outcome(&terminal),
+                    terminal_output_text(&outcome),
+                );
+            }
             if let Err(error) = driver_context
                 .advance_tool_receipt(ToolReceiptMutationData::terminal(identity, terminal))
                 .await
@@ -466,3 +515,41 @@ pub(crate) enum ToolExecutionSupervisorError {
 #[cfg(test)]
 #[path = "execution_supervisor_tests.rs"]
 mod tests;
+
+/// #252 PR2：转后台调用的一句话摘要（监督器账本 display 用）。
+fn invocation_summary_text(call: &SupervisedToolCall) -> String {
+    format!(
+        "tool={} input={}",
+        call.identity.tool_name, call.input_preview
+    )
+}
+
+/// #252 PR2：receipt 终态 → 后台任务终态映射。
+fn terminal_kind_from_outcome(
+    terminal: &ToolTerminalReceiptData,
+) -> crate::domain::background_task::BackgroundTaskTerminalKind {
+    use crate::domain::background_task::BackgroundTaskTerminalKind as Kind;
+    match terminal.outcome {
+        context::ToolOutcomeKindData::Success => Kind::Success,
+        context::ToolOutcomeKindData::Failure => Kind::Failure,
+        context::ToolOutcomeKindData::TimedOut
+        | context::ToolOutcomeKindData::CancellationUnconfirmed => Kind::TimedOut,
+        context::ToolOutcomeKindData::Cancelled
+        | context::ToolOutcomeKindData::Suspended
+        | context::ToolOutcomeKindData::Denied => Kind::Stopped,
+    }
+}
+
+/// #252 PR2：终态安全文本（Success 首个文本块；其余用 safe_reason）。
+fn terminal_output_text(outcome: &PublishedToolOutcome) -> Option<String> {
+    match outcome {
+        PublishedToolOutcome::Success(success) => {
+            success.content.first().map(|block| block.text.clone())
+        }
+        PublishedToolOutcome::Failure(failure) => Some(failure.safe_message.clone()),
+        PublishedToolOutcome::TimedOut(details) => Some(details.safe_reason.clone()),
+        PublishedToolOutcome::CancellationUnconfirmed(details) => Some(details.safe_reason.clone()),
+        PublishedToolOutcome::Cancelled(cancelled) => Some(cancelled.reason.clone()),
+        PublishedToolOutcome::Suspended(_) => None,
+    }
+}

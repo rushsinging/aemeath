@@ -171,3 +171,82 @@ fn snapshots_list_all_registered_tasks() {
     assert_eq!(snapshots.len(), 2);
     assert!(snapshots.iter().all(|record| !record.is_terminal()));
 }
+
+#[test]
+fn take_unnotified_terminal_items_returns_each_completion_once() {
+    let supervisor = BackgroundTaskSupervisor::new();
+    let task_id = supervisor.register(identity("1"), "command=test");
+    supervisor.record_output(&task_id, b"3 passed\n");
+
+    supervisor
+        .finish(&task_id, BackgroundTaskTerminalKind::Success, None)
+        .expect("终态推进");
+
+    let items = supervisor.take_unnotified_terminal_items();
+    assert_eq!(items.len(), 1, "终态后应有一条待通知条目");
+    assert_eq!(items[0].task_id, task_id.as_str());
+    assert_eq!(items[0].tool_name, "Bash");
+    assert!(matches!(
+        items[0].status,
+        context::BackgroundTaskCompletionStatus::Succeeded
+    ));
+    assert!(items[0].output_tail.contains("3 passed"), "通知带输出尾部");
+
+    // take 语义：再次调用为空（已通知不再重复注入）。
+    assert!(
+        supervisor.take_unnotified_terminal_items().is_empty(),
+        "已通知条目不得重复"
+    );
+}
+
+#[test]
+fn take_unnotified_terminal_items_skips_invalidated_and_keeps_order() {
+    let supervisor = BackgroundTaskSupervisor::new();
+    let first = supervisor.register(identity("1"), "command=a");
+    let second = supervisor.register(identity("2"), "command=b");
+    let third = supervisor.register(identity("3"), "command=c");
+
+    supervisor
+        .finish(&first, BackgroundTaskTerminalKind::Success, None)
+        .unwrap();
+    supervisor
+        .finish(
+            &second,
+            BackgroundTaskTerminalKind::Invalidated {
+                reason: BackgroundInvalidationReason::ProcessExit,
+            },
+            None,
+        )
+        .unwrap();
+    supervisor
+        .finish(&third, BackgroundTaskTerminalKind::Stopped, None)
+        .unwrap();
+
+    let items = supervisor.take_unnotified_terminal_items();
+    // Invalidated 是生命周期失效（resume 场景走失效投影），不产生 LLM 通知。
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].task_id, first.as_str(), "按终态顺序");
+    assert_eq!(items[1].task_id, third.as_str());
+    assert!(matches!(
+        items[1].status,
+        context::BackgroundTaskCompletionStatus::Cancelled
+    ));
+}
+
+#[test]
+fn take_unnotified_terminal_items_caps_output_tail_bytes() {
+    let supervisor = BackgroundTaskSupervisor::new();
+    let task_id = supervisor.register(identity("1"), "command=verbose");
+    supervisor.record_output(&task_id, vec![b'x'; 8192].as_slice());
+
+    supervisor
+        .finish(&task_id, BackgroundTaskTerminalKind::Success, None)
+        .unwrap();
+
+    let items = supervisor.take_unnotified_terminal_items();
+    let tail_bytes = items[0].output_tail.len();
+    assert!(
+        tail_bytes <= crate::application::constants::BACKGROUND_TASK_NOTIFICATION_TAIL_BYTES,
+        "通知尾部截断（实际 {tail_bytes} 字节）"
+    );
+}

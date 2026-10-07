@@ -511,3 +511,59 @@ fn render_invocation_reminder_body_covers_all_kinds_bilingually() {
     let memory = crate::domain::InvocationReminderData::MemoryUpdated { changed: 5 };
     assert!(render_invocation_reminder_body(&memory, "zh").contains("记忆已更新 5 条"));
 }
+
+#[test]
+fn background_task_completed_kind_and_render_are_bilingual() {
+    let data = crate::domain::InvocationReminderData::background_task_completed(vec![
+        crate::domain::BackgroundTaskReminderItemData {
+            task_id: "task-01a2b3c4".to_string(),
+            tool_name: "Bash".to_string(),
+            status: crate::domain::BackgroundTaskCompletionStatus::Succeeded,
+            output_tail: "test result: ok. 3 passed".to_string(),
+        },
+        crate::domain::BackgroundTaskReminderItemData {
+            task_id: "task-05e6f7a8".to_string(),
+            tool_name: "Agent".to_string(),
+            status: crate::domain::BackgroundTaskCompletionStatus::Failed,
+            output_tail: String::new(),
+        },
+    ]);
+    assert_eq!(data.kind(), "background_task");
+
+    let zh = render_invocation_reminder_body(&data, "zh");
+    assert!(zh.contains("后台任务已完成"), "zh 标题：{zh}");
+    assert!(zh.contains("task-01a2b3c4"));
+    assert!(zh.contains("Bash"));
+    assert!(zh.contains("成功"));
+    assert!(zh.contains("失败"));
+    assert!(zh.contains("test result: ok. 3 passed"));
+    assert!(
+        zh.contains("日志或后续输出可用 background_tasks 工具查询"),
+        "引导查询：{zh}"
+    );
+
+    let en = render_invocation_reminder_body(&data, "en");
+    assert!(en.contains("Background task completed"), "en 标题：{en}");
+    assert!(en.contains("succeeded"));
+    assert!(en.contains("failed"));
+    assert!(en.contains("Use the background_tasks tool"));
+}
+
+#[test]
+fn background_task_item_fields_are_serializable_for_fingerprint() {
+    // SkipIfUnchanged fingerprint 对 data serde 全量计算，字段必须可序列化。
+    let data = crate::domain::InvocationReminderData::background_task_completed(vec![
+        crate::domain::BackgroundTaskReminderItemData {
+            task_id: "task-1".to_string(),
+            tool_name: "Bash".to_string(),
+            status: crate::domain::BackgroundTaskCompletionStatus::TimedOut,
+            output_tail: "x".to_string(),
+        },
+    ]);
+    let json = serde_json::to_string(&data).expect("reminder data 可序列化");
+    assert!(json.contains("\"task-1\""));
+    assert!(json.contains("timed_out"));
+    let round_trip: crate::domain::InvocationReminderData =
+        serde_json::from_str(&json).expect("可反序列化");
+    assert_eq!(round_trip, data);
+}

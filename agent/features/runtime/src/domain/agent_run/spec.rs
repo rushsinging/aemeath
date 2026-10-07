@@ -309,6 +309,15 @@ impl RunSpec {
         }
     }
 
+    /// 后台任务唤醒 Run（#252）：装配与主会话 Run 完全一致，
+    /// 仅 intent 标记启动触发源（无用户输入，完成事实经 reminder 注入）。
+    pub fn background_task_wakeup() -> Self {
+        Self {
+            intent: RunIntent::BackgroundTaskWakeup,
+            ..Self::full("main", Duration::ZERO)
+        }
+    }
+
     fn restricted(name: impl Into<String>, timeout: Duration) -> Self {
         Self {
             name: name.into(),

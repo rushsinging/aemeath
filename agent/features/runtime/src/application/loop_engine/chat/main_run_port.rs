@@ -108,6 +108,9 @@ pub(crate) fn make_agent(
     max_tool_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
     session_id: &str,
+    background_tasks: Option<
+        std::sync::Arc<crate::application::background_task::session_runtime::BackgroundTaskRuntime>,
+    >,
     run_id: &sdk::RunId,
     tool_result_materializer: Arc<
         crate::application::tool::tool_result_materializer::ToolResultMaterializer,
@@ -181,6 +184,7 @@ pub(crate) fn make_agent(
         background_threshold: crate::application::run::config::background_threshold_from_context(
             runtime_context,
         ),
+        background_tasks,
     }
 }
 

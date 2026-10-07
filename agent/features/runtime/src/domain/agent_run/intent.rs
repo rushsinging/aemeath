@@ -17,4 +17,9 @@ pub enum RunIntent {
     ManualCompaction,
     /// 只执行一次 Memory 反思，不调用模型。
     ManualReflection,
+    /// 后台任务完成唤醒的对话 Run（#252）：行为与 `Conversation` 同构
+    /// （模型调用、工具执行、正常取消），仅启动触发源不同——由
+    /// WakeupMailbox 在无 active Run 时驱动。完成事实经
+    /// `background_task` reminder 注入，intent 本体不携带任务数据。
+    BackgroundTaskWakeup,
 }

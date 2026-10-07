@@ -2412,3 +2412,33 @@ fn manual_reflection_spec_carries_reflection_intent() {
         "与 manual_compaction 同构：装配与主会话一致，仅目的不同"
     );
 }
+
+#[test]
+fn background_task_wakeup_intent_is_a_normal_conversation_run() {
+    // Wakeup Run 行为与 Conversation 同构（模型调用、工具执行、正常取消），
+    // 只是启动触发源是后台任务完成；spec 与 main() 全字段一致仅 intent 不同。
+    let spec = RunSpec::background_task_wakeup();
+    assert_eq!(spec.intent(), RunIntent::BackgroundTaskWakeup);
+
+    let main = RunSpec::main();
+    assert_eq!(spec.name, main.name);
+    assert_eq!(spec.timeout, main.timeout);
+    assert_eq!(spec.input, main.input);
+    assert_eq!(spec.interaction, main.interaction);
+    assert_eq!(spec.events, main.events);
+
+    // 状态机：从 Created 正常起步（与 Conversation 同构，
+    // 不落入 Manual* 的单目的收口语义）。
+    let run = Run::new(spec, None);
+    assert_eq!(run.status(), RunStatus::Created);
+}
+
+#[test]
+fn background_task_wakeup_projects_main_purpose_and_normal_cancel() {
+    use crate::application::activity::RunPurpose;
+    assert_eq!(
+        RunPurpose::from(RunIntent::BackgroundTaskWakeup),
+        RunPurpose::Main,
+        "wakeup 投影 Main（TUI 视角是普通主 Run）"
+    );
+}

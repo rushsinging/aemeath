@@ -8,8 +8,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::domain::constants::{
-    ENVELOPE_VERSION, KIND_MEMORY_RECALL, KIND_MEMORY_UPDATED, KIND_TASK_PROGRESS,
-    PRIORITY_ENVIRONMENT, PRIORITY_EVENT, PRIORITY_MEMORY_RECALL, PRIORITY_TASK_STATE,
+    ENVELOPE_VERSION, KIND_BACKGROUND_TASK, KIND_MEMORY_RECALL, KIND_MEMORY_UPDATED,
+    KIND_TASK_PROGRESS, PRIORITY_ENVIRONMENT, PRIORITY_EVENT, PRIORITY_MEMORY_RECALL,
+    PRIORITY_TASK_STATE,
 };
 
 /// reminder kind 开放标识：新增 kind 只注册新 source，NEVER 扩展闭合 enum。
@@ -33,6 +34,10 @@ impl ReminderKind {
         Self::new(KIND_MEMORY_RECALL)
     }
 
+    pub fn background_task() -> Self {
+        Self::new(KIND_BACKGROUND_TASK)
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -45,6 +50,10 @@ pub struct ReminderEventSource(Arc<str>);
 impl ReminderEventSource {
     pub fn new(value: impl Into<Arc<str>>) -> Self {
         Self(value.into())
+    }
+
+    pub fn background_task() -> Self {
+        Self::new(KIND_BACKGROUND_TASK)
     }
 
     pub fn as_str(&self) -> &str {
@@ -534,6 +543,45 @@ pub fn render_invocation_reminder_body(
                 _ => lines.push(
                     "You may draw on these memories; use the memory tool's search for full text."
                         .to_owned(),
+                ),
+            }
+            lines.join("\n")
+        }
+        crate::domain::InvocationReminderData::BackgroundTaskCompleted { items } => {
+            let status_text = |status: &crate::domain::BackgroundTaskCompletionStatus| match status {
+                crate::domain::BackgroundTaskCompletionStatus::Succeeded => ("成功", "succeeded"),
+                crate::domain::BackgroundTaskCompletionStatus::Failed => ("失败", "failed"),
+                crate::domain::BackgroundTaskCompletionStatus::TimedOut => ("超时", "timed out"),
+                crate::domain::BackgroundTaskCompletionStatus::Cancelled => ("已取消", "cancelled"),
+            };
+            let mut lines = vec![match language {
+                "zh" => "━━ 后台任务已完成 ━━".to_owned(),
+                _ => "━━ Background task completed ━━".to_owned(),
+            }];
+            for item in items {
+                let (status_zh, status_en) = status_text(&item.status);
+                lines.push(format!(
+                    "- {} [{}] {}",
+                    escape_reminder_text(&item.task_id),
+                    match language {
+                        "zh" => status_zh,
+                        _ => status_en,
+                    },
+                    escape_reminder_text(&item.tool_name),
+                ));
+                if !item.output_tail.is_empty() {
+                    lines.push(format!(
+                        "  {}",
+                        escape_reminder_text(item.output_tail.trim())
+                    ));
+                }
+            }
+            match language {
+                "zh" => lines.push(
+                    "结果已回注；日志或后续输出可用 background_tasks 工具查询。".to_owned(),
+                ),
+                _ => lines.push(
+                    "Use the background_tasks tool to inspect logs or further output.".to_owned(),
                 ),
             }
             lines.join("\n")

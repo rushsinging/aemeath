@@ -482,6 +482,7 @@ impl AgentRunner for CliAgentRunner {
                 // 无处回注、通知无法语义路由；子代理整体已作为父侧后台
                 // 任务的执行体，内部保持同步语义。
                 background_threshold: None,
+                background_tasks: None,
             };
 
             if let Some(ref sink) = progress_sink {
