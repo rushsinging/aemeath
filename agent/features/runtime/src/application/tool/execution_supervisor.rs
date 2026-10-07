@@ -93,9 +93,11 @@ impl ToolExecutionSupervisor {
             .background
             .as_ref()
             .map_or_else(BackgroundTaskId::new_v7, |runtime| {
-                runtime
-                    .supervisor()
-                    .register(call.identity.clone(), invocation_summary_text(&call))
+                runtime.supervisor().register_with_cancellation(
+                    call.identity.clone(),
+                    invocation_summary_text(&call),
+                    call.child_cancellation.clone(),
+                )
             });
         log::info!(
             target: crate::LOG_TARGET,

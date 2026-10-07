@@ -250,3 +250,120 @@ fn take_unnotified_terminal_items_caps_output_tail_bytes() {
         "通知尾部截断（实际 {tail_bytes} 字节）"
     );
 }
+
+// ── #252 PR3：stop 请求与日志游标读取 ───────────────────────────────
+
+fn registered_backgrounded_task(
+    supervisor: &BackgroundTaskSupervisor,
+    token: tokio_util::sync::CancellationToken,
+) -> BackgroundTaskId {
+    let task_id = supervisor.register_with_cancellation(identity("1"), "command=build", token);
+    supervisor
+        .mark_backgrounded(&task_id, None)
+        .expect("转后台成功");
+    task_id
+}
+
+#[test]
+fn stop_task_cancels_child_token_and_reports_current_state() {
+    let supervisor = BackgroundTaskSupervisor::new();
+    let token = tokio_util::sync::CancellationToken::new();
+    let task_id = registered_backgrounded_task(&supervisor, token.clone());
+
+    let outcome = supervisor.stop_task(&task_id).expect("stop 请求成功");
+    assert!(
+        token.is_cancelled(),
+        "stop 必须取消子任务 cancellation token"
+    );
+
+    use crate::application::background_task::supervisor::StopRequestOutcome;
+    match outcome {
+        StopRequestOutcome::SignalSent { state } => {
+            assert!(
+                matches!(state, BackgroundTaskState::Backgrounded { .. }),
+                "stop 时任务应仍在 Backgrounded（真实终态由执行体收口）"
+            );
+        }
+        other => panic!("应返回 SignalSent，实际 {other:?}"),
+    }
+}
+
+#[test]
+fn stop_task_on_terminal_task_returns_terminal_without_side_effect() {
+    let supervisor = BackgroundTaskSupervisor::new();
+    let token = tokio_util::sync::CancellationToken::new();
+    let task_id = registered_backgrounded_task(&supervisor, token.clone());
+    supervisor
+        .finish(&task_id, BackgroundTaskTerminalKind::Success, None)
+        .unwrap();
+
+    let outcome = supervisor.stop_task(&task_id).expect("stop 请求成功");
+    match outcome {
+        StopRequestOutcome::AlreadyTerminal(kind) => {
+            assert_eq!(kind, BackgroundTaskTerminalKind::Success);
+        }
+        other => panic!("终态任务 stop 应幂等返回终态，实际 {other:?}"),
+    }
+}
+
+#[test]
+fn stop_task_unknown_id_reports_error() {
+    let supervisor = BackgroundTaskSupervisor::new();
+    let result = supervisor.stop_task(&BackgroundTaskId::new_v7());
+    assert!(result.is_err(), "未知任务 stop 必须报错");
+}
+
+#[test]
+fn read_task_log_returns_tail_then_incremental_delta() {
+    let supervisor = BackgroundTaskSupervisor::new();
+    let task_id = supervisor.register(identity("1"), "command=watch");
+    supervisor.record_output(&task_id, b"line-1\nline-2\n");
+
+    // 尾部读取（无游标）：最近字节 + 读后游标。
+    let (text, cursor, _total) = supervisor
+        .read_task_log(&task_id, None, 4096)
+        .expect("日志读取成功");
+    assert!(text.contains("line-1"));
+    assert!(text.contains("line-2"));
+    assert!(cursor > 0, "游标应推进到已读位置");
+
+    // 增量读取（携带游标）：只返回新增字节。
+    supervisor.record_output(&task_id, b"line-3\n");
+    let (delta, next_cursor, _) = supervisor
+        .read_task_log(&task_id, Some(cursor), 4096)
+        .expect("增量读取成功");
+    assert_eq!(delta, "line-3\n", "增量只含新字节");
+    assert!(next_cursor > cursor);
+
+    // 游标追平后读取：空增量。
+    let (empty, _, _) = supervisor
+        .read_task_log(&task_id, Some(next_cursor), 4096)
+        .expect("游标追平后读取成功");
+    assert!(empty.is_empty());
+}
+
+#[test]
+fn read_task_log_falls_back_to_terminal_output_when_no_stream() {
+    let supervisor = BackgroundTaskSupervisor::new();
+    let task_id = supervisor.register(identity("1"), "command=once");
+    supervisor
+        .finish(
+            &task_id,
+            BackgroundTaskTerminalKind::Success,
+            Some("final output".to_string()),
+        )
+        .unwrap();
+
+    let (text, _cursor, _) = supervisor
+        .read_task_log(&task_id, None, 4096)
+        .expect("终态文本兜底");
+    assert_eq!(text, "final output");
+}
+
+#[test]
+fn read_task_log_unknown_id_returns_none() {
+    let supervisor = BackgroundTaskSupervisor::new();
+    assert!(supervisor
+        .read_task_log(&BackgroundTaskId::new_v7(), None, 64)
+        .is_none());
+}
