@@ -1716,7 +1716,6 @@
         "value": "agent/features/provider/src"
       },
       "allowed_symbols": [
-        "CancellationSignal",
         "InvocationDeltaData",
         "InvocationEventData",
         "InvocationRequestData",

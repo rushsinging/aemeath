@@ -41,8 +41,8 @@ pub use policy_port::Policy;
 pub use policy_port::{PolicyDecisionData, PolicyRequestData};
 pub use provider_factory::{ProviderBindingData, ProviderBuildSpecData, ProviderFactory};
 pub use provider_port::{
-    InvocationRequestData, ModelIdData, ProviderPort, RawUsageSnapshotData, RequestSystemBlockData,
-    StopReason,
+    CancellationSignal, InvocationRequestData, ModelIdData, ProviderPort, RawUsageSnapshotData,
+    RequestSystemBlockData, StopReason,
 };
 #[cfg(test)]
 pub use provider_port::{

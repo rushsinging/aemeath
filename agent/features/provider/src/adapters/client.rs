@@ -309,6 +309,7 @@ pub struct LlmClient {
 }
 
 impl LlmClient {
+    #[cfg(test)]
     pub fn from_provider(provider: Arc<dyn LlmProvider>) -> Self {
         let default_scope = crate::domain::invoke::InvocationScopeData::new(
             provider.model_name(),
@@ -381,12 +382,12 @@ impl LlmClient {
         &self,
         capability: &crate::ModelCapabilityData,
         request: &crate::InvocationRequestData,
-        cancellation: &dyn crate::CancellationSignal,
     ) -> Result<crate::InvocationStreamData, crate::ProviderError> {
         use crate::ProviderError;
 
-        // fast path：调用方信号已触发。
-        if cancellation.is_cancelled() {
+        // fast path：请求携带的取消 token 已触发（取消真相源在 runtime，
+        // provider 只消费意图——v2 单通道）。
+        if request.cancellation.is_cancelled() {
             return Err(ProviderError::cancelled());
         }
 
@@ -417,7 +418,7 @@ impl LlmClient {
 
         tokio::select! {
             biased;
-            _ = cancellation.cancelled() => {
+            _ = request.cancellation.cancelled() => {
                 cancel_token.cancel();
                 Err(ProviderError::cancelled())
             }

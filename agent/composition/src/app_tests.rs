@@ -181,7 +181,7 @@ impl runtime::ProviderPort for ReportedUsageProvider {
     async fn invoke(
         &self,
         _request: provider::InvocationRequestData,
-        _cancellation: &dyn provider::CancellationSignal,
+        _cancellation: &dyn runtime::CancellationSignal,
     ) -> Result<provider::InvocationStreamData, ProviderError> {
         let invocation_index = self.invocation_count.fetch_add(1, Ordering::SeqCst);
         let completion = match invocation_index {

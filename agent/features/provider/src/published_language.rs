@@ -17,27 +17,6 @@ use async_trait::async_trait;
 use futures_util::Stream;
 use share::message::Message;
 
-/// Provider 只读消费的取消信号。
-///
-/// 端口不暴露取消发起、child token 或 deadline；consumer drop 由私有
-/// stream owner 负责转为 invocation-local 取消。
-#[async_trait]
-pub trait CancellationSignal: Send + Sync {
-    fn is_cancelled(&self) -> bool;
-    async fn cancelled(&self);
-}
-
-#[async_trait]
-impl CancellationSignal for tokio_util::sync::CancellationToken {
-    fn is_cancelled(&self) -> bool {
-        tokio_util::sync::CancellationToken::is_cancelled(self)
-    }
-
-    async fn cancelled(&self) {
-        tokio_util::sync::CancellationToken::cancelled(self).await;
-    }
-}
-
 // ─── 模型标识 ───────────────────────────────────────────
 
 /// 模型标识符（provider/model）。

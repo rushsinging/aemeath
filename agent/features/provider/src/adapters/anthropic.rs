@@ -153,7 +153,7 @@ impl AnthropicProvider {
             effort,
             system
                 .iter()
-                .map(|block| SystemBlockData::from_request_block(block))
+                .map(SystemBlockData::from_request_block)
                 .collect(),
             api_messages,
             cached_tools,

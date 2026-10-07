@@ -198,7 +198,7 @@ async fn invoke_returns_stream_with_delta_then_completed() {
     let request = InvocationRequestData::new(test_model_id(), vec![], 8192, ReasoningLevel::Off);
     let cancel = CancellationToken::new();
 
-    let mut stream = client.invoke(&capability, &request, &cancel).await.unwrap();
+    let mut stream = client.invoke(&capability, &request).await.unwrap();
 
     use futures_util::StreamExt;
 
@@ -246,7 +246,7 @@ async fn invoke_propagates_provider_error() {
         InvocationRequestData::new(capability.model.clone(), vec![], 8192, ReasoningLevel::Off);
     let cancel = CancellationToken::new();
 
-    let result = client.invoke(&capability, &request, &cancel).await;
+    let result = client.invoke(&capability, &request).await;
     assert!(
         matches!(result, Err(ref e) if e.kind == ProviderErrorKind::RateLimited && !e.retryable),
         "expected terminal rate-limited error"
@@ -266,7 +266,7 @@ async fn invoke_rejects_invalid_scope() {
     let request = InvocationRequestData::new(test_model_id(), vec![], 0, ReasoningLevel::Off);
     let cancel = CancellationToken::new();
 
-    let result = client.invoke(&capability, &request, &cancel).await;
+    let result = client.invoke(&capability, &request).await;
     assert!(
         matches!(result, Err(ref e) if e.kind == ProviderErrorKind::Configuration),
         "expected configuration error for zero max tokens"
@@ -301,7 +301,7 @@ async fn invoke_converts_system_blocks_tools_and_uses_neutral_scope_model() {
     })];
 
     let cancel = CancellationToken::new();
-    let mut stream = client.invoke(&capability, &request, &cancel).await.unwrap();
+    let mut stream = client.invoke(&capability, &request).await.unwrap();
     use futures_util::StreamExt;
     while stream.next().await.is_some() {}
 
@@ -350,7 +350,7 @@ async fn invoke_clamps_requested_reasoning_to_capability() {
 
     let request = InvocationRequestData::new(test_model_id(), vec![], 4096, ReasoningLevel::Max);
     let cancel = CancellationToken::new();
-    let _ = client.invoke(&capability, &request, &cancel).await.unwrap();
+    let _ = client.invoke(&capability, &request).await.unwrap();
 
     let c = captured.lock().expect("captured lock poisoned");
     assert_eq!(
@@ -380,7 +380,7 @@ async fn invoke_invokes_provider_exactly_once() {
 
     let request = InvocationRequestData::new(test_model_id(), vec![], 8192, ReasoningLevel::Off);
     let cancel = CancellationToken::new();
-    let mut stream = client.invoke(&capability, &request, &cancel).await.unwrap();
+    let mut stream = client.invoke(&capability, &request).await.unwrap();
 
     use futures_util::StreamExt;
     while stream.next().await.is_some() {}
@@ -403,17 +403,16 @@ async fn invoke_returns_cancelled_when_signal_fires_during_establishment() {
     ));
     let capability = test_capability();
 
-    let request = InvocationRequestData::new(test_model_id(), vec![], 8192, ReasoningLevel::Off);
+    // 单通道取消：request.cancellation 是唯一取消载体（v2 C13——生产侧
+    // runtime 以同一 token 注入 request 与 advisory 信号，语义同源）。
+    let mut request =
+        InvocationRequestData::new(test_model_id(), vec![], 8192, ReasoningLevel::Off);
     let cancel = CancellationToken::new();
-    let cancel_for_task = cancel.clone();
+    request.cancellation = cancel.clone();
     let client_for_task = client.clone();
 
     // Drive invoke() on a task so we can fire the external signal mid-flight.
-    let handle = tokio::spawn(async move {
-        client_for_task
-            .invoke(&capability, &request, &cancel_for_task)
-            .await
-    });
+    let handle = tokio::spawn(async move { client_for_task.invoke(&capability, &request).await });
 
     // Let the spawned invoke reach call establishment (the fake now awaits its
     // invocation-local cancellation token).

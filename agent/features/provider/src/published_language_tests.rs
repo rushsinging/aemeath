@@ -274,16 +274,3 @@ fn tool_call_identity_can_bind_provider_id_after_start() {
         } if id == "call_late"
     ));
 }
-
-#[tokio::test]
-async fn cancellation_token_implements_object_safe_signal() {
-    fn assert_object_safe(_: &dyn CancellationSignal) {}
-
-    let token = tokio_util::sync::CancellationToken::new();
-    let signal: &dyn CancellationSignal = &token;
-    assert_object_safe(signal);
-    assert!(!signal.is_cancelled());
-    token.cancel();
-    signal.cancelled().await;
-    assert!(signal.is_cancelled());
-}

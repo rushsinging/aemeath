@@ -20,9 +20,8 @@ use futures::Stream;
 // 通过 provider::api（API facade）访问，不直接引用 published_language 模块。
 // 新 PL StopReason 通过别名 ProviderStopReasonData 导出，此处还原为 StopReason。
 pub use provider::{
-    CancellationSignal, InvocationEventData, InvocationRequestData, ModelCapabilityData,
-    ModelIdData, ProviderError, ProviderStopReasonData as StopReason, RawUsageSnapshotData,
-    RequestSystemBlockData,
+    InvocationEventData, InvocationRequestData, ModelCapabilityData, ModelIdData, ProviderError,
+    ProviderStopReasonData as StopReason, RawUsageSnapshotData, RequestSystemBlockData,
 };
 
 #[cfg(test)]
@@ -43,6 +42,27 @@ pub use share::reasoning::ReasoningLevel;
 ///
 /// consumer drop 等价于取消意图，adapter 应停止继续读取和缓冲。
 pub type InvocationStreamData = Pin<Box<dyn Stream<Item = InvocationEventData> + Send>>;
+
+/// 取消信号（真相源在 runtime Run 生命周期；provider 只消费意图）。
+///
+/// 端口不暴露取消发起、child token 或 deadline；consumer drop 由私有
+/// stream owner 负责转为 invocation-local 取消。
+#[async_trait::async_trait]
+pub trait CancellationSignal: Send + Sync {
+    fn is_cancelled(&self) -> bool;
+    async fn cancelled(&self);
+}
+
+#[async_trait::async_trait]
+impl CancellationSignal for tokio_util::sync::CancellationToken {
+    fn is_cancelled(&self) -> bool {
+        tokio_util::sync::CancellationToken::is_cancelled(self)
+    }
+
+    async fn cancelled(&self) {
+        tokio_util::sync::CancellationToken::cancelled(self).await;
+    }
+}
 
 // ─── Port trait ───
 

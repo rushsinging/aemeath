@@ -4,8 +4,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use provider::composition::{LlmClient, LlmConfigOptionsData};
 use provider::{
-    CancellationSignal, InvocationRequestData, InvocationStreamData, ModelCapabilityData,
-    ModelIdData, ProviderError, ProviderErrorKind,
+    InvocationRequestData, InvocationStreamData, ModelCapabilityData, ModelIdData, ProviderError,
+    ProviderErrorKind,
 };
 
 use runtime::{
@@ -63,16 +63,14 @@ impl ProviderPort for ProviderAdapter {
     async fn invoke(
         &self,
         request: InvocationRequestData,
-        cancellation: &dyn CancellationSignal,
+        cancellation: &dyn runtime::CancellationSignal,
     ) -> Result<InvocationStreamData, ProviderError> {
         // fast path：调用方信号已触发。
         if cancellation.is_cancelled() {
             return Err(ProviderError::cancelled());
         }
         let capability = self.capabilities(&request.model)?;
-        self.client
-            .invoke(&capability, &request, cancellation)
-            .await
+        self.client.invoke(&capability, &request).await
     }
 }
 
