@@ -192,7 +192,7 @@ impl ToolExecutionSupervisor {
             }
         });
 
-        let placeholder = placeholder_tool_result(&task_id, &call.identity.tool_name);
+        let placeholder = placeholder_tool_result(&task_id);
         call.background_threshold = None; // 已转后台，防止重复判定
         Ok((placeholder, started.elapsed()))
     }
@@ -413,12 +413,9 @@ fn join_result_to_outcome(
 }
 
 /// 占位 tool result：转后台后立即发布给 LLM 的合法成功结果。
-fn placeholder_tool_result(task_id: &BackgroundTaskId, tool_name: &str) -> PublishedToolOutcome {
+fn placeholder_tool_result(task_id: &BackgroundTaskId) -> PublishedToolOutcome {
     PublishedToolOutcome::success_text(format!(
-        "Tool call is still running in the background (task-{} for tool {tool_name}). \
-         The result is not final yet and will be delivered when the task completes. \
-         You may continue with other work; use the background tasks tool to inspect \
-         status or logs, or to stop the task.",
+        "Running in the background (task-{}). Result will be delivered on completion.",
         task_id.as_str(),
     ))
 }
