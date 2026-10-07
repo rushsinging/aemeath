@@ -8,6 +8,51 @@ use crate::app::FeatureGateways;
 
 pub(crate) use runtime::AgentClientImpl;
 
+/// #252 PR3：后台任务端口源（可换绑——session 创建后绑定真实实现）。
+struct WiringBackgroundTaskSource {
+    slot:
+        std::sync::Arc<std::sync::RwLock<Option<std::sync::Arc<dyn tools::BackgroundTaskAccess>>>>,
+}
+
+impl tools::BackgroundTaskAccessSource for WiringBackgroundTaskSource {
+    fn current(&self) -> std::sync::Arc<dyn tools::BackgroundTaskAccess> {
+        self.slot
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+            .unwrap_or_else(|| std::sync::Arc::new(UnboundBackgroundTaskAccess))
+    }
+}
+
+/// 未绑定期的空实现（安全降级：空列表 / 未找到 / stop 报错）。
+struct UnboundBackgroundTaskAccess;
+
+impl tools::BackgroundTaskAccess for UnboundBackgroundTaskAccess {
+    fn list_tasks(&self) -> Vec<tools::types::background_tasks::BackgroundTaskSummaryData> {
+        Vec::new()
+    }
+    fn task_status(
+        &self,
+        _task_id: &str,
+    ) -> Option<tools::types::background_tasks::BackgroundTaskDetailData> {
+        None
+    }
+    fn read_task_log(
+        &self,
+        _task_id: &str,
+        _cursor: Option<u64>,
+        _max_bytes: usize,
+    ) -> Option<tools::types::background_tasks::BackgroundTaskLogData> {
+        None
+    }
+    fn stop_task(
+        &self,
+        _task_id: &str,
+    ) -> Result<tools::types::background_tasks::BackgroundTaskStopData, String> {
+        Err("background tasks are not available in this session".to_string())
+    }
+}
+
 struct WiringMemoryPortSource {
     wiring: Arc<context::MainSessionWiring>,
 }
@@ -30,6 +75,7 @@ fn wire_runtime_tool_assembly(
     memory_source: Arc<dyn tools::MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
     skill_loader: Arc<dyn tools::published::skill::SkillLoadPort>,
+    background_source: Arc<dyn tools::BackgroundTaskAccessSource>,
     snapshot: &share::config::domain::snapshot::ConfigSnapshot,
     agents_dir: &std::path::Path,
     context_size: usize,
@@ -47,6 +93,7 @@ fn wire_runtime_tool_assembly(
         memory_source,
         workspace_control,
         skill_loader,
+        background_source,
         role_policies,
     )
     .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
@@ -269,6 +316,9 @@ pub(crate) async fn from_args_with_gateways(
         Some(args.context_size),
         initial_provider.resolved_model().model.context_window,
     );
+    let background_slot: std::sync::Arc<
+        std::sync::RwLock<Option<std::sync::Arc<dyn tools::BackgroundTaskAccess>>>,
+    > = std::sync::Arc::new(std::sync::RwLock::new(None));
     let tool_assembly = wire_runtime_tool_assembly(
         task_wiring.access(),
         Arc::new(WiringMemoryPortSource {
@@ -276,6 +326,9 @@ pub(crate) async fn from_args_with_gateways(
         }),
         workspace.control(),
         skill_loader.clone(),
+        Arc::new(WiringBackgroundTaskSource {
+            slot: background_slot.clone(),
+        }),
         &config.reader().committed_snapshot(),
         agents_dir,
         context_size,
@@ -398,7 +451,8 @@ pub(crate) async fn from_args_with_gateways(
             skill_catalog,
             tool_assembly.tool_result_materializer,
             tool_assembly.active_run,
-        ),
+        )
+        .with_background_slot(background_slot),
         runtime::composition::wire_sdk_chat_ingress(),
         initial_provider,
         session_bootstrap,

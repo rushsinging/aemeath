@@ -15,6 +15,10 @@ pub struct RuntimeToolAssemblyDependenciesData {
     tool_result_materializer:
         Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
     active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
+    /// #252 PR3：后台任务端口绑定槽（session 创建后写入实现）。
+    background_slot: Option<
+        std::sync::Arc<std::sync::RwLock<Option<std::sync::Arc<dyn tools::BackgroundTaskAccess>>>>,
+    >,
 }
 
 impl RuntimeToolAssemblyDependenciesData {
@@ -31,7 +35,19 @@ impl RuntimeToolAssemblyDependenciesData {
             skill_catalog,
             tool_result_materializer,
             active_run,
+            background_slot: None,
         }
+    }
+
+    /// 绑定后台任务端口槽（#252 PR3：shell 构造后写入实现）。
+    pub fn with_background_slot(
+        mut self,
+        slot: std::sync::Arc<
+            std::sync::RwLock<Option<std::sync::Arc<dyn tools::BackgroundTaskAccess>>>,
+        >,
+    ) -> Self {
+        self.background_slot = Some(slot);
+        self
     }
 }
 
@@ -312,7 +328,7 @@ pub async fn wire_agent_client_from_args(
         skill_catalog,
         tool_result_materializer,
         active_run,
-        ..
+        background_slot,
     } = tool_assembly;
     let crate::application::client::bootstrap::AgentRunnerAssemblyData {
         runner: agent_runner,
@@ -459,6 +475,13 @@ pub async fn wire_agent_client_from_args(
         ingress.input_port_factory,
         runtime_context_factory,
     );
+
+    // #252 PR3：session 就绪后绑定后台任务端口（查询 tool 的数据源）。
+    if let Some(slot) = background_slot {
+        slot.write()
+            .unwrap_or_else(|error| error.into_inner())
+            .replace(shell.background_tasks.clone());
+    }
 
     // 21. 构建 handle — #1385 TaskData 7: shell is the single source.
     let handle = RuntimeHandle { shell };

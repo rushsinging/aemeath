@@ -1,6 +1,6 @@
 //! `BackgroundTasks` 工具（#252）：后台任务查询与停止。
 
-use crate::domain::background_task_port::BackgroundTaskAccess;
+use crate::domain::background_task_port::BackgroundTaskAccessSource;
 use crate::domain::types::background_tasks::{
     BackgroundTasksAction, BackgroundTasksInput, BackgroundTasksResult,
 };
@@ -10,7 +10,8 @@ use serde_json::Value;
 use std::sync::Arc;
 
 pub struct BackgroundTasksTool {
-    pub access: Arc<dyn BackgroundTaskAccess>,
+    /// 可换绑端口源（session 创建后绑定实现，先例 MemoryPortSource）。
+    pub source: Arc<dyn BackgroundTaskAccessSource>,
 }
 
 #[cfg(test)]
@@ -55,9 +56,10 @@ impl TypedTool for BackgroundTasksTool {
             Ok(args) => args,
             Err(error) => return TypedToolResult::error(format!("invalid input: {error}")),
         };
+        let access = self.source.current();
         match args.action {
             BackgroundTasksAction::List => {
-                let tasks = self.access.list_tasks();
+                let tasks = access.list_tasks();
                 let text = if tasks.is_empty() {
                     "No background tasks.".to_string()
                 } else {
@@ -88,7 +90,7 @@ impl TypedTool for BackgroundTasksTool {
                 let Some(task_id) = args.task_id.as_deref() else {
                     return TypedToolResult::error("status action requires task_id");
                 };
-                match self.access.task_status(task_id) {
+                match access.task_status(task_id) {
                     Some(detail) => TypedToolResult::success(
                         format!(
                             "{} [{}] {} — deadline in {:?}ms, log bytes {}",
@@ -115,7 +117,7 @@ impl TypedTool for BackgroundTasksTool {
                     .max_bytes
                     .map(|value| value as usize)
                     .unwrap_or(DEFAULT_LOG_MAX_BYTES);
-                match self.access.read_task_log(task_id, args.cursor, max_bytes) {
+                match access.read_task_log(task_id, args.cursor, max_bytes) {
                     Some(log) => TypedToolResult::success(
                         log.text.clone(),
                         BackgroundTasksResult {
@@ -131,7 +133,7 @@ impl TypedTool for BackgroundTasksTool {
                 let Some(task_id) = args.task_id.as_deref() else {
                     return TypedToolResult::error("stop action requires task_id");
                 };
-                match self.access.stop_task(task_id) {
+                match access.stop_task(task_id) {
                     Ok(stop) => TypedToolResult::success(
                         format!("stop requested: {} state={}", task_id, stop.state),
                         BackgroundTasksResult {

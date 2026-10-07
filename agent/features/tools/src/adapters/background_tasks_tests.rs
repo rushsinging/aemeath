@@ -1,5 +1,5 @@
 use super::*;
-use crate::domain::background_task_port::BackgroundTaskAccess;
+use crate::domain::background_task_port::{BackgroundTaskAccess, BackgroundTaskAccessSource};
 use crate::domain::types::background_tasks::{
     BackgroundTaskDetailData, BackgroundTaskLogData, BackgroundTaskStopData,
     BackgroundTaskSummaryData, BackgroundTasksAction, BackgroundTasksInput,
@@ -49,16 +49,28 @@ impl BackgroundTaskAccess for FakeAccess {
     }
 }
 
+struct StaticSource {
+    access: Arc<FakeAccess>,
+}
+
+impl BackgroundTaskAccessSource for StaticSource {
+    fn current(&self) -> Arc<dyn BackgroundTaskAccess> {
+        self.access.clone()
+    }
+}
+
 fn tool() -> BackgroundTasksTool {
     BackgroundTasksTool {
-        access: Arc::new(FakeAccess {
-            summaries: vec![BackgroundTaskSummaryData {
-                task_id: "task-1".to_string(),
-                tool_name: "Bash".to_string(),
-                state: "backgrounded".to_string(),
-                summary: "tool=Bash input=cargo test".to_string(),
-                duration_ms: Some(1500),
-            }],
+        source: Arc::new(StaticSource {
+            access: Arc::new(FakeAccess {
+                summaries: vec![BackgroundTaskSummaryData {
+                    task_id: "task-1".to_string(),
+                    tool_name: "Bash".to_string(),
+                    state: "backgrounded".to_string(),
+                    summary: "tool=Bash input=cargo test".to_string(),
+                    duration_ms: Some(1500),
+                }],
+            }),
         }),
     }
 }

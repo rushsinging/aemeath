@@ -114,3 +114,127 @@ impl BackgroundTaskRuntime {
 #[cfg(test)]
 #[path = "session_runtime_tests.rs"]
 mod tests;
+
+// ── #252 PR3：BackgroundTaskAccess 端口实现（BackgroundTasks tool 数据源） ──
+
+impl tools::BackgroundTaskAccess for BackgroundTaskRuntime {
+    fn list_tasks(&self) -> Vec<tools::types::background_tasks::BackgroundTaskSummaryData> {
+        self.supervisor()
+            .snapshots()
+            .into_iter()
+            .map(|record| task_summary_data(&record))
+            .collect()
+    }
+
+    fn task_status(
+        &self,
+        task_id: &str,
+    ) -> Option<tools::types::background_tasks::BackgroundTaskDetailData> {
+        let parsed = share::ids::BackgroundTaskId::parse_uuid7(task_id).ok()?;
+        let record = self.supervisor().snapshot(&parsed)?;
+        let deadline_remaining_ms = match &record.state {
+            crate::domain::background_task::BackgroundTaskState::Backgrounded {
+                deadline_snapshot: Some(deadline),
+                ..
+            } => deadline
+                .duration_since(std::time::SystemTime::now())
+                .ok()
+                .map(|remaining| remaining.as_millis() as u64),
+            _ => None,
+        };
+        Some(tools::types::background_tasks::BackgroundTaskDetailData {
+            summary: task_summary_data(&record),
+            deadline_remaining_ms,
+            total_written_bytes: 0,
+        })
+    }
+
+    fn read_task_log(
+        &self,
+        task_id: &str,
+        cursor: Option<u64>,
+        max_bytes: usize,
+    ) -> Option<tools::types::background_tasks::BackgroundTaskLogData> {
+        let parsed = share::ids::BackgroundTaskId::parse_uuid7(task_id).ok()?;
+        let (text, cursor, total_written) = self
+            .supervisor()
+            .read_task_log(&parsed, cursor, max_bytes)?;
+        Some(tools::types::background_tasks::BackgroundTaskLogData {
+            text,
+            cursor,
+            total_written,
+        })
+    }
+
+    fn stop_task(
+        &self,
+        task_id: &str,
+    ) -> Result<tools::types::background_tasks::BackgroundTaskStopData, String> {
+        let parsed = share::ids::BackgroundTaskId::parse_uuid7(task_id)
+            .map_err(|error| format!("invalid task id {task_id}: {error}"))?;
+        let outcome = self
+            .supervisor()
+            .stop_task(&parsed)
+            .map_err(|error| error.to_string())?;
+        let data = match outcome {
+            super::supervisor::StopRequestOutcome::SignalSent { state } => {
+                tools::types::background_tasks::BackgroundTaskStopData {
+                    signal_sent: true,
+                    state: state_vocabulary(&state).to_string(),
+                }
+            }
+            super::supervisor::StopRequestOutcome::AlreadyTerminal(kind) => {
+                tools::types::background_tasks::BackgroundTaskStopData {
+                    signal_sent: false,
+                    state: terminal_vocabulary(&kind).to_string(),
+                }
+            }
+        };
+        Ok(data)
+    }
+}
+
+/// 记录 → 查询摘要（状态词汇 + 运行时长）。
+fn task_summary_data(
+    record: &crate::domain::background_task::BackgroundTaskRecord,
+) -> tools::types::background_tasks::BackgroundTaskSummaryData {
+    let state = match record.terminal_kind() {
+        Some(kind) => terminal_vocabulary(&kind).to_string(),
+        None => state_vocabulary(&record.state).to_string(),
+    };
+    let duration_ms = std::time::SystemTime::now()
+        .duration_since(record.created_at)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0);
+    tools::types::background_tasks::BackgroundTaskSummaryData {
+        task_id: record.task_id.as_str().to_string(),
+        tool_name: record.identity.tool_name.clone(),
+        state,
+        summary: record.invocation_summary.clone(),
+        duration_ms: Some(duration_ms),
+    }
+}
+
+fn state_vocabulary(state: &crate::domain::background_task::BackgroundTaskState) -> &'static str {
+    match state {
+        crate::domain::background_task::BackgroundTaskState::ForegroundWaiting => {
+            "foreground_waiting"
+        }
+        crate::domain::background_task::BackgroundTaskState::Backgrounded { .. } => "backgrounded",
+        crate::domain::background_task::BackgroundTaskState::Terminal(_) => "terminal",
+    }
+}
+
+fn terminal_vocabulary(
+    kind: &crate::domain::background_task::BackgroundTaskTerminalKind,
+) -> &'static str {
+    match kind {
+        crate::domain::background_task::BackgroundTaskTerminalKind::Success => "succeeded",
+        crate::domain::background_task::BackgroundTaskTerminalKind::Failure => "failed",
+        crate::domain::background_task::BackgroundTaskTerminalKind::TimedOut => "timed_out",
+        crate::domain::background_task::BackgroundTaskTerminalKind::Stopped => "stopped",
+        crate::domain::background_task::BackgroundTaskTerminalKind::Invalidated { .. } => {
+            "invalidated"
+        }
+    }
+}

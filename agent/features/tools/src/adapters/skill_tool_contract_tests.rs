@@ -85,6 +85,7 @@ async fn main_and_sub_catalog_publish_exact_skill_schema_and_execute_body() {
         memory_source(),
         workspace.control(),
         skill.loader(),
+        empty_background_source(),
         Vec::new(),
     )
     .unwrap();
@@ -186,6 +187,7 @@ async fn skill_state_decision_controls_body_without_leaking_on_failure() {
             memory_source(),
             workspace.control(),
             skill.loader(),
+            empty_background_source(),
             Vec::new(),
         )
         .unwrap();
@@ -243,6 +245,7 @@ async fn deleted_skill_returns_failure_without_panicking() {
         memory_source(),
         workspace.control(),
         skill.loader(),
+        empty_background_source(),
         Vec::new(),
     )
     .unwrap();
@@ -278,4 +281,48 @@ async fn deleted_skill_returns_failure_without_panicking() {
         outcome,
         crate::domain::ToolExecutionOutcome::Failure(_)
     ));
+}
+
+fn empty_background_source(
+) -> std::sync::Arc<dyn crate::domain::background_task_port::BackgroundTaskAccessSource> {
+    struct EmptyAccess;
+    impl crate::domain::background_task_port::BackgroundTaskAccess for EmptyAccess {
+        fn list_tasks(
+            &self,
+        ) -> Vec<crate::domain::types::background_tasks::BackgroundTaskSummaryData> {
+            Vec::new()
+        }
+        fn task_status(
+            &self,
+            _task_id: &str,
+        ) -> Option<crate::domain::types::background_tasks::BackgroundTaskDetailData> {
+            None
+        }
+        fn read_task_log(
+            &self,
+            _task_id: &str,
+            _cursor: Option<u64>,
+            _max_bytes: usize,
+        ) -> Option<crate::domain::types::background_tasks::BackgroundTaskLogData> {
+            None
+        }
+        fn stop_task(
+            &self,
+            _task_id: &str,
+        ) -> Result<crate::domain::types::background_tasks::BackgroundTaskStopData, String>
+        {
+            Err("background tasks unavailable".to_string())
+        }
+    }
+    struct FixedSource(
+        std::sync::Arc<dyn crate::domain::background_task_port::BackgroundTaskAccess>,
+    );
+    impl crate::domain::background_task_port::BackgroundTaskAccessSource for FixedSource {
+        fn current(
+            &self,
+        ) -> std::sync::Arc<dyn crate::domain::background_task_port::BackgroundTaskAccess> {
+            self.0.clone()
+        }
+    }
+    std::sync::Arc::new(FixedSource(std::sync::Arc::new(EmptyAccess)))
 }
