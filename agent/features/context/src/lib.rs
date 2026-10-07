@@ -5,9 +5,12 @@
 //! | 组 | 实体 |
 //! |---|---|
 //! | 工厂 | `wire_main_session`（出口 `SdkError`）、`wire_isolated_context{,_with_skill,_with_workspace_skills}`（isolated_context 家族更名） |
-//! | 角色和职能 | `ContextPort`（+context_port 模块 glob 面）、`SessionManagementPort`、`MainSessionWiring`（生产协调器）+ Gate 家族、适配器实现体（composition 装配面） |
+//! | 角色和职能 | `ContextPort`（+context_port 模块 glob 面）、`SessionManagementPort`、`MainSessionWiring`（生产协调器）+ `OwnedSessionSharedPermit`、适配器实现体（composition 装配面） |
 //! | 数据和生命周期 | 36 个 Data（ContextRequest/StepReceipt/Compact*/ToolReceipt*/Session 展示类）；session 持久化内核（SessionCodec/Generation 族等）已内部化 pub(crate) |
 //! | Error | SessionManagementError/ContextPortError/ContextAppendError/AcceptedInputError（活跃 match 保留）；MainSessionError 内部化（wire 出口统一 SdkError） |
+//!
+//! main_session 模块整面已收编（#1863）：Gate 族/BoundMainRun/GateAware 族/MainSessionError
+//! 不再经 `context::main_session` 穿透，crate 内经 `application::main_session` 路径。
 //!
 //! 实测修正（调研"零消费 65"口径错误——真死仅 2）：52 符号内部化后经
 //! 编译器/测试暴露真消费 16 处恢复 pub（glob 链 11 + 签名载荷 5）；
@@ -67,7 +70,6 @@ pub use adapters::{
     AtomicBlobAcceptedInputWriter, AtomicBlobSessionManagement, AtomicBlobToolReceiptWriter,
     DatasetCanonicalSessionWriter, DatasetSessionManagement, WorkspaceSkillQueryFactory,
 };
-pub use application::main_session;
 #[cfg(test)]
 pub(crate) use application::ContextApplicationService;
 #[cfg(test)]

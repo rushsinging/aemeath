@@ -1662,7 +1662,6 @@
         "estimate_messages_tokens",
         "estimate_tool_schemas_tokens",
         "init_guidance_dir",
-        "main_session",
         "messages_selected_for_precompact_memory",
         "migrate_flat_sessions_to_project_dirs",
         "render_invocation_reminder_body",

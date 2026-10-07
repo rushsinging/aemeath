@@ -10,7 +10,9 @@ use config::{ConfigAppService, ConfigReader, ProjectConfigParticipant};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use crate::main_session::{MainSessionError, MainSessionWiring, MainSessionWiringBuilder};
+use crate::application::main_session::{
+    MainSessionError, MainSessionWiring, MainSessionWiringBuilder,
+};
 use crate::ContextPort;
 use crate::{
     AcceptedInputAppendData, CleanupConfirmation, ContentFingerprint, ContextAppendData,

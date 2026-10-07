@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::main_session::{MainSessionWiring, MainSessionWiringBuilder};
+use crate::application::main_session::{MainSessionWiring, MainSessionWiringBuilder};
 use crate::{CanonicalSession, SnapshotState};
 use async_trait::async_trait;
 use config::{
@@ -352,7 +352,7 @@ async fn cross_project_resume_does_not_switch_config_or_memory() {
     // Cross-project resume must fail before Config/Memory preparation.
     assert!(matches!(
         h.wiring.resume_prepared(session).await,
-        Err(crate::main_session::MainSessionError::ProjectMismatch)
+        Err(crate::application::main_session::MainSessionError::ProjectMismatch)
     ));
 
     let post_model = h
