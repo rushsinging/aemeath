@@ -14,17 +14,21 @@ pub(super) async fn chat_impl(
     let input_events = (me.inner.shell.input_port_factory)(input.ingress);
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    // #252 PR3：spinner 活动数事件直达本 chat 会话通道（覆盖式刷新；
-    // 后台账本事件无需经 sink 工厂重建孤立通道）。
-    me.inner
+    // #252 PR3：spinner 活动数事件直达本 chat 会话通道（覆盖式刷新）。
+    // guard 随 chat 任务结束 drop，释放 sender 使 ChatStream 正常关闭；
+    // 事件无需经 sink 工厂重建孤立通道。
+    let chat_sender_binding = me
+        .inner
         .shell
-        .background_tasks
+        .background_processes
         .bind_chat_event_sender(tx.clone());
     let sink = (me.inner.shell.event_sink_factory)(tx);
     let shell = me.inner.shell.clone();
     let inner = me.inner.clone();
     let session_context = logging::capture();
     logging::spawn_instrumented(session_context, async move {
+        // 绑定存续至 chat 任务结束（drop 释放 sender → stream 关闭）。
+        let _chat_sender_binding = chat_sender_binding;
         crate::application::loop_engine::chat::run_session_command_driver(
             crate::application::loop_engine::chat::SessionCommandDriverInput {
                 sink,

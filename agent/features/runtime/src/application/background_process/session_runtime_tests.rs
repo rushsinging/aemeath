@@ -4,7 +4,7 @@ use super::*;
 fn notify_route_targets_active_main_run_when_present() {
     let registry =
         std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
-    let runtime = BackgroundTaskRuntime::for_test(registry.clone());
+    let runtime = BackgroundProcessRuntime::for_test(registry.clone());
 
     // 无 active Run → wakeup 信号。
     assert!(matches!(
@@ -25,7 +25,7 @@ fn notify_route_targets_active_main_run_when_present() {
 fn notify_route_clears_with_run_lifecycle() {
     let registry =
         std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
-    let runtime = BackgroundTaskRuntime::for_test(registry.clone());
+    let runtime = BackgroundProcessRuntime::for_test(registry.clone());
     let run_id = sdk::RunId::new_v7();
     registry.activate_main_for_test(run_id.clone());
 
@@ -37,15 +37,15 @@ fn notify_route_clears_with_run_lifecycle() {
 }
 
 #[test]
-fn background_task_access_projects_summaries_logs_and_stop() {
-    use tools::BackgroundTaskAccess as _;
+fn background_process_access_projects_summaries_logs_and_stop() {
+    use tools::BackgroundProcessAccess as _;
     let registry =
         std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
-    let runtime = BackgroundTaskRuntime::for_test(registry);
+    let runtime = BackgroundProcessRuntime::for_test(registry);
 
     let task_id = runtime
         .supervisor()
-        .register(background_task_identity(), "tool=Bash input=cargo test");
+        .register(background_process_identity(), "tool=Bash input=cargo test");
     runtime.supervisor().record_output(&task_id, b"building\n");
     runtime
         .supervisor()
@@ -82,7 +82,7 @@ fn background_task_access_projects_summaries_logs_and_stop() {
         .supervisor()
         .finish(
             &task_id,
-            crate::domain::background_task::BackgroundTaskTerminalKind::Success,
+            crate::domain::background_process::BackgroundProcessTerminalKind::Success,
             Some("done".to_string()),
         )
         .unwrap();
@@ -92,16 +92,16 @@ fn background_task_access_projects_summaries_logs_and_stop() {
 }
 
 #[test]
-fn background_task_access_rejects_invalid_task_ids() {
-    use tools::BackgroundTaskAccess as _;
+fn background_process_access_rejects_invalid_task_ids() {
+    use tools::BackgroundProcessAccess as _;
     let registry =
         std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
-    let runtime = BackgroundTaskRuntime::for_test(registry);
+    let runtime = BackgroundProcessRuntime::for_test(registry);
     assert!(runtime.task_status("not-a-task-id").is_none());
     assert!(runtime.stop_task("garbage").is_err());
 }
 
-fn background_task_identity() -> context::ToolCallIdentityData {
+fn background_process_identity() -> context::ToolCallIdentityData {
     context::ToolCallIdentityData {
         session_id: context::SessionId::new("session-1"),
         run_id: sdk::RunId::new("run-1"),
@@ -126,21 +126,21 @@ async fn ledger_persists_snapshots_and_restores_invalidation() {
     // 会话 A：登记两个任务——一个终态（Success）、一个 Backgrounded（进程将退出）。
     let registry_a =
         std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
-    let runtime_a = BackgroundTaskRuntime::for_test(registry_a);
+    let runtime_a = BackgroundProcessRuntime::for_test(registry_a);
     let finished = runtime_a
         .supervisor()
-        .register(background_task_identity(), "tool=Bash input=done");
+        .register(background_process_identity(), "tool=Bash input=done");
     runtime_a
         .supervisor()
         .finish(
             &finished,
-            crate::domain::background_task::BackgroundTaskTerminalKind::Success,
+            crate::domain::background_process::BackgroundProcessTerminalKind::Success,
             Some("ok".to_string()),
         )
         .unwrap();
     let orphaned = runtime_a
         .supervisor()
-        .register(background_task_identity(), "tool=Bash input=lost");
+        .register(background_process_identity(), "tool=Bash input=lost");
     runtime_a
         .supervisor()
         .mark_backgrounded(&orphaned, None)
@@ -156,7 +156,7 @@ async fn ledger_persists_snapshots_and_restores_invalidation() {
     // 会话 B（resume）：读快照恢复——终态保持、非终态标 Invalidated(ProcessExit)。
     let registry_b =
         std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
-    let runtime_b = BackgroundTaskRuntime::for_test(registry_b);
+    let runtime_b = BackgroundProcessRuntime::for_test(registry_b);
     let restored = runtime_b
         .restore_from_snapshot(&blob, "session-persist-1")
         .await
@@ -170,7 +170,7 @@ async fn ledger_persists_snapshots_and_restores_invalidation() {
         .expect("终态记录恢复");
     assert!(matches!(
         restored_finished.terminal_kind(),
-        Some(crate::domain::background_task::BackgroundTaskTerminalKind::Success)
+        Some(crate::domain::background_process::BackgroundProcessTerminalKind::Success)
     ));
     let restored_orphan = snapshots
         .iter()
@@ -180,18 +180,18 @@ async fn ledger_persists_snapshots_and_restores_invalidation() {
         matches!(
             restored_orphan.terminal_kind(),
             Some(
-                crate::domain::background_task::BackgroundTaskTerminalKind::Invalidated {
+                crate::domain::background_process::BackgroundProcessTerminalKind::Invalidated {
                     reason:
-                        crate::domain::background_task::BackgroundInvalidationReason::ProcessExit
+                        crate::domain::background_process::BackgroundInvalidationReason::ProcessExit
                 }
             )
         ),
-        "resume 时非终态后台任务必须失效"
+        "resume 时非终态后台进程必须失效"
     );
 
     // blob 侧可见：key 存在（Primary 读回非空）。
     let key = StorageKeyData::new(
-        StorageNamespaceData::BackgroundTask,
+        StorageNamespaceData::BackgroundProcess,
         vec!["session-persist-1".parse().unwrap()],
     )
     .unwrap();
@@ -209,14 +209,14 @@ async fn ledger_persists_snapshots_and_restores_invalidation() {
 
 #[test]
 fn task_summary_duration_freezes_after_terminal() {
-    use tools::BackgroundTaskAccess as _;
+    use tools::BackgroundProcessAccess as _;
     let registry =
         std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
-    let runtime = BackgroundTaskRuntime::for_test(registry);
+    let runtime = BackgroundProcessRuntime::for_test(registry);
 
     let task_id = runtime
         .supervisor()
-        .register(background_task_identity(), "tool=Bash input=cargo test");
+        .register(background_process_identity(), "tool=Bash input=cargo test");
     runtime
         .supervisor()
         .mark_backgrounded(&task_id, None)
@@ -225,7 +225,7 @@ fn task_summary_duration_freezes_after_terminal() {
         .supervisor()
         .finish(
             &task_id,
-            crate::domain::background_task::BackgroundTaskTerminalKind::Success,
+            crate::domain::background_process::BackgroundProcessTerminalKind::Success,
             Some("done".to_string()),
         )
         .unwrap();
@@ -258,13 +258,13 @@ fn task_summary_duration_freezes_after_terminal() {
 
 #[test]
 fn task_summary_duration_tracks_now_for_running_task() {
-    use tools::BackgroundTaskAccess as _;
+    use tools::BackgroundProcessAccess as _;
     let registry =
         std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
-    let runtime = BackgroundTaskRuntime::for_test(registry);
+    let runtime = BackgroundProcessRuntime::for_test(registry);
     runtime
         .supervisor()
-        .register(background_task_identity(), "tool=Bash input=running");
+        .register(background_process_identity(), "tool=Bash input=running");
 
     let list = runtime.list_tasks();
     assert_eq!(list.len(), 1);
@@ -280,17 +280,17 @@ fn task_summary_duration_tracks_now_for_running_task() {
 async fn emit_active_count_delivers_event_to_bound_chat_sender() {
     let registry =
         std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
-    let runtime = BackgroundTaskRuntime::for_test(registry);
+    let runtime = std::sync::Arc::new(BackgroundProcessRuntime::for_test(registry));
 
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
-    runtime.bind_chat_event_sender(sender);
+    let _binding = runtime.bind_chat_event_sender(sender);
 
     runtime.emit_active_count();
     let event = receiver.try_recv().expect("事件必须送达绑定的 chat 通道");
     assert!(
         matches!(
             &event,
-            sdk::ChatEvent::BackgroundTaskCountChanged { active: 0 }
+            sdk::ChatEvent::BackgroundProcessCountChanged { active: 0 }
         ),
         "空账本活动数为 0，实际 {event:?}"
     );
@@ -298,13 +298,13 @@ async fn emit_active_count_delivers_event_to_bound_chat_sender() {
     // 登记一个非终态任务后再发：活动数反映账本真相。
     runtime
         .supervisor()
-        .register(background_task_identity(), "tool=Bash input=live");
+        .register(background_process_identity(), "tool=Bash input=live");
     runtime.emit_active_count();
     let event = receiver.try_recv().expect("第二次事件送达");
     assert!(
         matches!(
             &event,
-            sdk::ChatEvent::BackgroundTaskCountChanged { active: 1 }
+            sdk::ChatEvent::BackgroundProcessCountChanged { active: 1 }
         ),
         "登记后活动数为 1，实际 {event:?}"
     );
@@ -314,7 +314,61 @@ async fn emit_active_count_delivers_event_to_bound_chat_sender() {
 fn emit_active_count_without_bound_sender_is_noop() {
     let registry =
         std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
-    let runtime = BackgroundTaskRuntime::for_test(registry);
+    let runtime = BackgroundProcessRuntime::for_test(registry);
     // 未绑定（如 Sub Run / 测试装配）：静默不发送，不 panic。
     runtime.emit_active_count();
+}
+
+// ── chat sender 绑定生命周期（RAII：chat 结束必须释放 sender） ─────────
+
+#[tokio::test]
+async fn chat_sender_binding_releases_on_drop_so_stream_closes() {
+    let registry =
+        std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
+    let runtime = std::sync::Arc::new(BackgroundProcessRuntime::for_test(registry));
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let binding = runtime.bind_chat_event_sender(tx.clone());
+    drop(tx);
+
+    // 绑定存续期间改走 event 通道：事件可达。
+    runtime.emit_active_count();
+    assert!(rx.try_recv().is_ok(), "绑定期事件应可达");
+
+    // chat 结束：guard drop 释放 sender → 全部 sender 已 drop，
+    // receiver 关闭（真实挂起根因的最小复现：session 级 clone 遗忘
+    // 使 `ChatStream::recv()` 永不返回 None）。
+    drop(binding);
+    assert!(
+        rx.try_recv().is_err(),
+        "绑定释放后不应再有可读事件（channel 已空且关闭）"
+    );
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+            .await
+            .expect("sender 释放后 stream 必须关闭（不得挂起）")
+            .is_none(),
+        "全部 sender 释放后 stream 返回 None"
+    );
+}
+
+#[tokio::test]
+async fn rebinding_replaces_previous_sender_and_stale_guard_keeps_new_binding() {
+    let registry =
+        std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
+    let runtime = std::sync::Arc::new(BackgroundProcessRuntime::for_test(registry));
+
+    let (first_tx, _first_rx) = tokio::sync::mpsc::unbounded_channel();
+    let first_binding = runtime.bind_chat_event_sender(first_tx);
+    // 新 chat 覆盖绑定。
+    let (second_tx, mut second_rx) = tokio::sync::mpsc::unbounded_channel();
+    let _second_binding = runtime.bind_chat_event_sender(second_tx);
+
+    // 旧 guard 释放不得清掉新绑定（generation 校验）。
+    drop(first_binding);
+    runtime.emit_active_count();
+    assert!(
+        second_rx.try_recv().is_ok(),
+        "旧 guard 释放后新绑定仍须可达"
+    );
 }

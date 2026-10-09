@@ -61,10 +61,10 @@ pub const KIND_MEMORY_UPDATED: &str = "memory_updated";
 /// per-message 记忆主动召回（System One 重排后的相关记忆）。
 pub const KIND_MEMORY_RECALL: &str = "memory_recall";
 
-/// 后台任务完成通知（#252，事件类，OnEvent 触发）。
-pub const KIND_BACKGROUND_TASK: &str = "background_task";
+/// 后台进程完成通知（#252，事件类，OnEvent 触发）。
+pub const KIND_BACKGROUND_PROCESS: &str = "background_process";
 
-/// 注入优先级缺省：事件类（后台任务完成、memory 更新）最高。
+/// 注入优先级缺省：事件类（后台进程完成、memory 更新）最高。
 pub const PRIORITY_EVENT: i32 = 300;
 
 /// 注入优先级缺省：任务状态类。

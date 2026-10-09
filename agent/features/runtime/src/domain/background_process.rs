@@ -1,6 +1,6 @@
-//! 后台任务领域模型（tool call 统一后台任务模型）。
+//! 后台进程领域模型（tool call 统一后台进程模型）。
 //!
-//! 所有 tool call 派发即登记为后台任务：前台等待只是快路径视图，
+//! 所有 tool call 派发即登记为后台进程：前台等待只是快路径视图，
 //! 超过阈值自动转后台（占位结果 + 异步回注）。本模块只维护任务监督
 //! 视角的状态机与事实；逐 call 的执行事实（取消协议、重启恢复）仍由
 //! Context 的 `ToolCallReceiptData` 承担，两者以 `ToolCallIdentityData`
@@ -12,18 +12,18 @@ use std::time::SystemTime;
 
 use context::ToolCallIdentityData;
 use serde::{Deserialize, Serialize};
-use share::ids::BackgroundTaskId;
+use share::ids::BackgroundProcessId;
 
-/// 后台任务终态种类（任务监督视角；与 receipt 终态对齐但独立维护）。
+/// 后台进程终态种类（任务监督视角；与 receipt 终态对齐但独立维护）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BackgroundTaskTerminalKind {
+pub enum BackgroundProcessTerminalKind {
     /// 执行成功完成（快路径或后台）。
     Success,
     /// 执行失败。
     Failure,
     /// 转后台快照 deadline 到期，按硬超时收敛。
     TimedOut,
-    /// 经后台任务工具的 stop 请求停止。
+    /// 经后台进程工具的 stop 请求停止。
     Stopped,
     /// 任务随进程生命周期失效（重启 / 退出）。
     Invalidated {
@@ -40,9 +40,9 @@ pub enum BackgroundInvalidationReason {
     SessionRestored,
 }
 
-/// 后台任务状态机（单调推进，禁止回退）。
+/// 后台进程状态机（单调推进，禁止回退）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BackgroundTaskState {
+pub enum BackgroundProcessState {
     /// 已派发登记，前台等待中（快路径窗口内）。
     ForegroundWaiting,
     /// 超阈值转后台：执行仍在进行，占位结果已发布。
@@ -52,16 +52,16 @@ pub enum BackgroundTaskState {
         deadline_snapshot: Option<SystemTime>,
     },
     /// 终态。
-    Terminal(BackgroundTaskTerminalKind),
+    Terminal(BackgroundProcessTerminalKind),
 }
 
-/// 后台任务记录（跨 Run 的任务监督事实）。
+/// 后台进程记录（跨 Run 的任务监督事实）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BackgroundTaskRecord {
-    pub task_id: BackgroundTaskId,
+pub struct BackgroundProcessRecord {
+    pub task_id: BackgroundProcessId,
     pub identity: ToolCallIdentityData,
     pub invocation_summary: String,
-    pub state: BackgroundTaskState,
+    pub state: BackgroundProcessState,
     pub created_at: SystemTime,
     /// 首次进入终态的时刻（时长冻结依据；旧快照缺失时为 None）。
     #[serde(default)]
@@ -70,40 +70,40 @@ pub struct BackgroundTaskRecord {
 
 /// 状态推进结果：推进后的记录与是否发生变化。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BackgroundTaskAdvance {
-    pub record: BackgroundTaskRecord,
+pub struct BackgroundProcessAdvance {
+    pub record: BackgroundProcessRecord,
     pub changed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum BackgroundTaskTransitionError {
-    #[error("后台任务状态转换非法：{from:?} -> {to:?}")]
+pub enum BackgroundProcessTransitionError {
+    #[error("后台进程状态转换非法：{from:?} -> {to:?}")]
     InvalidTransition {
         from: &'static str,
         to: &'static str,
     },
-    #[error("后台任务已终态，禁止覆盖：{task_id}")]
+    #[error("后台进程已终态，禁止覆盖：{task_id}")]
     TerminalConflict { task_id: String },
 }
 
-impl BackgroundTaskState {
+impl BackgroundProcessState {
     fn phase_name(&self) -> &'static str {
         match self {
-            BackgroundTaskState::ForegroundWaiting => "ForegroundWaiting",
-            BackgroundTaskState::Backgrounded { .. } => "Backgrounded",
-            BackgroundTaskState::Terminal(_) => "Terminal",
+            BackgroundProcessState::ForegroundWaiting => "ForegroundWaiting",
+            BackgroundProcessState::Backgrounded { .. } => "Backgrounded",
+            BackgroundProcessState::Terminal(_) => "Terminal",
         }
     }
 }
 
-impl BackgroundTaskRecord {
+impl BackgroundProcessRecord {
     /// 派发即登记：任务记录从 ForegroundWaiting 起步。
     pub fn dispatch(identity: ToolCallIdentityData, invocation_summary: impl Into<String>) -> Self {
         Self {
-            task_id: BackgroundTaskId::new_v7(),
+            task_id: BackgroundProcessId::new_v7(),
             identity,
             invocation_summary: invocation_summary.into(),
-            state: BackgroundTaskState::ForegroundWaiting,
+            state: BackgroundProcessState::ForegroundWaiting,
             created_at: SystemTime::now(),
             finished_at: None,
         }
@@ -120,16 +120,16 @@ impl BackgroundTaskRecord {
     }
 
     pub fn is_backgrounded(&self) -> bool {
-        matches!(self.state, BackgroundTaskState::Backgrounded { .. })
+        matches!(self.state, BackgroundProcessState::Backgrounded { .. })
     }
 
     pub fn is_terminal(&self) -> bool {
-        matches!(self.state, BackgroundTaskState::Terminal(_))
+        matches!(self.state, BackgroundProcessState::Terminal(_))
     }
 
-    pub fn terminal_kind(&self) -> Option<BackgroundTaskTerminalKind> {
+    pub fn terminal_kind(&self) -> Option<BackgroundProcessTerminalKind> {
         match &self.state {
-            BackgroundTaskState::Terminal(kind) => Some(kind.clone()),
+            BackgroundProcessState::Terminal(kind) => Some(kind.clone()),
             _ => None,
         }
     }
@@ -138,10 +138,10 @@ impl BackgroundTaskRecord {
     /// Backgrounded → Terminal；相同状态幂等；Terminal 禁止覆盖。
     pub fn advance(
         self,
-        next: BackgroundTaskState,
-    ) -> Result<BackgroundTaskAdvance, BackgroundTaskTransitionError> {
+        next: BackgroundProcessState,
+    ) -> Result<BackgroundProcessAdvance, BackgroundProcessTransitionError> {
         if self.state == next {
-            return Ok(BackgroundTaskAdvance {
+            return Ok(BackgroundProcessAdvance {
                 record: self,
                 changed: false,
             });
@@ -149,32 +149,37 @@ impl BackgroundTaskRecord {
         let from = self.state.phase_name();
         let to = next.phase_name();
         let allowed = match (&self.state, &next) {
-            (BackgroundTaskState::ForegroundWaiting, BackgroundTaskState::Backgrounded { .. })
-            | (BackgroundTaskState::ForegroundWaiting, BackgroundTaskState::Terminal(_))
-            | (BackgroundTaskState::Backgrounded { .. }, BackgroundTaskState::Terminal(_)) => true,
+            (
+                BackgroundProcessState::ForegroundWaiting,
+                BackgroundProcessState::Backgrounded { .. },
+            )
+            | (BackgroundProcessState::ForegroundWaiting, BackgroundProcessState::Terminal(_))
+            | (BackgroundProcessState::Backgrounded { .. }, BackgroundProcessState::Terminal(_)) => {
+                true
+            }
             // 重复转后台幂等：已 Backgrounded 时忽略新时间戳（首次数据为准）。
             // Backgrounded 携带时间字段，全等比较在两次 now() 间天然不稳定。
             (
-                BackgroundTaskState::Backgrounded { .. },
-                BackgroundTaskState::Backgrounded { .. },
+                BackgroundProcessState::Backgrounded { .. },
+                BackgroundProcessState::Backgrounded { .. },
             ) => {
-                return Ok(BackgroundTaskAdvance {
+                return Ok(BackgroundProcessAdvance {
                     record: self,
                     changed: false,
                 });
             }
-            (BackgroundTaskState::Terminal(_), _) => {
-                return Err(BackgroundTaskTransitionError::TerminalConflict {
+            (BackgroundProcessState::Terminal(_), _) => {
+                return Err(BackgroundProcessTransitionError::TerminalConflict {
                     task_id: self.task_id.as_str().to_string(),
                 });
             }
             _ => false,
         };
         if !allowed {
-            return Err(BackgroundTaskTransitionError::InvalidTransition { from, to });
+            return Err(BackgroundProcessTransitionError::InvalidTransition { from, to });
         }
-        Ok(BackgroundTaskAdvance {
-            record: BackgroundTaskRecord {
+        Ok(BackgroundProcessAdvance {
+            record: BackgroundProcessRecord {
                 state: next,
                 ..self
             },
@@ -183,19 +188,19 @@ impl BackgroundTaskRecord {
     }
 }
 
-impl fmt::Display for BackgroundTaskTerminalKind {
+impl fmt::Display for BackgroundProcessTerminalKind {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let text = match self {
-            BackgroundTaskTerminalKind::Success => "success",
-            BackgroundTaskTerminalKind::Failure => "failure",
-            BackgroundTaskTerminalKind::TimedOut => "timed_out",
-            BackgroundTaskTerminalKind::Stopped => "stopped",
-            BackgroundTaskTerminalKind::Invalidated { .. } => "invalidated",
+            BackgroundProcessTerminalKind::Success => "success",
+            BackgroundProcessTerminalKind::Failure => "failure",
+            BackgroundProcessTerminalKind::TimedOut => "timed_out",
+            BackgroundProcessTerminalKind::Stopped => "stopped",
+            BackgroundProcessTerminalKind::Invalidated { .. } => "invalidated",
         };
         formatter.write_str(text)
     }
 }
 
 #[cfg(test)]
-#[path = "background_task_tests.rs"]
+#[path = "background_process_tests.rs"]
 mod tests;

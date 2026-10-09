@@ -1,5 +1,5 @@
 //! Wakeup Run 内部续延（#252）：空输入 Run 首次 drain 返回
-//! `InternalContinuation(BackgroundTaskWakeup)` 使 engine 执行 step
+//! `InternalContinuation(BackgroundProcessWakeup)` 使 engine 执行 step
 //! （build_window 消费 reminder → LLM 调用），而非 `drain_or_seal`
 //! 空批即 `EmptyAndSealed` 收口、完成事实随 Run 丢弃。
 
@@ -63,7 +63,7 @@ fn adapter_without_user_input() -> BufferedInputAdapter<NoOpInput> {
 #[tokio::test]
 async fn wakeup_continuation_yields_internal_continuation_before_seal() {
     let mut adapter = adapter_without_user_input();
-    adapter.continuation.install_background_task_wakeup();
+    adapter.continuation.install_background_process_wakeup();
 
     let outcome = adapter
         .drain_input(DrainEpoch(0))
@@ -77,8 +77,8 @@ async fn wakeup_continuation_yields_internal_continuation_before_seal() {
                 "wakeup Run 无用户输入，batch 应为空（step 由续延驱动）"
             );
             assert!(
-                matches!(kind, InternalContinuationKind::BackgroundTaskWakeup),
-                "kind 应为 BackgroundTaskWakeup，实际 {kind:?}"
+                matches!(kind, InternalContinuationKind::BackgroundProcessWakeup),
+                "kind 应为 BackgroundProcessWakeup，实际 {kind:?}"
             );
         }
         other => panic!("应返回 InternalContinuation，实际 {other:?}"),
@@ -98,7 +98,7 @@ async fn wakeup_continuation_yields_internal_continuation_before_seal() {
 #[tokio::test]
 async fn wakeup_continuation_takes_priority_with_buffered_user_input() {
     let mut adapter = adapter_without_user_input();
-    adapter.continuation.install_background_task_wakeup();
+    adapter.continuation.install_background_process_wakeup();
     let accepted_input = crate::application::loop_engine::AcceptedUserInput::from_event(
         ChatInputEvent::UserMessage {
             id: share::ids::InputId::new_v7(),
@@ -118,8 +118,8 @@ async fn wakeup_continuation_takes_priority_with_buffered_user_input() {
     match outcome {
         DrainOutcome::InternalContinuation { kind, batch, .. } => {
             assert!(
-                matches!(kind, InternalContinuationKind::BackgroundTaskWakeup),
-                "kind 应为 BackgroundTaskWakeup"
+                matches!(kind, InternalContinuationKind::BackgroundProcessWakeup),
+                "kind 应为 BackgroundProcessWakeup"
             );
             assert_eq!(batch.len(), 1, "已缓冲用户消息应随续延批一起交付，不得丢弃");
         }

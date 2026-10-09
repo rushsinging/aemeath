@@ -37,31 +37,31 @@ pub async fn build_static_prompt(
         prompt.push_str("\n\n");
         prompt.push_str(&model_guidance);
     }
-    // #252 PR3：后台任务特性说明（仅阈值启用时注入；显式 0 = 禁用后台化
+    // #252 PR3：后台进程特性说明（仅阈值启用时注入；显式 0 = 禁用后台化
     // 的会话不注入）。统一模型 / 占位语义 / 查询与停止用法 / sequential 提示。
     let background_threshold = config_file
         .map(|snap| snap.tool_background_threshold_secs())
         .unwrap_or(0);
     if background_threshold > 0 {
         prompt.push_str("\n\n");
-        prompt.push_str(background_tasks_guidance_section(language));
+        prompt.push_str(background_processes_guidance_section(language));
     }
     prompt
 }
 
-/// 后台任务特性 system prompt 段（#252 D6 / 设计 §8，双语）。
-pub(crate) fn background_tasks_guidance_section(lang: &str) -> &'static str {
+/// 后台进程特性 system prompt 段（#252 D6 / 设计 §8，双语）。
+pub(crate) fn background_processes_guidance_section(lang: &str) -> &'static str {
     match lang {
         "zh" => {
-            "# 后台任务\n\
+            "# 后台进程\n\
             超过前台等待阈值（当前会话已启用）的 tool call 会自动转后台运行：你会先收到一条占位结果（标注任务已转后台、非终态），任务完成会主动通知你并回注结果，届时可继续处理。\n\
-            - 用 BackgroundTaskList / BackgroundTaskStatus / BackgroundTaskLogs 查询任务列表、状态与日志（Logs 支持增量游标），用 BackgroundTaskStop 请求停止。\n\
+            - 用 BackgroundProcessList / BackgroundProcessStatus / BackgroundProcessLogs 查询任务列表、状态与日志（Logs 支持增量游标），用 BackgroundProcessStop 请求停止。\n\
             - sequential-only 工具的前序调用转后台后，同轮后续命令可能与未完成的前序并行；有顺序依赖时应等待完成通知或先查询状态。"
         }
         _ => {
             "# Background tasks\n\
             Tool calls that exceed the foreground waiting threshold (enabled in this session) are automatically moved to the background: you first receive a placeholder result (marked as moved to the background, not final), and you will be notified when the task completes.\n\
-            - Use BackgroundTaskList / BackgroundTaskStatus / BackgroundTaskLogs to list tasks, check status, or read logs (Logs supports an incremental cursor); use BackgroundTaskStop to request a stop.\n\
+            - Use BackgroundProcessList / BackgroundProcessStatus / BackgroundProcessLogs to list tasks, check status, or read logs (Logs supports an incremental cursor); use BackgroundProcessStop to request a stop.\n\
             - When a sequential-only predecessor has been moved to the background, later commands in the same round may run concurrently with it; if order matters, wait for the completion notification or query the status first."
         }
     }

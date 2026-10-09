@@ -178,7 +178,7 @@ fn live_status_spinner_fixture_fields(
             phase_elapsed_secs: phase_text.map(|_| phase_elapsed_secs),
             phase_text: phase_text.map(str::to_string),
             detail_text: None,
-            background_tasks_active: 0,
+            background_processes_active: 0,
         }),
         queued_lines: Vec::new(),
         task_lines: Vec::new(),

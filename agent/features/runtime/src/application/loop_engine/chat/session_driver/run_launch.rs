@@ -448,7 +448,7 @@ where
                 let manual_compaction_run =
                     matches!(idle_result, IdleResult::ManualCompactionRequested);
                 let background_wakeup_run =
-                    matches!(idle_result, IdleResult::BackgroundTaskWakeup);
+                    matches!(idle_result, IdleResult::BackgroundProcessWakeup);
                 let manual_reflection_run =
                     matches!(idle_result, IdleResult::ManualReflectionRequested);
                 // 手动反思的材料快照必须在 run launch 装配前取自当前 committed session
@@ -493,15 +493,15 @@ where
                         manual_compaction_requested = false;
                         (ChatId::new_v7().to_string(), Vec::new())
                     }
-                    IdleResult::BackgroundTaskWakeup => {
-                        // 无用户输入的唤醒 Run（#252）：完成事实由 background_task
+                    IdleResult::BackgroundProcessWakeup => {
+                        // 无用户输入的唤醒 Run（#252）：完成事实由 background_process
                         // reminder 在本轮注入（D11：不合成用户 turn）。
                         // 用户侧系统卡片（设计 §8：用户清楚看到 agent 为何自己动起来）。
                         sink.send_event(RuntimeStreamEvent::CommandResultText {
                             text: if language == "zh" {
-                                "⏙ 后台任务已完成，已唤醒 agent 继续（详情可用 BackgroundTaskList 等工具查询）".to_string()
+                                "⏙ 后台进程已完成，已唤醒 agent 继续（详情可用 BackgroundProcessList 等工具查询）".to_string()
                             } else {
-                                "⏙ Background task completed; agent resumed automatically (inspect with the BackgroundTaskList tool)".to_string()
+                                "⏙ Background process completed; agent resumed automatically (inspect with the BackgroundProcessList tool)".to_string()
                             },
                             is_error: false,
                         })
@@ -610,7 +610,7 @@ where
                     } else if manual_reflection_run {
                         RunSpec::manual_reflection()
                     } else if background_wakeup_run {
-                        RunSpec::background_task_wakeup()
+                        RunSpec::background_process_wakeup()
                     } else {
                         RunSpec::main()
                     },
@@ -690,7 +690,7 @@ where
                     // drain 以 InternalContinuation 驱动 step（reminder 注入
                     // 完成事实 → LLM 调用）；否则 drain_or_seal 空批即
                     // EmptyAndSealed 收口，完成事实随 Run 丢弃。
-                    input_continuation.install_background_task_wakeup();
+                    input_continuation.install_background_process_wakeup();
                 }
                 let mut input_source =
                     crate::application::loop_engine::input_strategy::BufferedInputAdapter {
@@ -746,11 +746,11 @@ where
                             share::config::TaskListConfig::default().max_lines,
                         ),
                     ),
-                    // #252 PR2：后台任务完成通知（OnEvent；Wakeup Run 内的
+                    // #252 PR2：后台进程完成通知（OnEvent；Wakeup Run 内的
                     // 完成事实注入同源——build take 语义保证只通知一次）。
                     std::sync::Arc::new(
-                        crate::application::loop_engine::chat::reminder_sources::BackgroundTaskReminderSource::new(
-                            shell.background_task_supervisor(),
+                        crate::application::loop_engine::chat::reminder_sources::BackgroundProcessReminderSource::new(
+                            shell.background_process_supervisor(),
                         ),
                     ),
                 ];
@@ -826,12 +826,12 @@ where
                 );
                 reminder_context_port.reminder_run_started(&run_id);
                 // Wakeup Run（#252 D11）：本 Run 无用户消息、无 handle_event
-                // 触发点——启动时显式触发 background_task 事件，把监督器内
+                // 触发点——启动时显式触发 background_process 事件，把监督器内
                 // 「终态未通知」事实经 OnEvent source build（take）进注入队列。
                 if background_wakeup_run {
                     reminder_context_port.reminder_handle_event(
                         &run_id,
-                        &context::ReminderEventSource::background_task(),
+                        &context::ReminderEventSource::background_process(),
                     );
                 }
                 let context_request =
@@ -878,7 +878,7 @@ where
                     max_tool_concurrency,
                     agent_semaphore.clone(),
                     &session_id,
-                    Some(shell.background_tasks.clone()),
+                    Some(shell.background_processes.clone()),
                     &run_id,
                     tool_result_materializer.clone(),
                 );

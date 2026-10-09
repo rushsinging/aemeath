@@ -8,33 +8,34 @@ use crate::app::FeatureGateways;
 
 pub(crate) use runtime::AgentClientImpl;
 
-/// #252 PR3：后台任务端口源（可换绑——session 创建后绑定真实实现）。
-struct WiringBackgroundTaskSource {
-    slot:
-        std::sync::Arc<std::sync::RwLock<Option<std::sync::Arc<dyn tools::BackgroundTaskAccess>>>>,
+/// #252 PR3：后台进程端口源（可换绑——session 创建后绑定真实实现）。
+struct WiringBackgroundProcessSource {
+    slot: std::sync::Arc<
+        std::sync::RwLock<Option<std::sync::Arc<dyn tools::BackgroundProcessAccess>>>,
+    >,
 }
 
-impl tools::BackgroundTaskAccessSource for WiringBackgroundTaskSource {
-    fn current(&self) -> std::sync::Arc<dyn tools::BackgroundTaskAccess> {
+impl tools::BackgroundProcessAccessSource for WiringBackgroundProcessSource {
+    fn current(&self) -> std::sync::Arc<dyn tools::BackgroundProcessAccess> {
         self.slot
             .read()
             .unwrap_or_else(|error| error.into_inner())
             .clone()
-            .unwrap_or_else(|| std::sync::Arc::new(UnboundBackgroundTaskAccess))
+            .unwrap_or_else(|| std::sync::Arc::new(UnboundBackgroundProcessAccess))
     }
 }
 
 /// 未绑定期的空实现（安全降级：空列表 / 未找到 / stop 报错）。
-struct UnboundBackgroundTaskAccess;
+struct UnboundBackgroundProcessAccess;
 
-impl tools::BackgroundTaskAccess for UnboundBackgroundTaskAccess {
-    fn list_tasks(&self) -> Vec<tools::types::background_tasks::BackgroundTaskSummaryData> {
+impl tools::BackgroundProcessAccess for UnboundBackgroundProcessAccess {
+    fn list_tasks(&self) -> Vec<tools::types::background_processes::BackgroundProcessSummaryData> {
         Vec::new()
     }
     fn task_status(
         &self,
         _task_id: &str,
-    ) -> Option<tools::types::background_tasks::BackgroundTaskDetailData> {
+    ) -> Option<tools::types::background_processes::BackgroundProcessDetailData> {
         None
     }
     fn read_task_log(
@@ -42,13 +43,13 @@ impl tools::BackgroundTaskAccess for UnboundBackgroundTaskAccess {
         _task_id: &str,
         _cursor: Option<u64>,
         _max_bytes: usize,
-    ) -> Option<tools::types::background_tasks::BackgroundTaskLogData> {
+    ) -> Option<tools::types::background_processes::BackgroundProcessLogData> {
         None
     }
     fn stop_task(
         &self,
         _task_id: &str,
-    ) -> Result<tools::types::background_tasks::BackgroundTaskStopData, String> {
+    ) -> Result<tools::types::background_processes::BackgroundProcessStopData, String> {
         Err("background tasks are not available in this session".to_string())
     }
 }
@@ -75,7 +76,7 @@ fn wire_runtime_tool_assembly(
     memory_source: Arc<dyn tools::MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
     skill_loader: Arc<dyn tools::published::skill::SkillLoadPort>,
-    background_source: Arc<dyn tools::BackgroundTaskAccessSource>,
+    background_source: Arc<dyn tools::BackgroundProcessAccessSource>,
     snapshot: &share::config::domain::snapshot::ConfigSnapshot,
     agents_dir: &std::path::Path,
     context_size: usize,
@@ -303,7 +304,7 @@ pub(crate) async fn from_args_with_gateways(
         initial_provider.resolved_model().model.context_window,
     );
     let background_slot: std::sync::Arc<
-        std::sync::RwLock<Option<std::sync::Arc<dyn tools::BackgroundTaskAccess>>>,
+        std::sync::RwLock<Option<std::sync::Arc<dyn tools::BackgroundProcessAccess>>>,
     > = std::sync::Arc::new(std::sync::RwLock::new(None));
     let tool_assembly = wire_runtime_tool_assembly(
         task_wiring.access(),
@@ -312,7 +313,7 @@ pub(crate) async fn from_args_with_gateways(
         }),
         workspace.control(),
         skill_loader.clone(),
-        Arc::new(WiringBackgroundTaskSource {
+        Arc::new(WiringBackgroundProcessSource {
             slot: background_slot.clone(),
         }),
         &config.reader().committed_snapshot(),

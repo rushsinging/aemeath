@@ -378,7 +378,7 @@ pub enum InternalContinuationKind {
     /// driven by the reminder pipeline (completion facts injected at the
     /// window tail). Without this continuation an empty first drain would
     /// seal the Run before the model is ever invoked.
-    BackgroundTaskWakeup,
+    BackgroundProcessWakeup,
 }
 
 #[derive(Debug, thiserror::Error)]

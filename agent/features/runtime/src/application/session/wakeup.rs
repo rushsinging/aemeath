@@ -1,10 +1,10 @@
-//! 后台任务唤醒信箱（#252 PR2）：无 active Run 时的 Wakeup 信号通道。
+//! 后台进程唤醒信箱（#252 PR2）：无 active Run 时的 Wakeup 信号通道。
 //!
 //! 任务终态若此刻没有 active Main Run，完成通知无法经 reminder 注入
-//! （reminder 管线是 Run 级的）——改由本信箱把「有后台任务完成」信号
+//! （reminder 管线是 Run 级的）——改由本信箱把「有后台进程完成」信号
 //! 送达 session driver 的 idle 等待点，驱动一次 Wakeup Run
-//! （`RunIntent::BackgroundTaskWakeup`）。信号是纯触发语义：完成事实
-//! 由 `background_task` reminder 在 Wakeup Run 内注入（D11），信箱不
+//! （`RunIntent::BackgroundProcessWakeup`）。信号是纯触发语义：完成事实
+//! 由 `background_process` reminder 在 Wakeup Run 内注入（D11），信箱不
 //! 携带任务数据。
 
 use tokio::sync::mpsc;

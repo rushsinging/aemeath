@@ -1,4 +1,4 @@
-//! background_task — 后台任务监督（tool call 统一后台任务模型）。
+//! background_process — 后台进程监督（tool call 统一后台进程模型）。
 //!
 //! 对应设计：`docs/design/02-modules/runtime/09-background-tasks.md`。
 //!

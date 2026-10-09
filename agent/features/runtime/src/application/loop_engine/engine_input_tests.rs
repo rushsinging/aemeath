@@ -1690,8 +1690,8 @@ mod interaction_routing {
 
 // ── #252 wakeup Run：空批 InternalContinuation 必须执行 step ─────────
 
-/// 后台任务 wakeup Run 无用户输入：首次 drain 携带空 batch 的
-/// `InternalContinuation(BackgroundTaskWakeup)`。engine 不得因空批
+/// 后台进程 wakeup Run 无用户输入：首次 drain 携带空 batch 的
+/// `InternalContinuation(BackgroundProcessWakeup)`。engine 不得因空批
 /// 收口——step 必须执行（模型被调用、reminder 注入窗口被构建），
 /// 这是完成事实到达 LLM 的唯一通道。
 #[tokio::test]
@@ -1701,7 +1701,7 @@ async fn engine_executes_step_for_empty_batch_background_wakeup_continuation() {
     let mut port = ScriptedScenario {
         drain_outcomes: VecDeque::from([
             DrainOutcome::InternalContinuation {
-                kind: InternalContinuationKind::BackgroundTaskWakeup,
+                kind: InternalContinuationKind::BackgroundProcessWakeup,
                 batch: Vec::new(),
                 epoch: DrainEpoch(0),
             },

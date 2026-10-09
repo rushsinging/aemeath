@@ -25,10 +25,10 @@ impl tools::MemoryPortSource for TestMemoryPortSource {
     }
 }
 
-fn noop_background_source() -> std::sync::Arc<dyn tools::BackgroundTaskAccessSource> {
+fn noop_background_source() -> std::sync::Arc<dyn tools::BackgroundProcessAccessSource> {
     struct NoopSource;
-    impl tools::BackgroundTaskAccessSource for NoopSource {
-        fn current(&self) -> std::sync::Arc<dyn tools::BackgroundTaskAccess> {
+    impl tools::BackgroundProcessAccessSource for NoopSource {
+        fn current(&self) -> std::sync::Arc<dyn tools::BackgroundProcessAccess> {
             unreachable!("background source 只作注册期占位，测试不调用")
         }
     }

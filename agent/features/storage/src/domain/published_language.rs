@@ -34,8 +34,12 @@ pub enum StorageNamespaceData {
     AuditUsage,
     Config,
     Workspace,
-    /// #252：后台任务账本（session 级快照，resume 失效对账与查询）。
-    BackgroundTask,
+    /// #252：后台进程账本（session 级快照，resume 失效对账与查询）。
+    BackgroundProcess,
+    /// #252：后台进程账本旧 namespace（Background Process 更名前的
+    /// `background-task`），仅 resume 读旧兜底使用，新写入一律
+    /// [`StorageNamespaceData::BackgroundProcess`]。
+    LegacyBackgroundTask,
 }
 
 impl StorageNamespaceData {
@@ -49,7 +53,8 @@ impl StorageNamespaceData {
             Self::AuditUsage => "audit-usage",
             Self::Config => "config",
             Self::Workspace => "workspace",
-            Self::BackgroundTask => "background-task",
+            Self::BackgroundProcess => "background-process",
+            Self::LegacyBackgroundTask => "background-task",
         }
     }
 
@@ -63,7 +68,8 @@ impl StorageNamespaceData {
             | Self::ToolResult
             | Self::Config
             | Self::Workspace
-            | Self::BackgroundTask => PreviousPolicy::Retain,
+            | Self::BackgroundProcess
+            | Self::LegacyBackgroundTask => PreviousPolicy::Retain,
         }
     }
 
@@ -77,7 +83,8 @@ impl StorageNamespaceData {
             | Self::ToolResult
             | Self::Config
             | Self::Workspace
-            | Self::BackgroundTask => DurabilityData::ProcessCrashSafe,
+            | Self::BackgroundProcess
+            | Self::LegacyBackgroundTask => DurabilityData::ProcessCrashSafe,
         }
     }
 

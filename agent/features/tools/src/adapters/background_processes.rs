@@ -1,11 +1,11 @@
-//! 后台任务工具族（#252）：list / status / logs / stop 四个独立 tool。
+//! 后台进程工具族（#252）：list / status / logs / stop 四个独立 tool。
 
-use crate::domain::background_task_port::BackgroundTaskAccessSource;
-use crate::domain::types::background_tasks::{
-    BackgroundTaskDetailData, BackgroundTaskListInput, BackgroundTaskListResult,
-    BackgroundTaskLogsInput, BackgroundTaskLogsResult, BackgroundTaskStatusInput,
-    BackgroundTaskStatusResult, BackgroundTaskStopInput, BackgroundTaskStopResult,
-    BackgroundTaskSummaryData,
+use crate::domain::background_process_port::BackgroundProcessAccessSource;
+use crate::domain::types::background_processes::{
+    BackgroundProcessDetailData, BackgroundProcessListInput, BackgroundProcessListResult,
+    BackgroundProcessLogsInput, BackgroundProcessLogsResult, BackgroundProcessStatusInput,
+    BackgroundProcessStatusResult, BackgroundProcessStopInput, BackgroundProcessStopResult,
+    BackgroundProcessSummaryData,
 };
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
@@ -13,33 +13,35 @@ use serde_json::Value;
 use std::sync::Arc;
 
 #[cfg(test)]
-#[path = "background_tasks_tests.rs"]
+#[path = "background_processes_tests.rs"]
 mod tests;
 
-/// `BackgroundTaskList`：列出活动与近期后台任务。
-pub struct BackgroundTaskListTool {
-    pub source: Arc<dyn BackgroundTaskAccessSource>,
+/// `BackgroundProcessList`：列出活动与近期后台进程。
+pub struct BackgroundProcessListTool {
+    pub source: Arc<dyn BackgroundProcessAccessSource>,
 }
 
 #[async_trait]
-impl TypedTool for BackgroundTaskListTool {
-    type Output = BackgroundTaskListResult;
+impl TypedTool for BackgroundProcessListTool {
+    type Output = BackgroundProcessListResult;
     fn name(&self) -> &str {
-        "BackgroundTaskList"
+        "BackgroundProcessList"
     }
     fn description(&self) -> &str {
-        share::i18n::tools::background::background_task_list("en")
+        share::i18n::tools::background::background_process_list("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
-        std::borrow::Cow::Borrowed(share::i18n::tools::background::background_task_list(lang))
+        std::borrow::Cow::Borrowed(share::i18n::tools::background::background_process_list(
+            lang,
+        ))
     }
     fn input_schema(&self) -> Value {
         use crate::domain::types::ToolSchema;
-        BackgroundTaskListInput::data_schema()
+        BackgroundProcessListInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use crate::domain::types::ToolSchema;
-        BackgroundTaskListResult::data_schema()
+        BackgroundProcessListResult::data_schema()
     }
     fn is_read_only(&self) -> bool {
         true
@@ -52,8 +54,8 @@ impl TypedTool for BackgroundTaskListTool {
         &self,
         input: Value,
         _ctx: &ToolExecutionContext,
-    ) -> TypedToolResult<BackgroundTaskListResult> {
-        if let Err(error) = serde_json::from_value::<BackgroundTaskListInput>(input) {
+    ) -> TypedToolResult<BackgroundProcessListResult> {
+        if let Err(error) = serde_json::from_value::<BackgroundProcessListInput>(input) {
             return TypedToolResult::error(format!("invalid input: {error}"));
         }
         let tasks = self.source.current().list_tasks();
@@ -62,7 +64,7 @@ impl TypedTool for BackgroundTaskListTool {
         } else {
             tasks
                 .iter()
-                .map(|summary: &BackgroundTaskSummaryData| {
+                .map(|summary: &BackgroundProcessSummaryData| {
                     format!(
                         "{} [{}] {} ({}ms)",
                         summary.task_id,
@@ -74,34 +76,36 @@ impl TypedTool for BackgroundTaskListTool {
                 .collect::<Vec<_>>()
                 .join("\n")
         };
-        TypedToolResult::success(text, BackgroundTaskListResult { tasks })
+        TypedToolResult::success(text, BackgroundProcessListResult { tasks })
     }
 }
 
-/// `BackgroundTaskStatus`：单任务详情。
-pub struct BackgroundTaskStatusTool {
-    pub source: Arc<dyn BackgroundTaskAccessSource>,
+/// `BackgroundProcessStatus`：单任务详情。
+pub struct BackgroundProcessStatusTool {
+    pub source: Arc<dyn BackgroundProcessAccessSource>,
 }
 
 #[async_trait]
-impl TypedTool for BackgroundTaskStatusTool {
-    type Output = BackgroundTaskStatusResult;
+impl TypedTool for BackgroundProcessStatusTool {
+    type Output = BackgroundProcessStatusResult;
     fn name(&self) -> &str {
-        "BackgroundTaskStatus"
+        "BackgroundProcessStatus"
     }
     fn description(&self) -> &str {
-        share::i18n::tools::background::background_task_status("en")
+        share::i18n::tools::background::background_process_status("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
-        std::borrow::Cow::Borrowed(share::i18n::tools::background::background_task_status(lang))
+        std::borrow::Cow::Borrowed(share::i18n::tools::background::background_process_status(
+            lang,
+        ))
     }
     fn input_schema(&self) -> Value {
         use crate::domain::types::ToolSchema;
-        BackgroundTaskStatusInput::data_schema()
+        BackgroundProcessStatusInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use crate::domain::types::ToolSchema;
-        BackgroundTaskStatusResult::data_schema()
+        BackgroundProcessStatusResult::data_schema()
     }
     fn is_read_only(&self) -> bool {
         true
@@ -114,22 +118,22 @@ impl TypedTool for BackgroundTaskStatusTool {
         &self,
         input: Value,
         _ctx: &ToolExecutionContext,
-    ) -> TypedToolResult<BackgroundTaskStatusResult> {
-        let args: BackgroundTaskStatusInput = match serde_json::from_value(input) {
+    ) -> TypedToolResult<BackgroundProcessStatusResult> {
+        let args: BackgroundProcessStatusInput = match serde_json::from_value(input) {
             Ok(args) => args,
             Err(error) => return TypedToolResult::error(format!("invalid input: {error}")),
         };
         match self.source.current().task_status(&args.task_id) {
             Some(detail) => TypedToolResult::success(
                 status_text(&detail),
-                BackgroundTaskStatusResult { detail },
+                BackgroundProcessStatusResult { detail },
             ),
             None => TypedToolResult::error(format!("Task not found: {}", args.task_id)),
         }
     }
 }
 
-fn status_text(detail: &BackgroundTaskDetailData) -> String {
+fn status_text(detail: &BackgroundProcessDetailData) -> String {
     format!(
         "{} [{}] {} — deadline in {:?}ms, log bytes {}",
         detail.summary.task_id,
@@ -140,30 +144,32 @@ fn status_text(detail: &BackgroundTaskDetailData) -> String {
     )
 }
 
-/// `BackgroundTaskLogs`：任务日志读取（增量游标）。
-pub struct BackgroundTaskLogsTool {
-    pub source: Arc<dyn BackgroundTaskAccessSource>,
+/// `BackgroundProcessLogs`：任务日志读取（增量游标）。
+pub struct BackgroundProcessLogsTool {
+    pub source: Arc<dyn BackgroundProcessAccessSource>,
 }
 
 #[async_trait]
-impl TypedTool for BackgroundTaskLogsTool {
-    type Output = BackgroundTaskLogsResult;
+impl TypedTool for BackgroundProcessLogsTool {
+    type Output = BackgroundProcessLogsResult;
     fn name(&self) -> &str {
-        "BackgroundTaskLogs"
+        "BackgroundProcessLogs"
     }
     fn description(&self) -> &str {
-        share::i18n::tools::background::background_task_logs("en")
+        share::i18n::tools::background::background_process_logs("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
-        std::borrow::Cow::Borrowed(share::i18n::tools::background::background_task_logs(lang))
+        std::borrow::Cow::Borrowed(share::i18n::tools::background::background_process_logs(
+            lang,
+        ))
     }
     fn input_schema(&self) -> Value {
         use crate::domain::types::ToolSchema;
-        BackgroundTaskLogsInput::data_schema()
+        BackgroundProcessLogsInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use crate::domain::types::ToolSchema;
-        BackgroundTaskLogsResult::data_schema()
+        BackgroundProcessLogsResult::data_schema()
     }
     fn is_read_only(&self) -> bool {
         true
@@ -176,8 +182,8 @@ impl TypedTool for BackgroundTaskLogsTool {
         &self,
         input: Value,
         _ctx: &ToolExecutionContext,
-    ) -> TypedToolResult<BackgroundTaskLogsResult> {
-        let args: BackgroundTaskLogsInput = match serde_json::from_value(input) {
+    ) -> TypedToolResult<BackgroundProcessLogsResult> {
+        let args: BackgroundProcessLogsInput = match serde_json::from_value(input) {
             Ok(args) => args,
             Err(error) => return TypedToolResult::error(format!("invalid input: {error}")),
         };
@@ -191,37 +197,39 @@ impl TypedTool for BackgroundTaskLogsTool {
             .read_task_log(&args.task_id, args.cursor, max_bytes)
         {
             Some(log) => {
-                TypedToolResult::success(log.text.clone(), BackgroundTaskLogsResult { log })
+                TypedToolResult::success(log.text.clone(), BackgroundProcessLogsResult { log })
             }
             None => TypedToolResult::error(format!("Task not found: {}", args.task_id)),
         }
     }
 }
 
-/// `BackgroundTaskStop`：请求停止（发 cancel 信号，真实终态由执行体收口）。
-pub struct BackgroundTaskStopTool {
-    pub source: Arc<dyn BackgroundTaskAccessSource>,
+/// `BackgroundProcessStop`：请求停止（发 cancel 信号，真实终态由执行体收口）。
+pub struct BackgroundProcessStopTool {
+    pub source: Arc<dyn BackgroundProcessAccessSource>,
 }
 
 #[async_trait]
-impl TypedTool for BackgroundTaskStopTool {
-    type Output = BackgroundTaskStopResult;
+impl TypedTool for BackgroundProcessStopTool {
+    type Output = BackgroundProcessStopResult;
     fn name(&self) -> &str {
-        "BackgroundTaskStop"
+        "BackgroundProcessStop"
     }
     fn description(&self) -> &str {
-        share::i18n::tools::background::background_task_stop("en")
+        share::i18n::tools::background::background_process_stop("en")
     }
     fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
-        std::borrow::Cow::Borrowed(share::i18n::tools::background::background_task_stop(lang))
+        std::borrow::Cow::Borrowed(share::i18n::tools::background::background_process_stop(
+            lang,
+        ))
     }
     fn input_schema(&self) -> Value {
         use crate::domain::types::ToolSchema;
-        BackgroundTaskStopInput::data_schema()
+        BackgroundProcessStopInput::data_schema()
     }
     fn data_schema(&self) -> Value {
         use crate::domain::types::ToolSchema;
-        BackgroundTaskStopResult::data_schema()
+        BackgroundProcessStopResult::data_schema()
     }
     fn is_read_only(&self) -> bool {
         false
@@ -234,15 +242,15 @@ impl TypedTool for BackgroundTaskStopTool {
         &self,
         input: Value,
         _ctx: &ToolExecutionContext,
-    ) -> TypedToolResult<BackgroundTaskStopResult> {
-        let args: BackgroundTaskStopInput = match serde_json::from_value(input) {
+    ) -> TypedToolResult<BackgroundProcessStopResult> {
+        let args: BackgroundProcessStopInput = match serde_json::from_value(input) {
             Ok(args) => args,
             Err(error) => return TypedToolResult::error(format!("invalid input: {error}")),
         };
         match self.source.current().stop_task(&args.task_id) {
             Ok(stop) => TypedToolResult::success(
                 format!("stop requested: {} state={}", args.task_id, stop.state),
-                BackgroundTaskStopResult {
+                BackgroundProcessStopResult {
                     task_id: args.task_id,
                     stop,
                 },

@@ -186,7 +186,7 @@ fn test_input_id_serde_roundtrip_preserves_uuid() {
     assert_eq!(restored, original);
 }
 
-// ── 前缀 typed id（wanaka 方向，#252 先接入 BackgroundTaskId） ────────
+// ── 前缀 typed id（wanaka 方向，#252 先接入 BackgroundProcessId） ────────
 
 #[test]
 fn typed_id_generates_prefix_separator_and_base62_snowflake() {
@@ -228,20 +228,28 @@ fn typed_ids_are_lexicographically_chronological() {
 }
 
 #[test]
-fn background_task_id_is_prefixed_form_with_typed_parse() {
-    use crate::ids::BackgroundTaskId;
-    let task_id = BackgroundTaskId::new_v7();
-    let text = task_id.as_str();
-    assert!(text.starts_with("task_"), "本体即前缀形态：{text}");
-    assert!(crate::ids::is_typed_id(text, "task"));
+fn background_process_id_is_prefixed_form_with_typed_parse() {
+    use crate::ids::BackgroundProcessId;
+    let process_id = BackgroundProcessId::new_v7();
+    let text = process_id.as_str();
+    assert!(text.starts_with("process_"), "本体即前缀形态：{text}");
+    assert!(crate::ids::is_typed_id(text, "process"));
 
-    let parsed = BackgroundTaskId::parse(text).expect("合法形态可解析");
-    assert_eq!(parsed, task_id);
+    let parsed = BackgroundProcessId::parse(text).expect("合法形态可解析");
+    assert_eq!(parsed, process_id);
+
+    // 读旧：Background Process 更名前的 `task_` 旧前缀快照仍可解析
+    // （历史账本 resume 兼容；新写入一律 `process_`）。
+    let legacy_text = format!("task_{}", &text["process_".len()..]);
+    assert!(
+        BackgroundProcessId::parse(&legacy_text).is_ok(),
+        "旧前缀 task_ 快照可解析：{legacy_text}"
+    );
 
     // 跨种类/坏形态拒绝。
-    assert!(BackgroundTaskId::parse("run_018f3a2b0d0000000000000000000000").is_err());
-    assert!(BackgroundTaskId::parse("task-not-a-suffix").is_err());
-    assert!(BackgroundTaskId::parse("").is_err());
+    assert!(BackgroundProcessId::parse("run_018f3a2b0d0000000000000000000000").is_err());
+    assert!(BackgroundProcessId::parse("task-not-a-suffix").is_err());
+    assert!(BackgroundProcessId::parse("").is_err());
 }
 
 // ── #1884：雪花生成与 base62 编解码 ─────────────────────────────────

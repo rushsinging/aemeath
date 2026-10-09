@@ -259,8 +259,8 @@ pub enum RuntimeStreamEvent {
     RuntimeStatusChanged {
         status: Box<sdk::RuntimeStatusView>,
     },
-    /// #252：后台任务活动数变化（spinner 显示）。
-    BackgroundTaskCountChanged {
+    /// #252：后台进程活动数变化（spinner 显示）。
+    BackgroundProcessCountChanged {
         active: usize,
     },
 }

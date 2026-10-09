@@ -513,50 +513,50 @@ fn render_invocation_reminder_body_covers_all_kinds_bilingually() {
 }
 
 #[test]
-fn background_task_completed_kind_and_render_are_bilingual() {
-    let data = crate::domain::InvocationReminderData::background_task_completed(vec![
-        crate::domain::BackgroundTaskReminderItemData {
+fn background_process_completed_kind_and_render_are_bilingual() {
+    let data = crate::domain::InvocationReminderData::background_process_completed(vec![
+        crate::domain::BackgroundProcessReminderItemData {
             task_id: "task-01a2b3c4".to_string(),
             tool_name: "Bash".to_string(),
-            status: crate::domain::BackgroundTaskCompletionStatus::Succeeded,
+            status: crate::domain::BackgroundProcessCompletionStatus::Succeeded,
             output_tail: "test result: ok. 3 passed".to_string(),
         },
-        crate::domain::BackgroundTaskReminderItemData {
+        crate::domain::BackgroundProcessReminderItemData {
             task_id: "task-05e6f7a8".to_string(),
             tool_name: "Agent".to_string(),
-            status: crate::domain::BackgroundTaskCompletionStatus::Failed,
+            status: crate::domain::BackgroundProcessCompletionStatus::Failed,
             output_tail: String::new(),
         },
     ]);
-    assert_eq!(data.kind(), "background_task");
+    assert_eq!(data.kind(), "background_process");
 
     let zh = render_invocation_reminder_body(&data, "zh");
-    assert!(zh.contains("后台任务已完成"), "zh 标题：{zh}");
+    assert!(zh.contains("后台进程已完成"), "zh 标题：{zh}");
     assert!(zh.contains("task-01a2b3c4"));
     assert!(zh.contains("Bash"));
     assert!(zh.contains("成功"));
     assert!(zh.contains("失败"));
     assert!(zh.contains("test result: ok. 3 passed"));
     assert!(
-        zh.contains("日志或后续输出可用 BackgroundTaskList / BackgroundTaskLogs 查询"),
+        zh.contains("日志或后续输出可用 BackgroundProcessList / BackgroundProcessLogs 查询"),
         "引导查询（新工具名）：{zh}"
     );
 
     let en = render_invocation_reminder_body(&data, "en");
-    assert!(en.contains("Background task completed"), "en 标题：{en}");
+    assert!(en.contains("Background process completed"), "en 标题：{en}");
     assert!(en.contains("succeeded"));
     assert!(en.contains("failed"));
-    assert!(en.contains("BackgroundTaskLogs"));
+    assert!(en.contains("BackgroundProcessLogs"));
 }
 
 #[test]
-fn background_task_item_fields_are_serializable_for_fingerprint() {
+fn background_process_item_fields_are_serializable_for_fingerprint() {
     // SkipIfUnchanged fingerprint 对 data serde 全量计算，字段必须可序列化。
-    let data = crate::domain::InvocationReminderData::background_task_completed(vec![
-        crate::domain::BackgroundTaskReminderItemData {
+    let data = crate::domain::InvocationReminderData::background_process_completed(vec![
+        crate::domain::BackgroundProcessReminderItemData {
             task_id: "task-1".to_string(),
             tool_name: "Bash".to_string(),
-            status: crate::domain::BackgroundTaskCompletionStatus::TimedOut,
+            status: crate::domain::BackgroundProcessCompletionStatus::TimedOut,
             output_tail: "x".to_string(),
         },
     ]);

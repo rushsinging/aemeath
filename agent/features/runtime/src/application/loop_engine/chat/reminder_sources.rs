@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::application::background_task::supervisor::BackgroundTaskSupervisor;
+use crate::application::background_process::supervisor::BackgroundProcessSupervisor;
 use context::{
     CompactBehavior, InjectBehavior, ReminderDedup, ReminderKind, ReminderPlacement,
     ReminderPolicy, ReminderPriority, ReminderSnapshot, ReminderSource,
@@ -180,30 +180,30 @@ impl ReminderSource for RunStartFactReminderSource {
 #[path = "reminder_sources_tests.rs"]
 mod tests;
 
-/// 后台任务完成通知 source（#252 PR2）：`OnEvent("background_task")` 触发。
+/// 后台进程完成通知 source（#252 PR2）：`OnEvent("background_process")` 触发。
 ///
 /// `build` 是 take 语义（取走监督器内未通知终态条目）——每次完成事件
 /// 由管线 `handle_event` 调一次 build 入事件队列；`SkipIfUnchanged`
 /// 兜底同批重复。数据获取在 Runtime（监督器），渲染委托 Context。
-pub(crate) struct BackgroundTaskReminderSource {
-    supervisor: Arc<BackgroundTaskSupervisor>,
+pub(crate) struct BackgroundProcessReminderSource {
+    supervisor: Arc<BackgroundProcessSupervisor>,
 }
 
-impl BackgroundTaskReminderSource {
-    pub(crate) fn new(supervisor: Arc<BackgroundTaskSupervisor>) -> Self {
+impl BackgroundProcessReminderSource {
+    pub(crate) fn new(supervisor: Arc<BackgroundProcessSupervisor>) -> Self {
         Self { supervisor }
     }
 }
 
-impl ReminderSource for BackgroundTaskReminderSource {
+impl ReminderSource for BackgroundProcessReminderSource {
     fn kind(&self) -> ReminderKind {
-        ReminderKind::background_task()
+        ReminderKind::background_process()
     }
 
     fn policy(&self) -> ReminderPolicy {
         ReminderPolicy {
             refresh: context::RefreshTrigger::OnEvent(
-                context::ReminderEventSource::background_task(),
+                context::ReminderEventSource::background_process(),
             ),
             placement: ReminderPlacement::TailUserMessage,
             inject: InjectBehavior {
@@ -219,7 +219,7 @@ impl ReminderSource for BackgroundTaskReminderSource {
         if items.is_empty() {
             return None;
         }
-        let data = context::InvocationReminderData::background_task_completed(items);
+        let data = context::InvocationReminderData::background_process_completed(items);
         Some(ReminderSnapshot {
             data: serde_json::to_string(&data).expect("reminder 快照序列化不可失败"),
         })
@@ -231,7 +231,7 @@ impl ReminderSource for BackgroundTaskReminderSource {
             Err(error) => {
                 log::warn!(
                     target: crate::LOG_TARGET,
-                    "reminder 快照反序列化失败 kind=background_task error={error}"
+                    "reminder 快照反序列化失败 kind=background_process error={error}"
                 );
                 String::new()
             }

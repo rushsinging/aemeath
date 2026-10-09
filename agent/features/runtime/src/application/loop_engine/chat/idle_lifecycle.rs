@@ -55,10 +55,10 @@ pub(crate) enum IdleResult {
     ManualCompactionRequested,
     /// idle `/reflect-now`：启动一次只执行反思、不调用模型的 Run。
     ManualReflectionRequested,
-    /// 后台任务完成唤醒（#252）：无 active Run 时由 WakeupMailbox 信号驱动，
-    /// 启动一次 `RunIntent::BackgroundTaskWakeup` 的 Main Run（D13：直接启动，
+    /// 后台进程完成唤醒（#252）：无 active Run 时由 WakeupMailbox 信号驱动，
+    /// 启动一次 `RunIntent::BackgroundProcessWakeup` 的 Main Run（D13：直接启动，
     /// 用户可 Esc 走标准取消协议；不合成用户 turn）。
-    BackgroundTaskWakeup,
+    BackgroundProcessWakeup,
 }
 
 async fn await_idle_input<I: InputEventDrainPort>(
@@ -71,13 +71,13 @@ async fn await_idle_input<I: InputEventDrainPort>(
         None => match wakeup {
             // 无 wakeup 接入（如部分测试场景）：保持既有纯输入等待。
             None => input_events.recv_next_input().await,
-            // idle 等待点 select：输入与后台任务唤醒竞争（D13：不仲裁，
+            // idle 等待点 select：输入与后台进程唤醒竞争（D13：不仲裁，
             // 先到先服务；输入侧被选中时唤醒信号保留给下一轮 idle）。
             Some(waiter) => {
                 tokio::select! {
                     event = input_events.recv_next_input() => event,
                     signal = waiter.wait() => match signal {
-                        Some(()) => return IdleResult::BackgroundTaskWakeup,
+                        Some(()) => return IdleResult::BackgroundProcessWakeup,
                         // 发送端全部释放（session 退出）：不再等待 wakeup，
                         // 回落到纯输入等待语义。
                         None => input_events.recv_next_input().await,
@@ -141,7 +141,7 @@ where
             IdleResult::ManualReflectionRequested => {
                 return IdleResult::ManualReflectionRequested;
             }
-            IdleResult::BackgroundTaskWakeup => return IdleResult::BackgroundTaskWakeup,
+            IdleResult::BackgroundProcessWakeup => return IdleResult::BackgroundProcessWakeup,
         }
     }
 }

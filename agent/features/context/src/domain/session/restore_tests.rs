@@ -426,7 +426,7 @@ fn restore_reads_only_steps_from_active_marker() {
 #[test]
 fn restore_projects_backgrounded_receipt_as_invalidated_not_unconfirmed() {
     // #252：Backgrounded receipt（已转后台）在 resume 时必然失效——
-    // 后台执行体随原进程退出消亡，语义是「后台任务失效」而非「取消不确定」。
+    // 后台执行体随原进程退出消亡，语义是「后台进程失效」而非「取消不确定」。
     let restore = SessionRestore::from_canonical(&unfinished_tool_session(
         crate::domain::ToolCallState::Backgrounded,
     ));
@@ -444,8 +444,8 @@ fn restore_projects_backgrounded_receipt_as_invalidated_not_unconfirmed() {
     assert!(*is_error);
     let content_text = content.to_string();
     assert!(
-        content_text.contains("BackgroundTaskInvalidated"),
-        "outcome 语义应为后台任务失效：{content_text}"
+        content_text.contains("BackgroundProcessInvalidated"),
+        "outcome 语义应为后台进程失效：{content_text}"
     );
     assert!(
         !content_text.contains("CancellationUnconfirmed"),

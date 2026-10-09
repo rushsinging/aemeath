@@ -61,7 +61,7 @@ impl ContextCoordinator {
         Self { port }
     }
 
-    /// Reminder 事件触发转发（#252：后台任务完成 → OnEvent source 重建）。
+    /// Reminder 事件触发转发（#252：后台进程完成 → OnEvent source 重建）。
     pub(crate) fn reminder_handle_event(
         &self,
         run_id: &sdk::RunId,

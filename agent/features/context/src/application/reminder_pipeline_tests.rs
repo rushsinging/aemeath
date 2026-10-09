@@ -124,7 +124,7 @@ fn event_source_flows_only_on_matching_event() {
     source.set_snapshot("changed=2");
     let mut pipeline = ReminderPipeline::new(vec![source.clone()]);
 
-    pipeline.handle_event(&ReminderEventSource::new("background_task"));
+    pipeline.handle_event(&ReminderEventSource::new("background_process"));
     assert!(
         pipeline
             .inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512)

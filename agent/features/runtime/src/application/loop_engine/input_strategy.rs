@@ -22,7 +22,7 @@ pub(crate) struct InputContinuationState {
     stop_hook_feedback: std::sync::Arc<std::sync::Mutex<Option<Message>>>,
     pending_step_prefix: std::sync::Arc<std::sync::Mutex<Option<Message>>>,
     tool_results_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    background_task_wakeup: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    background_process_wakeup: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl InputContinuationState {
@@ -52,16 +52,16 @@ impl InputContinuationState {
             .store(true, std::sync::atomic::Ordering::Release);
     }
 
-    /// 预置后台任务 wakeup 续延（#252）：wakeup Run 空输入启动时装配，
+    /// 预置后台进程 wakeup 续延（#252）：wakeup Run 空输入启动时装配，
     /// 首次 drain 以 InternalContinuation 驱动一次 step，使 reminder
     /// 管线（完成事实注入）真正到达 LLM。
-    pub(crate) fn install_background_task_wakeup(&self) {
-        self.background_task_wakeup
+    pub(crate) fn install_background_process_wakeup(&self) {
+        self.background_process_wakeup
             .store(true, std::sync::atomic::Ordering::Release);
     }
 
-    fn take_background_task_wakeup(&self) -> bool {
-        self.background_task_wakeup
+    fn take_background_process_wakeup(&self) -> bool {
+        self.background_process_wakeup
             .swap(false, std::sync::atomic::Ordering::AcqRel)
     }
 
@@ -368,7 +368,7 @@ where
                 epoch,
             }));
         }
-        if self.continuation.take_background_task_wakeup() {
+        if self.continuation.take_background_process_wakeup() {
             let (batch, epoch) = match self
                 .run_input_buffer
                 .with_lock(|b| b.take_internal_continuation(expected_epoch))
@@ -396,13 +396,13 @@ where
             };
             log::debug!(
                 target: crate::LOG_TARGET,
-                "[loop_debug] drain_input run_id={} status=InternalContinuation epoch={:?} kind=BackgroundTaskWakeup count={}",
+                "[loop_debug] drain_input run_id={} status=InternalContinuation epoch={:?} kind=BackgroundProcessWakeup count={}",
                 self.run_id,
                 epoch,
                 batch.len(),
             );
             return Ok(Some(DrainOutcome::InternalContinuation {
-                kind: InternalContinuationKind::BackgroundTaskWakeup,
+                kind: InternalContinuationKind::BackgroundProcessWakeup,
                 batch,
                 epoch,
             }));

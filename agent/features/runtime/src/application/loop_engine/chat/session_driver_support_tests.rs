@@ -368,8 +368,8 @@ fn test_shell_with_catalog(
         session_ingress: Arc::new(crate::application::session::ingress::SessionIngress::new(
             Arc::new(crate::application::interaction::port::InteractionBridge::new()),
         )),
-        background_tasks: Arc::new(
-            crate::application::background_task::session_runtime::BackgroundTaskRuntime::new(),
+        background_processes: Arc::new(
+            crate::application::background_process::session_runtime::BackgroundProcessRuntime::new(),
         ),
         event_sink_factory: Arc::new(|tx| {
             crate::application::loop_engine::chat::ChatEventSinkHandle::new(
@@ -476,8 +476,8 @@ fn test_shell_with_task_store(
         session_ingress: Arc::new(crate::application::session::ingress::SessionIngress::new(
             Arc::new(crate::application::interaction::port::InteractionBridge::new()),
         )),
-        background_tasks: Arc::new(
-            crate::application::background_task::session_runtime::BackgroundTaskRuntime::new(),
+        background_processes: Arc::new(
+            crate::application::background_process::session_runtime::BackgroundProcessRuntime::new(),
         ),
         event_sink_factory: Arc::new(|tx| {
             crate::application::loop_engine::chat::ChatEventSinkHandle::new(

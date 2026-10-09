@@ -1,17 +1,17 @@
-//! 后台任务 session 运行时（#252 PR2）：监督器 + 唤醒信箱的 session 级装配。
+//! 后台进程 session 运行时（#252 PR2）：监督器 + 唤醒信箱的 session 级装配。
 
 use std::sync::{Arc, Mutex};
 
-use super::supervisor::BackgroundTaskSupervisor;
+use super::supervisor::BackgroundProcessSupervisor;
 use crate::application::session::wakeup::{self, WakeupNotifier, WakeupWaiter};
 
-/// Session 级后台任务运行时：挂在 `SessionRuntime`（跨 Run 共享）。
+/// Session 级后台进程运行时：挂在 `SessionRuntime`（跨 Run 共享）。
 ///
 /// - `supervisor`：任务事实账本（登记 / 状态推进 / 未通知终态 take）。
 /// - 唤醒信箱：任务终态且无 active Run 时发信号，session driver idle
 ///   等待点 select（Wakeup Run，D13）。
-pub(crate) struct BackgroundTaskRuntime {
-    supervisor: Arc<BackgroundTaskSupervisor>,
+pub(crate) struct BackgroundProcessRuntime {
+    supervisor: Arc<BackgroundProcessSupervisor>,
     notifier: WakeupNotifier,
     waiter: Mutex<Option<WakeupWaiter>>,
     active_run:
@@ -20,54 +20,95 @@ pub(crate) struct BackgroundTaskRuntime {
     persistence: std::sync::OnceLock<(std::sync::Arc<dyn storage::AtomicBlobPort>, String)>,
     /// #252 PR3：当前 chat 会话事件通道（spinner 活动数事件）。
     ///
-    /// chat 启动时绑定该次调用的 `ChatEvent` sender（覆盖式刷新）；
-    /// 直接发送可避免为工厂临时建孤立 channel 导致事件从未到达
-    /// SDK 消费端。
+    /// chat 启动时绑定该次调用的 `ChatEvent` sender（覆盖式刷新），
+    /// 并以 generation 标记；chat 任务结束时 [`ChatSenderBinding`]
+    /// guard drop 释放对应 sender——session 级长期持有 sender clone
+    /// 会使 `ChatStream` 的 receiver 永不关闭（`recv()` 挂死）。
     chat_event_sender:
-        std::sync::RwLock<Option<tokio::sync::mpsc::UnboundedSender<sdk::ChatEvent>>>,
+        std::sync::RwLock<Option<(u64, tokio::sync::mpsc::UnboundedSender<sdk::ChatEvent>)>>,
+    /// 绑定代次（覆盖式绑定的身份校验）。
+    chat_sender_generation: std::sync::atomic::AtomicU64,
+}
+
+/// chat 会话事件通道绑定 guard：drop 时释放本代次 sender（#252 PR3）。
+///
+/// 生命周期锚定 chat 调用任务：chat 结束 → guard drop → sender 释放
+/// → stream receiver 正常关闭。
+pub(crate) struct ChatSenderBinding {
+    runtime: Arc<BackgroundProcessRuntime>,
+    generation: u64,
+}
+
+impl Drop for ChatSenderBinding {
+    fn drop(&mut self) {
+        let mut slot = self
+            .runtime
+            .chat_event_sender
+            .write()
+            .unwrap_or_else(|error| error.into_inner());
+        if slot
+            .as_ref()
+            .is_some_and(|(generation, _)| *generation == self.generation)
+        {
+            *slot = None;
+        }
+    }
 }
 
 /// 终态通知路由决策（纯判定，#252 PR2 §4.2/§4.4）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BackgroundNotifyRoute {
-    /// 有 active Main Run：`background_task` reminder 事件注入该 Run。
+    /// 有 active Main Run：`background_process` reminder 事件注入该 Run。
     Reminder(sdk::RunId),
     /// 无 active Run：wakeup 信号驱动 Wakeup Run。
     WakeupSignal,
 }
 
-impl BackgroundTaskRuntime {
+impl BackgroundProcessRuntime {
     pub(crate) fn new() -> Self {
         let (notifier, waiter) = wakeup::wakeup_channel();
         Self {
-            supervisor: Arc::new(BackgroundTaskSupervisor::new()),
+            supervisor: Arc::new(BackgroundProcessSupervisor::new()),
             notifier,
             waiter: Mutex::new(Some(waiter)),
             active_run: std::sync::OnceLock::new(),
             persistence: std::sync::OnceLock::new(),
             chat_event_sender: std::sync::RwLock::new(None),
+            chat_sender_generation: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
     /// 绑定当前 chat 会话的事件通道（chat 启动时；覆盖式刷新）。
+    ///
+    /// 返回 RAII guard：chat 任务须持有至结束，drop 时释放本代次
+    /// sender（否则 session 级 clone 使 stream 永不关闭）。
     pub(crate) fn bind_chat_event_sender(
-        &self,
+        self: &Arc<Self>,
         sender: tokio::sync::mpsc::UnboundedSender<sdk::ChatEvent>,
-    ) {
+    ) -> ChatSenderBinding {
+        let generation = self
+            .chat_sender_generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
+            .wrapping_add(1);
         *self
             .chat_event_sender
             .write()
-            .unwrap_or_else(|error| error.into_inner()) = Some(sender);
+            .unwrap_or_else(|error| error.into_inner()) = Some((generation, sender));
+        ChatSenderBinding {
+            runtime: Arc::clone(self),
+            generation,
+        }
     }
 
-    /// 发送后台任务活动数事件（unbounded 不阻塞；尽力而为，
+    /// 发送后台进程活动数事件（unbounded 不阻塞；尽力而为，
     /// 接收端已随 chat 结束 drop 时忽略，下次活动数变化自愈）。
     pub(crate) fn emit_active_count(&self) {
         let sender = self
             .chat_event_sender
             .read()
             .unwrap_or_else(|error| error.into_inner())
-            .clone();
+            .as_ref()
+            .map(|(_, sender)| sender.clone());
         let Some(sender) = sender else {
             return;
         };
@@ -77,7 +118,7 @@ impl BackgroundTaskRuntime {
             .iter()
             .filter(|record| !record.is_terminal())
             .count();
-        let _ = sender.send(sdk::ChatEvent::BackgroundTaskCountChanged { active });
+        let _ = sender.send(sdk::ChatEvent::BackgroundProcessCountChanged { active });
     }
 
     /// 绑定 active run registry（SessionRuntime::new 收尾时调用，一次绑定）。
@@ -114,8 +155,8 @@ impl BackgroundTaskRuntime {
     pub(crate) async fn notify_terminal(
         &self,
         context: &crate::application::context::coordination::ContextCoordinator,
-        task_id: &share::ids::BackgroundTaskId,
-        kind: crate::domain::background_task::BackgroundTaskTerminalKind,
+        task_id: &share::ids::BackgroundProcessId,
+        kind: crate::domain::background_process::BackgroundProcessTerminalKind,
         terminal_output: Option<String>,
     ) {
         let finished = self
@@ -139,7 +180,7 @@ impl BackgroundTaskRuntime {
             BackgroundNotifyRoute::Reminder(run_id) => {
                 context.reminder_handle_event(
                     &run_id,
-                    &context::ReminderEventSource::background_task(),
+                    &context::ReminderEventSource::background_process(),
                 );
             }
             BackgroundNotifyRoute::WakeupSignal => {
@@ -153,13 +194,13 @@ impl BackgroundTaskRuntime {
         }
     }
 
-    pub(crate) fn supervisor(&self) -> Arc<BackgroundTaskSupervisor> {
+    pub(crate) fn supervisor(&self) -> Arc<BackgroundProcessSupervisor> {
         self.supervisor.clone()
     }
 
     /// 取走等待端（session driver 首次接线；一个 session 一个等待端）。
     pub(crate) fn take_wakeup_waiter(&self) -> Option<WakeupWaiter> {
-        self.waiter.lock().expect("后台任务唤醒信箱锁中毒").take()
+        self.waiter.lock().expect("后台进程唤醒信箱锁中毒").take()
     }
 }
 
@@ -167,10 +208,10 @@ impl BackgroundTaskRuntime {
 #[path = "session_runtime_tests.rs"]
 mod tests;
 
-// ── #252 PR3：BackgroundTaskAccess 端口实现（BackgroundTasks tool 数据源） ──
+// ── #252 PR3：BackgroundProcessAccess 端口实现（BackgroundProcesss tool 数据源） ──
 
-impl tools::BackgroundTaskAccess for BackgroundTaskRuntime {
-    fn list_tasks(&self) -> Vec<tools::types::background_tasks::BackgroundTaskSummaryData> {
+impl tools::BackgroundProcessAccess for BackgroundProcessRuntime {
+    fn list_tasks(&self) -> Vec<tools::types::background_processes::BackgroundProcessSummaryData> {
         self.supervisor()
             .snapshots()
             .into_iter()
@@ -181,11 +222,11 @@ impl tools::BackgroundTaskAccess for BackgroundTaskRuntime {
     fn task_status(
         &self,
         task_id: &str,
-    ) -> Option<tools::types::background_tasks::BackgroundTaskDetailData> {
-        let parsed = share::ids::BackgroundTaskId::parse(task_id).ok()?;
+    ) -> Option<tools::types::background_processes::BackgroundProcessDetailData> {
+        let parsed = share::ids::BackgroundProcessId::parse(task_id).ok()?;
         let record = self.supervisor().snapshot(&parsed)?;
         let deadline_remaining_ms = match &record.state {
-            crate::domain::background_task::BackgroundTaskState::Backgrounded {
+            crate::domain::background_process::BackgroundProcessState::Backgrounded {
                 deadline_snapshot: Some(deadline),
                 ..
             } => deadline
@@ -194,11 +235,13 @@ impl tools::BackgroundTaskAccess for BackgroundTaskRuntime {
                 .map(|remaining| remaining.as_millis() as u64),
             _ => None,
         };
-        Some(tools::types::background_tasks::BackgroundTaskDetailData {
-            summary: task_summary_data(&record),
-            deadline_remaining_ms,
-            total_written_bytes: 0,
-        })
+        Some(
+            tools::types::background_processes::BackgroundProcessDetailData {
+                summary: task_summary_data(&record),
+                deadline_remaining_ms,
+                total_written_bytes: 0,
+            },
+        )
     }
 
     fn read_task_log(
@@ -206,23 +249,25 @@ impl tools::BackgroundTaskAccess for BackgroundTaskRuntime {
         task_id: &str,
         cursor: Option<u64>,
         max_bytes: usize,
-    ) -> Option<tools::types::background_tasks::BackgroundTaskLogData> {
-        let parsed = share::ids::BackgroundTaskId::parse(task_id).ok()?;
+    ) -> Option<tools::types::background_processes::BackgroundProcessLogData> {
+        let parsed = share::ids::BackgroundProcessId::parse(task_id).ok()?;
         let (text, cursor, total_written) = self
             .supervisor()
             .read_task_log(&parsed, cursor, max_bytes)?;
-        Some(tools::types::background_tasks::BackgroundTaskLogData {
-            text,
-            cursor,
-            total_written,
-        })
+        Some(
+            tools::types::background_processes::BackgroundProcessLogData {
+                text,
+                cursor,
+                total_written,
+            },
+        )
     }
 
     fn stop_task(
         &self,
         task_id: &str,
-    ) -> Result<tools::types::background_tasks::BackgroundTaskStopData, String> {
-        let parsed = share::ids::BackgroundTaskId::parse(task_id)
+    ) -> Result<tools::types::background_processes::BackgroundProcessStopData, String> {
+        let parsed = share::ids::BackgroundProcessId::parse(task_id)
             .map_err(|error| format!("invalid task id {task_id}: {error}"))?;
         let outcome = self
             .supervisor()
@@ -230,13 +275,13 @@ impl tools::BackgroundTaskAccess for BackgroundTaskRuntime {
             .map_err(|error| error.to_string())?;
         let data = match outcome {
             super::supervisor::StopRequestOutcome::SignalSent { state } => {
-                tools::types::background_tasks::BackgroundTaskStopData {
+                tools::types::background_processes::BackgroundProcessStopData {
                     signal_sent: true,
                     state: state_vocabulary(&state).to_string(),
                 }
             }
             super::supervisor::StopRequestOutcome::AlreadyTerminal(kind) => {
-                tools::types::background_tasks::BackgroundTaskStopData {
+                tools::types::background_processes::BackgroundProcessStopData {
                     signal_sent: false,
                     state: terminal_vocabulary(&kind).to_string(),
                 }
@@ -248,8 +293,8 @@ impl tools::BackgroundTaskAccess for BackgroundTaskRuntime {
 
 /// 记录 → 查询摘要（状态词汇 + 运行时长）。
 fn task_summary_data(
-    record: &crate::domain::background_task::BackgroundTaskRecord,
-) -> tools::types::background_tasks::BackgroundTaskSummaryData {
+    record: &crate::domain::background_process::BackgroundProcessRecord,
+) -> tools::types::background_processes::BackgroundProcessSummaryData {
     let state = match record.terminal_kind() {
         Some(kind) => terminal_vocabulary(&kind).to_string(),
         None => state_vocabulary(&record.state).to_string(),
@@ -261,7 +306,7 @@ fn task_summary_data(
         .duration_since(record.created_at)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0);
-    tools::types::background_tasks::BackgroundTaskSummaryData {
+    tools::types::background_processes::BackgroundProcessSummaryData {
         task_id: record.task_id.as_str().to_string(),
         tool_name: record.identity.tool_name.clone(),
         state,
@@ -270,33 +315,37 @@ fn task_summary_data(
     }
 }
 
-fn state_vocabulary(state: &crate::domain::background_task::BackgroundTaskState) -> &'static str {
+fn state_vocabulary(
+    state: &crate::domain::background_process::BackgroundProcessState,
+) -> &'static str {
     match state {
-        crate::domain::background_task::BackgroundTaskState::ForegroundWaiting => {
+        crate::domain::background_process::BackgroundProcessState::ForegroundWaiting => {
             "foreground_waiting"
         }
-        crate::domain::background_task::BackgroundTaskState::Backgrounded { .. } => "backgrounded",
-        crate::domain::background_task::BackgroundTaskState::Terminal(_) => "terminal",
+        crate::domain::background_process::BackgroundProcessState::Backgrounded { .. } => {
+            "backgrounded"
+        }
+        crate::domain::background_process::BackgroundProcessState::Terminal(_) => "terminal",
     }
 }
 
 fn terminal_vocabulary(
-    kind: &crate::domain::background_task::BackgroundTaskTerminalKind,
+    kind: &crate::domain::background_process::BackgroundProcessTerminalKind,
 ) -> &'static str {
     match kind {
-        crate::domain::background_task::BackgroundTaskTerminalKind::Success => "succeeded",
-        crate::domain::background_task::BackgroundTaskTerminalKind::Failure => "failed",
-        crate::domain::background_task::BackgroundTaskTerminalKind::TimedOut => "timed_out",
-        crate::domain::background_task::BackgroundTaskTerminalKind::Stopped => "stopped",
-        crate::domain::background_task::BackgroundTaskTerminalKind::Invalidated { .. } => {
-            "invalidated"
-        }
+        crate::domain::background_process::BackgroundProcessTerminalKind::Success => "succeeded",
+        crate::domain::background_process::BackgroundProcessTerminalKind::Failure => "failed",
+        crate::domain::background_process::BackgroundProcessTerminalKind::TimedOut => "timed_out",
+        crate::domain::background_process::BackgroundProcessTerminalKind::Stopped => "stopped",
+        crate::domain::background_process::BackgroundProcessTerminalKind::Invalidated {
+            ..
+        } => "invalidated",
     }
 }
 
 // ── #252 PR3：账本持久化（snapshot 落盘 / resume 恢复） ───────────────
 
-impl BackgroundTaskRuntime {
+impl BackgroundProcessRuntime {
     /// 绑定持久化目标（session 就绪后调用一次）。
     pub(crate) async fn bind_persistence(
         &self,
@@ -337,9 +386,23 @@ impl BackgroundTaskRuntime {
         let key = ledger_key(session_id)?;
         let bytes = match blob.read(&key, storage::GenerationData::Primary).await? {
             storage::ReadOutcomeData::Found(entry) => entry.bytes().to_vec(),
-            storage::ReadOutcomeData::NotFound => return Ok(0),
+            // 读旧写新：新 namespace 未命中时兜底旧 `background-task`
+            // 账本（Background Process 更名前的快照），命中后由下次
+            // persist 落到新 namespace。
+            storage::ReadOutcomeData::NotFound => {
+                match blob
+                    .read(
+                        &legacy_ledger_key(session_id)?,
+                        storage::GenerationData::Primary,
+                    )
+                    .await?
+                {
+                    storage::ReadOutcomeData::Found(entry) => entry.bytes().to_vec(),
+                    storage::ReadOutcomeData::NotFound => return Ok(0),
+                }
+            }
         };
-        let records: Vec<crate::domain::background_task::BackgroundTaskRecord> =
+        let records: Vec<crate::domain::background_process::BackgroundProcessRecord> =
             serde_json::from_slice(&bytes).map_err(|error| {
                 storage::StorageError::new(storage::StorageErrorKind::Io, error.to_string())
             })?;
@@ -348,10 +411,24 @@ impl BackgroundTaskRuntime {
     }
 }
 
-/// 账本 key：`background-task/<session-id>`。
+/// 账本 key：`background-process/<session-id>`。
 fn ledger_key(session_id: &str) -> Result<storage::StorageKeyData, storage::StorageError> {
     let segment: storage::SafePathSegmentData = session_id
         .parse()
         .map_err(|error: storage::StorageError| error)?;
-    storage::StorageKeyData::new(storage::StorageNamespaceData::BackgroundTask, vec![segment])
+    storage::StorageKeyData::new(
+        storage::StorageNamespaceData::BackgroundProcess,
+        vec![segment],
+    )
+}
+
+/// 旧账本 key（`background-task/<session-id>`，resume 读旧兜底）。
+fn legacy_ledger_key(session_id: &str) -> Result<storage::StorageKeyData, storage::StorageError> {
+    let segment: storage::SafePathSegmentData = session_id
+        .parse()
+        .map_err(|error: storage::StorageError| error)?;
+    storage::StorageKeyData::new(
+        storage::StorageNamespaceData::LegacyBackgroundTask,
+        vec![segment],
+    )
 }

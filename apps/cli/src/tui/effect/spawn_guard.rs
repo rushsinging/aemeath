@@ -4,7 +4,7 @@
 
 use futures::FutureExt;
 
-/// spawn 一个带 panic 兜底的后台任务。task 内 panic 不会传播，只记录 error 日志。
+/// spawn 一个带 panic 兜底的后台进程。task 内 panic 不会传播，只记录 error 日志。
 pub fn spawn_guarded<F>(label: &'static str, fut: F)
 where
     F: std::future::Future<Output = ()> + Send + 'static,
@@ -14,7 +14,7 @@ where
         async move {
             if let Err(panic) = std::panic::AssertUnwindSafe(fut).catch_unwind().await {
                 let msg = crate::panic_hook::payload_message(panic.as_ref());
-                crate::tui::log_error!("后台任务 {} panic: {}", label, msg);
+                crate::tui::log_error!("后台进程 {} panic: {}", label, msg);
             }
         },
     );
