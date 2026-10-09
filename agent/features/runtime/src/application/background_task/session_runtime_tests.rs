@@ -273,3 +273,48 @@ fn task_summary_duration_tracks_now_for_running_task() {
         "运行中任务时长按当前时刻计算"
     );
 }
+
+// ── spinner 活动数事件直达当前 chat 会话通道 ──────────────────────────
+
+#[tokio::test]
+async fn emit_active_count_delivers_event_to_bound_chat_sender() {
+    let registry =
+        std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
+    let runtime = BackgroundTaskRuntime::for_test(registry);
+
+    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    runtime.bind_chat_event_sender(sender);
+
+    runtime.emit_active_count();
+    let event = receiver.try_recv().expect("事件必须送达绑定的 chat 通道");
+    assert!(
+        matches!(
+            &event,
+            sdk::ChatEvent::BackgroundTaskCountChanged { active: 0 }
+        ),
+        "空账本活动数为 0，实际 {event:?}"
+    );
+
+    // 登记一个非终态任务后再发：活动数反映账本真相。
+    runtime
+        .supervisor()
+        .register(background_task_identity(), "tool=Bash input=live");
+    runtime.emit_active_count();
+    let event = receiver.try_recv().expect("第二次事件送达");
+    assert!(
+        matches!(
+            &event,
+            sdk::ChatEvent::BackgroundTaskCountChanged { active: 1 }
+        ),
+        "登记后活动数为 1，实际 {event:?}"
+    );
+}
+
+#[test]
+fn emit_active_count_without_bound_sender_is_noop() {
+    let registry =
+        std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
+    let runtime = BackgroundTaskRuntime::for_test(registry);
+    // 未绑定（如 Sub Run / 测试装配）：静默不发送，不 panic。
+    runtime.emit_active_count();
+}

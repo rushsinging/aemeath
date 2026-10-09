@@ -14,6 +14,12 @@ pub(super) async fn chat_impl(
     let input_events = (me.inner.shell.input_port_factory)(input.ingress);
 
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    // #252 PR3：spinner 活动数事件直达本 chat 会话通道（覆盖式刷新；
+    // 后台账本事件无需经 sink 工厂重建孤立通道）。
+    me.inner
+        .shell
+        .background_tasks
+        .bind_chat_event_sender(tx.clone());
     let sink = (me.inner.shell.event_sink_factory)(tx);
     let shell = me.inner.shell.clone();
     let inner = me.inner.clone();
