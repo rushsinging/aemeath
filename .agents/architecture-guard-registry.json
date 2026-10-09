@@ -421,6 +421,18 @@
       "tracking_issue": 1833
     },
     {
+      "id": "construction.systemone.wire-embedded-scoring-raw",
+      "symbol": "wire_embedded_scoring_raw",
+      "owner_crate": "systemone",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src/systemone.rs"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Raw engine assembly (asset resolve -> llama worker, without calibration/audit wrappers) for per-scenario wrapping at composition slot assignment; single cross-BC call site alongside wire_embedded_scoring",
+      "tracking_issue": 1832
+    },
+    {
       "id": "construction.systemone.wire-model-download-service",
       "symbol": "wire_model_download_service",
       "owner_crate": "systemone",
