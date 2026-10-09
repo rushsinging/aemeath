@@ -201,8 +201,8 @@ aemeath systemone download
 - **审计**：每次评分决策落审计事件，携带引擎 revision、prompt sha256、probabilities、校准级别、延迟——与现有 audit BC 对齐。
 - **Rust 化路线**：
   1. ~~外部 HTTP 服务~~：阶段一/二评测与接入基线，生产路径在 embedded 交付后退役，仅留测试 / 离线对分用途。
-  2. **llama.cpp 内嵌（当前目标）**：`llama-cpp-2` 驱动 Q8_0 GGUF；逐 token hidden states + Rust PointerHead 外置前向。79-case 数值对分：f16 与 Q8_0 均 100% argmax 一致（`eval/system-one/REPORT.md`）；Q4_K_M 否决。
-  3. **可选 Rust 原生后端**：`rlx-qwen35` 数值 spike 与 llama.cpp 决策位等价，但当前 GPU 路径、内存和维护成熟度不足；GPL-3.0 对本项目不是绝对阻断，后续在分发许可和工程条件可接受时 MAY 作为替代后端评估。`mistral.rs` 待稳定 hidden-state API；candle 待 Qwen3.5 gated-DeltaNet 上游支持。
+  2. **llama.cpp 内嵌（当前路线）**：`llama-cpp-2` 驱动 Q8_0 GGUF；逐 token hidden states + Rust PointerHead 外置前向。79-case 数值对分：f16 与 Q8_0 均 100% argmax 一致（`eval/system-one/REPORT.md`）；Q4_K_M 否决。**Rust 化边界 = 推理内核外全链**（编码 / PointerHead / 校准 / 审计均为纯 Rust）。
+  3. **未来备选（NEVER 作为当前计划）**：`rlx-qwen35`（白盒 Rust，数值与 llama.cpp 决策位等价；GPL-3.0 与 GPU 路径问题解决后可评估）；`mistral.rs`（待稳定 hidden-state API）；`candle`（已放弃推进，仅当 Qwen3.5 gated-DeltaNet 上游支持成熟且有真实诉求时作备选）。三者均为替代后端候选，接入时 MUST 先过 79-case 数值门禁。
 - **自训练路线（中长期）**：用开源三段式管线（SFT 软标签 → listwise PL/NDCG RL → OOF 校准）在 aemeath 真实 agent 决策轨迹上训练与 kev 同架构（Qwen3.5 小底座 + LoRA + pointer head）的专属权重；训练在 Python/GPU 侧，产出无缝接入 Rust 引擎。
 
 ## 9. 验收口径
