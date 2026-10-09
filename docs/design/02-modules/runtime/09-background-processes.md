@@ -72,6 +72,16 @@ BackgroundProcessRecord
 
 ### 2.3 输出管理与持久化（任务日志文件：直绑优先 + 终态兜底）
 
+> **实施态（2026-10-09 落地）**：命名空间为
+> `~/.agents/sessions/{session_id}.background-process/{bgp_id}.log`
+> （平铺前缀式目录，GC/对账按 session 前缀整目录处理）；直绑派发的
+> 进程 id **前移到派发时生成**（文件名与账本 id 同源）；快路径（阈值
+> 内前台完成）输出已直接进 tool_result，完成后删文件不留垃圾；转后台
+> 一律带文件（非直绑工具转后台时刻建档）；`stderr` 保持 piped（分离
+> 语义与 TUI 直播保留，海量输出场景走 stdout 文件）；`OutputRingBuffer`
+> 已退役删除（从未有生产数据源，logs 直读文件区间，累计写入=文件
+> 实际大小）；占位 tool_result 附日志文件绝对路径。
+
 `ToolExecutionOutcome` 为一次性返回，无内置增量输出流。完整输出零丢失
 （2026-10-07 拍板，方案 B；同日修订为输出直绑形态）：
 

@@ -16,8 +16,8 @@ fn temp_base() -> std::path::PathBuf {
     dir
 }
 
-fn process_id() -> crate::domain::background_process::BackgroundProcessId {
-    crate::domain::background_process::BackgroundProcessId::new_v7()
+fn process_id() -> share::ids::BackgroundProcessId {
+    share::ids::BackgroundProcessId::new_v7()
 }
 
 #[test]

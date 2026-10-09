@@ -7,10 +7,10 @@ use std::time::SystemTime;
 use context::ToolCallIdentityData;
 use share::ids::BackgroundProcessId;
 
+use crate::application::background_process::log_file::TaskLogFile;
 use crate::domain::background_process::{
-    log_file::TaskLogFile, BackgroundInvalidationReason, BackgroundProcessAdvance,
-    BackgroundProcessRecord, BackgroundProcessState, BackgroundProcessTerminalKind,
-    BackgroundProcessTransitionError,
+    BackgroundInvalidationReason, BackgroundProcessAdvance, BackgroundProcessRecord,
+    BackgroundProcessState, BackgroundProcessTerminalKind, BackgroundProcessTransitionError,
 };
 
 /// 监督中的后台进程：领域记录 + 终态结果。

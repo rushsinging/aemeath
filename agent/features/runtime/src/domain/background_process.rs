@@ -237,8 +237,6 @@ impl fmt::Display for BackgroundProcessTerminalKind {
     }
 }
 
-pub mod log_file;
-
 #[cfg(test)]
 #[path = "background_process_tests.rs"]
 mod tests;

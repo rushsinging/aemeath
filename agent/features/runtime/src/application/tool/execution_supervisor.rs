@@ -456,7 +456,7 @@ impl ToolExecutionSupervisor {
 struct DirectDispatch {
     process_id: BackgroundProcessId,
     path: std::path::PathBuf,
-    log: crate::domain::background_process::log_file::TaskLogFile,
+    log: crate::application::background_process::log_file::TaskLogFile,
 }
 
 /// spawn 执行体：owned context move 进独立 task，执行体生命周期独立于前台等待。

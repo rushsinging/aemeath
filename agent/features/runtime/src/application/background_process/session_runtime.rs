@@ -168,8 +168,9 @@ impl BackgroundProcessRuntime {
         // 内存 terminal_output（可用性优先）。
         if let Some(text) = terminal_output.as_ref() {
             if let Some(log_path) = self.supervisor.log_file_of(task_id) {
-                let log =
-                    crate::domain::background_process::log_file::TaskLogFile::from_path(log_path);
+                let log = crate::application::background_process::log_file::TaskLogFile::from_path(
+                    log_path,
+                );
                 if let Err(error) = log.append_terminal(&format!("{text}\n")) {
                     log::warn!(
                         target: crate::LOG_TARGET,
@@ -224,12 +225,12 @@ impl BackgroundProcessRuntime {
     pub(crate) fn open_direct_log(
         &self,
         process_id: share::ids::BackgroundProcessId,
-    ) -> Option<crate::domain::background_process::log_file::TaskLogFile> {
+    ) -> Option<crate::application::background_process::log_file::TaskLogFile> {
         let session_id = self.persistence.get()?.1.clone();
         let base = self
             .log_base
             .get_or_init(share::config::adapters::paths::global_sessions_dir);
-        crate::domain::background_process::log_file::TaskLogFile::open(
+        crate::application::background_process::log_file::TaskLogFile::open(
             base,
             &session_id,
             &process_id,

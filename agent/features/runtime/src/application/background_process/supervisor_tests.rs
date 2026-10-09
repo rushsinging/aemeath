@@ -160,7 +160,7 @@ fn direct_log_read_task_log_uses_file_as_source_of_truth() {
     let supervisor = BackgroundProcessSupervisor::new();
     let process_id = share::ids::BackgroundProcessId::new_v7();
     let (log, mut stdout, _stderr) =
-        crate::domain::background_process::log_file::TaskLogFile::open(
+        crate::application::background_process::log_file::TaskLogFile::open(
             &base,
             "sess-1",
             &process_id,
@@ -296,7 +296,7 @@ fn peek_caps_output_tail_bytes() {
     let supervisor = BackgroundProcessSupervisor::new();
     let process_id = share::ids::BackgroundProcessId::new_v7();
     let (log, mut stdout, _stderr) =
-        crate::domain::background_process::log_file::TaskLogFile::open(
+        crate::application::background_process::log_file::TaskLogFile::open(
             &base,
             "sess-1",
             &process_id,
@@ -408,7 +408,7 @@ fn read_task_log_returns_tail_then_incremental_delta() {
     let supervisor = BackgroundProcessSupervisor::new();
     let process_id = share::ids::BackgroundProcessId::new_v7();
     let (log, mut stdout, _stderr) =
-        crate::domain::background_process::log_file::TaskLogFile::open(
+        crate::application::background_process::log_file::TaskLogFile::open(
             &base,
             "sess-1",
             &process_id,
