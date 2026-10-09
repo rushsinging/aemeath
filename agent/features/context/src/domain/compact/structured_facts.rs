@@ -14,6 +14,13 @@ pub enum CompactFactSource {
     ToolResult,
     SystemGenerated,
     SubagentInstruction,
+    /// 上一份 checkpoint 的确定性回填（compact 级联通道）。
+    ///
+    /// 内部来源，不进入 LLM prompt 的 source 清单；其原始权威性已在更早一轮
+    /// 归并时确认，级联时必须按对应 kind 的权威来源等价保留，否则每轮 compact
+    /// 都会把已确立事实逐级降级（约束落进 scope unverified，已提交事实被标
+    /// unverified，objective / resume cursor 被静默丢弃）。
+    Checkpoint,
     Unknown,
 }
 
@@ -52,6 +59,9 @@ pub enum CompactFactKind {
     Constraint,
     Objective,
     CommittedFact,
+    /// 已决策项：用户已拍板或由持久证据确立的选择，条目必须自包含
+    /// （短指代需补足其指代的方案/上下文）。
+    Decision,
     WorkingSet,
     Risk,
     ResumeCandidate,
@@ -68,8 +78,7 @@ pub struct ConstraintMetadata {
 }
 
 impl ConstraintMetadata {
-    /// 仅测试构造器（生产经 serde 反序列化路径构造）；保留错误分支覆盖。
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// 构造约束元数据（compact 级联回填等生产路径与测试共用）。
     pub const fn new(
         scope: ConstraintScope,
         lifecycle: ConstraintLifecycle,
@@ -324,6 +333,16 @@ impl CompactFact {
         &self.text
     }
 
+    /// 按给定序号重建（不动其他字段）。
+    ///
+    /// map-reduce 的每个 chunk 独立编号，跨 chunk 的 sequence 不可比；归并前
+    /// 由调用方按 chunk 顺序统一重编号，避免不同 chunk 的相同序号交错后让
+    /// 较早的事实覆盖较新的事实。
+    pub fn with_sequence(mut self, sequence: u64) -> Self {
+        self.sequence = sequence;
+        self
+    }
+
     pub const fn constraint_metadata(&self) -> Option<&ConstraintMetadata> {
         self.constraint.as_ref()
     }
@@ -333,7 +352,10 @@ impl CompactFact {
     }
 
     pub fn normalize_scope(mut self) -> Self {
-        if self.source != CompactFactSource::MainUser {
+        if !matches!(
+            self.source,
+            CompactFactSource::MainUser | CompactFactSource::Checkpoint
+        ) {
             if let Some(constraint) = &mut self.constraint {
                 if constraint.scope == ConstraintScope::Session {
                     constraint.scope = ConstraintScope::Unknown;
@@ -710,6 +732,7 @@ pub fn reduce_compact_facts_with_objective_fallback(
     let mut immutable_constraints = Vec::new();
     let mut current_objective = None;
     let mut committed_facts = Vec::new();
+    let mut committed_decisions = Vec::new();
     let mut working_set = Vec::new();
     let mut risks = Vec::new();
     let mut next_action = None;
@@ -735,8 +758,10 @@ pub fn reduce_compact_facts_with_objective_fallback(
                 let metadata = fact
                     .constraint_metadata()
                     .expect("validated constraint fact must have metadata");
-                if fact.source() == CompactFactSource::MainUser
-                    && metadata.scope() == ConstraintScope::Session
+                if matches!(
+                    fact.source(),
+                    CompactFactSource::MainUser | CompactFactSource::Checkpoint
+                ) && metadata.scope() == ConstraintScope::Session
                     && metadata.lifecycle() == ConstraintLifecycle::Persistent
                 {
                     match metadata.action() {
@@ -759,24 +784,55 @@ pub fn reduce_compact_facts_with_objective_fallback(
                     ));
                 }
             }
-            CompactFactKind::Objective if fact.source() == CompactFactSource::MainUser => {
+            CompactFactKind::Objective
+                if matches!(
+                    fact.source(),
+                    CompactFactSource::MainUser | CompactFactSource::Checkpoint
+                ) =>
+            {
                 current_objective = Some(as_fact_bullet(fact.text()));
             }
             CompactFactKind::Objective => {}
             CompactFactKind::CommittedFact
-                if fact.source() == CompactFactSource::ToolResult && dynamic_fact =>
+                if matches!(
+                    fact.source(),
+                    CompactFactSource::ToolResult | CompactFactSource::Checkpoint
+                ) && dynamic_fact =>
             {
                 revalidation.push(as_fact_bullet(fact.text()));
             }
-            CompactFactKind::CommittedFact if fact.source() == CompactFactSource::ToolResult => {
+            CompactFactKind::CommittedFact
+                if matches!(
+                    fact.source(),
+                    CompactFactSource::ToolResult | CompactFactSource::Checkpoint
+                ) =>
+            {
                 committed_facts.push(as_fact_bullet(fact.text()));
             }
             CompactFactKind::CommittedFact => {
                 risks.push(format!("- unverified fact: {}", fact.text()));
             }
+            CompactFactKind::Decision
+                if matches!(
+                    fact.source(),
+                    CompactFactSource::MainUser
+                        | CompactFactSource::ToolResult
+                        | CompactFactSource::Checkpoint
+                ) =>
+            {
+                committed_decisions.push(as_fact_bullet(fact.text()));
+            }
+            CompactFactKind::Decision => {
+                risks.push(format!("- unverified decision: {}", fact.text()));
+            }
             CompactFactKind::WorkingSet => working_set.push(as_fact_bullet(fact.text())),
             CompactFactKind::Risk => risks.push(as_fact_bullet(fact.text())),
-            CompactFactKind::ResumeCandidate if fact.source() == CompactFactSource::MainUser => {
+            CompactFactKind::ResumeCandidate
+                if matches!(
+                    fact.source(),
+                    CompactFactSource::MainUser | CompactFactSource::Checkpoint
+                ) =>
+            {
                 next_action = Some(fact.text().to_string());
             }
             CompactFactKind::ResumeCandidate => {}
@@ -868,6 +924,7 @@ pub fn reduce_compact_facts_with_objective_fallback(
         resume_cursor_lines: Vec::new(),
         next_action,
         required_revalidation: revalidation,
+        committed_decisions,
         archived_milestones: milestones,
         status,
         status_reason: Some(match status {

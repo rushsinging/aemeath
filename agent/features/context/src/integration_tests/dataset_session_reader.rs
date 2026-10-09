@@ -626,6 +626,7 @@ async fn continuation_checkpoint_control_lines_survive_dataset_resume() {
             resume_cursor_lines: vec!["- Prohibited: do not edit".to_string()],
             next_action: "revalidate once".to_string(),
             required_revalidation: vec!["- revalidate git".to_string()],
+            committed_decisions: Vec::new(),
             archived_milestones: vec!["- baseline `abc`".to_string()],
             status: crate::compact::ContinuationStatus::Continue,
             status_reason: Some("work remains".to_string()),

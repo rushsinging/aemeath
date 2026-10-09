@@ -84,3 +84,10 @@ pub const ENVELOPE_VERSION: u32 = 1;
 /// reminder 是注意力补偿通道而非正文载体：超预算的低优先级块按
 /// priority 截断滞留，下一轮优先补入。
 pub const REMINDER_INJECTION_TOKEN_BUDGET: usize = 512;
+
+/// LLM 视图的 user 输入时间前缀格式（渲染与剥离共用的唯一真源）。
+///
+/// canonical message 与落盘 JSON 不消费该格式：只有 Context window 渲染
+/// （`domain::user_input_timestamp::render_user_input_timestamp_prefix`）与
+/// compact 摘要剥离（`...::strip_user_input_timestamp_prefix`）引用它。
+pub const USER_INPUT_TIMESTAMP_FORMAT: &str = "%Y-%m-%d %H:%M %z";

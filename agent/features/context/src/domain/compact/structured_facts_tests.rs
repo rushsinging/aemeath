@@ -16,6 +16,54 @@ const VALID_BATCH_JSON: &str = r#"{
   ]
 }"#;
 
+/// 已决策项是独立分组：用户/证据已确立的选择必须进入
+/// `Committed Decisions`（与未决决策/风险对照），不得混入 working set 或风险。
+#[test]
+fn decision_facts_land_in_committed_decisions_section() {
+    let facts = vec![
+        CompactFact::new(
+            1,
+            CompactFactSource::MainUser,
+            CompactFactKind::Decision,
+            "用户拍板引入 ConfirmNode（A 方案）。",
+            None,
+        )
+        .unwrap(),
+        CompactFact::new(
+            2,
+            CompactFactSource::MainUser,
+            CompactFactKind::Objective,
+            "继续设计。",
+            None,
+        )
+        .unwrap(),
+        CompactFact::new(
+            3,
+            CompactFactSource::MainUser,
+            CompactFactKind::Risk,
+            "预算仍待观察。",
+            None,
+        )
+        .unwrap(),
+    ];
+
+    let wire = reduce_compact_facts(CompactFactBatch::new(facts))
+        .unwrap()
+        .to_wire();
+
+    assert_eq!(
+        wire.committed_decisions,
+        vec!["用户拍板引入 ConfirmNode（A 方案）。"]
+    );
+    assert!(
+        wire.open_decisions_and_risks
+            .iter()
+            .all(|line| !line.contains("ConfirmNode")),
+        "已决策项不得落入未决区：{:?}",
+        wire.open_decisions_and_risks
+    );
+}
+
 #[test]
 fn compact_protocol_constraint_is_filtered_from_immutable_constraints() {
     let protocol_fact = CompactFact::constraint(
