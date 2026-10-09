@@ -93,6 +93,9 @@ impl ToolExecutionSupervisor {
         // （占位、receipt、通知同源）；无装配（Sub Run / 测试）则临时生成。
         // #1890 直绑派发：id 前移到派发时生成（与任务日志文件名同源），
         // 路径随记录入账。
+        // #1890：转后台一律带任务日志文件——直绑派发用前移 id 与已建文件；
+        // 非直绑（非流式 / Agent）此刻建文件，终态由 notify_terminal 兜底
+        // append（文件成为全部后台任务 logs 查询的统一真相源）。
         let task_id = match (self.background.as_ref(), direct) {
             (Some(runtime), Some(dd)) => runtime.supervisor().register_direct(
                 dd.process_id,
@@ -102,14 +105,31 @@ impl ToolExecutionSupervisor {
                 call.child_cancellation.clone(),
                 dispatch_started_time(started),
             ),
-            (Some(runtime), None) => runtime.supervisor().register_with_cancellation(
-                call.identity.clone(),
-                invocation_summary_text(&call),
-                call.child_cancellation.clone(),
-                dispatch_started_time(started),
-            ),
+            (Some(runtime), None) => {
+                let process_id = BackgroundProcessId::new_v7();
+                match runtime.open_direct_log(process_id.clone()) {
+                    Some(log) => runtime.supervisor().register_direct(
+                        process_id,
+                        log.path().to_path_buf(),
+                        call.identity.clone(),
+                        invocation_summary_text(&call),
+                        call.child_cancellation.clone(),
+                        dispatch_started_time(started),
+                    ),
+                    None => runtime.supervisor().register_with_cancellation(
+                        call.identity.clone(),
+                        invocation_summary_text(&call),
+                        call.child_cancellation.clone(),
+                        dispatch_started_time(started),
+                    ),
+                }
+            }
             (None, _) => BackgroundProcessId::new_v7(),
         };
+        let task_log_path = self
+            .background
+            .as_ref()
+            .and_then(|runtime| runtime.supervisor().log_file_of(&task_id));
         log::info!(
             target: crate::LOG_TARGET,
             "tool moved to background: run_id={} step_id={} call_id={} tool={} task_id={} elapsed_ms={} deadline_snapshot={:?}",
@@ -203,7 +223,7 @@ impl ToolExecutionSupervisor {
             }
         });
 
-        let placeholder = placeholder_tool_result(&task_id);
+        let placeholder = placeholder_tool_result(&task_id, task_log_path.as_deref());
         call.background_threshold = None; // 已转后台，防止重复判定
         Ok((placeholder, started.elapsed()))
     }
@@ -478,9 +498,18 @@ fn dispatch_started_time(started: std::time::Instant) -> std::time::SystemTime {
         .unwrap_or_else(std::time::SystemTime::now)
 }
 
-fn placeholder_tool_result(task_id: &BackgroundProcessId) -> PublishedToolOutcome {
+fn placeholder_tool_result(
+    task_id: &BackgroundProcessId,
+    log_path: Option<&std::path::Path>,
+) -> PublishedToolOutcome {
+    // #1890：占位附任务日志文件路径——运行中即可主动查看进度
+    //（优先等完成通知；确需中途进度用 BackgroundProcessLogs 增量查询
+    // 或 Read/Bash 读取该文件）。
+    let log_hint = log_path
+        .map(|path| format!(" Progress log: {}", path.display()))
+        .unwrap_or_default();
     PublishedToolOutcome::success_text(format!(
-        "Running in the background ({}). Result will be delivered on completion.",
+        "Running in the background ({}).{log_hint} Result will be delivered on completion.",
         task_id.as_str(),
     ))
 }

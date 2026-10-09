@@ -162,6 +162,23 @@ impl BackgroundProcessRuntime {
         kind: crate::domain::background_process::BackgroundProcessTerminalKind,
         terminal_output: Option<String>,
     ) {
+        // #1890 非流式工具终态兜底：终态文本 append 进任务日志文件
+        //（runtime 唯一写入方；文件是 logs 查询真相源）。直绑任务的
+        // 子进程输出已在文件内，此处只补终态结果文本；append 失败降级
+        // 内存 terminal_output（可用性优先）。
+        if let Some(text) = terminal_output.as_ref() {
+            if let Some(log_path) = self.supervisor.log_file_of(task_id) {
+                let log =
+                    crate::domain::background_process::log_file::TaskLogFile::from_path(log_path);
+                if let Err(error) = log.append_terminal(&format!("{text}\n")) {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "background terminal append to log file failed: task_id={} error={error:?}",
+                        task_id.as_str()
+                    );
+                }
+            }
+        }
         let finished = self
             .supervisor
             .finish(task_id, kind, terminal_output)

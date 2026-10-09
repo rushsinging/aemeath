@@ -104,6 +104,14 @@ impl BackgroundProcessSupervisor {
         task_id
     }
 
+    /// 任务的日志文件路径（#1890 文件真相源；无文件任务 None）。
+    pub(crate) fn log_file_of(&self, task_id: &BackgroundProcessId) -> Option<std::path::PathBuf> {
+        let tasks = self.tasks.lock().expect("后台进程表锁中毒");
+        tasks
+            .get(task_id)
+            .and_then(|task| task.record.log_file.clone())
+    }
+
     /// 直绑派发登记（#1890 输出直绑）：id 派发时前移生成（与任务日志
     /// 文件名同源），路径随记录入账；logs 查询直读文件区间。
     pub(crate) fn register_direct(
