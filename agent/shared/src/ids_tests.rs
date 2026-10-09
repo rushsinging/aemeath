@@ -232,19 +232,21 @@ fn background_process_id_is_prefixed_form_with_typed_parse() {
     use crate::ids::BackgroundProcessId;
     let process_id = BackgroundProcessId::new_v7();
     let text = process_id.as_str();
-    assert!(text.starts_with("process_"), "本体即前缀形态：{text}");
-    assert!(crate::ids::is_typed_id(text, "process"));
+    assert!(text.starts_with("bgp_"), "本体即前缀形态：{text}");
+    assert!(crate::ids::is_typed_id(text, "bgp"));
 
     let parsed = BackgroundProcessId::parse(text).expect("合法形态可解析");
     assert_eq!(parsed, process_id);
 
-    // 读旧：Background Process 更名前的 `task_` 旧前缀快照仍可解析
-    // （历史账本 resume 兼容；新写入一律 `process_`）。
-    let legacy_text = format!("task_{}", &text["process_".len()..]);
-    assert!(
-        BackgroundProcessId::parse(&legacy_text).is_ok(),
-        "旧前缀 task_ 快照可解析：{legacy_text}"
-    );
+    // 读旧：历史快照保留 parse 兼容（长前缀 `process_` 与更早 `task_`），
+    // 新写入一律 `bgp_`。
+    for legacy_prefix in ["process_", "task_"] {
+        let legacy_text = format!("{legacy_prefix}{}", &text["bgp_".len()..]);
+        assert!(
+            BackgroundProcessId::parse(&legacy_text).is_ok(),
+            "旧前缀快照可解析：{legacy_text}"
+        );
+    }
 
     // 跨种类/坏形态拒绝。
     assert!(BackgroundProcessId::parse("run_018f3a2b0d0000000000000000000000").is_err());

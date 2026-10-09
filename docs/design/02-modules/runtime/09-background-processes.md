@@ -183,7 +183,7 @@ reminder 不携带完整输出（管线预算纪律）。
 ## 6. 持久化与 resume
 
 - 新 storage namespace `BackgroundProcess`（AtomicBlob，ProcessCrashSafe），key `background-process/<session_id>`；存 task record 与任务日志文件引用。
-- **读旧写新（概念重命名兼容）**：id 前缀 `process_`，`parse` 兼容更名前 `task_` 旧快照（新生成一律 `process_`）；namespace 更名前为 `background-task`，resume 在新键未命中时兜底读旧键（`LegacyBackgroundTask` 仅读路径），persist 一律写新键。
+- **读旧写新（前缀修订兼容）**：id 前缀 `bgp_`（3 字符），`parse` 兼容历史 `process_`（短前缀修订前）与 `task_`（概念重命名前）旧快照（新生成一律 `bgp_`）；namespace 更名前为 `background-task`，resume 在新键未命中时兜底读旧键（`LegacyBackgroundTask` 仅读路径），persist 一律写新键。
 - 任务日志文件（§2.3 方案 B）：per-task 增量 append，完整输出真相源；会话任务日志随 session GC。
 - resume：`Backgrounded` / `Running` → `Invalidated(reason: process_exit)`；查询 tool 可见失效任务。
 - **对账**：receipt 恢复路径（`has_unfinished_receipts` → unconfirmed 投影）遇 `Backgrounded` receipt 时与任务账本对账——有对应 task record 则投影为「任务已失效」而非 unconfirmed。specs 3.10 同步。

@@ -280,7 +280,7 @@ async fn execute_exceeding_threshold_returns_placeholder_and_backgrounds_receipt
     assert!(
         placeholder_text
             .split_whitespace()
-            .find(|word| word.contains("process_"))
+            .find(|word| word.contains("bgp_"))
             .map(|word| { word.trim_start_matches('(').trim_end_matches(['.', ')']) })
             .and_then(|process_id| BackgroundProcessId::parse(process_id).ok())
             .is_some(),

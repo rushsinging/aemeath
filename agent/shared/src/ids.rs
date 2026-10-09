@@ -457,30 +457,33 @@ pub fn decode_base62(value: &str) -> Option<u64> {
     Some(result)
 }
 
-/// Runtime-owned 后台进程记录标识（前缀 typed id，`process_<base62>`）。
+/// Runtime-owned 后台进程记录标识（前缀 typed id，`bgp_<base62>`）。
 ///
 /// 本体即前缀形态（单一真相，无裸值/display 两套）；
 /// `parse` 按前缀+形状校验，跨种类误用在前缀层被拒。
-/// 历史快照存在 `task_` 旧前缀（Background Process 更名前），
-/// `parse` 读旧写新：仅解析层兼容，新生成一律 `process_`。
+/// 历史快照保留解析兼容：`process_`（短前缀修订前）与 `task_`
+/// （Background Process 更名前）；读旧写新，新生成一律 `bgp_`。
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
 )]
 pub struct BackgroundProcessId(String);
 
 impl BackgroundProcessId {
-    /// 生成新进程 id（`process_` + 雪花 base62；字典序=时间序）。
+    /// 生成新进程 id（`bgp_` + 雪花 base62；字典序=时间序）。
     pub fn new_v7() -> Self {
-        Self(new_typed_id("process"))
+        Self(new_typed_id("bgp"))
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    /// 解析（严格前缀+形状校验；兼容 `task_` 旧前缀快照）。
+    /// 解析（严格前缀+形状校验；兼容 `process_` / `task_` 旧快照）。
     pub fn parse(value: &str) -> Result<Self, IdParseError> {
-        if !(is_typed_id(value, "process") || is_typed_id(value, "task")) {
+        if !(is_typed_id(value, "bgp")
+            || is_typed_id(value, "process")
+            || is_typed_id(value, "task"))
+        {
             return Err(IdParseError::InvalidPrefixedFormat(value.to_string()));
         }
         Ok(Self(value.to_string()))
