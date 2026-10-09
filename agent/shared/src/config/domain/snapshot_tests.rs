@@ -374,13 +374,15 @@ fn snapshot_concurrency_limits_normalize_zero_to_domain_defaults() {
 #[test]
 fn snapshot_exposes_validated_tool_result_policy() {
     let mut config = Config::default();
-    config.tools.tool_result.threshold_chars = 8_000;
+    // 1M 窗口下 0.5% = 5,000；配置值必须低于该上限才会被直接采用，
+    // 否则断言无法区分「配置值生效」与「比例收紧生效」。
+    config.tools.tool_result.threshold_chars = 4_500;
     config.tools.tool_result.preview_head_chars = 1_000;
     config.tools.tool_result.preview_tail_chars = 250;
     let snap = ConfigSnapshot::new(config);
 
     let policy = snap.tool_result_policy(1_000_000);
-    assert_eq!(policy.threshold_chars(), 8_000);
+    assert_eq!(policy.threshold_chars(), 4_500);
     assert_eq!(policy.preview_head_chars(), 1_000);
     assert_eq!(policy.preview_tail_chars(), 250);
 }
@@ -393,52 +395,70 @@ fn snapshot_normalizes_invalid_tool_result_policy_to_compatible_defaults() {
     config.tools.tool_result.preview_tail_chars = 9_000;
     let snap = ConfigSnapshot::new(config);
 
-    let policy = snap.tool_result_policy(1_000_000);
+    // 窗口未知（0）不按比例收紧：验证的就是规范化后的原始默认值，
+    // 若改用大窗口，收紧结果会掩盖规范化失效（例如 head 未回落默认值）。
+    let policy = snap.tool_result_policy(0);
     assert_eq!(policy.threshold_chars(), 50_000);
     assert_eq!(policy.preview_head_chars(), 2_000);
     assert_eq!(policy.preview_tail_chars(), 500);
 }
 
 /// tool_result 截断阈值必须随 context window 比例收紧：
-/// `threshold = min(配置值, 窗口×5%)`，下限 4k chars；
+/// `threshold = min(配置值, 窗口×0.5%)`，下限 2k chars；
 /// head/tail 等比收紧（threshold 的 1/4、1/8）且收紧后仍满足
 /// `head + tail ≤ threshold` 不变式；窗口未知（0）时不收紧。
-/// 配置值语义是"大窗口下的上限"——1M 窗口下默认 50k 占 5% 合理，
-/// 128k 窗口下单条 50k chars（中文场景约 50k tokens）即占 40%，
-/// 会直接把启发式估算顶到 auto-compact 阈值。
+/// 配置值语义是"大窗口下的上限"——大 tool_result 是 context 膨胀的
+/// 主要来源，单条上限过大会把启发式估算顶到 auto-compact 阈值。
 #[test]
 fn tool_result_policy_scales_threshold_with_context_window() {
     let snap = ConfigSnapshot::new(Config::default());
 
-    // 1M 窗口：5% = 50k，与默认配置相等，不收紧
+    // 1M 窗口：0.5% = 5k 收紧；head 收紧到 5000/4 = 1250，tail 保持 500
     let policy = snap.tool_result_policy(1_000_000);
-    assert_eq!(policy.threshold_chars(), 50_000);
-    assert_eq!(policy.preview_head_chars(), 2_000);
+    assert_eq!(policy.threshold_chars(), 5_000);
+    assert_eq!(policy.preview_head_chars(), 1_250);
     assert_eq!(policy.preview_tail_chars(), 500);
 
-    // 200k 窗口：5% = 10k 收紧；head/tail 低于等比上限，保持原值
+    // 200k 窗口：0.5% = 1000 低于下限，取 2k；head = 2000/4 = 500
     let policy = snap.tool_result_policy(200_000);
-    assert_eq!(policy.threshold_chars(), 10_000);
-    assert_eq!(policy.preview_head_chars(), 2_000);
-    assert_eq!(policy.preview_tail_chars(), 500);
+    assert_eq!(policy.threshold_chars(), 2_000);
+    assert_eq!(policy.preview_head_chars(), 500);
+    assert_eq!(policy.preview_tail_chars(), 250);
 
-    // 128k 窗口：5% = 6.4k；head 收紧到 6400/4 = 1600
+    // 128k 窗口：0.5% = 640 低于下限，取 2k；head/tail 同下限形态
     let policy = snap.tool_result_policy(128_000);
-    assert_eq!(policy.threshold_chars(), 6_400);
-    assert_eq!(policy.preview_head_chars(), 1_600);
-    assert_eq!(policy.preview_tail_chars(), 500);
+    assert_eq!(policy.threshold_chars(), 2_000);
+    assert_eq!(policy.preview_head_chars(), 500);
+    assert_eq!(policy.preview_tail_chars(), 250);
 
-    // 32k 窗口：5% = 1600 低于下限，取 4k；head = 4000/4 = 1000
+    // 32k 窗口：0.5% = 160 低于下限，取 2k；小窗口仍受下限保护
     let policy = snap.tool_result_policy(32_000);
-    assert_eq!(policy.threshold_chars(), 4_000);
-    assert_eq!(policy.preview_head_chars(), 1_000);
-    assert_eq!(policy.preview_tail_chars(), 500);
+    assert_eq!(policy.threshold_chars(), 2_000);
+    assert_eq!(policy.preview_head_chars(), 500);
+    assert_eq!(policy.preview_tail_chars(), 250);
 
     // 窗口未知（0）：不收紧，避免误伤
     let policy = snap.tool_result_policy(0);
     assert_eq!(policy.threshold_chars(), 50_000);
     assert_eq!(policy.preview_head_chars(), 2_000);
     assert_eq!(policy.preview_tail_chars(), 500);
+}
+
+/// 落盘占位符由 head + tail 组成；若 `head + tail >= threshold`，
+/// 落盘会比保留原文更占 context（负收益）。该不变式必须在所有窗口成立。
+#[test]
+fn tool_result_policy_preview_fits_below_threshold_across_windows() {
+    let snap = ConfigSnapshot::new(Config::default());
+
+    for window in [
+        0usize, 32_000, 128_000, 200_000, 272_000, 300_000, 1_000_000, 1_048_576,
+    ] {
+        let policy = snap.tool_result_policy(window);
+        assert!(
+            policy.preview_head_chars() + policy.preview_tail_chars() < policy.threshold_chars(),
+            "window={window}: head+tail must stay below threshold (no negative-yield persistence)"
+        );
+    }
 }
 
 /// resolve_context_size 在 CLI 传 0 时应忽略 CLI（用 snapshot 值），

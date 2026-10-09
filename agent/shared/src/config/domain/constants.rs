@@ -29,11 +29,13 @@ pub(crate) const DEFAULT_STOP_HOOK_MAX_BLOCKS: usize = 15;
 pub(crate) const MAX_MARKDOWN_SPACING_LINES: u8 = 8;
 
 // ─── snapshot.rs ───
-/// 截断阈值占 context window 的比例上限（1/20 = 5%）。
+/// 截断阈值占 context window 的比例上限（1/200 = 0.5%）。
 ///
-/// 定量阈值只对大窗口合理：128k 窗口下单条 50k chars（中文场景约
-/// 50k tokens）即占 40%，会直接把启发式估算顶到 auto-compact 阈值。
-pub(crate) const WINDOW_SCALED_THRESHOLD_RATIO_DIVISOR: usize = 20;
+/// 大 tool_result 是 context 膨胀的主要来源（实测占内容池 71.5%），
+/// 单条上限过大会把启发式估算顶到 auto-compact 阈值：1M 窗口下
+/// 5% 即 50k chars 单条占用，300k 窗口下 15k chars 同理。
+pub(crate) const WINDOW_SCALED_THRESHOLD_RATIO_DIVISOR: usize = 200;
 
-/// 窗口收紧后的阈值下限：过小的 preview 无法容纳有效的 head/tail 提示。
-pub(crate) const MIN_WINDOW_SCALED_THRESHOLD_CHARS: usize = 4_000;
+/// 窗口收紧后的阈值下限：低于落盘占位符开销（head + tail）的阈值
+/// 会让落盘比保留原文更占 context（负收益）。
+pub(crate) const MIN_WINDOW_SCALED_THRESHOLD_CHARS: usize = 2_000;
