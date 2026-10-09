@@ -75,7 +75,7 @@ crate 根 façade 发布 `MemoryPort`、`ReflectionWorkflow` 与必要 PL。Stor
 
 ### Agent Runtime
 
-Context Management 通过 `MemoryPort` 检索 top-N 记忆并注入 Context Window；Runtime 调用 Memory-owned `ReflectionWorkflow` 构建 prompt、解析 Provider 返回并提交 apply/history，但 Provider 调用及后台任务 cancel/timeout/drain 仍由 Runtime 拥有。后台 Reflection job **MUST** 持 lease 到完成或取消收口。
+Context Management 通过 `MemoryPort` 检索 top-N 记忆并注入 Context Window；Runtime 调用 Memory-owned `ReflectionWorkflow` 构建 prompt、解析 Provider 返回并提交 apply/history，但 Provider 调用及后台进程 cancel/timeout/drain 仍由 Runtime 拥有。后台 Reflection job **MUST** 持 lease 到完成或取消收口。
 
 ### Context Management
 
