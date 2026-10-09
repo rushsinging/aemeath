@@ -129,7 +129,7 @@ impl ToolExecutionSupervisor {
             {
                 log::warn!(
                     target: crate::LOG_TARGET,
-                    "background task mark_backgrounded failed: task_id={} error={error:?}",
+                    "background process mark_backgrounded failed: task_id={} error={error:?}",
                     task_id.as_str(),
                 );
             }
@@ -145,7 +145,7 @@ impl ToolExecutionSupervisor {
                         _ = tokio::time::sleep(wait) => {
                             log::warn!(
                                 target: crate::LOG_TARGET,
-                                "background task reached deadline snapshot: run_id={} step_id={} call_id={} tool={} task_id={}",
+                                "background process reached deadline snapshot: run_id={} step_id={} call_id={} tool={} task_id={}",
                                 identity.run_id,
                                 identity.step_id,
                                 identity.runtime_call_id,
@@ -162,7 +162,7 @@ impl ToolExecutionSupervisor {
             let terminal = terminal_receipt(&outcome);
             log::info!(
                 target: crate::LOG_TARGET,
-                "background task terminal: run_id={} step_id={} call_id={} tool={} task_id={} outcome={:?}",
+                "background process terminal: run_id={} step_id={} call_id={} tool={} task_id={} outcome={:?}",
                 identity.run_id,
                 identity.step_id,
                 identity.runtime_call_id,
@@ -187,7 +187,7 @@ impl ToolExecutionSupervisor {
             {
                 log::error!(
                     target: crate::LOG_TARGET,
-                    "background task terminal receipt failed: task_id={} error={error:?}",
+                    "background process terminal receipt failed: task_id={} error={error:?}",
                     task_id_for_logs.as_str(),
                 );
             }

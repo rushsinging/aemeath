@@ -217,8 +217,8 @@ fn project_unfinished_tool_results(messages: &mut Vec<Message>, receipts: &[Tool
             let (outcome, message, text) = if matches!(receipt.state, ToolCallState::Backgrounded) {
                 (
                     "BackgroundProcessInvalidated",
-                    "background task was lost with the session process;                      inspect side effects via the workspace if relevant",
-                    "Background task was lost with the session process.",
+                    "background process was lost with the session process;                      inspect side effects via the workspace if relevant",
+                    "Background process was lost with the session process.",
                 )
             } else {
                 (

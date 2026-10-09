@@ -1,4 +1,4 @@
-//! Typed input and result types for the background task tool family（#252）.
+//! Typed input and result types for the background process tool family（#252）.
 
 use serde::{Deserialize, Serialize};
 

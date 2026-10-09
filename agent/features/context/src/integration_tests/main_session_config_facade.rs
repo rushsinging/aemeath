@@ -570,7 +570,7 @@ async fn update_committed_installs_after_caller_drop() {
     assert_ne!(
         final_snapshot.revision(),
         pre_revision,
-        "config revision should advance after background task completes"
+        "config revision should advance after background process completes"
     );
     assert_eq!(
         final_snapshot.models().default,
@@ -583,7 +583,7 @@ async fn update_committed_installs_after_caller_drop() {
         .wiring
         .gate()
         .try_acquire_shared()
-        .expect("gate should be released after background task completes");
+        .expect("gate should be released after background process completes");
     let _ = shared;
 
     // Clean up the detached update task (its result is no longer needed but we

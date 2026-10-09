@@ -499,7 +499,7 @@ pub async fn wire_agent_client_from_args(
         {
             log::warn!(
                 target: crate::LOG_TARGET,
-                "background task ledger bind failed: {error}"
+                "background process ledger bind failed: {error}"
             );
         } else {
             match shell
@@ -510,7 +510,7 @@ pub async fn wire_agent_client_from_args(
                 Ok(restored) if restored > 0 => {
                     log::info!(
                         target: crate::LOG_TARGET,
-                        "background task ledger restored: session={} tasks={restored}",
+                        "background process ledger restored: session={} tasks={restored}",
                         session_id
                     );
                 }
@@ -518,7 +518,7 @@ pub async fn wire_agent_client_from_args(
                 Err(error) => {
                     log::warn!(
                         target: crate::LOG_TARGET,
-                        "background task ledger restore failed: {error}"
+                        "background process ledger restore failed: {error}"
                     );
                 }
             }

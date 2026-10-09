@@ -8,7 +8,7 @@
 //!
 //! Implementation: After discovering the endpoint, we keep the SSE GET stream alive.
 //! Each `send_request` POSTs the request then directly reads the response from the
-//! stream — no background task, no channel, no race conditions.
+//! stream — no background process, no channel, no race conditions.
 
 use super::constants::{SSE_CONNECT_TIMEOUT_SECS, SSE_REQUEST_TIMEOUT_SECS};
 use crate::adapters::mcp::sse_stream::SseReadStream;

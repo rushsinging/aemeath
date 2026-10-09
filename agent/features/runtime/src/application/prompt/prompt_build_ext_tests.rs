@@ -267,7 +267,7 @@ fn background_process_section_injected_only_when_threshold_enabled() {
     assert!(enabled.contains("后台进程"), "zh 段落：{enabled}");
     assert!(enabled.contains("BackgroundProcessList"));
     let enabled_en = background_processes_guidance_section("en");
-    assert!(enabled_en.contains("Background tasks"));
+    assert!(enabled_en.contains("Background processes"));
     assert!(enabled_en.contains("sequential"));
 }
 

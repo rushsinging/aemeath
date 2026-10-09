@@ -312,7 +312,7 @@ fn empty_background_source(
             _task_id: &str,
         ) -> Result<crate::domain::types::background_processes::BackgroundProcessStopData, String>
         {
-            Err("background tasks unavailable".to_string())
+            Err("background processes unavailable".to_string())
         }
     }
     struct FixedSource(

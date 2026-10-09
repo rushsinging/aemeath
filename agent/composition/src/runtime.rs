@@ -50,7 +50,7 @@ impl tools::BackgroundProcessAccess for UnboundBackgroundProcessAccess {
         &self,
         _task_id: &str,
     ) -> Result<tools::types::background_processes::BackgroundProcessStopData, String> {
-        Err("background tasks are not available in this session".to_string())
+        Err("background processes are not available in this session".to_string())
     }
 }
 

@@ -60,7 +60,7 @@ impl TypedTool for BackgroundProcessListTool {
         }
         let tasks = self.source.current().list_tasks();
         let text = if tasks.is_empty() {
-            "No background tasks.".to_string()
+            "No background processes.".to_string()
         } else {
             tasks
                 .iter()

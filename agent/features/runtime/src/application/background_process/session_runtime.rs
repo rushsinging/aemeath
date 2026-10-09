@@ -171,7 +171,7 @@ impl BackgroundProcessRuntime {
         if let Err(error) = self.persist_snapshot().await {
             log::warn!(
                 target: crate::LOG_TARGET,
-                "background task ledger persist failed: {error}"
+                "background process ledger persist failed: {error}"
             );
         }
         // #252 PR3：活动数 -1 → spinner 显示。

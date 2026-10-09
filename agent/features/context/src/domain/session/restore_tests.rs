@@ -451,5 +451,5 @@ fn restore_projects_backgrounded_receipt_as_invalidated_not_unconfirmed() {
         !content_text.contains("CancellationUnconfirmed"),
         "Backgrounded 不是取消不确定：{content_text}"
     );
-    assert!(content_text.contains("background task was lost with the session process"));
+    assert!(content_text.contains("background process was lost with the session process"));
 }
