@@ -45,7 +45,7 @@ pub use edit::{EditInput, EditResult};
 pub use enter_worktree::{EnterWorktreeInput, EnterWorktreeResult};
 pub use exit_worktree::{ExitWorktreeInput, ExitWorktreeResult};
 pub use glob::{GlobInput, GlobResult};
-pub use grep::{GrepInput, GrepResult};
+pub use grep::{GrepFileMatch, GrepInput, GrepResult};
 pub use read::{ReadInput, ReadResult};
 pub use web_fetch::{WebFetchInput, WebFetchResult};
 pub use write::{WriteInput, WriteResult};

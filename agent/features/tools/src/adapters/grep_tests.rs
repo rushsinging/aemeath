@@ -73,7 +73,8 @@ async fn test_grep_head_limit_narrows_results() {
             serde_json::json!({
                 "pattern": "match_me",
                 "path": dir.path().to_string_lossy(),
-                "head_limit": 3
+                "head_limit": 3,
+                "output_mode": "content"
             }),
             &ctx,
         )
@@ -98,7 +99,8 @@ async fn test_grep_head_limit_text_shows_truncation_hint() {
             serde_json::json!({
                 "pattern": "match_me",
                 "path": dir.path().to_string_lossy(),
-                "head_limit": 3
+                "head_limit": 3,
+                "output_mode": "content"
             }),
             &ctx,
         )
@@ -120,6 +122,7 @@ async fn test_grep_without_head_limit_returns_all() {
             serde_json::json!({
                 "pattern": "match_me",
                 "path": dir.path().to_string_lossy(),
+                "output_mode": "content"
             }),
             &ctx,
         )
@@ -148,7 +151,8 @@ async fn test_grep_head_limit_exceeds_actual_returns_all_no_truncation_hint() {
             serde_json::json!({
                 "pattern": "match_me",
                 "path": dir.path().to_string_lossy(),
-                "head_limit": 1000
+                "head_limit": 1000,
+                "output_mode": "content"
             }),
             &ctx,
         )
@@ -163,6 +167,139 @@ async fn test_grep_head_limit_exceeds_actual_returns_all_no_truncation_hint() {
         !result.text.contains("showing first"),
         "head_limit > 实际时不应有截断提示"
     );
+}
+
+/// 默认模式输出文件级索引：只给「文件 + 匹配数」，不返回匹配行内容。
+/// 索引是发现性信息——LLM 据此决定下一步读哪个文件。
+#[tokio::test]
+async fn test_grep_default_mode_returns_file_index() {
+    let dir = tempfile::tempdir().unwrap();
+    tokio::fs::write(dir.path().join("a.txt"), "match_me\nmatch_me\nmatch_me\n")
+        .await
+        .unwrap();
+    tokio::fs::write(dir.path().join("b.txt"), "match_me\n")
+        .await
+        .unwrap();
+    let ctx = test_ctx(dir.path().to_path_buf());
+    let tool = GrepTool;
+
+    let result = tool
+        .call(
+            serde_json::json!({
+                "pattern": "match_me",
+                "path": dir.path().to_string_lossy()
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error, "grep should succeed: {}", result.text);
+    let data = result.data.expect("data should be present");
+    assert!(data.matches.is_empty(), "索引模式不返回逐行匹配");
+    assert_eq!(data.total_matches, 4, "总匹配数");
+    assert_eq!(data.total_files, 2, "命中文件数");
+    assert_eq!(data.files.len(), 2, "索引列表含两个文件");
+    assert_eq!(data.files[0].match_count, 3, "按匹配数降序：a.txt 在前");
+    assert!(
+        result.text.contains("in 2 files"),
+        "text 汇总文件数: {}",
+        result.text
+    );
+}
+
+/// 索引文本受字符预算约束：超出时截断文件列表并给出可操作的收窄提示，
+/// 保证索引结果落在通用落盘阈值（最严 2,000 字符）之内、始终完整可见。
+#[tokio::test]
+async fn test_grep_index_output_respects_char_budget() {
+    let dir = tempfile::tempdir().unwrap();
+    for index in 0..60 {
+        // 较长文件名：每行索引开销足够大，使 60 个文件必然超出字符预算。
+        tokio::fs::write(
+            dir.path()
+                .join(format!("budget_probe_long_file_name_{index:03}.txt")),
+            "match_me\n",
+        )
+        .await
+        .unwrap();
+    }
+    let ctx = test_ctx(dir.path().to_path_buf());
+    let tool = GrepTool;
+
+    let result = tool
+        .call(
+            serde_json::json!({
+                "pattern": "match_me",
+                "path": dir.path().to_string_lossy()
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error, "grep should succeed: {}", result.text);
+    let data = result.data.expect("data should be present");
+    assert_eq!(data.total_files, 60, "总文件数完整保留");
+    assert!(data.files.len() < 60, "文件列表被预算截断");
+    assert!(
+        result.text.chars().count() <= 2_000,
+        "索引文本不超过通用落盘阈值: {}",
+        result.text.chars().count()
+    );
+    assert!(
+        result.text.contains("refine pattern"),
+        "截断时必须给出可操作提示: {}",
+        result.text
+    );
+}
+
+/// 索引模式路径相对 workspace root：避免长绝对路径吃掉字符预算。
+#[tokio::test]
+async fn test_grep_index_paths_are_workspace_relative() {
+    let dir = tempfile::tempdir().unwrap();
+    tokio::fs::write(dir.path().join("a.txt"), "match_me\n")
+        .await
+        .unwrap();
+    let ctx = test_ctx(dir.path().to_path_buf());
+    let tool = GrepTool;
+
+    let result = tool
+        .call(
+            serde_json::json!({
+                "pattern": "match_me",
+                "path": dir.path().to_string_lossy()
+            }),
+            &ctx,
+        )
+        .await;
+
+    let data = result.data.expect("data should be present");
+    let path = &data.files[0].file_path;
+    assert!(!path.starts_with('/'), "索引路径应为相对路径: {path}");
+    assert!(path.ends_with("a.txt"), "索引路径保留文件名: {path}");
+}
+
+/// 显式 content 模式：逐行匹配行为与既有语义一致。
+#[tokio::test]
+async fn test_grep_content_mode_returns_line_matches() {
+    let dir = make_match_dir(10).await;
+    let ctx = test_ctx(dir.path().to_path_buf());
+    let tool = GrepTool;
+
+    let result = tool
+        .call(
+            serde_json::json!({
+                "pattern": "match_me",
+                "path": dir.path().to_string_lossy(),
+                "output_mode": "content"
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error, "grep should succeed: {}", result.text);
+    let data = result.data.expect("data should be present");
+    assert_eq!(data.matches.len(), 10, "content 模式返回逐行匹配");
+    assert!(result.text.contains("10 matches"), "text 保留总数");
+    assert!(data.files.is_empty(), "content 模式不填充文件索引");
 }
 
 #[test]
@@ -189,6 +326,7 @@ async fn grep_returns_cancelled_result_when_signal_already_cancelled() {
             serde_json::json!({
                 "pattern": "match_me",
                 "path": dir.path().to_string_lossy(),
+                "output_mode": "content"
             }),
             &ctx,
         )
@@ -219,6 +357,7 @@ async fn grep_running_search_observes_cancellation_and_terminates_child() {
             serde_json::json!({
                 "pattern": "match_me",
                 "path": dir.path().to_string_lossy(),
+                "output_mode": "content"
             }),
             &ctx,
         );
