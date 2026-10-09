@@ -36,6 +36,7 @@ pub(crate) const MAX_MARKDOWN_SPACING_LINES: u8 = 8;
 /// 5% 即 50k chars 单条占用，300k 窗口下 15k chars 同理。
 pub(crate) const WINDOW_SCALED_THRESHOLD_RATIO_DIVISOR: usize = 200;
 
-/// 窗口收紧后的阈值下限：低于落盘占位符开销（head + tail）的阈值
-/// 会让落盘比保留原文更占 context（负收益）。
-pub(crate) const MIN_WINDOW_SCALED_THRESHOLD_CHARS: usize = 2_000;
+/// 窗口收紧后的阈值下限：不得低于落盘占位符开销（head + tail + 元数据），
+/// 否则落盘比保留原文更占 context（负收益）。取值同时决定「结果完整进
+/// context」的比例：3k 时实测约 78% 的单条结果不触发落盘。
+pub(crate) const MIN_WINDOW_SCALED_THRESHOLD_CHARS: usize = 3_000;

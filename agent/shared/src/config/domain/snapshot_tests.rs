@@ -404,7 +404,7 @@ fn snapshot_normalizes_invalid_tool_result_policy_to_compatible_defaults() {
 }
 
 /// tool_result 截断阈值必须随 context window 比例收紧：
-/// `threshold = min(配置值, 窗口×0.5%)`，下限 2k chars；
+/// `threshold = min(配置值, 窗口×0.5%)`，下限 3k chars；
 /// head/tail 等比收紧（threshold 的 1/4、1/8）且收紧后仍满足
 /// `head + tail ≤ threshold` 不变式；窗口未知（0）时不收紧。
 /// 配置值语义是"大窗口下的上限"——大 tool_result 是 context 膨胀的
@@ -419,23 +419,23 @@ fn tool_result_policy_scales_threshold_with_context_window() {
     assert_eq!(policy.preview_head_chars(), 1_250);
     assert_eq!(policy.preview_tail_chars(), 500);
 
-    // 200k 窗口：0.5% = 1000 低于下限，取 2k；head = 2000/4 = 500
+    // 200k 窗口：0.5% = 1000 低于下限，取 3k；head = 3000/4 = 750
     let policy = snap.tool_result_policy(200_000);
-    assert_eq!(policy.threshold_chars(), 2_000);
-    assert_eq!(policy.preview_head_chars(), 500);
-    assert_eq!(policy.preview_tail_chars(), 250);
+    assert_eq!(policy.threshold_chars(), 3_000);
+    assert_eq!(policy.preview_head_chars(), 750);
+    assert_eq!(policy.preview_tail_chars(), 375);
 
-    // 128k 窗口：0.5% = 640 低于下限，取 2k；head/tail 同下限形态
+    // 128k 窗口：0.5% = 640 低于下限，取 3k；head/tail 同下限形态
     let policy = snap.tool_result_policy(128_000);
-    assert_eq!(policy.threshold_chars(), 2_000);
-    assert_eq!(policy.preview_head_chars(), 500);
-    assert_eq!(policy.preview_tail_chars(), 250);
+    assert_eq!(policy.threshold_chars(), 3_000);
+    assert_eq!(policy.preview_head_chars(), 750);
+    assert_eq!(policy.preview_tail_chars(), 375);
 
-    // 32k 窗口：0.5% = 160 低于下限，取 2k；小窗口仍受下限保护
+    // 32k 窗口：0.5% = 160 低于下限，取 3k；小窗口仍受下限保护
     let policy = snap.tool_result_policy(32_000);
-    assert_eq!(policy.threshold_chars(), 2_000);
-    assert_eq!(policy.preview_head_chars(), 500);
-    assert_eq!(policy.preview_tail_chars(), 250);
+    assert_eq!(policy.threshold_chars(), 3_000);
+    assert_eq!(policy.preview_head_chars(), 750);
+    assert_eq!(policy.preview_tail_chars(), 375);
 
     // 窗口未知（0）：不收紧，避免误伤
     let policy = snap.tool_result_policy(0);

@@ -107,7 +107,7 @@ impl ToolResultPolicy {
 
     /// 按 context window 收紧截断阈值。
     ///
-    /// - `threshold = min(配置值, 窗口 × 0.5%)`，下限 2k chars；配置值语义
+    /// - `threshold = min(配置值, 窗口 × 0.5%)`，下限 3k chars；配置值语义
     ///   是"大窗口下的上限"
     /// - head/tail 等比收紧到 threshold 的 1/4、1/8，收紧后仍满足
     ///   `head + tail ≤ threshold` 不变式（1/4 + 1/8 = 3/8 < 1）
