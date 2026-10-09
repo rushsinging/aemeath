@@ -10,23 +10,37 @@ use composition::systemone::{run_systemone_download_with, SystemoneDownloadExit}
 /// 测试用 engine_revision（canonical segment）。
 const TEST_ENGINE_REVISION: &str = "e83f5c1a9d2b4f6a7c0e1d2b3a4f5c6d7e8f9a0b";
 
-/// 三类小体积夹具资产（与 systemone model_assets 测试同布局）。
-fn fixture_payloads() -> Vec<(&'static str, Vec<u8>)> {
+/// 三类小体积夹具资产（与 systemone model_assets 测试同布局）；
+/// SHA-256 为对应字节的预计算值（composition 不依赖 utils，本测试的核心
+/// 是装配链行为而非哈希计算本身；字节变化时需同步重算）。
+fn fixture_payloads() -> Vec<(&'static str, &'static str, Vec<u8>)> {
     vec![
-        ("model.gguf", b"GGUF-TEST-WEIGHTS-CONTENT".to_vec()),
-        ("pointer_head.safetensors", vec![7_u8; 64]),
-        ("tokenizer/merges.txt", b"line-one\nline-two\n".to_vec()),
+        (
+            "model.gguf",
+            "d525dff061f8b33c4f554195cfd996dd32d0cb0fc4018eb76adc8e5be0dced4e",
+            b"GGUF-TEST-WEIGHTS-CONTENT".to_vec(),
+        ),
+        (
+            "pointer_head.safetensors",
+            "6cfeeb3aa25d3f411dae5eec17d7369ca7153e72dcf54bcf4c3daec0f5b21fc7",
+            vec![7_u8; 64],
+        ),
+        (
+            "tokenizer/merges.txt",
+            "3ef30b67e7b9fd6b53b65079bcd18f76f6bf6cbe23d36ef862ea82b0f96f7264",
+            b"line-one\nline-two\n".to_vec(),
+        ),
     ]
 }
 
-/// 按夹具字节构造契约 manifest（长度与 SHA-256 来自真实字节）。
+/// 按夹具字节构造契约 manifest（长度来自真实字节，SHA-256 用预计算常量）。
 fn fixture_manifest() -> systemone::ModelManifest {
     let assets = fixture_payloads()
         .into_iter()
-        .map(|(path, payload)| systemone::ModelAsset {
+        .map(|(path, sha256, payload)| systemone::ModelAsset {
             url: format!("https://example.com/{path}"),
             byte_length: payload.len() as u64,
-            sha256: utils::sha256_hex(&payload),
+            sha256: sha256.to_owned(),
             path: path.to_owned(),
         })
         .collect();
@@ -44,7 +58,7 @@ fn fixture_manifest() -> systemone::ModelManifest {
 /// 在 models_dir 下手工构造完整有效安装树（覆盖读路径幂等命中）。
 fn write_installed_tree(models_dir: &Path, manifest: &systemone::ModelManifest) {
     let revision_dir = models_dir.join(&manifest.engine_revision);
-    for (path, payload) in fixture_payloads() {
+    for (path, _sha256, payload) in fixture_payloads() {
         let file_path = revision_dir.join(path);
         std::fs::create_dir_all(file_path.parent().expect("资产应有父目录")).expect("父目录创建");
         std::fs::write(file_path, payload).expect("资产写入");
