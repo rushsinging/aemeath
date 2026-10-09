@@ -114,12 +114,10 @@ impl EmbeddedScoringAdapter {
             }
         };
         let manifest = installed.manifest();
-        let model_asset = manifest
-            .model_asset()
-            .map_err(|error| embedded_asset_contract(error))?;
+        let model_asset = manifest.model_asset().map_err(embedded_asset_contract)?;
         let pointer_head_asset = manifest
             .pointer_head_asset()
-            .map_err(|error| embedded_asset_contract(error))?;
+            .map_err(embedded_asset_contract)?;
         let install_root = installed.install_root();
         Self::start_from_paths(
             install_root.join(&model_asset.path),

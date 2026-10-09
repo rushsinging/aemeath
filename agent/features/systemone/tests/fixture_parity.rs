@@ -103,7 +103,7 @@ fn fixture_manifest_matches_production_shape() {
     assert_eq!(manifest.case_count, 79);
     assert_eq!(manifest.hidden_size, 1024);
     assert_eq!(manifest.pointer_dimension, 256);
-    assert!((manifest.temperature - 2.351_095_8).abs() < 1e-6);
+    assert!((manifest.temperature - 2.351_096).abs() < 1e-6);
 }
 
 /// 每行 fixture 完整自洽：probs 长度/归一、hidden/ids 布局一致。

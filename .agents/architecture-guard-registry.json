@@ -373,6 +373,18 @@
       "tracking_issue": 1833
     },
     {
+      "id": "construction.systemone.wire-model-download-service",
+      "symbol": "wire_model_download_service",
+      "owner_crate": "systemone",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src/systemone.rs"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Manual model download service assembly (LocalModelAssetStore dual port + HttpArtifactFetcher with fixed-manifest source policy) has its single cross-BC call site in the composition systemone module behind run_systemone_download",
+      "tracking_issue": 1833
+    },
+    {
       "id": "construction.runtime.agent-runner",
       "symbol": "wire_agent_runner",
       "owner_crate": "runtime",

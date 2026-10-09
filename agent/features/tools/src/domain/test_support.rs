@@ -164,6 +164,9 @@ fn fake_controls() -> &'static Mutex<HashMap<String, Arc<dyn WorkspaceControl>>>
     CONTROLS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// bash adapter 内联测试专用 fake（仅 cfg(test) 编译；test-harness feature
+/// 的 lib 侧消费者不需要它，加 cfg 防 dead_code）。
+#[cfg(test)]
 pub(crate) fn workspace_control(ctx: &ToolExecutionContext) -> Arc<dyn WorkspaceControl> {
     fake_controls()
         .lock()

@@ -63,6 +63,18 @@ fn dirs_home() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/root"))
 }
 
+/// fixture manifest（只取本门禁需要的口径字段）。
+#[derive(Deserialize)]
+struct ParityFixtureManifest {
+    temperature: f32,
+}
+
+fn read_fixture_manifest() -> ParityFixtureManifest {
+    let source = std::fs::read_to_string(fixture_dir().join("manifest.json"))
+        .expect("fixture manifest.json 应存在（先运行 export_parity_fixture.py）");
+    serde_json::from_str(&source).expect("fixture manifest 解析")
+}
+
 /// head.f32 → PointerHead 权重（与 tests/fixture_parity.rs 的 reader 同构，
 /// 权重真相源相同：fixture head/head.f32）。
 fn fixture_pointer_head() -> PointerHead {
@@ -78,7 +90,7 @@ fn fixture_pointer_head() -> PointerHead {
     let weights = PointerHeadWeights::new(
         HIDDEN_SIZE,
         POINTER_DIMENSION,
-        2.351_095_8,
+        read_fixture_manifest().temperature,
         &floats[0..matrix_len],
         &floats[matrix_len..matrix_len + POINTER_DIMENSION],
         &floats[matrix_len + POINTER_DIMENSION..2 * matrix_len + POINTER_DIMENSION],

@@ -136,18 +136,16 @@ where
         .expect("fake engine 初始化成功")
 }
 
-fn adapter_with<E, F>(
+async fn adapter_with<E, F>(
     init_engine: F,
     row_builder: KevCausalRowBuilder,
-) -> impl std::future::Future<Output = EmbeddedScoringAdapter>
+) -> EmbeddedScoringAdapter
 where
     E: RowEmbeddingEngine + 'static,
     F: FnOnce() -> Result<E, WorkerInitError> + Send + 'static,
 {
-    async move {
-        let client = client_for(init_engine).await;
-        EmbeddedScoringAdapter::from_parts(client, row_builder, tiny_pointer_head(), 2)
-    }
+    let client = client_for(init_engine).await;
+    EmbeddedScoringAdapter::from_parts(client, row_builder, tiny_pointer_head(), 2)
 }
 
 fn sample_state(text: &str) -> ScoringState {

@@ -105,6 +105,7 @@ trait CalibrationPort {
 - 推理机制：对 kev 编码协议产生的逐题 causal row 做 llama.cpp embedding 前向，读取逐 token normed hidden states；在 `<|fim_suffix|>` 的 decide 位置与每个 `<|box_end|>` option 位置取 hidden，执行 `q(h_decide)`、`k(h_option)`、点积、温度缩放与 softmax。
 - Rust 接入：优先使用 `llama-cpp-2` safe binding；若 safe 层未暴露逐 token hidden，仅对 `llama_get_embeddings_ith` 等必要 API 使用 `llama-cpp-sys-2` 薄封装，unsafe MUST 局限在 adapter 内。
 - 生命周期：llama model/context 与 PointerHead 固定驻留专用 worker thread；异步 `ScoringPort` 通过有界 channel 提交请求，NEVER 将 C/C++ context 跨 Tokio task 传递。
+- 已知上游缺陷规避：llama.cpp（ggml-metal-device.m，residency sets 释放断言）在 device 释放期可能 SIGABRT；engine init 期设置 `GGML_METAL_NO_RESIDENCY=1` 关闭该特性（用户显式配置时不覆盖），上游修复后移除。
 
 ### 4.2 模型安装与缓存
 
@@ -131,7 +132,13 @@ aemeath systemone download
   tokenizer/
 ```
 
-有效缓存命中时命令幂等返回，不重复下载；失败时 NEVER 留下可被运行时识别为有效安装的半成品目录，也 NEVER 覆盖已有有效版本。
+有效缓存命中时命令幂等返回，不重复下载；失败时 NEVER 留下可被运行时识别为有效安装的半成品目录，也 NEVER 覆盖已有有效版本。发行 manifest 未落地（仓库无经确认的 URL / SHA-256 元数据）时命令 typed 失败并以非零退出码告知，NEVER 内置占位 URL 假数据。
+
+### 4.2.1 数值回归门禁（批次 2 落地）
+
+- fixture 真相源：`eval/system-one/fixtures/parity_q8/`（79 case：row token ids + torch fp32 golden hidden + Python PointerHead softmax 概率 + head 权重裸二进制），由 `harness/export_parity_fixture.py` 零网络导出，随 git 提交。
+- 纯数学门禁（任何环境可跑）：`systemone` crate `tests/fixture_parity.rs`——Rust PointerHead 对拍 fixture golden 概率，79/79 argmax 恒等、max|Δp| ≤1e-4。
+- 真机门禁（`--ignored` 显式运行、模型缺失时 skip 且 NEVER 自动下载）：`adapters/embedded_parity_tests.rs`——fixture token ids → llama.cpp Q8_0 前向 → Rust PointerHead → argmax 对拍 golden，实测 79/79 命中、max|Δp|=0.0136（位于 crate 内是因需 `pub(crate)` worker 接口）。
 
 ### 4.3 HTTP adapter 退役边界
 

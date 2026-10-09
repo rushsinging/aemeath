@@ -101,9 +101,13 @@ pub(crate) const EMBEDDED_UBATCH_TOKENS: u32 = 2048;
 #[cfg(feature = "embedded")]
 pub(crate) const TOKENIZER_JSON_RELATIVE_PATH: &str = "tokenizer/tokenizer.json";
 
+/// PointerHead 张量 shape 生成器：入参 (pointer_dimension, hidden_size)。
+#[cfg(feature = "embedded")]
+pub(crate) type PointerHeadShapeFn = fn(usize, usize) -> Vec<u64>;
+
 /// PointerHead safetensors 四个张量的固定名称与 shape 生成器。
 #[cfg(feature = "embedded")]
-pub(crate) const POINTER_HEAD_TENSORS: [(&str, fn(usize, usize) -> Vec<u64>); 4] = [
+pub(crate) const POINTER_HEAD_TENSORS: [(&str, PointerHeadShapeFn); 4] = [
     ("q.weight", |pointer_dimension, hidden_size| {
         vec![pointer_dimension as u64, hidden_size as u64]
     }),
