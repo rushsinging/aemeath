@@ -668,18 +668,66 @@ reflect agent 的工具集中**没有写记忆的工具**。闭环在别处：re
 | `RERANKER_LOCAL_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | 默认重排模型 |
 | `MENTAL_MODEL_HISTORY_MAX_ENTRIES` | 50 | 心智模型历史保留条数 |
 
-## 12. 未验证项
+## 12. 论文对照（arXiv:2512.12818）
+
+Hindsight 官方论文《Hindsight is 20/20: Building Agent Memory that Retains, Recalls, and Reflects》（arXiv:2512.12818，2025-12）给出了架构的学术化命名与形式化。与本文前述章节的源码观察对照如下。
+
+**命名映射**：论文将 retain/recall 管线命名为 **TEMPR**（Temporal Entity Memory Priming Retrieval），reflect 命名为 **CARA**（Coherent Adaptive Reasoning Agents）。四网络命名为 world / experience / opinion / observation——注意论文版包含 opinion 网络，而**该网络已在产品中废弃**（见下文）。
+
+**论文独有、产品已废弃的机制**：opinion 以 `(text, confidence∈[0,1], timestamp, bank, entities)` 元组存储；reflect 按 disposition profile（skepticism / literalism / empathy 各 1-5，加 bias strength β∈[0,1]，数值经"言语化"函数 φ 注入 system prompt）形成新 opinion；新事实 retain 后经实体重叠 + 语义相似（阈值 θ）召回候选 opinion，LLM 四分类（reinforce / weaken / contradict / neutral）后按步长 α 更新置信度（contradict 双倍扣减），小步长防震荡。该机制的消失与 §8.4 观察到的 `confidence_score` 列删除迁移（`g2h3i4j5k6l7`）互为印证：**产品最终选择"改写文本 + 保留演变史"，而非数值信念追踪**。
+
+**benchmark 数字的折扣点**（评估其 SOTA 声称时需注意，出处：论文 §7 与 README）：
+
+- 官方数字：LongMemEval(S) 91.4% / LoCoMo 89.61%（Gemini-3 生成端）；同 backbone 20B 开源模型 39.0% → 83.6%（+44.6pt），multi-session 21.1% → 79.7%、temporal 31.6% → 79.7% 为最大涨幅。
+- baseline 数字（Zep / Supermemory / Backboard / Mem0）**直接抄自对手自报数据**（Supermemory 技术报告、Backboard 官网），非独立复现；论文明确写 "We treat these numbers as reported reference points"。
+- 实验设置中检索 token budget 留有 `<add>` 占位符未填（论文 §7.3 排版疏漏）。
+- 无消融实验章节；四路检索各自的贡献无单独数据。
+- Hindsight 自身数字由 Virginia Tech Sanghani Center 与 Washington Post 独立复现（README 声称），相对可信；其余厂商数字不可比。
+
+## 13. 中文友好度评估
+
+针对中文使用场景的适配评估（出处：官方 multilingual 文档、`.env.example`、源码目录核查，2026-10 复核）：
+
+| 组件 | 默认 | 中文适配 |
+|---|---|---|
+| LLM 抽取 / reflect | 依赖所选 LLM | 语言保真为 prompt 工程（见 §5.2）；可用 `HINDSIGHT_API_LLM_OUTPUT_LANGUAGE` 强制输出语言 |
+| Embedding | `BAAI/bge-small-en-v1.5`（英文专用） | 须换 `BAAI/bge-m3`（100+ 语言） |
+| Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2`（英文专用） | 须换 `BAAI/bge-reranker-v2-m3` |
+| BM25 | `native`（PostgreSQL 英语词典） | **CJK 零分词能力**（无空格词边界），须 `pgroonga`（TokenBigram）或 `pg_search`（jieba）；两者均**不在内嵌 pg0 中**——中文 BM25 意味着外挂 PostgreSQL，单容器形态失效 |
+| Temporal 解析 | dateparser / dateutil + flan-t5-small 兜底 | 有 `engine/chinese_temporal_periods.py` 中文周期表达支持；flan-t5-small 对中文时间表达式的能力未验证 |
+| 阈值标定 | 按 bge-small 分数分布（§11） | 换模型后相似度阈值分布漂移需重调；官方未给中文模型推荐值 |
+
+**架构教训**：检索管线的每个组件（embedding / reranker / BM25 tokenizer / 阈值）都是语言敏感的，默认英文组件栈在非英语环境下**静默降级且不报错**；官方 benchmark（LongMemEval / LoCoMo）全英文，中文检索精度无官方实测数据。若坚持内嵌 pg0 部署，recall 四路中的关键词臂对中文实际失效，退化为三路，中文专有名词精确匹配能力受损。
+
+## 14. coding-agent 集成机制（初稿后新增能力）
+
+`@vectorize-io/hindsight-coding-agents` npm 包（源码 `hindsight-integrations/coding-agents/`）为 Claude Code 等 CLI coding agent 提供 per-repo 长期记忆，机制与 aemeath 的 hook 体系直接可比（出处：该目录源码 `src/core/*.ts` 与各 harness 入口，2026-10 核查）。
+
+**接入形态**：对 Claude Code 写入 3 个 hook（`~/.claude/settings.json`）——SessionStart（detached 子进程后台 seed）/ UserPromptSubmit（recall + 注入 `additionalContext`）/ Stop（本轮对话 retain 回写）；另加 stdio MCP server 暴露 `hindsight_*` 工具。
+
+**per-repo bank**：bank id 模板 `coding-agent::{gitProject}`（worktree-aware，linked worktree 继承主 checkout 身份）；**刻意不提供 repo 内配置文件**——克隆来的仓库不能自行开启记忆（fail-closed 隐私设计）；支持 opt-in 路径白名单，不在名单中的项目完全 inert（不建 bank、不 seed）。
+
+**git ingest 的成本控制**：默认仅取最近 300 条 **commit message**（无 diff）聚合成单个文档写入，`document_id = gitlog:<repo>` 幂等 upsert（一次抽取 op）；全 diff ingest（逐 commit message + 全 diff）是昂贵的 opt-in；另有一次性 codebase survey（只读 agent 跑一遍仓库生成 knowledge pages）。
+
+**注入节流**（与本项目"注入时机冻结"同向的设计）：
+
+- 每会话只在第一个 prompt 做一次重 reflect 综合（结果按 session 缓存、失败回退 pages → recall、每会话最多重试 2 次），之后不重复注入。
+- knowledge pages 采用"**roster 推 / 正文拉**"：每 N 轮只注入页面清单 + 工具指引，正文由 agent 主动调 MCP 工具按需拉取——避免每轮注入在 transcript 中堆积噪音。
+- hook 永不破坏宿主 agent：注入失败有预算、seed 为 fire-and-forget、diag 文件记录每次注入的耗时与成败。
+
+**对 aemeath 的可对照点**：本项目的 MemoryUpdated reminder（OnRunStart + Drop 语义）与"首注 + compact 后刷新"冻结策略，与 Hindsight 的"每会话一次 + 缓存"是同一反噪音直觉的两种实现；"roster 推 / 正文拉"对大体积知识的注入策略有直接借鉴价值。
+
+## 15. 未验证项
 
 以下条目在调研中未读到实现原文，仅有间接或命名证据，引用时需谨慎：
 
 1. **recall 的 budget 档位具体数值**：`recall_unified` 的 `limit` 由 budget 档位决定，但具体映射位于超大编排文件中，未逐行核对。
 2. **`cap_per_source` 的调用点与取值**：函数已核对，调用位置与配置键未定位。
-3. **`memory_units` 是否存在数值化置信度**：已确认历史列被删除；当前是否存在其他等价机制未穷尽检查。
-4. **观察的"证据引文"是否有独立存储**：结论为通过 `source_memory_ids` 指针引用源行文本；是否存在额外的引文快照列未穷尽检查。
-5. **直接写入路径的 Observation 上限行为**：`max_observations_per_scope` 相关策略覆盖逻辑未逐行核对。
-6. **核心编排文件规模**：`engine/memory_engine.py` 体积巨大，超出可读窗口，其内部职责划分未逐段核对。
+3. **观察的"证据引文"是否有独立存储**：结论为通过 `source_memory_ids` 指针引用源行文本；是否存在额外的引文快照列未穷尽检查。
+4. **直接写入路径的 Observation 上限行为**：`max_observations_per_scope` 相关策略覆盖逻辑未逐行核对。
+5. **核心编排文件规模**：`engine/memory_engine.py` 体积巨大，超出可读窗口，其内部职责划分未逐段核对。
 
-## 13. 相关文档
+## 16. 相关文档
 
 - 模块入口：[README.md](README.md)
 - 变更设计（进行中）：[051-hindsight-memory-change-design.md](../../snapshot/specs/051-hindsight-memory-change-design.md)
@@ -695,3 +743,4 @@ reflect agent 的工具集中**没有写记忆的工具**。闭环在别处：re
 | 2026-09-28 | 初稿：Hindsight 四层梯度、retain 链路、数据模型、检索融合、巩固机制与心智模型的调研记录 |
 | 2026-09-28 | 补充设计优势（§2）与记忆链路（§4）；「记忆体系总览」并入「记忆架构」（§3）并补充记忆类型体系、组织维度与分层设计律，后续章节顺延重编号 |
 | 2026-09-28 | 作为长期保留的调研记录回归 design 目录（本文）；变更设计留在 snapshot/specs |
+| 2026-10-09 | 补充论文对照（§12）、中文友好度评估（§13）与 coding-agent 集成机制（§14）；闭合未验证项「数值化置信度」（论文与迁移史双向确认 opinion/置信度机制已被产品废弃），未验证项与相关文档顺延为 §15/§16 |
