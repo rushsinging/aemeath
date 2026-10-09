@@ -204,12 +204,15 @@ impl From<crate::adapters::embedded::EmbeddedInitError> for EmbeddedScoringWirin
 /// - `models_dir`：模型安装根（生产为 `share::config::paths::systemone_models_dir()`）。
 /// - `user_agent`：HTTP 抓取 User-Agent（生产为进程 UA）。
 /// - `manifest`：固定发行 manifest（契约先校验，零 IO 拒绝非法结构）。
+/// - `allowed_redirect_hosts`：额外允许的重定向 host（manifest URL host 自动
+///   进白名单；生产传 HF CDN 域，托管方变更时同步调整）。
 ///
 /// composition 只调用本工厂，NEVER 手工 new adapter。
 pub fn wire_model_download_service(
     models_dir: PathBuf,
     user_agent: &str,
     manifest: ModelManifest,
+    allowed_redirect_hosts: &[&str],
 ) -> Result<crate::application::ModelDownloadService, crate::application::ModelDownloadError> {
     let asset_store = LocalModelAssetStore::new(models_dir, manifest.clone()).map_err(|error| {
         crate::application::ModelDownloadError {
@@ -228,7 +231,10 @@ pub fn wire_model_download_service(
         user_agent,
         crate::constants::DOWNLOAD_CONNECT_READ_TIMEOUT,
         &manifest,
-        Vec::new(),
+        allowed_redirect_hosts
+            .iter()
+            .map(|host| (*host).to_owned())
+            .collect(),
     )
     .map_err(|error| crate::application::ModelDownloadError {
         kind: crate::application::ModelDownloadErrorKind::Fetch(

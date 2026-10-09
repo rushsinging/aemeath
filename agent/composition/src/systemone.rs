@@ -160,14 +160,15 @@ pub enum SystemoneDownloadExit {
     },
 }
 
-/// `aemeath systemone download` 生产入口：manifest 取自生产发行 manifest 源
-/// （当前未落地 → typed 失败），模型目录取 `~/.agents/models/systemone`。
+/// `aemeath systemone download` 生产入口：manifest 取自生产发行 manifest 源，
+/// 模型目录取 `~/.agents/models/systemone`，重定向 host 白名单取 HF CDN 域。
 pub async fn run_systemone_download(user_agent: &str) -> SystemoneDownloadExit {
-    let manifest = UnavailableReleaseManifest.release_manifest();
-    run_systemone_download_with(
+    let manifest = ProductionReleaseManifest.release_manifest();
+    run_systemone_download_inner(
         manifest,
         share::config::paths::systemone_models_dir(),
         user_agent,
+        &crate::constants::HF_CDN_REDIRECT_HOSTS,
     )
     .await
 }
@@ -180,6 +181,15 @@ pub async fn run_systemone_download_with(
     models_dir: std::path::PathBuf,
     user_agent: &str,
 ) -> SystemoneDownloadExit {
+    run_systemone_download_inner(manifest, models_dir, user_agent, &[]).await
+}
+
+async fn run_systemone_download_inner(
+    manifest: Option<systemone::ModelManifest>,
+    models_dir: std::path::PathBuf,
+    user_agent: &str,
+    allowed_redirect_hosts: &[&str],
+) -> SystemoneDownloadExit {
     let Some(manifest) = manifest else {
         return SystemoneDownloadExit::Failure {
             message: "System One 发行模型 manifest 未提供：当前构建未内置经确认的模型\
@@ -188,7 +198,12 @@ pub async fn run_systemone_download_with(
             exit_code: 1,
         };
     };
-    let service = match systemone::wire_model_download_service(models_dir, user_agent, manifest) {
+    let service = match systemone::wire_model_download_service(
+        models_dir,
+        user_agent,
+        manifest,
+        allowed_redirect_hosts,
+    ) {
         Ok(service) => service,
         Err(error) => {
             return SystemoneDownloadExit::Failure {
@@ -242,17 +257,32 @@ pub(crate) trait EmbeddedScoringFactory: Send + Sync {
     ) -> Result<Arc<dyn systemone::ScoringPort>, systemone::EmbeddedScoringWiringError>;
 }
 
-/// 生产发行 manifest 源：**当前不提供**发行 artifact 元数据。
+/// 生产发行 manifest 源：当前发行（kev 0.8B 合并 Q8_0，托管于 Hugging Face
+/// 公开仓库 `rushsinging/aemeath-systemone-kev`）。
 ///
-/// 仓库现状（docs / eval / git 全量检索）没有经用户确认的发行模型 URL 与
-/// SHA-256；内置占位假数据会让真实下载 / 校验失败，故一律返回 `None` →
-/// typed [`ScoringStartupOutcome::ManifestUnavailable`]。发行 manifest 落地后
-/// 在此返回 `Some`（fixture 仅供测试）。
-pub(crate) struct UnavailableReleaseManifest;
+/// URL / 长度 / SHA-256 是下载链的**信任根**：资产内容任何变化（重新转换、
+/// 重新量化）MUST 重新上传并同步更新 constants 的发行常量与 revision。
+pub(crate) struct ProductionReleaseManifest;
 
-impl ReleaseManifestSource for UnavailableReleaseManifest {
+impl ReleaseManifestSource for ProductionReleaseManifest {
     fn release_manifest(&self) -> Option<systemone::ModelManifest> {
-        None
+        Some(systemone::ModelManifest {
+            schema_version: 1,
+            engine_revision: crate::constants::SYSTEMONE_RELEASE_REVISION.to_owned(),
+            hidden_size: 1024,
+            pointer_dimension: 256,
+            temperature: 2.351_095_8,
+            supported_platforms: vec![systemone::required_platform().to_owned()],
+            assets: crate::constants::SYSTEMONE_RELEASE_ASSETS
+                .iter()
+                .map(|(path, byte_length, sha256)| systemone::ModelAsset {
+                    url: format!("{}/{}", crate::constants::SYSTEMONE_RELEASE_BASE_URL, path),
+                    byte_length: *byte_length,
+                    sha256: (*sha256).to_owned(),
+                    path: (*path).to_owned(),
+                })
+                .collect(),
+        })
     }
 }
 
@@ -288,7 +318,7 @@ pub async fn assemble_scoring_ports(scoring: &share::config::ScoringConfig) -> S
     assemble_scoring_ports_with(
         scoring,
         &ProductionEmbeddedFactory,
-        &UnavailableReleaseManifest,
+        &ProductionReleaseManifest,
     )
     .await
 }

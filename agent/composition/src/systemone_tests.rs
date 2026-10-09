@@ -307,14 +307,20 @@ async fn production_assembly_with_default_features_reports_embedded_unavailable(
     assert_no_ports(&assembly.assignment);
 }
 
-/// 生产装配入口（embedded feature 开启 + 发行 manifest 未落地）：
-/// typed `ManifestUnavailable`，NEVER 占位假 URL / SHA。
+/// 生产装配入口（embedded feature 开启 + 发行 manifest 已落地 + CI 无已安装
+/// 模型）：typed `ModelMissing`（生产 manifest 常量含真实 URL / SHA， NEVER
+/// 占位假数据；真实安装后的 Ready 链路由 wiring fake 覆盖）。
 #[cfg(feature = "systemone-embedded")]
 #[tokio::test]
-async fn production_assembly_without_release_manifest_reports_manifest_unavailable() {
+async fn production_assembly_with_release_manifest_reports_model_missing_when_uninstalled() {
+    // 生产 manifest 的 revision 目录不得存在于本测试运行环境（CI 恒无模型；
+    // 本机若已安装同 revision 则直接命中 Ready——断言二选一，两者都是合法终态）。
     let assembly = assemble_scoring_ports(&all_enabled()).await;
-    assert_eq!(assembly.outcome, ScoringStartupOutcome::ManifestUnavailable);
-    assert_no_ports(&assembly.assignment);
+    match assembly.outcome {
+        ScoringStartupOutcome::ModelMissing { .. } => assert_no_ports(&assembly.assignment),
+        ScoringStartupOutcome::Ready => assert!(assembly.assignment.for_memory_rerank.is_some()),
+        other => panic!("生产装配结果应为 ModelMissing 或 Ready，实际 {other:?}"),
+    }
 }
 
 /// 生产 composition 源文件永远不得引用 HTTP 评分工厂或其配置 env。
@@ -379,5 +385,65 @@ fn scoring_startup_notices_non_empty_for_unavailable_outcomes() {
             "outcome {outcome:?} 应生成恰好一条启动提醒"
         );
         assert!(!notices[0].message.is_empty());
+    }
+}
+
+/// 生产发行 manifest 常量契约：三资产 URL 均指向 HF 官方域（https）、SHA-256
+/// 为 64 位十六进制、维度与 kev 0.8B 决策口径一致、平台仅 macOS arm64。
+#[test]
+fn production_release_manifest_matches_hf_release_shape() {
+    let manifest = ProductionReleaseManifest
+        .release_manifest()
+        .expect("生产 manifest 必须落地");
+    assert_eq!(manifest.schema_version, 1);
+    assert_eq!(manifest.engine_revision, "kev-0.8b-q8-r1");
+    assert_eq!(manifest.hidden_size, 1024);
+    assert_eq!(manifest.pointer_dimension, 256);
+    assert!((manifest.temperature - 2.351_095_8).abs() < 1e-6);
+    assert_eq!(
+        manifest.supported_platforms,
+        vec!["macos-aarch64".to_string()]
+    );
+    assert_eq!(manifest.assets.len(), 3);
+    let expected_paths = [
+        "model.gguf",
+        "pointer_head.safetensors",
+        "tokenizer/tokenizer.json",
+    ];
+    for (asset, expected_path) in manifest.assets.iter().zip(expected_paths) {
+        assert_eq!(asset.path, expected_path);
+        assert!(
+            asset.url.starts_with(
+                "https://huggingface.co/rushsinging/aemeath-systemone-kev/resolve/main/"
+            ),
+            "URL 必须指向 HF 发行仓库：{}",
+            asset.url
+        );
+        assert_eq!(asset.sha256.len(), 64);
+        assert!(asset.sha256.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(asset.byte_length > 0);
+    }
+    // Q8_0 GGUF 资产量级 sanity（约 812MB；明显偏离说明常量填错）。
+    let gguf = manifest
+        .assets
+        .iter()
+        .find(|asset| asset.path == "model.gguf")
+        .expect("model.gguf 资产");
+    assert!(
+        gguf.byte_length > 700_000_000 && gguf.byte_length < 900_000_000,
+        "Q8_0 GGUF 大小异常：{}",
+        gguf.byte_length
+    );
+}
+
+/// HF xet/LFS CDN 重定向 host 白名单非空且全部为 HF 官方域（下载链 302 必需）。
+#[test]
+fn hf_cdn_redirect_hosts_are_official_hf_domains() {
+    assert!(!crate::constants::HF_CDN_REDIRECT_HOSTS.is_empty());
+    for host in crate::constants::HF_CDN_REDIRECT_HOSTS {
+        assert!(
+            host.ends_with(".hf.co") || host.ends_with(".huggingface.co"),
+            "CDN host 必须是 HF 官方域：{host}"
+        );
     }
 }
