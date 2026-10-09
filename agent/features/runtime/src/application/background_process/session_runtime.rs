@@ -198,6 +198,26 @@ impl BackgroundProcessRuntime {
         self.supervisor.clone()
     }
 
+    /// Run 收口后的滞留事实检测（#252 注入确认制兜底）：监督器仍有
+    /// 未确认完成事实（收口临界窗口内被 peek 但未注入，消费者已随
+    /// Run 销毁）时补发 wakeup 信号——立即唤醒补注入，而非等下一个
+    /// 任务完成 / 用户输入捎带。无可补内容时静默不发。
+    pub(crate) fn signal_wakeup_for_stranded_facts(&self) {
+        if self.supervisor.peek_unnotified_terminal_items().is_empty() {
+            return;
+        }
+        log::info!(
+            target: crate::LOG_TARGET,
+            "background stranded facts detected: signaling wakeup for immediate re-injection"
+        );
+        if let Err(error) = self.notifier.wakeup() {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "background wakeup signal lost (session exiting): {error:?}"
+            );
+        }
+    }
+
     /// 取走等待端（session driver 首次接线；一个 session 一个等待端）。
     pub(crate) fn take_wakeup_waiter(&self) -> Option<WakeupWaiter> {
         self.waiter.lock().expect("后台进程唤醒信箱锁中毒").take()

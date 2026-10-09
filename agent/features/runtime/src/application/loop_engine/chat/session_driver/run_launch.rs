@@ -449,6 +449,18 @@ where
                     matches!(idle_result, IdleResult::ManualCompactionRequested);
                 let background_wakeup_run =
                     matches!(idle_result, IdleResult::BackgroundProcessWakeup);
+                // 滞留信号预检（#252）：wakeup 信号被前一轮 idle 的用户
+                // 输入分支竞争保留后，事实可能已由该 Run 注入确认——
+                // 无可补注入内容时静默忽略信号，避免空转一次 LLM 调用。
+                if background_wakeup_run
+                    && shell
+                        .background_processes
+                        .supervisor()
+                        .peek_unnotified_terminal_items()
+                        .is_empty()
+                {
+                    continue;
+                }
                 let manual_reflection_run =
                     matches!(idle_result, IdleResult::ManualReflectionRequested);
                 // 手动反思的材料快照必须在 run launch 装配前取自当前 committed session
@@ -1070,6 +1082,12 @@ where
                 runtime_context
                     .context()
                     .drop_reminder_pipeline(&run_id);
+                // Run 收口滞留检测（#252 注入确认制兜底）：reminder 管线
+                // 销毁后监督器若仍有未确认完成事实，补发 wakeup 信号立即
+                // 补注入（否则需等下一个任务完成 / 用户输入捎带）。
+                shell
+                    .background_processes
+                    .signal_wakeup_for_stranded_facts();
                 // Return any remaining Run-scoped events (control commands
                 // buffered during await_user_input) to the session idle gate.
                 input_source.drain_remaining_events();

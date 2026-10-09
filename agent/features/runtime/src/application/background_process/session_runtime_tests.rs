@@ -411,3 +411,51 @@ fn task_summary_duration_counts_from_dispatch_time() {
         "时长自派发时刻起算（覆盖前台等待段）：{duration_ms}ms"
     );
 }
+
+// ── Run 收口滞留事实检测（#252 注入确认制兜底） ──────────────────────
+
+#[tokio::test]
+async fn stranded_facts_detection_signals_wakeup_only_when_unconfirmed() {
+    let registry =
+        std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
+    let runtime = std::sync::Arc::new(BackgroundProcessRuntime::for_test(registry));
+    let mut waiter = runtime.take_wakeup_waiter().expect("session 首次取等待端");
+
+    // 无事实：不发信号。
+    runtime.signal_wakeup_for_stranded_facts();
+    assert!(waiter.try_wait().is_none(), "无滞留事实不得发信号");
+
+    // 未确认完成事实（收口临界窗口被 peek 未注入）：补发 wakeup。
+    let task_id = runtime.supervisor().register(
+        background_process_identity(),
+        "tool=Bash input=stranded",
+        SystemTime::now(),
+    );
+    runtime
+        .supervisor()
+        .finish(
+            &task_id,
+            crate::domain::background_process::BackgroundProcessTerminalKind::Success,
+            Some("done".to_string()),
+        )
+        .unwrap();
+    runtime.signal_wakeup_for_stranded_facts();
+    assert!(
+        waiter.try_wait().is_some(),
+        "滞留事实必须立即补发 wakeup（不等下一个事件捎带）"
+    );
+
+    // 注入确认后：不再发。
+    let items = runtime.supervisor().peek_unnotified_terminal_items();
+    runtime.supervisor().mark_notified(
+        &items
+            .iter()
+            .map(|item| item.task_id.clone())
+            .collect::<Vec<_>>(),
+    );
+    runtime.signal_wakeup_for_stranded_facts();
+    assert!(
+        waiter.try_wait().is_none(),
+        "已确认事实不得重复唤醒（避免空转 LLM 调用）"
+    );
+}
