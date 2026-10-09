@@ -850,3 +850,83 @@ async fn bash_when_workspace_deleted_returns_cwd_attribution() {
         result.text
     );
 }
+
+// ── #1890 输出直绑：stdout 重定向任务日志文件 ────────────────────────
+
+#[tokio::test]
+async fn bash_direct_log_writes_stdout_to_log_file_and_result_keeps_text() {
+    let workspace = tempdir().unwrap();
+    let log_path = workspace.path().join("bgp_direct1.log");
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build()
+    .with_background_log_path(log_path.clone());
+
+    let result = bash_tool(&ctx)
+        .call(json!({ "command": "echo direct-bound-output" }), &ctx)
+        .await;
+
+    assert!(!result.is_error, "直绑不应影响执行：{}", result.text);
+    let file_content = std::fs::read_to_string(&log_path).unwrap();
+    assert!(
+        file_content.contains("direct-bound-output"),
+        "stdout 必须直写日志文件（零跳字节）：{file_content:?}"
+    );
+    assert!(
+        result.text.contains("direct-bound-output"),
+        "前台结果文本保留输出（文件尾部回读）：{}",
+        result.text
+    );
+}
+
+#[tokio::test]
+async fn bash_direct_log_keeps_full_output_beyond_capture_limit() {
+    let workspace = tempdir().unwrap();
+    let log_path = workspace.path().join("bgp_direct2.log");
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build()
+    .with_background_log_path(log_path.clone());
+
+    // 11MB：超过 MAX_CAPTURE_BYTES（10MB）——pipe 形态会丢弃超限部分。
+    let result = bash_tool(&ctx)
+        .call(
+            json!({ "command": "for i in $(seq 1 11); do dd if=/dev/zero bs=1048576 count=1 2>/dev/null | tr '\\0' 'x'; done" }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error, "大输出直绑执行：{}", result.text);
+    let file_content = std::fs::read(&log_path).unwrap();
+    // 11MB 输出 + 尾部 cwd marker（脚本注入的 PWD 标记）。
+    assert!(
+        file_content.len() >= 11 * 1024 * 1024,
+        "文件是全量真相：超捕获上限的输出零丢失（实际 {} 字节）",
+        file_content.len()
+    );
+}
+
+#[tokio::test]
+async fn bash_without_log_path_behaves_unchanged() {
+    let workspace = tempdir().unwrap();
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build();
+
+    let result = bash_tool(&ctx)
+        .call(json!({ "command": "echo piped-unchanged" }), &ctx)
+        .await;
+
+    assert!(!result.is_error);
+    assert!(
+        result.text.contains("piped-unchanged"),
+        "未注入路径时保持 piped 行为：{}",
+        result.text
+    );
+}
