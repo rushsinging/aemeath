@@ -549,3 +549,146 @@ fn snapshot_mapping_uses_default_logs_dir_when_config_is_absent() {
     );
     assert_eq!(settings.logs_dir(), PathBuf::from("/fallback/logs"));
 }
+
+/// 透传链路：场景开关开启（评分未生效）时 `SessionRuntimeAssembly` 携带
+/// 恰好一条启动提醒（默认构建 typed `EmbeddedUnavailable`，embedded 构建
+/// typed `ManifestUnavailable`——两种 feature 下均为一条非空中文提醒）。
+#[tokio::test(flavor = "current_thread")]
+async fn bootstrap_assembly_carries_scoring_startup_notice_when_scenario_enabled() {
+    let temp = tempfile::tempdir().expect("create temp root");
+    let root = temp.path().join("root");
+    let agents_dir = temp.path().join("agents");
+    std::fs::create_dir_all(&root).expect("create project root");
+    std::fs::create_dir_all(&agents_dir).expect("create agents dir");
+    std::fs::write(
+        agents_dir.join("aemeath.json"),
+        serde_json::json!({
+            "models": {
+                "default": "local/test-model",
+                "providers": {
+                    "local": {
+                        "baseUrl": "http://127.0.0.1:1/v1",
+                        "apiKey": "test-api-key",
+                        "driver": "openai",
+                        "models": [{
+                            "id": "test-model",
+                            "name": "Test Model",
+                            "input": ["text"],
+                            "contextWindow": 8192,
+                            "max_tokens": 1024
+                        }]
+                    }
+                }
+            },
+            "scoring": { "memoryRerank": true }
+        })
+        .to_string(),
+    )
+    .expect("write config");
+    std::fs::write(agents_dir.join("mcp.json"), r#"{"mcpServers":{}}"#).expect("write MCP config");
+
+    let gateways = FeatureGateways::new(
+        Arc::new(CountingProviderFactory::default()),
+        policy::allow_all(),
+    );
+    let args = AgentArgs {
+        cwd: Some(root),
+        api_key: Some("test-api-key".to_string()),
+        base_url: Some("http://127.0.0.1:1/v1".to_string()),
+        model: Some("local/test-model".to_string()),
+        context_size: 8192,
+        ..Default::default()
+    };
+    let native_store = wire_config_override_store(&agents_dir).expect("wire override store");
+    let config = config::wire_project_config_with_agents_dir(
+        args.cwd.as_deref().unwrap_or(Path::new(".")),
+        &agents_dir,
+        native_store,
+        cli_config_input(&args),
+    )
+    .await
+    .expect("wire config");
+    let workspace =
+        wire_workspace_with_config(&args.cwd.clone().unwrap(), &config).expect("wire workspace");
+
+    let assembly =
+        crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
+            .await
+            .expect("assemble runtime");
+
+    assert_eq!(
+        assembly.startup_notices.len(),
+        1,
+        "场景开关开启但评分未生效时应携带一条启动提醒"
+    );
+    assert!(!assembly.startup_notices[0].message.is_empty());
+}
+
+/// 透传链路：场景开关全关（零成本路径）时启动提醒为空。
+#[tokio::test(flavor = "current_thread")]
+async fn bootstrap_assembly_has_no_scoring_notice_when_scenarios_disabled() {
+    let temp = tempfile::tempdir().expect("create temp root");
+    let root = temp.path().join("root");
+    let agents_dir = temp.path().join("agents");
+    std::fs::create_dir_all(&root).expect("create project root");
+    std::fs::create_dir_all(&agents_dir).expect("create agents dir");
+    std::fs::write(
+        agents_dir.join("aemeath.json"),
+        serde_json::json!({
+            "models": {
+                "default": "local/test-model",
+                "providers": {
+                    "local": {
+                        "baseUrl": "http://127.0.0.1:1/v1",
+                        "apiKey": "test-api-key",
+                        "driver": "openai",
+                        "models": [{
+                            "id": "test-model",
+                            "name": "Test Model",
+                            "input": ["text"],
+                            "contextWindow": 8192,
+                            "max_tokens": 1024
+                        }]
+                    }
+                }
+            }
+        })
+        .to_string(),
+    )
+    .expect("write config");
+    std::fs::write(agents_dir.join("mcp.json"), r#"{"mcpServers":{}}"#).expect("write MCP config");
+
+    let gateways = FeatureGateways::new(
+        Arc::new(CountingProviderFactory::default()),
+        policy::allow_all(),
+    );
+    let args = AgentArgs {
+        cwd: Some(root),
+        api_key: Some("test-api-key".to_string()),
+        base_url: Some("http://127.0.0.1:1/v1".to_string()),
+        model: Some("local/test-model".to_string()),
+        context_size: 8192,
+        ..Default::default()
+    };
+    let native_store = wire_config_override_store(&agents_dir).expect("wire override store");
+    let config = config::wire_project_config_with_agents_dir(
+        args.cwd.as_deref().unwrap_or(Path::new(".")),
+        &agents_dir,
+        native_store,
+        cli_config_input(&args),
+    )
+    .await
+    .expect("wire config");
+    let workspace =
+        wire_workspace_with_config(&args.cwd.clone().unwrap(), &config).expect("wire workspace");
+
+    let assembly =
+        crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
+            .await
+            .expect("assemble runtime");
+
+    assert!(
+        assembly.startup_notices.is_empty(),
+        "场景开关全关时不应产生启动提醒"
+    );
+}

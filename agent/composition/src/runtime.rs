@@ -81,6 +81,9 @@ fn wire_runtime_tool_assembly(
 pub(crate) struct SessionRuntimeAssembly {
     pub client: AgentClientImpl,
     pub audit: Option<crate::audit::SessionAudit>,
+    /// 启动期一次性提醒（System One 评分未生效等）：经 bootstrap 透传给
+    /// CLI / TUI 渲染，不阻断主聊天。
+    pub startup_notices: Vec<crate::systemone::StartupNotice>,
 }
 
 pub(crate) async fn from_args_with_gateways(
@@ -209,6 +212,7 @@ pub(crate) async fn from_args_with_gateways(
         ),
     }
     let scoring_ports = scoring_assembly.assignment;
+    let startup_notices = crate::systemone::scoring_startup_notices(&scoring_assembly.outcome);
     let compact_generator =
         runtime::ProviderCompactGenerator::new(Arc::new(runtime::CompactModelResolver::new(
             config.reader(),
@@ -395,6 +399,7 @@ pub(crate) async fn from_args_with_gateways(
     Ok(SessionRuntimeAssembly {
         client,
         audit: session_audit,
+        startup_notices,
     })
 }
 

@@ -25,6 +25,27 @@ fn should_emit_quiet_cli_diagnostic_log(quiet: bool) -> bool {
     quiet
 }
 
+/// no-TUI（quiet）模式启动提醒：每条 notice 渲染为一行 stderr 文本
+/// （不污染 stdout 对话流）。
+fn render_startup_notices_for_no_tui(notices: &[composition::systemone::StartupNotice]) -> String {
+    notices
+        .iter()
+        .map(|notice| notice.message.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// TUI 模式启动提醒：每条 notice 经 append_system_notice 进入对话流，恰好
+/// 渲染一次；bootstrap 之外的路径不追加。
+fn apply_startup_notices_to_tui(
+    app: &mut crate::tui::App,
+    notices: &[composition::systemone::StartupNotice],
+) {
+    for notice in notices {
+        app.append_system_notice(notice.message.clone());
+    }
+}
+
 async fn run_frontend_with_audit_drain<F, Fut, DrainFuture, Error>(
     client: std::sync::Arc<dyn sdk::AgentClient>,
     drain: Option<DrainFuture>,
@@ -127,6 +148,10 @@ pub(crate) async fn run_chat(args: Args) {
             if should_emit_quiet_cli_diagnostic_log(quiet) {
                 crate::tui::log_info!("quiet chat started: session={session_id}");
             }
+            let startup_notice_text = render_startup_notices_for_no_tui(&bootstrap.startup_notices);
+            if !startup_notice_text.is_empty() {
+                eprintln!("{startup_notice_text}");
+            }
             let client = bootstrap.client.clone();
             let command_router = bootstrap.command_router.clone();
             let quiet_session_id = session_id.clone();
@@ -170,6 +195,7 @@ pub(crate) async fn run_chat(args: Args) {
         app.session.memory_config = bootstrap.memory_config;
         app.set_skill_snapshot(bootstrap.skill_snapshot);
         app.set_commands(bootstrap.command_catalog, bootstrap.command_router);
+        apply_startup_notices_to_tui(&mut app, &bootstrap.startup_notices);
         // 在 run() 之前设置启动上下文（替代 18 参数注入）
         app.apply_agent_intent(
             crate::tui::update::intent::AgentIntent::RuntimePresentation(

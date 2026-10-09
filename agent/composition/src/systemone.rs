@@ -105,6 +105,28 @@ impl From<systemone::EmbeddedScoringWiringError> for ScoringStartupOutcome {
     }
 }
 
+/// 启动期一次性提醒（published value）：composition 装配时生成，经
+/// `AgentClientBootstrap` 透传，CLI / TUI 只负责渲染，不读取配置、环境变量
+/// 或模型目录。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartupNotice {
+    /// 中文提醒文本（含用户可执行的动作提示，如手动下载命令）。
+    pub message: String,
+}
+
+/// typed 启动结果 → 启动提醒：`Disabled`（场景全关，用户未表达使用意图）
+/// 与 `Ready`（正常装配）不打扰用户；其余 outcome 说明「场景开关开启但评分
+/// 未生效」，各生成恰好一条中文提醒。
+#[must_use]
+pub(crate) fn scoring_startup_notices(outcome: &ScoringStartupOutcome) -> Vec<StartupNotice> {
+    match outcome {
+        ScoringStartupOutcome::Disabled | ScoringStartupOutcome::Ready => Vec::new(),
+        outcome => vec![StartupNotice {
+            message: outcome.to_string(),
+        }],
+    }
+}
+
 /// 装配结果：场景槽位分配 + typed 启动结果（两者一致性由装配矩阵契约测试锁定）。
 #[must_use]
 pub struct ScoringAssembly {

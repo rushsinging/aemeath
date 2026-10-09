@@ -339,3 +339,45 @@ fn production_scoring_sources_never_reference_http_scoring_factory() {
         }
     }
 }
+
+/// 启动提醒转换：`Disabled` / `Ready` 无提醒（零成本与正常态不打扰用户）。
+#[test]
+fn scoring_startup_notices_empty_for_disabled_and_ready() {
+    assert!(scoring_startup_notices(&ScoringStartupOutcome::Disabled).is_empty());
+    assert!(scoring_startup_notices(&ScoringStartupOutcome::Ready).is_empty());
+}
+
+/// 启动提醒转换：`ModelMissing` 携带一条含手动下载命令的中文提醒。
+#[test]
+fn scoring_startup_notices_model_missing_mentions_download_command() {
+    let notices = scoring_startup_notices(&ScoringStartupOutcome::ModelMissing {
+        detail: "System One 模型未安装，评分功能不可用；执行 `aemeath systemone download` 安装"
+            .to_string(),
+    });
+    assert_eq!(notices.len(), 1);
+    assert!(notices[0].message.contains("aemeath systemone download"));
+}
+
+/// 启动提醒转换：其余 typed outcome 各生成一条非空中文提醒
+/// （场景开关开启但评分未生效时用户必须可感知）。
+#[test]
+fn scoring_startup_notices_non_empty_for_unavailable_outcomes() {
+    for outcome in [
+        ScoringStartupOutcome::EmbeddedUnavailable,
+        ScoringStartupOutcome::ManifestUnavailable,
+        ScoringStartupOutcome::InvalidAssets {
+            detail: "资产损坏".to_string(),
+        },
+        ScoringStartupOutcome::InitFailed {
+            detail: "初始化失败".to_string(),
+        },
+    ] {
+        let notices = scoring_startup_notices(&outcome);
+        assert_eq!(
+            notices.len(),
+            1,
+            "outcome {outcome:?} 应生成恰好一条启动提醒"
+        );
+        assert!(!notices[0].message.is_empty());
+    }
+}
