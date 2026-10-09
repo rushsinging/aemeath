@@ -57,6 +57,7 @@ fn scoring_patch_overrides_only_set_fields_and_reaches_snapshot() {
     assert_eq!(
         keys,
         [
+            "enabled",
             "memory_recall",
             "memory_rerank",
             "policy_triage",

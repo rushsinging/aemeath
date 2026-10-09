@@ -353,10 +353,11 @@ pub(crate) async fn assemble_scoring_ports_with(
     factory: &dyn EmbeddedScoringFactory,
     source: &dyn ReleaseManifestSource,
 ) -> ScoringAssembly {
-    let any_scenario_enabled = scoring.memory_rerank
-        || scoring.memory_recall
-        || scoring.skill_match
-        || scoring.policy_triage;
+    let any_scenario_enabled = scoring.enabled
+        && (scoring.memory_rerank
+            || scoring.memory_recall
+            || scoring.skill_match
+            || scoring.policy_triage);
     if !any_scenario_enabled {
         // 零成本：不咨询 manifest 源、不读取模型目录、不解析 manifest、不启动 worker。
         return ScoringAssembly {
