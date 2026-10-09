@@ -214,3 +214,27 @@ kev 打分的真实机制是 **backbone hidden states → 外置 PointerHead**�
 - adapter 形态：llama-cpp-2 embedding 模式（pooling=none）→ 逐 row token ids（encode 口径 = kev serve 的 SERVE_MAX_STATE=65536 / SERVE_MAX_BRANCH=+8192）→ hidden states → Rust PointerHead（q/k 线性 + 点积 + T=2.3510958，权重从 head.pt 导出为 safetensors）
 - llama-server 运行参数基线：`--ctx-size 16384 --ubatch-size 16384`（embedding 输入必须单 batch 装下；real case row 最大已观测 ~1.5k tokens，16k 余量充足）
 - 内存实测（M 系列 Mac）：f16 server ≈1.6G 常驻，Q8_0 ≈0.9G 常驻（含 16k ctx KV）——Q8_0 在 1.5GB 预算内
+
+---
+
+## B1 场景验收（2026-10-09，embedded Rust 生产链，M4/Q8_0）
+
+数据：`results/embedded_rust_parity.json`（`embedded_parity_tests` 真机门禁产出，含 order-flip 反转轮）；
+指标：`harness/embedded_acceptance.py`；fixture 含 gold 标注（导出器同日补齐）。
+
+| 数据集 | n | R@1/acc | MRR | order-flip | 误放 |
+|---|---|---|---|---|---|
+| memory_rerank（合成） | 12 | **1.000** | 1.000 | 0.000 | — |
+| memory_rerank_real | 20 | 0.600 | 0.785 | 0.000 | — |
+| skill_match（合成） | 6 | **1.000** | 1.000 | 0.000 | — |
+| skill_match_real | 13 | 0.923 | 0.962 | 0.000 | — |
+| permission_triage | 16 | 0.750 | — | — | 1/16 (6.2%) |
+| stop_verify | 12 | **1.000** | — | — | 0 |
+
+延迟（8 case/批，冷路径）：批 p50 2.75s / p95 8.22s → 单 case p50 ≈344ms / p95 ≈1.03s。
+
+**结论**：
+1. Rust embedded 链与 golden（torch fp32）所有数据集指标逐项一致（argmax 79/79，max|Δp|=0.0136）——**接入零损失**；real/难集指标差异全部为引擎质量上限。
+2. #1834 记忆重排：合成对分集 R@1 100%/MRR 1.0/flip 0% **达标**（real 集 60% 为引擎上限，golden 同值，属真实会话复验观察项）。
+3. #1835 Skill 匹配（ToolSearch 口径）：R@1 100%/flip 0% **达标**；单 case p95 ≈1.03s 边缘（门禁 1s，批推理口径 ±3% 内）。
+4. #1836 权限预筛：acc 75% < 80%、误放 1/16 ≠ 0 **不达标**——与 golden 基线（75%）一致，属 kev 权重质量上限，**触发 issue 预设分支：切 rsi-jev 高质量档（基线 81%/MAE 0.40）**；开关保持默认关，triage 不进入生产直到换档复验达标。

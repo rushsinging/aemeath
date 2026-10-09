@@ -21,7 +21,9 @@ use crate::domain::{PointerHead, PointerHeadWeights};
 /// fixture 单行（本门禁只消费 ids 与 golden argmax，hidden 不需要）。
 #[derive(Deserialize)]
 struct ParityFixtureCase {
+    dataset: String,
     id: String,
+    gold: usize,
     ids: Vec<u32>,
     decide: usize,
     opts: Vec<usize>,
@@ -153,6 +155,11 @@ async fn embedded_q8_argmax_matches_fixture_golden() {
 
     let mut hits = 0_usize;
     let mut max_delta = 0.0_f32;
+    let mut flipped_results: Vec<usize> = Vec::with_capacity(cases.len());
+    // 验收包输出：逐 case 结果（含 order-flip 反转轮与批延迟），落
+    // eval/system-one/results/ 供 acceptance 脚本计算场景指标。
+    let mut report_rows: Vec<serde_json::Value> = Vec::with_capacity(cases.len());
+    let mut flipped_rows: Vec<CausalRow> = Vec::with_capacity(cases.len());
     // 分批提交：batch 容量 16k，row 最长 ~1.5k，8 行/批留足余量。
     for batch in cases.chunks(8) {
         let rows: Vec<CausalRow> = batch
@@ -165,9 +172,19 @@ async fn embedded_q8_argmax_matches_fixture_golden() {
                 )
             })
             .collect();
+        let batch_started = std::time::Instant::now();
         let vectors: Vec<RowHiddenVectors> = client.run_rows(rows).await.expect("llama 前向应成功");
+        let batch_latency_ms = batch_started.elapsed().as_millis();
         assert_eq!(vectors.len(), batch.len(), "返回 hidden 行数应与提交一致");
-        for (case, vector) in batch.iter().zip(vectors) {
+        // order-flip 轮：选项顺序整体反转（rank 题型翻转稳定性验收）。
+        for case in batch {
+            flipped_rows.push(CausalRow::new(
+                case.ids.iter().map(|token| *token as i32).collect(),
+                case.decide,
+                case.opts.iter().rev().copied().collect(),
+            ));
+        }
+        for (case_index, (case, vector)) in batch.iter().zip(vectors).enumerate() {
             let mut options_flat = Vec::with_capacity(vector.options.len() * vector.decide.len());
             for option in &vector.options {
                 options_flat.extend_from_slice(option);
@@ -190,6 +207,18 @@ async fn embedded_q8_argmax_matches_fixture_golden() {
                 .map(|(golden, actual)| (*golden - f64::from(*actual)).abs() as f32)
                 .fold(0.0_f32, f32::max);
             max_delta = max_delta.max(case_delta);
+            report_rows.push(serde_json::json!({
+                "dataset": case.dataset,
+                "id": case.id,
+                "gold": case.gold,
+                "n_options": case.opts.len(),
+                "argmax": rust_argmax,
+                "argmax_golden": expected,
+                "p_true": if case.opts.len() == 2 { probs[1] } else { 0.0 },
+                "probs": probs,
+                "batch_index": case_index,
+                "batch_latency_ms": batch_latency_ms,
+            }));
             if rust_argmax != expected {
                 println!(
                     "MISS [{}]: golden={expected} rust={rust_argmax} probs={probs:?}",
@@ -198,6 +227,44 @@ async fn embedded_q8_argmax_matches_fixture_golden() {
             }
         }
     }
+    // order-flip 轮前向（反转后的 rows 已收集，逐批推理后记录翻转 argmax）。
+    for batch in flipped_rows.chunks(8) {
+        let vectors: Vec<RowHiddenVectors> = client
+            .run_rows(batch.to_vec())
+            .await
+            .expect("flip 前向应成功");
+        for (row, vector) in batch.iter().zip(vectors) {
+            let mut options_flat = Vec::with_capacity(vector.options.len() * vector.decide.len());
+            for option in &vector.options {
+                options_flat.extend_from_slice(option);
+            }
+            let probs = head
+                .score_options(&vector.decide, &options_flat)
+                .expect("flip 评分");
+            let flipped_argmax = probs
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.total_cmp(b.1))
+                .map(|(index, _)| index)
+                .expect("probs 非空");
+            flipped_results.push(flipped_argmax);
+        }
+    }
+    // 合并：argmax_flipped 记录「反转序中的 argmax」（原序位置）。
+    for (row, flipped_argmax) in report_rows.iter_mut().zip(flipped_results) {
+        let n_options = row["n_options"].as_u64().unwrap_or(0) as usize;
+        row["argmax_flipped"] = serde_json::json!(n_options - 1 - flipped_argmax);
+    }
+    let report_path = fixture_dir().join("../../results/embedded_rust_parity.json");
+    if let Some(parent) = report_path.parent() {
+        std::fs::create_dir_all(parent).expect("results 目录创建");
+    }
+    std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&report_rows).expect("报告序列化") + "\n",
+    )
+    .expect("验收报告写入");
+    println!("report: {}", report_path.display());
     println!("argmax 命中 {hits}/79，max|Δp|={max_delta:.4}");
     assert!(
         hits * 100 >= 79 * 99,
