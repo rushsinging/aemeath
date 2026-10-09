@@ -934,13 +934,13 @@ impl systemone::ScoringPort for FixedRiskScoring {
     }
 }
 
-fn triage_policy_with(p_true: f64) -> policy::PolicyTriage {
-    policy::PolicyTriage::new(std::sync::Arc::new(FixedRiskScoring { p_true }))
+fn triage_policy_with(p_true: f64) -> crate::application::tool::PolicyTriage {
+    crate::application::tool::PolicyTriage::new(std::sync::Arc::new(FixedRiskScoring { p_true }))
 }
 
 async fn prepare_with_triage(
     policy: &dyn Policy,
-    triage: Option<&policy::PolicyTriage>,
+    triage: Option<&crate::application::tool::PolicyTriage>,
 ) -> super::PreparedToolRound {
     let factory = TestCatalogExecutionFactory::new();
     factory.register(TestTool("Allowed"));

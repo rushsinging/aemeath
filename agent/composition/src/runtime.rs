@@ -349,7 +349,7 @@ pub(crate) async fn from_args_with_gateways(
         scoring_ports
             .for_policy_triage
             .clone()
-            .map(|scoring| std::sync::Arc::new(policy::PolicyTriage::new(scoring))),
+            .map(|scoring| std::sync::Arc::new(runtime::PolicyTriage::new(scoring))),
     ));
     context::guidance::init_guidance_dir();
     let cwd = args

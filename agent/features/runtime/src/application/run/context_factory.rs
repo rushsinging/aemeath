@@ -155,7 +155,7 @@ impl RuntimeContextFactory {
         usage_sink: Arc<dyn crate::ports::UsageSink>,
         scoring_for_recall: Option<Arc<dyn systemone::ScoringPort>>,
         scoring_for_skill_match: Option<Arc<dyn systemone::ScoringPort>>,
-        policy_triage: Option<Arc<policy::PolicyTriage>>,
+        policy_triage: Option<Arc<crate::application::tool::PolicyTriage>>,
     ) -> Self {
         Self::from_services(
             tool_catalog,
@@ -181,7 +181,7 @@ impl RuntimeContextFactory {
         usage_sink: Arc<dyn crate::ports::UsageSink>,
         scoring_for_recall: Option<Arc<dyn systemone::ScoringPort>>,
         scoring_for_skill_match: Option<Arc<dyn systemone::ScoringPort>>,
-        policy_triage: Option<Arc<policy::PolicyTriage>>,
+        policy_triage: Option<Arc<crate::application::tool::PolicyTriage>>,
     ) -> Self {
         Self {
             services: RuntimeServices {

@@ -35,7 +35,7 @@ pub(crate) async fn execute_tool_round<S>(
     tool_calls: &[ToolCall],
     catalog: &tools::ToolCatalogSnapshot,
     policy: &dyn policy::Policy,
-    triage: Option<&policy::PolicyTriage>,
+    triage: Option<&crate::application::tool::PolicyTriage>,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
     agent: &Agent,

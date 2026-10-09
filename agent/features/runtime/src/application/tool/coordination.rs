@@ -472,7 +472,7 @@ pub(crate) async fn prepare_tool_round(
     calls: &[(ToolCall, ToolGuardDecision)],
     catalog: &ToolCatalogSnapshot,
     policy: &dyn Policy,
-    triage: Option<&policy::PolicyTriage>,
+    triage: Option<&crate::application::tool::PolicyTriage>,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
     workspace_root: &Path,

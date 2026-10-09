@@ -353,7 +353,7 @@ pub struct RuntimeServices {
     /// skill match 场景槽位（ToolSearch 语义重排）。
     pub scoring_for_skill_match: Option<std::sync::Arc<dyn systemone::ScoringPort>>,
     /// 权限/风险预筛（#1836）：policy Allow 后的单向加严评审器。
-    pub policy_triage: Option<std::sync::Arc<policy::PolicyTriage>>,
+    pub policy_triage: Option<std::sync::Arc<crate::application::tool::PolicyTriage>>,
     /// Hook BC 出站端口。
     pub hooks: Arc<dyn HookDispatcher>,
     /// Audit Usage 事实的非阻塞出站端口。
@@ -448,7 +448,7 @@ pub struct RuntimeContext {
     /// skill match 场景槽位（session 级，来自 RuntimeServices）。
     scoring_for_skill_match: Option<Arc<dyn systemone::ScoringPort>>,
     /// 权限/风险预筛（#1836，session 级，来自 RuntimeServices）。
-    policy_triage: Option<Arc<policy::PolicyTriage>>,
+    policy_triage: Option<Arc<crate::application::tool::PolicyTriage>>,
     /// per-message 记忆召回 source 槽：run_launch 装配 pipeline 时一次性写入
     ///（recall 依赖 per-Run memory binding，Run 启动前不可得）。
     memory_recall: Arc<
@@ -557,7 +557,7 @@ impl RuntimeContext {
         self.scoring_for_skill_match.clone()
     }
     /// 权限/风险预筛（#1836）：policy Allow 后单向加严；开关关闭为 None。
-    pub(crate) fn policy_triage(&self) -> Option<Arc<policy::PolicyTriage>> {
+    pub(crate) fn policy_triage(&self) -> Option<Arc<crate::application::tool::PolicyTriage>> {
         self.policy_triage.clone()
     }
 

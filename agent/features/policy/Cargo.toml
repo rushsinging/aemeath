@@ -6,14 +6,9 @@ edition.workspace = true
 [dependencies]
 # 决策 BC 只依赖共享内核：执行词汇与 id 均来自 share（跨 BC 领域词汇下沉）。
 share = { path = "../../shared" }
-# System One 评分服务消费（#1836 权限/风险预筛场景）：与 tools / memory 的
-# 场景消费同方向，policy 只依赖 ScoringPort published 契约。
-systemone = { path = "../systemone" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
-tokio = { workspace = true }
-async-trait = { workspace = true }

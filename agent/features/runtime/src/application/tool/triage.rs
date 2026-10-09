@@ -11,7 +11,7 @@
 use std::sync::Arc;
 
 use crate::constants::{POLICY_TRIAGE_RISK_THRESHOLD, TRIAGE_NOUL_INSTRUCTIONS};
-use crate::domain::PolicyRequestData;
+use policy::PolicyRequestData;
 use share::tools_vocab::{ToolCapabilities, ToolCapability};
 
 /// 高风险提级结论（含可读中文理由）。

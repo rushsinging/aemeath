@@ -46,8 +46,8 @@ fn triage_with(p_true: f64, fail: bool) -> (PolicyTriage, Arc<FakeNoulScoring>) 
     (PolicyTriage::new(fake.clone()), fake)
 }
 
-fn sample_request() -> crate::domain::PolicyRequestData {
-    crate::domain::PolicyRequestData::new(
+fn sample_request() -> policy::PolicyRequestData {
+    policy::PolicyRequestData::new(
         share::ids::RunId::new_v7(),
         share::ids::RunStepId::new_v7(),
         share::tools_vocab::ToolName::new("Bash"),

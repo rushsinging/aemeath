@@ -30,6 +30,7 @@ pub use application::run::active_registry::{wire_active_run_registry, ActiveRunR
 pub use application::tool::tool_result_materializer::{
     ToolResultMaterializationPolicyData, ToolResultMaterializer,
 };
+pub use application::tool::triage::{PolicyTriage, TriageEscalation};
 
 pub use application::client::{
     config_snapshot_to_sdk, resolve_concurrency_limits, resolve_model_runtime_settings,
