@@ -26,15 +26,18 @@ impl ErrorCategory {
     }
 }
 
-/// 全仓唯一跨界错误类型（形态 B）：分类 + 消息 + 来源链。
+/// 全仓唯一跨界错误类型（形态 B）：分类 + 细分码 + 消息 + 来源链。
 ///
 /// - 控制流：`category()`（Storage/Invalid/Unavailable）；
+/// - 细分判别：`code()`（可选稳定字符串，由产生方 crate 定义常量；
+///   服务需要变体粒度的消费方，如失败分类转译，不参与重试语义）；
 /// - 呈现：`Display`（生成点定型的文案）；
 /// - 诊断：`domain` 定位来源 crate，`source` 保留底层链（日志侧展开）。
 #[derive(Debug, Clone)]
 pub struct DomainError {
     domain: &'static str,
     category: ErrorCategory,
+    code: Option<&'static str>,
     message: String,
     source: Option<std::sync::Arc<dyn std::error::Error + Send + Sync>>,
 }
@@ -45,6 +48,7 @@ impl DomainError {
         Self {
             domain,
             category: ErrorCategory::Invalid,
+            code: None,
             message: message.into(),
             source: None,
         }
@@ -55,6 +59,7 @@ impl DomainError {
         Self {
             domain,
             category: ErrorCategory::Storage,
+            code: None,
             message: message.into(),
             source: None,
         }
@@ -65,6 +70,7 @@ impl DomainError {
         Self {
             domain,
             category: ErrorCategory::Unavailable,
+            code: None,
             message: message.into(),
             source: None,
         }
@@ -79,6 +85,20 @@ impl DomainError {
         self
     }
 
+    /// 附加细分码（产生方 crate 定义的稳定字符串常量）。
+    ///
+    /// 用于消费方需要变体粒度判别的场景（如失败分类转译）；
+    /// 无码错误与有码错误不等价。
+    pub fn with_code(mut self, code: &'static str) -> Self {
+        self.code = Some(code);
+        self
+    }
+
+    /// 细分码（可选）。
+    pub fn code(&self) -> Option<&'static str> {
+        self.code
+    }
+
     /// 折叠层构造（各 crate 的 From impl 使用；消费方用三个具名构造器）。
     pub fn from_parts(
         domain: &'static str,
@@ -88,6 +108,7 @@ impl DomainError {
         Self {
             domain,
             category,
+            code: None,
             message: message.into(),
             source: None,
         }
@@ -110,10 +131,11 @@ impl DomainError {
 }
 
 impl PartialEq for DomainError {
-    /// 等价性按 domain/category/message（source 为诊断链，不参与等价）。
+    /// 等价性按 domain/category/code/message（source 为诊断链，不参与等价）。
     fn eq(&self, other: &Self) -> bool {
         self.domain == other.domain
             && self.category == other.category
+            && self.code == other.code
             && self.message == other.message
     }
 }
