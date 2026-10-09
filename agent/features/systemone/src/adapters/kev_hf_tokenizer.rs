@@ -100,9 +100,12 @@ pub(crate) fn rewrite_user_text_special_markers(text: &str) -> String {
     while cursor < bytes.len() {
         if bytes[cursor..].starts_with(b"<|") {
             if let Some(end) = marker_end(bytes, cursor) {
+                let marker_name = text
+                    .get(cursor + 2..end - 2)
+                    .expect("marker_end 仅返回 ASCII marker 的字符边界");
                 rewritten.push('<');
                 rewritten.push(BROKEN_BAR);
-                rewritten.push_str(&text[cursor + 2..end - 2]);
+                rewritten.push_str(marker_name);
                 rewritten.push(BROKEN_BAR);
                 rewritten.push('>');
                 cursor = end;

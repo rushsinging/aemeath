@@ -8,23 +8,8 @@
 
 use std::path::Path;
 
+use crate::constants::POINTER_HEAD_TENSORS;
 use crate::domain::{PointerHead, PointerHeadWeights};
-
-/// 四个张量的固定形态（名称 → 期望 shape）。
-const POINTER_HEAD_TENSORS: [(&str, fn(usize, usize) -> Vec<u64>); 4] = [
-    ("q.weight", |pointer_dimension, hidden_size| {
-        vec![pointer_dimension as u64, hidden_size as u64]
-    }),
-    ("q.bias", |pointer_dimension, _| {
-        vec![pointer_dimension as u64]
-    }),
-    ("k.weight", |pointer_dimension, hidden_size| {
-        vec![pointer_dimension as u64, hidden_size as u64]
-    }),
-    ("k.bias", |pointer_dimension, _| {
-        vec![pointer_dimension as u64]
-    }),
-];
 
 /// PointerHead 加载失败（全部映射为启动期禁用，不构造 port）。
 #[derive(Debug, Clone, PartialEq)]
@@ -106,16 +91,24 @@ pub(crate) fn parse_pointer_head(
     temperature: f32,
 ) -> Result<PointerHead, PointerHeadLoadError> {
     let header_end = header_end(source)?;
-    let header = std::str::from_utf8(&source[8..header_end]).map_err(|error| {
+    let header = std::str::from_utf8(source.get(8..header_end).ok_or_else(|| {
         PointerHeadLoadError::MalformedHeader {
-            detail: error.to_string(),
+            detail: "header 边界超出源字节范围".to_owned(),
         }
+    })?)
+    .map_err(|error| PointerHeadLoadError::MalformedHeader {
+        detail: error.to_string(),
     })?;
     let entries: serde_json::Map<String, serde_json::Value> = serde_json::from_str(header)
         .map_err(|error| PointerHeadLoadError::MalformedHeader {
             detail: error.to_string(),
         })?;
-    let data_section = &source[header_end..];
+    let data_section =
+        source
+            .get(header_end..)
+            .ok_or_else(|| PointerHeadLoadError::MalformedHeader {
+                detail: "数据段边界超出源字节范围".to_owned(),
+            })?;
 
     let mut tensors: Vec<Vec<f32>> = Vec::with_capacity(POINTER_HEAD_TENSORS.len());
     for (tensor_name, expected_shape) in POINTER_HEAD_TENSORS {
@@ -254,7 +247,15 @@ fn read_f32_tensor(
             ),
         });
     }
-    let payload = &data_section[begin..end];
+    let payload =
+        data_section
+            .get(begin..end)
+            .ok_or_else(|| PointerHeadLoadError::DataTruncated {
+                detail: format!(
+                    "张量 {tensor_name} 声明区间 [{begin}, {end}) 超出数据段 {} 字节",
+                    data_section.len()
+                ),
+            })?;
     if payload.len() % 4 != 0 {
         return Err(PointerHeadLoadError::DataTruncated {
             detail: format!(

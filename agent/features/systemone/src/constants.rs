@@ -95,3 +95,20 @@ pub(crate) const EMBEDDED_UBATCH_TOKENS: u32 = 2048;
 /// 安装目录内 HF fast tokenizer 的相对路径（kev causal row 编码输入）。
 #[cfg(feature = "embedded")]
 pub(crate) const TOKENIZER_JSON_RELATIVE_PATH: &str = "tokenizer/tokenizer.json";
+
+/// PointerHead safetensors 四个张量的固定名称与 shape 生成器。
+#[cfg(feature = "embedded")]
+pub(crate) const POINTER_HEAD_TENSORS: [(&str, fn(usize, usize) -> Vec<u64>); 4] = [
+    ("q.weight", |pointer_dimension, hidden_size| {
+        vec![pointer_dimension as u64, hidden_size as u64]
+    }),
+    ("q.bias", |pointer_dimension, _| {
+        vec![pointer_dimension as u64]
+    }),
+    ("k.weight", |pointer_dimension, hidden_size| {
+        vec![pointer_dimension as u64, hidden_size as u64]
+    }),
+    ("k.bias", |pointer_dimension, _| {
+        vec![pointer_dimension as u64]
+    }),
+];
