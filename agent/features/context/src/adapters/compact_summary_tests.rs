@@ -32,7 +32,6 @@ const VALID_MAP_FACTS: &str = r#"{
 const SHORTER_COMPRESSION_PATCH: &str = r#"{
   "committed_facts": [],
   "uncommitted_working_set": [],
-  "open_decisions_and_risks": [],
   "resume_context": [],
   "required_revalidation": ["Recheck worktree and CI state before delivery."],
   "archived_milestones": []
@@ -473,8 +472,6 @@ fn compact_prompts_require_typed_json_contracts() {
     assert!(COMPACT_PROMPT.contains("grant|restrict|revoke|supersede"));
     assert!(COMPACT_PROMPT.contains("\"identity\""));
     assert!(COMPACT_PROMPT.contains("entity + key + dimension"));
-    assert!(COMPACT_PROMPT.contains("pull_request|ci_run|branch|worktree"));
-    assert!(COMPACT_PROMPT.contains("persistent|dynamic|task|phase|ephemeral"));
     assert!(COMPACT_REFRESH_PROMPT.contains("Return JSON only"));
     assert!(COMPACT_REFRESH_PROMPT.contains("immutable_constraints"));
     assert!(COMPACT_REFRESH_PROMPT.contains("resume_cursor.next_action"));
@@ -498,6 +495,535 @@ fn compact_prompts_require_typed_json_contracts() {
         assert!(!prompt.contains("<summary>"));
         assert!(!prompt.contains("## Immutable Constraints"));
         assert!(!prompt.contains("Write your summary inside"));
+    }
+}
+
+/// 用非法探针值触发 serde 枚举错误，从错误信息取回该枚举的合法值全集。
+///
+/// 测试不重复枚举清单：枚举新增或改名后，serde 的候选值列表自动跟随，
+/// prompt 与 schema 的漂移无需人工同步测试断言即可暴露。
+fn serde_enum_variants<T: serde::de::DeserializeOwned + std::fmt::Debug>(
+    probe_json: &str,
+) -> Vec<String> {
+    let error = serde_json::from_str::<T>(probe_json).expect_err("探针 JSON 必须被拒绝");
+    let message = error.to_string();
+    let list = message
+        .split_once("expected one of ")
+        .unwrap_or_else(|| panic!("探针未产生枚举候选错误：{message}"))
+        .1;
+    // serde 会在候选清单末尾附加 ` at line L column C` 位置后缀。
+    let list = list.split(" at line ").next().unwrap_or(list);
+    list.replace('`', "")
+        .replace(", or ", ", ")
+        .split(",")
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+/// 提取 `"field":"a|b|c"` 形态的 prompt 枚举清单。
+fn prompt_pipe_list(source: &str, field: &str) -> Vec<String> {
+    let marker = format!("\"{field}\":\"");
+    let rest = source
+        .split_once(&marker)
+        .unwrap_or_else(|| panic!("prompt 缺少 `{field}` 清单"))
+        .1;
+    let end = rest
+        .find('"')
+        .unwrap_or_else(|| panic!("`{field}` 清单未闭合"));
+    rest[..end].split('|').map(str::to_owned).collect()
+}
+
+/// 提取 `Allowed field values: a, b, c.` 形态的 prompt 枚举清单。
+fn prompt_allowed_values(source: &str, field: &str) -> Vec<String> {
+    let marker = format!("Allowed {field} values: ");
+    let rest = source
+        .split_once(&marker)
+        .unwrap_or_else(|| panic!("prompt 缺少 `{field}` 清单"))
+        .1;
+    let line = rest.lines().next().unwrap_or_default();
+    line.trim_end_matches('.')
+        .split(", ")
+        .map(str::to_owned)
+        .collect()
+}
+
+fn constraint_member_json(scope: &str, lifecycle: &str, action: &str) -> String {
+    format!(r#"{{"scope":"{scope}","lifecycle":"{lifecycle}","action":"{action}"}}"#)
+}
+
+fn identity_member_json(entity: &str, dimension: &str, lifecycle: &str) -> String {
+    format!(
+        r#"{{"entity":"{entity}","key":"probe-key","dimension":"{dimension}","lifecycle":"{lifecycle}"}}"#
+    )
+}
+
+/// 端到端：LLM map 提取出的 decision facts 必须渲染进
+/// `## Committed Decisions` 分区，与未决决策/风险对照可追溯。
+#[tokio::test]
+async fn compact_summary_renders_committed_decisions_from_llm_facts() {
+    let messages = (0..10)
+        .map(|index| Message::user(format!("message-{index}")))
+        .collect::<Vec<_>>();
+    let generator = MockGenerator {
+        text: r#"{"facts":[{"sequence":1,"source":"main_user","kind":"decision","text":"用户拍板引入 ConfirmNode（A 方案）。"},{"sequence":2,"source":"main_user","kind":"objective","text":"继续设计。"},{"sequence":3,"source":"main_user","kind":"resume_candidate","text":"更新文档。"}]}"#.to_string(),
+        requests: std::sync::Mutex::new(Vec::new()),
+        };
+
+    let result = compact_messages_with_llm(
+        &messages,
+        None,
+        100_000,
+        Some(&generator),
+        None,
+        None,
+        &CancellationToken::new(),
+        CompactTail::unbounded(),
+    )
+    .await
+    .expect("compact should run");
+
+    assert!(
+        result
+            .summary
+            .contains("## Committed Decisions\n- 用户拍板引入 ConfirmNode（A 方案）。"),
+        "决策必须进入独立分区：{}",
+        result.summary
+    );
+}
+
+#[test]
+fn compact_request_strips_user_input_timestamp_prefix() {
+    // LLM 视图会为真实用户输入渲染时间前缀；摘要请求只吸收对话语义。
+    let rendered_view = Message::user("[2026-10-09 15:29 +0800]: 只分析，不实现");
+    let request = build_compact_request(&[rendered_view], None, 1_000);
+    let prompt = request
+        .first()
+        .map(Message::text_content)
+        .unwrap_or_default();
+
+    assert!(prompt.contains("[User]: 只分析，不实现"));
+    assert!(
+        !prompt.contains("+0800"),
+        "compact 请求不得携带 LLM 视图时间前缀：{prompt}"
+    );
+}
+
+#[test]
+fn compact_request_keeps_plain_user_text_untouched() {
+    let request = build_compact_request(&[Message::user("[note]: 参考资料")], None, 1_000);
+    let prompt = request
+        .first()
+        .map(Message::text_content)
+        .unwrap_or_default();
+
+    assert!(prompt.contains("[User]: [note]: 参考资料"));
+}
+
+#[test]
+fn local_fallback_summary_strips_user_input_timestamp_prefix() {
+    let messages = vec![Message::user("[2026-10-09 15:29 +0800]: 把当前决策落盘吧")];
+    let summary = build_summary_text(&messages, None);
+
+    assert!(summary.contains("把当前决策落盘吧"));
+    assert!(
+        !summary.contains("+0800"),
+        "本地降级摘要不得携带 LLM 视图时间前缀：{summary}"
+    );
+}
+
+fn checkpoint_for_cascade_probe() -> crate::domain::compact::ContinuationCheckpoint {
+    crate::domain::compact::ContinuationCheckpoint::from_sections(
+        crate::domain::compact::CheckpointSections {
+            immutable_constraints: vec!["- NEVER widen the requested action level.".to_string()],
+            current_objective: vec!["- 修复 compact 级联丢失。".to_string()],
+            committed_facts: vec!["- CI run 123 已通过。".to_string()],
+            uncommitted_working_set: vec!["- 待办：补级联测试。".to_string()],
+            open_decisions_and_risks: vec!["- 风险：预算紧张。".to_string()],
+            resume_cursor_lines: vec![],
+            next_action: "补级联测试".to_string(),
+            required_revalidation: vec![],
+            committed_decisions: vec!["- 已决策：引入 ConfirmNode（A 方案）。".to_string()],
+            archived_milestones: vec![],
+            status: crate::domain::compact::ContinuationStatus::Continue,
+            status_reason: None,
+        },
+    )
+    .expect("探针 checkpoint 必须可构造")
+}
+
+/// compact 级联：上一份 checkpoint 的约束、已提交事实、目标与 resume cursor
+/// 经确定性回填后必须原类别存活——不得被降级为 `scope unverified` /
+/// `unverified fact` 风险，也不得被静默丢弃。
+#[test]
+fn checkpoint_cascade_keeps_previous_sections_in_place() {
+    let previous = checkpoint_for_cascade_probe();
+    let wire_before = previous.to_wire();
+    let batch = checkpoint_to_fact_batch(previous);
+    let reduced = crate::domain::compact::reduce_compact_facts(batch).expect("级联归并必须成功");
+    let wire_after = reduced.to_wire();
+
+    assert!(
+        wire_after
+            .immutable_constraints
+            .iter()
+            .any(|line| line.contains("NEVER widen the requested action level.")),
+        "上一份 checkpoint 的不可变约束在级联后丢失：{:?}",
+        wire_after.immutable_constraints
+    );
+    assert!(
+        wire_after
+            .committed_facts
+            .iter()
+            .any(|line| line.contains("CI run 123 已通过。")),
+        "上一份 checkpoint 的已提交事实被降级或丢弃：{:?}",
+        wire_after
+    );
+    assert!(
+        wire_after
+            .open_decisions_and_risks
+            .iter()
+            .all(|line| !line.contains("unverified") && !line.contains("scope unverified")),
+        "级联不得产生 unverified / scope unverified 降级：{:?}",
+        wire_after.open_decisions_and_risks
+    );
+    assert!(
+        wire_after
+            .current_objective
+            .contains("修复 compact 级联丢失"),
+        "上一份 checkpoint 的目标被丢弃：{}",
+        wire_after.current_objective
+    );
+    assert!(
+        wire_after.resume_cursor.next_action.contains("补级联测试"),
+        "上一份 checkpoint 的 resume cursor 被丢弃：{}",
+        wire_after.resume_cursor.next_action
+    );
+    assert!(
+        wire_after
+            .uncommitted_working_set
+            .iter()
+            .any(|line| line.contains("待办：补级联测试。")),
+        "上一份 checkpoint 的 working set 丢失：{:?}",
+        wire_after.uncommitted_working_set
+    );
+    assert!(
+        wire_after
+            .committed_decisions
+            .iter()
+            .any(|line| line.contains("引入 ConfirmNode（A 方案）")),
+        "上一份 checkpoint 的已决策项被丢弃或降级：{:?}",
+        wire_after.committed_decisions
+    );
+    assert!(
+        wire_after
+            .open_decisions_and_risks
+            .iter()
+            .all(|line| !line.contains("引入 ConfirmNode")),
+        "已决策项不得降级进未决区：{:?}",
+        wire_after.open_decisions_and_risks
+    );
+    assert_eq!(
+        wire_before.immutable_constraints.len(),
+        wire_after.immutable_constraints.len(),
+        "约束条目数在级联后发生变化"
+    );
+}
+
+/// map 阶段单个 chunk 的 Provider 级失败必须本地降级，而不是作废整个
+/// map-reduce：已完成 chunk 的 LLM facts 必须保留。历史缺陷——任一 chunk
+/// 报错会让全部 chunk 退化为本地文本降级，已提取的事实随截断丢失。
+#[tokio::test]
+async fn map_chunk_provider_failure_degrades_locally_and_keeps_other_chunks() {
+    struct FlakyChunkGenerator;
+    #[async_trait::async_trait]
+    impl CompactGenerator for FlakyChunkGenerator {
+        async fn generate(
+            &self,
+            request: Vec<Message>,
+            _cancel: &CancellationToken,
+        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
+        {
+            let prompt = request
+                .first()
+                .map(Message::text_content)
+                .unwrap_or_default();
+            if prompt.contains("POISON-CHUNK") {
+                return Err(crate::domain::CompactGenerationFailureData::new(
+                    crate::domain::CompactGenerationFailureKind::Provider,
+                    "模拟 chunk 级 Provider 失败",
+                ));
+            }
+            let text = if prompt.contains("CHUNK-KEEP-MARKER") {
+                "保留的 chunk 事实"
+            } else {
+                "其他 chunk 事实"
+            };
+            Ok(CompactGenerationOutputData::from(format!(
+                r#"{{"facts":[{{"sequence":1,"source":"main_user","kind":"objective","text":"{text}"}},{{"sequence":2,"source":"main_user","kind":"resume_candidate","text":"继续"}}]}}"#
+            )))
+        }
+    }
+
+    let messages = (0..600)
+        .map(|index| {
+        let marker = match index {
+        10 => " POISON-CHUNK ",
+        500 => " CHUNK-KEEP-MARKER ",
+        _ => " ",
+        };
+        Message::user(format!(
+        "编号 {index}。{marker}需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。{}",
+        "重复填充内容以放大估算。".repeat(3)
+        ))
+        })
+        .collect::<Vec<_>>();
+    let cancel = CancellationToken::new();
+
+    let result = compact_messages_with_llm(
+        &messages,
+        None,
+        100_000,
+        Some(&FlakyChunkGenerator),
+        None,
+        None,
+        &cancel,
+        CompactTail::unbounded(),
+    )
+    .await
+    .expect("chunk 级失败不得让整次 compact 失败");
+
+    assert!(
+        result.summary.contains("保留的 chunk 事实"),
+        "其他 chunk 的 LLM facts 被整体作废：{}",
+        result.summary
+    );
+    assert!(
+        matches!(
+        result.quality,
+        crate::domain::CompactSummaryQuality::PartialMapFallback { degraded_chunks, .. }
+        if degraded_chunks >= 1
+        ),
+        "必须记录 chunk 级降级，实际 {:?}",
+        result.quality
+    );
+}
+
+/// 本地降级的截断上限必须足以保住决策原文：历史缺陷为每条消息 200 字符、
+/// 每条工具结果 500 字符，会在决策句中途截断。上限放大后由注入侧的 summary
+/// 预算统一收敛，不会撑爆上下文。
+#[test]
+fn local_fallback_keeps_long_user_deliberation_beyond_legacy_cap() {
+    // 旧上限 200 字节 ≈ 66 个汉字，会在决策句中途截断。
+    let decision_text = "决定：Replan 只能修改 Pending 节点，Active 节点冻结。".repeat(60);
+    let beyond_legacy = decision_text.chars().take(300).collect::<String>();
+    // 1500 个字符 ≈ 2650 字节，超过 2000 字节上限。
+    let beyond_cap = decision_text.chars().take(1_500).collect::<String>();
+    let summary = build_summary_text(&[Message::user(decision_text)], None);
+
+    assert!(
+        summary.contains(&beyond_legacy),
+        "提升后的上限应保留至少 300 个字符的决策原文，实际 summary 字节数 {}",
+        summary.len()
+    );
+    assert!(!summary.contains(&beyond_cap), "超过上限的内容必须被截断");
+}
+
+#[test]
+fn local_fallback_keeps_long_tool_result_beyond_legacy_cap() {
+    let result_text = "cargo test -p context: 513 passed; 2222".repeat(200);
+    let beyond_legacy = result_text.chars().take(600).collect::<String>();
+    let beyond_cap = result_text.chars().take(4_500).collect::<String>();
+    let tool_result = Message {
+        role: Role::User,
+        content: vec![ContentBlock::ToolResult {
+            tool_use_id: "call-long".to_string(),
+            content: serde_json::Value::String(result_text.clone()),
+            text: Some(result_text),
+            is_error: false,
+        }],
+        metadata: None,
+    };
+
+    let summary = build_summary_text(&[tool_result], None);
+
+    assert!(
+        summary.contains(&beyond_legacy),
+        "提升后的上限应保留至少 600 个字符的工具结果，实际 summary 字节数 {}",
+        summary.len()
+    );
+    assert!(
+        !summary.contains(&beyond_cap),
+        "超过上限的工具结果必须被截断"
+    );
+}
+
+/// prompt 声明的枚举字面量必须与 serde 枚举双向一致：既不出现 serde 拒绝的
+/// 值（历史缺陷：prompt 写 `task`、枚举是 `task_data`，导致 map chunk 降级），
+/// 也不遗漏枚举已有的变体。
+#[test]
+fn compact_prompt_enum_literals_match_serde_enums() {
+    use crate::domain::compact as compact_domain;
+
+    fn scoped<'a>(source: &'a str, marker: &'a str) -> &'a str {
+        source
+            .split_once(marker)
+            .map(|(_, tail)| tail)
+            .unwrap_or_else(|| panic!("prompt 缺少 `{marker}` 段"))
+    }
+
+    let prompt = COMPACT_PROMPT;
+    let constraint_section = scoped(prompt, "\"constraint\"");
+    let identity_section = scoped(prompt, "\"identity\"");
+
+    /// 单条 prompt↔serde 枚举对账契约。
+    struct EnumContractCheck {
+        label: &'static str,
+        prompt_values: Vec<String>,
+        serde_values: Vec<String>,
+        accepts: Box<dyn Fn(&str) -> bool>,
+        /// 内部值豁免：由代码路径写入、绝不暴露给 LLM 的 serde 枚举值
+        /// （新增变体时必须显式决定是否列入，列入即声明 LLM 看不到它）。
+        internal_values: &'static [&'static str],
+    }
+
+    let checks: Vec<EnumContractCheck> = vec![
+        EnumContractCheck {
+            label: "constraint.scope",
+            prompt_values: prompt_pipe_list(constraint_section, "scope"),
+            serde_values: serde_enum_variants::<compact_domain::ConstraintMetadata>(
+                &constraint_member_json("__probe__", "persistent", "grant"),
+            ),
+            accepts: Box::new(|value| {
+                serde_json::from_str::<compact_domain::ConstraintMetadata>(&constraint_member_json(
+                    value,
+                    "persistent",
+                    "grant",
+                ))
+                .is_ok()
+            }),
+            internal_values: &[],
+        },
+        EnumContractCheck {
+            label: "constraint.lifecycle",
+            prompt_values: prompt_pipe_list(constraint_section, "lifecycle"),
+            serde_values: serde_enum_variants::<compact_domain::ConstraintMetadata>(
+                &constraint_member_json("session", "__probe__", "grant"),
+            ),
+            accepts: Box::new(|value| {
+                serde_json::from_str::<compact_domain::ConstraintMetadata>(&constraint_member_json(
+                    "session", value, "grant",
+                ))
+                .is_ok()
+            }),
+            internal_values: &[],
+        },
+        EnumContractCheck {
+            label: "constraint.action",
+            prompt_values: prompt_pipe_list(constraint_section, "action"),
+            serde_values: serde_enum_variants::<compact_domain::ConstraintMetadata>(
+                &constraint_member_json("session", "persistent", "__probe__"),
+            ),
+            accepts: Box::new(|value| {
+                serde_json::from_str::<compact_domain::ConstraintMetadata>(&constraint_member_json(
+                    "session",
+                    "persistent",
+                    value,
+                ))
+                .is_ok()
+            }),
+            internal_values: &[],
+        },
+        EnumContractCheck {
+            label: "identity.entity",
+            prompt_values: prompt_pipe_list(identity_section, "entity"),
+            serde_values: serde_enum_variants::<compact_domain::CompactFactIdentity>(
+                &identity_member_json("__probe__", "status", "dynamic"),
+            ),
+            accepts: Box::new(|value| {
+                serde_json::from_str::<compact_domain::CompactFactIdentity>(&identity_member_json(
+                    value, "status", "dynamic",
+                ))
+                .is_ok()
+            }),
+            internal_values: &[],
+        },
+        EnumContractCheck {
+            label: "identity.dimension",
+            prompt_values: prompt_pipe_list(identity_section, "dimension"),
+            serde_values: serde_enum_variants::<compact_domain::CompactFactIdentity>(
+                &identity_member_json("branch", "__probe__", "dynamic"),
+            ),
+            accepts: Box::new(|value| {
+                serde_json::from_str::<compact_domain::CompactFactIdentity>(&identity_member_json(
+                    "branch", value, "dynamic",
+                ))
+                .is_ok()
+            }),
+            internal_values: &[],
+        },
+        EnumContractCheck {
+            label: "identity.lifecycle",
+            prompt_values: prompt_pipe_list(identity_section, "lifecycle"),
+            serde_values: serde_enum_variants::<compact_domain::CompactFactIdentity>(
+                &identity_member_json("branch", "status", "__probe__"),
+            ),
+            accepts: Box::new(|value| {
+                serde_json::from_str::<compact_domain::CompactFactIdentity>(&identity_member_json(
+                    "branch", "status", value,
+                ))
+                .is_ok()
+            }),
+            internal_values: &[],
+        },
+        EnumContractCheck {
+            label: "fact.source",
+            prompt_values: prompt_allowed_values(prompt, "source"),
+            serde_values: serde_enum_variants::<compact_domain::CompactFactSource>("\"__probe__\""),
+            accepts: Box::new(|value| {
+                serde_json::from_str::<compact_domain::CompactFactSource>(&format!("\"{value}\""))
+                    .is_ok()
+            }),
+            internal_values: &["checkpoint"],
+        },
+        EnumContractCheck {
+            label: "fact.kind",
+            prompt_values: prompt_allowed_values(prompt, "kind"),
+            serde_values: serde_enum_variants::<compact_domain::CompactFactKind>("\"__probe__\""),
+            accepts: Box::new(|value| {
+                serde_json::from_str::<compact_domain::CompactFactKind>(&format!("\"{value}\""))
+                    .is_ok()
+            }),
+            internal_values: &[],
+        },
+    ];
+
+    for check in checks {
+        let label = check.label;
+        assert!(
+            !check.prompt_values.is_empty(),
+            "{label}：prompt 清单解析为空"
+        );
+        for value in &check.prompt_values {
+            assert!(
+                (check.accepts)(value),
+                "{label}：prompt 声明 `{value}`，serde 枚举不接受该值"
+            );
+        }
+        for value in &check.serde_values {
+            let declared = check.prompt_values.contains(value)
+                || check.internal_values.contains(&value.as_str());
+            assert!(
+                declared,
+                "{label}：serde 枚举存在 `{value}`，prompt 未声明且不在内部豁免清单"
+            );
+        }
+        for value in check.internal_values {
+            assert!(
+                !check.prompt_values.iter().any(|declared| declared == value),
+                "{label}：内部值 `{value}` 不得出现在 prompt 清单中"
+            );
+        }
     }
 }
 
@@ -1197,6 +1723,25 @@ async fn compact_falls_back_when_generator_errors() {
 
 /// #1490：再压提示词必须使用缩减预算（summary_budget × 0.8）并硬约束，
 /// 替代通用 COMPACT_PROMPT 的 "more detail is better" 反效果措辞。
+/// 再压（refresh）MUST NOT 把决策/风险区当作可变字段下发：该区由用户拍板
+/// 与未决项构成，LLM 只能压缩非决策区（历史缺陷：提示词要求 aggressively
+/// drop，决策随再压被删）。
+#[test]
+fn refresh_request_excludes_open_decisions_from_mutable_patch() {
+    let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(VALID_CHECKPOINT)
+        .expect("fixture must be valid");
+    let prompt = crate::adapters::compact_summary::build_refresh_prompt(&checkpoint, 5_000);
+
+    assert!(
+        !prompt.contains("\"open_decisions_and_risks\":"),
+        "再压请求不得把决策区作为可变字段下发：{prompt}"
+    );
+    assert!(
+        prompt.contains("open_decisions_and_risks"),
+        "prompt 必须声明决策区受保护、不可改写：{prompt}"
+    );
+}
+
 #[test]
 fn refresh_prompt_enforces_shrunk_budget() {
     use crate::domain::token_budget::summary_budget;
@@ -1263,7 +1808,6 @@ async fn local_reduce_normalization_avoids_non_shrinking_refresh_rounds() {
                     r#"{
                   "committed_facts": [],
                   "uncommitted_working_set": [],
-                  "open_decisions_and_risks": [],
                   "resume_context": [],
                   "required_revalidation": [],
                   "archived_milestones": ["historical detail"]

@@ -18,6 +18,10 @@ pub(crate) mod token_budget;
 pub mod tool_receipt;
 #[cfg(test)]
 mod tool_receipt_tests;
+pub(crate) mod user_input_timestamp;
+#[cfg(test)]
+#[path = "domain/user_input_timestamp_tests.rs"]
+mod user_input_timestamp_tests;
 
 pub use compact::CompactProgressFn;
 pub use constants::REMINDER_INJECTION_TOKEN_BUDGET;

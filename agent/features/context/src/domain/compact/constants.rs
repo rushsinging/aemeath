@@ -19,7 +19,7 @@ pub const TASK_STATE_HEADING: &str = "\n\n## Current Task State\n";
 
 pub(crate) const CONTENT_ESCAPE_PREFIX: &str = "\\";
 
-pub(crate) const SECTION_HEADINGS: [&str; 9] = [
+pub(crate) const SECTION_HEADINGS: [&str; 10] = [
     "Immutable Constraints",
     "Current Objective",
     "Committed Facts",
@@ -27,6 +27,11 @@ pub(crate) const SECTION_HEADINGS: [&str; 9] = [
     "Open Decisions / Risks",
     "Resume Cursor",
     "Required Revalidation",
+    "Committed Decisions",
     "Archived Milestones",
     "Continuation Status",
 ];
+
+/// 可选分区：旧 summary（尚无该分区）允许缺失，缺失按空处理；
+/// 出现时仍参与顺序校验。当前仅 `Committed Decisions`。
+pub(crate) const OPTIONAL_SECTION_INDICES: [usize; 1] = [7];

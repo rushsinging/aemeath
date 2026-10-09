@@ -1,5 +1,37 @@
 use super::*;
 
+/// 旧格式样本：尚无 `Committed Decisions` 分区（用于解析兼容回归）。
+const LEGACY_CHECKPOINT_WITHOUT_COMMITTED_DECISIONS: &str = r#"## Immutable Constraints
+- NEVER merge PR #1541.
+
+## Current Objective
+- Continue the content-stream migration without widening scope.
+
+## Committed Facts
+- Commit `5e42c9aa` passed Runtime and CLI tests.
+
+## Uncommitted Working Set
+- Runtime and SDK are migrated; TUI remains.
+
+## Open Decisions / Risks
+- `chat_result.rs` compatibility ownership requires inspection.
+
+## Resume Cursor
+- Worktree: `.worktrees/feat-945-1502-control-terminal-convergence`
+- Branch: `feat/945-1502-control-terminal-convergence`
+- Current task: migrate TUI consumers
+- Next action: inspect all legacy Token/Thinking consumers.
+- Prohibited: do not merge PR #1541.
+
+## Required Revalidation
+- Recheck worktree status, branch HEAD, PR state, and CI before mutation.
+
+## Archived Milestones
+- ToolCall split completed in `5e42c9aa`.
+
+## Continuation Status
+Continue — TUI consumption remains."#;
+
 const COMPLETE_CHECKPOINT: &str = r#"## Immutable Constraints
 - NEVER merge PR #1541.
 
@@ -24,6 +56,9 @@ const COMPLETE_CHECKPOINT: &str = r#"## Immutable Constraints
 
 ## Required Revalidation
 - Recheck worktree status, branch HEAD, PR state, and CI before mutation.
+
+## Committed Decisions
+- 已决策：引入 ConfirmNode（A 方案）。
 
 ## Archived Milestones
 - ToolCall split completed in `5e42c9aa`.
@@ -76,6 +111,113 @@ fn budget_degradation_preserves_recovery_critical_sections_before_historical_det
     assert!(rendered.contains("Recheck the active blocker before mutation."));
 }
 
+/// 决策/风险区是用户拍板与未决项的载体：预算收缩时 MUST 最后被牺牲，
+/// 不得因为单行较长就先被弹掉（历史缺陷：降级按「最长行」选择 section，
+/// 一条长决策会先于短小的 working set 被删）。
+#[test]
+fn degrade_to_budget_sacrifices_open_decisions_last() {
+    let checkpoint = ContinuationCheckpoint::from_sections(CheckpointSections {
+        immutable_constraints: vec!["- NEVER widen scope.".to_string()],
+        current_objective: vec!["- 保持决策保真。".to_string()],
+        committed_facts: vec![
+            "- fact one.".to_string(),
+            "- fact two.".to_string(),
+            "- fact three.".to_string(),
+            "- fact four.".to_string(),
+        ],
+        uncommitted_working_set: vec![
+            "- work one.".to_string(),
+            "- work two.".to_string(),
+            "- work three.".to_string(),
+            "- work four.".to_string(),
+        ],
+        open_decisions_and_risks: vec![format!(
+            "- 用户拍板：Replan 只能修改 Pending 节点；这行刻意最长，用于验证它不会被优先牺牲。{}",
+            "补充说明。".repeat(10)
+        )],
+        resume_cursor_lines: vec![],
+        next_action: "继续收敛。".to_string(),
+        required_revalidation: vec!["- recheck state.".to_string()],
+        committed_decisions: Vec::new(),
+        archived_milestones: vec![
+            "- milestone one.".to_string(),
+            "- milestone two.".to_string(),
+            "- milestone three.".to_string(),
+            "- milestone four.".to_string(),
+        ],
+        status: ContinuationStatus::Continue,
+        status_reason: None,
+    })
+    .expect("probe checkpoint must build");
+
+    let wire_before = checkpoint.to_wire();
+    // 标尺：只保留「保护区 + 决策区」的 checkpoint，其 token 量即降级下限；
+    // 预算取该下限 + 少量余量，使降级恰好需要弹掉全部可弹区但不能碰决策区。
+    let floor = ContinuationCheckpoint::from_sections(CheckpointSections {
+        immutable_constraints: wire_before.immutable_constraints.clone(),
+        current_objective: vec![wire_before.current_objective.clone()],
+        committed_facts: Vec::new(),
+        uncommitted_working_set: Vec::new(),
+        open_decisions_and_risks: wire_before.open_decisions_and_risks.clone(),
+        resume_cursor_lines: Vec::new(),
+        next_action: wire_before.resume_cursor.next_action.clone(),
+        required_revalidation: wire_before.required_revalidation.clone(),
+        committed_decisions: Vec::new(),
+        archived_milestones: Vec::new(),
+        status: wire_before.continuation_status,
+        status_reason: None,
+    })
+    .expect("floor checkpoint must build");
+    let budget = crate::domain::token_budget::estimate_tokens(&floor.render()) + 50;
+
+    let degraded = checkpoint
+        .degrade_to_budget(budget)
+        .expect("must degrade into budget");
+    let wire = degraded.to_wire();
+
+    assert_eq!(
+        wire.open_decisions_and_risks.len(),
+        1,
+        "决策必须最后被牺牲：{:?}",
+        wire.open_decisions_and_risks
+    );
+    assert!(
+        wire.archived_milestones.is_empty(),
+        "milestones 应最先被牺牲：{:?}",
+        wire.archived_milestones
+    );
+}
+
+/// 已决策项是保护字段：再压（refresh）不得改写或删除已拍板决策。
+#[test]
+fn refresh_cannot_rewrite_committed_decisions() {
+    let original = ContinuationCheckpoint::parse(COMPLETE_CHECKPOINT).unwrap();
+
+    for changed in [
+        COMPLETE_CHECKPOINT.replace("- 已决策：引入 ConfirmNode（A 方案）。", ""),
+        COMPLETE_CHECKPOINT.replace(
+            "- 已决策：引入 ConfirmNode（A 方案）。",
+            "- 已决策：改为 B 方案。",
+        ),
+    ] {
+        let refreshed = ContinuationCheckpoint::parse(&changed).unwrap();
+        let error = refreshed
+            .validate_refresh_from(&original)
+            .expect_err("committed decisions must not change during refresh");
+        assert!(matches!(error, CheckpointError::ProtectedRefreshChanged));
+    }
+}
+
+/// 旧 summary（尚无 Committed Decisions 分区）必须继续可解析：新分区是
+/// 可选分区，缺失时按空处理，NEVER 触发 MissingSection。
+#[test]
+fn legacy_summary_without_committed_decisions_section_parses() {
+    let checkpoint =
+        ContinuationCheckpoint::parse(LEGACY_CHECKPOINT_WITHOUT_COMMITTED_DECISIONS).unwrap();
+
+    assert!(checkpoint.to_wire().committed_decisions.is_empty());
+}
+
 #[test]
 fn compression_patch_changes_only_unprotected_sections() {
     let original = ContinuationCheckpoint::parse(COMPLETE_CHECKPOINT).unwrap();
@@ -83,7 +225,6 @@ fn compression_patch_changes_only_unprotected_sections() {
     let patch = CheckpointCompressionPatch {
         committed_facts: vec!["Commit `5e42c9aa` passed tests.".to_string()],
         uncommitted_working_set: vec!["TUI remains.".to_string()],
-        open_decisions_and_risks: vec!["Compatibility ownership remains open.".to_string()],
         resume_context: vec!["Worktree: structured compact".to_string()],
         required_revalidation: vec!["Recheck PR state.".to_string()],
         archived_milestones: vec!["Baseline `5e42c9aa`.".to_string()],
@@ -92,6 +233,10 @@ fn compression_patch_changes_only_unprotected_sections() {
     let compressed = original.apply_compression_patch(patch).unwrap();
     let compressed_wire = compressed.to_wire();
 
+    assert_eq!(
+        compressed_wire.open_decisions_and_risks, protected_wire.open_decisions_and_risks,
+        "决策/风险区属保护字段，再压不得改写"
+    );
     assert_eq!(
         compressed_wire.immutable_constraints,
         protected_wire.immutable_constraints
@@ -143,7 +288,7 @@ fn compression_patch_rejects_unknown_fields() {
 }
 
 #[test]
-fn typed_checkpoint_wire_renders_the_compatible_nine_sections() {
+fn typed_checkpoint_wire_renders_the_compatible_ten_sections() {
     let source = r#"{
       "immutable_constraints": ["Do not merge without approval."],
       "current_objective": "Implement typed compact checkpoints.",
@@ -165,7 +310,11 @@ fn typed_checkpoint_wire_renders_the_compatible_nine_sections() {
     let checkpoint = ContinuationCheckpoint::try_from(wire).unwrap();
     let rendered = checkpoint.render();
 
-    assert_eq!(rendered.matches("## ").count(), 9);
+    assert_eq!(rendered.matches("## ").count(), 10);
+    assert!(
+        checkpoint.to_wire().committed_decisions.is_empty(),
+        "旧 wire 缺 Committed Decisions 字段时必须按空处理"
+    );
     assert_eq!(rendered.matches("- Next action:").count(), 1);
     assert!(rendered.contains("## Current Objective\n- Implement typed compact checkpoints."));
     assert!(rendered.contains("Continue — Implementation remains."));
@@ -215,6 +364,15 @@ fn refresh_rejects_any_protected_semantic_change() {
             "Continue — TUI consumption remains.",
             "Waiting for User — approval required.",
         ),
+        // 决策/风险区保护：用户拍板与未决项不得被再压改写或删除。
+        COMPLETE_CHECKPOINT.replace(
+            "- `chat_result.rs` compatibility ownership requires inspection.",
+            "",
+        ),
+        COMPLETE_CHECKPOINT.replace(
+            "- `chat_result.rs` compatibility ownership requires inspection.",
+            "- 已由 LLM 静默改写。",
+        ),
     ] {
         let refreshed = ContinuationCheckpoint::parse(&changed).unwrap();
         let error = refreshed
@@ -230,10 +388,6 @@ fn refresh_allows_shortening_unprotected_sections() {
     let shortened_source = COMPLETE_CHECKPOINT
         .replace("- Commit `5e42c9aa` passed Runtime and CLI tests.", "")
         .replace("- Runtime and SDK are migrated; TUI remains.", "")
-        .replace(
-            "- `chat_result.rs` compatibility ownership requires inspection.",
-            "",
-        )
         .replace("- ToolCall split completed in `5e42c9aa`.", "");
     let shortened = ContinuationCheckpoint::parse(&shortened_source).unwrap();
 
@@ -592,6 +746,7 @@ fn checkpoint_content_control_lines_round_trip_reversibly() {
         resume_cursor_lines: vec!["- Prohibited: do not edit".to_string()],
         next_action: "revalidate once".to_string(),
         required_revalidation: vec!["- revalidate git".to_string()],
+        committed_decisions: Vec::new(),
         archived_milestones: vec!["- baseline `abc`".to_string()],
         status: ContinuationStatus::Continue,
         status_reason: Some("work remains".to_string()),

@@ -1,5 +1,6 @@
 use super::constants::{
-    CONTENT_ESCAPE_PREFIX, LEGACY_TASK_STATE_HEADING, SECTION_HEADINGS, TASK_STATE_HEADING,
+    CONTENT_ESCAPE_PREFIX, LEGACY_TASK_STATE_HEADING, OPTIONAL_SECTION_INDICES, SECTION_HEADINGS,
+    TASK_STATE_HEADING,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -60,7 +61,6 @@ pub struct ResumeCursorWire {
 pub struct CheckpointCompressionPatch {
     pub committed_facts: Vec<String>,
     pub uncommitted_working_set: Vec<String>,
-    pub open_decisions_and_risks: Vec<String>,
     pub resume_context: Vec<String>,
     pub required_revalidation: Vec<String>,
     pub archived_milestones: Vec<String>,
@@ -76,6 +76,9 @@ pub struct ContinuationCheckpointWire {
     pub open_decisions_and_risks: Vec<String>,
     pub resume_cursor: ResumeCursorWire,
     pub required_revalidation: Vec<String>,
+    /// 已决策项。可选字段：旧 summary 无该分区时按空处理。
+    #[serde(default)]
+    pub committed_decisions: Vec<String>,
     pub archived_milestones: Vec<String>,
     pub continuation_status: ContinuationStatus,
     pub continuation_reason: String,
@@ -130,6 +133,11 @@ impl TryFrom<ContinuationCheckpointWire> for ContinuationCheckpoint {
                 .into_iter()
                 .map(|line| as_bullet(&line))
                 .collect(),
+            committed_decisions: wire
+                .committed_decisions
+                .into_iter()
+                .map(|line| as_bullet(&line))
+                .collect(),
             archived_milestones: wire
                 .archived_milestones
                 .into_iter()
@@ -151,6 +159,7 @@ pub struct CheckpointSections {
     pub resume_cursor_lines: Vec<String>,
     pub next_action: String,
     pub required_revalidation: Vec<String>,
+    pub committed_decisions: Vec<String>,
     pub archived_milestones: Vec<String>,
     pub status: ContinuationStatus,
     pub status_reason: Option<String>,
@@ -188,14 +197,14 @@ impl<'a> CanonicalCompactSummary<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContinuationCheckpoint {
-    sections: [Vec<String>; 9],
+    sections: [Vec<String>; 10],
     resume_cursor: ResumeCursor,
     status: ContinuationStatus,
 }
 
 impl ContinuationCheckpoint {
     pub fn to_wire(&self) -> ContinuationCheckpointWire {
-        let status_line = self.sections[8]
+        let status_line = self.sections[9]
             .iter()
             .find(|line| !line.trim().is_empty())
             .cloned()
@@ -243,7 +252,8 @@ impl ContinuationCheckpoint {
                 prohibited_actions,
             },
             required_revalidation: section_without_bullets(&self.sections[6]),
-            archived_milestones: section_without_bullets(&self.sections[7]),
+            committed_decisions: section_without_bullets(&self.sections[7]),
+            archived_milestones: section_without_bullets(&self.sections[8]),
             continuation_status: self.status,
             continuation_reason,
         }
@@ -279,6 +289,7 @@ impl ContinuationCheckpoint {
             parts.open_decisions_and_risks,
             resume_cursor_lines,
             parts.required_revalidation,
+            parts.committed_decisions,
             parts.archived_milestones,
             vec![status_line],
         ];
@@ -341,6 +352,7 @@ impl ContinuationCheckpoint {
                 "- Revalidate all dynamic Git, GitHub, CI, and worktree state from the legacy summary."
                     .to_string(),
             ],
+            committed_decisions: Vec::new(),
             archived_milestones: vec![
                 "- No stable milestone references recovered.".to_string(),
             ],
@@ -351,9 +363,9 @@ impl ContinuationCheckpoint {
     }
 
     pub fn parse(source: &str) -> Result<Self, CheckpointError> {
-        let mut sections: [Vec<String>; 9] = std::array::from_fn(|_| Vec::new());
-        let mut seen = [false; 9];
-        let mut encountered_sections = Vec::with_capacity(9);
+        let mut sections: [Vec<String>; 10] = std::array::from_fn(|_| Vec::new());
+        let mut seen = [false; 10];
+        let mut encountered_sections = Vec::with_capacity(10);
         let mut current_section = None;
 
         for line in source.lines() {
@@ -384,19 +396,44 @@ impl ContinuationCheckpoint {
             }
         }
 
-        if let Some(index) = seen.iter().position(|present| !present) {
+        // 必需分区缺失即失败；可选分区（旧 summary 尚无）允许缺席。
+        if let Some(index) = seen
+            .iter()
+            .enumerate()
+            .position(|(index, present)| !present && !OPTIONAL_SECTION_INDICES.contains(&index))
+        {
             return Err(CheckpointError::MissingSection {
                 section: SECTION_HEADINGS[index],
             });
         }
-        if let Some((position, actual)) = encountered_sections
+        // 顺序校验：必需分区之间的相对次序必须与定义一致。
+        let required_encountered = encountered_sections
+            .iter()
+            .copied()
+            .filter(|index| !OPTIONAL_SECTION_INDICES.contains(index))
+            .collect::<Vec<_>>();
+        let required_order = (0..SECTION_HEADINGS.len())
+            .filter(|index| !OPTIONAL_SECTION_INDICES.contains(index))
+            .collect::<Vec<_>>();
+        if let Some((position, actual)) = required_encountered
             .iter()
             .copied()
             .enumerate()
-            .find(|(position, actual)| position != actual)
+            .find(|(position, actual)| *actual != required_order[*position])
         {
             return Err(CheckpointError::InvalidSectionOrder {
-                expected: SECTION_HEADINGS[position],
+                expected: SECTION_HEADINGS[required_order[position]],
+                actual: SECTION_HEADINGS[actual],
+            });
+        }
+        // 可选分区若出现，必须落在其定义位置（整体索引严格递增即可保证）。
+        if let Some(actual) = encountered_sections
+            .windows(2)
+            .find(|window| window[0] >= window[1])
+            .map(|window| window[1])
+        {
+            return Err(CheckpointError::InvalidSectionOrder {
+                expected: SECTION_HEADINGS[actual.saturating_sub(1)],
                 actual: SECTION_HEADINGS[actual],
             });
         }
@@ -422,7 +459,7 @@ impl ContinuationCheckpoint {
             next_action: next_actions[0].to_string(),
         };
 
-        let status_line = sections[8]
+        let status_line = sections[9]
             .iter()
             .find(|line| !line.trim().is_empty())
             .ok_or_else(|| CheckpointError::InvalidStatus {
@@ -447,13 +484,14 @@ impl ContinuationCheckpoint {
             current_objective: protected_wire.current_objective,
             committed_facts: patch.committed_facts,
             uncommitted_working_set: patch.uncommitted_working_set,
-            open_decisions_and_risks: patch.open_decisions_and_risks,
+            open_decisions_and_risks: protected_wire.open_decisions_and_risks,
             resume_cursor: ResumeCursorWire {
                 context: patch.resume_context,
                 next_action: protected_wire.resume_cursor.next_action,
                 prohibited_actions: protected_wire.resume_cursor.prohibited_actions,
             },
             required_revalidation: patch.required_revalidation,
+            committed_decisions: protected_wire.committed_decisions,
             archived_milestones: patch.archived_milestones,
             continuation_status: protected_wire.continuation_status,
             continuation_reason: protected_wire.continuation_reason,
@@ -473,12 +511,12 @@ impl ContinuationCheckpoint {
     }
 
     pub fn merge_fallback_update(mut self, current: Self) -> Self {
-        for section_index in [0usize, 2, 3, 4, 6, 7] {
+        for section_index in [0usize, 2, 3, 4, 6, 7, 8] {
             self.sections[section_index].extend(current.sections[section_index].clone());
         }
         self.sections[1] = current.sections[1].clone();
         self.sections[5] = current.sections[5].clone();
-        self.sections[8] = current.sections[8].clone();
+        self.sections[9] = current.sections[9].clone();
         self.resume_cursor = current.resume_cursor;
         self.status = current.status;
         self.remove_duplicate_lines();
@@ -499,18 +537,15 @@ impl ContinuationCheckpoint {
             return Ok(self);
         }
 
-        const DEGRADATION_ORDER: [usize; 4] = [7, 2, 4, 3];
+        // 降级优先级：先牺牲归档里程碑，再已提交事实、working set、未决决策，
+        // 最后才是已决策项（用户已拍板的权威记录，MUST 最后被牺牲）。按优先级
+        // 取第一个非空 section（而非按「最长行」选择，避免一条长决策先被删）。
+        const DEGRADATION_ORDER: [usize; 5] = [8, 2, 3, 4, 7];
         while estimate_checkpoint_tokens(&self) > budget {
             let Some(section_index) = DEGRADATION_ORDER
                 .iter()
                 .copied()
-                .filter(|section_index| !self.sections[*section_index].is_empty())
-                .max_by_key(|section_index| {
-                    self.sections[*section_index]
-                        .last()
-                        .map(|line| estimate_checkpoint_tokens_for_text(line))
-                        .unwrap_or_default()
-                })
+                .find(|section_index| !self.sections[*section_index].is_empty())
             else {
                 break;
             };
@@ -557,7 +592,7 @@ impl ContinuationCheckpoint {
     }
 
     fn compact_archived_milestones(&mut self) {
-        self.sections[7].retain(|line| {
+        self.sections[8].retain(|line| {
             let trimmed = line.trim();
             trimmed.is_empty()
                 || trimmed.contains('`')
@@ -569,10 +604,12 @@ impl ContinuationCheckpoint {
     pub fn validate_refresh_from(&self, previous: &Self) -> Result<(), CheckpointError> {
         let protected_sections_match = self.sections[0] == previous.sections[0]
             && self.sections[1] == previous.sections[1]
+            && self.sections[4] == previous.sections[4]
             && prohibited_lines(&self.sections[5]) == prohibited_lines(&previous.sections[5])
             && self.resume_cursor == previous.resume_cursor
             && self.status == previous.status
-            && self.sections[8] == previous.sections[8];
+            && self.sections[7] == previous.sections[7]
+            && self.sections[9] == previous.sections[9];
         if protected_sections_match {
             Ok(())
         } else {

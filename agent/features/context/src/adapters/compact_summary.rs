@@ -5,8 +5,8 @@
 
 use super::constants::{
     COMPACT_PROMPT, COMPACT_REFRESH_PROMPT, FALLBACK_PREVIOUS_SUMMARY_CAP,
-    MAIN_USER_OBJECTIVE_MAX_CHARS, MAX_REDUCE_REFRESH_ROUNDS, MAX_TYPED_OUTPUT_REPAIR_ATTEMPTS,
-    REFRESH_BUDGET_RATIO,
+    FALLBACK_TEXT_BLOCK_MAX_BYTES, FALLBACK_TOOL_RESULT_MAX_BYTES, MAIN_USER_OBJECTIVE_MAX_CHARS,
+    MAX_REDUCE_REFRESH_ROUNDS, MAX_TYPED_OUTPUT_REPAIR_ATTEMPTS, REFRESH_BUDGET_RATIO,
 };
 use crate::domain::compact::{
     sanitize_tool_pairs, CompactProgressFn, CompactStageData, CompactWorkData,
@@ -142,7 +142,6 @@ pub(crate) fn build_refresh_prompt(
     let patch_json = serde_json::to_string(&crate::domain::compact::CheckpointCompressionPatch {
         committed_facts: wire.committed_facts,
         uncommitted_working_set: wire.uncommitted_working_set,
-        open_decisions_and_risks: wire.open_decisions_and_risks,
         resume_context: wire.resume_cursor.context,
         required_revalidation: wire.required_revalidation,
         archived_milestones: wire.archived_milestones,
@@ -371,6 +370,13 @@ pub fn build_compact_request(
         for block in &msg.content {
             match block {
                 ContentBlock::Text { text } => {
+                    // LLM 视图为真实用户输入渲染时间前缀；摘要只吸收对话
+                    // 语义，进入请求前按 role 剥离（幂等，未渲染文本原样）。
+                    let text = if msg.role == Role::User {
+                        crate::domain::user_input_timestamp::strip_user_input_timestamp_prefix(text)
+                    } else {
+                        text.as_str()
+                    };
                     conversation_text.push_str(&format!("[{role}]: {text}\n\n"));
                 }
                 ContentBlock::ToolUse { name, input, .. } => {
@@ -456,12 +462,19 @@ pub fn build_summary_text(messages: &[Message], previous_summary: Option<&str>) 
     let mut last_text: Option<(Role, String)> = None;
 
     for msg in messages {
-        let text = msg.text_content();
+        let raw_text = msg.text_content();
+        // 本地降级摘要与 LLM 摘要吸收同一批语义：LLM 视图为真实用户输入渲染
+        // 的时间前缀属渲染层噪声，进入摘要前按 role 剥离（幂等）。
+        let text = if msg.role == Role::User {
+            crate::domain::user_input_timestamp::strip_user_input_timestamp_prefix(&raw_text)
+        } else {
+            raw_text.as_str()
+        };
         if !text.is_empty() {
-            let truncated = if text.len() > 200 {
-                format!("{}...", slice_head(&text, 200))
+            let truncated = if text.len() > FALLBACK_TEXT_BLOCK_MAX_BYTES {
+                format!("{}...", slice_head(text, FALLBACK_TEXT_BLOCK_MAX_BYTES))
             } else {
-                text
+                text.to_owned()
             };
             last_text = Some((msg.role.clone(), truncated.clone()));
             match msg.role {
@@ -493,8 +506,11 @@ pub fn build_summary_text(messages: &[Message], previous_summary: Option<&str>) 
                     other => other.to_string(),
                 });
                 if !result_text.trim().is_empty() {
-                    let result_text = if result_text.len() > 500 {
-                        format!("{}...", slice_head(&result_text, 500))
+                    let result_text = if result_text.len() > FALLBACK_TOOL_RESULT_MAX_BYTES {
+                        format!(
+                            "{}...",
+                            slice_head(&result_text, FALLBACK_TOOL_RESULT_MAX_BYTES)
+                        )
                     } else {
                         result_text
                     };
@@ -575,6 +591,7 @@ pub fn build_summary_text(messages: &[Message], previous_summary: Option<&str>) 
                 "- Revalidate Git, GitHub, CI, worktree, test, and task current state before mutation."
                     .to_string(),
             ],
+            committed_decisions: Vec::new(),
             archived_milestones: vec![
                 "- No stable milestone references established by fallback.".to_string(),
             ],
@@ -1042,53 +1059,104 @@ async fn llm_extract_facts_or_local_fallback(
                 messages.len(),
                 crate::domain::token_budget::estimate_messages_tokens(messages),
             );
-            let fallback = build_summary_text(messages, None);
-            let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&fallback)
-                .map_err(|parse_error| {
-                    CompactGenerationFailureData::new(
-                        CompactGenerationFailureKind::InvalidSummary,
-                        format!("local chunk fallback 无法解析：{parse_error}"),
-                    )
-                })?;
-            Ok((checkpoint_to_fact_batch(checkpoint), Some(error.kind)))
+            Ok((local_chunk_fallback_fact_batch(messages)?, Some(error.kind)))
         }
         Err(error) => Err(error),
     }
 }
 
+/// 单 chunk 的本地降级：按文本摘要折叠该 chunk 的消息为 fact 批次。
+///
+/// 降级只影响当前 chunk；调用方 MUST NOT 因单个 chunk 降级而放弃其他 chunk
+/// 的 LLM 提取成果，否则一次局部失败会把整轮 compact 退化为全量文本降级。
+fn local_chunk_fallback_fact_batch(
+    messages: &[Message],
+) -> Result<crate::domain::compact::CompactFactBatch, CompactGenerationFailureData> {
+    let fallback = build_summary_text(messages, None);
+    crate::domain::compact::ContinuationCheckpoint::parse(&fallback)
+        .map(checkpoint_to_fact_batch)
+        .map_err(|parse_error| {
+            CompactGenerationFailureData::new(
+                CompactGenerationFailureKind::InvalidSummary,
+                format!("local chunk fallback 无法解析：{parse_error}"),
+            )
+        })
+}
+
+/// 将上一份 checkpoint 确定性回填为 fact 批次（compact 级联通道）。
+///
+/// 回填事实标记为 [`CompactFactSource::Checkpoint`]：其原始权威性已在更早
+/// 一轮归并时确认，reduce 侧必须按对应 kind 的权威来源等价保留，否则每轮
+/// compact 都会把已确立事实降级——约束落进 scope unverified、已提交事实被标
+/// unverified、objective 与 resume cursor 被静默丢弃。
 fn checkpoint_to_fact_batch(
     checkpoint: crate::domain::compact::ContinuationCheckpoint,
 ) -> crate::domain::compact::CompactFactBatch {
-    use crate::domain::compact::{CompactFact, CompactFactKind, CompactFactSource};
+    use crate::domain::compact::{
+        CompactFact, CompactFactKind, CompactFactSource, ConstraintAction, ConstraintLifecycle,
+        ConstraintMetadata, ConstraintScope,
+    };
 
     let wire = checkpoint.to_wire();
     let mut sequence = 0u64;
     let mut facts = Vec::new();
-    let mut push_fact = |kind, text: String| {
+    let mut push_fact = |kind, text: String, constraint: Option<ConstraintMetadata>| {
         sequence += 1;
-        if let Ok(fact) = CompactFact::new(sequence, CompactFactSource::Unknown, kind, text, None) {
+        if let Ok(fact) = CompactFact::new(
+            sequence,
+            CompactFactSource::Checkpoint,
+            kind,
+            text,
+            constraint,
+        ) {
             facts.push(fact);
         }
     };
-    push_fact(CompactFactKind::Objective, wire.current_objective);
+
+    // checkpoint 只保留约束文本，原始 metadata 已不可考；回填时按「会话级
+    // 持久限制」重建 scope/lifecycle（它们决定该条能否回到 Immutable
+    // Constraints 区），action 取 restrict，不改变其授权方向。
+    let session_persistent_restriction = ConstraintMetadata::new(
+        ConstraintScope::Session,
+        ConstraintLifecycle::Persistent,
+        ConstraintAction::Restrict,
+    );
+    for text in wire
+        .immutable_constraints
+        .iter()
+        .chain(wire.resume_cursor.prohibited_actions.iter())
+    {
+        push_fact(
+            CompactFactKind::Constraint,
+            text.clone(),
+            Some(session_persistent_restriction.clone()),
+        );
+    }
+
+    push_fact(CompactFactKind::Objective, wire.current_objective, None);
     for text in wire.committed_facts {
-        push_fact(CompactFactKind::CommittedFact, text);
+        push_fact(CompactFactKind::CommittedFact, text, None);
+    }
+    // 已决策项跨 compact 级联：标 Checkpoint 来源，reduce 侧等价保留。
+    for text in wire.committed_decisions {
+        push_fact(CompactFactKind::Decision, text, None);
     }
     for text in wire.uncommitted_working_set {
-        push_fact(CompactFactKind::WorkingSet, text);
+        push_fact(CompactFactKind::WorkingSet, text, None);
     }
     for text in wire.open_decisions_and_risks {
-        push_fact(CompactFactKind::Risk, text);
+        push_fact(CompactFactKind::Risk, text, None);
     }
     push_fact(
         CompactFactKind::ResumeCandidate,
         wire.resume_cursor.next_action,
+        None,
     );
     for text in wire.required_revalidation {
-        push_fact(CompactFactKind::Revalidation, text);
+        push_fact(CompactFactKind::Revalidation, text, None);
     }
     for text in wire.archived_milestones {
-        push_fact(CompactFactKind::Milestone, text);
+        push_fact(CompactFactKind::Milestone, text, None);
     }
     crate::domain::compact::CompactFactBatch::new(facts)
 }
@@ -1247,7 +1315,7 @@ async fn compact_messages_map_reduce(
         .map(|(chunk_index, chunk)| {
             let previous_for_chunk = (chunk_index == 0).then_some(previous_summary).flatten();
             async move {
-                let (facts, degradation) = llm_extract_facts_or_local_fallback(
+                match llm_extract_facts_or_local_fallback(
                     generator,
                     chunk_index,
                     total_chunks,
@@ -1256,16 +1324,28 @@ async fn compact_messages_map_reduce(
                     budgets,
                     cancel,
                 )
-                .await?;
-                Ok::<_, CompactGenerationFailureData>((chunk_index, facts, degradation))
+                .await
+                {
+                    Ok((facts, degradation)) => Ok((chunk_index, facts, degradation)),
+                    Err(error) => Err((chunk_index, error)),
+                }
             }
         })
         .collect::<Vec<_>>();
     let mut in_flight = futures_util::stream::iter(futures).buffer_unordered(concurrency);
     let mut indexed_fact_batches = Vec::with_capacity(total_chunks);
+    let mut failed_chunks: Vec<(usize, CompactGenerationFailureData)> = Vec::new();
     let mut completed_chunks = 0usize;
     while let Some(fact_batch) = in_flight.next().await {
-        indexed_fact_batches.push(fact_batch?);
+        match fact_batch {
+            Ok(entry) => indexed_fact_batches.push(entry),
+            // 取消等不可降级错误必须整体上抛；其余 chunk 级错误本地降级，
+            // 不牵连已完成的 LLM 提取成果。
+            Err((chunk_index, error)) if error.permits_local_fallback() => {
+                failed_chunks.push((chunk_index, error));
+            }
+            Err((_, error)) => return Err(error),
+        }
         completed_chunks += 1;
         emit_progress_completed(
             progress,
@@ -1277,6 +1357,19 @@ async fn compact_messages_map_reduce(
             target: crate::LOG_TARGET,
             "[compact] chunk {completed_chunks}/{total_chunks} 摘要完成",
         );
+    }
+    for (chunk_index, error) in failed_chunks {
+        log::warn!(
+            target: crate::LOG_TARGET,
+            "[compact] stage=map chunk={}/{} outcome=local_chunk_fallback failure={:?} input_messages={} input_tokens={}",
+            chunk_index + 1,
+            total_chunks,
+            error.kind,
+            chunks[chunk_index].len(),
+            estimate_messages_tokens(&chunks[chunk_index]),
+        );
+        let facts = local_chunk_fallback_fact_batch(&chunks[chunk_index])?;
+        indexed_fact_batches.push((chunk_index, facts, Some(error.kind)));
     }
     indexed_fact_batches.sort_by_key(|(chunk_index, _, _)| *chunk_index);
     if let Some(previous_summary) = previous_summary {
@@ -1331,10 +1424,21 @@ async fn compact_messages_map_reduce(
 
     // reduce: Context 按 chunk index 与 fact sequence 确定性归并，LLM 不再构造权威 checkpoint。
     emit_progress(progress, CompactStageData::Reducing);
-    let combined_facts = fact_batches
-        .into_iter()
-        .flat_map(crate::domain::compact::CompactFactBatch::into_facts)
-        .collect::<Vec<_>>();
+    // 每个 chunk 的 sequence 由该 chunk 的 LLM 独立给出（compact 请求不携带
+    // 全局序号），跨 chunk 不可比。若直接拼接，不同 chunk 的相同序号会在
+    // reduce 排序中交错，让较早 chunk 的事实覆盖较新 chunk 的事实；这里按
+    // chunk 顺序统一重编号：chunk 内保留 LLM 的时间序，chunk 之间按历史
+    // 顺序累计，使 reduce 的「后者覆盖前者」语义落在真正更新的历史上。
+    let mut combined_facts = Vec::new();
+    let mut next_sequence = 0u64;
+    for fact_batch in fact_batches {
+        let mut facts = fact_batch.into_facts();
+        facts.sort_by_key(crate::domain::compact::CompactFact::sequence);
+        for fact in facts {
+            next_sequence += 1;
+            combined_facts.push(fact.with_sequence(next_sequence));
+        }
+    }
     let mut final_checkpoint = reduce_facts_with_objective_fallback(
         crate::domain::compact::CompactFactBatch::new(combined_facts),
         early_messages,

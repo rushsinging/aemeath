@@ -251,7 +251,7 @@ async fn build_window_structurally_degrades_oversized_summary_without_losing_obj
     );
     assert!(summary.contains("## Current Objective\n- Preserve the semantic compact goal."));
     assert!(summary.contains("- Next action: run the focused regression."));
-    assert_eq!(summary.matches("## ").count(), 9);
+    assert_eq!(summary.matches("## ").count(), 10);
     assert!(!summary.contains("historical evidence"));
 }
 
