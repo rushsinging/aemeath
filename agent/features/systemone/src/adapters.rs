@@ -26,3 +26,8 @@ pub mod model_assets;
 pub mod null;
 #[cfg(feature = "embedded")]
 pub mod pointer_head_loader;
+
+// 79-case 真机门禁（--ignored 显式运行；见模块注释的模型探测顺序）。
+#[cfg(all(test, feature = "embedded"))]
+#[path = "adapters/embedded_parity_tests.rs"]
+mod embedded_parity_tests;

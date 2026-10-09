@@ -61,6 +61,13 @@ pub(crate) fn init_llama_row_engine(
     config: &LlamaWorkerConfig,
 ) -> Result<LlamaRowEngine, WorkerInitError> {
     ensure_model_file_exists(&config.model_path)?;
+    // llama.cpp 0.1.159 已知缺陷（ggml-metal-device.m:1025）：residency sets
+    // 未释放即 device_free 会 SIGABRT（worker 退出 / 进程收尾时触发用户可见
+    // 崩溃）。在 backend init（device 唯一读取点）前关闭该特性规避；用户
+    // 已显式配置该变量时 NEVER 覆盖。上游修复后移除（ggml-org/llama.cpp#17869）。
+    if std::env::var_os("GGML_METAL_NO_RESIDENCY").is_none() {
+        std::env::set_var("GGML_METAL_NO_RESIDENCY", "1");
+    }
     let backend = LlamaBackend::init().map_err(|error| WorkerInitError::BackendInitFailed {
         detail: error.to_string(),
     })?;
