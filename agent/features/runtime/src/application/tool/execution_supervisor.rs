@@ -608,7 +608,7 @@ pub(crate) enum ToolExecutionSupervisorError {
     #[error("Tool 不在当前 Catalog：{0}")]
     ToolUnavailable(String),
     #[error(transparent)]
-    Receipt(#[from] context::ToolReceiptMutationError),
+    Receipt(#[from] share::error::DomainError),
 }
 
 #[cfg(test)]

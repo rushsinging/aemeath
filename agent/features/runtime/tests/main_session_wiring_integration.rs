@@ -300,7 +300,10 @@ async fn resume_nonexistent_session_returns_load_error() {
     let result = resume_session_to_backing("does-not-exist", &wiring).await;
 
     assert!(
-        matches!(result, Err(context::SessionManagementError::NotFound(_))),
+        matches!(
+            &result,
+            Err(err) if err.code() == Some(context::error_codes::SESSION_NOT_FOUND)
+        ),
         "nonexistent session should return NotFound, got: {:?}",
         result
     );
@@ -389,7 +392,9 @@ async fn cross_project_resume_keeps_bound_run_on_current_memory_config() {
     // NotFound 与旧 ProjectMismatch 在消费方同归 NotFound 语义。
     assert!(matches!(
         resume_session_to_backing("cross-project-memory-target", &wiring).await,
-        Err(context::SessionManagementError::NotFound(id)) if id == "cross-project-memory-target"
+        Err(err)
+            if err.code() == Some(context::error_codes::SESSION_NOT_FOUND)
+                && err.message() == "Session 不存在：cross-project-memory-target"
     ));
 
     // The committed and newly bound config must remain on project A.
@@ -443,7 +448,9 @@ async fn cross_project_resume_keeps_current_model_and_memory() {
     // NotFound 与旧 ProjectMismatch 在消费方同归 NotFound 语义。
     assert!(matches!(
         resume_session_to_backing("cross-project-config-target", &wiring).await,
-        Err(context::SessionManagementError::NotFound(id)) if id == "cross-project-config-target"
+        Err(err)
+            if err.code() == Some(context::error_codes::SESSION_NOT_FOUND)
+                && err.message() == "Session 不存在：cross-project-config-target"
     ));
 
     let after = wiring.committed_config();

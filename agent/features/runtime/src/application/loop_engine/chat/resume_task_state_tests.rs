@@ -1,5 +1,5 @@
 use super::*;
-use context::SessionManagementError;
+use share::error::DomainError;
 use std::collections::VecDeque;
 use task::{BatchCreateSpecData, TaskAccess, TaskCreateSpecData, TaskPersist, TaskPriorityData};
 
@@ -14,14 +14,14 @@ impl context::SessionManagementPort for ResumeSessionManagement {
         &self,
         _id: &str,
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<context::session::CanonicalSession, SessionManagementError> {
+    ) -> Result<context::session::CanonicalSession, DomainError> {
         Ok(self.session.clone())
     }
 
     async fn list_for_project(
         &self,
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<context::SessionListEntryData>, SessionManagementError> {
+    ) -> Result<Vec<context::SessionListEntryData>, DomainError> {
         Ok(Vec::new())
     }
 
@@ -29,16 +29,18 @@ impl context::SessionManagementPort for ResumeSessionManagement {
         &self,
         _id: &str,
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<u8>, SessionManagementError> {
-        Err(SessionManagementError::Storage("unused".to_owned()))
+    ) -> Result<Vec<u8>, DomainError> {
+        Err(DomainError::storage("context", "Session 存储失败：unused")
+            .with_code(context::error_codes::SESSION_STORAGE))
     }
 
     async fn import_for_project(
         &self,
         _bytes: &[u8],
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<context::SessionListEntryData, SessionManagementError> {
-        Err(SessionManagementError::Storage("unused".to_owned()))
+    ) -> Result<context::SessionListEntryData, DomainError> {
+        Err(DomainError::storage("context", "Session 存储失败：unused")
+            .with_code(context::error_codes::SESSION_STORAGE))
     }
 
     async fn update_metadata_for_project(
@@ -46,16 +48,18 @@ impl context::SessionManagementPort for ResumeSessionManagement {
         _id: &str,
         _project: &share::session_types::ProjectIdentityData,
         _update: context::SessionMetadataUpdateData,
-    ) -> Result<context::SessionListEntryData, SessionManagementError> {
-        Err(SessionManagementError::Storage("unused".to_owned()))
+    ) -> Result<context::SessionListEntryData, DomainError> {
+        Err(DomainError::storage("context", "Session 存储失败：unused")
+            .with_code(context::error_codes::SESSION_STORAGE))
     }
 
     async fn delete_for_project(
         &self,
         _id: &str,
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<(), SessionManagementError> {
-        Err(SessionManagementError::Storage("unused".to_owned()))
+    ) -> Result<(), DomainError> {
+        Err(DomainError::storage("context", "Session 存储失败：unused")
+            .with_code(context::error_codes::SESSION_STORAGE))
     }
 }
 

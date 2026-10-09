@@ -21,10 +21,11 @@ use crate::application::tool::execution_supervisor::{
 use async_trait::async_trait;
 use context::{
     CompactOutcome, CompactRequestData, CompactionDecisionData, ContextAppendData,
-    ContextPortError, ContextRequestData, ContextWindowData, ManualCompactRequestData,
-    ToolCallIdentityData, ToolReceiptMutationData, ToolReceiptMutationReceiptData,
+    ContextRequestData, ContextWindowData, ManualCompactRequestData, ToolCallIdentityData,
+    ToolReceiptMutationData, ToolReceiptMutationReceiptData,
 };
 use sdk::{RunId, RunStepId};
+use share::error::DomainError;
 use share::ids::BackgroundProcessId;
 use share::ids::SessionId;
 use std::sync::{Arc, Mutex};
@@ -79,45 +80,41 @@ impl context::ContextPort for RecordingContextPort {
     async fn build_window(
         &self,
         _request: &ContextRequestData,
-    ) -> Result<ContextWindowData, ContextPortError> {
-        Err(ContextPortError::SessionRepository(
-            "test port 不支持 build_window".into(),
-        ))
+    ) -> Result<ContextWindowData, DomainError> {
+        Err(
+            DomainError::storage("context", "test port 不支持 build_window")
+                .with_code(context::error_codes::SESSION_REPOSITORY),
+        )
     }
     async fn needs_compaction(
         &self,
         _request: &ContextRequestData,
-    ) -> Result<CompactionDecisionData, ContextPortError> {
-        Err(ContextPortError::SessionRepository(
-            "test port 不支持 needs_compaction".into(),
-        ))
+    ) -> Result<CompactionDecisionData, DomainError> {
+        Err(
+            DomainError::storage("context", "test port 不支持 needs_compaction")
+                .with_code(context::error_codes::SESSION_REPOSITORY),
+        )
     }
-    async fn compact(
-        &self,
-        _request: &CompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
-        Err(ContextPortError::SessionRepository(
-            "test port 不支持 compact".into(),
-        ))
+    async fn compact(&self, _request: &CompactRequestData) -> Result<CompactOutcome, DomainError> {
+        Err(DomainError::storage("context", "test port 不支持 compact")
+            .with_code(context::error_codes::SESSION_REPOSITORY))
     }
     async fn manual_compact(
         &self,
         _request: &ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
-        Err(ContextPortError::SessionRepository(
-            "test port 不支持 manual_compact".into(),
-        ))
+    ) -> Result<CompactOutcome, DomainError> {
+        Err(
+            DomainError::storage("context", "test port 不支持 manual_compact")
+                .with_code(context::error_codes::SESSION_REPOSITORY),
+        )
     }
-    async fn clear_session(
-        &self,
-        _session_id: &share::ids::SessionId,
-    ) -> Result<(), ContextPortError> {
+    async fn clear_session(&self, _session_id: &share::ids::SessionId) -> Result<(), DomainError> {
         Ok(())
     }
     async fn advance_tool_receipt(
         &self,
         mutation: ToolReceiptMutationData,
-    ) -> Result<ToolReceiptMutationReceiptData, context::ToolReceiptMutationError> {
+    ) -> Result<ToolReceiptMutationReceiptData, DomainError> {
         self.states
             .lock()
             .expect("receipt 状态记录锁")
@@ -134,10 +131,11 @@ impl context::ContextPort for RecordingContextPort {
     async fn append_and_persist(
         &self,
         _append: &ContextAppendData,
-    ) -> Result<context::AppendReceiptData, context::ContextAppendError> {
-        Err(context::ContextAppendError::Storage(
-            "test port 不支持 append_and_persist".to_string(),
-        ))
+    ) -> Result<context::AppendReceiptData, DomainError> {
+        Err(
+            DomainError::storage("context", "test port 不支持 append_and_persist")
+                .with_code(context::error_codes::CONTEXT_APPEND_STORAGE),
+        )
     }
 }
 

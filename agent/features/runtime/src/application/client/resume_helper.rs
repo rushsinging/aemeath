@@ -3,7 +3,7 @@
 
 use crate::LOG_TARGET;
 
-pub type ResumeError = context::SessionManagementError;
+pub type ResumeError = share::error::DomainError;
 
 pub async fn resume_session_to_backing(
     session_id: &str,

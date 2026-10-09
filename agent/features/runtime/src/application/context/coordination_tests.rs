@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::ports::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, CompactResult, CompactSkipReason, CompactionDecisionData,
-    ContentFingerprint, ContextAppendData, ContextAppendError, ContextPort, ContextPortError,
-    ContextRequestData, ContextRequestId, ContextWindowData, DecisionReason, FinalizeCause,
-    Language, ManualCompactRequestData, SessionId, SessionRevision, StepReceiptData, SystemBlock,
+    AcceptedInputAppendData, AcceptedInputReceiptData, AppendReceiptData, CompactOutcome,
+    CompactRequestData, CompactResult, CompactSkipReason, CompactionDecisionData,
+    ContentFingerprint, ContextAppendData, ContextPort, ContextRequestData, ContextRequestId,
+    ContextWindowData, DecisionReason, DomainError, FinalizeCause, Language,
+    ManualCompactRequestData, SessionId, SessionRevision, StepReceiptData, SystemBlock,
     SystemPromptSpecData, TokenBudget, ToolOutcomeKindData, Urgency,
 };
 use async_trait::async_trait;
@@ -31,7 +31,7 @@ impl ContextPort for RecordingPort {
     async fn build_window(
         &self,
         request: &ContextRequestData,
-    ) -> Result<ContextWindowData, ContextPortError> {
+    ) -> Result<ContextWindowData, DomainError> {
         self.calls.lock().unwrap().push("build_window");
         Ok(ContextWindowData {
             backing_revision: SessionRevision::new(1),
@@ -64,7 +64,7 @@ impl ContextPort for RecordingPort {
     async fn needs_compaction(
         &self,
         _request: &ContextRequestData,
-    ) -> Result<CompactionDecisionData, ContextPortError> {
+    ) -> Result<CompactionDecisionData, DomainError> {
         self.calls.lock().unwrap().push("needs_compaction");
         Ok(CompactionDecisionData {
             needed: true,
@@ -77,10 +77,7 @@ impl ContextPort for RecordingPort {
         })
     }
 
-    async fn compact(
-        &self,
-        request: &CompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
+    async fn compact(&self, request: &CompactRequestData) -> Result<CompactOutcome, DomainError> {
         self.calls.lock().unwrap().push("compact");
         self.compact_requests.lock().unwrap().push(request.clone());
         Ok(CompactOutcome::Committed(CompactResult {
@@ -94,7 +91,7 @@ impl ContextPort for RecordingPort {
     async fn manual_compact(
         &self,
         request: &ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
+    ) -> Result<CompactOutcome, DomainError> {
         self.calls.lock().unwrap().push("manual_compact");
         Ok(CompactOutcome::Committed(CompactResult {
             summary: format!("manual summary for {}", request.session_id.as_str()),
@@ -104,7 +101,7 @@ impl ContextPort for RecordingPort {
         }))
     }
 
-    async fn clear_session(&self, session_id: &SessionId) -> Result<(), ContextPortError> {
+    async fn clear_session(&self, session_id: &SessionId) -> Result<(), DomainError> {
         self.calls.lock().unwrap().push("clear_session");
         assert!(!session_id.as_str().is_empty());
         Ok(())
@@ -113,7 +110,7 @@ impl ContextPort for RecordingPort {
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
+    ) -> Result<AcceptedInputReceiptData, DomainError> {
         self.calls.lock().unwrap().push("append_accepted_input");
         self.accepted_inputs.lock().unwrap().push(append.clone());
         Ok(AcceptedInputReceiptData {
@@ -127,7 +124,7 @@ impl ContextPort for RecordingPort {
     async fn append_and_persist(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError> {
+    ) -> Result<AppendReceiptData, DomainError> {
         self.calls.lock().unwrap().push("append_and_persist");
         self.appends.lock().unwrap().push(append.clone());
         Ok(AppendReceiptData {
@@ -475,39 +472,41 @@ async fn append_conflict_is_returned_without_hidden_retry() {
         async fn build_window(
             &self,
             _: &ContextRequestData,
-        ) -> Result<ContextWindowData, ContextPortError> {
+        ) -> Result<ContextWindowData, DomainError> {
             unreachable!()
         }
         async fn needs_compaction(
             &self,
             _: &ContextRequestData,
-        ) -> Result<CompactionDecisionData, ContextPortError> {
+        ) -> Result<CompactionDecisionData, DomainError> {
             unreachable!()
         }
-        async fn compact(
-            &self,
-            _: &CompactRequestData,
-        ) -> Result<CompactOutcome, ContextPortError> {
+        async fn compact(&self, _: &CompactRequestData) -> Result<CompactOutcome, DomainError> {
             unreachable!()
         }
         async fn manual_compact(
             &self,
             _: &ManualCompactRequestData,
-        ) -> Result<CompactOutcome, ContextPortError> {
+        ) -> Result<CompactOutcome, DomainError> {
             unreachable!()
         }
-        async fn clear_session(&self, _: &SessionId) -> Result<(), ContextPortError> {
+        async fn clear_session(&self, _: &SessionId) -> Result<(), DomainError> {
             unreachable!()
         }
         async fn append_and_persist(
             &self,
             _: &ContextAppendData,
-        ) -> Result<AppendReceiptData, ContextAppendError> {
+        ) -> Result<AppendReceiptData, DomainError> {
             *self.calls.lock().unwrap() += 1;
-            Err(ContextAppendError::RevisionConflict {
-                expected: SessionRevision::new(1),
-                actual: SessionRevision::new(2),
-            })
+            Err(DomainError::invalid(
+                "context",
+                format!(
+                    "Session revision 冲突：期望 {:?}，实际 {:?}",
+                    SessionRevision::new(1),
+                    SessionRevision::new(2)
+                ),
+            )
+            .with_code(context::error_codes::REVISION_CONFLICT))
         }
     }
 
@@ -528,7 +527,7 @@ async fn append_conflict_is_returned_without_hidden_retry() {
                 None,
             )
             .await,
-        Err(ContextAppendError::RevisionConflict { .. })
+        Err(err) if err.code() == Some(context::error_codes::REVISION_CONFLICT)
     ));
     assert_eq!(*port.calls.lock().unwrap(), 1);
 }
@@ -541,34 +540,31 @@ async fn skipped_compaction_is_returned_without_hidden_retry() {
         async fn build_window(
             &self,
             _: &ContextRequestData,
-        ) -> Result<ContextWindowData, ContextPortError> {
+        ) -> Result<ContextWindowData, DomainError> {
             unreachable!()
         }
         async fn needs_compaction(
             &self,
             _: &ContextRequestData,
-        ) -> Result<CompactionDecisionData, ContextPortError> {
+        ) -> Result<CompactionDecisionData, DomainError> {
             unreachable!()
         }
-        async fn compact(
-            &self,
-            _: &CompactRequestData,
-        ) -> Result<CompactOutcome, ContextPortError> {
+        async fn compact(&self, _: &CompactRequestData) -> Result<CompactOutcome, DomainError> {
             Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection))
         }
         async fn manual_compact(
             &self,
             _: &ManualCompactRequestData,
-        ) -> Result<CompactOutcome, ContextPortError> {
+        ) -> Result<CompactOutcome, DomainError> {
             unreachable!()
         }
-        async fn clear_session(&self, _: &SessionId) -> Result<(), ContextPortError> {
+        async fn clear_session(&self, _: &SessionId) -> Result<(), DomainError> {
             unreachable!()
         }
         async fn append_and_persist(
             &self,
             _: &ContextAppendData,
-        ) -> Result<AppendReceiptData, ContextAppendError> {
+        ) -> Result<AppendReceiptData, DomainError> {
             unreachable!()
         }
     }

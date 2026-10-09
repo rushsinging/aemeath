@@ -141,14 +141,17 @@ impl context::SessionManagementPort for NoopSessionManagement {
         &self,
         id: &str,
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<context::session::CanonicalSession, context::SessionManagementError> {
-        Err(context::SessionManagementError::NotFound(id.to_string()))
+    ) -> Result<context::session::CanonicalSession, share::error::DomainError> {
+        Err(
+            share::error::DomainError::invalid("context", format!("Session 不存在：{id}"))
+                .with_code(context::error_codes::SESSION_NOT_FOUND),
+        )
     }
 
     async fn list_for_project(
         &self,
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<context::SessionListEntryData>, context::SessionManagementError> {
+    ) -> Result<Vec<context::SessionListEntryData>, share::error::DomainError> {
         Ok(Vec::new())
     }
 
@@ -156,18 +159,22 @@ impl context::SessionManagementPort for NoopSessionManagement {
         &self,
         id: &str,
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<u8>, context::SessionManagementError> {
-        Err(context::SessionManagementError::NotFound(id.to_string()))
+    ) -> Result<Vec<u8>, share::error::DomainError> {
+        Err(
+            share::error::DomainError::invalid("context", format!("Session 不存在：{id}"))
+                .with_code(context::error_codes::SESSION_NOT_FOUND),
+        )
     }
 
     async fn import_for_project(
         &self,
         _bytes: &[u8],
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<context::SessionListEntryData, context::SessionManagementError> {
-        Err(context::SessionManagementError::Storage(
-            "test port".to_string(),
-        ))
+    ) -> Result<context::SessionListEntryData, share::error::DomainError> {
+        Err(
+            share::error::DomainError::storage("context", "Session 存储失败：test port")
+                .with_code(context::error_codes::SESSION_STORAGE),
+        )
     }
 
     async fn update_metadata_for_project(
@@ -175,16 +182,22 @@ impl context::SessionManagementPort for NoopSessionManagement {
         id: &str,
         _project: &share::session_types::ProjectIdentityData,
         _update: context::SessionMetadataUpdateData,
-    ) -> Result<context::SessionListEntryData, context::SessionManagementError> {
-        Err(context::SessionManagementError::NotFound(id.to_string()))
+    ) -> Result<context::SessionListEntryData, share::error::DomainError> {
+        Err(
+            share::error::DomainError::invalid("context", format!("Session 不存在：{id}"))
+                .with_code(context::error_codes::SESSION_NOT_FOUND),
+        )
     }
 
     async fn delete_for_project(
         &self,
         id: &str,
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<(), context::SessionManagementError> {
-        Err(context::SessionManagementError::NotFound(id.to_string()))
+    ) -> Result<(), share::error::DomainError> {
+        Err(
+            share::error::DomainError::invalid("context", format!("Session 不存在：{id}"))
+                .with_code(context::error_codes::SESSION_NOT_FOUND),
+        )
     }
 }
 

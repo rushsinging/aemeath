@@ -19,43 +19,48 @@ impl ContextPort for FakeContextPort {
     async fn build_window(
         &self,
         _request: &crate::ports::ContextRequestData,
-    ) -> Result<crate::ports::ContextWindowData, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
+    ) -> Result<crate::ports::ContextWindowData, crate::ports::DomainError> {
+        Err(crate::ports::DomainError::unavailable("context", "fake")
+            .with_code(context::error_codes::COMPACT))
     }
 
     async fn needs_compaction(
         &self,
         _request: &crate::ports::ContextRequestData,
-    ) -> Result<crate::ports::CompactionDecisionData, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
+    ) -> Result<crate::ports::CompactionDecisionData, crate::ports::DomainError> {
+        Err(crate::ports::DomainError::unavailable("context", "fake")
+            .with_code(context::error_codes::COMPACT))
     }
 
     async fn compact(
         &self,
         _request: &crate::ports::CompactRequestData,
-    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
+    ) -> Result<crate::ports::CompactOutcome, crate::ports::DomainError> {
+        Err(crate::ports::DomainError::unavailable("context", "fake")
+            .with_code(context::error_codes::COMPACT))
     }
 
     async fn manual_compact(
         &self,
         _request: &crate::ports::ManualCompactRequestData,
-    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
+    ) -> Result<crate::ports::CompactOutcome, crate::ports::DomainError> {
+        Err(crate::ports::DomainError::unavailable("context", "fake")
+            .with_code(context::error_codes::COMPACT))
     }
 
     async fn clear_session(
         &self,
         _session_id: &crate::ports::SessionId,
-    ) -> Result<(), crate::ports::ContextPortError> {
+    ) -> Result<(), crate::ports::DomainError> {
         Ok(())
     }
 
     async fn append_and_persist(
         &self,
         _append: &crate::ports::ContextAppendData,
-    ) -> Result<crate::ports::AppendReceiptData, crate::ports::ContextAppendError> {
-        Err(crate::ports::ContextAppendError::Storage("fake".into()))
+    ) -> Result<crate::ports::AppendReceiptData, crate::ports::DomainError> {
+        Err(crate::ports::DomainError::storage("context", "fake")
+            .with_code(context::error_codes::CONTEXT_APPEND_STORAGE))
     }
 }
 

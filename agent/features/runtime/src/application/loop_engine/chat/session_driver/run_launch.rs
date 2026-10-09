@@ -326,21 +326,7 @@ where
                             })
                             .await;                        }
                         Err(error) => {
-                            use sdk::SessionResumeFailureKind;
-                            let kind = match error {
-                                context::SessionManagementError::NotFound(_)
-                                | context::SessionManagementError::ProjectMismatch(_) => {
-                                    SessionResumeFailureKind::NotFound
-                                }
-                                context::SessionManagementError::Corrupt(_)
-                                | context::SessionManagementError::UnsupportedFutureVersion(_) => {
-                                    SessionResumeFailureKind::Corrupt
-                                }
-                                context::SessionManagementError::Storage(_)
-                                | context::SessionManagementError::Resume(_) => {
-                                    SessionResumeFailureKind::Io
-                                }
-                            };
+                            let kind = classify_resume_failure(error.code());
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::SessionResumeFailed {
                                     kind,
@@ -1120,4 +1106,23 @@ where
         },
     )
     .await
+}
+
+/// resume 失败分类：context DomainError 细分码 → sdk 用户可见失败类别。
+///
+/// 折叠前按 SessionManagementError 变体映射；折叠后按 `error_codes` 稳定码。
+/// 无码/未知码保守归 Io（不伪装为「不存在」误导用户重试同名会话）。
+pub(crate) fn classify_resume_failure(code: Option<&'static str>) -> sdk::SessionResumeFailureKind {
+    use sdk::SessionResumeFailureKind;
+    match code {
+        Some(
+            context::error_codes::SESSION_NOT_FOUND
+            | context::error_codes::SESSION_PROJECT_MISMATCH,
+        ) => SessionResumeFailureKind::NotFound,
+        Some(
+            context::error_codes::SESSION_CORRUPT
+            | context::error_codes::SESSION_UNSUPPORTED_VERSION,
+        ) => SessionResumeFailureKind::Corrupt,
+        _ => SessionResumeFailureKind::Io,
+    }
 }

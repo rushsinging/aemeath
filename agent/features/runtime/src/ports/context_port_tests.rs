@@ -36,7 +36,7 @@ impl ContextPort for FakeContextPort {
     async fn build_window(
         &self,
         request: &ContextRequestData,
-    ) -> Result<ContextWindowData, ContextPortError> {
+    ) -> Result<ContextWindowData, DomainError> {
         Ok(ContextWindowData {
             backing_revision: SessionRevision::new(0),
             system_blocks: vec![],
@@ -50,7 +50,7 @@ impl ContextPort for FakeContextPort {
     async fn needs_compaction(
         &self,
         _request: &ContextRequestData,
-    ) -> Result<CompactionDecisionData, ContextPortError> {
+    ) -> Result<CompactionDecisionData, DomainError> {
         Ok(CompactionDecisionData {
             needed: false,
             urgency: Urgency::None,
@@ -62,17 +62,14 @@ impl ContextPort for FakeContextPort {
         })
     }
 
-    async fn compact(
-        &self,
-        _request: &CompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
+    async fn compact(&self, _request: &CompactRequestData) -> Result<CompactOutcome, DomainError> {
         Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection))
     }
 
     async fn manual_compact(
         &self,
         request: &ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
+    ) -> Result<CompactOutcome, DomainError> {
         Ok(CompactOutcome::Committed(CompactResult {
             summary: format!("manual summary for {}", request.session_id.as_str()),
             recent_messages: vec![],
@@ -81,14 +78,14 @@ impl ContextPort for FakeContextPort {
         }))
     }
 
-    async fn clear_session(&self, _session_id: &SessionId) -> Result<(), ContextPortError> {
+    async fn clear_session(&self, _session_id: &SessionId) -> Result<(), DomainError> {
         Ok(())
     }
 
     async fn append_and_persist(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError> {
+    ) -> Result<AppendReceiptData, DomainError> {
         Ok(AppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),

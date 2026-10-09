@@ -21,7 +21,7 @@
 ///
 /// 设计文档：`docs/design/02-modules/context-management/README.md`
 mod constants;
-pub mod error_codes;
+pub use constants::error_codes;
 pub(crate) use constants::LOG_TARGET;
 
 mod adapters;

@@ -1732,21 +1732,21 @@ impl context::ContextPort for RecordingContextPort {
     async fn build_window(
         &self,
         request: &crate::ports::ContextRequestData,
-    ) -> Result<crate::ports::ContextWindowData, crate::ports::ContextPortError> {
+    ) -> Result<crate::ports::ContextWindowData, crate::ports::DomainError> {
         context::ContextPort::build_window(&*self.inner, request).await
     }
 
     async fn needs_compaction(
         &self,
         request: &crate::ports::ContextRequestData,
-    ) -> Result<crate::ports::CompactionDecisionData, crate::ports::ContextPortError> {
+    ) -> Result<crate::ports::CompactionDecisionData, crate::ports::DomainError> {
         context::ContextPort::needs_compaction(&*self.inner, request).await
     }
 
     async fn compact(
         &self,
         request: &crate::ports::CompactRequestData,
-    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
+    ) -> Result<crate::ports::CompactOutcome, crate::ports::DomainError> {
         self.record_persistence("compact");
         context::ContextPort::compact(&*self.inner, request).await
     }
@@ -1754,7 +1754,7 @@ impl context::ContextPort for RecordingContextPort {
     async fn manual_compact(
         &self,
         request: &crate::ports::ManualCompactRequestData,
-    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
+    ) -> Result<crate::ports::CompactOutcome, crate::ports::DomainError> {
         self.record_persistence("manual_compact");
         context::ContextPort::manual_compact(&*self.inner, request).await
     }
@@ -1762,7 +1762,7 @@ impl context::ContextPort for RecordingContextPort {
     async fn clear_session(
         &self,
         session_id: &crate::ports::SessionId,
-    ) -> Result<(), crate::ports::ContextPortError> {
+    ) -> Result<(), crate::ports::DomainError> {
         self.record_persistence("clear_session");
         context::ContextPort::clear_session(&*self.inner, session_id).await
     }
@@ -1770,7 +1770,7 @@ impl context::ContextPort for RecordingContextPort {
     async fn append_accepted_input(
         &self,
         append: &crate::ports::AcceptedInputAppendData,
-    ) -> Result<crate::ports::AcceptedInputReceiptData, crate::ports::AcceptedInputError> {
+    ) -> Result<crate::ports::AcceptedInputReceiptData, crate::ports::DomainError> {
         self.record_persistence("append_accepted_input");
         context::ContextPort::append_accepted_input(&*self.inner, append).await
     }
@@ -1778,7 +1778,7 @@ impl context::ContextPort for RecordingContextPort {
     async fn advance_tool_receipt(
         &self,
         mutation: context::ToolReceiptMutationData,
-    ) -> Result<context::ToolReceiptMutationReceiptData, context::ToolReceiptMutationError> {
+    ) -> Result<context::ToolReceiptMutationReceiptData, crate::ports::DomainError> {
         self.record_persistence("advance_tool_receipt");
         context::ContextPort::advance_tool_receipt(&*self.inner, mutation).await
     }
@@ -1788,7 +1788,7 @@ impl context::ContextPort for RecordingContextPort {
         session_id: &crate::ports::SessionId,
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::ports::StepReceiptData>, context::ToolReceiptMutationError> {
+    ) -> Result<Vec<crate::ports::StepReceiptData>, crate::ports::DomainError> {
         context::ContextPort::step_receipts(&*self.inner, session_id, run_id, step_id).await
     }
 
@@ -1806,7 +1806,7 @@ impl context::ContextPort for RecordingContextPort {
     async fn append_and_persist(
         &self,
         append: &crate::ports::ContextAppendData,
-    ) -> Result<crate::ports::AppendReceiptData, crate::ports::ContextAppendError> {
+    ) -> Result<crate::ports::AppendReceiptData, crate::ports::DomainError> {
         self.record_persistence("append_and_persist");
         context::ContextPort::append_and_persist(&*self.inner, append).await
     }

@@ -21,12 +21,12 @@
 use std::sync::Arc;
 
 use crate::ports::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, CompactTrigger, ContentFingerprint, ContextAppendData,
-    ContextAppendError, ContextPort, ContextPortError, ContextRequestData, ContextWindowData,
-    FinalizeCause, ManualCompactRequestData, SessionId, SessionRevision, StepReceiptData,
+    AcceptedInputAppendData, AcceptedInputReceiptData, AppendReceiptData, CompactOutcome,
+    CompactRequestData, CompactTrigger, ContentFingerprint, ContextAppendData, ContextPort,
+    ContextRequestData, ContextWindowData, DomainError, FinalizeCause, ManualCompactRequestData,
+    SessionId, SessionRevision, StepReceiptData,
 };
-use context::{ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData};
+use context::{ToolReceiptMutationData, ToolReceiptMutationReceiptData};
 use sdk::RunStepId;
 use sha2::{Digest, Sha256};
 use share::message::Message;
@@ -73,7 +73,7 @@ impl ContextCoordinator {
     pub(crate) async fn build_window(
         &self,
         request: &ContextRequestData,
-    ) -> Result<ContextWindowData, ContextPortError> {
+    ) -> Result<ContextWindowData, DomainError> {
         log::debug!(
             target: crate::LOG_TARGET,
             "context_request_forwarded request_id={} run_id={} step_id={}",
@@ -97,7 +97,7 @@ impl ContextCoordinator {
     pub(crate) async fn compaction_decision(
         &self,
         request: &ContextRequestData,
-    ) -> Result<context::CompactionDecisionData, ContextPortError> {
+    ) -> Result<context::CompactionDecisionData, DomainError> {
         self.port.needs_compaction(request).await
     }
 
@@ -105,7 +105,7 @@ impl ContextCoordinator {
     pub(crate) async fn needs_compaction(
         &self,
         request: &ContextRequestData,
-    ) -> Result<bool, ContextPortError> {
+    ) -> Result<bool, DomainError> {
         Ok(self.compaction_decision(request).await?.needed)
     }
 
@@ -116,7 +116,7 @@ impl ContextCoordinator {
         progress: std::sync::Arc<dyn crate::application::loop_engine::CompactProgressView>,
         task_snapshot: Option<context::compact::CompactTaskSnapshotData>,
         cancellation: tokio_util::sync::CancellationToken,
-    ) -> Result<CompactOutcome, ContextPortError> {
+    ) -> Result<CompactOutcome, DomainError> {
         let progress: Option<std::sync::Arc<dyn context::compact::CompactProgressFn>> =
             Some(std::sync::Arc::new(
                 crate::application::loop_engine::compaction::CompactProgressAdapter(progress),
@@ -137,14 +137,11 @@ impl ContextCoordinator {
     pub(crate) async fn manual_compact(
         &self,
         request: &ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
+    ) -> Result<CompactOutcome, DomainError> {
         self.port.manual_compact(request).await
     }
 
-    pub(crate) async fn clear_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), ContextPortError> {
+    pub(crate) async fn clear_session(&self, session_id: &SessionId) -> Result<(), DomainError> {
         self.port.clear_session(session_id).await
     }
 
@@ -152,7 +149,7 @@ impl ContextCoordinator {
         &self,
         request: &ContextRequestData,
         messages: Vec<Message>,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
+    ) -> Result<AcceptedInputReceiptData, DomainError> {
         let fingerprint = accepted_input_fingerprint(request, &messages)?;
         self.port
             .append_accepted_input(&AcceptedInputAppendData {
@@ -169,14 +166,14 @@ impl ContextCoordinator {
     pub(crate) async fn advance_tool_receipt(
         &self,
         mutation: ToolReceiptMutationData,
-    ) -> Result<ToolReceiptMutationReceiptData, ToolReceiptMutationError> {
+    ) -> Result<ToolReceiptMutationReceiptData, DomainError> {
         self.port.advance_tool_receipt(mutation).await
     }
 
     pub(crate) async fn step_receipts(
         &self,
         request: &ContextRequestData,
-    ) -> Result<Vec<StepReceiptData>, ToolReceiptMutationError> {
+    ) -> Result<Vec<StepReceiptData>, DomainError> {
         self.port
             .step_receipts(&request.session_id, &request.run_id, &request.step_id)
             .await
@@ -193,7 +190,7 @@ impl ContextCoordinator {
         messages: Vec<Message>,
         receipts: Vec<StepReceiptData>,
         api_input_tokens: Option<u64>,
-    ) -> Result<AppendReceiptData, ContextAppendError> {
+    ) -> Result<AppendReceiptData, DomainError> {
         let fingerprint = fingerprint(
             request,
             &step_id,
@@ -224,7 +221,7 @@ impl ContextCoordinator {
 fn accepted_input_fingerprint(
     request: &ContextRequestData,
     messages: &[Message],
-) -> Result<ContentFingerprint, AcceptedInputError> {
+) -> Result<ContentFingerprint, DomainError> {
     let payload = serde_json::to_vec(&(
         request.session_id.as_str(),
         request.run_id.to_string(),
@@ -232,7 +229,8 @@ fn accepted_input_fingerprint(
         messages,
     ))
     .map_err(|error| {
-        AcceptedInputError::Storage(format!("accepted input 指纹编码失败：{error}"))
+        DomainError::storage("runtime", format!("accepted input 指纹编码失败：{error}"))
+            .with_code(context::error_codes::ACCEPTED_INPUT_STORAGE)
     })?;
     Ok(ContentFingerprint::new(format!(
         "{:x}",
@@ -248,7 +246,7 @@ fn fingerprint(
     messages: &[Message],
     receipts: &[StepReceiptData],
     api_input_tokens: Option<u64>,
-) -> Result<ContentFingerprint, ContextAppendError> {
+) -> Result<ContentFingerprint, DomainError> {
     let payload = serde_json::to_vec(&(
         request.session_id.as_str(),
         request.run_id.to_string(),
@@ -274,7 +272,11 @@ fn fingerprint(
         api_input_tokens,
     ))
     .map_err(|error| {
-        ContextAppendError::Storage(format!("ContextAppendData 指纹编码失败：{error}"))
+        DomainError::storage(
+            "runtime",
+            format!("ContextAppendData 指纹编码失败：{error}"),
+        )
+        .with_code(context::error_codes::CONTEXT_APPEND_STORAGE)
     })?;
     let digest = Sha256::digest(payload);
     Ok(ContentFingerprint::new(format!("{digest:x}")))

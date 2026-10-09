@@ -27,3 +27,46 @@ fn the_reflection_interval_ordinal_is_named_after_runs() {
         "the session-level Run ordinal must be named run_count"
     );
 }
+
+mod resume_failure_classification {
+    use super::super::run_launch::classify_resume_failure;
+    use sdk::SessionResumeFailureKind;
+
+    #[test]
+    fn not_found_codes_map_to_not_found() {
+        for code in [
+            context::error_codes::SESSION_NOT_FOUND,
+            context::error_codes::SESSION_PROJECT_MISMATCH,
+        ] {
+            assert_eq!(
+                classify_resume_failure(Some(code)),
+                SessionResumeFailureKind::NotFound
+            );
+        }
+    }
+
+    #[test]
+    fn corrupt_codes_map_to_corrupt() {
+        for code in [
+            context::error_codes::SESSION_CORRUPT,
+            context::error_codes::SESSION_UNSUPPORTED_VERSION,
+        ] {
+            assert_eq!(
+                classify_resume_failure(Some(code)),
+                SessionResumeFailureKind::Corrupt
+            );
+        }
+    }
+
+    #[test]
+    fn storage_resume_unknown_and_missing_codes_fall_back_to_io() {
+        for code in [
+            Some(context::error_codes::SESSION_STORAGE),
+            Some(context::error_codes::SESSION_RESUME),
+            Some("unknown_future_code"),
+            None,
+        ] {
+            assert_eq!(classify_resume_failure(code), SessionResumeFailureKind::Io);
+        }
+    }
+}

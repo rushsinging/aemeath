@@ -31,8 +31,8 @@ use crate::application::reflection::{
 };
 use crate::ports::{
     CompactOutcome, CompactRequestData, CompactResult, CompactSkipReason, CompactionDecisionData,
-    ContextPort, ContextPortError, ContextRequestData, ContextRequestId, ContextWindowData,
-    DecisionReason, Language as ContextLanguage, SessionId, SessionRevision, SystemBlock,
+    ContextPort, ContextRequestData, ContextRequestId, ContextWindowData, DecisionReason,
+    DomainError, Language as ContextLanguage, SessionId, SessionRevision, SystemBlock,
     SystemPromptSpecData, TokenBudget, Urgency,
 };
 
@@ -97,12 +97,12 @@ fn window_with(messages: Vec<Message>) -> ContextWindowData {
 /// outcome. Other methods are no-ops because the production compact path only
 /// touches `compact`.
 struct StubContextPort {
-    outcome: Mutex<Option<Result<CompactOutcome, ContextPortError>>>,
+    outcome: Mutex<Option<Result<CompactOutcome, DomainError>>>,
     compact_calls: Mutex<Vec<CompactRequestData>>,
 }
 
 impl StubContextPort {
-    fn new(outcome: Result<CompactOutcome, ContextPortError>) -> Arc<Self> {
+    fn new(outcome: Result<CompactOutcome, DomainError>) -> Arc<Self> {
         Arc::new(Self {
             outcome: Mutex::new(Some(outcome)),
             compact_calls: Mutex::new(Vec::new()),
@@ -119,23 +119,22 @@ impl ContextPort for StubContextPort {
     async fn build_window(
         &self,
         _request: &ContextRequestData,
-    ) -> Result<ContextWindowData, ContextPortError> {
-        Err(ContextPortError::Compact("stub: build_window".to_string()))
+    ) -> Result<ContextWindowData, DomainError> {
+        Err(DomainError::unavailable("context", "stub: build_window")
+            .with_code(context::error_codes::COMPACT))
     }
 
     async fn needs_compaction(
         &self,
         _request: &ContextRequestData,
-    ) -> Result<CompactionDecisionData, ContextPortError> {
-        Err(ContextPortError::Compact(
-            "stub: needs_compaction".to_string(),
-        ))
+    ) -> Result<CompactionDecisionData, DomainError> {
+        Err(
+            DomainError::unavailable("context", "stub: needs_compaction")
+                .with_code(context::error_codes::COMPACT),
+        )
     }
 
-    async fn compact(
-        &self,
-        request: &CompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
+    async fn compact(&self, request: &CompactRequestData) -> Result<CompactOutcome, DomainError> {
         self.compact_calls.lock().unwrap().push(request.clone());
         self.outcome
             .lock()
@@ -147,23 +146,22 @@ impl ContextPort for StubContextPort {
     async fn manual_compact(
         &self,
         _request: &crate::ports::ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
-        Err(ContextPortError::Compact(
-            "stub: manual_compact".to_string(),
-        ))
+    ) -> Result<CompactOutcome, DomainError> {
+        Err(DomainError::unavailable("context", "stub: manual_compact")
+            .with_code(context::error_codes::COMPACT))
     }
 
-    async fn clear_session(&self, _session_id: &SessionId) -> Result<(), ContextPortError> {
-        Err(ContextPortError::Compact("stub: clear_session".to_string()))
+    async fn clear_session(&self, _session_id: &SessionId) -> Result<(), DomainError> {
+        Err(DomainError::unavailable("context", "stub: clear_session")
+            .with_code(context::error_codes::COMPACT))
     }
 
     async fn append_and_persist(
         &self,
         _append: &crate::ports::ContextAppendData,
-    ) -> Result<crate::ports::AppendReceiptData, crate::ports::ContextAppendError> {
-        Err(crate::ports::ContextAppendError::Storage(
-            "stub".to_string(),
-        ))
+    ) -> Result<crate::ports::AppendReceiptData, DomainError> {
+        Err(DomainError::storage("context", "stub")
+            .with_code(context::error_codes::CONTEXT_APPEND_STORAGE))
     }
 }
 
@@ -252,7 +250,7 @@ struct CompactHarness {
 }
 
 impl CompactHarness {
-    fn new(outcome: Result<CompactOutcome, ContextPortError>) -> Self {
+    fn new(outcome: Result<CompactOutcome, DomainError>) -> Self {
         let recording = Arc::new(RecordingReflectionHistory::default());
         Self::with_options(
             outcome,
@@ -263,17 +261,14 @@ impl CompactHarness {
     }
 
     /// 自定义配置（如关闭反思门禁）；反思历史为默认记录实现。
-    fn with_config(
-        outcome: Result<CompactOutcome, ContextPortError>,
-        config: ConfigSnapshot,
-    ) -> Self {
+    fn with_config(outcome: Result<CompactOutcome, DomainError>, config: ConfigSnapshot) -> Self {
         let recording = Arc::new(RecordingReflectionHistory::default());
         Self::with_options(outcome, config, recording.clone(), Some(recording))
     }
 
     /// 自定义反思历史（如注入 append 失败的实现）；配置为默认值。
     fn with_history(
-        outcome: Result<CompactOutcome, ContextPortError>,
+        outcome: Result<CompactOutcome, DomainError>,
         history: Arc<dyn memory::api::ReflectionHistoryStore>,
     ) -> Self {
         Self::with_options(
@@ -285,7 +280,7 @@ impl CompactHarness {
     }
 
     fn with_options(
-        outcome: Result<CompactOutcome, ContextPortError>,
+        outcome: Result<CompactOutcome, DomainError>,
         config_snapshot: ConfigSnapshot,
         reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
         recording_history: Option<Arc<RecordingReflectionHistory>>,
@@ -687,9 +682,11 @@ async fn pre_compact_trigger_skips_when_context_compact_call_errors() {
     let window = window_with(vec![Message::user("only")]);
     let request = frozen_request();
 
-    let harness = CompactHarness::new(Err(ContextPortError::Compact(
-        "context port error".to_string(),
-    )));
+    let harness = CompactHarness::new(Err(DomainError::unavailable(
+        "context",
+        "context port error",
+    )
+    .with_code(context::error_codes::COMPACT)));
 
     let mut execution = crate::application::run::execution_state::RunExecutionState::new();
     execution.initialize_for_launch(vec![Message::user("only")], 1);

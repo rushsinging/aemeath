@@ -25,11 +25,11 @@ pub mod tool_result_blob;
 pub mod usage_sink;
 
 pub use context_port::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, CompactTrigger, ContentFingerprint, ContextAppendData,
-    ContextAppendError, ContextPort, ContextPortError, ContextRequestData, ContextRequestId,
-    ContextWindowData, FinalizeCause, Language, ManualCompactRequestData, RunStepId, SessionId,
-    SessionRevision, StepReceiptData, SystemPromptSpecData, ToolSchemaData,
+    AcceptedInputAppendData, AcceptedInputReceiptData, AppendReceiptData, CompactOutcome,
+    CompactRequestData, CompactTrigger, ContentFingerprint, ContextAppendData, ContextPort,
+    ContextRequestData, ContextRequestId, ContextWindowData, DomainError, FinalizeCause, Language,
+    ManualCompactRequestData, RunStepId, SessionId, SessionRevision, StepReceiptData,
+    SystemPromptSpecData, ToolSchemaData,
 };
 #[cfg(test)]
 pub use context_port::{
