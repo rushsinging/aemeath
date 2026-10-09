@@ -110,7 +110,7 @@ pub struct Config {
     #[serde(default)]
     pub storage: StorageConfig,
 
-    /// System One 评分服务配置（引擎端点与逐场景开关）
+    /// System One 评分配置（逐场景开关；HTTP 端点字段已退役）
     #[serde(default)]
     pub scoring: crate::config::scoring::ScoringConfig,
 

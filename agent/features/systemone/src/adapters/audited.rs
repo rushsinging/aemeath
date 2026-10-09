@@ -9,7 +9,6 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 
 use crate::adapters::calibration_store::append_jsonl_line_sync;
 use crate::domain::{
@@ -61,14 +60,14 @@ impl AuditedScoringAdapter {
 
 /// prompt 指纹：state + 题型结构序列化的 sha256（与实际发送内容同源）。
 fn prompt_fingerprint(state: &ScoringState, questions: &[ScoringQuestion]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(state.as_str().as_bytes());
+    let mut prompt_bytes = Vec::with_capacity(state.as_str().len());
+    prompt_bytes.extend_from_slice(state.as_str().as_bytes());
     for question in questions {
         if let Ok(serialized) = serde_json::to_vec(question) {
-            hasher.update(serialized);
+            prompt_bytes.extend_from_slice(&serialized);
         }
     }
-    format!("{:x}", hasher.finalize())
+    utils::sha256_hex(&prompt_bytes)
 }
 
 fn answer_probabilities(answer: &ScoringAnswer) -> Vec<f64> {

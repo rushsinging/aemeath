@@ -36,3 +36,113 @@ fn test_slice_head_tail_never_panic() {
         let _ = slice_tail(source, max_bytes);
     }
 }
+
+#[test]
+fn sha256_hex_of_hello_returns_standard_digest() {
+    // SHA256("hello") = 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+    assert_eq!(
+        sha256_hex(b"hello"),
+        "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    );
+}
+
+#[test]
+fn sha256_hex_of_empty_slice_returns_standard_digest() {
+    // SHA256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    assert_eq!(
+        sha256_hex(&[]),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+}
+
+// 独立工具（python hashlib 与 openssl dgst）计算并固定的黄金向量，
+// 锁定 stable_sha256_hex 的编码路径：domain || be64(len(field)) || field。
+const STABLE_GOLDEN_DOMAIN_V1: &[u8] = b"aemeath:stable_sha256_hex:v1";
+const STABLE_GOLDEN_DOMAIN_V2: &[u8] = b"aemeath:stable_sha256_hex:v2";
+
+#[test]
+fn stable_sha256_hex_for_fixed_domain_and_parts_matches_golden_digest() {
+    // sha256("aemeath:stable_sha256_hex:v1" || be64(11) || "project-key" || be64(5) || "alpha")
+    assert_eq!(
+        stable_sha256_hex(STABLE_GOLDEN_DOMAIN_V1, &[b"project-key", b"alpha"]),
+        "9fb1eaead75a28d5aa01c83c4841acc853aba5a2b6f67a32f5f22a5c14548967"
+    );
+}
+
+#[test]
+fn stable_sha256_hex_frames_each_part_so_boundaries_change_digest() {
+    let joined_first = stable_sha256_hex(STABLE_GOLDEN_DOMAIN_V1, &[b"ab", b"c"]);
+    let joined_second = stable_sha256_hex(STABLE_GOLDEN_DOMAIN_V1, &[b"a", b"bc"]);
+    assert_eq!(
+        joined_first,
+        "321968268c20be38d78306ace8b7d421146bce5f76680666f99ed85d546aaaf2"
+    );
+    assert_eq!(
+        joined_second,
+        "a66ec02c1731b3a91fc9f454e9dc4ed80e2a9943743c3a117e624b433e14c634"
+    );
+    assert_ne!(joined_first, joined_second);
+}
+
+#[test]
+fn stable_sha256_hex_changes_digest_when_domain_changes() {
+    assert_eq!(
+        stable_sha256_hex(STABLE_GOLDEN_DOMAIN_V2, &[b"project-key", b"alpha"]),
+        "77b679f06b0473e62600eb2911068915bd81080a6fb79974f870752a81d968e4"
+    );
+    assert_ne!(
+        stable_sha256_hex(STABLE_GOLDEN_DOMAIN_V1, &[b"project-key", b"alpha"]),
+        stable_sha256_hex(STABLE_GOLDEN_DOMAIN_V2, &[b"project-key", b"alpha"])
+    );
+}
+
+// --- sha256_reader_hex：流式 Reader 摘要（大文件哈希必须流式，禁止 read_to_end） ---
+
+#[test]
+fn sha256_reader_hex_of_empty_reader_returns_standard_digest() {
+    // SHA256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    let digest =
+        sha256_reader_hex(&mut std::io::Cursor::new(Vec::new())).expect("空 reader 应可读");
+    assert_eq!(
+        digest,
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+}
+
+#[test]
+fn sha256_reader_hex_of_hello_returns_standard_digest() {
+    let digest = sha256_reader_hex(&mut std::io::Cursor::new(b"hello")).expect("hello 应可读");
+    assert_eq!(
+        digest,
+        "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    );
+}
+
+#[test]
+fn sha256_reader_hex_streams_multi_chunk_input_matching_memory_helper() {
+    // 超过内部读缓冲（64KiB）的输入，确保分块循环与一次性内存哈希结果一致。
+    let source: Vec<u8> = (0..300_000_u32).map(|index| (index % 251) as u8).collect();
+    let digest =
+        sha256_reader_hex(&mut std::io::Cursor::new(source.clone())).expect("多块输入应可读");
+    assert_eq!(digest, sha256_hex(&source), "流式与内存摘要必须一致");
+}
+
+#[test]
+fn sha256_reader_hex_propagates_read_error() {
+    struct FailingReader;
+
+    impl std::io::Read for FailingReader {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            if buffer.is_empty() {
+                return Ok(0);
+            }
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "读取中断",
+            ))
+        }
+    }
+
+    let error = sha256_reader_hex(&mut FailingReader).expect_err("读错误应被传播");
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+}

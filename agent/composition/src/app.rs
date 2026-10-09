@@ -1053,6 +1053,9 @@ pub struct AgentClientBootstrap {
     pub command_catalog: Arc<dyn sdk::CommandCatalogPort>,
     pub command_router: Arc<dyn sdk::CommandRouterPort>,
     pub user_agent: String,
+    /// 启动期一次性提醒（System One 评分未生效等）：CLI / TUI 只渲染消息，
+    /// 不读取 ConfigReader、环境变量或模型目录。
+    pub startup_notices: Vec<crate::systemone::StartupNotice>,
 }
 
 pub struct PreChatAgentClient {
@@ -1440,6 +1443,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         command_catalog: command_wiring.catalog(),
         command_router: command_wiring.router(),
         user_agent,
+        startup_notices: runtime_client.startup_notices,
     })
 }
 

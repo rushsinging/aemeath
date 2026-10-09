@@ -110,6 +110,12 @@ pub enum Commands {
     /// Configure a built-in LLM provider interactively
     Connect,
 
+    /// Manage the embedded System One scoring model
+    Systemone {
+        #[command(subcommand)]
+        command: SystemoneCommands,
+    },
+
     /// Check for and install updates
     Update {
         /// Only check for available updates, don't install
@@ -119,6 +125,13 @@ pub enum Commands {
 
     /// Print version information
     Version,
+}
+
+/// `aemeath systemone` 子命令集。
+#[derive(Subcommand)]
+pub enum SystemoneCommands {
+    /// Download and install the System One scoring model (~/.agents/models/systemone)
+    Download,
 }
 
 /// The original Args struct, used by the rest of main.rs to avoid touching all call sites.

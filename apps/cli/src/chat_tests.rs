@@ -184,3 +184,83 @@ async fn tui_session_scope_exit_restores_complete_parent_scope() {
     })
     .await;
 }
+
+/// no-TUI 启动提醒渲染：每条 notice 恰好输出一行文本（含手动下载命令提示），
+/// 空列表不产生任何输出。
+#[test]
+fn render_startup_notices_for_no_tui_prints_each_notice_once() {
+    let notices = vec![composition::systemone::StartupNotice {
+        message: "System One 模型未安装，评分功能不可用；执行 `aemeath systemone download` 安装"
+            .to_string(),
+    }];
+    let rendered = render_startup_notices_for_no_tui(&notices);
+    assert_eq!(
+        rendered.matches("aemeath systemone download").count(),
+        1,
+        "命令提示应恰好出现一次"
+    );
+    assert_eq!(rendered.lines().count(), 1);
+
+    assert_eq!(
+        render_startup_notices_for_no_tui(&[]),
+        "",
+        "无提醒时不应产生输出"
+    );
+}
+
+/// TUI 启动提醒渲染：每条 notice 恰好进入一个 System block，渲染后不重复。
+#[test]
+fn apply_startup_notices_to_tui_appends_each_notice_once() {
+    let mut app = crate::tui::App::new(
+        "sess-startup-notice".to_string(),
+        std::path::PathBuf::from("/tmp"),
+        "test-model".to_string(),
+    );
+    let notices = vec![composition::systemone::StartupNotice {
+        message: "System One 模型未安装，评分功能不可用；执行 `aemeath systemone download` 安装"
+            .to_string(),
+    }];
+    apply_startup_notices_to_tui(&mut app, &notices);
+    let notice_texts: Vec<&String> = app
+        .model
+        .conversation
+        .timeline
+        .items()
+        .iter()
+        .filter_map(|item| match item {
+            crate::tui::model::output_timeline::OutputTimelineItem::System { text, .. } => {
+                Some(text)
+            }
+            _ => None,
+        })
+        .collect();
+    // App 启动自带 banner 等 System block，只断言提醒文本恰好出现一次。
+    assert_eq!(
+        notice_texts
+            .iter()
+            .filter(|text| text.contains("aemeath systemone download"))
+            .count(),
+        1,
+        "启动提醒应恰好渲染为一个 System block"
+    );
+
+    apply_startup_notices_to_tui(&mut app, &[]);
+    let notice_count_after_empty = app
+        .model
+        .conversation
+        .timeline
+        .items()
+        .iter()
+        .filter_map(|item| match item {
+            crate::tui::model::output_timeline::OutputTimelineItem::System { text, .. } => {
+                Some(text)
+            }
+            _ => None,
+        })
+        .filter(|text| text.contains("aemeath systemone download"))
+        .count();
+    assert_eq!(
+        notice_count_after_empty, 1,
+        "空列表重复调用不得追加额外 block"
+    );
+}

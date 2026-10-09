@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "case_count": 79,
+  "hidden_size": 1024,
+  "pointer_dimension": 256,
+  "temperature": 2.3510958125672174,
+  "source": {
+    "backbone": "Qwen/Qwen3.5-0.8B-Base@dc7cdfe2ee4154fa7e30f5b51ca41bfa40174e68",
+    "lora": "jaredpalmer/kev-0.8b (merged fp32)",
+    "hidden_source": "torch fp32 eager forward",
+    "probs_source": "python PointerHead softmax (same hidden)",
+    "gguf_target": "Q8_0",
+    "datasets": [
+      "memory_rerank.jsonl",
+      "memory_rerank_real.jsonl",
+      "skill_match.jsonl",
+      "skill_match_real.jsonl",
+      "stop_verify.jsonl",
+      "permission_triage.jsonl"
+    ],
+    "generator": "harness/export_parity_fixture.py"
+  },
+  "head_layout": {
+    "file": "head/head.f32",
+    "order": [
+      "q_weight",
+      "q_bias",
+      "k_weight",
+      "k_bias"
+    ],
+    "dtype": "<f4",
+    "q_weight_shape": [
+      256,
+      1024
+    ]
+  }
+}

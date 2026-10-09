@@ -3,16 +3,45 @@ name = "systemone"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# Jev HTTP 评分 adapter / wire 类型 / `wire_http_scoring_port` 的编译开关：
+# 仅测试、eval 对分与回归基准使用（设计 §4.3 HTTP adapter 退役边界）。
+# `HttpArtifactFetcher` 下载能力不受此 feature 影响，reqwest 始终是必选依赖。
+http-adapter = []
+# 生产 embedded llama.cpp 评分路径（设计 §4.1）：llama.cpp 原生 worker + kev causal row
+# 编码 + HF tokenizer。默认构建 MUST NOT 链接/编译 llama.cpp 原生运行路径，
+# 因此 native 依赖只经此 feature 引入；原生 worker 本体另有 macOS arm64 cfg 门控。
+embedded = ["dep:llama-cpp-2", "dep:tokenizers"]
+
 [dependencies]
 share = { path = "../../shared" }
+utils = { path = "../../../packages/global/utils" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
-sha2 = { workspace = true }
+futures-util = { workspace = true }
 chrono = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 log = "0.4"
+# 仅 feature `embedded` 使用：llama.cpp safe binding（0.1.158 为研究结论版本）。
+# default-features 关闭以排除 macOS Apple clang 不可用的 openmp 与未使用的 common。
+llama-cpp-2 = { version = "=0.1.158", default-features = false, optional = true }
+# 仅 feature `embedded` 使用：kev causal row 编码复现 HF fast tokenizer 语义
+#（tokenizer/tokenizer.json，与 Python `transformers` 同一 Rust 实现）。
+tokenizers = { version = "0.23", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+
+# kev HTTP 基线复测需要本地 kev.serve，默认构建不编译该集成测试。
+[[test]]
+name = "kev_baseline"
+path = "tests/kev_baseline.rs"
+required-features = ["http-adapter"]
+
+# 原子 no-replace rename（renameat2 / renameatx_np + RENAME_EXCL）与 O_NOFOLLOW
+# 需要 POSIX 平台原语：unix 上引入 rustix safe API；其余 target 由 cfg 编译的
+# fail-closed 分支处理（NEVER 回退会覆盖空目录的 std::fs::rename）。
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true }

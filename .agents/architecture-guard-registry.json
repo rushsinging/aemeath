@@ -398,15 +398,39 @@
     },
     {
       "id": "construction.systemone.wire-scoring-port",
-      "symbol": "wire_scoring_port",
+      "symbol": "wire_http_scoring_port",
       "owner_crate": "systemone",
       "kind": "wire",
       "allowed_paths": [
-        "agent/composition/src"
+        "agent/features/systemone/tests"
       ],
       "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "System One scoring port wiring is invoked only by the Composition Root (#1831)",
+      "reason": "Jev HTTP scoring wiring is feature http-adapter only (test/eval parity per design 01-systemone-scoring §4.3); production composition must never invoke it",
       "tracking_issue": 1831
+    },
+    {
+      "id": "construction.systemone.wire-embedded-scoring",
+      "symbol": "wire_embedded_scoring",
+      "owner_crate": "systemone",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src/systemone.rs"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Production embedded scoring chain (asset resolve → llama worker → calibrated → audited) has its single cross-BC call site in the composition systemone assembly module; HTTP wiring stays forbidden to production",
+      "tracking_issue": 1833
+    },
+    {
+      "id": "construction.systemone.wire-model-download-service",
+      "symbol": "wire_model_download_service",
+      "owner_crate": "systemone",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src/systemone.rs"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Manual model download service assembly (LocalModelAssetStore dual port + HttpArtifactFetcher with fixed-manifest source policy) has its single cross-BC call site in the composition systemone module behind run_systemone_download",
+      "tracking_issue": 1833
     },
     {
       "id": "construction.runtime.agent-runner",
@@ -2060,7 +2084,8 @@
         "update": [
           "logging",
           "sdk",
-          "share"
+          "share",
+          "utils"
         ],
         "logging": [],
         "utils": []
@@ -2135,6 +2160,8 @@
         "runtime.rs",
         "runtime_tests.rs",
         "state.rs",
+        "systemone.rs",
+        "systemone_tests.rs",
         "tools.rs",
         "update.rs"
       ],

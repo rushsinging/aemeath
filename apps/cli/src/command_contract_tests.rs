@@ -125,3 +125,27 @@ fn fatal_exit_paths_restore_terminal_stderr_through_single_reporter() {
         );
     }
 }
+
+/// `aemeath systemone` 子命令只委托 composition：不得直接触碰网络、环境变量
+/// 或文件系统（模型下载/校验/安装全部在 composition→systemone 装配链内）。
+#[test]
+fn systemone_command_only_delegates_to_composition() {
+    let source = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/subcommand/systemone_command.rs"
+    ))
+    .expect("systemone_command.rs 应存在");
+    for forbidden in [
+        "reqwest",
+        "std::env",
+        "std::fs",
+        "http://",
+        "https://",
+        "\nuse systemone",
+    ] {
+        assert!(
+            !source.contains(forbidden),
+            "CLI 子命令不得直接引用 `{forbidden}`，必须经 composition 委托"
+        );
+    }
+}

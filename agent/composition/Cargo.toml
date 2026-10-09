@@ -3,6 +3,13 @@ name = "composition"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# System One embedded 评分装配（llama.cpp worker）。默认关闭：遵循计划
+# 「默认 workspace 不启用 embedded」——默认构建不链接 llama.cpp、不编译
+# 原生运行路径；`cargo test -p composition --features systemone-embedded`
+# 显式启用后生产装配入口才具备真实装配能力（否则 typed EmbeddedUnavailable）。
+systemone-embedded = ["systemone/embedded"]
+
 [dependencies]
 runtime = { path = "../features/runtime" }
 config = { path = "../features/config" }

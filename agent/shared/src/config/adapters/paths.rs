@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 pub use super::constants::{
     AGENTS_DIR_ENV, AGENTS_DIR_NAME, AGENTS_MD, CLAUDE_DIR_NAME, CLAUDE_MD, GUIDANCE_DIR_NAME,
-    HISTORY_FILE, HOOKS_DIR_NAME, LOGS_DIR_NAME, MCP_CONFIG_FILE, MEMORY_DIR_NAME, NEW_CONFIG_FILE,
-    OLD_AEMEATH_DIR_NAME, OLD_CONFIG_FILE, SESSIONS_DIR_NAME, SETTINGS_FILE, SKILLS_DIR_NAME,
-    TOOL_RESULTS_DIR_NAME, WORKTREES_DIR_NAME,
+    HISTORY_FILE, HOOKS_DIR_NAME, LOGS_DIR_NAME, MCP_CONFIG_FILE, MEMORY_DIR_NAME, MODELS_DIR_NAME,
+    NEW_CONFIG_FILE, OLD_AEMEATH_DIR_NAME, OLD_CONFIG_FILE, SESSIONS_DIR_NAME, SETTINGS_FILE,
+    SKILLS_DIR_NAME, SYSTEMONE_DIR_NAME, TOOL_RESULTS_DIR_NAME, WORKTREES_DIR_NAME,
 };
 
 /// 解析 home 目录（读取 `$HOME`）。
@@ -31,6 +31,18 @@ pub fn global_agents_dir() -> PathBuf {
     }
 
     home_dir_or_dot().join(AGENTS_DIR_NAME)
+}
+
+/// `~/.agents/models/` — 本地模型资产根目录。
+pub fn global_models_dir() -> PathBuf {
+    global_agents_dir().join(MODELS_DIR_NAME)
+}
+
+/// `~/.agents/models/systemone/` — System One GGUF 模型缓存目录。
+///
+/// 单一路径真相源：所有 System One 模型资产读写都从此函数取路径。
+pub fn systemone_models_dir() -> PathBuf {
+    global_models_dir().join(SYSTEMONE_DIR_NAME)
 }
 
 /// 展开 `~` / `~/` 前缀为 home 目录。

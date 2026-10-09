@@ -109,6 +109,39 @@ fn test_global_data_paths_use_agents_directory() {
 }
 
 #[test]
+fn test_systemone_models_dir_under_custom_agents_root() {
+    let temp_agents_dir = std::env::temp_dir().join(format!(
+        "aemeath_shared_models_{}",
+        UNIQUE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let _guard = TestEnvGuard::set(AGENTS_DIR_ENV, &temp_agents_dir);
+
+    assert_eq!(global_models_dir(), temp_agents_dir.join("models"));
+    assert_eq!(
+        systemone_models_dir(),
+        temp_agents_dir.join("models/systemone")
+    );
+}
+
+#[test]
+fn test_systemone_models_dir_env_blank_falls_back_to_home_layout() {
+    let _guard = TestEnvGuard::set(AGENTS_DIR_ENV, "   ");
+    let expected = home_dir_or_dot()
+        .join(AGENTS_DIR_NAME)
+        .join("models/systemone");
+    assert_eq!(systemone_models_dir(), expected);
+}
+
+#[test]
+fn test_systemone_models_dir_env_missing_falls_back_to_home_layout() {
+    let _guard = TestEnvGuard::unset(AGENTS_DIR_ENV);
+    let expected = home_dir_or_dot()
+        .join(AGENTS_DIR_NAME)
+        .join("models/systemone");
+    assert_eq!(systemone_models_dir(), expected);
+}
+
+#[test]
 fn test_old_global_claude_md_path_uses_home_directory() {
     let expected = home_dir_or_dot().join(CLAUDE_DIR_NAME).join(CLAUDE_MD);
     assert_eq!(old_global_claude_md_path(), expected);
