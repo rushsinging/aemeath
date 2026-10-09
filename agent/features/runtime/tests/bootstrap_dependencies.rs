@@ -276,6 +276,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         Arc::new(runtime::UnavailableUsageSink),
         None,
         None,
+        None,
     ));
     let dependencies = runtime::RuntimeBootstrapDependenciesData::new(
         runtime::RuntimeCoreDependenciesData::new(

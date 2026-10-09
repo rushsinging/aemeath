@@ -319,6 +319,7 @@ fn make_test_factory() -> RuntimeContextFactory {
         Arc::new(crate::ports::UnavailableUsageSink),
         None,
         None,
+        None,
     )
 }
 

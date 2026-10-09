@@ -59,6 +59,7 @@ fn assemble_test_context(
         Arc::new(crate::ports::UnavailableUsageSink),
         None,
         None,
+        None,
     ));
     let fixture = SessionRunFixture::builder()
         .with_context_factory(factory.clone())

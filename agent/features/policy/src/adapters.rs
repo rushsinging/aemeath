@@ -71,6 +71,7 @@ fn evaluate(mode: PolicyModeData, request: &PolicyRequestData) -> PolicyDecision
 
 #[cfg(test)]
 mod adapters_tests;
+pub mod triage;
 
 /// 生产策略工厂：mode 由闭包动态供给（config reload 后跟随变化）。
 pub fn configured<ModeFn>(mode: ModeFn) -> std::sync::Arc<dyn crate::domain::Policy>

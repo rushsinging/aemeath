@@ -19,6 +19,7 @@ mod adapters;
 pub(crate) mod contract;
 mod domain;
 
+pub use adapters::triage::{PolicyTriage, TriageEscalation};
 pub use adapters::{allow_all, configured};
 pub use domain::{
     ApprovalSubjectData, Policy, PolicyDecisionData, PolicyModeData, PolicyReasonData,

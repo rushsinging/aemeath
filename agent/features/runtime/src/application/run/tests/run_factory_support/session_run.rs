@@ -372,6 +372,7 @@ impl SessionRunFixtureBuilder {
                 self.usage_sink.clone(),
                 self.scoring_for_recall.clone(),
                 self.scoring_for_skill_match.clone(),
+                None,
             ))
         });
         SessionRunFixture {

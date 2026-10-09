@@ -24,6 +24,7 @@ fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeCon
     let services = crate::application::run::context::RuntimeServices {
         scoring_for_recall: None,
         scoring_for_skill_match: None,
+        policy_triage: None,
         tool_catalog: tool_ports.catalog_port(),
         tool_execution: tool_ports.execution(),
         policy: policy::allow_all(),
@@ -85,6 +86,7 @@ fn test_rt_factory() -> Arc<crate::application::run::context_factory::RuntimeCon
             services.task,
             services.hooks,
             services.usage_sink,
+            None,
             None,
             None,
         ),

@@ -1718,10 +1718,12 @@
         "PolicyModeData",
         "PolicyReasonData",
         "PolicyRequestData",
+        "PolicyTriage",
+        "TriageEscalation",
         "allow_all",
         "configured"
       ],
-      "reason": "F-2：policy crate 根窄 façade（#1022 登记，消费者证明制）",
+      "reason": "F-2：policy crate 根窄 façade（#1022 登记，消费者证明制）；PolicyTriage/TriageEscalation 为 #1836 权限预筛消费者入口（runtime coordination 消费）",
       "profile": "fast"
     },
     {

@@ -84,6 +84,7 @@ fn build_agent_runner_constructs_without_panic() {
                 Arc::new(crate::ports::UnavailableUsageSink),
                 None,
                 None,
+                None,
             )
         }),
     );

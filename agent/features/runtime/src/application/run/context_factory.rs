@@ -155,6 +155,7 @@ impl RuntimeContextFactory {
         usage_sink: Arc<dyn crate::ports::UsageSink>,
         scoring_for_recall: Option<Arc<dyn systemone::ScoringPort>>,
         scoring_for_skill_match: Option<Arc<dyn systemone::ScoringPort>>,
+        policy_triage: Option<Arc<policy::PolicyTriage>>,
     ) -> Self {
         Self::from_services(
             tool_catalog,
@@ -166,6 +167,7 @@ impl RuntimeContextFactory {
             usage_sink,
             scoring_for_recall,
             scoring_for_skill_match,
+            policy_triage,
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -179,6 +181,7 @@ impl RuntimeContextFactory {
         usage_sink: Arc<dyn crate::ports::UsageSink>,
         scoring_for_recall: Option<Arc<dyn systemone::ScoringPort>>,
         scoring_for_skill_match: Option<Arc<dyn systemone::ScoringPort>>,
+        policy_triage: Option<Arc<policy::PolicyTriage>>,
     ) -> Self {
         Self {
             services: RuntimeServices {
@@ -193,6 +196,7 @@ impl RuntimeContextFactory {
                 usage_sink,
                 scoring_for_recall,
                 scoring_for_skill_match,
+                policy_triage,
             },
             provider_factory: None,
             skill_catalog: None,
