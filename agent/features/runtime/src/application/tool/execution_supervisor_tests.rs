@@ -15,7 +15,9 @@ fn supervisor_uses_earliest_deadline() {
 }
 
 use crate::application::context::coordination::ContextCoordinator;
-use crate::application::tool::execution_supervisor::{SupervisedToolCall, ToolExecutionSupervisor};
+use crate::application::tool::execution_supervisor::{
+    dispatch_started_time, SupervisedToolCall, ToolExecutionSupervisor,
+};
 use async_trait::async_trait;
 use context::SessionId;
 use context::{
@@ -468,4 +470,23 @@ async fn background_terminal_task_recorded_with_terminal_kind() {
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+}
+
+// ── 派发时刻换算（Instant → SystemTime） ─────────────────────────────
+
+#[test]
+fn dispatch_started_time_is_elapsed_before_now() {
+    let started = std::time::Instant::now() - std::time::Duration::from_secs(3);
+    let wall = dispatch_started_time(started);
+    let elapsed = std::time::SystemTime::now()
+        .duration_since(wall)
+        .expect("换算时刻不晚于当前墙钟");
+    assert!(
+        elapsed.as_millis() >= 3_000,
+        "换算结果应早于当前约 3s，实际 {elapsed:?}"
+    );
+    assert!(
+        elapsed.as_millis() < 5_000,
+        "换算误差不应膨胀，实际 {elapsed:?}"
+    );
 }

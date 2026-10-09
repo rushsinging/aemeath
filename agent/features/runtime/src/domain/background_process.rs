@@ -62,7 +62,10 @@ pub struct BackgroundProcessRecord {
     pub identity: ToolCallIdentityData,
     pub invocation_summary: String,
     pub state: BackgroundProcessState,
-    pub created_at: SystemTime,
+    /// 进程开始时刻（工具派发时刻，含前台等待段；旧快照字段名为
+    /// `created_at`，经 serde alias 兼容读取）。
+    #[serde(alias = "created_at")]
+    pub started_at: SystemTime,
     /// 首次进入终态的时刻（时长冻结依据；旧快照缺失时为 None）。
     #[serde(default)]
     pub finished_at: Option<SystemTime>,
@@ -98,13 +101,20 @@ impl BackgroundProcessState {
 
 impl BackgroundProcessRecord {
     /// 派发即登记：任务记录从 ForegroundWaiting 起步。
-    pub fn dispatch(identity: ToolCallIdentityData, invocation_summary: impl Into<String>) -> Self {
+    ///
+    /// `started_at` 由调用方传入工具派发时刻（转后台登记时回填派发
+    /// 时刻，使时长覆盖前台等待段）。
+    pub fn dispatch(
+        identity: ToolCallIdentityData,
+        invocation_summary: impl Into<String>,
+        started_at: SystemTime,
+    ) -> Self {
         Self {
             task_id: BackgroundProcessId::new_v7(),
             identity,
             invocation_summary: invocation_summary.into(),
             state: BackgroundProcessState::ForegroundWaiting,
-            created_at: SystemTime::now(),
+            started_at,
             finished_at: None,
         }
     }

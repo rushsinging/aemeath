@@ -71,23 +71,29 @@ impl BackgroundProcessSupervisor {
         &self,
         identity: ToolCallIdentityData,
         invocation_summary: impl Into<String>,
+        started_at: SystemTime,
     ) -> BackgroundProcessId {
         self.register_with_cancellation(
             identity,
             invocation_summary,
             tokio_util::sync::CancellationToken::new(),
+            started_at,
         )
     }
 
     /// 派发登记（携带子任务 cancellation token，stop 请求的取消源）。
+    ///
+    /// `started_at` = 工具派发时刻（调用方换算传入），时长统计自该
+    /// 时刻起算，覆盖转后台前的前台等待段。
     pub(crate) fn register_with_cancellation(
         &self,
         identity: ToolCallIdentityData,
         invocation_summary: impl Into<String>,
         child_cancellation: tokio_util::sync::CancellationToken,
+        started_at: SystemTime,
     ) -> BackgroundProcessId {
         let task = SupervisedBackgroundProcess {
-            record: BackgroundProcessRecord::dispatch(identity, invocation_summary),
+            record: BackgroundProcessRecord::dispatch(identity, invocation_summary, started_at),
             output: OutputRingBuffer::new(BACKGROUND_PROCESS_OUTPUT_CAPACITY_BYTES),
             terminal_output: None,
             notified: false,

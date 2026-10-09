@@ -98,6 +98,7 @@ impl ToolExecutionSupervisor {
                         call.identity.clone(),
                         invocation_summary_text(&call),
                         call.child_cancellation.clone(),
+                        dispatch_started_time(started),
                     )
                 });
         log::info!(
@@ -414,6 +415,14 @@ fn join_result_to_outcome(
 }
 
 /// 占位 tool result：转后台后立即发布给 LLM 的合法成功结果。
+/// 工具派发时刻（`Instant`）换算为墙钟 `SystemTime`：进程开始时刻 =
+/// 当前墙钟 - 已流逝时长。任务记录的自派发时刻起算的时长依赖该值。
+fn dispatch_started_time(started: std::time::Instant) -> std::time::SystemTime {
+    std::time::SystemTime::now()
+        .checked_sub(started.elapsed())
+        .unwrap_or_else(std::time::SystemTime::now)
+}
+
 fn placeholder_tool_result(task_id: &BackgroundProcessId) -> PublishedToolOutcome {
     PublishedToolOutcome::success_text(format!(
         "Running in the background ({}). Result will be delivered on completion.",

@@ -206,7 +206,7 @@ reminder 不携带完整输出（管线预算纪律）。
   sequential 顺序提示（前序转后台后同轮后续命令可能与未完成前序并行，有顺序依赖时
   应等待通知或先查状态）。随查询 tool（PR3）落地时一并接线 prompt BC。
 - SDK 新增 `BackgroundProcess` 生命周期事件（PL）→ TUI reducer：
-  - 消息流系统样式卡片（可折叠）：「⏙ 后台进程完成：task-xxx『cargo test』已完成，已唤醒 agent 继续」——用户清楚看到 agent 为何自己动起来；
+  - 消息流系统样式卡片（可折叠）：「✓ 后台进程完成：bgp-xxx『cargo test』已完成，已唤醒 agent 继续」——用户清楚看到 agent 为何自己动起来；
   - 后台进程面板：活动任务状态 / 输出预览（复用 Bash 输出渲染），管理入口。
   - **spinner 活动数事件通道（2026-10-09 修复）**：`BackgroundProcessCountChanged` 由 `BackgroundProcessRuntime` 直接发往**当前 chat 会话**的事件 sender（chat 启动绑定、覆盖式刷新）；绑定为 RAII guard（generation 校验），chat 任务结束 drop 释放 sender——session 级长期持有 sender clone 会使 `ChatStream` 的 receiver 永不关闭（`recv()` 挂死）。仅 spinner 存在（有 active Run）时可见，计数=非终态进程数。
 

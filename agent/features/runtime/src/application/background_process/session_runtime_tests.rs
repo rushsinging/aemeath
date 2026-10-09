@@ -1,4 +1,5 @@
 use super::*;
+use std::time::SystemTime;
 
 #[test]
 fn notify_route_targets_active_main_run_when_present() {
@@ -43,9 +44,11 @@ fn background_process_access_projects_summaries_logs_and_stop() {
         std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
     let runtime = BackgroundProcessRuntime::for_test(registry);
 
-    let task_id = runtime
-        .supervisor()
-        .register(background_process_identity(), "tool=Bash input=cargo test");
+    let task_id = runtime.supervisor().register(
+        background_process_identity(),
+        "tool=Bash input=cargo test",
+        SystemTime::now(),
+    );
     runtime.supervisor().record_output(&task_id, b"building\n");
     runtime
         .supervisor()
@@ -127,9 +130,11 @@ async fn ledger_persists_snapshots_and_restores_invalidation() {
     let registry_a =
         std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
     let runtime_a = BackgroundProcessRuntime::for_test(registry_a);
-    let finished = runtime_a
-        .supervisor()
-        .register(background_process_identity(), "tool=Bash input=done");
+    let finished = runtime_a.supervisor().register(
+        background_process_identity(),
+        "tool=Bash input=done",
+        SystemTime::now(),
+    );
     runtime_a
         .supervisor()
         .finish(
@@ -138,9 +143,11 @@ async fn ledger_persists_snapshots_and_restores_invalidation() {
             Some("ok".to_string()),
         )
         .unwrap();
-    let orphaned = runtime_a
-        .supervisor()
-        .register(background_process_identity(), "tool=Bash input=lost");
+    let orphaned = runtime_a.supervisor().register(
+        background_process_identity(),
+        "tool=Bash input=lost",
+        SystemTime::now(),
+    );
     runtime_a
         .supervisor()
         .mark_backgrounded(&orphaned, None)
@@ -214,9 +221,11 @@ fn task_summary_duration_freezes_after_terminal() {
         std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
     let runtime = BackgroundProcessRuntime::for_test(registry);
 
-    let task_id = runtime
-        .supervisor()
-        .register(background_process_identity(), "tool=Bash input=cargo test");
+    let task_id = runtime.supervisor().register(
+        background_process_identity(),
+        "tool=Bash input=cargo test",
+        SystemTime::now(),
+    );
     runtime
         .supervisor()
         .mark_backgrounded(&task_id, None)
@@ -235,7 +244,7 @@ fn task_summary_duration_freezes_after_terminal() {
     let expected_ms = snapshot
         .finished_at
         .expect("终态记录已固化完成时刻")
-        .duration_since(snapshot.created_at)
+        .duration_since(snapshot.started_at)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0);
 
@@ -262,9 +271,11 @@ fn task_summary_duration_tracks_now_for_running_task() {
     let registry =
         std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
     let runtime = BackgroundProcessRuntime::for_test(registry);
-    runtime
-        .supervisor()
-        .register(background_process_identity(), "tool=Bash input=running");
+    runtime.supervisor().register(
+        background_process_identity(),
+        "tool=Bash input=running",
+        SystemTime::now(),
+    );
 
     let list = runtime.list_tasks();
     assert_eq!(list.len(), 1);
@@ -296,9 +307,11 @@ async fn emit_active_count_delivers_event_to_bound_chat_sender() {
     );
 
     // 登记一个非终态任务后再发：活动数反映账本真相。
-    runtime
-        .supervisor()
-        .register(background_process_identity(), "tool=Bash input=live");
+    runtime.supervisor().register(
+        background_process_identity(),
+        "tool=Bash input=live",
+        SystemTime::now(),
+    );
     runtime.emit_active_count();
     let event = receiver.try_recv().expect("第二次事件送达");
     assert!(
@@ -370,5 +383,31 @@ async fn rebinding_replaces_previous_sender_and_stale_guard_keeps_new_binding() 
     assert!(
         second_rx.try_recv().is_ok(),
         "旧 guard 释放后新绑定仍须可达"
+    );
+}
+
+// ── 时长自工具派发起算（含前台等待段） ───────────────────────────────
+
+#[test]
+fn task_summary_duration_counts_from_dispatch_time() {
+    use tools::BackgroundProcessAccess as _;
+    let registry =
+        std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
+    let runtime = BackgroundProcessRuntime::for_test(registry);
+
+    // 派发时刻在 12 秒前（前台等待 + 后台存活总计 12s）。
+    let dispatch_time = SystemTime::now() - std::time::Duration::from_secs(12);
+    runtime.supervisor().register(
+        background_process_identity(),
+        "tool=Bash input=long",
+        dispatch_time,
+    );
+
+    let list = runtime.list_tasks();
+    assert_eq!(list.len(), 1);
+    let duration_ms = list[0].duration_ms.expect("运行中任务有时长");
+    assert!(
+        duration_ms >= 12_000,
+        "时长自派发时刻起算（覆盖前台等待段）：{duration_ms}ms"
     );
 }

@@ -499,9 +499,9 @@ where
                         // 用户侧系统卡片（设计 §8：用户清楚看到 agent 为何自己动起来）。
                         sink.send_event(RuntimeStreamEvent::CommandResultText {
                             text: if language == "zh" {
-                                "⏙ 后台进程已完成，已唤醒 agent 继续（详情可用 BackgroundProcessList 等工具查询）".to_string()
+                                "✓ 后台进程已完成，已唤醒 agent 继续（详情可用 BackgroundProcessList 等工具查询）".to_string()
                             } else {
-                                "⏙ Background process completed; agent resumed automatically (inspect with the BackgroundProcessList tool)".to_string()
+                                "✓ Background process completed; agent resumed automatically (inspect with the BackgroundProcessList tool)".to_string()
                             },
                             is_error: false,
                         })

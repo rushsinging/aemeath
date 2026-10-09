@@ -26,7 +26,8 @@ fn backgrounded_state() -> BackgroundProcessState {
 
 #[test]
 fn dispatch_creates_foreground_waiting_record() {
-    let record = BackgroundProcessRecord::dispatch(identity(), "command=cargo test");
+    let record =
+        BackgroundProcessRecord::dispatch(identity(), "command=cargo test", SystemTime::now());
     assert!(matches!(
         record.state,
         BackgroundProcessState::ForegroundWaiting
@@ -39,7 +40,7 @@ fn dispatch_creates_foreground_waiting_record() {
 
 #[test]
 fn foreground_waiting_advances_to_backgrounded_capturing_deadline() {
-    let record = BackgroundProcessRecord::dispatch(identity(), "command=build");
+    let record = BackgroundProcessRecord::dispatch(identity(), "command=build", SystemTime::now());
     let deadline = SystemTime::now() + Duration::from_secs(600);
     let advanced = record
         .advance(BackgroundProcessState::Backgrounded {
@@ -60,7 +61,8 @@ fn foreground_waiting_advances_to_backgrounded_capturing_deadline() {
 
 #[test]
 fn foreground_waiting_advances_directly_to_terminal_on_fast_path() {
-    let record = BackgroundProcessRecord::dispatch(identity(), "pattern=**/*.rs");
+    let record =
+        BackgroundProcessRecord::dispatch(identity(), "pattern=**/*.rs", SystemTime::now());
     let advanced = record
         .advance(BackgroundProcessState::Terminal(
             BackgroundProcessTerminalKind::Success,
@@ -86,10 +88,11 @@ fn backgrounded_advances_to_terminal_kinds() {
             reason: BackgroundInvalidationReason::ProcessExit,
         },
     ] {
-        let record = BackgroundProcessRecord::dispatch(identity(), "command=long")
-            .advance(backgrounded_state())
-            .unwrap()
-            .record;
+        let record =
+            BackgroundProcessRecord::dispatch(identity(), "command=long", SystemTime::now())
+                .advance(backgrounded_state())
+                .unwrap()
+                .record;
         let advanced = record
             .advance(BackgroundProcessState::Terminal(kind.clone()))
             .unwrap_or_else(|_| panic!("{kind:?} 应为合法后台终态"))
@@ -100,7 +103,7 @@ fn backgrounded_advances_to_terminal_kinds() {
 
 #[test]
 fn transition_rejects_terminal_regression() {
-    let terminal = BackgroundProcessRecord::dispatch(identity(), "command=long")
+    let terminal = BackgroundProcessRecord::dispatch(identity(), "command=long", SystemTime::now())
         .advance(BackgroundProcessState::Terminal(
             BackgroundProcessTerminalKind::Success,
         ))
@@ -119,10 +122,11 @@ fn transition_rejects_terminal_regression() {
 
 #[test]
 fn backgrounded_cannot_return_to_foreground() {
-    let backgrounded = BackgroundProcessRecord::dispatch(identity(), "command=long")
-        .advance(backgrounded_state())
-        .unwrap()
-        .record;
+    let backgrounded =
+        BackgroundProcessRecord::dispatch(identity(), "command=long", SystemTime::now())
+            .advance(backgrounded_state())
+            .unwrap()
+            .record;
 
     assert!(matches!(
         backgrounded.advance(BackgroundProcessState::ForegroundWaiting),
@@ -132,7 +136,7 @@ fn backgrounded_cannot_return_to_foreground() {
 
 #[test]
 fn repeated_same_state_mutation_is_idempotent() {
-    let waiting = BackgroundProcessRecord::dispatch(identity(), "command=long");
+    let waiting = BackgroundProcessRecord::dispatch(identity(), "command=long", SystemTime::now());
     let repeated = waiting
         .clone()
         .advance(BackgroundProcessState::ForegroundWaiting)
@@ -148,8 +152,8 @@ fn repeated_same_state_mutation_is_idempotent() {
 
 #[test]
 fn task_id_is_stable_and_unique_per_dispatch() {
-    let first = BackgroundProcessRecord::dispatch(identity(), "a");
-    let second = BackgroundProcessRecord::dispatch(identity(), "a");
+    let first = BackgroundProcessRecord::dispatch(identity(), "a", SystemTime::now());
+    let second = BackgroundProcessRecord::dispatch(identity(), "a", SystemTime::now());
     assert_ne!(first.task_id.as_str(), second.task_id.as_str());
 }
 
@@ -157,7 +161,7 @@ fn task_id_is_stable_and_unique_per_dispatch() {
 
 #[test]
 fn mark_finished_records_terminal_time_once() {
-    let terminal = BackgroundProcessRecord::dispatch(identity(), "command=long")
+    let terminal = BackgroundProcessRecord::dispatch(identity(), "command=long", SystemTime::now())
         .advance(BackgroundProcessState::Terminal(
             BackgroundProcessTerminalKind::Success,
         ))
@@ -177,19 +181,21 @@ fn mark_finished_records_terminal_time_once() {
 
 #[test]
 fn mark_finished_is_ignored_on_non_terminal_record() {
-    let mut record = BackgroundProcessRecord::dispatch(identity(), "command=long");
+    let mut record =
+        BackgroundProcessRecord::dispatch(identity(), "command=long", SystemTime::now());
     record.mark_finished(SystemTime::UNIX_EPOCH + Duration::from_secs(1));
     assert!(record.finished_at.is_none(), "非终态记录不得固化完成时刻");
 }
 
 #[test]
 fn record_deserializes_without_finished_at_for_legacy_snapshot() {
-    let terminal = BackgroundProcessRecord::dispatch(identity(), "command=legacy")
-        .advance(BackgroundProcessState::Terminal(
-            BackgroundProcessTerminalKind::Success,
-        ))
-        .unwrap()
-        .record;
+    let terminal =
+        BackgroundProcessRecord::dispatch(identity(), "command=legacy", SystemTime::now())
+            .advance(BackgroundProcessState::Terminal(
+                BackgroundProcessTerminalKind::Success,
+            ))
+            .unwrap()
+            .record;
     // 模拟旧快照：剥离 finished_at 字段后应仍可反序列化（serde default）。
     let mut value = serde_json::to_value(&terminal).unwrap();
     value
@@ -198,4 +204,34 @@ fn record_deserializes_without_finished_at_for_legacy_snapshot() {
         .remove("finished_at");
     let restored: BackgroundProcessRecord = serde_json::from_value(value).expect("旧快照可恢复");
     assert!(restored.finished_at.is_none());
+}
+
+// ── 进程开始时刻语义（自工具派发起算） ───────────────────────────────
+
+#[test]
+fn dispatch_records_caller_supplied_started_at() {
+    let dispatch_time = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let record = BackgroundProcessRecord::dispatch(identity(), "command=long", dispatch_time);
+    assert_eq!(
+        record.started_at, dispatch_time,
+        "开始时刻由调用方（工具派发时刻）传入"
+    );
+}
+
+#[test]
+fn record_deserializes_legacy_created_at_field_into_started_at() {
+    let started = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let record = BackgroundProcessRecord::dispatch(identity(), "command=legacy", started);
+    let mut value = serde_json::to_value(&record).unwrap();
+    {
+        let object = value.as_object_mut().expect("record 序列化为对象");
+        // 模拟旧快照：字段名为 created_at。
+        let started_value = object.remove("started_at").expect("新字段存在");
+        object.insert("created_at".to_string(), started_value);
+    }
+    let restored: BackgroundProcessRecord = serde_json::from_value(value).expect("旧快照可恢复");
+    assert_eq!(
+        restored.started_at, started,
+        "旧字段名 created_at 经 serde alias 映射到 started_at"
+    );
 }

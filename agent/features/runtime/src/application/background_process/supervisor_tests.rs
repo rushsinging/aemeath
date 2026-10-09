@@ -23,7 +23,7 @@ fn identity(call_suffix: &str) -> ToolCallIdentityData {
 #[test]
 fn register_creates_foreground_waiting_task() {
     let supervisor = BackgroundProcessSupervisor::new();
-    let task_id = supervisor.register(identity("1"), "command=cargo test");
+    let task_id = supervisor.register(identity("1"), "command=cargo test", SystemTime::now());
 
     let snapshot = supervisor.snapshot(&task_id).expect("登记后应可查询");
     assert!(matches!(
@@ -35,7 +35,7 @@ fn register_creates_foreground_waiting_task() {
 #[test]
 fn mark_backgrounded_advances_state_with_deadline_snapshot() {
     let supervisor = BackgroundProcessSupervisor::new();
-    let task_id = supervisor.register(identity("1"), "command=build");
+    let task_id = supervisor.register(identity("1"), "command=build", SystemTime::now());
     let deadline = SystemTime::now() + Duration::from_secs(600);
 
     supervisor
@@ -54,7 +54,7 @@ fn mark_backgrounded_advances_state_with_deadline_snapshot() {
 #[test]
 fn finish_records_terminal_kind_and_output() {
     let supervisor = BackgroundProcessSupervisor::new();
-    let task_id = supervisor.register(identity("1"), "command=test");
+    let task_id = supervisor.register(identity("1"), "command=test", SystemTime::now());
     supervisor.record_output(&task_id, b"3 passed");
 
     let changed = supervisor
@@ -77,7 +77,7 @@ fn finish_records_terminal_kind_and_output() {
 #[test]
 fn finish_after_backgrounded_records_terminal() {
     let supervisor = BackgroundProcessSupervisor::new();
-    let task_id = supervisor.register(identity("1"), "command=long");
+    let task_id = supervisor.register(identity("1"), "command=long", SystemTime::now());
     supervisor
         .mark_backgrounded(&task_id, None)
         .expect("转后台应成功");
@@ -104,7 +104,7 @@ fn finish_unknown_task_errors() {
 #[test]
 fn repeated_finish_is_idempotent() {
     let supervisor = BackgroundProcessSupervisor::new();
-    let task_id = supervisor.register(identity("1"), "command=test");
+    let task_id = supervisor.register(identity("1"), "command=test", SystemTime::now());
     supervisor
         .finish(&task_id, BackgroundProcessTerminalKind::Success, None)
         .unwrap();
@@ -117,10 +117,10 @@ fn repeated_finish_is_idempotent() {
 #[test]
 fn invalidate_all_marks_active_tasks_and_keeps_terminals() {
     let supervisor = BackgroundProcessSupervisor::new();
-    let waiting = supervisor.register(identity("waiting"), "command=a");
-    let backgrounded = supervisor.register(identity("bg"), "command=b");
+    let waiting = supervisor.register(identity("waiting"), "command=a", SystemTime::now());
+    let backgrounded = supervisor.register(identity("bg"), "command=b", SystemTime::now());
     supervisor.mark_backgrounded(&backgrounded, None).unwrap();
-    let finished = supervisor.register(identity("done"), "command=c");
+    let finished = supervisor.register(identity("done"), "command=c", SystemTime::now());
     supervisor
         .finish(&finished, BackgroundProcessTerminalKind::Success, None)
         .unwrap();
@@ -149,7 +149,7 @@ fn invalidate_all_marks_active_tasks_and_keeps_terminals() {
 #[test]
 fn output_read_tail_is_non_consumptive_across_reads() {
     let supervisor = BackgroundProcessSupervisor::new();
-    let task_id = supervisor.register(identity("1"), "command=watch");
+    let task_id = supervisor.register(identity("1"), "command=watch", SystemTime::now());
     supervisor.record_output(&task_id, b"first-line\n");
 
     let first = supervisor.read_output_tail(&task_id, 1024).unwrap();
@@ -164,8 +164,8 @@ fn output_read_tail_is_non_consumptive_across_reads() {
 #[test]
 fn snapshots_list_all_registered_tasks() {
     let supervisor = BackgroundProcessSupervisor::new();
-    supervisor.register(identity("1"), "command=a");
-    supervisor.register(identity("2"), "command=b");
+    supervisor.register(identity("1"), "command=a", SystemTime::now());
+    supervisor.register(identity("2"), "command=b", SystemTime::now());
 
     let snapshots = supervisor.snapshots();
     assert_eq!(snapshots.len(), 2);
@@ -175,7 +175,7 @@ fn snapshots_list_all_registered_tasks() {
 #[test]
 fn take_unnotified_terminal_items_returns_each_completion_once() {
     let supervisor = BackgroundProcessSupervisor::new();
-    let task_id = supervisor.register(identity("1"), "command=test");
+    let task_id = supervisor.register(identity("1"), "command=test", SystemTime::now());
     supervisor.record_output(&task_id, b"3 passed\n");
 
     supervisor
@@ -202,9 +202,9 @@ fn take_unnotified_terminal_items_returns_each_completion_once() {
 #[test]
 fn take_unnotified_terminal_items_skips_invalidated_and_keeps_order() {
     let supervisor = BackgroundProcessSupervisor::new();
-    let first = supervisor.register(identity("1"), "command=a");
-    let second = supervisor.register(identity("2"), "command=b");
-    let third = supervisor.register(identity("3"), "command=c");
+    let first = supervisor.register(identity("1"), "command=a", SystemTime::now());
+    let second = supervisor.register(identity("2"), "command=b", SystemTime::now());
+    let third = supervisor.register(identity("3"), "command=c", SystemTime::now());
 
     supervisor
         .finish(&first, BackgroundProcessTerminalKind::Success, None)
@@ -236,7 +236,7 @@ fn take_unnotified_terminal_items_skips_invalidated_and_keeps_order() {
 #[test]
 fn take_unnotified_terminal_items_caps_output_tail_bytes() {
     let supervisor = BackgroundProcessSupervisor::new();
-    let task_id = supervisor.register(identity("1"), "command=verbose");
+    let task_id = supervisor.register(identity("1"), "command=verbose", SystemTime::now());
     supervisor.record_output(&task_id, vec![b'x'; 8192].as_slice());
 
     supervisor
@@ -257,7 +257,12 @@ fn registered_backgrounded_task(
     supervisor: &BackgroundProcessSupervisor,
     token: tokio_util::sync::CancellationToken,
 ) -> BackgroundProcessId {
-    let task_id = supervisor.register_with_cancellation(identity("1"), "command=build", token);
+    let task_id = supervisor.register_with_cancellation(
+        identity("1"),
+        "command=build",
+        token,
+        SystemTime::now(),
+    );
     supervisor
         .mark_backgrounded(&task_id, None)
         .expect("转后台成功");
@@ -316,7 +321,7 @@ fn stop_task_unknown_id_reports_error() {
 #[test]
 fn read_task_log_returns_tail_then_incremental_delta() {
     let supervisor = BackgroundProcessSupervisor::new();
-    let task_id = supervisor.register(identity("1"), "command=watch");
+    let task_id = supervisor.register(identity("1"), "command=watch", SystemTime::now());
     supervisor.record_output(&task_id, b"line-1\nline-2\n");
 
     // 尾部读取（无游标）：最近字节 + 读后游标。
@@ -345,7 +350,7 @@ fn read_task_log_returns_tail_then_incremental_delta() {
 #[test]
 fn read_task_log_falls_back_to_terminal_output_when_no_stream() {
     let supervisor = BackgroundProcessSupervisor::new();
-    let task_id = supervisor.register(identity("1"), "command=once");
+    let task_id = supervisor.register(identity("1"), "command=once", SystemTime::now());
     supervisor
         .finish(
             &task_id,
@@ -373,7 +378,11 @@ fn read_task_log_unknown_id_returns_none() {
 #[test]
 fn finish_freezes_completion_time_on_record() {
     let supervisor = BackgroundProcessSupervisor::new();
-    let task_id = supervisor.register(identity("freeze"), "tool=Bash input=long");
+    let task_id = supervisor.register(
+        identity("freeze"),
+        "tool=Bash input=long",
+        SystemTime::now(),
+    );
     supervisor.mark_backgrounded(&task_id, None).unwrap();
 
     supervisor
@@ -399,11 +408,30 @@ fn finish_freezes_completion_time_on_record() {
 #[test]
 fn invalidate_all_freezes_completion_time_on_active_tasks() {
     let supervisor = BackgroundProcessSupervisor::new();
-    let task_id = supervisor.register(identity("invalidate"), "tool=Bash input=long");
+    let task_id = supervisor.register(
+        identity("invalidate"),
+        "tool=Bash input=long",
+        SystemTime::now(),
+    );
     supervisor.mark_backgrounded(&task_id, None).unwrap();
 
     let invalidated = supervisor.invalidate_all(BackgroundInvalidationReason::ProcessExit);
     assert_eq!(invalidated, 1);
     let snapshot = supervisor.snapshot(&task_id).unwrap();
     assert!(snapshot.finished_at.is_some(), "失效收口同样固化完成时刻");
+}
+
+// ── 注册携带派发时刻（时长自派发起算） ───────────────────────────────
+
+#[test]
+fn register_persists_caller_supplied_started_at() {
+    let supervisor = BackgroundProcessSupervisor::new();
+    let dispatch_time = SystemTime::now() - std::time::Duration::from_secs(12);
+    let task_id = supervisor.register(identity("started-at"), "command=long", dispatch_time);
+
+    let snapshot = supervisor.snapshot(&task_id).expect("任务存在");
+    assert_eq!(
+        snapshot.started_at, dispatch_time,
+        "登记时固化调用方传入的派发时刻（覆盖前台等待段）"
+    );
 }

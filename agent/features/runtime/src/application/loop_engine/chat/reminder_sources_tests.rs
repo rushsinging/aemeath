@@ -3,6 +3,7 @@ use crate::application::constants::TASK_PROGRESS_REFRESH_INTERVAL_STEPS;
 use crate::application::loop_engine::chat::reminder_sources::{
     RunStartFactReminderSource, TaskProgressReminderSource,
 };
+use std::time::SystemTime;
 
 fn access_with_progress(completed: usize) -> task::TaskStore {
     let store = task::TaskStore::new();
@@ -400,7 +401,11 @@ fn background_process_source_build_takes_terminal_items_once_and_renders() {
     assert!(source.build().is_none());
 
     // 推进一个终态：build 携带完成条目（take 语义）。
-    let task_id = supervisor.register(background_process_identity(), "command=cargo test");
+    let task_id = supervisor.register(
+        background_process_identity(),
+        "command=cargo test",
+        SystemTime::now(),
+    );
     supervisor.record_output(&task_id, b"ok 3 passed\n");
     supervisor
         .finish(

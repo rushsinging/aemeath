@@ -351,6 +351,8 @@ define_id_type!(
 /// 64 bit 雪花（41 时间 + 10 进程随机 + 12 序列）经有序 base62 定长
 /// 编码——同前缀下**字典序 = 时间序**。前缀词汇表逐步接入（先 `task`，
 /// 其余 id 渐进迁移）。
+/// 约定（specs 3.2.1.2）：前缀长度固定 3 字符（`bgp` / `run` 等）；
+/// 新前缀 NEVER 超过 3 字符，历史超长前缀仅存在于 parse 兼容读路径。
 pub fn new_typed_id(prefix: &str) -> String {
     format!(
         "{prefix}{}{}",
