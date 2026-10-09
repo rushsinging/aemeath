@@ -263,7 +263,10 @@ fn task_summary_data(
         Some(kind) => terminal_vocabulary(&kind).to_string(),
         None => state_vocabulary(&record.state).to_string(),
     };
-    let duration_ms = std::time::SystemTime::now()
+    // 终态时长以固化完成时刻冻结；运行中任务按当前时刻实时计算。
+    let duration_ms = record
+        .finished_at
+        .unwrap_or_else(std::time::SystemTime::now)
         .duration_since(record.created_at)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0);

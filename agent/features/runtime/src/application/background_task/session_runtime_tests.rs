@@ -204,3 +204,72 @@ async fn ledger_persists_snapshots_and_restores_invalidation() {
         other => panic!("快照应可读回：{other:?}"),
     }
 }
+
+// ── 终态时长冻结（duration 不再随查询时刻增长） ───────────────────────
+
+#[test]
+fn task_summary_duration_freezes_after_terminal() {
+    use tools::BackgroundTaskAccess as _;
+    let registry =
+        std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
+    let runtime = BackgroundTaskRuntime::for_test(registry);
+
+    let task_id = runtime
+        .supervisor()
+        .register(background_task_identity(), "tool=Bash input=cargo test");
+    runtime
+        .supervisor()
+        .mark_backgrounded(&task_id, None)
+        .unwrap();
+    runtime
+        .supervisor()
+        .finish(
+            &task_id,
+            crate::domain::background_task::BackgroundTaskTerminalKind::Success,
+            Some("done".to_string()),
+        )
+        .unwrap();
+
+    // 期望时长 = 终态快照固化时刻 - 创建时刻（精确对比，不依赖真实时间流逝）。
+    let snapshot = runtime.supervisor().snapshot(&task_id).unwrap();
+    let expected_ms = snapshot
+        .finished_at
+        .expect("终态记录已固化完成时刻")
+        .duration_since(snapshot.created_at)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0);
+
+    let list = runtime.list_tasks();
+    assert_eq!(list.len(), 1);
+    assert_eq!(
+        list[0].duration_ms,
+        Some(expected_ms),
+        "终态时长应等于固化时刻差，而非查询时刻差"
+    );
+
+    // 二次查询（真实时间已推移）时长不变。
+    let list_again = runtime.list_tasks();
+    assert_eq!(
+        list_again[0].duration_ms,
+        Some(expected_ms),
+        "终态时长不得随查询时刻增长"
+    );
+}
+
+#[test]
+fn task_summary_duration_tracks_now_for_running_task() {
+    use tools::BackgroundTaskAccess as _;
+    let registry =
+        std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
+    let runtime = BackgroundTaskRuntime::for_test(registry);
+    runtime
+        .supervisor()
+        .register(background_task_identity(), "tool=Bash input=running");
+
+    let list = runtime.list_tasks();
+    assert_eq!(list.len(), 1);
+    assert!(
+        list[0].duration_ms.is_some_and(|millis| millis < 60_000),
+        "运行中任务时长按当前时刻计算"
+    );
+}

@@ -178,6 +178,9 @@ impl BackgroundTaskSupervisor {
             .clone()
             .advance(BackgroundTaskState::Terminal(kind))?;
         task.record = record;
+        if changed {
+            task.record.mark_finished(SystemTime::now());
+        }
         Ok(changed)
     }
 
@@ -198,6 +201,7 @@ impl BackgroundTaskSupervisor {
             }) = advanced
             {
                 task.record = record;
+                task.record.mark_finished(SystemTime::now());
                 invalidated_count += 1;
             }
         }
@@ -347,7 +351,9 @@ impl BackgroundTaskSupervisor {
                         reason: BackgroundInvalidationReason::ProcessExit,
                     },
                 )) {
-                    record = advanced.record;
+                    let mut invalid_record = advanced.record;
+                    invalid_record.mark_finished(SystemTime::now());
+                    record = invalid_record;
                 }
             }
             let task_id = record.task_id.clone();

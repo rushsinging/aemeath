@@ -367,3 +367,43 @@ fn read_task_log_unknown_id_returns_none() {
         .read_task_log(&BackgroundTaskId::new_v7(), None, 64)
         .is_none());
 }
+
+// ── 终态完成时刻冻结（时长不再随查询时刻增长） ────────────────────────
+
+#[test]
+fn finish_freezes_completion_time_on_record() {
+    let supervisor = BackgroundTaskSupervisor::new();
+    let task_id = supervisor.register(identity("freeze"), "tool=Bash input=long");
+    supervisor.mark_backgrounded(&task_id, None).unwrap();
+
+    supervisor
+        .finish(&task_id, BackgroundTaskTerminalKind::Success, None)
+        .unwrap();
+
+    let snapshot = supervisor.snapshot(&task_id).expect("任务存在");
+    assert!(snapshot.finished_at.is_some(), "首次终态推进应固化完成时刻");
+
+    // 重复 finish 幂等，不刷新完成时刻。
+    let frozen_at = snapshot.finished_at;
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    supervisor
+        .finish(&task_id, BackgroundTaskTerminalKind::Success, None)
+        .unwrap();
+    assert_eq!(
+        supervisor.snapshot(&task_id).unwrap().finished_at,
+        frozen_at,
+        "重复终态推进不得刷新完成时刻"
+    );
+}
+
+#[test]
+fn invalidate_all_freezes_completion_time_on_active_tasks() {
+    let supervisor = BackgroundTaskSupervisor::new();
+    let task_id = supervisor.register(identity("invalidate"), "tool=Bash input=long");
+    supervisor.mark_backgrounded(&task_id, None).unwrap();
+
+    let invalidated = supervisor.invalidate_all(BackgroundInvalidationReason::ProcessExit);
+    assert_eq!(invalidated, 1);
+    let snapshot = supervisor.snapshot(&task_id).unwrap();
+    assert!(snapshot.finished_at.is_some(), "失效收口同样固化完成时刻");
+}

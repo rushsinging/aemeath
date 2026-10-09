@@ -152,3 +152,50 @@ fn task_id_is_stable_and_unique_per_dispatch() {
     let second = BackgroundTaskRecord::dispatch(identity(), "a");
     assert_ne!(first.task_id.as_str(), second.task_id.as_str());
 }
+
+// ── 终态完成时刻冻结（时长不再随查询时刻增长） ────────────────────────
+
+#[test]
+fn mark_finished_records_terminal_time_once() {
+    let terminal = BackgroundTaskRecord::dispatch(identity(), "command=long")
+        .advance(BackgroundTaskState::Terminal(
+            BackgroundTaskTerminalKind::Success,
+        ))
+        .unwrap()
+        .record;
+    let mut record = terminal;
+
+    let first_mark = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    record.mark_finished(first_mark);
+    assert_eq!(record.finished_at, Some(first_mark));
+
+    // 重复标记不覆盖首次完成时刻（幂等）。
+    let second_mark = SystemTime::UNIX_EPOCH + Duration::from_secs(2_000_000);
+    record.mark_finished(second_mark);
+    assert_eq!(record.finished_at, Some(first_mark));
+}
+
+#[test]
+fn mark_finished_is_ignored_on_non_terminal_record() {
+    let mut record = BackgroundTaskRecord::dispatch(identity(), "command=long");
+    record.mark_finished(SystemTime::UNIX_EPOCH + Duration::from_secs(1));
+    assert!(record.finished_at.is_none(), "非终态记录不得固化完成时刻");
+}
+
+#[test]
+fn record_deserializes_without_finished_at_for_legacy_snapshot() {
+    let terminal = BackgroundTaskRecord::dispatch(identity(), "command=legacy")
+        .advance(BackgroundTaskState::Terminal(
+            BackgroundTaskTerminalKind::Success,
+        ))
+        .unwrap()
+        .record;
+    // 模拟旧快照：剥离 finished_at 字段后应仍可反序列化（serde default）。
+    let mut value = serde_json::to_value(&terminal).unwrap();
+    value
+        .as_object_mut()
+        .expect("record 序列化为对象")
+        .remove("finished_at");
+    let restored: BackgroundTaskRecord = serde_json::from_value(value).expect("旧快照可恢复");
+    assert!(restored.finished_at.is_none());
+}

@@ -63,6 +63,9 @@ pub struct BackgroundTaskRecord {
     pub invocation_summary: String,
     pub state: BackgroundTaskState,
     pub created_at: SystemTime,
+    /// 首次进入终态的时刻（时长冻结依据；旧快照缺失时为 None）。
+    #[serde(default)]
+    pub finished_at: Option<SystemTime>,
 }
 
 /// 状态推进结果：推进后的记录与是否发生变化。
@@ -102,6 +105,17 @@ impl BackgroundTaskRecord {
             invocation_summary: invocation_summary.into(),
             state: BackgroundTaskState::ForegroundWaiting,
             created_at: SystemTime::now(),
+            finished_at: None,
+        }
+    }
+
+    /// 固化完成时刻：仅终态记录生效，且首次固化后不再覆盖（幂等）。
+    ///
+    /// 时长统计以本时刻冻结，避免查询时刻随墙钟推移导致终态时长
+    /// 持续增长。
+    pub fn mark_finished(&mut self, at: SystemTime) {
+        if self.is_terminal() && self.finished_at.is_none() {
+            self.finished_at = Some(at);
         }
     }
 
