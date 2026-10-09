@@ -569,9 +569,11 @@ where
                         (next_segment, accepted_inputs)
                     }                };
 
-                // 硬约束：手动反思不增加 session `run_count`，也不发 `RunChanged`
-                // （它不是用户回合，不消耗 Interval 反思的频控计数）。
-                if !manual_reflection_run {
+                // 硬约束：手动反思与后台进程 wakeup Run 均不增加 session
+                // `run_count`，也不发 `RunChanged`（它们不是用户回合，不消耗
+                // Interval 反思的频控计数；wakeup 若计入会把「每 10 个用户
+                // 回合反思」的触发点推到内部 Run 上，#252 实测即崩）。
+                if !manual_reflection_run && !background_wakeup_run {
                     run_count += 1;
                     sink.send_event(RuntimeStreamEvent::RunChanged(run_count))
                         .await;
@@ -906,7 +908,6 @@ where
                 let mut model =
                     crate::application::loop_engine::run_services::RuntimeModelInvocation::new(
                         model_observer,
-                        false,
                     );
                 // PreCompact 材料共享槽：压缩观察者在 Committed 时暂存将被丢弃的
                 // 消息，反思端口在 Compacting 内取出执行（材料收集与状态机分离）。

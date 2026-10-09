@@ -153,19 +153,20 @@ pub(crate) fn reflection_enabled(config: &share::config::MemoryConfig) -> bool {
     config.enabled && config.reflection.enabled && config.reflection.interval_runs > 0
 }
 
-/// Interval 频控判定：配置开启且 step_count 命中 interval 时才反思。
+/// Interval 频控判定：配置开启且用户回合序号（run_ordinal）命中
+/// interval 时才反思。
 ///
 /// 唯一生产调用点是 engine 的 Interval 插入点（`ModelStep::Complete` 路径，
 /// 必然无未完成工具轮），因此 has_tool_calls/stop_reason/before_finish_gate
 /// 三个历史参数已随执行点上移 engine 而删除——它们在该路径上从不参与判定。
 pub(crate) fn should_run_turn_reflection(
     config: &share::config::MemoryConfig,
-    step_count: usize,
+    run_ordinal: usize,
 ) -> bool {
     if !reflection_enabled(config) {
         return false;
     }
-    step_count.is_multiple_of(config.reflection.interval_runs)
+    run_ordinal.is_multiple_of(config.reflection.interval_runs)
 }
 
 /// PreCompact 反思材料的共享槽：compaction observer 在 `CompactOutcome::Committed`

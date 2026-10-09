@@ -38,9 +38,11 @@ impl OutputRingBuffer {
         }
         self.buffer.extend_from_slice(chunk);
         self.total_written += chunk.len() as u64;
-        let overflow = (self.buffer.len() > self.capacity_bytes)
-            .then(|| self.buffer.len() - self.capacity_bytes)
-            .unwrap_or(0);
+        let overflow = if self.buffer.len() > self.capacity_bytes {
+            self.buffer.len() - self.capacity_bytes
+        } else {
+            0
+        };
         if overflow > 0 {
             self.buffer.drain(..overflow);
             self.buffer_start_cursor += overflow as u64;

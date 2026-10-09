@@ -16,14 +16,14 @@ pub struct RuntimeToolAssemblyDependenciesData {
         Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
     active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
     /// #252 PR3：后台进程端口绑定槽（session 创建后写入实现）。
-    background_slot: Option<
-        std::sync::Arc<
-            std::sync::RwLock<Option<std::sync::Arc<dyn tools::BackgroundProcessAccess>>>,
-        >,
-    >,
+    background_slot: Option<BackgroundProcessAccessSlot>,
     /// #252 PR3：后台进程账本 blob（session 就绪后绑定持久化并恢复快照）。
     background_ledger_blob: Option<std::sync::Arc<dyn storage::AtomicBlobPort>>,
 }
+
+/// 后台进程端口绑定槽：session 创建后由装配方写入运行时实现。
+type BackgroundProcessAccessSlot =
+    std::sync::Arc<std::sync::RwLock<Option<std::sync::Arc<dyn tools::BackgroundProcessAccess>>>>;
 
 impl RuntimeToolAssemblyDependenciesData {
     pub fn new(

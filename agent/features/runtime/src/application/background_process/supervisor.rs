@@ -129,6 +129,7 @@ impl BackgroundProcessSupervisor {
     /// 任务日志读取（#252 D12 增量游标）：
     /// - `None` 游标 → 尾部视图（ring buffer 优先，空则回退终态文本）；
     /// - `Some(cursor)` → 增量读取（只返回新字节；过期游标 clamp）。
+    ///
     /// 返回 `(文本, 读后游标, 累计写入)`；多次读取幂等（非消耗性）。
     pub(crate) fn read_task_log(
         &self,
@@ -281,17 +282,19 @@ impl BackgroundProcessSupervisor {
 
     /// 取走「终态且未通知」的任务完成条目（take 语义，#252 通知链路）。
     ///
-    /// - 每条完成事实只通知一次：注入确认前由 reminder 队列持有，
-    ///   取走即视为已进入通知通道；注入前 Run 被取消的极端窗口由
-    ///   background_processes 查询工具兜底（设计 §12 风险表）。
+    /// - 每条完成事实只通知一次：**注入确认制**——`peek` 只读不标记，
+    ///   `mark_notified` 由 reminder source 在快照被组装进 window 后
+    ///   调用（#252：take 即标记在「有 active Run 但已无后续 step」时
+    ///   把完成事实静默丢失，实测 sleep-20 通知从未到达任何 LLM 请求）。
+    ///   未确认的事实保留在监督器，由下一个 Run / wakeup 补注入。
     /// - `Invalidated` 是生命周期失效（resume / terminate 场景走失效
     ///   投影），不产生 LLM 通知。
-    pub(crate) fn take_unnotified_terminal_items(
+    pub(crate) fn peek_unnotified_terminal_items(
         &self,
     ) -> Vec<context::BackgroundProcessReminderItemData> {
-        let mut tasks = self.tasks.lock().expect("后台进程表锁中毒");
+        let tasks = self.tasks.lock().expect("后台进程表锁中毒");
         let mut items = Vec::new();
-        for task in tasks.values_mut() {
+        for task in tasks.values() {
             if task.notified {
                 continue;
             }
@@ -299,7 +302,6 @@ impl BackgroundProcessSupervisor {
                 continue;
             };
             let Some(status) = terminal_completion_status(&kind) else {
-                task.notified = true;
                 continue;
             };
             let (output_tail, _) = task.output.read_tail_text(
@@ -310,7 +312,6 @@ impl BackgroundProcessSupervisor {
             } else {
                 output_tail
             };
-            task.notified = true;
             items.push(context::BackgroundProcessReminderItemData {
                 task_id: task.record.task_id.as_str().to_string(),
                 tool_name: task.record.identity.tool_name.clone(),
@@ -321,6 +322,19 @@ impl BackgroundProcessSupervisor {
         // 稳定顺序：按 task_id（UUIDv7 单调）排序，注入内容可复现。
         items.sort_by(|left, right| left.task_id.cmp(&right.task_id));
         items
+    }
+
+    /// 注入确认：把已组装进 window 的事实标记为已通知（幂等；未列出的
+    /// 保持未标记，供后续 Run 补注入）。
+    pub(crate) fn mark_notified(&self, task_ids: &[String]) {
+        let mut tasks = self.tasks.lock().expect("后台进程表锁中毒");
+        for task_id in task_ids {
+            if let Ok(process_id) = BackgroundProcessId::parse(task_id) {
+                if let Some(task) = tasks.get_mut(&process_id) {
+                    task.notified = true;
+                }
+            }
+        }
     }
 }
 

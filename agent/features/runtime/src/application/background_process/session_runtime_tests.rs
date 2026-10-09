@@ -121,7 +121,7 @@ fn background_process_identity() -> context::ToolCallIdentityData {
 
 #[tokio::test]
 async fn ledger_persists_snapshots_and_restores_invalidation() {
-    use storage::{AtomicBlobPort, ReadOutcomeData, StorageKeyData, StorageNamespaceData};
+    use storage::{ReadOutcomeData, StorageKeyData, StorageNamespaceData};
 
     let tempdir = tempfile::tempdir().unwrap();
     let blob = storage::wire_file_system_blob(tempdir.path()).unwrap();

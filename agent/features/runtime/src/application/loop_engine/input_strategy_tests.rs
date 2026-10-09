@@ -8,7 +8,6 @@ use crate::application::loop_engine::chat::{
     ChatEventSink, EventFuture, InputEventDrainPort, InputEventFuture, InputEventOptFuture,
     RuntimeStreamEvent,
 };
-use crate::application::loop_engine::LoopInput;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Default)]

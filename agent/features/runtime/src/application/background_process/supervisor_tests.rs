@@ -173,7 +173,7 @@ fn snapshots_list_all_registered_tasks() {
 }
 
 #[test]
-fn take_unnotified_terminal_items_returns_each_completion_once() {
+fn peek_keeps_items_until_injection_confirmed() {
     let supervisor = BackgroundProcessSupervisor::new();
     let task_id = supervisor.register(identity("1"), "command=test", SystemTime::now());
     supervisor.record_output(&task_id, b"3 passed\n");
@@ -182,7 +182,7 @@ fn take_unnotified_terminal_items_returns_each_completion_once() {
         .finish(&task_id, BackgroundProcessTerminalKind::Success, None)
         .expect("终态推进");
 
-    let items = supervisor.take_unnotified_terminal_items();
+    let items = supervisor.peek_unnotified_terminal_items();
     assert_eq!(items.len(), 1, "终态后应有一条待通知条目");
     assert_eq!(items[0].task_id, task_id.as_str());
     assert_eq!(items[0].tool_name, "Bash");
@@ -192,15 +192,22 @@ fn take_unnotified_terminal_items_returns_each_completion_once() {
     ));
     assert!(items[0].output_tail.contains("3 passed"), "通知带输出尾部");
 
-    // take 语义：再次调用为空（已通知不再重复注入）。
+    // peek 语义（注入确认制）：确认前重复可见（Run 收口后下个 Run
+    // 仍可补注入）；确认后不再出现。
+    assert_eq!(
+        supervisor.peek_unnotified_terminal_items().len(),
+        1,
+        "确认前事实保留在监督器"
+    );
+    supervisor.mark_notified(&[task_id.as_str().to_string()]);
     assert!(
-        supervisor.take_unnotified_terminal_items().is_empty(),
-        "已通知条目不得重复"
+        supervisor.peek_unnotified_terminal_items().is_empty(),
+        "注入确认后不再重复注入"
     );
 }
 
 #[test]
-fn take_unnotified_terminal_items_skips_invalidated_and_keeps_order() {
+fn peek_skips_invalidated_and_keeps_order() {
     let supervisor = BackgroundProcessSupervisor::new();
     let first = supervisor.register(identity("1"), "command=a", SystemTime::now());
     let second = supervisor.register(identity("2"), "command=b", SystemTime::now());
@@ -222,7 +229,7 @@ fn take_unnotified_terminal_items_skips_invalidated_and_keeps_order() {
         .finish(&third, BackgroundProcessTerminalKind::Stopped, None)
         .unwrap();
 
-    let items = supervisor.take_unnotified_terminal_items();
+    let items = supervisor.peek_unnotified_terminal_items();
     // Invalidated 是生命周期失效（resume 场景走失效投影），不产生 LLM 通知。
     assert_eq!(items.len(), 2);
     assert_eq!(items[0].task_id, first.as_str(), "按终态顺序");
@@ -234,7 +241,7 @@ fn take_unnotified_terminal_items_skips_invalidated_and_keeps_order() {
 }
 
 #[test]
-fn take_unnotified_terminal_items_caps_output_tail_bytes() {
+fn peek_caps_output_tail_bytes() {
     let supervisor = BackgroundProcessSupervisor::new();
     let task_id = supervisor.register(identity("1"), "command=verbose", SystemTime::now());
     supervisor.record_output(&task_id, vec![b'x'; 8192].as_slice());
@@ -243,7 +250,7 @@ fn take_unnotified_terminal_items_caps_output_tail_bytes() {
         .finish(&task_id, BackgroundProcessTerminalKind::Success, None)
         .unwrap();
 
-    let items = supervisor.take_unnotified_terminal_items();
+    let items = supervisor.peek_unnotified_terminal_items();
     let tail_bytes = items[0].output_tail.len();
     assert!(
         tail_bytes <= crate::application::constants::BACKGROUND_PROCESS_NOTIFICATION_TAIL_BYTES,
@@ -434,4 +441,31 @@ fn register_persists_caller_supplied_started_at() {
         snapshot.started_at, dispatch_time,
         "登记时固化调用方传入的派发时刻（覆盖前台等待段）"
     );
+}
+
+// ── 注入确认制（#252：完成事实不再随 Run 收口静默丢失） ─────────────
+
+#[test]
+fn unconfirmed_fact_survives_run_close_and_next_run_re_peeks() {
+    let supervisor = BackgroundProcessSupervisor::new();
+    let task_id = supervisor.register(identity("confirm"), "command=long", SystemTime::now());
+    supervisor
+        .finish(&task_id, BackgroundProcessTerminalKind::Success, None)
+        .unwrap();
+
+    // 第一个 Run：peek（入 reminder 队列）但 Run 收口、未注入确认。
+    let first = supervisor.peek_unnotified_terminal_items();
+    assert_eq!(first.len(), 1);
+
+    // 第二个 Run（wakeup / 用户输入）：事实仍在，可再次 peek 补注入。
+    let second = supervisor.peek_unnotified_terminal_items();
+    assert_eq!(
+        second.len(),
+        1,
+        "未确认事实必须存活到下一个 Run（修复：take 即标记曾静默丢失）"
+    );
+
+    // 注入确认后事实关闭。
+    supervisor.mark_notified(&[task_id.as_str().to_string()]);
+    assert!(supervisor.peek_unnotified_terminal_items().is_empty());
 }

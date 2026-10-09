@@ -213,7 +213,7 @@ impl EventSinkPort for ChatEventPort {
             task_access: &self.task_access,
             model: &self.model,
             started_at: execution.started_at().unwrap_or_else(Instant::now),
-            step_count: execution.step_count(),
+            step_count: execution.run_ordinal(),
             messages_snapshot: execution.messages_snapshot(),
         }
         .emit(events)

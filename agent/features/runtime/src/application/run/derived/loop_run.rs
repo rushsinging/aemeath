@@ -148,7 +148,7 @@ impl EventSinkPort for DerivedEventPort {
         execution: &mut RunExecutionState,
         events: Vec<RuntimeLifecycleEvent>,
     ) -> Result<(), LoopEngineError> {
-        let step_count = execution.step_count();
+        let step_count = execution.step_ordinal();
         ProgressTerminalObserver {
             progress: self.progress.as_ref(),
             terminal: execution.terminal_mut(),
@@ -173,10 +173,10 @@ pub(super) struct DerivedModelObserver {
 impl DerivedModelObserver {
     fn progress_turn_start(&self, execution: &RunExecutionState) {
         (self.progress)(
-            Some(execution.step_count()),
+            Some(execution.step_ordinal()),
             &format!(
                 "Agent step {}, messages: {}, est_tokens: {}",
-                execution.step_count(),
+                execution.step_ordinal(),
                 execution.messages_len(),
                 execution.message_tokens(),
             ),
@@ -293,8 +293,8 @@ impl ModelInvocationObserver for DerivedModelObserver {
         response: &InvocationResponse,
         _elapsed_secs: f64,
     ) {
-        self.progress_api_ok(execution.step_count(), response);
-        self.send_response_progress(execution.step_count(), response);
+        self.progress_api_ok(execution.step_ordinal(), response);
+        self.send_response_progress(execution.step_ordinal(), response);
     }
 
     async fn classify_terminal(
@@ -309,7 +309,7 @@ impl ModelInvocationObserver for DerivedModelObserver {
             log::warn!(
                 target: crate::LOG_TARGET,
                 "run step {}: 模型响应触发 max_tokens 限制，注入分块提示",
-                execution.step_count(),
+                execution.step_ordinal(),
             );
             execution.append_message(Message::user(
                 "[系统提示] 你的上一次响应触达了 max_tokens 限制，输出被截断。\
@@ -430,7 +430,7 @@ impl crate::application::loop_engine::StuckHandlingPort for DerivedStuckObserver
         decision: &crate::application::loop_engine::StuckDecision,
     ) -> Result<(), LoopEngineError> {
         (self.progress)(
-            Some(execution.step_count()),
+            Some(execution.step_ordinal()),
             &format!("StuckGuard: {decision:?}"),
         );
         Ok(())

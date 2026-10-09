@@ -182,16 +182,25 @@ mod tests;
 
 /// 后台进程完成通知 source（#252 PR2）：`OnEvent("background_process")` 触发。
 ///
-/// `build` 是 take 语义（取走监督器内未通知终态条目）——每次完成事件
-/// 由管线 `handle_event` 调一次 build 入事件队列；`SkipIfUnchanged`
-/// 兜底同批重复。数据获取在 Runtime（监督器），渲染委托 Context。
+/// `build` 是 **peek 语义**（只读监督器内未通知终态条目，不标记）——
+/// 每次完成事件由管线 `handle_event` 调一次 build 入事件队列；
+/// `SkipIfUnchanged` 兜底同批重复。事实的最终标记推迟到
+/// `confirm_injected`（快照被组装进 window 后由管线调用）：未确认前
+/// 事实保留在监督器，Run 收口后由下一个 Run / wakeup 补注入
+/// （#252：take 即标记曾把完成事实静默丢失）。数据获取在 Runtime
+/// （监督器），渲染委托 Context。
 pub(crate) struct BackgroundProcessReminderSource {
     supervisor: Arc<BackgroundProcessSupervisor>,
+    /// 已 peek 未确认的事实 id（注入确认制的工作集）。
+    peeked_task_ids: std::sync::Mutex<Vec<String>>,
 }
 
 impl BackgroundProcessReminderSource {
     pub(crate) fn new(supervisor: Arc<BackgroundProcessSupervisor>) -> Self {
-        Self { supervisor }
+        Self {
+            supervisor,
+            peeked_task_ids: std::sync::Mutex::new(Vec::new()),
+        }
     }
 }
 
@@ -215,14 +224,37 @@ impl ReminderSource for BackgroundProcessReminderSource {
     }
 
     fn build(&self) -> Option<ReminderSnapshot> {
-        let items = self.supervisor.take_unnotified_terminal_items();
+        let items = self.supervisor.peek_unnotified_terminal_items();
         if items.is_empty() {
             return None;
+        }
+        {
+            let mut peeked = self
+                .peeked_task_ids
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            for item in &items {
+                if !peeked.contains(&item.task_id) {
+                    peeked.push(item.task_id.clone());
+                }
+            }
         }
         let data = context::InvocationReminderData::background_process_completed(items);
         Some(ReminderSnapshot {
             data: serde_json::to_string(&data).expect("reminder 快照序列化不可失败"),
         })
+    }
+
+    fn confirm_injected(&self) {
+        let peeked: Vec<String> = std::mem::take(
+            &mut *self
+                .peeked_task_ids
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()),
+        );
+        if !peeked.is_empty() {
+            self.supervisor.mark_notified(&peeked);
+        }
     }
 
     fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String {

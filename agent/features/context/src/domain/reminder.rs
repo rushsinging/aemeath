@@ -176,9 +176,17 @@ pub trait ReminderSource: Send + Sync {
     fn kind(&self) -> ReminderKind;
     fn policy(&self) -> ReminderPolicy;
     /// 读当前快照；`None` 表示本轮无内容（如当前无任务），不入队。
+    ///
+    /// 携带消费型事实的 source **MUST** 在 build 只 peek 不取走，把
+    /// 事实的最终标记推迟到 [`ReminderSource::confirm_injected`]——
+    /// 快照入队后若 Run 收口（未注入），事实保留在源头，由下一个
+    /// Run / wakeup 补注入（#252：take 即标记会把完成事实静默丢失）。
     fn build(&self) -> Option<ReminderSnapshot>;
     /// 按语言渲染 body。
     fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String;
+    /// 注入组装确认：快照被组装进本轮 window 后调用。消费型 source
+    /// 在此标记事实已送达；默认 no-op（非消费型 source 无需实现）。
+    fn confirm_injected(&self) {}
 }
 
 /// 队列 entry：kind + 快照 + 内容指纹 + 序号 + 注入行为。

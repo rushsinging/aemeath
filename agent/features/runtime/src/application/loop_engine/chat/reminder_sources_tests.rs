@@ -391,7 +391,7 @@ fn background_process_source_policy_is_event_tail_dedup_rebuild() {
 }
 
 #[test]
-fn background_process_source_build_takes_terminal_items_once_and_renders() {
+fn background_process_source_build_peeks_until_confirmed_and_renders() {
     let supervisor = Arc::new(
         crate::application::background_process::supervisor::BackgroundProcessSupervisor::new(),
     );
@@ -426,8 +426,11 @@ fn background_process_source_build_takes_terminal_items_once_and_renders() {
         other => panic!("应为 BackgroundProcessCompleted，实际 {other:?}"),
     }
 
-    // take 语义：再 build 为空。
-    assert!(source.build().is_none());
+    // peek 语义（注入确认制）：确认前再 build 仍可见（Run 收口后
+    // 下个 Run 补注入）；注入确认后关闭。
+    assert!(source.build().is_some(), "确认前事实存活");
+    source.confirm_injected();
+    assert!(source.build().is_none(), "注入确认后不再重复");
 
     // render 委托 context 双语渲染。
     let rendered = source.render(&snapshot, "zh");

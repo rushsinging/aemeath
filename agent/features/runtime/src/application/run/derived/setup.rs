@@ -546,7 +546,6 @@ impl AgentRunner for CliAgentRunner {
                     context_size,
                     progress: progress.clone(),
                 },
-                true,
             );
             // Reminder 统一管线（07-reminder-pipeline.md）：sub run 与 main 同一
             // 机制——sources 按 derived 启动期事实条件注册，句柄随 derived run 销毁。
