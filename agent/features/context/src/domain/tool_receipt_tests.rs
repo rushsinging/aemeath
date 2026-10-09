@@ -84,7 +84,7 @@ fn terminal_receipt_rejects_state_regression_and_conflicting_terminal() {
         terminal
             .clone()
             .advance(ToolReceiptMutationData::running(identity())),
-        Err(ToolReceiptMutationError::TerminalStateConflict { .. })
+        Err(err) if err.code() == Some(crate::error_codes::TERMINAL_STATE_CONFLICT)
     ));
     assert!(matches!(
         terminal.advance(ToolReceiptMutationData::terminal(
@@ -95,7 +95,7 @@ fn terminal_receipt_rejects_state_regression_and_conflicting_terminal() {
                 CleanupConfirmation::NotApplicable,
             ),
         )),
-        Err(ToolReceiptMutationError::TerminalStateConflict { .. })
+        Err(err) if err.code() == Some(crate::error_codes::TERMINAL_STATE_CONFLICT)
     ));
 }
 
@@ -160,13 +160,13 @@ fn backgrounded_mutation_is_idempotent_and_rejects_regression() {
         backgrounded
             .clone()
             .advance(ToolReceiptMutationData::running(identity())),
-        Err(ToolReceiptMutationError::InvalidTransition)
+        Err(err) if err.code() == Some(crate::error_codes::INVALID_TRANSITION)
     ));
 
     let pending = ToolCallReceiptData::pending(identity(), "safe");
     assert!(matches!(
         pending.advance(ToolReceiptMutationData::backgrounded(identity())),
-        Err(ToolReceiptMutationError::InvalidTransition)
+        Err(err) if err.code() == Some(crate::error_codes::INVALID_TRANSITION)
     ));
 }
 

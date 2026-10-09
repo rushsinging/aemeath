@@ -1,9 +1,9 @@
 use crate::InMemorySessionRepository;
 use crate::SessionRepository;
 use crate::{
-    AcceptedInputAppendData, AcceptedInputError, CleanupConfirmation, ContentFingerprint,
-    ContextAppendData, ContextAppendError, ContextRequestId, FinalizeCause, SessionRevision,
-    ToolCallIdentityData, ToolOutcomeKindData, ToolReceiptMutationData, ToolTerminalReceiptData,
+    AcceptedInputAppendData, CleanupConfirmation, ContentFingerprint, ContextAppendData,
+    ContextRequestId, FinalizeCause, SessionRevision, ToolCallIdentityData, ToolOutcomeKindData,
+    ToolReceiptMutationData, ToolTerminalReceiptData,
 };
 use sdk::RunId;
 use share::ids::{RunStepId, SessionId};
@@ -283,7 +283,7 @@ async fn accepted_input_has_independent_idempotency_from_finalized_outcome() {
     conflict.fingerprint = ContentFingerprint::new("input-v2");
     assert!(matches!(
         backing.append_accepted_input(&conflict).await,
-        Err(AcceptedInputError::ContentConflict { .. })
+        Err(err) if err.code() == Some(crate::error_codes::ACCEPTED_INPUT_CONFLICT)
     ));
 }
 
@@ -346,6 +346,6 @@ async fn same_step_and_different_fingerprint_conflicts() {
     backing.append_finalized(&append("first")).await.unwrap();
     assert!(matches!(
         backing.append_finalized(&append("other")).await,
-        Err(ContextAppendError::ContentConflict { .. })
+        Err(err) if err.code() == Some(crate::error_codes::CONTENT_CONFLICT)
     ));
 }

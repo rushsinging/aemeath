@@ -6,6 +6,7 @@ use async_trait::async_trait;
 
 use crate::domain::reminder::{ReminderEventSource, ReminderSource};
 pub use crate::domain::*;
+use share::error::DomainError;
 
 /// Context Management 对 Agent Runtime 开放的唯一端口。
 ///
@@ -16,41 +17,42 @@ pub trait ContextPort: Send + Sync {
     async fn build_window(
         &self,
         request: &ContextRequestData,
-    ) -> Result<ContextWindowData, ContextPortError>;
+    ) -> Result<ContextWindowData, DomainError>;
 
     async fn needs_compaction(
         &self,
         request: &ContextRequestData,
-    ) -> Result<CompactionDecisionData, ContextPortError>;
+    ) -> Result<CompactionDecisionData, DomainError>;
 
-    async fn compact(
-        &self,
-        request: &CompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError>;
+    async fn compact(&self, request: &CompactRequestData) -> Result<CompactOutcome, DomainError>;
 
     async fn manual_compact(
         &self,
         request: &ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError>;
+    ) -> Result<CompactOutcome, DomainError>;
 
-    async fn clear_session(&self, session_id: &SessionId) -> Result<(), ContextPortError>;
+    async fn clear_session(&self, session_id: &SessionId) -> Result<(), DomainError>;
 
     async fn append_accepted_input(
         &self,
         _append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
-        Err(AcceptedInputError::Storage(
-            "此 ContextPort 未实现已接受输入持久化".to_string(),
-        ))
+    ) -> Result<AcceptedInputReceiptData, DomainError> {
+        Err(DomainError::storage(
+            "context",
+            "Session 已接受输入持久化失败：此 ContextPort 未实现已接受输入持久化",
+        )
+        .with_code(crate::error_codes::ACCEPTED_INPUT_STORAGE))
     }
 
     async fn advance_tool_receipt(
         &self,
         _mutation: ToolReceiptMutationData,
-    ) -> Result<ToolReceiptMutationReceiptData, ToolReceiptMutationError> {
-        Err(ToolReceiptMutationError::Storage(
-            "此 ContextPort 未实现 Tool receipt 持久化".to_string(),
-        ))
+    ) -> Result<ToolReceiptMutationReceiptData, DomainError> {
+        Err(DomainError::storage(
+            "context",
+            "Tool receipt 持久化失败：此 ContextPort 未实现 Tool receipt 持久化",
+        )
+        .with_code(crate::error_codes::TOOL_RECEIPT_STORAGE))
     }
 
     async fn step_receipts(
@@ -58,10 +60,12 @@ pub trait ContextPort: Send + Sync {
         _session_id: &SessionId,
         _run_id: &sdk::RunId,
         _step_id: &sdk::RunStepId,
-    ) -> Result<Vec<StepReceiptData>, ToolReceiptMutationError> {
-        Err(ToolReceiptMutationError::Storage(
-            "此 ContextPort 未实现 Step receipt 查询".to_string(),
-        ))
+    ) -> Result<Vec<StepReceiptData>, DomainError> {
+        Err(DomainError::storage(
+            "context",
+            "Tool receipt 持久化失败：此 ContextPort 未实现 Step receipt 查询",
+        )
+        .with_code(crate::error_codes::TOOL_RECEIPT_STORAGE))
     }
 
     async fn compare_and_record_skill_load(
@@ -79,7 +83,7 @@ pub trait ContextPort: Send + Sync {
     async fn append_and_persist(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError>;
+    ) -> Result<AppendReceiptData, DomainError>;
 
     // ─── Reminder 统一管线控制面（07-reminder-pipeline.md）────────────
     //

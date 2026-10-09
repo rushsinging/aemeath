@@ -2,8 +2,10 @@ use async_trait::async_trait;
 
 use share::session_types::ProjectIdentityData;
 
+use share::error::DomainError;
+
 use crate::domain::session::{
-    CanonicalSession, DisplayHistoryStepWindowData, SessionListEntryData, SessionManagementError,
+    CanonicalSession, DisplayHistoryStepWindowData, SessionListEntryData,
     SessionMetadataUpdateData, SessionResumeLoad,
 };
 
@@ -19,13 +21,13 @@ pub trait SessionManagementPort: Send + Sync {
         &self,
         id: &str,
         project: &ProjectIdentityData,
-    ) -> Result<CanonicalSession, SessionManagementError>;
+    ) -> Result<CanonicalSession, DomainError>;
 
     async fn load_for_resume(
         &self,
         id: &str,
         project: &ProjectIdentityData,
-    ) -> Result<SessionResumeLoad, SessionManagementError> {
+    ) -> Result<SessionResumeLoad, DomainError> {
         self.load_for_project(id, project)
             .await
             .map(|active_session| SessionResumeLoad {
@@ -40,25 +42,27 @@ pub trait SessionManagementPort: Send + Sync {
         project: &ProjectIdentityData,
         generation_revision: u64,
         member_names: &[String],
-    ) -> Result<DisplayHistoryStepWindowData, SessionManagementError> {
+    ) -> Result<DisplayHistoryStepWindowData, DomainError> {
         let _ = (id, project, generation_revision, member_names);
-        Err(SessionManagementError::Storage(
-            "当前 Session 存储不支持按需 display history".to_string(),
-        ))
+        Err(DomainError::storage(
+            "context",
+            "Session 存储失败：当前 Session 存储不支持按需 display history",
+        )
+        .with_code(crate::error_codes::SESSION_STORAGE))
     }
 
     /// Lists only sessions belonging to the supplied stable project identity.
     async fn list_for_project(
         &self,
         project: &ProjectIdentityData,
-    ) -> Result<Vec<SessionListEntryData>, SessionManagementError>;
+    ) -> Result<Vec<SessionListEntryData>, DomainError>;
 
     /// Exports only a session belonging to the supplied stable project identity.
     async fn export_for_project(
         &self,
         id: &str,
         project: &ProjectIdentityData,
-    ) -> Result<Vec<u8>, SessionManagementError>;
+    ) -> Result<Vec<u8>, DomainError>;
 
     /// Imports only a session whose persisted project identity matches the
     /// supplied current project.
@@ -66,7 +70,7 @@ pub trait SessionManagementPort: Send + Sync {
         &self,
         bytes: &[u8],
         project: &ProjectIdentityData,
-    ) -> Result<SessionListEntryData, SessionManagementError>;
+    ) -> Result<SessionListEntryData, DomainError>;
 
     /// Updates metadata only for a session belonging to the supplied stable
     /// project identity.
@@ -75,12 +79,12 @@ pub trait SessionManagementPort: Send + Sync {
         id: &str,
         project: &ProjectIdentityData,
         update: SessionMetadataUpdateData,
-    ) -> Result<SessionListEntryData, SessionManagementError>;
+    ) -> Result<SessionListEntryData, DomainError>;
 
     /// Deletes only a session belonging to the supplied stable project identity.
     async fn delete_for_project(
         &self,
         id: &str,
         project: &ProjectIdentityData,
-    ) -> Result<(), SessionManagementError>;
+    ) -> Result<(), DomainError>;
 }

@@ -44,7 +44,7 @@ impl SessionRepository for BaselineSession {
     async fn append_finalized(
         &self,
         append: &ContextAppendData,
-    ) -> Result<crate::domain::AppendReceiptData, crate::domain::ContextAppendError> {
+    ) -> Result<crate::domain::AppendReceiptData, share::error::DomainError> {
         self.finalized_appends
             .lock()
             .expect("finalized appends lock poisoned")
@@ -60,7 +60,7 @@ impl SessionRepository for BaselineSession {
     async fn commit_compaction(
         &self,
         _request: &crate::domain::CompactRequestData,
-    ) -> Result<crate::domain::CompactOutcome, crate::domain::ContextPortError> {
+    ) -> Result<crate::domain::CompactOutcome, share::error::DomainError> {
         if self.committed_compaction {
             Ok(crate::domain::CompactOutcome::Committed(
                 crate::domain::CompactResult {
@@ -80,13 +80,13 @@ impl SessionRepository for BaselineSession {
     async fn commit_manual_compaction(
         &self,
         _request: &crate::domain::ManualCompactRequestData,
-    ) -> Result<crate::domain::CompactOutcome, crate::domain::ContextPortError> {
+    ) -> Result<crate::domain::CompactOutcome, share::error::DomainError> {
         Ok(crate::domain::CompactOutcome::Skipped(
             crate::domain::CompactSkipReason::ResumeProtection,
         ))
     }
 
-    async fn clear(&self, _session_id: &SessionId) -> Result<(), crate::domain::ContextPortError> {
+    async fn clear(&self, _session_id: &SessionId) -> Result<(), share::error::DomainError> {
         Ok(())
     }
 }

@@ -32,8 +32,7 @@ pub use token_budget::{
 
 pub use tool_receipt::{
     CleanupConfirmation, ToolCallIdentityData, ToolCallReceiptData, ToolCallState,
-    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
-    ToolTerminalReceiptData,
+    ToolReceiptMutationData, ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
 };
 
 use serde::ser::SerializeSeq;
@@ -828,17 +827,6 @@ pub struct AcceptedInputReceiptData {
     pub fingerprint: ContentFingerprint,
 }
 
-/// accepted input append 的 typed failure。
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
-pub enum AcceptedInputError {
-    #[error("RunStep 已接受输入冲突：run={run_id} step={step_id}")]
-    ContentConflict { run_id: RunId, step_id: RunStepId },
-    #[error("Session 不存在：{0}")]
-    SessionNotFound(SessionId),
-    #[error("Session 已接受输入持久化失败：{0}")]
-    Storage(String),
-}
-
 /// 单个 finalized RunStep 的不可变提交载荷。
 #[derive(Debug, Clone)]
 pub struct ContextAppendData {
@@ -862,33 +850,4 @@ pub struct AppendReceiptData {
     pub step_id: RunStepId,
     pub committed_revision: SessionRevision,
     pub fingerprint: ContentFingerprint,
-}
-
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
-pub enum ContextAppendError {
-    #[error("Session revision 冲突：期望 {expected:?}，实际 {actual:?}")]
-    RevisionConflict {
-        expected: SessionRevision,
-        actual: SessionRevision,
-    },
-    #[error("RunStep 内容冲突：run={run_id} step={step_id}")]
-    ContentConflict { run_id: RunId, step_id: RunStepId },
-    #[error("Session 不存在：{0}")]
-    SessionNotFound(SessionId),
-    #[error("Session 持久化失败：{0}")]
-    Storage(String),
-}
-
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
-pub enum ContextPortError {
-    #[error("Session 不存在：{0}")]
-    SessionNotFound(SessionId),
-    #[error("Session backing 读取失败：{0}")]
-    SessionRepository(String),
-    #[error("Prompt 物化失败：{0}")]
-    PromptMaterialization(String),
-    #[error("Memory 物化失败：{0}")]
-    MemoryMaterialization(String),
-    #[error("Context 压缩失败：{0}")]
-    Compact(String),
 }

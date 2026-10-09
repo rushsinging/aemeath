@@ -441,10 +441,8 @@ impl SessionHistory {
     pub fn advance_tool_receipt(
         &self,
         mutation: ToolReceiptMutationData,
-    ) -> Result<
-        (Self, crate::domain::ToolReceiptMutationReceiptData),
-        crate::domain::ToolReceiptMutationError,
-    > {
+    ) -> Result<(Self, crate::domain::ToolReceiptMutationReceiptData), share::error::DomainError>
+    {
         if let Some(receipt) = self.tool_receipt(&mutation) {
             let advanced = receipt.clone().advance(mutation.clone())?;
             if !advanced.changed {
@@ -636,7 +634,7 @@ impl CanonicalSession {
     pub fn advance_tool_receipt(
         &mut self,
         mutation: ToolReceiptMutationData,
-    ) -> Result<bool, crate::domain::ToolReceiptMutationError> {
+    ) -> Result<bool, share::error::DomainError> {
         let (history, advanced) = self.run_slices.advance_tool_receipt(mutation)?;
         if advanced.changed {
             self.run_slices = history;

@@ -7,7 +7,7 @@ use crate::adapters::{AtomicBlobSessionStore, LegacySessionDecoder};
 use crate::application::{SessionLoadError, SessionPersistenceService};
 use crate::domain::session::{
     now_iso, project_dir_segment, session_matches_project, CanonicalSession, SessionCodec,
-    SessionListEntryData, SessionManagementError, SessionMetadataUpdateData,
+    SessionListEntryData, SessionMetadataUpdateData,
 };
 use crate::ports::SessionManagementPort;
 
@@ -20,20 +20,26 @@ impl AtomicBlobSessionManagement {
         Self { blob }
     }
 
-    fn store(&self, id: &str) -> Result<Arc<AtomicBlobSessionStore>, SessionManagementError> {
+    fn store(&self, id: &str) -> Result<Arc<AtomicBlobSessionStore>, share::error::DomainError> {
         AtomicBlobSessionStore::new(Arc::clone(&self.blob), id)
             .map(Arc::new)
-            .map_err(|error| SessionManagementError::Storage(error.to_string()))
+            .map_err(|error| {
+                share::error::DomainError::storage("context", format!("{error}"))
+                    .with_code(crate::error_codes::SESSION_STORAGE)
+            })
     }
 
     fn store_scoped(
         &self,
         project_dir: &SafePathSegmentData,
         id: &str,
-    ) -> Result<Arc<AtomicBlobSessionStore>, SessionManagementError> {
+    ) -> Result<Arc<AtomicBlobSessionStore>, share::error::DomainError> {
         AtomicBlobSessionStore::new_scoped(Arc::clone(&self.blob), project_dir, id)
             .map(Arc::new)
-            .map_err(|error| SessionManagementError::Storage(error.to_string()))
+            .map_err(|error| {
+                share::error::DomainError::storage("context", format!("{error}"))
+                    .with_code(crate::error_codes::SESSION_STORAGE)
+            })
     }
 
     fn persistence_from_store(
@@ -49,7 +55,7 @@ impl AtomicBlobSessionManagement {
         &self,
         project_dir: Option<&SafePathSegmentData>,
         id: &str,
-    ) -> Result<CanonicalSession, SessionManagementError> {
+    ) -> Result<CanonicalSession, share::error::DomainError> {
         let mut candidates: Vec<Arc<AtomicBlobSessionStore>> = Vec::new();
         if let Some(project_dir) = project_dir {
             candidates.push(self.store_scoped(project_dir, id)?);
@@ -74,27 +80,50 @@ impl AtomicBlobSessionManagement {
                 Arc::clone(&self.blob),
                 id,
             )
-            .map_err(SessionManagementError::Storage)?
+            .map_err(|error| {
+                share::error::DomainError::storage("context", format!("{error}"))
+                    .with_code(crate::error_codes::SESSION_STORAGE)
+            })?
             .overlay(&mut session)
             .await
-            .map_err(SessionManagementError::Storage)?;
+            .map_err(|error| {
+                share::error::DomainError::storage("context", format!("{error}"))
+                    .with_code(crate::error_codes::SESSION_STORAGE)
+            })?;
             return Ok(session);
         }
         Err(match last_error {
             Some(error) => map_load(id, error),
-            None => SessionManagementError::Storage("候选 session 存储构造失败".to_string()),
+            None => share::error::DomainError::storage(
+                "context",
+                format!("Session 存储失败：候选 session 存储构造失败"),
+            )
+            .with_code(crate::error_codes::SESSION_STORAGE),
         })
     }
 }
 
-fn map_load(id: &str, error: SessionLoadError) -> SessionManagementError {
+fn map_load(id: &str, error: SessionLoadError) -> share::error::DomainError {
     match error {
-        SessionLoadError::NotFound => SessionManagementError::NotFound(id.to_string()),
-        SessionLoadError::NoDecodableGeneration => SessionManagementError::Corrupt(id.to_string()),
-        SessionLoadError::UnsupportedFutureVersion { version, .. } => {
-            SessionManagementError::UnsupportedFutureVersion(version)
+        SessionLoadError::NotFound => {
+            share::error::DomainError::invalid("context", format!("Session 不存在：{id}"))
+                .with_code(crate::error_codes::SESSION_NOT_FOUND)
         }
-        other => SessionManagementError::Storage(other.to_string()),
+        SessionLoadError::NoDecodableGeneration => {
+            share::error::DomainError::invalid("context", format!("Session 数据损坏：{id}"))
+                .with_code(crate::error_codes::SESSION_CORRUPT)
+        }
+        SessionLoadError::UnsupportedFutureVersion { version, .. } => {
+            share::error::DomainError::invalid(
+                "context",
+                format!("Session schema 版本过新：{version}"),
+            )
+            .with_code(crate::error_codes::SESSION_UNSUPPORTED_VERSION)
+        }
+        other => {
+            share::error::DomainError::storage("context", format!("Session 存储失败：{other}"))
+                .with_code(crate::error_codes::SESSION_STORAGE)
+        }
     }
 }
 
@@ -104,13 +133,17 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
         &self,
         id: &str,
         project: &share::session_types::ProjectIdentityData,
-    ) -> Result<CanonicalSession, SessionManagementError> {
+    ) -> Result<CanonicalSession, share::error::DomainError> {
         let project_dir = project_dir_segment(project);
         let session = self.load_canonical(Some(&project_dir), id).await?;
         if session_matches_project(&session, project) {
             Ok(session)
         } else {
-            Err(SessionManagementError::ProjectMismatch(id.to_string()))
+            Err(share::error::DomainError::invalid(
+                "context",
+                format!("Session 不属于当前项目：{id}"),
+            )
+            .with_code(crate::error_codes::SESSION_PROJECT_MISMATCH))
         }
     }
 
@@ -120,13 +153,16 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
     async fn list_for_project(
         &self,
         project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<SessionListEntryData>, SessionManagementError> {
+    ) -> Result<Vec<SessionListEntryData>, share::error::DomainError> {
         let project_dir = project_dir_segment(project);
         let entries = self
             .blob
             .list_primary(StorageNamespaceData::Session)
             .await
-            .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
+            .map_err(|error| {
+                share::error::DomainError::storage("context", format!("{error}"))
+                    .with_code(crate::error_codes::SESSION_STORAGE)
+            })?;
         let mut sessions = Vec::new();
         for entry in entries {
             let segments = entry.key().segments();
@@ -155,26 +191,39 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
         &self,
         id: &str,
         project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<u8>, SessionManagementError> {
+    ) -> Result<Vec<u8>, share::error::DomainError> {
         let session = self.load_for_project(id, project).await?;
-        SessionCodec::encode(&session)
-            .map_err(|error| SessionManagementError::Storage(error.to_string()))
+        SessionCodec::encode(&session).map_err(|error| {
+            share::error::DomainError::storage("context", format!("{error}"))
+                .with_code(crate::error_codes::SESSION_STORAGE)
+        })
     }
 
     async fn import_for_project(
         &self,
         bytes: &[u8],
         project: &share::session_types::ProjectIdentityData,
-    ) -> Result<SessionListEntryData, SessionManagementError> {
+    ) -> Result<SessionListEntryData, share::error::DomainError> {
         let decoded = crate::adapters::decode_session(bytes).map_err(|error| match error {
             crate::domain::session::SessionCodecError::UnsupportedFutureVersion {
                 version, ..
-            } => SessionManagementError::UnsupportedFutureVersion(version),
-            other => SessionManagementError::Corrupt(other.to_string()),
+            } => share::error::DomainError::invalid(
+                "context",
+                format!("Session schema 版本过新：{version}"),
+            )
+            .with_code(crate::error_codes::SESSION_UNSUPPORTED_VERSION),
+            other => {
+                share::error::DomainError::invalid("context", format!("Session 数据损坏：{other}"))
+                    .with_code(crate::error_codes::SESSION_CORRUPT)
+            }
         })?;
         let session = decoded.session;
         if !session_matches_project(&session, project) {
-            return Err(SessionManagementError::ProjectMismatch(session.id));
+            return Err(share::error::DomainError::invalid(
+                "context",
+                format!("Session 不属于当前项目：{}", session.id),
+            )
+            .with_code(crate::error_codes::SESSION_PROJECT_MISMATCH));
         }
         // 导入统一落新布局：session 自身 identity 决定目录段。
         let store = match crate::domain::session::session_project_dir(&session) {
@@ -184,7 +233,10 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
         self.persistence_from_store(store)
             .save(&session)
             .await
-            .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
+            .map_err(|error| {
+                share::error::DomainError::storage("context", format!("{error}"))
+                    .with_code(crate::error_codes::SESSION_STORAGE)
+            })?;
         Ok(SessionListEntryData::from_canonical(&session))
     }
 
@@ -193,7 +245,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
         id: &str,
         project: &share::session_types::ProjectIdentityData,
         update: SessionMetadataUpdateData,
-    ) -> Result<SessionListEntryData, SessionManagementError> {
+    ) -> Result<SessionListEntryData, share::error::DomainError> {
         let mut session = self.load_for_project(id, project).await?;
         update.apply(&mut session.metadata);
         session.updated_at = now_iso();
@@ -205,7 +257,10 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
         self.persistence_from_store(store)
             .save(&session)
             .await
-            .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
+            .map_err(|error| {
+                share::error::DomainError::storage("context", format!("{error}"))
+                    .with_code(crate::error_codes::SESSION_STORAGE)
+            })?;
         Ok(SessionListEntryData::from_canonical(&session))
     }
 
@@ -213,7 +268,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
         &self,
         id: &str,
         project: &share::session_types::ProjectIdentityData,
-    ) -> Result<(), SessionManagementError> {
+    ) -> Result<(), share::error::DomainError> {
         let session = self.load_for_project(id, project).await?;
         // 三种历史布局位置一并清理（scoped / 平铺 / 平铺 .json）。
         let mut stores = Vec::new();
@@ -231,22 +286,32 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
         }
         let mut deleted_any = false;
         for store in stores {
-            let outcome = store
-                .delete_all()
-                .await
-                .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
+            let outcome = store.delete_all().await.map_err(|error| {
+                share::error::DomainError::storage("context", format!("{error}"))
+                    .with_code(crate::error_codes::SESSION_STORAGE)
+            })?;
             deleted_any |= outcome.deleted_primary() | outcome.deleted_previous();
         }
         crate::adapters::tool_receipt_ledger::AtomicBlobToolReceiptLedger::new(
             Arc::clone(&self.blob),
             id,
         )
-        .map_err(SessionManagementError::Storage)?
+        .map_err(|error| {
+            share::error::DomainError::storage("context", format!("{error}"))
+                .with_code(crate::error_codes::SESSION_STORAGE)
+        })?
         .delete()
         .await
-        .map_err(SessionManagementError::Storage)?;
+        .map_err(|error| {
+            share::error::DomainError::storage("context", format!("{error}"))
+                .with_code(crate::error_codes::SESSION_STORAGE)
+        })?;
         if !deleted_any {
-            return Err(SessionManagementError::NotFound(id.to_string()));
+            return Err(share::error::DomainError::invalid(
+                "context",
+                format!("Session 不存在：{id}"),
+            )
+            .with_code(crate::error_codes::SESSION_NOT_FOUND));
         }
         Ok(())
     }

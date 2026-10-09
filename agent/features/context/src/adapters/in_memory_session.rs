@@ -5,12 +5,12 @@ use async_trait::async_trait;
 
 use crate::domain::session::{AcceptedInputRecord, FinalizedOutcomeRecord, SessionHistory};
 use crate::domain::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, CompactSkipReason, ContextAppendData, ContextAppendError,
-    ContextMessage, ContextPortError, SessionId, SessionRevision, ToolCallReceiptData,
-    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
+    AcceptedInputAppendData, AcceptedInputReceiptData, AppendReceiptData, CompactOutcome,
+    CompactRequestData, CompactSkipReason, ContextAppendData, ContextMessage, SessionId,
+    SessionRevision, ToolCallReceiptData, ToolReceiptMutationData, ToolReceiptMutationReceiptData,
 };
 use crate::ports::{SessionRepository, SessionSnapshot};
+use share::error::DomainError;
 
 #[derive(Default)]
 struct SessionState {
@@ -103,14 +103,23 @@ impl SessionRepository for InMemorySessionRepository {
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
-        let mut sessions = self
-            .sessions
-            .lock()
-            .map_err(|error| AcceptedInputError::Storage(error.to_string()))?;
+    ) -> Result<AcceptedInputReceiptData, DomainError> {
+        let mut sessions = self.sessions.lock().map_err(|error| {
+            share::error::DomainError::storage(
+                "context",
+                format!("Session 已接受输入持久化失败：{error}"),
+            )
+            .with_code(crate::error_codes::ACCEPTED_INPUT_STORAGE)
+        })?;
         let state = sessions
             .get_mut(append.session_id.as_str())
-            .ok_or_else(|| AcceptedInputError::SessionNotFound(append.session_id.clone()))?;
+            .ok_or_else(|| {
+                share::error::DomainError::invalid(
+                    "context",
+                    format!("Session 不存在：{}", append.session_id),
+                )
+                .with_code(crate::error_codes::SESSION_NOT_FOUND)
+            })?;
         let key = (
             append.run_id.to_string(),
             append.step_id.as_str().to_string(),
@@ -122,10 +131,14 @@ impl SessionRepository for InMemorySessionRepository {
                     SessionRevision::new(input.committed_revision),
                 ));
             }
-            return Err(AcceptedInputError::ContentConflict {
-                run_id: append.run_id.clone(),
-                step_id: append.step_id.clone(),
-            });
+            return Err(share::error::DomainError::invalid(
+                "context",
+                format!(
+                    "RunStep 已接受输入冲突：run={} step={}",
+                    append.run_id, append.step_id
+                ),
+            )
+            .with_code(crate::error_codes::ACCEPTED_INPUT_CONFLICT));
         }
         let accepted_input = AcceptedInputRecord::new(
             append.messages.clone(),
@@ -147,15 +160,22 @@ impl SessionRepository for InMemorySessionRepository {
     async fn advance_tool_receipt(
         &self,
         mutation: ToolReceiptMutationData,
-    ) -> Result<ToolReceiptMutationReceiptData, ToolReceiptMutationError> {
-        let mut sessions = self
-            .sessions
-            .lock()
-            .map_err(|error| ToolReceiptMutationError::Storage(error.to_string()))?;
+    ) -> Result<ToolReceiptMutationReceiptData, DomainError> {
+        let mut sessions = self.sessions.lock().map_err(|error| {
+            share::error::DomainError::storage(
+                "context",
+                format!("Tool receipt 持久化失败：{error}"),
+            )
+            .with_code(crate::error_codes::TOOL_RECEIPT_STORAGE)
+        })?;
         let state = sessions
             .get_mut(mutation.identity.session_id.as_str())
             .ok_or_else(|| {
-                ToolReceiptMutationError::SessionNotFound(mutation.identity.session_id.clone())
+                share::error::DomainError::invalid(
+                    "context",
+                    format!("Session 不存在：{}", mutation.identity.session_id),
+                )
+                .with_code(crate::error_codes::SESSION_NOT_FOUND)
             })?;
         let key = mutation.identity.runtime_call_id.clone();
         let advanced = if let Some(receipt) = state.tool_receipts.get(&key) {
@@ -177,7 +197,13 @@ impl SessionRepository for InMemorySessionRepository {
             state.history = state
                 .history
                 .advance_tool_receipt(mutation)
-                .map_err(|error| ToolReceiptMutationError::Storage(error.to_string()))?
+                .map_err(|error| {
+                    share::error::DomainError::storage(
+                        "context",
+                        format!("Tool receipt 持久化失败：{error}"),
+                    )
+                    .with_code(crate::error_codes::TOOL_RECEIPT_STORAGE)
+                })?
                 .0;
             state.tool_receipts.insert(key, advanced.receipt.clone());
         }
@@ -189,14 +215,18 @@ impl SessionRepository for InMemorySessionRepository {
         session_id: &SessionId,
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::domain::StepReceiptData>, ToolReceiptMutationError> {
-        let sessions = self
-            .sessions
-            .lock()
-            .map_err(|error| ToolReceiptMutationError::Storage(error.to_string()))?;
-        let state = sessions
-            .get(session_id.as_str())
-            .ok_or_else(|| ToolReceiptMutationError::SessionNotFound(session_id.clone()))?;
+    ) -> Result<Vec<crate::domain::StepReceiptData>, DomainError> {
+        let sessions = self.sessions.lock().map_err(|error| {
+            share::error::DomainError::storage(
+                "context",
+                format!("Tool receipt 持久化失败：{error}"),
+            )
+            .with_code(crate::error_codes::TOOL_RECEIPT_STORAGE)
+        })?;
+        let state = sessions.get(session_id.as_str()).ok_or_else(|| {
+            share::error::DomainError::invalid("context", format!("Session 不存在：{session_id}"))
+                .with_code(crate::error_codes::SESSION_NOT_FOUND)
+        })?;
         let mut receipts = state
             .tool_receipts
             .values()
@@ -247,14 +277,20 @@ impl SessionRepository for InMemorySessionRepository {
     async fn append_finalized(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError> {
-        let mut sessions = self
-            .sessions
-            .lock()
-            .map_err(|error| ContextAppendError::Storage(error.to_string()))?;
+    ) -> Result<AppendReceiptData, DomainError> {
+        let mut sessions = self.sessions.lock().map_err(|error| {
+            share::error::DomainError::storage("context", format!("Session 持久化失败：{error}"))
+                .with_code(crate::error_codes::CONTEXT_APPEND_STORAGE)
+        })?;
         let state = sessions
             .get_mut(append.session_id.as_str())
-            .ok_or_else(|| ContextAppendError::SessionNotFound(append.session_id.clone()))?;
+            .ok_or_else(|| {
+                share::error::DomainError::invalid(
+                    "context",
+                    format!("Session 不存在：{}", append.session_id),
+                )
+                .with_code(crate::error_codes::SESSION_NOT_FOUND)
+            })?;
         let key = (
             append.run_id.to_string(),
             append.step_id.as_str().to_string(),
@@ -266,10 +302,14 @@ impl SessionRepository for InMemorySessionRepository {
                     SessionRevision::new(outcome.committed_revision),
                 ));
             }
-            return Err(ContextAppendError::ContentConflict {
-                run_id: append.run_id.clone(),
-                step_id: append.step_id.clone(),
-            });
+            return Err(share::error::DomainError::invalid(
+                "context",
+                format!(
+                    "RunStep 内容冲突：run={} step={}",
+                    append.run_id, append.step_id
+                ),
+            )
+            .with_code(crate::error_codes::CONTENT_CONFLICT));
         }
         let actual = SessionRevision::new(state.revision);
         if actual != append.expected_revision {
@@ -279,10 +319,14 @@ impl SessionRepository for InMemorySessionRepository {
                         && receipt.identity.step_id == append.step_id
                 });
             if !receipt_only_advances {
-                return Err(ContextAppendError::RevisionConflict {
-                    expected: append.expected_revision,
-                    actual,
-                });
+                return Err(share::error::DomainError::invalid(
+                    "context",
+                    format!(
+                        "Session revision 冲突：期望 {:?}，实际 {:?}",
+                        append.expected_revision, actual
+                    ),
+                )
+                .with_code(crate::error_codes::REVISION_CONFLICT));
             }
         }
         state.messages.extend(append.messages.clone());
@@ -309,25 +353,29 @@ impl SessionRepository for InMemorySessionRepository {
     async fn commit_compaction(
         &self,
         _request: &CompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
+    ) -> Result<CompactOutcome, DomainError> {
         Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection))
     }
 
     async fn commit_manual_compaction(
         &self,
         _request: &crate::domain::ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
+    ) -> Result<CompactOutcome, DomainError> {
         Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection))
     }
 
-    async fn clear(&self, session_id: &SessionId) -> Result<(), ContextPortError> {
-        let mut sessions = self
-            .sessions
-            .lock()
-            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))?;
-        let state = sessions
-            .get_mut(session_id.as_str())
-            .ok_or_else(|| ContextPortError::SessionNotFound(session_id.clone()))?;
+    async fn clear(&self, session_id: &SessionId) -> Result<(), DomainError> {
+        let mut sessions = self.sessions.lock().map_err(|error| {
+            share::error::DomainError::storage(
+                "context",
+                format!("Session backing 读取失败：{error}"),
+            )
+            .with_code(crate::error_codes::SESSION_REPOSITORY)
+        })?;
+        let state = sessions.get_mut(session_id.as_str()).ok_or_else(|| {
+            share::error::DomainError::invalid("context", format!("Session 不存在：{session_id}"))
+                .with_code(crate::error_codes::SESSION_NOT_FOUND)
+        })?;
         state.messages.clear();
         state.history = state.history.cleared();
         state.active_summary = None;

@@ -4,10 +4,10 @@ use std::sync::{Arc, Mutex, RwLock};
 use crate::domain::ToolCallState;
 use crate::SessionRepository;
 use crate::{
-    AcceptedInputAppendData, AcceptedInputError, CompactRequestData, CompactTrigger,
-    ContentFingerprint, ContextAppendData, ContextAppendError, ContextRequestData,
-    ContextRequestId, FinalizeCause, Language, ManualCompactRequestData, SessionRevision,
-    SystemPromptSpecData, ToolCallIdentityData, ToolReceiptMutationData,
+    AcceptedInputAppendData, CompactRequestData, CompactTrigger, ContentFingerprint,
+    ContextAppendData, ContextRequestData, ContextRequestId, FinalizeCause, Language,
+    ManualCompactRequestData, SessionRevision, SystemPromptSpecData, ToolCallIdentityData,
+    ToolReceiptMutationData,
 };
 use crate::{
     AcceptedInputRecord, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
@@ -1036,7 +1036,7 @@ async fn accepted_input_is_idempotent_but_rejects_content_conflict() {
     conflicting.fingerprint = ContentFingerprint::new("input-v2");
     assert!(matches!(
         repository.append_accepted_input(&conflicting).await,
-        Err(AcceptedInputError::ContentConflict { .. })
+        Err(err) if err.code() == Some(crate::error_codes::ACCEPTED_INPUT_CONFLICT)
     ));
 }
 
@@ -1056,7 +1056,7 @@ async fn accepted_input_storage_failure_does_not_publish_or_advance_revision() {
 
     assert!(matches!(
         result,
-        Err(AcceptedInputError::Storage(message)) if message == "input disk full"
+        Err(err) if err.message() == "Session 已接受输入持久化失败：input disk full"
     ));
     assert_eq!(holder.read().unwrap().revision, 0);
     assert!(holder.read().unwrap().run_slices.is_empty());
@@ -1416,7 +1416,7 @@ async fn accepted_input_writer_failure_does_not_publish_candidate() {
 
     assert!(matches!(
         repository.append_accepted_input(&accepted_input("input-ledger")).await,
-        Err(AcceptedInputError::Storage(message)) if message == "input disk full"
+        Err(err) if err.message() == "Session 已接受输入持久化失败：input disk full"
     ));
     assert_eq!(holder.read().unwrap().revision, 0);
     assert!(holder.read().unwrap().run_slices.is_empty());
@@ -1479,7 +1479,7 @@ async fn advance_tool_receipt_write_failure_does_not_publish_candidate() {
         repository
             .advance_tool_receipt(ToolReceiptMutationData::pending(tool_identity(), "safe preview"))
             .await,
-        Err(crate::ToolReceiptMutationError::Storage(message)) if message == "receipt disk full"
+        Err(err) if err.message() == "Tool receipt 持久化失败：receipt disk full"
     ));
     assert_eq!(holder.read().unwrap().revision, 0);
     assert!(holder.read().unwrap().run_slices.is_empty());
@@ -1511,7 +1511,12 @@ async fn concurrent_appends_with_same_revision_allow_one_commit_and_reject_one_c
     assert_eq!(
         results
             .iter()
-            .filter(|result| matches!(result, Err(ContextAppendError::RevisionConflict { .. })))
+            .filter(|result| {
+                matches!(
+                    result,
+                    Err(err) if err.code() == Some(crate::error_codes::REVISION_CONFLICT)
+                )
+            })
             .count(),
         1
     );
@@ -1530,7 +1535,7 @@ async fn failed_durable_write_does_not_publish_candidate() {
 
     assert!(matches!(
         repository.append_finalized(&append("same")).await,
-        Err(ContextAppendError::Storage(message)) if message == "disk full"
+        Err(err) if err.message() == "Session 持久化失败：disk full"
     ));
     assert_eq!(holder.read().unwrap().revision, 0);
 }
@@ -1613,8 +1618,9 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
     let compact_result = compact_task.await.unwrap();
     assert!(matches!(
         compact_result,
-        Err(crate::ContextPortError::Compact(ref message))
-            if message.contains("Session revision 冲突")
+        Err(err)
+            if err.code() == Some(crate::error_codes::COMPACT)
+                && err.message().contains("Session revision 冲突")
     ));
     let session = holder.read().unwrap();
     assert_eq!(session.revision, 1);
@@ -2006,7 +2012,10 @@ async fn compaction_rejects_stale_source_revision() {
         })
         .await;
 
-    assert!(matches!(result, Err(crate::ContextPortError::Compact(_))));
+    assert!(matches!(
+        result,
+        Err(err) if err.code() == Some(crate::error_codes::COMPACT)
+    ));
     assert_eq!(holder.read().unwrap().revision, 2);
 }
 
@@ -2021,7 +2030,7 @@ async fn duplicate_key_is_idempotent_and_conflicting_content_is_typed() {
     assert_eq!(writer.saved.lock().unwrap().len(), 1);
     assert!(matches!(
         repository.append_finalized(&append("different")).await,
-        Err(ContextAppendError::ContentConflict { .. })
+        Err(err) if err.code() == Some(crate::error_codes::CONTENT_CONFLICT)
     ));
 }
 

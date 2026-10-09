@@ -8,7 +8,7 @@ use crate::adapters::{
 };
 use crate::domain::session::{
     now_iso, project_dir_segment, session_matches_project, CanonicalSession, SessionCodec,
-    SessionListEntryData, SessionManagementError, SessionMetadataUpdateData,
+    SessionListEntryData, SessionMetadataUpdateData,
 };
 use crate::ports::SessionManagementPort;
 
@@ -41,7 +41,7 @@ impl DatasetSessionManagement {
         &self,
         project_dir: Option<&SafePathSegmentData>,
         id: &str,
-    ) -> Result<CanonicalSession, SessionManagementError> {
+    ) -> Result<CanonicalSession, share::error::DomainError> {
         self.reader
             .load(project_dir, id)
             .await
@@ -51,13 +51,20 @@ impl DatasetSessionManagement {
 
 fn map_reader_error(
     error: crate::domain::session::SessionGenerationWireError,
-) -> SessionManagementError {
+) -> share::error::DomainError {
     match error {
         crate::domain::session::SessionGenerationWireError::UnsupportedFutureVersion {
             version,
             ..
-        } => SessionManagementError::UnsupportedFutureVersion(version),
-        other => SessionManagementError::Corrupt(other.to_string()),
+        } => share::error::DomainError::invalid(
+            "context",
+            format!("Session schema 版本过新：{version}"),
+        )
+        .with_code(crate::error_codes::SESSION_UNSUPPORTED_VERSION),
+        other => {
+            share::error::DomainError::invalid("context", format!("Session 数据损坏：{other}"))
+                .with_code(crate::error_codes::SESSION_CORRUPT)
+        }
     }
 }
 
@@ -67,13 +74,17 @@ impl SessionManagementPort for DatasetSessionManagement {
         &self,
         id: &str,
         project: &share::session_types::ProjectIdentityData,
-    ) -> Result<CanonicalSession, SessionManagementError> {
+    ) -> Result<CanonicalSession, share::error::DomainError> {
         let project_dir = project_dir_segment(project);
         let session = self.load_canonical(Some(&project_dir), id).await?;
         if session_matches_project(&session, project) {
             Ok(session)
         } else {
-            Err(SessionManagementError::ProjectMismatch(id.to_string()))
+            Err(share::error::DomainError::invalid(
+                "context",
+                format!("Session 不属于当前项目：{id}"),
+            )
+            .with_code(crate::error_codes::SESSION_PROJECT_MISMATCH))
         }
     }
 
@@ -81,7 +92,7 @@ impl SessionManagementPort for DatasetSessionManagement {
         &self,
         id: &str,
         project: &share::session_types::ProjectIdentityData,
-    ) -> Result<crate::domain::session::SessionResumeLoad, SessionManagementError> {
+    ) -> Result<crate::domain::session::SessionResumeLoad, share::error::DomainError> {
         let project_dir = project_dir_segment(project);
         let prepared = self
             .reader
@@ -89,7 +100,11 @@ impl SessionManagementPort for DatasetSessionManagement {
             .await
             .map_err(map_reader_error)?;
         if !session_matches_project(&prepared.active_session, project) {
-            return Err(SessionManagementError::ProjectMismatch(id.to_string()));
+            return Err(share::error::DomainError::invalid(
+                "context",
+                format!("Session 不属于当前项目：{id}"),
+            )
+            .with_code(crate::error_codes::SESSION_PROJECT_MISMATCH));
         }
         Ok(crate::domain::session::SessionResumeLoad {
             active_session: prepared.active_session,
@@ -103,7 +118,8 @@ impl SessionManagementPort for DatasetSessionManagement {
         project: &share::session_types::ProjectIdentityData,
         generation_revision: u64,
         member_names: &[String],
-    ) -> Result<crate::domain::session::DisplayHistoryStepWindowData, SessionManagementError> {
+    ) -> Result<crate::domain::session::DisplayHistoryStepWindowData, share::error::DomainError>
+    {
         self.load_for_project(id, project).await?;
         let project_dir = project_dir_segment(project);
         self.reader
@@ -118,13 +134,16 @@ impl SessionManagementPort for DatasetSessionManagement {
     async fn list_for_project(
         &self,
         project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<SessionListEntryData>, SessionManagementError> {
+    ) -> Result<Vec<SessionListEntryData>, share::error::DomainError> {
         let project_dir = project_dir_segment(project);
         let dataset_keys = self
             .dataset
             .list_datasets(StorageNamespaceData::Session)
             .await
-            .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
+            .map_err(|error| {
+                share::error::DomainError::storage("context", format!("{error}"))
+                    .with_code(crate::error_codes::SESSION_STORAGE)
+            })?;
         let mut sessions = Vec::new();
         for dataset_key in dataset_keys {
             let segments = dataset_key.segments();
@@ -161,31 +180,44 @@ impl SessionManagementPort for DatasetSessionManagement {
         &self,
         id: &str,
         project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<u8>, SessionManagementError> {
+    ) -> Result<Vec<u8>, share::error::DomainError> {
         let session = self.load_for_project(id, project).await?;
-        SessionCodec::encode(&session)
-            .map_err(|error| SessionManagementError::Storage(error.to_string()))
+        SessionCodec::encode(&session).map_err(|error| {
+            share::error::DomainError::storage("context", format!("{error}"))
+                .with_code(crate::error_codes::SESSION_STORAGE)
+        })
     }
 
     async fn import_for_project(
         &self,
         bytes: &[u8],
         project: &share::session_types::ProjectIdentityData,
-    ) -> Result<SessionListEntryData, SessionManagementError> {
+    ) -> Result<SessionListEntryData, share::error::DomainError> {
         let decoded = crate::adapters::decode_session(bytes).map_err(|error| match error {
             crate::domain::session::SessionCodecError::UnsupportedFutureVersion {
                 version, ..
-            } => SessionManagementError::UnsupportedFutureVersion(version),
-            other => SessionManagementError::Corrupt(other.to_string()),
+            } => share::error::DomainError::invalid(
+                "context",
+                format!("Session schema 版本过新：{version}"),
+            )
+            .with_code(crate::error_codes::SESSION_UNSUPPORTED_VERSION),
+            other => {
+                share::error::DomainError::invalid("context", format!("Session 数据损坏：{other}"))
+                    .with_code(crate::error_codes::SESSION_CORRUPT)
+            }
         })?;
         let session = decoded.session;
         if !session_matches_project(&session, project) {
-            return Err(SessionManagementError::ProjectMismatch(session.id));
+            return Err(share::error::DomainError::invalid(
+                "context",
+                format!("Session 不属于当前项目：{}", session.id),
+            )
+            .with_code(crate::error_codes::SESSION_PROJECT_MISMATCH));
         }
-        self.writer
-            .save_initial(&session)
-            .await
-            .map_err(SessionManagementError::Storage)?;
+        self.writer.save_initial(&session).await.map_err(|error| {
+            share::error::DomainError::storage("context", format!("{error}"))
+                .with_code(crate::error_codes::SESSION_STORAGE)
+        })?;
         Ok(SessionListEntryData::from_canonical(&session))
     }
 
@@ -194,7 +226,7 @@ impl SessionManagementPort for DatasetSessionManagement {
         id: &str,
         project: &share::session_types::ProjectIdentityData,
         update: SessionMetadataUpdateData,
-    ) -> Result<SessionListEntryData, SessionManagementError> {
+    ) -> Result<SessionListEntryData, share::error::DomainError> {
         let before = self.load_for_project(id, project).await?;
         let mut after = before.clone();
         update.apply(&mut after.metadata);
@@ -203,7 +235,10 @@ impl SessionManagementPort for DatasetSessionManagement {
         self.writer
             .save_incremental(&before, &after)
             .await
-            .map_err(SessionManagementError::Storage)?;
+            .map_err(|error| {
+                share::error::DomainError::storage("context", format!("{error}"))
+                    .with_code(crate::error_codes::SESSION_STORAGE)
+            })?;
         Ok(SessionListEntryData::from_canonical(&after))
     }
 
@@ -211,18 +246,28 @@ impl SessionManagementPort for DatasetSessionManagement {
         &self,
         id: &str,
         project: &share::session_types::ProjectIdentityData,
-    ) -> Result<(), SessionManagementError> {
+    ) -> Result<(), share::error::DomainError> {
         self.load_for_project(id, project).await?;
-        let dataset_key = super::dataset_session_writer::session_dataset_key(id)
-            .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
+        let dataset_key =
+            super::dataset_session_writer::session_dataset_key(id).map_err(|error| {
+                share::error::DomainError::storage("context", format!("{error}"))
+                    .with_code(crate::error_codes::SESSION_STORAGE)
+            })?;
         let outcome = self
             .dataset
             .delete_all_generations(&dataset_key, storage::DeleteOptionsData::default())
             .await
-            .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
+            .map_err(|error| {
+                share::error::DomainError::storage("context", format!("{error}"))
+                    .with_code(crate::error_codes::SESSION_STORAGE)
+            })?;
         let legacy_outcome = self.legacy.delete_for_project(id, project).await.err();
         if !outcome.deleted_primary() && !outcome.deleted_previous() && legacy_outcome.is_some() {
-            return Err(SessionManagementError::NotFound(id.to_string()));
+            return Err(share::error::DomainError::invalid(
+                "context",
+                format!("Session 不存在：{id}"),
+            )
+            .with_code(crate::error_codes::SESSION_NOT_FOUND));
         }
         Ok(())
     }

@@ -3,11 +3,12 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 
 use crate::domain::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, ContextAppendData, ContextAppendError, ContextMessages,
-    ContextPortError, ContextRequestData, ManualCompactRequestData, SessionId, SessionRevision,
-    SystemBlock, ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
+    AcceptedInputAppendData, AcceptedInputReceiptData, AppendReceiptData, CompactOutcome,
+    CompactRequestData, ContextAppendData, ContextMessages, ContextRequestData,
+    ManualCompactRequestData, SessionId, SessionRevision, SystemBlock, ToolReceiptMutationData,
+    ToolReceiptMutationReceiptData,
 };
+use share::error::DomainError;
 
 pub mod compact_generator;
 pub mod context_port;
@@ -52,28 +53,34 @@ pub(crate) trait SessionRepository: Send + Sync {
     async fn append_accepted_input(
         &self,
         _append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
-        Err(AcceptedInputError::Storage(
-            "此 SessionRepository 未实现已接受输入持久化".to_string(),
-        ))
+    ) -> Result<AcceptedInputReceiptData, DomainError> {
+        Err(DomainError::storage(
+            "context",
+            "Session 已接受输入持久化失败：此 SessionRepository 未实现已接受输入持久化",
+        )
+        .with_code(crate::error_codes::ACCEPTED_INPUT_STORAGE))
     }
     async fn advance_tool_receipt(
         &self,
         _mutation: ToolReceiptMutationData,
-    ) -> Result<ToolReceiptMutationReceiptData, ToolReceiptMutationError> {
-        Err(ToolReceiptMutationError::Storage(
-            "此 SessionRepository 未实现 Tool receipt 持久化".to_string(),
-        ))
+    ) -> Result<ToolReceiptMutationReceiptData, DomainError> {
+        Err(DomainError::storage(
+            "context",
+            "Tool receipt 持久化失败：此 SessionRepository 未实现 Tool receipt 持久化",
+        )
+        .with_code(crate::error_codes::TOOL_RECEIPT_STORAGE))
     }
     async fn step_receipts(
         &self,
         _session_id: &SessionId,
         _run_id: &sdk::RunId,
         _step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::domain::StepReceiptData>, ToolReceiptMutationError> {
-        Err(ToolReceiptMutationError::Storage(
-            "此 SessionRepository 未实现 Step receipt 查询".to_string(),
-        ))
+    ) -> Result<Vec<crate::domain::StepReceiptData>, DomainError> {
+        Err(DomainError::storage(
+            "context",
+            "Tool receipt 持久化失败：此 SessionRepository 未实现 Step receipt 查询",
+        )
+        .with_code(crate::error_codes::TOOL_RECEIPT_STORAGE))
     }
     async fn compare_and_record_skill_load(
         &self,
@@ -89,16 +96,16 @@ pub(crate) trait SessionRepository: Send + Sync {
     async fn append_finalized(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError>;
+    ) -> Result<AppendReceiptData, DomainError>;
     async fn commit_compaction(
         &self,
         request: &CompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError>;
+    ) -> Result<CompactOutcome, DomainError>;
     async fn commit_manual_compaction(
         &self,
         request: &ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError>;
-    async fn clear(&self, session_id: &SessionId) -> Result<(), ContextPortError>;
+    ) -> Result<CompactOutcome, DomainError>;
+    async fn clear(&self, session_id: &SessionId) -> Result<(), DomainError>;
 }
 
 #[derive(Debug, Clone)]

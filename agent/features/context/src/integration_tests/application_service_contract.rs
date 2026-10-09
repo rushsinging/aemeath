@@ -201,7 +201,7 @@ impl SessionRepository for FakeSession {
     async fn append_finalized(
         &self,
         append: &ContextAppendData,
-    ) -> Result<crate::AppendReceiptData, crate::ContextAppendError> {
+    ) -> Result<crate::AppendReceiptData, share::error::DomainError> {
         Ok(crate::AppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
@@ -213,7 +213,7 @@ impl SessionRepository for FakeSession {
     async fn commit_compaction(
         &self,
         _request: &crate::CompactRequestData,
-    ) -> Result<crate::CompactOutcome, crate::ContextPortError> {
+    ) -> Result<crate::CompactOutcome, share::error::DomainError> {
         Ok(crate::CompactOutcome::Skipped(
             crate::CompactSkipReason::ResumeProtection,
         ))
@@ -222,7 +222,7 @@ impl SessionRepository for FakeSession {
     async fn commit_manual_compaction(
         &self,
         _request: &crate::ManualCompactRequestData,
-    ) -> Result<crate::CompactOutcome, crate::ContextPortError> {
+    ) -> Result<crate::CompactOutcome, share::error::DomainError> {
         Ok(crate::CompactOutcome::Committed(crate::CompactResult {
             summary: "manual".into(),
             recent_messages: vec![],
@@ -231,7 +231,7 @@ impl SessionRepository for FakeSession {
         }))
     }
 
-    async fn clear(&self, _session_id: &SessionId) -> Result<(), crate::ContextPortError> {
+    async fn clear(&self, _session_id: &SessionId) -> Result<(), share::error::DomainError> {
         Ok(())
     }
 }

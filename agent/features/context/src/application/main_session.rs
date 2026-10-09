@@ -931,19 +931,18 @@ pub mod test_support {
             &self,
             id: &str,
             _project: &share::session_types::ProjectIdentityData,
-        ) -> Result<CanonicalSession, crate::domain::session::SessionManagementError> {
-            Err(crate::domain::session::SessionManagementError::NotFound(
-                id.to_string(),
-            ))
+        ) -> Result<CanonicalSession, share::error::DomainError> {
+            Err(
+                share::error::DomainError::invalid("context", format!("Session 不存在：{id}"))
+                    .with_code(crate::error_codes::SESSION_NOT_FOUND),
+            )
         }
 
         async fn list_for_project(
             &self,
             _project: &share::session_types::ProjectIdentityData,
-        ) -> Result<
-            Vec<crate::domain::session::SessionListEntryData>,
-            crate::domain::session::SessionManagementError,
-        > {
+        ) -> Result<Vec<crate::domain::session::SessionListEntryData>, share::error::DomainError>
+        {
             Ok(Vec::new())
         }
 
@@ -951,23 +950,24 @@ pub mod test_support {
             &self,
             id: &str,
             _project: &share::session_types::ProjectIdentityData,
-        ) -> Result<Vec<u8>, crate::domain::session::SessionManagementError> {
-            Err(crate::domain::session::SessionManagementError::NotFound(
-                id.to_string(),
-            ))
+        ) -> Result<Vec<u8>, share::error::DomainError> {
+            Err(
+                share::error::DomainError::invalid("context", format!("Session 不存在：{id}"))
+                    .with_code(crate::error_codes::SESSION_NOT_FOUND),
+            )
         }
 
         async fn import_for_project(
             &self,
             _bytes: &[u8],
             _project: &share::session_types::ProjectIdentityData,
-        ) -> Result<
-            crate::domain::session::SessionListEntryData,
-            crate::domain::session::SessionManagementError,
-        > {
-            Err(crate::domain::session::SessionManagementError::Storage(
-                "test session port unavailable".to_string(),
-            ))
+        ) -> Result<crate::domain::session::SessionListEntryData, share::error::DomainError>
+        {
+            Err(share::error::DomainError::storage(
+                "context",
+                "Session 存储失败：test session port unavailable",
+            )
+            .with_code(crate::error_codes::SESSION_STORAGE))
         }
 
         async fn update_metadata_for_project(
@@ -975,23 +975,23 @@ pub mod test_support {
             id: &str,
             _project: &share::session_types::ProjectIdentityData,
             _update: crate::domain::session::SessionMetadataUpdateData,
-        ) -> Result<
-            crate::domain::session::SessionListEntryData,
-            crate::domain::session::SessionManagementError,
-        > {
-            Err(crate::domain::session::SessionManagementError::NotFound(
-                id.to_string(),
-            ))
+        ) -> Result<crate::domain::session::SessionListEntryData, share::error::DomainError>
+        {
+            Err(
+                share::error::DomainError::invalid("context", format!("Session 不存在：{id}"))
+                    .with_code(crate::error_codes::SESSION_NOT_FOUND),
+            )
         }
 
         async fn delete_for_project(
             &self,
             id: &str,
             _project: &share::session_types::ProjectIdentityData,
-        ) -> Result<(), crate::domain::session::SessionManagementError> {
-            Err(crate::domain::session::SessionManagementError::NotFound(
-                id.to_string(),
-            ))
+        ) -> Result<(), share::error::DomainError> {
+            Err(
+                share::error::DomainError::invalid("context", format!("Session 不存在：{id}"))
+                    .with_code(crate::error_codes::SESSION_NOT_FOUND),
+            )
         }
     }
 

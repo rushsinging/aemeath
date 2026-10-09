@@ -7,7 +7,7 @@
 //! | 工厂 | `wire_main_session`（出口 `SdkError`）、`wire_isolated_context{,_with_skill,_with_workspace_skills}`（isolated_context 家族更名） |
 //! | 角色和职能 | `ContextPort`（+context_port 模块 glob 面）、`SessionManagementPort`、`MainSessionWiring`（生产协调器）+ `OwnedSessionSharedPermit`、适配器实现体（composition 装配面） |
 //! | 数据和生命周期 | 36 个 Data（ContextRequest/StepReceipt/Compact*/ToolReceipt*/Session 展示类）；session 持久化内核（SessionCodec/Generation 族等）已内部化 pub(crate) |
-//! | Error | SessionManagementError/ContextPortError/ContextAppendError/AcceptedInputError（活跃 match 保留）；MainSessionError 内部化（wire 出口统一 SdkError） |
+//! | Error | `share::error::DomainError`（5 个边界错误枚举已折叠，变体粒度经 `error_codes` 细分码）；MainSessionError 内部化（wire 出口统一 SdkError） |
 //!
 //! main_session 模块整面已收编（#1863）：Gate 族/BoundMainRun/GateAware 族/MainSessionError
 //! 不再经 `context::main_session` 穿透，crate 内经 `application::main_session` 路径。
@@ -21,6 +21,7 @@
 ///
 /// 设计文档：`docs/design/02-modules/context-management/README.md`
 mod constants;
+pub mod error_codes;
 pub(crate) use constants::LOG_TARGET;
 
 mod adapters;
@@ -44,8 +45,7 @@ pub use domain::reminder::{
     ReminderPriority, ReminderSnapshot, ReminderSource,
 };
 pub use domain::session::{
-    SessionListEntryData, SessionManagementError, SessionMetadataUpdateData,
-    SessionRestoreStepData, SessionResumeViewData,
+    SessionListEntryData, SessionMetadataUpdateData, SessionRestoreStepData, SessionResumeViewData,
 };
 pub use ports::SessionManagementPort;
 
@@ -84,20 +84,19 @@ pub(crate) use domain::session::{
 #[cfg(test)]
 pub(crate) use domain::ContextMessages;
 pub use domain::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, ContextAppendData,
-    ContextRequestId, SessionRevision, SystemBlock, Urgency,
+    AcceptedInputAppendData, AcceptedInputReceiptData, ContextAppendData, ContextRequestId,
+    SessionRevision, SystemBlock, Urgency,
 };
 pub use domain::{
     AppendReceiptData, BackgroundProcessCompletionStatus, BackgroundProcessReminderItemData,
     CleanupConfirmation, CompactGenerationFailureData, CompactGenerationFailureKind,
     CompactGenerationOutputData, CompactOutcome, CompactRequestData, CompactResult,
     CompactSkipReason, CompactSummaryQuality, CompactTrigger, CompactionDecisionData,
-    ContentFingerprint, ContextAppendError, ContextPortError, ContextRequestData,
-    ContextWindowData, DecisionReason, FinalizeCause, InvocationReminderData, Language,
-    ManualCompactRequestData, MemoryRecallEntryData, StepReceiptData, SystemPromptSpecData,
-    TaskProgressReminderData, TaskProgressReminderItemData, TaskProgressStatus, TokenBudget,
-    ToolCallIdentityData, ToolCallReceiptData, ToolOutcomeKindData, ToolReceiptMutationData,
-    ToolReceiptMutationError, ToolReceiptMutationReceiptData, ToolSchemaData,
+    ContentFingerprint, ContextRequestData, ContextWindowData, DecisionReason, FinalizeCause,
+    InvocationReminderData, Language, ManualCompactRequestData, MemoryRecallEntryData,
+    StepReceiptData, SystemPromptSpecData, TaskProgressReminderData, TaskProgressReminderItemData,
+    TaskProgressStatus, TokenBudget, ToolCallIdentityData, ToolCallReceiptData,
+    ToolOutcomeKindData, ToolReceiptMutationData, ToolReceiptMutationReceiptData, ToolSchemaData,
     ToolTerminalReceiptData,
 };
 #[cfg(test)]

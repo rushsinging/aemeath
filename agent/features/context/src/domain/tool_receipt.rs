@@ -1,5 +1,6 @@
 use super::{SessionId, ToolOutcomeKindData};
 use serde::{Deserialize, Serialize};
+use share::error::DomainError;
 use share::ids::{RunId, RunStepId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,9 +125,12 @@ impl ToolCallReceiptData {
     pub fn advance(
         self,
         mutation: ToolReceiptMutationData,
-    ) -> Result<ToolReceiptMutationReceiptData, ToolReceiptMutationError> {
+    ) -> Result<ToolReceiptMutationReceiptData, DomainError> {
         if self.identity != mutation.identity {
-            return Err(ToolReceiptMutationError::IdentityMismatch);
+            return Err(
+                DomainError::invalid("context", "Tool receipt identity 不匹配")
+                    .with_code(crate::error_codes::IDENTITY_MISMATCH),
+            );
         }
 
         let next = match (&self.state, mutation.next) {
@@ -154,9 +158,12 @@ impl ToolCallReceiptData {
                 });
             }
             (ToolCallState::Terminal(_), _) => {
-                return Err(ToolReceiptMutationError::TerminalStateConflict {
-                    call_id: self.identity.runtime_call_id.clone(),
-                });
+                let call_id = self.identity.runtime_call_id.clone();
+                return Err(DomainError::invalid(
+                    "context",
+                    format!("Tool receipt 已终态，禁止覆盖：{call_id}"),
+                )
+                .with_code(crate::error_codes::TERMINAL_STATE_CONFLICT));
             }
             (current, next) if current == &next => {
                 return Ok(ToolReceiptMutationReceiptData {
@@ -164,7 +171,10 @@ impl ToolCallReceiptData {
                     changed: false,
                 });
             }
-            _ => return Err(ToolReceiptMutationError::InvalidTransition),
+            _ => {
+                return Err(DomainError::invalid("context", "Tool receipt 状态转换非法")
+                    .with_code(crate::error_codes::INVALID_TRANSITION))
+            }
         };
 
         Ok(ToolReceiptMutationReceiptData {
@@ -222,18 +232,4 @@ impl ToolReceiptMutationData {
 pub struct ToolReceiptMutationReceiptData {
     pub receipt: ToolCallReceiptData,
     pub changed: bool,
-}
-
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
-pub enum ToolReceiptMutationError {
-    #[error("Tool receipt 对应 Session 不存在：{0}")]
-    SessionNotFound(SessionId),
-    #[error("Tool receipt 持久化失败：{0}")]
-    Storage(String),
-    #[error("Tool receipt identity 不匹配")]
-    IdentityMismatch,
-    #[error("Tool receipt 状态转换非法")]
-    InvalidTransition,
-    #[error("Tool receipt 已终态，禁止覆盖：{call_id}")]
-    TerminalStateConflict { call_id: String },
 }

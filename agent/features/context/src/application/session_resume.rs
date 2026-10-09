@@ -1,12 +1,14 @@
 use std::time::Instant;
 
-use crate::domain::session::{SessionManagementError, SessionRestore, SessionResumeViewData};
+use share::error::DomainError;
+
+use crate::domain::session::{SessionRestore, SessionResumeViewData};
 
 impl crate::application::MainSessionWiring {
     pub async fn resume_session(
         &self,
         session_id: &str,
-    ) -> Result<SessionResumeViewData, SessionManagementError> {
+    ) -> Result<SessionResumeViewData, DomainError> {
         let started = Instant::now();
         let project = self.project_identity();
         log::debug!(
@@ -34,9 +36,10 @@ impl crate::application::MainSessionWiring {
             "resume_lifecycle boundary=context_session_resume stage=resume_prepare_started session_id={}",
             session_id
         );
-        self.resume_prepared(session)
-            .await
-            .map_err(|error| SessionManagementError::Resume(error.to_string()))?;
+        self.resume_prepared(session).await.map_err(|error| {
+            DomainError::storage("context", format!("Session 恢复失败：{error}"))
+                .with_code(crate::error_codes::SESSION_RESUME)
+        })?;
         log::debug!(
             target: crate::LOG_TARGET,
             "resume_lifecycle boundary=context_session_resume stage=resume_prepare_completed session_id={}",

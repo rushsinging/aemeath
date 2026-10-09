@@ -5,15 +5,15 @@ use crate::domain::ContextMessage;
 use crate::{
     AcceptedInputAppendData, AcceptedInputReceiptData, AppendReceiptData, CompactOutcome,
     CompactRequestData, CompactResult, CompactTrigger, CompactionDecisionData, ContentFingerprint,
-    ContextAppendData, ContextAppendError, ContextPort, ContextPortError, ContextRequestData,
-    ContextRequestId, ContextWindowData, DecisionReason, FinalizeCause, Language,
-    ManualCompactRequestData, SessionRevision, StepReceiptData, SystemPromptSpecData, TokenBudget,
-    ToolOutcomeKindData, Urgency,
+    ContextAppendData, ContextPort, ContextRequestData, ContextRequestId, ContextWindowData,
+    DecisionReason, FinalizeCause, Language, ManualCompactRequestData, SessionRevision,
+    StepReceiptData, SystemPromptSpecData, TokenBudget, ToolOutcomeKindData, Urgency,
 };
 use async_trait::async_trait;
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
+use share::error::DomainError;
 use share::message::Message;
 use share::reasoning::ReasoningLevel;
 
@@ -58,7 +58,7 @@ impl ContextPort for FakeContextPort {
     async fn build_window(
         &self,
         request: &ContextRequestData,
-    ) -> Result<ContextWindowData, ContextPortError> {
+    ) -> Result<ContextWindowData, DomainError> {
         Ok(ContextWindowData {
             backing_revision: SessionRevision::new(3),
             system_blocks: vec![],
@@ -72,14 +72,11 @@ impl ContextPort for FakeContextPort {
     async fn needs_compaction(
         &self,
         _request: &ContextRequestData,
-    ) -> Result<CompactionDecisionData, ContextPortError> {
+    ) -> Result<CompactionDecisionData, DomainError> {
         Ok(decision())
     }
 
-    async fn compact(
-        &self,
-        request: &CompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
+    async fn compact(&self, request: &CompactRequestData) -> Result<CompactOutcome, DomainError> {
         assert_eq!(request.trigger, CompactTrigger::Automatic);
         Ok(CompactOutcome::Committed(CompactResult {
             summary: "summary".into(),
@@ -92,7 +89,7 @@ impl ContextPort for FakeContextPort {
     async fn manual_compact(
         &self,
         request: &ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
+    ) -> Result<CompactOutcome, DomainError> {
         Ok(CompactOutcome::Committed(CompactResult {
             summary: format!("manual summary for {}", request.session_id.as_str()),
             recent_messages: vec![],
@@ -101,14 +98,14 @@ impl ContextPort for FakeContextPort {
         }))
     }
 
-    async fn clear_session(&self, _session_id: &SessionId) -> Result<(), ContextPortError> {
+    async fn clear_session(&self, _session_id: &SessionId) -> Result<(), DomainError> {
         Ok(())
     }
 
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, crate::AcceptedInputError> {
+    ) -> Result<AcceptedInputReceiptData, DomainError> {
         Ok(AcceptedInputReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
@@ -120,7 +117,7 @@ impl ContextPort for FakeContextPort {
     async fn append_and_persist(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError> {
+    ) -> Result<AppendReceiptData, DomainError> {
         Ok(AppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
@@ -252,22 +249,32 @@ async fn append_returns_typed_receipt_and_conflict_errors_remain_distinct() {
     assert_eq!(receipt.committed_revision, SessionRevision::new(4));
     assert_eq!(receipt.fingerprint, append.fingerprint);
 
-    let revision_conflict = ContextAppendError::RevisionConflict {
-        expected: SessionRevision::new(3),
-        actual: SessionRevision::new(4),
-    };
-    let content_conflict = ContextAppendError::ContentConflict {
-        run_id: append.run_id,
-        step_id: append.step_id,
-    };
-    assert!(matches!(
-        revision_conflict,
-        ContextAppendError::RevisionConflict { .. }
-    ));
-    assert!(matches!(
-        content_conflict,
-        ContextAppendError::ContentConflict { .. }
-    ));
+    let revision_conflict = DomainError::invalid(
+        "context",
+        format!(
+            "Session revision 冲突：期望 {:?}，实际 {:?}",
+            SessionRevision::new(3),
+            SessionRevision::new(4)
+        ),
+    )
+    .with_code(crate::error_codes::REVISION_CONFLICT);
+    let content_conflict = DomainError::invalid(
+        "context",
+        format!(
+            "RunStep 内容冲突：run={} step={}",
+            append.run_id, append.step_id
+        ),
+    )
+    .with_code(crate::error_codes::CONTENT_CONFLICT);
+    assert_eq!(
+        revision_conflict.code(),
+        Some(crate::error_codes::REVISION_CONFLICT)
+    );
+    assert_eq!(
+        content_conflict.code(),
+        Some(crate::error_codes::CONTENT_CONFLICT)
+    );
+    assert_ne!(revision_conflict.code(), content_conflict.code());
 }
 
 #[test]

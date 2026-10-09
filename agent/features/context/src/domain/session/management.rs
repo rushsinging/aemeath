@@ -145,19 +145,3 @@ pub struct SessionResumeViewData {
     pub trimmed: usize,
     pub repaired: usize,
 }
-
-#[derive(Debug, thiserror::Error)]
-pub enum SessionManagementError {
-    #[error("Session 不存在：{0}")]
-    NotFound(String),
-    #[error("Session 不属于当前项目：{0}")]
-    ProjectMismatch(String),
-    #[error("Session 数据损坏：{0}")]
-    Corrupt(String),
-    #[error("Session schema 版本过新：{0}")]
-    UnsupportedFutureVersion(u32),
-    #[error("Session 存储失败：{0}")]
-    Storage(String),
-    #[error("Session 恢复失败：{0}")]
-    Resume(String),
-}

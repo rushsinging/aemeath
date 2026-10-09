@@ -6,13 +6,13 @@ use async_trait::async_trait;
 use crate::application::reminder_pipeline::ReminderPipeline;
 use crate::domain::reminder::{ReminderEventSource, ReminderSource};
 use crate::domain::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, CompactionDecisionData, ContextAppendData,
-    ContextAppendError, ContextMessage, ContextPortError, ContextRequestData, ContextWindowData,
-    ManualCompactRequestData, RunId, SessionId, SystemBlock, ToolReceiptMutationData,
-    ToolReceiptMutationError, ToolReceiptMutationReceiptData,
+    AcceptedInputAppendData, AcceptedInputReceiptData, AppendReceiptData, CompactOutcome,
+    CompactRequestData, CompactionDecisionData, ContextAppendData, ContextMessage,
+    ContextRequestData, ContextWindowData, ManualCompactRequestData, RunId, SessionId, SystemBlock,
+    ToolReceiptMutationData, ToolReceiptMutationReceiptData,
 };
 use crate::ports::{ContextMemorySource, ContextPort, ContextPromptSource, SessionRepository};
+use share::error::DomainError;
 
 pub(crate) struct ContextApplicationService {
     session: Arc<dyn SessionRepository>,
@@ -59,7 +59,7 @@ impl ContextApplicationService {
     async fn injection_for(
         &self,
         request: &ContextRequestData,
-    ) -> Result<crate::ports::MemoryMaterialization, ContextPortError> {
+    ) -> Result<crate::ports::MemoryMaterialization, DomainError> {
         let refresh = self
             .injection_refresh_pending
             .swap(false, std::sync::atomic::Ordering::Relaxed);
@@ -74,11 +74,10 @@ impl ContextApplicationService {
                 return Ok(frozen.materialization.clone());
             }
         }
-        let materialization = self
-            .memory
-            .materialize(request)
-            .await
-            .map_err(ContextPortError::MemoryMaterialization)?;
+        let materialization = self.memory.materialize(request).await.map_err(|error| {
+            DomainError::unavailable("context", format!("Memory 物化失败：{error}"))
+                .with_code(crate::error_codes::MEMORY_MATERIALIZATION)
+        })?;
         *self
             .frozen_injection
             .lock()
@@ -140,7 +139,7 @@ impl ContextApplicationService {
     async fn build_candidate(
         &self,
         request: &ContextRequestData,
-    ) -> Result<ContextWindowData, ContextPortError> {
+    ) -> Result<ContextWindowData, DomainError> {
         #[cfg(test)]
         let build_started = std::time::Instant::now();
         #[cfg(test)]
@@ -149,7 +148,10 @@ impl ContextApplicationService {
             .session
             .snapshot(&request.session_id)
             .await
-            .map_err(ContextPortError::SessionRepository)?;
+            .map_err(|error| {
+                DomainError::storage("context", format!("Session backing 读取失败：{error}"))
+                    .with_code(crate::error_codes::SESSION_REPOSITORY)
+            })?;
         #[cfg(test)]
         {
             let (snapshot_committed_steps, snapshot_shared_messages) =
@@ -199,11 +201,10 @@ impl ContextApplicationService {
 
         #[cfg(test)]
         let prompt_started = std::time::Instant::now();
-        let prompt = self
-            .prompt
-            .materialize(request)
-            .await
-            .map_err(ContextPortError::PromptMaterialization)?;
+        let prompt = self.prompt.materialize(request).await.map_err(|error| {
+            DomainError::unavailable("context", format!("Prompt 物化失败：{error}"))
+                .with_code(crate::error_codes::PROMPT_MATERIALIZATION)
+        })?;
         #[cfg(test)]
         crate::application::performance::record_prompt(prompt_started.elapsed());
         #[cfg(test)]
@@ -223,18 +224,26 @@ impl ContextApplicationService {
             let summary = if estimated_tokens > budget {
                 let decoded = crate::domain::compact::CanonicalCompactSummary::decode(&summary)
                     .map_err(|error| {
-                        ContextPortError::Compact(format!(
-                            "active_summary 超出预算且无法解析为 canonical checkpoint：{error}"
-                        ))
+                        DomainError::unavailable(
+                            "context",
+                            format!(
+                                "Context 压缩失败：active_summary 超出预算且无法解析为 canonical checkpoint：{error}"
+                            ),
+                        )
+                        .with_code(crate::error_codes::COMPACT)
                     })?;
                 let task_state_companion = decoded.task_state_companion().map(str::to_string);
                 let bounded_checkpoint = decoded
                     .into_checkpoint()
                     .degrade_to_budget(budget)
                     .map_err(|error| {
-                        ContextPortError::Compact(format!(
-                            "active_summary 超出预算且无法安全降级：{error}"
-                        ))
+                        DomainError::unavailable(
+                            "context",
+                            format!(
+                                "Context 压缩失败：active_summary 超出预算且无法安全降级：{error}"
+                            ),
+                        )
+                        .with_code(crate::error_codes::COMPACT)
                     })?;
                 let bounded_summary = match task_state_companion {
                     Some(companion) => format!(
@@ -246,9 +255,13 @@ impl ContextApplicationService {
                 };
                 let bounded_tokens = crate::domain::token_budget::estimate_tokens(&bounded_summary);
                 if bounded_tokens > budget {
-                    return Err(ContextPortError::Compact(format!(
-                        "active_summary 结构化降级后仍超出预算：{bounded_tokens} tokens > budget {budget}"
-                    )));
+                    return Err(DomainError::unavailable(
+                        "context",
+                        format!(
+                            "Context 压缩失败：active_summary 结构化降级后仍超出预算：{bounded_tokens} tokens > budget {budget}"
+                        ),
+                    )
+                    .with_code(crate::error_codes::COMPACT));
                 }
                 log::warn!(
                     target: crate::LOG_TARGET,
@@ -384,21 +397,18 @@ impl ContextPort for ContextApplicationService {
     async fn build_window(
         &self,
         request: &ContextRequestData,
-    ) -> Result<ContextWindowData, ContextPortError> {
+    ) -> Result<ContextWindowData, DomainError> {
         self.build_candidate(request).await
     }
 
     async fn needs_compaction(
         &self,
         request: &ContextRequestData,
-    ) -> Result<CompactionDecisionData, ContextPortError> {
+    ) -> Result<CompactionDecisionData, DomainError> {
         Ok(self.build_candidate(request).await?.compaction_decision)
     }
 
-    async fn compact(
-        &self,
-        request: &CompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
+    async fn compact(&self, request: &CompactRequestData) -> Result<CompactOutcome, DomainError> {
         let outcome = self.session.commit_compaction(request).await?;
         // 仅在真实提交后体检：Skipped 时会话状态未变，重建无意义。
         if matches!(outcome, CompactOutcome::Committed(_)) {
@@ -423,7 +433,7 @@ impl ContextPort for ContextApplicationService {
     async fn manual_compact(
         &self,
         request: &ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
+    ) -> Result<CompactOutcome, DomainError> {
         let outcome = self.session.commit_manual_compaction(request).await?;
         if matches!(outcome, CompactOutcome::Committed(_)) {
             // #1777：手动 compact 同样刷新冻结的注入内容。
@@ -432,7 +442,7 @@ impl ContextPort for ContextApplicationService {
         Ok(outcome)
     }
 
-    async fn clear_session(&self, session_id: &SessionId) -> Result<(), ContextPortError> {
+    async fn clear_session(&self, session_id: &SessionId) -> Result<(), DomainError> {
         let cleared = self.session.clear(session_id).await?;
         // 清除的是该 Session 的冻结注入，下一次窗口重新注入。
         let mut frozen = self
@@ -451,14 +461,14 @@ impl ContextPort for ContextApplicationService {
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
+    ) -> Result<AcceptedInputReceiptData, DomainError> {
         self.session.append_accepted_input(append).await
     }
 
     async fn advance_tool_receipt(
         &self,
         mutation: ToolReceiptMutationData,
-    ) -> Result<ToolReceiptMutationReceiptData, ToolReceiptMutationError> {
+    ) -> Result<ToolReceiptMutationReceiptData, DomainError> {
         self.session.advance_tool_receipt(mutation).await
     }
 
@@ -467,7 +477,7 @@ impl ContextPort for ContextApplicationService {
         session_id: &SessionId,
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::domain::StepReceiptData>, ToolReceiptMutationError> {
+    ) -> Result<Vec<crate::domain::StepReceiptData>, DomainError> {
         self.session
             .step_receipts(session_id, run_id, step_id)
             .await
@@ -486,7 +496,7 @@ impl ContextPort for ContextApplicationService {
     async fn append_and_persist(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError> {
+    ) -> Result<AppendReceiptData, DomainError> {
         // #1848 尾部注入类 reminder 显式落盘：flush 本 Run 待落盘的注入
         // 消息并前置到提交消息头部（canonical 顺序 u → R → a/tool），
         // 使注入轮后的请求前缀逐 token 稳定（prompt cache 命中）。

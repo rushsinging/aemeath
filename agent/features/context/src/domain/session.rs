@@ -40,7 +40,7 @@ pub use generation::{
 #[allow(unused_imports)]
 pub use generation::{SessionMemberBytes, SessionMetadataMember, SessionStateMember};
 pub use management::{
-    same_project_identity, session_matches_project, SessionListEntryData, SessionManagementError,
+    same_project_identity, session_matches_project, SessionListEntryData,
     SessionMetadataUpdateData, SessionResumeLoad, SessionResumeViewData,
 };
 pub(crate) use project_layout::project_dir_segment;

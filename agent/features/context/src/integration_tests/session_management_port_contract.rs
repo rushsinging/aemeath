@@ -134,12 +134,12 @@ async fn session_management_filters_and_loads_only_matching_project_identity() {
     // 在消费方同归 SessionResumeFailureKind::NotFound，语义等价且更准确。
     assert!(matches!(
         port.load_for_project("project-b", &same_git_other_worktree).await,
-        Err(crate::SessionManagementError::NotFound(id)) if id == "project-b"
+        Err(err) if err.message() == "Session 不存在：project-b"
     ));
     assert!(matches!(
         port.export_for_project("project-b", &same_git_other_worktree)
             .await,
-        Err(crate::SessionManagementError::NotFound(id)) if id == "project-b"
+        Err(err) if err.message() == "Session 不存在：project-b"
     ));
     assert!(matches!(
         port.update_metadata_for_project(
@@ -151,12 +151,12 @@ async fn session_management_filters_and_loads_only_matching_project_identity() {
             },
         )
         .await,
-        Err(crate::SessionManagementError::NotFound(id)) if id == "project-b"
+        Err(err) if err.message() == "Session 不存在：project-b"
     ));
     assert!(matches!(
         port.delete_for_project("project-b", &same_git_other_worktree)
             .await,
-        Err(crate::SessionManagementError::NotFound(id)) if id == "project-b"
+        Err(err) if err.message() == "Session 不存在：project-b"
     ));
     let exported = port
         .export_for_project("project-a", &same_git_other_worktree)
@@ -260,7 +260,7 @@ async fn session_management_imports_exports_updates_and_deletes_through_injected
         .expect("delete session");
     assert!(matches!(
         port.load_for_project("session-lifecycle", &project).await,
-        Err(crate::SessionManagementError::NotFound(_))
+        Err(err) if err.code() == Some(crate::error_codes::SESSION_NOT_FOUND)
     ));
     std::fs::remove_dir_all(root).expect("remove storage root");
 }

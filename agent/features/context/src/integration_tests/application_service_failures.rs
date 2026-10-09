@@ -32,21 +32,21 @@ impl SessionRepository for Session {
     async fn append_finalized(
         &self,
         _append: &ContextAppendData,
-    ) -> Result<crate::AppendReceiptData, crate::ContextAppendError> {
+    ) -> Result<crate::AppendReceiptData, share::error::DomainError> {
         unreachable!()
     }
 
     async fn commit_compaction(
         &self,
         _request: &crate::CompactRequestData,
-    ) -> Result<crate::CompactOutcome, crate::ContextPortError> {
+    ) -> Result<crate::CompactOutcome, share::error::DomainError> {
         unreachable!()
     }
 
     async fn commit_manual_compaction(
         &self,
         _request: &crate::ManualCompactRequestData,
-    ) -> Result<crate::CompactOutcome, crate::ContextPortError> {
+    ) -> Result<crate::CompactOutcome, share::error::DomainError> {
         Ok(crate::CompactOutcome::Committed(crate::CompactResult {
             summary: "manual".into(),
             recent_messages: vec![],
@@ -55,7 +55,7 @@ impl SessionRepository for Session {
         }))
     }
 
-    async fn clear(&self, _session_id: &SessionId) -> Result<(), crate::ContextPortError> {
+    async fn clear(&self, _session_id: &SessionId) -> Result<(), share::error::DomainError> {
         Ok(())
     }
 }
@@ -121,7 +121,7 @@ async fn prompt_failure_is_typed_and_stops_before_memory_materialization() {
 
     assert!(matches!(
         service.build_window(&request()).await,
-        Err(crate::ContextPortError::PromptMaterialization(msg)) if msg == "guidance unavailable"
+        Err(err) if err.message() == "Prompt 物化失败：guidance unavailable"
     ));
     assert_eq!(memory_calls.load(Ordering::SeqCst), 0);
 }

@@ -8,13 +8,13 @@ use crate::domain::session::{
     FinalizedOutcomeRecord, SessionCommitPlan, SnapshotState,
 };
 use crate::domain::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, CompactSkipReason, ContextAppendData, ContextAppendError,
-    ContextPortError, ManualCompactRequestData, SessionId, SessionRevision,
-    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
+    AcceptedInputAppendData, AcceptedInputReceiptData, AppendReceiptData, CompactOutcome,
+    CompactRequestData, CompactSkipReason, ContextAppendData, ManualCompactRequestData, SessionId,
+    SessionRevision, ToolReceiptMutationData, ToolReceiptMutationReceiptData,
 };
 use crate::ports::CompactGenerator;
 use crate::ports::{ContextPort, MainContextFactory, SessionRepository, SessionSnapshot};
+use share::error::DomainError;
 
 #[async_trait]
 pub trait CanonicalSessionWriter: Send + Sync {
@@ -368,7 +368,7 @@ struct AutoCompactAttemptPermit {
 }
 
 impl AutoCompactAttemptPermit {
-    fn finish(mut self, outcome: &Result<CompactOutcome, ContextPortError>) {
+    fn finish(mut self, outcome: &Result<CompactOutcome, DomainError>) {
         let mut state = self
             .state
             .lock()
@@ -585,7 +585,7 @@ impl CanonicalSessionRepository {
     async fn commit_automatic_compaction(
         &self,
         request: &CompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
+    ) -> Result<CompactOutcome, DomainError> {
         let source = self
             .freeze_compact_source(&request.source.session_id, Some(request.source_revision))
             .await?;
@@ -629,15 +629,22 @@ impl CanonicalSessionRepository {
         &self,
         session_id: &SessionId,
         expected_revision: Option<SessionRevision>,
-    ) -> Result<CompactSource, ContextPortError> {
+    ) -> Result<CompactSource, DomainError> {
         let _mutation = self.mutation_gate.lock().await;
         let current = self
             .session
             .read()
-            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))?
+            .map_err(|error| {
+                share::error::DomainError::storage("context", format!("{error}"))
+                    .with_code(crate::error_codes::SESSION_REPOSITORY)
+            })?
             .clone();
         if current.id != session_id.as_str() {
-            return Err(ContextPortError::SessionNotFound(session_id.clone()));
+            return Err(share::error::DomainError::invalid(
+                "context",
+                format!("Session 不存在：{session_id}"),
+            )
+            .with_code(crate::error_codes::SESSION_NOT_FOUND));
         }
         let revision = SessionRevision::new(current.revision);
         if let Some(expected_revision) = expected_revision {
@@ -725,15 +732,22 @@ impl CanonicalSessionRepository {
         session_id: &SessionId,
         source: &CompactSource,
         generated: GeneratedCompact,
-    ) -> Result<CompactOutcome, ContextPortError> {
+    ) -> Result<CompactOutcome, DomainError> {
         let _mutation = self.mutation_gate.lock().await;
         let current = self
             .session
             .read()
-            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))?
+            .map_err(|error| {
+                share::error::DomainError::storage("context", format!("{error}"))
+                    .with_code(crate::error_codes::SESSION_REPOSITORY)
+            })?
             .clone();
         if current.id != session_id.as_str() {
-            return Err(ContextPortError::SessionNotFound(session_id.clone()));
+            return Err(share::error::DomainError::invalid(
+                "context",
+                format!("Session 不存在：{session_id}"),
+            )
+            .with_code(crate::error_codes::SESSION_NOT_FOUND));
         }
         let actual_revision = SessionRevision::new(current.revision);
         if actual_revision != source.revision {
@@ -766,9 +780,15 @@ impl CanonicalSessionRepository {
         candidate.updated_at = crate::domain::session::now_iso();
         self.persist_candidate(&current, &candidate)
             .await
-            .map_err(ContextPortError::Compact)?;
+            .map_err(|error| {
+                share::error::DomainError::unavailable("context", format!("{error}"))
+                    .with_code(crate::error_codes::COMPACT)
+            })?;
         self.publish_generation(&current, candidate)
-            .map_err(ContextPortError::SessionRepository)?;
+            .map_err(|error| {
+                share::error::DomainError::storage("context", format!("{error}"))
+                    .with_code(crate::error_codes::SESSION_REPOSITORY)
+            })?;
         Ok(CompactOutcome::Committed(crate::domain::CompactResult {
             summary: generated.summary,
             recent_messages: generated.recent_messages,
@@ -780,10 +800,12 @@ impl CanonicalSessionRepository {
     fn compact_revision_conflict(
         expected: SessionRevision,
         actual: SessionRevision,
-    ) -> ContextPortError {
-        ContextPortError::Compact(format!(
-            "Session revision 冲突：期望 {expected:?}，实际 {actual:?}"
-        ))
+    ) -> DomainError {
+        share::error::DomainError::unavailable(
+            "context",
+            format!("Context 压缩失败：Session revision 冲突：{expected:?}，实际 {actual:?}"),
+        )
+        .with_code(crate::error_codes::COMPACT)
     }
 
     fn receipt(append: &ContextAppendData, revision: SessionRevision) -> AppendReceiptData {
@@ -900,17 +922,25 @@ impl SessionRepository for CanonicalSessionRepository {
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
+    ) -> Result<AcceptedInputReceiptData, DomainError> {
         let _mutation = self.mutation_gate.lock().await;
         let current = self
             .session
             .read()
-            .map_err(|error| AcceptedInputError::Storage(error.to_string()))?
+            .map_err(|error| {
+                share::error::DomainError::storage(
+                    "context",
+                    format!("Session 已接受输入持久化失败：{error}"),
+                )
+                .with_code(crate::error_codes::ACCEPTED_INPUT_STORAGE)
+            })?
             .clone();
         if current.id != append.session_id.as_str() {
-            return Err(AcceptedInputError::SessionNotFound(
-                append.session_id.clone(),
-            ));
+            return Err(share::error::DomainError::invalid(
+                "context",
+                format!("Session 不存在：{}", append.session_id),
+            )
+            .with_code(crate::error_codes::SESSION_NOT_FOUND));
         }
         if let Some(input) = current.accepted_input(append.run_id.as_ref(), append.step_id.as_str())
         {
@@ -920,10 +950,14 @@ impl SessionRepository for CanonicalSessionRepository {
                     SessionRevision::new(input.committed_revision),
                 ));
             }
-            return Err(AcceptedInputError::ContentConflict {
-                run_id: append.run_id.clone(),
-                step_id: append.step_id.clone(),
-            });
+            return Err(share::error::DomainError::invalid(
+                "context",
+                format!(
+                    "RunStep 已接受输入冲突：run={} step={}",
+                    append.run_id, append.step_id
+                ),
+            )
+            .with_code(crate::error_codes::ACCEPTED_INPUT_CONFLICT));
         }
         let mut candidate = (*current).clone();
         candidate.updated_at = crate::domain::session::now_iso();
@@ -951,27 +985,50 @@ impl SessionRepository for CanonicalSessionRepository {
                 &input,
             )
             .await
-            .map_err(AcceptedInputError::Storage)?;
+            .map_err(|error| {
+                share::error::DomainError::storage(
+                    "context",
+                    format!("Session 已接受输入持久化失败：{error}"),
+                )
+                .with_code(crate::error_codes::ACCEPTED_INPUT_STORAGE)
+            })?;
         let revision = SessionRevision::new(candidate.revision);
         self.publish_generation(&current, candidate)
-            .map_err(AcceptedInputError::Storage)?;
+            .map_err(|error| {
+                share::error::DomainError::storage(
+                    "context",
+                    format!("Session 已接受输入持久化失败：{error}"),
+                )
+                .with_code(crate::error_codes::ACCEPTED_INPUT_STORAGE)
+            })?;
         Ok(Self::accepted_receipt(append, revision))
     }
 
     async fn advance_tool_receipt(
         &self,
         mutation: ToolReceiptMutationData,
-    ) -> Result<ToolReceiptMutationReceiptData, ToolReceiptMutationError> {
+    ) -> Result<ToolReceiptMutationReceiptData, DomainError> {
         let _mutation_guard = self.mutation_gate.lock().await;
         let current = self
             .session
             .read()
-            .map_err(|error| ToolReceiptMutationError::Storage(error.to_string()))?
+            .map_err(|error| {
+                share::error::DomainError::storage(
+                    "context",
+                    format!("Tool receipt 持久化失败：{error}"),
+                )
+                .with_code(crate::error_codes::TOOL_RECEIPT_STORAGE)
+            })?
             .clone();
         if current.id != mutation.identity.session_id.as_str() {
-            return Err(ToolReceiptMutationError::SessionNotFound(
-                mutation.identity.session_id.clone(),
-            ));
+            return Err(share::error::DomainError::invalid(
+                "context",
+                format!(
+                    "Tool receipt 对应 Session 不存在：{}",
+                    mutation.identity.session_id
+                ),
+            )
+            .with_code(crate::error_codes::SESSION_NOT_FOUND));
         }
         if let Some(receipt) = current.tool_receipt(&mutation) {
             let advanced = receipt.clone().advance(mutation.clone())?;
@@ -1002,9 +1059,21 @@ impl SessionRepository for CanonicalSessionRepository {
         self.tool_receipt_writer
             .save(&current.id, revision, &receipt)
             .await
-            .map_err(ToolReceiptMutationError::Storage)?;
+            .map_err(|error| {
+                share::error::DomainError::storage(
+                    "context",
+                    format!("Tool receipt 持久化失败：{error}"),
+                )
+                .with_code(crate::error_codes::TOOL_RECEIPT_STORAGE)
+            })?;
         self.publish_generation(&current, candidate)
-            .map_err(ToolReceiptMutationError::Storage)?;
+            .map_err(|error| {
+                share::error::DomainError::storage(
+                    "context",
+                    format!("Tool receipt 持久化失败：{error}"),
+                )
+                .with_code(crate::error_codes::TOOL_RECEIPT_STORAGE)
+            })?;
         return Ok(ToolReceiptMutationReceiptData {
             receipt,
             changed: true,
@@ -1016,16 +1085,24 @@ impl SessionRepository for CanonicalSessionRepository {
         session_id: &SessionId,
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::domain::StepReceiptData>, ToolReceiptMutationError> {
+    ) -> Result<Vec<crate::domain::StepReceiptData>, DomainError> {
         let current = self
             .session
             .read()
-            .map_err(|error| ToolReceiptMutationError::Storage(error.to_string()))?
+            .map_err(|error| {
+                share::error::DomainError::storage(
+                    "context",
+                    format!("Tool receipt 持久化失败：{error}"),
+                )
+                .with_code(crate::error_codes::TOOL_RECEIPT_STORAGE)
+            })?
             .clone();
         if current.id != session_id.as_str() {
-            return Err(ToolReceiptMutationError::SessionNotFound(
-                session_id.clone(),
-            ));
+            return Err(share::error::DomainError::invalid(
+                "context",
+                format!("Session 不存在：{session_id}"),
+            )
+            .with_code(crate::error_codes::SESSION_NOT_FOUND));
         }
         Ok(current.step_receipts(run_id.as_ref(), step_id.as_str()))
     }
@@ -1076,17 +1153,25 @@ impl SessionRepository for CanonicalSessionRepository {
     async fn append_finalized(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError> {
+    ) -> Result<AppendReceiptData, DomainError> {
         let _mutation = self.mutation_gate.lock().await;
         let current = self
             .session
             .read()
-            .map_err(|error| ContextAppendError::Storage(error.to_string()))?
+            .map_err(|error| {
+                share::error::DomainError::storage(
+                    "context",
+                    format!("Session 持久化失败：{error}"),
+                )
+                .with_code(crate::error_codes::CONTEXT_APPEND_STORAGE)
+            })?
             .clone();
         if current.id != append.session_id.as_str() {
-            return Err(ContextAppendError::SessionNotFound(
-                append.session_id.clone(),
-            ));
+            return Err(share::error::DomainError::invalid(
+                "context",
+                format!("Session 不存在：{}", append.session_id),
+            )
+            .with_code(crate::error_codes::SESSION_NOT_FOUND));
         }
         if let Some(committed) = current
             .committed_steps
@@ -1102,10 +1187,14 @@ impl SessionRepository for CanonicalSessionRepository {
                 .await;
                 return Ok(Self::receipt(append, revision));
             }
-            return Err(ContextAppendError::ContentConflict {
-                run_id: append.run_id.clone(),
-                step_id: append.step_id.clone(),
-            });
+            return Err(share::error::DomainError::invalid(
+                "context",
+                format!(
+                    "RunStep 内容冲突：run={} step={}",
+                    append.run_id, append.step_id
+                ),
+            )
+            .with_code(crate::error_codes::CONTENT_CONFLICT));
         }
         let actual = SessionRevision::new(current.revision);
         if actual != append.expected_revision {
@@ -1121,10 +1210,14 @@ impl SessionRepository for CanonicalSessionRepository {
                 })
                 .is_some_and(|step| step.outcome.is_none());
             if !receipt_only_advances {
-                return Err(ContextAppendError::RevisionConflict {
-                    expected: append.expected_revision,
-                    actual,
-                });
+                return Err(share::error::DomainError::invalid(
+                    "context",
+                    format!(
+                        "Session revision 冲突：期望 {:?}，实际 {:?}",
+                        append.expected_revision, actual
+                    ),
+                )
+                .with_code(crate::error_codes::REVISION_CONFLICT));
             }
         }
 
@@ -1160,10 +1253,22 @@ impl SessionRepository for CanonicalSessionRepository {
 
         self.persist_candidate(&current, &candidate)
             .await
-            .map_err(ContextAppendError::Storage)?;
+            .map_err(|error| {
+                share::error::DomainError::storage(
+                    "context",
+                    format!("Session 持久化失败：{error}"),
+                )
+                .with_code(crate::error_codes::CONTEXT_APPEND_STORAGE)
+            })?;
         let revision = SessionRevision::new(candidate.revision);
         self.publish_generation(&current, candidate)
-            .map_err(ContextAppendError::Storage)?;
+            .map_err(|error| {
+                share::error::DomainError::storage(
+                    "context",
+                    format!("Session 持久化失败：{error}"),
+                )
+                .with_code(crate::error_codes::CONTEXT_APPEND_STORAGE)
+            })?;
         self.acknowledge_finalized_input_ledger(
             &current.id,
             append.run_id.as_ref(),
@@ -1176,7 +1281,7 @@ impl SessionRepository for CanonicalSessionRepository {
     async fn commit_compaction(
         &self,
         request: &CompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
+    ) -> Result<CompactOutcome, DomainError> {
         let Some(attempt) = self.begin_auto_compact_attempt(
             request.source.config_snapshot.auto_compact_failure_limit(),
         ) else {
@@ -1192,7 +1297,7 @@ impl SessionRepository for CanonicalSessionRepository {
     async fn commit_manual_compaction(
         &self,
         request: &ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
+    ) -> Result<CompactOutcome, DomainError> {
         let source = self
             .freeze_compact_source(&request.session_id, None)
             .await?;
@@ -1219,15 +1324,22 @@ impl SessionRepository for CanonicalSessionRepository {
             .await
     }
 
-    async fn clear(&self, session_id: &SessionId) -> Result<(), ContextPortError> {
+    async fn clear(&self, session_id: &SessionId) -> Result<(), DomainError> {
         let _mutation = self.mutation_gate.lock().await;
         let current = self
             .session
             .read()
-            .map_err(|error| ContextPortError::SessionRepository(error.to_string()))?
+            .map_err(|error| {
+                share::error::DomainError::storage("context", format!("{error}"))
+                    .with_code(crate::error_codes::SESSION_REPOSITORY)
+            })?
             .clone();
         if current.id != session_id.as_str() {
-            return Err(ContextPortError::SessionNotFound(session_id.clone()));
+            return Err(share::error::DomainError::invalid(
+                "context",
+                format!("Session 不存在：{session_id}"),
+            )
+            .with_code(crate::error_codes::SESSION_NOT_FOUND));
         }
         let mut candidate = (*current).clone();
         candidate.chats.clear();
@@ -1258,16 +1370,25 @@ impl SessionRepository for CanonicalSessionRepository {
                 self.writer
                     .rebuild_empty_dataset(&current.id, &fallback)
                     .await
-                    .map_err(|_| ContextPortError::SessionRepository(commit_error))?;
+                    .map_err(|_| {
+                        share::error::DomainError::storage("context", format!("{commit_error}"))
+                            .with_code(crate::error_codes::SESSION_REPOSITORY)
+                    })?;
                 fallback
             }
         };
         self.publish_generation(&current, cleared)
-            .map_err(ContextPortError::SessionRepository)?;
+            .map_err(|error| {
+                share::error::DomainError::storage("context", format!("{error}"))
+                    .with_code(crate::error_codes::SESSION_REPOSITORY)
+            })?;
         self.accepted_input_writer
             .delete_all(&current.id)
             .await
-            .map_err(ContextPortError::SessionRepository)?;
+            .map_err(|error| {
+                share::error::DomainError::storage("context", format!("{error}"))
+                    .with_code(crate::error_codes::SESSION_REPOSITORY)
+            })?;
         Ok(())
     }
 }
