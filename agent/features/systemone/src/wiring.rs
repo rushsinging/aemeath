@@ -23,14 +23,10 @@ use std::sync::Arc;
 use crate::domain::ModelManifest;
 use crate::ports::{InvalidAssetKind, ScoringPort};
 
-#[cfg(any(feature = "embedded", test))]
 use std::path::Path;
 
-#[cfg(any(feature = "embedded", test))]
 use crate::adapters::audited::AuditedScoringAdapter;
-#[cfg(any(feature = "embedded", test))]
 use crate::adapters::calibrated::CalibratedScoringAdapter;
-#[cfg(any(feature = "embedded", test))]
 use crate::adapters::calibration_store::CalibrationStore;
 #[cfg(feature = "embedded")]
 use crate::adapters::embedded::EmbeddedScoringAdapter;
@@ -120,11 +116,55 @@ impl std::error::Error for EmbeddedScoringWiringError {}
 /// - `models_dir`：模型安装根（生产为 `share::config::paths::systemone_models_dir()`）。
 /// - `scoring_dir`：校准 artifact 与审计事件落盘目录。
 /// - `manifest`：composition 注入的固定发行 manifest（契约先校验，零 IO 拒绝）。
+/// - `scenarios`：开启的场景标签集合——每个场景独立包一层校准 + 审计外壳
+///   （同一引擎实例，事件按场景归因），返回 `标签 → port` 映射；空集合
+///   fail-closed 返回 typed 错误。
+///
+/// 返回按场景标签分发的 [`ScoringPort`] 映射（Calibrated → Audited 外壳），
+/// 或 typed 错误。
+pub async fn wire_embedded_scoring_per_scenario(
+    models_dir: PathBuf,
+    scoring_dir: PathBuf,
+    manifest: ModelManifest,
+    scenarios: &[&'static str],
+) -> Result<
+    std::collections::BTreeMap<&'static str, Arc<dyn ScoringPort>>,
+    EmbeddedScoringWiringError,
+> {
+    let raw = wire_embedded_scoring_raw(models_dir, manifest.clone()).await?;
+    let mut ports = std::collections::BTreeMap::new();
+    for scenario in scenarios {
+        ports.insert(
+            *scenario,
+            wrap_calibrated_audited(raw.clone(), &manifest, &scoring_dir, scenario),
+        );
+    }
+    Ok(ports)
+}
+
+/// 生产 embedded 评分装配链（单场景便捷入口；等价于
+/// [`wire_embedded_scoring_per_scenario`] 的单场景包装）。
 ///
 /// 返回装配完成的 [`ScoringPort`]（Calibrated → Audited 外壳），或 typed 错误。
 pub async fn wire_embedded_scoring(
     models_dir: PathBuf,
     scoring_dir: PathBuf,
+    manifest: ModelManifest,
+) -> Result<Arc<dyn ScoringPort>, EmbeddedScoringWiringError> {
+    let raw = wire_embedded_scoring_raw(models_dir, manifest.clone()).await?;
+    Ok(wrap_calibrated_audited(
+        raw,
+        &manifest,
+        &scoring_dir,
+        "embedded",
+    ))
+}
+
+/// raw 引擎装配（资产三态解析 → llama worker；不含校准 / 审计外壳）：
+/// composition 按场景自行包装 [`wrap_calibrated_audited`]。
+#[doc(hidden)]
+pub async fn wire_embedded_scoring_raw(
+    models_dir: PathBuf,
     manifest: ModelManifest,
 ) -> Result<Arc<dyn ScoringPort>, EmbeddedScoringWiringError> {
     manifest
@@ -135,12 +175,12 @@ pub async fn wire_embedded_scoring(
     #[cfg(not(feature = "embedded"))]
     {
         // feature 关闭：零 IO fail-closed（不解析资产状态、不启动 worker）。
-        let _ = (models_dir, scoring_dir);
+        let _ = models_dir;
         Err(EmbeddedScoringWiringError::EmbeddedUnavailable)
     }
     #[cfg(feature = "embedded")]
     {
-        let store = LocalModelAssetStore::new(models_dir, manifest.clone()).map_err(|error| {
+        let store = LocalModelAssetStore::new(models_dir, manifest).map_err(|error| {
             EmbeddedScoringWiringError::ManifestInvalid {
                 detail: error.to_string(),
             }
@@ -150,21 +190,18 @@ pub async fn wire_embedded_scoring(
         let embedded = EmbeddedScoringAdapter::start(&state)
             .await
             .map_err(EmbeddedScoringWiringError::from)?;
-        Ok(wrap_calibrated_audited(
-            Arc::new(embedded),
-            &manifest,
-            &scoring_dir,
-        ))
+        Ok(Arc::new(embedded))
     }
 }
 
 /// 校准 + 审计外壳（装配链后两层）：审计 revision MUST 取自
-/// `manifest.engine_revision`，审计事件落在 `scoring_dir/audit.jsonl`。
-#[cfg(any(feature = "embedded", test))]
-pub(crate) fn wrap_calibrated_audited(
+/// `manifest.engine_revision`，审计事件落在 `scoring_dir/audit.jsonl`，
+/// `scenario` 场景标签随每条事件归因。
+pub fn wrap_calibrated_audited(
     inner: Arc<dyn ScoringPort>,
     manifest: &ModelManifest,
     scoring_dir: &Path,
+    scenario: &'static str,
 ) -> Arc<dyn ScoringPort> {
     let store = CalibrationStore::new(scoring_dir.to_path_buf());
     let calibrated = Arc::new(CalibratedScoringAdapter::new(inner, &store));
@@ -173,6 +210,7 @@ pub(crate) fn wrap_calibrated_audited(
         manifest.engine_revision.clone(),
         scoring_dir.join(crate::constants::AUDIT_FILE),
         Arc::new(|| chrono::Utc::now().to_rfc3339()),
+        scenario,
     ))
 }
 

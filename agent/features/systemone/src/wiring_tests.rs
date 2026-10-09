@@ -201,7 +201,12 @@ async fn wrap_calibrated_audited_appends_audit_event_with_manifest_revision() {
     let scoring_dir = temp.path().join("scoring");
     std::fs::create_dir_all(&scoring_dir).expect("scoring 目录创建");
     let manifest = fixture_manifest();
-    let port = wrap_calibrated_audited(Arc::new(StubScoringPort), &manifest, &scoring_dir);
+    let port = wrap_calibrated_audited(
+        Arc::new(StubScoringPort),
+        &manifest,
+        &scoring_dir,
+        "memory_rerank",
+    );
 
     let state = ScoringState::new("用户正在验证审计 revision。").expect("state 构造");
     let questions = vec![ScoringQuestion::choice(

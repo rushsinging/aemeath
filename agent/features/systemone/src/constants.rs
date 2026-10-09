@@ -16,7 +16,6 @@ pub(crate) const OBSERVATIONS_FILE: &str = "observations.jsonl";
 pub(crate) const CALIBRATION_FILE: &str = "calibration.json";
 
 /// 评分审计事件文件名（{scoring_dir}/audit.jsonl）。
-#[cfg(any(feature = "embedded", feature = "http-adapter", test))]
 pub(crate) const AUDIT_FILE: &str = "audit.jsonl";
 
 /// 本构建是否提供 embedded 生产装配（feature `embedded` 编译开关）。

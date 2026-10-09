@@ -163,9 +163,10 @@ pub(crate) fn make_agent(
                 runtime_context.skill_load_state(),
             )
             .with_scoring(
-                // #1835：skill_match 开关开启且评分端口装配时注入 ToolSearch 语义重排。
+                // #1835：skill_match 开关开启且评分端口装配时注入 ToolSearch 语义重排
+                //（读 skill_match 专属槽位，与 memory recall 槽互不串用）。
                 runtime_context
-                    .scoring()
+                    .scoring_for_skill_match()
                     .filter(|_| runtime_context.config_ref().config().scoring().skill_match),
             )
             .with_agent(agent_runner),

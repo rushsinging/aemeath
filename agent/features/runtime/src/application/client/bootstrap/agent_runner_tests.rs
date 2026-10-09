@@ -83,6 +83,7 @@ fn build_agent_runner_constructs_without_panic() {
                 hooks,
                 Arc::new(crate::ports::UnavailableUsageSink),
                 None,
+                None,
             )
         }),
     );

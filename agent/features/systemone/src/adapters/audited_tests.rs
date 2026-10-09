@@ -39,6 +39,7 @@ fn audited_with(
         "kev-0.8b@2026-09-30",
         audit_path,
         fixed_clock(),
+        "memory_rerank",
     )
 }
 
@@ -177,4 +178,31 @@ async fn prompt_fingerprint_stable_for_same_input_and_differs_for_different() {
         events[0]["prompt_sha256"], events[2]["prompt_sha256"],
         "不同输入指纹必须不同"
     );
+}
+
+/// 审计事件携带场景标签：四场景共用引擎时 `audit.jsonl` 逐事件可归因。
+#[tokio::test]
+async fn audit_event_records_scenario_label() {
+    use crate::ports::ScoringPort;
+
+    let temp = tempfile::tempdir().expect("唯一临时目录");
+    let audit_path = temp.path().join("audit.jsonl");
+    let audited = AuditedScoringAdapter::new(
+        std::sync::Arc::new(StubScoringPort {
+            outcome: Ok(vec![
+                ScoringAnswer::noul(0.9, CalibrationLevel::Raw).expect("answer 构造")
+            ]),
+        }),
+        "rev-test",
+        audit_path.clone(),
+        std::sync::Arc::new(|| "2026-10-09T00:00:00Z".to_owned()),
+        "memory_rerank",
+    );
+    let state = crate::domain::ScoringState::new("state 文本").expect("状态合法");
+    let question = crate::domain::ScoringQuestion::noul("完成了吗？", None).expect("题目合法");
+    let _ = audited.answer(&state, &[question]).await.expect("评分成功");
+
+    let line = std::fs::read_to_string(audit_path).expect("审计文件存在");
+    let event: serde_json::Value = serde_json::from_str(line.trim()).expect("审计行是 JSON");
+    assert_eq!(event["scenario"], "memory_rerank", "事件必须带场景标签");
 }

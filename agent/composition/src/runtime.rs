@@ -345,6 +345,7 @@ pub(crate) async fn from_args_with_gateways(
         hook_runner.clone(),
         usage_sink,
         scoring_ports.for_memory_recall.clone(),
+        scoring_ports.for_skill_match.clone(),
     ));
     context::guidance::init_guidance_dir();
     let cwd = args

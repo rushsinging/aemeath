@@ -64,10 +64,10 @@ impl EmbeddedScoringFactory for RecordingFactory {
 
     async fn wire(
         &self,
-        manifest: systemone::ModelManifest,
+        manifest: &systemone::ModelManifest,
     ) -> Result<Arc<dyn systemone::ScoringPort>, systemone::EmbeddedScoringWiringError> {
         self.wired.fetch_add(1, Ordering::SeqCst);
-        *self.last_revision.lock().expect("revision 锁") = Some(manifest.engine_revision);
+        *self.last_revision.lock().expect("revision 锁") = Some(manifest.engine_revision.clone());
         self.result.clone()
     }
 }
@@ -136,6 +136,8 @@ fn assert_no_ports(assignment: &ScoringPortAssignment) {
         "失败/关闭路径必须回退原路径（槽位 None）"
     );
     assert!(assignment.for_memory_recall.is_none());
+    assert!(assignment.for_skill_match.is_none());
+    assert!(assignment.for_policy_triage.is_none());
 }
 
 /// 场景开关全关：零成本——不咨询 manifest 源、不启动装配、无端口。
@@ -446,4 +448,41 @@ fn hf_cdn_redirect_hosts_are_official_hf_domains() {
             "CDN host 必须是 HF 官方域：{host}"
         );
     }
+}
+
+/// 槽位与开关一一对应：skill_match 单开（memory 全关）时 `for_skill_match`
+/// 有端口而 `for_memory_recall` 为 None——修复 skill_match 依赖 recall 槽导致
+/// 的单开静默失效。
+#[tokio::test]
+async fn skill_match_alone_owns_its_slot_without_memory_slots() {
+    let source = RecordingSource::with_manifest(fixture_manifest());
+    let factory = RecordingFactory::returning(true, Ok(Arc::new(StubScoringPort)));
+    let skill_only = share::config::ScoringConfig {
+        skill_match: true,
+        ..share::config::ScoringConfig::default()
+    };
+    let assembly = assemble_scoring_ports_with(&skill_only, &factory, &source).await;
+    assert_eq!(assembly.outcome, ScoringStartupOutcome::Ready);
+    assert!(
+        assembly.assignment.for_skill_match.is_some(),
+        "skill_match 开关开启且装配成功时必须产出自己的槽位"
+    );
+    assert!(assembly.assignment.for_memory_rerank.is_none());
+    assert!(assembly.assignment.for_memory_recall.is_none());
+}
+
+/// 槽位与开关一一对应：policy_triage 单开时产出自己的槽位（消费端接入随
+/// 场景任务交付，槽位先就位保证「开开关加载模型却无人消费」不再发生）。
+#[tokio::test]
+async fn policy_triage_alone_owns_its_slot() {
+    let source = RecordingSource::with_manifest(fixture_manifest());
+    let factory = RecordingFactory::returning(true, Ok(Arc::new(StubScoringPort)));
+    let triage_only = share::config::ScoringConfig {
+        policy_triage: true,
+        ..share::config::ScoringConfig::default()
+    };
+    let assembly = assemble_scoring_ports_with(&triage_only, &factory, &source).await;
+    assert_eq!(assembly.outcome, ScoringStartupOutcome::Ready);
+    assert!(assembly.assignment.for_policy_triage.is_some());
+    assert!(assembly.assignment.for_skill_match.is_none());
 }

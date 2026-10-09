@@ -20,14 +20,19 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-/// System One 评分端口的场景分配：按场景开关分发给 memory rerank 与 memory
-/// recall 消费点（skill match / policy triage 场景端口随各自场景任务补充）。
+/// System One 评分端口的场景分配：四槽与四个场景开关一一对应（开关关闭或
+/// 装配失败为 `None`，消费点回退原路径）。槽位 NEVER 复用跨场景语义——
+/// 消费端按自身场景取槽，杜绝「A 开关点亮 B 场景槽位」的隐性耦合。
 #[derive(Clone, Default)]
 pub struct ScoringPortAssignment {
-    /// memory rerank 场景槽位（开关关闭或装配失败为 `None`，消费点回退原路径）。
+    /// memory rerank 场景槽位（memory search 词法召回 top-N Choice 重排）。
     pub for_memory_rerank: Option<Arc<dyn systemone::ScoringPort>>,
-    /// memory recall 场景槽位（开关关闭或装配失败为 `None`，消费点回退原路径）。
+    /// memory recall 场景槽位（per-message 记忆主动召回 reminder）。
     pub for_memory_recall: Option<Arc<dyn systemone::ScoringPort>>,
+    /// skill match 场景槽位（ToolSearch 语义重排，#1835 口径拍板）。
+    pub for_skill_match: Option<Arc<dyn systemone::ScoringPort>>,
+    /// policy triage 场景槽位（权限/风险预筛，单向加严，消费端随 #1836 接入）。
+    pub for_policy_triage: Option<Arc<dyn systemone::ScoringPort>>,
 }
 
 /// 启动期评分装配结果：variant 即 typed 分类，`detail` 为中文可读原因。
@@ -250,11 +255,22 @@ pub(crate) trait EmbeddedScoringFactory: Send + Sync {
     /// 本构建是否具备 embedded 装配能力（systemone feature `embedded`）。
     fn available(&self) -> bool;
 
-    /// 装配完整链（资产解析 → llama worker → 校准 → 审计）。
+    /// 装配 raw 引擎链（资产解析 → llama worker；不含校准 / 审计外壳）。
     async fn wire(
         &self,
-        manifest: systemone::ModelManifest,
+        manifest: &systemone::ModelManifest,
     ) -> Result<Arc<dyn systemone::ScoringPort>, systemone::EmbeddedScoringWiringError>;
+
+    /// 按场景包装校准 + 审计外壳（生产：`wrap_calibrated_audited`，事件带
+    /// 场景标签归因；测试默认透传 raw，避免测试向真实 scoring 目录落盘）。
+    fn wrap(
+        &self,
+        raw: Arc<dyn systemone::ScoringPort>,
+        manifest: &systemone::ModelManifest,
+        scenario: &'static str,
+    ) -> Arc<dyn systemone::ScoringPort> {
+        raw
+    }
 }
 
 /// 生产发行 manifest 源：当前发行（kev 0.8B 合并 Q8_0，托管于 Hugging Face
@@ -297,14 +313,22 @@ impl EmbeddedScoringFactory for ProductionEmbeddedFactory {
 
     async fn wire(
         &self,
-        manifest: systemone::ModelManifest,
+        manifest: &systemone::ModelManifest,
     ) -> Result<Arc<dyn systemone::ScoringPort>, systemone::EmbeddedScoringWiringError> {
-        systemone::wire_embedded_scoring(
+        systemone::wire_embedded_scoring_raw(
             share::config::paths::systemone_models_dir(),
-            scoring_dir(),
-            manifest,
+            manifest.clone(),
         )
         .await
+    }
+
+    fn wrap(
+        &self,
+        raw: Arc<dyn systemone::ScoringPort>,
+        manifest: &systemone::ModelManifest,
+        scenario: &'static str,
+    ) -> Arc<dyn systemone::ScoringPort> {
+        systemone::wrap_calibrated_audited(raw, manifest, &scoring_dir(), scenario)
     }
 }
 
@@ -352,11 +376,21 @@ pub(crate) async fn assemble_scoring_ports_with(
             outcome: ScoringStartupOutcome::ManifestUnavailable,
         };
     };
-    match factory.wire(manifest).await {
-        Ok(port) => ScoringAssembly {
+    match factory.wire(&manifest).await {
+        Ok(raw_port) => ScoringAssembly {
             assignment: ScoringPortAssignment {
-                for_memory_rerank: scoring.memory_rerank.then(|| port.clone()),
-                for_memory_recall: scoring.memory_recall.then(|| port.clone()),
+                for_memory_rerank: scoring
+                    .memory_rerank
+                    .then(|| factory.wrap(raw_port.clone(), &manifest, "memory_rerank")),
+                for_memory_recall: scoring
+                    .memory_recall
+                    .then(|| factory.wrap(raw_port.clone(), &manifest, "memory_recall")),
+                for_skill_match: scoring
+                    .skill_match
+                    .then(|| factory.wrap(raw_port.clone(), &manifest, "skill_match")),
+                for_policy_triage: scoring
+                    .policy_triage
+                    .then(|| factory.wrap(raw_port.clone(), &manifest, "policy_triage")),
             },
             outcome: ScoringStartupOutcome::Ready,
         },

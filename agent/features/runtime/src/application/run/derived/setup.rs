@@ -434,9 +434,10 @@ impl AgentRunner for CliAgentRunner {
                     derived.skill_load_scope.clone(),
                     derived.instance.context().skill_load_state(),
                 )
-                // #1835：skill_match 开关开启且评分端口装配时注入（与 main run 同判定）。
+                // #1835：skill_match 开关开启且评分端口装配时注入（与 main run
+                // 同判定；读 skill_match 专属槽位，与 memory recall 槽互不串用）。
                 .with_scoring(
-                    derived.instance.context().scoring().filter(|_| {
+                    derived.instance.context().scoring_for_skill_match().filter(|_| {
                         derived
                             .instance
                             .context()

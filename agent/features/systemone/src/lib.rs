@@ -57,7 +57,10 @@ pub use ports::{
     ModelInstallPortError, ModelInstallPortErrorKind, ModelInstallerPort, ModelStagingArea,
     ScoringPort, StagedInstallOutcome,
 };
-pub use wiring::{wire_embedded_scoring, wire_model_download_service, EmbeddedScoringWiringError};
+pub use wiring::{
+    wire_embedded_scoring, wire_embedded_scoring_per_scenario, wire_embedded_scoring_raw,
+    wire_model_download_service, wrap_calibrated_audited, EmbeddedScoringWiringError,
+};
 
 /// Jev HTTP 评分装配链：JevHttp → Calibrated（读温度 artifact）→ Audited（落审计）。
 ///
@@ -78,5 +81,7 @@ pub fn wire_http_scoring_port(
         model.to_owned(),
         scoring_dir.join("audit.jsonl"),
         std::sync::Arc::new(|| chrono::Utc::now().to_rfc3339()),
+        // HTTP 评分仅供测试 / eval 对分（设计 §4.3），场景标签固定 eval。
+        "eval_http",
     ))
 }
