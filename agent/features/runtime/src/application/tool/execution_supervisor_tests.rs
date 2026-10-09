@@ -15,7 +15,9 @@ fn supervisor_uses_earliest_deadline() {
 }
 
 use crate::application::context::coordination::ContextCoordinator;
-use crate::application::tool::execution_supervisor::{SupervisedToolCall, ToolExecutionSupervisor};
+use crate::application::tool::execution_supervisor::{
+    dispatch_started_time, SupervisedToolCall, ToolExecutionSupervisor,
+};
 use async_trait::async_trait;
 use context::SessionId;
 use context::{
@@ -24,7 +26,7 @@ use context::{
     ToolCallIdentityData, ToolReceiptMutationData, ToolReceiptMutationReceiptData,
 };
 use sdk::{RunId, RunStepId};
-use share::ids::BackgroundTaskId;
+use share::ids::BackgroundProcessId;
 use std::sync::{Arc, Mutex};
 use tools::published::execution::{
     CancellationSignal, ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort,
@@ -275,16 +277,16 @@ async fn execute_exceeding_threshold_returns_placeholder_and_backgrounds_receipt
     );
     assert!(
         placeholder_text.split_whitespace().count() <= 12,
-        "占位文案应精简（task id + running in background）：{placeholder_text}"
+        "占位文案应精简（process id + running in background）：{placeholder_text}"
     );
     assert!(
         placeholder_text
             .split_whitespace()
-            .find(|word| word.contains("task_"))
+            .find(|word| word.contains("bgp_"))
             .map(|word| { word.trim_start_matches('(').trim_end_matches(['.', ')']) })
-            .and_then(|task_id| BackgroundTaskId::parse(task_id).ok())
+            .and_then(|process_id| BackgroundProcessId::parse(process_id).ok())
             .is_some(),
-        "占位文案应携带合法 task id：{placeholder_text}"
+        "占位文案应携带合法 process id：{placeholder_text}"
     );
     assert!(
         states
@@ -377,7 +379,7 @@ async fn placeholder_outcome_is_error_free_success() {
 async fn background_terminal_sends_wakeup_signal_without_active_run() {
     let (mut supervisor, states) = supervisor_with(Duration::from_millis(50));
     let background = std::sync::Arc::new(
-        crate::application::background_task::session_runtime::BackgroundTaskRuntime::new(),
+        crate::application::background_process::session_runtime::BackgroundProcessRuntime::new(),
     );
     // 无 active run（不 bind registry）→ 终态路由 wakeup 信号。
     supervisor = supervisor.with_background_runtime(Some(background.clone()));
@@ -410,7 +412,7 @@ async fn background_terminal_sends_wakeup_signal_without_active_run() {
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "后台任务应在超时前到达终态（监督器账本）"
+            "后台进程应在超时前到达终态（监督器账本）"
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
@@ -430,7 +432,7 @@ async fn background_terminal_sends_wakeup_signal_without_active_run() {
 async fn background_terminal_task_recorded_with_terminal_kind() {
     let (mut supervisor, _) = supervisor_with(Duration::from_millis(30));
     let background = std::sync::Arc::new(
-        crate::application::background_task::session_runtime::BackgroundTaskRuntime::new(),
+        crate::application::background_process::session_runtime::BackgroundProcessRuntime::new(),
     );
     supervisor = supervisor.with_background_runtime(Some(background.clone()));
 
@@ -456,7 +458,7 @@ async fn background_terminal_task_recorded_with_terminal_kind() {
             assert!(
                 matches!(
                     record.terminal_kind(),
-                    Some(crate::domain::background_task::BackgroundTaskTerminalKind::Success)
+                    Some(crate::domain::background_process::BackgroundProcessTerminalKind::Success)
                 ),
                 "SleepTool 正常完成应记 Success 终态"
             );
@@ -464,8 +466,27 @@ async fn background_terminal_task_recorded_with_terminal_kind() {
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "后台任务应在超时前到达终态"
+            "后台进程应在超时前到达终态"
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+}
+
+// ── 派发时刻换算（Instant → SystemTime） ─────────────────────────────
+
+#[test]
+fn dispatch_started_time_is_elapsed_before_now() {
+    let started = std::time::Instant::now() - std::time::Duration::from_secs(3);
+    let wall = dispatch_started_time(started);
+    let elapsed = std::time::SystemTime::now()
+        .duration_since(wall)
+        .expect("换算时刻不晚于当前墙钟");
+    assert!(
+        elapsed.as_millis() >= 3_000,
+        "换算结果应早于当前约 3s，实际 {elapsed:?}"
+    );
+    assert!(
+        elapsed.as_millis() < 5_000,
+        "换算误差不应膨胀，实际 {elapsed:?}"
+    );
 }

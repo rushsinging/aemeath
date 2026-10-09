@@ -204,7 +204,7 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
     .map(|call| call.call)
     .collect::<Vec<_>>();
     observer
-        .execution_started(execution.step_count(), &raw_calls, &executable)
+        .execution_started(execution.step_ordinal(), &raw_calls, &executable)
         .await;
     let sink = context.runtime_context.event_sink();
     let round = crate::application::loop_engine::chat::tools::execute_tool_round(
@@ -226,7 +226,7 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
     )
     .await;
     observer
-        .execution_finished(execution, execution.step_count(), &round.results)
+        .execution_finished(execution, execution.step_ordinal(), &round.results)
         .await;
     let interaction_ids: std::collections::HashSet<_> = round
         .suspensions
@@ -413,7 +413,7 @@ async fn finalize_tool_round_results<O: ToolRoundObserver>(
         });
     }
     observer
-        .round_finished(step_id, result_count, execution.step_count(), run_cancel)
+        .round_finished(step_id, result_count, execution.step_ordinal(), run_cancel)
         .await;
     Ok(ToolRoundOutcome {
         step: crate::application::loop_engine::tool_strategy::step_from_fuse_bypass(fuse_bypassed),

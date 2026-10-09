@@ -53,7 +53,7 @@
         "ProjectInfo",
         "TaskStateChanged",
         "RuntimeStatusChanged",
-        "BackgroundTaskCountChanged"
+        "BackgroundProcessCountChanged"
       ]
     },
     "sdk": {
@@ -135,7 +135,7 @@
         "ProjectInfo",
         "TaskStateChanged",
         "RuntimeStatusChanged",
-        "BackgroundTaskCountChanged"
+        "BackgroundProcessCountChanged"
       ]
     },
     "tui": {
@@ -194,7 +194,7 @@
         "TaskStateChanged",
         "ConfigChanged",
         "ConfigReloaded",
-        "BackgroundTaskCountChanged"
+        "BackgroundProcessCountChanged"
       ]
     }
   },

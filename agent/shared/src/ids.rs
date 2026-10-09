@@ -351,6 +351,8 @@ define_id_type!(
 /// 64 bit 雪花（41 时间 + 10 进程随机 + 12 序列）经有序 base62 定长
 /// 编码——同前缀下**字典序 = 时间序**。前缀词汇表逐步接入（先 `task`，
 /// 其余 id 渐进迁移）。
+/// 约定（specs 3.2.1.2）：前缀长度固定 3 字符（`bgp` / `run` 等）；
+/// 新前缀 NEVER 超过 3 字符，历史超长前缀仅存在于 parse 兼容读路径。
 pub fn new_typed_id(prefix: &str) -> String {
     format!(
         "{prefix}{}{}",
@@ -457,28 +459,33 @@ pub fn decode_base62(value: &str) -> Option<u64> {
     Some(result)
 }
 
-/// Runtime-owned 后台任务记录标识（前缀 typed id，`task_<uuidv7hex>`）。
+/// Runtime-owned 后台进程记录标识（前缀 typed id，`bgp_<base62>`）。
 ///
 /// 本体即前缀形态（单一真相，无裸值/display 两套）；
 /// `parse` 按前缀+形状校验，跨种类误用在前缀层被拒。
+/// 历史快照保留解析兼容：`process_`（短前缀修订前）与 `task_`
+/// （Background Process 更名前）；读旧写新，新生成一律 `bgp_`。
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
 )]
-pub struct BackgroundTaskId(String);
+pub struct BackgroundProcessId(String);
 
-impl BackgroundTaskId {
-    /// 生成新任务 id（`task_` + uuidv7 hex；字典序=时间序）。
+impl BackgroundProcessId {
+    /// 生成新进程 id（`bgp_` + 雪花 base62；字典序=时间序）。
     pub fn new_v7() -> Self {
-        Self(new_typed_id("task"))
+        Self(new_typed_id("bgp"))
     }
 
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    /// 解析（严格前缀+形状校验）。
+    /// 解析（严格前缀+形状校验；兼容 `process_` / `task_` 旧快照）。
     pub fn parse(value: &str) -> Result<Self, IdParseError> {
-        if !is_typed_id(value, "task") {
+        if !(is_typed_id(value, "bgp")
+            || is_typed_id(value, "process")
+            || is_typed_id(value, "task"))
+        {
             return Err(IdParseError::InvalidPrefixedFormat(value.to_string()));
         }
         Ok(Self(value.to_string()))

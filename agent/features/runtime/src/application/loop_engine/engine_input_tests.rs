@@ -1687,3 +1687,49 @@ mod interaction_routing {
         assert_eq!(question_tc.status(), ToolCallStatus::Success);
     }
 }
+
+// ── #252 wakeup Run：空批 InternalContinuation 必须执行 step ─────────
+
+/// 后台进程 wakeup Run 无用户输入：首次 drain 携带空 batch 的
+/// `InternalContinuation(BackgroundProcessWakeup)`。engine 不得因空批
+/// 收口——step 必须执行（模型被调用、reminder 注入窗口被构建），
+/// 这是完成事实到达 LLM 的唯一通道。
+#[tokio::test]
+async fn engine_executes_step_for_empty_batch_background_wakeup_continuation() {
+    let mut run = new_run(Duration::ZERO);
+    let cancel = CancellationToken::new();
+    let mut port = ScriptedScenario {
+        drain_outcomes: VecDeque::from([
+            DrainOutcome::InternalContinuation {
+                kind: InternalContinuationKind::BackgroundProcessWakeup,
+                batch: Vec::new(),
+                epoch: DrainEpoch(0),
+            },
+            DrainOutcome::EmptyAndSealed {
+                epoch: DrainEpoch(1),
+            },
+        ]),
+        model_steps: VecDeque::from([ModelStep::Complete {
+            text: "wakeup handled".to_string(),
+        }]),
+        ..Default::default()
+    };
+    port.sync_inputs();
+
+    let directive = run_loop(
+        &mut run,
+        &mut crate::application::run::execution_state::RunExecutionState::new(),
+        &cancel,
+        &mut scripted_run_loop(&mut port),
+    )
+    .await
+    .unwrap();
+
+    // 空批续延驱动 step：模型完成 → 第二次 drain EmptyAndSealed 收口。
+    assert_eq!(directive, LoopDirective::Terminal);
+    assert_eq!(run.status(), RunStatus::Completed);
+    assert!(
+        port.model_steps.is_empty(),
+        "脚本化模型步应被消费（LLM 至少调用一次）"
+    );
+}

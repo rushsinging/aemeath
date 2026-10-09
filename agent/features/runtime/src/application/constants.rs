@@ -66,13 +66,13 @@ pub(crate) const CALIBRATION_CLAMP: std::ops::RangeInclusive<f64> = 0.5..=2.0;
 
 pub(crate) const DEFAULT_GRACE: Duration = Duration::from_millis(250);
 
-// ─── background_task/supervisor.rs ───
+// ─── background_process/supervisor.rs ───
 
 /// 单任务输出环形缓冲容量（字节）。
-pub(crate) const BACKGROUND_TASK_OUTPUT_CAPACITY_BYTES: usize = 64 * 1024;
+pub(crate) const BACKGROUND_PROCESS_OUTPUT_CAPACITY_BYTES: usize = 64 * 1024;
 
-/// 后台任务完成通知的输出尾部截断（reminder 注入 token 预算纪律，设计 §4.2）。
-pub(crate) const BACKGROUND_TASK_NOTIFICATION_TAIL_BYTES: usize = 2048;
+/// 后台进程完成通知的输出尾部截断（reminder 注入 token 预算纪律，设计 §4.2）。
+pub(crate) const BACKGROUND_PROCESS_NOTIFICATION_TAIL_BYTES: usize = 2048;
 
 // ─── tool/tool_result_materializer.rs ───
 

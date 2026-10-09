@@ -24,7 +24,7 @@ fn append_beyond_capacity_drops_oldest_bytes() {
 #[test]
 fn read_tail_is_non_consumptive_and_idempotent() {
     let mut buffer = OutputRingBuffer::new(64);
-    buffer.append(b"hello background tasks");
+    buffer.append(b"hello background processes");
 
     let first = buffer.read_tail_text(1024);
     let second = buffer.read_tail_text(1024);
@@ -32,7 +32,10 @@ fn read_tail_is_non_consumptive_and_idempotent() {
 
     buffer.append(b" more");
     let (text, _) = buffer.read_tail_text(1024);
-    assert_eq!(text, "hello background tasks more", "读取不影响后续写入");
+    assert_eq!(
+        text, "hello background processes more",
+        "读取不影响后续写入"
+    );
 }
 
 #[test]

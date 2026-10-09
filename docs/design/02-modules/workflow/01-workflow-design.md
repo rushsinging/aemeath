@@ -60,7 +60,7 @@ Workflow 不负责：
 - 管理 Run 的取消、暂停和终态；
 - 决定 Run 与 Run 之间是否继续；
 - 代替用户判断整体目标是否成功；
-- 管理后台任务的定时唤醒。
+- 管理后台进程的定时唤醒。
 
 ## 2. Workflow 的创建
 
@@ -131,7 +131,7 @@ WorkflowActivationReceipt
   - `End.Completed`：Workflow 正常结束，只保留历史查询，不再接受新的流程更新。
   - `End.Cancelled`：Workflow 被用户或系统取消，只保留历史查询，不再接受新的流程更新。
 
-  `Suspended`、`Sleeping`、`AwaitingUser` 不是 Workflow 状态，分别属于 Runtime Run、Runtime Goal 或后台任务能力。Session 的 `active_workflow` 只指向 `Active` Workflow；Workflow 进入任一 `End` 状态后，该槽位清空。
+  `Suspended`、`Sleeping`、`AwaitingUser` 不是 Workflow 状态，分别属于 Runtime Run、Runtime Goal 或后台进程能力。Session 的 `active_workflow` 只指向 `Active` Workflow；Workflow 进入任一 `End` 状态后，该槽位清空。
 
 ## 3. Workflow 如何约束 LLM
 
@@ -723,14 +723,14 @@ AwaitingUser
 
 Workflow 不调用 `create_run`，也不通过 `next_request` 自动推进前台任务。
 
-### 9.8 后台任务完成与唤醒
+### 9.8 后台进程完成与唤醒
 
-后台任务的“唤醒”不等于创建新的 Runtime Run。后台任务完成后，Runtime 先产生完成事实，再由通知路由决定如何让 LLM 获知该事实。
+后台进程的“唤醒”不等于创建新的 Runtime Run。后台进程完成后，Runtime 先产生完成事实，再由通知路由决定如何让 LLM 获知该事实。
 
 ```text
-后台任务执行完成
+后台进程执行完成
   ↓
-Runtime 记录 BackgroundTaskCompleted fact
+Runtime 记录 BackgroundProcessCompleted fact
   ↓
 Runtime Notification Router
   ├─ 存在可接收通知的 Active Run
@@ -748,16 +748,16 @@ Runtime Notification Router
      下次用户启动 Run 时注入 Prompt
 ```
 
-Runtime 不打断已经发出的 Model Invocation。若后台任务在模型调用进行期间完成，通知只在下一个安全的 Prompt / Model Invocation 边界生效。
+Runtime 不打断已经发出的 Model Invocation。若后台进程在模型调用进行期间完成，通知只在下一个安全的 Prompt / Model Invocation 边界生效。
 
 如果 Active Run 处于 `AwaitingUser`，Runtime 不应偷偷启动新的模型调用；完成事实先作为 pending notice 保留，待该 Run 被用户输入恢复后，再以 reminder 形式进入 Prompt。
 
-### 9.9 后台任务完成通知与 Workflow
+### 9.9 后台进程完成通知与 Workflow
 
-后台任务完成后，Runtime 可以将完成事实发布给绑定的 Workflow，使 Workflow 能在 `workflow_query` 中提供任务结论或证据引用：
+后台进程完成后，Runtime 可以将完成事实发布给绑定的 Workflow，使 Workflow 能在 `workflow_query` 中提供任务结论或证据引用：
 
 ```text
-BackgroundTaskCompleted
+BackgroundProcessCompleted
   ├─ task_id
   ├─ goal_id: Option<GoalId>
   ├─ status
@@ -772,7 +772,7 @@ Runtime facts boundary
 该事实不会自动完成 Workflow 节点，也不会自动改变 Goal：
 
 ```text
-后台任务完成
+后台进程完成
   ↓
 Reminder 告知当前 LLM
   ↓
@@ -785,12 +785,12 @@ Workflow Kernel 校验并更新 revision
 
 ### 9.10 新建 Run 的授权分两条独立通道
 
-后台任务完成后是否创建新 Run，按任务种类走两条**互不混同**的授权通道：
+后台进程完成后是否创建新 Run，按任务种类走两条**互不混同**的授权通道：
 
 - **Goal / Loop 级长任务的后台继续**：由 Runtime Goal 的
   `continuation_authorization` 与后台策略管辖，未授权时仅保存
   `PendingRuntimeNotice`、等待用户启动下一次 Run。
-- **tool call 后台任务（后台任务模型）**：无 Active Run 时 Runtime 创建
+- **tool call 后台进程（后台进程模型）**：无 Active Run 时 Runtime 创建
   **Wakeup Run** 回注结果——授权来源是 **agent 发起转后台这个动作本身**
   （转后台即视为该任务的唤醒授权），不依赖 `continuation_authorization`，
   也不经 Workflow 决定。用户可用 Esc 标准取消 Wakeup Run。
@@ -798,7 +798,7 @@ Workflow Kernel 校验并更新 revision
 因此，`Wakeup` 表示 Runtime 的后台状态变化或通知事件，不是固定的 Run 类型：
 
 ```text
-Wakeup outcome（tool call 后台任务）
+Wakeup outcome（tool call 后台进程）
   ├─ ReminderQueued(active_run_id)
   └─ WakeupRunStarted（授权来源：agent 发起转后台）
 Wakeup outcome（Goal / Loop 级后台继续）
@@ -811,7 +811,7 @@ Wakeup outcome（Goal / Loop 级后台继续）
 Runtime 后台状态至少包括：
 
 ```text
-BackgroundTaskState
+BackgroundProcessState
   ├─ Sleeping
   ├─ WakeDue
   ├─ Running
@@ -822,20 +822,20 @@ BackgroundTaskState
   └─ Cancelled
 ```
 
-Workflow 不负责计时、唤醒、创建 Run 或决定通知如何投递；但后台任务完成事实进入 LLM Prompt 后，LLM 仍必须服从当前 Workflow 节点的 Execution Contract。
+Workflow 不负责计时、唤醒、创建 Run 或决定通知如何投递；但后台进程完成事实进入 LLM Prompt 后，LLM 仍必须服从当前 Workflow 节点的 Execution Contract。
 
 ## 11. Workflow 与后台通知的交互
 
 Runtime 使用 Reminder 统一管线（`ReminderSource` + per-kind policy；真相源
 `docs/design/02-modules/context-management/07-reminder-pipeline.md`）把后台完成
 事实送入 LLM Prompt。该机制是 Runtime 的 Prompt 传递能力，不是 Workflow 直接
-调用 LLM。tool call 后台任务的完成事实注册为 `BackgroundTaskEvent` kind
+调用 LLM。tool call 后台进程的完成事实注册为 `BackgroundProcessEvent` kind
 （`OnEvent(task_terminal)` 触发、`TailUserMessage` 注入并显式落盘 canonical）。
 
 ```text
 Runtime Notification Router
   ↓
-ReminderSource(BackgroundTaskEvent) + OnEvent(task_terminal)
+ReminderSource(BackgroundProcessEvent) + OnEvent(task_terminal)
   ↓
 Reminder Pipeline（per-kind policy 注入决策）
   ↓
@@ -849,11 +849,11 @@ LLM
 概念伪代码：
 
 ```rust
-async fn on_background_task_completed(
+async fn on_background_process_completed(
     &self,
-    completion: BackgroundTaskCompleted,
+    completion: BackgroundProcessCompleted,
 ) -> BackgroundNotificationOutcome {
-    let reminder = InvocationReminderData::background_task_completed(
+    let reminder = InvocationReminderData::background_process_completed(
         completion.task_id.clone(),
         completion.status,
         completion.output_refs.clone(),
@@ -861,7 +861,7 @@ async fn on_background_task_completed(
 
     if let Some(active_run) = self.active_run_for(completion.session_id) {
         // Reminder 统一管线：source 经 OnEvent(task_terminal) 注入下一 invocation
-        self.context.reminder_handle_event(active_run.run_id(), "background_task");
+        self.context.reminder_handle_event(active_run.run_id(), "background_process");
         return BackgroundNotificationOutcome::ReminderQueued {
             run_id: active_run.run_id().clone(),
         };
@@ -880,7 +880,7 @@ canonical。LLM 收到通知后，可以：
 
 ```text
 <system-reminder>
-后台任务 task-123 已完成，结果引用 artifact-456。
+后台进程 task-123 已完成，结果引用 artifact-456。
 如需了解其对当前 Workflow 的影响，请调用 workflow_query。
 </system-reminder>
 ```
@@ -908,7 +908,7 @@ Workflow 不负责计时、唤醒、创建 Run 或决定后台通知是否打断
 15. Session 同时最多存在一个 Active Workflow；Workflow 不从属于 Goal，也不因 Goal 生命周期自动创建、销毁或切换。
 16. Run 可以没有 Goal，也可以独立绑定当前 Session Workflow 的快照；Goal 与 Workflow 绑定均为可选关联。
 17. Workflow 不自动创建下一个 Run；前台 Run 之间由用户决定是否继续，后台自动继续必须有 Runtime 侧授权。
-18. Workflow 不负责计时、唤醒或创建 Run；后台完成事件优先通过 Active Run 的 Reminder 进入 Prompt；tool call 后台任务在无 Active Run 时经 Wakeup Run 回注（授权 = agent 发起转后台），Goal / Loop 级后台继续创建 Run 仅在 `continuation_authorization` 授权时发生。
+18. Workflow 不负责计时、唤醒或创建 Run；后台完成事件优先通过 Active Run 的 Reminder 进入 Prompt；tool call 后台进程在无 Active Run 时经 Wakeup Run 回注（授权 = agent 发起转后台），Goal / Loop 级后台继续创建 Run 仅在 `continuation_authorization` 授权时发生。
 19. Runtime finalized facts、Workflow 节点结论、Runtime Goal 生命周期事实是三类不同事实，不能自动混同。
 20. tool call 后台化唤醒与 `continuation_authorization` 是两条独立授权通道：前者授权来自 agent 发起转后台动作本身，后者管辖 Goal / Loop 级长任务的后台继续，两者不得混同。
 ## 13. 非目标

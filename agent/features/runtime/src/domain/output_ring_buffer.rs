@@ -1,4 +1,4 @@
-//! 后台任务输出环形缓冲。
+//! 后台进程输出环形缓冲。
 //!
 //! 读写游标分离实现非消耗性读取：读取不推进写入侧状态，多次读取幂等，
 //! 不破坏任务完成后的结果回注。全局写入游标（`total_written`）单调递增，
@@ -38,9 +38,11 @@ impl OutputRingBuffer {
         }
         self.buffer.extend_from_slice(chunk);
         self.total_written += chunk.len() as u64;
-        let overflow = (self.buffer.len() > self.capacity_bytes)
-            .then(|| self.buffer.len() - self.capacity_bytes)
-            .unwrap_or(0);
+        let overflow = if self.buffer.len() > self.capacity_bytes {
+            self.buffer.len() - self.capacity_bytes
+        } else {
+            0
+        };
         if overflow > 0 {
             self.buffer.drain(..overflow);
             self.buffer_start_cursor += overflow as u64;

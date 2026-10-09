@@ -339,8 +339,8 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             workspace_root,
             workspace.context_stack.len()
         ),
-        sdk::ChatEvent::BackgroundTaskCountChanged { active } => crate::tui::log_trace!(
-            "{} background_task_count_changed active={}",
+        sdk::ChatEvent::BackgroundProcessCountChanged { active } => crate::tui::log_trace!(
+            "{} background_process_count_changed active={}",
             stage,
             active,
         ),

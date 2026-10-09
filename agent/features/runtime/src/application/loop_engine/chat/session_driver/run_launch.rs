@@ -448,7 +448,19 @@ where
                 let manual_compaction_run =
                     matches!(idle_result, IdleResult::ManualCompactionRequested);
                 let background_wakeup_run =
-                    matches!(idle_result, IdleResult::BackgroundTaskWakeup);
+                    matches!(idle_result, IdleResult::BackgroundProcessWakeup);
+                // 滞留信号预检（#252）：wakeup 信号被前一轮 idle 的用户
+                // 输入分支竞争保留后，事实可能已由该 Run 注入确认——
+                // 无可补注入内容时静默忽略信号，避免空转一次 LLM 调用。
+                if background_wakeup_run
+                    && shell
+                        .background_processes
+                        .supervisor()
+                        .peek_unnotified_terminal_items()
+                        .is_empty()
+                {
+                    continue;
+                }
                 let manual_reflection_run =
                     matches!(idle_result, IdleResult::ManualReflectionRequested);
                 // 手动反思的材料快照必须在 run launch 装配前取自当前 committed session
@@ -493,15 +505,15 @@ where
                         manual_compaction_requested = false;
                         (ChatId::new_v7().to_string(), Vec::new())
                     }
-                    IdleResult::BackgroundTaskWakeup => {
-                        // 无用户输入的唤醒 Run（#252）：完成事实由 background_task
+                    IdleResult::BackgroundProcessWakeup => {
+                        // 无用户输入的唤醒 Run（#252）：完成事实由 background_process
                         // reminder 在本轮注入（D11：不合成用户 turn）。
                         // 用户侧系统卡片（设计 §8：用户清楚看到 agent 为何自己动起来）。
                         sink.send_event(RuntimeStreamEvent::CommandResultText {
                             text: if language == "zh" {
-                                "⏙ 后台任务已完成，已唤醒 agent 继续（详情可用 BackgroundTaskList 等工具查询）".to_string()
+                                "✓ 后台进程已完成，已唤醒 agent 继续（详情可用 BackgroundProcessList 等工具查询）".to_string()
                             } else {
-                                "⏙ Background task completed; agent resumed automatically (inspect with the BackgroundTaskList tool)".to_string()
+                                "✓ Background process completed; agent resumed automatically (inspect with the BackgroundProcessList tool)".to_string()
                             },
                             is_error: false,
                         })
@@ -569,9 +581,11 @@ where
                         (next_segment, accepted_inputs)
                     }                };
 
-                // 硬约束：手动反思不增加 session `run_count`，也不发 `RunChanged`
-                // （它不是用户回合，不消耗 Interval 反思的频控计数）。
-                if !manual_reflection_run {
+                // 硬约束：手动反思与后台进程 wakeup Run 均不增加 session
+                // `run_count`，也不发 `RunChanged`（它们不是用户回合，不消耗
+                // Interval 反思的频控计数；wakeup 若计入会把「每 10 个用户
+                // 回合反思」的触发点推到内部 Run 上，#252 实测即崩）。
+                if !manual_reflection_run && !background_wakeup_run {
                     run_count += 1;
                     sink.send_event(RuntimeStreamEvent::RunChanged(run_count))
                         .await;
@@ -610,7 +624,7 @@ where
                     } else if manual_reflection_run {
                         RunSpec::manual_reflection()
                     } else if background_wakeup_run {
-                        RunSpec::background_task_wakeup()
+                        RunSpec::background_process_wakeup()
                     } else {
                         RunSpec::main()
                     },
@@ -685,6 +699,13 @@ where
                 };
               let input_continuation =
                     crate::application::loop_engine::input_strategy::InputContinuationState::default();
+                if background_wakeup_run {
+                    // wakeup Run 空输入启动（#252）：预置内部续延，首次
+                    // drain 以 InternalContinuation 驱动 step（reminder 注入
+                    // 完成事实 → LLM 调用）；否则 drain_or_seal 空批即
+                    // EmptyAndSealed 收口，完成事实随 Run 丢弃。
+                    input_continuation.install_background_process_wakeup();
+                }
                 let mut input_source =
                     crate::application::loop_engine::input_strategy::BufferedInputAdapter {
                         input_events: input_events.clone(),
@@ -739,11 +760,11 @@ where
                             share::config::TaskListConfig::default().max_lines,
                         ),
                     ),
-                    // #252 PR2：后台任务完成通知（OnEvent；Wakeup Run 内的
+                    // #252 PR2：后台进程完成通知（OnEvent；Wakeup Run 内的
                     // 完成事实注入同源——build take 语义保证只通知一次）。
                     std::sync::Arc::new(
-                        crate::application::loop_engine::chat::reminder_sources::BackgroundTaskReminderSource::new(
-                            shell.background_task_supervisor(),
+                        crate::application::loop_engine::chat::reminder_sources::BackgroundProcessReminderSource::new(
+                            shell.background_process_supervisor(),
                         ),
                     ),
                 ];
@@ -819,12 +840,12 @@ where
                 );
                 reminder_context_port.reminder_run_started(&run_id);
                 // Wakeup Run（#252 D11）：本 Run 无用户消息、无 handle_event
-                // 触发点——启动时显式触发 background_task 事件，把监督器内
+                // 触发点——启动时显式触发 background_process 事件，把监督器内
                 // 「终态未通知」事实经 OnEvent source build（take）进注入队列。
                 if background_wakeup_run {
                     reminder_context_port.reminder_handle_event(
                         &run_id,
-                        &context::ReminderEventSource::background_task(),
+                        &context::ReminderEventSource::background_process(),
                     );
                 }
                 let context_request =
@@ -871,7 +892,7 @@ where
                     max_tool_concurrency,
                     agent_semaphore.clone(),
                     &session_id,
-                    Some(shell.background_tasks.clone()),
+                    Some(shell.background_processes.clone()),
                     &run_id,
                     tool_result_materializer.clone(),
                 );
@@ -899,7 +920,6 @@ where
                 let mut model =
                     crate::application::loop_engine::run_services::RuntimeModelInvocation::new(
                         model_observer,
-                        false,
                     );
                 // PreCompact 材料共享槽：压缩观察者在 Committed 时暂存将被丢弃的
                 // 消息，反思端口在 Compacting 内取出执行（材料收集与状态机分离）。
@@ -1062,6 +1082,12 @@ where
                 runtime_context
                     .context()
                     .drop_reminder_pipeline(&run_id);
+                // Run 收口滞留检测（#252 注入确认制兜底）：reminder 管线
+                // 销毁后监督器若仍有未确认完成事实，补发 wakeup 信号立即
+                // 补注入（否则需等下一个任务完成 / 用户输入捎带）。
+                shell
+                    .background_processes
+                    .signal_wakeup_for_stranded_facts();
                 // Return any remaining Run-scoped events (control commands
                 // buffered during await_user_input) to the session idle gate.
                 input_source.drain_remaining_events();

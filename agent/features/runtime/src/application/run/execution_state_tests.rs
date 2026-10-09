@@ -62,7 +62,7 @@ fn new_execution_state_starts_with_empty_working_data() {
     assert!(state.accepted_input().is_empty());
     assert!(state.context_request().is_none());
     assert!(state.context_window().is_none());
-    assert_eq!(state.step_count(), 0);
+    assert_eq!(state.step_ordinal(), 0);
     assert!(state.pending_interaction_work().is_none());
 }
 
@@ -105,12 +105,12 @@ fn pending_interaction_work_has_single_take_owner() {
 }
 
 #[test]
-fn with_step_count_preserves_bootstrap_turn() {
+fn launch_run_ordinal_preserves_bootstrap_turn() {
     let mut state = RunExecutionState::new();
     state.initialize_for_launch(Vec::new(), 4);
 
-    assert_eq!(state.step_count(), 4);
-    assert_eq!(state.advance_step(), 5);
+    assert_eq!(state.run_ordinal(), 4);
+    assert_eq!(state.advance_step_ordinal(), 1);
 }
 
 #[test]
@@ -119,17 +119,17 @@ fn launch_initialization_sets_messages_turn_and_start_once() {
     state.initialize_for_launch(vec![Message::user("hello")], 4);
 
     assert_eq!(state.messages().len(), 1);
-    assert_eq!(state.step_count(), 4);
+    assert_eq!(state.run_ordinal(), 4);
     assert!(state.elapsed() >= std::time::Duration::ZERO);
 }
 
 #[test]
-fn step_count_is_owned_by_execution_state() {
+fn step_ordinal_is_owned_by_execution_state() {
     let mut state = RunExecutionState::new();
 
-    assert_eq!(state.advance_step(), 1);
-    assert_eq!(state.advance_step(), 2);
-    assert_eq!(state.step_count(), 2);
+    assert_eq!(state.advance_step_ordinal(), 1);
+    assert_eq!(state.advance_step_ordinal(), 2);
+    assert_eq!(state.step_ordinal(), 2);
 }
 
 #[test]
@@ -242,7 +242,7 @@ fn begin_step_replaces_transient_step_data_without_discarding_messages() {
     let mut state = RunExecutionState::new();
     state.append_message(Message::user("history"));
     state.replace_accepted_input(vec![Message::user("accepted")]);
-    state.advance_step();
+    state.advance_step_ordinal();
 
     state.begin_step();
 
@@ -250,5 +250,5 @@ fn begin_step_replaces_transient_step_data_without_discarding_messages() {
     assert!(state.accepted_input().is_empty());
     assert!(state.context_request().is_none());
     assert!(state.context_window().is_none());
-    assert_eq!(state.step_count(), 1);
+    assert_eq!(state.step_ordinal(), 1);
 }

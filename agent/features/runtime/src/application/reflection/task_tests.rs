@@ -128,7 +128,7 @@ async fn the_run_cancellation_token_wins_over_the_executor() {
     assert_completed(
         adapter
             .run_future(
-                ReflectionTaskTrigger::Interval { step_count: 3 },
+                ReflectionTaskTrigger::Interval { run_ordinal: 3 },
                 cancel,
                 move |_cancel| async {
                     pending::<()>().await;

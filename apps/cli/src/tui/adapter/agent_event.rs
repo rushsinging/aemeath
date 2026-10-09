@@ -282,9 +282,11 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
         TuiRuntimeEvent::RuntimeStatusChanged { status } => conversation(
             ConversationIntent::ReplaceRuntimeStatus(ReplaceRuntimeStatus((**status).clone())),
         ),
-        TuiRuntimeEvent::BackgroundTaskCountChanged { active } => conversation(
-            ConversationIntent::ReplaceBackgroundTaskCount(ReplaceBackgroundTaskCount(*active)),
-        ),
+        TuiRuntimeEvent::BackgroundProcessCountChanged { active } => {
+            conversation(ConversationIntent::ReplaceBackgroundProcessCount(
+                ReplaceBackgroundProcessCount(*active),
+            ))
+        }
         TuiRuntimeEvent::TaskStateChanged { state } => conversation(
             ConversationIntent::ReplaceTaskState(ReplaceTaskState((**state).clone())),
         ),

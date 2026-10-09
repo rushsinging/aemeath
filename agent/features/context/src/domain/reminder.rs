@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::domain::constants::{
-    ENVELOPE_VERSION, KIND_BACKGROUND_TASK, KIND_MEMORY_RECALL, KIND_MEMORY_UPDATED,
+    ENVELOPE_VERSION, KIND_BACKGROUND_PROCESS, KIND_MEMORY_RECALL, KIND_MEMORY_UPDATED,
     KIND_TASK_PROGRESS, PRIORITY_ENVIRONMENT, PRIORITY_EVENT, PRIORITY_MEMORY_RECALL,
     PRIORITY_TASK_STATE,
 };
@@ -34,8 +34,8 @@ impl ReminderKind {
         Self::new(KIND_MEMORY_RECALL)
     }
 
-    pub fn background_task() -> Self {
-        Self::new(KIND_BACKGROUND_TASK)
+    pub fn background_process() -> Self {
+        Self::new(KIND_BACKGROUND_PROCESS)
     }
 
     pub fn as_str(&self) -> &str {
@@ -43,7 +43,7 @@ impl ReminderKind {
     }
 }
 
-/// 事件源标识（如 memory、background_task）：`OnEvent` 触发的来源句柄。
+/// 事件源标识（如 memory、background_process）：`OnEvent` 触发的来源句柄。
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ReminderEventSource(Arc<str>);
 
@@ -52,8 +52,8 @@ impl ReminderEventSource {
         Self(value.into())
     }
 
-    pub fn background_task() -> Self {
-        Self::new(KIND_BACKGROUND_TASK)
+    pub fn background_process() -> Self {
+        Self::new(KIND_BACKGROUND_PROCESS)
     }
 
     pub fn as_str(&self) -> &str {
@@ -176,9 +176,17 @@ pub trait ReminderSource: Send + Sync {
     fn kind(&self) -> ReminderKind;
     fn policy(&self) -> ReminderPolicy;
     /// 读当前快照；`None` 表示本轮无内容（如当前无任务），不入队。
+    ///
+    /// 携带消费型事实的 source **MUST** 在 build 只 peek 不取走，把
+    /// 事实的最终标记推迟到 [`ReminderSource::confirm_injected`]——
+    /// 快照入队后若 Run 收口（未注入），事实保留在源头，由下一个
+    /// Run / wakeup 补注入（#252：take 即标记会把完成事实静默丢失）。
     fn build(&self) -> Option<ReminderSnapshot>;
     /// 按语言渲染 body。
     fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String;
+    /// 注入组装确认：快照被组装进本轮 window 后调用。消费型 source
+    /// 在此标记事实已送达；默认 no-op（非消费型 source 无需实现）。
+    fn confirm_injected(&self) {}
 }
 
 /// 队列 entry：kind + 快照 + 内容指纹 + 序号 + 注入行为。
@@ -547,16 +555,16 @@ pub fn render_invocation_reminder_body(
             }
             lines.join("\n")
         }
-        crate::domain::InvocationReminderData::BackgroundTaskCompleted { items } => {
-            let status_text = |status: &crate::domain::BackgroundTaskCompletionStatus| match status {
-                crate::domain::BackgroundTaskCompletionStatus::Succeeded => ("成功", "succeeded"),
-                crate::domain::BackgroundTaskCompletionStatus::Failed => ("失败", "failed"),
-                crate::domain::BackgroundTaskCompletionStatus::TimedOut => ("超时", "timed out"),
-                crate::domain::BackgroundTaskCompletionStatus::Cancelled => ("已取消", "cancelled"),
+        crate::domain::InvocationReminderData::BackgroundProcessCompleted { items } => {
+            let status_text = |status: &crate::domain::BackgroundProcessCompletionStatus| match status {
+                crate::domain::BackgroundProcessCompletionStatus::Succeeded => ("成功", "succeeded"),
+                crate::domain::BackgroundProcessCompletionStatus::Failed => ("失败", "failed"),
+                crate::domain::BackgroundProcessCompletionStatus::TimedOut => ("超时", "timed out"),
+                crate::domain::BackgroundProcessCompletionStatus::Cancelled => ("已取消", "cancelled"),
             };
             let mut lines = vec![match language {
-                "zh" => "━━ 后台任务已完成 ━━".to_owned(),
-                _ => "━━ Background task completed ━━".to_owned(),
+                "zh" => "━━ 后台进程已完成 ━━".to_owned(),
+                _ => "━━ Background process completed ━━".to_owned(),
             }];
             for item in items {
                 let (status_zh, status_en) = status_text(&item.status);
@@ -578,11 +586,11 @@ pub fn render_invocation_reminder_body(
             }
             match language {
                 "zh" => lines.push(
-                    "结果已回注；日志或后续输出可用 BackgroundTaskList / BackgroundTaskLogs 查询。"
+                    "结果已回注；日志或后续输出可用 BackgroundProcessList / BackgroundProcessLogs 查询。"
                         .to_owned(),
                 ),
                 _ => lines.push(
-                    "Use BackgroundTaskList / BackgroundTaskLogs to inspect logs or further output."
+                    "Use BackgroundProcessList / BackgroundProcessLogs to inspect logs or further output."
                         .to_owned(),
                 ),
             }

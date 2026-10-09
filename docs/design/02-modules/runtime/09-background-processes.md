@@ -1,36 +1,36 @@
-# Agent Runtime · 后台任务系统（tool call 统一后台任务模型）
+# Agent Runtime · 后台进程系统（tool call 统一后台进程模型）
 
 > 层级：02-modules / runtime（模块战术设计）
 > 状态：Target（设计定稿，待实施）｜Milestone：v0.2.0｜对应 Issue：#252
-> 本文定义 tool call 的统一后台任务模型：超阈值自动转后台、占位结果 + 异步回注、完成主动提醒（reminder / Wakeup Run）与后台任务查询。依赖 #1440（tool call identity / 硬超时 / 取消协议 / pending receipt）与 #1695（Reminder 统一管线）先行落地。
+> 本文定义 tool call 的统一后台进程模型：超阈值自动转后台、占位结果 + 异步回注、完成主动提醒（reminder / Wakeup Run）与后台进程查询。依赖 #1440（tool call identity / 硬超时 / 取消协议 / pending receipt）与 #1695（Reminder 统一管线）先行落地。
 
 ## 0. 决策记录
 
 | # | 决策 |
 |---|---|
-| D1 | 不做独立 watch tool。所有 tool call 本质统一为后台任务，前台等待只是快路径视图 |
+| D1 | 不做独立 watch tool。所有 tool call 本质统一为后台进程，前台等待只是快路径视图 |
 | D2 | 转后台语义 = 占位 tool result + 异步回注。全部工具 + 时间阈值自动触发，无 per-tool 声明；阈值内完成走快路径，行为与现状完全一致 |
 | D3 | 完成提醒双路：有 active Run → 完成事实作为 reminder 注入当前 Run 后续 step；无 active Run → Runtime 创建 Wakeup Run 回注。agent 发起转后台即视为该任务的唤醒授权 |
 | D4 | 任务生命周期随 CLI 进程终止，标记失效，不做 daemon 化 |
-| D5 | 不挂 Goal / Loop。tool call 后台任务是独立轻量任务记录，与 Workflow 的 `continuation_authorization` 是独立通道，不得混同 |
+| D5 | 不挂 Goal / Loop。tool call 后台进程是独立轻量任务记录，与 Workflow 的 `continuation_authorization` 是独立通道，不得混同 |
 | D6 | 阈值可配置，随 `RunConfigSnapshot` 冻结（Run scope）；默认 0=禁用（PR1-3 全套链路已交付，2026-10-07 用户拍板暂关闭，真实使用验证后开启 10） |
 | D7 | 设计文档随核心引擎 PR 落地（含 workflow 设计文档落地与修订） |
 | D8 | 交付拆分为 3 个 PR：核心引擎+文档 → 通知链路 → 查询+持久化+TUI+收尾 |
 | D9 | sequential FIFO 修订：前序调用转后台后，同轮后续 sequential-only 调用 MAY 启动（启动顺序仍严格 FIFO）；`ToolCallState` 增加 `Backgrounded` 中间态 |
-| D10 | 停止通道：语义上仅经 `background_tasks` tool 的 stop action；TUI 提供后台任务查看/管理 slash 命令；terminate（退出）时后台任务 drain 退出 |
+| D10 | 停止通道：语义上仅经 `background_processes` tool 的 stop action；TUI 提供后台进程查看/管理 slash 命令；terminate（退出）时后台进程 drain 退出 |
 | D11 | Wakeup Run 触发事实走 reminder 落盘（TailUserMessage 显式落盘机制，与 #1848 同构）+ SDK 事件渲染 TUI 卡片；不合成用户 turn |
 | D12 | `logs` 查询含增量游标 + 非消耗性读取，运行中与完成后皆可查 |
 | D13 | wakeup 到来直接启动 Wakeup Run（用户可 Esc 标准取消），竞争仲裁暂不实现 |
-| D14 | 自动转后台仅对 Main Run 生效；Sub Run（含子代理内部 tool call）一律禁用——子代理收口后占位无处回注、通知无法语义路由、多层嵌套 active Run 判定错乱；子代理整体已作为父侧后台任务的执行体 |
+| D14 | 自动转后台仅对 Main Run 生效；Sub Run（含子代理内部 tool call）一律禁用——子代理收口后占位无处回注、通知无法语义路由、多层嵌套 active Run 判定错乱；子代理整体已作为父侧后台进程的执行体 |
 
 ## 1. 目标 / 非目标
 
 **目标**：
 
 - 任意 tool call 超过阈值自动转后台；agent 收到占位结果并可继续其他工作或结束 turn。
-- 后台任务完成后主动提醒 LLM：有 active Run 时以 reminder 注入当前 Run 后续 step；无 active Run 时经 Wakeup Run 回注。
-- agent 可通过查询 tool 查看后台任务状态与日志（含增量游标），可停止任务并获得明确终态。
-- CLI 退出 / 重启后，后台任务标记失效且可从 session 恢复中看到。
+- 后台进程完成后主动提醒 LLM：有 active Run 时以 reminder 注入当前 Run 后续 step；无 active Run 时经 Wakeup Run 回注。
+- agent 可通过查询 tool 查看后台进程状态与日志（含增量游标），可停止任务并获得明确终态。
+- CLI 退出 / 重启后，后台进程标记失效且可从 session 恢复中看到。
 - 快路径行为与现状一致（阈值内完成无行为变化）。
 
 **非目标**：
@@ -43,10 +43,10 @@
 
 ### 2.1 双状态机分工
 
-现有 `ToolCallReceiptData{Pending, Running, Terminal}` 管理逐 call 的**执行事实**（取消协议、重启恢复）；新增 `BackgroundTaskRecord` 管理跨 Run 的**任务监督**（回注、查询）。两者以 `ToolCallIdentityData`（session / run / step / call 四级 identity）关联，各自单一职责：
+现有 `ToolCallReceiptData{Pending, Running, Terminal}` 管理逐 call 的**执行事实**（取消协议、重启恢复）；新增 `BackgroundProcessRecord` 管理跨 Run 的**任务监督**（回注、查询）。两者以 `ToolCallIdentityData`（session / run / step / call 四级 identity）关联，各自单一职责：
 
 ```text
-BackgroundTaskRecord
+BackgroundProcessRecord
   ├─ task_id: TaskId（UUIDv7）
   ├─ identity: ToolCallIdentityData
   ├─ tool_name / invocation_summary（参数摘要，审计与查询展示）
@@ -61,13 +61,14 @@ BackgroundTaskRecord
 **receipt 状态机扩展**：`ToolCallState` 增加 `Backgrounded` 中间态（`advance` 单调规则同步扩展）。转后台时 receipt `Running → Backgrounded`，**terminal 仍推迟到真实完成时写入**——#1440 终态语义不变，只推迟时点：
 
 - step finalize 允许携带 `Backgrounded` receipt 挂起（区别于取消场景的 unfinished 收敛）；
-- 重启恢复时 `Backgrounded` receipt 与后台任务账本对账后投影为「任务已失效」（见 §6）。
+- 重启恢复时 `Backgrounded` receipt 与后台进程账本对账后投影为「任务已失效」（见 §6）。
 
-### 2.2 BackgroundTaskSupervisor（session 级监督器）
+### 2.2 BackgroundProcessSupervisor（session 级监督器）
 
 - **Session 级存活**（非 Run 级），Run 收口不销毁；CLI 退出时统一 drain（见 §7）。
 - 职责：派发登记、阈值判定、后台 `JoinHandle` 托管、输出收集、终态推进、通知路由（§4）、持久化（§6）。
 - 摆放：runtime feature `application/tool/` 旁新模块；**NEVER** 流入 tools domain（工具执行编排边界不变）。
+- **终态时长冻结（2026-10-09 修复）**：记录新增 `finished_at`，首次终态推进（finish / invalidate_all / resume 失效收口）固化完成时刻且幂等不覆盖；查询时长终态取 `finished_at - created_at`，运行中按当前时刻实时。旧快照缺该字段（serde default）时回退实时计算。
 
 ### 2.3 输出管理与持久化（任务日志文件：直绑优先 + 终态兜底）
 
@@ -141,70 +142,76 @@ select! {
 ### 4.1 占位 tool result
 
 - 转后台时经现有 `finalize_tool_round_results` 物化链合成单条 `Message::tool_results_rich`（`tool_use_id` 配对完整，`is_error=false`），与取消收敛合成（`converge_cancelled_tool_round`）同构，不触发 `message_integrity` 孤儿清理。
-- 文案双语：任务 id +「已转后台运行，完成后将收到通知；可用 `background_tasks` 工具查询状态 / 日志或停止」。
+- 文案双语：任务 id +「已转后台运行，完成后将收到通知；可用 `background_processes` 工具查询状态 / 日志或停止」。
 
 ### 4.2 送达分层
 
 | 层 | 载体 | 内容 |
 |---|---|---|
-| 轻量通知 | reminder（`BackgroundTaskEvent`） | task_id、工具名、终态、输出尾部截断（注入 token 预算内） |
-| 完整数据 | `background_tasks` tool | ring buffer 增量读取 + token budget 截断 |
+| 轻量通知 | reminder（`BackgroundProcessEvent`） | task_id、工具名、终态、输出尾部截断（注入 token 预算内） |
+| 完整数据 | `background_processes` tool | ring buffer 增量读取 + token budget 截断 |
 
 reminder 不携带完整输出（管线预算纪律）。
 
 ### 4.3 有 active Run
 
-任务终态 → 监督器调 `ContextPort::reminder_handle_event(run_id, "background_task")` → 管线 `push_event` → 下一次 invocation 注入。新增 source：`OnEvent + TailUserMessage + SkipIfUnchanged(event) + Rebuild`（注册期 `is_valid` 校验已拒绝动态 refresh 配 SystemTail）。`AwaitingUser` 相位不注入（管线天然在下一次 build_window 生效，符合「不打断已发出的 Model Invocation」）。active 判定：`ActiveRunRegistry.current_main_run_id`。
+任务终态 → 监督器调 `ContextPort::reminder_handle_event(run_id, "background_process")` → 管线 `push_event` → 下一次 invocation 注入。新增 source：`OnEvent + TailUserMessage + SkipIfUnchanged(event) + Rebuild`（注册期 `is_valid` 校验已拒绝动态 refresh 配 SystemTail）。`AwaitingUser` 相位不注入（管线天然在下一次 build_window 生效，符合「不打断已发出的 Model Invocation」）。active 判定：`ActiveRunRegistry.current_main_run_id`。
 
 ### 4.4 无 active Run：Wakeup Run（D11 / D13）
 
-- `RunIntent` 新增变体 `BackgroundTaskWakeup`（**无 payload**——task_ids 经 reminder 承载即 D11 本义，intent 保持 `Copy`；投影 `RunPurpose::Main`，行为与 `Conversation` 同构）。
-- `WakeupMailbox`（Runtime 内部 unbounded mpsc，session 级，挂在 `SessionRuntime.background_tasks`）：任务终态时若无 active run → send；idle 等待点 `select { 用户输入, wakeup }`（D13 不仲裁，输入侧选中时信号保留给下一轮 idle）。
-- session driver idle 等待 select { 用户输入, wakeup }；收到 wakeup → 以 `BackgroundTaskWakeup` intent 启动 Main Run（直接启动，用户可 Esc 走标准取消协议），空输入（`ManualCompactionRequested` 同构先例）。
-- 触发事实由 `background_task` reminder 承载：TailUserMessage 类 reminder 随 step 收口**显式落盘 canonical**（envelope 标识、compact 可清理、resume 可见），与既有尾部注入机制同构；**不合成用户 turn**。
-- **Wakeup Run 启动时显式触发事件（PR2 实现事实）**：OnEvent source 只在 `reminder_handle_event` 时 build（take 语义），Wakeup Run 本身无用户消息与事件触发点——`run_launch` 在 `create_reminder_pipeline` 后对 wakeup Run 显式调用 `reminder_handle_event(run_id, "background_task")`，把监督器内「终态未通知」事实注入本轮。若 handle_event 时 pipeline 尚未建（竞争窗口），take 未发生、数据留在监督器，由下一个 Run 补注入（无丢失，仅延迟）。
-- 用户侧显示走 SDK `BackgroundTask` 生命周期事件渲染卡片（见 §8，PR3 交付），不依赖 canonical 消息样式。
+- `RunIntent` 新增变体 `BackgroundProcessWakeup`（**无 payload**——task_ids 经 reminder 承载即 D11 本义，intent 保持 `Copy`；投影 `RunPurpose::Main`，行为与 `Conversation` 同构）。
+- `WakeupMailbox`（Runtime 内部 unbounded mpsc，session 级，挂在 `SessionRuntime.background_processes`）：任务终态时若无 active run → send；idle 等待点 `select { 用户输入, wakeup }`（D13 不仲裁，输入侧选中时信号保留给下一轮 idle）。
+- session driver idle 等待 select { 用户输入, wakeup }；收到 wakeup → 以 `BackgroundProcessWakeup` intent 启动 Main Run（直接启动，用户可 Esc 走标准取消协议），空输入（`ManualCompactionRequested` 同构先例）。
+- 触发事实由 `background_process` reminder 承载：TailUserMessage 类 reminder 随 step 收口**显式落盘 canonical**（envelope 标识、compact 可清理、resume 可见），与既有尾部注入机制同构；**不合成用户 turn**。
+- **Wakeup Run 启动时显式触发事件（PR2 实现事实）**：OnEvent source 只在 `reminder_handle_event` 时 build，Wakeup Run 本身无用户消息与事件触发点——`run_launch` 在 `create_reminder_pipeline` 后对 wakeup Run 显式调用 `reminder_handle_event(run_id, "background_process")`，把监督器内「终态未通知」事实注入本轮。若 handle_event 时 pipeline 尚未建（竞争窗口），build 未发生、数据留在监督器，由下一个 Run 补注入（无丢失，仅延迟）。
+- **注入确认制（2026-10-09 修复，覆盖反向竞争窗口）**：source `build` 是 **peek 语义**（只读不标记），事实的最终标记（`mark_notified`）推迟到快照被组装进 window 时（`ReminderSource::confirm_injected` 由管线在注入组装后调用）。修复前的 take 即标记在「有 active Run 但该 Run 已无后续 step」窗口把完成事实静默丢失（实测：sleep-20 终态后通知从未到达任何 LLM 请求，而后续 sleep-30/40 正常送达）。未确认的事实保留在监督器，由下一个 Run / wakeup 补注入（fail-safe：宁可重复提醒，不丢事实）。
+- **Run 收口滞留检测（2026-10-09 补充，送达及时性）**：Run 收口（reminder 管线销毁）时若监督器仍有未确认完成事实（收口临界窗口被 peek 未注入），补发 wakeup 信号**立即**唤醒补注入——而非等下一个任务完成 / 用户输入捎带（实测：sleep-20 滞留 24s 等到 sleep-30 的 wakeup 才合并送达）。消费端（idle select 命中 wakeup 信号）预检：无可补注入内容（事实已确认）时静默忽略信号，避免空转一次 LLM 调用。
+- **wakeup Run 不计入 interval 反思频控（2026-10-09 修复）**：wakeup Run 不是用户回合，与手动反思同理不递增 session `run_count`、不发 `RunChanged`；engine 的 interval 判定也按 intent 过滤（仅 `Conversation` 判定）——修复前 wakeup Run 命中频控后 `BeginReflection` 被意图 gate 拒绝，整个 Run 被判 `ApiError` 失败。
+- 用户侧显示走 SDK `BackgroundProcess` 生命周期事件渲染卡片（见 §8，PR3 交付），不依赖 canonical 消息样式。
+- **空输入必须由内部续延驱动 step（2026-10-09 修复）**：engine 的 `drain_or_seal` 契约下空批即 seal（#1272）——wakeup Run 无用户输入时首次 drain 直接 `EmptyAndSealed` 收口，step 从未执行：reminder 注入（TailUserMessage 经 `with_pending` 追加合成 user 消息，不依赖本轮真实输入）永不发生，且 take 语义已取走的完成事实随 Run 丢弃（LLM 永久失去完成通知）。修复：`InputContinuationState` 增加第三种内部续延 `BackgroundProcessWakeup`（与 `StopHookFeedback` / `ToolResults` 同构），run_launch 装配 wakeup Run 时预置，首次 drain 以空批 `InternalContinuation` 驱动 step；续延一次性消费，后续 drain 回落正常 drain-or-seal，已缓冲用户输入随续延批一并交付。stop hook 与 wakeup Run：`coordinate_stop_hook` 照常执行（Main 装配），Block → feedback 续延 → LLM 继续修复复用既有链路，无特殊分支。
 
-## 5. 后台任务查询 tool
+## 5. 后台进程查询 tool
 
-后台任务工具族（对齐 task 族先例，2026-10-07 用户拍板由单 tool 多 action 拆分）：
+后台进程工具族（对齐 task 族先例，2026-10-07 用户拍板由单 tool 多 action 拆分）：
 
 | tool | 行为 |
 |---|---|
-| `BackgroundTaskList` | 活动与近期任务（id / 工具 / 状态 / 时长） |
-| `BackgroundTaskStatus` | 单任务详情：状态、终态、deadline 剩余 |
-| `BackgroundTaskLogs` | 查询任务日志（运行中与完成后皆可）：ring buffer 非消耗性读取；缺省尾部（默认 4096 字节）；携带游标只读新增（增量游标）；token budget 截断；多次读取幂等、不破坏后续回注 |
-| `BackgroundTaskStop` | 请求取消：signal cancel，真实终态由执行体收口后经通知/查询可见（含取消不确定语义） |
+| `BackgroundProcessList` | 活动与近期任务（id / 工具 / 状态 / 时长） |
+| `BackgroundProcessStatus` | 单任务详情：状态、终态、deadline 剩余 |
+| `BackgroundProcessLogs` | 查询任务日志（运行中与完成后皆可）：ring buffer 非消耗性读取；缺省尾部（默认 4096 字节）；携带游标只读新增（增量游标）；token budget 截断；多次读取幂等、不破坏后续回注 |
+| `BackgroundProcessStop` | 请求取消：signal cancel，真实终态由执行体收口后经通知/查询可见（含取消不确定语义） |
 
 挂 Main Catalog（caps 对齐 task 族：查询 `TaskRead`、停止 `TaskWrite`，sub-agent-restricted profile 下不可见——Sub Run 本就禁用后台化，无需查询）；常规 profile 权限链；占位 tool_result 文案中显式引导 `Logs` 用法。
 
 ## 6. 持久化与 resume
 
-- 新 storage namespace `BackgroundTask`（AtomicBlob，ProcessCrashSafe），key `background-tasks-{session_id}`；存 task record 与任务日志文件引用。
+- 新 storage namespace `BackgroundProcess`（AtomicBlob，ProcessCrashSafe），key `background-process/<session_id>`；存 task record 与任务日志文件引用。
+- **读旧写新（前缀修订兼容）**：id 前缀 `bgp_`（3 字符），`parse` 兼容历史 `process_`（短前缀修订前）与 `task_`（概念重命名前）旧快照（新生成一律 `bgp_`）；namespace 更名前为 `background-task`，resume 在新键未命中时兜底读旧键（`LegacyBackgroundTask` 仅读路径），persist 一律写新键。
 - 任务日志文件（§2.3 方案 B）：per-task 增量 append，完整输出真相源；会话任务日志随 session GC。
 - resume：`Backgrounded` / `Running` → `Invalidated(reason: process_exit)`；查询 tool 可见失效任务。
 - **对账**：receipt 恢复路径（`has_unfinished_receipts` → unconfirmed 投影）遇 `Backgrounded` receipt 时与任务账本对账——有对应 task record 则投影为「任务已失效」而非 unconfirmed。specs 3.10 同步。
 
 ## 7. 取消 / 审计 / 退出集成
 
-- **CancelStep**：`ForegroundWaiting` 期 = 现状取消协议；`Backgrounded` 后不受 CancelStep 管辖（step 已收口），停止仅经 `background_tasks` stop（D10）。
-- **terminate / CLI 退出**：监督器 drain——全部后台任务 cancel + wait grace + 标 `Invalidated` + 落盘（D10）。
+- **CancelStep**：`ForegroundWaiting` 期 = 现状取消协议；`Backgrounded` 后不受 CancelStep 管辖（step 已收口），停止仅经 `background_processes` stop（D10）。
+- **terminate / CLI 退出**：监督器 drain——全部后台进程 cancel + wait grace + 标 `Invalidated` + 落盘（D10）。
 - **权限**：派发时已评估，转后台不重新评估；`stop` 走正常 tool 权限链。
 - **审计**：任务终态事实与现有 tool 终态审计同构。
-- **Usage**：后台任务无 model invocation，不构造 `UsageRecord`。
+- **Usage**：后台进程无 model invocation，不构造 `UsageRecord`。
 
 ## 8. TUI / SDK 与 LLM 引导
 
 - 转后台瞬间：工具块追加「已转后台（task_id）」状态行。
-- TUI 新增后台任务查看 / 管理 slash 命令（D10；经 Tools-owned Command Catalog，Runtime PendingCommand 为 handler adapter）；可翻阅任务日志文件全量输出（§2.3）。
+- TUI 新增后台进程查看 / 管理 slash 命令（D10；经 Tools-owned Command Catalog，Runtime PendingCommand 为 handler adapter）；可翻阅任务日志文件全量输出（§2.3）。
 - **LLM 行为引导（2026-10-07 拍板）**：除占位 tool_result 文案外，Main/Sub 的 system
-  prompt 经 guidance 系统注入后台任务特性说明——统一模型（所有 tool call 超阈值自动
-  转后台）、占位结果语义（非终态，完成会主动通知）、`background_tasks` 查询/停止用法、
+  prompt 经 guidance 系统注入后台进程特性说明——统一模型（所有 tool call 超阈值自动
+  转后台）、占位结果语义（非终态，完成会主动通知）、`background_processes` 查询/停止用法、
   sequential 顺序提示（前序转后台后同轮后续命令可能与未完成前序并行，有顺序依赖时
   应等待通知或先查状态）。随查询 tool（PR3）落地时一并接线 prompt BC。
-- SDK 新增 `BackgroundTask` 生命周期事件（PL）→ TUI reducer：
-  - 消息流系统样式卡片（可折叠）：「⏙ 后台任务完成：task-xxx『cargo test』已完成，已唤醒 agent 继续」——用户清楚看到 agent 为何自己动起来；
-  - 后台任务面板：活动任务状态 / 输出预览（复用 Bash 输出渲染），管理入口。
+- SDK 新增 `BackgroundProcess` 生命周期事件（PL）→ TUI reducer：
+  - 消息流系统样式卡片（可折叠）：「✓ 后台进程完成：bgp-xxx『cargo test』已完成，已唤醒 agent 继续」——用户清楚看到 agent 为何自己动起来；
+  - 后台进程面板：活动任务状态 / 输出预览（复用 Bash 输出渲染），管理入口。
+  - **spinner 活动数事件通道（2026-10-09 修复）**：`BackgroundProcessCountChanged` 由 `BackgroundProcessRuntime` 直接发往**当前 chat 会话**的事件 sender（chat 启动绑定、覆盖式刷新）；绑定为 RAII guard（generation 校验），chat 任务结束 drop 释放 sender——session 级长期持有 sender clone 会使 `ChatStream` 的 receiver 永不关闭（`recv()` 挂死）。仅 spinner 存在（有 active Run）时可见，计数=非终态进程数。
 
 ### 8.1 自动转后台覆盖面（D14）
 
@@ -215,7 +222,7 @@ interaction waiter 承担），不会触发阈值，天然安全。
 
 **Sub Run 一律禁用自动转后台**：子代理收口后，其内部转后台 tool call 的占位
 无处回注、完成通知无法语义路由（该 `tool_use_id` 不在任何存活 Run 的 canonical
-中）、多层 agent 嵌套时 active Run 判定错乱；且子代理整体已作为父侧后台任务的
+中）、多层 agent 嵌套时 active Run 判定错乱；且子代理整体已作为父侧后台进程的
 执行体（父转后台后子代理继续跑），内部保持同步语义不损失并发性。派生装配点
 显式 `background_threshold: None`。
 
@@ -229,7 +236,7 @@ detach-cancel 现状，零退化）。
 1. §9.10 / §11：`invocation_reminders` 旧机制名 → Reminder 统一管线术语（ReminderSource / policy / envelope）。
 2. 不变量 17 / 18 对齐 D3：无 active Run 时由 Wakeup Run 回注；授权来源 = agent 发起转后台。
 3. 新增不变量：tool call 后台化唤醒与 `continuation_authorization` 是独立通道，前者授权来自 agent 发起转后台动作本身，后者管辖 Goal / Loop 级长任务后台继续，两者不得混同。
-4. `07-reminder-pipeline.md` §6 / §7 / §8：`BackgroundTaskEvent` 从「预留」改「已接线」。
+4. `07-reminder-pipeline.md` §6 / §7 / §8：`BackgroundProcessEvent` 从「预留」改「已接线」。
 
 specs 同步（核心引擎 PR 内）：3.4.3（FIFO 修订）、3.4.4（`Backgrounded` receipt / deadline 快照）、3.9（阈值配置项）、3.10（新 namespace / 对账）。
 

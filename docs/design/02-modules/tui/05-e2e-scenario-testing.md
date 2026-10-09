@@ -36,7 +36,7 @@ crossterm Event
 
 1. **MUST** 使用生产的 update、Effect 协议、ViewAssembler 与 Render 路径，不复制业务状态转换。
 2. **MUST** 使用真实 crossterm 事件类型表达按键、鼠标、粘贴和 resize。
-3. **MUST** 由测试 Effect Driver 隔离网络、剪贴板、文件系统、计时器和后台任务。
+3. **MUST** 由测试 Effect Driver 隔离网络、剪贴板、文件系统、计时器和后台进程。
 4. **MUST** 在稳定检查点渲染，不依赖 `sleep` 等待异步系统“碰巧稳定”。
 5. **MUST** 同时保留语义断言与屏幕快照；快照不能替代 Effect payload 和 Model 不变量断言。
 6. **NEVER** 在测试中调用全局 `crossterm::event::read`、真实 `EventStream` 或真实系统剪贴板。
@@ -139,7 +139,7 @@ Harness 是场景测试唯一入口，至少提供以下能力：
 | `run_until(predicate, max_steps)` | 有上限地推进到稳定条件 |
 | `render()` | 执行生产共享的 flush、同步和 draw |
 | `snapshot(name)` | 对规范化屏幕执行 insta 断言 |
-| `assert_idle()` | 断言无待处理消息、Effect、timer 和后台任务 |
+| `assert_idle()` | 断言无待处理消息、Effect、timer 和后台进程 |
 
 场景 API 应表达用户动作和外部事实，**NEVER** 直接修改 Model 私有字段。少量初始 fixture 必须经公开构造器、Intent 或已定义的测试 builder 建立。
 

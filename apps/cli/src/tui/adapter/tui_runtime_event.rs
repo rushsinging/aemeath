@@ -776,7 +776,7 @@ pub(crate) enum TuiRuntimeEvent {
     RuntimeStatusChanged {
         status: Box<super::runtime_status::TuiRuntimeStatus>,
     },
-    BackgroundTaskCountChanged {
+    BackgroundProcessCountChanged {
         active: usize,
     },
     TaskStateChanged {

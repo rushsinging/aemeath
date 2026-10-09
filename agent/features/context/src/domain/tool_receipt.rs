@@ -69,7 +69,7 @@ pub enum ToolCallState {
     Pending,
     Running,
     /// 已转后台：前台等待结束但执行未完成，terminal 推迟到真实完成时写入。
-    /// step finalize 允许携带该状态挂起；恢复时按后台任务失效语义对账。
+    /// step finalize 允许携带该状态挂起；恢复时按后台进程失效语义对账。
     Backgrounded,
     Terminal(ToolTerminalReceiptData),
 }

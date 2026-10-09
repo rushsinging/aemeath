@@ -423,22 +423,22 @@ fn omitted_members_are_old_names_absent_from_replacement() {
 }
 
 #[test]
-fn background_task_namespace_is_crash_safe_and_retained() {
-    // #252：后台任务账本跨进程可见（resume 失效对账与查询）。
+fn background_process_namespace_is_crash_safe_and_retained() {
+    // #252：后台进程账本跨进程可见（resume 失效对账与查询）。
     assert_eq!(
-        StorageNamespaceData::BackgroundTask.as_str(),
-        "background-task"
+        StorageNamespaceData::BackgroundProcess.as_str(),
+        "background-process"
     );
     assert_eq!(
-        StorageNamespaceData::BackgroundTask.minimum_durability(),
+        StorageNamespaceData::BackgroundProcess.minimum_durability(),
         DurabilityData::ProcessCrashSafe
     );
     assert_eq!(
-        StorageNamespaceData::BackgroundTask.effective_durability(DurabilityData::BestEffort),
+        StorageNamespaceData::BackgroundProcess.effective_durability(DurabilityData::BestEffort),
         DurabilityData::ProcessCrashSafe
     );
     assert_eq!(
-        StorageNamespaceData::BackgroundTask.previous_policy(),
+        StorageNamespaceData::BackgroundProcess.previous_policy(),
         PreviousPolicy::Retain
     );
 }

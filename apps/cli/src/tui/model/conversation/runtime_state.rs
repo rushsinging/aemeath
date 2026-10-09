@@ -19,8 +19,8 @@ pub struct RuntimeState {
     pub task_status: TaskStatusSnapshot,
     pub status_notice: StatusNotice,
     pub transient_notice_expiry: Option<Instant>,
-    /// #252：后台任务活动数（spinner 显示；0 = 无）。
-    pub background_tasks_active: usize,
+    /// #252：后台进程活动数（spinner 显示；0 = 无）。
+    pub background_processes_active: usize,
 }
 
 // ── 临时 notice 过期逻辑 ──

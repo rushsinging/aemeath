@@ -87,7 +87,7 @@ pub use domain::{
     SessionRevision, SystemBlock, Urgency,
 };
 pub use domain::{
-    AppendReceiptData, BackgroundTaskCompletionStatus, BackgroundTaskReminderItemData,
+    AppendReceiptData, BackgroundProcessCompletionStatus, BackgroundProcessReminderItemData,
     CleanupConfirmation, CompactGenerationFailureData, CompactGenerationFailureKind,
     CompactGenerationOutputData, CompactOutcome, CompactRequestData, CompactResult,
     CompactSkipReason, CompactSummaryQuality, CompactTrigger, CompactionDecisionData,

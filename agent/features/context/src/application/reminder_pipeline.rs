@@ -172,6 +172,7 @@ impl ReminderPipeline {
         let mut tail_blocks = Vec::new();
         let mut system_blocks = Vec::new();
         let mut injected_seqs = Vec::new();
+        let mut injected_kinds: Vec<ReminderKind> = Vec::new();
         let mut deferred_seqs = Vec::new();
         let mut budget_used = 0usize;
         let policies = self.policies_by_kind();
@@ -197,6 +198,7 @@ impl ReminderPipeline {
             }
             budget_used += block_tokens;
             injected_seqs.push(candidate.seq);
+            injected_kinds.push(candidate.kind.clone());
             log::debug!(
                 target: crate::LOG_TARGET,
                 "reminder_injected kind={} seq={} placement={:?} tokens={}",
@@ -213,6 +215,15 @@ impl ReminderPipeline {
 
         self.queue.confirm_injection(&injected_seqs);
         self.queue.defer_injection(&deferred_seqs);
+
+        // source 层注入确认：本轮被组装进 window 的 kind 逐个通知 source
+        // 标记其消费型事实已送达（#252：确认前事实保留在源头，Run 收口
+        // 由下一个 Run / wakeup 补注入）。
+        for kind in injected_kinds {
+            if let Some(source) = self.source_for_kind(&kind) {
+                source.confirm_injected();
+            }
+        }
 
         if !tail_blocks.is_empty() {
             let tail_message = compose_tail_user_message(&tail_blocks);

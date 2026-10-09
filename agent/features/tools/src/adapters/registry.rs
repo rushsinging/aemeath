@@ -1,7 +1,7 @@
 //! Built-in tool registration and named registry-scope assembly.
 
 use crate::adapters::{
-    agent_tool, ask_user, background_tasks, bash, brief, file_edit, file_read, file_write,
+    agent_tool, ask_user, background_processes, bash, brief, file_edit, file_read, file_write,
     glob_tool, grep, memory_tool, skill_tool, task_block_by, task_create, task_get, task_list,
     task_list_complete, task_list_create, task_lists, task_stop, task_update, tool_search,
     web_fetch, web_search, worktree,
@@ -55,7 +55,9 @@ pub(crate) fn register_named_scope(
     memory_source: Arc<dyn MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
     skill_loader: Arc<dyn crate::domain::SkillLoadPort>,
-    background_source: Arc<dyn crate::domain::background_task_port::BackgroundTaskAccessSource>,
+    background_source: Arc<
+        dyn crate::domain::background_process_port::BackgroundProcessAccessSource,
+    >,
     selected_scope: BuiltinRegistryScope,
 ) -> RegistryScope {
     let mut scope = RegistryScopeBuilder::new(selected_scope.name());
@@ -89,30 +91,30 @@ pub(crate) fn register_named_scope(
     builtin!("Grep", Caps::Read, grep::GrepTool);
     builtin!("WebFetch", Caps::NetworkAccess, web_fetch::WebFetchTool);
     builtin!(
-        "BackgroundTaskList",
+        "BackgroundProcessList",
         Caps::TaskRead,
-        background_tasks::BackgroundTaskListTool {
+        background_processes::BackgroundProcessListTool {
             source: background_source.clone()
         }
     );
     builtin!(
-        "BackgroundTaskStatus",
+        "BackgroundProcessStatus",
         Caps::TaskRead,
-        background_tasks::BackgroundTaskStatusTool {
+        background_processes::BackgroundProcessStatusTool {
             source: background_source.clone()
         }
     );
     builtin!(
-        "BackgroundTaskLogs",
+        "BackgroundProcessLogs",
         Caps::TaskRead,
-        background_tasks::BackgroundTaskLogsTool {
+        background_processes::BackgroundProcessLogsTool {
             source: background_source.clone()
         }
     );
     builtin!(
-        "BackgroundTaskStop",
+        "BackgroundProcessStop",
         Caps::TaskWrite,
-        background_tasks::BackgroundTaskStopTool {
+        background_processes::BackgroundProcessStopTool {
             source: background_source.clone()
         }
     );

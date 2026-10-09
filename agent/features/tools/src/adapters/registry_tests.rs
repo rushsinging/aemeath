@@ -48,20 +48,21 @@ fn set(names: &[&str]) -> BTreeSet<String> {
     names.iter().map(|name| name.to_ascii_lowercase()).collect()
 }
 
-/// 空后台任务端口（注册期占位；查询工具装配的真实实现由 runtime 注入）。
+/// 空后台进程端口（注册期占位；查询工具装配的真实实现由 runtime 注入）。
 fn empty_background_access(
-) -> std::sync::Arc<dyn crate::domain::background_task_port::BackgroundTaskAccess> {
+) -> std::sync::Arc<dyn crate::domain::background_process_port::BackgroundProcessAccess> {
     struct EmptyAccess;
-    impl crate::domain::background_task_port::BackgroundTaskAccess for EmptyAccess {
+    impl crate::domain::background_process_port::BackgroundProcessAccess for EmptyAccess {
         fn list_tasks(
             &self,
-        ) -> Vec<crate::domain::types::background_tasks::BackgroundTaskSummaryData> {
+        ) -> Vec<crate::domain::types::background_processes::BackgroundProcessSummaryData> {
             Vec::new()
         }
         fn task_status(
             &self,
             _task_id: &str,
-        ) -> Option<crate::domain::types::background_tasks::BackgroundTaskDetailData> {
+        ) -> Option<crate::domain::types::background_processes::BackgroundProcessDetailData>
+        {
             None
         }
         fn read_task_log(
@@ -69,29 +70,30 @@ fn empty_background_access(
             _task_id: &str,
             _cursor: Option<u64>,
             _max_bytes: usize,
-        ) -> Option<crate::domain::types::background_tasks::BackgroundTaskLogData> {
+        ) -> Option<crate::domain::types::background_processes::BackgroundProcessLogData> {
             None
         }
         fn stop_task(
             &self,
             _task_id: &str,
-        ) -> Result<crate::domain::types::background_tasks::BackgroundTaskStopData, String>
+        ) -> Result<crate::domain::types::background_processes::BackgroundProcessStopData, String>
         {
-            Err("background tasks unavailable".to_string())
+            Err("background processes unavailable".to_string())
         }
     }
     std::sync::Arc::new(EmptyAccess)
 }
 
 fn test_background_source(
-) -> std::sync::Arc<dyn crate::domain::background_task_port::BackgroundTaskAccessSource> {
+) -> std::sync::Arc<dyn crate::domain::background_process_port::BackgroundProcessAccessSource> {
     struct FixedSource(
-        std::sync::Arc<dyn crate::domain::background_task_port::BackgroundTaskAccess>,
+        std::sync::Arc<dyn crate::domain::background_process_port::BackgroundProcessAccess>,
     );
-    impl crate::domain::background_task_port::BackgroundTaskAccessSource for FixedSource {
+    impl crate::domain::background_process_port::BackgroundProcessAccessSource for FixedSource {
         fn current(
             &self,
-        ) -> std::sync::Arc<dyn crate::domain::background_task_port::BackgroundTaskAccess> {
+        ) -> std::sync::Arc<dyn crate::domain::background_process_port::BackgroundProcessAccess>
+        {
             self.0.clone()
         }
     }
@@ -128,10 +130,10 @@ const FULL: &[&str] = &[
     "EnterWorktree",
     "ExitWorktree",
     "Skill",
-    "BackgroundTaskList",
-    "BackgroundTaskStatus",
-    "BackgroundTaskLogs",
-    "BackgroundTaskStop",
+    "BackgroundProcessList",
+    "BackgroundProcessStatus",
+    "BackgroundProcessLogs",
+    "BackgroundProcessStop",
 ];
 #[test]
 fn production_profiles_are_main_baseline_or_restricted_children() {

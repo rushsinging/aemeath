@@ -117,10 +117,13 @@ where
     ) -> Result<(), LoopEngineError> {
         // Reminder 统一管线：step 边界推进 OnStepInterval 周期重建
         // （07-reminder-pipeline.md；run_started 已以 step=0 提供首次注入）。
+        // Main 与 Derived 统一在此推进 step 计数（历史实现 Derived 在
+        // invoke 前递增、Main 不递增导致 OnStepInterval 在 Main 从不触发）。
+        let step_ordinal = execution.advance_step_ordinal();
         self.context_request
             .runtime_context
             .context()
-            .reminder_step_advanced(&self.run_id, execution.step_count() as u64);
+            .reminder_step_advanced(&self.run_id, step_ordinal as u64);
         // per-message 记忆召回（#1834）：开关开启时先预物化（评分 await），
         // 再触发 pipeline 的 OnUserMessage 重建——保证注入的是当轮快照。
         if let Some(recall_source) = self.context_request.runtime_context.memory_recall() {
@@ -525,7 +528,7 @@ impl InteractionPublisher for ProgressInteractionPublisher<'_> {
         request: &sdk::InteractionRequest,
     ) -> Result<(), LoopEngineError> {
         (self.progress)(
-            Some(execution.step_count()),
+            Some(execution.run_ordinal()),
             &format!("Interaction: id={}", request.id),
         );
         Ok(())
@@ -534,18 +537,14 @@ impl InteractionPublisher for ProgressInteractionPublisher<'_> {
 
 pub(crate) struct RuntimeModelInvocation<O> {
     observer: O,
-    advance_step: bool,
 }
 
 impl<O> RuntimeModelInvocation<O>
 where
     O: crate::application::model::invocation::ModelInvocationObserver,
 {
-    pub(crate) fn new(observer: O, advance_step: bool) -> Self {
-        Self {
-            observer,
-            advance_step,
-        }
+    pub(crate) fn new(observer: O) -> Self {
+        Self { observer }
     }
 }
 
@@ -568,10 +567,7 @@ where
         ),
         LoopEngineError,
     > {
-        if self.advance_step {
-            execution.advance_step();
-        }
-        let run_step = execution.step_count();
+        let run_step = execution.step_ordinal();
         logging::within(
             logging::LogContextPatch {
                 run_step: logging::FieldPatch::Set(run_step),

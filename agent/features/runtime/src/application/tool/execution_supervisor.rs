@@ -5,7 +5,7 @@ use context::{
     CleanupConfirmation as ReceiptCleanupConfirmation, ToolCallIdentityData,
     ToolReceiptMutationData, ToolTerminalReceiptData,
 };
-use share::ids::BackgroundTaskId;
+use share::ids::BackgroundProcessId;
 use tools::published::execution::ToolExecutionOutcome as PublishedToolOutcome;
 use tools::published::execution::{
     CancellationDeclaration, CancellationSignal, CleanupConfirmation, ToolExecutionContext,
@@ -22,10 +22,11 @@ pub(crate) struct ToolExecutionSupervisor {
     catalog: ToolCatalogSnapshot,
     context: ContextCoordinator,
     grace: Duration,
-    /// #252 PR2 通知链路装配：session 级后台任务运行时（Main Run 注入；
+    /// #252 PR2 通知链路装配：session 级后台进程运行时（Main Run 注入；
     /// Sub Run / 测试为 None，spawn body 只推进 receipt）。
-    background:
-        Option<Arc<crate::application::background_task::session_runtime::BackgroundTaskRuntime>>,
+    background: Option<
+        Arc<crate::application::background_process::session_runtime::BackgroundProcessRuntime>,
+    >,
 }
 
 pub(crate) struct SupervisedToolCall {
@@ -58,12 +59,12 @@ impl ToolExecutionSupervisor {
         }
     }
 
-    /// 注入 session 级后台任务运行时（Main Run 传 Some，#252 PR2；
+    /// 注入 session 级后台进程运行时（Main Run 传 Some，#252 PR2；
     /// Sub Run / 测试传 None——spawn body 只推进 receipt）。
     pub(crate) fn with_background_runtime(
         mut self,
         runtime: Option<
-            Arc<crate::application::background_task::session_runtime::BackgroundTaskRuntime>,
+            Arc<crate::application::background_process::session_runtime::BackgroundProcessRuntime>,
         >,
     ) -> Self {
         self.background = runtime;
@@ -89,16 +90,17 @@ impl ToolExecutionSupervisor {
     ) -> Result<(PublishedToolOutcome, Duration), ToolExecutionSupervisorError> {
         // #252 PR2：有 session 级账本时以账本登记的 task id 为唯一身份
         // （占位、receipt、通知同源）；无装配（Sub Run / 测试）则临时生成。
-        let task_id = self
-            .background
-            .as_ref()
-            .map_or_else(BackgroundTaskId::new_v7, |runtime| {
-                runtime.supervisor().register_with_cancellation(
-                    call.identity.clone(),
-                    invocation_summary_text(&call),
-                    call.child_cancellation.clone(),
-                )
-            });
+        let task_id =
+            self.background
+                .as_ref()
+                .map_or_else(BackgroundProcessId::new_v7, |runtime| {
+                    runtime.supervisor().register_with_cancellation(
+                        call.identity.clone(),
+                        invocation_summary_text(&call),
+                        call.child_cancellation.clone(),
+                        dispatch_started_time(started),
+                    )
+                });
         log::info!(
             target: crate::LOG_TARGET,
             "tool moved to background: run_id={} step_id={} call_id={} tool={} task_id={} elapsed_ms={} deadline_snapshot={:?}",
@@ -128,7 +130,7 @@ impl ToolExecutionSupervisor {
             {
                 log::warn!(
                     target: crate::LOG_TARGET,
-                    "background task mark_backgrounded failed: task_id={} error={error:?}",
+                    "background process mark_backgrounded failed: task_id={} error={error:?}",
                     task_id.as_str(),
                 );
             }
@@ -144,7 +146,7 @@ impl ToolExecutionSupervisor {
                         _ = tokio::time::sleep(wait) => {
                             log::warn!(
                                 target: crate::LOG_TARGET,
-                                "background task reached deadline snapshot: run_id={} step_id={} call_id={} tool={} task_id={}",
+                                "background process reached deadline snapshot: run_id={} step_id={} call_id={} tool={} task_id={}",
                                 identity.run_id,
                                 identity.step_id,
                                 identity.runtime_call_id,
@@ -161,7 +163,7 @@ impl ToolExecutionSupervisor {
             let terminal = terminal_receipt(&outcome);
             log::info!(
                 target: crate::LOG_TARGET,
-                "background task terminal: run_id={} step_id={} call_id={} tool={} task_id={} outcome={:?}",
+                "background process terminal: run_id={} step_id={} call_id={} tool={} task_id={} outcome={:?}",
                 identity.run_id,
                 identity.step_id,
                 identity.runtime_call_id,
@@ -186,7 +188,7 @@ impl ToolExecutionSupervisor {
             {
                 log::error!(
                     target: crate::LOG_TARGET,
-                    "background task terminal receipt failed: task_id={} error={error:?}",
+                    "background process terminal receipt failed: task_id={} error={error:?}",
                     task_id_for_logs.as_str(),
                 );
             }
@@ -413,7 +415,15 @@ fn join_result_to_outcome(
 }
 
 /// 占位 tool result：转后台后立即发布给 LLM 的合法成功结果。
-fn placeholder_tool_result(task_id: &BackgroundTaskId) -> PublishedToolOutcome {
+/// 工具派发时刻（`Instant`）换算为墙钟 `SystemTime`：进程开始时刻 =
+/// 当前墙钟 - 已流逝时长。任务记录的自派发时刻起算的时长依赖该值。
+fn dispatch_started_time(started: std::time::Instant) -> std::time::SystemTime {
+    std::time::SystemTime::now()
+        .checked_sub(started.elapsed())
+        .unwrap_or_else(std::time::SystemTime::now)
+}
+
+fn placeholder_tool_result(task_id: &BackgroundProcessId) -> PublishedToolOutcome {
     PublishedToolOutcome::success_text(format!(
         "Running in the background ({}). Result will be delivered on completion.",
         task_id.as_str(),
@@ -525,11 +535,11 @@ fn invocation_summary_text(call: &SupervisedToolCall) -> String {
     )
 }
 
-/// #252 PR2：receipt 终态 → 后台任务终态映射。
+/// #252 PR2：receipt 终态 → 后台进程终态映射。
 fn terminal_kind_from_outcome(
     terminal: &ToolTerminalReceiptData,
-) -> crate::domain::background_task::BackgroundTaskTerminalKind {
-    use crate::domain::background_task::BackgroundTaskTerminalKind as Kind;
+) -> crate::domain::background_process::BackgroundProcessTerminalKind {
+    use crate::domain::background_process::BackgroundProcessTerminalKind as Kind;
     match terminal.outcome {
         context::ToolOutcomeKindData::Success => Kind::Success,
         context::ToolOutcomeKindData::Failure => Kind::Failure,

@@ -296,10 +296,15 @@ pub(super) async fn execute_step_with_scope(
     // 因此判定前先查 Run 的一次性闸门，命中且即将开始 phase 时才消耗——未命中
     // 不消耗（配置竞态下后续判定仍可触发）；一旦开始 phase，端口错误/任务失败/
     // 取消也都算该 Run 已执行过，不再自动重试重复反思。
-    if matches!(model_step, ModelStep::Complete { .. }) && !execution.interval_reflection_started()
+    // Interval 反思只对用户对话回合触发（intent=Conversation）：wakeup /
+    // 手动反思等内部 Run 不是用户回合，不判定、不消耗频控（#252 实测：
+    // wakeup Run 命中判定后意图 gate 拒绝，整个 Run 被判失败）。
+    if matches!(model_step, ModelStep::Complete { .. })
+        && run.spec().intent() == crate::domain::agent_run::RunIntent::Conversation
+        && !execution.interval_reflection_started()
     {
         let interval_material = port.reflection_mut().and_then(|reflection| {
-            reflection.interval_reflection_messages(execution.step_count(), execution.messages())
+            reflection.interval_reflection_messages(execution.run_ordinal(), execution.messages())
         });
         if let Some(material) = interval_material {
             execution.mark_interval_reflection_started();
@@ -308,7 +313,7 @@ pub(super) async fn execute_step_with_scope(
                 execution,
                 port,
                 crate::application::reflection::ReflectionTaskTrigger::Interval {
-                    step_count: execution.step_count(),
+                    run_ordinal: execution.run_ordinal(),
                 },
                 material.messages,
                 Some(&step_id),

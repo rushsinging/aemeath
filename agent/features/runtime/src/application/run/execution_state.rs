@@ -27,15 +27,22 @@ pub struct RunExecutionState {
     step_outcome: Vec<Message>,
     context_request: Option<ContextRequestData>,
     context_window: Option<ContextWindowData>,
-    step_count: usize,
+    /// Session 级 Run 序号（用户回合计数）：Main Run 启动时由 session driver
+    /// 传入（反思频控 `interval_runs` 判据、progress 回合文案）；Run 内不递增。
+    /// Derived Run 恒 0（子代理 Run 不占用户回合计数）。
+    run_ordinal: usize,
+    /// Run 内 model invocation（step）计数：Main 与 Derived 均在 step 边界
+    /// 递增（`accept_step_input` 统一推进）；用于 run_steps 终态展示、
+    /// invoke 日志与 reminder OnStepInterval 推进。
+    step_ordinal: usize,
     started_at: Option<Instant>,
     step_started_at: Option<Instant>,
     terminal: Option<AgentRunTerminal>,
     pending_interaction_work: Option<PendingInteractionWork>,
     adopted_input: Vec<(sdk::InputId, Message)>,
     active_interaction: Option<ActiveInteractionReceiver>,
-    /// Interval 反思的 Run 级一次性闸门：主会话 Run 内 `step_count` 不递增，
-    /// 多个 `ModelStep::Complete`（含内部 continuation）会命中同一 step_count，
+    /// Interval 反思的 Run 级一次性闸门：主会话 Run 内 `run_ordinal` 不递增，
+    /// 多个 `ModelStep::Complete`（含内部 continuation）会命中同一序号，
     /// 因此 Interval 反思在同 Run 内至多开始一次。命中并开始 phase 时消耗，
     /// 未命中不消耗；与消息/step 临时状态不同，本字段跨 `begin_step` 保留。
     interval_reflection_started: bool,
@@ -46,7 +53,7 @@ impl RunExecutionState {
         Self::default()
     }
 
-    pub(crate) fn initialize_for_launch(&mut self, messages: Vec<Message>, step_count: usize) {
+    pub(crate) fn initialize_for_launch(&mut self, messages: Vec<Message>, run_ordinal: usize) {
         debug_assert!(
             self.started_at.is_none(),
             "execution state initialized twice"
@@ -56,7 +63,7 @@ impl RunExecutionState {
             "execution messages initialized twice"
         );
         self.messages = messages;
-        self.step_count = step_count;
+        self.run_ordinal = run_ordinal;
         self.started_at = Some(Instant::now());
     }
 
@@ -208,8 +215,14 @@ impl RunExecutionState {
         self.step_started_at.map(|started_at| started_at.elapsed())
     }
 
-    pub(crate) fn step_count(&self) -> usize {
-        self.step_count
+    /// Session 级 Run 序号（Main：用户回合计数；Derived 恒 0）。
+    pub(crate) fn run_ordinal(&self) -> usize {
+        self.run_ordinal
+    }
+
+    /// Run 内 step（model invocation）计数。
+    pub(crate) fn step_ordinal(&self) -> usize {
+        self.step_ordinal
     }
 
     /// Interval 反思的 Run 级一次性闸门是否已消耗（本 Run 已开始过 Interval phase）。
@@ -225,9 +238,10 @@ impl RunExecutionState {
         self.interval_reflection_started = true;
     }
 
-    pub(crate) fn advance_step(&mut self) -> usize {
-        self.step_count += 1;
-        self.step_count
+    /// 推进 Run 内 step 计数（step 边界统一调用：Main 与 Derived 同源）。
+    pub(crate) fn advance_step_ordinal(&mut self) -> usize {
+        self.step_ordinal += 1;
+        self.step_ordinal
     }
 
     pub(crate) fn terminal_mut(&mut self) -> &mut Option<AgentRunTerminal> {

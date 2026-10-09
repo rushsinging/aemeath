@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::application::background_task::supervisor::BackgroundTaskSupervisor;
+use crate::application::background_process::supervisor::BackgroundProcessSupervisor;
 use context::{
     CompactBehavior, InjectBehavior, ReminderDedup, ReminderKind, ReminderPlacement,
     ReminderPolicy, ReminderPriority, ReminderSnapshot, ReminderSource,
@@ -180,30 +180,39 @@ impl ReminderSource for RunStartFactReminderSource {
 #[path = "reminder_sources_tests.rs"]
 mod tests;
 
-/// 后台任务完成通知 source（#252 PR2）：`OnEvent("background_task")` 触发。
+/// 后台进程完成通知 source（#252 PR2）：`OnEvent("background_process")` 触发。
 ///
-/// `build` 是 take 语义（取走监督器内未通知终态条目）——每次完成事件
-/// 由管线 `handle_event` 调一次 build 入事件队列；`SkipIfUnchanged`
-/// 兜底同批重复。数据获取在 Runtime（监督器），渲染委托 Context。
-pub(crate) struct BackgroundTaskReminderSource {
-    supervisor: Arc<BackgroundTaskSupervisor>,
+/// `build` 是 **peek 语义**（只读监督器内未通知终态条目，不标记）——
+/// 每次完成事件由管线 `handle_event` 调一次 build 入事件队列；
+/// `SkipIfUnchanged` 兜底同批重复。事实的最终标记推迟到
+/// `confirm_injected`（快照被组装进 window 后由管线调用）：未确认前
+/// 事实保留在监督器，Run 收口后由下一个 Run / wakeup 补注入
+/// （#252：take 即标记曾把完成事实静默丢失）。数据获取在 Runtime
+/// （监督器），渲染委托 Context。
+pub(crate) struct BackgroundProcessReminderSource {
+    supervisor: Arc<BackgroundProcessSupervisor>,
+    /// 已 peek 未确认的事实 id（注入确认制的工作集）。
+    peeked_task_ids: std::sync::Mutex<Vec<String>>,
 }
 
-impl BackgroundTaskReminderSource {
-    pub(crate) fn new(supervisor: Arc<BackgroundTaskSupervisor>) -> Self {
-        Self { supervisor }
+impl BackgroundProcessReminderSource {
+    pub(crate) fn new(supervisor: Arc<BackgroundProcessSupervisor>) -> Self {
+        Self {
+            supervisor,
+            peeked_task_ids: std::sync::Mutex::new(Vec::new()),
+        }
     }
 }
 
-impl ReminderSource for BackgroundTaskReminderSource {
+impl ReminderSource for BackgroundProcessReminderSource {
     fn kind(&self) -> ReminderKind {
-        ReminderKind::background_task()
+        ReminderKind::background_process()
     }
 
     fn policy(&self) -> ReminderPolicy {
         ReminderPolicy {
             refresh: context::RefreshTrigger::OnEvent(
-                context::ReminderEventSource::background_task(),
+                context::ReminderEventSource::background_process(),
             ),
             placement: ReminderPlacement::TailUserMessage,
             inject: InjectBehavior {
@@ -215,14 +224,37 @@ impl ReminderSource for BackgroundTaskReminderSource {
     }
 
     fn build(&self) -> Option<ReminderSnapshot> {
-        let items = self.supervisor.take_unnotified_terminal_items();
+        let items = self.supervisor.peek_unnotified_terminal_items();
         if items.is_empty() {
             return None;
         }
-        let data = context::InvocationReminderData::background_task_completed(items);
+        {
+            let mut peeked = self
+                .peeked_task_ids
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            for item in &items {
+                if !peeked.contains(&item.task_id) {
+                    peeked.push(item.task_id.clone());
+                }
+            }
+        }
+        let data = context::InvocationReminderData::background_process_completed(items);
         Some(ReminderSnapshot {
             data: serde_json::to_string(&data).expect("reminder 快照序列化不可失败"),
         })
+    }
+
+    fn confirm_injected(&self) {
+        let peeked: Vec<String> = std::mem::take(
+            &mut *self
+                .peeked_task_ids
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()),
+        );
+        if !peeked.is_empty() {
+            self.supervisor.mark_notified(&peeked);
+        }
     }
 
     fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String {
@@ -231,7 +263,7 @@ impl ReminderSource for BackgroundTaskReminderSource {
             Err(error) => {
                 log::warn!(
                     target: crate::LOG_TARGET,
-                    "reminder 快照反序列化失败 kind=background_task error={error}"
+                    "reminder 快照反序列化失败 kind=background_process error={error}"
                 );
                 String::new()
             }

@@ -483,7 +483,7 @@ impl AgentRunner for CliAgentRunner {
                 // 无处回注、通知无法语义路由；子代理整体已作为父侧后台
                 // 任务的执行体，内部保持同步语义。
                 background_threshold: None,
-                background_tasks: None,
+                background_processes: None,
             };
 
             if let Some(ref sink) = progress_sink {
@@ -546,7 +546,6 @@ impl AgentRunner for CliAgentRunner {
                     context_size,
                     progress: progress.clone(),
                 },
-                true,
             );
             // Reminder 统一管线（07-reminder-pipeline.md）：sub run 与 main 同一
             // 机制——sources 按 derived 启动期事实条件注册，句柄随 derived run 销毁。

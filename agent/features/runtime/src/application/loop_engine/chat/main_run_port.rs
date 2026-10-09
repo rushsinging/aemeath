@@ -108,8 +108,10 @@ pub(crate) fn make_agent(
     max_tool_concurrency: usize,
     agent_semaphore: Arc<tokio::sync::Semaphore>,
     session_id: &str,
-    background_tasks: Option<
-        std::sync::Arc<crate::application::background_task::session_runtime::BackgroundTaskRuntime>,
+    background_processes: Option<
+        std::sync::Arc<
+            crate::application::background_process::session_runtime::BackgroundProcessRuntime,
+        >,
     >,
     run_id: &sdk::RunId,
     tool_result_materializer: Arc<
@@ -185,7 +187,7 @@ pub(crate) fn make_agent(
         background_threshold: crate::application::run::config::background_threshold_from_context(
             runtime_context,
         ),
-        background_tasks,
+        background_processes,
     }
 }
 
@@ -211,7 +213,7 @@ impl EventSinkPort for ChatEventPort {
             task_access: &self.task_access,
             model: &self.model,
             started_at: execution.started_at().unwrap_or_else(Instant::now),
-            step_count: execution.step_count(),
+            step_count: execution.run_ordinal(),
             messages_snapshot: execution.messages_snapshot(),
         }
         .emit(events)

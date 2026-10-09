@@ -1567,8 +1567,8 @@
         "AtomicBlobAcceptedInputWriter",
         "AtomicBlobSessionManagement",
         "AtomicBlobToolReceiptWriter",
-        "BackgroundTaskCompletionStatus",
-        "BackgroundTaskReminderItemData",
+        "BackgroundProcessCompletionStatus",
+        "BackgroundProcessReminderItemData",
         "CanonicalSession",
         "CleanupConfirmation",
         "CommittedStep",
@@ -1672,7 +1672,7 @@
         "wire_isolated_context_with_workspace_skills",
         "wire_main_session"
       ],
-      "reason": "F-2：context crate 根窄 façade（#1022 登记，消费者证明制）；+ToolCallReceiptData/ToolCallState：后台任务 Backgrounded 中间态跨 crate 消费（receipt 状态语义）；+BackgroundTaskCompletionStatus/BackgroundTaskReminderItemData：#252 通知数据跨 crate 消费（runtime source 构造 reminder 条目）",
+      "reason": "F-2：context crate 根窄 façade（#1022 登记，消费者证明制）；+ToolCallReceiptData/ToolCallState：后台进程 Backgrounded 中间态跨 crate 消费（receipt 状态语义）；+BackgroundProcessCompletionStatus/BackgroundProcessReminderItemData：#252 通知数据跨 crate 消费（runtime source 构造 reminder 条目）",
       "profile": "fast"
     },
     {
@@ -1944,8 +1944,8 @@
       },
       "allowed_symbols": [
         "AuthorizationContext",
-        "BackgroundTaskAccess",
-        "BackgroundTaskAccessSource",
+        "BackgroundProcessAccess",
+        "BackgroundProcessAccessSource",
         "CommittedTaskChange",
         "ExecutionScope",
         "FixedGuidance",
@@ -1973,7 +1973,7 @@
         "test_support",
         "types"
       ],
-      "reason": "F-2：tools crate 根窄 façade（DDD 五类判据；published/ 九子命名空间承载词汇族；composition 独立装配面；#1716 收敛）；+test_support：test-harness feature 门控的 test-only 出口（runtime 执行流测试复用 TestToolExecutionContextBuilder）；+BackgroundTaskAccess/Source：#252 查询端口（runtime 实现、tools 契约，端口类五类判据）",
+      "reason": "F-2：tools crate 根窄 façade（DDD 五类判据；published/ 九子命名空间承载词汇族；composition 独立装配面；#1716 收敛）；+test_support：test-harness feature 门控的 test-only 出口（runtime 执行流测试复用 TestToolExecutionContextBuilder）；+BackgroundProcessAccess/Source：#252 查询端口（runtime 实现、tools 契约，端口类五类判据）",
       "profile": "fast"
     },
     {

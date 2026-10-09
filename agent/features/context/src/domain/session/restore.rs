@@ -157,7 +157,7 @@ fn has_unfinished_receipts(receipts: &[ToolCallReceiptData]) -> bool {
             receipt.state,
             ToolCallState::Pending
                 | ToolCallState::Running
-                // #252：转后台任务在 resume 时必然失效（执行体随原进程消亡）。
+                // #252：转后台进程在 resume 时必然失效（执行体随原进程消亡）。
                 | ToolCallState::Backgrounded
         )
     })
@@ -212,13 +212,13 @@ fn project_unfinished_tool_results(messages: &mut Vec<Message>, receipts: &[Tool
         .into_iter()
         .map(|receipt| {
             let call_id = provider_call_id(receipt).to_string();
-            // #252：Backgrounded 语义独立——后台任务随会话进程退出失效
+            // #252：Backgrounded 语义独立——后台进程随会话进程退出失效
             // （执行体消亡、无清理确认问题），与取消不确定（Pending/Running）区分。
             let (outcome, message, text) = if matches!(receipt.state, ToolCallState::Backgrounded) {
                 (
-                    "BackgroundTaskInvalidated",
-                    "background task was lost with the session process;                      inspect side effects via the workspace if relevant",
-                    "Background task was lost with the session process.",
+                    "BackgroundProcessInvalidated",
+                    "background process was lost with the session process;                      inspect side effects via the workspace if relevant",
+                    "Background process was lost with the session process.",
                 )
             } else {
                 (

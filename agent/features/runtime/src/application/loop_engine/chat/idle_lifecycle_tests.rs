@@ -93,7 +93,7 @@ fn user_event(text: &str) -> ChatInputEvent {
 }
 
 #[tokio::test]
-async fn idle_returns_background_task_wakeup_when_signal_arrives() {
+async fn idle_returns_background_process_wakeup_when_signal_arrives() {
     let (notifier, mut waiter) = crate::application::session::wakeup::wakeup_channel();
     let mut pending = PendingInputBuffer::default();
     let source = NeverInputSource::new();
@@ -106,7 +106,7 @@ async fn idle_returns_background_task_wakeup_when_signal_arrives() {
         idle_until_resume_or_shutdown(&source, &sink, &mut pending, &task_store, Some(&mut waiter))
             .await;
     assert!(
-        matches!(result, IdleResult::BackgroundTaskWakeup),
+        matches!(result, IdleResult::BackgroundProcessWakeup),
         "唤醒信号应驱动 Wakeup Run 结果，实际 {result:?}"
     );
 }

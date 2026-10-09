@@ -215,11 +215,8 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                         name,
                     } => {
                         self.saw_visible_delta = true;
-                        self.handler.on_tool_use_start(
-                            &name,
-                            provider_id.as_ref().map(|id| id.as_str()),
-                            index,
-                        );
+                        self.handler
+                            .on_tool_use_start(&name, provider_id.as_deref(), index);
                     }
                     ProviderContentData::ToolArgumentsDelta {
                         index,
@@ -230,7 +227,7 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                         self.handler.on_tool_arguments_delta(
                             index,
                             "",
-                            provider_id.as_ref().map(|id| id.as_str()),
+                            provider_id.as_deref(),
                             &partial_json,
                         );
                     }

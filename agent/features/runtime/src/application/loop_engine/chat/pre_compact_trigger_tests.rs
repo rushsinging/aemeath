@@ -321,7 +321,7 @@ impl CompactHarness {
 
     /// Triggers of the reflection runs that reached persistence. A synchronous
     /// run writes its `Running` marker before calling the provider, so this is
-    /// a deterministic observation rather than a race with a background task.
+    /// a deterministic observation rather than a race with a background process.
     fn persisted_triggers(&self) -> Vec<memory::api::reflection::ReflectionTrigger> {
         self.reflection_history
             .as_ref()

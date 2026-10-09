@@ -2,7 +2,7 @@
 
 > 层级：02-modules / context-management（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.2.0｜对应 Issue：[#1695](https://github.com/rushsinging/aemeath/issues/1695)
-> 本文定义 reminder 的统一管线：来源注册（build）、Run 级队列（queue）、invocation 边界注入（inject）与广义策略模型。reminder 是 Context Window 的动态组成部分——运行期事实（任务进度、配置变化、后台任务完成、记忆更新）以受控方式进入模型上下文，对抗注意力衰减并承载事件回注。
+> 本文定义 reminder 的统一管线：来源注册（build）、Run 级队列（queue）、invocation 边界注入（inject）与广义策略模型。reminder 是 Context Window 的动态组成部分——运行期事实（任务进度、配置变化、后台进程完成、记忆更新）以受控方式进入模型上下文，对抗注意力衰减并承载事件回注。
 
 ## 1. 定位
 
@@ -25,9 +25,9 @@ reminder 解决的问题域：
 | 注入内容随窗口增长沉底（注意力衰减） | 稳定 step 间隔的周期性重注入 |
 | compact 后注入内容随历史被 summary 替代而丢失 | per-kind compact 处置（重建 / 复位 / 丢弃） |
 | 新增 reminder 类型需触碰 enum / 渲染 / 生成点多处 | 类型与机制解耦（source 注册，开闭原则） |
-| 运行期事件（后台任务完成）需要回注模型 | 事件驱动入队与注入 |
+| 运行期事件（后台进程完成）需要回注模型 | 事件驱动入队与注入 |
 
-**域归属决策**：管线归 Context Management，事实来源归 Agent Runtime。注入时机、placement、去重、预算、compact 处置是 prompt 组装知识；Run 生命周期信号与业务事件是 runtime 编排事实。Runtime 只推 typed 事件，不解释注入；Context 只按策略消费事件，不依赖 task store / 后台任务内部结构。依赖方向保持 `runtime → context`。
+**域归属决策**：管线归 Context Management，事实来源归 Agent Runtime。注入时机、placement、去重、预算、compact 处置是 prompt 组装知识；Run 生命周期信号与业务事件是 runtime 编排事实。Runtime 只推 typed 事件，不解释注入；Context 只按策略消费事件，不依赖 task store / 后台进程内部结构。依赖方向保持 `runtime → context`。
 
 ## 2. 三段固定管线
 
@@ -125,12 +125,12 @@ Runtime 推送 typed 事件（Context 定义事件 PL，Runtime 实现/转发）
 | `StepAdvanced` | step 边界（accept_step_input） | OnStepInterval 计数 | ✅ |
 | `CompactCommitted` | auto-compact 提交（Context `compact` 的 `Committed` 分支内部对接，不经 Runtime 推送——run_id 取自 CompactRequestData，少一次跨域往返） | 各 kind 的 compact 处置 | ✅ |
 | `TaskMutated` | task store 变更后 | TaskProgress | 未接线：OnStepInterval 周期已覆盖 task 变更反映，即时触发留后续按需接入 |
-| `BackgroundTaskCompleted` | 后台任务终态 | BackgroundTaskEvent（见 §8） | 随后台任务模型落地 |
+| `BackgroundProcessCompleted` | 后台进程终态 | BackgroundProcessEvent（见 §8） | 随后台进程模型落地 |
 | `MemoryUpdated` | memory 更新通知 | MemoryUpdated | 按 Run 启动事实 source 承载（见 §7 映射注记） |
 
-事件 payload 为自包含快照数据；Context **NEVER** 回查业务 store，**NEVER** 持有 task / 后台任务内部句柄。
+事件 payload 为自包含快照数据；Context **NEVER** 回查业务 store，**NEVER** 持有 task / 后台进程内部句柄。
 
-事件 payload 为自包含快照数据；Context **NEVER** 回查业务 store，**NEVER** 持有 task / 后台任务内部句柄。
+事件 payload 为自包含快照数据；Context **NEVER** 回查业务 store，**NEVER** 持有 task / 后台进程内部句柄。
 
 ## 7. 现有 reminder 迁移映射
 
@@ -151,15 +151,15 @@ reminder 管线只承载 **LLM 受众**（invocation-only、可重算快照）�
 
 `GuidanceConfig.reload_policy` 三变体中，`Remind`（默认）是 `specs/3.9-config-compat.md` §155 规定形态：guidance / instruction 文件变更时，下一 Run 注入**带路径的 Read 引导 reminder**（LLM 自行 Read 重新读取，NEVER 重建 cacheable system prompt）——已由 `GuidanceSourcesChanged { paths }` 载体落地。`Inject`（前置 diff head）与 3.7 冻结、3.9 NEVER 重建规则冲突，待 spec 裁决后废弃或另行设计；`Confirm`（InteractionPort 用户确认）挂后续 issue。未实现变体按 Remind 兜底渲染并 warn。
 
-## 8. 与后台任务事件的对接
+## 8. 与后台进程事件的对接
 
-后台任务（tool call 统一后台任务模型，见对应 Runtime 设计）是本管线的第一个新类型消费者：
+后台进程（tool call 统一后台进程模型，见对应 Runtime 设计）是本管线的第一个新类型消费者：
 
-- kind `BackgroundTaskEvent`：refresh = `OnEvent(task_terminal)`、compact = `Rebuild`（从任务状态重建）、placement = `TailUserMessage`
+- kind `BackgroundProcessEvent`：refresh = `OnEvent(task_terminal)`、compact = `Rebuild`（从任务状态重建）、placement = `TailUserMessage`
 - **有 active Run**：任务完成事实作为 reminder 注入当前 Run 的后续 step
 - **无 active Run**：Runtime 走 Wakeup Run 回注（属 Runtime 编排，不经本管线注入，但 Wakeup Run 组装时经同一管线渲染任务状态快照）
 
-本管线（source 注册 + 策略分发 + 队列）**MUST** 先于后台任务 reminder 部分落地，否则事件注入会被迫硬编码返工。
+本管线（source 注册 + 策略分发 + 队列）**MUST** 先于后台进程 reminder 部分落地，否则事件注入会被迫硬编码返工。
 
 ## 9. 落盘语义与不变量（#1848 修订）
 

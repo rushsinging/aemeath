@@ -3,6 +3,7 @@ use crate::application::constants::TASK_PROGRESS_REFRESH_INTERVAL_STEPS;
 use crate::application::loop_engine::chat::reminder_sources::{
     RunStartFactReminderSource, TaskProgressReminderSource,
 };
+use std::time::SystemTime;
 
 fn access_with_progress(completed: usize) -> task::TaskStore {
     let store = task::TaskStore::new();
@@ -365,17 +366,18 @@ async fn recall_snapshot_data_stable_for_same_result_set() {
 }
 
 #[test]
-fn background_task_source_policy_is_event_tail_dedup_rebuild() {
-    let supervisor =
-        Arc::new(crate::application::background_task::supervisor::BackgroundTaskSupervisor::new());
-    let source = BackgroundTaskReminderSource::new(supervisor);
+fn background_process_source_policy_is_event_tail_dedup_rebuild() {
+    let supervisor = Arc::new(
+        crate::application::background_process::supervisor::BackgroundProcessSupervisor::new(),
+    );
+    let source = BackgroundProcessReminderSource::new(supervisor);
 
-    assert_eq!(source.kind().as_str(), "background_task");
+    assert_eq!(source.kind().as_str(), "background_process");
     let policy = source.policy();
     assert!(matches!(
         policy.refresh,
         context::RefreshTrigger::OnEvent(ref event)
-            if *event == context::ReminderEventSource::background_task()
+            if *event == context::ReminderEventSource::background_process()
     ));
     assert!(matches!(
         policy.placement,
@@ -389,21 +391,26 @@ fn background_task_source_policy_is_event_tail_dedup_rebuild() {
 }
 
 #[test]
-fn background_task_source_build_takes_terminal_items_once_and_renders() {
-    let supervisor =
-        Arc::new(crate::application::background_task::supervisor::BackgroundTaskSupervisor::new());
-    let source = BackgroundTaskReminderSource::new(supervisor.clone());
+fn background_process_source_build_peeks_until_confirmed_and_renders() {
+    let supervisor = Arc::new(
+        crate::application::background_process::supervisor::BackgroundProcessSupervisor::new(),
+    );
+    let source = BackgroundProcessReminderSource::new(supervisor.clone());
 
     // 无终态任务：build 为 None（本轮无内容不入队）。
     assert!(source.build().is_none());
 
     // 推进一个终态：build 携带完成条目（take 语义）。
-    let task_id = supervisor.register(background_task_identity(), "command=cargo test");
+    let task_id = supervisor.register(
+        background_process_identity(),
+        "command=cargo test",
+        SystemTime::now(),
+    );
     supervisor.record_output(&task_id, b"ok 3 passed\n");
     supervisor
         .finish(
             &task_id,
-            crate::domain::background_task::BackgroundTaskTerminalKind::Success,
+            crate::domain::background_process::BackgroundProcessTerminalKind::Success,
             None,
         )
         .unwrap();
@@ -411,23 +418,26 @@ fn background_task_source_build_takes_terminal_items_once_and_renders() {
     let decoded: context::InvocationReminderData =
         serde_json::from_str(&snapshot.data).expect("快照为 InvocationReminderData JSON");
     match decoded {
-        context::InvocationReminderData::BackgroundTaskCompleted { items } => {
+        context::InvocationReminderData::BackgroundProcessCompleted { items } => {
             assert_eq!(items.len(), 1);
             assert_eq!(items[0].tool_name, "Bash");
             assert!(items[0].output_tail.contains("ok 3 passed"));
         }
-        other => panic!("应为 BackgroundTaskCompleted，实际 {other:?}"),
+        other => panic!("应为 BackgroundProcessCompleted，实际 {other:?}"),
     }
 
-    // take 语义：再 build 为空。
-    assert!(source.build().is_none());
+    // peek 语义（注入确认制）：确认前再 build 仍可见（Run 收口后
+    // 下个 Run 补注入）；注入确认后关闭。
+    assert!(source.build().is_some(), "确认前事实存活");
+    source.confirm_injected();
+    assert!(source.build().is_none(), "注入确认后不再重复");
 
     // render 委托 context 双语渲染。
     let rendered = source.render(&snapshot, "zh");
-    assert!(rendered.contains("后台任务已完成"));
+    assert!(rendered.contains("后台进程已完成"));
 }
 
-fn background_task_identity() -> context::ToolCallIdentityData {
+fn background_process_identity() -> context::ToolCallIdentityData {
     context::ToolCallIdentityData {
         session_id: context::SessionId::new("session-1"),
         run_id: sdk::RunId::new("run-1"),

@@ -114,10 +114,10 @@ pub enum InvocationReminderData {
     MemoryRecall {
         entries: Vec<MemoryRecallEntryData>,
     },
-    /// 后台任务完成通知（#252）：转后台 tool call 的终态事实。
-    /// 轻量通知只带输出尾部截断；完整数据由 background_tasks tool 查询。
-    BackgroundTaskCompleted {
-        items: Vec<BackgroundTaskReminderItemData>,
+    /// 后台进程完成通知（#252）：转后台 tool call 的终态事实。
+    /// 轻量通知只带输出尾部截断；完整数据由 background_processes tool 查询。
+    BackgroundProcessCompleted {
+        items: Vec<BackgroundProcessReminderItemData>,
     },
 }
 
@@ -128,19 +128,19 @@ pub struct MemoryRecallEntryData {
     pub content_preview: String,
 }
 
-/// 后台任务完成通知条目（渲染语义枚举归 Context；runtime 侧终态转换映射）。
+/// 后台进程完成通知条目（渲染语义枚举归 Context；runtime 侧终态转换映射）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BackgroundTaskReminderItemData {
+pub struct BackgroundProcessReminderItemData {
     pub task_id: String,
     pub tool_name: String,
-    pub status: BackgroundTaskCompletionStatus,
-    /// 输出尾部截断（注入 token 预算内；完整输出经 background_tasks logs 查询）。
+    pub status: BackgroundProcessCompletionStatus,
+    /// 输出尾部截断（注入 token 预算内；完整输出经 background_processes logs 查询）。
     pub output_tail: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum BackgroundTaskCompletionStatus {
+pub enum BackgroundProcessCompletionStatus {
     Succeeded,
     Failed,
     TimedOut,
@@ -174,8 +174,8 @@ impl InvocationReminderData {
         Self::MemoryRecall { entries }
     }
 
-    pub fn background_task_completed(items: Vec<BackgroundTaskReminderItemData>) -> Self {
-        Self::BackgroundTaskCompleted { items }
+    pub fn background_process_completed(items: Vec<BackgroundProcessReminderItemData>) -> Self {
+        Self::BackgroundProcessCompleted { items }
     }
 
     pub const fn kind(&self) -> &'static str {
@@ -185,7 +185,7 @@ impl InvocationReminderData {
             Self::ModelGuidanceMismatch { .. } => "model_guidance_mismatch",
             Self::MemoryUpdated { .. } => "memory_updated",
             Self::MemoryRecall { .. } => "memory_recall",
-            Self::BackgroundTaskCompleted { .. } => "background_task",
+            Self::BackgroundProcessCompleted { .. } => "background_process",
         }
     }
 }

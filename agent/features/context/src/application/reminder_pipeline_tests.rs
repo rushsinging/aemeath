@@ -124,7 +124,7 @@ fn event_source_flows_only_on_matching_event() {
     source.set_snapshot("changed=2");
     let mut pipeline = ReminderPipeline::new(vec![source.clone()]);
 
-    pipeline.handle_event(&ReminderEventSource::new("background_task"));
+    pipeline.handle_event(&ReminderEventSource::new("background_process"));
     assert!(
         pipeline
             .inject_into_window(LANGUAGE_ZH, "2026-10-04T01:00:00+08:00", 512)
@@ -465,4 +465,61 @@ fn injected_reminders_persist_on_finalize_and_flush_once() {
     let second = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-05T18:00:01+08:00", 512);
     assert!(second.tail_user_message.is_none());
     assert_eq!(pipeline.take_pending_persist_messages().len(), 0);
+}
+
+// ── source 层注入确认（#252：注入组装后必须调用 confirm_injected） ────
+
+struct ConfirmingTestSource {
+    inner: CountingTestSource,
+    confirm_count: std::sync::atomic::AtomicUsize,
+}
+
+impl ReminderSource for ConfirmingTestSource {
+    fn kind(&self) -> ReminderKind {
+        self.inner.kind()
+    }
+
+    fn policy(&self) -> ReminderPolicy {
+        self.inner.policy()
+    }
+
+    fn build(&self) -> Option<ReminderSnapshot> {
+        self.inner.build()
+    }
+
+    fn render(&self, snapshot: &ReminderSnapshot, language: &str) -> String {
+        self.inner.render(snapshot, language)
+    }
+
+    fn confirm_injected(&self) {
+        self.confirm_count
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
+#[test]
+fn injection_assembly_calls_confirm_injected_on_injected_sources() {
+    let source = Arc::new(ConfirmingTestSource {
+        inner: CountingTestSource::new(
+            ReminderKind::new("memory_updated"),
+            interval_policy(1, ReminderPlacement::TailUserMessage),
+        ),
+        confirm_count: std::sync::atomic::AtomicUsize::new(0),
+    });
+    source.inner.set_snapshot("state");
+
+    let mut pipeline = ReminderPipeline::new(vec![source.clone()]);
+    pipeline.step_advanced(1);
+    let injection = pipeline.inject_into_window(LANGUAGE_ZH, "2026-10-09T00:00:00Z", 4096);
+    assert!(
+        injection.tail_user_message.is_some(),
+        "interval 命中应有尾部注入"
+    );
+    assert_eq!(
+        source
+            .confirm_count
+            .load(std::sync::atomic::Ordering::Acquire),
+        1,
+        "被组装进 window 的 source 必须收到注入确认"
+    );
 }

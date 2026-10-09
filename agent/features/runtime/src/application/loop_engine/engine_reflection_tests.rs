@@ -164,7 +164,7 @@ async fn drive_interval_run(
 
 fn interval_outcome(status: ReflectionTaskCompletionStatus) -> ReflectionRunOutcome {
     ReflectionRunOutcome::Completed(ReflectionTaskCompletion {
-        trigger: ReflectionTaskTrigger::Interval { step_count: 2 },
+        trigger: ReflectionTaskTrigger::Interval { run_ordinal: 2 },
         status,
         metadata: None,
     })
@@ -297,7 +297,7 @@ async fn interval_reflection_publishes_begin_and_terminal_activity_under_current
     assert!(
         matches!(
             result.reflection_runs.as_slice(),
-            [ReflectionTaskTrigger::Interval { step_count: 2 }]
+            [ReflectionTaskTrigger::Interval { run_ordinal: 2 }]
         ),
         "端口必须收到 Interval{{ step_count: 2 }} 触发；实际: {:?}",
         result.reflection_runs
@@ -576,7 +576,7 @@ async fn interval_reflection_runs_once_per_run_across_two_complete_steps() {
     assert!(
         matches!(
             result.reflection_runs.as_slice(),
-            [ReflectionTaskTrigger::Interval { step_count: 2 }]
+            [ReflectionTaskTrigger::Interval { run_ordinal: 2 }]
         ),
         "同一 Run 的多个 Complete step 命中同一 step_count 时只允许反思一次；\
          实际触发: {:?}",
@@ -617,7 +617,7 @@ async fn interval_reflection_miss_then_hit_still_triggers_once() {
     assert!(
         matches!(
             result.reflection_runs.as_slice(),
-            [ReflectionTaskTrigger::Interval { step_count: 2 }]
+            [ReflectionTaskTrigger::Interval { run_ordinal: 2 }]
         ),
         "未命中不得消耗闸门：命中后必须反思一次且仅一次；实际触发: {:?}",
         result.reflection_runs
@@ -1416,5 +1416,57 @@ async fn manual_compaction_run_defers_drained_user_batch_and_completes() {
         scenario.deferred_batches(),
         vec![vec!["user during compaction".to_string()]],
         "用户输入必须回流 session 队列"
+    );
+}
+
+/// #252：wakeup Run 不是用户回合——interval 判定必须整体跳过（连端口
+/// 判定都不调用），命中频控也不进入反思 phase。修复前：判定命中后
+/// `BeginReflection` 被意图 gate 拒绝，整个 Run 被判失败。
+#[tokio::test]
+async fn interval_reflection_skipped_for_wakeup_intent_run() {
+    let mut run = crate::domain::agent_run::Run::new(
+        crate::domain::agent_run::RunSpec::background_process_wakeup(),
+        None,
+    );
+    let cancel = CancellationToken::new();
+    let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+    execution.initialize_for_launch(Vec::new(), 10);
+    let activities = std::sync::Arc::new(
+        crate::application::activity::ActivityCoordinator::production_without_publisher(
+            run.id().clone(),
+            crate::application::activity::RunPurpose::Main,
+        ),
+    );
+    let mut reflection = ReflectionFake {
+        judgment: IntervalJudgment::Interval(10),
+        outcome: interval_outcome(ReflectionTaskCompletionStatus::Succeeded),
+        activities: activities.clone(),
+        runs: Vec::new(),
+        state_during_run: None,
+        pre_compact_material: Default::default(),
+        memory_config: share::config::MemoryConfig::default(),
+        received_cancels: Vec::new(),
+        judgment_calls: std::cell::Cell::new(0),
+    };
+    let mut scenario = ScriptedScenario {
+        model_steps: VecDeque::from([ModelStep::Complete {
+            text: "wakeup handled".to_string(),
+        }]),
+        ..Default::default()
+    };
+    let result = {
+        let mut port = scenario.ports().run_loop();
+        port.bind_activity_context(activities.clone(), "test-model".to_string());
+        port.bind_reflection(&mut reflection);
+        run_loop(&mut run, &mut execution, &cancel, &mut port)
+            .await
+            .expect("wakeup Run 不得因反思判定失败")
+    };
+    assert_eq!(result, LoopDirective::Terminal);
+    assert_eq!(run.status(), RunStatus::Completed);
+    assert_eq!(
+        reflection.judgment_calls.get(),
+        0,
+        "非用户回合 Run 必须跳过 interval 判定（不消耗频控、不触发反思）"
     );
 }

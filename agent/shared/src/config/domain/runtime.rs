@@ -14,7 +14,7 @@ pub(super) fn default_tool_background_threshold_secs() -> u64 {
 /// Runtime 引擎分段配置。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeConfig {
-    /// tool call 前台等待阈值（秒）：超过即自动转后台任务（占位结果 + 异步回注）。
+    /// tool call 前台等待阈值（秒）：超过即自动转后台进程（占位结果 + 异步回注）。
     /// `0` 表示禁用后台化（纯快路径，行为与现状一致）。随 `RunConfigSnapshot` 冻结。
     #[serde(
         default = "default_tool_background_threshold_secs",

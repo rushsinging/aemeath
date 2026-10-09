@@ -22,6 +22,7 @@ pub(crate) struct InputContinuationState {
     stop_hook_feedback: std::sync::Arc<std::sync::Mutex<Option<Message>>>,
     pending_step_prefix: std::sync::Arc<std::sync::Mutex<Option<Message>>>,
     tool_results_pending: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    background_process_wakeup: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl InputContinuationState {
@@ -49,6 +50,19 @@ impl InputContinuationState {
     pub(crate) fn schedule_tool_results(&self) {
         self.tool_results_pending
             .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// 预置后台进程 wakeup 续延（#252）：wakeup Run 空输入启动时装配，
+    /// 首次 drain 以 InternalContinuation 驱动一次 step，使 reminder
+    /// 管线（完成事实注入）真正到达 LLM。
+    pub(crate) fn install_background_process_wakeup(&self) {
+        self.background_process_wakeup
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    fn take_background_process_wakeup(&self) -> bool {
+        self.background_process_wakeup
+            .swap(false, std::sync::atomic::Ordering::AcqRel)
     }
 
     fn take_tool_results(&self) -> bool {
@@ -350,6 +364,45 @@ where
             );
             return Ok(Some(DrainOutcome::InternalContinuation {
                 kind: InternalContinuationKind::ToolResults,
+                batch,
+                epoch,
+            }));
+        }
+        if self.continuation.take_background_process_wakeup() {
+            let (batch, epoch) = match self
+                .run_input_buffer
+                .with_lock(|b| b.take_internal_continuation(expected_epoch))
+            {
+                BufferDrain::Ready { batch, epoch } => (batch, epoch),
+                BufferDrain::EmptyAndSealed { .. } | BufferDrain::Empty { .. } => {
+                    return Err(LoopEngineError::Adapter(
+                        "internal continuation 意外返回 EmptyAndSealed/Empty".to_string(),
+                    ));
+                }
+                BufferDrain::AlreadySealed { epoch } => {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "BufferedInputAdapter: take_internal_continuation returned AlreadySealed at epoch {:?}",
+                        epoch,
+                    );
+                    return Ok(Some(DrainOutcome::EmptyAndSealed { epoch }));
+                }
+                BufferDrain::EpochMismatch { expected, actual } => {
+                    return Err(LoopEngineError::Adapter(format!(
+                        "drain epoch 不匹配：期望 {:?}，实际 {:?}",
+                        expected, actual,
+                    )));
+                }
+            };
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[loop_debug] drain_input run_id={} status=InternalContinuation epoch={:?} kind=BackgroundProcessWakeup count={}",
+                self.run_id,
+                epoch,
+                batch.len(),
+            );
+            return Ok(Some(DrainOutcome::InternalContinuation {
+                kind: InternalContinuationKind::BackgroundProcessWakeup,
                 batch,
                 epoch,
             }));
@@ -693,6 +746,10 @@ impl crate::application::loop_engine::InputPort for FixedInputAdapter<'_> {
         InputStrategy::await_user_input(self, expected_epoch).await
     }
 }
+
+#[cfg(test)]
+#[path = "input_strategy_tests.rs"]
+mod input_strategy_tests;
 
 #[cfg(test)]
 mod batched_user_input_tests {

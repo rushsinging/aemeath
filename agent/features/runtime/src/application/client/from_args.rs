@@ -15,13 +15,15 @@ pub struct RuntimeToolAssemblyDependenciesData {
     tool_result_materializer:
         Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
     active_run: Arc<crate::application::run::active_registry::ActiveRunRegistry>,
-    /// #252 PR3：后台任务端口绑定槽（session 创建后写入实现）。
-    background_slot: Option<
-        std::sync::Arc<std::sync::RwLock<Option<std::sync::Arc<dyn tools::BackgroundTaskAccess>>>>,
-    >,
-    /// #252 PR3：后台任务账本 blob（session 就绪后绑定持久化并恢复快照）。
+    /// #252 PR3：后台进程端口绑定槽（session 创建后写入实现）。
+    background_slot: Option<BackgroundProcessAccessSlot>,
+    /// #252 PR3：后台进程账本 blob（session 就绪后绑定持久化并恢复快照）。
     background_ledger_blob: Option<std::sync::Arc<dyn storage::AtomicBlobPort>>,
 }
+
+/// 后台进程端口绑定槽：session 创建后由装配方写入运行时实现。
+type BackgroundProcessAccessSlot =
+    std::sync::Arc<std::sync::RwLock<Option<std::sync::Arc<dyn tools::BackgroundProcessAccess>>>>;
 
 impl RuntimeToolAssemblyDependenciesData {
     pub fn new(
@@ -42,7 +44,7 @@ impl RuntimeToolAssemblyDependenciesData {
         }
     }
 
-    /// 绑定后台任务账本 blob（#252 PR3：shell 构造后绑定持久化并恢复）。
+    /// 绑定后台进程账本 blob（#252 PR3：shell 构造后绑定持久化并恢复）。
     pub fn with_background_ledger_blob(
         mut self,
         blob: std::sync::Arc<dyn storage::AtomicBlobPort>,
@@ -51,11 +53,11 @@ impl RuntimeToolAssemblyDependenciesData {
         self
     }
 
-    /// 绑定后台任务端口槽（#252 PR3：shell 构造后写入实现）。
+    /// 绑定后台进程端口槽（#252 PR3：shell 构造后写入实现）。
     pub fn with_background_slot(
         mut self,
         slot: std::sync::Arc<
-            std::sync::RwLock<Option<std::sync::Arc<dyn tools::BackgroundTaskAccess>>>,
+            std::sync::RwLock<Option<std::sync::Arc<dyn tools::BackgroundProcessAccess>>>,
         >,
     ) -> Self {
         self.background_slot = Some(slot);
@@ -482,37 +484,33 @@ pub async fn wire_agent_client_from_args(
         runtime_context_factory,
     );
 
-    // #252 PR3：session 就绪后绑定后台任务端口（查询 tool 的数据源）、
+    // #252 PR3：session 就绪后绑定后台进程端口（查询 tool 的数据源）、
     // 绑定账本持久化并恢复快照（非终态任务标 Invalidated(ProcessExit)）。
     if let Some(slot) = background_slot {
         slot.write()
             .unwrap_or_else(|error| error.into_inner())
-            .replace(shell.background_tasks.clone());
+            .replace(shell.background_processes.clone());
     }
-    // #252 PR3：spinner 活动数事件 sink 工厂（per-chat）。
-    shell
-        .background_tasks
-        .bind_event_sink_factory(shell.event_sink_factory.clone());
     if let Some(blob) = background_ledger_blob {
         if let Err(error) = shell
-            .background_tasks
+            .background_processes
             .bind_persistence(blob.clone(), session_id.clone())
             .await
         {
             log::warn!(
                 target: crate::LOG_TARGET,
-                "background task ledger bind failed: {error}"
+                "background process ledger bind failed: {error}"
             );
         } else {
             match shell
-                .background_tasks
+                .background_processes
                 .restore_from_snapshot(&blob, &session_id)
                 .await
             {
                 Ok(restored) if restored > 0 => {
                     log::info!(
                         target: crate::LOG_TARGET,
-                        "background task ledger restored: session={} tasks={restored}",
+                        "background process ledger restored: session={} tasks={restored}",
                         session_id
                     );
                 }
@@ -520,7 +518,7 @@ pub async fn wire_agent_client_from_args(
                 Err(error) => {
                     log::warn!(
                         target: crate::LOG_TARGET,
-                        "background task ledger restore failed: {error}"
+                        "background process ledger restore failed: {error}"
                     );
                 }
             }

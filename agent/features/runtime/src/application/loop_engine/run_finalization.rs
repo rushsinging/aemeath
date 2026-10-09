@@ -86,7 +86,7 @@ where
         };
         let outcome = RunFinalizationOutcome {
             status,
-            run_steps: execution.step_count(),
+            run_steps: execution.step_ordinal(),
             duration: execution.elapsed(),
             role: self.role.clone(),
             model: self.model.clone(),

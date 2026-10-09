@@ -44,7 +44,7 @@ pub mod read_mcp_resource;
 // Filesystem Skill adapter（#912/#913）：双端口实现已完成并经
 // adapters::composition 接线生产装配。端口与 PL 类型已在 domain.rs /
 // lib.rs 正式 re-export。
-pub mod background_tasks;
+pub mod background_processes;
 pub mod skill_filesystem;
 pub mod skill_tool;
 pub mod task_block_by;

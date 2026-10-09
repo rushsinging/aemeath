@@ -18,7 +18,7 @@ pub type ReflectionInputMessage = share::message::Message;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReflectionTaskTrigger {
-    Interval { step_count: usize },
+    Interval { run_ordinal: usize },
     PreCompact,
     Manual,
 }

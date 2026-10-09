@@ -292,7 +292,7 @@ pub struct LlmClient {
 
 impl LlmClient {
     #[cfg(test)]
-    pub fn from_provider(provider: Arc<dyn LlmProvider>) -> Self {
+    pub(crate) fn from_provider(provider: Arc<dyn LlmProvider>) -> Self {
         let default_scope = crate::domain::invoke::InvocationScopeData::new(
             provider.model_name(),
             share::config::models::DEFAULT_MAX_TOKENS,

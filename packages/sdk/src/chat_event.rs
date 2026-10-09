@@ -888,8 +888,8 @@ pub enum ChatEvent {
     RuntimeStatusChanged {
         status: Box<crate::RuntimeStatusView>,
     },
-    /// #252：后台任务活动数变化（TUI spinner 显示）。
-    BackgroundTaskCountChanged {
+    /// #252：后台进程活动数变化（TUI spinner 显示）。
+    BackgroundProcessCountChanged {
         active: usize,
     },
 }

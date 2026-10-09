@@ -1,3 +1,7 @@
+// 手动 replay 工具（`--ignored` 运行）：SKIP/VERDICT 为面向操作者的
+// stdout 交互产物，与 CI 断言型测试不同（仓库既有 allow 先例）。
+#![allow(clippy::print_stdout, clippy::print_stderr)]
+
 //! 直接驱动 provider（`LlmClient::invocation_stream` 全链路：请求构造、
 //! headers、发送、SSE 解码）打真实 OmniRoute 端点，判定上游 400 是稳定
 //! 复现还是瞬态——不绕过 aemeath 自身的请求构造代码。

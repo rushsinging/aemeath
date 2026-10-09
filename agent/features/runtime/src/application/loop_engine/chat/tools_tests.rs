@@ -612,7 +612,7 @@ async fn test_materialized_tool_results_persist_oversized_tui_result() {
 // resolve_ask_user_via_bridge is deleted — the engine handles
 // all interaction routing via InteractionCoordinator.
 
-// ── #252 后台任务：工具轮级快路径等价与转后台场景 ─────────────────────
+// ── #252 后台进程：工具轮级快路径等价与转后台场景 ─────────────────────
 //
 // 计时断言在高负载（pre-push 并发全量测试）下易 flaky，改用确定性信号：
 // fast 工具完成时刻观察 slow 是否已真实完成。
