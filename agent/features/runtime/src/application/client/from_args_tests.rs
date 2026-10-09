@@ -301,6 +301,8 @@ async fn make_test_shell(
             hook_runner.clone(),
             Arc::new(crate::ports::UnavailableUsageSink),
             None,
+            None,
+            None,
         ),
     );
 
@@ -640,6 +642,8 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
             task_wiring.access(),
             hook_runner.clone(),
             Arc::new(crate::ports::UnavailableUsageSink),
+            None,
+            None,
             None,
         ),
     );

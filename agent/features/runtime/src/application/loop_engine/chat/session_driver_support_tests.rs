@@ -391,6 +391,8 @@ fn test_shell_with_catalog(
                 hooks,
                 Arc::new(crate::ports::UnavailableUsageSink),
             None,
+            None,
+            None,
             ),        ),
     }
 }
@@ -496,6 +498,8 @@ fn test_shell_with_task_store(
                 task_store,
                 hooks,
                 Arc::new(crate::ports::UnavailableUsageSink),
+            None,
+            None,
             None,
             ),        ),
     }

@@ -124,9 +124,13 @@ def main() -> None:
             h_decide = hidden[base + row["decide"]]
             h_opts = torch.stack([hidden[base + o] for o in row["opts"]])
             probs = torch.softmax(head.logits(h_decide, h_opts), dim=-1)
+            gold = case.get("gold")
+            if gold is None:
+                gold = 1 if case.get("label") else 0
             rows_out.append({
                 "dataset": name,
                 "id": case.get("id"),
+                "gold": gold,
                 "n_options": len(row["opts"]),
                 "ids": row_ids,
                 "decide": base + row["decide"],

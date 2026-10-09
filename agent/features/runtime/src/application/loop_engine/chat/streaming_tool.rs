@@ -261,6 +261,7 @@ impl StreamingToolExecutor {
                 std::slice::from_ref(&call),
                 &spawn_inner.agent.catalog,
                 spawn_inner.runtime_context.policy_ref().as_ref(),
+                spawn_inner.runtime_context.policy_triage().as_deref(),
                 &spawn_inner.run_id,
                 &step_id,
                 &spawn_inner.agent,

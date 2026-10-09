@@ -791,7 +791,7 @@ where
                 }
                 // per-message 记忆召回（#1834）：开关开且评分端口已装配时注册 source
                 // 并写入 slot（accept_step_input 在 turn 边界 refresh 预物化）。
-                if let Some(scorer) = runtime_context.scoring() {
+                if let Some(scorer) = runtime_context.scoring_for_recall() {
                     if runtime_context.config_ref().config().scoring().memory_recall {
                         let recall_source = std::sync::Arc::new(
                             crate::application::loop_engine::chat::reminder_sources::MemoryRecallReminderSource::new(

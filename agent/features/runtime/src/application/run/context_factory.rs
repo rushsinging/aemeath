@@ -141,9 +141,10 @@ pub struct RuntimeContextFactory {
 impl RuntimeContextFactory {
     /// Narrow crate-root construction entry.
     ///
-    /// Accepts six explicit session-scoped port parameters — no opaque
+    /// Accepts session-scoped port parameters — no opaque
     /// service bag. This is the only constructor callable from outside the
     /// runtime crate.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         tool_catalog: Arc<dyn ToolCatalogPort>,
         tool_execution: Arc<dyn ToolExecutionPort>,
@@ -152,7 +153,9 @@ impl RuntimeContextFactory {
         task: Arc<dyn TaskAccess>,
         hooks: Arc<dyn HookDispatcher>,
         usage_sink: Arc<dyn crate::ports::UsageSink>,
-        scoring: Option<Arc<dyn systemone::ScoringPort>>,
+        scoring_for_recall: Option<Arc<dyn systemone::ScoringPort>>,
+        scoring_for_skill_match: Option<Arc<dyn systemone::ScoringPort>>,
+        policy_triage: Option<Arc<crate::application::tool::PolicyTriage>>,
     ) -> Self {
         Self::from_services(
             tool_catalog,
@@ -162,7 +165,9 @@ impl RuntimeContextFactory {
             task,
             hooks,
             usage_sink,
-            scoring,
+            scoring_for_recall,
+            scoring_for_skill_match,
+            policy_triage,
         )
     }
     #[allow(clippy::too_many_arguments)]
@@ -174,7 +179,9 @@ impl RuntimeContextFactory {
         task: Arc<dyn TaskAccess>,
         hooks: Arc<dyn HookDispatcher>,
         usage_sink: Arc<dyn crate::ports::UsageSink>,
-        scoring: Option<Arc<dyn systemone::ScoringPort>>,
+        scoring_for_recall: Option<Arc<dyn systemone::ScoringPort>>,
+        scoring_for_skill_match: Option<Arc<dyn systemone::ScoringPort>>,
+        policy_triage: Option<Arc<crate::application::tool::PolicyTriage>>,
     ) -> Self {
         Self {
             services: RuntimeServices {
@@ -187,7 +194,9 @@ impl RuntimeContextFactory {
                     crate::application::published_state::PublishedStateRegistry::default(),
                 hooks,
                 usage_sink,
-                scoring,
+                scoring_for_recall,
+                scoring_for_skill_match,
+                policy_triage,
             },
             provider_factory: None,
             skill_catalog: None,

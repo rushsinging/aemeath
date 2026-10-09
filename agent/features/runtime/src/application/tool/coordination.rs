@@ -193,10 +193,12 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
         calls,
         &agent.catalog,
         context.runtime_context.policy_ref().as_ref(),
+        context.runtime_context.policy_triage().as_deref(),
         run_id,
         step_id,
         &workspace_root,
     )
+    .await
     .executable
     .into_iter()
     .map(|call| call.call)
@@ -210,6 +212,7 @@ async fn execute_tools_impl<O: ToolRoundObserver>(
         &raw_calls,
         &agent.catalog,
         context.runtime_context.policy_ref().as_ref(),
+        context.runtime_context.policy_triage().as_deref(),
         run_id,
         step_id,
         agent,
@@ -460,10 +463,16 @@ pub(crate) struct RequireApprovalCall {
 /// Calls absent from the frozen catalog are denied before Policy because no
 /// trustworthy capability set exists. Policy is evaluated once per valid call;
 /// its AuthorizationContext decides whether the Runtime fuse remains active.
-pub(crate) fn prepare_tool_round(
+/// 准备一轮工具调用：catalog 复验 → policy 判定 → （#1836）policy Allow 后
+/// 风险预筛单向加严 → guard fuse。triage 为 `None`（场景开关关闭）时行为与
+/// 无预筛完全一致；既有 `Deny` / `RequireApproval` 恒先短路，评分 NEVER
+/// 被咨询、NEVER 放宽。
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn prepare_tool_round(
     calls: &[(ToolCall, ToolGuardDecision)],
     catalog: &ToolCatalogSnapshot,
     policy: &dyn Policy,
+    triage: Option<&crate::application::tool::PolicyTriage>,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
     workspace_root: &Path,
@@ -495,6 +504,19 @@ pub(crate) fn prepare_tool_round(
         };
         match policy.evaluate(&request) {
             PolicyDecisionData::Allow(authorization) => {
+                // #1836 单向加严：规则 Allow 后叠加风险预筛；评分不可用静默
+                // 降级放行（PolicyTriage::escalate 内建）。
+                if let Some(triage) = triage {
+                    if let Some(escalation) = triage.escalate(&request).await {
+                        prepared.require_approval.push(RequireApprovalCall {
+                            call: call.clone(),
+                            authorization: share::tools_vocab::AuthorizationContext::STANDARD,
+                            reason: escalation.reason,
+                            subject: format!("tool:{}", request.tool_name().as_str()),
+                        });
+                        continue;
+                    }
+                }
                 if let ToolGuardDecision::SoftBlock { reason } = decision {
                     if authorization.enforce_tool_fuse {
                         prepared

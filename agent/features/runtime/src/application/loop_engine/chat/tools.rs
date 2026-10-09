@@ -35,6 +35,7 @@ pub(crate) async fn execute_tool_round<S>(
     tool_calls: &[ToolCall],
     catalog: &tools::ToolCatalogSnapshot,
     policy: &dyn policy::Policy,
+    triage: Option<&crate::application::tool::PolicyTriage>,
     run_id: &sdk::RunId,
     step_id: &sdk::RunStepId,
     agent: &Agent,
@@ -54,10 +55,12 @@ where
         guarded_calls,
         catalog,
         policy,
+        triage,
         run_id,
         step_id,
         &workspace_root,
-    );
+    )
+    .await;
     let denied_results = deny_tool_calls(
         &prepared.denied,
         sink,

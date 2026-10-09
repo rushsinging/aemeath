@@ -120,8 +120,8 @@ fn call(name: &str, index: usize) -> ToolCall {
     }
 }
 
-#[test]
-fn prepare_round_applies_policy_before_fuse_and_preserves_positions() {
+#[tokio::test]
+async fn prepare_round_applies_policy_before_fuse_and_preserves_positions() {
     let factory = TestCatalogExecutionFactory::new();
     factory.register(TestTool("Allowed"));
     factory.register(TestTool("Denied"));
@@ -146,10 +146,12 @@ fn prepare_round_applies_policy_before_fuse_and_preserves_positions() {
         &calls,
         &catalog,
         &policy,
+        None,
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
         &std::env::current_dir().unwrap(),
-    );
+    )
+    .await;
 
     assert_eq!(
         policy.names.lock().unwrap().as_slice(),
@@ -181,8 +183,8 @@ impl Policy for AllowAllRecordingPolicy {
     }
 }
 
-#[test]
-fn allow_all_bypasses_fuse_after_single_policy_evaluation() {
+#[tokio::test]
+async fn allow_all_bypasses_fuse_after_single_policy_evaluation() {
     let factory = TestCatalogExecutionFactory::new();
     factory.register(TestTool("Allowed"));
     let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
@@ -203,10 +205,12 @@ fn allow_all_bypasses_fuse_after_single_policy_evaluation() {
         )],
         &catalog,
         &policy,
+        None,
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
         &std::env::current_dir().unwrap(),
-    );
+    )
+    .await;
 
     assert_eq!(policy.names.lock().unwrap().as_slice(), ["Allowed"]);
     assert_eq!(prepared.executable.len(), 1);
@@ -214,8 +218,8 @@ fn allow_all_bypasses_fuse_after_single_policy_evaluation() {
     assert_eq!(prepared.fuse_bypassed, vec![call.id]);
 }
 
-#[test]
-fn prepare_round_maps_require_approval_to_denied_call_with_subject_and_reason() {
+#[tokio::test]
+async fn prepare_round_maps_require_approval_to_denied_call_with_subject_and_reason() {
     let factory = TestCatalogExecutionFactory::new();
     factory.register(TestTool("Bash"));
     let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
@@ -232,10 +236,12 @@ fn prepare_round_maps_require_approval_to_denied_call_with_subject_and_reason() 
         &[(call("Bash", 0), ToolGuardDecision::Allow)],
         &catalog,
         &policy,
+        None,
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
         &std::env::current_dir().unwrap(),
-    );
+    )
+    .await;
 
     // #1248 TaskData 5: RequireApproval now surfaces in require_approval, not denied
     assert!(prepared.executable.is_empty());
@@ -244,8 +250,8 @@ fn prepare_round_maps_require_approval_to_denied_call_with_subject_and_reason() 
     assert_eq!(prepared.require_approval[0].call.name, "Bash");
 }
 
-#[test]
-fn prepare_round_rejects_missing_catalog_tool_without_invoking_policy() {
+#[tokio::test]
+async fn prepare_round_rejects_missing_catalog_tool_without_invoking_policy() {
     let factory = TestCatalogExecutionFactory::new();
     let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
         std::env::current_dir().unwrap(),
@@ -260,10 +266,12 @@ fn prepare_round_rejects_missing_catalog_tool_without_invoking_policy() {
         &[(call("Unknown", 0), ToolGuardDecision::Allow)],
         &catalog,
         &policy,
+        None,
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
         &std::env::current_dir().unwrap(),
-    );
+    )
+    .await;
 
     assert!(prepared.executable.is_empty());
     assert_eq!(prepared.denied.len(), 1);
@@ -275,8 +283,8 @@ fn prepare_round_rejects_missing_catalog_tool_without_invoking_policy() {
     assert!(policy.names.lock().unwrap().is_empty());
 }
 
-#[test]
-fn prepare_round_rejects_invalid_policy_request_without_invoking_policy() {
+#[tokio::test]
+async fn prepare_round_rejects_invalid_policy_request_without_invoking_policy() {
     let factory = TestCatalogExecutionFactory::new();
     factory.register(TestTool("Read"));
     let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
@@ -292,10 +300,12 @@ fn prepare_round_rejects_invalid_policy_request_without_invoking_policy() {
         &[(call("Read", 0), ToolGuardDecision::Allow)],
         &catalog,
         &policy,
+        None,
         &sdk::RunId::new_v7(),
         &sdk::RunStepId::new_v7(),
         std::path::Path::new(""),
-    );
+    )
+    .await;
 
     assert!(prepared.executable.is_empty());
     assert_eq!(prepared.denied.len(), 1);
@@ -901,4 +911,104 @@ fn streaming_round_pairing_validation_rejects_orphan_results() {
         message.contains("call_orphan"),
         "failure must name the orphaned call: {message}"
     );
+}
+
+/// #1836 权限预筛：policy Allow + 高风险评分 → 提级 require_approval
+///（单向加严），低风险 → 原样 executable。
+struct FixedRiskScoring {
+    p_true: f64,
+}
+
+#[async_trait::async_trait]
+impl systemone::ScoringPort for FixedRiskScoring {
+    async fn answer(
+        &self,
+        _state: &systemone::ScoringState,
+        _questions: &[systemone::ScoringQuestion],
+    ) -> Result<Vec<systemone::ScoringAnswer>, systemone::ScoringUnavailable> {
+        Ok(vec![systemone::ScoringAnswer::noul(
+            self.p_true,
+            systemone::CalibrationLevel::Raw,
+        )
+        .expect("answer 构造")])
+    }
+}
+
+fn triage_policy_with(p_true: f64) -> crate::application::tool::PolicyTriage {
+    crate::application::tool::PolicyTriage::new(std::sync::Arc::new(FixedRiskScoring { p_true }))
+}
+
+async fn prepare_with_triage(
+    policy: &dyn Policy,
+    triage: Option<&crate::application::tool::PolicyTriage>,
+) -> super::PreparedToolRound {
+    let factory = TestCatalogExecutionFactory::new();
+    factory.register(TestTool("Allowed"));
+    let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
+        std::env::current_dir().unwrap(),
+        tokio_util::sync::CancellationToken::new(),
+    );
+    let catalog = factory.build(ctx).catalog();
+    let calls = vec![(call("Allowed", 0), ToolGuardDecision::Allow)];
+    prepare_tool_round(
+        &calls,
+        &catalog,
+        policy,
+        triage,
+        &sdk::RunId::new_v7(),
+        &sdk::RunStepId::new_v7(),
+        &std::env::current_dir().unwrap(),
+    )
+    .await
+}
+
+/// policy Allow + 高风险评分（p_true ≥ 阈值）→ 提级 require_approval。
+#[tokio::test]
+async fn triage_escalation_moves_allow_to_require_approval() {
+    let policy = RecordingPolicy::allow_except_denied();
+    let triage = triage_policy_with(0.95);
+    let prepared = prepare_with_triage(&policy, Some(&triage)).await;
+    assert!(prepared.executable.is_empty(), "高风险工具调用不得直接放行");
+    assert_eq!(prepared.require_approval.len(), 1);
+    assert!(
+        prepared.require_approval[0].reason.contains("风险预筛"),
+        "提级理由应来自预筛结论：{}",
+        prepared.require_approval[0].reason
+    );
+}
+
+/// triage 未装配（场景开关关闭）→ 行为与现状完全一致。
+#[tokio::test]
+async fn triage_absent_keeps_original_behavior() {
+    let policy = RecordingPolicy::allow_except_denied();
+    let prepared = prepare_with_triage(&policy, None).await;
+    assert_eq!(prepared.executable.len(), 1);
+    assert!(prepared.require_approval.is_empty());
+}
+
+/// 单向加严：既有 Deny 恒先短路，评分 NEVER 被咨询、NEVER 放宽。
+#[tokio::test]
+async fn triage_never_relaxes_deny() {
+    let policy = RecordingPolicy::allow_except_denied();
+    let triage = triage_policy_with(0.99);
+    let factory = TestCatalogExecutionFactory::new();
+    factory.register(TestTool("Denied"));
+    let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
+        std::env::current_dir().unwrap(),
+        tokio_util::sync::CancellationToken::new(),
+    );
+    let catalog = factory.build(ctx).catalog();
+    let calls = vec![(call("Denied", 0), ToolGuardDecision::Allow)];
+    let prepared = prepare_tool_round(
+        &calls,
+        &catalog,
+        &policy,
+        Some(&triage),
+        &sdk::RunId::new_v7(),
+        &sdk::RunStepId::new_v7(),
+        &std::env::current_dir().unwrap(),
+    )
+    .await;
+    assert_eq!(prepared.denied.len(), 1, "Deny 必须保持 Deny");
+    assert!(prepared.require_approval.is_empty());
 }

@@ -801,3 +801,52 @@ fn factory_assembled_context_event_sink_is_real_not_noop() {
         "event_sink must be real, not noop"
     );
 }
+
+/// 评分双槽（#1835 修复）：recall 与 skill_match 槽位经 factory 独立流入
+/// RuntimeContext 的语义化访问器，互不串槽（skill_match 单开不再静默失效）。
+#[test]
+fn scoring_slots_preserve_independent_identity_per_accessor() {
+    use std::sync::Arc;
+
+    struct NoopScoring;
+
+    #[async_trait::async_trait]
+    impl systemone::ScoringPort for NoopScoring {
+        async fn answer(
+            &self,
+            _state: &systemone::ScoringState,
+            _questions: &[systemone::ScoringQuestion],
+        ) -> Result<Vec<systemone::ScoringAnswer>, systemone::ScoringUnavailable> {
+            Ok(Vec::new())
+        }
+    }
+
+    let recall_port: Arc<dyn systemone::ScoringPort> = Arc::new(NoopScoring);
+    let skill_match_port: Arc<dyn systemone::ScoringPort> = Arc::new(NoopScoring);
+    let fixture = SessionRunFixture::builder()
+        .with_scoring_slots(Some(recall_port.clone()), Some(skill_match_port.clone()))
+        .build();
+    let instance = fixture
+        .create(crate::domain::agent_run::RunSpec::main())
+        .expect("production RunFactory should create test run");
+    let context = instance.context();
+
+    let context_recall = context
+        .scoring_for_recall()
+        .expect("recall 槽位应流入 context");
+    let context_skill = context
+        .scoring_for_skill_match()
+        .expect("skill_match 槽位应流入 context");
+    assert!(
+        Arc::ptr_eq(&context_recall, &recall_port),
+        "recall 访问器必须返回注入的 recall 槽位"
+    );
+    assert!(
+        Arc::ptr_eq(&context_skill, &skill_match_port),
+        "skill_match 访问器必须返回注入的 skill_match 槽位"
+    );
+    assert!(
+        !Arc::ptr_eq(&context_recall, &context_skill),
+        "两个独立注入的槽位不得坍缩为同一 Arc"
+    );
+}

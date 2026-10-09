@@ -575,6 +575,8 @@ pub(crate) fn apply_context_patch(
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ScoringConfigPatch {
+    #[serde(default)]
+    pub enabled: Option<bool>,
     #[serde(default, alias = "memoryRerank")]
     pub memory_rerank: Option<bool>,
     #[serde(default, alias = "skillMatch")]
@@ -610,6 +612,9 @@ pub(crate) fn apply_scoring_patch(
     mut base: super::scoring::ScoringConfig,
     patch: ScoringConfigPatch,
 ) -> super::scoring::ScoringConfig {
+    if let Some(v) = patch.enabled {
+        base.enabled = v;
+    }
     if let Some(v) = patch.memory_rerank {
         base.memory_rerank = v;
     }

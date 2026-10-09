@@ -20,6 +20,9 @@ use crate::ports::ScoringPort;
 #[derive(Debug, Clone, Serialize)]
 pub struct ScoringAuditEvent {
     pub timestamp: String,
+    /// 场景标签（memory_rerank / memory_recall / skill_match / policy_triage）：
+    /// 四场景共用同一引擎时逐事件归因的唯一依据。
+    pub scenario: &'static str,
     pub engine_revision: String,
     pub prompt_sha256: String,
     pub question_count: usize,
@@ -36,21 +39,25 @@ pub struct ScoringAuditEvent {
 /// 审计装饰器：透传评分结果，同时落审计事件（best-effort）。
 pub struct AuditedScoringAdapter {
     inner: Arc<dyn ScoringPort>,
+    scenario: &'static str,
     engine_revision: String,
     audit_path: PathBuf,
     clock: Arc<dyn Fn() -> String + Send + Sync>,
 }
 
 impl AuditedScoringAdapter {
-    /// `clock` 注入时间源（生产：RFC3339 系统时钟；测试：固定值）。
+    /// `clock` 注入时间源（生产：RFC3339 系统时钟；测试：固定值）；
+    /// `scenario` 为消费场景标签（composition 装配期注入，事件逐条携带）。
     pub fn new(
         inner: Arc<dyn ScoringPort>,
         engine_revision: impl Into<String>,
         audit_path: PathBuf,
         clock: Arc<dyn Fn() -> String + Send + Sync>,
+        scenario: &'static str,
     ) -> Self {
         Self {
             inner,
+            scenario,
             engine_revision: engine_revision.into(),
             audit_path,
             clock,
@@ -94,6 +101,7 @@ impl ScoringPort for AuditedScoringAdapter {
         let event = match &outcome {
             Ok(answers) => ScoringAuditEvent {
                 timestamp: (self.clock)(),
+                scenario: self.scenario,
                 engine_revision: self.engine_revision.clone(),
                 prompt_sha256: prompt_fingerprint(state, questions),
                 question_count: questions.len(),
@@ -105,6 +113,7 @@ impl ScoringPort for AuditedScoringAdapter {
             },
             Err(error) => ScoringAuditEvent {
                 timestamp: (self.clock)(),
+                scenario: self.scenario,
                 engine_revision: self.engine_revision.clone(),
                 prompt_sha256: prompt_fingerprint(state, questions),
                 question_count: questions.len(),

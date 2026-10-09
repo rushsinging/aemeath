@@ -40,6 +40,17 @@ fn env_adapter_ignores_invalid_and_retired_reasoning_env() {
 }
 
 #[test]
+fn env_adapter_maps_scoring_master_gate_env_into_patch() {
+    let source = FakeEnv(HashMap::from([(
+        "AEMEATH_SCORING_ENABLED".into(),
+        "0".into(),
+    )]));
+    let patch = EnvAdapter::read(&source);
+    let scoring = patch.scoring.expect("总闸门 env 应产出 patch");
+    assert_eq!(scoring.enabled, Some(false), "0 应解析为总闸门关闭");
+}
+
+#[test]
 fn env_adapter_maps_scoring_envs_into_patch() {
     let source = FakeEnv(HashMap::from([
         ("AEMEATH_SCORING_MEMORY_RERANK".into(), "true".into()),

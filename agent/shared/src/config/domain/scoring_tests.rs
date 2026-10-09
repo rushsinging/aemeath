@@ -34,6 +34,7 @@ fn scoring_config_ignores_retired_http_keys() {
     assert_eq!(
         keys,
         [
+            "enabled",
             "memory_recall",
             "memory_rerank",
             "policy_triage",

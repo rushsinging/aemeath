@@ -148,6 +148,9 @@ pub(crate) struct SessionRunFixtureBuilder {
     usage: crate::application::run::context::RunUsageTracker,
     usage_sink: Arc<dyn crate::ports::UsageSink>,
     reflection_history: Arc<dyn memory::api::ReflectionHistoryStore>,
+    /// System One 评分双槽（None = 场景关闭/零成本路径）。
+    scoring_for_recall: Option<Arc<dyn systemone::ScoringPort>>,
+    scoring_for_skill_match: Option<Arc<dyn systemone::ScoringPort>>,
 }
 
 impl SessionRunFixtureBuilder {
@@ -165,6 +168,8 @@ impl SessionRunFixtureBuilder {
             tool_catalog: Arc::new(FakeToolCatalog),
             tool_execution: Arc::new(FakeToolExecution),
             policy: Arc::new(FakePolicyPort),
+            scoring_for_recall: None,
+            scoring_for_skill_match: None,
             context_factory: None,
             config: share::config::domain::snapshot::ConfigSnapshot::new_with_revision(
                 share::config::domain::snapshot::ConfigRevision::new(1),
@@ -235,6 +240,17 @@ impl SessionRunFixtureBuilder {
 
     pub(crate) fn with_policy(mut self, policy: Arc<dyn crate::ports::Policy>) -> Self {
         self.policy = policy;
+        self
+    }
+
+    /// 注入 System One 评分双槽（None = 场景关闭；两槽独立以便测试断言不串槽）。
+    pub(crate) fn with_scoring_slots(
+        mut self,
+        scoring_for_recall: Option<Arc<dyn systemone::ScoringPort>>,
+        scoring_for_skill_match: Option<Arc<dyn systemone::ScoringPort>>,
+    ) -> Self {
+        self.scoring_for_recall = scoring_for_recall;
+        self.scoring_for_skill_match = scoring_for_skill_match;
         self
     }
 
@@ -354,6 +370,8 @@ impl SessionRunFixtureBuilder {
                 task_store,
                 self.hooks.clone(),
                 self.usage_sink.clone(),
+                self.scoring_for_recall.clone(),
+                self.scoring_for_skill_match.clone(),
                 None,
             ))
         });

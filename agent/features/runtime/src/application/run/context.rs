@@ -347,9 +347,13 @@ pub struct RuntimeServices {
     pub task: Arc<dyn TaskAccess>,
     /// Runtime Published State（会话级，跨 Run 复用）。
     pub(crate) published_state: crate::application::published_state::PublishedStateRegistry,
-    /// System One 评分端口（任一场景开关开启时由 composition 装配；
-    /// 全关为 None，零成本）。session 级共享。
-    pub scoring: Option<std::sync::Arc<dyn systemone::ScoringPort>>,
+    /// System One 评分端口槽位（场景开关开启时由 composition 装配；全关为
+    /// None，零成本）。session 级共享；两槽独立注入、NEVER 串槽复用。
+    pub scoring_for_recall: Option<std::sync::Arc<dyn systemone::ScoringPort>>,
+    /// skill match 场景槽位（ToolSearch 语义重排）。
+    pub scoring_for_skill_match: Option<std::sync::Arc<dyn systemone::ScoringPort>>,
+    /// 权限/风险预筛（#1836）：policy Allow 后的单向加严评审器。
+    pub policy_triage: Option<std::sync::Arc<crate::application::tool::PolicyTriage>>,
     /// Hook BC 出站端口。
     pub hooks: Arc<dyn HookDispatcher>,
     /// Audit Usage 事实的非阻塞出站端口。
@@ -439,8 +443,12 @@ pub struct RuntimeContext {
     published_state: crate::application::published_state::PublishedStateRegistry,
     /// Optional session lease held for the full Run lifetime.
     session_lease: Option<Arc<context::OwnedSessionSharedPermit>>,
-    /// System One 评分端口（session 级，来自 RuntimeServices）。
-    scoring: Option<Arc<dyn systemone::ScoringPort>>,
+    /// System One 评分端口（session 级，来自 RuntimeServices，双槽独立）。
+    scoring_for_recall: Option<Arc<dyn systemone::ScoringPort>>,
+    /// skill match 场景槽位（session 级，来自 RuntimeServices）。
+    scoring_for_skill_match: Option<Arc<dyn systemone::ScoringPort>>,
+    /// 权限/风险预筛（#1836，session 级，来自 RuntimeServices）。
+    policy_triage: Option<Arc<crate::application::tool::PolicyTriage>>,
     /// per-message 记忆召回 source 槽：run_launch 装配 pipeline 时一次性写入
     ///（recall 依赖 per-Run memory binding，Run 启动前不可得）。
     memory_recall: Arc<
@@ -498,7 +506,9 @@ impl RuntimeContext {
             activities,
             published_state: services.published_state.clone(),
             session_lease: None,
-            scoring: services.scoring.clone(),
+            scoring_for_recall: services.scoring_for_recall.clone(),
+            scoring_for_skill_match: services.scoring_for_skill_match.clone(),
+            policy_triage: services.policy_triage.clone(),
             memory_recall: Arc::new(std::sync::OnceLock::new()),
         }
     }
@@ -538,9 +548,17 @@ impl RuntimeContext {
     pub fn memory(&self) -> Arc<dyn MemoryPort> {
         self.memory.clone()
     }
-    /// System One 评分端口（任一场景开关开启时存在）。
-    pub(crate) fn scoring(&self) -> Option<Arc<dyn systemone::ScoringPort>> {
-        self.scoring.clone()
+    /// memory recall 场景评分槽位（per-message 记忆召回 reminder 消费）。
+    pub(crate) fn scoring_for_recall(&self) -> Option<Arc<dyn systemone::ScoringPort>> {
+        self.scoring_for_recall.clone()
+    }
+    /// skill match 场景评分槽位（ToolSearch 语义重排消费）。
+    pub(crate) fn scoring_for_skill_match(&self) -> Option<Arc<dyn systemone::ScoringPort>> {
+        self.scoring_for_skill_match.clone()
+    }
+    /// 权限/风险预筛（#1836）：policy Allow 后单向加严；开关关闭为 None。
+    pub(crate) fn policy_triage(&self) -> Option<Arc<crate::application::tool::PolicyTriage>> {
+        self.policy_triage.clone()
     }
 
     /// per-message 记忆召回 source 槽（run_launch 一次性装配）。
