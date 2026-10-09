@@ -101,12 +101,22 @@ pub struct ToolDescriptor {
     pub input_safety: InputSafetyDeclaration,
     /// Output JSON Schema used by presentation layers.
     pub data_schema: serde_json::Value,
+    /// 输出直绑声明（#1890）：工具自声明可直绑子进程输出到任务日志文件；
+    /// 未声明（false）工具行为完全不变。serde default 兼容旧快照。
+    #[serde(default)]
+    pub background_log_direct: bool,
 }
 
 impl ToolDescriptor {
     /// 该 Descriptor 的并发安全是否为 Safe。
     pub fn is_concurrency_safe(&self) -> bool {
         self.concurrency.safety == ConcurrencySafety::Safe
+    }
+
+    /// 输出直绑能力（#1890）：runtime 据此决定是否为该工具的调用
+    /// 创建任务日志文件并注入路径。
+    pub fn is_background_log_direct(&self) -> bool {
+        self.background_log_direct
     }
 
     /// 该 Descriptor 是否支持协作取消。

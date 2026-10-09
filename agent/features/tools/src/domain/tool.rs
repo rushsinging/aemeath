@@ -52,6 +52,12 @@ pub trait Tool: Send + Sync {
         false
     }
 
+    /// 输出直绑声明（#1890）：自声明子进程 stdout/stderr 可直接重定向到
+    /// per-task 任务日志文件（descriptor opt-in；未声明工具行为不变）。
+    fn background_log_direct(&self) -> bool {
+        false
+    }
+
     fn timeout_secs(&self) -> u64 {
         120
     }
@@ -157,6 +163,12 @@ pub trait TypedTool: Send + Sync {
         false
     }
 
+    /// 输出直绑声明（#1890）：自声明子进程 stdout/stderr 可直接重定向到
+    /// per-task 任务日志文件（descriptor opt-in；未声明工具行为不变）。
+    fn background_log_direct(&self) -> bool {
+        false
+    }
+
     fn timeout_secs(&self) -> u64 {
         120
     }
@@ -218,6 +230,10 @@ impl<T: TypedTool> Tool for TypedToolAdapter<T> {
 
     fn is_concurrency_safe(&self) -> bool {
         self.0.is_concurrency_safe()
+    }
+
+    fn background_log_direct(&self) -> bool {
+        self.0.background_log_direct()
     }
 
     fn timeout_secs(&self) -> u64 {

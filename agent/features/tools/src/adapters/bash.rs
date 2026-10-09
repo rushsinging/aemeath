@@ -110,6 +110,12 @@ impl TypedTool for BashTool {
         false
     }
 
+    /// 输出直绑（#1890）：子进程 stdout/stderr 重定向到 per-task 任务
+    /// 日志文件（路径经 ToolExecutionContext 注入；未注入时保持 piped）。
+    fn background_log_direct(&self) -> bool {
+        true
+    }
+
     /// Override: Bash commands may run up to 3600s (schema max).
     /// The default 120s outer timeout in agent.rs would kill long-running
     /// commands before the internal per-command timeout fires.
