@@ -59,6 +59,17 @@ async fn main() {
                 .unwrap_or_else(|error| fatal_error::report_fatal(error));
             subcommand::update_command::run_update_command(check, user_agent).await;
         }
+        Some(Commands::Systemone { command }) => {
+            let args = Args::from(cli.run_args);
+            let user_agent = composition::app::configured_user_agent(args.into())
+                .await
+                .unwrap_or_else(|error| fatal_error::report_fatal(error));
+            match command {
+                args::SystemoneCommands::Download => {
+                    subcommand::systemone_command::run_systemone_download_command(user_agent).await;
+                }
+            }
+        }
         Some(Commands::Version) => {
             println!("aemeath {}", composition::version());
         }

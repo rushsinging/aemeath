@@ -590,6 +590,7 @@ dependencies = [
  "tokio-util",
  "tools",
  "update",
+ "utils",
 ]
 
 [[package]]

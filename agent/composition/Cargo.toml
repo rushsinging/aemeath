@@ -38,6 +38,7 @@ serde_json = { workspace = true }
 [dev-dependencies]
 tools = { path = "../features/tools", features = ["test-harness"] }
 task = { path = "../features/task" }
+utils = { path = "../../packages/global/utils" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 futures-util = { workspace = true }

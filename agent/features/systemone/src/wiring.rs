@@ -34,7 +34,7 @@ use crate::adapters::calibrated::CalibratedScoringAdapter;
 use crate::adapters::calibration_store::CalibrationStore;
 #[cfg(feature = "embedded")]
 use crate::adapters::embedded::EmbeddedScoringAdapter;
-#[cfg(feature = "embedded")]
+use crate::adapters::fetch_http::HttpArtifactFetcher;
 use crate::adapters::model_assets::LocalModelAssetStore;
 #[cfg(feature = "embedded")]
 use crate::ports::ModelAssetPort;
@@ -192,6 +192,56 @@ impl From<crate::adapters::embedded::EmbeddedInitError> for EmbeddedScoringWirin
             },
         }
     }
+}
+
+/// 手动模型下载装配（设计 §4.2 `aemeath systemone download` 的唯一生产入口）。
+///
+/// 组装 [`ModelDownloadService`] 的三个生产端口：`LocalModelAssetStore` 同时
+/// 承担资产状态解析（[`crate::ports::ModelAssetPort`]）与暂存/校验/原子提交
+/// （[`crate::ports::ModelInstallerPort`]），`HttpArtifactFetcher` 承担流式抓取
+/// （固定 manifest 来源策略，https-only）。
+///
+/// - `models_dir`：模型安装根（生产为 `share::config::paths::systemone_models_dir()`）。
+/// - `user_agent`：HTTP 抓取 User-Agent（生产为进程 UA）。
+/// - `manifest`：固定发行 manifest（契约先校验，零 IO 拒绝非法结构）。
+///
+/// composition 只调用本工厂，NEVER 手工 new adapter。
+pub fn wire_model_download_service(
+    models_dir: PathBuf,
+    user_agent: &str,
+    manifest: ModelManifest,
+) -> Result<crate::application::ModelDownloadService, crate::application::ModelDownloadError> {
+    let asset_store = LocalModelAssetStore::new(models_dir, manifest.clone()).map_err(|error| {
+        crate::application::ModelDownloadError {
+            kind: crate::application::ModelDownloadErrorKind::ManifestRejected,
+            detail: error.to_string(),
+        }
+    })?;
+    let installer =
+        LocalModelAssetStore::new(asset_store.root_dir().to_path_buf(), manifest.clone()).map_err(
+            |error| crate::application::ModelDownloadError {
+                kind: crate::application::ModelDownloadErrorKind::ManifestRejected,
+                detail: error.to_string(),
+            },
+        )?;
+    let fetcher = HttpArtifactFetcher::new(
+        user_agent,
+        crate::constants::DOWNLOAD_CONNECT_READ_TIMEOUT,
+        &manifest,
+        Vec::new(),
+    )
+    .map_err(|error| crate::application::ModelDownloadError {
+        kind: crate::application::ModelDownloadErrorKind::Fetch(
+            crate::ports::ArtifactFetchErrorKind::UnsafeSource,
+        ),
+        detail: error.to_string(),
+    })?;
+    crate::application::ModelDownloadService::new(
+        manifest,
+        Arc::new(asset_store),
+        Arc::new(installer),
+        Arc::new(fetcher),
+    )
 }
 
 #[cfg(test)]

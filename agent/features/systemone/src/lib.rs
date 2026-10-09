@@ -57,7 +57,7 @@ pub use ports::{
     ModelInstallPortError, ModelInstallPortErrorKind, ModelInstallerPort, ModelStagingArea,
     ScoringPort, StagedInstallOutcome,
 };
-pub use wiring::{wire_embedded_scoring, EmbeddedScoringWiringError};
+pub use wiring::{wire_embedded_scoring, wire_model_download_service, EmbeddedScoringWiringError};
 
 /// Jev HTTP 评分装配链：JevHttp → Calibrated（读温度 artifact）→ Audited（落审计）。
 ///

@@ -68,6 +68,11 @@ pub(crate) const STAGING_ATTEMPT_LIMIT: usize = 128;
 /// 手动重定向的最大跟随跳数（逐跳仍校验 https；超过即 fail closed，禁止无界跳转）。
 pub(crate) const MAX_REDIRECT_HOPS: usize = 5;
 
+/// 手动下载的连接 / 单次读取空闲超时（不是下载总预算——775MB 资产总时长
+/// 不受该值限制，卡死的连接才被切断）。
+pub(crate) const DOWNLOAD_CONNECT_READ_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(30);
+
 // --- embedded llama.cpp 评分（来源：kev.serve 上下文口径与 eval/system-one/REPORT.md 基线）---
 
 /// kev 编码 state 上限（`SERVE_MAX_STATE`，含 state 分隔 token；超出即截断）。

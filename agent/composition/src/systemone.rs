@@ -127,6 +127,92 @@ pub(crate) fn scoring_startup_notices(outcome: &ScoringStartupOutcome) -> Vec<St
     }
 }
 
+/// `aemeath systemone download` 的命令结果（CLI 只渲染，不决策）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SystemoneDownloadReport {
+    /// 本地已有有效安装（幂等命中，未发生覆盖）。
+    pub already_installed: bool,
+    /// 已安装的 engine revision。
+    pub revision: String,
+    /// 已安装 revision 的根目录。
+    pub install_root: std::path::PathBuf,
+}
+
+impl SystemoneDownloadReport {
+    /// CLI 退出码：成功 / 幂等 → 0。
+    pub fn exit_code(&self) -> i32 {
+        0
+    }
+}
+
+/// `aemeath systemone download` 的退出结局：成功或 typed 失败（含退出码与
+/// 中文消息），CLI NEVER 字符串匹配决策。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SystemoneDownloadExit {
+    /// 下载安装成功或幂等命中已有安装。
+    Success(SystemoneDownloadReport),
+    /// typed 失败（manifest 未提供 / 契约非法 / 安装状态无效 / 下载或安装失败）。
+    Failure {
+        /// 中文失败消息。
+        message: String,
+        /// 非零退出码。
+        exit_code: i32,
+    },
+}
+
+/// `aemeath systemone download` 生产入口：manifest 取自生产发行 manifest 源
+/// （当前未落地 → typed 失败），模型目录取 `~/.agents/models/systemone`。
+pub async fn run_systemone_download(user_agent: &str) -> SystemoneDownloadExit {
+    let manifest = UnavailableReleaseManifest.release_manifest();
+    run_systemone_download_with(
+        manifest,
+        share::config::paths::systemone_models_dir(),
+        user_agent,
+    )
+    .await
+}
+
+/// 可注入装配入口（wiring 测试用）：manifest 缺失 → typed 失败 fail-closed，
+/// 不构造下载链、不触碰模型目录；manifest 有效则经 systemone 工厂装配真实
+/// 生产链（本地存储 + https 抓取器）执行下载用例。
+pub async fn run_systemone_download_with(
+    manifest: Option<systemone::ModelManifest>,
+    models_dir: std::path::PathBuf,
+    user_agent: &str,
+) -> SystemoneDownloadExit {
+    let Some(manifest) = manifest else {
+        return SystemoneDownloadExit::Failure {
+            message: "System One 发行模型 manifest 未提供：当前构建未内置经确认的模型\
+                      下载元数据（URL / SHA-256），请等待后续发行版本。"
+                .to_owned(),
+            exit_code: 1,
+        };
+    };
+    let service = match systemone::wire_model_download_service(models_dir, user_agent, manifest) {
+        Ok(service) => service,
+        Err(error) => {
+            return SystemoneDownloadExit::Failure {
+                message: error.to_string(),
+                exit_code: error.exit_code(),
+            };
+        }
+    };
+    match service.download().await {
+        Ok(outcome) => SystemoneDownloadExit::Success(SystemoneDownloadReport {
+            already_installed: matches!(
+                outcome,
+                systemone::DownloadOutcome::AlreadyInstalled { .. }
+            ),
+            revision: outcome.revision().to_owned(),
+            install_root: outcome.install_root().to_path_buf(),
+        }),
+        Err(error) => SystemoneDownloadExit::Failure {
+            message: error.to_string(),
+            exit_code: error.exit_code(),
+        },
+    }
+}
+
 /// 装配结果：场景槽位分配 + typed 启动结果（两者一致性由装配矩阵契约测试锁定）。
 #[must_use]
 pub struct ScoringAssembly {

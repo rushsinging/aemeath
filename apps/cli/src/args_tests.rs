@@ -138,3 +138,20 @@ fn test_args_from_run_args_carries_quiet_flag() {
 
     assert!(args.quiet);
 }
+
+#[test]
+fn cli_accepts_systemone_download_nested_command() {
+    let cli = Cli::try_parse_from(["aemeath", "systemone", "download"]).unwrap();
+    assert!(matches!(
+        cli.command,
+        Some(Commands::Systemone {
+            command: SystemoneCommands::Download
+        })
+    ));
+}
+
+#[test]
+fn cli_rejects_systemone_without_subcommand() {
+    let result = Cli::try_parse_from(["aemeath", "systemone"]);
+    assert!(result.is_err(), "`aemeath systemone` 缺少子命令应解析失败");
+}
