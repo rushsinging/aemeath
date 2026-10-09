@@ -406,12 +406,12 @@ fn background_process_source_build_peeks_until_confirmed_and_renders() {
         "command=cargo test",
         SystemTime::now(),
     );
-    supervisor.record_output(&task_id, b"ok 3 passed\n");
+    // 无文件任务：output_tail 回退终态文本（#1890 文件真相源）。
     supervisor
         .finish(
             &task_id,
             crate::domain::background_process::BackgroundProcessTerminalKind::Success,
-            None,
+            Some("ok 3 passed\n".to_string()),
         )
         .unwrap();
     let snapshot = source.build().expect("终态后应有快照");

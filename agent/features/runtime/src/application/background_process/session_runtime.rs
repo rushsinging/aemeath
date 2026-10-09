@@ -28,6 +28,8 @@ pub(crate) struct BackgroundProcessRuntime {
         std::sync::RwLock<Option<(u64, tokio::sync::mpsc::UnboundedSender<sdk::ChatEvent>)>>,
     /// 绑定代次（覆盖式绑定的身份校验）。
     chat_sender_generation: std::sync::atomic::AtomicU64,
+    /// #1890 任务日志目录 base（默认 `~/.agents/sessions/`；测试可注入）。
+    log_base: std::sync::OnceLock<std::path::PathBuf>,
 }
 
 /// chat 会话事件通道绑定 guard：drop 时释放本代次 sender（#252 PR3）。
@@ -75,6 +77,7 @@ impl BackgroundProcessRuntime {
             persistence: std::sync::OnceLock::new(),
             chat_event_sender: std::sync::RwLock::new(None),
             chat_sender_generation: std::sync::atomic::AtomicU64::new(0),
+            log_base: std::sync::OnceLock::new(),
         }
     }
 
@@ -196,6 +199,32 @@ impl BackgroundProcessRuntime {
 
     pub(crate) fn supervisor(&self) -> Arc<BackgroundProcessSupervisor> {
         self.supervisor.clone()
+    }
+
+    /// 派发直绑装配（#1890 输出直绑）：session 已绑（persistence 就绪 =
+    /// session id 可得）时创建 per-process 任务日志文件。文件创建失败
+    /// 返回 None（调用方降级 piped，可用性优先）。
+    pub(crate) fn open_direct_log(
+        &self,
+        process_id: share::ids::BackgroundProcessId,
+    ) -> Option<crate::domain::background_process::log_file::TaskLogFile> {
+        let session_id = self.persistence.get()?.1.clone();
+        let base = self
+            .log_base
+            .get_or_init(share::config::adapters::paths::global_sessions_dir);
+        crate::domain::background_process::log_file::TaskLogFile::open(
+            base,
+            &session_id,
+            &process_id,
+        )
+        .ok()
+        .map(|(log, _stdout, _stderr)| log)
+    }
+
+    /// 测试注入任务日志 base 目录（生产默认 `~/.agents/sessions/`）。
+    #[cfg(test)]
+    pub(crate) fn set_log_base_for_test(&self, base: std::path::PathBuf) {
+        let _ = self.log_base.set(base);
     }
 
     /// Run 收口后的滞留事实检测（#252 注入确认制兜底）：监督器仍有

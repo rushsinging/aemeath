@@ -49,7 +49,6 @@ fn background_process_access_projects_summaries_logs_and_stop() {
         "tool=Bash input=cargo test",
         SystemTime::now(),
     );
-    runtime.supervisor().record_output(&task_id, b"building\n");
     runtime
         .supervisor()
         .mark_backgrounded(&task_id, None)
@@ -67,9 +66,9 @@ fn background_process_access_projects_summaries_logs_and_stop() {
         .expect("已登记任务详情可见");
     assert_eq!(detail.summary.task_id, task_id.as_str());
 
-    // logs：尾部读取 + 增量。
+    // logs：尾部读取 + 增量（无文件任务回退终态文本——finish 未带输出
+    // 则为空，语义上「无输出事实」不再经 ring buffer 采集）。
     let log = runtime.read_task_log(task_id.as_str(), None, 4096).unwrap();
-    assert!(log.text.contains("building"));
     let delta = runtime
         .read_task_log(task_id.as_str(), Some(log.cursor), 4096)
         .unwrap();

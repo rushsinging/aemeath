@@ -69,6 +69,11 @@ pub struct BackgroundProcessRecord {
     /// 首次进入终态的时刻（时长冻结依据；旧快照缺失时为 None）。
     #[serde(default)]
     pub finished_at: Option<SystemTime>,
+    /// 任务日志文件路径（#1890 输出直绑；直绑派发时创建，logs 查询的
+    /// 文件真相源。非直绑工具由 runtime 终态兜底写入。旧快照缺失时
+    /// 为 None——查询回退终态文本）。
+    #[serde(default)]
+    pub log_file: Option<std::path::PathBuf>,
 }
 
 /// 状态推进结果：推进后的记录与是否发生变化。
@@ -116,6 +121,27 @@ impl BackgroundProcessRecord {
             state: BackgroundProcessState::ForegroundWaiting,
             started_at,
             finished_at: None,
+            log_file: None,
+        }
+    }
+
+    /// 直绑派发（#1890 输出直绑）：进程 id 前移到派发时生成（spawn 前
+    /// 任务日志文件名与账本 id 必须同源），文件路径随记录入账。
+    pub fn dispatch_direct(
+        task_id: BackgroundProcessId,
+        log_file: std::path::PathBuf,
+        identity: ToolCallIdentityData,
+        invocation_summary: impl Into<String>,
+        started_at: SystemTime,
+    ) -> Self {
+        Self {
+            task_id,
+            identity,
+            invocation_summary: invocation_summary.into(),
+            state: BackgroundProcessState::ForegroundWaiting,
+            started_at,
+            finished_at: None,
+            log_file: Some(log_file),
         }
     }
 

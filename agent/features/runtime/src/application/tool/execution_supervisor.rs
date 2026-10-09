@@ -87,20 +87,29 @@ impl ToolExecutionSupervisor {
         deadline_snapshot: Option<SystemTime>,
         cancellation_declaration: CancellationDeclaration,
         started: std::time::Instant,
+        direct: Option<DirectDispatch>,
     ) -> Result<(PublishedToolOutcome, Duration), ToolExecutionSupervisorError> {
         // #252 PR2：有 session 级账本时以账本登记的 task id 为唯一身份
         // （占位、receipt、通知同源）；无装配（Sub Run / 测试）则临时生成。
-        let task_id =
-            self.background
-                .as_ref()
-                .map_or_else(BackgroundProcessId::new_v7, |runtime| {
-                    runtime.supervisor().register_with_cancellation(
-                        call.identity.clone(),
-                        invocation_summary_text(&call),
-                        call.child_cancellation.clone(),
-                        dispatch_started_time(started),
-                    )
-                });
+        // #1890 直绑派发：id 前移到派发时生成（与任务日志文件名同源），
+        // 路径随记录入账。
+        let task_id = match (self.background.as_ref(), direct) {
+            (Some(runtime), Some(dd)) => runtime.supervisor().register_direct(
+                dd.process_id,
+                dd.path,
+                call.identity.clone(),
+                invocation_summary_text(&call),
+                call.child_cancellation.clone(),
+                dispatch_started_time(started),
+            ),
+            (Some(runtime), None) => runtime.supervisor().register_with_cancellation(
+                call.identity.clone(),
+                invocation_summary_text(&call),
+                call.child_cancellation.clone(),
+                dispatch_started_time(started),
+            ),
+            (None, _) => BackgroundProcessId::new_v7(),
+        };
         log::info!(
             target: crate::LOG_TARGET,
             "tool moved to background: run_id={} step_id={} call_id={} tool={} task_id={} elapsed_ms={} deadline_snapshot={:?}",
@@ -265,15 +274,37 @@ impl ToolExecutionSupervisor {
             effective_deadline
         );
 
+        let backgrounding = call
+            .background_threshold
+            .filter(|threshold| threshold > &Duration::ZERO);
+        // #1890 输出直绑装配：工具声明直绑 + 会话启用后台化 + 监督器/
+        // session 就绪时，派发即前移生成进程 id 并创建任务日志文件
+        //（文件名与账本 id 同源）；快路径完成删文件，转后台同 id 入账。
+        let mut direct_dispatch = backgrounding
+            .filter(|_| descriptor.is_background_log_direct())
+            .and_then(|_| {
+                let runtime = self.background.as_ref()?;
+                let process_id = BackgroundProcessId::new_v7();
+                let log = runtime.open_direct_log(process_id.clone())?;
+                Some(DirectDispatch {
+                    process_id,
+                    path: log.path().to_path_buf(),
+                    log,
+                })
+            });
+        let exec_context = match direct_dispatch.as_ref() {
+            Some(dd) => call
+                .context
+                .clone()
+                .with_background_log_path(dd.path.clone()),
+            None => call.context.clone(),
+        };
         // spawn-first：执行体独立于前台等待，转后台时不 abort 继续运行。
         let mut join_handle = spawn_tool_execution(
             Arc::clone(&self.execution),
             call.invocation.clone(),
-            call.context.clone(),
+            exec_context,
         );
-        let backgrounding = call
-            .background_threshold
-            .filter(|threshold| threshold > &Duration::ZERO);
 
         let outcome = match effective_deadline {
             Some(deadline) => {
@@ -316,6 +347,7 @@ impl ToolExecutionSupervisor {
                                 effective_deadline,
                                 descriptor.cancellation,
                                 started,
+                                direct_dispatch,
                             )
                             .await;
                     }
@@ -344,6 +376,7 @@ impl ToolExecutionSupervisor {
                             effective_deadline,
                             descriptor.cancellation,
                             started,
+                            direct_dispatch,
                         )
                         .await;
                 }
@@ -378,10 +411,32 @@ impl ToolExecutionSupervisor {
         self.context
             .advance_tool_receipt(ToolReceiptMutationData::terminal(call.identity, terminal))
             .await?;
+        // #1890 快路径清理：前台完成的直绑任务输出已直接进 tool_result，
+        // 任务日志文件删除不留垃圾（转后台路径已在 move_to_background
+        // 消费 direct_dispatch）。
+        if let Some(dd) = direct_dispatch.take() {
+            if let Err(error) = dd.log.remove() {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "fast-path direct log remove failed: path={:?} error={error:?}",
+                    dd.path
+                );
+            }
+        }
         // #1666：与 [tool execution terminal] 日志同源的执行耗时，随 outcome
         // 返回给调用方进入事件流（ChatEvent::ToolResult.duration_ms）。
         Ok((outcome, started.elapsed()))
     }
+}
+
+/// #1890 直绑派发件：前移生成的进程 id + 任务日志文件。
+///
+/// 快路径（前台完成）→ 删除文件；转后台 → `move_to_background` 消费
+/// （id 与路径入账，文件成为 logs 查询真相源）。
+struct DirectDispatch {
+    process_id: BackgroundProcessId,
+    path: std::path::PathBuf,
+    log: crate::domain::background_process::log_file::TaskLogFile,
 }
 
 /// spawn 执行体：owned context move 进独立 task，执行体生命周期独立于前台等待。

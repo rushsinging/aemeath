@@ -7,20 +7,18 @@ use std::time::SystemTime;
 use context::ToolCallIdentityData;
 use share::ids::BackgroundProcessId;
 
-use crate::application::constants::BACKGROUND_PROCESS_OUTPUT_CAPACITY_BYTES;
 use crate::domain::background_process::{
-    BackgroundInvalidationReason, BackgroundProcessAdvance, BackgroundProcessRecord,
-    BackgroundProcessState, BackgroundProcessTerminalKind, BackgroundProcessTransitionError,
+    log_file::TaskLogFile, BackgroundInvalidationReason, BackgroundProcessAdvance,
+    BackgroundProcessRecord, BackgroundProcessState, BackgroundProcessTerminalKind,
+    BackgroundProcessTransitionError,
 };
-use crate::domain::output_ring_buffer::OutputRingBuffer;
 
-/// 监督中的后台进程：领域记录 + 输出缓冲 + 终态结果。
+/// 监督中的后台进程：领域记录 + 终态结果。
 ///
-/// 输出来源两档：progress 通道增量进 ring buffer；无增量的工具只有
-/// 终态完整结果。读取时 ring buffer 优先，为空回退终态文本。
+/// 输出真相源是任务日志文件（#1890 输出直绑；record.log_file）；
+/// 非直绑 / 无文件任务回退终态文本。
 struct SupervisedBackgroundProcess {
     record: BackgroundProcessRecord,
-    output: OutputRingBuffer,
     terminal_output: Option<String>,
     /// 完成事实是否已进入通知通道（take_unnotified 语义）。
     notified: bool,
@@ -94,7 +92,37 @@ impl BackgroundProcessSupervisor {
     ) -> BackgroundProcessId {
         let task = SupervisedBackgroundProcess {
             record: BackgroundProcessRecord::dispatch(identity, invocation_summary, started_at),
-            output: OutputRingBuffer::new(BACKGROUND_PROCESS_OUTPUT_CAPACITY_BYTES),
+            terminal_output: None,
+            notified: false,
+            child_cancellation,
+        };
+        let task_id = task.record.task_id.clone();
+        self.tasks
+            .lock()
+            .expect("后台进程表锁中毒")
+            .insert(task_id.clone(), task);
+        task_id
+    }
+
+    /// 直绑派发登记（#1890 输出直绑）：id 派发时前移生成（与任务日志
+    /// 文件名同源），路径随记录入账；logs 查询直读文件区间。
+    pub(crate) fn register_direct(
+        &self,
+        task_id: BackgroundProcessId,
+        log_file: std::path::PathBuf,
+        identity: ToolCallIdentityData,
+        invocation_summary: impl Into<String>,
+        child_cancellation: tokio_util::sync::CancellationToken,
+        started_at: SystemTime,
+    ) -> BackgroundProcessId {
+        let task = SupervisedBackgroundProcess {
+            record: BackgroundProcessRecord::dispatch_direct(
+                task_id,
+                log_file,
+                identity,
+                invocation_summary,
+                started_at,
+            ),
             terminal_output: None,
             notified: false,
             child_cancellation,
@@ -126,9 +154,11 @@ impl BackgroundProcessSupervisor {
         })
     }
 
-    /// 任务日志读取（#252 D12 增量游标）：
-    /// - `None` 游标 → 尾部视图（ring buffer 优先，空则回退终态文本）；
-    /// - `Some(cursor)` → 增量读取（只返回新字节；过期游标 clamp）。
+    /// 任务日志读取（#1890 文件真相源；#252 D12 增量游标语义不变）：
+    /// - 有任务日志文件 → 文件区间读（`None` 游标 = 尾部视图，
+    ///   `Some(cursor)` = 增量读取；累计写入 = 文件实际大小，跨重启
+    ///   天然续读）；
+    /// - 无文件（非直绑且未终态落盘 / 旧快照）→ 回退终态文本。
     ///
     /// 返回 `(文本, 读后游标, 累计写入)`；多次读取幂等（非消耗性）。
     pub(crate) fn read_task_log(
@@ -139,16 +169,18 @@ impl BackgroundProcessSupervisor {
     ) -> Option<(String, u64, u64)> {
         let tasks = self.tasks.lock().expect("后台进程表锁中毒");
         let task = tasks.get(task_id)?;
-        if task.output.is_empty() {
-            let terminal_text = task.terminal_output.clone().unwrap_or_default();
-            let total = terminal_text.len() as u64;
-            return Some((terminal_text, total, total));
+        if let Some(log_path) = task.record.log_file.clone() {
+            drop(tasks);
+            let log = TaskLogFile::from_path(log_path);
+            let size = log.size_bytes();
+            let start = cursor.unwrap_or(size.saturating_sub(max_bytes as u64));
+            let segment = log.read_range(start, max_bytes).ok()?;
+            let text = String::from_utf8_lossy(&segment.bytes).into_owned();
+            return Some((text, segment.next_cursor, size));
         }
-        let (text, cursor) = match cursor {
-            Some(cursor) => task.output.read_from_text(cursor, max_bytes),
-            None => task.output.read_tail_text(max_bytes),
-        };
-        Some((text, cursor, task.output.total_written()))
+        let terminal_text = task.terminal_output.clone().unwrap_or_default();
+        let total = terminal_text.len() as u64;
+        Some((terminal_text, total, total))
     }
 
     /// 转后台：推进任务状态并固化 deadline 快照。
@@ -218,39 +250,6 @@ impl BackgroundProcessSupervisor {
         invalidated_count
     }
 
-    /// 采集任务输出增量（progress 通道或终态完整输出）。
-    pub(crate) fn record_output(&self, task_id: &BackgroundProcessId, chunk: &[u8]) {
-        let mut tasks = self.tasks.lock().expect("后台进程表锁中毒");
-        if let Some(task) = tasks.get_mut(task_id) {
-            task.output.append(chunk);
-        }
-    }
-
-    /// 非消耗性输出尾部读取（多次读取幂等）：ring buffer 优先，
-    /// 无增量采集时回退终态完整结果。
-    pub(crate) fn read_output_tail(
-        &self,
-        task_id: &BackgroundProcessId,
-        max_bytes: usize,
-    ) -> Option<(String, u64)> {
-        let tasks = self.tasks.lock().expect("后台进程表锁中毒");
-        tasks.get(task_id).map(|task| {
-            if task.output.is_empty() {
-                let terminal_length = task
-                    .terminal_output
-                    .as_ref()
-                    .map(|output| output.len())
-                    .unwrap_or(0);
-                (
-                    task.terminal_output.clone().unwrap_or_default(),
-                    terminal_length as u64,
-                )
-            } else {
-                task.output.read_tail_text(max_bytes)
-            }
-        })
-    }
-
     /// 单任务记录快照。
     pub(crate) fn snapshot(
         &self,
@@ -304,9 +303,20 @@ impl BackgroundProcessSupervisor {
             let Some(status) = terminal_completion_status(&kind) else {
                 continue;
             };
-            let (output_tail, _) = task.output.read_tail_text(
-                crate::application::constants::BACKGROUND_PROCESS_NOTIFICATION_TAIL_BYTES,
-            );
+            let output_tail = match &task.record.log_file {
+                Some(log_path) => {
+                    let log = TaskLogFile::from_path(log_path.clone());
+                    let size = log.size_bytes();
+                    let start = size.saturating_sub(
+                        crate::application::constants::BACKGROUND_PROCESS_NOTIFICATION_TAIL_BYTES
+                            as u64,
+                    );
+                    log.read_range(start, usize::MAX)
+                        .map(|segment| String::from_utf8_lossy(&segment.bytes).into_owned())
+                        .unwrap_or_default()
+                }
+                None => String::new(),
+            };
             let output_tail = if output_tail.is_empty() {
                 task.terminal_output.clone().unwrap_or_default()
             } else {
@@ -387,7 +397,6 @@ impl BackgroundProcessSupervisor {
                 task_id.clone(),
                 SupervisedBackgroundProcess {
                     record,
-                    output: OutputRingBuffer::new(BACKGROUND_PROCESS_OUTPUT_CAPACITY_BYTES),
                     terminal_output: None,
                     // 恢复记录不再进通知通道（resume 场景经失效投影展示）。
                     notified: true,
