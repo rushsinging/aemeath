@@ -374,6 +374,11 @@ pub enum InternalContinuationKind {
     StopHookFeedback { feedback: String },
     /// Tool results have been recorded; the model should read them.
     ToolResults,
+    /// Background-task wakeup Run (#252): no user input exists; the step is
+    /// driven by the reminder pipeline (completion facts injected at the
+    /// window tail). Without this continuation an empty first drain would
+    /// seal the Run before the model is ever invoked.
+    BackgroundTaskWakeup,
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -685,6 +685,13 @@ where
                 };
               let input_continuation =
                     crate::application::loop_engine::input_strategy::InputContinuationState::default();
+                if background_wakeup_run {
+                    // wakeup Run 空输入启动（#252）：预置内部续延，首次
+                    // drain 以 InternalContinuation 驱动 step（reminder 注入
+                    // 完成事实 → LLM 调用）；否则 drain_or_seal 空批即
+                    // EmptyAndSealed 收口，完成事实随 Run 丢弃。
+                    input_continuation.install_background_task_wakeup();
+                }
                 let mut input_source =
                     crate::application::loop_engine::input_strategy::BufferedInputAdapter {
                         input_events: input_events.clone(),
