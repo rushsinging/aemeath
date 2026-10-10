@@ -19,8 +19,6 @@ pub struct SpinnerLineView {
     pub phase_text: Option<String>,
     /// 最多一条通过稳定性门槛的用户可见 Activity 摘要。
     pub detail_text: Option<String>,
-    /// #252：后台进程活动数（0 = 不显示；spinner 尾部 ⛙N）。
-    pub background_processes_active: usize,
 }
 
 /// Compact 进度视图（spinner 行内嵌渲染用）。
@@ -46,6 +44,9 @@ pub struct LiveStatusViewModel {
     pub task_lines: Vec<String>,
     /// compact 进度（spinner 行内嵌）；None 表示未在 compact 中。
     pub compact_progress: Option<CompactProgressView>,
+    /// #252：后台进程活动数（status line 第三行；0 不显示）。挂在顶层
+    /// 而非 spinner 视图——Run 结束 spinner 消失后计数仍须可见。
+    pub background_processes_active: usize,
 }
 
 #[cfg(test)]

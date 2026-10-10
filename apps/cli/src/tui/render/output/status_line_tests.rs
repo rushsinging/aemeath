@@ -13,11 +13,11 @@ fn live_status(task_lines: Vec<&str>) -> LiveStatusViewModel {
             phase_elapsed_secs: Some(0),
             phase_text: None,
             detail_text: None,
-            background_processes_active: 0,
         }),
         queued_lines: Vec::new(),
         task_lines: task_lines.into_iter().map(str::to_string).collect(),
         compact_progress: None,
+        background_processes_active: 0,
     }
 }
 
@@ -27,6 +27,7 @@ fn live_status_with_queue(queued_lines: Vec<&str>) -> LiveStatusViewModel {
         queued_lines: queued_lines.into_iter().map(str::to_string).collect(),
         task_lines: Vec::new(),
         compact_progress: None,
+        background_processes_active: 0,
     }
 }
 
@@ -106,4 +107,57 @@ fn test_render_wraps_long_queued_input_lines() {
     assert_eq!(buf.cell((0, 0)).unwrap().symbol(), ">");
     assert_eq!(buf.cell((3, 0)).unwrap().symbol(), "b");
     assert_eq!(buf.cell((2, 1)).unwrap().symbol(), "c");
+}
+
+// ── #1895：后台进程计数 status line 第三行 ────────────────────────
+
+#[test]
+fn background_process_count_renders_third_line_with_spinner() {
+    let mut output = OutputArea::new();
+    let mut status = live_status(vec!["━━ Tasks: 0/1 ━━"]);
+    status.background_processes_active = 2;
+    let area = Rect::new(0, 0, 40, 8);
+    let mut buf = Buffer::empty(area);
+    output.render(area, &mut buf, &Default::default(), &status);
+    let text = buffer_text(&buf);
+    assert!(
+        text.contains("2 Backend Progress"),
+        "有 spinner 时计数仍显示（第三行）：{text}"
+    );
+}
+
+#[test]
+fn background_process_count_visible_without_spinner() {
+    let mut output = OutputArea::new();
+    let mut status = live_status_with_queue(vec![]);
+    status.background_processes_active = 3;
+    let area = Rect::new(0, 0, 40, 8);
+    let mut buf = Buffer::empty(area);
+    output.render(area, &mut buf, &Default::default(), &status);
+    let text = buffer_text(&buf);
+    assert!(
+        text.contains("3 Backend Progress"),
+        "无 active Run（spinner 消失）计数仍可见：{text}"
+    );
+}
+
+#[test]
+fn background_process_count_hidden_when_zero() {
+    let mut output = OutputArea::new();
+    let status = live_status_with_queue(vec![]);
+    let area = Rect::new(0, 0, 40, 8);
+    let mut buf = Buffer::empty(area);
+    output.render(area, &mut buf, &Default::default(), &status);
+    let text = buffer_text(&buf);
+    assert!(
+        !text.contains("Backend Progress"),
+        "计数 0 不显示第三行：{text}"
+    );
+}
+
+fn buffer_text(buf: &Buffer) -> String {
+    buf.content
+        .iter()
+        .map(|cell| cell.symbol().to_string())
+        .collect()
 }
