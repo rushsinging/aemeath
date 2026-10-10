@@ -887,7 +887,9 @@ async fn l4_real_assembly_direct_log_end_to_end_chain() {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
     loop {
         let content = std::fs::read_to_string(&log_path).unwrap_or_default();
-        if content.matches("ping statistics").count() >= 1 && content.contains("round-trip") {
+        if content.matches("ping statistics").count() >= 1
+            && content.contains("packets transmitted")
+        {
             assert!(
                 content.contains("64 bytes"),
                 "文件含全程输出（零丢失）：{content:?}"
