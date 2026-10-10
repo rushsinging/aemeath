@@ -78,6 +78,18 @@ impl ScoringEvent {
     }
 }
 
+/// 评分调用关联上下文（设计 §5.3）：装配期可选注入，缺省全 None。
+///
+/// **NEVER** 因缺失而阻断评分；装饰器持有 `Fn() -> Self` 源，按次快照写入事件。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScoringCallContext {
+    pub correlation_id: Option<String>,
+    pub session_id: Option<String>,
+    pub run_ordinal: Option<u32>,
+    pub step_ordinal: Option<u32>,
+    pub tool_call_id: Option<String>,
+}
+
 /// 题型快照：按题型保留可复盘全文。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScoringQuestionSnapshot {

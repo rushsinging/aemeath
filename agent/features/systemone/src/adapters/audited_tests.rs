@@ -342,3 +342,80 @@ async fn prompt_fingerprint_stable_for_same_input_and_differs_for_different() {
         "不同输入指纹必须不同"
     );
 }
+
+#[tokio::test]
+async fn answer_with_context_source_writes_association_fields() {
+    use crate::domain::ScoringCallContext;
+
+    let day = today();
+    let temp = tempfile::TempDir::new().expect("临时目录");
+    let scoring_dir = temp.path().join("scoring");
+    let context = ScoringCallContext {
+        correlation_id: Some("corr-1".to_string()),
+        session_id: Some("sess-1".to_string()),
+        run_ordinal: Some(2),
+        step_ordinal: Some(7),
+        tool_call_id: Some("tool-9".to_string()),
+    };
+    let adapter = audited_with_day(
+        Ok(vec![
+            ScoringAnswer::noul(0.8, CalibrationLevel::Raw).expect("答案构造")
+        ]),
+        scoring_dir.clone(),
+        &day,
+    )
+    .with_context_source(Arc::new(move || context.clone()));
+
+    let answers = adapter
+        .answer(&sample_state(), &sample_questions())
+        .await
+        .expect("有 context 时评分仍须成功");
+    assert_eq!(answers.len(), 1);
+
+    let events = read_daily_events(&scoring_dir, &day);
+    assert_eq!(events.len(), 1);
+    let event = &events[0];
+    assert_eq!(event["correlation_id"], "corr-1");
+    assert_eq!(event["session_id"], "sess-1");
+    assert_eq!(event["run_ordinal"], 2);
+    assert_eq!(event["step_ordinal"], 7);
+    assert_eq!(event["tool_call_id"], "tool-9");
+
+    let typed: ScoringEvent = serde_json::from_value(event.clone()).expect("反序列化");
+    assert_eq!(typed.correlation_id.as_deref(), Some("corr-1"));
+    assert_eq!(typed.session_id.as_deref(), Some("sess-1"));
+    assert_eq!(typed.run_ordinal, Some(2));
+    assert_eq!(typed.step_ordinal, Some(7));
+    assert_eq!(typed.tool_call_id.as_deref(), Some("tool-9"));
+}
+
+#[tokio::test]
+async fn answer_without_context_source_keeps_null_association_and_succeeds() {
+    let day = today();
+    let temp = tempfile::TempDir::new().expect("临时目录");
+    let scoring_dir = temp.path().join("scoring");
+    let adapter = audited_with_day(
+        Ok(vec![
+            ScoringAnswer::noul(0.5, CalibrationLevel::Raw).expect("答案构造")
+        ]),
+        scoring_dir.clone(),
+        &day,
+    );
+
+    adapter
+        .answer(&sample_state(), &sample_questions())
+        .await
+        .expect("无 context 时评分须成功");
+
+    let events = read_daily_events(&scoring_dir, &day);
+    let event = &events[0];
+    for field in [
+        "correlation_id",
+        "session_id",
+        "run_ordinal",
+        "step_ordinal",
+        "tool_call_id",
+    ] {
+        assert!(event[field].is_null(), "{field} 缺省应 null");
+    }
+}

@@ -7,8 +7,8 @@ pub mod temperature;
 
 pub use error::{ScoringUnavailable, UnavailableKind};
 pub use event::{
-    CriterionSnapshot, ScoringAnswerSnapshot, ScoringEvent, ScoringQuestionSnapshot,
-    ScoringRankingSnapshot,
+    CriterionSnapshot, ScoringAnswerSnapshot, ScoringCallContext, ScoringEvent,
+    ScoringQuestionSnapshot, ScoringRankingSnapshot,
 };
 pub use model_manifest::{required_platform, ModelAsset, ModelManifest, ModelManifestError};
 pub use pointer_head::{PointerHead, PointerHeadError, PointerHeadWeights};
