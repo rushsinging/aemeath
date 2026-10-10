@@ -1360,6 +1360,67 @@ async fn append_failure_never_blocks_write_or_retrieve() {
     assert_eq!(injected.hits.len(), 1);
 }
 
+#[tokio::test]
+async fn event_lifecycle_assembly_fingerprint_emits_on_open() {
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Project))], vec![]),
+    );
+    let (service, recorder) = open_events_service(store, MemoryPolicy::default()).await;
+    let _ = &service; // keep service alive
+    let events = recorder.events();
+    let fingerprint = events
+        .iter()
+        .find(|event| event.op == MemoryEventOp::AssemblyFingerprint)
+        .expect("AssemblyFingerprint on open");
+    assert!(!fingerprint.config_fingerprint.scoring_enabled);
+    assert_eq!(
+        fingerprint.config_fingerprint.similarity_threshold,
+        Some(0.8)
+    );
+    assert!(fingerprint
+        .context
+        .trigger_summary
+        .as_deref()
+        .is_some_and(|summary| summary.contains("max_entries=")));
+}
+
+#[tokio::test]
+async fn event_lifecycle_eviction_watermark_emits_candidate_entries() {
+    let existing = entry(MemoryLayer::Project, "fills capacity");
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
+        layer_script(
+            vec![
+                Ok(committed(1, MemoryLayer::Project, vec![existing.clone()])),
+                Ok(committed(1, MemoryLayer::Project, vec![existing.clone()])),
+            ],
+            vec![],
+        ),
+    );
+    let (service, recorder) = open_events_service(store, small_policy()).await;
+    let result = service
+        .write(entry(MemoryLayer::Project, "needs room"))
+        .await
+        .unwrap();
+    assert!(matches!(result, WriteResult::NeedsEviction { .. }));
+    let eviction = recorder
+        .events()
+        .into_iter()
+        .find(|event| event.op == MemoryEventOp::EvictionWatermark)
+        .expect("EvictionWatermark");
+    match &eviction.change {
+        EventChange::Lifecycle { stage, affected } => {
+            assert_eq!(stage, "eviction_watermark");
+            assert!(!affected.is_empty());
+            assert!(affected
+                .iter()
+                .any(|entry| entry.content == "fills capacity"));
+        }
+        other => panic!("expected Lifecycle, got {other:?}"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // event_read_ops_*：读组 4 项（候选正文全量）。
 // ---------------------------------------------------------------------------

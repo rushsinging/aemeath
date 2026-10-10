@@ -145,6 +145,7 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
             events,
         };
         service.emit_open_load().await;
+        service.emit_assembly_fingerprint().await;
         Ok(service)
     }
 
@@ -170,6 +171,27 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
         event.context.trigger_summary = Some(format!(
             "global active={global_active} archive={global_archive}; \
              project active={project_active} archive={project_archive}"
+        ));
+        self.emit_event(event).await;
+    }
+
+    /// AssemblyFingerprint：打开完成后记录评分/阈值/策略指纹，供复盘对照「当时装配」。
+    async fn emit_assembly_fingerprint(&self) {
+        let mut event = self.build_lifecycle_event(
+            MemoryEventOp::AssemblyFingerprint,
+            "assembly_fingerprint",
+            format!("assembly_fingerprint-{}", uuid::Uuid::now_v7()),
+            EventActor::Opener,
+        );
+        event.config_fingerprint = ConfigFingerprint {
+            scoring_enabled: self.scorer.is_some(),
+            similarity_threshold: Some(self.policy.similarity_threshold),
+            ..ConfigFingerprint::default()
+        };
+        event.context.trigger_summary = Some(format!(
+            "max_entries={};scoring={}",
+            self.policy.max_entries,
+            self.scorer.is_some()
         ));
         self.emit_event(event).await;
     }
@@ -941,6 +963,26 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                 self.emit_event(event).await;
             }
         }
+        if let WriteResult::NeedsEviction { candidates } = &result {
+            let affected: Vec<MemoryEntry> = candidates
+                .iter()
+                .map(|candidate| candidate.entry.clone())
+                .collect();
+            let correlation = format!("eviction_watermark-write-{}", uuid::Uuid::now_v7());
+            let mut event = self.build_lifecycle_event(
+                MemoryEventOp::EvictionWatermark,
+                "eviction_watermark",
+                correlation,
+                EventActor::Service,
+            );
+            event.change = EventChange::Lifecycle {
+                stage: "eviction_watermark".to_string(),
+                affected,
+            };
+            event.context.trigger_summary =
+                Some(format!("path=write;candidates={}", candidates.len()));
+            self.emit_event(event).await;
+        }
         Ok(result)
     }
 
@@ -1254,8 +1296,28 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                 self.emit_event(event).await;
                 return Ok(outcome);
             }
+            if let RestoreResult::NeedsEviction { candidates } = &outcome {
+                let affected: Vec<MemoryEntry> = candidates
+                    .iter()
+                    .map(|candidate| candidate.entry.clone())
+                    .collect();
+                let correlation = format!("eviction_watermark-restore-{}", uuid::Uuid::now_v7());
+                let mut event = self.build_lifecycle_event(
+                    MemoryEventOp::EvictionWatermark,
+                    "eviction_watermark",
+                    correlation,
+                    EventActor::Service,
+                );
+                event.change = EventChange::Lifecycle {
+                    stage: "eviction_watermark".to_string(),
+                    affected,
+                };
+                event.context.trigger_summary =
+                    Some(format!("path=restore;candidates={}", candidates.len()));
+                self.emit_event(event).await;
+                return Ok(outcome);
+            }
             if !matches!(outcome, RestoreResult::NotFound) {
-                // NeedsEviction：无变更不发事件。
                 return Ok(outcome);
             }
         }
