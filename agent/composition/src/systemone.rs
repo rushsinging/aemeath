@@ -240,6 +240,8 @@ pub struct ScoringAssembly {
     pub assignment: ScoringPortAssignment,
     /// typed 启动结果（生产 runtime 只消费此 outcome）。
     pub outcome: ScoringStartupOutcome,
+    /// 关联上下文槽：消费点在 `answer` 前 `set`，四场景审计装饰器共享读取。
+    pub context_slot: Arc<systemone::ScoringCallContextSlot>,
 }
 
 /// 发行 manifest 注入源：唯一决定「当前构建期望哪份模型资产」的地方。
@@ -271,6 +273,7 @@ pub(crate) trait EmbeddedScoringFactory: Send + Sync {
         _manifest: &systemone::ModelManifest,
         _scenario: &'static str,
         _event_retention_days: u32,
+        _context_source: Option<Arc<dyn Fn() -> systemone::ScoringCallContext + Send + Sync>>,
     ) -> Arc<dyn systemone::ScoringPort> {
         raw
     }
@@ -334,6 +337,7 @@ impl EmbeddedScoringFactory for ProductionEmbeddedFactory {
         manifest: &systemone::ModelManifest,
         scenario: &'static str,
         event_retention_days: u32,
+        context_source: Option<Arc<dyn Fn() -> systemone::ScoringCallContext + Send + Sync>>,
     ) -> Arc<dyn systemone::ScoringPort> {
         systemone::wrap_calibrated_audited(
             raw,
@@ -341,6 +345,7 @@ impl EmbeddedScoringFactory for ProductionEmbeddedFactory {
             &scoring_dir(),
             scenario,
             event_retention_days,
+            context_source,
         )
     }
 }
@@ -366,6 +371,8 @@ pub(crate) async fn assemble_scoring_ports_with(
     factory: &dyn EmbeddedScoringFactory,
     source: &dyn ReleaseManifestSource,
 ) -> ScoringAssembly {
+    let context_slot = Arc::new(systemone::ScoringCallContextSlot::new());
+    let context_source = context_slot.snapshot_source();
     let any_scenario_enabled = scoring.enabled
         && (scoring.memory_rerank
             || scoring.memory_recall
@@ -376,18 +383,21 @@ pub(crate) async fn assemble_scoring_ports_with(
         return ScoringAssembly {
             assignment: ScoringPortAssignment::default(),
             outcome: ScoringStartupOutcome::Disabled,
+            context_slot,
         };
     }
     if !factory.available() {
         return ScoringAssembly {
             assignment: ScoringPortAssignment::default(),
             outcome: ScoringStartupOutcome::EmbeddedUnavailable,
+            context_slot,
         };
     }
     let Some(manifest) = source.release_manifest() else {
         return ScoringAssembly {
             assignment: ScoringPortAssignment::default(),
             outcome: ScoringStartupOutcome::ManifestUnavailable,
+            context_slot,
         };
     };
     match factory.wire(&manifest).await {
@@ -399,6 +409,7 @@ pub(crate) async fn assemble_scoring_ports_with(
                         &manifest,
                         "memory_rerank",
                         scoring.event_retention_days,
+                        Some(Arc::clone(&context_source)),
                     )
                 }),
                 for_memory_recall: scoring.memory_recall.then(|| {
@@ -407,6 +418,7 @@ pub(crate) async fn assemble_scoring_ports_with(
                         &manifest,
                         "memory_recall",
                         scoring.event_retention_days,
+                        Some(Arc::clone(&context_source)),
                     )
                 }),
                 for_skill_match: scoring.skill_match.then(|| {
@@ -415,6 +427,7 @@ pub(crate) async fn assemble_scoring_ports_with(
                         &manifest,
                         "skill_match",
                         scoring.event_retention_days,
+                        Some(Arc::clone(&context_source)),
                     )
                 }),
                 for_policy_triage: scoring.policy_triage.then(|| {
@@ -423,14 +436,17 @@ pub(crate) async fn assemble_scoring_ports_with(
                         &manifest,
                         "policy_triage",
                         scoring.event_retention_days,
+                        Some(Arc::clone(&context_source)),
                     )
                 }),
             },
             outcome: ScoringStartupOutcome::Ready,
+            context_slot,
         },
         Err(error) => ScoringAssembly {
             assignment: ScoringPortAssignment::default(),
             outcome: ScoringStartupOutcome::from(error),
+            context_slot,
         },
     }
 }

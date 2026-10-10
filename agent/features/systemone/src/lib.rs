@@ -50,8 +50,8 @@ pub use domain::{
     required_platform, AnswerRejected, CalibrationLevel, CriterionSnapshot, ModelAsset,
     ModelManifest, ModelManifestError, NoulCriteria, PointerHead, PointerHeadError,
     PointerHeadWeights, QuestionRejected, ScoringAnswer, ScoringAnswerSnapshot, ScoringCallContext,
-    ScoringEvent, ScoringQuestion, ScoringQuestionSnapshot, ScoringRankingSnapshot, ScoringState,
-    ScoringUnavailable, UnavailableKind,
+    ScoringCallContextSlot, ScoringEvent, ScoringQuestion, ScoringQuestionSnapshot,
+    ScoringRankingSnapshot, ScoringState, ScoringUnavailable, UnavailableKind,
 };
 pub use ports::{
     ArtifactFetchError, ArtifactFetchErrorKind, ArtifactFetcherPort, CalibrationObservation,

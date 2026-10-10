@@ -90,6 +90,43 @@ pub struct ScoringCallContext {
     pub tool_call_id: Option<String>,
 }
 
+/// 装配级关联上下文槽：消费点在 `answer` 前 `set`，审计装饰器经 `snapshot_source` 读取。
+///
+/// 进程内共享可变状态；锁失败时快照回落为 `Default`（仍不阻断评分）。
+#[derive(Debug, Clone, Default)]
+pub struct ScoringCallContextSlot {
+    current: std::sync::Arc<std::sync::Mutex<ScoringCallContext>>,
+}
+
+impl ScoringCallContextSlot {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 覆盖当前关联上下文（消费点在评分前调用）。
+    pub fn set(&self, context: ScoringCallContext) {
+        if let Ok(mut guard) = self.current.lock() {
+            *guard = context;
+        }
+    }
+
+    /// 清空为缺省（全 None），避免跨调用串味。
+    pub fn clear(&self) {
+        self.set(ScoringCallContext::default());
+    }
+
+    /// 供 `AuditedScoringAdapter::with_context_source` 注入的快照闭包。
+    pub fn snapshot_source(&self) -> std::sync::Arc<dyn Fn() -> ScoringCallContext + Send + Sync> {
+        let current = std::sync::Arc::clone(&self.current);
+        std::sync::Arc::new(move || {
+            current
+                .lock()
+                .map(|guard| guard.clone())
+                .unwrap_or_default()
+        })
+    }
+}
+
 /// 题型快照：按题型保留可复盘全文。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScoringQuestionSnapshot {

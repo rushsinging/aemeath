@@ -220,6 +220,7 @@ async fn wrap_calibrated_audited_appends_scoring_event_with_manifest_revision() 
         &scoring_dir,
         "memory_rerank",
         share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
+        None,
     );
 
     let state = ScoringState::new("用户正在验证审计 revision。").expect("state 构造");
@@ -313,6 +314,7 @@ async fn wrap_calibrated_audited_emits_for_all_four_scenarios_including_unavaila
                 &scoring_dir,
                 scenario,
                 share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
+                None,
             )
         } else {
             wrap_calibrated_audited(
@@ -321,6 +323,7 @@ async fn wrap_calibrated_audited_emits_for_all_four_scenarios_including_unavaila
                 &scoring_dir,
                 scenario,
                 share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
+                None,
             )
         };
 
