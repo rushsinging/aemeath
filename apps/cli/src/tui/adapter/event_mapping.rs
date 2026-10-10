@@ -1394,6 +1394,7 @@ fn reflection_error_category(
         sdk::ReflectionErrorCategoryView::History => TuiReflectionErrorCategory::History,
         sdk::ReflectionErrorCategoryView::Cancelled => TuiReflectionErrorCategory::Cancelled,
         sdk::ReflectionErrorCategoryView::TimedOut => TuiReflectionErrorCategory::TimedOut,
+        sdk::ReflectionErrorCategoryView::Interrupted => TuiReflectionErrorCategory::Interrupted,
     }
 }
 

@@ -2406,17 +2406,26 @@
       "type": "string"
     },
     "ReflectionErrorCategoryView": {
-      "enum": [
-        "llm_call",
-        "empty_response",
-        "parse",
-        "invalid_suggestion",
-        "apply",
-        "history",
-        "cancelled",
-        "timed_out"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "llm_call",
+            "empty_response",
+            "parse",
+            "invalid_suggestion",
+            "apply",
+            "history",
+            "cancelled",
+            "timed_out"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "interrupted",
+          "description": "进程被终止（崩溃/重启）导致 Running 事实未收口，由悬挂收口（reap）写入。",
+          "type": "string"
+        }
+      ]
     },
     "ReflectionHistoryView": {
       "description": "Safe reflection history projection. By default it intentionally contains only\nmetadata and aggregate counts; `deviation_texts` / `suggested_memories` are\npopulated only for the explicit local `/reflect` content query (never LLM raw\noutput, prompts, or conversation text).",

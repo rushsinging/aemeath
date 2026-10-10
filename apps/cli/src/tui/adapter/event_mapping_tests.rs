@@ -1077,3 +1077,26 @@ fn control_commands_queued_mapping_preserves_order_and_text() {
     assert_eq!(queued[1].0.as_str(), second_id.as_str());
     assert_eq!(queued[1].1, "/model anthropic/claude");
 }
+
+/// 错误分类映射穷举：SDK view 的每个变体都有 TUI 镜像，
+/// `Interrupted`（悬挂 running 收口）全链可达。
+#[test]
+fn reflection_error_category_variants_map_to_tui_mirror() {
+    use super::reflection_error_category as map;
+    use crate::tui::adapter::tui_runtime_event::TuiReflectionErrorCategory as Tui;
+    use sdk::ReflectionErrorCategoryView as Sdk;
+
+    for (source, expected) in [
+        (Sdk::LlmCall, Tui::LlmCall),
+        (Sdk::EmptyResponse, Tui::EmptyResponse),
+        (Sdk::Parse, Tui::Parse),
+        (Sdk::InvalidSuggestion, Tui::InvalidSuggestion),
+        (Sdk::Apply, Tui::Apply),
+        (Sdk::History, Tui::History),
+        (Sdk::Cancelled, Tui::Cancelled),
+        (Sdk::TimedOut, Tui::TimedOut),
+        (Sdk::Interrupted, Tui::Interrupted),
+    ] {
+        assert_eq!(map(source), expected, "source={source:?}");
+    }
+}

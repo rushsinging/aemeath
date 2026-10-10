@@ -619,3 +619,99 @@ async fn cancelled_run_does_not_advance_cursor() {
     assert_eq!(upserts.len(), 1);
     assert_eq!(upserts[0].coverage_end, None, "取消/失败不得推进游标");
 }
+
+// ---------------------------------------------------------------------------
+// 悬挂 running 收口：进程退出留下的超龄 Running 在下次反思执行前
+// 被 upsert 为 Failed(Interrupted)；本次反思照常执行。
+// ---------------------------------------------------------------------------
+
+/// list 返回一条超龄 Running 的 history 替身；upsert 记录终态写入。
+#[derive(Clone, Default)]
+struct StaleRunningReflectionHistory {
+    upserts: Arc<Mutex<Vec<memory::api::reflection::ReflectionRecord>>>,
+}
+
+#[async_trait::async_trait]
+impl memory::api::ReflectionHistoryQuery for StaleRunningReflectionHistory {
+    async fn list(
+        &self,
+        _limit: usize,
+    ) -> Result<Vec<memory::api::reflection::ReflectionSafeSummary>, memory::api::MemoryError> {
+        let stale = memory::api::reflection::ReflectionRecord::running(
+            "stale-running",
+            1,
+            memory::api::reflection::ReflectionTrigger::Interval,
+        );
+        Ok(vec![stale.safe_summary()])
+    }
+}
+
+#[async_trait::async_trait]
+impl memory::api::ReflectionHistoryStore for StaleRunningReflectionHistory {
+    async fn append(
+        &self,
+        _record: &memory::api::reflection::ReflectionRecord,
+    ) -> Result<(), memory::api::MemoryError> {
+        Ok(())
+    }
+
+    async fn upsert(
+        &self,
+        record: &memory::api::reflection::ReflectionRecord,
+    ) -> Result<(), memory::api::MemoryError> {
+        self.upserts.lock().await.push(record.clone());
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn stale_running_records_are_reaped_before_reflection_executes() {
+    // 已取消的 token 走确定性取消路径：收口发生在执行之前，不依赖 provider 响应。
+    let adapter = ReflectionTaskAdapter::production(Duration::from_secs(5));
+    let history = StaleRunningReflectionHistory::default();
+    let binding = crate::application::run::run_factory_support::doubles::fake_provider_binding();
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+
+    let outcome = adapter
+        .run_complete(
+            ReflectionTaskRequest::new(
+                ReflectionTaskTrigger::Manual,
+                vec![share::message::Message::user("reflect me")],
+            ),
+            share::config::MemoryConfig {
+                enabled: true,
+                reflection: share::config::ReflectionConfig {
+                    enabled: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            binding.provider.clone(),
+            binding.model.clone(),
+            binding.max_tokens,
+            binding.requested_reasoning,
+            "system".to_string(),
+            "en".to_string(),
+            std::sync::Arc::new(memory::api::NoOpMemory),
+            std::sync::Arc::new(history.clone()),
+            cancel,
+        )
+        .await;
+
+    let completion = assert_completed(outcome, ReflectionTaskCompletionStatus::Cancelled);
+    assert_eq!(completion.trigger, ReflectionTaskTrigger::Manual);
+    let upserts = history.upserts.lock().await;
+    let reaped = upserts
+        .iter()
+        .find(|record| record.id == "stale-running")
+        .expect("超龄 Running 必须被收口");
+    assert_eq!(
+        reaped.status,
+        memory::api::reflection::ReflectionStatus::Failed
+    );
+    assert_eq!(
+        reaped.error_category,
+        Some(memory::api::reflection::ReflectionErrorCategory::Interrupted)
+    );
+}

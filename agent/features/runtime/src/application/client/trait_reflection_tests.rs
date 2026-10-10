@@ -104,3 +104,44 @@ fn sdk_view_maps_all_layer_and_category_variants() {
         }
     }
 }
+
+/// 错误分类映射穷举：Memory 的每个 `ReflectionErrorCategory` 变体都有对应
+/// SDK view（防新增枚举漏映射——`Interrupted` 为悬挂 running 收口新增）。
+#[test]
+fn sdk_view_maps_all_reflection_error_category_variants() {
+    use memory::api::reflection::ReflectionErrorCategory as MemoryErrorCategory;
+    use sdk::ReflectionErrorCategoryView as View;
+
+    for (category, expected) in [
+        (MemoryErrorCategory::LlmCall, View::LlmCall),
+        (MemoryErrorCategory::EmptyResponse, View::EmptyResponse),
+        (MemoryErrorCategory::Parse, View::Parse),
+        (
+            MemoryErrorCategory::InvalidSuggestion,
+            View::InvalidSuggestion,
+        ),
+        (MemoryErrorCategory::Apply, View::Apply),
+        (MemoryErrorCategory::History, View::History),
+        (MemoryErrorCategory::Cancelled, View::Cancelled),
+        (MemoryErrorCategory::TimedOut, View::TimedOut),
+        (MemoryErrorCategory::Interrupted, View::Interrupted),
+    ] {
+        let view = summary_to_sdk(ReflectionSafeSummary {
+            id: "reflection-3".into(),
+            timestamp: 44,
+            trigger: ReflectionTrigger::Interval,
+            status: ReflectionStatus::Failed,
+            deviations: 0,
+            suggestions: 0,
+            outdated: 0,
+            apply_status: ReflectionApplyStatus::NotApplied,
+            error_category: Some(category),
+            token_usage: None,
+            duration_ms: 0,
+            coverage_end: None,
+            deviation_texts: None,
+            suggested_memories: None,
+        });
+        assert_eq!(view.error_category, Some(expected), "category={category:?}");
+    }
+}

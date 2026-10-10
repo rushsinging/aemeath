@@ -54,13 +54,13 @@ MemorySuggestion 是 **Reflection 的产出物**，不是 MemoryEntry——它�
 struct ReflectionOutput {                // LLM 返回的完整反思结果
     deviations: Vec<String>,             // 偏差检测：对话中的偏离行为
     suggested_memories: Vec<MemorySuggestion>, // 建议新增的记忆
-    outdated_memories: Vec<String>,      // 建议标记过期的记忆 id 列表
+    outdated_memories: Vec<String>,      // 建议标记过期的记忆引用（解析后为 UUID 字符串）
 }
 ```
 
 - **deviations**：LLM 观察到 agent 在对话中有偏离预期行为的描述（如重复尝试失败方案、忽略用户指令）。正文只保存在 Memory-owned history record 中；TUI 的只读查询只取得计数等安全摘要。
 - **suggested_memories**：LLM 认为值得持久化的新记忆建议。
-- **outdated_memories**：LLM 认为已过时的已有记忆 id 列表（apply 后标记 outdated）。
+- **outdated_memories**：LLM 认为已过时的已有记忆引用。模型侧只输出本次输入列表的行序号（如 `M3`）；解析阶段经引用表映射为真实 UUID 后进 apply（见「引用契约」小节）。字段保持 `Vec<String>`，兼容历史记录中未解析的原始 token。
 
 ### 反序列化兼容
 
@@ -70,6 +70,30 @@ LLM 可能返回 `null` 而非空数组。使用 `null_as_empty_vec` 自定义�
 #[serde(default, deserialize_with = "null_as_empty_vec")]
 pub deviations: Vec<String>,
 ```
+
+### 引用契约：模型只输出行序号
+
+反思输入的记忆列表每行以本次运行内稳定的行序号开头（`- [M1] [Decision][tags] content`）。
+模型对已有记忆的引用（`outdated_memories` / `supersedes` / `synthesizes`）**MUST** 使用行
+序号（如 `M3`），**MUST NOT** 使用 UUID、标签或正文片段：UUID 是系统内部寻址标识，对
+模型无语义，要求模型复刻长随机串必然出错。
+
+- **引用表**：输入构造返回 `ReflectionReferenceTable`（行序号 → MemoryId）；行序与渲染
+  顺序由同一 `entries` 切片推导（序号单一来源），模型输出里的序号经该表映射回真实 id。
+  序号仅在产生它的那次反思运行内有效。
+- **解析容错**：`parse_output` 逐条解析引用；无法解析的 token **MUST** 跳过并记录
+  （`memory_reflection_reference_unresolved`），**NEVER** 让单条坏引用作废整批建议。
+  合法 UUID 直填（兼容路径）仍被接受。
+- **apply 容错**：`apply_reflection` 对 `outdated_memories` 中无法解析的条目同样跳过并
+  记录（`memory_reflection_reference_skipped`）；`suggested_memories` 照常写入，NEVER
+  因坏引用丢弃合法建议。
+
+### 悬挂 Running 收口
+
+`append_running` 在进程被终止（崩溃/重启）时可能留下永不收口的 `Running` 记录。Runtime
+在每次反思执行前调用 `ReflectionWorkflow::reap_stale_running`（阈值 = 任务超时 × 2，
+至少 60s），把超龄 `Running` 以同一 stable id upsert 为 `Failed(Interrupted)`；未超龄的
+记录（并发中正在运行）不受影响；收口失败只告警、不阻断本次反思。
 
 ## 4. 触发条件
 
@@ -203,7 +227,7 @@ Reflection 的运行时可见性是结构化 Activity（SDK typed view），**�
 
 ### 归纳产物（跨条目结论）
 
-反思除「提炼新记忆 / 标记过时」外，还判断「是否存在可归纳的组合」。沿用既有两步流程：prompt 要求模型输出 `synthesizes`（来源 memory id 列表）→ apply 写入时置 `kind = Synthesized` 并把来源写入 `evidence`。
+反思除「提炼新记忆 / 标记过时」外，还判断「是否存在可归纳的组合」。沿用既有两步流程：prompt 要求模型输出 `synthesizes`（来源记忆的行序号）→ 解析映射为真实 id → apply 写入时置 `kind = Synthesized` 并把来源写入 `evidence`。
 
 - **触发沿用既有三种**（Interval / PreCompact / Manual），不新增触发条件：归纳是「每 N 轮批量做」，存在最多 N 轮延迟；记忆是辅助信息源，当前对话 context 优先级更高，该延迟可接受。
 - **M13 证据下限**：`evidence.len() >= 2`。单条来源的「归纳」等价于复制既有条目，MUST NOT 产出；此时**降级**为普通建议（`Raw` + 空 evidence），内容照常写入——丢弃模型产出的内容比降级更糟。
@@ -268,13 +292,13 @@ Prompt 结构（i18n）：
 分析以上对话，识别：
 1. deviations: agent 是否有偏离行为
 2. suggested_memories: 值得持久化的新记忆
-3. outdated_memories: 已过时的记忆 id
+3. outdated_memories: 已过时的记忆（填本次列表行序号，如 M3）
 
 只输出 JSON，格式如下：
 {...}
 ```
 
-- **project_memory**：从当前 Run 持有的同一 `MemoryPort` 读取 Project 层 active 条目，格式化为 `- [Category][tags] content` 列表。
+- **project_memory**：从当前 Run 持有的同一 `MemoryPort` 读取 Project 层 active 条目，格式化为 `- [M1] [Category][tags] content` 列表（行序号即引用契约的索引）。
 - **recent_summary**：从最近对话消息提取文本，按 `[User]/[Assistant]: text` 格式逆序拼接，截断到合理长度。
 - **i18n**：prompt 模板支持中英文，按 `lang` 参数选择。
 
@@ -336,7 +360,7 @@ async fn apply_output(
 ### 步骤
 
 1. **apply_suggestions**：`MemoryPort::apply_reflection` 遍历 `suggested_memories`，将每条转换为 MemoryEntry（UUIDv7 + now + source=Llm），执行去重、容量判断与必要的归档重试。
-2. **apply_outdated**：同一 Port 实例遍历 `outdated_memories` 并标记过期；它就是当前 Run shared lease 捕获的 active Memory Arc。
+2. **apply_outdated**：同一 Port 实例遍历 `outdated_memories` 并标记过期；无法解析的引用跳过并记录（NEVER 使整批失败）；它就是当前 Run shared lease 捕获的 active Memory Arc。
 3. **提交语义**：每个 layer 使用 MemoryService candidate/CAS/publish 协议；跨层部分完成返回结构化 `MemoryError::PartialApply`，不伪装成全成功。
 
 ### auto_apply_suggestions

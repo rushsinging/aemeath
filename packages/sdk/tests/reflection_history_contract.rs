@@ -73,3 +73,17 @@ fn wire_schema_exposes_suggestion_view_types() {
     assert!(schemas.contains_key("MemoryLayerView"));
     assert!(schemas.contains_key("MemoryCategoryView"));
 }
+
+/// 新增 `Interrupted`（悬挂 running 收口）错误分类，wire 序列化为
+/// snake_case，跨层（runtime → sdk → tui）反序列化兼容。
+#[test]
+fn reflection_error_category_interrupted_round_trips_snake_case() {
+    let restored: sdk::ReflectionErrorCategoryView =
+        serde_json::from_value(serde_json::json!("interrupted"))
+            .expect("interrupted 必须可反序列化");
+    assert_eq!(restored, sdk::ReflectionErrorCategoryView::Interrupted);
+    assert_eq!(
+        serde_json::to_value(restored).expect("serialize"),
+        serde_json::json!("interrupted")
+    );
+}

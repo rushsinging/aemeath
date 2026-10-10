@@ -84,6 +84,7 @@ fn summary_to_sdk(summary: ReflectionSafeSummary) -> ReflectionHistoryView {
             ReflectionErrorCategory::History => ReflectionErrorCategoryView::History,
             ReflectionErrorCategory::Cancelled => ReflectionErrorCategoryView::Cancelled,
             ReflectionErrorCategory::TimedOut => ReflectionErrorCategoryView::TimedOut,
+            ReflectionErrorCategory::Interrupted => ReflectionErrorCategoryView::Interrupted,
         }),
         token_usage: summary.token_usage.map(|usage| ReflectionTokenUsageView {
             input_tokens: usage.input_tokens,

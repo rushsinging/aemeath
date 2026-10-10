@@ -1,8 +1,8 @@
 pub mod recall;
 use crate::domain::{
     MemoryError, MemoryLayer, ReflectionEngine, ReflectionError, ReflectionErrorCategory,
-    ReflectionMessage, ReflectionOutput, ReflectionRecord, ReflectionStatus, ReflectionTokenUsage,
-    ReflectionTrigger,
+    ReflectionMessage, ReflectionOutput, ReflectionPrompt, ReflectionRecord,
+    ReflectionReferenceTable, ReflectionStatus, ReflectionTokenUsage, ReflectionTrigger,
 };
 use crate::ports::{MemoryPort, ReflectionApplyResult, ReflectionHistoryStore};
 
@@ -39,15 +39,18 @@ pub struct ReflectionWorkflow;
 impl ReflectionWorkflow {
     /// `now` 是本次反思运行的时间戳（M12 的 TTL 判定需要它），由调用方从反思
     /// identity 传入，避免在此处另起时钟导致两次读取跨秒。
+    ///
+    /// 返回值携带本次输入的行序号表：模型输出里的引用（`M3` 等）必须在解析阶段
+    /// 用同一张表映射回 UUID。
     pub async fn build_prompt(
         messages: &[share::message::Message],
         lang: &str,
         memory: &dyn MemoryPort,
         now: u64,
-    ) -> String {
+    ) -> ReflectionPrompt {
         let engine = ReflectionEngine;
         // M12：反思输入排除失效条目（outdated / 被取代 / TTL 过期）。
-        let project_memory = engine.format_memory_summary(
+        let (project_memory, references) = engine.format_memory_summary(
             &memory
                 .list(Some(MemoryLayer::Project))
                 .await
@@ -70,7 +73,10 @@ impl ReflectionWorkflow {
         const REFLECTION_MESSAGE_BUDGET_CHARS: usize = 24_000;
         let recent_summary =
             engine.recent_messages_summary(&messages, REFLECTION_MESSAGE_BUDGET_CHARS);
-        engine.build_prompt(&project_memory, &recent_summary, lang)
+        ReflectionPrompt {
+            text: engine.build_prompt(&project_memory, &recent_summary, lang),
+            references,
+        }
     }
 
     pub async fn append_running(
@@ -93,13 +99,14 @@ impl ReflectionWorkflow {
         memory: &dyn MemoryPort,
         identity: &ReflectionExecutionIdentity,
         raw_response: &str,
+        references: &ReflectionReferenceTable,
         _lang: &str,
         auto_apply: bool,
         token_usage: ReflectionTokenUsage,
         duration_ms: u64,
     ) -> Result<ReflectionExecutionResult, ReflectionWorkflowError> {
-        let output = match ReflectionEngine.parse_output(raw_response) {
-            Ok(output) => output,
+        let resolved = match ReflectionEngine.parse_output(raw_response, references) {
+            Ok(resolved) => resolved,
             Err(error) => {
                 let category = match error {
                     ReflectionError::InvalidSuggestion(_) => {
@@ -118,6 +125,17 @@ impl ReflectionWorkflow {
                 });
             }
         };
+        // 无法解析的引用（模型编造的标识）逐条记录后跳过：合法建议照常写入，
+        // NEVER 让单条坏引用作废整批。
+        for reference in &resolved.unresolved {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "memory_reflection_reference_unresolved field={:?} token={}",
+                reference.field,
+                reference.token,
+            );
+        }
+        let output = resolved.output;
 
         let (apply_result, error_category) = if auto_apply {
             match memory.apply_reflection(&output).await {
@@ -195,6 +213,50 @@ impl ReflectionWorkflow {
             ))
             .await
             .map_err(|_| ReflectionWorkflowError::HistoryWrite)
+    }
+
+    /// 收口悬挂的 Running 反思事实：进程被终止（崩溃/重启）时 `append_running`
+    /// 留下的记录永不收口。调用方在反思执行前用「早于本次启动足够久」的阈值
+    /// 扫描，把超龄 Running 记录 upsert 为 `Failed(Interrupted)`。
+    ///
+    /// 返回收口数量；未超龄的运行（并发中的其它进程/本次）不受影响。
+    pub async fn reap_stale_running(
+        history: &dyn ReflectionHistoryStore,
+        now: u64,
+        stale_after_secs: u64,
+    ) -> Result<usize, ReflectionWorkflowError> {
+        let summaries = history
+            .list(crate::constants::REFLECTION_REAP_SCAN_LIMIT)
+            .await
+            .map_err(|_| ReflectionWorkflowError::HistoryWrite)?;
+        let mut reaped = 0;
+        for summary in summaries {
+            if summary.status != ReflectionStatus::Running {
+                continue;
+            }
+            let age_secs = now.saturating_sub(summary.timestamp);
+            if age_secs < stale_after_secs {
+                continue;
+            }
+            history
+                .upsert(&ReflectionRecord::failed(
+                    summary.id.clone(),
+                    summary.timestamp,
+                    summary.trigger,
+                    ReflectionErrorCategory::Interrupted,
+                    age_secs,
+                ))
+                .await
+                .map_err(|_| ReflectionWorkflowError::HistoryWrite)?;
+            log::info!(
+                target: crate::LOG_TARGET,
+                "reflection_stale_running_reaped id={} age_secs={}",
+                summary.id,
+                age_secs,
+            );
+            reaped += 1;
+        }
+        Ok(reaped)
     }
 }
 

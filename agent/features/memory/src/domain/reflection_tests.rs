@@ -5,6 +5,13 @@ fn engine() -> ReflectionEngine {
     ReflectionEngine
 }
 
+/// 以空引用表解析模型输出，取解析后的领域输出（引用表行为见专门测试）。
+fn parse(raw: &str) -> ReflectionResult<ReflectionOutput> {
+    engine()
+        .parse_output(raw, &ReflectionReferenceTable::default())
+        .map(|resolved| resolved.output)
+}
+
 #[test]
 fn reflection_record_summary_is_safe_and_deterministic() {
     let record = ReflectionRecord {
@@ -158,49 +165,39 @@ fn failed_reflection_record_has_typed_error_and_no_output() {
 
 #[test]
 fn null_collections_deserialize_as_empty() {
-    let output = engine()
-        .parse_output(r#"{"deviations":null,"suggested_memories":null,"outdated_memories":null}"#)
-        .unwrap();
+    let output =
+        parse(r#"{"deviations":null,"suggested_memories":null,"outdated_memories":null}"#).unwrap();
     assert_eq!(output, ReflectionOutput::default());
 
-    let output = engine()
-        .parse_output(r#"{"suggested_memories":[{"category":"fact","content":"x","tags":null}]}"#)
-        .unwrap();
+    let output =
+        parse(r#"{"suggested_memories":[{"category":"fact","content":"x","tags":null}]}"#).unwrap();
     assert!(output.suggested_memories[0].tags.is_empty());
 }
 
 #[test]
 fn extracts_fenced_and_prose_json() {
-    let fenced = engine()
-        .parse_output("answer:\n```json\n{\"deviations\":[\"fenced\"]}\n```")
-        .unwrap();
-    let prose = engine()
-        .parse_output("answer: {\"deviations\":[\"prose\"]} done")
-        .unwrap();
+    let fenced = parse("answer:\n```json\n{\"deviations\":[\"fenced\"]}\n```").unwrap();
+    let prose = parse("answer: {\"deviations\":[\"prose\"]} done").unwrap();
     assert_eq!(fenced.deviations, ["fenced"]);
     assert_eq!(prose.deviations, ["prose"]);
 }
 
 #[test]
 fn distinguishes_empty_unparseable_and_malformed_json() {
+    assert!(matches!(parse("  "), Err(ReflectionError::Unparseable)));
     assert!(matches!(
-        engine().parse_output("  "),
+        parse("no json here"),
         Err(ReflectionError::Unparseable)
     ));
     assert!(matches!(
-        engine().parse_output("no json here"),
-        Err(ReflectionError::Unparseable)
-    ));
-    assert!(matches!(
-        engine().parse_output("{\"deviations\": [}"),
+        parse("{\"deviations\": [}"),
         Err(ReflectionError::Parse)
     ));
 }
 
 #[test]
 fn rejects_empty_suggestion_content() {
-    let result =
-        engine().parse_output(r#"{"suggested_memories":[{"category":"decision","content":"  "}]}"#);
+    let result = parse(r#"{"suggested_memories":[{"category":"decision","content":"  "}]}"#);
     assert!(matches!(result, Err(ReflectionError::InvalidSuggestion(_))));
 }
 
@@ -217,7 +214,7 @@ fn prompt_is_bilingual_without_user_alert() {
 }
 
 #[test]
-fn formats_memory_summary() {
+fn formats_memory_summary_with_ordinal_references() {
     let mut entry = MemoryEntry::new(
         MemoryId::now_v7(),
         1,
@@ -228,9 +225,95 @@ fn formats_memory_summary() {
     )
     .unwrap();
     entry.tags = vec!["ddd".into(), "reflection".into()];
+    let entry_id = entry.id;
+    let (text, references) = engine().format_memory_summary(&[entry]);
     assert_eq!(
-        engine().format_memory_summary(&[entry]),
-        "- [Decision][ddd,reflection] keep Reflection in Memory"
+        text,
+        "- [M1] [Decision][ddd,reflection] keep Reflection in Memory"
+    );
+    assert_eq!(references.len(), 1);
+    assert_eq!(references.resolve("M1"), Some(entry_id));
+}
+
+fn fact_entry(content: &str) -> MemoryEntry {
+    MemoryEntry::new(
+        MemoryId::now_v7(),
+        1,
+        MemoryLayer::Project,
+        MemoryCategory::Fact,
+        content,
+        MemorySource::Llm,
+    )
+    .unwrap()
+}
+
+#[test]
+fn reference_table_resolves_ordinal_forms_and_direct_uuids() {
+    let first = fact_entry("first");
+    let second = fact_entry("second");
+    let table = ReflectionReferenceTable::from_entries(&[first.clone(), second.clone()]);
+
+    // 序号的各种书写形式（模型可能带方括号/前缀/大小写/空白）。
+    for token in ["M1", "m1", "[M1]", "[m1]", "#1", "1", " M1 "] {
+        assert_eq!(table.resolve(token), Some(first.id), "token={token:?}");
+    }
+    assert_eq!(table.resolve("M2"), Some(second.id));
+    // 兼容：模型直填真实 UUID。
+    assert_eq!(table.resolve(&second.id.to_string()), Some(second.id));
+    // 越界序号与编造标识不可解析。
+    assert_eq!(table.resolve("M99"), None);
+    assert_eq!(table.resolve("some-tag-slug"), None);
+    assert_eq!(table.resolve("[Decision][some-tag]"), None);
+    // 空表（严格模式）只接受 UUID。
+    let empty = ReflectionReferenceTable::default();
+    assert!(empty.is_empty());
+    assert_eq!(empty.resolve("M1"), None);
+    assert_eq!(empty.resolve(&first.id.to_string()), Some(first.id));
+}
+
+#[test]
+fn parse_output_resolves_references_and_reports_unresolved() {
+    let first = fact_entry("first");
+    let second = fact_entry("second");
+    let table = ReflectionReferenceTable::from_entries(&[first.clone(), second.clone()]);
+
+    let resolved = engine()
+        .parse_output(
+            r#"{
+                "suggested_memories": [{
+                    "category": "decision",
+                    "content": "new conclusion",
+                    "supersedes": ["M2"],
+                    "synthesizes": ["1", "M99"]
+                }],
+                "outdated_memories": ["M1", "[Decision][some-tag]"]
+            }"#,
+            &table,
+        )
+        .unwrap();
+
+    let suggestion = &resolved.output.suggested_memories[0];
+    assert_eq!(suggestion.supersedes, vec![second.id]);
+    assert_eq!(suggestion.synthesizes, vec![first.id]);
+    assert_eq!(
+        resolved.output.outdated_memories,
+        vec![first.id.to_string()]
+    );
+    // 无法解析的引用被跳过并记录，NEVER 失败整批。
+    assert_eq!(resolved.unresolved.len(), 2);
+    assert_eq!(
+        resolved.unresolved[0],
+        UnresolvedReflectionReference {
+            field: ReflectionReferenceField::Synthesizes,
+            token: "M99".to_string(),
+        }
+    );
+    assert_eq!(
+        resolved.unresolved[1],
+        UnresolvedReflectionReference {
+            field: ReflectionReferenceField::Outdated,
+            token: "[Decision][some-tag]".to_string(),
+        }
     );
 }
 
