@@ -160,6 +160,13 @@ pub struct ReflectionTaskAdapter {
     #[cfg(test)]
     executor: std::sync::Arc<ReflectionTaskExecutor>,
     pending_memory_updates: std::sync::Arc<std::sync::Mutex<usize>>,
+    /// 反思专用 provider binding（配置 `memory.reflection.model`）。
+    /// 缓存位置与生命周期：session driver 装配期（run_launch 的
+    /// `ReflectionTaskAdapter::production` 之后）解析一次后写入，随本 adapter
+    /// 在整个 session driver 内存续（Interval/PreCompact/Manual 三个触发点拿到的
+    /// 都是同一 session 级 adapter 的 clone，共享同一 `Arc`）；`None` 表示未配置
+    /// 或解析失败，反思回退会话 binding。
+    reflection_binding: Option<std::sync::Arc<crate::ports::ProviderBindingData>>,
 }
 
 impl ReflectionTaskAdapter {
@@ -180,6 +187,7 @@ impl ReflectionTaskAdapter {
                 Box::pin(executor(request, cancel))
             }),
             pending_memory_updates: std::sync::Arc::new(std::sync::Mutex::new(0)),
+            reflection_binding: None,
         }
     }
 
@@ -191,7 +199,22 @@ impl ReflectionTaskAdapter {
                 Box::pin(async { Err(ReflectionError::LlmCall) })
             }),
             pending_memory_updates: std::sync::Arc::new(std::sync::Mutex::new(0)),
+            reflection_binding: None,
         }
+    }
+
+    /// 装配期写入反思专用 binding（`None` = 未配置/解析失败，回退会话 binding）。
+    /// 见字段注释：缓存于 session 级 adapter，随 clone 共享。
+    pub fn set_reflection_binding(
+        &mut self,
+        binding: Option<std::sync::Arc<crate::ports::ProviderBindingData>>,
+    ) {
+        self.reflection_binding = binding;
+    }
+
+    /// 读取缓存的反思专用 binding；`None` 时调用方回退会话 binding。
+    pub fn reflection_binding(&self) -> Option<&std::sync::Arc<crate::ports::ProviderBindingData>> {
+        self.reflection_binding.as_ref()
     }
 
     /// Run the stage without configuration gating, for callers that own their own

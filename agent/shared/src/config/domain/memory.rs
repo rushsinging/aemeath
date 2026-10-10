@@ -14,6 +14,10 @@ pub(crate) fn default_interval_runs() -> usize {
     10
 }
 
+pub(crate) fn default_reflection_timeout_secs() -> u64 {
+    240
+}
+
 /// Memory system configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryConfig {
@@ -76,6 +80,11 @@ pub struct ReflectionConfig {
     /// Optional model override for reflection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+
+    /// Reflection 执行超时（秒）：默认 240s，覆盖成功耗时长尾
+    /// （旧硬编码 120s 紧贴 p99 导致超时成为最大失败来源）。
+    #[serde(default = "default_reflection_timeout_secs")]
+    pub timeout_secs: u64,
 }
 
 impl Default for ReflectionConfig {
@@ -85,6 +94,7 @@ impl Default for ReflectionConfig {
             interval_runs: default_interval_runs(),
             auto_apply_suggestions: false,
             model: None,
+            timeout_secs: default_reflection_timeout_secs(),
         }
     }
 }

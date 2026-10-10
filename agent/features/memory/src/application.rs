@@ -215,6 +215,25 @@ impl ReflectionWorkflow {
             .map_err(|_| ReflectionWorkflowError::HistoryWrite)
     }
 
+    /// 预解析（不落盘）：供执行链在调用 [`Self::complete`] 之前判断响应是否
+    /// 可解析，从而有界地发起格式修复。
+    ///
+    /// `Ok(())` 表示响应可正常解析；`Err` 携带精确校验错误摘要（直接用于
+    /// 构造发回模型的纠错指令）。解析与引用解析逻辑与 [`Self::complete`] 同源
+    /// （同一 `ReflectionEngine`），保证预解析与落盘解析的判定一致。
+    pub fn parse_for_repair(
+        raw_response: &str,
+        references: &ReflectionReferenceTable,
+    ) -> Result<(), String> {
+        match ReflectionEngine.parse_output(raw_response, references) {
+            Ok(_) => Ok(()),
+            // InvalidSuggestion 自带字段/索引级细节，直接作为精确摘要；
+            // 其余错误取稳定 Display（Unparseable / Parse 的描述）。
+            Err(ReflectionError::InvalidSuggestion(detail)) => Err(detail),
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
     /// 收口悬挂的 Running 反思事实：进程被终止（崩溃/重启）时 `append_running`
     /// 留下的记录永不收口。调用方在反思执行前用「早于本次启动足够久」的阈值
     /// 扫描，把超龄 Running 记录 upsert 为 `Failed(Interrupted)`。

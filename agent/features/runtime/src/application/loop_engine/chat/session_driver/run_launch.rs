@@ -77,10 +77,30 @@ where
             let mut initial_git_context = (!initial_git_context.is_empty())
                 .then_some(Message::system_generated_user(initial_git_context));
             // Interval and PreCompact share this single session-scoped slot.
-            let reflection_tasks =
+            // 反思超时来自配置 `memory.reflection.timeout_secs`（缺省 240s）：
+            // 装配期快照语义，与本 session 同生命周期，不随配置热重载。
+            let mut reflection_tasks =
                 crate::application::reflection::ReflectionTaskAdapter::production(
-                    std::time::Duration::from_secs(120),
+                    std::time::Duration::from_secs(memory_config.reflection.timeout_secs),
                 );
+            // 反思专用模型接线（配置 `memory.reflection.model`）：装配期在此
+            // 解析一次并缓存到 session 级 adapter（后续 clone 共享同一 Arc，
+            // 三个触发点与整 session 只构建一次 provider）；解析失败 fail-open
+            // 记 warn 并回退会话 binding——反思是辅助功能，不阻断主流程。
+            if let Some(selection) = memory_config.reflection.model.clone() {
+                let resolved = crate::application::client::trait_model::build_provider_binding_for_switch(
+                    &selection,
+                    config_query_for_switch.as_ref(),
+                    provider_factory.as_ref(),
+                )
+                .await
+                .map(|(binding, _switch_result)| std::sync::Arc::new(binding));
+                crate::application::loop_engine::chat::reflection::cache_resolved_reflection_binding(
+                    &mut reflection_tasks,
+                    &selection,
+                    resolved,
+                );
+            }
             let mut cwd = workspace.read().current_workspace_root();
             // Per-Session usage tracker shared across all Main Runs.
             let session_usage = crate::application::run::context::RunUsageTracker::new();
