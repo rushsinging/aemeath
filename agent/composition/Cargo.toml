@@ -36,6 +36,7 @@ futures-util = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
+context = { path = "../features/context", features = ["dev"] }
 tools = { path = "../features/tools", features = ["test-harness"] }
 task = { path = "../features/task" }
 tokio = { workspace = true }

@@ -254,9 +254,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         config_participant: config.participant(),
         memory_opener,
         session_management: session_management.clone(),
-        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
-        ))),
+        context_factory: context::test_support::wire_test_main_context_factory_noop(),
     })
     .await
     .unwrap();

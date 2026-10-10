@@ -199,9 +199,7 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
         config_participant: config.participant(),
         memory_opener,
         session_management: session_management.clone(),
-        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
-        ))),
+        context_factory: context::test_support::wire_test_main_context_factory_noop(),
     };
     let wiring = context::wire_main_session(deps)
         .await
@@ -259,10 +257,8 @@ async fn production_context_append_reopens_from_atomic_blob() {
     let session_blob = storage::wire_file_system_blob(&agents_dir).expect("create session blob");
     let session_dataset = storage::wire_file_system_dataset(agents_dir.clone())
         .expect("create session dataset adapter");
-    let session_management: Arc<dyn SessionManagementPort> = Arc::new(
-        context::DatasetSessionManagement::new(session_dataset.clone(), session_blob.clone()),
-    );
-    let writer = Arc::new(context::DatasetCanonicalSessionWriter::new(session_dataset));
+    let session_management =
+        context::wire_session_management(session_dataset.clone(), session_blob.clone());
     let session_project = workspace.read().project_identity();
     let wiring = context::wire_main_session(MainSessionDependencies {
         workspace,
@@ -271,7 +267,9 @@ async fn production_context_append_reopens_from_atomic_blob() {
         config_participant: config.participant(),
         memory_opener,
         session_management: session_management.clone(),
-        context_factory: Arc::new(context::ProductionMainContextFactory::new(writer)),
+        context_factory: context::test_support::wire_test_main_context_factory_with_dataset(
+            session_dataset,
+        ),
     })
     .await
     .expect("wire main session");
@@ -372,9 +370,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         config_participant: config.participant(),
         memory_opener,
         session_management: session_management.clone(),
-        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
-        ))),
+        context_factory: context::test_support::wire_test_main_context_factory_noop(),
     };
     let wiring = context::wire_main_session(deps)
         .await
@@ -553,9 +549,7 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
         config_participant: config.participant(),
         memory_opener,
         session_management: session_management.clone(),
-        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
-        ))),
+        context_factory: context::test_support::wire_test_main_context_factory_noop(),
     };
     let wiring = context::wire_main_session(deps)
         .await
@@ -590,20 +584,28 @@ fn production_session_wiring_uses_dataset_writer_instead_of_blob_writer() {
     let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/runtime.rs"))
         .expect("read composition runtime wiring");
     assert!(
-        source.contains("DatasetSessionManagement::new"),
-        "production Session wiring must construct Dataset-aware management"
+        source.contains("wire_session_management"),
+        "production Session wiring must go through context::wire_session_management"
     );
     assert!(
         !source.contains("AtomicBlobSessionManagement::new"),
         "production Session wiring must not construct legacy-only management"
     );
     assert!(
-        source.contains("DatasetCanonicalSessionWriter::new"),
-        "production Session wiring must construct the incremental Dataset writer"
+        source.contains("wire_production_main_context_factory"),
+        "production context factory must go through context::wire_production_main_context_factory"
     );
     assert!(
         !source.contains("AtomicBlobCanonicalSessionWriter::new"),
         "production Session wiring must not construct the retired full-blob writer"
+    );
+    assert!(
+        !source.contains("DatasetSessionManagement::new"),
+        "production must not construct DatasetSessionManagement directly after PL convergence"
+    );
+    assert!(
+        !source.contains("DatasetCanonicalSessionWriter::new"),
+        "production must not construct DatasetCanonicalSessionWriter directly after PL convergence"
     );
 }
 

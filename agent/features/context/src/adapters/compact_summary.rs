@@ -16,7 +16,6 @@ use crate::domain::{
     CompactSummaryQuality,
 };
 use crate::ports::CompactGenerator;
-use async_trait::async_trait;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, MessageSource, Role};
 use share::string_idx::slice_head;

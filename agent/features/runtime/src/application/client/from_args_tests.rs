@@ -252,9 +252,7 @@ async fn make_test_shell(
         config.reader(),
         config.participant(),
         Arc::new(context::test_support::UnavailableSessionManagement),
-        Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
-        ))),
+        context::test_support::wire_test_main_context_factory_noop(),
     )
     .await;
     let snapshot = wiring.committed_config();
@@ -573,9 +571,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         config.reader(),
         config.participant(),
         Arc::new(context::test_support::UnavailableSessionManagement),
-        Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
-        ))),
+        context::test_support::wire_test_main_context_factory_noop(),
     )
     .await;
     let policy: Arc<dyn policy::Policy> = policy::allow_all();

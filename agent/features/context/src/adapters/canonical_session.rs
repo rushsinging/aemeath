@@ -238,8 +238,10 @@ impl ToolReceiptWriter for AtomicBlobCanonicalSessionWriter {
     }
 }
 
+#[cfg(any(test, feature = "dev"))]
 pub struct NoOpCanonicalSessionWriter;
 
+#[cfg(any(test, feature = "dev"))]
 #[async_trait]
 impl CanonicalSessionWriter for NoOpCanonicalSessionWriter {
     async fn commit(
@@ -635,7 +637,7 @@ impl CanonicalSessionRepository {
             .session
             .read()
             .map_err(|error| {
-                share::error::DomainError::storage("context", format!("{error}"))
+                share::error::DomainError::storage("context", error.to_string())
                     .with_code(crate::error_codes::SESSION_REPOSITORY)
             })?
             .clone();
@@ -738,7 +740,7 @@ impl CanonicalSessionRepository {
             .session
             .read()
             .map_err(|error| {
-                share::error::DomainError::storage("context", format!("{error}"))
+                share::error::DomainError::storage("context", error.to_string())
                     .with_code(crate::error_codes::SESSION_REPOSITORY)
             })?
             .clone();
@@ -781,12 +783,12 @@ impl CanonicalSessionRepository {
         self.persist_candidate(&current, &candidate)
             .await
             .map_err(|error| {
-                share::error::DomainError::unavailable("context", format!("{error}"))
+                share::error::DomainError::unavailable("context", error.to_string())
                     .with_code(crate::error_codes::COMPACT)
             })?;
         self.publish_generation(&current, candidate)
             .map_err(|error| {
-                share::error::DomainError::storage("context", format!("{error}"))
+                share::error::DomainError::storage("context", error.to_string())
                     .with_code(crate::error_codes::SESSION_REPOSITORY)
             })?;
         Ok(CompactOutcome::Committed(crate::domain::CompactResult {
@@ -1330,7 +1332,7 @@ impl SessionRepository for CanonicalSessionRepository {
             .session
             .read()
             .map_err(|error| {
-                share::error::DomainError::storage("context", format!("{error}"))
+                share::error::DomainError::storage("context", error.to_string())
                     .with_code(crate::error_codes::SESSION_REPOSITORY)
             })?
             .clone();
@@ -1371,7 +1373,7 @@ impl SessionRepository for CanonicalSessionRepository {
                     .rebuild_empty_dataset(&current.id, &fallback)
                     .await
                     .map_err(|_| {
-                        share::error::DomainError::storage("context", format!("{commit_error}"))
+                        share::error::DomainError::storage("context", commit_error.to_string())
                             .with_code(crate::error_codes::SESSION_REPOSITORY)
                     })?;
                 fallback
@@ -1379,14 +1381,14 @@ impl SessionRepository for CanonicalSessionRepository {
         };
         self.publish_generation(&current, cleared)
             .map_err(|error| {
-                share::error::DomainError::storage("context", format!("{error}"))
+                share::error::DomainError::storage("context", error.to_string())
                     .with_code(crate::error_codes::SESSION_REPOSITORY)
             })?;
         self.accepted_input_writer
             .delete_all(&current.id)
             .await
             .map_err(|error| {
-                share::error::DomainError::storage("context", format!("{error}"))
+                share::error::DomainError::storage("context", error.to_string())
                     .with_code(crate::error_codes::SESSION_REPOSITORY)
             })?;
         Ok(())

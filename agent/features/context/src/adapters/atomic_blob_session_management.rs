@@ -24,7 +24,7 @@ impl AtomicBlobSessionManagement {
         AtomicBlobSessionStore::new(Arc::clone(&self.blob), id)
             .map(Arc::new)
             .map_err(|error| {
-                share::error::DomainError::storage("context", format!("{error}"))
+                share::error::DomainError::storage("context", error.to_string())
                     .with_code(crate::error_codes::SESSION_STORAGE)
             })
     }
@@ -37,7 +37,7 @@ impl AtomicBlobSessionManagement {
         AtomicBlobSessionStore::new_scoped(Arc::clone(&self.blob), project_dir, id)
             .map(Arc::new)
             .map_err(|error| {
-                share::error::DomainError::storage("context", format!("{error}"))
+                share::error::DomainError::storage("context", error.to_string())
                     .with_code(crate::error_codes::SESSION_STORAGE)
             })
     }
@@ -81,13 +81,13 @@ impl AtomicBlobSessionManagement {
                 id,
             )
             .map_err(|error| {
-                share::error::DomainError::storage("context", format!("{error}"))
+                share::error::DomainError::storage("context", error.to_string())
                     .with_code(crate::error_codes::SESSION_STORAGE)
             })?
             .overlay(&mut session)
             .await
             .map_err(|error| {
-                share::error::DomainError::storage("context", format!("{error}"))
+                share::error::DomainError::storage("context", error.to_string())
                     .with_code(crate::error_codes::SESSION_STORAGE)
             })?;
             return Ok(session);
@@ -96,7 +96,7 @@ impl AtomicBlobSessionManagement {
             Some(error) => map_load(id, error),
             None => share::error::DomainError::storage(
                 "context",
-                format!("Session 存储失败：候选 session 存储构造失败"),
+                "Session 存储失败：候选 session 存储构造失败".to_string(),
             )
             .with_code(crate::error_codes::SESSION_STORAGE),
         })
@@ -160,7 +160,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
             .list_primary(StorageNamespaceData::Session)
             .await
             .map_err(|error| {
-                share::error::DomainError::storage("context", format!("{error}"))
+                share::error::DomainError::storage("context", error.to_string())
                     .with_code(crate::error_codes::SESSION_STORAGE)
             })?;
         let mut sessions = Vec::new();
@@ -194,7 +194,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
     ) -> Result<Vec<u8>, share::error::DomainError> {
         let session = self.load_for_project(id, project).await?;
         SessionCodec::encode(&session).map_err(|error| {
-            share::error::DomainError::storage("context", format!("{error}"))
+            share::error::DomainError::storage("context", error.to_string())
                 .with_code(crate::error_codes::SESSION_STORAGE)
         })
     }
@@ -234,7 +234,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
             .save(&session)
             .await
             .map_err(|error| {
-                share::error::DomainError::storage("context", format!("{error}"))
+                share::error::DomainError::storage("context", error.to_string())
                     .with_code(crate::error_codes::SESSION_STORAGE)
             })?;
         Ok(SessionListEntryData::from_canonical(&session))
@@ -258,7 +258,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
             .save(&session)
             .await
             .map_err(|error| {
-                share::error::DomainError::storage("context", format!("{error}"))
+                share::error::DomainError::storage("context", error.to_string())
                     .with_code(crate::error_codes::SESSION_STORAGE)
             })?;
         Ok(SessionListEntryData::from_canonical(&session))
@@ -287,7 +287,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
         let mut deleted_any = false;
         for store in stores {
             let outcome = store.delete_all().await.map_err(|error| {
-                share::error::DomainError::storage("context", format!("{error}"))
+                share::error::DomainError::storage("context", error.to_string())
                     .with_code(crate::error_codes::SESSION_STORAGE)
             })?;
             deleted_any |= outcome.deleted_primary() | outcome.deleted_previous();
@@ -297,13 +297,13 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
             id,
         )
         .map_err(|error| {
-            share::error::DomainError::storage("context", format!("{error}"))
+            share::error::DomainError::storage("context", error.to_string())
                 .with_code(crate::error_codes::SESSION_STORAGE)
         })?
         .delete()
         .await
         .map_err(|error| {
-            share::error::DomainError::storage("context", format!("{error}"))
+            share::error::DomainError::storage("context", error.to_string())
                 .with_code(crate::error_codes::SESSION_STORAGE)
         })?;
         if !deleted_any {

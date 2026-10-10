@@ -1,4 +1,4 @@
-use share::ids::{RunStepId, SessionId};
+use share::ids::SessionId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 

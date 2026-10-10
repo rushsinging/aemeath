@@ -1,21 +1,26 @@
 //! Context：会话上下文的编排、持久化与压缩决策。
 //!
-//! # Published Language（四类语法，#1707 收敛·两阶段）
+//! # Published Language（DDD 五类判据，#1863 收口）
 //!
-//! | 组 | 实体 |
-//! |---|---|
-//! | 工厂 | `wire_main_session`（出口 `SdkError`）、`wire_isolated_context{,_with_skill,_with_workspace_skills}`（isolated_context 家族更名） |
-//! | 角色和职能 | `ContextPort`（+context_port 模块 glob 面）、`SessionManagementPort`、`MainSessionWiring`（生产协调器）+ `OwnedSessionSharedPermit`、适配器实现体（composition 装配面） |
-//! | 数据和生命周期 | 36 个 Data（ContextRequest/StepReceipt/Compact*/ToolReceipt*/Session 展示类）；session 持久化内核（SessionCodec/Generation 族等）已内部化 pub(crate) |
-//! | Error | `share::error::DomainError`（5 个边界错误枚举已折叠，变体粒度经 `error_codes` 细分码）；MainSessionError 内部化（wire 出口统一 SdkError） |
+//! | 组 | 实体 | 消费者 |
+//! |---|---|---|
+//! | 命令 | `ContextRequestData`/`ContextAppendData`/`CompactRequestData`/`ManualCompactRequestData`/`ToolReceiptMutationData`/`AcceptedInputAppendData`/`SessionMetadataUpdateData` | runtime、sdk |
+//! | 事件 | `StepReceiptData`/`AppendReceiptData`/`AcceptedInputReceiptData`/`ToolCallReceiptData`/`ToolTerminalReceiptData`/`ToolReceiptMutationReceiptData`/`CompactResult`/`CompactOutcome`/`CompactionDecisionData`/`CleanupConfirmation` | runtime、sdk、cli |
+//! | 值对象 | Session/Compact/Reminder/Tool 展示与决策 Data（含 `CanonicalSession` 持久化 DTO 身份、`TokenBudget`、`error_codes` 细分码词汇） | runtime、sdk、cli、composition |
+//! | 端口 | `ContextPort`、`SessionManagementPort`、`MainContextFactory`、`CompactGenerator`、`MainSessionWiring`（+`MainSessionDependencies`/`Builder`/`OwnedSessionSharedPermit`） | runtime、composition、sdk |
+//! | 工厂 | `wire_main_session`（出口 `SdkError`）、`wire_session_management`、`wire_production_main_context_factory`、`wire_isolated_context{,_with_workspace_skills}` | composition |
 //!
-//! main_session 模块整面已收编（#1863）：Gate 族/BoundMainRun/GateAware 族/MainSessionError
-//! 不再经 `context::main_session` 穿透，crate 内经 `application::main_session` 路径。
+//! 子发布语言模块（模块=1 计数）：`api` / `compact` / `guidance` / `session`。
+//! 错误跨界唯一 `share::error::DomainError`（5 边界枚举已折叠；`MainSessionError` 内部化）。
 //!
-//! 实测修正（调研"零消费 65"口径错误——真死仅 2）：52 符号内部化后经
-//! 编译器/测试暴露真消费 16 处恢复 pub（glob 链 11 + 签名载荷 5）；
-//! 集成测试 20 文件（9782 行）搬 src/integration_tests/。
-//! 按 docs/design/03-engineering/05-published-language.md SOP。
+//! #1863 收口判定：
+//! - main_session 穿透清零（Gate/`BoundMainRun`/`MainSessionError` 不再经根面）；
+//! - 6 个 adapter 实现体（`ProductionMainContextFactory`/`DatasetSessionManagement`/
+//!   `DatasetCanonicalSessionWriter`/`AtomicBlobAcceptedInputWriter`/
+//!   `AtomicBlobToolReceiptWriter`/`WorkspaceSkillQueryFactory`）`pub(crate)`，
+//!   composition 仅经 wire 工厂装配；
+//! - `NoOpCanonicalSessionWriter`/`test_support` 归 `cfg(any(test, feature="dev"))`；
+//! - `AtomicBlobSessionManagement` 仍根导出（legacy 读路径，随后续迁移收窄）。
 
 /// Context Management crate — 对话历史容器、上下文压缩、token 预算、提示组装、记忆注入。
 ///
@@ -37,8 +42,10 @@ mod ports;
 #[cfg(any(test, feature = "dev"))]
 #[cfg(test)]
 pub(crate) use adapters::wire_isolated_context_with_skill;
-pub use adapters::{wire_isolated_context, wire_isolated_context_with_workspace_skills};
-pub use adapters::{NoOpCanonicalSessionWriter, ProductionMainContextFactory};
+pub use adapters::{
+    wire_isolated_context, wire_isolated_context_with_workspace_skills,
+    wire_production_main_context_factory, wire_session_management,
+};
 pub use domain::reminder::{
     render_invocation_reminder_body, CompactBehavior, InjectBehavior, RefreshTrigger,
     ReminderDedup, ReminderEventSource, ReminderKind, ReminderPlacement, ReminderPolicy,
@@ -51,6 +58,8 @@ pub use ports::SessionManagementPort;
 
 // Main Session coordinator — cross-BC wiring for Runtime bootstrap.
 #[cfg(any(test, feature = "dev"))]
+pub use adapters::NoOpCanonicalSessionWriter;
+#[cfg(any(test, feature = "dev"))]
 pub use application::test_support;
 pub use application::{
     wire_main_session, MainSessionDependencies, MainSessionWiring, MainSessionWiringBuilder,
@@ -58,6 +67,7 @@ pub use application::{
 };
 
 // 窄 façade根导出（#1022 收口：内部层 mod 私有，跨 BC 消费只经 crate 根与语义模块）
+pub use adapters::AtomicBlobSessionManagement;
 #[cfg(test)]
 pub(crate) use adapters::{
     decode_session, skill_prompt_budget, AcceptedInputWriter, AtomicBlobCanonicalSessionWriter,
@@ -65,9 +75,9 @@ pub(crate) use adapters::{
     CommittedMemoryRetrieveAdapter, DatasetSessionReader, InMemorySessionRepository,
     LegacySessionDecoder, NoOpContextMemorySource, SkillPromptSource, ToolReceiptWriter,
 };
-pub use adapters::{
-    AtomicBlobAcceptedInputWriter, AtomicBlobSessionManagement, AtomicBlobToolReceiptWriter,
-    DatasetCanonicalSessionWriter, DatasetSessionManagement, WorkspaceSkillQueryFactory,
+#[cfg(test)]
+pub(crate) use adapters::{
+    DatasetCanonicalSessionWriter, ProductionMainContextFactory, WorkspaceSkillQueryFactory,
 };
 #[cfg(test)]
 pub(crate) use application::ContextApplicationService;
@@ -165,4 +175,5 @@ mod integration_tests {
     mod skill_prompt_pipeline;
     mod structured_context_candidate;
     mod tool_receipt_persistence_contract;
+    mod wire_factories;
 }

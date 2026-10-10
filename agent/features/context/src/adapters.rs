@@ -23,18 +23,19 @@ mod tool_receipt_ledger;
 pub(crate) use atomic_blob_session::AtomicBlobSessionStore;
 pub use atomic_blob_session_management::AtomicBlobSessionManagement;
 pub(crate) use canonical_session::CanonicalSessionWriter;
+#[cfg(any(test, feature = "dev"))]
+pub use canonical_session::NoOpCanonicalSessionWriter;
 #[cfg(test)]
 pub(crate) use canonical_session::{
     AcceptedInputWriter, AtomicBlobCanonicalSessionWriter, CanonicalSessionRepository,
     ToolReceiptWriter,
 };
-pub use canonical_session::{
-    AtomicBlobAcceptedInputWriter, AtomicBlobToolReceiptWriter, NoOpCanonicalSessionWriter,
-    ProductionMainContextFactory,
+pub(crate) use canonical_session::{
+    AtomicBlobAcceptedInputWriter, AtomicBlobToolReceiptWriter, ProductionMainContextFactory,
 };
-pub use dataset_session_management::DatasetSessionManagement;
+pub(crate) use dataset_session_management::DatasetSessionManagement;
 pub(crate) use dataset_session_reader::DatasetSessionReader;
-pub use dataset_session_writer::DatasetCanonicalSessionWriter;
+pub(crate) use dataset_session_writer::DatasetCanonicalSessionWriter;
 pub(crate) use in_memory_session::InMemorySessionRepository;
 pub use legacy_flat_session_migrator::migrate_flat_sessions_to_project_dirs;
 pub(crate) use memory_injection::{CommittedMemoryRetrieveAdapter, NoOpContextMemorySource};
@@ -46,7 +47,45 @@ pub(crate) use session_lifecycle::capture as capture_session_lifecycle;
 #[cfg(test)]
 pub(crate) use skill_prompt_source::skill_prompt_budget;
 pub(crate) use skill_prompt_source::SkillPromptSource;
-pub use skill_prompt_source::WorkspaceSkillQueryFactory;
+pub(crate) use skill_prompt_source::WorkspaceSkillQueryFactory;
+
+/// 装配 Session 管理端口（dataset 持久化 + legacy blob 读取）。
+///
+/// composition 唯一构造入口；实现体 `DatasetSessionManagement` 不进入 PL。
+pub fn wire_session_management(
+    dataset: Arc<dyn storage::AtomicDatasetPort>,
+    legacy_blob: Arc<dyn storage::AtomicBlobPort>,
+) -> Arc<dyn crate::ports::SessionManagementPort> {
+    Arc::new(DatasetSessionManagement::new(dataset, legacy_blob))
+}
+
+/// 装配生产 Main Context 工厂（canonical writer + accepted input/tool receipt
+/// ledger + skill catalog 查询 + LLM compact 生成器）。
+///
+/// composition 唯一构造入口（原 5 adapter builder 链直构收口）；内部组件
+/// 实现体不进入 PL。
+pub fn wire_production_main_context_factory(
+    session_dataset: Arc<dyn storage::AtomicDatasetPort>,
+    session_blob: Arc<dyn storage::AtomicBlobPort>,
+    skill_catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
+    workspace_read: Arc<dyn project::WorkspaceReader>,
+    generator: Arc<dyn crate::ports::CompactGenerator>,
+) -> Arc<dyn crate::ports::MainContextFactory> {
+    Arc::new(
+        ProductionMainContextFactory::new(Arc::new(DatasetCanonicalSessionWriter::new(
+            session_dataset,
+        )))
+        .with_accepted_input_writer(Arc::new(AtomicBlobAcceptedInputWriter::new(
+            session_blob.clone(),
+        )))
+        .with_tool_receipt_writer(Arc::new(AtomicBlobToolReceiptWriter::new(session_blob)))
+        .with_skill_catalog(
+            skill_catalog,
+            Arc::new(WorkspaceSkillQueryFactory::new(workspace_read)),
+        )
+        .with_generator(generator),
+    )
+}
 
 pub fn wire_isolated_context(session_id: &str) -> Arc<dyn crate::ports::ContextPort> {
     let repository = Arc::new(InMemorySessionRepository::new());

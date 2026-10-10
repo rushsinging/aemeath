@@ -1,4 +1,4 @@
-use share::ids::{RunStepId, SessionId};
+use share::ids::SessionId;
 use std::sync::Arc;
 
 use crate::decode_session;

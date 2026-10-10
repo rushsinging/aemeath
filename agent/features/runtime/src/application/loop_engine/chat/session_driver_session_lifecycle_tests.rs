@@ -1675,7 +1675,7 @@ async fn test_reflect_now_runs_a_real_run_without_run_changed() {
 /// 装饰 production context 的 `MainContextFactory`：统计 session 落盘类端口
 /// 调用（`append_and_persist` 等持久化方法），读路径原样转发给内层。
 struct RecordingContextFactory {
-    inner: context::ProductionMainContextFactory,
+    inner: Arc<dyn context::MainContextFactory>,
     persistence_calls: Arc<Mutex<Vec<String>>>,
 }
 
@@ -1683,9 +1683,7 @@ impl RecordingContextFactory {
     fn new() -> (Arc<Self>, Arc<Mutex<Vec<String>>>) {
         let persistence_calls = Arc::new(Mutex::new(Vec::new()));
         let factory = Self {
-            inner: context::ProductionMainContextFactory::new(Arc::new(
-                context::NoOpCanonicalSessionWriter,
-            )),
+            inner: context::test_support::wire_test_main_context_factory_noop(),
             persistence_calls: persistence_calls.clone(),
         };
         (Arc::new(factory), persistence_calls)
@@ -1701,8 +1699,7 @@ impl context::MainContextFactory for RecordingContextFactory {
         memory: Arc<std::sync::RwLock<Arc<dyn memory::api::MemoryPort>>>,
         mutation_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Arc<dyn context::ContextPort> {
-        let inner = <context::ProductionMainContextFactory as context::MainContextFactory>::build(
-            &self.inner,
+        let inner = self.inner.build(
             session,
             task_persist,
             workspace_persist,

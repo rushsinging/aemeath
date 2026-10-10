@@ -154,9 +154,9 @@ impl memory::api::MemoryOpener for TestMemoryOpener {
 }
 
 fn test_wiring() -> Arc<context::MainSessionWiring> {
-    test_wiring_with_context_factory(Arc::new(context::ProductionMainContextFactory::new(
-        Arc::new(context::NoOpCanonicalSessionWriter),
-    )))
+    test_wiring_with_context_factory(
+        context::test_support::wire_test_main_context_factory_noop(),
+    )
 }
 
 /// 允许测试注入自定义 `MainContextFactory`（如装饰 production context、

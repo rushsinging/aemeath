@@ -169,9 +169,8 @@ pub(crate) async fn from_args_with_gateways(
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
     let session_blob = storage::wire_file_system_blob(agents_dir)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
-    let session_management: Arc<dyn context::SessionManagementPort> = Arc::new(
-        context::DatasetSessionManagement::new(session_dataset.clone(), session_blob.clone()),
-    );
+    let session_management: Arc<dyn context::SessionManagementPort> =
+        context::wire_session_management(session_dataset.clone(), session_blob.clone());
     // 后台一次性迁移存量平铺 session 到 project 目录段布局：串行逐个加载
     // （内存峰值 = 单个 session），不阻塞装配与用户消息；失败由下次启动自愈。
     {
@@ -276,21 +275,12 @@ pub(crate) async fn from_args_with_gateways(
             scoring_ports.for_memory_rerank.clone(),
         ),
         session_management: session_management.clone(),
-        context_factory: Arc::new(
-            context::ProductionMainContextFactory::new(Arc::new(
-                context::DatasetCanonicalSessionWriter::new(session_dataset),
-            ))
-            .with_accepted_input_writer(Arc::new(context::AtomicBlobAcceptedInputWriter::new(
-                session_blob.clone(),
-            )))
-            .with_tool_receipt_writer(Arc::new(context::AtomicBlobToolReceiptWriter::new(
-                session_blob,
-            )))
-            .with_skill_catalog(
-                skill_catalog.clone(),
-                Arc::new(context::WorkspaceSkillQueryFactory::new(workspace.read())),
-            )
-            .with_generator(Arc::new(compact_generator)),
+        context_factory: context::wire_production_main_context_factory(
+            session_dataset,
+            session_blob,
+            skill_catalog.clone(),
+            workspace.read(),
+            Arc::new(compact_generator),
         ),
     };
     let wiring = context::wire_main_session(deps)

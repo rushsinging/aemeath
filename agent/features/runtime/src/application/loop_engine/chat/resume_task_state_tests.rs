@@ -169,9 +169,7 @@ fn resumed_shell(
             session_management,
             initial_session: shell.wiring.committed_session().as_ref().clone(),
             initial_memory: shell.wiring.committed_memory(),
-            context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-                context::NoOpCanonicalSessionWriter,
-            ))),
+            context_factory: context::test_support::wire_test_main_context_factory_noop(),
         },
     ));
     shell

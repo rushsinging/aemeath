@@ -1018,4 +1018,22 @@ pub mod test_support {
         .await
         .expect("test wiring with InMemoryTestOpener should not fail")
     }
+
+    /// 测试装配：NoOp canonical writer（不落盘）的 MainContextFactory。
+    ///
+    /// 跨 crate 测试的唯一构造入口；`ProductionMainContextFactory` 实现体不进入 PL。
+    pub fn wire_test_main_context_factory_noop() -> Arc<dyn MainContextFactory> {
+        Arc::new(crate::adapters::ProductionMainContextFactory::new(
+            Arc::new(crate::adapters::NoOpCanonicalSessionWriter),
+        ))
+    }
+
+    /// 测试装配：Dataset canonical writer 的 MainContextFactory（可落盘复开）。
+    pub fn wire_test_main_context_factory_with_dataset(
+        dataset: Arc<dyn storage::AtomicDatasetPort>,
+    ) -> Arc<dyn MainContextFactory> {
+        Arc::new(crate::adapters::ProductionMainContextFactory::new(
+            Arc::new(crate::adapters::DatasetCanonicalSessionWriter::new(dataset)),
+        ))
+    }
 }

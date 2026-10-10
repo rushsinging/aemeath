@@ -1184,10 +1184,7 @@ impl SessionCommitPlan {
             .sort_by(|left, right| left.name.cmp(&right.name));
     }
 
-    pub fn reuse_fallbacks(&self) -> &[SessionMemberBytes] {
-        &self.reuse_fallbacks
-    }
-
+    #[cfg(test)]
     pub fn preserves_unloaded_steps(&self) -> bool {
         self.preserves_unloaded_steps
     }

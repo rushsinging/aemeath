@@ -34,78 +34,6 @@
       "tracking_issue": 1647
     },
     {
-      "id": "construction.context.atomicblobacceptedinputwriter",
-      "symbol": "AtomicBlobAcceptedInputWriter",
-      "owner_crate": "context",
-      "kind": "adapter",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Accepted input writer is assembled only by the Composition Root (#861/#950)",
-      "tracking_issue": 1067
-    },
-    {
-      "id": "construction.context.atomicblobtoolreceiptwriter",
-      "symbol": "AtomicBlobToolReceiptWriter",
-      "owner_crate": "context",
-      "kind": "adapter",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Tool receipt writer is assembled only by the Composition Root (#861/#950)",
-      "tracking_issue": 1067
-    },
-    {
-      "id": "construction.context.datasetsessionmanagement",
-      "symbol": "DatasetSessionManagement",
-      "owner_crate": "context",
-      "kind": "adapter",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Dataset session management is assembled only by the Composition Root (#861/#950)",
-      "tracking_issue": 1067
-    },
-    {
-      "id": "construction.context.datasetcanonicalsessionwriter",
-      "symbol": "DatasetCanonicalSessionWriter",
-      "owner_crate": "context",
-      "kind": "adapter",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Canonical session writer is assembled only by the Composition Root (#861/#950)",
-      "tracking_issue": 1067
-    },
-    {
-      "id": "construction.context.productionmaincontextfactory",
-      "symbol": "ProductionMainContextFactory",
-      "owner_crate": "context",
-      "kind": "adapter",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Main context factory is assembled only by the Composition Root (#861/#950)",
-      "tracking_issue": 1067
-    },
-    {
-      "id": "construction.context.workspaceskillqueryfactory",
-      "symbol": "WorkspaceSkillQueryFactory",
-      "owner_crate": "context",
-      "kind": "adapter",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Skill query factory is assembled only by the Composition Root or inside the Context adapters (#1067)",
-      "tracking_issue": 1067
-    },
-    {
       "id": "construction.config.nativeconfigstore",
       "symbol": "NativeConfigStore",
       "owner_crate": "config",
@@ -539,6 +467,30 @@
       "guard": "check-cross-bc-construction-registry.sh",
       "reason": "隔离上下文构造工厂（isolated_context 家族更名）；runtime 子代理派生调用",
       "tracking_issue": 1707
+    },
+    {
+      "id": "construction.context.wire-session-management",
+      "symbol": "wire_session_management",
+      "owner_crate": "context",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Session management 装配收口 wire 工厂（#1863）；DatasetSessionManagement 实现体已 pub(crate)",
+      "tracking_issue": 1863
+    },
+    {
+      "id": "construction.context.wire-production-main-context-factory",
+      "symbol": "wire_production_main_context_factory",
+      "owner_crate": "context",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Production main context factory 装配收口 wire 工厂（#1863）；5 个内部 adapter 实现体已 pub(crate)",
+      "tracking_issue": 1863
     }
   ],
   "entries": [],
@@ -1563,9 +1515,7 @@
         "AcceptedInputAppendData",
         "AcceptedInputReceiptData",
         "AppendReceiptData",
-        "AtomicBlobAcceptedInputWriter",
         "AtomicBlobSessionManagement",
-        "AtomicBlobToolReceiptWriter",
         "BackgroundProcessCompletionStatus",
         "BackgroundProcessReminderItemData",
         "CanonicalSession",
@@ -1595,8 +1545,6 @@
         "ContextRequestData",
         "ContextRequestId",
         "ContextWindowData",
-        "DatasetCanonicalSessionWriter",
-        "DatasetSessionManagement",
         "DecisionReason",
         "DisplayHistoryStepIndexData",
         "DisplayHistoryStepWindowData",
@@ -1613,7 +1561,6 @@
         "MemoryRecallEntryData",
         "NoOpCanonicalSessionWriter",
         "OwnedSessionSharedPermit",
-        "ProductionMainContextFactory",
         "RefreshTrigger",
         "ReminderDedup",
         "ReminderEventSource",
@@ -1646,7 +1593,6 @@
         "ToolSchemaData",
         "ToolTerminalReceiptData",
         "Urgency",
-        "WorkspaceSkillQueryFactory",
         "assess_guidance",
         "error_codes",
         "estimate_messages_tokens",
@@ -1659,7 +1605,9 @@
         "test_support",
         "wire_isolated_context",
         "wire_isolated_context_with_workspace_skills",
-        "wire_main_session"
+        "wire_main_session",
+        "wire_production_main_context_factory",
+        "wire_session_management"
       ],
       "reason": "F-2：context crate 根窄 façade（#1022 登记，消费者证明制）；+ToolCallReceiptData/ToolCallState：后台进程 Backgrounded 中间态跨 crate 消费（receipt 状态语义）；+BackgroundProcessCompletionStatus/BackgroundProcessReminderItemData：#252 通知数据跨 crate 消费（runtime source 构造 reminder 条目）",
       "profile": "fast"

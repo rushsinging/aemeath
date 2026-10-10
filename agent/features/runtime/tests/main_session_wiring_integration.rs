@@ -83,9 +83,7 @@ async fn make_wiring_and_workspace(
         config.reader(),
         config.participant(),
         session_management,
-        Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
-        ))),
+        context::test_support::wire_test_main_context_factory_noop(),
     )
     .await;
     (wiring, workspace)
@@ -252,9 +250,7 @@ async fn config_query_and_writer_come_from_wiring() {
         config.reader(),
         config.participant(),
         session_management,
-        Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
-        ))),
+        context::test_support::wire_test_main_context_factory_noop(),
     )
     .await;
 

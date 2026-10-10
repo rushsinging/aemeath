@@ -15,7 +15,6 @@ use crate::ports::SessionManagementPort;
 pub struct DatasetSessionManagement {
     dataset: Arc<dyn AtomicDatasetPort>,
     legacy: Arc<AtomicBlobSessionManagement>,
-    receipt_blob: Arc<dyn AtomicBlobPort>,
     reader: DatasetSessionReader,
     writer: DatasetCanonicalSessionWriter,
 }
@@ -25,18 +24,11 @@ impl DatasetSessionManagement {
         Self {
             dataset: Arc::clone(&dataset),
             legacy: Arc::new(AtomicBlobSessionManagement::new(Arc::clone(&legacy_blob))),
-            receipt_blob: legacy_blob.clone(),
             reader: DatasetSessionReader::new(Arc::clone(&dataset), Some(Arc::clone(&legacy_blob))),
             writer: DatasetCanonicalSessionWriter::new(Arc::clone(&dataset)),
         }
     }
 
-    pub fn accepted_input_writer(&self) -> crate::adapters::AtomicBlobAcceptedInputWriter {
-        crate::adapters::AtomicBlobAcceptedInputWriter::new(Arc::clone(&self.receipt_blob))
-    }
-    pub fn tool_receipt_writer(&self) -> crate::adapters::AtomicBlobToolReceiptWriter {
-        crate::adapters::AtomicBlobToolReceiptWriter::new(Arc::clone(&self.receipt_blob))
-    }
     async fn load_canonical(
         &self,
         project_dir: Option<&SafePathSegmentData>,
@@ -141,7 +133,7 @@ impl SessionManagementPort for DatasetSessionManagement {
             .list_datasets(StorageNamespaceData::Session)
             .await
             .map_err(|error| {
-                share::error::DomainError::storage("context", format!("{error}"))
+                share::error::DomainError::storage("context", error.to_string())
                     .with_code(crate::error_codes::SESSION_STORAGE)
             })?;
         let mut sessions = Vec::new();
@@ -183,7 +175,7 @@ impl SessionManagementPort for DatasetSessionManagement {
     ) -> Result<Vec<u8>, share::error::DomainError> {
         let session = self.load_for_project(id, project).await?;
         SessionCodec::encode(&session).map_err(|error| {
-            share::error::DomainError::storage("context", format!("{error}"))
+            share::error::DomainError::storage("context", error.to_string())
                 .with_code(crate::error_codes::SESSION_STORAGE)
         })
     }
@@ -215,7 +207,7 @@ impl SessionManagementPort for DatasetSessionManagement {
             .with_code(crate::error_codes::SESSION_PROJECT_MISMATCH));
         }
         self.writer.save_initial(&session).await.map_err(|error| {
-            share::error::DomainError::storage("context", format!("{error}"))
+            share::error::DomainError::storage("context", error.to_string())
                 .with_code(crate::error_codes::SESSION_STORAGE)
         })?;
         Ok(SessionListEntryData::from_canonical(&session))
@@ -236,7 +228,7 @@ impl SessionManagementPort for DatasetSessionManagement {
             .save_incremental(&before, &after)
             .await
             .map_err(|error| {
-                share::error::DomainError::storage("context", format!("{error}"))
+                share::error::DomainError::storage("context", error.to_string())
                     .with_code(crate::error_codes::SESSION_STORAGE)
             })?;
         Ok(SessionListEntryData::from_canonical(&after))
@@ -250,7 +242,7 @@ impl SessionManagementPort for DatasetSessionManagement {
         self.load_for_project(id, project).await?;
         let dataset_key =
             super::dataset_session_writer::session_dataset_key(id).map_err(|error| {
-                share::error::DomainError::storage("context", format!("{error}"))
+                share::error::DomainError::storage("context", error.to_string())
                     .with_code(crate::error_codes::SESSION_STORAGE)
             })?;
         let outcome = self
@@ -258,7 +250,7 @@ impl SessionManagementPort for DatasetSessionManagement {
             .delete_all_generations(&dataset_key, storage::DeleteOptionsData::default())
             .await
             .map_err(|error| {
-                share::error::DomainError::storage("context", format!("{error}"))
+                share::error::DomainError::storage("context", error.to_string())
                     .with_code(crate::error_codes::SESSION_STORAGE)
             })?;
         let legacy_outcome = self.legacy.delete_for_project(id, project).await.err();
