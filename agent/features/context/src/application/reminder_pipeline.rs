@@ -227,8 +227,10 @@ impl ReminderPipeline {
 
         if !tail_blocks.is_empty() {
             let tail_message = compose_tail_user_message(&tail_blocks);
+            // 头置 system_reminder 标志：TUI 会话加载按标志隐藏（渲染
+            // NEVER 文本匹配）；provider 出站照发正文。
             self.pending_persist
-                .push(ContextMessage::user(tail_message));
+                .push(ContextMessage::system_reminder_user(tail_message));
         }
 
         ReminderWindowInjection {

@@ -164,6 +164,7 @@ pub(crate) fn message_to_sdk(message: share::message::Message) -> sdk::ChatMessa
                 share::message::MessageSource::Hook => sdk::ChatMessageSource::Hook,
                 share::message::MessageSource::SkillRequest => sdk::ChatMessageSource::SkillRequest,
             },
+            system_reminder: metadata.system_reminder,
             hook_notice: metadata.hook_notice.map(|notice| sdk::HookNoticeView {
                 point: notice.point,
                 kind: match notice.kind {

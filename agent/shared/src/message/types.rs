@@ -59,6 +59,13 @@ pub struct MessageMetadata {
     /// Context window 渲染时据此生成 LLM 时间前缀，canonical 文本与 TUI 显示不消费。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<DateTime<FixedOffset>>,
+    /// invocation-only 系统提醒合成消息标志（reminder 管线注入的
+    /// TailUserMessage 落盘时置位）：TUI 会话加载渲染按此**标志位**隐藏
+    /// ——NEVER 渲染路径文本匹配剥离（envelope 格式演进曾使前缀匹配
+    /// 失效，resume 后历史 reminder 原样显示）。LLM 侧不受影响：provider
+    /// 出站照发正文（上下文连续性是 TailUserMessage 落盘语义）。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub system_reminder: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]

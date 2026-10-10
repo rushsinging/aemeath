@@ -26,6 +26,10 @@ pub struct ChatMessageMetadata {
     pub hook_notice: Option<HookNoticeView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skill_request: Option<SkillRequestMetadataView>,
+    /// invocation-only 系统提醒标志（share `MessageMetadata::system_reminder`
+    /// 的 wire 投影）：TUI 会话加载按标志隐藏，渲染 NEVER 文本匹配。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub system_reminder: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -95,6 +99,7 @@ impl ChatMessage {
                 source: ChatMessageSource::SystemGenerated,
                 hook_notice: None,
                 skill_request: None,
+                system_reminder: false,
             }),
             input_id: None,
         }
