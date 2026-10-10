@@ -9,9 +9,9 @@ use std::time::{Duration, SystemTime};
 
 fn identity(call_suffix: &str) -> ToolCallIdentityData {
     ToolCallIdentityData {
-        session_id: SessionId::new_v7(),
-        run_id: RunId::new_v7(),
-        step_id: RunStepId::new_v7(),
+        session_id: SessionId::new("session-1"),
+        run_id: RunId::new("run-1"),
+        step_id: RunStepId::new("step-1"),
         runtime_call_id: format!("runtime-call-{call_suffix}"),
         provider_call_id: None,
         tool_name: "Bash".to_string(),

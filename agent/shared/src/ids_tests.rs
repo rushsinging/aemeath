@@ -41,11 +41,12 @@ fn parse_rejects_uuidv4_and_garbage() {
 }
 
 #[test]
-fn from_legacy_or_new_keeps_opaque_strings_stable() {
+fn from_legacy_or_new_maps_invalid_strings_deterministically() {
     let a = ChatId::from_legacy_or_new("chat-1");
     let b = ChatId::new("chat-1");
-    assert_eq!(a.as_str(), "chat-1");
     assert_eq!(a, b);
+    assert!(uuid::Uuid::parse_str(a.as_str()).unwrap().get_version_num() == 7);
+    assert_ne!(a.as_str(), "chat-1");
 }
 
 #[test]

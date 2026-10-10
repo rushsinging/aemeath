@@ -1,8 +1,8 @@
 //! Prefixed typed IDs（雪花 base62）与 legacy UUIDv7 读兼容。
 //!
 //! 新生成一律 `prefix_<11 base62>`（`new_typed_id`）；parse / serde 读路径
-//! 同时接受旧 UUIDv7 字符串。`from_legacy_or_new` 对非法串原样保留
-//! （退役确定性 UUIDv7 映射，保持同输入稳定）。
+//! 同时接受旧 UUIDv7 字符串。`from_legacy_or_new` 对非法串做确定性 UUIDv7 映射（ACL/测试稳定）；
+//! 新鲜生成仍走 `new_v7` → typed id。
 
 use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -28,6 +28,19 @@ fn is_legacy_uuidv7(value: &str) -> bool {
     }
 }
 
+/// Deterministic UUIDv7 from a string（namespace-based；仅 `from_legacy_or_new` 非法串路径）。
+fn deterministic_uuidv7(s: &str) -> Uuid {
+    let namespace = Uuid::from_bytes([
+        0xa1, 0x7e, 0x0a, 0x7e, 0x0a, 0x7e, 0x0a, 0x7e, 0xa1, 0x7e, 0x0a, 0x7e, 0x0a, 0x7e, 0x0a,
+        0x7e,
+    ]);
+    let base = Uuid::new_v5(&namespace, s.as_bytes());
+    let mut bytes = *base.as_bytes();
+    bytes[6] = (bytes[6] & 0x0f) | 0x70;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Uuid::from_bytes(bytes)
+}
+
 macro_rules! define_typed_id {
     ($ty:ident, $prefix:literal, $doc:literal) => {
         #[doc = $doc]
@@ -43,7 +56,7 @@ macro_rules! define_typed_id {
                 Self(new_typed_id($prefix))
             }
 
-            /// 从字符串构造：合法 typed / uuidv7 保留，否则原样保留。
+            /// 从字符串构造：合法 typed / uuidv7 保留，否则确定性 UUIDv7。
             pub fn new(s: impl AsRef<str>) -> Self {
                 Self::from_legacy_or_new(s.as_ref())
             }
@@ -66,9 +79,9 @@ macro_rules! define_typed_id {
                 Self::parse(s)
             }
 
-            /// 读旧写新辅助：可 parse 则保留，否则原样保留输入（稳定映射）。
+            /// 读旧写新辅助：可 parse 则保留，否则确定性 UUIDv7（稳定同输入）。
             pub fn from_legacy_or_new(s: &str) -> Self {
-                Self::parse(s).unwrap_or_else(|_| Self(s.to_string()))
+                Self::parse(s).unwrap_or_else(|_| Self(deterministic_uuidv7(s).to_string()))
             }
 
             pub fn as_str(&self) -> &str {
