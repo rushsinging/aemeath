@@ -1,13 +1,7 @@
 //! System One 评分服务配置：逐场景开关 + 评分事件保留天数。
 
+pub use super::constants::DEFAULT_EVENT_RETENTION_DAYS;
 use serde::{Deserialize, Serialize};
-
-/// 评分事件日切 segment（`events/{yyyy-mm-dd}.jsonl`）默认保留天数。
-///
-/// 这是配置缺省值的**唯一真相源**：`ScoringConfig::default()`、serde 缺省
-/// 与装配链取值均源于此（设计 03-event-stream §8：默认 30，`0`=禁用 GC，
-/// **NEVER** 经此关闭事件写入）。
-pub const DEFAULT_EVENT_RETENTION_DAYS: u32 = 30;
 
 /// `ScoringConfig::enabled` 的 serde 默认值（保持既有配置文件兼容：缺省即开）。
 fn default_enabled() -> bool {
