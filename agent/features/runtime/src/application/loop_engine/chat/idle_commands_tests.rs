@@ -6,6 +6,7 @@ fn test_port() -> InMemoryMemory {
     InMemoryMemory::new(MemoryPolicy {
         max_entries: 100,
         similarity_threshold: 0.9,
+        target_active_entries: 150,
     })
     .expect("valid policy")
 }

@@ -310,6 +310,8 @@ impl ReflectionTaskAdapter {
                     &request.messages,
                     &lang,
                     config.reflection.auto_apply_suggestions,
+                    config.reflection.target_active_entries,
+                    config.max_entries,
                     ReflectionInvocation {
                         provider: provider.as_ref(),
                         model: &model,

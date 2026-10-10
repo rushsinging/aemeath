@@ -134,6 +134,7 @@ fn small_policy() -> MemoryPolicy {
     MemoryPolicy {
         max_entries: 1,
         similarity_threshold: 0.8,
+        target_active_entries: 150,
     }
 }
 

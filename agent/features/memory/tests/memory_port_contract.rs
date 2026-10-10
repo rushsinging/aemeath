@@ -19,6 +19,7 @@ async fn in_memory_fake_satisfies_memory_port_contract() {
     let port = InMemoryMemory::new(MemoryPolicy {
         max_entries: 2,
         similarity_threshold: 0.8,
+        target_active_entries: 150,
     })
     .unwrap();
 
@@ -154,6 +155,7 @@ async fn restore_when_layer_is_full_is_not_committed_and_returns_candidates() {
     let port = InMemoryMemory::new(MemoryPolicy {
         max_entries: 1,
         similarity_threshold: 0.8,
+        target_active_entries: 150,
     })
     .unwrap();
     let archived = entry("archived", "archived fact", 100);

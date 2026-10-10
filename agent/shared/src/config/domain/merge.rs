@@ -355,6 +355,9 @@ pub struct ReflectionConfigPatch {
     /// 反思执行超时（秒）覆盖。
     #[serde(default)]
     pub timeout_secs: Option<u64>,
+    /// Reflect 收敛目标 active 条数覆盖。
+    #[serde(default)]
+    pub target_active_entries: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -905,6 +908,9 @@ pub(crate) fn apply_reflection_patch(
     }
     if let Some(v) = patch.timeout_secs {
         base.timeout_secs = v;
+    }
+    if let Some(v) = patch.target_active_entries {
+        base.target_active_entries = v;
     }
     base
 }
