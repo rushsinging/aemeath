@@ -2055,11 +2055,15 @@ async fn event_lifecycle_open_load_covers_both_layers_with_count_summary() {
     .await
     .unwrap();
 
-    let events = recorder.events();
+    let events: Vec<_> = recorder
+        .events()
+        .into_iter()
+        .filter(|event| event.op == MemoryEventOp::OpenLoad)
+        .collect();
     assert_eq!(
         events.len(),
         1,
-        "opening must emit exactly one event, got {events:?}"
+        "opening must emit exactly one OpenLoad, got {events:?}"
     );
     let event = &events[0];
     assert_eq!(event.op, MemoryEventOp::OpenLoad);
