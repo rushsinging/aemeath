@@ -109,7 +109,9 @@ async fn add_result_returns_full_id_for_follow_up_actions() {
     .await;
     let id = result.data.unwrap().id.unwrap();
 
-    assert_eq!(id.len(), 36);
+    assert!(id.starts_with("mem_"), "typed MemoryId: {id}");
+    assert_eq!(id.len(), "mem_".len() + 11);
+    assert!(share::ids::is_typed_id(&id, "mem"));
     assert!(result.text.contains(&id));
 }
 
