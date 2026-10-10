@@ -129,6 +129,9 @@ pub(crate) async fn run(
 ) -> ReflectionRunOutcome {
     let mut request = ReflectionTaskRequest::new(trigger, messages);
     request.coverage_end = coverage_end;
+    // 反思专用 binding（配置 `memory.reflection.model`，装配期缓存在 adapter 上）
+    // 优先；未配置或解析失败（已 fail-open 记 warn）时回退调用方传入的会话 binding。
+    let binding = effective_binding(adapter, binding);
     adapter
         .run_complete(
             request,
@@ -144,6 +147,35 @@ pub(crate) async fn run(
             cancel,
         )
         .await
+}
+
+/// 反思 binding 选择：装配期缓存的反思专用 binding（`memory.reflection.model`）
+/// 优先；`None`（未配置或解析失败）时返回会话 binding——反思是辅助功能，
+/// 永不因模型解析失败阻断主流程（fail-open）。
+pub(crate) fn effective_binding<'a>(
+    adapter: &'a ReflectionTaskAdapter,
+    session_binding: &'a Arc<ProviderBindingData>,
+) -> &'a Arc<ProviderBindingData> {
+    adapter.reflection_binding().unwrap_or(session_binding)
+}
+
+/// 装配期缓存反思专用 binding 的唯一收口：`Ok` 写入 session 级 adapter
+/// （随 clone 在三个触发点间共享同一 `Arc`，每个 session 只解析一次 provider）；
+/// `Err` 记 warn 并保持 `None`——调用方经 [`effective_binding`] 回退会话 binding。
+pub(crate) fn cache_resolved_reflection_binding(
+    adapter: &mut ReflectionTaskAdapter,
+    selection: &str,
+    resolved: Result<Arc<ProviderBindingData>, String>,
+) {
+    match resolved {
+        Ok(binding) => adapter.set_reflection_binding(Some(binding)),
+        Err(err) => log::warn!(
+            target: crate::LOG_TARGET,
+            "[reflection_model_fallback] selection={} err={}；反思回退会话模型",
+            selection,
+            err
+        ),
+    }
 }
 
 /// 反思配置门禁（等价 `run_complete` 内 `ReflectionDisabledReason::of` 的布尔
@@ -258,5 +290,76 @@ impl IntervalReflectionMaterialSlot {
 
     pub(crate) fn take(&self) -> Option<IntervalReflectionMaterial> {
         self.0.lock().expect("interval 反思材料槽锁中毒").take()
+    }
+}
+
+#[cfg(test)]
+mod reflection_binding_selection_tests {
+    use super::*;
+    use crate::application::reflection::test_support::static_reflection_binding;
+
+    fn adapter() -> ReflectionTaskAdapter {
+        ReflectionTaskAdapter::production(std::time::Duration::from_secs(240))
+    }
+
+    /// 无配置（None）时行为与现状完全一致：反思直接用会话 binding。
+    #[test]
+    fn unconfigured_adapter_falls_back_to_session_binding() {
+        let adapter = adapter();
+        let session = static_reflection_binding();
+
+        assert!(Arc::ptr_eq(effective_binding(&adapter, &session), &session));
+    }
+
+    /// 解析成功并缓存后，反思优先使用反思专用 binding。
+    #[test]
+    fn cached_binding_wins_over_session_binding() {
+        let mut adapter = adapter();
+        let session = static_reflection_binding();
+        let reflection_binding = static_reflection_binding();
+
+        cache_resolved_reflection_binding(
+            &mut adapter,
+            "provider/model",
+            Ok(Arc::clone(&reflection_binding)),
+        );
+
+        assert!(Arc::ptr_eq(
+            effective_binding(&adapter, &session),
+            &reflection_binding
+        ));
+    }
+
+    /// 解析失败 fail-open：保持 None → 回退会话 binding，不阻断反思。
+    #[test]
+    fn resolution_failure_keeps_session_binding_fallback() {
+        let mut adapter = adapter();
+        let session = static_reflection_binding();
+
+        cache_resolved_reflection_binding(&mut adapter, "provider/model", Err("boom".into()));
+
+        assert!(adapter.reflection_binding().is_none());
+        assert!(Arc::ptr_eq(effective_binding(&adapter, &session), &session));
+    }
+
+    /// 缓存随 adapter clone 共享：三个触发点拿到的是同一 session 级 adapter 的
+    /// clone，解析一次即可全局生效。
+    #[test]
+    fn clones_share_the_cached_reflection_binding() {
+        let mut adapter = adapter();
+        let reflection_binding = static_reflection_binding();
+        cache_resolved_reflection_binding(
+            &mut adapter,
+            "provider/model",
+            Ok(Arc::clone(&reflection_binding)),
+        );
+
+        let clone = adapter.clone();
+        let session = static_reflection_binding();
+
+        assert!(Arc::ptr_eq(
+            effective_binding(&clone, &session),
+            &reflection_binding
+        ));
     }
 }

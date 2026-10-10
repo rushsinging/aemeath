@@ -251,8 +251,15 @@ Reflection 的运行时可见性是结构化 Activity（SDK typed view），**�
 - **Interval / PreCompact**：反思的失败、取消与超时 **不终止宿主 Run**——Reflection leaf 按对应终态收口，状态机经 `ReflectionCompleted` 返回进入前状态后继续原流程；宿主 Run 的取消仍由既有 interrupt / step control 路径负责（反思复用该 step 的 cancellation token）。
 - **取消的 history 落盘**：取消后 durable fact 以同一 stable id `upsert` 终态——`status = Failed`、`error_category = Cancelled`（NEVER 留下悬挂的 `Running`，也 NEVER 写入 `Succeeded`；冲突终态互斥）。
 - **执行期间可取消**：取消只形成安全终态 metadata，不泄漏 prompt、provider raw response 或 Reflection 正文。
-- **任务超时**：执行通道对反思施加 timeout，超时形成安全终态（Manual 为 Run 终态；Interval / PreCompact 只收口 leaf activity）。
+- **任务超时**：执行通道对反思施加 timeout（配置 `memory.reflection.timeout_secs`，默认 240s；装配期快照语义），超时形成安全终态（Manual 为 Run 终态；Interval / PreCompact 只收口 leaf activity）。
 - **无后台残留**：三种 trigger 都在所属调用点 await 完成，Session teardown 不需要 drain 或等待后台 job。
+
+### 执行可靠性与成本控制（当前实现）
+
+- **反思专用模型**：配置 `memory.reflection.model`（selection 字符串）在 session 装配期解析一次并缓存到反思 adapter（三个触发点共享同一 `Arc`，每 session 只构建一次 provider）；解析失败 fail-open——记 warn 并以会话模型继续，NEVER 阻断主流程。未配置时行为与无该配置完全一致。
+- **空响应有界重试**：provider 流结束但无文本（`EmptyResponse`）时用同一 prompt 重试 1 次；仍空则按 `Failed(EmptyResponse)` 收口。provider 错误（LlmCall）与取消路径 NEVER 重试。
+- **解析失败有界修复（repair）**：调用 `complete` 之前先做不落盘的预解析；失败时把「原反思 prompt → 原始响应 → 纠错指令（附精确校验错误）」发回 provider 一次，修复响应可解析则以其完成 apply；修复调用失败或修复后仍非法时回退原始响应，按现状落 `Failed(Parse)`。上限 1 次、NEVER 递归；取消后跳过修复。
+- **统计口径**：重试与 repair 的真实 token 消耗累加进本次反思的 usage 计数；duration 为整次执行的墙钟时间（含重试与 repair）。
 
 ### Usage 记账口径（当前实现）
 

@@ -349,6 +349,9 @@ pub struct ReflectionConfigPatch {
     pub model: Option<String>,
     #[serde(default)]
     pub clear_model: bool,
+    /// 反思执行超时（秒）覆盖。
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -887,6 +890,9 @@ pub(crate) fn apply_reflection_patch(
         base.model = None;
     } else if let Some(v) = patch.model {
         base.model = Some(v);
+    }
+    if let Some(v) = patch.timeout_secs {
+        base.timeout_secs = v;
     }
     base
 }

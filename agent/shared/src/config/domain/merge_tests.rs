@@ -342,3 +342,36 @@ fn runtime_patch_some_makes_config_patch_non_empty() {
     };
     assert!(!layer.is_empty(), "runtime Some 时 is_empty 必须为 false");
 }
+
+#[test]
+fn reflection_timeout_secs_patch_overrides_and_reaches_config() {
+    let layer: ConfigPatch =
+        serde_json::from_str(r#"{"memory":{"reflection":{"timeout_secs":600}}}"#).unwrap();
+
+    let config = apply_patch(Config::default(), layer);
+
+    assert_eq!(
+        config.memory.reflection.timeout_secs, 600,
+        "高层 patch 的 timeout_secs 必须覆盖缺省 240"
+    );
+    assert_eq!(
+        config.memory.reflection.interval_runs, 10,
+        "未设置字段保持缺省，不受本 patch 影响"
+    );
+}
+
+#[test]
+fn reflection_timeout_secs_unspecified_in_patch_preserves_lower_layer() {
+    let global: ConfigPatch =
+        serde_json::from_str(r#"{"memory":{"reflection":{"timeout_secs":600}}}"#).unwrap();
+    let overlay: ConfigPatch =
+        serde_json::from_str(r#"{"memory":{"reflection":{"interval_runs":3}}}"#).unwrap();
+
+    let config = apply_patch(apply_patch(Config::default(), global), overlay);
+
+    assert_eq!(
+        config.memory.reflection.timeout_secs, 600,
+        "overlay 未触碰 timeout_secs，必须保留低层值"
+    );
+    assert_eq!(config.memory.reflection.interval_runs, 3);
+}

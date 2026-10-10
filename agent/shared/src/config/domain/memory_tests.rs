@@ -60,4 +60,17 @@ fn test_reflection_config_default() {
     assert_eq!(config.interval_runs, 10);
     assert!(!config.auto_apply_suggestions);
     assert!(config.model.is_none());
+    assert_eq!(config.timeout_secs, 240);
+}
+
+#[test]
+fn test_reflection_timeout_secs_defaults_to_240_and_deserializes_override() {
+    // 缺省：反思超时 240s——覆盖成功耗时长尾（此前硬编码 120s 紧贴 p99）。
+    let empty: MemoryConfig = serde_json::from_str("{}").unwrap();
+    assert_eq!(empty.reflection.timeout_secs, 240);
+
+    // 显式配置覆盖。
+    let json = r#"{ "reflection": { "timeout_secs": 600 } }"#;
+    let config: MemoryConfig = serde_json::from_str(json).unwrap();
+    assert_eq!(config.reflection.timeout_secs, 600);
 }
