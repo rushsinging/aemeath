@@ -44,9 +44,6 @@ pub struct LiveStatusViewModel {
     pub task_lines: Vec<String>,
     /// compact 进度（spinner 行内嵌）；None 表示未在 compact 中。
     pub compact_progress: Option<CompactProgressView>,
-    /// #252：后台进程活动数（status line 第三行；0 不显示）。挂在顶层
-    /// 而非 spinner 视图——Run 结束 spinner 消失后计数仍须可见。
-    pub background_processes_active: usize,
 }
 
 #[cfg(test)]

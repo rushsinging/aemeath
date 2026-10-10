@@ -383,3 +383,27 @@ fn test_screen_col_to_selection_end_includes_char_under_cursor() {
     let end = bar.screen_col_to_selection_end(StatusBarRow::Runtime, total as u16 - 1, 0, &view);
     assert_eq!(end, full.chars().count());
 }
+
+// ── #1895：后台进程计数挂 status bar runtime 行尾部 ───────────────
+
+fn runtime_row_text(background_processes_active: usize) -> String {
+    let bar = StatusBar::new();
+    let mut view = runtime_context_view("~/aemeath", "~/aemeath", "main");
+    view.runtime.background_processes_active = background_processes_active;
+    bar.build_full_text(&view)
+}
+
+#[test]
+fn runtime_row_appends_backend_process_count_when_active() {
+    let text = runtime_row_text(2);
+    assert!(
+        text.contains("2 Backend Progress"),
+        "runtime 行应含计数：{text}"
+    );
+}
+
+#[test]
+fn runtime_row_hides_backend_process_count_when_zero() {
+    let text = runtime_row_text(0);
+    assert!(!text.contains("Backend Progress"), "计数 0 不显示：{text}");
+}

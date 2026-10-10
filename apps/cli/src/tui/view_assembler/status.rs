@@ -83,6 +83,7 @@ impl StatusViewAssembler {
                 |status| status.context_budget.context_size,
             ),
             tps: conversation.runtime.live_tps.unwrap_or(0.0),
+            background_processes_active: conversation.runtime.background_processes_active,
             context: StatusContextViewModel {
                 path_base: workspace.path_base().unwrap_or_default().to_string(),
                 workspace_root: workspace.workspace_root().unwrap_or_default().to_string(),

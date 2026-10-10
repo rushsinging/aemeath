@@ -53,19 +53,6 @@ impl OutputArea {
                 .push((usize::MAX, CharIdx::ZERO, CharIdx::ZERO));
             lines.push(sl.clone());
         }
-        // #252：后台进程活动数第三行（>0 才显示）。挂顶层——Run 结束
-        // spinner 消失后仍可见（用户须随时知道还有多少后台进程在跑）。
-        if live_status.background_processes_active > 0 {
-            self.screen_line_map
-                .push((usize::MAX, CharIdx::ZERO, CharIdx::ZERO));
-            lines.push(Line::from(ratatui::text::Span::styled(
-                format!(
-                    "{} Backend Progress",
-                    live_status.background_processes_active
-                ),
-                Style::default().fg(theme::TEXT_DIM),
-            )));
-        }
         if spinner_line.is_some() {
             let task_base_idx = self.document.total_lines();
             for (i, task_line) in live_status.task_lines.iter().enumerate() {
@@ -195,7 +182,6 @@ fn live_status_spinner_fixture_fields(
         queued_lines: Vec::new(),
         task_lines: Vec::new(),
         compact_progress: None,
-        background_processes_active: 0,
     }
 }
 

@@ -52,7 +52,6 @@ impl LiveStatusAssembler {
             queued_lines,
             task_lines: conversation.runtime.task_status.lines.clone(),
             compact_progress,
-            background_processes_active: conversation.runtime.background_processes_active,
         }
     }
 }

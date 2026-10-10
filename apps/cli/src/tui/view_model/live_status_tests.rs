@@ -34,7 +34,6 @@ fn test_live_status_view_model_equality() {
         queued_lines: vec!["> hello".to_string()],
         task_lines: vec!["□ #1".to_string()],
         compact_progress: None,
-        background_processes_active: 0,
     };
     let b = a.clone();
     assert_eq!(a, b);

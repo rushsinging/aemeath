@@ -24,7 +24,6 @@ fn live_status(task_lines: Vec<&str>) -> LiveStatusViewModel {
         queued_lines: Vec::new(),
         task_lines: task_lines.into_iter().map(str::to_string).collect(),
         compact_progress: None,
-        background_processes_active: 0,
     }
 }
 fn no_live_status() -> LiveStatusViewModel {
