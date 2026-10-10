@@ -1361,6 +1361,171 @@ async fn append_failure_never_blocks_write_or_retrieve() {
 }
 
 // ---------------------------------------------------------------------------
+// event_read_ops_*：读组 4 项（候选正文全量）。
+// ---------------------------------------------------------------------------
+
+fn recorded_read_events(recorder: &RecordingEventAppend) -> Vec<MemoryEvent> {
+    recorder
+        .events()
+        .into_iter()
+        .filter(|event| {
+            matches!(
+                event.op,
+                MemoryEventOp::RetrieveForInject
+                    | MemoryEventOp::Search
+                    | MemoryEventOp::PerMessageRecall
+                    | MemoryEventOp::ListStats
+            )
+        })
+        .collect()
+}
+
+fn assert_read_candidates_have_content(change: &EventChange) {
+    match change {
+        EventChange::Read {
+            candidates,
+            hit_count,
+            ..
+        } => {
+            assert_eq!(*hit_count as usize, candidates.len());
+            for entry in candidates {
+                assert!(
+                    !entry.content.is_empty(),
+                    "read event candidate must carry full content, got {entry:?}"
+                );
+            }
+        }
+        other => panic!("expected EventChange::Read, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn event_read_ops_retrieve_for_inject_emits_candidates_with_content() {
+    let stored = entry(MemoryLayer::Project, "injectable fact body");
+    // open 各层 1 次 load + retrieve 各层再 1 次。
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
+        layer_script(
+            vec![
+                Ok(committed(1, MemoryLayer::Project, vec![stored.clone()])),
+                Ok(committed(1, MemoryLayer::Project, vec![stored.clone()])),
+            ],
+            vec![],
+        ),
+    );
+    let (service, recorder) = open_events_service(store, MemoryPolicy::default()).await;
+    let result = service
+        .retrieve_for_inject(&MemoryQuery {
+            limit: 10,
+            layer: None,
+            category: None,
+            now: 10,
+        })
+        .await;
+    assert_eq!(result.hits.len(), 1);
+    let events = recorded_read_events(&recorder);
+    let retrieve = events
+        .iter()
+        .find(|event| event.op == MemoryEventOp::RetrieveForInject)
+        .expect("RetrieveForInject event");
+    assert_read_candidates_have_content(&retrieve.change);
+    match &retrieve.change {
+        EventChange::Read { candidates, .. } => {
+            assert_eq!(candidates[0].content, "injectable fact body");
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[tokio::test]
+async fn event_read_ops_search_emits_candidates_with_content() {
+    let stored = entry(MemoryLayer::Project, "searchable alpha fact");
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
+        layer_script(
+            vec![
+                Ok(committed(1, MemoryLayer::Project, vec![stored.clone()])),
+                Ok(committed(1, MemoryLayer::Project, vec![stored.clone()])),
+            ],
+            vec![],
+        ),
+    );
+    let (service, recorder) = open_events_service(store, MemoryPolicy::default()).await;
+    let result = service
+        .search(&MemorySearchQuery {
+            text: "alpha".to_string(),
+            limit: 10,
+            layer: None,
+            category: None,
+            include_archive: false,
+            now: 10,
+        })
+        .await;
+    assert!(!result.hits.is_empty());
+    let events = recorded_read_events(&recorder);
+    let search = events
+        .iter()
+        .find(|event| event.op == MemoryEventOp::Search)
+        .expect("Search event");
+    assert_eq!(search.context.query.as_deref(), Some("alpha"));
+    assert_read_candidates_have_content(&search.change);
+}
+
+#[tokio::test]
+async fn event_read_ops_list_and_stats_emit_list_stats() {
+    let stored = entry(MemoryLayer::Project, "listed fact body");
+    // open + list + stats = 每层 3 次 load。
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 3], vec![]),
+        layer_script(
+            vec![
+                Ok(committed(1, MemoryLayer::Project, vec![stored.clone()])),
+                Ok(committed(1, MemoryLayer::Project, vec![stored.clone()])),
+                Ok(committed(1, MemoryLayer::Project, vec![stored.clone()])),
+            ],
+            vec![],
+        ),
+    );
+    let (service, recorder) = open_events_service(store, MemoryPolicy::default()).await;
+    let listed = service.list(Some(MemoryLayer::Project)).await;
+    assert_eq!(listed.len(), 1);
+    let stats = service.stats().await;
+    assert_eq!(stats.project_count, 1);
+    let events = recorded_read_events(&recorder);
+    let list_events: Vec<_> = events
+        .iter()
+        .filter(|event| event.op == MemoryEventOp::ListStats)
+        .collect();
+    assert_eq!(list_events.len(), 2, "list + stats each emit ListStats");
+    let list_event = list_events
+        .iter()
+        .find(|event| event.context.trigger_summary.as_deref() == Some("kind=list"))
+        .expect("list kind");
+    assert_read_candidates_have_content(&list_event.change);
+    let stats_event = list_events
+        .iter()
+        .find(|event| {
+            event
+                .context
+                .trigger_summary
+                .as_deref()
+                .is_some_and(|summary| summary.starts_with("kind=stats"))
+        })
+        .expect("stats kind");
+    match &stats_event.change {
+        EventChange::Read {
+            candidates,
+            hit_count,
+            ..
+        } => {
+            assert!(candidates.is_empty());
+            assert!(*hit_count >= 1);
+        }
+        other => panic!("expected Read for stats, got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // event_write_ops_*：写组 8 项落点（WriteAdd 已有专测；此处覆盖其余路径）。
 // 每个 op 断言事件枚举 + change 携带受影响条目全文（NEVER 仅 id）。
 // ---------------------------------------------------------------------------
