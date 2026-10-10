@@ -272,6 +272,7 @@ async fn reflection_evicts_unpinned_candidate_and_retries_once() {
         MemoryPolicy {
             max_entries: 1,
             similarity_threshold: 0.8,
+            target_active_entries: 150,
         },
         || 200,
     )
@@ -301,6 +302,7 @@ async fn reflection_reports_full_capacity_when_only_pinned_entries_exist() {
         MemoryPolicy {
             max_entries: 1,
             similarity_threshold: 0.8,
+            target_active_entries: 150,
         },
         || 200,
     )
