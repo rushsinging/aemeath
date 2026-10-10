@@ -358,7 +358,9 @@ impl BackgroundProcessSupervisor {
                             as u64,
                     );
                     log.read_range(start, usize::MAX)
-                        .map(|segment| String::from_utf8_lossy(&segment.bytes).into_owned())
+                        .map(|segment| {
+                            strip_internal_markers(&String::from_utf8_lossy(&segment.bytes))
+                        })
                         .unwrap_or_default()
                 }
                 None => String::new(),
@@ -453,4 +455,17 @@ impl BackgroundProcessSupervisor {
         }
         restored
     }
+}
+
+/// 通知尾部视图剥离内部执行标记（#1890 直绑文件含 Bash 注入的
+/// `__AEMEATH_CWD__=` marker 行与 `[cwd: ...]` 尾行——面向 LLM 的
+/// 通知文本不得泄漏内部标记）。
+fn strip_internal_markers(tail: &str) -> String {
+    tail.lines()
+        .filter(|line| {
+            !line.contains("__AEMEATH_CWD__=")
+                && !(line.starts_with("[cwd: ") && line.ends_with(']'))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
