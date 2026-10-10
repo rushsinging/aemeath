@@ -143,9 +143,9 @@ impl ToolDisplay for BackgroundProcessLogsDisplay {
     }
     fn render_policy(&self) -> ToolRenderPolicy {
         // 放宽行数上限：日志本体多行；tail 模式只看最新段。
-        // Logs 原文 tail：10 行收敛显示（完整日志经 cursor 增量读取，
-        // 卡片只承担「最新输出可瞥」职责——40 行实测过长）。
-        family_policy(10, true)
+        // Logs 原文 tail：与 Bash 输出卡片同源常量（用户要求一致，
+        // NEVER 各自另造数字）；完整日志经 cursor 增量读取。
+        family_policy(super::super::constants::TOOL_RESULT_TAIL_LINES, true)
     }
 }
 inventory::submit!(ToolDisplayEntry {
