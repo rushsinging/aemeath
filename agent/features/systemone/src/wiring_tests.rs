@@ -220,6 +220,7 @@ async fn wrap_calibrated_audited_appends_scoring_event_with_manifest_revision() 
         &scoring_dir,
         "memory_rerank",
         share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
+        None,
     );
 
     let state = ScoringState::new("用户正在验证审计 revision。").expect("state 构造");
@@ -254,4 +255,115 @@ async fn wrap_calibrated_audited_appends_scoring_event_with_manifest_revision() 
         Some(manifest.engine_revision.as_str()),
         "事件 revision MUST 来自 manifest.engine_revision"
     );
+    assert_eq!(events[0]["scenario"], "memory_rerank");
+}
+
+/// 设计 §6 / §10：四场景生产装配路径（`wrap_calibrated_audited`）各至少 emit 一条，
+/// 且 `scenario` 标签与装配注入一致（含 Unavailable 终态）。
+#[tokio::test]
+async fn wrap_calibrated_audited_emits_for_all_four_scenarios_including_unavailable() {
+    struct OkPort;
+    struct UnavailablePort;
+
+    #[async_trait::async_trait]
+    impl ScoringPort for OkPort {
+        async fn answer(
+            &self,
+            _state: &ScoringState,
+            _questions: &[ScoringQuestion],
+        ) -> Result<Vec<ScoringAnswer>, crate::domain::ScoringUnavailable> {
+            Ok(vec![
+                ScoringAnswer::noul(0.6, CalibrationLevel::Raw).expect("答案")
+            ])
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ScoringPort for UnavailablePort {
+        async fn answer(
+            &self,
+            _state: &ScoringState,
+            _questions: &[ScoringQuestion],
+        ) -> Result<Vec<ScoringAnswer>, crate::domain::ScoringUnavailable> {
+            Err(crate::domain::ScoringUnavailable::new(
+                crate::domain::UnavailableKind::Connect,
+                "fixture",
+            ))
+        }
+    }
+
+    let scenarios: &[(&'static str, bool)] = &[
+        ("memory_rerank", true),
+        ("memory_recall", true),
+        ("skill_match", true),
+        ("policy_triage", false), // Unavailable 终态也必须 emit
+    ];
+
+    let temp = tempfile::TempDir::new().expect("临时目录");
+    let scoring_dir = temp.path().join("scoring");
+    std::fs::create_dir_all(&scoring_dir).expect("scoring 目录");
+    let manifest = fixture_manifest();
+    let state = ScoringState::new("四场景契约上下文").expect("state");
+    let questions = vec![ScoringQuestion::noul("是否相关？", None).expect("question")];
+
+    for (scenario, expect_ok) in scenarios {
+        let port = if *expect_ok {
+            wrap_calibrated_audited(
+                Arc::new(OkPort),
+                &manifest,
+                &scoring_dir,
+                scenario,
+                share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
+                None,
+            )
+        } else {
+            wrap_calibrated_audited(
+                Arc::new(UnavailablePort),
+                &manifest,
+                &scoring_dir,
+                scenario,
+                share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
+                None,
+            )
+        };
+
+        let result = port.answer(&state, &questions).await;
+        if *expect_ok {
+            assert!(result.is_ok(), "{scenario} Ok 路径");
+        } else {
+            assert!(result.is_err(), "{scenario} Unavailable 路径");
+        }
+    }
+
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let segment_path = scoring_dir
+        .join(crate::constants::EVENTS_DIR_NAME)
+        .join(format!("{today}.jsonl"));
+    let events: Vec<serde_json::Value> = std::fs::read_to_string(&segment_path)
+        .expect("日切 segment 可读")
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("合法 JSON"))
+        .collect();
+    assert_eq!(events.len(), 4, "四场景各一条事件");
+
+    let emitted: std::collections::BTreeSet<&str> = events
+        .iter()
+        .filter_map(|event| event["scenario"].as_str())
+        .collect();
+    for (scenario, expect_ok) in scenarios {
+        assert!(
+            emitted.contains(scenario),
+            "缺失 scenario={scenario} 的事件"
+        );
+        let event = events
+            .iter()
+            .find(|event| event["scenario"] == *scenario)
+            .expect("按 scenario 定位事件");
+        if *expect_ok {
+            assert_eq!(event["outcome"], "ok", "{scenario}");
+        } else {
+            assert_eq!(event["outcome"], "unavailable", "{scenario}");
+            assert!(event["unavailable_kind"].is_string(), "{scenario} kind");
+        }
+    }
 }

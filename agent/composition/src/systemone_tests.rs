@@ -80,6 +80,7 @@ impl EmbeddedScoringFactory for RecordingFactory {
         _manifest: &systemone::ModelManifest,
         _scenario: &'static str,
         event_retention_days: u32,
+        _context_source: Option<Arc<dyn Fn() -> systemone::ScoringCallContext + Send + Sync>>,
     ) -> Arc<dyn systemone::ScoringPort> {
         *self.last_retention_days.lock().expect("retention 锁") = Some(event_retention_days);
         raw

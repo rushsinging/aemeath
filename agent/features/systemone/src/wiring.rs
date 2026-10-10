@@ -146,6 +146,7 @@ pub async fn wire_embedded_scoring_per_scenario(
                 &scoring_dir,
                 scenario,
                 event_retention_days,
+                None,
             ),
         );
     }
@@ -170,6 +171,7 @@ pub async fn wire_embedded_scoring(
         &scoring_dir,
         "embedded",
         event_retention_days,
+        None,
     ))
 }
 
@@ -220,18 +222,23 @@ pub fn wrap_calibrated_audited(
     scoring_dir: &Path,
     scenario: &'static str,
     event_retention_days: u32,
+    context_source: Option<Arc<dyn Fn() -> crate::domain::ScoringCallContext + Send + Sync>>,
 ) -> Arc<dyn ScoringPort> {
     let store = CalibrationStore::new(scoring_dir.to_path_buf());
     let calibrated = Arc::new(CalibratedScoringAdapter::new(inner, &store));
     let event_store =
         JsonlSegmentScoringEventStore::new(scoring_dir.to_path_buf(), event_retention_days);
-    Arc::new(AuditedScoringAdapter::new(
+    let mut audited = AuditedScoringAdapter::new(
         calibrated,
         manifest.engine_revision.clone(),
         event_store,
         Arc::new(|| chrono::Utc::now().to_rfc3339()),
         scenario,
-    ))
+    );
+    if let Some(source) = context_source {
+        audited = audited.with_context_source(source);
+    }
+    Arc::new(audited)
 }
 
 /// `EmbeddedInitError` → typed wiring 错误（分类不丢失，消息保持中文）。

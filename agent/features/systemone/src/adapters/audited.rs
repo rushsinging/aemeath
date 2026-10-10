@@ -14,8 +14,8 @@ use async_trait::async_trait;
 
 use crate::adapters::event_jsonl::JsonlSegmentScoringEventStore;
 use crate::domain::{
-    ScoringAnswer, ScoringAnswerSnapshot, ScoringEvent, ScoringQuestion, ScoringQuestionSnapshot,
-    ScoringState, ScoringUnavailable,
+    ScoringAnswer, ScoringAnswerSnapshot, ScoringCallContext, ScoringEvent, ScoringQuestion,
+    ScoringQuestionSnapshot, ScoringState, ScoringUnavailable,
 };
 use crate::ports::ScoringPort;
 
@@ -26,6 +26,8 @@ pub struct AuditedScoringAdapter {
     engine_revision: String,
     store: Arc<JsonlSegmentScoringEventStore>,
     clock: Arc<dyn Fn() -> String + Send + Sync>,
+    /// 可选关联上下文源（设计 §5.3）；缺省 None → 事件关联字段写 null。
+    context_source: Option<Arc<dyn Fn() -> ScoringCallContext + Send + Sync>>,
 }
 
 impl AuditedScoringAdapter {
@@ -57,7 +59,19 @@ impl AuditedScoringAdapter {
             engine_revision: engine_revision.into(),
             store,
             clock,
+            context_source: None,
         }
+    }
+
+    /// 注入关联上下文源：每次 `answer` 调用一次以快照写入事件关联字段。
+    ///
+    /// 缺省不调用本方法时关联字段写 null；**NEVER** 因源缺失或返回空而阻断评分。
+    pub fn with_context_source(
+        mut self,
+        context_source: Arc<dyn Fn() -> ScoringCallContext + Send + Sync>,
+    ) -> Self {
+        self.context_source = Some(context_source);
+        self
     }
 }
 
@@ -106,7 +120,14 @@ impl ScoringPort for AuditedScoringAdapter {
             ),
         };
 
-        // 全量现场：state/questions/answers 全文 + 关联字段全 null（PR2 填充）。
+        // 关联字段：有 context_source 则快照写入；缺省全 None（serde null）。
+        let call_context = self
+            .context_source
+            .as_ref()
+            .map(|source| source())
+            .unwrap_or_default();
+
+        // 全量现场：state/questions/answers 全文 + 可选关联字段。
         let event = ScoringEvent {
             schema_version: ScoringEvent::SCHEMA_VERSION,
             event_id: ScoringEvent::generate_event_id(),
@@ -126,11 +147,11 @@ impl ScoringPort for AuditedScoringAdapter {
                 .collect(),
             answers: answer_snapshots,
             ranking: None,
-            correlation_id: None,
-            session_id: None,
-            run_ordinal: None,
-            step_ordinal: None,
-            tool_call_id: None,
+            correlation_id: call_context.correlation_id,
+            session_id: call_context.session_id,
+            run_ordinal: call_context.run_ordinal,
+            step_ordinal: call_context.step_ordinal,
+            tool_call_id: call_context.tool_call_id,
         };
 
         let store = Arc::clone(&self.store);

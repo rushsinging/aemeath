@@ -49,9 +49,9 @@ pub use constants::EMBEDDED_SCORING_AVAILABLE;
 pub use domain::{
     required_platform, AnswerRejected, CalibrationLevel, CriterionSnapshot, ModelAsset,
     ModelManifest, ModelManifestError, NoulCriteria, PointerHead, PointerHeadError,
-    PointerHeadWeights, QuestionRejected, ScoringAnswer, ScoringAnswerSnapshot, ScoringEvent,
-    ScoringQuestion, ScoringQuestionSnapshot, ScoringRankingSnapshot, ScoringState,
-    ScoringUnavailable, UnavailableKind,
+    PointerHeadWeights, QuestionRejected, ScoringAnswer, ScoringAnswerSnapshot, ScoringCallContext,
+    ScoringCallContextSlot, ScoringEvent, ScoringQuestion, ScoringQuestionSnapshot,
+    ScoringRankingSnapshot, ScoringState, ScoringUnavailable, UnavailableKind,
 };
 pub use ports::{
     ArtifactFetchError, ArtifactFetchErrorKind, ArtifactFetcherPort, CalibrationObservation,

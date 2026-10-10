@@ -265,3 +265,27 @@ fn event_ids_are_unique_and_non_empty() {
     assert!(!first_id.is_empty());
     assert_ne!(first_id, second_id);
 }
+
+#[test]
+fn call_context_slot_snapshot_reflects_set_and_clear() {
+    let slot = ScoringCallContextSlot::new();
+    let source = slot.snapshot_source();
+    assert_eq!(source(), ScoringCallContext::default());
+
+    slot.set(ScoringCallContext {
+        correlation_id: Some("c1".to_string()),
+        session_id: Some("s1".to_string()),
+        run_ordinal: Some(1),
+        step_ordinal: Some(2),
+        tool_call_id: Some("t1".to_string()),
+    });
+    let snapshot = source();
+    assert_eq!(snapshot.correlation_id.as_deref(), Some("c1"));
+    assert_eq!(snapshot.session_id.as_deref(), Some("s1"));
+    assert_eq!(snapshot.run_ordinal, Some(1));
+    assert_eq!(snapshot.step_ordinal, Some(2));
+    assert_eq!(snapshot.tool_call_id.as_deref(), Some("t1"));
+
+    slot.clear();
+    assert_eq!(source(), ScoringCallContext::default());
+}
