@@ -18,6 +18,13 @@ pub(crate) const CALIBRATION_FILE: &str = "calibration.json";
 /// 评分审计事件文件名（{scoring_dir}/audit.jsonl）。
 pub(crate) const AUDIT_FILE: &str = "audit.jsonl";
 
+// --- 评分事件流（来源：docs/design/02-modules/systemone/03-event-stream.md §5.1）---
+
+/// 评分事件 schema 版本（`domain::event::ScoringEvent.schema_version`）。
+///
+/// legacy 旧审计行无此字段，读侧视为 `0`。
+pub(crate) const EVENT_SCHEMA_VERSION: u32 = 1;
+
 /// 本构建是否提供 embedded 生产装配（feature `embedded` 编译开关）。
 ///
 /// composition 据此在装配前判定 EmbeddedUnavailable（typed startup outcome），
