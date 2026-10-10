@@ -209,6 +209,17 @@ impl BackgroundProcessRuntime {
         }
         // #252 PR3：活动数 -1 → spinner 显示。
         self.emit_active_count();
+        // WakeupSignal 直发同样进 one-shot 已弹集合（#252）：通知信号
+        // 语义统一「每事实批次一次」——直发路径此前不记录集合，wakeup
+        // Run 若因注入预算 deferred 等未确认，收口滞留检测会把同一
+        // 事实当作新批次再弹（实测：卡片×2 循环唤醒）。
+        if matches!(self.notify_route(), BackgroundNotifyRoute::WakeupSignal) {
+            let mut signaled = self
+                .signaled_stranded_ids
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            signaled.insert(task_id.as_str().to_string());
+        }
         match self.notify_route() {
             BackgroundNotifyRoute::Reminder(run_id) => {
                 context.reminder_handle_event(

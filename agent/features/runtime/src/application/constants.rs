@@ -72,7 +72,11 @@ pub(crate) const DEFAULT_GRACE: Duration = Duration::from_millis(250);
 pub(crate) const BACKGROUND_PROCESS_OUTPUT_CAPACITY_BYTES: usize = 64 * 1024;
 
 /// 后台进程完成通知的输出尾部截断（reminder 注入 token 预算纪律，设计 §4.2）。
-pub(crate) const BACKGROUND_PROCESS_NOTIFICATION_TAIL_BYTES: usize = 2048;
+/// 通知尾部视图上限：须稳低于 reminder 注入预算（512 token，
+/// `REMINDER_INJECTION_TOKEN_BUDGET`）——2048 字节≈557 token 会常态触发
+/// deferred（不注入不确认），配合滞留唤醒形成循环。1024 字节≈280-350
+/// token，留多事实合并的 headroom。
+pub(crate) const BACKGROUND_PROCESS_NOTIFICATION_TAIL_BYTES: usize = 1024;
 
 // ─── tool/tool_result_materializer.rs ───
 
