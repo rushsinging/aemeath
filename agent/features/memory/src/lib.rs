@@ -72,6 +72,21 @@ pub fn wire_reflection_history_store(
     ))
 }
 
+/// Composition 构造生产事件流存储的唯一入口：返回 `Arc<dyn MemoryEventAppendPort>`
+/// （`JsonlSegmentEventStore` 为 crate 内实现细节，`new` 收窄 `pub(crate)`）。
+/// `retention_days` 为 GC 保留天数（`0` 表示禁用 GC，**NEVER** 表示关闭写入）。
+pub fn wire_memory_event_store(
+    root: storage::SafeStorageRoot,
+    project: crate::domain::ProjectMemoryKey,
+    retention_days: u32,
+) -> std::sync::Arc<dyn crate::ports::MemoryEventAppendPort> {
+    std::sync::Arc::new(crate::event_jsonl::JsonlSegmentEventStore::new(
+        root,
+        project,
+        retention_days,
+    ))
+}
+
 mod constants;
 pub(crate) use constants::LOG_TARGET;
 
@@ -79,6 +94,7 @@ mod adapters;
 mod application;
 mod codec;
 mod domain;
+mod event_jsonl;
 mod noop;
 mod ports;
 mod service;

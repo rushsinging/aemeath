@@ -128,6 +128,14 @@ impl SafeStorageDir {
         entries.sort_by(|left, right| left.name.cmp(&right.name));
         Ok(entries)
     }
+
+    /// 删除目录内的普通文件（GC 收口用）。安全口径与 [`Self::create_or_open`]
+    /// 对齐：符号链接、非常规文件一律拒收（`InvalidKey`），文件系统错误按
+    /// [`map_io`] 归类；文件不存在返回 `Io` 错误。
+    pub fn remove_file(&self, name: &SafePathSegmentData) -> Result<(), StorageError> {
+        reject_regular_file_symlink(&self.dir, name)?;
+        self.dir.remove_file(name.as_str()).map_err(map_io)
+    }
 }
 
 fn cap_options(options: SafeOpenOptions, create: bool) -> OpenOptions {
@@ -172,3 +180,7 @@ fn map_io(error: std::io::Error) -> StorageError {
     };
     StorageError::new(kind, "路径安全操作失败")
 }
+
+#[cfg(test)]
+#[path = "safe_storage_root_tests.rs"]
+mod tests;

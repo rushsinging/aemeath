@@ -38,6 +38,17 @@ pub(crate) const SCHEMA_VERSION: u32 = 1;
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) const EVENT_SCHEMA_VERSION: u32 = 1;
 
+/// 事件流日切 segment 目录名（`memory/{project_key}/events/` 下的固定段）。
+pub(crate) const EVENTS_SEGMENT: &str = "events";
+
+/// 事件流日切 segment 文件后缀（`{yyyy-mm-dd}.jsonl`）。
+pub(crate) const EVENTS_JSONL_SUFFIX: &str = ".jsonl";
+
+/// 事件 segment 默认保留天数（`0` 表示禁用 GC，NEVER 表示关闭事件写入）。
+/// retention 配置接线（composition 落点）前仅测试引用，dead_code 暂时放行。
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) const DEFAULT_EVENT_RETENTION_DAYS: u32 = 30;
+
 /// 重排 instructions（与 eval/system-one harness rank 场景同文案，保证基线可比；
 /// Qwen3-Reranker instruct 定向口径——该引擎对任务定向 instruct 敏感，实测 R@1 +5pp）。
 pub(crate) const RERANK_INSTRUCTIONS: &str =
