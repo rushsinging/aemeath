@@ -75,6 +75,15 @@ pub trait ToolDisplay: Send + Sync {
     /// Format detail lines shown below the header.
     fn format_details(&self, input: &serde_json::Value) -> Vec<String>;
 
+    /// typed result 自定义渲染（#1895）：从 result 的 content JSON
+    /// 反序列化 typed 结果并产出展示行。默认 `None` 走通用路径
+    ///（`resolve_display_text` + Plain 行渲染）；结构化结果（列表 /
+    /// 多行日志等）覆写此方法实现解析后的人类可读显示，NEVER 在
+    /// 通用路径猜 JSON 结构。
+    fn format_result_lines(&self, _content: Option<&serde_json::Value>) -> Option<Vec<String>> {
+        None
+    }
+
     /// 返回该工具的渲染策略。
     fn render_policy(&self) -> ToolRenderPolicy;
 }
