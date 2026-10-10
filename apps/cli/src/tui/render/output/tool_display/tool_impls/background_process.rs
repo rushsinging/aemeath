@@ -8,8 +8,7 @@ use super::super::{
     ToolRenderPolicy,
 };
 use sdk::tool_input::{
-    BackgroundProcessListInput, BackgroundProcessLogsInput, BackgroundProcessStatusInput,
-    BackgroundProcessStopInput,
+    BackgroundProcessLogsInput, BackgroundProcessStatusInput, BackgroundProcessStopInput,
 };
 use sdk::tool_result::{
     BackgroundProcessListResult, BackgroundProcessLogsResult, BackgroundProcessStatusResult,

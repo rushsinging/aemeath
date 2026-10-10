@@ -304,3 +304,64 @@ fn test_render_tool_result_tail_mode_shows_last_lines() {
     assert!(!block.lines.iter().any(|l| l.plain == "line1"));
     assert!(!block.lines.iter().any(|l| l.plain == "line2"));
 }
+
+// ── #1895 L4：typed 渲染接线全链（真实 BlockView → 渲染 → 行断言） ──
+// 捕获两类中间层断裂：lookup_display 名字不匹配、content(data) 传递
+// 断链——两者都会静默回退 fallback JSON 路径，仅测 Display 方法本身
+// 无法发现。
+
+#[test]
+fn background_process_logs_result_renders_parsed_lines_via_render_pipeline() {
+    let logs_json = serde_json::json!({
+        "log": {
+            "text": "64 bytes from 127.0.0.1: icmp_seq=1\n64 bytes from 127.0.0.1: icmp_seq=2",
+            "cursor": 120,
+            "total_written": 120,
+        }
+    });
+    let view = result_with_data("BackgroundProcessLogs", "{\"raw\":true}", logs_json);
+    let block = render_tool_result("bgp-logs-result", &view, &RenderCtx::for_width(80));
+    let text = block_text(&block);
+    assert!(
+        text.contains("icmp_seq=1"),
+        "Logs 应经 typed 分支渲染多行原文：{text}"
+    );
+    assert!(
+        !text.contains("\\\"raw\\\""),
+        "typed 分支生效时不应回退 JSON 原文：{text}"
+    );
+}
+
+#[test]
+fn background_process_list_result_renders_summary_via_render_pipeline() {
+    let list_json = serde_json::json!({
+        "tasks": [
+            {
+                "task_id": "bgp_07YExample02",
+                "tool_name": "Bash",
+                "state": "backgrounded",
+                "summary": "ping -c 30 127.0.0.1",
+            }
+        ]
+    });
+    let view = result_with_data("BackgroundProcessList", "[]", list_json);
+    let block = render_tool_result("bgp-list-result", &view, &RenderCtx::for_width(80));
+    let text = block_text(&block);
+    assert!(
+        text.contains("ping -c 30"),
+        "List 应渲染逐行摘要（summary 来自 data 而非 result_text）：{text}"
+    );
+    assert!(
+        !text.contains("\"processes\":"),
+        "不应显示未解析的 JSON 原文：{text}"
+    );
+}
+
+fn block_text(block: &super::RenderedBlock) -> String {
+    block
+        .lines
+        .iter()
+        .map(|line| line.plain.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
