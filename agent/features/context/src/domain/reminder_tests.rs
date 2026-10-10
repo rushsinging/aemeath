@@ -519,13 +519,11 @@ fn background_process_completed_kind_and_render_are_bilingual() {
             task_id: "task-01a2b3c4".to_string(),
             tool_name: "Bash".to_string(),
             status: crate::domain::BackgroundProcessCompletionStatus::Succeeded,
-            output_tail: "test result: ok. 3 passed".to_string(),
         },
         crate::domain::BackgroundProcessReminderItemData {
             task_id: "task-05e6f7a8".to_string(),
             tool_name: "Agent".to_string(),
             status: crate::domain::BackgroundProcessCompletionStatus::Failed,
-            output_tail: String::new(),
         },
     ]);
     assert_eq!(data.kind(), "background_process");
@@ -536,10 +534,9 @@ fn background_process_completed_kind_and_render_are_bilingual() {
     assert!(zh.contains("Bash"));
     assert!(zh.contains("成功"));
     assert!(zh.contains("失败"));
-    assert!(zh.contains("test result: ok. 3 passed"));
     assert!(
-        zh.contains("日志或后续输出可用 BackgroundProcessList / BackgroundProcessLogs 查询"),
-        "引导查询（新工具名）：{zh}"
+        zh.contains("完成详情与日志用 BackgroundProcessStatus / BackgroundProcessLogs 查询"),
+        "引导查询（id + 状态即可，详情走工具）：{zh}"
     );
 
     let en = render_invocation_reminder_body(&data, "en");
@@ -557,7 +554,6 @@ fn background_process_item_fields_are_serializable_for_fingerprint() {
             task_id: "task-1".to_string(),
             tool_name: "Bash".to_string(),
             status: crate::domain::BackgroundProcessCompletionStatus::TimedOut,
-            output_tail: "x".to_string(),
         },
     ]);
     let json = serde_json::to_string(&data).expect("reminder data 可序列化");

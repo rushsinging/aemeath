@@ -406,7 +406,6 @@ fn background_process_source_build_peeks_until_confirmed_and_renders() {
         "command=cargo test",
         SystemTime::now(),
     );
-    // 无文件任务：output_tail 回退终态文本（#1890 文件真相源）。
     supervisor
         .finish(
             &task_id,
@@ -421,7 +420,7 @@ fn background_process_source_build_peeks_until_confirmed_and_renders() {
         context::InvocationReminderData::BackgroundProcessCompleted { items } => {
             assert_eq!(items.len(), 1);
             assert_eq!(items[0].tool_name, "Bash");
-            assert!(items[0].output_tail.contains("ok 3 passed"));
+            assert_eq!(items[0].tool_name, "Bash");
         }
         other => panic!("应为 BackgroundProcessCompleted，实际 {other:?}"),
     }

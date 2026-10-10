@@ -349,32 +349,11 @@ impl BackgroundProcessSupervisor {
             let Some(status) = terminal_completion_status(&kind) else {
                 continue;
             };
-            let output_tail = match &task.record.log_file {
-                Some(log_path) => {
-                    let log = TaskLogFile::from_path(log_path.clone());
-                    let size = log.size_bytes();
-                    let start = size.saturating_sub(
-                        crate::application::constants::BACKGROUND_PROCESS_NOTIFICATION_TAIL_BYTES
-                            as u64,
-                    );
-                    log.read_range(start, usize::MAX)
-                        .map(|segment| {
-                            strip_internal_markers(&String::from_utf8_lossy(&segment.bytes))
-                        })
-                        .unwrap_or_default()
-                }
-                None => String::new(),
-            };
-            let output_tail = if output_tail.is_empty() {
-                task.terminal_output.clone().unwrap_or_default()
-            } else {
-                output_tail
-            };
+
             items.push(context::BackgroundProcessReminderItemData {
                 task_id: task.record.task_id.as_str().to_string(),
                 tool_name: task.record.identity.tool_name.clone(),
                 status,
-                output_tail,
             });
         }
         // 稳定顺序：按 task_id（UUIDv7 单调）排序，注入内容可复现。
@@ -455,17 +434,4 @@ impl BackgroundProcessSupervisor {
         }
         restored
     }
-}
-
-/// 通知尾部视图剥离内部执行标记（#1890 直绑文件含 Bash 注入的
-/// `__AEMEATH_CWD__=` marker 行与 `[cwd: ...]` 尾行——面向 LLM 的
-/// 通知文本不得泄漏内部标记）。
-fn strip_internal_markers(tail: &str) -> String {
-    tail.lines()
-        .filter(|line| {
-            !line.contains("__AEMEATH_CWD__=")
-                && !(line.starts_with("[cwd: ") && line.ends_with(']'))
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }

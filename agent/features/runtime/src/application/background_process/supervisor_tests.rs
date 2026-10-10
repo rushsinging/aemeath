@@ -233,7 +233,7 @@ fn peek_keeps_items_until_injection_confirmed() {
         items[0].status,
         context::BackgroundProcessCompletionStatus::Succeeded
     ));
-    assert!(items[0].output_tail.contains("3 passed"), "通知带输出尾部");
+    // 通知瘦身为 id + 状态（详情走 Logs 工具）；不再携带输出尾部。
 
     // peek 语义（注入确认制）：确认前重复可见（Run 收口后下个 Run
     // 仍可补注入）；确认后不再出现。
@@ -283,66 +283,17 @@ fn peek_skips_invalidated_and_keeps_order() {
     ));
 }
 
-#[test]
-fn peek_caps_output_tail_bytes() {
-    let base = std::env::temp_dir().join(format!(
-        "bgp-sup-tail-{}-{}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    let supervisor = BackgroundProcessSupervisor::new();
-    let process_id = share::ids::BackgroundProcessId::new_v7();
-    let (log, mut stdout, _stderr) =
-        crate::application::background_process::log_file::TaskLogFile::open(
-            &base,
-            "sess-1",
-            &process_id,
-        )
-        .unwrap();
-    use std::io::Write as _;
-    stdout.write_all(&vec![b'x'; 8192]).unwrap();
-    drop(stdout);
-
-    let task_id = supervisor.register_direct(
-        process_id,
-        log.path().to_path_buf(),
-        identity("1"),
-        "command=verbose",
-        tokio_util::sync::CancellationToken::new(),
-        SystemTime::now(),
-    );
-    supervisor
-        .finish(&task_id, BackgroundProcessTerminalKind::Success, None)
-        .unwrap();
-
-    let items = supervisor.peek_unnotified_terminal_items();
-    let tail_bytes = items[0].output_tail.len();
-    assert!(
-        tail_bytes <= crate::application::constants::BACKGROUND_PROCESS_NOTIFICATION_TAIL_BYTES,
-        "通知尾部截断（文件真相源，实际 {tail_bytes} 字节）"
-    );
-
-    let _ = std::fs::remove_dir_all(&base);
-}
-
-// ── #252 PR3：stop 请求与日志游标读取 ───────────────────────────────
-
 fn registered_backgrounded_task(
     supervisor: &BackgroundProcessSupervisor,
     token: tokio_util::sync::CancellationToken,
 ) -> BackgroundProcessId {
     let task_id = supervisor.register_with_cancellation(
-        identity("1"),
-        "command=build",
+        identity("stop-1"),
+        "command=stop",
         token,
         SystemTime::now(),
     );
-    supervisor
-        .mark_backgrounded(&task_id, None)
-        .expect("转后台成功");
+    supervisor.mark_backgrounded(&task_id, None).unwrap();
     task_id
 }
 

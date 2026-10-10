@@ -577,20 +577,14 @@ pub fn render_invocation_reminder_body(
                     },
                     escape_reminder_text(&item.tool_name),
                 ));
-                if !item.output_tail.is_empty() {
-                    lines.push(format!(
-                        "  {}",
-                        escape_reminder_text(item.output_tail.trim())
-                    ));
-                }
             }
             match language {
                 "zh" => lines.push(
-                    "结果已回注；日志或后续输出可用 BackgroundProcessList / BackgroundProcessLogs 查询。"
+                    "完成详情与日志用 BackgroundProcessStatus / BackgroundProcessLogs 查询。"
                         .to_owned(),
                 ),
                 _ => lines.push(
-                    "Use BackgroundProcessList / BackgroundProcessLogs to inspect logs or further output."
+                    "Use BackgroundProcessStatus / BackgroundProcessLogs for details and logs."
                         .to_owned(),
                 ),
             }
