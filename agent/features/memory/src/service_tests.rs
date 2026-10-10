@@ -1615,7 +1615,15 @@ fn recorded_write_events(recorder: &RecordingEventAppend) -> Vec<MemoryEvent> {
     recorder
         .events()
         .into_iter()
-        .filter(|event| !matches!(event.op, MemoryEventOp::OpenLoad | MemoryEventOp::CommitCas))
+        .filter(|event| {
+            !matches!(
+                event.op,
+                MemoryEventOp::OpenLoad
+                    | MemoryEventOp::CommitCas
+                    | MemoryEventOp::AssemblyFingerprint
+                    | MemoryEventOp::EvictionWatermark
+            )
+        })
         .collect()
 }
 
