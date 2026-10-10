@@ -967,6 +967,7 @@
         "constants.rs",
         "domain",
         "domain.rs",
+        "event_coverage_tests.rs",
         "event_jsonl.rs",
         "event_jsonl_tests.rs",
         "lib.rs",
