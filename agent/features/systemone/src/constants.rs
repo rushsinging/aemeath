@@ -16,6 +16,10 @@ pub(crate) const OBSERVATIONS_FILE: &str = "observations.jsonl";
 pub(crate) const CALIBRATION_FILE: &str = "calibration.json";
 
 /// 评分审计事件文件名（{scoring_dir}/audit.jsonl）。
+///
+/// 语义：事件流 PR1 起为 **legacy 停写** 路径（写入已迁移至 `events/{yyyy-mm-dd}.jsonl`）；
+/// 仍被现有 audited/wiring 写路径使用（Task3 改写后退役），迁移见
+/// `LEGACY_AUDIT_FILE`。
 pub(crate) const AUDIT_FILE: &str = "audit.jsonl";
 
 // --- 评分事件流（来源：docs/design/02-modules/systemone/03-event-stream.md §5.1）---
@@ -24,6 +28,19 @@ pub(crate) const AUDIT_FILE: &str = "audit.jsonl";
 ///
 /// legacy 旧审计行无此字段，读侧视为 `0`。
 pub(crate) const EVENT_SCHEMA_VERSION: u32 = 1;
+
+// --- 事件流日切 segment 落盘（来源：docs/design/02-modules/systemone/03-event-stream.md §4.1/§4.2）---
+
+/// 日切事件目录名（{scoring_dir}/events/{yyyy-mm-dd}.jsonl）。
+pub(crate) const EVENTS_DIR_NAME: &str = "events";
+
+/// legacy 审计文件名（{scoring_dir}/audit.jsonl）：事件流迁移的输入侧，
+/// 成功迁移后改名 `audit.jsonl.migrated`。
+pub(crate) const LEGACY_AUDIT_FILE: &str = "audit.jsonl";
+
+/// legacy 审计迁移归档文件名（{scoring_dir}/events/legacy-audit.jsonl）：
+/// 旧行原样旁路归档（NEVER 解析改写、NEVER 丢弃）。
+pub(crate) const LEGACY_AUDIT_ARCHIVE_FILE: &str = "legacy-audit.jsonl";
 
 /// 本构建是否提供 embedded 生产装配（feature `embedded` 编译开关）。
 ///

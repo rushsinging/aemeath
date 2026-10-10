@@ -30,6 +30,7 @@ pub use adapters::calibrated::CalibratedScoringAdapter;
 pub use adapters::calibration_store::{CalibrationArtifact, CalibrationStore};
 #[cfg(feature = "embedded")]
 pub use adapters::embedded::{EmbeddedInitError, EmbeddedScoringAdapter};
+pub use adapters::event_jsonl::JsonlSegmentScoringEventStore;
 pub use adapters::fetch_http::HttpArtifactFetcher;
 #[cfg(feature = "http-adapter")]
 pub use adapters::jev_http::JevHttpScoringAdapter;
