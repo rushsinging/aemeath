@@ -120,6 +120,8 @@ impl std::error::Error for EmbeddedScoringWiringError {}
 /// - `scenarios`：开启的场景标签集合——每个场景独立包一层校准 + 审计外壳
 ///   （同一引擎实例，事件按场景归因），返回 `标签 → port` 映射；空集合
 ///   fail-closed 返回 typed 错误。
+/// - `event_retention_days`：评分事件日切 segment 保留天数（`scoring.event_retention_days`
+///   配置值；`0`=禁用 GC，不影响写入；缺省 30 见 `share::config::scoring`）。
 ///
 /// 返回按场景标签分发的 [`ScoringPort`] 映射（Calibrated → Audited 外壳），
 /// 或 typed 错误。
@@ -128,6 +130,7 @@ pub async fn wire_embedded_scoring_per_scenario(
     scoring_dir: PathBuf,
     manifest: ModelManifest,
     scenarios: &[&'static str],
+    event_retention_days: u32,
 ) -> Result<
     std::collections::BTreeMap<&'static str, Arc<dyn ScoringPort>>,
     EmbeddedScoringWiringError,
@@ -137,7 +140,13 @@ pub async fn wire_embedded_scoring_per_scenario(
     for scenario in scenarios {
         ports.insert(
             *scenario,
-            wrap_calibrated_audited(raw.clone(), &manifest, &scoring_dir, scenario),
+            wrap_calibrated_audited(
+                raw.clone(),
+                &manifest,
+                &scoring_dir,
+                scenario,
+                event_retention_days,
+            ),
         );
     }
     Ok(ports)
@@ -146,11 +155,13 @@ pub async fn wire_embedded_scoring_per_scenario(
 /// 生产 embedded 评分装配链（单场景便捷入口；等价于
 /// [`wire_embedded_scoring_per_scenario`] 的单场景包装）。
 ///
+/// `event_retention_days`：评分事件保留天数（`scoring.event_retention_days` 配置值）。
 /// 返回装配完成的 [`ScoringPort`]（Calibrated → Audited 外壳），或 typed 错误。
 pub async fn wire_embedded_scoring(
     models_dir: PathBuf,
     scoring_dir: PathBuf,
     manifest: ModelManifest,
+    event_retention_days: u32,
 ) -> Result<Arc<dyn ScoringPort>, EmbeddedScoringWiringError> {
     let raw = wire_embedded_scoring_raw(models_dir, manifest.clone()).await?;
     Ok(wrap_calibrated_audited(
@@ -158,6 +169,7 @@ pub async fn wire_embedded_scoring(
         &manifest,
         &scoring_dir,
         "embedded",
+        event_retention_days,
     ))
 }
 
@@ -199,18 +211,20 @@ pub async fn wire_embedded_scoring_raw(
 /// `manifest.engine_revision`，评分事件落在 `scoring_dir/events/{yyyy-mm-dd}.jsonl`
 /// 日切 segment（构造期完成 legacy 迁移与保留期 GC），
 /// `scenario` 场景标签随每条事件归因。
+///
+/// `event_retention_days`：事件 segment 保留天数（来自 `scoring.event_retention_days`
+/// 配置，由 composition 注入；`0`=仅禁用 GC，NEVER 表示关闭写入）。
 pub fn wrap_calibrated_audited(
     inner: Arc<dyn ScoringPort>,
     manifest: &ModelManifest,
     scoring_dir: &Path,
     scenario: &'static str,
+    event_retention_days: u32,
 ) -> Arc<dyn ScoringPort> {
     let store = CalibrationStore::new(scoring_dir.to_path_buf());
     let calibrated = Arc::new(CalibratedScoringAdapter::new(inner, &store));
-    let event_store = JsonlSegmentScoringEventStore::new(
-        scoring_dir.to_path_buf(),
-        crate::constants::DEFAULT_EVENT_RETENTION_DAYS,
-    );
+    let event_store =
+        JsonlSegmentScoringEventStore::new(scoring_dir.to_path_buf(), event_retention_days);
     Arc::new(AuditedScoringAdapter::new(
         calibrated,
         manifest.engine_revision.clone(),

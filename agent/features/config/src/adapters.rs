@@ -157,6 +157,8 @@ impl EnvAdapter {
                 skill_match,
                 policy_triage,
                 memory_recall,
+                // 事件保留天数暂无业务 env：仅经配置文件分层合并设置。
+                event_retention_days: None,
             })
         };
         let storage = source.get("AEMEATH_WORKTREES_DIR").map(|directory| {

@@ -35,10 +35,6 @@ pub(crate) const LEGACY_AUDIT_FILE: &str = "audit.jsonl";
 /// 旧行原样旁路归档（NEVER 解析改写、NEVER 丢弃）。
 pub(crate) const LEGACY_AUDIT_ARCHIVE_FILE: &str = "legacy-audit.jsonl";
 
-/// 事件 segment 默认保留天数（构造期注入 `JsonlSegmentScoringEventStore`；
-/// Task4 接配置前的占位默认值，0 = 禁用 GC）。
-pub(crate) const DEFAULT_EVENT_RETENTION_DAYS: u32 = 30;
-
 /// 本构建是否提供 embedded 生产装配（feature `embedded` 编译开关）。
 ///
 /// composition 据此在装配前判定 EmbeddedUnavailable（typed startup outcome），

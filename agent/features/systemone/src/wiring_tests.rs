@@ -48,7 +48,13 @@ async fn wire_embedded_scoring_with_invalid_manifest_returns_manifest_invalid_be
     manifest.hidden_size = 7;
     let models_dir = std::path::PathBuf::from("/nonexistent/aemeath-wiring-models");
     let scoring_dir = std::path::PathBuf::from("/nonexistent/aemeath-wiring-scoring");
-    let error = match wire_embedded_scoring(models_dir.clone(), scoring_dir.clone(), manifest).await
+    let error = match wire_embedded_scoring(
+        models_dir.clone(),
+        scoring_dir.clone(),
+        manifest,
+        share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
+    )
+    .await
     {
         Err(error) => error,
         Ok(_) => panic!("契约非法的 manifest 必须 fail-closed"),
@@ -74,11 +80,17 @@ async fn wire_embedded_scoring_with_invalid_manifest_returns_manifest_invalid_be
 async fn wire_embedded_scoring_without_embedded_feature_returns_typed_unavailable() {
     let models_dir = std::path::PathBuf::from("/nonexistent/aemeath-wiring-models");
     let scoring_dir = std::path::PathBuf::from("/nonexistent/aemeath-wiring-scoring");
-    let error =
-        match wire_embedded_scoring(models_dir.clone(), scoring_dir, fixture_manifest()).await {
-            Err(error) => error,
-            Ok(_) => panic!("feature 关闭必须返回 typed 错误"),
-        };
+    let error = match wire_embedded_scoring(
+        models_dir.clone(),
+        scoring_dir,
+        fixture_manifest(),
+        share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
+    )
+    .await
+    {
+        Err(error) => error,
+        Ok(_) => panic!("feature 关闭必须返回 typed 错误"),
+    };
     assert!(
         matches!(error, EmbeddedScoringWiringError::EmbeddedUnavailable),
         "错误类型不符：{error:?}"
@@ -103,6 +115,7 @@ async fn wire_embedded_scoring_when_model_missing_returns_model_missing() {
         temp.path().join("models"),
         temp.path().join("scoring"),
         fixture_manifest(),
+        share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
     )
     .await
     {
@@ -206,6 +219,7 @@ async fn wrap_calibrated_audited_appends_scoring_event_with_manifest_revision() 
         &manifest,
         &scoring_dir,
         "memory_rerank",
+        share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
     );
 
     let state = ScoringState::new("用户正在验证审计 revision。").expect("state 构造");

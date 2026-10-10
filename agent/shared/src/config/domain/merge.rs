@@ -588,6 +588,8 @@ pub struct ScoringConfigPatch {
     pub policy_triage: Option<bool>,
     #[serde(default, alias = "memoryRecall")]
     pub memory_recall: Option<bool>,
+    #[serde(default, alias = "eventRetentionDays")]
+    pub event_retention_days: Option<u32>,
 }
 
 pub(crate) fn apply_tools_patch(mut base: ToolsConfig, patch: ToolsConfigPatch) -> ToolsConfig {
@@ -629,6 +631,10 @@ pub(crate) fn apply_scoring_patch(
     }
     if let Some(v) = patch.memory_recall {
         base.memory_recall = v;
+    }
+    if let Some(v) = patch.event_retention_days {
+        // `0` 是合法覆盖值（禁用 GC），不得与「未设置」混淆。
+        base.event_retention_days = v;
     }
     base
 }

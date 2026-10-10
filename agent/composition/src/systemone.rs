@@ -263,11 +263,14 @@ pub(crate) trait EmbeddedScoringFactory: Send + Sync {
 
     /// 按场景包装校准 + 审计外壳（生产：`wrap_calibrated_audited`，事件带
     /// 场景标签归因；测试默认透传 raw，避免测试向真实 scoring 目录落盘）。
+    /// `event_retention_days` 来自 `scoring.event_retention_days` 配置（默认 30，
+    /// `0`=禁用事件 segment GC），透传给事件 store 构造。
     fn wrap(
         &self,
         raw: Arc<dyn systemone::ScoringPort>,
-        manifest: &systemone::ModelManifest,
-        scenario: &'static str,
+        _manifest: &systemone::ModelManifest,
+        _scenario: &'static str,
+        _event_retention_days: u32,
     ) -> Arc<dyn systemone::ScoringPort> {
         raw
     }
@@ -281,6 +284,9 @@ pub(crate) trait EmbeddedScoringFactory: Send + Sync {
 pub(crate) struct ProductionReleaseManifest;
 
 impl ReleaseManifestSource for ProductionReleaseManifest {
+    // 发行元数据原始温度 2.3510958（HF 发布口径）：f32 字面量位数触发
+    // clippy::excessive_precision，但截断会改变落点 f32 取值，故保留原值。
+    #[allow(clippy::excessive_precision)]
     fn release_manifest(&self) -> Option<systemone::ModelManifest> {
         Some(systemone::ModelManifest {
             schema_version: 1,
@@ -327,8 +333,15 @@ impl EmbeddedScoringFactory for ProductionEmbeddedFactory {
         raw: Arc<dyn systemone::ScoringPort>,
         manifest: &systemone::ModelManifest,
         scenario: &'static str,
+        event_retention_days: u32,
     ) -> Arc<dyn systemone::ScoringPort> {
-        systemone::wrap_calibrated_audited(raw, manifest, &scoring_dir(), scenario)
+        systemone::wrap_calibrated_audited(
+            raw,
+            manifest,
+            &scoring_dir(),
+            scenario,
+            event_retention_days,
+        )
     }
 }
 
@@ -380,18 +393,38 @@ pub(crate) async fn assemble_scoring_ports_with(
     match factory.wire(&manifest).await {
         Ok(raw_port) => ScoringAssembly {
             assignment: ScoringPortAssignment {
-                for_memory_rerank: scoring
-                    .memory_rerank
-                    .then(|| factory.wrap(raw_port.clone(), &manifest, "memory_rerank")),
-                for_memory_recall: scoring
-                    .memory_recall
-                    .then(|| factory.wrap(raw_port.clone(), &manifest, "memory_recall")),
-                for_skill_match: scoring
-                    .skill_match
-                    .then(|| factory.wrap(raw_port.clone(), &manifest, "skill_match")),
-                for_policy_triage: scoring
-                    .policy_triage
-                    .then(|| factory.wrap(raw_port.clone(), &manifest, "policy_triage")),
+                for_memory_rerank: scoring.memory_rerank.then(|| {
+                    factory.wrap(
+                        raw_port.clone(),
+                        &manifest,
+                        "memory_rerank",
+                        scoring.event_retention_days,
+                    )
+                }),
+                for_memory_recall: scoring.memory_recall.then(|| {
+                    factory.wrap(
+                        raw_port.clone(),
+                        &manifest,
+                        "memory_recall",
+                        scoring.event_retention_days,
+                    )
+                }),
+                for_skill_match: scoring.skill_match.then(|| {
+                    factory.wrap(
+                        raw_port.clone(),
+                        &manifest,
+                        "skill_match",
+                        scoring.event_retention_days,
+                    )
+                }),
+                for_policy_triage: scoring.policy_triage.then(|| {
+                    factory.wrap(
+                        raw_port.clone(),
+                        &manifest,
+                        "policy_triage",
+                        scoring.event_retention_days,
+                    )
+                }),
             },
             outcome: ScoringStartupOutcome::Ready,
         },

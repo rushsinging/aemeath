@@ -68,18 +68,21 @@ pub use wiring::{
 ///
 /// 设计 §4.3 HTTP adapter 退役边界：仅供测试 / eval 对分与回归基准使用，
 /// 生产 composition **NEVER** 调用；默认构建不提供本工厂。
+///
+/// `event_retention_days`：评分事件保留天数（测试 / eval 侧传
+/// `share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS` 或显式配置值）。
 #[cfg(feature = "http-adapter")]
 pub fn wire_http_scoring_port(
     base_url: &str,
     model: &str,
     timeout: std::time::Duration,
     scoring_dir: std::path::PathBuf,
+    event_retention_days: u32,
 ) -> std::sync::Arc<dyn ScoringPort> {
     let http = std::sync::Arc::new(JevHttpScoringAdapter::new(base_url, model, timeout));
     let store = CalibrationStore::new(scoring_dir.clone());
     let calibrated = std::sync::Arc::new(CalibratedScoringAdapter::new(http, &store));
-    let event_store =
-        JsonlSegmentScoringEventStore::new(scoring_dir, constants::DEFAULT_EVENT_RETENTION_DAYS);
+    let event_store = JsonlSegmentScoringEventStore::new(scoring_dir, event_retention_days);
     std::sync::Arc::new(AuditedScoringAdapter::new(
         calibrated,
         model.to_owned(),

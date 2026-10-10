@@ -53,7 +53,7 @@ fn audited_with_day(
         "kev-0.8b@2026-09-30",
         JsonlSegmentScoringEventStore::new(
             scoring_dir,
-            crate::constants::DEFAULT_EVENT_RETENTION_DAYS,
+            share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
         ),
         clock_at(day),
         "memory_rerank",
