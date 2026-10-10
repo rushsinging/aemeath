@@ -155,7 +155,6 @@ pub(crate) enum TuiCompactWork {
 pub(crate) enum TuiInteractionKind {
     ToolApproval,
     UserQuestion,
-    StuckDiagnostic,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -325,7 +324,6 @@ pub(crate) struct TuiInteractionRequest {
 pub(crate) enum TuiInteractionBody {
     UserQuestions(Vec<TuiUserQuestion>),
     ToolApproval(TuiToolApprovalPrompt),
-    HardPause(TuiStuckDiagnostic),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -353,12 +351,6 @@ pub(crate) enum TuiRiskLevel {
     Low,
     Medium,
     High,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct TuiStuckDiagnostic {
-    pub(crate) reason: String,
-    pub(crate) recent_actions: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

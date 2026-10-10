@@ -68,13 +68,10 @@ TerminateRun: 任意非终态 → Terminating → Terminated
 | AwaitingToolApproval | 全部放行 | ExecutingTools |
 | AwaitingToolApproval | 需人工确认 | AwaitingInteraction（`ContinueToolApproval`） |
 | ExecutingTools | Tool 返回 `Suspended(UserInteraction)` | AwaitingInteraction（`CompleteToolCall`） |
-| ExecutingTools | StuckGuard `HardPause` | 挂起按来源相位发起（见下两行），不再直接自 `ExecutingTools` 挂起 |
-| ApplyingResponse | StuckGuard `HardPause`（text stall） | capability 可用：AwaitingInteraction（`ContinueAfterHardPause`，step 现场收口）；unavailable：Failed |
-| DrainingInput | StuckGuard `HardPause`（tool fuse，工具轮与 step 收口后） | capability 可用：AwaitingInteraction（`ContinueAfterHardPause`）；unavailable：Failed |
+| ApplyingResponse / DrainingInput | StuckGuard 升级（Fail） | → Failed（Main/Sub 一律；**NEVER** 再挂 interaction） |
 | ExecutingTools | 结果回收完 | FinalizingStep → DrainingInput |
-| AwaitingInteraction | 匹配 reply | 按 typed continuation 恢复到 ExecutingTools / AwaitingToolApproval / PreparingContext；`ContinueAfterHardPause` 恢复到挂起源相位（ApplyingResponse / DrainingInput）并按来源收口 |
+| AwaitingInteraction | 匹配 reply | 按 typed continuation 恢复到 ExecutingTools / AwaitingToolApproval / PreparingContext |
 | AwaitingInteraction | completion=`Cancelled` + Tool continuation | ToolCall 得到 typed Cancelled，回原 Tool 状态继续 |
-| AwaitingInteraction | completion=`Cancelled` + HardPause continuation | Failed（typed HardPauseCancelled） |
 | 任意 active Step 态 | `CancelRunStep` 获胜 | CancellingStep |
 | CancellingStep | StepFinalizer 完成或 10s deadline 到达 | FinalizingStep（持久化 deterministic receipts / partial step） |
 | FinalizingStep | cancel 原因的 Step 已持久化（`StepCancelled → DrainingInput`） | DrainingInput |
@@ -164,16 +161,9 @@ Stop Hook 只裁决 Run 能否终止，**NEVER** 否决已完成 assistant / Too
 
 > Session committed content 是唯一历史真相。Stop Block 的语义是“继续同一个 Run”，不是撤销 assistant 已产生的内容；feedback 和用户追问只决定该 Run 的**下一 Step**。
 
-### 2.3 HardPause Continuation
+### 2.3 StuckGuard 升级（Fail）
 
-StuckGuard HardPause 有两个挂起源，continuation **MUST** 记录挂起源相位（`PendingInteraction.hard_pause_resume_status`）：
-
-- **text stall**（挂起源 `ApplyingResponse`）：挂起时现场收口当前 step（complete + finalize）；
-- **tool fuse**（挂起源 `DrainingInput`）：本批调用全部按 SoftBlock 物化为阻断结果，step 随工具轮正常收口后才挂起，恢复时 **NEVER** 重放工具轮。
-
-- 若恢复（HardPauseContinue）：run 先回到挂起源相位，再按相位收口——`ApplyingResponse` 补 `ContinueAfterResponse` 至 `DrainingInput`；`DrainingInput` 直接回到 drain。**NEVER** 直接跳到 `PreparingContext`；
-- 若取消：typed cancel 后 completion 走 `complete_tool_interaction` 的不匹配分支，run **THEN** 进入 Failed（保持既有语义）；
-- 若 `begin` 被域状态拒绝（如审批交互已挂起的 `InteractionAlreadyPending`）：守卫降级为 SoftBlock 语义继续，run **NEVER** 因守卫自身而 Failed；port 层 `Unavailable`（如 Sub-run 无交互通道）保持 fail-run 语义（见 §04-stuck-prevention）。
+StuckGuard 升级路径（原 HardPause）**MUST** 直接将 Run 收口为 `Failed`（带 stuck reason），Main/Sub 一律如此。**NEVER** 再发起 interaction / `AwaitingUser` 挂起。用户发下一条消息开新 Run。细节见 [04-stuck-prevention](04-stuck-prevention.md)。
 
 ### 2.4 领域事件发布不变量
 
@@ -498,7 +488,7 @@ Run-owned atomic InputQueue 提供 drain、park 与 admission 生命周期：
 | Stop Hook Block（累计≤当前 Run 冻结上限） | 当前 Step 提交 → InternalContinuation(StopHookFeedback) + 同次 drain 用户追问 → PreparingContext，同一 Run 继续 |
 | Stop Hook Block 累计>当前 Run 冻结上限 | 当前 Step 提交 → Failed，错误文本保留实际阻断次数 |
 | timeout>0 且墙钟超时 | Failed |
-| StuckGuard HardPause | interaction capability 可用 → AwaitingInteraction；Unavailable → Failed；begin 被域状态拒绝 → 守卫降级 SoftBlock 继续（run 不 Failed） |
+| StuckGuard 升级（Fail） | → Failed（Main/Sub 一律） |
 | CancelRunStep 且 Drain 无新输入、admission 保持 Open | StepFinalizer → DrainingInput → AwaitingInput |
 | CancelRunStep 且 Drain 有输入 | StepFinalizer → DrainingInput → Ready → PreparingContext，继续下一 Step |
 | CancelRunStep 且 admission 已 seal 且无输入 | StepFinalizer → DrainingInput → EmptyAndSealed → Completed(`StepCancelledAndInputDrained`) |
@@ -521,7 +511,7 @@ Run-owned atomic InputQueue 提供 drain、park 与 admission 生命周期：
 - 进入前必须保存唯一 `PendingInteraction` 和 typed continuation，并发布 `RunInteractionRequested`；
 - `InteractionInbox` 只接受匹配 `run_id + request_id` 的 completion，重复、陈旧、不匹配的 reply 返回 typed error；
 - 普通 `UserMessage` 可以继续进入 InputQueue，但不得唤醒或完成 interaction continuation；
-- completion 到达后先验证 identity，再发布 `RunInteractionResumed`，按 continuation 恢复 Tool、Approval 或 HardPause 工作；
+- completion 到达后先验证 identity，再发布 `RunInteractionResumed`，按 continuation 恢复 Tool / Approval 工作；
 - cancel、timeout、parent disconnect 和 session shutdown 都必须走 typed completion，不能伪造普通用户输入。
 
 两种等待均不属于终态；只有 `Completed / Failed / Terminated` 才能结束 `run_loop`。

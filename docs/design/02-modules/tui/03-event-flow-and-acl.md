@@ -286,17 +286,14 @@ struct UiUserQuestion {
 enum UiInteractionBody {
     UserQuestions(Vec<UiUserQuestion>),
     ToolApproval(UiApprovalPrompt),
-    HardPause(UiStuckDiagnostic),
 }
 
 enum UiInteractionReply {
     UserAnswers(Vec<String>),
     ToolApproval(UiApprovalDecision),
-    HardPause(UiHardPauseDecision),       // v0.1.0 只有 Continue；取消走 typed cancel command
 }
 
 enum UiApprovalDecision { Approve, Deny }
-enum UiHardPauseDecision { Continue }
 
 struct UiApprovalPrompt { title: String, detail: String }
 struct UiStuckDiagnostic { reason: String, recent_actions: Vec<String> }
@@ -354,7 +351,6 @@ sdk::ChatEvent::InteractionRequested {
     request_id,
     run_id,
     body: UserQuestions(items) | ToolApproval(prompt) |
-          HardPause(diagnostic),
 }
   → event_mapping: SDK run/id/body → TUI-owned RunId / UiInteractionRequestId / UiInteractionBody
   → UiEvent::InteractionRequested { request_id, run_id, body }
@@ -383,13 +379,13 @@ sdk::ChatEvent::InteractionRequested {
 规则：
 
 1. Runtime-owned bridge **MUST** 校验 request body 与 reply variant，并对未知、重复、已完成或 RunCancelling 返回结构化 `InteractionCommandOutcome`；TUI 只投影该结果，**NEVER** 复制校验真相或假定成功。每个 variant 的类型化投影见 §4.6——`InvalidReply` **NEVER** 映射到终态。
-2. UserQuestions 的答案数量 **MUST** 等于 question count，并按原问题顺序把每个 `String` 无损包装为 Runtime `UserAnswer`；不得丢项、重排或附加隐式默认值。ToolApproval 只接受 Approve / Deny；HardPause 只接受 Continue。`InvalidReply` 不消费 Runtime pending request，用户可修正后重试。
+2. UserQuestions 的答案数量 **MUST** 等于 question count，并按原问题顺序把每个 `String` 无损包装为 Runtime `UserAnswer`；不得丢项、重排或附加隐式默认值。ToolApproval 只接受 Approve / Deny。`InvalidReply` 不消费 Runtime pending request，用户可修正后重试。
 3. cancel 使用 typed `InteractionCancelReason::UserCancelled`，**NEVER** 用等长空字符串或 drop sender 猜测取消。
 4. Run cancel / session reset 的 pending continuation 清理由 Runtime cancellation scope 负责；stream failure / processing teardown 只影响 TUI 投影，**NEVER** 冒充 Runtime cancellation 或自行 drain waiter。
 5. Model 只建立属于已知非终态 Run 的 Interaction，并要求后续 result Intent 与活跃 `UiInteractionRequestId` 匹配；旧 Run / 未知 Run / 陈旧 request 不改投影，并记录 Diagnostic Intent。
 6. TUI 同一时刻只容纳一个 active Interaction。Runtime **MUST** 把并发 Tool suspension 按原始 ToolCall 稳定顺序串行发布；新 request 与未完成 request 冲突时 TUI 记录协议错误，**NEVER** 静默覆盖活跃块或建立第二个 registry。
 7. `InteractionReplySent` / `InteractionCancelled` 只更新匹配 Interaction 块的本地阶段，**NEVER** 把 Run 从 `AwaitingUser` 改为 `Running` 或 `Cancelled`；Runtime 完成 continuation 后发布 `RunResumed`，TUI 才恢复 Running。
-8. UserQuestions 渲染问题与答案；ToolApproval 渲染 Approve / Deny；HardPause 渲染 diagnostic 与 Continue / Cancel。所有选择只形成 TUI draft，业务结果仍由 Runtime continuation 决定。
+8. UserQuestions 渲染问题与答案；ToolApproval 渲染 Approve / Deny。所有选择只形成 TUI draft，业务结果仍由 Runtime continuation 决定。
 
 ### 4.5 Run 取消的两阶段投影
 
@@ -421,8 +417,8 @@ Runtime `AgentClient::reply_interaction` / `cancel_interaction` 返回封闭枚�
 |---|---|---|---|---|
 | `ReplySent` | `InteractionReplySent { request_id }` | `Collecting`/`Confirming` → `ReplyPending` → `Replied` | 消费 | 是 |
 | `CancelAccepted` | `InteractionCancelled { request_id }` | → `Cancelled` | 丢弃 | 是 |
-| `InvalidReply { reason }` | `InteractionReplyRejected { request_id, reason }` | **回** `Collecting`（UserQuestions）或 `Confirming`（ToolApproval / HardPause）；**NEVER** 进入终态 | **保留**，用户修正后重试同一 `request_id` | **否** |
-| `CancelRejected { reason }` | `InteractionCancelRejected { request_id, reason }` | **回** `Collecting`（UserQuestions）或 `Confirming`（ToolApproval / HardPause）；**NEVER** 进入终态 | **保留**，用户可继续原 draft 或重新发起取消 | **否** |
+| `InvalidReply { reason }` | `InteractionReplyRejected { request_id, reason }` | **回** `Collecting`（UserQuestions）或 `Confirming`（ToolApproval）；**NEVER** 进入终态 | **保留**，用户修正后重试同一 `request_id` | **否** |
+| `CancelRejected { reason }` | `InteractionCancelRejected { request_id, reason }` | **回** `Collecting`（UserQuestions）或 `Confirming`（ToolApproval）；**NEVER** 进入终态 | **保留**，用户可继续原 draft 或重新发起取消 | **否** |
 | `NotFound { request_id }` | Diagnostic-only Intent（无 Interaction Change） | 不改当前活跃 Interaction 投影（陈旧 request） | 静默丢弃 | n/a |
 | `AlreadyCompleted { request_id }` | Diagnostic-only Intent | 不改投影（协议冲突） | 静默丢弃 | n/a |
 | `RunCancelling { run_id }` | `InteractionReplyDeferred { request_id, run_id }`；**NEVER** 推进交互终态 | 保持 `ReplyPending` / `Confirming`，等 Run 终态事件（§4.5） | 保留 | 否 |
@@ -431,7 +427,7 @@ Runtime `AgentClient::reply_interaction` / `cancel_interaction` 返回封闭枚�
 规则：
 
 1. **MUST** `InvalidReply` **NEVER** 映射到 `ReplyFailed` 或 `Cancelled`——它是可恢复的验证失败：Runtime 不消费 pending request，用户修正 draft 后可对同一 `request_id` 重试。
-2. **MUST** reducer 收到 `InteractionReplyRejected` 时把 phase 回退到 `Collecting`（UserQuestions）或 `Confirming`（ToolApproval / HardPause），**保留** draft 与光标位置，并把 `reason` 追加为 Diagnostic notice。
+2. **MUST** reducer 收到 `InteractionReplyRejected` 时把 phase 回退到 `Collecting`（UserQuestions）或 `Confirming`（ToolApproval），**保留** draft 与光标位置，并把 `reason` 追加为 Diagnostic notice。
 3. **MUST** `NotFound` / `AlreadyCompleted` 只产生 Diagnostic Intent，**NEVER** 改变当前活跃 Interaction 的 phase 或消费 draft；二者表示陈旧 / 协议冲突，effect runner **MUST** 记录结构化诊断日志后静默丢弃。
 4. **MUST** `RunCancelling` 不伪造交互终态——交互保持等待，直到 Runtime 发布 `RunCancelled` / `RunCompleted`；`CancelInteraction` 已发 typed `UserCancelled`，Runtime 在 cancellation scope 内清理 pending continuation。
 5. **MUST** 只有 `IrrecoverableError` 才进入 `ReplyFailed { message }`；该终态意味着 request 已无法重试（如对应 Run 已死、连接永久断开），且 **MUST** 在 Diagnostic 记录结构化错误。

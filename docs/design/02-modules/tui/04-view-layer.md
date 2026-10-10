@@ -82,7 +82,6 @@ struct InteractionBlockView {
 enum InteractionBodyView {
     UserQuestions { questions: Vec<UserQuestionView>, current: usize },
     ToolApproval { title: String, detail: String, selected: Option<ApprovalDecisionView> },
-    HardPause { reason: String, recent_actions: Vec<String>, continue_selected: bool },
 }
 
 enum InteractionPhaseView {

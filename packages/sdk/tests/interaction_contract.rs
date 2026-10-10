@@ -1,8 +1,7 @@
 use sdk::{
     AgentId, ApprovalDecision, InteractionCancelReason, InteractionCommandOutcome,
     InteractionReply, InteractionReplyError, InteractionRequestBody, InteractionRequestId,
-    OptionItem, RiskLevel, RunStepId, StuckDiagnostic, ToolApprovalPrompt, UserAnswer,
-    UserQuestion,
+    OptionItem, RiskLevel, RunStepId, ToolApprovalPrompt, UserAnswer, UserQuestion,
 };
 
 fn assert_json_round_trip<T>(value: &T)
@@ -51,10 +50,6 @@ fn every_interaction_request_body_round_trips() {
             tool_name: "Bash".to_string(),
             args_summary: "cargo test".to_string(),
             risk_level: RiskLevel::Medium,
-        }),
-        InteractionRequestBody::HardPause(StuckDiagnostic {
-            reason: "repeated action".to_string(),
-            recent_actions: vec!["Read".to_string(), "Read".to_string()],
         }),
     ];
 
@@ -107,7 +102,6 @@ fn every_interaction_reply_and_outcome_round_trips() {
     let replies = [
         InteractionReply::UserQuestions(vec![UserAnswer("a".to_string())]),
         InteractionReply::ToolApproval(ApprovalDecision::Approve),
-        InteractionReply::HardPauseContinue,
     ];
     for reply in replies {
         assert_json_round_trip(&reply);

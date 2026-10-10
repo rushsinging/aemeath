@@ -148,7 +148,6 @@ pub enum CompactWorkView {
 pub enum InteractionKindView {
     ToolApproval,
     UserQuestion,
-    StuckDiagnostic,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

@@ -29,7 +29,7 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
     use crate::tui::adapter::tui_runtime_event::{TuiInteractionBody, TuiRunStepEvent};
     use crate::tui::model::conversation::interaction::{
         InteractionBody, InteractionRequest, UiApprovalPrompt, UiOptionItem, UiRiskLevel,
-        UiStuckDiagnostic, UiUserQuestion,
+        UiUserQuestion,
     };
 
     match event {
@@ -456,12 +456,6 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                                 UiRiskLevel::High
                             }
                         },
-                    })
-                }
-                TuiInteractionBody::HardPause(diagnostic) => {
-                    InteractionBody::HardPause(UiStuckDiagnostic {
-                        reason: diagnostic.reason.clone(),
-                        recent_actions: diagnostic.recent_actions.clone(),
                     })
                 }
             };

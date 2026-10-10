@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use sdk::{
     ChatInputEvent, ChatInputEventPort, InputEventFuture, InputEventOptFuture, InteractionReply,
-    InteractionRequest, InteractionRequestBody, RunId, StuckDiagnostic,
+    InteractionRequest, InteractionRequestBody, RunId,
 };
 
 use super::{InteractionCommand, SessionIngress, SessionInputMailbox};
@@ -118,9 +118,10 @@ fn interaction_command_is_dispatched_through_ingress() {
         id: sdk::InteractionRequestId::new_v7(),
         run_id: RunId::new_v7(),
         tool_call_id: None,
-        body: InteractionRequestBody::HardPause(StuckDiagnostic {
-            reason: "test".to_string(),
-            recent_actions: Vec::new(),
+        body: InteractionRequestBody::ToolApproval(sdk::ToolApprovalPrompt {
+            tool_name: "Bash".into(),
+            args_summary: "x".into(),
+            risk_level: sdk::RiskLevel::Low,
         }),
     };
     let mut receiver = bridge
@@ -128,14 +129,14 @@ fn interaction_command_is_dispatched_through_ingress() {
         .expect("register interaction");
     let outcome = ingress.dispatch_interaction(InteractionCommand::Reply {
         request_id: request.id,
-        reply: InteractionReply::HardPauseContinue,
+        reply: InteractionReply::ToolApproval(sdk::ApprovalDecision::Approve),
     });
     assert_eq!(outcome, sdk::InteractionCommandOutcome::Accepted);
     assert!(matches!(
         receiver.try_recv(),
         Ok(
             crate::application::interaction::port::InteractionCompletion::Replied(
-                InteractionReply::HardPauseContinue
+                InteractionReply::ToolApproval(sdk::ApprovalDecision::Approve)
             )
         )
     ));

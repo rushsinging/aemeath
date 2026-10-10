@@ -7,7 +7,7 @@ pub(super) async fn record_stuck(
     decision: &StuckDecision,
 ) -> Result<(), LoopEngineError> {
     let reason = match decision {
-        StuckDecision::SoftBlock { reason } | StuckDecision::HardPause { reason } => reason.clone(),
+        StuckDecision::SoftBlock { reason } | StuckDecision::Fail { reason } => reason.clone(),
         StuckDecision::Allow => return Ok(()),
     };
     run.mark_stuck(reason)?;

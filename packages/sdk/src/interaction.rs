@@ -17,7 +17,6 @@ pub struct InteractionRequest {
 pub enum InteractionRequestBody {
     UserQuestions(Vec<UserQuestion>),
     ToolApproval(ToolApprovalPrompt),
-    HardPause(StuckDiagnostic),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -32,12 +31,6 @@ pub struct ToolApprovalPrompt {
     pub tool_name: String,
     pub args_summary: String,
     pub risk_level: RiskLevel,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct StuckDiagnostic {
-    pub reason: String,
-    pub recent_actions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -57,7 +50,6 @@ pub enum ApprovalDecision {
 pub enum InteractionReply {
     UserQuestions(Vec<UserAnswer>),
     ToolApproval(ApprovalDecision),
-    HardPauseContinue,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
