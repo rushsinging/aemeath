@@ -407,3 +407,36 @@ fn runtime_row_hides_backend_process_count_when_zero() {
     let text = runtime_row_text(0);
     assert!(!text.contains("Backend Progress"), "计数 0 不显示：{text}");
 }
+
+// ── #1895 L4：计数经 status bar render 管线的位置级断言 ──────────
+// L1（build_full_text 段拼）不覆盖真实 render 布局——计数必须落在
+// runtime 行（第 0 行，与 Ready 同行），context 行不含。
+
+#[test]
+fn backend_process_count_lands_on_runtime_row_not_context_row() {
+    let bar = StatusBar::new();
+    let mut view = runtime_context_view("~/aemeath", "~/aemeath", "main");
+    view.runtime.background_processes_active = 2;
+    let area = Rect::new(0, 0, 120, 2);
+    let mut buf = Buffer::empty(area);
+    bar.render(area, &mut buf, &StatusSelectionViewState::default(), &view);
+
+    let row_text = |row: u16| -> String {
+        buf.content
+            .iter()
+            .skip(row as usize * area.width as usize)
+            .take(area.width as usize)
+            .map(|cell| cell.symbol().to_string())
+            .collect()
+    };
+    let runtime_row = row_text(0);
+    let context_row = row_text(1);
+    assert!(
+        runtime_row.contains("Ready") && runtime_row.contains("2 Backend Progress"),
+        "计数应在 runtime 行（与 Ready 同行）：{runtime_row}"
+    );
+    assert!(
+        !context_row.contains("Backend Progress"),
+        "context 行不应含计数：{context_row}"
+    );
+}
