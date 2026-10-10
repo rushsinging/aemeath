@@ -1,4 +1,5 @@
 use super::*;
+use crate::domain::event::{EventChange, EventOutcome, MemoryEvent, MemoryEventOp};
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex as StdMutex},
@@ -72,6 +73,10 @@ impl MemoryDatasetStore for ScriptedStore {
         let layer = script.layer(layer);
         layer.commit_calls += 1;
         layer.commits.pop_front().expect("unexpected commit")
+    }
+
+    fn event_revision_label(revision: &Self::Revision) -> Option<String> {
+        Some(revision.to_string())
     }
 }
 
@@ -1257,4 +1262,679 @@ async fn read_falls_back_to_snapshot_when_store_keeps_failing() {
         .any(|hit| hit.entry.content == "old fact"));
     let listed = service.list(None).await;
     assert_eq!(listed.len(), 1);
+}
+
+// -----------------------------------------------------------------
+// Event emit skeleton: a committed write-add emits exactly one event
+// through the injected append port, and a broken port never blocks callers.
+// -----------------------------------------------------------------
+
+/// Append stub that always fails — proves emit is fail-open.
+struct FailingEventAppend;
+
+#[async_trait]
+impl MemoryEventAppendPort for FailingEventAppend {
+    async fn append(&self, _event: &MemoryEvent) -> Result<(), EventAppendError> {
+        Err(EventAppendError::Io)
+    }
+}
+
+#[tokio::test]
+async fn write_add_emits_event_through_injected_append_port() {
+    let added = entry(MemoryLayer::Project, "emitted fact");
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(
+            vec![Ok(empty_layer(1, MemoryLayer::Project))],
+            vec![Ok(receipt(2, MemoryCommitVisibility::Visible))],
+        ),
+    );
+    let recorder = RecordingEventAppend::default();
+    let service = MemoryService::open_with_clock_and_scorer_and_events(
+        store,
+        MemoryPolicy::default(),
+        || 4_242,
+        None,
+        Arc::new(recorder.clone()),
+    )
+    .await
+    .unwrap();
+
+    let result = service.write(added.clone()).await.unwrap();
+    assert!(matches!(result, WriteResult::Added { .. }));
+
+    let events = recorded_write_events(&recorder);
+    assert_eq!(
+        events.len(),
+        1,
+        "one committed write-add must emit one event, got {events:?}"
+    );
+    assert_eq!(events[0].op, MemoryEventOp::WriteAdd);
+    assert_eq!(events[0].outcome, EventOutcome::Succeeded);
+    assert_eq!(
+        events[0].change,
+        EventChange::Write {
+            before: vec![],
+            after: vec![added]
+        }
+    );
+}
+
+#[tokio::test]
+async fn append_failure_never_blocks_write_or_retrieve() {
+    let stored = entry(MemoryLayer::Project, "fail open fact");
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
+        layer_script(
+            vec![
+                Ok(empty_layer(1, MemoryLayer::Project)),
+                Ok(committed(2, MemoryLayer::Project, vec![stored.clone()])),
+            ],
+            vec![Ok(receipt(2, MemoryCommitVisibility::Visible))],
+        ),
+    );
+    let service = MemoryService::open_with_clock_and_scorer_and_events(
+        store,
+        MemoryPolicy::default(),
+        || 4_242,
+        None,
+        Arc::new(FailingEventAppend),
+    )
+    .await
+    .unwrap();
+
+    // Fail-open: the always-Err port must never surface through the write path.
+    let result = service
+        .write(entry(MemoryLayer::Project, "written anyway"))
+        .await;
+    assert!(matches!(result, Ok(WriteResult::Added { .. })));
+
+    let injected = service
+        .retrieve_for_inject(&MemoryQuery {
+            limit: 10,
+            layer: None,
+            category: None,
+            now: 10,
+        })
+        .await;
+    assert_eq!(injected.hits.len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// event_write_ops_*：写组 8 项落点（WriteAdd 已有专测；此处覆盖其余路径）。
+// 每个 op 断言事件枚举 + change 携带受影响条目全文（NEVER 仅 id）。
+// ---------------------------------------------------------------------------
+
+/// 装配一个带 Recording 事件端口的服务（固定时钟，评分关闭）。
+async fn open_events_service(
+    store: ScriptedStore,
+    policy: MemoryPolicy,
+) -> (MemoryService<ScriptedStore>, RecordingEventAppend) {
+    let recorder = RecordingEventAppend::default();
+    let service = MemoryService::open_with_clock_and_scorer_and_events(
+        store,
+        policy,
+        || 4_242,
+        None,
+        Arc::new(recorder.clone()),
+    )
+    .await
+    .unwrap();
+    (service, recorder)
+}
+
+/// 录制端口里的写组事件快照（过滤 OpenLoad / CommitCas——生命周期事件由
+/// `event_lifecycle_*` 专测断言，写组专测只关心受影响条目全文）。
+fn recorded_write_events(recorder: &RecordingEventAppend) -> Vec<MemoryEvent> {
+    recorder
+        .events()
+        .into_iter()
+        .filter(|event| !matches!(event.op, MemoryEventOp::OpenLoad | MemoryEventOp::CommitCas))
+        .collect()
+}
+
+#[tokio::test]
+async fn event_write_ops_write_merged_emits_survivor_and_incoming_content() {
+    // Merged 不发 WriteAdd（Added 专属），但必须带存活条目与归档来件的
+    // before/after 全文，否则复盘看不到「谁被改写、谁进了归档」。
+    let existing = entry(MemoryLayer::Project, "shared fact");
+    let incoming = entry(MemoryLayer::Project, "shared fact");
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(
+            vec![Ok(committed(
+                1,
+                MemoryLayer::Project,
+                vec![existing.clone()],
+            ))],
+            vec![Ok(receipt(2, MemoryCommitVisibility::Visible))],
+        ),
+    );
+    let (service, recorder) = open_events_service(store, MemoryPolicy::default()).await;
+
+    let result = service.write(incoming.clone()).await.unwrap();
+    assert!(matches!(result, WriteResult::Merged { .. }));
+
+    let events = recorded_write_events(&recorder);
+    assert_eq!(
+        events.len(),
+        1,
+        "one committed merge must emit exactly one event, got {events:?}"
+    );
+    assert_eq!(events[0].op, MemoryEventOp::Update);
+    assert_eq!(events[0].outcome, EventOutcome::Succeeded);
+    assert_eq!(events[0].layer, Some(MemoryLayer::Project));
+    let mut survivor = existing.clone();
+    survivor.evidence.push(incoming.id);
+    survivor.confirmation_count = survivor.confirmation_count.saturating_add(1);
+    assert_eq!(
+        events[0].change,
+        EventChange::Write {
+            before: vec![existing],
+            after: vec![survivor, incoming],
+        },
+        "merge event must carry full before/after of survivor + archived incoming"
+    );
+}
+
+#[tokio::test]
+async fn event_write_ops_update_emits_before_and_after_content() {
+    let existing = entry(MemoryLayer::Project, "old wording");
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(
+            vec![Ok(committed(
+                1,
+                MemoryLayer::Project,
+                vec![existing.clone()],
+            ))],
+            vec![Ok(receipt(2, MemoryCommitVisibility::Visible))],
+        ),
+    );
+    let (service, recorder) = open_events_service(store, MemoryPolicy::default()).await;
+
+    assert!(service.update(&existing.id, "new wording").await.unwrap());
+
+    let events = recorded_write_events(&recorder);
+    assert_eq!(
+        events.len(),
+        1,
+        "one committed update => one event, got {events:?}"
+    );
+    assert_eq!(events[0].op, MemoryEventOp::Update);
+    let mut expected_after = existing.clone();
+    expected_after.content = "new wording".to_string();
+    assert_eq!(
+        events[0].change,
+        EventChange::Write {
+            before: vec![existing],
+            after: vec![expected_after],
+        }
+    );
+}
+
+#[tokio::test]
+async fn event_write_ops_delete_emits_full_entry_in_before() {
+    let existing = entry(MemoryLayer::Project, "doomed entry");
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(
+            vec![Ok(committed(
+                1,
+                MemoryLayer::Project,
+                vec![existing.clone()],
+            ))],
+            vec![Ok(receipt(2, MemoryCommitVisibility::Visible))],
+        ),
+    );
+    let (service, recorder) = open_events_service(store, MemoryPolicy::default()).await;
+
+    assert!(service.delete(&existing.id).await.unwrap());
+
+    let events = recorded_write_events(&recorder);
+    assert_eq!(
+        events.len(),
+        1,
+        "one committed delete => one event, got {events:?}"
+    );
+    assert_eq!(events[0].op, MemoryEventOp::Delete);
+    assert_eq!(
+        events[0].change,
+        EventChange::Write {
+            before: vec![existing],
+            after: vec![],
+        },
+        "delete must carry the FULL deleted entry in before (never id-only)"
+    );
+}
+
+#[tokio::test]
+async fn event_write_ops_pin_emits_before_and_after_for_pin_and_unpin() {
+    let existing = entry(MemoryLayer::Project, "pinned entry");
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(
+            vec![Ok(committed(
+                1,
+                MemoryLayer::Project,
+                vec![existing.clone()],
+            ))],
+            vec![
+                Ok(receipt(2, MemoryCommitVisibility::Visible)),
+                Ok(receipt(3, MemoryCommitVisibility::Visible)),
+            ],
+        ),
+    );
+    let (service, recorder) = open_events_service(store, MemoryPolicy::default()).await;
+
+    assert!(service.pin(&existing.id, true).await.unwrap());
+    assert!(service.pin(&existing.id, false).await.unwrap());
+
+    let events = recorded_write_events(&recorder);
+    assert_eq!(
+        events.len(),
+        2,
+        "pin then unpin => two events, got {events:?}"
+    );
+    for event in &events {
+        assert_eq!(event.op, MemoryEventOp::Pin);
+        assert_eq!(event.outcome, EventOutcome::Succeeded);
+    }
+    let mut pinned = existing.clone();
+    pinned.pinned = true;
+    assert_eq!(
+        events[0].change,
+        EventChange::Write {
+            before: vec![existing.clone()],
+            after: vec![pinned.clone()],
+        }
+    );
+    assert_eq!(
+        events[1].change,
+        EventChange::Write {
+            before: vec![pinned],
+            after: vec![existing],
+        }
+    );
+}
+
+#[tokio::test]
+async fn event_write_ops_mark_outdated_emits_before_and_after_content() {
+    let existing = entry(MemoryLayer::Project, "stale entry");
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(
+            vec![Ok(committed(
+                1,
+                MemoryLayer::Project,
+                vec![existing.clone()],
+            ))],
+            vec![Ok(receipt(2, MemoryCommitVisibility::Visible))],
+        ),
+    );
+    let (service, recorder) = open_events_service(store, MemoryPolicy::default()).await;
+
+    assert!(service.mark_outdated(&existing.id).await.unwrap());
+
+    let events = recorded_write_events(&recorder);
+    assert_eq!(
+        events.len(),
+        1,
+        "one committed mark_outdated => one event, got {events:?}"
+    );
+    assert_eq!(events[0].op, MemoryEventOp::MarkOutdated);
+    let mut expected_after = existing.clone();
+    expected_after.outdated = true;
+    assert_eq!(
+        events[0].change,
+        EventChange::Write {
+            before: vec![existing],
+            after: vec![expected_after],
+        }
+    );
+}
+
+#[tokio::test]
+async fn event_write_ops_archive_and_restore_emit_distinct_stages() {
+    // 同一 op：archive 与 restore 用 Lifecycle.stage 区分，
+    // affected 始终是受影响条目全文（正文不变，仅位置迁移）。
+    let existing = entry(MemoryLayer::Project, "archived then restored");
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(
+            vec![Ok(committed(
+                1,
+                MemoryLayer::Project,
+                vec![existing.clone()],
+            ))],
+            vec![
+                Ok(receipt(2, MemoryCommitVisibility::Visible)),
+                Ok(receipt(3, MemoryCommitVisibility::Visible)),
+            ],
+        ),
+    );
+    let (service, recorder) = open_events_service(store, MemoryPolicy::default()).await;
+
+    assert!(service.archive(&[existing.id]).await.unwrap());
+    assert!(matches!(
+        service.restore(&existing.id).await.unwrap(),
+        RestoreResult::Restored { .. }
+    ));
+
+    let events = recorded_write_events(&recorder);
+    assert_eq!(
+        events.len(),
+        2,
+        "archive + restore => two ArchiveRestore events, got {events:?}"
+    );
+    for event in &events {
+        assert_eq!(event.op, MemoryEventOp::ArchiveRestore);
+        assert_eq!(event.outcome, EventOutcome::Succeeded);
+        assert_eq!(event.layer, Some(MemoryLayer::Project));
+    }
+    assert_eq!(
+        events[0].change,
+        EventChange::Lifecycle {
+            stage: "archive".to_string(),
+            affected: vec![existing.clone()],
+        }
+    );
+    assert_eq!(
+        events[1].change,
+        EventChange::Lifecycle {
+            stage: "restore".to_string(),
+            affected: vec![existing],
+        }
+    );
+}
+
+#[tokio::test]
+async fn event_write_ops_compact_emits_affected_full_text() {
+    let first = entry(MemoryLayer::Project, "compact candidate one");
+    let second = entry(MemoryLayer::Project, "compact candidate two");
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(
+            vec![Ok(committed(
+                1,
+                MemoryLayer::Project,
+                vec![first.clone(), second.clone()],
+            ))],
+            vec![Ok(receipt(2, MemoryCommitVisibility::Visible))],
+        ),
+    );
+    // max_entries = 1：两条候选中必有一条被归档。
+    let (service, recorder) = open_events_service(store, small_policy()).await;
+
+    let result = service.compact().await.unwrap();
+    assert_eq!(result.archived, 1);
+    assert_eq!(result.remaining, 1);
+
+    let events = recorded_write_events(&recorder);
+    assert_eq!(
+        events.len(),
+        1,
+        "one committed compact => one event, got {events:?}"
+    );
+    assert_eq!(events[0].op, MemoryEventOp::Compact);
+    assert_eq!(events[0].layer, Some(MemoryLayer::Project));
+    match &events[0].change {
+        EventChange::Lifecycle { stage, affected } => {
+            assert_eq!(stage, "compact");
+            assert_eq!(
+                affected.len(),
+                1,
+                "compact must list the affected entry with full text, got {affected:?}"
+            );
+            assert!(
+                affected[0] == first || affected[0] == second,
+                "affected must be one of the pre-compact entries, got {:?}",
+                affected[0]
+            );
+        }
+        other => panic!("compact must emit Lifecycle change, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn event_write_ops_supersede_relation_emits_target_full_content() {
+    let target = entry(MemoryLayer::Project, "superseded claim");
+    let superseding = entry(MemoryLayer::Project, "superseding claim");
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(
+            vec![Ok(committed(1, MemoryLayer::Project, vec![target.clone()]))],
+            vec![Ok(receipt(2, MemoryCommitVisibility::Visible))],
+        ),
+    );
+    let (service, recorder) = open_events_service(store, MemoryPolicy::default()).await;
+
+    assert!(service.mark_superseded_by(target.id, superseding.id).await);
+
+    let events = recorded_write_events(&recorder);
+    assert_eq!(
+        events.len(),
+        1,
+        "one established supersede relation => one event, got {events:?}"
+    );
+    assert_eq!(events[0].op, MemoryEventOp::SupersedeSynthesis);
+    assert_eq!(events[0].outcome, EventOutcome::Succeeded);
+    let mut expected_after = target.clone();
+    expected_after.superseded_by = Some(superseding.id);
+    assert_eq!(
+        events[0].change,
+        EventChange::Write {
+            before: vec![target],
+            after: vec![expected_after],
+        },
+        "supersede event must carry full target content before and after"
+    );
+}
+
+#[tokio::test]
+async fn event_write_ops_synthesis_write_emits_full_entry_via_apply_reflection() {
+    let source_one = entry(MemoryLayer::Project, "source fact one");
+    let source_two = entry(MemoryLayer::Project, "source fact two");
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(
+            vec![Ok(committed(
+                1,
+                MemoryLayer::Project,
+                vec![source_one.clone(), source_two.clone()],
+            ))],
+            vec![Ok(receipt(2, MemoryCommitVisibility::Visible))],
+        ),
+    );
+    let (service, recorder) = open_events_service(store, MemoryPolicy::default()).await;
+
+    let output = ReflectionOutput {
+        deviations: vec![],
+        suggested_memories: vec![MemorySuggestion {
+            layer: MemoryLayer::Project,
+            category: MemoryCategory::Fact,
+            content: "synthesized conclusion".to_string(),
+            tags: vec![],
+            reason: "test".to_string(),
+            supersedes: vec![],
+            synthesizes: vec![source_one.id, source_two.id],
+        }],
+        outdated_memories: vec![],
+    };
+    let applied = service.apply_reflection(&output).await.unwrap();
+    assert_eq!(applied.suggestions_added, 1);
+
+    let events = recorded_write_events(&recorder);
+    assert_eq!(
+        events.len(),
+        1,
+        "one synthesized write => one event, got {events:?}"
+    );
+    assert_eq!(events[0].op, MemoryEventOp::SupersedeSynthesis);
+    assert_eq!(events[0].layer, Some(MemoryLayer::Project));
+    match &events[0].change {
+        EventChange::Write { before, after } => {
+            assert!(
+                before.is_empty(),
+                "new synthesis has no before, got {before:?}"
+            );
+            assert_eq!(
+                after.len(),
+                1,
+                "after must carry the full synthesized entry"
+            );
+            assert_eq!(after[0].content, "synthesized conclusion");
+            assert_eq!(after[0].kind, MemoryKind::Synthesized);
+            assert_eq!(after[0].evidence, vec![source_one.id, source_two.id]);
+        }
+        other => panic!("synthesis write must emit Write change, got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// event_lifecycle_*：生命周期 OpenLoad / CommitCas 落点。
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn event_lifecycle_open_load_covers_both_layers_with_count_summary() {
+    // 打开一次 = 一条 OpenLoad 覆盖两层：actor=Opener、layer=None，
+    // context 以两层 active/archive 计数摘要代替条目全文（打开不改语料）。
+    let store = ScriptedStore::new(
+        layer_script(
+            vec![Ok(committed(
+                1,
+                MemoryLayer::Global,
+                vec![entry(MemoryLayer::Global, "global fact")],
+            ))],
+            vec![],
+        ),
+        layer_script(vec![Ok(empty_layer(7, MemoryLayer::Project))], vec![]),
+    );
+    let recorder = RecordingEventAppend::default();
+    let _service = MemoryService::open_with_clock_and_scorer_and_events(
+        store,
+        MemoryPolicy::default(),
+        || 4_242,
+        None,
+        Arc::new(recorder.clone()),
+    )
+    .await
+    .unwrap();
+
+    let events = recorder.events();
+    assert_eq!(
+        events.len(),
+        1,
+        "opening must emit exactly one event, got {events:?}"
+    );
+    let event = &events[0];
+    assert_eq!(event.op, MemoryEventOp::OpenLoad);
+    assert_eq!(event.outcome, EventOutcome::Succeeded);
+    assert_eq!(event.actor, EventActor::Opener);
+    assert_eq!(event.layer, None, "one OpenLoad covers both layers");
+    assert_eq!(
+        event.change,
+        EventChange::Lifecycle {
+            stage: "open_load".to_string(),
+            affected: vec![],
+        }
+    );
+    let summary = event
+        .context
+        .trigger_summary
+        .as_deref()
+        .unwrap_or_else(|| panic!("open_load must carry a layer count summary"));
+    assert!(
+        summary.contains("global active=1 archive=0"),
+        "got {summary}"
+    );
+    assert!(
+        summary.contains("project active=0 archive=0"),
+        "got {summary}"
+    );
+}
+
+#[tokio::test]
+async fn event_lifecycle_commit_cas_emits_revision_and_layer() {
+    // 一次成功 commit => 一条 CommitCas：坐标为被提交层，revision 取自 receipt。
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(
+            vec![Ok(empty_layer(1, MemoryLayer::Project))],
+            vec![Ok(receipt(2, MemoryCommitVisibility::Visible))],
+        ),
+    );
+    let (service, recorder) = open_events_service(store, MemoryPolicy::default()).await;
+
+    service
+        .write(entry(MemoryLayer::Project, "commit cas fact"))
+        .await
+        .unwrap();
+
+    let events = recorder.events();
+    let commits: Vec<&MemoryEvent> = events
+        .iter()
+        .filter(|event| event.op == MemoryEventOp::CommitCas)
+        .collect();
+    assert_eq!(
+        commits.len(),
+        1,
+        "one successful commit => one CommitCas, got {events:?}"
+    );
+    let commit = commits[0];
+    assert_eq!(commit.outcome, EventOutcome::Succeeded);
+    assert_eq!(commit.layer, Some(MemoryLayer::Project));
+    assert_eq!(commit.commit_revision.as_deref(), Some("2"));
+    assert_eq!(
+        commit.change,
+        EventChange::Lifecycle {
+            stage: "commit_cas".to_string(),
+            affected: vec![],
+        }
+    );
+    assert!(
+        !commit.correlation_id.is_empty(),
+        "CommitCas must be correlatable"
+    );
+}
+
+#[tokio::test]
+async fn event_lifecycle_commit_cas_after_cas_retry_reports_successful_receipt() {
+    // 第一次 commit 撞 CAS 冲突、刷新重试成功：CommitCas 只报成功那一版
+    // revision，且同一次 mutate_layer 调用只 emit 一条（重试共享因果链）。
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(
+            vec![
+                Ok(empty_layer(1, MemoryLayer::Project)),
+                Ok(empty_layer(1, MemoryLayer::Project)),
+            ],
+            vec![
+                Err(storage(MemoryStorageErrorKind::ConcurrentWrite)),
+                Ok(receipt(3, MemoryCommitVisibility::Visible)),
+            ],
+        ),
+    );
+    let (service, recorder) = open_events_service(store, MemoryPolicy::default()).await;
+
+    service
+        .write(entry(MemoryLayer::Project, "retried fact"))
+        .await
+        .unwrap();
+
+    let events = recorder.events();
+    let commits: Vec<&MemoryEvent> = events
+        .iter()
+        .filter(|event| event.op == MemoryEventOp::CommitCas)
+        .collect();
+    assert_eq!(
+        commits.len(),
+        1,
+        "CAS retry still yields exactly one CommitCas, got {events:?}"
+    );
+    assert_eq!(
+        commits[0].commit_revision.as_deref(),
+        Some("3"),
+        "revision must come from the successful receipt"
+    );
 }

@@ -1,3 +1,4 @@
+use crate::domain::event::MemoryEvent;
 use crate::domain::*;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -159,6 +160,12 @@ pub trait MemoryDatasetStore: Send + Sync {
         expected: &Self::Revision,
         dataset: &MemoryDataset,
     ) -> Result<MemoryCommitReceipt<Self::Revision>, MemoryError>;
+
+    /// 事件坐标 `MemoryEvent::commit_revision` 用的 revision 字符串。
+    /// 无法以字符串表达 revision 的实现返回 `None`（事件留空，NEVER 编造）。
+    fn event_revision_label(_revision: &Self::Revision) -> Option<String> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,8 +233,9 @@ pub use crate::domain::ReflectionApplyResult;
 pub trait ReflectionHistoryQuery: Send + Sync {
     /// Returns at most `limit` records, newest append first. A zero limit
     /// returns an empty result without weakening dataset validation.
-    /// Only safe metadata summaries cross this boundary; full records
-    /// (including output content) stay internal to the adapter.
+    /// Append-only stores fold by stable id to the latest record before
+    /// truncating. Only safe metadata summaries cross this boundary; full
+    /// records (including output content) stay internal to the adapter.
     async fn list(&self, limit: usize) -> Result<Vec<ReflectionSafeSummary>, MemoryError>;
 
     /// 显式内容投影查询：摘要同时携带偏差文本与建议内容（`safe_summary_with_content`）。
@@ -246,7 +254,9 @@ pub trait ReflectionHistoryQuery: Send + Sync {
 #[async_trait]
 pub trait ReflectionHistoryStore: ReflectionHistoryQuery {
     async fn append(&self, record: &ReflectionRecord) -> Result<(), MemoryError>;
-    /// Inserts a new record or replaces the record with the same stable id.
+    /// Appends a new line for the same stable id (true append-only).
+    /// Read-side [`ReflectionHistoryQuery::list`] folds to the latest record;
+    /// implementations **MUST NOT** rewrite prior lines in place.
     async fn upsert(&self, record: &ReflectionRecord) -> Result<(), MemoryError>;
 }
 
@@ -304,6 +314,62 @@ pub trait MemoryOpener: Send + Sync {
 impl Clone for Box<dyn MemoryOpener> {
     fn clone(&self) -> Self {
         self.boxed_clone()
+    }
+}
+
+/// Failures from handing one [`MemoryEvent`] to the append sink. Variants are
+/// fixed, payload-free categories: the error type deliberately carries **no**
+/// memory body/content — emit paths stay fail-open and warn without content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum EventAppendError {
+    #[error("event append rejected by sink")]
+    Rejected,
+    #[error("event sink is unavailable")]
+    Unavailable,
+    #[error("event serialization failed")]
+    Serialization,
+    #[error("I/O failure while appending event")]
+    Io,
+}
+
+/// Append-only 生产事件流的写入端口：中心化 emit 的唯一出口，实现方
+/// 只接收反序列化的 [`MemoryEvent`]；事件内容随调用方传入，错误返回值
+/// 永不回带正文（失败语义为 fail-open，调用方仅记录无正文告警）。
+#[async_trait]
+pub trait MemoryEventAppendPort: Send + Sync {
+    /// 追加一条事件；成功返回 `()`，失败返回不携带正文的
+    /// [`EventAppendError`]。
+    async fn append(&self, event: &MemoryEvent) -> Result<(), EventAppendError>;
+}
+
+/// 测试辅助：记录每一次 `append` 收到的事件克隆（`Arc<Mutex<Vec<_>>>`
+/// 共享），供测试断言 emit 次序与内容。仅在测试构建中存在。
+#[cfg(test)]
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RecordingEventAppend {
+    events: Arc<std::sync::Mutex<Vec<MemoryEvent>>>,
+}
+
+#[cfg(test)]
+impl RecordingEventAppend {
+    /// 读取当前已录制的事件克隆快照。
+    pub(crate) fn events(&self) -> Vec<MemoryEvent> {
+        self.events
+            .lock()
+            .expect("recording event append lock poisoned")
+            .clone()
+    }
+}
+
+#[cfg(test)]
+#[async_trait]
+impl MemoryEventAppendPort for RecordingEventAppend {
+    async fn append(&self, event: &MemoryEvent) -> Result<(), EventAppendError> {
+        self.events
+            .lock()
+            .expect("recording event append lock poisoned")
+            .push(event.clone());
+        Ok(())
     }
 }
 

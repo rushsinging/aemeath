@@ -8,11 +8,12 @@ pub(crate) const LEGACY_ARCHIVE_SUFFIX: &str = "_archive";
 /// Fixed segments used by the predecessor flat-file layout.
 pub(crate) const LEGACY_GLOBAL_STEM: &str = "_global";
 
-pub(crate) const REFLECTION_HISTORY_CAS_ATTEMPTS: usize = 8;
-
 pub(crate) const REFLECTION_RECORDS_MEMBER: &str = "records";
 
 pub(crate) const REFLECTION_HISTORY_SEGMENT: &str = "reflection-history";
+
+/// reflection-history 日切 segment 文件后缀（`{yyyy-mm-dd}.jsonl`）。
+pub(crate) const REFLECTION_HISTORY_JSONL_SUFFIX: &str = ".jsonl";
 
 /// 悬挂 running 记录收口（reap）扫描的历史窗口上限：反思记录按最新在前排序，
 /// 超龄未收口的 Running 只会出现在最近的有限窗口内。
@@ -33,6 +34,20 @@ pub(crate) const ARCHIVE_MEMBER: &str = "archive";
 pub(crate) const ACTIVE_MEMBER: &str = "active";
 
 pub(crate) const SCHEMA_VERSION: u32 = 1;
+
+/// 生产事件流 envelope 的 schema 版本（`MemoryEvent::schema_version` 写入值）。
+pub(crate) const EVENT_SCHEMA_VERSION: u32 = 1;
+
+/// 事件流日切 segment 目录名（`memory/{project_key}/events/` 下的固定段）。
+pub(crate) const EVENTS_SEGMENT: &str = "events";
+
+/// 事件流日切 segment 文件后缀（`{yyyy-mm-dd}.jsonl`）。
+pub(crate) const EVENTS_JSONL_SUFFIX: &str = ".jsonl";
+
+/// 事件 segment 默认保留天数（`0` 表示禁用 GC，NEVER 表示关闭事件写入）。
+/// retention 配置接线（composition 落点）前仅测试引用，dead_code 暂时放行。
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) const DEFAULT_EVENT_RETENTION_DAYS: u32 = 30;
 
 /// 重排 instructions（与 eval/system-one harness rank 场景同文案，保证基线可比；
 /// Qwen3-Reranker instruct 定向口径——该引擎对任务定向 instruct 敏感，实测 R@1 +5pp）。

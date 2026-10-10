@@ -18,6 +18,10 @@ pub(crate) fn default_reflection_timeout_secs() -> u64 {
     240
 }
 
+pub(crate) fn default_event_retention_days() -> u32 {
+    30
+}
+
 /// Memory system configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryConfig {
@@ -47,6 +51,11 @@ pub struct MemoryConfig {
     /// 掩盖。旧配置中的 `inject_count` 残留被忽略（serde 不拒绝未知字段）。
     #[serde(default)]
     pub inject_token_budget: Option<usize>,
+
+    /// Memory 事件流 / reflection-history 日切 segment 保留天数。
+    /// `0` = 禁用 GC（从不删除）；默认 30。NEVER 表示关闭写入。
+    #[serde(default = "default_event_retention_days")]
+    pub event_retention_days: u32,
 }
 
 impl Default for MemoryConfig {
@@ -57,6 +66,7 @@ impl Default for MemoryConfig {
             similarity_threshold: default_similarity_threshold(),
             reflection: ReflectionConfig::default(),
             inject_token_budget: None,
+            event_retention_days: default_event_retention_days(),
         }
     }
 }

@@ -333,6 +333,9 @@ pub struct MemoryConfigPatch {
     pub inject_count: Option<usize>,
     #[serde(default)]
     pub inject_token_budget: Option<usize>,
+    /// 事件流 / reflection-history 日切 segment 保留天数（`0` = 禁用 GC）。
+    #[serde(default)]
+    pub event_retention_days: Option<u32>,
     #[serde(default)]
     pub reflection: Option<ReflectionConfigPatch>,
 }
@@ -866,6 +869,9 @@ pub(crate) fn apply_memory_patch(mut base: MemoryConfig, patch: MemoryConfigPatc
     let _ = patch.inject_count;
     if let Some(v) = patch.inject_token_budget {
         base.inject_token_budget = Some(v);
+    }
+    if let Some(v) = patch.event_retention_days {
+        base.event_retention_days = v;
     }
     if let Some(v) = patch.reflection {
         base.reflection = apply_reflection_patch(base.reflection, v);

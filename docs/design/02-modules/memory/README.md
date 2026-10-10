@@ -113,6 +113,7 @@ Slash Command 的 `SnapshotQuery`（`/memory` 查看列表）和 `ApplicationCon
 | [03-reflection.md](03-reflection.md) | ReflectionEngine、MemorySuggestion、触发条件、prompt/output/apply、与 Runtime 职责边界 |
 | [04-ports-and-adapters.md](04-ports-and-adapters.md) | MemoryPort / ReflectionWorkflow / ReflectionHistoryStore、NoOpMemory、Storage 边界、project-aware Composition 装配 |
 | [05-hindsight-research.md](05-hindsight-research.md) | 外部系统 Hindsight 调研（长期保留参考）：设计优势与边界、记忆架构（类型体系 / 组织维度 / 分层设计律）、记忆链路（形态演进与失效重算）、retain 摄入、数据模型、检索融合、巩固机制与心智模型 |
+| [06-event-stream.md](06-event-stream.md) | 生产事件流（append-only jsonl、含内容决策现场、19 落点）与 reflection-history 真 append-only；本期无查询/报告面 |
 
 ## 8. 相关文档
 
@@ -131,3 +132,4 @@ Slash Command 的 `SnapshotQuery`（`/memory` 查看列表）和 `ApplicationCon
 | 2026-07-14 | 明确 MemoryPort 为 Memory-owned OHS，并禁止 CLI/TUI 绕过 AgentClient 直接持有 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 统一自动注入与显式查询的 typed result envelope，纠正 BM25 与 query-independent injection_score 的收益边界 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-16 | 冻结 Memory Target 物理结构：write/retrieve/compact/reflection 统一进入私有 `capabilities/`，跨切片 MemoryEntry 不变量保留最小 model，Storage integration 就近归 mutation 切片 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
+| 2026-10-10 | 新增事件流与 reflection-history append-only 目标态文档（06）；文档导航补链 | Memory 生产遥测 |

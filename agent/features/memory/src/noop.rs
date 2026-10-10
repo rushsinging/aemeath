@@ -1,3 +1,4 @@
+use crate::domain::event::MemoryEvent;
 use crate::domain::*;
 use crate::ports::*;
 use async_trait::async_trait;
@@ -71,5 +72,19 @@ impl MemoryPort for NoOpMemory {
 
     async fn stats(&self) -> MemoryStats {
         MemoryStats::default()
+    }
+}
+
+/// 事件 append 端口的空对象：opener/service 未装配真实事件存储时静默成功，
+/// 零副作用（事件落盘 fail-open，不阻断主流程）。
+///
+/// 生产可见（`pub(crate)`）：`MemoryService` 的旧构造入口默认注入它。
+#[derive(Debug, Default)]
+pub(crate) struct NoopEventAppend;
+
+#[async_trait]
+impl MemoryEventAppendPort for NoopEventAppend {
+    async fn append(&self, _event: &MemoryEvent) -> Result<(), EventAppendError> {
+        Ok(())
     }
 }

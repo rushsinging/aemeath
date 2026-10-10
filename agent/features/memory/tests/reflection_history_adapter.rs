@@ -1,6 +1,6 @@
 use memory::api::reflection::{ReflectionErrorCategory, ReflectionRecord, ReflectionTrigger};
 use memory::api::{MemoryError, MemoryStorageErrorKind, ProjectMemoryKey, ReflectionHistoryStore};
-use std::{str::FromStr, sync::Arc};
+use std::sync::Arc;
 use storage as storage_api;
 
 fn unique_root(case: &str) -> std::path::PathBuf {
@@ -19,8 +19,15 @@ fn storage(root: &std::path::Path) -> Arc<dyn storage_api::AtomicDatasetPort> {
 }
 
 /// 实现体已收窄 crate 内：跨 crate 构造只能经 `wire_reflection_history_store`。
+/// jsonl 根与 dataset 根同为 `root`（`SafeStorageRoot::open`），legacy dataset
+/// 作为一次性导出源注入。
 fn store(root: &std::path::Path) -> Arc<dyn ReflectionHistoryStore> {
-    memory::wire_reflection_history_store(storage(root), project_key())
+    memory::wire_reflection_history_store(
+        storage::SafeStorageRoot::open(root).unwrap(),
+        project_key(),
+        30,
+        Some(storage(root)),
+    )
 }
 
 fn record(id: &str, timestamp: u64) -> ReflectionRecord {
@@ -34,7 +41,7 @@ fn record(id: &str, timestamp: u64) -> ReflectionRecord {
 }
 
 #[tokio::test]
-async fn reflection_history_upsert_replaces_stable_id_without_duplication() {
+async fn reflection_history_upsert_folds_stable_id_to_latest_on_read() {
     let root = unique_root("upsert");
     let history = store(&root);
     let running =
@@ -70,7 +77,13 @@ async fn reflection_history_append_and_list_round_trip() {
 #[tokio::test]
 async fn reflection_history_reopen_keeps_records() {
     let root = unique_root("reopen");
-    let expected = record("durable", 30);
+    // 当前时间戳：GC-on-wire 只删超出 retention 窗口的日切段，
+    // 当日 segment 必须在 reopen 后幸存（1970 日切会被 GC 正确回收）。
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_secs();
+    let expected = record("durable", now_secs);
     store(&root).append(&expected).await.unwrap();
 
     let reopened = store(&root);
@@ -103,37 +116,29 @@ async fn reflection_history_limit_returns_newest_records_only() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+/// jsonl 行损坏 = 当前数据损坏 → fail closed（legacy member 损坏则 fail-open，见 crate 内单测）。
 #[tokio::test]
 async fn reflection_history_corruption_fails_closed() {
     let root = unique_root("corruption");
-    let storage = storage(&root);
-    let project = project_key();
-    let key = storage_api::DatasetKeyData::new(
-        storage_api::StorageNamespaceData::Memory,
-        vec![
-            storage_api::SafePathSegmentData::from_str(project.as_str()).unwrap(),
-            storage_api::SafePathSegmentData::from_str("reflection-history").unwrap(),
-        ],
-    )
-    .unwrap();
-    let manifest = storage.read_manifest(&key).await.unwrap();
-    storage
-        .commit_atomic(
-            &key,
-            manifest.revision(),
-            &[storage_api::DatasetMemberData::new(
-                storage_api::SafePathSegmentData::from_str("records").unwrap(),
-                br#"{"raw_prompt":"must not be accepted"}"#.to_vec(),
-            )],
-            storage_api::WriteOptionsData::new(storage_api::DurabilityData::ProcessCrashSafe),
-        )
-        .await
-        .unwrap();
+    let history = store(&root);
+    history.append(&record("valid", 40)).await.unwrap();
 
-    let error = memory::wire_reflection_history_store(storage, project)
-        .list(10)
-        .await
-        .unwrap_err();
+    // timestamp=40 → UTC 日 1970-01-01；在当日 segment 末尾追加非法行。
+    let segment = root
+        .join("memory")
+        .join(project_key().as_str())
+        .join("reflection-history")
+        .join("1970-01-01.jsonl");
+    {
+        use std::io::Write as _;
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&segment)
+            .expect("segment open");
+        file.write_all(b"not json\n").expect("write corrupt line");
+    }
+
+    let error = history.list(10).await.unwrap_err();
     assert_eq!(
         error,
         MemoryError::Storage {
@@ -145,9 +150,8 @@ async fn reflection_history_corruption_fails_closed() {
 
 #[test]
 fn reflection_history_adapter_is_memory_owned_port() {
-    // 具体实现体 `AtomicDatasetReflectionHistoryStore` 已收窄 crate 内
-    // （`pub(crate)`），其「实现两 trait」的静态断言随收窄迁至 crate 内
-    // `adapters_tests`；此处改由 wire 工厂的 trait 对象消费面守住同一约束。
+    // 具体实现体已收窄 crate 内；此处由 wire 工厂的 trait 对象消费面守住
+    // ReflectionHistoryStore 约束。
     fn assert_store<T: ReflectionHistoryStore + ?Sized>() {}
     assert_store::<dyn ReflectionHistoryStore>();
 }

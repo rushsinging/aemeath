@@ -27,6 +27,7 @@ async fn wire_memory_opener_returns_object_safe_cloneable_opener() {
         storage::wire_file_system_dataset(&root).unwrap(),
         crate::wire_legacy_memory_source_factory(root.join("legacy")),
         None,
+        storage::SafeStorageRoot::open(&root).unwrap(),
     );
     let port = opener
         .open_memory(&project_key(), &share::config::MemoryConfig::default())
@@ -70,8 +71,10 @@ async fn wire_reflection_history_store_appends_and_lists() {
     std::fs::create_dir_all(&root).unwrap();
 
     let store: Arc<dyn ReflectionHistoryStore> = crate::wire_reflection_history_store(
-        storage::wire_file_system_dataset(&root).unwrap(),
+        storage::SafeStorageRoot::open(&root).unwrap(),
         project_key(),
+        30,
+        Some(storage::wire_file_system_dataset(&root).unwrap()),
     );
     store
         .append(&ReflectionRecord::running(
@@ -93,8 +96,10 @@ async fn reflection_history_list_with_content_projects_texts_and_suggestions() {
     std::fs::create_dir_all(&root).unwrap();
 
     let store: Arc<dyn ReflectionHistoryStore> = crate::wire_reflection_history_store(
-        storage::wire_file_system_dataset(&root).unwrap(),
+        storage::SafeStorageRoot::open(&root).unwrap(),
         project_key(),
+        30,
+        Some(storage::wire_file_system_dataset(&root).unwrap()),
     );
     let mut record = ReflectionRecord::running("content-1", 7, ReflectionTrigger::Manual);
     record.output = Some(crate::domain::ReflectionOutput {
@@ -130,6 +135,70 @@ async fn reflection_history_list_with_content_projects_texts_and_suggestions() {
         .expect("内容投影必须携带建议");
     assert_eq!(suggestions.len(), 1);
     assert_eq!(suggestions[0].content, "suggestion content");
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// 生产 opener（`wire_memory_opener` + 真 event root）打开的 Memory 把事件写进
+/// 真实 `memory/{project}/events/yyyy-mm-dd.jsonl`——证明生产路径不再落 Noop。
+#[tokio::test]
+async fn wire_memory_opener_open_memory_appends_events_to_daily_jsonl() {
+    use crate::api::{MemoryCategory, MemoryEntry, MemoryId, MemorySource};
+    use crate::domain::event::MemoryEventOp;
+
+    let root = unique_root("opener-events");
+    std::fs::create_dir_all(&root).unwrap();
+    let key = project_key();
+
+    let opener: Box<dyn MemoryOpener> = crate::wire_memory_opener(
+        storage::wire_file_system_dataset(&root).unwrap(),
+        crate::wire_legacy_memory_source_factory(root.join("legacy")),
+        None,
+        storage::SafeStorageRoot::open(&root).unwrap(),
+    );
+    let port = opener
+        .open_memory(&key, &share::config::MemoryConfig::default())
+        .await
+        .unwrap();
+
+    // 写入触发 WriteAdd（emit fail-open，成功写入必达真 store）。
+    let entry = MemoryEntry::new(
+        MemoryId::now_v7(),
+        42,
+        MemoryLayer::Project,
+        MemoryCategory::Decision,
+        "event wiring fact",
+        MemorySource::User,
+    )
+    .unwrap();
+    port.write(entry).await.unwrap();
+
+    // 断言日切 jsonl 落盘于 memory/{project}/events/yyyy-mm-dd.jsonl。
+    let day = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let events_file = root
+        .join("memory")
+        .join(key.as_str())
+        .join("events")
+        .join(format!("{day}.jsonl"));
+    assert!(
+        events_file.is_file(),
+        "事件日切文件必须落盘：{}",
+        events_file.display()
+    );
+
+    // 读回内容确认确为 WriteAdd 事件（空文件不算数）。
+    let store = crate::event_jsonl::JsonlSegmentEventStore::new(
+        storage::SafeStorageRoot::open(&root).unwrap(),
+        key.clone(),
+        30,
+    );
+    let events = store.read_all_for_test().expect("读回事件");
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event.op, MemoryEventOp::WriteAdd)),
+        "事件流必须包含 WriteAdd"
+    );
 
     std::fs::remove_dir_all(root).unwrap();
 }

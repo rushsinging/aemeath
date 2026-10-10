@@ -1,7 +1,6 @@
 use super::constants::{
     ACTIVE_MEMBER, ARCHIVE_MEMBER, GLOBAL_DATASET_SEGMENT, LEGACY_ARCHIVE_SUFFIX, LEGACY_FILE_EXT,
-    LEGACY_GLOBAL_STEM, MEMORY_MEMBER_NAMES, REFLECTION_HISTORY_CAS_ATTEMPTS,
-    REFLECTION_HISTORY_SEGMENT, REFLECTION_RECORDS_MEMBER,
+    LEGACY_GLOBAL_STEM, MEMORY_MEMBER_NAMES,
 };
 use crate::domain::constants::MIN_SYNTHESIS_EVIDENCE;
 use crate::domain::*;
@@ -271,190 +270,13 @@ impl MemoryDatasetStore for AtomicDatasetMemoryStore {
     }
 }
 
-/// Memory-owned Reflection history adapter. A project gets one independent
-/// atomic dataset containing a single JSON member whose schema is exactly
-/// `Vec<ReflectionRecord>`.
-///
-/// 收窄：crate 外只能经 `memory::wire_reflection_history_store` 取得。
-pub(crate) struct AtomicDatasetReflectionHistoryStore {
-    storage: Arc<dyn storage_api::AtomicDatasetPort>,
-    dataset: storage_api::DatasetKeyData,
-}
-
-impl AtomicDatasetReflectionHistoryStore {
-    pub(crate) fn new(
-        storage: Arc<dyn storage_api::AtomicDatasetPort>,
-        project: ProjectMemoryKey,
-    ) -> Self {
-        let project = storage_api::SafePathSegmentData::from_str(project.as_str())
-            .expect("derived project Memory key is a safe Storage path segment");
-        let history = member_name(REFLECTION_HISTORY_SEGMENT);
-        let dataset = storage_api::DatasetKeyData::new(
-            storage_api::StorageNamespaceData::Memory,
-            vec![project, history],
-        )
-        .expect("Reflection history segments form a valid dataset key");
-        Self { storage, dataset }
-    }
-
-    async fn load_records(
-        &self,
-    ) -> Result<(Vec<ReflectionRecord>, storage_api::DatasetRevisionData), MemoryError> {
-        let manifest = self
-            .storage
-            .read_manifest(&self.dataset)
-            .await
-            .map_err(storage_error)?;
-        let revision = manifest.revision().clone();
-        if manifest.members().is_empty() {
-            return Ok((Vec::new(), revision));
-        }
-        let records_member = member_name(REFLECTION_RECORDS_MEMBER);
-        if manifest.members() != std::slice::from_ref(&records_member) {
-            return Err(invalid_dataset(MemoryStorageErrorKind::CorruptTransaction));
-        }
-        let read = self
-            .storage
-            .read_consistent(&self.dataset, std::slice::from_ref(&records_member))
-            .await
-            .map_err(storage_error)?;
-        let storage_api::DatasetReadOutcomeData::Found(read) = read else {
-            return Err(invalid_dataset(MemoryStorageErrorKind::CorruptTransaction));
-        };
-        if read.revision() != &revision {
-            return Err(invalid_dataset(MemoryStorageErrorKind::ConcurrentWrite));
-        }
-        let bytes = read
-            .members()
-            .first()
-            .filter(|member| member.name() == &records_member)
-            .map(storage_api::DatasetMemberData::bytes)
-            .ok_or_else(|| invalid_dataset(MemoryStorageErrorKind::CorruptTransaction))?;
-        let records = serde_json::from_slice(bytes)
-            .map_err(|_| invalid_dataset(MemoryStorageErrorKind::Serialization))?;
-        Ok((records, revision))
-    }
-
-    async fn mutate_records(
-        &self,
-        mut mutation: impl FnMut(&mut Vec<ReflectionRecord>),
-    ) -> Result<(), MemoryError> {
-        for attempt in 0..REFLECTION_HISTORY_CAS_ATTEMPTS {
-            let (mut records, revision) = match self.load_records().await {
-                Ok(loaded) => loaded,
-                Err(MemoryError::Storage {
-                    kind: MemoryStorageErrorKind::ConcurrentWrite,
-                }) if attempt + 1 < REFLECTION_HISTORY_CAS_ATTEMPTS => {
-                    tokio::task::yield_now().await;
-                    continue;
-                }
-                Err(error) => return Err(error),
-            };
-            mutation(&mut records);
-            let bytes = serde_json::to_vec(&records)
-                .map_err(|_| invalid_dataset(MemoryStorageErrorKind::Serialization))?;
-            let members = [storage_api::DatasetMemberData::new(
-                member_name(REFLECTION_RECORDS_MEMBER),
-                bytes,
-            )];
-            match self
-                .storage
-                .commit_atomic(
-                    &self.dataset,
-                    &revision,
-                    &members,
-                    storage_api::WriteOptionsData::new(
-                        storage_api::DurabilityData::ProcessCrashSafe,
-                    ),
-                )
-                .await
-            {
-                Ok(_) => return Ok(()),
-                Err(error)
-                    if map_storage_error(&error) == MemoryStorageErrorKind::ConcurrentWrite
-                        && attempt + 1 < REFLECTION_HISTORY_CAS_ATTEMPTS =>
-                {
-                    tokio::task::yield_now().await;
-                }
-                Err(error) => return Err(storage_error(error)),
-            }
-        }
-        Err(invalid_dataset(MemoryStorageErrorKind::ConcurrentWrite))
-    }
-}
-
-#[async_trait]
-impl ReflectionHistoryQuery for AtomicDatasetReflectionHistoryStore {
-    async fn list(&self, limit: usize) -> Result<Vec<ReflectionSafeSummary>, MemoryError> {
-        self.list_projecting(limit, false).await
-    }
-
-    async fn list_with_content(
-        &self,
-        limit: usize,
-    ) -> Result<Vec<ReflectionSafeSummary>, MemoryError> {
-        self.list_projecting(limit, true).await
-    }
-}
-
-impl AtomicDatasetReflectionHistoryStore {
-    async fn list_projecting(
-        &self,
-        limit: usize,
-        with_content: bool,
-    ) -> Result<Vec<ReflectionSafeSummary>, MemoryError> {
-        for attempt in 0..REFLECTION_HISTORY_CAS_ATTEMPTS {
-            match self.load_records().await {
-                Ok((records, _)) => {
-                    return Ok(records
-                        .into_iter()
-                        .rev()
-                        .take(limit)
-                        .map(|record| {
-                            if with_content {
-                                record.safe_summary_with_content()
-                            } else {
-                                record.safe_summary()
-                            }
-                        })
-                        .collect());
-                }
-                Err(MemoryError::Storage {
-                    kind: MemoryStorageErrorKind::ConcurrentWrite,
-                }) if attempt + 1 < REFLECTION_HISTORY_CAS_ATTEMPTS => {
-                    tokio::task::yield_now().await;
-                }
-                Err(error) => return Err(error),
-            }
-        }
-        Err(invalid_dataset(MemoryStorageErrorKind::ConcurrentWrite))
-    }
-}
-
-#[async_trait]
-impl ReflectionHistoryStore for AtomicDatasetReflectionHistoryStore {
-    async fn append(&self, record: &ReflectionRecord) -> Result<(), MemoryError> {
-        self.mutate_records(|records| records.push(record.clone()))
-            .await
-    }
-
-    async fn upsert(&self, record: &ReflectionRecord) -> Result<(), MemoryError> {
-        self.mutate_records(|records| {
-            if let Some(stored) = records.iter_mut().find(|stored| stored.id == record.id) {
-                *stored = record.clone();
-            } else {
-                records.push(record.clone());
-            }
-        })
-        .await
-    }
-}
-
 pub(crate) struct ProjectMemoryOpener {
     store: AtomicDatasetMemoryStore,
     legacy: Arc<dyn LegacyMemorySource>,
     /// System One 评分端口（None = 重排关闭）。
     scorer: Option<Arc<dyn systemone::ScoringPort>>,
+    /// 事件追加端口（None = `NoopEventAppend`，仅测试/降级路径）。
+    events: Option<Arc<dyn MemoryEventAppendPort>>,
 }
 
 impl ProjectMemoryOpener {
@@ -463,12 +285,19 @@ impl ProjectMemoryOpener {
             store,
             legacy,
             scorer: None,
+            events: None,
         }
     }
 
     /// 装配评分端口（composition 在场景开关开启时调用）。
     pub fn with_scorer(mut self, scorer: Option<Arc<dyn systemone::ScoringPort>>) -> Self {
         self.scorer = scorer;
+        self
+    }
+
+    /// 装配事件追加端口（`DatasetMemoryOpener` 注入真 event store）。
+    pub fn with_events(mut self, events: Arc<dyn MemoryEventAppendPort>) -> Self {
+        self.events = Some(events);
         self
     }
 
@@ -511,10 +340,23 @@ impl ProjectMemoryOpener {
                 .await
                 .map_err(map_memory_open_error)?;
         }
-        // 双入口保持各自生产消费者语义：无评分走精简 open，有评分走 scorer 链。
-        match self.scorer {
-            Some(scorer) => MemoryService::open_with_scorer(self.store, policy, Some(scorer)).await,
-            None => MemoryService::open(self.store, policy).await,
+        // 事件端口缺省（None）走既有 Noop 默认双入口，语义与接线前完全一致；
+        // 注入真 event store（生产路径）时走全参入口（system clock + scorer + events）。
+        match (self.scorer, self.events) {
+            (scorer, Some(events)) => {
+                MemoryService::open_with_clock_and_scorer_and_events(
+                    self.store,
+                    policy,
+                    crate::service::system_time_seconds,
+                    scorer,
+                    events,
+                )
+                .await
+            }
+            (None, None) => MemoryService::open(self.store, policy).await,
+            (Some(scorer), None) => {
+                MemoryService::open_with_scorer(self.store, policy, Some(scorer)).await
+            }
         }
         .map_err(map_memory_open_error)
     }
@@ -542,17 +384,22 @@ pub(crate) struct DatasetMemoryOpener {
     legacy_factory: Arc<dyn LegacyMemorySourceFactory>,
     /// System One 评分端口（None = 重排关闭）。
     scorer: Option<Arc<dyn systemone::ScoringPort>>,
+    /// 事件 jsonl 根（`memory/{project}/events/…` 相对此根；与 dataset 根
+    /// 同为 agents_dir）。retention 天数在 `open_memory` 时取 candidate config。
+    event_root: storage_api::SafeStorageRoot,
 }
 
 impl DatasetMemoryOpener {
     pub(crate) fn new(
         storage: Arc<dyn storage_api::AtomicDatasetPort>,
         legacy_factory: Arc<dyn LegacyMemorySourceFactory>,
+        event_root: storage_api::SafeStorageRoot,
     ) -> Self {
         Self {
             storage,
             legacy_factory,
             scorer: None,
+            event_root,
         }
     }
 
@@ -575,8 +422,16 @@ impl MemoryOpener for DatasetMemoryOpener {
             similarity_threshold: config.similarity_threshold,
         };
         let legacy = self.legacy_factory.create_for(key);
+        // 生产路径注入真 event store：retention 取 candidate config（`0` = 禁用 GC），
+        // 构造期已 fail-open 触发一次 GC。
+        let events = crate::wire_memory_event_store(
+            self.event_root.clone(),
+            key.clone(),
+            config.event_retention_days,
+        );
         let service = ProjectMemoryOpener::new(store, legacy)
             .with_scorer(self.scorer.clone())
+            .with_events(events)
             .open(policy)
             .await?;
         Ok(Arc::new(service))

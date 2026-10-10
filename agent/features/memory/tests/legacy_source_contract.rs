@@ -366,6 +366,7 @@ async fn opener_migrates_legacy_global_and_project() {
         storage(&storage_dir),
         memory::wire_legacy_memory_source_factory(&legacy_dir),
         None,
+        storage::SafeStorageRoot::open(&storage_dir).unwrap(),
     );
 
     let port = opener
@@ -421,8 +422,12 @@ async fn opener_legacy_conflict_when_new_data_exists() {
                 Box::new(self.clone())
             }
         }
-        let opener =
-            memory::wire_memory_opener(storage(&storage_dir), Arc::new(NoLegacyFactory), None);
+        let opener = memory::wire_memory_opener(
+            storage(&storage_dir),
+            Arc::new(NoLegacyFactory),
+            None,
+            storage::SafeStorageRoot::open(&storage_dir).unwrap(),
+        );
         let port = opener
             .open_memory(&project, &MemoryConfig::default())
             .await
@@ -453,6 +458,7 @@ async fn opener_legacy_conflict_when_new_data_exists() {
         storage(&storage_dir),
         memory::wire_legacy_memory_source_factory(&legacy_dir),
         None,
+        storage::SafeStorageRoot::open(&storage_dir).unwrap(),
     );
 
     let result = opener.open_memory(&project, &MemoryConfig::default()).await;
