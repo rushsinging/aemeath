@@ -34,6 +34,10 @@ pub(crate) const ACTIVE_MEMBER: &str = "active";
 
 pub(crate) const SCHEMA_VERSION: u32 = 1;
 
+/// 生产事件流 envelope 的 schema 版本（`MemoryEvent::schema_version` 写入值）。
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) const EVENT_SCHEMA_VERSION: u32 = 1;
+
 /// 重排 instructions（与 eval/system-one harness rank 场景同文案，保证基线可比；
 /// Qwen3-Reranker instruct 定向口径——该引擎对任务定向 instruct 敏感，实测 R@1 +5pp）。
 pub(crate) const RERANK_INSTRUCTIONS: &str =

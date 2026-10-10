@@ -1,4 +1,5 @@
 pub(crate) mod constants;
+pub(crate) mod event;
 pub(crate) mod lexical_search;
 mod model;
 mod persistence;
