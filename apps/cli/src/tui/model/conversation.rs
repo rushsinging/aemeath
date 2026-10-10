@@ -39,7 +39,6 @@ mod retained_state_tests;
 pub mod runtime_state;
 pub mod status_notice;
 pub mod streaming_preview;
-pub mod system_reminder;
 pub mod task_status;
 pub mod terminal;
 pub mod text_stream;

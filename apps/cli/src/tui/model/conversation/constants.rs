@@ -17,10 +17,6 @@ pub(crate) const OUTPUT_VIEW_JOURNAL_CAPACITY: usize = 256;
 
 pub(crate) const MAX_LOADED_HISTORY_STEPS: usize = 128;
 
-pub(crate) const CLOSE_TAG: &str = "</system-reminder>";
-
-pub(crate) const OPEN_TAG: &str = "<system-reminder>";
-
 pub(crate) const DONE_VERBS: [&str; 20] = [
     "Sautéed",
     "Baked",

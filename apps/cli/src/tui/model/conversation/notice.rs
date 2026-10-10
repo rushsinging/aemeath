@@ -1,7 +1,6 @@
 use super::change::ConversationChange;
 use super::constants::BANNER_LINES;
 use super::model::ConversationModel;
-use super::system_reminder::strip_system_reminder_envelope_owned;
 use crate::tui::model::output_timeline::OutputTimelineItem;
 
 impl ConversationModel {
@@ -36,7 +35,6 @@ impl ConversationModel {
     }
 
     pub(super) fn append_system_message(&mut self, text: String) -> Vec<ConversationChange> {
-        let text = strip_system_reminder_envelope_owned(text);
         if let Some(OutputTimelineItem::System { text: existing, .. }) =
             self.timeline.items_mut().last_mut()
         {

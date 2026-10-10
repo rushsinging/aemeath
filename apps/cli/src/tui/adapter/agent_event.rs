@@ -1,7 +1,6 @@
 use crate::tui::adapter::tui_runtime_event::{TuiRuntimeEvent, TuiToolCallStatus};
 use crate::tui::model::conversation::ids::ToolCallId;
 use crate::tui::model::conversation::intent::*;
-use crate::tui::model::conversation::system_reminder::strip_system_reminder_envelope;
 use crate::tui::model::conversation::tool_call::ToolCallStatus;
 use crate::tui::model::diagnostic::intent::DiagnosticIntent;
 use crate::tui::model::diagnostic::notice::DiagnosticSeverity;
@@ -184,7 +183,9 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             mapping
         }
         TuiRuntimeEvent::SystemMessage(text) => {
-            if strip_system_reminder_envelope(text).trim().is_empty() {
+            // 空 SystemMessage 丢弃（空语义判定；envelope 剥离已随
+            // system_reminder 标志位退役——渲染 NEVER 解析文本）。
+            if text.trim().is_empty() {
                 crate::tui::log_debug!("drop empty runtime system message raw_len={}", text.len());
                 AgentEventMapping::default()
             } else {
