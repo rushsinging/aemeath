@@ -28,6 +28,14 @@ pub(crate) struct BackgroundProcessRuntime {
         std::sync::RwLock<Option<(u64, tokio::sync::mpsc::UnboundedSender<sdk::ChatEvent>)>>,
     /// 绑定代次（覆盖式绑定的身份校验）。
     chat_sender_generation: std::sync::atomic::AtomicU64,
+    /// #1890 任务日志目录 base（默认 `~/.agents/sessions/`；测试可注入）。
+    log_base: std::sync::OnceLock<std::path::PathBuf>,
+    /// 已弹过的滞留事实批次（#252 滞留信号 one-shot）：Run 收口检测到
+    /// 未确认事实时发 wakeup 信号——**消费一次即达**，不追踪注入确认
+    /// 闭环（provider 连败时 Run 反复失败收口，若按确认闭环会形成
+    /// 无限唤醒风暴，实测 33 次信号）。同批事实（集合 ⊆ 已弹集合）
+    /// 不再弹；新事实到达形成新批次再弹一次；集合随 session 存活（量级 = 后台任务数，懒膨胀可忽略）。
+    signaled_stranded_ids: Mutex<std::collections::HashSet<String>>,
 }
 
 /// chat 会话事件通道绑定 guard：drop 时释放本代次 sender（#252 PR3）。
@@ -75,6 +83,8 @@ impl BackgroundProcessRuntime {
             persistence: std::sync::OnceLock::new(),
             chat_event_sender: std::sync::RwLock::new(None),
             chat_sender_generation: std::sync::atomic::AtomicU64::new(0),
+            log_base: std::sync::OnceLock::new(),
+            signaled_stranded_ids: Mutex::new(std::collections::HashSet::new()),
         }
     }
 
@@ -159,6 +169,29 @@ impl BackgroundProcessRuntime {
         kind: crate::domain::background_process::BackgroundProcessTerminalKind,
         terminal_output: Option<String>,
     ) {
+        // #1890 终态落盘分档：直绑任务（log_direct）stdout/stderr 已由
+        // 子进程直写文件——**不回写正文**（否则正文双写，实测 ping 任务
+        // 日志 ping statistics ×2）；建档非直绑（非流式 / Agent 兜底）
+        // 终态文本 append 是唯一落盘通道。append 失败降级内存
+        // terminal_output（可用性优先）。
+        if let Some(text) = terminal_output.as_ref() {
+            let needs_append = self
+                .supervisor
+                .log_file_of(task_id)
+                .filter(|_| self.supervisor.is_log_direct(task_id) != Some(true));
+            if let Some(log_path) = needs_append {
+                let log = crate::application::background_process::log_file::TaskLogFile::from_path(
+                    log_path,
+                );
+                if let Err(error) = log.append_terminal(&format!("{text}\n")) {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "background terminal append to log file failed: task_id={} error={error:?}",
+                        task_id.as_str()
+                    );
+                }
+            }
+        }
         let finished = self
             .supervisor
             .finish(task_id, kind, terminal_output)
@@ -176,6 +209,17 @@ impl BackgroundProcessRuntime {
         }
         // #252 PR3：活动数 -1 → spinner 显示。
         self.emit_active_count();
+        // WakeupSignal 直发同样进 one-shot 已弹集合（#252）：通知信号
+        // 语义统一「每事实批次一次」——直发路径此前不记录集合，wakeup
+        // Run 若因注入预算 deferred 等未确认，收口滞留检测会把同一
+        // 事实当作新批次再弹（实测：卡片×2 循环唤醒）。
+        if matches!(self.notify_route(), BackgroundNotifyRoute::WakeupSignal) {
+            let mut signaled = self
+                .signaled_stranded_ids
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            signaled.insert(task_id.as_str().to_string());
+        }
         match self.notify_route() {
             BackgroundNotifyRoute::Reminder(run_id) => {
                 context.reminder_handle_event(
@@ -198,17 +242,62 @@ impl BackgroundProcessRuntime {
         self.supervisor.clone()
     }
 
+    /// 派发直绑装配（#1890 输出直绑）：session 已绑（persistence 就绪 =
+    /// session id 可得）时创建 per-process 任务日志文件。文件创建失败
+    /// 返回 None（调用方降级 piped，可用性优先）。
+    pub(crate) fn open_direct_log(
+        &self,
+        process_id: share::ids::BackgroundProcessId,
+    ) -> Option<crate::application::background_process::log_file::TaskLogFile> {
+        let session_id = self.persistence.get()?.1.clone();
+        let base = self
+            .log_base
+            .get_or_init(share::config::adapters::paths::global_sessions_dir);
+        crate::application::background_process::log_file::TaskLogFile::open(
+            base,
+            &session_id,
+            &process_id,
+        )
+        .ok()
+        .map(|(log, _stdout, _stderr)| log)
+    }
+
+    /// 测试注入任务日志 base 目录（生产默认 `~/.agents/sessions/`）。
+    #[cfg(test)]
+    pub(crate) fn set_log_base_for_test(&self, base: std::path::PathBuf) {
+        let _ = self.log_base.set(base);
+    }
+
     /// Run 收口后的滞留事实检测（#252 注入确认制兜底）：监督器仍有
     /// 未确认完成事实（收口临界窗口内被 peek 但未注入，消费者已随
     /// Run 销毁）时补发 wakeup 信号——立即唤醒补注入，而非等下一个
-    /// 任务完成 / 用户输入捎带。无可补内容时静默不发。
+    /// 任务完成 / 用户输入捎带。
+    ///
+    /// **one-shot 语义**：同批事实只弹一次（消费一次即达），不追踪
+    /// 注入确认闭环——wakeup Run 因 provider 失败等再次收口时不再重弹
+    /// （否则无限唤醒风暴）；未被注入确认的事实保留监督器，由
+    /// background_processes 查询工具兜底（设计 §12 风险表）。
+    /// 新事实到达（集合不 ⊆ 已弹集合）形成新批次，弹一次。
     pub(crate) fn signal_wakeup_for_stranded_facts(&self) {
-        if self.supervisor.peek_unnotified_terminal_items().is_empty() {
+        let items = self.supervisor.peek_unnotified_terminal_items();
+        if items.is_empty() {
             return;
         }
+        let mut signaled = self
+            .signaled_stranded_ids
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let has_new_fact = items.iter().any(|item| !signaled.contains(&item.task_id));
+        if !has_new_fact {
+            return;
+        }
+        for item in &items {
+            signaled.insert(item.task_id.clone());
+        }
+        drop(signaled);
         log::info!(
             target: crate::LOG_TARGET,
-            "background stranded facts detected: signaling wakeup for immediate re-injection"
+            "background stranded facts detected: signaling wakeup for immediate re-injection (one-shot)"
         );
         if let Err(error) = self.notifier.wakeup() {
             log::warn!(
@@ -255,11 +344,23 @@ impl tools::BackgroundProcessAccess for BackgroundProcessRuntime {
                 .map(|remaining| remaining.as_millis() as u64),
             _ => None,
         };
+        // #1890 缺陷③：total_written_bytes 取任务日志文件实际大小（文件
+        // 是全量真相源；无文件任务 0）。
+        let total_written_bytes = record
+            .log_file
+            .as_ref()
+            .map(|log_path| {
+                crate::application::background_process::log_file::TaskLogFile::from_path(
+                    log_path.clone(),
+                )
+                .size_bytes()
+            })
+            .unwrap_or(0);
         Some(
             tools::types::background_processes::BackgroundProcessDetailData {
                 summary: task_summary_data(&record),
                 deadline_remaining_ms,
-                total_written_bytes: 0,
+                total_written_bytes,
             },
         )
     }

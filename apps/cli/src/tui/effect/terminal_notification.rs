@@ -37,9 +37,7 @@ pub(crate) struct TurnCompleteNotificationContext<'a> {
 /// 跳过纯 `system-reminder` 注入（hook/skill 内部消息），无用户消息时返回 None。
 pub(crate) fn latest_user_prompt(items: &[OutputTimelineItem]) -> Option<String> {
     items.iter().rev().find_map(|item| match item {
-        OutputTimelineItem::UserMessage { text, .. } if !text.contains("system-reminder") => {
-            summarize_prompt(text)
-        }
+        OutputTimelineItem::UserMessage { text, .. } => summarize_prompt(text),
         _ => None,
     })
 }

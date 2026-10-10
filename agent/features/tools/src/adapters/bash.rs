@@ -110,6 +110,12 @@ impl TypedTool for BashTool {
         false
     }
 
+    /// 输出直绑（#1890）：子进程 stdout/stderr 重定向到 per-task 任务
+    /// 日志文件（路径经 ToolExecutionContext 注入；未注入时保持 piped）。
+    fn background_log_direct(&self) -> bool {
+        true
+    }
+
     /// Override: Bash commands may run up to 3600s (schema max).
     /// The default 120s outer timeout in agent.rs would kill long-running
     /// commands before the internal per-command timeout fires.
@@ -154,13 +160,52 @@ impl TypedTool for BashTool {
         let script =
             format!("{command}\nstatus=$?\nprintf '\\n{CWD_MARKER}%s\\n' \"$PWD\"\nexit $status");
         let mut command_process = Command::new("bash");
+        // #1890 输出直绑：ctx 注入任务日志路径时 stdout/stderr 都直接
+        // 重定向该文件（同文件双 append handle，交错时间序即真实执行
+        // 序；零跳字节、无捕获上限、OS 收尾）。stderr 分离语义退化为
+        // 交错混排（前台结果 stderr 段为空；2>&1 用户重定向自然并入）。
+        // 任一 handle 打开失败整体降级 piped 并 warn（可用性优先）。
+        let (stdout_stdio, stderr_stdio, direct_bound) = match ctx.background_log_path() {
+            Some(log_path) => {
+                let open = || {
+                    std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(log_path)
+                };
+                match (open(), open()) {
+                    (Ok(stdout_file), Ok(stderr_file)) => (
+                        std::process::Stdio::from(stdout_file),
+                        std::process::Stdio::from(stderr_file),
+                        true,
+                    ),
+                    (result_a, result_b) => {
+                        let error = result_a.err().or_else(|| result_b.err());
+                        log::warn!(
+                            target: crate::LOG_TARGET,
+                            "background log direct open failed, fallback to piped: path={log_path:?} error={error:?}"
+                        );
+                        (
+                            std::process::Stdio::piped(),
+                            std::process::Stdio::piped(),
+                            false,
+                        )
+                    }
+                }
+            }
+            None => (
+                std::process::Stdio::piped(),
+                std::process::Stdio::piped(),
+                false,
+            ),
+        };
         command_process
             .arg("-c")
             .arg(&script)
             .current_dir(&path_base)
             .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stdout(stdout_stdio)
+            .stderr(stderr_stdio)
             .kill_on_drop(true);
         if let Err(error) = utils::configure_tokio_noninteractive(&mut command_process) {
             return TypedToolResult::error(format!("failed to isolate command process: {error}"));
@@ -180,6 +225,13 @@ impl TypedTool for BashTool {
         // Take stdout/stderr pipes before spawning readers
         let stdout_pipe = child.stdout.take();
         let stderr_pipe = child.stderr.take();
+        // #1890 直绑路径：直绑时 stdout_pipe 为 None（reader 空转），完成后
+        // 从任务日志文件读尾部 MAX_CAPTURE_BYTES 作为前台结果文本（文件是
+        // 全量真相，前台文本仅回放窗口）。
+        let direct_log_path: Option<std::path::PathBuf> = ctx
+            .background_log_path()
+            .filter(|_| direct_bound)
+            .map(std::path::Path::to_path_buf);
 
         let stdout_handle = tokio::spawn(stream::read_stdout(stdout_pipe, ctx.progress_sink()));
         let stderr_handle = tokio::spawn(stream::read_stderr(stderr_pipe));
@@ -220,7 +272,8 @@ impl TypedTool for BashTool {
                 let (stdout_bytes, stderr_bytes) =
                     drain_reader_tasks(stdout_handle, stderr_handle).await;
                 let stdout =
-                    split_stdout_and_cwd(&String::from_utf8_lossy(&stdout_bytes)).0;
+                    split_stdout_and_cwd(&direct_or_pipe_stdout(&direct_log_path, &stdout_bytes).await)
+                        .0;
                 let stderr = String::from_utf8_lossy(&stderr_bytes);
                 let result = partial_output_text(
                     &stdout,
@@ -260,7 +313,8 @@ impl TypedTool for BashTool {
                         let (stdout_bytes, stderr_bytes) =
                             drain_reader_tasks(stdout_handle, stderr_handle).await;
                         let stdout =
-                            split_stdout_and_cwd(&String::from_utf8_lossy(&stdout_bytes)).0;
+                            split_stdout_and_cwd(&direct_or_pipe_stdout(&direct_log_path, &stdout_bytes).await)
+                                .0;
                         let stderr = String::from_utf8_lossy(&stderr_bytes);
                         let result = partial_output_text(
                             &stdout,
@@ -294,7 +348,7 @@ impl TypedTool for BashTool {
 
         match wait_result {
             Ok(status) => {
-                let stdout = String::from_utf8_lossy(&stdout);
+                let stdout = direct_or_pipe_stdout(&direct_log_path, &stdout).await;
                 let (stdout, new_path_base) = split_stdout_and_cwd(&stdout);
                 // `cd` 改变了 path_base 时通知 workspace 并记录新值，回传给 LLM（#414）。
                 let cd_path_base: Option<std::path::PathBuf> = new_path_base.clone();
@@ -413,4 +467,47 @@ impl TypedTool for BashTool {
             }
         }
     }
+}
+
+/// #1890 输出直绑回读：直绑时从任务日志文件读尾部
+/// [`MAX_CAPTURE_BYTES`]（前台结果文本回放窗口；文件是全量真相），
+/// 否则回退 pipe 捕获 bytes。返回未剥离 cwd marker 的原文。
+async fn direct_or_pipe_stdout(
+    direct_log_path: &Option<std::path::PathBuf>,
+    pipe_stdout_bytes: &[u8],
+) -> String {
+    match direct_log_path {
+        Some(path) => {
+            let path = path.clone();
+            tokio::task::spawn_blocking(move || read_log_tail(&path))
+                .await
+                .unwrap_or_default()
+        }
+        None => String::from_utf8_lossy(pipe_stdout_bytes).into_owned(),
+    }
+}
+
+/// 任务日志文件尾部读取（最多 [`MAX_CAPTURE_BYTES`]；读失败/文件缺失
+/// 返回空串——降级可用性优先）。
+fn read_log_tail(path: &std::path::Path) -> String {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return String::new();
+    };
+    let size = meta.len();
+    let window = u64::try_from(constants::MAX_CAPTURE_BYTES).unwrap_or(u64::MAX);
+    let start = size.saturating_sub(window);
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(_) => return String::new(),
+    };
+    use std::io::{Read as _, Seek as _};
+    let mut reader = std::io::BufReader::new(file);
+    if reader.seek(std::io::SeekFrom::Start(start)).is_err() {
+        return String::new();
+    }
+    let mut bytes = Vec::new();
+    if reader.read_to_end(&mut bytes).is_err() {
+        return String::new();
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
 }

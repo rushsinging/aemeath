@@ -675,6 +675,8 @@ fn oversized_unknown_tool_result_renders_truncation_notice() {
 /// #1106 回归：runtime 允许发空 SystemMessage（hook 的 additional_context /
 /// system_message 只判 Option 不判空串），TUI 必须不渲染——否则每条空消息
 /// 各吃掉 2 行（空内容 + depth0 前置空行），在输出区堆出大片空行。
+/// （envelope 空壳 payload 已随 system_reminder 标志位退役——当前生产
+/// 链路无 envelope 组装点进入 SystemMessage，渲染 NEVER 解析文本。）
 ///
 /// 端到端：runtime 事件 → ACL → model → view_assembler → render → 屏幕字符。
 #[test]
@@ -683,12 +685,8 @@ fn empty_system_messages_from_runtime_do_not_accumulate_blank_lines() {
         let mut harness = TuiScenarioHarness::new(60, 30);
         for anchor in ["ANCHORUP", "ANCHORDOWN"] {
             if anchor == "ANCHORDOWN" {
-                for payload in ["", "<system-reminder></system-reminder>"]
-                    .iter()
-                    .cycle()
-                    .take(empty_count)
-                {
-                    harness.runtime_event(TuiRuntimeEvent::SystemMessage((*payload).to_string()));
+                for _ in 0..empty_count {
+                    harness.runtime_event(TuiRuntimeEvent::SystemMessage(String::new()));
                 }
             }
             harness.runtime_event(TuiRuntimeEvent::AssistantTextDelta {

@@ -7,5 +7,6 @@
 //! 逐 call 执行事实（receipt / 取消协议）仍由 Context 承担；完成通知
 //! （reminder / Wakeup Run）挂接点在通知链路交付中落地。
 
+pub(crate) mod log_file;
 pub(crate) mod session_runtime;
 pub(crate) mod supervisor;

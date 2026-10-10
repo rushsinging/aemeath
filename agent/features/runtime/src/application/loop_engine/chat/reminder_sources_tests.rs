@@ -406,12 +406,11 @@ fn background_process_source_build_peeks_until_confirmed_and_renders() {
         "command=cargo test",
         SystemTime::now(),
     );
-    supervisor.record_output(&task_id, b"ok 3 passed\n");
     supervisor
         .finish(
             &task_id,
             crate::domain::background_process::BackgroundProcessTerminalKind::Success,
-            None,
+            Some("ok 3 passed\n".to_string()),
         )
         .unwrap();
     let snapshot = source.build().expect("终态后应有快照");
@@ -421,7 +420,7 @@ fn background_process_source_build_peeks_until_confirmed_and_renders() {
         context::InvocationReminderData::BackgroundProcessCompleted { items } => {
             assert_eq!(items.len(), 1);
             assert_eq!(items[0].tool_name, "Bash");
-            assert!(items[0].output_tail.contains("ok 3 passed"));
+            assert_eq!(items[0].tool_name, "Bash");
         }
         other => panic!("应为 BackgroundProcessCompleted，实际 {other:?}"),
     }

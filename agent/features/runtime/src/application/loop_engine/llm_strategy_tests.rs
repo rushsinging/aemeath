@@ -176,6 +176,7 @@ fn invocation_context_preserves_non_user_message_sources() {
             hook_notice: None,
             skill_request: None,
             created_at: None,
+            system_reminder: false,
         }),
     };
 

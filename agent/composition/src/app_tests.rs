@@ -686,3 +686,228 @@ async fn bootstrap_assembly_has_no_scoring_notice_when_scenarios_disabled() {
         "场景开关全关时不应产生启动提醒"
     );
 }
+
+// ── #1890 输出直绑 L4 跨 crate 全链 ────────────────────────────────
+
+/// 脚本：invocation 0 返回 Bash tool call（长命令触发转后台直绑），
+/// 之后 EndTurn 收口（占位即 tool result）。
+struct DirectLogScriptProvider {
+    invocation_count: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl runtime::ProviderPort for DirectLogScriptProvider {
+    async fn invoke(
+        &self,
+        _request: provider::ProviderRequestData,
+        _cancellation: &dyn runtime::CancellationSignal,
+    ) -> Result<provider::ProviderResponseStream, ProviderError> {
+        let invocation_index = self.invocation_count.fetch_add(1, Ordering::SeqCst);
+        let (output, usage, stop_reason) = match invocation_index {
+            0 => (
+                vec![provider::ProviderContentData::ToolCall {
+                    id: "call-bash-direct".to_string(),
+                    name: "Bash".to_string(),
+                    arguments: serde_json::json!({
+                        "command": "ping -c 3 127.0.0.1",
+                        "goal": "L4 直绑全链验证",
+                        "timeout": 30000
+                    }),
+                }],
+                Some(provider::TokenUsageData {
+                    input_tokens: Some(10),
+                    output_tokens: Some(6),
+                    cache_write_tokens: None,
+                    cache_read_tokens: None,
+                    reasoning_tokens: None,
+                }),
+                provider::ResponseStopReason::ToolUse,
+            ),
+            _ => (
+                vec![provider::ProviderContentData::Text(
+                    "backgrounded, done".to_string(),
+                )],
+                Some(provider::TokenUsageData {
+                    input_tokens: Some(20),
+                    output_tokens: Some(4),
+                    cache_write_tokens: None,
+                    cache_read_tokens: None,
+                    reasoning_tokens: None,
+                }),
+                provider::ResponseStopReason::EndTurn,
+            ),
+        };
+        let mut chunks: Vec<provider::ProviderResponseChunk> = output
+            .into_iter()
+            .map(provider::ProviderResponseChunk::Content)
+            .collect();
+        if let Some(usage) = usage {
+            chunks.push(provider::ProviderResponseChunk::Usage(usage));
+        }
+        chunks.push(provider::ProviderResponseChunk::Stop(stop_reason));
+        Ok(Box::pin(futures_util::stream::iter(chunks)))
+    }
+}
+
+struct DirectLogProviderFactory {
+    invocation_count: Arc<AtomicUsize>,
+}
+
+impl ProviderFactory for DirectLogProviderFactory {
+    fn build(&self, spec: ProviderBuildSpecData) -> Result<ProviderBindingData, ProviderError> {
+        Ok(ProviderBindingData {
+            provider: Arc::new(DirectLogScriptProvider {
+                invocation_count: self.invocation_count.clone(),
+            }),
+            model: provider::ModelInfo {
+                provider: spec.source_key.clone(),
+                model: spec.model.clone(),
+                supports_tools: true,
+                supports_parallel_tool_calls: true,
+                supports_streaming: true,
+                supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+                context_limit: spec.context_window,
+                output_limit: Some(spec.max_tokens as usize),
+            },
+            max_tokens: spec.max_tokens,
+            requested_reasoning: spec.requested_reasoning,
+        })
+    }
+}
+
+/// L4：真实装配（真 Bash + runtime 派发 + session 级 BackgroundProcess
+/// Runtime + 持久化）+ scripted LLM 驱动——派发装配 → 直绑声明 → ctx
+/// 路径注入 → 子进程 stdout 直写任务日志文件 → 转后台 → 占位带路径。
+/// 任一环断裂（注入遗漏 / 建档失败 / 声明链断）由本测试直接定位。
+#[tokio::test(flavor = "current_thread")]
+async fn l4_real_assembly_direct_log_end_to_end_chain() {
+    let temp = tempfile::tempdir().expect("create temp root");
+    let root = temp.path().join("root");
+    let agents_dir = temp.path().join("agents");
+    std::fs::create_dir_all(&root).expect("create project root");
+    std::fs::create_dir_all(&agents_dir).expect("create agents dir");
+    std::fs::write(
+        agents_dir.join("aemeath.json"),
+        serde_json::json!({
+            "models": {
+                "default": "local/test-model",
+                "providers": {
+                    "local": {
+                        "baseUrl": "http://127.0.0.1:1/v1",
+                        "apiKey": "test-api-key",
+                        "driver": "openai",
+                        "models": [{
+                            "id": "test-model",
+                            "name": "Test Model",
+                            "input": ["text"],
+                            "contextWindow": 128000,
+                            "max_tokens": 8192
+                        }]
+                    }
+                }
+            },
+            // 1s 阈值启用后台化（sleep 2 必转后台）。
+            "runtime": { "tool_background_threshold_secs": 1 },
+            "policy": { "mode": "disable" }
+        })
+        .to_string(),
+    )
+    .expect("write global config");
+    std::fs::write(agents_dir.join("mcp.json"), "{\"mcpServers\":{}}").expect("write mcp config");
+    let args = AgentArgs {
+        cwd: Some(root),
+        api_key: Some("test-api-key".to_string()),
+        base_url: Some("http://127.0.0.1:1/v1".to_string()),
+        model: Some("local/test-model".to_string()),
+        context_size: 128_000,
+        ..AgentArgs::default()
+    };
+    let config = config::wire_project_config_with_agents_dir(
+        args.cwd.as_deref().expect("cwd"),
+        &agents_dir,
+        wire_config_override_store(&agents_dir).expect("override store"),
+        cli_config_input(&args),
+    )
+    .await
+    .expect("config wiring");
+    let workspace =
+        wire_workspace_with_config(args.cwd.as_deref().expect("cwd"), &config).expect("workspace");
+    let gateways = FeatureGateways::new(
+        Arc::new(DirectLogProviderFactory {
+            invocation_count: Arc::new(AtomicUsize::new(0)),
+        }),
+        configured_policy(&config),
+    );
+    let _assembly =
+        crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
+            .await
+            .expect("runtime assembly");
+
+    let (input_sender, input_receiver) = tokio::sync::mpsc::unbounded_channel();
+    input_sender
+        .send(sdk::ChatInputEvent::user_message(
+            "run long command",
+            Vec::new(),
+        ))
+        .expect("send user input");
+    drop(input_sender);
+    let input_port = TestInputEventPort::new(input_receiver);
+    let mut stream = sdk::AgentClient::chat(
+        &_assembly.client,
+        sdk::ChatRequest {
+            ingress: Arc::new(input_port),
+        },
+    )
+    .await
+    .expect("chat stream");
+    let mut tool_result_outputs: Vec<String> = Vec::new();
+    while let Some(event) = stream.recv().await {
+        if let sdk::ChatEvent::ToolResult { output, .. } = &event {
+            tool_result_outputs.push(output.clone());
+        }
+    }
+
+    // 占位 tool_result：进程 id + 任务日志路径。
+    let placeholder = tool_result_outputs
+        .iter()
+        .find(|text| text.contains("bgp_"))
+        .expect("应有后台占位 tool result");
+    assert!(
+        placeholder.contains("Progress log: "),
+        "占位附任务日志路径：{placeholder}"
+    );
+    let log_path = placeholder
+        .split("Progress log: ")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .expect("路径可提取");
+    let log_path = std::path::PathBuf::from(log_path);
+
+    // 文件是全量真相：占位返回时子进程仍在跑，轮询至完整输出落盘。
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        let content = std::fs::read_to_string(&log_path).unwrap_or_default();
+        if content.matches("ping statistics").count() >= 1
+            && content.contains("packets transmitted")
+        {
+            assert!(
+                content.contains("64 bytes"),
+                "文件含全程输出（零丢失）：{content:?}"
+            );
+            // #1890 双写防复发：直绑任务终态不回写正文——ping 汇总
+            // 只出现一次。
+            assert_eq!(
+                content.matches("ping statistics").count(),
+                1,
+                "直绑任务日志正文不得双写：{content:?}"
+            );
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "任务日志文件未在限期内包含完整输出：{}",
+            std::fs::read_to_string(&log_path).unwrap_or_default()
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+}

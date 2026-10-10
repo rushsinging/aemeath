@@ -140,14 +140,11 @@ fn latest_user_prompt_takes_first_line_and_truncates_at_60_chars() {
     assert!(long.ends_with('…'));
 }
 
-/// 取最后一条非 system-reminder 的用户消息；纯内部注入不进通知。
+/// 取最后一条用户消息（reminder 不进 timeline：实时 invocation-only、
+/// resume 按消息头标志隐藏——timeline 内无文本过滤）。
 #[test]
-fn latest_user_prompt_picks_last_real_user_message_and_skips_system_reminder() {
-    let items = [
-        user_message("最早的问题"),
-        user_message("<system-reminder>Skill loaded</system-reminder>"),
-        user_message("最新的问题"),
-    ];
+fn latest_user_prompt_picks_last_user_message() {
+    let items = [user_message("最早的问题"), user_message("最新的问题")];
     assert_eq!(latest_user_prompt(&items).as_deref(), Some("最新的问题"));
 }
 

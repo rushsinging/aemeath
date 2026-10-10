@@ -1,4 +1,5 @@
 use super::published_language::*;
+use crate::domain::TypedTool;
 
 #[test]
 fn tool_outcome_exposes_timeout_and_unconfirmed_terminals() {
@@ -121,6 +122,7 @@ fn test_descriptor_is_concurrency_safe() {
         read_only: true,
         input_safety: InputSafetyDeclaration::Always,
         data_schema: serde_json::Value::Null,
+        background_log_direct: false,
     };
     assert!(desc.is_concurrency_safe());
     assert!(desc.is_cooperative_cancel());
@@ -139,6 +141,7 @@ fn test_descriptor_serialized_and_non_cooperative() {
         read_only: false,
         input_safety: InputSafetyDeclaration::Never,
         data_schema: serde_json::Value::Null,
+        background_log_direct: false,
     };
     assert!(!desc.is_concurrency_safe());
     assert!(!desc.is_cooperative_cancel());
@@ -262,6 +265,7 @@ fn test_catalog_snapshot_find() {
         read_only: true,
         input_safety: InputSafetyDeclaration::Always,
         data_schema: serde_json::Value::Null,
+        background_log_direct: false,
     };
     let desc2 = ToolDescriptor {
         name: ToolName::new("Bash"),
@@ -274,6 +278,7 @@ fn test_catalog_snapshot_find() {
         read_only: false,
         input_safety: InputSafetyDeclaration::Never,
         data_schema: serde_json::Value::Null,
+        background_log_direct: false,
     };
     let snapshot = ToolCatalogSnapshot::new("main", "full", vec![desc1, desc2]);
 
@@ -299,4 +304,70 @@ fn test_catalog_error_display() {
         scope: "xyz".into(),
     };
     assert!(e.to_string().contains("xyz"));
+}
+
+// ── #1890 输出直绑 opt-in 声明 ──────────────────────────────────────
+
+#[test]
+fn background_log_direct_defaults_false_and_is_opt_in() {
+    let desc = ToolDescriptor {
+        name: ToolName::new("Glob"),
+        description: "File glob tool".into(),
+        input_schema: serde_json::json!({"type": "object"}),
+        required_capabilities: ToolCapabilities::Read,
+        concurrency: ConcurrencyDeclaration::safe(),
+        cancellation: CancellationDeclaration::Cooperative,
+        timeout_secs: 120,
+        read_only: true,
+        input_safety: InputSafetyDeclaration::Always,
+        data_schema: serde_json::Value::Null,
+        background_log_direct: false,
+    };
+    assert!(
+        !desc.is_background_log_direct(),
+        "未声明工具行为不变（opt-in）"
+    );
+
+    let direct = ToolDescriptor {
+        background_log_direct: true,
+        ..desc
+    };
+    assert!(direct.is_background_log_direct(), "声明后可见");
+}
+
+#[test]
+fn bash_tool_declares_background_log_direct() {
+    let workspace = tempfile::tempdir().unwrap();
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .build();
+    let bash = crate::adapters::bash::BashTool {
+        control: crate::domain::test_support::workspace_control(&ctx),
+    };
+    assert!(bash.background_log_direct(), "Bash 优先参与输出直绑");
+}
+
+#[test]
+fn execution_context_background_log_path_is_per_call_opt_in() {
+    let workspace = tempfile::tempdir().unwrap();
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .build();
+    assert!(
+        ctx.background_log_path().is_none(),
+        "默认无路径（行为不变）"
+    );
+    let bound = ctx
+        .clone()
+        .with_background_log_path(workspace.path().join("bgp_x.log"));
+    assert_eq!(
+        bound.background_log_path(),
+        Some(workspace.path().join("bgp_x.log").as_path())
+    );
+    assert!(
+        ctx.background_log_path().is_none(),
+        "clone 注入不影响原 context（per-call）"
+    );
 }

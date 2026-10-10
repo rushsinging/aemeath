@@ -1,4 +1,4 @@
-use super::earliest_deadline;
+use super::{earliest_deadline, placeholder_tool_result};
 use std::time::{Duration, SystemTime};
 
 #[test]
@@ -488,5 +488,29 @@ fn dispatch_started_time_is_elapsed_before_now() {
     assert!(
         elapsed.as_millis() < 5_000,
         "换算误差不应膨胀，实际 {elapsed:?}"
+    );
+}
+
+// ── #1890 占位带路径 ────────────────────────────────────────────────
+
+#[test]
+fn placeholder_carries_log_path_when_available() {
+    let task_id = BackgroundProcessId::new_v7();
+    let log_path = std::path::PathBuf::from("/tmp/sess.background-process/bgp_x.log");
+    let text = success_text(&placeholder_tool_result(&task_id, Some(&log_path)));
+    assert!(
+        text.contains("Progress log: /tmp/sess.background-process/bgp_x.log"),
+        "占位应附任务日志路径：{text}"
+    );
+    assert!(text.contains(task_id.as_str()), "占位保留进程 id：{text}");
+}
+
+#[test]
+fn placeholder_without_log_path_stays_compact() {
+    let task_id = BackgroundProcessId::new_v7();
+    let text = success_text(&placeholder_tool_result(&task_id, None));
+    assert!(
+        !text.contains("Progress log:"),
+        "无文件（未装配 / 建档失败降级）不带路径段：{text}"
     );
 }

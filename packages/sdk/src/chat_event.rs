@@ -169,6 +169,7 @@ fn sdk_message_to_local(message: ChatMessage) -> share::message::Message {
                         share::message::MessageSource::SkillRequest
                     }
                 },
+                system_reminder: metadata.system_reminder,
                 hook_notice: metadata
                     .hook_notice
                     .map(|notice| share::message::HookNotice {
@@ -225,6 +226,7 @@ fn local_message_to_sdk(message: &share::message::Message) -> ChatMessage {
                         crate::ChatMessageSource::SkillRequest
                     }
                 },
+                system_reminder: metadata.system_reminder,
                 hook_notice: metadata
                     .hook_notice
                     .as_ref()

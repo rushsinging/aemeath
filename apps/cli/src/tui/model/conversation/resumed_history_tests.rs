@@ -290,3 +290,41 @@ fn loaded_step_cache_is_bounded() {
     assert!(backing.step(159).is_some());
     assert_eq!(backing.items()[0].id, "history-step-0");
 }
+
+// ── #1890/#1695：system_reminder 标志位隐藏（渲染 NEVER 文本匹配） ──
+
+#[test]
+fn system_reminder_messages_are_hidden_by_flag() {
+    let backing = sdk::LocalSessionResumeBacking {
+        steps: vec![sdk::LocalResumedSessionStep {
+            run_id: "run-1".to_string(),
+            step_id: "step-1".to_string(),
+            message_segments: vec![std::sync::Arc::from(vec![
+                sdk::LocalResumeMessage::system_reminder_user(
+                    "<system-reminder kind=\"background-process\">hidden body</system-reminder>",
+                ),
+                sdk::LocalResumeMessage::user("visible input"),
+            ])],
+            finalize_cause: None,
+            duration_ms: None,
+        }],
+        display_history: None,
+        session_id: "session-1".to_string(),
+        created_at: 0,
+        compacted: false,
+    };
+    let resumed = ResumedHistoryBacking::from_sdk(backing);
+    let items = resumed.items().to_vec();
+    let kinds = items.iter().map(|item| &item.kind).collect::<Vec<_>>();
+    assert!(!kinds.is_empty(), "普通用户消息渲染：{kinds:?}");
+    // 标志隐藏：reminder 消息不产生任何 item——普通输入消息产生的
+    // item 数量应恰好等于其自身（1 条 user message → UserMessage item）。
+    let user_message_items = kinds
+        .iter()
+        .filter(|kind| matches!(kind, ResumedHistoryItemKind::UserMessage { .. }))
+        .count();
+    assert_eq!(
+        user_message_items, 1,
+        "仅普通用户输入渲染，reminder 按标志隐藏：{kinds:?}"
+    );
+}

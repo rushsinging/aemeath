@@ -54,13 +54,15 @@ pub(crate) fn background_processes_guidance_section(lang: &str) -> &'static str 
     match lang {
         "zh" => {
             "# 后台进程\n\
-            超过前台等待阈值（当前会话已启用）的 tool call 会自动转后台运行：你会先收到一条占位结果（标注任务已转后台、非终态），任务完成会主动通知你并回注结果，届时可继续处理。\n\
+            超过前台等待阈值（当前会话已启用）的 tool call 会自动转后台运行：你会先收到一条占位结果（标注任务已转后台、非终态，并附任务日志文件路径），任务完成会主动通知你并回注结果，届时可继续处理。\n\
+            - 优先等待完成通知；确需中途进度时用 BackgroundProcessLogs（task_id + 增量游标，全量字节无截断）或直接读占位里的日志文件路径。\n\
             - 用 BackgroundProcessList / BackgroundProcessStatus / BackgroundProcessLogs 查询任务列表、状态与日志（Logs 支持增量游标），用 BackgroundProcessStop 请求停止。\n\
             - sequential-only 工具的前序调用转后台后，同轮后续命令可能与未完成的前序并行；有顺序依赖时应等待完成通知或先查询状态。"
         }
         _ => {
             "# Background processes\n\
-            Tool calls that exceed the foreground waiting threshold (enabled in this session) are automatically moved to the background: you first receive a placeholder result (marked as moved to the background, not final), and you will be notified when the task completes.\n\
+            Tool calls that exceed the foreground waiting threshold (enabled in this session) are automatically moved to the background: you first receive a placeholder result (marked as moved to the background, not final, and including the task log file path), and you will be notified when the task completes.\n\
+            - Prefer waiting for the completion notification; for mid-run progress use BackgroundProcessLogs (task_id + incremental cursor, full bytes without truncation) or read the log file path from the placeholder.\n\
             - Use BackgroundProcessList / BackgroundProcessStatus / BackgroundProcessLogs to list tasks, check status, or read logs (Logs supports an incremental cursor); use BackgroundProcessStop to request a stop.\n\
             - When a sequential-only predecessor has been moved to the background, later commands in the same round may run concurrently with it; if order matters, wait for the completion notification or query the status first."
         }

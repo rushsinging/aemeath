@@ -134,8 +134,6 @@ pub struct BackgroundProcessReminderItemData {
     pub task_id: String,
     pub tool_name: String,
     pub status: BackgroundProcessCompletionStatus,
-    /// 输出尾部截断（注入 token 预算内；完整输出经 background_processes logs 查询）。
-    pub output_tail: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

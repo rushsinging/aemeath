@@ -347,11 +347,13 @@ fn local_message_from_tui(message: crate::tui::adapter::runtime_view::TuiChatMes
                 source: sdk::ChatMessageSource::SystemGenerated,
                 hook_notice: None,
                 skill_request: None,
+                system_reminder: false,
             })
         }
         crate::tui::adapter::runtime_view::TuiMessageSource::Hook => {
             Some(sdk::ChatMessageMetadata {
                 source: sdk::ChatMessageSource::Hook,
+                system_reminder: false,
                 hook_notice: message.hook_notice.map(|notice| sdk::HookNoticeView {
                     point: notice.point,
                     kind: match notice.kind {
@@ -381,6 +383,7 @@ fn local_message_from_tui(message: crate::tui::adapter::runtime_view::TuiChatMes
         crate::tui::adapter::runtime_view::TuiMessageSource::SkillRequest => {
             Some(sdk::ChatMessageMetadata {
                 source: sdk::ChatMessageSource::SkillRequest,
+                system_reminder: false,
                 hook_notice: None,
                 skill_request: message
                     .skill_request
@@ -511,6 +514,14 @@ fn build_items_for_step(step_index: usize, step: &ResumedHistoryStep) -> Vec<Res
     let mut items = Vec::new();
     for (message_index, message) in step.messages().enumerate() {
         match message.role {
+            // invocation-only 系统提醒（reminder 管线 TailUserMessage 落盘）：
+            // 按消息头标志隐藏——NEVER 渲染路径文本匹配剥离（envelope
+            // 格式演进曾使前缀匹配失效，resume 后历史 reminder 原样显示）。
+            Role::User
+                if message
+                    .metadata
+                    .as_ref()
+                    .is_some_and(|metadata| metadata.system_reminder) => {}
             Role::User
                 if message.source() == MessageSource::User && !message.has_tool_results() =>
             {

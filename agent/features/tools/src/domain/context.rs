@@ -239,10 +239,29 @@ impl ToolExecutionPorts {
 pub struct ToolExecutionContext {
     scope: ExecutionScope,
     ports: ToolExecutionPorts,
+    /// 输出直绑任务日志文件路径（#1890）：per-call 注入（派发点 clone
+    /// 本 context 后设置）；工具自声明 `background_log_direct` 且会话
+    /// 启用后台化时由 runtime 提供，其余为 None（行为不变）。
+    background_log_path: Option<std::path::PathBuf>,
 }
 impl ToolExecutionContext {
     pub fn new(scope: ExecutionScope, ports: ToolExecutionPorts) -> Self {
-        Self { scope, ports }
+        Self {
+            scope,
+            ports,
+            background_log_path: None,
+        }
+    }
+
+    /// 输出直绑路径注入（#1890）：per-call clone 后调用。
+    pub fn with_background_log_path(mut self, path: std::path::PathBuf) -> Self {
+        self.background_log_path = Some(path);
+        self
+    }
+
+    /// 任务日志文件路径（#1890 输出直绑）；None 表示本次调用不直绑。
+    pub fn background_log_path(&self) -> Option<&std::path::Path> {
+        self.background_log_path.as_deref()
     }
     pub fn selection(&self) -> &share::config::ToolSelection {
         &self.ports.selection

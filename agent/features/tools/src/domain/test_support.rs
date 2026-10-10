@@ -255,6 +255,7 @@ pub fn sequential_test_tool_catalog(
         read_only: true,
         input_safety: crate::domain::published_language::InputSafetyDeclaration::Always,
         data_schema: serde_json::json!({}),
+        background_log_direct: false,
     };
     crate::ToolCatalogSnapshot::new("main", "standard", vec![descriptor])
 }

@@ -55,7 +55,6 @@ fn mark_backgrounded_advances_state_with_deadline_snapshot() {
 fn finish_records_terminal_kind_and_output() {
     let supervisor = BackgroundProcessSupervisor::new();
     let task_id = supervisor.register(identity("1"), "command=test", SystemTime::now());
-    supervisor.record_output(&task_id, b"3 passed");
 
     let changed = supervisor
         .finish(
@@ -70,8 +69,10 @@ fn finish_records_terminal_kind_and_output() {
         supervisor.snapshot(&task_id).unwrap().terminal_kind(),
         Some(BackgroundProcessTerminalKind::Success)
     );
-    let (text, _) = supervisor.read_output_tail(&task_id, 1024).unwrap();
+    // 无文件任务回退终态文本（#1890）。
+    let (text, cursor, total) = supervisor.read_task_log(&task_id, None, 1024).unwrap();
     assert_eq!(text, "3 passed");
+    assert_eq!(cursor, total);
 }
 
 #[test]
@@ -147,18 +148,57 @@ fn invalidate_all_marks_active_tasks_and_keeps_terminals() {
 }
 
 #[test]
-fn output_read_tail_is_non_consumptive_across_reads() {
+fn direct_log_read_task_log_uses_file_as_source_of_truth() {
+    let base = std::env::temp_dir().join(format!(
+        "bgp-sup-tests-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
     let supervisor = BackgroundProcessSupervisor::new();
-    let task_id = supervisor.register(identity("1"), "command=watch", SystemTime::now());
-    supervisor.record_output(&task_id, b"first-line\n");
+    let process_id = share::ids::BackgroundProcessId::new_v7();
+    let (log, mut stdout, _stderr) =
+        crate::application::background_process::log_file::TaskLogFile::open(
+            &base,
+            "sess-1",
+            &process_id,
+        )
+        .unwrap();
+    use std::io::Write as _;
+    stdout.write_all(b"first-line\n").unwrap();
+    drop(stdout);
+    supervisor.register_direct(
+        process_id.clone(),
+        log.path().to_path_buf(),
+        identity("1"),
+        "command=watch",
+        tokio_util::sync::CancellationToken::new(),
+        SystemTime::now(),
+    );
 
-    let first = supervisor.read_output_tail(&task_id, 1024).unwrap();
-    let second = supervisor.read_output_tail(&task_id, 1024).unwrap();
-    assert_eq!(first, second);
+    // 尾部视图 + 增量游标：文件真相源，多次读取幂等。
+    let (text, cursor, total) = supervisor.read_task_log(&process_id, None, 1024).unwrap();
+    assert_eq!(text, "first-line\n");
+    assert_eq!(cursor, total);
+    let again = supervisor.read_task_log(&process_id, None, 1024).unwrap();
+    assert_eq!(again.0, text);
 
-    supervisor.record_output(&task_id, b"second-line\n");
-    let (text, _) = supervisor.read_output_tail(&task_id, 1024).unwrap();
-    assert_eq!(text, "first-line\nsecond-line\n");
+    // 文件增长（子进程直写）→ 游标增量读出新段。
+    let mut append = std::fs::OpenOptions::new()
+        .append(true)
+        .open(log.path())
+        .unwrap();
+    append.write_all(b"second-line\n").unwrap();
+    let (delta, next, total2) = supervisor
+        .read_task_log(&process_id, Some(cursor), 1024)
+        .unwrap();
+    assert_eq!(delta, "second-line\n");
+    assert_eq!(next, total2);
+    assert!(total2 > total);
+
+    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]
@@ -176,10 +216,13 @@ fn snapshots_list_all_registered_tasks() {
 fn peek_keeps_items_until_injection_confirmed() {
     let supervisor = BackgroundProcessSupervisor::new();
     let task_id = supervisor.register(identity("1"), "command=test", SystemTime::now());
-    supervisor.record_output(&task_id, b"3 passed\n");
 
     supervisor
-        .finish(&task_id, BackgroundProcessTerminalKind::Success, None)
+        .finish(
+            &task_id,
+            BackgroundProcessTerminalKind::Success,
+            Some("3 passed".to_string()),
+        )
         .expect("终态推进");
 
     let items = supervisor.peek_unnotified_terminal_items();
@@ -190,7 +233,7 @@ fn peek_keeps_items_until_injection_confirmed() {
         items[0].status,
         context::BackgroundProcessCompletionStatus::Succeeded
     ));
-    assert!(items[0].output_tail.contains("3 passed"), "通知带输出尾部");
+    // 通知瘦身为 id + 状态（详情走 Logs 工具）；不再携带输出尾部。
 
     // peek 语义（注入确认制）：确认前重复可见（Run 收口后下个 Run
     // 仍可补注入）；确认后不再出现。
@@ -240,39 +283,17 @@ fn peek_skips_invalidated_and_keeps_order() {
     ));
 }
 
-#[test]
-fn peek_caps_output_tail_bytes() {
-    let supervisor = BackgroundProcessSupervisor::new();
-    let task_id = supervisor.register(identity("1"), "command=verbose", SystemTime::now());
-    supervisor.record_output(&task_id, vec![b'x'; 8192].as_slice());
-
-    supervisor
-        .finish(&task_id, BackgroundProcessTerminalKind::Success, None)
-        .unwrap();
-
-    let items = supervisor.peek_unnotified_terminal_items();
-    let tail_bytes = items[0].output_tail.len();
-    assert!(
-        tail_bytes <= crate::application::constants::BACKGROUND_PROCESS_NOTIFICATION_TAIL_BYTES,
-        "通知尾部截断（实际 {tail_bytes} 字节）"
-    );
-}
-
-// ── #252 PR3：stop 请求与日志游标读取 ───────────────────────────────
-
 fn registered_backgrounded_task(
     supervisor: &BackgroundProcessSupervisor,
     token: tokio_util::sync::CancellationToken,
 ) -> BackgroundProcessId {
     let task_id = supervisor.register_with_cancellation(
-        identity("1"),
-        "command=build",
+        identity("stop-1"),
+        "command=stop",
         token,
         SystemTime::now(),
     );
-    supervisor
-        .mark_backgrounded(&task_id, None)
-        .expect("转后台成功");
+    supervisor.mark_backgrounded(&task_id, None).unwrap();
     task_id
 }
 
@@ -327,9 +348,34 @@ fn stop_task_unknown_id_reports_error() {
 
 #[test]
 fn read_task_log_returns_tail_then_incremental_delta() {
+    let base = std::env::temp_dir().join(format!(
+        "bgp-sup-incr-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
     let supervisor = BackgroundProcessSupervisor::new();
-    let task_id = supervisor.register(identity("1"), "command=watch", SystemTime::now());
-    supervisor.record_output(&task_id, b"line-1\nline-2\n");
+    let process_id = share::ids::BackgroundProcessId::new_v7();
+    let (log, mut stdout, _stderr) =
+        crate::application::background_process::log_file::TaskLogFile::open(
+            &base,
+            "sess-1",
+            &process_id,
+        )
+        .unwrap();
+    use std::io::Write as _;
+    stdout.write_all(b"line-1\nline-2\n").unwrap();
+    drop(stdout);
+    let task_id = supervisor.register_direct(
+        process_id,
+        log.path().to_path_buf(),
+        identity("1"),
+        "command=watch",
+        tokio_util::sync::CancellationToken::new(),
+        SystemTime::now(),
+    );
 
     // 尾部读取（无游标）：最近字节 + 读后游标。
     let (text, cursor, _total) = supervisor
@@ -339,8 +385,12 @@ fn read_task_log_returns_tail_then_incremental_delta() {
     assert!(text.contains("line-2"));
     assert!(cursor > 0, "游标应推进到已读位置");
 
-    // 增量读取（携带游标）：只返回新增字节。
-    supervisor.record_output(&task_id, b"line-3\n");
+    // 增量读取（携带游标）：只返回新增字节（子进程直写文件）。
+    let mut append = std::fs::OpenOptions::new()
+        .append(true)
+        .open(log.path())
+        .unwrap();
+    append.write_all(b"line-3\n").unwrap();
     let (delta, next_cursor, _) = supervisor
         .read_task_log(&task_id, Some(cursor), 4096)
         .expect("增量读取成功");
@@ -352,6 +402,8 @@ fn read_task_log_returns_tail_then_incremental_delta() {
         .read_task_log(&task_id, Some(next_cursor), 4096)
         .expect("游标追平后读取成功");
     assert!(empty.is_empty());
+
+    let _ = std::fs::remove_dir_all(&base);
 }
 
 #[test]

@@ -348,3 +348,40 @@ fn created_at_round_trips_through_session_json() {
         Some(fixed_user_input_time())
     );
 }
+
+// ── system_reminder 消息头标志 ──────────────────────────────────────
+
+#[test]
+fn system_reminder_user_sets_flag_and_round_trips() {
+    let message =
+        Message::system_reminder_user("<system-reminder kind=\"x\">body</system-reminder>");
+    let metadata = message.metadata.as_ref().expect("头已置位");
+    assert!(metadata.system_reminder, "注入消息头携带隐藏标志");
+
+    // 落盘 round-trip：标志保留。
+    let serialized = serde_json::to_string(&message).unwrap();
+    assert!(
+        serialized.contains("\"system_reminder\":true"),
+        "落盘含标志：{serialized}"
+    );
+    let restored: Message = serde_json::from_str(&serialized).unwrap();
+    assert!(restored.metadata.as_ref().unwrap().system_reminder);
+
+    // 旧数据（无标志字段）反序列化 false 兼容。
+    let legacy = serde_json::json!({
+        "role": "user",
+        "content": [{"type": "text", "text": "plain"}],
+    });
+    let legacy_message: Message = serde_json::from_value(legacy).unwrap();
+    assert!(
+        legacy_message
+            .metadata
+            .as_ref()
+            .map(|metadata| !metadata.system_reminder)
+            .unwrap_or(true),
+        "旧数据无标志（false / None），不隐藏"
+    );
+
+    // 普通用户消息不带标志。
+    assert!(Message::user("hello").metadata.is_none());
+}
