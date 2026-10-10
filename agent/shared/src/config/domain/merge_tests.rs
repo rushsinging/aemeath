@@ -222,8 +222,9 @@ fn tool_result_partial_patch_preserves_unspecified_policy_fields() {
     .unwrap();
 
     let snapshot = ConfigSnapshot::new(apply_patch(Config::default(), patch));
-    // 大窗口（1M）下比例收紧不生效，验证的就是 patch 后的原始策略值
-    let policy = snapshot.tool_result_policy(1_000_000);
+    // 窗口未知（0）不按比例收紧：验证的就是 patch 后的原始策略值，
+    // 若改用大窗口，比例收紧结果会掩盖「未指定字段保留默认值」的失效。
+    let policy = snapshot.tool_result_policy(0);
 
     assert_eq!(policy.threshold_chars(), 9_000);
     assert_eq!(policy.preview_head_chars(), 2_000);
