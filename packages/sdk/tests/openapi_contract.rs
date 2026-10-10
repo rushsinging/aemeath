@@ -62,7 +62,7 @@ fn wire_components_document_preserves_interaction_and_run_control_references() {
         schemas["InteractionRequestBody"]["oneOf"]
             .as_array()
             .map(Vec::len),
-        Some(3)
+        Some(2)
     );
 
     let _: &Value = &document;
