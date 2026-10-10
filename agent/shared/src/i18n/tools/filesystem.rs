@@ -13,8 +13,8 @@ pub fn bash(lang: &str) -> &'static str {
 /// Grep description。
 pub fn grep(lang: &str) -> &'static str {
     match lang {
-        "zh" => "使用 ripgrep 正则语法搜索文件内容。支持 glob 文件过滤。",
-        _ => "Search file contents using ripgrep regex syntax. Supports glob file filters.",
+        "zh" => "使用 ripgrep 正则语法搜索文件内容，支持 glob 文件过滤。默认返回文件级索引（文件与匹配数），便于定位；需要查看具体匹配行时传 output_mode=\"content\"，或用 Read 读取目标文件。",
+        _ => "Search file contents using ripgrep regex syntax, with glob file filters. Returns a file-level index (files with match counts) by default; pass output_mode=\"content\" to see matching lines, or use Read on the target files.",
     }
 }
 

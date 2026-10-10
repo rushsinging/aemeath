@@ -26,7 +26,7 @@ pub use tools::types::edit::EditResult;
 pub use tools::types::enter_worktree::EnterWorktreeResult;
 pub use tools::types::exit_worktree::ExitWorktreeResult;
 pub use tools::types::glob::GlobResult;
-pub use tools::types::grep::GrepResult;
+pub use tools::types::grep::{GrepFileMatch, GrepResult};
 pub use tools::types::list_mcp_resources::ListMcpResourcesResult;
 pub use tools::types::mcp_manager::McpManagerResult;
 pub use tools::types::mcp_tool::McpToolResult;
