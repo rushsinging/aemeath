@@ -652,11 +652,21 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             }
             prepared.push((entry, suggestion.supersedes.clone()));
         }
-        let outdated = output
-            .outdated_memories
-            .iter()
-            .map(MemoryId::new)
-            .collect::<Result<Vec<_>, _>>()?;
+        // 非法引用（模型编造的标签 slug、行格式等）逐条跳过并记录，NEVER 让
+        // 单条坏引用作废整批建议——事故形态即「一条非法 outdated id
+        // 触发整批 apply 失败」，连合法建议一并丢弃。
+        let mut outdated = Vec::with_capacity(output.outdated_memories.len());
+        for token in &output.outdated_memories {
+            match MemoryId::new(token) {
+                Ok(id) => outdated.push(id),
+                Err(_) => log::warn!(
+                    target: crate::LOG_TARGET,
+                    "memory_reflection_reference_skipped field=outdated token={} len={}",
+                    crate::domain::truncate_reference_token(token, 40),
+                    token.chars().count(),
+                ),
+            }
+        }
 
         let mut result = ReflectionApplyResult {
             attempted: prepared.len() + outdated.len(),

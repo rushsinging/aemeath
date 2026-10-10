@@ -322,7 +322,7 @@ async fn reflection_reports_full_capacity_when_only_pinned_entries_exist() {
 }
 
 #[tokio::test]
-async fn reflection_marks_existing_outdated_ids_and_rejects_invalid_ids() {
+async fn reflection_marks_existing_outdated_ids_and_skips_invalid_ids() {
     let port = InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 200).unwrap();
     let existing = entry("existing", "existing fact", 100);
     port.write(existing.clone()).await.unwrap();
@@ -337,14 +337,17 @@ async fn reflection_marks_existing_outdated_ids_and_rejects_invalid_ids() {
     assert_eq!(result.outdated_marked, 1);
     assert!(port.list(None).await[0].outdated);
 
-    let error = port
+    // 非法引用被跳过并记录，NEVER 让整批失败（旧契约要求上抛 InvalidEntry）。
+    let result = port
         .apply_reflection(&ReflectionOutput {
             outdated_memories: vec!["not-a-uuid".to_string()],
             ..ReflectionOutput::default()
         })
         .await
-        .unwrap_err();
-    assert!(matches!(error, MemoryError::InvalidEntry { .. }));
+        .unwrap();
+    assert_eq!(result.outdated_marked, 0);
+    assert_eq!(result.attempted, 0);
+    assert_eq!(result.completed, 0);
 }
 
 #[tokio::test]

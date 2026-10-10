@@ -14,6 +14,17 @@ fn default_memory_layer() -> MemoryLayer {
     MemoryLayer::Project
 }
 
+/// 观测/日志用的引用 token 截断：模型编造的引用可能是很长的内容片段，
+/// 日志只保留可辨识前缀，避免污染日志与泄露正文。
+pub(crate) fn truncate_reference_token(token: &str, max_chars: usize) -> String {
+    if token.chars().count() <= max_chars {
+        return token.to_string();
+    }
+    let mut truncated: String = token.chars().take(max_chars).collect();
+    truncated.push('…');
+    truncated
+}
+
 /// A candidate memory produced by Reflection, before it becomes a `MemoryEntry`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemorySuggestion {
@@ -60,6 +71,152 @@ pub enum ReflectionError {
 }
 
 pub type ReflectionResult<T> = Result<T, ReflectionError>;
+
+/// 反思输入引用表：本次运行内稳定的行序号（从 1 起）→ 已有记忆 id。
+///
+/// 反思模型只看得到行首序号（`[M1]`、`[M2]`…），NEVER 看到 UUID；解析模型输出
+/// 时经本表把序号映射回真实 id。序号仅在产生它的那次反思运行内有效。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReflectionReferenceTable {
+    references: Vec<(u32, MemoryId)>,
+}
+
+impl ReflectionReferenceTable {
+    /// 行序 MUST 与 [`ReflectionEngine::format_memory_summary`] 的渲染顺序一致
+    /// （两者都以同一 `entries` 切片为基准）。
+    pub fn from_entries(entries: &[MemoryEntry]) -> Self {
+        Self {
+            references: entries
+                .iter()
+                .enumerate()
+                .map(|(index, entry)| (index as u32 + 1, entry.id))
+                .collect(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.references.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.references.is_empty()
+    }
+
+    /// 解析一条模型引用。接受两类形式：
+    /// - 完整 UUID（兼容模型直填真实 id 的情况）；
+    /// - 本表行序号：`M3` / `m3` / `[M3]` / `#3` / `3`。
+    ///
+    /// 无法解析时返回 `None`，由调用方降级（跳过并记录），NEVER 失败整批。
+    pub fn resolve(&self, token: &str) -> Option<MemoryId> {
+        let trimmed = token.trim();
+        if let Ok(id) = MemoryId::new(trimmed) {
+            return Some(id);
+        }
+        let ordinal = parse_reference_ordinal(trimmed)?;
+        self.references
+            .iter()
+            .find(|(candidate, _)| *candidate == ordinal)
+            .map(|(_, id)| *id)
+    }
+}
+
+fn parse_reference_ordinal(token: &str) -> Option<u32> {
+    let stripped = token.trim();
+    let stripped = stripped.strip_prefix('[').unwrap_or(stripped);
+    let stripped = stripped.strip_suffix(']').unwrap_or(stripped);
+    let stripped = stripped.trim();
+    let stripped = stripped
+        .strip_prefix('M')
+        .or_else(|| stripped.strip_prefix('m'))
+        .or_else(|| stripped.strip_prefix('#'))
+        .unwrap_or(stripped);
+    stripped
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|ordinal| *ordinal > 0)
+}
+
+/// 逐条解析建议里的引用 token：可解析者映射为真实 id，无法解析者跳过并记录
+/// （NEVER 失败整批）。
+fn resolve_reference_tokens(
+    tokens: Vec<String>,
+    references: &ReflectionReferenceTable,
+    field: ReflectionReferenceField,
+    unresolved: &mut Vec<UnresolvedReflectionReference>,
+) -> Vec<MemoryId> {
+    tokens
+        .into_iter()
+        .filter_map(|token| match references.resolve(&token) {
+            Some(id) => Some(id),
+            None => {
+                unresolved.push(UnresolvedReflectionReference {
+                    field,
+                    token: truncate_reference_token(&token, 80),
+                });
+                None
+            }
+        })
+        .collect()
+}
+
+/// 反思输入构造产物：prompt 文本 + 引用表（解析模型输出时使用）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReflectionPrompt {
+    pub text: String,
+    pub references: ReflectionReferenceTable,
+}
+
+/// 无法解析的引用所属字段（观测分类）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReflectionReferenceField {
+    Outdated,
+    Supersedes,
+    Synthesizes,
+}
+
+/// 一条无法解析的模型引用：原始 token 截断后保留，供日志观测。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnresolvedReflectionReference {
+    pub field: ReflectionReferenceField,
+    pub token: String,
+}
+
+/// 解析后的反思输出：引用（序号/UUID）已映射为真实 id；`unresolved` 记录被
+/// 跳过的引用（NEVER 因单条坏引用使整批失败，也 NEVER 丢弃合法建议）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ResolvedReflectionOutput {
+    pub output: ReflectionOutput,
+    pub unresolved: Vec<UnresolvedReflectionReference>,
+}
+
+/// 模型输出的 wire 投影：引用字段以字符串承载（序号、UUID 或任意编造串），
+/// 经引用表解析后才进入领域类型 [`ReflectionOutput`]。
+#[derive(Debug, Clone, Deserialize)]
+struct RawReflectionOutput {
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    deviations: Vec<String>,
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    suggested_memories: Vec<RawMemorySuggestion>,
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    outdated_memories: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RawMemorySuggestion {
+    #[serde(default = "default_memory_layer")]
+    layer: MemoryLayer,
+    category: MemoryCategory,
+    content: String,
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    tags: Vec<String>,
+    #[serde(default)]
+    reason: String,
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    supersedes: Vec<String>,
+    #[serde(default, deserialize_with = "null_as_empty_vec")]
+    synthesizes: Vec<String>,
+}
 
 /// A provider-independent message projection used by the pure Reflection service.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,6 +267,8 @@ pub enum ReflectionErrorCategory {
     History,
     Cancelled,
     TimedOut,
+    /// 进程被终止（崩溃/重启）导致 Running 事实未收口，由悬挂收口（reap）写入。
+    Interrupted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -312,12 +471,16 @@ impl ReflectionEngine {
 - 只输出 JSON，不要输出 Markdown。
 - suggested_memories[].layer 只能是 project 或 global，默认优先使用 project。
 - suggested_memories[].category 只能是 fact、decision、preference、pattern、pitfall。
-- outdated_memories 使用已有 memory id。
-- suggested_memories[].synthesizes 只在**归纳多条已有记忆**时填这些 memory id。
+- 引用已有记忆只能使用「当前项目记忆」列表行首的序号（形如 M3，对应行首 [M3]）。
+  NEVER 编造列表中不存在的序号，NEVER 用标签、正文或任何其他标识充当引用。
+  正确示例："outdated_memories": ["M2"]。
+  错误示例："outdated_memories": ["[Decision][some-tag]"] 或 ["some-tag-slug"]。
+- outdated_memories 填被新事实推翻、不应再注入的条目序号。
+- suggested_memories[].synthesizes 只在**归纳多条已有记忆**时填这些条目序号。
   单条来源不是归纳（那只是改写），此时留空数组——不足两条来源的归纳 MUST NOT
   产出。结论被新证据修正时在正文里写「曾…现…」，不要输出置信度数字。
 - suggested_memories[].supersedes 只在**新记忆明确取代某条已有记忆**时填该
-  memory id（例如部署方式、端口、结论被新事实推翻）。两条记忆只是补充关系、或
+  条目序号（例如部署方式、端口、结论被新事实推翻）。两条记忆只是补充关系、或
   旧记忆仍然成立时，**必须留空数组**——误取代会让仍有价值的记忆停止注入。
 - 没有内容时输出空数组。
 
@@ -325,7 +488,7 @@ JSON 格式：
 {{
     "deviations": ["偏差描述"],
     "suggested_memories": [{{"layer":"project","category":"decision","content":"记忆内容","tags":["可选标签"],"reason":"为什么建议添加","supersedes":[],"synthesizes":[]}}],
-    "outdated_memories": ["memory-id"]
+    "outdated_memories": ["M3"]
 }}
 
 # 当前项目记忆
@@ -340,14 +503,21 @@ Requirements:
 - Output JSON only, no Markdown.
 - suggested_memories[].layer must be project or global; prefer project by default.
 - suggested_memories[].category must be fact, decision, preference, pattern, or pitfall.
-- outdated_memories uses existing memory ids.
-- Fill suggested_memories[].synthesizes with the memory ids ONLY when this
+- Reference existing memories ONLY by the ordinal shown at the start of each
+  "Current project memory" line (e.g. M3 for a line beginning with [M3]).
+  NEVER invent an ordinal that is not in the list; NEVER use tags, content, or
+  any other identifier as a reference.
+  Good: "outdated_memories": ["M2"].
+  Bad: "outdated_memories": ["[Decision][some-tag]"] or ["some-tag-slug"].
+- outdated_memories lists the ordinals of entries superseded by new facts and
+  that must stop being injected.
+- Fill suggested_memories[].synthesizes with the ordinals ONLY when this
   suggestion combines several existing memories into a new conclusion. A single
   source is not a synthesis — it is a restatement — so leave it empty; a
   synthesis over fewer than two sources must not be produced. When new evidence
   corrects a conclusion, phrase the change in the content ("used to …, now …")
   instead of emitting a confidence number.
-- Fill suggested_memories[].supersedes with an existing memory id ONLY when the
+- Fill suggested_memories[].supersedes with an ordinal ONLY when the
   new memory explicitly replaces it (a changed deploy target, port, or reversed
   conclusion). Leave it empty when the two memories merely complement each
   other or the old one still holds — a wrong supersede stops a still-valuable
@@ -358,7 +528,7 @@ JSON format:
 {{
     "deviations": ["deviation description"],
     "suggested_memories": [{{"layer":"project","category":"decision","content":"memory content","tags":["optional tag"],"reason":"why this is suggested","supersedes":[],"synthesizes":[]}}],
-    "outdated_memories": ["memory-id"]
+    "outdated_memories": ["M3"]
 }}
 
 # Current project memory
@@ -377,7 +547,15 @@ impl ReflectionEngine {
             .replace("{recent_summary}", recent_summary)
     }
 
-    pub fn parse_output(&self, raw: &str) -> ReflectionResult<ReflectionOutput> {
+    /// 解析模型输出并把引用（序号/UUID）映射为真实 id。
+    ///
+    /// 单条无法解析的引用被跳过并记录到 `unresolved`——NEVER 使整批失败，
+    /// NEVER 丢弃合法建议（引用契约事故形态的根因修复）。
+    pub fn parse_output(
+        &self,
+        raw: &str,
+        references: &ReflectionReferenceTable,
+    ) -> ReflectionResult<ResolvedReflectionOutput> {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
             return Err(ReflectionError::Unparseable);
@@ -397,31 +575,87 @@ impl ReflectionEngine {
             return Err(ReflectionError::Unparseable);
         };
 
-        let output: ReflectionOutput =
+        let raw_output: RawReflectionOutput =
             serde_json::from_str(source).map_err(|_| ReflectionError::Parse)?;
-        for (index, suggestion) in output.suggested_memories.iter().enumerate() {
+        let mut unresolved = Vec::new();
+        let mut suggested_memories = Vec::with_capacity(raw_output.suggested_memories.len());
+        for (index, suggestion) in raw_output.suggested_memories.into_iter().enumerate() {
             if suggestion.content.trim().is_empty() {
                 return Err(ReflectionError::InvalidSuggestion(format!(
                     "suggested_memories[{index}].content must not be empty"
                 )));
             }
+            suggested_memories.push(MemorySuggestion {
+                layer: suggestion.layer,
+                category: suggestion.category,
+                content: suggestion.content,
+                tags: suggestion.tags,
+                reason: suggestion.reason,
+                supersedes: resolve_reference_tokens(
+                    suggestion.supersedes,
+                    references,
+                    ReflectionReferenceField::Supersedes,
+                    &mut unresolved,
+                ),
+                synthesizes: resolve_reference_tokens(
+                    suggestion.synthesizes,
+                    references,
+                    ReflectionReferenceField::Synthesizes,
+                    &mut unresolved,
+                ),
+            });
         }
-        Ok(output)
+        let outdated_memories = raw_output
+            .outdated_memories
+            .into_iter()
+            .filter_map(|token| match references.resolve(&token) {
+                Some(id) => Some(id.to_string()),
+                None => {
+                    unresolved.push(UnresolvedReflectionReference {
+                        field: ReflectionReferenceField::Outdated,
+                        token: truncate_reference_token(&token, 80),
+                    });
+                    None
+                }
+            })
+            .collect();
+
+        Ok(ResolvedReflectionOutput {
+            output: ReflectionOutput {
+                deviations: raw_output.deviations,
+                suggested_memories,
+                outdated_memories,
+            },
+            unresolved,
+        })
     }
 
-    pub fn format_memory_summary(&self, entries: &[MemoryEntry]) -> String {
-        entries
+    /// 渲染反思输入的记忆列表：每行以本次运行内稳定的行序号开头
+    /// （`- [M1] [Decision][tag] content`），同时返回序号表。模型 NEVER 看到
+    /// UUID；解析模型输出时经 [`ReflectionReferenceTable`] 映射回真实 id。
+    ///
+    /// 行文本与引用表由同一 `entries` 切片推导（序号单一来源），顺序 MUST 一致。
+    pub fn format_memory_summary(
+        &self,
+        entries: &[MemoryEntry],
+    ) -> (String, ReflectionReferenceTable) {
+        let references = ReflectionReferenceTable::from_entries(entries);
+        let text = references
+            .references
             .iter()
-            .map(|entry| {
+            .zip(entries.iter())
+            .map(|((ordinal, _), entry)| {
                 format!(
-                    "- [{:?}][{}] {}",
+                    "- [M{}] [{:?}][{}] {}",
+                    ordinal,
                     entry.category,
                     entry.tags.join(","),
                     entry.content
                 )
             })
             .collect::<Vec<_>>()
-            .join("\n")
+            .join("\n");
+        (text, references)
     }
 
     pub fn recent_messages_summary(

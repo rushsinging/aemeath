@@ -14,6 +14,10 @@ pub(crate) const REFLECTION_RECORDS_MEMBER: &str = "records";
 
 pub(crate) const REFLECTION_HISTORY_SEGMENT: &str = "reflection-history";
 
+/// 悬挂 running 记录收口（reap）扫描的历史窗口上限：反思记录按最新在前排序，
+/// 超龄未收口的 Running 只会出现在最近的有限窗口内。
+pub(crate) const REFLECTION_REAP_SCAN_LIMIT: usize = 200;
+
 /// Fixed, project-independent segment for the shared global layer generation.
 /// Fixed, project-independent segment for the shared global layer generation.
 pub(crate) const GLOBAL_DATASET_SEGMENT: &str = "global";

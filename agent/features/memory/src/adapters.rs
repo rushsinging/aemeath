@@ -898,8 +898,22 @@ impl MemoryPort for InMemoryMemory {
         &self,
         output: &ReflectionOutput,
     ) -> Result<ReflectionApplyResult, MemoryError> {
+        // 非法引用（编造标识）先过滤并记录：跳过而不是拒绝，NEVER 作废整批；
+        // attempted 只统计实际尝试的操作。
+        let mut outdated_ids = Vec::with_capacity(output.outdated_memories.len());
+        for raw_id in &output.outdated_memories {
+            match MemoryId::new(raw_id) {
+                Ok(id) => outdated_ids.push(id),
+                Err(_) => log::warn!(
+                    target: crate::LOG_TARGET,
+                    "memory_reflection_reference_skipped field=outdated token={} len={}",
+                    crate::domain::truncate_reference_token(raw_id, 40),
+                    raw_id.chars().count(),
+                ),
+            }
+        }
         let mut result = ReflectionApplyResult {
-            attempted: output.suggested_memories.len() + output.outdated_memories.len(),
+            attempted: output.suggested_memories.len() + outdated_ids.len(),
             ..ReflectionApplyResult::default()
         };
         for suggestion in &output.suggested_memories {
@@ -942,8 +956,7 @@ impl MemoryPort for InMemoryMemory {
             }
         }
 
-        for raw_id in &output.outdated_memories {
-            let id = MemoryId::new(raw_id)?;
+        for id in outdated_ids {
             let mut state = self.state.write().expect("memory state lock poisoned");
             if let Some(entry) = state.active.iter_mut().find(|entry| entry.id == id) {
                 entry.outdated = true;

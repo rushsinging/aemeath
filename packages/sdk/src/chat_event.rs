@@ -443,6 +443,8 @@ pub enum ReflectionErrorCategoryView {
     History,
     Cancelled,
     TimedOut,
+    /// 进程被终止（崩溃/重启）导致 Running 事实未收口，由悬挂收口（reap）写入。
+    Interrupted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

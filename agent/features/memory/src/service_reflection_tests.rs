@@ -156,3 +156,35 @@ async fn retrieve_for_inject_reads_committed_memory_without_write() {
         "injection retrieval must not write the committed project layer"
     );
 }
+
+#[tokio::test]
+async fn apply_reflection_skips_invalid_outdated_reference_without_failing_batch() {
+    // 复现修复前的 apply 全批失败：outdated_memories 携带非法引用
+    // （真实事故形态：模型把标签 slug 或行格式当作 memory id）。
+    // 合法的新建议 MUST 照常写入，非法引用 MUST 跳过并记录，NEVER 整批丢弃。
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(
+            vec![Ok(committed(1, MemoryLayer::Project, vec![]))],
+            vec![Ok(receipt(2))],
+        ),
+    );
+    let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 200)
+        .await
+        .unwrap();
+
+    let result = service
+        .apply_reflection(&ReflectionOutput {
+            suggested_memories: vec![suggestion(MemoryLayer::Project, "有效的新记忆")],
+            outdated_memories: vec!["some-tag-slug".to_string()],
+            ..ReflectionOutput::default()
+        })
+        .await
+        .expect("非法引用 MUST 跳过而不是整批失败");
+
+    assert_eq!(result.suggestions_added, 1, "合法建议 MUST 写入");
+    assert_eq!(result.outdated_marked, 0, "非法引用 MUST 跳过");
+    // 跳过的引用不计入 attempted（没有实际尝试的操作）。
+    assert_eq!(result.attempted, 1);
+    assert_eq!(result.completed, 1);
+}

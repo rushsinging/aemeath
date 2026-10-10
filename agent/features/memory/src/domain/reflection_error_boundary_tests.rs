@@ -1,4 +1,4 @@
-use super::ReflectionEngine;
+use super::{ReflectionEngine, ReflectionReferenceTable};
 #[test]
 fn parse_errors_never_expose_model_response_content() {
     let secret = "REFLECTION-RAW-SECRET";
@@ -8,7 +8,7 @@ fn parse_errors_never_expose_model_response_content() {
         format!(r#"{{"deviations":["{secret}"]"#),
     ] {
         let error = engine
-            .parse_output(&response)
+            .parse_output(&response, &ReflectionReferenceTable::default())
             .expect_err("invalid model output must fail");
         assert!(
             !error.to_string().contains(secret),

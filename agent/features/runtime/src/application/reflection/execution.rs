@@ -76,7 +76,7 @@ pub(crate) async fn execute_reflection(
 ) -> ReflectionExecutionResultType<CompleteReflectionResult> {
     let started = std::time::Instant::now();
     let prompt = ReflectionWorkflow::build_prompt(messages, lang, memory, identity.timestamp).await;
-    let response = call_provider(&invocation, &prompt, cancel).await;
+    let response = call_provider(&invocation, &prompt.text, cancel).await;
     let (raw_response, input_tokens, output_tokens) = match response {
         Ok(response) => response,
         Err(error) => {
@@ -95,6 +95,7 @@ pub(crate) async fn execute_reflection(
         memory,
         identity,
         &raw_response,
+        &prompt.references,
         lang,
         auto_apply,
         ReflectionTokenUsage {

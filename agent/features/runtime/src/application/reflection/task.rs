@@ -253,9 +253,25 @@ impl ReflectionTaskAdapter {
             return ReflectionRunOutcome::DisabledSkipped;
         }
         let trigger = request.trigger;
+        // 收口上次进程退出留下的悬挂 Running 记录：阈值 = 本次任务超时的两倍
+        // （至少 60s），并发中新启动的运行不会被误收口；失败只告警不阻断本次反思。
+        let stale_after_secs = (self.timeout.as_secs().saturating_mul(2)).max(60);
+        let now = chrono::Utc::now().timestamp().max(0) as u64;
+        match ReflectionWorkflow::reap_stale_running(history.as_ref(), now, stale_after_secs).await
+        {
+            Ok(0) => {}
+            Ok(reaped) => log::info!(
+                target: crate::LOG_TARGET,
+                "[reflection_reaped] count={reaped} stale_after_secs={stale_after_secs}",
+            ),
+            Err(_) => log::warn!(
+                target: crate::LOG_TARGET,
+                "[reflection_reap_failed] 悬挂 running 记录收口失败，继续本次反思",
+            ),
+        }
         let identity = ReflectionExecutionIdentity {
             id: uuid::Uuid::now_v7().to_string(),
-            timestamp: chrono::Utc::now().timestamp().max(0) as u64,
+            timestamp: now,
             trigger: trigger.memory_trigger(),
             coverage_end: request.coverage_end,
         };
@@ -545,6 +561,7 @@ fn error_category_label(category: ReflectionErrorCategory) -> &'static str {
         ReflectionErrorCategory::History => "history",
         ReflectionErrorCategory::Cancelled => "cancel",
         ReflectionErrorCategory::TimedOut => "timeout",
+        ReflectionErrorCategory::Interrupted => "interrupted",
     }
 }
 

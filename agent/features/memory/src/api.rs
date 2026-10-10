@@ -18,8 +18,9 @@ pub mod reflection {
         ReflectionWorkflowError,
     };
     pub use crate::domain::{
-        ReflectionApplyStatus, ReflectionErrorCategory, ReflectionOutput, ReflectionRecord,
-        ReflectionSafeSummary, ReflectionStatus, ReflectionTokenUsage, ReflectionTrigger,
+        ReflectionApplyStatus, ReflectionErrorCategory, ReflectionOutput, ReflectionPrompt,
+        ReflectionRecord, ReflectionReferenceTable, ReflectionSafeSummary, ReflectionStatus,
+        ReflectionTokenUsage, ReflectionTrigger,
     };
     pub use crate::ports::ReflectionApplyResult;
 }

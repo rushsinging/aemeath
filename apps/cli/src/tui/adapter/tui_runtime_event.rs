@@ -403,6 +403,7 @@ pub(crate) enum TuiReflectionErrorCategory {
     History,
     Cancelled,
     TimedOut,
+    Interrupted,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
