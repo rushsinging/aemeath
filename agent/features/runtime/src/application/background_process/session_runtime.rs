@@ -333,11 +333,23 @@ impl tools::BackgroundProcessAccess for BackgroundProcessRuntime {
                 .map(|remaining| remaining.as_millis() as u64),
             _ => None,
         };
+        // #1890 缺陷③：total_written_bytes 取任务日志文件实际大小（文件
+        // 是全量真相源；无文件任务 0）。
+        let total_written_bytes = record
+            .log_file
+            .as_ref()
+            .map(|log_path| {
+                crate::application::background_process::log_file::TaskLogFile::from_path(
+                    log_path.clone(),
+                )
+                .size_bytes()
+            })
+            .unwrap_or(0);
         Some(
             tools::types::background_processes::BackgroundProcessDetailData {
                 summary: task_summary_data(&record),
                 deadline_remaining_ms,
-                total_written_bytes: 0,
+                total_written_bytes,
             },
         )
     }

@@ -475,3 +475,46 @@ async fn stranded_facts_detection_signals_wakeup_only_when_unconfirmed() {
     runtime.signal_wakeup_for_stranded_facts();
     assert!(waiter.try_wait().is_none(), "新批次同样 one-shot");
 }
+
+#[test]
+fn background_process_status_reports_log_file_bytes() {
+    use tools::BackgroundProcessAccess as _;
+    let registry =
+        std::sync::Arc::new(crate::application::run::active_registry::ActiveRunRegistry::default());
+    let runtime = BackgroundProcessRuntime::for_test(registry);
+    let base = std::env::temp_dir().join(format!(
+        "bgp-status-bytes-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let process_id = share::ids::BackgroundProcessId::new_v7();
+    let (log, mut stdout, _stderr) =
+        crate::application::background_process::log_file::TaskLogFile::open(
+            &base,
+            "sess-status-bytes",
+            &process_id,
+        )
+        .unwrap();
+    use std::io::Write as _;
+    stdout.write_all(&vec![b'z'; 366]).unwrap();
+    drop(stdout);
+    let task_id = runtime.supervisor().register_direct(
+        process_id,
+        log.path().to_path_buf(),
+        background_process_identity(),
+        "command=status-bytes",
+        tokio_util::sync::CancellationToken::new(),
+        SystemTime::now(),
+    );
+
+    let detail = runtime.task_status(task_id.as_str()).expect("详情可见");
+    assert_eq!(
+        detail.total_written_bytes, 366,
+        "total_written_bytes = 任务日志文件实际大小（缺陷③：不再硬编码 0）"
+    );
+
+    let _ = std::fs::remove_dir_all(&base);
+}
