@@ -444,17 +444,34 @@ async fn stranded_facts_detection_signals_wakeup_only_when_unconfirmed() {
         "滞留事实必须立即补发 wakeup（不等下一个事件捎带）"
     );
 
-    // 注入确认后：不再发。
-    let items = runtime.supervisor().peek_unnotified_terminal_items();
-    runtime.supervisor().mark_notified(
-        &items
-            .iter()
-            .map(|item| item.task_id.clone())
-            .collect::<Vec<_>>(),
-    );
+    // 同批事实（无新增、未确认）：one-shot——消费一次即达，不再重弹。
     runtime.signal_wakeup_for_stranded_facts();
     assert!(
         waiter.try_wait().is_none(),
-        "已确认事实不得重复唤醒（避免空转 LLM 调用）"
+        "同批滞留事实只弹一次（消费一次即达）——wakeup Run 失败收口后不得无限唤醒风暴"
     );
+
+    // 新事实到达：新批次，弹一次。
+    let another_id = runtime.supervisor().register(
+        background_process_identity(),
+        "tool=Bash input=stranded-2",
+        SystemTime::now(),
+    );
+    runtime
+        .supervisor()
+        .finish(
+            &another_id,
+            crate::domain::background_process::BackgroundProcessTerminalKind::Success,
+            Some("done-2".to_string()),
+        )
+        .unwrap();
+    runtime.signal_wakeup_for_stranded_facts();
+    assert!(
+        waiter.try_wait().is_some(),
+        "新事实形成新批次，允许再弹一次"
+    );
+
+    // 新批次弹过后又稳定：不再弹。
+    runtime.signal_wakeup_for_stranded_facts();
+    assert!(waiter.try_wait().is_none(), "新批次同样 one-shot");
 }

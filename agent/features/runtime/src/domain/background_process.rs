@@ -74,6 +74,12 @@ pub struct BackgroundProcessRecord {
     /// 为 None——查询回退终态文本）。
     #[serde(default)]
     pub log_file: Option<std::path::PathBuf>,
+    /// 直绑任务标志（#1890）：stdout/stderr 由子进程直写日志文件
+    /// （正文已在文件内，终态 append 不回写正文，避免双写）；建档
+    /// 非直绑（非流式 / Agent 兜底）为 false——终态文本 append 是其
+    /// 唯一落盘通道。旧快照缺失时 false（回退 append 全文）。
+    #[serde(default)]
+    pub log_direct: bool,
 }
 
 /// 状态推进结果：推进后的记录与是否发生变化。
@@ -122,6 +128,7 @@ impl BackgroundProcessRecord {
             started_at,
             finished_at: None,
             log_file: None,
+            log_direct: false,
         }
     }
 
@@ -142,6 +149,29 @@ impl BackgroundProcessRecord {
             started_at,
             finished_at: None,
             log_file: Some(log_file),
+            log_direct: true,
+        }
+    }
+
+    /// 建档非直绑派发（#1890 终态兜底）：非流式 / Agent 任务转后台时
+    /// 建文件但正文不经子进程直写——终态文本由 runtime append（唯一
+    /// 写入方）。
+    pub fn dispatch_indirect_log(
+        task_id: BackgroundProcessId,
+        log_file: std::path::PathBuf,
+        identity: ToolCallIdentityData,
+        invocation_summary: impl Into<String>,
+        started_at: SystemTime,
+    ) -> Self {
+        Self {
+            task_id,
+            identity,
+            invocation_summary: invocation_summary.into(),
+            state: BackgroundProcessState::ForegroundWaiting,
+            started_at,
+            finished_at: None,
+            log_file: Some(log_file),
+            log_direct: false,
         }
     }
 

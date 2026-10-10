@@ -160,26 +160,44 @@ impl TypedTool for BashTool {
         let script =
             format!("{command}\nstatus=$?\nprintf '\\n{CWD_MARKER}%s\\n' \"$PWD\"\nexit $status");
         let mut command_process = Command::new("bash");
-        // #1890 输出直绑：ctx 注入任务日志路径时 stdout 直接重定向该文件
-        //（零跳字节、无捕获上限、OS 收尾）；stderr 保持 piped（分离语义与
-        // TUI 直播保留——stderr 海量场景罕见，且 2>&1 用户重定向自然并入
-        // stdout 文件）。直绑打开失败降级 piped 并 warn（可用性优先）。
-        let stdout_stdio = match ctx.background_log_path() {
-            Some(log_path) => match std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(log_path)
-            {
-                Ok(file) => std::process::Stdio::from(file),
-                Err(error) => {
-                    log::warn!(
-                        target: crate::LOG_TARGET,
-                        "background log direct open failed, fallback to piped: path={log_path:?} error={error:?}"
-                    );
-                    std::process::Stdio::piped()
+        // #1890 输出直绑：ctx 注入任务日志路径时 stdout/stderr 都直接
+        // 重定向该文件（同文件双 append handle，交错时间序即真实执行
+        // 序；零跳字节、无捕获上限、OS 收尾）。stderr 分离语义退化为
+        // 交错混排（前台结果 stderr 段为空；2>&1 用户重定向自然并入）。
+        // 任一 handle 打开失败整体降级 piped 并 warn（可用性优先）。
+        let (stdout_stdio, stderr_stdio, direct_bound) = match ctx.background_log_path() {
+            Some(log_path) => {
+                let open = || {
+                    std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(log_path)
+                };
+                match (open(), open()) {
+                    (Ok(stdout_file), Ok(stderr_file)) => (
+                        std::process::Stdio::from(stdout_file),
+                        std::process::Stdio::from(stderr_file),
+                        true,
+                    ),
+                    (result_a, result_b) => {
+                        let error = result_a.err().or_else(|| result_b.err());
+                        log::warn!(
+                            target: crate::LOG_TARGET,
+                            "background log direct open failed, fallback to piped: path={log_path:?} error={error:?}"
+                        );
+                        (
+                            std::process::Stdio::piped(),
+                            std::process::Stdio::piped(),
+                            false,
+                        )
+                    }
                 }
-            },
-            None => std::process::Stdio::piped(),
+            }
+            None => (
+                std::process::Stdio::piped(),
+                std::process::Stdio::piped(),
+                false,
+            ),
         };
         command_process
             .arg("-c")
@@ -187,7 +205,7 @@ impl TypedTool for BashTool {
             .current_dir(&path_base)
             .stdin(std::process::Stdio::null())
             .stdout(stdout_stdio)
-            .stderr(std::process::Stdio::piped())
+            .stderr(stderr_stdio)
             .kill_on_drop(true);
         if let Err(error) = utils::configure_tokio_noninteractive(&mut command_process) {
             return TypedToolResult::error(format!("failed to isolate command process: {error}"));
@@ -210,8 +228,10 @@ impl TypedTool for BashTool {
         // #1890 直绑路径：直绑时 stdout_pipe 为 None（reader 空转），完成后
         // 从任务日志文件读尾部 MAX_CAPTURE_BYTES 作为前台结果文本（文件是
         // 全量真相，前台文本仅回放窗口）。
-        let direct_log_path: Option<std::path::PathBuf> =
-            ctx.background_log_path().map(std::path::Path::to_path_buf);
+        let direct_log_path: Option<std::path::PathBuf> = ctx
+            .background_log_path()
+            .filter(|_| direct_bound)
+            .map(std::path::Path::to_path_buf);
 
         let stdout_handle = tokio::spawn(stream::read_stdout(stdout_pipe, ctx.progress_sink()));
         let stderr_handle = tokio::spawn(stream::read_stderr(stderr_pipe));

@@ -113,7 +113,8 @@ impl BackgroundProcessSupervisor {
     }
 
     /// 直绑派发登记（#1890 输出直绑）：id 派发时前移生成（与任务日志
-    /// 文件名同源），路径随记录入账；logs 查询直读文件区间。
+    /// 文件名同源），路径随记录入账；logs 查询直读文件区间；终态不
+    /// 回写正文（子进程已直写）。
     pub(crate) fn register_direct(
         &self,
         task_id: BackgroundProcessId,
@@ -141,6 +142,43 @@ impl BackgroundProcessSupervisor {
             .expect("后台进程表锁中毒")
             .insert(task_id.clone(), task);
         task_id
+    }
+
+    /// 建档非直绑登记（#1890 终态兜底）：非流式 / Agent 任务转后台时
+    /// 建文件；终态文本由 notify_terminal append（唯一落盘通道）。
+    pub(crate) fn register_indirect_log(
+        &self,
+        task_id: BackgroundProcessId,
+        log_file: std::path::PathBuf,
+        identity: ToolCallIdentityData,
+        invocation_summary: impl Into<String>,
+        child_cancellation: tokio_util::sync::CancellationToken,
+        started_at: SystemTime,
+    ) -> BackgroundProcessId {
+        let task = SupervisedBackgroundProcess {
+            record: BackgroundProcessRecord::dispatch_indirect_log(
+                task_id,
+                log_file,
+                identity,
+                invocation_summary,
+                started_at,
+            ),
+            terminal_output: None,
+            notified: false,
+            child_cancellation,
+        };
+        let task_id = task.record.task_id.clone();
+        self.tasks
+            .lock()
+            .expect("后台进程表锁中毒")
+            .insert(task_id.clone(), task);
+        task_id
+    }
+
+    /// 是否直绑任务（终态 append 决策：直绑不回写正文）。
+    pub(crate) fn is_log_direct(&self, task_id: &BackgroundProcessId) -> Option<bool> {
+        let tasks = self.tasks.lock().expect("后台进程表锁中毒");
+        tasks.get(task_id).map(|task| task.record.log_direct)
     }
 
     /// stop 请求（#252 D10）：发 cancel 信号；真实终态由执行体收口后

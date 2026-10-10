@@ -887,10 +887,17 @@ async fn l4_real_assembly_direct_log_end_to_end_chain() {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
     loop {
         let content = std::fs::read_to_string(&log_path).unwrap_or_default();
-        if content.contains("ping statistics") {
+        if content.matches("ping statistics").count() >= 1 && content.contains("round-trip") {
             assert!(
                 content.contains("64 bytes"),
                 "文件含全程输出（零丢失）：{content:?}"
+            );
+            // #1890 双写防复发：直绑任务终态不回写正文——ping 汇总
+            // 只出现一次。
+            assert_eq!(
+                content.matches("ping statistics").count(),
+                1,
+                "直绑任务日志正文不得双写：{content:?}"
             );
             break;
         }

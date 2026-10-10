@@ -30,6 +30,12 @@ pub(crate) struct BackgroundProcessRuntime {
     chat_sender_generation: std::sync::atomic::AtomicU64,
     /// #1890 任务日志目录 base（默认 `~/.agents/sessions/`；测试可注入）。
     log_base: std::sync::OnceLock<std::path::PathBuf>,
+    /// 已弹过的滞留事实批次（#252 滞留信号 one-shot）：Run 收口检测到
+    /// 未确认事实时发 wakeup 信号——**消费一次即达**，不追踪注入确认
+    /// 闭环（provider 连败时 Run 反复失败收口，若按确认闭环会形成
+    /// 无限唤醒风暴，实测 33 次信号）。同批事实（集合 ⊆ 已弹集合）
+    /// 不再弹；新事实到达形成新批次再弹一次；集合随 session 存活（量级 = 后台任务数，懒膨胀可忽略）。
+    signaled_stranded_ids: Mutex<std::collections::HashSet<String>>,
 }
 
 /// chat 会话事件通道绑定 guard：drop 时释放本代次 sender（#252 PR3）。
@@ -78,6 +84,7 @@ impl BackgroundProcessRuntime {
             chat_event_sender: std::sync::RwLock::new(None),
             chat_sender_generation: std::sync::atomic::AtomicU64::new(0),
             log_base: std::sync::OnceLock::new(),
+            signaled_stranded_ids: Mutex::new(std::collections::HashSet::new()),
         }
     }
 
@@ -162,12 +169,17 @@ impl BackgroundProcessRuntime {
         kind: crate::domain::background_process::BackgroundProcessTerminalKind,
         terminal_output: Option<String>,
     ) {
-        // #1890 非流式工具终态兜底：终态文本 append 进任务日志文件
-        //（runtime 唯一写入方；文件是 logs 查询真相源）。直绑任务的
-        // 子进程输出已在文件内，此处只补终态结果文本；append 失败降级
-        // 内存 terminal_output（可用性优先）。
+        // #1890 终态落盘分档：直绑任务（log_direct）stdout/stderr 已由
+        // 子进程直写文件——**不回写正文**（否则正文双写，实测 ping 任务
+        // 日志 ping statistics ×2）；建档非直绑（非流式 / Agent 兜底）
+        // 终态文本 append 是唯一落盘通道。append 失败降级内存
+        // terminal_output（可用性优先）。
         if let Some(text) = terminal_output.as_ref() {
-            if let Some(log_path) = self.supervisor.log_file_of(task_id) {
+            let needs_append = self
+                .supervisor
+                .log_file_of(task_id)
+                .filter(|_| self.supervisor.is_log_direct(task_id) != Some(true));
+            if let Some(log_path) = needs_append {
                 let log = crate::application::background_process::log_file::TaskLogFile::from_path(
                     log_path,
                 );
@@ -248,14 +260,33 @@ impl BackgroundProcessRuntime {
     /// Run 收口后的滞留事实检测（#252 注入确认制兜底）：监督器仍有
     /// 未确认完成事实（收口临界窗口内被 peek 但未注入，消费者已随
     /// Run 销毁）时补发 wakeup 信号——立即唤醒补注入，而非等下一个
-    /// 任务完成 / 用户输入捎带。无可补内容时静默不发。
+    /// 任务完成 / 用户输入捎带。
+    ///
+    /// **one-shot 语义**：同批事实只弹一次（消费一次即达），不追踪
+    /// 注入确认闭环——wakeup Run 因 provider 失败等再次收口时不再重弹
+    /// （否则无限唤醒风暴）；未被注入确认的事实保留监督器，由
+    /// background_processes 查询工具兜底（设计 §12 风险表）。
+    /// 新事实到达（集合不 ⊆ 已弹集合）形成新批次，弹一次。
     pub(crate) fn signal_wakeup_for_stranded_facts(&self) {
-        if self.supervisor.peek_unnotified_terminal_items().is_empty() {
+        let items = self.supervisor.peek_unnotified_terminal_items();
+        if items.is_empty() {
             return;
         }
+        let mut signaled = self
+            .signaled_stranded_ids
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let has_new_fact = items.iter().any(|item| !signaled.contains(&item.task_id));
+        if !has_new_fact {
+            return;
+        }
+        for item in &items {
+            signaled.insert(item.task_id.clone());
+        }
+        drop(signaled);
         log::info!(
             target: crate::LOG_TARGET,
-            "background stranded facts detected: signaling wakeup for immediate re-injection"
+            "background stranded facts detected: signaling wakeup for immediate re-injection (one-shot)"
         );
         if let Err(error) = self.notifier.wakeup() {
             log::warn!(

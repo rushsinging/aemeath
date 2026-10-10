@@ -930,3 +930,31 @@ async fn bash_without_log_path_behaves_unchanged() {
         result.text
     );
 }
+
+#[tokio::test]
+async fn bash_direct_log_writes_stderr_to_same_file_interleaved() {
+    let workspace = tempdir().unwrap();
+    let log_path = workspace.path().join("bgp_stderr_direct.log");
+    let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .allow_all(true)
+    .build()
+    .with_background_log_path(log_path.clone());
+
+    // stdout 与 stderr 各出一行（1>&2 走 stderr 通道）。
+    let result = bash_tool(&ctx)
+        .call(json!({ "command": "echo out-line; seq 1 1>&2" }), &ctx)
+        .await;
+
+    assert!(!result.is_error, "直绑执行：{}", result.text);
+    let file_content = std::fs::read_to_string(&log_path).unwrap();
+    assert!(
+        file_content.contains("out-line"),
+        "stdout 直写文件：{file_content:?}"
+    );
+    assert!(
+        file_content.contains("1\n"),
+        "stderr（1>&2）同文件直写（交错混排）：{file_content:?}"
+    );
+}

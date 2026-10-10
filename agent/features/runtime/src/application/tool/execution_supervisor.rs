@@ -108,7 +108,7 @@ impl ToolExecutionSupervisor {
             (Some(runtime), None) => {
                 let process_id = BackgroundProcessId::new_v7();
                 match runtime.open_direct_log(process_id.clone()) {
-                    Some(log) => runtime.supervisor().register_direct(
+                    Some(log) => runtime.supervisor().register_indirect_log(
                         process_id,
                         log.path().to_path_buf(),
                         call.identity.clone(),
