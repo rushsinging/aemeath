@@ -105,3 +105,58 @@ fn normalizes_json_object_key_order_for_fingerprint_across_steps() {
         ToolFuseDecision::SoftBlock { .. }
     ));
 }
+
+#[test]
+fn readonly_background_query_tools_are_exempt_from_consecutive_fuse() {
+    // #1921：List/Status/Logs 忙等轮询不应触发 SoftBlock；豁免后跨 3+ step 仍 Allow。
+    for tool_name in [
+        "BackgroundProcessList",
+        "BackgroundProcessStatus",
+        "BackgroundProcessLogs",
+    ] {
+        let mut fuse = ToolCallFuse::new();
+        let tool_call = call(tool_name, serde_json::json!({"task_id": "bgp_test"}));
+        for _ in 0..5 {
+            assert_eq!(
+                fuse.inspect(&step(), &tool_call),
+                ToolFuseDecision::Allow,
+                "{tool_name} 应豁免 consecutive fuse"
+            );
+        }
+    }
+}
+
+#[test]
+fn background_process_stop_is_not_exempt_from_consecutive_fuse() {
+    let mut fuse = ToolCallFuse::new();
+    let tool_call = call(
+        "BackgroundProcessStop",
+        serde_json::json!({"task_id": "bgp_test"}),
+    );
+
+    assert_eq!(fuse.inspect(&step(), &tool_call), ToolFuseDecision::Allow);
+    assert_eq!(fuse.inspect(&step(), &tool_call), ToolFuseDecision::Allow);
+    assert!(
+        matches!(
+            fuse.inspect(&step(), &tool_call),
+            ToolFuseDecision::SoftBlock { .. }
+        ),
+        "Stop 不豁免，第 3 次跨 step 应 SoftBlock"
+    );
+}
+
+#[test]
+fn non_background_tools_still_soft_block_after_three_steps() {
+    let mut fuse = ToolCallFuse::new();
+    let tool_call = call("Bash", serde_json::json!({"command": "sleep 1"}));
+
+    assert_eq!(fuse.inspect(&step(), &tool_call), ToolFuseDecision::Allow);
+    assert_eq!(fuse.inspect(&step(), &tool_call), ToolFuseDecision::Allow);
+    assert!(
+        matches!(
+            fuse.inspect(&step(), &tool_call),
+            ToolFuseDecision::SoftBlock { .. }
+        ),
+        "普通工具 Soft=3 行为不变"
+    );
+}

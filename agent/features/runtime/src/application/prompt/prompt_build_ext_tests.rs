@@ -276,7 +276,17 @@ fn background_process_section_is_bilingual_and_covers_core_semantics() {
     let zh = background_processes_guidance_section("zh");
     assert!(zh.contains("自动转后台"), "统一模型");
     assert!(zh.contains("完成会主动通知"), "占位结果语义");
+    assert!(zh.contains("忙等轮询"), "禁 Status 忙等");
+    assert!(
+        !zh.contains("或先查询状态"),
+        "不应再鼓励用 Status 替代完成通知"
+    );
     let en = background_processes_guidance_section("en");
     assert!(en.contains("moved to the background"));
     assert!(en.contains("will be notified"));
+    assert!(en.contains("NEVER busy-poll"), "禁 Status 忙等");
+    assert!(
+        !en.contains("query the status first"),
+        "不应再鼓励用 Status 替代完成通知"
+    );
 }

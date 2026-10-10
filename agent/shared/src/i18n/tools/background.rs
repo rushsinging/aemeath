@@ -16,10 +16,10 @@ pub fn background_process_list(lang: &str) -> &'static str {
 pub fn background_process_status(lang: &str) -> &'static str {
     match lang {
         "zh" => {
-            "按进程 id 查询单个后台进程详情：状态、终态、deadline 剩余与日志字节数。"
+            "按进程 id 查询单个后台进程详情：状态、终态、deadline 剩余与日志字节数。优先等待完成通知；完成前不要对同一 id 反复调用本工具忙等。"
         }
         _ => {
-            "Retrieve one background process's detail by process id: state, terminal outcome, remaining deadline, and log byte count."
+            "Retrieve one background process's detail by process id: state, terminal outcome, remaining deadline, and log byte count. Prefer the completion notification; do not repeatedly call this tool on the same id to busy-wait before completion."
         }
     }
 }
@@ -28,10 +28,10 @@ pub fn background_process_status(lang: &str) -> &'static str {
 pub fn background_process_logs(lang: &str) -> &'static str {
     match lang {
         "zh" => {
-            r#"读取后台进程日志：运行中与完成后皆可查。缺省读尾部；携带上次返回的 cursor 只读增量（增量游标，多次读取幂等、不破坏后续通知）。"#
+            r#"读取后台进程日志：运行中与完成后皆可查。缺省读尾部；携带上次返回的 cursor 只读增量（增量游标，多次读取幂等、不破坏后续通知）。优先等待完成通知；不要为等完成而对同一 id 反复调用。"#
         }
         _ => {
-            r#"Read a background process's log: works while running and after completion. Omit cursor for the tail; pass the previously returned cursor to read only new output (incremental cursor; reads are idempotent and never interfere with completion notifications)."#
+            r#"Read a background process's log: works while running and after completion. Omit cursor for the tail; pass the previously returned cursor to read only new output (incremental cursor; reads are idempotent and never interfere with completion notifications). Prefer the completion notification; do not repeatedly call this tool on the same id just to wait for completion."#
         }
     }
 }
