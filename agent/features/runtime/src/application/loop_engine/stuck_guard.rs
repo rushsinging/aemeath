@@ -1,12 +1,18 @@
 use crate::application::loop_engine::chat::stall::StallDetector;
 use crate::application::tool::agent::ToolCall;
 use crate::application::tool::coordination::loop_guard::{ToolCallFuse, ToolFuseDecision};
+use sdk::ids::RunStepId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StuckDecision {
     Allow,
-    SoftBlock { reason: String },
-    HardPause { reason: String },
+    SoftBlock {
+        reason: String,
+    },
+    /// 升级为 Run Failed（不再挂 HardPause interaction）。
+    Fail {
+        reason: String,
+    },
 }
 
 /// Guard against stuck loops (repeated text, tool call loops, timeout).
@@ -37,7 +43,7 @@ impl StuckGuard {
                 self.text_stall_count
             );
             if self.text_stall_count >= 3 {
-                StuckDecision::HardPause { reason }
+                StuckDecision::Fail { reason }
             } else {
                 StuckDecision::SoftBlock { reason }
             }
@@ -46,11 +52,11 @@ impl StuckGuard {
         }
     }
 
-    pub fn inspect_tool(&mut self, call: &ToolCall) -> StuckDecision {
-        match self.tool_fuse.inspect(call) {
+    pub fn inspect_tool(&mut self, step_id: &RunStepId, call: &ToolCall) -> StuckDecision {
+        match self.tool_fuse.inspect(step_id, call) {
             ToolFuseDecision::Allow => StuckDecision::Allow,
             ToolFuseDecision::SoftBlock { reason } => StuckDecision::SoftBlock { reason },
-            ToolFuseDecision::HardPause { reason } => StuckDecision::HardPause { reason },
+            ToolFuseDecision::Fail { reason } => StuckDecision::Fail { reason },
         }
     }
 }

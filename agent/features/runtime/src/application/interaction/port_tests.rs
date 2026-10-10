@@ -84,7 +84,10 @@ fn bridge_invalid_reply_does_not_consume_waiter() {
     let _waiter = port_register(&bridge, request.clone()).unwrap();
 
     assert_eq!(
-        bridge.reply(&request.id, InteractionReply::HardPauseContinue),
+        bridge.reply(
+            &request.id,
+            InteractionReply::ToolApproval(sdk::ApprovalDecision::Approve)
+        ),
         InteractionCommandOutcome::InvalidReply(InteractionReplyError::VariantMismatch)
     );
     assert!(bridge.contains(&request.id));
@@ -143,7 +146,10 @@ fn unavailable_port_all_methods_are_noop() {
     let id = sdk::InteractionRequestId::new_v7();
     assert!(!port.contains(&id));
     assert_eq!(
-        port.reply(&id, InteractionReply::HardPauseContinue),
+        port.reply(
+            &id,
+            InteractionReply::ToolApproval(sdk::ApprovalDecision::Approve)
+        ),
         InteractionCommandOutcome::NotFound
     );
     assert_eq!(
@@ -210,18 +216,20 @@ fn bridge_as_trait_object_drain_run_cancels_pending() {
         id: sdk::InteractionRequestId::new_v7(),
         run_id: run_id.clone(),
         tool_call_id: None,
-        body: InteractionRequestBody::HardPause(sdk::StuckDiagnostic {
-            reason: "stuck".into(),
-            recent_actions: vec![],
+        body: InteractionRequestBody::ToolApproval(sdk::ToolApprovalPrompt {
+            tool_name: "Bash".into(),
+            args_summary: "stuck".into(),
+            risk_level: sdk::RiskLevel::Low,
         }),
     };
     let r2 = InteractionRequest {
         id: sdk::InteractionRequestId::new_v7(),
         run_id: RunId::new_v7(),
         tool_call_id: None, // different run
-        body: InteractionRequestBody::HardPause(sdk::StuckDiagnostic {
-            reason: "other".into(),
-            recent_actions: vec![],
+        body: InteractionRequestBody::ToolApproval(sdk::ToolApprovalPrompt {
+            tool_name: "Bash".into(),
+            args_summary: "other".into(),
+            risk_level: sdk::RiskLevel::Low,
         }),
     };
 
@@ -276,7 +284,7 @@ fn shared_validate_rejects_variant_mismatch() {
         options: vec![],
         allow_multi: false,
     }]);
-    let reply = InteractionReply::HardPauseContinue;
+    let reply = InteractionReply::ToolApproval(sdk::ApprovalDecision::Approve);
     assert_eq!(
         validate_reply(&body, &reply).unwrap_err(),
         InteractionReplyError::VariantMismatch

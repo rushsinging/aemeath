@@ -6,8 +6,9 @@ use crate::tui::model::conversation::intent::{
     ConversationIntent, InteractionCancelRejected, ShowInteraction, ToolCallStart, ToolCallUpdate,
 };
 use crate::tui::model::conversation::interaction::{
-    InteractionBody, InteractionCommandFailure, InteractionRequest, UiInteractionCancelReason,
-    UiInteractionReply, UiInteractionRequestId, UiOptionItem, UiRunId, UiStuckDiagnostic,
+    InteractionBody, InteractionCommandFailure, InteractionRequest, UiApprovalPrompt,
+    UiInteractionCancelReason, UiInteractionReply, UiInteractionRequestId, UiOptionItem,
+    UiRiskLevel, UiRunId,
 };
 use crate::tui::model::conversation::update::ConversationUpdate;
 use async_trait::async_trait;
@@ -75,15 +76,16 @@ impl sdk::AgentClient for RecordingInteractionClient {
     }
 }
 
-fn install_hard_pause_interaction(app: &mut App, request_id: UiInteractionRequestId) {
+fn install_tool_approval_interaction(app: &mut App, request_id: UiInteractionRequestId) {
     ConversationIntent::ShowInteraction(ShowInteraction {
         request: InteractionRequest {
             request_id,
             run_id: UiRunId::from("run-1"),
             tool_call_id: None,
-            body: InteractionBody::HardPause(UiStuckDiagnostic {
-                reason: "等待确认".to_string(),
-                recent_actions: Vec::new(),
+            body: InteractionBody::ToolApproval(UiApprovalPrompt {
+                title: "Bash".to_string(),
+                detail: "echo".to_string(),
+                risk: UiRiskLevel::Low,
             }),
         },
     })
@@ -97,7 +99,7 @@ async fn reply_effect_calls_agent_client_once_and_completes_interaction() {
     app.agent_client = Some(client.clone());
     let (tx, _rx) = mpsc::channel(1);
     let request_id = UiInteractionRequestId::from("018f0000-0000-7000-8000-000000000001");
-    install_hard_pause_interaction(&mut app, request_id.clone());
+    install_tool_approval_interaction(&mut app, request_id.clone());
 
     app.execute_effect(
         Effect::ReplyInteraction {
@@ -183,7 +185,7 @@ async fn cancel_effect_calls_typed_cancel_and_completes_interaction() {
     app.agent_client = Some(client.clone());
     let (tx, _rx) = mpsc::channel(1);
     let request_id = UiInteractionRequestId::from("018f0000-0000-7000-8000-000000000002");
-    install_hard_pause_interaction(&mut app, request_id.clone());
+    install_tool_approval_interaction(&mut app, request_id.clone());
     app.execute_effect(
         Effect::CancelInteraction {
             request_id: request_id.clone(),
@@ -261,7 +263,7 @@ async fn accepted_ask_user_cancel_marks_only_matching_tool_cancelled_through_exe
 async fn cancel_rejection_restores_collecting_through_cancel_result_intent() {
     let mut app = App::new("session".to_string(), "/tmp".into(), "model".to_string());
     let request_id = UiInteractionRequestId::from("request-4");
-    install_hard_pause_interaction(&mut app, request_id.clone());
+    install_tool_approval_interaction(&mut app, request_id.clone());
     ConversationIntent::InteractionCancelRejected(InteractionCancelRejected {
         request_id: request_id.clone(),
         failure: InteractionCommandFailure::NotFound,
@@ -286,7 +288,7 @@ async fn malformed_request_id_is_rejected_without_calling_agent_client() {
     app.agent_client = Some(client.clone());
     let (tx, _rx) = mpsc::channel(1);
     let request_id = UiInteractionRequestId::from("not-a-uuid7");
-    install_hard_pause_interaction(&mut app, request_id.clone());
+    install_tool_approval_interaction(&mut app, request_id.clone());
 
     app.execute_effect(
         Effect::ReplyInteraction {

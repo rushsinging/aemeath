@@ -159,26 +159,14 @@ impl Run {
             ) | (
                 InteractionContinuation::ContinueToolApproval(_),
                 RunStatus::AwaitingToolApproval
-            ) | (
-                InteractionContinuation::ContinueAfterHardPause,
-                RunStatus::ExecutingTools
-                    | RunStatus::ApplyingResponse
-                    | RunStatus::AwaitingToolApproval
-                    | RunStatus::DrainingInput
             )
         );
         if !allowed {
             return Err(RunTransitionError::RunNotActive(self.status));
         }
-        let hard_pause_resume_status = matches!(
-            continuation,
-            InteractionContinuation::ContinueAfterHardPause
-        )
-        .then_some(self.status);
         self.pending_interaction = Some(PendingInteraction {
             request_id: request_id.clone(),
             continuation,
-            hard_pause_resume_status,
         });
         self.set_status_by_command(RunStatus::AwaitingUser, RunTransitionReason::AwaitUser)?;
         self.events.push(RuntimeLifecycleEvent::AwaitingUser {
@@ -204,9 +192,7 @@ impl Run {
             });
         }
         let pending = self.pending_interaction.take().expect("checked above");
-        let resume_status = pending
-            .hard_pause_resume_status
-            .unwrap_or_else(|| pending.continuation.resume_status());
+        let resume_status = pending.continuation.resume_status();
         self.set_status_by_command(resume_status, RunTransitionReason::UserResumed)?;
         self.events.push(RuntimeLifecycleEvent::Resumed {
             run_id: self.id.clone(),
@@ -231,9 +217,7 @@ impl Run {
             });
         }
         let pending = self.pending_interaction.take().expect("checked above");
-        let resume_status = pending
-            .hard_pause_resume_status
-            .unwrap_or_else(|| pending.continuation.resume_status());
+        let resume_status = pending.continuation.resume_status();
         self.set_status_by_command(resume_status, RunTransitionReason::UserResumed)?;
         Ok(pending.continuation)
     }

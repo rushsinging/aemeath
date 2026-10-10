@@ -8,5 +8,5 @@ pub(crate) const CONSECUTIVE_TOOL_CALL_HARD_LIMIT: usize = 5;
 pub(crate) const PERIOD_MIN_LEN: usize = 2;
 pub(crate) const PERIOD_MAX_LEN: usize = 5;
 pub(crate) const PERIOD_REPEAT_LIMIT: usize = 3;
-pub(crate) const TOOL_FUSE_HARD_PAUSE_LIMIT: usize = 3;
+pub(crate) const TOOL_FUSE_FAIL_LIMIT: usize = 3;
 pub(crate) const MAX_INPUT_SUMMARY_CHARS: usize = 160;

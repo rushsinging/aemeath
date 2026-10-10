@@ -158,7 +158,6 @@ pub trait InteractionPort: Send + Sync {
 /// Exhaustive match covers all body variants:
 /// - `UserQuestions` → `UserQuestions` with matching answer count
 /// - `ToolApproval` → `ToolApproval`
-/// - `HardPause` → `HardPauseContinue`
 pub fn validate_reply(
     body: &InteractionRequestBody,
     reply: &InteractionReply,
@@ -174,8 +173,7 @@ pub fn validate_reply(
                 Ok(())
             }
         }
-        (InteractionRequestBody::ToolApproval(_), InteractionReply::ToolApproval(_))
-        | (InteractionRequestBody::HardPause(_), InteractionReply::HardPauseContinue) => Ok(()),
+        (InteractionRequestBody::ToolApproval(_), InteractionReply::ToolApproval(_)) => Ok(()),
         _ => Err(InteractionReplyError::VariantMismatch),
     }
 }

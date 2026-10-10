@@ -5,7 +5,10 @@ fn assert_agent_client_commands<T: AgentClient + ?Sized>(client: &T) {
     let _ = client.cancel_current_run(deadline);
 
     let request_id = crate::InteractionRequestId::new_v7();
-    let _ = client.reply_interaction(&request_id, crate::InteractionReply::HardPauseContinue);
+    let _ = client.reply_interaction(
+        &request_id,
+        crate::InteractionReply::ToolApproval(crate::ApprovalDecision::Approve),
+    );
     let _ = client.cancel_interaction(&request_id, crate::InteractionCancelReason::UserCancelled);
 }
 

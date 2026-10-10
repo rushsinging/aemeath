@@ -286,7 +286,7 @@ ConversationModel 维护两套**互补投影**：
 | `SystemMessage` | 系统消息 |
 | `HookNotice` | Hook 通知 |
 | `Error` | 错误消息 |
-| `Interaction` | UserQuestions / ToolApproval / HardPause 交互块（同一时刻至多一个） |
+| `Interaction` | UserQuestions / ToolApproval 交互块（同一时刻至多一个） |
 - Agent 子 Run activity 不创建独立 block 或 timeline variant；它仅作为 owning Agent ToolCall 的 bounded `activities` preview，由 `RecordAgentActivities` / `AgentActivitiesRecorded` 更新并内联渲染，避免双显示
 
 **一致性保证**：
@@ -452,7 +452,6 @@ struct InteractionState {
 enum UiInteractionDraft {
     UserQuestions { slots: Vec<UserAnswerSlot>, current: usize },
     ToolApproval { decision: Option<UiApprovalDecision> },
-    HardPause { decision: Option<UiHardPauseDecision> },
 }
 
 enum InteractionPhase {
@@ -475,16 +474,15 @@ Collecting ──draft 完整──→ Confirming ──ConfirmInteraction──
     └────────────CancelInteraction────────→ CancelPending ──InteractionCancelled（CancelAccepted）──→ Cancelled
 
 ReplyPending ──InvalidReply（UserQuestions，保留 draft）──────────────────────────→ Collecting
-ReplyPending ──InvalidReply（ToolApproval / HardPause，保留 draft）───→ Confirming
+ReplyPending ──InvalidReply（ToolApproval，保留 draft）───→ Confirming
 CancelPending ──CancelRejected（UserQuestions，保留 draft）───────────────────────→ Collecting
-CancelPending ──CancelRejected（ToolApproval / HardPause，保留 draft）→ Confirming
+CancelPending ──CancelRejected（ToolApproval，保留 draft）→ Confirming
 ```
 
 - UserQuestions 的 Collecting 维护题目索引、选项与自由文本；draft 完整后生成 `UserAnswers`。
 - ToolApproval 的 Collecting 只允许 Approve / Deny，并生成对应 reply variant。
-- HardPause 展示 stuck diagnostic；Continue 生成 `HardPause(Continue)`，Cancel 走 typed cancel command，**NEVER** 伪造空 reply。
-- `InvalidReply` 是 `reply_interaction` 的校验失败结果：**NEVER** 消费 pending request、**NEVER** 进入终态。它把 `ReplyPending` 按原 body variant 退回 `Collecting`（UserQuestions）或 `Confirming`（ToolApproval / HardPause），`draft` 原样保留，用户可修正后对同一 `request_id` 重试。
-- `CancelRejected` 是 `cancel_interaction` 的对称校验失败结果（例如目标 request 已被并发命令抢先终态化但尚未同步到 TUI）：**NEVER** 消费原 pending request、**NEVER** 进入终态。它把 `CancelPending` 按原 body variant 退回 `Collecting`（UserQuestions）或 `Confirming`（ToolApproval / HardPause），`draft` 原样保留；用户可继续原 draft 或重新发起取消。
+- `InvalidReply` 是 `reply_interaction` 的校验失败结果：**NEVER** 消费 pending request、**NEVER** 进入终态。它把 `ReplyPending` 按原 body variant 退回 `Collecting`（UserQuestions）或 `Confirming`（ToolApproval），`draft` 原样保留，用户可修正后对同一 `request_id` 重试。
+- `CancelRejected` 是 `cancel_interaction` 的对称校验失败结果（例如目标 request 已被并发命令抢先终态化但尚未同步到 TUI）：**NEVER** 消费原 pending request、**NEVER** 进入终态。它把 `CancelPending` 按原 body variant 退回 `Collecting`（UserQuestions）或 `Confirming`（ToolApproval），`draft` 原样保留；用户可继续原 draft 或重新发起取消。
 - 完整 `InteractionCommandOutcome` 类型化投影表（`ReplySent` / `CancelAccepted` / `InvalidReply` / `CancelRejected` / `NotFound` / `AlreadyCompleted` / `RunCancelling` / `IrrecoverableError`）见 [03-event-flow-and-acl.md §4.6](03-event-flow-and-acl.md#46-interaction-command-outcome-类型化投影)。
 
 | 方法 | 说明 |
@@ -1050,7 +1048,7 @@ Model 层 `MUST NOT` import 以下 crate：
 1. Model architecture test **MUST** 拦截 ratatui、tokio、process、channel、AgentClient、SDK DTO 与 Project 类型的越界 import。
 2. Model encapsulation guard **MUST** 证明六 Context 核心字段私有，`apply` / `reduce_*` 的生产调用点只有 root reducer；ViewAssembler 只取得不可变 accessor / projection view。
 3. reducer 单元测试 **MUST** 逐 Intent 断言 Model 与 Change，不启动异步 runtime。
-4. Interaction 场景测试 **MUST** 穷尽 UserQuestions / ToolApproval / HardPause，并分层覆盖 Runtime request-id DTO → Intent、Intent → Change、Change → AgentClient Effect、Effect result → Intent；sender / pending waiter 不得出现在 TUI fixture；`InteractionReplySent` / `InteractionCancelled` **MUST NOT** 改 Run 状态，只有 `RunResumed` / `RunCancelling` / `RunCancelled` 推进对应投影。另有场景证明两个并发 Tool suspension 被 Runtime 串行发布，第二个 request 不覆盖第一个。
+4. Interaction 场景测试 **MUST** 穷尽 UserQuestions / ToolApproval，并分层覆盖 Runtime request-id DTO → Intent、Intent → Change、Change → AgentClient Effect、Effect result → Intent；sender / pending waiter 不得出现在 TUI fixture；`InteractionReplySent` / `InteractionCancelled` **MUST NOT** 改 Run 状态，只有 `RunResumed` / `RunCancelling` / `RunCancelled` 推进对应投影。另有场景证明两个并发 Tool suspension 被 Runtime 串行发布，第二个 request 不覆盖第一个。
 5. structured Conversation / timeline invariant test **MUST** 覆盖 append、tool result 乱序、queued、progress、complete 与 resume，并只校验重叠稳定 ID、相对顺序、关联与终态；**NEVER** 伪造“二者可全量互相重建”的测试。
 6. Workspace metadata test **MUST** 证明陈旧 `(root, revision)` 结果不会覆盖新 snapshot。
 

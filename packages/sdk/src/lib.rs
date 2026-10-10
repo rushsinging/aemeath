@@ -100,7 +100,7 @@ pub use ids::{
 };
 pub use interaction::{
     ApprovalDecision, InteractionCancelReason, InteractionCommandOutcome, InteractionReply,
-    InteractionReplyError, InteractionRequest, InteractionRequestBody, RiskLevel, StuckDiagnostic,
+    InteractionReplyError, InteractionRequest, InteractionRequestBody, RiskLevel,
     ToolApprovalPrompt, UserAnswer, UserQuestion,
 };
 pub use models::ModelSummary;

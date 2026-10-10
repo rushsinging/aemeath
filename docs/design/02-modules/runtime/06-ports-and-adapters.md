@@ -188,7 +188,6 @@ struct InteractionRequest {
 enum InteractionRequestBody {
     UserQuestions(Vec<UserQuestion>),
     ToolApproval(ToolApprovalPrompt),
-    HardPause(StuckDiagnostic),
 }
 
 struct UserQuestion {
@@ -225,7 +224,6 @@ enum ApprovalDecision {
 enum InteractionReply {
     UserQuestions(Vec<UserAnswer>),
     ToolApproval(ApprovalDecision),
-    HardPauseContinue,
 }
 
 struct UserAnswer(String); // 与 UserQuestions 按位置一一对应；不得丢项、重排或附加隐式默认值
@@ -244,7 +242,6 @@ reply 必须与 request body 同 variant；`InvalidReply` 不消费 waiter。`In
 |---|---|---|---|
 | `CompleteToolCall(id)` | answers → 同一 ToolCall 的 `ToolSuccess` | `ToolCancelled(UserInteractionCancelled(reason))` | `ExecutingTools`；继续下一个 suspension |
 | `ContinueToolApproval(id)` | Approve → Ready；Deny → `ToolCancelled(ApprovalDenied)` | `ToolCancelled(ApprovalCancelled(reason))` | `AwaitingToolApproval`；继续处理其余原始调用 |
-| `ContinueAfterHardPause` | `HardPauseContinue` | `RunFailed(HardPauseCancelled(reason))` | reply 回 `ExecutingTools` 并继续 continuation 记录的未完成 tool phase；cancel 回 `Failed` |
 
 Run root / Step cancellation scope 若与 reply/cancel 竞争则永远优先：`CancelRunStep` 进入 `CancellingStep` 并收口到 `DrainingInput`；`TerminateRun` 进入 `Terminating` 并最终 `Terminated`，**NEVER** 套用上表的普通 completion。
 

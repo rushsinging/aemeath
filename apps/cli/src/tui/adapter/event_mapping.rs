@@ -833,7 +833,6 @@ fn activity_detail(value: sdk::ActivityDetailView) -> TuiActivityDetail {
             kind: match kind {
                 sdk::InteractionKindView::ToolApproval => TuiInteractionKind::ToolApproval,
                 sdk::InteractionKindView::UserQuestion => TuiInteractionKind::UserQuestion,
-                sdk::InteractionKindView::StuckDiagnostic => TuiInteractionKind::StuckDiagnostic,
             },
         },
         sdk::ActivityDetailView::SubRun { role, model } => {
@@ -957,12 +956,6 @@ fn interaction_request(value: sdk::InteractionRequest) -> TuiInteractionRequest 
                         sdk::RiskLevel::Medium => TuiRiskLevel::Medium,
                         sdk::RiskLevel::High => TuiRiskLevel::High,
                     },
-                })
-            }
-            sdk::InteractionRequestBody::HardPause(diagnostic) => {
-                TuiInteractionBody::HardPause(TuiStuckDiagnostic {
-                    reason: diagnostic.reason,
-                    recent_actions: diagnostic.recent_actions,
                 })
             }
         },

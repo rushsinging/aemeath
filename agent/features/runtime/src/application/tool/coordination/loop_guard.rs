@@ -2,8 +2,9 @@ use crate::application::tool::agent::ToolCall;
 use crate::application::tool::coordination::constants::{
     CONSECUTIVE_TOOL_CALL_HARD_LIMIT, CONSECUTIVE_TOOL_CALL_SOFT_LIMIT, MAX_INPUT_SUMMARY_CHARS,
     PERIOD_MAX_LEN, PERIOD_MIN_LEN, PERIOD_REPEAT_LIMIT, RECENT_TOOL_CALL_LIMIT,
-    TOOL_FUSE_HARD_PAUSE_LIMIT,
+    TOOL_FUSE_FAIL_LIMIT,
 };
+use sdk::ids::RunStepId;
 use serde_json::Value;
 use std::collections::VecDeque;
 
@@ -11,7 +12,7 @@ use std::collections::VecDeque;
 pub(crate) enum ToolFuseDecision {
     Allow,
     SoftBlock { reason: String },
-    HardPause { reason: String },
+    Fail { reason: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,9 +42,15 @@ impl ToolCallFingerprint {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StepFingerprint {
+    step_id: RunStepId,
+    fingerprint: ToolCallFingerprint,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct ToolCallFuse {
-    recent: VecDeque<ToolCallFingerprint>,
+    recent: VecDeque<StepFingerprint>,
     blocked_count: usize,
 }
 
@@ -52,9 +59,21 @@ impl ToolCallFuse {
         Self::default()
     }
 
-    pub(crate) fn inspect(&mut self, call: &ToolCall) -> ToolFuseDecision {
+    /// 按 step 粒度计入：同一 `step_id` 内同一指纹无论出现几次只记 1 次。
+    pub(crate) fn inspect(&mut self, step_id: &RunStepId, call: &ToolCall) -> ToolFuseDecision {
         let fingerprint = ToolCallFingerprint::from_call(call);
-        self.recent.push_back(fingerprint.clone());
+        if self
+            .recent
+            .iter()
+            .any(|entry| &entry.step_id == step_id && entry.fingerprint == fingerprint)
+        {
+            return ToolFuseDecision::Allow;
+        }
+
+        self.recent.push_back(StepFingerprint {
+            step_id: step_id.clone(),
+            fingerprint: fingerprint.clone(),
+        });
         while self.recent.len() > RECENT_TOOL_CALL_LIMIT {
             self.recent.pop_front();
         }
@@ -63,7 +82,7 @@ impl ToolCallFuse {
         let periodic = self.periodic_repeat();
         let soft_reason = if consecutive >= CONSECUTIVE_TOOL_CALL_SOFT_LIMIT {
             Some(format!(
-                "repeated tool call detected: {} appeared {consecutive} consecutive times",
+                "repeated tool call detected: {} appeared {consecutive} consecutive steps",
                 fingerprint.summary()
             ))
         } else if let Some((period_len, repeats, sequence)) = periodic {
@@ -93,9 +112,9 @@ impl ToolCallFuse {
         );
 
         if consecutive >= CONSECUTIVE_TOOL_CALL_HARD_LIMIT
-            || self.blocked_count >= TOOL_FUSE_HARD_PAUSE_LIMIT
+            || self.blocked_count >= TOOL_FUSE_FAIL_LIMIT
         {
-            ToolFuseDecision::HardPause { reason }
+            ToolFuseDecision::Fail { reason }
         } else {
             ToolFuseDecision::SoftBlock { reason }
         }
@@ -105,7 +124,7 @@ impl ToolCallFuse {
         self.recent
             .iter()
             .rev()
-            .take_while(|recent| *recent == fingerprint)
+            .take_while(|entry| &entry.fingerprint == fingerprint)
             .count()
     }
 
@@ -115,10 +134,14 @@ impl ToolCallFuse {
             if self.recent.len() < required {
                 continue;
             }
-            let forward = self.recent.iter().cloned().collect::<Vec<_>>();
+            let forward = self
+                .recent
+                .iter()
+                .map(|entry| entry.fingerprint.clone())
+                .collect::<Vec<_>>();
             let pattern = &forward[forward.len() - period_len..]; // allow unsafe_text_op: Vec slice
             let start = forward.len() - required;
-            if forward[start..]
+            if forward[start..] // allow unsafe_text_op: Vec slice
                 .chunks(period_len)
                 .all(|chunk| chunk == pattern)
             {
@@ -150,11 +173,13 @@ fn normalize_json(value: &Value) -> String {
                 "{{{}}}",
                 entries
                     .into_iter()
-                    .map(|(key, value)| format!(
-                        "{}:{}",
-                        serde_json::to_string(key).unwrap_or_else(|_| "\"\"".to_string()),
-                        normalize_json(value)
-                    ))
+                    .map(|(key, value)| {
+                        format!(
+                            "{}:{}",
+                            serde_json::to_string(key).unwrap_or_else(|_| "\"\"".to_string()),
+                            normalize_json(value)
+                        )
+                    })
                     .collect::<Vec<_>>()
                     .join(",")
             )

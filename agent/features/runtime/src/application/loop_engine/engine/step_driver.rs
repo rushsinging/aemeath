@@ -407,25 +407,13 @@ pub(super) async fn execute_step_with_scope(
                     .await?;
                     return Ok(());
                 }
-                decision @ StuckDecision::HardPause { .. } => {
-                    let reason = match &decision {
-                        StuckDecision::HardPause { reason } => reason.clone(),
-                        _ => unreachable!(),
+                StuckDecision::Fail { reason } => {
+                    let decision = StuckDecision::Fail {
+                        reason: reason.clone(),
                     };
                     record_stuck(run, execution, port, &decision).await?;
-                    let begin = handle_hard_pause(
-                        run,
-                        execution,
-                        port,
-                        &step_id,
-                        reason,
-                        HardPauseStepClose::CloseNow,
-                    )
-                    .await?;
-                    if matches!(begin, HardPauseBegin::Suspended) {
-                        return Ok(());
-                    }
-                    // Degraded：守卫降级，落入下方常规 ContinueAfterResponse 收口。
+                    fail_run(run, execution, port, reason).await?;
+                    return Ok(());
                 }
                 StuckDecision::Allow => {}
             }
@@ -449,22 +437,13 @@ pub(super) async fn execute_step_with_scope(
                 StuckDecision::SoftBlock { .. } => {
                     record_stuck(run, execution, port, &decision).await?
                 }
-                StuckDecision::HardPause { ref reason } => {
-                    let reason = reason.clone();
-                    record_stuck(run, execution, port, &decision).await?;
-                    let begin = handle_hard_pause(
-                        run,
-                        execution,
-                        port,
-                        &step_id,
-                        reason,
-                        HardPauseStepClose::CloseNow,
-                    )
-                    .await?;
-                    if matches!(begin, HardPauseBegin::Suspended) {
-                        return Ok(());
-                    }
-                    // Degraded：守卫降级，落入下方常规 ContinueAfterResponse 收口。
+                StuckDecision::Fail { reason } => {
+                    let stuck = StuckDecision::Fail {
+                        reason: reason.clone(),
+                    };
+                    record_stuck(run, execution, port, &stuck).await?;
+                    fail_run(run, execution, port, reason).await?;
+                    return Ok(());
                 }
                 StuckDecision::Allow => {}
             }
@@ -487,12 +466,12 @@ pub(super) async fn execute_step_with_scope(
             }
             transition_and_emit(run, execution, port, RunTransition::ResponseWithTools).await?;
             let mut guarded_calls = Vec::with_capacity(calls.len());
-            // fuse 升级 HardPause 后不立即挂起：本批调用全部按 SoftBlock 物化收口，
-            // 工具轮结束、step 收口到 DrainingInput 后再挂起，恢复时无需重放工具轮。
-            let mut hard_pause_reason: Option<String> = None;
+            // fuse 升级 Fail 后：本批剩余调用按 SoftBlock 物化，工具轮与 step
+            // 收口后再 fail_run，避免留下半截工具态。
+            let mut fail_reason: Option<String> = None;
             for call in calls {
                 run.add_tool_call(&step_id, call.clone())?;
-                if let Some(block_reason) = &hard_pause_reason {
+                if let Some(block_reason) = &fail_reason {
                     guarded_calls.push((
                         call,
                         ToolGuardDecision::SoftBlock {
@@ -501,7 +480,7 @@ pub(super) async fn execute_step_with_scope(
                     ));
                     continue;
                 }
-                match guard.inspect_tool(&call) {
+                match guard.inspect_tool(&step_id, &call) {
                     StuckDecision::SoftBlock { reason } => {
                         record_stuck(
                             run,
@@ -514,17 +493,17 @@ pub(super) async fn execute_step_with_scope(
                         .await?;
                         guarded_calls.push((call, ToolGuardDecision::SoftBlock { reason }));
                     }
-                    StuckDecision::HardPause { reason } => {
+                    StuckDecision::Fail { reason } => {
                         record_stuck(
                             run,
                             execution,
                             port,
-                            &StuckDecision::HardPause {
+                            &StuckDecision::Fail {
                                 reason: reason.clone(),
                             },
                         )
                         .await?;
-                        hard_pause_reason = Some(reason.clone());
+                        fail_reason = Some(reason.clone());
                         guarded_calls.push((call, ToolGuardDecision::SoftBlock { reason }));
                     }
                     StuckDecision::Allow => {
@@ -757,19 +736,9 @@ pub(super) async fn execute_step_with_scope(
                     handle_tool_approvals(run, execution, port, calls_needing_approval).await?;
                 }
             }
-            // fuse HardPause：工具轮与 step 已收口到 DrainingInput，此刻挂起等待
-            // 用户确认。审批交互分支若已挂起（pending 未清），begin 会因
-            // InteractionAlreadyPending 走 Degraded 降级，不会打死 run。
-            if let Some(reason) = hard_pause_reason.take() {
-                handle_hard_pause(
-                    run,
-                    execution,
-                    port,
-                    &step_id,
-                    reason,
-                    HardPauseStepClose::AlreadyClosed,
-                )
-                .await?;
+            // fuse 升级：工具轮与 step 已收口到 DrainingInput，直接 Failed。
+            if let Some(reason) = fail_reason.take() {
+                fail_run(run, execution, port, reason).await?;
             }
         }
     }

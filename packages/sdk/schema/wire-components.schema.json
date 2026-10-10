@@ -2021,19 +2021,12 @@
     "InteractionKindView": {
       "enum": [
         "tool_approval",
-        "user_question",
-        "stuck_diagnostic"
+        "user_question"
       ],
       "type": "string"
     },
     "InteractionReply": {
       "oneOf": [
-        {
-          "enum": [
-            "HardPauseContinue"
-          ],
-          "type": "string"
-        },
         {
           "additionalProperties": false,
           "properties": {
@@ -2140,18 +2133,6 @@
           },
           "required": [
             "ToolApproval"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "HardPause": {
-              "$ref": "#/$defs/StuckDiagnostic"
-            }
-          },
-          "required": [
-            "HardPause"
           ],
           "type": "object"
         }
@@ -2772,24 +2753,6 @@
         "skill",
         "arguments",
         "raw_input"
-      ],
-      "type": "object"
-    },
-    "StuckDiagnostic": {
-      "properties": {
-        "reason": {
-          "type": "string"
-        },
-        "recent_actions": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "reason",
-        "recent_actions"
       ],
       "type": "object"
     },

@@ -32,7 +32,7 @@ use crate::domain::agent_run::{
 };
 
 /// Advance a fresh Run into ExecutingTools so `begin_interaction` with
-/// `CompleteToolCall`/`ContinueAfterHardPause` is allowed.
+/// `CompleteToolCall`/`ContinueToolApproval` is allowed.
 fn run_in_executing_tools() -> Run {
     let mut run = Run::new(RunSpec::main(), None);
     // Created → DrainingInput
@@ -276,7 +276,7 @@ fn shared_validate_rejects_variant_mismatch() {
         options: vec![],
         allow_multi: false,
     }]);
-    let reply = InteractionReply::HardPauseContinue;
+    let reply = InteractionReply::ToolApproval(sdk::ApprovalDecision::Approve);
     assert_eq!(
         validate_reply(&body, &reply).unwrap_err(),
         InteractionReplyError::VariantMismatch
@@ -302,29 +302,6 @@ fn shared_validate_tool_approval_rejects_variant_mismatch() {
         risk_level: sdk::RiskLevel::Low,
     });
     let reply = InteractionReply::UserQuestions(vec![]);
-    assert_eq!(
-        validate_reply(&body, &reply).unwrap_err(),
-        InteractionReplyError::VariantMismatch
-    );
-}
-
-#[test]
-fn shared_validate_hard_pause_accepts_continue() {
-    let body = sdk::InteractionRequestBody::HardPause(sdk::StuckDiagnostic {
-        reason: "stuck".into(),
-        recent_actions: vec![],
-    });
-    let reply = InteractionReply::HardPauseContinue;
-    assert!(validate_reply(&body, &reply).is_ok());
-}
-
-#[test]
-fn shared_validate_hard_pause_rejects_variant_mismatch() {
-    let body = sdk::InteractionRequestBody::HardPause(sdk::StuckDiagnostic {
-        reason: "stuck".into(),
-        recent_actions: vec![],
-    });
-    let reply = InteractionReply::UserQuestions(vec![UserAnswer("A".into())]);
     assert_eq!(
         validate_reply(&body, &reply).unwrap_err(),
         InteractionReplyError::VariantMismatch

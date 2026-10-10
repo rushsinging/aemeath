@@ -207,7 +207,6 @@ struct PendingInteraction {
 enum InteractionContinuation {
     CompleteToolCall(ToolCallId),
     ContinueToolApproval(ToolCallId),
-    ContinueAfterHardPause,
 }
 
 /// Stop Hook typed outcome：Run 拥有计数并使用创建时冻结的 StopHookPolicy；首个超限 Block 进入 Failed。
