@@ -135,7 +135,7 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
         validate_policy(policy)?;
         let global = load_layer(&store, MemoryLayer::Global).await?;
         let project = load_layer(&store, MemoryLayer::Project).await?;
-        Ok(Self {
+        let service = Self {
             store,
             policy,
             state: RwLock::new(CommittedState { global, project }),
@@ -143,7 +143,64 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
             clock: Arc::new(clock),
             scorer,
             events,
-        })
+        };
+        service.emit_open_load().await;
+        Ok(service)
+    }
+
+    /// OpenLoad：两层加载成功后发射一条覆盖双层的生命周期事件（actor=Opener，
+    /// layer=None）。context 用两层 active/archive 计数摘要——打开不改语料，
+    /// dump 全量条目既无必要也不便宜，计数足以复盘「打开时装了什么」。
+    async fn emit_open_load(&self) {
+        let (global_active, global_archive, project_active, project_archive) = {
+            let state = self.state.read().expect("committed state lock poisoned");
+            (
+                state.global.dataset.active().len(),
+                state.global.dataset.archive().len(),
+                state.project.dataset.active().len(),
+                state.project.dataset.archive().len(),
+            )
+        };
+        let mut event = self.build_lifecycle_event(
+            MemoryEventOp::OpenLoad,
+            "open_load",
+            format!("open_load-{}", uuid::Uuid::now_v7()),
+            EventActor::Opener,
+        );
+        event.context.trigger_summary = Some(format!(
+            "global active={global_active} archive={global_archive}; \
+             project active={project_active} archive={project_archive}"
+        ));
+        self.emit_event(event).await;
+    }
+
+    /// 生命周期事件组装（open_load / commit_cas …）：`correlation_id` 由调用方
+    /// 给定并复用为 `event_id`；`affected` 恒为空——受影响条目全文由写组事件
+    /// 承载，生命周期只记坐标与 outcome。
+    fn build_lifecycle_event(
+        &self,
+        op: MemoryEventOp,
+        stage: &str,
+        correlation_id: String,
+        actor: EventActor,
+    ) -> MemoryEvent {
+        MemoryEvent::new(
+            correlation_id.clone(),
+            (self.clock)() * 1000,
+            op,
+            EventOutcome::Succeeded,
+            correlation_id,
+            actor,
+            EventChange::Lifecycle {
+                stage: stage.to_string(),
+                affected: vec![],
+            },
+            EventContext::default(),
+            ConfigFingerprint {
+                scoring_enabled: self.scorer.is_some(),
+                ..ConfigFingerprint::default()
+            },
+        )
     }
 
     /// 中心化事件发射：追加失败仅记录一条无正文的告警并吞掉错误——
@@ -284,6 +341,8 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
         F: Fn(&mut MemoryDataset) -> Result<(T, bool), MemoryError>,
     {
         let _permit = self.mutation_gate.lock().await;
+        // 同一次 mutate_layer 调用（含 CAS 冲突重试）共用一条 CommitCas 因果链。
+        let commit_correlation = format!("commit_cas-{layer:?}-{}", uuid::Uuid::now_v7());
         for attempt in 0..=1 {
             let mut candidate = self.layer_state(layer);
             let (output, changed) = operation(&mut candidate.dataset)?;
@@ -296,9 +355,19 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
                 .await
             {
                 Ok(receipt) => {
+                    let commit_revision = S::event_revision_label(receipt.revision());
                     // Visible and RecoveryPending are both committed receipts.
                     candidate.revision = receipt.into_revision();
                     self.set_layer_state(layer, candidate);
+                    let mut event = self.build_lifecycle_event(
+                        MemoryEventOp::CommitCas,
+                        "commit_cas",
+                        commit_correlation,
+                        EventActor::Service,
+                    );
+                    event.layer = Some(layer);
+                    event.commit_revision = commit_revision;
+                    self.emit_event(event).await;
                     return Ok(output);
                 }
                 Err(error) if is_concurrent_write(&error) && attempt == 0 => {

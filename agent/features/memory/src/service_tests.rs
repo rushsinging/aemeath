@@ -74,6 +74,10 @@ impl MemoryDatasetStore for ScriptedStore {
         layer.commit_calls += 1;
         layer.commits.pop_front().expect("unexpected commit")
     }
+
+    fn event_revision_label(revision: &Self::Revision) -> Option<String> {
+        Some(revision.to_string())
+    }
 }
 
 fn layer_script(
@@ -1299,7 +1303,7 @@ async fn write_add_emits_event_through_injected_append_port() {
     let result = service.write(added.clone()).await.unwrap();
     assert!(matches!(result, WriteResult::Added { .. }));
 
-    let events = recorder.events();
+    let events = recorded_write_events(&recorder);
     assert_eq!(
         events.len(),
         1,
@@ -1379,6 +1383,16 @@ async fn open_events_service(
     (service, recorder)
 }
 
+/// 录制端口里的写组事件快照（过滤 OpenLoad / CommitCas——生命周期事件由
+/// `event_lifecycle_*` 专测断言，写组专测只关心受影响条目全文）。
+fn recorded_write_events(recorder: &RecordingEventAppend) -> Vec<MemoryEvent> {
+    recorder
+        .events()
+        .into_iter()
+        .filter(|event| !matches!(event.op, MemoryEventOp::OpenLoad | MemoryEventOp::CommitCas))
+        .collect()
+}
+
 #[tokio::test]
 async fn event_write_ops_write_merged_emits_survivor_and_incoming_content() {
     // Merged 不发 WriteAdd（Added 专属），但必须带存活条目与归档来件的
@@ -1401,7 +1415,7 @@ async fn event_write_ops_write_merged_emits_survivor_and_incoming_content() {
     let result = service.write(incoming.clone()).await.unwrap();
     assert!(matches!(result, WriteResult::Merged { .. }));
 
-    let events = recorder.events();
+    let events = recorded_write_events(&recorder);
     assert_eq!(
         events.len(),
         1,
@@ -1441,7 +1455,7 @@ async fn event_write_ops_update_emits_before_and_after_content() {
 
     assert!(service.update(&existing.id, "new wording").await.unwrap());
 
-    let events = recorder.events();
+    let events = recorded_write_events(&recorder);
     assert_eq!(
         events.len(),
         1,
@@ -1477,7 +1491,7 @@ async fn event_write_ops_delete_emits_full_entry_in_before() {
 
     assert!(service.delete(&existing.id).await.unwrap());
 
-    let events = recorder.events();
+    let events = recorded_write_events(&recorder);
     assert_eq!(
         events.len(),
         1,
@@ -1516,7 +1530,7 @@ async fn event_write_ops_pin_emits_before_and_after_for_pin_and_unpin() {
     assert!(service.pin(&existing.id, true).await.unwrap());
     assert!(service.pin(&existing.id, false).await.unwrap());
 
-    let events = recorder.events();
+    let events = recorded_write_events(&recorder);
     assert_eq!(
         events.len(),
         2,
@@ -1562,7 +1576,7 @@ async fn event_write_ops_mark_outdated_emits_before_and_after_content() {
 
     assert!(service.mark_outdated(&existing.id).await.unwrap());
 
-    let events = recorder.events();
+    let events = recorded_write_events(&recorder);
     assert_eq!(
         events.len(),
         1,
@@ -1607,7 +1621,7 @@ async fn event_write_ops_archive_and_restore_emit_distinct_stages() {
         RestoreResult::Restored { .. }
     ));
 
-    let events = recorder.events();
+    let events = recorded_write_events(&recorder);
     assert_eq!(
         events.len(),
         2,
@@ -1656,7 +1670,7 @@ async fn event_write_ops_compact_emits_affected_full_text() {
     assert_eq!(result.archived, 1);
     assert_eq!(result.remaining, 1);
 
-    let events = recorder.events();
+    let events = recorded_write_events(&recorder);
     assert_eq!(
         events.len(),
         1,
@@ -1697,7 +1711,7 @@ async fn event_write_ops_supersede_relation_emits_target_full_content() {
 
     assert!(service.mark_superseded_by(target.id, superseding.id).await);
 
-    let events = recorder.events();
+    let events = recorded_write_events(&recorder);
     assert_eq!(
         events.len(),
         1,
@@ -1750,7 +1764,7 @@ async fn event_write_ops_synthesis_write_emits_full_entry_via_apply_reflection()
     let applied = service.apply_reflection(&output).await.unwrap();
     assert_eq!(applied.suggestions_added, 1);
 
-    let events = recorder.events();
+    let events = recorded_write_events(&recorder);
     assert_eq!(
         events.len(),
         1,
@@ -1775,4 +1789,152 @@ async fn event_write_ops_synthesis_write_emits_full_entry_via_apply_reflection()
         }
         other => panic!("synthesis write must emit Write change, got {other:?}"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// event_lifecycle_*：生命周期 OpenLoad / CommitCas 落点。
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn event_lifecycle_open_load_covers_both_layers_with_count_summary() {
+    // 打开一次 = 一条 OpenLoad 覆盖两层：actor=Opener、layer=None，
+    // context 以两层 active/archive 计数摘要代替条目全文（打开不改语料）。
+    let store = ScriptedStore::new(
+        layer_script(
+            vec![Ok(committed(
+                1,
+                MemoryLayer::Global,
+                vec![entry(MemoryLayer::Global, "global fact")],
+            ))],
+            vec![],
+        ),
+        layer_script(vec![Ok(empty_layer(7, MemoryLayer::Project))], vec![]),
+    );
+    let recorder = RecordingEventAppend::default();
+    let _service = MemoryService::open_with_clock_and_scorer_and_events(
+        store,
+        MemoryPolicy::default(),
+        || 4_242,
+        None,
+        Arc::new(recorder.clone()),
+    )
+    .await
+    .unwrap();
+
+    let events = recorder.events();
+    assert_eq!(
+        events.len(),
+        1,
+        "opening must emit exactly one event, got {events:?}"
+    );
+    let event = &events[0];
+    assert_eq!(event.op, MemoryEventOp::OpenLoad);
+    assert_eq!(event.outcome, EventOutcome::Succeeded);
+    assert_eq!(event.actor, EventActor::Opener);
+    assert_eq!(event.layer, None, "one OpenLoad covers both layers");
+    assert_eq!(
+        event.change,
+        EventChange::Lifecycle {
+            stage: "open_load".to_string(),
+            affected: vec![],
+        }
+    );
+    let summary = event
+        .context
+        .trigger_summary
+        .as_deref()
+        .unwrap_or_else(|| panic!("open_load must carry a layer count summary"));
+    assert!(
+        summary.contains("global active=1 archive=0"),
+        "got {summary}"
+    );
+    assert!(
+        summary.contains("project active=0 archive=0"),
+        "got {summary}"
+    );
+}
+
+#[tokio::test]
+async fn event_lifecycle_commit_cas_emits_revision_and_layer() {
+    // 一次成功 commit => 一条 CommitCas：坐标为被提交层，revision 取自 receipt。
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(
+            vec![Ok(empty_layer(1, MemoryLayer::Project))],
+            vec![Ok(receipt(2, MemoryCommitVisibility::Visible))],
+        ),
+    );
+    let (service, recorder) = open_events_service(store, MemoryPolicy::default()).await;
+
+    service
+        .write(entry(MemoryLayer::Project, "commit cas fact"))
+        .await
+        .unwrap();
+
+    let events = recorder.events();
+    let commits: Vec<&MemoryEvent> = events
+        .iter()
+        .filter(|event| event.op == MemoryEventOp::CommitCas)
+        .collect();
+    assert_eq!(
+        commits.len(),
+        1,
+        "one successful commit => one CommitCas, got {events:?}"
+    );
+    let commit = commits[0];
+    assert_eq!(commit.outcome, EventOutcome::Succeeded);
+    assert_eq!(commit.layer, Some(MemoryLayer::Project));
+    assert_eq!(commit.commit_revision.as_deref(), Some("2"));
+    assert_eq!(
+        commit.change,
+        EventChange::Lifecycle {
+            stage: "commit_cas".to_string(),
+            affected: vec![],
+        }
+    );
+    assert!(
+        !commit.correlation_id.is_empty(),
+        "CommitCas must be correlatable"
+    );
+}
+
+#[tokio::test]
+async fn event_lifecycle_commit_cas_after_cas_retry_reports_successful_receipt() {
+    // 第一次 commit 撞 CAS 冲突、刷新重试成功：CommitCas 只报成功那一版
+    // revision，且同一次 mutate_layer 调用只 emit 一条（重试共享因果链）。
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(
+            vec![
+                Ok(empty_layer(1, MemoryLayer::Project)),
+                Ok(empty_layer(1, MemoryLayer::Project)),
+            ],
+            vec![
+                Err(storage(MemoryStorageErrorKind::ConcurrentWrite)),
+                Ok(receipt(3, MemoryCommitVisibility::Visible)),
+            ],
+        ),
+    );
+    let (service, recorder) = open_events_service(store, MemoryPolicy::default()).await;
+
+    service
+        .write(entry(MemoryLayer::Project, "retried fact"))
+        .await
+        .unwrap();
+
+    let events = recorder.events();
+    let commits: Vec<&MemoryEvent> = events
+        .iter()
+        .filter(|event| event.op == MemoryEventOp::CommitCas)
+        .collect();
+    assert_eq!(
+        commits.len(),
+        1,
+        "CAS retry still yields exactly one CommitCas, got {events:?}"
+    );
+    assert_eq!(
+        commits[0].commit_revision.as_deref(),
+        Some("3"),
+        "revision must come from the successful receipt"
+    );
 }

@@ -160,6 +160,12 @@ pub trait MemoryDatasetStore: Send + Sync {
         expected: &Self::Revision,
         dataset: &MemoryDataset,
     ) -> Result<MemoryCommitReceipt<Self::Revision>, MemoryError>;
+
+    /// 事件坐标 `MemoryEvent::commit_revision` 用的 revision 字符串。
+    /// 无法以字符串表达 revision 的实现返回 `None`（事件留空，NEVER 编造）。
+    fn event_revision_label(_revision: &Self::Revision) -> Option<String> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
