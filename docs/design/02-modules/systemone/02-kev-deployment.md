@@ -74,5 +74,8 @@ cargo test -p systemone --test kev_baseline -- --ignored --test-threads=1
 - 温度 artifact：`~/.agents/scoring/calibration.json`（`{"temperature": 1.35}`），
   离线拟合后落盘，进程重启生效；生效后所有评分答案按温度重缩放
   （只重缩放，NEVER 改变选项胜负排序），`CalibrationLevel` 标注进每个答案与审计事件。
-- 审计：`~/.agents/scoring/audit.jsonl`（每次评分决策带 engine revision +
-  prompt sha256 + probabilities + 校准级别 + 延迟）。
+- 可复盘评分事件流（目标态）：`~/.agents/scoring/events/{yyyy-mm-dd}.jsonl`
+  （升级替换原 `audit.jsonl`；含全量现场 + 关联字段；详见
+  [03-event-stream.md](03-event-stream.md)）。校准旁路 `observations.jsonl` 不动。
+- 审计（现状 / legacy）：`~/.agents/scoring/audit.jsonl`（每次评分决策带 engine revision +
+  prompt sha256 + probabilities + 校准级别 + 延迟；实施事件流后停写并迁入/旁路归档）。
