@@ -233,8 +233,9 @@ pub use crate::domain::ReflectionApplyResult;
 pub trait ReflectionHistoryQuery: Send + Sync {
     /// Returns at most `limit` records, newest append first. A zero limit
     /// returns an empty result without weakening dataset validation.
-    /// Only safe metadata summaries cross this boundary; full records
-    /// (including output content) stay internal to the adapter.
+    /// Append-only stores fold by stable id to the latest record before
+    /// truncating. Only safe metadata summaries cross this boundary; full
+    /// records (including output content) stay internal to the adapter.
     async fn list(&self, limit: usize) -> Result<Vec<ReflectionSafeSummary>, MemoryError>;
 
     /// 显式内容投影查询：摘要同时携带偏差文本与建议内容（`safe_summary_with_content`）。
@@ -253,7 +254,9 @@ pub trait ReflectionHistoryQuery: Send + Sync {
 #[async_trait]
 pub trait ReflectionHistoryStore: ReflectionHistoryQuery {
     async fn append(&self, record: &ReflectionRecord) -> Result<(), MemoryError>;
-    /// Inserts a new record or replaces the record with the same stable id.
+    /// Appends a new line for the same stable id (true append-only).
+    /// Read-side [`ReflectionHistoryQuery::list`] folds to the latest record;
+    /// implementations **MUST NOT** rewrite prior lines in place.
     async fn upsert(&self, record: &ReflectionRecord) -> Result<(), MemoryError>;
 }
 

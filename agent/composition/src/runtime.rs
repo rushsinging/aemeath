@@ -151,11 +151,17 @@ pub(crate) async fn from_args_with_gateways(
     // agents_dir so the dataset lives at agents_dir/memory/{project}/...
     // (not agents_dir/memory/memory/...). Legacy memory still uses the
     // explicit agents_dir.join("memory") path via wire_legacy_memory_source_factory.
+    // jsonl 根与 dataset 根同为 agents_dir（memory/{project}/reflection-history/…）；
+    // legacy AtomicDataset 作为一次性导出源注入（无则传 None）。
+    let reflection_legacy_dataset = storage::wire_file_system_dataset(agents_dir)
+        .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
     let reflection_history: Arc<dyn memory_api::ReflectionHistoryStore> =
         memory::wire_reflection_history_store(
-            storage::wire_file_system_dataset(agents_dir)
+            storage::SafeStorageRoot::open(agents_dir)
                 .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
             project_key,
+            30,
+            Some(reflection_legacy_dataset),
         );
 
     let task_wiring = task::wire_task();

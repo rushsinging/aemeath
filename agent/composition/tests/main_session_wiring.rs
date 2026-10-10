@@ -361,7 +361,12 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         memory::api::ProjectMemoryKey::derive(root.to_str().expect("project root is UTF-8"), None)
             .expect("derive key");
     let reflection_history: Arc<dyn memory::api::ReflectionHistoryStore> =
-        memory::wire_reflection_history_store(dataset_adapter.clone(), project_key);
+        memory::wire_reflection_history_store(
+            storage::SafeStorageRoot::open(&agents_dir).expect("storage root"),
+            project_key,
+            30,
+            Some(dataset_adapter.clone()),
+        );
     let memory_opener = memory::wire_memory_opener(dataset_adapter, legacy_factory, None);
 
     let session_management = session_management(&agents_dir);

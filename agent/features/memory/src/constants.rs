@@ -8,11 +8,12 @@ pub(crate) const LEGACY_ARCHIVE_SUFFIX: &str = "_archive";
 /// Fixed segments used by the predecessor flat-file layout.
 pub(crate) const LEGACY_GLOBAL_STEM: &str = "_global";
 
-pub(crate) const REFLECTION_HISTORY_CAS_ATTEMPTS: usize = 8;
-
 pub(crate) const REFLECTION_RECORDS_MEMBER: &str = "records";
 
 pub(crate) const REFLECTION_HISTORY_SEGMENT: &str = "reflection-history";
+
+/// reflection-history 日切 segment 文件后缀（`{yyyy-mm-dd}.jsonl`）。
+pub(crate) const REFLECTION_HISTORY_JSONL_SUFFIX: &str = ".jsonl";
 
 /// 悬挂 running 记录收口（reap）扫描的历史窗口上限：反思记录按最新在前排序，
 /// 超龄未收口的 Running 只会出现在最近的有限窗口内。

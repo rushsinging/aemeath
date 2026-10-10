@@ -424,9 +424,9 @@ PreCompact 在 compact 前把所选 `messages` clone 为 owned snapshot，但只
 
 ### 8.2 History 与安全查询
 
-`ReflectionRecord` 是 Memory-owned 持久化事实，包含 trigger、状态、可选 parsed output / apply result、错误类别、token usage 与 duration。Runtime 接受任务后先通过 `ReflectionHistoryStore::append` 写入 `Running`，成功、失败、partial apply、timeout 或 cancel 后以同 id `upsert` 终态；adapter 使用 project-scoped durable dataset，append/upsert/query 均由 Memory 拥有。它与运行时 `Reflection` activity 相互独立：activity 是本次执行的观测投影，`ReflectionRecord` 才是持久化历史。
+`ReflectionRecord` 是 Memory-owned 持久化事实，包含 trigger、状态、可选 parsed output / apply result、错误类别、token usage 与 duration。Runtime 接受任务后先通过 `ReflectionHistoryStore::append` 写入 `Running`，成功、失败、partial apply、timeout 或 cancel 后以同 id `upsert` 终态。落盘形态为 project-scoped **真 append-only 日切 jsonl**（`memory/{project}/reflection-history/{yyyy-mm-dd}.jsonl`，经 `SafeStorageRoot`）；`append` / `upsert` 均只追加一行，**NEVER** 原地改写历史行。读侧 `list` / `list_with_content` 扫描保留窗内 segment（默认 30 天，可配置；`0` 禁用 GC），按 id **折叠为最新一条**后再按 newest-first 截断 `limit`，以保持「每 id 一条有效视图」；完整谱系只存在于文件。旧 AtomicDataset 单 member `records`（整 `Vec` CAS）在首读/首写时一次性导出为 jsonl，迁移失败 fail-open。append/upsert/query 均由 Memory 拥有。它与运行时 `Reflection` activity 相互独立：activity 是本次执行的观测投影，`ReflectionRecord` 才是持久化历史。
 
-`/reflect [limit]` 只调用 `ReflectionHistoryQuery::list(limit)`，该 query 已按 newest-first 返回至多 `limit` 条 `ReflectionSafeSummary`；Runtime/SDK 仅映射其交付 DTO：id、时间、trigger、status、deviation/suggestion/outdated 数量、apply 状态、错误类别、token 计数与耗时。该查询**不运行 Reflection、不 apply、也不返回 output 正文**。
+`/reflect [limit]` 只调用 `ReflectionHistoryQuery::list(limit)`，该 query 已按 newest-first 返回至多 `limit` 条折叠后的 `ReflectionSafeSummary`；Runtime/SDK 仅映射其交付 DTO：id、时间、trigger、status、deviation/suggestion/outdated 数量、apply 状态、错误类别、token 计数与耗时。该查询**不运行 Reflection、不 apply、也不返回 output 正文**。
 
 ### 8.3 安全日志
 
@@ -464,6 +464,7 @@ struct ReflectionConfig {
 | 2026-09-25 | 接通 Manual 显式入口：Tools catalog `/reflect-now` → SDK `ChatInputEvent::ReflectNow` → input gate（idle 受理 / busy 提示丢弃，NEVER 排队）→ run_launch handler 冻结 `structured_messages()` 快照启动手动反思 |
 | 2026-07-20 | Run teardown 落地有界 drain→cancel→terminal 收口；Manual 显式入口从压缩事项中拆分 |
 | 2026-07-20 | 接通 compact 成功后的 PreCompact 冻结快照提交 |
+| 2026-10-10 | reflection-history 改为真 append-only 日切 jsonl；upsert 再追加，读侧按 id 折叠最新；旧 AtomicDataset Vec 一次性迁移；默认 30 天保留 |
 | 2026-07-20 | 将 parse 错误收窄为不含模型原文的稳定类别，且 `ReflectionHistoryQuery` 仅发布安全摘要；完整 record 保持在 Memory adapter 内部 |
 | 2026-07-19 | 将旧 `MemoryStore` apply 示例更新为当前 Run shared lease 捕获的同一 `MemoryPort::apply_reflection`，保留 `ReflectionEngine` 作为无状态 prompt/parse 领域服务 |
 | 2026-07-18 | 三 trigger Runtime 单槽异步、busy skip、静默完成、Memory-owned history append/query 持久化、`/reflect [limit]` 只读安全摘要、安全日志与 Run teardown drain/cancel timeout |

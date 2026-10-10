@@ -32,7 +32,7 @@
 // ---------- composition-only wiring（根级 wire 工厂，config crate 同判） ----------
 //
 // 三个实现体（`DatasetMemoryOpener`、`FileLegacyMemorySourceFactory`、
-// `AtomicDatasetReflectionHistoryStore`）的构造入口：**composition 及跨 crate
+// `JsonlReflectionHistoryStore`）的构造入口：**composition 及跨 crate
 // 测试的唯一构造点**。实现体本身与 `new` 均已收窄 `pub(crate)`——crate 外
 // 一切散落构造在编译期不可达，只能经下列工厂取得 trait 对象。参数保持
 // composition 既有的输入（存储句柄 / legacy 路径 / project key），装配语义不变。
@@ -61,15 +61,25 @@ pub fn wire_legacy_memory_source_factory(
 }
 
 /// Composition 构造反思历史存储的唯一入口：返回
-/// `Arc<dyn ReflectionHistoryStore>`。`AtomicDatasetReflectionHistoryStore`
-/// 为 crate 内实现细节，其 `new` 已收窄 `pub(crate)`，crate 外不可达。
+/// `Arc<dyn ReflectionHistoryStore>`。`JsonlReflectionHistoryStore`（append-only
+/// 日切 jsonl）为 crate 内实现细节，其 `new` 已收窄 `pub(crate)`，crate 外不可达。
+/// `retention_days` 为日切 segment GC 保留天数（`0` 表示禁用 GC，**NEVER** 表示
+/// 关闭写入）；`legacy_dataset` 为旧 AtomicDataset `records` member 的一次性导出
+/// 源（`None` 表示无 legacy 需要迁移）。
 pub fn wire_reflection_history_store(
-    storage: std::sync::Arc<dyn storage::AtomicDatasetPort>,
+    root: storage::SafeStorageRoot,
     project: crate::domain::ProjectMemoryKey,
+    retention_days: u32,
+    legacy_dataset: Option<std::sync::Arc<dyn storage::AtomicDatasetPort>>,
 ) -> std::sync::Arc<dyn crate::ports::ReflectionHistoryStore> {
-    std::sync::Arc::new(crate::adapters::AtomicDatasetReflectionHistoryStore::new(
-        storage, project,
-    ))
+    std::sync::Arc::new(
+        crate::reflection_history_jsonl::JsonlReflectionHistoryStore::new(
+            root,
+            project,
+            retention_days,
+            legacy_dataset,
+        ),
+    )
 }
 
 /// Composition 构造生产事件流存储的唯一入口：返回 `Arc<dyn MemoryEventAppendPort>`
@@ -97,6 +107,7 @@ mod domain;
 mod event_jsonl;
 mod noop;
 mod ports;
+mod reflection_history_jsonl;
 mod service;
 
 pub mod api;

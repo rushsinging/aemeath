@@ -70,8 +70,10 @@ async fn wire_reflection_history_store_appends_and_lists() {
     std::fs::create_dir_all(&root).unwrap();
 
     let store: Arc<dyn ReflectionHistoryStore> = crate::wire_reflection_history_store(
-        storage::wire_file_system_dataset(&root).unwrap(),
+        storage::SafeStorageRoot::open(&root).unwrap(),
         project_key(),
+        30,
+        Some(storage::wire_file_system_dataset(&root).unwrap()),
     );
     store
         .append(&ReflectionRecord::running(
@@ -93,8 +95,10 @@ async fn reflection_history_list_with_content_projects_texts_and_suggestions() {
     std::fs::create_dir_all(&root).unwrap();
 
     let store: Arc<dyn ReflectionHistoryStore> = crate::wire_reflection_history_store(
-        storage::wire_file_system_dataset(&root).unwrap(),
+        storage::SafeStorageRoot::open(&root).unwrap(),
         project_key(),
+        30,
+        Some(storage::wire_file_system_dataset(&root).unwrap()),
     );
     let mut record = ReflectionRecord::running("content-1", 7, ReflectionTrigger::Manual);
     record.output = Some(crate::domain::ReflectionOutput {
