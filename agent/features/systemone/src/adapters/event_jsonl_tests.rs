@@ -173,6 +173,27 @@ fn migrate_without_legacy_file_is_noop() {
 }
 
 #[test]
+fn migrate_unreadable_legacy_file_returns_err_and_keeps_original() {
+    let temp = tempfile::TempDir::new().expect("临时目录");
+    let scoring_dir = temp.path().join("scoring");
+    std::fs::create_dir_all(&scoring_dir).expect("创建 scoring 目录");
+    // 用同名目录占位模拟「存在但不可读」：NEVER 吞错为空操作。
+    std::fs::create_dir_all(scoring_dir.join("audit.jsonl")).expect("占位目录");
+
+    let store = JsonlSegmentScoringEventStore::new(scoring_dir.clone(), 30);
+    let migrate_result = store.migrate_legacy_audit();
+
+    assert!(
+        migrate_result.is_err(),
+        "读失败 MUST 返回 Err，仅 NotFound 才是空操作"
+    );
+    assert!(
+        !scoring_dir.join("audit.jsonl.migrated").exists(),
+        "失败后原路径 MUST 保持不动"
+    );
+}
+
+#[test]
 fn retain_segments_deletes_expired_keeps_recent_and_unparsable_names() {
     let temp = tempfile::TempDir::new().expect("临时目录");
     let scoring_dir = temp.path().join("scoring");

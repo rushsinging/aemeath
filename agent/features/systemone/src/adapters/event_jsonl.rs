@@ -61,8 +61,11 @@ impl JsonlSegmentScoringEventStore {
     /// 文件不存在 → `Ok(())` 空操作；迁移 IO 失败 → 返回 `Err` 且原文件保持不动。
     pub fn migrate_legacy_audit(&self) -> std::io::Result<()> {
         let legacy_path = self.scoring_dir.join(LEGACY_AUDIT_FILE);
-        let Ok(legacy_source) = std::fs::read_to_string(&legacy_path) else {
-            return Ok(());
+        let legacy_source = match std::fs::read_to_string(&legacy_path) {
+            Ok(source) => source,
+            // 仅「不存在」是合法空操作；其余读失败 MUST 冒泡，NEVER 吞错。
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error),
         };
 
         let events_dir = self.scoring_dir.join(EVENTS_DIR_NAME);
