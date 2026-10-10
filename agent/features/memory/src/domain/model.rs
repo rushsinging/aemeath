@@ -18,7 +18,7 @@ impl MemoryId {
     pub fn new(value: impl AsRef<str>) -> Result<Self, MemoryError> {
         let value = value.as_ref();
         if share::ids::is_typed_id(value, "mem") {
-            let suffix = value["mem_".len()..].as_bytes();
+            let suffix = &value.as_bytes()["mem_".len()..];
             let mut bytes = [0u8; 11];
             bytes.copy_from_slice(suffix);
             return Ok(Self(MemoryIdRepr::Typed(bytes)));
