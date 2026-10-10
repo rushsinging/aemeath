@@ -31,6 +31,7 @@ Loop Engine 内置 StuckGuard（Main/Sub 共用）
   - **连续重复**：同一指纹连续出现在 ≥N 个 step
   - **周期循环**：period 长度 `2-5`、重复 `3` 次的循环模式（按 step 条目序列）
 - **默认参数**：连续 soft `≥3` step / hard `≥5` step；周期重复 `3`；`blocked_count≥3` → Fail；recent 窗口 `64`
+- **只读后台查询豁免**（#1921）：`BackgroundProcessList` / `BackgroundProcessStatus` / `BackgroundProcessLogs` **MUST** 跳过 fuse（不写入 recent、不增加 `blocked_count`）。原因：完成前对同一 id 的查询指纹不变，会被 Soft=3 误杀；真实等待路径是完成通知 + wakeup，guidance **MUST** 禁止 Status 忙等。`BackgroundProcessStop` **NEVER** 豁免。
 - **触发处理**：
   - **SoftBlock**：阻断本次调用，喂回错误结果提示 LLM「不要重复、换策略/总结/问用户」
   - **Fail**：升级为 Run `Failed`（Main/Sub 一律；**NEVER** 再挂 HardPause interaction）
@@ -90,3 +91,4 @@ StuckGuard 触发是 Run 状态机的一等公民，而非散落的 `if`：
 |---|---|---|
 | 2026-07-11 | 初稿：四层防线（Stall/ToolLoop/Timeout/StopHook）、统一进 Loop Engine 补 Sub 缺口、分级响应、状态机集成 | #761 |
 | 2026-10-10 | 废除 HardPause interaction；升级一律 Failed；ToolLoopGuard 改为 step 粒度计数 | #1913 |
+| 2026-10-11 | 只读后台查询工具（List/Status/Logs）豁免 ToolCallFuse；Stop 不豁免 | #1921 |

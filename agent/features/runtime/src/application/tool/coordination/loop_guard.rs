@@ -2,7 +2,7 @@ use crate::application::tool::agent::ToolCall;
 use crate::application::tool::coordination::constants::{
     CONSECUTIVE_TOOL_CALL_HARD_LIMIT, CONSECUTIVE_TOOL_CALL_SOFT_LIMIT, MAX_INPUT_SUMMARY_CHARS,
     PERIOD_MAX_LEN, PERIOD_MIN_LEN, PERIOD_REPEAT_LIMIT, RECENT_TOOL_CALL_LIMIT,
-    TOOL_FUSE_FAIL_LIMIT,
+    TOOL_FUSE_EXEMPT_READONLY_BACKGROUND_TOOLS, TOOL_FUSE_FAIL_LIMIT,
 };
 use sdk::ids::RunStepId;
 use serde_json::Value;
@@ -60,7 +60,15 @@ impl ToolCallFuse {
     }
 
     /// 按 step 粒度计入：同一 `step_id` 内同一指纹无论出现几次只记 1 次。
+    /// 只读后台查询工具（List/Status/Logs）豁免 fuse，不写入 recent、不增加 blocked_count。
     pub(crate) fn inspect(&mut self, step_id: &RunStepId, call: &ToolCall) -> ToolFuseDecision {
+        if TOOL_FUSE_EXEMPT_READONLY_BACKGROUND_TOOLS
+            .iter()
+            .any(|name| *name == call.name.as_str())
+        {
+            return ToolFuseDecision::Allow;
+        }
+
         let fingerprint = ToolCallFingerprint::from_call(call);
         if self
             .recent

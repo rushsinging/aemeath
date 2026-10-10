@@ -10,3 +10,11 @@ pub(crate) const PERIOD_MAX_LEN: usize = 5;
 pub(crate) const PERIOD_REPEAT_LIMIT: usize = 3;
 pub(crate) const TOOL_FUSE_FAIL_LIMIT: usize = 3;
 pub(crate) const MAX_INPUT_SUMMARY_CHARS: usize = 160;
+
+/// #1921：只读后台查询工具不计入 ToolCallFuse consecutive / blocked。
+/// `BackgroundProcessStop` 不在此列（副作用调用仍受 fuse 约束）。
+pub(crate) const TOOL_FUSE_EXEMPT_READONLY_BACKGROUND_TOOLS: &[&str] = &[
+    "BackgroundProcessList",
+    "BackgroundProcessStatus",
+    "BackgroundProcessLogs",
+];
