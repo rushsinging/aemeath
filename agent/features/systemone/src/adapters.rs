@@ -3,6 +3,7 @@ pub mod calibrated;
 pub mod calibration_store;
 #[cfg(feature = "embedded")]
 pub mod embedded;
+pub mod event_jsonl;
 pub mod fetch_http;
 #[cfg(any(test, feature = "http-adapter"))]
 pub mod jev_http;

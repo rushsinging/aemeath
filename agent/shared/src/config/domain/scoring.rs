@@ -1,10 +1,17 @@
-//! System One 评分服务配置：仅保留逐场景开关。
+//! System One 评分服务配置：逐场景开关 + 评分事件保留天数。
 
+pub use super::constants::DEFAULT_EVENT_RETENTION_DAYS;
 use serde::{Deserialize, Serialize};
 
 /// `ScoringConfig::enabled` 的 serde 默认值（保持既有配置文件兼容：缺省即开）。
 fn default_enabled() -> bool {
     true
+}
+
+/// `ScoringConfig::event_retention_days` 的 serde 默认值（与
+/// [`DEFAULT_EVENT_RETENTION_DAYS`] 同源，见该常量文档）。
+fn default_event_retention_days() -> u32 {
+    DEFAULT_EVENT_RETENTION_DAYS
 }
 
 impl Default for ScoringConfig {
@@ -16,12 +23,14 @@ impl Default for ScoringConfig {
             skill_match: false,
             policy_triage: false,
             memory_recall: false,
+            event_retention_days: DEFAULT_EVENT_RETENTION_DAYS,
         }
     }
 }
 
 /// System One 评分服务配置：四个场景开关（默认全关，开关全关时行为与无评分
-/// 服务完全一致）。HTTP 端点配置（url/model/timeout_ms）已随设计 §4.3 退役，
+/// 服务完全一致）+ 事件保留天数 `event_retention_days`（默认 30，仅影响 GC）。
+/// HTTP 端点配置（url/model/timeout_ms）已随设计 §4.3 退役，
 /// 旧配置残留键被忽略而非报错。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScoringConfig {
@@ -46,6 +55,11 @@ pub struct ScoringConfig {
     /// 相关性阈值门）。
     #[serde(default, alias = "memoryRecall")]
     pub memory_recall: bool,
+
+    /// 评分事件 `events/` 日切 segment 保留天数（默认 30；`0`=仅禁用过期
+    /// segment 的 GC，**NEVER** 表示关闭事件写入）。
+    #[serde(default = "default_event_retention_days", alias = "eventRetentionDays")]
+    pub event_retention_days: u32,
 }
 
 #[cfg(test)]

@@ -34,11 +34,13 @@ impl ReleaseManifestSource for RecordingSource {
     }
 }
 
-/// 记录装配次数与注入 manifest 的 fake embedded 工厂（不触碰模型目录 / worker）。
+/// 记录装配次数、注入 manifest 与 wrap 收到的 retention 的 fake embedded
+/// 工厂（不触碰模型目录 / worker）。
 struct RecordingFactory {
     available: bool,
     wired: AtomicUsize,
     last_revision: Mutex<Option<String>>,
+    last_retention_days: Mutex<Option<u32>>,
     result: Result<Arc<dyn systemone::ScoringPort>, systemone::EmbeddedScoringWiringError>,
 }
 
@@ -51,6 +53,7 @@ impl RecordingFactory {
             available,
             wired: AtomicUsize::new(0),
             last_revision: Mutex::new(None),
+            last_retention_days: Mutex::new(None),
             result,
         }
     }
@@ -69,6 +72,17 @@ impl EmbeddedScoringFactory for RecordingFactory {
         self.wired.fetch_add(1, Ordering::SeqCst);
         *self.last_revision.lock().expect("revision 锁") = Some(manifest.engine_revision.clone());
         self.result.clone()
+    }
+
+    fn wrap(
+        &self,
+        raw: Arc<dyn systemone::ScoringPort>,
+        _manifest: &systemone::ModelManifest,
+        _scenario: &'static str,
+        event_retention_days: u32,
+    ) -> Arc<dyn systemone::ScoringPort> {
+        *self.last_retention_days.lock().expect("retention 锁") = Some(event_retention_days);
+        raw
     }
 }
 
@@ -128,6 +142,7 @@ fn all_enabled() -> share::config::ScoringConfig {
         memory_recall: true,
         skill_match: true,
         policy_triage: true,
+        event_retention_days: share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
     }
 }
 
@@ -402,7 +417,8 @@ fn production_release_manifest_matches_hf_release_shape() {
     assert_eq!(manifest.engine_revision, "kev-0.8b-q8-r1");
     assert_eq!(manifest.hidden_size, 1024);
     assert_eq!(manifest.pointer_dimension, 256);
-    assert!((manifest.temperature - 2.351_095_8).abs() < 1e-6);
+    // f64 提升比较：保留发行温度全精度字面量，避免 f32 截断失真。
+    assert!((f64::from(manifest.temperature) - 2.351_095_8).abs() < 1e-6);
     assert_eq!(
         manifest.supported_platforms,
         vec!["macos-aarch64".to_string()]
@@ -449,6 +465,29 @@ fn hf_cdn_redirect_hosts_are_official_hf_domains() {
             "CDN host 必须是 HF 官方域：{host}"
         );
     }
+}
+
+/// `scoring.event_retention_days` 配置必须原样贯通到 wrap（事件 store 构造
+/// 入参）：低层配置 7 → 装配链传 7（设计 03-event-stream §8 配置注入）。
+#[tokio::test]
+async fn event_retention_days_config_flows_into_wrap() {
+    let source = RecordingSource::with_manifest(fixture_manifest());
+    let factory = RecordingFactory::returning(true, Ok(Arc::new(StubScoringPort)));
+    let scoring = share::config::ScoringConfig {
+        skill_match: true,
+        event_retention_days: 7,
+        ..share::config::ScoringConfig::default()
+    };
+
+    let assembly = assemble_scoring_ports_with(&scoring, &factory, &source).await;
+
+    assert_eq!(assembly.outcome, ScoringStartupOutcome::Ready);
+    assert!(assembly.assignment.for_skill_match.is_some());
+    assert_eq!(
+        *factory.last_retention_days.lock().expect("retention 锁"),
+        Some(7),
+        "配置的 event_retention_days 必须传入 wrap（事件 store 构造入参）"
+    );
 }
 
 /// 槽位与开关一一对应：skill_match 单开（memory 全关）时 `for_skill_match`

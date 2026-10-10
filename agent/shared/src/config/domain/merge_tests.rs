@@ -58,12 +58,54 @@ fn scoring_patch_overrides_only_set_fields_and_reaches_snapshot() {
         keys,
         [
             "enabled",
+            "event_retention_days",
             "memory_recall",
             "memory_rerank",
             "policy_triage",
             "skill_match"
         ],
         "合并结果不得出现退役 HTTP 字段"
+    );
+}
+
+#[test]
+fn scoring_event_retention_patch_overrides_lower_layer_zero_wins() {
+    // 分层合并语义：低层 7、高层显式 0 → 0 生效（0=禁用 GC，是合法覆盖值）。
+    let global: ConfigPatch =
+        serde_json::from_str(r#"{"scoring":{"event_retention_days":7}}"#).expect("低层解析");
+    let env_layer = ConfigPatch {
+        scoring: Some(ScoringConfigPatch {
+            event_retention_days: Some(0),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let config = apply_patch(apply_patch(Config::default(), global), env_layer);
+
+    assert_eq!(
+        ConfigSnapshot::new(config).scoring().event_retention_days,
+        0,
+        "高层显式 0 必须覆盖低层 7（0 是合法配置而非缺省哨兵）"
+    );
+}
+
+#[test]
+fn scoring_event_retention_inherits_lower_layer_when_higher_unset() {
+    // 分层合并语义：低层 7、高层未设 → 7 保留（None 不得覆盖）。
+    let global: ConfigPatch =
+        serde_json::from_str(r#"{"scoring":{"event_retention_days":7}}"#).expect("低层解析");
+    let env_layer = ConfigPatch {
+        scoring: Some(ScoringConfigPatch::default()),
+        ..Default::default()
+    };
+
+    let config = apply_patch(apply_patch(Config::default(), global), env_layer);
+
+    assert_eq!(
+        ConfigSnapshot::new(config).scoring().event_retention_days,
+        7,
+        "高层未设时必须保留低层值"
     );
 }
 

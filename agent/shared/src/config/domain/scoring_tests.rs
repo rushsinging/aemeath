@@ -35,12 +35,13 @@ fn scoring_config_ignores_retired_http_keys() {
         keys,
         [
             "enabled",
+            "event_retention_days",
             "memory_recall",
             "memory_rerank",
             "policy_triage",
             "skill_match"
         ],
-        "序列化面只允许四个场景开关，HTTP 端点字段不得回归"
+        "序列化面只允许场景开关与事件保留天数，HTTP 端点字段不得回归"
     );
 }
 
@@ -60,4 +61,36 @@ fn scoring_config_accepts_camel_case_aliases_for_switches() {
 fn empty_scoring_json_uses_defaults() {
     let config: ScoringConfig = serde_json::from_str(r#"{}"#).expect("空对象应解析");
     assert_eq!(config, ScoringConfig::default());
+}
+
+#[test]
+fn event_retention_days_parses_from_scoring_section() {
+    // 设计 03-event-stream §8：`scoring.event_retention_days` 配置贯通。
+    let config: crate::config::Config =
+        serde_json::from_str(r#"{"scoring":{"event_retention_days":7}}"#)
+            .expect("scoring 配置段应可解析 event_retention_days");
+    assert_eq!(config.scoring.event_retention_days, 7, "显式配置应生效");
+}
+
+#[test]
+fn event_retention_days_defaults_to_thirty() {
+    let from_empty: ScoringConfig = serde_json::from_str(r#"{}"#).expect("空对象应解析");
+    assert_eq!(from_empty.event_retention_days, 30, "缺省保留 30 日");
+    assert_eq!(
+        ScoringConfig::default().event_retention_days,
+        30,
+        "Default 缺省与 serde 缺省必须同源同值"
+    );
+    assert_eq!(
+        from_empty,
+        ScoringConfig::default(),
+        "缺省解析结果应等于 Default"
+    );
+}
+
+#[test]
+fn event_retention_days_zero_is_legal_gc_off_not_write_off() {
+    let config: ScoringConfig = serde_json::from_str(r#"{"event_retention_days":0}"#)
+        .expect("0 应合法（0=禁用 GC，不影响事件写入）");
+    assert_eq!(config.event_retention_days, 0);
 }

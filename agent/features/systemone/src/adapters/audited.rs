@@ -1,65 +1,61 @@
-//! 审计装饰器：每次评分决策落审计事件到 `audit.jsonl`。
+//! 审计装饰器：每次评分决策经日切事件流落盘到 `events/{yyyy-mm-dd}.jsonl`。
 //!
-//! 事件携带：时间戳、引擎 revision、prompt sha256、probabilities、校准级别、
-//! 延迟与结果分类（吸收 semif 的溯源要求）。审计落盘失败 NEVER 影响评分返回。
+//! 事件携带：schema 版本、事件 id、时间戳、引擎 revision、prompt sha256、
+//! state/questions/answers 全量现场、校准级别、延迟与结果分类（吸收 semif 的
+//! 溯源要求）。构造期一次性完成 legacy `audit.jsonl` 迁移与保留期 GC；
+//! 落盘失败 NEVER 影响评分返回（fail-open，仅记运行日志）。
+//!
+//! 设计依据：`docs/design/02-modules/systemone/03-event-stream.md` §4–§7。
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use serde::Serialize;
 
-use crate::adapters::calibration_store::append_jsonl_line_sync;
+use crate::adapters::event_jsonl::JsonlSegmentScoringEventStore;
 use crate::domain::{
-    CalibrationLevel, ScoringAnswer, ScoringQuestion, ScoringState, ScoringUnavailable,
+    ScoringAnswer, ScoringAnswerSnapshot, ScoringEvent, ScoringQuestion, ScoringQuestionSnapshot,
+    ScoringState, ScoringUnavailable,
 };
 use crate::ports::ScoringPort;
 
-/// 评分审计事件（一行 JSONL）。
-#[derive(Debug, Clone, Serialize)]
-pub struct ScoringAuditEvent {
-    pub timestamp: String,
-    /// 场景标签（memory_rerank / memory_recall / skill_match / policy_triage）：
-    /// 四场景共用同一引擎时逐事件归因的唯一依据。
-    pub scenario: &'static str,
-    pub engine_revision: String,
-    pub prompt_sha256: String,
-    pub question_count: usize,
-    pub outcome: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub unavailable_kind: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub probabilities: Vec<Vec<f64>>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub calibration: Vec<CalibrationLevel>,
-    pub latency_ms: u128,
-}
-
-/// 审计装饰器：透传评分结果，同时落审计事件（best-effort）。
+/// 审计装饰器：透传评分结果，同时落评分事件（best-effort）。
 pub struct AuditedScoringAdapter {
     inner: Arc<dyn ScoringPort>,
     scenario: &'static str,
     engine_revision: String,
-    audit_path: PathBuf,
+    store: Arc<JsonlSegmentScoringEventStore>,
     clock: Arc<dyn Fn() -> String + Send + Sync>,
 }
 
 impl AuditedScoringAdapter {
+    /// `store` 为日切事件流 store（scoring_dir + retention_days 由装配期注入）；
     /// `clock` 注入时间源（生产：RFC3339 系统时钟；测试：固定值）；
     /// `scenario` 为消费场景标签（composition 装配期注入，事件逐条携带）。
+    ///
+    /// 构造期一次性执行 legacy `audit.jsonl` 迁移与保留期 GC，两者失败均
+    /// fail-open（仅 `log::warn!`，绝不 panic、绝不阻断评分链装配）。
     pub fn new(
         inner: Arc<dyn ScoringPort>,
         engine_revision: impl Into<String>,
-        audit_path: PathBuf,
+        store: JsonlSegmentScoringEventStore,
         clock: Arc<dyn Fn() -> String + Send + Sync>,
         scenario: &'static str,
     ) -> Self {
+        let store = Arc::new(store);
+        if let Err(error) = store.migrate_legacy_audit() {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "scoring_event_migration_failed error={error}"
+            );
+        }
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        store.retain_segments(&today);
         Self {
             inner,
             scenario,
             engine_revision: engine_revision.into(),
-            audit_path,
+            store,
             clock,
         }
     }
@@ -77,16 +73,6 @@ fn prompt_fingerprint(state: &ScoringState, questions: &[ScoringQuestion]) -> St
     utils::sha256_hex(&prompt_bytes)
 }
 
-fn answer_probabilities(answer: &ScoringAnswer) -> Vec<f64> {
-    match answer {
-        ScoringAnswer::Noul { p_true, .. } => vec![*p_true],
-        ScoringAnswer::Choice { probabilities, .. } => {
-            probabilities.iter().map(|(_, p)| *p).collect()
-        }
-        ScoringAnswer::Score { probabilities, .. } => probabilities.clone(),
-    }
-}
-
 #[async_trait]
 impl ScoringPort for AuditedScoringAdapter {
     async fn answer(
@@ -98,72 +84,74 @@ impl ScoringPort for AuditedScoringAdapter {
         let outcome = self.inner.answer(state, questions).await;
         let latency_ms = started.elapsed().as_millis();
 
-        let event = match &outcome {
-            Ok(answers) => ScoringAuditEvent {
-                timestamp: (self.clock)(),
-                scenario: self.scenario,
-                engine_revision: self.engine_revision.clone(),
-                prompt_sha256: prompt_fingerprint(state, questions),
-                question_count: questions.len(),
-                outcome: "ok",
-                unavailable_kind: None,
-                probabilities: answers.iter().map(answer_probabilities).collect(),
-                calibration: answers.iter().map(|answer| answer.calibration()).collect(),
-                latency_ms,
-            },
-            Err(error) => ScoringAuditEvent {
-                timestamp: (self.clock)(),
-                scenario: self.scenario,
-                engine_revision: self.engine_revision.clone(),
-                prompt_sha256: prompt_fingerprint(state, questions),
-                question_count: questions.len(),
-                outcome: "unavailable",
-                unavailable_kind: Some(format!("{:?}", error.kind())),
-                probabilities: Vec::new(),
-                calibration: Vec::new(),
-                latency_ms,
-            },
+        // 时间戳同刻：RFC3339 时间串与其 unix 毫秒取同一瞬间。
+        let timestamp = (self.clock)();
+        let ts_unix_ms = chrono::DateTime::parse_from_rfc3339(&timestamp)
+            .map(|instant| u64::try_from(instant.timestamp_millis()).unwrap_or(0))
+            .unwrap_or(0);
+
+        let (outcome_label, unavailable_kind, answer_snapshots) = match &outcome {
+            Ok(answers) => (
+                "ok",
+                None,
+                answers
+                    .iter()
+                    .map(ScoringAnswerSnapshot::from_answer)
+                    .collect(),
+            ),
+            Err(error) => (
+                "unavailable",
+                Some(format!("{:?}", error.kind())),
+                Vec::new(),
+            ),
         };
-        write_audit_event(&self.audit_path, &event).await;
+
+        // 全量现场：state/questions/answers 全文 + 关联字段全 null（PR2 填充）。
+        let event = ScoringEvent {
+            schema_version: ScoringEvent::SCHEMA_VERSION,
+            event_id: ScoringEvent::generate_event_id(),
+            ts_unix_ms,
+            timestamp,
+            scenario: self.scenario.to_owned(),
+            engine_revision: self.engine_revision.clone(),
+            prompt_sha256: prompt_fingerprint(state, questions),
+            question_count: questions.len(),
+            latency_ms: u64::try_from(latency_ms).unwrap_or(u64::MAX),
+            outcome: outcome_label.to_owned(),
+            unavailable_kind,
+            state_text: state.as_str().to_owned(),
+            questions: questions
+                .iter()
+                .map(ScoringQuestionSnapshot::from_question)
+                .collect(),
+            answers: answer_snapshots,
+            ranking: None,
+            correlation_id: None,
+            session_id: None,
+            run_ordinal: None,
+            step_ordinal: None,
+            tool_call_id: None,
+        };
+
+        let store = Arc::clone(&self.store);
+        let append_outcome = tokio::task::spawn_blocking(move || store.append(&event)).await;
+        match append_outcome {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "scoring_event_append_failed error={error}"
+                );
+            }
+            Err(join_error) => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "scoring_event_append_failed error={join_error}"
+                );
+            }
+        }
 
         outcome
-    }
-}
-
-async fn write_audit_event(path: &std::path::Path, event: &ScoringAuditEvent) {
-    let mut line = match serde_json::to_string(event) {
-        Ok(serialized) => serialized,
-        Err(error) => {
-            log::warn!(
-                target: crate::LOG_TARGET,
-                "scoring_audit_encode_failed error={error}"
-            );
-            return;
-        }
-    };
-    line.push('\n');
-    let path = path.to_path_buf();
-    let outcome = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        append_jsonl_line_sync(&path, &line)
-    })
-    .await;
-    match outcome {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => {
-            log::warn!(
-                target: crate::LOG_TARGET,
-                "scoring_audit_append_failed error={error}"
-            );
-        }
-        Err(join_error) => {
-            log::warn!(
-                target: crate::LOG_TARGET,
-                "scoring_audit_join_failed error={join_error}"
-            );
-        }
     }
 }
 

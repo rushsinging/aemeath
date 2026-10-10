@@ -21,6 +21,14 @@ pub const AUTO_COMPACT_THRESHOLD_RATIO_MAX: f64 = 0.95;
 // ── models/runtime.rs：max_tokens 默认值 ──
 pub const DEFAULT_MAX_TOKENS: u32 = 8192;
 
+// ── scoring.rs：评分事件流保留默认值 ──
+/// 评分事件日切 segment（`events/{yyyy-mm-dd}.jsonl`）默认保留天数。
+///
+/// 这是配置缺省值的**唯一真相源**：`ScoringConfig::default()`、serde 缺省
+/// 与装配链取值均源于此（设计 03-event-stream §8：默认 30，`0`=禁用 GC，
+/// **NEVER** 经此关闭事件写入）。
+pub const DEFAULT_EVENT_RETENTION_DAYS: u32 = 30;
+
 // ── snapshot.rs：hook 执行 / stop block 默认值 ──
 pub(crate) const DEFAULT_HOOK_EXECUTION_MAX_ATTEMPTS: u8 = 3;
 pub(crate) const DEFAULT_STOP_HOOK_MAX_BLOCKS: usize = 15;

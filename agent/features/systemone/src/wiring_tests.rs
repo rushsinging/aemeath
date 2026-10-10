@@ -48,7 +48,13 @@ async fn wire_embedded_scoring_with_invalid_manifest_returns_manifest_invalid_be
     manifest.hidden_size = 7;
     let models_dir = std::path::PathBuf::from("/nonexistent/aemeath-wiring-models");
     let scoring_dir = std::path::PathBuf::from("/nonexistent/aemeath-wiring-scoring");
-    let error = match wire_embedded_scoring(models_dir.clone(), scoring_dir.clone(), manifest).await
+    let error = match wire_embedded_scoring(
+        models_dir.clone(),
+        scoring_dir.clone(),
+        manifest,
+        share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
+    )
+    .await
     {
         Err(error) => error,
         Ok(_) => panic!("契约非法的 manifest 必须 fail-closed"),
@@ -74,11 +80,17 @@ async fn wire_embedded_scoring_with_invalid_manifest_returns_manifest_invalid_be
 async fn wire_embedded_scoring_without_embedded_feature_returns_typed_unavailable() {
     let models_dir = std::path::PathBuf::from("/nonexistent/aemeath-wiring-models");
     let scoring_dir = std::path::PathBuf::from("/nonexistent/aemeath-wiring-scoring");
-    let error =
-        match wire_embedded_scoring(models_dir.clone(), scoring_dir, fixture_manifest()).await {
-            Err(error) => error,
-            Ok(_) => panic!("feature 关闭必须返回 typed 错误"),
-        };
+    let error = match wire_embedded_scoring(
+        models_dir.clone(),
+        scoring_dir,
+        fixture_manifest(),
+        share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
+    )
+    .await
+    {
+        Err(error) => error,
+        Ok(_) => panic!("feature 关闭必须返回 typed 错误"),
+    };
     assert!(
         matches!(error, EmbeddedScoringWiringError::EmbeddedUnavailable),
         "错误类型不符：{error:?}"
@@ -103,6 +115,7 @@ async fn wire_embedded_scoring_when_model_missing_returns_model_missing() {
         temp.path().join("models"),
         temp.path().join("scoring"),
         fixture_manifest(),
+        share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
     )
     .await
     {
@@ -177,7 +190,7 @@ fn embedded_init_error_maps_to_typed_wiring_error() {
 /// 校准 + 审计外壳：fake 内层端口验证 wrapper 链生效，且审计事件的
 /// `engine_revision` MUST 来自 manifest（不是模型文件名或环境推断）。
 #[tokio::test]
-async fn wrap_calibrated_audited_appends_audit_event_with_manifest_revision() {
+async fn wrap_calibrated_audited_appends_scoring_event_with_manifest_revision() {
     struct StubScoringPort;
 
     #[async_trait::async_trait]
@@ -206,6 +219,7 @@ async fn wrap_calibrated_audited_appends_audit_event_with_manifest_revision() {
         &manifest,
         &scoring_dir,
         "memory_rerank",
+        share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
     );
 
     let state = ScoringState::new("用户正在验证审计 revision。").expect("state 构造");
@@ -223,17 +237,21 @@ async fn wrap_calibrated_audited_appends_audit_event_with_manifest_revision() {
         .expect("外壳链应透传 fake 端口结果");
     assert_eq!(answers.len(), 1);
 
-    let audit_path = scoring_dir.join(crate::constants::AUDIT_FILE);
-    assert!(audit_path.is_file(), "审计事件应落在 scoring 目录");
-    let events: Vec<serde_json::Value> = std::fs::read_to_string(&audit_path)
-        .expect("审计文件可读")
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let segment_path = scoring_dir
+        .join(crate::constants::EVENTS_DIR_NAME)
+        .join(format!("{today}.jsonl"));
+    assert!(segment_path.is_file(), "评分事件应落在当日日切 segment");
+    let events: Vec<serde_json::Value> = std::fs::read_to_string(&segment_path)
+        .expect("日切 segment 可读")
         .lines()
         .map(|line| serde_json::from_str(line).expect("行应为合法 JSON"))
         .collect();
     assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["schema_version"], 1);
     assert_eq!(
         events[0]["engine_revision"].as_str(),
         Some(manifest.engine_revision.as_str()),
-        "审计 revision MUST 来自 manifest.engine_revision"
+        "事件 revision MUST 来自 manifest.engine_revision"
     );
 }

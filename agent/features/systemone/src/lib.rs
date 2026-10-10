@@ -25,11 +25,12 @@ mod domain;
 mod ports;
 mod wiring;
 
-pub use adapters::audited::{AuditedScoringAdapter, ScoringAuditEvent};
+pub use adapters::audited::AuditedScoringAdapter;
 pub use adapters::calibrated::CalibratedScoringAdapter;
 pub use adapters::calibration_store::{CalibrationArtifact, CalibrationStore};
 #[cfg(feature = "embedded")]
 pub use adapters::embedded::{EmbeddedInitError, EmbeddedScoringAdapter};
+pub use adapters::event_jsonl::JsonlSegmentScoringEventStore;
 pub use adapters::fetch_http::HttpArtifactFetcher;
 #[cfg(feature = "http-adapter")]
 pub use adapters::jev_http::JevHttpScoringAdapter;
@@ -46,10 +47,11 @@ pub use application::{
 
 pub use constants::EMBEDDED_SCORING_AVAILABLE;
 pub use domain::{
-    required_platform, AnswerRejected, CalibrationLevel, ModelAsset, ModelManifest,
-    ModelManifestError, NoulCriteria, PointerHead, PointerHeadError, PointerHeadWeights,
-    QuestionRejected, ScoringAnswer, ScoringQuestion, ScoringState, ScoringUnavailable,
-    UnavailableKind,
+    required_platform, AnswerRejected, CalibrationLevel, CriterionSnapshot, ModelAsset,
+    ModelManifest, ModelManifestError, NoulCriteria, PointerHead, PointerHeadError,
+    PointerHeadWeights, QuestionRejected, ScoringAnswer, ScoringAnswerSnapshot, ScoringEvent,
+    ScoringQuestion, ScoringQuestionSnapshot, ScoringRankingSnapshot, ScoringState,
+    ScoringUnavailable, UnavailableKind,
 };
 pub use ports::{
     ArtifactFetchError, ArtifactFetchErrorKind, ArtifactFetcherPort, CalibrationObservation,
@@ -62,24 +64,29 @@ pub use wiring::{
     wire_model_download_service, wrap_calibrated_audited, EmbeddedScoringWiringError,
 };
 
-/// Jev HTTP 评分装配链：JevHttp → Calibrated（读温度 artifact）→ Audited（落审计）。
+/// Jev HTTP 评分装配链：JevHttp → Calibrated（读温度 artifact）→ Audited（落评分事件）。
 ///
 /// 设计 §4.3 HTTP adapter 退役边界：仅供测试 / eval 对分与回归基准使用，
 /// 生产 composition **NEVER** 调用；默认构建不提供本工厂。
+///
+/// `event_retention_days`：评分事件保留天数（测试 / eval 侧传
+/// `share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS` 或显式配置值）。
 #[cfg(feature = "http-adapter")]
 pub fn wire_http_scoring_port(
     base_url: &str,
     model: &str,
     timeout: std::time::Duration,
     scoring_dir: std::path::PathBuf,
+    event_retention_days: u32,
 ) -> std::sync::Arc<dyn ScoringPort> {
     let http = std::sync::Arc::new(JevHttpScoringAdapter::new(base_url, model, timeout));
     let store = CalibrationStore::new(scoring_dir.clone());
     let calibrated = std::sync::Arc::new(CalibratedScoringAdapter::new(http, &store));
+    let event_store = JsonlSegmentScoringEventStore::new(scoring_dir, event_retention_days);
     std::sync::Arc::new(AuditedScoringAdapter::new(
         calibrated,
         model.to_owned(),
-        scoring_dir.join("audit.jsonl"),
+        event_store,
         std::sync::Arc::new(|| chrono::Utc::now().to_rfc3339()),
         // HTTP 评分仅供测试 / eval 对分（设计 §4.3），场景标签固定 eval。
         "eval_http",
