@@ -61,7 +61,7 @@ impl ConnectFacade {
             .map_err(sdk::SdkError::Internal)?;
         self.service
             .apply(
-                session_id,
+                &session_id,
                 config::connect::ConnectRevision::from_value(revision.0),
                 config_command(command)?,
             )
@@ -79,7 +79,7 @@ impl ConnectFacade {
             .map_err(sdk::SdkError::Internal)?;
         self.service
             .cancel(
-                session_id,
+                &session_id,
                 config::connect::ConnectRevision::from_value(revision.0),
             )
             .await
@@ -93,7 +93,7 @@ impl ConnectFacade {
     ) -> Result<Option<sdk::ConnectView>, sdk::SdkError> {
         let session_id = config::connect::ConnectSessionId::from_transport_str(&session_id.0)
             .map_err(sdk::SdkError::Internal)?;
-        Ok(self.service.view(session_id).await.map(sdk_view))
+        Ok(self.service.view(&session_id).await.map(sdk_view))
     }
 }
 
@@ -131,7 +131,7 @@ impl sdk::ConfigFormClient for ConnectFacade {
                 .map_err(SdkError::Internal)?;
         let current = self
             .service
-            .view(session_id)
+            .view(&session_id)
             .await
             .ok_or_else(|| SdkError::Internal("Config Form 会话不存在".to_string()))?;
         let form_command = sdk_form_command(command.values, &current)?;
@@ -139,7 +139,7 @@ impl sdk::ConfigFormClient for ConnectFacade {
         let connect_view = match self
             .service
             .apply(
-                session_id,
+                &session_id,
                 config::connect::ConnectRevision::from_value(command.expected_revision.0),
                 form_command,
             )
@@ -148,7 +148,7 @@ impl sdk::ConfigFormClient for ConnectFacade {
             Ok(view) => view,
             Err(config::connect::ConnectError::Validation { .. }) => self
                 .service
-                .view(session_id)
+                .view(&session_id)
                 .await
                 .ok_or_else(|| SdkError::Internal("Config Form 会话不存在".to_string()))?,
             Err(error) => return Err(connect_sdk_error(error)),
@@ -167,7 +167,7 @@ impl sdk::ConfigFormClient for ConnectFacade {
                 .map_err(SdkError::Internal)?;
         let current = self
             .service
-            .view(session_id)
+            .view(&session_id)
             .await
             .ok_or_else(|| SdkError::Internal("Config Form 会话不存在".to_string()))?;
         let form_command = connect_command_for_form(
@@ -182,7 +182,7 @@ impl sdk::ConfigFormClient for ConnectFacade {
         let connect_view = self
             .service
             .apply(
-                session_id,
+                &session_id,
                 config::connect::ConnectRevision::from_value(command.expected_revision.0),
                 form_command,
             )
@@ -202,7 +202,7 @@ impl sdk::ConfigFormClient for ConnectFacade {
             .map_err(SdkError::Internal)?;
         let current = self
             .service
-            .view(session_id)
+            .view(&session_id)
             .await
             .ok_or_else(|| SdkError::Internal("Config Form 会话不存在".to_string()))?;
         let form_command = connect_command_for_form(
@@ -214,7 +214,7 @@ impl sdk::ConfigFormClient for ConnectFacade {
         let connect_view = self
             .service
             .apply(
-                session_id,
+                &session_id,
                 config::connect::ConnectRevision::from_value(revision.0),
                 form_command,
             )
@@ -235,7 +235,7 @@ impl sdk::ConfigFormClient for ConnectFacade {
         let connect_view = self
             .service
             .cancel(
-                session_id,
+                &session_id,
                 config::connect::ConnectRevision::from_value(revision.0),
             )
             .await
@@ -251,7 +251,7 @@ impl sdk::ConfigFormClient for ConnectFacade {
     ) -> Result<Option<sdk::ConfigFormView>, SdkError> {
         let session_id = config::connect::ConnectSessionId::from_transport_str(session_id.as_str())
             .map_err(SdkError::Internal)?;
-        let Some(connect_view) = self.service.view(session_id).await else {
+        let Some(connect_view) = self.service.view(&session_id).await else {
             return Ok(None);
         };
         provider_connect_form_view(&connect_view, config::catalog::PROVIDER_CATALOG)

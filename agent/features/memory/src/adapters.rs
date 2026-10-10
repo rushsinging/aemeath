@@ -1092,9 +1092,8 @@ impl InMemoryMemory {
     }
 }
 
-fn reflection_memory_id(now: u64) -> Result<MemoryId, MemoryError> {
-    let timestamp = uuid::Timestamp::from_unix_time(now, 0, 0, 0);
-    MemoryId::new(uuid::Uuid::new_v7(timestamp).to_string())
+fn reflection_memory_id(_now: u64) -> Result<MemoryId, MemoryError> {
+    Ok(MemoryId::now_v7())
 }
 
 fn reflection_capacity_error() -> MemoryError {

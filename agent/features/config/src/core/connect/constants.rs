@@ -5,6 +5,3 @@ use std::time::Duration;
 /// Probe 调用注入的合法超时上限。该值是 Connect 服务的策略常量，不在
 /// 客户端控制范围内，避免各入口漂移。
 pub(crate) const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
-
-/// Connect session id 十六进制编码码表（`states::hex_encode` 伴生）。
-pub(crate) const HEX: &[u8; 16] = b"0123456789abcdef";

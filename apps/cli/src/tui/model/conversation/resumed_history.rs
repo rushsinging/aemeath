@@ -441,7 +441,7 @@ fn local_message_from_tui(message: crate::tui::adapter::runtime_view::TuiChatMes
         metadata,
         input_id: message
             .input_id
-            .and_then(|id| sdk::InputId::parse_uuid7(&id).ok()),
+            .and_then(|id| sdk::InputId::parse(&id).ok()),
     };
     sdk::LocalResumedSessionStep::from_wire(sdk::ResumedSessionStep {
         run_id: String::new(),

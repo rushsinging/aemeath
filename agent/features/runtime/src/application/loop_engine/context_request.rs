@@ -47,7 +47,7 @@ impl<'a> ContextRequestCoordinator<'a> {
             .collect();
         ContextRequestData {
             session_id: SessionId::new(self.source.session_id),
-            request_id: ContextRequestId::new(uuid::Uuid::now_v7().to_string()),
+            request_id: ContextRequestId::new(share::ids::new_typed_id("irq")),
             run_id: run_id.clone(),
             step_id: step_id.clone(),
             pending_messages,

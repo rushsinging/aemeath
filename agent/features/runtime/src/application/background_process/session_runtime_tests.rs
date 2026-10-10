@@ -105,9 +105,9 @@ fn background_process_access_rejects_invalid_task_ids() {
 
 fn background_process_identity() -> context::ToolCallIdentityData {
     context::ToolCallIdentityData {
-        session_id: context::SessionId::new("session-1"),
-        run_id: sdk::RunId::new("run-1"),
-        step_id: sdk::RunStepId::new("step-1"),
+        session_id: context::SessionId::new_v7(),
+        run_id: sdk::RunId::new_v7(),
+        step_id: sdk::RunStepId::new_v7(),
         runtime_call_id: "runtime-call-1".to_string(),
         provider_call_id: None,
         tool_name: "Bash".to_string(),

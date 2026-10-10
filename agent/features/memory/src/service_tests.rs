@@ -469,8 +469,8 @@ async fn explicit_search_matches_chinese_subphrases_and_mixed_code_terms() {
 
 #[tokio::test]
 async fn explicit_search_chinese_bigram_ranking_is_deterministic() {
-    let first_id = MemoryId::new("00000000-0000-0000-0000-000000000001").unwrap();
-    let second_id = MemoryId::new("00000000-0000-0000-0000-000000000002").unwrap();
+    let first_id = MemoryId::new("00000000-0000-7000-8000-000000000001").unwrap();
+    let second_id = MemoryId::new("00000000-0000-7000-8000-000000000002").unwrap();
     let mut first = entry(MemoryLayer::Project, "始终使用中文回答");
     first.id = first_id;
     let mut second = entry(MemoryLayer::Project, "始终使用中文回答");
@@ -517,8 +517,8 @@ async fn explicit_search_chinese_bigram_ranking_is_deterministic() {
 
 #[tokio::test]
 async fn explicit_search_is_deterministic_and_empty_query_returns_no_hits() {
-    let first_id = MemoryId::new("00000000-0000-0000-0000-000000000001").unwrap();
-    let second_id = MemoryId::new("00000000-0000-0000-0000-000000000002").unwrap();
+    let first_id = MemoryId::new("00000000-0000-7000-8000-000000000001").unwrap();
+    let second_id = MemoryId::new("00000000-0000-7000-8000-000000000002").unwrap();
     let mut first = entry(MemoryLayer::Project, "stable lexical match");
     first.id = first_id;
     let mut second = entry(MemoryLayer::Project, "stable lexical match");
@@ -774,7 +774,7 @@ async fn reflection_recomputes_once_after_cas_conflict() {
     let entries = service.list(Some(MemoryLayer::Project)).await;
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[1].created_at, 4242);
-    assert_eq!(entries[1].id.as_uuid().get_version_num(), 7);
+    assert!(share::ids::is_typed_id(&entries[1].id.to_string(), "mem"));
 }
 
 #[tokio::test]

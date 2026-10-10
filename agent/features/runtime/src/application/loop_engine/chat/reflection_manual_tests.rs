@@ -496,14 +496,14 @@ async fn chat_manual_reflection_success_records_usage_without_run_step() {
         record.output_tokens, 1,
         "provider 报告的 output tokens 原样入账"
     );
-    assert_eq!(
-        record.run_step_id.as_uuid().get_version_num(),
-        7,
-        "Manual Run 无 RunStep：run_step_id 必须是仅记账的 UUIDv7"
+    assert!(
+        share::ids::is_typed_id(record.run_step_id.as_str(), "stp")
+            || uuid::Uuid::parse_str(record.run_step_id.as_str()).is_ok(),
+        "Manual Run 无 RunStep：run_step_id 必须是 typed 或 legacy id"
     );
-    assert_eq!(
-        record.model_invocation_id.as_uuid().get_version_num(),
-        7,
-        "model_invocation_id 必须是仅记账的 UUIDv7"
+    assert!(
+        share::ids::is_typed_id(record.model_invocation_id.as_str(), "inv")
+            || uuid::Uuid::parse_str(record.model_invocation_id.as_str()).is_ok(),
+        "model_invocation_id 必须是 typed 或 legacy id"
     );
 }

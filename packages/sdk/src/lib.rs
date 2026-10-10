@@ -95,8 +95,8 @@ pub use connect::{
 pub use content::{ContentBlock, ImageSource};
 pub use error::SdkError;
 pub use ids::{
-    AgentId, ChatId, ChatRunId, IdParseError, InputId, InteractionRequestId, ModelInvocationId,
-    RunId, RunStepId, SessionId, ToolCallId,
+    new_typed_id, AgentId, ChatId, ChatRunId, IdParseError, InputId, InteractionRequestId,
+    ModelInvocationId, RunId, RunStepId, SessionId, ToolCallId,
 };
 pub use interaction::{
     ApprovalDecision, InteractionCancelReason, InteractionCommandOutcome, InteractionReply,

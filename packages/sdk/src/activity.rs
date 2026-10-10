@@ -2,110 +2,12 @@
 //!
 //! 本模块只包含客户端无关的完整事实值，不包含 TUI 文案、颜色、布局或原始 payload。
 
+pub use crate::ids::ActivityId;
 use crate::{
     InteractionRequestId, ModelInvocationId, ReflectionTriggerView, RunId, RunStepId, ToolCallId,
 };
-use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::fmt;
-use std::hash::{Hash, Hasher};
-use uuid::Uuid;
-
-/// Runtime-owned Activity identity (UUIDv7)。
-#[derive(Debug, Clone)]
-pub struct ActivityId(Uuid, String);
-
-impl ActivityId {
-    pub fn new_v7() -> Self {
-        let uuid = Uuid::now_v7();
-        Self(uuid, uuid.to_string())
-    }
-
-    pub fn new(value: impl AsRef<str>) -> Self {
-        let value = value.as_ref();
-        if let Ok(uuid) = Uuid::parse_str(value) {
-            if uuid.get_version_num() == 7 {
-                return Self(uuid, uuid.to_string());
-            }
-        }
-        let namespace = Uuid::from_bytes([
-            0xa1, 0xc7, 0x1a, 0x17, 0x1a, 0x17, 0x1a, 0x17, 0xa1, 0xc7, 0x1a, 0x17, 0x1a, 0x17,
-            0x1a, 0x17,
-        ]);
-        let base = Uuid::new_v5(&namespace, value.as_bytes());
-        let mut bytes = *base.as_bytes();
-        bytes[6] = (bytes[6] & 0x0f) | 0x70;
-        bytes[8] = (bytes[8] & 0x3f) | 0x80;
-        let uuid = Uuid::from_bytes(bytes);
-        Self(uuid, uuid.to_string())
-    }
-
-    pub fn as_uuid(&self) -> &Uuid {
-        &self.0
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.1
-    }
-}
-
-impl PartialEq for ActivityId {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl Eq for ActivityId {}
-
-impl Hash for ActivityId {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.hash(state);
-    }
-}
-
-impl fmt::Display for ActivityId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.1)
-    }
-}
-
-impl AsRef<str> for ActivityId {
-    fn as_ref(&self) -> &str {
-        &self.1
-    }
-}
-
-impl Serialize for ActivityId {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.0.serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for ActivityId {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let uuid = Uuid::deserialize(deserializer)?;
-        if uuid.get_version_num() != 7 {
-            return Err(serde::de::Error::custom(format!(
-                "Activity UUID 不是 version 7: {uuid}"
-            )));
-        }
-        Ok(Self(uuid, uuid.to_string()))
-    }
-}
-
-impl JsonSchema for ActivityId {
-    fn schema_name() -> std::borrow::Cow<'static, str> {
-        "ActivityId".into()
-    }
-
-    fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
-        json_schema!({
-            "type": "string",
-            "format": "uuid",
-            "x-aemeath-uuid-version": 7
-        })
-    }
-}
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]

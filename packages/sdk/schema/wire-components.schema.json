@@ -208,9 +208,8 @@
       ]
     },
     "ActivityId": {
-      "format": "uuid",
-      "type": "string",
-      "x-aemeath-uuid-version": 7
+      "description": "Typed id `act_<11 base62>` or legacy UUIDv7",
+      "type": "string"
     },
     "ActivityKindView": {
       "oneOf": [
@@ -692,9 +691,8 @@
       "type": "object"
     },
     "ChatId": {
-      "format": "uuid",
-      "type": "string",
-      "x-aemeath-uuid-version": 7
+      "description": "Typed id `cht_<11 base62>` or legacy UUIDv7",
+      "type": "string"
     },
     "ChatMessage": {
       "description": "SDK 级 message 投影。`content` 为 typed 块列表（serde 成与历史完全相同的 JSON）。",
@@ -780,9 +778,8 @@
       "type": "string"
     },
     "ChatRunId": {
-      "format": "uuid",
-      "type": "string",
-      "x-aemeath-uuid-version": 7
+      "description": "Typed id `run_<11 base62>` or legacy UUIDv7",
+      "type": "string"
     },
     "CompactStageView": {
       "enum": [
@@ -1983,9 +1980,8 @@
       ]
     },
     "InputId": {
-      "format": "uuid",
-      "type": "string",
-      "x-aemeath-uuid-version": 7
+      "description": "Typed id `inp_<11 base62>` or legacy UUIDv7",
+      "type": "string"
     },
     "InteractionCancelReason": {
       "enum": [
@@ -2163,9 +2159,8 @@
       "title": "InteractionRequestBody"
     },
     "InteractionRequestId": {
-      "format": "uuid",
-      "type": "string",
-      "x-aemeath-uuid-version": 7
+      "description": "Typed id `irq_<11 base62>` or legacy UUIDv7",
+      "type": "string"
     },
     "MarkdownSpacingModeView": {
       "enum": [
@@ -2296,9 +2291,8 @@
       "type": "object"
     },
     "ModelInvocationId": {
-      "format": "uuid",
-      "type": "string",
-      "x-aemeath-uuid-version": 7
+      "description": "Typed id `inv_<11 base62>` or legacy UUIDv7",
+      "type": "string"
     },
     "ModelStreamStateView": {
       "enum": [
@@ -2566,9 +2560,8 @@
       "type": "string"
     },
     "RunId": {
-      "format": "uuid",
-      "type": "string",
-      "x-aemeath-uuid-version": 7
+      "description": "Typed id `run_<11 base62>` or legacy UUIDv7",
+      "type": "string"
     },
     "RunPhaseKindView": {
       "enum": [
@@ -2592,9 +2585,8 @@
       "type": "string"
     },
     "RunStepId": {
-      "format": "uuid",
-      "type": "string",
-      "x-aemeath-uuid-version": 7
+      "description": "Typed id `stp_<11 base62>` or legacy UUIDv7",
+      "type": "string"
     },
     "RunTerminationReason": {
       "enum": [
@@ -2983,9 +2975,8 @@
       "type": "object"
     },
     "ToolCallId": {
-      "format": "uuid",
-      "type": "string",
-      "x-aemeath-uuid-version": 7
+      "description": "Typed id `tcl_<11 base62>` or legacy UUIDv7",
+      "type": "string"
     },
     "UserAnswer": {
       "type": "string"

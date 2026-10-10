@@ -29,6 +29,6 @@ fn test_all_ids_are_uuidv7() {
     let registry = ToolIdentityRegistry::new();
     let id1 = registry.runtime_id_for_stream(0, None);
     let id2 = registry.runtime_id_for_provider("provider-a");
-    assert_eq!(id1.as_uuid().get_version_num(), 7);
-    assert_eq!(id2.as_uuid().get_version_num(), 7);
+    assert!(share::ids::is_typed_id(id1.as_str(), "tcl"));
+    assert!(share::ids::is_typed_id(id2.as_str(), "tcl"));
 }

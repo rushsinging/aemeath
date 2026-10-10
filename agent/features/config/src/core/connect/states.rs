@@ -14,7 +14,6 @@ use std::fmt;
 
 use uuid::Uuid;
 
-use super::constants::HEX;
 use crate::catalog::ProviderSource;
 
 /// Connect 向导的当前阶段。
@@ -72,48 +71,45 @@ pub enum ConnectOrigin {
 
 /// Connect session 的 opaque ID。
 ///
-/// - 内部使用 [`Uuid::v7`] 保证时间序与唯一性；外部只能从 service 返回值
+/// - 内部使用 share typed id（`cnx_`）；外部只能从 service 返回值
 ///   与 `View` 投影中读取，无法构造或推断；
-/// - 不暴露内部 UUID；`Debug` 与 `Display` 显示脱敏的短前缀，足够识别但
-///   不泄漏完整 ID（防日志关联）。
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ConnectSessionId(Uuid);
+/// - `Debug` / `Display` 显示脱敏短前缀，足够识别但不泄漏完整 ID。
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct ConnectSessionId(String);
 
 /// ConnectSessionId is intentionally opaque; the only public re-export
-/// `lib.rs` provides is `ConnectSessionId` itself, not its inner UUID.
-/// The `as_uuid()` accessor is reserved for internal logging and tests.
+/// `lib.rs` provides is `ConnectSessionId` itself, not its inner value.
 impl ConnectSessionId {
     /// 创建一个新的 session id。**仅允许在 service 内部调用**——生产 API
     /// 不导出；测试辅助通过 service 申请。
     pub(crate) fn new() -> Self {
-        Self(Uuid::now_v7())
+        Self(share::ids::new_typed_id("cnx"))
     }
 
     /// 在 Config ↔ SDK ACL 边界编码完整 opaque identity。
-    pub fn to_transport_string(self) -> String {
-        self.0.to_string()
+    pub fn to_transport_string(&self) -> String {
+        self.0.clone()
     }
 
-    /// 从 SDK ACL 输入恢复 identity；拒绝非 UUIDv7 值。
+    /// 从 SDK ACL 输入恢复 identity；接受 typed `cnx_` 或 legacy UUIDv7。
     pub fn from_transport_str(value: &str) -> Result<Self, String> {
-        let parsed = Uuid::parse_str(value).map_err(|_| "Connect session id 无效".to_string())?;
-        if parsed.get_version_num() != 7 {
-            return Err("Connect session id 必须是 UUIDv7".to_string());
+        let ok = share::ids::is_typed_id(value, "cnx")
+            || Uuid::parse_str(value)
+                .map(|parsed| parsed.get_version_num() == 7)
+                .unwrap_or(false);
+        if ok {
+            Ok(Self(value.to_string()))
+        } else {
+            Err("Connect session id 必须是 typed `cnx_` 或 legacy UUIDv7".to_string())
         }
-        Ok(Self(parsed))
     }
 }
 
 impl fmt::Debug for ConnectSessionId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // 短前缀 8 字符，足以在日志中分辨不同 session 且不暴露完整 ID。
-        let bytes = self.0.as_bytes();
-        let mut short = [0u8; 8];
-        for (i, item) in short.iter_mut().enumerate() {
-            *item = bytes[i];
-        }
-        let hex = hex_encode(&short);
-        write!(formatter, "ConnectSessionId({hex})")
+        // 短前缀：取字符串前 8 字符，足以分辨且不暴露完整 ID。
+        let short = self.0.chars().take(8).collect::<String>();
+        write!(formatter, "ConnectSessionId({short})")
     }
 }
 
@@ -121,15 +117,6 @@ impl fmt::Display for ConnectSessionId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(self, formatter)
     }
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0x0F) as usize] as char);
-    }
-    out
 }
 
 /// Connect session 的 revision。

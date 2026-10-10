@@ -5,9 +5,9 @@ use std::time::Duration;
 use super::*;
 use crate::domain::MemoryCategory;
 
-/// 测试用的确定性 UUID：同一序号恒得同一 id，链式断言因此可读。
+/// 测试用的确定性 UUIDv7：同一序号恒得同一 id，链式断言因此可读。
 fn test_id(index: usize) -> MemoryId {
-    MemoryId::new(format!("00000000-0000-0000-0000-{index:012x}")).expect("static UUID is valid")
+    MemoryId::new(format!("00000000-0000-7000-8000-{index:012x}")).expect("static UUIDv7 is valid")
 }
 
 fn entry(index: usize, now: u64) -> MemoryEntry {
@@ -164,7 +164,7 @@ fn a_chain_at_the_guard_boundary_is_still_evaluated() {
 #[test]
 fn a_persisted_entry_without_the_supersede_field_loads_as_not_superseded() {
     let legacy = r#"{
-        "id": "00000000-0000-0000-0000-000000000001",
+        "id": "00000000-0000-7000-8000-000000000001",
         "layer": "project",
         "category": "decision",
         "content": "legacy entry",
@@ -188,7 +188,7 @@ fn the_supersede_field_round_trips_and_stays_absent_by_default() {
     let encoded = serde_json::to_value(&superseded).expect("entry must encode");
     assert_eq!(
         encoded["superseded_by"],
-        serde_json::json!("00000000-0000-0000-0000-000000000001")
+        serde_json::json!("00000000-0000-7000-8000-000000000001")
     );
     let decoded: MemoryEntry = serde_json::from_value(encoded).expect("entry must decode");
     assert_eq!(decoded, superseded);

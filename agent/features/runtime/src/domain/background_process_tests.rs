@@ -6,9 +6,9 @@ use sdk::{RunId, RunStepId};
 
 fn identity() -> ToolCallIdentityData {
     ToolCallIdentityData {
-        session_id: SessionId::new("session-1"),
-        run_id: RunId::new("run-1"),
-        step_id: RunStepId::new("step-1"),
+        session_id: SessionId::new_v7(),
+        run_id: RunId::new_v7(),
+        step_id: RunStepId::new_v7(),
         runtime_call_id: "runtime-call-1".to_string(),
         provider_call_id: Some("provider-call-1".to_string()),
         tool_name: "Bash".to_string(),
