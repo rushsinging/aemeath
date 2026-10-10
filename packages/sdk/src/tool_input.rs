@@ -13,6 +13,10 @@
 //! serde `#[serde(alias = "...)]` attributes are honoured, eliminating the
 //! snake_case / camelCase mismatch that `str_arg` caused (issue #839).
 pub use tools::types::agent::AgentInput;
+pub use tools::types::background_processes::{
+    BackgroundProcessListInput, BackgroundProcessLogsInput, BackgroundProcessStatusInput,
+    BackgroundProcessStopInput,
+};
 pub use tools::types::bash::BashInput;
 pub use tools::types::edit::EditInput;
 pub use tools::types::enter_worktree::EnterWorktreeInput;
