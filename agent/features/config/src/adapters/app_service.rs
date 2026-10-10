@@ -246,6 +246,8 @@ fn patch_for_update(
                         // SetMemoryConfig 的输入视图不携带反思超时键：
                         // patch 不触碰该键，保留文件层既有 timeout_secs。
                         timeout_secs: None,
+                        // 同上：视图不携带 target_active_entries，保留文件层既有值。
+                        target_active_entries: None,
                     }),
                 }),
                 ..Default::default()

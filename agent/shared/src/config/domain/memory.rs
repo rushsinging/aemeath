@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 pub(crate) fn default_max_entries() -> usize {
-    100
+    200
 }
 
 pub(crate) fn default_similarity_threshold() -> f64 {
@@ -16,6 +16,10 @@ pub(crate) fn default_interval_runs() -> usize {
 
 pub(crate) fn default_reflection_timeout_secs() -> u64 {
     240
+}
+
+pub(crate) fn default_target_active_entries() -> usize {
+    150
 }
 
 pub(crate) fn default_event_retention_days() -> u32 {
@@ -95,6 +99,14 @@ pub struct ReflectionConfig {
     /// （旧硬编码 120s 紧贴 p99 导致超时成为最大失败来源）。
     #[serde(default = "default_reflection_timeout_secs")]
     pub timeout_secs: u64,
+
+    /// Reflect 收敛后的目标 active 条数（默认 150）。
+    /// 与 `MemoryConfig::max_entries`（硬上限，默认 200）配合：
+    /// 留出 `max_entries - target_active_entries` 作为后续 add 缓冲。
+    /// Prompt 要求模型在 active > target 时用 outdated/supersedes/synthesizes
+    /// 收敛；active ≤ target 时不强制淘汰。NEVER 做机械硬删。
+    #[serde(default = "default_target_active_entries")]
+    pub target_active_entries: usize,
 }
 
 impl Default for ReflectionConfig {
@@ -105,6 +117,7 @@ impl Default for ReflectionConfig {
             auto_apply_suggestions: false,
             model: None,
             timeout_secs: default_reflection_timeout_secs(),
+            target_active_entries: default_target_active_entries(),
         }
     }
 }

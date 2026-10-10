@@ -58,6 +58,8 @@ async fn build_prompt_reads_memory_and_owned_message_snapshot() {
         "en",
         &NoOpMemory,
         100,
+        150,
+        200,
     )
     .await;
 
@@ -125,6 +127,8 @@ async fn build_prompt_excludes_entries_that_injection_would_reject() {
         "en",
         &memory,
         now + 20,
+        150,
+        200,
     )
     .await;
 
@@ -236,7 +240,7 @@ async fn build_prompt_truncates_messages_beyond_budget() {
         )));
     }
 
-    let prompt = ReflectionWorkflow::build_prompt(&messages, "en", &memory, 1).await;
+    let prompt = ReflectionWorkflow::build_prompt(&messages, "en", &memory, 1, 150, 200).await;
     assert!(
         !prompt.text.contains("marker-0000"),
         "超预算时最早消息必须被截出 prompt"
@@ -273,7 +277,7 @@ async fn complete_resolves_ordinal_references_end_to_end() {
     memory.write(first.clone()).await.unwrap();
     memory.write(second.clone()).await.unwrap();
 
-    let prompt = ReflectionWorkflow::build_prompt(&[], "en", &memory, 100).await;
+    let prompt = ReflectionWorkflow::build_prompt(&[], "en", &memory, 100, 150, 200).await;
     assert!(prompt.text.contains("[M1]"), "反思输入 MUST 携带行序号");
     assert!(
         !prompt.text.contains(&first.id.to_string()),
@@ -477,7 +481,7 @@ async fn event_reflection_ops_complete_emits_trigger_apply_cost() {
         recorder: Arc::clone(&recorder),
     };
 
-    let prompt = ReflectionWorkflow::build_prompt(&[], "en", &memory, 100).await;
+    let prompt = ReflectionWorkflow::build_prompt(&[], "en", &memory, 100, 150, 200).await;
     let token_usage = ReflectionTokenUsage {
         input_tokens: 11,
         output_tokens: 7,

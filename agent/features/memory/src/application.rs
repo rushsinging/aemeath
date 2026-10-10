@@ -4,9 +4,10 @@ use crate::domain::event::{
     MemoryEventOp,
 };
 use crate::domain::{
-    MemoryError, MemoryLayer, ReflectionEngine, ReflectionError, ReflectionErrorCategory,
-    ReflectionMessage, ReflectionOutput, ReflectionPrompt, ReflectionRecord,
-    ReflectionReferenceTable, ReflectionStatus, ReflectionTokenUsage, ReflectionTrigger,
+    MemoryError, MemoryLayer, ReflectionCapacityBudget, ReflectionEngine, ReflectionError,
+    ReflectionErrorCategory, ReflectionMessage, ReflectionOutput, ReflectionPrompt,
+    ReflectionRecord, ReflectionReferenceTable, ReflectionStatus, ReflectionTokenUsage,
+    ReflectionTrigger,
 };
 use crate::ports::{MemoryPort, ReflectionApplyResult, ReflectionHistoryStore};
 
@@ -51,17 +52,23 @@ impl ReflectionWorkflow {
         lang: &str,
         memory: &dyn MemoryPort,
         now: u64,
+        target_active_entries: usize,
+        max_entries: usize,
     ) -> ReflectionPrompt {
         let engine = ReflectionEngine;
         // M12：反思输入排除失效条目（outdated / 被取代 / TTL 过期）。
-        let (project_memory, references) = engine.format_memory_summary(
-            &memory
-                .list(Some(MemoryLayer::Project))
-                .await
-                .into_iter()
-                .filter(|entry| crate::domain::is_reflection_input_eligible(entry, now))
-                .collect::<Vec<_>>(),
-        );
+        let eligible = memory
+            .list(Some(MemoryLayer::Project))
+            .await
+            .into_iter()
+            .filter(|entry| crate::domain::is_reflection_input_eligible(entry, now))
+            .collect::<Vec<_>>();
+        let capacity = ReflectionCapacityBudget {
+            active_count: eligible.len(),
+            target_active_entries,
+            max_entries,
+        };
+        let (project_memory, references) = engine.format_memory_summary(&eligible);
         let messages = messages
             .iter()
             .map(|message| {
@@ -78,7 +85,7 @@ impl ReflectionWorkflow {
         let recent_summary =
             engine.recent_messages_summary(&messages, REFLECTION_MESSAGE_BUDGET_CHARS);
         ReflectionPrompt {
-            text: engine.build_prompt(&project_memory, &recent_summary, lang),
+            text: engine.build_prompt(&project_memory, &recent_summary, lang, capacity),
             references,
         }
     }

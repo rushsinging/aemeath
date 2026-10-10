@@ -19,6 +19,7 @@ async fn in_memory_fake_satisfies_memory_port_contract() {
     let port = InMemoryMemory::new(MemoryPolicy {
         max_entries: 2,
         similarity_threshold: 0.8,
+        target_active_entries: 150,
     })
     .unwrap();
 
@@ -154,6 +155,7 @@ async fn restore_when_layer_is_full_is_not_committed_and_returns_candidates() {
     let port = InMemoryMemory::new(MemoryPolicy {
         max_entries: 1,
         similarity_threshold: 0.8,
+        target_active_entries: 150,
     })
     .unwrap();
     let archived = entry("archived", "archived fact", 100);
@@ -270,6 +272,7 @@ async fn reflection_evicts_unpinned_candidate_and_retries_once() {
         MemoryPolicy {
             max_entries: 1,
             similarity_threshold: 0.8,
+            target_active_entries: 150,
         },
         || 200,
     )
@@ -299,6 +302,7 @@ async fn reflection_reports_full_capacity_when_only_pinned_entries_exist() {
         MemoryPolicy {
             max_entries: 1,
             similarity_threshold: 0.8,
+            target_active_entries: 150,
         },
         || 200,
     )

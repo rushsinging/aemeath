@@ -5,10 +5,11 @@ fn test_memory_config_default() {
     let config = MemoryConfig::default();
 
     assert!(config.enabled);
-    assert_eq!(config.max_entries, 100);
+    assert_eq!(config.max_entries, 200);
     assert_eq!(config.similarity_threshold, 0.8);
     assert!(config.reflection.enabled);
     assert_eq!(config.event_retention_days, 30);
+    assert_eq!(config.reflection.target_active_entries, 150);
 }
 
 #[test]
@@ -31,9 +32,10 @@ fn test_event_retention_days_defaults_to_30_and_deserializes_override() {
 fn test_memory_config_deserialize_ignores_removed_session_end_summary() {
     let empty: MemoryConfig = serde_json::from_str("{}").unwrap();
     assert!(empty.enabled);
-    assert_eq!(empty.max_entries, 100);
+    assert_eq!(empty.max_entries, 200);
     assert_eq!(empty.reflection.interval_runs, 10);
     assert!(!empty.reflection.auto_apply_suggestions);
+    assert_eq!(empty.reflection.target_active_entries, 150);
 
     let json = r#"{
             "enabled": true,
@@ -42,7 +44,7 @@ fn test_memory_config_deserialize_ignores_removed_session_end_summary() {
     let config: MemoryConfig = serde_json::from_str(json).unwrap();
 
     assert!(config.enabled);
-    assert_eq!(config.max_entries, 100);
+    assert_eq!(config.max_entries, 200);
 }
 
 #[test]
@@ -78,6 +80,7 @@ fn test_reflection_config_default() {
     assert!(!config.auto_apply_suggestions);
     assert!(config.model.is_none());
     assert_eq!(config.timeout_secs, 240);
+    assert_eq!(config.target_active_entries, 150);
 }
 
 #[test]
@@ -90,4 +93,15 @@ fn test_reflection_timeout_secs_defaults_to_240_and_deserializes_override() {
     let json = r#"{ "reflection": { "timeout_secs": 600 } }"#;
     let config: MemoryConfig = serde_json::from_str(json).unwrap();
     assert_eq!(config.reflection.timeout_secs, 600);
+}
+
+#[test]
+fn test_reflection_target_active_entries_defaults_to_150_and_deserializes_override() {
+    // 缺省 150：reflect 将 active 收敛到该目标，hard_cap(max_entries=200) 留 50 缓冲。
+    let empty: MemoryConfig = serde_json::from_str("{}").unwrap();
+    assert_eq!(empty.reflection.target_active_entries, 150);
+
+    let json = r#"{ "reflection": { "target_active_entries": 120 } }"#;
+    let config: MemoryConfig = serde_json::from_str(json).unwrap();
+    assert_eq!(config.reflection.target_active_entries, 120);
 }

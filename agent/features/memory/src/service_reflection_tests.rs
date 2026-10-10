@@ -2,7 +2,7 @@ use super::{
     tests::{LayerScript, ScriptedStore},
     MemoryService,
 };
-use crate::adapters::MemoryPolicy;
+use crate::adapters::{InMemoryMemory, MemoryPolicy};
 use crate::{domain::*, ports::*};
 
 fn layer_script(
@@ -213,4 +213,34 @@ async fn apply_reflection_missing_outdated_target_is_skipped_without_failure() {
     assert_eq!(result.outdated_marked, 0);
     assert_eq!(result.attempted, 1);
     assert_eq!(result.completed, 1);
+}
+
+#[tokio::test]
+async fn apply_reflection_does_not_hard_evict_when_above_target() {
+    // target=2、hard_cap=10：active 已有 3 条且反思未建议淘汰时，NEVER 机械硬删。
+    let memory = InMemoryMemory::new(MemoryPolicy {
+        max_entries: 10,
+        similarity_threshold: 0.8,
+        target_active_entries: 2,
+    })
+    .expect("policy");
+    for content in ["keep-1", "keep-2", "keep-3"] {
+        memory
+            .write(entry(MemoryLayer::Project, content))
+            .await
+            .expect("write");
+    }
+    assert_eq!(memory.stats().await.project_count, 3);
+
+    let result = memory
+        .apply_reflection(&ReflectionOutput::default())
+        .await
+        .unwrap();
+    assert_eq!(result.outdated_marked, 0);
+    assert_eq!(result.suggestions_added, 0);
+    assert_eq!(
+        memory.stats().await.project_count,
+        3,
+        "超 target 时 apply 不得机械硬删；只依赖 LLM outdated/supersedes"
+    );
 }

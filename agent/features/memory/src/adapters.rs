@@ -420,6 +420,7 @@ impl MemoryOpener for DatasetMemoryOpener {
         let policy = MemoryPolicy {
             max_entries: config.max_entries,
             similarity_threshold: config.similarity_threshold,
+            target_active_entries: config.reflection.target_active_entries,
         };
         let legacy = self.legacy_factory.create_for(key);
         // 生产路径注入真 event store：retention 取 candidate config（`0` = 禁用 GC），
@@ -543,13 +544,17 @@ impl LegacyMemorySourceFactory for FileLegacyMemorySourceFactory {
 pub struct MemoryPolicy {
     pub max_entries: usize,
     pub similarity_threshold: f64,
+    /// Reflect 收敛目标 active 条数；与 max_entries 差值作 add 缓冲。
+    pub target_active_entries: usize,
 }
 
 impl Default for MemoryPolicy {
     fn default() -> Self {
+        let defaults = share::config::MemoryConfig::default();
         Self {
-            max_entries: 100,
-            similarity_threshold: 0.8,
+            max_entries: defaults.max_entries,
+            similarity_threshold: defaults.similarity_threshold,
+            target_active_entries: defaults.reflection.target_active_entries,
         }
     }
 }
@@ -819,6 +824,21 @@ impl MemoryPort for InMemoryMemory {
                 result.outdated_marked += 1;
             }
             result.completed += 1;
+        }
+        // 容量收敛靠 LLM 建议；若 apply 后仍超 target，仅 warn，NEVER 机械硬删。
+        let stats = self.stats().await;
+        for (layer, active) in [
+            (MemoryLayer::Global, stats.global_count),
+            (MemoryLayer::Project, stats.project_count),
+        ] {
+            if active > self.policy.target_active_entries {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "memory_reflection_above_target layer={layer:?} active={active} target={} hard_cap={}",
+                    self.policy.target_active_entries,
+                    self.policy.max_entries,
+                );
+            }
         }
         Ok(result)
     }

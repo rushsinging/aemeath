@@ -8,5 +8,5 @@ fn test_default_config() {
     assert!(config.ui.markdown);
     assert!(config.storage.persist_sessions);
     assert!(config.memory.enabled);
-    assert_eq!(config.memory.max_entries, 100);
+    assert_eq!(config.memory.max_entries, 200);
 }

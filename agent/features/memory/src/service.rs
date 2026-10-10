@@ -189,8 +189,9 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
             ..ConfigFingerprint::default()
         };
         event.context.trigger_summary = Some(format!(
-            "max_entries={};scoring={}",
+            "max_entries={};target_active_entries={};scoring={}",
             self.policy.max_entries,
+            self.policy.target_active_entries,
             self.scorer.is_some()
         ));
         self.emit_event(event).await;
@@ -1189,6 +1190,28 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                     result.completed += 1;
                 }
                 Err(error) => return Err(partial_apply_or(error, &result)),
+            }
+        }
+        // 容量收敛靠 LLM 建议；若 apply 后仍超 target，仅 warn，NEVER 机械硬删。
+        // 用本次 apply 已提交的内存态计数，避免额外现读磁盘打乱 ScriptedStore 队列。
+        let (global_active, project_active) = {
+            let state = self.state.read().expect("memory state lock poisoned");
+            (
+                state.global.dataset.active().len(),
+                state.project.dataset.active().len(),
+            )
+        };
+        for (layer, active) in [
+            (MemoryLayer::Global, global_active),
+            (MemoryLayer::Project, project_active),
+        ] {
+            if active > self.policy.target_active_entries {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "memory_reflection_above_target layer={layer:?} active={active} target={} hard_cap={}",
+                    self.policy.target_active_entries,
+                    self.policy.max_entries,
+                );
             }
         }
         Ok(result)

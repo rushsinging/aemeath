@@ -419,6 +419,23 @@ fn reflection_timeout_secs_unspecified_in_patch_preserves_lower_layer() {
 }
 
 #[test]
+fn reflection_target_active_entries_patch_overrides_and_reaches_config() {
+    let layer: ConfigPatch =
+        serde_json::from_str(r#"{"memory":{"reflection":{"target_active_entries":120}}}"#).unwrap();
+
+    let config = apply_patch(Config::default(), layer);
+
+    assert_eq!(
+        config.memory.reflection.target_active_entries, 120,
+        "高层 patch 的 target_active_entries 必须覆盖缺省 150"
+    );
+    assert_eq!(
+        config.memory.max_entries, 200,
+        "未设置字段保持缺省，不受本 patch 影响"
+    );
+}
+
+#[test]
 fn event_retention_days_patch_overrides_and_defaults_to_30() {
     // 缺省 30 天；patch 显式覆盖必须到达最终 Config。
     assert_eq!(Config::default().memory.event_retention_days, 30);
@@ -432,7 +449,7 @@ fn event_retention_days_patch_overrides_and_defaults_to_30() {
         "高层 patch 的 event_retention_days 必须覆盖缺省 30"
     );
     assert_eq!(
-        config.memory.max_entries, 100,
+        config.memory.max_entries, 200,
         "未设置字段保持缺省，不受本 patch 影响"
     );
 }

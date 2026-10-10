@@ -224,6 +224,7 @@ async fn recall_memory(entries: Vec<&str>) -> Arc<dyn memory::api::MemoryPort> {
     let memory = memory::api::InMemoryMemory::new(memory::api::MemoryPolicy {
         max_entries: 50,
         similarity_threshold: 0.8,
+        target_active_entries: 150,
     })
     .expect("policy 合法");
     for content in entries {

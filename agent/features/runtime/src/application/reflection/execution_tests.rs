@@ -99,6 +99,8 @@ async fn runtime_invokes_provider_then_delegates_parse_apply_and_history_to_memo
         &[share::message::Message::user("reflect")],
         "en",
         false,
+        150,
+        200,
         ReflectionInvocation {
             provider: &provider,
             model: &model,
@@ -132,6 +134,8 @@ async fn malformed_provider_text_returns_safe_runtime_error_and_memory_records_p
         &[],
         "en",
         false,
+        150,
+        200,
         ReflectionInvocation {
             provider: &provider,
             model: &model,
@@ -245,6 +249,8 @@ async fn run_scripted_reflection(
         &[share::message::Message::user("reflect")],
         lang,
         false,
+        150,
+        200,
         ReflectionInvocation {
             provider,
             model: &model,

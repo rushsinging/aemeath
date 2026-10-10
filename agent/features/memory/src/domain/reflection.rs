@@ -72,6 +72,17 @@ pub enum ReflectionError {
 
 pub type ReflectionResult<T> = Result<T, ReflectionError>;
 
+/// Reflect prompt 容量预算：注入当前 active 数、收敛目标与硬上限。
+///
+/// `target_active_entries` 是 LLM 应收敛到的目标；`max_entries` 是层硬上限。
+/// 二者差值是后续 `memory add` 缓冲。NEVER 用本结构做输入截断。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReflectionCapacityBudget {
+    pub active_count: usize,
+    pub target_active_entries: usize,
+    pub max_entries: usize,
+}
+
 /// 反思输入引用表：本次运行内稳定的行序号（从 1 起）→ 已有记忆 id。
 ///
 /// 反思模型只看得到行首序号（`[M1]`、`[M2]`…），NEVER 看到 UUID；解析模型输出
@@ -480,9 +491,13 @@ impl ReflectionEngine {
   单条来源不是归纳（那只是改写），此时留空数组——不足两条来源的归纳 MUST NOT
   产出。结论被新证据修正时在正文里写「曾…现…」，不要输出置信度数字。
 - suggested_memories[].supersedes 只在**新记忆明确取代某条已有记忆**时填该
-  条目序号（例如部署方式、端口、结论被新事实推翻）。两条记忆只是补充关系、或
-  旧记忆仍然成立时，**必须留空数组**——误取代会让仍有价值的记忆停止注入。
-- 没有内容时输出空数组。
+    条目序号（例如部署方式、端口、结论被新事实推翻）。两条记忆只是补充关系、或
+    旧记忆仍然成立时，**必须留空数组**——误取代会让仍有价值的记忆停止注入。
+  - 容量：当前项目记忆 active={active_count}，收敛目标 target={target_active_entries}，硬上限 hard_cap={max_entries}。
+    当 active > target 时，MUST 通过 outdated_memories / supersedes / synthesizes 将 active 收敛到 ≤ target，
+    为后续新增留出缓冲（hard_cap − target）。
+    当 active ≤ target 时不要为凑数而强制淘汰；仅标记真正过时或被取代的条目。
+  - 没有内容时输出空数组。
 
 JSON 格式：
 {{
@@ -518,11 +533,15 @@ Requirements:
   corrects a conclusion, phrase the change in the content ("used to …, now …")
   instead of emitting a confidence number.
 - Fill suggested_memories[].supersedes with an ordinal ONLY when the
-  new memory explicitly replaces it (a changed deploy target, port, or reversed
-  conclusion). Leave it empty when the two memories merely complement each
-  other or the old one still holds — a wrong supersede stops a still-valuable
-  memory from being injected.
-- Output empty arrays when there is nothing.
+    new memory explicitly replaces it (a changed deploy target, port, or reversed
+    conclusion). Leave it empty when the two memories merely complement each
+    other or the old one still holds — a wrong supersede stops a still-valuable
+    memory from being injected.
+  - Capacity: current project memory active={active_count}, converge target={target_active_entries}, hard_cap={max_entries}.
+    When active > target, MUST use outdated_memories / supersedes / synthesizes to converge active to ≤ target,
+    leaving headroom (hard_cap − target) for later adds.
+    When active ≤ target, do not force eviction just to hit a quota; only mark truly outdated or replaced entries.
+  - Output empty arrays when there is nothing.
 
 JSON format:
 {{
@@ -541,10 +560,22 @@ JSON format:
 }
 
 impl ReflectionEngine {
-    pub fn build_prompt(&self, project_memory: &str, recent_summary: &str, lang: &str) -> String {
+    pub fn build_prompt(
+        &self,
+        project_memory: &str,
+        recent_summary: &str,
+        lang: &str,
+        capacity: ReflectionCapacityBudget,
+    ) -> String {
         Self::prompt_template(lang)
             .replace("{project_memory}", project_memory)
             .replace("{recent_summary}", recent_summary)
+            .replace("{active_count}", &capacity.active_count.to_string())
+            .replace(
+                "{target_active_entries}",
+                &capacity.target_active_entries.to_string(),
+            )
+            .replace("{max_entries}", &capacity.max_entries.to_string())
     }
 
     /// 解析模型输出并把引用（序号/UUID）映射为真实 id。

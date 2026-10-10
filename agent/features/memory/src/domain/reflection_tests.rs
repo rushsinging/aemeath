@@ -203,14 +203,40 @@ fn rejects_empty_suggestion_content() {
 
 #[test]
 fn prompt_is_bilingual_without_user_alert() {
-    let zh = engine().build_prompt("MEM", "SUMMARY", "zh");
-    let en = engine().build_prompt("MEM", "SUMMARY", "en");
+    let capacity = ReflectionCapacityBudget {
+        active_count: 12,
+        target_active_entries: 150,
+        max_entries: 200,
+    };
+    let zh = engine().build_prompt("MEM", "SUMMARY", "zh", capacity);
+    let en = engine().build_prompt("MEM", "SUMMARY", "en", capacity);
     assert!(zh.contains("只输出 JSON") && zh.contains("# 最近对话摘要"));
     assert!(en.contains("Output JSON only") && en.contains("# Recent conversation summary"));
     assert!(zh.contains("MEM") && en.contains("SUMMARY"));
     // user_alert 已随死代码清理移除：prompt 不再要求 LLM 产出该字段。
     assert!(!zh.contains("user_alert"));
     assert!(!en.contains("user_alert"));
+}
+
+#[test]
+fn prompt_includes_capacity_budget_and_convergence_rules() {
+    let over = ReflectionCapacityBudget {
+        active_count: 180,
+        target_active_entries: 150,
+        max_entries: 200,
+    };
+    let zh = engine().build_prompt("MEM", "SUMMARY", "zh", over);
+    let en = engine().build_prompt("MEM", "SUMMARY", "en", over);
+    assert!(zh.contains("active=180"));
+    assert!(zh.contains("target=150"));
+    assert!(zh.contains("hard_cap=200"));
+    assert!(zh.contains("收敛到 ≤ target"));
+    assert!(zh.contains("active ≤ target 时不要为凑数而强制淘汰"));
+    assert!(en.contains("active=180"));
+    assert!(en.contains("target=150"));
+    assert!(en.contains("hard_cap=200"));
+    assert!(en.contains("converge active to ≤ target"));
+    assert!(en.contains("When active ≤ target, do not force eviction"));
 }
 
 #[test]

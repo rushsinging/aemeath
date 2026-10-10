@@ -68,6 +68,8 @@ pub(crate) async fn execute_reflection(
     messages: &[share::message::Message],
     lang: &str,
     auto_apply: bool,
+    target_active_entries: usize,
+    max_entries: usize,
     invocation: ReflectionInvocation<'_>,
     memory: &dyn MemoryPort,
     history: &dyn ReflectionHistoryStore,
@@ -75,7 +77,15 @@ pub(crate) async fn execute_reflection(
     cancel: &tokio_util::sync::CancellationToken,
 ) -> ReflectionExecutionResultType<CompleteReflectionResult> {
     let started = std::time::Instant::now();
-    let prompt = ReflectionWorkflow::build_prompt(messages, lang, memory, identity.timestamp).await;
+    let prompt = ReflectionWorkflow::build_prompt(
+        messages,
+        lang,
+        memory,
+        identity.timestamp,
+        target_active_entries,
+        max_entries,
+    )
+    .await;
     // 空响应有界重试：同一 prompt 再调一次 provider；provider 错误（LlmCall）
     // 与取消路径 NEVER 重试，仍按现状落 Failed(EmptyResponse)。
     let response =
