@@ -41,12 +41,19 @@
 /// （MainSession 依赖的消费签名）。`DatasetMemoryOpener` 为 crate 内实现
 /// 细节，其 `new` 已收窄 `pub(crate)`，crate 外不可达；legacy 发现经
 /// [`wire_legacy_memory_source_factory`] 取得的 trait 对象注入。
+/// `event_root` 为事件 jsonl 根（`memory/{project}/events/…` 相对此根，与
+/// dataset 根同为 agents_dir）；retention 天数在 `open_memory` 时从 candidate
+/// `MemoryConfig.event_retention_days` 取，wire 侧 **NEVER** 硬编码。
 pub fn wire_memory_opener(
     storage: std::sync::Arc<dyn storage::AtomicDatasetPort>,
     legacy_factory: std::sync::Arc<dyn crate::ports::LegacyMemorySourceFactory>,
     scorer: Option<std::sync::Arc<dyn systemone::ScoringPort>>,
+    event_root: storage::SafeStorageRoot,
 ) -> Box<dyn crate::ports::MemoryOpener> {
-    Box::new(crate::adapters::DatasetMemoryOpener::new(storage, legacy_factory).with_scorer(scorer))
+    Box::new(
+        crate::adapters::DatasetMemoryOpener::new(storage, legacy_factory, event_root)
+            .with_scorer(scorer),
+    )
 }
 
 /// Composition 构造 legacy 发现工厂的唯一入口：返回
@@ -72,29 +79,44 @@ pub fn wire_reflection_history_store(
     retention_days: u32,
     legacy_dataset: Option<std::sync::Arc<dyn storage::AtomicDatasetPort>>,
 ) -> std::sync::Arc<dyn crate::ports::ReflectionHistoryStore> {
-    std::sync::Arc::new(
-        crate::reflection_history_jsonl::JsonlReflectionHistoryStore::new(
-            root,
-            project,
-            retention_days,
-            legacy_dataset,
-        ),
-    )
+    let store = crate::reflection_history_jsonl::JsonlReflectionHistoryStore::new(
+        root,
+        project,
+        retention_days,
+        legacy_dataset,
+    );
+    // 构造期触发一次 GC（fail-open）：过期日切 segment 删除失败只记 warn，
+    // **NEVER** 阻断装配。
+    let now_unix_ms = crate::service::system_time_seconds() * 1000;
+    if let Err(error) = store.gc(now_unix_ms) {
+        log::warn!(
+            target: crate::LOG_TARGET,
+            "reflection_history_gc_failed (fail-open): {error}"
+        );
+    }
+    std::sync::Arc::new(store)
 }
 
 /// Composition 构造生产事件流存储的唯一入口：返回 `Arc<dyn MemoryEventAppendPort>`
 /// （`JsonlSegmentEventStore` 为 crate 内实现细节，`new` 收窄 `pub(crate)`）。
 /// `retention_days` 为 GC 保留天数（`0` 表示禁用 GC，**NEVER** 表示关闭写入）。
+/// 每次 open 均经此构造，构造期即触发一次 GC（fail-open：失败只记 warn，
+/// **NEVER** 阻断 `open_memory`）。
 pub fn wire_memory_event_store(
     root: storage::SafeStorageRoot,
     project: crate::domain::ProjectMemoryKey,
     retention_days: u32,
 ) -> std::sync::Arc<dyn crate::ports::MemoryEventAppendPort> {
-    std::sync::Arc::new(crate::event_jsonl::JsonlSegmentEventStore::new(
-        root,
-        project,
-        retention_days,
-    ))
+    let store = crate::event_jsonl::JsonlSegmentEventStore::new(root, project, retention_days);
+    // GC-on-open：删除过期日切 segment；失败只告警，绝不阻断 Memory 打开。
+    let now_unix_ms = crate::service::system_time_seconds() * 1000;
+    if let Err(error) = store.gc(now_unix_ms) {
+        log::warn!(
+            target: crate::LOG_TARGET,
+            "memory_event_gc_failed (fail-open): {error}"
+        );
+    }
+    std::sync::Arc::new(store)
 }
 
 mod constants;

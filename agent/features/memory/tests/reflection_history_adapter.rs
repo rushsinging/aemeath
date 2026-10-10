@@ -77,7 +77,13 @@ async fn reflection_history_append_and_list_round_trip() {
 #[tokio::test]
 async fn reflection_history_reopen_keeps_records() {
     let root = unique_root("reopen");
-    let expected = record("durable", 30);
+    // 当前时间戳：GC-on-wire 只删超出 retention 窗口的日切段，
+    // 当日 segment 必须在 reopen 后幸存（1970 日切会被 GC 正确回收）。
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_secs();
+    let expected = record("durable", now_secs);
     store(&root).append(&expected).await.unwrap();
 
     let reopened = store(&root);

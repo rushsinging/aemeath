@@ -231,6 +231,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         storage::wire_file_system_dataset(temp.path()).unwrap(),
         memory::wire_legacy_memory_source_factory(temp.path()),
         None,
+        storage::SafeStorageRoot::open(temp.path()).unwrap(),
     );
     let session_management: Arc<dyn context::SessionManagementPort> =
         Arc::new(NoopSessionManagement);

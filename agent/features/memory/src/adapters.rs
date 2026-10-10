@@ -275,6 +275,8 @@ pub(crate) struct ProjectMemoryOpener {
     legacy: Arc<dyn LegacyMemorySource>,
     /// System One 评分端口（None = 重排关闭）。
     scorer: Option<Arc<dyn systemone::ScoringPort>>,
+    /// 事件追加端口（None = `NoopEventAppend`，仅测试/降级路径）。
+    events: Option<Arc<dyn MemoryEventAppendPort>>,
 }
 
 impl ProjectMemoryOpener {
@@ -283,12 +285,19 @@ impl ProjectMemoryOpener {
             store,
             legacy,
             scorer: None,
+            events: None,
         }
     }
 
     /// 装配评分端口（composition 在场景开关开启时调用）。
     pub fn with_scorer(mut self, scorer: Option<Arc<dyn systemone::ScoringPort>>) -> Self {
         self.scorer = scorer;
+        self
+    }
+
+    /// 装配事件追加端口（`DatasetMemoryOpener` 注入真 event store）。
+    pub fn with_events(mut self, events: Arc<dyn MemoryEventAppendPort>) -> Self {
+        self.events = Some(events);
         self
     }
 
@@ -331,10 +340,23 @@ impl ProjectMemoryOpener {
                 .await
                 .map_err(map_memory_open_error)?;
         }
-        // 双入口保持各自生产消费者语义：无评分走精简 open，有评分走 scorer 链。
-        match self.scorer {
-            Some(scorer) => MemoryService::open_with_scorer(self.store, policy, Some(scorer)).await,
-            None => MemoryService::open(self.store, policy).await,
+        // 事件端口缺省（None）走既有 Noop 默认双入口，语义与接线前完全一致；
+        // 注入真 event store（生产路径）时走全参入口（system clock + scorer + events）。
+        match (self.scorer, self.events) {
+            (scorer, Some(events)) => {
+                MemoryService::open_with_clock_and_scorer_and_events(
+                    self.store,
+                    policy,
+                    crate::service::system_time_seconds,
+                    scorer,
+                    events,
+                )
+                .await
+            }
+            (None, None) => MemoryService::open(self.store, policy).await,
+            (Some(scorer), None) => {
+                MemoryService::open_with_scorer(self.store, policy, Some(scorer)).await
+            }
         }
         .map_err(map_memory_open_error)
     }
@@ -362,17 +384,22 @@ pub(crate) struct DatasetMemoryOpener {
     legacy_factory: Arc<dyn LegacyMemorySourceFactory>,
     /// System One 评分端口（None = 重排关闭）。
     scorer: Option<Arc<dyn systemone::ScoringPort>>,
+    /// 事件 jsonl 根（`memory/{project}/events/…` 相对此根；与 dataset 根
+    /// 同为 agents_dir）。retention 天数在 `open_memory` 时取 candidate config。
+    event_root: storage_api::SafeStorageRoot,
 }
 
 impl DatasetMemoryOpener {
     pub(crate) fn new(
         storage: Arc<dyn storage_api::AtomicDatasetPort>,
         legacy_factory: Arc<dyn LegacyMemorySourceFactory>,
+        event_root: storage_api::SafeStorageRoot,
     ) -> Self {
         Self {
             storage,
             legacy_factory,
             scorer: None,
+            event_root,
         }
     }
 
@@ -395,8 +422,16 @@ impl MemoryOpener for DatasetMemoryOpener {
             similarity_threshold: config.similarity_threshold,
         };
         let legacy = self.legacy_factory.create_for(key);
+        // 生产路径注入真 event store：retention 取 candidate config（`0` = 禁用 GC），
+        // 构造期已 fail-open 触发一次 GC。
+        let events = crate::wire_memory_event_store(
+            self.event_root.clone(),
+            key.clone(),
+            config.event_retention_days,
+        );
         let service = ProjectMemoryOpener::new(store, legacy)
             .with_scorer(self.scorer.clone())
+            .with_events(events)
             .open(policy)
             .await?;
         Ok(Arc::new(service))

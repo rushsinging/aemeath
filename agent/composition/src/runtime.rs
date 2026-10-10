@@ -155,12 +155,19 @@ pub(crate) async fn from_args_with_gateways(
     // legacy AtomicDataset 作为一次性导出源注入（无则传 None）。
     let reflection_legacy_dataset = storage::wire_file_system_dataset(agents_dir)
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
+    // 事件流 / reflection-history 日切 segment 保留天数来自配置
+    //（`memory.event_retention_days`，默认 30；`0` = 禁用 GC）。
+    let event_retention_days = config
+        .reader()
+        .committed_snapshot()
+        .memory()
+        .event_retention_days;
     let reflection_history: Arc<dyn memory_api::ReflectionHistoryStore> =
         memory::wire_reflection_history_store(
             storage::SafeStorageRoot::open(agents_dir)
                 .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
             project_key,
-            30,
+            event_retention_days,
             Some(reflection_legacy_dataset),
         );
 
@@ -280,6 +287,10 @@ pub(crate) async fn from_args_with_gateways(
                 .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
             memory::wire_legacy_memory_source_factory(agents_dir.join("memory")),
             scoring_ports.for_memory_rerank.clone(),
+            // 事件 jsonl 根与 dataset 根同为 agents_dir（memory/{project}/events/…）；
+            // retention 在 open_memory 时取 candidate `MemoryConfig`。
+            storage::SafeStorageRoot::open(agents_dir)
+                .map_err(|error| sdk::SdkError::Init(error.to_string()))?,
         ),
         session_management: session_management.clone(),
         context_factory: Arc::new(

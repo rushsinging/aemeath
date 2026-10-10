@@ -244,13 +244,29 @@ enum MemoryOpenerError {
 
 **`CorruptTransaction` 区分**：`MemoryOpenerError::CorruptTransaction` 表示 open / recovery 期间发现的既存 storage 损坏（journal crash residue、checksum 失败等）——此时尚无 transaction 运行，**NEVER** 适用 mutation 路径的 `Err = NotCommitted` 语义。该错误与 `MemoryStorageErrorKind::CorruptTransaction`（mutation 路径 storage 返回的 crash-protocol corruption）使用同名 `CorruptTransaction` 全链一致，但发生阶段不同：前者阻止 service 启动（fail closed），后者导致当次 mutation 失败并保留旧 state。领域 JSON/schema 校验失败使用 `MemoryOpenerError::CorruptDataset`，**NEVER** 与 storage crash-protocol corruption 混为一类。
 
-fn assemble_reflection_history(
-    storage: Arc<dyn AtomicDatasetPort>,
+// Composition Root 唯一构造入口（实现体收窄 crate 内，crate 外不可达）：
+fn wire_reflection_history_store(
+    root: SafeStorageRoot,
     project: ProjectMemoryKey,
-) -> Arc<dyn ReflectionHistoryStore> {
-    Arc::new(AtomicDatasetReflectionHistoryStore::new(storage, project))
-}
+    retention_days: u32,                            // memory.event_retention_days（0 = 禁用 GC）
+    legacy_dataset: Option<Arc<dyn AtomicDatasetPort>>, // 旧 records member 一次性导出源
+) -> Arc<dyn ReflectionHistoryStore>;
+
+fn wire_memory_event_store(
+    root: SafeStorageRoot,                          // memory/{project}/events/… 相对此根
+    project: ProjectMemoryKey,
+    retention_days: u32,                            // memory.event_retention_days（0 = 禁用 GC）
+) -> Arc<dyn MemoryEventAppendPort>;
+
+fn wire_memory_opener(
+    storage: Arc<dyn AtomicDatasetPort>,
+    legacy_factory: Arc<dyn LegacyMemorySourceFactory>,
+    scorer: Option<Arc<dyn ScoringPort>>,
+    event_root: SafeStorageRoot,                    // 事件 jsonl 根（与 dataset 根同为 agents_dir）
+) -> Box<dyn MemoryOpener>;
 ```
+
+`wire_reflection_history_store` 与 `wire_memory_event_store` 在构造期各触发一次日切 segment GC（fail-open：失败只记 warn，**NEVER** 阻断装配 / `open_memory`）。`DatasetMemoryOpener::open_memory` 每次打开都经 `wire_memory_event_store` 注入真事件端口，retention 取 candidate `MemoryConfig.event_retention_days`（wire 侧 **NEVER** 硬编码）——生产 `MemoryService` 由此不再落 `NoopEventAppend`。
 
 - **Main agent 打开**：Composition（`wire_main_session`）先准备 project-aware Config，再从 `WorkspaceRead::project_identity()` 派生 `ProjectMemoryKey`，以 candidate `MemoryConfig` await 一次 `MemoryOpener::open_memory`，把真实 `MemoryService` 交给 Context-owned active Session slot；每个 Main Run 在 shared lease 下取得同一 Arc 并同时注入 Context、Runtime、MemoryTool 与 Reflection apply。
 - **Sub Run（Disabled）**：装配 `NoOpMemory`；Reflection 不触发（Runtime 按 `MemoryMode::Disabled` 跳过）。

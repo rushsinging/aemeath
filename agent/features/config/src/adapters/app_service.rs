@@ -234,6 +234,9 @@ fn patch_for_update(
                     similarity_threshold: Some(config.similarity_threshold),
                     inject_count: None,
                     inject_token_budget: config.inject_token_budget,
+                    // SetMemoryConfig 的输入视图不携带事件保留天数键（非 TUI 关注点）：
+                    // patch 不触碰该键，保留文件层既有 event_retention_days。
+                    event_retention_days: None,
                     reflection: Some(share::config::domain::merge::ReflectionConfigPatch {
                         enabled: Some(config.reflection.enabled),
                         interval_runs: Some(config.reflection.interval_runs),

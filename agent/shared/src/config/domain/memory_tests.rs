@@ -8,6 +8,23 @@ fn test_memory_config_default() {
     assert_eq!(config.max_entries, 100);
     assert_eq!(config.similarity_threshold, 0.8);
     assert!(config.reflection.enabled);
+    assert_eq!(config.event_retention_days, 30);
+}
+
+#[test]
+fn test_event_retention_days_defaults_to_30_and_deserializes_override() {
+    // 缺省 30 天：事件流 / reflection-history 日切 segment 保留窗口。
+    let empty: MemoryConfig = serde_json::from_str("{}").unwrap();
+    assert_eq!(empty.event_retention_days, 30);
+
+    // 显式覆盖。
+    let json = r#"{ "event_retention_days": 7 }"#;
+    let config: MemoryConfig = serde_json::from_str(json).unwrap();
+    assert_eq!(config.event_retention_days, 7);
+
+    // `0` = 禁用 GC（从不删除）；NEVER 表示关闭写入。
+    let zero: MemoryConfig = serde_json::from_str(r#"{ "event_retention_days": 0 }"#).unwrap();
+    assert_eq!(zero.event_retention_days, 0);
 }
 
 #[test]

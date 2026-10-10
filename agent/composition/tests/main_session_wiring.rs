@@ -189,7 +189,12 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
     let dataset_adapter =
         storage::wire_file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
     let legacy_factory = memory::wire_legacy_memory_source_factory(agents_dir.join("memory"));
-    let memory_opener = memory::wire_memory_opener(dataset_adapter, legacy_factory, None);
+    let memory_opener = memory::wire_memory_opener(
+        dataset_adapter,
+        legacy_factory,
+        None,
+        storage::SafeStorageRoot::open(&agents_dir).expect("storage root"),
+    );
 
     let session_management = session_management(&agents_dir);
     let deps = MainSessionDependencies {
@@ -255,6 +260,7 @@ async fn production_context_append_reopens_from_atomic_blob() {
         dataset_adapter,
         memory::wire_legacy_memory_source_factory(agents_dir.join("memory")),
         None,
+        storage::SafeStorageRoot::open(&agents_dir).expect("storage root"),
     );
     let session_blob = storage::wire_file_system_blob(&agents_dir).expect("create session blob");
     let session_dataset = storage::wire_file_system_dataset(agents_dir.clone())
@@ -367,7 +373,12 @@ async fn runtime_session_id_matches_wiring_committed_session() {
             30,
             Some(dataset_adapter.clone()),
         );
-    let memory_opener = memory::wire_memory_opener(dataset_adapter, legacy_factory, None);
+    let memory_opener = memory::wire_memory_opener(
+        dataset_adapter,
+        legacy_factory,
+        None,
+        storage::SafeStorageRoot::open(&agents_dir).expect("storage root"),
+    );
 
     let session_management = session_management(&agents_dir);
     let deps = MainSessionDependencies {
@@ -548,7 +559,12 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
     let dataset_adapter =
         storage::wire_file_system_dataset(agents_dir.clone()).expect("create dataset adapter");
     let legacy_factory = memory::wire_legacy_memory_source_factory(agents_dir.join("memory"));
-    let memory_opener = memory::wire_memory_opener(dataset_adapter, legacy_factory, None);
+    let memory_opener = memory::wire_memory_opener(
+        dataset_adapter,
+        legacy_factory,
+        None,
+        storage::SafeStorageRoot::open(&agents_dir).expect("storage root"),
+    );
 
     let session_management = session_management(&agents_dir);
     let deps = MainSessionDependencies {
