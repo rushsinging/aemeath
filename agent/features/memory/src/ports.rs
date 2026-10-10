@@ -1,3 +1,4 @@
+use crate::domain::event::MemoryEvent;
 use crate::domain::*;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -304,6 +305,66 @@ pub trait MemoryOpener: Send + Sync {
 impl Clone for Box<dyn MemoryOpener> {
     fn clone(&self) -> Self {
         self.boxed_clone()
+    }
+}
+
+/// Failures from handing one [`MemoryEvent`] to the append sink. Variants are
+/// fixed, payload-free categories: the error type deliberately carries **no**
+/// memory body/content — emit paths stay fail-open and warn without content.
+/// 事件写路径接线（adapter/service 落地）前仅测试引用，dead_code 暂时放行。
+#[cfg_attr(not(test), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum EventAppendError {
+    #[error("event append rejected by sink")]
+    Rejected,
+    #[error("event sink is unavailable")]
+    Unavailable,
+    #[error("event serialization failed")]
+    Serialization,
+    #[error("I/O failure while appending event")]
+    Io,
+}
+
+/// Append-only 生产事件流的写入端口：中心化 emit 的唯一出口，实现方
+/// 只接收反序列化的 [`MemoryEvent`]；事件内容随调用方传入，错误返回值
+/// 永不回带正文（失败语义为 fail-open，调用方仅记录无正文告警）。
+/// 事件写路径接线（adapter/service 落地）前仅测试引用，dead_code 暂时放行。
+#[cfg_attr(not(test), allow(dead_code))]
+#[async_trait]
+pub trait MemoryEventAppendPort: Send + Sync {
+    /// 追加一条事件；成功返回 `()`，失败返回不携带正文的
+    /// [`EventAppendError`]。
+    async fn append(&self, event: &MemoryEvent) -> Result<(), EventAppendError>;
+}
+
+/// 测试辅助：记录每一次 `append` 收到的事件克隆（`Arc<Mutex<Vec<_>>>`
+/// 共享），供测试断言 emit 次序与内容。仅在测试构建中存在。
+#[cfg(test)]
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RecordingEventAppend {
+    events: Arc<std::sync::Mutex<Vec<MemoryEvent>>>,
+}
+
+#[cfg(test)]
+impl RecordingEventAppend {
+    /// 读取当前已录制的事件克隆快照。
+    pub(crate) fn events(&self) -> Vec<MemoryEvent> {
+        self.events
+            .lock()
+            .expect("recording event append lock poisoned")
+            .clone()
+    }
+}
+
+#[cfg(test)]
+#[async_trait]
+impl MemoryEventAppendPort for RecordingEventAppend {
+    async fn append(&self, event: &MemoryEvent) -> Result<(), EventAppendError> {
+        self.events
+            .lock()
+            .expect("recording event append lock poisoned")
+            .push(event.clone());
+        Ok(())
     }
 }
 
