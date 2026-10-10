@@ -15,13 +15,6 @@ pub(crate) const OBSERVATIONS_FILE: &str = "observations.jsonl";
 /// 温度校准 artifact 文件名（{scoring_dir}/calibration.json）。
 pub(crate) const CALIBRATION_FILE: &str = "calibration.json";
 
-/// 评分审计事件文件名（{scoring_dir}/audit.jsonl）。
-///
-/// 语义：事件流 PR1 起为 **legacy 停写** 路径（写入已迁移至 `events/{yyyy-mm-dd}.jsonl`）；
-/// 仍被现有 audited/wiring 写路径使用（Task3 改写后退役），迁移见
-/// `LEGACY_AUDIT_FILE`。
-pub(crate) const AUDIT_FILE: &str = "audit.jsonl";
-
 // --- 评分事件流（来源：docs/design/02-modules/systemone/03-event-stream.md §5.1）---
 
 /// 评分事件 schema 版本（`domain::event::ScoringEvent.schema_version`）。
@@ -41,6 +34,10 @@ pub(crate) const LEGACY_AUDIT_FILE: &str = "audit.jsonl";
 /// legacy 审计迁移归档文件名（{scoring_dir}/events/legacy-audit.jsonl）：
 /// 旧行原样旁路归档（NEVER 解析改写、NEVER 丢弃）。
 pub(crate) const LEGACY_AUDIT_ARCHIVE_FILE: &str = "legacy-audit.jsonl";
+
+/// 事件 segment 默认保留天数（构造期注入 `JsonlSegmentScoringEventStore`；
+/// Task4 接配置前的占位默认值，0 = 禁用 GC）。
+pub(crate) const DEFAULT_EVENT_RETENTION_DAYS: u32 = 30;
 
 /// 本构建是否提供 embedded 生产装配（feature `embedded` 编译开关）。
 ///

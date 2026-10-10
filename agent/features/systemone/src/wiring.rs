@@ -30,6 +30,7 @@ use crate::adapters::calibrated::CalibratedScoringAdapter;
 use crate::adapters::calibration_store::CalibrationStore;
 #[cfg(feature = "embedded")]
 use crate::adapters::embedded::EmbeddedScoringAdapter;
+use crate::adapters::event_jsonl::JsonlSegmentScoringEventStore;
 use crate::adapters::fetch_http::HttpArtifactFetcher;
 use crate::adapters::model_assets::LocalModelAssetStore;
 #[cfg(feature = "embedded")]
@@ -195,7 +196,8 @@ pub async fn wire_embedded_scoring_raw(
 }
 
 /// 校准 + 审计外壳（装配链后两层）：审计 revision MUST 取自
-/// `manifest.engine_revision`，审计事件落在 `scoring_dir/audit.jsonl`，
+/// `manifest.engine_revision`，评分事件落在 `scoring_dir/events/{yyyy-mm-dd}.jsonl`
+/// 日切 segment（构造期完成 legacy 迁移与保留期 GC），
 /// `scenario` 场景标签随每条事件归因。
 pub fn wrap_calibrated_audited(
     inner: Arc<dyn ScoringPort>,
@@ -205,10 +207,14 @@ pub fn wrap_calibrated_audited(
 ) -> Arc<dyn ScoringPort> {
     let store = CalibrationStore::new(scoring_dir.to_path_buf());
     let calibrated = Arc::new(CalibratedScoringAdapter::new(inner, &store));
+    let event_store = JsonlSegmentScoringEventStore::new(
+        scoring_dir.to_path_buf(),
+        crate::constants::DEFAULT_EVENT_RETENTION_DAYS,
+    );
     Arc::new(AuditedScoringAdapter::new(
         calibrated,
         manifest.engine_revision.clone(),
-        scoring_dir.join(crate::constants::AUDIT_FILE),
+        event_store,
         Arc::new(|| chrono::Utc::now().to_rfc3339()),
         scenario,
     ))

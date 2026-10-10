@@ -25,7 +25,7 @@ mod domain;
 mod ports;
 mod wiring;
 
-pub use adapters::audited::{AuditedScoringAdapter, ScoringAuditEvent};
+pub use adapters::audited::AuditedScoringAdapter;
 pub use adapters::calibrated::CalibratedScoringAdapter;
 pub use adapters::calibration_store::{CalibrationArtifact, CalibrationStore};
 #[cfg(feature = "embedded")]
@@ -64,7 +64,7 @@ pub use wiring::{
     wire_model_download_service, wrap_calibrated_audited, EmbeddedScoringWiringError,
 };
 
-/// Jev HTTP 评分装配链：JevHttp → Calibrated（读温度 artifact）→ Audited（落审计）。
+/// Jev HTTP 评分装配链：JevHttp → Calibrated（读温度 artifact）→ Audited（落评分事件）。
 ///
 /// 设计 §4.3 HTTP adapter 退役边界：仅供测试 / eval 对分与回归基准使用，
 /// 生产 composition **NEVER** 调用；默认构建不提供本工厂。
@@ -78,10 +78,12 @@ pub fn wire_http_scoring_port(
     let http = std::sync::Arc::new(JevHttpScoringAdapter::new(base_url, model, timeout));
     let store = CalibrationStore::new(scoring_dir.clone());
     let calibrated = std::sync::Arc::new(CalibratedScoringAdapter::new(http, &store));
+    let event_store =
+        JsonlSegmentScoringEventStore::new(scoring_dir, constants::DEFAULT_EVENT_RETENTION_DAYS);
     std::sync::Arc::new(AuditedScoringAdapter::new(
         calibrated,
         model.to_owned(),
-        scoring_dir.join("audit.jsonl"),
+        event_store,
         std::sync::Arc::new(|| chrono::Utc::now().to_rfc3339()),
         // HTTP 评分仅供测试 / eval 对分（设计 §4.3），场景标签固定 eval。
         "eval_http",
