@@ -278,6 +278,12 @@ pub trait MemoryPort: Send + Sync {
     async fn compact(&self) -> Result<CompactResult, MemoryError>;
     async fn list(&self, layer: Option<MemoryLayer>) -> Vec<MemoryEntry>;
     async fn stats(&self) -> MemoryStats;
+
+    /// 生产路径暴露事件 append 端口，供 application 边界（如 per-message recall）
+    /// 中心化 emit；默认 `None`（NoOp / 纯测试桩不写事件）。
+    fn event_append_port(&self) -> Option<std::sync::Arc<dyn MemoryEventAppendPort>> {
+        None
+    }
 }
 
 /// Object-safe, cloneable project-aware Memory opener seam.

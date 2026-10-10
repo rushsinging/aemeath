@@ -3,6 +3,10 @@
 //! 与显式 `search` 的区别：search 面向工具调用（词法序或内嵌重排的命中列表），
 //! 本服务面向 reminder 注入——必须把评分概率带出给调用方做阈值门/预算决策。
 
+use crate::domain::event::{
+    ConfigFingerprint, EventActor, EventChange, EventContext, EventOutcome, MemoryEvent,
+    MemoryEventOp,
+};
 use crate::domain::rerank::{apply_rerank_order, build_rerank_request};
 use crate::domain::{MemoryEntry, MemoryLocation, MemorySearchQuery};
 use crate::ports::MemoryPort;
@@ -22,6 +26,20 @@ pub struct RecalledMemory {
 /// 词法零命中时返回空（调用方本 turn 不注入）；评分失败向上传播
 /// `ScoringUnavailable`（调用方静默缺席，NEVER 阻断 turn）。
 pub async fn recall_relevant(
+    memory: &dyn MemoryPort,
+    scorer: &dyn systemone::ScoringPort,
+    query_text: &str,
+    now: u64,
+    recall_limit: usize,
+    top_k: usize,
+) -> Result<Vec<RecalledMemory>, systemone::ScoringUnavailable> {
+    let recalled =
+        recall_relevant_inner(memory, scorer, query_text, now, recall_limit, top_k).await?;
+    emit_per_message_recall(memory, query_text, now, top_k, &recalled).await;
+    Ok(recalled)
+}
+
+async fn recall_relevant_inner(
     memory: &dyn MemoryPort,
     scorer: &dyn systemone::ScoringPort,
     query_text: &str,
@@ -92,6 +110,55 @@ pub async fn recall_relevant(
         })
         .take(top_k)
         .collect())
+}
+
+async fn emit_per_message_recall(
+    memory: &dyn MemoryPort,
+    query_text: &str,
+    now: u64,
+    top_k: usize,
+    recalled: &[RecalledMemory],
+) {
+    let Some(events) = memory.event_append_port() else {
+        return;
+    };
+    let candidates: Vec<MemoryEntry> = recalled.iter().map(|item| item.entry.clone()).collect();
+    let probabilities = recalled
+        .iter()
+        .map(|item| format!("{:.6}", item.probability))
+        .collect::<Vec<_>>()
+        .join(",");
+    let correlation = format!("per_message_recall-{now}");
+    let event = MemoryEvent::new(
+        correlation.clone(),
+        now.saturating_mul(1000),
+        MemoryEventOp::PerMessageRecall,
+        EventOutcome::Succeeded,
+        correlation,
+        EventActor::Service,
+        EventChange::Read {
+            candidates,
+            hit_count: recalled.len() as u32,
+            limit: top_k as u32,
+            layer_filter: None,
+        },
+        EventContext {
+            query: Some(query_text.to_owned()),
+            trigger_summary: Some(format!("probabilities=[{probabilities}]")),
+            ..EventContext::default()
+        },
+        ConfigFingerprint {
+            scoring_enabled: true,
+            ..ConfigFingerprint::default()
+        },
+    );
+    if let Err(error) = events.append(&event).await {
+        log::warn!(
+            target: crate::LOG_TARGET,
+            "memory_event_append_failed op={:?} err={error}",
+            MemoryEventOp::PerMessageRecall
+        );
+    }
 }
 
 /// 单候选召回：Noul 判定该候选与消息的相关性（p_true 即概率）。

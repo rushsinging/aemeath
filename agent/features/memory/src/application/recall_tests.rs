@@ -175,3 +175,131 @@ async fn recall_single_candidate_uses_noul_gate() {
         "p_true 即概率"
     );
 }
+
+#[tokio::test]
+async fn event_read_ops_per_message_recall_emits_candidates_with_content() {
+    use crate::domain::event::{EventChange, MemoryEventOp};
+    use crate::ports::RecordingEventAppend;
+    use std::sync::Arc;
+
+    struct PortWithEvents {
+        inner: crate::adapters::InMemoryMemory,
+        events: Arc<dyn crate::ports::MemoryEventAppendPort>,
+        recorder: Arc<RecordingEventAppend>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::ports::MemoryPort for PortWithEvents {
+        async fn retrieve_for_inject(
+            &self,
+            query: &crate::ports::MemoryQuery,
+        ) -> crate::ports::MemorySearchResult {
+            self.inner.retrieve_for_inject(query).await
+        }
+        async fn search(
+            &self,
+            query: &crate::domain::MemorySearchQuery,
+        ) -> crate::ports::MemorySearchResult {
+            self.inner.search(query).await
+        }
+        async fn write(
+            &self,
+            entry: crate::domain::MemoryEntry,
+        ) -> Result<crate::ports::WriteResult, crate::domain::MemoryError> {
+            self.inner.write(entry).await
+        }
+        async fn update(
+            &self,
+            id: &MemoryId,
+            content: &str,
+        ) -> Result<bool, crate::domain::MemoryError> {
+            self.inner.update(id, content).await
+        }
+        async fn delete(&self, id: &MemoryId) -> Result<bool, crate::domain::MemoryError> {
+            self.inner.delete(id).await
+        }
+        async fn pin(
+            &self,
+            id: &MemoryId,
+            pinned: bool,
+        ) -> Result<bool, crate::domain::MemoryError> {
+            self.inner.pin(id, pinned).await
+        }
+        async fn mark_outdated(&self, id: &MemoryId) -> Result<bool, crate::domain::MemoryError> {
+            self.inner.mark_outdated(id).await
+        }
+        async fn apply_reflection(
+            &self,
+            output: &crate::domain::ReflectionOutput,
+        ) -> Result<crate::ports::ReflectionApplyResult, crate::domain::MemoryError> {
+            self.inner.apply_reflection(output).await
+        }
+        async fn archive(&self, ids: &[MemoryId]) -> Result<bool, crate::domain::MemoryError> {
+            self.inner.archive(ids).await
+        }
+        async fn restore(
+            &self,
+            id: &MemoryId,
+        ) -> Result<crate::ports::RestoreResult, crate::domain::MemoryError> {
+            self.inner.restore(id).await
+        }
+        async fn compact(&self) -> Result<crate::ports::CompactResult, crate::domain::MemoryError> {
+            self.inner.compact().await
+        }
+        async fn list(&self, layer: Option<MemoryLayer>) -> Vec<crate::domain::MemoryEntry> {
+            self.inner.list(layer).await
+        }
+        async fn stats(&self) -> crate::ports::MemoryStats {
+            self.inner.stats().await
+        }
+        fn event_append_port(&self) -> Option<Arc<dyn crate::ports::MemoryEventAppendPort>> {
+            Some(Arc::clone(&self.events))
+        }
+    }
+
+    // ≥2 候选走 Choice，避免单候选 Noul 与 KeywordScoringPort 不匹配。
+    let inner = memory_with(vec![
+        "worktree isolation matters",
+        "unrelated cooking tip",
+        "another worktree note",
+    ])
+    .await;
+    let recorder = Arc::new(RecordingEventAppend::default());
+    let port = PortWithEvents {
+        inner,
+        events: recorder.clone(),
+        recorder: Arc::clone(&recorder),
+    };
+    let scorer = KeywordScoringPort {
+        keyword: "worktree",
+    };
+    let recalled = recall_relevant(&port, &scorer, "worktree", 4_242, 20, 3)
+        .await
+        .expect("recall");
+    assert!(!recalled.is_empty());
+    // search 也会 emit Search（inner 无 event port，故只见 PerMessageRecall）。
+    let events = port.recorder.events();
+    let recall_event = events
+        .iter()
+        .find(|event| event.op == MemoryEventOp::PerMessageRecall)
+        .expect("PerMessageRecall event");
+    match &recall_event.change {
+        EventChange::Read {
+            candidates,
+            hit_count,
+            ..
+        } => {
+            assert_eq!(*hit_count as usize, candidates.len());
+            assert!(candidates
+                .iter()
+                .any(|entry| entry.content.contains("worktree")));
+            assert!(candidates.iter().all(|entry| !entry.content.is_empty()));
+        }
+        other => panic!("expected Read, got {other:?}"),
+    }
+    assert!(recall_event
+        .context
+        .trigger_summary
+        .as_deref()
+        .is_some_and(|summary| summary.contains("probabilities=")));
+}

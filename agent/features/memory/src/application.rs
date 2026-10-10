@@ -1,4 +1,8 @@
 pub mod recall;
+use crate::domain::event::{
+    ConfigFingerprint, EventActor, EventChange, EventContext, EventOutcome, MemoryEvent,
+    MemoryEventOp,
+};
 use crate::domain::{
     MemoryError, MemoryLayer, ReflectionEngine, ReflectionError, ReflectionErrorCategory,
     ReflectionMessage, ReflectionOutput, ReflectionPrompt, ReflectionRecord,
@@ -105,6 +109,24 @@ impl ReflectionWorkflow {
         token_usage: ReflectionTokenUsage,
         duration_ms: u64,
     ) -> Result<ReflectionExecutionResult, ReflectionWorkflowError> {
+        Self::emit_reflection_event(
+            memory,
+            MemoryEventOp::ReflectionTriggered,
+            identity,
+            EventChange::Reflection {
+                summary: format!("trigger={:?};auto_apply={auto_apply}", identity.trigger),
+                affected: Vec::new(),
+            },
+            EventContext {
+                coverage_range: identity.coverage_end.map(|end| format!("0..{end}")),
+                trigger_summary: Some(format!("{:?}", identity.trigger)),
+                ..EventContext::default()
+            },
+            None,
+            None,
+        )
+        .await;
+
         let resolved = match ReflectionEngine.parse_output(raw_response, references) {
             Ok(resolved) => resolved,
             Err(error) => {
@@ -118,6 +140,28 @@ impl ReflectionWorkflow {
                     ReflectionError::Memory(_) => ReflectionErrorCategory::Apply,
                 };
                 Self::record_failure(history, identity, category, duration_ms).await?;
+                Self::emit_reflection_event(
+                    memory,
+                    MemoryEventOp::ReflectionCost,
+                    identity,
+                    EventChange::Reflection {
+                        summary: format!(
+                            "status=failed;category={category:?};duration_ms={duration_ms};input_tokens={};output_tokens={}",
+                            token_usage.input_tokens, token_usage.output_tokens
+                        ),
+                        affected: Vec::new(),
+                    },
+                    EventContext {
+                        coverage_range: identity
+                            .coverage_end
+                            .map(|end| format!("0..{end}")),
+                        trigger_summary: Some(format!("{:?}", identity.trigger)),
+                        ..EventContext::default()
+                    },
+                    Some(token_usage),
+                    Some(duration_ms),
+                )
+                .await;
                 return Err(if category == ReflectionErrorCategory::InvalidSuggestion {
                     ReflectionWorkflowError::InvalidSuggestion
                 } else {
@@ -165,15 +209,45 @@ impl ReflectionWorkflow {
             (None, None)
         };
 
+        if let Some(applied) = apply_result.as_ref() {
+            Self::emit_reflection_event(
+                memory,
+                MemoryEventOp::ReflectionApplied,
+                identity,
+                EventChange::Reflection {
+                    summary: format!(
+                        "attempted={};completed={};suggestions_added={};outdated_marked={};superseded={}",
+                        applied.attempted,
+                        applied.completed,
+                        applied.suggestions_added,
+                        applied.outdated_marked,
+                        applied.superseded
+                    ),
+                    affected: Vec::new(),
+                },
+                EventContext {
+                    coverage_range: identity
+                        .coverage_end
+                        .map(|end| format!("0..{end}")),
+                    trigger_summary: Some(format!("{:?}", identity.trigger)),
+                    ..EventContext::default()
+                },
+                None,
+                None,
+            )
+            .await;
+        }
+
+        let status = if error_category.is_some() {
+            ReflectionStatus::Failed
+        } else {
+            ReflectionStatus::Succeeded
+        };
         let record = ReflectionRecord {
             id: identity.id.clone(),
             timestamp: identity.timestamp,
             trigger: identity.trigger,
-            status: if error_category.is_some() {
-                ReflectionStatus::Failed
-            } else {
-                ReflectionStatus::Succeeded
-            },
+            status,
             output: Some(output.clone()),
             apply_result: apply_result.clone(),
             error_category,
@@ -189,6 +263,30 @@ impl ReflectionWorkflow {
             .upsert(&record)
             .await
             .map_err(|_| ReflectionWorkflowError::HistoryWrite)?;
+
+        Self::emit_reflection_event(
+            memory,
+            MemoryEventOp::ReflectionCost,
+            identity,
+            EventChange::Reflection {
+                summary: format!(
+                    "status={status:?};category={error_category:?};duration_ms={duration_ms};input_tokens={};output_tokens={}",
+                    token_usage.input_tokens, token_usage.output_tokens
+                ),
+                affected: Vec::new(),
+            },
+            EventContext {
+                coverage_range: identity
+                    .coverage_end
+                    .map(|end| format!("0..{end}")),
+                trigger_summary: Some(format!("{:?}", identity.trigger)),
+                ..EventContext::default()
+            },
+            Some(token_usage),
+            Some(duration_ms),
+        )
+        .await;
+
         Ok(ReflectionExecutionResult {
             output,
             apply_result,
@@ -213,6 +311,38 @@ impl ReflectionWorkflow {
             ))
             .await
             .map_err(|_| ReflectionWorkflowError::HistoryWrite)
+    }
+
+    async fn emit_reflection_event(
+        memory: &dyn MemoryPort,
+        op: MemoryEventOp,
+        identity: &ReflectionExecutionIdentity,
+        change: EventChange,
+        context: EventContext,
+        _token_usage: Option<ReflectionTokenUsage>,
+        _duration_ms: Option<u64>,
+    ) {
+        let Some(events) = memory.event_append_port() else {
+            return;
+        };
+        let correlation = format!("{op:?}-{}", identity.id);
+        let event = MemoryEvent::new(
+            correlation.clone(),
+            identity.timestamp.saturating_mul(1000),
+            op,
+            EventOutcome::Succeeded,
+            correlation,
+            EventActor::ReflectionWorkflow,
+            change,
+            context,
+            ConfigFingerprint::default(),
+        );
+        if let Err(error) = events.append(&event).await {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "memory_event_append_failed op={op:?} err={error}"
+            );
+        }
     }
 
     /// 预解析（不落盘）：供执行链在调用 [`Self::complete`] 之前判断响应是否

@@ -384,3 +384,177 @@ async fn reap_stale_running_closes_only_age_exceeded_running_records() {
         Some(ReflectionErrorCategory::TimedOut)
     );
 }
+
+#[tokio::test]
+async fn event_reflection_ops_complete_emits_trigger_apply_cost() {
+    use crate::domain::event::{EventChange, MemoryEventOp};
+    use crate::ports::RecordingEventAppend;
+    use std::sync::Arc;
+
+    struct PortWithEvents {
+        inner: crate::adapters::InMemoryMemory,
+        events: Arc<dyn crate::ports::MemoryEventAppendPort>,
+        recorder: Arc<RecordingEventAppend>,
+    }
+
+    #[async_trait]
+    impl MemoryPort for PortWithEvents {
+        async fn retrieve_for_inject(&self, query: &MemoryQuery) -> MemorySearchResult {
+            self.inner.retrieve_for_inject(query).await
+        }
+        async fn search(&self, query: &MemorySearchQuery) -> MemorySearchResult {
+            self.inner.search(query).await
+        }
+        async fn write(&self, entry: MemoryEntry) -> Result<WriteResult, MemoryError> {
+            self.inner.write(entry).await
+        }
+        async fn update(&self, id: &MemoryId, content: &str) -> Result<bool, MemoryError> {
+            self.inner.update(id, content).await
+        }
+        async fn delete(&self, id: &MemoryId) -> Result<bool, MemoryError> {
+            self.inner.delete(id).await
+        }
+        async fn pin(&self, id: &MemoryId, pinned: bool) -> Result<bool, MemoryError> {
+            self.inner.pin(id, pinned).await
+        }
+        async fn mark_outdated(&self, id: &MemoryId) -> Result<bool, MemoryError> {
+            self.inner.mark_outdated(id).await
+        }
+        async fn apply_reflection(
+            &self,
+            output: &ReflectionOutput,
+        ) -> Result<ReflectionApplyResult, MemoryError> {
+            self.inner.apply_reflection(output).await
+        }
+        async fn archive(&self, ids: &[MemoryId]) -> Result<bool, MemoryError> {
+            self.inner.archive(ids).await
+        }
+        async fn restore(&self, id: &MemoryId) -> Result<RestoreResult, MemoryError> {
+            self.inner.restore(id).await
+        }
+        async fn compact(&self) -> Result<CompactResult, MemoryError> {
+            self.inner.compact().await
+        }
+        async fn list(&self, layer: Option<MemoryLayer>) -> Vec<MemoryEntry> {
+            self.inner.list(layer).await
+        }
+        async fn stats(&self) -> MemoryStats {
+            self.inner.stats().await
+        }
+        fn event_append_port(&self) -> Option<Arc<dyn crate::ports::MemoryEventAppendPort>> {
+            Some(Arc::clone(&self.events))
+        }
+    }
+
+    let history = RecordingHistory::default();
+    let inner = crate::adapters::InMemoryMemory::new(crate::adapters::MemoryPolicy::default())
+        .expect("policy");
+    let first = MemoryEntry::new(
+        MemoryId::now_v7(),
+        1,
+        MemoryLayer::Project,
+        MemoryCategory::Fact,
+        "old deploy target",
+        MemorySource::User,
+    )
+    .unwrap();
+    let second = MemoryEntry::new(
+        MemoryId::now_v7(),
+        1,
+        MemoryLayer::Project,
+        MemoryCategory::Fact,
+        "legacy service port",
+        MemorySource::User,
+    )
+    .unwrap();
+    inner.write(first.clone()).await.unwrap();
+    inner.write(second.clone()).await.unwrap();
+
+    let recorder = Arc::new(RecordingEventAppend::default());
+    let memory = PortWithEvents {
+        inner,
+        events: recorder.clone(),
+        recorder: Arc::clone(&recorder),
+    };
+
+    let prompt = ReflectionWorkflow::build_prompt(&[], "en", &memory, 100).await;
+    let token_usage = ReflectionTokenUsage {
+        input_tokens: 11,
+        output_tokens: 7,
+    };
+    let mut exec_identity = identity();
+    exec_identity.coverage_end = Some(42);
+
+    let result = ReflectionWorkflow::complete(
+        &history,
+        &memory,
+        &exec_identity,
+        r#"{
+            "suggested_memories": [{
+                "category": "decision",
+                "content": "the deploy target moved to the new cluster",
+                "supersedes": ["M2"]
+            }],
+            "outdated_memories": ["M1"]
+        }"#,
+        &prompt.references,
+        "en",
+        true,
+        token_usage,
+        88,
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.error_category, None);
+
+    let events = memory.recorder.events();
+    let reflection_ops: Vec<_> = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event.op,
+                MemoryEventOp::ReflectionTriggered
+                    | MemoryEventOp::ReflectionApplied
+                    | MemoryEventOp::ReflectionCost
+            )
+        })
+        .collect();
+    assert_eq!(
+        reflection_ops.iter().map(|e| e.op).collect::<Vec<_>>(),
+        vec![
+            MemoryEventOp::ReflectionTriggered,
+            MemoryEventOp::ReflectionApplied,
+            MemoryEventOp::ReflectionCost,
+        ]
+    );
+
+    let triggered = reflection_ops[0];
+    assert_eq!(triggered.context.coverage_range.as_deref(), Some("0..42"));
+    assert!(triggered
+        .context
+        .trigger_summary
+        .as_deref()
+        .is_some_and(|summary| summary.contains("PreCompact")
+            || summary.contains("Interval")
+            || summary.contains("Manual")));
+
+    let applied = reflection_ops[1];
+    match &applied.change {
+        EventChange::Reflection { summary, .. } => {
+            assert!(summary.contains("suggestions_added=1"));
+            assert!(summary.contains("outdated_marked=1"));
+        }
+        other => panic!("expected Reflection change, got {other:?}"),
+    }
+
+    let cost = reflection_ops[2];
+    match &cost.change {
+        EventChange::Reflection { summary, .. } => {
+            assert!(summary.contains("duration_ms=88"));
+            assert!(summary.contains("input_tokens=11"));
+            assert!(summary.contains("output_tokens=7"));
+            assert!(summary.contains("Succeeded") || summary.contains("status="));
+        }
+        other => panic!("expected Reflection change, got {other:?}"),
+    }
+}

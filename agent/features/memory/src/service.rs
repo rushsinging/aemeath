@@ -145,6 +145,7 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
             events,
         };
         service.emit_open_load().await;
+        service.emit_assembly_fingerprint().await;
         Ok(service)
     }
 
@@ -170,6 +171,27 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
         event.context.trigger_summary = Some(format!(
             "global active={global_active} archive={global_archive}; \
              project active={project_active} archive={project_archive}"
+        ));
+        self.emit_event(event).await;
+    }
+
+    /// AssemblyFingerprint：打开完成后记录评分/阈值/策略指纹，供复盘对照「当时装配」。
+    async fn emit_assembly_fingerprint(&self) {
+        let mut event = self.build_lifecycle_event(
+            MemoryEventOp::AssemblyFingerprint,
+            "assembly_fingerprint",
+            format!("assembly_fingerprint-{}", uuid::Uuid::now_v7()),
+            EventActor::Opener,
+        );
+        event.config_fingerprint = ConfigFingerprint {
+            scoring_enabled: self.scorer.is_some(),
+            similarity_threshold: Some(self.policy.similarity_threshold),
+            ..ConfigFingerprint::default()
+        };
+        event.context.trigger_summary = Some(format!(
+            "max_entries={};scoring={}",
+            self.policy.max_entries,
+            self.scorer.is_some()
         ));
         self.emit_event(event).await;
     }
@@ -234,6 +256,32 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
             EventActor::Service,
             change,
             EventContext::default(),
+            ConfigFingerprint {
+                scoring_enabled: self.scorer.is_some(),
+                ..ConfigFingerprint::default()
+            },
+        )
+    }
+
+    /// 读组通用事件组装：候选集携带 `MemoryEntry` 全文（Q3=A）；
+    /// `context` 由调用方填 query / stats 摘要等。
+    fn build_read_event(
+        &self,
+        op: MemoryEventOp,
+        event_id: String,
+        correlation_id: String,
+        change: EventChange,
+        context: EventContext,
+    ) -> MemoryEvent {
+        MemoryEvent::new(
+            event_id,
+            (self.clock)() * 1000,
+            op,
+            EventOutcome::Succeeded,
+            correlation_id,
+            EventActor::Service,
+            change,
+            context,
             ConfigFingerprint {
                 scoring_enabled: self.scorer.is_some(),
                 ..ConfigFingerprint::default()
@@ -671,19 +719,35 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             eligible_project,
             query.limit
         );
+        let hits: Vec<MemorySearchHit> = entries
+            .into_iter()
+            .map(|entry| MemorySearchHit {
+                entry,
+                location: MemoryLocation::Active,
+                outdated: false,
+                ttl_expired: false,
+                superseded_by: None,
+                relevance: None,
+            })
+            .collect();
+        let candidates: Vec<MemoryEntry> = hits.iter().map(|hit| hit.entry.clone()).collect();
+        let correlation = format!("retrieve_for_inject-{}", (self.clock)());
+        self.emit_event(self.build_read_event(
+            MemoryEventOp::RetrieveForInject,
+            correlation.clone(),
+            correlation,
+            EventChange::Read {
+                candidates,
+                hit_count: hits.len() as u32,
+                limit: query.limit as u32,
+                layer_filter: query.layer,
+            },
+            EventContext::default(),
+        ))
+        .await;
         MemorySearchResult {
             mode: MemoryRetrievalMode::InjectionPriority,
-            hits: entries
-                .into_iter()
-                .map(|entry| MemorySearchHit {
-                    entry,
-                    location: MemoryLocation::Active,
-                    outdated: false,
-                    ttl_expired: false,
-                    superseded_by: None,
-                    relevance: None,
-                })
-                .collect(),
+            hits,
         }
     }
 
@@ -746,6 +810,24 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             min_relevance,
             max_relevance
         );
+        let candidates: Vec<MemoryEntry> = hits.iter().map(|hit| hit.entry.clone()).collect();
+        let correlation = format!("search-{}", (self.clock)());
+        self.emit_event(self.build_read_event(
+            MemoryEventOp::Search,
+            correlation.clone(),
+            correlation,
+            EventChange::Read {
+                candidates,
+                hit_count: hits.len() as u32,
+                limit: query.limit as u32,
+                layer_filter: query.layer,
+            },
+            EventContext {
+                query: Some(query.text.clone()),
+                ..EventContext::default()
+            },
+        ))
+        .await;
         MemorySearchResult {
             mode: MemoryRetrievalMode::ExplicitSearch,
             hits,
@@ -880,6 +962,26 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                 event.layer = Some(layer);
                 self.emit_event(event).await;
             }
+        }
+        if let WriteResult::NeedsEviction { candidates } = &result {
+            let affected: Vec<MemoryEntry> = candidates
+                .iter()
+                .map(|candidate| candidate.entry.clone())
+                .collect();
+            let correlation = format!("eviction_watermark-write-{}", uuid::Uuid::now_v7());
+            let mut event = self.build_lifecycle_event(
+                MemoryEventOp::EvictionWatermark,
+                "eviction_watermark",
+                correlation,
+                EventActor::Service,
+            );
+            event.change = EventChange::Lifecycle {
+                stage: "eviction_watermark".to_string(),
+                affected,
+            };
+            event.context.trigger_summary =
+                Some(format!("path=write;candidates={}", candidates.len()));
+            self.emit_event(event).await;
         }
         Ok(result)
     }
@@ -1194,8 +1296,28 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                 self.emit_event(event).await;
                 return Ok(outcome);
             }
+            if let RestoreResult::NeedsEviction { candidates } = &outcome {
+                let affected: Vec<MemoryEntry> = candidates
+                    .iter()
+                    .map(|candidate| candidate.entry.clone())
+                    .collect();
+                let correlation = format!("eviction_watermark-restore-{}", uuid::Uuid::now_v7());
+                let mut event = self.build_lifecycle_event(
+                    MemoryEventOp::EvictionWatermark,
+                    "eviction_watermark",
+                    correlation,
+                    EventActor::Service,
+                );
+                event.change = EventChange::Lifecycle {
+                    stage: "eviction_watermark".to_string(),
+                    affected,
+                };
+                event.context.trigger_summary =
+                    Some(format!("path=restore;candidates={}", candidates.len()));
+                self.emit_event(event).await;
+                return Ok(outcome);
+            }
             if !matches!(outcome, RestoreResult::NotFound) {
-                // NeedsEviction：无变更不发事件。
                 return Ok(outcome);
             }
         }
@@ -1226,23 +1348,73 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
 
     async fn list(&self, layer: Option<MemoryLayer>) -> Vec<MemoryEntry> {
         let (global, project) = self.load_latest_layers().await;
-        global
+        let entries: Vec<MemoryEntry> = global
             .active()
             .iter()
             .chain(project.active())
             .filter(|entry| layer.is_none_or(|layer| entry.layer == layer))
             .cloned()
-            .collect()
+            .collect();
+        let correlation = format!("list_stats-list-{}", (self.clock)());
+        self.emit_event(self.build_read_event(
+            MemoryEventOp::ListStats,
+            correlation.clone(),
+            correlation,
+            EventChange::Read {
+                candidates: entries.clone(),
+                hit_count: entries.len() as u32,
+                limit: entries.len() as u32,
+                layer_filter: layer,
+            },
+            EventContext {
+                trigger_summary: Some("kind=list".to_string()),
+                ..EventContext::default()
+            },
+        ))
+        .await;
+        entries
     }
 
     async fn stats(&self) -> MemoryStats {
         let (global, project) = self.load_latest_layers().await;
-        MemoryStats {
+        let stats = MemoryStats {
             global_count: global.active().len(),
             global_archive_count: global.archive().len(),
             project_count: project.active().len(),
             project_archive_count: project.archive().len(),
-        }
+        };
+        let hit_count = (stats.global_count
+            + stats.global_archive_count
+            + stats.project_count
+            + stats.project_archive_count) as u32;
+        let correlation = format!("list_stats-stats-{}", (self.clock)());
+        self.emit_event(self.build_read_event(
+            MemoryEventOp::ListStats,
+            correlation.clone(),
+            correlation,
+            EventChange::Read {
+                candidates: Vec::new(),
+                hit_count,
+                limit: 0,
+                layer_filter: None,
+            },
+            EventContext {
+                trigger_summary: Some(format!(
+                    "kind=stats;global={};global_archive={};project={};project_archive={}",
+                    stats.global_count,
+                    stats.global_archive_count,
+                    stats.project_count,
+                    stats.project_archive_count
+                )),
+                ..EventContext::default()
+            },
+        ))
+        .await;
+        stats
+    }
+
+    fn event_append_port(&self) -> Option<Arc<dyn MemoryEventAppendPort>> {
+        Some(Arc::clone(&self.events))
     }
 }
 
