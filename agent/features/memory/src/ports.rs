@@ -311,8 +311,6 @@ impl Clone for Box<dyn MemoryOpener> {
 /// Failures from handing one [`MemoryEvent`] to the append sink. Variants are
 /// fixed, payload-free categories: the error type deliberately carries **no**
 /// memory body/content — emit paths stay fail-open and warn without content.
-/// 事件写路径接线（adapter/service 落地）前仅测试引用，dead_code 暂时放行。
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum EventAppendError {
     #[error("event append rejected by sink")]
@@ -328,8 +326,6 @@ pub enum EventAppendError {
 /// Append-only 生产事件流的写入端口：中心化 emit 的唯一出口，实现方
 /// 只接收反序列化的 [`MemoryEvent`]；事件内容随调用方传入，错误返回值
 /// 永不回带正文（失败语义为 fail-open，调用方仅记录无正文告警）。
-/// 事件写路径接线（adapter/service 落地）前仅测试引用，dead_code 暂时放行。
-#[cfg_attr(not(test), allow(dead_code))]
 #[async_trait]
 pub trait MemoryEventAppendPort: Send + Sync {
     /// 追加一条事件；成功返回 `()`，失败返回不携带正文的

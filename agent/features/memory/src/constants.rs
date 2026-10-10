@@ -35,7 +35,6 @@ pub(crate) const ACTIVE_MEMBER: &str = "active";
 pub(crate) const SCHEMA_VERSION: u32 = 1;
 
 /// 生产事件流 envelope 的 schema 版本（`MemoryEvent::schema_version` 写入值）。
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) const EVENT_SCHEMA_VERSION: u32 = 1;
 
 /// 事件流日切 segment 目录名（`memory/{project_key}/events/` 下的固定段）。

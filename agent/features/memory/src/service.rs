@@ -1,6 +1,11 @@
 use crate::adapters::MemoryPolicy;
 use crate::domain::constants::MIN_SYNTHESIS_EVIDENCE;
+use crate::domain::event::{
+    ConfigFingerprint, EventActor, EventChange, EventContext, EventOutcome, MemoryEvent,
+    MemoryEventOp,
+};
 use crate::domain::*;
+use crate::noop::NoopEventAppend;
 use crate::ports::*;
 use async_trait::async_trait;
 use std::{
@@ -45,6 +50,8 @@ pub(crate) struct MemoryService<S: MemoryDatasetStore> {
     clock: MemoryClock,
     /// System One 评分端口（None = 重排关闭，词法序原样返回）。
     scorer: Option<Arc<dyn systemone::ScoringPort>>,
+    /// 事件追加端口（中心化 emit 的唯一出口，fail-open，见 `emit_event`）。
+    events: Arc<dyn MemoryEventAppendPort>,
 }
 
 impl<S: MemoryDatasetStore> MemoryService<S> {
@@ -77,8 +84,27 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
         clock: impl Fn() -> u64 + Send + Sync + 'static,
         scorer: Option<Arc<dyn systemone::ScoringPort>>,
     ) -> Result<Self, MemoryError> {
+        Self::open_with_clock_and_scorer_and_events(
+            store,
+            policy,
+            clock,
+            scorer,
+            Arc::new(NoopEventAppend),
+        )
+        .await
+    }
+
+    /// 全参装配入口：测试与后续 opener 经此注入真实事件端口；
+    /// 其余入口以 `NoopEventAppend` 作默认，保持既有调用方零改动。
+    pub async fn open_with_clock_and_scorer_and_events(
+        store: S,
+        policy: MemoryPolicy,
+        clock: impl Fn() -> u64 + Send + Sync + 'static,
+        scorer: Option<Arc<dyn systemone::ScoringPort>>,
+        events: Arc<dyn MemoryEventAppendPort>,
+    ) -> Result<Self, MemoryError> {
         log::debug!(target: crate::LOG_TARGET, "open_with_clock enter");
-        let outcome = Self::load_open(store, policy, clock, scorer).await;
+        let outcome = Self::load_open(store, policy, clock, scorer, events).await;
         match &outcome {
             Ok(_) => log::debug!(target: crate::LOG_TARGET, "open_with_clock ok"),
             Err(error) => log::debug!(target: crate::LOG_TARGET, "open_with_clock error: {error}"),
@@ -96,6 +122,7 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
         policy: MemoryPolicy,
         clock: impl Fn() -> u64 + Send + Sync + 'static,
         scorer: Option<Arc<dyn systemone::ScoringPort>>,
+        events: Arc<dyn MemoryEventAppendPort>,
     ) -> Result<Self, MemoryError> {
         validate_policy(policy)?;
         let global = load_layer(&store, MemoryLayer::Global).await?;
@@ -107,7 +134,44 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
             mutation_gate: Mutex::new(()),
             clock: Arc::new(clock),
             scorer,
+            events,
         })
+    }
+
+    /// 中心化事件发射：追加失败仅记录一条无正文的告警并吞掉错误——
+    /// **NEVER** 把 append 错误传播给调用方（fail-open，事件流绝不阻断主路径）。
+    async fn emit_event(&self, event: MemoryEvent) {
+        if let Err(error) = self.events.append(&event).await {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "memory_event_append_failed op={:?} err={error}",
+                event.op
+            );
+        }
+    }
+
+    /// 组装一条 write-add 事件快照（写组全量落点前的骨架：先保证中心化
+    /// emit 与 fail-open 成立，变更快照携带新增条目全文）。
+    fn build_write_add_event(&self, entry: &MemoryEntry, id: MemoryId) -> MemoryEvent {
+        let mut event = MemoryEvent::new(
+            format!("write_add-{id}"),
+            (self.clock)() * 1000,
+            MemoryEventOp::WriteAdd,
+            EventOutcome::Succeeded,
+            format!("write_add-{id}"),
+            EventActor::Service,
+            EventChange::Write {
+                before: vec![],
+                after: vec![entry.clone()],
+            },
+            EventContext::default(),
+            ConfigFingerprint {
+                scoring_enabled: self.scorer.is_some(),
+                ..ConfigFingerprint::default()
+            },
+        );
+        event.layer = Some(entry.layer);
+        event
     }
 
     /// 评分开启时重排词法召回的 top-N；评分失败静默回退词法序（NEVER 阻断搜索）。
@@ -496,8 +560,11 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
     async fn write(&self, entry: MemoryEntry) -> Result<WriteResult, MemoryError> {
         validate_content(&entry.content)?;
         let policy = self.policy;
+        let layer = entry.layer;
+        // Commit closure consumes `entry`; keep one snapshot for the event.
+        let event_entry = entry.clone();
         let result = self
-            .mutate_layer(entry.layer, move |dataset| {
+            .mutate_layer(layer, move |dataset| {
                 if dataset
                     .active()
                     .iter()
@@ -579,6 +646,11 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             outcome,
             eviction_candidates
         );
+        // One real emit on the committed add path; fail-open inside emit_event.
+        if let WriteResult::Added { id } = &result {
+            let event = self.build_write_add_event(&event_entry, *id);
+            self.emit_event(event).await;
+        }
         Ok(result)
     }
 

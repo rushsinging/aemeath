@@ -1,4 +1,5 @@
 use super::*;
+use crate::domain::event::{EventChange, EventOutcome, MemoryEvent, MemoryEventOp};
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex as StdMutex},
@@ -1257,4 +1258,100 @@ async fn read_falls_back_to_snapshot_when_store_keeps_failing() {
         .any(|hit| hit.entry.content == "old fact"));
     let listed = service.list(None).await;
     assert_eq!(listed.len(), 1);
+}
+
+// -----------------------------------------------------------------
+// Event emit skeleton: a committed write-add emits exactly one event
+// through the injected append port, and a broken port never blocks callers.
+// -----------------------------------------------------------------
+
+/// Append stub that always fails — proves emit is fail-open.
+struct FailingEventAppend;
+
+#[async_trait]
+impl MemoryEventAppendPort for FailingEventAppend {
+    async fn append(&self, _event: &MemoryEvent) -> Result<(), EventAppendError> {
+        Err(EventAppendError::Io)
+    }
+}
+
+#[tokio::test]
+async fn write_add_emits_event_through_injected_append_port() {
+    let added = entry(MemoryLayer::Project, "emitted fact");
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(
+            vec![Ok(empty_layer(1, MemoryLayer::Project))],
+            vec![Ok(receipt(2, MemoryCommitVisibility::Visible))],
+        ),
+    );
+    let recorder = RecordingEventAppend::default();
+    let service = MemoryService::open_with_clock_and_scorer_and_events(
+        store,
+        MemoryPolicy::default(),
+        || 4_242,
+        None,
+        Arc::new(recorder.clone()),
+    )
+    .await
+    .unwrap();
+
+    let result = service.write(added.clone()).await.unwrap();
+    assert!(matches!(result, WriteResult::Added { .. }));
+
+    let events = recorder.events();
+    assert_eq!(
+        events.len(),
+        1,
+        "one committed write-add must emit one event, got {events:?}"
+    );
+    assert_eq!(events[0].op, MemoryEventOp::WriteAdd);
+    assert_eq!(events[0].outcome, EventOutcome::Succeeded);
+    assert_eq!(
+        events[0].change,
+        EventChange::Write {
+            before: vec![],
+            after: vec![added]
+        }
+    );
+}
+
+#[tokio::test]
+async fn append_failure_never_blocks_write_or_retrieve() {
+    let stored = entry(MemoryLayer::Project, "fail open fact");
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
+        layer_script(
+            vec![
+                Ok(empty_layer(1, MemoryLayer::Project)),
+                Ok(committed(2, MemoryLayer::Project, vec![stored.clone()])),
+            ],
+            vec![Ok(receipt(2, MemoryCommitVisibility::Visible))],
+        ),
+    );
+    let service = MemoryService::open_with_clock_and_scorer_and_events(
+        store,
+        MemoryPolicy::default(),
+        || 4_242,
+        None,
+        Arc::new(FailingEventAppend),
+    )
+    .await
+    .unwrap();
+
+    // Fail-open: the always-Err port must never surface through the write path.
+    let result = service
+        .write(entry(MemoryLayer::Project, "written anyway"))
+        .await;
+    assert!(matches!(result, Ok(WriteResult::Added { .. })));
+
+    let injected = service
+        .retrieve_for_inject(&MemoryQuery {
+            limit: 10,
+            layer: None,
+            category: None,
+            now: 10,
+        })
+        .await;
+    assert_eq!(injected.hits.len(), 1);
 }

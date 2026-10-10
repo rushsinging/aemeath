@@ -78,9 +78,7 @@ impl MemoryPort for NoOpMemory {
 /// 事件 append 端口的空对象：opener/service 未装配真实事件存储时静默成功，
 /// 零副作用（事件落盘 fail-open，不阻断主流程）。
 ///
-/// 生产可见（`pub(crate)`）供 wire 装配点注入；事件写路径接线落地前
-/// 尚无生产调用方，显式放行 dead_code。
-#[allow(dead_code)]
+/// 生产可见（`pub(crate)`）：`MemoryService` 的旧构造入口默认注入它。
 #[derive(Debug, Default)]
 pub(crate) struct NoopEventAppend;
 
