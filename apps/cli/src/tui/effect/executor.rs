@@ -196,7 +196,7 @@ impl App {
         request_id: UiInteractionRequestId,
         reply: UiInteractionReply,
     ) {
-        let sdk_request_id = match sdk::InteractionRequestId::parse_uuid7(request_id.as_str()) {
+        let sdk_request_id = match sdk::InteractionRequestId::parse(request_id.as_str()) {
             Ok(value) => value,
             Err(_) => {
                 self.apply_interaction_failure(
@@ -235,7 +235,7 @@ impl App {
         request_id: UiInteractionRequestId,
         reason: UiInteractionCancelReason,
     ) {
-        let sdk_request_id = match sdk::InteractionRequestId::parse_uuid7(request_id.as_str()) {
+        let sdk_request_id = match sdk::InteractionRequestId::parse(request_id.as_str()) {
             Ok(value) => value,
             Err(_) => {
                 self.apply_interaction_failure(

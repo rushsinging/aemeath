@@ -239,7 +239,7 @@ impl ConnectAppService {
         };
         let session_id = ConnectSessionId::new();
         let session = ConnectSession::new(
-            session_id,
+            session_id.clone(),
             origin,
             expected_global_revision,
             existing_providers,
@@ -253,8 +253,8 @@ impl ConnectAppService {
     }
 
     /// 取得当前 session 的最新 view。
-    pub async fn view(&self, session_id: ConnectSessionId) -> Option<ConnectView> {
-        let session = self.sessions.lock().await.get(&session_id).cloned()?;
+    pub async fn view(&self, session_id: &ConnectSessionId) -> Option<ConnectView> {
+        let session = self.sessions.lock().await.get(session_id).cloned()?;
         let session = session.lock().await;
         Some(self.project_view(&session))
     }
@@ -262,10 +262,10 @@ impl ConnectAppService {
     /// 取消 session。
     pub async fn cancel(
         &self,
-        session_id: ConnectSessionId,
+        session_id: &ConnectSessionId,
         expected_revision: ConnectRevision,
     ) -> Result<ConnectView, ConnectError> {
-        let session = self.sessions.lock().await.get(&session_id).cloned().ok_or(
+        let session = self.sessions.lock().await.get(session_id).cloned().ok_or(
             ConnectError::InvalidTransition {
                 command: "Cancel",
                 actual: ConnectStage::Cancelled,
@@ -294,11 +294,11 @@ impl ConnectAppService {
     /// ConfirmSave）→ 以 operation revision 合并结果 / 投影。
     pub async fn apply(
         &self,
-        session_id: ConnectSessionId,
+        session_id: &ConnectSessionId,
         expected_revision: ConnectRevision,
         command: crate::connect::ConnectCommand,
     ) -> Result<ConnectView, ConnectError> {
-        let session = self.sessions.lock().await.get(&session_id).cloned().ok_or(
+        let session = self.sessions.lock().await.get(session_id).cloned().ok_or(
             ConnectError::InvalidTransition {
                 command: command_name_fn(&command),
                 actual: ConnectStage::Cancelled,
@@ -365,7 +365,7 @@ impl ConnectAppService {
         let sessions = self.sessions.clone();
         let probe = self.probe.clone();
         let commit = self.commit.clone();
-        let session_id = session_guard.session_id;
+        let session_id = session_guard.session_id.clone();
         drop(session_guard);
         tokio::spawn(async move {
             let async_result = run_async_operation(probe, commit, operation).await;
@@ -427,7 +427,7 @@ impl ConnectAppService {
 
     fn prepare_commit_request(&self, session: &ConnectSession) -> ConnectCommitRequest {
         ConnectCommitRequest {
-            session_id: session.session_id,
+            session_id: session.session_id.clone(),
             origin: session.origin,
             expected_global_revision: session.expected_global_revision.clone(),
             draft: session.draft.clone(),
@@ -942,7 +942,7 @@ impl ConnectAppService {
         let probe_status = session.probe_status.clone();
         let available_actions = AvailableAction::for_stage(stage, probe_status.as_ref());
         ConnectView {
-            session_id: session.session_id,
+            session_id: session.session_id.clone(),
             revision: session.revision,
             stage,
             origin: session.origin,

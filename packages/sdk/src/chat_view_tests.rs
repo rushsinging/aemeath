@@ -4,15 +4,15 @@ use super::*;
 fn sub_run_activity_round_trips_without_field_loss() {
     let event = SubRunActivityEventView {
         identity: SubRunIdentityView {
-            agent_id: crate::AgentId::from_legacy_or_new("agent-sub-a"),
-            run_id: crate::RunId::from_legacy_or_new("run-sub-a"),
-            parent_chat_id: crate::ChatId::from_legacy_or_new("parent-chat"),
-            parent_run_id: crate::RunId::from_legacy_or_new("run-main"),
-            spawned_by_tool_call_id: crate::ToolCallId::from_legacy_or_new("tool-agent-a"),
+            agent_id: crate::AgentId::new_v7(),
+            run_id: crate::RunId::new_v7(),
+            parent_chat_id: crate::ChatId::new_v7(),
+            parent_run_id: crate::RunId::new_v7(),
+            spawned_by_tool_call_id: crate::ToolCallId::new_v7(),
         },
         sequence: 9,
         kind: SubRunActivityKindView::ToolResult {
-            tool_call_id: crate::ToolCallId::from_legacy_or_new("skill-call"),
+            tool_call_id: crate::ToolCallId::new_v7(),
             tool_name: "Skill".to_string(),
             output: "SKILL_BODY_SENTINEL".to_string(),
             content: serde_json::json!({"name": "using-superpowers"}),

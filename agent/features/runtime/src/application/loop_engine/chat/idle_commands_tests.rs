@@ -84,8 +84,8 @@ async fn test_execute_memory_add_success() {
     assert!(text.contains("记忆已添加"), "got: {text}");
     // The full UUID is included so the user can reference it with delete/pin.
     assert!(
-        text.contains("ID: 0"),
-        "add result should include a UUID v7 (starts with 0): {text}"
+        text.contains("ID: mem_"),
+        "add result should include typed MemoryId: {text}"
     );
 }
 

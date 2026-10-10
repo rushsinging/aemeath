@@ -159,7 +159,7 @@ async fn a_suggestion_without_sources_stays_raw() {
 /// L1: the prompt contract parses both with and without the new field.
 #[test]
 fn the_synthesizes_field_parses_with_and_without_legacy_output() {
-    let with_field = r#"{"deviations":[],"suggested_memories":[{"layer":"project","category":"decision","content":"c","tags":[],"reason":"r","synthesizes":["00000000-0000-0000-0000-000000000001"]}],"outdated_memories":[]}"#;
+    let with_field = r#"{"deviations":[],"suggested_memories":[{"layer":"project","category":"decision","content":"c","tags":[],"reason":"r","synthesizes":["00000000-0000-7000-8000-000000000001"]}],"outdated_memories":[]}"#;
     let legacy = r#"{"deviations":[],"suggested_memories":[{"layer":"project","category":"decision","content":"c","tags":[],"reason":"r"}],"outdated_memories":[]}"#;
 
     let parsed = serde_json::from_str::<ReflectionOutput>(with_field).expect("must parse");

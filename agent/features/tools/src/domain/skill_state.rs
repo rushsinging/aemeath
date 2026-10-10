@@ -16,7 +16,7 @@ impl SkillLoadScope {
     }
 
     pub fn new_subagent_instance() -> Self {
-        Self::Subagent(uuid::Uuid::now_v7().to_string())
+        Self::Subagent(share::ids::new_typed_id("agt"))
     }
 
     pub fn subagent(value: impl Into<String>) -> Result<Self, SkillLoadStateError> {

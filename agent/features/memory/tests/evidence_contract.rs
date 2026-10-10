@@ -72,7 +72,7 @@ fn a_fresh_entry_is_raw_with_no_evidence() {
 #[test]
 fn a_persisted_entry_without_the_new_fields_loads_with_safe_defaults() {
     let legacy = r#"{
-        "id": "00000000-0000-0000-0000-000000000001",
+        "id": "00000000-0000-7000-8000-000000000001",
         "layer": "project",
         "category": "fact",
         "content": "legacy entry",
@@ -310,7 +310,7 @@ async fn restoring_a_referenced_entry_keeps_the_pointers_valid() {
 #[test]
 fn historical_merges_are_never_backfilled() {
     let legacy = r#"{
-        "id": "00000000-0000-0000-0000-000000000002",
+        "id": "00000000-0000-7000-8000-000000000002",
         "layer": "project",
         "category": "fact",
         "content": "merged long ago",

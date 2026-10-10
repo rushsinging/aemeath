@@ -47,7 +47,7 @@ pub(super) fn sub_request_log_context(
     role: &str,
 ) -> logging::LogContext {
     parent.patched(logging::LogContextPatch {
-        request_id: logging::FieldPatch::Set(uuid::Uuid::now_v7().to_string()),
+        request_id: logging::FieldPatch::Set(share::ids::new_typed_id("irq")),
         model: logging::FieldPatch::Set(model.to_string()),
         provider: logging::FieldPatch::Set(provider.to_string()),
         role: logging::FieldPatch::Set(role.to_string()),

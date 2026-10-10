@@ -163,7 +163,7 @@ async fn advance(
     command: ConnectCommand,
 ) -> ConnectView {
     service
-        .apply(view.session_id, view.revision, command)
+        .apply(&view.session_id, view.revision, command)
         .await
         .expect("command should succeed")
 }
@@ -463,7 +463,7 @@ async fn custom_model_skip_probe_save_completes_without_exposing_api_key() {
     assert!(!format!("{view:?}").contains("secret-key"));
 
     let saving = advance(&service, view, ConnectCommand::ConfirmSave).await;
-    let completed = wait_for_view(&service, saving.session_id, |view| {
+    let completed = wait_for_view(&service, &saving.session_id, |view| {
         matches!(view.terminal, Some(ConnectOutcome::Completed { .. }))
     })
     .await;
@@ -503,7 +503,7 @@ async fn invalid_endpoint_keeps_session_on_endpoint_page_with_visible_error() {
 
     let error = service
         .apply(
-            endpoint.session_id,
+            &endpoint.session_id,
             endpoint.revision,
             ConnectCommand::SetEndpoint {
                 base_url: String::new(),
@@ -520,7 +520,7 @@ async fn invalid_endpoint_keeps_session_on_endpoint_page_with_visible_error() {
             ..
         }
     ));
-    let current = service.view(endpoint.session_id).await.unwrap();
+    let current = service.view(&endpoint.session_id).await.unwrap();
     assert_eq!(current.stage, ConnectStage::EditEndpoint);
     assert!(matches!(
         current.last_error,
@@ -589,12 +589,12 @@ async fn back_from_initial_provider_stage_is_rejected_without_cancelling_session
         .await;
 
     let error = service
-        .apply(initial.session_id, initial.revision, ConnectCommand::Back)
+        .apply(&initial.session_id, initial.revision, ConnectCommand::Back)
         .await
         .expect_err("initial stage has no previous page");
 
     assert!(matches!(error, ConnectError::InvalidTransition { .. }));
-    let current = service.view(initial.session_id).await.unwrap();
+    let current = service.view(&initial.session_id).await.unwrap();
     assert_eq!(current.stage, ConnectStage::SelectProvider);
     assert_eq!(current.terminal, None);
 }
@@ -610,7 +610,7 @@ async fn stale_revision_rejects_command_without_changing_view() {
         .await;
     let error = service
         .apply(
-            view.session_id,
+            &view.session_id,
             ConnectRevision::from_value(99),
             ConnectCommand::SelectProvider {
                 source: find_by_source("Anthropic").unwrap().source.clone(),
@@ -619,7 +619,7 @@ async fn stale_revision_rejects_command_without_changing_view() {
         .await
         .expect_err("stale revision must fail");
     assert!(matches!(error, ConnectError::StaleRevision { .. }));
-    let current = service.view(view.session_id).await.unwrap();
+    let current = service.view(&view.session_id).await.unwrap();
     assert_eq!(current.stage, ConnectStage::SelectProvider);
     assert_eq!(current.revision, view.revision);
 }
@@ -634,12 +634,12 @@ async fn cancelled_session_rejects_repeated_terminal_command() {
         .start_connect(ConnectOrigin::ExplicitCommand, test_global_revision())
         .await;
     let cancelled = service
-        .cancel(view.session_id, view.revision)
+        .cancel(&view.session_id, view.revision)
         .await
         .unwrap();
     assert_eq!(cancelled.terminal, Some(ConnectOutcome::Cancelled));
     let error = service
-        .cancel(cancelled.session_id, cancelled.revision)
+        .cancel(&cancelled.session_id, cancelled.revision)
         .await
         .expect_err("terminal command must not repeat");
     assert!(matches!(error, ConnectError::InvalidTransition { .. }));
@@ -653,7 +653,7 @@ async fn probe_success_moves_directly_to_review() {
         .build();
     let view = ready_to_probe(&service).await;
     let running = advance(&service, view, ConnectCommand::BeginProbe).await;
-    let result = wait_for_probe_result(&service, running.session_id).await;
+    let result = wait_for_probe_result(&service, &running.session_id).await;
     // 成功停在结果页等待用户确认，回车（ContinueAfterProbe）才进 Review。
     assert_eq!(result.stage, ConnectStage::Probing);
     assert!(matches!(
@@ -677,7 +677,7 @@ async fn probe_user_agent_uses_global_config_when_catalog_has_no_client_ua() {
 
     let view = ready_to_probe_for_source(&service, "DeepSeek", None).await;
     let running = advance(&service, view, ConnectCommand::BeginProbe).await;
-    wait_for_probe_result(&service, running.session_id).await;
+    wait_for_probe_result(&service, &running.session_id).await;
 
     assert_eq!(
         probe.captured_user_agents().await,
@@ -699,7 +699,7 @@ async fn probe_user_agent_precedes_catalog_client_ua_when_global_is_set() {
 
     let view = ready_to_probe(&service).await;
     let running = advance(&service, view, ConnectCommand::BeginProbe).await;
-    wait_for_probe_result(&service, running.session_id).await;
+    wait_for_probe_result(&service, &running.session_id).await;
 
     assert_eq!(
         probe.captured_user_agents().await,
@@ -719,7 +719,7 @@ async fn probe_user_agent_uses_catalog_client_ua_when_global_missing() {
 
     let view = ready_to_probe(&service).await;
     let running = advance(&service, view, ConnectCommand::BeginProbe).await;
-    wait_for_probe_result(&service, running.session_id).await;
+    wait_for_probe_result(&service, &running.session_id).await;
 
     assert_eq!(
         probe.captured_user_agents().await,
@@ -739,7 +739,7 @@ async fn probe_user_agent_prefers_provider_override_over_global_config() {
 
     let view = ready_to_probe_with_provider_user_agent(&service, Some("provider-agent/1.0")).await;
     let running = advance(&service, view, ConnectCommand::BeginProbe).await;
-    wait_for_probe_result(&service, running.session_id).await;
+    wait_for_probe_result(&service, &running.session_id).await;
 
     assert_eq!(
         probe.captured_user_agents().await,
@@ -756,7 +756,7 @@ async fn probe_failure_requires_explicit_continue_or_edit() {
         .build();
     let view = ready_to_probe(&service).await;
     let running = advance(&service, view, ConnectCommand::BeginProbe).await;
-    let failed = wait_for_probe_result(&service, running.session_id).await;
+    let failed = wait_for_probe_result(&service, &running.session_id).await;
     assert_eq!(failed.stage, ConnectStage::Probing);
     assert!(matches!(
         failed.probe_status,
@@ -931,7 +931,7 @@ async fn commit_conflict_remains_saving_and_can_retry() {
     let saving = advance(&service, view, ConnectCommand::ConfirmSave).await;
     assert_eq!(saving.stage, ConnectStage::Saving);
     // 等后台写回 Conflict 状态。
-    let conflicted = wait_for_view(&service, saving.session_id, |view| {
+    let conflicted = wait_for_view(&service, &saving.session_id, |view| {
         matches!(
             view.last_error,
             Some(ConnectError::PersistConflict { expected: 2 })
@@ -945,7 +945,7 @@ async fn commit_conflict_remains_saving_and_can_retry() {
         })
         .await;
     let completed = advance(&service, conflicted, ConnectCommand::ConfirmSave).await;
-    let finished = wait_for_view(&service, completed.session_id, |view| {
+    let finished = wait_for_view(&service, &completed.session_id, |view| {
         matches!(view.terminal, Some(ConnectOutcome::Completed { .. }))
     })
     .await;
@@ -955,7 +955,7 @@ async fn commit_conflict_remains_saving_and_can_retry() {
 /// 等待探测异步结果写回（probe_status 离开 Running / 出错）。
 async fn wait_for_probe_result(
     service: &ConnectAppService,
-    session_id: ConnectSessionId,
+    session_id: &ConnectSessionId,
 ) -> ConnectView {
     wait_for_view(service, session_id, |view| {
         !matches!(view.probe_status, None | Some(ProbeStatusView::Running))
@@ -968,11 +968,11 @@ async fn wait_for_probe_result(
 /// 轮询 session view 直到谓词命中（异步写回等待）。
 async fn wait_for_view(
     service: &ConnectAppService,
-    session_id: ConnectSessionId,
+    session_id: &ConnectSessionId,
     matches_view: impl Fn(&ConnectView) -> bool,
 ) -> ConnectView {
     for _ in 0..200 {
-        if let Some(view) = service.view(session_id).await {
+        if let Some(view) = service.view(&session_id).await {
             if matches_view(&view) {
                 return view;
             }
@@ -996,7 +996,7 @@ async fn cancel_same_session_during_probe_wins_over_late_probe_result() {
     let probe_task = tokio::spawn(async move {
         service_for_probe
             .apply(
-                probing_view.session_id,
+                &probing_view.session_id,
                 probing_view.revision,
                 ConnectCommand::BeginProbe,
             )
@@ -1009,7 +1009,7 @@ async fn cancel_same_session_during_probe_wins_over_late_probe_result() {
     assert_eq!(running.stage, ConnectStage::Probing);
     let cancelled = tokio::time::timeout(
         Duration::from_millis(100),
-        service.cancel(running.session_id, running.revision),
+        service.cancel(&running.session_id, running.revision),
     )
     .await
     .expect("cancel must not wait for probe")
@@ -1018,12 +1018,12 @@ async fn cancel_same_session_during_probe_wins_over_late_probe_result() {
 
     probe.release.notify_one();
     // 后台写回被 outcome 拦截：session 保持 Cancelled。
-    let settled = wait_for_view(&service, running.session_id, |view| {
+    let settled = wait_for_view(&service, &running.session_id, |view| {
         matches!(view.terminal, Some(ConnectOutcome::Cancelled))
     })
     .await;
     tokio::time::sleep(Duration::from_millis(100)).await;
-    let after = service.view(running.session_id).await.unwrap();
+    let after = service.view(&running.session_id).await.unwrap();
     assert_eq!(after.stage, ConnectStage::Cancelled);
     assert!(!matches!(
         settled.terminal,
@@ -1044,25 +1044,27 @@ async fn cancel_same_session_during_commit_wins_over_late_success() {
     );
     let review = ready_to_review(&service).await;
     let service_for_commit = service.clone();
+    let review_session_id = review.session_id.clone();
+    let review_revision = review.revision;
     let commit_task = tokio::spawn(async move {
         service_for_commit
             .apply(
-                review.session_id,
-                review.revision,
+                &review_session_id,
+                review_revision,
                 ConnectCommand::ConfirmSave,
             )
             .await
     });
     commit.entered.notified().await;
 
-    let saving = tokio::time::timeout(Duration::from_millis(100), service.view(review.session_id))
+    let saving = tokio::time::timeout(Duration::from_millis(100), service.view(&review.session_id))
         .await
         .expect("same session view must remain available during commit")
         .expect("session exists");
     assert_eq!(saving.stage, ConnectStage::Saving);
     let cancelled = tokio::time::timeout(
         Duration::from_millis(100),
-        service.cancel(saving.session_id, saving.revision),
+        service.cancel(&saving.session_id, saving.revision),
     )
     .await
     .expect("cancel must not wait for commit")
@@ -1072,12 +1074,12 @@ async fn cancel_same_session_during_commit_wins_over_late_success() {
     commit.release.notify_one();
     let _ = commit_task.await.unwrap().unwrap();
     // 后台写回被 outcome 拦截：session 保持 Cancelled（未 Completed）。
-    let settled = wait_for_view(&service, saving.session_id, |view| {
+    let settled = wait_for_view(&service, &saving.session_id, |view| {
         matches!(view.terminal, Some(ConnectOutcome::Cancelled))
     })
     .await;
     tokio::time::sleep(Duration::from_millis(100)).await;
-    let after = service.view(saving.session_id).await.unwrap();
+    let after = service.view(&saving.session_id).await.unwrap();
     assert_eq!(after.stage, ConnectStage::Cancelled);
     assert!(!matches!(
         settled.terminal,
@@ -1103,7 +1105,7 @@ async fn unrelated_session_view_is_not_blocked_while_probe_waits() {
     let probe_task = tokio::spawn(async move {
         service_for_probe
             .apply(
-                probing_view.session_id,
+                &probing_view.session_id,
                 probing_view.revision,
                 ConnectCommand::BeginProbe,
             )
@@ -1112,7 +1114,7 @@ async fn unrelated_session_view_is_not_blocked_while_probe_waits() {
     probe.entered.notified().await;
 
     let other_view =
-        tokio::time::timeout(Duration::from_millis(100), service.view(other.session_id))
+        tokio::time::timeout(Duration::from_millis(100), service.view(&other.session_id))
             .await
             .expect("another session must not wait for probe")
             .expect("other session exists");

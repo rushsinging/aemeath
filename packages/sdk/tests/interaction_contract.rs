@@ -15,17 +15,17 @@ where
 }
 
 #[test]
-fn published_identity_round_trips_as_uuidv7_strings() {
+fn published_identity_round_trips_as_typed_or_legacy_strings() {
     let run_step_id = RunStepId::new_v7();
     let agent_id = AgentId::new_v7();
     let request_id = InteractionRequestId::new_v7();
+    assert!(share::ids::is_typed_id(run_step_id.as_str(), "stp"));
+    assert!(share::ids::is_typed_id(agent_id.as_str(), "agt"));
+    assert!(share::ids::is_typed_id(request_id.as_str(), "irq"));
 
     assert_json_round_trip(&run_step_id);
     assert_json_round_trip(&agent_id);
     assert_json_round_trip(&request_id);
-    assert_eq!(run_step_id.as_uuid().get_version_num(), 7);
-    assert_eq!(agent_id.as_uuid().get_version_num(), 7);
-    assert_eq!(request_id.as_uuid().get_version_num(), 7);
 }
 
 #[test]

@@ -293,7 +293,7 @@ impl ReflectionTaskAdapter {
             ),
         }
         let identity = ReflectionExecutionIdentity {
-            id: uuid::Uuid::now_v7().to_string(),
+            id: share::ids::new_typed_id("inv"),
             timestamp: now,
             trigger: trigger.memory_trigger(),
             coverage_end: request.coverage_end,

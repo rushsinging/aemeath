@@ -7,11 +7,11 @@ use crate::{
 
 fn activity_fixture() -> ActivityView {
     ActivityView {
-        id: ActivityId::new("activity-1"),
-        run_id: crate::RunId::new("run-1"),
-        run_step_id: Some(crate::RunStepId::new("step-1")),
-        parent_activity_id: Some(ActivityId::new("root-activity")),
-        source: ActivitySourceView::ModelInvocation(crate::ModelInvocationId::new("invocation-1")),
+        id: ActivityId::new_v7(),
+        run_id: crate::RunId::new_v7(),
+        run_step_id: Some(crate::RunStepId::new_v7()),
+        parent_activity_id: Some(ActivityId::new_v7()),
+        source: ActivitySourceView::ModelInvocation(crate::ModelInvocationId::new_v7()),
         kind: ActivityKindView::ModelInvocation,
         state: ActivityStateView::Running,
         detail: ActivityDetailView::Model {
@@ -57,11 +57,13 @@ fn activity_snapshot_defaults_legacy_missing_heartbeat_sequence() {
 
 #[test]
 fn activity_snapshot_carries_complete_views_at_one_run_revision() {
+    let mut activity = activity_fixture();
+    let run_id = activity.run_id.clone();
     let snapshot = ActivitySnapshotView {
-        run_id: crate::RunId::new("run-1"),
+        run_id: run_id.clone(),
         revision: 9,
         heartbeat_sequence: 3,
-        activities: vec![activity_fixture()],
+        activities: vec![activity],
     };
 
     assert_eq!(snapshot.activities[0].run_id, snapshot.run_id);
@@ -144,7 +146,7 @@ fn activity_events_keep_change_kind_and_complete_snapshot() {
         activity: activity_fixture(),
     };
     let snapshot = ChatEvent::ActivitySnapshot(ActivitySnapshotView {
-        run_id: crate::RunId::new("run-1"),
+        run_id: crate::RunId::new_v7(),
         revision: 9,
         heartbeat_sequence: 0,
         activities: vec![activity_fixture()],

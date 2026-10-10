@@ -42,13 +42,13 @@ tui_id!(ToolCallId);
 
 impl ChatId {
     pub fn new_v7() -> Self {
-        Self(uuid::Uuid::new_v4().to_string())
+        Self(sdk::new_typed_id("cht"))
     }
 }
 
 impl ChatRunId {
     pub fn new_v7() -> Self {
-        Self(uuid::Uuid::new_v4().to_string())
+        Self(sdk::new_typed_id("run"))
     }
 }
 

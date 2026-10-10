@@ -261,7 +261,7 @@ async fn reflection_adds_and_merges_suggestions_with_injected_time() {
     assert_eq!(entries[0].created_at, 4242);
     assert_eq!(entries[0].last_confirmed_at, 4242);
     assert_eq!(entries[0].confirmation_count, 1);
-    assert_eq!(entries[0].id.as_uuid().get_version_num(), 7);
+    assert!(share::ids::is_typed_id(&entries[0].id.to_string(), "mem"));
 }
 
 #[tokio::test]

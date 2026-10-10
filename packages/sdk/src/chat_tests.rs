@@ -164,7 +164,12 @@ fn test_chat_input_event_classify_text_control_command() {
 fn test_user_message_generates_v7_input_id() {
     match ChatInputEvent::user_message("x", vec![]) {
         ChatInputEvent::UserMessage { id, .. } => {
-            assert_eq!(id.as_uuid().get_version_num(), 7);
+            assert!(
+                share::ids::is_typed_id(id.as_str(), "inp")
+                    || uuid::Uuid::parse_str(id.as_str())
+                        .map(|u| u.get_version_num() == 7)
+                        .unwrap_or(false)
+            );
         }
         other => panic!("expected UserMessage, got {other:?}"),
     }

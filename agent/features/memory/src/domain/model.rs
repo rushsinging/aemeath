@@ -2,31 +2,67 @@ use serde::{Deserialize, Serialize};
 use std::{fmt, time::Duration};
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct MemoryId(uuid::Uuid);
+/// Memory 条目身份：新生成 typed `mem_<11base62>`；读兼容 legacy UUIDv7。
+///
+/// 保持 `Copy`（领域内大量按值传递）；序列化为单字符串。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MemoryId(MemoryIdRepr);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum MemoryIdRepr {
+    Typed([u8; 11]),
+    Legacy(uuid::Uuid),
+}
 
 impl MemoryId {
     pub fn new(value: impl AsRef<str>) -> Result<Self, MemoryError> {
-        uuid::Uuid::parse_str(value.as_ref())
-            .map(Self)
-            .map_err(|_| MemoryError::InvalidEntry {
-                message: "记忆 ID 必须是 UUID".to_string(),
-            })
+        let value = value.as_ref();
+        if share::ids::is_typed_id(value, "mem") {
+            let suffix = value["mem_".len()..].as_bytes();
+            let mut bytes = [0u8; 11];
+            bytes.copy_from_slice(suffix);
+            return Ok(Self(MemoryIdRepr::Typed(bytes)));
+        }
+        if let Ok(uuid) = uuid::Uuid::parse_str(value) {
+            if uuid.get_version_num() == 7 {
+                return Ok(Self(MemoryIdRepr::Legacy(uuid)));
+            }
+        }
+        Err(MemoryError::InvalidEntry {
+            message: "记忆 ID 必须是 typed `mem_` 或 legacy UUIDv7".to_string(),
+        })
     }
 
     pub fn now_v7() -> Self {
-        Self(uuid::Uuid::now_v7())
-    }
-
-    pub fn as_uuid(&self) -> &uuid::Uuid {
-        &self.0
+        Self::new(share::ids::new_typed_id("mem")).expect("new_typed_id(mem) 必合法")
     }
 }
 
 impl fmt::Display for MemoryId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(formatter)
+        match self.0 {
+            MemoryIdRepr::Typed(suffix) => {
+                write!(
+                    formatter,
+                    "mem_{}",
+                    std::str::from_utf8(&suffix).expect("typed suffix 为 ascii base62")
+                )
+            }
+            MemoryIdRepr::Legacy(uuid) => write!(formatter, "{uuid}"),
+        }
+    }
+}
+
+impl Serialize for MemoryId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for MemoryId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
     }
 }
 
