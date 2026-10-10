@@ -95,14 +95,9 @@ fn background_process_tools_render_typed_display_and_status_line_count() {
     // 第三行必须仍在。
     submit(&terminal, "派发一个后台任务");
     wait_screen_text(&terminal, "已转后台", Duration::from_secs(25));
-    // 位置级断言（#1895）：计数在 status bar runtime 行（与 Ready 同
-    // 行），而非 spinner 下方输出区。
-    wait_screen_row(
-        &terminal,
-        "Ready",
-        "Backend Progress",
-        Duration::from_secs(10),
-    );
+    // 位置级断言（#1895）：计数独占 status bar 第三行——与 Ready、
+    // context 均不同行。
+    wait_screen_standalone_row(&terminal, "Backend Progress", Duration::from_secs(10));
 
     // ② List typed 渲染：mock 第 3 响应返回 BackgroundProcessList tool
     // call，第 4 响应纯文本收口。断言 typed header 与解析摘要行。
@@ -137,8 +132,9 @@ fn submit(terminal: &Session, data: &str) {
         .expect("键入并回车");
 }
 
-/// 轮询全屏文本直到 needle_a 与 needle_b 出现在同一行（位置级断言）。
-fn wait_screen_row(terminal: &Session, needle_a: &str, needle_b: &str, timeout: Duration) {
+/// 轮询直到 needle 独占一行（不含 Ready——计数第三行专属），且存在
+/// 独立 Ready 行（证明 status bar 正常渲染、位置正确）。
+fn wait_screen_standalone_row(terminal: &Session, needle: &str, timeout: Duration) {
     let deadline = Instant::now() + timeout;
     let mut last_screen = String::new();
     while Instant::now() < deadline {
@@ -146,17 +142,19 @@ fn wait_screen_row(terminal: &Session, needle_a: &str, needle_b: &str, timeout: 
             .execute(Operation::Text { full: true })
             .expect("读屏")
         {
-            if text
-                .lines()
-                .any(|line| line.contains(needle_a) && line.contains(needle_b))
-            {
+            let lines: Vec<&str> = text.lines().collect();
+            let has_ready = lines.iter().any(|line| line.contains("Ready"));
+            let standalone = lines
+                .iter()
+                .any(|line| line.contains(needle) && !line.contains("Ready"));
+            if has_ready && standalone {
                 return;
             }
             last_screen = text;
         }
         std::thread::sleep(Duration::from_millis(300));
     }
-    panic!("等待同一行出现 {needle_a:?} 与 {needle_b:?} 超时；当前屏幕：\n{last_screen}");
+    panic!("等待 {needle:?} 独立行超时；当前屏幕：\n{last_screen}");
 }
 
 /// 轮询全屏文本直到包含 needle（超时 panic 时附当前屏幕快照辅助定位）。

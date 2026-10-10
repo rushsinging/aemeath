@@ -137,6 +137,23 @@ impl StatusBar {
             let context_line = self.context_row_spans(area.width as usize, base, selection, view);
             Paragraph::new(Line::from(context_line)).render(context_area, buf);
         }
+        // #1895：后台进程计数独占第三行（>0 才显示；布局高度随之为 3）。
+        // Run 结束 spinner 消失后仍可见——用户须随时知道还有多少后台进程在跑。
+        if area.height >= 3 && view.runtime.background_processes_active > 0 {
+            let count_area = Rect {
+                y: area.y.saturating_add(2),
+                height: 1,
+                ..area
+            };
+            let spans = vec![Span::styled(
+                format!(
+                    "{} Backend Progress",
+                    view.runtime.background_processes_active
+                ),
+                self.runtime_segment_style(RuntimeSegmentStyle::Muted),
+            )];
+            Paragraph::new(Line::from(spans)).render(count_area, buf);
+        }
     }
 
     fn runtime_segments(&self, view: &StatusViewModel) -> Vec<(String, RuntimeSegmentStyle)> {
@@ -180,15 +197,6 @@ impl StatusBar {
         if vm.api_calls > 0 {
             segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
             segments.push((format!("api {}", vm.api_calls), RuntimeSegmentStyle::Muted));
-        }
-        // #1895：后台进程活动数挂 status bar runtime 行尾部（>0 才显示）。
-        // Run 结束 spinner 消失后仍可见——用户须随时知道还有多少后台进程在跑。
-        if vm.background_processes_active > 0 {
-            segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
-            segments.push((
-                format!("{} Backend Progress", vm.background_processes_active),
-                RuntimeSegmentStyle::Muted,
-            ));
         }
         segments
     }
