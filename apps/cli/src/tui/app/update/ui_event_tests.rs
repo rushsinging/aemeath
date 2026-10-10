@@ -467,8 +467,8 @@ fn adopted_typed_skill_and_hook_notice_keep_distinct_semantics_without_user_echo
     assert!(!notices.iter().any(|text| text.contains("LLM hook prompt")));
 }
 
-/// #749：ApiError 退化为纯展示 —— 追加一次错误 notice，NOT 自行清 processing
-/// （收口统一交给随后的 DoneWithDuration）。
+/// #749 / #1919：ApiError 退化为纯展示 —— 经 mapping 追加恰好一次 Error notice，
+/// NOT 再经 update 侧写 System；且不清 processing（收口交给 Done）。
 #[test]
 fn test_api_error_appends_notice_and_defers_processing_to_done() {
     let mut app = test_app();
@@ -489,18 +489,57 @@ fn test_api_error_appends_notice_and_defers_processing_to_done() {
         &spawn_refs,
     );
 
-    // 错误 notice 已注入（供用户可见），且只出现一次
-    let error_hits = system_notice_texts(&app)
+    // 展示只走 AppendError：Error 恰好一次，System 同文为 0（防双写）
+    let error_hits = error_notice_texts(&app)
         .iter()
         .filter(|t| t.contains("stream interrupted after partial output"))
         .count();
-    assert_eq!(error_hits, 1, "ApiError 应追加恰好一次错误 notice");
+    assert_eq!(error_hits, 1, "ApiError 应追加恰好一次 Error notice");
+    let system_hits = system_notice_texts(&app)
+        .iter()
+        .filter(|t| t.contains("stream interrupted after partial output"))
+        .count();
+    assert_eq!(system_hits, 0, "ApiError 不得再侧写 System notice");
 
     // ApiError 本身不清 processing —— 收口交给 DoneWithDuration
     assert!(
         app.chat.is_processing,
         "ApiError 不应自行清 processing，收口交给 Done"
     );
+}
+
+/// #1919：SessionResumeFailed 只展示一行带前缀的 Error，不得 System+Error 双写。
+#[test]
+fn test_session_resume_failed_appends_single_prefixed_error() {
+    let mut app = test_app();
+    let (ui_tx, _ui_rx) = mpsc::channel(1);
+    let spawn_refs = make_spawn_refs();
+
+    let message = "no such session".to_string();
+    app.update(
+        TuiMsg::RuntimeBatch(vec![TuiRuntimeEvent::SessionResumeFailed {
+            kind: crate::tui::adapter::tui_runtime_event::TuiSessionResumeFailureKind::NotFound,
+            id: "sess-missing".to_string(),
+            message: message.clone(),
+        }]),
+        &ui_tx,
+        &spawn_refs,
+    );
+
+    let expected = format!("⚠️ 会话恢复失败（不存在）: {message}");
+    let error_hits = error_notice_texts(&app)
+        .iter()
+        .filter(|t| **t == expected)
+        .count();
+    assert_eq!(
+        error_hits, 1,
+        "SessionResumeFailed 应追加恰好一次带前缀 Error"
+    );
+    let system_hits = system_notice_texts(&app)
+        .iter()
+        .filter(|t| t.contains(&message))
+        .count();
+    assert_eq!(system_hits, 0, "SessionResumeFailed 不得侧写 System notice");
 }
 
 /// #749 核心回归：API 错误 turn 终止序列（ApiError → DoneWithDuration）后，
@@ -551,6 +590,22 @@ fn system_notice_texts(app: &App) -> Vec<&str> {
         .iter()
         .filter_map(|item| match item {
             crate::tui::model::output_timeline::OutputTimelineItem::System { text, .. } => {
+                Some(text.as_str())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// 收集 Error notice timeline 文本（`AppendError` 写入 Error 块）。
+fn error_notice_texts(app: &App) -> Vec<&str> {
+    app.model
+        .conversation
+        .timeline
+        .items()
+        .iter()
+        .filter_map(|item| match item {
+            crate::tui::model::output_timeline::OutputTimelineItem::Error { text, .. } => {
                 Some(text.as_str())
             }
             _ => None,

@@ -410,8 +410,8 @@ impl App {
             TuiRuntimeEvent::TurnStarted { .. } => {
                 self.mark_output_dirty();
             }
-            TuiRuntimeEvent::ApiError { error, .. } => {
-                self.append_system_notice(error);
+            TuiRuntimeEvent::ApiError { .. } => {
+                // 展示只走 map_runtime_event → AppendError；此处不再侧写 notice（#1919）。
                 self.mark_output_dirty();
             }
             TuiRuntimeEvent::ReflectionHistory { records } => {
@@ -565,18 +565,7 @@ impl App {
                 };
             }
             TuiRuntimeEvent::SessionResumeFailed { kind, id, message } => {
-                let prefix = match kind {
-                    crate::tui::adapter::tui_runtime_event::TuiSessionResumeFailureKind::NotFound => {
-                        "⚠️ 会话恢复失败（不存在）"
-                    }
-                    crate::tui::adapter::tui_runtime_event::TuiSessionResumeFailureKind::Corrupt => {
-                        "⚠️ 会话恢复失败（文件损坏）"
-                    }
-                    crate::tui::adapter::tui_runtime_event::TuiSessionResumeFailureKind::Io => {
-                        "⚠️ 会话恢复失败（IO 错误）"
-                    }
-                };
-                self.append_system_notice(format!("{prefix}: {message}"));
+                // 展示只走 map_runtime_event → AppendError（含前缀）；此处仅保留诊断日志（#1919）。
                 log::warn!(
                     target: crate::LOG_TARGET,
                     "session resume failed: id={} kind={:?} msg={}",

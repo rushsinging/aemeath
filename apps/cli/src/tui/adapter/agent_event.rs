@@ -383,9 +383,20 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             }
         }
         TuiRuntimeEvent::SessionResumed { .. } => AgentEventMapping::default(),
-        TuiRuntimeEvent::SessionResumeFailed { message, .. } => {
+        TuiRuntimeEvent::SessionResumeFailed { kind, message, .. } => {
+            let prefix = match kind {
+                crate::tui::adapter::tui_runtime_event::TuiSessionResumeFailureKind::NotFound => {
+                    "⚠️ 会话恢复失败（不存在）"
+                }
+                crate::tui::adapter::tui_runtime_event::TuiSessionResumeFailureKind::Corrupt => {
+                    "⚠️ 会话恢复失败（文件损坏）"
+                }
+                crate::tui::adapter::tui_runtime_event::TuiSessionResumeFailureKind::Io => {
+                    "⚠️ 会话恢复失败（IO 错误）"
+                }
+            };
             conversation(ConversationIntent::AppendError(AppendError {
-                text: message.clone(),
+                text: format!("{prefix}: {message}"),
             }))
         }
         TuiRuntimeEvent::ReflectionHistory { .. } => AgentEventMapping::default(),
