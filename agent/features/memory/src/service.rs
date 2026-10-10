@@ -713,6 +713,13 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                 Ok(marked) => {
                     if marked {
                         result.outdated_marked += 1;
+                    } else {
+                        // 目标在反射运行期间被删除或已过期（引用解析后库变化）：
+                        // 静默跳过并记录，NEVER 失败整批。
+                        log::info!(
+                            target: crate::LOG_TARGET,
+                            "memory_reflection_outdated_noop id={id}",
+                        );
                     }
                     result.completed += 1;
                 }

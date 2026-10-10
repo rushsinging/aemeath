@@ -188,3 +188,29 @@ async fn apply_reflection_skips_invalid_outdated_reference_without_failing_batch
     assert_eq!(result.attempted, 1);
     assert_eq!(result.completed, 1);
 }
+
+#[tokio::test]
+async fn apply_reflection_missing_outdated_target_is_skipped_without_failure() {
+    // 引用在解析时有效、apply 时目标已不存在（反射运行期间被删除/变更）：
+    // 跳过并记录，NEVER 失败整批。
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global))], vec![]),
+        layer_script(vec![Ok(committed(1, MemoryLayer::Project, vec![]))], vec![]),
+    );
+    let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 200)
+        .await
+        .unwrap();
+
+    let missing = MemoryId::now_v7();
+    let result = service
+        .apply_reflection(&ReflectionOutput {
+            outdated_memories: vec![missing.to_string()],
+            ..ReflectionOutput::default()
+        })
+        .await
+        .expect("目标缺失 MUST 跳过而不是失败");
+
+    assert_eq!(result.outdated_marked, 0);
+    assert_eq!(result.attempted, 1);
+    assert_eq!(result.completed, 1);
+}
