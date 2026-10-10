@@ -69,10 +69,10 @@ impl JsonlSegmentEventStore {
     /// 事件行校验（与 Audit append 同口径）：非空、以 `\n` 结尾、行内无第二个
     /// `\n`。返回错误的 Display 固定文案，绝不携带 payload。
     fn validate_line(bytes: &[u8]) -> Result<(), EventAppendError> {
-        if bytes.is_empty()
-            || bytes.last() != Some(&b'\n')
-            || bytes[..bytes.len() - 1].contains(&b'\n')
-        {
+        let Some((last, body)) = bytes.split_last() else {
+            return Err(EventAppendError::Rejected);
+        };
+        if *last != b'\n' || body.contains(&b'\n') {
             return Err(EventAppendError::Rejected);
         }
         Ok(())

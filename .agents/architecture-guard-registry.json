@@ -505,6 +505,18 @@
       "tracking_issue": 1709
     },
     {
+      "id": "construction.memory.wire-memory-event-store",
+      "symbol": "wire_memory_event_store",
+      "owner_crate": "memory",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "memory 事件流 JsonlSegmentEventStore 收窄后 composition 唯一构造入口",
+      "tracking_issue": 1903
+    },
+    {
       "id": "construction.context.isolated-context",
       "symbol": "wire_isolated_context",
       "owner_crate": "context",
@@ -955,12 +967,16 @@
         "constants.rs",
         "domain",
         "domain.rs",
+        "event_jsonl.rs",
+        "event_jsonl_tests.rs",
         "lib.rs",
         "lib_tests.rs",
         "noop.rs",
         "ports",
         "ports.rs",
         "ports_tests.rs",
+        "reflection_history_jsonl.rs",
+        "reflection_history_jsonl_tests.rs",
         "service.rs",
         "service_reflection_tests.rs",
         "service_tests.rs"

@@ -129,7 +129,10 @@ impl JsonlReflectionHistoryStore {
         let mut bytes = serde_json::to_vec(record)
             .map_err(|_| Self::storage_kind(MemoryStorageErrorKind::Serialization))?;
         bytes.push(b'\n');
-        if bytes[..bytes.len() - 1].contains(&b'\n') {
+        let Some((last, body)) = bytes.split_last() else {
+            return Err(Self::storage_kind(MemoryStorageErrorKind::Serialization));
+        };
+        if *last != b'\n' || body.contains(&b'\n') {
             return Err(Self::storage_kind(MemoryStorageErrorKind::Serialization));
         }
         Ok(bytes)
