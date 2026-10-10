@@ -3,6 +3,18 @@ use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload
 use serde::de::DeserializeOwned;
 use std::path::Path;
 
+/// 从 result 的 content JSON 反序列化到 typed struct（#1895 typed
+/// result 渲染入口）；content 缺失 / Null / 反序列化失败返回 None。
+pub(super) fn typed_from_content<T: DeserializeOwned>(
+    content: Option<&serde_json::Value>,
+) -> Option<T> {
+    let content = content?;
+    if content.is_null() {
+        return None;
+    }
+    serde_json::from_value(content.clone()).ok()
+}
+
 /// 从 `payload.content` 反序列化到 typed struct。
 ///
 /// 返回 `None` 当 payload 缺失、content 为 Null、或反序列化失败。

@@ -17,6 +17,6 @@ pub(crate) fn registration_count(name: &str) -> usize {
         .count()
 }
 
-pub(crate) fn lookup_display(name: &str) -> Option<&'static dyn ToolDisplay> {
+pub fn lookup_display(name: &str) -> Option<&'static dyn ToolDisplay> {
     TOOL_DISPLAYS.get(name).map(|display| display.as_ref())
 }

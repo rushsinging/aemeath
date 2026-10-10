@@ -7,14 +7,14 @@ use serde::{Deserialize, Serialize};
 pub struct BackgroundProcessListInput {}
 
 /// `BackgroundProcessStatus` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BackgroundProcessStatusInput {
     /// Task id（`task-` 前缀）。
     pub task_id: String,
 }
 
 /// `BackgroundProcessLogs` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BackgroundProcessLogsInput {
     /// Task id（`task-` 前缀）。
     pub task_id: String,
@@ -25,7 +25,7 @@ pub struct BackgroundProcessLogsInput {
 }
 
 /// `BackgroundProcessStop` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BackgroundProcessStopInput {
     /// Task id（`task-` 前缀）。
     pub task_id: String,

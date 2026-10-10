@@ -1,4 +1,5 @@
 mod common;
+mod constants;
 mod format;
 mod policy;
 mod registry;
@@ -17,5 +18,4 @@ pub use traits::ToolDisplay;
 
 #[cfg(test)]
 pub(crate) use format::result_render_kind;
-#[cfg(test)]
 pub(crate) use registry::lookup_display;

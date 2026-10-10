@@ -163,6 +163,10 @@ impl ToolExecutionSupervisor {
                     task_id.as_str(),
                 );
             }
+            // #252 PR3 补全：转后台（活动数 +1 方向）也 emit——此前仅
+            // notify_terminal（-1）emit，单任务运行期间计数永不显示
+            // （L5 PTY 端到端实证）。
+            runtime.emit_active_count();
         }
         tokio::spawn(async move {
             let outcome = match deadline_snapshot {

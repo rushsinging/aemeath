@@ -1,5 +1,6 @@
 mod agent;
 mod ask_user;
+mod background_process;
 mod filesystem;
 mod helpers;
 mod search;

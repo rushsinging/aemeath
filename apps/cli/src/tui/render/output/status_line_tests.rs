@@ -13,7 +13,6 @@ fn live_status(task_lines: Vec<&str>) -> LiveStatusViewModel {
             phase_elapsed_secs: Some(0),
             phase_text: None,
             detail_text: None,
-            background_processes_active: 0,
         }),
         queued_lines: Vec::new(),
         task_lines: task_lines.into_iter().map(str::to_string).collect(),

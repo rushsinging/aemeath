@@ -59,9 +59,9 @@ impl ToolDisplay for BashDisplay {
             header: HeaderPolicy::Standard,
             details: DetailsPolicy::Expanded,
             result: ResultPolicy::Visible {
-                max_lines: Some(5),
+                max_lines: Some(super::super::constants::TOOL_RESULT_TAIL_LINES),
                 render_kind: ResultRender::Plain,
-                tail_mode: true, // 只显示最后 5 行
+                tail_mode: true, // 只显示最后 N 行（与 BackgroundProcessLogs 同源）
             },
         }
     }

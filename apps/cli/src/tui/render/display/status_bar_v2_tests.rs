@@ -57,6 +57,7 @@ fn test_runtime_row_shows_token_in_out_tps_ctx_and_api_without_cost_or_session()
             api_calls: 7,
             context_size: 200_000,
             tps: 42.0,
+            background_processes_active: 0,
             context: StatusContextViewModel::default(),
         },
         ..StatusViewModel::default()

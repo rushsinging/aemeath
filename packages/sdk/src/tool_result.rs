@@ -20,6 +20,10 @@
 //! Phase 0a (方案 D) for the full design.
 pub use tools::types::agent::AgentResult;
 pub use tools::types::ask_user::AskUserQuestionResult;
+pub use tools::types::background_processes::{
+    BackgroundProcessListResult, BackgroundProcessLogsResult, BackgroundProcessStatusResult,
+    BackgroundProcessStopResult,
+};
 pub use tools::types::bash::BashResult;
 pub use tools::types::brief::BriefResult;
 pub use tools::types::edit::EditResult;

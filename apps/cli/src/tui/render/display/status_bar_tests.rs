@@ -383,3 +383,7 @@ fn test_screen_col_to_selection_end_includes_char_under_cursor() {
     let end = bar.screen_col_to_selection_end(StatusBarRow::Runtime, total as u16 - 1, 0, &view);
     assert_eq!(end, full.chars().count());
 }
+
+// ── #1895 L4：计数经 status bar render 管线的位置级断言 ──────────
+// L1（build_full_text 段拼）不覆盖真实 render 布局——计数必须落在
+// runtime 行（第 0 行，与 Ready 同行），context 行不含。

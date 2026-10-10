@@ -11,7 +11,6 @@ use crate::tui::view_state::output::OutputViewState;
 use ratatui::{buffer::Buffer, layout::Rect, text::Span};
 use sdk::CharIdx;
 use std::rc::Rc;
-
 fn live_status(task_lines: Vec<&str>) -> LiveStatusViewModel {
     LiveStatusViewModel {
         spinner: Some(SpinnerLineView {
@@ -21,18 +20,15 @@ fn live_status(task_lines: Vec<&str>) -> LiveStatusViewModel {
             phase_elapsed_secs: Some(0),
             phase_text: None,
             detail_text: None,
-            background_processes_active: 0,
         }),
         queued_lines: Vec::new(),
         task_lines: task_lines.into_iter().map(str::to_string).collect(),
         compact_progress: None,
     }
 }
-
 fn no_live_status() -> LiveStatusViewModel {
     LiveStatusViewModel::default()
 }
-
 /// Test helper for no-live-status render paths; callers with spinner/queued/task lines must
 /// compute visible height through the same projection used by App.
 fn render_view_for_area(area: &Rect) -> OutputViewState {
@@ -41,7 +37,6 @@ fn render_view_for_area(area: &Rect) -> OutputViewState {
         ..Default::default()
     }
 }
-
 /// 测试辅助：以若干纯文本行填充 document（单 block）。
 fn set_plain_lines(output: &mut OutputArea, texts: &[&str]) {
     let lines: Vec<RenderedLine> = texts
@@ -57,7 +52,6 @@ fn set_plain_lines(output: &mut OutputArea, texts: &[&str]) {
         block_line_ends: Vec::new(),
     });
 }
-
 /// 测试辅助：经 assistant_message block 渲染 markdown 文本并写入 document。
 /// 复用真实渲染管线，保证 markdown/table 的 plain 与显示偏移一致。
 fn set_assistant_markdown(output: &mut OutputArea, text: &str, width: u16) {
@@ -73,29 +67,22 @@ fn set_assistant_markdown(output: &mut OutputArea, text: &str, width: u16) {
         block_line_ends: Vec::new(),
     });
 }
-
 #[test]
 fn test_get_selected_text_clamps_start_col_after_line_shrinks() {
     let mut output = OutputArea::new();
     set_plain_lines(&mut output, &["短"]);
     let view = output_selection_view_for_test((0, CharIdx::new(4)), (0, CharIdx::new(6)));
-
     let selected = output.selected_text_for_view(&view, &no_live_status());
-
     assert_eq!(selected, None);
 }
-
 #[test]
 fn test_get_selected_text_skips_line_when_clamped_start_exceeds_end() {
     let mut output = OutputArea::new();
     set_plain_lines(&mut output, &["ab"]);
     let view = output_selection_view_for_test((0, CharIdx::new(4)), (0, CharIdx::new(1)));
-
     let selected = output.selected_text_for_view(&view, &no_live_status());
-
     assert_eq!(selected, Some("b".to_string()));
 }
-
 #[test]
 fn test_get_line_content_normal_line() {
     let mut output = OutputArea::new();
@@ -106,7 +93,6 @@ fn test_get_line_content_normal_line() {
     );
     assert_eq!(output.get_line_content(1, &no_live_status()), None);
 }
-
 #[test]
 fn test_get_line_content_task_status_line() {
     let mut output = OutputArea::new();
@@ -130,7 +116,6 @@ fn test_get_line_content_task_status_line() {
     // idx=3 → 越界
     assert_eq!(output.get_line_content(3, &live_status), None);
 }
-
 #[test]
 fn test_total_virtual_line_count() {
     let mut output = OutputArea::new();
@@ -138,7 +123,6 @@ fn test_total_virtual_line_count() {
     let live_status = live_status(vec!["t1", "t2"]);
     assert_eq!(output.total_virtual_line_count(&live_status), 3);
 }
-
 #[test]
 fn test_get_selected_text_task_status_only() {
     let mut output = OutputArea::new();
@@ -150,7 +134,6 @@ fn test_get_selected_text_task_status_only() {
     // content is "  pending task", chars [2..8) = "pendin"
     assert_eq!(selected, Some("pendin".to_string()));
 }
-
 #[test]
 fn test_get_selected_text_spanning_normal_and_task_status() {
     let mut output = OutputArea::new();
@@ -162,7 +145,6 @@ fn test_get_selected_text_spanning_normal_and_task_status() {
     // line 0 chars [1..3) = "bc", line 1 content = "  xyz" chars [0..3) = "  x"
     assert_eq!(selected, Some("bc\n  x".to_string()));
 }
-
 #[test]
 fn test_get_selected_text_markdown_table_uses_rendered_line_offsets() {
     let mut output = OutputArea::new();
@@ -193,12 +175,9 @@ fn test_get_selected_text_markdown_table_uses_rendered_line_offsets() {
         .screen_to_anchor(0, 15, &area, &no_live_status())
         .unwrap();
     let view = output_selection_view_for_test(start, end);
-
     let selected = output.selected_text_for_view(&view, &no_live_status());
-
     assert_eq!(selected, Some(" Name  │ Status".to_string()));
 }
-
 #[test]
 fn test_get_selected_text_uses_rendered_inline_markdown_offsets() {
     let mut output = OutputArea::new();
@@ -227,15 +206,12 @@ fn test_get_selected_text_uses_rendered_inline_markdown_offsets() {
         .screen_to_anchor(0, 32, &area, &no_live_status())
         .unwrap();
     let view = output_selection_view_for_test(start, end);
-
     let selected = output.selected_text_for_view(&view, &no_live_status());
-
     assert_eq!(
         selected,
         Some("活动中 Bug（docs/bug/active.md）".to_string())
     );
 }
-
 #[test]
 fn test_get_selected_text_strips_inline_markdown_formatting() {
     let mut output = OutputArea::new();
@@ -264,15 +240,12 @@ fn test_get_selected_text_strips_inline_markdown_formatting() {
         .map(|line| line.plain.chars().count())
         .unwrap_or(0);
     let view = output_selection_view_for_test((0, CharIdx::new(0)), (0, CharIdx::new(plain_len)));
-
     let selected = output.selected_text_for_view(&view, &no_live_status());
-
     assert_eq!(
         selected,
         Some("bold and italic with code plus link".to_string())
     );
 }
-
 #[test]
 fn test_get_selected_text_preserves_unclosed_markdown_marker() {
     let mut output = OutputArea::new();
@@ -304,12 +277,9 @@ fn test_get_selected_text_preserves_unclosed_markdown_marker() {
         (0, CharIdx::new(0)),
         (0, CharIdx::new(plain.chars().count())),
     );
-
     let selected = output.selected_text_for_view(&view, &no_live_status());
-
     assert_eq!(selected, Some("**unclosed marker".to_string()));
 }
-
 /// 渲染若干纯文本行并回填 screen_line_map，供坐标换算测试。
 fn rendered_plain(texts: &[&str], width: u16) -> (OutputArea, Rect) {
     let mut output = OutputArea::new();
@@ -329,7 +299,6 @@ fn rendered_plain(texts: &[&str], width: u16) -> (OutputArea, Rect) {
     );
     (output, area)
 }
-
 #[test]
 fn test_screen_to_anchor_maps_row_col_to_logic_char() {
     let (output, area) = rendered_plain(&["hello", "世界"], 40);
@@ -344,7 +313,6 @@ fn test_screen_to_anchor_maps_row_col_to_logic_char() {
         Some((1, CharIdx::new(1)))
     );
 }
-
 #[test]
 fn test_screen_to_anchor_returns_none_when_row_out_of_range() {
     let (output, area) = rendered_plain(&["abc"], 40);
@@ -354,7 +322,6 @@ fn test_screen_to_anchor_returns_none_when_row_out_of_range() {
         None
     );
 }
-
 #[test]
 fn test_screen_to_anchor_gutter_columns_map_to_plain_zero() {
     let mut line =
@@ -395,7 +362,6 @@ fn test_screen_to_anchor_gutter_columns_map_to_plain_zero() {
         Some((0, CharIdx::new(2)))
     );
 }
-
 #[test]
 fn test_word_bounds_at_returns_word_half_open_range() {
     let (output, area) = rendered_plain(&["foo bar_baz qux"], 40);
@@ -412,7 +378,6 @@ fn test_word_bounds_at_returns_word_half_open_range() {
     // 错误路径：行超界返回 None。
     assert_eq!(output.word_bounds_at(9, 0, &area, &no_live_status()), None);
 }
-
 #[test]
 fn test_last_visible_anchor_returns_last_screen_line_end() {
     let (output, _area) = rendered_plain(&["abc", "de"], 40);

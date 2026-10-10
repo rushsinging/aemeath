@@ -7,7 +7,9 @@ use super::constants::OMITTED_LINE_COUNT_LIMIT;
 use crate::tui::render::output::blocks::edit_diff::render_edit_diff;
 use crate::tui::render::output::primitives::wrap::{wrap_spans_with_prefix, WrapMode};
 use crate::tui::render::output::rendered::{RenderCtx, RenderedBlock, RenderedLine};
-use crate::tui::render::output::tool_display::{result_policy, ResultPolicy, ResultRender};
+use crate::tui::render::output::tool_display::{
+    lookup_display, result_policy, ResultPolicy, ResultRender,
+};
 use crate::tui::render::theme;
 use crate::tui::view_model::output::{
     AgentActivityKindView, AgentActivityLineView, ToolResultBlockView,
@@ -87,15 +89,33 @@ pub fn render_tool_result(
                     format_result_lines(&view.tool_title, &display_text, ctx.text_width, limit)
                 }),
                 ResultRender::Plain => {
-                    if tail_mode {
-                        format_result_lines_tail(
-                            &view.tool_title,
-                            &display_text,
-                            ctx.text_width,
-                            limit,
-                        )
-                    } else {
-                        format_result_lines(&view.tool_title, &display_text, ctx.text_width, limit)
+                    // typed result 渲染（#1895）：Display 覆写
+                    // format_result_lines 时优先解析后的行（列表摘要 /
+                    // 多行日志原文），否则回退通用 display_text 路径。
+                    let typed_lines = lookup_display(&view.tool_title)
+                        .and_then(|display| display.format_result_lines(view.data.as_ref()))
+                        .map(|lines| {
+                            render_typed_result_lines(lines, ctx.text_width, limit, tail_mode)
+                        });
+                    match typed_lines {
+                        Some(lines) => lines,
+                        None => {
+                            if tail_mode {
+                                format_result_lines_tail(
+                                    &view.tool_title,
+                                    &display_text,
+                                    ctx.text_width,
+                                    limit,
+                                )
+                            } else {
+                                format_result_lines(
+                                    &view.tool_title,
+                                    &display_text,
+                                    ctx.text_width,
+                                    limit,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -190,6 +210,44 @@ fn format_result_lines(
         };
         out.push(RenderedLine::new(vec![Span::styled(
             format!("... ({omitted_label} lines omitted)"),
+            base,
+        )]));
+    }
+    out
+}
+
+/// typed result 行渲染（#1895）：逐行 wrap、`limit` 截断并标注省略；
+/// tail 模式只保留最后 `limit` 行。
+fn render_typed_result_lines(
+    lines: Vec<String>,
+    width: u16,
+    limit: usize,
+    tail_mode: bool,
+) -> Vec<RenderedLine> {
+    let base = Style::default().fg(theme::TEXT_DIM);
+    let mut selected: Vec<&String> = lines.iter().collect();
+    if tail_mode && selected.len() > limit {
+        selected = selected.split_off(selected.len() - limit);
+    }
+    let mut out: Vec<RenderedLine> = Vec::new();
+    for line in selected {
+        if out.len() >= limit {
+            break;
+        }
+        out.extend(wrap_spans_with_prefix(
+            vec![Span::styled(line.clone(), base)],
+            width as usize,
+            None,
+            WrapMode::Word,
+        ));
+    }
+    if out.len() > limit {
+        out.truncate(limit);
+    }
+    let omitted = lines.len().saturating_sub(limit);
+    if omitted > 0 {
+        out.push(RenderedLine::new(vec![Span::styled(
+            format!("... ({omitted} lines omitted)"),
             base,
         )]));
     }

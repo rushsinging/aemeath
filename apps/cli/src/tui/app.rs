@@ -302,7 +302,13 @@ impl App {
                     Constraint::Min(10),
                     Constraint::Length(input_height),
                     Constraint::Length(suggestions_height),
-                    Constraint::Length(2),
+                    Constraint::Length(
+                        if self.model.conversation.runtime.background_processes_active > 0 {
+                            3
+                        } else {
+                            2
+                        },
+                    ),
                 ])
                 .split(size);
 

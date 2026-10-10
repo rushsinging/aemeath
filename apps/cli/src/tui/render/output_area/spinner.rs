@@ -111,15 +111,6 @@ impl super::OutputArea {
             ));
         }
 
-        // #252：后台进程活动数（>0 才显示；与主执行并行）。
-        if s.background_processes_active > 0 {
-            spans.push(Span::styled("  ·  ", Style::default().fg(theme::TEXT_DIM)));
-            spans.push(Span::styled(
-                format!("{} Backend Progress", s.background_processes_active),
-                Style::default().fg(theme::TEXT_DIM),
-            ));
-        }
-
         if let Some(cp) = compact_progress {
             spans.extend(compact_progress_spans(cp));
         }
