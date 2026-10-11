@@ -364,6 +364,30 @@ pub async fn wire_agent_client_from_args(
         resume,
     } = session_bootstrap;
 
+    // 6. 初始模型绑定由 Composition 解析并构造；Runtime 只消费 typed assembly。
+    // 必须在 startup resume 固化 display-history generation 之前完成
+    // metadata.model 回写（同值跳过），否则 TUI pin 旧 revision 会加载失败。
+    let InitialProviderAssemblyData {
+        binding,
+        resolved_model,
+        runtime_settings: _,
+        compact_model_slot,
+    } = initial_provider;
+    let model_state = crate::application::client::SessionModelState::new(
+        resolved_model.clone(),
+        Arc::new(binding.clone()),
+    );
+    compact_model_slot.bind(model_state.clone());
+    let persist_session_id = resume
+        .clone()
+        .unwrap_or_else(|| wiring.committed_session().id.clone());
+    super::session_model_persist::persist_resolved_model_for_session(
+        &wiring,
+        &persist_session_id,
+        &resolved_model,
+    )
+    .await;
+
     // 3. Session — startup resume is scoped to the current project identity.
     // A rejected cross-project id leaves the committed snapshot unchanged.
     // 职责 1（resume 解析与 SDK backing 映射）由 startup_resume 模块承担。
@@ -386,28 +410,6 @@ pub async fn wire_agent_client_from_args(
     let snapshot = wiring.committed_config();
 
     // 5. 日志已由 Composition 在进入 Runtime 前初始化。
-
-    // 6. 初始模型绑定由 Composition 解析并构造；Runtime 只消费 typed assembly。
-    let InitialProviderAssemblyData {
-        binding,
-        resolved_model,
-        runtime_settings: _,
-        compact_model_slot,
-    } = initial_provider;
-    // Compact 模型解析所需的会话模型真相源：Composition 创建的槽在这里绑定，
-    // 之后 `/model` 切换与 compact 解析共享同一 `SessionModelState`。
-    let model_state = crate::application::client::SessionModelState::new(
-        resolved_model.clone(),
-        Arc::new(binding.clone()),
-    );
-    compact_model_slot.bind(model_state.clone());
-    // 回写 session.metadata.model（fail-open），供下次 `--resume` 恢复。
-    super::session_model_persist::persist_resolved_model_for_session(
-        &wiring,
-        &session_id,
-        &resolved_model,
-    )
-    .await;
 
     // Tool and Skill bootstrap results are assembled and frozen by Composition.
     let SkillBootstrapAssemblyData {

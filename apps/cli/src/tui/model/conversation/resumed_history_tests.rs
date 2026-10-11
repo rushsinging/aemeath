@@ -74,6 +74,21 @@ fn loaded_window_replaces_step_placeholder_with_renderable_items() {
 }
 
 #[test]
+fn apply_window_follows_newer_generation_revision() {
+    let mut backing = ResumedHistoryBacking::from_index(index("session", 7, 2));
+
+    assert!(
+        backing.apply_window(window("session", 8, 1)),
+        "stale pin must accept refreshed generation window"
+    );
+    assert_eq!(backing.items()[1].id, "history-1-message-0");
+    let follow_up = backing
+        .history_window_request(&["history-step-0".to_string()])
+        .expect("still-missing step should request against refreshed revision");
+    assert_eq!(follow_up.generation_revision, 8);
+}
+
+#[test]
 fn loaded_window_excludes_llm_only_user_role_messages() {
     let mut backing = ResumedHistoryBacking::from_index(index("session", 7, 1));
     let mut hook_notice = TuiChatMessage::system_generated_user_text(

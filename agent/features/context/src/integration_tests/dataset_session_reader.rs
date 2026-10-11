@@ -598,6 +598,62 @@ async fn dataset_reader_loads_requested_display_history_steps_from_same_generati
     );
 }
 
+#[tokio::test]
+async fn dataset_reader_follows_newer_generation_when_display_history_revision_stale() {
+    let root = tempfile::tempdir().expect("temporary root");
+    let dataset = storage::wire_file_system_dataset(root.path()).expect("dataset adapter");
+    let writer = DatasetCanonicalSessionWriter::new(dataset.clone());
+    let mut session = session_with_step("stale-window", 9, "kept body");
+    session.run_slices = vec![CommittedRunSlice::new(
+        "run-1",
+        vec![CommittedRunStep::accepted_only(
+            "step-1",
+            AcceptedInputRecord::new(vec![Message::user("kept body")], "fp-1", 1),
+        )],
+    )]
+    .into();
+    writer
+        .save_initial(&session)
+        .await
+        .expect("save generation");
+
+    let mut bumped = session.clone();
+    bumped.metadata.model = Some("OmniRoute/cursor-auto".to_string());
+    bumped.revision = 10;
+    writer
+        .save_incremental(&session, &bumped)
+        .await
+        .expect("metadata-only bump");
+
+    let reader = DatasetSessionReader::new(dataset, None);
+    let prepared = reader
+        .load_for_resume(None, "stale-window")
+        .await
+        .expect("prepare resume at latest");
+    let member_name = prepared.display_history.steps()[0]
+        .member_name()
+        .to_string();
+
+    let window = reader
+        .load_display_history_steps(None, "stale-window", 9, &[member_name])
+        .await
+        .expect("stale revision should follow latest generation");
+
+    assert_eq!(window.session_id(), "stale-window");
+    assert_eq!(window.generation_revision(), 10);
+    assert_eq!(window.steps().len(), 1);
+    assert_eq!(
+        window.steps()[0]
+            .step()
+            .accepted_input
+            .as_ref()
+            .expect("accepted input")
+            .messages[0]
+            .text_content(),
+        "kept body"
+    );
+}
+
 #[test]
 fn manifest_codec_fixture_remains_current_for_reader_contract() {
     let manifest = SessionGenerationManifest::new("fixture", 0, vec![]).expect("manifest");

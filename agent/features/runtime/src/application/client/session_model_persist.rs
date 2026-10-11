@@ -21,6 +21,22 @@ pub(crate) async fn persist_session_model(
     if model.is_empty() {
         return;
     }
+    match session_management
+        .load_for_project(session_id, project)
+        .await
+    {
+        Ok(session) => {
+            if session.metadata.model.as_deref() == Some(model) {
+                return;
+            }
+        }
+        Err(error) => {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "persist session model load failed (continuing write): session={session_id} error={error}"
+            );
+        }
+    }
     if let Err(error) = session_management
         .update_metadata_for_project(
             session_id,
