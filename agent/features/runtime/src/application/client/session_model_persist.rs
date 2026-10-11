@@ -1,5 +1,6 @@
 //! Persist the session-selected model into `SessionMetadata.model`.
 
+use share::config::models::ResolvedModel;
 use share::session_types::ProjectIdentityData;
 
 /// Stable `source/model` key stored on the session for later `--resume`.
@@ -36,6 +37,21 @@ pub(crate) async fn persist_session_model(
             "persist session model failed: session={session_id} model={model} error={error}"
         );
     }
+}
+
+/// Bootstrap/switch helper: write `source/model` from a resolved binding.
+pub(crate) async fn persist_resolved_model_for_session(
+    wiring: &context::MainSessionWiring,
+    session_id: &str,
+    resolved_model: &ResolvedModel,
+) {
+    persist_session_model(
+        wiring.session_management().as_ref(),
+        session_id,
+        &wiring.project_identity(),
+        &session_model_key(&resolved_model.source_key, &resolved_model.model.id),
+    )
+    .await;
 }
 
 #[cfg(test)]

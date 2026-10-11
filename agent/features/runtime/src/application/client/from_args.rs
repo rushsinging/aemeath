@@ -401,17 +401,11 @@ pub async fn wire_agent_client_from_args(
         Arc::new(binding.clone()),
     );
     compact_model_slot.bind(model_state.clone());
-
-    // 将会话最终选用的 model 回写 metadata，供下次 `--resume` 恢复。
-    // 写失败 fail-open，不阻断启动。
-    super::session_model_persist::persist_session_model(
-        wiring.session_management().as_ref(),
+    // 回写 session.metadata.model（fail-open），供下次 `--resume` 恢复。
+    super::session_model_persist::persist_resolved_model_for_session(
+        &wiring,
         &session_id,
-        &wiring.project_identity(),
-        &super::session_model_persist::session_model_key(
-            &resolved_model.source_key,
-            &resolved_model.model.id,
-        ),
+        &resolved_model,
     )
     .await;
 
