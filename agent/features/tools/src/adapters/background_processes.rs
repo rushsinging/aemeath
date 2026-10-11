@@ -1,16 +1,23 @@
-//! 后台进程工具族（#252）：list / status / logs / stop 四个独立 tool。
+//! 后台进程工具族（#252 / #1931）：list / status / logs / stop / watch。
 
-use crate::domain::background_process_port::BackgroundProcessAccessSource;
+use crate::adapters::constants::{
+    WATCH_RESULT_HEADER_RESERVE_CHARS, WATCH_RESULT_TEXT_BUDGET_CHARS,
+};
+use crate::domain::background_process_port::{
+    wait_task, BackgroundProcessAccess, BackgroundProcessAccessSource,
+};
 use crate::domain::types::background_processes::{
-    BackgroundProcessDetailData, BackgroundProcessListInput, BackgroundProcessListResult,
-    BackgroundProcessLogsInput, BackgroundProcessLogsResult, BackgroundProcessStatusInput,
-    BackgroundProcessStatusResult, BackgroundProcessStopInput, BackgroundProcessStopResult,
-    BackgroundProcessSummaryData,
+    resolve_watch_timeout_secs, BackgroundProcessDetailData, BackgroundProcessListInput,
+    BackgroundProcessListResult, BackgroundProcessLogsInput, BackgroundProcessLogsResult,
+    BackgroundProcessStatusInput, BackgroundProcessStatusResult, BackgroundProcessStopInput,
+    BackgroundProcessStopResult, BackgroundProcessSummaryData, BackgroundProcessWatchInput,
+    BackgroundProcessWatchOutcome, BackgroundProcessWatchResult,
 };
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
+use std::time::Duration;
 
 #[cfg(test)]
 #[path = "background_processes_tests.rs"]
@@ -258,4 +265,138 @@ impl TypedTool for BackgroundProcessStopTool {
             Err(message) => TypedToolResult::error(message),
         }
     }
+}
+
+/// `BackgroundProcessWatch`：前台短等任务终态或超时（#1931）。
+///
+/// **MUST** 由执行监督器禁止转后台；完成通知 / reminder 不因本工具而抑制。
+pub struct BackgroundProcessWatchTool {
+    pub source: Arc<dyn BackgroundProcessAccessSource>,
+}
+
+#[async_trait]
+impl TypedTool for BackgroundProcessWatchTool {
+    type Output = BackgroundProcessWatchResult;
+    fn name(&self) -> &str {
+        "BackgroundProcessWatch"
+    }
+    fn description(&self) -> &str {
+        share::i18n::tools::background::background_process_watch("en")
+    }
+    fn description_for(&self, lang: &str) -> std::borrow::Cow<'_, str> {
+        std::borrow::Cow::Borrowed(share::i18n::tools::background::background_process_watch(
+            lang,
+        ))
+    }
+    fn input_schema(&self) -> Value {
+        use crate::domain::types::ToolSchema;
+        BackgroundProcessWatchInput::data_schema()
+    }
+    fn data_schema(&self) -> Value {
+        use crate::domain::types::ToolSchema;
+        BackgroundProcessWatchResult::data_schema()
+    }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+    fn is_concurrency_safe(&self) -> bool {
+        true
+    }
+
+    async fn call(
+        &self,
+        input: Value,
+        ctx: &ToolExecutionContext,
+    ) -> TypedToolResult<BackgroundProcessWatchResult> {
+        let args: BackgroundProcessWatchInput = match serde_json::from_value(input) {
+            Ok(args) => args,
+            Err(error) => return TypedToolResult::error(format!("invalid input: {error}")),
+        };
+        if args.task_id.is_empty() {
+            return TypedToolResult::error("task_id is required".to_string());
+        }
+        let timeout = Duration::from_secs(resolve_watch_timeout_secs(args.timeout_secs));
+        let access = self.source.current();
+        let progress = ctx.progress_sink();
+        match wait_task(
+            access.as_ref(),
+            &args.task_id,
+            timeout,
+            ctx.cancellation(),
+            progress.as_deref(),
+        )
+        .await
+        {
+            Ok(mut result) => {
+                attach_watch_log_tail(access.as_ref(), &args.task_id, &mut result);
+                TypedToolResult::success(watch_text(&result), result)
+            }
+            Err(message) => TypedToolResult::error(message),
+        }
+    }
+}
+
+/// 终态附带 log tail：字符预算压在 Grep 同档 2000 内，避免 materializer 落盘截断。
+fn attach_watch_log_tail(
+    access: &dyn BackgroundProcessAccess,
+    task_id: &str,
+    result: &mut BackgroundProcessWatchResult,
+) {
+    let body_budget =
+        WATCH_RESULT_TEXT_BUDGET_CHARS.saturating_sub(WATCH_RESULT_HEADER_RESERVE_CHARS);
+    let Some(log) = access.read_task_log(task_id, None, body_budget) else {
+        return;
+    };
+    result.log_tail = clip_to_char_budget(&log.text, body_budget);
+}
+
+fn watch_text(result: &BackgroundProcessWatchResult) -> String {
+    let outcome = match result.outcome {
+        BackgroundProcessWatchOutcome::Terminal => "terminal",
+        BackgroundProcessWatchOutcome::StillRunning => "still_running",
+        BackgroundProcessWatchOutcome::Cancelled => "cancelled",
+    };
+    let header = format!(
+        "{} outcome={} [{}] {} — log bytes {}",
+        result.detail.summary.task_id,
+        outcome,
+        result.detail.summary.state,
+        result.detail.summary.summary,
+        result.detail.total_written_bytes
+    );
+    if result.log_tail.is_empty() {
+        return header;
+    }
+    let remaining =
+        WATCH_RESULT_TEXT_BUDGET_CHARS.saturating_sub(header.chars().count().saturating_add(1));
+    let body = clip_to_char_budget(&result.log_tail, remaining);
+    format!("{header}\n{body}")
+}
+
+fn clip_to_char_budget(text: &str, budget: usize) -> String {
+    if budget == 0 {
+        return String::new();
+    }
+    if text.chars().count() <= budget {
+        return text.to_string();
+    }
+    let marker = "\n…(truncated)";
+    let marker_chars = marker.chars().count();
+    let keep = budget.saturating_sub(marker_chars);
+    let mut out = String::new();
+    for (index, ch) in text.chars().enumerate() {
+        if index >= keep {
+            break;
+        }
+        out.push(ch);
+    }
+    if let Some((head, _)) = out.rsplit_once('\n') {
+        out = head.to_string();
+    }
+    out.push_str(marker);
+    // 若仍超预算（极端短 budget），硬裁到 budget。
+    if out.chars().count() > budget {
+        out = out.chars().take(budget).collect();
+    }
+    out
 }

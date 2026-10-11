@@ -1,7 +1,7 @@
 //! Background Process 工具族显示注册测试（#1895）：registry 断言 +
 //! header 定制 + typed result 解析渲染。
 
-use crate::tui::render::output::tool_display::{lookup_display, ToolDisplay};
+use crate::tui::render::output::tool_display::lookup_display;
 
 fn content(value: serde_json::Value) -> Option<serde_json::Value> {
     Some(value)
@@ -139,4 +139,58 @@ fn empty_list_result_shows_placeholder() {
         .format_result_lines(result.as_ref())
         .expect("typed 渲染");
     assert_eq!(lines, vec!["（无后台进程）"]);
+}
+
+#[test]
+fn watch_header_carries_task_id_and_timeout() {
+    let display = lookup_display("BackgroundProcessWatch").unwrap();
+    let input = serde_json::json!({ "task_id": "bgp_07Xwatch1", "timeout_secs": 60 });
+    let header = display.format_header(&input, None);
+    assert!(
+        header.contains("bgp_07Xwatch1"),
+        "Watch header 携带 task id：{header}"
+    );
+    assert!(
+        header.contains("timeout=60s"),
+        "Watch header 携带 timeout：{header}"
+    );
+}
+
+#[test]
+fn watch_result_renders_outcome_not_json() {
+    let display = lookup_display("BackgroundProcessWatch").unwrap();
+    let result = content(serde_json::json!({
+        "outcome": "still_running",
+        "detail": {
+            "summary": {
+                "task_id": "bgp_w1",
+                "tool_name": "Bash",
+                "state": "backgrounded",
+                "summary": "cargo test",
+                "duration_ms": 5000
+            },
+            "deadline_remaining_ms": null,
+            "total_written_bytes": 12
+        },
+        "log_tail": "watch-tail-line-a\nwatch-tail-line-b\n"
+    }));
+    let lines = display
+        .format_result_lines(result.as_ref())
+        .expect("typed 渲染产出");
+    assert!(lines.len() >= 3, "log_tail + outcome 行：{lines:?}");
+    let outcome_line = lines.last().expect("outcome 行");
+    assert!(
+        outcome_line.contains("still_running"),
+        "outcome 应在末行以免 tail 裁掉：{outcome_line}"
+    );
+    assert!(outcome_line.contains("bgp_w1"));
+    assert!(outcome_line.contains("backgrounded"));
+    assert!(
+        !outcome_line.starts_with('{'),
+        "不渲染 JSON 原文：{outcome_line}"
+    );
+    assert!(
+        lines.iter().any(|line| line.contains("watch-tail-line-a")),
+        "应渲染 log_tail：{lines:?}"
+    );
 }

@@ -5,6 +5,14 @@ use std::time::Duration;
 pub(crate) const SUB_AGENT_DEFAULT_TIMEOUT_SECS: u64 = 3600;
 pub(crate) const SUB_AGENT_TIMEOUT_CAP_SECS: u64 = 10800;
 
+/// Bash `timeout` 字段单位：秒（硬切，不再接受毫秒）。
+pub(crate) const BASH_DEFAULT_TIMEOUT_SECS: u64 = 120;
+pub(crate) const BASH_MAX_TIMEOUT_SECS: u64 = 3600;
+
+/// WebFetch `timeout` 字段单位：秒（硬切，不再接受毫秒）。
+pub(crate) const WEB_FETCH_DEFAULT_TIMEOUT_SECS: u64 = 30;
+pub(crate) const WEB_FETCH_MAX_TIMEOUT_SECS: u64 = 3600;
+
 pub(crate) const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
 
 pub(crate) const TERM_GRACE: Duration = Duration::from_millis(200);
@@ -23,3 +31,11 @@ pub(crate) const GREP_INDEX_TEXT_BUDGET_CHARS: usize = 2_000;
 /// 索引文本为汇总 header 与收窄提示预留的字符空间，
 /// 避免截断后总长超出 [`GREP_INDEX_TEXT_BUDGET_CHARS`]。
 pub(crate) const GREP_INDEX_HEADER_RESERVE_CHARS: usize = 260;
+
+/// `BackgroundProcessWatch` 终态 tool_result 文本字符预算（#1931）：
+/// 与 Grep 索引同档，硬压在 materializer 最严 floor（3000）之下，
+/// **NEVER** 触发 tool_result 落盘截断阶段。
+pub(crate) const WATCH_RESULT_TEXT_BUDGET_CHARS: usize = 2_000;
+
+/// Watch 摘要行预留字符；剩余预算给 log_tail。
+pub(crate) const WATCH_RESULT_HEADER_RESERVE_CHARS: usize = 260;

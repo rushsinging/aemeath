@@ -1217,3 +1217,97 @@ async fn resume_publishes_only_canonical_committed_session_visible_after_bind() 
         "bound run must observe the canonical committed session published by resume"
     );
 }
+
+/// #1931 follow-up：active metadata 旁路写盘后必须同步 `committed_session.revision`，
+/// 否则下一轮 append CAS 会 `expected=N, actual=N+1`。
+#[tokio::test]
+async fn update_active_session_metadata_syncs_committed_revision() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    let project = h.wiring.project_identity();
+    let before = h.wiring.committed_session();
+    let before_revision = before.revision;
+
+    // 磁盘需先有同 id 快照，update_metadata_for_project 才能 load。
+    h.wiring
+        .session_management()
+        .import_for_project(
+            &crate::SessionCodec::encode(before.as_ref()).expect("encode"),
+            &project,
+        )
+        .await
+        .expect("seed session on disk");
+
+    h.wiring
+        .update_active_session_metadata(crate::SessionMetadataUpdateData {
+            model: Some("OmniRoute/cursor-auto".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect("update active metadata");
+
+    let after = h.wiring.committed_session();
+    assert_eq!(
+        after.revision,
+        before_revision + 1,
+        "committed revision 必须跟随磁盘 bump"
+    );
+    assert_eq!(
+        after.metadata.model.as_deref(),
+        Some("OmniRoute/cursor-auto")
+    );
+
+    let disk = h
+        .wiring
+        .session_management()
+        .load_for_project(&after.id, &project)
+        .await
+        .expect("reload disk");
+    assert_eq!(disk.revision, after.revision);
+    assert_eq!(disk.metadata.model, after.metadata.model);
+}
+
+#[tokio::test]
+async fn update_active_session_metadata_skips_when_unchanged() {
+    let _guard = git_lock().await;
+    let h = build_harness();
+    let project = h.wiring.project_identity();
+    let before = h.wiring.committed_session();
+
+    h.wiring
+        .session_management()
+        .import_for_project(
+            &crate::SessionCodec::encode(before.as_ref()).expect("encode"),
+            &project,
+        )
+        .await
+        .expect("seed");
+
+    let before_revision = h.wiring.committed_session().revision;
+    h.wiring
+        .update_active_session_metadata(crate::SessionMetadataUpdateData {
+            model: Some("OmniRoute/cursor-auto".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect("first write");
+    let mid = h.wiring.committed_session().revision;
+    assert!(
+        mid > before_revision,
+        "首次写入必须 bump committed revision: before={before_revision} mid={mid}"
+    );
+
+    h.wiring
+        .update_active_session_metadata(crate::SessionMetadataUpdateData {
+            model: Some("OmniRoute/cursor-auto".to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect("same-value skip");
+
+    assert_eq!(
+        h.wiring.committed_session().revision,
+        mid,
+        "同值 metadata 不得再 bump revision"
+    );
+}

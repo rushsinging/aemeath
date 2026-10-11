@@ -5,7 +5,9 @@
 //! 事件链 → TUI 渲染 → PTY 真实终端屏幕文本断言。覆盖两条核心显示：
 //! ① 超阈值 tool call 转后台 + Run 收口后（spinner 消失）status line
 //! 第三行仍显示「N Backend Progress」；② BackgroundProcessList 工具
-//! 卡片渲染 typed header「后台进程列表」与逐行摘要（非 JSON 原文）。
+//! 卡片渲染 typed header「后台进程列表」与逐行摘要（非 JSON 原文）；
+//! ③ BackgroundProcessWatch（timeout=5s）强制前台短等，返回
+//! still_running typed 行（非转后台占位）。
 //!
 //! 运行方式：`cargo test -p cli --test background_process_display_pty -- --ignored`
 //!（需先 `cargo build -p cli --bin aemeath`；check-slow-test-matrix 已登记）。
@@ -101,9 +103,28 @@ fn background_process_tools_render_typed_display_and_status_line_count() {
 
     // ② List typed 渲染：mock 第 3 响应返回 BackgroundProcessList tool
     // call，第 4 响应纯文本收口。断言 typed header 与解析摘要行。
+    // 必须等「列表已展示」消费完 seq=3，再提交 Watch，否则下一请求会
+    // 错吃文本收口、跳过 Watch tool call。
     submit(&terminal, "列出后台进程");
     wait_screen_text(&terminal, "Backend Processes", Duration::from_secs(25));
     wait_screen_text(&terminal, "ping -c 30", Duration::from_secs(10));
+    wait_screen_text(&terminal, "列表已展示", Duration::from_secs(10));
+
+    // ③ Watch 强制前台：mock 从对话历史提取 bgp_ id，发
+    // BackgroundProcessWatch(timeout_secs=5)。阈值=1s 时若未禁转后台
+    // 会出占位；强制前台则等满超时后渲染 still_running typed 行。
+    // 真断言流式：bytes from 必须在 still_running（终态 outcome）出现之前
+    // 可见——否则会假绿命中结束后的 log_tail。
+    submit(&terminal, "等待后台任务");
+    wait_screen_text(&terminal, "Backend Process Watch", Duration::from_secs(10));
+    wait_screen_text_before(
+        &terminal,
+        "bytes from",
+        "still_running",
+        Duration::from_secs(10),
+    );
+    wait_screen_text(&terminal, "watch已返回", Duration::from_secs(25));
+    wait_screen_text(&terminal, "still_running", Duration::from_secs(10));
 
     // 退出（双击 Ctrl+C），恢复终端。
     terminal
@@ -176,11 +197,43 @@ fn wait_screen_text(terminal: &Session, needle: &str, timeout: Duration) {
     panic!("等待屏幕文本 {needle:?} 超时；当前屏幕：\n{last_screen}");
 }
 
+/// 等到 `needle` 出现，且此时 `forbidden` 尚未出现。
+///
+/// 用于区分「等待中流式 preview」与「结束后 log_tail」：若先看到
+/// forbidden（如终态 outcome），则本断言失败，避免假绿。
+fn wait_screen_text_before(terminal: &Session, needle: &str, forbidden: &str, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    let mut last_screen = String::new();
+    while Instant::now() < deadline {
+        if let OperationResult::Text(text) = terminal
+            .execute(Operation::Text { full: true })
+            .expect("读屏")
+        {
+            if text.contains(forbidden) && !text.contains(needle) {
+                panic!("未见到流式 {needle:?} 却先出现终态标记 {forbidden:?}；当前屏幕：\n{text}");
+            }
+            if text.contains(needle) && !text.contains(forbidden) {
+                return;
+            }
+            if text.contains(needle) && text.contains(forbidden) {
+                panic!(
+                    "{needle:?} 与 {forbidden:?} 同时出现，无法证明是等待中流式；当前屏幕：\n{text}"
+                );
+            }
+            last_screen = text;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    panic!("等待流式 {needle:?}（且尚无 {forbidden:?}）超时；当前屏幕：\n{last_screen}");
+}
+
 /// mock LLM（openai chat.completions SSE）：按请求序返回脚本化响应。
 ///
 /// 脚本：① Bash tool call（ping 30s）→ ② 文本「已转后台」→
-/// ③ BackgroundProcessList tool call → ④ 文本「列表已展示」→ 后续兜底
-/// 文本「end」。线程为守护语义，测试进程退出即终结。
+/// ③ BackgroundProcessList tool call → ④ 文本「列表已展示」→
+/// ⑤ BackgroundProcessWatch（从 body 提取 bgp_ id，timeout=5）→
+/// ⑥ 文本「watch已返回」→ 后续兜底文本「end」。线程为守护语义，
+/// 测试进程退出即终结。
 fn spawn_mock_llm() -> u16 {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock llm");
     let port = listener.local_addr().expect("mock port").port();
@@ -251,7 +304,7 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack.windows(needle.len()).position(|w| w == needle)
 }
 
-fn scripted_sse_response(seq: usize, _body: &str) -> String {
+fn scripted_sse_response(seq: usize, body: &str) -> String {
     match seq {
         0 => sse_tool_call_response(
             "call_bg_1",
@@ -261,11 +314,54 @@ fn scripted_sse_response(seq: usize, _body: &str) -> String {
         1 => sse_text_response("已转后台"),
         2 => sse_tool_call_response("call_list_1", "BackgroundProcessList", "{}"),
         3 => sse_text_response("列表已展示"),
+        4 => {
+            let task_id = extract_bgp_task_id(body).unwrap_or_else(|| "bgp_missing000".into());
+            // 5s：给等待中流式 preview 留下可观测窗口；2s 过短会导致
+            // bytes from 与 still_running 同帧出现，假绿/真断言均不稳定。
+            let arguments = format!(r#"{{"task_id":"{task_id}","timeout_secs":5}}"#);
+            sse_tool_call_response("call_watch_1", "BackgroundProcessWatch", &arguments)
+        }
+        5 => sse_text_response("watch已返回"),
         _ => sse_text_response("end"),
     }
 }
 
+/// 从 chat completions 请求 body 中提取首个 `bgp_<11 base62>` 进程 id。
+fn extract_bgp_task_id(body: &str) -> Option<String> {
+    const PREFIX: &str = "bgp_";
+    const SUFFIX_LEN: usize = 11;
+    let mut search_from = 0;
+    while let Some(relative) = body[search_from..].find(PREFIX) {
+        let start = search_from + relative;
+        let suffix_start = start + PREFIX.len();
+        let suffix_end = suffix_start + SUFFIX_LEN;
+        if suffix_end > body.len() {
+            return None;
+        }
+        let suffix = &body[suffix_start..suffix_end];
+        if suffix.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+            let after = body.as_bytes().get(suffix_end).copied();
+            if after.is_none_or(|byte| !byte.is_ascii_alphanumeric()) {
+                return Some(body[start..suffix_end].to_string());
+            }
+        }
+        search_from = start + PREFIX.len();
+    }
+    None
+}
+
 /// openai chat.completions SSE：tool call（arguments 全量放首 chunk）。
+
+#[test]
+fn extract_bgp_task_id_finds_first_typed_id() {
+    let body = r#"{"content":"task bgp_07XDnXyhBz6 still running"}"#;
+    assert_eq!(
+        extract_bgp_task_id(body).as_deref(),
+        Some("bgp_07XDnXyhBz6")
+    );
+    assert_eq!(extract_bgp_task_id("no id here"), None);
+}
+
 fn sse_tool_call_response(call_id: &str, tool_name: &str, arguments: &str) -> String {
     let escaped = arguments.replace('\\', "\\\\").replace('"', "\\\"");
     format!(

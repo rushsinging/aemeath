@@ -118,6 +118,13 @@ pub(crate) fn register_named_scope(
             source: background_source.clone()
         }
     );
+    builtin!(
+        "BackgroundProcessWatch",
+        Caps::TaskRead,
+        background_processes::BackgroundProcessWatchTool {
+            source: background_source.clone()
+        }
+    );
     builtin!("WebSearch", Caps::NetworkAccess, web_search::WebSearchTool);
     builtin!("Agent", Caps::Dispatch, agent_tool::AgentTool);
     builtin!(

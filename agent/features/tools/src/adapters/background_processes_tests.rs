@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 struct FakeAccess {
     summaries: Vec<BackgroundProcessSummaryData>,
+    log_text: String,
 }
 
 impl BackgroundProcessAccess for FakeAccess {
@@ -24,20 +25,33 @@ impl BackgroundProcessAccess for FakeAccess {
         Some(BackgroundProcessDetailData {
             summary,
             deadline_remaining_ms: Some(120_000),
-            total_written_bytes: 42,
+            total_written_bytes: self.log_text.len() as u64,
         })
     }
 
     fn read_task_log(
         &self,
-        _task_id: &str,
-        _cursor: Option<u64>,
-        _max_bytes: usize,
+        task_id: &str,
+        cursor: Option<u64>,
+        max_bytes: usize,
     ) -> Option<BackgroundProcessLogData> {
+        if !self
+            .summaries
+            .iter()
+            .any(|summary| summary.task_id == task_id)
+        {
+            return None;
+        }
+        let bytes = self.log_text.as_bytes();
+        let size = bytes.len() as u64;
+        let start = cursor.unwrap_or(size.saturating_sub(max_bytes as u64));
+        let start = start.min(size) as usize;
+        let end = (start + max_bytes).min(bytes.len());
+        let slice = bytes.get(start..end).unwrap_or(&[]);
         Some(BackgroundProcessLogData {
-            text: "line-1\nline-2\n".to_string(),
-            cursor: 14,
-            total_written: 14,
+            text: String::from_utf8_lossy(slice).into_owned(),
+            cursor: end as u64,
+            total_written: size,
         })
     }
 
@@ -69,6 +83,7 @@ fn source() -> Arc<StaticSource> {
                 summary: "tool=Bash input=cargo test".to_string(),
                 duration_ms: Some(1500),
             }],
+            log_text: "line-1\nline-2\n".to_string(),
         }),
     })
 }
@@ -119,7 +134,12 @@ async fn logs_tool_returns_chunk_and_cursor() {
         .await;
     assert!(!result.is_error);
     let log = result.data.expect("结构化数据").log;
-    assert!(log.text.contains("line-1"));
+    // cursor=5 从 "line-1\nline-2\n" 中部起读，应含后续内容且游标推进到末尾。
+    assert!(log.text.contains("line-2"), "增量段：{}", log.text);
+    assert!(
+        !log.text.starts_with("line-1"),
+        "不应重放 cursor 之前的前缀"
+    );
     assert_eq!(log.cursor, 14);
 }
 
@@ -140,4 +160,105 @@ async fn stop_tool_reports_signal() {
     let stop = result.data.expect("结构化数据").stop;
     assert!(stop.signal_sent);
     assert_eq!(stop.state, "backgrounded");
+}
+
+#[tokio::test]
+async fn watch_tool_times_out_as_still_running_for_backgrounded_task() {
+    let tool = BackgroundProcessWatchTool { source: source() };
+    let result = tool
+        .call(
+            serde_json::json!({"task_id": "task-1", "timeout_secs": 1}),
+            &test_context(),
+        )
+        .await;
+    assert!(!result.is_error, "watch 超时不应报错");
+    let data = result.data.expect("结构化数据");
+    assert_eq!(
+        data.outcome,
+        crate::domain::types::background_processes::BackgroundProcessWatchOutcome::StillRunning
+    );
+    assert!(result.text.contains("still_running"));
+}
+
+#[tokio::test]
+async fn watch_tool_unknown_task_errors() {
+    let tool = BackgroundProcessWatchTool { source: source() };
+    let result = tool
+        .call(
+            serde_json::json!({"task_id": "task-none", "timeout_secs": 1}),
+            &test_context(),
+        )
+        .await;
+    assert!(result.is_error, "未知任务必须报错");
+}
+
+#[tokio::test]
+async fn watch_tool_result_text_includes_log_tail_within_budget() {
+    let huge = format!("MARKER_HEAD\n{}\nMARKER_TAIL\n", "x".repeat(4_000));
+    let source = Arc::new(StaticSource {
+        access: Arc::new(FakeAccess {
+            summaries: vec![BackgroundProcessSummaryData {
+                task_id: "task-done".to_string(),
+                tool_name: "Bash".to_string(),
+                state: "succeeded".to_string(),
+                summary: "Bash · done".to_string(),
+                duration_ms: Some(10),
+            }],
+            log_text: huge,
+        }),
+    });
+    let tool = BackgroundProcessWatchTool { source };
+    let result = tool
+        .call(
+            serde_json::json!({"task_id": "task-done", "timeout_secs": 5}),
+            &test_context(),
+        )
+        .await;
+    assert!(!result.is_error);
+    let chars = result.text.chars().count();
+    assert!(
+        chars <= super::super::constants::WATCH_RESULT_TEXT_BUDGET_CHARS,
+        "Watch text 必须压在预算内以免 materializer 落盘：{chars}"
+    );
+    assert!(
+        result.text.contains("MARKER_TAIL") || result.text.contains("truncated"),
+        "应携带 log tail 或截断标记：{}",
+        result.text
+    );
+    let data = result.data.expect("结构化数据");
+    assert!(!data.log_tail.is_empty(), "typed log_tail 不应为空");
+    assert!(
+        data.log_tail.chars().count() <= super::super::constants::WATCH_RESULT_TEXT_BUDGET_CHARS,
+        "log_tail 本身也不得超过总预算"
+    );
+}
+
+#[tokio::test]
+async fn watch_tool_terminal_state_returns_terminal_outcome() {
+    let source = Arc::new(StaticSource {
+        access: Arc::new(FakeAccess {
+            summaries: vec![BackgroundProcessSummaryData {
+                task_id: "task-done".to_string(),
+                tool_name: "Bash".to_string(),
+                state: "succeeded".to_string(),
+                summary: "tool=Bash input=ok".to_string(),
+                duration_ms: Some(10),
+            }],
+            log_text: "done-line\n".to_string(),
+        }),
+    });
+    let tool = BackgroundProcessWatchTool { source };
+    let result = tool
+        .call(
+            serde_json::json!({"task_id": "task-done", "timeout_secs": 5}),
+            &test_context(),
+        )
+        .await;
+    assert!(!result.is_error);
+    let data = result.data.expect("结构化数据");
+    assert_eq!(
+        data.outcome,
+        crate::domain::types::background_processes::BackgroundProcessWatchOutcome::Terminal
+    );
+    assert!(result.text.contains("done-line"), "终态 text 应含 log tail");
 }

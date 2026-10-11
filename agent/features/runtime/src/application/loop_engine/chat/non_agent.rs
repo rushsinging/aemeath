@@ -406,9 +406,9 @@ where
         effective_call.id,
         effective_call.provider_id,
     );
-    // Only Bash supports stdout streaming via progress_tx. For other tools,
-    // skip the channel setup to avoid unnecessary overhead.
-    let is_bash = effective_call.name == "Bash";
+    // 仅对会 emit ToolProgressEvent 的工具装配 progress 通道；其余跳过以免空开销。
+    // #1931：BackgroundProcessWatch 等待中流式 log 依赖此通道，NEVER 只认 Bash。
+    let forwards_progress = tool_forwards_progress_stream(&effective_call.name);
 
     let tool_ctx = tool_context.with_authorization(effective_authorization);
     log::debug!(
@@ -420,10 +420,10 @@ where
         effective_call.name,
         tool_ctx.cancellation().is_cancelled()
     );
-    let exec_results = if is_bash {
-        // Set up tool stream channel for stdout streaming.
-        // Uses ToolProgressEvent (not AgentProgressEvent) since Bash stdout
-        // is tool output, not sub-agent progress.
+    let exec_results = if forwards_progress {
+        // Set up tool stream channel for stdout / watch-log streaming.
+        // Uses ToolProgressEvent (not AgentProgressEvent) since this is tool
+        // output, not sub-agent progress.
         let (prog_tx, mut prog_rx) =
             tokio::sync::mpsc::channel::<tools::published::execution::ToolProgressEvent>(32);
         let streaming_ctx = tool_ctx.with_progress(Some(
@@ -467,7 +467,7 @@ where
         }
         results
     } else {
-        // Non-Bash tools: execute without progress streaming.
+        // 无 ToolProgress 的工具：不装配 streaming 通道。
         vec![
             agent
                 .execute_one_with_ctx(&effective_call, &tool_ctx, step_id)
@@ -518,6 +518,11 @@ where
         out.push(ex);
     }
     out
+}
+
+/// 是否为该工具装配 `ToolProgressEvent` → `ToolOutputDelta` 转发通道。
+pub(crate) fn tool_forwards_progress_stream(tool_name: &str) -> bool {
+    matches!(tool_name, "Bash" | "BackgroundProcessWatch")
 }
 
 #[cfg(test)]

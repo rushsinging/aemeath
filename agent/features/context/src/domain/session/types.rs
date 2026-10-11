@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use uuid::{NoContext, Timestamp, Uuid};
 
 /// Validate a session ID to prevent path traversal attacks.
-#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+#[derive(Debug, Serialize, Deserialize, Default, Clone, PartialEq, Eq)]
 #[serde(default)]
 pub struct SessionMetadata {
     pub title: Option<String>,

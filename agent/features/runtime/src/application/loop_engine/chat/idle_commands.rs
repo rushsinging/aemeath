@@ -3,7 +3,6 @@
 //! 从旧 CommandRegistry 迁移，每个命令是独立函数。
 //! 结果通过 RuntimeStreamEvent::CommandResultText { text, is_error } 回传 TUI。
 
-use context::SessionManagementPort;
 use memory::api::search::MemorySearchQuery;
 use memory::api::{
     MemoryCategory, MemoryEntry, MemoryId, MemoryLayer, MemoryPort, MemorySource, MemoryStats,
@@ -43,16 +42,17 @@ pub fn execute_init(cwd: &str, force: bool) -> (String, bool) {
 pub async fn execute_session(
     args: &str,
     session_id: &str,
-    project: &share::session_types::ProjectIdentityData,
-    session_management: &dyn SessionManagementPort,
+    wiring: &context::MainSessionWiring,
 ) -> (String, bool) {
+    let project = wiring.project_identity();
+    let session_management = wiring.session_management();
     let parts: Vec<&str> = args.split_whitespace().collect();
     if parts.is_empty() {
         return (format!("Current session: {}", session_id), false);
     }
     match parts[0] {
         "list" => {
-            let sessions = match session_management.list_for_project(project).await {
+            let sessions = match session_management.list_for_project(&project).await {
                 Ok(sessions) => sessions,
                 Err(error) => return (format!("Failed to list sessions: {error}"), true),
             };
@@ -76,21 +76,26 @@ pub async fn execute_session(
             if parts.len() < 3 {
                 return ("Usage: /session rename <id> <name>".to_string(), true);
             }
-            match session_management
-                .update_metadata_for_project(
-                    parts[1],
-                    project,
-                    context::SessionMetadataUpdateData {
-                        title: Some(parts[2..].join(" ")),
-                        ..Default::default()
-                    },
-                )
-                .await
-            {
-                Ok(_) => (
-                    format!("Session {} renamed to {}", parts[1], parts[2]),
-                    false,
-                ),
+            let rename_id = parts[1];
+            let title = parts[2..].join(" ");
+            let update = context::SessionMetadataUpdateData {
+                title: Some(title.clone()),
+                ..Default::default()
+            };
+            // 当前 active session：走 wiring 同步 committed revision，避免 CAS 漂移。
+            let result = if rename_id == session_id {
+                wiring
+                    .update_active_session_metadata(update)
+                    .await
+                    .map(|_| ())
+            } else {
+                session_management
+                    .update_metadata_for_project(rename_id, &project, update)
+                    .await
+                    .map(|_| ())
+            };
+            match result {
+                Ok(()) => (format!("Session {} renamed to {}", rename_id, title), false),
                 Err(e) => (format!("Failed to rename session: {}", e), true),
             }
         }
@@ -99,7 +104,7 @@ pub async fn execute_session(
                 return ("Usage: /session delete <id>".to_string(), true);
             }
             match session_management
-                .delete_for_project(parts[1], project)
+                .delete_for_project(parts[1], &project)
                 .await
             {
                 Ok(()) => (format!("Session {} deleted.", parts[1]), false),
@@ -111,7 +116,7 @@ pub async fn execute_session(
                 return ("Usage: /session export <id>".to_string(), true);
             }
             match session_management
-                .export_for_project(parts[1], project)
+                .export_for_project(parts[1], &project)
                 .await
             {
                 Ok(bytes) => match String::from_utf8(bytes) {
@@ -127,7 +132,7 @@ pub async fn execute_session(
             }
             match tokio::fs::read(parts[1]).await {
                 Ok(content) => match session_management
-                    .import_for_project(&content, project)
+                    .import_for_project(&content, &project)
                     .await
                 {
                     Ok(session) => (format!("Session {} imported", session.id), false),

@@ -22,6 +22,7 @@ pub(crate) static TOOL_DISPLAY_NAMES: LazyLock<HashMap<&'static str, &'static st
             ("BackgroundProcessStatus", "Backend Process"),
             ("BackgroundProcessLogs", "Backend Process Logs"),
             ("BackgroundProcessStop", "Backend Process Stop"),
+            ("BackgroundProcessWatch", "Backend Process Watch"),
             ("TaskListCreate", "New Task List"),
             ("TaskListComplete", "Complete List"),
             ("TaskStop", "Stop Task"),
