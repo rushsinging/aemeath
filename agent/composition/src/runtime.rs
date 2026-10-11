@@ -201,9 +201,37 @@ pub(crate) async fn from_args_with_gateways(
     }
 
     let snapshot = config.reader().committed_snapshot();
-    let runtime_model = snapshot
-        .resolve_runtime_model(args.model.as_deref(), args.max_tokens)
-        .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
+    let session_model = load_resume_session_model(
+        session_management.as_ref(),
+        &identity,
+        args.resume.as_deref(),
+    )
+    .await;
+    let model_override = startup_model_override(args.model.as_deref(), session_model.as_deref());
+    let runtime_model = match snapshot.resolve_runtime_model(model_override, args.max_tokens) {
+        Ok(runtime_model) => runtime_model,
+        Err(error)
+            if args
+                .model
+                .as_deref()
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+                .is_none()
+                && session_model.is_some() =>
+        {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "resume session model 无效，回退 models.default: override={} error={error}",
+                session_model.as_deref().unwrap_or("")
+            );
+            snapshot
+                .resolve_runtime_model(None, args.max_tokens)
+                .map_err(|error| sdk::SdkError::Init(error.to_string()))?
+        }
+        Err(error) => {
+            return Err(sdk::SdkError::Init(error.to_string()));
+        }
+    };
     let resolved_model = runtime_model.resolved_model().clone();
     let runtime_settings = runtime::resolve_model_runtime_settings(
         runtime_model.max_tokens(),
@@ -479,6 +507,46 @@ pub(crate) async fn from_args_with_gateways(
         audit: session_audit,
         startup_notices,
     })
+}
+
+/// 启动模型选型优先级：CLI `--model` > session `metadata.model` > 配置默认。
+pub(crate) fn startup_model_override<'a>(
+    cli_model: Option<&'a str>,
+    session_model: Option<&'a str>,
+) -> Option<&'a str> {
+    cli_model
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .or_else(|| {
+            session_model
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+        })
+}
+
+async fn load_resume_session_model(
+    session_management: &dyn context::SessionManagementPort,
+    project: &share::session_types::ProjectIdentityData,
+    resume_id: Option<&str>,
+) -> Option<String> {
+    let resume_id = resume_id.map(str::trim).filter(|id| !id.is_empty())?;
+    match session_management
+        .load_for_project(resume_id, project)
+        .await
+    {
+        Ok(session) => session
+            .metadata
+            .model
+            .map(|model| model.trim().to_string())
+            .filter(|model| !model.is_empty()),
+        Err(error) => {
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "resume session model peek skipped: session={resume_id} error={error}"
+            );
+            None
+        }
+    }
 }
 
 #[cfg(test)]

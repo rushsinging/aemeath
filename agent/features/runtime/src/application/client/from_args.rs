@@ -401,6 +401,13 @@ pub async fn wire_agent_client_from_args(
         Arc::new(binding.clone()),
     );
     compact_model_slot.bind(model_state.clone());
+    // 回写 session.metadata.model（fail-open），供下次 `--resume` 恢复。
+    super::session_model_persist::persist_resolved_model_for_session(
+        &wiring,
+        &session_id,
+        &resolved_model,
+    )
+    .await;
 
     // Tool and Skill bootstrap results are assembled and frozen by Composition.
     let SkillBootstrapAssemblyData {

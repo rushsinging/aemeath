@@ -156,6 +156,13 @@ where
                                 .update_provider_binding(&new_binding, committed_config);
                             shell.model_state.update_binding(Arc::new(new_binding));
                             context_size = result.context_window;
+                            crate::application::client::session_model_persist::persist_session_model(
+                                shell.wiring.session_management().as_ref(),
+                                &session_id,
+                                &shell.wiring.project_identity(),
+                                &selection,
+                            )
+                            .await;
                             let _ = sink
                                 .send_event(RuntimeStreamEvent::ModelSwitched { result })
                                 .await;

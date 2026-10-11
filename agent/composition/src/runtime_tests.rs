@@ -339,3 +339,28 @@ async fn role_policy_with_unknown_capability_fails_wiring() {
     );
     assert!(result.is_err(), "unknown tool name must fail wiring");
 }
+
+#[test]
+fn startup_model_override_prefers_cli_over_session() {
+    assert_eq!(
+        super::startup_model_override(Some("cli/model"), Some("session/model"),),
+        Some("cli/model")
+    );
+}
+
+#[test]
+fn startup_model_override_uses_session_when_cli_absent() {
+    assert_eq!(
+        super::startup_model_override(None, Some("session/model")),
+        Some("session/model")
+    );
+}
+
+#[test]
+fn startup_model_override_ignores_blank_session_model() {
+    assert_eq!(super::startup_model_override(None, Some("  ")), None);
+    assert_eq!(
+        super::startup_model_override(Some(""), Some("session/model")),
+        Some("session/model")
+    );
+}

@@ -108,6 +108,7 @@ pub struct SessionMetadataUpdateData {
     pub tags: Option<Vec<String>>,
     pub notes: Option<String>,
     pub is_favorite: Option<bool>,
+    pub model: Option<String>,
 }
 
 impl SessionMetadataUpdateData {
@@ -123,6 +124,9 @@ impl SessionMetadataUpdateData {
         }
         if let Some(is_favorite) = self.is_favorite {
             metadata.is_favorite = is_favorite;
+        }
+        if let Some(model) = self.model {
+            metadata.model = Some(model);
         }
     }
 }
