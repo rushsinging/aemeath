@@ -981,7 +981,86 @@ async fn pre_compact_reflection_disabled_drops_material_without_phase() {
     assert_eq!(result.run.status(), RunStatus::Completed);
     assert_eq!(result.run.steps().len(), 1);
 }
-
+  
+/// #1925：wakeup Run 可 compact，但必须跳过 PreCompact 反思——
+/// 修复前：材料已 staged 后仍 `BeginReflection`，意图 gate 拒绝致整个 Run 失败。
+/// 跳过时 MUST take 并丢弃 staged 材料，NEVER 残留到下一 Conversation Run。
+#[tokio::test]
+async fn pre_compact_reflection_skipped_for_wakeup_intent_run() {
+    let slot =
+        crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot::default();
+    let mut run = crate::domain::agent_run::Run::new(
+        crate::domain::agent_run::RunSpec::background_process_wakeup(),
+        None,
+    );
+    let cancel = CancellationToken::new();
+    let mut execution = crate::application::run::execution_state::RunExecutionState::new();
+    // wakeup 不增加 session run_count；此处沿用上次用户回合序号即可。
+    execution.initialize_for_launch(Vec::new(), 10);
+    let activities = std::sync::Arc::new(
+        crate::application::activity::ActivityCoordinator::production_without_publisher(
+            run.id().clone(),
+            crate::application::activity::RunPurpose::Main,
+        ),
+    );
+    let mut reflection = ReflectionFake {
+        judgment: IntervalJudgment::Disabled,
+        outcome: pre_compact_outcome(ReflectionTaskCompletionStatus::Succeeded),
+        activities: activities.clone(),
+        runs: Vec::new(),
+        state_during_run: None,
+        pre_compact_material: slot.clone(),
+        memory_config: share::config::MemoryConfig::default(),
+        received_cancels: Vec::new(),
+        judgment_calls: std::cell::Cell::new(0),
+    };
+    let material = Some(vec![
+        share::message::Message::user("discarded-by-wakeup-compact"),
+    ]);
+    let mut scenario = ScriptedScenario {
+        model_steps: VecDeque::from([ModelStep::Complete {
+            text: "wakeup handled".to_string(),
+        }]),
+        needs_compaction: true,
+        pre_compact_material: material,
+        pre_compact_slot: Some(slot.clone()),
+        ..Default::default()
+    };
+    let events = {
+        let mut port = scenario.ports().run_loop();
+        port.bind_activity_context(activities.clone(), "test-model".to_string());
+        port.bind_reflection(&mut reflection);
+        run_loop(&mut run, &mut execution, &cancel, &mut port)
+            .await
+            .expect("wakeup Run 可 compact，但跳过 PreCompact 反思后必须正常完成");
+        scenario.events()
+    };
+  
+    assert_no_reflection_phase(
+        &events,
+        &activities,
+        &reflection.runs,
+        "wakeup intent + staged PreCompact",
+    );
+    let transitions = transition_events(&events);
+    assert!(
+        transition_index(
+            &transitions,
+            RunStatus::Compacting,
+            RunStatus::PreparingContext,
+            RunTransitionReason::CompactionCompleted,
+        )
+        .is_some(),
+        "wakeup 必须仍能完成 compact；实际转移: {transitions:?}"
+    );
+    assert!(
+        slot.staged().is_none(),
+        "跳过 PreCompact 反思时 staged 材料必须被取走丢弃，NEVER 残留"
+    );
+    assert_eq!(run.status(), RunStatus::Completed);
+    assert_eq!(run.steps().len(), 1);
+}
+  
 // ---------------------------------------------------------------------------
 // Manual：/reflect-now 走真 Run——Created→DrainingInput→Reflecting→DrainingInput→Completed
 // ---------------------------------------------------------------------------

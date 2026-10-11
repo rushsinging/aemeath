@@ -23,3 +23,14 @@ pub enum RunIntent {
     /// `background_process` reminder 注入，intent 本体不携带任务数据。
     BackgroundProcessWakeup,
 }
+
+impl RunIntent {
+    /// 是否允许 Interval / PreCompact 等自动反思。
+    ///
+    /// 仅用户对话回合（`Conversation`）放行；wakeup / 手动压缩 / 手动反思
+    /// 均不是用户回合——可 compact，但不得自动反思，也不消耗反思频控
+    /// （session `run_count` 由 session driver 在启动时跳过递增）。
+    pub fn allows_auto_reflection(self) -> bool {
+        matches!(self, Self::Conversation)
+    }
+}
