@@ -208,10 +208,13 @@ impl ResumedHistoryBacking {
         &mut self,
         window: crate::tui::adapter::runtime_view::TuiDisplayHistoryWindow,
     ) -> bool {
-        if self.session_id.as_deref() != Some(window.session_id.as_str())
-            || self.generation_revision != Some(window.generation_revision)
-        {
+        if self.session_id.as_deref() != Some(window.session_id.as_str()) {
             return false;
+        }
+        // Reader 遇 metadata bump 会跟随最新 generation；接受 >= pin 的刷新。
+        match self.generation_revision {
+            Some(pinned) if window.generation_revision < pinned => return false,
+            _ => self.generation_revision = Some(window.generation_revision),
         }
         for step in window.steps {
             let Some(step_index) = self

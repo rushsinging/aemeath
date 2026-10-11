@@ -219,12 +219,28 @@ impl DatasetSessionReader {
         };
         let manifest =
             SessionGenerationCodec::decode_manifest(only_member_bytes(manifest_read.members())?)?;
-        if manifest.session_id() != session_id || manifest.revision() != generation_revision {
+        if manifest.session_id() != session_id {
+            return Err(SessionGenerationWireError::InvalidManifest(
+                "Session generation identity 与请求不一致".to_string(),
+            ));
+        }
+        // metadata-only bump（如 session.metadata.model）会推进 generation；
+        // 请求 revision 落后时跟随 latest，而不是当损坏丢弃历史窗口。
+        let resolved_revision = if manifest.revision() == generation_revision {
+            generation_revision
+        } else if generation_revision < manifest.revision() {
+            log::info!(
+                target: crate::LOG_TARGET,
+                "display history follows newer generation: session={session_id} expected={generation_revision} actual={}",
+                manifest.revision()
+            );
+            manifest.revision()
+        } else {
             return Err(SessionGenerationWireError::StaleDisplayHistory {
                 expected_revision: generation_revision,
                 actual_revision: manifest.revision(),
             });
-        }
+        };
         let references_by_name = manifest
             .steps()
             .iter()
@@ -275,7 +291,7 @@ impl DatasetSessionReader {
             .collect::<Result<Vec<_>, _>>()?;
         Ok(DisplayHistoryStepWindowData::new(
             session_id,
-            generation_revision,
+            resolved_revision,
             steps,
         ))
     }

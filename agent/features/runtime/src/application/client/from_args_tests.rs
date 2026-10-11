@@ -844,3 +844,19 @@ fn startup_emits_session_start_after_session_resolution() {
         "SessionStart emit 必须位于 resolve_startup_session 之后（session id 已确定）"
     );
 }
+
+#[test]
+fn startup_persists_session_model_before_resolve_startup_session() {
+    let source = include_str!("from_args.rs");
+    let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+    let persist_pos = production
+        .find("persist_resolved_model_for_session")
+        .expect("startup 必须回写 session.metadata.model");
+    let resume_pos = production
+        .find("resolve_startup_session")
+        .expect("startup 必须解析 session");
+    assert!(
+        persist_pos < resume_pos,
+        "persist_session_model 必须在 resolve_startup_session 之前，避免 display-history pin 旧 generation"
+    );
+}
