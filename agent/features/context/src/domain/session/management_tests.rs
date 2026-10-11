@@ -116,3 +116,15 @@ fn list_entry_keeps_project_none_without_workspace_snapshot() {
 
     assert_eq!(entry.project, None);
 }
+
+#[test]
+fn metadata_update_applies_model_selection() {
+    let mut metadata = SessionMetadata::default();
+    SessionMetadataUpdateData {
+        model: Some("Zhipu Coding Plan/glm-5.3".to_string()),
+        ..Default::default()
+    }
+    .apply(&mut metadata);
+
+    assert_eq!(metadata.model.as_deref(), Some("Zhipu Coding Plan/glm-5.3"));
+}

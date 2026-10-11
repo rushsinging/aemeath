@@ -247,12 +247,22 @@ async fn session_management_imports_exports_updates_and_deletes_through_injected
             &project,
             crate::SessionMetadataUpdateData {
                 title: Some("renamed".to_string()),
+                model: Some("Zhipu Coding Plan/glm-5.3".to_string()),
                 ..Default::default()
             },
         )
         .await
         .expect("update session metadata");
     assert_eq!(updated.title.as_deref(), Some("renamed"));
+    assert_eq!(updated.model.as_deref(), Some("Zhipu Coding Plan/glm-5.3"));
+    let reloaded = port
+        .load_for_project("session-lifecycle", &project)
+        .await
+        .expect("reload session after metadata update");
+    assert_eq!(
+        reloaded.metadata.model.as_deref(),
+        Some("Zhipu Coding Plan/glm-5.3")
+    );
 
     port.delete_for_project("session-lifecycle", &project)
         .await

@@ -402,6 +402,19 @@ pub async fn wire_agent_client_from_args(
     );
     compact_model_slot.bind(model_state.clone());
 
+    // 将会话最终选用的 model 回写 metadata，供下次 `--resume` 恢复。
+    // 写失败 fail-open，不阻断启动。
+    super::session_model_persist::persist_session_model(
+        wiring.session_management().as_ref(),
+        &session_id,
+        &wiring.project_identity(),
+        &super::session_model_persist::session_model_key(
+            &resolved_model.source_key,
+            &resolved_model.model.id,
+        ),
+    )
+    .await;
+
     // Tool and Skill bootstrap results are assembled and frozen by Composition.
     let SkillBootstrapAssemblyData {
         snapshot: initial_skill_snapshot,

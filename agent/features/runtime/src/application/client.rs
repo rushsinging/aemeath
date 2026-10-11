@@ -4,6 +4,7 @@ mod compact_model;
 mod from_args;
 mod mapping;
 pub mod resume_helper;
+pub(crate) mod session_model_persist;
 pub(crate) mod session_query;
 mod skill_catalog_refresh;
 mod startup_resume;
