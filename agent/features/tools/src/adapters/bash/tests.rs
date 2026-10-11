@@ -427,7 +427,7 @@ async fn bash_cancellation_interrupts_running_process_before_command_timeout() {
     let tool = bash_tool(&ctx);
 
     let execution = tokio::time::timeout(std::time::Duration::from_secs(2), async move {
-        let call = tool.call(json!({ "command": "sleep 60", "timeout": 600_000 }), &ctx);
+        let call = tool.call(json!({ "command": "sleep 60", "timeout": 600 }), &ctx);
         tokio::pin!(call);
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         cancellation
@@ -516,7 +516,7 @@ async fn bash_cancellation_preserves_partial_stdout() {
         // call 必须并发驱动：主流程先等 echo 输出被 reader 读到，再触发取消。
         let call = tokio::spawn(async move {
             tool.call(
-                json!({ "command": "echo partial-stdout-marker-1; sleep 30", "timeout": 600_000 }),
+                json!({ "command": "echo partial-stdout-marker-1; sleep 30", "timeout": 600 }),
                 &ctx,
             )
             .await
@@ -561,7 +561,7 @@ async fn bash_timeout_preserves_partial_stdout() {
 
     let execution = bash_tool(&ctx)
         .call(
-            json!({ "command": "echo partial-stdout-marker-2; sleep 30", "timeout": 400 }),
+            json!({ "command": "echo partial-stdout-marker-2; sleep 30", "timeout": 1 }),
             &ctx,
         )
         .await;
@@ -576,7 +576,7 @@ async fn bash_timeout_preserves_partial_stdout() {
         execution.text
     );
     assert!(
-        execution.text.contains("timed out after 400ms"),
+        execution.text.contains("timed out after 1s"),
         "the timeout marker must be appended, got: {:?}",
         execution.text
     );
@@ -803,8 +803,8 @@ fn bash_tool_timeout_max_lives_in_schema_and_both_description_channels_agree() {
         .as_str()
         .expect("timeout description");
     assert!(
-        timeout_desc.contains("max 3600000"),
-        "schema should advertise the 60-minute max, got: {timeout_desc}"
+        timeout_desc.contains("max 3600") && timeout_desc.contains("seconds"),
+        "schema should advertise the 3600s max in seconds, got: {timeout_desc}"
     );
     assert_eq!(
         tool.description_for("en"),

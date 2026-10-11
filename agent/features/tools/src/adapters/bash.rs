@@ -149,13 +149,16 @@ impl TypedTool for BashTool {
                 return TypedToolResult::error(format!("Shell injection pattern blocked ({reason}): {command}\nUse separate Bash calls instead."));
             }
         }
-        let timeout_ms = args.timeout.unwrap_or(120_000).min(3_600_000);
+        let timeout_secs = args
+            .timeout
+            .unwrap_or(super::constants::BASH_DEFAULT_TIMEOUT_SECS)
+            .min(super::constants::BASH_MAX_TIMEOUT_SECS);
 
         let path_base = ctx.workspace_read().current_path_base();
         log::debug!(
             target: crate::LOG_TARGET,
-            "executing command: path_base={:?} timeout_ms={} command={:?}",
-            path_base, timeout_ms, command
+            "executing command: path_base={:?} timeout_secs={} command={:?}",
+            path_base, timeout_secs, command
         );
         let script =
             format!("{command}\nstatus=$?\nprintf '\\n{CWD_MARKER}%s\\n' \"$PWD\"\nexit $status");
@@ -240,11 +243,11 @@ impl TypedTool for BashTool {
         let cancellation = ctx.cancellation();
         log::debug!(
             target: crate::LOG_TARGET,
-            "bash cancellation boundary: command={:?} child_pid={:?} initial_cancelled={} timeout_ms={}",
+            "bash cancellation boundary: command={:?} child_pid={:?} initial_cancelled={} timeout_secs={}",
             command,
             child_pid,
             cancellation.is_cancelled(),
-            timeout_ms,
+            timeout_secs,
         );
         let wait_result: Result<std::process::ExitStatus, std::io::Error> = tokio::select! {
             biased;
@@ -297,7 +300,7 @@ impl TypedTool for BashTool {
                 return tool_result;
             }
             result = tokio::time::timeout(
-                Duration::from_millis(timeout_ms),
+                Duration::from_secs(timeout_secs),
                 child.wait(),
             ) => {
                 match result {
@@ -320,9 +323,9 @@ impl TypedTool for BashTool {
                             &stdout,
                             &stderr,
                             &format!(
-                                "[Command timed out after {timeout_ms}ms — partial output above]"
+                                "[Command timed out after {timeout_secs}s — partial output above]"
                             ),
-                            &format!("command timed out after {timeout_ms}ms"),
+                            &format!("command timed out after {timeout_secs}s"),
                         );
                         let mut tool_result = TypedToolResult::error(result);
                         tool_result.data = Some(BashResult {

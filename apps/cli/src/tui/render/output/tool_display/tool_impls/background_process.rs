@@ -1,6 +1,6 @@
-//! Background Process 工具族 TUI 显示（#1895）：四工具专属 header +
+//! Background Process 工具族 TUI 显示（#1895 / #1931）：五工具专属 header +
 //! typed result 解析渲染（List 逐行摘要 / Status 详情 / Logs 多行原文 /
-//! Stop 信号态），替代 fallback 的 JSON 原文截断。
+//! Stop 信号态 / Watch outcome），替代 fallback 的 JSON 原文截断。
 
 use super::super::common::typed_from_content;
 use super::super::{
@@ -9,10 +9,11 @@ use super::super::{
 };
 use sdk::tool_input::{
     BackgroundProcessLogsInput, BackgroundProcessStatusInput, BackgroundProcessStopInput,
+    BackgroundProcessWatchInput,
 };
 use sdk::tool_result::{
     BackgroundProcessListResult, BackgroundProcessLogsResult, BackgroundProcessStatusResult,
-    BackgroundProcessStopResult,
+    BackgroundProcessStopResult, BackgroundProcessWatchOutcome, BackgroundProcessWatchResult,
 };
 use std::path::Path;
 
@@ -186,6 +187,61 @@ impl ToolDisplay for BackgroundProcessStopDisplay {
 inventory::submit!(ToolDisplayEntry {
     name: "BackgroundProcessStop",
     display: || Box::new(BackgroundProcessStopDisplay)
+});
+
+// ── BackgroundProcessWatch ──────────────────────────────
+
+struct BackgroundProcessWatchDisplay;
+
+impl ToolDisplay for BackgroundProcessWatchDisplay {
+    fn name(&self) -> &str {
+        "BackgroundProcessWatch"
+    }
+    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
+        let args = parse_input::<BackgroundProcessWatchInput>(input);
+        if args.task_id.is_empty() {
+            return self.display_name().to_string();
+        }
+        match args.timeout_secs {
+            Some(secs) => format!("{} {} timeout={}s", self.display_name(), args.task_id, secs),
+            None => format!("{} {}", self.display_name(), args.task_id),
+        }
+    }
+    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
+        vec![]
+    }
+    fn format_result_lines(&self, content: Option<&serde_json::Value>) -> Option<Vec<String>> {
+        let result: BackgroundProcessWatchResult = typed_from_content(content)?;
+        let outcome = match result.outcome {
+            BackgroundProcessWatchOutcome::Terminal => "terminal",
+            BackgroundProcessWatchOutcome::StillRunning => "still_running",
+            BackgroundProcessWatchOutcome::Cancelled => "cancelled",
+        };
+        let detail = &result.detail;
+        let duration = match detail.summary.duration_ms {
+            Some(ms) => format!("{}ms", ms),
+            None => "-".to_string(),
+        };
+        // log_tail 在前、outcome 摘要在后：tail_mode 保留最新日志的同时
+        // NEVER 把 still_running/terminal 行裁掉。
+        let mut lines = Vec::new();
+        if !result.log_tail.is_empty() {
+            lines.extend(result.log_tail.lines().map(str::to_string));
+        }
+        lines.push(format!(
+            "{} · {} · {} · {} · {}",
+            outcome, detail.summary.task_id, detail.summary.state, duration, detail.summary.summary
+        ));
+        Some(lines)
+    }
+    fn render_policy(&self) -> ToolRenderPolicy {
+        // log tail + 末行 outcome（与 Logs 同源尾部行数）。
+        family_policy(super::super::constants::TOOL_RESULT_TAIL_LINES + 1, true)
+    }
+}
+inventory::submit!(ToolDisplayEntry {
+    name: "BackgroundProcessWatch",
+    display: || Box::new(BackgroundProcessWatchDisplay)
 });
 
 #[cfg(test)]

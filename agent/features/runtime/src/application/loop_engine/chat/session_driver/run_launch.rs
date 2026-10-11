@@ -156,10 +156,9 @@ where
                                 .update_provider_binding(&new_binding, committed_config);
                             shell.model_state.update_binding(Arc::new(new_binding));
                             context_size = result.context_window;
-                            crate::application::client::session_model_persist::persist_session_model(
-                                shell.wiring.session_management().as_ref(),
+                            crate::application::client::session_model_persist::persist_session_model_on_wiring(
+                                &shell.wiring,
                                 &session_id,
-                                &shell.wiring.project_identity(),
                                 &selection,
                             )
                             .await;
@@ -209,20 +208,20 @@ where
                             }
                         }
                     } else {
-                        let port = wiring.session_management();
-                        let project = wiring.project_identity();
                         let args = args.clone();
                         let deleted_session = args.trim_start().starts_with("delete ");
                         let active_session_id = session_id.clone();
                         let result = wiring
-                            .with_shared(async move {
-                                super::super::idle_commands::execute_session(
-                                    &args,
-                                    &active_session_id,
-                                    &project,
-                                    port.as_ref(),
-                                )
-                                .await
+                            .with_shared({
+                                let wiring = wiring.clone();
+                                async move {
+                                    super::super::idle_commands::execute_session(
+                                        &args,
+                                        &active_session_id,
+                                        &wiring,
+                                    )
+                                    .await
+                                }
                             })
                             .await;
                         let (text, is_error) = result.unwrap_or_else(|_| {

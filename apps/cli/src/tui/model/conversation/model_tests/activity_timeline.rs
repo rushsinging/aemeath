@@ -459,6 +459,44 @@ fn test_bash_streaming_preview_tails_complete_lines() {
     assert_eq!(activities, vec!["b", "c", "d", "e", "f"]);
 }
 
+/// #1931：Watch 等待中 ToolProgress 必须进入 streaming_preview。
+/// 白名单若只认 Bash/Agent，本测试应失败（假绿根因）。
+#[test]
+fn background_process_watch_streaming_output_populates_preview() {
+    let mut model = ConversationModel::default();
+    let chat_id = super::ids::ChatId::new("chat-watch-stream");
+    let run_id = super::ids::ChatRunId::new("turn-watch-stream");
+    let tool_id = super::ids::ToolCallId::new("tool-watch-stream");
+
+    model.ensure_runtime_turn(chat_id.clone(), run_id.clone());
+    model.apply(ToolCallStart {
+        chat_id: chat_id.clone(),
+        run_id: run_id.clone(),
+        id: tool_id.clone(),
+        provider_id: None,
+        name: "BackgroundProcessWatch".to_string(),
+        index: 0,
+    });
+
+    model.apply(RecordToolStreamingOutput {
+        chat_id: chat_id.clone(),
+        run_id: run_id.clone(),
+        tool_id: tool_id.clone(),
+        text: "64 bytes from 127.0.0.1: icmp_seq=1\n".to_string(),
+    });
+
+    let call = tool_call(&model, &chat_id, &run_id, &tool_id).expect("Watch tool call");
+    assert!(
+        call.streaming_preview.is_some(),
+        "Watch ToolProgress 必须写入 streaming_preview，不能被白名单丢弃"
+    );
+    let activities = call.activities.clone();
+    assert!(
+        activities.iter().any(|line| line.contains("bytes from")),
+        "Watch 等待中应可见流式 log 行：{activities:?}"
+    );
+}
+
 #[test]
 fn test_agent_activity_preview_limits_activity_lines() {
     let mut model = ConversationModel::default();

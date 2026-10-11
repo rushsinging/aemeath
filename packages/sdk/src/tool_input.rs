@@ -15,7 +15,7 @@
 pub use tools::types::agent::AgentInput;
 pub use tools::types::background_processes::{
     BackgroundProcessListInput, BackgroundProcessLogsInput, BackgroundProcessStatusInput,
-    BackgroundProcessStopInput,
+    BackgroundProcessStopInput, BackgroundProcessWatchInput,
 };
 pub use tools::types::bash::BashInput;
 pub use tools::types::edit::EditInput;

@@ -11,6 +11,9 @@ pub(crate) fn session_model_key(source_key: &str, model_id: &str) -> String {
 /// Best-effort write of the active model onto the session metadata.
 ///
 /// Failures are logged and swallowed so model persistence never blocks chat.
+///
+/// Prefer [`persist_session_model_on_wiring`] when a [`context::MainSessionWiring`]
+/// is available — that path holds `mutation_gate` and syncs `committed_session`.
 pub(crate) async fn persist_session_model(
     session_management: &dyn context::SessionManagementPort,
     session_id: &str,
@@ -55,16 +58,55 @@ pub(crate) async fn persist_session_model(
     }
 }
 
+/// Write model onto session metadata, syncing in-memory revision when `session_id`
+/// is the wiring's currently committed active session.
+///
+/// - Active session → [`MainSessionWiring::update_active_session_metadata`]
+///   (mutation_gate + disk + committed revision sync).
+/// - Other id (bootstrap `--resume` target before `resolve_startup_session`) →
+///   disk-only [`persist_session_model`].
+pub(crate) async fn persist_session_model_on_wiring(
+    wiring: &context::MainSessionWiring,
+    session_id: &str,
+    model: &str,
+) {
+    let model = model.trim();
+    if model.is_empty() {
+        return;
+    }
+    if wiring.committed_session().id == session_id {
+        if let Err(error) = wiring
+            .update_active_session_metadata(context::SessionMetadataUpdateData {
+                model: Some(model.to_string()),
+                ..Default::default()
+            })
+            .await
+        {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "persist session model (active sync) failed: session={session_id} model={model} error={error}"
+            );
+        }
+        return;
+    }
+    persist_session_model(
+        wiring.session_management().as_ref(),
+        session_id,
+        &wiring.project_identity(),
+        model,
+    )
+    .await;
+}
+
 /// Bootstrap/switch helper: write `source/model` from a resolved binding.
 pub(crate) async fn persist_resolved_model_for_session(
     wiring: &context::MainSessionWiring,
     session_id: &str,
     resolved_model: &ResolvedModel,
 ) {
-    persist_session_model(
-        wiring.session_management().as_ref(),
+    persist_session_model_on_wiring(
+        wiring,
         session_id,
-        &wiring.project_identity(),
         &session_model_key(&resolved_model.source_key, &resolved_model.model.id),
     )
     .await;

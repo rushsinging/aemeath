@@ -164,7 +164,11 @@ impl TypedTool for WebFetchTool {
         }
         let raw_url = args.url.as_str();
 
-        let timeout_ms = args.timeout.unwrap_or(30_000);
+        let timeout_secs = args
+            .timeout
+            .unwrap_or(super::constants::WEB_FETCH_DEFAULT_TIMEOUT_SECS)
+            .min(super::constants::WEB_FETCH_MAX_TIMEOUT_SECS)
+            .max(1);
 
         // Validate URL and upgrade http to https
         let mut url = match validate_url(raw_url) {
@@ -191,7 +195,7 @@ impl TypedTool for WebFetchTool {
         command.args([
             "-sL", // silent, follow redirects
             "--max-time",
-            &(timeout_ms / 1000).max(5).to_string(),
+            &timeout_secs.to_string(),
             "-A",
             "aemeath/0.1.0",
             // Limit redirect count to reduce SSRF surface
@@ -210,7 +214,7 @@ impl TypedTool for WebFetchTool {
             );
         }
         let result =
-            tokio::time::timeout(Duration::from_millis(timeout_ms), command.output()).await;
+            tokio::time::timeout(Duration::from_secs(timeout_secs), command.output()).await;
 
         match result {
             Ok(Ok(output)) => {
@@ -295,7 +299,7 @@ impl TypedTool for WebFetchTool {
             Err(_) => TypedToolResult::error(
                 serde_json::json!({
                     "status": "error",
-                    "message": format!("request timed out after {timeout_ms}ms"),
+                    "message": format!("request timed out after {timeout_secs}s"),
                     "data": { "url": url.as_str() }
                 })
                 .to_string(),

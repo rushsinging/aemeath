@@ -2,6 +2,15 @@ use super::*;
 use crate::application::loop_engine::chat::committed_side_effect::{
     CommittedSideEffectDispatcher, TaskCommittedSideEffectHandler,
 };
+
+#[test]
+fn tool_forwards_progress_stream_includes_bash_and_watch_only() {
+    assert!(tool_forwards_progress_stream("Bash"));
+    assert!(tool_forwards_progress_stream("BackgroundProcessWatch"));
+    assert!(!tool_forwards_progress_stream("BackgroundProcessStatus"));
+    assert!(!tool_forwards_progress_stream("BackgroundProcessLogs"));
+    assert!(!tool_forwards_progress_stream("Read"));
+}
 use crate::application::loop_engine::chat::{ChatEventSinkHandle, EventFuture};
 use async_trait::async_trait;
 use serde_json::Value;

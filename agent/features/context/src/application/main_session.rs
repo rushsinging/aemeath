@@ -13,7 +13,10 @@ use share::session_types::ProjectIdentityData;
 use task::{PreparedTaskRestoreData, TaskPersist, TaskSnapshotData};
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock as TokioRwLock};
 
-use crate::domain::session::{same_project_identity, CanonicalSession, SnapshotState};
+use crate::domain::session::{
+    same_project_identity, CanonicalSession, SessionManagementError, SessionMetadataUpdateData,
+    SnapshotState,
+};
 use crate::ports::{ContextPort, MainContextFactory, SessionManagementPort};
 
 // ─── SessionSwitchGate (existing) ────────────────────────────────────
@@ -455,6 +458,56 @@ impl MainSessionWiring {
     /// Returns the current project identity used to scope Session list/resume.
     pub fn project_identity(&self) -> ProjectIdentityData {
         self.workspace_read.project_identity()
+    }
+
+    /// 更新**当前 active** session 的 metadata：持 [`mutation_gate`]，落盘后同步
+    /// [`committed_session`] 的 revision / metadata。
+    ///
+    /// 用于 `/model`、当前会话 rename 等原先旁路 `update_metadata_for_project`
+    /// 的路径——那些路径只 bump 磁盘 revision、不 `publish_generation`，会导致
+    /// 下一轮 `append_and_persist` CAS `expected=N, actual=N+1`。
+    ///
+    /// 同值更新（apply 后 metadata 不变）直接 Ok 且不写盘。
+    pub async fn update_active_session_metadata(
+        &self,
+        update: SessionMetadataUpdateData,
+    ) -> Result<(), SessionManagementError> {
+        let _mutation = self.mutation_gate.lock().await;
+        let before = self.committed_session();
+        let session_id = before.id.clone();
+        let project = self.project_identity();
+
+        let mut probed = before.metadata.clone();
+        update.clone().apply(&mut probed);
+        if probed == before.metadata {
+            return Ok(());
+        }
+
+        self.session_management
+            .update_metadata_for_project(&session_id, &project, update)
+            .await?;
+
+        let disk = self
+            .session_management
+            .load_for_project(&session_id, &project)
+            .await?;
+        if disk.id != before.id {
+            return Err(SessionManagementError::Storage(format!(
+                "active session id 在 metadata 更新后不一致: before={}, disk={}",
+                before.id, disk.id
+            )));
+        }
+
+        // 只同步 metadata 路径会改的字段，保留内存里其它 committed 内容。
+        let mut merged = (*before).clone();
+        merged.revision = disk.revision;
+        merged.updated_at = disk.updated_at;
+        merged.metadata = disk.metadata;
+        *self
+            .committed_session
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Arc::new(merged);
+        Ok(())
     }
 
     /// Returns the raw [`ConfigReader`] backing this wiring.

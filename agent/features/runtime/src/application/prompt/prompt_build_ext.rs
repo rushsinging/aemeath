@@ -59,6 +59,7 @@ pub(crate) fn background_processes_guidance_section(lang: &str) -> &'static str 
             - 优先等待完成通知；NEVER 对同一 task_id 忙等轮询 BackgroundProcessStatus。\n\
             - 确需中途进度时用 BackgroundProcessLogs（task_id + 增量游标，全量字节无截断）或直接读占位里的日志文件路径；不要为「等完成」反复调用 Logs。\n\
             - BackgroundProcessStatus 仅偶发一次用于确认（例如怀疑通知丢失）；用 BackgroundProcessList 查看列表，用 BackgroundProcessStop 请求停止。\n\
+            - 需要主动短等时可用 BackgroundProcessWatch（强制前台；timeout_secs 缺省 60、上限 300；超时返回 still_running）。NEVER 对同一 task_id 连续狂调 Watch（仍受 fuse）；完成通知与 reminder 不因 Watch 而抑制。\n\
             - sequential-only 工具的前序调用转后台后，同轮后续命令可能与未完成的前序并行；有顺序依赖时应等待完成通知，不要用 Status 轮询替代。"
         }
         _ => {
@@ -68,6 +69,7 @@ pub(crate) fn background_processes_guidance_section(lang: &str) -> &'static str 
             - Prefer waiting for the completion notification; NEVER busy-poll BackgroundProcessStatus for the same task_id.\n\
             - For mid-run progress use BackgroundProcessLogs (task_id + incremental cursor, full bytes without truncation) or read the log file path from the placeholder; do not poll Logs just to wait for completion.\n\
             - Use BackgroundProcessStatus only occasionally to confirm (e.g. if a notification seems missing); use BackgroundProcessList for the task list and BackgroundProcessStop to request a stop.\n\
+            - For an explicit short wait use BackgroundProcessWatch (forced foreground; timeout_secs default 60, hard cap 300; timeout returns still_running). NEVER spam Watch on the same task_id (still fuse-governed); completion notifications and reminders are not suppressed by Watch.\n\
             - When a sequential-only predecessor has been moved to the background, later commands in the same round may run concurrently with it; if order matters, wait for the completion notification — do not substitute Status polling."
         }
     }

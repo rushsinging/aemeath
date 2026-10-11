@@ -148,6 +148,17 @@ fn supervised_call(
     background_threshold: Option<Duration>,
     run_deadline: Option<SystemTime>,
 ) -> SupervisedToolCall {
+    supervised_call_with_identity_name("SleepTool", context, background_threshold, run_deadline)
+}
+
+/// identity.tool_name 可与 invocation 分离：catalog/执行走 SleepTool，
+/// 强制前台判定只看 identity.tool_name（#1931 Watch）。
+fn supervised_call_with_identity_name(
+    identity_tool_name: &str,
+    context: ToolExecutionContext,
+    background_threshold: Option<Duration>,
+    run_deadline: Option<SystemTime>,
+) -> SupervisedToolCall {
     SupervisedToolCall {
         identity: ToolCallIdentityData {
             session_id: SessionId::new("session-1"),
@@ -155,7 +166,7 @@ fn supervised_call(
             step_id: RunStepId::new("step-1"),
             runtime_call_id: "runtime-call-1".to_string(),
             provider_call_id: None,
-            tool_name: "SleepTool".to_string(),
+            tool_name: identity_tool_name.to_string(),
             call_index: 0,
             agent: false,
         },
@@ -295,6 +306,42 @@ async fn execute_exceeding_threshold_returns_placeholder_and_backgrounds_receipt
             .iter()
             .any(|state| state == "Backgrounded"),
         "转后台应推进 receipt 至 Backgrounded"
+    );
+}
+
+#[tokio::test]
+async fn background_process_watch_never_moves_to_background_despite_threshold() {
+    let (supervisor, states) = supervisor_with(Duration::from_millis(400));
+
+    let started = std::time::Instant::now();
+    let (outcome, _) = supervisor
+        .execute(supervised_call_with_identity_name(
+            "BackgroundProcessWatch",
+            test_context(),
+            Some(Duration::from_millis(40)),
+            None,
+        ))
+        .await
+        .expect("Watch 强制前台应成功");
+    let foreground_wait = started.elapsed();
+
+    assert!(
+        foreground_wait >= Duration::from_millis(300),
+        "Watch 应前台等到真实完成，不得在阈值处提前返回占位；实际前台等待 {foreground_wait:?}"
+    );
+    assert!(
+        success_text(&outcome).contains("sleep tool finished"),
+        "Watch 应返回真实结果而非转后台占位：{}",
+        success_text(&outcome)
+    );
+    assert!(
+        !states
+            .lock()
+            .expect("receipt 状态记录锁")
+            .iter()
+            .any(|state| state == "Backgrounded"),
+        "Watch 不得推进 receipt 至 Backgrounded：{:?}",
+        states.lock().expect("receipt 状态记录锁")
     );
 }
 

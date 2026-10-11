@@ -277,3 +277,17 @@ specs 同步（核心引擎 PR 内）：3.4.3（FIFO 修订）、3.4.4（`Backgr
 | ④ | progress 通道增量输出覆盖面 | 仅影响「运行中实时日志」体验，终态输出不受影响 |
 | ⑤ | sequential FIFO 修订的完成序风险 | specs 修订 + L4 快路径 / 转后台双场景锁定 |
 | ⑥ | Wakeup Run 空输入可行性 | 通知链路 PR 实现时验证，兜底极简标记文本 |
+
+## BackgroundProcessWatch（#1931）
+
+推翻此前「不做 Watch」否决：登记式 Watch 与完成通知重复、阻塞式会嵌套后台的风险，通过以下约束解除——
+
+- **强制前台**：执行监督器对 `BackgroundProcessWatch` 将 `background_threshold` 视为 `None`，NEVER 自动转后台。
+- **带超时短等**：`timeout_secs` 缺省 60，硬上限 300（clamp 到 `[1, 300]`）；超时返回 `outcome=still_running` + 当前 detail；终态返回 `outcome=terminal`。
+- **等待中流式 log**：`wait_task` 从**当前日志末尾**增量 `read_task_log`，经 `ToolProgressEvent` 推送；runtime `non_agent` **必须**为 `BackgroundProcessWatch` 装配与 Bash 相同的 progress→`ToolOutputDelta` 通道（`tool_forwards_progress_stream`）；TUI `tool_observe` 白名单必须包含 Watch。NEVER 回放历史全文。缺任一层都会静默无流式。
+- **结束 result 含 log_tail**：`BackgroundProcessWatchResult.log_tail` + `watch_text` 拼接尾部；字符预算 `WATCH_RESULT_TEXT_BUDGET_CHARS=2000`（对齐 Grep、硬压在 materializer floor 3000 之下），NEVER 触发 tool_result 落盘截断阶段。
+- **不吞通知**：Watch 只读账本等待；完成通知 / wakeup / reminder 原路走。
+- **Fuse 不豁免**：与 List/Status/Logs 不同；连续同 id Watch 仍计 Soft=3。
+- **等待实现**：tools crate 内 `domain::background_process_port::wait_task`（`pub(crate)`，不进 crate 根 façade）基于非阻塞 `task_status` 轮询 + cancellation + 可选 ProgressSink，NEVER 在调用方盲 sleep。
+- **测试**：L0–L4 覆盖 types/port/adapter/fuse/TUI（含 log_tail 渲染与 text≤2000）；强制前台由 `execution_supervisor_tests::background_process_watch_never_moves_to_background_despite_threshold` 钉死；L5 PTY（`background_process_display_pty`）覆盖 Watch 等待中流式 ping 输出（`bytes from`）+ timeout→`still_running` typed 行（mock 提取 `bgp_`，`timeout_secs=2`）。
+

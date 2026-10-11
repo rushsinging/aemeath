@@ -134,6 +134,7 @@ const FULL: &[&str] = &[
     "BackgroundProcessStatus",
     "BackgroundProcessLogs",
     "BackgroundProcessStop",
+    "BackgroundProcessWatch",
 ];
 #[test]
 fn production_profiles_are_main_baseline_or_restricted_children() {

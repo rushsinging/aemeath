@@ -194,19 +194,23 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
         project: &share::session_types::ProjectIdentityData,
         update: SessionMetadataUpdateData,
     ) -> Result<SessionListEntryData, SessionManagementError> {
-        let mut session = self.load_for_project(id, project).await?;
-        update.apply(&mut session.metadata);
-        session.updated_at = now_iso();
+        let before = self.load_for_project(id, project).await?;
+        let mut after = before.clone();
+        update.apply(&mut after.metadata);
+        after.updated_at = now_iso();
+        // 与 DatasetSessionManagement 对齐：metadata 更新 MUST bump revision，
+        // 否则 CAS 调用方无法感知旁路写；同值 skip 由上层 wiring 负责。
+        after.revision += 1;
         // 元数据更新顺带把 session 升格到 project 目录段布局。
-        let store = match crate::domain::session::session_project_dir(&session) {
+        let store = match crate::domain::session::session_project_dir(&after) {
             Some(project_dir) => self.store_scoped(&project_dir, id)?,
             None => self.store(id)?,
         };
         self.persistence_from_store(store)
-            .save(&session)
+            .save(&after)
             .await
             .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
-        Ok(SessionListEntryData::from_canonical(&session))
+        Ok(SessionListEntryData::from_canonical(&after))
     }
 
     async fn delete_for_project(

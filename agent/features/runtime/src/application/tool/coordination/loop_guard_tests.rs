@@ -146,6 +146,31 @@ fn background_process_stop_is_not_exempt_from_consecutive_fuse() {
 }
 
 #[test]
+fn background_process_watch_is_not_exempt_from_consecutive_fuse() {
+    // #1931：Watch 不豁免；连续同 id 仍 Soft=3。
+    assert!(
+        !crate::application::tool::coordination::constants::TOOL_FUSE_EXEMPT_READONLY_BACKGROUND_TOOLS
+            .contains(&"BackgroundProcessWatch"),
+        "Watch 不得进入只读豁免列"
+    );
+    let mut fuse = ToolCallFuse::new();
+    let tool_call = call(
+        "BackgroundProcessWatch",
+        serde_json::json!({"task_id": "bgp_test", "timeout_secs": 60}),
+    );
+
+    assert_eq!(fuse.inspect(&step(), &tool_call), ToolFuseDecision::Allow);
+    assert_eq!(fuse.inspect(&step(), &tool_call), ToolFuseDecision::Allow);
+    assert!(
+        matches!(
+            fuse.inspect(&step(), &tool_call),
+            ToolFuseDecision::SoftBlock { .. }
+        ),
+        "Watch 不豁免，第 3 次跨 step 应 SoftBlock"
+    );
+}
+
+#[test]
 fn non_background_tools_still_soft_block_after_three_steps() {
     let mut fuse = ToolCallFuse::new();
     let tool_call = call("Bash", serde_json::json!({"command": "sleep 1"}));

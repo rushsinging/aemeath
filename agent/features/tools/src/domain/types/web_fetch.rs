@@ -20,6 +20,6 @@ pub struct WebFetchResult {
 pub struct WebFetchInput {
     /// The URL to fetch
     pub url: String,
-    /// Timeout in milliseconds (default 30000)
+    /// Timeout in seconds (default 30, max 3600)
     pub timeout: Option<u64>,
 }

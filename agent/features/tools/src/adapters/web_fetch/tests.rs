@@ -92,3 +92,20 @@ fn test_web_fetch_result_schema_includes_links() {
     let properties = schema.get("properties").unwrap();
     assert!(properties.get("links").is_some());
 }
+
+#[test]
+fn web_fetch_timeout_schema_advertises_seconds() {
+    let tool = WebFetchTool;
+    let schema = tool.input_schema();
+    let timeout_desc = schema["properties"]["timeout"]["description"]
+        .as_str()
+        .expect("timeout description");
+    assert!(
+        timeout_desc.contains("seconds") && timeout_desc.contains("30"),
+        "WebFetch timeout schema must be seconds: {timeout_desc}"
+    );
+    assert!(
+        !timeout_desc.contains("milliseconds") && !timeout_desc.contains("30000"),
+        "WebFetch timeout schema must not advertise ms: {timeout_desc}"
+    );
+}

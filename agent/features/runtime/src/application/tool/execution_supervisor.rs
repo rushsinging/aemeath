@@ -298,9 +298,13 @@ impl ToolExecutionSupervisor {
             effective_deadline
         );
 
-        let backgrounding = call
-            .background_threshold
-            .filter(|threshold| threshold > &Duration::ZERO);
+        // #1931：Watch 是强制前台短等出口，NEVER 自动转后台（无论全局阈值）。
+        let backgrounding = if call.identity.tool_name == "BackgroundProcessWatch" {
+            None
+        } else {
+            call.background_threshold
+                .filter(|threshold| threshold > &Duration::ZERO)
+        };
         // #1890 输出直绑装配：工具声明直绑 + 会话启用后台化 + 监督器/
         // session 就绪时，派发即前移生成进程 id 并创建任务日志文件
         //（文件名与账本 id 同源）；快路径完成删文件，转后台同 id 入账。

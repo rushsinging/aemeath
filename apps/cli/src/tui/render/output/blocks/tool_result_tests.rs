@@ -357,6 +357,41 @@ fn background_process_list_result_renders_summary_via_render_pipeline() {
     );
 }
 
+#[test]
+fn background_process_watch_result_renders_outcome_via_render_pipeline() {
+    let watch_json = serde_json::json!({
+        "outcome": "still_running",
+        "detail": {
+            "summary": {
+                "task_id": "bgp_07YWatch01",
+                "tool_name": "Bash",
+                "state": "backgrounded",
+                "summary": "cargo test -p tools",
+                "duration_ms": 12000
+            },
+            "deadline_remaining_ms": null,
+            "total_written_bytes": 64
+        },
+        "log_tail": "64 bytes from 127.0.0.1: icmp_seq=1\n"
+    });
+    let view = result_with_data("BackgroundProcessWatch", "{}", watch_json);
+    let block = render_tool_result("bgp-watch-result", &view, &RenderCtx::for_width(80));
+    let text = block_text(&block);
+    assert!(
+        text.contains("still_running"),
+        "Watch 应经 typed 分支渲染 outcome：{text}"
+    );
+    assert!(
+        text.contains("bgp_07YWatch01"),
+        "Watch 应渲染 task id：{text}"
+    );
+    assert!(text.contains("bytes from"), "Watch 应渲染 log_tail：{text}");
+    assert!(
+        !text.contains("\"outcome\""),
+        "typed 分支生效时不应回退 JSON 原文：{text}"
+    );
+}
+
 fn block_text(block: &super::RenderedBlock) -> String {
     block
         .lines

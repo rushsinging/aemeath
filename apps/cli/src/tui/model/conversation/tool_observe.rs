@@ -12,6 +12,8 @@ fn push_streaming_preview_activity(call: &mut ToolCall, activities: &[AgentActiv
     let policy = match call.name.as_str() {
         "Bash" => ToolStreamingPreviewPolicy::new(5, true, STREAM_CAP),
         "Agent" => ToolStreamingPreviewPolicy::new(5, true, STREAM_CAP),
+        // #1931：Watch 等待中 ToolProgress 必须进入 preview；NEVER 静默丢弃。
+        "BackgroundProcessWatch" => ToolStreamingPreviewPolicy::new(5, true, STREAM_CAP),
         _ => return,
     };
     let buffer = call
