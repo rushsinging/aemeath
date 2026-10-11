@@ -313,7 +313,7 @@ impl Run {
             let allowed = match self.status {
                 RunStatus::DrainingInput => self.spec.intent() == RunIntent::ManualReflection,
                 RunStatus::ApplyingResponse | RunStatus::Compacting => {
-                    self.spec.intent() == RunIntent::Conversation
+                    self.spec.intent().allows_auto_reflection()
                 }
                 _ => false,
             };

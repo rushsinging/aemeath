@@ -103,6 +103,16 @@ pub(super) async fn run_pre_compact_reflection_phase_if_staged(
     let Some(messages) = messages else {
         return Ok(());
     };
+    // wakeup / 手动压缩等非用户回合：可 compact，但跳过自动反思。
+    // 材料已 take——此处直接丢弃，NEVER 残留到下一 Conversation Run（#1925）。
+    if !run.spec().intent().allows_auto_reflection() {
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "[run_loop] 跳过 PreCompact 反思: intent={:?}（非用户回合）",
+            run.spec().intent(),
+        );
+        return Ok(());
+    }
     // PreCompact 反思的是被丢弃段（非 session 历史增量），不推进游标（None）。
     run_reflection_phase(
         run,

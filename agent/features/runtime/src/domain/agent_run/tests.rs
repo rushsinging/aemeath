@@ -2382,6 +2382,51 @@ fn manual_reflection_spec_carries_reflection_intent() {
 }
 
 #[test]
+fn only_conversation_allows_auto_reflection() {
+    assert!(
+        RunIntent::Conversation.allows_auto_reflection(),
+        "用户对话回合才允许 Interval / PreCompact 自动反思"
+    );
+    for intent in [
+        RunIntent::BackgroundProcessWakeup,
+        RunIntent::ManualCompaction,
+        RunIntent::ManualReflection,
+    ] {
+        assert!(
+            !intent.allows_auto_reflection(),
+            "{intent:?} 不得允许自动反思"
+        );
+    }
+}
+
+#[test]
+fn wakeup_run_rejects_begin_reflection_from_compacting() {
+    // #1925：wakeup 可 compact，但不得从 Compacting 切入自动反思。
+    let mut run = Run::new(RunSpec::background_process_wakeup(), None);
+    run.start_draining().unwrap();
+    run.apply_drain_decision(DrainDecision::Inputs, None)
+        .unwrap();
+    run.transition(RunTransition::BeginCompaction).unwrap();
+    assert_eq!(run.status(), RunStatus::Compacting);
+    let events_before = run.events().len();
+
+    assert_eq!(
+        run.transition(RunTransition::BeginReflection),
+        Err(RunTransitionError::IllegalTransition {
+            from: RunStatus::Compacting,
+            transition: RunTransition::BeginReflection,
+        }),
+        "wakeup 不得从 Compacting 进入 BeginReflection"
+    );
+    assert_eq!(run.status(), RunStatus::Compacting);
+    assert_eq!(
+        run.events().len(),
+        events_before,
+        "被拒绝的反思入口不得发布迁移事件"
+    );
+}
+
+#[test]
 fn background_process_wakeup_intent_is_a_normal_conversation_run() {
     // Wakeup Run 行为与 Conversation 同构（模型调用、工具执行、正常取消），
     // 只是启动触发源是后台进程完成；spec 与 main() 全字段一致仅 intent 不同。
