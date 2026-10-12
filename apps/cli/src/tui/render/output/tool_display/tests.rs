@@ -1011,8 +1011,25 @@ fn task_lists_result_renders_typed_summary_lines() {
     assert_eq!(lines.len(), 1);
     assert!(lines[0].contains("tl_1"));
     assert!(lines[0].contains("active"));
-    assert!(lines[0].contains("p1/i1/c1/t3"));
+    assert!(lines[0].contains("pending:1 doing:1 completed:1 total:3"));
     assert!(!lines[0].starts_with('{'));
+}
+
+#[test]
+fn task_list_get_null_list_shows_empty_placeholder() {
+    let display = lookup_display("TaskListGet").unwrap();
+    let lines = display
+        .format_result_lines(Some(&serde_json::json!({
+            "task_list": null,
+            "stats": { "total": 0, "pending": 0, "in_progress": 0, "completed": 0 },
+            "tasks": []
+        })))
+        .expect("typed lines");
+    assert_eq!(lines, vec!["（无任务）".to_string()]);
+    assert!(!lines.iter().any(|line| line.contains("pending:0")));
+    assert!(!lines
+        .iter()
+        .any(|line| line.starts_with('-') || line.contains("· - ·")));
 }
 
 #[test]

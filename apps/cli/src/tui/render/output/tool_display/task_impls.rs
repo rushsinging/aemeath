@@ -38,6 +38,10 @@ fn format_task_view_line(task: &serde_json::Value) -> String {
 
 fn format_task_list_summary_line(summary: &serde_json::Value) -> Option<String> {
     let task_list = summary.get("task_list")?;
+    // task_list: null（无当前列表）不得回退成 `- · - · - · pending:0…`。
+    if !task_list.is_object() {
+        return None;
+    }
     let stats = summary.get("stats");
     let id = json_str(task_list, "id");
     let status = json_str(task_list, "status");
@@ -45,7 +49,7 @@ fn format_task_list_summary_line(summary: &serde_json::Value) -> Option<String> 
     let stats_part = stats
         .map(|value| {
             format!(
-                "p{}/i{}/c{}/t{}",
+                "pending:{} doing:{} completed:{} total:{}",
                 value.get("pending").and_then(|v| v.as_u64()).unwrap_or(0),
                 value
                     .get("in_progress")
