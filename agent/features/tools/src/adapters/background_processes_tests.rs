@@ -162,32 +162,27 @@ async fn stop_tool_reports_signal() {
     assert_eq!(stop.state, "backgrounded");
 }
 
-#[tokio::test]
-async fn watch_tool_times_out_as_still_running_for_backgrounded_task() {
+#[test]
+fn watch_tool_framework_timeout_is_300_not_default_120() {
+    use crate::domain::TypedTool;
     let tool = BackgroundProcessWatchTool { source: source() };
-    let result = tool
-        .call(
-            serde_json::json!({"task_id": "task-1", "timeout_secs": 1}),
-            &test_context(),
-        )
-        .await;
-    assert!(!result.is_error, "watch 超时不应报错");
-    let data = result.data.expect("结构化数据");
     assert_eq!(
-        data.outcome,
-        crate::domain::types::background_processes::BackgroundProcessWatchOutcome::StillRunning
+        tool.timeout_secs(),
+        crate::domain::constants::WATCH_TOOL_TIMEOUT_SECS
     );
-    assert!(result.text.contains("still_running"));
+    assert_eq!(tool.timeout_secs(), 300);
+    assert!(
+        crate::domain::types::background_processes::watch_internal_timeout_secs()
+            < tool.timeout_secs(),
+        "内部 wait MUST 短于框架 timeout"
+    );
 }
 
 #[tokio::test]
 async fn watch_tool_unknown_task_errors() {
     let tool = BackgroundProcessWatchTool { source: source() };
     let result = tool
-        .call(
-            serde_json::json!({"task_id": "task-none", "timeout_secs": 1}),
-            &test_context(),
-        )
+        .call(serde_json::json!({"task_id": "task-none"}), &test_context())
         .await;
     assert!(result.is_error, "未知任务必须报错");
 }
@@ -209,10 +204,7 @@ async fn watch_tool_result_text_includes_log_tail_within_budget() {
     });
     let tool = BackgroundProcessWatchTool { source };
     let result = tool
-        .call(
-            serde_json::json!({"task_id": "task-done", "timeout_secs": 5}),
-            &test_context(),
-        )
+        .call(serde_json::json!({"task_id": "task-done"}), &test_context())
         .await;
     assert!(!result.is_error);
     let chars = result.text.chars().count();
@@ -249,10 +241,7 @@ async fn watch_tool_terminal_state_returns_terminal_outcome() {
     });
     let tool = BackgroundProcessWatchTool { source };
     let result = tool
-        .call(
-            serde_json::json!({"task_id": "task-done", "timeout_secs": 5}),
-            &test_context(),
-        )
+        .call(serde_json::json!({"task_id": "task-done"}), &test_context())
         .await;
     assert!(!result.is_error);
     let data = result.data.expect("结构化数据");

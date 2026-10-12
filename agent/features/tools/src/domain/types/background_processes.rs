@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::constants::{DEFAULT_WATCH_TIMEOUT_SECS, MAX_WATCH_TIMEOUT_SECS};
+use crate::domain::constants::{WATCH_INTERNAL_GRACE_SECS, WATCH_TOOL_TIMEOUT_SECS};
 
 /// `BackgroundProcessList` input（无参数：列出活动与近期任务）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -103,12 +103,13 @@ pub struct BackgroundProcessStopResult {
 }
 
 /// `BackgroundProcessWatch` input.
+///
+/// 超时唯一来源为 Tool 框架 [`WATCH_TOOL_TIMEOUT_SECS`]（#1946）；
+/// **NEVER** 再提供入参 timeout。旧调用若仍带 `timeout_secs` 由 serde 忽略。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BackgroundProcessWatchInput {
     /// Task id（`task_` / typed id 前缀）。
     pub task_id: String,
-    /// 等待超时（秒）。缺省 [`DEFAULT_WATCH_TIMEOUT_SECS`]；clamp 到 `[1, MAX]`。
-    pub timeout_secs: Option<u64>,
 }
 
 /// Watch 等待结局。
@@ -133,12 +134,9 @@ pub struct BackgroundProcessWatchResult {
     pub log_tail: String,
 }
 
-/// 解析 Watch 超时：`None` → 缺省 60；否则 clamp 到 `[1, 300]`。
-pub fn resolve_watch_timeout_secs(raw: Option<u64>) -> u64 {
-    match raw {
-        None => DEFAULT_WATCH_TIMEOUT_SECS,
-        Some(value) => value.clamp(1, MAX_WATCH_TIMEOUT_SECS),
-    }
+/// Watch 内部等待时长：框架超时减去 grace，先于 supervisor 收口为 `still_running`。
+pub fn watch_internal_timeout_secs() -> u64 {
+    WATCH_TOOL_TIMEOUT_SECS.saturating_sub(WATCH_INTERNAL_GRACE_SECS)
 }
 
 /// 状态词汇是否为后台进程终态（与 Status/List 词汇对齐）。
@@ -168,11 +166,33 @@ mod tests {
     }
 
     #[test]
-    fn watch_timeout_defaults_to_60_and_clamps_to_1_300() {
-        assert_eq!(resolve_watch_timeout_secs(None), 60);
-        assert_eq!(resolve_watch_timeout_secs(Some(0)), 1);
-        assert_eq!(resolve_watch_timeout_secs(Some(301)), 300);
-        assert_eq!(resolve_watch_timeout_secs(Some(120)), 120);
+    fn watch_timeouts_are_framework_only_with_internal_grace() {
+        assert_eq!(WATCH_TOOL_TIMEOUT_SECS, 300);
+        assert_eq!(WATCH_INTERNAL_GRACE_SECS, 5);
+        assert_eq!(watch_internal_timeout_secs(), 295);
+        assert!(
+            watch_internal_timeout_secs() < WATCH_TOOL_TIMEOUT_SECS,
+            "内部 wait MUST 短于框架 timeout，避免 cleanup unconfirmed"
+        );
+    }
+
+    #[test]
+    fn watch_input_ignores_legacy_timeout_secs_field() {
+        let input: BackgroundProcessWatchInput = serde_json::from_value(serde_json::json!({
+            "task_id": "bgp_legacy1",
+            "timeout_secs": 300
+        }))
+        .expect("旧 timeout_secs 字段应被忽略");
+        assert_eq!(input.task_id, "bgp_legacy1");
+        let schema = {
+            use crate::domain::types::ToolSchema;
+            BackgroundProcessWatchInput::data_schema()
+        };
+        let schema_text = schema.to_string();
+        assert!(
+            !schema_text.contains("timeout_secs"),
+            "Watch input schema MUST NOT 暴露 timeout_secs：{schema_text}"
+        );
     }
 
     #[test]
