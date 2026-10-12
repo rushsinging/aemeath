@@ -181,7 +181,7 @@ async fn map_reduce_chunk_target_follows_compact_model_window() {
         .map(|index| {
             Message::user(format!(
                 "这是一个用于触发分块压缩的测试消息编号 {index}。{}",
-                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(4)
             ))
         })
         .collect::<Vec<_>>();
@@ -326,7 +326,7 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
         .map(|index| {
             Message::user(format!(
                 "这是一个用于触发分块压缩的测试消息编号 {index}。{}",
-                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(4)
             ))
         })
         .collect::<Vec<_>>();
@@ -774,7 +774,7 @@ async fn map_chunk_provider_failure_degrades_locally_and_keeps_other_chunks() {
         };
         Message::user(format!(
         "编号 {index}。{marker}需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。{}",
-        "重复填充内容以放大估算。".repeat(3)
+        "重复填充内容以放大估算。".repeat(5)
         ))
         })
         .collect::<Vec<_>>();
@@ -1330,7 +1330,7 @@ async fn multi_chunk_map_is_reduced_locally_without_full_checkpoint_request() {
         .map(|index| {
             Message::user(format!(
                 "触发本地归并的测试消息编号 {index}。{}",
-                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(4)
             ))
         })
         .collect::<Vec<_>>();
@@ -1402,7 +1402,7 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
         .map(|index| {
             Message::user(format!(
                 "这是一个用于触发分块压缩的测试消息编号 {index}。{}",
-                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(4)
             ))
         })
         .collect::<Vec<_>>();
@@ -1494,11 +1494,12 @@ async fn local_reduce_normalizes_oversized_unprotected_facts_to_budget() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     // 与并发测试相同规模的 600 条消息，确保触发 map-reduce（5+ 块）
+    // CJK 比率 0.6 后用 repeat(3) 对齐旧估算出的约 5 次 generator 调用。
     let messages = (0..600)
         .map(|index| {
             Message::user(format!(
                 "触发分块压缩的测试消息编号 {index}。{}",
-                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(3)
             ))
         })
         .collect::<Vec<_>>();
@@ -1773,12 +1774,12 @@ fn refresh_prompt_enforces_shrunk_budget() {
 async fn local_reduce_normalization_avoids_non_shrinking_refresh_rounds() {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    // 构造足以触发 map-reduce 的消息
+    // 构造足以触发 map-reduce 的消息（CJK 0.6 比率下 repeat(3) 对齐约 5 次调用）
     let messages = (0..600)
         .map(|index| {
             Message::user(format!(
                 "触发分块压缩的测试消息编号 {index}。{}",
-                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(3)
             ))
         })
         .collect::<Vec<_>>();
@@ -1861,7 +1862,7 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
         .map(|index| {
             Message::user(format!(
                 "触发分块压缩的测试消息编号 {index}。{}",
-                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(4)
             ))
         })
         .collect::<Vec<_>>();
@@ -2362,7 +2363,7 @@ async fn local_reduce_never_repairs_a_full_checkpoint_wire() {
         .map(|index| {
             Message::user(format!(
                 "触发分块压缩的测试消息编号 {index}。{}",
-                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(4)
             ))
         })
         .collect::<Vec<_>>();
@@ -2417,7 +2418,7 @@ async fn refresh_repair_provider_failure_degrades_to_bounded_canonical_checkpoin
         .map(|index| {
             Message::user(format!(
                 "触发分块压缩的测试消息编号 {index}。{}",
-                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(4)
             ))
         })
         .collect::<Vec<_>>();
@@ -2507,7 +2508,7 @@ async fn invalid_refresh_checkpoint_is_repaired_before_preserving_current_checkp
         .map(|index| {
             Message::user(format!(
                 "触发分块压缩的测试消息编号 {index}。{}",
-                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(2)
+                "需要更长的内容来确保 token 估算足够大，从而把消息集拆成多个 chunk。".repeat(4)
             ))
         })
         .collect::<Vec<_>>();
@@ -2885,10 +2886,13 @@ async fn placeholder_objective_from_previous_checkpoint_is_replaced_by_main_user
 
 // ── #1688：compact tail token 封顶（软阶段对齐 Step 边界） ─────────────
 
-/// 构造约 `tokens` 估算 token 的 user 文本消息（ASCII ~4 chars/token）。
+/// 构造约 `tokens` 估算 token 的 user 文本消息（拉丁字符 ≈ 0.3 token/字）。
 fn sized_user_message(label: &str, tokens: usize) -> Message {
-    let filler = "x".repeat(tokens.saturating_sub(1) * 4);
-    Message::user(format!("{label}{filler}"))
+    let label_tokens = crate::domain::token_budget::estimate_tokens(label);
+    let remaining = tokens.saturating_sub(label_tokens.max(1));
+    let filler_chars =
+        ((remaining as f64) / crate::domain::token_budget::TOKENS_PER_LATIN_CHAR).ceil() as usize;
+    Message::user(format!("{label}{}", "x".repeat(filler_chars)))
 }
 
 fn budget_boundaries(entries: &[usize]) -> Vec<usize> {

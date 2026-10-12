@@ -1,6 +1,17 @@
 //! Context domain 层共享生产常量（#1146 双轨归位）。
 
 pub(crate) const HEURISTIC_CALIBRATION_RANGE: std::ops::RangeInclusive<f64> = 0.5..=2.0;
+
+/// Provider usage 相对本地估算的可信区间（与校准 clamp 对齐）。
+/// `api / heuristic` 落在该闭区间内才采信 API；否则预判改用本地估算。
+pub(crate) const PROVIDER_USAGE_TRUST_RATIO_RANGE: std::ops::RangeInclusive<f64> =
+    HEURISTIC_CALIBRATION_RANGE;
+
+/// 中文字符（CJK）粗估：约 0.6 token / 字。
+pub(crate) const TOKENS_PER_CJK_CHAR: f64 = 0.6;
+
+/// 英文字符（拉丁等非 CJK）粗估：约 0.3 token / 字。
+pub(crate) const TOKENS_PER_LATIN_CHAR: f64 = 0.3;
 /// fallback/护栏中 previous_summary 允许嵌入的最大字符数（#1486）。
 ///
 /// 多次 compact 时 previous_summary 若被全文 verbatim 嵌入会线性累加，

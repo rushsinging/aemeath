@@ -28,6 +28,9 @@ impl PublishedStateRegistry {
             context::DecisionReason::HeuristicFallback => {
                 sdk::ContextDecisionSourceView::HeuristicFallback
             }
+            context::DecisionReason::HeuristicPreferred => {
+                sdk::ContextDecisionSourceView::HeuristicPreferred
+            }
             context::DecisionReason::MisconfiguredWindow => {
                 sdk::ContextDecisionSourceView::MisconfiguredWindow
             }

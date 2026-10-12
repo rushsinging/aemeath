@@ -7,6 +7,7 @@
 pub use super::constants::MIN_EFFECTIVE_WINDOW;
 pub(crate) use super::constants::{
     COMPACT_TAIL_WINDOW_PERCENT, FALLBACK_PREVIOUS_SUMMARY_CAP, MAX_OUTPUT_WINDOW_RATIO_CAP,
+    TOKENS_PER_CJK_CHAR, TOKENS_PER_LATIN_CHAR,
 };
 use share::message::{ContentBlock, Message};
 
@@ -15,33 +16,40 @@ use share::message::{ContentBlock, Message};
 // 已在 #1486 修复中删除；以下为仍在使用的纯函数。）
 
 /// Estimate token count for a string.
-/// Uses CJK-aware estimation: CJK characters average ~1 token each
-/// (mainstream tokenizers measure 0.7–1.0 tokens per CJK char),
-/// while ASCII/Latin text averages ~4 characters per token.
+/// CJK-aware：中文字符 ≈ 0.6 token/字，英文字符 ≈ 0.3 token/字。
 pub fn estimate_tokens(text: &str) -> usize {
-    estimate_tokens_with_ratio(text, 4.0)
+    estimate_tokens_with_char_rates(text, TOKENS_PER_CJK_CHAR, TOKENS_PER_LATIN_CHAR)
 }
 
-/// Estimate tokens with custom bytes-per-token ratio
-pub fn estimate_tokens_with_ratio(text: &str, bytes_per_token: f64) -> usize {
+/// Estimate tokens with custom per-character rates（CJK / 非 CJK）。
+pub fn estimate_tokens_with_char_rates(
+    text: &str,
+    tokens_per_cjk_char: f64,
+    tokens_per_latin_char: f64,
+) -> usize {
     let mut cjk_chars = 0usize;
-    let mut other_bytes = 0usize;
+    let mut latin_chars = 0usize;
 
     for ch in text.chars() {
         if is_cjk_char(ch) {
             cjk_chars += 1;
         } else {
-            other_bytes += ch.len_utf8();
+            latin_chars += 1;
         }
     }
 
-    // CJK: ~1 token per character; Other: ~N bytes per token (varies by model).
-    // 无额外 safety margin：compact threshold 已含 0.8 安全系数，
-    // 旧实现（CJK×2 + 1.33x margin）实测高估 1.8–3.2 倍（#1500）。
-    let cjk_tokens = cjk_chars;
+    let cjk_rate = tokens_per_cjk_char.clamp(0.1, 2.0);
+    let latin_rate = tokens_per_latin_char.clamp(0.1, 2.0);
+    ((cjk_chars as f64) * cjk_rate + (latin_chars as f64) * latin_rate).ceil() as usize
+}
+
+/// 兼容旧调用：`bytes_per_token` 换算为拉丁字符比率 `1 / bytes_per_token`，
+/// CJK 仍用默认 0.6。新代码应优先 [`estimate_tokens`] /
+/// [`estimate_tokens_with_char_rates`]。
+#[allow(dead_code)] // 保留兼容入口，生产路径走默认比率
+pub fn estimate_tokens_with_ratio(text: &str, bytes_per_token: f64) -> usize {
     let ratio = bytes_per_token.clamp(2.0, 6.0);
-    let other_tokens = (other_bytes as f64 / ratio).ceil() as usize;
-    cjk_tokens + other_tokens
+    estimate_tokens_with_char_rates(text, TOKENS_PER_CJK_CHAR, 1.0 / ratio)
 }
 
 /// Check if a character is in CJK Unicode ranges.
@@ -58,11 +66,9 @@ fn is_cjk_char(ch: char) -> bool {
     )
 }
 
-/// Estimate tokens for JSON content (~4 bytes per token, same as text;
-/// 旧实现按 2 bytes/token × 1.33 高估 ~2.7 倍，tool schemas 因 JSON 占比高
-/// 是 heuristic 判定系统性高估的主要来源之一，#1500)。
+/// Estimate tokens for JSON content（与文本相同：按字符比率粗估）。
 pub fn estimate_json_tokens(text: &str) -> usize {
-    text.len().div_ceil(4)
+    estimate_tokens(text)
 }
 
 /// Estimate total tokens in a message list

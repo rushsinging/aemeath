@@ -461,18 +461,25 @@ fn run_usage_tracker_calibration_starts_neutral_and_converges() {
     );
 }
 
-/// #1626：脏观测（比值超出 clamp 区间 2 倍）不污染系数；估算为 0 跳过。
+/// 脏观测（api/heuristic 落在可信区间 [0.5, 2.0] 外）既不写 usage 也不污染系数；
+/// 估算为 0 时无法校验，同样跳过写入。
 #[test]
 fn run_usage_tracker_calibration_ignores_dirty_observations() {
     let tracker = RunUsageTracker::new();
-    tracker.update_with_heuristic(4_000, 1_000); // observed 4.0 > 2.0×2 → 丢弃
+    tracker.update_with_heuristic(4_000, 1_000); // observed 4.0 > 2.0 → 丢弃
     assert_eq!(tracker.calibration_factor(), 1.0);
-    tracker.update_with_heuristic(100, 1_000); // observed 0.1 < 0.5/2 → 丢弃
+    assert_eq!(tracker.get(), None);
+    tracker.update_with_heuristic(100, 1_000); // observed 0.1 < 0.5 → 丢弃
     assert_eq!(tracker.calibration_factor(), 1.0);
+    assert_eq!(tracker.get(), None);
     tracker.update_with_heuristic(500, 0); // 估算为 0 → 跳过
     assert_eq!(tracker.calibration_factor(), 1.0);
-    // usage 本身仍被记录
-    assert_eq!(tracker.get(), Some(500));
+    assert_eq!(tracker.get(), None);
+
+    // 边界可信：2.0 写入 usage 并参与校准
+    tracker.update_with_heuristic(2_000, 1_000);
+    assert_eq!(tracker.get(), Some(2_000));
+    assert!((tracker.calibration_factor() - 1.3).abs() < 1e-9); // 0.7*1 + 0.3*2
 }
 
 /// #1626：系数 clamp 在 [0.5, 2.0]；reset（compact 后）清除 usage 但保留系数。

@@ -2,38 +2,42 @@ use super::*;
 
 #[test]
 fn test_estimate_ascii() {
-    // ASCII: ~4 chars per token
+    // 英文字符 ≈ 0.3 token/字 → ceil(11 × 0.3) = 4
     let tokens = estimate_tokens("hello world");
-    assert!(tokens > 0);
-    // "hello world" is 11 chars, should be about 3 tokens
-    assert!((3..=5).contains(&tokens));
-}
-
-#[test]
-fn test_estimate_cjk() {
-    // CJK: ~1 token per char（主流 tokenizer 实测 0.7-1.0 tokens/char；
-    // #1500 复现：按 2 tokens/char + 1.33x margin 估算高估 ~2.7 倍，
-    // 导致 heuristic 判定在 ctx 43% 时误触发 compact）
-    let tokens = estimate_tokens("你好世界");
     assert_eq!(tokens, 4);
 }
 
 #[test]
-fn test_estimate_ascii_no_safety_margin_inflation() {
-    // 长 ASCII 文本 ≈ len/4 tokens，不再叠加 1.33x safety margin——
-    // threshold 已含 0.8 安全系数，双重保险造成估算系统性高估。
-    let text = "the quick brown fox jumps over the lazy dog. ".repeat(50);
-    let tokens = estimate_tokens(&text);
-    assert_eq!(tokens, text.len().div_ceil(4));
+fn test_estimate_cjk() {
+    // 中文字符 ≈ 0.6 token/字 → ceil(4 × 0.6) = 3
+    let tokens = estimate_tokens("你好世界");
+    assert_eq!(tokens, 3);
 }
 
 #[test]
-fn test_estimate_json_no_inflated_ratio() {
-    // JSON（tool input / tool schemas）按 ~4 bytes/token 估算；
-    // #1500 复现：旧实现按 2 bytes/token × 4/3 高估 ~2.7 倍。
+fn test_estimate_ascii_uses_chars_times_point_three() {
+    let text = "the quick brown fox jumps over the lazy dog. ".repeat(50);
+    let expected = ((text.chars().count() as f64) * TOKENS_PER_LATIN_CHAR).ceil() as usize;
+    assert_eq!(estimate_tokens(&text), expected);
+}
+
+#[test]
+fn test_estimate_json_uses_same_latin_ratio() {
     let json = r#"{"name":"Read","path":"src/main.rs","line":10}"#;
-    let tokens = estimate_json_tokens(json);
-    assert_eq!(tokens, json.len().div_ceil(4));
+    let expected = ((json.chars().count() as f64) * TOKENS_PER_LATIN_CHAR).ceil() as usize;
+    assert_eq!(estimate_json_tokens(json), expected);
+}
+
+#[test]
+fn test_estimate_mixed_cjk_and_latin() {
+    // 「你好」×0.6 + "AB"×0.3 → ceil(1.2 + 0.6) = 2
+    assert_eq!(estimate_tokens("你好AB"), 2);
+}
+
+#[test]
+fn test_estimate_tokens_with_ratio_maps_bytes_to_latin_rate() {
+    // bytes_per_token=4 → latin rate 0.25；纯 ASCII "abcd" → ceil(4*0.25)=1
+    assert_eq!(estimate_tokens_with_ratio("abcd", 4.0), 1);
 }
 
 #[test]

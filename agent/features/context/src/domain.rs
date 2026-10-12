@@ -470,6 +470,8 @@ pub enum DecisionReason {
     ActualProviderUsage,
     /// No provider usage available; full candidate heuristic estimate used.
     HeuristicFallback,
+    /// Provider usage 相对本地估算超出可信区间，预判改用本地估算。
+    HeuristicPreferred,
     /// Effective window below [`MIN_EFFECTIVE_WINDOW`] even after the output
     /// reservation clamp — the context window itself is misconfigured and
     /// autocompact is disabled to prevent a compaction storm (#1626).
