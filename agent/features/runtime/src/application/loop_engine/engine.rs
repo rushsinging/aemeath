@@ -304,6 +304,12 @@ async fn run_loop_body(
                     continue;
                 }
 
+                // #1944: pending AskUser/ToolApproval 时 queued message 必须回流，
+                // 不得 UserResumed/begin_step（旧 step 仍 active）。
+                if defer_user_batch_if_pending_interaction(run, &mut batch, port)? {
+                    continue;
+                }
+
                 // User input: resume if awaiting, then drain into work.
                 if run.status() == RunStatus::AwaitingUser {
                     transition_and_emit(run, execution, port, RunTransition::UserResumed).await?;
@@ -322,7 +328,9 @@ async fn run_loop_body(
                 .await?;
             }
             DrainOutcome::InternalContinuation {
-                kind: _kind, batch, ..
+                kind: _kind,
+                mut batch,
+                ..
             } => {
                 // #1272: InternalContinuation always advances epoch because
                 // `take_internal_continuation` already advanced the buffer's
@@ -339,6 +347,10 @@ async fn run_loop_body(
                     // advanced for the continuation).
                     if batch.is_empty() {
                         return Ok(LoopDirective::AwaitUser);
+                    }
+                    // #1944: 非空 continuation 同样不得在 pending interaction 下 resume。
+                    if defer_user_batch_if_pending_interaction(run, &mut batch, port)? {
+                        continue;
                     }
                     transition_and_emit(run, execution, port, RunTransition::UserResumed).await?;
                 }

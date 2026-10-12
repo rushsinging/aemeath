@@ -47,6 +47,28 @@ pub(super) fn defer_user_batch_if_single_purpose(
     Ok(true)
 }
 
+/// #1944: AwaitingUser 且仍有 pending interaction（AskUser / ToolApproval）时，
+/// session 排队消息不得 UserResumed/begin_step——旧 step 仍 active。
+/// 回流 session 队列，等 interaction 完成后再由后续 Run/drain 消费。
+pub(super) fn defer_user_batch_if_pending_interaction(
+    run: &Run,
+    batch: &mut Vec<LoopInput>,
+    port: &mut RunLoop<'_>,
+) -> Result<bool, LoopEngineError> {
+    if run.status() != RunStatus::AwaitingUser || run.pending_interaction().is_none() {
+        return Ok(false);
+    }
+    log::debug!(
+        target: crate::LOG_TARGET,
+        "[run_loop] defer user batch while pending interaction: run_id={} batch_size={} request_id={:?}",
+        run.id(),
+        batch.len(),
+        run.pending_interaction().map(|pending| pending.request_id.clone()),
+    );
+    port.input_mut().defer_user_batch(std::mem::take(batch))?;
+    Ok(true)
+}
+
 pub(super) fn interaction_resolution_kind(
     resolution: &crate::application::interaction::port::InteractionResolution,
 ) -> &'static str {
