@@ -458,3 +458,60 @@ async fn anthropic_stream_emits_tool_call_completed_on_content_block_stop() {
         "arguments must be the validated JSON"
     );
 }
+
+/// #1951：Cursor auto-balance 在 SSE 流内返回 empty-turn / rate-limit 信封
+///（文案含 HTTP 429），必须分类为 RateLimited + retryable，供 Runtime 退避。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn openai_stream_empty_turn_rate_limit_envelope_is_retryable_rate_limited() {
+    let body = concat!(
+        "data: {\"error\":{\"type\":\"api_error\",\"message\":\"cursor-api/auto-balance: rate limit — streaming upstream error: api_error: Cursor returned an empty turn (often usage/quota exhausted). Try model \\\"auto\\\". (HTTP 429)\"}}\n\n",
+    );
+    let response = response_from_fixture(body, "text/event-stream").await;
+    let events: Vec<_> = invocation_stream_from_decoder(
+        response,
+        ReasoningLevel::Off,
+        CancellationToken::new(),
+        InvocationDecoder::OpenAiChat,
+    )
+    .collect()
+    .await;
+
+    let [ProviderResponseChunk::Error(error)] = events.as_slice() else {
+        panic!("SSE error envelope must emit exactly one failed terminal event: {events:?}");
+    };
+    assert_eq!(
+        error.kind,
+        ProviderErrorKind::RateLimited,
+        "empty-turn/429 envelope must be RateLimited: {error:?}"
+    );
+    assert!(
+        error.retryable,
+        "empty-turn/429 envelope must be retryable for Runtime backoff: {error:?}"
+    );
+}
+
+/// #1951：无 rate/quota/429 信号的流内 Api 错误仍 fatal，避免误重试真 4xx。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn openai_stream_plain_api_error_envelope_stays_fatal_upstream_unavailable() {
+    let body = concat!(
+        "data: {\"error\":{\"type\":\"invalid_request_error\",\"message\":\"invalid api key\"}}\n\n",
+    );
+    let response = response_from_fixture(body, "text/event-stream").await;
+    let events: Vec<_> = invocation_stream_from_decoder(
+        response,
+        ReasoningLevel::Off,
+        CancellationToken::new(),
+        InvocationDecoder::OpenAiChat,
+    )
+    .collect()
+    .await;
+
+    let [ProviderResponseChunk::Error(error)] = events.as_slice() else {
+        panic!("SSE error envelope must emit exactly one failed terminal event: {events:?}");
+    };
+    assert_eq!(error.kind, ProviderErrorKind::UpstreamUnavailable);
+    assert!(
+        !error.retryable,
+        "plain api errors must stay fatal: {error:?}"
+    );
+}

@@ -250,7 +250,7 @@ async fn invoke_stream_emits_content_then_usage_then_stop_frames() {
 async fn invoke_propagates_provider_error() {
     let (client, _captured) = build_client(
         RecordingProvider::new("bad-provider", "bad-model", fresh_captured()).with_error(
-            ProviderError::fatal(ProviderErrorKind::RateLimited, "too many requests"),
+            ProviderError::retryable(ProviderErrorKind::RateLimited, "too many requests"),
         ),
     );
     let model = ModelInfo {
@@ -268,8 +268,8 @@ async fn invoke_propagates_provider_error() {
 
     let result = client.invoke(&model, &request).await;
     assert!(
-        matches!(result, Err(ref e) if e.kind == ProviderErrorKind::RateLimited && !e.retryable),
-        "expected terminal rate-limited error"
+        matches!(result, Err(ref e) if e.kind == ProviderErrorKind::RateLimited && e.retryable),
+        "expected retryable rate-limited error (#1951)"
     );
 }
 

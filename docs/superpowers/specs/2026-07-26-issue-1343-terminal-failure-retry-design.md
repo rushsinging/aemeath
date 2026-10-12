@@ -82,7 +82,7 @@ Runtime retry error，也不为了单一语义新增公开错误枚举。`retrya
 `retryable` 标志、当前 attempt 和既有特殊分支决定：
 
 - `ContextTooLong`：仍进入 compact；
-- `RateLimited`：保持当前立即失败行为，本 Issue 不改变 429 策略；
+- `RateLimited`：本 Issue 曾冻结为立即失败；**已被 #1951 废除**——当 `retryable=true` 时按既有退避计划重试（对齐 `03-loop` §5）；
 - `retryable=false`：立即失败；
 - 达到第 11 次 attempt：返回最后一次真实错误；
 - 其他 `retryable=true`：按现有退避计划重试。

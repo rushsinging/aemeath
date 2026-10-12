@@ -317,7 +317,8 @@ impl HttpAttemptFailure {
                     ),
                     HttpFailureKind::RateLimited => (
                         ProviderErrorKind::RateLimited,
-                        false,
+                        // #1951: hint Runtime 可退避；Provider 仍单 attempt。
+                        true,
                         "provider rate limit exceeded",
                     ),
                     HttpFailureKind::ContextTooLong => (
