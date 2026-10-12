@@ -77,13 +77,15 @@ pub(crate) const READONLY_COMMANDS: &[&str] = &[
 
 pub(crate) const SAFE_DEVS: &[&str] = &["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"];
 
-// ─── background_processes.rs（#1931 Watch）───
+// ─── background_processes.rs（#1931 / #1946 Watch）───
 
-/// `BackgroundProcessWatch` 缺省超时（秒）。
-pub const DEFAULT_WATCH_TIMEOUT_SECS: u64 = 60;
+/// `BackgroundProcessWatch` 的 Tool 框架超时（秒）。
+/// 唯一超时源：`Tool::timeout_secs()` / execution_supervisor effective deadline。
+pub const WATCH_TOOL_TIMEOUT_SECS: u64 = 300;
 
-/// `BackgroundProcessWatch` 硬上限（秒）；更大值 clamp 到此。
-pub const MAX_WATCH_TIMEOUT_SECS: u64 = 300;
+/// 内部 `wait_task` 相对框架超时提前收口的 grace（秒），避免撞
+/// `effective deadline; cleanup unconfirmed`。
+pub const WATCH_INTERNAL_GRACE_SECS: u64 = 5;
 
 /// Watch 等待轮询间隔（毫秒）；runtime `wait_task` 与工具侧共用语义。
 pub const WATCH_POLL_INTERVAL_MS: u64 = 100;

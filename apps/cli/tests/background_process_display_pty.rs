@@ -6,8 +6,8 @@
 //! ① 超阈值 tool call 转后台 + Run 收口后（spinner 消失）status line
 //! 第三行仍显示「N Backend Progress」；② BackgroundProcessList 工具
 //! 卡片渲染 typed header「后台进程列表」与逐行摘要（非 JSON 原文）；
-//! ③ BackgroundProcessWatch（timeout=5s）强制前台短等，返回
-//! still_running typed 行（非转后台占位）。
+//! ③ BackgroundProcessWatch 强制前台等待，流式 preview 后返回
+//! terminal typed 行（非转后台占位；超时由 Tool 框架接管）。
 //!
 //! 运行方式：`cargo test -p cli --test background_process_display_pty -- --ignored`
 //!（需先 `cargo build -p cli --bin aemeath`；check-slow-test-matrix 已登记）。
@@ -111,20 +111,15 @@ fn background_process_tools_render_typed_display_and_status_line_count() {
     wait_screen_text(&terminal, "列表已展示", Duration::from_secs(10));
 
     // ③ Watch 强制前台：mock 从对话历史提取 bgp_ id，发
-    // BackgroundProcessWatch(timeout_secs=5)。阈值=1s 时若未禁转后台
-    // 会出占位；强制前台则等满超时后渲染 still_running typed 行。
-    // 真断言流式：bytes from 必须在 still_running（终态 outcome）出现之前
+    // BackgroundProcessWatch（无 timeout 入参；框架超时 300s）。阈值=1s
+    // 时若未禁转后台会出占位；强制前台则等到 Bash 终态后渲染 terminal。
+    // 真断言流式：bytes from 必须在 terminal（终态 outcome）出现之前
     // 可见——否则会假绿命中结束后的 log_tail。
     submit(&terminal, "等待后台任务");
     wait_screen_text(&terminal, "Backend Process Watch", Duration::from_secs(10));
-    wait_screen_text_before(
-        &terminal,
-        "bytes from",
-        "still_running",
-        Duration::from_secs(10),
-    );
-    wait_screen_text(&terminal, "watch已返回", Duration::from_secs(25));
-    wait_screen_text(&terminal, "still_running", Duration::from_secs(10));
+    wait_screen_text_before(&terminal, "bytes from", "terminal", Duration::from_secs(25));
+    wait_screen_text(&terminal, "watch已返回", Duration::from_secs(45));
+    wait_screen_text(&terminal, "terminal", Duration::from_secs(15));
 
     // 退出（双击 Ctrl+C），恢复终端。
     terminal
@@ -231,7 +226,7 @@ fn wait_screen_text_before(terminal: &Session, needle: &str, forbidden: &str, ti
 ///
 /// 脚本：① Bash tool call（ping 30s）→ ② 文本「已转后台」→
 /// ③ BackgroundProcessList tool call → ④ 文本「列表已展示」→
-/// ⑤ BackgroundProcessWatch（从 body 提取 bgp_ id，timeout=5）→
+/// ⑤ BackgroundProcessWatch（从 body 提取 bgp_ id，无 timeout 入参）→
 /// ⑥ 文本「watch已返回」→ 后续兜底文本「end」。线程为守护语义，
 /// 测试进程退出即终结。
 fn spawn_mock_llm() -> u16 {
@@ -316,9 +311,9 @@ fn scripted_sse_response(seq: usize, body: &str) -> String {
         3 => sse_text_response("列表已展示"),
         4 => {
             let task_id = extract_bgp_task_id(body).unwrap_or_else(|| "bgp_missing000".into());
-            // 5s：给等待中流式 preview 留下可观测窗口；2s 过短会导致
-            // bytes from 与 still_running 同帧出现，假绿/真断言均不稳定。
-            let arguments = format!(r#"{{"task_id":"{task_id}","timeout_secs":5}}"#);
+            // 无 timeout 入参：Watch 等到 Bash 终态；ping -c 30 留出
+            // 流式 preview 窗口，bytes from 须在 terminal 前可见。
+            let arguments = format!(r#"{{"task_id":"{task_id}"}}"#);
             sse_tool_call_response("call_watch_1", "BackgroundProcessWatch", &arguments)
         }
         5 => sse_text_response("watch已返回"),

@@ -8,7 +8,7 @@ pub mod background_process_port;
 pub use background_process_port::{BackgroundProcessAccess, BackgroundProcessAccessSource};
 pub mod command_pl;
 pub mod command_ports;
-mod constants;
+pub(crate) mod constants;
 pub mod context;
 pub mod memory_source;
 pub mod ports;

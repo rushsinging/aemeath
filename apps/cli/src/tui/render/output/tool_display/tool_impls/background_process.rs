@@ -202,10 +202,8 @@ impl ToolDisplay for BackgroundProcessWatchDisplay {
         if args.task_id.is_empty() {
             return self.display_name().to_string();
         }
-        match args.timeout_secs {
-            Some(secs) => format!("{} {} timeout={}s", self.display_name(), args.task_id, secs),
-            None => format!("{} {}", self.display_name(), args.task_id),
-        }
+        // #1946：超时由 Tool 框架接管，header 只展示 task id。
+        format!("{} {}", self.display_name(), args.task_id)
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]

@@ -6,8 +6,9 @@ use crate::adapters::constants::{
 use crate::domain::background_process_port::{
     wait_task, BackgroundProcessAccess, BackgroundProcessAccessSource,
 };
+use crate::domain::constants::WATCH_TOOL_TIMEOUT_SECS;
 use crate::domain::types::background_processes::{
-    resolve_watch_timeout_secs, BackgroundProcessDetailData, BackgroundProcessListInput,
+    watch_internal_timeout_secs, BackgroundProcessDetailData, BackgroundProcessListInput,
     BackgroundProcessListResult, BackgroundProcessLogsInput, BackgroundProcessLogsResult,
     BackgroundProcessStatusInput, BackgroundProcessStatusResult, BackgroundProcessStopInput,
     BackgroundProcessStopResult, BackgroundProcessSummaryData, BackgroundProcessWatchInput,
@@ -302,6 +303,10 @@ impl TypedTool for BackgroundProcessWatchTool {
     fn is_concurrency_safe(&self) -> bool {
         true
     }
+    fn timeout_secs(&self) -> u64 {
+        // #1946：唯一超时源 = Tool 框架；内部 wait 再短 grace 秒。
+        WATCH_TOOL_TIMEOUT_SECS
+    }
 
     async fn call(
         &self,
@@ -315,7 +320,7 @@ impl TypedTool for BackgroundProcessWatchTool {
         if args.task_id.is_empty() {
             return TypedToolResult::error("task_id is required".to_string());
         }
-        let timeout = Duration::from_secs(resolve_watch_timeout_secs(args.timeout_secs));
+        let timeout = Duration::from_secs(watch_internal_timeout_secs());
         let access = self.source.current();
         let progress = ctx.progress_sink();
         match wait_task(

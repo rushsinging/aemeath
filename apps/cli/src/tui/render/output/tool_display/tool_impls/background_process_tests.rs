@@ -142,17 +142,17 @@ fn empty_list_result_shows_placeholder() {
 }
 
 #[test]
-fn watch_header_carries_task_id_and_timeout() {
+fn watch_header_carries_task_id_without_timeout_param() {
     let display = lookup_display("BackgroundProcessWatch").unwrap();
-    let input = serde_json::json!({ "task_id": "bgp_07Xwatch1", "timeout_secs": 60 });
+    let input = serde_json::json!({ "task_id": "bgp_07Xwatch1" });
     let header = display.format_header(&input, None);
     assert!(
         header.contains("bgp_07Xwatch1"),
         "Watch header 携带 task id：{header}"
     );
     assert!(
-        header.contains("timeout=60s"),
-        "Watch header 携带 timeout：{header}"
+        !header.contains("timeout="),
+        "Watch header MUST NOT 展示入参 timeout：{header}"
     );
 }
 

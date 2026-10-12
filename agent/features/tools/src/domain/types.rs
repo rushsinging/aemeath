@@ -70,7 +70,7 @@ pub mod web_search;
 
 // Re-exports for non-core tool result structs.
 pub use background_processes::{
-    is_background_process_terminal_state, resolve_watch_timeout_secs, BackgroundProcessDetailData,
+    is_background_process_terminal_state, watch_internal_timeout_secs, BackgroundProcessDetailData,
     BackgroundProcessListInput, BackgroundProcessListResult, BackgroundProcessLogData,
     BackgroundProcessLogsInput, BackgroundProcessLogsResult, BackgroundProcessStatusInput,
     BackgroundProcessStatusResult, BackgroundProcessStopData, BackgroundProcessStopInput,
