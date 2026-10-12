@@ -28,7 +28,7 @@ case "$mode" in
 esac
 
 engine_status=0
-cargo run --quiet -p xtask -- guard "$mode" || engine_status=$?
+"$HOOKS_DIR/run-xtask.sh" guard "$mode" || engine_status=$?
 if [ "$engine_status" -ne 0 ]; then
   echo "[architecture] xtask guard failed (exit=$engine_status)" >&2
   exit "$engine_status"
@@ -120,10 +120,10 @@ echo "[hook-env] AEMEATH_PROJECT_DIR=${AEMEATH_PROJECT_DIR:-<unset>}"
 echo "[hook-env] CLAUDE_PROJECT_DIR=${CLAUDE_PROJECT_DIR:-<unset>}"
 echo "[hook-env] ROOT=$ROOT"
 echo "[hook-env] ARCHITECTURE_GUARD_MODE=$mode"
-run_guard full bash -c "cargo run --quiet -p xtask -- guard-registry check"
+run_guard full bash -c "$HOOKS_DIR/run-xtask.sh guard-registry check"
 run_guard full bash -c "cargo test --quiet -p logging routing_guard::tests"
-run_guard full bash -c "cargo run --quiet -p xtask -- sdk-wire-schema check"
-run_guard full bash -c "cargo run --quiet -p xtask -- source-guard \"$ROOT\" "
+run_guard full bash -c "$HOOKS_DIR/run-xtask.sh sdk-wire-schema check"
+run_guard full bash -c "$HOOKS_DIR/run-xtask.sh source-guard \"$ROOT\" "
 # gate 分层契约回归（Stop=--fast、pre-push 顺序、fail-fast 不清缓存），
 # 进程级测试，fake repo 内执行，不参与源码结构检查。
 run_guard full bash "$HOOKS_DIR/check-gate-layering-tests.sh"
