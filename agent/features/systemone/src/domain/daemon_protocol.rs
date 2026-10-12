@@ -164,8 +164,9 @@ pub fn try_decode_frame(buffer: &[u8]) -> Result<(&[u8], usize), FrameError> {
     if buffer.len() < total {
         return Err(FrameError::Incomplete);
     }
-    let (_prefix, after_length) = buffer.split_at(4);
-    let (body, _rest) = after_length.split_at(length);
+    // 本函数操作的是 length-prefixed 二进制帧（非 UTF-8 文本）。
+    let (_prefix, after_length) = buffer.split_at(4); // allow unsafe_text_op
+    let (body, _rest) = after_length.split_at(length); // allow unsafe_text_op
     Ok((body, total))
 }
 

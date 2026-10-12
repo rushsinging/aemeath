@@ -112,7 +112,8 @@ async fn serve_connection(
         if n == 0 {
             break;
         }
-        let (received, _) = chunk.split_at(n);
+        // chunk 为原始 socket 字节缓冲，非 UTF-8 文本。
+        let (received, _) = chunk.split_at(n); // allow unsafe_text_op
         buffer.extend_from_slice(received);
         loop {
             match try_decode_frame(&buffer) {
