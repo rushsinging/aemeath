@@ -51,7 +51,6 @@ pub use web_fetch::{WebFetchInput, WebFetchResult};
 pub use write::{WriteInput, WriteResult};
 // Non-core tool result structs (Phase 0a 任务 0.4).
 pub mod background_processes;
-pub mod brief;
 pub mod list_mcp_resources;
 pub mod mcp_manager;
 pub mod mcp_tool;
@@ -78,7 +77,6 @@ pub use background_processes::{
     BackgroundProcessStopResult, BackgroundProcessSummaryData, BackgroundProcessWatchInput,
     BackgroundProcessWatchOutcome, BackgroundProcessWatchResult,
 };
-pub use brief::{BriefInput, BriefResult};
 pub use list_mcp_resources::ListMcpResourcesResult;
 pub use mcp_manager::McpManagerResult;
 pub use mcp_tool::McpToolResult;

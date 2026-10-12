@@ -26,7 +26,6 @@ pub use tools::types::background_processes::{
     BackgroundProcessWatchOutcome, BackgroundProcessWatchResult,
 };
 pub use tools::types::bash::BashResult;
-pub use tools::types::brief::BriefResult;
 pub use tools::types::edit::EditResult;
 pub use tools::types::enter_worktree::EnterWorktreeResult;
 pub use tools::types::exit_worktree::ExitWorktreeResult;
@@ -50,7 +49,7 @@ pub use tools::types::task_list_create::TaskListCreateResult;
 pub use tools::types::task_lists::TaskListsResult;
 pub use tools::types::task_stop::TaskStopResult;
 pub use tools::types::task_update::TaskUpdateResult;
-pub use tools::types::tool_search::ToolSearchResult;
+pub use tools::types::tool_search::{ToolInfo, ToolSearchResult};
 pub use tools::types::web_fetch::WebFetchResult;
 pub use tools::types::web_search::WebSearchResult;
 pub use tools::types::write::WriteResult;
@@ -61,7 +60,6 @@ pub use tools::types::write::WriteResult;
 pub mod agent;
 pub mod ask_user;
 pub mod bash;
-pub mod brief;
 pub mod edit;
 pub mod enter_worktree;
 pub mod exit_worktree;

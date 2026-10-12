@@ -62,12 +62,20 @@ impl ToolDisplay for GlobDisplay {
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
     }
+    fn format_result_lines(&self, content: Option<&serde_json::Value>) -> Option<Vec<String>> {
+        use super::super::common::typed_from_content;
+        let result: sdk::tool_result::GlobResult = typed_from_content(content)?;
+        if result.files.is_empty() {
+            return Some(vec!["（无匹配文件）".to_string()]);
+        }
+        Some(result.files)
+    }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
             header: HeaderPolicy::Standard,
             details: DetailsPolicy::Hidden,
             result: ResultPolicy::Visible {
-                max_lines: Some(5),
+                max_lines: Some(15),
                 render_kind: ResultRender::Plain,
                 tail_mode: false,
             },
@@ -129,12 +137,42 @@ impl ToolDisplay for GrepDisplay {
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
     }
+    fn format_result_lines(&self, content: Option<&serde_json::Value>) -> Option<Vec<String>> {
+        use super::super::common::typed_from_content;
+        let result: sdk::tool_result::GrepResult = typed_from_content(content)?;
+        if !result.files.is_empty() {
+            return Some(
+                result
+                    .files
+                    .iter()
+                    .map(|file| format!("{} · {}", file.file_path, file.match_count))
+                    .collect(),
+            );
+        }
+        if result.matches.is_empty() {
+            return Some(vec!["（无命中）".to_string()]);
+        }
+        Some(
+            result
+                .matches
+                .iter()
+                .map(|hit| {
+                    format!(
+                        "{}:{}: {}",
+                        hit.file_path.display(),
+                        hit.line_number,
+                        hit.line.trim()
+                    )
+                })
+                .collect(),
+        )
+    }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
             header: HeaderPolicy::Standard,
             details: DetailsPolicy::Hidden,
             result: ResultPolicy::Visible {
-                max_lines: Some(5),
+                max_lines: Some(15),
                 render_kind: ResultRender::Plain,
                 tail_mode: false,
             },

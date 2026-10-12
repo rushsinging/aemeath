@@ -36,6 +36,7 @@ pub use tools::types::task_list_create::TaskListCreateInput;
 pub use tools::types::task_lists::TaskListsInput;
 pub use tools::types::task_stop::TaskStopInput;
 pub use tools::types::task_update::TaskUpdateInput;
+pub use tools::types::tool_search::ToolSearchInput;
 pub use tools::types::web_fetch::WebFetchInput;
 pub use tools::types::web_search::WebSearchInput;
 pub use tools::types::write::WriteInput;

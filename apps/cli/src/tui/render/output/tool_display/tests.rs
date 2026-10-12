@@ -487,7 +487,7 @@ fn test_format_tool_call_task_list_create_empty_subject_no_question_mark() {
 fn test_format_tool_call_web_fetch_empty_url_no_question_mark() {
     let (header, _details) = format_tool_call("WebFetch", "{}", None, None);
     let text = line_to_string(&header);
-    assert_eq!(text, "WebFetch");
+    assert_eq!(text, "Web Fetch");
     assert!(!text.contains('?'));
 }
 
@@ -988,4 +988,87 @@ fn test_format_call_duration_auto_carries_across_units() {
     assert_eq!(super::format::format_call_duration(3_600_000), "1h");
     assert_eq!(super::format::format_call_duration(3_725_000), "1h 2m");
     assert_eq!(super::format::format_call_duration(7_925_000), "2h 12m");
+}
+
+#[test]
+fn task_lists_result_renders_typed_summary_lines() {
+    let display = lookup_display("TaskLists").unwrap();
+    let lines = display
+        .format_result_lines(Some(&serde_json::json!({
+            "task_lists": [{
+                "task_list": {
+                    "id": "tl_1",
+                    "summary": "Memory TUI 收口",
+                    "status": "active",
+                    "created_at": 1,
+                    "last_active_turn": 1,
+                    "silence_turns": 0
+                },
+                "stats": { "total": 3, "pending": 1, "in_progress": 1, "completed": 1 }
+            }]
+        })))
+        .expect("typed lines");
+    assert_eq!(lines.len(), 1);
+    assert!(lines[0].contains("tl_1"));
+    assert!(lines[0].contains("active"));
+    assert!(lines[0].contains("p1/i1/c1/t3"));
+    assert!(!lines[0].starts_with('{'));
+}
+
+#[test]
+fn task_list_get_result_renders_tasks() {
+    let display = lookup_display("TaskListGet").unwrap();
+    let lines = display
+        .format_result_lines(Some(&serde_json::json!({
+            "task_list": {
+                "id": "tl_2",
+                "summary": "列表",
+                "status": "active",
+                "created_at": 1,
+                "last_active_turn": 1,
+                "silence_turns": 0
+            },
+            "stats": { "total": 1, "pending": 1, "in_progress": 0, "completed": 0 },
+            "tasks": [{
+                "id": "task_1",
+                "subject": "写测试",
+                "description": "先红后绿",
+                "status": "pending",
+                "blocked_by": [],
+                "priority": "medium",
+                "created_at": 1,
+                "updated_at": 1,
+                "session_id": null,
+                "batch": "batch_1"
+            }]
+        })))
+        .expect("typed lines");
+    assert!(lines.iter().any(|line| line.contains("tl_2")));
+    assert!(lines
+        .iter()
+        .any(|line| line.contains("task_1") && line.contains("写测试")));
+}
+
+#[test]
+fn task_get_result_renders_subject_and_description() {
+    let display = lookup_display("TaskGet").unwrap();
+    let lines = display
+        .format_result_lines(Some(&serde_json::json!({
+            "task": {
+                "id": "task_9",
+                "subject": "修显示",
+                "description": "补 typed result 行",
+                "status": "in_progress",
+                "blocked_by": [],
+                "priority": "high",
+                "created_at": 1,
+                "updated_at": 2,
+                "session_id": null,
+                "batch": "batch_9"
+            }
+        })))
+        .expect("typed lines");
+    assert!(lines[0].contains("task_9"));
+    assert!(lines[0].contains("修显示"));
+    assert!(lines.iter().any(|line| line.contains("补 typed result")));
 }

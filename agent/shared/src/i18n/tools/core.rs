@@ -1,4 +1,4 @@
-//! 核心工具文案（agent/memory/skill/ask_user/brief/sleep/tool_search 的 description）。
+//! 核心工具文案（agent/memory/skill/ask_user/sleep/tool_search 的 description）。
 
 /// Agent description。
 ///
@@ -78,14 +78,6 @@ pub fn ask_user(lang: &str) -> &'static str {
     match lang {
         "zh" => "向用户提问并等待回答。当需要用户输入或确认才能继续时使用；选项格式以字段 schema 为准。",
         _ => "Ask the user one or more questions and wait for their response. Use this when input or confirmation from the user is required to proceed. Option format is defined in the field schema.",
-    }
-}
-
-/// Brief description。
-pub fn brief(lang: &str) -> &'static str {
-    match lang {
-        "zh" => "生成本次会话已完成工作的简要总结。适合创建状态更新、记录进度或准备交接说明。",
-        _ => "Generate a brief summary of work completed in this session. Useful for creating status updates, documenting progress, or preparing handoff notes.",
     }
 }
 

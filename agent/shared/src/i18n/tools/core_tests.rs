@@ -88,7 +88,6 @@ fn core_bilingual_and_fallback() {
     let ask_user_en = ask_user("en");
     assert!(ask_user_en.contains("wait for their response"));
     assert!(ask_user_en.contains("required"));
-    assert!(brief("zh").contains("简要总结"));
     assert!(sleep("zh").contains("暂停执行"));
     assert!(tool_search("zh").contains("搜索可用工具"));
 }

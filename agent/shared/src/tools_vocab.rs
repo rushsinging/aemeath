@@ -196,7 +196,7 @@ bitflags::bitflags! {
         const WorkspaceControl = 1 << 7;
         // 1 << 8 已随 plan mode 机制退役，保留空缺防止历史持久化数值重映射。
         const TaskRead         = 1 << 9;
-        /// 全量类：main 专属。Brief / ToolSearch / Memory 等杂项工具归此位，
+        /// 全量类：main 专属。ToolSearch / Memory 等杂项工具归此位，
         /// 受限 profile 默认组装不出；config 显式声明 "All" 才放行。
         const All              = 1 << 10;
     }
