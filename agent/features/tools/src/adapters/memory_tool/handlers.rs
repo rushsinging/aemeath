@@ -147,7 +147,7 @@ pub(super) async fn search_memory(
     let now = current_timestamp_secs();
     let query = Query {
         text,
-        limit: limit.min(50),
+        limit: limit.min(super::constants::MEMORY_PAGE_MAX_LIMIT),
         layer,
         category,
         include_archive: false,
@@ -258,22 +258,42 @@ pub(super) async fn list_memory(
     input: Value,
     port: &dyn MemoryPort,
 ) -> TypedToolResult<MemoryResult> {
+    use super::constants::{MEMORY_LIST_DEFAULT_LIMIT, MEMORY_PAGE_MAX_LIMIT};
+
     let layer = match optional_layer(&input) {
         Ok(layer) => layer,
         Err(error) => return TypedToolResult::error(error),
     };
-    let entries = port.list(layer).await;
-    let message = render_memory_entries(&entries, current_timestamp_secs());
+    let limit = input
+        .get("limit")
+        .and_then(|value| value.as_u64())
+        .map(|value| value as usize)
+        .filter(|value| *value > 0)
+        .unwrap_or(MEMORY_LIST_DEFAULT_LIMIT)
+        .min(MEMORY_PAGE_MAX_LIMIT);
+    let offset = input
+        .get("offset")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0) as usize;
+    let all_entries = port.list(layer).await;
+    let total = all_entries.len();
+    let page: Vec<_> = all_entries.into_iter().skip(offset).take(limit).collect();
+    let has_more = offset.saturating_add(page.len()) < total;
+    let now = current_timestamp_secs();
+    let message = render_memory_entries(&page, total, offset, limit, has_more, now);
     TypedToolResult::success(
         message,
         MemoryResult {
             action: "list".to_string(),
             entries: Some(
-                entries
-                    .iter()
-                    .map(|entry| memory_entry_result(entry, current_timestamp_secs()))
+                page.iter()
+                    .map(|entry| memory_entry_result(entry, now))
                     .collect(),
             ),
+            total: Some(total as u64),
+            offset: Some(offset as u64),
+            limit: Some(limit as u64),
+            has_more: Some(has_more),
             ..MemoryResult::default()
         },
     )
@@ -283,24 +303,20 @@ fn render_eviction_candidates(candidates: &[EvictionCandidate]) -> String {
     if candidates.is_empty() {
         return "记忆数量已达上限，且没有可归档的非固定候选。".to_string();
     }
-    let details = candidates
-        .iter()
-        .map(|candidate| {
-            format!(
-                "- id={} layer={} category={} confirmation_count={} last_confirmed_at={} eviction_score={} reason={}\n  {}",
-                candidate.entry.id,
-                memory_layer_name(candidate.entry.layer),
-                memory_category_name(candidate.entry.category),
-                candidate.entry.confirmation_count,
-                candidate.entry.last_confirmed_at,
-                candidate.eviction_score,
-                candidate.eviction_reason,
-                candidate.entry.content
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    format!("记忆数量已达上限；写入未发生。请先使用 archive 显式归档候选，再重试：\n{details}")
+    let header = format!(
+        "记忆数量已达上限；写入未发生。请先 archive 候选再重试（{} 条）",
+        candidates.len()
+    );
+    let lines = candidates.iter().map(|candidate| {
+        format!(
+            "{} · score {} · {} · {}",
+            candidate.entry.id,
+            candidate.eviction_score,
+            candidate.eviction_reason,
+            preview_content(&candidate.entry.content)
+        )
+    });
+    render_bounded_lines(header, lines)
 }
 
 fn eviction_candidate_result(candidate: &EvictionCandidate) -> MemoryEvictionCandidateResult {
@@ -324,67 +340,150 @@ fn render_search_hits(hits: &[MemorySearchHit]) -> String {
     if hits.is_empty() {
         return "暂无记忆。".to_string();
     }
-    hits.iter()
-        .map(|hit| {
-            let entry = &hit.entry;
-            format!(
-                "- id={} layer={} category={} tags={} location={} pinned={} outdated={} ttl_expired={} relevance={:.6}\n  {}",
-                entry.id,
-                memory_layer_name(entry.layer),
-                memory_category_name(entry.category),
-                render_tags(&entry.tags),
-                match hit.location {
-                    MemoryLocation::Active => "active",
-                    MemoryLocation::Archive => "archive",
-                },
-                entry.pinned,
-                hit.outdated,
-                hit.ttl_expired,
-                hit.relevance.unwrap_or_default(),
-                entry.content
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    let header = format!("命中 {} 条", hits.len());
+    let lines = hits.iter().map(|hit| {
+        let entry = &hit.entry;
+        let location = match hit.location {
+            MemoryLocation::Active => "active",
+            MemoryLocation::Archive => "archive",
+        };
+        let relevance = hit
+            .relevance
+            .map(|score| format!("{score:.1}"))
+            .unwrap_or_else(|| "-".to_string());
+        format!(
+            "{} · {} · {} · {} · {} · {}",
+            entry.id,
+            memory_layer_name(entry.layer),
+            memory_category_name(entry.category),
+            location,
+            relevance,
+            preview_content(&entry.content)
+        )
+    });
+    render_bounded_lines(header, lines)
 }
 
-fn render_memory_entries(entries: &[MemoryEntry], now: u64) -> String {
-    if entries.is_empty() {
+fn render_memory_entries(
+    entries: &[MemoryEntry],
+    total: usize,
+    offset: usize,
+    limit: usize,
+    has_more: bool,
+    now: u64,
+) -> String {
+    if total == 0 {
         return "暂无记忆。".to_string();
     }
-    entries
-        .iter()
-        .map(|entry| {
-            format!(
-                "- id={} layer={} category={} tags={} pinned={} outdated={} ttl_expired={} superseded_by={} evidence={}\n  {}",
-                entry.id,
-                memory_layer_name(entry.layer),
-                memory_category_name(entry.category),
-                render_tags(&entry.tags),
-                entry.pinned,
-                entry.outdated,
-                entry.is_ttl_expired(now),
-                render_superseded_by(entry.superseded_by.as_ref()),
-                entry.evidence.len(),
-                entry.content
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn render_superseded_by(superseded_by: Option<&Id>) -> String {
-    superseded_by
-        .map(|id| id.to_string())
-        .unwrap_or_else(|| "-".to_string())
-}
-
-fn render_tags(tags: &[String]) -> String {
-    if tags.is_empty() {
-        "[]".to_string()
-    } else {
-        format!("[{}]", tags.join(","))
+    if entries.is_empty() {
+        return format!("共 {total} 条，offset={offset} 超出范围");
     }
+    let start = offset.saturating_add(1);
+    let end = offset.saturating_add(entries.len());
+    let mut header = format!("共 {total} 条，显示 {start}–{end}（limit={limit}）");
+    if has_more {
+        header.push_str(&format!(
+            "；has_more next_offset={}",
+            offset.saturating_add(entries.len())
+        ));
+    }
+    let lines = entries
+        .iter()
+        .map(|entry| format_entry_summary_line(entry, now));
+    render_bounded_lines(header, lines)
+}
+
+fn format_entry_summary_line(entry: &MemoryEntry, now: u64) -> String {
+    format!(
+        "{} · {} · {} · {} · {}",
+        entry.id,
+        memory_layer_name(entry.layer),
+        memory_category_name(entry.category),
+        entry_flags(
+            entry.pinned,
+            entry.outdated,
+            entry.is_ttl_expired(now),
+            entry.superseded_by.is_some()
+        ),
+        preview_content(&entry.content)
+    )
+}
+
+fn entry_flags(pinned: bool, outdated: bool, ttl_expired: bool, superseded: bool) -> String {
+    let mut flags = Vec::new();
+    if pinned {
+        flags.push("pinned");
+    }
+    if outdated {
+        flags.push("outdated");
+    }
+    if ttl_expired {
+        flags.push("ttl_expired");
+    }
+    if superseded {
+        flags.push("superseded");
+    }
+    if flags.is_empty() {
+        "-".to_string()
+    } else {
+        flags.join(",")
+    }
+}
+
+fn preview_content(content: &str) -> String {
+    use super::constants::MEMORY_RESULT_CONTENT_PREVIEW_CHARS;
+    let max = MEMORY_RESULT_CONTENT_PREVIEW_CHARS;
+    if content.chars().count() <= max {
+        return content.to_string();
+    }
+    let truncated: String = content.chars().take(max.saturating_sub(1)).collect();
+    format!("{truncated}…")
+}
+
+fn render_bounded_lines(header: String, lines: impl IntoIterator<Item = String>) -> String {
+    use super::super::constants::{
+        MEMORY_RESULT_HEADER_RESERVE_CHARS, MEMORY_RESULT_TEXT_BUDGET_CHARS,
+    };
+
+    let body_budget =
+        MEMORY_RESULT_TEXT_BUDGET_CHARS.saturating_sub(MEMORY_RESULT_HEADER_RESERVE_CHARS);
+    let mut used_chars = 0usize;
+    let mut body = Vec::new();
+    let mut omitted = false;
+    for line in lines {
+        let line_chars = line.chars().count().saturating_add(1);
+        if used_chars.saturating_add(line_chars) > body_budget {
+            omitted = true;
+            break;
+        }
+        used_chars = used_chars.saturating_add(line_chars);
+        body.push(line);
+    }
+    let mut header = header;
+    if omitted {
+        header.push_str("；文本已截断");
+    }
+    if body.is_empty() {
+        return clip_header_to_budget(header);
+    }
+    let text = format!("{header}\n{}", body.join("\n"));
+    if text.chars().count() <= MEMORY_RESULT_TEXT_BUDGET_CHARS {
+        text
+    } else {
+        // 极端短预算兜底：保留 header。
+        clip_header_to_budget(header)
+    }
+}
+
+fn clip_header_to_budget(header: String) -> String {
+    use super::super::constants::MEMORY_RESULT_TEXT_BUDGET_CHARS;
+    if header.chars().count() <= MEMORY_RESULT_TEXT_BUDGET_CHARS {
+        return header;
+    }
+    header
+        .chars()
+        .take(MEMORY_RESULT_TEXT_BUDGET_CHARS)
+        .collect()
 }
 
 fn memory_layer_name(layer: Layer) -> &'static str {

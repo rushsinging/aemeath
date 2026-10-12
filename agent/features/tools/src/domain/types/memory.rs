@@ -100,6 +100,18 @@ pub struct MemoryResult {
     pub entries: Option<Vec<MemoryEntryResult>>,
     pub hits: Option<Vec<MemorySearchHitResult>>,
     pub eviction_candidates: Option<Vec<MemoryEvictionCandidateResult>>,
+    /// 全量条数（List 分页用；旧快照缺省为 None）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    /// 当前页起点（List 分页用）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u64>,
+    /// 当前页大小（List 分页用）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u64>,
+    /// 是否还有下一页（List 分页用）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_more: Option<bool>,
 }
 
 /// Memory write status transition applied by `MemoryUpdate`.
@@ -147,6 +159,10 @@ pub struct MemorySearchInput {
 pub struct MemoryListInput {
     /// 限定层级。Restrict to a layer.
     pub layer: Option<MemoryLayerInput>,
+    /// 每页条数，上限 50。默认 20。Page size, capped at 50. Defaults to 20.
+    pub limit: Option<u64>,
+    /// 分页起点（从 0 计）。默认 0。Page offset, 0-based. Defaults to 0.
+    pub offset: Option<u64>,
 }
 
 /// Input for the `MemoryUpdate` tool: pin, unpin, archive, or restore one entry.

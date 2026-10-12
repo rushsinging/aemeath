@@ -30,8 +30,8 @@ pub fn memory_search(lang: &str) -> &'static str {
 /// MemoryList description。
 pub fn memory_list(lang: &str) -> &'static str {
     match lang {
-        "zh" => "列出持久记忆条目，用于审阅当前有哪些记忆、哪些已归档。",
-        _ => "List persistent memory entries to review what exists and what is archived.",
+        "zh" => "列出持久记忆条目（支持 limit/offset 翻页，默认每页 20）。用于审阅当前有哪些记忆。",
+        _ => "List persistent memory entries with limit/offset pagination (default page size 20). Use to review what exists.",
     }
 }
 
