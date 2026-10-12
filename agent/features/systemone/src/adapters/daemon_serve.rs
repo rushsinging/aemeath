@@ -88,7 +88,7 @@ pub async fn run_daemon_accept_loop(
                     result = serve_connection(stream, port.as_ref(), &engine_revision) => {
                         if let Err(error) = result {
                             log::warn!(
-                                target: crate::constants::LOG_TARGET,
+                                target: crate::LOG_TARGET,
                                 "scoring daemon 连接处理失败：{error}"
                             );
                         }
