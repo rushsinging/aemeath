@@ -68,8 +68,22 @@ fn static_system_prompt_locks_worktree_command_discipline() {
 }
 
 #[test]
-fn static_system_prompt_core_contract_item_count_is_fourteen() {
+fn static_system_prompt_core_contract_item_count_is_fifteen() {
     for s in [static_system_prompt("zh"), static_system_prompt("en")] {
-        assert_eq!(s.matches("\n- ").count(), 14);
+        assert_eq!(s.matches("\n- ").count(), 15);
     }
+}
+
+#[test]
+fn static_system_prompt_locks_design_full_picture_before_details() {
+    let en = static_system_prompt("en");
+    assert!(en.contains("first present the full picture"));
+    assert!(en.contains("only after the user aligns on that full picture"));
+    assert!(en.contains("NEVER dive into a single detail first or skip the full picture"));
+    assert!(!en.contains("panorama"));
+
+    let zh = static_system_prompt("zh");
+    assert!(zh.contains("必须先给出全景"));
+    assert!(zh.contains("在用户对齐全景后再拆分逐项细聊"));
+    assert!(zh.contains("禁止一上来就钻进单点细节或跳过全景直接拍板局部方案"));
 }
