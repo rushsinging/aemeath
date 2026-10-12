@@ -28,6 +28,10 @@ mod wiring;
 pub use adapters::audited::AuditedScoringAdapter;
 pub use adapters::calibrated::CalibratedScoringAdapter;
 pub use adapters::calibration_store::{CalibrationArtifact, CalibrationStore};
+pub use adapters::daemon_instance::{
+    acquire_daemon_lock, prepare_socket_path, DaemonEndpoints, DaemonLockError, DaemonLockGuard,
+};
+pub use adapters::daemon_serve::run_daemon_accept_loop;
 #[cfg(feature = "embedded")]
 pub use adapters::embedded::{EmbeddedInitError, EmbeddedScoringAdapter};
 pub use adapters::event_jsonl::JsonlSegmentScoringEventStore;

@@ -9,6 +9,8 @@ edition.workspace = true
 # 原生运行路径；`cargo test -p composition --features systemone-embedded`
 # 显式启用后生产装配入口才具备真实装配能力（否则 typed EmbeddedUnavailable）。
 systemone-embedded = ["systemone/embedded"]
+# #1935 scoring serve 路径（与 systemone-embedded 同引擎能力）。
+systemone-daemon = ["systemone/daemon"]
 
 [dependencies]
 runtime = { path = "../features/runtime" }

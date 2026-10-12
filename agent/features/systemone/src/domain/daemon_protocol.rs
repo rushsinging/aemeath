@@ -22,6 +22,24 @@ pub enum ProtocolError {
     UnsupportedMethod(String),
 }
 
+impl std::fmt::Display for ProtocolError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Frame(FrameError::Incomplete) => formatter.write_str("协议帧不完整"),
+            Self::Json(detail) => write!(formatter, "协议 JSON 非法：{detail}"),
+            Self::VersionMismatch { found, expected } => write!(
+                formatter,
+                "协议版本不匹配：found={found} expected={expected}"
+            ),
+            Self::UnsupportedMethod(method) => {
+                write!(formatter, "不支持的 method：{method}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ProtocolError {}
+
 impl From<FrameError> for ProtocolError {
     fn from(value: FrameError) -> Self {
         Self::Frame(value)
@@ -72,7 +90,9 @@ pub enum DaemonRequest {
     },
 }
 
+#[cfg(test)]
 impl DaemonRequest {
+    /// 构造 answer 请求。
     pub fn answer(id: Option<String>, params: AnswerParams) -> Self {
         Self::Answer {
             protocol_version: DAEMON_PROTOCOL_VERSION,
@@ -175,6 +195,8 @@ pub fn decode_answer_request(buffer: &[u8]) -> Result<(DaemonRequest, usize), Pr
     ))
 }
 
+/// 解码响应帧（客户端 / 测试用；生产客户端在 PR2 落地后去掉 cfg）。
+#[cfg(test)]
 pub fn decode_response(buffer: &[u8]) -> Result<(DaemonResponse, usize), ProtocolError> {
     let (body, consumed) = try_decode_frame(buffer)?;
     let response: DaemonResponse =

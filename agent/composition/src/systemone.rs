@@ -454,3 +454,99 @@ pub(crate) async fn assemble_scoring_ports_with(
 #[cfg(test)]
 #[path = "systemone_tests.rs"]
 mod tests;
+
+/// `aemeath scoring serve` 退出结局。
+#[derive(Debug)]
+pub enum ScoringServeExit {
+    /// 正常优雅退出（收到 shutdown）。
+    Stopped { sock: std::path::PathBuf },
+    /// 启动失败（feature / 模型 / 锁 / IO）。
+    Failure { message: String, exit_code: i32 },
+}
+
+/// 生产入口：加锁 → 装配 raw 引擎 → 监听 UDS → 直到 Ctrl-C。
+///
+/// 会话侧装配不走本函数；本函数是加载 GGUF 的唯一用户路径（#1935 PR1）。
+pub async fn run_scoring_serve() -> ScoringServeExit {
+    if !systemone::EMBEDDED_SCORING_AVAILABLE {
+        return ScoringServeExit::Failure {
+            message: "本构建未启用 System One 引擎（feature `systemone-daemon` / `embedded`）；无法启动 scoring serve。".to_owned(),
+            exit_code: 2,
+        };
+    }
+
+    let Some(manifest) = ProductionReleaseManifest.release_manifest() else {
+        return ScoringServeExit::Failure {
+            message: "发行 manifest 不可用，无法启动 scoring serve。".to_owned(),
+            exit_code: 2,
+        };
+    };
+
+    let agents_dir = share::config::paths::global_agents_dir();
+    let endpoints = systemone::DaemonEndpoints::under_agents_dir(&agents_dir);
+    let lock = match systemone::acquire_daemon_lock(&endpoints.lock) {
+        Ok(lock) => lock,
+        Err(systemone::DaemonLockError::AlreadyRunning) => {
+            return ScoringServeExit::Failure {
+                message: format!(
+                    "scoring daemon 已在运行（lock={}）。",
+                    endpoints.lock.display()
+                ),
+                exit_code: 0,
+            };
+        }
+        Err(error) => {
+            return ScoringServeExit::Failure {
+                message: error.to_string(),
+                exit_code: 1,
+            };
+        }
+    };
+
+    let port = match ProductionEmbeddedFactory.wire(&manifest).await {
+        Ok(port) => port,
+        Err(error) => {
+            let detail = error.to_string();
+            let message = if matches!(error, systemone::EmbeddedScoringWiringError::ModelMissing) {
+                format!(
+                    "{detail}
+请执行 `aemeath systemone download` 安装模型后重试。"
+                )
+            } else {
+                detail
+            };
+            return ScoringServeExit::Failure {
+                message,
+                exit_code: 1,
+            };
+        }
+    };
+
+    let sock = endpoints.sock.clone();
+    println!("scoring serve 监听 {}", sock.display());
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let serve = tokio::spawn(async move {
+        systemone::run_daemon_accept_loop(
+            endpoints,
+            lock,
+            port,
+            manifest.engine_revision.clone(),
+            shutdown_rx,
+        )
+        .await
+    });
+
+    let _ = tokio::signal::ctrl_c().await;
+    let _ = shutdown_tx.send(());
+    match serve.await {
+        Ok(Ok(())) => ScoringServeExit::Stopped { sock },
+        Ok(Err(error)) => ScoringServeExit::Failure {
+            message: error.to_string(),
+            exit_code: 1,
+        },
+        Err(error) => ScoringServeExit::Failure {
+            message: format!("scoring serve 任务失败：{error}"),
+            exit_code: 1,
+        },
+    }
+}
