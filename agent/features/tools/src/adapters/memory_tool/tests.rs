@@ -149,8 +149,9 @@ async fn search_result_publishes_ranked_memory_details_for_llm_and_tui() {
     assert!(result.text.contains("cargo clippy"));
     assert!(result.text.contains("project"));
     assert!(result.text.contains("pattern"));
-    assert!(result.text.contains("tags="));
-    assert!(result.text.contains("relevance"));
+    assert!(result.text.contains("active"));
+    // LLM text 只留精简摘要；tags 等细节在 typed data。
+    assert!(!result.text.contains("tags="));
     let data = result.data.unwrap();
     let hits = data.hits.unwrap();
     assert_eq!(hits.len(), 2);
@@ -217,6 +218,107 @@ async fn list_result_publishes_manageable_entries_in_llm_text() {
     assert!(result.text.contains("project"));
     assert!(result.text.contains("pattern"));
     assert!(result.text.contains(&entries[0].id));
+}
+
+#[tokio::test]
+async fn list_paginates_with_limit_and_offset() {
+    let memory =
+        memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap();
+    for index in 0..5 {
+        memory
+            .write(test_entry(
+                &format!("list page entry {index}"),
+                MemoryCategory::Fact,
+            ))
+            .await
+            .unwrap();
+    }
+
+    let first =
+        handlers::list_memory(serde_json::json!({ "limit": 2, "offset": 0 }), &memory).await;
+    let first_data = first.data.as_ref().unwrap();
+    let first_entries = first_data.entries.as_ref().unwrap();
+    assert_eq!(first_entries.len(), 2);
+    assert_eq!(first_data.total, Some(5));
+    assert_eq!(first_data.offset, Some(0));
+    assert_eq!(first_data.limit, Some(2));
+    assert_eq!(first_data.has_more, Some(true));
+    assert!(
+        first.text.contains("next_offset=2") || first.text.contains("offset=2"),
+        "有下一页时应提示 next_offset：{}",
+        first.text
+    );
+
+    let second =
+        handlers::list_memory(serde_json::json!({ "limit": 2, "offset": 2 }), &memory).await;
+    let second_data = second.data.as_ref().unwrap();
+    let second_entries = second_data.entries.as_ref().unwrap();
+    assert_eq!(second_entries.len(), 2);
+    assert_eq!(second_data.offset, Some(2));
+    assert_eq!(second_data.has_more, Some(true));
+
+    let last = handlers::list_memory(serde_json::json!({ "limit": 2, "offset": 4 }), &memory).await;
+    let last_data = last.data.as_ref().unwrap();
+    let last_entries = last_data.entries.as_ref().unwrap();
+    assert_eq!(last_entries.len(), 1);
+    assert_eq!(last_data.has_more, Some(false));
+    assert_eq!(last_data.total, Some(5));
+}
+
+#[tokio::test]
+async fn list_text_respects_char_budget_even_with_large_page() {
+    let memory =
+        memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap();
+    let long_body = "L".repeat(400);
+    for index in 0..30 {
+        memory
+            .write(test_entry(
+                &format!("budget entry {index} {long_body}"),
+                MemoryCategory::Fact,
+            ))
+            .await
+            .unwrap();
+    }
+
+    let result =
+        handlers::list_memory(serde_json::json!({ "limit": 50, "offset": 0 }), &memory).await;
+    let chars = result.text.chars().count();
+    assert!(
+        chars <= super::super::constants::MEMORY_RESULT_TEXT_BUDGET_CHARS,
+        "list text 必须 ≤ 预算：chars={chars} text={}",
+        result.text
+    );
+    // typed data 仍含当前页条目（可带全文），不进 LLM text。
+    let entries = result.data.unwrap().entries.unwrap();
+    assert!(!entries.is_empty());
+    assert!(entries[0].content.contains(&long_body));
+}
+
+#[tokio::test]
+async fn search_text_respects_char_budget() {
+    let memory =
+        memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap();
+    let long_body = "S".repeat(400);
+    for index in 0..20 {
+        memory
+            .write(test_entry(
+                &format!("search budget {index} {long_body}"),
+                MemoryCategory::Decision,
+            ))
+            .await
+            .unwrap();
+    }
+
+    let result = handlers::search_memory(
+        serde_json::json!({ "query": "search budget", "limit": 50 }),
+        &memory,
+    )
+    .await;
+    let chars = result.text.chars().count();
+    assert!(
+        chars <= super::super::constants::MEMORY_RESULT_TEXT_BUDGET_CHARS,
+        "search text 必须 ≤ 预算：chars={chars}"
+    );
 }
 
 #[tokio::test]
@@ -440,6 +542,15 @@ fn the_five_memory_tools_expose_type_driven_required() {
         list.get("required").is_none(),
         "MemoryList has no required field"
     );
+    let list_props = list["properties"].as_object().unwrap();
+    assert!(
+        list_props.contains_key("limit"),
+        "MemoryList schema 含 limit"
+    );
+    assert!(
+        list_props.contains_key("offset"),
+        "MemoryList schema 含 offset"
+    );
 
     let update = MemoryUpdateTool {
         source: source.clone(),
@@ -535,6 +646,12 @@ fn memory_result_schema_exposes_entries_and_search_hits() {
     assert!(properties.contains_key("entries"));
     assert!(properties.contains_key("hits"));
     assert!(properties.contains_key("eviction_candidates"));
+    for field in ["total", "offset", "limit", "has_more"] {
+        assert!(
+            properties.contains_key(field),
+            "MemoryResult schema 缺分页字段 {field}"
+        );
+    }
     let eviction_properties = properties["eviction_candidates"]["items"]["properties"]
         .as_object()
         .unwrap();

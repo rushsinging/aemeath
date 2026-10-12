@@ -39,3 +39,11 @@ pub(crate) const WATCH_RESULT_TEXT_BUDGET_CHARS: usize = 2_000;
 
 /// Watch 摘要行预留字符；剩余预算给 log_tail。
 pub(crate) const WATCH_RESULT_HEADER_RESERVE_CHARS: usize = 260;
+
+/// Memory List/Search/eviction 的 tool_result 文本字符预算：
+/// 与 Grep/Watch 同档，硬压在 materializer 最严 floor（3000）之下，
+/// **NEVER** 触发 tool_result 落盘截断阶段。
+pub(crate) const MEMORY_RESULT_TEXT_BUDGET_CHARS: usize = 2_000;
+
+/// Memory 结果摘要行预留字符；剩余预算给逐条精简行。
+pub(crate) const MEMORY_RESULT_HEADER_RESERVE_CHARS: usize = 260;
