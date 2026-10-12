@@ -116,6 +116,12 @@ pub enum Commands {
         command: SystemoneCommands,
     },
 
+    /// System One scoring daemon（本机常驻服务）
+    Scoring {
+        #[command(subcommand)]
+        command: ScoringCommands,
+    },
+
     /// Check for and install updates
     Update {
         /// Only check for available updates, don't install
@@ -132,6 +138,13 @@ pub enum Commands {
 pub enum SystemoneCommands {
     /// Download and install the System One scoring model (~/.agents/models/systemone)
     Download,
+}
+
+/// `aemeath scoring` 子命令集。
+#[derive(Subcommand)]
+pub enum ScoringCommands {
+    /// 启动本机 scoring daemon（加载一份 GGUF，经 UDS 服务多会话）
+    Serve,
 }
 
 /// The original Args struct, used by the rest of main.rs to avoid touching all call sites.

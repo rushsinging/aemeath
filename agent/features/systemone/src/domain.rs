@@ -1,3 +1,4 @@
+pub mod daemon_protocol;
 pub mod error;
 pub mod event;
 pub mod model_manifest;

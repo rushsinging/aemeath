@@ -70,6 +70,11 @@ async fn main() {
                 }
             }
         }
+        Some(Commands::Scoring { command }) => match command {
+            args::ScoringCommands::Serve => {
+                subcommand::scoring_command::run_scoring_serve_command().await;
+            }
+        },
         Some(Commands::Version) => {
             println!("aemeath {}", composition::version());
         }

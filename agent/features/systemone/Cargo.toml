@@ -8,6 +8,8 @@ edition.workspace = true
 # 仅测试、eval 对分与回归基准使用（设计 §4.3 HTTP adapter 退役边界）。
 # `HttpArtifactFetcher` 下载能力不受此 feature 影响，reqwest 始终是必选依赖。
 http-adapter = []
+# Scoring daemon 生产路径（#1935）：复用 embedded 引擎，仅 serve 侧装配加载。
+daemon = ["embedded"]
 # 生产 embedded llama.cpp 评分路径（设计 §4.1）：llama.cpp 原生 worker + kev causal row
 # 编码 + HF tokenizer。默认构建 MUST NOT 链接/编译 llama.cpp 原生运行路径，
 # 因此 native 依赖只经此 feature 引入；原生 worker 本体另有 macOS arm64 cfg 门控。

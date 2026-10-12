@@ -1,6 +1,8 @@
 pub mod audited;
 pub mod calibrated;
 pub mod calibration_store;
+pub mod daemon_instance;
+pub mod daemon_serve;
 #[cfg(feature = "embedded")]
 pub mod embedded;
 pub mod event_jsonl;

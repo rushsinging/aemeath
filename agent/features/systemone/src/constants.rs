@@ -22,6 +22,20 @@ pub(crate) const CALIBRATION_FILE: &str = "calibration.json";
 /// legacy 旧审计行无此字段，读侧视为 `0`。
 pub(crate) const EVENT_SCHEMA_VERSION: u32 = 1;
 
+// --- Scoring daemon UDS 协议（来源：docs/design/02-modules/systemone/04-scoring-daemon.md §5）---
+
+/// Daemon ↔ 客户端 length-prefixed JSON 协议版本。
+pub(crate) const DAEMON_PROTOCOL_VERSION: u32 = 1;
+
+/// `{agents_dir}/scoring/` 目录名。
+pub(crate) const SCORING_DIR_NAME: &str = "scoring";
+
+/// Daemon UDS 文件名（`{scoring_dir}/scoring.sock`）。
+pub(crate) const SCORING_SOCK_FILE: &str = "scoring.sock";
+
+/// Daemon 单实例锁文件名（`{scoring_dir}/scoring.lock`）。
+pub(crate) const SCORING_LOCK_FILE: &str = "scoring.lock";
+
 // --- 事件流日切 segment 落盘（来源：docs/design/02-modules/systemone/03-event-stream.md §4.1/§4.2）---
 
 /// 日切事件目录名（{scoring_dir}/events/{yyyy-mm-dd}.jsonl）。
