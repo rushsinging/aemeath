@@ -391,7 +391,20 @@ impl ScoringDaemonLauncher for ProcessDaemonLauncher {
         sock: &std::path::Path,
         connect_timeout: std::time::Duration,
     ) -> Result<(), String> {
-        systemone::ensure_scoring_daemon_ready(sock, connect_timeout)
+        // composition 单测的 current_exe 是 `deps/composition-*` 测试二进制：
+        // 对其 spawn `scoring serve` 会挂起并污染并行用例（如 L4 日志等待）。
+        // 生产路径（非 cfg(test)）仍走惰性拉起。
+        #[cfg(test)]
+        {
+            let _ = (sock, connect_timeout);
+            return Err(
+                "composition 单测禁用惰性拉起 scoring serve（避免测试二进制被误 spawn）".to_owned(),
+            );
+        }
+        #[cfg(not(test))]
+        {
+            systemone::ensure_scoring_daemon_ready(sock, connect_timeout)
+        }
     }
 }
 

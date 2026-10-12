@@ -119,6 +119,15 @@ impl ScoringDaemonLauncher for RecordingDaemonLauncher {
     }
 }
 
+#[test]
+fn process_daemon_launcher_skips_lazy_spawn_under_cfg_test() {
+    let sock = std::path::Path::new("/tmp/aemeath-scoring-daemon-launcher-test.sock");
+    let err = ProcessDaemonLauncher
+        .ensure_ready(sock, std::time::Duration::from_millis(10))
+        .expect_err("cfg(test) 必须禁用惰性拉起");
+    assert!(err.contains("单测禁用惰性拉起"), "unexpected detail: {err}");
+}
+
 fn fixture_manifest() -> systemone::ModelManifest {
     systemone::ModelManifest {
         schema_version: 1,
