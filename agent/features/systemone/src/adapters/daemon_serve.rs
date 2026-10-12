@@ -112,12 +112,12 @@ async fn serve_connection(
         if n == 0 {
             break;
         }
-        buffer.extend_from_slice(&chunk[..n]);
+        let (received, _) = chunk.split_at(n);
+        buffer.extend_from_slice(received);
         loop {
             match try_decode_frame(&buffer) {
                 Ok((_, consumed)) => {
-                    let frame = buffer[..consumed].to_vec();
-                    buffer.drain(..consumed);
+                    let frame: Vec<u8> = buffer.drain(..consumed).collect();
                     let response = handle_framed_request(port, engine_revision, &frame)
                         .await
                         .map_err(|error| {

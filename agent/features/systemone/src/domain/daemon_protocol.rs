@@ -164,7 +164,9 @@ pub fn try_decode_frame(buffer: &[u8]) -> Result<(&[u8], usize), FrameError> {
     if buffer.len() < total {
         return Err(FrameError::Incomplete);
     }
-    Ok((&buffer[4..total], total))
+    let (_prefix, after_length) = buffer.split_at(4);
+    let (body, _rest) = after_length.split_at(length);
+    Ok((body, total))
 }
 
 pub fn encode_json_frame<T: Serialize>(value: &T) -> Result<Vec<u8>, ProtocolError> {

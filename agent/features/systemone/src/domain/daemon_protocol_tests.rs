@@ -29,8 +29,9 @@ fn sample_answer() -> ScoringAnswer {
 fn encode_decode_frame_round_trips_json_body() {
     let body = br#"{"hello":"world"}"#;
     let frame = encode_frame(body);
-    assert_eq!(&frame[..4], &(body.len() as u32).to_le_bytes());
-    assert_eq!(&frame[4..], body);
+    let (prefix, payload) = frame.split_at(4);
+    assert_eq!(prefix, &(body.len() as u32).to_le_bytes());
+    assert_eq!(payload, body);
 
     let (decoded, consumed) = try_decode_frame(&frame).expect("完整帧应可解码");
     assert_eq!(decoded, body);
