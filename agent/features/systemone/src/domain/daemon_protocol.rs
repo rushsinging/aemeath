@@ -100,6 +100,7 @@ impl DaemonRequest {
         }
     }
 
+    #[cfg(test)]
     pub fn protocol_version(&self) -> u32 {
         match self {
             Self::Answer {

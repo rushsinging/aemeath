@@ -19,7 +19,7 @@ if printf '%s\n' "$staged" | grep -qE '\.rs$'; then
 fi
 
 if printf '%s\n' "$staged" | grep -qE '^(agent|apps|packages|tools/xtask|\.agents)/'; then
-    cargo run --quiet -p xtask -- source-guard "$top"
+    "$top/.agents/hooks/run-xtask.sh" source-guard "$top"
 fi
 
 if printf '%s\n' "$staged" | grep -qE '(^|/)(scenario_tests|snapshots)(/|\.)|\.snap$'; then
