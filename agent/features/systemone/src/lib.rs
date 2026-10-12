@@ -28,6 +28,7 @@ mod wiring;
 pub use adapters::audited::AuditedScoringAdapter;
 pub use adapters::calibrated::CalibratedScoringAdapter;
 pub use adapters::calibration_store::{CalibrationArtifact, CalibrationStore};
+pub use adapters::daemon_client::DaemonScoringClient;
 pub use adapters::daemon_instance::{
     acquire_daemon_lock, prepare_socket_path, DaemonEndpoints, DaemonLockError, DaemonLockGuard,
 };
