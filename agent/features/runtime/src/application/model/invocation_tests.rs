@@ -6,10 +6,26 @@ fn retryable(kind: ProviderErrorKind) -> ProviderError {
 }
 
 #[test]
-fn retry_policy_rejects_rate_limits_and_uses_retry_after_or_capped_exponential_backoff() {
+fn retry_policy_retries_rate_limits_and_uses_retry_after_or_capped_exponential_backoff() {
     let policy = RetryPolicy::default();
+    // #1951: RateLimited + retryable 走与 Timeout/Network 相同的退避（对齐 03-loop §5）。
     assert_eq!(
         policy.decide(1, false, &retryable(ProviderErrorKind::RateLimited), 0),
+        RetryDecision::RetryAfter(Duration::from_secs(10))
+    );
+    let mut rate_retry_after = retryable(ProviderErrorKind::RateLimited);
+    rate_retry_after.retry_after = Some(Duration::from_secs(30));
+    assert_eq!(
+        policy.decide(1, false, &rate_retry_after, 250),
+        RetryDecision::RetryAfter(Duration::from_millis(30_250))
+    );
+    assert_eq!(
+        policy.decide(
+            1,
+            false,
+            &ProviderError::fatal(ProviderErrorKind::RateLimited, "terminal rate limit"),
+            0,
+        ),
         RetryDecision::Fail
     );
     assert_eq!(

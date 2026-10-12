@@ -54,7 +54,7 @@ fn custom_user_agent_is_sent_in_anthropic_headers() {
 }
 
 #[tokio::test]
-async fn anthropic_invocation_stream_returns_non_retryable_rate_limited_error_after_one_request() {
+async fn anthropic_invocation_stream_returns_retryable_rate_limited_error_after_one_request() {
     let response =
         "HTTP/1.1 429 Too Many Requests\r\nretry-after: 2\r\ncontent-length: 8\r\n\r\nsensitive";
     let (base_url, request_count) = spawn_counting_server(response).await;
@@ -91,7 +91,8 @@ async fn anthropic_invocation_stream_returns_non_retryable_rate_limited_error_af
 
     assert_eq!(request_count.load(Ordering::SeqCst), 1);
     assert_eq!(error.kind, crate::ProviderErrorKind::RateLimited);
-    assert!(!error.retryable);
+    // #1951: Provider 单 attempt 不重试，但 retryable=true 供 Runtime 退避。
+    assert!(error.retryable);
     assert_eq!(error.retry_after, Some(std::time::Duration::from_secs(2)));
     assert!(!error.safe_message.contains("sensitive"));
 }
@@ -322,9 +323,9 @@ async fn invocation_stream_returns_upstream_unavailable_on_400_without_retrying(
 }
 
 #[tokio::test]
-async fn invocation_stream_returns_non_retryable_rate_limited_on_429() {
-    // 429 is surfaced as a terminal ProviderError::RateLimited. Runtime
-    // must not retry rate limits, while Retry-After remains diagnostic data.
+async fn invocation_stream_returns_retryable_rate_limited_on_429() {
+    // #1951: 429 → RateLimited + retryable；Provider 仍单 attempt，
+    // Runtime 拥有跨调用退避。Retry-After 继续透传。
     let response = "HTTP/1.1 429 Too Many Requests\r\ncontent-length: 0\r\n\r\n";
     let (base_url, request_count) = spawn_counting_server(response).await;
 
@@ -358,8 +359,8 @@ async fn invocation_stream_returns_non_retryable_rate_limited_on_429() {
         "expected RateLimited, got {err:?}"
     );
     assert!(
-        !err.retryable,
-        "429 must remain terminal even when Runtime owns other retries"
+        err.retryable,
+        "429 must be retryable so Runtime can back off (#1951)"
     );
     assert_eq!(
         request_count.load(Ordering::SeqCst),

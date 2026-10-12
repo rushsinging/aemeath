@@ -655,28 +655,45 @@ mod stream_usage_tests;
 #[path = "stream_contract_tests.rs"]
 mod contract_tests;
 
-/// 流式路径的 LlmError→ProviderError：Network/StreamInterrupted/StreamTruncated
-/// 标记 retryable（重试是安全的——请求未部分生效）；其余 fatal。
+/// #1951：流内 Api 信封是否表达 rate limit / empty-turn / quota（含伪 HTTP 429 文案）。
+fn stream_api_looks_rate_limited(error_type: &str, message: &str) -> bool {
+    let error_type = error_type.to_ascii_lowercase();
+    let message = message.to_ascii_lowercase();
+    error_type.contains("rate_limit")
+        || error_type.contains("rate-limit")
+        || message.contains("http 429")
+        || message.contains("(429)")
+        || message.contains("rate limit")
+        || message.contains("rate_limit")
+        || message.contains("empty turn")
+        || message.contains("quota exhausted")
+        || message.contains("usage/quota")
+        || message.contains("too many requests")
+}
+
+/// 流式路径的 LlmError→ProviderError：StreamInterrupted/StreamTruncated 可重试；
+/// #1951 起流内 rate-limit/empty-turn Api → RateLimited+retryable；其余 Api fatal。
 /// 与构造期映射（`From<LlmError>`，全 fatal）语义不同，勿合并。
 fn provider_error_from_legacy(error: crate::LlmError) -> ProviderError {
-    let retryable = matches!(
-        &error,
-        crate::LlmError::StreamInterrupted(_) | crate::LlmError::StreamTruncated { .. }
-    );
-    let kind = match &error {
-        crate::LlmError::Cancelled => ProviderErrorKind::Cancelled,
-        crate::LlmError::Api { .. } => ProviderErrorKind::UpstreamUnavailable,
-        crate::LlmError::StreamInterrupted(_) | crate::LlmError::StreamTruncated { .. } => {
-            ProviderErrorKind::StreamTruncated
-        }
-        crate::LlmError::Stream(_) => ProviderErrorKind::Protocol,
-        crate::LlmError::Config(_) => ProviderErrorKind::Configuration,
-    };
     let message = error.to_string();
-    if retryable {
-        ProviderError::retryable(kind, message)
-    } else {
-        ProviderError::fatal(kind, message)
+    match &error {
+        crate::LlmError::Cancelled => ProviderError::fatal(ProviderErrorKind::Cancelled, message),
+        crate::LlmError::Api {
+            error_type,
+            message: api_message,
+        } if stream_api_looks_rate_limited(error_type, api_message) => {
+            ProviderError::retryable(ProviderErrorKind::RateLimited, message)
+        }
+        crate::LlmError::Api { .. } => {
+            ProviderError::fatal(ProviderErrorKind::UpstreamUnavailable, message)
+        }
+        crate::LlmError::StreamInterrupted(_) | crate::LlmError::StreamTruncated { .. } => {
+            ProviderError::retryable(ProviderErrorKind::StreamTruncated, message)
+        }
+        crate::LlmError::Stream(_) => ProviderError::fatal(ProviderErrorKind::Protocol, message),
+        crate::LlmError::Config(_) => {
+            ProviderError::fatal(ProviderErrorKind::Configuration, message)
+        }
     }
 }
 

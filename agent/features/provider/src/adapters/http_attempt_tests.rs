@@ -157,7 +157,7 @@ async fn attempt_failure_maps_to_safe_provider_error_contract() {
         (
             429,
             crate::ProviderErrorKind::RateLimited,
-            false,
+            true, // #1951: Runtime 可退避
             Some(3_000),
         ),
         (404, crate::ProviderErrorKind::ModelUnavailable, false, None),

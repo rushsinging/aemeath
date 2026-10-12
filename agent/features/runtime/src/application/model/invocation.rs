@@ -7,8 +7,8 @@
 //! - 组装流式响应
 //! - 提取 tool_calls
 //! - 记录 `TokenUsageData` -> 构造 `UsageRecordData` 经 `RuntimeStreamEvent::Usage` 路径发出
-//! - 退避重试：仅对 Retryable(超时/5xx/429/流中断) 指数退避重试
-//! - Fatal(4xx) 直接失败；context 超限 -> compact
+//! - 退避重试：仅对 Retryable(超时/5xx/429 RateLimited/流中断) 指数退避重试（#1951）
+//! - Fatal(4xx / !retryable) 直接失败；context 超限 -> compact
 //! - 重试期 emit `ModelInvocationRetrying{attempt}`
 //!
 //! 状态：无（产出 `ModelInvocation` VO 交回 Run Step）
@@ -71,10 +71,9 @@ impl RetryPolicy {
         if error.kind == ProviderErrorKind::ContextTooLong {
             return RetryDecision::Compact;
         }
-        if error.kind == ProviderErrorKind::RateLimited
-            || !error.retryable
-            || attempt >= self.max_attempts
-        {
+        // #1951: RateLimited 不再硬 Fail；是否重试仅看 retryable + attempt 上限
+        //（与 03-loop §5「429 退避」对齐；#1343 的 429 冻结条款作废）。
+        if !error.retryable || attempt >= self.max_attempts {
             return RetryDecision::Fail;
         }
 
