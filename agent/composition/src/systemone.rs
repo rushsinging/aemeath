@@ -391,49 +391,7 @@ impl ScoringDaemonLauncher for ProcessDaemonLauncher {
         sock: &std::path::Path,
         connect_timeout: std::time::Duration,
     ) -> Result<(), String> {
-        ensure_scoring_daemon_ready(sock, connect_timeout)
-    }
-}
-
-fn ensure_scoring_daemon_ready(
-    sock: &std::path::Path,
-    connect_timeout: std::time::Duration,
-) -> Result<(), String> {
-    if scoring_sock_connectable(sock) {
-        return Ok(());
-    }
-    let executable = std::env::current_exe()
-        .map_err(|error| format!("定位当前可执行文件失败，无法惰性拉起 scoring serve：{error}"))?;
-    std::process::Command::new(&executable)
-        .args(["scoring", "serve"])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|error| format!("惰性拉起 `scoring serve` 失败：{error}"))?;
-
-    let started = std::time::Instant::now();
-    while started.elapsed() < connect_timeout {
-        if scoring_sock_connectable(sock) {
-            return Ok(());
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    Err(format!(
-        "等待 scoring daemon sock 就绪超时（{}s）；可手动执行 `aemeath scoring serve`，         模型缺失时先 `aemeath systemone download`",
-        connect_timeout.as_secs().max(1)
-    ))
-}
-
-fn scoring_sock_connectable(sock: &std::path::Path) -> bool {
-    #[cfg(unix)]
-    {
-        std::os::unix::net::UnixStream::connect(sock).is_ok()
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = sock;
-        false
+        systemone::ensure_scoring_daemon_ready(sock, connect_timeout)
     }
 }
 
