@@ -57,14 +57,17 @@ fn scoring_patch_overrides_only_set_fields_and_reaches_snapshot() {
     assert_eq!(
         keys,
         [
+            "connect_timeout_secs",
             "enabled",
             "event_retention_days",
+            "infer_timeout_secs",
             "memory_recall",
             "memory_rerank",
             "policy_triage",
-            "skill_match"
+            "skill_match",
+            "socket_path",
         ],
-        "合并结果不得出现退役 HTTP 字段"
+        "合并结果不得出现退役 HTTP 字段",
     );
 }
 

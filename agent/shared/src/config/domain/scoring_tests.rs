@@ -34,14 +34,17 @@ fn scoring_config_ignores_retired_http_keys() {
     assert_eq!(
         keys,
         [
+            "connect_timeout_secs",
             "enabled",
             "event_retention_days",
+            "infer_timeout_secs",
             "memory_recall",
             "memory_rerank",
             "policy_triage",
-            "skill_match"
+            "skill_match",
+            "socket_path",
         ],
-        "序列化面只允许场景开关与事件保留天数，HTTP 端点字段不得回归"
+        "序列化面允许场景开关、事件保留、daemon socket/超时；HTTP 端点字段不得回归"
     );
 }
 
@@ -93,4 +96,33 @@ fn event_retention_days_zero_is_legal_gc_off_not_write_off() {
     let config: ScoringConfig = serde_json::from_str(r#"{"event_retention_days":0}"#)
         .expect("0 应合法（0=禁用 GC，不影响事件写入）");
     assert_eq!(config.event_retention_days, 0);
+}
+
+#[test]
+fn scoring_config_defaults_daemon_timeouts_and_empty_socket_path() {
+    let config = ScoringConfig::default();
+    assert_eq!(
+        config.connect_timeout_secs,
+        DEFAULT_SCORING_CONNECT_TIMEOUT_SECS
+    );
+    assert_eq!(
+        config.infer_timeout_secs,
+        DEFAULT_SCORING_INFER_TIMEOUT_SECS
+    );
+    assert!(config.socket_path.is_none());
+}
+
+#[test]
+fn scoring_config_accepts_socket_path_and_timeout_aliases() {
+    let config: ScoringConfig = serde_json::from_str(
+        r#"{
+            "socketPath": "/tmp/custom.sock",
+            "connectTimeoutSecs": 5,
+            "inferTimeoutSecs": 60
+        }"#,
+    )
+    .expect("deserialize");
+    assert_eq!(config.socket_path.as_deref(), Some("/tmp/custom.sock"));
+    assert_eq!(config.connect_timeout_secs, 5);
+    assert_eq!(config.infer_timeout_secs, 60);
 }

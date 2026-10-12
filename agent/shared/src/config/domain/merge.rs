@@ -596,6 +596,12 @@ pub struct ScoringConfigPatch {
     pub memory_recall: Option<bool>,
     #[serde(default, alias = "eventRetentionDays")]
     pub event_retention_days: Option<u32>,
+    #[serde(default, alias = "socketPath")]
+    pub socket_path: Option<String>,
+    #[serde(default, alias = "connectTimeoutSecs")]
+    pub connect_timeout_secs: Option<u64>,
+    #[serde(default, alias = "inferTimeoutSecs")]
+    pub infer_timeout_secs: Option<u64>,
 }
 
 pub(crate) fn apply_tools_patch(mut base: ToolsConfig, patch: ToolsConfigPatch) -> ToolsConfig {
@@ -641,6 +647,15 @@ pub(crate) fn apply_scoring_patch(
     if let Some(v) = patch.event_retention_days {
         // `0` 是合法覆盖值（禁用 GC），不得与「未设置」混淆。
         base.event_retention_days = v;
+    }
+    if let Some(v) = patch.socket_path {
+        base.socket_path = Some(v);
+    }
+    if let Some(v) = patch.connect_timeout_secs {
+        base.connect_timeout_secs = v;
+    }
+    if let Some(v) = patch.infer_timeout_secs {
+        base.infer_timeout_secs = v;
     }
     base
 }
