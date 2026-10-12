@@ -18,6 +18,25 @@ fn parse_input<T: serde::de::DeserializeOwned + Default>(input: &serde_json::Val
     serde_json::from_value(input.clone()).unwrap_or_default()
 }
 
+fn content_is_glob_shape(content: Option<&serde_json::Value>) -> bool {
+    let Some(value) = content else {
+        return false;
+    };
+    value.get("files").is_some() || value.get("count").is_some()
+}
+
+fn content_is_grep_shape(content: Option<&serde_json::Value>) -> bool {
+    let Some(value) = content else {
+        return false;
+    };
+    value.get("files").is_some()
+        || value.get("matches").is_some()
+        || value.get("total_matches").is_some()
+        || value.get("total_files").is_some()
+        || value.get("query").is_some()
+        || value.get("shown").is_some()
+}
+
 // ── Glob ─────────────────────────────────────────────────────────
 
 struct GlobDisplay;
@@ -65,10 +84,16 @@ impl ToolDisplay for GlobDisplay {
     fn format_result_lines(&self, content: Option<&serde_json::Value>) -> Option<Vec<String>> {
         use super::super::common::typed_from_content;
         let result: sdk::tool_result::GlobResult = typed_from_content(content)?;
-        if result.files.is_empty() {
-            return Some(vec!["（无匹配文件）".to_string()]);
+        if !result.files.is_empty() {
+            return Some(result.files);
         }
-        Some(result.files)
+        // 仅当 payload 明确是 GlobResult 形状时显示空占位；
+        // 否则回退 Plain text（兼容仅 text 的旧夹具 / 历史 session）。
+        if content_is_glob_shape(content) {
+            Some(vec!["（无匹配文件）".to_string()])
+        } else {
+            None
+        }
     }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
@@ -149,23 +174,28 @@ impl ToolDisplay for GrepDisplay {
                     .collect(),
             );
         }
-        if result.matches.is_empty() {
-            return Some(vec!["（无命中）".to_string()]);
+        if !result.matches.is_empty() {
+            return Some(
+                result
+                    .matches
+                    .iter()
+                    .map(|hit| {
+                        format!(
+                            "{}:{}: {}",
+                            hit.file_path.display(),
+                            hit.line_number,
+                            hit.line.trim()
+                        )
+                    })
+                    .collect(),
+            );
         }
-        Some(
-            result
-                .matches
-                .iter()
-                .map(|hit| {
-                    format!(
-                        "{}:{}: {}",
-                        hit.file_path.display(),
-                        hit.line_number,
-                        hit.line.trim()
-                    )
-                })
-                .collect(),
-        )
+        // 空结构化结果：仅 typed 形状显示占位，否则回退 Plain text。
+        if content_is_grep_shape(content) {
+            Some(vec!["（无命中）".to_string()])
+        } else {
+            None
+        }
     }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
