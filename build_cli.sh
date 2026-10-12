@@ -22,10 +22,7 @@ TARGET_DIR="$(cargo metadata --format-version 1 --no-deps \
 # Limit parallel rustc jobs to avoid hook-time SIGTERM on memory pressure.
 CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 
-# 本机安装 CLI 默认启用 System One embedded（llama.cpp）；workspace 默认构建仍不启用。
-# 可用 AEMEATH_CLI_FEATURES 覆盖（空字符串 = 不启用任何额外 feature）。
-# 注意：macOS 自带 bash 3.2，避免空数组 + set -u 展开。
-AEMEATH_CLI_FEATURES="${AEMEATH_CLI_FEATURES-composition/systemone-embedded}"
+echo ">>> cargo build --release --package cli --jobs $CARGO_BUILD_JOBS (target-dir: $TARGET_DIR)"
 
 # build.rs 不再从 git tag 读版本号；显式 AEMEATH_VERSION 未设置时，
 # 本地构建使用 0.0.0-<short commit> 标识对应源码 revision。
@@ -38,13 +35,7 @@ else
     echo ">>> AEMEATH_VERSION=$AEMEATH_VERSION → 二进制版本号同上"
 fi
 
-if [[ -n "$AEMEATH_CLI_FEATURES" ]]; then
-    echo ">>> cargo build --release --package cli --features $AEMEATH_CLI_FEATURES --jobs $CARGO_BUILD_JOBS (target-dir: $TARGET_DIR)"
-    cargo build --release --package cli --features "$AEMEATH_CLI_FEATURES" --jobs "$CARGO_BUILD_JOBS"
-else
-    echo ">>> cargo build --release --package cli --jobs $CARGO_BUILD_JOBS (target-dir: $TARGET_DIR)"
-    cargo build --release --package cli --jobs "$CARGO_BUILD_JOBS"
-fi
+cargo build --release --package cli --jobs "$CARGO_BUILD_JOBS"
 
 mkdir -p "$INSTALL_DIR"
 cp "$TARGET_DIR/release/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
