@@ -22,6 +22,8 @@ TARGET_DIR="$(cargo metadata --format-version 1 --no-deps \
 # Limit parallel rustc jobs to avoid hook-time SIGTERM on memory pressure.
 CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 
+# 会话二进制默认不启用 composition/systemone-daemon|embedded（#1935）：
+# 评分经 DaemonScoringClient 惰性拉起独立 serve；勿在此默认加 --features。
 echo ">>> cargo build --release --package cli --jobs $CARGO_BUILD_JOBS (target-dir: $TARGET_DIR)"
 
 # build.rs 不再从 git tag 读版本号；显式 AEMEATH_VERSION 未设置时，

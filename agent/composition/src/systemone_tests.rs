@@ -430,6 +430,29 @@ fn production_scoring_sources_never_reference_http_scoring_factory() {
             );
         }
     }
+    let systemone =
+        std::fs::read_to_string(source_dir.join("systemone.rs")).expect("读取 systemone.rs");
+    assert!(
+        systemone.contains("assemble_daemon_scoring_ports_with"),
+        "会话生产装配必须走 daemon 客户端路径"
+    );
+    assert!(
+        systemone.contains("DaemonScoringClient"),
+        "会话生产装配必须构造 DaemonScoringClient"
+    );
+    // `pub async fn assemble_scoring_ports` 本体不得再委托 ProductionEmbeddedFactory。
+    let start = systemone
+        .find("pub async fn assemble_scoring_ports(")
+        .expect("assemble_scoring_ports 应存在");
+    let body = &systemone[start..start + 350];
+    assert!(
+        body.contains("assemble_daemon_scoring_ports_with"),
+        "assemble_scoring_ports 必须委托 daemon 装配：{body}"
+    );
+    assert!(
+        !body.contains("ProductionEmbeddedFactory"),
+        "assemble_scoring_ports 不得委托 ProductionEmbeddedFactory：{body}"
+    );
 }
 
 /// 启动提醒转换：`Disabled` / `Ready` 无提醒（零成本与正常态不打扰用户）。

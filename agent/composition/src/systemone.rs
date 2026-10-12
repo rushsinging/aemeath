@@ -260,8 +260,9 @@ pub(crate) trait ReleaseManifestSource: Send + Sync {
     fn release_manifest(&self) -> Option<systemone::ModelManifest>;
 }
 
-/// embedded 装配注入点：生产委托 `systemone::wire_embedded_scoring`，
-/// 测试注入 fake 以覆盖装配矩阵（不读模型目录、不加载真实模型）。
+/// embedded 装配注入点：**仅** `aemeath scoring serve` 与测试矩阵使用。
+/// 会话生产装配走 [`assemble_daemon_scoring_ports_with`]，**NEVER** 经本 trait 加载 GGUF。
+/// 测试注入 fake 以覆盖历史装配矩阵（不读模型目录、不加载真实模型）。
 #[async_trait]
 pub(crate) trait EmbeddedScoringFactory: Send + Sync {
     /// 本构建是否具备 embedded 装配能力（systemone feature `embedded`）。
@@ -321,7 +322,7 @@ impl ReleaseManifestSource for ProductionReleaseManifest {
     }
 }
 
-/// 生产 embedded 工厂：委托 systemone 的唯一生产装配入口。
+/// serve 路径工厂：仅 `run_scoring_serve` 用来加载 GGUF（会话侧不调用）。
 pub(crate) struct ProductionEmbeddedFactory;
 
 #[async_trait]
@@ -531,7 +532,7 @@ pub(crate) async fn assemble_daemon_scoring_ports_with(
     }
 }
 
-/// 装配矩阵（可注入 fake，供契约测试覆盖全关 / feature 关闭 / 资产失败 / 成功链）。
+/// 历史 embedded 装配矩阵（可注入 fake；供契约测试）。会话生产入口已改 daemon。
 pub(crate) async fn assemble_scoring_ports_with(
     scoring: &share::config::ScoringConfig,
     factory: &dyn EmbeddedScoringFactory,

@@ -26,6 +26,14 @@ description: Use when building and installing the aemeath CLI binary from the cu
 4. 验证版本：`~/.local/bin/aemeath --version`，输出应与 `git rev-parse --short=8 HEAD`（或显式设置的 `AEMEATH_VERSION`）一致。
 5. 验证可执行路径：`which aemeath`，确认解析到 `$INSTALL_DIR/aemeath`。
 
+
+## System One / scoring daemon
+
+- 默认 `./build_cli.sh` **不**启用 `composition/systemone-embedded` 或 `composition/systemone-daemon`：会话二进制只含 `DaemonScoringClient`，惰性拉起外部 `aemeath scoring serve`。
+- 需要本机直接跑引擎 serve 时，在启用 feature 的 checkout 上构建，例如：
+  `cargo build --release -p cli --features composition/systemone-daemon`
+  （或等价地把该 feature 写进临时构建脚本）；**NEVER** 为日常会话安装默认链入 GGUF。
+
 ## Rules
 
 - **MUST** 使用 `./build_cli.sh` 安装二进制；**NEVER** 手工 `cp target/release/aemeath ~/.local/bin/`——脚本负责 xattr 清理与重签名，手工复制会让二进制在 macOS 上无法启动。
