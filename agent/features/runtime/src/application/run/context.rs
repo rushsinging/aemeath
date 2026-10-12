@@ -184,19 +184,17 @@ impl RunUsageTracker {
     /// EMA with `reported / estimated` from the same request (#1626).
     ///
     /// 只有同一次请求的 provider 上报值与 heuristic 估算值才可比；
-    /// 估算为 0 或比值严重异常时丢弃观测，只更新 usage 不动校准系数。
+    /// 估算为 0，或 api/heuristic 落在可信区间 CALIBRATION_CLAMP（[0.5, 2.0]）
+    /// 外时，既不写入 usage 也不更新校准，避免脏值跨 Run 残留误触发 auto compact。
     pub fn update_with_heuristic(&self, tokens: u64, heuristic_estimate: u64) {
-        self.update(tokens);
         if heuristic_estimate == 0 {
             return;
         }
         let observed = tokens as f64 / heuristic_estimate as f64;
-        // 单次观测超出 clamp 区间 2 倍视为脏观测（provider 返回值与估算
-        // 严重失配，例如窗口刚被外部事件重置），避免污染滑动系数。
-        // 半开区间：恰为 2 倍（4.0）同样丢弃。
-        if !(*CALIBRATION_CLAMP.start() / 2.0..*CALIBRATION_CLAMP.end() * 2.0).contains(&observed) {
+        if !CALIBRATION_CLAMP.contains(&observed) {
             return;
         }
+        self.update(tokens);
         let clamped_observed = observed.clamp(*CALIBRATION_CLAMP.start(), *CALIBRATION_CLAMP.end());
         let mut guard = match self.heuristic_calibration.write() {
             Ok(guard) => guard,

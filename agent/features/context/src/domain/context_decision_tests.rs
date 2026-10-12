@@ -246,11 +246,60 @@ fn heuristic_calibration_scales_fallback_estimate_only() {
         (uncalibrated.decision_token_count as f64 * 0.5) as usize
     );
 
-    // provider usage 路径不受校准系数影响
+    // 可信区间内的 provider usage 不被校准系数缩放
     let mut with_usage = calibrated;
     with_usage.last_api_total_tokens = Some(700);
     with_usage.heuristic_calibration = Some(0.5);
     let usage_decision = context_decision::calculate(&with_usage, &messages, &[]);
     assert_eq!(usage_decision.decision_token_count, 700);
     assert_eq!(usage_decision.reason, DecisionReason::ActualProviderUsage);
+}
+
+/// API 相对本地估算超出可信区间 [0.5, 2.0] 时丢弃 API，改用本地预判，
+/// 避免脏 usage（如 4.4×）误触发 auto compact。
+#[test]
+fn outlier_provider_usage_falls_back_to_heuristic_for_precheck() {
+    let mut request = request(None);
+    request.context_size = 500_000;
+    request.max_output_tokens = 20_000;
+    let messages = vec![Message::user("x".repeat(4_000))].into();
+
+    let heuristic = context_decision::calculate(&request, &messages, &[]);
+    let heuristic_tokens = heuristic.decision_token_count;
+    assert!(heuristic_tokens > 0);
+    assert!(!heuristic.needed);
+
+    request.last_api_total_tokens = Some((heuristic_tokens as u64).saturating_mul(5));
+    let decision = context_decision::calculate(&request, &messages, &[]);
+
+    assert_eq!(decision.decision_token_count, heuristic_tokens);
+    assert_eq!(decision.reason, DecisionReason::HeuristicPreferred);
+    assert!(!decision.needed);
+}
+
+/// API / 本地落在可信闭区间边界（含 0.5 与 2.0）时仍采信 API。
+#[test]
+fn provider_usage_at_trust_bounds_is_accepted() {
+    let mut request = request(None);
+    request.context_size = 32_768;
+    request.max_output_tokens = 8_192;
+    let messages = vec![Message::user("x".repeat(4_000))].into();
+    let heuristic_tokens =
+        context_decision::calculate(&request, &messages, &[]).decision_token_count;
+
+    request.last_api_total_tokens = Some((heuristic_tokens as f64 * 0.5).round() as u64);
+    let low = context_decision::calculate(&request, &messages, &[]);
+    assert_eq!(low.reason, DecisionReason::ActualProviderUsage);
+    assert_eq!(
+        low.decision_token_count,
+        request.last_api_total_tokens.unwrap() as usize
+    );
+
+    request.last_api_total_tokens = Some((heuristic_tokens as f64 * 2.0).round() as u64);
+    let high = context_decision::calculate(&request, &messages, &[]);
+    assert_eq!(high.reason, DecisionReason::ActualProviderUsage);
+    assert_eq!(
+        high.decision_token_count,
+        request.last_api_total_tokens.unwrap() as usize
+    );
 }

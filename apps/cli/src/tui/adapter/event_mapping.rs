@@ -584,6 +584,9 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
                         sdk::ContextDecisionSourceView::HeuristicFallback => {
                             TuiContextDecisionSource::HeuristicFallback
                         }
+                        sdk::ContextDecisionSourceView::HeuristicPreferred => {
+                            TuiContextDecisionSource::HeuristicPreferred
+                        }
                         sdk::ContextDecisionSourceView::MisconfiguredWindow => {
                             TuiContextDecisionSource::MisconfiguredWindow
                         }
