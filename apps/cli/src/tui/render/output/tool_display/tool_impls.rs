@@ -7,5 +7,6 @@ mod memory;
 mod search;
 mod shell;
 mod skill;
+mod tool_search;
 mod web;
 mod worktree;

@@ -22,6 +22,47 @@ fn parse_input<T: serde::de::DeserializeOwned + Default>(input: &serde_json::Val
     serde_json::from_value(input.clone()).unwrap_or_default()
 }
 
+fn json_str<'a>(value: &'a serde_json::Value, key: &str) -> &'a str {
+    value
+        .get(key)
+        .and_then(|field| field.as_str())
+        .unwrap_or("-")
+}
+
+fn format_task_view_line(task: &serde_json::Value) -> String {
+    let id = json_str(task, "id");
+    let status = json_str(task, "status");
+    let subject = truncate_ellipsis(json_str(task, "subject"), 60);
+    format!("{id} · {status} · {subject}")
+}
+
+fn format_task_list_summary_line(summary: &serde_json::Value) -> Option<String> {
+    let task_list = summary.get("task_list")?;
+    // task_list: null（无当前列表）不得回退成 `- · - · - · pending:0…`。
+    if !task_list.is_object() {
+        return None;
+    }
+    let stats = summary.get("stats");
+    let id = json_str(task_list, "id");
+    let status = json_str(task_list, "status");
+    let list_summary = truncate_ellipsis(json_str(task_list, "summary"), 50);
+    let stats_part = stats
+        .map(|value| {
+            format!(
+                "pending:{} doing:{} completed:{} total:{}",
+                value.get("pending").and_then(|v| v.as_u64()).unwrap_or(0),
+                value
+                    .get("in_progress")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0),
+                value.get("completed").and_then(|v| v.as_u64()).unwrap_or(0),
+                value.get("total").and_then(|v| v.as_u64()).unwrap_or(0),
+            )
+        })
+        .unwrap_or_else(|| "-".to_string());
+    Some(format!("{id} · {status} · {list_summary} · {stats_part}"))
+}
+
 // ── TaskCreate ───────────────────────────────────────────────────
 
 struct TaskCreateDisplay;
@@ -222,12 +263,34 @@ impl ToolDisplay for TaskListGetDisplay {
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
     }
+    fn format_result_lines(&self, content: Option<&serde_json::Value>) -> Option<Vec<String>> {
+        let content = content?;
+        let mut lines = Vec::new();
+        if let Some(summary_line) = content.get("task_list").and_then(|task_list| {
+            let wrapper = serde_json::json!({
+                "task_list": task_list,
+                "stats": content.get("stats").cloned().unwrap_or(serde_json::Value::Null),
+            });
+            format_task_list_summary_line(&wrapper)
+        }) {
+            lines.push(summary_line);
+        }
+        if let Some(tasks) = content.get("tasks").and_then(|value| value.as_array()) {
+            if tasks.is_empty() && lines.is_empty() {
+                return Some(vec!["（无任务）".to_string()]);
+            }
+            lines.extend(tasks.iter().map(format_task_view_line));
+        } else if lines.is_empty() {
+            return Some(vec!["（无列表）".to_string()]);
+        }
+        Some(lines)
+    }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
             header: HeaderPolicy::Standard,
             details: DetailsPolicy::Hidden,
             result: ResultPolicy::Visible {
-                max_lines: Some(5),
+                max_lines: Some(15),
                 render_kind: ResultRender::Plain,
                 tail_mode: false,
             },
@@ -252,12 +315,26 @@ impl ToolDisplay for TaskListsDisplay {
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
     }
+    fn format_result_lines(&self, content: Option<&serde_json::Value>) -> Option<Vec<String>> {
+        let lists = content?
+            .get("task_lists")
+            .and_then(|value| value.as_array())?;
+        if lists.is_empty() {
+            return Some(vec!["（无列表）".to_string()]);
+        }
+        Some(
+            lists
+                .iter()
+                .filter_map(format_task_list_summary_line)
+                .collect(),
+        )
+    }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
             header: HeaderPolicy::Standard,
             details: DetailsPolicy::Hidden,
             result: ResultPolicy::Visible {
-                max_lines: Some(5),
+                max_lines: Some(15),
                 render_kind: ResultRender::Plain,
                 tail_mode: false,
             },
@@ -344,12 +421,21 @@ impl ToolDisplay for TaskGetDisplay {
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
     }
+    fn format_result_lines(&self, content: Option<&serde_json::Value>) -> Option<Vec<String>> {
+        let task = content?.get("task")?;
+        let mut lines = vec![format_task_view_line(task)];
+        let description = json_str(task, "description").trim();
+        if !description.is_empty() && description != "-" {
+            lines.push(truncate_ellipsis(description, 100));
+        }
+        Some(lines)
+    }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
             header: HeaderPolicy::Standard,
             details: DetailsPolicy::Hidden,
             result: ResultPolicy::Visible {
-                max_lines: Some(5),
+                max_lines: Some(8),
                 render_kind: ResultRender::Plain,
                 tail_mode: false,
             },

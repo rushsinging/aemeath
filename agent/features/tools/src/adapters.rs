@@ -15,7 +15,6 @@ mod skill_tool_contract_tests;
 pub mod agent_tool;
 pub mod ask_user;
 pub mod bash;
-pub mod brief;
 pub mod catalog;
 pub mod command;
 pub mod composition;

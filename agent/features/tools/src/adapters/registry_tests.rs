@@ -125,7 +125,6 @@ const FULL: &[&str] = &[
     "MemoryUpdate",
     "MemoryDelete",
     "AskUserQuestion",
-    "Brief",
     "ToolSearch",
     "EnterWorktree",
     "ExitWorktree",
@@ -272,7 +271,7 @@ fn sub_agent_registration_pool_equals_main_pool() {
 #[test]
 fn sub_agent_restricted_profile_assembles_expected_toolset_from_caps() {
     // caps 组装：Read|Write|Execute|NetworkAccess 位挑选的工具组。
-    // Memory/Brief/ToolSearch 归 All 位（main 专属），默认组装不出。
+    // Memory/ToolSearch 归 All 位（main 专属），默认组装不出。
     let main = ToolProfile::baseline(Caps::all());
     let restricted = profile_for(BuiltinRegistryScope::SubAgent, &main);
     assert_eq!(

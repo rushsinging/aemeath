@@ -6,4 +6,4 @@
 //!
 //! See `docs/superpowers/plans/2026-06-18-tool-display-structured-data.md`
 //! Phase 0a (方案 D) for the rationale.
-pub use tools::types::tool_search::ToolSearchResult;
+pub use tools::types::tool_search::{ToolInfo, ToolSearchResult};

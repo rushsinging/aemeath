@@ -1,8 +1,8 @@
 //! Built-in tool registration and named registry-scope assembly.
 
 use crate::adapters::{
-    agent_tool, ask_user, background_processes, bash, brief, file_edit, file_read, file_write,
-    glob_tool, grep, memory_tool, skill_tool, task_block_by, task_create, task_get, task_list,
+    agent_tool, ask_user, background_processes, bash, file_edit, file_read, file_write, glob_tool,
+    grep, memory_tool, skill_tool, task_block_by, task_create, task_get, task_list,
     task_list_complete, task_list_create, task_lists, task_stop, task_update, tool_search,
     web_fetch, web_search, worktree,
 };
@@ -33,7 +33,7 @@ impl BuiltinRegistryScope {
 
 pub(crate) fn profile_for(scope: BuiltinRegistryScope, main_parent: &ToolProfile) -> ToolProfile {
     // sub 默认集以 capability 位为唯一载体：Read|Write|Execute|NetworkAccess。
-    // Memory/Brief/ToolSearch 归 All 位（main 专属），默认对受限 profile 隐藏
+    // Memory/ToolSearch 归 All 位（main 专属），默认对受限 profile 隐藏
     // （用户决策：empty-caps 不无脑放行）；skill 走 Read 位。
     let requested = match scope {
         BuiltinRegistryScope::Main => Caps::all(),
@@ -235,7 +235,6 @@ pub(crate) fn register_named_scope(
         Caps::Interact,
         ask_user::AskUserQuestionTool
     );
-    builtin!("Brief", Caps::All, brief::BriefTool);
     builtin!("ToolSearch", Caps::All, tool_search::ToolSearchTool);
     builtin!(
         "EnterWorktree",

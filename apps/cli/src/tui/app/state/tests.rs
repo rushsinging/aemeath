@@ -308,14 +308,15 @@ async fn test_thinking_then_grep_renders_tool_block_in_output_area() {
     // Grep details 已隐藏（path 已在 header 中）
     // 结果升为 depth-1 子块（#60）：gutter = 2(深度缩进) + 2(marker 槽) = 4 列前导。
     // 首行 marker 为 ⎿ 圆角连接（连接父 ToolCall），续行为 4 空格。
-    // result 子块展示工具 output 前 N 行预览（Grep result_max_lines=5；6 行 output →
-    // 前 5 行 + "1 lines omitted"），不再退化为纯 "✓ Grep completed" 摘要。
+    // result 子块展示工具 output 预览（Grep max_lines=15；本夹具 6 行全部可见，
+    // 无省略标记）。不再退化为纯 "✓ Grep completed" 摘要。
     assert!(rendered
         .iter()
         .any(|line| line == "  ⎿ /tmp/docs/bug/active.md:18:match"));
     assert!(rendered
         .iter()
-        .any(|line| line == "    ... (1 lines omitted)"));
+        .any(|line| line.contains("/tmp/docs/bug/active.md:23:omitted")));
+    assert!(!rendered.iter().any(|line| line.contains("lines omitted")));
     assert!(!rendered
         .iter()
         .any(|line| line.contains("Search completed")));
