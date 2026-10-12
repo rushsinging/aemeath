@@ -27,37 +27,49 @@ resolve_target_dir() {
 compute_fingerprint() {
   python3 - <<'PY'
 import hashlib
+import re
 import sys
 from pathlib import Path
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - py<3.11
-    import tomli as tomllib  # type: ignore
 
 root = Path('.').resolve()
 start = root / 'tools' / 'xtask'
 if not (start / 'Cargo.toml').is_file():
     sys.exit(2)
 
-def path_deps(cargo_toml: Path):
-    data = tomllib.loads(cargo_toml.read_text(encoding='utf-8'))
-    sections = [
-        data.get('dependencies') or {},
-        data.get('build-dependencies') or {},
-    ]
-    for _tgt, tbl in (data.get('target') or {}).items():
-        sections.append(tbl.get('dependencies') or {})
-        sections.append(tbl.get('build-dependencies') or {})
+SECTION_RE = re.compile(r'^\s*\[([^\]]+)\]\s*$')
+# Matches both `path = "..."` lines and inline tables: `foo = { path = "..." }`.
+PATH_RE = re.compile(r'\bpath\s*=\s*"([^"]+)"')
+
+def section_kind(name):
+    # Accept dependencies / build-dependencies, including target.\'cfg(...)\'.* forms.
+    # NEVER include dev-dependencies.
+    parts = [p.strip() for p in name.split('.')]
+    if not parts:
+        return None
+    leaf = parts[-1]
+    if leaf == 'dev-dependencies':
+        return None
+    if leaf in ('dependencies', 'build-dependencies'):
+        return leaf
+    return None
+
+def path_deps(cargo_toml):
+    text = cargo_toml.read_text(encoding='utf-8')
+    current = None
     out = []
-    for sec in sections:
-        for _name, spec in sec.items():
-            if isinstance(spec, dict) and 'path' in spec:
-                resolved = (cargo_toml.parent / spec['path']).resolve()
-                out.append(resolved if resolved.is_dir() else resolved.parent)
+    for line in text.splitlines():
+        m = SECTION_RE.match(line)
+        if m:
+            current = section_kind(m.group(1))
+            continue
+        if current is None:
+            continue
+        for pm in PATH_RE.finditer(line):
+            resolved = (cargo_toml.parent / pm.group(1)).resolve()
+            out.append(resolved if resolved.is_dir() else resolved.parent)
     return out
 
-seen: set[Path] = set()
+seen = set()
 queue = [start]
 while queue:
     crate = queue.pop(0)
@@ -70,7 +82,7 @@ while queue:
     for dep in path_deps(cargo_toml):
         queue.append(dep)
 
-files: list[Path] = []
+files = []
 for crate in seen:
     files.extend(p for p in crate.rglob('*.rs') if p.is_file())
     files.extend(p for p in crate.rglob('Cargo.toml') if p.is_file())
