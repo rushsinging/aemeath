@@ -605,10 +605,25 @@ async fn bootstrap_assembly_carries_scoring_startup_notice_when_scenario_enabled
     let workspace =
         wire_workspace_with_config(&args.cwd.clone().unwrap(), &config).expect("wire workspace");
 
+    // 装配读 global_agents_dir() 解析 daemon sock；隔离到临时 agents_dir，
+    // 避免本机已有 ~/.agents/scoring/scoring.sock 时误判 Ready、漏发启动提醒。
+    let previous_agents_dir = std::env::var_os(share::config::paths::AGENTS_DIR_ENV);
+    // SAFETY: 单测串行改写进程级 env；测试结束立即还原。
+    unsafe {
+        std::env::set_var(share::config::paths::AGENTS_DIR_ENV, &agents_dir);
+    }
     let assembly =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
-            .await
-            .expect("assemble runtime");
+            .await;
+    match previous_agents_dir {
+        Some(value) => unsafe {
+            std::env::set_var(share::config::paths::AGENTS_DIR_ENV, value);
+        },
+        None => unsafe {
+            std::env::remove_var(share::config::paths::AGENTS_DIR_ENV);
+        },
+    }
+    let assembly = assembly.expect("assemble runtime");
 
     assert_eq!(
         assembly.startup_notices.len(),
