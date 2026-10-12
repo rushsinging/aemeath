@@ -1179,3 +1179,76 @@ async fn ask_user_second_interaction_request_after_first_accepted_is_selectable(
     )));
     harness.assert_idle();
 }
+
+/// L4 (#1944): processing + AskUser 展示期间，先前排队的 submission 仍可见，
+/// 且 UI 不得凭空出现 run-state / ActiveStep 错误 notice（真炸 Run 由 L5 覆盖）。
+#[test]
+fn ask_user_keeps_queued_submission_visible_without_runtime_error_notice() {
+    let mut harness = TuiScenarioHarness::new(100, 30);
+    harness.app.chat.start_processing();
+
+    // 直接注入排队占位，避免走 Enter→SendChatInputEvent 的 effect 脚本路径。
+    harness
+        .app
+        .enqueue_submission_echo("inp_ask_queued_1", "queued-during-ask-marker");
+    assert!(
+        harness
+            .app
+            .model
+            .conversation
+            .queued_submissions
+            .iter()
+            .any(|item| item.text.contains("queued-during-ask-marker")),
+        "queued submission should remain visible: {:?}",
+        harness.app.model.conversation.queued_submissions
+    );
+
+    let request_id = UiInteractionRequestId::from("ask-queued-1");
+    harness.runtime_event(TuiRuntimeEvent::InteractionRequested(
+        TuiInteractionRequest {
+            request_id: request_id.clone(),
+            run_id: crate::tui::model::conversation::interaction::UiRunId::from("run-ask-queued"),
+            tool_call_id: None,
+            body: TuiInteractionBody::UserQuestions(vec![TuiUserQuestion {
+                prompt: "L4 ask while queued?".to_string(),
+                options: vec![
+                    TuiOptionItem {
+                        title: "yes".to_string(),
+                        description: Some("approve".to_string()),
+                    },
+                    TuiOptionItem {
+                        title: "no".to_string(),
+                        description: Some("decline".to_string()),
+                    },
+                ],
+                allow_multi: false,
+            }]),
+        },
+    ));
+
+    assert!(
+        harness.app.model.conversation.ask_user_snapshot().is_some(),
+        "AskUser UI should be active"
+    );
+    assert!(
+        harness
+            .app
+            .model
+            .conversation
+            .queued_submissions
+            .iter()
+            .any(|item| item.text.contains("queued-during-ask-marker")),
+        "queued submission must survive AskUser presentation"
+    );
+
+    let screen = harness.screen();
+    assert!(
+        !screen.contains("已存在活动 Step"),
+        "AskUser presentation must not surface ActiveStep error: {screen}"
+    );
+    assert!(
+        !screen.contains("ActiveStepAlreadyExists"),
+        "AskUser presentation must not surface ActiveStepAlreadyExists: {screen}"
+    );
+    harness.assert_idle();
+}

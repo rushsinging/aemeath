@@ -303,6 +303,10 @@ async fn run_loop_body(
                 if defer_user_batch_if_single_purpose(run, &mut batch, port)? {
                     continue;
                 }
+                // #1944: pending interaction 时 queued input 必须 defer，不得 begin_step。
+                if defer_user_batch_if_pending_interaction(run, &mut batch, port)? {
+                    continue;
+                }
 
                 // User input: resume if awaiting, then drain into work.
                 if run.status() == RunStatus::AwaitingUser {
@@ -322,7 +326,9 @@ async fn run_loop_body(
                 .await?;
             }
             DrainOutcome::InternalContinuation {
-                kind: _kind, batch, ..
+                kind: _kind,
+                mut batch,
+                ..
             } => {
                 // #1272: InternalContinuation always advances epoch because
                 // `take_internal_continuation` already advanced the buffer's
@@ -339,6 +345,10 @@ async fn run_loop_body(
                     // advanced for the continuation).
                     if batch.is_empty() {
                         return Ok(LoopDirective::AwaitUser);
+                    }
+                    // #1944: pending interaction 下非空 continuation 也须 defer。
+                    if defer_user_batch_if_pending_interaction(run, &mut batch, port)? {
+                        continue;
                     }
                     transition_and_emit(run, execution, port, RunTransition::UserResumed).await?;
                 }

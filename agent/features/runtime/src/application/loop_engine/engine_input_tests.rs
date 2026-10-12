@@ -918,6 +918,123 @@ mod interaction_routing {
         assert_eq!(work.queue.len(), 1, "one item should be in the queue");
     }
 
+    /// L4 (#1944): AskUser 等待中 session queued message 必须 defer，不得 begin_step；
+    /// 覆盖 drain Ready → defer → reply → Completed 全旅程。
+    #[tokio::test]
+    async fn awaiting_user_pending_ask_defers_queued_session_input() {
+        let call = call("AskUserQuestion", json!({"question": "continue?"}));
+        let call_id = call.id.clone();
+        let suspended = SuspendedToolCall {
+            call: call.clone(),
+            questions: vec![SuspendedQuestion {
+                prompt: "continue?".to_string(),
+                options: vec![
+                    sdk::OptionItem::new("yes", "approve"),
+                    sdk::OptionItem::new("no", "decline"),
+                ],
+                allow_multi: false,
+            }],
+        };
+
+        let mut drain_q = VecDeque::new();
+        drain_q.push_back(DrainOutcome::ready(
+            vec![LoopInput {
+                text: "user input".to_string(),
+                input_id: None,
+                images: Vec::new(),
+                accepted: None,
+            }],
+            DrainEpoch(0),
+        ));
+        // AwaitingUser 期间 queued message 先于 interaction 到达 → 必须 defer。
+        drain_q.push_back(DrainOutcome::ready(
+            vec![LoopInput {
+                text: "queued during ask".to_string(),
+                input_id: None,
+                images: Vec::new(),
+                accepted: None,
+            }],
+            DrainEpoch(1),
+        ));
+        drain_q.push_back(DrainOutcome::NoInput {
+            epoch: DrainEpoch(2),
+        });
+
+        let mut port = ScriptedScenario {
+            model_steps: VecDeque::from([ModelStep::Tools {
+                text: String::new(),
+                calls: vec![call],
+            }]),
+            tool_steps: VecDeque::from([ToolStep::InteractionSuspended {
+                completed_results: Vec::new(),
+                fuse_bypassed: Vec::new(),
+                suspended: vec![suspended],
+            }]),
+            drain_outcomes: drain_q,
+            ..Default::default()
+        };
+
+        let mut run = Run::new(RunSpec::main(), None);
+        let cancel = CancellationToken::new();
+        let mut execution =
+            crate::application::run::execution_state::RunExecutionState::new();
+
+        let directive = run_loop(
+            &mut run,
+            &mut execution,
+            &cancel,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .expect("queued session input during AskUser must not fail the run");
+        assert_eq!(directive, LoopDirective::AwaitUser);
+        assert_eq!(run.status(), RunStatus::AwaitingUser);
+        assert!(
+            run.pending_interaction().is_some(),
+            "AskUser pending interaction must remain"
+        );
+        assert_eq!(
+            port.deferred_batches(),
+            vec![vec!["queued during ask".to_string()]],
+            "queued message must be deferred back to session input"
+        );
+        assert!(
+            run.active_step_id().is_some(),
+            "AskUser step must stay active until interaction resolves"
+        );
+
+        // Reply AskUser，确认仍可正常收口。
+        let request_id = execution
+            .interaction_metadata()
+            .first()
+            .expect("should have stored metadata")
+            .request_id
+            .clone();
+        let reply = sdk::InteractionReply::UserQuestions(vec![sdk::UserAnswer("yes".to_string())]);
+        let outcome = port.interaction_bridge.reply(&request_id, reply);
+        assert_eq!(outcome, sdk::InteractionCommandOutcome::Accepted);
+
+        port.drain_outcomes = VecDeque::from([DrainOutcome::EmptyAndSealed {
+            epoch: DrainEpoch(2),
+        }]);
+        port.sync_inputs();
+        let directive = run_loop(
+            &mut run,
+            &mut execution,
+            &cancel,
+            &mut scripted_run_loop(&mut port),
+        )
+        .await
+        .expect("AskUser reply after defer must complete");
+        assert_eq!(directive, LoopDirective::Terminal);
+        assert_eq!(run.status(), RunStatus::Completed);
+
+        let step = &run.steps()[0];
+        assert_eq!(step.tool_calls().len(), 1);
+        assert_eq!(step.tool_calls()[0].id(), &call_id);
+        assert_eq!(step.tool_calls()[0].status(), ToolCallStatus::Success);
+    }
+
     // ── RequireApproval: full engine roundtrip approve ──
 
     /// Full engine roundtrip for tool approval: setup fake_tool_port,
