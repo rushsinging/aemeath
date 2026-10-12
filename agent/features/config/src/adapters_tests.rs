@@ -67,6 +67,23 @@ fn env_adapter_maps_scoring_envs_into_patch() {
 }
 
 #[test]
+fn env_adapter_maps_scoring_daemon_socket_and_timeout_envs() {
+    let source = FakeEnv(HashMap::from([
+        (
+            "AEMEATH_SCORING_SOCKET_PATH".into(),
+            "/tmp/custom.sock".into(),
+        ),
+        ("AEMEATH_SCORING_CONNECT_TIMEOUT_SECS".into(), "5".into()),
+        ("AEMEATH_SCORING_INFER_TIMEOUT_SECS".into(), "45".into()),
+    ]));
+    let patch = EnvAdapter::read(&source);
+    let scoring = patch.scoring.expect("daemon env 应产出 patch");
+    assert_eq!(scoring.socket_path.as_deref(), Some("/tmp/custom.sock"));
+    assert_eq!(scoring.connect_timeout_secs, Some(5));
+    assert_eq!(scoring.infer_timeout_secs, Some(45));
+}
+
+#[test]
 fn env_adapter_ignores_retired_scoring_http_envs() {
     // 退役 HTTP env（设计 §4.3）：即使存在也不得产生 scoring patch，
     // 业务 env 只经 EnvAdapter 进入 ConfigPatch。

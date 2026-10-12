@@ -34,18 +34,19 @@ make_fake_repo() {
   cp "$PRE_PUSH_HOOK" "$repo/.cargo/hooks/pre-push"
   cp "$REPO_ROOT/scripts/clean-worktree-targets.sh" "$repo/scripts/clean-worktree-targets.sh"
   cp "$REPO_ROOT/.cargo/lib.sh" "$repo/.cargo/lib.sh"
+  cp "$REPO_ROOT/.agents/hooks/run-xtask.sh" "$repo/.agents/hooks/run-xtask.sh"
 
   cat >"$repo/.agents/hooks/check-architecture-guards.sh" <<'EOF'
 #!/usr/bin/env bash
 printf 'architecture:%s\n' "${1:-missing}" >>"$GATE_LOG"
 [ "${FAKE_FAIL:-}" != "architecture" ]
 EOF
-  # pre-push 的单元测试门禁已迁移为 `xtask test-runner`（Rust）：
+  # pre-push 经 `run-xtask.sh`；fixture 无 workspace 时回退 `cargo run -p xtask`。
   # fake repo 无 Cargo.toml，用 PATH stub 拦截 cargo 调用并记录 gate 序列。
   cat >"$repo/bin/cargo" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "$*" == *"xtask -- test-runner"* ]]; then
+if [[ "$*" == *"test-runner"* ]]; then
   printf 'unit-tests\n' >>"$GATE_LOG"
   [ "${FAKE_FAIL:-}" != "unit-tests" ]
   exit $?

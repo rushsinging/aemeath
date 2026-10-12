@@ -1,4 +1,4 @@
-//! System One 评分端口装配：场景开关 → embedded 装配链 → typed 启动结果。
+//! System One 评分端口装配：场景开关 → scoring daemon 客户端 → typed 启动结果。
 //!
 //! 契约（设计 `docs/design/02-modules/systemone/01-systemone-scoring.md` §4.1/§4.3）：
 //! - **场景开关全关：零成本**——不读取模型目录、不解析发行 manifest、不启动
@@ -42,9 +42,15 @@ pub struct ScoringPortAssignment {
 pub enum ScoringStartupOutcome {
     /// 场景开关全关：零成本，未读取任何模型资产。
     Disabled,
-    /// embedded 端口装配成功（至少一个场景开关开启）。
+    /// 评分端口装配成功（至少一个场景开关开启；生产为 daemon 客户端）。
     Ready,
-    /// 构建未启用 `systemone-embedded`：不加载模型、不回退 HTTP。
+    /// scoring daemon 暂不可达（已惰性拉起失败或 sock 未就绪）；端口仍装配，
+    /// 首次提醒后场景静默降级，主聊天 **NEVER** 阻断。
+    DaemonUnreachable {
+        /// 中文原因（含 `aemeath scoring serve` / download 提示）。
+        detail: String,
+    },
+    /// 构建未启用 `systemone-embedded`：不加载模型、不回退 HTTP（测试 / 旧路径）。
     EmbeddedUnavailable,
     /// 发行 manifest 未提供（仓库无经确认的发行 URL / SHA-256）：不加载模型、
     /// 不回退 HTTP。
@@ -70,7 +76,11 @@ impl Display for ScoringStartupOutcome {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Disabled => write!(formatter, "System One 评分场景开关全关，未装配评分端口"),
-            Self::Ready => write!(formatter, "System One embedded 评分端口已装配"),
+            Self::Ready => write!(
+                formatter,
+                "System One 评分端口已装配（scoring daemon 客户端）"
+            ),
+            Self::DaemonUnreachable { detail } => write!(formatter, "{detail}"),
             Self::EmbeddedUnavailable => write!(
                 formatter,
                 "System One embedded 评分未随本构建编译（feature `systemone-embedded` 未启用），\
@@ -250,8 +260,9 @@ pub(crate) trait ReleaseManifestSource: Send + Sync {
     fn release_manifest(&self) -> Option<systemone::ModelManifest>;
 }
 
-/// embedded 装配注入点：生产委托 `systemone::wire_embedded_scoring`，
-/// 测试注入 fake 以覆盖装配矩阵（不读模型目录、不加载真实模型）。
+/// embedded 装配注入点：**仅** `aemeath scoring serve` 与测试矩阵使用。
+/// 会话生产装配走 [`assemble_daemon_scoring_ports_with`]，**NEVER** 经本 trait 加载 GGUF。
+/// 测试注入 fake 以覆盖历史装配矩阵（不读模型目录、不加载真实模型）。
 #[async_trait]
 pub(crate) trait EmbeddedScoringFactory: Send + Sync {
     /// 本构建是否具备 embedded 装配能力（systemone feature `embedded`）。
@@ -311,7 +322,7 @@ impl ReleaseManifestSource for ProductionReleaseManifest {
     }
 }
 
-/// 生产 embedded 工厂：委托 systemone 的唯一生产装配入口。
+/// serve 路径工厂：仅 `run_scoring_serve` 用来加载 GGUF（会话侧不调用）。
 pub(crate) struct ProductionEmbeddedFactory;
 
 #[async_trait]
@@ -355,17 +366,144 @@ fn scoring_dir() -> std::path::PathBuf {
     share::config::paths::global_agents_dir().join("scoring")
 }
 
-/// 生产装配入口：场景全关零成本；开启时经生产工厂与生产 manifest 源装配。
+/// 生产装配入口：场景全关零成本；开启时装配 daemon 客户端（惰性拉起 serve）。
 pub async fn assemble_scoring_ports(scoring: &share::config::ScoringConfig) -> ScoringAssembly {
-    assemble_scoring_ports_with(
-        scoring,
-        &ProductionEmbeddedFactory,
-        &ProductionReleaseManifest,
-    )
-    .await
+    assemble_daemon_scoring_ports_with(scoring, &ProductionReleaseManifest, &ProcessDaemonLauncher)
+        .await
 }
 
-/// 装配矩阵（可注入 fake，供契约测试覆盖全关 / feature 关闭 / 资产失败 / 成功链）。
+/// 惰性拉起 scoring daemon 的注入点（测试可 stub，避免真实 spawn）。
+pub(crate) trait ScoringDaemonLauncher: Send + Sync {
+    /// sock 已可连则 Ok；否则尝试 spawn `scoring serve` 并等待就绪。
+    fn ensure_ready(
+        &self,
+        sock: &std::path::Path,
+        connect_timeout: std::time::Duration,
+    ) -> Result<(), String>;
+}
+
+/// 生产 launcher：探测 sock → `current_exe scoring serve` → 轮询就绪。
+pub(crate) struct ProcessDaemonLauncher;
+
+impl ScoringDaemonLauncher for ProcessDaemonLauncher {
+    fn ensure_ready(
+        &self,
+        sock: &std::path::Path,
+        connect_timeout: std::time::Duration,
+    ) -> Result<(), String> {
+        // composition 单测的 current_exe 是 `deps/composition-*` 测试二进制：
+        // 对其 spawn `scoring serve` 会挂起并污染并行用例（如 L4 日志等待）。
+        // 生产路径（非 cfg(test)）仍走惰性拉起。
+        #[cfg(test)]
+        {
+            let _ = (sock, connect_timeout);
+            return Err(
+                "composition 单测禁用惰性拉起 scoring serve（避免测试二进制被误 spawn）".to_owned(),
+            );
+        }
+        #[cfg(not(test))]
+        {
+            systemone::ensure_scoring_daemon_ready(sock, connect_timeout)
+        }
+    }
+}
+
+/// 生产 / 契约：daemon 客户端装配矩阵（可注入 launcher 与 manifest 源）。
+pub(crate) async fn assemble_daemon_scoring_ports_with(
+    scoring: &share::config::ScoringConfig,
+    source: &dyn ReleaseManifestSource,
+    launcher: &dyn ScoringDaemonLauncher,
+) -> ScoringAssembly {
+    let context_slot = Arc::new(systemone::ScoringCallContextSlot::new());
+    let context_source = context_slot.snapshot_source();
+    let any_scenario_enabled = scoring.enabled
+        && (scoring.memory_rerank
+            || scoring.memory_recall
+            || scoring.skill_match
+            || scoring.policy_triage);
+    if !any_scenario_enabled {
+        return ScoringAssembly {
+            assignment: ScoringPortAssignment::default(),
+            outcome: ScoringStartupOutcome::Disabled,
+            context_slot,
+        };
+    }
+    let Some(manifest) = source.release_manifest() else {
+        return ScoringAssembly {
+            assignment: ScoringPortAssignment::default(),
+            outcome: ScoringStartupOutcome::ManifestUnavailable,
+            context_slot,
+        };
+    };
+
+    let agents_dir = share::config::paths::global_agents_dir();
+    let endpoints = systemone::DaemonEndpoints::under_agents_dir_with_socket(
+        &agents_dir,
+        scoring.socket_path.as_ref().map(std::path::PathBuf::from),
+    );
+    let connect_timeout = std::time::Duration::from_secs(scoring.connect_timeout_secs);
+    let infer_timeout = std::time::Duration::from_secs(scoring.infer_timeout_secs);
+
+    let daemon_outcome = match launcher.ensure_ready(&endpoints.sock, connect_timeout) {
+        Ok(()) => ScoringStartupOutcome::Ready,
+        Err(detail) => ScoringStartupOutcome::DaemonUnreachable { detail },
+    };
+
+    let raw_port: Arc<dyn systemone::ScoringPort> = Arc::new(systemone::DaemonScoringClient::new(
+        endpoints.sock,
+        connect_timeout,
+        infer_timeout,
+    ));
+
+    ScoringAssembly {
+        assignment: ScoringPortAssignment {
+            for_memory_rerank: scoring.memory_rerank.then(|| {
+                systemone::wrap_calibrated_audited(
+                    Arc::clone(&raw_port),
+                    &manifest,
+                    &scoring_dir(),
+                    "memory_rerank",
+                    scoring.event_retention_days,
+                    Some(Arc::clone(&context_source)),
+                )
+            }),
+            for_memory_recall: scoring.memory_recall.then(|| {
+                systemone::wrap_calibrated_audited(
+                    Arc::clone(&raw_port),
+                    &manifest,
+                    &scoring_dir(),
+                    "memory_recall",
+                    scoring.event_retention_days,
+                    Some(Arc::clone(&context_source)),
+                )
+            }),
+            for_skill_match: scoring.skill_match.then(|| {
+                systemone::wrap_calibrated_audited(
+                    Arc::clone(&raw_port),
+                    &manifest,
+                    &scoring_dir(),
+                    "skill_match",
+                    scoring.event_retention_days,
+                    Some(Arc::clone(&context_source)),
+                )
+            }),
+            for_policy_triage: scoring.policy_triage.then(|| {
+                systemone::wrap_calibrated_audited(
+                    Arc::clone(&raw_port),
+                    &manifest,
+                    &scoring_dir(),
+                    "policy_triage",
+                    scoring.event_retention_days,
+                    Some(Arc::clone(&context_source)),
+                )
+            }),
+        },
+        outcome: daemon_outcome,
+        context_slot,
+    }
+}
+
+/// 历史 embedded 装配矩阵（可注入 fake；供契约测试）。会话生产入口已改 daemon。
 pub(crate) async fn assemble_scoring_ports_with(
     scoring: &share::config::ScoringConfig,
     factory: &dyn EmbeddedScoringFactory,

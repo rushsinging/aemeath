@@ -20,11 +20,18 @@ description: Use when building and installing the aemeath CLI binary from the cu
 1. 确认 checkout 与目标 commit：`git log --oneline -1`；在 worktree 中操作时先确认分支已包含目标代码。
 2. 需要固定版本号时显式传入：`AEMEATH_VERSION=0.1.0 ./build_cli.sh`；不设置则由脚本注入 `0.0.0-<short commit>`。
 3. 执行构建：`./build_cli.sh`
-   - 内部执行 `cargo build --release --package cli`；
+   - 内部执行 `cargo build --release --package cli --features composition/systemone-daemon`；
    - 随后复制到 `$INSTALL_DIR/aemeath`（默认 `INSTALL_DIR=$HOME/.local/bin`）；
    - macOS 上清理 `com.apple.provenance` xattr 并做 ad-hoc 重签名，避免 Gatekeeper 杀掉新拷贝的二进制。
 4. 验证版本：`~/.local/bin/aemeath --version`，输出应与 `git rev-parse --short=8 HEAD`（或显式设置的 `AEMEATH_VERSION`）一致。
 5. 验证可执行路径：`which aemeath`，确认解析到 `$INSTALL_DIR/aemeath`。
+  
+  
+## System One / scoring daemon
+  
+- 默认 `./build_cli.sh` **启用** `composition/systemone-daemon`：安装的二进制可直接 `aemeath scoring serve`（链入 llama.cpp/GGUF，体积约 +8M）。会话侧仍走 `DaemonScoringClient` + UDS，不在会话进程内加载模型。
+- 需要瘦身安装（不链引擎）时：`AEMEATH_CLI_FEATURES= ./build_cli.sh`。
+- **NEVER** 默认启用仅 `composition/systemone-embedded` 作为会话内嵌生产路径；引擎只经 `scoring serve`。
 
 ## Rules
 

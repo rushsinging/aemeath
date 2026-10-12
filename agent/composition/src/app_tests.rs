@@ -544,9 +544,9 @@ fn snapshot_mapping_uses_default_logs_dir_when_config_is_absent() {
     assert_eq!(settings.logs_dir(), PathBuf::from("/fallback/logs"));
 }
 
-/// 透传链路：场景开关开启（评分未生效）时 `SessionRuntimeAssembly` 携带
-/// 恰好一条启动提醒（默认构建 typed `EmbeddedUnavailable`，embedded 构建
-/// typed `ManifestUnavailable`——两种 feature 下均为一条非空中文提醒）。
+/// 透传链路：场景开关开启但评分 daemon 未就绪时 `SessionRuntimeAssembly` 携带
+/// 恰好一条启动提醒（cfg(test) 下 ProcessDaemonLauncher 禁用惰性拉起，
+/// 走 typed `DaemonUnreachable`）。
 #[tokio::test(flavor = "current_thread")]
 async fn bootstrap_assembly_carries_scoring_startup_notice_when_scenario_enabled() {
     let temp = tempfile::tempdir().expect("create temp root");
@@ -605,6 +605,8 @@ async fn bootstrap_assembly_carries_scoring_startup_notice_when_scenario_enabled
     let workspace =
         wire_workspace_with_config(&args.cwd.clone().unwrap(), &config).expect("wire workspace");
 
+    // ProcessDaemonLauncher 在 cfg(test) 下禁用惰性拉起，保证即使本机 sock 已就绪
+    // 也走 DaemonUnreachable → 恰好一条启动提醒（不 spawn 测试二进制）。
     let assembly =
         crate::runtime::from_args_with_gateways(args, gateways, workspace, config, &agents_dir)
             .await

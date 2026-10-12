@@ -90,7 +90,6 @@ pub enum DaemonRequest {
     },
 }
 
-#[cfg(test)]
 impl DaemonRequest {
     /// 构造 answer 请求。
     pub fn answer(id: Option<String>, params: AnswerParams) -> Self {
@@ -101,6 +100,7 @@ impl DaemonRequest {
         }
     }
 
+    #[cfg(test)]
     pub fn protocol_version(&self) -> u32 {
         match self {
             Self::Answer {
@@ -198,8 +198,7 @@ pub fn decode_answer_request(buffer: &[u8]) -> Result<(DaemonRequest, usize), Pr
     ))
 }
 
-/// 解码响应帧（客户端 / 测试用；生产客户端在 PR2 落地后去掉 cfg）。
-#[cfg(test)]
+/// 解码响应帧（会话客户端 / 测试）。
 pub fn decode_response(buffer: &[u8]) -> Result<(DaemonResponse, usize), ProtocolError> {
     let (body, consumed) = try_decode_frame(buffer)?;
     let response: DaemonResponse =

@@ -146,11 +146,22 @@ impl EnvAdapter {
             let skill_match = parse_bool_switch(source.get("AEMEATH_SCORING_SKILL_MATCH"));
             let policy_triage = parse_bool_switch(source.get("AEMEATH_SCORING_POLICY_TRIAGE"));
             let memory_recall = parse_bool_switch(source.get("AEMEATH_SCORING_MEMORY_RECALL"));
+            let socket_path = source
+                .get("AEMEATH_SCORING_SOCKET_PATH")
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+            let connect_timeout_secs =
+                parse_non_negative(source.get("AEMEATH_SCORING_CONNECT_TIMEOUT_SECS"));
+            let infer_timeout_secs =
+                parse_non_negative(source.get("AEMEATH_SCORING_INFER_TIMEOUT_SECS"));
             (enabled.is_some()
                 || memory_rerank.is_some()
                 || skill_match.is_some()
                 || policy_triage.is_some()
-                || memory_recall.is_some())
+                || memory_recall.is_some()
+                || socket_path.is_some()
+                || connect_timeout_secs.is_some()
+                || infer_timeout_secs.is_some())
             .then_some(share::config::domain::merge::ScoringConfigPatch {
                 enabled,
                 memory_rerank,
@@ -159,6 +170,9 @@ impl EnvAdapter {
                 memory_recall,
                 // 事件保留天数暂无业务 env：仅经配置文件分层合并设置。
                 event_retention_days: None,
+                socket_path,
+                connect_timeout_secs,
+                infer_timeout_secs,
             })
         };
         let storage = source.get("AEMEATH_WORKTREES_DIR").map(|directory| {

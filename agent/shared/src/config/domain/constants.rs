@@ -29,6 +29,12 @@ pub const DEFAULT_MAX_TOKENS: u32 = 8192;
 /// **NEVER** 经此关闭事件写入）。
 pub const DEFAULT_EVENT_RETENTION_DAYS: u32 = 30;
 
+/// scoring daemon 客户端连接超时默认值（秒；含惰性拉起等待）。
+pub const DEFAULT_SCORING_CONNECT_TIMEOUT_SECS: u64 = 2;
+
+/// scoring daemon 单次推理超时默认值（秒）。
+pub const DEFAULT_SCORING_INFER_TIMEOUT_SECS: u64 = 30;
+
 // ── snapshot.rs：hook 执行 / stop block 默认值 ──
 pub(crate) const DEFAULT_HOOK_EXECUTION_MAX_ATTEMPTS: u8 = 3;
 pub(crate) const DEFAULT_STOP_HOOK_MAX_BLOCKS: usize = 15;

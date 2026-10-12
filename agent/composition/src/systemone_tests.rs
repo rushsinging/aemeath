@@ -102,6 +102,32 @@ impl systemone::ScoringPort for StubScoringPort {
 }
 
 /// 测试 fixture manifest（URL / SHA-256 仅锁契约格式，**不**对应任何真实发行数据）。
+
+struct RecordingDaemonLauncher {
+    calls: AtomicUsize,
+    result: Result<(), String>,
+}
+
+impl ScoringDaemonLauncher for RecordingDaemonLauncher {
+    fn ensure_ready(
+        &self,
+        _sock: &std::path::Path,
+        _connect_timeout: std::time::Duration,
+    ) -> Result<(), String> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.result.clone()
+    }
+}
+
+#[test]
+fn process_daemon_launcher_skips_lazy_spawn_under_cfg_test() {
+    let sock = std::path::Path::new("/tmp/aemeath-scoring-daemon-launcher-test.sock");
+    let err = ProcessDaemonLauncher
+        .ensure_ready(sock, std::time::Duration::from_millis(10))
+        .expect_err("cfg(test) 必须禁用惰性拉起");
+    assert!(err.contains("单测禁用惰性拉起"), "unexpected detail: {err}");
+}
+
 fn fixture_manifest() -> systemone::ModelManifest {
     systemone::ModelManifest {
         schema_version: 1,
@@ -138,12 +164,11 @@ fn fixture_manifest() -> systemone::ModelManifest {
 
 fn all_enabled() -> share::config::ScoringConfig {
     share::config::ScoringConfig {
-        enabled: true,
         memory_rerank: true,
         memory_recall: true,
         skill_match: true,
         policy_triage: true,
-        event_retention_days: share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
+        ..share::config::ScoringConfig::default()
     }
 }
 
@@ -317,29 +342,80 @@ async fn ready_assigns_ports_per_enabled_switch() {
     assert!(both.assignment.for_memory_recall.is_some());
 }
 
-/// 生产装配入口（默认构建，无 embedded feature）：typed `EmbeddedUnavailable`。
-#[cfg(not(feature = "systemone-embedded"))]
+/// 生产装配入口：走 daemon 客户端；launcher 成败不影响槽位装配（fail-open）。
+/// 本测试不调用真实 `assemble_scoring_ports`（会触达 ProcessDaemonLauncher），
+/// 改测 `assemble_daemon_scoring_ports_with` 契约。
 #[tokio::test]
-async fn production_assembly_with_default_features_reports_embedded_unavailable() {
-    let assembly = assemble_scoring_ports(&all_enabled()).await;
-    assert_eq!(assembly.outcome, ScoringStartupOutcome::EmbeddedUnavailable);
+async fn daemon_assembly_wires_ports_and_reports_unreachable_when_launcher_fails() {
+    let source = RecordingSource::with_manifest(fixture_manifest());
+    let launcher = RecordingDaemonLauncher {
+        calls: AtomicUsize::new(0),
+        result: Err("sock 未就绪".to_string()),
+    };
+    let assembly = assemble_daemon_scoring_ports_with(&all_enabled(), &source, &launcher).await;
+    assert_eq!(launcher.calls.load(Ordering::SeqCst), 1);
+    assert!(
+        matches!(
+            assembly.outcome,
+            ScoringStartupOutcome::DaemonUnreachable { .. }
+        ),
+        "outcome={:?}",
+        assembly.outcome
+    );
+    assert!(assembly.assignment.for_memory_rerank.is_some());
+    assert!(assembly.assignment.for_memory_recall.is_some());
+    assert!(assembly.assignment.for_skill_match.is_some());
+    assert!(assembly.assignment.for_policy_triage.is_some());
+    let notices = scoring_startup_notices(&assembly.outcome);
+    assert_eq!(notices.len(), 1);
+    assert!(notices[0].message.contains("sock 未就绪"));
+}
+
+#[tokio::test]
+async fn daemon_assembly_ready_when_launcher_succeeds() {
+    let source = RecordingSource::with_manifest(fixture_manifest());
+    let launcher = RecordingDaemonLauncher {
+        calls: AtomicUsize::new(0),
+        result: Ok(()),
+    };
+    let assembly = assemble_daemon_scoring_ports_with(&all_enabled(), &source, &launcher).await;
+    assert_eq!(assembly.outcome, ScoringStartupOutcome::Ready);
+    assert!(assembly.assignment.for_memory_rerank.is_some());
+    assert!(scoring_startup_notices(&assembly.outcome).is_empty());
+}
+
+#[tokio::test]
+async fn daemon_assembly_disabled_is_zero_cost_without_launcher() {
+    let source = RecordingSource::with_manifest(fixture_manifest());
+    let launcher = RecordingDaemonLauncher {
+        calls: AtomicUsize::new(0),
+        result: Ok(()),
+    };
+    let assembly = assemble_daemon_scoring_ports_with(
+        &share::config::ScoringConfig::default(),
+        &source,
+        &launcher,
+    )
+    .await;
+    assert_eq!(assembly.outcome, ScoringStartupOutcome::Disabled);
+    assert_eq!(launcher.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(source.consulted.load(Ordering::SeqCst), 0);
     assert_no_ports(&assembly.assignment);
 }
 
-/// 生产装配入口（embedded feature 开启 + 发行 manifest 已落地 + CI 无已安装
-/// 模型）：typed `ModelMissing`（生产 manifest 常量含真实 URL / SHA， NEVER
-/// 占位假数据；真实安装后的 Ready 链路由 wiring fake 覆盖）。
-#[cfg(feature = "systemone-embedded")]
+/// 生产 ReleaseManifest 在 daemon 装配路径仍提供 engine_revision（审计用）；
+/// 不加载 GGUF。用 stub launcher 验证 Ready + 槽位。
 #[tokio::test]
-async fn production_assembly_with_release_manifest_reports_model_missing_when_uninstalled() {
-    // 生产 manifest 的 revision 目录不得存在于本测试运行环境（CI 恒无模型；
-    // 本机若已安装同 revision 则直接命中 Ready——断言二选一，两者都是合法终态）。
-    let assembly = assemble_scoring_ports(&all_enabled()).await;
-    match assembly.outcome {
-        ScoringStartupOutcome::ModelMissing { .. } => assert_no_ports(&assembly.assignment),
-        ScoringStartupOutcome::Ready => assert!(assembly.assignment.for_memory_rerank.is_some()),
-        other => panic!("生产装配结果应为 ModelMissing 或 Ready，实际 {other:?}"),
-    }
+async fn production_release_manifest_supports_daemon_assembly_ready() {
+    let launcher = RecordingDaemonLauncher {
+        calls: AtomicUsize::new(0),
+        result: Ok(()),
+    };
+    let assembly =
+        assemble_daemon_scoring_ports_with(&all_enabled(), &ProductionReleaseManifest, &launcher)
+            .await;
+    assert_eq!(assembly.outcome, ScoringStartupOutcome::Ready);
+    assert!(assembly.assignment.for_memory_rerank.is_some());
 }
 
 /// 生产 composition 源文件永远不得引用 HTTP 评分工厂或其配置 env。
@@ -363,6 +439,29 @@ fn production_scoring_sources_never_reference_http_scoring_factory() {
             );
         }
     }
+    let systemone =
+        std::fs::read_to_string(source_dir.join("systemone.rs")).expect("读取 systemone.rs");
+    assert!(
+        systemone.contains("assemble_daemon_scoring_ports_with"),
+        "会话生产装配必须走 daemon 客户端路径"
+    );
+    assert!(
+        systemone.contains("DaemonScoringClient"),
+        "会话生产装配必须构造 DaemonScoringClient"
+    );
+    // `pub async fn assemble_scoring_ports` 本体不得再委托 ProductionEmbeddedFactory。
+    let start = systemone
+        .find("pub async fn assemble_scoring_ports(")
+        .expect("assemble_scoring_ports 应存在");
+    let body = &systemone[start..start + 350];
+    assert!(
+        body.contains("assemble_daemon_scoring_ports_with"),
+        "assemble_scoring_ports 必须委托 daemon 装配：{body}"
+    );
+    assert!(
+        !body.contains("ProductionEmbeddedFactory"),
+        "assemble_scoring_ports 不得委托 ProductionEmbeddedFactory：{body}"
+    );
 }
 
 /// 启动提醒转换：`Disabled` / `Ready` 无提醒（零成本与正常态不打扰用户）。
@@ -389,6 +488,9 @@ fn scoring_startup_notices_model_missing_mentions_download_command() {
 fn scoring_startup_notices_non_empty_for_unavailable_outcomes() {
     for outcome in [
         ScoringStartupOutcome::EmbeddedUnavailable,
+        ScoringStartupOutcome::DaemonUnreachable {
+            detail: "daemon 不可达".to_string(),
+        },
         ScoringStartupOutcome::ManifestUnavailable,
         ScoringStartupOutcome::InvalidAssets {
             detail: "资产损坏".to_string(),
