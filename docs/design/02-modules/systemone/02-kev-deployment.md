@@ -1,7 +1,11 @@
-# kev 本地评分服务部署指南
+# kev 模型产物与本地部署参考
 
-System One 决策模型的本地服务部署（阶段二外部 HTTP 形态；阶段三将内嵌化，见
-`01-systemone-scoring.md` 演进路线）。
+> **生产路径（当前）**：本机 `aemeath scoring serve`（UDS），见
+> [04-scoring-daemon.md](04-scoring-daemon.md) 与 `01-systemone-scoring.md` §4 / §8。
+>
+> 下文保留阶段二 **外部 HTTP（kev.serve）** 的历史部署说明，仅供评测 / 对分参考；
+> **NEVER** 再作为 aemeath 生产 fallback。会话侧配置已改为 `scoring.enabled` +
+> 场景开关 + 可选 `socket_path` / timeout，不再消费 `AEMEATH_SCORING_URL`。
 
 ## 部署（macOS Apple Silicon）
 

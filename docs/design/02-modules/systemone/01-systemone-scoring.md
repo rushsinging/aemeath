@@ -9,9 +9,10 @@
 System One 决策模型是一类**非生成式**评分服务：对「状态 × 候选集」一次前向（或少量前向）直接输出校准概率分布，延迟远低于生成式 LLM。Scoring BC 把它作为 aemeath 内部决策点（记忆重排、Skill 匹配、权限预筛等）的可选增强能力接入：
 
 - **可选增强，NEVER 阻断主循环**：System One 未安装、加载失败、推理超时、开关关闭时，消费点回退到原有词法/启发式路径；初始化失败必须明确报错并禁用 System One，NEVER 静默切换到另一评分后端。
-- **生产引擎收敛为 Rust 内嵌实现**：kev 0.8B 的 Q8_0 GGUF + 外置 PointerHead，由 llama.cpp Rust binding 驱动；外部 HTTP 服务不再是生产 fallback。
-- **模型按需手动安装**：启动 `aemeath` NEVER 主动下载模型；缺失时提示执行 `aemeath systemone download`。模型安装、校验和缓存由独立命令负责。
-- **协议无锁定**：`ScoringPort` 不暴露引擎细节；HTTP adapter 仅保留为测试、离线对分和 embedded 回归基准，不作为用户生产运行路径。
+- **生产路径为本机 scoring daemon**：kev 0.8B 的 Q8_0 GGUF + 外置 PointerHead 由**单一** `aemeath scoring serve` 常驻加载；各会话经 Unix domain socket 调用，多进程共享一份权重（见 [04-scoring-daemon.md](04-scoring-daemon.md) / #1935）。进程内 embedded **已退役**，不再是生产或测试默认路径。
+- **外部 HTTP（Jev）不是生产 fallback**：`jev_http` 仅保留为测试 / 离线对分；daemon 不可用时 fail-open，NEVER 回退 HTTP。
+- **模型按需手动安装**：启动会话 `aemeath` NEVER 主动下载模型；缺失时提示执行 `aemeath systemone download`。模型安装、校验和缓存由独立命令负责；daemon 启动失败同样引导 download，NEVER 自动下载。
+- **协议无锁定**：`ScoringPort` 不暴露引擎或传输细节（无 URL / sock 路径概念泄漏到消费点）；客户端 daemon adapter 与 HTTP adapter（测试）都只是换一个 `ScoringPort` 实现。
 
 ## 2. 领域模型
 
@@ -70,12 +71,14 @@ domain/
   pointer_head.rs         — hidden states → q/k 投影 → 校准 logits（纯领域数学）
 ports.rs                  — ScoringPort / CalibrationPort / ModelAssetPort
 adapters/
-  embedded.rs             — embedded ScoringPort facade（向专用 worker 提交推理）
-  llama_worker.rs         — llama.cpp context 的单线程生命周期与逐 token hidden 读取
+  daemon_client.rs        — 会话侧 ScoringPort：UDS 客户端（生产路径）
+  daemon_serve.rs         — `aemeath scoring serve`：单实例锁 + listener + 串行 worker
+  llama_worker.rs         — llama.cpp context 的单线程生命周期与逐 token hidden 读取（仅 serve 路径）
   model_assets.rs         — manifest、下载、sha256 校验、原子安装与本地解析
   jev_http.rs             — Jev HTTP adapter（仅测试 / 离线对分 / 回归基准）
   null.rs                 — NullScoringAdapter（开关关闭或初始化失败时的零成本实现）
   calibration_store.rs    — observe 落盘与校准 artifact 读写
+  # embedded.rs           — 已退役（#1935）；NEVER 再作为生产或默认测试装配
 ```
 
 ```rust
@@ -93,28 +96,33 @@ trait CalibrationPort {
 }
 ```
 
-- `ScoringPort` 抽象**不暴露 HTTP 细节**（无 URL/header 概念），为 Rust 内嵌化（llama.cpp / candle）预留：内嵌实现只是换一个 adapter。
-- 消费方（memory / skills / policy）只依赖 `ScoringPort`，NEVER 直接感知引擎型号。
+- `ScoringPort` 抽象**不暴露传输或引擎细节**（无 URL / header / sock 路径概念泄漏到消费点）：daemon 客户端、测试用 HTTP、mock 都只是换一个 adapter。
+- 消费方（memory / skills / policy）只依赖 `ScoringPort`，NEVER 直接感知引擎型号或 daemon 生命周期。
 
 ## 4. 引擎接入与模型生命周期
 
-### 4.1 生产路径：embedded llama.cpp
+### 4.1 生产路径：本机 scoring daemon
 
-- 首批平台：macOS arm64；其他平台未实现 embedded 时明确报告不可用并禁用 System One，NEVER 自动回退 HTTP。
-- 模型形态：Qwen3.5-0.8B + kev LoRA 合并后的 **Q8_0 GGUF（约 775MB）**，加外置 PointerHead 权重。Q4_K_M 在 79-case 对分仅 94.9% argmax 一致，NEVER 用于生产评分。
-- 推理机制：对 kev 编码协议产生的逐题 causal row 做 llama.cpp embedding 前向，读取逐 token normed hidden states；在 `<|fim_suffix|>` 的 decide 位置与每个 `<|box_end|>` option 位置取 hidden，执行 `q(h_decide)`、`k(h_option)`、点积、温度缩放与 softmax。
-- Rust 接入：优先使用 `llama-cpp-2` safe binding；若 safe 层未暴露逐 token hidden，仅对 `llama_get_embeddings_ith` 等必要 API 使用 `llama-cpp-sys-2` 薄封装，unsafe MUST 局限在 adapter 内。
-- 生命周期：llama model/context 与 PointerHead 固定驻留专用 worker thread；异步 `ScoringPort` 通过有界 channel 提交请求，NEVER 将 C/C++ context 跨 Tokio task 传递。
-- 已知上游缺陷规避：llama.cpp（ggml-metal-device.m，residency sets 释放断言）在 device 释放期可能 SIGABRT；engine init 期设置 `GGML_METAL_NO_RESIDENCY=1` 关闭该特性（用户显式配置时不覆盖），上游修复后移除。
+> 详细契约见 [04-scoring-daemon.md](04-scoring-daemon.md)（#1935）。此处只保留与引擎/模型相关的摘要。
+
+- **进程模型**：`aemeath scoring serve` 常驻加载 1 份权重；会话进程经 UDS 调用 `DaemonScoringClient`（实现 `ScoringPort`）。
+- **首批平台**：macOS arm64；其他平台未实现时明确报告不可用并禁用 System One，NEVER 自动回退 HTTP，NEVER 回退进程内 embedded。
+- **模型形态**：Qwen3.5-0.8B + kev LoRA 合并后的 **Q8_0 GGUF（约 775–812MB）**，加外置 PointerHead 权重。Q4_K_M 在 79-case 对分仅 94.9% argmax 一致，NEVER 用于生产评分。
+- **推理机制**（daemon 进程内）：对 kev 编码协议产生的逐题 causal row 做 llama.cpp embedding 前向，读取逐 token normed hidden states；在 `<|fim_suffix|>` 的 decide 位置与每个 `<|box_end|>` option 位置取 hidden，执行 `q(h_decide)`、`k(h_option)`、点积、温度缩放与 softmax。
+- **Rust 接入**：优先使用 `llama-cpp-2` safe binding；若 safe 层未暴露逐 token hidden，仅对 `llama_get_embeddings_ith` 等必要 API 使用 `llama-cpp-sys-2` 薄封装，unsafe MUST 局限在 serve 侧 adapter 内。
+- **生命周期**：llama model/context 与 PointerHead 固定驻留 daemon 内专用 worker thread（单 worker 串行）；会话侧异步 `ScoringPort` 只做 UDS RPC，NEVER 在会话进程持有 C/C++ context。
+- **退役进程内 embedded**：会话 composition **NEVER** 再装配进程内引擎；测试用 mock 或真 daemon。原 embedded 路径仅作为代码迁移源，合并进 serve 后删除生产出口。
+- **已知上游缺陷规避**：llama.cpp（ggml-metal-device.m，residency sets 释放断言）在 device 释放期可能 SIGABRT；engine init 期设置 `GGML_METAL_NO_RESIDENCY=1` 关闭该特性（用户显式配置时不覆盖），上游修复后移除。
 
 ### 4.2 模型安装与缓存
 
-启动 `aemeath` 时 **NEVER 主动下载模型**。仅当任一评分场景开关开启时检查本地资产：
+启动**会话** `aemeath` 时 **NEVER 主动下载模型**，也 **NEVER** 在会话进程内加载 GGUF。仅当总闸与任一评分场景开关开启时：
 
-- 校验通过：加载 embedded adapter。
-- 模型缺失：显示「System One 模型未安装，评分功能已禁用；执行 `aemeath systemone download` 安装」，并继续无评分原路径。
-- 校验或加载失败：明确报告错误、禁用 System One，NEVER 下载，NEVER 回退 HTTP，主循环继续运行。
-- 所有评分场景开关关闭：不检查、不下载、不加载模型。
+- sock 可达且 daemon 健康：经客户端评分。
+- sock 不可达：惰性尝试 spawn `aemeath scoring serve`（单实例锁）；仍失败 → `ScoringUnavailable`，**首次**提示用户，之后静默降级。
+- 模型缺失（serve 启动失败或客户端收到 unavailable）：显示引导「执行 `aemeath systemone download` 安装」，主循环继续无评分原路径。
+- 校验或加载失败（daemon 侧）：明确报告、评分不可用，NEVER 下载，NEVER 回退 HTTP / 进程内 embedded。
+- 所有评分场景开关关闭或 `scoring.enabled=false`：不检查、不 spawn、不下载、不加载模型（零成本）。
 
 手动安装命令：
 
@@ -142,13 +150,13 @@ aemeath systemone download
 
 ### 4.3 HTTP adapter 退役边界
 
-`jev_http` 从生产 composition 路径退出，不再有 `embedded|http` 用户后端切换，也不作为 embedded 失败后的 fallback。它 MAY 保留在测试和 eval 构建中，用于：
+`jev_http` 从生产 composition 路径退出，不再有用户后端切换，也**不作为** daemon 失败后的 fallback。它 MAY 保留在测试和 eval 构建中，用于：
 
 - MLX golden 数值对分；
 - Jev 线格式兼容性测试；
-- embedded adapter 的回归基准。
+- 与 daemon 路径的离线回归基准（显式启用 `http-adapter` feature）。
 
-生产配置中的 `AEMEATH_SCORING_URL`、`AEMEATH_SCORING_MODEL`、`AEMEATH_SCORING_TIMEOUT_MS` 随 HTTP 退役进入兼容清理；具体移除节奏遵循配置弃用门禁，NEVER 留下看似生效但实际无消费点的死配置。
+生产配置中的 `AEMEATH_SCORING_URL`、`AEMEATH_SCORING_MODEL`、`AEMEATH_SCORING_TIMEOUT_MS` 随 HTTP 退役进入兼容清理；具体移除节奏遵循配置弃用门禁，NEVER 留下看似生效但实际无消费点的死配置。daemon 使用独立的 `scoring.socket_path` / timeout 配置，**NEVER** 复用上述已退役键名充当生产开关。
 
 ### 4.4 错误语义
 
@@ -198,19 +206,21 @@ aemeath systemone download
 
 ## 8. 审计与 Rust 化演进
 
-- **审计**：每次评分决策落审计事件，携带引擎 revision、prompt sha256、probabilities、校准级别、延迟——与现有 audit BC 对齐。
+- **审计 / 事件流**：每次评分决策由客户端 `AuditedScoringAdapter` 写入日切事件流（#1909 / [03-event-stream.md](03-event-stream.md)），携带引擎 revision、prompt sha256、probabilities、校准级别、延迟与关联字段；daemon 只写引擎诊断，不替代业务事件。
 - **Rust 化路线**：
-  1. ~~外部 HTTP 服务~~：阶段一/二评测与接入基线，生产路径在 embedded 交付后退役，仅留测试 / 离线对分用途。
-  2. **llama.cpp 内嵌（当前路线）**：`llama-cpp-2` 驱动 Q8_0 GGUF；逐 token hidden states + Rust PointerHead 外置前向。79-case 数值对分：f16 与 Q8_0 均 100% argmax 一致（`eval/system-one/REPORT.md`）；Q4_K_M 否决。**Rust 化边界 = 推理内核外全链**（编码 / PointerHead / 校准 / 审计均为纯 Rust）。
-  3. **未来备选（NEVER 作为当前计划）**：`rlx-qwen35`（白盒 Rust，数值与 llama.cpp 决策位等价；GPL-3.0 与 GPU 路径问题解决后可评估）；`mistral.rs`（待稳定 hidden-state API）；`candle`（已放弃推进，仅当 Qwen3.5 gated-DeltaNet 上游支持成熟且有真实诉求时作备选）。三者均为替代后端候选，接入时 MUST 先过 79-case 数值门禁。
-- **自训练路线（中长期）**：用开源三段式管线（SFT 软标签 → listwise PL/NDCG RL → OOF 校准）在 aemeath 真实 agent 决策轨迹上训练与 kev 同架构（Qwen3.5 小底座 + LoRA + pointer head）的专属权重；训练在 Python/GPU 侧，产出无缝接入 Rust 引擎。
+  1. ~~外部 HTTP 服务~~：阶段一/二评测与接入基线，生产路径退役，仅留测试 / 离线对分用途。
+  2. ~~进程内 llama.cpp embedded~~：曾为 #1833 生产终态；因多会话各自加载 GGUF 的内存/启动成本，由 #1935 **退役**为非生产路径（代码迁入 serve 后删除会话侧装配）。
+  3. **本机 scoring daemon（当前生产路线，#1935）**：同一套 `llama-cpp-2` + Q8_0 GGUF + Rust PointerHead，运行在 `aemeath scoring serve`；会话只做 UDS 客户端。79-case 数值对分门禁保留。**Rust 化边界 = 推理内核外全链**（编码 / PointerHead / 校准 / 事件均为纯 Rust）。
+  4. **未来备选（NEVER 作为当前计划）**：`rlx-qwen35`（白盒 Rust，数值与 llama.cpp 决策位等价；GPL-3.0 与 GPU 路径问题解决后可评估）；`mistral.rs`（待稳定 hidden-state API）；`candle`（已放弃推进，仅当 Qwen3.5 gated-DeltaNet 上游支持成熟且有真实诉求时作备选）。三者均为替代**推理后端**候选，接入时 MUST 先过 79-case 数值门禁，且仍应落在 daemon 进程内而非每会话一份。
+- **自训练路线（中长期）**：用开源三段式管线（SFT 软标签 → listwise PL/NDCG RL → OOF 校准）在 aemeath 真实 agent 决策轨迹上训练与 kev 同架构（Qwen3.5 小底座 + LoRA + pointer head）的专属权重；训练在 Python/GPU 侧，产出无缝接入 daemon 侧引擎。
 
 ## 9. 验收口径
 
 - 场景接入门禁固定三项：**冷路径延迟**（无 state 缓存）、**中文 case 子集**、**order-flip 率**（候选正反序两遍）。
-- embedded 数值门禁：Q8_0 GGUF + PointerHead 对 MLX golden 全量 79-case argmax 一致率 ≥99%，各场景指标劣化 ≤1 个百分点；逐 case 比对表入 `eval/system-one/results/`。
-- macOS arm64 首批门禁：embedded 加载后的主进程增量内存 ≤1.5GB，记录冷启动、p50/p95 推理延迟；四平台 CI 必须仍能编译不含 embedded 运行能力的目标。
-- 模型生命周期门禁：CLI 启动不产生网络下载；`aemeath systemone download` 可幂等安装、校验失败 fail-closed、半成品不可见；模型缺失时提示准确且主循环继续。
-- HTTP 退役门禁：生产 composition 不构造 `JevHttpScoringAdapter`，embedded 初始化失败不回退 HTTP；测试 / eval 对分仍能显式使用 HTTP adapter。
-- 每场景接入后在真实会话数据上复验；跨层链路（config → asset → adapter → port → 消费点）每层有单元测试或场景测试，NEVER 只测首尾。
-- 开关全关回归：不检查模型、不显示下载提醒、不加载 llama.cpp，行为与资源占用同无 System One。
+- 数值门禁：Q8_0 GGUF + PointerHead 对 MLX golden 全量 79-case argmax 一致率 ≥99%，各场景指标劣化 ≤1 个百分点；逐 case 比对表入 `eval/system-one/results/`（真机对分以 daemon 在线为前提，模型缺失 skip，NEVER 自动下载）。
+- macOS arm64 首批门禁：单 daemon 常驻增量内存 ≤1.5GB；多会话不再叠加 GGUF；记录会话冷启动（daemon 已就绪）、p50/p95 推理延迟；四平台 CI 必须仍能编译**不含**引擎运行能力的会话目标。
+- 模型生命周期门禁：会话 CLI 启动不产生网络下载、不加载 GGUF；`aemeath systemone download` 可幂等安装、校验失败 fail-closed、半成品不可见；模型缺失时提示准确且主循环继续。
+- HTTP 退役门禁：生产 composition 不构造 `JevHttpScoringAdapter`；daemon 不可用 **NEVER** 回退 HTTP；测试 / eval 对分仍能显式使用 HTTP adapter。
+- Daemon 门禁（#1935）：见 [04-scoring-daemon.md](04-scoring-daemon.md) §11（共享一份权重、惰性拉起、首次提示后 fail-open、`enabled=false` 零成本、协议版本不匹配 → Unavailable）。
+- 每场景接入后在真实会话数据上复验；跨层链路（config → client → daemon → port → 消费点）每层有单元测试或场景测试，NEVER 只测首尾。
+- 开关全关回归：不检查模型、不 spawn daemon、不显示下载提醒、会话进程不加载 llama.cpp，行为与资源占用同无 System One。
