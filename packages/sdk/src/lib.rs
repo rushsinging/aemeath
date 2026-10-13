@@ -33,6 +33,7 @@ pub use chat_event::{
     SessionResumeFailureKind, SessionResumeViewData,
 };
 pub mod task;
+pub mod tool_display_name;
 pub mod tool_input;
 pub mod tool_result;
 pub mod tui;
@@ -126,6 +127,7 @@ pub use task::{
     TaskBatchStatusView, TaskBatchView, TaskItemStatusView, TaskItemView, TaskPriorityView,
     TaskStateView,
 };
+pub use tool_display_name::tool_display_name;
 pub use tui::{
     classify_paste, resolve_local_image_path, ChatEventSink, ChatHandle, ChatInputEventPort,
     ClipboardImageView, InputEventFuture, InputEventOptFuture, MemoryConfigView, PasteKind,

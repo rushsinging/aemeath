@@ -610,3 +610,34 @@ fn invocation_summary_without_goal_falls_back_to_no_goal() {
         "缺 goal 也不应回退 input=：{text}"
     );
 }
+
+// ── #1964 Task 3：友好名唯一真相源必须是共享 API（runtime 禁止本地字面量表）──
+
+#[test]
+fn invocation_summary_uses_shared_display_name_source() {
+    // runtime 侧只能调用共享函数，不得自带映射表。
+    assert_eq!(sdk::tool_display_name("Bash"), "Run");
+    assert_eq!(sdk::tool_display_name("Grep"), "Search");
+    assert_eq!(
+        sdk::tool_display_name("SomeUnregisteredTool"),
+        "SomeUnregisteredTool",
+        "未知名回退自身"
+    );
+}
+
+#[test]
+fn invocation_summary_non_bash_tool_uses_shared_friendly_name() {
+    // Task 2 review 非阻塞项：非 Bash 工具同样走共享友好名。
+    let call = summary_call(
+        "Grep",
+        serde_json::json!({"goal": "找 TODO", "pattern": "TODO"}),
+    );
+    assert_eq!(invocation_summary_text(&call), "Search · 找 TODO");
+}
+
+#[test]
+fn invocation_summary_blank_goal_falls_back_to_no_goal() {
+    // Task 2 review 非阻塞项：仅空白字符的 goal 视为缺失。
+    let call = summary_call("Bash", serde_json::json!({"goal": "   "}));
+    assert_eq!(invocation_summary_text(&call), "Run · (no goal)");
+}
