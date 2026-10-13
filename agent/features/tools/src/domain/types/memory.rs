@@ -187,7 +187,8 @@ pub struct MemoryUpdateInput {
 }
 
 /// Input for the `MemoryDelete` tool: permanently delete one entry.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct MemoryDeleteInput {
     /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
     pub goal: String,

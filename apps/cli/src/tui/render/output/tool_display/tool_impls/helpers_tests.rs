@@ -1,4 +1,4 @@
-use super::build_header_line;
+use super::{build_header_line, format_goal_header, goal_or_fallback};
 
 #[test]
 fn build_header_line_no_suffix() {
@@ -29,4 +29,15 @@ fn build_header_line_truncates_long_path() {
         text.len() < long.len() + 10,
         "long path should be truncated: {text}"
     );
+}
+
+#[test]
+fn goal_or_fallback_prefers_nonempty_goal() {
+    assert_eq!(goal_or_fallback(" 跑 ping ", "pattern"), "跑 ping");
+    assert_eq!(goal_or_fallback("", "pattern"), "pattern");
+    assert_eq!(
+        format_goal_header("Search", "找 TODO", "TODO"),
+        "Search 找 TODO"
+    );
+    assert_eq!(format_goal_header("Search", "", "TODO"), "Search TODO");
 }

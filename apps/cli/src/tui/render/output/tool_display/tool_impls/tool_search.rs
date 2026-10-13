@@ -5,6 +5,7 @@ use super::super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
 };
+use super::helpers::format_goal_header;
 use sdk::tool_input::ToolSearchInput;
 use sdk::tool_result::ToolSearchResult;
 use std::path::Path;
@@ -20,15 +21,17 @@ impl ToolDisplay for ToolSearchDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let args = parse_input::<ToolSearchInput>(input);
+        let fallback = truncate_ellipsis(args.query.trim(), 60);
+        format_goal_header(self.display_name(), &args.goal, &fallback)
+    }
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        let args = parse_input::<ToolSearchInput>(input);
         let query = args.query.trim();
         if query.is_empty() {
-            self.display_name().to_string()
+            vec![]
         } else {
-            format!("{} {}", self.display_name(), truncate_ellipsis(query, 60))
+            vec![query.to_string()]
         }
-    }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        vec![]
     }
     fn format_result_lines(&self, content: Option<&serde_json::Value>) -> Option<Vec<String>> {
         let result: ToolSearchResult = typed_from_content(content)?;
@@ -59,7 +62,7 @@ impl ToolDisplay for ToolSearchDisplay {
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
             header: HeaderPolicy::Compact,
-            details: DetailsPolicy::Hidden,
+            details: DetailsPolicy::Expanded,
             result: ResultPolicy::Visible {
                 max_lines: Some(15),
                 render_kind: ResultRender::Plain,

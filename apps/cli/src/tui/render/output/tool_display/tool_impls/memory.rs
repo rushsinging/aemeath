@@ -6,6 +6,7 @@ use super::super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
 };
+use super::helpers::format_goal_header;
 use sdk::tool_input::{
     MemoryAddInput, MemoryCategoryInput, MemoryDeleteInput, MemoryLayerInput, MemoryListInput,
     MemorySearchInput,
@@ -23,7 +24,7 @@ fn parse_input<T: serde::de::DeserializeOwned>(input: &serde_json::Value) -> Opt
 fn family_policy(max_lines: usize) -> ToolRenderPolicy {
     ToolRenderPolicy {
         header: HeaderPolicy::Compact,
-        details: DetailsPolicy::Hidden,
+        details: DetailsPolicy::Expanded,
         result: ResultPolicy::Visible {
             max_lines: Some(max_lines),
             render_kind: ResultRender::Plain,
@@ -162,16 +163,25 @@ impl ToolDisplay for MemoryAddDisplay {
         let Some(args) = parse_input::<MemoryAddInput>(input) else {
             return self.display_name().to_string();
         };
-        let mut parts = vec![self.display_name().to_string()];
-        append_filter_parts(&mut parts, args.layer, args.category);
+        let mut fallback_parts = Vec::new();
+        append_filter_parts(&mut fallback_parts, args.layer, args.category);
         let preview = content_preview(args.content.trim());
         if !preview.is_empty() {
-            parts.push(preview);
+            fallback_parts.push(preview);
         }
-        parts.join(" ")
+        format_goal_header(self.display_name(), &args.goal, &fallback_parts.join(" "))
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        vec![]
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        let Some(args) = parse_input::<MemoryAddInput>(input) else {
+            return vec![];
+        };
+        let mut lines = Vec::new();
+        append_filter_parts(&mut lines, args.layer, args.category);
+        let preview = content_preview(args.content.trim());
+        if !preview.is_empty() {
+            lines.push(preview);
+        }
+        lines
     }
     fn format_result_lines(&self, content: Option<&serde_json::Value>) -> Option<Vec<String>> {
         let result: MemoryResult = typed_from_content(content)?;
@@ -197,16 +207,25 @@ impl ToolDisplay for MemorySearchDisplay {
         let Some(args) = parse_input::<MemorySearchInput>(input) else {
             return self.display_name().to_string();
         };
-        let mut parts = vec![self.display_name().to_string()];
-        append_filter_parts(&mut parts, args.layer, args.category);
+        let mut fallback_parts = Vec::new();
+        append_filter_parts(&mut fallback_parts, args.layer, args.category);
         let query = args.query.trim();
         if !query.is_empty() {
-            parts.push(content_preview(query));
+            fallback_parts.push(content_preview(query));
         }
-        parts.join(" ")
+        format_goal_header(self.display_name(), &args.goal, &fallback_parts.join(" "))
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        vec![]
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        let Some(args) = parse_input::<MemorySearchInput>(input) else {
+            return vec![];
+        };
+        let mut lines = Vec::new();
+        append_filter_parts(&mut lines, args.layer, args.category);
+        let query = args.query.trim();
+        if !query.is_empty() {
+            lines.push(query.to_string());
+        }
+        lines
     }
     fn format_result_lines(&self, content: Option<&serde_json::Value>) -> Option<Vec<String>> {
         let result: MemoryResult = typed_from_content(content)?;
@@ -236,20 +255,33 @@ impl ToolDisplay for MemoryListDisplay {
         let Some(args) = parse_input::<MemoryListInput>(input) else {
             return self.display_name().to_string();
         };
-        let mut parts = vec![self.display_name().to_string()];
+        let mut fallback_parts = Vec::new();
         if let Some(layer) = args.layer {
-            parts.push(layer_label(layer).to_string());
+            fallback_parts.push(layer_label(layer).to_string());
         }
         if let Some(offset) = args.offset {
-            parts.push(format!("offset={offset}"));
+            fallback_parts.push(format!("offset={offset}"));
         }
         if let Some(limit) = args.limit {
-            parts.push(format!("limit={limit}"));
+            fallback_parts.push(format!("limit={limit}"));
         }
-        parts.join(" ")
+        format_goal_header(self.display_name(), &args.goal, &fallback_parts.join(" "))
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        vec![]
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        let Some(args) = parse_input::<MemoryListInput>(input) else {
+            return vec![];
+        };
+        let mut lines = Vec::new();
+        if let Some(layer) = args.layer {
+            lines.push(layer_label(layer).to_string());
+        }
+        if let Some(offset) = args.offset {
+            lines.push(format!("offset={offset}"));
+        }
+        if let Some(limit) = args.limit {
+            lines.push(format!("limit={limit}"));
+        }
+        lines
     }
     fn format_result_lines(&self, content: Option<&serde_json::Value>) -> Option<Vec<String>> {
         let result: MemoryResult = typed_from_content(content)?;
@@ -285,7 +317,11 @@ impl ToolDisplay for MemoryUpdateDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         // MemoryUpdateInput.status 无 Debug/Display 且 MemoryStatus 未从 sdk
-        // 再导出；header 直接读 JSON 字段，避免为显示再扩公开面。
+        // 再导出；fallback 直接读 JSON 字段，避免为显示再扩公开面。
+        let goal = input
+            .get("goal")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
         let id = input
             .get("id")
             .and_then(|value| value.as_str())
@@ -294,15 +330,31 @@ impl ToolDisplay for MemoryUpdateDisplay {
             .get("status")
             .and_then(|value| value.as_str())
             .unwrap_or("");
-        match (id.is_empty(), status.is_empty()) {
-            (false, false) => format!("{} {} {}", self.display_name(), id, status),
-            (false, true) => format!("{} {}", self.display_name(), id),
-            (true, false) => format!("{} {}", self.display_name(), status),
-            (true, true) => self.display_name().to_string(),
-        }
+        let fallback = match (id.is_empty(), status.is_empty()) {
+            (false, false) => format!("{id} {status}"),
+            (false, true) => id.to_string(),
+            (true, false) => status.to_string(),
+            (true, true) => String::new(),
+        };
+        format_goal_header(self.display_name(), goal, &fallback)
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        vec![]
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        let mut lines = Vec::new();
+        if let Some(id) = input
+            .get("id")
+            .and_then(|value| value.as_str())
+            .filter(|v| !v.is_empty())
+        {
+            lines.push(id.to_string());
+        }
+        if let Some(status) = input
+            .get("status")
+            .and_then(|value| value.as_str())
+            .filter(|v| !v.is_empty())
+        {
+            lines.push(status.to_string());
+        }
+        lines
     }
     fn format_result_lines(&self, content: Option<&serde_json::Value>) -> Option<Vec<String>> {
         let result: MemoryResult = typed_from_content(content)?;
@@ -328,13 +380,17 @@ impl ToolDisplay for MemoryDeleteDisplay {
         let Some(args) = parse_input::<MemoryDeleteInput>(input) else {
             return self.display_name().to_string();
         };
-        if args.id.is_empty() {
-            return self.display_name().to_string();
-        }
-        format!("{} {}", self.display_name(), args.id)
+        format_goal_header(self.display_name(), &args.goal, &args.id)
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        vec![]
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        let Some(args) = parse_input::<MemoryDeleteInput>(input) else {
+            return vec![];
+        };
+        if args.id.is_empty() {
+            vec![]
+        } else {
+            vec![args.id.clone()]
+        }
     }
     fn format_result_lines(&self, content: Option<&serde_json::Value>) -> Option<Vec<String>> {
         let result: MemoryResult = typed_from_content(content)?;

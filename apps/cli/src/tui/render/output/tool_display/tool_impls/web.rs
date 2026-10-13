@@ -8,7 +8,7 @@ use super::super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
 };
-use super::helpers::build_header_line;
+use super::helpers::{build_header_line, format_goal_header};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use sdk::tool_input::{WebFetchInput, WebSearchInput};
@@ -22,7 +22,7 @@ fn parse_input<T: serde::de::DeserializeOwned + Default>(input: &serde_json::Val
 fn family_policy(max_lines: usize) -> ToolRenderPolicy {
     ToolRenderPolicy {
         header: HeaderPolicy::Standard,
-        details: DetailsPolicy::Hidden,
+        details: DetailsPolicy::Expanded,
         result: ResultPolicy::Visible {
             max_lines: Some(max_lines),
             render_kind: ResultRender::Plain,
@@ -40,12 +40,12 @@ impl ToolDisplay for WebFetchDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let args = parse_input::<WebFetchInput>(input);
-        if args.url.is_empty() {
-            self.display_name().to_string()
+        let fallback = if args.url.is_empty() {
+            String::new()
         } else {
-            let display_url = truncate_ellipsis(&args.url, 60);
-            format!("{} {display_url}", self.display_name())
-        }
+            truncate_ellipsis(&args.url, 60)
+        };
+        format_goal_header(self.display_name(), &args.goal, &fallback)
     }
     fn format_header_line_with_result(
         &self,
@@ -68,8 +68,13 @@ impl ToolDisplay for WebFetchDisplay {
             build_header_line(self.display_name(), &args.url, &suffix)
         }
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        vec![]
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        let args = parse_input::<WebFetchInput>(input);
+        if args.url.trim().is_empty() {
+            vec![]
+        } else {
+            vec![args.url.clone()]
+        }
     }
     fn format_result_lines(&self, content: Option<&serde_json::Value>) -> Option<Vec<String>> {
         let result: WebFetchResult = typed_from_content(content)?;
@@ -120,15 +125,16 @@ impl ToolDisplay for WebSearchDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let args = parse_input::<WebSearchInput>(input);
-        let query = args.query.trim();
-        if query.is_empty() {
-            self.display_name().to_string()
-        } else {
-            format!("{} {}", self.display_name(), truncate_ellipsis(query, 60))
-        }
+        let fallback = truncate_ellipsis(args.query.trim(), 60);
+        format_goal_header(self.display_name(), &args.goal, &fallback)
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        vec![]
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        let args = parse_input::<WebSearchInput>(input);
+        if args.query.trim().is_empty() {
+            vec![]
+        } else {
+            vec![args.query.clone()]
+        }
     }
     fn format_result_lines(&self, content: Option<&serde_json::Value>) -> Option<Vec<String>> {
         let result: WebSearchResult = typed_from_content(content)?;

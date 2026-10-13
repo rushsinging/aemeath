@@ -3,7 +3,7 @@ use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload
 use super::super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ToolDisplay, ToolDisplayEntry, ToolRenderPolicy,
 };
-use super::helpers::build_header_line;
+use super::helpers::{build_header_line, format_goal_header};
 use ratatui::text::Line;
 use std::path::Path;
 
@@ -14,10 +14,14 @@ impl ToolDisplay for AskUserQuestionDisplay {
     fn name(&self) -> &str {
         "AskUserQuestion"
     }
-    fn format_header(&self, _input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        // Issue #545: 不再把 question 截断拼进 header，避免长问题信息丢失。
+    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
+        // Issue #545: 不再把 question 截断拼进 header；#1964 用 goal 表达意图。
         // 完整 question 由交互区域（blocks/ask_user.rs）按段落渲染。
-        self.display_name().to_string()
+        let goal = input
+            .get("goal")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        format_goal_header(self.display_name(), goal, "")
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]

@@ -6,7 +6,7 @@ use super::super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
 };
-use super::helpers::{build_header_line, truncate_path};
+use super::helpers::{build_header_line, format_goal_header, goal_or_fallback};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use sdk::tool_input::{GlobInput, GrepInput};
@@ -46,11 +46,7 @@ impl ToolDisplay for GlobDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let args = parse_input::<GlobInput>(input);
-        if args.pattern.is_empty() {
-            self.display_name().to_string()
-        } else {
-            format!("{} {}", self.display_name(), args.pattern)
-        }
+        format_goal_header(self.display_name(), &args.goal, &args.pattern)
     }
     fn header_for_subagent(
         &self,
@@ -69,17 +65,26 @@ impl ToolDisplay for GlobDisplay {
         let args = parse_input::<GlobInput>(input);
         let n = typed_data::<sdk::tool_result::GlobResult>(result_payload).map(|r| r.count);
         let suffix = n.map(|c| format!(" ({c} files)")).unwrap_or_default();
-        if args.pattern.is_empty() && suffix.is_empty() {
+        let header_text = goal_or_fallback(&args.goal, &args.pattern);
+        if header_text.is_empty() && suffix.is_empty() {
             Line::from(Span::styled(
                 self.display_name().to_string(),
                 Style::default().fg(theme::ACCENT_BRIGHT),
             ))
         } else {
-            build_header_line(self.display_name(), &args.pattern, &suffix)
+            build_header_line(self.display_name(), &header_text, &suffix)
         }
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        vec![]
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        let args = parse_input::<GlobInput>(input);
+        let mut lines = Vec::new();
+        if !args.pattern.is_empty() {
+            lines.push(args.pattern);
+        }
+        if let Some(path) = args.path.as_ref().filter(|path| !path.is_empty()) {
+            lines.push(path.clone());
+        }
+        lines
     }
     fn format_result_lines(&self, content: Option<&serde_json::Value>) -> Option<Vec<String>> {
         use super::super::common::typed_from_content;
@@ -98,7 +103,7 @@ impl ToolDisplay for GlobDisplay {
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
             header: HeaderPolicy::Standard,
-            details: DetailsPolicy::Hidden,
+            details: DetailsPolicy::Expanded,
             result: ResultPolicy::Visible {
                 max_lines: Some(15),
                 render_kind: ResultRender::Plain,
@@ -121,18 +126,19 @@ impl ToolDisplay for GrepDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, workspace_root: Option<&Path>) -> String {
         let args = parse_input::<GrepInput>(input);
-        let path = args.path.as_deref().unwrap_or(".");
-        let rel = display_path(path, workspace_root);
-        let display_path = truncate_path(&rel, 40);
-        if args.pattern.is_empty() {
-            format!("{} in {display_path}", self.display_name())
-        } else {
-            format!(
-                "{} /{}/ in {display_path}",
-                self.display_name(),
-                args.pattern
-            )
-        }
+        let path = args
+            .path
+            .as_deref()
+            .map(|path| display_path(path, workspace_root))
+            .filter(|path| !path.is_empty())
+            .unwrap_or_default();
+        let fallback = match (args.pattern.is_empty(), path.is_empty()) {
+            (true, true) => String::new(),
+            (false, true) => args.pattern.clone(),
+            (true, false) => path,
+            (false, false) => format!("{} in {}", args.pattern, path),
+        };
+        format_goal_header(self.display_name(), &args.goal, &fallback)
     }
     fn header_for_subagent(
         &self,
@@ -150,17 +156,26 @@ impl ToolDisplay for GrepDisplay {
         let args = parse_input::<GrepInput>(input);
         let path = args.path.as_deref().unwrap_or(".");
         let rel = display_path(path, workspace_root);
-        let arg = if args.pattern.is_empty() {
+        let fallback = if args.pattern.is_empty() {
             format!("in {rel}")
         } else {
             format!("/{}/, path={rel}", args.pattern)
         };
+        let header_text = goal_or_fallback(&args.goal, &fallback);
         let n = typed_data::<sdk::tool_result::GrepResult>(result_payload).map(|r| r.total_matches);
         let suffix = n.map(|c| format!(" ({c} matches)")).unwrap_or_default();
-        build_header_line(self.display_name(), &arg, &suffix)
+        build_header_line(self.display_name(), &header_text, &suffix)
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        vec![]
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        let args = parse_input::<GrepInput>(input);
+        let mut lines = Vec::new();
+        if !args.pattern.is_empty() {
+            lines.push(args.pattern);
+        }
+        if let Some(path) = args.path.as_ref().filter(|path| !path.is_empty()) {
+            lines.push(path.clone());
+        }
+        lines
     }
     fn format_result_lines(&self, content: Option<&serde_json::Value>) -> Option<Vec<String>> {
         use super::super::common::typed_from_content;
@@ -200,7 +215,7 @@ impl ToolDisplay for GrepDisplay {
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
             header: HeaderPolicy::Standard,
-            details: DetailsPolicy::Hidden,
+            details: DetailsPolicy::Expanded,
             result: ResultPolicy::Visible {
                 max_lines: Some(15),
                 render_kind: ResultRender::Plain,

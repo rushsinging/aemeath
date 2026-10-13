@@ -2,7 +2,7 @@ mod agent;
 mod ask_user;
 mod background_process;
 mod filesystem;
-mod helpers;
+pub(super) mod helpers;
 mod memory;
 mod search;
 mod shell;

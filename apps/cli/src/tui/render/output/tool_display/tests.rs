@@ -110,7 +110,17 @@ fn canonical_catalog_names_hit_specialized_displays() {
         line_to_string(&grep),
         "Search /tool_coordination/, path=docs/design"
     );
-    assert!(grep_details.is_empty());
+    // #1964：Details 承载技术载荷（pattern/path）
+    assert!(
+        grep_details
+            .iter()
+            .any(|line| line.contains("tool_coordination")),
+        "{grep_details:?}"
+    );
+    assert!(
+        grep_details.iter().any(|line| line.contains("docs/design")),
+        "{grep_details:?}"
+    );
 
     let (agent, agent_details) = format_tool_call(
         "Agent",
@@ -1096,4 +1106,66 @@ fn task_get_result_renders_subject_and_description() {
     assert!(lines[0].contains("task_9"));
     assert!(lines[0].contains("修显示"));
     assert!(lines.iter().any(|line| line.contains("补 typed result")));
+}
+
+#[test]
+fn tool_headers_prefer_goal_and_put_payload_in_details() {
+    let cases = [
+        (
+            "Grep",
+            r#"{"goal":"定位超时逻辑","pattern":"timeout_secs"}"#,
+            "定位超时逻辑",
+            "timeout_secs",
+        ),
+        (
+            "Glob",
+            r#"{"goal":"枚举源码","pattern":"*.rs"}"#,
+            "枚举源码",
+            "*.rs",
+        ),
+        (
+            "Read",
+            r#"{"goal":"读清单","file_path":"Cargo.toml"}"#,
+            "读清单",
+            "Cargo.toml",
+        ),
+        (
+            "WebSearch",
+            r#"{"goal":"查文档","query":"ratatui"}"#,
+            "查文档",
+            "ratatui",
+        ),
+        (
+            "ToolSearch",
+            r#"{"goal":"搜工具","query":"memory"}"#,
+            "搜工具",
+            "memory",
+        ),
+        (
+            "Bash",
+            r#"{"goal":"跑探测","command":"ping -c 1 1.1.1.1"}"#,
+            "跑探测",
+            "ping -c 1 1.1.1.1",
+        ),
+    ];
+    for (tool, raw, goal, payload) in cases {
+        let (header, details) = format_tool_call(tool, raw, None, None);
+        let text = line_to_string(&header);
+        assert!(
+            text.contains(goal),
+            "{tool} header 应含 goal={goal:?}，实际={text:?}"
+        );
+        assert!(
+            !text.contains(payload),
+            "{tool} header 不应再以载荷为主: {text}"
+        );
+        let detail_text = details.join(
+            "
+",
+        );
+        assert!(
+            detail_text.contains(payload),
+            "{tool} details 应含载荷 {payload:?}，实际={detail_text:?}"
+        );
+    }
 }

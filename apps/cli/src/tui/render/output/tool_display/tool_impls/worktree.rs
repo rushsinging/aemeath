@@ -5,7 +5,7 @@ use super::super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
 };
-use super::helpers::build_header_line;
+use super::helpers::{build_header_line, format_goal_header};
 use ratatui::text::Line;
 use std::path::Path;
 
@@ -28,12 +28,18 @@ impl ToolDisplay for EnterWorktreeDisplay {
         "EnterWorktree"
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        input_target(input)
-            .map(|target| format!("{} {target}", self.display_name()))
-            .unwrap_or_else(|| self.display_name().to_string())
+        let goal = input
+            .get("goal")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let fallback = input_target(input).unwrap_or_default();
+        format_goal_header(self.display_name(), goal, &fallback)
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        vec![]
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        match input_target(input) {
+            Some(target) => vec![target],
+            None => vec![],
+        }
     }
     fn format_header_line_with_result(
         &self,
@@ -56,7 +62,7 @@ impl ToolDisplay for EnterWorktreeDisplay {
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
             header: HeaderPolicy::Standard,
-            details: DetailsPolicy::Hidden,
+            details: DetailsPolicy::Expanded,
             result: ResultPolicy::Visible {
                 max_lines: Some(16),
                 render_kind: ResultRender::Plain,
@@ -77,8 +83,12 @@ impl ToolDisplay for ExitWorktreeDisplay {
     fn name(&self) -> &str {
         "ExitWorktree"
     }
-    fn format_header(&self, _input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        self.display_name().to_string()
+    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
+        let goal = input
+            .get("goal")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        format_goal_header(self.display_name(), goal, "")
     }
     fn format_header_line_with_result(
         &self,

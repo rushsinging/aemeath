@@ -6,7 +6,7 @@ use super::super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
 };
-use super::helpers::{build_header_line, truncate_path};
+use super::helpers::{build_header_line, format_goal_header, goal_or_fallback, truncate_path};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use sdk::tool_input::{EditInput, ReadInput, WriteInput};
@@ -72,13 +72,14 @@ impl ToolDisplay for ReadDisplay {
     fn format_header(&self, input: &serde_json::Value, workspace_root: Option<&Path>) -> String {
         let args = parse_input::<ReadInput>(input);
         let rel = display_path(&args.file_path, workspace_root);
-        let display_path = truncate_path(&rel, 60);
+        let path_text = truncate_path(&rel, 60);
         let range = read_range_info(&args, None);
-        if range.is_empty() {
-            format!("{} {display_path}", self.display_name())
+        let fallback = if range.is_empty() {
+            path_text
         } else {
-            format!("{} {display_path} {range}", self.display_name())
-        }
+            format!("{path_text} {range}")
+        };
+        format_goal_header(self.display_name(), &args.goal, &fallback)
     }
     fn header_for_subagent(
         &self,
@@ -114,20 +115,30 @@ impl ToolDisplay for ReadDisplay {
             .or_else(|| result_payload.and_then(|p| parse_line_count_from_message(&p.output)));
 
         let range_info = read_range_info(&args, actual_lines);
-        Line::from(read_header_spans(
-            self.display_name(),
-            &display_path,
-            &range_info,
-        ))
+        let fallback = if range_info.is_empty() {
+            display_path.clone()
+        } else {
+            format!("{display_path} {range_info}")
+        };
+        let header_text = goal_or_fallback(&args.goal, &fallback);
+        Line::from(read_header_spans(self.display_name(), &header_text, ""))
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        // 行范围信息已在 header 中，不再需要 details
-        vec![]
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        let args = parse_input::<ReadInput>(input);
+        let mut lines = Vec::new();
+        if !args.file_path.is_empty() {
+            lines.push(args.file_path.clone());
+        }
+        let range = read_range_info(&args, None);
+        if !range.is_empty() {
+            lines.push(range);
+        }
+        lines
     }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
             header: HeaderPolicy::Standard,
-            details: DetailsPolicy::Hidden,
+            details: DetailsPolicy::Expanded,
             result: ResultPolicy::Hidden, // 不显示 result 子块
         }
     }
@@ -155,9 +166,10 @@ impl ToolDisplay for WriteDisplay {
     fn format_header(&self, input: &serde_json::Value, workspace_root: Option<&Path>) -> String {
         let args = parse_input::<WriteInput>(input);
         let rel = display_path(&args.file_path, workspace_root);
-        let display_path = truncate_path(&rel, 60);
+        let path_text = truncate_path(&rel, 60);
         let bytes = args.content.len();
-        format!("{} {display_path} {bytes} bytes", self.display_name())
+        let fallback = format!("{path_text} {bytes} bytes");
+        format_goal_header(self.display_name(), &args.goal, &fallback)
     }
     fn header_for_subagent(
         &self,
@@ -187,24 +199,23 @@ impl ToolDisplay for WriteDisplay {
         let input_bytes = args.content.len();
         let bytes = actual_bytes.unwrap_or(input_bytes);
         let bytes_info = format!("{bytes} bytes");
-
-        Line::from(vec![
-            Span::styled(
-                self.display_name().to_string(),
-                Style::default().fg(theme::ACCENT_BRIGHT),
-            ),
-            Span::raw(format!(" {display_path} ")),
-            Span::styled(bytes_info, Style::default().fg(theme::TEXT_MUTED)),
-        ])
+        let fallback = format!("{display_path} {bytes_info}");
+        let header_text = goal_or_fallback(&args.goal, &fallback);
+        build_header_line(self.display_name(), &header_text, "")
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        // 字节数已在 summary 中，不再需要 details
-        vec![]
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        let args = parse_input::<WriteInput>(input);
+        let mut lines = Vec::new();
+        if !args.file_path.is_empty() {
+            lines.push(args.file_path.clone());
+        }
+        lines.push(format!("{} bytes", args.content.len()));
+        lines
     }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
             header: HeaderPolicy::Standard,
-            details: DetailsPolicy::Hidden,
+            details: DetailsPolicy::Expanded,
             result: ResultPolicy::Hidden, // 不显示 result 子块
         }
     }
@@ -232,13 +243,11 @@ impl ToolDisplay for EditDisplay {
     fn format_header(&self, input: &serde_json::Value, workspace_root: Option<&Path>) -> String {
         let args = parse_input::<EditInput>(input);
         let rel = display_path(&args.file_path, workspace_root);
-        let display_path = truncate_path(&rel, 60);
+        let path_text = truncate_path(&rel, 60);
         let old_len = args.old_string.len();
         let new_len = args.new_string.len();
-        format!(
-            "{} {display_path} Changed {old_len} -> {new_len} chars",
-            self.display_name()
-        )
+        let fallback = format!("{path_text} Changed {old_len} -> {new_len} chars");
+        format_goal_header(self.display_name(), &args.goal, &fallback)
     }
     fn header_for_subagent(
         &self,
@@ -255,19 +264,29 @@ impl ToolDisplay for EditDisplay {
     ) -> Line<'static> {
         let args = parse_input::<EditInput>(input);
         let rel = display_path(&args.file_path, workspace_root);
+        let header_text = goal_or_fallback(&args.goal, &rel);
         let suffix = typed_data::<sdk::tool_result::EditResult>(result_payload)
             .map(|r| format!(" (Replaced {})", r.replacements_made))
             .unwrap_or_default();
-        build_header_line(self.display_name(), &rel, &suffix)
+        build_header_line(self.display_name(), &header_text, &suffix)
     }
-    fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
-        // old/new 内容由 result 子块的 diff 渲染展示
-        vec![]
+    fn format_details(&self, input: &serde_json::Value) -> Vec<String> {
+        let args = parse_input::<EditInput>(input);
+        let mut lines = Vec::new();
+        if !args.file_path.is_empty() {
+            lines.push(args.file_path.clone());
+        }
+        lines.push(format!(
+            "Changed {} -> {} chars",
+            args.old_string.len(),
+            args.new_string.len()
+        ));
+        lines
     }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
             header: HeaderPolicy::Standard,
-            details: DetailsPolicy::Hidden,
+            details: DetailsPolicy::Expanded,
             result: ResultPolicy::Visible {
                 max_lines: None, // 全部显示
                 render_kind: ResultRender::Diff,

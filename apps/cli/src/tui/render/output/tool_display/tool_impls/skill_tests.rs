@@ -11,7 +11,7 @@ fn header_uses_only_identity_and_hides_details_and_result() {
         display.render_policy(),
         ToolRenderPolicy {
             header: HeaderPolicy::Standard,
-            details: DetailsPolicy::Hidden,
+            details: DetailsPolicy::Expanded,
             result: ResultPolicy::Hidden,
         }
     );

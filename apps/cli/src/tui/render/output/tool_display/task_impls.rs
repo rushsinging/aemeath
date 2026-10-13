@@ -1,4 +1,5 @@
 use super::common::{truncate_ellipsis, typed_data};
+use super::tool_impls::helpers::format_goal_header;
 use super::{
     DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
     ToolRenderPolicy,
@@ -72,6 +73,9 @@ impl ToolDisplay for TaskCreateDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let args = parse_input::<TaskCreateInput>(input);
+        if !args.goal.trim().is_empty() {
+            return format!("{} {}", self.display_name(), args.goal.trim());
+        }
         if args.subject.is_empty() {
             return self.display_name().to_string();
         }
@@ -111,6 +115,9 @@ impl ToolDisplay for TaskUpdateDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let args = parse_input::<TaskUpdateInput>(input);
+        if !args.goal.trim().is_empty() {
+            return format!("{} {}", self.display_name(), args.goal.trim());
+        }
         if args.task_id.is_empty() {
             return self.display_name().to_string();
         }
@@ -215,6 +222,9 @@ impl ToolDisplay for TaskBlockByDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let args = parse_input::<TaskBlockByInput>(input);
+        if !args.goal.trim().is_empty() {
+            return format!("{} {}", self.display_name(), args.goal.trim());
+        }
         if args.id.is_empty() {
             return self.display_name().to_string();
         }
@@ -257,8 +267,12 @@ impl ToolDisplay for TaskListGetDisplay {
     fn name(&self) -> &str {
         "TaskListGet"
     }
-    fn format_header(&self, _input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        self.display_name().to_string()
+    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
+        let goal = input
+            .get("goal")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        format_goal_header(self.display_name(), goal, "")
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -309,8 +323,12 @@ impl ToolDisplay for TaskListsDisplay {
     fn name(&self) -> &str {
         "TaskLists"
     }
-    fn format_header(&self, _input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        self.display_name().to_string()
+    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
+        let goal = input
+            .get("goal")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        format_goal_header(self.display_name(), goal, "")
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -355,6 +373,9 @@ impl ToolDisplay for TaskListCreateDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let args = parse_input::<TaskListCreateInput>(input);
+        if !args.goal.trim().is_empty() {
+            return format!("{} {}", self.display_name(), args.goal.trim());
+        }
         if args.subject.is_empty() {
             self.display_name().to_string()
         } else {
@@ -384,8 +405,12 @@ impl ToolDisplay for TaskListCompleteDisplay {
     fn name(&self) -> &str {
         "TaskListComplete"
     }
-    fn format_header(&self, _input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
-        self.display_name().to_string()
+    fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
+        let goal = input
+            .get("goal")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        format_goal_header(self.display_name(), goal, "")
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -412,6 +437,9 @@ impl ToolDisplay for TaskGetDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let args = parse_input::<TaskGetInput>(input);
+        if !args.goal.trim().is_empty() {
+            return format!("{} {}", self.display_name(), args.goal.trim());
+        }
         if args.task_id.is_empty() {
             self.display_name().to_string()
         } else {
@@ -456,6 +484,9 @@ impl ToolDisplay for TaskStopDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let args = parse_input::<TaskStopInput>(input);
+        if !args.goal.trim().is_empty() {
+            return format!("{} {}", self.display_name(), args.goal.trim());
+        }
         if args.task_id.is_empty() {
             self.display_name().to_string()
         } else {
