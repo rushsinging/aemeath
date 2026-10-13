@@ -62,7 +62,6 @@ fn convert_messages_strips_metadata() {
             hook_notice: None,
             skill_request: None,
             created_at: None,
-            system_reminder: false,
         }),
     };
     let result = convert_messages(&[msg]);

@@ -13,16 +13,20 @@ impl Message {
         }
     }
 
-    /// invocation-only 系统提醒合成消息（reminder 管线 TailUserMessage
-    /// 落盘形态）：metadata 头置 `system_reminder` 标志，TUI 按标志隐藏。
-    pub fn system_reminder_user(text: impl Into<String>) -> Self {
+    /// TailUserMessage 落盘形态：content 全为 Reminder blocks（可多条）。
+    /// TUI 按 `type=reminder` 隐藏；LLM 出站由 provider 渲染 XML envelope。
+    pub fn reminder(blocks: Vec<ContentBlock>) -> Self {
+        debug_assert!(
+            !blocks.is_empty()
+                && blocks
+                    .iter()
+                    .all(|block| matches!(block, ContentBlock::Reminder { .. })),
+            "Message::reminder 要求非空且全为 Reminder blocks"
+        );
         Self {
             role: Role::User,
-            content: vec![ContentBlock::Text { text: text.into() }],
-            metadata: Some(MessageMetadata {
-                system_reminder: true,
-                ..MessageMetadata::default()
-            }),
+            content: blocks,
+            metadata: Some(MessageMetadata::default()),
         }
     }
 
@@ -44,7 +48,6 @@ impl Message {
                 hook_notice: None,
                 skill_request: None,
                 created_at: None,
-                system_reminder: false,
             }),
         }
     }
@@ -58,7 +61,6 @@ impl Message {
                 hook_notice: Some(notice),
                 skill_request: None,
                 created_at: None,
-                system_reminder: false,
             }),
         }
     }
@@ -72,7 +74,6 @@ impl Message {
                 hook_notice: None,
                 skill_request: Some(payload),
                 created_at: None,
-                system_reminder: false,
             }),
         }
     }

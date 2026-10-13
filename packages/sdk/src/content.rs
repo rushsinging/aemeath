@@ -47,6 +47,14 @@ pub enum ContentBlock {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         signature: Option<String>,
     },
+    /// TailUserMessage 落盘形态（与 share::ContentBlock::Reminder 同形）。
+    Reminder {
+        kind: String,
+        version: u32,
+        at: String,
+        seq: u64,
+        body: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]

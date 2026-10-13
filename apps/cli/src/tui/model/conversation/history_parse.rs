@@ -45,6 +45,17 @@ impl std::fmt::Display for HistoryDisplayParseError {
 
 impl HistoryDisplayMessage {
     pub(crate) fn parse(msg: &TuiChatMessage) -> Result<Self, HistoryDisplayParseError> {
+        // resume 后隐藏 system reminder：content 全为 Reminder 的消息直接按
+        // "非用户可见" 跳过（与 TuiMessageSource::SystemGenerated 同路径）。
+        // 构造器保证一条 Message 的 content 要么全是 Reminder，要么不含 Reminder。
+        if !msg.content.is_empty()
+            && msg
+                .content
+                .iter()
+                .all(|block| matches!(block, TuiContentBlock::Reminder { .. }))
+        {
+            return Err(HistoryDisplayParseError::NonUserVisibleMessage);
+        }
         if msg.role == "user" {
             match msg.source {
                 crate::tui::adapter::runtime_view::TuiMessageSource::SkillRequest => {
@@ -135,6 +146,10 @@ fn parse_history_assistant(
                     "image".to_string(),
                 ))
             }
+            TuiContentBlock::Reminder { .. } => {
+                // 纯 reminder 消息已在 HistoryDisplayMessage::parse 入口隐藏；
+                // 此处兜底混合内容：同样不渲染。
+            }
         }
     }
     if parsed.is_empty() {
@@ -217,6 +232,13 @@ fn parse_history_user_blocks(
                 // `clone()` 避免移动后无法在其它分支复用。
                 Ok(HistoryUserBlock::Image(
                     placeholder.clone().unwrap_or_else(|| "[Image]".to_string()),
+                ))
+            }
+            TuiContentBlock::Reminder { .. } => {
+                // 纯 reminder 消息已在 HistoryDisplayMessage::parse 入口隐藏；
+                // 混合内容（违反构造器不变量）按不支持的块类型报错。
+                Err(HistoryDisplayParseError::UnsupportedUserBlock(
+                    "reminder".to_string(),
                 ))
             }
         })

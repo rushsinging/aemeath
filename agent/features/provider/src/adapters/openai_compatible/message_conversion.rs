@@ -106,6 +106,21 @@ impl OpenAICompatibleProvider {
                             None => thinking.clone(),
                         });
                     }
+                    ContentBlock::Reminder {
+                        kind,
+                        version,
+                        at,
+                        seq,
+                        body,
+                    } => {
+                        // 与 Text 同路径：渲染为 <system-reminder> XML envelope。
+                        content_parts.push(serde_json::json!({
+                            "type": "text",
+                            "text": ContentBlock::reminder_to_llm_envelope(
+                                kind, *version, at, *seq, body,
+                            )
+                        }));
+                    }
                 }
             }
 

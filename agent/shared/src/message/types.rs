@@ -59,13 +59,6 @@ pub struct MessageMetadata {
     /// Context window 渲染时据此生成 LLM 时间前缀，canonical 文本与 TUI 显示不消费。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<DateTime<FixedOffset>>,
-    /// invocation-only 系统提醒合成消息标志（reminder 管线注入的
-    /// TailUserMessage 落盘时置位）：TUI 会话加载渲染按此**标志位**隐藏
-    /// ——NEVER 渲染路径文本匹配剥离（envelope 格式演进曾使前缀匹配
-    /// 失效，resume 后历史 reminder 原样显示）。LLM 侧不受影响：provider
-    /// 出站照发正文（上下文连续性是 TailUserMessage 落盘语义）。
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub system_reminder: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -170,6 +163,21 @@ pub enum ContentBlock {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         signature: Option<String>,
     },
+    /// TailUserMessage 落盘形态：属性与去 envelope 标签的正文同层。
+    /// 出站 → LLM 时渲染为 `<system-reminder ...>` XML；→ TUI 时按 type 隐藏。
+    /// 一条 Message 的 content 要么全是 Reminder，要么不含 Reminder（不与 Text/tool_result 混放）。
+    Reminder {
+        /// wire kind（连字符）：background-process / memory-updated / …
+        kind: String,
+        /// envelope version（当前恒为 1）
+        version: u32,
+        /// 注入时刻 RFC3339
+        at: String,
+        /// 管线序号
+        seq: u64,
+        /// 去外层 `<system-reminder>` 后的正文
+        body: String,
+    },
 }
 
 impl ContentBlock {
@@ -207,6 +215,41 @@ impl ContentBlock {
         matches!(self, ContentBlock::ToolResult { .. })
     }
 
+    /// Returns true if this is a Reminder block.
+    pub fn is_reminder(&self) -> bool {
+        matches!(self, ContentBlock::Reminder { .. })
+    }
+
+    /// 构造 typed Reminder block（kind 应为 wire 连字符形式）。
+    pub fn reminder(
+        kind: impl Into<String>,
+        version: u32,
+        at: impl Into<String>,
+        seq: u64,
+        body: impl Into<String>,
+    ) -> Self {
+        ContentBlock::Reminder {
+            kind: kind.into(),
+            version,
+            at: at.into(),
+            seq,
+            body: body.into(),
+        }
+    }
+
+    /// Reminder → LLM 出站 XML envelope（与历史 `compose_reminder_envelope` 同形）。
+    pub fn reminder_to_llm_envelope(
+        kind: &str,
+        version: u32,
+        at: &str,
+        seq: u64,
+        body: &str,
+    ) -> String {
+        format!(
+            "<system-reminder kind=\"{kind}\" version=\"{version}\" at=\"{at}\" seq=\"{seq}\">\n{body}\n</system-reminder>"
+        )
+    }
+
     /// Create a base64 image ContentBlock.
     pub fn base64_image(data: String, media_type: String) -> Self {
         ContentBlock::Image {
@@ -236,6 +279,15 @@ impl ContentBlock {
                 },
                 is_error: *is_error,
                 text: None,
+            },
+            ContentBlock::Reminder {
+                kind,
+                version,
+                at,
+                seq,
+                body,
+            } => ContentBlock::Text {
+                text: Self::reminder_to_llm_envelope(kind, *version, at, *seq, body),
             },
             other => other.clone(),
         }

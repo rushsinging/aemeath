@@ -306,18 +306,22 @@ fn loaded_step_cache_is_bounded() {
     assert_eq!(backing.items()[0].id, "history-step-0");
 }
 
-// ── #1890/#1695：system_reminder 标志位隐藏（渲染 NEVER 文本匹配） ──
+// ── typed Reminder ContentBlock：resume / window 路径隐藏 ──
 
 #[test]
-fn system_reminder_messages_are_hidden_by_flag() {
+fn reminder_messages_are_hidden_on_inline_resume() {
     let backing = sdk::LocalSessionResumeBacking {
         steps: vec![sdk::LocalResumedSessionStep {
             run_id: "run-1".to_string(),
             step_id: "step-1".to_string(),
             message_segments: vec![std::sync::Arc::from(vec![
-                sdk::LocalResumeMessage::system_reminder_user(
-                    "<system-reminder kind=\"background-process\">hidden body</system-reminder>",
-                ),
+                sdk::LocalResumeMessage::reminder(vec![sdk::LocalResumeContentBlock::reminder(
+                    "background-process",
+                    1,
+                    "2026-10-13T15:10:41Z",
+                    2,
+                    "━━ Background process completed ━━",
+                )]),
                 sdk::LocalResumeMessage::user("visible input"),
             ])],
             finalize_cause: None,
@@ -329,17 +333,43 @@ fn system_reminder_messages_are_hidden_by_flag() {
         compacted: false,
     };
     let resumed = ResumedHistoryBacking::from_sdk(backing);
-    let items = resumed.items().to_vec();
-    let kinds = items.iter().map(|item| &item.kind).collect::<Vec<_>>();
-    assert!(!kinds.is_empty(), "普通用户消息渲染：{kinds:?}");
-    // 标志隐藏：reminder 消息不产生任何 item——普通输入消息产生的
-    // item 数量应恰好等于其自身（1 条 user message → UserMessage item）。
-    let user_message_items = kinds
+    let user_message_items = resumed
+        .items()
         .iter()
-        .filter(|kind| matches!(kind, ResumedHistoryItemKind::UserMessage { .. }))
+        .filter(|item| matches!(item.kind, ResumedHistoryItemKind::UserMessage { .. }))
+        .count();
+    assert_eq!(user_message_items, 1, "仅普通用户输入渲染，Reminder 隐藏");
+}
+
+#[test]
+fn reminder_messages_are_hidden_on_display_history_window() {
+    let mut backing = ResumedHistoryBacking::from_index(index("session", 7, 1));
+    let mut loaded = window("session", 7, 0);
+    loaded.steps[0].messages = vec![
+        TuiChatMessage {
+            role: "user".to_string(),
+            content: vec![TuiContentBlock::Reminder {
+                kind: "background-process".to_string(),
+                version: 1,
+                at: "2026-10-13T15:10:41Z".to_string(),
+                seq: 2,
+                body: "━━ Background process completed ━━".to_string(),
+            }],
+            input_id: None,
+            source: TuiMessageSource::User,
+            hook_notice: None,
+            skill_request: None,
+        },
+        TuiChatMessage::user_text("visible user input"),
+    ];
+    assert!(backing.apply_window(loaded));
+    let user_message_items = backing
+        .items()
+        .iter()
+        .filter(|item| matches!(item.kind, ResumedHistoryItemKind::UserMessage { .. }))
         .count();
     assert_eq!(
         user_message_items, 1,
-        "仅普通用户输入渲染，reminder 按标志隐藏：{kinds:?}"
+        "window 路径保留 Reminder 类型后必须隐藏，不能当普通用户消息"
     );
 }

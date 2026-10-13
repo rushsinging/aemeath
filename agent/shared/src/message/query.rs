@@ -51,6 +51,11 @@ impl Message {
         self.content.iter().any(|b| b.is_tool_result())
     }
 
+    /// content 非空且全为 Reminder（TUI / resume 隐藏判定）。
+    pub fn is_reminder_message(&self) -> bool {
+        !self.content.is_empty() && self.content.iter().all(|block| block.is_reminder())
+    }
+
     /// Returns the tool_use_ids of ToolResult blocks in this message.
     pub fn tool_result_ids(&self) -> Vec<&str> {
         self.content

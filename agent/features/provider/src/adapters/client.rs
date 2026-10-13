@@ -536,6 +536,9 @@ impl LlmClient {
                 share::message::ContentBlock::Image { .. } => {
                     serde_json::json!({"type":"image","preview":"[image data]"})
                 }
+                share::message::ContentBlock::Reminder { kind, body, .. } => {
+                    serde_json::json!({"type":"reminder","kind":kind,"preview":truncate_preview(body,200)})
+                }
             }).collect();
             serde_json::json!({"index":i,"role":format!("{:?}",msg.role).to_lowercase(),"blocks":blocks})
         }).collect();
@@ -552,6 +555,16 @@ impl LlmClient {
                     content.to_string().len()
                 }
                 share::message::ContentBlock::Image { .. } => 0,
+                share::message::ContentBlock::Reminder {
+                    kind,
+                    version,
+                    at,
+                    seq,
+                    body,
+                } => share::message::ContentBlock::reminder_to_llm_envelope(
+                    kind, *version, at, *seq, body,
+                )
+                .len(),
             })
             .sum();
         log::debug!(target: crate::LOG_TARGET,

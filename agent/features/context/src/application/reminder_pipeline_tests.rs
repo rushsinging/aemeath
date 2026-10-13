@@ -452,9 +452,16 @@ fn injected_reminders_persist_on_finalize_and_flush_once() {
     let pending = pipeline.take_pending_persist_messages();
     assert_eq!(pending.len(), 1, "注入轮产出待落盘消息");
     assert!(
-        pending[0].text_content().contains("kind=\"task-progress\""),
-        "落盘消息带统一 envelope"
+        pending[0].is_reminder_message(),
+        "落盘为 typed Reminder Message"
     );
+    match &pending[0].content[0] {
+        share::message::ContentBlock::Reminder { kind, version, .. } => {
+            assert_eq!(kind, "task-progress");
+            assert_eq!(*version, 1);
+        }
+        other => panic!("期望 Reminder block，得到 {other:?}"),
+    }
     assert_eq!(
         pipeline.take_pending_persist_messages().len(),
         0,

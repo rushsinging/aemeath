@@ -1070,6 +1070,19 @@ fn content_block(value: sdk::ContentBlock) -> TuiContentBlock {
             thinking,
             signature,
         },
+        sdk::ContentBlock::Reminder {
+            kind,
+            version,
+            at,
+            seq,
+            body,
+        } => TuiContentBlock::Reminder {
+            kind,
+            version,
+            at,
+            seq,
+            body,
+        },
     }
 }
 

@@ -409,6 +409,19 @@ pub fn build_compact_request(
                 ContentBlock::Thinking { .. } => {
                     // 思考块是内部的，在压缩摘要中跳过
                 }
+                ContentBlock::Reminder {
+                    kind,
+                    version,
+                    at,
+                    seq,
+                    body,
+                } => {
+                    // 与 Text 同路径（旧 system_reminder Text 语义）：
+                    // 出站 envelope 文本原样进入摘要语料。
+                    let envelope =
+                        ContentBlock::reminder_to_llm_envelope(kind, *version, at, *seq, body);
+                    conversation_text.push_str(&format!("[{role}]: {envelope}\n\n"));
+                }
             }
         }
     }
