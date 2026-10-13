@@ -39,7 +39,11 @@ impl TypedTool for AgentTool {
     }
 
     fn timeout_secs(&self) -> u64 {
-        3600 // 60 minutes — sub-agents run multi-run LLM conversations
+        SUB_AGENT_DEFAULT_TIMEOUT_SECS
+    }
+
+    fn max_timeout_secs(&self) -> u64 {
+        SUB_AGENT_TIMEOUT_CAP_SECS
     }
 
     fn cancellation(&self) -> crate::domain::published_language::CancellationDeclaration {
@@ -64,10 +68,11 @@ impl TypedTool for AgentTool {
         let prompt = args.prompt.as_str();
 
         let cwd = ctx.workspace_read().current_path_base();
-        let timeout_secs = args
-            .timeout
-            .unwrap_or(SUB_AGENT_DEFAULT_TIMEOUT_SECS)
-            .min(SUB_AGENT_TIMEOUT_CAP_SECS);
+        let timeout_secs = crate::domain::timeout_policy::resolve_tool_timeout(
+            args.timeout,
+            SUB_AGENT_DEFAULT_TIMEOUT_SECS,
+            SUB_AGENT_TIMEOUT_CAP_SECS,
+        );
         let timeout = std::time::Duration::from_secs(timeout_secs);
         let runner = match ctx.agent_dispatch() {
             Some(r) => r,
@@ -89,7 +94,7 @@ CRITICAL — Context budget:
 - Use Grep to find specific code instead of reading entire files — this is much more token-efficient.
 - Use Glob to discover files, then read only the most relevant ones.
 - NEVER read more than 3 files per tool call round.
-- This Run has a wall-clock timeout: {timeout_secs} seconds (0 means unlimited). StuckGuard independently detects repeated text, tool loops, and blocked completion.
+- This Run has a wall-clock timeout: {timeout_secs} seconds. StuckGuard independently detects repeated text, tool loops, and blocked completion.
 - You cannot use TaskData*, AskUserQuestion, or Agent tools. TaskData tracking and user clarification belong to the parent agent.
 - If the task is ambiguous or needs user input, return a concise `blocked:` explanation instead of asking the user.
 

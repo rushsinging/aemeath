@@ -31,6 +31,7 @@ pub mod skill_tool;
 pub mod suspension;
 #[cfg(any(test, feature = "test-harness"))]
 pub mod test_support;
+pub mod timeout_policy;
 pub mod tool;
 #[cfg(test)]
 #[path = "domain/tool_tests.rs"]

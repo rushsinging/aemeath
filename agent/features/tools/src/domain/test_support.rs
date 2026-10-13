@@ -252,6 +252,7 @@ pub fn sequential_test_tool_catalog(
         concurrency: crate::domain::published_language::ConcurrencyDeclaration::serialized(),
         cancellation: crate::domain::published_language::CancellationDeclaration::NonCooperative,
         timeout_secs,
+        max_timeout_secs: crate::domain::constants::DEFAULT_TOOL_MAX_TIMEOUT_SECS,
         read_only: true,
         input_safety: crate::domain::published_language::InputSafetyDeclaration::Always,
         data_schema: serde_json::json!({}),

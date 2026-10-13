@@ -309,6 +309,10 @@ impl TypedTool for BackgroundProcessWatchTool {
         WATCH_TOOL_TIMEOUT_SECS
     }
 
+    fn max_timeout_secs(&self) -> u64 {
+        WATCH_TOOL_TIMEOUT_SECS
+    }
+
     async fn call(
         &self,
         input: Value,

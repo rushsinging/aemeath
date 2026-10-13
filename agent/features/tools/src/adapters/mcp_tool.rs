@@ -39,6 +39,10 @@ impl TypedTool for McpTool {
         false
     }
 
+    fn supports_configurable_timeout(&self) -> bool {
+        false
+    }
+
     async fn call(
         &self,
         input: Value,

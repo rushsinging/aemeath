@@ -11,6 +11,7 @@ use tools::published::execution::{
     CancellationDeclaration, CancellationSignal, CleanupConfirmation, ToolExecutionContext,
     ToolExecutionPort, ToolInvocation,
 };
+use tools::types::{extract_timeout_from_input, resolve_tool_timeout};
 use tools::ToolCatalogSnapshot;
 
 use crate::application::constants::DEFAULT_GRACE;
@@ -260,6 +261,11 @@ impl ToolExecutionSupervisor {
         self.context
             .advance_tool_receipt(ToolReceiptMutationData::running(call.identity.clone()))
             .await?;
+        let tool_timeout_secs = resolve_tool_timeout(
+            extract_timeout_from_input(&call.invocation.input),
+            descriptor.timeout_secs,
+            descriptor.max_timeout_secs,
+        );
         log::debug!(
             target: crate::LOG_TARGET,
             "tool execution started: run_id={} step_id={} call_id={} tool={} timeout_secs={} cancellation={:?}",
@@ -267,7 +273,7 @@ impl ToolExecutionSupervisor {
             call.identity.step_id,
             call.identity.runtime_call_id,
             call.identity.tool_name,
-            descriptor.timeout_secs,
+            tool_timeout_secs,
             descriptor.cancellation,
         );
         let started = std::time::Instant::now();
@@ -275,7 +281,7 @@ impl ToolExecutionSupervisor {
         let effective_deadline = earliest_deadline(
             call.invocation.execution_scope.deadline(),
             call.run_deadline,
-            Some(SystemTime::now() + Duration::from_secs(descriptor.timeout_secs)),
+            Some(SystemTime::now() + Duration::from_secs(tool_timeout_secs)),
         );
         log::debug!(
             target: crate::LOG_TARGET,

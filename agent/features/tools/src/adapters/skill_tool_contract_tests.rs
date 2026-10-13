@@ -93,7 +93,15 @@ async fn main_and_sub_catalog_publish_exact_skill_schema_and_execute_body() {
 
     let expected = json!({
         "type": "object",
-        "properties": { "skill": { "type": "string", "minLength": 1 } },
+        "properties": {
+            "skill": { "type": "string", "minLength": 1 },
+            "timeout": {
+                "type": "integer",
+                "description": "Timeout in seconds (default 120, max 3600)",
+                "minimum": 1,
+                "maximum": 3600
+            }
+        },
         "required": ["skill"],
         "additionalProperties": false
     });

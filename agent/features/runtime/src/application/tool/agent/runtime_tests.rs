@@ -661,14 +661,14 @@ async fn test_execute_tools_timeout_message_distinguishes_tool_call_execution() 
             serde_json::json!({"type": "object"})
         }
         fn timeout_secs(&self) -> u64 {
-            0
+            1
         }
         async fn call(
             &self,
             _input: Value,
             _ctx: &ToolExecutionContext,
         ) -> TypedToolResult<Self::Output> {
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
             TypedToolResult::success("too late", Value::Null)
         }
     }
@@ -816,7 +816,7 @@ async fn test_execute_tools_deadline_notifies_cooperative_tool_cancellation() {
             serde_json::json!({"type": "object"})
         }
         fn timeout_secs(&self) -> u64 {
-            0
+            1
         }
         fn cancellation(&self) -> tools::published::execution::CancellationDeclaration {
             tools::published::execution::CancellationDeclaration::Cooperative

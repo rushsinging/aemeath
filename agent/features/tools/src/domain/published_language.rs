@@ -94,8 +94,11 @@ pub struct ToolDescriptor {
     pub concurrency: ConcurrencyDeclaration,
     /// 取消声明。
     pub cancellation: CancellationDeclaration,
-    /// Runtime-owned timeout policy reads this value; dispatch does not enforce it.
+    /// 省略入参 `timeout` 时的默认秒数；Runtime 结合入参与 `max_timeout_secs` 计算 effective deadline。
     pub timeout_secs: u64,
+    /// 入参 `timeout` 上限（秒）。serde default 兼容旧快照。
+    #[serde(default = "crate::domain::timeout_policy::default_tool_max_timeout_secs")]
+    pub max_timeout_secs: u64,
     /// Value-only approval declarations (no executable Tool callback escapes Catalog).
     pub read_only: bool,
     pub input_safety: InputSafetyDeclaration,

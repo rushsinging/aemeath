@@ -58,8 +58,19 @@ pub trait Tool: Send + Sync {
         false
     }
 
+    /// 省略入参 `timeout` 时的默认秒数（框架 effective deadline 与业务默认对齐）。
     fn timeout_secs(&self) -> u64 {
         120
+    }
+
+    /// 入参 `timeout` 可设置的上限（秒）。通用默认 3600；Agent/Watch 可覆盖。
+    fn max_timeout_secs(&self) -> u64 {
+        crate::domain::constants::DEFAULT_TOOL_MAX_TIMEOUT_SECS
+    }
+
+    /// 是否在 input schema 暴露可配置 `timeout`（MCP 动态工具为 false）。
+    fn supports_configurable_timeout(&self) -> bool {
+        true
     }
 
     fn cancellation(&self) -> crate::domain::published_language::CancellationDeclaration {
@@ -169,8 +180,19 @@ pub trait TypedTool: Send + Sync {
         false
     }
 
+    /// 省略入参 `timeout` 时的默认秒数。
     fn timeout_secs(&self) -> u64 {
         120
+    }
+
+    /// 入参 `timeout` 上限（秒）。
+    fn max_timeout_secs(&self) -> u64 {
+        crate::domain::constants::DEFAULT_TOOL_MAX_TIMEOUT_SECS
+    }
+
+    /// 是否在 input schema 暴露可配置 `timeout`（MCP 为 false）。
+    fn supports_configurable_timeout(&self) -> bool {
+        true
     }
 
     fn cancellation(&self) -> crate::domain::published_language::CancellationDeclaration {
@@ -217,7 +239,16 @@ impl<T: TypedTool> Tool for TypedToolAdapter<T> {
     }
 
     fn input_schema(&self) -> Value {
-        self.0.input_schema()
+        let schema = self.0.input_schema();
+        if self.0.supports_configurable_timeout() {
+            crate::domain::timeout_policy::inject_timeout_into_input_schema(
+                schema,
+                self.0.timeout_secs(),
+                self.0.max_timeout_secs(),
+            )
+        } else {
+            schema
+        }
     }
 
     fn data_schema(&self) -> Value {
@@ -238,6 +269,14 @@ impl<T: TypedTool> Tool for TypedToolAdapter<T> {
 
     fn timeout_secs(&self) -> u64 {
         self.0.timeout_secs()
+    }
+
+    fn max_timeout_secs(&self) -> u64 {
+        self.0.max_timeout_secs()
+    }
+
+    fn supports_configurable_timeout(&self) -> bool {
+        self.0.supports_configurable_timeout()
     }
 
     fn cancellation(&self) -> crate::domain::published_language::CancellationDeclaration {

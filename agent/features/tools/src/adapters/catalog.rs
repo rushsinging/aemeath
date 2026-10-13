@@ -141,6 +141,7 @@ impl crate::domain::ToolCatalogPort for CatalogAdapter {
                     },
                     cancellation: tool.cancellation(),
                     timeout_secs: tool.timeout_secs(),
+                    max_timeout_secs: tool.max_timeout_secs(),
                     read_only: tool.is_read_only(),
                     background_log_direct: tool.background_log_direct(),
                     input_safety: if tool.name().eq_ignore_ascii_case("bash") {

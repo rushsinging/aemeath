@@ -209,15 +209,24 @@ fn test_exit_worktree_schema() {
     let schema = tool.input_schema();
 
     assert_eq!(schema["type"], "object");
-    // ExitWorktree 无输入字段：path 参数已移除，输入 schema 必须为空。
+    // path 已移除；仅允许框架统一的可选 timeout。
+    let props = schema
+        .get("properties")
+        .and_then(|v| v.as_object())
+        .expect("ExitWorktree schema should have properties");
     assert!(
-        schema
-            .get("properties")
-            .and_then(|v| v.as_object())
-            .is_none_or(|props| props.is_empty()),
-        "ExitWorktree 不应声明任何输入字段，got: {schema}"
+        props.contains_key("timeout"),
+        "ExitWorktree should declare timeout, got: {schema}"
     );
-    // 无字段：不含 required 键（或为空数组）。
+    assert!(
+        !props.contains_key("path"),
+        "ExitWorktree must not declare path, got: {schema}"
+    );
+    assert_eq!(
+        props.len(),
+        1,
+        "ExitWorktree should only declare timeout, got: {schema}"
+    );
     assert!(schema
         .get("required")
         .and_then(|v| v.as_array())
