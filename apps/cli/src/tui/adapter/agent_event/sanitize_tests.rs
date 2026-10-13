@@ -4,9 +4,7 @@
 //! （ToolSearch 等）必须保持对象形状，只逐条截断大字段并按预算收敛，
 //! 保证 `format_result_lines` 仍能反序列化并渲染结构化行。
 
-use super::super::constants::{
-    TOOL_RESULT_PREVIEW_LIMIT, TOOL_SEARCH_DESCRIPTION_BUDGET_CHARS, TOOL_SEARCH_ITEM_BUDGET,
-};
+use super::super::constants::{TOOL_RESULT_PREVIEW_LIMIT, TOOL_SEARCH_DESCRIPTION_BUDGET_CHARS};
 use super::sanitize_tool_result_content;
 use serde_json::{json, Value};
 
@@ -33,12 +31,33 @@ fn deserialize(content: &Value) -> ToolSearchResult {
 }
 
 #[test]
-fn oversized_tool_search_keeps_object_shape() {
+fn tool_search_within_raised_limit_keeps_every_item() {
     let raw = tool_search_result(95);
     let bytes = raw.to_string().len();
     assert!(
+        bytes > 16 * 1024,
+        "前置条件：结果应超过旧 16KB 限额，实际 {bytes}"
+    );
+    assert!(
+        bytes <= TOOL_RESULT_PREVIEW_LIMIT,
+        "前置条件：结果应在 64KB 限额内，实际 {bytes}"
+    );
+
+    let sanitized = sanitize_tool_result_content("ToolSearch", raw.clone());
+
+    assert_eq!(
+        sanitized, raw,
+        "限额提升到 64KB 后，95 条结果应原样保留（不裁剪、不标省略）"
+    );
+}
+
+#[test]
+fn oversized_tool_search_keeps_object_shape() {
+    let raw = tool_search_result(300);
+    let bytes = raw.to_string().len();
+    assert!(
         bytes > TOOL_RESULT_PREVIEW_LIMIT,
-        "前置条件：构造结果应超过预览限额，实际 {bytes}"
+        "前置条件：构造结果应超过 64KB 限额，实际 {bytes}"
     );
 
     let sanitized = sanitize_tool_result_content("ToolSearch", raw);
@@ -54,10 +73,10 @@ fn oversized_tool_search_keeps_object_shape() {
     );
 
     let result = deserialize(&sanitized);
-    assert_eq!(
-        result.tools.len(),
-        TOOL_SEARCH_ITEM_BUDGET,
-        "条目数应被收敛到条目预算"
+    assert!(
+        !result.tools.is_empty() && result.tools.len() < 300,
+        "应按 64KB 预算保留最大可容纳前缀，实际 {}",
+        result.tools.len()
     );
     let marker = sanitized["tools_truncated"]
         .as_str()
@@ -66,18 +85,18 @@ fn oversized_tool_search_keeps_object_shape() {
         .split_once('/')
         .map(|(total, omitted)| (total.to_owned(), omitted.to_owned()))
         .expect("省略标记格式应为 total/omitted");
-    assert_eq!(total, "95");
-    assert_eq!(omitted, (95 - TOOL_SEARCH_ITEM_BUDGET).to_string());
+    assert_eq!(total, "300");
+    assert_eq!(omitted, (300 - result.tools.len()).to_string());
     assert_eq!(result.tools[0].name, "tool_0", "保留前 N 条的顺序");
 }
 
 #[test]
 fn oversized_tool_description_is_truncated_per_item() {
-    let mut raw = tool_search_result(60);
+    let mut raw = tool_search_result(300);
     raw["tools"][0]["description"] = json!("d".repeat(4000));
     assert!(
         raw.to_string().len() > TOOL_RESULT_PREVIEW_LIMIT,
-        "前置条件：含超长描述的结果应超过预览限额"
+        "前置条件：含超长描述的结果应超过 64KB 限额"
     );
 
     let sanitized = sanitize_tool_result_content("ToolSearch", raw);
@@ -129,7 +148,7 @@ fn unregistered_tool_truncates_long_fields_but_keeps_shape() {
 
 #[test]
 fn unconvergent_shape_still_degrades_to_string() {
-    let items: Vec<Value> = (0..5000).map(|_| json!("x")).collect();
+    let items: Vec<Value> = (0..20_000).map(|_| json!("x")).collect();
     let raw = json!({ "items": items });
     assert!(raw.to_string().len() > TOOL_RESULT_PREVIEW_LIMIT);
 
@@ -146,7 +165,7 @@ fn unconvergent_shape_still_degrades_to_string() {
 fn sanitized_oversized_result_still_renders_structured_lines() {
     use crate::tui::render::output::tool_display::lookup_display;
 
-    let raw = tool_search_result(95);
+    let raw = tool_search_result(300);
     let sanitized = sanitize_tool_result_content("ToolSearch", raw);
 
     let display = lookup_display("ToolSearch").expect("ToolSearch 已注册 ToolDisplay");
@@ -154,7 +173,11 @@ fn sanitized_oversized_result_still_renders_structured_lines() {
         .format_result_lines(Some(&sanitized))
         .expect("sanitize 后仍应产出 typed 行");
 
-    assert_eq!(lines.len(), TOOL_SEARCH_ITEM_BUDGET);
+    assert!(
+        lines.len() > 15,
+        "超限收敛后仍应产出足量结构化行，实际 {}",
+        lines.len()
+    );
     let first = &lines[0];
     assert!(
         first.contains("tool ·") || first.starts_with("tool "),

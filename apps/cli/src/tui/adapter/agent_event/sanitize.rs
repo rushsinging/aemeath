@@ -1,7 +1,6 @@
 use super::constants::{
     STRUCTURED_MARKER_RESERVE_BYTES, TOOL_LARGE_FIELD_PREVIEW_LIMIT, TOOL_RESULT_PREVIEW_LIMIT,
-    TOOL_SEARCH_DESCRIPTION_BUDGET_CHARS, TOOL_SEARCH_ITEM_BUDGET, TOOL_STREAM_PREVIEW_LIMIT,
-    TUI_OMISSION_SUFFIX_MARKER,
+    TOOL_SEARCH_DESCRIPTION_BUDGET_CHARS, TOOL_STREAM_PREVIEW_LIMIT, TUI_OMISSION_SUFFIX_MARKER,
 };
 use crate::tui::text::safe_str_slice_by_char;
 use serde_json::{Map, Value};
@@ -48,7 +47,9 @@ pub(super) fn sanitize_tool_result_content(tool_name: &str, content: Value) -> V
 /// - 其他工具：通用策略——只截长字符串字段，保持对象/数组形状。
 fn truncate_structured_object(tool_name: &str, value: Value) -> Option<Value> {
     if tool_name == "ToolSearch" {
-        return Some(truncate_tool_search_result(value));
+        if let Some(converged) = truncate_tool_search_result(value.clone()) {
+            return Some(converged);
+        }
     }
     let truncated = truncate_long_string_fields(value);
     (truncated.to_string().len() <= TOOL_RESULT_PREVIEW_LIMIT).then_some(truncated)
@@ -88,37 +89,45 @@ fn truncate_long_string(text: String) -> Value {
 ///
 /// 输出始终是合法 JSON 对象（形状 `{"tools":[…], "tools_truncated"?: "total/omitted"}`），
 /// 保证下游 `ToolSearchResult` 反序列化与结构化行渲染不失效。
-fn truncate_tool_search_result(value: Value) -> Value {
+fn truncate_tool_search_result(value: Value) -> Option<Value> {
     let Value::Object(mut object) = value else {
-        return truncate_json_value(value, "ToolSearch", "content");
+        return None;
     };
     let Some(tools) = object.remove("tools") else {
-        return Value::Object(object);
+        return None;
     };
     let Value::Array(tools) = tools else {
-        return Value::Object(object);
+        return None;
     };
     let total = tools.len();
-    let truncated: Vec<Value> = tools
-        .into_iter()
-        .take(TOOL_SEARCH_ITEM_BUDGET)
-        .map(truncate_tool_search_item)
-        .collect();
+    let mut kept: Vec<Value> = tools.into_iter().map(truncate_tool_search_item).collect();
 
-    object.insert("tools".to_owned(), Value::Array(Vec::new()));
-    let mut kept = truncated;
-    while kept.len() > 1 && measured_len(&object, &kept) > TOOL_RESULT_PREVIEW_LIMIT {
-        kept.pop();
-    }
-    let omitted = total.saturating_sub(kept.len());
-    object.insert("tools".to_owned(), Value::Array(kept));
-    if omitted > 0 {
+    if measured_len(&object, &kept, kept.len()) > TOOL_RESULT_PREVIEW_LIMIT {
+        // 二分最大可容纳前缀（至少 1 条），避免逐条 pop 的 O(n²) 重测量。
+        let mut low = 1usize;
+        let mut high = kept.len();
+        while low < high {
+            let mid = low + (high - low).div_ceil(2);
+            if measured_len(&object, &kept, mid) <= TOOL_RESULT_PREVIEW_LIMIT {
+                low = mid;
+            } else {
+                high = mid - 1;
+            }
+        }
+        kept.truncate(low);
+        let omitted = total.saturating_sub(kept.len());
+        object.insert("tools".to_owned(), Value::Array(kept.clone()));
         object.insert(
             "tools_truncated".to_owned(),
             Value::String(format!("{total}/{omitted}")),
         );
     }
-    Value::Object(object)
+    if measured_len(&object, &kept, kept.len()) > TOOL_RESULT_PREVIEW_LIMIT {
+        // 单条也装不下：退回通用字段截断，仍超限则由调用方降级兜底。
+        return None;
+    }
+    object.insert("tools".to_owned(), Value::Array(kept));
+    Some(Value::Object(object))
 }
 
 /// 单条 ToolSearch 条目：只截长描述，其余结构化字段原样保留。
@@ -146,10 +155,13 @@ fn truncate_tool_search_item(tool: Value) -> Value {
     Value::Object(item)
 }
 
-/// 以「对象骨架 + 候选 tools」测量体积（含省略标记余量）。
-fn measured_len(object: &Map<String, Value>, tools: &[Value]) -> usize {
+/// 以「对象骨架 + 前 `count` 条 tools」测量体积（含省略标记余量）。
+fn measured_len(object: &Map<String, Value>, tools: &[Value], count: usize) -> usize {
     let mut probe = object.clone();
-    probe.insert("tools".to_owned(), Value::Array(tools.to_vec()));
+    probe.insert(
+        "tools".to_owned(),
+        Value::Array(tools.iter().take(count).cloned().collect()),
+    );
     Value::Object(probe).to_string().len() + STRUCTURED_MARKER_RESERVE_BYTES
 }
 
