@@ -55,6 +55,7 @@ pub(crate) fn register_named_scope(
     memory_source: Arc<dyn MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
     skill_loader: Arc<dyn crate::domain::SkillLoadPort>,
+    skill_catalog: Arc<dyn crate::domain::SkillCatalogPort>,
     background_source: Arc<
         dyn crate::domain::background_process_port::BackgroundProcessAccessSource,
     >,
@@ -235,7 +236,11 @@ pub(crate) fn register_named_scope(
         Caps::Interact,
         ask_user::AskUserQuestionTool
     );
-    builtin!("ToolSearch", Caps::All, tool_search::ToolSearchTool);
+    builtin!(
+        "ToolSearch",
+        Caps::All,
+        tool_search::ToolSearchTool::new(skill_catalog.clone())
+    );
     builtin!(
         "EnterWorktree",
         Caps::Read | Caps::WorkspaceControl,

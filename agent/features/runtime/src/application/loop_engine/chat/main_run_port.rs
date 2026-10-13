@@ -135,7 +135,7 @@ pub(crate) fn make_agent(
         None,
     );
     Agent {
-        catalog,
+        catalog: catalog.clone(),
         execution: runtime_context.tool_execution(),
         context: crate::application::context::coordination::ContextCoordinator::new(
             runtime_context.context(),
@@ -164,6 +164,7 @@ pub(crate) fn make_agent(
                 tools::published::skill::SkillLoadScope::main(),
                 runtime_context.skill_load_state(),
             )
+            .with_catalog(Some(std::sync::Arc::new(catalog)))
             .with_scoring(
                 // #1835：skill_match 开关开启且评分端口装配时注入 ToolSearch 语义重排
                 //（读 skill_match 专属槽位，与 memory recall 槽互不串用）。

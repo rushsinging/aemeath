@@ -32,6 +32,7 @@ fn assembled_scope(scope: BuiltinRegistryScope) -> RegistryScope {
         test_memory_source(),
         control,
         crate::composition::wire_skills().loader(),
+        crate::composition::wire_skills().catalog(),
         test_background_source(),
         scope,
     )
@@ -186,6 +187,7 @@ fn registry_exposes_five_memory_tools_and_no_legacy_memory() {
         test_memory_source(),
         control,
         crate::composition::wire_skills().loader(),
+        crate::composition::wire_skills().catalog(),
         test_background_source(),
         BuiltinRegistryScope::Main,
     );
@@ -222,6 +224,7 @@ fn every_tool_description_matches_its_english_i18n_text() {
         test_memory_source(),
         control,
         crate::composition::wire_skills().loader(),
+        crate::composition::wire_skills().catalog(),
         test_background_source(),
         BuiltinRegistryScope::Main,
     );

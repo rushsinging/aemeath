@@ -88,6 +88,7 @@ pub fn wire_builtin_catalog_execution(
     memory_source: Arc<dyn crate::domain::MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
     skill_loader: Arc<dyn crate::domain::SkillLoadPort>,
+    skill_catalog: Arc<dyn crate::domain::SkillCatalogPort>,
     background_source: Arc<
         dyn crate::domain::background_process_port::BackgroundProcessAccessSource,
     >,
@@ -104,6 +105,7 @@ pub fn wire_builtin_catalog_execution(
             memory_source.clone(),
             workspace_control.clone(),
             skill_loader.clone(),
+            skill_catalog.clone(),
             background_source.clone(),
             scope_kind,
         );

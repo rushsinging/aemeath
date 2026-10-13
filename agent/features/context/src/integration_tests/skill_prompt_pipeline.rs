@@ -83,9 +83,10 @@ async fn renders_sorted_metadata_directory_without_skill_body() {
         .find(|block| block.kind == "skills")
         .unwrap();
     assert!(block.content.starts_with("# Available Skills\n"));
-    assert!(block
-        .content
-        .contains("- release: create a release\n  Usage: /release [version]"));
+    assert!(block.content.contains("- release\n"));
+    assert!(block.content.contains("- zeta\n"));
+    assert!(!block.content.contains("create a release"));
+    assert!(!block.content.contains("Usage:"));
     assert!(block.content.find("release").unwrap() < block.content.find("zeta").unwrap());
     assert!(!block.content.contains("FULL_SKILL_BODY_MUST_NOT_APPEAR"));
 }
@@ -104,7 +105,8 @@ async fn duplicate_identity_is_deduplicated_and_empty_catalog_omits_block() {
         .iter()
         .find(|block| block.kind == "skills")
         .unwrap();
-    assert!(block.content.contains("first"));
+    assert_eq!(block.content.matches("- dup\n").count(), 1);
+    assert!(!block.content.contains("first"));
     assert!(!block.content.contains("second"));
 
     let empty = source(Vec::new())
@@ -123,7 +125,14 @@ async fn chinese_header_and_budget_are_deterministic() {
         .materialize(&request)
         .await
         .unwrap();
-    assert!(!result.cacheable.iter().any(|block| block.kind == "skills"));
+    let block = result
+        .cacheable
+        .iter()
+        .find(|block| block.kind == "skills")
+        .expect("name-only entries fit the budget even when description is huge");
+    assert!(block.content.starts_with("# 可用技能\n"));
+    assert!(block.content.contains("- alpha\n"));
+    assert!(!block.content.contains(&"x".repeat(32)));
     assert_eq!(crate::skill_prompt_budget(8_000), 1_024);
 }
 

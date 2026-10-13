@@ -92,8 +92,8 @@ pub fn sleep(lang: &str) -> &'static str {
 /// ToolSearch description。
 pub fn tool_search(lang: &str) -> &'static str {
     match lang {
-        "zh" => "按名称或功能搜索可用工具。用于发现能帮助处理特定任务的工具。",
-        _ => "Search for available tools by name or functionality. Use this to discover tools that can help with specific tasks.",
+        "zh" => "按名称或功能搜索可用工具与 Skill。用于发现能帮助处理特定任务的工具；命中 skill 后用 Skill 工具加载正文。",
+        _ => "Search available tools and skills by name or functionality. Use this to discover tools for a task; when a skill matches, load it with the Skill tool.",
     }
 }
 

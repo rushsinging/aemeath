@@ -38,6 +38,7 @@ fn tool_search_result_renders_summary_without_schema() {
         )
         .expect("typed 产出");
     assert_eq!(lines.len(), 1);
+    assert!(lines[0].contains("tool"));
     assert!(lines[0].contains("MemorySearch"));
     assert!(lines[0].contains("ro"));
     assert!(lines[0].contains("Search persistent"));

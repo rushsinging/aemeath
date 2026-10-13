@@ -98,7 +98,7 @@ pub use task_update::{
     TaskProgressItemResult, TaskProgressLifecycleResult, TaskProgressListResult,
     TaskProgressOmittedResult, TaskProgressResult, TaskUpdateInput, TaskUpdateResult,
 };
-pub use tool_search::{ToolInfo, ToolSearchInput, ToolSearchResult};
+pub use tool_search::{SearchItemKind, ToolInfo, ToolSearchInput, ToolSearchResult};
 pub use web_search::{WebSearchInput, WebSearchResult};
 
 // Generated ToolSchema impls (by build.rs).

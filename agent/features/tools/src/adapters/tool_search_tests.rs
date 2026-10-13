@@ -1,11 +1,40 @@
 use super::*;
+use crate::domain::types::tool_search::SearchItemKind;
 
+use crate::domain::{SkillCatalogPort, SkillDescriptor, SkillQuery, SkillSource, SkillSourceKind};
+
+struct FakeSkills {
+    skills: Vec<SkillDescriptor>,
+}
+impl SkillCatalogPort for FakeSkills {
+    fn list(&self, _query: SkillQuery) -> Vec<SkillDescriptor> {
+        self.skills.clone()
+    }
+}
+fn empty_skills() -> std::sync::Arc<dyn SkillCatalogPort> {
+    std::sync::Arc::new(FakeSkills { skills: Vec::new() })
+}
+fn skill_descriptor(name: &str, description: &str) -> SkillDescriptor {
+    SkillDescriptor::new(
+        name,
+        description,
+        SkillSource::file(
+            SkillSourceKind::ProjectAgents,
+            format!("/fake/{name}/SKILL.md"),
+        ),
+        Vec::new(),
+        Some(name.to_string()),
+        Vec::new(),
+        None,
+    )
+}
 fn make_tool(name: &str, description: &str) -> ToolInfo {
     ToolInfo {
         name: name.to_string(),
         description: description.to_string(),
         input_schema: serde_json::json!({"type": "object"}),
         is_read_only: true,
+        kind: SearchItemKind::Tool,
     }
 }
 
@@ -222,7 +251,7 @@ async fn low_confidence_query_triggers_scoring_rerank() {
         calls: AtomicUsize::new(0),
     });
     let ctx = search_context(catalog, Some(scoring.clone()));
-    let tool = ToolSearchTool;
+    let tool = ToolSearchTool::new(empty_skills());
     let result = tool
         .call(serde_json::json!({"query": "画一张系统架构图"}), &ctx)
         .await;
@@ -252,7 +281,7 @@ async fn confident_lexical_hit_skips_scoring() {
         calls: AtomicUsize::new(0),
     });
     let ctx = search_context(catalog, Some(scoring.clone()));
-    let tool = ToolSearchTool;
+    let tool = ToolSearchTool::new(empty_skills());
     let result = tool.call(serde_json::json!({"query": "bash"}), &ctx).await;
     let output = result.data.expect("应成功");
     assert_eq!(output.tools.len(), 1);
@@ -276,7 +305,7 @@ async fn scoring_failure_falls_back_to_lexical_order() {
         calls: AtomicUsize::new(0),
     });
     let ctx = search_context(catalog, Some(scoring.clone()));
-    let tool = ToolSearchTool;
+    let tool = ToolSearchTool::new(empty_skills());
     // "commands"：Bash 与 Makefile desc contains（50 分，低置信双命中）。
     let result = tool
         .call(serde_json::json!({"query": "commands"}), &ctx)
@@ -295,10 +324,112 @@ async fn no_scoring_port_keeps_pure_lexical_behavior() {
         tools: semantic_catalog(),
     });
     let ctx = search_context(catalog, None);
-    let tool = ToolSearchTool;
+    let tool = ToolSearchTool::new(empty_skills());
     let result = tool
         .call(serde_json::json!({"query": "画一张系统架构图"}), &ctx)
         .await;
     let output = result.data.expect("应成功");
     assert!(output.tools.is_empty(), "开关关零命中返回空");
+}
+
+#[tokio::test]
+async fn no_catalog_returns_empty_for_nonempty_query_without_skills() {
+    // 生产回归：未注入 catalog 时非空 query 不得误命中。
+    let ports = crate::domain::ToolExecutionPorts::new(
+        Arc::new(TestCancellation),
+        crate::domain::WorkspaceReadAccess::new(Arc::new(TestWorkspace {
+            root: std::path::PathBuf::from("/tmp"),
+        })),
+        Arc::new(crate::domain::MutexReadSet(Arc::new(
+            std::sync::Mutex::new(Default::default()),
+        ))),
+        Arc::new(memory::api::NoOpMemory),
+        Arc::new(crate::domain::FixedGuidance {
+            language: "en".into(),
+        }),
+    ); // no with_catalog
+    let scope = crate::domain::ExecutionScope::builder(
+        "run",
+        share::session_types::WorkspaceId::default(),
+        std::path::PathBuf::from("/tmp"),
+    )
+    .build();
+    let ctx = crate::domain::ToolExecutionContext::new(scope, ports);
+    let result = ToolSearchTool::new(empty_skills())
+        .call(serde_json::json!({"query": "bash"}), &ctx)
+        .await;
+    assert!(result.data.expect("ok").tools.is_empty());
+}
+
+#[tokio::test]
+async fn lexical_recall_without_scoring_hits_tools_and_skills() {
+    let catalog = Arc::new(FakeCatalog {
+        tools: vec![
+            make_tool("Bash", "Execute shell commands"),
+            make_tool("MemorySearch", "Search persistent memory by keywords"),
+            make_tool("WebFetch", "Fetch a URL and return content"),
+        ],
+    });
+    let skills = Arc::new(FakeSkills {
+        skills: vec![
+            skill_descriptor(
+                "cmux-browser",
+                "Automate cmux webview browser surfaces with snapshots",
+            ),
+            skill_descriptor(
+                "agent-browser",
+                "Browser automation CLI for websites and web apps；浏览器自动化",
+            ),
+        ],
+    });
+    let ctx = search_context(catalog, None);
+    let tool = ToolSearchTool::new(skills);
+
+    let bash = tool
+        .call(serde_json::json!({"query": "bash"}), &ctx)
+        .await
+        .data
+        .expect("ok");
+    assert_eq!(bash.tools[0].name, "Bash");
+    assert_eq!(bash.tools[0].kind, SearchItemKind::Tool);
+
+    let memory = tool
+        .call(serde_json::json!({"query": "memory"}), &ctx)
+        .await
+        .data
+        .expect("ok");
+    assert!(memory.tools.iter().any(|t| t.name == "MemorySearch"));
+
+    let browser = tool
+        .call(serde_json::json!({"query": "browser"}), &ctx)
+        .await
+        .data
+        .expect("ok");
+    assert!(
+        browser
+            .tools
+            .iter()
+            .any(|t| t.kind == SearchItemKind::Skill && t.name.contains("browser")),
+        "expected skill hit for browser, got {:?}",
+        browser
+            .tools
+            .iter()
+            .map(|t| (&t.kind, &t.name))
+            .collect::<Vec<_>>()
+    );
+
+    // 中文靠 description contains（无 systemone）
+    let zh = tool
+        .call(serde_json::json!({"query": "浏览器"}), &ctx)
+        .await
+        .data
+        .expect("ok");
+    assert!(
+        zh.tools.iter().any(|item| item.name == "agent-browser"),
+        "expected Chinese description contains hit, got {:?}",
+        zh.tools
+            .iter()
+            .map(|item| item.name.as_str())
+            .collect::<Vec<_>>()
+    );
 }

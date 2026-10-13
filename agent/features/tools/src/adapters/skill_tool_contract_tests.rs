@@ -85,6 +85,7 @@ async fn main_and_sub_catalog_publish_exact_skill_schema_and_execute_body() {
         memory_source(),
         workspace.control(),
         skill.loader(),
+        skill.catalog(),
         empty_background_source(),
         Vec::new(),
     )
@@ -187,6 +188,7 @@ async fn skill_state_decision_controls_body_without_leaking_on_failure() {
             memory_source(),
             workspace.control(),
             skill.loader(),
+            skill.catalog(),
             empty_background_source(),
             Vec::new(),
         )
@@ -245,6 +247,7 @@ async fn deleted_skill_returns_failure_without_panicking() {
         memory_source(),
         workspace.control(),
         skill.loader(),
+        skill.catalog(),
         empty_background_source(),
         Vec::new(),
     )

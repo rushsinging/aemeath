@@ -76,6 +76,7 @@ fn wire_runtime_tool_assembly(
     memory_source: Arc<dyn tools::MemoryPortSource>,
     workspace_control: Arc<dyn project::WorkspaceControl>,
     skill_loader: Arc<dyn tools::published::skill::SkillLoadPort>,
+    skill_catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
     background_source: Arc<dyn tools::BackgroundProcessAccessSource>,
     snapshot: &share::config::domain::snapshot::ConfigSnapshot,
     agents_dir: &std::path::Path,
@@ -94,6 +95,7 @@ fn wire_runtime_tool_assembly(
         memory_source,
         workspace_control,
         skill_loader,
+        skill_catalog.clone(),
         background_source,
         role_policies,
     )
@@ -358,6 +360,7 @@ pub(crate) async fn from_args_with_gateways(
         }),
         workspace.control(),
         skill_loader.clone(),
+        skill_catalog.clone(),
         Arc::new(WiringBackgroundProcessSource {
             slot: background_slot.clone(),
         }),
