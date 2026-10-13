@@ -33,7 +33,11 @@ pub(crate) async fn run_systemone_download_command(user_agent: String) {
 }
 
 pub(crate) async fn run_systemone_serve_command() {
-    match composition::systemone::run_scoring_serve().await {
+    let exit = composition::systemone::run_scoring_serve(|sock| {
+        println!("systemone serve 监听 {}", sock.display());
+    })
+    .await;
+    match exit {
         ScoringServeExit::Stopped { sock } => {
             println!("systemone serve 已停止（{}）", sock.display());
         }

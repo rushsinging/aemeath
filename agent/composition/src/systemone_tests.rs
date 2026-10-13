@@ -666,3 +666,31 @@ async fn master_gate_defaults_to_enabled() {
         "缺省 enabled 必须为 true（配置文件兼容）"
     );
 }
+
+/// serve 入口在无引擎构建下必须返回 typed Failure，且 **NEVER** 调用 ready 回调
+/// （库层禁止 stdout：`#![deny(clippy::print_stdout)]`，用户输出由 CLI 渲染）。
+#[cfg(not(feature = "systemone-daemon"))]
+#[tokio::test]
+async fn run_scoring_serve_without_engine_skips_ready_callback() {
+    let called = AtomicUsize::new(0);
+    let exit = run_scoring_serve(|_sock| {
+        called.fetch_add(1, Ordering::SeqCst);
+    })
+    .await;
+
+    assert_eq!(
+        called.load(Ordering::SeqCst),
+        0,
+        "引擎不可用时 NEVER 调用 ready 回调"
+    );
+    match exit {
+        ScoringServeExit::Failure { exit_code, message } => {
+            assert_eq!(exit_code, 2, "feature 未启用应为 exit 2：{message}");
+            assert!(
+                message.contains("systemone serve"),
+                "失败原因应指向 systemone serve：{message}"
+            );
+        }
+        other => panic!("unexpected exit: {other:?}"),
+    }
+}
