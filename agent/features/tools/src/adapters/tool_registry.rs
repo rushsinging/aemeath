@@ -135,6 +135,7 @@ impl crate::domain::ToolListProvider for ToolRegistry {
                 description: t.description().to_string(),
                 input_schema: t.input_schema(),
                 is_read_only: t.is_read_only(),
+                kind: crate::domain::types::tool_search::SearchItemKind::Tool,
             })
     }
 }

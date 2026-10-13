@@ -1,13 +1,47 @@
-use crate::domain::types::tool_search::{ToolInfo, ToolSearchInput, ToolSearchResult};
-use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
+use std::sync::Arc;
+
+use crate::domain::types::tool_search::{
+    SearchItemKind, ToolInfo, ToolSearchInput, ToolSearchResult,
+};
+use crate::domain::{
+    SkillCatalogPort, SkillQuery, ToolExecutionContext, TypedTool, TypedToolResult,
+};
 use async_trait::async_trait;
 use serde_json::Value;
 
-/// ToolSearch tool - dynamically searches available tools from the registry.
+/// ToolSearch tool - dynamically searches available tools and skills.
 ///
-/// Returns detailed tool info (name, description, input_schema, is_read_only)
+/// Returns detailed info (name, description, input_schema, is_read_only, kind)
 /// sorted by relevance: exact name match > name contains > description contains.
-pub struct ToolSearchTool;
+pub struct ToolSearchTool {
+    skills: Arc<dyn SkillCatalogPort>,
+}
+
+impl ToolSearchTool {
+    pub fn new(skills: Arc<dyn SkillCatalogPort>) -> Self {
+        Self { skills }
+    }
+
+    fn list_skills(&self, ctx: &ToolExecutionContext) -> Vec<ToolInfo> {
+        let snapshot = ctx.skill_query();
+        let query = SkillQuery::new(
+            ctx.workspace_read().current_workspace_root(),
+            snapshot.extra_dirs.clone(),
+            snapshot.available_tools.clone(),
+        );
+        self.skills
+            .list(query)
+            .into_iter()
+            .map(|descriptor| ToolInfo {
+                name: descriptor.name().to_string(),
+                description: descriptor.description().to_string(),
+                input_schema: serde_json::json!({ "type": "object", "properties": {} }),
+                is_read_only: true,
+                kind: SearchItemKind::Skill,
+            })
+            .collect()
+    }
+}
 
 #[async_trait]
 impl TypedTool for ToolSearchTool {
@@ -58,6 +92,7 @@ impl TypedTool for ToolSearchTool {
         };
 
         if query.is_empty() {
+            // 空 query 只列 tools，避免 skills 全量倾倒。
             let count = tools.len();
             let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
             return TypedToolResult::success(
@@ -66,8 +101,11 @@ impl TypedTool for ToolSearchTool {
             );
         }
 
+        let mut candidates = tools;
+        candidates.extend(self.list_skills(ctx));
+
         // 搜索并按相关度排序
-        let mut matching: Vec<(ToolInfo, f64)> = tools
+        let mut matching: Vec<(ToolInfo, f64)> = candidates
             .iter()
             .filter_map(|tool| {
                 let score = compute_relevance(&query, tool)?;
@@ -87,18 +125,18 @@ impl TypedTool for ToolSearchTool {
             crate::domain::tool_search_scoring::is_lexical_confident(&lexical_scores),
         ) {
             (Some(port), false) => {
-                let candidates: Vec<ToolInfo> = if matching.is_empty() {
-                    tools.clone()
+                let rerank_candidates: Vec<ToolInfo> = if matching.is_empty() {
+                    candidates.clone()
                 } else {
                     matching.iter().map(|(tool, _)| tool.clone()).collect()
                 };
                 log::debug!(
                     target: crate::LOG_TARGET,
                     "tool_search_scoring_triggered query={query} candidates={} zero_hit={}",
-                    candidates.len(),
+                    rerank_candidates.len(),
                     matching.is_empty(),
                 );
-                match semantic_rerank(&query, &candidates, port).await {
+                match semantic_rerank(&query, &rerank_candidates, port).await {
                     Some(reranked) => reranked,
                     None => matching.into_iter().map(|(tool, _)| tool).collect(),
                 }
@@ -108,7 +146,7 @@ impl TypedTool for ToolSearchTool {
 
         if result_tools.is_empty() {
             return TypedToolResult::success(
-                format!("No tools found matching '{query}'"),
+                format!("No tools or skills found matching '{query}'"),
                 ToolSearchResult { tools: vec![] },
             );
         }
@@ -144,7 +182,11 @@ async fn semantic_rerank(
         .enumerate()
         .take(systemone::ScoringQuestion::CHOICE_CRITERIA_MAX)
         .map(|(index, tool)| {
-            let text: String = format!("{}: {}", tool.name, tool.description)
+            let kind = match tool.kind {
+                SearchItemKind::Tool => "tool",
+                SearchItemKind::Skill => "skill",
+            };
+            let text: String = format!("{kind} {}: {}", tool.name, tool.description)
                 .chars()
                 .take(crate::constants::TOOL_SEARCH_CRITERIA_MAX_CHARS)
                 .collect();

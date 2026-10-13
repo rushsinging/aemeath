@@ -151,6 +151,7 @@ async fn wire_runtime_tool_assembly_produces_working_catalog_and_execution() {
         memory_source,
         workspace.control(),
         tools::composition::wire_skills().loader(),
+        tools::composition::wire_skills().catalog(),
         noop_background_source(),
         &snapshot,
         env_temp.path(),
@@ -219,6 +220,7 @@ async fn production_catalog_has_both_main_and_sub_agent_scopes() {
         noop_memory_source(),
         workspace.control(),
         tools::composition::wire_skills().loader(),
+        tools::composition::wire_skills().catalog(),
         noop_background_source(),
         Vec::new(),
     )
@@ -285,6 +287,7 @@ async fn role_policies_surface_as_role_profiles() {
         noop_memory_source(),
         workspace.control(),
         tools::composition::wire_skills().loader(),
+        tools::composition::wire_skills().catalog(),
         noop_background_source(),
         role_policies,
     )
@@ -334,6 +337,7 @@ async fn role_policy_with_unknown_capability_fails_wiring() {
         noop_memory_source(),
         workspace.control(),
         tools::composition::wire_skills().loader(),
+        tools::composition::wire_skills().catalog(),
         noop_background_source(),
         role_policies,
     );

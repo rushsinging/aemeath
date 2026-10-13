@@ -49,7 +49,7 @@ pub use tools::types::task_list_create::TaskListCreateResult;
 pub use tools::types::task_lists::TaskListsResult;
 pub use tools::types::task_stop::TaskStopResult;
 pub use tools::types::task_update::TaskUpdateResult;
-pub use tools::types::tool_search::{ToolInfo, ToolSearchResult};
+pub use tools::types::tool_search::{SearchItemKind, ToolInfo, ToolSearchResult};
 pub use tools::types::web_fetch::WebFetchResult;
 pub use tools::types::web_search::WebSearchResult;
 pub use tools::types::write::WriteResult;

@@ -523,6 +523,7 @@ impl crate::domain::ToolListProvider for ToolCatalogSnapshot {
                 description: descriptor.description.clone(),
                 input_schema: descriptor.input_schema.clone(),
                 is_read_only: descriptor.read_only,
+                kind: crate::domain::types::tool_search::SearchItemKind::Tool,
             }
         })
     }

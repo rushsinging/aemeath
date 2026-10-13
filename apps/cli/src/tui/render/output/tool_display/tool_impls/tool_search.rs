@@ -40,9 +40,14 @@ impl ToolDisplay for ToolSearchDisplay {
                 .tools
                 .iter()
                 .map(|tool| {
+                    let kind = match tool.kind {
+                        sdk::tool_result::SearchItemKind::Tool => "tool",
+                        sdk::tool_result::SearchItemKind::Skill => "skill",
+                    };
                     let access = if tool.is_read_only { "ro" } else { "rw" };
                     format!(
-                        "{} · {} · {}",
+                        "{} · {} · {} · {}",
+                        kind,
                         tool.name,
                         access,
                         truncate_ellipsis(tool.description.trim(), 80)

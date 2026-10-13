@@ -61,15 +61,8 @@ pub(crate) fn skill_prompt_budget(context_size: usize) -> usize {
 }
 
 fn render_entry(skill: &SkillDescriptor) -> String {
-    let mut line = format!("- {}: {}", skill.name(), skill.description());
-    if let Some(slash) = skill.slash_command() {
-        line.push_str(&format!("\n  Usage: /{slash}"));
-        if let Some(hint) = skill.argument_hint() {
-            line.push(' ');
-            line.push_str(hint);
-        }
-    }
-    line
+    // #1955：目录块只保留 skill 名，长 description / Usage 改由 ToolSearch 按需返回。
+    format!("- {}", skill.name())
 }
 
 fn select_within_budget(
