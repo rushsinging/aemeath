@@ -106,6 +106,28 @@ main() {
   test -d "$current_cache" \
     || fail "pre-push must not clean the current cache when a gate fails"
 
+  # #1966：纯 delete（local oid 全 0）跳过门禁，不清缓存。
+  : >"$repo/gate.log"
+  mkdir -p "$current_cache/build"
+  touch "$current_cache/build/marker"
+  zero_oid="$(printf '%040d' 0)"
+  real_oid="$(printf '%040d' 1)"
+  HOME="$repo/home" run_gate "$repo" "$repo/.cargo/hooks/pre-push" \
+    <<<"refs/heads/tmp $zero_oid refs/heads/tmp $real_oid"
+  [ -z "$(cat "$repo/gate.log")" ] \
+    || fail "delete-only push must skip gates: $(cat "$repo/gate.log")"
+  test -d "$current_cache" \
+    || fail "delete-only push must not clean the current cache"
+
+  # 混合 delete + 更新：仍跑完整门禁。
+  : >"$repo/gate.log"
+  HOME="$repo/home" run_gate "$repo" "$repo/.cargo/hooks/pre-push" <<EOF
+refs/heads/gone $zero_oid refs/heads/gone $real_oid
+refs/heads/feat $real_oid refs/heads/feat $zero_oid
+EOF
+  [ "$(cat "$repo/gate.log")" = "$(printf 'architecture:--full\nunit-tests')" ] \
+    || fail "mixed delete+update must still run gates: $(cat "$repo/gate.log")"
+
   echo "layered hook regression tests passed"
 }
 

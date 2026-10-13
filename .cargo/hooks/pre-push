@@ -11,6 +11,26 @@ cd "$ROOT"
 # 判成 bare 仓库并写入 core.bare=true，导致主仓不可用。
 while IFS= read -r git_local_var; do unset "$git_local_var"; done < <(git rev-parse --local-env-vars 2>/dev/null || true)
 
+# #1966：delete-only push（每行 local oid 全 0）跳过全量门禁。
+# 空 stdin 或混有非 delete 行仍跑完整检查（保守）。
+zero_oid="$(printf '%040d' 0)"
+push_line_count=0
+delete_only=1
+while IFS= read -r push_line || [[ -n "${push_line:-}" ]]; do
+  [[ -z "${push_line:-}" ]] && continue
+  push_line_count=$((push_line_count + 1))
+  # <local_ref> <local_oid> <remote_ref> <remote_oid>
+  local_oid="${push_line#* }"
+  local_oid="${local_oid%% *}"
+  if [[ "$local_oid" != "$zero_oid" ]]; then
+    delete_only=0
+  fi
+done
+if ((push_line_count > 0 && delete_only)); then
+  printf 'pre-push: delete-only push; skipping architecture/unit-test gates\n' >&2
+  exit 0
+fi
+
 export AEMEATH_PROJECT_DIR="$ROOT"
 "$ROOT/.agents/hooks/check-architecture-guards.sh" --full
 "$ROOT/.agents/hooks/run-xtask.sh" test-runner
