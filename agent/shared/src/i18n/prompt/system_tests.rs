@@ -68,9 +68,9 @@ fn static_system_prompt_locks_worktree_command_discipline() {
 }
 
 #[test]
-fn static_system_prompt_core_contract_item_count_is_fifteen() {
+fn static_system_prompt_core_contract_item_count_is_sixteen() {
     for s in [static_system_prompt("zh"), static_system_prompt("en")] {
-        assert_eq!(s.matches("\n- ").count(), 15);
+        assert_eq!(s.matches("\n- ").count(), 16);
     }
 }
 
