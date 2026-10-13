@@ -49,7 +49,7 @@
 BackgroundProcessRecord
   ├─ task_id: TaskId（UUIDv7）
   ├─ identity: ToolCallIdentityData
-  ├─ tool_name / invocation_summary（参数摘要，审计与查询展示）
+  ├─ tool_name / invocation_summary（#1964：= `Tool::goal_text`，有 goal 用 goal、否则拼主载荷；审计与 List/Status/Watch 展示）
   ├─ state:
   │     Dispatched → ForegroundWaiting ──阈值内完成──→ Terminal(Success | Failure | Cancelled | TimedOut | CancellationUnconfirmed)
   │                     └─超阈值→ Backgrounded → Completed | Failed | TimedOut | Stopped | Invalidated

@@ -171,6 +171,11 @@ fn status_result_formats_deadline_without_ms() {
         "Status deadline NEVER 含 ms：{}",
         lines[0]
     );
+    assert!(
+        lines[0].contains("long"),
+        "Status result MUST 含账本 summary：{}",
+        lines[0]
+    );
 }
 
 #[test]
@@ -189,13 +194,60 @@ fn watch_header_carries_task_id_without_timeout_param() {
     let input = serde_json::json!({ "task_id": "bgp_07Xwatch1" });
     let header = display.format_header(&input, None);
     assert!(
-        header.contains("bgp_07Xwatch1"),
-        "Watch header 携带 task id：{header}"
+        header.starts_with("Watch ·"),
+        "Watch header 短友好名：{header}"
+    );
+    assert!(
+        header.contains("bgp_07Xwatch1") || header.contains("…"),
+        "Watch header 携带短尾：{header}"
     );
     assert!(
         !header.contains("timeout="),
         "Watch header MUST NOT 展示入参 timeout：{header}"
     );
+}
+
+#[test]
+fn watch_header_with_result_uses_summary_and_short_tail() {
+    use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
+    let display = lookup_display("BackgroundProcessWatch").unwrap();
+    let input = serde_json::json!({ "task_id": "bgp_07dYn1F3S6a" });
+    let payload = ToolResultPayload::new(
+        String::new(),
+        serde_json::json!({
+            "outcome": "still_running",
+            "detail": {
+                "summary": {
+                    "task_id": "bgp_07dYn1F3S6a",
+                    "tool_name": "Bash",
+                    "state": "backgrounded",
+                    "summary": "跑 ping 验收",
+                    "duration_ms": 5000
+                },
+                "deadline_remaining_ms": null,
+                "total_written_bytes": 10
+            },
+            "log_tail": ""
+        }),
+        false,
+        0,
+    );
+    let line = display.format_header_line_with_result(&input, Some(&payload), None);
+    let header: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+    assert_eq!(
+        header.matches(" · ").count(),
+        2,
+        "形态 Watch · summary · 短尾：{header}"
+    );
+    assert!(
+        header.starts_with("Watch · 跑 ping 验收 ·"),
+        "Watch header 用账本 summary：{header}"
+    );
+    assert!(
+        !header.contains("bgp_07dYn1F3S6a"),
+        "Watch header NEVER 完整长 id：{header}"
+    );
+    assert!(header.contains("…"), "短尾省略：{header}");
 }
 
 #[test]

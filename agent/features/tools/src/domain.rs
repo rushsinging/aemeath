@@ -10,6 +10,7 @@ pub mod command_pl;
 pub mod command_ports;
 pub(crate) mod constants;
 pub mod context;
+pub(crate) mod goal_text;
 pub mod memory_source;
 pub mod ports;
 pub mod published_language;

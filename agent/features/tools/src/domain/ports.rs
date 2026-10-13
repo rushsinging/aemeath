@@ -72,4 +72,10 @@ pub trait ToolExecutionPort: Send + Sync {
         invocation: ToolInvocation,
         context: &super::ToolExecutionContext,
     ) -> ToolExecutionOutcome;
+
+    /// 一句话调用意图（#1964）。默认不经 Tool 实例、按工具名+input 合成；
+    /// 生产 `ExecutionAdapter` **MUST** 覆盖为委派 `Tool::goal_text`。
+    fn goal_text(&self, tool_name: &str, input: &serde_json::Value) -> String {
+        crate::domain::goal_text::resolve(tool_name, input)
+    }
 }

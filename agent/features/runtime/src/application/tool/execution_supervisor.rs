@@ -102,7 +102,7 @@ impl ToolExecutionSupervisor {
                 dd.process_id,
                 dd.path,
                 call.identity.clone(),
-                invocation_summary_text(&call),
+                invocation_summary_text(self.execution.as_ref(), &call),
                 call.child_cancellation.clone(),
                 dispatch_started_time(started),
             ),
@@ -113,13 +113,13 @@ impl ToolExecutionSupervisor {
                         process_id,
                         log.path().to_path_buf(),
                         call.identity.clone(),
-                        invocation_summary_text(&call),
+                        invocation_summary_text(self.execution.as_ref(), &call),
                         call.child_cancellation.clone(),
                         dispatch_started_time(started),
                     ),
                     None => runtime.supervisor().register_with_cancellation(
                         call.identity.clone(),
-                        invocation_summary_text(&call),
+                        invocation_summary_text(self.execution.as_ref(), &call),
                         call.child_cancellation.clone(),
                         dispatch_started_time(started),
                     ),
@@ -626,11 +626,9 @@ pub(crate) enum ToolExecutionSupervisorError {
 mod tests;
 
 /// #252 PR2：转后台调用的一句话摘要（监督器账本 display 用）。
-fn invocation_summary_text(call: &SupervisedToolCall) -> String {
-    format!(
-        "tool={} input={}",
-        call.identity.tool_name, call.input_preview
-    )
+/// #1964：转后台摘要 = ToolExecutionPort::goal_text（有 goal 用 goal，否则拼载荷）。
+fn invocation_summary_text(execution: &dyn ToolExecutionPort, call: &SupervisedToolCall) -> String {
+    execution.goal_text(call.invocation.tool_name.as_str(), &call.invocation.input)
 }
 
 /// #252 PR2：receipt 终态 → 后台进程终态映射。
