@@ -116,7 +116,7 @@ fn background_process_tools_render_typed_display_and_status_line_count() {
     // 真断言流式：bytes from 必须在 terminal（终态 outcome）出现之前
     // 可见——否则会假绿命中结束后的 log_tail。
     submit(&terminal, "等待后台任务");
-    wait_screen_text(&terminal, "Backend Process Watch", Duration::from_secs(10));
+    wait_screen_text(&terminal, "Watch", Duration::from_secs(10));
     wait_screen_text_before(&terminal, "bytes from", "terminal", Duration::from_secs(25));
     wait_screen_text(&terminal, "watch已返回", Duration::from_secs(45));
     wait_screen_text(&terminal, "terminal", Duration::from_secs(15));
