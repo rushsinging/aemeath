@@ -606,7 +606,11 @@ pub enum ScoringServeExit {
 /// 生产入口：加锁 → 装配 raw 引擎 → 监听 UDS → 直到 Ctrl-C。
 ///
 /// 会话侧装配不走本函数；本函数是加载 GGUF 的唯一用户路径（#1935 PR1）。
-pub async fn run_scoring_serve() -> ScoringServeExit {
+///
+/// `on_ready` 在锁与引擎就绪、开始监听前调用一次，携带 sock 路径——
+/// 库层 **NEVER** 直接写 stdout（`#![deny(clippy::print_stdout)]`），
+/// 用户可见输出由调用方（CLI 子命令）渲染。
+pub async fn run_scoring_serve(on_ready: impl FnOnce(&std::path::Path)) -> ScoringServeExit {
     if !systemone::EMBEDDED_SCORING_AVAILABLE {
         return ScoringServeExit::Failure {
             message: "本构建未启用 System One 引擎（feature `systemone-daemon` / `embedded`）；无法启动 systemone serve。".to_owned(),
@@ -662,7 +666,7 @@ pub async fn run_scoring_serve() -> ScoringServeExit {
     };
 
     let sock = endpoints.sock.clone();
-    println!("systemone serve 监听 {}", sock.display());
+    on_ready(&sock);
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let serve = tokio::spawn(async move {
         systemone::run_daemon_accept_loop(

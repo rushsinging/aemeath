@@ -1,5 +1,6 @@
 use super::constants::{
-    TOOL_LARGE_FIELD_PREVIEW_LIMIT, TOOL_RESULT_PREVIEW_LIMIT, TOOL_STREAM_PREVIEW_LIMIT,
+    STRUCTURED_MARKER_RESERVE_BYTES, TOOL_LARGE_FIELD_PREVIEW_LIMIT, TOOL_RESULT_PREVIEW_LIMIT,
+    TOOL_SEARCH_DESCRIPTION_BUDGET_CHARS, TOOL_STREAM_PREVIEW_LIMIT, TUI_OMISSION_SUFFIX_MARKER,
 };
 use crate::tui::text::safe_str_slice_by_char;
 use serde_json::{Map, Value};
@@ -30,10 +31,138 @@ pub(super) fn sanitize_tool_result_content(tool_name: &str, content: Value) -> V
         value => truncate_json_value(value, tool_name, "content"),
     };
     if sanitized.to_string().len() <= TOOL_RESULT_PREVIEW_LIMIT {
-        sanitized
-    } else {
-        truncate_json_value(sanitized, tool_name, "content")
+        return sanitized;
     }
+    // #1957：已登记结构化形状的工具**结构保留**收敛，NEVER 整块降级为字符串
+    // （否则 TUI `format_result_lines` 解析失败、退化成原始文本列表）。
+    if let Some(structured) = truncate_structured_object(tool_name, sanitized.clone()) {
+        return structured;
+    }
+    truncate_json_value(sanitized, tool_name, "content")
+}
+
+/// 对结构化 tool_result 做「保结构」收敛；无法在限额内收敛时返回 `None`。
+///
+/// - `ToolSearch`：专属策略（逐条截描述 + 条目预算 + 省略标记）。
+/// - 其他工具：通用策略——只截长字符串字段，保持对象/数组形状。
+fn truncate_structured_object(tool_name: &str, value: Value) -> Option<Value> {
+    if tool_name == "ToolSearch" {
+        if let Some(converged) = truncate_tool_search_result(value.clone()) {
+            return Some(converged);
+        }
+    }
+    let truncated = truncate_long_string_fields(value);
+    (truncated.to_string().len() <= TOOL_RESULT_PREVIEW_LIMIT).then_some(truncated)
+}
+
+/// 递归截断长字符串字段（幂等：已带 TUI 省略标记的字符串不再二次截断）。
+fn truncate_long_string_fields(value: Value) -> Value {
+    match value {
+        Value::String(text) => truncate_long_string(text),
+        Value::Array(items) => {
+            Value::Array(items.into_iter().map(truncate_long_string_fields).collect())
+        }
+        Value::Object(object) => Value::Object(
+            object
+                .into_iter()
+                .map(|(key, item)| (key, truncate_long_string_fields(item)))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+fn truncate_long_string(text: String) -> Value {
+    if text.chars().count() <= TOOL_LARGE_FIELD_PREVIEW_LIMIT
+        || text.ends_with(TUI_OMISSION_SUFFIX_MARKER)
+    {
+        return Value::String(text);
+    }
+    let prefix: String = text.chars().take(TOOL_LARGE_FIELD_PREVIEW_LIMIT).collect();
+    let omitted = text.chars().count() - TOOL_LARGE_FIELD_PREVIEW_LIMIT;
+    Value::String(format!(
+        "{prefix} ... ({omitted} chars omitted from TUI preview)"
+    ))
+}
+
+/// ToolSearch 结果：逐条截 `description` → 收敛条目数 → 保留省略标记。
+///
+/// 输出始终是合法 JSON 对象（形状 `{"tools":[…], "tools_truncated"?: "total/omitted"}`），
+/// 保证下游 `ToolSearchResult` 反序列化与结构化行渲染不失效。
+fn truncate_tool_search_result(value: Value) -> Option<Value> {
+    let Value::Object(mut object) = value else {
+        return None;
+    };
+    let Some(tools) = object.remove("tools") else {
+        return None;
+    };
+    let Value::Array(tools) = tools else {
+        return None;
+    };
+    let total = tools.len();
+    let mut kept: Vec<Value> = tools.into_iter().map(truncate_tool_search_item).collect();
+
+    if measured_len(&object, &kept, kept.len()) > TOOL_RESULT_PREVIEW_LIMIT {
+        // 二分最大可容纳前缀（至少 1 条），避免逐条 pop 的 O(n²) 重测量。
+        let mut low = 1usize;
+        let mut high = kept.len();
+        while low < high {
+            let mid = low + (high - low).div_ceil(2);
+            if measured_len(&object, &kept, mid) <= TOOL_RESULT_PREVIEW_LIMIT {
+                low = mid;
+            } else {
+                high = mid - 1;
+            }
+        }
+        kept.truncate(low);
+        let omitted = total.saturating_sub(kept.len());
+        object.insert("tools".to_owned(), Value::Array(kept.clone()));
+        object.insert(
+            "tools_truncated".to_owned(),
+            Value::String(format!("{total}/{omitted}")),
+        );
+    }
+    if measured_len(&object, &kept, kept.len()) > TOOL_RESULT_PREVIEW_LIMIT {
+        // 单条也装不下：退回通用字段截断，仍超限则由调用方降级兜底。
+        return None;
+    }
+    object.insert("tools".to_owned(), Value::Array(kept));
+    Some(Value::Object(object))
+}
+
+/// 单条 ToolSearch 条目：只截长描述，其余结构化字段原样保留。
+fn truncate_tool_search_item(tool: Value) -> Value {
+    let Value::Object(mut item) = tool else {
+        return tool;
+    };
+    let Some(Value::String(description)) = item.get("description").cloned() else {
+        return Value::Object(item);
+    };
+    if description.chars().count() <= TOOL_SEARCH_DESCRIPTION_BUDGET_CHARS {
+        return Value::Object(item);
+    }
+    let prefix: String = description
+        .chars()
+        .take(TOOL_SEARCH_DESCRIPTION_BUDGET_CHARS)
+        .collect();
+    let omitted = description.chars().count() - TOOL_SEARCH_DESCRIPTION_BUDGET_CHARS;
+    item.insert(
+        "description".to_owned(),
+        Value::String(format!(
+            "{prefix} ... ({omitted} chars omitted from TUI ToolSearch preview)"
+        )),
+    );
+    Value::Object(item)
+}
+
+/// 以「对象骨架 + 前 `count` 条 tools」测量体积（含省略标记余量）。
+fn measured_len(object: &Map<String, Value>, tools: &[Value], count: usize) -> usize {
+    let mut probe = object.clone();
+    probe.insert(
+        "tools".to_owned(),
+        Value::Array(tools.iter().take(count).cloned().collect()),
+    );
+    Value::Object(probe).to_string().len() + STRUCTURED_MARKER_RESERVE_BYTES
 }
 
 fn sanitize_tool_value(tool_name: &str, value: Value) -> Value {
@@ -111,3 +240,7 @@ fn utf8_prefix(text: &str, limit: usize) -> &str {
         .count();
     safe_str_slice_by_char(text, 0, char_end)
 }
+
+#[cfg(test)]
+#[path = "sanitize_tests.rs"]
+mod tests;
