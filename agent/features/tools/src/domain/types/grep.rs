@@ -58,5 +58,6 @@ pub struct GrepInput {
     pub head_limit: Option<u32>,
     /// Output mode. `files_with_matches` (default) returns a file index with match counts,
     /// which keeps the "where are the matches" map compact; `content` returns matching lines.
+    #[serde(default)]
     pub output_mode: GrepOutputMode,
 }
