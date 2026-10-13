@@ -931,14 +931,15 @@ async fn append_and_persist_prepends_pending_reminder_before_step_messages() {
         "第一次提交 = [reminder, step 消息]（Context 内部 flush 插入头部）"
     );
     assert!(
-        appends[0][0]
-            .text_content()
-            .contains("kind=\"task-progress\""),
+        appends[0][0].is_reminder_message(),
         "reminder 为第一条（canonical 顺序 u → R → a）"
     );
-    assert!(
-        !appends[0][1].text_content().contains("task-progress"),
-        "原 step 消息保持在后"
-    );
+    match &appends[0][0].content[0] {
+        share::message::ContentBlock::Reminder { kind, .. } => {
+            assert_eq!(kind, "task-progress");
+        }
+        other => panic!("期望 Reminder block，得到 {other:?}"),
+    }
+    assert!(!appends[0][1].is_reminder_message(), "原 step 消息保持在后");
     assert_eq!(appends[1].len(), 1, "第二次提交（无新注入）不重复插入");
 }

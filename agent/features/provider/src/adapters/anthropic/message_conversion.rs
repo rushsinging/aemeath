@@ -169,6 +169,19 @@ fn convert_block(block: &ContentBlock) -> serde_json::Value {
                 None => serde_json::Value::Null,
             }
         }
+        ContentBlock::Reminder {
+            kind,
+            version,
+            at,
+            seq,
+            body,
+        } => {
+            // 出站与 Text 同路径：渲染为 <system-reminder> XML envelope。
+            serde_json::json!({
+                "type": "text",
+                "text": ContentBlock::reminder_to_llm_envelope(kind, *version, at, *seq, body),
+            })
+        }
     }
 }
 

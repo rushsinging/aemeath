@@ -83,6 +83,13 @@ pub(crate) enum TuiContentBlock {
         thinking: String,
         signature: Option<String>,
     },
+    Reminder {
+        kind: String,
+        version: u32,
+        at: String,
+        seq: u64,
+        body: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

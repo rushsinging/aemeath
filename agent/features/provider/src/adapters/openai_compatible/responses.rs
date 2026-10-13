@@ -144,6 +144,21 @@ fn user_content_to_responses_input(
                     "output": output,
                 }));
             }
+            share::message::ContentBlock::Reminder {
+                kind,
+                version,
+                at,
+                seq,
+                body,
+            } => {
+                // 与 Text 同路径：渲染为 <system-reminder> XML envelope。
+                message_content.push(serde_json::json!({
+                    "type": "input_text",
+                    "text": share::message::ContentBlock::reminder_to_llm_envelope(
+                        kind, *version, at, *seq, body,
+                    ),
+                }));
+            }
             share::message::ContentBlock::ToolUse { .. }
             | share::message::ContentBlock::Thinking { .. } => {
                 // User-role ToolUse/Thinking 不属于合法 canonical 用户输入；保持既有忽略语义，

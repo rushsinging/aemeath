@@ -10,6 +10,7 @@ use crate::domain::reminder::{
     ReminderQueue, ReminderSource,
 };
 use crate::domain::{estimate_tokens, ContextMessage, SystemBlock};
+use share::message::ContentBlock;
 
 /// 一次 build_window 的 reminder 注入产物：尾部合并消息 + SystemTail 块。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -170,6 +171,7 @@ impl ReminderPipeline {
         }
 
         let mut tail_blocks = Vec::new();
+        let mut tail_persist_blocks: Vec<ContentBlock> = Vec::new();
         let mut system_blocks = Vec::new();
         let mut injected_seqs = Vec::new();
         let mut injected_kinds: Vec<ReminderKind> = Vec::new();
@@ -182,8 +184,8 @@ impl ReminderPipeline {
                 .get(&candidate.kind)
                 .map(|policy| policy.placement)
                 .unwrap_or(ReminderPlacement::TailUserMessage);
-            let block = self.render_block(candidate, placement, language, at);
-            let block_tokens = estimate_tokens(&block);
+            let (envelope, persist_block) = self.render_block(candidate, placement, language, at);
+            let block_tokens = estimate_tokens(&envelope);
             if budget_used + block_tokens > token_budget {
                 deferred_seqs.push(candidate.seq);
                 log::debug!(
@@ -208,8 +210,13 @@ impl ReminderPipeline {
                 block_tokens,
             );
             match placement {
-                ReminderPlacement::TailUserMessage => tail_blocks.push(block),
-                ReminderPlacement::SystemTail => system_blocks.push(block),
+                ReminderPlacement::TailUserMessage => {
+                    tail_blocks.push(envelope);
+                    if let Some(block) = persist_block {
+                        tail_persist_blocks.push(block);
+                    }
+                }
+                ReminderPlacement::SystemTail => system_blocks.push(envelope),
             }
         }
 
@@ -225,12 +232,10 @@ impl ReminderPipeline {
             }
         }
 
-        if !tail_blocks.is_empty() {
-            let tail_message = compose_tail_user_message(&tail_blocks);
-            // 头置 system_reminder 标志：TUI 会话加载按标志隐藏（渲染
-            // NEVER 文本匹配）；provider 出站照发正文。
+        if !tail_persist_blocks.is_empty() {
+            // typed Reminder 落盘：TUI 按 type=reminder 隐藏；LLM 出站走 to_llm_view envelope。
             self.pending_persist
-                .push(ContextMessage::system_reminder_user(tail_message));
+                .push(ContextMessage::reminder(tail_persist_blocks));
         }
 
         ReminderWindowInjection {
@@ -271,25 +276,33 @@ impl ReminderPipeline {
         }
     }
 
+    /// 返回 (LLM envelope 文本, TailUserMessage 落盘用 Reminder block)。
+    /// SystemTail 不落盘 Message，故第二项为 None。
     fn render_block(
         &self,
         candidate: &InjectionCandidate,
         placement: ReminderPlacement,
         language: &str,
         at: &str,
-    ) -> String {
+    ) -> (String, Option<ContentBlock>) {
         let body = match placement {
             ReminderPlacement::TailUserMessage | ReminderPlacement::SystemTail => self
                 .source_for_kind(&candidate.kind)
                 .map(|source| source.render(&candidate.snapshot, language))
                 .unwrap_or_default(),
         };
-        compose_reminder_envelope(&ReminderEnvelopeInput {
+        let kind_wire = candidate.kind.as_str().replace('_', "-");
+        let envelope = compose_reminder_envelope(&ReminderEnvelopeInput {
             kind: candidate.kind.as_str().to_string(),
-            body,
+            body: body.clone(),
             at: at.to_string(),
             seq: candidate.seq,
-        })
+        });
+        let persist = matches!(placement, ReminderPlacement::TailUserMessage).then(|| {
+            // version 与 domain::compose_reminder_envelope / ENVELOPE_VERSION 对齐。
+            ContentBlock::reminder(kind_wire, 1, at, candidate.seq, body)
+        });
+        (envelope, persist)
     }
 
     fn source_for_kind(&self, kind: &ReminderKind) -> Option<&Arc<dyn ReminderSource>> {

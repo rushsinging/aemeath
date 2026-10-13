@@ -760,10 +760,6 @@
         "source": {
           "$ref": "#/$defs/ChatMessageSource",
           "default": "user"
-        },
-        "system_reminder": {
-          "description": "invocation-only 系统提醒标志（share `MessageMetadata::system_reminder`\n的 wire 投影）：TUI 会话加载按标志隐藏，渲染 NEVER 文本匹配。",
-          "type": "boolean"
         }
       },
       "type": "object"
@@ -1815,6 +1811,43 @@
           },
           "required": [
             "type"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "TailUserMessage 落盘形态（与 share::ContentBlock::Reminder 同形）。",
+          "properties": {
+            "at": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "reminder",
+              "type": "string"
+            },
+            "version": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "type",
+            "kind",
+            "version",
+            "at",
+            "seq",
+            "body"
           ],
           "type": "object"
         }

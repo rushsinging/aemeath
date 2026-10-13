@@ -93,6 +93,18 @@ pub fn estimate_message_tokens(message: &Message) -> usize {
             },
             ContentBlock::Image { .. } => 85, // ~85 tokens overhead for image reference
             ContentBlock::Thinking { thinking, .. } => estimate_tokens(thinking),
+            ContentBlock::Reminder {
+                kind,
+                version,
+                at,
+                seq,
+                body,
+            } => {
+                // 与 to_llm_view 一致：按出站 <system-reminder> envelope 文本估算。
+                estimate_tokens(&ContentBlock::reminder_to_llm_envelope(
+                    kind, *version, at, *seq, body,
+                ))
+            }
         })
         .sum::<usize>()
 }

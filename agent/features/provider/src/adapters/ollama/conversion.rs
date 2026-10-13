@@ -130,6 +130,18 @@ impl OllamaProviderConversion for OllamaProvider {
                     ContentBlock::Thinking { .. } => {
                         // Thinking blocks are internal; not re-sent to ollama
                     }
+                    ContentBlock::Reminder {
+                        kind,
+                        version,
+                        at,
+                        seq,
+                        body,
+                    } => {
+                        // 与 Text 同路径：渲染为 <system-reminder> XML envelope 后作为消息文本。
+                        text_parts.push(ContentBlock::reminder_to_llm_envelope(
+                            kind, *version, at, *seq, body,
+                        ));
+                    }
                 }
             }
 
