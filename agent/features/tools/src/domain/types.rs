@@ -49,6 +49,12 @@ pub use grep::{GrepFileMatch, GrepInput, GrepResult};
 pub use read::{ReadInput, ReadResult};
 pub use web_fetch::{WebFetchInput, WebFetchResult};
 pub use write::{WriteInput, WriteResult};
+
+// 统一 timeout 入参策略（方案 B：框架注入 + 解析）。
+pub use crate::domain::timeout_policy::{
+    default_tool_max_timeout_secs, extract_timeout_from_input, inject_timeout_into_input_schema,
+    resolve_tool_timeout,
+};
 // Non-core tool result structs (Phase 0a 任务 0.4).
 pub mod background_processes;
 pub mod list_mcp_resources;

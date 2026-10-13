@@ -133,6 +133,14 @@ impl TypedTool for WebFetchTool {
         true
     }
 
+    fn timeout_secs(&self) -> u64 {
+        super::constants::WEB_FETCH_DEFAULT_TIMEOUT_SECS
+    }
+
+    fn max_timeout_secs(&self) -> u64 {
+        super::constants::WEB_FETCH_MAX_TIMEOUT_SECS
+    }
+
     async fn call(
         &self,
         input: serde_json::Value,
@@ -164,11 +172,11 @@ impl TypedTool for WebFetchTool {
         }
         let raw_url = args.url.as_str();
 
-        let timeout_secs = args
-            .timeout
-            .unwrap_or(super::constants::WEB_FETCH_DEFAULT_TIMEOUT_SECS)
-            .min(super::constants::WEB_FETCH_MAX_TIMEOUT_SECS)
-            .max(1);
+        let timeout_secs = crate::domain::timeout_policy::resolve_tool_timeout(
+            args.timeout,
+            super::constants::WEB_FETCH_DEFAULT_TIMEOUT_SECS,
+            super::constants::WEB_FETCH_MAX_TIMEOUT_SECS,
+        );
 
         // Validate URL and upgrade http to https
         let mut url = match validate_url(raw_url) {

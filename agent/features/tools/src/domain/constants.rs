@@ -77,10 +77,15 @@ pub(crate) const READONLY_COMMANDS: &[&str] = &[
 
 pub(crate) const SAFE_DEVS: &[&str] = &["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"];
 
+// ─── timeout policy（全工具统一入参）───
+
+/// 通用工具 `timeout` 入参上限（秒）。Agent / Watch 可覆盖。
+pub const DEFAULT_TOOL_MAX_TIMEOUT_SECS: u64 = 3600;
+
 // ─── background_processes.rs（#1931 / #1946 Watch）───
 
 /// `BackgroundProcessWatch` 的 Tool 框架超时（秒）。
-/// 唯一超时源：`Tool::timeout_secs()` / execution_supervisor effective deadline。
+/// 省略入参时的 default，同时作为该工具 max / 框架硬上限。
 pub const WATCH_TOOL_TIMEOUT_SECS: u64 = 300;
 
 /// 内部 `wait_task` 相对框架超时提前收口的 grace（秒），避免撞

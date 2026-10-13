@@ -116,15 +116,16 @@ impl TypedTool for BashTool {
         true
     }
 
-    /// Override: Bash commands may run up to 3600s (schema max).
-    /// The default 120s outer timeout in agent.rs would kill long-running
-    /// commands before the internal per-command timeout fires.
     fn cancellation(&self) -> crate::domain::published_language::CancellationDeclaration {
         crate::domain::published_language::CancellationDeclaration::Cooperative
     }
 
     fn timeout_secs(&self) -> u64 {
-        3600
+        super::constants::BASH_DEFAULT_TIMEOUT_SECS
+    }
+
+    fn max_timeout_secs(&self) -> u64 {
+        super::constants::BASH_MAX_TIMEOUT_SECS
     }
 
     fn is_input_safe(&self, input: &Value) -> bool {
@@ -149,10 +150,11 @@ impl TypedTool for BashTool {
                 return TypedToolResult::error(format!("Shell injection pattern blocked ({reason}): {command}\nUse separate Bash calls instead."));
             }
         }
-        let timeout_secs = args
-            .timeout
-            .unwrap_or(super::constants::BASH_DEFAULT_TIMEOUT_SECS)
-            .min(super::constants::BASH_MAX_TIMEOUT_SECS);
+        let timeout_secs = crate::domain::timeout_policy::resolve_tool_timeout(
+            args.timeout,
+            super::constants::BASH_DEFAULT_TIMEOUT_SECS,
+            super::constants::BASH_MAX_TIMEOUT_SECS,
+        );
 
         let path_base = ctx.workspace_read().current_path_base();
         log::debug!(

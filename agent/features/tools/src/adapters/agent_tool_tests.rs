@@ -89,6 +89,36 @@ async fn test_agent_tool_caps_timeout_at_three_hours() {
     );
 }
 
+#[tokio::test]
+async fn test_agent_tool_clamps_zero_timeout_to_one_second() {
+    let tool = AgentTool;
+    let runner = Arc::new(StubRunner::default());
+    let ctx = test_ctx_with_runner(runner.clone());
+
+    let result = tool
+        .call(
+            serde_json::json!({
+                "prompt": "finished",
+                "description": "run task",
+                "agent": "coder",
+                "timeout": 0,
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(!result.is_error);
+    assert_eq!(
+        *runner.captured_timeout.lock().unwrap(),
+        std::time::Duration::from_secs(1)
+    );
+    assert!(!runner
+        .captured_system
+        .lock()
+        .unwrap()
+        .contains("0 means unlimited"));
+}
+
 #[test]
 fn test_agent_tool_schema_describes_timeout_without_max_turns() {
     let tool = AgentTool;

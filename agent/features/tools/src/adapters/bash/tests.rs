@@ -781,9 +781,9 @@ fn bash_tool_timeout_secs_allows_up_to_one_hour() {
     .allow_all(true)
     .build();
     let tool = bash_tool(&ctx);
-    // Outer override must cover the full 3600s schema max so the outer
-    // guard does not kill a command before its internal timeout fires.
-    assert_eq!(tool.timeout_secs(), 3600);
+    // default 保持 120；max=3600，由入参 timeout + supervisor resolve 抬高 deadline。
+    assert_eq!(tool.timeout_secs(), 120);
+    assert_eq!(tool.max_timeout_secs(), 3600);
 }
 
 /// timeout 默认值/上限属参数契约，唯一真相源是 `BashInput::timeout` 字段 doc
