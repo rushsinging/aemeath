@@ -1,4 +1,4 @@
-use super::{earliest_deadline, placeholder_tool_result};
+use super::{earliest_deadline, invocation_summary_text, placeholder_tool_result};
 use std::time::{Duration, SystemTime};
 
 #[test]
@@ -559,5 +559,54 @@ fn placeholder_without_log_path_stays_compact() {
     assert!(
         !text.contains("Progress log:"),
         "无文件（未装配 / 建档失败降级）不带路径段：{text}"
+    );
+}
+
+// ── #1964 摘要语义：友好名 · goal ────────────────────────────────────
+
+fn summary_call(tool_name: &str, input: serde_json::Value) -> SupervisedToolCall {
+    let context = test_context();
+    SupervisedToolCall {
+        identity: ToolCallIdentityData {
+            session_id: SessionId::new("session-1"),
+            run_id: RunId::new("run-1"),
+            step_id: RunStepId::new("step-1"),
+            runtime_call_id: "runtime-call-1".to_string(),
+            provider_call_id: None,
+            tool_name: tool_name.to_string(),
+            call_index: 0,
+            agent: false,
+        },
+        invocation: ToolInvocation::new(tool_name, input, context.scope().clone()),
+        context,
+        input_preview: "{}".to_string(),
+        run_deadline: None,
+        cancellation: Arc::new(NeverCancelSignal),
+        child_cancellation: tokio_util::sync::CancellationToken::new(),
+        background_threshold: None,
+    }
+}
+
+#[test]
+fn invocation_summary_uses_display_name_and_goal() {
+    // goal 从完整 input JSON 读取（不是 input_preview）。
+    let call = summary_call(
+        "Bash",
+        serde_json::json!({"goal": "跑 ping", "command": "ping -c 1 1.1.1.1"}),
+    );
+    let text = invocation_summary_text(&call);
+    assert_eq!(text, "Run · 跑 ping");
+    assert!(!text.contains("input="), "摘要不应再含 input=：{text}");
+    assert!(!text.contains("tool="), "摘要不应再含 tool=：{text}");
+}
+
+#[test]
+fn invocation_summary_without_goal_falls_back_to_no_goal() {
+    let call = summary_call("Bash", serde_json::json!({"command": "ping -c 1 1.1.1.1"}));
+    let text = invocation_summary_text(&call);
+    assert_eq!(text, "Run · (no goal)");
+    assert!(
+        !text.contains("input="),
+        "缺 goal 也不应回退 input=：{text}"
     );
 }

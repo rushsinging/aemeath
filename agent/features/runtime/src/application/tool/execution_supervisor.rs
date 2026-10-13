@@ -620,11 +620,35 @@ pub(crate) enum ToolExecutionSupervisorError {
 mod tests;
 
 /// #252 PR2：转后台调用的一句话摘要（监督器账本 display 用）。
+/// #1964：`{友好名} · {goal}`；goal 缺失 fallback `{友好名} · (no goal)`，绝不回退 `input=`。
 fn invocation_summary_text(call: &SupervisedToolCall) -> String {
-    format!(
-        "tool={} input={}",
-        call.identity.tool_name, call.input_preview
-    )
+    let display_name = local_tool_display_name(&call.identity.tool_name);
+    let goal = call
+        .invocation
+        .input
+        .get("goal")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|goal| !goal.is_empty());
+    match goal {
+        Some(goal) => format!("{display_name} · {goal}"),
+        None => format!("{display_name} · (no goal)"),
+    }
+}
+
+/// #1964 Task 2 过渡：runtime 侧本地友好名最小表（未知工具回退内部名）。
+/// Task 3 会下沉共享真相源（`TOOL_DISPLAY_NAMES`），届时删除本表改为共享调用。
+fn local_tool_display_name(tool_name: &str) -> String {
+    match tool_name {
+        "Bash" => "Run".to_string(),
+        "Glob" => "Find".to_string(),
+        "Grep" => "Search".to_string(),
+        "WebFetch" => "Web Fetch".to_string(),
+        "WebSearch" => "Web Search".to_string(),
+        "ToolSearch" => "Tool Search".to_string(),
+        "AskUserQuestion" => "Ask".to_string(),
+        other => other.to_string(),
+    }
 }
 
 /// #252 PR2：receipt 终态 → 后台进程终态映射。
