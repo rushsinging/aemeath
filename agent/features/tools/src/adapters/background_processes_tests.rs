@@ -80,7 +80,7 @@ fn source() -> Arc<StaticSource> {
                 task_id: "task-1".to_string(),
                 tool_name: "Bash".to_string(),
                 state: "backgrounded".to_string(),
-                goal: "tool=Bash input=cargo test".to_string(),
+                goal: "跑 cargo test".to_string(),
                 duration_ms: Some(1500),
             }],
             log_text: "line-1\nline-2\n".to_string(),
@@ -100,6 +100,11 @@ async fn list_tool_returns_summaries() {
     assert_eq!(result.data.expect("结构化数据").tasks.len(), 1);
     assert!(result.text.contains("task-1"));
     assert!(result.text.contains("Bash"));
+    assert!(
+        result.text.contains("跑 cargo test"),
+        "List LLM text MUST 含 goal：{}",
+        result.text
+    );
 }
 
 #[tokio::test]

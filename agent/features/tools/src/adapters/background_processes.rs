@@ -74,10 +74,11 @@ impl TypedTool for BackgroundProcessListTool {
                 .iter()
                 .map(|summary: &BackgroundProcessSummaryData| {
                     format!(
-                        "{} [{}] {} ({}ms)",
+                        "{} [{}] {} · {} ({}ms)",
                         summary.task_id,
                         summary.state,
                         summary.tool_name,
+                        summary.goal,
                         summary.duration_ms.unwrap_or(0)
                     )
                 })
