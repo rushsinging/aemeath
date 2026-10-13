@@ -49,7 +49,7 @@
 BackgroundProcessRecord
   ├─ task_id: TaskId（UUIDv7）
   ├─ identity: ToolCallIdentityData
-  ├─ tool_name / invocation_summary（参数摘要，审计与查询展示）
+  ├─ tool_name / invocation_summary（语义摘要：`{友好名} · {goal}`，审计与 List/Status/Watch 展示；#1964）
   ├─ state:
   │     Dispatched → ForegroundWaiting ──阈值内完成──→ Terminal(Success | Failure | Cancelled | TimedOut | CancellationUnconfirmed)
   │                     └─超阈值→ Backgrounded → Completed | Failed | TimedOut | Stopped | Invalidated
@@ -279,6 +279,9 @@ specs 同步（核心引擎 PR 内）：3.4.3（FIFO 修订）、3.4.4（`Backgr
 | ⑥ | Wakeup Run 空输入可行性 | 通知链路 PR 实现时验证，兜底极简标记文本 |
 
 ## BackgroundProcessWatch（#1931）
+
+> **#1964 TUI**：Watch/Status header = `{友好名} · {summary|goal} · {短尾}`；账本 `BackgroundProcessSummaryData.summary` = `{友好名} · {goal}`。outcome（Watch 等待结局）与 state（任务生命周期）语义不同，可同时出现在 result 末行。
+
 
 推翻此前「不做 Watch」否决：登记式 Watch 与完成通知重复、阻塞式会嵌套后台的风险，通过以下约束解除——
 
