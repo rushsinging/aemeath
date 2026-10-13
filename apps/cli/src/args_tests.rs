@@ -155,3 +155,23 @@ fn cli_rejects_systemone_without_subcommand() {
     let result = Cli::try_parse_from(["aemeath", "systemone"]);
     assert!(result.is_err(), "`aemeath systemone` 缺少子命令应解析失败");
 }
+
+#[test]
+fn cli_accepts_systemone_serve_nested_command() {
+    let cli = Cli::try_parse_from(["aemeath", "systemone", "serve"]).unwrap();
+    assert!(matches!(
+        cli.command,
+        Some(Commands::Systemone {
+            command: SystemoneCommands::Serve
+        })
+    ));
+}
+
+#[test]
+fn cli_rejects_retired_scoring_serve_top_level() {
+    let result = Cli::try_parse_from(["aemeath", "scoring", "serve"]);
+    assert!(
+        result.is_err(),
+        "`aemeath scoring serve` 已退役，应解析失败"
+    );
+}

@@ -110,16 +110,10 @@ pub enum Commands {
     /// Configure a built-in LLM provider interactively
     Connect,
 
-    /// Manage the embedded System One scoring model
+    /// Manage System One scoring model and local daemon
     Systemone {
         #[command(subcommand)]
         command: SystemoneCommands,
-    },
-
-    /// System One scoring daemon（本机常驻服务）
-    Scoring {
-        #[command(subcommand)]
-        command: ScoringCommands,
     },
 
     /// Check for and install updates
@@ -138,11 +132,6 @@ pub enum Commands {
 pub enum SystemoneCommands {
     /// Download and install the System One scoring model (~/.agents/models/systemone)
     Download,
-}
-
-/// `aemeath scoring` 子命令集。
-#[derive(Subcommand)]
-pub enum ScoringCommands {
     /// 启动本机 scoring daemon（加载一份 GGUF，经 UDS 服务多会话）
     Serve,
 }

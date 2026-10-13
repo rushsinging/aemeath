@@ -59,20 +59,16 @@ async fn main() {
                 .unwrap_or_else(|error| fatal_error::report_fatal(error));
             subcommand::update_command::run_update_command(check, user_agent).await;
         }
-        Some(Commands::Systemone { command }) => {
-            let args = Args::from(cli.run_args);
-            let user_agent = composition::app::configured_user_agent(args.into())
-                .await
-                .unwrap_or_else(|error| fatal_error::report_fatal(error));
-            match command {
-                args::SystemoneCommands::Download => {
-                    subcommand::systemone_command::run_systemone_download_command(user_agent).await;
-                }
+        Some(Commands::Systemone { command }) => match command {
+            args::SystemoneCommands::Download => {
+                let args = Args::from(cli.run_args);
+                let user_agent = composition::app::configured_user_agent(args.into())
+                    .await
+                    .unwrap_or_else(|error| fatal_error::report_fatal(error));
+                subcommand::systemone_command::run_systemone_download_command(user_agent).await;
             }
-        }
-        Some(Commands::Scoring { command }) => match command {
-            args::ScoringCommands::Serve => {
-                subcommand::scoring_command::run_scoring_serve_command().await;
+            args::SystemoneCommands::Serve => {
+                subcommand::systemone_command::run_systemone_serve_command().await;
             }
         },
         Some(Commands::Version) => {

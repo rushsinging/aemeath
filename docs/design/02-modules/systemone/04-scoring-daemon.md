@@ -31,7 +31,7 @@
 
 | # | 题 | 结论 |
 |---|---|---|
-| Q1 | 进程入口 | 同一 `aemeath` 二进制子命令：`aemeath scoring serve` |
+| Q1 | 进程入口 | 同一 `aemeath` 二进制子命令：`aemeath systemone serve` |
 | Q2 | 传输 | Unix domain socket（不做 HTTP localhost） |
 | Q3 | 生命周期 | 客户端惰性拉起 + 可选挂 launchd/system daemon（非默认硬依赖） |
 | Q4 | 失败语义 | 短超时；**首次** TUI/系统提示后 fail-open；NEVER 回退 Jev HTTP |
@@ -53,7 +53,7 @@
 
 ```
 aemeath (会话进程)
-  composition: DaemonScoringClient ──UDS──► aemeath scoring serve
+  composition: DaemonScoringClient ──UDS──► aemeath systemone serve
        │                                        │
        │                                        ├─ 单实例锁 scoring.lock
        │                                        ├─ 加载 1× GGUF + PointerHead
@@ -72,8 +72,8 @@ aemeath (会话进程)
 ### 4.1 入口
 
 ```bash
-aemeath scoring serve          # 前台 / 受管进程
-aemeath scoring serve --detach # 如需后台（实现 MAY 延后；launchd 优先）
+aemeath systemone serve          # 前台 / 受管进程
+aemeath systemone serve --detach # 如需后台（实现 MAY 延后；launchd 优先）
 ```
 
 - 同一二进制；**仅** `serve`（及 `systemone download`）路径编译并加载引擎（feature `systemone-daemon`）。
@@ -94,14 +94,14 @@ aemeath scoring serve --detach # 如需后台（实现 MAY 延后；launchd 优�
 2. 至少一个场景开关开启，且
 3. 连接 sock 失败（不存在 / 拒绝），
 
-则客户端尝试 `spawn` 当前可执行文件的 `scoring serve`（带单实例锁语义），短暂等待 sock 就绪后重连。
+则客户端尝试 `spawn` 当前可执行文件的 `systemone serve`（带单实例锁语义），短暂等待 sock 就绪后重连。
 
 - 会话退出 **NEVER** 杀掉 daemon（多会话共享）。
 - `scoring.enabled=false` 或四场景全关 → **零成本**（不连、不 spawn、不检查模型）。
 
 ### 4.4 可选 system daemon
 
-- 文档提供 launchd plist 示例，将 `aemeath scoring serve` 注册为用户级 agent。
+- 文档提供 launchd plist 示例，将 `aemeath systemone serve` 注册为用户级 agent。
 - 默认安装 **不**自动注册 launchd；惰性拉起是默认路径。
 
 ### 4.5 模型缺失
@@ -180,7 +180,7 @@ aemeath scoring serve --detach # 如需后台（实现 MAY 延后；launchd 优�
 | 路径 | 状态 |
 |---|---|
 | 生产会话 | **仅** daemon 客户端；CLI 默认不编 `systemone-embedded` |
-| `aemeath scoring serve` | 唯一加载 GGUF 的用户路径（feature `systemone-daemon`） |
+| `aemeath systemone serve` | 唯一加载 GGUF 的用户路径（feature `systemone-daemon`） |
 | 进程内 embedded adapter | **退役**：删除生产 composition 装配；测试 **NEVER** 依赖进程内 load |
 | 单测 | mock `ScoringPort` |
 | 集成 / 数值对分 | 起本地 daemon，或 eval harness 显式管理 serve 生命周期 |
@@ -225,7 +225,7 @@ aemeath scoring serve --detach # 如需后台（实现 MAY 延后；launchd 优�
 | `systemone` domain | 协议版本常量、请求/响应 DTO（与 `ScoringPort` 同形） |
 | `systemone` adapters | `DaemonScoringClient`；serve 侧 listener + worker 队列；单实例锁 |
 | `composition` | 装配客户端装饰链；惰性 spawn 策略；**删除** embedded 生产装配 |
-| `apps/cli` | `scoring serve` 子命令；launchd 文档；首次 Unavailable 提示接线 |
+| `apps/cli` | `systemone serve` 子命令；launchd 文档；首次 Unavailable 提示接线 |
 | `build_cli.sh` | 默认不启 embedded；serve 所需 feature 在子命令/独立构建说明中明确 |
 
 ## 10. 交付拆分
@@ -238,7 +238,7 @@ aemeath scoring serve --detach # 如需后台（实现 MAY 延后；launchd 优�
 
 ### PR1 — daemon + 协议 + 单实例
 
-- `aemeath scoring serve`、UDS、锁、模型加载、串行 worker、`protocol_version`。
+- `aemeath systemone serve`、UDS、锁、模型加载、串行 worker、`protocol_version`。
 - 单元测试：帧编解码、锁互斥、协议不匹配、模型缺失失败路径。
 - 真机 smoke（`--ignored`）：serve + 单次 answer。
 
