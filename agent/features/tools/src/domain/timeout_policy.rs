@@ -6,13 +6,11 @@ use super::constants::DEFAULT_TOOL_MAX_TIMEOUT_SECS;
 
 /// 解析工具 `timeout` 入参（秒）。
 ///
-/// - `None` → 保留工具默认 `default_secs`（允许 `0`：框架/测试用立即 deadline）
+/// - `None` → `default_secs.clamp(1, max_secs)`（**NEVER** 保留 0）
 /// - `Some(v)` → clamp 到 `[1, max_secs]`（废除入参 `0=无超时`）
-/// - 非零默认若高于 max，则收束到 max
 pub fn resolve_tool_timeout(requested: Option<u64>, default_secs: u64, max_secs: u64) -> u64 {
     let max_secs = max_secs.max(1);
     match requested {
-        None if default_secs == 0 => 0,
         None => default_secs.clamp(1, max_secs),
         Some(value) => value.clamp(1, max_secs),
     }
@@ -95,7 +93,7 @@ mod tests {
     fn resolve_none_uses_default_clamped_to_max() {
         assert_eq!(resolve_tool_timeout(None, 120, 3600), 120);
         assert_eq!(resolve_tool_timeout(None, 5000, 300), 300);
-        assert_eq!(resolve_tool_timeout(None, 0, 3600), 0);
+        assert_eq!(resolve_tool_timeout(None, 0, 3600), 1);
     }
 
     #[test]
