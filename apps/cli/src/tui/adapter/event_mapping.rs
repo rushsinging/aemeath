@@ -454,6 +454,11 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         },
         ChatEvent::ConfigReloaded { event } => TuiRuntimeEvent::ConfigReloaded {
             changed_keys: event.changed_keys,
+            scopes: event
+                .scopes
+                .into_iter()
+                .map(config_application_scope)
+                .collect(),
             view: config_view(event.view),
         },
         ChatEvent::SessionReset => TuiRuntimeEvent::SessionReset,
@@ -1209,6 +1214,16 @@ fn config_cause(value: sdk::ConfigChangeCauseData) -> TuiConfigChangeCause {
         sdk::ConfigChangeCauseData::ClientUpdate => TuiConfigChangeCause::ClientUpdate,
         sdk::ConfigChangeCauseData::ProjectCommit => TuiConfigChangeCause::ProjectCommit,
         sdk::ConfigChangeCauseData::FileReload => TuiConfigChangeCause::FileReload,
+    }
+}
+
+fn config_application_scope(value: sdk::ConfigApplicationScopeView) -> TuiConfigApplicationScope {
+    match value {
+        sdk::ConfigApplicationScopeView::Immediate => TuiConfigApplicationScope::Immediate,
+        sdk::ConfigApplicationScopeView::SessionRestartRequired => {
+            TuiConfigApplicationScope::SessionRestartRequired
+        }
+        sdk::ConfigApplicationScopeView::Run => TuiConfigApplicationScope::Run,
     }
 }
 fn config_view(value: sdk::ConfigView) -> TuiConfigView {

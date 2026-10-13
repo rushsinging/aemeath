@@ -194,3 +194,41 @@ fn runtime_tool_output_delta_maps_to_record_tool_streaming_output_intent() {
                 && intent.text == "line of stdout\n"
     ));
 }
+
+fn empty_config_view() -> crate::tui::adapter::tui_runtime_event::TuiConfigView {
+    let markdown_spacing = crate::tui::view_model::markdown_spacing::MarkdownSpacingPolicy::from(
+        &sdk::ConfigView::default(),
+    );
+    crate::tui::adapter::tui_runtime_event::TuiConfigView {
+        model_name: String::new(),
+        provider: None,
+        has_api_key: false,
+        permission_mode: "ask".to_string(),
+        markdown: false,
+        verbose: false,
+        markdown_spacing,
+        context_size: 0,
+        logging_level: String::new(),
+    }
+}
+
+#[test]
+fn config_reloaded_maps_scope_notices_for_run_and_session_restart() {
+    use crate::tui::adapter::tui_runtime_event::TuiConfigApplicationScope;
+    use crate::tui::model::conversation::intent::AppendSystemMessage;
+
+    let mapping = map_runtime_event(&TuiRuntimeEvent::ConfigReloaded {
+        changed_keys: vec!["config:reloaded".to_string()],
+        scopes: vec![
+            TuiConfigApplicationScope::Run,
+            TuiConfigApplicationScope::SessionRestartRequired,
+        ],
+        view: empty_config_view(),
+    });
+
+    assert!(matches!(
+        mapping.conversation.as_slice(),
+        [ConversationIntent::AppendSystemMessage(AppendSystemMessage { text })]
+            if text.contains("下次 Run 生效") && text.contains("重启 Session 后生效")
+    ));
+}

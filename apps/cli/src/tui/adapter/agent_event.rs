@@ -355,10 +355,14 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
             ],
             ..Default::default()
         },
-        TuiRuntimeEvent::ConfigReloaded { changed_keys, view } => {
+        TuiRuntimeEvent::ConfigReloaded {
+            changed_keys: _,
+            scopes,
+            view,
+        } => {
             let mut mapping = conversation(ConversationIntent::AppendSystemMessage(
                 AppendSystemMessage {
-                    text: format!("[config reloaded] changed: {}", changed_keys.join(", ")),
+                    text: config_reload_notice(scopes),
                 },
             ));
             mapping.ui_preferences.push(
@@ -497,6 +501,25 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
 // ════════════════════════════════════════════════════════════════════
 //  Helpers — AgentEventMapping constructors
 // ════════════════════════════════════════════════════════════════════
+
+fn config_reload_notice(
+    scopes: &[crate::tui::adapter::tui_runtime_event::TuiConfigApplicationScope],
+) -> String {
+    use crate::tui::adapter::tui_runtime_event::TuiConfigApplicationScope;
+
+    let mut parts = Vec::new();
+    if scopes.contains(&TuiConfigApplicationScope::Run) {
+        parts.push("下次 Run 生效");
+    }
+    if scopes.contains(&TuiConfigApplicationScope::SessionRestartRequired) {
+        parts.push("重启 Session 后生效");
+    }
+    if parts.is_empty() {
+        "[config] 已重载。".to_string()
+    } else {
+        format!("[config] 已重载。{}。", parts.join("；"))
+    }
+}
 
 fn conversation(intent: ConversationIntent) -> AgentEventMapping {
     AgentEventMapping {

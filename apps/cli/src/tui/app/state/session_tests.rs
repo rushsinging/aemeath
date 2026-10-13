@@ -15,6 +15,64 @@ fn test_session_state_holds_session_id() {
 }
 
 #[test]
+fn remember_and_sync_rewrites_display_after_name_change() {
+    let mut state = empty_state();
+    state.current_model_display = "Volcengine/DeepSeek V4.1 Flash (Ark)".into();
+    state.cache_models(vec![sdk::ModelSummary {
+        provider: "Volcengine".into(),
+        id: "deepseek-v4.1-flash".into(),
+        name: "DeepSeek V4.1 Flash (Ark)".into(),
+        context_window: 128_000,
+        max_tokens: 8_192,
+    }]);
+
+    state.remember_bound_model_from_cache();
+    assert_eq!(
+        state
+            .bound_model
+            .as_ref()
+            .map(|(p, i)| (p.as_str(), i.as_str())),
+        Some(("Volcengine", "deepseek-v4.1-flash"))
+    );
+    state.invalidate_cached_models();
+
+    let refreshed = state.sync_current_model_display_from_list(&[sdk::ModelSummary {
+        provider: "Volcengine".into(),
+        id: "deepseek-v4.1-flash".into(),
+        name: "DeepSeek V4.1 Flash".into(),
+        context_window: 128_000,
+        max_tokens: 8_192,
+    }]);
+    assert_eq!(refreshed.as_deref(), Some("Volcengine/DeepSeek V4.1 Flash"));
+    assert_eq!(
+        state.current_model_display,
+        "Volcengine/DeepSeek V4.1 Flash"
+    );
+}
+
+#[test]
+fn invalidate_cached_models_returns_to_unloaded_state() {
+    let mut state = SessionState {
+        current_model_display: String::new(),
+        ..Default::default()
+    };
+    state.cache_models(vec![sdk::ModelSummary {
+        provider: "Volcengine".to_string(),
+        id: "kimi-k3".to_string(),
+        name: "Kimi K3".to_string(),
+        context_window: 128_000,
+        max_tokens: 8_192,
+    }]);
+    assert!(state.cached_models.is_some());
+
+    state.invalidate_cached_models();
+    assert!(
+        state.cached_models.is_none(),
+        "invalidate must restore unloaded semantics so /model waits for ModelList"
+    );
+}
+
+#[test]
 fn cache_models_distinguishes_unloaded_from_confirmed_empty() {
     let mut state = empty_state();
     assert!(

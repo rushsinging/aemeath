@@ -485,6 +485,14 @@ pub(crate) enum TuiConfigChangeCause {
     FileReload,
 }
 
+/// 配置变更可被应用的最早安全边界（对齐 SDK `ConfigApplicationScopeView`）。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TuiConfigApplicationScope {
+    Immediate,
+    SessionRestartRequired,
+    Run,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TuiConfigView {
     pub(crate) model_name: String,
@@ -782,6 +790,7 @@ pub(crate) enum TuiRuntimeEvent {
     },
     ConfigReloaded {
         changed_keys: Vec<String>,
+        scopes: Vec<TuiConfigApplicationScope>,
         view: TuiConfigView,
     },
 }

@@ -988,6 +988,35 @@ fn config_reload_preserves_permission_mode_in_tui_owned_event() {
 }
 
 #[test]
+fn config_reload_preserves_scopes_in_tui_owned_event() {
+    let mapped = sdk_event_to_tui_event(sdk::ChatEvent::ConfigReloaded {
+        event: sdk::ConfigReloadedEvent {
+            changed_keys: vec![
+                "config:reloaded".to_string(),
+                "config:scope:run".to_string(),
+                "config:scope:session_restart_required".to_string(),
+            ],
+            scopes: vec![
+                sdk::ConfigApplicationScopeView::Run,
+                sdk::ConfigApplicationScopeView::SessionRestartRequired,
+            ],
+            view: sdk::ConfigView::default(),
+        },
+    });
+
+    let SdkEventMapping::Runtime(TuiRuntimeEvent::ConfigReloaded { scopes, .. }) = mapped else {
+        panic!("ConfigReloaded must map to one runtime event");
+    };
+    assert_eq!(
+        scopes,
+        vec![
+            crate::tui::adapter::tui_runtime_event::TuiConfigApplicationScope::Run,
+            crate::tui::adapter::tui_runtime_event::TuiConfigApplicationScope::SessionRestartRequired,
+        ]
+    );
+}
+
+#[test]
 fn model_invocation_retry_mapping_preserves_context_attempt_and_delay() {
     let expected_chat_id = sdk::ids::ChatId::new("chat-retry");
     let expected_run_id = sdk::ids::ChatRunId::new("turn-retry");
