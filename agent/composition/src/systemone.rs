@@ -47,7 +47,7 @@ pub enum ScoringStartupOutcome {
     /// scoring daemon 暂不可达（已惰性拉起失败或 sock 未就绪）；端口仍装配，
     /// 首次提醒后场景静默降级，主聊天 **NEVER** 阻断。
     DaemonUnreachable {
-        /// 中文原因（含 `aemeath scoring serve` / download 提示）。
+        /// 中文原因（含 `aemeath systemone serve` / download 提示）。
         detail: String,
     },
     /// 构建未启用 `systemone-embedded`：不加载模型、不回退 HTTP（测试 / 旧路径）。
@@ -260,7 +260,7 @@ pub(crate) trait ReleaseManifestSource: Send + Sync {
     fn release_manifest(&self) -> Option<systemone::ModelManifest>;
 }
 
-/// embedded 装配注入点：**仅** `aemeath scoring serve` 与测试矩阵使用。
+/// embedded 装配注入点：**仅** `aemeath systemone serve` 与测试矩阵使用。
 /// 会话生产装配走 [`assemble_daemon_scoring_ports_with`]，**NEVER** 经本 trait 加载 GGUF。
 /// 测试注入 fake 以覆盖历史装配矩阵（不读模型目录、不加载真实模型）。
 #[async_trait]
@@ -374,7 +374,7 @@ pub async fn assemble_scoring_ports(scoring: &share::config::ScoringConfig) -> S
 
 /// 惰性拉起 scoring daemon 的注入点（测试可 stub，避免真实 spawn）。
 pub(crate) trait ScoringDaemonLauncher: Send + Sync {
-    /// sock 已可连则 Ok；否则尝试 spawn `scoring serve` 并等待就绪。
+    /// sock 已可连则 Ok；否则尝试 spawn `systemone serve` 并等待就绪。
     fn ensure_ready(
         &self,
         sock: &std::path::Path,
@@ -382,7 +382,7 @@ pub(crate) trait ScoringDaemonLauncher: Send + Sync {
     ) -> Result<(), String>;
 }
 
-/// 生产 launcher：探测 sock → `current_exe scoring serve` → 轮询就绪。
+/// 生产 launcher：探测 sock → `current_exe systemone serve` → 轮询就绪。
 pub(crate) struct ProcessDaemonLauncher;
 
 impl ScoringDaemonLauncher for ProcessDaemonLauncher {
@@ -392,13 +392,14 @@ impl ScoringDaemonLauncher for ProcessDaemonLauncher {
         connect_timeout: std::time::Duration,
     ) -> Result<(), String> {
         // composition 单测的 current_exe 是 `deps/composition-*` 测试二进制：
-        // 对其 spawn `scoring serve` 会挂起并污染并行用例（如 L4 日志等待）。
+        // 对其 spawn `systemone serve` 会挂起并污染并行用例（如 L4 日志等待）。
         // 生产路径（非 cfg(test)）仍走惰性拉起。
         #[cfg(test)]
         {
             let _ = (sock, connect_timeout);
             return Err(
-                "composition 单测禁用惰性拉起 scoring serve（避免测试二进制被误 spawn）".to_owned(),
+                "composition 单测禁用惰性拉起 systemone serve（避免测试二进制被误 spawn）"
+                    .to_owned(),
             );
         }
         #[cfg(not(test))]
@@ -593,7 +594,7 @@ pub(crate) async fn assemble_scoring_ports_with(
 #[path = "systemone_tests.rs"]
 mod tests;
 
-/// `aemeath scoring serve` 退出结局。
+/// `aemeath systemone serve` 退出结局。
 #[derive(Debug)]
 pub enum ScoringServeExit {
     /// 正常优雅退出（收到 shutdown）。
@@ -608,14 +609,14 @@ pub enum ScoringServeExit {
 pub async fn run_scoring_serve() -> ScoringServeExit {
     if !systemone::EMBEDDED_SCORING_AVAILABLE {
         return ScoringServeExit::Failure {
-            message: "本构建未启用 System One 引擎（feature `systemone-daemon` / `embedded`）；无法启动 scoring serve。".to_owned(),
+            message: "本构建未启用 System One 引擎（feature `systemone-daemon` / `embedded`）；无法启动 systemone serve。".to_owned(),
             exit_code: 2,
         };
     }
 
     let Some(manifest) = ProductionReleaseManifest.release_manifest() else {
         return ScoringServeExit::Failure {
-            message: "发行 manifest 不可用，无法启动 scoring serve。".to_owned(),
+            message: "发行 manifest 不可用，无法启动 systemone serve。".to_owned(),
             exit_code: 2,
         };
     };
@@ -661,7 +662,7 @@ pub async fn run_scoring_serve() -> ScoringServeExit {
     };
 
     let sock = endpoints.sock.clone();
-    println!("scoring serve 监听 {}", sock.display());
+    println!("systemone serve 监听 {}", sock.display());
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let serve = tokio::spawn(async move {
         systemone::run_daemon_accept_loop(
@@ -683,7 +684,7 @@ pub async fn run_scoring_serve() -> ScoringServeExit {
             exit_code: 1,
         },
         Err(error) => ScoringServeExit::Failure {
-            message: format!("scoring serve 任务失败：{error}"),
+            message: format!("systemone serve 任务失败：{error}"),
             exit_code: 1,
         },
     }

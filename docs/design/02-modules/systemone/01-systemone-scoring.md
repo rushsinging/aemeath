@@ -9,7 +9,7 @@
 System One 决策模型是一类**非生成式**评分服务：对「状态 × 候选集」一次前向（或少量前向）直接输出校准概率分布，延迟远低于生成式 LLM。Scoring BC 把它作为 aemeath 内部决策点（记忆重排、Skill 匹配、权限预筛等）的可选增强能力接入：
 
 - **可选增强，NEVER 阻断主循环**：System One 未安装、加载失败、推理超时、开关关闭时，消费点回退到原有词法/启发式路径；初始化失败必须明确报错并禁用 System One，NEVER 静默切换到另一评分后端。
-- **生产路径为本机 scoring daemon**：kev 0.8B 的 Q8_0 GGUF + 外置 PointerHead 由**单一** `aemeath scoring serve` 常驻加载；各会话经 Unix domain socket 调用，多进程共享一份权重（见 [04-scoring-daemon.md](04-scoring-daemon.md) / #1935）。进程内 embedded **已退役**，不再是生产或测试默认路径。
+- **生产路径为本机 scoring daemon**：kev 0.8B 的 Q8_0 GGUF + 外置 PointerHead 由**单一** `aemeath systemone serve` 常驻加载；各会话经 Unix domain socket 调用，多进程共享一份权重（见 [04-scoring-daemon.md](04-scoring-daemon.md) / #1935）。进程内 embedded **已退役**，不再是生产或测试默认路径。
 - **外部 HTTP（Jev）不是生产 fallback**：`jev_http` 仅保留为测试 / 离线对分；daemon 不可用时 fail-open，NEVER 回退 HTTP。
 - **模型按需手动安装**：启动会话 `aemeath` NEVER 主动下载模型；缺失时提示执行 `aemeath systemone download`。模型安装、校验和缓存由独立命令负责；daemon 启动失败同样引导 download，NEVER 自动下载。
 - **协议无锁定**：`ScoringPort` 不暴露引擎或传输细节（无 URL / sock 路径概念泄漏到消费点）；客户端 daemon adapter 与 HTTP adapter（测试）都只是换一个 `ScoringPort` 实现。
@@ -72,7 +72,7 @@ domain/
 ports.rs                  — ScoringPort / CalibrationPort / ModelAssetPort
 adapters/
   daemon_client.rs        — 会话侧 ScoringPort：UDS 客户端（生产路径）
-  daemon_serve.rs         — `aemeath scoring serve`：单实例锁 + listener + 串行 worker
+  daemon_serve.rs         — `aemeath systemone serve`：单实例锁 + listener + 串行 worker
   llama_worker.rs         — llama.cpp context 的单线程生命周期与逐 token hidden 读取（仅 serve 路径）
   model_assets.rs         — manifest、下载、sha256 校验、原子安装与本地解析
   jev_http.rs             — Jev HTTP adapter（仅测试 / 离线对分 / 回归基准）
@@ -105,7 +105,7 @@ trait CalibrationPort {
 
 > 详细契约见 [04-scoring-daemon.md](04-scoring-daemon.md)（#1935）。此处只保留与引擎/模型相关的摘要。
 
-- **进程模型**：`aemeath scoring serve` 常驻加载 1 份权重；会话进程经 UDS 调用 `DaemonScoringClient`（实现 `ScoringPort`）。
+- **进程模型**：`aemeath systemone serve` 常驻加载 1 份权重；会话进程经 UDS 调用 `DaemonScoringClient`（实现 `ScoringPort`）。
 - **首批平台**：macOS arm64；其他平台未实现时明确报告不可用并禁用 System One，NEVER 自动回退 HTTP，NEVER 回退进程内 embedded。
 - **模型形态**：Qwen3.5-0.8B + kev LoRA 合并后的 **Q8_0 GGUF（约 775–812MB）**，加外置 PointerHead 权重。Q4_K_M 在 79-case 对分仅 94.9% argmax 一致，NEVER 用于生产评分。
 - **推理机制**（daemon 进程内）：对 kev 编码协议产生的逐题 causal row 做 llama.cpp embedding 前向，读取逐 token normed hidden states；在 `<|fim_suffix|>` 的 decide 位置与每个 `<|box_end|>` option 位置取 hidden，执行 `q(h_decide)`、`k(h_option)`、点积、温度缩放与 softmax。
@@ -119,7 +119,7 @@ trait CalibrationPort {
 启动**会话** `aemeath` 时 **NEVER 主动下载模型**，也 **NEVER** 在会话进程内加载 GGUF。仅当总闸与任一评分场景开关开启时：
 
 - sock 可达且 daemon 健康：经客户端评分。
-- sock 不可达：惰性尝试 spawn `aemeath scoring serve`（单实例锁）；仍失败 → `ScoringUnavailable`，**首次**提示用户，之后静默降级。
+- sock 不可达：惰性尝试 spawn `aemeath systemone serve`（单实例锁）；仍失败 → `ScoringUnavailable`，**首次**提示用户，之后静默降级。
 - 模型缺失（serve 启动失败或客户端收到 unavailable）：显示引导「执行 `aemeath systemone download` 安装」，主循环继续无评分原路径。
 - 校验或加载失败（daemon 侧）：明确报告、评分不可用，NEVER 下载，NEVER 回退 HTTP / 进程内 embedded。
 - 所有评分场景开关关闭或 `scoring.enabled=false`：不检查、不 spawn、不下载、不加载模型（零成本）。
@@ -210,7 +210,7 @@ aemeath systemone download
 - **Rust 化路线**：
   1. ~~外部 HTTP 服务~~：阶段一/二评测与接入基线，生产路径退役，仅留测试 / 离线对分用途。
   2. ~~进程内 llama.cpp embedded~~：曾为 #1833 生产终态；因多会话各自加载 GGUF 的内存/启动成本，由 #1935 **退役**为非生产路径（代码迁入 serve 后删除会话侧装配）。
-  3. **本机 scoring daemon（当前生产路线，#1935）**：同一套 `llama-cpp-2` + Q8_0 GGUF + Rust PointerHead，运行在 `aemeath scoring serve`；会话只做 UDS 客户端。79-case 数值对分门禁保留。**Rust 化边界 = 推理内核外全链**（编码 / PointerHead / 校准 / 事件均为纯 Rust）。
+  3. **本机 scoring daemon（当前生产路线，#1935）**：同一套 `llama-cpp-2` + Q8_0 GGUF + Rust PointerHead，运行在 `aemeath systemone serve`；会话只做 UDS 客户端。79-case 数值对分门禁保留。**Rust 化边界 = 推理内核外全链**（编码 / PointerHead / 校准 / 事件均为纯 Rust）。
   4. **未来备选（NEVER 作为当前计划）**：`rlx-qwen35`（白盒 Rust，数值与 llama.cpp 决策位等价；GPL-3.0 与 GPU 路径问题解决后可评估）；`mistral.rs`（待稳定 hidden-state API）；`candle`（已放弃推进，仅当 Qwen3.5 gated-DeltaNet 上游支持成熟且有真实诉求时作备选）。三者均为替代**推理后端**候选，接入时 MUST 先过 79-case 数值门禁，且仍应落在 daemon 进程内而非每会话一份。
 - **自训练路线（中长期）**：用开源三段式管线（SFT 软标签 → listwise PL/NDCG RL → OOF 校准）在 aemeath 真实 agent 决策轨迹上训练与 kev 同架构（Qwen3.5 小底座 + LoRA + pointer head）的专属权重；训练在 Python/GPU 侧，产出无缝接入 daemon 侧引擎。
 

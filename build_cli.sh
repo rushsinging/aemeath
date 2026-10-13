@@ -23,7 +23,7 @@ TARGET_DIR="$(cargo metadata --format-version 1 --no-deps \
 CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 
 # #1935：默认启用 composition/systemone-daemon，使安装的 aemeath 可直接
-# `scoring serve`（链入 llama.cpp/GGUF 引擎，体积约 +8M）。会话侧仍走
+# `systemone serve`（链入 llama.cpp/GGUF 引擎，体积约 +8M）。会话侧仍走
 # DaemonScoringClient + UDS，不在会话进程内加载模型。
 # 需要瘦身安装时：`AEMEATH_CLI_FEATURES= ./build_cli.sh`（空串关闭默认 feature）。
 DEFAULT_CLI_FEATURES="composition/systemone-daemon"

@@ -4,7 +4,7 @@
 
 **Goal:** 将 System One 生产路径从「每会话进程内 embedded」改为「本机单一 scoring daemon + UDS 客户端」，多会话共享一份 GGUF；彻底退役进程内 embedded 装配。
 
-**Architecture:** `aemeath scoring serve`（feature `systemone-daemon`）持有 llama.cpp worker；会话经 `DaemonScoringClient` 实现 `ScoringPort`；装饰链仍为 calibrated → audited → client。事件流继续由客户端 audited 写（#1909）。设计真相源：`docs/design/02-modules/systemone/04-scoring-daemon.md`。
+**Architecture:** `aemeath systemone serve`（feature `systemone-daemon`）持有 llama.cpp worker；会话经 `DaemonScoringClient` 实现 `ScoringPort`；装饰链仍为 calibrated → audited → client。事件流继续由客户端 audited 写（#1909）。设计真相源：`docs/design/02-modules/systemone/04-scoring-daemon.md`。
 
 **Tech Stack:** Rust 2021、Tokio、Unix domain socket、既有 llama-cpp-2 / PointerHead、composition 装配、CLI 子命令。
 
@@ -40,7 +40,7 @@
 
 - [ ] 红 → 绿 → 提交 `feat(systemone): #1935 scoring.lock 与 sock 路径`
 
-### Task 3: `aemeath scoring serve` 最小可运行
+### Task 3: `aemeath systemone serve` 最小可运行
 
 **Files:**
 - CLI 子命令接线；`DaemonServe` listener + 串行 worker 接入既有 llama worker
@@ -48,7 +48,7 @@
 
 - [ ] 红：无模型时 serve 失败并提示 download
 - [ ] 绿：有模型时 ping/answer 一次成功（可用 fixture 或 `--ignored` smoke）
-- [ ] 提交 `feat(cli): #1935 aemeath scoring serve`
+- [ ] 提交 `feat(cli): #1935 aemeath systemone serve`
 
 ### Task 4: PR1 验收
 

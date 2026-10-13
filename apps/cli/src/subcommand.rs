@@ -3,7 +3,6 @@ pub(crate) mod config_form_render;
 pub(crate) mod connect_command;
 mod constants;
 pub(crate) mod model_selection;
-pub(crate) mod scoring_command;
 pub(crate) mod sessions_command;
 pub(crate) mod systemone_command;
 pub(crate) mod update_command;

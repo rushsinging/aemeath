@@ -140,7 +140,7 @@ fn map_daemon_error_kind(kind: DaemonErrorKind) -> UnavailableKind {
     }
 }
 
-/// 惰性拉起：sock 可连则 Ok；否则 spawn 当前可执行文件的 `scoring serve` 并等待就绪。
+/// 惰性拉起：sock 可连则 Ok；否则 spawn 当前可执行文件的 `systemone serve` 并等待就绪。
 ///
 /// 会话退出 **NEVER** 杀掉 daemon。构造外部进程时配对
 /// [`utils::configure_std_noninteractive`]。
@@ -151,19 +151,20 @@ pub fn ensure_scoring_daemon_ready(
     if scoring_sock_connectable(sock) {
         return Ok(());
     }
-    let executable = std::env::current_exe()
-        .map_err(|error| format!("定位当前可执行文件失败，无法惰性拉起 scoring serve：{error}"))?;
+    let executable = std::env::current_exe().map_err(|error| {
+        format!("定位当前可执行文件失败，无法惰性拉起 systemone serve：{error}")
+    })?;
     let mut command = std::process::Command::new(&executable);
     command
-        .args(["scoring", "serve"])
+        .args(["systemone", "serve"])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
     utils::configure_std_noninteractive(&mut command)
-        .map_err(|error| format!("配置 scoring serve 非交互隔离失败：{error}"))?;
+        .map_err(|error| format!("配置 systemone serve 非交互隔离失败：{error}"))?;
     command
         .spawn()
-        .map_err(|error| format!("惰性拉起 `scoring serve` 失败：{error}"))?;
+        .map_err(|error| format!("惰性拉起 `systemone serve` 失败：{error}"))?;
 
     let started = std::time::Instant::now();
     while started.elapsed() < connect_timeout {
@@ -173,7 +174,7 @@ pub fn ensure_scoring_daemon_ready(
         std::thread::sleep(Duration::from_millis(50));
     }
     Err(format!(
-        "等待 scoring daemon sock 就绪超时（{}s）；可手动执行 `aemeath scoring serve`，         模型缺失时先 `aemeath systemone download`",
+        "等待 scoring daemon sock 就绪超时（{}s）；可手动执行 `aemeath systemone serve`，模型缺失时先 `aemeath systemone download`",
         connect_timeout.as_secs().max(1)
     ))
 }

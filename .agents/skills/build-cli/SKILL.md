@@ -29,9 +29,9 @@ description: Use when building and installing the aemeath CLI binary from the cu
   
 ## System One / scoring daemon
   
-- 默认 `./build_cli.sh` **启用** `composition/systemone-daemon`：安装的二进制可直接 `aemeath scoring serve`（链入 llama.cpp/GGUF，体积约 +8M）。会话侧仍走 `DaemonScoringClient` + UDS，不在会话进程内加载模型。
+- 默认 `./build_cli.sh` **启用** `composition/systemone-daemon`：安装的二进制可直接 `aemeath systemone serve`（链入 llama.cpp/GGUF，体积约 +8M）。会话侧仍走 `DaemonScoringClient` + UDS，不在会话进程内加载模型。
 - 需要瘦身安装（不链引擎）时：`AEMEATH_CLI_FEATURES= ./build_cli.sh`。
-- **NEVER** 默认启用仅 `composition/systemone-embedded` 作为会话内嵌生产路径；引擎只经 `scoring serve`。
+- **NEVER** 默认启用仅 `composition/systemone-embedded` 作为会话内嵌生产路径；引擎只经 `systemone serve`。
 
 ## Rules
 

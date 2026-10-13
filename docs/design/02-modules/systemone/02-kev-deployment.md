@@ -1,6 +1,6 @@
 # kev 模型产物与本地部署参考
 
-> **生产路径（当前）**：本机 `aemeath scoring serve`（UDS），见
+> **生产路径（当前）**：本机 `aemeath systemone serve`（UDS），见
 > [04-scoring-daemon.md](04-scoring-daemon.md) 与 `01-systemone-scoring.md` §4 / §8。
 >
 > 下文保留阶段二 **外部 HTTP（kev.serve）** 的历史部署说明，仅供评测 / 对分参考；
