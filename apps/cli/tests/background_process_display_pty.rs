@@ -7,7 +7,7 @@
 //! 第三行仍显示「N Backend Progress」；② BackgroundProcessList 工具
 //! 卡片渲染 typed header「后台进程列表」与逐行摘要（非 JSON 原文）；
 //! ③ BackgroundProcessWatch 强制前台等待，流式 preview 后返回
-//! terminal typed 行；#1964 Watch 短 header `Watch · summary · 短尾`。
+//! terminal typed 行；#1964 Watch 短 header `Watch · {goal}`。
 //!
 //! 运行方式：`cargo test -p cli --test background_process_display_pty -- --ignored`
 //!（需先 `cargo build -p cli --bin aemeath`；check-slow-test-matrix 已登记）。
@@ -116,7 +116,7 @@ fn background_process_tools_render_typed_display_and_status_line_count() {
     // 真断言流式：bytes from 必须在 terminal（终态 outcome）出现之前
     // 可见——否则会假绿命中结束后的 log_tail。
     submit(&terminal, "等待后台任务");
-    wait_screen_text(&terminal, "Watch ·", Duration::from_secs(10));
+    wait_screen_text(&terminal, "Watch · 后台显示验证", Duration::from_secs(10));
     wait_screen_text_before(&terminal, "bytes from", "terminal", Duration::from_secs(25));
     wait_screen_text(&terminal, "watch已返回", Duration::from_secs(45));
     wait_screen_text(&terminal, "terminal", Duration::from_secs(15));

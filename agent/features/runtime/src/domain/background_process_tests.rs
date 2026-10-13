@@ -33,7 +33,7 @@ fn dispatch_creates_foreground_waiting_record() {
         BackgroundProcessState::ForegroundWaiting
     ));
     assert_eq!(record.identity.tool_name, "Bash");
-    assert_eq!(record.invocation_summary, "command=cargo test");
+    assert_eq!(record.invocation_goal, "command=cargo test");
     assert!(!record.is_terminal());
     assert!(!record.is_backgrounded());
 }

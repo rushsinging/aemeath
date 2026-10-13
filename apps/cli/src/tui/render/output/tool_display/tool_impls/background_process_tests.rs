@@ -60,7 +60,7 @@ fn list_result_renders_typed_lines_not_json() {
                 "task_id": "bgp_1",
                 "tool_name": "Bash",
                 "state": "backgrounded",
-                "summary": "ping -c 30",
+                "goal": "ping -c 30",
                 "duration_ms": 12000
             }
         ]
@@ -113,7 +113,7 @@ fn status_result_renders_detail_with_log_bytes() {
                 "task_id": "bgp_3",
                 "tool_name": "Bash",
                 "state": "succeeded",
-                "summary": "ping",
+                "goal": "ping",
                 "duration_ms": 30000
             },
             "deadline_remaining_ms": null,
@@ -150,7 +150,7 @@ fn status_result_formats_deadline_without_ms() {
                 "task_id": "bgp_deadline",
                 "tool_name": "Bash",
                 "state": "backgrounded",
-                "summary": "long",
+                "goal": "long",
                 "duration_ms": 850
             },
             "deadline_remaining_ms": 5000,
@@ -189,17 +189,13 @@ fn empty_list_result_shows_placeholder() {
 }
 
 #[test]
-fn watch_header_carries_task_id_without_timeout_param() {
+fn watch_header_without_goal_falls_back_to_full_task_id() {
     let display = lookup_display("BackgroundProcessWatch").unwrap();
     let input = serde_json::json!({ "task_id": "bgp_07Xwatch1" });
     let header = display.format_header(&input, None);
-    assert!(
-        header.starts_with("Watch ·"),
-        "Watch header 短友好名：{header}"
-    );
-    assert!(
-        header.contains("bgp_07Xwatch1") || header.contains("…"),
-        "Watch header 携带短尾：{header}"
+    assert_eq!(
+        header, "bgp_07Xwatch1",
+        "无 goal 退化完整 task_id：{header}"
     );
     assert!(
         !header.contains("timeout="),
@@ -208,10 +204,17 @@ fn watch_header_carries_task_id_without_timeout_param() {
 }
 
 #[test]
-fn watch_header_with_result_uses_summary_and_short_tail() {
+fn watch_header_uses_input_goal_without_waiting_for_result() {
     use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
     let display = lookup_display("BackgroundProcessWatch").unwrap();
-    let input = serde_json::json!({ "task_id": "bgp_07dYn1F3S6a" });
+    // Runtime 已注入 goal；不等 typed result。
+    let input = serde_json::json!({
+        "task_id": "bgp_07dYn1F3S6a",
+        "goal": "跑 ping 验收"
+    });
+    let header = display.format_header(&input, None);
+    assert_eq!(header, "Watch · 跑 ping 验收");
+
     let payload = ToolResultPayload::new(
         String::new(),
         serde_json::json!({
@@ -221,7 +224,7 @@ fn watch_header_with_result_uses_summary_and_short_tail() {
                     "task_id": "bgp_07dYn1F3S6a",
                     "tool_name": "Bash",
                     "state": "backgrounded",
-                    "summary": "跑 ping 验收",
+                    "goal": "不应覆盖 input goal",
                     "duration_ms": 5000
                 },
                 "deadline_remaining_ms": null,
@@ -233,21 +236,15 @@ fn watch_header_with_result_uses_summary_and_short_tail() {
         0,
     );
     let line = display.format_header_line_with_result(&input, Some(&payload), None);
-    let header: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+    let with_result: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
     assert_eq!(
-        header.matches(" · ").count(),
-        2,
-        "形态 Watch · summary · 短尾：{header}"
+        with_result, "Watch · 跑 ping 验收",
+        "有 result 仍只读 input.goal：{with_result}"
     );
     assert!(
-        header.starts_with("Watch · 跑 ping 验收 ·"),
-        "Watch header 用账本 summary：{header}"
+        !with_result.contains("bgp_"),
+        "有 goal 时 header NEVER 含 id：{with_result}"
     );
-    assert!(
-        !header.contains("bgp_07dYn1F3S6a"),
-        "Watch header NEVER 完整长 id：{header}"
-    );
-    assert!(header.contains("…"), "短尾省略：{header}");
 }
 
 #[test]
@@ -260,7 +257,7 @@ fn watch_result_renders_outcome_not_json() {
                 "task_id": "bgp_w1",
                 "tool_name": "Bash",
                 "state": "backgrounded",
-                "summary": "cargo test",
+                "goal": "cargo test",
                 "duration_ms": 5000
             },
             "deadline_remaining_ms": null,

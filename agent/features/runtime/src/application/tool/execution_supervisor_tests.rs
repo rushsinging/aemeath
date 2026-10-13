@@ -587,16 +587,16 @@ async fn backgrounded_summary_uses_goal_text_not_tool_input() {
     let snapshots = background.supervisor().snapshots();
     assert_eq!(snapshots.len(), 1, "应登记一条后台任务");
     assert_eq!(
-        snapshots[0].invocation_summary, "跑 ping 验收",
+        snapshots[0].invocation_goal, "跑 ping 验收",
         "summary = goal_text：{:?}",
-        snapshots[0].invocation_summary
+        snapshots[0].invocation_goal
     );
     assert!(
-        !snapshots[0].invocation_summary.contains("tool="),
+        !snapshots[0].invocation_goal.contains("tool="),
         "NEVER 机械 tool= 摘要"
     );
     assert!(
-        !snapshots[0].invocation_summary.contains("input="),
+        !snapshots[0].invocation_goal.contains("input="),
         "NEVER 机械 input= 摘要"
     );
 }

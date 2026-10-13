@@ -2,7 +2,7 @@
 //! typed result 解析渲染（List 逐行摘要 / Status 详情 / Logs 多行原文 /
 //! Stop 信号态 / Watch outcome），替代 fallback 的 JSON 原文截断。
 
-use super::super::common::{typed_data, typed_from_content};
+use super::super::common::typed_from_content;
 use super::super::{
     format_call_duration, DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay,
     ToolDisplayEntry, ToolRenderPolicy,
@@ -25,36 +25,29 @@ fn parse_input<T: serde::de::DeserializeOwned + Default>(input: &serde_json::Val
     serde_json::from_value(input.clone()).unwrap_or_default()
 }
 
-fn short_task_id(task_id: &str) -> String {
-    use super::super::constants::BACKGROUND_TASK_ID_SHORT_CHARS;
-    let id = task_id.trim();
-    let chars: Vec<char> = id.chars().collect();
-    if chars.len() <= BACKGROUND_TASK_ID_SHORT_CHARS {
-        return id.to_string();
+/// #1964：有 goal → `Watch · {goal}`；无 goal → 完整 `task_id`（纯展示，零业务）。
+fn watch_header(goal: &str, task_id: &str) -> String {
+    let goal = goal.trim();
+    if !goal.is_empty() {
+        format!("Watch · {goal}")
+    } else {
+        let id = task_id.trim();
+        if id.is_empty() {
+            "Watch".to_string()
+        } else {
+            id.to_string()
+        }
     }
-    let head: String = chars.iter().take(4).collect();
-    let tail: String = chars
-        .iter()
-        .rev()
-        .take(6)
-        .copied()
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    format!("{head}…{tail}")
 }
 
-/// #1964：`Watch · {summary} · {短尾}`；无 summary 时 `Watch · {短尾}`。
-fn watch_header(summary: &str, task_id: &str) -> String {
-    let summary = summary.trim();
-    let short = short_task_id(task_id);
-    match (!summary.is_empty(), !short.is_empty()) {
-        (true, true) => format!("Watch · {summary} · {short}"),
-        (true, false) => format!("Watch · {summary}"),
-        (false, true) => format!("Watch · {short}"),
-        (false, false) => "Watch".to_string(),
-    }
+fn watch_goal_from_input(input: &serde_json::Value) -> String {
+    input
+        .get("goal")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn styled_watch_header(text: &str) -> Line<'static> {
@@ -111,7 +104,7 @@ impl ToolDisplay for BackgroundProcessListDisplay {
                 .map(|task| {
                     format!(
                         "{} · {} · {} · {}",
-                        task.task_id, task.tool_name, task.state, task.summary
+                        task.task_id, task.tool_name, task.state, task.goal
                     )
                 })
                 .collect(),
@@ -159,7 +152,7 @@ impl ToolDisplay for BackgroundProcessStatusDisplay {
             detail.summary.state,
             deadline,
             detail.total_written_bytes,
-            detail.summary.summary
+            detail.summary.goal
         )])
     }
     fn render_policy(&self) -> ToolRenderPolicy {
@@ -253,20 +246,17 @@ impl ToolDisplay for BackgroundProcessWatchDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let args = parse_input::<BackgroundProcessWatchInput>(input);
-        // 等待中尚无账本 summary：仅短尾。
-        watch_header("", &args.task_id)
+        // Runtime 已把账本 goal 注入 arguments；TUI 只渲染。
+        watch_header(&watch_goal_from_input(input), &args.task_id)
     }
     fn format_header_line_with_result(
         &self,
         input: &serde_json::Value,
-        result_payload: Option<&ToolResultPayload>,
+        _result_payload: Option<&ToolResultPayload>,
         _workspace_root: Option<&Path>,
     ) -> Line<'static> {
         let args = parse_input::<BackgroundProcessWatchInput>(input);
-        let summary = typed_data::<BackgroundProcessWatchResult>(result_payload)
-            .map(|result| result.detail.summary.summary)
-            .unwrap_or_default();
-        styled_watch_header(&watch_header(&summary, &args.task_id))
+        styled_watch_header(&watch_header(&watch_goal_from_input(input), &args.task_id))
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -291,7 +281,7 @@ impl ToolDisplay for BackgroundProcessWatchDisplay {
         }
         lines.push(format!(
             "{} · {} · {} · {} · {}",
-            outcome, detail.summary.task_id, detail.summary.state, duration, detail.summary.summary
+            outcome, detail.summary.task_id, detail.summary.state, duration, detail.summary.goal
         ));
         Some(lines)
     }

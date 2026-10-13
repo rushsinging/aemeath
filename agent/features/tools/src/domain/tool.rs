@@ -88,7 +88,7 @@ pub trait Tool: Send + Sync {
     }
 
     /// 一句话调用意图（#1964）：非空 `goal` 优先，否则按工具载荷语义合成。
-    /// 供转后台 `invocation_summary` / Watch header 消费。
+    /// 供转后台 `invocation_goal` / Watch header 消费。
     fn goal_text(&self, input: &Value) -> String {
         crate::domain::goal_text::resolve(self.name(), input)
     }

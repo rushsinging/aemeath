@@ -178,17 +178,18 @@ CatalogChanged 不携带内部 Registry、MCP server 或 Tool 实例；消费者
 
 ## 4. Tool Invocation 与 Outcome
 
-### 4.1 ToolInvocation
+### 4.1 ToolCall（调用态；原 ToolInvocation）
 
 ```rust
-struct ToolInvocation {
+struct ToolCall {
     tool_name: ToolName,
     input: JsonValue,
     execution_scope: ExecutionScope,
 }
+// ToolInvocation = ToolCall（兼容别名）
 ```
 
-Invocation 不携带 RuntimeContext、Registry、Session、Store 或 MCP 类型。
+`ToolCall` 是 **per tool_use 调用态**：持有本次 `input`，提供 `goal_text(&self)`。Catalog 中的 Tool 实现（如 `BashTool`）是**定义单例**，不持有某次 input。Invocation/Call 不携带 RuntimeContext、Registry、Session、Store 或 MCP 类型。
 
 ### 4.2 ToolOutcome
 

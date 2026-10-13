@@ -68,12 +68,12 @@ impl BackgroundProcessSupervisor {
     pub(crate) fn register(
         &self,
         identity: ToolCallIdentityData,
-        invocation_summary: impl Into<String>,
+        invocation_goal: impl Into<String>,
         started_at: SystemTime,
     ) -> BackgroundProcessId {
         self.register_with_cancellation(
             identity,
-            invocation_summary,
+            invocation_goal,
             tokio_util::sync::CancellationToken::new(),
             started_at,
         )
@@ -86,12 +86,12 @@ impl BackgroundProcessSupervisor {
     pub(crate) fn register_with_cancellation(
         &self,
         identity: ToolCallIdentityData,
-        invocation_summary: impl Into<String>,
+        invocation_goal: impl Into<String>,
         child_cancellation: tokio_util::sync::CancellationToken,
         started_at: SystemTime,
     ) -> BackgroundProcessId {
         let task = SupervisedBackgroundProcess {
-            record: BackgroundProcessRecord::dispatch(identity, invocation_summary, started_at),
+            record: BackgroundProcessRecord::dispatch(identity, invocation_goal, started_at),
             terminal_output: None,
             notified: false,
             child_cancellation,
@@ -120,7 +120,7 @@ impl BackgroundProcessSupervisor {
         task_id: BackgroundProcessId,
         log_file: std::path::PathBuf,
         identity: ToolCallIdentityData,
-        invocation_summary: impl Into<String>,
+        invocation_goal: impl Into<String>,
         child_cancellation: tokio_util::sync::CancellationToken,
         started_at: SystemTime,
     ) -> BackgroundProcessId {
@@ -129,7 +129,7 @@ impl BackgroundProcessSupervisor {
                 task_id,
                 log_file,
                 identity,
-                invocation_summary,
+                invocation_goal,
                 started_at,
             ),
             terminal_output: None,
@@ -151,7 +151,7 @@ impl BackgroundProcessSupervisor {
         task_id: BackgroundProcessId,
         log_file: std::path::PathBuf,
         identity: ToolCallIdentityData,
-        invocation_summary: impl Into<String>,
+        invocation_goal: impl Into<String>,
         child_cancellation: tokio_util::sync::CancellationToken,
         started_at: SystemTime,
     ) -> BackgroundProcessId {
@@ -160,7 +160,7 @@ impl BackgroundProcessSupervisor {
                 task_id,
                 log_file,
                 identity,
-                invocation_summary,
+                invocation_goal,
                 started_at,
             ),
             terminal_output: None,

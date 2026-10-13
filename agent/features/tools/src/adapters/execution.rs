@@ -104,10 +104,10 @@ impl crate::domain::ToolExecutionPort for ExecutionAdapter {
         self.execute_checked(invocation, context).await
     }
 
-    fn goal_text(&self, tool_name: &str, input: &serde_json::Value) -> String {
-        match self.backing.registry().get(tool_name) {
-            Some(tool) => tool.goal_text(input),
-            None => crate::domain::goal_text::resolve(tool_name, input),
+    fn goal_text(&self, call: &crate::domain::published_language::ToolCall) -> String {
+        match self.backing.registry().get(call.tool_name.as_str()) {
+            Some(tool) => tool.goal_text(&call.input),
+            None => call.goal_text(),
         }
     }
 }

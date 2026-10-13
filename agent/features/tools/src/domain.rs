@@ -73,7 +73,7 @@ pub use context::{
 pub use memory_source::MemoryPortSource;
 pub use ports::{ToolCatalogPort, ToolExecutionPort};
 pub use published_language::{
-    CancellationDeclaration, CleanupConfirmation, RegistryScopeName, ToolCapabilities,
+    CancellationDeclaration, CleanupConfirmation, RegistryScopeName, ToolCall, ToolCapabilities,
     ToolCapability, ToolCatalogError, ToolCatalogSnapshot, ToolErrorKind, ToolInvocation, ToolName,
     ToolOutcome as ToolExecutionOutcome, ToolProfileName,
 };

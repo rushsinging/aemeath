@@ -39,3 +39,21 @@ fn blank_goal_falls_through_to_payload() {
     let text = resolve("Read", &json!({"goal": "   ", "file_path": "Cargo.toml"}));
     assert_eq!(text, "Cargo.toml");
 }
+
+#[test]
+fn tool_call_goal_text_reads_self_input() {
+    use crate::domain::published_language::ToolCall;
+    use crate::domain::ExecutionScope;
+    let scope = ExecutionScope::builder(
+        "run-goal",
+        share::session_types::WorkspaceId::from("ws"),
+        std::path::PathBuf::from("/tmp"),
+    )
+    .build();
+    let call = ToolCall::new(
+        "Bash",
+        serde_json::json!({"goal": "跑 ping 验收", "command": "ping -c 1 127.0.0.1"}),
+        scope,
+    );
+    assert_eq!(call.goal_text(), "跑 ping 验收");
+}
