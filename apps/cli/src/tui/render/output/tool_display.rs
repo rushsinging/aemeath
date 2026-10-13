@@ -16,6 +16,7 @@ pub use policy::{DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolRe
 pub use registry::ToolDisplayEntry;
 pub use traits::ToolDisplay;
 
+pub(crate) use format::format_call_duration;
 #[cfg(test)]
 pub(crate) use format::result_render_kind;
 pub(crate) use registry::lookup_display;

@@ -129,6 +129,48 @@ fn status_result_renders_detail_with_log_bytes() {
         "详情含日志字节数：{}",
         lines[0]
     );
+    assert!(
+        lines[0].contains("no deadline"),
+        "无 deadline 显示占位：{}",
+        lines[0]
+    );
+    assert!(
+        !lines[0].contains("ms"),
+        "Status 用户可见耗时 NEVER 含 ms：{}",
+        lines[0]
+    );
+}
+
+#[test]
+fn status_result_formats_deadline_without_ms() {
+    let display = lookup_display("BackgroundProcessStatus").unwrap();
+    let result = content(serde_json::json!({
+        "detail": {
+            "summary": {
+                "task_id": "bgp_deadline",
+                "tool_name": "Bash",
+                "state": "backgrounded",
+                "summary": "long",
+                "duration_ms": 850
+            },
+            "deadline_remaining_ms": 5000,
+            "total_written_bytes": 10
+        }
+    }));
+    let lines = display
+        .format_result_lines(result.as_ref())
+        .expect("typed 渲染产出");
+    assert_eq!(lines.len(), 1);
+    assert!(
+        lines[0].contains("deadline 5.00s"),
+        "deadline 应走小数秒：{}",
+        lines[0]
+    );
+    assert!(
+        !lines[0].contains("ms"),
+        "Status deadline NEVER 含 ms：{}",
+        lines[0]
+    );
 }
 
 #[test]
@@ -185,6 +227,14 @@ fn watch_result_renders_outcome_not_json() {
     );
     assert!(outcome_line.contains("bgp_w1"));
     assert!(outcome_line.contains("backgrounded"));
+    assert!(
+        outcome_line.contains("5.00s"),
+        "Watch duration 应走小数秒：{outcome_line}"
+    );
+    assert!(
+        !outcome_line.contains("ms"),
+        "Watch 用户可见耗时 NEVER 含 ms：{outcome_line}"
+    );
     assert!(
         !outcome_line.starts_with('{'),
         "不渲染 JSON 原文：{outcome_line}"
