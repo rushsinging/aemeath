@@ -50,6 +50,10 @@ impl ScriptedEffectDriver {
                     | Effect::LoadDisplayHistoryWindow { .. }
                     // fire-and-forget 通知：只记录供断言，不需要脚本回复。
                     | Effect::SendTerminalNotification { .. }
+                    // ConfigReloaded(Run) 触发的模型列表刷新：异步回填，无需脚本回复。
+                    | Effect::SendChatInputEvent {
+                        event: sdk::ChatInputEvent::ListModels
+                    }
             ) {
                 self.effects.push(effect);
                 continue;

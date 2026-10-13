@@ -434,6 +434,7 @@ impl App {
                         ),
                     ));
                 }
+                self.session.clear_bound_model();
                 self.session.current_model_display = display_name.clone();
                 self.apply_agent_intent(AgentIntent::RuntimePresentation(
                     crate::tui::model::runtime_presentation::RuntimePresentationIntent::ProviderModel {
@@ -511,26 +512,20 @@ impl App {
             TuiRuntimeEvent::SessionReset => {
                 return UpdateResult::one(Effect::ResetRuntimeState);
             }
-            TuiRuntimeEvent::ConfigChanged { view, .. }
-            | TuiRuntimeEvent::ConfigReloaded { view, .. } => {
-                self.config_view.model_name = view.model_name.clone();
-                self.config_view.provider = view.provider.clone();
-                self.config_view.has_api_key = view.has_api_key;
-                self.config_view.permission_mode = view.permission_mode.clone();
-                self.config_view.markdown = view.markdown;
-                self.config_view.verbose = view.verbose;
-                self.config_view.context_size = view.context_size;
-                self.config_view.logging_level = view.logging_level.clone();
-                self.config_view.markdown_spacing = match view.markdown_spacing.mode() {
-                    crate::tui::render::output::spacing::MarkdownSpacingMode::Normal => {
-                        sdk::MarkdownSpacingModeView::Normal
-                    }
-                    crate::tui::render::output::spacing::MarkdownSpacingMode::Compact => {
-                        sdk::MarkdownSpacingModeView::Compact
-                    }
-                };
-                self.config_view.markdown_spacing_overrides =
-                    markdown_spacing_overrides_to_sdk(view.markdown_spacing.overrides());
+            TuiRuntimeEvent::ConfigChanged { view, .. } => {
+                self.apply_config_view(view);
+            }
+            TuiRuntimeEvent::ConfigReloaded { scopes, view, .. } => {
+                self.apply_config_view(view);
+                if scopes.contains(
+                    &crate::tui::adapter::tui_runtime_event::TuiConfigApplicationScope::Run,
+                ) {
+                    self.session.remember_bound_model_from_cache();
+                    self.session.invalidate_cached_models();
+                    extra_effects.push(Effect::SendChatInputEvent {
+                        event: sdk::ChatInputEvent::ListModels,
+                    });
+                }
             }
             TuiRuntimeEvent::SessionResumed {
                 steps,
@@ -618,7 +613,7 @@ impl App {
             // #740：ModelList / SessionList 是 /model 对话框与 /resume 补全的
             // 唯一数据源，在此显式消费写入 SessionState 缓存，NEVER 静默丢弃。
             TuiRuntimeEvent::ModelList { models } => {
-                let models = models
+                let models: Vec<sdk::ModelSummary> = models
                     .iter()
                     .map(|model| sdk::ModelSummary {
                         provider: model.provider.clone(),
@@ -628,6 +623,24 @@ impl App {
                         max_tokens: model.max_tokens,
                     })
                     .collect();
+                if let Some(display) = self.session.sync_current_model_display_from_list(&models) {
+                    self.apply_agent_intent(AgentIntent::RuntimePresentation(
+                        crate::tui::model::runtime_presentation::RuntimePresentationIntent::ProviderModel {
+                            provider: self
+                                .model
+                                .runtime_presentation
+                                .provider()
+                                .map(ToOwned::to_owned)
+                                .or_else(|| {
+                                    self.session
+                                        .bound_model
+                                        .as_ref()
+                                        .map(|(provider, _)| provider.clone())
+                                }),
+                            model_id: Some(display),
+                        },
+                    ));
+                }
                 self.session.cache_models(models);
                 if std::mem::take(&mut self.session.model_selection_pending) {
                     self.present_model_selection_dialog();
@@ -916,6 +929,27 @@ impl App {
 
     pub(crate) fn mark_output_dirty(&mut self) {
         self.view_state.dirty.mark_output();
+    }
+
+    fn apply_config_view(&mut self, view: &crate::tui::adapter::tui_runtime_event::TuiConfigView) {
+        self.config_view.model_name = view.model_name.clone();
+        self.config_view.provider = view.provider.clone();
+        self.config_view.has_api_key = view.has_api_key;
+        self.config_view.permission_mode = view.permission_mode.clone();
+        self.config_view.markdown = view.markdown;
+        self.config_view.verbose = view.verbose;
+        self.config_view.context_size = view.context_size;
+        self.config_view.logging_level = view.logging_level.clone();
+        self.config_view.markdown_spacing = match view.markdown_spacing.mode() {
+            crate::tui::render::output::spacing::MarkdownSpacingMode::Normal => {
+                sdk::MarkdownSpacingModeView::Normal
+            }
+            crate::tui::render::output::spacing::MarkdownSpacingMode::Compact => {
+                sdk::MarkdownSpacingModeView::Compact
+            }
+        };
+        self.config_view.markdown_spacing_overrides =
+            markdown_spacing_overrides_to_sdk(view.markdown_spacing.overrides());
     }
 
     pub(crate) fn status_view_model(&self) -> crate::tui::view_model::StatusViewModel {
