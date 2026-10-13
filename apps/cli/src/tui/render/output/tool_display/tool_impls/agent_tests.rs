@@ -3,10 +3,10 @@ use crate::tui::render::output::tool_display::ToolDisplay;
 use serde_json::json;
 
 /// issue #646：可指定 role/model 的 agent header helper
-fn agent_header_with_meta(description: &str, role: Option<&str>, model: Option<&str>) -> String {
+fn agent_header_with_meta(goal: &str, role: Option<&str>, model: Option<&str>) -> String {
     let display = AgentDisplay;
     let mut input = serde_json::Map::new();
-    input.insert("description".to_string(), json!(description));
+    input.insert("goal".to_string(), json!(goal));
     if let Some(r) = role {
         input.insert("role".to_string(), json!(r));
     }
@@ -16,6 +16,16 @@ fn agent_header_with_meta(description: &str, role: Option<&str>, model: Option<&
     let input = serde_json::Value::Object(input);
     let line = display.format_header_line_with_result(&input, None, None);
     line.spans.iter().map(|s| s.content.as_ref()).collect()
+}
+
+#[test]
+fn agent_header_accepts_legacy_description_alias() {
+    let display = AgentDisplay;
+    let input = json!({"description": "legacy intent", "prompt": "long prompt"});
+    let header = display.format_header(&input, None);
+    assert_eq!(header, "Agent legacy intent");
+    let details = display.format_details(&input);
+    assert_eq!(details, vec!["long prompt"]);
 }
 
 // ── issue #646: AgentDisplay header role/model 4 case ──

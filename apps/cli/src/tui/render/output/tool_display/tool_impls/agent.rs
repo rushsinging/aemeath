@@ -15,7 +15,9 @@ use std::path::Path;
 #[serde(default)]
 struct AgentDisplayInput {
     prompt: String,
-    description: String,
+    /// Legacy transcripts may still send `description`.
+    #[serde(alias = "description")]
+    goal: String,
 }
 
 /// Deserialize the display-only projection, intentionally tolerating legacy
@@ -33,14 +35,14 @@ impl ToolDisplay for AgentDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let args = parse_input::<AgentDisplayInput>(input);
-        let desc = if args.description.is_empty() {
+        let goal = if args.goal.is_empty() {
             "sub-task"
         } else {
-            &args.description
+            &args.goal
         };
         let role = input.get("role").and_then(|role| role.as_str());
         let model = input.get("model").and_then(|model| model.as_str());
-        let mut header = format!("{} {desc}", self.display_name());
+        let mut header = format!("{} {goal}", self.display_name());
         if let Some(r) = role {
             header.push_str(&format!(" [role: {r}]"));
         }
@@ -77,7 +79,7 @@ impl ToolDisplay for AgentDisplay {
         _workspace_root: Option<&Path>,
     ) -> Line<'static> {
         let args = parse_input::<AgentDisplayInput>(input);
-        let description = args.description.as_str();
+        let goal = args.goal.as_str();
         // issue #499：追加 role/model 标记（由 merge_agent_meta 从 agent_meta 合并而来）
         let mut suffix = String::new();
         if let Some(role) = input.get("role").and_then(|v| v.as_str()) {
@@ -86,7 +88,7 @@ impl ToolDisplay for AgentDisplay {
         if let Some(model) = input.get("model").and_then(|v| v.as_str()) {
             suffix.push_str(&format!(" [model: {model}]"));
         }
-        build_header_line(self.display_name(), description, &suffix)
+        build_header_line(self.display_name(), goal, &suffix)
     }
 }
 inventory::submit!(ToolDisplayEntry {

@@ -16,8 +16,10 @@ pub struct AgentResult {
 pub struct AgentInput {
     /// The task for the agent to perform
     pub prompt: String,
-    /// A short (3-5 word) description of the task
-    pub description: String,
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    /// Legacy transcripts may still send `description`; accepted via serde alias.
+    #[serde(alias = "description")]
+    pub goal: String,
     /// Required named agent. Must exactly match an instance name in the system prompt's Available Agent Roles roster (machine key: `config.agents.names`).
     pub agent: String,
     /// Wall-clock timeout in seconds. Defaults to 3600 seconds and is capped at 10800 seconds. Use 0 for no timeout.

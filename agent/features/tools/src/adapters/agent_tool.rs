@@ -55,8 +55,8 @@ impl TypedTool for AgentTool {
         if args.prompt.is_empty() {
             return TypedToolResult::error("missing required parameter: prompt");
         }
-        if args.description.is_empty() {
-            return TypedToolResult::error("missing required parameter: description");
+        if args.goal.is_empty() {
+            return TypedToolResult::error("missing required parameter: goal");
         }
         if args.agent.trim().is_empty() {
             return TypedToolResult::error("missing required parameter: agent");

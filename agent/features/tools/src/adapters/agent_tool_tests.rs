@@ -45,7 +45,7 @@ async fn test_agent_tool_uses_finite_default_timeout() {
         .call(
             serde_json::json!({
                 "prompt": "finished",
-                "description": "run task",
+                "goal": "run task",
                 "agent": "coder",
             }),
             &ctx,
@@ -74,7 +74,7 @@ async fn test_agent_tool_caps_timeout_at_three_hours() {
         .call(
             serde_json::json!({
                 "prompt": "finished",
-                "description": "run task",
+                "goal": "run task",
                 "agent": "coder",
                 "timeout": 20000,
             }),
@@ -111,7 +111,7 @@ async fn test_agent_tool_passes_parent_run_id_to_sub_agent_request() {
         .call(
             serde_json::json!({
                 "prompt": "finished",
-                "description": "run task",
+                "goal": "run task",
                 "agent": "coder",
             }),
             &ctx,
@@ -135,7 +135,7 @@ async fn test_agent_tool_runs_without_task_id() {
         .call(
             serde_json::json!({
                 "prompt": "finished",
-                "description": "run task",
+                "goal": "run task",
                 "agent": "coder",
             }),
             &ctx,
@@ -210,7 +210,7 @@ async fn agent_tool_rejects_missing_agent_before_dispatch() {
         .call(
             serde_json::json!({
                 "prompt": "finished",
-                "description": "run task"
+                "goal": "run task"
             }),
             &ctx,
         )
@@ -267,7 +267,7 @@ async fn test_agent_tool_text_contains_subagent_output() {
         .call(
             serde_json::json!({
                 "prompt": "这是子代理的实际产出内容",
-                "description": "run task",
+                "goal": "run task",
                 "agent": "coder",
             }),
             &ctx,
@@ -299,7 +299,7 @@ async fn test_agent_tool_text_fallback_when_output_empty() {
         .call(
             serde_json::json!({
                 "prompt": "anything",
-                "description": "run task",
+                "goal": "run task",
                 "agent": "coder",
             }),
             &ctx,
