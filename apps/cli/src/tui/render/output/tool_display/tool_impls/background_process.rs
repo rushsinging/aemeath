@@ -4,8 +4,8 @@
 
 use super::super::common::typed_from_content;
 use super::super::{
-    DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay, ToolDisplayEntry,
-    ToolRenderPolicy,
+    format_call_duration, DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay,
+    ToolDisplayEntry, ToolRenderPolicy,
 };
 use sdk::tool_input::{
     BackgroundProcessLogsInput, BackgroundProcessStatusInput, BackgroundProcessStopInput,
@@ -96,7 +96,9 @@ impl ToolDisplay for BackgroundProcessStatusDisplay {
         let result: BackgroundProcessStatusResult = typed_from_content(content)?;
         let detail = &result.detail;
         let deadline = match detail.deadline_remaining_ms {
-            Some(ms) => format!("deadline {}ms", ms),
+            Some(remaining_ms) => {
+                format!("deadline {}", format_call_duration(remaining_ms))
+            }
             None => "no deadline".to_string(),
         };
         Some(vec![format!(
@@ -217,7 +219,7 @@ impl ToolDisplay for BackgroundProcessWatchDisplay {
         };
         let detail = &result.detail;
         let duration = match detail.summary.duration_ms {
-            Some(ms) => format!("{}ms", ms),
+            Some(elapsed_ms) => format_call_duration(elapsed_ms),
             None => "-".to_string(),
         };
         // log_tail 在前、outcome 摘要在后：tail_mode 保留最新日志的同时
