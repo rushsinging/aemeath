@@ -33,7 +33,10 @@ pub struct TaskListResult {
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
 /// 所有字段可选（原 schema 无 required）。
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct TaskListInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// TaskData list ID to query; defaults to the current active list
     pub task_list_id: Option<String>,
     /// Filter by status

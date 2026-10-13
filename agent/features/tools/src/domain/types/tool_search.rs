@@ -44,7 +44,10 @@ pub struct ToolSearchResult {
 ///
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct ToolSearchInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// Search query - tool/skill name or functionality keyword
     pub query: String,
 }

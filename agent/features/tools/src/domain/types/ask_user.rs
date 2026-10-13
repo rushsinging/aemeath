@@ -31,7 +31,10 @@ pub struct QuestionItem {
 ///
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct AskUserQuestionInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// The single-question form. Use `questions` instead to ask multiple questions in one
     /// call; do not provide both.
     ///

@@ -14,6 +14,8 @@ pub struct TaskBlockByResult {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct TaskBlockByInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// The ID of the task whose dependencies will be replaced
     #[serde(alias = "taskId")]
     pub id: String,

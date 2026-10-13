@@ -383,13 +383,13 @@ async fn memory_update_publishes_manageable_archive_and_restore_results() {
 
     let archived = tool
         .call(
-            serde_json::json!({"id": entry.id.to_string(), "status": "archive"}),
+            serde_json::json!({"goal": "test", "id": entry.id.to_string(), "status": "archive"}),
             &context,
         )
         .await;
     let restored = tool
         .call(
-            serde_json::json!({"id": entry.id.to_string(), "status": "restore"}),
+            serde_json::json!({"goal": "test", "id": entry.id.to_string(), "status": "restore"}),
             &context,
         )
         .await;
@@ -428,13 +428,19 @@ async fn memory_update_pins_then_unpins() {
     let pinned = MemoryUpdateTool {
         source: source.clone(),
     }
-    .call(serde_json::json!({ "id": id, "status": "pin" }), &context)
+    .call(
+        serde_json::json!({ "goal": "test", "id": id, "status": "pin" }),
+        &context,
+    )
     .await;
     assert!(!pinned.is_error, "pin must succeed: {}", pinned.text);
     assert_eq!(pinned.data.unwrap().action, "pin");
 
     let unpinned = MemoryUpdateTool { source }
-        .call(serde_json::json!({ "id": id, "status": "unpin" }), &context)
+        .call(
+            serde_json::json!({ "goal": "test", "id": id, "status": "unpin" }),
+            &context,
+        )
         .await;
     assert!(!unpinned.is_error, "unpin must succeed: {}", unpinned.text);
     assert_eq!(unpinned.data.unwrap().action, "unpin");
@@ -468,7 +474,7 @@ async fn memory_update_archives_and_restores() {
         source: source.clone(),
     }
     .call(
-        serde_json::json!({ "id": id, "status": "archive" }),
+        serde_json::json!({ "goal": "test", "id": id, "status": "archive" }),
         &context,
     )
     .await;
@@ -481,7 +487,7 @@ async fn memory_update_archives_and_restores() {
 
     let restored = MemoryUpdateTool { source }
         .call(
-            serde_json::json!({ "id": id, "status": "restore" }),
+            serde_json::json!({ "goal": "test", "id": id, "status": "restore" }),
             &context,
         )
         .await;
@@ -505,6 +511,7 @@ async fn memory_update_rejects_an_unknown_status() {
     let explode = MemoryUpdateTool { source }
         .call(
             serde_json::json!({
+                "goal": "test",
                 "id": "018f0000-0000-7000-8000-000000000000",
                 "status": "explode"
             }),
@@ -526,22 +533,19 @@ fn the_five_memory_tools_expose_type_driven_required() {
         source: source.clone(),
     }
     .input_schema();
-    assert_eq!(add["required"], serde_json::json!(["content"]));
+    assert_eq!(add["required"], serde_json::json!(["goal", "content"]));
 
     let search = MemorySearchTool {
         source: source.clone(),
     }
     .input_schema();
-    assert_eq!(search["required"], serde_json::json!(["query"]));
+    assert_eq!(search["required"], serde_json::json!(["goal", "query"]));
 
     let list = MemoryListTool {
         source: source.clone(),
     }
     .input_schema();
-    assert!(
-        list.get("required").is_none(),
-        "MemoryList has no required field"
-    );
+    assert_eq!(list["required"], serde_json::json!(["goal"]));
     let list_props = list["properties"].as_object().unwrap();
     assert!(
         list_props.contains_key("limit"),
@@ -556,7 +560,10 @@ fn the_five_memory_tools_expose_type_driven_required() {
         source: source.clone(),
     }
     .input_schema();
-    assert_eq!(update["required"], serde_json::json!(["id", "status"]));
+    assert_eq!(
+        update["required"],
+        serde_json::json!(["goal", "id", "status"])
+    );
     assert_eq!(
         update["properties"]["status"]["enum"],
         serde_json::json!(["pin", "unpin", "archive", "restore"])
@@ -566,7 +573,7 @@ fn the_five_memory_tools_expose_type_driven_required() {
         source: source.clone(),
     }
     .input_schema();
-    assert_eq!(delete["required"], serde_json::json!(["id"]));
+    assert_eq!(delete["required"], serde_json::json!(["goal", "id"]));
 }
 
 #[test]

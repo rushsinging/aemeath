@@ -13,7 +13,10 @@ pub struct WebSearchResult {
 ///
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
 #[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct WebSearchInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// The search query
     pub query: String,
     /// Maximum number of results to return (default 5, max 10)

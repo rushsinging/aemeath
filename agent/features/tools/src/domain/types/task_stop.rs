@@ -14,6 +14,8 @@ pub struct TaskStopResult {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct TaskStopInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// The ID of the task to stop
     #[serde(alias = "taskId")]
     pub task_id: String,

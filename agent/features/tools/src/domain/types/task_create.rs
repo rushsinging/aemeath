@@ -25,6 +25,8 @@ pub struct TaskCreateResult {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct TaskCreateInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// A brief title for the task
     pub subject: String,
     /// What needs to be done

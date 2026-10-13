@@ -15,6 +15,8 @@ pub struct WriteResult {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct WriteInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// Absolute or workspace-relative path of the file to create or overwrite. Required.
     pub file_path: String,
     /// Full text content to write into the file. Required (use empty string for an empty file).

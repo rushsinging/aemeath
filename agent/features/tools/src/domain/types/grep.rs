@@ -47,6 +47,8 @@ pub struct GrepResult {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct GrepInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// Regex pattern to search for
     pub pattern: String,
     /// File or directory to search in (defaults to cwd)

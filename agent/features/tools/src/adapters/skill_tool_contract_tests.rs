@@ -93,8 +93,14 @@ async fn main_and_sub_catalog_publish_exact_skill_schema_and_execute_body() {
 
     let expected = json!({
         "type": "object",
-        "properties": { "skill": { "type": "string", "minLength": 1 } },
-        "required": ["skill"],
+        "properties": {
+            "goal": {
+                "type": "string",
+                "description": "Short intent for this call (3-5 words). Shown in TUI header / background summary."
+            },
+            "skill": { "type": "string", "minLength": 1 }
+        },
+        "required": ["goal", "skill"],
         "additionalProperties": false
     });
     for (scope, profile) in [("main", "main-full"), ("sub-agent", "sub-agent-restricted")] {
@@ -150,7 +156,11 @@ async fn main_and_sub_catalog_publish_exact_skill_schema_and_execute_body() {
         let outcome = wiring
             .execution()
             .execute(
-                ToolInvocation::new("Skill", json!({"skill": "commit"}), execution_scope),
+                ToolInvocation::new(
+                    "Skill",
+                    json!({"goal": "load skill", "skill": "commit"}),
+                    execution_scope,
+                ),
                 &ctx,
             )
             .await;
@@ -216,7 +226,11 @@ async fn skill_state_decision_controls_body_without_leaking_on_failure() {
         let outcome = wiring
             .execution()
             .execute(
-                ToolInvocation::new("Skill", json!({"skill": "review"}), scope),
+                ToolInvocation::new(
+                    "Skill",
+                    json!({"goal": "load skill", "skill": "review"}),
+                    scope,
+                ),
                 &ctx,
             )
             .await;
@@ -276,7 +290,11 @@ async fn deleted_skill_returns_failure_without_panicking() {
     let outcome = wiring
         .execution()
         .execute(
-            ToolInvocation::new("Skill", json!({"skill": "gone"}), scope),
+            ToolInvocation::new(
+                "Skill",
+                json!({"goal": "load skill", "skill": "gone"}),
+                scope,
+            ),
             &ctx,
         )
         .await;

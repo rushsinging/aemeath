@@ -18,6 +18,8 @@ pub struct WebFetchResult {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct WebFetchInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// The URL to fetch
     pub url: String,
     /// Timeout in seconds (default 30, max 3600)

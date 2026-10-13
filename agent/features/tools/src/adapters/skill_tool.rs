@@ -9,8 +9,11 @@ use crate::domain::{
     SkillLoadQuery, SkillLoadStateError, ToolExecutionContext, TypedTool, TypedToolResult,
 };
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct DynamicSkillToolInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    goal: String,
     skill: String,
 }
 
@@ -47,9 +50,13 @@ impl TypedTool for SkillTool {
         json!({
             "type": "object",
             "properties": {
+                "goal": {
+                    "type": "string",
+                    "description": "Short intent for this call (3-5 words). Shown in TUI header / background summary."
+                },
                 "skill": { "type": "string", "minLength": 1 }
             },
-            "required": ["skill"],
+            "required": ["goal", "skill"],
             "additionalProperties": false
         })
     }

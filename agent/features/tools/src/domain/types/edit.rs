@@ -26,6 +26,8 @@ pub struct EditResult {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct EditInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// Absolute path to the file
     pub file_path: String,
     /// The exact text to replace

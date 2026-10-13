@@ -4,20 +4,30 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::constants::{WATCH_INTERNAL_GRACE_SECS, WATCH_TOOL_TIMEOUT_SECS};
 
-/// `BackgroundProcessList` input（无参数：列出活动与近期任务）。
+/// `BackgroundProcessList` input（列出活动与近期任务；必填 goal）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct BackgroundProcessListInput {}
+#[serde(default)]
+pub struct BackgroundProcessListInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
+}
 
 /// `BackgroundProcessStatus` input.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct BackgroundProcessStatusInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// Task id（`task-` 前缀）。
     pub task_id: String,
 }
 
 /// `BackgroundProcessLogs` input.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct BackgroundProcessLogsInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// Task id（`task-` 前缀）。
     pub task_id: String,
     /// 增量读取游标（上次读取返回的 cursor）；缺省读尾部。
@@ -28,7 +38,10 @@ pub struct BackgroundProcessLogsInput {
 
 /// `BackgroundProcessStop` input.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct BackgroundProcessStopInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// Task id（`task-` 前缀）。
     pub task_id: String,
 }
@@ -107,7 +120,10 @@ pub struct BackgroundProcessStopResult {
 /// 超时唯一来源为 Tool 框架 [`WATCH_TOOL_TIMEOUT_SECS`]（#1946）；
 /// **NEVER** 再提供入参 timeout。旧调用若仍带 `timeout_secs` 由 serde 忽略。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct BackgroundProcessWatchInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// Task id（`task_` / typed id 前缀）。
     pub task_id: String,
 }

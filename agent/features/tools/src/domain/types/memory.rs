@@ -125,8 +125,11 @@ pub enum MemoryStatus {
 }
 
 /// Input for the `MemoryAdd` tool: write one persistent memory entry.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct MemoryAddInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// 要记住的文本，上限 500 字符。Content to remember, up to 500 chars.
     pub content: String,
     /// 层级：global 仅用于明确跨项目适用的偏好。默认 project。
@@ -142,8 +145,11 @@ pub struct MemoryAddInput {
 }
 
 /// Input for the `MemorySearch` tool: lexical search over memory entries.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct MemorySearchInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// 检索词，使用少量辨识词。Search terms; use a few discriminating words.
     pub query: String,
     /// 返回条数，上限 50。默认 10。Max results, capped at 50. Defaults to 10.
@@ -155,8 +161,11 @@ pub struct MemorySearchInput {
 }
 
 /// Input for the `MemoryList` tool: list memory entries.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(default)]
 pub struct MemoryListInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// 限定层级。Restrict to a layer.
     pub layer: Option<MemoryLayerInput>,
     /// 每页条数，上限 50。默认 20。Page size, capped at 50. Defaults to 20.
@@ -168,6 +177,8 @@ pub struct MemoryListInput {
 /// Input for the `MemoryUpdate` tool: pin, unpin, archive, or restore one entry.
 #[derive(Debug, Clone, Deserialize)]
 pub struct MemoryUpdateInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// 目标记忆 ID。Target memory ID.
     pub id: String,
     /// 状态变更：pin 置顶避免淘汰、unpin 取消置顶、archive 归档释放容量、restore 恢复归档条目。
@@ -178,6 +189,8 @@ pub struct MemoryUpdateInput {
 /// Input for the `MemoryDelete` tool: permanently delete one entry.
 #[derive(Debug, Clone, Deserialize)]
 pub struct MemoryDeleteInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// 目标记忆 ID。Target memory ID.
     pub id: String,
 }

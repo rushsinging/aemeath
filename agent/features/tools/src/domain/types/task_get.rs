@@ -21,6 +21,8 @@ mod tests;
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct TaskGetInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// The ID of the task to retrieve
     #[serde(alias = "taskId")]
     pub task_id: String,

@@ -438,7 +438,8 @@ fn grep_validate_accepts_omitted_output_mode() {
     use crate::domain::types::ToolSchema;
 
     let schema = GrepInput::data_schema();
-    let input = serde_json::json!({ "pattern": "needle" });
+    let input = serde_json::json!({ "goal": "search",
+        "pattern": "needle" });
     let result = validate_tool_input("Grep", &schema, &input);
     assert!(
         result.is_ok(),

@@ -67,6 +67,8 @@ pub struct TaskUpdateResult {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct TaskUpdateInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// The task list containing the task. Required when updating a task from a historical list; omit to use the current active list.
     #[serde(alias = "taskListId")]
     pub task_list_id: Option<String>,

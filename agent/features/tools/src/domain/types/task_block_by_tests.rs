@@ -9,7 +9,7 @@ fn task_block_by_schema_publishes_complete_dependency_list() {
     assert!(properties.contains_key("block_by_ids"));
     assert_eq!(
         schema["required"],
-        serde_json::json!(["id", "block_by_ids"])
+        serde_json::json!(["goal", "id", "block_by_ids"])
     );
     assert_eq!(properties["block_by_ids"]["type"], "array");
 }

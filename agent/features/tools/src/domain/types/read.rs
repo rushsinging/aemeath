@@ -22,6 +22,8 @@ pub struct ReadResult {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct ReadInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// Absolute path to the file to read
     pub file_path: String,
     /// Line number to start reading from (0-based, default: 0)

@@ -15,6 +15,8 @@ pub struct GlobResult {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct GlobInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
     /// Glob pattern (e.g. "**/*.rs")
     pub pattern: String,
     /// Directory to search in (defaults to cwd)

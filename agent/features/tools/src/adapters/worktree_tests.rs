@@ -170,11 +170,8 @@ fn test_enter_worktree_schema() {
         .as_str()
         .expect("base description");
     assert!(base_description.contains("默认 main"));
-    // 全 Option 字段：生成的 schema 不含 required 键（或为空数组）。
-    assert!(schema
-        .get("required")
-        .and_then(|v| v.as_array())
-        .is_none_or(|arr| arr.is_empty()));
+    // goal 必填；其余业务字段仍为 Option。
+    assert_eq!(schema["required"], serde_json::json!(["goal"]));
 }
 
 #[tokio::test]
@@ -209,19 +206,13 @@ fn test_exit_worktree_schema() {
     let schema = tool.input_schema();
 
     assert_eq!(schema["type"], "object");
-    // ExitWorktree 无输入字段：path 参数已移除，输入 schema 必须为空。
-    assert!(
-        schema
-            .get("properties")
-            .and_then(|v| v.as_object())
-            .is_none_or(|props| props.is_empty()),
-        "ExitWorktree 不应声明任何输入字段，got: {schema}"
-    );
-    // 无字段：不含 required 键（或为空数组）。
-    assert!(schema
-        .get("required")
-        .and_then(|v| v.as_array())
-        .is_none_or(|arr| arr.is_empty()));
+    // ExitWorktree 仅保留必填 goal；path 等旁路字段仍禁止。
+    let props = schema
+        .get("properties")
+        .and_then(|v| v.as_object())
+        .expect("properties");
+    assert_eq!(props.keys().collect::<Vec<_>>(), vec!["goal"]);
+    assert_eq!(schema["required"], serde_json::json!(["goal"]));
 }
 
 #[test]

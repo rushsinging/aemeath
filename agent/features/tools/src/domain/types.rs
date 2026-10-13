@@ -103,3 +103,8 @@ pub use web_search::{WebSearchInput, WebSearchResult};
 
 // Generated ToolSchema impls (by build.rs).
 include!(concat!(env!("OUT_DIR"), "/generated_impls.rs"));
+
+// #1964 Task 5：内置工具 Input 必填 goal 的 schema 契约（表驱动）。
+#[cfg(test)]
+#[path = "types/goal_contract_tests.rs"]
+mod goal_contract_tests;

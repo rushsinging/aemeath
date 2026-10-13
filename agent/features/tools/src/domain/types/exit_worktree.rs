@@ -18,8 +18,11 @@ pub struct ExitWorktreeResult {
 
 /// Typed input for the `exit_worktree` tool.
 ///
-/// build.rs 由本 struct 生成 `input_schema`。ExitWorktree 无输入字段且
+/// build.rs 由本 struct 生成 `input_schema`。除必填 `goal` 外无业务参数；
 /// 拒绝未知字段（含已移除的 `path`），防止误用直接切换旁路。
 #[derive(Debug, Clone, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-pub struct ExitWorktreeInput {}
+#[serde(default, deny_unknown_fields)]
+pub struct ExitWorktreeInput {
+    /// Short intent for this call (3-5 words). Shown in TUI header / background summary.
+    pub goal: String,
+}
