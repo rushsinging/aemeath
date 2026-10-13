@@ -172,7 +172,9 @@ fn generate_json_schema(
         }
 
         properties.push(format!("            \"{field_name}\": {schema}"));
-        if !is_option {
+        // Option 字段或带字段级 `#[serde(default)]` 的字段均可省略：
+        // 后者走 Default，与 serde 反序列化语义对齐，避免 schema_validator 误拦。
+        if !is_option && !has_serde_default(&field.attrs) {
             required.push(format!("            \"{field_name}\""));
         }
     }
@@ -228,6 +230,34 @@ fn is_option_type(ty: &syn::Type) -> bool {
     if let syn::Type::Path(type_path) = ty {
         if let Some(segment) = type_path.path.segments.last() {
             return segment.ident == "Option";
+        }
+    }
+    false
+}
+
+/// 字段是否标注了 `#[serde(default)]` / `#[serde(default = "...")]`。
+///
+/// 仅识别字段级属性；struct 级 `#[serde(default)]` 不在此列——
+/// schema 的 required 语义以显式字段级标注为准，避免把「整 struct 可缺字段」
+/// 误扩成「所有字段都不 required」。
+fn has_serde_default(attrs: &[syn::Attribute]) -> bool {
+    for attr in attrs {
+        if !attr.path().is_ident("serde") {
+            continue;
+        }
+        let mut found = false;
+        let _ = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("default") {
+                found = true;
+            }
+            // 吞掉 `default = "path"` 的字面量值，以及其他未关心的键。
+            if meta.input.peek(syn::Token![=]) {
+                let _: syn::Expr = meta.value()?.parse()?;
+            }
+            Ok(())
+        });
+        if found {
+            return true;
         }
     }
     false

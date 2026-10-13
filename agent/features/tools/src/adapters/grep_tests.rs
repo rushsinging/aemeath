@@ -410,3 +410,39 @@ async fn search_when_workspace_root_deleted_returns_cwd_attribution() {
         result.text
     );
 }
+
+#[test]
+fn grep_input_schema_does_not_require_output_mode() {
+    use crate::domain::types::grep::GrepInput;
+    use crate::domain::types::ToolSchema;
+
+    let schema = GrepInput::data_schema();
+    let required = schema["required"]
+        .as_array()
+        .expect("GrepInput schema must publish required");
+    let required_names: Vec<&str> = required.iter().filter_map(|value| value.as_str()).collect();
+    assert!(
+        required_names.contains(&"pattern"),
+        "pattern 仍为 required: {required_names:?}"
+    );
+    assert!(
+        !required_names.contains(&"output_mode"),
+        "output_mode 有默认值，不得进入 required: {required_names:?}"
+    );
+}
+
+#[test]
+fn grep_validate_accepts_omitted_output_mode() {
+    use crate::domain::schema_validator::validate_tool_input;
+    use crate::domain::types::grep::GrepInput;
+    use crate::domain::types::ToolSchema;
+
+    let schema = GrepInput::data_schema();
+    let input = serde_json::json!({ "pattern": "needle" });
+    let result = validate_tool_input("Grep", &schema, &input);
+    assert!(
+        result.is_ok(),
+        "省略 output_mode 必须通过 schema 校验: {:?}",
+        result.err()
+    );
+}
