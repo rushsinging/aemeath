@@ -2,11 +2,15 @@
 //! typed result 解析渲染（List 逐行摘要 / Status 详情 / Logs 多行原文 /
 //! Stop 信号态 / Watch outcome），替代 fallback 的 JSON 原文截断。
 
-use super::super::common::typed_from_content;
+use super::super::common::{typed_data, typed_from_content};
 use super::super::{
     format_call_duration, DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay,
     ToolDisplayEntry, ToolRenderPolicy,
 };
+use crate::tui::render::theme;
+use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
 use sdk::tool_input::{
     BackgroundProcessLogsInput, BackgroundProcessStatusInput, BackgroundProcessStopInput,
     BackgroundProcessWatchInput,
@@ -19,6 +23,54 @@ use std::path::Path;
 
 fn parse_input<T: serde::de::DeserializeOwned + Default>(input: &serde_json::Value) -> T {
     serde_json::from_value(input.clone()).unwrap_or_default()
+}
+
+/// task_id 短尾：保留前缀（如 `bgp_`）+ 末尾，中间省略，便于对账又不占满 header。
+fn short_task_id(task_id: &str) -> String {
+    use super::super::constants::BACKGROUND_TASK_ID_SHORT_CHARS;
+    let id = task_id.trim();
+    let chars: Vec<char> = id.chars().collect();
+    if chars.len() <= BACKGROUND_TASK_ID_SHORT_CHARS {
+        return id.to_string();
+    }
+    let head: String = chars.iter().take(4).collect();
+    let tail: String = chars
+        .iter()
+        .rev()
+        .take(6)
+        .copied()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("{head}…{tail}")
+}
+
+/// Background* 语义 header：`{友好名} · {summary|goal} · {短尾}`。
+
+fn styled_background_header(display_name: &str, text: &str) -> Line<'static> {
+    let name = display_name.to_string();
+    if let Some(rest) = text.strip_prefix(&name) {
+        Line::from(vec![
+            Span::styled(name, Style::default().fg(theme::ACCENT_BRIGHT)),
+            Span::raw(rest.to_string()),
+        ])
+    } else {
+        Line::from(Span::styled(
+            text.to_string(),
+            Style::default().fg(theme::ACCENT_BRIGHT),
+        ))
+    }
+}
+fn background_semantic_header(display_name: &str, semantic: &str, task_id: &str) -> String {
+    let semantic = semantic.trim();
+    let short = short_task_id(task_id);
+    match (!semantic.is_empty(), !short.is_empty()) {
+        (true, true) => format!("{display_name} · {semantic} · {short}"),
+        (true, false) => format!("{display_name} · {semantic}"),
+        (false, true) => format!("{display_name} {}", task_id.trim()),
+        (false, false) => display_name.to_string(),
+    }
 }
 
 /// 工具族公共 policy：result 可见 + Plain（行内容由 `format_result_lines`
@@ -84,10 +136,21 @@ impl ToolDisplay for BackgroundProcessStatusDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let args = parse_input::<BackgroundProcessStatusInput>(input);
-        if args.task_id.is_empty() {
-            return self.display_name().to_string();
-        }
-        format!("{} {}", self.display_name(), args.task_id)
+        background_semantic_header(self.display_name(), &args.goal, &args.task_id)
+    }
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+        _workspace_root: Option<&Path>,
+    ) -> Line<'static> {
+        let args = parse_input::<BackgroundProcessStatusInput>(input);
+        let semantic = typed_data::<BackgroundProcessStatusResult>(result_payload)
+            .map(|result| result.detail.summary.summary)
+            .filter(|summary| !summary.trim().is_empty())
+            .unwrap_or_else(|| args.goal.clone());
+        let text = background_semantic_header(self.display_name(), &semantic, &args.task_id);
+        styled_background_header(self.display_name(), &text)
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -102,12 +165,13 @@ impl ToolDisplay for BackgroundProcessStatusDisplay {
             None => "no deadline".to_string(),
         };
         Some(vec![format!(
-            "{} · {} · {} · {} · log bytes {}",
+            "{} · {} · {} · {} · log bytes {} · {}",
             detail.summary.task_id,
             detail.summary.tool_name,
             detail.summary.state,
             deadline,
-            detail.total_written_bytes
+            detail.total_written_bytes,
+            detail.summary.summary
         )])
     }
     fn render_policy(&self) -> ToolRenderPolicy {
@@ -201,11 +265,22 @@ impl ToolDisplay for BackgroundProcessWatchDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let args = parse_input::<BackgroundProcessWatchInput>(input);
-        if args.task_id.is_empty() {
-            return self.display_name().to_string();
-        }
-        // #1946：超时由 Tool 框架接管，header 只展示 task id。
-        format!("{} {}", self.display_name(), args.task_id)
+        // 等待中尚无账本 summary：先用 Watch 自身 goal + 短尾。
+        background_semantic_header(self.display_name(), &args.goal, &args.task_id)
+    }
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        result_payload: Option<&ToolResultPayload>,
+        _workspace_root: Option<&Path>,
+    ) -> Line<'static> {
+        let args = parse_input::<BackgroundProcessWatchInput>(input);
+        let semantic = typed_data::<BackgroundProcessWatchResult>(result_payload)
+            .map(|result| result.detail.summary.summary)
+            .filter(|summary| !summary.trim().is_empty())
+            .unwrap_or_else(|| args.goal.clone());
+        let text = background_semantic_header(self.display_name(), &semantic, &args.task_id);
+        styled_background_header(self.display_name(), &text)
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]

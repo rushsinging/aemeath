@@ -244,3 +244,96 @@ fn watch_result_renders_outcome_not_json() {
         "应渲染 log_tail：{lines:?}"
     );
 }
+
+#[test]
+fn watch_header_prefers_summary_with_short_task_id() {
+    use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
+    let display = lookup_display("BackgroundProcessWatch").unwrap();
+    let input = serde_json::json!({
+        "goal": "盯 ping",
+        "task_id": "bgp_07dYn1F3S6a"
+    });
+    // 无 result：header 用 Watch 自身 goal + 短尾
+    let in_flight = display.format_header(&input, None);
+    assert!(
+        in_flight.contains("盯 ping"),
+        "无 result 时 header 应用 Watch.goal：{in_flight}"
+    );
+    assert!(
+        in_flight.contains("…") || in_flight.contains("bgp_"),
+        "header 应含短尾：{in_flight}"
+    );
+    assert!(
+        !in_flight.ends_with("bgp_07dYn1F3S6a"),
+        "header 不应再只挂完整 id：{in_flight}"
+    );
+
+    let payload = ToolResultPayload::new(
+        String::new(),
+        serde_json::json!({
+            "outcome": "still_running",
+            "detail": {
+                "summary": {
+                    "task_id": "bgp_07dYn1F3S6a",
+                    "tool_name": "Bash",
+                    "state": "backgrounded",
+                    "summary": "Run · 跑 ping 验收",
+                    "duration_ms": 5000
+                },
+                "deadline_remaining_ms": null,
+                "total_written_bytes": 10
+            },
+            "log_tail": ""
+        }),
+        false,
+        0,
+    );
+    let line = display.format_header_line_with_result(&input, Some(&payload), None);
+    let header: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+    assert!(
+        header.contains("Run · 跑 ping 验收"),
+        "有 result 时 header 应映射账本 summary：{header}"
+    );
+    assert!(
+        header.contains("…") || !header.contains("bgp_07dYn1F3S6a"),
+        "有 result 时仍用短尾：{header}"
+    );
+}
+
+#[test]
+fn status_result_includes_summary_and_header_maps_it() {
+    use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
+    let display = lookup_display("BackgroundProcessStatus").unwrap();
+    let input = serde_json::json!({
+        "goal": "查状态",
+        "task_id": "bgp_07dYn1F3S6a"
+    });
+    let content = serde_json::json!({
+        "detail": {
+            "summary": {
+                "task_id": "bgp_07dYn1F3S6a",
+                "tool_name": "Bash",
+                "state": "backgrounded",
+                "summary": "Run · 跑 ping 验收",
+                "duration_ms": 850
+            },
+            "deadline_remaining_ms": 5000,
+            "total_written_bytes": 10
+        }
+    });
+    let lines = display.format_result_lines(Some(&content)).expect("typed");
+    assert_eq!(lines.len(), 1);
+    assert!(
+        lines[0].contains("Run · 跑 ping 验收"),
+        "Status result MUST 含 summary：{}",
+        lines[0]
+    );
+
+    let payload = ToolResultPayload::new(String::new(), content.clone(), false, 0);
+    let line = display.format_header_line_with_result(&input, Some(&payload), None);
+    let header: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+    assert!(
+        header.contains("Run · 跑 ping 验收"),
+        "Status header 应映射 summary：{header}"
+    );
+}

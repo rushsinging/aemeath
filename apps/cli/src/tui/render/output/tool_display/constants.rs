@@ -4,3 +4,6 @@ pub(crate) const TOOL_RESULT_TAIL_LINES: usize = 5;
 
 /// Memory 工具族 header / result 行的 content 预览宽度（字符）。
 pub(crate) const MEMORY_CONTENT_PREVIEW_CHARS: usize = 60;
+
+/// BackgroundProcess* header 中 task_id 短尾保留字符数（含前缀识别）。
+pub(crate) const BACKGROUND_TASK_ID_SHORT_CHARS: usize = 10;
