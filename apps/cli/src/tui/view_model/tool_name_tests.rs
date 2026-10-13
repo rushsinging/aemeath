@@ -25,6 +25,7 @@ fn test_known_mappings() {
     assert_eq!(tool_display_name("TaskListCreate"), "New Task List");
     assert_eq!(tool_display_name("TaskListComplete"), "Complete List");
     assert_eq!(tool_display_name("TaskStop"), "Stop Task");
+    assert_eq!(tool_display_name("BackgroundProcessWatch"), "Watch");
 }
 
 #[test]
