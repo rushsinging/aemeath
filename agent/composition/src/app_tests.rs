@@ -175,7 +175,7 @@ impl runtime::ProviderPort for ReportedUsageProvider {
                     id: "call-sub-agent".to_string(),
                     name: "Agent".to_string(),
                     arguments: serde_json::json!({
-                        "description": "record child usage",
+                        "goal": "record child usage",
                         "prompt": "finish successfully",
                         "agent": "coder"
                     }),
@@ -295,7 +295,7 @@ async fn successful_runtime_invocation_persists_versioned_session_usage_jsonl() 
                     "coder": {
                         "role": "coder",
                         "model": "local/test-model",
-                        "description": "test child usage"
+                        "goal": "test child usage"
                     }
                 }
             }

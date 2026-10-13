@@ -186,7 +186,7 @@ async fn wire_runtime_tool_assembly_produces_working_catalog_and_execution() {
             .build();
     let invocation = tools::published::execution::ToolInvocation::new(
         "Read",
-        serde_json::json!({"file_path": file_path.to_string_lossy()}),
+        serde_json::json!({"goal": "read assembly fixture", "file_path": file_path.to_string_lossy()}),
         scope,
     );
     let outcome = execution.execute(invocation, &ctx).await;
