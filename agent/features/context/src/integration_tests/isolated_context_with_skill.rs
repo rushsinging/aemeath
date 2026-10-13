@@ -71,8 +71,9 @@ async fn isolated_context_with_skill_catalog_builds_metadata_directory() {
         .iter()
         .find(|block| block.kind == "skills")
         .unwrap();
-    assert!(block.content.contains("release: create a release"));
-    assert!(block.content.contains("Usage: /release [version]"));
+    assert!(block.content.contains("- release\n"));
+    assert!(!block.content.contains("create a release"));
+    assert!(!block.content.contains("Usage:"));
     assert!(!block.content.contains("FULL_SKILL_BODY_MUST_NOT_APPEAR"));
 }
 
