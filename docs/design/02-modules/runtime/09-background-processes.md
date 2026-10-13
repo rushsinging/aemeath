@@ -99,11 +99,16 @@ BackgroundProcessRecord
   直接按文件区间读取（LLM 增量游标与 TUI 翻全量共用同一文件真相源），
   token budget 截断在读取层叠加。
 - 生命周期随 session：会话任务日志 GC 与 resume 失效对账同步（§6）。
-- **Agent（sub-agent 派发）的输出形态**：无字节流可直绑。终态输出（子代理总结
-  文本）由 runtime 终态兜底 append 进任务日志文件（与非流式工具同路径）；
-  中间过程**不复制**进任务日志——sub-run 的过程真相已由现有 Activity / 事件流 /
-  子代理诊断日志（`SubAgentLogConfig`）承担，`logs` 对 agent 任务返回终态总结
-  并引用其 Activity / 事件流，过程细节走子代理自身体系查询。
+- **Agent（sub-agent 派发）的输出形态**：无字节流可直绑。
+  - **中间过程（B1）**：关键 Activity（Started / ToolCalls / ToolResult /
+    Terminal outcome 种类）在 `ProgressSink::emit` 包装内归约为一行摘要，流式
+    append 进任务日志（硬预算按字符截断；Thinking / Message / ToolOutput 跳过
+    防洪水），供 `BackgroundProcessWatch` 等待期跟踪过程；直绑任务禁止过程
+    双写。
+  - **终态总结**：仍由 runtime 终态唯一 `append_terminal` 一次（与非流式工具
+    同路径），过程行在前、总结在后。
+  - **完成通知**：保持瘦身（仅 id+状态）。
+  - 过程细节仍可走子代理自身体系（Activity / 事件流 / `SubAgentLogConfig`）查询。
 
 ### 2.4 阈值配置
 
@@ -283,11 +288,11 @@ specs 同步（核心引擎 PR 内）：3.4.3（FIFO 修订）、3.4.4（`Backgr
 推翻此前「不做 Watch」否决：登记式 Watch 与完成通知重复、阻塞式会嵌套后台的风险，通过以下约束解除——
 
 - **强制前台**：执行监督器对 `BackgroundProcessWatch` 将 `background_threshold` 视为 `None`，NEVER 自动转后台。
-- **带超时短等**：`timeout_secs` 缺省 60，硬上限 300（clamp 到 `[1, 300]`）；超时返回 `outcome=still_running` + 当前 detail；终态返回 `outcome=terminal`。
+- **带超时短等**：可选统一入参 `timeout`（秒，与 Bash/Agent/WebFetch 同名），缺省 = 框架硬上限 300，clamp 到 `[1, 300]`；逼近上限时内部 wait 再减 grace，先于 supervisor 收口。超时返回 `outcome=still_running` + 当前 detail；终态返回 `outcome=terminal`。`Tool::timeout_secs()` 固定 300，**NEVER** 另起 `timeout_secs` 字段，也 **NEVER** 让入参大于框架上限以致被 `cleanup unconfirmed` 砍死（#1946）。
 - **等待中流式 log**：`wait_task` 从**当前日志末尾**增量 `read_task_log`，经 `ToolProgressEvent` 推送；runtime `non_agent` **必须**为 `BackgroundProcessWatch` 装配与 Bash 相同的 progress→`ToolOutputDelta` 通道（`tool_forwards_progress_stream`）；TUI `tool_observe` 白名单必须包含 Watch。NEVER 回放历史全文。缺任一层都会静默无流式。
 - **结束 result 含 log_tail**：`BackgroundProcessWatchResult.log_tail` + `watch_text` 拼接尾部；字符预算 `WATCH_RESULT_TEXT_BUDGET_CHARS=2000`（对齐 Grep、硬压在 materializer floor 3000 之下），NEVER 触发 tool_result 落盘截断阶段。
 - **不吞通知**：Watch 只读账本等待；完成通知 / wakeup / reminder 原路走。
 - **Fuse 不豁免**：与 List/Status/Logs 不同；连续同 id Watch 仍计 Soft=3。
 - **等待实现**：tools crate 内 `domain::background_process_port::wait_task`（`pub(crate)`，不进 crate 根 façade）基于非阻塞 `task_status` 轮询 + cancellation + 可选 ProgressSink，NEVER 在调用方盲 sleep。
-- **测试**：L0–L4 覆盖 types/port/adapter/fuse/TUI（含 log_tail 渲染与 text≤2000）；强制前台由 `execution_supervisor_tests::background_process_watch_never_moves_to_background_despite_threshold` 钉死；L5 PTY（`background_process_display_pty`）覆盖 Watch 等待中流式 ping 输出（`bytes from`）+ timeout→`still_running` typed 行（mock 提取 `bgp_`，`timeout_secs=2`）。
+- **测试**：L0–L4 覆盖 types/port/adapter/fuse/TUI（含 log_tail 渲染与 text≤2000）；强制前台由 `execution_supervisor_tests::background_process_watch_never_moves_to_background_despite_threshold` 钉死；L5 PTY（`background_process_display_pty`）覆盖 Watch 等待中流式 ping 输出（`bytes from`）+ 超时→`still_running` typed 行（mock 提取 `bgp_`；入参用统一字段 `timeout`）。
 

@@ -52,10 +52,10 @@ pub fn background_process_stop(lang: &str) -> &'static str {
 pub fn background_process_watch(lang: &str) -> &'static str {
     match lang {
         "zh" => {
-            "前台短等一个后台进程：等到终态或 Tool 框架超时（300s，内部略提前收口）。超时返回 still_running。本工具不会转后台，也无需也不接受 timeout_secs 入参。优先依赖完成通知；不要对同一 id 连续狂调 Watch（仍受 fuse 约束）。"
+            "前台短等一个后台进程：等到终态或超时。可选 timeout（秒，默认 300，上限 300，与 Bash/Agent 等统一字段名）；逼近上限时内部略提前收口。超时返回 still_running。本工具不会转后台。优先依赖完成通知；不要对同一 id 连续狂调 Watch（仍受 fuse 约束）。"
         }
         _ => {
-            "Foreground short-wait for one background process: waits for a terminal state or the Tool framework timeout (300s; internal wait ends slightly earlier). On timeout returns still_running. This tool never moves to background and does not take a timeout_secs argument. Prefer the completion notification; do not repeatedly Watch the same id (still subject to the tool-call fuse)."
+            "Foreground short-wait for one background process: waits for a terminal state or timeout. Optional timeout (seconds, default 300, max 300; same field name as Bash/Agent). Near the cap the internal wait ends slightly earlier. On timeout returns still_running. This tool never moves to background. Prefer the completion notification; do not repeatedly Watch the same id (still subject to the tool-call fuse)."
         }
     }
 }

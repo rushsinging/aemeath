@@ -171,8 +171,12 @@ fn watch_tool_framework_timeout_is_300_not_default_120() {
         crate::domain::constants::WATCH_TOOL_TIMEOUT_SECS
     );
     assert_eq!(tool.timeout_secs(), 300);
+    assert_eq!(
+        crate::domain::types::background_processes::resolve_watch_wait_secs(Some(60)),
+        60
+    );
     assert!(
-        crate::domain::types::background_processes::watch_internal_timeout_secs()
+        crate::domain::types::background_processes::resolve_watch_wait_secs(None)
             < tool.timeout_secs(),
         "内部 wait MUST 短于框架 timeout"
     );

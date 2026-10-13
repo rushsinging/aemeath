@@ -104,12 +104,18 @@ pub struct BackgroundProcessStopResult {
 
 /// `BackgroundProcessWatch` input.
 ///
-/// 超时唯一来源为 Tool 框架 [`WATCH_TOOL_TIMEOUT_SECS`]（#1946）；
-/// **NEVER** 再提供入参 timeout。旧调用若仍带 `timeout_secs` 由 serde 忽略。
+/// 等待上限经统一入参 `timeout`（秒）设置；Tool 框架硬上限仍为
+/// [`WATCH_TOOL_TIMEOUT_SECS`]（#1946）：入参与内部 wait 必须在该上限内收口，
+/// **NEVER** 让框架 deadline 先于 wait 砍成 cleanup unconfirmed。
+/// **NEVER** 使用 `timeout_secs` 字段名（与 Bash/Agent/WebFetch 统一为 `timeout`）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BackgroundProcessWatchInput {
     /// Task id（`task_` / typed id 前缀）。
     pub task_id: String,
+    /// Timeout in seconds (default 300, max 300).
+    /// Omit to wait up to the framework cap (minus a short internal grace).
+    #[serde(default)]
+    pub timeout: Option<u64>,
 }
 
 /// Watch 等待结局。
@@ -134,9 +140,22 @@ pub struct BackgroundProcessWatchResult {
     pub log_tail: String,
 }
 
-/// Watch 内部等待时长：框架超时减去 grace，先于 supervisor 收口为 `still_running`。
+/// 解析 Watch 实际等待秒数（入参 = 统一字段 `timeout`）。
+///
+/// - 省略入参 → 默认框架上限；
+/// - clamp 到 `1..=WATCH_TOOL_TIMEOUT_SECS`；
+/// - 再与 `框架上限 − grace` 取 min，逼近框架窗时先收口为 `still_running`。
+pub fn resolve_watch_wait_secs(timeout: Option<u64>) -> u64 {
+    let requested = timeout
+        .unwrap_or(WATCH_TOOL_TIMEOUT_SECS)
+        .clamp(1, WATCH_TOOL_TIMEOUT_SECS);
+    let max_safe = WATCH_TOOL_TIMEOUT_SECS.saturating_sub(WATCH_INTERNAL_GRACE_SECS);
+    requested.min(max_safe).max(1)
+}
+
+/// 省略入参时的内部等待时长（兼容旧调用点）。
 pub fn watch_internal_timeout_secs() -> u64 {
-    WATCH_TOOL_TIMEOUT_SECS.saturating_sub(WATCH_INTERNAL_GRACE_SECS)
+    resolve_watch_wait_secs(None)
 }
 
 /// 状态词汇是否为后台进程终态（与 Status/List 词汇对齐）。
@@ -166,29 +185,50 @@ mod tests {
     }
 
     #[test]
-    fn watch_timeouts_are_framework_only_with_internal_grace() {
+    fn watch_timeouts_clamp_under_framework_cap_with_grace() {
         assert_eq!(WATCH_TOOL_TIMEOUT_SECS, 300);
         assert_eq!(WATCH_INTERNAL_GRACE_SECS, 5);
-        assert_eq!(watch_internal_timeout_secs(), 295);
+        assert_eq!(resolve_watch_wait_secs(None), 295);
+        assert_eq!(resolve_watch_wait_secs(Some(60)), 60);
+        assert_eq!(resolve_watch_wait_secs(Some(1)), 1);
+        assert_eq!(resolve_watch_wait_secs(Some(0)), 1);
+        assert_eq!(resolve_watch_wait_secs(Some(999)), 295);
+        assert_eq!(resolve_watch_wait_secs(Some(300)), 295);
         assert!(
-            watch_internal_timeout_secs() < WATCH_TOOL_TIMEOUT_SECS,
-            "内部 wait MUST 短于框架 timeout，避免 cleanup unconfirmed"
+            resolve_watch_wait_secs(None) < WATCH_TOOL_TIMEOUT_SECS,
+            "逼近框架上限时内部 wait MUST 短于框架 timeout，避免 cleanup unconfirmed"
         );
     }
 
     #[test]
-    fn watch_input_ignores_legacy_timeout_secs_field() {
+    fn watch_input_accepts_unified_timeout_field() {
         let input: BackgroundProcessWatchInput = serde_json::from_value(serde_json::json!({
-            "task_id": "bgp_legacy1",
-            "timeout_secs": 300
+            "task_id": "bgp_watch1",
+            "timeout": 60
         }))
-        .expect("旧 timeout_secs 字段应被忽略");
-        assert_eq!(input.task_id, "bgp_legacy1");
+        .expect("timeout 应可解析");
+        assert_eq!(input.task_id, "bgp_watch1");
+        assert_eq!(input.timeout, Some(60));
+        let omitted: BackgroundProcessWatchInput = serde_json::from_value(serde_json::json!({
+            "task_id": "bgp_watch2"
+        }))
+        .expect("省略 timeout 应默认 None");
+        assert_eq!(omitted.timeout, None);
+        let ignored: BackgroundProcessWatchInput = serde_json::from_value(serde_json::json!({
+            "task_id": "bgp_legacy",
+            "timeout_secs": 60
+        }))
+        .expect("旧 timeout_secs 字段名 MUST 被忽略");
+        assert_eq!(ignored.timeout, None);
         let schema = {
             use crate::domain::types::ToolSchema;
             BackgroundProcessWatchInput::data_schema()
         };
         let schema_text = schema.to_string();
+        assert!(
+            schema_text.contains("\"timeout\"") || schema_text.contains("timeout"),
+            "Watch input schema MUST 暴露统一 timeout：{schema_text}"
+        );
         assert!(
             !schema_text.contains("timeout_secs"),
             "Watch input schema MUST NOT 暴露 timeout_secs：{schema_text}"
