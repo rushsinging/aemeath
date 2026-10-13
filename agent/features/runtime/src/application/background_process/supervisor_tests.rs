@@ -521,3 +521,120 @@ fn unconfirmed_fact_survives_run_close_and_next_run_re_peeks() {
     supervisor.mark_notified(&[task_id.as_str().to_string()]);
     assert!(supervisor.peek_unnotified_terminal_items().is_empty());
 }
+
+// ── #1962 按 runtime_call_id 追加过程行 ──
+
+/// 独立临时日志文件（目录先建好，文件可不存在——append 会创建）。
+fn temp_activity_log(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "bgp-activity-sup-{}-{}-{tag}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).expect("建临时日志目录");
+    dir.join("task.log")
+}
+
+#[test]
+fn append_activity_line_writes_indirect_task_log() {
+    let log_path = temp_activity_log("indirect");
+    let supervisor = BackgroundProcessSupervisor::new();
+    supervisor.register_indirect_log(
+        share::ids::BackgroundProcessId::new_v7(),
+        log_path.clone(),
+        identity("a"),
+        "Agent run",
+        tokio_util::sync::CancellationToken::new(),
+        SystemTime::now(),
+    );
+
+    let appended = supervisor.append_activity_line_for_runtime_call(
+        "runtime-call-a",
+        "started role=engineer model=claude-test",
+    );
+
+    assert!(appended, "间接日志任务应接受过程行");
+    assert_eq!(
+        std::fs::read_to_string(&log_path).unwrap(),
+        "started role=engineer model=claude-test\n"
+    );
+
+    let _ = std::fs::remove_file(&log_path);
+}
+
+#[test]
+fn append_activity_line_rejects_direct_log_task() {
+    let log_path = temp_activity_log("direct");
+    std::fs::write(&log_path, "direct-stdout\n").expect("预写直绑内容");
+    let supervisor = BackgroundProcessSupervisor::new();
+    supervisor.register_direct(
+        share::ids::BackgroundProcessId::new_v7(),
+        log_path.clone(),
+        identity("b"),
+        "Bash run",
+        tokio_util::sync::CancellationToken::new(),
+        SystemTime::now(),
+    );
+
+    let appended =
+        supervisor.append_activity_line_for_runtime_call("runtime-call-b", "tool_call: Bash");
+
+    assert!(!appended, "直绑任务禁止过程双写");
+    assert_eq!(
+        std::fs::read_to_string(&log_path).unwrap(),
+        "direct-stdout\n",
+        "直绑文件内容不得被过程行改动"
+    );
+
+    let _ = std::fs::remove_file(&log_path);
+}
+
+#[test]
+fn append_activity_lines_then_terminal_summary_keep_order_once() {
+    let log_path = temp_activity_log("terminal");
+    let supervisor = BackgroundProcessSupervisor::new();
+    supervisor.register_indirect_log(
+        share::ids::BackgroundProcessId::new_v7(),
+        log_path.clone(),
+        identity("c"),
+        "Agent run",
+        tokio_util::sync::CancellationToken::new(),
+        SystemTime::now(),
+    );
+
+    assert!(supervisor
+        .append_activity_line_for_runtime_call("runtime-call-c", "started model=claude-test"));
+    assert!(
+        supervisor.append_activity_line_for_runtime_call("runtime-call-c", "tool_call: Bash, Read")
+    );
+
+    // 终态总结仍走唯一落盘通道 append_terminal。
+    crate::application::background_process::log_file::TaskLogFile::from_path(log_path.clone())
+        .append_terminal("final summary\n")
+        .expect("终态总结追加");
+
+    let text = std::fs::read_to_string(&log_path).unwrap();
+    assert_eq!(
+        text, "started model=claude-test\ntool_call: Bash, Read\nfinal summary\n",
+        "过程行在前、总结在后"
+    );
+    assert_eq!(
+        text.matches("final summary").count(),
+        1,
+        "终态总结只能出现一次"
+    );
+
+    let _ = std::fs::remove_file(&log_path);
+}
+
+#[test]
+fn append_activity_line_unknown_call_id_returns_false() {
+    let supervisor = BackgroundProcessSupervisor::new();
+    assert!(
+        !supervisor.append_activity_line_for_runtime_call("missing-call", "started model=x"),
+        "无匹配任务应安静失败"
+    );
+}

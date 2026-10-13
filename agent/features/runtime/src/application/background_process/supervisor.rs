@@ -181,6 +181,48 @@ impl BackgroundProcessSupervisor {
         tasks.get(task_id).map(|task| task.record.log_direct)
     }
 
+    /// #1962 Agent 过程行：按 runtime_call_id 定位任务并 append 一行过程日志。
+    ///
+    /// 直绑任务（子进程已直写文件）禁止过程双写 → false；无匹配任务 /
+    /// 无日志文件 → false；写失败仅 warn 并返回 false（不打断 progress emit）。
+    pub(crate) fn append_activity_line_for_runtime_call(
+        &self,
+        runtime_call_id: &str,
+        line: &str,
+    ) -> bool {
+        let log_path = {
+            let tasks = self.tasks.lock().expect("后台进程表锁中毒");
+            let Some(task) = tasks
+                .values()
+                .find(|task| task.record.identity.runtime_call_id == runtime_call_id)
+            else {
+                return false;
+            };
+            if task.record.log_direct {
+                return false;
+            }
+            match &task.record.log_file {
+                Some(path) => path.clone(),
+                None => return false,
+            }
+        };
+        // 文件 IO 不持表锁（emit 可能在 progress 转发热路径上）。
+        let mut text = line.to_string();
+        text.push('\n');
+        match TaskLogFile::from_path(log_path).append_terminal(&text) {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "append activity line failed: runtime_call_id={} error={}",
+                    runtime_call_id,
+                    error
+                );
+                false
+            }
+        }
+    }
+
     /// stop 请求（#252 D10）：发 cancel 信号；真实终态由执行体收口后
     /// 经既有 finish 路径推进（幂等），本方法只请求停止并报告当前状态。
     pub(crate) fn stop_task(

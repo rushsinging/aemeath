@@ -294,9 +294,18 @@ where
     );
     let (prog_tx, mut prog_rx) =
         tokio::sync::mpsc::channel::<tools::published::agent::AgentProgressEvent>(32);
-    let prog_adapter = crate::application::run::context::tool_progress_sink(prog_tx);
-    *agent_tool_context = agent_tool_context.with_progress(Some(prog_adapter.clone()));
+    // call_id 先取：包装 sink 的 runtime_call_id 必须与 SupervisedToolCall
+    // identity.runtime_call_id（call.id.to_string()）同源（#1962）。
     let call_id = effective_call.id.clone();
+    let prog_adapter = crate::application::background_process::activity_log::wrap_with_activity_log(
+        crate::application::run::context::tool_progress_sink(prog_tx),
+        agent
+            .background_processes
+            .as_ref()
+            .map(|runtime| runtime.supervisor()),
+        call_id.as_str(),
+    );
+    *agent_tool_context = agent_tool_context.with_progress(Some(prog_adapter.clone()));
     let ui_sink = sink.clone();
     let progress_context = context.clone();
     let child_parent_context = progress_context.clone();

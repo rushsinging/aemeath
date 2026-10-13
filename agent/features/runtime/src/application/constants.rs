@@ -71,6 +71,12 @@ pub(crate) const DEFAULT_GRACE: Duration = Duration::from_millis(250);
 /// 单任务输出环形缓冲容量（字节）。
 pub(crate) const BACKGROUND_PROCESS_OUTPUT_CAPACITY_BYTES: usize = 64 * 1024;
 
+// ─── background_process/activity_log.rs ───
+
+/// Agent 过程日志单行字符预算（#1962 硬预算：等待期 Activity 摘要流式
+/// append 进任务日志，超预算按字符截断）。
+pub(crate) const AGENT_ACTIVITY_LOG_LINE_MAX_CHARS: usize = 200;
+
 // ─── tool/tool_result_materializer.rs ───
 
 pub(crate) const COMPLETED_MATERIALIZATION_CAPACITY: usize = 256;
