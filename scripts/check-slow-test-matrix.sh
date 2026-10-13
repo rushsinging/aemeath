@@ -17,7 +17,7 @@ run tui-p1 cargo test -p cli 'scenario_tests::p1'
 # L5 真实 CLI/PTY 测试：cargo 为集成测试自动构建 aemeath bin 并经
 # CARGO_BIN_EXE 注入路径（跟随 worktree target-dir），无需单独定位；
 # AEMEATH_PTY_BIN 仍可在测试内作显式覆盖。串行执行避免 PTY 抢占。
-run real-terminal cargo test -p cli --locked --test connect_wizard_tui --test pty_smoke --test background_process_display_pty --test memory_display_pty --test tool_search_display_pty --test ask_user_queued_pty -- --ignored --nocapture --test-threads=1
+run real-terminal cargo test -p cli --locked --test connect_wizard_tui --test pty_smoke --test background_process_display_pty --test memory_display_pty --test tool_search_display_pty --test ask_user_queued_pty --test tool_display_goal_pty -- --ignored --nocapture --test-threads=1
 
 targets=()
 if [[ "${AEMEATH_MATRIX_CROSS:-0}" == "1" ]]; then

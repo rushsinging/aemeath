@@ -107,7 +107,8 @@ fn background_process_tools_render_typed_display_and_status_line_count() {
     // 错吃文本收口、跳过 Watch tool call。
     submit(&terminal, "列出后台进程");
     wait_screen_text(&terminal, "Backend Processes", Duration::from_secs(25));
-    wait_screen_text(&terminal, "ping -c 30", Duration::from_secs(10));
+    wait_screen_text(&terminal, "后台显示验证", Duration::from_secs(10));
+    wait_screen_text(&terminal, "Run ·", Duration::from_secs(5));
     wait_screen_text(&terminal, "列表已展示", Duration::from_secs(10));
 
     // ③ Watch 强制前台：mock 从对话历史提取 bgp_ id，发
@@ -120,6 +121,8 @@ fn background_process_tools_render_typed_display_and_status_line_count() {
     wait_screen_text_before(&terminal, "bytes from", "terminal", Duration::from_secs(25));
     wait_screen_text(&terminal, "watch已返回", Duration::from_secs(45));
     wait_screen_text(&terminal, "terminal", Duration::from_secs(15));
+    // Watch header 映射账本 summary（友好名 · goal）
+    wait_screen_text(&terminal, "后台显示验证", Duration::from_secs(10));
 
     // 退出（双击 Ctrl+C），恢复终端。
     terminal
@@ -307,13 +310,17 @@ fn scripted_sse_response(seq: usize, body: &str) -> String {
             r#"{"command":"ping -c 30 127.0.0.1","goal":"后台显示验证"}"#,
         ),
         1 => sse_text_response("已转后台"),
-        2 => sse_tool_call_response("call_list_1", "BackgroundProcessList", "{}"),
+        2 => sse_tool_call_response(
+            "call_list_1",
+            "BackgroundProcessList",
+            r#"{"goal":"列后台"}"#,
+        ),
         3 => sse_text_response("列表已展示"),
         4 => {
             let task_id = extract_bgp_task_id(body).unwrap_or_else(|| "bgp_missing000".into());
             // 无 timeout 入参：Watch 等到 Bash 终态；ping -c 30 留出
             // 流式 preview 窗口，bytes from 须在 terminal 前可见。
-            let arguments = format!(r#"{{"task_id":"{task_id}"}}"#);
+            let arguments = format!(r#"{{"goal":"盯后台","task_id":"{task_id}"}}"#);
             sse_tool_call_response("call_watch_1", "BackgroundProcessWatch", &arguments)
         }
         5 => sse_text_response("watch已返回"),

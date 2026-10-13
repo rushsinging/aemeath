@@ -234,7 +234,7 @@ fn scripted_sse_response(body: &str) -> String {
         sse_tool_call_response(
             "call_tool_search_1",
             "ToolSearch",
-            &format!(r#"{{"query":"{QUERY}"}}"#),
+            &format!(r#"{{"goal":"搜工具显示","query":"{QUERY}"}}"#),
         )
     } else {
         sse_text_response("end")

@@ -245,7 +245,7 @@ fn scripted_sse_response(seq: usize) -> String {
             "call_ask_1",
             "AskUserQuestion",
             &format!(
-                r#"{{"question":"{ASK_PROMPT}","options":[{{"title":"yes","description":"approve"}},{{"title":"no","description":"decline"}}]}}"#
+                r#"{{"goal":"提问排队","question":"{ASK_PROMPT}","options":[{{"title":"yes","description":"approve"}},{{"title":"no","description":"decline"}}]}}"#
             ),
         ),
         2 => sse_text_response(FINAL_TEXT),

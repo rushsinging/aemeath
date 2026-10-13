@@ -264,14 +264,16 @@ fn scripted_sse_response(body: &str) -> String {
         Some("搜索记忆") => sse_tool_call_response(
             "call_mem_search_1",
             "MemorySearch",
-            &format!(r#"{{"query":"{DISTINCT_CONTENT}","limit":10}}"#),
+            &format!(r#"{{"goal":"搜记忆显示","query":"{DISTINCT_CONTENT}","limit":10}}"#),
         ),
-        Some("列出记忆") => sse_tool_call_response("call_mem_list_1", "MemoryList", "{}"),
+        Some("列出记忆") => {
+            sse_tool_call_response("call_mem_list_1", "MemoryList", r#"{"goal":"列记忆显示"}"#)
+        }
         Some("记住一条验证显示的记忆") => sse_tool_call_response(
             "call_mem_add_1",
             "MemoryAdd",
             &format!(
-                r#"{{"content":"{DISTINCT_CONTENT}","layer":"project","category":"pitfall"}}"#
+                r#"{{"goal":"记记忆显示","content":"{DISTINCT_CONTENT}","layer":"project","category":"pitfall"}}"#
             ),
         ),
         _ => sse_text_response("end"),
