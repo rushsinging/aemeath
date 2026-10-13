@@ -25,6 +25,22 @@ fn test_known_mappings() {
     assert_eq!(tool_display_name("TaskListCreate"), "New Task List");
     assert_eq!(tool_display_name("TaskListComplete"), "Complete List");
     assert_eq!(tool_display_name("TaskStop"), "Stop Task");
+    assert_eq!(
+        tool_display_name("BackgroundProcessList"),
+        "Backend Processes"
+    );
+    assert_eq!(
+        tool_display_name("BackgroundProcessStatus"),
+        "Backend Process"
+    );
+    assert_eq!(
+        tool_display_name("BackgroundProcessLogs"),
+        "Backend Process Logs"
+    );
+    assert_eq!(
+        tool_display_name("BackgroundProcessStop"),
+        "Backend Process Stop"
+    );
     assert_eq!(tool_display_name("BackgroundProcessWatch"), "Watch");
 }
 

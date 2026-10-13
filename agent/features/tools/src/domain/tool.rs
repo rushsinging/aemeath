@@ -87,6 +87,12 @@ pub trait Tool: Send + Sync {
         None
     }
 
+    /// 一句话调用意图（#1964）：非空 `goal` 优先，否则按工具载荷语义合成。
+    /// 供转后台 `invocation_goal` / Watch header 消费。
+    fn goal_text(&self, input: &Value) -> String {
+        crate::domain::goal_text::resolve(self.name(), input)
+    }
+
     /// Execute the tool（type-erased）。工具源应实现 [`TypedTool`]。
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult;
 }
@@ -209,6 +215,11 @@ pub trait TypedTool: Send + Sync {
         None
     }
 
+    /// 一句话调用意图（#1964）。默认与 [`Tool::goal_text`] 同规则。
+    fn goal_text(&self, input: &Value) -> String {
+        crate::domain::goal_text::resolve(self.name(), input)
+    }
+
     async fn call(&self, input: Value, ctx: &ToolExecutionContext)
         -> TypedToolResult<Self::Output>;
 }
@@ -289,6 +300,10 @@ impl<T: TypedTool> Tool for TypedToolAdapter<T> {
 
     fn suspension(&self, input: &Value) -> Option<Result<ToolSuspension, String>> {
         self.0.suspension(input)
+    }
+
+    fn goal_text(&self, input: &Value) -> String {
+        self.0.goal_text(input)
     }
 
     async fn call(&self, input: Value, ctx: &ToolExecutionContext) -> ToolResult {

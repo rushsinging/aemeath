@@ -74,10 +74,11 @@ impl TypedTool for BackgroundProcessListTool {
                 .iter()
                 .map(|summary: &BackgroundProcessSummaryData| {
                     format!(
-                        "{} [{}] {} ({}ms)",
+                        "{} [{}] {} · {} ({}ms)",
                         summary.task_id,
                         summary.state,
                         summary.tool_name,
+                        summary.goal,
                         summary.duration_ms.unwrap_or(0)
                     )
                 })
@@ -146,7 +147,7 @@ fn status_text(detail: &BackgroundProcessDetailData) -> String {
         "{} [{}] {} — deadline in {:?}ms, log bytes {}",
         detail.summary.task_id,
         detail.summary.state,
-        detail.summary.summary,
+        detail.summary.goal,
         detail.deadline_remaining_ms,
         detail.total_written_bytes
     )
@@ -371,7 +372,7 @@ fn watch_text(result: &BackgroundProcessWatchResult) -> String {
         result.detail.summary.task_id,
         outcome,
         result.detail.summary.state,
-        result.detail.summary.summary,
+        result.detail.summary.goal,
         result.detail.total_written_bytes
     );
     if result.log_tail.is_empty() {

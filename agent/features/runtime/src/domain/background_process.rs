@@ -60,7 +60,9 @@ pub enum BackgroundProcessState {
 pub struct BackgroundProcessRecord {
     pub task_id: BackgroundProcessId,
     pub identity: ToolCallIdentityData,
-    pub invocation_summary: String,
+    /// 调用意图（#1964 = ToolCall::goal_text）。旧快照字段名 invocation_summary。
+    #[serde(alias = "invocation_summary")]
+    pub invocation_goal: String,
     pub state: BackgroundProcessState,
     /// 进程开始时刻（工具派发时刻，含前台等待段；旧快照字段名为
     /// `created_at`，经 serde alias 兼容读取）。
@@ -117,13 +119,13 @@ impl BackgroundProcessRecord {
     /// 时刻，使时长覆盖前台等待段）。
     pub fn dispatch(
         identity: ToolCallIdentityData,
-        invocation_summary: impl Into<String>,
+        invocation_goal: impl Into<String>,
         started_at: SystemTime,
     ) -> Self {
         Self {
             task_id: BackgroundProcessId::new_v7(),
             identity,
-            invocation_summary: invocation_summary.into(),
+            invocation_goal: invocation_goal.into(),
             state: BackgroundProcessState::ForegroundWaiting,
             started_at,
             finished_at: None,
@@ -138,13 +140,13 @@ impl BackgroundProcessRecord {
         task_id: BackgroundProcessId,
         log_file: std::path::PathBuf,
         identity: ToolCallIdentityData,
-        invocation_summary: impl Into<String>,
+        invocation_goal: impl Into<String>,
         started_at: SystemTime,
     ) -> Self {
         Self {
             task_id,
             identity,
-            invocation_summary: invocation_summary.into(),
+            invocation_goal: invocation_goal.into(),
             state: BackgroundProcessState::ForegroundWaiting,
             started_at,
             finished_at: None,
@@ -160,13 +162,13 @@ impl BackgroundProcessRecord {
         task_id: BackgroundProcessId,
         log_file: std::path::PathBuf,
         identity: ToolCallIdentityData,
-        invocation_summary: impl Into<String>,
+        invocation_goal: impl Into<String>,
         started_at: SystemTime,
     ) -> Self {
         Self {
             task_id,
             identity,
-            invocation_summary: invocation_summary.into(),
+            invocation_goal: invocation_goal.into(),
             state: BackgroundProcessState::ForegroundWaiting,
             started_at,
             finished_at: None,

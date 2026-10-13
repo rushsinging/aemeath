@@ -7,6 +7,10 @@ use super::super::{
     format_call_duration, DetailsPolicy, HeaderPolicy, ResultPolicy, ResultRender, ToolDisplay,
     ToolDisplayEntry, ToolRenderPolicy,
 };
+use crate::tui::render::theme;
+use crate::tui::view_model::conversation::tool_result_payload::ToolResultPayload;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
 use sdk::tool_input::{
     BackgroundProcessLogsInput, BackgroundProcessStatusInput, BackgroundProcessStopInput,
     BackgroundProcessWatchInput,
@@ -19,6 +23,46 @@ use std::path::Path;
 
 fn parse_input<T: serde::de::DeserializeOwned + Default>(input: &serde_json::Value) -> T {
     serde_json::from_value(input.clone()).unwrap_or_default()
+}
+
+/// #1964：有 goal → `Watch · {goal}`；无 goal → 完整 `task_id`（纯展示，零业务）。
+fn watch_header(goal: &str, task_id: &str) -> String {
+    let goal = goal.trim();
+    if !goal.is_empty() {
+        format!("Watch · {goal}")
+    } else {
+        let id = task_id.trim();
+        if id.is_empty() {
+            "Watch".to_string()
+        } else {
+            id.to_string()
+        }
+    }
+}
+
+fn watch_goal_from_input(input: &serde_json::Value) -> String {
+    input
+        .get("goal")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn styled_watch_header(text: &str) -> Line<'static> {
+    let name = "Watch";
+    if let Some(rest) = text.strip_prefix(name) {
+        Line::from(vec![
+            Span::styled(name.to_string(), Style::default().fg(theme::ACCENT_BRIGHT)),
+            Span::raw(rest.to_string()),
+        ])
+    } else {
+        Line::from(Span::styled(
+            text.to_string(),
+            Style::default().fg(theme::ACCENT_BRIGHT),
+        ))
+    }
 }
 
 /// 工具族公共 policy：result 可见 + Plain（行内容由 `format_result_lines`
@@ -60,7 +104,7 @@ impl ToolDisplay for BackgroundProcessListDisplay {
                 .map(|task| {
                     format!(
                         "{} · {} · {} · {}",
-                        task.task_id, task.tool_name, task.state, task.summary
+                        task.task_id, task.tool_name, task.state, task.goal
                     )
                 })
                 .collect(),
@@ -102,12 +146,13 @@ impl ToolDisplay for BackgroundProcessStatusDisplay {
             None => "no deadline".to_string(),
         };
         Some(vec![format!(
-            "{} · {} · {} · {} · log bytes {}",
+            "{} · {} · {} · {} · log bytes {} · {}",
             detail.summary.task_id,
             detail.summary.tool_name,
             detail.summary.state,
             deadline,
-            detail.total_written_bytes
+            detail.total_written_bytes,
+            detail.summary.goal
         )])
     }
     fn render_policy(&self) -> ToolRenderPolicy {
@@ -201,11 +246,17 @@ impl ToolDisplay for BackgroundProcessWatchDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let args = parse_input::<BackgroundProcessWatchInput>(input);
-        if args.task_id.is_empty() {
-            return self.display_name().to_string();
-        }
-        // #1946：超时由 Tool 框架接管，header 只展示 task id。
-        format!("{} {}", self.display_name(), args.task_id)
+        // Runtime 已把账本 goal 注入 arguments；TUI 只渲染。
+        watch_header(&watch_goal_from_input(input), &args.task_id)
+    }
+    fn format_header_line_with_result(
+        &self,
+        input: &serde_json::Value,
+        _result_payload: Option<&ToolResultPayload>,
+        _workspace_root: Option<&Path>,
+    ) -> Line<'static> {
+        let args = parse_input::<BackgroundProcessWatchInput>(input);
+        styled_watch_header(&watch_header(&watch_goal_from_input(input), &args.task_id))
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -230,7 +281,7 @@ impl ToolDisplay for BackgroundProcessWatchDisplay {
         }
         lines.push(format!(
             "{} · {} · {} · {} · {}",
-            outcome, detail.summary.task_id, detail.summary.state, duration, detail.summary.summary
+            outcome, detail.summary.task_id, detail.summary.state, duration, detail.summary.goal
         ));
         Some(lines)
     }

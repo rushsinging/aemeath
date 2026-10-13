@@ -41,8 +41,9 @@ pub struct BackgroundProcessSummaryData {
     /// 状态词汇：`foreground_waiting` | `backgrounded` | `succeeded` |
     /// `failed` | `timed_out` | `stopped` | `invalidated`。
     pub state: String,
-    /// 摘要（工具名 + 输入预览）。
-    pub summary: String,
+    /// 调用意图（#1964 = ToolCall::goal_text / 账本 invocation_goal）。
+    #[serde(alias = "summary")]
+    pub goal: String,
     /// 运行时长（毫秒；终态后为终态耗时）。
     pub duration_ms: Option<u64>,
 }
@@ -176,7 +177,7 @@ mod tests {
                 task_id: "task_01hxyz".to_string(),
                 tool_name: "Bash".to_string(),
                 state: state.to_string(),
-                summary: "Bash · cargo test".to_string(),
+                goal: "Bash · cargo test".to_string(),
                 duration_ms: Some(1_200),
             },
             deadline_remaining_ms: None,

@@ -561,3 +561,42 @@ fn placeholder_without_log_path_stays_compact() {
         "无文件（未装配 / 建档失败降级）不带路径段：{text}"
     );
 }
+
+#[tokio::test]
+async fn backgrounded_summary_uses_goal_text_not_tool_input() {
+    let (mut supervisor, _states) = supervisor_with(Duration::from_millis(80));
+    let background = std::sync::Arc::new(
+        crate::application::background_process::session_runtime::BackgroundProcessRuntime::new(),
+    );
+    supervisor = supervisor.with_background_runtime(Some(background.clone()));
+
+    let mut call = supervised_call(test_context(), Some(Duration::from_millis(10)), None);
+    // catalog 仍是 SleepTool；input 带 goal → Port 默认 goal_text 取字段
+    call.invocation = ToolInvocation::new(
+        "SleepTool",
+        serde_json::json!({
+            "goal": "跑 ping 验收",
+            "command": "ping -c 8 127.0.0.1"
+        }),
+        call.context.scope().clone(),
+    );
+
+    let (outcome, _) = supervisor.execute(call).await.expect("转后台执行应成功");
+    assert!(matches!(outcome, ToolExecutionOutcome::Success(_)));
+
+    let snapshots = background.supervisor().snapshots();
+    assert_eq!(snapshots.len(), 1, "应登记一条后台任务");
+    assert_eq!(
+        snapshots[0].invocation_goal, "跑 ping 验收",
+        "summary = goal_text：{:?}",
+        snapshots[0].invocation_goal
+    );
+    assert!(
+        !snapshots[0].invocation_goal.contains("tool="),
+        "NEVER 机械 tool= 摘要"
+    );
+    assert!(
+        !snapshots[0].invocation_goal.contains("input="),
+        "NEVER 机械 input= 摘要"
+    );
+}

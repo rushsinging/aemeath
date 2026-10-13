@@ -1,5 +1,8 @@
 //! Tools domain 常量（#1146 双轨归位）。
 
+/// `goal_text` 合成/回传的预览上限（字符），防止整段 command/JSON 进账本。
+pub(crate) const GOAL_TEXT_PREVIEW_CHARS: usize = 80;
+
 pub const RUNTIME_META_KEYS: &[&str] = &["phase"];
 
 pub(crate) const CHAIN_START_COMMANDS: &[&str] = &["cd", "pushd", "popd", "dirs"];

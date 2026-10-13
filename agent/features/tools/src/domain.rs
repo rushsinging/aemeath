@@ -10,6 +10,7 @@ pub mod command_pl;
 pub mod command_ports;
 pub(crate) mod constants;
 pub mod context;
+pub(crate) mod goal_text;
 pub mod memory_source;
 pub mod ports;
 pub mod published_language;
@@ -72,7 +73,7 @@ pub use context::{
 pub use memory_source::MemoryPortSource;
 pub use ports::{ToolCatalogPort, ToolExecutionPort};
 pub use published_language::{
-    CancellationDeclaration, CleanupConfirmation, RegistryScopeName, ToolCapabilities,
+    CancellationDeclaration, CleanupConfirmation, RegistryScopeName, ToolCall, ToolCapabilities,
     ToolCapability, ToolCatalogError, ToolCatalogSnapshot, ToolErrorKind, ToolInvocation, ToolName,
     ToolOutcome as ToolExecutionOutcome, ToolProfileName,
 };

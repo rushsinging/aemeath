@@ -141,19 +141,23 @@ impl ToolDescriptor {
 
 // ── ToolInvocation ──────────────────────────────────────────────────
 
-/// 工具调用请求。
+/// 一次工具调用（调用态，#1964）。
 ///
-/// 这是可序列化语义上的纯值描述：不携带 RuntimeContext、Registry、Session、
-/// Store、MCP client、token、channel 或 callback capability。
+/// 持有本次 `input`；可回答 `goal_text()`。不携带 RuntimeContext、Registry、
+/// Session、Store、MCP client、token、channel 或 callback capability。
+/// Catalog 里的 `BashTool` 等仍是定义单例——本类型才是 per tool_use 实例。
 #[derive(Debug, Clone)]
-pub struct ToolInvocation {
+pub struct ToolCall {
     pub tool_name: ToolName,
     pub input: serde_json::Value,
     pub execution_scope: ExecutionScope,
     pub authorization: crate::domain::AuthorizationContext,
 }
 
-impl ToolInvocation {
+/// 兼容旧 Published Language 名。
+pub type ToolInvocation = ToolCall;
+
+impl ToolCall {
     pub fn new(
         tool_name: impl Into<ToolName>,
         input: serde_json::Value,
@@ -173,6 +177,11 @@ impl ToolInvocation {
     ) -> Self {
         self.authorization = authorization;
         self
+    }
+
+    /// 一句话调用意图：读 `self.input`（有非空 `goal` 优先，否则按工具名合成）。
+    pub fn goal_text(&self) -> String {
+        crate::domain::goal_text::resolve(self.tool_name.as_str(), &self.input)
     }
 }
 

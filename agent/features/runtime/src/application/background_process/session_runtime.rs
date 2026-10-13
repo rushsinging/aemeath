@@ -432,7 +432,7 @@ fn task_summary_data(
         task_id: record.task_id.as_str().to_string(),
         tool_name: record.identity.tool_name.clone(),
         state,
-        summary: record.invocation_summary.clone(),
+        goal: record.invocation_goal.clone(),
         duration_ms: Some(duration_ms),
     }
 }

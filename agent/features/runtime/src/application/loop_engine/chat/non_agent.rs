@@ -392,14 +392,10 @@ where
         effective_call.provider_id,
         pre_dispatch.executions.len(),
     );
-    send_tool_call_status(sink, context, &effective_call, RuntimeToolCallStatus::Ready).await;
-    send_tool_call_status(
-        sink,
-        context,
-        &effective_call,
-        RuntimeToolCallStatus::Running,
-    )
-    .await;
+    let mut display_call = effective_call.clone();
+    enrich_watch_goal_from_ledger(agent, &mut display_call);
+    send_tool_call_status(sink, context, &display_call, RuntimeToolCallStatus::Ready).await;
+    send_tool_call_status(sink, context, &display_call, RuntimeToolCallStatus::Running).await;
     log::debug!(target: crate::LOG_TARGET,
         "tool execution timing running_sent: kind=non_agent tool_name={} runtime_id={} provider_id={}",
         effective_call.name,
@@ -518,6 +514,39 @@ where
         out.push(ex);
     }
     out
+}
+
+/// #1964：Watch 展示前由 runtime 查账本注入 `goal` 到 arguments（TUI 零业务）。
+fn enrich_watch_goal_from_ledger(agent: &Agent, call: &mut ToolCall) {
+    if call.name != "BackgroundProcessWatch" {
+        return;
+    }
+    let Some(runtime) = agent.background_processes.as_ref() else {
+        return;
+    };
+    let Some(task_id) = call
+        .input
+        .get("task_id")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+    let Some(detail) = tools::BackgroundProcessAccess::task_status(runtime.as_ref(), task_id)
+    else {
+        return;
+    };
+    let goal = detail.summary.goal.trim();
+    if goal.is_empty() {
+        return;
+    }
+    if let Some(object) = call.input.as_object_mut() {
+        object.insert(
+            "goal".to_string(),
+            serde_json::Value::String(goal.to_string()),
+        );
+    }
 }
 
 /// 是否为该工具装配 `ToolProgressEvent` → `ToolOutputDelta` 转发通道。

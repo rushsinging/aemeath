@@ -72,4 +72,10 @@ pub trait ToolExecutionPort: Send + Sync {
         invocation: ToolInvocation,
         context: &super::ToolExecutionContext,
     ) -> ToolExecutionOutcome;
+
+    /// 一句话调用意图（#1964）。默认 `call.goal_text()`；
+    /// 生产 `ExecutionAdapter` **MUST** 覆盖为委派 Definition 的 `Tool::goal_text(&call.input)`。
+    fn goal_text(&self, call: &super::published_language::ToolCall) -> String {
+        call.goal_text()
+    }
 }

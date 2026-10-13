@@ -103,6 +103,13 @@ impl crate::domain::ToolExecutionPort for ExecutionAdapter {
     ) -> ToolExecutionOutcome {
         self.execute_checked(invocation, context).await
     }
+
+    fn goal_text(&self, call: &crate::domain::published_language::ToolCall) -> String {
+        match self.backing.registry().get(call.tool_name.as_str()) {
+            Some(tool) => tool.goal_text(&call.input),
+            None => call.goal_text(),
+        }
+    }
 }
 
 fn unavailable(invocation: &ToolInvocation) -> ToolExecutionOutcome {
