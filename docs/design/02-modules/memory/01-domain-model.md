@@ -92,7 +92,7 @@ Memory BC 守护以下局部不变量：
 | M5 | **outdated 不可逆且不可注入** | 从 outdated 回到 active，或将 outdated 记忆放入注入候选 | 无 `unmark_outdated` 方法；`is_injection_eligible` 硬过滤 |
 | M6 | **pinned 不被淘汰** | compact/evict 淘汰了 pinned 条目 | `eviction_candidates` 过滤 `!entry.pinned` |
 | M7 | **active 容量上限** | active 条目数超过 `max_entries` | `add` 时检查，返回 `NeedsEviction` |
-| M14 | **成功反思后 active ≤ target** | `auto_apply` 的成功 reflect commit 后 project active > `target_active_entries`；或系统机械裁剪凑数 | Reflect 容量门禁：LLM synthesize/outdated 收敛；不足则同轮补问至多一次，仍超则 Failed 且整批不写；**NEVER** apply 后按分数/FIFO 静默归档到 target（详见 `03-reflection.md` §5.1 / §7.1） |
+| M14 | **成功反思后 active ≤ target** | `auto_apply` 的成功 reflect commit 后 project active > `floor(max_entries×0.75)`（或配置覆盖的 target）；或系统机械裁剪凑数；或补问降比例 | Reflect 容量门禁：LLM synthesize/outdated 收敛到同一 0.75 目标；不足则同轮补问至多一次（目标不变），仍超则 Failed 且整批不写；**NEVER** apply 后按分数/FIFO 静默归档到 target（详见 `03-reflection.md` §5.1 / §7.1） |
 | M8 | **TTL 过期不注入** | 注入了 TTL 已过期的记忆 | `is_injection_eligible` 硬过滤 |
 | M9 | **取代关系无环** | 沿 `superseded_by` 上溯回到自身 | 建立关系前 `would_create_supersede_cycle` 校验；超长链（>256 步）按损坏数据处理拒绝；违反时跳过该关系并计数，NEVER 半写入 |
 | M10 | **被取代条目不可注入** | 把 `superseded_by` 非空的记忆放入注入候选（含 pinned） | `is_injection_eligible` 硬过滤，与 M5/M8 同层；显式 `search` 不受影响，结果 metadata 携带取代状态 |
