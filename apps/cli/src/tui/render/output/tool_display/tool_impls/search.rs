@@ -165,37 +165,31 @@ impl ToolDisplay for GrepDisplay {
     fn format_result_lines(&self, content: Option<&serde_json::Value>) -> Option<Vec<String>> {
         use super::super::common::typed_from_content;
         let result: sdk::tool_result::GrepResult = typed_from_content(content)?;
-        if !result.files.is_empty() {
-            return Some(
-                result
-                    .files
-                    .iter()
-                    .map(|file| format!("{} · {}", file.file_path, file.match_count))
-                    .collect(),
-            );
+        if result.matches.is_empty() {
+            return if content_is_grep_shape(content) {
+                Some(vec!["（无命中）".to_string()])
+            } else {
+                None
+            };
         }
-        if !result.matches.is_empty() {
-            return Some(
-                result
-                    .matches
-                    .iter()
-                    .map(|hit| {
-                        format!(
-                            "{}:{}: {}",
-                            hit.file_path.display(),
-                            hit.line_number,
-                            hit.line.trim()
-                        )
-                    })
-                    .collect(),
-            );
-        }
-        // 空结构化结果：仅 typed 形状显示占位，否则回退 Plain text。
-        if content_is_grep_shape(content) {
-            Some(vec!["（无命中）".to_string()])
+        let summary = if result.shown < result.total_matches {
+            format!(
+                "Found {} matches (showing {})",
+                result.total_matches, result.shown
+            )
         } else {
-            None
-        }
+            format!("Found {} matches", result.total_matches)
+        };
+        let mut lines = vec![summary];
+        lines.extend(result.matches.iter().map(|hit| {
+            format!(
+                "{}:{}: {}",
+                hit.file_path.display(),
+                hit.line_number,
+                hit.line.trim()
+            )
+        }));
+        Some(lines)
     }
     fn render_policy(&self) -> ToolRenderPolicy {
         ToolRenderPolicy {
@@ -213,3 +207,7 @@ inventory::submit!(ToolDisplayEntry {
     name: "Grep",
     display: || Box::new(GrepDisplay)
 });
+
+#[cfg(test)]
+#[path = "search_tests.rs"]
+mod tests;

@@ -103,8 +103,7 @@ async fn grep_outside_workspace_follows_authorization_context() {
         .unwrap();
     let (standard, allow_all) = outside_contexts(&workspace);
     // 本测试验证授权行为（工作区外放行/拒绝），用 content 模式断言匹配内容可见。
-    let input =
-        serde_json::json!({"pattern": "needle", "path": outside.path(), "output_mode": "content"});
+    let input = serde_json::json!({"pattern": "needle", "path": outside.path()});
 
     let denied = crate::adapters::grep::GrepTool
         .call(input.clone(), &standard)
