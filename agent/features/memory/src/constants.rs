@@ -23,6 +23,9 @@ pub(crate) const REFLECTION_REAP_SCAN_LIMIT: usize = 200;
 /// Fixed, project-independent segment for the shared global layer generation.
 pub(crate) const GLOBAL_DATASET_SEGMENT: &str = "global";
 
+/// Corpus 写锁文件名（独立于 storage `dataset.lock`，供 Reflect LLM 窗口长持）。
+pub(crate) const WRITE_LOCK_FILE: &str = "write.lock";
+
 /// Members are canonicalized into name order by Storage; "active" sorts before
 /// "archive".
 /// Members are canonicalized into name order by Storage; "active" sorts before

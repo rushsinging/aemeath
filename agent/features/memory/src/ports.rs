@@ -1,5 +1,6 @@
 use crate::domain::event::MemoryEvent;
 use crate::domain::*;
+use crate::write_lock::{MemoryWritePermit, OsWriteLockHandle};
 use async_trait::async_trait;
 use std::sync::Arc;
 use thiserror::Error;
@@ -166,6 +167,11 @@ pub trait MemoryDatasetStore: Send + Sync {
     fn event_revision_label(_revision: &Self::Revision) -> Option<String> {
         None
     }
+
+    /// Corpus OS 写锁（global→project）。默认空：进程内门闩即可；磁盘 store 覆盖。
+    async fn acquire_os_write_locks(&self) -> Result<Vec<OsWriteLockHandle>, MemoryError> {
+        Ok(Vec::new())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -262,6 +268,11 @@ pub trait ReflectionHistoryStore: ReflectionHistoryQuery {
 
 #[async_trait]
 pub trait MemoryPort: Send + Sync {
+    /// 获取 corpus 写许可（进程内 + 可选 OS flock）。同 task 可重入。
+    async fn acquire_write_permit(&self) -> Result<MemoryWritePermit, MemoryError> {
+        Ok(MemoryWritePermit::noop())
+    }
+
     async fn retrieve_for_inject(&self, query: &MemoryQuery) -> MemorySearchResult;
     async fn search(&self, query: &MemorySearchQuery) -> MemorySearchResult;
     async fn write(&self, entry: MemoryEntry) -> Result<WriteResult, MemoryError>;
@@ -273,6 +284,16 @@ pub trait MemoryPort: Send + Sync {
         &self,
         output: &ReflectionOutput,
     ) -> Result<ReflectionApplyResult, MemoryError>;
+
+    /// 调用方已持 [`MemoryWritePermit`] 时的 apply（不再取锁）。
+    /// 默认转发到 [`Self::apply_reflection`]（NoOp / 测试桩）。
+    async fn apply_reflection_under_permit(
+        &self,
+        output: &ReflectionOutput,
+        _permit: &MemoryWritePermit,
+    ) -> Result<ReflectionApplyResult, MemoryError> {
+        self.apply_reflection(output).await
+    }
     async fn archive(&self, ids: &[MemoryId]) -> Result<bool, MemoryError>;
     async fn restore(&self, id: &MemoryId) -> Result<RestoreResult, MemoryError>;
     async fn compact(&self) -> Result<CompactResult, MemoryError>;

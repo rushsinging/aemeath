@@ -428,6 +428,8 @@ struct ReflectionApplyResult {
 
 **MUST 持 per-corpus 写锁**的路径（整段临界区，含 LLM 窗口）：
 
+实现：进程内 `WriteGate` + 各 dataset 目录下独立 `write.lock`（`fs2` flock；**NEVER** 复用 storage 短临界区 `dataset.lock`，以免与 commit 嵌套死锁）。锁序固定 global → project。
+
 - Reflect（load → Provider → parse → 可选补问 → 容量门禁 → persist）
 - MemoryUpdate
 - archive / restore 等位置迁移

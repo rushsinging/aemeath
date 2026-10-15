@@ -6,6 +6,7 @@ use crate::domain::constants::MIN_SYNTHESIS_EVIDENCE;
 use crate::domain::*;
 use crate::ports::*;
 use crate::service::MemoryService;
+use crate::write_lock::{MemoryWritePermit, OsWriteLockHandle, WriteGate};
 use async_trait::async_trait;
 use std::{
     path::{Path, PathBuf},
@@ -32,12 +33,23 @@ pub(crate) struct AtomicDatasetMemoryStore {
     storage: Arc<dyn storage_api::AtomicDatasetPort>,
     global: storage_api::DatasetKeyData,
     project: storage_api::DatasetKeyData,
+    /// agents_dir：corpus `write.lock` 根；None 时仅进程内门闩（测试 Scripted/旧构造）。
+    lock_root: Option<storage_api::SafeStorageRoot>,
 }
 
 impl AtomicDatasetMemoryStore {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new(
         storage: Arc<dyn storage_api::AtomicDatasetPort>,
         project: ProjectMemoryKey,
+    ) -> Self {
+        Self::with_lock_root(storage, project, None)
+    }
+
+    pub fn with_lock_root(
+        storage: Arc<dyn storage_api::AtomicDatasetPort>,
+        project: ProjectMemoryKey,
+        lock_root: Option<storage_api::SafeStorageRoot>,
     ) -> Self {
         let global = dataset_key(GLOBAL_DATASET_SEGMENT);
         let project = dataset_key(project.as_str());
@@ -45,6 +57,7 @@ impl AtomicDatasetMemoryStore {
             storage,
             global,
             project,
+            lock_root,
         }
     }
 
@@ -131,6 +144,48 @@ fn map_memory_open_error(error: MemoryError) -> MemoryOpenerError {
         } => MemoryOpenerError::Io,
         _ => MemoryOpenerError::LegacyMigrationFailed,
     }
+}
+
+fn lock_corpus_via_root(
+    root: &storage_api::SafeStorageRoot,
+    segment: &str,
+) -> Result<OsWriteLockHandle, MemoryError> {
+    use fs2::FileExt;
+    use std::str::FromStr;
+
+    let memory =
+        storage_api::SafePathSegmentData::from_str("memory").map_err(|_| MemoryError::Storage {
+            kind: MemoryStorageErrorKind::Io,
+        })?;
+    let segment =
+        storage_api::SafePathSegmentData::from_str(segment).map_err(|_| MemoryError::Storage {
+            kind: MemoryStorageErrorKind::Io,
+        })?;
+    let dir = root
+        .ensure_dir(&[memory, segment])
+        .map_err(|_| MemoryError::Storage {
+            kind: MemoryStorageErrorKind::Io,
+        })?;
+    let name = storage_api::SafePathSegmentData::from_str(crate::constants::WRITE_LOCK_FILE)
+        .map_err(|_| MemoryError::Storage {
+            kind: MemoryStorageErrorKind::Io,
+        })?;
+    let file = dir
+        .create_or_open(
+            &name,
+            storage_api::SafeOpenOptions {
+                // create 需要 write/append；锁文件用 append 仅为拿到可写 fd。
+                read: true,
+                append: true,
+            },
+        )
+        .map_err(|_| MemoryError::Storage {
+            kind: MemoryStorageErrorKind::Io,
+        })?;
+    file.lock_exclusive().map_err(|_| MemoryError::Storage {
+        kind: MemoryStorageErrorKind::Io,
+    })?;
+    Ok(OsWriteLockHandle::from_file(file))
 }
 
 fn dataset_key(segment: &str) -> storage_api::DatasetKeyData {
@@ -267,6 +322,25 @@ impl MemoryDatasetStore for AtomicDatasetMemoryStore {
             receipt.revision().clone(),
             visibility,
         ))
+    }
+
+    async fn acquire_os_write_locks(&self) -> Result<Vec<OsWriteLockHandle>, MemoryError> {
+        let Some(root) = &self.lock_root else {
+            return Ok(Vec::new());
+        };
+        let mut locks = Vec::with_capacity(2);
+        // 锁序固定：global → project，避免跨 session ABBA。
+        for key in [&self.global, &self.project] {
+            let segment = key
+                .segments()
+                .first()
+                .map(|segment| segment.as_str())
+                .ok_or(MemoryError::Storage {
+                    kind: MemoryStorageErrorKind::Io,
+                })?;
+            locks.push(lock_corpus_via_root(root, segment)?);
+        }
+        Ok(locks)
     }
 }
 
@@ -416,7 +490,11 @@ impl MemoryOpener for DatasetMemoryOpener {
         key: &ProjectMemoryKey,
         config: &share::config::MemoryConfig,
     ) -> Result<Arc<dyn MemoryPort>, MemoryOpenerError> {
-        let store = AtomicDatasetMemoryStore::new(Arc::clone(&self.storage), key.clone());
+        let store = AtomicDatasetMemoryStore::with_lock_root(
+            Arc::clone(&self.storage),
+            key.clone(),
+            Some(self.event_root.clone()),
+        );
         let policy = MemoryPolicy {
             max_entries: config.max_entries,
             similarity_threshold: config.similarity_threshold,
@@ -570,6 +648,7 @@ pub struct InMemoryMemory {
     policy: MemoryPolicy,
     state: RwLock<MemoryState>,
     clock: crate::service::MemoryClock,
+    write_gate: Arc<WriteGate>,
 }
 
 impl InMemoryMemory {
@@ -595,6 +674,7 @@ impl InMemoryMemory {
             policy,
             state: RwLock::new(MemoryState::default()),
             clock: Arc::new(clock),
+            write_gate: WriteGate::new(),
         })
     }
 
@@ -608,6 +688,10 @@ impl InMemoryMemory {
 
 #[async_trait]
 impl MemoryPort for InMemoryMemory {
+    async fn acquire_write_permit(&self) -> Result<MemoryWritePermit, MemoryError> {
+        Ok(self.write_gate.acquire(Vec::new()).await)
+    }
+
     async fn retrieve_for_inject(&self, query: &MemoryQuery) -> MemorySearchResult {
         let state = self.state.read().expect("memory state lock poisoned");
         let mut entries = state
@@ -661,6 +745,7 @@ impl MemoryPort for InMemoryMemory {
     }
 
     async fn write(&self, mut entry: MemoryEntry) -> Result<WriteResult, MemoryError> {
+        let _permit = self.acquire_write_permit().await?;
         validate_content(&entry.content)?;
         let mut state = self.state.write().expect("memory state lock poisoned");
         if state.active.iter().any(|stored| stored.id == entry.id)
@@ -731,11 +816,13 @@ impl MemoryPort for InMemoryMemory {
     }
 
     async fn update(&self, id: &MemoryId, content: &str) -> Result<bool, MemoryError> {
+        let _permit = self.acquire_write_permit().await?;
         validate_content(content)?;
         self.mutate_entry(id, |entry| entry.content = content.to_string())
     }
 
     async fn delete(&self, id: &MemoryId) -> Result<bool, MemoryError> {
+        let _permit = self.acquire_write_permit().await?;
         let mut state = self.state.write().expect("memory state lock poisoned");
         let before = state.active.len();
         state.active.retain(|entry| &entry.id != id);
@@ -747,16 +834,27 @@ impl MemoryPort for InMemoryMemory {
     }
 
     async fn pin(&self, id: &MemoryId, pinned: bool) -> Result<bool, MemoryError> {
+        let _permit = self.acquire_write_permit().await?;
         self.mutate_entry(id, |entry| entry.pinned = pinned)
     }
 
     async fn mark_outdated(&self, id: &MemoryId) -> Result<bool, MemoryError> {
+        let _permit = self.acquire_write_permit().await?;
         self.mutate_entry(id, |entry| entry.outdated = true)
     }
 
     async fn apply_reflection(
         &self,
         output: &ReflectionOutput,
+    ) -> Result<ReflectionApplyResult, MemoryError> {
+        let permit = self.acquire_write_permit().await?;
+        self.apply_reflection_under_permit(output, &permit).await
+    }
+
+    async fn apply_reflection_under_permit(
+        &self,
+        output: &ReflectionOutput,
+        _permit: &MemoryWritePermit,
     ) -> Result<ReflectionApplyResult, MemoryError> {
         // 非法引用跳过；整批在候选态试算，project active ≤ target 才提交，否则 CapacityNotMet 整批不写。
         let mut outdated_ids = Vec::with_capacity(output.outdated_memories.len());
@@ -858,6 +956,7 @@ impl MemoryPort for InMemoryMemory {
         Ok(result)
     }
     async fn archive(&self, ids: &[MemoryId]) -> Result<bool, MemoryError> {
+        let _permit = self.acquire_write_permit().await?;
         let mut state = self.state.write().expect("memory state lock poisoned");
         let mut moved = Vec::new();
         state.active.retain(|entry| {
@@ -877,6 +976,7 @@ impl MemoryPort for InMemoryMemory {
     }
 
     async fn restore(&self, id: &MemoryId) -> Result<RestoreResult, MemoryError> {
+        let _permit = self.acquire_write_permit().await?;
         let mut state = self.state.write().expect("memory state lock poisoned");
         let Some(archived) = state.archive.iter().find(|entry| &entry.id == id).cloned() else {
             return Ok(RestoreResult::NotFound);
@@ -899,6 +999,7 @@ impl MemoryPort for InMemoryMemory {
     }
 
     async fn compact(&self) -> Result<CompactResult, MemoryError> {
+        let _permit = self.acquire_write_permit().await?;
         let mut state = self.state.write().expect("memory state lock poisoned");
         let mut candidates = Vec::new();
         for layer in [MemoryLayer::Global, MemoryLayer::Project] {

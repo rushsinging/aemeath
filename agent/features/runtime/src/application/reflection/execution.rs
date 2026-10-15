@@ -29,6 +29,8 @@ pub enum ReflectionExecutionError {
     InvalidSuggestion,
     #[error("reflection history write failed")]
     HistoryWrite,
+    #[error("reflection could not acquire corpus write lock")]
+    WriteLock,
 }
 
 pub type ReflectionExecutionResultType<T> = Result<T, ReflectionExecutionError>;
@@ -41,6 +43,7 @@ impl ReflectionExecutionError {
             Self::Unparseable => ReflectionErrorCategory::Parse,
             Self::InvalidSuggestion => ReflectionErrorCategory::InvalidSuggestion,
             Self::HistoryWrite => ReflectionErrorCategory::History,
+            Self::WriteLock => ReflectionErrorCategory::Apply,
         }
     }
 }
@@ -77,6 +80,15 @@ pub(crate) async fn execute_reflection(
     cancel: &tokio_util::sync::CancellationToken,
 ) -> ReflectionExecutionResultType<CompleteReflectionResult> {
     let started = std::time::Instant::now();
+    // #1981：Reflect 全程持 corpus 写锁（含 LLM / 补问窗口）；同 task 可重入 apply。
+    let write_permit = memory.acquire_write_permit().await.map_err(|error| {
+        log::error!(
+            target: crate::LOG_TARGET,
+            "reflection_write_lock_failed id={} error={error:?}",
+            identity.id
+        );
+        ReflectionExecutionError::WriteLock
+    })?;
     let prompt = ReflectionWorkflow::build_prompt(
         messages,
         lang,
@@ -169,6 +181,7 @@ pub(crate) async fn execute_reflection(
             output_tokens,
         },
         started.elapsed().as_millis() as u64,
+        Some(&write_permit),
     )
     .await?;
 
@@ -207,6 +220,7 @@ pub(crate) async fn execute_reflection(
                         output_tokens,
                     },
                     started.elapsed().as_millis() as u64,
+                    Some(&write_permit),
                 )
                 .await?;
             }

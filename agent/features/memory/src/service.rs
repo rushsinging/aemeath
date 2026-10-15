@@ -7,12 +7,12 @@ use crate::domain::event::{
 use crate::domain::*;
 use crate::noop::NoopEventAppend;
 use crate::ports::*;
+use crate::write_lock::{MemoryWritePermit, WriteGate};
 use async_trait::async_trait;
 use std::{
     sync::{Arc, Mutex as StdMutex, RwLock},
     time::{SystemTime, UNIX_EPOCH},
 };
-use tokio::sync::Mutex;
 
 /// Injectable source of Unix time used when Reflection creates memories.
 pub type MemoryClock = Arc<dyn Fn() -> u64 + Send + Sync>;
@@ -54,7 +54,7 @@ pub(crate) struct MemoryService<S: MemoryDatasetStore> {
     store: S,
     policy: MemoryPolicy,
     state: RwLock<CommittedState<S::Revision>>,
-    mutation_gate: Mutex<()>,
+    write_gate: std::sync::Arc<WriteGate>,
     clock: MemoryClock,
     /// System One 评分端口（None = 重排关闭，词法序原样返回）。
     scorer: Option<Arc<dyn systemone::ScoringPort>>,
@@ -63,6 +63,68 @@ pub(crate) struct MemoryService<S: MemoryDatasetStore> {
 }
 
 impl<S: MemoryDatasetStore> MemoryService<S> {
+    async fn take_write_permit(&self) -> Result<MemoryWritePermit, MemoryError> {
+        let os_locks = self.store.acquire_os_write_locks().await?;
+        Ok(self.write_gate.acquire(os_locks).await)
+    }
+
+    async fn mark_outdated_locked(&self, id: &MemoryId) -> Result<bool, MemoryError> {
+        self.mutate_entry_and_emit(MemoryEventOp::MarkOutdated, "mark_outdated", *id, |entry| {
+            entry.outdated = true;
+        })
+        .await
+    }
+
+    async fn archive_locked(&self, ids: &[MemoryId]) -> Result<bool, MemoryError> {
+        // The ids may span both layers; archive each layer as its own observable
+        // mutation so a stale-CAS conflict is scoped to a single layer.
+        // 一次逻辑 archive 共用一条 correlation；每层 commit 各 emit 一条。
+        let correlation = format!("archive-{}", uuid::Uuid::now_v7());
+        let mut archived = false;
+        for layer in [MemoryLayer::Global, MemoryLayer::Project] {
+            let ids = ids.to_vec();
+            let slot: AffectedCapture = Default::default();
+            let capture = Arc::clone(&slot);
+            let layer_archived = self
+                .mutate_layer(layer, move |dataset| {
+                    let mut moved = Vec::new();
+                    dataset.active_mut().retain(|entry| {
+                        if ids.contains(&entry.id) && !entry.pinned {
+                            moved.push(entry.clone());
+                            false
+                        } else {
+                            true
+                        }
+                    });
+                    let changed = !moved.is_empty();
+                    if changed {
+                        *capture.lock().expect("archive event slot poisoned") = moved.clone();
+                    }
+                    dataset.archive_mut().extend(moved);
+                    Ok((changed, changed))
+                })
+                .await?;
+            if layer_archived {
+                // 同一 op，stage="archive" 与 restore 区分；正文不变仅迁位置，
+                // affected 记迁移条目全文。
+                let affected = slot.lock().expect("archive event slot poisoned").clone();
+                let mut event = self.build_write_event(
+                    MemoryEventOp::ArchiveRestore,
+                    format!("{correlation}-{layer:?}"),
+                    correlation.clone(),
+                    EventChange::Lifecycle {
+                        stage: "archive".to_string(),
+                        affected,
+                    },
+                );
+                event.layer = Some(layer);
+                self.emit_event(event).await;
+            }
+            archived |= layer_archived;
+        }
+        Ok(archived)
+    }
+
     pub async fn open(store: S, policy: MemoryPolicy) -> Result<Self, MemoryError> {
         Self::open_with_clock(store, policy, system_time_seconds).await
     }
@@ -139,7 +201,7 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
             store,
             policy,
             state: RwLock::new(CommittedState { global, project }),
-            mutation_gate: Mutex::new(()),
+            write_gate: WriteGate::new(),
             clock: Arc::new(clock),
             scorer,
             events,
@@ -389,7 +451,7 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
     where
         F: Fn(&mut MemoryDataset) -> Result<(T, bool), MemoryError>,
     {
-        let _permit = self.mutation_gate.lock().await;
+        // 写锁由公开写入口 / acquire_write_permit 持有（可重入）；此处不再短持。
         // 同一次 mutate_layer 调用（含 CAS 冲突重试）共用一条 CommitCas 因果链。
         let commit_correlation = format!("commit_cas-{layer:?}-{}", uuid::Uuid::now_v7());
         for attempt in 0..=1 {
@@ -687,6 +749,10 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
 
 #[async_trait]
 impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
+    async fn acquire_write_permit(&self) -> Result<MemoryWritePermit, MemoryError> {
+        self.take_write_permit().await
+    }
+
     async fn retrieve_for_inject(&self, query: &MemoryQuery) -> MemorySearchResult {
         let (global, project) = self.load_latest_layers().await;
         let eligible_global = global
@@ -836,6 +902,7 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
     }
 
     async fn write(&self, entry: MemoryEntry) -> Result<WriteResult, MemoryError> {
+        let _permit = self.take_write_permit().await?;
         validate_content(&entry.content)?;
         let policy = self.policy;
         let layer = entry.layer;
@@ -988,6 +1055,7 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
     }
 
     async fn update(&self, id: &MemoryId, content: &str) -> Result<bool, MemoryError> {
+        let _permit = self.take_write_permit().await?;
         validate_content(content)?;
         let content = content.to_string();
         self.mutate_entry_and_emit(MemoryEventOp::Update, "update", *id, move |entry| {
@@ -997,6 +1065,7 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
     }
 
     async fn delete(&self, id: &MemoryId) -> Result<bool, MemoryError> {
+        let _permit = self.take_write_permit().await?;
         let id = *id;
         let slot: WriteCapture = Default::default();
         let capture = Arc::clone(&slot);
@@ -1035,6 +1104,7 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
     }
 
     async fn pin(&self, id: &MemoryId, pinned: bool) -> Result<bool, MemoryError> {
+        let _permit = self.take_write_permit().await?;
         self.mutate_entry_and_emit(MemoryEventOp::Pin, "pin", *id, move |entry| {
             entry.pinned = pinned;
         })
@@ -1042,15 +1112,22 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
     }
 
     async fn mark_outdated(&self, id: &MemoryId) -> Result<bool, MemoryError> {
-        self.mutate_entry_and_emit(MemoryEventOp::MarkOutdated, "mark_outdated", *id, |entry| {
-            entry.outdated = true;
-        })
-        .await
+        let _permit = self.take_write_permit().await?;
+        self.mark_outdated_locked(id).await
     }
 
     async fn apply_reflection(
         &self,
         output: &ReflectionOutput,
+    ) -> Result<ReflectionApplyResult, MemoryError> {
+        let permit = self.take_write_permit().await?;
+        self.apply_reflection_under_permit(output, &permit).await
+    }
+
+    async fn apply_reflection_under_permit(
+        &self,
+        output: &ReflectionOutput,
+        _permit: &MemoryWritePermit,
     ) -> Result<ReflectionApplyResult, MemoryError> {
         // Validate the whole model-produced batch before the first durable write.
         // This prevents malformed later suggestions/ids from causing the common
@@ -1192,11 +1269,11 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             }
         }
         for id in outdated {
-            match self.mark_outdated(&id).await {
+            match self.mark_outdated_locked(&id).await {
                 Ok(marked) => {
                     if marked {
                         // 与试算一致：outdated 后移出 active，否则物理条数无法收敛到 target。
-                        if let Err(error) = self.archive(std::slice::from_ref(&id)).await {
+                        if let Err(error) = self.archive_locked(std::slice::from_ref(&id)).await {
                             return Err(partial_apply_or(error, &result));
                         }
                         result.outdated_marked += 1;
@@ -1228,56 +1305,12 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
     }
 
     async fn archive(&self, ids: &[MemoryId]) -> Result<bool, MemoryError> {
-        // The ids may span both layers; archive each layer as its own observable
-        // mutation so a stale-CAS conflict is scoped to a single layer.
-        // 一次逻辑 archive 共用一条 correlation；每层 commit 各 emit 一条。
-        let correlation = format!("archive-{}", uuid::Uuid::now_v7());
-        let mut archived = false;
-        for layer in [MemoryLayer::Global, MemoryLayer::Project] {
-            let ids = ids.to_vec();
-            let slot: AffectedCapture = Default::default();
-            let capture = Arc::clone(&slot);
-            let layer_archived = self
-                .mutate_layer(layer, move |dataset| {
-                    let mut moved = Vec::new();
-                    dataset.active_mut().retain(|entry| {
-                        if ids.contains(&entry.id) && !entry.pinned {
-                            moved.push(entry.clone());
-                            false
-                        } else {
-                            true
-                        }
-                    });
-                    let changed = !moved.is_empty();
-                    if changed {
-                        *capture.lock().expect("archive event slot poisoned") = moved.clone();
-                    }
-                    dataset.archive_mut().extend(moved);
-                    Ok((changed, changed))
-                })
-                .await?;
-            if layer_archived {
-                // 同一 op，stage="archive" 与 restore 区分；正文不变仅迁位置，
-                // affected 记迁移条目全文。
-                let affected = slot.lock().expect("archive event slot poisoned").clone();
-                let mut event = self.build_write_event(
-                    MemoryEventOp::ArchiveRestore,
-                    format!("{correlation}-{layer:?}"),
-                    correlation.clone(),
-                    EventChange::Lifecycle {
-                        stage: "archive".to_string(),
-                        affected,
-                    },
-                );
-                event.layer = Some(layer);
-                self.emit_event(event).await;
-            }
-            archived |= layer_archived;
-        }
-        Ok(archived)
+        let _permit = self.take_write_permit().await?;
+        self.archive_locked(ids).await
     }
 
     async fn restore(&self, id: &MemoryId) -> Result<RestoreResult, MemoryError> {
+        let _permit = self.take_write_permit().await?;
         let id = *id;
         // 一次逻辑 restore 一条 correlation（命中的层唯一）。
         let correlation = format!("restore-{id}-{}", uuid::Uuid::now_v7());
@@ -1358,6 +1391,7 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
     }
 
     async fn compact(&self) -> Result<CompactResult, MemoryError> {
+        let _permit = self.take_write_permit().await?;
         // Compact spans both layers, but each layer is committed as its own
         // observable mutation. A single layer failing surfaces the real error;
         // no partial commit is hidden behind one aggregate result.

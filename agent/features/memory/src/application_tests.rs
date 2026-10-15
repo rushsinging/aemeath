@@ -166,6 +166,7 @@ async fn completion_parses_applies_and_persists_memory_owned_record() {
             output_tokens: 22,
         },
         7,
+        None,
     )
     .await
     .unwrap();
@@ -193,6 +194,7 @@ async fn malformed_response_persists_safe_parse_failure_without_raw_text() {
         false,
         ReflectionTokenUsage::default(),
         9,
+        None,
     )
     .await
     .unwrap_err();
@@ -301,6 +303,7 @@ async fn complete_resolves_ordinal_references_end_to_end() {
         true,
         ReflectionTokenUsage::default(),
         5,
+        None,
     )
     .await
     .unwrap();
@@ -507,6 +510,7 @@ async fn event_reflection_ops_complete_emits_trigger_apply_cost() {
         true,
         token_usage,
         88,
+        None,
     )
     .await
     .unwrap();

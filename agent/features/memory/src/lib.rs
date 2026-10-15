@@ -131,6 +131,7 @@ mod noop;
 mod ports;
 mod reflection_history_jsonl;
 mod service;
+mod write_lock;
 
 pub mod api;
 
