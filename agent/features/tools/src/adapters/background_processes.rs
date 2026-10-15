@@ -1,6 +1,8 @@
 //! 后台进程工具族（#252 / #1931）：list / status / logs / stop / watch。
 
-use crate::adapters::constants::DEFAULT_BACKGROUND_LOG_MAX_BYTES;
+use crate::adapters::constants::{
+    WATCH_RESULT_HEADER_RESERVE_CHARS, WATCH_RESULT_TEXT_BUDGET_CHARS,
+};
 use crate::domain::background_process_port::{
     wait_task, BackgroundProcessAccess, BackgroundProcessAccessSource,
 };
@@ -345,16 +347,18 @@ impl TypedTool for BackgroundProcessWatchTool {
     }
 }
 
-/// 终态附带 log tail：按默认日志字节窗口读取；大结果交给 materializer 兜底。
+/// 终态附带 log tail：字符预算压在 Grep 同档 2000 内，避免 materializer 落盘截断。
 fn attach_watch_log_tail(
     access: &dyn BackgroundProcessAccess,
     task_id: &str,
     result: &mut BackgroundProcessWatchResult,
 ) {
-    let Some(log) = access.read_task_log(task_id, None, DEFAULT_BACKGROUND_LOG_MAX_BYTES) else {
+    let body_budget =
+        WATCH_RESULT_TEXT_BUDGET_CHARS.saturating_sub(WATCH_RESULT_HEADER_RESERVE_CHARS);
+    let Some(log) = access.read_task_log(task_id, None, body_budget) else {
         return;
     };
-    result.log_tail = log.text;
+    result.log_tail = clip_to_char_budget(&log.text, body_budget);
 }
 
 fn watch_text(result: &BackgroundProcessWatchResult) -> String {
@@ -374,5 +378,36 @@ fn watch_text(result: &BackgroundProcessWatchResult) -> String {
     if result.log_tail.is_empty() {
         return header;
     }
-    format!("{header}\n{}", result.log_tail)
+    let remaining =
+        WATCH_RESULT_TEXT_BUDGET_CHARS.saturating_sub(header.chars().count().saturating_add(1));
+    let body = clip_to_char_budget(&result.log_tail, remaining);
+    format!("{header}\n{body}")
+}
+
+fn clip_to_char_budget(text: &str, budget: usize) -> String {
+    if budget == 0 {
+        return String::new();
+    }
+    if text.chars().count() <= budget {
+        return text.to_string();
+    }
+    let marker = "\n…(truncated)";
+    let marker_chars = marker.chars().count();
+    let keep = budget.saturating_sub(marker_chars);
+    let mut out = String::new();
+    for (index, ch) in text.chars().enumerate() {
+        if index >= keep {
+            break;
+        }
+        out.push(ch);
+    }
+    if let Some((head, _)) = out.rsplit_once('\n') {
+        out = head.to_string();
+    }
+    out.push_str(marker);
+    // 若仍超预算（极端短 budget），硬裁到 budget。
+    if out.chars().count() > budget {
+        out = out.chars().take(budget).collect();
+    }
+    out
 }
