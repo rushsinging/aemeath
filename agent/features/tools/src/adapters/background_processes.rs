@@ -347,7 +347,7 @@ impl TypedTool for BackgroundProcessWatchTool {
     }
 }
 
-/// 终态附带 log tail：字符预算压在 Grep 同档 2000 内，避免 materializer 落盘截断。
+/// 终态附带 log tail：按 Watch 源头硬预算裁剪（日志本已落盘，防 materializer 二次落盘）。
 fn attach_watch_log_tail(
     access: &dyn BackgroundProcessAccess,
     task_id: &str,

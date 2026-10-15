@@ -290,7 +290,7 @@ specs 同步（核心引擎 PR 内）：3.4.3（FIFO 修订）、3.4.4（`Backgr
 - **强制前台**：执行监督器对 `BackgroundProcessWatch` 将 `background_threshold` 视为 `None`，NEVER 自动转后台。
 - **带超时短等**：可选统一入参 `timeout`（秒，与 Bash/Agent/WebFetch 同名），缺省 = 框架硬上限 300，clamp 到 `[1, 300]`；逼近上限时内部 wait 再减 grace，先于 supervisor 收口。超时返回 `outcome=still_running` + 当前 detail；终态返回 `outcome=terminal`。`Tool::timeout_secs()` 固定 300，**NEVER** 另起 `timeout_secs` 字段，也 **NEVER** 让入参大于框架上限以致被 `cleanup unconfirmed` 砍死（#1946）。
 - **等待中流式 log**：`wait_task` 从**当前日志末尾**增量 `read_task_log`，经 `ToolProgressEvent` 推送；runtime `non_agent` **必须**为 `BackgroundProcessWatch` 装配与 Bash 相同的 progress→`ToolOutputDelta` 通道（`tool_forwards_progress_stream`）；TUI `tool_observe` 白名单必须包含 Watch。NEVER 回放历史全文。缺任一层都会静默无流式。
-- **结束 result 含 log_tail**：`BackgroundProcessWatchResult.log_tail` + `watch_text` 拼接尾部；字符预算 `WATCH_RESULT_TEXT_BUDGET_CHARS=2000`（与 Memory 同档、硬压在 materializer floor 3000 之下），NEVER 触发 tool_result 落盘截断阶段。
+- **结束 result 含 log_tail**：`BackgroundProcessWatchResult.log_tail` + `watch_text` 拼接尾部；字符预算 `WATCH_RESULT_TEXT_BUDGET_CHARS=2000`（硬压在 materializer floor 3000 之下）。**设硬顶理由**：任务日志本已落盘，禁止再靠 materializer 二次落盘扩散；与 Memory/Skill 等「有预期的内部调用」同属可设硬顶族。对环境工具（Grep/Bash/Read 等）不设源头硬顶。
 - **不吞通知**：Watch 只读账本等待；完成通知 / wakeup / reminder 原路走。
 - **Fuse 不豁免**：与 List/Status/Logs 不同；连续同 id Watch 仍计 Soft=3。
 - **等待实现**：tools crate 内 `domain::background_process_port::wait_task`（`pub(crate)`，不进 crate 根 façade）基于非阻塞 `task_status` 轮询 + cancellation + 可选 ProgressSink，NEVER 在调用方盲 sleep。
