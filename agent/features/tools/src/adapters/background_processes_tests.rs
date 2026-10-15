@@ -197,7 +197,7 @@ async fn watch_tool_unknown_task_errors() {
 }
 
 #[tokio::test]
-async fn watch_tool_result_text_includes_log_tail() {
+async fn watch_tool_result_text_includes_log_tail_within_budget() {
     let huge = format!("MARKER_HEAD\n{}\nMARKER_TAIL\n", "x".repeat(4_000));
     let source = Arc::new(StaticSource {
         access: Arc::new(FakeAccess {
@@ -216,13 +216,22 @@ async fn watch_tool_result_text_includes_log_tail() {
         .call(serde_json::json!({"task_id": "task-done"}), &test_context())
         .await;
     assert!(!result.is_error);
+    let chars = result.text.chars().count();
     assert!(
-        result.text.contains("MARKER_HEAD") || result.text.contains("MARKER_TAIL"),
-        "应携带 log tail：{}",
+        chars <= super::super::constants::WATCH_RESULT_TEXT_BUDGET_CHARS,
+        "Watch text 必须压在预算内以免 materializer 落盘：{chars}"
+    );
+    assert!(
+        result.text.contains("MARKER_TAIL") || result.text.contains("truncated"),
+        "应携带 log tail 或截断标记：{}",
         result.text
     );
     let data = result.data.expect("结构化数据");
     assert!(!data.log_tail.is_empty(), "typed log_tail 不应为空");
+    assert!(
+        data.log_tail.chars().count() <= super::super::constants::WATCH_RESULT_TEXT_BUDGET_CHARS,
+        "log_tail 本身也不得超过总预算"
+    );
 }
 
 #[tokio::test]
