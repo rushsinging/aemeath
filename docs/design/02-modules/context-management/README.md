@@ -140,6 +140,7 @@ Storage 提供原子写与损坏兜底**机制**，不拥有 Session 数据本�
 | [05-memory-injection.md](05-memory-injection.md) | MemoryPort consumption、SystemBlock render / placement、token budget、跨轮 dedup、Reflection 时序 |
 | [06-persistent-summary-tree.md](06-persistent-summary-tree.md) | L5 持久化增量摘要树、checkpoint、projection、scheduler、恢复与 compact usage |
 | [07-reminder-pipeline.md](07-reminder-pipeline.md) | Reminder 统一管线：source 注册、Run 级队列、invocation 注入、广义 ReminderPolicy、placement 与格式契约 |
+| [08-deepseek-harness-compaction-research.md](08-deepseek-harness-compaction-research.md) | DeepSeek Harness compaction 外部对照：prune-first、可递归 checkpoint、与五级管线 / 摘要树取舍 |
 
 ## 9. 相关文档
 
@@ -156,6 +157,7 @@ Storage 提供原子写与损坏兜底**机制**，不拥有 Session 数据本�
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-10-15 | 新增 DeepSeek Harness 上下文压缩外部对照调研（08 文档）：prune-first、可递归 checkpoint、与五级管线 / 摘要树取舍 | 外部对照调研 |
 | 2026-10-04 | 新增 Reminder 统一管线（07 文档）：域归属决策、三段管线、广义 ReminderPolicy、placement 缓存不变量与多 reminder 拼装 | [#1695](https://github.com/rushsinging/aemeath/issues/1695) |
 | 2026-07-28 | #1438 将 Context 的 Skill 消费收窄为 metadata-only SkillCatalogPort；完整正文只在 Skill Tool 调用后进入模型上下文 | [#1438](https://github.com/rushsinging/aemeath/issues/1438) |
 | 2026-07-12 | 初稿：Context Management 模块入口、7 条核心决策、ContextPort OHS、四方法、跨 BC 快照组装 | #743 |
