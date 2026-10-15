@@ -207,6 +207,13 @@ impl ReflectionWorkflow {
                     }),
                     Some(ReflectionErrorCategory::Apply),
                 ),
+                Err(MemoryError::CapacityNotMet { active, target }) => {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "Reflection apply capacity_not_met active={active} target={target}"
+                    );
+                    (None, Some(ReflectionErrorCategory::CapacityNotMet))
+                }
                 Err(error) => {
                     log::warn!(target: crate::LOG_TARGET, "Reflection apply failed: {error}");
                     (None, Some(ReflectionErrorCategory::Apply))

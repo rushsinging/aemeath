@@ -43,6 +43,12 @@ fn assert_completed(
         ReflectionRunOutcome::DisabledSkipped => {
             panic!("the run must not be skipped by configuration")
         }
+        ReflectionRunOutcome::BusySkipped => {
+            panic!("the run must not be skipped as busy")
+        }
+        ReflectionRunOutcome::Detached => {
+            panic!("the run must not be detached in this test")
+        }
     }
 }
 

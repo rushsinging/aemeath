@@ -156,7 +156,7 @@ pub(crate) async fn execute_reflection(
             }
         }
     }
-    let completed: ReflectionExecutionResult = ReflectionWorkflow::complete(
+    let mut completed: ReflectionExecutionResult = ReflectionWorkflow::complete(
         history,
         memory,
         identity,
@@ -171,6 +171,56 @@ pub(crate) async fn execute_reflection(
         started.elapsed().as_millis() as u64,
     )
     .await?;
+
+    // 容量未达标：同轮补问至多 1 次，目标仍为同一 target（NEVER 降比例）；仍超则保持 Failed。
+    if auto_apply
+        && completed.error_category == Some(ReflectionErrorCategory::CapacityNotMet)
+        && !cancel.is_cancelled()
+    {
+        log::warn!(
+            target: crate::LOG_TARGET,
+            "reflection_capacity_retry id={} target={}",
+            identity.id,
+            target_active_entries,
+        );
+        let capacity_messages = build_capacity_repair_messages(
+            &prompt.text,
+            &raw_response,
+            lang,
+            target_active_entries,
+        );
+        match call_provider(&invocation, capacity_messages, cancel).await {
+            Ok((repaired, repair_input_tokens, repair_output_tokens)) => {
+                input_tokens = input_tokens.saturating_add(repair_input_tokens);
+                output_tokens = output_tokens.saturating_add(repair_output_tokens);
+                raw_response = repaired;
+                completed = ReflectionWorkflow::complete(
+                    history,
+                    memory,
+                    identity,
+                    &raw_response,
+                    &prompt.references,
+                    lang,
+                    auto_apply,
+                    ReflectionTokenUsage {
+                        input_tokens,
+                        output_tokens,
+                    },
+                    started.elapsed().as_millis() as u64,
+                )
+                .await?;
+            }
+            Err(error) => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "reflection_capacity_retry_failed id={} error={:?}",
+                    identity.id,
+                    error,
+                );
+            }
+        }
+    }
+
     Ok(CompleteReflectionResult {
         output: completed.output,
         apply_result: completed.apply_result,
@@ -189,6 +239,40 @@ fn user_prompt_messages(prompt_text: &str) -> Vec<share::message::Message> {
 /// 构造一次性的格式修复消息：原反思 prompt（user）→ 原始响应（assistant）→
 /// 纠错指令（user），文案按 lang 中英。system prompt 由 [`call_provider`]
 /// 沿用原样（`invocation.system_prompt_text`）。
+/// 容量未达标时的同轮补问：目标仍为同一 `target`（NEVER 降比例）。
+fn build_capacity_repair_messages(
+    prompt_text: &str,
+    raw_response: &str,
+    lang: &str,
+    target_active_entries: usize,
+) -> Vec<share::message::Message> {
+    let instruction = if lang == "zh" {
+        format!(
+            "你上一次反思建议落盘后 project active 仍大于收敛目标 {target_active_entries}。\n\
+             请只输出符合要求的 JSON：通过 outdated_memories（归档过时条目）/ supersedes / synthesizes\n\
+             将 active 压到 ≤ {target_active_entries}；目标不得降低；不要机械凑数说明；不要 Markdown。"
+        )
+    } else {
+        format!(
+            "Your previous reflection suggestions would leave project active above the converge \
+             target {target_active_entries}. Output only valid JSON that uses outdated_memories \
+             (archives outdated entries) / supersedes / synthesizes to bring active to ≤ \
+             {target_active_entries}. Do not lower the target. No Markdown."
+        )
+    };
+    vec![
+        share::message::Message::user(prompt_text),
+        share::message::Message {
+            role: share::message::Role::Assistant,
+            content: vec![share::message::ContentBlock::Text {
+                text: raw_response.to_string(),
+            }],
+            metadata: None,
+        },
+        share::message::Message::user(instruction),
+    ]
+}
+
 fn build_repair_messages(
     prompt_text: &str,
     raw_response: &str,

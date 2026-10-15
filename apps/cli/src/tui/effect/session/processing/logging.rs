@@ -344,6 +344,11 @@ pub(crate) fn log_sdk_event(event: &sdk::ChatEvent, stage: &'static str) {
             stage,
             active,
         ),
+        sdk::ChatEvent::ReflectionActiveChanged { active } => crate::tui::log_trace!(
+            "{} reflection_active_changed active={}",
+            stage,
+            active,
+        ),
         sdk::ChatEvent::TaskStateChanged { state } => crate::tui::log_trace!(
             "{} task_state_changed session_id={} revision={} items={}",
             stage,

@@ -1102,6 +1102,23 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             attempted: prepared.len() + outdated.len(),
             ..ReflectionApplyResult::default()
         };
+        {
+            let (global, project) = self.snapshot();
+            let project_active = simulate_project_active_after_reflection(
+                &global,
+                &project,
+                &prepared,
+                &outdated,
+                self.policy,
+            )?;
+            let target = crate::domain::reflect_target_active_entries(self.policy.max_entries);
+            if project_active > target {
+                return Err(MemoryError::CapacityNotMet {
+                    active: project_active,
+                    target,
+                });
+            }
+        }
         for (entry, supersedes) in prepared {
             let policy = self.policy;
             let layer = entry.layer;
@@ -1178,6 +1195,10 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             match self.mark_outdated(&id).await {
                 Ok(marked) => {
                     if marked {
+                        // 与试算一致：outdated 后移出 active，否则物理条数无法收敛到 target。
+                        if let Err(error) = self.archive(std::slice::from_ref(&id)).await {
+                            return Err(partial_apply_or(error, &result));
+                        }
                         result.outdated_marked += 1;
                     } else {
                         // 目标在反射运行期间被删除或已过期（引用解析后库变化）：
@@ -1192,27 +1213,16 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                 Err(error) => return Err(partial_apply_or(error, &result)),
             }
         }
-        // 容量收敛靠 LLM 建议；若 apply 后仍超 target，仅 warn，NEVER 机械硬删。
-        // 用本次 apply 已提交的内存态计数，避免额外现读磁盘打乱 ScriptedStore 队列。
-        let (global_active, project_active) = {
+        let project_active = {
             let state = self.state.read().expect("memory state lock poisoned");
-            (
-                state.global.dataset.active().len(),
-                state.project.dataset.active().len(),
-            )
+            state.project.dataset.active().len()
         };
-        for (layer, active) in [
-            (MemoryLayer::Global, global_active),
-            (MemoryLayer::Project, project_active),
-        ] {
-            if active > self.policy.target_active_entries {
-                log::warn!(
-                    target: crate::LOG_TARGET,
-                    "memory_reflection_above_target layer={layer:?} active={active} target={} hard_cap={}",
-                    self.policy.target_active_entries,
-                    self.policy.max_entries,
-                );
-            }
+        let target = crate::domain::reflect_target_active_entries(self.policy.max_entries);
+        if project_active > target {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "memory_reflection_above_target_after_commit active={project_active} target={target}"
+            );
         }
         Ok(result)
     }
@@ -1463,6 +1473,46 @@ fn partial_apply_or(error: MemoryError, result: &ReflectionApplyResult) -> Memor
             superseded: result.superseded,
         }
     }
+}
+
+/// 在候选盘面上试算 reflect apply 后的 project active 条数（含 outdated→归档）。
+/// 仅用于容量门禁；NEVER 在此路径写盘。
+fn simulate_project_active_after_reflection(
+    global: &MemoryDataset,
+    project: &MemoryDataset,
+    prepared: &[(MemoryEntry, Vec<MemoryId>)],
+    outdated: &[MemoryId],
+    policy: MemoryPolicy,
+) -> Result<usize, MemoryError> {
+    let mut global = global.clone();
+    let mut project = project.clone();
+    for (entry, _supersedes) in prepared {
+        let dataset = match entry.layer {
+            MemoryLayer::Global => &mut global,
+            MemoryLayer::Project => &mut project,
+        };
+        apply_reflection_entry(dataset, entry, policy)?;
+    }
+    for id in outdated {
+        for dataset in [&mut global, &mut project] {
+            let mut moved = None;
+            dataset.active_mut().retain(|entry| {
+                if &entry.id == id && !entry.pinned {
+                    let mut archived = entry.clone();
+                    archived.outdated = true;
+                    moved = Some(archived);
+                    false
+                } else {
+                    true
+                }
+            });
+            if let Some(archived) = moved {
+                dataset.archive_mut().push(archived);
+                break;
+            }
+        }
+    }
+    Ok(project.active().len())
 }
 
 /// Applies one Reflection suggestion as one dataset mutation. On capacity it

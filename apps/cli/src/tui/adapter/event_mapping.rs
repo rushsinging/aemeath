@@ -603,6 +603,9 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
         ChatEvent::BackgroundProcessCountChanged { active } => {
             TuiRuntimeEvent::BackgroundProcessCountChanged { active }
         }
+        ChatEvent::ReflectionActiveChanged { active } => {
+            TuiRuntimeEvent::ReflectionActiveChanged { active }
+        }
         ChatEvent::TaskStateChanged { state } => TuiRuntimeEvent::TaskStateChanged {
             state: Box::new(TuiTaskState {
                 session_id: state.session_id,
@@ -1419,6 +1422,9 @@ fn reflection_error_category(
         sdk::ReflectionErrorCategoryView::Cancelled => TuiReflectionErrorCategory::Cancelled,
         sdk::ReflectionErrorCategoryView::TimedOut => TuiReflectionErrorCategory::TimedOut,
         sdk::ReflectionErrorCategoryView::Interrupted => TuiReflectionErrorCategory::Interrupted,
+        sdk::ReflectionErrorCategoryView::CapacityNotMet => {
+            TuiReflectionErrorCategory::CapacityNotMet
+        }
     }
 }
 

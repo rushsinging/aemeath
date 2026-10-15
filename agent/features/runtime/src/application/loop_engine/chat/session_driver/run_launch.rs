@@ -83,6 +83,7 @@ where
                 crate::application::reflection::ReflectionTaskAdapter::production(
                     std::time::Duration::from_secs(memory_config.reflection.timeout_secs),
                 );
+            reflection_tasks.set_active_emitter(Some(shell.background_processes.clone()));
             // 反思专用模型接线（配置 `memory.reflection.model`）：装配期在此
             // 解析一次并缓存到 session 级 adapter（后续 clone 共享同一 Arc，
             // 三个触发点与整 session 只构建一次 provider）；解析失败 fail-open

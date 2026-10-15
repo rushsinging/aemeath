@@ -230,12 +230,17 @@ fn prompt_includes_capacity_budget_and_convergence_rules() {
     assert!(zh.contains("active=180"));
     assert!(zh.contains("target=150"));
     assert!(zh.contains("hard_cap=200"));
-    assert!(zh.contains("收敛到 ≤ target"));
+    assert!(zh.contains("floor(hard_cap×0.75)"));
+    assert!(zh.contains("active MUST ≤ target"));
+    assert!(zh.contains("不会机械裁剪"));
+    assert!(zh.contains("禁止建议 ephemeral fact"));
     assert!(zh.contains("active ≤ target 时不要为凑数而强制淘汰"));
     assert!(en.contains("active=180"));
     assert!(en.contains("target=150"));
     assert!(en.contains("hard_cap=200"));
-    assert!(en.contains("converge active to ≤ target"));
+    assert!(en.contains("floor(hard_cap×0.75)"));
+    assert!(en.contains("never mechanically trims"));
+    assert!(en.contains("Never suggest ephemeral facts"));
     assert!(en.contains("When active ≤ target, do not force eviction"));
 }
 

@@ -758,8 +758,7 @@ impl MemoryPort for InMemoryMemory {
         &self,
         output: &ReflectionOutput,
     ) -> Result<ReflectionApplyResult, MemoryError> {
-        // 非法引用（编造标识）先过滤并记录：跳过而不是拒绝，NEVER 作废整批；
-        // attempted 只统计实际尝试的操作。
+        // 非法引用跳过；整批在候选态试算，project active ≤ target 才提交，否则 CapacityNotMet 整批不写。
         let mut outdated_ids = Vec::with_capacity(output.outdated_memories.len());
         for raw_id in &output.outdated_memories {
             match MemoryId::new(raw_id) {
@@ -772,10 +771,19 @@ impl MemoryPort for InMemoryMemory {
                 ),
             }
         }
+
         let mut result = ReflectionApplyResult {
             attempted: output.suggested_memories.len() + outdated_ids.len(),
             ..ReflectionApplyResult::default()
         };
+
+        let mut state = self.state.write().expect("memory state lock poisoned");
+        let mut candidate = MemoryState {
+            active: state.active.clone(),
+            archive: state.archive.clone(),
+            revision: state.revision,
+        };
+
         for suggestion in &output.suggested_memories {
             let now = (self.clock)();
             let id = reflection_memory_id(now)?;
@@ -788,61 +796,67 @@ impl MemoryPort for InMemoryMemory {
                 MemorySource::Llm,
             )?;
             entry.tags = suggestion.tags.clone();
-            // M13: fewer than two sources is a copy, not a synthesis.
             if !apply_synthesis(&mut entry, &suggestion.synthesizes)
                 && !suggestion.synthesizes.is_empty()
             {
-                log::info!(
+                log::warn!(
                     target: crate::LOG_TARGET,
-                    "memory_synthesis_downgraded sources={} below_min={}",
+                    "memory_reflection_synthesis_demoted evidence_count={} min={}",
                     suggestion.synthesizes.len(),
                     MIN_SYNTHESIS_EVIDENCE,
                 );
             }
 
-            let mut state = self.state.write().expect("memory state lock poisoned");
-            let surviving = apply_reflection_entry(&mut state, entry, self.policy)?;
-            state.revision = state.revision.saturating_add(1);
+            let surviving = apply_reflection_entry(&mut candidate, entry, self.policy)?;
+            candidate.revision = candidate.revision.saturating_add(1);
             result.suggestions_added += 1;
             result.completed += 1;
-            // A merged suggestion never keeps its own id, so the relation has to
-            // attach to the entry that actually survived the merge.
             if let Some(surviving) = surviving {
                 result.attempted += suggestion.supersedes.len();
-                let established =
-                    establish_supersede_relations(&mut state, surviving, &suggestion.supersedes);
+                let established = establish_supersede_relations(
+                    &mut candidate,
+                    surviving,
+                    &suggestion.supersedes,
+                );
                 result.completed += established;
                 result.superseded += established;
             }
         }
 
-        for id in outdated_ids {
-            let mut state = self.state.write().expect("memory state lock poisoned");
-            if let Some(entry) = state.active.iter_mut().find(|entry| entry.id == id) {
-                entry.outdated = true;
-                state.revision = state.revision.saturating_add(1);
+        for id in &outdated_ids {
+            // Reflect outdated：标 outdated 并移出 active（归档），否则物理条数无法收敛到 target。
+            // pinned 与 archive 工具一致：不可归档，跳过并计入 attempted/completed。
+            let mut moved = None;
+            candidate.active.retain(|entry| {
+                if &entry.id == id && !entry.pinned {
+                    let mut archived = entry.clone();
+                    archived.outdated = true;
+                    moved = Some(archived);
+                    false
+                } else {
+                    true
+                }
+            });
+            if let Some(archived) = moved {
+                candidate.archive.push(archived);
+                candidate.revision = candidate.revision.saturating_add(1);
                 result.outdated_marked += 1;
             }
             result.completed += 1;
         }
-        // 容量收敛靠 LLM 建议；若 apply 后仍超 target，仅 warn，NEVER 机械硬删。
-        let stats = self.stats().await;
-        for (layer, active) in [
-            (MemoryLayer::Global, stats.global_count),
-            (MemoryLayer::Project, stats.project_count),
-        ] {
-            if active > self.policy.target_active_entries {
-                log::warn!(
-                    target: crate::LOG_TARGET,
-                    "memory_reflection_above_target layer={layer:?} active={active} target={} hard_cap={}",
-                    self.policy.target_active_entries,
-                    self.policy.max_entries,
-                );
-            }
+
+        let project_active = count_layer(&candidate.active, MemoryLayer::Project);
+        let target = self.policy.target_active_entries;
+        if project_active > target {
+            return Err(MemoryError::CapacityNotMet {
+                active: project_active,
+                target,
+            });
         }
+
+        *state = candidate;
         Ok(result)
     }
-
     async fn archive(&self, ids: &[MemoryId]) -> Result<bool, MemoryError> {
         let mut state = self.state.write().expect("memory state lock poisoned");
         let mut moved = Vec::new();

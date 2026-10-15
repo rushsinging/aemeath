@@ -396,6 +396,7 @@ pub(crate) enum TuiReflectionErrorCategory {
     Cancelled,
     TimedOut,
     Interrupted,
+    CapacityNotMet,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -779,6 +780,9 @@ pub(crate) enum TuiRuntimeEvent {
     },
     BackgroundProcessCountChanged {
         active: usize,
+    },
+    ReflectionActiveChanged {
+        active: bool,
     },
     TaskStateChanged {
         state: Box<super::runtime_view::TuiTaskState>,

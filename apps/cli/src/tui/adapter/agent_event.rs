@@ -288,6 +288,9 @@ pub fn map_runtime_event(event: &TuiRuntimeEvent) -> AgentEventMapping {
                 ReplaceBackgroundProcessCount(*active),
             ))
         }
+        TuiRuntimeEvent::ReflectionActiveChanged { active } => conversation(
+            ConversationIntent::ReplaceReflectingActive(ReplaceReflectingActive(*active)),
+        ),
         TuiRuntimeEvent::TaskStateChanged { state } => conversation(
             ConversationIntent::ReplaceTaskState(ReplaceTaskState((**state).clone())),
         ),

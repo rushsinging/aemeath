@@ -263,6 +263,10 @@ pub enum RuntimeStreamEvent {
     BackgroundProcessCountChanged {
         active: usize,
     },
+    /// Reflect 异步进行中标志（TUI status line）。
+    ReflectionActiveChanged {
+        active: bool,
+    },
 }
 
 pub trait ChatEventSink: Clone + Send + Sync + 'static {

@@ -2436,6 +2436,11 @@
           "const": "interrupted",
           "description": "进程被终止（崩溃/重启）导致 Running 事实未收口，由悬挂收口（reap）写入。",
           "type": "string"
+        },
+        {
+          "const": "capacity_not_met",
+          "description": "Reflect apply 后 project active 仍大于收敛目标；整批未写。",
+          "type": "string"
         }
       ]
     },

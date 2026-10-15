@@ -85,6 +85,7 @@ pub struct StatusRuntimeViewModel {
     pub tps: f64,
     /// #1895：后台进程活动数（0 不显示；status bar runtime 行尾部）。
     pub background_processes_active: usize,
+    pub reflecting: bool,
     pub context: StatusContextViewModel,
 }
 

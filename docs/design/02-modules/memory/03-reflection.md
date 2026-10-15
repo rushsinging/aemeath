@@ -424,7 +424,7 @@ struct ReflectionApplyResult {
 
 ### 7.2 磁盘往返、写锁与异步 Reflect（目标态）
 
-因 LLM 调用成本高，Reflect **MUST** 转**异步**：主对话不阻塞；TUI status line 显示进行中标志（如 `Reflecting…`），终态后清除或短暂展示结果。
+因 LLM 调用成本高，**Interval** Reflect **MUST** 转**异步**（主对话不阻塞）；PreCompact / Manual 仍在调用方相位内同步 await（便于 Usage 记账与 compact 收口）。TUI status line 显示进行中标志（如 `Reflecting…`），终态后清除。
 
 **MUST 持 per-corpus 写锁**的路径（整段临界区，含 LLM 窗口）：
 
@@ -466,7 +466,7 @@ Memory BC 提供 prompt / parse / apply / history 的单一 `ReflectionWorkflow`
 Runtime trigger（Interval / PreCompact / Manual）
   ├─ capture owned messages snapshot（Manual 在 run launch 装配前自 committed session 冻结）
   ├─ 同 corpus 已有 Running reflect？→ skip（安全日志；主对话继续）
-  └─ 启动异步 Reflect（主对话不阻塞；TUI status line 置 Reflecting 标志）
+  └─ Interval：异步 Reflect（主对话不阻塞；status line Reflecting）；PreCompact/Manual：同步 await
        ├─ 获取 per-corpus 写锁（与 MemoryUpdate/archive 共用）
        ├─ append Running → disk load → build_prompt（CapacityBudget，target=floor(max×0.75)）
        ├─ Provider + parse（持锁；不足则同轮补问 1 次，目标仍 0.75）
