@@ -943,7 +943,7 @@ impl MemoryPort for InMemoryMemory {
             result.completed += 1;
         }
 
-        let project_active = count_layer(&candidate.active, MemoryLayer::Project);
+        let project_active = crate::domain::effective_active_count(&candidate.active);
         let target = self.policy.target_active_entries;
         if project_active > target {
             return Err(MemoryError::CapacityNotMet {

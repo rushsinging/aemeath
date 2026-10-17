@@ -1547,7 +1547,7 @@ fn simulate_project_active_after_reflection(
             }
         }
     }
-    Ok(project.active().len())
+    Ok(crate::domain::effective_active_count(project.active()))
 }
 
 /// Applies one Reflection suggestion as one dataset mutation. On capacity it
