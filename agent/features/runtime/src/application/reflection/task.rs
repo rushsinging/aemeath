@@ -67,6 +67,10 @@ pub enum ReflectionRunOutcome {
     Completed(ReflectionTaskCompletion),
     /// Configuration disabled reflection; nothing ran.
     DisabledSkipped,
+    /// 同 corpus 已有 Running reflect；单槽 skip（NEVER 排队）。
+    BusySkipped,
+    /// Interval/PreCompact 已 detach 到后台；主对话不阻塞。
+    Detached,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,6 +171,30 @@ pub struct ReflectionTaskAdapter {
     /// 都是同一 session 级 adapter 的 clone，共享同一 `Arc`）；`None` 表示未配置
     /// 或解析失败，反思回退会话 binding。
     reflection_binding: Option<std::sync::Arc<crate::ports::ProviderBindingData>>,
+    /// 同 corpus Reflect 单槽：已有 Running 则 BusySkipped（NEVER 排队）。
+    slot: std::sync::Arc<tokio::sync::Mutex<()>>,
+    /// 复用 session 级 background_processes 的 chat sender，发 ReflectionActiveChanged。
+    active_emitter: Option<
+        std::sync::Arc<
+            crate::application::background_process::session_runtime::BackgroundProcessRuntime,
+        >,
+    >,
+}
+
+struct ReflectionActiveGuard {
+    emitter: Option<
+        std::sync::Arc<
+            crate::application::background_process::session_runtime::BackgroundProcessRuntime,
+        >,
+    >,
+}
+
+impl Drop for ReflectionActiveGuard {
+    fn drop(&mut self) {
+        if let Some(emitter) = &self.emitter {
+            emitter.emit_reflection_active(false);
+        }
+    }
 }
 
 impl ReflectionTaskAdapter {
@@ -188,6 +216,8 @@ impl ReflectionTaskAdapter {
             }),
             pending_memory_updates: std::sync::Arc::new(std::sync::Mutex::new(0)),
             reflection_binding: None,
+            slot: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+            active_emitter: None,
         }
     }
 
@@ -200,6 +230,8 @@ impl ReflectionTaskAdapter {
             }),
             pending_memory_updates: std::sync::Arc::new(std::sync::Mutex::new(0)),
             reflection_binding: None,
+            slot: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+            active_emitter: None,
         }
     }
 
@@ -210,6 +242,18 @@ impl ReflectionTaskAdapter {
         binding: Option<std::sync::Arc<crate::ports::ProviderBindingData>>,
     ) {
         self.reflection_binding = binding;
+    }
+
+    /// 装配期绑定 status-line 事件发射器（与 chat sender 同源）。
+    pub fn set_active_emitter(
+        &mut self,
+        emitter: Option<
+            std::sync::Arc<
+                crate::application::background_process::session_runtime::BackgroundProcessRuntime,
+            >,
+        >,
+    ) {
+        self.active_emitter = emitter;
     }
 
     /// 读取缓存的反思专用 binding；`None` 时调用方回退会话 binding。
@@ -298,36 +342,50 @@ impl ReflectionTaskAdapter {
             trigger: trigger.memory_trigger(),
             coverage_end: request.coverage_end,
         };
-        self.run_persisted(
-            trigger,
-            Some(ReflectionPersistence {
-                identity: identity.clone(),
-                history: std::sync::Arc::clone(&history),
-            }),
-            cancel,
-            move |cancel| async move {
-                execute_reflection(
-                    &request.messages,
-                    &lang,
-                    config.reflection.auto_apply_suggestions,
-                    config.reflection.target_active_entries,
-                    config.max_entries,
-                    ReflectionInvocation {
-                        provider: provider.as_ref(),
-                        model: &model,
-                        max_tokens,
-                        requested_reasoning,
-                        system_prompt_text: &system_prompt_text,
-                    },
-                    memory.as_ref(),
-                    history.as_ref(),
-                    &identity,
-                    &cancel,
-                )
-                .await
-            },
-        )
-        .await
+        let persistence = Some(ReflectionPersistence {
+            identity: identity.clone(),
+            history: std::sync::Arc::clone(&history),
+        });
+        let build = move |cancel: tokio_util::sync::CancellationToken| async move {
+            execute_reflection(
+                &request.messages,
+                &lang,
+                config.reflection.auto_apply_suggestions,
+                config.reflection.target_active_entries,
+                config.max_entries,
+                ReflectionInvocation {
+                    provider: provider.as_ref(),
+                    model: &model,
+                    max_tokens,
+                    requested_reasoning,
+                    system_prompt_text: &system_prompt_text,
+                },
+                memory.as_ref(),
+                history.as_ref(),
+                &identity,
+                &cancel,
+            )
+            .await
+        };
+        // Interval：后台执行，避免阻塞主对话；PreCompact/Manual 仍同步等待
+        // （PreCompact 在 compact 相位内，调用方需 Completed 以记账/收口）。
+        if matches!(trigger, ReflectionTaskTrigger::Interval { .. }) {
+            let adapter = self.clone();
+            let cancel = cancel.clone();
+            tokio::spawn(async move {
+                let outcome = adapter
+                    .run_persisted(trigger, persistence, cancel, build)
+                    .await;
+                log::info!(
+                    target: crate::LOG_TARGET,
+                    "[reflection_detached_done] trigger={:?} outcome={outcome:?}",
+                    trigger,
+                );
+            });
+            return ReflectionRunOutcome::Detached;
+        }
+        self.run_persisted(trigger, persistence, cancel, build)
+            .await
     }
 
     /// Take the memory changes recorded since the last take. Returns `None` when
@@ -349,6 +407,22 @@ impl ReflectionTaskAdapter {
         F: FnOnce(tokio_util::sync::CancellationToken) -> Fut,
         Fut: std::future::Future<Output = ReflectionResult<ReflectionResultPayload>> + Send,
     {
+        let Ok(_slot) = self.slot.try_lock() else {
+            log::info!(
+                target: crate::LOG_TARGET,
+                "[reflection_busy_skip] trigger={:?}",
+                trigger,
+            );
+            return ReflectionRunOutcome::BusySkipped;
+        };
+
+        if let Some(emitter) = &self.active_emitter {
+            emitter.emit_reflection_active(true);
+        }
+        let _active_guard = ReflectionActiveGuard {
+            emitter: self.active_emitter.clone(),
+        };
+
         let timeout = self.timeout;
         let started = std::time::Instant::now();
         if let Some(persistence) = &persistence {
@@ -587,6 +661,7 @@ fn error_category_label(category: ReflectionErrorCategory) -> &'static str {
         ReflectionErrorCategory::Cancelled => "cancel",
         ReflectionErrorCategory::TimedOut => "timeout",
         ReflectionErrorCategory::Interrupted => "interrupted",
+        ReflectionErrorCategory::CapacityNotMet => "capacity",
     }
 }
 

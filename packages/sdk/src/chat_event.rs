@@ -447,6 +447,8 @@ pub enum ReflectionErrorCategoryView {
     TimedOut,
     /// 进程被终止（崩溃/重启）导致 Running 事实未收口，由悬挂收口（reap）写入。
     Interrupted,
+    /// Reflect apply 后 project active 仍大于收敛目标；整批未写。
+    CapacityNotMet,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -895,6 +897,10 @@ pub enum ChatEvent {
     /// #252：后台进程活动数变化（TUI spinner 显示）。
     BackgroundProcessCountChanged {
         active: usize,
+    },
+    /// Reflect 异步/进行中标志（TUI status line）。
+    ReflectionActiveChanged {
+        active: bool,
     },
 }
 

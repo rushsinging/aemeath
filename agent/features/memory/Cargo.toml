@@ -12,6 +12,7 @@ serde_json.workspace = true
 share = { path = "../../shared" }
 storage = { path = "../storage" }
 systemone = { path = "../systemone" }
+fs2 = "0.4"
 thiserror.workspace = true
 tokio.workspace = true
 utils = { path = "../../../packages/global/utils" }

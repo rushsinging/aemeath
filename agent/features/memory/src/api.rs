@@ -43,3 +43,4 @@ pub use crate::ports::{
     MemoryQuery, MemoryStats, ReflectionHistoryQuery, ReflectionHistoryStore, RestoreResult,
     WriteResult,
 };
+pub use crate::write_lock::MemoryWritePermit;

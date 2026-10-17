@@ -58,6 +58,7 @@ fn test_runtime_row_shows_token_in_out_tps_ctx_and_api_without_cost_or_session()
             context_size: 200_000,
             tps: 42.0,
             background_processes_active: 0,
+            reflecting: false,
             context: StatusContextViewModel::default(),
         },
         ..StatusViewModel::default()
@@ -301,4 +302,32 @@ fn test_status_bar_render_two_rows_v2() {
     assert!(!context.contains("ctx "));
     assert!(context.starts_with('/'));
     assert!(context.contains("worktree:feature/46-status-line"));
+}
+
+#[test]
+fn status_bar_includes_reflecting_marker_when_active() {
+    let bar = StatusBar::new();
+    let mut view = StatusViewModel {
+        notice: StatusNoticeViewModel {
+            text: "Ready".to_string(),
+            kind: StatusNoticeViewKind::Success,
+        },
+        runtime: StatusRuntimeViewModel {
+            model: Some("m".to_string()),
+            reflecting: true,
+            ..StatusRuntimeViewModel::default()
+        },
+        ..StatusViewModel::default()
+    };
+    let rendered = bar.build_full_text(&view);
+    assert!(
+        rendered.contains("Reflecting"),
+        "expected Reflecting marker, got {rendered}"
+    );
+    view.runtime.reflecting = false;
+    let rendered = bar.build_full_text(&view);
+    assert!(
+        !rendered.contains("Reflecting"),
+        "unexpected Reflecting marker, got {rendered}"
+    );
 }

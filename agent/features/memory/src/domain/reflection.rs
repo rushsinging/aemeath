@@ -280,6 +280,8 @@ pub enum ReflectionErrorCategory {
     TimedOut,
     /// 进程被终止（崩溃/重启）导致 Running 事实未收口，由悬挂收口（reap）写入。
     Interrupted,
+    /// apply 后 project active 仍 > target；整批未写。
+    CapacityNotMet,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -493,10 +495,11 @@ impl ReflectionEngine {
 - suggested_memories[].supersedes 只在**新记忆明确取代某条已有记忆**时填该
     条目序号（例如部署方式、端口、结论被新事实推翻）。两条记忆只是补充关系、或
     旧记忆仍然成立时，**必须留空数组**——误取代会让仍有价值的记忆停止注入。
-  - 容量：当前项目记忆 active={active_count}，收敛目标 target={target_active_entries}，硬上限 hard_cap={max_entries}。
-    当 active > target 时，MUST 通过 outdated_memories / supersedes / synthesizes 将 active 收敛到 ≤ target，
-    为后续新增留出缓冲（hard_cap − target）。
+  - 容量：当前项目记忆 active={active_count}，收敛目标 target={target_active_entries}（= floor(hard_cap×0.75)），硬上限 hard_cap={max_entries}。
+    成功落盘后 active MUST ≤ target。当 active > target 时，MUST 通过 outdated_memories（将过时条目归档出 active）/
+    supersedes / synthesizes 收敛；系统不会机械裁剪凑数，未达标整批不写。
     当 active ≤ target 时不要为凑数而强制淘汰；仅标记真正过时或被取代的条目。
+  - 禁止建议 ephemeral fact：单次 PR squash/CLOSED/清分支、CLI 安装版本推进等流水账；此类应进 outdated_memories 或根本不写。
   - 没有内容时输出空数组。
 
 JSON 格式：
@@ -537,10 +540,13 @@ Requirements:
     conclusion). Leave it empty when the two memories merely complement each
     other or the old one still holds — a wrong supersede stops a still-valuable
     memory from being injected.
-  - Capacity: current project memory active={active_count}, converge target={target_active_entries}, hard_cap={max_entries}.
-    When active > target, MUST use outdated_memories / supersedes / synthesizes to converge active to ≤ target,
-    leaving headroom (hard_cap − target) for later adds.
+  - Capacity: current project memory active={active_count}, converge target={target_active_entries} (= floor(hard_cap×0.75)), hard_cap={max_entries}.
+    After a successful commit active MUST be ≤ target. When active > target, MUST converge via outdated_memories
+    (archives outdated entries out of active) / supersedes / synthesizes; the system never mechanically trims to target,
+    and a miss fails the whole apply with no writes.
     When active ≤ target, do not force eviction just to hit a quota; only mark truly outdated or replaced entries.
+  - Never suggest ephemeral facts: one-off PR squash/CLOSED/branch cleanup, CLI install version bumps, etc.
+    Put those in outdated_memories or omit them.
   - Output empty arrays when there is nothing.
 
 JSON format:

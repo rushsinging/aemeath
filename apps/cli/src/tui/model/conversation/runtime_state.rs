@@ -21,6 +21,8 @@ pub struct RuntimeState {
     pub transient_notice_expiry: Option<Instant>,
     /// #252：后台进程活动数（spinner 显示；0 = 无）。
     pub background_processes_active: usize,
+    /// Reflect 进行中（status line 标志）。
+    pub reflecting: bool,
 }
 
 // ── 临时 notice 过期逻辑 ──

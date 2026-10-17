@@ -203,6 +203,9 @@ pub enum MemoryError {
         outdated_marked: usize,
         superseded: usize,
     },
+    /// Reflect apply 试算后 project active 仍大于收敛目标；整批不写。
+    #[error("Reflection 未将 project active 收敛到目标（{active} > {target}）")]
+    CapacityNotMet { active: usize, target: usize },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]

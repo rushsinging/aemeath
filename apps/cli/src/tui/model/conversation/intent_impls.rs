@@ -515,6 +515,16 @@ impl ConversationUpdate for ReplaceBackgroundProcessCount {
     }
 }
 
+impl ConversationUpdate for ReplaceReflectingActive {
+    fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
+        if model.runtime.reflecting == self.0 {
+            return Vec::new();
+        }
+        model.runtime.reflecting = self.0;
+        vec![ConversationChange::OutputDirty]
+    }
+}
+
 impl ConversationUpdate for ReplaceTaskState {
     fn update(self, model: &mut ConversationModel) -> Vec<ConversationChange> {
         if model.runtime.task_status.replace(self.0) {
@@ -640,6 +650,7 @@ impl ConversationUpdate for ConversationIntent {
             Self::RecordLiveTps(s) => s.update(model),
             Self::ReplaceRuntimeStatus(status) => status.update(model),
             Self::ReplaceBackgroundProcessCount(count) => count.update(model),
+            Self::ReplaceReflectingActive(active) => active.update(model),
             Self::ReplaceTaskState(state) => state.update(model),
             Self::UpdateTaskLines(state) => state.update(model),
             Self::SetStatusNotice(s) => s.update(model),

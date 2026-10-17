@@ -425,3 +425,47 @@ async fn distinct_project_keys_share_global_and_isolate_project() {
 
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn os_write_lock_blocks_second_service_until_released() {
+    use crate::service::MemoryService;
+    use std::time::Duration;
+
+    let root = unique_root("os-write-lock");
+    let lock_root = storage_api::SafeStorageRoot::open(&root).unwrap();
+    let storage = shared_storage(&root);
+    let store_a = AtomicDatasetMemoryStore::with_lock_root(
+        Arc::clone(&storage),
+        project_key(),
+        Some(lock_root.clone()),
+    );
+    let store_b = AtomicDatasetMemoryStore::with_lock_root(storage, project_key(), Some(lock_root));
+    let service_a = Arc::new(
+        MemoryService::open_with_clock(store_a, MemoryPolicy::default(), || 100)
+            .await
+            .unwrap(),
+    );
+    let service_b = Arc::new(
+        MemoryService::open_with_clock(store_b, MemoryPolicy::default(), || 100)
+            .await
+            .unwrap(),
+    );
+
+    let permit = service_a.acquire_write_permit().await.unwrap();
+    let blocked = {
+        let service_b = Arc::clone(&service_b);
+        tokio::spawn(async move { service_b.acquire_write_permit().await })
+    };
+    tokio::time::sleep(Duration::from_millis(120)).await;
+    assert!(
+        !blocked.is_finished(),
+        "跨 MemoryService 的 OS write.lock MUST 阻塞第二写者"
+    );
+    drop(permit);
+    let second = tokio::time::timeout(Duration::from_secs(3), blocked)
+        .await
+        .expect("释放后应完成")
+        .expect("join")
+        .expect("acquire");
+    drop(second);
+}

@@ -172,6 +172,10 @@ impl StatusBar {
             segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
             segments.push((level.to_string(), RuntimeSegmentStyle::Muted));
         }
+        if vm.reflecting {
+            segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
+            segments.push(("Reflecting…".to_string(), RuntimeSegmentStyle::Muted));
+        }
         segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
         segments.push((
             format!("in {}", sdk::format_tokens(vm.input_tokens)),

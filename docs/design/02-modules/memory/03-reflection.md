@@ -1,8 +1,8 @@
 # Memory · Reflection 引擎
 
 > 层级：02-modules / memory（模块战术设计）
-> 状态：Target（目标设计）｜Milestone：v0.1.0
-> 本文定义 Reflection 引擎的领域模型、触发条件、prompt 构建、output schema、Memory-owned workflow，以及与 Runtime 的职责边界。§1/§4/§8 中关于 Run 归属与 `Reflecting` 状态、Activity 可见性、Manual 显式入口、Usage 记账与取消/超时的描述以**当前实现**为准；其余为目标态设计。
+> 状态：Target（目标设计）｜Milestone：v0.2.0
+> 本文定义 Reflection 引擎的领域模型、触发条件、prompt 构建、output schema、Memory-owned workflow，以及与 Runtime 的职责边界。§1/§4/§8 中关于 Run 归属与 `Reflecting` 状态、Activity 可见性、Manual 显式入口、Usage 记账与取消/超时的描述以**当前实现**为准；§5.1 / §7.1 / §7.2（容量收敛、写锁、异步 Reflect + status line）为 v0.2.0 目标态，落地前以本节 MUST/NEVER 为准。
 
 ## 1. 定位
 
@@ -292,18 +292,36 @@ Prompt 结构（i18n）：
 # 当前项目记忆
 {project_memory}
 
+# 容量
+当前 project active={active_count}，收敛目标 target={target_active_entries}，硬上限 max={max_entries}。
+成功反思落盘后 active MUST ≤ target。通过 synthesize / outdated / 少新增达成；系统不会机械裁剪凑数。
+
 # 最近对话摘要
 {recent_summary}
 
 # 任务
 分析以上对话，识别：
 1. deviations: agent 是否有偏离行为
-2. suggested_memories: 值得持久化的新记忆
-3. outdated_memories: 已过时的记忆（填本次列表行序号，如 M3）
+2. suggested_memories: 值得持久化的新记忆（近重复 MUST synthesizes；可 pin 的长期口径可标 pinned）
+3. outdated_memories: 已过时的记忆（填本次列表行序号，如 M3）——为达标所必需的归档/过期候选 MUST 列出
+4. 禁止建议 ephemeral fact：单次 PR squash/CLOSED/清分支、CLI 安装版本推进等流水账
 
 只输出 JSON，格式如下：
 {...}
 ```
+
+### 5.1 容量收敛（LLM 责任，目标态）
+
+| 配置 / 比例 | 语义 |
+|---|---|
+| `memory.max_entries`（默认 200） | 层硬顶；`add` 触顶返回 `NeedsEviction`，**不是** reflect 的收敛手段 |
+| 收敛目标 | **`floor(max_entries × 0.75)`**（默认 150）。首轮与同轮补问 **同一目标**，补问 **NEVER** 再降比例 |
+| `memory.reflection.target_active_entries` | 可为显式覆盖；未覆盖时按上式由 `max_entries` 推导 |
+
+- **MUST** 由 LLM 通过 `suggested_memories`（含 `synthesizes` / `supersedes`）与 `outdated_memories` 把 active 压到 ≤ target。
+- **NEVER** 在 `apply_reflection` 之后按分数/FIFO **机械归档**到 target 以「凑数」。
+- Prompt **MUST** 注入 `ReflectionCapacityBudget { active_count, target_active_entries, max_entries }`（已有结构）；差值是后续手工 `memory add` 缓冲。
+- ephemeral fact（交付流水账）**SHOULD** 优先进 `outdated_memories` 或根本不要进 `suggested_memories`。
 
 - **project_memory**：从当前 Run 持有的同一 `MemoryPort` 读取 Project 层 active 条目，格式化为 `- [M1] [Category][tags] content` 列表（行序号即引用契约的索引）。
 - **recent_summary**：从最近对话消息提取文本，按 `[User]/[Assistant]: text` 格式逆序拼接，截断到合理长度。
@@ -387,8 +405,60 @@ if config.reflection.auto_apply_suggestions {
 struct ReflectionApplyResult {
     suggestions_added: usize,     // 成功写入/合并的 suggestion 数
     outdated_marked: usize,       // 标记过期的记忆数
+    // 目标态可扩展：superseded / synthesizes_applied / active_before / active_after
 }
 ```
+
+### 7.1 容量门禁（目标态，禁止机械裁剪）
+
+在 `auto_apply_suggestions = true` 且本轮将写入 corpus 时：
+
+1. `target = floor(max_entries × 0.75)`（或配置覆盖的 `target_active_entries`）。
+2. 在**持锁下的候选盘面**上试算 apply（suggestions + outdated），得到 `active_after`。
+3. 若 `active_after ≤ target` → 原子提交。
+4. 若仍 `> target` → **同轮最多再调用 LLM 一次**（反馈「仍超 N 条」）；补问目标 **仍为同一 target（0.75）**，**NEVER** 降到 0.6 或其它比例。
+5. 补问后仍超 → `Failed(capacity_not_met)`，**整批不写**（corpus 保持本次 reflect 获取写锁前的已提交 revision；history 记失败与前后计数）。
+6. **NEVER** 用 eviction 分数或 FIFO 静默归档非 pin 条目来强行压到 target。
+
+`max_entries` 硬顶仍可在普通 `add` 路径触发 `NeedsEviction`；那是防爆，与 reflect 收敛门禁正交。
+
+### 7.2 磁盘往返、写锁与异步 Reflect（目标态）
+
+因 LLM 调用成本高，**Interval** Reflect **MUST** 转**异步**（主对话不阻塞）；PreCompact / Manual 仍在调用方相位内同步 await（便于 Usage 记账与 compact 收口）。TUI status line 显示进行中标志（如 `Reflecting…`），终态后清除。
+
+**MUST 持 per-corpus 写锁**的路径（整段临界区，含 LLM 窗口）：
+
+实现：进程内 `WriteGate` + 各 dataset 目录下独立 `write.lock`（`fs2` flock；**NEVER** 复用 storage 短临界区 `dataset.lock`，以免与 commit 嵌套死锁）。锁序固定 global → project。
+
+- Reflect（load → Provider → parse → 可选补问 → 容量门禁 → persist）
+- MemoryUpdate
+- archive / restore 等位置迁移
+
+```text
+触发 Interval / PreCompact / Manual
+  ├─ 同 corpus 已有 Running reflect？→ skip（NEVER 排队；记安全日志 / history skip）
+  ├─ 主 Run：发布 status-line 标志后返回（不 await LLM）
+  └─ 后台 Reflect 任务：
+       获取 corpus 写锁
+         → disk load
+         → build_prompt（CapacityBudget，target=floor(max×0.75)）
+         → Provider + parse（+ 可选同轮补问，目标仍 0.75）
+         → 容量门禁：达标则原子写盘；否则 Failed 整批不写
+       释放写锁
+       → upsert terminal ReflectionRecord；清除 status-line 标志
+```
+
+| 规则 | 要求 |
+|---|---|
+| 锁范围 | Reflect / MemoryUpdate / archive **MUST** 持同一把 per-corpus 写锁；LLM 窗口 **亦持锁**（防并发 CAS 重放浪费） |
+| 锁粒度 | per-corpus（project / global）；跨项目 **NEVER** 全局大锁 |
+| 同 corpus 并发 Reflect | **单槽**：已有 Running → **skip**（不排队） |
+| 与其它 writer | Update/archive 等写路径同一把锁，串行化；reflect **无**盲盖写特权 |
+| 磁盘 | 开始读盘、成功结束写盘；失败不写半成品 |
+| 会话缓存 | 成功 commit 后 invalidate/reload |
+| history | Running→terminal 可观测；skip / capacity_not_met 可区分 |
+
+**明确不做**：LLM 窗口无锁的乐观 CAS 重放作为主路径；补问降比例；机械裁剪凑数；同 corpus reflect 排队。
 
 ## 8. 完整编排流程（Runtime 侧）
 
@@ -397,18 +467,15 @@ Memory BC 提供 prompt / parse / apply / history 的单一 `ReflectionWorkflow`
 ```text
 Runtime trigger（Interval / PreCompact / Manual）
   ├─ capture owned messages snapshot（Manual 在 run launch 装配前自 committed session 冻结）
-  └─ engine 反思阶段
-       ├─ BeginReflection → RunStatus::Reflecting（非终态）
-       ├─ Reflection activity 发布（detail.trigger 对应三种来源）
-       ├─ ReflectionTaskAdapter.run
-       │    ├─ DisabledSkipped → [reflection_disabled] 安全日志，返回调用方
-       │    └─ append Running → build_prompt → Provider invocation → parse_output
-       │                      → optional MemoryPort.apply_reflection
-       │                      → upsert terminal ReflectionRecord
-       │                      → 返回 completion（状态 + 计数，不含正文）
-       ├─ Reflection activity 按终态收口，ReflectionCompleted 返回进入前状态
-       ├─ 仅 Succeeded 且带 metadata 计 usage
-       └─ 计数 > 0 时发 TUI SystemMessage 并累积 LLM reminder
+  ├─ 同 corpus 已有 Running reflect？→ skip（安全日志；主对话继续）
+  └─ Interval：异步 Reflect（主对话不阻塞；status line Reflecting）；PreCompact/Manual：同步 await
+       ├─ 获取 per-corpus 写锁（与 MemoryUpdate/archive 共用）
+       ├─ append Running → disk load → build_prompt（CapacityBudget，target=floor(max×0.75)）
+       ├─ Provider + parse（持锁；不足则同轮补问 1 次，目标仍 0.75）
+       ├─ 容量门禁：达标原子写盘；否则 Failed(capacity_not_met) 整批不写
+       ├─ 释放写锁 → upsert terminal ReflectionRecord（active_before/after / 错误类别）
+       ├─ 清除 status-line 标志；Succeeded 且计数>0 时 SystemMessage + LLM reminder
+       └─ Usage 仅 Succeeded 且带 metadata 时记账
 
 调用方（主 Run 的 ModelStep::Complete 收尾 / compact Committed 后的 Compacting 内 / Manual Reflection Run 的 DrainingInput）await 上述结果。
 ```
@@ -457,6 +524,7 @@ struct ReflectionConfig {
 
 | 日期 | 变更 |
 |---|---|
+| 2026-10-14 | 定案容量与并发目标态：收敛目标 `floor(max_entries×0.75)`（首轮与补问同一目标，禁止再降比例）；LLM 负责、禁止机械裁剪；未达标补问 1 次仍超则 Failed 整批不写；Reflect/MemoryUpdate/archive 持 per-corpus 写锁（含 LLM 窗口）；Reflect 异步 + TUI status line；同 corpus Running 则 skip；disk load/原子 persist；prompt 注入 CapacityBudget 并禁止 ephemeral fact 流水账 |
 | 2026-10-01 | 文档与实现双向同步：三触发的 Run 归属与 `Reflecting` 状态路径（非终态、返回进入前状态、intent→purpose 映射）；Manual `/reflect-now` 创建 `ManualReflection` intent 的真实 Run（root purpose=Reflection、无 RunStep、不落盘、不递增 `run_count`/不发 `RunChanged`）；新增「Activity 结构化可见性」与「Usage 记账口径」；取消/超时/失败语义按当前实现改写；计数口径改为按当前判定位置描述；清理设计文档中的 Issue/PR 编号引用 |
 | 2026-09-29 | 新增「归纳产物（跨条目结论）」小节：`synthesizes` → `kind=Synthesized` + `evidence`、M13 证据下限与降级语义、触发沿用既有三种、候选集为已知限制 |
 | 2026-09-29 | 补充「计数口径」小节：区分 session 内 Main Run 序号 `run_count` 与 Run 内 LLM 跳数；Interval 判定只发生在回合收尾跳；`run_step` 日志字段只承载 LLM 跳数 |

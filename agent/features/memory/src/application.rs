@@ -115,6 +115,7 @@ impl ReflectionWorkflow {
         auto_apply: bool,
         token_usage: ReflectionTokenUsage,
         duration_ms: u64,
+        write_permit: Option<&crate::write_lock::MemoryWritePermit>,
     ) -> Result<ReflectionExecutionResult, ReflectionWorkflowError> {
         Self::emit_reflection_event(
             memory,
@@ -189,7 +190,12 @@ impl ReflectionWorkflow {
         let output = resolved.output;
 
         let (apply_result, error_category) = if auto_apply {
-            match memory.apply_reflection(&output).await {
+            let apply = if let Some(permit) = write_permit {
+                memory.apply_reflection_under_permit(&output, permit).await
+            } else {
+                memory.apply_reflection(&output).await
+            };
+            match apply {
                 Ok(result) => (Some(result), None),
                 Err(MemoryError::PartialApply {
                     result_attempted,
@@ -207,6 +213,13 @@ impl ReflectionWorkflow {
                     }),
                     Some(ReflectionErrorCategory::Apply),
                 ),
+                Err(MemoryError::CapacityNotMet { active, target }) => {
+                    log::warn!(
+                        target: crate::LOG_TARGET,
+                        "Reflection apply capacity_not_met active={active} target={target}"
+                    );
+                    (None, Some(ReflectionErrorCategory::CapacityNotMet))
+                }
                 Err(error) => {
                     log::warn!(target: crate::LOG_TARGET, "Reflection apply failed: {error}");
                     (None, Some(ReflectionErrorCategory::Apply))

@@ -424,6 +424,12 @@ impl crate::application::loop_engine::ManualReflectionPort for ChatManualReflect
                     crate::application::reflection::ReflectionTaskCompletionStatus::Failed,
                 )
             }
+            crate::application::reflection::ReflectionRunOutcome::BusySkipped
+            | crate::application::reflection::ReflectionRunOutcome::Detached => {
+                crate::application::loop_engine::ManualReflectionOutcome::Ready(
+                    crate::application::reflection::ReflectionTaskCompletionStatus::Failed,
+                )
+            }
         })
     }
 }

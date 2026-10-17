@@ -77,7 +77,9 @@ pub(super) async fn run_reflection_phase(
                 ReflectionTaskCompletionStatus::Cancelled => ActivityTerminal::Cancelled,
                 ReflectionTaskCompletionStatus::TimedOut => ActivityTerminal::Terminated,
             },
-            ReflectionRunOutcome::DisabledSkipped => ActivityTerminal::Cancelled,
+            ReflectionRunOutcome::DisabledSkipped
+            | ReflectionRunOutcome::BusySkipped
+            | ReflectionRunOutcome::Detached => ActivityTerminal::Cancelled,
         };
         let _ = port.finish_activity(activity_id, terminal);
     }

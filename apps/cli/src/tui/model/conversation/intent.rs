@@ -323,6 +323,10 @@ pub struct ReplaceRuntimeStatus(pub crate::tui::adapter::runtime_status::TuiRunt
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReplaceBackgroundProcessCount(pub usize);
 
+/// #1981：Reflect 进行中标志（status line）。
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReplaceReflectingActive(pub bool);
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReplaceTaskState(pub crate::tui::adapter::runtime_view::TuiTaskState);
 
@@ -426,6 +430,7 @@ pub enum ConversationIntent {
     RecordLiveTps(RecordLiveTps),
     ReplaceRuntimeStatus(ReplaceRuntimeStatus),
     ReplaceBackgroundProcessCount(ReplaceBackgroundProcessCount),
+    ReplaceReflectingActive(ReplaceReflectingActive),
     ReplaceTaskState(ReplaceTaskState),
     UpdateTaskLines(UpdateTaskLines),
     SetStatusNotice(SetStatusNotice),

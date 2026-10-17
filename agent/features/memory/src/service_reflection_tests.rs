@@ -216,8 +216,8 @@ async fn apply_reflection_missing_outdated_target_is_skipped_without_failure() {
 }
 
 #[tokio::test]
-async fn apply_reflection_does_not_hard_evict_when_above_target() {
-    // target=2、hard_cap=10：active 已有 3 条且反思未建议淘汰时，NEVER 机械硬删。
+async fn apply_reflection_rejects_when_above_target_without_writing() {
+    // target=2、hard_cap=10：active=3 且未建议淘汰 → CapacityNotMet，盘面不变，NEVER 机械硬删。
     let memory = InMemoryMemory::new(MemoryPolicy {
         max_entries: 10,
         similarity_threshold: 0.8,
@@ -232,15 +232,58 @@ async fn apply_reflection_does_not_hard_evict_when_above_target() {
     }
     assert_eq!(memory.stats().await.project_count, 3);
 
-    let result = memory
-        .apply_reflection(&ReflectionOutput::default())
+    let error = memory
+        .apply_reflection(&ReflectionOutput {
+            suggested_memories: vec![suggestion(MemoryLayer::Project, "extra")],
+            ..ReflectionOutput::default()
+        })
         .await
-        .unwrap();
-    assert_eq!(result.outdated_marked, 0);
-    assert_eq!(result.suggestions_added, 0);
+        .expect_err("超 target 且未收敛 MUST CapacityNotMet");
+    assert_eq!(
+        error,
+        MemoryError::CapacityNotMet {
+            active: 4,
+            target: 2,
+        }
+    );
     assert_eq!(
         memory.stats().await.project_count,
         3,
-        "超 target 时 apply 不得机械硬删；只依赖 LLM outdated/supersedes"
+        "CapacityNotMet 时整批不写"
     );
+}
+
+#[tokio::test]
+async fn apply_reflection_commits_when_outdated_archives_down_to_target() {
+    // outdated_memories 在 reflect apply 中 MUST 归档出 active，才能把物理条数压到 ≤target。
+    let memory = InMemoryMemory::new(MemoryPolicy {
+        max_entries: 10,
+        similarity_threshold: 0.8,
+        target_active_entries: 2,
+    })
+    .expect("policy");
+    let mut ids = Vec::new();
+    for content in ["keep-1", "drop-a", "drop-b"] {
+        let written = entry(MemoryLayer::Project, content);
+        ids.push(written.id);
+        memory.write(written).await.expect("write");
+    }
+    let result = memory
+        .apply_reflection(&ReflectionOutput {
+            outdated_memories: vec![ids[1].to_string(), ids[2].to_string()],
+            ..ReflectionOutput::default()
+        })
+        .await
+        .expect("收敛到 target 应成功");
+    assert_eq!(result.outdated_marked, 2);
+    let stats = memory.stats().await;
+    assert_eq!(stats.project_count, 1);
+    assert_eq!(stats.project_archive_count, 2);
+}
+
+#[test]
+fn reflect_target_active_entries_is_three_quarters_of_max() {
+    assert_eq!(reflect_target_active_entries(200), 150);
+    assert_eq!(reflect_target_active_entries(10), 7);
+    assert_eq!(reflect_target_active_entries(0), 0);
 }

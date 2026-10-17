@@ -131,6 +131,20 @@ impl BackgroundProcessRuntime {
         let _ = sender.send(sdk::ChatEvent::BackgroundProcessCountChanged { active });
     }
 
+    /// #1981：Reflect 进行中标志（status line）；与活动数共用 chat sender。
+    pub(crate) fn emit_reflection_active(&self, active: bool) {
+        let sender = self
+            .chat_event_sender
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_ref()
+            .map(|(_, sender)| sender.clone());
+        let Some(sender) = sender else {
+            return;
+        };
+        let _ = sender.send(sdk::ChatEvent::ReflectionActiveChanged { active });
+    }
+
     /// 绑定 active run registry（SessionRuntime::new 收尾时调用，一次绑定）。
     pub(crate) fn bind_active_run(
         &self,

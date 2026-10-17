@@ -980,7 +980,9 @@
         "reflection_history_jsonl_tests.rs",
         "service.rs",
         "service_reflection_tests.rs",
-        "service_tests.rs"
+        "service_tests.rs",
+        "write_lock.rs",
+        "write_lock_port_tests.rs"
       ],
       "reason": "F-3：memory Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
       "profile": "fast"

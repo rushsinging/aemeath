@@ -32,6 +32,10 @@ pub(crate) fn manual_outcome_notice(outcome: &ReflectionRunOutcome) -> ManualRef
             "Memory 或 Reflection 未启用；请在配置中开启后重试。".to_string(),
             false,
         ),
+        ReflectionRunOutcome::BusySkipped => {
+            ("已有反思在进行中，已跳过本次触发。".to_string(), false)
+        }
+        ReflectionRunOutcome::Detached => ("Reflection 已在后台开始。".to_string(), false),
         ReflectionRunOutcome::Completed(completion) => {
             let changed = completion
                 .metadata
