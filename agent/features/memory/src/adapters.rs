@@ -957,22 +957,30 @@ impl MemoryPort for InMemoryMemory {
     }
     async fn archive(&self, ids: &[MemoryId]) -> Result<bool, MemoryError> {
         let _permit = self.acquire_write_permit().await?;
-        let mut state = self.state.write().expect("memory state lock poisoned");
-        let mut moved = Vec::new();
-        state.active.retain(|entry| {
-            if ids.contains(&entry.id) && !entry.pinned {
-                moved.push(entry.clone());
-                false
-            } else {
-                true
-            }
-        });
-        let changed = !moved.is_empty();
-        if changed {
-            state.archive.extend(moved);
-            state.revision = state.revision.saturating_add(1);
+        self.archive_locked(ids)
+    }
+
+    async fn sweep_stale_under_permit(
+        &self,
+        now: u64,
+        _permit: &MemoryWritePermit,
+    ) -> Result<usize, MemoryError> {
+        let stale: Vec<MemoryId> = {
+            let state = self.state.read().expect("memory state lock poisoned");
+            state
+                .active
+                .iter()
+                .filter(|entry| !entry.pinned)
+                .filter(|entry| !crate::domain::is_reflection_input_eligible(entry, now))
+                .map(|entry| entry.id)
+                .collect()
+        };
+        if stale.is_empty() {
+            return Ok(0);
         }
-        Ok(changed)
+        let swept = stale.len();
+        self.archive_locked(&stale)?;
+        Ok(swept)
     }
 
     async fn restore(&self, id: &MemoryId) -> Result<RestoreResult, MemoryError> {
@@ -1068,6 +1076,25 @@ impl MemoryPort for InMemoryMemory {
 }
 
 impl InMemoryMemory {
+    fn archive_locked(&self, ids: &[MemoryId]) -> Result<bool, MemoryError> {
+        let mut state = self.state.write().expect("memory state lock poisoned");
+        let mut moved = Vec::new();
+        state.active.retain(|entry| {
+            if ids.contains(&entry.id) && !entry.pinned {
+                moved.push(entry.clone());
+                false
+            } else {
+                true
+            }
+        });
+        let changed = !moved.is_empty();
+        if changed {
+            state.archive.extend(moved);
+            state.revision = state.revision.saturating_add(1);
+        }
+        Ok(changed)
+    }
+
     fn mutate_entry(
         &self,
         id: &MemoryId,

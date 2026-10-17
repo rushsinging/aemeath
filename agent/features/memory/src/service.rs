@@ -75,6 +75,31 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
         .await
     }
 
+    async fn sweep_stale_under_permit(
+        &self,
+        now: u64,
+        _permit: &MemoryWritePermit,
+    ) -> Result<usize, MemoryError> {
+        let stale: Vec<MemoryId> = {
+            let state = self.state.read().expect("committed state lock poisoned");
+            state
+                .project
+                .dataset
+                .active()
+                .iter()
+                .filter(|entry| !entry.pinned)
+                .filter(|entry| !crate::domain::is_reflection_input_eligible(entry, now))
+                .map(|entry| entry.id)
+                .collect()
+        };
+        if stale.is_empty() {
+            return Ok(0);
+        }
+        let swept = stale.len();
+        self.archive_locked(&stale).await?;
+        Ok(swept)
+    }
+
     async fn archive_locked(&self, ids: &[MemoryId]) -> Result<bool, MemoryError> {
         // The ids may span both layers; archive each layer as its own observable
         // mutation so a stale-CAS conflict is scoped to a single layer.

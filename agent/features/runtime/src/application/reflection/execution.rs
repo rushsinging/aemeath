@@ -103,6 +103,19 @@ pub(crate) async fn execute_reflection(
         max_entries,
     )
     .await;
+    // #1987 残留清扫：active 中已失效（outdated/被取代/TTL 过期）且未 pinned
+    // 的条目系统侧直接归档（M12 之外的终态收口），LLM 无需也不应看见它们。
+    let swept = memory
+        .sweep_stale_under_permit(identity.timestamp, &write_permit)
+        .await
+        .unwrap_or_else(|error| {
+            log::warn!(target: crate::LOG_TARGET, "reflection_sweep_failed {error:?}");
+            0
+        });
+    if swept > 0 {
+        log::info!(target: crate::LOG_TARGET, "reflection_swept_stale count={swept}");
+    }
+
     // 取消优先：已取消时跳过 Step 1，交 Step 2 原取消路径收口。
     let noise_result = if cancel.is_cancelled() {
         Ok((0, 0))

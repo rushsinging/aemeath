@@ -285,6 +285,16 @@ pub trait MemoryPort: Send + Sync {
         output: &ReflectionOutput,
     ) -> Result<ReflectionApplyResult, MemoryError>;
 
+    /// #1987：系统侧残留清扫——把 active 中已失效（outdated/被取代/TTL 过期）
+    /// 且未 pinned 的条目归档；调用方须已持写许可。默认不动（NoOp/测试桩）。
+    async fn sweep_stale_under_permit(
+        &self,
+        _now: u64,
+        _permit: &MemoryWritePermit,
+    ) -> Result<usize, MemoryError> {
+        Ok(0)
+    }
+
     /// 调用方已持 [`MemoryWritePermit`] 时的 apply（不再取锁）。
     /// 默认转发到 [`Self::apply_reflection`]（NoOp / 测试桩）。
     async fn apply_reflection_under_permit(

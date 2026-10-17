@@ -533,6 +533,18 @@ async fn two_phase_reflection_removes_noise_then_completes() {
     )
     .unwrap();
     memory.write(noisy.clone()).await.unwrap();
+    // 残留：独立 mark_outdated 不归档的旧数据，等编排 sweep 收口。
+    let mut residual = memory::api::MemoryEntry::new(
+        memory::api::MemoryId::now_v7(),
+        100,
+        MemoryLayer::Project,
+        memory::api::MemoryCategory::Fact,
+        "独立的过时残留条目",
+        memory::api::MemorySource::User,
+    )
+    .unwrap();
+    memory.write(residual.clone()).await.unwrap();
+    assert!(memory.mark_outdated(&residual.id).await.unwrap());
 
     let provider = ScriptedReflectionProvider::new(vec![
         ScriptedStep::Text(NOISE_STALE_JSON.to_string()),
@@ -564,9 +576,9 @@ async fn two_phase_reflection_removes_noise_then_completes() {
     .await
     .unwrap();
 
-    // Step1 淘汰落盘：噪音条目归档出 active。
+    // Sweep + Step1 淘汰落盘：残留与噪音条目都归档出 active。
     assert_eq!(memory.stats().await.project_count, 0);
-    assert_eq!(memory.stats().await.project_archive_count, 1);
+    assert_eq!(memory.stats().await.project_archive_count, 2);
     // 两步各一次调用；token 合并（ScriptedProvider 每次同额）。
     assert_eq!(provider.requests().len(), 2);
     assert_eq!((result.input_tokens, result.output_tokens), (22, 44));
