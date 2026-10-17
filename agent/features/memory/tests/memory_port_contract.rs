@@ -339,7 +339,26 @@ async fn reflection_marks_existing_outdated_ids_and_skips_invalid_ids() {
         .await
         .unwrap();
     assert_eq!(result.outdated_marked, 1);
-    assert!(port.list(None).await[0].outdated);
+    // outdated 必须归档离开 active，禁止只打标符仍留在注入列表。
+    assert!(!port
+        .list(None)
+        .await
+        .iter()
+        .any(|entry| entry.id == existing.id));
+    assert_eq!(port.stats().await.project_archive_count, 1);
+    let archived = port
+        .search(&MemorySearchQuery {
+            text: "existing fact".to_string(),
+            limit: 10,
+            layer: None,
+            category: None,
+            include_archive: true,
+            now: 200,
+        })
+        .await;
+    assert!(archived.hits.iter().any(|hit| {
+        hit.entry.id == existing.id && hit.outdated && hit.location == MemoryLocation::Archive
+    }));
 
     // 非法引用被跳过并记录，NEVER 让整批失败（旧契约要求上抛 InvalidEntry）。
     let result = port
@@ -378,9 +397,26 @@ async fn reflection_applies_mixed_suggestion_and_outdated_id_as_one_result() {
         .await
         .iter()
         .any(|entry| entry.content == "current fact"));
-    assert!(port
-        .list(Some(MemoryLayer::Project))
-        .await
-        .iter()
-        .any(|entry| entry.id == existing.id && entry.outdated));
+    assert!(
+        !port
+            .list(Some(MemoryLayer::Project))
+            .await
+            .iter()
+            .any(|entry| entry.id == existing.id),
+        "outdated 条目必须离开 active"
+    );
+    assert_eq!(port.stats().await.project_archive_count, 1);
+    let archived = port
+        .search(&MemorySearchQuery {
+            text: "obsolete fact".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: true,
+            now: 200,
+        })
+        .await;
+    assert!(archived.hits.iter().any(|hit| {
+        hit.entry.id == existing.id && hit.outdated && hit.location == MemoryLocation::Archive
+    }));
 }
