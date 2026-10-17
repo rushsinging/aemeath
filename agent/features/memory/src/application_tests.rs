@@ -567,3 +567,52 @@ async fn event_reflection_ops_complete_emits_trigger_apply_cost() {
         other => panic!("expected Reflection change, got {other:?}"),
     }
 }
+
+/// #1987：build_prompt 注入 corpus 现状段——分类分布、archive 计数与高相似对
+/// 行号引用（InMemoryMemory 全链路）。
+#[tokio::test]
+async fn build_prompt_embeds_corpus_status_from_memory_state() {
+    // threshold=1.0：模拟历史积量（写入时未触发合并去重）的 corpus，两条高相似
+    // 条目同时留在 active，reflect 现状段应检出并要求合并。
+    let memory = crate::adapters::InMemoryMemory::new(crate::adapters::MemoryPolicy {
+        similarity_threshold: 1.0,
+        ..crate::adapters::MemoryPolicy::default()
+    })
+    .expect("policy must be valid");
+    let now = 1_000u64;
+    for content in [
+        "git push long commands run in background, inspect nohup log file incrementally",
+        "git push long commands run in background, inspect nohup log file",
+    ] {
+        memory
+            .write(
+                MemoryEntry::new(
+                    MemoryId::now_v7(),
+                    now,
+                    MemoryLayer::Project,
+                    MemoryCategory::Fact,
+                    content,
+                    MemorySource::User,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+    }
+
+    let prompt = ReflectionWorkflow::build_prompt(
+        &[share::message::Message::user("reflect")],
+        "en",
+        &memory,
+        now,
+        150,
+        200,
+    )
+    .await;
+
+    assert!(prompt.text.contains("# Corpus status"));
+    assert!(prompt.text.contains("archive=0"));
+    assert!(prompt.text.contains("fact=2"));
+    assert!(prompt.text.contains("M1 × M2"));
+    assert!(prompt.text.contains("must produce a synthesizes"));
+}

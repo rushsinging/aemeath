@@ -422,6 +422,22 @@ struct ReflectionApplyResult {
 
 `max_entries` 硬顶仍可在普通 `add` 路径触发 `NeedsEviction`；那是防爆，与 reflect 收敛门禁正交。
 
+### 7.3 corpus 现状注入与重复对检测（#1987）
+
+**背景**：反思历史 778 次产出 1453 条建议，`synthesizes` 仅 14、`supersedes` 仅 7——LLM 几乎只增不并，而 corpus 实测存在高相似重复对。
+
+**机制**：`build_prompt`（持锁阶段）注入「记忆库现状」段：
+
+- 统计：active 分类分布（decision/fact/preference/pattern/pitfall 固定序）、archive 计数
+- 高相似对：top-K（K=8，阈值 J≥0.70）按 score 降序，行序号与 `format_memory_summary` 的 M 序号同源（同一 eligible 切片按下标 +1），LLM 可直接对输出 synthesizes/supersedes
+- 收敛指令：清单中每一对 MUST 给出 synthesizes 或说明保留理由；active ≥ target 时新增建议需搭配等量淘汰
+
+**分词口径（关键）**：CJK 连续段按字符 bigram 分词、拉丁/数字段照旧按词切分——中文整句是天然无空格连续段，纯词法 token 会让 Jaccard 对中文重复对全量漏检（真 corpus eligible 全中文时 0 检出，实测验证）。该口径由 `tokenize` 统一提供，write 合并去重与 rerank 同源受益。
+
+**检测范围 = 反思输入**（M12 过滤后的 eligible）：与引用契约一致，LLM 输出只引用它看得见的行。outdated/superseded 条目不进清单（其重复应经 apply 归档自然消解）。
+
+**性能**：n 条全量两两比（预分词集合），n≈150 时约 1 万对、毫秒级，在持锁的 prompt 构建阶段完成。
+
 ### 7.2 磁盘往返、写锁与异步 Reflect（目标态）
 
 因 LLM 调用成本高，**Interval** Reflect **MUST** 转**异步**（主对话不阻塞）；PreCompact / Manual 仍在调用方相位内同步 await（便于 Usage 记账与 compact 收口）。TUI status line 显示进行中标志（如 `Reflecting…`），终态后清除。

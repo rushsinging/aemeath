@@ -32,3 +32,9 @@ pub const REFLECT_TARGET_ACTIVE_RATIO_DEN: usize = 4;
 pub const fn reflect_target_active_entries(max_entries: usize) -> usize {
     max_entries.saturating_mul(REFLECT_TARGET_ACTIVE_RATIO_NUM) / REFLECT_TARGET_ACTIVE_RATIO_DEN
 }
+
+/// #1987：corpus 现状高相似对检测阈值（Jaccard，词法）。
+pub(crate) const REFLECT_DUPLICATE_PAIR_THRESHOLD: f64 = 0.70;
+
+/// #1987：现状段最多渲染的高相似对数量（控 token）。
+pub(crate) const REFLECT_DUPLICATE_PAIR_TOP_K: usize = 8;

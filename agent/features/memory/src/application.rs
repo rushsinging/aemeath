@@ -4,10 +4,10 @@ use crate::domain::event::{
     MemoryEventOp,
 };
 use crate::domain::{
-    MemoryError, MemoryLayer, ReflectionCapacityBudget, ReflectionEngine, ReflectionError,
-    ReflectionErrorCategory, ReflectionMessage, ReflectionOutput, ReflectionPrompt,
-    ReflectionRecord, ReflectionReferenceTable, ReflectionStatus, ReflectionTokenUsage,
-    ReflectionTrigger,
+    MemoryCategory, MemoryError, MemoryLayer, ReflectionCapacityBudget, ReflectionCorpusStatus,
+    ReflectionEngine, ReflectionError, ReflectionErrorCategory, ReflectionMessage,
+    ReflectionOutput, ReflectionPrompt, ReflectionRecord, ReflectionReferenceTable,
+    ReflectionStatus, ReflectionTokenUsage, ReflectionTrigger,
 };
 use crate::ports::{MemoryPort, ReflectionApplyResult, ReflectionHistoryStore};
 
@@ -69,6 +69,38 @@ impl ReflectionWorkflow {
             max_entries,
         };
         let (project_memory, references) = engine.format_memory_summary(&eligible);
+        // #1987：corpus 现状（分类分布 / archive / top-K 高相似对）注入 prompt，
+        // 引导 LLM 合并收敛而非只增不并；计算在持锁的 prompt 构建阶段完成。
+        let stats = memory.stats().await;
+        let category_order = [
+            MemoryCategory::Decision,
+            MemoryCategory::Fact,
+            MemoryCategory::Preference,
+            MemoryCategory::Pattern,
+            MemoryCategory::Pitfall,
+        ];
+        let category_counts = category_order
+            .iter()
+            .map(|category| {
+                (
+                    *category,
+                    eligible
+                        .iter()
+                        .filter(|entry| entry.category == *category)
+                        .count(),
+                )
+            })
+            .filter(|(_, count)| *count > 0)
+            .collect::<Vec<_>>();
+        let corpus_status = ReflectionCorpusStatus {
+            archive_count: stats.project_archive_count,
+            category_counts,
+            duplicate_pairs: ReflectionEngine::top_similar_pairs(
+                &eligible,
+                crate::domain::constants::REFLECT_DUPLICATE_PAIR_THRESHOLD,
+                crate::domain::constants::REFLECT_DUPLICATE_PAIR_TOP_K,
+            ),
+        };
         let messages = messages
             .iter()
             .map(|message| {
@@ -85,7 +117,13 @@ impl ReflectionWorkflow {
         let recent_summary =
             engine.recent_messages_summary(&messages, REFLECTION_MESSAGE_BUDGET_CHARS);
         ReflectionPrompt {
-            text: engine.build_prompt(&project_memory, &recent_summary, lang, capacity),
+            text: engine.build_prompt(
+                &project_memory,
+                &recent_summary,
+                lang,
+                capacity,
+                Some(&corpus_status),
+            ),
             references,
         }
     }

@@ -1,4 +1,5 @@
 use super::{MemoryCategory, MemoryEntry, MemoryError, MemoryId, MemoryLayer};
+use crate::domain::policy::{jaccard_token_sets, token_set};
 use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
@@ -74,6 +75,25 @@ pub type ReflectionResult<T> = Result<T, ReflectionError>;
 
 /// Reflect prompt 容量预算：注入当前 active 数、收敛目标与硬上限。
 ///
+/// `target_active_entries` 是 LLM 应收敛到的目标；`max_entries` 是层硬上限。
+/// 二者差值是后续 `memory add` 缓冲。NEVER 用本结构做输入截断。
+/// #1987：corpus 现状里的高相似重复对（行序号与 prompt 引用契约同源）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReflectionDuplicatePair {
+    pub left_ordinal: usize,
+    pub right_ordinal: usize,
+    pub score: f64,
+}
+
+/// #1987：注入 prompt 的 corpus 现状快照（project 层）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReflectionCorpusStatus {
+    pub archive_count: usize,
+    /// 按 decision/fact/preference/pattern/pitfall 固定序，只含计数 > 0 的类目。
+    pub category_counts: Vec<(MemoryCategory, usize)>,
+    pub duplicate_pairs: Vec<ReflectionDuplicatePair>,
+}
+
 /// `target_active_entries` 是 LLM 应收敛到的目标；`max_entries` 是层硬上限。
 /// 二者差值是后续 `memory add` 缓冲。NEVER 用本结构做输入截断。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -509,6 +529,7 @@ JSON 格式：
     "outdated_memories": ["M3"]
 }}
 
+{corpus_status}
 # 当前项目记忆
 {project_memory}
 
@@ -556,6 +577,7 @@ JSON format:
     "outdated_memories": ["M3"]
 }}
 
+{corpus_status}
 # Current project memory
 {project_memory}
 
@@ -572,8 +594,13 @@ impl ReflectionEngine {
         recent_summary: &str,
         lang: &str,
         capacity: ReflectionCapacityBudget,
+        corpus_status: Option<&ReflectionCorpusStatus>,
     ) -> String {
+        let corpus_status = corpus_status
+            .map(|status| Self::corpus_status_section(status, lang))
+            .unwrap_or_default();
         Self::prompt_template(lang)
+            .replace("{corpus_status}", &corpus_status)
             .replace("{project_memory}", project_memory)
             .replace("{recent_summary}", recent_summary)
             .replace("{active_count}", &capacity.active_count.to_string())
@@ -667,6 +694,125 @@ impl ReflectionEngine {
         })
     }
 
+    /// #1987：全量两两词法相似度（预分词集合），返回 ≥ 阈值的 top-K 对
+    /// （score 降序、行序号升序 tie-break）。序号与 `format_memory_summary`
+    /// 的 M 序号同源（同一 entries 切片按下标 +1）。
+    pub fn top_similar_pairs(
+        entries: &[MemoryEntry],
+        threshold: f64,
+        top_k: usize,
+    ) -> Vec<ReflectionDuplicatePair> {
+        let token_sets: Vec<_> = entries
+            .iter()
+            .map(|entry| token_set(&entry.content))
+            .collect();
+        let mut pairs = Vec::new();
+        for left in 0..entries.len() {
+            for right in (left + 1)..entries.len() {
+                let score = jaccard_token_sets(&token_sets[left], &token_sets[right]);
+                if score >= threshold {
+                    pairs.push(ReflectionDuplicatePair {
+                        left_ordinal: left + 1,
+                        right_ordinal: right + 1,
+                        score,
+                    });
+                }
+            }
+        }
+        pairs.sort_by(|left, right| {
+            right
+                .score
+                .partial_cmp(&left.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.left_ordinal.cmp(&right.left_ordinal))
+                .then_with(|| left.right_ordinal.cmp(&right.right_ordinal))
+        });
+        pairs.truncate(top_k);
+        pairs
+    }
+
+    /// #1987：渲染 corpus 现状段（含标题与收敛指令）；随 `lang` 双语。
+    pub fn corpus_status_section(status: &ReflectionCorpusStatus, lang: &str) -> String {
+        let total: usize = status.category_counts.iter().map(|(_, count)| count).sum();
+        let distribution = status
+            .category_counts
+            .iter()
+            .map(|(category, count)| format!("{}={}", Self::category_label(*category), count))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if lang == "zh" {
+            let pairs = if status.duplicate_pairs.is_empty() {
+                "  - 未检出高相似对".to_string()
+            } else {
+                status
+                    .duplicate_pairs
+                    .iter()
+                    .map(|pair| {
+                        format!(
+                            "  - M{} × M{}（{:.2}）",
+                            pair.left_ordinal, pair.right_ordinal, pair.score
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(
+                        "
+",
+                    )
+            };
+            format!(
+                "# 记忆库现状
+- active 分类分布：{distribution}（共 {total}）
+- archive={}
+- 高相似对（J ≥ {:.2}，建议合并）：
+{pairs}
+- 高相似对清单中每一对，MUST 给出 synthesizes（合并为一条新记忆并引用两侧行号），或说明为何保留两条。
+- 当 active ≥ target 时，新增建议需搭配等量淘汰（outdated_memories / supersedes），NEVER 只增不减。",
+                status.archive_count,
+                crate::domain::constants::REFLECT_DUPLICATE_PAIR_THRESHOLD,
+            )
+        } else {
+            let pairs = if status.duplicate_pairs.is_empty() {
+                "  - no high-similarity pairs detected".to_string()
+            } else {
+                status
+                    .duplicate_pairs
+                    .iter()
+                    .map(|pair| {
+                        format!(
+                            "  - M{} × M{} ({:.2})",
+                            pair.left_ordinal, pair.right_ordinal, pair.score
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(
+                        "
+",
+                    )
+            };
+            format!(
+                "# Corpus status
+- active category distribution: {distribution} (total {total})
+- archive={}
+- High-similarity pairs (J ≥ {:.2}, merge candidates):
+{pairs}
+- For every listed pair you must produce a synthesizes suggestion merging both sides (citing both ordinals), or explain why both must stay.
+- When active ≥ target, each new suggestion must be paired with an equal amount of eviction (outdated_memories / supersedes); NEVER add without reducing.",
+                status.archive_count,
+                crate::domain::constants::REFLECT_DUPLICATE_PAIR_THRESHOLD,
+            )
+        }
+    }
+
+    fn category_label(category: MemoryCategory) -> &'static str {
+        match category {
+            MemoryCategory::Decision => "decision",
+            MemoryCategory::Fact => "fact",
+            MemoryCategory::Preference => "preference",
+            MemoryCategory::Pattern => "pattern",
+            MemoryCategory::Pitfall => "pitfall",
+        }
+    }
+
     /// 渲染反思输入的记忆列表：每行以本次运行内稳定的行序号开头
     /// （`- [M1] [Decision][tag] content`），同时返回序号表。模型 NEVER 看到
     /// UUID；解析模型输出时经 [`ReflectionReferenceTable`] 映射回真实 id。
@@ -729,3 +875,7 @@ impl ReflectionEngine {
 #[cfg(test)]
 #[path = "reflection_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "reflection_corpus_status_tests.rs"]
+mod corpus_status_tests;

@@ -208,8 +208,8 @@ fn prompt_is_bilingual_without_user_alert() {
         target_active_entries: 150,
         max_entries: 200,
     };
-    let zh = engine().build_prompt("MEM", "SUMMARY", "zh", capacity);
-    let en = engine().build_prompt("MEM", "SUMMARY", "en", capacity);
+    let zh = engine().build_prompt("MEM", "SUMMARY", "zh", capacity, None);
+    let en = engine().build_prompt("MEM", "SUMMARY", "en", capacity, None);
     assert!(zh.contains("只输出 JSON") && zh.contains("# 最近对话摘要"));
     assert!(en.contains("Output JSON only") && en.contains("# Recent conversation summary"));
     assert!(zh.contains("MEM") && en.contains("SUMMARY"));
@@ -225,8 +225,8 @@ fn prompt_includes_capacity_budget_and_convergence_rules() {
         target_active_entries: 150,
         max_entries: 200,
     };
-    let zh = engine().build_prompt("MEM", "SUMMARY", "zh", over);
-    let en = engine().build_prompt("MEM", "SUMMARY", "en", over);
+    let zh = engine().build_prompt("MEM", "SUMMARY", "zh", over, None);
+    let en = engine().build_prompt("MEM", "SUMMARY", "en", over, None);
     assert!(zh.contains("active=180"));
     assert!(zh.contains("target=150"));
     assert!(zh.contains("hard_cap=200"));
