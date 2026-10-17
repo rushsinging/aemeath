@@ -390,3 +390,24 @@ fn coverage_end_is_optional_and_round_trips() {
     assert_eq!(round_trip.coverage_end, Some(42));
     assert_eq!(record.safe_summary().coverage_end, Some(42));
 }
+
+#[test]
+fn prompt_orders_noise_and_off_project_cleanup() {
+    let capacity = ReflectionCapacityBudget {
+        active_count: 180,
+        target_active_entries: 150,
+        max_entries: 200,
+    };
+    let zh = engine().build_prompt("MEM", "SUMMARY", "zh", capacity, None);
+    let en = engine().build_prompt("MEM", "SUMMARY", "en", capacity, None);
+    assert!(zh.contains("噪音"), "zh 必须明确要求清除噪音");
+    assert!(
+        zh.contains("与本项目无关"),
+        "zh 必须明确要求清除非本项目内容"
+    );
+    assert!(en.contains("noise entries"), "en 必须明确要求清除噪音");
+    assert!(
+        en.contains("unrelated to this project"),
+        "en 必须明确要求清除非本项目内容"
+    );
+}

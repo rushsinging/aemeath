@@ -508,7 +508,11 @@ impl ReflectionEngine {
   NEVER 编造列表中不存在的序号，NEVER 用标签、正文或任何其他标识充当引用。
   正确示例："outdated_memories": ["M2"]。
   错误示例："outdated_memories": ["[Decision][some-tag]"] 或 ["some-tag-slug"]。
-- outdated_memories 填被新事实推翻、不应再注入的条目序号。
+- outdated_memories 填应清除的条目序号，三类依据：
+  ① 被新事实推翻、不应再注入；② 噪音：单次交付流水账（squash/CLOSED/清分支/
+  安装版本推进）、已时过境迁的状态快照（磁盘空间、待 CI、进度百分比等）；
+  ③ 越界：与本项目无关的内容（其它项目、通用环境琐事）——它们不属于本 corpus。
+  清除噪音与越界条目不算「为凑数强制淘汰」，是维护 corpus 卫生的正当理由。
 - suggested_memories[].synthesizes 只在**归纳多条已有记忆**时填这些条目序号。
   单条来源不是归纳（那只是改写），此时留空数组——不足两条来源的归纳 MUST NOT
   产出。结论被新证据修正时在正文里写「曾…现…」，不要输出置信度数字。
@@ -549,8 +553,13 @@ Requirements:
   any other identifier as a reference.
   Good: "outdated_memories": ["M2"].
   Bad: "outdated_memories": ["[Decision][some-tag]"] or ["some-tag-slug"].
-- outdated_memories lists the ordinals of entries superseded by new facts and
-  that must stop being injected.
+- outdated_memories lists the ordinals of entries to remove, on three grounds:
+  ① superseded by new facts and must stop being injected; ② noise entries:
+  one-off delivery logs (squash/CLOSED/branch cleanup, install version bumps)
+  and stale status snapshots (disk space, pending CI, progress percentages);
+  ③ off-project content unrelated to this project (other projects, generic
+  environment trivia) — it does not belong in this corpus. Removing noise and
+  off-project entries is corpus hygiene, not quota-forced eviction.
 - Fill suggested_memories[].synthesizes with the ordinals ONLY when this
   suggestion combines several existing memories into a new conclusion. A single
   source is not a synthesis — it is a restatement — so leave it empty; a
