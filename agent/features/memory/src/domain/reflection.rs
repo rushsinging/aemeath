@@ -752,6 +752,71 @@ impl ReflectionEngine {
         pairs
     }
 
+    /// #1987 两步反思的 Step 1（去噪）prompt：不带对话摘要（噪音判断靠
+    /// 条目自身），输出仅 outdated_memories 单字段。
+    pub fn build_noise_prompt(
+        &self,
+        project_memory: &str,
+        lang: &str,
+        capacity: ReflectionCapacityBudget,
+        corpus_status: Option<&ReflectionCorpusStatus>,
+    ) -> String {
+        let corpus_status = corpus_status
+            .map(|status| Self::corpus_status_section(status, lang))
+            .unwrap_or_default();
+        Self::noise_prompt_template(lang)
+            .replace("{corpus_status}", &corpus_status)
+            .replace("{project_memory}", project_memory)
+            .replace("{active_count}", &capacity.active_count.to_string())
+            .replace(
+                "{target_active_entries}",
+                &capacity.target_active_entries.to_string(),
+            )
+            .replace("{max_entries}", &capacity.max_entries.to_string())
+    }
+
+    fn noise_prompt_template(lang: &str) -> &'static str {
+        if lang == "zh" {
+            r#"你是 Aemeath 的 Reflection 去噪引擎。请审查当前项目记忆列表，找出应清除的条目。
+
+清除依据（三类）：
+① 被新事实推翻、不应再注入；
+② 噪音：单次交付流水账（squash/CLOSED/清分支/安装版本推进）、已时过境迁的状态快照（磁盘空间、待 CI、进度百分比等）；
+③ 越界：与本项目无关的内容（其它项目、通用环境琐事）——它们不属于本 corpus。
+判断时 issue/PR 编号、日期、版本号本身不构成保留或清除的依据，以内容实质判断。
+当前 active={active_count}，收敛目标 target={target_active_entries}，硬上限 hard_cap={max_entries}。
+本步只做清除、NEVER 新增：清除是 corpus 卫生，不算为凑数强制淘汰；没有可清除条目时输出空数组。
+
+只输出 JSON，不要输出 Markdown：
+{{
+    "outdated_memories": ["M3"]
+}}
+
+{corpus_status}
+# 当前项目记忆
+{project_memory}"#
+        } else {
+            r#"You are the Aemeath Reflection noise-removal engine. Review the current project memory list and identify entries to remove.
+
+Removal grounds (three):
+① superseded by new facts and must stop being injected;
+② noise entries: one-off delivery logs (squash/CLOSED/branch cleanup, install version bumps) and stale status snapshots (disk space, pending CI, progress percentages);
+③ off-project content unrelated to this project (other projects, generic environment trivia) — it does not belong in this corpus.
+Issue/PR numbers, dates, and version strings by themselves are neither grounds to keep nor to remove; judge by substance.
+Current active={active_count}, converge target={target_active_entries}, hard cap={max_entries}.
+This step only removes and NEVER adds: removal is corpus hygiene, not quota-forced eviction; output an empty array when nothing qualifies.
+
+Output JSON only, no Markdown:
+{{
+    "outdated_memories": ["M3"]
+}}
+
+{corpus_status}
+# Current project memory
+{project_memory}"#
+        }
+    }
+
     /// #1987：渲染 corpus 现状段（含标题与收敛指令）；随 `lang` 双语。
     pub fn corpus_status_section(status: &ReflectionCorpusStatus, lang: &str) -> String {
         let total: usize = status.category_counts.iter().map(|(_, count)| count).sum();

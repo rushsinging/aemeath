@@ -488,13 +488,14 @@ async fn chat_manual_reflection_success_records_usage_without_run_step() {
     );
     assert_eq!(record.provider, "manual-reflect-test");
     assert_eq!(record.model, "manual-test-model");
+    // 两步反思：Step1 去噪 + Step2 归纳各计一次（mock 每次同额）。
     assert_eq!(
-        record.input_tokens, 1,
-        "provider 报告的 input tokens 原样入账"
+        record.input_tokens, 2,
+        "两步 provider input tokens 合并入账"
     );
     assert_eq!(
-        record.output_tokens, 1,
-        "provider 报告的 output tokens 原样入账"
+        record.output_tokens, 2,
+        "两步 provider output tokens 合并入账"
     );
     assert!(
         share::ids::is_typed_id(record.run_step_id.as_str(), "stp")

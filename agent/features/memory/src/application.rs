@@ -128,6 +128,31 @@ impl ReflectionWorkflow {
         }
     }
 
+    /// #1987 两步反思 Step 1：去噪 prompt（无对话摘要；引用表与 Step 2 独立）。
+    pub async fn build_noise_prompt(
+        lang: &str,
+        memory: &dyn MemoryPort,
+        now: u64,
+        target_active_entries: usize,
+        max_entries: usize,
+    ) -> ReflectionPrompt {
+        let engine = ReflectionEngine;
+        let eligible = memory
+            .list(Some(MemoryLayer::Project))
+            .await
+            .into_iter()
+            .filter(|entry| crate::domain::is_reflection_input_eligible(entry, now))
+            .collect::<Vec<_>>();
+        let capacity = ReflectionCapacityBudget {
+            active_count: eligible.len(),
+            target_active_entries,
+            max_entries,
+        };
+        let (project_memory, references) = engine.format_memory_summary(&eligible);
+        let text = engine.build_noise_prompt(&project_memory, lang, capacity, None);
+        ReflectionPrompt { text, references }
+    }
+
     pub async fn append_running(
         history: &dyn ReflectionHistoryStore,
         identity: &ReflectionExecutionIdentity,

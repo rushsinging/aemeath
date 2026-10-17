@@ -411,3 +411,29 @@ fn prompt_orders_noise_and_off_project_cleanup() {
         "en 必须明确要求清除非本项目内容"
     );
 }
+
+#[test]
+fn noise_prompt_is_summary_free_single_field_and_grounds_explicit() {
+    let capacity = ReflectionCapacityBudget {
+        active_count: 112,
+        target_active_entries: 150,
+        max_entries: 200,
+    };
+    let zh = engine().build_noise_prompt("MEM", "zh", capacity, None);
+    let en = engine().build_noise_prompt("MEM", "en", capacity, None);
+    assert!(zh.contains("去噪引擎"));
+    assert!(zh.contains("噪音"));
+    assert!(zh.contains("与本项目无关"));
+    assert!(zh.contains("只做清除、NEVER 新增"));
+    assert!(zh.contains("outdated_memories"));
+    assert!(!zh.contains("最近对话摘要"), "去噪步 MUST NOT 带对话摘要");
+    assert!(!zh.contains("{recent_summary}"), "占位符 MUST NOT 泄漏");
+    assert!(
+        !zh.contains("suggested_memories"),
+        "去噪步 MUST NOT 请求建议"
+    );
+    assert!(en.contains("noise-removal engine"));
+    assert!(en.contains("only removes and NEVER adds"));
+    assert!(!en.contains("Recent conversation summary"));
+    assert!(!en.contains("suggested_memories"));
+}
