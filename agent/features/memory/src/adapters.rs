@@ -804,7 +804,7 @@ impl MemoryPort for InMemoryMemory {
             .filter(|stored| stored.layer == entry.layer)
             .cloned()
             .collect::<Vec<_>>();
-        if layer_entries.len() >= self.policy.max_entries {
+        if crate::domain::effective_active_count(&layer_entries) >= self.policy.max_entries {
             return Ok(WriteResult::NeedsEviction {
                 candidates: eviction_candidates(&layer_entries, 3, entry.created_at),
             });
@@ -943,7 +943,7 @@ impl MemoryPort for InMemoryMemory {
             result.completed += 1;
         }
 
-        let project_active = count_layer(&candidate.active, MemoryLayer::Project);
+        let project_active = crate::domain::effective_active_count(&candidate.active);
         let target = self.policy.target_active_entries;
         if project_active > target {
             return Err(MemoryError::CapacityNotMet {
@@ -957,22 +957,30 @@ impl MemoryPort for InMemoryMemory {
     }
     async fn archive(&self, ids: &[MemoryId]) -> Result<bool, MemoryError> {
         let _permit = self.acquire_write_permit().await?;
-        let mut state = self.state.write().expect("memory state lock poisoned");
-        let mut moved = Vec::new();
-        state.active.retain(|entry| {
-            if ids.contains(&entry.id) && !entry.pinned {
-                moved.push(entry.clone());
-                false
-            } else {
-                true
-            }
-        });
-        let changed = !moved.is_empty();
-        if changed {
-            state.archive.extend(moved);
-            state.revision = state.revision.saturating_add(1);
+        self.archive_locked(ids)
+    }
+
+    async fn sweep_stale_under_permit(
+        &self,
+        now: u64,
+        _permit: &MemoryWritePermit,
+    ) -> Result<usize, MemoryError> {
+        let stale: Vec<MemoryId> = {
+            let state = self.state.read().expect("memory state lock poisoned");
+            state
+                .active
+                .iter()
+                .filter(|entry| !entry.pinned)
+                .filter(|entry| !crate::domain::is_reflection_input_eligible(entry, now))
+                .map(|entry| entry.id)
+                .collect()
+        };
+        if stale.is_empty() {
+            return Ok(0);
         }
-        Ok(changed)
+        let swept = stale.len();
+        self.archive_locked(&stale)?;
+        Ok(swept)
     }
 
     async fn restore(&self, id: &MemoryId) -> Result<RestoreResult, MemoryError> {
@@ -987,7 +995,7 @@ impl MemoryPort for InMemoryMemory {
             .filter(|entry| entry.layer == archived.layer)
             .cloned()
             .collect::<Vec<_>>();
-        if layer_entries.len() >= self.policy.max_entries {
+        if crate::domain::effective_active_count(&layer_entries) >= self.policy.max_entries {
             return Ok(RestoreResult::NeedsEviction {
                 candidates: eviction_candidates(&layer_entries, 3, archived.last_confirmed_at),
             });
@@ -1009,7 +1017,8 @@ impl MemoryPort for InMemoryMemory {
                 .filter(|entry| entry.layer == layer)
                 .cloned()
                 .collect::<Vec<_>>();
-            let excess = layer_entries.len().saturating_sub(self.policy.max_entries);
+            let excess = crate::domain::effective_active_count(&layer_entries)
+                .saturating_sub(self.policy.max_entries);
             candidates.extend(eviction_candidates(
                 &layer_entries,
                 excess,
@@ -1067,6 +1076,25 @@ impl MemoryPort for InMemoryMemory {
 }
 
 impl InMemoryMemory {
+    fn archive_locked(&self, ids: &[MemoryId]) -> Result<bool, MemoryError> {
+        let mut state = self.state.write().expect("memory state lock poisoned");
+        let mut moved = Vec::new();
+        state.active.retain(|entry| {
+            if ids.contains(&entry.id) && !entry.pinned {
+                moved.push(entry.clone());
+                false
+            } else {
+                true
+            }
+        });
+        let changed = !moved.is_empty();
+        if changed {
+            state.archive.extend(moved);
+            state.revision = state.revision.saturating_add(1);
+        }
+        Ok(changed)
+    }
+
     fn mutate_entry(
         &self,
         id: &MemoryId,
@@ -1140,7 +1168,7 @@ fn apply_reflection_entry(
         .filter(|stored| stored.layer == entry.layer)
         .cloned()
         .collect::<Vec<_>>();
-    if layer_entries.len() >= policy.max_entries {
+    if crate::domain::effective_active_count(&layer_entries) >= policy.max_entries {
         let candidates = eviction_candidates(&layer_entries, 3, entry.created_at);
         let ids = candidates
             .iter()

@@ -117,7 +117,8 @@ async fn runtime_invokes_provider_then_delegates_parse_apply_and_history_to_memo
     .unwrap();
 
     assert_eq!(result.output.deviations, ["drift"]);
-    assert_eq!((result.input_tokens, result.output_tokens), (11, 22));
+    // 两步：Step1 与 Step2 各计一次。
+    assert_eq!((result.input_tokens, result.output_tokens), (22, 44));
     assert_eq!(history.list(1).await.unwrap()[0].id, "reflection-id");
 }
 
@@ -268,12 +269,16 @@ async fn run_scripted_reflection(
 
 const VALID_REFLECTION_JSON: &str =
     r#"{"deviations":["drift"],"suggested_memories":[],"outdated_memories":[]}"#;
+/// 两步反思 Step 1（去噪）的空产出响应：多数既有脚本的脚本头。
+const NOISE_EMPTY_JSON: &str = r#"{"outdated_memories":[]}"#;
+const NOISE_STALE_JSON: &str = r#"{"outdated_memories":["M1"]}"#;
 const REPAIRED_REFLECTION_JSON: &str =
     r#"{"deviations":["repaired"],"suggested_memories":[],"outdated_memories":[]}"#;
 
 #[tokio::test]
 async fn empty_first_response_is_retried_once_with_the_same_prompt() {
     let provider = ScriptedReflectionProvider::new(vec![
+        ScriptedStep::Text(NOISE_EMPTY_JSON.to_string()),
         ScriptedStep::Empty,
         ScriptedStep::Text(REPAIRED_REFLECTION_JSON.to_string()),
     ]);
@@ -286,15 +291,19 @@ async fn empty_first_response_is_retried_once_with_the_same_prompt() {
 
     assert_eq!(result.output.deviations, ["repaired"]);
     let requests = provider.requests();
-    assert_eq!(requests.len(), 2);
-    // 重试 MUST 用同一 prompt、同一 system 原样重发。
-    assert_eq!(requests[0].system, "system");
-    assert_eq!(requests[0], requests[1]);
+    assert_eq!(requests.len(), 3);
+    // 重试 MUST 用同一 prompt、同一 system 原样重发（[0]=Step1 去噪）。
+    assert_eq!(requests[1].system, "system");
+    assert_eq!(requests[1], requests[2]);
 }
 
 #[tokio::test]
 async fn empty_response_twice_fails_after_exactly_one_retry() {
-    let provider = ScriptedReflectionProvider::new(vec![ScriptedStep::Empty, ScriptedStep::Empty]);
+    let provider = ScriptedReflectionProvider::new(vec![
+        ScriptedStep::Text(NOISE_EMPTY_JSON.to_string()),
+        ScriptedStep::Empty,
+        ScriptedStep::Empty,
+    ]);
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
 
@@ -303,7 +312,7 @@ async fn empty_response_twice_fails_after_exactly_one_retry() {
         .unwrap_err();
 
     assert_eq!(error, ReflectionExecutionError::EmptyResponse);
-    assert_eq!(provider.requests().len(), 2);
+    assert_eq!(provider.requests().len(), 3);
     assert_eq!(
         history.list(1).await.unwrap()[0].error_category,
         Some(ReflectionErrorCategory::EmptyResponse)
@@ -312,7 +321,10 @@ async fn empty_response_twice_fails_after_exactly_one_retry() {
 
 #[tokio::test]
 async fn provider_error_is_never_retried() {
-    let provider = ScriptedReflectionProvider::new(vec![ScriptedStep::InvokeError]);
+    let provider = ScriptedReflectionProvider::new(vec![
+        ScriptedStep::Text(NOISE_EMPTY_JSON.to_string()),
+        ScriptedStep::InvokeError,
+    ]);
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
 
@@ -321,12 +333,13 @@ async fn provider_error_is_never_retried() {
         .unwrap_err();
 
     assert_eq!(error, ReflectionExecutionError::LlmCall);
-    assert_eq!(provider.requests().len(), 1);
+    assert_eq!(provider.requests().len(), 2);
 }
 
 #[tokio::test]
 async fn cancelled_empty_response_is_not_retried() {
-    // 第二步脚本若被消费说明发生了重试——断言经脚本耗尽 panic 兜底。
+    // 取消短路 Step1（脚本无去噪步）；第二步脚本若被消费说明发生了重试——
+    // 断言经脚本耗尽 panic 兜底。
     let provider = ScriptedReflectionProvider::new(vec![
         ScriptedStep::Empty,
         ScriptedStep::Text(VALID_REFLECTION_JSON.to_string()),
@@ -347,6 +360,7 @@ async fn cancelled_empty_response_is_not_retried() {
 async fn unparseable_output_triggers_one_repair_and_repaired_response_completes() {
     let broken_response = r#"{"deviations": ["truncated"#.to_string();
     let provider = ScriptedReflectionProvider::new(vec![
+        ScriptedStep::Text(NOISE_EMPTY_JSON.to_string()),
         ScriptedStep::Text(broken_response.clone()),
         ScriptedStep::Text(REPAIRED_REFLECTION_JSON.to_string()),
     ]);
@@ -359,13 +373,13 @@ async fn unparseable_output_triggers_one_repair_and_repaired_response_completes(
 
     assert_eq!(result.output.deviations, ["repaired"]);
     let requests = provider.requests();
-    assert_eq!(requests.len(), 2);
-    let repair = &requests[1];
+    assert_eq!(requests.len(), 3);
+    let repair = &requests[2];
     // 修复请求：system 原样沿用；消息 = 原反思 prompt → 原始响应 → 纠错指令。
     assert_eq!(repair.system, "system");
     assert_eq!(repair.messages.len(), 3);
     assert_eq!(repair.messages[0].0, "user");
-    assert_eq!(repair.messages[0].1, requests[0].messages[0].1);
+    assert_eq!(repair.messages[0].1, requests[1].messages[0].1);
     assert_eq!(repair.messages[1].0, "assistant");
     assert_eq!(repair.messages[1].1, broken_response);
     assert_eq!(repair.messages[2].0, "user");
@@ -383,6 +397,7 @@ async fn unparseable_output_triggers_one_repair_and_repaired_response_completes(
 #[tokio::test]
 async fn repair_instruction_follows_zh_lang_wording() {
     let provider = ScriptedReflectionProvider::new(vec![
+        ScriptedStep::Text(NOISE_EMPTY_JSON.to_string()),
         ScriptedStep::Text("这根本不是 JSON".to_string()),
         ScriptedStep::Text(VALID_REFLECTION_JSON.to_string()),
     ]);
@@ -394,8 +409,8 @@ async fn repair_instruction_follows_zh_lang_wording() {
         .unwrap();
 
     let requests = provider.requests();
-    assert_eq!(requests.len(), 2);
-    let instruction = &requests[1].messages[2].1;
+    assert_eq!(requests.len(), 3);
+    let instruction = &requests[2].messages[2].1;
     assert!(
         instruction.contains("不是合法 JSON"),
         "instruction = {instruction}"
@@ -412,6 +427,7 @@ async fn failed_repair_falls_back_to_the_original_response() {
     // 若修复响应被交给 complete，错误应为 Unparseable——用错误种类证明回退。
     let invalid_suggestion = r#"{"deviations":[],"suggested_memories":[{"layer":"project","category":"fact","content":""}],"outdated_memories":[]}"#;
     let provider = ScriptedReflectionProvider::new(vec![
+        ScriptedStep::Text(NOISE_EMPTY_JSON.to_string()),
         ScriptedStep::Text(invalid_suggestion.to_string()),
         ScriptedStep::Text("still not json".to_string()),
     ]);
@@ -423,13 +439,13 @@ async fn failed_repair_falls_back_to_the_original_response() {
         .unwrap_err();
 
     assert_eq!(error, ReflectionExecutionError::InvalidSuggestion);
-    assert_eq!(provider.requests().len(), 2);
+    assert_eq!(provider.requests().len(), 3);
     assert_eq!(
         history.list(1).await.unwrap()[0].error_category,
         Some(ReflectionErrorCategory::InvalidSuggestion)
     );
     // 纠错指令 MUST 携带精确校验错误摘要。
-    let instruction = &provider.requests()[1].messages[2].1;
+    let instruction = &provider.requests()[2].messages[2].1;
     assert!(
         instruction.contains("suggested_memories[0].content must not be empty"),
         "instruction = {instruction}"
@@ -439,6 +455,7 @@ async fn failed_repair_falls_back_to_the_original_response() {
 #[tokio::test]
 async fn repair_call_provider_error_falls_back_to_original_parse_failure() {
     let provider = ScriptedReflectionProvider::new(vec![
+        ScriptedStep::Text(NOISE_EMPTY_JSON.to_string()),
         ScriptedStep::Text("not json at all".to_string()),
         ScriptedStep::InvokeError,
     ]);
@@ -451,7 +468,7 @@ async fn repair_call_provider_error_falls_back_to_original_parse_failure() {
 
     // 修复调用的 provider 错误 NEVER 升级为 LlmCall 失败，按现状落 Parse。
     assert_eq!(error, ReflectionExecutionError::Unparseable);
-    assert_eq!(provider.requests().len(), 2);
+    assert_eq!(provider.requests().len(), 3);
     assert_eq!(
         history.list(1).await.unwrap()[0].error_category,
         Some(ReflectionErrorCategory::Parse)
@@ -460,9 +477,10 @@ async fn repair_call_provider_error_falls_back_to_original_parse_failure() {
 
 #[tokio::test]
 async fn valid_output_calls_provider_once_without_repair() {
-    let provider = ScriptedReflectionProvider::new(vec![ScriptedStep::Text(
-        VALID_REFLECTION_JSON.to_string(),
-    )]);
+    let provider = ScriptedReflectionProvider::new(vec![
+        ScriptedStep::Text(NOISE_EMPTY_JSON.to_string()),
+        ScriptedStep::Text(VALID_REFLECTION_JSON.to_string()),
+    ]);
     let history = RecordingHistory::default();
     let cancel = tokio_util::sync::CancellationToken::new();
 
@@ -471,12 +489,12 @@ async fn valid_output_calls_provider_once_without_repair() {
         .unwrap();
 
     assert_eq!(result.output.deviations, ["drift"]);
-    assert_eq!(provider.requests().len(), 1);
+    assert_eq!(provider.requests().len(), 2);
 }
 
 #[tokio::test]
 async fn cancelled_parse_failure_skips_the_repair_call() {
-    // 第二步脚本若被消费说明取消后仍发起了修复。
+    // 取消短路 Step1（脚本无去噪步）；第二步脚本若被消费说明取消后仍发起了修复。
     let provider = ScriptedReflectionProvider::new(vec![
         ScriptedStep::Text("not json at all".to_string()),
         ScriptedStep::Text(VALID_REFLECTION_JSON.to_string()),
@@ -491,4 +509,86 @@ async fn cancelled_parse_failure_skips_the_repair_call() {
 
     assert_eq!(error, ReflectionExecutionError::Unparseable);
     assert_eq!(provider.requests().len(), 1);
+}
+
+/// #1987 两步反思：Step1 去噪真实落盘（under_permit），Step2 在干净盘面上
+/// 完成；usage 为两步合计。
+#[tokio::test]
+async fn two_phase_reflection_removes_noise_then_completes() {
+    use memory::api::{InMemoryMemory, MemoryLayer, MemoryPort as _};
+
+    let memory = InMemoryMemory::new(memory::api::MemoryPolicy {
+        max_entries: 10,
+        similarity_threshold: 0.8,
+        target_active_entries: 7,
+    })
+    .unwrap();
+    let noisy = memory::api::MemoryEntry::new(
+        memory::api::MemoryId::now_v7(),
+        100,
+        MemoryLayer::Project,
+        memory::api::MemoryCategory::Fact,
+        "#1234 已 squash 合入 main：PR #1235 → abc1234，分支已清理",
+        memory::api::MemorySource::User,
+    )
+    .unwrap();
+    memory.write(noisy.clone()).await.unwrap();
+    // 残留：独立 mark_outdated 不归档的旧数据，等编排 sweep 收口。
+    let mut residual = memory::api::MemoryEntry::new(
+        memory::api::MemoryId::now_v7(),
+        100,
+        MemoryLayer::Project,
+        memory::api::MemoryCategory::Fact,
+        "独立的过时残留条目",
+        memory::api::MemorySource::User,
+    )
+    .unwrap();
+    memory.write(residual.clone()).await.unwrap();
+    assert!(memory.mark_outdated(&residual.id).await.unwrap());
+
+    let provider = ScriptedReflectionProvider::new(vec![
+        ScriptedStep::Text(NOISE_STALE_JSON.to_string()),
+        ScriptedStep::Text(VALID_REFLECTION_JSON.to_string()),
+    ]);
+    let history = RecordingHistory::default();
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let model = model();
+    let invocation = ReflectionInvocation {
+        provider: &provider,
+        model: &model,
+        max_tokens: 4_096,
+        requested_reasoning: share::reasoning::ReasoningLevel::Off,
+        system_prompt_text: "system",
+    };
+
+    let result = execute_reflection(
+        &[share::message::Message::user("reflect")],
+        "en",
+        true,
+        7,
+        10,
+        invocation,
+        &memory,
+        &history,
+        &identity(),
+        &cancel,
+    )
+    .await
+    .unwrap();
+
+    // Sweep + Step1 淘汰落盘：残留与噪音条目都归档出 active。
+    assert_eq!(memory.stats().await.project_count, 0);
+    assert_eq!(memory.stats().await.project_archive_count, 2);
+    // 两步各一次调用；token 合并（ScriptedProvider 每次同额）。
+    assert_eq!(provider.requests().len(), 2);
+    assert_eq!((result.input_tokens, result.output_tokens), (22, 44));
+    // Step1 的 Step2 prompt 不再含噪音条目。
+    let second_prompt = &provider.requests()[1];
+    assert!(
+        !second_prompt
+            .messages
+            .iter()
+            .any(|(_, text)| text.contains("abc1234")),
+        "Step2 prompt MUST NOT 含已清除条目"
+    );
 }

@@ -37,6 +37,16 @@ pub fn is_reflection_input_eligible(entry: &MemoryEntry, now: u64) -> bool {
     is_injection_eligible(entry, now)
 }
 
+/// 容量口径（#1987 用户拍板）：active 中的 outdated / 被取代残留已不可注入，
+/// MUST NOT 计入 max_entries 与 reflect 收敛目标——max_entries / target 约束的
+/// 都是「有效 active」。
+pub fn effective_active_count(entries: &[MemoryEntry]) -> usize {
+    entries
+        .iter()
+        .filter(|entry| !entry.outdated && entry.superseded_by.is_none())
+        .count()
+}
+
 /// 把 `target` 的取代关系指向 `superseding`，返回是否写入。
 ///
 /// 找不到 `target` 时返回 `false`，调用方据此判定为「跳过」而非写坏
@@ -172,22 +182,78 @@ pub fn eviction_candidates(
 }
 
 pub fn jaccard_similarity(left: &str, right: &str) -> f64 {
-    let left = tokenize(left);
-    let right = tokenize(right);
+    jaccard_token_sets(&tokenize(left), &tokenize(right))
+}
+
+/// 预分词集合上的 Jaccard（#1987 现状段两两比对的批量入口，避免重复分词）。
+pub(crate) fn jaccard_token_sets(
+    left: &std::collections::HashSet<String>,
+    right: &std::collections::HashSet<String>,
+) -> f64 {
     if left.is_empty() || right.is_empty() {
         return 0.0;
     }
-    let intersection = left.intersection(&right).count();
-    let union = left.union(&right).count();
+    let intersection = left.intersection(right).count();
+    let union = left.union(right).count();
     intersection as f64 / union as f64
 }
 
+pub(crate) fn token_set(value: &str) -> std::collections::HashSet<String> {
+    tokenize(value)
+}
+
+/// #1987：分词口径——拉丁/数字段照旧按词切；CJK 连续段拆字符 bigram。
+/// 中文整句是天然连续段（无空格），单整段 token 让 Jaccard 对中文重复对
+/// 全量漏检（真 corpus 实测 eligible 全中文时 0 检出）；bigram 修复该盲区。
 fn tokenize(value: &str) -> HashSet<String> {
-    value
-        .split(|character: char| !character.is_alphanumeric())
-        .filter(|token| !token.is_empty())
-        .map(str::to_lowercase)
-        .collect()
+    let mut tokens = HashSet::new();
+    let mut latin_run = String::new();
+    let mut cjk_run = String::new();
+    let flush_latin = |run: &mut String, tokens: &mut HashSet<String>| {
+        if !run.is_empty() {
+            tokens.insert(run.to_lowercase());
+            run.clear();
+        }
+    };
+    for character in value.chars() {
+        if is_cjk(character) {
+            flush_latin(&mut latin_run, &mut tokens);
+            cjk_run.push(character);
+        } else if character.is_alphanumeric() {
+            if !cjk_run.is_empty() {
+                emit_cjk_bigrams(&cjk_run, &mut tokens);
+                cjk_run.clear();
+            }
+            latin_run.push(character);
+        } else {
+            flush_latin(&mut latin_run, &mut tokens);
+            if !cjk_run.is_empty() {
+                emit_cjk_bigrams(&cjk_run, &mut tokens);
+                cjk_run.clear();
+            }
+        }
+    }
+    flush_latin(&mut latin_run, &mut tokens);
+    if !cjk_run.is_empty() {
+        emit_cjk_bigrams(&cjk_run, &mut tokens);
+    }
+    tokens
+}
+
+fn is_cjk(character: char) -> bool {
+    matches!(character as u32,
+        0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0x20000..=0x2FA1F)
+}
+
+fn emit_cjk_bigrams(run: &str, tokens: &mut HashSet<String>) {
+    let characters: Vec<char> = run.chars().collect();
+    if characters.len() == 1 {
+        tokens.insert(characters[0].to_string());
+        return;
+    }
+    for window in characters.windows(2) {
+        tokens.insert(window.iter().collect::<String>());
+    }
 }
 
 fn recency_score(last_confirmed_at: u64, now: u64) -> i64 {

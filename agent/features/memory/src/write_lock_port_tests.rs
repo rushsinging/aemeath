@@ -81,3 +81,37 @@ async fn apply_reflection_under_outer_permit_does_not_reacquire() {
         .await
         .expect("under_permit apply");
 }
+
+/// #1987：残留清扫——outdated/被取代且未 pinned 的 active 条目归档；
+/// pinned 与有效条目 NEVER 被动。
+#[tokio::test]
+async fn sweep_stale_archives_only_ineligible_unpinned_entries() {
+    use crate::domain::MemoryCategory;
+    use crate::ports::MemoryPort;
+
+    let memory = InMemoryMemory::new(MemoryPolicy {
+        max_entries: 10,
+        similarity_threshold: 1.0,
+        target_active_entries: 7,
+    })
+    .unwrap();
+    let mut stale = fact_entry("已过时的旧口径");
+    stale.outdated = true;
+    let mut pinned_stale = fact_entry("用户钉住的过时条目");
+    pinned_stale.outdated = true;
+    pinned_stale.pinned = true;
+    let live = fact_entry("仍然有效的记忆");
+    let stale_id = stale.id;
+    for entry in [stale, pinned_stale, live] {
+        memory.write(entry).await.unwrap();
+    }
+
+    let permit = memory.acquire_write_permit().await.unwrap();
+    let swept = memory.sweep_stale_under_permit(200, &permit).await.unwrap();
+    assert_eq!(swept, 1, "只清非 pinned 残留");
+    let listed = memory.list(Some(crate::domain::MemoryLayer::Project)).await;
+    let ids: Vec<_> = listed.iter().map(|entry| entry.id).collect();
+    assert!(!ids.contains(&stale_id), "outdated 残留必须归档出 active");
+    assert_eq!(listed.len(), 2, "pinned 残留与有效条目保留: {listed:?}");
+    let _ = MemoryCategory::Fact;
+}

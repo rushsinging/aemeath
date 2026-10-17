@@ -208,8 +208,8 @@ fn prompt_is_bilingual_without_user_alert() {
         target_active_entries: 150,
         max_entries: 200,
     };
-    let zh = engine().build_prompt("MEM", "SUMMARY", "zh", capacity);
-    let en = engine().build_prompt("MEM", "SUMMARY", "en", capacity);
+    let zh = engine().build_prompt("MEM", "SUMMARY", "zh", capacity, None);
+    let en = engine().build_prompt("MEM", "SUMMARY", "en", capacity, None);
     assert!(zh.contains("只输出 JSON") && zh.contains("# 最近对话摘要"));
     assert!(en.contains("Output JSON only") && en.contains("# Recent conversation summary"));
     assert!(zh.contains("MEM") && en.contains("SUMMARY"));
@@ -225,8 +225,8 @@ fn prompt_includes_capacity_budget_and_convergence_rules() {
         target_active_entries: 150,
         max_entries: 200,
     };
-    let zh = engine().build_prompt("MEM", "SUMMARY", "zh", over);
-    let en = engine().build_prompt("MEM", "SUMMARY", "en", over);
+    let zh = engine().build_prompt("MEM", "SUMMARY", "zh", over, None);
+    let en = engine().build_prompt("MEM", "SUMMARY", "en", over, None);
     assert!(zh.contains("active=180"));
     assert!(zh.contains("target=150"));
     assert!(zh.contains("hard_cap=200"));
@@ -389,4 +389,51 @@ fn coverage_end_is_optional_and_round_trips() {
     let round_trip: ReflectionRecord = serde_json::from_str(&json).unwrap();
     assert_eq!(round_trip.coverage_end, Some(42));
     assert_eq!(record.safe_summary().coverage_end, Some(42));
+}
+
+#[test]
+fn prompt_orders_noise_and_off_project_cleanup() {
+    let capacity = ReflectionCapacityBudget {
+        active_count: 180,
+        target_active_entries: 150,
+        max_entries: 200,
+    };
+    let zh = engine().build_prompt("MEM", "SUMMARY", "zh", capacity, None);
+    let en = engine().build_prompt("MEM", "SUMMARY", "en", capacity, None);
+    assert!(zh.contains("噪音"), "zh 必须明确要求清除噪音");
+    assert!(
+        zh.contains("与本项目无关"),
+        "zh 必须明确要求清除非本项目内容"
+    );
+    assert!(en.contains("noise entries"), "en 必须明确要求清除噪音");
+    assert!(
+        en.contains("unrelated to this project"),
+        "en 必须明确要求清除非本项目内容"
+    );
+}
+
+#[test]
+fn noise_prompt_is_summary_free_single_field_and_grounds_explicit() {
+    let capacity = ReflectionCapacityBudget {
+        active_count: 112,
+        target_active_entries: 150,
+        max_entries: 200,
+    };
+    let zh = engine().build_noise_prompt("MEM", "zh", capacity, None);
+    let en = engine().build_noise_prompt("MEM", "en", capacity, None);
+    assert!(zh.contains("去噪引擎"));
+    assert!(zh.contains("噪音"));
+    assert!(zh.contains("与本项目无关"));
+    assert!(zh.contains("只做清除、NEVER 新增"));
+    assert!(zh.contains("outdated_memories"));
+    assert!(!zh.contains("最近对话摘要"), "去噪步 MUST NOT 带对话摘要");
+    assert!(!zh.contains("{recent_summary}"), "占位符 MUST NOT 泄漏");
+    assert!(
+        !zh.contains("suggested_memories"),
+        "去噪步 MUST NOT 请求建议"
+    );
+    assert!(en.contains("noise-removal engine"));
+    assert!(en.contains("only removes and NEVER adds"));
+    assert!(!en.contains("Recent conversation summary"));
+    assert!(!en.contains("suggested_memories"));
 }

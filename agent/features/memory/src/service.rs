@@ -75,6 +75,31 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
         .await
     }
 
+    async fn sweep_stale_under_permit(
+        &self,
+        now: u64,
+        _permit: &MemoryWritePermit,
+    ) -> Result<usize, MemoryError> {
+        let stale: Vec<MemoryId> = {
+            let state = self.state.read().expect("committed state lock poisoned");
+            state
+                .project
+                .dataset
+                .active()
+                .iter()
+                .filter(|entry| !entry.pinned)
+                .filter(|entry| !crate::domain::is_reflection_input_eligible(entry, now))
+                .map(|entry| entry.id)
+                .collect()
+        };
+        if stale.is_empty() {
+            return Ok(0);
+        }
+        let swept = stale.len();
+        self.archive_locked(&stale).await?;
+        Ok(swept)
+    }
+
     async fn archive_locked(&self, ids: &[MemoryId]) -> Result<bool, MemoryError> {
         // The ids may span both layers; archive each layer as its own observable
         // mutation so a stale-CAS conflict is scoped to a single layer.
@@ -982,7 +1007,7 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                     }
                     return Ok((WriteResult::Merged { existing_id }, true));
                 }
-                if dataset.active().len() >= policy.max_entries {
+                if crate::domain::effective_active_count(dataset.active()) >= policy.max_entries {
                     return Ok((
                         WriteResult::NeedsEviction {
                             candidates: eviction_candidates(dataset.active(), 3, entry.created_at),
@@ -1328,7 +1353,8 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                     else {
                         return Ok((RestoreResult::NotFound, false));
                     };
-                    if dataset.active().len() >= policy.max_entries {
+                    if crate::domain::effective_active_count(dataset.active()) >= policy.max_entries
+                    {
                         return Ok((
                             RestoreResult::NeedsEviction {
                                 candidates: eviction_candidates(
@@ -1546,7 +1572,7 @@ fn simulate_project_active_after_reflection(
             }
         }
     }
-    Ok(project.active().len())
+    Ok(crate::domain::effective_active_count(project.active()))
 }
 
 /// Applies one Reflection suggestion as one dataset mutation. On capacity it
@@ -1608,7 +1634,7 @@ fn apply_reflection_entry(
         }
         return Ok((WriteResult::Merged { existing_id }, true));
     }
-    if dataset.active().len() >= policy.max_entries {
+    if crate::domain::effective_active_count(dataset.active()) >= policy.max_entries {
         let candidates = eviction_candidates(dataset.active(), 3, entry.created_at);
         let ids = candidates
             .iter()
@@ -1624,7 +1650,7 @@ fn apply_reflection_entry(
             }
         });
         dataset.archive_mut().extend(moved);
-        if dataset.active().len() >= policy.max_entries {
+        if crate::domain::effective_active_count(dataset.active()) >= policy.max_entries {
             return Err(reflection_capacity_error());
         }
     }

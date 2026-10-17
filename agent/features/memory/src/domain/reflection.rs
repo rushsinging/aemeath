@@ -1,4 +1,5 @@
 use super::{MemoryCategory, MemoryEntry, MemoryError, MemoryId, MemoryLayer};
+use crate::domain::policy::{jaccard_token_sets, token_set};
 use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
@@ -74,6 +75,25 @@ pub type ReflectionResult<T> = Result<T, ReflectionError>;
 
 /// Reflect prompt 容量预算：注入当前 active 数、收敛目标与硬上限。
 ///
+/// `target_active_entries` 是 LLM 应收敛到的目标；`max_entries` 是层硬上限。
+/// 二者差值是后续 `memory add` 缓冲。NEVER 用本结构做输入截断。
+/// #1987：corpus 现状里的高相似重复对（行序号与 prompt 引用契约同源）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ReflectionDuplicatePair {
+    pub left_ordinal: usize,
+    pub right_ordinal: usize,
+    pub score: f64,
+}
+
+/// #1987：注入 prompt 的 corpus 现状快照（project 层）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReflectionCorpusStatus {
+    pub archive_count: usize,
+    /// 按 decision/fact/preference/pattern/pitfall 固定序，只含计数 > 0 的类目。
+    pub category_counts: Vec<(MemoryCategory, usize)>,
+    pub duplicate_pairs: Vec<ReflectionDuplicatePair>,
+}
+
 /// `target_active_entries` 是 LLM 应收敛到的目标；`max_entries` 是层硬上限。
 /// 二者差值是后续 `memory add` 缓冲。NEVER 用本结构做输入截断。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -488,7 +508,11 @@ impl ReflectionEngine {
   NEVER 编造列表中不存在的序号，NEVER 用标签、正文或任何其他标识充当引用。
   正确示例："outdated_memories": ["M2"]。
   错误示例："outdated_memories": ["[Decision][some-tag]"] 或 ["some-tag-slug"]。
-- outdated_memories 填被新事实推翻、不应再注入的条目序号。
+- outdated_memories 填应清除的条目序号，三类依据：
+  ① 被新事实推翻、不应再注入；② 噪音：单次交付流水账（squash/CLOSED/清分支/
+  安装版本推进）、已时过境迁的状态快照（磁盘空间、待 CI、进度百分比等）；
+  ③ 越界：与本项目无关的内容（其它项目、通用环境琐事）——它们不属于本 corpus。
+  清除噪音与越界条目不算「为凑数强制淘汰」，是维护 corpus 卫生的正当理由。
 - suggested_memories[].synthesizes 只在**归纳多条已有记忆**时填这些条目序号。
   单条来源不是归纳（那只是改写），此时留空数组——不足两条来源的归纳 MUST NOT
   产出。结论被新证据修正时在正文里写「曾…现…」，不要输出置信度数字。
@@ -499,6 +523,10 @@ impl ReflectionEngine {
     成功落盘后 active MUST ≤ target。当 active > target 时，MUST 通过 outdated_memories（将过时条目归档出 active）/
     supersedes / synthesizes 收敛；系统不会机械裁剪凑数，未达标整批不写。
     当 active ≤ target 时不要为凑数而强制淘汰；仅标记真正过时或被取代的条目。
+  - 判断重复/合并时，issue/PR 编号、日期、版本号本身不构成语义相似性依据——同编号的两条未必重复，编号不同的两条可能重复；以内容实质判断。
+  - suggested_memories[].content MUST NOT 携带 issue/PR 编号、commit hash、
+    日期戳、版本串等标识性流水信息；归纳旧条目时只提取结论本身（结构性
+    事实、口径、教训），NEVER 复制其交付痕迹。
   - 禁止建议 ephemeral fact：单次 PR squash/CLOSED/清分支、CLI 安装版本推进等流水账；此类应进 outdated_memories 或根本不写。
   - 没有内容时输出空数组。
 
@@ -509,6 +537,7 @@ JSON 格式：
     "outdated_memories": ["M3"]
 }}
 
+{corpus_status}
 # 当前项目记忆
 {project_memory}
 
@@ -527,8 +556,13 @@ Requirements:
   any other identifier as a reference.
   Good: "outdated_memories": ["M2"].
   Bad: "outdated_memories": ["[Decision][some-tag]"] or ["some-tag-slug"].
-- outdated_memories lists the ordinals of entries superseded by new facts and
-  that must stop being injected.
+- outdated_memories lists the ordinals of entries to remove, on three grounds:
+  ① superseded by new facts and must stop being injected; ② noise entries:
+  one-off delivery logs (squash/CLOSED/branch cleanup, install version bumps)
+  and stale status snapshots (disk space, pending CI, progress percentages);
+  ③ off-project content unrelated to this project (other projects, generic
+  environment trivia) — it does not belong in this corpus. Removing noise and
+  off-project entries is corpus hygiene, not quota-forced eviction.
 - Fill suggested_memories[].synthesizes with the ordinals ONLY when this
   suggestion combines several existing memories into a new conclusion. A single
   source is not a synthesis — it is a restatement — so leave it empty; a
@@ -545,6 +579,14 @@ Requirements:
     (archives outdated entries out of active) / supersedes / synthesizes; the system never mechanically trims to target,
     and a miss fails the whole apply with no writes.
     When active ≤ target, do not force eviction just to hit a quota; only mark truly outdated or replaced entries.
+  - When judging duplicates or merges, issue/PR numbers, dates, and version
+    strings do not by themselves establish semantic similarity — two entries
+    sharing a number may differ, two entries with different numbers may be
+    duplicates; judge by substance of the content.
+  - suggested_memories[].content MUST NOT carry issue/PR numbers, commit
+    hashes, date stamps, or version strings as identification debris; when
+    synthesizing older entries, extract only the conclusion itself (structural
+    facts, decisions, lessons) and NEVER copy their delivery traces.
   - Never suggest ephemeral facts: one-off PR squash/CLOSED/branch cleanup, CLI install version bumps, etc.
     Put those in outdated_memories or omit them.
   - Output empty arrays when there is nothing.
@@ -556,6 +598,7 @@ JSON format:
     "outdated_memories": ["M3"]
 }}
 
+{corpus_status}
 # Current project memory
 {project_memory}
 
@@ -572,8 +615,13 @@ impl ReflectionEngine {
         recent_summary: &str,
         lang: &str,
         capacity: ReflectionCapacityBudget,
+        corpus_status: Option<&ReflectionCorpusStatus>,
     ) -> String {
+        let corpus_status = corpus_status
+            .map(|status| Self::corpus_status_section(status, lang))
+            .unwrap_or_default();
         Self::prompt_template(lang)
+            .replace("{corpus_status}", &corpus_status)
             .replace("{project_memory}", project_memory)
             .replace("{recent_summary}", recent_summary)
             .replace("{active_count}", &capacity.active_count.to_string())
@@ -667,6 +715,190 @@ impl ReflectionEngine {
         })
     }
 
+    /// #1987：全量两两词法相似度（预分词集合），返回 ≥ 阈值的 top-K 对
+    /// （score 降序、行序号升序 tie-break）。序号与 `format_memory_summary`
+    /// 的 M 序号同源（同一 entries 切片按下标 +1）。
+    pub fn top_similar_pairs(
+        entries: &[MemoryEntry],
+        threshold: f64,
+        top_k: usize,
+    ) -> Vec<ReflectionDuplicatePair> {
+        let token_sets: Vec<_> = entries
+            .iter()
+            .map(|entry| token_set(&entry.content))
+            .collect();
+        let mut pairs = Vec::new();
+        for left in 0..entries.len() {
+            for right in (left + 1)..entries.len() {
+                let score = jaccard_token_sets(&token_sets[left], &token_sets[right]);
+                if score >= threshold {
+                    pairs.push(ReflectionDuplicatePair {
+                        left_ordinal: left + 1,
+                        right_ordinal: right + 1,
+                        score,
+                    });
+                }
+            }
+        }
+        pairs.sort_by(|left, right| {
+            right
+                .score
+                .partial_cmp(&left.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.left_ordinal.cmp(&right.left_ordinal))
+                .then_with(|| left.right_ordinal.cmp(&right.right_ordinal))
+        });
+        pairs.truncate(top_k);
+        pairs
+    }
+
+    /// #1987 两步反思的 Step 1（去噪）prompt：不带对话摘要（噪音判断靠
+    /// 条目自身），输出仅 outdated_memories 单字段。
+    pub fn build_noise_prompt(
+        &self,
+        project_memory: &str,
+        lang: &str,
+        capacity: ReflectionCapacityBudget,
+        corpus_status: Option<&ReflectionCorpusStatus>,
+    ) -> String {
+        let corpus_status = corpus_status
+            .map(|status| Self::corpus_status_section(status, lang))
+            .unwrap_or_default();
+        Self::noise_prompt_template(lang)
+            .replace("{corpus_status}", &corpus_status)
+            .replace("{project_memory}", project_memory)
+            .replace("{active_count}", &capacity.active_count.to_string())
+            .replace(
+                "{target_active_entries}",
+                &capacity.target_active_entries.to_string(),
+            )
+            .replace("{max_entries}", &capacity.max_entries.to_string())
+    }
+
+    fn noise_prompt_template(lang: &str) -> &'static str {
+        if lang == "zh" {
+            r#"你是 Aemeath 的 Reflection 去噪引擎。请审查当前项目记忆列表，找出应清除的条目。
+
+清除依据（三类）：
+① 被新事实推翻、不应再注入；
+② 噪音：单次交付流水账（squash/CLOSED/清分支/安装版本推进）、已时过境迁的状态快照（磁盘空间、待 CI、进度百分比等）；
+③ 越界：与本项目无关的内容（其它项目、通用环境琐事）——它们不属于本 corpus。
+判断时 issue/PR 编号、日期、版本号本身不构成保留或清除的依据，以内容实质判断。
+当前 active={active_count}，收敛目标 target={target_active_entries}，硬上限 hard_cap={max_entries}。
+本步只做清除、NEVER 新增：清除是 corpus 卫生，不算为凑数强制淘汰；没有可清除条目时输出空数组。
+
+只输出 JSON，不要输出 Markdown：
+{{
+    "outdated_memories": ["M3"]
+}}
+
+{corpus_status}
+# 当前项目记忆
+{project_memory}"#
+        } else {
+            r#"You are the Aemeath Reflection noise-removal engine. Review the current project memory list and identify entries to remove.
+
+Removal grounds (three):
+① superseded by new facts and must stop being injected;
+② noise entries: one-off delivery logs (squash/CLOSED/branch cleanup, install version bumps) and stale status snapshots (disk space, pending CI, progress percentages);
+③ off-project content unrelated to this project (other projects, generic environment trivia) — it does not belong in this corpus.
+Issue/PR numbers, dates, and version strings by themselves are neither grounds to keep nor to remove; judge by substance.
+Current active={active_count}, converge target={target_active_entries}, hard cap={max_entries}.
+This step only removes and NEVER adds: removal is corpus hygiene, not quota-forced eviction; output an empty array when nothing qualifies.
+
+Output JSON only, no Markdown:
+{{
+    "outdated_memories": ["M3"]
+}}
+
+{corpus_status}
+# Current project memory
+{project_memory}"#
+        }
+    }
+
+    /// #1987：渲染 corpus 现状段（含标题与收敛指令）；随 `lang` 双语。
+    pub fn corpus_status_section(status: &ReflectionCorpusStatus, lang: &str) -> String {
+        let total: usize = status.category_counts.iter().map(|(_, count)| count).sum();
+        let distribution = status
+            .category_counts
+            .iter()
+            .map(|(category, count)| format!("{}={}", Self::category_label(*category), count))
+            .collect::<Vec<_>>()
+            .join(", ");
+        if lang == "zh" {
+            let pairs = if status.duplicate_pairs.is_empty() {
+                "  - 未检出高相似对".to_string()
+            } else {
+                status
+                    .duplicate_pairs
+                    .iter()
+                    .map(|pair| {
+                        format!(
+                            "  - M{} × M{}（{:.2}）",
+                            pair.left_ordinal, pair.right_ordinal, pair.score
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(
+                        "
+",
+                    )
+            };
+            format!(
+                "# 记忆库现状
+- active 分类分布：{distribution}（共 {total}）
+- archive={}
+- 高相似对（J ≥ {:.2}，建议合并）：
+{pairs}
+- 高相似对清单中每一对，MUST 给出 synthesizes（合并为一条新记忆并引用两侧行号），或说明为何保留两条。
+- 当 active ≥ target 时，新增建议需搭配等量淘汰（outdated_memories / supersedes），NEVER 只增不减。",
+                status.archive_count,
+                crate::domain::constants::REFLECT_DUPLICATE_PAIR_THRESHOLD,
+            )
+        } else {
+            let pairs = if status.duplicate_pairs.is_empty() {
+                "  - no high-similarity pairs detected".to_string()
+            } else {
+                status
+                    .duplicate_pairs
+                    .iter()
+                    .map(|pair| {
+                        format!(
+                            "  - M{} × M{} ({:.2})",
+                            pair.left_ordinal, pair.right_ordinal, pair.score
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(
+                        "
+",
+                    )
+            };
+            format!(
+                "# Corpus status
+- active category distribution: {distribution} (total {total})
+- archive={}
+- High-similarity pairs (J ≥ {:.2}, merge candidates):
+{pairs}
+- For every listed pair you must produce a synthesizes suggestion merging both sides (citing both ordinals), or explain why both must stay.
+- When active ≥ target, each new suggestion must be paired with an equal amount of eviction (outdated_memories / supersedes); NEVER add without reducing.",
+                status.archive_count,
+                crate::domain::constants::REFLECT_DUPLICATE_PAIR_THRESHOLD,
+            )
+        }
+    }
+
+    fn category_label(category: MemoryCategory) -> &'static str {
+        match category {
+            MemoryCategory::Decision => "decision",
+            MemoryCategory::Fact => "fact",
+            MemoryCategory::Preference => "preference",
+            MemoryCategory::Pattern => "pattern",
+            MemoryCategory::Pitfall => "pitfall",
+        }
+    }
+
     /// 渲染反思输入的记忆列表：每行以本次运行内稳定的行序号开头
     /// （`- [M1] [Decision][tag] content`），同时返回序号表。模型 NEVER 看到
     /// UUID；解析模型输出时经 [`ReflectionReferenceTable`] 映射回真实 id。
@@ -729,3 +961,7 @@ impl ReflectionEngine {
 #[cfg(test)]
 #[path = "reflection_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "reflection_corpus_status_tests.rs"]
+mod corpus_status_tests;

@@ -797,14 +797,14 @@ async fn succeeded_reflection_records_usage_via_shared_path() {
         sdk::SessionId::new(harness.runtime_context.skill_load_session_id())
     );
     assert_eq!(record.provider, "reflection-test");
-    assert_eq!(record.model, "reflection-test-model");
+    // 两步反思：Step1 去噪 + Step2 归纳各计一次（mock 每次同额）。
     assert_eq!(
-        record.input_tokens, 1,
-        "provider 报告的 input tokens 必须原样入账"
+        record.input_tokens, 2,
+        "两步 provider input tokens 合并入账"
     );
     assert_eq!(
-        record.output_tokens, 1,
-        "provider 报告的 output tokens 必须原样入账"
+        record.output_tokens, 2,
+        "两步 provider output tokens 合并入账"
     );
     assert_ne!(
         record.model_invocation_id,

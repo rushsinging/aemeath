@@ -22,6 +22,7 @@ pub mod reflection {
         ReflectionRecord, ReflectionReferenceTable, ReflectionSafeSummary, ReflectionStatus,
         ReflectionTokenUsage, ReflectionTrigger,
     };
+    pub use crate::domain::{ReflectionCorpusStatus, ReflectionDuplicatePair, ReflectionEngine};
     pub use crate::ports::ReflectionApplyResult;
 }
 
