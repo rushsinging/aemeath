@@ -804,7 +804,7 @@ impl MemoryPort for InMemoryMemory {
             .filter(|stored| stored.layer == entry.layer)
             .cloned()
             .collect::<Vec<_>>();
-        if layer_entries.len() >= self.policy.max_entries {
+        if crate::domain::effective_active_count(&layer_entries) >= self.policy.max_entries {
             return Ok(WriteResult::NeedsEviction {
                 candidates: eviction_candidates(&layer_entries, 3, entry.created_at),
             });
@@ -987,7 +987,7 @@ impl MemoryPort for InMemoryMemory {
             .filter(|entry| entry.layer == archived.layer)
             .cloned()
             .collect::<Vec<_>>();
-        if layer_entries.len() >= self.policy.max_entries {
+        if crate::domain::effective_active_count(&layer_entries) >= self.policy.max_entries {
             return Ok(RestoreResult::NeedsEviction {
                 candidates: eviction_candidates(&layer_entries, 3, archived.last_confirmed_at),
             });
@@ -1009,7 +1009,8 @@ impl MemoryPort for InMemoryMemory {
                 .filter(|entry| entry.layer == layer)
                 .cloned()
                 .collect::<Vec<_>>();
-            let excess = layer_entries.len().saturating_sub(self.policy.max_entries);
+            let excess = crate::domain::effective_active_count(&layer_entries)
+                .saturating_sub(self.policy.max_entries);
             candidates.extend(eviction_candidates(
                 &layer_entries,
                 excess,
@@ -1140,7 +1141,7 @@ fn apply_reflection_entry(
         .filter(|stored| stored.layer == entry.layer)
         .cloned()
         .collect::<Vec<_>>();
-    if layer_entries.len() >= policy.max_entries {
+    if crate::domain::effective_active_count(&layer_entries) >= policy.max_entries {
         let candidates = eviction_candidates(&layer_entries, 3, entry.created_at);
         let ids = candidates
             .iter()

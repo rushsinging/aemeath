@@ -37,6 +37,16 @@ pub fn is_reflection_input_eligible(entry: &MemoryEntry, now: u64) -> bool {
     is_injection_eligible(entry, now)
 }
 
+/// 容量口径（#1987 用户拍板）：active 中的 outdated / 被取代残留已不可注入，
+/// MUST NOT 计入 max_entries 与 reflect 收敛目标——max_entries / target 约束的
+/// 都是「有效 active」。
+pub fn effective_active_count(entries: &[MemoryEntry]) -> usize {
+    entries
+        .iter()
+        .filter(|entry| !entry.outdated && entry.superseded_by.is_none())
+        .count()
+}
+
 /// 把 `target` 的取代关系指向 `superseding`，返回是否写入。
 ///
 /// 找不到 `target` 时返回 `false`，调用方据此判定为「跳过」而非写坏

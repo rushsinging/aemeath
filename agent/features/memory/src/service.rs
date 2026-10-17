@@ -982,7 +982,7 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                     }
                     return Ok((WriteResult::Merged { existing_id }, true));
                 }
-                if dataset.active().len() >= policy.max_entries {
+                if crate::domain::effective_active_count(dataset.active()) >= policy.max_entries {
                     return Ok((
                         WriteResult::NeedsEviction {
                             candidates: eviction_candidates(dataset.active(), 3, entry.created_at),
@@ -1328,7 +1328,8 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                     else {
                         return Ok((RestoreResult::NotFound, false));
                     };
-                    if dataset.active().len() >= policy.max_entries {
+                    if crate::domain::effective_active_count(dataset.active()) >= policy.max_entries
+                    {
                         return Ok((
                             RestoreResult::NeedsEviction {
                                 candidates: eviction_candidates(
@@ -1608,7 +1609,7 @@ fn apply_reflection_entry(
         }
         return Ok((WriteResult::Merged { existing_id }, true));
     }
-    if dataset.active().len() >= policy.max_entries {
+    if crate::domain::effective_active_count(dataset.active()) >= policy.max_entries {
         let candidates = eviction_candidates(dataset.active(), 3, entry.created_at);
         let ids = candidates
             .iter()
@@ -1624,7 +1625,7 @@ fn apply_reflection_entry(
             }
         });
         dataset.archive_mut().extend(moved);
-        if dataset.active().len() >= policy.max_entries {
+        if crate::domain::effective_active_count(dataset.active()) >= policy.max_entries {
             return Err(reflection_capacity_error());
         }
     }
