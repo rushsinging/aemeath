@@ -524,6 +524,9 @@ impl ReflectionEngine {
     supersedes / synthesizes 收敛；系统不会机械裁剪凑数，未达标整批不写。
     当 active ≤ target 时不要为凑数而强制淘汰；仅标记真正过时或被取代的条目。
   - 判断重复/合并时，issue/PR 编号、日期、版本号本身不构成语义相似性依据——同编号的两条未必重复，编号不同的两条可能重复；以内容实质判断。
+  - suggested_memories[].content MUST NOT 携带 issue/PR 编号、commit hash、
+    日期戳、版本串等标识性流水信息；归纳旧条目时只提取结论本身（结构性
+    事实、口径、教训），NEVER 复制其交付痕迹。
   - 禁止建议 ephemeral fact：单次 PR squash/CLOSED/清分支、CLI 安装版本推进等流水账；此类应进 outdated_memories 或根本不写。
   - 没有内容时输出空数组。
 
@@ -580,6 +583,10 @@ Requirements:
     strings do not by themselves establish semantic similarity — two entries
     sharing a number may differ, two entries with different numbers may be
     duplicates; judge by substance of the content.
+  - suggested_memories[].content MUST NOT carry issue/PR numbers, commit
+    hashes, date stamps, or version strings as identification debris; when
+    synthesizing older entries, extract only the conclusion itself (structural
+    facts, decisions, lessons) and NEVER copy their delivery traces.
   - Never suggest ephemeral facts: one-off PR squash/CLOSED/branch cleanup, CLI install version bumps, etc.
     Put those in outdated_memories or omit them.
   - Output empty arrays when there is nothing.
