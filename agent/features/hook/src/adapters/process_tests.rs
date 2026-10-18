@@ -1,3 +1,4 @@
+#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;

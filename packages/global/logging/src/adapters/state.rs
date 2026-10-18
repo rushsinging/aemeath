@@ -14,5 +14,7 @@ pub(crate) static UNKNOWN_TARGET_REPORTS: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) static LOGGER: OnceLock<&'static UnifiedLogger> = OnceLock::new();
 
-/// 进程级保存位：stderr 只路由一次，副本随首次路由写入。
+/// 进程级保存位：stderr 只路由一次，副本随首次路由写入
+/// （仅 Unix 路由面消费；Windows 分支不读，放行跨目标 dead_code）。
+#[cfg_attr(not(unix), allow(dead_code))]
 pub(crate) static SAVED_STDERR: OnceLock<SavedStderr> = OnceLock::new();

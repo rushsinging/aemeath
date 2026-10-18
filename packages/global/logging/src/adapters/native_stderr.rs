@@ -9,18 +9,24 @@ use std::path::Path;
 #[cfg(unix)]
 use std::os::fd::AsRawFd;
 
-/// 路由前保存的原生 stderr 描述符副本，供致命错误重新在终端可见。
+/// 路由前保存的原生 stderr 描述符副本，供致命错误重新在终端可见
+/// （仅 Unix 路由面消费；Windows 分支不构造，放行跨目标 dead_code）。
+#[cfg_attr(not(unix), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct SavedStderr {
     fd: i32,
 }
 
+/// 终端身份指纹（仅 Unix 路由面使用；放行跨目标 dead_code）。
+#[cfg_attr(not(unix), allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct TerminalIdentity {
     device: u64,
     inode: u64,
 }
 
+/// Unix 路由抽象（Windows 分支不实现；放行跨目标 dead_code）。
+#[cfg_attr(not(unix), allow(dead_code))]
 trait NativeStderrOps {
     type Target;
 
@@ -47,6 +53,7 @@ pub(super) fn route_native_stderr(settings: &LoggingSettings) -> io::Result<()> 
     }
 }
 
+#[cfg_attr(not(unix), allow(dead_code))]
 fn route_native_stderr_with<Ops>(settings: &LoggingSettings, ops: &Ops) -> io::Result<()>
 where
     Ops: NativeStderrOps,

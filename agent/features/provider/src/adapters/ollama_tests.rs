@@ -118,13 +118,13 @@ async fn llm_client_ollama_invocation_stream_is_single_request_pull_stream() {
 
 #[test]
 fn tool_result_images_become_following_user_message_with_bare_base64() {
-    let provider = OllamaProvider::new(
+    let provider = OllamaProvider::new_with_user_agent(
         String::new(),
         Some("http://localhost:11434".to_string()),
         Some("test-model".to_string()),
         8192,
         false,
-        600,
+        "aemeath-test".to_string(),
     );
     let messages = vec![Message {
         role: share::message::Role::User,
