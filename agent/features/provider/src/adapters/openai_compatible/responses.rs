@@ -107,6 +107,7 @@ fn push_responses_message(
 
 fn user_content_to_responses_input(
     content_blocks: &[share::message::ContentBlock],
+    pending_tool_images: &mut Vec<(String, String)>,
 ) -> Vec<serde_json::Value> {
     let mut input = Vec::new();
     let mut message_content = Vec::new();
@@ -134,6 +135,10 @@ fn user_content_to_responses_input(
                 ..
             } => {
                 push_responses_message(&mut input, "user", &mut message_content);
+                // #1992：function_call_output 不承载图片，图块摘出由后续 user 消息承接。
+                pending_tool_images.extend(
+                    crate::adapters::tool_result_images::extract_tool_result_images(content),
+                );
                 let output = text.clone().unwrap_or_else(|| match content {
                     serde_json::Value::String(output) => output.clone(),
                     _ => content.to_string(),
@@ -177,11 +182,24 @@ fn user_content_to_responses_input(
 /// tool results 用 `{ type: "function_call_output", call_id, output }` 表示。
 fn messages_to_responses_input(messages: &[Message]) -> Vec<serde_json::Value> {
     let mut input = Vec::new();
+    // #1992：tool_result 图块累积；在下一批非 tool-only 消息（或末尾）前投递。
+    let mut pending_tool_images: Vec<(String, String)> = Vec::new();
 
     for msg in messages {
+        let is_tool_result_only = !msg.content.is_empty()
+            && msg
+                .content
+                .iter()
+                .all(|b| matches!(b, share::message::ContentBlock::ToolResult { .. }));
+        if !is_tool_result_only {
+            flush_responses_tool_images(&mut input, &mut pending_tool_images);
+        }
         match msg.role {
             share::message::Role::User => {
-                input.extend(user_content_to_responses_input(&msg.content));
+                input.extend(user_content_to_responses_input(
+                    &msg.content,
+                    &mut pending_tool_images,
+                ));
             }
             share::message::Role::Assistant => {
                 // 提取 text
@@ -224,7 +242,40 @@ fn messages_to_responses_input(messages: &[Message]) -> Vec<serde_json::Value> {
         }
     }
 
+    // #1992：末尾残余（图来自最后一批 tool 消息）同样需要投递。
+    flush_responses_tool_images(&mut input, &mut pending_tool_images);
+
     input
+}
+
+/// #1992：把累积的 tool_result 图块投递为一条 user 消息（input_image 数组 + 说明文本）。
+///
+/// 在下一个非 tool-only 消息之前、或遍历结束后调用；空列表为 no-op。
+fn flush_responses_tool_images(
+    input: &mut Vec<serde_json::Value>,
+    pending_tool_images: &mut Vec<(String, String)>,
+) {
+    if pending_tool_images.is_empty() {
+        return;
+    }
+    let mut content: Vec<serde_json::Value> = pending_tool_images
+        .drain(..)
+        .map(|(media_type, base64)| {
+            serde_json::json!({
+                "type": "input_image",
+                "image_url": format!("data:{media_type};base64,{base64}"),
+            })
+        })
+        .collect();
+    content.push(serde_json::json!({
+        "type": "input_text",
+        "text": "Images from the tool results above."
+    }));
+    input.push(serde_json::json!({
+        "type": "message",
+        "role": "user",
+        "content": serde_json::Value::Array(content)
+    }));
 }
 
 #[cfg(test)]

@@ -230,3 +230,50 @@ fn test_build_responses_request_body_injects_tools_from_flat_schema() {
         "string"
     );
 }
+
+#[test]
+fn tool_result_images_become_user_input_image_after_function_call_output() {
+    let messages = vec![Message {
+        role: share::message::Role::User,
+        content: vec![share::message::ContentBlock::ToolResult {
+            tool_use_id: "call_1".to_string(),
+            content: serde_json::json!([
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": "QUJD",
+                    }
+                },
+                {"type": "text", "text": "Image: /tmp/a.png"},
+            ]),
+            is_error: false,
+            text: None,
+        }],
+        metadata: None,
+    }];
+
+    let input = messages_to_responses_input(&messages);
+
+    let output_index = input
+        .iter()
+        .position(|v| v["type"] == "function_call_output")
+        .expect("function_call_output present");
+    let image_index = input
+        .iter()
+        .position(|v| {
+            v["content"]
+                .as_array()
+                .map(|blocks| {
+                    blocks
+                        .iter()
+                        .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("input_image"))
+                })
+                .unwrap_or(false)
+        })
+        .expect("input_image carrier present");
+    assert!(output_index < image_index, "{input:#?}");
+    let image = &input[image_index]["content"][0];
+    assert_eq!(image["image_url"], "data:image/png;base64,QUJD");
+}

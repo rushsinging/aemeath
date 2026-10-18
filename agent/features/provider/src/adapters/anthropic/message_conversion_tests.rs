@@ -297,3 +297,41 @@ fn cache_breakpoint_two_messages_hits_first() {
         "ephemeral"
     );
 }
+
+#[test]
+fn tool_result_image_blocks_pass_through_in_content_array() {
+    // #1992：Anthropic 协议原生支持 tool_result.content 内嵌 image 块，
+    // 此测试锁定该透传行为不被未来「text-first 收敛」误伤。
+    let messages = vec![Message {
+        role: Role::User,
+        content: vec![ContentBlock::ToolResult {
+            tool_use_id: "call_1".to_string(),
+            content: serde_json::json!([
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": "QUJD",
+                    }
+                },
+                {"type": "text", "text": "Image: /tmp/a.png"},
+            ]),
+            is_error: false,
+            text: None,
+        }],
+        metadata: None,
+    }];
+
+    let converted = convert_messages(&messages);
+
+    let block = &converted[0]["content"][0];
+    assert_eq!(block["type"], "tool_result");
+    let array = block["content"].as_array().expect("content array");
+    let image = array
+        .iter()
+        .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("image"))
+        .expect("image block present");
+    assert_eq!(image["source"]["data"], "QUJD");
+    assert_eq!(image["source"]["media_type"], "image/png");
+}
