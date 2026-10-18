@@ -79,6 +79,8 @@ impl OllamaProviderConversion for OllamaProvider {
 
         // Process remaining messages (skip the leading system-reminder ones)
         // 数组索引切片（消息列表），非文本字节切片。
+        // #1992：tool_result 图块累积；在下一批非 tool-only 消息（或末尾）前投递。
+        let mut pending_tool_images: Vec<(String, String)> = Vec::new();
         for msg in &messages[first_non_reminder..] {
             // allow unsafe_text_op
             let mut text_parts: Vec<String> = Vec::new();
@@ -113,15 +115,14 @@ impl OllamaProviderConversion for OllamaProvider {
                         content,
                         ..
                     } => {
-                        let text = match content {
-                            serde_json::Value::String(s) => s.clone(),
-                            serde_json::Value::Array(parts) => parts
-                                .iter()
-                                .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
-                                .collect::<Vec<_>>()
-                                .join(""),
-                            _ => content.to_string(),
-                        };
+                        // #1992：tool 消息不承载图片，图块摘出由后续 user 消息承接。
+                        pending_tool_images.extend(
+                            crate::adapters::tool_result_images::extract_tool_result_images(
+                                content,
+                            ),
+                        );
+                        let text =
+                            crate::adapters::tool_result_images::extract_tool_result_text(content);
                         ollama_messages.push(serde_json::json!({
                             "role": "tool",
                             "content": text
@@ -149,6 +150,10 @@ impl OllamaProviderConversion for OllamaProvider {
                 continue;
             }
 
+            // #1992：任何后续消息之前，先把已累积的 tool_result 图以 user
+            // 消息投递（保证图消息紧随这批 tool 消息、不插入工具消息之间）。
+            flush_tool_result_image_carrier(&mut ollama_messages, &mut pending_tool_images);
+
             let role = match msg.role {
                 Role::User => "user",
                 Role::Assistant => "assistant",
@@ -171,6 +176,9 @@ impl OllamaProviderConversion for OllamaProvider {
 
             ollama_messages.push(message);
         }
+
+        // #1992：末尾残余（图来自最后一批 tool 消息）同样需要投递。
+        flush_tool_result_image_carrier(&mut ollama_messages, &mut pending_tool_images);
 
         Ok(ollama_messages)
     }
@@ -234,4 +242,26 @@ impl OllamaProviderConversion for OllamaProvider {
 
         Ok(request_body)
     }
+}
+
+/// #1992：把累积的 tool_result 图块投递为一条 user 消息（native `images` 数组）。
+///
+/// 在下一个非 tool-only 消息之前、或遍历结束后调用；空列表为 no-op。
+/// ollama native format 的 images 为裸 base64 字符串（无 `data:` 前缀）。
+fn flush_tool_result_image_carrier(
+    ollama_messages: &mut Vec<serde_json::Value>,
+    pending_tool_images: &mut Vec<(String, String)>,
+) {
+    if pending_tool_images.is_empty() {
+        return;
+    }
+    let images: Vec<serde_json::Value> = pending_tool_images
+        .drain(..)
+        .map(|(_, data)| serde_json::Value::String(data))
+        .collect();
+    ollama_messages.push(serde_json::json!({
+        "role": "user",
+        "content": "Images from the tool results above.",
+        "images": serde_json::Value::Array(images)
+    }));
 }

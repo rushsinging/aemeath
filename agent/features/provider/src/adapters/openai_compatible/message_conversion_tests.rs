@@ -303,3 +303,122 @@ fn test_convert_messages_current_turn_without_thinking_keeps_historical() {
         Some(&serde_json::json!(""))
     );
 }
+
+fn tool_result_message_with_image(text: &str, base64: &str, tool_use_id: &str) -> Message {
+    // 形状对齐 to_llm_view 输出：image 块 + text 块，`text` 字段置 None。
+    Message {
+        role: Role::User,
+        content: vec![ContentBlock::ToolResult {
+            tool_use_id: tool_use_id.to_string(),
+            content: serde_json::json!([
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": base64,
+                    }
+                },
+                {"type": "text", "text": text},
+            ]),
+            is_error: false,
+            text: None,
+        }],
+        metadata: None,
+    }
+}
+
+fn assistant_tool_use_message(tool_use_ids: &[&str]) -> Message {
+    Message {
+        role: Role::Assistant,
+        content: tool_use_ids
+            .iter()
+            .map(|id| ContentBlock::ToolUse {
+                id: id.to_string(),
+                name: "Read".to_string(),
+                input: serde_json::json!({"file_path": "/tmp/a.png"}),
+            })
+            .collect(),
+        metadata: None,
+    }
+}
+
+#[test]
+fn tool_result_images_follow_tool_message_in_user_message() {
+    let messages = vec![
+        assistant_tool_use_message(&["call_1"]),
+        tool_result_message_with_image("Image: /tmp/a.png (10 bytes, image/png)", "QUJD", "call_1"),
+    ];
+
+    let converted = OpenAICompatibleProvider::convert_messages("", &messages, false).unwrap();
+
+    let tool_index = converted
+        .iter()
+        .position(|m| m.get("role").and_then(|v| v.as_str()) == Some("tool"))
+        .expect("tool message present");
+    let user_index = converted
+        .iter()
+        .position(|m| m.get("role").and_then(|v| v.as_str()) == Some("user"))
+        .expect("image carrier user message present");
+    assert!(tool_index < user_index, "{converted:#?}");
+    assert_eq!(
+        converted[tool_index]["content"],
+        "Image: /tmp/a.png (10 bytes, image/png)"
+    );
+
+    let content = converted[user_index]["content"]
+        .as_array()
+        .expect("user content array");
+    let image = content
+        .iter()
+        .find(|b| b.get("type").and_then(|v| v.as_str()) == Some("image_url"))
+        .expect("image_url block present");
+    assert_eq!(image["image_url"]["url"], "data:image/png;base64,QUJD");
+}
+
+#[test]
+fn multiple_tool_result_images_merge_into_one_user_message() {
+    let messages = vec![
+        assistant_tool_use_message(&["call_1", "call_2"]),
+        tool_result_message_with_image("Image: /tmp/a.png", "QUJD", "call_1"),
+        tool_result_message_with_image("Image: /tmp/b.png", "REVG", "call_2"),
+    ];
+
+    let converted = OpenAICompatibleProvider::convert_messages("", &messages, false).unwrap();
+
+    let user_messages = converted
+        .iter()
+        .filter(|m| m.get("role").and_then(|v| v.as_str()) == Some("user"))
+        .collect::<Vec<_>>();
+    assert_eq!(user_messages.len(), 1, "{converted:#?}");
+    let images = user_messages[0]["content"]
+        .as_array()
+        .expect("content array")
+        .iter()
+        .filter(|b| b.get("type").and_then(|v| v.as_str()) == Some("image_url"))
+        .count();
+    assert_eq!(images, 2, "{converted:#?}");
+}
+
+#[test]
+fn tool_result_without_images_emits_no_extra_user_message() {
+    let messages = vec![Message {
+        role: Role::User,
+        content: vec![ContentBlock::ToolResult {
+            tool_use_id: "call_1".to_string(),
+            content: serde_json::json!("plain output"),
+            is_error: false,
+            text: None,
+        }],
+        metadata: None,
+    }];
+
+    let converted = OpenAICompatibleProvider::convert_messages("", &messages, false).unwrap();
+
+    assert!(
+        converted
+            .iter()
+            .all(|m| m.get("role").and_then(|v| v.as_str()) != Some("user")),
+        "{converted:#?}"
+    );
+}
