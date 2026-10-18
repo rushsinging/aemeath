@@ -64,7 +64,9 @@ impl BackgroundProcessSupervisor {
         }
     }
 
-    /// 派发即登记：任务从 ForegroundWaiting 起步，返回稳定 task id。
+    /// 派发即登记便捷封装（仅测试：生产路径一律用携带取消源的
+    /// [`Self::register_with_cancellation`]）。
+    #[cfg(test)]
     pub(crate) fn register(
         &self,
         identity: ToolCallIdentityData,
@@ -309,33 +311,6 @@ impl BackgroundProcessSupervisor {
             task.record.mark_finished(SystemTime::now());
         }
         Ok(changed)
-    }
-
-    /// 全部活跃任务失效（进程退出 / 恢复对账）；返回失效数量。
-    pub(crate) fn invalidate_all(&self, reason: BackgroundInvalidationReason) -> usize {
-        let mut tasks = self.tasks.lock().expect("后台进程表锁中毒");
-        let mut invalidated_count = 0;
-        for task in tasks.values_mut() {
-            if task.record.is_terminal() {
-                continue;
-            }
-            let advanced = task
-                .record
-                .clone()
-                .advance(BackgroundProcessState::Terminal(
-                    BackgroundProcessTerminalKind::Invalidated { reason },
-                ));
-            if let Ok(BackgroundProcessAdvance {
-                record,
-                changed: true,
-            }) = advanced
-            {
-                task.record = record;
-                task.record.mark_finished(SystemTime::now());
-                invalidated_count += 1;
-            }
-        }
-        invalidated_count
     }
 
     /// 单任务记录快照。

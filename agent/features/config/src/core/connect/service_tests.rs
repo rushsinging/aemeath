@@ -972,7 +972,7 @@ async fn wait_for_view(
     matches_view: impl Fn(&ConnectView) -> bool,
 ) -> ConnectView {
     for _ in 0..200 {
-        if let Some(view) = service.view(&session_id).await {
+        if let Some(view) = service.view(session_id).await {
             if matches_view(&view) {
                 return view;
             }

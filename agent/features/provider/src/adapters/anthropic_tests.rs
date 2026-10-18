@@ -39,7 +39,6 @@ fn custom_user_agent_is_sent_in_anthropic_headers() {
         Some("test-model".to_string()),
         8192,
         ReasoningLevel::Off,
-        60,
         "aemeath-test/1.0".to_string(),
     );
 
@@ -64,7 +63,6 @@ async fn anthropic_invocation_stream_returns_retryable_rate_limited_error_after_
         Some("test-model".to_string()),
         8192,
         ReasoningLevel::Off,
-        60,
     );
     let resolved = crate::ports::ResolvedInvocation::new(
         "test-model",
@@ -189,7 +187,6 @@ async fn invoke_stream_emits_ordered_deltas_and_single_completion_from_one_reque
         Some("test-model".to_string()),
         8192,
         ReasoningLevel::Off,
-        60,
     );
     let resolved = crate::ports::ResolvedInvocation::new(
         "test-model",
@@ -247,7 +244,6 @@ async fn invocation_stream_returns_context_too_long_on_413_without_retrying() {
         Some("test-model".to_string()),
         8192,
         ReasoningLevel::Off,
-        60,
     );
     let resolved = crate::ports::ResolvedInvocation::new(
         "test-model",
@@ -291,7 +287,6 @@ async fn invocation_stream_returns_upstream_unavailable_on_400_without_retrying(
         Some("test-model".to_string()),
         8192,
         ReasoningLevel::Off,
-        60,
     );
     let resolved = crate::ports::ResolvedInvocation::new(
         "test-model",
@@ -335,7 +330,6 @@ async fn invocation_stream_returns_retryable_rate_limited_on_429() {
         Some("test-model".to_string()),
         8192,
         ReasoningLevel::Off,
-        60,
     );
     let resolved = crate::ports::ResolvedInvocation::new(
         "test-model",
@@ -452,7 +446,6 @@ async fn invocation_stream_400_logs_final_failure_disposition() {
         Some("test-model".to_string()),
         8192,
         ReasoningLevel::Off,
-        60,
     );
     let resolved = crate::ports::ResolvedInvocation::new(
         "test-model",

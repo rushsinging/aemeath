@@ -49,3 +49,7 @@ libc = "0.2"
 insta = "1"
 tempfile = "3"
 tui-test-rs = "=0.1.0-beta.5"
+
+# 继承 workspace 零容忍 lint 基线（#1995）。
+[lints]
+workspace = true

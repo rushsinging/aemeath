@@ -1,6 +1,8 @@
 use crate::adapters::mcp::McpToolDef;
 use std::collections::HashMap;
 
+// 保留豁免：adapters.rs 注明 mcp_manager 辅助函数 re-export 保留备用（refs #61 D3），当前仅测试引用。
+#[allow(dead_code)]
 pub struct ToolListDiff {
     /// Tools present in the new list but absent from the old list.
     pub added: Vec<McpToolDef>,
@@ -11,6 +13,8 @@ pub struct ToolListDiff {
 }
 
 /// Compute added, removed, and changed MCP tools by tool name.
+// 保留豁免：adapters.rs 注明 mcp_manager 辅助函数 re-export 保留备用（refs #61 D3），当前仅测试引用。
+#[allow(dead_code)]
 pub fn diff_tools(old: &[McpToolDef], new: &[McpToolDef]) -> ToolListDiff {
     let old_by_name: HashMap<&str, &McpToolDef> =
         old.iter().map(|tool| (tool.name.as_str(), tool)).collect();
@@ -55,6 +59,8 @@ pub fn qualified_tool_name(server: &str, tool: &str) -> String {
 }
 
 /// Build registry-qualified names for tools removed from an MCP server.
+// 保留豁免：adapters.rs 注明 mcp_manager 辅助函数 re-export 保留备用（refs #61 D3），当前仅测试引用。
+#[allow(dead_code)]
 pub fn removed_qualified_tool_names(server: &str, removed: &[String]) -> Vec<String> {
     removed
         .iter()

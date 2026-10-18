@@ -69,7 +69,8 @@ jobs:
       - name: cargo clippy
         # --locked：Cargo.lock 与本地验证一致，防止 CI 重新解析依赖
         # 拉入新版 crate（如 async-trait 0.1.90+）触发 lint 差异。
-        run: cargo clippy --workspace --locked -- -D warnings
+        # --all-targets：测试代码同受零容忍约束。
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: cargo test
         run: cargo test --workspace --locked

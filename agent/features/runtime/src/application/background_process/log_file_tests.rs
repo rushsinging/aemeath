@@ -1,5 +1,5 @@
-//! 任务日志文件（#1890 输出直绑）测试：路径推导、创建、终态兜底 append、
-//! 区间读游标、快路径删除、session 级清理。
+//! 任务日志文件（#1890 输出直绑）测试：路径布局、创建、终态兜底 append、
+//! 区间读游标、快路径删除。
 
 use super::*;
 
@@ -28,18 +28,6 @@ fn session_logs_dir_uses_sidecar_layout_under_base() {
         dir,
         base.join("sess-1.background-process"),
         "平铺前缀式目录：不打破 sessions 既有平铺布局"
-    );
-}
-
-#[test]
-fn log_path_derives_from_session_and_process_id() {
-    let base = temp_base();
-    let process_id = process_id();
-    let log = TaskLogFile::path_for(&base, "sess-1", &process_id);
-    assert_eq!(
-        log,
-        base.join("sess-1.background-process")
-            .join(format!("{}.log", process_id.as_str()))
     );
 }
 
@@ -121,25 +109,4 @@ fn remove_deletes_file_for_fast_path() {
     let (log, _, _) = TaskLogFile::open(&base, "sess-1", &process_id).unwrap();
     log.remove().unwrap();
     assert!(!log.path().exists(), "快路径完成后不留垃圾文件");
-}
-
-#[test]
-fn remove_session_logs_clears_whole_session_namespace() {
-    let base = temp_base();
-    for _ in 0..3 {
-        let process_id = process_id();
-        let _ = TaskLogFile::open(&base, "sess-1", &process_id).unwrap();
-    }
-    let _ = TaskLogFile::open(&base, "sess-2", &process_id()).unwrap();
-
-    remove_session_logs(&base, "sess-1").unwrap();
-
-    assert!(
-        !base.join("sess-1.background-process").exists(),
-        "整个 session 目录清除"
-    );
-    assert!(
-        base.join("sess-2.background-process").exists(),
-        "其他 session 不受影响"
-    );
 }

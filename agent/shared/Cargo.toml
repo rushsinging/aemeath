@@ -22,3 +22,6 @@ bitflags = { version = "2", features = ["serde"] }
 logging = { path = "../../packages/global/logging" }
 utils = { path = "../../packages/global/utils" }
 
+# 继承 workspace 零容忍 lint 基线（#1995）。
+[lints]
+workspace = true

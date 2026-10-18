@@ -1,5 +1,4 @@
 use crate::adapters::mcp::McpClient;
-use crate::adapters::mcp_manager::McpConnectionManager;
 use crate::domain::types::mcp_manager::McpManagerResult;
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
@@ -114,6 +113,3 @@ impl TypedTool for McpToolWrapper {
         }
     }
 }
-
-/// Shared MCP connection manager
-pub type SharedMcpManager = Arc<McpConnectionManager>;

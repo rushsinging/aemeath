@@ -93,9 +93,7 @@ fn truncate_tool_search_result(value: Value) -> Option<Value> {
     let Value::Object(mut object) = value else {
         return None;
     };
-    let Some(tools) = object.remove("tools") else {
-        return None;
-    };
+    let tools = object.remove("tools")?;
     let Value::Array(tools) = tools else {
         return None;
     };

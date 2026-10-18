@@ -9,10 +9,14 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Read MCP resource tool
+// 保留豁免：尚未注册到 register_* 入口，按 adapters.rs 注释保留实现以备后续接线（refs #61 D3）。
+#[allow(dead_code)]
 pub struct ReadMcpResourceTool {
     pub clients: Arc<Mutex<Vec<Arc<Mutex<McpClient>>>>>,
 }
 
+// 保留豁免：随 ReadMcpResourceTool 一并保留待接线（refs #61 D3）。
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceContent {
     /// Resource URI
@@ -28,6 +32,8 @@ pub struct ResourceContent {
     pub blob_saved_to: Option<String>,
 }
 
+// 保留豁免：随 ReadMcpResourceTool 一并保留待接线（refs #61 D3）。
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize)]
 pub struct ReadMcpResourceOutput {
     pub contents: Vec<ResourceContent>,

@@ -38,7 +38,8 @@ pub(crate) struct AtomicDatasetMemoryStore {
 }
 
 impl AtomicDatasetMemoryStore {
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// 无 OS 文件锁根的便捷构造（进程内门闩）；仅测试使用，生产走 `with_lock_root`。
+    #[cfg(test)]
     pub fn new(
         storage: Arc<dyn storage_api::AtomicDatasetPort>,
         project: ProjectMemoryKey,

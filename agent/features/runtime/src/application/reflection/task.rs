@@ -245,7 +245,7 @@ impl ReflectionTaskAdapter {
     }
 
     /// 装配期绑定 status-line 事件发射器（与 chat sender 同源）。
-    pub fn set_active_emitter(
+    pub(crate) fn set_active_emitter(
         &mut self,
         emitter: Option<
             std::sync::Arc<

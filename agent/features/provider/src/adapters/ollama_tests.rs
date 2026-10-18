@@ -34,7 +34,6 @@ fn custom_user_agent_is_sent_in_ollama_headers() {
         Some("test-model".to_string()),
         8192,
         false,
-        60,
         "aemeath-test/1.0".to_string(),
     );
 

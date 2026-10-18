@@ -534,7 +534,8 @@ impl SessionStateMember {
             .and_then(|marker| marker.start_at.as_ref())
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// compact 摘要读访问器（仅测试断言使用；生产经 marker 序列化读）。
+    #[cfg(test)]
     pub fn compact_summary(&self) -> Option<&str> {
         self.compact.as_ref().map(|marker| marker.summary.as_str())
     }

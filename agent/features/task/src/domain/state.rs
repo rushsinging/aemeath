@@ -290,6 +290,7 @@ impl TaskStoreState {
         ))
     }
 
+    #[allow(dead_code)] // 预留：store.rs 保留的 Task-internal 能力之域实现（见 adapters/store.rs 说明）
     pub fn add_tag(
         &mut self,
         id: TaskIdData,
@@ -317,6 +318,7 @@ impl TaskStoreState {
         ))
     }
 
+    #[allow(dead_code)] // 预留：store.rs 保留的 Task-internal 能力之域实现（见 adapters/store.rs 说明）
     pub fn remove_tag(
         &mut self,
         id: TaskIdData,
@@ -576,6 +578,7 @@ impl TaskStoreState {
         false
     }
 
+    #[allow(dead_code)] // 预留：store.rs 保留的 Task-internal 能力之域实现（见 adapters/store.rs 说明）
     pub fn pause_batch(
         &mut self,
         id: BatchIdData,
@@ -608,6 +611,7 @@ impl TaskStoreState {
         ))
     }
 
+    #[allow(dead_code)] // 预留：store.rs 保留的 Task-internal 能力之域实现（见 adapters/store.rs 说明）
     pub fn resume_batch(
         &mut self,
         id: BatchIdData,
@@ -695,6 +699,7 @@ impl TaskStoreState {
     /// updated; `Paused`/`Archived` batches return a typed error and are left
     /// completely unchanged. Calls that would not change any observable field
     /// are idempotent no-ops and never advance the revision.
+    #[allow(dead_code)] // 预留：store.rs 保留的 Task-internal 能力之域实现（见 adapters/store.rs 说明）
     pub fn record_batch_turn(
         &mut self,
         id: BatchIdData,
@@ -725,6 +730,7 @@ impl TaskStoreState {
         ))
     }
 
+    #[allow(dead_code)] // 预留：store.rs 保留的 Task-internal 能力之域实现（见 adapters/store.rs 说明）
     pub fn is_blocked(&self, id: TaskIdData) -> Result<bool, share::error::DomainError> {
         Ok(!self.blocking_ids(id)?.is_empty())
     }
@@ -847,6 +853,7 @@ impl TaskStoreState {
         ))
     }
 
+    #[allow(dead_code)] // 预留：store.rs 保留的 Task-internal 能力之域实现（见 adapters/store.rs 说明）
     pub fn transition(
         &mut self,
         id: TaskIdData,

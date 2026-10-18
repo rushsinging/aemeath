@@ -13,7 +13,6 @@ pub(crate) enum ActivitySource {
     Compaction(ActivityId),
     Reflection(ActivityId),
     Interaction(sdk::InteractionRequestId),
-    SubRun(RunId),
 }
 
 impl ActivitySource {
@@ -27,7 +26,6 @@ impl ActivitySource {
             Self::Compaction(id) => ActivitySourceView::Compaction(id.clone()),
             Self::Reflection(id) => ActivitySourceView::Reflection(id.clone()),
             Self::Interaction(id) => ActivitySourceView::Interaction(id.clone()),
-            Self::SubRun(id) => ActivitySourceView::SubRun(id.clone()),
         }
     }
 }
@@ -97,7 +95,6 @@ pub(crate) enum ActivityKind {
     Compaction,
     Reflection,
     Interaction,
-    SubRun,
 }
 
 impl ActivityKind {
@@ -111,7 +108,6 @@ impl ActivityKind {
             Self::Compaction => ActivityKindView::Compaction,
             Self::Reflection => ActivityKindView::Reflection,
             Self::Interaction => ActivityKindView::Interaction,
-            Self::SubRun => ActivityKindView::SubRun,
         }
     }
 }
@@ -147,10 +143,6 @@ pub(crate) enum ActivityDetail {
     },
     Interaction {
         kind: sdk::InteractionKindView,
-    },
-    SubRun {
-        role: String,
-        model: String,
     },
 }
 
@@ -196,10 +188,6 @@ impl ActivityDetail {
             },
             Self::Reflection { trigger } => ActivityDetailView::Reflection { trigger: *trigger },
             Self::Interaction { kind } => ActivityDetailView::Interaction { kind: *kind },
-            Self::SubRun { role, model } => ActivityDetailView::SubRun {
-                role: role.clone(),
-                model: model.clone(),
-            },
         }
     }
 }

@@ -76,6 +76,8 @@ pub fn validate_remote_url(url: &str) -> Result<(), String> {
     }
 }
 
+// 保留豁免：adapters.rs 注明 validation 辅助函数 re-export 保留备用（refs #61 D3），当前仅测试引用。
+#[allow(dead_code)]
 pub fn redact_headers(headers: &HashMap<String, String>) -> HashMap<String, String> {
     headers
         .iter()

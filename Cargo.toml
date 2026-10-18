@@ -45,3 +45,10 @@ rustix = { version = "1", features = ["fs"] }
 [workspace.package]
 version = "0.0.0"
 edition = "2021"
+
+# 零容忍 lint 基线（#1995）：warning 允许值为 0，本地编译即拦。
+# rustc `warnings` 组同时涵盖 rustc 与 clippy 注册的全部 warning 级 lint，
+# 故无需单独的 [workspace.lints.clippy] 表；单点豁免用 item 级
+# #[allow(...)] + 中文注释说明理由（allow 优先于本表）。
+[workspace.lints.rust]
+warnings = "deny"

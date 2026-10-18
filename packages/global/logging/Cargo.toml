@@ -16,3 +16,7 @@ libc = "0.2"
 [dev-dependencies]
 portable-pty = "0.9"
 tempfile = "3"
+
+# 继承 workspace 零容忍 lint 基线（#1995）。
+[lints]
+workspace = true

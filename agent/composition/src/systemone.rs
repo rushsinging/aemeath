@@ -18,8 +18,6 @@
 use std::fmt::Display;
 use std::sync::Arc;
 
-use async_trait::async_trait;
-
 /// System One 评分端口的场景分配：四槽与四个场景开关一一对应（开关关闭或
 /// 装配失败为 `None`，消费点回退原路径）。槽位 NEVER 复用跨场景语义——
 /// 消费端按自身场景取槽，杜绝「A 开关点亮 B 场景槽位」的隐性耦合。
@@ -50,26 +48,9 @@ pub enum ScoringStartupOutcome {
         /// 中文原因（含 `aemeath systemone serve` / download 提示）。
         detail: String,
     },
-    /// 构建未启用 `systemone-embedded`：不加载模型、不回退 HTTP（测试 / 旧路径）。
-    EmbeddedUnavailable,
     /// 发行 manifest 未提供（仓库无经确认的发行 URL / SHA-256）：不加载模型、
     /// 不回退 HTTP。
     ManifestUnavailable,
-    /// 模型未安装（detail 提示执行 `aemeath systemone download`）。
-    ModelMissing {
-        /// 中文原因（含手动下载命令提示）。
-        detail: String,
-    },
-    /// 已安装但资产校验失败（损坏 / 不可读 / 不支持）。
-    InvalidAssets {
-        /// 中文原因（含失败类别）。
-        detail: String,
-    },
-    /// 初始化失败（manifest 契约 / tokenizer / PointerHead / worker）。
-    InitFailed {
-        /// 中文原因。
-        detail: String,
-    },
 }
 
 impl Display for ScoringStartupOutcome {
@@ -81,41 +62,10 @@ impl Display for ScoringStartupOutcome {
                 "System One 评分端口已装配（scoring daemon 客户端）"
             ),
             Self::DaemonUnreachable { detail } => write!(formatter, "{detail}"),
-            Self::EmbeddedUnavailable => write!(
-                formatter,
-                "System One embedded 评分未随本构建编译（feature `systemone-embedded` 未启用），\
-                 评分端口为空（不加载模型、不回退 HTTP）"
-            ),
             Self::ManifestUnavailable => write!(
                 formatter,
                 "System One 发行模型 manifest 未提供，评分端口为空（不加载模型、不回退 HTTP）"
             ),
-            Self::ModelMissing { detail }
-            | Self::InvalidAssets { detail }
-            | Self::InitFailed { detail } => write!(formatter, "{detail}"),
-        }
-    }
-}
-
-impl From<systemone::EmbeddedScoringWiringError> for ScoringStartupOutcome {
-    fn from(error: systemone::EmbeddedScoringWiringError) -> Self {
-        match error {
-            systemone::EmbeddedScoringWiringError::EmbeddedUnavailable => Self::EmbeddedUnavailable,
-            systemone::EmbeddedScoringWiringError::ManifestInvalid { detail } => {
-                Self::InitFailed { detail }
-            }
-            systemone::EmbeddedScoringWiringError::ModelMissing => Self::ModelMissing {
-                detail: error.to_string(),
-            },
-            systemone::EmbeddedScoringWiringError::InvalidAssets { .. } => Self::InvalidAssets {
-                detail: error.to_string(),
-            },
-            systemone::EmbeddedScoringWiringError::AssetContract { .. }
-            | systemone::EmbeddedScoringWiringError::TokenizerLoadFailed { .. }
-            | systemone::EmbeddedScoringWiringError::PointerHeadLoadFailed { .. }
-            | systemone::EmbeddedScoringWiringError::WorkerStart { .. } => Self::InitFailed {
-                detail: error.to_string(),
-            },
         }
     }
 }
@@ -260,36 +210,6 @@ pub(crate) trait ReleaseManifestSource: Send + Sync {
     fn release_manifest(&self) -> Option<systemone::ModelManifest>;
 }
 
-/// embedded 装配注入点：**仅** `aemeath systemone serve` 与测试矩阵使用。
-/// 会话生产装配走 [`assemble_daemon_scoring_ports_with`]，**NEVER** 经本 trait 加载 GGUF。
-/// 测试注入 fake 以覆盖历史装配矩阵（不读模型目录、不加载真实模型）。
-#[async_trait]
-pub(crate) trait EmbeddedScoringFactory: Send + Sync {
-    /// 本构建是否具备 embedded 装配能力（systemone feature `embedded`）。
-    fn available(&self) -> bool;
-
-    /// 装配 raw 引擎链（资产解析 → llama worker；不含校准 / 审计外壳）。
-    async fn wire(
-        &self,
-        manifest: &systemone::ModelManifest,
-    ) -> Result<Arc<dyn systemone::ScoringPort>, systemone::EmbeddedScoringWiringError>;
-
-    /// 按场景包装校准 + 审计外壳（生产：`wrap_calibrated_audited`，事件带
-    /// 场景标签归因；测试默认透传 raw，避免测试向真实 scoring 目录落盘）。
-    /// `event_retention_days` 来自 `scoring.event_retention_days` 配置（默认 30，
-    /// `0`=禁用事件 segment GC），透传给事件 store 构造。
-    fn wrap(
-        &self,
-        raw: Arc<dyn systemone::ScoringPort>,
-        _manifest: &systemone::ModelManifest,
-        _scenario: &'static str,
-        _event_retention_days: u32,
-        _context_source: Option<Arc<dyn Fn() -> systemone::ScoringCallContext + Send + Sync>>,
-    ) -> Arc<dyn systemone::ScoringPort> {
-        raw
-    }
-}
-
 /// 生产发行 manifest 源：当前发行（kev 0.8B 合并 Q8_0，托管于 Hugging Face
 /// 公开仓库 `rushsinging/aemeath-systemone-kev`）。
 ///
@@ -325,13 +245,9 @@ impl ReleaseManifestSource for ProductionReleaseManifest {
 /// serve 路径工厂：仅 `run_scoring_serve` 用来加载 GGUF（会话侧不调用）。
 pub(crate) struct ProductionEmbeddedFactory;
 
-#[async_trait]
-impl EmbeddedScoringFactory for ProductionEmbeddedFactory {
-    fn available(&self) -> bool {
-        systemone::EMBEDDED_SCORING_AVAILABLE
-    }
-
-    async fn wire(
+impl ProductionEmbeddedFactory {
+    /// 装配 raw 引擎链（资产解析 → llama worker；不含校准 / 审计外壳）。
+    pub(crate) async fn wire(
         &self,
         manifest: &systemone::ModelManifest,
     ) -> Result<Arc<dyn systemone::ScoringPort>, systemone::EmbeddedScoringWiringError> {
@@ -340,24 +256,6 @@ impl EmbeddedScoringFactory for ProductionEmbeddedFactory {
             manifest.clone(),
         )
         .await
-    }
-
-    fn wrap(
-        &self,
-        raw: Arc<dyn systemone::ScoringPort>,
-        manifest: &systemone::ModelManifest,
-        scenario: &'static str,
-        event_retention_days: u32,
-        context_source: Option<Arc<dyn Fn() -> systemone::ScoringCallContext + Send + Sync>>,
-    ) -> Arc<dyn systemone::ScoringPort> {
-        systemone::wrap_calibrated_audited(
-            raw,
-            manifest,
-            &scoring_dir(),
-            scenario,
-            event_retention_days,
-            context_source,
-        )
     }
 }
 
@@ -393,17 +291,14 @@ impl ScoringDaemonLauncher for ProcessDaemonLauncher {
     ) -> Result<(), String> {
         // composition 单测的 current_exe 是 `deps/composition-*` 测试二进制：
         // 对其 spawn `systemone serve` 会挂起并污染并行用例（如 L4 日志等待）。
-        // 生产路径（非 cfg(test)）仍走惰性拉起。
-        #[cfg(test)]
-        {
+        // 生产路径（非测试运行时）仍走惰性拉起。
+        if cfg!(test) {
             let _ = (sock, connect_timeout);
-            return Err(
+            Err(
                 "composition 单测禁用惰性拉起 systemone serve（避免测试二进制被误 spawn）"
                     .to_owned(),
-            );
-        }
-        #[cfg(not(test))]
-        {
+            )
+        } else {
             systemone::ensure_scoring_daemon_ready(sock, connect_timeout)
         }
     }
@@ -501,92 +396,6 @@ pub(crate) async fn assemble_daemon_scoring_ports_with(
         },
         outcome: daemon_outcome,
         context_slot,
-    }
-}
-
-/// 历史 embedded 装配矩阵（可注入 fake；供契约测试）。会话生产入口已改 daemon。
-pub(crate) async fn assemble_scoring_ports_with(
-    scoring: &share::config::ScoringConfig,
-    factory: &dyn EmbeddedScoringFactory,
-    source: &dyn ReleaseManifestSource,
-) -> ScoringAssembly {
-    let context_slot = Arc::new(systemone::ScoringCallContextSlot::new());
-    let context_source = context_slot.snapshot_source();
-    let any_scenario_enabled = scoring.enabled
-        && (scoring.memory_rerank
-            || scoring.memory_recall
-            || scoring.skill_match
-            || scoring.policy_triage);
-    if !any_scenario_enabled {
-        // 零成本：不咨询 manifest 源、不读取模型目录、不解析 manifest、不启动 worker。
-        return ScoringAssembly {
-            assignment: ScoringPortAssignment::default(),
-            outcome: ScoringStartupOutcome::Disabled,
-            context_slot,
-        };
-    }
-    if !factory.available() {
-        return ScoringAssembly {
-            assignment: ScoringPortAssignment::default(),
-            outcome: ScoringStartupOutcome::EmbeddedUnavailable,
-            context_slot,
-        };
-    }
-    let Some(manifest) = source.release_manifest() else {
-        return ScoringAssembly {
-            assignment: ScoringPortAssignment::default(),
-            outcome: ScoringStartupOutcome::ManifestUnavailable,
-            context_slot,
-        };
-    };
-    match factory.wire(&manifest).await {
-        Ok(raw_port) => ScoringAssembly {
-            assignment: ScoringPortAssignment {
-                for_memory_rerank: scoring.memory_rerank.then(|| {
-                    factory.wrap(
-                        raw_port.clone(),
-                        &manifest,
-                        "memory_rerank",
-                        scoring.event_retention_days,
-                        Some(Arc::clone(&context_source)),
-                    )
-                }),
-                for_memory_recall: scoring.memory_recall.then(|| {
-                    factory.wrap(
-                        raw_port.clone(),
-                        &manifest,
-                        "memory_recall",
-                        scoring.event_retention_days,
-                        Some(Arc::clone(&context_source)),
-                    )
-                }),
-                for_skill_match: scoring.skill_match.then(|| {
-                    factory.wrap(
-                        raw_port.clone(),
-                        &manifest,
-                        "skill_match",
-                        scoring.event_retention_days,
-                        Some(Arc::clone(&context_source)),
-                    )
-                }),
-                for_policy_triage: scoring.policy_triage.then(|| {
-                    factory.wrap(
-                        raw_port.clone(),
-                        &manifest,
-                        "policy_triage",
-                        scoring.event_retention_days,
-                        Some(Arc::clone(&context_source)),
-                    )
-                }),
-            },
-            outcome: ScoringStartupOutcome::Ready,
-            context_slot,
-        },
-        Err(error) => ScoringAssembly {
-            assignment: ScoringPortAssignment::default(),
-            outcome: ScoringStartupOutcome::from(error),
-            context_slot,
-        },
     }
 }
 

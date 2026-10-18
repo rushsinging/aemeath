@@ -115,20 +115,13 @@ async fn serve_connection(
         // chunk 为原始 socket 字节缓冲，非 UTF-8 文本。
         let (received, _) = chunk.split_at(n); // allow unsafe_text_op
         buffer.extend_from_slice(received);
-        loop {
-            match try_decode_frame(&buffer) {
-                Ok((_, consumed)) => {
-                    let frame: Vec<u8> = buffer.drain(..consumed).collect();
-                    let response = handle_framed_request(port, engine_revision, &frame)
-                        .await
-                        .map_err(|error| {
-                            io::Error::new(io::ErrorKind::InvalidData, error.to_string())
-                        })?;
-                    stream.write_all(&response).await?;
-                    stream.flush().await?;
-                }
-                Err(crate::domain::daemon_protocol::FrameError::Incomplete) => break,
-            }
+        while let Ok((_, consumed)) = try_decode_frame(&buffer) {
+            let frame: Vec<u8> = buffer.drain(..consumed).collect();
+            let response = handle_framed_request(port, engine_revision, &frame)
+                .await
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error.to_string()))?;
+            stream.write_all(&response).await?;
+            stream.flush().await?;
         }
     }
     Ok(())

@@ -66,11 +66,6 @@ pub(crate) const CALIBRATION_CLAMP: std::ops::RangeInclusive<f64> = 0.5..=2.0;
 
 pub(crate) const DEFAULT_GRACE: Duration = Duration::from_millis(250);
 
-// ─── background_process/supervisor.rs ───
-
-/// 单任务输出环形缓冲容量（字节）。
-pub(crate) const BACKGROUND_PROCESS_OUTPUT_CAPACITY_BYTES: usize = 64 * 1024;
-
 // ─── background_process/activity_log.rs ───
 
 /// Agent 过程日志单行字符预算（#1962 硬预算：等待期 Activity 摘要流式

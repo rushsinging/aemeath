@@ -142,14 +142,6 @@ async fn idle_without_wakeup_waiter_keeps_existing_behavior() {
     }
 }
 
-#[allow(dead_code)]
-fn assert_future_types_compatible(
-    source: &NeverInputSource,
-) -> (InputEventFuture<'_>, InputEventOptFuture<'_>) {
-    (source.drain_input_events(), source.recv_next_input())
-}
-
-#[allow(dead_code)]
 const fn _static_assert_sink_clone_send_sync()
 where
     NullSink: Clone + Send + Sync + 'static,

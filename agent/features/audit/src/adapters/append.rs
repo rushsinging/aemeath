@@ -5,6 +5,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+#[cfg(test)]
 use sdk::SessionId;
 use storage::{SafeOpenOptions, SafePathSegmentData, SafeStorageFileType, SafeStorageRoot};
 
@@ -33,7 +34,8 @@ impl FileUsageAppendStore {
         }
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    // 生产读取走 `AppendLogStream::for_session`（ingest/query）；本便捷方法仅测试引用，收窄到 test 目标（#1995）。
+    #[cfg(test)]
     pub fn stream_for_session(&self, session_id: &SessionId) -> AppendLogStream {
         AppendLogStream::for_session(session_id)
     }

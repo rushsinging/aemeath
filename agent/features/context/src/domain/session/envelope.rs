@@ -859,6 +859,8 @@ struct VersionedEnvelope {
 
 #[derive(Debug, Deserialize)]
 struct V2VersionedEnvelope {
+    /// 旧盘兼容读取：schema 分派已在 `decode_with_workspace_upgrade` 按原始
+    /// JSON 完成，此字段仅承接旧盘 JSON 键，无需再读。
     #[allow(dead_code)]
     schema_version: u32,
     #[serde(flatten)]
@@ -943,6 +945,8 @@ impl From<V2CanonicalSession> for CanonicalSession {
 
 #[derive(Debug, Deserialize)]
 struct V1VersionedEnvelope {
+    /// 旧盘兼容读取：schema 分派已在 `decode_with_workspace_upgrade` 按原始
+    /// JSON 完成，此字段仅承接旧盘 JSON 键，无需再读。
     #[allow(dead_code)]
     schema_version: u32,
     id: String,

@@ -3,7 +3,6 @@
 
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Mutex;
 
 /// 记录被咨询次数的发行 manifest 源（零成本路径必须 NEVER 咨询它）。
 struct RecordingSource {
@@ -18,13 +17,6 @@ impl RecordingSource {
             manifest: Some(manifest),
         }
     }
-
-    fn empty() -> Self {
-        Self {
-            consulted: AtomicUsize::new(0),
-            manifest: None,
-        }
-    }
 }
 
 impl ReleaseManifestSource for RecordingSource {
@@ -34,75 +26,7 @@ impl ReleaseManifestSource for RecordingSource {
     }
 }
 
-/// 记录装配次数、注入 manifest 与 wrap 收到的 retention 的 fake embedded
-/// 工厂（不触碰模型目录 / worker）。
-struct RecordingFactory {
-    available: bool,
-    wired: AtomicUsize,
-    last_revision: Mutex<Option<String>>,
-    last_retention_days: Mutex<Option<u32>>,
-    result: Result<Arc<dyn systemone::ScoringPort>, systemone::EmbeddedScoringWiringError>,
-}
-
-impl RecordingFactory {
-    fn returning(
-        available: bool,
-        result: Result<Arc<dyn systemone::ScoringPort>, systemone::EmbeddedScoringWiringError>,
-    ) -> Self {
-        Self {
-            available,
-            wired: AtomicUsize::new(0),
-            last_revision: Mutex::new(None),
-            last_retention_days: Mutex::new(None),
-            result,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl EmbeddedScoringFactory for RecordingFactory {
-    fn available(&self) -> bool {
-        self.available
-    }
-
-    async fn wire(
-        &self,
-        manifest: &systemone::ModelManifest,
-    ) -> Result<Arc<dyn systemone::ScoringPort>, systemone::EmbeddedScoringWiringError> {
-        self.wired.fetch_add(1, Ordering::SeqCst);
-        *self.last_revision.lock().expect("revision 锁") = Some(manifest.engine_revision.clone());
-        self.result.clone()
-    }
-
-    fn wrap(
-        &self,
-        raw: Arc<dyn systemone::ScoringPort>,
-        _manifest: &systemone::ModelManifest,
-        _scenario: &'static str,
-        event_retention_days: u32,
-        _context_source: Option<Arc<dyn Fn() -> systemone::ScoringCallContext + Send + Sync>>,
-    ) -> Arc<dyn systemone::ScoringPort> {
-        *self.last_retention_days.lock().expect("retention 锁") = Some(event_retention_days);
-        raw
-    }
-}
-
-/// fake 评分端口：只证明槽位被分配，不进行任何推理。
-struct StubScoringPort;
-
-#[async_trait::async_trait]
-impl systemone::ScoringPort for StubScoringPort {
-    async fn answer(
-        &self,
-        _state: &systemone::ScoringState,
-        _questions: &[systemone::ScoringQuestion],
-    ) -> Result<Vec<systemone::ScoringAnswer>, systemone::ScoringUnavailable> {
-        Ok(Vec::new())
-    }
-}
-
-/// 测试 fixture manifest（URL / SHA-256 仅锁契约格式，**不**对应任何真实发行数据）。
-
+/// 记录 `ensure_ready` 调用次数与结果的 fake daemon launcher。
 struct RecordingDaemonLauncher {
     calls: AtomicUsize,
     result: Result<(), String>,
@@ -128,6 +52,7 @@ fn process_daemon_launcher_skips_lazy_spawn_under_cfg_test() {
     assert!(err.contains("单测禁用惰性拉起"), "unexpected detail: {err}");
 }
 
+/// 测试 fixture manifest（URL / SHA-256 仅锁契约格式，**不**对应任何真实发行数据）。
 fn fixture_manifest() -> systemone::ModelManifest {
     systemone::ModelManifest {
         schema_version: 1,
@@ -181,168 +106,6 @@ fn assert_no_ports(assignment: &ScoringPortAssignment) {
     assert!(assignment.for_skill_match.is_none());
     assert!(assignment.for_policy_triage.is_none());
 }
-
-/// 场景开关全关：零成本——不咨询 manifest 源、不启动装配、无端口。
-#[tokio::test]
-async fn all_switches_disabled_is_zero_cost() {
-    let source = RecordingSource::with_manifest(fixture_manifest());
-    let factory = RecordingFactory::returning(true, Ok(Arc::new(StubScoringPort)));
-    let assembly =
-        assemble_scoring_ports_with(&share::config::ScoringConfig::default(), &factory, &source)
-            .await;
-    assert_eq!(assembly.outcome, ScoringStartupOutcome::Disabled);
-    assert_no_ports(&assembly.assignment);
-    assert_eq!(
-        source.consulted.load(Ordering::SeqCst),
-        0,
-        "全关时不得解析发行 manifest"
-    );
-    assert_eq!(
-        factory.wired.load(Ordering::SeqCst),
-        0,
-        "全关时不得启动 embedded 装配"
-    );
-}
-
-/// 开关开启 + 构建无 embedded 能力：typed `EmbeddedUnavailable`，
-/// 不读 manifest、不装配、两个槽位 None、绝不 HTTP 回退。
-#[tokio::test]
-async fn embedded_unavailable_returns_typed_outcome_without_manifest_read() {
-    let source = RecordingSource::with_manifest(fixture_manifest());
-    let factory = RecordingFactory::returning(false, Ok(Arc::new(StubScoringPort)));
-    let assembly = assemble_scoring_ports_with(&all_enabled(), &factory, &source).await;
-    assert_eq!(assembly.outcome, ScoringStartupOutcome::EmbeddedUnavailable);
-    assert_no_ports(&assembly.assignment);
-    assert_eq!(source.consulted.load(Ordering::SeqCst), 0);
-    assert_eq!(factory.wired.load(Ordering::SeqCst), 0);
-}
-
-/// 开关开启 + 发行 manifest 未提供：typed `ManifestUnavailable`（NEVER 假数据）。
-#[tokio::test]
-async fn missing_release_manifest_returns_manifest_unavailable() {
-    let source = RecordingSource::empty();
-    let factory = RecordingFactory::returning(true, Ok(Arc::new(StubScoringPort)));
-    let assembly = assemble_scoring_ports_with(&all_enabled(), &factory, &source).await;
-    assert_eq!(assembly.outcome, ScoringStartupOutcome::ManifestUnavailable);
-    assert_no_ports(&assembly.assignment);
-    assert_eq!(factory.wired.load(Ordering::SeqCst), 0);
-}
-
-/// 开关开启 + 模型未安装：typed `ModelMissing`（detail 提示手动下载命令）。
-#[tokio::test]
-async fn model_missing_maps_to_typed_outcome() {
-    let source = RecordingSource::with_manifest(fixture_manifest());
-    let factory = RecordingFactory::returning(
-        true,
-        Err(systemone::EmbeddedScoringWiringError::ModelMissing),
-    );
-    let assembly = assemble_scoring_ports_with(&all_enabled(), &factory, &source).await;
-    assert!(
-        matches!(assembly.outcome, ScoringStartupOutcome::ModelMissing { .. }),
-        "错误类型不符：{:?}",
-        assembly.outcome
-    );
-    let ScoringStartupOutcome::ModelMissing { detail } = &assembly.outcome else {
-        panic!("outcome 分支已断言");
-    };
-    assert!(
-        detail.contains("aemeath systemone download"),
-        "detail 应提示下载命令：{detail}"
-    );
-    assert_no_ports(&assembly.assignment);
-    assert_eq!(factory.wired.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        factory.last_revision.lock().expect("锁").as_deref(),
-        Some("composition-fixture-r1"),
-        "注入的发行 manifest 必须透传给工厂"
-    );
-}
-
-/// 开关开启 + 资产损坏：typed `InvalidAssets` 携带类别与中文 detail。
-#[tokio::test]
-async fn invalid_assets_outcome_carries_kind_and_detail() {
-    let source = RecordingSource::with_manifest(fixture_manifest());
-    let factory = RecordingFactory::returning(
-        true,
-        Err(systemone::EmbeddedScoringWiringError::InvalidAssets {
-            kind: systemone::InvalidAssetKind::Corrupt,
-            detail: "model.gguf 的 sha256 与 manifest 不符".to_owned(),
-        }),
-    );
-    let assembly = assemble_scoring_ports_with(&all_enabled(), &factory, &source).await;
-    assert!(
-        matches!(
-            assembly.outcome,
-            ScoringStartupOutcome::InvalidAssets { .. }
-        ),
-        "错误类型不符：{:?}",
-        assembly.outcome
-    );
-    let ScoringStartupOutcome::InvalidAssets { detail } = &assembly.outcome else {
-        panic!("outcome 分支已断言");
-    };
-    assert!(
-        detail.contains("已损坏") && detail.contains("sha256 与 manifest 不符"),
-        "detail 应包含类别与原因：{detail}"
-    );
-    assert_no_ports(&assembly.assignment);
-}
-
-/// 开关开启 + 初始化失败（tokenizer / PointerHead / worker / manifest 契约）：
-/// typed `InitFailed` 携带中文 detail，主聊天不被阻断（槽位 None 即回退）。
-#[tokio::test]
-async fn init_failure_outcome_carries_detail() {
-    let source = RecordingSource::with_manifest(fixture_manifest());
-    let factory = RecordingFactory::returning(
-        true,
-        Err(systemone::EmbeddedScoringWiringError::TokenizerLoadFailed {
-            detail: "tokenizer.json 解析失败".to_owned(),
-        }),
-    );
-    let assembly = assemble_scoring_ports_with(&all_enabled(), &factory, &source).await;
-    assert!(
-        matches!(assembly.outcome, ScoringStartupOutcome::InitFailed { .. }),
-        "错误类型不符：{:?}",
-        assembly.outcome
-    );
-    let ScoringStartupOutcome::InitFailed { detail } = &assembly.outcome else {
-        panic!("outcome 分支已断言");
-    };
-    assert!(
-        detail.contains("tokenizer.json 解析失败"),
-        "detail 应携带失败原因：{detail}"
-    );
-    assert_no_ports(&assembly.assignment);
-}
-
-/// 装配成功：`Ready` + 按场景开关分配槽位（关闭的场景仍为 None）。
-#[tokio::test]
-async fn ready_assigns_ports_per_enabled_switch() {
-    let source = RecordingSource::with_manifest(fixture_manifest());
-    let factory = RecordingFactory::returning(true, Ok(Arc::new(StubScoringPort)));
-
-    let rerank_only = share::config::ScoringConfig {
-        memory_rerank: true,
-        ..share::config::ScoringConfig::default()
-    };
-    let assembly = assemble_scoring_ports_with(&rerank_only, &factory, &source).await;
-    assert_eq!(assembly.outcome, ScoringStartupOutcome::Ready);
-    assert!(
-        assembly.assignment.for_memory_rerank.is_some(),
-        "rerank 开关开启且装配成功时槽位非 None"
-    );
-    assert!(
-        assembly.assignment.for_memory_recall.is_none(),
-        "recall 开关关闭时槽位必须为 None"
-    );
-
-    let both = assemble_scoring_ports_with(&all_enabled(), &factory, &source).await;
-    assert_eq!(both.outcome, ScoringStartupOutcome::Ready);
-    assert!(both.assignment.for_memory_rerank.is_some());
-    assert!(both.assignment.for_memory_recall.is_some());
-}
-
-/// 生产装配入口：走 daemon 客户端；launcher 成败不影响槽位装配（fail-open）。
 /// 本测试不调用真实 `assemble_scoring_ports`（会触达 ProcessDaemonLauncher），
 /// 改测 `assemble_daemon_scoring_ports_with` 契约。
 #[tokio::test]
@@ -471,33 +234,15 @@ fn scoring_startup_notices_empty_for_disabled_and_ready() {
     assert!(scoring_startup_notices(&ScoringStartupOutcome::Ready).is_empty());
 }
 
-/// 启动提醒转换：`ModelMissing` 携带一条含手动下载命令的中文提醒。
-#[test]
-fn scoring_startup_notices_model_missing_mentions_download_command() {
-    let notices = scoring_startup_notices(&ScoringStartupOutcome::ModelMissing {
-        detail: "System One 模型未安装，评分功能不可用；执行 `aemeath systemone download` 安装"
-            .to_string(),
-    });
-    assert_eq!(notices.len(), 1);
-    assert!(notices[0].message.contains("aemeath systemone download"));
-}
-
 /// 启动提醒转换：其余 typed outcome 各生成一条非空中文提醒
 /// （场景开关开启但评分未生效时用户必须可感知）。
 #[test]
 fn scoring_startup_notices_non_empty_for_unavailable_outcomes() {
     for outcome in [
-        ScoringStartupOutcome::EmbeddedUnavailable,
         ScoringStartupOutcome::DaemonUnreachable {
             detail: "daemon 不可达".to_string(),
         },
         ScoringStartupOutcome::ManifestUnavailable,
-        ScoringStartupOutcome::InvalidAssets {
-            detail: "资产损坏".to_string(),
-        },
-        ScoringStartupOutcome::InitFailed {
-            detail: "初始化失败".to_string(),
-        },
     ] {
         let notices = scoring_startup_notices(&outcome);
         assert_eq!(
@@ -570,41 +315,21 @@ fn hf_cdn_redirect_hosts_are_official_hf_domains() {
     }
 }
 
-/// `scoring.event_retention_days` 配置必须原样贯通到 wrap（事件 store 构造
-/// 入参）：低层配置 7 → 装配链传 7（设计 03-event-stream §8 配置注入）。
-#[tokio::test]
-async fn event_retention_days_config_flows_into_wrap() {
-    let source = RecordingSource::with_manifest(fixture_manifest());
-    let factory = RecordingFactory::returning(true, Ok(Arc::new(StubScoringPort)));
-    let scoring = share::config::ScoringConfig {
-        skill_match: true,
-        event_retention_days: 7,
-        ..share::config::ScoringConfig::default()
-    };
-
-    let assembly = assemble_scoring_ports_with(&scoring, &factory, &source).await;
-
-    assert_eq!(assembly.outcome, ScoringStartupOutcome::Ready);
-    assert!(assembly.assignment.for_skill_match.is_some());
-    assert_eq!(
-        *factory.last_retention_days.lock().expect("retention 锁"),
-        Some(7),
-        "配置的 event_retention_days 必须传入 wrap（事件 store 构造入参）"
-    );
-}
-
 /// 槽位与开关一一对应：skill_match 单开（memory 全关）时 `for_skill_match`
 /// 有端口而 `for_memory_recall` 为 None——修复 skill_match 依赖 recall 槽导致
 /// 的单开静默失效。
 #[tokio::test]
 async fn skill_match_alone_owns_its_slot_without_memory_slots() {
     let source = RecordingSource::with_manifest(fixture_manifest());
-    let factory = RecordingFactory::returning(true, Ok(Arc::new(StubScoringPort)));
+    let launcher = RecordingDaemonLauncher {
+        calls: AtomicUsize::new(0),
+        result: Ok(()),
+    };
     let skill_only = share::config::ScoringConfig {
         skill_match: true,
         ..share::config::ScoringConfig::default()
     };
-    let assembly = assemble_scoring_ports_with(&skill_only, &factory, &source).await;
+    let assembly = assemble_daemon_scoring_ports_with(&skill_only, &source, &launcher).await;
     assert_eq!(assembly.outcome, ScoringStartupOutcome::Ready);
     assert!(
         assembly.assignment.for_skill_match.is_some(),
@@ -619,12 +344,15 @@ async fn skill_match_alone_owns_its_slot_without_memory_slots() {
 #[tokio::test]
 async fn policy_triage_alone_owns_its_slot() {
     let source = RecordingSource::with_manifest(fixture_manifest());
-    let factory = RecordingFactory::returning(true, Ok(Arc::new(StubScoringPort)));
+    let launcher = RecordingDaemonLauncher {
+        calls: AtomicUsize::new(0),
+        result: Ok(()),
+    };
     let triage_only = share::config::ScoringConfig {
         policy_triage: true,
         ..share::config::ScoringConfig::default()
     };
-    let assembly = assemble_scoring_ports_with(&triage_only, &factory, &source).await;
+    let assembly = assemble_daemon_scoring_ports_with(&triage_only, &source, &launcher).await;
     assert_eq!(assembly.outcome, ScoringStartupOutcome::Ready);
     assert!(assembly.assignment.for_policy_triage.is_some());
     assert!(assembly.assignment.for_skill_match.is_none());
@@ -635,14 +363,17 @@ async fn policy_triage_alone_owns_its_slot() {
 #[tokio::test]
 async fn master_gate_disabled_forces_zero_cost_even_with_scenarios_on() {
     let source = RecordingSource::with_manifest(fixture_manifest());
-    let factory = RecordingFactory::returning(true, Ok(Arc::new(StubScoringPort)));
+    let launcher = RecordingDaemonLauncher {
+        calls: AtomicUsize::new(0),
+        result: Ok(()),
+    };
     let gated_off = share::config::ScoringConfig {
         enabled: false,
         memory_rerank: true,
         skill_match: true,
         ..share::config::ScoringConfig::default()
     };
-    let assembly = assemble_scoring_ports_with(&gated_off, &factory, &source).await;
+    let assembly = assemble_daemon_scoring_ports_with(&gated_off, &source, &launcher).await;
     assert_eq!(assembly.outcome, ScoringStartupOutcome::Disabled);
     assert_no_ports(&assembly.assignment);
     assert_eq!(
@@ -650,7 +381,7 @@ async fn master_gate_disabled_forces_zero_cost_even_with_scenarios_on() {
         0,
         "总闸门关闭时不得解析发行 manifest"
     );
-    assert_eq!(factory.wired.load(Ordering::SeqCst), 0);
+    assert_eq!(launcher.calls.load(Ordering::SeqCst), 0);
 }
 
 /// 总闸门默认开（`enabled=true` 缺省）：场景开关语义与现状完全一致。

@@ -28,6 +28,8 @@ pub struct SseEvent {
 /// Parse SSE event blocks from raw text.
 ///
 /// SSE format: `event: <type>\ndata: <payload>\n\n`
+// 仅测试引用（sse_tests），生产路径改用 SseReadStream 增量解析，故收窄为测试构建。
+#[cfg(test)]
 pub fn parse_sse_events(raw: &str) -> Vec<SseEvent> {
     let mut events = Vec::new();
     for block in raw.split("\n\n") {
@@ -109,6 +111,7 @@ pub fn build_http_client(
 pub struct SseTransport {
     /// Client used for the SSE GET stream (must NOT be shared with POST).
     /// Kept alive to ensure the SSE TCP connection stays open.
+    // 保留豁免：持有不读——按文档注释需保持 SSE GET 连接存活。
     #[allow(dead_code)]
     stream_client: Client,
     /// Separate client for POST requests — avoids HTTP/2 flow control issues

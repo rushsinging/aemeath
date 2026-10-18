@@ -72,13 +72,6 @@ impl ToolExecutionSupervisor {
         self
     }
 
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub(crate) fn with_grace(mut self, grace: Duration) -> Self {
-        self.grace = grace;
-        self
-    }
-
     /// 超阈值转后台：receipt 推进 Backgrounded，spawn detached 驱动在
     /// 后台等待真实终态（唯一取消源 = deadline 快照），前台立即返回占位结果。
     async fn move_to_background(

@@ -130,7 +130,6 @@ fn build_provider_and_scope(
                 options.api_key,
                 options.base_url,
                 Some(options.model),
-                options.timeout_secs,
                 resolved_user_agent,
                 http,
             ))
@@ -140,7 +139,6 @@ fn build_provider_and_scope(
                 options.api_key,
                 options.base_url,
                 Some(options.model),
-                options.timeout_secs,
                 resolved_user_agent,
                 http,
             ))

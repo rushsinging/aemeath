@@ -52,7 +52,8 @@ pub struct Run {
 }
 
 impl Run {
-    #[allow(dead_code)]
+    /// 仅测试使用（生产路径统一经 `with_id_and_stop_hook_policy` 注入策略）。
+    #[cfg(test)]
     pub fn new(spec: RunSpec, parent_id: Option<RunId>) -> Self {
         Self::with_id_and_stop_hook_policy(
             RunId::new_v7(),
@@ -76,7 +77,8 @@ impl Run {
         )
     }
 
-    #[allow(dead_code)]
+    /// 仅测试使用（生产路径统一经 `with_id_and_stop_hook_policy` 注入策略）。
+    #[cfg(test)]
     pub fn with_id(id: RunId, spec: RunSpec, parent_id: Option<RunId>) -> Self {
         Self::with_id_and_stop_hook_policy(
             id,

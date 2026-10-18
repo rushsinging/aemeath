@@ -1,7 +1,6 @@
 //! Runtime-owned Activity observation model and coordinator.
 
 mod coordinator;
-#[allow(dead_code)]
 mod model;
 mod model_tool;
 mod run_events;

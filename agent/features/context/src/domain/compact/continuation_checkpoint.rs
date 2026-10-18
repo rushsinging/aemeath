@@ -37,12 +37,12 @@ pub struct ResumeCursor {
 }
 
 impl ResumeCursor {
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn next_action(&self) -> &str {
         &self.next_action
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn next_action_count(&self) -> usize {
         usize::from(!self.next_action.is_empty())
     }
@@ -181,7 +181,8 @@ impl<'a> CanonicalCompactSummary<'a> {
         })
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// 借用视图（生产消费走 `into_checkpoint`；仅测试读视图）。
+    #[cfg(test)]
     pub fn checkpoint(&self) -> &ContinuationCheckpoint {
         &self.checkpoint
     }
@@ -500,12 +501,12 @@ impl ContinuationCheckpoint {
         Ok(patched)
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn status(&self) -> ContinuationStatus {
         self.status
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn resume_cursor(&self) -> &ResumeCursor {
         &self.resume_cursor
     }

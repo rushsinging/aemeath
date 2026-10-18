@@ -62,10 +62,7 @@ impl ToolCallFuse {
     /// 按 step 粒度计入：同一 `step_id` 内同一指纹无论出现几次只记 1 次。
     /// 只读后台查询工具（List/Status/Logs）豁免 fuse，不写入 recent、不增加 blocked_count。
     pub(crate) fn inspect(&mut self, step_id: &RunStepId, call: &ToolCall) -> ToolFuseDecision {
-        if TOOL_FUSE_EXEMPT_READONLY_BACKGROUND_TOOLS
-            .iter()
-            .any(|name| *name == call.name.as_str())
-        {
+        if TOOL_FUSE_EXEMPT_READONLY_BACKGROUND_TOOLS.contains(&call.name.as_str()) {
             return ToolFuseDecision::Allow;
         }
 

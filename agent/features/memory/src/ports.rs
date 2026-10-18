@@ -118,7 +118,6 @@ pub struct MemoryCommitReceipt<R> {
 }
 
 impl<R> MemoryCommitReceipt<R> {
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn revision(&self) -> &R {
         &self.revision
     }
@@ -130,6 +129,7 @@ impl<R> MemoryCommitReceipt<R> {
         }
     }
 
+    /// 提交可见性；仅测试断言读取（生产只透传构造，见 `new`），非测试构建豁免。
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn visibility(&self) -> MemoryCommitVisibility {
         self.visibility

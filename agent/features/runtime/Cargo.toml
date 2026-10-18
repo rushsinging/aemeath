@@ -45,3 +45,7 @@ tempfile = "3"
 tools = { path = "../tools", features = ["test-harness"] }
 futures-util = { workspace = true }
 context = { path = "../context", features = ["dev"] }
+
+# 继承 workspace 零容忍 lint 基线（#1995）。
+[lints]
+workspace = true

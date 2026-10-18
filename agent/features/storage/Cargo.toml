@@ -29,3 +29,7 @@ required-features = ["test-fault-injection"]
 [[test]]
 name = "atomic_dataset_crash"
 required-features = ["test-fault-injection"]
+
+# 继承 workspace 零容忍 lint 基线（#1995）。
+[lints]
+workspace = true

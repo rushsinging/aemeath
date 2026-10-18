@@ -21,9 +21,12 @@ pub use atomic_dataset::{
     DatasetReadData, DatasetReadOutcomeData, DatasetRevisionData,
 };
 #[cfg_attr(not(test), allow(unused_imports))]
+pub use blob_recovery::{CorruptTransactionError, CorruptionReason, QuarantineDisposition};
+// 恢复决策域项仅测试引用（生产恢复路径在 adapters 内联实现），随项收窄到 test 目标（#1995）。
+#[cfg(test)]
 pub use blob_recovery::{
-    decide_blob_recovery, decide_orphan_previous, CorruptTransactionError, CorruptionReason,
-    DigestObservation, JournalPhase, QuarantineDisposition, RecoveryDecision, TransactionDigest,
+    decide_blob_recovery, decide_orphan_previous, DigestObservation, JournalPhase,
+    RecoveryDecision, TransactionDigest,
 };
 pub(crate) use published_language::PreviousPolicy;
 pub use published_language::{

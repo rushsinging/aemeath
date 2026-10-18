@@ -114,7 +114,6 @@ struct ActivityPublicationState {
     heartbeat_sequence: u64,
 }
 
-#[allow(dead_code)]
 pub(crate) struct ActivitySnapshot {
     pub(crate) run_id: RunId,
     pub(crate) revision: u64,
@@ -122,8 +121,9 @@ pub(crate) struct ActivitySnapshot {
     pub(crate) activities: Vec<ActivityView>,
 }
 
-#[allow(dead_code)]
 impl ActivitySnapshot {
+    /// 仅测试用于按 id 定位单条活动断言。
+    #[cfg(test)]
     pub(crate) fn find(&self, activity_id: &ActivityId) -> Option<&ActivityView> {
         self.activities
             .iter()
@@ -428,12 +428,12 @@ impl ActivityCoordinator {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub(crate) fn wait(&self, command: UpdateActivity) -> Result<(), ActivityError> {
         self.transition(command.activity_id, ActivityState::Waiting, command.detail)
     }
 
-    #[allow(dead_code)]
+    /// 仅测试驱动 Waiting→Running 转换（生产侧暂无 resume 场景）。
+    #[cfg(test)]
     pub(crate) fn resume(&self, command: UpdateActivity) -> Result<(), ActivityError> {
         self.transition(command.activity_id, ActivityState::Running, command.detail)
     }
@@ -507,7 +507,8 @@ impl ActivityCoordinator {
         }
     }
 
-    #[allow(dead_code)]
+    /// 仅测试读取完整快照断言（生产侧经 publish_heartbeat/publish_snapshot 出口）。
+    #[cfg(test)]
     pub(crate) fn snapshot(&self) -> ActivitySnapshot {
         let revision = *self.revision.lock();
         let heartbeat_sequence = self.publication.lock().heartbeat_sequence;
