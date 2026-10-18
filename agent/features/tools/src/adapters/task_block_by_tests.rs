@@ -84,3 +84,33 @@ async fn task_block_by_rejects_duplicate_and_unknown_ids_without_mutation() {
         assert!(store.get(ids[0]).unwrap().blocked_by().is_empty());
     }
 }
+
+#[tokio::test]
+async fn task_block_by_not_found_on_empty_current_list_gives_taskcreate_guidance() {
+    // 复现 #1990：空当前列表下 TaskBlockBy 报错必须引导 TaskCreate，而非裸 not found。
+    let store = Arc::new(task::TaskStore::new());
+    store
+        .create_batch(
+            task::BatchCreateSpecData::try_new("batch".into()).unwrap(),
+            1,
+        )
+        .unwrap();
+    let tool = TaskBlockByTool {
+        access: store.clone(),
+    };
+
+    let result = tool
+        .call(
+            serde_json::json!({"id": "1", "block_by_ids": ["2"]}),
+            &test_ctx(),
+        )
+        .await;
+
+    assert!(result.is_error);
+    assert!(
+        result.text.contains("Task not found in current task list"),
+        "{}",
+        result.text
+    );
+    assert!(result.text.contains("TaskCreate"), "{}", result.text);
+}

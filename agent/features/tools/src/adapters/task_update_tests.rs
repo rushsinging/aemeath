@@ -246,3 +246,119 @@ async fn task_update_rejects_non_decimal_ids_before_ohs() {
     assert!(result.is_error);
     assert!(result.text.contains("decimal task ID"));
 }
+
+fn empty_list_setup() -> Arc<task::TaskStore> {
+    // 复现 #1990：LLM 误把 TaskListCreate 当 TaskCreate 连调后，当前列表存在但为空。
+    let store = Arc::new(task::TaskStore::new());
+    store
+        .create_batch(
+            task::BatchCreateSpecData::try_new("batch".into()).unwrap(),
+            1,
+        )
+        .unwrap();
+    store
+}
+
+#[tokio::test]
+async fn task_update_not_found_on_empty_current_list_gives_taskcreate_guidance() {
+    let store = empty_list_setup();
+    let tool = TaskUpdateTool {
+        access: store.clone(),
+    };
+
+    let result = tool
+        .call(
+            serde_json::json!({"task_id": "1", "key": "status", "value": "in_progress"}),
+            &test_ctx(),
+        )
+        .await;
+
+    assert!(result.is_error);
+    assert!(
+        result.text.contains("Task not found in current task list"),
+        "{}",
+        result.text
+    );
+    assert!(result.text.contains("0 tasks"), "{}", result.text);
+    assert!(result.text.contains("TaskCreate"), "{}", result.text);
+}
+
+#[tokio::test]
+async fn task_update_not_found_lists_valid_task_ids() {
+    let (_store, access, _id) = setup();
+    let _second = access
+        .create_task(
+            task::TaskCreateSpecData::try_new(
+                "任务二".into(),
+                "描述".into(),
+                None,
+                task::TaskPriorityData::Normal,
+            )
+            .unwrap(),
+            3,
+        )
+        .unwrap();
+    let tool = TaskUpdateTool { access };
+
+    let result = tool
+        .call(
+            serde_json::json!({"task_id": "9", "key": "status", "value": "in_progress"}),
+            &test_ctx(),
+        )
+        .await;
+
+    assert!(result.is_error);
+    assert!(
+        result.text.contains("valid task ids: 1, 2"),
+        "{}",
+        result.text
+    );
+}
+
+#[tokio::test]
+async fn task_update_not_found_without_active_list_gives_listcreate_guidance() {
+    let store = Arc::new(task::TaskStore::new());
+    let tool = TaskUpdateTool {
+        access: store.clone(),
+    };
+
+    let result = tool
+        .call(
+            serde_json::json!({"task_id": "1", "key": "status", "value": "in_progress"}),
+            &test_ctx(),
+        )
+        .await;
+
+    assert!(result.is_error);
+    assert!(
+        result.text.contains("no active task list"),
+        "{}",
+        result.text
+    );
+    assert!(result.text.contains("TaskListCreate"), "{}", result.text);
+}
+
+#[tokio::test]
+async fn task_update_not_found_on_empty_explicit_list_gives_taskcreate_guidance() {
+    let store = Arc::new(task::TaskStore::new());
+    store
+        .create_batch(
+            task::BatchCreateSpecData::try_new("batch".into()).unwrap(),
+            1,
+        )
+        .unwrap();
+    let tool = TaskUpdateTool {
+        access: store.clone(),
+    };
+
+    let result = tool
+        .call(
+            serde_json::json!({"task_list_id": "1", "task_id": "1", "key": "status", "value": "in_progress"}),
+            &test_ctx(),
+        )
+        .await;
+
+    assert!(result.is_error);
+    assert!(result.text.contains("0 tasks"), "{}", result.text);
+    assert!(result.text.contains("TaskCreate"), "{}", result.text);
+}

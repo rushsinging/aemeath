@@ -40,3 +40,7 @@ pub(crate) const MEMORY_RESULT_TEXT_BUDGET_CHARS: usize = 2_000;
 
 /// Memory 结果摘要行预留字符；剩余预算给逐条精简行。
 pub(crate) const MEMORY_RESULT_HEADER_RESERVE_CHARS: usize = 260;
+
+/// Task not-found 空列表引导语（#1990）：点破「列表 ≠ 任务」。
+pub(crate) const TASK_LIST_NOT_TASK_HINT: &str =
+    "TaskListCreate creates a list, not a task; add tasks with TaskCreate";

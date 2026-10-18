@@ -70,8 +70,8 @@ pub fn task_lists(lang: &str) -> &'static str {
 /// TaskListCreate description。
 pub fn task_list_create(lang: &str) -> &'static str {
     match lang {
-        "zh" => "为复杂的多步骤请求创建任务列表（3+ 步骤、多个依赖，或并行子代理协调）。之后创建的任务会自动挂载到此列表。",
-        _ => "Create a task list for a complex multi-step request (3+ steps, multiple dependencies, or parallel sub-agent coordination). Tasks created afterwards auto-attach to this list.",
+        "zh" => "为复杂的多步骤请求创建任务列表（3+ 步骤、多个依赖或并行子代理）。每个请求只创建一次；重复调用会新建空列表并切换当前列表；任务用 TaskCreate 添加。",
+        _ => "Create ONE task list per complex multi-step request (3+ steps, dependencies, or parallel sub-agents). Calling it again starts a NEW empty list. Add tasks with TaskCreate.",
     }
 }
 

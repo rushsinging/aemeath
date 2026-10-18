@@ -53,6 +53,7 @@ pub mod task_list;
 pub mod task_list_complete;
 pub mod task_list_create;
 pub mod task_lists;
+pub mod task_not_found;
 pub mod task_stop;
 pub mod task_update;
 pub mod tool_search;
