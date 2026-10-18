@@ -162,7 +162,8 @@ pub struct ContextReadRun {
 }
 
 impl ContextReadRun {
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// 便捷构造（生产由 snapshot 反序列化构造；仅测试直接组装）。
+    #[cfg(test)]
     pub fn new(run_id: impl Into<String>, steps: Vec<ContextReadStep>) -> Self {
         Self {
             run_id: run_id.into(),
@@ -175,7 +176,7 @@ impl ContextReadRun {
         &self.run_id
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub const fn is_protected(&self) -> bool {
         self.protected
     }
@@ -195,7 +196,8 @@ pub struct ContextReadStep {
 }
 
 impl ContextReadStep {
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// 便捷构造（生产由 snapshot 反序列化构造；仅测试直接组装）。
+    #[cfg(test)]
     pub fn new(
         step_id: impl Into<String>,
         accepted_messages: Option<CommittedStepMessages>,

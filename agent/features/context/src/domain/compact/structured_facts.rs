@@ -152,7 +152,7 @@ pub struct CompactFactIdentity {
 
 impl CompactFactIdentity {
     /// 仅测试构造器（生产经 serde 反序列化路径构造）。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn new(
         entity: CompactFactEntity,
         key: impl Into<String>,
@@ -172,19 +172,19 @@ impl CompactFactIdentity {
     }
 
     /// 仅测试访问器。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub const fn entity(&self) -> CompactFactEntity {
         self.entity
     }
 
     /// 仅测试访问器。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn key(&self) -> &str {
         &self.key
     }
 
     /// 仅测试访问器。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub const fn dimension(&self) -> CompactFactDimension {
         self.dimension
     }
@@ -289,7 +289,7 @@ impl CompactFact {
     }
 
     /// 构造带 identity 的 fact（生产经 serde 反序列化路径；此构造器供测试与显式构造）。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn new_with_identity(
         sequence: u64,
         source: CompactFactSource,
@@ -301,7 +301,7 @@ impl CompactFact {
     }
 
     /// 仅测试构造器（生产经 serde 反序列化路径构造）；保留错误分支覆盖。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub fn constraint(
         sequence: u64,
         source: CompactFactSource,
@@ -683,14 +683,16 @@ fn task_snapshot_is_authoritative(snapshot: &CompactTaskSnapshotData) -> bool {
             == 1
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+/// 归并便捷入口（仅测试；生产经完整 fallback 链入口）。
+#[cfg(test)]
 pub fn reduce_compact_facts(
     batch: CompactFactBatch,
 ) -> Result<ContinuationCheckpoint, CheckpointError> {
     reduce_compact_facts_with_objective_fallback(batch, None, None)
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+/// 归并便捷入口（仅测试；生产经完整 fallback 链入口）。
+#[cfg(test)]
 pub fn reduce_compact_facts_with_task_snapshot(
     batch: CompactFactBatch,
     task_snapshot: Option<&CompactTaskSnapshotData>,

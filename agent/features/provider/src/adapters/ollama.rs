@@ -23,7 +23,6 @@ pub struct OllamaProvider {
     pub(crate) model: String,
     pub(crate) user_agent: String,
     pub(crate) http: reqwest::Client,
-    pub(crate) timeout_secs: u64,
 }
 
 impl OllamaProvider {
@@ -31,46 +30,21 @@ impl OllamaProvider {
     /// max_tokens / 推理档位由调用方传入的 `InvocationScopeData` 决定（不可变、
     /// 一次调用一份快照）。这两个构造参数仅为保持调用方签名兼容而保留，
     /// 当前未参与任何 immutable default 的派生，故有意不使用。
-    #[allow(dead_code)]
-    pub fn new(
-        api_key: String,
-        base_url: Option<String>,
-        model: Option<String>,
-        max_tokens: u32,
-        reasoning: bool,
-        timeout_secs: u64,
-    ) -> Self {
-        Self::new_with_user_agent(
-            api_key,
-            base_url,
-            model,
-            max_tokens,
-            reasoning,
-            timeout_secs,
-            share::config::Config::default().api.user_agent,
-        )
-    }
-
+    ///
+    /// 装配走 `from_shared_http`（client.rs）；本构造器仅测试用，收窄到 test 目标（#1995）。
+    #[cfg(test)]
     pub fn new_with_user_agent(
         api_key: String,
         base_url: Option<String>,
         model: Option<String>,
         _max_tokens: u32,
         _reasoning: bool,
-        timeout_secs: u64,
         user_agent: String,
     ) -> Self {
         let base_url = base_url.expect("Provider construction 必须传入已解析 base URL");
         let model = model.expect("Provider construction 必须传入已解析模型");
         let http = crate::adapters::transport::build_http_client_for_endpoint(Some(&base_url));
-        Self::from_shared_http(
-            api_key,
-            Some(base_url),
-            Some(model),
-            timeout_secs,
-            user_agent,
-            http,
-        )
+        Self::from_shared_http(api_key, Some(base_url), Some(model), user_agent, http)
     }
 
     /// 基于共享（pool 复用的）HTTP client 构造 driver；连接事实由
@@ -79,7 +53,6 @@ impl OllamaProvider {
         api_key: String,
         base_url: Option<String>,
         model: Option<String>,
-        timeout_secs: u64,
         user_agent: String,
         http: reqwest::Client,
     ) -> Self {
@@ -94,16 +67,7 @@ impl OllamaProvider {
             api_key,
             user_agent,
             http,
-            timeout_secs,
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn with_timeout_secs(mut self, secs: u64) -> Self {
-        self.timeout_secs = secs;
-        self.http =
-            crate::adapters::transport::build_http_client_for_endpoint(Some(&self.base_url));
-        self
     }
 
     fn build_headers(&self) -> Result<HeaderMap, crate::LlmError> {

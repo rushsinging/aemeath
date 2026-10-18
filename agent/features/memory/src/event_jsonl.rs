@@ -175,7 +175,6 @@ impl JsonlSegmentEventStore {
 
     /// 以构造时配置的 `retention_days` 执行 GC 的免参入口（composition /
     /// 周期触发点使用；配置接线落地前仅测试引用，放行 dead_code）。
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn gc(&self, now_unix_ms: u64) -> Result<usize, EventAppendError> {
         self.gc_expired(now_unix_ms, self.retention_days)
     }

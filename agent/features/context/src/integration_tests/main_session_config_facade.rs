@@ -103,16 +103,6 @@ impl TrackingMemoryOpener {
         self.open_count.load(Ordering::SeqCst)
     }
 
-    #[allow(dead_code)]
-    fn last_key(&self) -> Option<ProjectMemoryKey> {
-        self.last_key.lock().unwrap().clone()
-    }
-
-    #[allow(dead_code)]
-    fn set_fail(&self, fail: bool) {
-        self.fail.store(fail, Ordering::SeqCst);
-    }
-
     fn shared_fields(
         &self,
     ) -> (
@@ -156,8 +146,6 @@ impl MemoryOpener for TrackingMemoryOpener {
 
 struct FacadeHarness {
     wiring: MainSessionWiring,
-    #[allow(dead_code)]
-    workspace_persist: Arc<dyn project::WorkspaceWriter>,
     config_service: Arc<ConfigAppService>,
     memory_opener: Arc<TrackingMemoryOpener>,
     _tmp: TempDir,
@@ -249,7 +237,6 @@ async fn build_facade_harness(
 
     FacadeHarness {
         wiring,
-        workspace_persist,
         config_service,
         memory_opener,
         _tmp: tmp,

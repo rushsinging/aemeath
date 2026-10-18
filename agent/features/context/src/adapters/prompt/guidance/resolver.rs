@@ -40,6 +40,9 @@ impl LoadedGuidance {
 ///   2. Every prefix-matched `{prefix}.md`, general to specific
 ///   3. Every matching config guidance entry, general to specific
 ///   4. If `reasoning == true`, append `_reasoning.md`
+///
+/// 同步版本仅契约测试使用；生产路径走带 hook 的 [`resolve_guidance_async`]。
+#[cfg(test)]
 pub(crate) fn resolve_guidance(
     model_id: &str,
     config_guidance: &HashMap<String, String>,
@@ -68,18 +71,6 @@ pub async fn resolve_guidance_async(
         .map(|guidance| guidance.content)
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-/// Resolve all model-specific file and config guidance with hook support.
-pub async fn resolve_model_guidance_async(
-    model_id: &str,
-    config_guidance: &HashMap<String, String>,
-    language: &str,
-    hook_runner: Option<&dyn InstructionsLoadedHook>,
-) -> Option<String> {
-    let guidance = collect_model_guidance(model_id, config_guidance, language);
-    trigger_loaded_hooks(&guidance, hook_runner).await;
-    join_loaded_guidance(guidance)
 }
 
 fn collect_guidance(
@@ -113,20 +104,6 @@ fn collect_model_guidance(
     guidance
 }
 
-fn join_loaded_guidance(guidance: Vec<LoadedGuidance>) -> Option<String> {
-    if guidance.is_empty() {
-        None
-    } else {
-        Some(
-            guidance
-                .into_iter()
-                .map(|guidance| guidance.content)
-                .collect::<Vec<_>>()
-                .join("\n"),
-        )
-    }
-}
-
 async fn trigger_loaded_hooks(
     guidance: &[LoadedGuidance],
     hook_runner: Option<&dyn InstructionsLoadedHook>,
@@ -149,6 +126,8 @@ async fn trigger_loaded_hooks(
 
 /// Load a named file with language subdirectory support.
 /// Tries `{language}/{name}.md` first, falls back to `{name}.md`, then built-in content.
+/// （仅测试直接消费的薄封装；生产经 `load_named_guidance_with_lang` 内联使用。）
+#[cfg(test)]
 pub(crate) fn load_named_file_with_lang(name: &str, language: &str) -> Option<String> {
     load_named_guidance_with_lang(name, language).map(|guidance| guidance.content)
 }

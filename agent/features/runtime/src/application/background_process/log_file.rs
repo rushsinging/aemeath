@@ -5,7 +5,7 @@
 //! 工具由 runtime 终态 append（唯一写入方）。`logs` 查询按文件区间读
 //! （游标 = 字节偏移），token budget 截断在读取层叠加。
 //!
-//! 生命周期随 session：快路径完成后删除单文件；session 清理整目录。
+//! 生命周期随 session：快路径完成后删除单文件。
 
 use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
@@ -28,15 +28,6 @@ pub(crate) struct TaskLogSegment {
 /// 按 session 前缀整目录处理。
 pub(crate) fn session_logs_dir(base: &Path, session_id: &str) -> PathBuf {
     base.join(format!("{session_id}.background-process"))
-}
-
-/// 单任务日志文件路径（未建文件也可推导，供恢复对账）。
-pub(crate) fn task_log_path(
-    base: &Path,
-    session_id: &str,
-    process_id: &BackgroundProcessId,
-) -> PathBuf {
-    session_logs_dir(base, session_id).join(format!("{}.log", process_id.as_str()))
 }
 
 /// 已创建的任务日志文件句柄（路径视图 + 终态兜底写 + 区间读）。
@@ -64,15 +55,6 @@ impl TaskLogFile {
     /// 既有路径构造（恢复 / 对账场景，文件可能已不存在）。
     pub(crate) fn from_path(path: PathBuf) -> Self {
         Self { path }
-    }
-
-    /// 路径推导（不建文件）。
-    pub(crate) fn path_for(
-        base: &Path,
-        session_id: &str,
-        process_id: &BackgroundProcessId,
-    ) -> PathBuf {
-        task_log_path(base, session_id, process_id)
     }
 
     pub(crate) fn path(&self) -> &Path {
@@ -134,16 +116,6 @@ impl TaskLogFile {
     /// 快路径清理：输出已直接进 tool_result，完成后删除文件不留垃圾。
     pub(crate) fn remove(&self) -> std::io::Result<()> {
         std::fs::remove_file(&self.path)
-    }
-}
-
-/// session 级清理：整目录删除（目录不存在视为成功）。
-pub(crate) fn remove_session_logs(base: &Path, session_id: &str) -> std::io::Result<()> {
-    let dir = session_logs_dir(base, session_id);
-    match std::fs::remove_dir_all(&dir) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
     }
 }
 

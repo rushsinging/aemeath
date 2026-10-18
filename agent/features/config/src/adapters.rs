@@ -6,7 +6,9 @@ use share::config::domain::merge::{
 use share::config::hooks::{default_timeout_secs, ClaudeSettingsConfig, HookEntry, HooksConfig};
 use share::config::PermissionModeConfig;
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use storage::{
@@ -512,7 +514,8 @@ impl CompatibilityAdapter {
         }
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// 多路径排序批量读（仅契约测试使用的组合面；生产按明确分层逐路径读）。
+    #[cfg(test)]
     pub async fn read_paths(
         mut paths: Vec<PathBuf>,
     ) -> Result<Vec<ConfigPatch>, ConfigAdapterError> {

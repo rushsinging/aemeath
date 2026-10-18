@@ -47,3 +47,7 @@ required-features = ["http-adapter"]
 # fail-closed 分支处理（NEVER 回退会覆盖空目录的 std::fs::rename）。
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true }
+
+# 继承 workspace 零容忍 lint 基线（#1995）。
+[lints]
+workspace = true

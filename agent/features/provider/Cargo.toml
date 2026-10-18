@@ -19,3 +19,7 @@ log = "0.4"
 futures-util = { workspace = true }
 tokio-util = { workspace = true }
 httpdate = "1"
+
+# 继承 workspace 零容忍 lint 基线（#1995）。
+[lints]
+workspace = true

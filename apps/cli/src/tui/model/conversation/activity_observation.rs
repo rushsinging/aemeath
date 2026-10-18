@@ -1,6 +1,6 @@
-use crate::tui::adapter::tui_runtime_event::{
-    TuiActivityObservation, TuiActivitySnapshot, UiActivityId,
-};
+#[cfg(test)]
+use crate::tui::adapter::tui_runtime_event::UiActivityId;
+use crate::tui::adapter::tui_runtime_event::{TuiActivityObservation, TuiActivitySnapshot};
 use crate::tui::model::conversation::interaction::UiRunId;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -146,7 +146,8 @@ impl ActivityObservationModel {
         self.stale_runs.retain(|stored| stored != run_id);
     }
 
-    #[allow(dead_code)]
+    /// 按 id 查观察值（仅测试断言使用的读访问器）。
+    #[cfg(test)]
     pub(crate) fn activity(&self, id: &UiActivityId) -> Option<&TuiActivityObservation> {
         self.activities.iter().find(|activity| &activity.id == id)
     }

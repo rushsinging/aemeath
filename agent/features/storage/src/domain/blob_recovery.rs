@@ -1,16 +1,20 @@
+// JournalPhase / DigestObservation / RecoveryDecision、decide_* 与 TransactionDigest 仅测试引用：
+// 生产恢复路径在 adapters（`blob_protocol` 侧副本 + 内联 match）实现，逐项收窄到 test 目标（#1995）；
+// CorruptionReason / QuarantineDisposition / CorruptTransactionError 仍为生产载荷，保持原样。
+#[cfg(test)]
 use sha2::{Digest, Sha256};
 
 use super::TransactionScopeData;
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub enum JournalPhase {
     Prepared,
     Committed,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub enum DigestObservation {
     New,
     Old,
@@ -29,8 +33,8 @@ pub enum CorruptionReason {
     DatasetMemberDigestMismatch,
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub enum RecoveryDecision {
     RollForward,
     RollBack,
@@ -38,7 +42,7 @@ pub enum RecoveryDecision {
     Corrupt(CorruptionReason),
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub fn decide_blob_recovery(
     phase: JournalPhase,
     observation: DigestObservation,
@@ -58,7 +62,7 @@ pub fn decide_blob_recovery(
     }
 }
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 pub fn decide_orphan_previous(matches_primary: bool) -> RecoveryDecision {
     if matches_primary {
         RecoveryDecision::CleanOrphan
@@ -67,11 +71,11 @@ pub fn decide_orphan_previous(matches_primary: bool) -> RecoveryDecision {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub struct TransactionDigest([u8; 32]);
 
-#[cfg_attr(not(test), allow(dead_code))]
+#[cfg(test)]
 impl TransactionDigest {
     pub fn blob_bytes(bytes: &[u8]) -> Self {
         Self::calculate(b"aemeath.storage.blob.bytes.v1\0", bytes)

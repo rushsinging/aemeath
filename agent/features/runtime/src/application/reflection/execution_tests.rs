@@ -534,7 +534,7 @@ async fn two_phase_reflection_removes_noise_then_completes() {
     .unwrap();
     memory.write(noisy.clone()).await.unwrap();
     // 残留：独立 mark_outdated 不归档的旧数据，等编排 sweep 收口。
-    let mut residual = memory::api::MemoryEntry::new(
+    let residual = memory::api::MemoryEntry::new(
         memory::api::MemoryId::now_v7(),
         100,
         MemoryLayer::Project,

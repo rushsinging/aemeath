@@ -18,3 +18,7 @@ logging = { path = "../../../packages/global/logging" }
 utils = { path = "../../../packages/global/utils" }
 flate2 = { workspace = true }
 tar = { workspace = true }
+
+# 继承 workspace 零容忍 lint 基线（#1995）。
+[lints]
+workspace = true

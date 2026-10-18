@@ -82,6 +82,7 @@ pub fn acquire_daemon_lock(lock_path: &Path) -> Result<DaemonLockGuard, DaemonLo
         .create(true)
         .read(true)
         .write(true)
+        .truncate(false)
         .open(lock_path)?;
     flock_exclusive_nonblock(&file)?;
     Ok(DaemonLockGuard { _file: file })

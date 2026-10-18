@@ -15,7 +15,9 @@ pub struct OpenAICompatibleProvider {
 }
 
 impl OpenAICompatibleProvider {
-    #[allow(clippy::too_many_arguments, dead_code)]
+    // 装配走 `from_shared_http`（client.rs）；这两个构造器仅测试用，收窄到 test 目标（#1995）。
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: OpenAIProviderConfig,
         api_key: String,
@@ -39,6 +41,7 @@ impl OpenAICompatibleProvider {
         )
     }
 
+    #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     pub fn new_with_user_agent(
         config: OpenAIProviderConfig,

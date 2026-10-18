@@ -26,19 +26,17 @@ pub mod glob_tool;
 pub mod grep;
 // 该 Tool 尚未注册到任何 register_* 入口，收窄可见性后内部 API 暂无消费方，
 // 保留实现以备后续接线（refs #61 D3）。
-#[allow(dead_code)]
 pub mod list_mcp_resources;
 // mcp / mcp_manager 内含若干面向完整性的辅助类型/函数（diff、sse、validation 等），
 // 当前仅部分经 tools crate-root façade 暴露消费，其余 re-export 保留备用（refs #61 D3）。
-#[allow(dead_code, unused_imports)]
+#[allow(unused_imports)]
 pub mod mcp;
-#[allow(dead_code, unused_imports)]
+#[allow(unused_imports)]
 pub mod mcp_manager;
 pub mod mcp_tool; // McpTool is dynamically created, not statically registered
 pub mod memory_tool;
 pub(crate) mod process_cleanup;
 // 同 list_mcp_resources：尚未注册的 MCP 资源读取 Tool，保留实现（refs #61 D3）。
-#[allow(dead_code)]
 pub mod read_mcp_resource;
 // Filesystem Skill adapter（#912/#913）：双端口实现已完成并经
 // adapters::composition 接线生产装配。端口与 PL 类型已在 domain.rs /

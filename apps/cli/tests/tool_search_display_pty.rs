@@ -252,8 +252,7 @@ data: [DONE]\n\n"
     )
 }
 
-/// openai chat.completions SSE：纯文本响应。
-
+// openai chat.completions SSE：纯文本响应。
 fn sse_text_response(text: &str) -> String {
     format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n\

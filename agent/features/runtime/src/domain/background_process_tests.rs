@@ -35,7 +35,6 @@ fn dispatch_creates_foreground_waiting_record() {
     assert_eq!(record.identity.tool_name, "Bash");
     assert_eq!(record.invocation_goal, "command=cargo test");
     assert!(!record.is_terminal());
-    assert!(!record.is_backgrounded());
 }
 
 #[test]
@@ -50,7 +49,6 @@ fn foreground_waiting_advances_to_backgrounded_capturing_deadline() {
         .expect("ForegroundWaiting -> Backgrounded 应合法")
         .record;
 
-    assert!(advanced.is_backgrounded());
     match advanced.state {
         BackgroundProcessState::Backgrounded {
             deadline_snapshot, ..

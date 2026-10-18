@@ -191,6 +191,7 @@ impl TaskStoreState {
             .collect()
     }
 
+    #[allow(dead_code)] // 预留：TaskStore 全局 stats 查询（见 adapters/store.rs 说明）
     pub fn stats(&self) -> TaskStoreStatsData {
         self.tasks()
             .values()

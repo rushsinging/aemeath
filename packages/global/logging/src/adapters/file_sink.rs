@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 
 /// emergency 兜底专用的日志文件名。TUI（alternate screen）下 stderr 越过双缓冲直接糊屏，
 struct SinkEntry {
+    /// 落盘绝对路径。生产只写入不读取；仅 `route()`（测试辅助）与测试断言读取。
     #[cfg_attr(not(test), allow(dead_code))]
     path: PathBuf,
 }
@@ -83,6 +84,8 @@ impl EmergencyWriter for FileEmergency {
 /// The process-wide logger. File 模式下全部落盘 IO 由专用 worker 线程执行，
 /// 调用线程（含 TUI 主线程）只做有界入队，磁盘繁忙不再阻塞 UI。
 pub struct UnifiedLogger {
+    /// sink_id → 落盘路径表。生产只写入（路由走 `route_sink_id` + TargetCatalog）；
+    /// 仅 `route()`（测试辅助）与测试断言读取，非测试构建无读点。
     #[cfg_attr(not(test), allow(dead_code))]
     sinks: HashMap<DiagnosticSinkId, SinkEntry>,
     async_sink: Option<AsyncSinkWorker>,
@@ -177,7 +180,7 @@ impl UnifiedLogger {
     }
 
     /// 测试辅助：按 target 查 sink 落盘路径（生产日志路径走 `route_sink_id`）。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     fn route(&self, target: &str) -> &SinkEntry {
         let sink = self.route_sink_id(target);
         self.sinks

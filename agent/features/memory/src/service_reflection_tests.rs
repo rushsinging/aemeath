@@ -337,7 +337,7 @@ async fn reflection_capacity_gate_counts_effective_active_only() {
         "eta rule",
     ] {
         let written = entry(MemoryLayer::Project, content);
-        ids.push(written.id.clone());
+        ids.push(written.id);
         memory.write(written).await.expect("write");
     }
     // 3 条残留：2 outdated + 1 superseded（物理 10 = 有效 7 + 残留 3）。

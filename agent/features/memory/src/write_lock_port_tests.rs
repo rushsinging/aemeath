@@ -22,7 +22,7 @@ fn fact_entry(content: &str) -> MemoryEntry {
 async fn write_permit_blocks_concurrent_update_until_released() {
     let memory = Arc::new(InMemoryMemory::new(MemoryPolicy::default()).unwrap());
     let entry = fact_entry("seed");
-    let id = entry.id.clone();
+    let id = entry.id;
     let written = memory.write(entry).await.expect("seed write");
     assert!(
         matches!(written, WriteResult::Added { .. }),
@@ -31,7 +31,7 @@ async fn write_permit_blocks_concurrent_update_until_released() {
 
     let permit = memory.acquire_write_permit().await.expect("permit");
     let blocked_memory = Arc::clone(&memory);
-    let blocked_id = id.clone();
+    let blocked_id = id;
     let blocked = tokio::spawn(async move {
         blocked_memory
             .update(&blocked_id, "changed-under-lock")

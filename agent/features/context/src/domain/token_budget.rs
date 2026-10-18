@@ -45,8 +45,8 @@ pub fn estimate_tokens_with_char_rates(
 
 /// 兼容旧调用：`bytes_per_token` 换算为拉丁字符比率 `1 / bytes_per_token`，
 /// CJK 仍用默认 0.6。新代码应优先 [`estimate_tokens`] /
-/// [`estimate_tokens_with_char_rates`]。
-#[allow(dead_code)] // 保留兼容入口，生产路径走默认比率
+/// [`estimate_tokens_with_char_rates`]。生产路径走默认比率；仅历史测试引用。
+#[cfg(test)]
 pub fn estimate_tokens_with_ratio(text: &str, bytes_per_token: f64) -> usize {
     let ratio = bytes_per_token.clamp(2.0, 6.0);
     estimate_tokens_with_char_rates(text, TOKENS_PER_CJK_CHAR, 1.0 / ratio)

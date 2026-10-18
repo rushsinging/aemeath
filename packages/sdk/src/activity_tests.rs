@@ -57,7 +57,7 @@ fn activity_snapshot_defaults_legacy_missing_heartbeat_sequence() {
 
 #[test]
 fn activity_snapshot_carries_complete_views_at_one_run_revision() {
-    let mut activity = activity_fixture();
+    let activity = activity_fixture();
     let run_id = activity.run_id.clone();
     let snapshot = ActivitySnapshotView {
         run_id: run_id.clone(),

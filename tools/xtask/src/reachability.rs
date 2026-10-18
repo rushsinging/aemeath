@@ -12,12 +12,11 @@ pub fn run(root: &Path) -> Result<Vec<TimedStep>> {
     let steps = [
         ("cargo check --workspace", vec!["check", "--workspace"]),
         (
-            "cargo clippy production targets",
+            "cargo clippy workspace targets",
             vec![
                 "clippy",
                 "--workspace",
-                "--bins",
-                "--lib",
+                "--all-targets",
                 "--",
                 "-D",
                 "warnings",

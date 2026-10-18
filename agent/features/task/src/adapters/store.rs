@@ -78,9 +78,9 @@ impl TaskStore {
     /// 探测、全局 stats）未发布到 [`TaskAccess`]，生产构建当前没有 crate 内
     /// 消费者；行为由 `adapters/contract/task_access.rs` 与 store 层测试锁定，
     /// 待消费面激活后移除各自的 `allow(dead_code)`。
-    #[cfg_attr(not(test), allow(dead_code))]
     /// Task-internal batch 生命周期命令（未发布到 [`TaskAccess`]）：
     /// `Active` 原子转为 `Paused` 并清空 current；重复 pause 幂等返回 `Paused` 实体。
+    #[allow(dead_code)] // 预留：Task-internal 消费面待接线（见上方说明，contract 测试锁定行为）
     pub(crate) fn pause_batch(
         &self,
         id: BatchIdData,
@@ -90,7 +90,7 @@ impl TaskStore {
 
     /// Task-internal batch 生命周期命令（未发布到 [`TaskAccess`]）：
     /// 仅在无其他 `Active` 时把 `Paused` 原子设回 `Active`/current。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)] // 预留：Task-internal 消费面待接线（见上方说明，contract 测试锁定行为）
     pub(crate) fn resume_batch(
         &self,
         id: BatchIdData,
@@ -99,7 +99,7 @@ impl TaskStore {
     }
 
     /// Task-internal batch turn 事实记录（未发布到 [`TaskAccess`]）。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)] // 预留：Task-internal 消费面待接线（见上方说明，contract 测试锁定行为）
     pub(crate) fn record_batch_turn(
         &self,
         id: BatchIdData,
@@ -111,7 +111,7 @@ impl TaskStore {
 
     /// Task-internal 非 progress 状态迁移（未发布到 [`TaskAccess`]）；
     /// crate 外状态推进走 [`TaskAccess::transition_with_progress`]。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)] // 预留：Task-internal 消费面待接线（见上方说明，contract 测试锁定行为）
     pub(crate) fn transition(
         &self,
         id: TaskIdData,
@@ -123,7 +123,7 @@ impl TaskStore {
 
     /// Task-internal 单条依赖追加（未发布到 [`TaskAccess`]）；
     /// crate 外依赖改写走 [`TaskAccess::replace_dependencies`]。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)] // 预留：Task-internal 消费面待接线（见上方说明，contract 测试锁定行为）
     pub(crate) fn add_dependency(
         &self,
         task_id: TaskIdData,
@@ -135,7 +135,7 @@ impl TaskStore {
     }
 
     /// Task-internal 单条依赖移除（未发布到 [`TaskAccess`]）。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)] // 预留：Task-internal 消费面待接线（见上方说明，contract 测试锁定行为）
     pub(crate) fn remove_dependency(
         &self,
         task_id: TaskIdData,
@@ -147,7 +147,7 @@ impl TaskStore {
     }
 
     /// Task-internal tag 追加（未发布到 [`TaskAccess`]）。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)] // 预留：Task-internal 消费面待接线（见上方说明，contract 测试锁定行为）
     pub(crate) fn add_tag(
         &self,
         id: TaskIdData,
@@ -158,7 +158,7 @@ impl TaskStore {
     }
 
     /// Task-internal tag 移除（未发布到 [`TaskAccess`]）。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)] // 预留：Task-internal 消费面待接线（见上方说明，contract 测试锁定行为）
     pub(crate) fn remove_tag(
         &self,
         id: TaskIdData,
@@ -170,28 +170,28 @@ impl TaskStore {
 
     /// Task-internal 全局 batch 列表（未发布到 [`TaskAccess`]）；
     /// crate 外历史发现走 [`TaskAccess::list_batch_snapshots`]。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)] // 预留：Task-internal 消费面待接线（见上方说明，contract 测试锁定行为）
     pub(crate) fn list_batches(&self) -> Vec<BatchData> {
         self.lock().list_batches()
     }
 
     /// Task-internal 全局统计（未发布到 [`TaskAccess`]）；
     /// crate 外 batch 统计走 [`TaskAccess::batch_snapshot`] 家族。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)] // 预留：Task-internal 消费面待接线（见上方说明，contract 测试锁定行为）
     pub(crate) fn stats(&self) -> TaskStoreStatsData {
         self.lock().stats()
     }
 
     /// Task-internal blocked 探测（未发布到 [`TaskAccess`]）；
     /// 写入侧 admission 由原子 transition 在锁内检查，不依赖本查询。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)] // 预留：Task-internal 消费面待接线（见上方说明，contract 测试锁定行为）
     pub(crate) fn is_blocked(&self, id: TaskIdData) -> Result<bool, share::error::DomainError> {
         self.lock().is_blocked(id)
     }
 
     /// Task-internal 依赖环预检（未发布到 [`TaskAccess`]）；
     /// `replace_dependencies` 写入时在同一事务内重新检查环。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[allow(dead_code)] // 预留：Task-internal 消费面待接线（见上方说明，contract 测试锁定行为）
     pub(crate) fn would_create_cycle(
         &self,
         task_id: TaskIdData,

@@ -116,38 +116,6 @@ fn repeated_finish_is_idempotent() {
 }
 
 #[test]
-fn invalidate_all_marks_active_tasks_and_keeps_terminals() {
-    let supervisor = BackgroundProcessSupervisor::new();
-    let waiting = supervisor.register(identity("waiting"), "command=a", SystemTime::now());
-    let backgrounded = supervisor.register(identity("bg"), "command=b", SystemTime::now());
-    supervisor.mark_backgrounded(&backgrounded, None).unwrap();
-    let finished = supervisor.register(identity("done"), "command=c", SystemTime::now());
-    supervisor
-        .finish(&finished, BackgroundProcessTerminalKind::Success, None)
-        .unwrap();
-
-    let invalidated_count = supervisor.invalidate_all(BackgroundInvalidationReason::ProcessExit);
-
-    assert_eq!(invalidated_count, 2, "仅活跃任务失效");
-    assert_eq!(
-        supervisor.snapshot(&waiting).unwrap().terminal_kind(),
-        Some(BackgroundProcessTerminalKind::Invalidated {
-            reason: BackgroundInvalidationReason::ProcessExit
-        })
-    );
-    assert_eq!(
-        supervisor.snapshot(&backgrounded).unwrap().terminal_kind(),
-        Some(BackgroundProcessTerminalKind::Invalidated {
-            reason: BackgroundInvalidationReason::ProcessExit
-        })
-    );
-    assert_eq!(
-        supervisor.snapshot(&finished).unwrap().terminal_kind(),
-        Some(BackgroundProcessTerminalKind::Success)
-    );
-}
-
-#[test]
 fn direct_log_read_task_log_uses_file_as_source_of_truth() {
     let base = std::env::temp_dir().join(format!(
         "bgp-sup-tests-{}-{}",
@@ -462,22 +430,6 @@ fn finish_freezes_completion_time_on_record() {
         frozen_at,
         "重复终态推进不得刷新完成时刻"
     );
-}
-
-#[test]
-fn invalidate_all_freezes_completion_time_on_active_tasks() {
-    let supervisor = BackgroundProcessSupervisor::new();
-    let task_id = supervisor.register(
-        identity("invalidate"),
-        "tool=Bash input=long",
-        SystemTime::now(),
-    );
-    supervisor.mark_backgrounded(&task_id, None).unwrap();
-
-    let invalidated = supervisor.invalidate_all(BackgroundInvalidationReason::ProcessExit);
-    assert_eq!(invalidated, 1);
-    let snapshot = supervisor.snapshot(&task_id).unwrap();
-    assert!(snapshot.finished_at.is_some(), "失效收口同样固化完成时刻");
 }
 
 // ── 注册携带派发时刻（时长自派发起算） ───────────────────────────────

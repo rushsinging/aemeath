@@ -187,10 +187,6 @@ impl BackgroundProcessRecord {
         }
     }
 
-    pub fn is_backgrounded(&self) -> bool {
-        matches!(self.state, BackgroundProcessState::Backgrounded { .. })
-    }
-
     pub fn is_terminal(&self) -> bool {
         matches!(self.state, BackgroundProcessState::Terminal(_))
     }

@@ -46,7 +46,7 @@ impl AsyncSinkHandle {
 
     /// 当前累计丢弃行数（含 channel 满与 worker 停止两类丢弃）。
     /// 生产路径经 FlushBarrier 的 emergency 报告观测；此读取器供测试断言。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub(super) fn dropped_lines(&self) -> u64 {
         self.dropped_lines.load(Ordering::Relaxed)
     }
@@ -74,7 +74,9 @@ impl AsyncSinkHandle {
 /// 专用落盘线程：独占持有全部 `FileSinkLifecycle`，按入队顺序写盘。
 pub(super) struct AsyncSinkWorker {
     handle: AsyncSinkHandle,
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// 持有 worker 线程句柄供测试 `join()` 确定性收尾；生产 drop 即 detach，
+    /// 线程生命周期与进程一致（无读点，RAII 持有）。
+    #[allow(dead_code)]
     worker: JoinHandle<HashMap<DiagnosticSinkId, FileSinkLifecycle>>,
 }
 
@@ -108,7 +110,7 @@ impl AsyncSinkWorker {
 
     /// 等待 worker 线程退出并取回 lifecycles。生产进程中 logger 被 leak、
     /// 生命周期与进程一致，不做 join；本方法用于测试的确定性收尾。
-    #[cfg_attr(not(test), allow(dead_code))]
+    #[cfg(test)]
     pub(super) fn join(self) -> HashMap<DiagnosticSinkId, FileSinkLifecycle> {
         drop(self.handle);
         self.worker.join().unwrap_or_default()

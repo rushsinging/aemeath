@@ -71,6 +71,9 @@ struct RuntimeToolAssembly {
     active_run: Arc<runtime::ActiveRunRegistry>,
 }
 
+/// 装配层聚合注入：端口依赖逐项平铺（对齐 `wire_builtin_catalog_execution`
+/// 的既有装配形态），收敛参数包会隐藏依赖分组语义，故豁免参数数量 lint。
+#[allow(clippy::too_many_arguments)]
 fn wire_runtime_tool_assembly(
     task_access: Arc<dyn task::TaskAccess>,
     memory_source: Arc<dyn tools::MemoryPortSource>,

@@ -8,6 +8,8 @@ pub(crate) const BASIC_ENVIRONMENT_VARIABLES: [&str; 6] =
 pub(crate) const CONTEXT_SEPARATOR: &str = "\n";
 
 pub(crate) const DEFAULT_OUTPUT_LIMIT: usize = 8 * 1024;
+/// 终止宽限仅 Unix 进程执行面消费（Windows 分支不读，放行跨目标 dead_code）。
+#[cfg_attr(not(unix), allow(dead_code))]
 pub(crate) const TERMINATION_GRACE: Duration = Duration::from_millis(250);
 /// `AEMEATH_*` 前缀的按次权威变量命名空间：仅由 Dispatcher 注入，
 /// 语义上与 `CLAUDE_*` 前缀兼容层共享归属。

@@ -124,8 +124,8 @@ pub(crate) trait ContextPromptSource: Send + Sync {
 pub(crate) struct MemoryMaterialization {
     pub blocks: Vec<SystemBlock>,
     /// 内容派生 revision（记忆注入结果变更检测；单元测试断言其随命中内容变化，
-    /// 生产读侧待接线）。
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// 生产读侧待接线——接线落地前放行 dead_code）。
+    #[allow(dead_code)]
     pub revision: u64,
 }
 

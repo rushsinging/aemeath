@@ -13,8 +13,10 @@ use tokio::sync::Mutex;
 /// JSON-RPC response (stdio transport)
 #[derive(Deserialize)]
 struct JsonRpcResponse {
+    // 保留豁免：JSON-RPC 协议信封字段，Deserialize 反序列化兼容需要，业务代码不读取。
     #[allow(dead_code)]
     jsonrpc: String,
+    // 保留豁免：JSON-RPC 协议信封字段，Deserialize 反序列化兼容需要，业务代码不读取。
     #[allow(dead_code)]
     id: Option<u64>,
     result: Option<Value>,
@@ -23,6 +25,7 @@ struct JsonRpcResponse {
 
 #[derive(Deserialize)]
 struct JsonRpcError {
+    // 保留豁免：错误码属协议兼容字段，Deserialize 需要，当前仅读取 message。
     #[allow(dead_code)]
     code: i64,
     message: String,
@@ -30,7 +33,6 @@ struct JsonRpcError {
 
 /// Stdio transport state
 pub struct StdioTransport {
-    #[allow(dead_code)]
     child: Child,
     stdin: Mutex<tokio::process::ChildStdin>,
     stdout: Mutex<BufReader<tokio::process::ChildStdout>>,

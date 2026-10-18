@@ -31,9 +31,10 @@ fn global_guidance_dir() -> PathBuf {
 //
 // 注：universal_execution_discipline 已迁至项目级 i18n catalog
 // （share::i18n::prompt::discipline）。此处 re-export 保持调用点零改动。
-pub use constants::{DEFAULT_FILES_EN, DEFAULT_FILES_ZH, DEFAULT_FILE_NAMES, SUPPORTED_LANGUAGES};
+pub use constants::{DEFAULT_FILES_EN, DEFAULT_FILES_ZH, DEFAULT_FILE_NAMES};
+#[cfg(test)]
 pub(crate) use resolver::resolve_guidance;
-pub use resolver::{resolve_guidance_async, resolve_model_guidance_async};
+pub use resolver::resolve_guidance_async;
 pub(crate) use share::i18n::prompt::discipline::universal_execution_discipline;
 pub use share::i18n::prompt::discipline::{
     UNIVERSAL_EXECUTION_DISCIPLINE_EN, UNIVERSAL_EXECUTION_DISCIPLINE_ZH,

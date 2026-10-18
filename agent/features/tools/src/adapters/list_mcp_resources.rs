@@ -9,10 +9,14 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// List MCP resources tool
+// 保留豁免：尚未注册到 register_* 入口，按 adapters.rs 注释保留实现以备后续接线（refs #61 D3）。
+#[allow(dead_code)]
 pub struct ListMcpResourcesTool {
     pub clients: Arc<Mutex<Vec<Arc<Mutex<McpClient>>>>>,
 }
 
+// 保留豁免：随 ListMcpResourcesTool 一并保留待接线（refs #61 D3）。
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpResource {
     /// Resource URI
@@ -140,6 +144,8 @@ impl TypedTool for ListMcpResourcesTool {
 }
 
 impl ListMcpResourcesTool {
+    // 保留豁免：随 ListMcpResourcesTool 一并保留待接线（refs #61 D3）。
+    #[allow(dead_code)]
     async fn list_resources(client: &McpClient) -> Result<Vec<McpResourceRaw>, String> {
         let result = client.send_request("resources/list", None).await?;
 
@@ -158,6 +164,8 @@ impl ListMcpResourcesTool {
     }
 }
 
+// 保留豁免：随 ListMcpResourcesTool 一并保留待接线（refs #61 D3）。
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 struct McpResourceRaw {
     uri: String,

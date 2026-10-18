@@ -24,10 +24,13 @@ where
     }
 }
 
+// 标准模式已由 `configured(|| PolicyModeData::Standard)` 生产路径供给；
+// 本结构仅测试直接引用，收窄到 test 目标（#1995）。
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, Default)]
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct StandardPolicy;
 
+#[cfg(test)]
 impl Policy for StandardPolicy {
     fn evaluate(&self, request: &PolicyRequestData) -> PolicyDecisionData {
         evaluate(PolicyModeData::Standard, request)

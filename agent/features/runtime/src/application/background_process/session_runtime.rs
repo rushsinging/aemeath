@@ -276,12 +276,6 @@ impl BackgroundProcessRuntime {
         .map(|(log, _stdout, _stderr)| log)
     }
 
-    /// 测试注入任务日志 base 目录（生产默认 `~/.agents/sessions/`）。
-    #[cfg(test)]
-    pub(crate) fn set_log_base_for_test(&self, base: std::path::PathBuf) {
-        let _ = self.log_base.set(base);
-    }
-
     /// Run 收口后的滞留事实检测（#252 注入确认制兜底）：监督器仍有
     /// 未确认完成事实（收口临界窗口内被 peek 但未注入，消费者已随
     /// Run 销毁）时补发 wakeup 信号——立即唤醒补注入，而非等下一个

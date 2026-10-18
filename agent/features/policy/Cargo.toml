@@ -12,3 +12,7 @@ log = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
+
+# 继承 workspace 零容忍 lint 基线（#1995）。
+[lints]
+workspace = true

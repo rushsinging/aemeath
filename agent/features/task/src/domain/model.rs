@@ -157,6 +157,7 @@ pub(crate) enum TaskCommandError {
         requested: BatchIdData,
     },
     #[error("批次 {id} 当前状态为 {status:?}，只有 active 批次才能记录轮次")]
+    #[allow(dead_code)] // 预留：record_turn 批次命令的错误契约（生产构造随该能力接线启用）
     BatchNotActive {
         id: BatchIdData,
         status: BatchStatusData,
@@ -528,12 +529,14 @@ impl TaskData {
         self.priority = priority;
         self.updated_at = updated_at;
     }
+    #[allow(dead_code)] // 预留：Task-internal tag/turn 能力域实现（见 adapters/store.rs 说明）
     pub(crate) fn add_tag(&mut self, tag: String, updated_at: u64) {
         if !self.tags.contains(&tag) {
             self.tags.push(tag);
             self.updated_at = updated_at;
         }
     }
+    #[allow(dead_code)] // 预留：Task-internal tag/turn 能力域实现（见 adapters/store.rs 说明）
     pub(crate) fn remove_tag(&mut self, tag: &str, updated_at: u64) {
         let old_len = self.tags.len();
         self.tags.retain(|existing| existing != tag);
@@ -740,6 +743,7 @@ impl BatchData {
     /// was already reflected by the current state (idempotent no-op: the
     /// same active turn with `silence_turns` already `0`, or a silent turn
     /// once `silence_turns` has already saturated at `u64::MAX`).
+    #[allow(dead_code)] // 预留：Task-internal tag/turn 能力域实现（见 adapters/store.rs 说明）
     pub(crate) fn record_turn(
         &mut self,
         turn: u64,

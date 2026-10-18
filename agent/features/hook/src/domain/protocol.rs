@@ -74,7 +74,8 @@ pub(crate) fn truncate(text: &str) -> String {
 /// - `can_add_context=false` 收到 Context → `Err(Protocol{ContextOnNonContextual})`。
 ///
 /// 分类失败（`Err`）对应 ExecutionFailed 路径，可重试；业务 Block 永不重试。
-#[cfg_attr(not(test), allow(dead_code))]
+// 生产装配走 `classify_output`（dispatcher）；本 directive-only 包装仅测试引用，收窄到 test 目标（#1995）。
+#[cfg(test)]
 pub fn classify_directive(
     point: HookPointData,
     exit_code: Option<i32>,

@@ -11,7 +11,7 @@
 //! `cargo test -p memory --test reflection_corpus_snapshot -- --ignored` 运行。
 
 use memory::api::reflection::{ReflectionEngine, ReflectionWorkflow};
-use memory::api::{MemoryLayer, MemoryOpener, ProjectMemoryKey};
+use memory::api::{MemoryLayer, ProjectMemoryKey};
 use share::config::MemoryConfig;
 
 fn now_unix() -> u64 {

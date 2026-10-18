@@ -48,8 +48,8 @@ pub(crate) const EVENTS_SEGMENT: &str = "events";
 pub(crate) const EVENTS_JSONL_SUFFIX: &str = ".jsonl";
 
 /// 事件 segment 默认保留天数（`0` 表示禁用 GC，NEVER 表示关闭事件写入）。
-/// retention 配置接线（composition 落点）前仅测试引用，dead_code 暂时放行。
-#[cfg_attr(not(test), allow(dead_code))]
+/// retention 配置接线（composition 落点）前仅测试引用，收窄为测试构建。
+#[cfg(test)]
 pub(crate) const DEFAULT_EVENT_RETENTION_DAYS: u32 = 30;
 
 /// 重排 instructions（与 eval/system-one harness rank 场景同文案，保证基线可比；

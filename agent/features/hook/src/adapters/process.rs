@@ -1,4 +1,7 @@
 //! Hook 子进程的受管执行边界。
+//! Windows 契约仅要求编译通过（unsupported platform）；Unix 执行面在
+//! Windows 目标下无消费者，模块级放行跨目标 dead_code / unused_imports。
+#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
 
 pub(crate) use super::constants::DEFAULT_OUTPUT_LIMIT;
 #[cfg(not(unix))]

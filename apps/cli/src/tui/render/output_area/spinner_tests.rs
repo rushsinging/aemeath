@@ -73,7 +73,7 @@ fn spinner_total_and_phase_elapsed_share_readable_duration_format() {
 
 #[test]
 fn spinner_line_does_not_carry_background_process_count() {
-    let mut view = SpinnerLineView {
+    let view = SpinnerLineView {
         frame: 0,
         verb: "Working".to_string(),
         elapsed_secs: 3,

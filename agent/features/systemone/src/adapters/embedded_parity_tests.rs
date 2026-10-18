@@ -233,7 +233,7 @@ async fn embedded_q8_argmax_matches_fixture_golden() {
             .run_rows(batch.to_vec())
             .await
             .expect("flip 前向应成功");
-        for (row, vector) in batch.iter().zip(vectors) {
+        for (_row, vector) in batch.iter().zip(vectors) {
             let mut options_flat = Vec::with_capacity(vector.options.len() * vector.decide.len());
             for option in &vector.options {
                 options_flat.extend_from_slice(option);

@@ -9,3 +9,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 log = { version = "0.4", features = ["std"] }
+
+# 继承 workspace 零容忍 lint 基线（#1995）。
+[lints]
+workspace = true
