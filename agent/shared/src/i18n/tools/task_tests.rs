@@ -31,6 +31,12 @@ fn task_bilingual_and_fallback() {
         assert!(!text.contains("owner:"));
     }
     assert!(task_list_create("zh").contains("创建任务列表"));
+    // #1990 混淆防线：列表只建一次 + 再调新建空列表 + 任务走 TaskCreate。
+    assert!(task_list_create("zh").contains("只创建一次"));
+    assert!(task_list_create("zh").contains("TaskCreate"));
+    assert!(task_list_create("en").contains("ONE task list"));
+    assert!(task_list_create("en").contains("NEW empty list"));
+    assert!(task_list_create("en").contains("TaskCreate"));
     assert!(task_list_complete("zh").contains("完成当前活动任务列表"));
 }
 
@@ -40,6 +46,7 @@ fn trimmed_task_descriptions_fit_the_200_char_budget() {
     for (zh, en) in [
         (task_block_by("zh"), task_block_by("en")),
         (task_list("zh"), task_list("en")),
+        (task_list_create("zh"), task_list_create("en")),
     ] {
         assert!(
             zh.chars().count() <= 200,

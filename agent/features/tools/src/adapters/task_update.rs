@@ -42,12 +42,18 @@ fn task_id(
                         .find(|task| task.seq() == seq)
                         .map(task::TaskData::id)
                 })
-                .ok_or_else(|| format!("Task not found in task list #{batch_id}: {value}"))
+                .ok_or_else(|| {
+                    crate::adapters::task_not_found::explicit_list_task_not_found_text(
+                        access, batch_id, value,
+                    )
+                })
         }
         None => access
             .current_task_by_seq(seq)
             .map(|task| task.id())
-            .ok_or_else(|| format!("Task not found in current task list: {value}")),
+            .ok_or_else(|| {
+                crate::adapters::task_not_found::current_list_task_not_found_text(access, value)
+            }),
     }
 }
 
