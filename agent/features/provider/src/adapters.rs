@@ -11,6 +11,7 @@ pub(crate) mod openai_compatible;
 pub(crate) mod pool;
 pub(crate) mod probe;
 pub(crate) mod stream;
+pub(crate) mod tool_result_images;
 pub(crate) mod transport;
 pub(crate) mod wire;
 

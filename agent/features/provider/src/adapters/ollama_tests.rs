@@ -115,3 +115,52 @@ async fn llm_client_ollama_invocation_stream_is_single_request_pull_stream() {
     assert_eq!(usage.input_tokens, Some(1));
     assert_eq!(usage.output_tokens, Some(1));
 }
+
+#[test]
+fn tool_result_images_become_following_user_message_with_bare_base64() {
+    let provider = OllamaProvider::new(
+        String::new(),
+        Some("http://localhost:11434".to_string()),
+        Some("test-model".to_string()),
+        8192,
+        false,
+        600,
+    );
+    let messages = vec![Message {
+        role: share::message::Role::User,
+        content: vec![share::message::ContentBlock::ToolResult {
+            tool_use_id: "call_1".to_string(),
+            content: serde_json::json!([
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": "QUJD",
+                    }
+                },
+                {"type": "text", "text": "Image: /tmp/a.png"},
+            ]),
+            is_error: false,
+            text: None,
+        }],
+        metadata: None,
+    }];
+
+    let converted = provider.convert_messages("", &messages).unwrap();
+
+    let tool_index = converted
+        .iter()
+        .position(|m| m.get("role").and_then(|v| v.as_str()) == Some("tool"))
+        .expect("tool message present");
+    let user_index = converted
+        .iter()
+        .position(|m| m.get("role").and_then(|v| v.as_str()) == Some("user"))
+        .expect("image carrier user message present");
+    assert!(tool_index < user_index, "{converted:#?}");
+    assert_eq!(
+        converted[user_index]["images"],
+        serde_json::json!(["QUJD"]),
+        "{converted:#?}"
+    );
+}

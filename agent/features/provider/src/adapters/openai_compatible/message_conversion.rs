@@ -30,6 +30,10 @@ impl OpenAICompatibleProvider {
             openai_messages.push(Self::convert_system_to_message(system));
         }
 
+        // #1992：tool 消息协议不承载图片。tool_result 中的 image 块在此累积，
+        // 在下一批非 tool-only 消息（或遍历结束）之前合并为一条 user 消息。
+        let mut pending_tool_images: Vec<(String, String)> = Vec::new();
+
         // 转换消息
         for msg in messages.iter() {
             let mut content_parts = Vec::new();
@@ -76,20 +80,19 @@ impl OpenAICompatibleProvider {
                         is_error,
                         ..
                     } => {
+                        // #1992：图块先摘出，随后的 user 消息承接（tool 消息只能带文本）。
+                        pending_tool_images.extend(
+                            crate::adapters::tool_result_images::extract_tool_result_images(
+                                content,
+                            ),
+                        );
                         // Tool result 在 OpenAI 格式中是独立的消息
                         openai_messages.push(serde_json::json!({
                             "role": "tool",
                             "tool_call_id": tool_use_id,
-                            "content": match content {
-                                serde_json::Value::String(s) => s.clone(),
-                                serde_json::Value::Array(parts) => {
-                                    parts.iter()
-                                        .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
-                                        .collect::<Vec<_>>()
-                                        .join("")
-                                }
-                                _ => content.to_string()
-                            }
+                            "content": crate::adapters::tool_result_images::extract_tool_result_text(
+                                content,
+                            )
                         }));
 
                         // 如果有错误，已包含在 content 中
@@ -130,6 +133,10 @@ impl OpenAICompatibleProvider {
                 continue;
             }
 
+            // #1992：任何后续消息之前，先把已累积的 tool_result 图以 user
+            // 消息投递（保证图消息紧随这批 tool 消息、不插入工具消息之间）。
+            flush_tool_result_image_carrier(&mut openai_messages, &mut pending_tool_images);
+
             // 构建消息
             let role = match msg.role {
                 Role::User => "user",
@@ -168,6 +175,9 @@ impl OpenAICompatibleProvider {
             openai_messages.push(message);
         }
 
+        // #1992：末尾残余（图来自最后一批 tool 消息）同样需要投递。
+        flush_tool_result_image_carrier(&mut openai_messages, &mut pending_tool_images);
+
         // 最后一道防线：确保 OpenAI 协议的 tool_calls ↔ tool messages 一一对应。
         // 不论上游 compact / sanitize 路径有没有漏网之鱼，这里都会自动补救。
         enforce_openai_tool_pairs(&mut openai_messages);
@@ -200,4 +210,33 @@ impl OpenAICompatibleProvider {
             })
             .collect()
     }
+}
+
+/// #1992：把累积的 tool_result 图块投递为一条 user 消息（text + image_url 数组）。
+///
+/// 在下一个非 tool-only 消息之前、或消息遍历结束后调用；空列表为 no-op。
+fn flush_tool_result_image_carrier(
+    openai_messages: &mut Vec<serde_json::Value>,
+    pending_tool_images: &mut Vec<(String, String)>,
+) {
+    if pending_tool_images.is_empty() {
+        return;
+    }
+    let mut content: Vec<serde_json::Value> = Vec::with_capacity(pending_tool_images.len() + 1);
+    content.push(serde_json::json!({
+        "type": "text",
+        "text": "Images from the tool results above."
+    }));
+    for (media_type, base64) in pending_tool_images.drain(..) {
+        content.push(serde_json::json!({
+            "type": "image_url",
+            "image_url": {
+                "url": format!("data:{media_type};base64,{base64}")
+            }
+        }));
+    }
+    openai_messages.push(serde_json::json!({
+        "role": "user",
+        "content": serde_json::Value::Array(content)
+    }));
 }
