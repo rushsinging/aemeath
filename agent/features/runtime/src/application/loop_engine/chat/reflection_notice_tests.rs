@@ -1,8 +1,7 @@
 //! Scenario tests for the reflection memory-update notice (double channel).
 //!
-//! A finished reflection that changed memory must reach the TUI at the moment it
-//! completes, and leave one LLM reminder behind for the next Run to take. A run
-//! without changes, a failed run, and a configuration skip must produce neither.
+//! 自动反思仅在有变更时发通用通知；手动反思始终回执实际终态。
+//! 有变更时留下的 LLM reminder 仍由下一 Run 消费一次。
 //!
 //! 统一异步链路（#2002）：chat 层 run 派发即 Detached；本文件测 announce 对终态
 //! outcome 的映射与 pending notice 归集，走 adapter 测试同步路径注入 executor
@@ -19,10 +18,11 @@ use crate::application::reflection::{
     CompleteReflectionResult, ReflectionRunOutcome, ReflectionTaskAdapter, ReflectionTaskRequest,
 };
 
-/// Sink that keeps only system messages, which is the whole contract here.
+/// 同时捕获通用记忆通知和带错误标记的手动反思回执。
 #[derive(Clone, Default)]
 struct SystemMessageSink {
     messages: Arc<Mutex<Vec<String>>>,
+    command_results: Arc<Mutex<Vec<(String, bool)>>>,
 }
 
 impl SystemMessageSink {
@@ -46,8 +46,14 @@ impl ChatEventSink for SystemMessageSink {
             RuntimeStreamEvent::SystemMessage(message) => {
                 self.messages.lock().expect("sink lock").push(message);
             }
-            RuntimeStreamEvent::CommandResultText { text, is_error } if is_error => {
-                self.messages.lock().expect("sink lock").push(text);
+            RuntimeStreamEvent::CommandResultText { text, is_error } => {
+                self.command_results
+                    .lock()
+                    .expect("command results lock")
+                    .push((text.clone(), is_error));
+                if is_error {
+                    self.messages.lock().expect("sink lock").push(text);
+                }
             }
             _ => {}
         }
@@ -227,6 +233,67 @@ async fn manual_failure_terminal_notifies_user_after_detached_completion() {
             "{label} 通知必须使用既有终态文案: {:?}",
             messages[0]
         );
+    }
+}
+
+#[tokio::test]
+async fn manual_success_always_receipts_once_without_duplicate_memory_notice() {
+    for changed in [0, 2] {
+        let (adapter, outcome) = run_with_changes(changed).await;
+        let sink = SystemMessageSink::default();
+        let hook = super::reflection::detached_completion_hook(
+            sink.handle(),
+            "zh".to_string(),
+            None,
+            None,
+            None,
+            crate::application::reflection::ReflectionTaskTrigger::Manual,
+        );
+        hook(outcome).await;
+        let expected = if changed == 0 {
+            "Reflection 已完成：没有记忆变更。".to_string()
+        } else {
+            format!("Reflection 已完成：更新 {changed} 条记忆；摘要可用 /reflect 查询。")
+        };
+        assert_eq!(
+            *sink.command_results.lock().unwrap(),
+            vec![(expected, false)],
+            "手动反思成功无论有无变更都必须恰好回执一次"
+        );
+        assert!(sink.messages().is_empty(), "不能重复发布记忆更新通知");
+        let expected_reminder =
+            (changed > 0).then_some(crate::application::reflection::MemoryUpdateNotice { changed });
+        assert_eq!(adapter.take_memory_update_notice(), expected_reminder);
+        assert_eq!(adapter.take_memory_update_notice(), None);
+    }
+}
+
+#[tokio::test]
+async fn automatic_success_keeps_existing_memory_notice_policy() {
+    for trigger in [
+        crate::application::reflection::ReflectionTaskTrigger::Interval { run_ordinal: 1 },
+        crate::application::reflection::ReflectionTaskTrigger::PreCompact,
+    ] {
+        for changed in [0, 2] {
+            let (_, outcome) = run_with_changes(changed).await;
+            let sink = SystemMessageSink::default();
+            let hook = super::reflection::detached_completion_hook(
+                sink.handle(),
+                "zh".to_string(),
+                None,
+                None,
+                None,
+                trigger,
+            );
+            hook(outcome).await;
+            assert!(sink.command_results.lock().unwrap().is_empty());
+            let expected = if changed == 0 {
+                Vec::<String>::new()
+            } else {
+                vec![format!("记忆已更新 {changed} 条")]
+            };
+            assert_eq!(sink.messages(), expected);
+        }
     }
 }
 
