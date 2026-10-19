@@ -180,6 +180,37 @@ impl ReflectionWorkflow {
         duration_ms: u64,
         write_permit: Option<&crate::write_lock::MemoryWritePermit>,
     ) -> Result<ReflectionExecutionResult, ReflectionWorkflowError> {
+        Self::complete_with_prior_apply(
+            history,
+            memory,
+            identity,
+            raw_response,
+            references,
+            _lang,
+            auto_apply,
+            token_usage,
+            duration_ms,
+            write_permit,
+            &ReflectionApplyResult::default(),
+        )
+        .await
+    }
+
+    /// 统一记录前置去噪与本阶段的真实应用结果，避免最终记录遗漏已提交变更。
+    #[allow(clippy::too_many_arguments)]
+    pub async fn complete_with_prior_apply(
+        history: &dyn ReflectionHistoryStore,
+        memory: &dyn MemoryPort,
+        identity: &ReflectionExecutionIdentity,
+        raw_response: &str,
+        references: &ReflectionReferenceTable,
+        _lang: &str,
+        auto_apply: bool,
+        token_usage: ReflectionTokenUsage,
+        duration_ms: u64,
+        write_permit: Option<&crate::write_lock::MemoryWritePermit>,
+        prior_apply: &ReflectionApplyResult,
+    ) -> Result<ReflectionExecutionResult, ReflectionWorkflowError> {
         Self::emit_reflection_event(
             memory,
             MemoryEventOp::ReflectionTriggered,
@@ -210,7 +241,21 @@ impl ReflectionWorkflow {
                     }
                     ReflectionError::Memory(_) => ReflectionErrorCategory::Apply,
                 };
-                Self::record_failure(history, identity, category, duration_ms).await?;
+                let mut failed = ReflectionRecord::failed(
+                    identity.id.clone(),
+                    identity.timestamp,
+                    identity.trigger,
+                    category,
+                    duration_ms,
+                );
+                failed.token_usage = Some(token_usage);
+                if prior_apply.attempted > 0 || prior_apply.completed > 0 {
+                    failed.apply_result = Some(prior_apply.clone());
+                }
+                history
+                    .upsert(&failed)
+                    .await
+                    .map_err(|_| ReflectionWorkflowError::HistoryWrite)?;
                 Self::emit_reflection_event(
                     memory,
                     MemoryEventOp::ReflectionCost,
@@ -291,6 +336,22 @@ impl ReflectionWorkflow {
         } else {
             (None, None)
         };
+
+        let apply_result = apply_result.map(|mut current| {
+            current.attempted = current.attempted.saturating_add(prior_apply.attempted);
+            current.completed = current.completed.saturating_add(prior_apply.completed);
+            current.suggestions_added = current
+                .suggestions_added
+                .saturating_add(prior_apply.suggestions_added);
+            current.outdated_marked = current
+                .outdated_marked
+                .saturating_add(prior_apply.outdated_marked);
+            current.superseded = current.superseded.saturating_add(prior_apply.superseded);
+            current
+        });
+        let apply_result = apply_result.or_else(|| {
+            (prior_apply.attempted > 0 || prior_apply.completed > 0).then(|| prior_apply.clone())
+        });
 
         if let Some(applied) = apply_result.as_ref() {
             Self::emit_reflection_event(

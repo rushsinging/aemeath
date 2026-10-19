@@ -782,6 +782,14 @@ async fn two_phase_reflection_removes_noise_then_completes() {
     // 两步各一次调用；token 合并（ScriptedProvider 每次同额）。
     assert_eq!(provider.requests().len(), 2);
     assert_eq!((result.input_tokens, result.output_tokens), (22, 44));
+    let applied = result.apply_result.as_ref().expect("必须汇总去噪应用结果");
+    assert_eq!(applied.attempted, 1);
+    assert_eq!(applied.completed, 1);
+    assert_eq!(applied.outdated_marked, 1);
+    let persisted = history.records.lock().unwrap();
+    let record = persisted.last().expect("最终记录必须落盘");
+    assert_eq!(record.apply_result.as_ref(), Some(applied));
+    drop(persisted);
     // Step1 的 Step2 prompt 不再含噪音条目。
     let second_prompt = &provider.requests()[1];
     assert!(

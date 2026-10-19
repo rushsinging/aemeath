@@ -244,6 +244,41 @@ async fn malformed_response_persists_safe_parse_failure_without_raw_text() {
 }
 
 #[tokio::test]
+async fn malformed_synthesis_keeps_prior_committed_noise_in_failure_history() {
+    let history = RecordingHistory::default();
+    let prior_apply = ReflectionApplyResult {
+        attempted: 2,
+        completed: 2,
+        outdated_marked: 2,
+        ..Default::default()
+    };
+    let error = ReflectionWorkflow::complete_with_prior_apply(
+        &history,
+        &NoOpMemory,
+        &identity(),
+        "invalid synthesis",
+        &ReflectionReferenceTable::default(),
+        "en",
+        true,
+        ReflectionTokenUsage {
+            input_tokens: 10,
+            output_tokens: 20,
+        },
+        9,
+        None,
+        &prior_apply,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error, ReflectionWorkflowError::Unparseable);
+    let records = history.records.lock().unwrap();
+    let record = records.last().unwrap();
+    assert_eq!(record.status, ReflectionStatus::Failed);
+    assert_eq!(record.apply_result.as_ref(), Some(&prior_apply));
+    assert_eq!(record.token_usage.unwrap().input_tokens, 10);
+}
+
+#[tokio::test]
 async fn runtime_failure_is_materialized_by_memory_history_workflow() {
     let history = RecordingHistory::default();
     ReflectionWorkflow::record_failure(
@@ -526,8 +561,14 @@ async fn event_reflection_ops_complete_emits_trigger_apply_cost() {
     };
     let mut exec_identity = identity();
     exec_identity.coverage_end = Some(42);
+    let prior_apply = ReflectionApplyResult {
+        attempted: 2,
+        completed: 2,
+        outdated_marked: 2,
+        ..Default::default()
+    };
 
-    let result = ReflectionWorkflow::complete(
+    let result = ReflectionWorkflow::complete_with_prior_apply(
         &history,
         &memory,
         &exec_identity,
@@ -545,10 +586,24 @@ async fn event_reflection_ops_complete_emits_trigger_apply_cost() {
         token_usage,
         88,
         None,
+        &prior_apply,
     )
     .await
     .unwrap();
     assert_eq!(result.error_category, None);
+    let total_apply = result.apply_result.as_ref().unwrap();
+    assert_eq!(total_apply.outdated_marked, 3);
+    assert_eq!(
+        history
+            .records
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .apply_result
+            .as_ref(),
+        Some(total_apply),
+    );
 
     let events = memory.recorder.events();
     let reflection_ops: Vec<_> = events
@@ -585,7 +640,7 @@ async fn event_reflection_ops_complete_emits_trigger_apply_cost() {
     match &applied.change {
         EventChange::Reflection { summary, .. } => {
             assert!(summary.contains("suggestions_added=1"));
-            assert!(summary.contains("outdated_marked=1"));
+            assert!(summary.contains("outdated_marked=3"));
         }
         other => panic!("expected Reflection change, got {other:?}"),
     }

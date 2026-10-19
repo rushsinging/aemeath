@@ -47,6 +47,21 @@ pub fn effective_active_count(entries: &[MemoryEntry]) -> usize {
         .count()
 }
 
+/// 反思收敛口径（#2002 统一）：在 [`effective_active_count`] 基础上再排除
+/// TTL 过期残留。sweep 只归档未 pinned 的过期条目，pinned 过期条目留在
+/// active、不可注入、也不进反思 prompt——MUST NOT 占用反思收敛目标，否则
+/// 门禁永远无法满足、告警会在未超标时误报。反思门禁与提交后告警 MUST 用
+/// 本口径；写路径 max_entries 门禁仍用 [`effective_active_count`]（TTL 的
+/// 物理收敛由 compact / sweep 各自语义负责）。
+pub fn effective_active_count_at(entries: &[MemoryEntry], now: u64) -> usize {
+    entries
+        .iter()
+        .filter(|entry| {
+            !entry.outdated && entry.superseded_by.is_none() && !entry.is_ttl_expired(now)
+        })
+        .count()
+}
+
 /// 把 `target` 的取代关系指向 `superseding`，返回是否写入。
 ///
 /// 找不到 `target` 时返回 `false`，调用方据此判定为「跳过」而非写坏

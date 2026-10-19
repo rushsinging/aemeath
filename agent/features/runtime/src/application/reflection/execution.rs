@@ -119,7 +119,11 @@ pub(crate) async fn execute_reflection(
 
     // 取消优先：已取消时跳过 Step 1，交 Step 2 原取消路径收口。
     let noise_result = if cancel.is_cancelled() {
-        Ok((0, 0))
+        Ok((
+            0,
+            0,
+            memory::api::reflection::ReflectionApplyResult::default(),
+        ))
     } else {
         call_noise_phase(
             &invocation,
@@ -132,7 +136,7 @@ pub(crate) async fn execute_reflection(
         )
         .await
     };
-    let (noise_input_tokens, noise_output_tokens) = match noise_result {
+    let (noise_input_tokens, noise_output_tokens, noise_apply) = match noise_result {
         Ok(usage) => usage,
         Err(error) => {
             ReflectionWorkflow::record_failure(
@@ -178,7 +182,7 @@ pub(crate) async fn execute_reflection(
     };
     input_tokens = input_tokens.saturating_add(noise_input_tokens);
     output_tokens = output_tokens.saturating_add(noise_output_tokens);
-    let mut completed: ReflectionExecutionResult = ReflectionWorkflow::complete(
+    let mut completed: ReflectionExecutionResult = ReflectionWorkflow::complete_with_prior_apply(
         history,
         memory,
         identity,
@@ -192,6 +196,7 @@ pub(crate) async fn execute_reflection(
         },
         started.elapsed().as_millis() as u64,
         Some(&write_permit),
+        &noise_apply,
     )
     .await?;
 
@@ -217,7 +222,7 @@ pub(crate) async fn execute_reflection(
                 input_tokens = input_tokens.saturating_add(repair_input_tokens);
                 output_tokens = output_tokens.saturating_add(repair_output_tokens);
                 raw_response = repaired;
-                completed = ReflectionWorkflow::complete(
+                completed = ReflectionWorkflow::complete_with_prior_apply(
                     history,
                     memory,
                     identity,
@@ -231,6 +236,7 @@ pub(crate) async fn execute_reflection(
                     },
                     started.elapsed().as_millis() as u64,
                     Some(&write_permit),
+                    &noise_apply,
                 )
                 .await?;
             }
@@ -359,8 +365,8 @@ async fn call_noise_phase(
     memory: &dyn memory::api::MemoryPort,
     write_permit: &memory::api::MemoryWritePermit,
     cancel: &tokio_util::sync::CancellationToken,
-) -> Result<(u32, u32), ReflectionExecutionError> {
-    use memory::api::reflection::ReflectionOutput;
+) -> Result<(u32, u32, memory::api::reflection::ReflectionApplyResult), ReflectionExecutionError> {
+    use memory::api::reflection::{ReflectionApplyResult, ReflectionOutput};
 
     let (raw, input_tokens, output_tokens) = request_reflection_response(
         invocation,
@@ -376,31 +382,36 @@ async fn call_noise_phase(
         Err(_) => return Err(ReflectionExecutionError::Unparseable),
     };
     if parsed.output.outdated_memories.is_empty() {
-        return Ok((input_tokens, output_tokens));
+        return Ok((
+            input_tokens,
+            output_tokens,
+            ReflectionApplyResult::default(),
+        ));
     }
     let noise_output = ReflectionOutput {
         deviations: Vec::new(),
         suggested_memories: Vec::new(),
         outdated_memories: parsed.output.outdated_memories,
     };
-    match memory
+    let apply_result = match memory
         .apply_reflection_under_permit(&noise_output, write_permit)
         .await
     {
-        Ok(_) => {}
+        Ok(applied) => applied,
         Err(memory::api::MemoryError::CapacityNotMet { active, target }) => {
             // 去噪只降不升：门禁未过说明存量本就超标，交 Step 2 / 补问收口。
             log::warn!(
                 target: crate::LOG_TARGET,
                 "reflection_noise_capacity_deferred active={active} target={target}",
             );
+            ReflectionApplyResult::default()
         }
         Err(error) => {
             log::warn!(target: crate::LOG_TARGET, "reflection_noise_apply_failed {error:?}");
             return Err(ReflectionExecutionError::Apply);
         }
-    }
-    Ok((input_tokens, output_tokens))
+    };
+    Ok((input_tokens, output_tokens, apply_result))
 }
 
 #[cfg(test)]

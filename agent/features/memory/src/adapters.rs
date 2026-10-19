@@ -944,7 +944,10 @@ impl MemoryPort for InMemoryMemory {
             result.completed += 1;
         }
 
-        let project_active = crate::domain::effective_active_count(&candidate.active);
+        // 与生产 MemoryService 门禁同口径：有效且未过期（pinned TTL 过期残留
+        // 不占收敛目标），target 用策略值。
+        let gate_now = (self.clock)();
+        let project_active = crate::domain::effective_active_count_at(&candidate.active, gate_now);
         let target = self.policy.target_active_entries;
         if project_active > target {
             return Err(MemoryError::CapacityNotMet {

@@ -1583,6 +1583,58 @@ async fn test_reflect_now_disabled_is_noop_without_run() {
 /// Run 根 activity 快照必须出现（Run 已创建）；但 NEVER 递增 run_count / 发 RunChanged，
 /// 也 NEVER 进入模型回合（不从主 run flow 注入模型）。
 #[tokio::test]
+async fn manual_reflection_empty_increment_still_reviews_existing_memory() {
+    struct CoveredHistory;
+    #[async_trait::async_trait]
+    impl memory::api::ReflectionHistoryQuery for CoveredHistory {
+        async fn list(&self, _limit: usize) -> Result<Vec<memory::api::reflection::ReflectionSafeSummary>, memory::api::MemoryError> {
+            let mut record = memory::api::reflection::ReflectionRecord::running(
+                "covered-history",
+                1,
+                memory::api::reflection::ReflectionTrigger::Manual,
+            );
+            record.status = memory::api::reflection::ReflectionStatus::Succeeded;
+            record.coverage_end = Some(0);
+            Ok(vec![record.safe_summary()])
+        }
+    }
+    #[async_trait::async_trait]
+    impl memory::api::ReflectionHistoryStore for CoveredHistory {
+        async fn append(&self, _record: &memory::api::reflection::ReflectionRecord) -> Result<(), memory::api::MemoryError> { Ok(()) }
+        async fn upsert(&self, _record: &memory::api::reflection::ReflectionRecord) -> Result<(), memory::api::MemoryError> { Ok(()) }
+    }
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    input_tx.send(sdk::ChatInputEvent::ReflectNow).unwrap();
+    let mut shell = test_shell();
+    let services = shell.runtime_context_factory.services().clone();
+    shell.runtime_context_factory = Arc::new(crate::application::run::context_factory::RuntimeContextFactory::new(
+        services.tool_catalog,
+        services.tool_execution,
+        services.policy,
+        Arc::new(CoveredHistory),
+        services.task,
+        services.hooks,
+        services.usage_sink,
+        services.scoring_for_recall,
+        services.scoring_for_skill_match,
+        services.policy_triage,
+    ));
+    shell.set_test_session_id("test-reflect-existing-memory-without-new-dialog");
+    let context = test_session_driver_input(sink.clone(), input_events, shell);
+    let run = tokio::spawn(run_session_command_driver(context));
+    wait_for_retry_test_condition("无新增对话的存量审查回执", || !sink.command_result_texts().is_empty()).await;
+    drop(input_tx);
+    tokio::time::timeout(std::time::Duration::from_secs(10), run).await.unwrap().unwrap();
+    let results = sink.command_result_texts();
+    assert!(results.iter().any(|(text, _)| text.contains("后台开始")), "无新增对话仍应触发存量反思: {results:?}");
+    assert!(!results.iter().any(|(text, _)| text.contains("无新增对话内容") || text.contains("已跳过本次手动反思")));
+    assert!(sink.lifecycle_events().iter().any(|event| matches!(event,
+        crate::domain::agent_run::RuntimeLifecycleEvent::Transitioned { to: crate::domain::agent_run::RunStatus::Reflecting, .. }
+    )));
+}
+
+#[tokio::test]
 async fn test_reflect_now_runs_a_real_run_without_run_changed() {
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();

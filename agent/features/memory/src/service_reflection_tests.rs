@@ -2,8 +2,104 @@ use super::{
     tests::{LayerScript, ScriptedStore},
     MemoryService,
 };
-use crate::adapters::{InMemoryMemory, MemoryPolicy};
+use crate::adapters::{AtomicDatasetMemoryStore, InMemoryMemory, MemoryPolicy};
 use crate::{domain::*, ports::*};
+use std::time::Duration;
+
+#[tokio::test]
+#[ignore = "只读真实 corpus 并在临时副本验证清扫"]
+async fn real_corpus_copy_sweep_preserves_valid_and_pinned_entries() {
+    let source_root = std::path::PathBuf::from(
+        std::env::var_os("AEMEATH_REFLECTION_CORPUS")
+            .expect("请设置 AEMEATH_REFLECTION_CORPUS 为只读 corpus 目录"),
+    );
+    let manifest_path = source_root.join("primary/manifest.json");
+    let manifest_bytes = std::fs::read(&manifest_path).unwrap();
+    let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes).unwrap();
+    let mut active = None;
+    let mut archive = None;
+    for evidence in manifest["成员证据"].as_array().unwrap() {
+        let member = source_root
+            .join("members")
+            .join(evidence["内容摘要"].as_str().unwrap());
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(member).unwrap()).unwrap();
+        let entries: Vec<MemoryEntry> = serde_json::from_value(value["entries"].clone()).unwrap();
+        match evidence["名称"].as_str().unwrap() {
+            "active" => active = Some(entries),
+            "archive" => archive = Some(entries),
+            _ => {}
+        }
+    }
+    let active = active.unwrap();
+    let archive = archive.unwrap();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let expected_swept = active
+        .iter()
+        .filter(|entry| !entry.pinned && !is_reflection_input_eligible(entry, now))
+        .count();
+    let expected_kept: Vec<_> = active
+        .iter()
+        .filter(|entry| entry.pinned || is_reflection_input_eligible(entry, now))
+        .map(|entry| entry.id)
+        .collect();
+    let root = sweep_root("real-corpus-copy");
+    let store = sweep_store(&root);
+    let committed = store.load_committed(MemoryLayer::Project).await.unwrap();
+    let dataset =
+        MemoryDataset::new(MemoryLayer::Project, active.clone(), archive.clone()).unwrap();
+    store
+        .commit(MemoryLayer::Project, &committed.revision, &dataset)
+        .await
+        .unwrap();
+    let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), move || now)
+        .await
+        .unwrap();
+    let permit = service.acquire_write_permit().await.unwrap();
+    let swept = service
+        .sweep_stale_under_permit(now, &permit)
+        .await
+        .unwrap();
+    assert_eq!(swept, expected_swept);
+    assert_eq!(
+        service
+            .sweep_stale_under_permit(now, &permit)
+            .await
+            .unwrap(),
+        0
+    );
+    drop(permit);
+    let stored = sweep_store(&root)
+        .load_committed(MemoryLayer::Project)
+        .await
+        .unwrap();
+    let kept: Vec<_> = stored
+        .dataset
+        .active()
+        .iter()
+        .map(|entry| entry.id)
+        .collect();
+    assert_eq!(kept, expected_kept);
+    assert_eq!(
+        stored.dataset.archive().len(),
+        archive.len() + expected_swept
+    );
+    assert_eq!(
+        effective_active_count(stored.dataset.active()),
+        effective_active_count(&active)
+    );
+    assert_eq!(
+        std::fs::read(&manifest_path).unwrap(),
+        manifest_bytes,
+        "真数据不得被修改"
+    );
+    log::info!(target: crate::LOG_TARGET, "real_corpus_copy_sweep before={} swept={} after={} effective={}", active.len(), swept, kept.len(), effective_active_count(stored.dataset.active()));
+    drop(service);
+    std::fs::remove_dir_all(&root).unwrap();
+}
 
 fn layer_script(
     loads: Vec<Result<CommittedMemoryDataset<u64>, MemoryError>>,
@@ -281,14 +377,7 @@ async fn apply_reflection_commits_when_outdated_archives_down_to_target() {
     assert_eq!(stats.project_archive_count, 2);
 }
 
-#[test]
-fn reflect_target_active_entries_is_three_quarters_of_max() {
-    assert_eq!(reflect_target_active_entries(200), 150);
-    assert_eq!(reflect_target_active_entries(10), 7);
-    assert_eq!(reflect_target_active_entries(0), 0);
-}
-
-/// #1987 容量口径：outdated/被取代残留不占用 max_entries 与 0.75 收敛目标。
+/// #1987 容量口径：outdated/被取代残留不占用 max_entries 与收敛目标。
 /// mark_outdated 独立调用（不经 apply）会留下「标记但未归档」的残留——它们
 /// 已不可注入（M10/M5），MUST NOT 再挤占新写入与反思收敛的容量配额。
 #[tokio::test]
@@ -352,4 +441,451 @@ async fn reflection_capacity_gate_counts_effective_active_only() {
         .await
         .expect("有效 active=7 ≤ target=7，空输出 MUST 通过门禁");
     assert_eq!(result.attempted, 0);
+}
+
+// -----------------------------------------------------------------
+// 生产 MemoryService 残留清扫（sweep_stale_under_permit）落盘契约。
+// 全部在独立临时目录上装配真实 AtomicDatasetMemoryStore 并断言落盘重读，
+// NEVER 触碰 ~/.agents/memory。
+// -----------------------------------------------------------------
+
+fn sweep_root(case: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "aemeath-memory-sweep-{case}-{}",
+        uuid::Uuid::new_v4()
+    ))
+}
+
+fn sweep_store(root: &std::path::Path) -> AtomicDatasetMemoryStore {
+    AtomicDatasetMemoryStore::new(
+        storage::wire_file_system_dataset(root).unwrap(),
+        ProjectMemoryKey::derive("/contract/sweep-project", None).unwrap(),
+    )
+}
+
+/// 直接落盘种入一层 active 条目（绕过写入口，构造 outdated / 被取代 /
+/// TTL 过期这类真实 corpus 已存在、公开写入口不易复现的残留形态）。
+async fn seed_layer(
+    store: &AtomicDatasetMemoryStore,
+    layer: MemoryLayer,
+    active: Vec<MemoryEntry>,
+) {
+    let committed = store.load_committed(layer).await.expect("种子层读取成功");
+    let dataset = MemoryDataset::new(layer, active, Vec::new()).expect("种子数据集不变量");
+    store
+        .commit(layer, &committed.revision, &dataset)
+        .await
+        .expect("种子提交必须成功");
+}
+
+fn outdated_entry(layer: MemoryLayer, content: &str) -> MemoryEntry {
+    let mut stale = entry(layer, content);
+    stale.outdated = true;
+    stale
+}
+
+fn superseded_entry(layer: MemoryLayer, content: &str) -> MemoryEntry {
+    let mut stale = entry(layer, content);
+    stale.superseded_by = Some(MemoryId::now_v7());
+    stale
+}
+
+fn ttl_expired_entry(layer: MemoryLayer, content: &str) -> MemoryEntry {
+    let mut stale = entry(layer, content);
+    stale.created_at = 100;
+    stale.ttl = Some(Duration::from_secs(50));
+    stale
+}
+
+fn pinned_stale_entry(layer: MemoryLayer, content: &str) -> MemoryEntry {
+    let mut stale = entry(layer, content);
+    stale.pinned = true;
+    stale.outdated = true;
+    stale
+}
+
+/// 生产残留清扫：active 中已 outdated / 被取代 / TTL 过期且非 pinned 的
+/// 条目 MUST 归档出 active（双层各归各的）；返回值是实际归档条数口径。
+#[tokio::test]
+async fn sweep_stale_under_permit_archives_outdated_superseded_and_ttl_residue() {
+    let root = sweep_root("stale");
+    let store = sweep_store(&root);
+    let fresh = entry(MemoryLayer::Project, "still fresh");
+    let residues = vec![
+        outdated_entry(MemoryLayer::Project, "already outdated"),
+        superseded_entry(MemoryLayer::Project, "already superseded"),
+        ttl_expired_entry(MemoryLayer::Project, "ttl expired"),
+    ];
+    let global_outdated = outdated_entry(MemoryLayer::Global, "stale global fact");
+    let mut project_seeded = vec![fresh.clone()];
+    project_seeded.extend(residues.clone());
+    seed_layer(&store, MemoryLayer::Project, project_seeded).await;
+    seed_layer(&store, MemoryLayer::Global, vec![global_outdated]).await;
+
+    let service =
+        MemoryService::open_with_clock(sweep_store(&root), MemoryPolicy::default(), || 200)
+            .await
+            .unwrap();
+    let permit = service.acquire_write_permit().await.unwrap();
+    let swept = service
+        .sweep_stale_under_permit(200, &permit)
+        .await
+        .unwrap();
+    assert_eq!(swept, 4, "双层 4 条非 pinned 失效残留 MUST 全部归档");
+
+    let stats = service.stats().await;
+    assert_eq!(stats.project_count, 1, "仅有效条目留在 project active");
+    assert_eq!(
+        stats.project_archive_count, 3,
+        "outdated / 被取代 / TTL 三条 MUST 归档"
+    );
+    assert_eq!(stats.global_count, 0, "global 层残留不得留在 active");
+    assert_eq!(stats.global_archive_count, 1, "global 层残留同样归档");
+
+    let active_ids: Vec<MemoryId> = service
+        .list(None)
+        .await
+        .iter()
+        .map(|listed| listed.id)
+        .collect();
+    assert_eq!(active_ids, vec![fresh.id], "有效条目 MUST 留在 active");
+    drop(permit);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// pinned 保护：pinned 的失效条目 MUST 留在 active，且不计入清扫计数。
+#[tokio::test]
+async fn sweep_stale_under_permit_keeps_pinned_residue_in_active() {
+    let root = sweep_root("pinned");
+    let store = sweep_store(&root);
+    let fresh = entry(MemoryLayer::Project, "fresh keeper");
+    let pinned_stale = pinned_stale_entry(MemoryLayer::Project, "pinned but outdated");
+    let unpinned_stale = outdated_entry(MemoryLayer::Project, "unpinned stale");
+    seed_layer(
+        &store,
+        MemoryLayer::Project,
+        vec![fresh.clone(), pinned_stale.clone(), unpinned_stale.clone()],
+    )
+    .await;
+
+    let service =
+        MemoryService::open_with_clock(sweep_store(&root), MemoryPolicy::default(), || 200)
+            .await
+            .unwrap();
+    let permit = service.acquire_write_permit().await.unwrap();
+    let swept = service
+        .sweep_stale_under_permit(200, &permit)
+        .await
+        .unwrap();
+    assert_eq!(swept, 1, "pinned 残留 MUST NOT 归档，也不计入清扫计数");
+
+    let active = service.list(Some(MemoryLayer::Project)).await;
+    let kept = active
+        .iter()
+        .find(|listed| listed.id == pinned_stale.id)
+        .expect("pinned 失效条目 MUST 留在 active");
+    assert!(kept.pinned);
+    assert!(kept.outdated);
+    assert!(
+        active.iter().any(|listed| listed.id == fresh.id),
+        "有效条目 MUST 留在 active"
+    );
+    assert!(
+        !active.iter().any(|listed| listed.id == unpinned_stale.id),
+        "未 pinned 的残留 MUST 移出 active"
+    );
+    assert_eq!(service.stats().await.project_archive_count, 1);
+    drop(permit);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// 死锁防护：调用方已持写 permit 时清扫 MUST 直接复用持锁原语完成，
+/// NEVER 二次取同一写门闩（异步重入会永久挂起）。
+#[tokio::test]
+async fn sweep_stale_under_permit_completes_without_deadlock_while_permit_held() {
+    let root = sweep_root("deadlock");
+    let store = sweep_store(&root);
+    seed_layer(
+        &store,
+        MemoryLayer::Project,
+        vec![outdated_entry(MemoryLayer::Project, "stale one")],
+    )
+    .await;
+
+    let service =
+        MemoryService::open_with_clock(sweep_store(&root), MemoryPolicy::default(), || 200)
+            .await
+            .unwrap();
+    let permit = service.acquire_write_permit().await.unwrap();
+    let swept = tokio::time::timeout(
+        Duration::from_secs(2),
+        service.sweep_stale_under_permit(200, &permit),
+    )
+    .await
+    .expect("已持 permit 的清扫 MUST 完成，NEVER 二次取写门闩死锁")
+    .expect("清扫成功");
+    assert_eq!(swept, 1);
+    drop(permit);
+
+    // permit 释放后门闩 MUST 可再次获取，证明没有被占死。
+    let repermit = tokio::time::timeout(Duration::from_secs(2), service.acquire_write_permit())
+        .await
+        .expect("释放后可再取 permit")
+        .unwrap();
+    drop(repermit);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// 落盘重读 + 幂等：归档结果 MUST 持久化并随重开恢复；同一 corpus
+/// 再次清扫 MUST 找不到残留、返回 0 且盘面不变。
+#[tokio::test]
+async fn swept_archive_survives_reopen_and_second_sweep_is_idempotent() {
+    let root = sweep_root("reopen");
+    let store = sweep_store(&root);
+    let fresh = entry(MemoryLayer::Project, "durable fresh");
+    let residues = vec![
+        outdated_entry(MemoryLayer::Project, "stale a"),
+        superseded_entry(MemoryLayer::Project, "stale b"),
+        ttl_expired_entry(MemoryLayer::Project, "stale c"),
+    ];
+    let mut seeded = vec![fresh];
+    seeded.extend(residues);
+    seed_layer(&store, MemoryLayer::Project, seeded).await;
+
+    let first = MemoryService::open_with_clock(sweep_store(&root), MemoryPolicy::default(), || 200)
+        .await
+        .unwrap();
+    let first_permit = first.acquire_write_permit().await.unwrap();
+    assert_eq!(
+        first
+            .sweep_stale_under_permit(200, &first_permit)
+            .await
+            .unwrap(),
+        3,
+        "首轮 MUST 归档全部 3 条残留"
+    );
+    drop(first_permit);
+    drop(first);
+
+    let reopened =
+        MemoryService::open_with_clock(sweep_store(&root), MemoryPolicy::default(), || 200)
+            .await
+            .unwrap();
+    let stats = reopened.stats().await;
+    assert_eq!(stats.project_count, 1, "重开后 active 仅剩有效条目");
+    assert_eq!(stats.project_archive_count, 3, "归档 MUST 落盘并随重开恢复");
+    let reopened_permit = reopened.acquire_write_permit().await.unwrap();
+    let reswept = reopened
+        .sweep_stale_under_permit(200, &reopened_permit)
+        .await
+        .unwrap();
+    assert_eq!(reswept, 0, "再次清扫 MUST 幂等返回 0");
+    assert_eq!(
+        reopened.stats().await.project_archive_count,
+        3,
+        "再次清扫 MUST NOT 改变盘面"
+    );
+    drop(reopened_permit);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// warning 有效口径：提交后复核与 apply 预检共用 effective_active_count——
+/// 物理 active 混入 outdated / 被取代残留时，只要有效数 ≤ target 就 MUST NOT
+/// 产出超载告警（修复前按 `active().len()` 把残留误报成超载）；有效数真正
+/// 超 target 时，告警文案携带的 MUST 是有效口径数字与原 target 计算。
+#[tokio::test]
+async fn reflection_after_commit_notice_counts_effective_active_only() {
+    let root = sweep_root("notice");
+    let store = sweep_store(&root);
+    let seeded = vec![
+        entry(MemoryLayer::Project, "fresh one"),
+        entry(MemoryLayer::Project, "fresh two"),
+        outdated_entry(MemoryLayer::Project, "residue outdated"),
+        superseded_entry(MemoryLayer::Project, "residue superseded"),
+    ];
+    seed_layer(&store, MemoryLayer::Project, seeded).await;
+
+    let policy = MemoryPolicy {
+        max_entries: 4, // target = floor(4 × 0.75) = 3
+        similarity_threshold: 0.8,
+        target_active_entries: 3,
+    };
+    let service = MemoryService::open_with_clock(sweep_store(&root), policy, || 200)
+        .await
+        .unwrap();
+
+    // 物理 active=4 > target=3，但有效 active=2 ≤ 3：旧物理口径会误报。
+    let listed = service.list(Some(MemoryLayer::Project)).await;
+    assert_eq!(listed.len(), 4, "物理 active 含 2 条残留");
+    assert_eq!(
+        crate::domain::effective_active_count(&listed),
+        2,
+        "有效 active 仅 2 条"
+    );
+    assert!(
+        service
+            .reflection_above_target_after_commit_notice()
+            .is_none(),
+        "有效 active ≤ target MUST NOT 产出超载告警"
+    );
+
+    // 空输出 apply 走完提交后复核同样不得告警（预检与复核同口径）。
+    let result = service
+        .apply_reflection(&ReflectionOutput::default())
+        .await
+        .expect("有效 active ≤ target，空输出 MUST 通过门禁");
+    assert_eq!(result.attempted, 0);
+    assert!(
+        service
+            .reflection_above_target_after_commit_notice()
+            .is_none(),
+        "apply 提交后复核 MUST NOT 按物理条数告警"
+    );
+
+    // 对照：有效 active 真正超过 target 时，告警携带有效口径数字与原 target。
+    let over_root = sweep_root("notice-over");
+    let over_store = sweep_store(&over_root);
+    let over_seeded: Vec<MemoryEntry> = ["alpha", "beta", "gamma", "delta"]
+        .into_iter()
+        .map(|content| entry(MemoryLayer::Project, content))
+        .collect();
+    seed_layer(&over_store, MemoryLayer::Project, over_seeded).await;
+    let over_service = MemoryService::open_with_clock(sweep_store(&over_root), policy, || 200)
+        .await
+        .unwrap();
+    let notice = over_service
+        .reflection_above_target_after_commit_notice()
+        .expect("有效 active=4 > target=3 MUST 告警");
+    assert!(
+        notice.contains("active=4 target=3"),
+        "告警 MUST 携带有效口径数字与原 target 计算，got {notice}"
+    );
+
+    drop(service);
+    drop(over_service);
+    std::fs::remove_dir_all(&root).unwrap();
+    std::fs::remove_dir_all(&over_root).unwrap();
+}
+
+/// 收敛目标来源统一：门禁与告警 MUST 用策略 `target_active_entries`（生产装配
+/// 即 `memory.reflection.target_active_entries` 配置值），与反思 prompt 同源；
+/// NEVER 另按 floor(max×0.75) 公式取值——两套口径会让按 prompt 收敛的模型被
+/// 门禁反复打回（修复前 max=10 公式目标 7，配置目标 3，有效 5 被放行且无告警）。
+#[tokio::test]
+async fn capacity_gate_and_warning_use_policy_target_not_formula() {
+    let root = sweep_root("policy-target-tight");
+    let store = sweep_store(&root);
+    let seeded: Vec<MemoryEntry> = ["a", "b", "c", "d", "e"]
+        .into_iter()
+        .map(|content| entry(MemoryLayer::Project, content))
+        .collect();
+    seed_layer(&store, MemoryLayer::Project, seeded).await;
+    let policy = MemoryPolicy {
+        max_entries: 10, // floor(10 × 0.75) = 7，与配置目标 3 分叉
+        similarity_threshold: 0.8,
+        target_active_entries: 3,
+    };
+    let service = MemoryService::open_with_clock(sweep_store(&root), policy, || 200)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        service
+            .apply_reflection(&ReflectionOutput::default())
+            .await
+            .expect_err("有效 5 > 策略目标 3 MUST 拦截（公式口径 5 ≤ 7 会误放行）"),
+        MemoryError::CapacityNotMet {
+            active: 5,
+            target: 3,
+        }
+    );
+    let notice = service
+        .reflection_above_target_after_commit_notice()
+        .expect("有效 5 > 策略目标 3 MUST 告警");
+    assert!(
+        notice.contains("active=5 target=3"),
+        "告警 MUST 携带策略目标口径，got {notice}"
+    );
+    drop(service);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// 反向分叉同样 MUST 跟策略走：配置目标 8 高于公式 7 时，有效 8 的空输出
+/// MUST 放行且不告警（公式口径 8 > 7 会误拦）。
+#[tokio::test]
+async fn capacity_gate_accepts_when_policy_target_above_formula() {
+    let root = sweep_root("policy-target-loose");
+    let store = sweep_store(&root);
+    let seeded: Vec<MemoryEntry> = ["a", "b", "c", "d", "e", "f", "g", "h"]
+        .into_iter()
+        .map(|content| entry(MemoryLayer::Project, content))
+        .collect();
+    seed_layer(&store, MemoryLayer::Project, seeded).await;
+    let policy = MemoryPolicy {
+        max_entries: 10, // floor(10 × 0.75) = 7 < 配置目标 8
+        similarity_threshold: 0.8,
+        target_active_entries: 8,
+    };
+    let service = MemoryService::open_with_clock(sweep_store(&root), policy, || 200)
+        .await
+        .unwrap();
+
+    let result = service
+        .apply_reflection(&ReflectionOutput::default())
+        .await
+        .expect("有效 8 ≤ 策略目标 8 MUST 放行（公式口径会误拦）");
+    assert_eq!(result.attempted, 0);
+    assert!(
+        service
+            .reflection_above_target_after_commit_notice()
+            .is_none(),
+        "有效 8 ≤ 策略目标 8 MUST NOT 告警"
+    );
+    drop(service);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// pinned TTL 过期残留 MUST NOT 占用收敛目标：门禁与告警同用「有效且未过期」
+/// 口径——pinned 过期条目留在 active、不可注入、不进反思 prompt，若仍计入
+/// 目标，门禁永远无法满足、告警会在未超标时误报（修复前有效口径 4 > 3）。
+#[tokio::test]
+async fn capacity_gate_and_warning_exclude_pinned_ttl_residue() {
+    let root = sweep_root("pinned-ttl-target");
+    let store = sweep_store(&root);
+    let mut pinned_expired = ttl_expired_entry(MemoryLayer::Project, "pinned expired");
+    pinned_expired.pinned = true;
+    let seeded = vec![
+        entry(MemoryLayer::Project, "fresh one"),
+        entry(MemoryLayer::Project, "fresh two"),
+        entry(MemoryLayer::Project, "fresh three"),
+        pinned_expired,
+    ];
+    seed_layer(&store, MemoryLayer::Project, seeded).await;
+    let policy = MemoryPolicy {
+        max_entries: 10,
+        similarity_threshold: 0.8,
+        target_active_entries: 3,
+    };
+    let service = MemoryService::open_with_clock(sweep_store(&root), policy, || 200)
+        .await
+        .unwrap();
+
+    let result = service
+        .apply_reflection(&ReflectionOutput::default())
+        .await
+        .expect("未过期有效 3 ≤ 目标 3，pinned 过期残留 MUST 不占目标");
+    assert_eq!(result.attempted, 0);
+    assert!(
+        service
+            .reflection_above_target_after_commit_notice()
+            .is_none(),
+        "未过期有效 3 ≤ 目标 3 MUST NOT 告警"
+    );
+    assert_eq!(
+        service.list(Some(MemoryLayer::Project)).await.len(),
+        4,
+        "门禁放行不改盘面，pinned 过期条目仍在物理 active"
+    );
+    drop(service);
+    std::fs::remove_dir_all(&root).unwrap();
 }

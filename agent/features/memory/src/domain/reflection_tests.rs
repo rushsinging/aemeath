@@ -437,3 +437,58 @@ fn noise_prompt_is_summary_free_single_field_and_grounds_explicit() {
     assert!(!en.contains("Recent conversation summary"));
     assert!(!en.contains("suggested_memories"));
 }
+
+#[test]
+fn prompt_requires_existing_corpus_review_when_no_new_dialog_and_under_target() {
+    let capacity = ReflectionCapacityBudget {
+        active_count: 3,
+        target_active_entries: 150,
+        max_entries: 200,
+    };
+    let corpus_status = ReflectionCorpusStatus {
+        archive_count: 0,
+        category_counts: vec![(MemoryCategory::Fact, 3)],
+        duplicate_pairs: vec![],
+    };
+    let zh = engine().build_prompt("", "", "zh", capacity, Some(&corpus_status));
+    let en = engine().build_prompt("", "", "en", capacity, Some(&corpus_status));
+    // 无新对话且 active ≤ target 时，仍明确要求审查存量：合并互补、提纯事实。
+    assert!(zh.contains("摘要为空"), "zh 需覆盖空对话场景：{zh}");
+    assert!(
+        zh.contains("通读「当前项目记忆」"),
+        "zh 需要求通读存量：{zh}"
+    );
+    assert!(zh.contains("合并互补"), "zh 需要求合并互补信息：{zh}");
+    assert!(zh.contains("有价值"), "zh 需要求保留有价值事实：{zh}");
+    assert!(
+        zh.contains("高相似对只是线索"),
+        "zh 需声明高相似对只是线索：{zh}"
+    );
+    assert!(zh.contains("允许空输出"), "zh 需允许无变更时空输出：{zh}");
+    assert!(zh.contains("机械淘汰"), "zh 需禁止机械淘汰：{zh}");
+    assert!(
+        en.contains("summary is empty"),
+        "en must cover empty dialog: {en}"
+    );
+    assert!(
+        en.contains("read the whole Current project memory list"),
+        "en must require reviewing the corpus: {en}"
+    );
+    assert!(
+        en.contains("merge complementary"),
+        "en must ask for merges: {en}"
+    );
+    assert!(en.contains("valuable"), "en must keep valuable facts: {en}");
+    assert!(
+        en.contains("only a clue, not a precondition"),
+        "en must treat similarity as a clue: {en}"
+    );
+    assert!(
+        en.contains("empty output"),
+        "en must allow empty output: {en}"
+    );
+    assert!(
+        en.contains("mechanically"),
+        "en must forbid mechanical eviction: {en}"
+    );
+}
