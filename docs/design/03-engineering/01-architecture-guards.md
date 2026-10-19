@@ -52,7 +52,7 @@
 
 ## 断言器目录
 
-引擎内置 9 种断言器（`tools/xtask/src/guards_rules.rs`），新增约束优先复用现有断言器加数据行：
+引擎内置 10 种断言器（`tools/xtask/src/guards_rules.rs`），新增约束优先复用现有断言器加数据行：
 
 | 断言器 | 语义 | 数据形态 | 档位 |
 |---|---|---|---|
@@ -66,6 +66,7 @@
 | `construction_whitelist` | 构造符号出现点白名单（由 `construction_symbols` 合成） | `symbol` + `allowed_paths` | full |
 | `forbidden_file_names` | 禁文件名（如 `mod.rs`） | `forbidden_file_names` | full |
 | `line_budget` | 单文件行数预算（职责不回缩锁） | `max_lines` 等 | full |
+| `struct_field_presence` | 带 serde 标记（如 `deny_unknown_fields`）的 struct 体内 MUST 声明指定字段（框架 schema 注入字段 × serde deny 契约一致性） | `struct_marker` + `required_field` + `exclusions` | full |
 
 代表性规则族（完整清单以 registry 为准）：
 

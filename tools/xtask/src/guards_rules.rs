@@ -90,6 +90,17 @@ pub enum RuleSpec {
         #[serde(default)]
         required_files: Vec<String>,
     },
+    /// serde 标记 struct 的必备字段：带 `struct_marker`（如
+    /// `deny_unknown_fields`）的 struct 体内 MUST 声明 `pub <required_field>:`。
+    /// 场景：框架向 schema 统一注入 timeout，若 Input struct 开
+    /// deny_unknown_fields 却未声明该字段，LLM 按 schema 传参即被
+    /// serde 拒绝（schema/serde 契约裂缝，#2003）。
+    StructFieldPresence {
+        struct_marker: String,
+        required_field: String,
+        #[serde(default)]
+        exclusions: Vec<Exclusion>,
+    },
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -283,6 +294,18 @@ pub fn enforce_rule_with_context(
         } => enforce_forbidden_file_names(rule, relative_file, forbidden_file_names),
         RuleSpec::DependencyMatrix { .. } => Ok(Vec::new()),
         RuleSpec::LineBudget { .. } => Ok(Vec::new()),
+        RuleSpec::StructFieldPresence {
+            struct_marker,
+            required_field,
+            exclusions,
+        } => enforce_struct_field_presence(
+            rule,
+            relative_file,
+            context,
+            struct_marker,
+            required_field,
+            exclusions,
+        ),
     }
 }
 
@@ -1061,6 +1084,95 @@ fn enforce_constant_placement(
                 "常量 `{name}` 未归位：模块级纯值常量 MUST 位于 constants.rs（cfg 门控/宏体/状态容器/常量表文件除外，#1146）"
             ),
         });
+    }
+    Ok(violations)
+}
+
+/// 标记 struct 必备字段断言：带 `struct_marker` 的 struct 体内 MUST
+/// 声明 `pub <required_field>:`，否则报违规（契约裂缝防复发，#2003）。
+fn enforce_struct_field_presence(
+    rule: &Rule,
+    relative_file: &str,
+    context: &guards_engine::FileContext,
+    struct_marker: &str,
+    required_field: &str,
+    exclusions: &[Exclusion],
+) -> Result<Vec<Violation>> {
+    if exclusions
+        .iter()
+        .any(|exclusion| relative_file.starts_with(exclusion.path.as_str()))
+    {
+        return Ok(Vec::new());
+    }
+    let Some(source) = context.text() else {
+        return Ok(Vec::new());
+    };
+    let production = strip_inline_cfg_test_region(source);
+    let lines: Vec<&str> = production.lines().collect();
+
+    let mut violations = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        if !line.contains(struct_marker) {
+            continue;
+        }
+        // 标记行向下最近的 struct 声明（中间只允许 attribute / doc 行）。
+        let Some((struct_line_index, struct_line)) = lines
+            .iter()
+            .enumerate()
+            .skip(index + 1)
+            .take_while(|(_, candidate)| {
+                let code = candidate.trim_start();
+                code.starts_with("#[")
+                    || candidate.trim().is_empty()
+                    || code.starts_with("pub struct ")
+                    || code.starts_with("struct ")
+            })
+            .find(|(_, candidate)| {
+                let code = candidate.trim_start();
+                code.starts_with("pub struct ") || code.starts_with("struct ")
+            })
+        else {
+            continue;
+        };
+        let Some(struct_name) = struct_line
+            .split_whitespace()
+            .skip_while(|token| *token != "struct")
+            .nth(1)
+            .map(|name| name.trim_end_matches('{').trim_end_matches('<'))
+        else {
+            continue;
+        };
+        // struct 体 = 首个 `{` 起花括号配对到闭合 `}`。
+        let mut brace_depth: i32 = 0;
+        let mut body_started = false;
+        let mut field_present = false;
+        let required_declaration = format!("pub {required_field}:");
+        for candidate in lines.iter().skip(struct_line_index) {
+            for character in candidate.chars() {
+                if character == '{' {
+                    brace_depth += 1;
+                    body_started = true;
+                } else if character == '}' {
+                    brace_depth -= 1;
+                }
+            }
+            if body_started && candidate.trim_start().starts_with(&required_declaration) {
+                field_present = true;
+            }
+            if body_started && brace_depth == 0 {
+                break;
+            }
+        }
+        if body_started && !field_present {
+            violations.push(Violation {
+                rule_id: rule.id.clone(),
+                location: format!("{relative_file}:{}", struct_line_index + 1),
+                message: format!(
+                    "struct `{struct_name}` 带 `{struct_marker}` 但未声明 `{required_declaration}`：\
+                     框架注入 schema 的字段与 serde 解析契约裂缝（#2003），补字段声明或加 exclusion 登记"
+                ),
+            });
+        }
     }
     Ok(violations)
 }
