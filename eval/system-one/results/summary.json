@@ -1,8 +1,11 @@
 {
+  "annotation": {},
   "anyjev": {
     "memory_rerank": {
       "n_forward": 12,
       "errors": 0,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
       "R@1": 1.0,
       "MRR": 1.0,
       "chinese_r_at_1": 1.0,
@@ -13,9 +16,11 @@
     "skill_match": {
       "n_forward": 6,
       "errors": 0,
-      "R@1": 1.0,
-      "MRR": 1.0,
-      "chinese_r_at_1": 1.0,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
+      "R@1": 0.0,
+      "MRR": 0.0,
+      "chinese_r_at_1": 0.0,
       "order_flip_rate": 0.0,
       "latency_p50_ms": 1494.4872920168564,
       "latency_p95_ms": 1726.7532090190798
@@ -25,8 +30,8 @@
       "errors": 0,
       "accuracy": 1.0,
       "f1": 1.0,
-      "brier": 2.386721726377962e-17,
-      "ece": 4.06464135904284e-09,
+      "brier": 2.3867217263779622e-17,
+      "ece": 4.064641414553992e-09,
       "confusion": {
         "tp": 6,
         "fp": 0,
@@ -43,7 +48,7 @@
       "accuracy": 0.9375,
       "f1": 0.9411764705882353,
       "brier": 0.06267467350333582,
-      "ece": 0.0578345346642297,
+      "ece": 0.057834534664229824,
       "confusion": {
         "tp": 8,
         "fp": 1,
@@ -53,13 +58,15 @@
       "order_flip_rate": 0.0,
       "latency_p50_ms": 899.1003750124946,
       "latency_p95_ms": 1003.6918759578839,
-      "risk_mae": 0.44716806386102925
+      "risk_mae": 0.4471680638610293
     }
   },
   "clm": {
     "memory_rerank": {
       "n_forward": 12,
       "errors": 0,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
       "R@1": 0.4166666666666667,
       "MRR": 0.6486111111111111,
       "chinese_r_at_1": 0.3,
@@ -70,9 +77,11 @@
     "skill_match": {
       "n_forward": 6,
       "errors": 0,
-      "R@1": 0.8333333333333334,
-      "MRR": 0.875,
-      "chinese_r_at_1": 1.0,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
+      "R@1": 0.0,
+      "MRR": 0.0,
+      "chinese_r_at_1": 0.0,
       "order_flip_rate": 0.0,
       "latency_p50_ms": 2.7863749999994525,
       "latency_p95_ms": 512.4467919999986
@@ -82,7 +91,7 @@
       "errors": 0,
       "accuracy": 0.5,
       "f1": 0.0,
-      "brier": 0.3877587552489188,
+      "brier": 0.38775875524891884,
       "ece": 0.4094410989811432,
       "confusion": {
         "tp": 0,
@@ -99,7 +108,7 @@
       "errors": 0,
       "accuracy": 0.5,
       "f1": 0.6666666666666666,
-      "brier": 0.35217408048322935,
+      "brier": 0.3521740804832294,
       "ece": 0.39976631712539734,
       "confusion": {
         "tp": 8,
@@ -110,13 +119,15 @@
       "order_flip_rate": 0.0,
       "latency_p50_ms": 6.210498999998038,
       "latency_p95_ms": 504.6944589999995,
-      "risk_mae": 0.5786217535420684
+      "risk_mae": 0.5786217535420682
     }
   },
   "jevos": {
     "memory_rerank": {
       "n_forward": 12,
       "errors": 0,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
       "R@1": 1.0,
       "MRR": 1.0,
       "chinese_r_at_1": 1.0,
@@ -127,9 +138,11 @@
     "skill_match": {
       "n_forward": 6,
       "errors": 0,
-      "R@1": 0.8333333333333334,
-      "MRR": 0.8888888888888888,
-      "chinese_r_at_1": 1.0,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
+      "R@1": 0.0,
+      "MRR": 0.0,
+      "chinese_r_at_1": 0.0,
       "order_flip_rate": 0.0,
       "latency_p50_ms": 341.16162500000155,
       "latency_p95_ms": 473.66629099999716
@@ -137,6 +150,8 @@
     "memory_rerank_real": {
       "n_forward": 20,
       "errors": 0,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
       "R@1": 0.5,
       "MRR": 0.6783333333333333,
       "chinese_r_at_1": 0.5,
@@ -184,6 +199,8 @@
     "memory_rerank": {
       "n_forward": 12,
       "errors": 0,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
       "R@1": 1.0,
       "MRR": 1.0,
       "chinese_r_at_1": 1.0,
@@ -194,9 +211,11 @@
     "skill_match": {
       "n_forward": 6,
       "errors": 0,
-      "R@1": 1.0,
-      "MRR": 1.0,
-      "chinese_r_at_1": 1.0,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
+      "R@1": 0.0,
+      "MRR": 0.0,
+      "chinese_r_at_1": 0.0,
       "order_flip_rate": 0.0,
       "latency_p50_ms": 45.27837499999965,
       "latency_p95_ms": 67.54462500000002
@@ -204,12 +223,26 @@
     "memory_rerank_real": {
       "n_forward": 20,
       "errors": 0,
-      "R@1": 0.65,
-      "MRR": 0.7916666666666667,
-      "chinese_r_at_1": 0.65,
-      "order_flip_rate": 0.3,
-      "latency_p50_ms": 359.17824999999937,
-      "latency_p95_ms": 520.3757499999995
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
+      "R@1": 0.6,
+      "MRR": 0.7849999999999999,
+      "chinese_r_at_1": 0.6,
+      "order_flip_rate": 0.35,
+      "latency_p50_ms": 336.6214999999997,
+      "latency_p95_ms": 392.5266249999999
+    },
+    "memory_recall_real": {
+      "n_forward": 60,
+      "errors": 0,
+      "no_relevant_n": 13,
+      "correct_reject_rate": 0.9230769230769231,
+      "R@1": 0.3404255319148936,
+      "MRR": 0.5355200945626477,
+      "chinese_r_at_1": 0.3409090909090909,
+      "order_flip_rate": 0.7,
+      "latency_p50_ms": 519.3743330000018,
+      "latency_p95_ms": 783.050459
     },
     "stop_verify": {
       "n_forward": 12,
@@ -244,13 +277,15 @@
       "order_flip_rate": 0.0,
       "latency_p50_ms": 64.79887500000015,
       "latency_p95_ms": 79.86404200000052,
-      "risk_mae": 0.6368874999999999
+      "risk_mae": 0.6368875
     }
   },
   "laya": {
     "memory_rerank": {
       "n_forward": 12,
       "errors": 0,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
       "R@1": 0.16666666666666666,
       "MRR": 0.4541666666666666,
       "chinese_r_at_1": 0.2,
@@ -261,9 +296,11 @@
     "skill_match": {
       "n_forward": 6,
       "errors": 0,
-      "R@1": 0.3333333333333333,
-      "MRR": 0.5555555555555556,
-      "chinese_r_at_1": 0.4,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
+      "R@1": 0.0,
+      "MRR": 0.0,
+      "chinese_r_at_1": 0.0,
       "order_flip_rate": 0.3333333333333333,
       "latency_p50_ms": 24.385750000000428,
       "latency_p95_ms": 47.78466699999839
@@ -273,7 +310,7 @@
       "errors": 0,
       "accuracy": 0.5,
       "f1": 0.5714285714285715,
-      "brier": 0.2586804816666667,
+      "brier": 0.25868048166666674,
       "ece": 0.33074999999999993,
       "confusion": {
         "tp": 4,
@@ -308,28 +345,46 @@
     "memory_rerank": {
       "n_forward": 12,
       "errors": 0,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
       "R@1": 1.0,
       "MRR": 1.0,
       "chinese_r_at_1": 1.0,
       "order_flip_rate": 0.0,
-      "latency_p50_ms": 234.4799590000548,
-      "latency_p95_ms": 339.9600829998235
+      "latency_p50_ms": 233.39608300011605,
+      "latency_p95_ms": 299.6311249989958
+    },
+    "skill_match": {
+      "n_forward": 6,
+      "errors": 0,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
+      "R@1": 1.0,
+      "MRR": 1.0,
+      "chinese_r_at_1": 1.0,
+      "order_flip_rate": 0.0,
+      "latency_p50_ms": 217.34583299985388,
+      "latency_p95_ms": 222.4354999998468
     },
     "memory_rerank_real": {
       "n_forward": 20,
       "errors": 0,
-      "R@1": 0.65,
-      "MRR": 0.8083333333333332,
-      "chinese_r_at_1": 0.65,
-      "order_flip_rate": 0.05,
-      "latency_p50_ms": 615.6195829998978,
-      "latency_p95_ms": 1376.438958000108
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
+      "R@1": 0.7,
+      "MRR": 0.8333333333333333,
+      "chinese_r_at_1": 0.7,
+      "order_flip_rate": 0.1,
+      "latency_p50_ms": 645.1701660007529,
+      "latency_p95_ms": 1455.150166999374
     }
   },
   "rsi-jev": {
     "memory_rerank": {
       "n_forward": 12,
       "errors": 0,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
       "R@1": 1.0,
       "MRR": 1.0,
       "chinese_r_at_1": 1.0,
@@ -340,9 +395,11 @@
     "skill_match": {
       "n_forward": 6,
       "errors": 0,
-      "R@1": 1.0,
-      "MRR": 1.0,
-      "chinese_r_at_1": 1.0,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
+      "R@1": 0.0,
+      "MRR": 0.0,
+      "chinese_r_at_1": 0.0,
       "order_flip_rate": 0.0,
       "latency_p50_ms": 239.46795799999876,
       "latency_p95_ms": 300.30479100000207
@@ -350,6 +407,8 @@
     "memory_rerank_real": {
       "n_forward": 20,
       "errors": 0,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
       "R@1": 0.55,
       "MRR": 0.7083333333333334,
       "chinese_r_at_1": 0.55,
@@ -379,7 +438,7 @@
       "errors": 0,
       "accuracy": 0.8125,
       "f1": 0.823529411764706,
-      "brier": 0.11538265347089821,
+      "brier": 0.1153826534708982,
       "ece": 0.16537817212520167,
       "confusion": {
         "tp": 7,
@@ -397,6 +456,8 @@
     "memory_rerank": {
       "n_forward": 12,
       "errors": 0,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
       "R@1": 1.0,
       "MRR": 1.0,
       "chinese_r_at_1": 1.0,
@@ -407,9 +468,11 @@
     "skill_match": {
       "n_forward": 6,
       "errors": 0,
-      "R@1": 1.0,
-      "MRR": 1.0,
-      "chinese_r_at_1": 1.0,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
+      "R@1": 0.0,
+      "MRR": 0.0,
+      "chinese_r_at_1": 0.0,
       "order_flip_rate": 0.0,
       "latency_p50_ms": 517.6241250010207,
       "latency_p95_ms": 539.7099170368165
@@ -417,6 +480,8 @@
     "memory_rerank_real": {
       "n_forward": 20,
       "errors": 0,
+      "no_relevant_n": 0,
+      "correct_reject_rate": null,
       "R@1": 0.75,
       "MRR": 0.8416666666666666,
       "chinese_r_at_1": 0.75,
@@ -430,7 +495,7 @@
       "accuracy": 1.0,
       "f1": 1.0,
       "brier": 1.690898346510949e-05,
-      "ece": 0.0030488060385686494,
+      "ece": 0.003048806038568594,
       "confusion": {
         "tp": 6,
         "fp": 0,
@@ -446,7 +511,7 @@
       "errors": 0,
       "accuracy": 0.875,
       "f1": 0.888888888888889,
-      "brier": 0.12205040373577279,
+      "brier": 0.1220504037357728,
       "ece": 0.20156702308434657,
       "confusion": {
         "tp": 8,

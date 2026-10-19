@@ -21,7 +21,8 @@ EVAL_ROOT = HERE.parent
 RESULTS = EVAL_ROOT / "results"
 DATASETS = EVAL_ROOT / "datasets"
 
-RANK_SCENARIOS = ("memory_rerank", "skill_match", "skill_match_real", "memory_rerank_real")
+RANK_SCENARIOS = ("memory_rerank", "skill_match", "skill_match_real", "memory_rerank_real",
+                  "memory_recall_real")
 NOUL_SCENARIOS = ("stop_verify",)
 
 
@@ -72,15 +73,29 @@ def eval_rank(records: list[dict], cases: dict[str, dict]) -> dict:
         case = cases[rid]
         return case["answers"][case["gold"]]
 
-    r_at_1 = (sum(1 for r in forward if r.get("top1") == gold_of(r["id"])) / len(forward)
-              if forward else None)
+    # 门控子集（gold=-1 无相关候选）：不进 R@1/MRR 分母，单独统计拒绝正确率
+    gated = [r for r in forward if cases[r["id"]].get("gold", -1) == -1]
+    effective = [r for r in forward if cases[r["id"]].get("gold", -1) >= 0]
 
-    chinese_forward = [r for r in forward if is_chinese_case(cases[r["id"]])]
+    def top1_prob(record: dict) -> float | None:
+        probs = record.get("probabilities") or {}
+        top1 = record.get("top1")
+        return probs.get(top1) if top1 is not None else None
+
+    GATING_THRESHOLD = 0.5  # 与生产 recall 门控一致（top1 p<0.5 不注入）
+    gated_with_prob = [(r, top1_prob(r)) for r in gated]
+    correct_rejects = sum(1 for _, p in gated_with_prob
+                          if p is not None and p < GATING_THRESHOLD)
+
+    r_at_1 = (sum(1 for r in effective if r.get("top1") == gold_of(r["id"])) / len(effective)
+              if effective else None)
+
+    chinese_forward = [r for r in effective if is_chinese_case(cases[r["id"]])]
     chinese_r_at_1 = (sum(1 for r in chinese_forward if r.get("top1") == gold_of(r["id"]))
                       / len(chinese_forward) if chinese_forward else None)
 
     mrr_sum = 0.0
-    for r in forward:
+    for r in effective:
         gold = gold_of(r["id"])
         probs = r.get("probabilities") or {}
         ranked = sorted(probs, key=probs.get, reverse=True)
@@ -88,7 +103,7 @@ def eval_rank(records: list[dict], cases: dict[str, dict]) -> dict:
             mrr_sum += 1.0 / (ranked.index(gold) + 1)
         except ValueError:
             pass
-    mrr = mrr_sum / len(forward) if forward else None
+    mrr = mrr_sum / len(effective) if effective else None
 
     flips = 0
     pairs = 0
@@ -103,6 +118,9 @@ def eval_rank(records: list[dict], cases: dict[str, dict]) -> dict:
                  if r.get("latency_ms") is not None]
     return {
         "n_forward": len(forward), "errors": len(errors),
+        "no_relevant_n": len(gated),
+        "correct_reject_rate": (correct_rejects / len(gated_with_prob)
+                                if gated_with_prob else None),
         "R@1": r_at_1, "MRR": mrr,
         "chinese_r_at_1": chinese_r_at_1,
         "order_flip_rate": (flips / pairs) if pairs else None,
@@ -182,6 +200,14 @@ GATES: dict[str, dict[str, tuple[str, float]]] = {
         "latency_p95_ms": ("<=", 1000.0),
         "chinese_r_at_1": ("==", 1.0),
     },
+    # #1997 真实门控+注入场景基线阈值：真实事件含跨域噪声与 no-relevant case，
+    # 不适用合成集 0.99 口径；下限对齐 kev 真实 rerank 水平（R@1=0.65/flip=0.30）。
+    "memory_recall_real": {
+        "R@1": (">=", 0.60),
+        "MRR": (">=", 0.70),
+        "order_flip_rate": ("<=", 0.30),
+        "correct_reject_rate": (">=", 0.50),
+    },
 }
 
 _OPS = {
@@ -252,7 +278,7 @@ def main() -> None:
     for engine in engines:
         summary[engine] = {}
         for scenario in ("memory_rerank", "skill_match", "memory_rerank_real",
-                         "stop_verify", "permission_triage"):
+                         "memory_recall_real", "stop_verify", "permission_triage"):
             records = load_jsonl(RESULTS / engine / f"{scenario}.jsonl")
             if not records:
                 continue

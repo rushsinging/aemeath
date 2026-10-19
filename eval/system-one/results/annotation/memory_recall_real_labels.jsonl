@@ -1,0 +1,60 @@
+{"id": "mrc-001", "gold": 7, "confidence": "low", "reason": "候选[7]是失败归因纪律（verdict=fail 且 failedAssertions=0 属证据缺口，先查证据覆盖），最贴近『这个 run 为什么失败』的排查主题，其余多为 lane/多人链路或 LFS 噪音。"}
+{"id": "mrc-002", "gold": 4, "confidence": "high", "reason": "候选[4]正是 #1964 工具 goal 与后台摘要定稿（设计/计划/提交），就是本次端到端验收的对象。"}
+{"id": "mrc-003", "gold": 0, "confidence": "low", "reason": "候选[0]记录 PR #9223 合入后 authority 断开 relay re-ensure、客户端回 Room 再回游戏（#9409 跟踪），最接近 dev multiplayer preview 窗口体验问题。"}
+{"id": "mrc-004", "gold": 2, "confidence": "low", "reason": "候选[2]直接讲 TOOL_DISPLAY_NAMES 友好名＝工具固定身份（Bash/Backend Process Watch/Agent），最贴合『tool 与 TUI display name 对应』；[0][6] 亦接近。"}
+{"id": "mrc-005", "gold": 1, "confidence": "low", "reason": "候选[1]为 BackgroundProcessWatch 定案：timeout_secs 默认 60、硬上限 300、超限 clamp，直接回答 watch 超时如何设置；[2][3][4] 为近似重复。"}
+{"id": "mrc-006", "gold": 1, "confidence": "low", "reason": "候选[1]讲 CJK 段改用字符 bigram 的相似度分词口径（含 J≈0.82 实证），对应『算法相似度对中英文兼容』；[7] 只覆盖前半句的 pr/issue 引用话题。"}
+{"id": "mrc-007", "gold": 1, "confidence": "low", "reason": "候选[1]为 #9409 现状（方案 A 已定、实现计划与遮罩/Retry/Leave 未落地、下一步先写可执行实现计划再动手），与『先出设计、执行任务后拆』的工序最相关。"}
+{"id": "mrc-008", "gold": 6, "confidence": "low", "reason": "候选[6]讲 MessageMetadata 承载 system_reminder 等消息级标志的跨层实现，最贴合这条后台进程完成 system-reminder。"}
+{"id": "mrc-009", "gold": 0, "confidence": "low", "reason": "候选[0]即用户批准、base 为 release/v2.3.0 的『429 限流纳入健康降级』决策与范围，与消息的批准+base 指令一致；[5] 为同题交付载体。"}
+{"id": "mrc-010", "gold": 0, "confidence": "low", "reason": "候选[0]讲 #1964 重设计：goal 方法落在 Tool/TypedTool 并经 ToolExecutionPort 暴露给 supervisor（runtime 拿不到 Arc<dyn Tool>），最贴合『tool 是接口还是类』的疑问；[8] 近似。"}
+{"id": "mrc-011", "gold": 0, "confidence": "low", "reason": "候选[0]讲 tool_result 结构化数据超限被整块降级为字符串、typed 显示契约被破坏的陷阱，最接近『grep 结果/LLM 读不到』的主题。"}
+{"id": "mrc-012", "gold": 0, "confidence": "high", "reason": "候选[0]明确 CJK bigram 后检出 J≈0.82 的 #1981 写锁两代结论重复对，直接解释『0.82 重复对』。"}
+{"id": "mrc-013", "gold": 0, "confidence": "high", "reason": "候选[0]是工具卡片身份与意图分层口径（卡片＝友好名+goal、summary 只存 goal 的边界），正对应『这个 header 太长、只需要 goal』。"}
+{"id": "mrc-014", "gold": 3, "confidence": "low", "reason": "候选[3]讲 MessageMetadata 承载 skill_request 等消息级标志的跨层实现模式，最贴合这条 skill-request 消息；[0]（skill 匹配）为次选。"}
+{"id": "mrc-015", "gold": 0, "confidence": "low", "reason": "候选[0]是唯一涉及 Git LFS 的记忆（二进制资源只是 LFS pointer、需 git lfs pull），对应『json 进 lfs、生成产物不该进 git』的诉求。"}
+{"id": "mrc-016", "gold": 1, "confidence": "low", "reason": "候选[1]讲 area-checks/affected-workspaces 与 packages/shared-libraries 的 workspace 覆盖结构（46 个未迁移 workspace 等），最接近『项目依赖图』一问。"}
+{"id": "mrc-017", "gold": 0, "confidence": "low", "reason": "候选[0]为 Brief 移除口径：彻底删除实现面、不留死代码、否决『仅注销留文件』的最小补丁，对应『清理 dead code』；[1][8] 只是侧记 clippy。"}
+{"id": "mrc-018", "gold": 5, "confidence": "low", "reason": "候选[5]要求手动/端到端验收前 MUST 先确认二进制来源与提交（安装版 vs run_debug），最贴合『e2e 验收下』的前置纪律；[6] 验收清单为次选。"}
+{"id": "mrc-019", "gold": 4, "confidence": "low", "reason": "候选[4]记录对本地全局配置 ~/.agents/aemeath.json 的修改（memory.max_entries 等），是唯一与『全局配置』同一文件的记忆，但话题仍是记忆容量而非模型。"}
+{"id": "mrc-020", "gold": 1, "confidence": "low", "reason": "候选[1]讲二进制资源可能只是 Git LFS pointer（约 129 字节）需 git lfs pull，最接近『这些文件太大改为 lfs』。"}
+{"id": "mrc-021", "gold": 4, "confidence": "high", "reason": "候选[4]是处理 GitHub PR 的纪律（先核验 assignee，非本人 PR 不关闭/不合并），直接对应『合并』指令。"}
+{"id": "mrc-022", "gold": 9, "confidence": "high", "reason": "候选[9]整条讲 PR #9751 的 CI 红因（game-agent 三文件未 prettier、已修并推送）与 baseline 级联，直接对应『ci failed』。"}
+{"id": "mrc-023", "gold": 2, "confidence": "high", "reason": "候选[2]为 #1979 续拍：范围=A 全做（Grep/Bash/Glob/Read/WebFetch/WebSearch）且须先解析 rtk 实际策略再写设计，正对应『A 档 6 个开启 + 你先深入了解 rtk 策略』。"}
+{"id": "mrc-024", "gold": -1, "confidence": "low", "reason": "消息仅为『1』，不含任何项目/主题线索，候选（合并清理、发版、模型、Watch 口径等）都无从与之建立相关，正确行为是不注入。"}
+{"id": "mrc-025", "gold": 0, "confidence": "low", "reason": "候选[0]讲 Skill 匹配即 ToolSearch 语义重排与 skill_match 槽位，是唯一与调用 e2e-accept skill 机制相关的记忆；[2] 仅顺带提到该 skill。"}
+{"id": "mrc-026", "gold": 0, "confidence": "high", "reason": "候选[0]提到『forward-port PR #8111 回流 main』，正对应『处理 forward 回 main 的 pr』。"}
+{"id": "mrc-027", "gold": 7, "confidence": "low", "reason": "候选[7]为 #1964 纠偏版终态契约（方法名定为 Tool/TypedTool::goal_text、Watch header 收敛为 Watch · summary · 短尾），最贴合 goal_text 取 input 与 header 渲染的追问；[0][1] 近似。"}
+{"id": "mrc-028", "gold": 4, "confidence": "low", "reason": "候选[4]为 #1927 模型持久化闭环拍板（session.metadata.model 双向读写、优先级、装配顺序），是候选里最贴近『做模型设计/模型能力有限』的模型设计决策记忆。"}
+{"id": "mrc-029", "gold": 4, "confidence": "high", "reason": "候选[4]明确入参统一字段名 timeout、NEVER 使用 timeout_secs（Tool::timeout_secs() 只是框架方法名），直接对应『不要恢复 timeout_secs』。"}
+{"id": "mrc-030", "gold": 4, "confidence": "low", "reason": "候选[4]讲 Memory(#1903) 与 System One(#1909) 事件流共用同一组拍板范式（保留全量现场、完整关联、不做报告面），最贴合同时基于 systemone/memory 日志出报告的需求；[3] 为次选。"}
+{"id": "mrc-031", "gold": 0, "confidence": "high", "reason": "候选0 讲回答 Issue 是否做完前必须核验状态/diff/工作区，正对『先看代码是否已修复+建 sub issue 跟踪』的方法论。"}
+{"id": "mrc-032", "gold": 2, "confidence": "high", "reason": "候选2 dev Grafana error 噪声主因与降级处置，直接对应『查 dev error/warning 日志并分类更新 issue』。"}
+{"id": "mrc-033", "gold": -1, "confidence": "low", "reason": "『修复，继续』指代依赖上文，候选多条修复主题无主导，正确行为不注入。"}
+{"id": "mrc-034", "gold": 2, "confidence": "low", "reason": "候选2 讲 LFS pointer 在 worktree 的行为，最接近『generated json/build-core.mjs 走 LFS』主题；无完全对应者。"}
+{"id": "mrc-035", "gold": -1, "confidence": "low", "reason": "『list bucket 权限』S3 主题无对应候选；候选6 仅擦边权限错误分类。"}
+{"id": "mrc-036", "gold": 4, "confidence": "low", "reason": "候选4 任务完成与宣称纪律最接近『验收项由 agent 给出』语义；无直接对应。"}
+{"id": "mrc-037", "gold": 8, "confidence": "low", "reason": "『合并，关联关闭 issue』为操作指令；候选8 合并后清理 worktree 纪律是合并动作最直接相关。"}
+{"id": "mrc-038", "gold": 5, "confidence": "high", "reason": "候选5 明确记录 429 issue 以 base release/v2.3.0 交付的分支与 PR，正对『base release 2.3.0 做这个 issue』。"}
+{"id": "mrc-039", "gold": 5, "confidence": "low", "reason": "reviewer 审 PR 任务；候选5 PR 处理纪律（assignee 核验）对 reviewer 有约束力。"}
+{"id": "mrc-040", "gold": 4, "confidence": "high", "reason": "候选4 wakeup/PreCompact 跳过 auto reflect 的口径直接回答『reflect 都会做什么』。"}
+{"id": "mrc-041", "gold": -1, "confidence": "high", "reason": "turbo devtools 主题；候选全是 multiplayer/LFS/验收主题，明确无相关。"}
+{"id": "mrc-042", "gold": 3, "confidence": "low", "reason": "候选3 scoring 配置终态含 policy_triage=false，与 triage 复验主题同域；rsi-jev 无直接候选。"}
+{"id": "mrc-043", "gold": 1, "confidence": "high", "reason": "候选1 讲收到『继续』催促时的行为纪律，正对该指令。"}
+{"id": "mrc-044", "gold": 1, "confidence": "high", "reason": "同 mrc-043，候选1 直接对应『继续』指令的处理纪律。"}
+{"id": "mrc-045", "gold": 1, "confidence": "high", "reason": "候选1 malf 人物基准定稿，正是『年龄调整到 16-18』的人物生图载体。"}
+{"id": "mrc-046", "gold": -1, "confidence": "low", "reason": "『散射光状态』生图光效话题，候选为任务跟踪/进度汇报主题，无相关。"}
+{"id": "mrc-047", "gold": 3, "confidence": "low", "reason": "『优化 reflect 给建议』；候选3 是 reflect 触发现状口径，为优化最相关的背景。"}
+{"id": "mrc-048", "gold": -1, "confidence": "low", "reason": "『同意，abce，继续』泛方案确认，候选（1863 白名单/门禁后台）无对应。"}
+{"id": "mrc-049", "gold": 3, "confidence": "high", "reason": "候选3 malf 分镜规范，正对『一个分镜一个分镜生成』。"}
+{"id": "mrc-050", "gold": 0, "confidence": "low", "reason": "『A 但不用加彩蛋』是对 malf 分镜方案的选择与附加约束；候选0 全篇硬约束最接近。"}
+{"id": "mrc-051", "gold": 1, "confidence": "high", "reason": "候选1 角色一致性管线 ball/winter 基准图，正对『按 v4 生成 ball』。"}
+{"id": "mrc-052", "gold": -1, "confidence": "high", "reason": "询问 #8701 状态；候选记录的是 #9223/#9409/#9202，无 8701 对应。"}
+{"id": "mrc-053", "gold": -1, "confidence": "low", "reason": "『还是报错』极泛无主题指向，候选无对应，正确行为不注入。"}
+{"id": "mrc-054", "gold": -1, "confidence": "low", "reason": "『开始1997』；候选是 #1935 的开始记录，对象不匹配，无帮助。"}
+{"id": "mrc-055", "gold": -1, "confidence": "low", "reason": "『继续』泛指令，候选为门禁后台执行口径，无主题对应。"}
+{"id": "mrc-056", "gold": 3, "confidence": "high", "reason": "候选3 #9202 目标态（不指定 provider/model、gateway 选路）直接回答『为什么钉死 provider 和 model』的设计背景。"}
+{"id": "mrc-057", "gold": -1, "confidence": "low", "reason": "『移除这一行』指代具体代码行，候选（Brief 移除/Watch 口径）无对应。"}
+{"id": "mrc-058", "gold": -1, "confidence": "low", "reason": "询问具体游戏 projectId 的内容；候选无该游戏信息。"}
+{"id": "mrc-059", "gold": -1, "confidence": "high", "reason": "『不要片名和字幕卡』即 malf 约束本身；当前桶候选无 malf 记忆，注入无帮助。"}
+{"id": "mrc-060", "gold": 1, "confidence": "low", "reason": "『先最小优化补丁』方案选择；候选1/2 是当时选根因级修复的对照记录，主题最相关。"}
