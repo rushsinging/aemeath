@@ -502,6 +502,8 @@ impl ReflectionEngine {
 
 要求：
 - 只输出 JSON，不要输出 Markdown。
+- 即使记忆列表为空、或没有任何条目需要处理，也必须只输出符合 schema 的 JSON
+  对象（各数组填空数组），NEVER 输出解释、说明或任何文字。
 - suggested_memories[].layer 只能是 project 或 global，默认优先使用 project。
 - suggested_memories[].category 只能是 fact、decision、preference、pattern、pitfall。
 - 引用已有记忆只能使用「当前项目记忆」列表行首的序号（形如 M3，对应行首 [M3]）。
@@ -552,6 +554,9 @@ JSON 格式：
 
 Requirements:
 - Output JSON only, no Markdown.
+- Even if the list is empty or nothing needs processing, you must still output
+  only a schema-valid JSON object (with empty arrays); NEVER answer with prose
+  or explanations.
 - suggested_memories[].layer must be project or global; prefer project by default.
 - suggested_memories[].category must be fact, decision, preference, pattern, or pitfall.
 - Reference existing memories ONLY by the ordinal shown at the start of each
@@ -818,6 +823,7 @@ impl ReflectionEngine {
 判断时 issue/PR 编号、日期、版本号本身不构成保留或清除的依据，以内容实质判断。
 当前 active={active_count}，收敛目标 target={target_active_entries}，硬上限 hard_cap={max_entries}。
 本步只做清除、NEVER 新增：清除是 corpus 卫生，不算为凑数强制淘汰；没有可清除条目时输出空数组。
+即使记忆列表为空、或没有任何条目需要清除，也必须只输出上述 JSON 对象（outdated_memories 为空数组），NEVER 输出解释、说明或任何文字。
 
 只输出 JSON，不要输出 Markdown：
 {{
@@ -837,6 +843,7 @@ Removal grounds (three):
 Issue/PR numbers, dates, and version strings by themselves are neither grounds to keep nor to remove; judge by substance.
 Current active={active_count}, converge target={target_active_entries}, hard cap={max_entries}.
 This step only removes and NEVER adds: removal is corpus hygiene, not quota-forced eviction; output an empty array when nothing qualifies.
+Even if the list is empty or nothing qualifies for removal, you must still output only the JSON object above (with an empty array); NEVER answer with prose or explanations.
 
 Output JSON only, no Markdown:
 {{

@@ -92,13 +92,17 @@ fn build_repair_messages(
     let instruction = if lang == "zh" {
         format!(
             "你上一次的输出不是合法 JSON 或不符合反思输出要求，请只输出符合要求的 JSON，\
-             不要输出 Markdown、解释或任何其他文字。校验错误：{validation_error}"
+             不要输出 Markdown、解释或任何其他文字；即使记忆列表为空或没有条目需要处理，\
+             也必须输出 JSON 对象本身（相关数组填空数组），NEVER 只给文字说明。\
+             校验错误：{validation_error}"
         )
     } else {
         format!(
             "Your previous output was not valid JSON or did not match the required reflection \
              schema. Output only a single JSON object that satisfies the requirements — no \
-             Markdown fences, no prose, no extra text. Validation error: {validation_error}"
+             Markdown fences, no prose, no extra text. Even if the list is empty or nothing \
+             needs processing, output the JSON object itself with empty arrays; NEVER answer \
+             with prose only. Validation error: {validation_error}"
         )
     };
     vec![

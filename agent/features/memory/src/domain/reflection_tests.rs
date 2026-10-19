@@ -492,3 +492,38 @@ fn prompt_requires_existing_corpus_review_when_no_new_dialog_and_under_target() 
         "en must forbid mechanical eviction: {en}"
     );
 }
+
+/// 空语料兜底（真模型实证：空 corpus 时 deepseek 输出自然语言解释而非
+/// JSON，初始与 repair 请求双双失败）：去噪与归纳 prompt 都 MUST 显式
+/// 要求「列表为空/无条目需要处理时仍只输出 JSON 对象（数组为空）」。
+#[test]
+fn prompts_forbid_prose_when_corpus_is_empty() {
+    let engine = ReflectionEngine;
+    let capacity = ReflectionCapacityBudget {
+        active_count: 0,
+        target_active_entries: 150,
+        max_entries: 200,
+    };
+
+    let zh_noise = engine.build_noise_prompt("", "zh", capacity, None);
+    assert!(
+        zh_noise.contains("列表为空") && zh_noise.contains("空数组"),
+        "zh 去噪 prompt MUST 含空语料兜底指令: {zh_noise}"
+    );
+    let en_noise = engine.build_noise_prompt("", "en", capacity, None);
+    assert!(
+        en_noise.contains("the list is empty") && en_noise.contains("empty array"),
+        "en 去噪 prompt MUST 含空语料兜底指令: {en_noise}"
+    );
+
+    let zh_synthesis = engine.build_prompt("", "", "zh", capacity, None);
+    assert!(
+        zh_synthesis.contains("列表为空") && zh_synthesis.contains("空数组"),
+        "zh 归纳 prompt MUST 含空语料兜底指令"
+    );
+    let en_synthesis = engine.build_prompt("", "", "en", capacity, None);
+    assert!(
+        en_synthesis.contains("the list is empty") && en_synthesis.contains("empty array"),
+        "en 归纳 prompt MUST 含空语料兜底指令"
+    );
+}
