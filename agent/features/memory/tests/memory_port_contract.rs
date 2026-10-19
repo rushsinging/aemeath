@@ -77,6 +77,7 @@ async fn in_memory_fake_satisfies_memory_port_contract() {
             layer: None,
             category: None,
             include_archive: true,
+            exclude_stale: false,
             now: 200,
         })
         .await;
@@ -105,6 +106,7 @@ async fn explicit_search_returns_ineligible_archive_without_panicking() {
             layer: None,
             category: None,
             include_archive: true,
+            exclude_stale: false,
             now: 102,
         })
         .await;
@@ -144,6 +146,7 @@ async fn mutations_are_typed_and_queries_do_not_change_revision() {
             layer: None,
             category: None,
             include_archive: true,
+            exclude_stale: false,
             now: 100,
         })
         .await;
@@ -182,6 +185,7 @@ async fn restore_when_layer_is_full_is_not_committed_and_returns_candidates() {
             layer: Some(MemoryLayer::Project),
             category: None,
             include_archive: true,
+            exclude_stale: false,
             now: 200,
         })
         .await;
@@ -353,6 +357,7 @@ async fn reflection_marks_existing_outdated_ids_and_skips_invalid_ids() {
             layer: None,
             category: None,
             include_archive: true,
+            exclude_stale: false,
             now: 200,
         })
         .await;
@@ -413,6 +418,7 @@ async fn reflection_applies_mixed_suggestion_and_outdated_id_as_one_result() {
             layer: Some(MemoryLayer::Project),
             category: None,
             include_archive: true,
+            exclude_stale: false,
             now: 200,
         })
         .await;

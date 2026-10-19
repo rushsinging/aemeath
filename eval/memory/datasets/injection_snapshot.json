@@ -1,0 +1,3762 @@
+{
+  "schema_version": 1,
+  "captured_at": 1792404474,
+  "corpora": [
+    {
+      "corpus": "global",
+      "revision": "110a797841580c260bac8f41c55b95898f3176f3f5373a43112cbedb9b30ed6c",
+      "active_sha256": "6dffd185f7fe1dde52adb9a2b7f596263a8277a18c62f405328952158238072f",
+      "entries": 8
+    },
+    {
+      "corpus": "v2_2a2bdf23f2c25a16214aa03ae0f51936d9875c766dea4e2fc0bd779ea1b481ce",
+      "revision": "58fbbae3c138b41c3b9195062fbb75de00225668ca6522b184a85ebb646434ab",
+      "active_sha256": "09c6280c947cfdac7df34c31b016c75c584d3995a7a1e2175e59134e6d574e2b",
+      "entries": 183
+    }
+  ],
+  "entries": [
+    {
+      "id": "mem_07ddZYWWDeS",
+      "layer": "global",
+      "category": "preference",
+      "content": "用户不喜欢「狗粮/dogfood」说法；验收场景用「手动验收 / 端到端验收 / LLM 驱动验收」，不要再提狗粮。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "language",
+        "验收"
+      ],
+      "pinned": false,
+      "created_at": 1791881474,
+      "last_confirmed_at": 1791881474,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07e2NBp5BUg",
+      "layer": "global",
+      "category": "pattern",
+      "content": "用任务跟踪列表维护长任务进度时，同一任务可能被重复登记（2026-10-13 实测 Task 3/4/5 再次出现为 #7/#8/#9，总条目 10 与实际唯一任务 6 不符），且完成状态会在轮次间回退；判断进度前应按任务内容去重并以最新一次 reminder 为准，不要直接采信总数。",
+      "source": "llm",
+      "tags": [
+        "progress-reporting",
+        "task-tracking"
+      ],
+      "pinned": false,
+      "created_at": 1791902297,
+      "last_confirmed_at": 1791902297,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "019fe126-57e0-79f1-883a-78c20bb48107",
+      "layer": "global",
+      "category": "preference",
+      "content": "用户要求：后续所有进度汇报除当前批次外，必须同时包含整体项目进度（已完成阶段、当前阶段、剩余主要工作、PR/验证状态）。",
+      "source": "llm",
+      "source_ref": "019fcad7-b164-7b44-a9f6-c7510440a520",
+      "tags": [
+        "aemeath",
+        "progress",
+        "reporting"
+      ],
+      "pinned": true,
+      "created_at": 1786188814,
+      "last_confirmed_at": 1786188814,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "019fe127-db22-7b10-a487-c1c13fbeef4c",
+      "layer": "global",
+      "category": "preference",
+      "content": "进度汇报必须明确给出整体完成比例（百分比，并说明估算口径）；同时包含已完成/总批次数、当前阶段占比、剩余批次与PR验证状态。",
+      "source": "llm",
+      "source_ref": "019fcad7-b164-7b44-a9f6-c7510440a520",
+      "tags": [
+        "percentage",
+        "progress",
+        "reporting"
+      ],
+      "pinned": true,
+      "created_at": 1786188913,
+      "last_confirmed_at": 1786188913,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a0a3fb-50b2-7cf2-b346-afd9d6d0371f",
+      "layer": "global",
+      "category": "decision",
+      "content": "#7777 已重组为\"[Feature] 将 Agent Chat turn 生命周期收归 Core API（输入队列、admission 与终态收敛）\"：方案决定分 A 进（队列/admission，原 7 条保留）与 B 出（终态帧即 UI 终态、system-notice 协议类型替代文案匹配、服务端唯一状态机），阶段清单 6 项，验收分进/出两组。#7526 已被 PR #7890 关闭、#7944 已被 #7961 关闭，均标注为过渡修复，本 Issue 是其架构收敛。",
+      "source": "llm",
+      "source_ref": "01a08ed9-e8ca-7ff6-93a3-19435325cf8e",
+      "tags": [
+        "7526",
+        "7777",
+        "7944",
+        "architecture",
+        "wanaka"
+      ],
+      "pinned": false,
+      "created_at": 1789457551,
+      "last_confirmed_at": 1789457551,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a0a40f-ee85-72d2-b557-6b4213117d4b",
+      "layer": "global",
+      "category": "decision",
+      "content": "#7777 queue 语义（用户确认）：入队保持用户顺序；出队是原子 drain——admission 时一次性弹出全部积压项，按入队顺序合并为下一轮单个 turn（单 invocation），无逐条出队路径；断线重连不得对已 drain 批次再次弹出。已同步进方案决定 A4、设计契约阶段、进侧验收标准。",
+      "source": "llm",
+      "source_ref": "01a08ed9-e8ca-7ff6-93a3-19435325cf8e",
+      "tags": [
+        "7777",
+        "queue-drain",
+        "wanaka"
+      ],
+      "pinned": false,
+      "created_at": 1789458902,
+      "last_confirmed_at": 1789458902,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a0eff7-5e68-7851-994f-c7772a1f86cd",
+      "layer": "global",
+      "category": "pitfall",
+      "content": "aemeath merge 收尾陷阱：ExitWorktree 删除 worktree 后，若会话进程 cwd 仍持有该目录 inode（已删除），进程级 spawn 全部 ENOENT——Bash、EnterWorktree/ExitWorktree（GitUnavailable/128）、Stop Hook（check-agent-stop.sh 启动失败）三通道同时失效，且重建同名目录无法恢复进程 cwd（inode 已死）。教训：1) 清理 worktree 前先确认它不是会话 cwd，或接受清理后必须重启会话；2) 遇此阻断不要反复重试或改 hook 脚本（属削弱守卫），诊断一次后直接请用户重启会话；3) bare 主 checkout 下 pull 不可用，用 git fetch main:main。",
+      "source": "llm",
+      "source_ref": "01a0eb5f-3db9-7854-b0c8-6df7aa924228",
+      "tags": [],
+      "pinned": false,
+      "created_at": 1790732361,
+      "last_confirmed_at": 1790732361,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a1252a-7570-72e9-a4c2-e112fd0012d0",
+      "layer": "global",
+      "category": "preference",
+      "content": "向用户收集选择或确认时，不使用 Ask 交互工具，直接通过普通文本提问。",
+      "source": "llm",
+      "tags": [
+        "ask-tool",
+        "communication",
+        "text"
+      ],
+      "pinned": false,
+      "created_at": 1791624902,
+      "last_confirmed_at": 1791624902,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07ZKBzcXpFQ",
+      "layer": "project",
+      "category": "preference",
+      "content": "用户要求「列下做什么」时只给代码改动清单（文件 → 改动点 → 验证命令），NEVER 混入建 issue / EnterWorktree / push / 开 PR 等流程步骤；流程动作需用户单独提出。实证：#1919 follow-up（B′）首版清单含 workflow 步骤被纠正「去掉 workflow 的部分，我是说代码修改」。",
+      "source": "llm",
+      "tags": [
+        "communication",
+        "planning",
+        "scope"
+      ],
+      "pinned": false,
+      "created_at": 1791656977,
+      "last_confirmed_at": 1791656977,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07ZKBzcXpFR",
+      "layer": "project",
+      "category": "pattern",
+      "content": "aemeath 长耗时本地门禁命令统一执行口径：cargo 全量测试、pre-push 架构守卫+全量单测、git push（timeout 3600000ms）、gh pr create 一律放后台进程运行（或 nohup 重定向日志文件后分次增量查看），靠完成通知继续后续 push / 建 PR，NEVER 前台串行或加 grep/tail 管道等待（管道静默会被误判卡死）；gh pr create 易超时优先用 gh api / body 文件方式建 PR。",
+      "source": "llm",
+      "tags": [
+        "background-process",
+        "cargo",
+        "pre-push",
+        "push",
+        "timeout"
+      ],
+      "pinned": false,
+      "created_at": 1791656977,
+      "last_confirmed_at": 1791656977,
+      "confirmation_count": 0,
+      "outdated": false,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07ZIunKCHGS",
+        "019fff45-9d85-7602-9cd8-3ee2654d2682"
+      ]
+    },
+    {
+      "id": "mem_07ZKBzcXpFS",
+      "layer": "project",
+      "category": "decision",
+      "content": "BackgroundProcess Watch 已评估并否决：登记式 Watch 与既有完成通知重复，阻塞式 Watch 会触发嵌套后台并占住 tool 槽。等待语义由 BackgroundProcessCompleted 完成通知 + wakeup 闭环承担（Run 内注入为主路径，跨 Run 仅作收口补偿）；后续再提 Watch 需求直接复用该结论，忙等问题只在 prompt / fuse 层治理（B′：豁免 List/Status/Logs，Stop 不豁免）。",
+      "source": "llm",
+      "tags": [
+        "background-process",
+        "fuse",
+        "wakeup",
+        "watch"
+      ],
+      "pinned": false,
+      "created_at": 1791656977,
+      "last_confirmed_at": 1791656977,
+      "confirmation_count": 0,
+      "outdated": true,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07ZISxTLqE4",
+        "01a1211a-bd78-723b-9d0d-da75d76dfa5b"
+      ]
+    },
+    {
+      "id": "mem_07ZKBzcXpFT",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "aemeath 语料容量前置条件：本地 ~/.agents/aemeath.json 的 max_entries 仍显式为 100（代码默认已改 200），active 已到 99/100；reflection.target_active_entries=150 高于当前硬上限，想达成 target 必须先手动把该配置改成 200，否则 reflection 的收敛动作会被上限挡住（超 target 只 warn，NEVER 机械硬删或截断输入）。",
+      "source": "llm",
+      "tags": [
+        "capacity",
+        "config",
+        "memory",
+        "reflection"
+      ],
+      "pinned": false,
+      "created_at": 1791656977,
+      "last_confirmed_at": 1791656977,
+      "confirmation_count": 0,
+      "outdated": true,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07ZJhrwkgdM",
+        "mem_07ZJrr4jMe3"
+      ]
+    },
+    {
+      "id": "mem_07ZxdsK2XS4",
+      "layer": "project",
+      "category": "pattern",
+      "content": "合并收尾清理口径：PR squash 合入后，除删除 worktree、本地与远端分支外，MUST 顺带清理该 worktree 遗留的 orphan cargo build cache（#1903 收尾约 1.2G、#1921 收尾约 3.6G，随反复本地验证持续累积）；仍在使用的无关 worktree（如 design-workflow-graph-redesign、pl-1863-context-pl-convergence）缓存保留。",
+      "source": "llm",
+      "tags": [
+        "cargo-cache",
+        "cleanup",
+        "merge",
+        "worktree"
+      ],
+      "pinned": false,
+      "created_at": 1791690099,
+      "last_confirmed_at": 1791690099,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07ZxxevalRB",
+      "layer": "project",
+      "category": "fact",
+      "content": "CLI 重装版本推进（2026-10-11）：main @ 1552fe344 上跑 build_cli.sh，产物 aemeath 0.0.0-1552fe34 安装到 /Users/guoyuqi/.local/bin/aemeath，取代此前基于 f3ab9c13 的安装。",
+      "source": "llm",
+      "tags": [
+        "build-cli",
+        "cli",
+        "main",
+        "version"
+      ],
+      "pinned": false,
+      "created_at": 1791690367,
+      "last_confirmed_at": 1791690367,
+      "confirmation_count": 0,
+      "outdated": true,
+      "superseded_by": "mem_07aMXw8QI09"
+    },
+    {
+      "id": "mem_07ZyFUI9epk",
+      "layer": "project",
+      "category": "decision",
+      "content": "wakeup Run 口径（用户 2026-10-11 拍板）：①可 compact；②跳过自动 reflect（Interval + PreCompact）；③不增加反思频控用的 session run_count（run_launch 已对 background_wakeup_run 跳过 +=1）。修复根因级：RunIntent::allows_auto_reflection() 仅 Conversation=true，Interval/PreCompact/domain BeginReflection gate 共用；非 Conversation 时 take 并丢弃 staged PreCompact 材料防槽残留。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "252",
+        "precompact",
+        "reflection",
+        "run-count",
+        "wakeup"
+      ],
+      "pinned": false,
+      "created_at": 1791690609,
+      "last_confirmed_at": 1791690609,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07ZyYfPWJma",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1925 已在 worktree bug-1925-wakeup-skip-precompact-reflection 实施：RunIntent::allows_auto_reflection() 仅 Conversation=true；domain BeginReflection gate、Interval、PreCompact 共用；非 Conversation take 并丢弃 staged 材料。测试：only_conversation_allows_auto_reflection / wakeup_run_rejects_begin_reflection_from_compacting / pre_compact_reflection_skipped_for_wakeup_intent_run 全绿。issue https://github.com/rushsinging/aemeath/issues/1925。尚未 commit/PR。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "1925",
+        "precompact",
+        "reflection",
+        "wakeup"
+      ],
+      "pinned": false,
+      "created_at": 1791690868,
+      "last_confirmed_at": 1791690868,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07Zz61dRbvc",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1925 PR 已开：https://github.com/rushsinging/aemeath/pull/1926（分支 bug-1925-wakeup-skip-precompact-reflection，commit 64cfbe686）。pre-push 全绿（runtime 1134 + guards 0）。Closes #1925。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "1925",
+        "1926",
+        "pr",
+        "reflection",
+        "wakeup"
+      ],
+      "pinned": false,
+      "created_at": 1791691320,
+      "last_confirmed_at": 1791691320,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07a0bvX8aMi",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1925/#1926 收尾完成：CLI 已按 merge e14551437 重装为 aemeath 0.0.0-e1455143 → /Users/guoyuqi/.local/bin/aemeath。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "1925",
+        "1926",
+        "build-cli"
+      ],
+      "pinned": false,
+      "created_at": 1791692592,
+      "last_confirmed_at": 1791692592,
+      "confirmation_count": 0,
+      "outdated": true,
+      "superseded_by": "mem_07aMXw8QI09"
+    },
+    {
+      "id": "mem_07aKlqYoyDQ",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1927 模型持久化闭环拍板（2026-10-11，issue 已挂 v0.2.0，worktree feature-1927-session-resume-model）：session.metadata.model 双向读写——启动确定最终 model 与 /model（SwitchModel）成功后回写该字段（SessionMetadataUpdateData 扩展 model，写失败不阻断）；--resume 且无 CLI --model 时读 session.model 做 resolve_runtime_model override，缺失/失效 fail-open 回 models.default 并可选 notice。优先级 CLI --model > session.metadata.model > models.default；CLI 显式 --model 的本次覆盖也回写 session。装配顺序须避开「先 resolve 再 resume」导致二次切换。",
+      "source": "llm",
+      "tags": [
+        "1927",
+        "model",
+        "resume",
+        "session"
+      ],
+      "pinned": false,
+      "created_at": 1791709519,
+      "last_confirmed_at": 1791709519,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07aKlqYoyDR",
+      "layer": "project",
+      "category": "fact",
+      "content": "cmux 与 aemeath 的 model 传递现状（2026-10-11 核实）：cmux 官方支持列表中无 aemeath（仅 claude/codex/cursor/gemini 等有 hooks），其持久化的是 session id + sanitized launch command（sanitizer 保留 --model 等 flag，不是单独 model 字段），因此 aemeath 恢复须自定义：cmux surface resume set --shell 'aemeath --resume <session_id> --model \"<source>/<model>\"'；aemeath --resume 只恢复会话历史/id，模型来自配置默认 models.default 加可选 CLI --model。",
+      "source": "llm",
+      "tags": [
+        "claude-code-compat",
+        "cmux",
+        "model",
+        "resume"
+      ],
+      "pinned": false,
+      "created_at": 1791709519,
+      "last_confirmed_at": 1791709519,
+      "confirmation_count": 0,
+      "outdated": true,
+      "superseded_by": "mem_07dO5XZFM3M"
+    },
+    {
+      "id": "mem_07aKlqYoyDS",
+      "layer": "project",
+      "category": "pattern",
+      "content": "aemeath model 写入三层机制区分（判断「resume 后是否还在」 MUST 按落盘与否分档）：CLI --model 仅本进程（CliConfigInput → ConfigPatch 覆盖 models.default，不落盘）；TUI /model 仅内存（SwitchModel → SessionModelState，进程退出即丢）；只有写 ~/.agents/aemeath.json 的 models.default（或 SetModel 写盘）才对所有新进程持久生效。session 自身是否承载「上次 model」由 #1927 决定其读写链路，不属上述三层。",
+      "source": "llm",
+      "tags": [
+        "config",
+        "model",
+        "persistence",
+        "tui"
+      ],
+      "pinned": false,
+      "created_at": 1791709519,
+      "last_confirmed_at": 1791709519,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07aMXw8QI08",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "#1927 model 持久化引入的 resume 回归（2026-10-11 实测定位）：启动路径无条件 persist_session_model → update_metadata_for_project 使 session generation/revision +1（即使 model 已是 OmniRoute/cursor-auto），TUI 先按 resume 拿到的 generation N 拉 display history window，写入后实际已是 N+1，加载报「Session generation 已变更: expected=28, actual=29/30」并被当损坏丢弃 → 会话 chats=[]、display history 26 steps 完好却显示 0 message。修复口径：A 止血=persist_session_model 在 metadata.model 已等于目标时跳过写入；B 根因=写入必须在 resume/display_history 下发之前完成，或 reader 遇 generation stale 自动跟随 latest 而非当损坏丢弃；metadata-only 更新不应让 display-history pinned revision 永久失效。建议优先 B。排查手段：TUI 日志中的 generation 不匹配行 + 磁盘 chats 与 display history steps 分离核对。",
+      "source": "llm",
+      "tags": [
+        "1927",
+        "display-history",
+        "generation",
+        "regression",
+        "resume",
+        "session"
+      ],
+      "pinned": false,
+      "created_at": 1791711009,
+      "last_confirmed_at": 1791711009,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07aMXw8QI09",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1927（session.metadata.model 持久化）已合入 main 并重装 CLI：当前安装版本 aemeath 0.0.0-9ccd981e → /Users/guoyuqi/.local/bin/aemeath，取代此前基于 1552fe34 / e1455143 的安装。该版本随即暴露 resume 后 0 message 的 generation 回归（见对应 pitfall 建议）。",
+      "source": "llm",
+      "tags": [
+        "1927",
+        "build-cli",
+        "main",
+        "version"
+      ],
+      "pinned": false,
+      "created_at": 1791711009,
+      "last_confirmed_at": 1791711009,
+      "confirmation_count": 0,
+      "outdated": true,
+      "superseded_by": "mem_07aMkGP6Pa4"
+    },
+    {
+      "id": "mem_07aMkGP6Pa4",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1927 session.metadata.model 持久化收口（2026-10-11）：PR #1928 squash → 9ccd981e4，issue #1927 CLOSED；worktree feature/1927-session-resume-model 与本地/远端分支已删（保留无关 worktree design-workflow-graph-redesign、pl-1863-context-pl-convergence）；CLI 重装 aemeath 0.0.0-9ccd981e → ~/.local/bin/aemeath，取代 1552fe34 / e1455143。该版本随即暴露 resume 后 0 message 的 generation 回归（修复口径见对应 pitfall）。",
+      "source": "llm",
+      "tags": [
+        "1927",
+        "1928",
+        "build-cli",
+        "merged",
+        "session-model"
+      ],
+      "pinned": false,
+      "created_at": 1791711176,
+      "last_confirmed_at": 1791711176,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07aMkGP6Pa5",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "pre-push 架构守卫含文件行数职责预算：from_args.rs 超 550 行即拦（#1928 期间实测，model 回写逻辑触发）。启动参数处理新增逻辑后 MUST 先自查行数，超限时抽 helper 或删冗余再 push，NEVER 直接 push 等守卫拦截后才发现。",
+      "source": "llm",
+      "tags": [
+        "architecture-guard",
+        "from_args",
+        "line-budget",
+        "pre-push"
+      ],
+      "pinned": false,
+      "created_at": 1791711176,
+      "last_confirmed_at": 1791711176,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07aNxXLXVfk",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1929 resume 0-message 修复已开 PR #1930（分支 bug-1929-resume-generation-stale，commit b1451adc6）：同值 skip + persist 在 resolve_startup_session 前 + stale generation 跟随。问题 session 01a1299a-022e-7e19-8cd5-5a71d6508114 磁盘 display history 完好，无需改 session 文件；恢复步骤=杀旧 resume 进程+删 lock → 合入/装修复版 CLI → aemeath --resume <id>。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "1929",
+        "1930",
+        "generation",
+        "pr",
+        "resume"
+      ],
+      "pinned": false,
+      "created_at": 1791712196,
+      "last_confirmed_at": 1791712196,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07aObLFWk2y",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1929/#1930 已 squash 合入 main：merge 5a1c8cc0f（2026-10-11T09:55:39Z），issue CLOSED；本地 main ff 至同提交；worktree/本地分支 bug-1929-resume-generation-stale 已删；问题 session 01a1299a PID 30585 已 kill 且 lock 已删。CLI 正按 5a1c8cc0 构建安装。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "1929",
+        "1930",
+        "build-cli",
+        "merged",
+        "resume"
+      ],
+      "pinned": false,
+      "created_at": 1791712735,
+      "last_confirmed_at": 1791712735,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07aOjKDhbc0",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1929/#1930 收口完成：squash → 5a1c8cc0f，issue CLOSED；CLI aemeath 0.0.0-5a1c8cc0 已装；worktree/本地/远端分支已删；orphan cache ~2.4G 已清；session 01a1299a lock/进程已清，可直接 resume。保留无关 worktree design-workflow-graph-redesign、pl-1863-context-pl-convergence。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "1929",
+        "1930",
+        "build-cli",
+        "cleanup",
+        "merged"
+      ],
+      "pinned": false,
+      "created_at": 1791712843,
+      "last_confirmed_at": 1791712843,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07ap5uYrojQ",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "删除远端分支（git push --delete / git push origin --delete）同样会触发完整 pre-push 门禁（架构守卫 + 全量单测），耗时与 push 同级（本次 #1929 收尾实证）。合并收尾的远端分支删除 MUST 与 cargo 全量测试、pre-push、git push、gh pr create 同列，放后台进程运行并靠完成通知继续，NEVER 前台串行等待。",
+      "source": "llm",
+      "tags": [
+        "background-process",
+        "branch-delete",
+        "cleanup",
+        "pre-push"
+      ],
+      "pinned": false,
+      "created_at": 1791734979,
+      "last_confirmed_at": 1791734979,
+      "confirmation_count": 0,
+      "outdated": true,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07ZKBzcXpFR",
+        "mem_07ZxdsK2XS4"
+      ]
+    },
+    {
+      "id": "mem_07ap5uYrojR",
+      "layer": "project",
+      "category": "decision",
+      "content": "session.metadata.model 写入口径修正与 #1929 修复边界（#1927 已 CLOSED，其引入的 resume 0-message 回归已由 #1929/#1930 修复合入）：used to「启动确定最终 model 后无条件回写 session.metadata.model」；now 仅当目标 model 与落盘值不同才写，且需要真写时必须在 resolve_startup_session 之前完成（TUI 拿到的已是写入后 revision），reader 遇 stale generation 跟 latest 重读而非当损坏丢弃，TUI apply_window 接受 >= pin 的刷新。明确不做「metadata-only 更新不 bump revision」——乐观并发语义保留，改动面过大的选项不进实现。",
+      "source": "llm",
+      "tags": [
+        "1927",
+        "1929",
+        "generation",
+        "model",
+        "session"
+      ],
+      "pinned": false,
+      "created_at": 1791734979,
+      "last_confirmed_at": 1791734979,
+      "confirmation_count": 0,
+      "outdated": false,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07aKlqYoyDQ",
+        "mem_07aMXw8QI08",
+        "mem_07aNxXLXVfk"
+      ]
+    },
+    {
+      "id": "mem_07apXz7RpZ2",
+      "layer": "project",
+      "category": "decision",
+      "content": "BackgroundProcessWatch 拍板（推翻此前否决）：真做前台 Watch；强制不可转后台；等待语义=默认等到终态，可选 timeout_secs（默认 60s，硬上限 300s，超限 clamp）；到期返回 still_running+当前状态；与完成通知关系选1——Watch 不吞通知/不影响 reminder，终态后完成通知与 wakeup 仍按原路径走。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "background-process",
+        "decision",
+        "watch"
+      ],
+      "pinned": false,
+      "created_at": 1791735359,
+      "last_confirmed_at": 1791735359,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07apZTYierg",
+      "layer": "project",
+      "category": "decision",
+      "content": "BackgroundProcess Watch 与 ToolCallFuse 的交互口径（承接 B′ 豁免集，待用户拍板）：已定 List/Status/Logs 只读豁免、Stop 不豁免（#1921）；Watch 本体三项候选——A 与 List/Status/Logs 同列只读豁免（推荐，理由：同一 task_id 反复 Watch 指纹近似，超时续等会被 Soft=3 误杀）、B 不豁免靠 LLM 自律、C 仅返回 still_running 的 Watch 计入 fuse、拿到终态的不计。Watch 自身已拍板：前台强制不可转后台、默认 60s、硬上限 300s 超限 clamp、到期返回 still_running、不吞完成通知/不影响 reminder。定案前 NEVER 放宽全局 fuse 阈值。",
+      "source": "llm",
+      "tags": [
+        "background-process",
+        "fuse",
+        "tool-call-fuse",
+        "watch"
+      ],
+      "pinned": false,
+      "created_at": 1791735379,
+      "last_confirmed_at": 1791735379,
+      "confirmation_count": 0,
+      "outdated": true,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07ZISxTLqE4",
+        "mem_07apXz7RpZ2"
+      ]
+    },
+    {
+      "id": "mem_07apahR0lYu",
+      "layer": "project",
+      "category": "decision",
+      "content": "BackgroundProcessWatch fuse：不豁免（B）。与 List/Status/Logs 不同；连续同 task_id Watch 仍受 Soft=3/Hard=5；靠 LLM 少调用，超限 SoftBlock。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "background-process",
+        "fuse",
+        "watch"
+      ],
+      "pinned": false,
+      "created_at": 1791735396,
+      "last_confirmed_at": 1791735396,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07apjcF6BKy",
+      "layer": "project",
+      "category": "decision",
+      "content": "BackgroundProcessWatch 验收追加：TUI 显示、JSON 解析、header 语义、L0–L5 测试全覆盖；设计拍板其余项不变（前台不可转后台、默认60s/上限300s、不吞通知、fuse不豁免）。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "background-process",
+        "testing",
+        "tui",
+        "watch"
+      ],
+      "pinned": false,
+      "created_at": 1791735517,
+      "last_confirmed_at": 1791735517,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07apuTs3pjc",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1931 BackgroundProcessWatch Feature Issue 已建并挂 v0.2.0：https://github.com/rushsinging/aemeath/issues/1931。拍板=前台不可转后台、默认60s/上限300、不吞通知、fuse不豁免、TUI+JSON+header+L0-L5。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "1931",
+        "background-process",
+        "watch"
+      ],
+      "pinned": false,
+      "created_at": 1791735664,
+      "last_confirmed_at": 1791735664,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07aqnAQ2yIa",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1931 BackgroundProcessWatch 已在 worktree feature/1931-background-process-watch 落地（未 commit）：前台强制、timeout 默认60/上限300、wait_task 自由函数、fuse不豁免、TUI/SDK/L0-L4 绿；L5 PTY 记豁免。Issue https://github.com/rushsinging/aemeath/issues/1931",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "1931",
+        "background-process",
+        "watch"
+      ],
+      "pinned": false,
+      "created_at": 1791736404,
+      "last_confirmed_at": 1791736404,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07ar9GGmi0G",
+      "layer": "project",
+      "category": "decision",
+      "content": "BackgroundProcessWatch 最终定案（2026-10-12 用户逐项确认）：立项动机=LLM 转后台后自身超长待机卡住，需给 LLM 一个显式前台等待出口；工具强制前台、不可转后台；timeout_secs 缺省 60、硬上限 300、超限 clamp，到期返回 still_running+当前 detail，终态返回 terminal+detail；不吞完成通知、不影响 reminder/wakeup；fuse 不豁免（定案 B，靠 LLM 少调用，超限 SoftBlock）；验收含 TUI 显示、SDK/JSON 解析、header 语义与 L0–L5 全层测试；Feature Issue #1931 挂 v0.2.0。",
+      "source": "llm",
+      "tags": [
+        "1931",
+        "background-process",
+        "fuse",
+        "watch"
+      ],
+      "pinned": false,
+      "created_at": 1791736703,
+      "last_confirmed_at": 1791736703,
+      "confirmation_count": 0,
+      "outdated": true,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07apXz7RpZ2",
+        "mem_07apZTYierg",
+        "mem_07apahR0lYu",
+        "mem_07apjcF6BKy"
+      ]
+    },
+    {
+      "id": "mem_07artH9x6Ce",
+      "layer": "project",
+      "category": "preference",
+      "content": "用户纠正（2026-10-12）：L5 是需要慢慢补齐的必要测试层，NEVER 在计划/设计文档自行写「L5 豁免 / 暂不扩 / Optional L5」。#1931 曾误把 background_process_display_pty 记为豁免，已撤销并实际补测。后续新工具/跨层显示能力 MUST 把 L5 列入验收，做不到时停下来问用户，不得默认豁免。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "1931",
+        "L5",
+        "preference",
+        "testing"
+      ],
+      "pinned": false,
+      "created_at": 1791737327,
+      "last_confirmed_at": 1791737327,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07asMai5LTE",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "架构守卫 facade.tools.root-exports（#1931 实证）：agent/features/tools/src/lib.rs 的 crate 根导出受白名单约束，crate 内部自由函数与辅助实现 MUST 保持 pub(crate) 或仅 adapter 可见，NEVER 顺手挂到根 façade；误挂会被 Stop Hook 的 xtask guard 以 exit 2 阻断并强制返工，且设计文档路径也要同步更正。新增工具公开面时 MUST 先自查根导出白名单（本次终态：wait_background_process 为 pub(crate)，wait_task 仅 adapter 内使用）。",
+      "source": "llm",
+      "tags": [
+        "architecture-guard",
+        "facade",
+        "stop-hook",
+        "tools"
+      ],
+      "pinned": false,
+      "created_at": 1791737724,
+      "last_confirmed_at": 1791737724,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07asMai5LTF",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1931 BackgroundProcessWatch 现状（用户逐项确认的定案 + 落地进展）：行为=强制前台不可转后台（execution_supervisor 按工具名硬判 backgrounding=None，与全局阈值无关）、timeout_secs 默认 60 / 硬上限 300 / 超限 clamp、到期返回 still_running+detail、终态返回 terminal+detail、不吞完成通知也不影响 reminder/wakeup、fuse 不豁免（定案 B，超限 SoftBlock）；实现=tools 内 wait_background_process（pub(crate)）+ adapter 接线；验收=TUI 显示、SDK/JSON 解析、header 语义、L0–L5 全层，L5 为必要层 NEVER 自行豁免。状态：worktree feature-1931-background-process-watch 已落地未 commit，L5 覆盖补齐中；Feature Issue #1931 挂 v0.2.0，待用户确认后 commit + PR（Closes #1931）。",
+      "source": "llm",
+      "tags": [
+        "1931",
+        "background-process",
+        "fuse",
+        "watch"
+      ],
+      "pinned": false,
+      "created_at": 1791737724,
+      "last_confirmed_at": 1791737724,
+      "confirmation_count": 0,
+      "outdated": true,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07apuTs3pjc",
+        "mem_07aqnAQ2yIa",
+        "mem_07ar9GGmi0G"
+      ]
+    },
+    {
+      "id": "mem_07asguVZOU4",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1931 Watch 结果正文口径（2026-10-12 用户提出，方案待最终确认）：Watch 结束返回给 LLM 的 text 除现有一行摘要外 MUST 追加后台任务 log 的 tail（结束收尾时读 read_task_log 尾部，而非整份 log）。硬预算新增 WATCH_RESULT_TEXT_BUDGET_CHARS = 2000（对齐 GREP_INDEX_TEXT_BUDGET_CHARS），MUST 显著低于 tool_result 落盘阈值 floor 3000，保证永不触发 tool_result materializer 落盘阶段；header 预留约 200–260 chars，tail 按字符截断并标注截断标记。typed data 可另带 log_tail 供 TUI 渲染（data 不进 LLM 上下文）。NEVER 把整份 log 塞进 result 后靠 materializer 事后截断，也 NEVER 与 Logs 工具默认 4096B 混用同一预算。实现推荐彻底方案（常量化 + 单测断言 text 字符数 ≤ 2000）。",
+      "source": "llm",
+      "tags": [
+        "1931",
+        "background-process",
+        "budget",
+        "tool-result",
+        "watch"
+      ],
+      "pinned": false,
+      "created_at": 1791737999,
+      "last_confirmed_at": 1791737999,
+      "confirmation_count": 0,
+      "outdated": true,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07asMai5LTF",
+        "01a1251a-e8f8-733d-9588-5f9134e6ebb1"
+      ]
+    },
+    {
+      "id": "mem_07atRupl38C",
+      "layer": "project",
+      "category": "decision",
+      "content": "BackgroundProcessWatch（#1931）追加口径（用户 2026-10-12）：①等待中经 ToolProgress 流式推送增量 log（从当前文件末尾起，NEVER 回放历史）；②结束后给 LLM 的 tool_result text 附带 log_tail，字符预算 WATCH_RESULT_TEXT_BUDGET_CHARS=2000（对齐 Grep，<< materializer floor 3000），NEVER 触发 tool_result 落盘截断；③typed BackgroundProcessWatchResult.log_tail 供 TUI 渲染；④验收含 L4+L5。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "1931",
+        "background-process",
+        "log-tail",
+        "streaming",
+        "watch"
+      ],
+      "pinned": false,
+      "created_at": 1791738635,
+      "last_confirmed_at": 1791738635,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07auRb4Y9Ee",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "L5 假绿教训（#1931 Watch 流式）：断言「bytes from」出现在「watch已返回」之前，实际命中的是结束后 log_tail 卡片，不是等待中 streaming_preview。根因=tool_observe 白名单只认 Bash/Agent，Watch 的 ToolProgress 被丢掉。覆盖中途流式 MUST 在工具仍 Running 时断言，或显测 streaming_preview；NEVER 用终态卡片文本冒充流式。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "1931",
+        "L5",
+        "false-green",
+        "streaming",
+        "testing"
+      ],
+      "pinned": false,
+      "created_at": 1791739471,
+      "last_confirmed_at": 1791739471,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07av6mcHski",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "Watch TUI 无流式双根因（#1931，2026-10-12）：①runtime non_agent.rs 曾只给 Bash 装配 ToolProgress→ToolOutputDelta 通道（is_bash），Watch 的 progress_sink=None，tools 层 emit 全被跳过；②TUI tool_observe 白名单只认 Bash/Agent，即便有 delta 也丢。修两边。L5 假绿：在 still_running 前断言 bytes from，才能区分等待中 preview 与结束后 log_tail。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "1931",
+        "Watch",
+        "false-green",
+        "non_agent",
+        "streaming"
+      ],
+      "pinned": false,
+      "created_at": 1791740028,
+      "last_confirmed_at": 1791740028,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07av9QL99Hs",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "SwitchModel→persist_session_model 旁路写盘 bump revision，内存 CanonicalSession.revision 不同步 → 下一轮 run 落盘 CAS「数据集修订号已变更 expected=N actual=N+1」（session 01a12bf9，2026-10-12）。#1929 只修了 resume 读路径/同值 skip，未修运行中 metadata 旁路写与内存 revision 同步。根因修复：persist 后同步内存 revision，或 metadata 更新走同一 session mutation gate。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "1927",
+        "1929",
+        "CAS",
+        "SwitchModel",
+        "revision"
+      ],
+      "pinned": false,
+      "created_at": 1791740064,
+      "last_confirmed_at": 1791740064,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07awc7dltAW",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "Bash 长耗时命令转后台时，Bash.timeout 仍会杀掉进程：#1931 实测 ping -c 120 若设 timeout:10000（10s）会在约 icmp_seq=10 被杀掉并标 failed；跑满约 120s 需 timeout≥180000。Watch.timeout_secs 只控制观察等待，不替代 Bash.timeout。",
+      "source": "llm",
+      "source_ref": "01a12c08-a126-7037-94a8-4870931c8b4a",
+      "tags": [
+        "1931",
+        "background-process",
+        "bash-timeout"
+      ],
+      "pinned": false,
+      "created_at": 1791741292,
+      "last_confirmed_at": 1791741292,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07awdyw8e36",
+      "layer": "project",
+      "category": "decision",
+      "content": "SwitchModel/metadata 旁路写 CAS 修复（彻底，#1931 worktree 顺带）：MainSessionWiring::update_active_session_metadata 持 mutation_gate → update_metadata_for_project 落盘 → 同步 committed_session 的 revision/updated_at/metadata。persist_session_model_on_wiring：active id 走 wiring 同步，bootstrap resume 目标（committed 尚未切换）仍 disk-only。AtomicBlob update_metadata 对齐 Dataset 必 bump revision。当前会话 /session rename 亦走 wiring。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "1929",
+        "1931",
+        "CAS",
+        "MainSessionWiring",
+        "SwitchModel",
+        "revision"
+      ],
+      "pinned": false,
+      "created_at": 1791741318,
+      "last_confirmed_at": 1791741318,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07ax86TwZiC",
+      "layer": "project",
+      "category": "decision",
+      "content": "Bash 与 WebFetch 的 timeout 字段单位硬切为秒（2026-10-12，#1931 worktree）：字段名仍为 timeout；Bash 默认 120 / 上限 3600；WebFetch 默认 30 / 上限 3600；schema 字段 doc 写 Timeout in seconds；无毫秒启发式兼容。Agent.timeout 本已是秒。旧会话若仍传 120000 会被 clamp 到 3600s。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "1931",
+        "bash",
+        "seconds",
+        "timeout",
+        "web_fetch"
+      ],
+      "pinned": false,
+      "created_at": 1791741725,
+      "last_confirmed_at": 1791741725,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07ayky4Onqa",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1931 BackgroundProcessWatch 已合入并清理完成（2026-10-11）：PR #1932 squash → 1549945ff；Issue CLOSED；本地 main=origin/main=1549945ff；远端/本地分支 feature/1931-background-process-watch 与 worktree 已删。附带合入：Watch 流式 ToolProgress+log_tail、SwitchModel metadata revision 同步、Bash/WebFetch timeout 硬切为秒。保留无关 worktree design-workflow-graph-redesign、pl-1863-context-pl-convergence。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "1931",
+        "1932",
+        "background-process",
+        "cleanup",
+        "merged"
+      ],
+      "pinned": false,
+      "created_at": 1791743091,
+      "last_confirmed_at": 1791743091,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07baCHA0EDY",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1931 BackgroundProcessWatch 定案（已由 PR #1932 squash → 1549945ff 合入，Issue CLOSED）：行为=强制前台不可转后台（execution_supervisor 按工具名硬判 backgrounding=None，与全局阈值无关）、timeout_secs 默认 60 / 硬上限 300 / 超限 clamp、到期返回 still_running+detail、终态返回 terminal+detail、不吞完成通知也不影响 reminder/wakeup、fuse 不豁免（连续同 task_id 仍受 Soft=3/Hard=5，超限 SoftBlock）；实现=tools 内 wait_background_process（pub(crate)）+ adapter 接线；验收含 TUI 显示、SDK/JSON 解析、header 语义、L0–L5 全层，L5 为必要层 NEVER 自行豁免。Worktree 与本地/远端分支 feature-1931-background-process-watch 已清理。",
+      "source": "llm",
+      "tags": [
+        "1931",
+        "1932",
+        "background-process",
+        "fuse",
+        "merged",
+        "watch"
+      ],
+      "pinned": false,
+      "created_at": 1791774527,
+      "last_confirmed_at": 1791774527,
+      "confirmation_count": 0,
+      "outdated": false,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07apahR0lYu",
+        "mem_07apjcF6BKy",
+        "mem_07asMai5LTF"
+      ]
+    },
+    {
+      "id": "mem_07baCHA0EDZ",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1931 Watch 文本预算与流式口径（已实施并随 #1932 合入）：等待中 wait_task 从当前日志末尾增量 read_task_log → ToolProgressEvent 流式推送（NEVER 回放历史）；结束后给 LLM 的 tool_result text = 一行摘要 + log tail（读 read_task_log 尾部而非整份），硬预算 WATCH_RESULT_TEXT_BUDGET_CHARS=2000（对齐 GREP_INDEX_TEXT_BUDGET_CHARS，<< tool_result materializer floor 3000），保证永不触发落盘截断；header 预留约 200–260 chars，tail 按字符截断并标注截断标记；typed BackgroundProcessWatchResult.log_tail 供 TUI 渲染（data 不进 LLM 上下文）。NEVER 把整份 log 塞进 result 靠 materializer 事后截，也 NEVER 与 Logs 默认 4096B 混用同一预算。",
+      "source": "llm",
+      "tags": [
+        "1931",
+        "background-process",
+        "budget",
+        "log-tail",
+        "streaming",
+        "watch"
+      ],
+      "pinned": false,
+      "created_at": 1791774527,
+      "last_confirmed_at": 1791774527,
+      "confirmation_count": 0,
+      "outdated": false,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07asguVZOU4",
+        "mem_07atRupl38C"
+      ]
+    },
+    {
+      "id": "mem_07baCHA0EDa",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "TUI 工具卡片采用 tail_mode 截断时只保留末行，工具的关键结论行（如 Watch 的 outcome=still_running/terminal、完成态摘要）MUST 放在卡片文本末行，NEVER 放首行。实证：#1931 中 outcome 行原在首行被 tail_mode 裁掉，L5 查不到 still_running，改为置于 log_tail 之后才通过。新增带 tail 的工具结果展示时 MUST 核对截断方向与关键行位置。",
+      "source": "llm",
+      "tags": [
+        "1931",
+        "display",
+        "pitfall",
+        "tail-mode",
+        "tui"
+      ],
+      "pinned": false,
+      "created_at": 1791774527,
+      "last_confirmed_at": 1791774527,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07baCHA0EDb",
+      "layer": "project",
+      "category": "pattern",
+      "content": "手动验收 aemeath 新功能前 MUST 先确认二进制来源与提交：~/.local/bin/aemeath 是已安装版本（build_cli.sh 装的 main 某提交），不含 worktree 未 commit 改动；run_debug.sh / cargo run 才编当前工作区代码。实证：#1931 Watch 流式已落地但未 commit 未安装，用户用安装版验收得到「TUI 没流式」的误判结论。用户报告「某功能看不到」时，先比对安装版本与 worktree 分支，再怀疑实现。",
+      "source": "llm",
+      "tags": [
+        "build-cli",
+        "false-negative",
+        "run-debug",
+        "verification",
+        "worktree"
+      ],
+      "pinned": false,
+      "created_at": 1791774527,
+      "last_confirmed_at": 1791774527,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07bcjN3z2oq",
+      "layer": "project",
+      "category": "decision",
+      "content": "auto compact 预判口径（2026-10-12）：估算器改为英文字符×0.3、中文字符×0.6；决策默认以本地估算预判，仅当 api/heuristic 落在可信闭区间 [0.5, 2.0] 内才采信 API（越界 reason=HeuristicPreferred）；RunUsageTracker::update_with_heuristic 对区间外或 heuristic=0 的观测不写 last_api；ContextTooLong 仍硬触发 compact。",
+      "source": "llm",
+      "source_ref": "01a12e17-c3b3-7c9a-8649-66388c048fe3",
+      "tags": [
+        "autocompact",
+        "heuristic",
+        "token-estimate"
+      ],
+      "pinned": false,
+      "created_at": 1791776655,
+      "last_confirmed_at": 1791776655,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07bgtDaridc",
+      "layer": "project",
+      "category": "pattern",
+      "content": "术语与守卫口径：facade（门面）= crate 对外暴露的窄公开面（通常 lib.rs 根 pub use），不等于业务逻辑本身；架构守卫 `facade.<crate>.root-exports` 以白名单管控「哪些符号可挂 crate 根」，M26 的 tools 案例只是该规则的实例，对任何 crate 均适用——内部实现复杂但跨 crate 只能取根 façade 白名单内符号。",
+      "source": "llm",
+      "tags": [
+        "architecture-guard",
+        "facade",
+        "root-exports",
+        "terminology"
+      ],
+      "pinned": false,
+      "created_at": 1791780146,
+      "last_confirmed_at": 1791780146,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07bhr5jtp8C",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1935 scoring daemon Q1 拍板：进程入口选 A——同一 aemeath 二进制子命令 `aemeath scoring serve`；日常会话不链 embedded，仅 serve 路径加载 GGUF。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1935",
+        "Q1",
+        "daemon",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791780957,
+      "last_confirmed_at": 1791780957,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07bi0NvuHJo",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1935 scoring daemon Q2 拍板：传输选 A——Unix domain socket（如 ~/.agents/scoring/scoring.sock）；跟 AEMEATH_AGENTS_DIR；不做 HTTP localhost。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1935",
+        "Q2",
+        "daemon",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791781083,
+      "last_confirmed_at": 1791781083,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07bi6FsDQCO",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1935 scoring daemon Q3 拍板：生命周期选 A——客户端惰性拉起（scoring.enabled 且场景开时 sock 不通则 spawn `aemeath scoring serve`，单实例锁）；会话退出不杀 daemon；支持子命令可做成 system daemon（launchd 可选），但默认不依赖。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1935",
+        "Q3",
+        "daemon",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791781163,
+      "last_confirmed_at": 1791781163,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07bi7YszSq0",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1935 Q3 补充：用户要求「支持子命令可以 system daemon」——默认仍是客户端惰性拉起；同时保留把 `aemeath scoring serve` 挂到 launchd/system daemon 的能力作为可选运维路径，不作为默认硬依赖。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1935",
+        "Q3",
+        "daemon",
+        "launchd",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791781180,
+      "last_confirmed_at": 1791781180,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07biK1ENzrk",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1935 scoring daemon Q4 拍板：失败语义选 B——ScoringUnavailable + 场景静默降级 + 短超时；首次失败给一次 TUI/系统提示（可关），之后静默；NEVER 阻断主循环，NEVER 回退旧 Jev HTTP。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1935",
+        "Q4",
+        "daemon",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791781349,
+      "last_confirmed_at": 1791781349,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07bifSV3KbY",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1935 scoring daemon Q5 拍板：协议形状选 A——UDS 上薄 JSON-RPC / length-prefixed JSON；请求对齐 ScoringPort::answer 输入，响应对齐概率分布；不复用旧 Jev HTTP JSON，不用 protobuf。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1935",
+        "Q5",
+        "daemon",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791781639,
+      "last_confirmed_at": 1791781639,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07bkh575PDE",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1935 scoring daemon Q6 拍板：与 #1833 关系选 B——彻底退役进程内 embedded；生产与测试一律走 daemon（测试需起本地 daemon 或 mock）；CLI 默认不链 composition/systemone-embedded。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1935",
+        "Q6",
+        "daemon",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791783340,
+      "last_confirmed_at": 1791783340,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07blU2knyWu",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1935 scoring daemon Q7 拍板：事件流选 A——仍由各 aemeath 客户端 AuditedScoringAdapter 写 ~/.agents/scoring/events/；daemon 只做推理，可另记引擎诊断日志；不改 #1909 中心化 emit 主路径。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1935",
+        "Q7",
+        "daemon",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791784004,
+      "last_confirmed_at": 1791784004,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07bldbtfLSS",
+      "layer": "project",
+      "category": "fact",
+      "content": "MemoryAdd 序列化失败 pitfall 已过时：2026-10-12 冒烟测试 MemoryAdd/Search/List/Update(pin/unpin/archive/restore)/Delete 全链路通过，测试条目已删除。",
+      "source": "llm",
+      "source_ref": "01a12ea6-8e00-7edb-9454-234f9aad62c5",
+      "tags": [
+        "MemoryAdd",
+        "memory",
+        "smoke-test"
+      ],
+      "pinned": false,
+      "created_at": 1791784133,
+      "last_confirmed_at": 1791784133,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07blrQ7DKD2",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1935 scoring daemon Q8–Q17 拍板全 A：sock/lock=~/.agents/scoring/；超时连2s/推理30s可配；单worker串行；模型缺失Unavailable+引导download不自动下；UDS 0600；feature systemone-daemon；protocol_version；首版仅macOS arm64；三PR交付；配置最小enabled+可选socket/timeout。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1935",
+        "Q8-Q17",
+        "daemon",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791784320,
+      "last_confirmed_at": 1791784320,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07bm33Rz3aK",
+      "layer": "project",
+      "category": "preference",
+      "content": "设计讨论流程偏好：设计时 MUST 先给出全景（目标/边界/模块或阶段鸟瞰、关键决策点），用户对齐后再拆分逐项细聊；NEVER 一上来就钻进单点细节。",
+      "source": "llm",
+      "source_ref": "01a12eab-2641-7cf3-9400-41320a9254b3",
+      "tags": [
+        "design",
+        "guidance",
+        "preference",
+        "workflow"
+      ],
+      "pinned": false,
+      "created_at": 1791784478,
+      "last_confirmed_at": 1791784478,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07bpDcmJH5U",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1935 用户确认设计并授权开始 PR0 文档：scoring daemon 设计已拍板（Q1–Q17）；下一步进 worktree 修订 01-systemone-scoring.md + 新增 04-scoring-daemon.md，只文档不改代码。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1935",
+        "PR0",
+        "daemon",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791787140,
+      "last_confirmed_at": 1791787140,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07bpbSoUMPg",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1935 PR0 设计文档已提交 worktree design/1935-scoring-daemon @162bbc2cf：新增 04-scoring-daemon.md、修订 01/README/02、实施计划 2026-10-12-scoring-daemon.md；push 进行中待开文档 PR。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1935",
+        "PR0",
+        "daemon",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791787462,
+      "last_confirmed_at": 1791787462,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07bpg78Ovse",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1935 scoring daemon 设计 Q1–Q17 已全部拍板（2026-10-12），细则见 docs/design 的 04-scoring-daemon.md。要点：进程入口=同一 aemeath 二进制子命令 `aemeath scoring serve`，日常会话不链 embedded、仅 serve 路径加载 GGUF；传输=UDS（默认 ~/.agents/scoring/scoring.sock，跟 AEMEATH_AGENTS_DIR，权限 0600，sock/lock 同目录），不做 HTTP localhost；生命周期=客户端惰性拉起 + 单实例锁，会话退出不杀 daemon，可挂 launchd/system daemon 作可选运维路径而非默认依赖；协议=UDS 上薄 JSON-RPC / length-prefixed JSON，对齐 ScoringPort::answer 输入输出，带 protocol_version，不复用旧 Jev HTTP JSON 也不用 protobuf；失败语义=ScoringUnavailable + 场景静默降级 + 短超时（连接 2s、推理 30s 可配），首次失败提示一次（可关），不阻断主循环、不回退旧 Jev HTTP；推理=单 worker 串行，模型缺失按 Unavailable 并引导 download 但不自动下载；彻底退役进程内 embedded（生产与测试一律走 daemon，CLI 默认不链 composition/systemone-embedded，feature gate `systemone-daemon`）；事件流仍由各客户端 AuditedScoringAdapter 写 ~/.agents/scoring/events/，daemon 只做推理、不改 #1909 中心化 emit 主路径；配置最小只含 `scoring.enabled` + 可选 socket/timeout；首版仅 macOS arm64，三 PR 交付。",
+      "source": "llm",
+      "tags": [
+        "1935",
+        "decision",
+        "design",
+        "scoring-daemon",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791787525,
+      "last_confirmed_at": 1791787525,
+      "confirmation_count": 0,
+      "outdated": false,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07bhr5jtp8C",
+        "mem_07bi0NvuHJo",
+        "mem_07bi6FsDQCO",
+        "mem_07bi7YszSq0",
+        "mem_07biK1ENzrk",
+        "mem_07bifSV3KbY",
+        "mem_07bkh575PDE",
+        "mem_07blU2knyWu",
+        "mem_07blrQ7DKD2"
+      ]
+    },
+    {
+      "id": "mem_07bpg78Ovsf",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1935 PR0 设计文档已落盘并提交 worktree design/1935-scoring-daemon @162bbc2cf（2026-10-12；用户已确认设计并授权开始 PR0）：新增 04-scoring-daemon.md（Q1–Q17、架构、生命周期、协议、退役 embedded、三 PR），修订 01-systemone-scoring.md（生产路径改为 daemon，§4/§8/§9 同步）与 README.md、02-kev-deployment.md（交叉引用，旧 HTTP 标为历史参考），新增实施计划 plans/2026-10-12-scoring-daemon.md（PR1/PR2 拆分）。PR0 只文档不改代码；push 需过 pre-push 门禁，随后开文档 PR（Refs #1935）。",
+      "source": "llm",
+      "tags": [
+        "1935",
+        "PR0",
+        "daemon",
+        "docs",
+        "worktree"
+      ],
+      "pinned": false,
+      "created_at": 1791787525,
+      "last_confirmed_at": 1791787525,
+      "confirmation_count": 0,
+      "outdated": true,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07bpDcmJH5U",
+        "mem_07bpbSoUMPg"
+      ]
+    },
+    {
+      "id": "mem_07br0NmDBlw",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1935 PR0 设计文档已 squash 合入 main：PR #1937 → e3abe73a9（2026-10-12T07:03:12Z，head 162bbc2cf）。清理：worktree/本地分支 design/1935-scoring-daemon 已删；远端删除进行中。Issue #1935 保持 OPEN（Refs）。下一步 PR1：daemon+协议+单实例。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1935",
+        "1937",
+        "PR0",
+        "daemon",
+        "merged",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791788640,
+      "last_confirmed_at": 1791788640,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07brDzJa13I",
+      "layer": "project",
+      "category": "decision",
+      "content": "设计讨论约束写入 aemeath 内置 STATIC_SYSTEM_PROMPT_*（Core contract），英文用 full picture（不用 panorama），中文用「全景」；不放 UNIVERSAL_EXECUTION_DISCIPLINE / guidance / AGENTS.md。",
+      "source": "llm",
+      "source_ref": "01a12eab-2641-7cf3-9400-41320a9254b3",
+      "tags": [
+        "design",
+        "full-picture",
+        "system-prompt"
+      ],
+      "pinned": false,
+      "created_at": 1791788824,
+      "last_confirmed_at": 1791788824,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07brQGUetpg",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1938 内置 system prompt full picture：Issue 已建并挂 v0.2.0；worktree feature/1938-prompt-design-full-picture；STATIC_SYSTEM_PROMPT EN/ZH 已加条 + system_tests 14→15 与关键词锁；cargo test -p share --lib i18n::prompt::system 8 passed。待 commit/PR。",
+      "source": "llm",
+      "source_ref": "01a12eab-2641-7cf3-9400-41320a9254b3",
+      "tags": [
+        "1938",
+        "full-picture",
+        "system-prompt"
+      ],
+      "pinned": false,
+      "created_at": 1791788990,
+      "last_confirmed_at": 1791788990,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07bsYaNwRKS",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1938 PR 已开：https://github.com/rushsinging/aemeath/pull/1939（分支 feature/1938-prompt-design-full-picture，commit 47fdebde6）；pre-push 守卫+全量单测已过；待 review/merge。",
+      "source": "llm",
+      "source_ref": "01a12eab-2641-7cf3-9400-41320a9254b3",
+      "tags": [
+        "1938",
+        "1939",
+        "pr",
+        "system-prompt"
+      ],
+      "pinned": false,
+      "created_at": 1791789942,
+      "last_confirmed_at": 1791789942,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07bv1wBT9yC",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1935 交付拆分口径：仅三档——PR0 设计（#1937 已合）、PR1 daemon+协议+serve（#1940）、PR2 客户端+退役 embedded+惰性拉起+首次提示+配置；无独立 PR3。计划 Task8 配置登记并入 PR2。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1935",
+        "PR2",
+        "daemon"
+      ],
+      "pinned": false,
+      "created_at": 1791792019,
+      "last_confirmed_at": 1791792019,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07bvuGiyWH2",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1935 PR1 已推送并开 PR：https://github.com/rushsinging/aemeath/pull/1940（MERGEABLE，head ce2dd0690，6 commits）。范围=协议 DTO + length-prefixed JSON 帧、scoring.lock 与 sock 路径解析、`aemeath scoring serve` 最小可运行（含单实例锁与模型加载）；明确不含会话客户端装配、惰性拉起、首次提示与退役 embedded —— 这些留 PR2。",
+      "source": "llm",
+      "tags": [
+        "1935",
+        "1940",
+        "daemon",
+        "pr",
+        "scoring"
+      ],
+      "pinned": false,
+      "created_at": 1791792755,
+      "last_confirmed_at": 1791792755,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07bvuGiyWH3",
+      "layer": "project",
+      "category": "decision",
+      "content": "build_cli.sh 默认链 systemone-embedded 的改动已 revert 并合入 main（PR #1936 → merge 15f32b2d）：日常 aemeath CLI 默认 MUST NOT 链 embedded（安装体积约 30M，带 embedded 约 38M），评分能力由 scoring daemon 路线提供；确需进程内引擎时必须用 AEMEATH_CLI_FEATURES 显式开启。",
+      "source": "llm",
+      "tags": [
+        "1936",
+        "build-cli",
+        "embedded",
+        "revert",
+        "scoring-daemon"
+      ],
+      "pinned": false,
+      "created_at": 1791792755,
+      "last_confirmed_at": 1791792755,
+      "confirmation_count": 0,
+      "outdated": false,
+      "superseded_by": "mem_07cDaHQmMbp"
+    },
+    {
+      "id": "mem_07bvuGiyWH4",
+      "layer": "project",
+      "category": "pattern",
+      "content": "交付拆分汇报口径：aemeath 计划用 0-based 编号（PR0 设计 / PR1 实现 / PR2 收尾），用户口语常按 1-based 计（会说 pr2/pr3）。汇报时 MUST 同时给出总档数、每档功能名与每档验收环节（谁验、跑什么命令或 CI、何时算通过），NEVER 只给编号与内容清单，否则用户需追问「在哪个环节验收」。",
+      "source": "llm",
+      "tags": [
+        "acceptance",
+        "communication",
+        "delivery-split",
+        "pr"
+      ],
+      "pinned": false,
+      "created_at": 1791792755,
+      "last_confirmed_at": 1791792755,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07bz6TJmK6i",
+      "layer": "project",
+      "category": "decision",
+      "content": "Brief 工具移除口径（用户 2026-10-12 要求，方案待确认）：彻底删除实现面而非仅从 registry 注销——registry.rs 去注册、删 adapters/brief.rs 与 domain/types/brief.rs、sdk tool_result/brief.rs 及根导出、adapters.rs/types.rs/i18n brief() 与相关测试同步清理；最小补丁（仅注销留文件）便宜但易复发，优先彻底删除。",
+      "source": "llm",
+      "tags": [
+        "brief",
+        "dead-code",
+        "registry",
+        "tool-removal"
+      ],
+      "pinned": false,
+      "created_at": 1791795439,
+      "last_confirmed_at": 1791795439,
+      "confirmation_count": 0,
+      "outdated": true,
+      "superseded_by": "mem_07c24ozN1TX"
+    },
+    {
+      "id": "mem_07bz6TJmK6j",
+      "layer": "project",
+      "category": "pattern",
+      "content": "TUI 工具结果展示统一契约：每个工具需要 ToolDisplayName 友好名 + header 行 + format_result_lines typed 结果行（对齐 Memory 的 typed 显示范式），Policy 取 Compact/Standard + Details Hidden + Visible{max_lines, Plain, tail=false}；新增或修复工具显示时 MUST 同 commit 更新 specs/3.3-tui-cli.md 的工具显示表。实证对象：WebSearch/WebFetch/ToolSearch 三工具缺失 header 与 result 行。",
+      "source": "llm",
+      "tags": [
+        "specs-3.3",
+        "tool-display",
+        "tui",
+        "typed-result"
+      ],
+      "pinned": false,
+      "created_at": 1791795439,
+      "last_confirmed_at": 1791795439,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07bz6TJmK6k",
+      "layer": "project",
+      "category": "pattern",
+      "content": "工具结果跨层显示验收清单（合成既有教训）：①L5 为必要验收层，NEVER 在计划文档自行写豁免；②TUI tail_mode 截断时关键结论行（outcome/摘要）MUST 置于卡片文本末行；③流式展示需同时打通 runtime progress_sink 装配与 TUI tool_observe 白名单两端，缺一即假绿；④L4/L5 断言须在 still_running 之前检查增量字节，以区分等待中 preview 与结束后 log_tail。",
+      "source": "llm",
+      "tags": [
+        "acceptance",
+        "l5",
+        "streaming",
+        "tail-mode",
+        "tool-display"
+      ],
+      "pinned": false,
+      "created_at": 1791795439,
+      "last_confirmed_at": 1791795439,
+      "confirmation_count": 0,
+      "outdated": false,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07artH9x6Ce",
+        "mem_07av6mcHski",
+        "mem_07baCHA0EDa",
+        "01a125a4-5c45-7342-9aec-cd7798de96d8"
+      ]
+    },
+    {
+      "id": "mem_07c24ozN1TU",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1941 Memory 工具 TUI 与结果文本收口（squash → 874892cb4，2026-10-12）：①五工具添专属 ToolDisplay（友好 header + typed format_result_lines，对齐 Background Process 范式）并补 TOOL_DISPLAY_NAMES；②MemoryList 分页：limit 默认 20 / 上限 50、offset 默认 0，MemoryResult 增 total/offset/limit/has_more，entries 仅含当前页；③MEMORY_RESULT_TEXT_BUDGET_CHARS=2000（另留 header reserve）做源头硬预算：LLM text = 一行摘要 + 精简条目（content 预览截断并标注），typed data 仍全量供 TUI；④L5 memory_display_pty 一并交付，已登记 slow-test-matrix。worktree/本地/远端分支已清理。",
+      "source": "llm",
+      "tags": [
+        "budget",
+        "memory",
+        "pagination",
+        "tui"
+      ],
+      "pinned": false,
+      "created_at": 1791797935,
+      "last_confirmed_at": 1791797935,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07c24ozN1TV",
+      "layer": "project",
+      "category": "pattern",
+      "content": "工具结果文本口径三层（合成既有教训 + #1941 实证）：①materializer 落盘阈值 = 窗口 0.5% + floor 3000；②会产出大结果的工具 MUST 在源头设硬预算约 2000 chars（WATCH_RESULT_TEXT_BUDGET_CHARS / GREP_INDEX_TEXT_BUDGET_CHARS / MEMORY_RESULT_TEXT_BUDGET_CHARS，均 << floor），NEVER 依赖 materializer 事后截断来兜底；③typed data 可全量供 TUI，但进 LLM 的 tool_result text 只留最重要信息（一行摘要 + 预览 + 截断标记）。新增或修改结果渲染 MUST 先算文本上界并写「渲染后 chars ≤ 预算」单测。",
+      "source": "llm",
+      "tags": [
+        "budget",
+        "materializer",
+        "tool-result",
+        "truncation"
+      ],
+      "pinned": false,
+      "created_at": 1791797935,
+      "last_confirmed_at": 1791797935,
+      "confirmation_count": 0,
+      "outdated": true,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07baCHA0EDZ",
+        "01a1251a-e8f8-733d-9588-5f9134e6ebb1"
+      ]
+    },
+    {
+      "id": "mem_07c24ozN1TW",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "xtask guard 规则族与提交前自查口径（合成既有守卫教训 + #1941 实证）：①pattern.all.constant-placement —— 模块级纯值常量 MUST 放对应 constants.rs（本次 CONTENT_PREVIEW_CHARS 未归位被 exit 2 拦截，改名 MEMORY_CONTENT_PREVIEW_CHARS 迁入 tool_display/constants.rs 才通过）；②文件行数职责预算（如 from_args.rs 超 550 行即拦）；③facade.<crate>.root-exports 白名单（crate 内部实现与辅助函数保持 pub(crate)，NEVER 顺手上挂根 façade）；④dependency.workspace-matrix 依赖白名单（新增依赖含 dev-dependencies 先核对）。新增常量 / 依赖 / 公开符号 / 大段逻辑后 MUST 先跑 `xtask guard --fast` 自查，NEVER 等 Stop Hook 阻断后返工。",
+      "source": "llm",
+      "tags": [
+        "architecture-guard",
+        "constants",
+        "self-check",
+        "stop-hook"
+      ],
+      "pinned": false,
+      "created_at": 1791797935,
+      "last_confirmed_at": 1791797935,
+      "confirmation_count": 0,
+      "outdated": false,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07aMkGP6Pa5",
+        "mem_07asMai5LTE",
+        "01a12566-3268-79ce-8941-2379d67cdd3d"
+      ]
+    },
+    {
+      "id": "mem_07c24ozN1TX",
+      "layer": "project",
+      "category": "decision",
+      "content": "TUI 工具显示续修 C 档（2026-10-12 用户拍板「C，一个 issue 做」）：单 issue 覆盖 P0+P1+P2 —— ①Brief 彻底删除（registry 去注册 + 删 adapters/brief.rs、domain/types/brief.rs、sdk tool_result/brief.rs 及根导出、adapters.rs/types.rs/i18n brief() 与相关测试，不留死代码；「仅注销留文件」的最低补丁已否决）；②WebSearch/ToolSearch 新建 ToolDisplay、WebFetch 补 typed format_result_lines（Header 保留 url/truncated，result = title + content 预览 + truncated/links 摘要，NEVER 回退整页 markdown）；③补齐 TOOL_DISPLAY_NAMES（Agent/Edit/Read/Skill/WebFetch/Write）并删除脏键 TaskList（真实工具为 TaskLists）；④TaskLists/TaskListGet/TaskGet 加 typed 结果行、Grep/Glob 加 typed 行；⑤L5 为必要验收层一并做，specs/3.3-tui-cli.md 工具显示表同 commit 更新。背景机制：未注册 ToolDisplay 的工具卡片走默认 Visible{max_lines:5, Plain}，且友好名回退内部名。",
+      "source": "llm",
+      "tags": [
+        "brief",
+        "l5",
+        "tool-display",
+        "tui"
+      ],
+      "pinned": false,
+      "created_at": 1791797935,
+      "last_confirmed_at": 1791797935,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07c3AdKeobY",
+      "layer": "project",
+      "category": "fact",
+      "content": "CLI 已按 #1939 合入提交重装：aemeath 0.0.0-3d4db051 → /Users/guoyuqi/.local/bin/aemeath（main=3d4db0515，含 #1938 full picture system prompt）。",
+      "source": "llm",
+      "source_ref": "01a12eab-2641-7cf3-9400-41320a9254b3",
+      "tags": [
+        "1938",
+        "1939",
+        "build-cli",
+        "install"
+      ],
+      "pinned": false,
+      "created_at": 1791798854,
+      "last_confirmed_at": 1791798854,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07c5SPi8CGG",
+      "layer": "project",
+      "category": "preference",
+      "content": "TaskLists/TaskListGet TUI stats 显示口径（2026-10-12 验收迭代）：不用 cryptic `p/i/c/t`；英文标签为 `pending:N doing:N completed:N total:N`（in_progress 显示名改为 doing，数据字段仍读 in_progress）。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [],
+      "pinned": false,
+      "created_at": 1791800774,
+      "last_confirmed_at": 1791800774,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07c5lUjgl5E",
+      "layer": "project",
+      "category": "preference",
+      "content": "TaskListGet 空列表验收口径（2026-10-12）：无当前 task list（task_list:null + 全0 stats）时 TUI 显示「（无任务）」；NEVER 拼 `- · - · - · pending:0 doing:0 completed:0 total:0`。stats 显示为 pending/doing/completed/total。",
+      "source": "llm",
+      "source_ref": "01a1263b-1b06-722a-8397-1982d6930b7f",
+      "tags": [
+        "1942",
+        "task-display",
+        "tui"
+      ],
+      "pinned": false,
+      "created_at": 1791801032,
+      "last_confirmed_at": 1791801032,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07c7RHalbdI",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1935 PR2（scoring daemon 客户端收尾）实现进度（2026-10-12，worktree feature-1935-scoring-daemon-pr2）：Task5 DaemonScoringClient 实现 ScoringPort（TDD）、Task6 composition 装配 + 惰性 spawn + 首次提示、Task7 退役进程内 embedded 生产装配、Task8 socket/timeout 配置 + specs/3.9 更新均已完成；仅剩 Task9 终验 + push + 开 PR2。",
+      "source": "llm",
+      "tags": [
+        "1935",
+        "pr2",
+        "scoring-daemon"
+      ],
+      "pinned": false,
+      "created_at": 1791802438,
+      "last_confirmed_at": 1791802438,
+      "confirmation_count": 0,
+      "outdated": true,
+      "superseded_by": "mem_07cRqFueNiT",
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07bv1wBT9yC",
+        "mem_07bvuGiyWH2"
+      ]
+    },
+    {
+      "id": "mem_07c7RHalbdJ",
+      "layer": "project",
+      "category": "decision",
+      "content": "embedded 语义澄清（合成既有决策，防误读为互相矛盾）：M69 的「llama.cpp 内嵌终态」指推理引擎（llama-cpp-2 + Q8_0 GGUF）运行在 scoring daemon 进程内，不是 aemeath CLI 进程内 embedded；#1935 退役的是 CLI 侧 systemone-embedded 生产装配（默认不链，确需时用 AEMEATH_CLI_FEATURES 显式开启，build_cli.sh 默认链 embedded 的改动已 revert）。判断「内嵌/embedded 是否已退役」MUST 先区分宿主进程：daemon 内推理引擎保留，CLI 进程内引擎退役。",
+      "source": "llm",
+      "tags": [
+        "1935",
+        "embedded",
+        "scoring-daemon"
+      ],
+      "pinned": false,
+      "created_at": 1791802438,
+      "last_confirmed_at": 1791802438,
+      "confirmation_count": 0,
+      "outdated": false,
+      "superseded_by": "mem_07cDaHQmMbp",
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07bpg78Ovse",
+        "mem_07bvuGiyWH3",
+        "01a12566-3268-7acd-a84c-857491e27eab"
+      ]
+    },
+    {
+      "id": "mem_07cDaHQmMbo",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "worktree 级 git 配置 MUST 落在 worktree 内：需要分支自定义 hooks 时，在 worktree 目录执行 git config core.hooksPath，指向该 worktree 的 .cargo/hooks 等分支自有脚本（只写 worktree 本地配置）；NEVER 改主仓的 core.hooksPath，否则污染共享主仓且分支脚本的生效范围错位。改配置前 MUST 先确认作用域（worktree 本地 vs 主仓），改后 MUST 回读主仓配置确认未被改动。实证：2026-10-12 #1935 PR2 worktree 中先改了主仓，用户当场纠正。",
+      "source": "llm",
+      "tags": [
+        "core.hooksPath",
+        "git-config",
+        "hooks",
+        "worktree"
+      ],
+      "pinned": false,
+      "created_at": 1791807597,
+      "last_confirmed_at": 1791807597,
+      "confirmation_count": 0,
+      "outdated": true,
+      "superseded_by": "mem_07cRqFueNiS"
+    },
+    {
+      "id": "mem_07cDaHQmMbp",
+      "layer": "project",
+      "category": "decision",
+      "content": "embedded / 内嵌语义总口径（合成既有决策，防误读为互相矛盾）：①判断「内嵌/embedded 是否已退役」MUST 先区分宿主进程——llama.cpp 推理引擎（llama-cpp-2 + Q8_0 GGUF）运行在 scoring daemon 进程内属终态，保留；aemeath CLI 进程内的 systemone-embedded 生产装配退役，日常 CLI 默认 MUST NOT 链 embedded，确需进程内引擎时才用 AEMEATH_CLI_FEATURES 显式开启。②build_cli.sh 默认链 embedded 的改动已 revert 并合入 main（PR #1936 → merge 15f32b2d）。③评分能力统一由 scoring daemon 路线提供（#1935 三档交付口径）。",
+      "source": "llm",
+      "tags": [
+        "build-cli",
+        "embedded",
+        "host-process",
+        "scoring-daemon"
+      ],
+      "pinned": false,
+      "created_at": 1791807597,
+      "last_confirmed_at": 1791807597,
+      "confirmation_count": 0,
+      "outdated": false,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07bvuGiyWH3",
+        "mem_07c7RHalbdJ",
+        "01a12566-3268-7acd-a84c-857491e27eab"
+      ]
+    },
+    {
+      "id": "mem_07cOJFmOOAL",
+      "layer": "project",
+      "category": "decision",
+      "content": "queued message 撞 pending interaction 的 runtime 铁律（#1944 根因级修复）：AskUserQuestion 走 InteractionSuspended 时故意不 complete_step，step 保持 active 且 Run=AwaitingUser；此时任何 user batch 进入 Ready/InternalContinuation 都 MUST 先经 defer_user_batch_if_pending_interaction 回流队列并 continue，NEVER 直接 UserResumed/execute_step，否则 begin_step 报 ActiveStepAlreadyExists（「Run 已存在活动 Step」）。Cancel/Terminate 仍走 control 路径不经该 helper。验收含 L2（engine_input_tests）+ L4（TUI scenario）+ L5（ask_user_queued_pty，已登记 slow-test-matrix）。",
+      "source": "llm",
+      "tags": [
+        "1944",
+        "engine",
+        "interaction",
+        "queued-message",
+        "run-state"
+      ],
+      "pinned": false,
+      "created_at": 1791816603,
+      "last_confirmed_at": 1791816603,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07cOJFmOOAM",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "全局 core.hooksPath 指向主仓 .cargo/hooks，任何会话或分支改动主仓 hook 脚本都会立刻波及所有 worktree（#1935 PR2 的 commit 3be39f189 把 pre-commit/pre-push 改为调用分支内新增的 .agents/hooks/run-xtask.sh，导致 #1944 worktree push 报 ENOENT）。分支自定义 hook 逻辑 MUST 通过 worktree 本地配置 + worktree 内脚本实现，NEVER 改主仓 hooksPath 或主仓 hook 脚本。排查「hook 突然失败」时 MUST 先回读主仓 hooks 是否被其它会话改脏（git status 主仓 + 与 HEAD diff）。",
+      "source": "llm",
+      "tags": [
+        "core.hooksPath",
+        "hooks",
+        "shared-state",
+        "worktree"
+      ],
+      "pinned": false,
+      "created_at": 1791816603,
+      "last_confirmed_at": 1791816603,
+      "confirmation_count": 0,
+      "outdated": true,
+      "superseded_by": "mem_07cRqFueNiS"
+    },
+    {
+      "id": "mem_07cOJFmOOAN",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "门禁超时类红灯判读口径（2026-10-12 实证）：①push/Stop 门禁 exit 124 常是 source-guard 默认 120s 超时而非真实违规，用 GUARD_TIMEOUT=300 重跑即可；②Stop Hook check-agent-stop.sh 也会整体执行超时并产生「hook 执行超时」阻断。遇到超时先抬超时或降负载重试，再怀疑违规；NEVER 把超时当作真实 violations，也 NEVER 靠临时包装脚本长期绕过门禁。",
+      "source": "llm",
+      "tags": [
+        "architecture-guard",
+        "source-guard",
+        "stop-hook",
+        "timeout"
+      ],
+      "pinned": false,
+      "created_at": 1791816603,
+      "last_confirmed_at": 1791816603,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07cOJFmOOAO",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "runtime 时序 flake 识别：test_stall_detector_resets_across_user_turns 在负载较高（并行全量测试）时会因第 3 回合 duration 被拉长而假失败，与当期改动无关，重试即绿（2026-10-12 #1944 push 期间实证）。该测试失败时 MUST 先判断是否负载/时序相关再重试，NEVER 直接改被测逻辑或断言阈值。",
+      "source": "llm",
+      "tags": [
+        "flake",
+        "runtime",
+        "test",
+        "timing"
+      ],
+      "pinned": false,
+      "created_at": 1791816603,
+      "last_confirmed_at": 1791816603,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07cPD8eRcKe",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1949/#1950 用户选 C：run-xtask 用 tools/xtask+packages/sdk 内容指纹对比杜绝旧二进制；指纹不同才 cargo build；Stop timeout 同步抬高兜底冷编。裸「有就用」不合格。",
+      "source": "llm",
+      "source_ref": "01a12eab-2641-7cf3-9400-41320a9254b3",
+      "tags": [
+        "1949",
+        "hooks",
+        "stop-hook",
+        "xtask"
+      ],
+      "pinned": false,
+      "created_at": 1791817359,
+      "last_confirmed_at": 1791817359,
+      "confirmation_count": 0,
+      "outdated": true,
+      "superseded_by": "mem_07cPxcRI5YG"
+    },
+    {
+      "id": "mem_07cPYkPvKi0",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "Stop Hook exit 101：worktree `.cargo/config.toml` 的 target-dir/build-dir 指向已被 rm/mv 掉的缓存（如 detached-*）时，check-agent-stop → run-xtask/cargo build 写 fingerprint 报 No such file (os error 2) → xtask guard exit 101。止血：post-checkout 重生正确 cache key 目录 + cargo build -p xtask + rustc-wrapper=\"\"；清理 ~/.cache/aemeath-target 前 MUST 先核对当前 worktree config 指向，NEVER 删正在用的 target-dir。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1935",
+        "cargo",
+        "stop-hook",
+        "target-dir"
+      ],
+      "pinned": false,
+      "created_at": 1791817652,
+      "last_confirmed_at": 1791817652,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07cPxcRI5YG",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1949 run-xtask 陈旧判定口径修正（used to：只对比 tools/xtask + packages/sdk 两目录内容指纹；now）：指纹范围 MUST 取生产 path 依赖闭包——从 tools/xtask 沿 Cargo.toml 的 path 依赖 BFS，含 xtask→sdk→{utils, share, logging, tools, project, memory, systemone, task} 共 11 crate / 675 文件，对闭包内 *.rs 与 Cargo.toml 做内容指纹（实测约 70ms），NEVER 硬编码目录清单（依赖变更会漏检）；dev-dependencies 不计入。命中直接 exec，miss 才 cargo build -p xtask 并写 $TARGET_DIR/debug/xtask.fingerprint；Stop Hook timeout 由 150 抬到 300 作冷编兜底；不改共享 .cargo/hooks。代价：改 tools/memory/shared 等日常代码也会判 miss 触发重编（sdk 直接依赖 tools，业务 crate 几乎全在闭包内）。",
+      "source": "llm",
+      "tags": [
+        "1949",
+        "dependency-graph",
+        "fingerprint",
+        "run-xtask",
+        "stop-hook"
+      ],
+      "pinned": false,
+      "created_at": 1791817989,
+      "last_confirmed_at": 1791817989,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07cQHRFqGIr",
+      "layer": "project",
+      "category": "pattern",
+      "content": "本机磁盘清理执行与汇报口径：①安全档先清可再生成的构建 / 包管理缓存、轮转日志与孤儿 target 缓存；高风险项（含未合入工作的 worktree、活跃 target-dir、会话数据）MUST 先列体积 + 风险，等用户拍板；②清 aemeath-target 前 MUST 核对各 worktree .cargo/config.toml 的 target-dir 指向，NEVER 删正在使用的目录（否则 cargo / Stop Hook 报 os error 2）；③汇报统一「清理前可用 / 清理后可用 / 逐项释放量」三项并保持自洽；④含未合入工作的 worktree MUST 逐个核对 git status、未推送 commit、stash 后才可列入可删清单，NEVER 直接提供「全部删除」选项。",
+      "source": "llm",
+      "tags": [
+        "cleanup",
+        "disk-cleanup",
+        "verification"
+      ],
+      "pinned": false,
+      "created_at": 1791818257,
+      "last_confirmed_at": 1791818257,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07cQz0RItqi",
+      "layer": "project",
+      "category": "decision",
+      "content": "build_cli 默认 feature 口径更新（2026-10-12 用户要求）：used to 默认不链 systemone-daemon/embedded（会话瘦身 30M）；now 默认启用 composition/systemone-daemon（安装约 38M，可直接 `aemeath scoring serve`）。会话侧仍走 DaemonScoringClient+UDS，不在会话内加载 GGUF。瘦身安装：`AEMEATH_CLI_FEATURES= ./build_cli.sh`。改动在 feature/1935-scoring-daemon-pr2（PR #1948），尚未单独要求 commit。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1935",
+        "build_cli",
+        "systemone-daemon"
+      ],
+      "pinned": false,
+      "created_at": 1791818847,
+      "last_confirmed_at": 1791818847,
+      "confirmation_count": 0,
+      "outdated": false,
+      "superseded_by": "mem_07cTTFyEWUC"
+    },
+    {
+      "id": "mem_07cRETZxFT6",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1949/#1950 方案 C 已落地：run-xtask 从 tools/xtask BFS 生产 path 依赖闭包（11 crate）内容指纹 vs debug/xtask.fingerprint；命中 exec、miss 才 cargo build；Stop timeout 150→300。指纹解析用正则（兼容无 tomllib），不用 mtime。PR #1950 head a52eb1d89。",
+      "source": "llm",
+      "source_ref": "01a12eab-2641-7cf3-9400-41320a9254b3",
+      "tags": [
+        "1949",
+        "1950",
+        "hooks",
+        "stop-hook",
+        "xtask"
+      ],
+      "pinned": false,
+      "created_at": 1791819057,
+      "last_confirmed_at": 1791819057,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07cRqFueNiS",
+      "layer": "project",
+      "category": "decision",
+      "content": "worktree 分支 hooks 生效铁律修正（2026-10-12，#1935 PR2 实证）：used to 依据「worktree 级 git 配置落在 worktree 内」；now 明确——aemeath 的 core.hooksPath 必须保持主仓 .cargo/hooks 的绝对路径（存于共享 .git/config），git 执行目录与 ROOT 虽是 worktree，但加载的 hook 脚本文件仍是主仓那份。Git（含 2.54）无「每个 worktree 自动用自己目录下 hooks」能力；在 worktree 内执行 git config core.hooksPath 会写共享 config 并波及全部 worktree，NEVER 这样做，也 NEVER 改主仓 hooksPath 或主仓 hook 脚本。让分支自有 hook 生效只能用本次命令的临时覆盖：git -c core.hooksPath=\"$PWD/.cargo/hooks\" <git 命令>（或 GIT_CONFIG_COUNT / GIT_CONFIG_KEY_0 / GIT_CONFIG_VALUE_0 环境变量），待 hook 改动合入 main 后自然生效；官方 per-worktree 机制 extensions.worktreeConfig + git config --worktree 本仓未启用，启用须先改规范并经用户同意。排查「hook 不生效/突然失败」MUST 先回读主仓 hooksPath 与主仓 hook 脚本是否被改脏。",
+      "source": "llm",
+      "tags": [
+        "core.hooksPath",
+        "git-config",
+        "hooks",
+        "shared-state",
+        "worktree"
+      ],
+      "pinned": false,
+      "created_at": 1791819568,
+      "last_confirmed_at": 1791819568,
+      "confirmation_count": 0,
+      "outdated": false,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07cDaHQmMbo",
+        "mem_07cOJFmOOAM"
+      ]
+    },
+    {
+      "id": "mem_07cRqFueNiT",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1935 PR2（scoring daemon 客户端收尾）已推送并开 PR #1948（2026-10-12）：开 PR 时 head eff7f7d9a、MERGEABLE、正文含 Closes #1935；范围=DaemonScoringClient（UDS 上 ScoringPort、超时转 Unavailable）、socket_path/connect_timeout_secs(2)/infer_timeout_secs(30) 配置 + specs 3.9、composition 装配 + 惰性 spawn scoring serve + DaemonUnreachable 首次提示（fail-open）、退役会话侧 embedded 生产装配（serve 路径保留）。push 通过临时 git -c core.hooksPath 覆盖走本分支 hooks，rebase 消化 main 上 #1944 后 force-with-lease；主仓 hooksPath 与工作区保持干净。used to「仅剩 Task9 终验 + push + 开 PR2」；now 该 PR 待 review/合并。",
+      "source": "llm",
+      "tags": [
+        "1935",
+        "delivery",
+        "pr-1948",
+        "pr2",
+        "scoring-daemon"
+      ],
+      "pinned": false,
+      "created_at": 1791819568,
+      "last_confirmed_at": 1791819568,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07cRqFueNiU",
+      "layer": "project",
+      "category": "fact",
+      "content": "scoring daemon 接口实测基线（2026-10-12，#1935 PR2 worktree，cargo build --release -p cli --features composition/systemone-daemon，约 38M）：aemeath scoring serve 起 UDS ~/.agents/scoring/scoring.sock（RSS ~766MB，模型 kev-0.8b-q8-r1）；Noul answer 返回 p_true≈0.36、calibration=Temperature、latency≈1044ms、engine_revision=kev-0.8b-q8-r1；choice answer 选 edit、概率分布合理（≈210ms）；双客户端并发均成功（第二请求 ~28ms）；无 feature 的安装版正确拒绝并提示 feature 未启用。已知缺口：非法 method / 错误 protocol_version 直接断连、不回错误帧（正常推理路径不受影响）。日常安装版仍为 30M 无引擎。",
+      "source": "llm",
+      "tags": [
+        "1935",
+        "baseline",
+        "interface-test",
+        "scoring-daemon",
+        "uds"
+      ],
+      "pinned": false,
+      "created_at": 1791819568,
+      "last_confirmed_at": 1791819568,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07cRqFueNiV",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "多 worktree/会话并发构建时门禁易挂起（2026-10-12 #1935 PR2 实证）：pre-commit source-guard 会长时间卡在编译 systemone，与 sccache/target 锁被其它 worktree 争用有关，表现为后台命令连续 failed、疑似 rustc 挂死。处置口径：门禁与 push 命令一律放后台并靠完成通知继续；卡住先查是否有其它 worktree 正在跑 build/push，再决定等待或抬超时（如 AEMEATH_UNIT_TEST_TIMEOUT_SECS=900）；NEVER 前台串行等待，NEVER 对同一失败命令反复重试而不先读日志定位。",
+      "source": "llm",
+      "tags": [
+        "background-process",
+        "lock-contention",
+        "pre-push",
+        "sccache",
+        "source-guard"
+      ],
+      "pinned": false,
+      "created_at": 1791819568,
+      "last_confirmed_at": 1791819568,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07cTTFyEWUC",
+      "layer": "project",
+      "category": "fact",
+      "content": "scoring daemon 交付终态（#1935 三档全部落地：PR0 #1937 设计、PR1 #1940 daemon+协议+serve、PR2 #1948 客户端收尾 → squash 19248330a，issue CLOSED）：build_cli 默认链 composition/systemone-daemon（安装约 38M，`aemeath scoring serve` 开箱可用），会话侧仍走 DaemonScoringClient+UDS、不在会话内加载 GGUF；配置项 socket_path / connect_timeout_secs(2) / infer_timeout_secs(30)；瘦身安装用 `AEMEATH_CLI_FEATURES= ./build_cli.sh`（约 30M）。安装形态 used to 默认不链 daemon、30M 无引擎；now 默认 38M 含引擎。",
+      "source": "llm",
+      "tags": [
+        "1935",
+        "build-cli",
+        "default-feature",
+        "delivery",
+        "scoring-daemon"
+      ],
+      "pinned": false,
+      "created_at": 1791820936,
+      "last_confirmed_at": 1791820936,
+      "confirmation_count": 0,
+      "outdated": false,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07bv1wBT9yC",
+        "mem_07cDaHQmMbp",
+        "mem_07cTP2xmp28"
+      ]
+    },
+    {
+      "id": "mem_07dIK86urdQ",
+      "layer": "project",
+      "category": "decision",
+      "content": "CLI 启动命令口径更新（#1953 / PR #1954）：used to `aemeath scoring serve`；now `aemeath systemone serve`（与 download 同树）。顶层 scoring 命令已删、无 alias；惰性拉起 spawn `[\"systemone\",\"serve\"]`；scoring.* 配置与 UDS 路径不变。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1953",
+        "1954",
+        "cli",
+        "rename",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791863633,
+      "last_confirmed_at": 1791863633,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07dO5XZFM3M",
+      "layer": "project",
+      "category": "fact",
+      "content": "aemeath 模型恢复链路现状（合并既有结论与 #1927 落地后事实）：session.metadata.model 已双向读写并随 #1929/#1930 修复合入（优先级 CLI --model > session.metadata.model > models.default，仅当目标值与落盘值不同才写、且必须在 resolve_startup_session 之前完成）；因此 --resume 不再只恢复会话历史/id。cmux 侧仍无 aemeath 官方 hooks，只持久化 session id + sanitized launch command，恢复需自定义 cmux surface resume set --shell 'aemeath --resume <session_id> --model \"<source>/<model>\"'。",
+      "source": "llm",
+      "tags": [
+        "cmux",
+        "model",
+        "resume",
+        "session"
+      ],
+      "pinned": false,
+      "created_at": 1791868473,
+      "last_confirmed_at": 1791868473,
+      "confirmation_count": 0,
+      "outdated": false,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07aKlqYoyDQ",
+        "mem_07aKlqYoyDR",
+        "mem_07ap5uYrojR"
+      ]
+    },
+    {
+      "id": "mem_07dPGaDce7E",
+      "layer": "project",
+      "category": "fact",
+      "content": "本机 ~/.agents/aemeath.json 的 scoring.enabled 已由用户要求改为 true（2026-10-13）：memory_rerank/skill_match/memory_recall=true，policy_triage=false，event_retention_days=30。daemon `aemeath systemone serve` PID 28023 当时已在跑、sock 就绪。会话侧需重启会话后生效。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "config",
+        "enabled",
+        "scoring"
+      ],
+      "pinned": false,
+      "created_at": 1791869462,
+      "last_confirmed_at": 1791869462,
+      "confirmation_count": 0,
+      "outdated": false,
+      "superseded_by": "mem_07dlSqbMSvZ"
+    },
+    {
+      "id": "mem_07dPQcVSXsO",
+      "layer": "project",
+      "category": "fact",
+      "content": "本机 scoring 场景开关（2026-10-13 用户要求开 memory + ToolSearch）：enabled=true，memory_rerank=true，memory_recall=true，skill_match=true；policy_triage 仍为 false。daemon systemone serve PID 28023 当时在跑。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "config",
+        "memory_rerank",
+        "scoring",
+        "skill_match"
+      ],
+      "pinned": false,
+      "created_at": 1791869598,
+      "last_confirmed_at": 1791869598,
+      "confirmation_count": 0,
+      "outdated": false,
+      "superseded_by": "mem_07dlSqbMSvZ"
+    },
+    {
+      "id": "mem_07dVDMvCKAK",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "TUI tool_result 结构化数据 16KB 预览限额陷阱（#1957 实测）：`sanitize_tool_result_content`（apps/cli/src/tui/adapter/agent_event/sanitize.rs）超限会把整个 JSON 降级为截断字符串，导致 ToolSearchDisplay::format_result_lines 解析失败→回退原始文本，同一工具两种卡片样式（95 条 ≈24KB vs 10 条 ≈2.5KB）。修复口径：ToolSearch 逐条截 description≤256 + 条目预算 40 + tools_truncated=\"total/omitted\"；其他工具递归截长字符串字段保持形状；无法收敛才降级；省略标记幂等。PR #1958。教训：TUI 侧任何「整块降级为字符串」的截断路径都会破坏 typed 显示契约。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1957",
+        "1958",
+        "sanitize",
+        "truncation",
+        "tui"
+      ],
+      "pinned": false,
+      "created_at": 1791874456,
+      "last_confirmed_at": 1791874456,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07dW9v7k1WS",
+      "layer": "project",
+      "category": "decision",
+      "content": "TUI 展示载荷上限口径（2026-10-13 用户要求提升，#1957/#1958）：TOOL_RESULT_PREVIEW_LIMIT 由 16KB 提升到 64KB（仍是 #1444 有界预览兜底，防 GB 级结果物化打爆内存）；ToolSearch 移除固定 40 条预算，改为按 64KB 二分收敛到最大可容纳前缀（≥1 条）+ tools_truncated=\"total/omitted\" 标记；95 条（≈24KB）不再触发任何裁剪。measured_len 收 count 参数以避免切片语法触发架构守卫 pattern.all.no-unsafe-text-range-slicing。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1957",
+        "1958",
+        "64kb",
+        "limit",
+        "tui"
+      ],
+      "pinned": false,
+      "created_at": 1791875249,
+      "last_confirmed_at": 1791875249,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07dWscnvcUS",
+      "layer": "project",
+      "category": "decision",
+      "content": "composition 库层 stdout 口径（#1957/#1958 顺带修复，2026-10-13）：agent/composition 声明 #![deny(clippy::print_stdout, print_stderr)]，run_scoring_serve 的 println 监听提示改为 on_ready 回调注入（库层只回传 sock 路径），用户可见输出由 CLI 子命令渲染。新增测试 run_scoring_serve_without_engine_skips_ready_callback（cfg 无 systemone-daemon 时生效，断言 Failure(exit 2) 且回调不被调用）。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1957",
+        "1958",
+        "clippy",
+        "composition",
+        "stdout"
+      ],
+      "pinned": false,
+      "created_at": 1791875855,
+      "last_confirmed_at": 1791875855,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07dat50un7g",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1962 Agent 后台 Watch 过程日志拍板落地（worktree bug/1962-agent-bg-watch-activity-log，未 commit）：B+Q1=B1+Q2=C1。写入点必须在 ProgressSink::emit 包装（activity_log::wrap_with_activity_log），因 agent_calls forward 在占位返回后 500ms 被杀。B1 只记 Started/ToolCalls/ToolResult/Terminal(kind)，跳过 Thinking/Message/ToolOutput；行预算 AGENT_ACTIVITY_LOG_LINE_MAX_CHARS=200；log_direct 任务不写过程；终态仍 notify_terminal 单次 append_terminal。完成通知保持瘦身。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1962",
+        "Agent",
+        "BackgroundProcessWatch",
+        "activity-log"
+      ],
+      "pinned": false,
+      "created_at": 1791879219,
+      "last_confirmed_at": 1791879219,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07dbdCJU9WS",
+      "layer": "project",
+      "category": "pattern",
+      "content": "aemeath TUI 工具卡片身份与意图分层口径（2026-10-13 会话澄清）：TOOL_DISPLAY_NAMES 友好名 = 工具固定身份（如 Bash、Backend Process Watch、Agent），与单次调用无关；goal = 模型填写的本次意图（如「跑 ping 验收」）。两者语义不重叠：卡片 = 友好名 + goal，账本/列表 summary = 「友好名 · goal」，多任务时靠工具名区分上下文。若后续要让 summary 只存 goal，工具友好名仍只出现在各工具自身 header 前缀，不得从卡片移除。新增工具显示或改 summary 格式时 MUST 按此分层，NEVER 把 goal 当身份或把友好名当意图。",
+      "source": "llm",
+      "tags": [
+        "display",
+        "goal",
+        "tool-display",
+        "tui"
+      ],
+      "pinned": false,
+      "created_at": 1791879844,
+      "last_confirmed_at": 1791879844,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07denb32Oae",
+      "layer": "project",
+      "category": "decision",
+      "content": "BackgroundProcessWatch 超时口径：入参用统一字段名 `timeout`（与 Bash/Agent/WebFetch 一致），NEVER 使用 `timeout_secs` 作为入参字段名。默认=框架硬上限 300，clamp 1..=300；Tool::timeout_secs() 固定 300（这是框架方法名，不是入参）；内部 wait=resolve_watch_wait_secs（逼近上限减 grace 5s）。保持 #1946「框架不先于 wait 砍死」。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1946",
+        "1962",
+        "BackgroundProcessWatch",
+        "timeout"
+      ],
+      "pinned": false,
+      "created_at": 1791882504,
+      "last_confirmed_at": 1791882504,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07di0swb3se",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1966/#1967：pre-push 若 stdin 全部 local oid 为 0（delete-only）则跳过全量门禁；空 stdin/混合更新仍跑。NEVER 用长期 --no-verify 替代。合入后 git push --delete 不再跑守卫+全量单测。",
+      "source": "llm",
+      "source_ref": "01a12eab-2641-7cf3-9400-41320a9254b3",
+      "tags": [
+        "#1966",
+        "hooks",
+        "pre-push"
+      ],
+      "pinned": false,
+      "created_at": 1791885202,
+      "last_confirmed_at": 1791885202,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07djoP7bd0y",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1959 / PR #1961 TUI 用户可见耗时去 ms（squash → 752c82360，2026-10-13T07:59:23Z，Issue CLOSED）：format_call_duration 定为 TUI 唯一用户可见耗时格式，永不输出 ms；<1s 显示小数秒（850ms → 0.85s）；BackgroundProcessStatus 的 deadline 与 BackgroundProcessWatch 的 duration 统一走该 formatter；内部字段、日志与埋点仍可保留 _ms。specs/3.3-tui-cli.md 已同步。",
+      "source": "llm",
+      "tags": [
+        "1959",
+        "1961",
+        "duration",
+        "ms",
+        "tui"
+      ],
+      "pinned": false,
+      "created_at": 1791886713,
+      "last_confirmed_at": 1791886713,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07djoP7bd0z",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1964 工具 goal 与后台摘要定稿（2026-10-13，issue #1964 挂 v0.2.0，worktree feature-1964-tool-goal-bg-summary，设计 docs/design/02-modules/tui/06-tool-goal-and-background-summary.md，计划 docs/superpowers/plans/2026-10-13-issue-1964-tool-goal-bg-summary.md，提交 346c4cd39）：①Q1=A 全内置工具必填 goal（Agent description→goal + serde alias）；②Header = {友好名} {goal}，第二行 Details 放技术载荷（Bash command / Agent prompt / Grep query+path）；③账本 BackgroundProcessSummaryData.summary = {友好名} · {goal}，Watch header = Watch · {summary} · bgp_短尾，Status/List 一并消费；④Q2=B、Q4=A 单 PR 交付；⑤L4+L5 覆盖全部内置工具（MCP 非硬门禁）。",
+      "source": "llm",
+      "tags": [
+        "1964",
+        "background-summary",
+        "goal",
+        "tool-display",
+        "tui"
+      ],
+      "pinned": false,
+      "created_at": 1791886713,
+      "last_confirmed_at": 1791886713,
+      "confirmation_count": 0,
+      "outdated": false,
+      "superseded_by": "mem_07dr94N60Ia"
+    },
+    {
+      "id": "mem_07djoP7bd10",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "Rust 工具入参 schema 必填陷阱（#1964 实施中新发现）：字段级 #[serde(default)] 会让 JSON schema 不把该字段标为 required；既要对旧数据兼容又要 schema 声明 required 时，MUST 用结构体级 #[serde(default)] 而非字段级。",
+      "source": "llm",
+      "tags": [
+        "1964",
+        "goal",
+        "schema",
+        "serde"
+      ],
+      "pinned": false,
+      "created_at": 1791886713,
+      "last_confirmed_at": 1791886713,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07djoP7bd11",
+      "layer": "project",
+      "category": "pattern",
+      "content": "Watch outcome 与任务 state 语义分层（#1964 澄清）：outcome ∈ {terminal, still_running, cancelled} 只描述本次 Watch 等待结果；state ∈ {foreground_waiting, backgrounded, succeeded, failed, timed_out, stopped, invalidated} 描述任务档位，两者可同时成立、语义不重复。BackgroundProcessSummaryData 字段 = task_id / tool_name / state / summary / duration_ms；Watch 结果外包一层 outcome + detail(含 summary) + log_tail。用户问「是否重复」时 MUST 先给两套语义对照再解释。",
+      "source": "llm",
+      "tags": [
+        "1964",
+        "background-process",
+        "outcome",
+        "state",
+        "watch"
+      ],
+      "pinned": false,
+      "created_at": 1791886713,
+      "last_confirmed_at": 1791886713,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07dlSqbMSvY",
+      "layer": "project",
+      "category": "fact",
+      "content": "PR #1969 已创建（2026-10-13，用户指令「开pr」）：本轮 worktree 的工具 goal / 后台摘要改动进入评审阶段。关联 issue 编号、CI 结论与 L4/L5 验收结果 MUST 在下次会话补齐记录，形成 PR → issue → 验收 → 合入 → 清理的可追溯链路。",
+      "source": "llm",
+      "tags": [
+        "1969",
+        "pr",
+        "workflow"
+      ],
+      "pinned": false,
+      "created_at": 1791888100,
+      "last_confirmed_at": 1791888100,
+      "confirmation_count": 0,
+      "outdated": false,
+      "superseded_by": "mem_07dr94N60Ib"
+    },
+    {
+      "id": "mem_07dlSqbMSvZ",
+      "layer": "project",
+      "category": "fact",
+      "content": "本机 ~/.agents/aemeath.json 的 scoring 配置终态（2026-10-13）：enabled=true；memory_rerank / memory_recall / skill_match=true；policy_triage=false；event_retention_days=30。会话侧需重启后生效，daemon 由 `aemeath systemone serve` 提供。",
+      "source": "llm",
+      "tags": [
+        "config",
+        "scoring",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791888100,
+      "last_confirmed_at": 1791888100,
+      "confirmation_count": 0,
+      "outdated": false,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07dPGaDce7E",
+        "mem_07dPQcVSXsO"
+      ]
+    },
+    {
+      "id": "mem_07dnA5hSgLI",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1964 e2e-accept PASS（2026-10-13）：worktree feature-1964-tool-goal-bg-summary @ 6e46d723，cmux workspace aemeath-e2e-1964 + run_debug（阈值1s）。屏幕证据：List=`bgp_… · Bash · backgrounded · Run · 跑 ping 验收`；Watch result 含 `Run · 跑 ping 验收`+terminal；Grep=`Search 找 timeout 用法` + Details `timeout`；session 01a134e5… / bgp_07dmPdF4MAC.log 完整 ping。截图 /tmp/aemeath-e2e-1964-final.png。PR #1970。",
+      "source": "llm",
+      "source_ref": "01a133f5-ae6b-7e98-947c-59d388cf5756",
+      "tags": [
+        "1964",
+        "e2e-accept",
+        "tui"
+      ],
+      "pinned": false,
+      "created_at": 1791889525,
+      "last_confirmed_at": 1791889525,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07dr94N60Ic",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "工具「意图字段」分档教训（#1964 撤销根因）：后台账本需要语义摘要 ≠ 所有工具 schema 必填 goal。参数即意图的工具（Read/Grep/Glob/Task*/Memory*/Ask 等）强制 goal 是重复税，e2e 会立刻暴露 GOAL_* 假值；MUST 按工具族分档——需要自然语言意图的（Bash/Agent 等）引导填 goal，其余从主载荷拼装。新增跨工具必填字段前 MUST 先验证该字段对每个工具族都有真实语义。",
+      "source": "llm",
+      "tags": [
+        "1964",
+        "goal",
+        "over-design",
+        "pitfall"
+      ],
+      "pinned": false,
+      "created_at": 1791892870,
+      "last_confirmed_at": 1791892870,
+      "confirmation_count": 0,
+      "outdated": false,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07dbdCJU9WS",
+        "mem_07djoP7bd0z"
+      ]
+    },
+    {
+      "id": "mem_07dsKP876qe",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1964 纠偏版已推送并开 PR #1974（2026-10-13）：commit 462aec9d8；目标=Tool::goal_text + Watch · summary · 短尾，NEVER 全员 schema 必填 goal（旧 PR #1970 已关撤回）。e2e PASS：session 01a13530…，Watch header=`Watch · 跑 ping 验收 · bgp_…c6FuLY`，List/Status summary=`跑 ping 验收`（无 tool=/input=），截图 /tmp/aemeath-e2e-1964-redesign.png。worktree feature-1964-tool-goal-bg-summary 仍保留。",
+      "source": "llm",
+      "source_ref": "01a133f5-ae6b-7e98-947c-59d388cf5756",
+      "tags": [
+        "1964",
+        "goal_text",
+        "pr-1974"
+      ],
+      "pinned": false,
+      "created_at": 1791893863,
+      "last_confirmed_at": 1791893863,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07dsQXnu892",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1964 纠偏版终态契约（合成既有设计 + 落地事实）：①方法名定为 Tool/TypedTool::goal_text（不是 goal），经 ToolExecutionPort 暴露给 supervisor（runtime 拿不到 Arc<dyn Tool>）；有 goal 字段的工具回该字段值，无则按各工具 header 语义拼装；「全员 schema 必填 goal」旧方案已撤销。②展示口径：Watch header 收敛为 `Watch · summary · 短尾`，账本/List/Status summary 只存 goal 文本（不再出现 tool=/input=）。③执行方式：在 feature-1964-tool-goal-bg-summary 原 worktree 内回到 main 基线重做，并同步把 issue #1964 目标改为新口径，NEVER 另开 worktree；旧 PR #1970 不 merge（已关撤回）。④交付：commit 462aec9d8 已 push，PR #1974（Closes #1964）待 CI，worktree 保留；e2e（阈值 1s）Bash → bgp_07dsFc6FuLY，Watch result 末行 terminal · … · succeeded · 跑 ping 验收。",
+      "source": "llm",
+      "tags": [
+        "1964",
+        "goal_text",
+        "pr-1974",
+        "tool-display",
+        "watch"
+      ],
+      "pinned": false,
+      "created_at": 1791893946,
+      "last_confirmed_at": 1791893946,
+      "confirmation_count": 0,
+      "outdated": false,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07dr94N60Ia",
+        "mem_07dr94N60Ib",
+        "mem_07dsKP876qe"
+      ]
+    },
+    {
+      "id": "mem_07e0GbPRQAK",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1964 ToolCall 模型（2026-10-13，1cbb73ed1）：肥在 ToolCall（定义单例不变）；goal_text(&self)；账本 invocation_goal / DTO goal（旧名 alias）；Watch=`Watch · {goal}`，无则完整 bgp_id；runtime Ready 前注入 arguments.goal，TUI 零业务。扩 #1964 落 M1–M4。",
+      "source": "llm",
+      "source_ref": "01a133f5-ae6b-7e98-947c-59d388cf5756",
+      "tags": [
+        "1964",
+        "ToolCall"
+      ],
+      "pinned": false,
+      "created_at": 1791900528,
+      "last_confirmed_at": 1791900528,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07e2O9BKe5w",
+      "layer": "project",
+      "category": "pattern",
+      "content": "三类 background progress 建模不可混（2026-10-13 澄清）：①状态栏「N Backend Progress」= session 级计数 background_processes_active / BackgroundProcessCountChanged，只表示当前在跑的后台任务条数，不绑任何 ToolCall；②流式进度 ToolProgressEvent → ToolOutputDelta 绑当前 ToolCall（转发用 effective_call.id 作 tool_id，进该卡片 streaming_preview），装配面仅 Bash / BackgroundProcessWatch（runtime progress_sink 与 TUI tool_observe 白名单两端），Watch 等待中的 log 增量走这条而非状态栏；③后台账本 BackgroundProcessRecord 为任务级（task_id bgp_…），经 identity（runtime_call_id 等 ToolCallIdentity）绑发起那次 tool call，含 invocation_goal 与 state 档位。三者语义正交：排查「进度没显示」MUST 先定位是哪一层（计数 / 流式 delta / 账本），NEVER 用一套口径解释另一套。",
+      "source": "llm",
+      "tags": [
+        "background-process",
+        "progress",
+        "tool-call",
+        "tui"
+      ],
+      "pinned": false,
+      "created_at": 1791902310,
+      "last_confirmed_at": 1791902310,
+      "confirmation_count": 0,
+      "outdated": false,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07av6mcHski",
+        "mem_07e0GbPRQAK",
+        "01a125a4-5c45-7342-9aec-cd7798de96d8"
+      ]
+    },
+    {
+      "id": "mem_07eGXtdHoKO",
+      "layer": "project",
+      "category": "decision",
+      "content": "Reminder 落盘终态：ContentBlock::Reminder{kind,version,at,seq,body}（去<>正文）；删 MessageMetadata.system_reminder；一条 Message 全 Reminder 不与 Text/tool_result 混；LLM 经 to_llm_view 渲染 XML envelope；TUI/resume/window 按 is_reminder_message 隐藏；旧盘 XML+bool 不迁移。根因是 display_history 窗口经 TuiChatMessage 丢标志。",
+      "source": "llm",
+      "source_ref": "01a13437-9ebd-7480-9c17-b3aa1946b9f6",
+      "tags": [
+        "reminder",
+        "resume",
+        "tui"
+      ],
+      "pinned": false,
+      "created_at": 1791914197,
+      "last_confirmed_at": 1791914197,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07eIgJ54UHQ",
+      "layer": "project",
+      "category": "decision",
+      "content": "[Decision] 工具结果体积策略转向（2026-10-14）：废 Grep/Watch/Memory 源头≈2000硬顶；Grep 去 output_mode/索引、默认 rg 行输出；用 rtk-ai/rtk 语义压缩替代硬砍（倾向策略内建）。materializer/TUI64KB 默认先不动。已建 v0.2.0 issue #1975，拍板完再开工。",
+      "source": "llm",
+      "source_ref": "01a133f5-ae6b-7e98-947c-59d388cf5756",
+      "tags": [
+        "1975",
+        "grep",
+        "rtk",
+        "tools"
+      ],
+      "pinned": false,
+      "created_at": 1791915990,
+      "last_confirmed_at": 1791915990,
+      "confirmation_count": 0,
+      "outdated": true,
+      "superseded_by": "mem_07evJqUFKdM"
+    },
+    {
+      "id": "mem_07evJqUFKdM",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1978 工具结果文本体积定稿（取代旧的约 2000 源头硬预算）：源头硬顶作废——Grep/Watch/Memory 的 *_RESULT_TEXT_BUDGET_CHARS 级硬预算已删（Watch 改用 DEFAULT_BACKGROUND_LOG_MAX_BYTES）；Grep 去掉 output_mode 与索引，默认 content 行输出，传 output_mode 直接拒绝（旧的默认 files_with_matches 口径同步作废）。未被推翻的仍保留：materializer 落盘阈值 0.5% + floor 3000、TUI TOOL_RESULT_PREVIEW_LIMIT 64KB 有界预览、TUI 行预算。新增或修改工具结果渲染时 MUST 先区分「源头硬预算」与「框架兜底预算」，NEVER 用已废除的源头硬顶口径做设计。",
+      "source": "llm",
+      "tags": [
+        "1975",
+        "1978",
+        "budget",
+        "grep",
+        "tool-result"
+      ],
+      "pinned": false,
+      "created_at": 1791948431,
+      "last_confirmed_at": 1791948431,
+      "confirmation_count": 0,
+      "outdated": true,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07ZJhrwkgdM",
+        "mem_07c24ozN1TV",
+        "01a1251a-e8f8-733d-9588-5f9134e6ebb1"
+      ]
+    },
+    {
+      "id": "mem_07evJqUFKdN",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1975 工具结果体积长期策略：硬顶废除只是第一步，后续方向是用 RTK 风格语义压缩替代机械硬砍——PR1=#1978 去源头硬顶 + 删 Grep output_mode（无 RTK），PR2=#1979 引入 RTK compact（依赖 PR1，倾向策略内建）。两 issue 均为 v0.2.0 sub-issues。#1978 已落地待 commit / push / 开 PR，PR2 未开工；predict 后续「工具结果太长」问题时 MUST 优先走 RTK 压缩路线，而不是恢复硬截断。",
+      "source": "llm",
+      "tags": [
+        "1975",
+        "1978",
+        "1979",
+        "rtk",
+        "tools"
+      ],
+      "pinned": false,
+      "created_at": 1791948431,
+      "last_confirmed_at": 1791948431,
+      "confirmation_count": 0,
+      "outdated": true,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07eIgJ54UHQ",
+        "mem_07eJ4GoPHG4"
+      ]
+    },
+    {
+      "id": "mem_07evJqUFKdO",
+      "layer": "project",
+      "category": "pattern",
+      "content": "工具结果体积三层口径与验收（更新旧口径）：①源头「单口径硬预算」——跨工具统一的约 2000 chars 硬顶已废除，各工具按自身语义设定；②materializer 落盘阈值 = 窗口 0.5% + floor 3000（#1896/#1897 口径仍有效），占位符开销 MUST < threshold；③TUI 有界预览 64KB 上限保留。新增或修改结果渲染 MUST 先算文本上界并写「渲染后 chars ≤ 预算」单测，验收时 MUST 区分「源头预算」与「框架兜底预算」——用错口径会误判为回归。",
+      "source": "llm",
+      "tags": [
+        "budget",
+        "materializer",
+        "tool-result",
+        "truncation"
+      ],
+      "pinned": false,
+      "created_at": 1791948431,
+      "last_confirmed_at": 1791948431,
+      "confirmation_count": 0,
+      "outdated": true,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07eIgJ54UHQ",
+        "mem_07eJ4GoPHG4",
+        "01a1251a-e8f8-733d-9588-5f9134e6ebb1"
+      ]
+    },
+    {
+      "id": "mem_07evsOBivJo",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1978 修订：Grep/Watch 去源头≈2000硬顶；Memory 仍走 MEMORY_RESULT_TEXT_BUDGET=2000（render_bounded_lines）。materializer/TUI64KB 不动；RTK=#1979。",
+      "source": "llm",
+      "source_ref": "01a133f5-ae6b-7e98-947c-59d388cf5756",
+      "tags": [
+        "1978",
+        "budget",
+        "memory"
+      ],
+      "pinned": false,
+      "created_at": 1791948898,
+      "last_confirmed_at": 1791948898,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07f6UJv5CYC",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1981 Reflect 定案终态（2026-10-14 用户拍板）：①两轮目标均为 max_entries×0.75（200→150），补问不再降到 0.6；仍超则 Failed(capacity_not_met) 且整批不写；禁止机械裁剪。②reflect / MemoryUpdate / archive 写路径 MUST 持 corpus 锁（LLM 窗口亦持锁）。③Reflect 异步进 PR1，TUI status line 显示进行中标志；同 corpus 已有 Running reflect 则 skip（不排队）。",
+      "source": "llm",
+      "source_ref": "01a13437-9ebd-7480-9c17-b3aa1946b9f6",
+      "tags": [
+        "1981",
+        "concurrency",
+        "reflect"
+      ],
+      "pinned": false,
+      "created_at": 1791957808,
+      "last_confirmed_at": 1791957808,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07h994KNhhY",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1983/#1984：Watch 加回源头 2000 字符预算；Grep 保持无硬顶无 output_mode；Memory 仍预算制。",
+      "source": "llm",
+      "source_ref": "01a133f5-ae6b-7e98-947c-59d388cf5756",
+      "tags": [
+        "1983",
+        "1984",
+        "watch"
+      ],
+      "pinned": false,
+      "created_at": 1792064152,
+      "last_confirmed_at": 1792064152,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07h9sMsQk64",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1981 Reflect 容量门禁与并发口径终态（2026-10-14 用户拍板）：①成功 reflect 落盘后 active MUST ≤ floor(max_entries×0.75)=150；②未达标同轮补问一次，第二轮仍按 0.75 不降级，仍超则 Failed(capacity_not_met) 且整批不写；③禁止系统机械裁剪，只能靠 LLM synthesize/outdated 收敛；④Reflect/MemoryUpdate/archive 全段持 per-corpus 写锁（含 LLM 窗口）；⑤Reflect 异步执行、TUI status line 显示进行中标志；⑥同 corpus 已有 Running reflect 则 skip 不排队；⑦启动时从磁盘 load、结束后原子 CAS persist。",
+      "source": "llm",
+      "tags": [],
+      "pinned": false,
+      "created_at": 1792064765,
+      "last_confirmed_at": 1792064765,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07hBCNQDMeW",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1981 PR1 已推 PR #1982（fe4b76cf8）：容量门禁 floor(max×0.75)+补问同目标+失败整批不写；Interval 异步单槽 skip，PreCompact/Manual 同步；TUI Reflecting…。跨 session LLM 窗口长持 dataset.lock 未进本 PR（follow-up）。",
+      "source": "llm",
+      "source_ref": "01a13437-9ebd-7480-9c17-b3aa1946b9f6",
+      "tags": [
+        "1981",
+        "reflect"
+      ],
+      "pinned": false,
+      "created_at": 1792065876,
+      "last_confirmed_at": 1792065876,
+      "confirmation_count": 0,
+      "outdated": false,
+      "superseded_by": "mem_07hDaw3UK92"
+    },
+    {
+      "id": "mem_07hDaw3UK92",
+      "layer": "project",
+      "category": "decision",
+      "content": "Reflect 全段写锁闭环口径（#1981，用户 2026-10-14 要求「在本 pr 里闭环」，落在 PR #1982）：Reflect 的 load→LLM→补问→apply 全程持 per-corpus 写锁；实现为双层——进程内 tokio::Mutex + 跨进程对 memory dataset 的 OS dataset.lock 长持；mutate_layer 去掉内嵌 mutation_gate，改由公开写入口（write/update/delete/pin/archive/restore/apply_reflection）与 Reflect guard 持有；apply_reflection 在已持锁路径走 _locked 内部实现，NEVER 二次加锁（防死锁）。只把进程内 mutation_gate 提到 execute_reflection 全程属最小补丁，多终端跨进程仍竞态，不算闭环。代价是 LLM 10–60s 阻塞其它写，定案已接受。",
+      "source": "llm",
+      "tags": [
+        "1981",
+        "1982",
+        "concurrency",
+        "lock",
+        "reflect"
+      ],
+      "pinned": false,
+      "created_at": 1792067888,
+      "last_confirmed_at": 1792067888,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07hDaw3UK93",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1981 Reflect 容量门禁与并发终态（合并去重）：①成功 reflect 落盘后 active MUST ≤ floor(max_entries×0.75)=150；②未达标同轮补问一次，第二轮目标仍按 0.75 不降级，仍超则 Failed(capacity_not_met) 且整批不写；③禁止系统机械裁剪，只能靠 LLM synthesize/outdated 收敛；④Reflect / MemoryUpdate / archive 全段持 per-corpus 写锁（含 LLM 窗口）；⑤Reflect 异步执行（Interval detached，PreCompact/Manual 同步）+ TUI status line 显示进行中标志；⑥同 corpus 已有 Running reflect 则 skip 不排队；⑦启动时从磁盘 load、结束后原子 CAS persist。",
+      "source": "llm",
+      "tags": [
+        "1981",
+        "capacity",
+        "concurrency",
+        "reflect"
+      ],
+      "pinned": false,
+      "created_at": 1792067888,
+      "last_confirmed_at": 1792067888,
+      "confirmation_count": 0,
+      "outdated": false,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07f6UJv5CYC",
+        "mem_07h9sMsQk64"
+      ]
+    },
+    {
+      "id": "mem_07hDeLi0SSe",
+      "layer": "project",
+      "category": "decision",
+      "content": "工具结果源头硬顶原则（2026-10-15）：仅「有预期的内部调用」设硬顶——Memory/Skill/Search 等；防二次扩散——Watch log（本已落盘）设硬顶避免再触 materializer 落盘。其余对环境的 tool call（Grep/Bash/Read 等）NEVER 设源头硬顶，体积交给 materializer。#1978 Grep 去硬顶+#1983 Watch 加回即此口径。",
+      "source": "llm",
+      "source_ref": "01a133f5-ae6b-7e98-947c-59d388cf5756",
+      "tags": [
+        "1978",
+        "1983",
+        "budget",
+        "tools"
+      ],
+      "pinned": false,
+      "created_at": 1792067934,
+      "last_confirmed_at": 1792067934,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07hFrBIt34q",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1981 Reflect 写锁闭环：全程持 corpus 写锁=进程内 WriteGate + memory/{segment}/write.lock（独立于 dataset.lock，锁序 global→project）；execute_reflection 含 LLM 窗口持锁，apply 走 apply_reflection_under_permit。已推 PR #1982（9ca1043ce）。",
+      "source": "llm",
+      "source_ref": "01a13437-9ebd-7480-9c17-b3aa1946b9f6",
+      "tags": [
+        "1981",
+        "reflect",
+        "write-lock"
+      ],
+      "pinned": false,
+      "created_at": 1792069787,
+      "last_confirmed_at": 1792069787,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07hLFzpgerA",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1979 RTK 拍板（2026-10-15）：①全员 Tool 属性 enable_rtk；②只压 LLM text，TUI/typed 不压；③确定性 compact 优先于 head_limit；④环境读（Grep/Bash/Glob/Read/WebFetch/WebSearch）默认 true，其余默认 false。形态=策略内建。",
+      "source": "llm",
+      "source_ref": "01a133f5-ae6b-7e98-947c-59d388cf5756",
+      "tags": [
+        "1979",
+        "rtk",
+        "tools"
+      ],
+      "pinned": false,
+      "created_at": 1792074321,
+      "last_confirmed_at": 1792074321,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07hLJQNptcO",
+      "layer": "project",
+      "category": "decision",
+      "content": "工具结果体积口径终态（合成 #1975/#1978/#1983 系列）：①源头硬顶按调用性质分层——有预期的内部调用（Memory/Skill/Search）与 Watch log（本已落盘，设硬顶防再触 materializer）设硬顶；对环境的 tool call（Grep/Bash/Read/Glob/WebFetch/WebSearch）NEVER 设源头硬顶，体积交给 materializer；②materializer 落盘阈值 = 窗口 0.5% + floor 3000，占位符开销 MUST < threshold；③TUI 有界预览 TOOL_RESULT_PREVIEW_LIMIT=64KB 保留；④Grep 已删 output_mode 与索引，默认 content 行输出，传 output_mode 直接拒绝；⑤长期方向是 RTK 语义压缩（#1979），NEVER 恢复机械硬截断。新增或修改结果渲染时 MUST 先区分「源头预算」与「框架兜底预算」。",
+      "source": "llm",
+      "tags": [
+        "budget",
+        "materializer",
+        "rtk",
+        "tool-result"
+      ],
+      "pinned": false,
+      "created_at": 1792074368,
+      "last_confirmed_at": 1792074368,
+      "confirmation_count": 0,
+      "outdated": false,
+      "kind": "synthesized",
+      "evidence": [
+        "mem_07evJqUFKdM",
+        "mem_07evJqUFKdO",
+        "mem_07h994KNhhY",
+        "mem_07hDeLi0SSe"
+      ]
+    },
+    {
+      "id": "mem_07hLJQNptcP",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1979 RTK 首批范围与交付形态仍待用户拍板：范围可选 = 仅 Grep / Grep+Bash / 六个环境读工具全做；交付可选 = 设计+实现同 PR 或先设计档。助手推荐默认 = Grep 先、同 PR。开工前 MUST 先确认范围与交付，且 #1979 属工具结果显示链改动，验收 MUST 含 L5（NEVER 自行写豁免），并同 commit 更新 specs/3.3-tui-cli.md 工具显示表。",
+      "source": "llm",
+      "tags": [
+        "1979",
+        "l5",
+        "rtk",
+        "scope"
+      ],
+      "pinned": false,
+      "created_at": 1792074368,
+      "last_confirmed_at": 1792074368,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "mem_07kUiMiiFXc",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1975 已关闭（2026-10-17）：PR1 #1978/#1983 交付完毕；RTK #1979 转未来工作并从 #1975 摘出、挂 v0.3.0 milestone（#4「Runtime Server 与 Agent 协同」，主题=runtime server 和 agent 协同）。RTK 已拍板：enable_rtk 默认关、仅 Grep/Bash/Glob/Read/WebFetch/WebSearch 默认开、只压 LLM text、不暴露给 LLM、compact>head_limit、策略内建；策略解析存 #1979 评论。",
+      "source": "llm",
+      "source_ref": "01a133f5-ae6b-7e98-947c-59d388cf5756",
+      "tags": [
+        "0.3.0",
+        "1975",
+        "1979",
+        "rtk"
+      ],
+      "pinned": false,
+      "created_at": 1792238431,
+      "last_confirmed_at": 1792238431,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07kXJEnqrHU",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "CJK 文本相似度分词口径：中文连续段在词法 tokenize 下只是单个 token，两个纯中文句子之间的词法 Jaccard 恒为 0，重复对会被全量静默漏检。凡做文本相似、去重、检索的组件，MUST 对 CJK 段改用字符 bigram（中英混合场景可叠加共享词法 token）。实证 #1987 PR2：~/.agents/memory 真 corpus eligible 全中文时 0 检出，改 bigram 后检出 J≈0.82 的 #1981 写锁两代结论重复对。",
+      "source": "llm",
+      "tags": [
+        "cjk",
+        "dedup",
+        "reflection",
+        "similarity",
+        "tokenize"
+      ],
+      "pinned": false,
+      "created_at": 1792240610,
+      "last_confirmed_at": 1792240610,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07kXJEnqrHV",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1987 reflection 收敛交付终态：PR0+#1981（容量门禁 0.75×max_entries=150、per-corpus 写锁闭环、reflect status line）已合入 main；PR2 = PR #1989（commit ec35623cb，Closes #1987，待 CI/review）。PR2 让 build_prompt 注入 corpus 现状段：分类分布 + archive 计数 + top-8 高相似对（J≥0.70，条目标注与该次引用的 M 序号契约同源）+ 合并收敛指令；依据是写入侧合并在写入瞬间生效，历史积量重复只能靠 reflect 时的 synthesize/outdated 收敛。设计文档 03-reflection.md §7.3。",
+      "source": "llm",
+      "tags": [
+        "1987",
+        "1989",
+        "convergence",
+        "corpus",
+        "prompt",
+        "reflection"
+      ],
+      "pinned": false,
+      "created_at": 1792240610,
+      "last_confirmed_at": 1792240610,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07kXJEnqrHW",
+      "layer": "project",
+      "category": "preference",
+      "content": "记忆/反思类改动的验收口径（用户 2026-10-12 明确要求）：MUST 用当前 ~/.agents/memory 真 corpus 快照做验收，不只跑合成 fixture（--ignored 集成测试直读真数据）。真数据中候选可能已被 outdated 或 eligible 过滤，此时改为分层验收——先直接调用检测函数验证目标对确实存在，再验证 prompt 集成输出。NEVER 因真实数据里没出现目标对就改判功能未完成或降低验收标准。",
+      "source": "llm",
+      "tags": [
+        "acceptance",
+        "corpus",
+        "ignored-test",
+        "reflection"
+      ],
+      "pinned": false,
+      "created_at": 1792240610,
+      "last_confirmed_at": 1792240610,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07kXJEnqrHX",
+      "layer": "project",
+      "category": "pattern",
+      "content": "记忆条目之间互引 MUST 使用稳定标识符（类型名、代码路径、文档章节、issue/PR 号），NEVER 使用 M 序号：序号在合并、去重与跨会话重排后会漂移，实证 M22 引 M26、M27 引 M1/M8、M73 引 M64/M60 均指向无关内容。反思生成的新记忆同样 MUST 能脱离序号独立读懂，避免把错误引用固化进下一轮注入。",
+      "source": "llm",
+      "tags": [
+        "citation",
+        "memory",
+        "reflection",
+        "stability"
+      ],
+      "pinned": false,
+      "created_at": 1792240610,
+      "last_confirmed_at": 1792240610,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07kfYWLDH3Q",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "记忆容量口径修正（#1987/#1989，修复 4c11cd776）：Reflect 的容量试算与候选计数 MUST 按有效 active 计（排除 outdated / superseded / TTL 过期条目），物理驻留的残留（实测 100 条 = outdated 78 + superseded 22）不占配额，也 MUST NOT 顶成整批拒写；修复后真 corpus 有效 active 99→89 通过 ≤150（0.75×max_entries）门禁。批量口径改动中断后 MUST 全量复查落点并用真 corpus 验收，NEVER 只改主调用面。",
+      "source": "llm",
+      "tags": [
+        "1987",
+        "1989",
+        "capacity",
+        "effective-count",
+        "reflection"
+      ],
+      "pinned": false,
+      "created_at": 1792247533,
+      "last_confirmed_at": 1792247533,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07kfYWLDH3R",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "Memory pinned 条目免疫 reflect 去噪（#1989 真 corpus 实证）：Step1 去噪 24 个候选中 13 条因 pinned 被拒；pin 保护是设计行为，但用户手动 pin 的多为『交付终态』类流水账，会被永久保留。要让 reflect 清掉这类噪音 MUST 先手动 unpin，NEVER 期待 reflect 覆盖 pin，也 NEVER 为绕过 pin 而弱化保护。",
+      "source": "llm",
+      "tags": [
+        "memory",
+        "noise",
+        "pin",
+        "reflection"
+      ],
+      "pinned": false,
+      "created_at": 1792247533,
+      "last_confirmed_at": 1792247533,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07kfYWLDH3S",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1987/#1989 真 corpus 两步 reflect 基线（副本隔离实跑）：起点物理 199 active / 188 archive；Step1 去噪 24 候选→11 落盘归档（13 条 pinned 被拒），物理 199→189；Step2 归纳 prompt 42.5k→38.8k chars，timeout 两代结论归纳为 1 条；净效果有效 active 99→89。遗留：100 条物理残留（outdated 78 + superseded 22）的一次性存量归档 migration 待用户拍板；#1989 已 7 commits、等 CI 绿合入（此前记录的 ec35623cb 已过期）。",
+      "source": "llm",
+      "tags": [
+        "1987",
+        "1989",
+        "baseline",
+        "corpus",
+        "reflection"
+      ],
+      "pinned": false,
+      "created_at": 1792247533,
+      "last_confirmed_at": 1792247533,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07mKI0NtXU0",
+      "layer": "project",
+      "category": "fact",
+      "content": "[Fact] #1990/#1991 与 #1992/#1994 均已 squash 合入 main：merge 5b1183b65（task not-found 报错补列表上下文 + TaskListCreate 描述防混淆）与 f426cf59d（tool_result 图片在 OpenAI 系/Ollama 出站转换不再丢弃：共享助手 tool_result_images + 紧随 user 消息承接；Anthropic 原生透传已锁定）。#1993（model vision 能力标记，priority:low）挂 v0.2.0 跟踪未实施；zhipu coding 通道含图请求 400 属预期现状（用户确认）。实测线索：doubao-seed-2.1-pro / Kimi k3 支持识图；测试图含答案文件名会导致假绿（vision-test-7391.png 教训，须用中性文件名）。CLI 已装 0.0.0-f426cf59（39M）。",
+      "source": "llm",
+      "source_ref": "01a133f5-ae6b-7e98-947c-59d388cf5756",
+      "tags": [
+        "delivery",
+        "provider",
+        "tools",
+        "vision"
+      ],
+      "pinned": false,
+      "created_at": 1792333790,
+      "last_confirmed_at": 1792333790,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07mVSsbB74q",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1995 clippy 零容忍已合（PR #1996 → 49c00708c）：[workspace.lints.rust] warnings=\"deny\" 全 crate 继承；clippy::warnings 是无效 lint 名 MUST NOT 写进 lints.clippy 表；item 级 #[allow] 优先于 lint 表；PR CI（coverage.yml）新增 clippy --all-targets -D warnings；生产顶层 allow(dead_code)=10=baseline（tools MCP 组挂 #61 D3）。两个坑：①workspace deny 使 Windows cargo check 也拦 dead_code，Unix 专属面须 cfg_attr(not(unix), allow(...))；②本地只验分支不验 merge ref——main 分叉后新增调用只在 CI 爆（#1994 用已删 OllamaProvider::new），合 PR 前先本地 merge main 复验。",
+      "source": "llm",
+      "source_ref": "01a12eab-2641-7cf3-9400-41320a9254b3",
+      "tags": [
+        "cfg_attr",
+        "clippy",
+        "lint-deny",
+        "merge-ref"
+      ],
+      "pinned": false,
+      "created_at": 1792343174,
+      "last_confirmed_at": 1792343174,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07nY62ni6rY",
+      "layer": "project",
+      "category": "fact",
+      "content": "#2003 已收口（2026-10-19）：PR #2004 squash → 95bc43151 合入 main，Issue CLOSED；worktree/本地/远端分支/orphan cache 已清。交付：①GrepInput 补 timeout: Option<u64>（修 schema 注入×deny_unknown_fields 契约裂缝，LLM 传 timeout 被拒）；②xtask 守卫新增 struct_field_presence 断言器（第 10 种）+ registry 规则 pattern.tools.deny-input-timeout-field（full 档）：开 deny_unknown_fields 的 Input struct MUST 声明 pub timeout:，防复发。",
+      "source": "llm",
+      "source_ref": "01a133f5-ae6b-7e98-947c-59d388cf5756",
+      "tags": [
+        "#2003",
+        "timeout",
+        "tools",
+        "守卫"
+      ],
+      "pinned": false,
+      "created_at": 1792397440,
+      "last_confirmed_at": 1792397440,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07nagjOjq9A",
+      "layer": "project",
+      "category": "decision",
+      "content": "#2002 Reflect 统一异步（PR #2005 待 CI，Closes #2002）：三触发 run_complete 一律 spawn detached 返 Detached；BusySkipped/DisabledSkipped 同步判定（engine 依赖同步回填）；detached 持独立 token，cancel 不影响异步（D2），ManualReflectionOutcome Cancelled/TimedOut 变体退役；副作用经 DetachedCompletionHook 完成点统一执行（usage+notice+槽游标），补齐 Interval 缺口；PreCompact 材料按 Succeeded 游标过滤、成功推游标=丢弃段压缩前末位置、BusySkipped 残余回填滞留（D4a）。坑：run_complete 不走注入 executor，测 BusySkipped 须 hold_slot_for_test 占槽；detached 断言轮询等落盘。",
+      "source": "llm",
+      "source_ref": "01a13437-9ebd-7480-9c17-b3aa1946b9f6",
+      "tags": [
+        "2002",
+        "async",
+        "detached",
+        "reflect"
+      ],
+      "pinned": false,
+      "created_at": 1792399616,
+      "last_confirmed_at": 1792399616,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07ndHks40iO",
+      "layer": "project",
+      "category": "decision",
+      "content": "Reflect 异步化后的终态反馈与超时口径：Manual 触发的 Failed/TimedOut MUST 经 DetachedCompletionHook 发 CommandResultText（is_error=true，复用既有终态文案），自动反思（Interval/PreCompact）失败保持静默不打扰主对话；TimedOut 在 notice 策略里 is_error=false，异步终态语境 MUST 统一按错误上报。memory.reflection.timeout_secs 默认 240→600s，依据为 Step1 推理实测 108s（64k chars + Max reasoning），240s 会让 Step2 被砍。通用口径：同步流程改 detached 后 MUST 逐项核验成功/失败/超时/取消终态仍产生等价的用户可见反馈。",
+      "source": "llm",
+      "tags": [
+        "detached",
+        "notice",
+        "reflection",
+        "timeout"
+      ],
+      "pinned": false,
+      "created_at": 1792401796,
+      "last_confirmed_at": 1792401796,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "mem_07ndHks40iP",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "带时间戳的 enum 变体 NEVER 依赖全等比较做幂等判定：两次 now() 在快环境会碰撞掩盖缺陷、慢环境（CI）才显形；幂等臂 MUST 显式忽略新时间戳（如已 Backgrounded 状态忽略新时间）。",
+      "source": "llm",
+      "tags": [
+        "enum",
+        "idempotency",
+        "timestamp"
+      ],
+      "pinned": false,
+      "created_at": 1792401796,
+      "last_confirmed_at": 1792401796,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "019f9927-0c00-7b02-a361-0c71bbb8061b",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1385 review 决策：最终架构去除 Main/Sub 生产类型区别；静态 RuntimeServices 与动态 SessionState 分开；统一 RuntimeContextFactory 按 RunSpec 装配；RuntimeContextParts 是无领域语义的过渡参数包，应删除，RuntimeContext 构造收窄为私有，禁止多路径手填。当前只 review，暂不执行修改。",
+      "source": "llm",
+      "source_ref": "019f94d4-3c99-7adc-ada8-4cae2fda89da",
+      "tags": [
+        "architecture",
+        "issue-1385",
+        "runtime"
+      ],
+      "pinned": true,
+      "created_at": 1784980900,
+      "last_confirmed_at": 1784980900,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "019fff45-9d85-7602-9cd8-3ee2654d2682",
+      "layer": "project",
+      "category": "fact",
+      "content": "aemeath 仓库 git push 触发 pre-push 复杂 hook（架构守卫+全量单测+缓存清理），Bash timeout 必须设 3600000ms；gh pr create 也易超时，优先用 gh api 直接创建或 body 文件方式，timeout 放长。",
+      "source": "llm",
+      "source_ref": "019ffea6-ec36-7fa1-803e-22b37280cb6c",
+      "tags": [
+        "aemeath",
+        "git",
+        "hook",
+        "timeout"
+      ],
+      "pinned": true,
+      "created_at": 1786694180,
+      "last_confirmed_at": 1786694180,
+      "confirmation_count": 0,
+      "outdated": false,
+      "superseded_by": "mem_07ZKBzcXpFR"
+    },
+    {
+      "id": "01a0cdf3-e0fb-7e70-beb0-73ede09fdc03",
+      "layer": "project",
+      "category": "decision",
+      "content": "#763 进度口径修正（用户指出）：真实约 45%，非 72%。原因：#982/#1022 关闭≠守卫终态达成（90 脚本混杂形态，29 项待引擎化），#1056 未开工，#1671 体量未计。教训：issue 关闭率不是交付度量，验收必须含\"形态\"验收；后续 #763 汇报按工作块加权（已完成块打折计返工），不再按 leaf 关闭率。",
+      "source": "llm",
+      "source_ref": "01a0ccfe-44e0-7640-945c-6e71b4b8a93f",
+      "tags": [],
+      "pinned": true,
+      "created_at": 1790161707,
+      "last_confirmed_at": 1790161707,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a0faf2-e311-71a0-a8b0-8e8124921cde",
+      "layer": "project",
+      "category": "fact",
+      "content": "v0.1.0 已于 2026-10-02 正式发版（tag 指 0db2458b1，run 36965064144 全绿，4 平台 tar.gz + checksums.txt），#579 与里程碑 #2「Context Engineering + 架构重构」（503 issue）已关闭。项目进入 v0.2.0（后台任务系统、Workflow Graph MVP、CLM 评分）。",
+      "source": "llm",
+      "source_ref": "01a0ee16-14c8-7a17-a872-2d5c283bfe59",
+      "tags": [
+        "milestone",
+        "release",
+        "v0.1.0"
+      ],
+      "pinned": true,
+      "created_at": 1790916616,
+      "last_confirmed_at": 1790916616,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a10cdc-4153-7d91-b44e-35395d86e260",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "aemeath UA 装配双重缺陷（PR #1851 / issue #1850，2026-10-05 实测定位）：①assemble_provider_user_agent_inputs 用 .or_else(find_by_driver) 使 catalog 外自定义 provider（OmniRoute，driver=openai）继承 OpenAI codex 官方 UA，网关按 UA 路由到不支持目标模型的 ChatGPT 账号渠道 → 400；②catalog UA 原优先于全局 api.user_agent。修复：优先级改为 Provider专属→全局→catalog→内置默认；source_key 有值时只查 source。排查手段：provider wire body 日志（llm_request/llm_request_body trace）+ 网关侧 provider_request_id 对账拿上游 detail。教训：driver 只是协议形状不代表身份，NEVER 让其继承官方客户端 UA。",
+      "source": "llm",
+      "source_ref": "01a0eb5f-3db9-7854-b0c8-6df7aa924228",
+      "tags": [
+        "config",
+        "omniroute",
+        "provider",
+        "user-agent"
+      ],
+      "pinned": true,
+      "created_at": 1791217123,
+      "last_confirmed_at": 1791217123,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a1121c-d67e-7650-be82-641e1184e7bf",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "#252 D14 嵌套后台陷阱（用户指出的设计缺陷，2026-10-07 修复）：Sub Run 内 tool call 若也自动转后台，子代理拿占位收口后——占位的 tool_use_id 只在子代理 canonical、真实结果回注无目标；完成通知路由到\"当前 active Run\"（父/无关 Run）语义错乱；多层 agent 嵌套彻底失控。铁律：自动转后台仅 Main Run 生效，Sub Run 派生装配点显式 background_threshold=None。判断依据：转后台模型假设「占位与回注同一 Run 树且存活」，任何会收口中间 Run 的嵌套结构都要重新审视此假设。",
+      "source": "llm",
+      "source_ref": "01a0eca8-9984-7164-99be-c4f4d2df2413",
+      "tags": [
+        "252",
+        "background-tasks",
+        "nested-run",
+        "sub-agent"
+      ],
+      "pinned": true,
+      "created_at": 1791305242,
+      "last_confirmed_at": 1791305242,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a11240-30d5-70f0-bc88-c6b101617168",
+      "layer": "project",
+      "category": "fact",
+      "content": "#252 PR1 已交付（PR #1853 待 review，9 commit：cf40f986b 设计→3470c19b4 基础件→f800623c7 spawn-first→7cd13d469 L4→3de656f0f workflow 文档+specs→6de12d72a 收尾）。全量绿+clippy 零警+守卫 0 违规+pre-push 过。剩余：PR2 通知链路（reminder BackgroundTaskEvent 接线+WakeupMailbox+RunIntent::BackgroundTaskWakeup）；PR3 查询+持久化+TUI（background_tasks tool、任务日志文件直绑装配、resume 对账、流式后台化、SDK 事件、slash 命令、LLM guidance）。01-workflow-design.md 主体来自 design-workflow-graph-redesign 未提交稿，该 worktree 任务 3/4 文档同步仍未完成。",
+      "source": "llm",
+      "source_ref": "01a0eca8-9984-7164-99be-c4f4d2df2413",
+      "tags": [
+        "252",
+        "PR-1853",
+        "background-tasks",
+        "v0.2.0"
+      ],
+      "pinned": true,
+      "created_at": 1791307559,
+      "last_confirmed_at": 1791307559,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "01a11270-9cb6-77d3-8121-557732024b07",
+      "layer": "project",
+      "category": "fact",
+      "content": "#252 PR1 已合入 main（PR #1853 squash merge → 8a722bcb5，2026-10-06T18:13，#252 保持 OPEN 等后续）。合并过程：①与 #1852/#1828 冲突（context lib.rs 两侧新增导出 union 解决）；②Coverage required check 失败——CI 慢环境暴露 domain 真 bug：Backgrounded 带时间字段，两次 now() 构造状态不全等致幂等判断落 InvalidTransition（本地过纯因跑得快时间戳碰撞）——advance 加幂等臂（已 Backgrounded 忽略新时间戳）修复；③head 变化按 skill 规则重新取得授权。分支/worktree/缓存已清理。剩余：PR2 通知链路（1-2 会话）、PR3 查询+持久化+TUI+默认开 10s（2-3 会话）。教训：带时间戳的 enum 变体 NEVER 依赖全等比较做幂等判定（测试里两次 now() 在快环境碰撞、慢环境显形）。",
+      "source": "llm",
+      "source_ref": "01a0eca8-9984-7164-99be-c4f4d2df2413",
+      "tags": [
+        "252",
+        "PR-1853",
+        "background-tasks",
+        "merged"
+      ],
+      "pinned": true,
+      "created_at": 1791310732,
+      "last_confirmed_at": 1791310732,
+      "confirmation_count": 0,
+      "outdated": false,
+      "superseded_by": "mem_07ndHks40iP"
+    },
+    {
+      "id": "01a112aa-2562-7bc1-8fe7-b1591c7d7298",
+      "layer": "project",
+      "category": "fact",
+      "content": "#252 PR2 已交付（PR #1879 等 review，8 commit）：通知链路全链——BackgroundTaskCompleted reminder 变体+渲染、BackgroundTaskReminderSource（OnEvent+take 语义）、RunIntent::BackgroundTaskWakeup（无 payload 保持 Copy）、WakeupMailbox+idle select、wakeup run 空输入启动+pipeline 创建后显式触发 reminder_handle_event（OnEvent source 只在 handle_event build 的缺口修补；竞争窗口数据留监督器下 Run 补注入）、spawn body notify_terminal 路由（active run→reminder/无→wakeup）、task_id 以账本 register 返回值为唯一身份。全量 73 suite 绿+guard 0 违规。剩余 PR3：查询+持久化+TUI+SDK+默认开 10s（2-3 会话）。",
+      "source": "llm",
+      "source_ref": "01a0eca8-9984-7164-99be-c4f4d2df2413",
+      "tags": [
+        "252",
+        "PR-1879",
+        "notify"
+      ],
+      "pinned": true,
+      "created_at": 1791314503,
+      "last_confirmed_at": 1791314503,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "01a1156d-fa23-7ed1-b9c5-e194efe78608",
+      "layer": "project",
+      "category": "fact",
+      "content": "#252 PR3 已交付（PR #1882 等 review，7 commit）：BackgroundTasks 工具（list/status/logs 增量游标/stop，port 在 tools、实现在 runtime、Source 换绑槽，Main+Sub 双 scope）；storage namespace background-task（终态快照落盘+resume Invalidated(ProcessExit) 恢复；Backgrounded receipt 投影 BackgroundTaskInvalidated）；wakeup 用户卡片；默认阈值 0→10+system prompt 特性段（阈值>0 才注入）。74 suite 绿+guard 0 违规。provider omniroute_replay 有 main 既有 println clippy 违规（CI 不跑 clippy 漏网）。#252 三 PR 全部交付，PR3 合入即收口。",
+      "source": "llm",
+      "source_ref": "01a0eca8-9984-7164-99be-c4f4d2df2413",
+      "tags": [
+        "252",
+        "PR-1882",
+        "PR3"
+      ],
+      "pinned": true,
+      "created_at": 1791360891,
+      "last_confirmed_at": 1791360891,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "01a115ff-bf39-74f2-a85c-f89e492e7767",
+      "layer": "project",
+      "category": "decision",
+      "content": "Workflow 交互边界总原则：用户不直接与 Workflow 交互。用户只与 LLM 对话；Workflow 的 create/query/update/activate/deactivate/complete/cancel 均只能由 LLM 通过 Workflow Tools 执行。TUI、slash command、用户输入和 Runtime 不得直接修改或查询后向用户暴露 Workflow 领域状态；用户意图与确认只作为 LLM 的语义输入/证据。此决策覆盖此前“用户可直接取消/激活 Workflow”等口径。",
+      "source": "llm",
+      "source_ref": "01a0f73e-fb68-7964-933d-d9001d972395",
+      "tags": [
+        "llm",
+        "supersedes",
+        "tools",
+        "user-boundary",
+        "workflow-graph"
+      ],
+      "pinned": true,
+      "created_at": 1791370444,
+      "last_confirmed_at": 1791370444,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a11664-233c-7670-a82d-c419587df8d6",
+      "layer": "project",
+      "category": "decision",
+      "content": "#252 默认阈值最终拍板（2026-10-07）：暂关闭（默认 0）——PR1-3 全套链路（引擎/通知/查询/持久化/TUI）已交付到 PR #1882，但真实使用验证后再开启默认 10s；显式配置 runtime.tool_background_threshold_secs>0 或 AEMEATH_TOOL_BACKGROUND_THRESHOLD_SECS 可随时启用。另：typed id 向 wanaka 靠拢已落地——share::ids 全局 new_typed_id(type)/is_typed_id（prefix_uuidv7hex，字典序=时间序），BackgroundTaskId 先接入（本体即 task_<uuidv7hex> 单一真相），其他 id 渐进迁移；TYPED_ID_SEPARATOR 常量归位 constants.rs。",
+      "source": "llm",
+      "source_ref": "01a0eca8-9984-7164-99be-c4f4d2df2413",
+      "tags": [
+        "252",
+        "default-off",
+        "typed-id"
+      ],
+      "pinned": true,
+      "created_at": 1791377023,
+      "last_confirmed_at": 1791377023,
+      "confirmation_count": 0,
+      "outdated": true,
+      "superseded_by": "01a125b3-0a48-7c48-bfca-be391a2bd649"
+    },
+    {
+      "id": "01a1166d-a445-7f01-acf4-767f0403b6eb",
+      "layer": "project",
+      "category": "fact",
+      "content": "#252 三 PR 全部合入 main 收口完成：PR1 #1853（核心引擎 8a722bcb5）、PR2 #1879（通知链路 c5ee1a941）、PR3 #1882（查询+持久化+TUI 54fdb8a92，2026-10-07T12:49）。PR3 终态含：BackgroundTaskList/Status/Logs/Stop 工具族（task 族先例拆分）、typed id new_typed_id/is_typed_id（wanaka 方向，BackgroundTaskId 先接入）、spinner「N Backend Progress」、resume 对账、**默认 0 暂关闭**（真实使用验证后开 10）。#252 保持 OPEN（默认开启验收项未完）。分支/worktree/缓存已清理（10G/50G）。剩余 open PR：#1880 PL provider、#1546、#533。",
+      "source": "llm",
+      "source_ref": "01a0eca8-9984-7164-99be-c4f4d2df2413",
+      "tags": [
+        "252",
+        "PR-1882",
+        "complete",
+        "merged"
+      ],
+      "pinned": true,
+      "created_at": 1791377646,
+      "last_confirmed_at": 1791377646,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "01a12566-3268-7acd-a84c-857491e27eab",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1833 推理路线口径修正（used to：candle 已放弃、设计文档 §8 远期评估项处置待拍板；now）：llama.cpp 内嵌即终态（llama-cpp-2 safe binding + Q8_0 GGUF 812MB + Metal worker 专线程约 0.9G；PointerHead 评分头为纯 Rust domain，Rust 化边界=推理前向之外全链路），candle、rlx-qwen35、mistral.rs 等候选统一保留为「未来备选」，§8 措辞已同步。曾用名 candle 的迁移目标作废。",
+      "source": "llm",
+      "tags": [
+        "1833",
+        "candle",
+        "llama-cpp",
+        "route"
+      ],
+      "pinned": false,
+      "created_at": 1791628817,
+      "last_confirmed_at": 1791628817,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a12566-c2ac-7e50-9fe4-f669900f7e96",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1895 已交付（PR #1907 CI 全绿待 review，feature/1895-background-process-tui-display，3 commit）：①sdk 四组 Input/Result typed 导出 ②ToolDisplay trait 扩 format_result_lines(content Value) 钩子（默认 None 零影响，渲染层 Plain 分支优先 typed 行）——四工具专属 header（Stop 也有独立 header 带 id）+ 解析渲染（List 逐行摘要/Status 含 log bytes/Logs 多行原文 40 行 tail/Stop signal_sent→state）③计数从 spinner 挪 LiveStatusViewModel.background_processes_active 顶层 → status line 第三行（Run 结束仍可见，>0 显示）。#252 sub-issue 全闭：合入 #1907 后 #252 可关。",
+      "source": "llm",
+      "source_ref": "01a0eca8-9984-7164-99be-c4f4d2df2413",
+      "tags": [
+        "1895",
+        "252",
+        "pr-1907",
+        "tui"
+      ],
+      "pinned": false,
+      "created_at": 1791628853,
+      "last_confirmed_at": 1791628853,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "01a1259d-ccc8-717c-b565-d77f8bf0b135",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "跨crate错误折叠前必须先核：活跃match粒度、反向构造越界、DomainError/ErrorCategory是否够承载用户可见语义。#1863中SessionManagementError的6变体被runtime映射为sdk SessionResumeFailureKind三类；仅有Invalid/Storage/Unavailable时NotFound与Corrupt无法区分。处理：先扩share DomainError细分code再全折叠，并同改透传签名与反向构造点。",
+      "source": "llm",
+      "tags": [
+        "DomainError",
+        "PL",
+        "cross-crate",
+        "error-folding"
+      ],
+      "pinned": false,
+      "created_at": 1791632461,
+      "last_confirmed_at": 1791632461,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a1259d-ccc8-7d35-b2e8-9843eccb0f4e",
+      "layer": "project",
+      "category": "pattern",
+      "content": "PL收敛拍板与白名单时序：阶段1对账表贴issue→用户文字逐项拍板→阶段2 TDD重构且每commit同步白名单保pre-push绿→阶段3清空后按领域聚合分组重建白名单（每组需用户同意）。对账可修正issue原假设；发现活路径与拍板前提冲突时立即停手报告并收窄删除范围，NEVER在未核实生产调用前删端口方法。",
+      "source": "llm",
+      "tags": [
+        "PL",
+        "reconciling",
+        "whitelist",
+        "workflow"
+      ],
+      "pinned": false,
+      "created_at": 1791632461,
+      "last_confirmed_at": 1791632461,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a1259d-ccc8-7e2f-a8ad-94eaad392365",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1863 context PL收敛拍板（2026-10-08/09）：删context_port子模块归根面（组织轴=领域概念非消费方；runtime直连PL、composition只装配不转发类型）；5错误枚举全折叠为DomainError并在#1863内扩展细分code（不另开issue），runtime resume失败分类改按code转译；NoOpCanonicalSessionWriter下沉context dev feature test_support供跨crate测试；只删reminder_task_mutated+OnTaskMutation死链路，保留reminder_handle_event/OnEvent（对账纠错后活路径）；白名单阶段2过程同步保绿、阶段3终态从0重建分组经用户同意加入。#1862 runtime暂停，留待与#1876 TUI↔runtime联动对账。",
+      "source": "llm",
+      "tags": [
+        "1863",
+        "DomainError",
+        "PL",
+        "context",
+        "whitelist"
+      ],
+      "pinned": false,
+      "created_at": 1791632461,
+      "last_confirmed_at": 1791632461,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a125a7-b95b-7190-adfc-d86350b820fd",
+      "layer": "project",
+      "category": "fact",
+      "content": "System One 事件流设计草案已落盘（#1909，milestone v0.2.0，分支 design/systemone-event-stream）：03-event-stream.md + README/02 交叉引用 + plan 2026-10-10-systemone-event-stream.md。拍板 Q1–Q7 全收：升级替换 audit→日切、全量现场、全套关联、30天GC+fail-open、不做报告面、中心化emit、明文两PR。只文档未改代码。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1909",
+        "design",
+        "event-stream",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791633111,
+      "last_confirmed_at": 1791633111,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "01a125a8-b1d8-7401-9755-8e672e7d910c",
+      "layer": "project",
+      "category": "pattern",
+      "content": "事件流设计范式已跨 feature 复用：Memory 事件流（#1903，06-event-stream.md）与 System One 事件流（#1909，03-event-stream.md）采用同一组缺省拍板项——真 append-only、升级替换旧审计为按日切分、30 天 GC + fail-open、保留全量现场、完整关联（id/session/correlation_id）、不做报告面、中心化 emit、明文、拆两 PR 交付。后续新 feature 的事件流设计 SHOULD 直接沿用该口径，避免逐项重新拍板；任何偏离项 MUST 显式说明理由。",
+      "source": "llm",
+      "tags": [
+        "design",
+        "event-stream",
+        "memory",
+        "reuse",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791633175,
+      "last_confirmed_at": 1791633175,
+      "confirmation_count": 0,
+      "outdated": false,
+      "kind": "synthesized",
+      "evidence": [
+        "01a1252a-b257-76c3-994f-7cef70de784d",
+        "01a125a7-b95b-7190-adfc-d86350b820fd"
+      ]
+    },
+    {
+      "id": "01a125b3-0a48-7153-baca-073d98dc43e7",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1908 实现口径两处收窄：MemoryId 不采用 String newtype（不走 BackgroundProcessId 形态），改用可 Copy 的枚举以避免全仓 .clone() 改造；Connect 服务 session_id 参数改为借用传递而非按值传入，避免丢 Copy 后的批量克隆。",
+      "source": "llm",
+      "tags": [
+        "1908",
+        "api",
+        "clone",
+        "memory-id"
+      ],
+      "pinned": false,
+      "created_at": 1791633853,
+      "last_confirmed_at": 1791633853,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a125b3-0a48-743f-94af-1846aadf4fc0",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "批量跨 crate 改名/符号迁移的委派可靠性再获反例：#1908（typed id 迁移）中委派的后台 coder sub agent 连续两次 failed，最终由主 agent 直接改调用面完成。既有「派发 coder sub-agent 逐文件精修」口径仍禁止无差别正则批量替换，但委派前须确认子 agent 上下文与范围可自包含，并预备主 agent 接手的回退路径。",
+      "source": "llm",
+      "tags": [
+        "1908",
+        "PL",
+        "rename",
+        "sub-agent"
+      ],
+      "pinned": false,
+      "created_at": 1791633853,
+      "last_confirmed_at": 1791633853,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a125b3-0a48-7631-b827-03db0dd10099",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "#1908 typed id 迁移实测坑：既有测试里用非 uuidv7 的假 UUID（test_id 等）在迁移后全部失配，需同步改测试 id 生成；serde 反序列化必须同时接受 typed 字符串与旧 uuidv7，否则旧快照/旧 session 读失败。迁移顺序宜先改内核 newtype 与 serde，再批量修调用面编译错误，最后清点业务路径 Uuid::now_v7 残留（雪花时间源借用可保留）。",
+      "source": "llm",
+      "tags": [
+        "1908",
+        "migration",
+        "serde",
+        "test",
+        "typed-id"
+      ],
+      "pinned": false,
+      "created_at": 1791633853,
+      "last_confirmed_at": 1791633853,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a125c6-7ad8-7b5a-8437-a016b3f8418f",
+      "layer": "project",
+      "category": "decision",
+      "content": "#1903 用户最终拍板相对推荐默认包有两处偏离：Q1 不做查询/报告面（非推荐的离线报告+内部 Port），只做事件+现场供 LLM 直接读文件分析；Q3=A 读路径全量含候选正文（非推荐的读摘要）。其余按推荐：Q2=A 中心化 emit、Q4=A 明文、Q5=B history 真 append-only 一致、Q6=B 两 PR。验收收窄为文件可读/测试 helper/写失败不阻断/19 落点齐，基线报告与查询 Port 明确 follow-up。",
+      "source": "llm",
+      "tags": [
+        "1903",
+        "design",
+        "event-stream",
+        "memory"
+      ],
+      "pinned": false,
+      "created_at": 1791635127,
+      "last_confirmed_at": 1791635127,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a125c6-7ad8-7cdd-8c5c-fb251b627b51",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1903 实施中（Subagent-Driven，选 1）：设计/计划已落地（06-event-stream.md + plan 2026-10-10-memory-event-stream.md）。PR1 进度：Task1–6 完成（schema、EventAppendPort、JsonlSegmentEventStore、MemoryService emit+fail-open、写组8项、OpenLoad+CommitCas）；当前 Task7 reflection-history 真 append-only；余 Task8 retention/composition、Task9 验证+开PR；PR2 尚未开工。",
+      "source": "llm",
+      "tags": [
+        "1903",
+        "event-stream",
+        "implementation",
+        "pr1"
+      ],
+      "pinned": false,
+      "created_at": 1791635127,
+      "last_confirmed_at": 1791635127,
+      "confirmation_count": 0,
+      "outdated": true,
+      "superseded_by": "mem_07ZJrr4jMe0"
+    },
+    {
+      "id": "01a12601-80be-72f3-8847-72d9355dbec9",
+      "layer": "project",
+      "category": "fact",
+      "content": "#252 后台任务系统已收口关闭（2026-10-10）：PR #1907 squash merge→3c0daa1c8（#1895 typed 显示+计数 status bar 第三行+L4/L5 体系+prompt 并发指引），#1895/#252 均 CLOSED。全链 6 PR：#1853/#1879/#1882/#1894/#1899/#1907。终态：计数独占第三行（布局 2→3 动态）、Logs 5 行 tail 同源常量 TOOL_RESULT_TAIL_LINES、L5 PTY mock LLM 基建（kitty CSI u 表达 Enter）。遗留：远端分支 feature/1895-background-process-tui-display 删除未确认（会话 cwd 失效中断收尾）；默认阈值 10s 已开待长期观察。",
+      "source": "llm",
+      "source_ref": "01a0eca8-9984-7164-99be-c4f4d2df2413",
+      "tags": [
+        "1895",
+        "1907",
+        "252",
+        "收口"
+      ],
+      "pinned": false,
+      "created_at": 1791638995,
+      "last_confirmed_at": 1791638995,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a12605-f16d-7892-baa2-bcdb3d4d5519",
+      "layer": "project",
+      "category": "pitfall",
+      "content": "Stop Hook cwd 死亡死循环根因与修复方案（2026-10-10 #252 收口会话实证）：worktree 被外部删除（非 ExitWorktree 路径）后，hook 子进程 cwd=HookDispatchContextData.cwd（runtime 传的 workspace cwd）ENOENT → ExecutionFault::SpawnWithDetail → 重试耗尽 → Stop 永久阻断，用户只能 Ctrl+C 强退。已修的是「ExitWorktree 正常退出时 AEMEATH_PROJECT_DIR 回退主仓」——覆盖不到外部删除路径。修复方案（下会话执行）：A 止血=dispatcher 对 Stop 点 cwd 无效的 Spawn 故障降级记录+放行（环境已死守卫无从谈起）；B 根因=HookDispatchContextData 加 fallback_cwd（runtime 传主仓根/agents dir），executor spawn 前 is_dir 校验选择。验证=hook crate 单测（回退选择+Stop 放行）+L4。",
+      "source": "llm",
+      "source_ref": "01a0eca8-9984-7164-99be-c4f4d2df2413",
+      "tags": [
+        "stop-hook",
+        "worktree",
+        "修复方案",
+        "死循环"
+      ],
+      "pinned": false,
+      "created_at": 1791639286,
+      "last_confirmed_at": 1791639286,
+      "confirmation_count": 0,
+      "outdated": false
+    },
+    {
+      "id": "01a12619-ed41-7af1-b0f7-c658bef4a9e7",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1909 System One 事件流设计文档 PR 已开：https://github.com/rushsinging/aemeath/pull/1911（分支 design/systemone-event-stream，commit c1a3b42fa，仅文档）。Issue #1909 milestone v0.2.0。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1909",
+        "1911",
+        "event-stream",
+        "pr",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791640595,
+      "last_confirmed_at": 1791640595,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "01a12625-7a57-78f3-84e6-88ed120ec4b5",
+      "layer": "project",
+      "category": "fact",
+      "content": "PR #1911（#1909 System One 事件流设计文档）已 squash 合入 main：0d9f5ed31（2026-10-10T14:07）。Issue #1909 保持 OPEN 等实施 PR1/PR2。本地 worktree design-systemone-event-stream 与本地分支已删；远端分支删除经 pre-push。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1909",
+        "1911",
+        "event-stream",
+        "merged",
+        "systemone"
+      ],
+      "pinned": false,
+      "created_at": 1791641352,
+      "last_confirmed_at": 1791641352,
+      "confirmation_count": 0,
+      "outdated": true
+    },
+    {
+      "id": "01a12626-3b0e-70e2-8ce4-faa51d2b940a",
+      "layer": "project",
+      "category": "fact",
+      "content": "#1909 文档 PR #1911 已合入并清理完毕：squash→0d9f5ed31；worktree/本地/远端 design/systemone-event-stream 已删；main=origin/main；#1909 仍 OPEN 待实施。",
+      "source": "llm",
+      "source_ref": "01a11edc-1f24-739e-b97e-ca31c2ac3456",
+      "tags": [
+        "1909",
+        "1911",
+        "cleanup",
+        "merged"
+      ],
+      "pinned": false,
+      "created_at": 1791641402,
+      "last_confirmed_at": 1791641402,
+      "confirmation_count": 0,
+      "outdated": true,
+      "superseded_by": "mem_07ZAEEd03yy"
+    }
+  ]
+}

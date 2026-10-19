@@ -736,8 +736,9 @@ impl MemoryPort for InMemoryMemory {
             } else {
                 Box::new(active)
             };
-        let candidates =
-            entries.filter(|(entry, _)| matches_filters(entry, query.layer, query.category));
+        let candidates = entries
+            .filter(|(entry, _)| matches_filters(entry, query.layer, query.category))
+            .filter(|(entry, _)| !query.exclude_stale || is_injection_eligible(entry, query.now));
         let hits = crate::domain::lexical_search::rank_explicit_search(candidates, query);
         MemorySearchResult {
             mode: MemoryRetrievalMode::ExplicitSearch,

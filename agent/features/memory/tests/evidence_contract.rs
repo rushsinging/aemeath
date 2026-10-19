@@ -48,6 +48,7 @@ async fn archived_entries(memory: &InMemoryMemory, text: &str) -> Vec<MemoryEntr
             layer: Some(MemoryLayer::Project),
             category: None,
             include_archive: true,
+            exclude_stale: false,
             now: now(),
         })
         .await

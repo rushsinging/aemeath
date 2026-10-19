@@ -54,6 +54,7 @@ async fn recall_relevant_inner(
             layer: None,
             category: None,
             include_archive: false,
+            exclude_stale: true,
             now,
         })
         .await;

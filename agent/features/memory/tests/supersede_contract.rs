@@ -77,6 +77,7 @@ async fn search(memory: &dyn MemoryPort, text: &str) -> Vec<MemorySearchHit> {
             layer: None,
             category: None,
             include_archive: false,
+            exclude_stale: false,
             now: now(),
         })
         .await
