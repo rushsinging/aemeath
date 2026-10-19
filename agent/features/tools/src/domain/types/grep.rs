@@ -28,4 +28,9 @@ pub struct GrepInput {
     pub glob: Option<String>,
     /// Maximum number of matching lines to return. Omit for no limit.
     pub head_limit: Option<u32>,
+    /// Timeout in seconds (default 120, max 3600)
+    /// 框架向 schema 统一注入 timeout（`TypedToolAdapter::input_schema`），serde 须能解析
+    /// 该字段，否则 LLM 按 schema 传参即被 `deny_unknown_fields` 拒绝（同 ExitWorktreeInput 契约）。
+    #[serde(default)]
+    pub timeout: Option<u64>,
 }

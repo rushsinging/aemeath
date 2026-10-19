@@ -230,6 +230,59 @@ async fn grep_call_rejects_output_mode_field() {
     );
 }
 
+/// 框架向 schema 注入统一 timeout 字段（`TypedTool::supports_configurable_timeout`
+/// 默认 true，`TypedToolAdapter::input_schema` 注入），因此 GrepInput MUST 能反序列化
+/// 含 timeout 的 input——否则 LLM 按 schema 承诺传参即被 deny_unknown_fields 拒绝。
+#[test]
+fn grep_input_deserializes_framework_timeout_field() {
+    use crate::domain::types::grep::GrepInput;
+
+    let parsed: GrepInput = serde_json::from_value(serde_json::json!({
+        "pattern": "needle",
+        "timeout": 30
+    }))
+    .expect("含 timeout 的 input 必须可解析");
+    assert_eq!(parsed.timeout, Some(30));
+}
+
+/// timeout 缺省时 MUST 保持向后兼容（Option 为 None）。
+#[test]
+fn grep_input_accepts_missing_timeout() {
+    use crate::domain::types::grep::GrepInput;
+
+    let parsed: GrepInput = serde_json::from_value(serde_json::json!({"pattern": "needle"}))
+        .expect("无 timeout 的 input 必须可解析");
+    assert_eq!(parsed.timeout, None);
+}
+
+/// 真实调用链：GrepTool::call 收到含 timeout 的 input 必须正常执行，
+/// 而非报 unknown field `timeout`。
+#[tokio::test]
+async fn grep_call_accepts_timeout_field() {
+    let dir = make_match_dir(2).await;
+    let ctx = test_ctx(dir.path().to_path_buf());
+    let tool = GrepTool;
+
+    let result = tool
+        .call(
+            serde_json::json!({
+                "pattern": "match_me",
+                "path": dir.path().to_string_lossy(),
+                "timeout": 30
+            }),
+            &ctx,
+        )
+        .await;
+
+    assert!(
+        !result.is_error,
+        "含 timeout 的调用必须成功: {}",
+        result.text
+    );
+    let data = result.data.expect("data should be present");
+    assert_eq!(data.matches.len(), 2);
+}
+
 #[test]
 fn grep_input_schema_excludes_output_mode_property() {
     use crate::domain::types::grep::GrepInput;
