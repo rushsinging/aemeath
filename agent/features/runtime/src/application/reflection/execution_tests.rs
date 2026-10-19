@@ -177,6 +177,8 @@ enum ScriptedStep {
 struct RecordedRequest {
     system: String,
     messages: Vec<(&'static str, String)>,
+    reasoning: share::reasoning::ReasoningLevel,
+    max_output_tokens: u32,
 }
 
 /// 按调用顺序回放响应的反思测试 provider。脚本耗尽后再次被调用即 panic——
@@ -214,6 +216,8 @@ impl ProviderPort for ScriptedReflectionProvider {
         self.requests.lock().unwrap().push(RecordedRequest {
             system: request.system.clone(),
             messages,
+            reasoning: request.reasoning,
+            max_output_tokens: request.max_output_tokens,
         });
         let step = self
             .steps
@@ -490,6 +494,50 @@ async fn valid_output_calls_provider_once_without_repair() {
 
     assert_eq!(result.output.deviations, ["drift"]);
     assert_eq!(provider.requests().len(), 2);
+}
+
+#[tokio::test]
+async fn reflection_execution_preserves_request_parameters_during_retry_and_repair() {
+    let provider = ScriptedReflectionProvider::new(vec![
+        ScriptedStep::Text(NOISE_EMPTY_JSON.to_string()),
+        ScriptedStep::Empty,
+        ScriptedStep::Text("not json at all".to_string()),
+        ScriptedStep::Text(VALID_REFLECTION_JSON.to_string()),
+    ]);
+    let history = RecordingHistory::default();
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let model = model();
+    let result = execute_reflection(
+        &[share::message::Message::user("reflect")],
+        "en",
+        false,
+        150,
+        200,
+        ReflectionInvocation {
+            provider: &provider,
+            model: &model,
+            max_tokens: 64_000,
+            requested_reasoning: share::reasoning::ReasoningLevel::High,
+            system_prompt_text: "system",
+        },
+        &NoOpMemory,
+        &history,
+        &identity(),
+        &cancel,
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.output.deviations, ["drift"]);
+    let requests = provider.requests();
+    assert_eq!(
+        requests.len(),
+        4,
+        "去噪、归纳、空响应重试和解析修复必须完整执行"
+    );
+    for request in requests {
+        assert_eq!(request.reasoning, share::reasoning::ReasoningLevel::High);
+        assert_eq!(request.max_output_tokens, 64_000);
+    }
 }
 
 #[tokio::test]

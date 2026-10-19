@@ -97,6 +97,38 @@ fn test_reflection_timeout_secs_defaults_to_600_and_deserializes_override() {
 }
 
 #[test]
+fn reflection_reasoning_defaults_to_inherited_and_round_trips_override() {
+    let empty: MemoryConfig = serde_json::from_str("{}").unwrap();
+    assert_eq!(empty.reflection.reasoning, None);
+
+    let configured: MemoryConfig =
+        serde_json::from_str(r#"{"reflection":{"reasoning":"high"}}"#).unwrap();
+    assert_eq!(
+        configured.reflection.reasoning,
+        Some(crate::reasoning::ReasoningLevel::High)
+    );
+    let encoded = serde_json::to_value(&configured).unwrap();
+    assert_eq!(encoded["reflection"]["reasoning"], "high");
+    assert!(
+        serde_json::from_str::<MemoryConfig>(r#"{"reflection":{"reasoning":"unsupported"}}"#)
+            .is_err()
+    );
+}
+
+#[test]
+fn reflection_max_tokens_defaults_to_inherited_and_round_trips_override() {
+    let empty: MemoryConfig = serde_json::from_str("{}").unwrap();
+    assert_eq!(empty.reflection.max_tokens, None);
+
+    let configured: MemoryConfig =
+        serde_json::from_str(r#"{"reflection":{"max_tokens":64000}}"#).unwrap();
+    assert_eq!(configured.reflection.max_tokens, Some(64_000));
+    let encoded = serde_json::to_value(&configured).unwrap();
+    assert_eq!(encoded["reflection"]["max_tokens"], 64_000);
+    assert!(serde_json::from_str::<MemoryConfig>(r#"{"reflection":{"max_tokens":-1}}"#).is_err());
+}
+
+#[test]
 fn test_reflection_target_active_entries_defaults_to_150_and_deserializes_override() {
     // 缺省 150：reflect 将 active 收敛到该目标，hard_cap(max_entries=200) 留 50 缓冲。
     let empty: MemoryConfig = serde_json::from_str("{}").unwrap();

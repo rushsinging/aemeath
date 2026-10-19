@@ -404,7 +404,7 @@ impl PreCompactMaterialSlot {
                 .map(|cursor| cursor.saturating_sub(staged.array_origin))
                 .unwrap_or_default();
         let (residual, dispatchable) = staged.uncovered_residual();
-        dispatchable.then(|| PreCompactReflectionMaterial {
+        dispatchable.then_some(PreCompactReflectionMaterial {
             messages: residual,
             coverage_end: Some(segment_end),
             array_origin: residual_origin,

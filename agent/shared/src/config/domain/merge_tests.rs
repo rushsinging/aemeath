@@ -389,6 +389,60 @@ fn runtime_patch_some_makes_config_patch_non_empty() {
 }
 
 #[test]
+fn reflection_reasoning_patch_overrides_and_preserves_unspecified_fields() {
+    let global: ConfigPatch =
+        serde_json::from_str(r#"{"memory":{"reflection":{"reasoning":"max","timeout_secs":300}}}"#)
+            .unwrap();
+    let overlay: ConfigPatch =
+        serde_json::from_str(r#"{"memory":{"reflection":{"reasoning":"high"}}}"#).unwrap();
+    let config = apply_patch(apply_patch(Config::default(), global), overlay);
+    assert_eq!(
+        config.memory.reflection.reasoning,
+        Some(crate::reasoning::ReasoningLevel::High)
+    );
+    assert_eq!(config.memory.reflection.timeout_secs, 300);
+
+    let sparse: ConfigPatch =
+        serde_json::from_str(r#"{"memory":{"reflection":{"interval_runs":3}}}"#).unwrap();
+    let config = apply_patch(config, sparse);
+    assert_eq!(
+        config.memory.reflection.reasoning,
+        Some(crate::reasoning::ReasoningLevel::High)
+    );
+    assert_eq!(config.memory.reflection.interval_runs, 3);
+
+    let off: ConfigPatch =
+        serde_json::from_str(r#"{"memory":{"reflection":{"reasoning":"off"}}}"#).unwrap();
+    let config = apply_patch(config, off);
+    assert_eq!(
+        config.memory.reflection.reasoning,
+        Some(crate::reasoning::ReasoningLevel::Off)
+    );
+}
+
+#[test]
+fn reflection_max_tokens_patch_overrides_and_preserves_unspecified_fields() {
+    let global: ConfigPatch = serde_json::from_str(
+        r#"{"memory":{"reflection":{"max_tokens":20000,"reasoning":"high"}}}"#,
+    )
+    .unwrap();
+    let overlay: ConfigPatch =
+        serde_json::from_str(r#"{"memory":{"reflection":{"max_tokens":64000}}}"#).unwrap();
+    let config = apply_patch(apply_patch(Config::default(), global), overlay);
+    assert_eq!(config.memory.reflection.max_tokens, Some(64_000));
+    assert_eq!(
+        config.memory.reflection.reasoning,
+        Some(crate::reasoning::ReasoningLevel::High)
+    );
+
+    let sparse: ConfigPatch =
+        serde_json::from_str(r#"{"memory":{"reflection":{"interval_runs":3}}}"#).unwrap();
+    let config = apply_patch(config, sparse);
+    assert_eq!(config.memory.reflection.max_tokens, Some(64_000));
+    assert_eq!(config.memory.reflection.interval_runs, 3);
+}
+
+#[test]
 fn reflection_timeout_secs_patch_overrides_and_reaches_config() {
     let layer: ConfigPatch =
         serde_json::from_str(r#"{"memory":{"reflection":{"timeout_secs":600}}}"#).unwrap();

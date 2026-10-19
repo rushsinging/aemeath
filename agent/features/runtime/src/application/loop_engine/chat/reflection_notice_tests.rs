@@ -46,10 +46,8 @@ impl ChatEventSink for SystemMessageSink {
             RuntimeStreamEvent::SystemMessage(message) => {
                 self.messages.lock().expect("sink lock").push(message);
             }
-            RuntimeStreamEvent::CommandResultText { text, is_error } => {
-                if is_error {
-                    self.messages.lock().expect("sink lock").push(text);
-                }
+            RuntimeStreamEvent::CommandResultText { text, is_error } if is_error => {
+                self.messages.lock().expect("sink lock").push(text);
             }
             _ => {}
         }

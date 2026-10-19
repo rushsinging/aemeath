@@ -243,6 +243,8 @@ fn patch_for_update(
                         auto_apply_suggestions: Some(config.reflection.auto_apply_suggestions),
                         clear_model: config.reflection.model.is_none(),
                         model: config.reflection.model,
+                        reasoning: config.reflection.reasoning,
+                        max_tokens: config.reflection.max_tokens,
                         // SetMemoryConfig 的输入视图不携带反思超时键：
                         // patch 不触碰该键，保留文件层既有 timeout_secs。
                         timeout_secs: None,

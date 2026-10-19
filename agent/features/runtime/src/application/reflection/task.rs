@@ -329,6 +329,8 @@ impl ReflectionTaskAdapter {
             );
             return ReflectionRunOutcome::DisabledSkipped;
         }
+        let max_tokens = config.reflection.max_tokens.unwrap_or(max_tokens);
+        let requested_reasoning = config.reflection.reasoning.unwrap_or(requested_reasoning);
         let trigger = request.trigger;
         // 收口上次进程退出留下的悬挂 Running 记录：阈值 = 本次任务超时的两倍
         // （至少 60s），并发中新启动的运行不会被误收口；失败只告警不阻断本次反思。

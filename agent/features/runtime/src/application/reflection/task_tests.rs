@@ -446,9 +446,8 @@ impl memory::api::ReflectionHistoryStore for RecordingReflectionHistory {
     }
 }
 
-/// 取消后 history 必须写入 Cancelled 语义的终态记录（status=Failed +
-/// error_category=Cancelled），NEVER 留下悬挂的 Running 或伪装成成功；
-/// 同时断言没有成功终态记录（冲突终态互斥）。
+// 原取消测试保护 Failed + Cancelled 终态落盘、不遗留 Running、无冲突成功记录。
+// 退役后由独立 token 语义测试验证调用方取消不影响异步反思。
 // 退役（#2002 D2「cancel 不影响异步」）：预取消 token 不再折叠为
 // Completed(Cancelled)——detached 持独立 token 照常执行；替代证据 =
 // detached_run_ignores_cancelled_caller_token（预取消 → 终态 Succeeded 落盘）。

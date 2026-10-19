@@ -352,6 +352,12 @@ pub struct ReflectionConfigPatch {
     pub model: Option<String>,
     #[serde(default)]
     pub clear_model: bool,
+    /// 反思专用推理深度覆盖；缺省保留低层配置。
+    #[serde(default)]
+    pub reasoning: Option<crate::reasoning::ReasoningLevel>,
+    /// 反思专用单次输出预算覆盖；缺省保留低层配置。
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
     /// 反思执行超时（秒）覆盖。
     #[serde(default)]
     pub timeout_secs: Option<u64>,
@@ -920,6 +926,12 @@ pub(crate) fn apply_reflection_patch(
         base.model = None;
     } else if let Some(v) = patch.model {
         base.model = Some(v);
+    }
+    if let Some(reasoning) = patch.reasoning {
+        base.reasoning = Some(reasoning);
+    }
+    if let Some(max_tokens) = patch.max_tokens {
+        base.max_tokens = Some(max_tokens);
     }
     if let Some(v) = patch.timeout_secs {
         base.timeout_secs = v;
