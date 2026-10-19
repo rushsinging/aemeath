@@ -97,15 +97,10 @@ async fn run_loop_body(
     }
 
     // 手动反思 Run：runtime 已受理 `/reflect-now`，反思前置到主循环之前——命令直接把
-    // Run 置为 `Reflecting`，反思完成后回到 `DrainingInput`，收口仍由主循环里 drain 的
-    // `EmptyAndSealed` 完成（`Completed` 的唯一来源）。
-    if run.spec().intent() == RunIntent::ManualReflection
-        && matches!(
-            execute_manual_reflection(run, execution, cancel, port).await?,
-            ManualReflectionDirective::Terminal
-        )
-    {
-        return Ok(LoopDirective::Terminal);
+    // Run 置为 `Reflecting`，派发（统一异步，#2002）后回到 `DrainingInput`，收口仍由
+    // 主循环里 drain 的 `EmptyAndSealed` 完成（`Completed` 的唯一来源）。
+    if run.spec().intent() == RunIntent::ManualReflection {
+        execute_manual_reflection(run, execution, cancel, port).await?;
     }
 
     log::debug!(

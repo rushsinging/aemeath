@@ -1661,11 +1661,13 @@ async fn test_reflect_now_runs_a_real_run_without_run_changed() {
     let (text, is_error) = texts
         .first()
         .expect("手动反思 Run 结束必须发布终态 CommandResultText");
+    // 统一异步链路（#2002）：受理回执为「已在后台开始」；执行失败终态不再经
+    // CommandResultText 上报（由 detached 完成点处理）。
     assert!(
-        text.contains("执行失败"),
-        "生产反思 adapter 无 LLM 出口，终态应为失败态文案: {text}"
+        text.contains("后台开始"),
+        "受理回执应为后台开始文案: {text}"
     );
-    assert!(*is_error, "执行失败必须按 is_error 上报: {text}");
+    assert!(!*is_error, "派发成功回执不是错误: {text}");
 }
 
 // ---------------------------------------------------------------------------
@@ -1868,8 +1870,8 @@ async fn manual_reflection_run_does_not_persist_session_or_touch_updated_at() {
         .first()
         .expect("手动反思 Run 结束必须发布终态 CommandResultText");
     assert!(
-        terminal_text.contains("执行失败"),
-        "前置：应走真实 Run 的失败终态，而非禁用跳过文案: {terminal_text}"
+        terminal_text.contains("后台开始"),
+        "前置：应走真实 Run 的受理回执（后台开始），而非禁用跳过文案: {terminal_text}"
     );
 
     let recorded = persistence_calls.lock().unwrap().clone();

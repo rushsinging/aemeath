@@ -16,6 +16,13 @@ pub(crate) type ReflectionError = ReflectionExecutionError;
 pub type ReflectionResult<T> = ReflectionExecutionResultType<T>;
 pub type ReflectionInputMessage = share::message::Message;
 
+/// detached 完成点副作用钩子（#2002 M2）：detached 任务终态产生后异步执行
+/// （usage 记账、memory update notice、PreCompact 槽游标推进）。钩子拿到的是
+/// 最终 outcome；调用方负责在构造时捕获 'static 上下文快照。
+pub type DetachedCompletionHook = std::sync::Arc<
+    dyn Fn(ReflectionRunOutcome) -> futures::future::BoxFuture<'static, ()> + Send + Sync,
+>;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReflectionTaskTrigger {
     Interval { run_ordinal: usize },
@@ -295,6 +302,9 @@ impl ReflectionTaskAdapter {
         self.run_persisted(trigger, None, cancel, build).await
     }
 
+    /// 生产入口：三触发点统一 detached。NEVER 接收调用方 cancel token——
+    /// detached 持独立 token（cancel 不影响异步，#2002 D2）。终态副作用
+    /// （记账/notice/游标推进）经 `completion_hook` 在 detached 完成点执行。
     #[allow(clippy::too_many_arguments)]
     pub async fn run_complete(
         &self,
@@ -308,7 +318,7 @@ impl ReflectionTaskAdapter {
         lang: String,
         memory: std::sync::Arc<dyn MemoryPort>,
         history: std::sync::Arc<dyn ReflectionHistoryStore>,
-        cancel: tokio_util::sync::CancellationToken,
+        completion_hook: Option<DetachedCompletionHook>,
     ) -> ReflectionRunOutcome {
         if let Some(reason) = ReflectionDisabledReason::of(&config) {
             log::info!(
@@ -367,25 +377,46 @@ impl ReflectionTaskAdapter {
             )
             .await
         };
-        // Interval：后台执行，避免阻塞主对话；PreCompact/Manual 仍同步等待
-        // （PreCompact 在 compact 相位内，调用方需 Completed 以记账/收口）。
-        if matches!(trigger, ReflectionTaskTrigger::Interval { .. }) {
-            let adapter = self.clone();
-            let cancel = cancel.clone();
-            tokio::spawn(async move {
-                let outcome = adapter
-                    .run_persisted(trigger, persistence, cancel, build)
-                    .await;
-                log::info!(
-                    target: crate::LOG_TARGET,
-                    "[reflection_detached_done] trigger={:?} outcome={outcome:?}",
-                    trigger,
-                );
-            });
-            return ReflectionRunOutcome::Detached;
-        }
-        self.run_persisted(trigger, persistence, cancel, build)
-            .await
+        // 统一异步链路（#2002）：三触发点（Interval/PreCompact/Manual）一律
+        // detached 执行，立即返回 Detached——宿主流程（compact 相位、Manual Run、
+        // 主对话）NEVER 等待反思完成。单槽占用必须同步判定（BusySkipped 同步
+        // 返回，engine 才能回填 PreCompact 材料）。
+        let Ok(slot) = self.slot.clone().try_lock_owned() else {
+            log::info!(
+                target: crate::LOG_TARGET,
+                "[reflection_busy_skip] trigger={:?}",
+                trigger,
+            );
+            return ReflectionRunOutcome::BusySkipped;
+        };
+        // detached 持独立 token：调用方 token（step_cancel / Run 收口 / Manual Esc）
+        // 的 cancel 不影响异步反思（#2002 D2），终态仅 Succeeded / Failed /
+        // TimedOut（timeout 仍由内部强制）。
+        let detached_cancel = tokio_util::sync::CancellationToken::new();
+        let adapter = self.clone();
+        tokio::spawn(async move {
+            let outcome = adapter
+                .run_guaranteed(slot, trigger, persistence, detached_cancel, build)
+                .await;
+            log::info!(
+                target: crate::LOG_TARGET,
+                "[reflection_detached_done] trigger={:?} outcome={outcome:?}",
+                trigger,
+            );
+            if let Some(hook) = completion_hook {
+                hook(outcome).await;
+            }
+        });
+        ReflectionRunOutcome::Detached
+    }
+
+    /// 测试专用：同步占住反思单槽（验证 BusySkipped 的确定性判定），
+    /// guard 存活期间其他 run_complete 调用必须同步返回 BusySkipped。
+    #[cfg(test)]
+    pub(crate) fn hold_slot_for_test(
+        &self,
+    ) -> Result<tokio::sync::OwnedMutexGuard<()>, tokio::sync::TryLockError> {
+        std::sync::Arc::clone(&self.slot).try_lock_owned()
     }
 
     /// Take the memory changes recorded since the last take. Returns `None` when
@@ -407,7 +438,8 @@ impl ReflectionTaskAdapter {
         F: FnOnce(tokio_util::sync::CancellationToken) -> Fut,
         Fut: std::future::Future<Output = ReflectionResult<ReflectionResultPayload>> + Send,
     {
-        let Ok(_slot) = self.slot.try_lock() else {
+        // 测试直跑路径（run/run_future）：同步占槽，BusySkipped 同步返回。
+        let Ok(slot) = self.slot.clone().try_lock_owned() else {
             log::info!(
                 target: crate::LOG_TARGET,
                 "[reflection_busy_skip] trigger={:?}",
@@ -415,7 +447,23 @@ impl ReflectionTaskAdapter {
             );
             return ReflectionRunOutcome::BusySkipped;
         };
+        self.run_guaranteed(slot, trigger, persistence, cancel, build)
+            .await
+    }
 
+    /// 持槽执行核心：调用方必须已持有单槽（生产 detached 任务或测试直跑路径）。
+    async fn run_guaranteed<F, Fut>(
+        &self,
+        _slot: tokio::sync::OwnedMutexGuard<()>,
+        trigger: ReflectionTaskTrigger,
+        persistence: Option<ReflectionPersistence>,
+        cancel: tokio_util::sync::CancellationToken,
+        build: F,
+    ) -> ReflectionRunOutcome
+    where
+        F: FnOnce(tokio_util::sync::CancellationToken) -> Fut,
+        Fut: std::future::Future<Output = ReflectionResult<ReflectionResultPayload>> + Send,
+    {
         if let Some(emitter) = &self.active_emitter {
             emitter.emit_reflection_active(true);
         }

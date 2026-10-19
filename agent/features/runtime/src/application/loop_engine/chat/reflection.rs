@@ -113,10 +113,12 @@ pub(crate) async fn announce_memory_update(
     Some(changed)
 }
 
-/// 三触发（Interval/PreCompact/Manual）共享的底层 adapter 编排：只执行一次反思任务，
-/// 不驱动状态机也不发布 activity——状态机与 `Reflection` activity 由各自 owner 负责：
-/// Interval/PreCompact 由 engine 的 reflection phase 经 `ReflectionPhasePort::run_reflection`
-/// 驱动，Manual 由 `engine/manual_reflection.rs` 经 `ManualReflectionPort` 驱动。
+/// 三触发（Interval/PreCompact/Manual）共享的底层 adapter 编排：只派发一次反思任务
+/// （统一 detached），不驱动状态机也不发布 activity——状态机与 `Reflection` activity
+/// 由各自 owner 负责：Interval/PreCompact 由 engine 的 reflection phase 经
+/// `ReflectionPhasePort::run_reflection` 驱动，Manual 由 `engine/manual_reflection.rs` 经
+/// `ManualReflectionPort` 驱动。`cancel` 不再透传执行（detached 持独立 token，
+/// cancel 不影响异步，#2002）；参数保留待上层签名统一退役。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run(
     adapter: &ReflectionTaskAdapter,
@@ -129,7 +131,8 @@ pub(crate) async fn run(
     memory: &Arc<dyn MemoryPort>,
     history: &Arc<dyn ReflectionHistoryStore>,
     coverage_end: Option<u64>,
-    cancel: tokio_util::sync::CancellationToken,
+    _cancel: tokio_util::sync::CancellationToken,
+    completion_hook: Option<crate::application::reflection::DetachedCompletionHook>,
 ) -> ReflectionRunOutcome {
     let mut request = ReflectionTaskRequest::new(trigger, messages);
     request.coverage_end = coverage_end;
@@ -148,9 +151,85 @@ pub(crate) async fn run(
             lang.to_owned(),
             Arc::clone(memory),
             Arc::clone(history),
-            cancel,
+            completion_hook,
         )
         .await
+}
+
+/// detached 完成点的 usage 记账入参快照（'static，随 hook 捕获）。
+#[derive(Clone)]
+pub(crate) struct DetachedUsageRecording {
+    pub usage_sink: std::sync::Arc<dyn crate::ports::UsageSink>,
+    pub model: provider::ModelInfo,
+    pub session_id: sdk::SessionId,
+    pub run_id: sdk::RunId,
+    /// Manual Reflection Run 无 RunStep：None → 仅记账 id。
+    pub run_step_id: Option<sdk::RunStepId>,
+}
+
+/// 快照版 usage 记账（原同步路径 `record_succeeded_usage` 的唯一继承实现，
+/// #2002 M2）：Succeeded 且带 usage metadata 时经共享 `record_successful_usage`。
+pub(crate) fn record_succeeded_usage_with(
+    recording: &DetachedUsageRecording,
+    metadata: &crate::application::reflection::ReflectionTaskMetadata,
+) {
+    let usage = crate::ports::TokenUsageData {
+        input_tokens: Some(metadata.input_tokens),
+        output_tokens: Some(metadata.output_tokens),
+        ..crate::ports::TokenUsageData::default()
+    };
+    crate::application::model::invocation::record_successful_usage(
+        recording.usage_sink.as_ref(),
+        crate::application::model::usage::UsageRecordContext {
+            session_id: recording.session_id.clone(),
+            run_id: recording.run_id.clone(),
+            run_step_id: recording
+                .run_step_id
+                .clone()
+                .unwrap_or_else(sdk::RunStepId::new_v7),
+            model_invocation_id: sdk::ModelInvocationId::new_v7(),
+            model: recording.model.clone(),
+        },
+        usage,
+        crate::application::model::invocation::unix_timestamp_millis,
+    );
+}
+
+/// detached 完成点标准副作用（#2002 M2，三触发共用，调用方各自构造快照）：
+/// - Succeeded + usage metadata → 记账 usage（快照路径）；
+/// - Succeeded + 有记忆变更 → TUI memory update notice（announce 现状口径，D1）；
+/// - PreCompact → 推进材料槽游标缓存（统一覆盖去重；写入失败接受重复，D5）。
+pub(crate) fn detached_completion_hook(
+    sink: ChatEventSinkHandle,
+    lang: String,
+    usage: Option<DetachedUsageRecording>,
+    pre_compact_slot: Option<PreCompactMaterialSlot>,
+    coverage_end: Option<u64>,
+) -> crate::application::reflection::DetachedCompletionHook {
+    std::sync::Arc::new(move |outcome| {
+        // Fn 闭包可重入：先克隆捕获快照（借用），再 move 进一次性 async 块。
+        let sink = sink.clone();
+        let lang = lang.clone();
+        let usage = usage.clone();
+        let pre_compact_slot = pre_compact_slot.clone();
+        Box::pin(async move {
+            if let ReflectionRunOutcome::Completed(completion) = &outcome {
+                if completion.status == ReflectionTaskCompletionStatus::Succeeded {
+                    if let (Some(usage), Some(metadata)) = (&usage, &completion.metadata) {
+                        record_succeeded_usage_with(usage, metadata);
+                    }
+                    if matches!(completion.trigger, ReflectionTaskTrigger::PreCompact) {
+                        if let Some(slot) = &pre_compact_slot {
+                            if let Some(coverage_end) = coverage_end {
+                                slot.advance_cursor_if_farther(coverage_end);
+                            }
+                        }
+                    }
+                }
+            }
+            announce_memory_update(&sink, &outcome, &lang).await;
+        })
+    })
 }
 
 /// 反思 binding 选择：装配期缓存的反思专用 binding（`memory.reflection.model`）
@@ -206,37 +285,146 @@ pub(crate) fn should_run_turn_reflection(
 }
 
 /// PreCompact 反思材料的共享槽：compaction observer 在 `CompactOutcome::Committed`
-/// 时暂存将被压缩丢弃的早期消息，engine 的 reflection phase 在 Compacting 内经
+/// 时暂存将被压缩丢弃的早期消息（按最新 `Succeeded` 游标过滤已覆盖段——已 reflect
+/// 的 context 不再进入 reflect），engine 的 reflection phase 在 Compacting 内经
 /// 反思端口取出执行。observer 回调拿不到 `&mut Run`，材料收集与状态机经本槽分离。
+/// BusySkipped 时未派发残余经 `restore` 回填滞留（下次 compact 后再试）。
 #[derive(Clone, Default)]
 pub(crate) struct PreCompactMaterialSlot(
-    std::sync::Arc<std::sync::Mutex<Option<Vec<share::message::Message>>>>,
+    std::sync::Arc<std::sync::Mutex<Option<StagedPreCompactMaterial>>>,
 );
 
+/// PreCompact 反思材料：按游标过滤后的未覆盖残余 + 游标推进基准
+/// （`coverage_end` = 丢弃段在压缩前历史坐标系中的末位置）。
+#[derive(Debug, Clone)]
+pub(crate) struct PreCompactReflectionMaterial {
+    pub messages: Vec<share::message::Message>,
+    /// 成功反思后的游标推进基准（压缩前历史坐标）。
+    pub coverage_end: Option<u64>,
+    /// `messages` 首元素在压缩前历史中的绝对坐标（restore 保持绝对坐标语义）。
+    array_origin: u64,
+    /// take 时的已知游标快照（restore 语义重建用）。
+    known_cursor: Option<u64>,
+}
+
+/// PreCompact 槽内部暂存态：丢弃段快照 + 段末坐标 + 已知最新游标。
+#[derive(Default)]
+struct StagedPreCompactMaterial {
+    messages: Vec<share::message::Message>,
+    /// 丢弃段末位置（压缩前历史坐标），派发时作为 `coverage_end` 基准。
+    segment_end: Option<u64>,
+    /// `messages` 首元素的绝对坐标（首次 stage 恒为 0）。
+    array_origin: u64,
+    /// 已知最新 `Succeeded` 游标（stage 时从 history 读取；restore/advance 只前进）。
+    known_cursor: Option<u64>,
+}
+
+impl StagedPreCompactMaterial {
+    /// 按已知游标过滤出未覆盖残余；返回 `(残余, 是否可派发)`。
+    fn uncovered_residual(&self) -> (Vec<share::message::Message>, bool) {
+        let Some(cursor) = self.known_cursor else {
+            return (self.messages.clone(), !self.messages.is_empty());
+        };
+        let relative = cursor.saturating_sub(self.array_origin) as usize;
+        let residual = self
+            .messages
+            .get(relative..)
+            .map(Vec::from)
+            .unwrap_or_default();
+        let dispatchable = cursor
+            < self
+                .segment_end
+                .unwrap_or_else(|| self.array_origin + self.messages.len() as u64)
+            && !residual.is_empty();
+        (residual, dispatchable)
+    }
+}
+
 impl PreCompactMaterialSlot {
-    /// 暂存材料。仅 `Committed` 调用；`Skipped` 不动槽位。
-    pub(crate) fn stage(&self, messages: Vec<share::message::Message>) {
-        *self.0.lock().expect("pre-compact 材料槽锁中毒") = Some(messages);
+    /// 暂存丢弃段快照并刷新已知游标（observer 在 `CompactOutcome::Committed` 时
+    /// 从 history 读取游标传入）。已有回填滞留时覆盖（新丢弃段优先）并记 log。
+    pub(crate) fn stage(&self, messages: Vec<share::message::Message>, cursor: Option<u64>) {
+        let mut staged = self.0.lock().expect("pre-compact 材料槽锁中毒");
+        if staged.is_some() {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "[pre_compact_material_overwritten] 槽内回填滞留被新丢弃段覆盖，滞留残余未派发",
+            );
+        }
+        *staged = Some(StagedPreCompactMaterial {
+            segment_end: Some(messages.len() as u64),
+            messages,
+            array_origin: 0,
+            known_cursor: cursor,
+        });
     }
 
     /// 反思端口取出材料：反思配置关闭时丢弃暂存材料并返回 None——材料既不滞留到
-    /// 下次 compact，也不让 engine 空走一次 Reflecting 往返；开启时取走材料返回。
+    /// 下次 compact，也不让 engine 空走一次 Reflecting 往返；开启时按已知游标
+    /// 过滤出未覆盖残余（整段已覆盖 → 不派发），取走材料返回。
     pub(crate) fn take_for_reflection(
         &self,
         config: &share::config::MemoryConfig,
-    ) -> Option<Vec<share::message::Message>> {
-        let staged = self.0.lock().expect("pre-compact 材料槽锁中毒").take();
-        if reflection_enabled(config) {
-            staged
-        } else {
-            None
+    ) -> Option<PreCompactReflectionMaterial> {
+        let staged = self.0.lock().expect("pre-compact 材料槽锁中毒").take()?;
+        if !reflection_enabled(config) {
+            return None;
+        }
+        let segment_end = staged
+            .segment_end
+            .unwrap_or(staged.array_origin + staged.messages.len() as u64);
+        let known_cursor = staged.known_cursor;
+        // 残余起点绝对坐标（restore 后保持：相对数组下标 + 数组首元素绝对坐标）。
+        let residual_origin = staged.array_origin
+            + known_cursor
+                .map(|cursor| cursor.saturating_sub(staged.array_origin))
+                .unwrap_or_default();
+        let (residual, dispatchable) = staged.uncovered_residual();
+        dispatchable.then(|| PreCompactReflectionMaterial {
+            messages: residual,
+            coverage_end: Some(segment_end),
+            array_origin: residual_origin,
+            known_cursor,
+        })
+    }
+
+    /// BusySkipped 时回填未派发的残余滞留（下次 compact 后再试）：保持绝对坐标
+    /// 语义，已知游标只前进不回退。
+    pub(crate) fn restore(&self, material: &PreCompactReflectionMaterial) {
+        let mut slot = self.0.lock().expect("pre-compact 材料槽锁中毒");
+        let known_cursor = slot
+            .as_ref()
+            .and_then(|staged| staged.known_cursor)
+            .or(material.known_cursor)
+            .map(|known| known.max(material.array_origin));
+        *slot = Some(StagedPreCompactMaterial {
+            segment_end: material.coverage_end,
+            messages: material.messages.clone(),
+            array_origin: material.array_origin,
+            known_cursor,
+        });
+    }
+
+    /// 已知游标只前进地推进到 `cursor`（反思成功后的游标缓存刷新）。
+    pub(crate) fn advance_cursor_if_farther(&self, cursor: u64) {
+        let mut slot = self.0.lock().expect("pre-compact 材料槽锁中毒");
+        if let Some(staged) = slot.as_mut() {
+            staged.known_cursor = Some(
+                staged
+                    .known_cursor
+                    .map_or(cursor, |known| known.max(cursor)),
+            );
         }
     }
 
-    /// 观察当前暂存材料（不清空）。
+    /// 观察当前暂存材料（不清空，未过滤）。
     #[cfg(test)]
     pub(crate) fn staged(&self) -> Option<Vec<share::message::Message>> {
-        self.0.lock().expect("pre-compact 材料槽锁中毒").clone()
+        self.0
+            .lock()
+            .expect("pre-compact 材料槽锁中毒")
+            .as_ref()
+            .map(|staged| staged.messages.clone())
     }
 }
 

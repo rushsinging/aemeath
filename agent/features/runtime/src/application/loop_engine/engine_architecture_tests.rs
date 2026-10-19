@@ -1252,7 +1252,7 @@ impl CompactionPort for CompactionFake {
                 state.pre_compact_slot.as_ref(),
                 state.pre_compact_material.as_ref(),
             ) {
-                slot.stage(material.clone());
+                slot.stage(material.clone(), None);
             }
         }
         Ok(())

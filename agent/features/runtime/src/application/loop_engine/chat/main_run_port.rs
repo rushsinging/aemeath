@@ -253,11 +253,13 @@ impl crate::application::loop_engine::step_persistence::AcceptedInputObserver
 }
 
 /// 自动压缩观察者：不在回调内执行反思（回调拿不到 `&mut Run`，无法驱动状态机），
-/// 仅在 `Committed` 时把将被丢弃的消息暂存进与反思端口共享的材料槽，由 engine 的
-/// reflection phase 在 Compacting 内取出执行；`Skipped` 不动槽位。
+/// 仅在 `Committed` 时把将被丢弃的消息暂存进与反思端口共享的材料槽（stage 时读
+/// 最新 `Succeeded` 游标过滤已覆盖段——已 reflect 的 context 不再进入 reflect），
+/// 由 engine 的 reflection phase 在 Compacting 内取出执行；`Skipped` 不动槽位。
 pub(crate) struct ChatCompactionObserver {
     pub pre_compact_material:
         crate::application::loop_engine::chat::reflection::PreCompactMaterialSlot,
+    pub reflection_history: std::sync::Arc<dyn memory::api::ReflectionHistoryStore>,
 }
 
 #[async_trait]
@@ -268,7 +270,12 @@ impl crate::application::loop_engine::compaction::CompactionObserver for ChatCom
         discarded_messages: &[Message],
     ) -> Result<(), LoopEngineError> {
         if matches!(outcome, crate::ports::CompactOutcome::Committed(_)) {
-            self.pre_compact_material.stage(discarded_messages.to_vec());
+            let cursor = crate::application::loop_engine::chat::reflection::latest_coverage_cursor(
+                &self.reflection_history,
+            )
+            .await;
+            self.pre_compact_material
+                .stage(discarded_messages.to_vec(), cursor);
         }
         Ok(())
     }
@@ -357,6 +364,24 @@ impl crate::application::loop_engine::ManualReflectionPort for ChatManualReflect
         run_id: &sdk::RunId,
         cancel: &CancellationToken,
     ) -> Result<crate::application::loop_engine::ManualReflectionOutcome, LoopEngineError> {
+        // #2002 M2：完成侧副作用（Succeeded usage 记账、memory update notice）随
+        // hook 迁到 detached 完成点；Manual Run 无 RunStep（`run_step_id=None` →
+        // 仅记账 UUIDv7）。Failed/DisabledSkipped 不记账（与原同步路径口径一致）。
+        let completion_hook =
+            crate::application::loop_engine::chat::reflection::detached_completion_hook(
+                self.runtime_context.event_sink(),
+                self.language.clone(),
+                Some(
+                    crate::application::loop_engine::run_services::RuntimeReflection::detached_usage_recording(
+                        &self.runtime_context,
+                        run_id,
+                        None,
+                        self.runtime_context.provider_ref().model.clone(),
+                    ),
+                ),
+                None,
+                self.coverage_end,
+            );
         let outcome = crate::application::loop_engine::chat::reflection::run(
             &self.reflection_tasks,
             crate::application::reflection::ReflectionTaskTrigger::Manual,
@@ -369,28 +394,9 @@ impl crate::application::loop_engine::ManualReflectionPort for ChatManualReflect
             self.runtime_context.reflection_history_ref(),
             self.coverage_end,
             cancel.clone(),
+            Some(completion_hook),
         )
         .await;
-        // 成功手动反思复用 `RuntimeReflection` 同一记账路径
-        // （共享 `record_successful_usage`）；Manual Run 无 RunStep，
-        // `run_step_id=None` → 仅记账 UUIDv7。Failed/Cancelled/TimedOut/
-        // DisabledSkipped 不在此分支，不记账。
-        if let crate::application::reflection::ReflectionRunOutcome::Completed(completion) =
-            &outcome
-        {
-            if completion.status
-                == crate::application::reflection::ReflectionTaskCompletionStatus::Succeeded
-            {
-                if let Some(metadata) = &completion.metadata {
-                    crate::application::loop_engine::run_services::RuntimeReflection::record_succeeded_usage(
-                        &self.runtime_context,
-                        run_id,
-                        None,
-                        metadata,
-                    );
-                }
-            }
-        }
         let (text, is_error) =
             crate::application::loop_engine::chat::reflection::manual_reflection_outcome_text(
                 &outcome,
@@ -400,19 +406,10 @@ impl crate::application::loop_engine::ManualReflectionPort for ChatManualReflect
             .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
             .await;
         Ok(match outcome {
-            crate::application::reflection::ReflectionRunOutcome::Completed(completion) => {
-                match completion.status {
-                    crate::application::reflection::ReflectionTaskCompletionStatus::Cancelled => {
-                        crate::application::loop_engine::ManualReflectionOutcome::Cancelled
-                    }
-                    crate::application::reflection::ReflectionTaskCompletionStatus::TimedOut => {
-                        crate::application::loop_engine::ManualReflectionOutcome::TimedOut
-                    }
-                    status => {
-                        crate::application::loop_engine::ManualReflectionOutcome::Ready(status)
-                    }
-                }
-            }
+            // 统一异步链路（#2002）：Detached 立即回执「已在后台开始」，activity 按
+            // Succeeded 收口（派发成功即完成；终态仅完成/异常两档，D2）；
+            // BusySkipped 由文案提示（单槽互斥，未派发记 Failed）；配置竞态关闭
+            // （DisabledSkipped）按失败收口。三者都不再等待执行终态。
             crate::application::reflection::ReflectionRunOutcome::DisabledSkipped => {
                 // 受理门禁已在 idle 时判定过；这里只可能是配置在受理后被关闭的竞态
                 // （文案已按「未启用」发布，Run 照常收口，activity 记 Failed）。
@@ -424,8 +421,18 @@ impl crate::application::loop_engine::ManualReflectionPort for ChatManualReflect
                     crate::application::reflection::ReflectionTaskCompletionStatus::Failed,
                 )
             }
-            crate::application::reflection::ReflectionRunOutcome::BusySkipped
-            | crate::application::reflection::ReflectionRunOutcome::Detached => {
+            crate::application::reflection::ReflectionRunOutcome::BusySkipped => {
+                crate::application::loop_engine::ManualReflectionOutcome::Ready(
+                    crate::application::reflection::ReflectionTaskCompletionStatus::Failed,
+                )
+            }
+            crate::application::reflection::ReflectionRunOutcome::Detached => {
+                crate::application::loop_engine::ManualReflectionOutcome::Ready(
+                    crate::application::reflection::ReflectionTaskCompletionStatus::Succeeded,
+                )
+            }
+            // run_complete 统一 detached 后 Completed 不再出现；防御性收口。
+            crate::application::reflection::ReflectionRunOutcome::Completed(_) => {
                 crate::application::loop_engine::ManualReflectionOutcome::Ready(
                     crate::application::reflection::ReflectionTaskCompletionStatus::Failed,
                 )

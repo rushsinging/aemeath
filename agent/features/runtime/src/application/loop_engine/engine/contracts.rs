@@ -635,15 +635,14 @@ pub trait ManualCompactionPort: Send {
     ) -> Result<ManualCompactionOutcome, LoopEngineError>;
 }
 
-/// 手动反思执行结果。
+/// 手动反思执行结果。统一异步链路（#2002）：Manual 派发即收口——`Ready` 的
+/// status 表达派发结果（Succeeded=已后台开始 / Failed=未派发），执行终态
+/// （成功有变更的 notice、失败日志）由 detached 完成点 hook 负责；取消/超时
+/// 属 detached 内部处理（cancel 不影响异步），Run 侧不再有对应变体。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManualReflectionOutcome {
-    /// 反思到达终态（成功或失败），Run 继续收口 `Completed`。
+    /// 派发已收口（后台开始或未派发），Run 继续收口 `Completed`。
     Ready(crate::application::reflection::ReflectionTaskCompletionStatus),
-    /// 反思被取消，Run 已进入终态。
-    Cancelled,
-    /// 反思超时，Run 已进入终态。
-    TimedOut,
 }
 
 /// 手动反思端口：只由产生手动反思 Run 的来源装配，承载装配前冻结的 committed
@@ -682,11 +681,22 @@ pub trait ReflectionPhasePort: Send {
         messages: &[share::message::Message],
     ) -> Option<IntervalReflectionMaterial>;
 
-    /// 取走 compaction observer 暂存的 PreCompact 材料；未暂存返回 None。
+    /// 取走 compaction observer 暂存的 PreCompact 材料（已按最新 `Succeeded` 游标
+    /// 过滤为未覆盖残余，`coverage_end` = 丢弃段压缩前末位置）；未暂存或整段已被
+    /// 游标覆盖（已 reflect 的 context 不再进入 reflect）返回 None。
     ///
     /// 语义由生产端口实现：反思配置关闭时丢弃暂存材料并返回 None——材料不滞留到
     /// 下次 compact，engine 也不空走一次 Reflecting 往返。
-    fn take_pre_compact_messages(&self) -> Option<Vec<share::message::Message>>;
+    fn take_pre_compact_messages(
+        &self,
+    ) -> Option<crate::application::loop_engine::chat::reflection::PreCompactReflectionMaterial>;
+
+    /// BusySkipped 时把未派发的 PreCompact 残余回填材料槽滞留（下次 compact 后
+    /// 再试）；下次 `CompactOutcome::Committed` 暂存新丢弃段时覆盖滞留并记 log。
+    fn restore_pre_compact_material(
+        &mut self,
+        material: &crate::application::loop_engine::chat::reflection::PreCompactReflectionMaterial,
+    );
 
     /// 执行一次反思（内部含 timeout/cancel select），返回终态 outcome。
     /// 任何 outcome（含 Failed/Cancelled/TimedOut）都不得终止宿主 Run——收口语义由 engine phase 统一负责。

@@ -977,6 +977,12 @@ where
                         &runtime_context,
                         main_run_port::ChatCompactionObserver {
                             pre_compact_material: pre_compact_material.clone(),
+                            reflection_history: std::sync::Arc::clone(
+                                &shell
+                                    .runtime_context_factory
+                                    .services()
+                                    .reflection_history,
+                            ),
                         },
                     );
                 let mut interaction =
