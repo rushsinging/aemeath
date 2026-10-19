@@ -38,6 +38,7 @@ fn assertion_name(rule: &guards_rules::Rule) -> &'static str {
         RuleSpec::ConstructionWhitelist { .. } => "construction_whitelist",
         RuleSpec::ConstantPlacement { .. } => "constant_placement",
         RuleSpec::CountRatio { .. } => "count_ratio",
+        RuleSpec::StructFieldPresence { .. } => "struct_field_presence",
     }
 }
 
@@ -84,7 +85,12 @@ fn fast_profile_covers_structural_assertions() {
 #[test]
 fn text_scan_assertions_stay_in_full_profile() {
     let rules = load_rules();
-    let text_scan_kinds = ["pattern_exclusion", "line_budget", "forbidden_file_names"];
+    let text_scan_kinds = [
+        "pattern_exclusion",
+        "line_budget",
+        "forbidden_file_names",
+        "struct_field_presence",
+    ];
     // 安全关键文本规则保留 fast 身份（原 fast 档独立脚本数据化而来，
     // Stop hook 必须持续覆盖进程隔离 / unsafe 切片 / 宽泛命名约束）；
     // 新增文本扫描规则 NEVER 进 fast（防快档膨胀）。

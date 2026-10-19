@@ -1014,3 +1014,119 @@ fn constant_placement_rule_exclusions_skip_test_domain_file() {
             .expect("enforce");
     assert!(violations.is_empty(), "{violations:?}");
 }
+
+/// 带 deny_unknown_fields 标记的 struct 缺 required 字段时 MUST 报违规
+/// （场景：框架向 schema 注入 timeout，Input 未声明即 schema/serde 契约裂缝）。
+#[test]
+fn struct_field_presence_rejects_marker_struct_without_field() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/types/leak.rs"),
+        "#[serde(default, deny_unknown_fields)]\npub struct LeakInput {\n    pub pattern: String,\n}\n",
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "pattern.test.deny-input-timeout",
+        "assertion": "struct_field_presence",
+        "scope": { "kind": "path_prefix", "value": "crates/x/src/types" },
+        "struct_marker": "deny_unknown_fields",
+        "required_field": "timeout",
+        "reason": "test",
+        "profile": "fast"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/types/leak.rs")
+            .expect("enforce");
+
+    assert_eq!(violations.len(), 1, "{violations:?}");
+    assert!(
+        violations[0].message.contains("LeakInput") && violations[0].message.contains("timeout"),
+        "{}",
+        violations[0].message
+    );
+}
+
+/// 声明了 required 字段的标记 struct MUST 通过。
+#[test]
+fn struct_field_presence_accepts_marker_struct_with_field() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/types/ok.rs"),
+        "#[serde(default, deny_unknown_fields)]\npub struct OkInput {\n    pub pattern: String,\n    #[serde(default)]\n    pub timeout: Option<u64>,\n}\n",
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "pattern.test.deny-input-timeout",
+        "assertion": "struct_field_presence",
+        "scope": { "kind": "path_prefix", "value": "crates/x/src/types" },
+        "struct_marker": "deny_unknown_fields",
+        "required_field": "timeout",
+        "reason": "test",
+        "profile": "fast"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/types/ok.rs")
+            .expect("enforce");
+    assert!(violations.is_empty(), "{violations:?}");
+}
+
+/// 无标记的普通 struct 不在治理范围。
+#[test]
+fn struct_field_presence_ignores_unmarked_structs() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/types/plain.rs"),
+        "#[serde(default)]\npub struct PlainInput {\n    pub pattern: String,\n}\n",
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "pattern.test.deny-input-timeout",
+        "assertion": "struct_field_presence",
+        "scope": { "kind": "path_prefix", "value": "crates/x/src/types" },
+        "struct_marker": "deny_unknown_fields",
+        "required_field": "timeout",
+        "reason": "test",
+        "profile": "fast"
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/types/plain.rs")
+            .expect("enforce");
+    assert!(violations.is_empty(), "{violations:?}");
+}
+
+/// 登记了 exclusion 的路径 MUST 放行。
+#[test]
+fn struct_field_presence_excludes_registered_paths() {
+    let temp = tempfile::tempdir().expect("create tempdir");
+    write_source(
+        &temp.path().join("crates/x/src/types/exempt.rs"),
+        "#[serde(default, deny_unknown_fields)]\npub struct ExemptInput {\n    pub pattern: String,\n}\n",
+    );
+    let rule: crate::guards_rules::Rule = serde_json::from_value(serde_json::json!({
+        "id": "pattern.test.deny-input-timeout",
+        "assertion": "struct_field_presence",
+        "scope": { "kind": "path_prefix", "value": "crates/x/src/types" },
+        "struct_marker": "deny_unknown_fields",
+        "required_field": "timeout",
+        "reason": "test",
+        "profile": "fast",
+        "exclusions": [
+            {
+                "path": "crates/x/src/types/exempt.rs",
+                "reason": "test fixture",
+                "owner": "test",
+                "exit_condition": "n/a",
+                "since": "#2003"
+            }
+        ]
+    }))
+    .expect("deserialize rule");
+
+    let violations =
+        crate::guards_rules::enforce_rule(&rule, temp.path(), "crates/x/src/types/exempt.rs")
+            .expect("enforce");
+    assert!(violations.is_empty(), "{violations:?}");
+}
