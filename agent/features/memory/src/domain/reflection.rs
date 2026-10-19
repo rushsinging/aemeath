@@ -641,9 +641,19 @@ impl ReflectionEngine {
         raw: &str,
         references: &ReflectionReferenceTable,
     ) -> ReflectionResult<ResolvedReflectionOutput> {
+        self.parse_output_diagnostic(raw, references)
+            .map_err(|(error, _)| error)
+    }
+
+    /// 保留现有领域错误，同时向执行层提供不含响应正文的解析位置。
+    pub(crate) fn parse_output_diagnostic(
+        &self,
+        raw: &str,
+        references: &ReflectionReferenceTable,
+    ) -> Result<ResolvedReflectionOutput, (ReflectionError, Option<String>)> {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
-            return Err(ReflectionError::Unparseable);
+            return Err((ReflectionError::Unparseable, None));
         }
 
         let fenced = trimmed
@@ -657,18 +667,28 @@ impl ReflectionEngine {
             // Preserve serde's structural error for JSON-looking, incomplete input.
             trimmed
         } else {
-            return Err(ReflectionError::Unparseable);
+            return Err((ReflectionError::Unparseable, None));
         };
 
-        let raw_output: RawReflectionOutput =
-            serde_json::from_str(source).map_err(|_| ReflectionError::Parse)?;
+        let raw_output: RawReflectionOutput = serde_json::from_str(source).map_err(|error| {
+            let detail = format!(
+                "category={:?} line={} column={}",
+                error.classify(),
+                error.line(),
+                error.column(),
+            );
+            (ReflectionError::Parse, Some(detail))
+        })?;
         let mut unresolved = Vec::new();
         let mut suggested_memories = Vec::with_capacity(raw_output.suggested_memories.len());
         for (index, suggestion) in raw_output.suggested_memories.into_iter().enumerate() {
             if suggestion.content.trim().is_empty() {
-                return Err(ReflectionError::InvalidSuggestion(format!(
-                    "suggested_memories[{index}].content must not be empty"
-                )));
+                return Err((
+                    ReflectionError::InvalidSuggestion(format!(
+                        "suggested_memories[{index}].content must not be empty"
+                    )),
+                    None,
+                ));
             }
             suggested_memories.push(MemorySuggestion {
                 layer: suggestion.layer,

@@ -4,6 +4,9 @@
 
 use std::time::Duration;
 
+/// 反思解析失败的结构化预览字符预算；所有正文字符均被遮蔽。
+pub(crate) const REFLECTION_RESPONSE_PREVIEW_CHARS: usize = 200;
+
 // ─── activity/coordinator.rs ───
 
 pub(crate) const MAX_RETAINED_TERMINAL_ACTIVITIES: usize = 64;

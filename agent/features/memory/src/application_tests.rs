@@ -146,6 +146,40 @@ async fn build_prompt_excludes_entries_that_injection_would_reject() {
     }
 }
 
+#[test]
+fn parse_repair_reports_schema_position_without_leaking_response_values() {
+    let raw = r#"{"outdated_memories":["private-secret-prefix", {"id":"private-secret-value"}]}"#;
+    let diagnostic =
+        ReflectionWorkflow::parse_for_repair(raw, &ReflectionReferenceTable::default())
+            .unwrap_err();
+    assert!(diagnostic.contains("reflection response JSON is invalid"));
+    assert!(diagnostic.contains("category=Data"), "{diagnostic}");
+    assert!(diagnostic.contains("line=1"), "{diagnostic}");
+    assert!(diagnostic.contains("column="), "{diagnostic}");
+    assert!(!diagnostic.contains("private-secret"));
+    assert!(matches!(
+        ReflectionEngine.parse_output(raw, &ReflectionReferenceTable::default()),
+        Err(ReflectionError::Parse)
+    ));
+}
+
+#[test]
+fn parse_repair_reports_syntax_and_eof_without_changing_domain_error() {
+    for (raw, category) in [
+        (r#"{"outdated_memories":[}"#, "Syntax"),
+        (r#"{"outdated_memories":["#, "Eof"),
+    ] {
+        let diagnostic =
+            ReflectionWorkflow::parse_for_repair(raw, &ReflectionReferenceTable::default())
+                .unwrap_err();
+        assert!(
+            diagnostic.contains(&format!("category={category}")),
+            "{diagnostic}"
+        );
+        assert!(diagnostic.contains("line=1"), "{diagnostic}");
+    }
+}
+
 #[tokio::test]
 async fn completion_parses_applies_and_persists_memory_owned_record() {
     let history = RecordingHistory::default();

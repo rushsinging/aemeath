@@ -324,6 +324,10 @@ fn status_bar_includes_reflecting_marker_when_active() {
         rendered.contains("Reflecting"),
         "expected Reflecting marker, got {rendered}"
     );
+    assert!(
+        !rendered.contains("Reflecting…") && !rendered.contains("Reflecting."),
+        "Reflecting marker must not include trailing dots: {rendered}"
+    );
     view.runtime.reflecting = false;
     let rendered = bar.build_full_text(&view);
     assert!(

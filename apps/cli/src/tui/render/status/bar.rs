@@ -39,7 +39,7 @@ enum RuntimeSegmentStyle {
     Separator,
     Status(StatusNoticeViewKind),
     Muted,
-    /// 运行中状态（如 Reflecting…）——peach 语义色。
+    /// 运行中状态（如 Reflecting）——peach 语义色。
     Running,
     ContextPct(u64),
 }
@@ -178,7 +178,7 @@ impl StatusBar {
             segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
             // 反思进行中属「运行中状态」语义色（TOOL_RUNNING/peach），与模型名
             // （ACCENT）及次级指标（TEXT_MUTED）拉开视觉层次。
-            segments.push(("Reflecting…".to_string(), RuntimeSegmentStyle::Running));
+            segments.push(("Reflecting".to_string(), RuntimeSegmentStyle::Running));
         }
         segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
         segments.push((

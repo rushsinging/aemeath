@@ -438,12 +438,11 @@ impl ReflectionWorkflow {
         raw_response: &str,
         references: &ReflectionReferenceTable,
     ) -> Result<(), String> {
-        match ReflectionEngine.parse_output(raw_response, references) {
+        match ReflectionEngine.parse_output_diagnostic(raw_response, references) {
             Ok(_) => Ok(()),
-            // InvalidSuggestion 自带字段/索引级细节，直接作为精确摘要；
-            // 其余错误取稳定 Display（Unparseable / Parse 的描述）。
-            Err(ReflectionError::InvalidSuggestion(detail)) => Err(detail),
-            Err(error) => Err(error.to_string()),
+            Err((ReflectionError::InvalidSuggestion(detail), _)) => Err(detail),
+            Err((error, Some(detail))) => Err(format!("{error}; {detail}")),
+            Err((error, None)) => Err(error.to_string()),
         }
     }
 
