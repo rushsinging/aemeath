@@ -79,20 +79,21 @@ fn test_reflection_config_default() {
     assert_eq!(config.interval_runs, 10);
     assert!(!config.auto_apply_suggestions);
     assert!(config.model.is_none());
-    assert_eq!(config.timeout_secs, 240);
+    assert_eq!(config.timeout_secs, 600);
     assert_eq!(config.target_active_entries, 150);
 }
 
 #[test]
-fn test_reflection_timeout_secs_defaults_to_240_and_deserializes_override() {
-    // 缺省：反思超时 240s——覆盖成功耗时长尾（此前硬编码 120s 紧贴 p99）。
+fn test_reflection_timeout_secs_defaults_to_600_and_deserializes_override() {
+    // 缺省：反思超时 600s——两步反思（去噪 + 归纳）在 ~60k chars 输入 +
+    // Max reasoning 下串行执行，240s 实测在 deepseek-v4.1-flash 上必然超时。
     let empty: MemoryConfig = serde_json::from_str("{}").unwrap();
-    assert_eq!(empty.reflection.timeout_secs, 240);
+    assert_eq!(empty.reflection.timeout_secs, 600);
 
     // 显式配置覆盖。
-    let json = r#"{ "reflection": { "timeout_secs": 600 } }"#;
+    let json = r#"{ "reflection": { "timeout_secs": 300 } }"#;
     let config: MemoryConfig = serde_json::from_str(json).unwrap();
-    assert_eq!(config.reflection.timeout_secs, 600);
+    assert_eq!(config.reflection.timeout_secs, 300);
 }
 
 #[test]

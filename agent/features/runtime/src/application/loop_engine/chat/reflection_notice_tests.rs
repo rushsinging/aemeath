@@ -42,8 +42,16 @@ impl ChatEventSink for SystemMessageSink {
     }
 
     fn try_send_event(&self, event: RuntimeStreamEvent) {
-        if let RuntimeStreamEvent::SystemMessage(message) = event {
-            self.messages.lock().expect("sink lock").push(message);
+        match event {
+            RuntimeStreamEvent::SystemMessage(message) => {
+                self.messages.lock().expect("sink lock").push(message);
+            }
+            RuntimeStreamEvent::CommandResultText { text, is_error } => {
+                if is_error {
+                    self.messages.lock().expect("sink lock").push(text);
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -164,4 +172,91 @@ async fn two_runs_before_the_next_one_merge_into_a_single_reminder() {
         adapter.take_memory_update_notice(),
         Some(crate::application::reflection::MemoryUpdateNotice { changed: 2 }),
     );
+}
+
+// ---------------------------------------------------------------------------
+// detached 完成点失败通知（#2002 follow-up：异步化后 Manual 失败终态不再静默）
+// ---------------------------------------------------------------------------
+
+fn terminal_outcome(
+    trigger: crate::application::reflection::ReflectionTaskTrigger,
+    status: crate::application::reflection::ReflectionTaskCompletionStatus,
+) -> crate::application::reflection::ReflectionRunOutcome {
+    crate::application::reflection::ReflectionRunOutcome::Completed(
+        crate::application::reflection::ReflectionTaskCompletion {
+            trigger,
+            status,
+            metadata: None,
+        },
+    )
+}
+
+/// Manual 失败/超时终态必须发 SystemMessage 错误通知（对齐同步时代的终态回执）。
+#[tokio::test]
+async fn manual_failure_terminal_notifies_user_after_detached_completion() {
+    for (label, status) in [
+        (
+            "失败",
+            crate::application::reflection::ReflectionTaskCompletionStatus::Failed,
+        ),
+        (
+            "超时",
+            crate::application::reflection::ReflectionTaskCompletionStatus::TimedOut,
+        ),
+    ] {
+        let sink = SystemMessageSink::default();
+        let hook = super::reflection::detached_completion_hook(
+            sink.handle(),
+            "zh".to_string(),
+            None,
+            None,
+            None,
+            crate::application::reflection::ReflectionTaskTrigger::Manual,
+        );
+        let outcome = terminal_outcome(
+            crate::application::reflection::ReflectionTaskTrigger::Manual,
+            status,
+        );
+        hook(outcome).await;
+        let messages = sink.messages();
+        assert_eq!(
+            messages.len(),
+            1,
+            "{label} 终态必须恰好通知一次: {messages:?}"
+        );
+        assert!(
+            messages[0].contains("Reflection"),
+            "{label} 通知必须使用既有终态文案: {:?}",
+            messages[0]
+        );
+    }
+}
+
+/// 自动反思（Interval/PreCompact）失败保持静默（不打扰主对话，与同步时代一致）。
+#[tokio::test]
+async fn automatic_reflection_failure_stays_silent() {
+    for trigger in [
+        crate::application::reflection::ReflectionTaskTrigger::Interval { run_ordinal: 1 },
+        crate::application::reflection::ReflectionTaskTrigger::PreCompact,
+    ] {
+        let sink = SystemMessageSink::default();
+        let hook = super::reflection::detached_completion_hook(
+            sink.handle(),
+            "zh".to_string(),
+            None,
+            None,
+            None,
+            trigger,
+        );
+        hook(terminal_outcome(
+            trigger,
+            crate::application::reflection::ReflectionTaskCompletionStatus::Failed,
+        ))
+        .await;
+        assert!(
+            sink.messages().is_empty(),
+            "自动反思失败必须保持静默: {:?}",
+            sink.messages()
+        );
+    }
 }

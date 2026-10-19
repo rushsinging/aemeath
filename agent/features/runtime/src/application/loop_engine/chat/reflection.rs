@@ -198,6 +198,9 @@ pub(crate) fn record_succeeded_usage_with(
 /// detached 完成点标准副作用（#2002 M2，三触发共用，调用方各自构造快照）：
 /// - Succeeded + usage metadata → 记账 usage（快照路径）；
 /// - Succeeded + 有记忆变更 → TUI memory update notice（announce 现状口径，D1）；
+/// - Manual + Failed/TimedOut → 终态错误 SystemMessage（异步化后受理回执退役为
+///   「已开始」，失败静默相对同步时代是行为退化，此分支恢复终态感知）；
+/// - 自动反思（Interval/PreCompact）失败保持静默（不打扰主对话）；
 /// - PreCompact → 推进材料槽游标缓存（统一覆盖去重；写入失败接受重复，D5）。
 pub(crate) fn detached_completion_hook(
     sink: ChatEventSinkHandle,
@@ -205,6 +208,7 @@ pub(crate) fn detached_completion_hook(
     usage: Option<DetachedUsageRecording>,
     pre_compact_slot: Option<PreCompactMaterialSlot>,
     coverage_end: Option<u64>,
+    trigger: ReflectionTaskTrigger,
 ) -> crate::application::reflection::DetachedCompletionHook {
     std::sync::Arc::new(move |outcome| {
         // Fn 闭包可重入：先克隆捕获快照（借用），再 move 进一次性 async 块。
@@ -214,17 +218,37 @@ pub(crate) fn detached_completion_hook(
         let pre_compact_slot = pre_compact_slot.clone();
         Box::pin(async move {
             if let ReflectionRunOutcome::Completed(completion) = &outcome {
-                if completion.status == ReflectionTaskCompletionStatus::Succeeded {
-                    if let (Some(usage), Some(metadata)) = (&usage, &completion.metadata) {
-                        record_succeeded_usage_with(usage, metadata);
-                    }
-                    if matches!(completion.trigger, ReflectionTaskTrigger::PreCompact) {
-                        if let Some(slot) = &pre_compact_slot {
-                            if let Some(coverage_end) = coverage_end {
-                                slot.advance_cursor_if_farther(coverage_end);
+                match completion.status {
+                    ReflectionTaskCompletionStatus::Succeeded => {
+                        if let (Some(usage), Some(metadata)) = (&usage, &completion.metadata) {
+                            record_succeeded_usage_with(usage, metadata);
+                        }
+                        if matches!(trigger, ReflectionTaskTrigger::PreCompact) {
+                            if let Some(slot) = &pre_compact_slot {
+                                if let Some(coverage_end) = coverage_end {
+                                    slot.advance_cursor_if_farther(coverage_end);
+                                }
                             }
                         }
                     }
+                    // Manual 失败/超时：终态错误通知（异步化后的终态感知通道，
+                    // 与同步时代受理回执同为 CommandResultText）。失败终态统一按
+                    // is_error=true 上报（notice 策略中 TimedOut 的非错误标志是
+                    // 同步等待语境，异步终态通知语境下超时同样是失败）。
+                    ReflectionTaskCompletionStatus::Failed
+                    | ReflectionTaskCompletionStatus::TimedOut
+                        if matches!(trigger, ReflectionTaskTrigger::Manual) =>
+                    {
+                        let ManualReflectionNotice { text, .. } = manual_outcome_notice(&outcome);
+                        sink.send_event(RuntimeStreamEvent::CommandResultText {
+                            text,
+                            is_error: true,
+                        })
+                        .await;
+                    }
+                    ReflectionTaskCompletionStatus::Cancelled => {}
+                    ReflectionTaskCompletionStatus::Failed
+                    | ReflectionTaskCompletionStatus::TimedOut => {}
                 }
             }
             announce_memory_update(&sink, &outcome, &lang).await;

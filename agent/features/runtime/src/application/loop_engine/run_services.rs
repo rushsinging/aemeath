@@ -366,6 +366,7 @@ impl ReflectionPhasePort for RuntimeReflection<'_> {
                 )),
                 pre_compact_slot,
                 coverage_end,
+                trigger,
             );
         let outcome = crate::application::loop_engine::chat::reflection::run(
             &self.reflection_tasks,

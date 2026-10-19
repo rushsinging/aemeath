@@ -381,6 +381,7 @@ impl crate::application::loop_engine::ManualReflectionPort for ChatManualReflect
                 ),
                 None,
                 self.coverage_end,
+                crate::application::reflection::ReflectionTaskTrigger::Manual,
             );
         let outcome = crate::application::loop_engine::chat::reflection::run(
             &self.reflection_tasks,
