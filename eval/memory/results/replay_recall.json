@@ -1,1050 +1,3168 @@
 {
-  "bucket": {
-    "total_active": 183,
-    "stale_free": 95,
-    "outdated_or_superseded": 88
+  "scope": "candidate-set shadow replay; not production end-to-end",
+  "snapshot_captured_at": 1792404474,
+  "labels": {
+    "low": 39,
+    "high": 21
   },
-  "kev_online": true,
-  "cases": [
-    {
-      "id": "mrc-001",
-      "gold": 7,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 10
+  "comparison_scope": {
+    "unknown_candidates_cases": 53,
+    "gold_ineligible_cases": 3
+  },
+  "scoring_backend": "HTTP kev (not UDS)",
+  "phases": {
+    "before_filter": {
+      "summary": {
+        "total_cases": 60,
+        "scored_cases": 60,
+        "scoring_errors": 0,
+        "status_counts": {
+          "scored": 60
+        },
+        "gate_outcomes": {
+          "correct_rejection": 11,
+          "correct_selection": 1,
+          "false_selection": 2,
+          "missed_selection": 45,
+          "wrong_selection": 1
+        },
+        "selected_cases": 4,
+        "selected_content_chars": 1496,
+        "corpus_recall_at_20": null,
+        "full_injection_precision": null,
+        "downstream_task_gain": null,
+        "not_measured": [
+          "corpus-level recall",
+          "all selected memories relevance",
+          "downstream task success"
+        ]
       },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.2817,
-        "top1_state": "drifted"
-      }
+      "cases": [
+        {
+          "id": "mrc-001",
+          "gold": 7,
+          "phase_gold": 7,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.0714,
+            0.2817,
+            0.0562,
+            0.0971,
+            0.0819,
+            0.0926,
+            0.052,
+            0.1281,
+            0.0493,
+            0.0897
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-002",
+          "gold": 4,
+          "phase_gold": 4,
+          "confidence": "high",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 4,
+          "candidate_status": {
+            "eligible": 5,
+            "ineligible": 4,
+            "unknown": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.204,
+            0.1437,
+            0.0852,
+            0.1045,
+            0.1191,
+            0.09,
+            0.11,
+            0.0579,
+            0.0574,
+            0.0284
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-003",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.2246,
+            0.1906,
+            0.1774,
+            0.0628,
+            0.0401,
+            0.0123,
+            0.1221,
+            0.0901,
+            0.0432,
+            0.0367
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-004",
+          "gold": 2,
+          "phase_gold": 2,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 1,
+          "candidate_status": {
+            "eligible": 8,
+            "unknown": 1,
+            "ineligible": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1782,
+            0.1539,
+            0.1223,
+            0.0821,
+            0.1069,
+            0.0786,
+            0.0555,
+            0.092,
+            0.0585,
+            0.0719
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-005",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 6,
+          "candidate_status": {
+            "eligible": 4,
+            "ineligible": 6
+          },
+          "lexical_mode": "metadata_complete_subset",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1819,
+            0.0845,
+            0.1053,
+            0.0498,
+            0.113,
+            0.1098,
+            0.0843,
+            0.0634,
+            0.1215,
+            0.0865
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-006",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 3,
+          "candidate_status": {
+            "eligible": 7,
+            "ineligible": 3
+          },
+          "lexical_mode": "metadata_complete_subset",
+          "lexical_top1_matches_gold": true,
+          "status": "scored",
+          "probabilities": [
+            0.1495,
+            0.1387,
+            0.1117,
+            0.0749,
+            0.0872,
+            0.1172,
+            0.1001,
+            0.1218,
+            0.0507,
+            0.0482
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-007",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.2427,
+            0.1889,
+            0.1074,
+            0.1933,
+            0.0603,
+            0.0665,
+            0.0567,
+            0.0299,
+            0.0283,
+            0.026
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-008",
+          "gold": 6,
+          "phase_gold": 6,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 6,
+          "candidate_status": {
+            "ineligible": 6,
+            "unknown": 2,
+            "eligible": 2
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.111,
+            0.066,
+            0.1477,
+            0.0837,
+            0.0935,
+            0.1109,
+            0.0902,
+            0.0914,
+            0.0806,
+            0.125
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-009",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1643,
+            0.1173,
+            0.0754,
+            0.1841,
+            0.0944,
+            0.0901,
+            0.0625,
+            0.0663,
+            0.0847,
+            0.0609
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-010",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 3,
+          "candidate_status": {
+            "unknown": 2,
+            "eligible": 5,
+            "ineligible": 3
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1449,
+            0.0724,
+            0.1497,
+            0.0991,
+            0.1513,
+            0.0661,
+            0.0486,
+            0.1291,
+            0.0711,
+            0.0678
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-011",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 3,
+          "candidate_status": {
+            "eligible": 5,
+            "ineligible": 3,
+            "unknown": 2
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "scored",
+          "probabilities": [
+            0.213,
+            0.1663,
+            0.085,
+            0.0651,
+            0.1028,
+            0.0796,
+            0.1011,
+            0.0881,
+            0.0737,
+            0.0253
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-012",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "high",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 1,
+          "candidate_status": {
+            "eligible": 8,
+            "ineligible": 1,
+            "unknown": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "scored",
+          "probabilities": [
+            0.2467,
+            0.1925,
+            0.171,
+            0.0871,
+            0.0657,
+            0.0554,
+            0.0354,
+            0.0576,
+            0.0562,
+            0.0323
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-013",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "high",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 6,
+          "candidate_status": {
+            "eligible": 3,
+            "ineligible": 6,
+            "unknown": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1575,
+            0.0973,
+            0.0964,
+            0.0791,
+            0.0977,
+            0.1541,
+            0.073,
+            0.1005,
+            0.0801,
+            0.0643
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-014",
+          "gold": 3,
+          "phase_gold": 3,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 3,
+          "candidate_status": {
+            "unknown": 3,
+            "ineligible": 3,
+            "eligible": 4
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1521,
+            0.0997,
+            0.1575,
+            0.1187,
+            0.0906,
+            0.1592,
+            0.0769,
+            0.0619,
+            0.0456,
+            0.0377
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-015",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 9,
+            "eligible": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "scored",
+          "probabilities": [
+            0.1734,
+            0.1636,
+            0.1588,
+            0.0826,
+            0.1158,
+            0.0923,
+            0.0602,
+            0.0524,
+            0.0409,
+            0.0599
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-016",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 9,
+            "eligible": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "scored",
+          "probabilities": [
+            0.1141,
+            0.135,
+            0.0528,
+            0.1156,
+            0.0562,
+            0.0842,
+            0.0359,
+            0.1003,
+            0.1154,
+            0.1904
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-017",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 4,
+          "candidate_status": {
+            "ineligible": 4,
+            "eligible": 2,
+            "unknown": 4
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1562,
+            0.1405,
+            0.0965,
+            0.137,
+            0.1075,
+            0.1009,
+            0.0846,
+            0.086,
+            0.0422,
+            0.0485
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-018",
+          "gold": 5,
+          "phase_gold": 5,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 4,
+          "candidate_status": {
+            "eligible": 5,
+            "ineligible": 4,
+            "unknown": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1578,
+            0.1034,
+            0.0961,
+            0.1318,
+            0.132,
+            0.0744,
+            0.0973,
+            0.0924,
+            0.0664,
+            0.0484
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-019",
+          "gold": 4,
+          "phase_gold": 4,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 4,
+          "candidate_status": {
+            "unknown": 4,
+            "ineligible": 4,
+            "eligible": 2
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1383,
+            0.1265,
+            0.1083,
+            0.1685,
+            0.1523,
+            0.0747,
+            0.0835,
+            0.0458,
+            0.0563,
+            0.046
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-020",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1547,
+            0.3075,
+            0.2367,
+            0.0537,
+            0.0857,
+            0.0351,
+            0.0398,
+            0.0237,
+            0.026,
+            0.0371
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-021",
+          "gold": 4,
+          "phase_gold": 4,
+          "confidence": "high",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 9,
+            "eligible": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.0845,
+            0.1631,
+            0.2294,
+            0.1095,
+            0.1085,
+            0.0821,
+            0.0799,
+            0.0508,
+            0.0513,
+            0.0409
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-022",
+          "gold": 9,
+          "phase_gold": 9,
+          "confidence": "high",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1427,
+            0.1082,
+            0.1437,
+            0.0759,
+            0.0469,
+            0.1311,
+            0.0623,
+            0.0455,
+            0.1013,
+            0.1425
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-023",
+          "gold": 2,
+          "phase_gold": 2,
+          "confidence": "high",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 4,
+          "candidate_status": {
+            "unknown": 3,
+            "ineligible": 4,
+            "eligible": 3
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1034,
+            0.1269,
+            0.0973,
+            0.2096,
+            0.1653,
+            0.0491,
+            0.0495,
+            0.0505,
+            0.0524,
+            0.0959
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-024",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 3,
+          "candidate_status": {
+            "unknown": 4,
+            "ineligible": 3,
+            "eligible": 3
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.0945,
+            0.1598,
+            0.1061,
+            0.0606,
+            0.0804,
+            0.1409,
+            0.1432,
+            0.0957,
+            0.0716,
+            0.0472
+          ],
+          "gate_outcome": "correct_rejection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-025",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 3,
+          "candidate_status": {
+            "unknown": 3,
+            "eligible": 4,
+            "ineligible": 3
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1604,
+            0.1178,
+            0.1221,
+            0.1212,
+            0.1002,
+            0.1141,
+            0.0856,
+            0.0649,
+            0.066,
+            0.0477
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-026",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "high",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "scored",
+          "probabilities": [
+            0.2273,
+            0.1121,
+            0.0478,
+            0.1093,
+            0.0743,
+            0.0689,
+            0.0492,
+            0.0589,
+            0.1883,
+            0.0637
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-027",
+          "gold": 7,
+          "phase_gold": 7,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 5,
+          "candidate_status": {
+            "unknown": 2,
+            "ineligible": 5,
+            "eligible": 3
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.138,
+            0.1889,
+            0.1669,
+            0.1102,
+            0.0551,
+            0.0671,
+            0.1019,
+            0.0492,
+            0.0651,
+            0.0575
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-028",
+          "gold": 4,
+          "phase_gold": 4,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 4,
+          "candidate_status": {
+            "ineligible": 4,
+            "eligible": 4,
+            "unknown": 2
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.202,
+            0.2449,
+            0.0832,
+            0.0523,
+            0.1141,
+            0.0696,
+            0.0564,
+            0.0549,
+            0.0387,
+            0.0841
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-029",
+          "gold": 4,
+          "phase_gold": 4,
+          "confidence": "high",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 4,
+          "candidate_status": {
+            "eligible": 4,
+            "ineligible": 4,
+            "unknown": 2
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.0823,
+            0.1049,
+            0.1101,
+            0.1529,
+            0.0972,
+            0.1282,
+            0.1227,
+            0.0995,
+            0.073,
+            0.0292
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-030",
+          "gold": 4,
+          "phase_gold": 4,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 4,
+          "candidate_status": {
+            "ineligible": 4,
+            "unknown": 2,
+            "eligible": 4
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.062,
+            0.079,
+            0.071,
+            0.1365,
+            0.2028,
+            0.0792,
+            0.1279,
+            0.1254,
+            0.0554,
+            0.0608
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-031",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "high",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 9,
+            "eligible": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.158,
+            0.1651,
+            0.1052,
+            0.1145,
+            0.1034,
+            0.0715,
+            0.0961,
+            0.0612,
+            0.072,
+            0.053
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-032",
+          "gold": 2,
+          "phase_gold": 2,
+          "confidence": "high",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "scored",
+          "probabilities": [
+            0.1248,
+            0.0785,
+            0.1851,
+            0.0657,
+            0.1224,
+            0.0601,
+            0.0762,
+            0.09,
+            0.1591,
+            0.0379
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-033",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 2,
+          "candidate_status": {
+            "eligible": 6,
+            "unknown": 2,
+            "ineligible": 2
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1203,
+            0.1488,
+            0.1377,
+            0.1022,
+            0.075,
+            0.078,
+            0.1882,
+            0.0643,
+            0.0583,
+            0.0271
+          ],
+          "gate_outcome": "correct_rejection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-034",
+          "gold": 2,
+          "phase_gold": 2,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1967,
+            0.211,
+            0.2075,
+            0.0712,
+            0.0772,
+            0.0418,
+            0.056,
+            0.0538,
+            0.0463,
+            0.0385
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-035",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1631,
+            0.1423,
+            0.1118,
+            0.1144,
+            0.1017,
+            0.0919,
+            0.0564,
+            0.0567,
+            0.1297,
+            0.0321
+          ],
+          "gate_outcome": "correct_rejection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-036",
+          "gold": 4,
+          "phase_gold": 4,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "eligible": 2,
+            "unknown": 8
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.0955,
+            0.0637,
+            0.0652,
+            0.1674,
+            0.1512,
+            0.0793,
+            0.1123,
+            0.1539,
+            0.0599,
+            0.0517
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-037",
+          "gold": 8,
+          "phase_gold": 8,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "eligible": 1,
+            "unknown": 9
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1017,
+            0.1062,
+            0.1742,
+            0.1555,
+            0.1103,
+            0.0353,
+            0.1104,
+            0.087,
+            0.0604,
+            0.059
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-038",
+          "gold": 5,
+          "phase_gold": 5,
+          "confidence": "high",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 9,
+            "eligible": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1668,
+            0.141,
+            0.1145,
+            0.0678,
+            0.0814,
+            0.0961,
+            0.0727,
+            0.0657,
+            0.115,
+            0.0791
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-039",
+          "gold": 5,
+          "phase_gold": 5,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "eligible": 3,
+            "unknown": 7
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.0993,
+            0.1893,
+            0.2183,
+            0.1753,
+            0.0927,
+            0.0684,
+            0.0358,
+            0.0263,
+            0.0376,
+            0.057
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-040",
+          "gold": 4,
+          "phase_gold": 4,
+          "confidence": "high",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 2,
+          "candidate_status": {
+            "eligible": 4,
+            "ineligible": 2,
+            "unknown": 4
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1388,
+            0.1216,
+            0.1344,
+            0.1147,
+            0.1339,
+            0.0971,
+            0.0987,
+            0.0533,
+            0.056,
+            0.0515
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-041",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "high",
+          "candidate_count": 4,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 4
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.3277,
+            0.368,
+            0.1796,
+            0.1247
+          ],
+          "gate_outcome": "correct_rejection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-042",
+          "gold": 3,
+          "phase_gold": 3,
+          "confidence": "low",
+          "candidate_count": 9,
+          "known_ineligible_candidates": 2,
+          "candidate_status": {
+            "eligible": 7,
+            "ineligible": 2
+          },
+          "lexical_mode": "metadata_complete_subset",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.2104,
+            0.108,
+            0.1353,
+            0.1165,
+            0.083,
+            0.1608,
+            0.076,
+            0.0727,
+            0.0373
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-043",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "high",
+          "candidate_count": 7,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 7
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "scored",
+          "probabilities": [
+            0.0621,
+            0.1678,
+            0.2396,
+            0.1029,
+            0.0656,
+            0.0211,
+            0.341
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-044",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "high",
+          "candidate_count": 5,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 5
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "scored",
+          "probabilities": [
+            0.0687,
+            0.2274,
+            0.2859,
+            0.0245,
+            0.3935
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-045",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "high",
+          "candidate_count": 2,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 2
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.6288,
+            0.3712
+          ],
+          "gate_outcome": "wrong_selection",
+          "preview": {
+            "selected_indexes": [
+              0,
+              1
+            ],
+            "selected_count": 2,
+            "selected_content_chars": 366,
+            "budget_accounting_chars": 392,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-046",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 4,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "eligible": 4
+          },
+          "lexical_mode": "metadata_complete_subset",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.2229,
+            0.2624,
+            0.4052,
+            0.1095
+          ],
+          "gate_outcome": "correct_rejection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-047",
+          "gold": 3,
+          "phase_gold": 3,
+          "confidence": "low",
+          "candidate_count": 9,
+          "known_ineligible_candidates": 2,
+          "candidate_status": {
+            "ineligible": 2,
+            "unknown": 3,
+            "eligible": 4
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.121,
+            0.1315,
+            0.0942,
+            0.1429,
+            0.109,
+            0.076,
+            0.0789,
+            0.1917,
+            0.0548
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-048",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 8,
+          "known_ineligible_candidates": 1,
+          "candidate_status": {
+            "unknown": 2,
+            "eligible": 5,
+            "ineligible": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1493,
+            0.1056,
+            0.1511,
+            0.0526,
+            0.0872,
+            0.2259,
+            0.2041,
+            0.0242
+          ],
+          "gate_outcome": "correct_rejection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-049",
+          "gold": 3,
+          "phase_gold": 3,
+          "confidence": "high",
+          "candidate_count": 6,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 6
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.213,
+            0.2079,
+            0.1413,
+            0.2152,
+            0.126,
+            0.0965
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-050",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "low",
+          "candidate_count": 4,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 3,
+            "eligible": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.2067,
+            0.2437,
+            0.3334,
+            0.2162
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-051",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "high",
+          "candidate_count": 2,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 2
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "scored",
+          "probabilities": [
+            0.497,
+            0.503
+          ],
+          "gate_outcome": "correct_selection",
+          "preview": {
+            "selected_indexes": [
+              1,
+              0
+            ],
+            "selected_count": 2,
+            "selected_content_chars": 400,
+            "budget_accounting_chars": 426,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-052",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "high",
+          "candidate_count": 6,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 6
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1355,
+            0.208,
+            0.1579,
+            0.0868,
+            0.2115,
+            0.2002
+          ],
+          "gate_outcome": "correct_rejection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-053",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 7,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 7
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.2952,
+            0.2011,
+            0.0951,
+            0.1332,
+            0.1028,
+            0.0693,
+            0.1035
+          ],
+          "gate_outcome": "correct_rejection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-054",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 2,
+          "known_ineligible_candidates": 2,
+          "candidate_status": {
+            "ineligible": 2
+          },
+          "lexical_mode": "metadata_complete_subset",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.3822,
+            0.6178
+          ],
+          "gate_outcome": "false_selection",
+          "preview": {
+            "selected_indexes": [
+              1,
+              0
+            ],
+            "selected_count": 2,
+            "selected_content_chars": 329,
+            "budget_accounting_chars": 367,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 2
+        },
+        {
+          "id": "mrc-055",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 5,
+          "known_ineligible_candidates": 1,
+          "candidate_status": {
+            "unknown": 2,
+            "eligible": 2,
+            "ineligible": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.1162,
+            0.1899,
+            0.38,
+            0.2355,
+            0.0784
+          ],
+          "gate_outcome": "correct_rejection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-056",
+          "gold": 3,
+          "phase_gold": 3,
+          "confidence": "high",
+          "candidate_count": 9,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 9
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.0699,
+            0.2216,
+            0.2317,
+            0.1485,
+            0.1001,
+            0.1336,
+            0.056,
+            0.0204,
+            0.0182
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-057",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 7,
+          "known_ineligible_candidates": 3,
+          "candidate_status": {
+            "ineligible": 3,
+            "eligible": 4
+          },
+          "lexical_mode": "metadata_complete_subset",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.243,
+            0.1346,
+            0.1931,
+            0.2057,
+            0.1029,
+            0.078,
+            0.0428
+          ],
+          "gate_outcome": "correct_rejection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-058",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 8,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 8
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.2227,
+            0.2092,
+            0.1851,
+            0.0726,
+            0.0917,
+            0.1002,
+            0.0777,
+            0.0408
+          ],
+          "gate_outcome": "correct_rejection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-059",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "high",
+          "candidate_count": 3,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "eligible": 3
+          },
+          "lexical_mode": "metadata_complete_subset",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.5039,
+            0.2003,
+            0.2957
+          ],
+          "gate_outcome": "false_selection",
+          "preview": {
+            "selected_indexes": [
+              0,
+              2,
+              1
+            ],
+            "selected_count": 3,
+            "selected_content_chars": 401,
+            "budget_accounting_chars": 479,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-060",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "low",
+          "candidate_count": 4,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 4
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "scored",
+          "probabilities": [
+            0.3094,
+            0.4182,
+            0.1592,
+            0.1132
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        }
+      ]
     },
-    {
-      "id": "mrc-002",
-      "gold": 4,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 1,
-        "eligible": 5,
-        "outdated": 3,
-        "superseded": 1
+    "after_filter": {
+      "summary": {
+        "total_cases": 60,
+        "scored_cases": 7,
+        "scoring_errors": 0,
+        "status_counts": {
+          "unresolved_snapshot_alignment": 53,
+          "scored": 7
+        },
+        "gate_outcomes": {
+          "correct_rejection": 3,
+          "false_selection": 1,
+          "missed_selection": 3
+        },
+        "selected_cases": 1,
+        "selected_content_chars": 401,
+        "corpus_recall_at_20": null,
+        "full_injection_precision": null,
+        "downstream_task_gain": null,
+        "not_measured": [
+          "corpus-level recall",
+          "all selected memories relevance",
+          "downstream task success"
+        ]
       },
-      "lexical_top1_state": "eligible",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.204,
-        "top1_state": "eligible"
-      }
-    },
-    {
-      "id": "mrc-003",
-      "gold": 0,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 10
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": true,
-        "top1_p": 0.2246,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-004",
-      "gold": 2,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 1,
-        "eligible": 8,
-        "superseded": 1
-      },
-      "lexical_top1_state": "eligible",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1782,
-        "top1_state": "eligible"
-      }
-    },
-    {
-      "id": "mrc-005",
-      "gold": 1,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "eligible": 4,
-        "outdated": 6
-      },
-      "lexical_top1_state": "eligible",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1819,
-        "top1_state": "eligible"
-      }
-    },
-    {
-      "id": "mrc-006",
-      "gold": 1,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": true,
-      "candidate_states": {
-        "drifted": 1,
-        "eligible": 6,
-        "outdated": 2,
-        "superseded": 1
-      },
-      "lexical_top1_state": "eligible",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1495,
-        "top1_state": "eligible"
-      }
-    },
-    {
-      "id": "mrc-007",
-      "gold": 1,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 10
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.2427,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-008",
-      "gold": 6,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 2,
-        "eligible": 2,
-        "outdated": 5,
-        "superseded": 1
-      },
-      "lexical_top1_state": "superseded",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1477,
-        "top1_state": "outdated"
-      }
-    },
-    {
-      "id": "mrc-009",
-      "gold": 0,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 10
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1841,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-010",
-      "gold": 0,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 3,
-        "eligible": 4,
-        "outdated": 2,
-        "superseded": 1
-      },
-      "lexical_top1_state": "eligible",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1513,
-        "top1_state": "outdated"
-      }
-    },
-    {
-      "id": "mrc-011",
-      "gold": 0,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": true,
-      "candidate_states": {
-        "drifted": 2,
-        "eligible": 5,
-        "outdated": 2,
-        "superseded": 1
-      },
-      "lexical_top1_state": "eligible",
-      "kev": {
-        "top1_is_gold": true,
-        "top1_p": 0.213,
-        "top1_state": "eligible"
-      }
-    },
-    {
-      "id": "mrc-012",
-      "gold": 0,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": true,
-      "candidate_states": {
-        "drifted": 2,
-        "eligible": 7,
-        "outdated": 1
-      },
-      "lexical_top1_state": "eligible",
-      "kev": {
-        "top1_is_gold": true,
-        "top1_p": 0.2467,
-        "top1_state": "eligible"
-      }
-    },
-    {
-      "id": "mrc-013",
-      "gold": 0,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 1,
-        "eligible": 3,
-        "outdated": 5,
-        "superseded": 1
-      },
-      "lexical_top1_state": "outdated",
-      "kev": {
-        "top1_is_gold": true,
-        "top1_p": 0.1575,
-        "top1_state": "eligible"
-      }
-    },
-    {
-      "id": "mrc-014",
-      "gold": 3,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 3,
-        "eligible": 4,
-        "superseded": 3
-      },
-      "lexical_top1_state": "eligible",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1592,
-        "top1_state": "superseded"
-      }
-    },
-    {
-      "id": "mrc-015",
-      "gold": 0,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": true,
-      "candidate_states": {
-        "drifted": 10
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": true,
-        "top1_p": 0.1734,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-016",
-      "gold": 1,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": true,
-      "candidate_states": {
-        "drifted": 10
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1904,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-017",
-      "gold": 0,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 4,
-        "eligible": 2,
-        "outdated": 3,
-        "superseded": 1
-      },
-      "lexical_top1_state": "eligible",
-      "kev": {
-        "top1_is_gold": true,
-        "top1_p": 0.1562,
-        "top1_state": "superseded"
-      }
-    },
-    {
-      "id": "mrc-018",
-      "gold": 5,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 2,
-        "eligible": 4,
-        "outdated": 3,
-        "superseded": 1
-      },
-      "lexical_top1_state": "outdated",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1578,
-        "top1_state": "eligible"
-      }
-    },
-    {
-      "id": "mrc-019",
-      "gold": 4,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 4,
-        "eligible": 2,
-        "outdated": 1,
-        "superseded": 3
-      },
-      "lexical_top1_state": "superseded",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1685,
-        "top1_state": "superseded"
-      }
-    },
-    {
-      "id": "mrc-020",
-      "gold": 1,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 10
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": true,
-        "top1_p": 0.3075,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-021",
-      "gold": 4,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 10
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.2294,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-022",
-      "gold": 9,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 10
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1437,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-023",
-      "gold": 2,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 3,
-        "eligible": 3,
-        "outdated": 3,
-        "superseded": 1
-      },
-      "lexical_top1_state": "eligible",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.2096,
-        "top1_state": "eligible"
-      }
-    },
-    {
-      "id": "mrc-024",
-      "gold": -1,
-      "candidates": 10,
-      "gold_status": "no_relevant",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 4,
-        "eligible": 3,
-        "outdated": 2,
-        "superseded": 1
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1598,
-        "top1_state": "outdated"
-      }
-    },
-    {
-      "id": "mrc-025",
-      "gold": 0,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 4,
-        "eligible": 3,
-        "outdated": 3
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": true,
-        "top1_p": 0.1604,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-026",
-      "gold": 0,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": true,
-      "candidate_states": {
-        "drifted": 10
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": true,
-        "top1_p": 0.2273,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-027",
-      "gold": 7,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 2,
-        "eligible": 3,
-        "outdated": 4,
-        "superseded": 1
-      },
-      "lexical_top1_state": "outdated",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1889,
-        "top1_state": "outdated"
-      }
-    },
-    {
-      "id": "mrc-028",
-      "gold": 4,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 2,
-        "eligible": 4,
-        "outdated": 3,
-        "superseded": 1
-      },
-      "lexical_top1_state": "eligible",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.2449,
-        "top1_state": "eligible"
-      }
-    },
-    {
-      "id": "mrc-029",
-      "gold": 4,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 2,
-        "eligible": 4,
-        "outdated": 4
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1529,
-        "top1_state": "outdated"
-      }
-    },
-    {
-      "id": "mrc-030",
-      "gold": 4,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 2,
-        "eligible": 4,
-        "outdated": 3,
-        "superseded": 1
-      },
-      "lexical_top1_state": "superseded",
-      "kev": {
-        "top1_is_gold": true,
-        "top1_p": 0.2028,
-        "top1_state": "eligible"
-      }
-    },
-    {
-      "id": "mrc-031",
-      "gold": 0,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 10
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1651,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-032",
-      "gold": 2,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": true,
-      "candidate_states": {
-        "drifted": 10
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": true,
-        "top1_p": 0.1851,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-033",
-      "gold": -1,
-      "candidates": 10,
-      "gold_status": "no_relevant",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 2,
-        "eligible": 6,
-        "outdated": 2
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1882,
-        "top1_state": "outdated"
-      }
-    },
-    {
-      "id": "mrc-034",
-      "gold": 2,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 10
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.211,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-035",
-      "gold": -1,
-      "candidates": 10,
-      "gold_status": "no_relevant",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 10
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1631,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-036",
-      "gold": 4,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 10
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1674,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-037",
-      "gold": 8,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 10
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1742,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-038",
-      "gold": 5,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 10
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1668,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-039",
-      "gold": 5,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 10
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.2183,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-040",
-      "gold": 4,
-      "candidates": 10,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 4,
-        "eligible": 4,
-        "outdated": 1,
-        "superseded": 1
-      },
-      "lexical_top1_state": "superseded",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1388,
-        "top1_state": "eligible"
-      }
-    },
-    {
-      "id": "mrc-041",
-      "gold": -1,
-      "candidates": 4,
-      "gold_status": "no_relevant",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 4
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.368,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-042",
-      "gold": 3,
-      "candidates": 9,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "eligible": 7,
-        "superseded": 2
-      },
-      "lexical_top1_state": "eligible",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.2104,
-        "top1_state": "eligible"
-      }
-    },
-    {
-      "id": "mrc-043",
-      "gold": 1,
-      "candidates": 7,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": true,
-      "candidate_states": {
-        "drifted": 7
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.341,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-044",
-      "gold": 1,
-      "candidates": 5,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": true,
-      "candidate_states": {
-        "drifted": 5
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.3935,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-045",
-      "gold": 1,
-      "candidates": 2,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 2
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.6288,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-046",
-      "gold": -1,
-      "candidates": 4,
-      "gold_status": "no_relevant",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 4
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.4052,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-047",
-      "gold": 3,
-      "candidates": 9,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 4,
-        "eligible": 3,
-        "outdated": 1,
-        "superseded": 1
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.1917,
-        "top1_state": "superseded"
-      }
-    },
-    {
-      "id": "mrc-048",
-      "gold": -1,
-      "candidates": 8,
-      "gold_status": "no_relevant",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 2,
-        "eligible": 5,
-        "outdated": 1
-      },
-      "lexical_top1_state": "eligible",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.2259,
-        "top1_state": "eligible"
-      }
-    },
-    {
-      "id": "mrc-049",
-      "gold": 3,
-      "candidates": 6,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 6
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": true,
-        "top1_p": 0.2152,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-050",
-      "gold": 0,
-      "candidates": 4,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 4
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.3334,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-051",
-      "gold": 1,
-      "candidates": 2,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": true,
-      "candidate_states": {
-        "drifted": 2
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": true,
-        "top1_p": 0.503,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-052",
-      "gold": -1,
-      "candidates": 6,
-      "gold_status": "no_relevant",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 6
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.2115,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-053",
-      "gold": -1,
-      "candidates": 7,
-      "gold_status": "no_relevant",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 7
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.2952,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-054",
-      "gold": -1,
-      "candidates": 2,
-      "gold_status": "no_relevant",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "outdated": 2
-      },
-      "lexical_top1_state": "outdated",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.6178,
-        "top1_state": "outdated"
-      }
-    },
-    {
-      "id": "mrc-055",
-      "gold": -1,
-      "candidates": 5,
-      "gold_status": "no_relevant",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 2,
-        "eligible": 2,
-        "outdated": 1
-      },
-      "lexical_top1_state": "outdated",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.38,
-        "top1_state": "eligible"
-      }
-    },
-    {
-      "id": "mrc-056",
-      "gold": 3,
-      "candidates": 9,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 9
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.2317,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-057",
-      "gold": -1,
-      "candidates": 7,
-      "gold_status": "no_relevant",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "eligible": 4,
-        "outdated": 2,
-        "superseded": 1
-      },
-      "lexical_top1_state": "superseded",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.243,
-        "top1_state": "superseded"
-      }
-    },
-    {
-      "id": "mrc-058",
-      "gold": -1,
-      "candidates": 8,
-      "gold_status": "no_relevant",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 8
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.2227,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-059",
-      "gold": -1,
-      "candidates": 3,
-      "gold_status": "no_relevant",
-      "lexical_top1_is_gold": false,
-      "candidate_states": {
-        "drifted": 3
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": false,
-        "top1_p": 0.5039,
-        "top1_state": "drifted"
-      }
-    },
-    {
-      "id": "mrc-060",
-      "gold": 1,
-      "candidates": 4,
-      "gold_status": "in_dataset",
-      "lexical_top1_is_gold": true,
-      "candidate_states": {
-        "drifted": 4
-      },
-      "lexical_top1_state": "drifted",
-      "kev": {
-        "top1_is_gold": true,
-        "top1_p": 0.4182,
-        "top1_state": "drifted"
-      }
+      "cases": [
+        {
+          "id": "mrc-001",
+          "gold": 7,
+          "phase_gold": 7,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-002",
+          "gold": 4,
+          "phase_gold": -1,
+          "confidence": "high",
+          "candidate_count": 6,
+          "known_ineligible_candidates": 4,
+          "candidate_status": {
+            "eligible": 5,
+            "ineligible": 4,
+            "unknown": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-003",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-004",
+          "gold": 2,
+          "phase_gold": 2,
+          "confidence": "low",
+          "candidate_count": 9,
+          "known_ineligible_candidates": 1,
+          "candidate_status": {
+            "eligible": 8,
+            "unknown": 1,
+            "ineligible": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-005",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "low",
+          "candidate_count": 4,
+          "known_ineligible_candidates": 6,
+          "candidate_status": {
+            "eligible": 4,
+            "ineligible": 6
+          },
+          "lexical_mode": "metadata_complete_subset",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.4513,
+            0.2097,
+            0.1147,
+            0.2242
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-006",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "low",
+          "candidate_count": 7,
+          "known_ineligible_candidates": 3,
+          "candidate_status": {
+            "eligible": 7,
+            "ineligible": 3
+          },
+          "lexical_mode": "metadata_complete_subset",
+          "lexical_top1_matches_gold": true,
+          "status": "scored",
+          "probabilities": [
+            0.2133,
+            0.1999,
+            0.1064,
+            0.1407,
+            0.1832,
+            0.0797,
+            0.0768
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-007",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-008",
+          "gold": 6,
+          "phase_gold": 1,
+          "confidence": "low",
+          "candidate_count": 4,
+          "known_ineligible_candidates": 6,
+          "candidate_status": {
+            "ineligible": 6,
+            "unknown": 2,
+            "eligible": 2
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-009",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-010",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "low",
+          "candidate_count": 7,
+          "known_ineligible_candidates": 3,
+          "candidate_status": {
+            "unknown": 2,
+            "eligible": 5,
+            "ineligible": 3
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-011",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "low",
+          "candidate_count": 7,
+          "known_ineligible_candidates": 3,
+          "candidate_status": {
+            "eligible": 5,
+            "ineligible": 3,
+            "unknown": 2
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-012",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "high",
+          "candidate_count": 9,
+          "known_ineligible_candidates": 1,
+          "candidate_status": {
+            "eligible": 8,
+            "ineligible": 1,
+            "unknown": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-013",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "high",
+          "candidate_count": 4,
+          "known_ineligible_candidates": 6,
+          "candidate_status": {
+            "eligible": 3,
+            "ineligible": 6,
+            "unknown": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-014",
+          "gold": 3,
+          "phase_gold": 2,
+          "confidence": "low",
+          "candidate_count": 7,
+          "known_ineligible_candidates": 3,
+          "candidate_status": {
+            "unknown": 3,
+            "ineligible": 3,
+            "eligible": 4
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-015",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 9,
+            "eligible": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-016",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 9,
+            "eligible": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-017",
+          "gold": 0,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 6,
+          "known_ineligible_candidates": 4,
+          "candidate_status": {
+            "ineligible": 4,
+            "eligible": 2,
+            "unknown": 4
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-018",
+          "gold": 5,
+          "phase_gold": 3,
+          "confidence": "low",
+          "candidate_count": 6,
+          "known_ineligible_candidates": 4,
+          "candidate_status": {
+            "eligible": 5,
+            "ineligible": 4,
+            "unknown": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-019",
+          "gold": 4,
+          "phase_gold": 2,
+          "confidence": "low",
+          "candidate_count": 6,
+          "known_ineligible_candidates": 4,
+          "candidate_status": {
+            "unknown": 4,
+            "ineligible": 4,
+            "eligible": 2
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-020",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-021",
+          "gold": 4,
+          "phase_gold": 4,
+          "confidence": "high",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 9,
+            "eligible": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-022",
+          "gold": 9,
+          "phase_gold": 9,
+          "confidence": "high",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-023",
+          "gold": 2,
+          "phase_gold": 1,
+          "confidence": "high",
+          "candidate_count": 6,
+          "known_ineligible_candidates": 4,
+          "candidate_status": {
+            "unknown": 3,
+            "ineligible": 4,
+            "eligible": 3
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-024",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 7,
+          "known_ineligible_candidates": 3,
+          "candidate_status": {
+            "unknown": 4,
+            "ineligible": 3,
+            "eligible": 3
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-025",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "low",
+          "candidate_count": 7,
+          "known_ineligible_candidates": 3,
+          "candidate_status": {
+            "unknown": 3,
+            "eligible": 4,
+            "ineligible": 3
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-026",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "high",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-027",
+          "gold": 7,
+          "phase_gold": 4,
+          "confidence": "low",
+          "candidate_count": 5,
+          "known_ineligible_candidates": 5,
+          "candidate_status": {
+            "unknown": 2,
+            "ineligible": 5,
+            "eligible": 3
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-028",
+          "gold": 4,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 6,
+          "known_ineligible_candidates": 4,
+          "candidate_status": {
+            "ineligible": 4,
+            "eligible": 4,
+            "unknown": 2
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-029",
+          "gold": 4,
+          "phase_gold": 2,
+          "confidence": "high",
+          "candidate_count": 6,
+          "known_ineligible_candidates": 4,
+          "candidate_status": {
+            "eligible": 4,
+            "ineligible": 4,
+            "unknown": 2
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-030",
+          "gold": 4,
+          "phase_gold": 3,
+          "confidence": "low",
+          "candidate_count": 6,
+          "known_ineligible_candidates": 4,
+          "candidate_status": {
+            "ineligible": 4,
+            "unknown": 2,
+            "eligible": 4
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-031",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "high",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 9,
+            "eligible": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-032",
+          "gold": 2,
+          "phase_gold": 2,
+          "confidence": "high",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-033",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 8,
+          "known_ineligible_candidates": 2,
+          "candidate_status": {
+            "eligible": 6,
+            "unknown": 2,
+            "ineligible": 2
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-034",
+          "gold": 2,
+          "phase_gold": 2,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-035",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 10
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-036",
+          "gold": 4,
+          "phase_gold": 4,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "eligible": 2,
+            "unknown": 8
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-037",
+          "gold": 8,
+          "phase_gold": 8,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "eligible": 1,
+            "unknown": 9
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-038",
+          "gold": 5,
+          "phase_gold": 5,
+          "confidence": "high",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 9,
+            "eligible": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-039",
+          "gold": 5,
+          "phase_gold": 5,
+          "confidence": "low",
+          "candidate_count": 10,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "eligible": 3,
+            "unknown": 7
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-040",
+          "gold": 4,
+          "phase_gold": 3,
+          "confidence": "high",
+          "candidate_count": 8,
+          "known_ineligible_candidates": 2,
+          "candidate_status": {
+            "eligible": 4,
+            "ineligible": 2,
+            "unknown": 4
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-041",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "high",
+          "candidate_count": 4,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 4
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-042",
+          "gold": 3,
+          "phase_gold": 2,
+          "confidence": "low",
+          "candidate_count": 7,
+          "known_ineligible_candidates": 2,
+          "candidate_status": {
+            "eligible": 7,
+            "ineligible": 2
+          },
+          "lexical_mode": "metadata_complete_subset",
+          "lexical_top1_matches_gold": true,
+          "status": "scored",
+          "probabilities": [
+            0.274,
+            0.1798,
+            0.1569,
+            0.1183,
+            0.1196,
+            0.1029,
+            0.0484
+          ],
+          "gate_outcome": "missed_selection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-043",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "high",
+          "candidate_count": 7,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 7
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-044",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "high",
+          "candidate_count": 5,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 5
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-045",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "high",
+          "candidate_count": 2,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 2
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-046",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 4,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "eligible": 4
+          },
+          "lexical_mode": "metadata_complete_subset",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.2229,
+            0.2624,
+            0.4052,
+            0.1095
+          ],
+          "gate_outcome": "correct_rejection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-047",
+          "gold": 3,
+          "phase_gold": 2,
+          "confidence": "low",
+          "candidate_count": 7,
+          "known_ineligible_candidates": 2,
+          "candidate_status": {
+            "ineligible": 2,
+            "unknown": 3,
+            "eligible": 4
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-048",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 7,
+          "known_ineligible_candidates": 1,
+          "candidate_status": {
+            "unknown": 2,
+            "eligible": 5,
+            "ineligible": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-049",
+          "gold": 3,
+          "phase_gold": 3,
+          "confidence": "high",
+          "candidate_count": 6,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 6
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-050",
+          "gold": 0,
+          "phase_gold": 0,
+          "confidence": "low",
+          "candidate_count": 4,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 3,
+            "eligible": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-051",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "high",
+          "candidate_count": 2,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 2
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-052",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "high",
+          "candidate_count": 6,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 6
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-053",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 7,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 7
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-054",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 0,
+          "known_ineligible_candidates": 2,
+          "candidate_status": {
+            "ineligible": 2
+          },
+          "lexical_mode": "metadata_complete_subset",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [],
+          "gate_outcome": "correct_rejection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-055",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 4,
+          "known_ineligible_candidates": 1,
+          "candidate_status": {
+            "unknown": 2,
+            "eligible": 2,
+            "ineligible": 1
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-056",
+          "gold": 3,
+          "phase_gold": 3,
+          "confidence": "high",
+          "candidate_count": 9,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 9
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-057",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 4,
+          "known_ineligible_candidates": 3,
+          "candidate_status": {
+            "ineligible": 3,
+            "eligible": 4
+          },
+          "lexical_mode": "metadata_complete_subset",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.2641,
+            0.2432,
+            0.3447,
+            0.148
+          ],
+          "gate_outcome": "correct_rejection",
+          "preview": {
+            "selected_indexes": [],
+            "selected_count": 0,
+            "selected_content_chars": 0,
+            "budget_accounting_chars": 0,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-058",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "low",
+          "candidate_count": 8,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 8
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": false,
+          "status": "unresolved_snapshot_alignment"
+        },
+        {
+          "id": "mrc-059",
+          "gold": -1,
+          "phase_gold": -1,
+          "confidence": "high",
+          "candidate_count": 3,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "eligible": 3
+          },
+          "lexical_mode": "metadata_complete_subset",
+          "lexical_top1_matches_gold": false,
+          "status": "scored",
+          "probabilities": [
+            0.5039,
+            0.2003,
+            0.2957
+          ],
+          "gate_outcome": "false_selection",
+          "preview": {
+            "selected_indexes": [
+              0,
+              2,
+              1
+            ],
+            "selected_count": 3,
+            "selected_content_chars": 401,
+            "budget_accounting_chars": 479,
+            "final_reminder_token_cost": null
+          },
+          "selected_known_ineligible": 0
+        },
+        {
+          "id": "mrc-060",
+          "gold": 1,
+          "phase_gold": 1,
+          "confidence": "low",
+          "candidate_count": 4,
+          "known_ineligible_candidates": 0,
+          "candidate_status": {
+            "unknown": 4
+          },
+          "lexical_mode": "text_only_subset_approximation",
+          "lexical_top1_matches_gold": true,
+          "status": "unresolved_snapshot_alignment"
+        }
+      ]
     }
-  ],
-  "metrics": {
-    "effective_cases": 47,
-    "lexical_top1_hit_rate": 0.23404255319148937,
-    "stale_in_candidates_total": 90,
-    "stale_at_lexical_top1": 10,
-    "gate_quadrant": {
-      "correct_inject": 1,
-      "wrong_inject": 3,
-      "miss_inject": 45,
-      "correct_reject": 11
-    }
+  },
+  "input_sha256": {
+    "snapshot": "8a8c18a58d19cd086b23c1175c275f17fd492c8f4da10e4305f2549e6206369b",
+    "dataset": "fb279a69bd9b9fe5d10b4768066b3111bad6c692f6a3d5a27c6cb2c94c78e90e",
+    "labels": "cef069a827416c9ef6e0373b2c50e55fe2e7c90b9af5a3f426ba85eff0db5006"
   }
 }

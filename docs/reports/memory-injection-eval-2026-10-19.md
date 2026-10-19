@@ -1,77 +1,95 @@
-# Memory Recall 与 Injection 端到端质量评测报告
+# Memory Recall 与 Injection 双通道评测报告
 
 > 日期：2026-10-19
-> Issue：#1998（父 #1988）
-> 评测对象：通道 A（memory-context system block）与通道 B（per-message recall 门控注入）
-> 工具：`eval/memory/harness/replay_recall.py`、`eval/memory/harness/analyze_channel_a.py`
+> 范围：双通道影子评测、失效记忆过滤修复与回归证据。
+> 本报告替代早期草稿中“候选即实际注入”“跨项目历史样本可直接映射当前桶”的推断。
 
-## 1. 执行摘要
+## 1. 结论与证据边界
 
-1. **通道 B 门控四象限（60 真实 case，kev 在线重放）**：miss_inject=45（75%）、correct_inject=1、wrong_inject=3、correct_reject=11/13。结合 #1997 的 R@1=0.34，per-message 注入当前几乎不产生有效注入——门控 0.5 阈值在多候选下的结构性失效（#1997 发现）在四象限口径下被完整量化。
-2. **stale 污染修复（本 PR 生产代码）**：`MemorySearchQuery.exclude_stale` 落地。修复前 60 case 候选中含 90 条 outdated/superseded 条目、10 个 case 词法 top1 即过期条目；修复后注入链路不再召回过期条目。记忆桶 active=183 中 88 条（48%）为 stale——**mark_outdated 只标标志不移出 active**，近半存储被过期条目占据。
-3. **通道 A 质量属性（当前桶快照）**：eligible 95 全量注入（limit 200 未截断），stale 泄漏=0（`is_injection_eligible` 已过滤，M5/M10 兜底有效）；pinned 6 条全部占据 top10；注入总量 29,194 字符——每会话 system block 携带约 29K 字符记忆，是上下文成本的常量项。
+- 生产 `recall_relevant` 经 `MemorySearchQuery.exclude_stale=true` 在词法排序前排除 outdated、superseded、TTL 失效条目；显式搜索传 false，仍能查看旧条目及状态。
+- 通道 A 原本已有适格性过滤，本次没有重复增加生产过滤器。
+- 双通道脚本现在基于 manifest 引用成员冻结的 global+project 快照，不再按 members 文件 mtime 猜当前代。
+- 通道 B 是**原候选集内的影子回放**，不是包含全 corpus BM25、双次评分、真实 reminder pipeline 和最终 LLM 输出的端到端测试。
+- 历史数据集没有全部候选的相关性标注、完整 corpus 真值与下游任务对照，因此 corpus Recall@20、完整注入 precision、downstream task gain 记为 `null`，不得以 0 或代理数值替代。
 
-## 2. 通道 B 四象限（kev 重放）
+## 2. 数据与可复现性
 
-重放口径：#1997 数据集 60 case（候选=生产词法 top-N 原文，gold 含 13 条 no-relevant），BM25 层用 `lexical_baseline`（生产同口径），kev 层经 8009 在线打分。
+输入：
 
-| 象限 | 定义 | n | 占比 |
-|---|---|---:|---:|
-| correct_inject | gold=-1 之外、top1=gold 且 p≥0.5 | 1 | 1.7% |
-| wrong_inject | p≥0.5 但 top1≠gold（含负例误放） | 3 | 5.0% |
-| **miss_inject** | **有 gold 但被门控拒绝或选错** | **45** | **75.0%** |
-| correct_reject | 无相关候选且 p<0.5 | 11 | 18.3% |
+- `eval/system-one/datasets/memory_recall_real.jsonl`：60 个历史候选集，47 个单一 gold，13 个候选集内无相关项。
+- `eval/system-one/results/annotation/memory_recall_real_labels.jsonl`：21 条 high、39 条 low；由 LLM 预标注，未完成用户抽检，质量数字仅为探索性基线。
+- `eval/memory/datasets/injection_snapshot.json`：global 8 条、aemeath project 183 条 active，记录采集秒级时间、corpus revision、内容摘要。
+- `eval/memory/results/replay_recall.json`：保存每个样本概率和失败/跳过状态，以及输入 SHA-256；可不联网用 `--responses` 复算。
 
-分层事实：
+快照加载遵循 `primary/manifest.json` 的 active 内容寻址引用，校验字节数与带领域前缀的存储摘要；采集前后 manifest 变化则报错，避免拼接不同代。
 
-- 词法 top1 命中 gold 仅 23.4%，kev 重排 R@1=34%（#1997）——重排对词法有 +11pp 增益，但绝对水平仍低。
-- 负例拒绝 11/13（84.6%）良好——通道 B 的问题集中在「该注入时注不进」，不是「不该注入时乱注入」。
+历史样本来自多个项目；本次快照只包含 global+aemeath，因此候选不可寻可能是其他项目、归档、改写或版本差异，**不能统一归因为 reflection 改写**。只有完整文本相等，或达到生产 500 字截断上限且唯一前缀匹配，才视为可对齐；歧义与不可寻均记 unknown。
 
-## 3. stale 污染与修复
+## 3. 通道 B：候选集内评分与门控
 
-### 3.1 修复前污染（量化）
+HTTP kev（MLX bf16、8009）的复跑结果，**不等同于生产 UDS Q8 daemon**：
 
-- 60 case 的 533 个候选条目中，90 条（16.9%）在当前桶状态为 outdated/superseded；
-- 10 个 case（16.7%）的词法 top1 即过期条目——过期条目在词法与重排两层都在挤占有效记忆名额；
-- 记忆桶 active=183 中 88 条 stale（48%）：`mark_outdated`/反思标记过期后条目仍留在 active 列表，仅 `exclude_stale` 视角与通道 A 的 `is_injection_eligible` 将其排除。
+| 过滤前候选集级结果 | 数量 | 定义 |
+|---|---:|---|
+| correct_selection | 1 | top1 为 gold 且概率达到 0.5 |
+| wrong_selection | 1 | 有 gold，但高概率选了别项 |
+| false_selection | 2 | 候选集无相关项，却达到门控阈值 |
+| missed_selection | 45 | 有 gold，但门控未放行 |
+| correct_rejection | 11 | 候选集无相关项且门控拒绝 |
 
-### 3.2 修复内容（本 PR）
+60/60 评分成功，0 scoring error，4 个样本通过门控。拆分 wrong_selection 与 missed_selection，避免把“高置信选错”隐藏在漏注入中。
 
-- `MemorySearchQuery` 新增 `exclude_stale: bool`（默认 false，显式搜索保持「过期可见+标注」契约）；
-- `recall_relevant_inner` 传 `exclude_stale: true`：过期条目不再进入词法候选，不占召回与重排名额（根因级，优于召回后过滤）；
-- 测试：`search_exclude_stale_drops_ineligible_entries_from_candidates`（service 层两态行为）+ `recall_relevant_excludes_stale_entries_from_injection`（注入链路名额不被过期条目挤占），memory 170 全绿、runtime 536、tools 63、context 5 无回归。
+模拟 runtime 的 top3、每条 preview 200 字符、1200 字符预算后，过滤前选中内容合计 1496 字符（全样本总和）；这是 preview 内容的影子成本，不包含最终 envelope/token 物化。
 
-## 4. 通道 A 质量属性（当前桶快照）
+过滤后：53/60 个样本因候选无法完整映射冻结快照而跳过，只有 7 个可比较样本（0 error）。其结果为 correct_rejection=3、false_selection=1、missed_selection=3。两个阶段分母不同，**不能据此宣称过滤提升或降低真实质量**；过滤后必须重新评分，不能删除旧概率后再当新 softmax。
 
-| 属性 | 值 |
+BM25 只在事件给出的候选子集中近似重算。缺失历史 tags/category/confirmation 等元数据时标记 text-only approximation，不能将其与生产全 corpus 的排序相比并宣称重排收益。历史 gold=-1 也不证明整个 corpus 无相关记忆。
+
+## 4. 通道 A：检索候选属性，不是实际 system block 大小
+
+冻结快照包含：
+
+| 属性 | 数值 |
 |---|---:|
-| active 总数 | 183 |
-| eligible（注入视角） | 95 |
-| stale（outdated/superseded） | 88（48%） |
-| 实际注入（limit 200） | 95（未截断） |
-| stale 泄漏 | 0 |
-| pinned 注入 | 6（全部进入 top10） |
-| 注入总字符 | 29,194 |
-| category 分布 | decision 41 / pitfall 23 / pattern 15 / fact 10 / preference 6 |
+| global+project active | 191 |
+| eligible | 103 |
+| 不可注入（去重计数） | 88 |
+| outdated 标记 | 78 |
+| superseded 标记 | 23 |
+| TTL 失效 | 0 |
+| 检索候选（limit=200） | 103 |
+| 候选内容字符和 | 30,310 |
+| pinned 覆盖 | 8/8 |
+| eligible decision/preference 覆盖 | 53/53 |
 
-结论：通道 A 的过滤与排序兜底有效；主要风险是**全量注入的上下文常量成本**（29K 字符/会话）与 active 中 48% 的 stale 占比对容量口径的挤压（指向 #1999 反思收敛）。
+outdated 与 superseded 可重叠，不能相加作失效条目总数。shadow 排序对齐 synthesized 组优先、组内 injection_score 降序及 ID tie-break；TTL 使用与 Rust 相同的严格过期边界，pinned 不绕过失效过滤。
 
-## 5. 后续建议
+候选层 category：decision 43、pitfall 24、pattern 16、fact 10、preference 10。精确重复对数和字符 bigram Jaccard≥0.85 的近重复对数均为 0，但这不证明没有语义重复。
 
-1. **门控阈值重设计**（最高优先，属生产代码变更）：0.5 绝对阈值在 ≥4 候选下机制性失效；建议改候选数自适应阈值或 top1-top2 相对判据。数据支撑：四象限 miss_inject=75%。
-2. **过期待收敛**（指向 #1999）：active 48% stale 说明「标记过期但不出 active」的存储口径需要反思闭环收敛或迁移策略。
-3. **通道 A 成本治理**：29K 字符常量注入建议做按需分档（如 top-K by score 或会话相关性过滤），属独立 issue。
-4. **数据集续用**：本评测复用 #1997 数据集；桶快照漂移（gold 前缀不可寻率 66%）表明跨期重放需固定桶快照，建议后续评测随数据集附桶快照。
+Context 在检索后还会按窗口 token 预算、归纳结论 evidence 覆盖与两段填充物化 system block。因此 **30,310 字符是候选原文总量，不是每会话实际注入成本**。最终 system block 字符与 token 成本因缺物化证据记 `null`；过滤后零失效只是 shadow 公式结果，生产行为由 Rust 回归测试证明。
 
-## 6. 复现命令
+## 5. 生产修复与回归边界
+
+- `MemorySearchQuery.exclude_stale` 是显式布尔字段，无自动默认；既有显式调用点均传 false，recall 传 true。
+- 在 `MemoryService.search` 词法排序及 scorer 之前调用现有 `is_injection_eligible`，避免先取 top-N 后过滤导致名额被旧条目挤占。
+- 增强 service 两态、recall 查询传递与 runtime reminder 内容断言，覆盖有效项存在、失效项不存在和 pinned 不绕过等边界。
+- `mark_outdated` 操作和 reflection 标记过期不能一概而论：不同写路径是否归档由实现决定。active 有失效项本身不能证明所有反思路径都只标记不归档。
+
+## 6. 未完成的质量证据
+
+完整注入相关性、历史 corpus Recall@20、token 实测与 downstream task gain 仍需要独立标注和真实任务对照。低置信标注不应直接用作严格放行门禁；本次不修改概率门控阈值，不处理延迟或权限。
+
+最小止血是召回后丢弃失效结果，成本低但已占用 top-N/scorer 名额。本次采用根因方案：候选入池前按注入适格性过滤，改动查询契约与构造点，成本略高但保留显式搜索兼容并消除名额挤占。评测侧同样采用冻结输入+错误/未知显式计数，而非沿用动态桶及静默跳过。
+
+## 7. 复现
+
+从仓库根运行：
 
 ```bash
-# 通道 B（BM25 层离线必跑；kev 在线时叠加四象限）
-cd eval/memory && python3 harness/replay_recall.py
-
-# 通道 A（离线）
-python3 harness/analyze_channel_a.py
-
-# 修复验证
-cargo test -p memory --lib   # 含 exclude_stale 两测试
+PYTHONDONTWRITEBYTECODE=1 python3 eval/memory/harness/replay_checks.py
+PYTHONDONTWRITEBYTECODE=1 python3 eval/memory/harness/channel_a_checks.py
+python3 eval/memory/harness/analyze_channel_a.py --snapshot eval/memory/datasets/injection_snapshot.json --output /tmp/channel-a.json
+python3 eval/memory/harness/replay_recall.py --snapshot eval/memory/datasets/injection_snapshot.json --responses eval/memory/results/replay_recall.json --output /tmp/replay-cached.json
 ```
+
+若需重新评分，改用 `--kev-url http://127.0.0.1:8009`，不能与 `--responses` 同传。未启用评分时报告 `scoring_skipped`；启用后请求/响应失败记 error，并以非零退出，绝不把错误算作正确拒绝。

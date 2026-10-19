@@ -243,6 +243,45 @@ async fn recall_memory(entries: Vec<&str>) -> Arc<dyn memory::api::MemoryPort> {
 }
 
 #[tokio::test]
+async fn memory_recall_source_never_materializes_outdated_memory() {
+    let memory = recall_memory(vec![
+        "rust 所有权指南 ownership 有效条目",
+        "rust ownership 历史编译器特殊操作守则",
+    ])
+    .await;
+    let before = memory
+        .search(&memory::api::search::MemorySearchQuery {
+            text: "历史编译器特殊操作守则".to_owned(),
+            limit: 10,
+            layer: None,
+            category: None,
+            include_archive: false,
+            exclude_stale: false,
+            now: 4_242,
+        })
+        .await;
+    let stale_id = before.hits.first().expect("旧条目先存在").entry.id;
+    assert!(memory.mark_outdated(&stale_id).await.expect("标记过期"));
+    let source = MemoryRecallReminderSource::with_clock(
+        memory,
+        Arc::new(KeywordScoring {
+            keyword: "ownership",
+            high: 0.95,
+        }),
+        Arc::new(|| 4_242),
+    );
+    source.refresh("rust ownership").await;
+    let snapshot = source.build().expect("有效条目仍应物化");
+    let body = source.render(&snapshot, "zh");
+    assert!(body.contains("有效条目"), "有效记忆必须在最终 reminder 中");
+    assert!(!body.contains("历史编译器"), "过期记忆不得渗入 reminder");
+    assert!(
+        !body.contains(&stale_id.to_string()),
+        "过期身份不得进入 reminder"
+    );
+}
+
+#[tokio::test]
 async fn recall_refresh_caches_snapshot_and_build_renders() {
     let source = MemoryRecallReminderSource::with_clock(
         recall_memory(vec!["git worktree 的创建步骤", "完全无关的烹饪食谱"]).await,

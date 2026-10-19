@@ -307,20 +307,21 @@ async fn event_read_ops_per_message_recall_emits_candidates_with_content() {
 
 #[tokio::test]
 async fn recall_relevant_excludes_stale_entries_from_injection() {
-    // #1998：注入链路必须以 exclude_stale 视角检索——
-    // outdated 条目即使词法全中也不得进入候选与重排名额。
+    // 注入链路必须以 exclude_stale 视角检索；先正常写入再标记过期，
+    // 避免 write 时清理失效条目使测试未触及 search 过滤器。
     let memory = memory_with(vec!["rust ownership 权威指南", "rust 生命周期注解实践"]).await;
-    let mut stale = MemoryEntry::new(
+    let stale = MemoryEntry::new(
         MemoryId::now_v7(),
         10,
         MemoryLayer::Project,
         MemoryCategory::Fact,
-        "rust ownership 权威指南 旧版",
+        "rust ownership 旧版借用编译器特殊操作守则",
         MemorySource::User,
     )
     .expect("entry 构造");
-    stale.outdated = true;
-    memory.write(stale).await.expect("写入过期条目");
+    let stale_id = stale.id;
+    memory.write(stale).await.expect("写入待过期条目");
+    assert!(memory.mark_outdated(&stale_id).await.expect("标记过期"));
     let scorer = KeywordScoringPort {
         keyword: "ownership",
     };

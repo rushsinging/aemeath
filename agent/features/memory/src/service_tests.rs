@@ -2193,7 +2193,7 @@ async fn event_lifecycle_commit_cas_after_cas_retry_reports_successful_receipt()
 
 #[tokio::test]
 async fn search_exclude_stale_drops_ineligible_entries_from_candidates() {
-    // #1998：注入链路（recall）经 search 传 exclude_stale=true，
+    // 注入链路经 search 传 exclude_stale=true，
     // outdated / superseded / TTL 过期条目不得进入词法候选（不占召回与重排名额）。
     let valid = entry(MemoryLayer::Project, "deploy checklist rust ownership");
     let mut stale_outdated = entry(MemoryLayer::Project, "rust ownership deploy checklist");
