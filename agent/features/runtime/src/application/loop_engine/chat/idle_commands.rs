@@ -232,6 +232,7 @@ pub async fn execute_memory(
                     layer: None,
                     category: None,
                     include_archive: false,
+                    exclude_stale: false,
                     now: unix_now(),
                 };
                 let result = port.search(&query).await;

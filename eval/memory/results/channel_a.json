@@ -1,0 +1,18 @@
+{
+  "bucket_total_active": 183,
+  "eligible": 95,
+  "ineligible": 88,
+  "injected": 95,
+  "stale_leak_in_injected": 0,
+  "pinned_injected": 6,
+  "category_distribution": {
+    "decision": 41,
+    "fact": 10,
+    "pitfall": 23,
+    "preference": 6,
+    "pattern": 15
+  },
+  "injected_total_chars": 29194,
+  "top10_pinned": 6,
+  "top10_high_confirmation": 0
+}

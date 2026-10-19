@@ -832,6 +832,7 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             layer: query.layer,
             category: query.category,
             include_archive: query.include_archive,
+            exclude_stale: query.exclude_stale,
             now: query.now,
         };
         let active = global
@@ -850,7 +851,8 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             active.collect::<Vec<_>>()
         }
         .into_iter()
-        .filter(|(entry, _)| matches_filters(entry, query.layer, query.category));
+        .filter(|(entry, _)| matches_filters(entry, query.layer, query.category))
+        .filter(|(entry, _)| !query.exclude_stale || is_injection_eligible(entry, query.now));
         let candidate_count = candidates.clone().count();
         let hits = crate::domain::lexical_search::rank_explicit_search(candidates, &recall_query);
         let hits = self.rerank_if_scored(query, hits).await;

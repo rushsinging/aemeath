@@ -265,5 +265,9 @@ pub struct MemorySearchQuery {
     pub layer: Option<MemoryLayer>,
     pub category: Option<MemoryCategory>,
     pub include_archive: bool,
+    /// 注入视角（recall 链路）：true 时 outdated / superseded / TTL 过期条目
+    /// 不进入词法候选（不占召回与重排名额）；显式搜索保持 false 以维持
+    /// 「过期可见 + 状态标注」的可见性契约（M5/M10 仅约束注入）。
+    pub exclude_stale: bool,
     pub now: u64,
 }

@@ -304,3 +304,34 @@ async fn event_read_ops_per_message_recall_emits_candidates_with_content() {
         .as_deref()
         .is_some_and(|summary| summary.contains("probabilities=")));
 }
+
+#[tokio::test]
+async fn recall_relevant_excludes_stale_entries_from_injection() {
+    // #1998：注入链路必须以 exclude_stale 视角检索——
+    // outdated 条目即使词法全中也不得进入候选与重排名额。
+    let memory = memory_with(vec!["rust ownership 权威指南", "rust 生命周期注解实践"]).await;
+    let mut stale = MemoryEntry::new(
+        MemoryId::now_v7(),
+        10,
+        MemoryLayer::Project,
+        MemoryCategory::Fact,
+        "rust ownership 权威指南 旧版",
+        MemorySource::User,
+    )
+    .expect("entry 构造");
+    stale.outdated = true;
+    memory.write(stale).await.expect("写入过期条目");
+    let scorer = KeywordScoringPort {
+        keyword: "ownership",
+    };
+
+    let recalled = recall_relevant(&memory, &scorer, "rust 所有权指南", 4_242, 20, 2)
+        .await
+        .expect("评分可用");
+
+    assert!(
+        recalled.iter().all(|hit| !hit.entry.outdated),
+        "注入结果不得包含 outdated 条目，got {recalled:?}"
+    );
+    assert!(!recalled.is_empty(), "有效条目应顶上名额而非被过期条目挤占");
+}

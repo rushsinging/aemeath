@@ -224,6 +224,7 @@ async fn search_project_hits(memory: &InMemoryMemory, text: &str) -> Vec<MemoryS
             layer: Some(MemoryLayer::Project),
             category: None,
             include_archive: false,
+            exclude_stale: false,
             now: now(),
         })
         .await

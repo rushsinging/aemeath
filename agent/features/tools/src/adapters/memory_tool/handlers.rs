@@ -151,6 +151,7 @@ pub(super) async fn search_memory(
         layer,
         category,
         include_archive: false,
+        exclude_stale: false,
         now,
     };
     let result = port.search(&query).await;

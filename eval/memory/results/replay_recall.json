@@ -1,0 +1,1050 @@
+{
+  "bucket": {
+    "total_active": 183,
+    "stale_free": 95,
+    "outdated_or_superseded": 88
+  },
+  "kev_online": true,
+  "cases": [
+    {
+      "id": "mrc-001",
+      "gold": 7,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 10
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.2817,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-002",
+      "gold": 4,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 1,
+        "eligible": 5,
+        "outdated": 3,
+        "superseded": 1
+      },
+      "lexical_top1_state": "eligible",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.204,
+        "top1_state": "eligible"
+      }
+    },
+    {
+      "id": "mrc-003",
+      "gold": 0,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 10
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": true,
+        "top1_p": 0.2246,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-004",
+      "gold": 2,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 1,
+        "eligible": 8,
+        "superseded": 1
+      },
+      "lexical_top1_state": "eligible",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1782,
+        "top1_state": "eligible"
+      }
+    },
+    {
+      "id": "mrc-005",
+      "gold": 1,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "eligible": 4,
+        "outdated": 6
+      },
+      "lexical_top1_state": "eligible",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1819,
+        "top1_state": "eligible"
+      }
+    },
+    {
+      "id": "mrc-006",
+      "gold": 1,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": true,
+      "candidate_states": {
+        "drifted": 1,
+        "eligible": 6,
+        "outdated": 2,
+        "superseded": 1
+      },
+      "lexical_top1_state": "eligible",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1495,
+        "top1_state": "eligible"
+      }
+    },
+    {
+      "id": "mrc-007",
+      "gold": 1,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 10
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.2427,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-008",
+      "gold": 6,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 2,
+        "eligible": 2,
+        "outdated": 5,
+        "superseded": 1
+      },
+      "lexical_top1_state": "superseded",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1477,
+        "top1_state": "outdated"
+      }
+    },
+    {
+      "id": "mrc-009",
+      "gold": 0,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 10
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1841,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-010",
+      "gold": 0,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 3,
+        "eligible": 4,
+        "outdated": 2,
+        "superseded": 1
+      },
+      "lexical_top1_state": "eligible",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1513,
+        "top1_state": "outdated"
+      }
+    },
+    {
+      "id": "mrc-011",
+      "gold": 0,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": true,
+      "candidate_states": {
+        "drifted": 2,
+        "eligible": 5,
+        "outdated": 2,
+        "superseded": 1
+      },
+      "lexical_top1_state": "eligible",
+      "kev": {
+        "top1_is_gold": true,
+        "top1_p": 0.213,
+        "top1_state": "eligible"
+      }
+    },
+    {
+      "id": "mrc-012",
+      "gold": 0,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": true,
+      "candidate_states": {
+        "drifted": 2,
+        "eligible": 7,
+        "outdated": 1
+      },
+      "lexical_top1_state": "eligible",
+      "kev": {
+        "top1_is_gold": true,
+        "top1_p": 0.2467,
+        "top1_state": "eligible"
+      }
+    },
+    {
+      "id": "mrc-013",
+      "gold": 0,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 1,
+        "eligible": 3,
+        "outdated": 5,
+        "superseded": 1
+      },
+      "lexical_top1_state": "outdated",
+      "kev": {
+        "top1_is_gold": true,
+        "top1_p": 0.1575,
+        "top1_state": "eligible"
+      }
+    },
+    {
+      "id": "mrc-014",
+      "gold": 3,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 3,
+        "eligible": 4,
+        "superseded": 3
+      },
+      "lexical_top1_state": "eligible",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1592,
+        "top1_state": "superseded"
+      }
+    },
+    {
+      "id": "mrc-015",
+      "gold": 0,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": true,
+      "candidate_states": {
+        "drifted": 10
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": true,
+        "top1_p": 0.1734,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-016",
+      "gold": 1,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": true,
+      "candidate_states": {
+        "drifted": 10
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1904,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-017",
+      "gold": 0,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 4,
+        "eligible": 2,
+        "outdated": 3,
+        "superseded": 1
+      },
+      "lexical_top1_state": "eligible",
+      "kev": {
+        "top1_is_gold": true,
+        "top1_p": 0.1562,
+        "top1_state": "superseded"
+      }
+    },
+    {
+      "id": "mrc-018",
+      "gold": 5,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 2,
+        "eligible": 4,
+        "outdated": 3,
+        "superseded": 1
+      },
+      "lexical_top1_state": "outdated",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1578,
+        "top1_state": "eligible"
+      }
+    },
+    {
+      "id": "mrc-019",
+      "gold": 4,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 4,
+        "eligible": 2,
+        "outdated": 1,
+        "superseded": 3
+      },
+      "lexical_top1_state": "superseded",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1685,
+        "top1_state": "superseded"
+      }
+    },
+    {
+      "id": "mrc-020",
+      "gold": 1,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 10
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": true,
+        "top1_p": 0.3075,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-021",
+      "gold": 4,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 10
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.2294,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-022",
+      "gold": 9,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 10
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1437,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-023",
+      "gold": 2,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 3,
+        "eligible": 3,
+        "outdated": 3,
+        "superseded": 1
+      },
+      "lexical_top1_state": "eligible",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.2096,
+        "top1_state": "eligible"
+      }
+    },
+    {
+      "id": "mrc-024",
+      "gold": -1,
+      "candidates": 10,
+      "gold_status": "no_relevant",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 4,
+        "eligible": 3,
+        "outdated": 2,
+        "superseded": 1
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1598,
+        "top1_state": "outdated"
+      }
+    },
+    {
+      "id": "mrc-025",
+      "gold": 0,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 4,
+        "eligible": 3,
+        "outdated": 3
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": true,
+        "top1_p": 0.1604,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-026",
+      "gold": 0,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": true,
+      "candidate_states": {
+        "drifted": 10
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": true,
+        "top1_p": 0.2273,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-027",
+      "gold": 7,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 2,
+        "eligible": 3,
+        "outdated": 4,
+        "superseded": 1
+      },
+      "lexical_top1_state": "outdated",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1889,
+        "top1_state": "outdated"
+      }
+    },
+    {
+      "id": "mrc-028",
+      "gold": 4,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 2,
+        "eligible": 4,
+        "outdated": 3,
+        "superseded": 1
+      },
+      "lexical_top1_state": "eligible",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.2449,
+        "top1_state": "eligible"
+      }
+    },
+    {
+      "id": "mrc-029",
+      "gold": 4,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 2,
+        "eligible": 4,
+        "outdated": 4
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1529,
+        "top1_state": "outdated"
+      }
+    },
+    {
+      "id": "mrc-030",
+      "gold": 4,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 2,
+        "eligible": 4,
+        "outdated": 3,
+        "superseded": 1
+      },
+      "lexical_top1_state": "superseded",
+      "kev": {
+        "top1_is_gold": true,
+        "top1_p": 0.2028,
+        "top1_state": "eligible"
+      }
+    },
+    {
+      "id": "mrc-031",
+      "gold": 0,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 10
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1651,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-032",
+      "gold": 2,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": true,
+      "candidate_states": {
+        "drifted": 10
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": true,
+        "top1_p": 0.1851,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-033",
+      "gold": -1,
+      "candidates": 10,
+      "gold_status": "no_relevant",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 2,
+        "eligible": 6,
+        "outdated": 2
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1882,
+        "top1_state": "outdated"
+      }
+    },
+    {
+      "id": "mrc-034",
+      "gold": 2,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 10
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.211,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-035",
+      "gold": -1,
+      "candidates": 10,
+      "gold_status": "no_relevant",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 10
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1631,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-036",
+      "gold": 4,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 10
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1674,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-037",
+      "gold": 8,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 10
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1742,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-038",
+      "gold": 5,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 10
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1668,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-039",
+      "gold": 5,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 10
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.2183,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-040",
+      "gold": 4,
+      "candidates": 10,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 4,
+        "eligible": 4,
+        "outdated": 1,
+        "superseded": 1
+      },
+      "lexical_top1_state": "superseded",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1388,
+        "top1_state": "eligible"
+      }
+    },
+    {
+      "id": "mrc-041",
+      "gold": -1,
+      "candidates": 4,
+      "gold_status": "no_relevant",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 4
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.368,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-042",
+      "gold": 3,
+      "candidates": 9,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "eligible": 7,
+        "superseded": 2
+      },
+      "lexical_top1_state": "eligible",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.2104,
+        "top1_state": "eligible"
+      }
+    },
+    {
+      "id": "mrc-043",
+      "gold": 1,
+      "candidates": 7,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": true,
+      "candidate_states": {
+        "drifted": 7
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.341,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-044",
+      "gold": 1,
+      "candidates": 5,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": true,
+      "candidate_states": {
+        "drifted": 5
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.3935,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-045",
+      "gold": 1,
+      "candidates": 2,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 2
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.6288,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-046",
+      "gold": -1,
+      "candidates": 4,
+      "gold_status": "no_relevant",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 4
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.4052,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-047",
+      "gold": 3,
+      "candidates": 9,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 4,
+        "eligible": 3,
+        "outdated": 1,
+        "superseded": 1
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.1917,
+        "top1_state": "superseded"
+      }
+    },
+    {
+      "id": "mrc-048",
+      "gold": -1,
+      "candidates": 8,
+      "gold_status": "no_relevant",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 2,
+        "eligible": 5,
+        "outdated": 1
+      },
+      "lexical_top1_state": "eligible",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.2259,
+        "top1_state": "eligible"
+      }
+    },
+    {
+      "id": "mrc-049",
+      "gold": 3,
+      "candidates": 6,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 6
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": true,
+        "top1_p": 0.2152,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-050",
+      "gold": 0,
+      "candidates": 4,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 4
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.3334,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-051",
+      "gold": 1,
+      "candidates": 2,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": true,
+      "candidate_states": {
+        "drifted": 2
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": true,
+        "top1_p": 0.503,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-052",
+      "gold": -1,
+      "candidates": 6,
+      "gold_status": "no_relevant",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 6
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.2115,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-053",
+      "gold": -1,
+      "candidates": 7,
+      "gold_status": "no_relevant",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 7
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.2952,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-054",
+      "gold": -1,
+      "candidates": 2,
+      "gold_status": "no_relevant",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "outdated": 2
+      },
+      "lexical_top1_state": "outdated",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.6178,
+        "top1_state": "outdated"
+      }
+    },
+    {
+      "id": "mrc-055",
+      "gold": -1,
+      "candidates": 5,
+      "gold_status": "no_relevant",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 2,
+        "eligible": 2,
+        "outdated": 1
+      },
+      "lexical_top1_state": "outdated",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.38,
+        "top1_state": "eligible"
+      }
+    },
+    {
+      "id": "mrc-056",
+      "gold": 3,
+      "candidates": 9,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 9
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.2317,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-057",
+      "gold": -1,
+      "candidates": 7,
+      "gold_status": "no_relevant",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "eligible": 4,
+        "outdated": 2,
+        "superseded": 1
+      },
+      "lexical_top1_state": "superseded",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.243,
+        "top1_state": "superseded"
+      }
+    },
+    {
+      "id": "mrc-058",
+      "gold": -1,
+      "candidates": 8,
+      "gold_status": "no_relevant",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 8
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.2227,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-059",
+      "gold": -1,
+      "candidates": 3,
+      "gold_status": "no_relevant",
+      "lexical_top1_is_gold": false,
+      "candidate_states": {
+        "drifted": 3
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": false,
+        "top1_p": 0.5039,
+        "top1_state": "drifted"
+      }
+    },
+    {
+      "id": "mrc-060",
+      "gold": 1,
+      "candidates": 4,
+      "gold_status": "in_dataset",
+      "lexical_top1_is_gold": true,
+      "candidate_states": {
+        "drifted": 4
+      },
+      "lexical_top1_state": "drifted",
+      "kev": {
+        "top1_is_gold": true,
+        "top1_p": 0.4182,
+        "top1_state": "drifted"
+      }
+    }
+  ],
+  "metrics": {
+    "effective_cases": 47,
+    "lexical_top1_hit_rate": 0.23404255319148937,
+    "stale_in_candidates_total": 90,
+    "stale_at_lexical_top1": 10,
+    "gate_quadrant": {
+      "correct_inject": 1,
+      "wrong_inject": 3,
+      "miss_inject": 45,
+      "correct_reject": 11
+    }
+  }
+}

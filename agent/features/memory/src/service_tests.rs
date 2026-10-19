@@ -394,6 +394,7 @@ async fn explicit_search_ranks_non_contiguous_multi_term_matches() {
             layer: Some(MemoryLayer::Project),
             category: None,
             include_archive: false,
+            exclude_stale: false,
             now: 4_242,
         })
         .await;
@@ -448,6 +449,7 @@ async fn explicit_search_matches_chinese_subphrases_and_mixed_code_terms() {
             layer: Some(MemoryLayer::Project),
             category: None,
             include_archive: false,
+            exclude_stale: false,
             now: 4_242,
         })
         .await;
@@ -463,6 +465,7 @@ async fn explicit_search_matches_chinese_subphrases_and_mixed_code_terms() {
             layer: Some(MemoryLayer::Project),
             category: None,
             include_archive: false,
+            exclude_stale: false,
             now: 4_242,
         })
         .await;
@@ -497,6 +500,7 @@ async fn explicit_search_chinese_bigram_ranking_is_deterministic() {
         layer: Some(MemoryLayer::Project),
         category: None,
         include_archive: false,
+        exclude_stale: false,
         now: 4_242,
     };
 
@@ -545,6 +549,7 @@ async fn explicit_search_is_deterministic_and_empty_query_returns_no_hits() {
         layer: Some(MemoryLayer::Project),
         category: None,
         include_archive: false,
+        exclude_stale: false,
         now: 4_242,
     };
 
@@ -633,6 +638,7 @@ async fn explicit_search_filters_by_tag_category_and_layer() {
             layer: Some(MemoryLayer::Project),
             category: Some(MemoryCategory::Pattern),
             include_archive: false,
+            exclude_stale: false,
             now: 4_242,
         })
         .await;
@@ -676,6 +682,7 @@ async fn explicit_search_includes_archive_status_without_mutation() {
             layer: Some(MemoryLayer::Project),
             category: None,
             include_archive: true,
+            exclude_stale: false,
             now: 4_242,
         })
         .await;
@@ -815,6 +822,7 @@ async fn queries_read_latest_from_store_per_call() {
             layer: None,
             category: None,
             include_archive: true,
+            exclude_stale: false,
             now: 10,
         })
         .await;
@@ -1026,6 +1034,7 @@ fn rerank_query(text: &str, limit: usize) -> MemorySearchQuery {
         layer: Some(MemoryLayer::Project),
         category: None,
         include_archive: false,
+        exclude_stale: false,
         now: 4_242,
     }
 }
@@ -1148,6 +1157,7 @@ async fn read_methods_reflect_dataset_committed_after_open() {
             layer: None,
             category: None,
             include_archive: false,
+            exclude_stale: false,
             now: 100,
         })
         .await;
@@ -1215,6 +1225,7 @@ async fn read_hits_concurrent_write_and_reloads_once() {
             layer: None,
             category: None,
             include_archive: false,
+            exclude_stale: false,
             now: 100,
         })
         .await;
@@ -1254,6 +1265,7 @@ async fn read_falls_back_to_snapshot_when_store_keeps_failing() {
             layer: None,
             category: None,
             include_archive: false,
+            exclude_stale: false,
             now: 100,
         })
         .await;
@@ -1520,6 +1532,7 @@ async fn event_read_ops_search_emits_candidates_with_content() {
             layer: None,
             category: None,
             include_archive: false,
+            exclude_stale: false,
             now: 10,
         })
         .await;
@@ -2175,5 +2188,81 @@ async fn event_lifecycle_commit_cas_after_cas_retry_reports_successful_receipt()
         commits[0].commit_revision.as_deref(),
         Some("3"),
         "revision must come from the successful receipt"
+    );
+}
+
+#[tokio::test]
+async fn search_exclude_stale_drops_ineligible_entries_from_candidates() {
+    // #1998：注入链路（recall）经 search 传 exclude_stale=true，
+    // outdated / superseded / TTL 过期条目不得进入词法候选（不占召回与重排名额）。
+    let valid = entry(MemoryLayer::Project, "deploy checklist rust ownership");
+    let mut stale_outdated = entry(MemoryLayer::Project, "rust ownership deploy checklist");
+    stale_outdated.outdated = true;
+    let mut stale_superseded = entry(MemoryLayer::Project, "rust ownership deploy notes");
+    let superseding = entry(MemoryLayer::Project, "rust ownership deploy checklist v2");
+    stale_superseded.superseded_by = Some(superseding.id);
+    let mut stale_ttl = entry(MemoryLayer::Project, "rust ownership deploy ttl");
+    stale_ttl.ttl = Some(std::time::Duration::from_secs(1));
+    let dataset = MemoryDataset::new(
+        MemoryLayer::Project,
+        vec![
+            valid.clone(),
+            stale_outdated.clone(),
+            stale_superseded.clone(),
+            stale_ttl.clone(),
+        ],
+        vec![],
+    )
+    .unwrap();
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 3], vec![]),
+        layer_script(
+            vec![
+                Ok(CommittedMemoryDataset {
+                    dataset,
+                    revision: 1,
+                });
+                3
+            ],
+            vec![],
+        ),
+    );
+    let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 4_242)
+        .await
+        .unwrap();
+
+    let excluded = service
+        .search(&MemorySearchQuery {
+            text: "rust ownership deploy".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: 4_242,
+            exclude_stale: true,
+        })
+        .await;
+    let excluded_ids: Vec<_> = excluded.hits.iter().map(|hit| hit.entry.id).collect();
+    assert_eq!(
+        excluded_ids,
+        vec![valid.id],
+        "exclude_stale must drop outdated/superseded/ttl-expired from candidates"
+    );
+
+    let default = service
+        .search(&MemorySearchQuery {
+            text: "rust ownership deploy".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: 4_242,
+            exclude_stale: false,
+        })
+        .await;
+    assert_eq!(
+        default.hits.len(),
+        4,
+        "default explicit search keeps stale entries visible"
     );
 }
