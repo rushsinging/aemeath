@@ -393,7 +393,7 @@ async fn each_configuration_gate_reports_its_own_reason() {
                 "en".to_string(),
                 std::sync::Arc::new(memory::api::NoOpMemory),
                 crate::application::reflection::test_support::noop_reflection_history(),
-                tokio_util::sync::CancellationToken::new(),
+                None,
             )
             .await;
 
@@ -446,80 +446,11 @@ impl memory::api::ReflectionHistoryStore for RecordingReflectionHistory {
     }
 }
 
-/// 取消后 history 必须写入 Cancelled 语义的终态记录（status=Failed +
-/// error_category=Cancelled），NEVER 留下悬挂的 Running 或伪装成成功；
-/// 同时断言没有成功终态记录（冲突终态互斥）。
-#[tokio::test]
-async fn cancelled_run_persists_cancelled_history_record() {
-    let adapter = ReflectionTaskAdapter::new(Duration::from_secs(5), |_request, _cancel| async {
-        pending::<()>().await;
-        #[allow(unreachable_code)]
-        Ok(successful_payload())
-    });
-    let history = RecordingReflectionHistory::default();
-    let binding = crate::application::run::run_factory_support::doubles::fake_provider_binding();
-    let cancel = CancellationToken::new();
-    cancel.cancel();
-
-    let outcome = adapter
-        .run_complete(
-            ReflectionTaskRequest::new(
-                ReflectionTaskTrigger::Manual,
-                vec![share::message::Message::user("reflect me")],
-            ),
-            share::config::MemoryConfig {
-                enabled: true,
-                reflection: share::config::ReflectionConfig {
-                    enabled: true,
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            binding.provider.clone(),
-            binding.model.clone(),
-            binding.max_tokens,
-            binding.requested_reasoning,
-            "system".to_string(),
-            "en".to_string(),
-            std::sync::Arc::new(memory::api::NoOpMemory),
-            std::sync::Arc::new(history.clone()),
-            cancel,
-        )
-        .await;
-
-    let ReflectionRunOutcome::Completed(completion) = &outcome else {
-        panic!("取消必须折叠为 Completed(Cancelled): {outcome:?}");
-    };
-    assert_eq!(completion.status, ReflectionTaskCompletionStatus::Cancelled);
-
-    let appends = history.appends.lock().await;
-    assert_eq!(appends.len(), 1, "执行前必须恰好写入一条 Running 记录");
-    assert_eq!(
-        appends[0].status,
-        memory::api::reflection::ReflectionStatus::Running
-    );
-
-    let upserts = history.upserts.lock().await;
-    assert_eq!(upserts.len(), 1, "取消终态必须恰好 upsert 一条记录");
-    assert_eq!(
-        upserts[0].status,
-        memory::api::reflection::ReflectionStatus::Failed,
-        "取消按失败态落盘（非 Succeeded）"
-    );
-    assert_eq!(
-        upserts[0].error_category,
-        Some(memory::api::reflection::ReflectionErrorCategory::Cancelled),
-        "取消的 error_category 必须是 Cancelled"
-    );
-    assert!(
-        upserts
-            .iter()
-            .all(|record| record.status != memory::api::reflection::ReflectionStatus::Succeeded),
-        "冲突终态互斥：取消后不得出现成功记录"
-    );
-    // 同一 stable id：Running 与终态是同一条记录的两次写入。
-    assert_eq!(appends[0].id, upserts[0].id);
-}
+// 原取消测试保护 Failed + Cancelled 终态落盘、不遗留 Running、无冲突成功记录。
+// 退役后由独立 token 语义测试验证调用方取消不影响异步反思。
+// 退役（#2002 D2「cancel 不影响异步」）：预取消 token 不再折叠为
+// Completed(Cancelled)——detached 持独立 token 照常执行；替代证据 =
+// detached_run_ignores_cancelled_caller_token（预取消 → 终态 Succeeded 落盘）。
 
 // ---------------------------------------------------------------------------
 // 反思游标写入链（#1827）：request 携带 coverage_end → Succeeded 落盘写入；
@@ -543,14 +474,7 @@ async fn succeeded_run_persists_coverage_end_cursor() {
     let outcome = adapter
         .run_complete(
             request,
-            share::config::MemoryConfig {
-                enabled: true,
-                reflection: share::config::ReflectionConfig {
-                    enabled: true,
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
+            enabled_memory_config(),
             binding.provider.clone(),
             binding.model.clone(),
             binding.max_tokens,
@@ -559,72 +483,29 @@ async fn succeeded_run_persists_coverage_end_cursor() {
             "en".to_string(),
             std::sync::Arc::new(memory::api::NoOpMemory),
             std::sync::Arc::new(history.clone()),
-            CancellationToken::new(),
+            None,
         )
         .await;
 
-    let ReflectionRunOutcome::Completed(completion) = &outcome else {
-        panic!("必须成功收口: {outcome:?}");
-    };
-    assert_eq!(completion.status, ReflectionTaskCompletionStatus::Succeeded);
-    let upserts = history.upserts.lock().await;
-    assert_eq!(upserts.len(), 1);
+    assert!(
+        matches!(outcome, ReflectionRunOutcome::Detached),
+        "必须立即 Detached: {outcome:?}"
+    );
+    let terminal = await_terminal_upsert(&history).await;
     assert_eq!(
-        upserts[0].coverage_end,
+        terminal.status,
+        memory::api::reflection::ReflectionStatus::Succeeded
+    );
+    assert_eq!(
+        terminal.coverage_end,
         Some(42),
         "Succeeded 落盘必须携带游标"
     );
 }
 
-/// 取消不推进游标：request 带 coverage_end 但取消时，落盘记录不得携带游标。
-#[tokio::test]
-async fn cancelled_run_does_not_advance_cursor() {
-    let adapter = ReflectionTaskAdapter::new(Duration::from_secs(5), |_request, _cancel| async {
-        pending::<()>().await;
-        #[allow(unreachable_code)]
-        Ok(successful_payload())
-    });
-    let history = RecordingReflectionHistory::default();
-    let binding = crate::application::run::run_factory_support::doubles::fake_provider_binding();
-    let mut request = ReflectionTaskRequest::new(
-        ReflectionTaskTrigger::Manual,
-        vec![share::message::Message::user("delta")],
-    );
-    request.coverage_end = Some(42);
-    let cancel = CancellationToken::new();
-    cancel.cancel();
-
-    let outcome = adapter
-        .run_complete(
-            request,
-            share::config::MemoryConfig {
-                enabled: true,
-                reflection: share::config::ReflectionConfig {
-                    enabled: true,
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            binding.provider.clone(),
-            binding.model.clone(),
-            binding.max_tokens,
-            binding.requested_reasoning,
-            "system".to_string(),
-            "en".to_string(),
-            std::sync::Arc::new(memory::api::NoOpMemory),
-            std::sync::Arc::new(history.clone()),
-            cancel,
-        )
-        .await;
-
-    let ReflectionRunOutcome::Completed(completion) = &outcome else {
-        panic!("取消必须折叠为 Completed(Cancelled): {outcome:?}");
-    };
-    assert_eq!(completion.status, ReflectionTaskCompletionStatus::Cancelled);
-    let upserts = history.upserts.lock().await;
-    assert_eq!(upserts.len(), 1);
-    assert_eq!(upserts[0].coverage_end, None, "取消/失败不得推进游标");
-}
+// 退役（#2002 D2）：预取消不再产生 Cancelled 终态，游标随 detached 实际终态推进；
+// 替代证据 = succeeded_run_persists_coverage_end_cursor（成功推游标）与
+// detached_run_ignores_cancelled_caller_token。
 
 // ---------------------------------------------------------------------------
 // 悬挂 running 收口：进程退出留下的超龄 Running 在下次反思执行前
@@ -672,12 +553,11 @@ impl memory::api::ReflectionHistoryStore for StaleRunningReflectionHistory {
 
 #[tokio::test]
 async fn stale_running_records_are_reaped_before_reflection_executes() {
-    // 已取消的 token 走确定性取消路径：收口发生在执行之前，不依赖 provider 响应。
+    // 统一异步链路（#2002）：reap 在派发前同步执行；等待 stale 收口记录出现即可，
+    // 本次反思终态（detached）与 reap 语义无关。
     let adapter = ReflectionTaskAdapter::production(Duration::from_secs(5));
     let history = StaleRunningReflectionHistory::default();
     let binding = crate::application::run::run_factory_support::doubles::fake_provider_binding();
-    let cancel = CancellationToken::new();
-    cancel.cancel();
 
     let outcome = adapter
         .run_complete(
@@ -685,14 +565,7 @@ async fn stale_running_records_are_reaped_before_reflection_executes() {
                 ReflectionTaskTrigger::Manual,
                 vec![share::message::Message::user("reflect me")],
             ),
-            share::config::MemoryConfig {
-                enabled: true,
-                reflection: share::config::ReflectionConfig {
-                    enabled: true,
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
+            enabled_memory_config(),
             binding.provider.clone(),
             binding.model.clone(),
             binding.max_tokens,
@@ -701,17 +574,28 @@ async fn stale_running_records_are_reaped_before_reflection_executes() {
             "en".to_string(),
             std::sync::Arc::new(memory::api::NoOpMemory),
             std::sync::Arc::new(history.clone()),
-            cancel,
+            None,
         )
         .await;
 
-    let completion = assert_completed(outcome, ReflectionTaskCompletionStatus::Cancelled);
-    assert_eq!(completion.trigger, ReflectionTaskTrigger::Manual);
-    let upserts = history.upserts.lock().await;
-    let reaped = upserts
-        .iter()
-        .find(|record| record.id == "stale-running")
-        .expect("超龄 Running 必须被收口");
+    assert!(
+        matches!(outcome, ReflectionRunOutcome::Detached),
+        "必须立即 Detached: {outcome:?}"
+    );
+    let mut reaped = None;
+    for _ in 0..500 {
+        let upserts = history.upserts.lock().await;
+        reaped = upserts
+            .iter()
+            .find(|record| record.id == "stale-running")
+            .cloned();
+        drop(upserts);
+        if reaped.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let reaped = reaped.expect("超龄 Running 必须被收口");
     assert_eq!(
         reaped.status,
         memory::api::reflection::ReflectionStatus::Failed
@@ -719,5 +603,152 @@ async fn stale_running_records_are_reaped_before_reflection_executes() {
     assert_eq!(
         reaped.error_category,
         Some(memory::api::reflection::ReflectionErrorCategory::Interrupted)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 统一异步链路（#2002）：三触发一律 detached；BusySkipped 同步判定；
+// detached 持独立 token（cancel 不影响异步）
+// ---------------------------------------------------------------------------
+
+async fn await_terminal_upsert(
+    history: &RecordingReflectionHistory,
+) -> memory::api::reflection::ReflectionRecord {
+    for _ in 0..500 {
+        if let Some(record) = history.upserts.lock().await.last() {
+            return record.clone();
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("detached 反思未在 5s 内落盘终态记录");
+}
+
+fn enabled_memory_config() -> share::config::MemoryConfig {
+    share::config::MemoryConfig {
+        enabled: true,
+        reflection: share::config::ReflectionConfig {
+            enabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+/// 三触发点（Interval/PreCompact/Manual）经生产入口 `run_complete` 一律立即
+/// 返回 Detached，终态由 detached 任务异步落盘。
+#[tokio::test]
+async fn all_triggers_now_dispatch_detached_immediately() {
+    for trigger in [
+        ReflectionTaskTrigger::Interval { run_ordinal: 1 },
+        ReflectionTaskTrigger::PreCompact,
+        ReflectionTaskTrigger::Manual,
+    ] {
+        let adapter =
+            ReflectionTaskAdapter::new(Duration::from_secs(5), |_request, _cancel| async {
+                Ok(successful_payload())
+            });
+        let history = RecordingReflectionHistory::default();
+        let binding = crate::application::reflection::test_support::static_reflection_binding();
+
+        let outcome = adapter
+            .run_complete(
+                ReflectionTaskRequest::new(trigger, vec![share::message::Message::user("m")]),
+                enabled_memory_config(),
+                binding.provider.clone(),
+                binding.model.clone(),
+                binding.max_tokens,
+                binding.requested_reasoning,
+                "system".to_string(),
+                "en".to_string(),
+                std::sync::Arc::new(memory::api::NoOpMemory),
+                std::sync::Arc::new(history.clone()),
+                None,
+            )
+            .await;
+
+        assert!(
+            matches!(outcome, ReflectionRunOutcome::Detached),
+            "{trigger:?} 必须立即返回 Detached"
+        );
+        let terminal = await_terminal_upsert(&history).await;
+        assert_eq!(
+            terminal.status,
+            memory::api::reflection::ReflectionStatus::Succeeded,
+            "{trigger:?} detached 终态必须 Succeeded 落盘"
+        );
+    }
+}
+
+/// 单槽被占（另一反思在跑）：BusySkipped 必须同步返回（engine 才能回填材料）。
+/// 用确定性手动占槽验证（run_complete 生产路径走真 provider，无法靠注入
+/// executor 挂起占槽）。
+#[tokio::test]
+async fn run_complete_reports_busy_skipped_synchronously_when_slot_held() {
+    let adapter = ReflectionTaskAdapter::new(Duration::from_secs(5), |_request, _cancel| async {
+        Ok(successful_payload())
+    });
+    let binding = crate::application::reflection::test_support::static_reflection_binding();
+
+    // 占住单槽：guard 存活期间下一次 run_complete 必须同步 BusySkipped。
+    let _slot_guard = adapter
+        .hold_slot_for_test()
+        .expect("测试开始时单槽必须空闲");
+
+    let outcome = adapter
+        .run_complete(
+            ReflectionTaskRequest::new(ReflectionTaskTrigger::PreCompact, vec![]),
+            enabled_memory_config(),
+            binding.provider.clone(),
+            binding.model.clone(),
+            binding.max_tokens,
+            binding.requested_reasoning,
+            "system".to_string(),
+            "en".to_string(),
+            std::sync::Arc::new(memory::api::NoOpMemory),
+            crate::application::reflection::test_support::noop_reflection_history(),
+            None,
+        )
+        .await;
+
+    assert!(
+        matches!(outcome, ReflectionRunOutcome::BusySkipped),
+        "单槽被占必须同步 BusySkipped: {outcome:?}"
+    );
+}
+
+/// detached 持独立 token：调用方 cancel（含 Manual Esc / step 收口）不影响异步
+/// 反思，终态仍 Succeeded（非 Cancelled）。
+#[tokio::test]
+async fn detached_run_ignores_cancelled_caller_token() {
+    let adapter = ReflectionTaskAdapter::new(Duration::from_secs(5), |_request, _cancel| async {
+        Ok(successful_payload())
+    });
+    let history = RecordingReflectionHistory::default();
+    let binding = crate::application::reflection::test_support::static_reflection_binding();
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+
+    let outcome = adapter
+        .run_complete(
+            ReflectionTaskRequest::new(ReflectionTaskTrigger::Manual, vec![]),
+            enabled_memory_config(),
+            binding.provider.clone(),
+            binding.model.clone(),
+            binding.max_tokens,
+            binding.requested_reasoning,
+            "system".to_string(),
+            "en".to_string(),
+            std::sync::Arc::new(memory::api::NoOpMemory),
+            std::sync::Arc::new(history.clone()),
+            None,
+        )
+        .await;
+
+    assert!(matches!(outcome, ReflectionRunOutcome::Detached));
+    let terminal = await_terminal_upsert(&history).await;
+    assert_eq!(
+        terminal.status,
+        memory::api::reflection::ReflectionStatus::Succeeded,
+        "调用方 token 已 cancel 不得影响 detached 执行"
     );
 }

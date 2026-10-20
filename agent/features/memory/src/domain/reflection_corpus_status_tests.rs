@@ -129,3 +129,34 @@ fn build_prompt_embeds_corpus_status_section() {
     assert!(!bare.contains("# 记忆库现状"));
     assert!(!bare.contains("{corpus_status}"));
 }
+
+#[test]
+fn corpus_status_section_requires_stale_review_even_without_duplicate_pairs() {
+    let status = ReflectionCorpusStatus {
+        archive_count: 0,
+        category_counts: vec![(MemoryCategory::Fact, 3)],
+        duplicate_pairs: vec![],
+    };
+    let zh = ReflectionEngine::corpus_status_section(&status, "zh");
+    assert!(zh.contains("相似度只是线索"), "zh 需弱化 bigram 前提：{zh}");
+    assert!(zh.contains("通读存量"), "zh 需要求通读存量：{zh}");
+    assert!(zh.contains("允许空输出"), "zh 需允许无变更时空输出：{zh}");
+    assert!(zh.contains("机械淘汰"), "zh 需禁止机械淘汰凑数：{zh}");
+    let en = ReflectionEngine::corpus_status_section(&status, "en");
+    assert!(
+        en.contains("only a clue"),
+        "en must weaken the bigram precondition: {en}"
+    );
+    assert!(
+        en.contains("read the whole corpus"),
+        "en must require a corpus review: {en}"
+    );
+    assert!(
+        en.contains("empty output"),
+        "en must allow empty output: {en}"
+    );
+    assert!(
+        en.contains("evict mechanically"),
+        "en must forbid mechanical eviction: {en}"
+    );
+}

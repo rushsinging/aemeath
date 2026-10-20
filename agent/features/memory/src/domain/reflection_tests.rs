@@ -437,3 +437,93 @@ fn noise_prompt_is_summary_free_single_field_and_grounds_explicit() {
     assert!(!en.contains("Recent conversation summary"));
     assert!(!en.contains("suggested_memories"));
 }
+
+#[test]
+fn prompt_requires_existing_corpus_review_when_no_new_dialog_and_under_target() {
+    let capacity = ReflectionCapacityBudget {
+        active_count: 3,
+        target_active_entries: 150,
+        max_entries: 200,
+    };
+    let corpus_status = ReflectionCorpusStatus {
+        archive_count: 0,
+        category_counts: vec![(MemoryCategory::Fact, 3)],
+        duplicate_pairs: vec![],
+    };
+    let zh = engine().build_prompt("", "", "zh", capacity, Some(&corpus_status));
+    let en = engine().build_prompt("", "", "en", capacity, Some(&corpus_status));
+    // 无新对话且 active ≤ target 时，仍明确要求审查存量：合并互补、提纯事实。
+    assert!(zh.contains("摘要为空"), "zh 需覆盖空对话场景：{zh}");
+    assert!(
+        zh.contains("通读「当前项目记忆」"),
+        "zh 需要求通读存量：{zh}"
+    );
+    assert!(zh.contains("合并互补"), "zh 需要求合并互补信息：{zh}");
+    assert!(zh.contains("有价值"), "zh 需要求保留有价值事实：{zh}");
+    assert!(
+        zh.contains("高相似对只是线索"),
+        "zh 需声明高相似对只是线索：{zh}"
+    );
+    assert!(zh.contains("允许空输出"), "zh 需允许无变更时空输出：{zh}");
+    assert!(zh.contains("机械淘汰"), "zh 需禁止机械淘汰：{zh}");
+    assert!(
+        en.contains("summary is empty"),
+        "en must cover empty dialog: {en}"
+    );
+    assert!(
+        en.contains("read the whole Current project memory list"),
+        "en must require reviewing the corpus: {en}"
+    );
+    assert!(
+        en.contains("merge complementary"),
+        "en must ask for merges: {en}"
+    );
+    assert!(en.contains("valuable"), "en must keep valuable facts: {en}");
+    assert!(
+        en.contains("only a clue, not a precondition"),
+        "en must treat similarity as a clue: {en}"
+    );
+    assert!(
+        en.contains("empty output"),
+        "en must allow empty output: {en}"
+    );
+    assert!(
+        en.contains("mechanically"),
+        "en must forbid mechanical eviction: {en}"
+    );
+}
+
+/// 空语料兜底（真模型实证：空 corpus 时 deepseek 输出自然语言解释而非
+/// JSON，初始与 repair 请求双双失败）：去噪与归纳 prompt 都 MUST 显式
+/// 要求「列表为空/无条目需要处理时仍只输出 JSON 对象（数组为空）」。
+#[test]
+fn prompts_forbid_prose_when_corpus_is_empty() {
+    let engine = ReflectionEngine;
+    let capacity = ReflectionCapacityBudget {
+        active_count: 0,
+        target_active_entries: 150,
+        max_entries: 200,
+    };
+
+    let zh_noise = engine.build_noise_prompt("", "zh", capacity, None);
+    assert!(
+        zh_noise.contains("列表为空") && zh_noise.contains("空数组"),
+        "zh 去噪 prompt MUST 含空语料兜底指令: {zh_noise}"
+    );
+    let en_noise = engine.build_noise_prompt("", "en", capacity, None);
+    assert!(
+        en_noise.contains("the list is empty") && en_noise.contains("empty array"),
+        "en 去噪 prompt MUST 含空语料兜底指令: {en_noise}"
+    );
+
+    let zh_synthesis = engine.build_prompt("", "", "zh", capacity, None);
+    assert!(
+        zh_synthesis.contains("列表为空") && zh_synthesis.contains("空数组"),
+        "zh 归纳 prompt MUST 含空语料兜底指令"
+    );
+    let en_synthesis = engine.build_prompt("", "", "en", capacity, None);
+    assert!(
+        en_synthesis.contains("the list is empty") && en_synthesis.contains("empty array"),
+        "en 归纳 prompt MUST 含空语料兜底指令"
+    );
+}

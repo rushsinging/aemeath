@@ -39,6 +39,8 @@ enum RuntimeSegmentStyle {
     Separator,
     Status(StatusNoticeViewKind),
     Muted,
+    /// 运行中状态（如 Reflecting）——peach 语义色。
+    Running,
     ContextPct(u64),
 }
 
@@ -174,7 +176,9 @@ impl StatusBar {
         }
         if vm.reflecting {
             segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
-            segments.push(("Reflecting…".to_string(), RuntimeSegmentStyle::Muted));
+            // 反思进行中属「运行中状态」语义色（TOOL_RUNNING/peach），与模型名
+            // （ACCENT）及次级指标（TEXT_MUTED）拉开视觉层次。
+            segments.push(("Reflecting".to_string(), RuntimeSegmentStyle::Running));
         }
         segments.push((FIELD_SEPARATOR.to_string(), RuntimeSegmentStyle::Separator));
         segments.push((
@@ -226,6 +230,7 @@ impl StatusBar {
                 Style::default().fg(theme::WARNING)
             }
             RuntimeSegmentStyle::Muted => Style::default().fg(theme::TEXT_MUTED),
+            RuntimeSegmentStyle::Running => Style::default().fg(theme::TOOL_RUNNING),
             RuntimeSegmentStyle::ContextPct(pct) if pct >= 80 => Style::default().fg(theme::ERROR),
             RuntimeSegmentStyle::ContextPct(pct) if pct >= 50 => {
                 Style::default().fg(theme::WARNING)

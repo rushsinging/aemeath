@@ -22,17 +22,6 @@ pub const MAX_SUPERSEDE_CHAIN_DEPTH: usize = 256;
 /// MUST NOT 产出。
 pub const MIN_SYNTHESIS_EVIDENCE: usize = 2;
 
-/// Reflect 收敛目标相对 `max_entries` 的分子（分母 4 → 0.75）。
-/// 首轮与同轮补问共用；NEVER 再降比例。
-pub const REFLECT_TARGET_ACTIVE_RATIO_NUM: usize = 3;
-pub const REFLECT_TARGET_ACTIVE_RATIO_DEN: usize = 4;
-
-/// `floor(max_entries × 0.75)`：成功 reflect 落盘后 project active 上限。
-#[must_use]
-pub const fn reflect_target_active_entries(max_entries: usize) -> usize {
-    max_entries.saturating_mul(REFLECT_TARGET_ACTIVE_RATIO_NUM) / REFLECT_TARGET_ACTIVE_RATIO_DEN
-}
-
 /// #1987：corpus 现状高相似对检测阈值（Jaccard，词法）。
 pub(crate) const REFLECT_DUPLICATE_PAIR_THRESHOLD: f64 = 0.70;
 

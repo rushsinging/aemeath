@@ -23,7 +23,7 @@ pub(super) async fn run_reflection_phase(
     run_step_id: Option<&sdk::RunStepId>,
     coverage_end: Option<u64>,
     step_cancel: &CancellationToken,
-) -> Result<(), LoopEngineError> {
+) -> Result<ReflectionRunOutcome, LoopEngineError> {
     transition_and_emit(run, execution, port, RunTransition::BeginReflection).await?;
     let activity_id = match port.start_reflection_activity(trigger) {
         Ok(id) => Some(id),
@@ -77,14 +77,16 @@ pub(super) async fn run_reflection_phase(
                 ReflectionTaskCompletionStatus::Cancelled => ActivityTerminal::Cancelled,
                 ReflectionTaskCompletionStatus::TimedOut => ActivityTerminal::Terminated,
             },
-            ReflectionRunOutcome::DisabledSkipped
-            | ReflectionRunOutcome::BusySkipped
-            | ReflectionRunOutcome::Detached => ActivityTerminal::Cancelled,
+            // 派发成功即完成（终态仅完成/异常两档，#2002 D2）；未派发的跳过记 Cancelled。
+            ReflectionRunOutcome::Detached => ActivityTerminal::Succeeded,
+            ReflectionRunOutcome::DisabledSkipped | ReflectionRunOutcome::BusySkipped => {
+                ActivityTerminal::Cancelled
+            }
         };
         let _ = port.finish_activity(activity_id, terminal);
     }
     transition_and_emit(run, execution, port, RunTransition::ReflectionCompleted).await?;
-    Ok(())
+    Ok(outcome)
 }
 
 /// PreCompact 插入点：两处自动压缩（needs_compaction 与 ModelContextExceeded）在
@@ -99,10 +101,10 @@ pub(super) async fn run_pre_compact_reflection_phase_if_staged(
     run_step_id: &sdk::RunStepId,
     step_cancel: &CancellationToken,
 ) -> Result<(), LoopEngineError> {
-    let messages = port
+    let material = port
         .reflection_mut()
         .and_then(|reflection| reflection.take_pre_compact_messages());
-    let Some(messages) = messages else {
+    let Some(material) = material else {
         return Ok(());
     };
     // wakeup / 手动压缩等非用户回合：可 compact，但跳过自动反思。
@@ -115,16 +117,28 @@ pub(super) async fn run_pre_compact_reflection_phase_if_staged(
         );
         return Ok(());
     }
-    // PreCompact 反思的是被丢弃段（非 session 历史增量），不推进游标（None）。
-    run_reflection_phase(
+    // PreCompact 反思的是被丢弃段中游标未覆盖的残余；成功后以丢弃段压缩前末位置
+    // 推进游标（#2002 统一覆盖去重）。
+    let outcome = run_reflection_phase(
         run,
         execution,
         port,
         crate::application::reflection::ReflectionTaskTrigger::PreCompact,
-        messages,
+        material.messages.clone(),
         Some(run_step_id),
-        None,
+        material.coverage_end,
         step_cancel,
     )
-    .await
+    .await?;
+    // BusySkipped：未派发残余回填材料槽滞留，下次 compact 后再试（D4a）。
+    if outcome == ReflectionRunOutcome::BusySkipped {
+        log::info!(
+            target: crate::LOG_TARGET,
+            "[pre_compact_material_restored] 反思槽忙，PreCompact 残余回填滞留",
+        );
+        if let Some(reflection) = port.reflection_mut() {
+            reflection.restore_pre_compact_material(&material);
+        }
+    }
+    Ok(())
 }

@@ -196,12 +196,14 @@ fn manual_outcome_notice_pairs_text_and_error_from_one_policy() {
 }
 
 #[tokio::test]
-async fn manual_run_awaits_completion_and_freezes_the_visible_messages() {
+async fn manual_run_dispatches_detached_and_freezes_the_visible_messages() {
     let adapter = ReflectionTaskAdapter::production(Duration::from_secs(5));
     let binding = fake_binding();
     let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::api::NoOpMemory);
     let history = crate::application::reflection::test_support::noop_reflection_history();
 
+    // 统一异步链路（#2002）：Manual 派发即 Detached，快照冻结传递到 detached
+    // 任务（「可见历史进反思」的完整证据由 RecordingReflectionProvider 组覆盖）。
     let outcome = crate::application::loop_engine::chat::reflection::run(
         &adapter,
         crate::application::reflection::ReflectionTaskTrigger::Manual,
@@ -214,24 +216,13 @@ async fn manual_run_awaits_completion_and_freezes_the_visible_messages() {
         &history,
         None,
         CancellationToken::new(),
+        None,
     )
     .await;
 
-    let ReflectionRunOutcome::Completed(completion) = outcome else {
-        panic!("an enabled configuration must not skip the manual run");
-    };
-    assert_eq!(
-        completion.trigger,
-        crate::application::reflection::ReflectionTaskTrigger::Manual
-    );
-    assert_eq!(completion.status, ReflectionTaskCompletionStatus::Succeeded);
-    assert_eq!(
-        completion
-            .metadata
-            .as_ref()
-            .map(|metadata| metadata.applied_changes()),
-        Some(0),
-        "auto-apply is off, so a completed run must not claim a change",
+    assert!(
+        matches!(outcome, ReflectionRunOutcome::Detached),
+        "Manual 必须立即 Detached: {outcome:?}"
     );
 }
 
@@ -362,12 +353,22 @@ async fn chat_manual_reflection_runs_frozen_snapshot_and_publishes_success_text(
         outcome,
         ManualReflectionOutcome::Ready(ReflectionTaskCompletionStatus::Succeeded)
     );
-    assert!(
-        prompts
+    // detached 异步执行：轮询等待冻结快照到达反思 prompt（#2002 统一异步链路）。
+    let mut snapshot_reached = false;
+    for _ in 0..500 {
+        if prompts
             .lock()
             .unwrap()
             .iter()
-            .any(|prompt| prompt.contains("visible committed history")),
+            .any(|prompt| prompt.contains("visible committed history"))
+        {
+            snapshot_reached = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(
+        snapshot_reached,
         "冻结的 committed 快照必须到达反思 prompt: {:?}",
         prompts.lock().unwrap()
     );
@@ -375,8 +376,8 @@ async fn chat_manual_reflection_runs_frozen_snapshot_and_publishes_success_text(
     assert!(
         texts
             .iter()
-            .any(|(text, is_error)| text.contains("已完成") && !is_error),
-        "Succeeded 必须发布成功文案且非错误: {texts:?}"
+            .any(|(text, is_error)| text.contains("后台开始") && !is_error),
+        "派发成功必须发布后台开始回执且非错误: {texts:?}"
     );
 }
 
@@ -384,7 +385,10 @@ async fn chat_manual_reflection_runs_frozen_snapshot_and_publishes_success_text(
 /// `DisabledSkipped` 折叠为 `Ready(Failed)` 并发布「未启用」文案（Run 照常收口）。
 #[tokio::test]
 async fn chat_manual_reflection_maps_cancelled_and_disabled_outcomes() {
-    // ① 预先取消的 token：run_complete 折叠为 Completed(Cancelled) → 端口映射 Cancelled。
+    // ① 预先取消的 token：detached 持独立 token（cancel 不影响异步，#2002 D2），
+    // 派发成功 → Ready(Succeeded)；usage 由 detached 完成点异步记账
+    // （不因取消缺失，改由 task_tests 的 detached_run_ignores_cancelled_caller_token
+    // 验证终态 Succeeded）。
     let cancelled_sink = Arc::new(
         crate::application::loop_engine::chat::pre_compact_trigger_tests::RecordingUsageSink::default(),
     );
@@ -401,12 +405,10 @@ async fn chat_manual_reflection_maps_cancelled_and_disabled_outcomes() {
     let outcome = port
         .run_manual_reflection(&sdk::RunId::new_v7(), &cancel)
         .await
-        .expect("取消不是错误");
-    assert_eq!(outcome, ManualReflectionOutcome::Cancelled);
-    assert!(
-        cancelled_sink.records().is_empty(),
-        "Cancelled 手动反思不得计入 Usage: {:?}",
-        cancelled_sink.records()
+        .expect("取消不影响异步派发");
+    assert_eq!(
+        outcome,
+        ManualReflectionOutcome::Ready(ReflectionTaskCompletionStatus::Succeeded)
     );
 
     // ② 禁用竞态：run_complete 返回 DisabledSkipped → Ready(Failed) + 未启用文案。
@@ -474,7 +476,18 @@ async fn chat_manual_reflection_success_records_usage_without_run_step() {
         ManualReflectionOutcome::Ready(ReflectionTaskCompletionStatus::Succeeded)
     );
 
-    let records = usage_sink.records();
+    // usage 记账在 detached 完成点异步执行（#2002 M2）：轮询等待记录出现。
+    let records = {
+        let mut records = usage_sink.records();
+        for _ in 0..500 {
+            if !records.is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            records = usage_sink.records();
+        }
+        records
+    };
     assert_eq!(
         records.len(),
         1,

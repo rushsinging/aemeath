@@ -26,8 +26,7 @@ use crate::application::loop_engine::compaction::CompactionObserver;
 use crate::application::loop_engine::run_services::RuntimeReflection;
 use crate::application::loop_engine::{CompactionPort, ReflectionPhasePort};
 use crate::application::reflection::{
-    ReflectionRunOutcome, ReflectionTaskAdapter, ReflectionTaskCompletionStatus,
-    ReflectionTaskTrigger,
+    ReflectionRunOutcome, ReflectionTaskAdapter, ReflectionTaskTrigger,
 };
 use crate::ports::{
     CompactOutcome, CompactRequestData, CompactResult, CompactSkipReason, CompactionDecisionData,
@@ -219,6 +218,7 @@ fn build_compact_test_port(
         &harness.runtime_context,
         ChatCompactionObserver {
             pre_compact_material: harness.material_slot.clone(),
+            reflection_history: cursor_history(None),
         },
     )
 }
@@ -428,6 +428,7 @@ async fn pre_compact_observer_stages_material_only_on_committed() {
     let slot = PreCompactMaterialSlot::default();
     let mut observer = ChatCompactionObserver {
         pre_compact_material: slot.clone(),
+        reflection_history: cursor_history(None),
     };
 
     observer
@@ -459,10 +460,10 @@ async fn pre_compact_observer_stages_material_only_on_committed() {
         "Skipped 不得改动已暂存材料"
     );
 
-    // 反思端口取出语义（反思开启时）：取走材料并清空槽位，供 engine phase 执行。
+    // 反思端口取出语义（反思开启时，无游标 → 全量）：取走材料并清空槽位。
     let taken = slot.take_for_reflection(&share::config::MemoryConfig::default());
     assert_eq!(
-        taken.as_ref().map(|messages| texts(messages)),
+        taken.as_ref().map(|material| texts(&material.messages)),
         Some(texts(&snapshot)),
         "开启时必须取走暂存材料"
     );
@@ -479,17 +480,18 @@ async fn pre_compact_execution_reports_a_precompact_completion() {
         Message::user("beta"),
         Message::user("gamma"),
     ];
-    harness.material_slot.stage(snapshot.clone());
+    harness.material_slot.stage(snapshot.clone(), None);
 
     let mut reflection = build_reflection_port(&harness);
-    let messages = reflection
+    let material = reflection
         .take_pre_compact_messages()
         .expect("反思开启时必须取走暂存材料");
     assert_eq!(
-        texts(&messages),
+        texts(&material.messages),
         texts(&snapshot),
         "取出的必须是暂存的被丢弃消息"
     );
+    assert_eq!(material.coverage_end, Some(3), "游标基准 = 丢弃段末位置");
     assert!(
         harness.material_slot.staged().is_none(),
         "取出后槽位必须清空"
@@ -498,19 +500,32 @@ async fn pre_compact_execution_reports_a_precompact_completion() {
     let outcome = reflection
         .run_reflection(
             ReflectionTaskTrigger::PreCompact,
-            messages,
+            material.messages,
             &RunId::new("run"),
             None,
-            None,
+            material.coverage_end,
             CancellationToken::new(),
         )
         .await
         .expect("反思端口执行不得返回 Err");
-    let ReflectionRunOutcome::Completed(completion) = outcome else {
-        panic!("an enabled configuration must not skip the run");
-    };
-    assert_eq!(completion.trigger, ReflectionTaskTrigger::PreCompact);
-    assert_eq!(completion.status, ReflectionTaskCompletionStatus::Succeeded);
+    // 统一异步链路（#2002）：派发即 Detached；终态经 history 落盘断言。
+    assert!(
+        matches!(outcome, ReflectionRunOutcome::Detached),
+        "PreCompact 必须立即 Detached: {outcome:?}"
+    );
+    let mut triggers = harness.persisted_triggers();
+    for _ in 0..500 {
+        if triggers.last() == Some(&memory::api::reflection::ReflectionTrigger::PreCompact) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        triggers = harness.persisted_triggers();
+    }
+    assert_eq!(
+        triggers.last(),
+        Some(&memory::api::reflection::ReflectionTrigger::PreCompact),
+        "detached 终态必须以 PreCompact 落盘"
+    );
 }
 
 /// 旧 `run_pre_compact_reflection_reports_history_failure` 的等价新路径：
@@ -521,35 +536,30 @@ async fn pre_compact_execution_reports_history_failure() {
         CompactHarness::with_history(Ok(committed_outcome()), failing_append_reflection_history());
     harness
         .material_slot
-        .stage(vec![Message::user("must not invoke provider")]);
+        .stage(vec![Message::user("must not invoke provider")], None);
 
     let mut reflection = build_reflection_port(&harness);
-    let messages = reflection
+    let material = reflection
         .take_pre_compact_messages()
         .expect("反思开启时必须取走暂存材料");
     let outcome = reflection
         .run_reflection(
             ReflectionTaskTrigger::PreCompact,
-            messages,
+            material.messages,
             &RunId::new("run"),
             None,
-            None,
+            material.coverage_end,
             CancellationToken::new(),
         )
         .await
         .expect("反思端口执行不得返回 Err");
 
-    let ReflectionRunOutcome::Completed(completion) = outcome else {
-        panic!("an enabled configuration must not skip the run");
-    };
-    assert_eq!(completion.trigger, ReflectionTaskTrigger::PreCompact);
-    assert_eq!(completion.status, ReflectionTaskCompletionStatus::Failed);
-    assert_eq!(
-        completion
-            .metadata
-            .as_ref()
-            .and_then(|metadata| metadata.error_category),
-        Some(memory::api::reflection::ReflectionErrorCategory::History)
+    // 统一异步链路（#2002）：派发即 Detached；history append 失败的 Failed
+    // 终态发生在 detached 内部且无法经失败的 history 自证，保留可平移断言：
+    // 不发布记忆更新、不记账 usage。
+    assert!(
+        matches!(outcome, ReflectionRunOutcome::Detached),
+        "PreCompact 必须立即 Detached: {outcome:?}"
     );
     assert_eq!(
         harness.adapter.take_memory_update_notice(),
@@ -607,27 +617,35 @@ async fn pre_compact_trigger_stages_material_after_compact_outcome_committed() {
 
     // 执行点在 engine：反思端口取出材料并以 PreCompact 执行。
     let mut reflection = build_reflection_port(&harness);
-    let messages = reflection
+    let material = reflection
         .take_pre_compact_messages()
         .expect("反思开启时必须取走暂存材料");
     assert_eq!(
-        texts(&messages),
+        texts(&material.messages),
         texts(&staged),
         "取出的必须是暂存的被丢弃消息"
     );
     reflection
         .run_reflection(
             ReflectionTaskTrigger::PreCompact,
-            messages,
+            material.messages,
             &RunId::new("run"),
             None,
-            None,
+            material.coverage_end,
             CancellationToken::new(),
         )
         .await
         .expect("反思端口执行不得返回 Err");
 
-    let triggers = harness.persisted_triggers();
+    // 统一异步链路（#2002）：detached 终态异步落盘，轮询等待 PreCompact 记录。
+    let mut triggers = harness.persisted_triggers();
+    for _ in 0..500 {
+        if triggers.contains(&memory::api::reflection::ReflectionTrigger::PreCompact) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        triggers = harness.persisted_triggers();
+    }
     assert!(
         triggers.contains(&memory::api::reflection::ReflectionTrigger::PreCompact),
         "Committed 最终必须执行 PreCompact reflection: {triggers:?}"
@@ -733,7 +751,7 @@ async fn pre_compact_take_drops_material_when_reflection_disabled() {
     );
     harness
         .material_slot
-        .stage(vec![Message::user("discarded")]);
+        .stage(vec![Message::user("discarded")], None);
 
     let reflection = build_reflection_port(&harness);
     assert!(
@@ -758,10 +776,10 @@ async fn succeeded_reflection_records_usage_via_shared_path() {
     let harness = CompactHarness::new(Ok(committed_outcome()));
     harness
         .material_slot
-        .stage(vec![Message::user("reflect me")]);
+        .stage(vec![Message::user("reflect me")], None);
 
     let mut reflection = build_reflection_port(&harness);
-    let messages = reflection
+    let material = reflection
         .take_pre_compact_messages()
         .expect("反思开启时必须取走暂存材料");
     let run_id = RunId::new("usage-run");
@@ -769,21 +787,29 @@ async fn succeeded_reflection_records_usage_via_shared_path() {
     let outcome = reflection
         .run_reflection(
             ReflectionTaskTrigger::PreCompact,
-            messages,
+            material.messages,
             &run_id,
             Some(&run_step_id),
-            None,
+            material.coverage_end,
             CancellationToken::new(),
         )
         .await
         .expect("反思端口执行不得返回 Err");
 
-    let ReflectionRunOutcome::Completed(completion) = outcome else {
-        panic!("an enabled configuration must not skip the run");
-    };
-    assert_eq!(completion.status, ReflectionTaskCompletionStatus::Succeeded);
+    assert!(
+        matches!(outcome, ReflectionRunOutcome::Detached),
+        "PreCompact 必须立即 Detached: {outcome:?}"
+    );
 
-    let records = harness.usage_sink.records();
+    // usage 记账在 detached 完成点异步执行（#2002 M2，Interval 缺口同路径补齐）。
+    let mut records = harness.usage_sink.records();
+    for _ in 0..500 {
+        if !records.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        records = harness.usage_sink.records();
+    }
     assert_eq!(
         records.len(),
         1,
@@ -820,28 +846,32 @@ async fn failed_reflection_records_no_usage() {
         CompactHarness::with_history(Ok(committed_outcome()), failing_append_reflection_history());
     harness
         .material_slot
-        .stage(vec![Message::user("will fail on history")]);
+        .stage(vec![Message::user("will fail on history")], None);
 
     let mut reflection = build_reflection_port(&harness);
-    let messages = reflection
+    let material = reflection
         .take_pre_compact_messages()
         .expect("反思开启时必须取走暂存材料");
     let outcome = reflection
         .run_reflection(
             ReflectionTaskTrigger::PreCompact,
-            messages,
+            material.messages,
             &RunId::new("failed-run"),
             Some(&RunStepId::new("failed-step")),
-            None,
+            material.coverage_end,
             CancellationToken::new(),
         )
         .await
         .expect("反思端口执行不得返回 Err");
 
-    let ReflectionRunOutcome::Completed(completion) = outcome else {
-        panic!("an enabled configuration must not skip the run");
-    };
-    assert_eq!(completion.status, ReflectionTaskCompletionStatus::Failed);
+    assert!(
+        matches!(outcome, ReflectionRunOutcome::Detached),
+        "PreCompact 必须立即 Detached: {outcome:?}"
+    );
+    // Failed 终态不记账；等 detached 执行完（history 失败即快速终态）再断言。
+    for _ in 0..200 {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
     assert!(
         harness.usage_sink.records().is_empty(),
         "Failed 反思不得计入 Usage: {:?}",
@@ -849,7 +879,9 @@ async fn failed_reflection_records_no_usage() {
     );
 }
 
-/// Cancelled 终态不记账。
+/// 调用方 token 预取消不影响异步（#2002 D2）：detached 持独立 token，
+/// 派发照常执行并按实际终态记账（原「取消不记账」同步语义已退役；
+/// 替代证据 = task_tests 的 detached_run_ignores_cancelled_caller_token）。
 #[tokio::test]
 async fn cancelled_reflection_records_no_usage() {
     let harness = CompactHarness::new(Ok(committed_outcome()));
@@ -867,16 +899,25 @@ async fn cancelled_reflection_records_no_usage() {
             cancel,
         )
         .await
-        .expect("取消不是错误");
+        .expect("取消不影响异步派发");
 
-    let ReflectionRunOutcome::Completed(completion) = outcome else {
-        panic!("an enabled configuration must not skip the run");
-    };
-    assert_eq!(completion.status, ReflectionTaskCompletionStatus::Cancelled);
     assert!(
-        harness.usage_sink.records().is_empty(),
-        "Cancelled 反思不得计入 Usage: {:?}",
-        harness.usage_sink.records()
+        matches!(outcome, ReflectionRunOutcome::Detached),
+        "预取消 token 必须照常 Detached: {outcome:?}"
+    );
+    // 实际执行成功（static provider）：usage 由完成点记账。
+    let mut records = harness.usage_sink.records();
+    for _ in 0..500 {
+        if !records.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        records = harness.usage_sink.records();
+    }
+    assert_eq!(
+        records.len(),
+        1,
+        "预取消不影响执行：成功终态必须照常记账: {records:?}"
     );
 }
 
@@ -981,5 +1022,189 @@ fn interval_reflection_messages_empty_slot_falls_back_to_run_messages_only() {
     assert_eq!(
         material.coverage_end, None,
         "回退路径不推进游标（保持现状语义）"
+    );
+}
+
+// ── PreCompact 材料游标去重（统一覆盖去重）────────────────────────
+
+/// 可配置游标的 fake history：`list` 返回唯一一条 `Succeeded` 且带
+/// `coverage_end` 的记录，供 `latest_coverage_cursor` 读取。
+struct CursorReflectionHistory {
+    coverage_end: Option<u64>,
+}
+
+#[async_trait]
+impl memory::api::ReflectionHistoryQuery for CursorReflectionHistory {
+    async fn list(
+        &self,
+        _limit: usize,
+    ) -> Result<Vec<memory::api::reflection::ReflectionSafeSummary>, memory::api::MemoryError> {
+        Ok(vec![memory::api::reflection::ReflectionSafeSummary {
+            id: share::ids::new_typed_id("inv"),
+            timestamp: 0,
+            trigger: memory::api::reflection::ReflectionTrigger::Interval,
+            status: memory::api::reflection::ReflectionStatus::Succeeded,
+            deviations: 0,
+            suggestions: 0,
+            outdated: 0,
+            apply_status: memory::api::reflection::ReflectionApplyStatus::Applied,
+            error_category: None,
+            token_usage: None,
+            duration_ms: 1,
+            coverage_end: self.coverage_end,
+            deviation_texts: None,
+            suggested_memories: None,
+        }])
+    }
+}
+
+#[async_trait]
+impl memory::api::ReflectionHistoryStore for CursorReflectionHistory {
+    async fn append(
+        &self,
+        _record: &memory::api::reflection::ReflectionRecord,
+    ) -> Result<(), memory::api::MemoryError> {
+        Ok(())
+    }
+
+    async fn upsert(
+        &self,
+        _record: &memory::api::reflection::ReflectionRecord,
+    ) -> Result<(), memory::api::MemoryError> {
+        Ok(())
+    }
+}
+
+fn cursor_history(coverage_end: Option<u64>) -> Arc<dyn memory::api::ReflectionHistoryStore> {
+    Arc::new(CursorReflectionHistory { coverage_end })
+}
+
+fn staged_discarded_segment() -> Vec<Message> {
+    vec![
+        Message::user("dropped-0"),
+        Message::user("dropped-1"),
+        Message::user("dropped-2"),
+        Message::user("dropped-3"),
+        Message::user("dropped-4"),
+    ]
+}
+
+/// stage 时按最新 Succeeded 游标过滤：只保留游标之后的未覆盖残余，
+/// coverage_end = 丢弃段在压缩前历史坐标系中的末位置（成功后推游标的基准）。
+#[test]
+fn pre_compact_take_returns_only_uncovered_residual() {
+    let slot = PreCompactMaterialSlot::default();
+    slot.stage(staged_discarded_segment(), Some(3));
+
+    let material = slot
+        .take_for_reflection(&share::config::MemoryConfig::default())
+        .expect("存在未覆盖残余时必须派发");
+    assert_eq!(
+        texts(&material.messages),
+        vec!["dropped-3".to_string(), "dropped-4".to_string()],
+        "材料只含游标之后的未覆盖残余"
+    );
+    assert_eq!(
+        material.coverage_end,
+        Some(5),
+        "coverage_end = 丢弃段末位置（压缩前坐标）"
+    );
+}
+
+/// 丢弃段整段已被游标覆盖：不派发（已 reflect 的 context 不再进入 reflect）。
+#[test]
+fn pre_compact_take_skips_fully_covered_segment() {
+    let slot = PreCompactMaterialSlot::default();
+    slot.stage(staged_discarded_segment(), Some(5));
+    assert!(
+        slot.take_for_reflection(&share::config::MemoryConfig::default())
+            .is_none(),
+        "整段已覆盖必须不派发"
+    );
+
+    // 游标越过丢弃段末位置（compact 截断后游标失效前的一次 take）同样不派发。
+    let slot = PreCompactMaterialSlot::default();
+    slot.stage(staged_discarded_segment(), Some(9));
+    assert!(slot
+        .take_for_reflection(&share::config::MemoryConfig::default())
+        .is_none());
+}
+
+/// 无游标（首次反思 / 游标失效回退）：全量材料 + coverage_end=丢弃段末位置。
+#[test]
+fn pre_compact_take_without_cursor_returns_full_segment() {
+    let slot = PreCompactMaterialSlot::default();
+    slot.stage(staged_discarded_segment(), None);
+
+    let material = slot
+        .take_for_reflection(&share::config::MemoryConfig::default())
+        .expect("无游标回退必须全量派发");
+    assert_eq!(material.messages.len(), 5);
+    assert_eq!(material.coverage_end, Some(5));
+}
+
+/// BusySkipped 回填滞留（D4a）：回填后残余保持绝对坐标语义，
+/// 游标推进到残余内部时再次 take 只取剩余未覆盖部分。
+#[test]
+fn pre_compact_restore_defers_residual_with_absolute_coordinates() {
+    let slot = PreCompactMaterialSlot::default();
+    slot.stage(staged_discarded_segment(), Some(3));
+    let material = slot
+        .take_for_reflection(&share::config::MemoryConfig::default())
+        .expect("未覆盖残余必须派发");
+
+    slot.restore(&material);
+    assert_eq!(
+        slot.staged().as_ref().map(|messages| texts(messages)),
+        Some(vec!["dropped-3".to_string(), "dropped-4".to_string()]),
+        "回填后滞留残余"
+    );
+
+    // 游标推进到 4（绝对坐标）：残余中只剩绝对位置 4 的消息。
+    slot.advance_cursor_if_farther(4);
+    let again = slot
+        .take_for_reflection(&share::config::MemoryConfig::default())
+        .expect("残余仍有未覆盖部分时再次派发");
+    assert_eq!(texts(&again.messages), vec!["dropped-4".to_string()]);
+    assert_eq!(again.coverage_end, Some(5));
+}
+
+/// 槽内已有回填滞留时再 stage：覆盖滞留材料（新丢弃段优先）。
+#[test]
+fn pre_compact_stage_overwrites_restored_residual() {
+    let slot = PreCompactMaterialSlot::default();
+    slot.stage(staged_discarded_segment(), Some(3));
+    let material = slot
+        .take_for_reflection(&share::config::MemoryConfig::default())
+        .expect("未覆盖残余必须派发");
+    slot.restore(&material);
+
+    let fresh = vec![Message::user("new-drop-0"), Message::user("new-drop-1")];
+    slot.stage(fresh.clone(), None);
+    let taken = slot
+        .take_for_reflection(&share::config::MemoryConfig::default())
+        .expect("新丢弃段必须生效");
+    assert_eq!(texts(&taken.messages), texts(&fresh));
+    assert_eq!(taken.coverage_end, Some(2));
+}
+
+/// compaction observer stage 时读游标并过滤：整段已覆盖时不暂存派发材料。
+#[tokio::test]
+async fn pre_compact_observer_stages_only_uncovered_residual() {
+    let history = cursor_history(Some(5));
+    let slot = PreCompactMaterialSlot::default();
+    let mut observer = ChatCompactionObserver {
+        pre_compact_material: slot.clone(),
+        reflection_history: history,
+    };
+
+    observer
+        .on_compacted(&committed_outcome(), &staged_discarded_segment())
+        .await
+        .expect("Committed 不得报错");
+    assert!(
+        slot.take_for_reflection(&share::config::MemoryConfig::default())
+            .is_none(),
+        "整段已覆盖：observer 不得暂存可派发材料"
     );
 }

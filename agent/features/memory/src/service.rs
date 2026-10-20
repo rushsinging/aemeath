@@ -630,6 +630,25 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
         (state.global.dataset.clone(), state.project.dataset.clone())
     }
 
+    /// 反思提交后收敛复核的告警文案。与 apply 预检、反思 prompt 三处同源：
+    /// 计数用「有效且未过期」口径（[`crate::domain::effective_active_count_at`]，
+    /// outdated / 被取代 / TTL 过期残留已不可注入，MUST NOT 误报成超载——
+    /// pinned 过期条目留在 active 但不占收敛目标）；target 取策略
+    /// `target_active_entries`（生产装配即配置值）。返回 `None` 表示无需告警。
+    fn reflection_above_target_after_commit_notice(&self) -> Option<String> {
+        let now = (self.clock)();
+        let project_active = {
+            let state = self.state.read().expect("memory state lock poisoned");
+            crate::domain::effective_active_count_at(state.project.dataset.active(), now)
+        };
+        let target = self.policy.target_active_entries;
+        (project_active > target).then(|| {
+            format!(
+                "memory_reflection_above_target_after_commit active={project_active} target={target}"
+            )
+        })
+    }
+
     /// 读路径统一入口：现读磁盘最新已提交数据（#1886）。
     ///
     /// 每层独立「初读 + 撞错重读一次」；任一层最终失败则整体回退内存快照，
@@ -1182,6 +1201,7 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             ..ReflectionApplyResult::default()
         };
         {
+            let now = (self.clock)();
             let (global, project) = self.snapshot();
             let project_active = simulate_project_active_after_reflection(
                 &global,
@@ -1189,8 +1209,13 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                 &prepared,
                 &outdated,
                 self.policy,
+                now,
             )?;
-            let target = crate::domain::reflect_target_active_entries(self.policy.max_entries);
+            // 收敛目标与反思 prompt 同源：一律取策略 target_active_entries
+            // （生产装配即 memory.reflection.target_active_entries 配置值），
+            // NEVER 此处另按 floor(max×0.75) 公式取值——两套口径会让按 prompt
+            // 收敛的模型被门禁反复打回（补问目标也用同一值，NEVER 降级）。
+            let target = self.policy.target_active_entries;
             if project_active > target {
                 return Err(MemoryError::CapacityNotMet {
                     active: project_active,
@@ -1292,18 +1317,42 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                 Err(error) => return Err(partial_apply_or(error, &result)),
             }
         }
-        let project_active = {
-            let state = self.state.read().expect("memory state lock poisoned");
-            state.project.dataset.active().len()
-        };
-        let target = crate::domain::reflect_target_active_entries(self.policy.max_entries);
-        if project_active > target {
-            log::warn!(
-                target: crate::LOG_TARGET,
-                "memory_reflection_above_target_after_commit active={project_active} target={target}"
-            );
+        if let Some(notice) = self.reflection_above_target_after_commit_notice() {
+            log::warn!(target: crate::LOG_TARGET, "{notice}");
         }
         Ok(result)
+    }
+
+    /// 系统侧残留清扫：把双层 active 中已失效（outdated / 被取代 / TTL 过期）
+    /// 且未 pinned 的残留归档，pinned 一律保留。调用方已持
+    /// [`MemoryWritePermit`]——扫描与归档在同一持锁窗口内完成，归档复用
+    /// [`Self::archive_locked`] 既有持锁原语，NEVER 二次取写门闩（对同一
+    /// 异步门闩二次 lock_owned 会重入死锁）。返回值即实际归档条数口径。
+    async fn sweep_stale_under_permit(
+        &self,
+        now: u64,
+        _permit: &MemoryWritePermit,
+    ) -> Result<usize, MemoryError> {
+        // 与 mutate_layer 同一 state 基准扫描：permit 持有期间进程内无并发
+        // 写者，快照里的非 pinned 失效残留即随后归档的集合，计数与盘面一致。
+        let stale_ids: Vec<MemoryId> = {
+            let state = self.state.read().expect("memory state lock poisoned");
+            state
+                .global
+                .dataset
+                .active()
+                .iter()
+                .chain(state.project.dataset.active())
+                .filter(|entry| !entry.pinned)
+                .filter(|entry| !crate::domain::is_reflection_input_eligible(entry, now))
+                .map(|entry| entry.id)
+                .collect()
+        };
+        if stale_ids.is_empty() {
+            return Ok(0);
+        }
+        self.archive_locked(&stale_ids).await?;
+        Ok(stale_ids.len())
     }
 
     async fn archive(&self, ids: &[MemoryId]) -> Result<bool, MemoryError> {
@@ -1513,13 +1562,15 @@ fn partial_apply_or(error: MemoryError, result: &ReflectionApplyResult) -> Memor
 }
 
 /// 在候选盘面上试算 reflect apply 后的 project active 条数（含 outdated→归档）。
-/// 仅用于容量门禁；NEVER 在此路径写盘。
+/// 仅用于容量门禁；NEVER 在此路径写盘。计数用「有效且未过期」口径——
+/// pinned TTL 过期残留不会被本批归档，但 MUST NOT 占用收敛目标。
 fn simulate_project_active_after_reflection(
     global: &MemoryDataset,
     project: &MemoryDataset,
     prepared: &[(MemoryEntry, Vec<MemoryId>)],
     outdated: &[MemoryId],
     policy: MemoryPolicy,
+    now: u64,
 ) -> Result<usize, MemoryError> {
     let mut global = global.clone();
     let mut project = project.clone();
@@ -1549,7 +1600,10 @@ fn simulate_project_active_after_reflection(
             }
         }
     }
-    Ok(crate::domain::effective_active_count(project.active()))
+    Ok(crate::domain::effective_active_count_at(
+        project.active(),
+        now,
+    ))
 }
 
 /// Applies one Reflection suggestion as one dataset mutation. On capacity it

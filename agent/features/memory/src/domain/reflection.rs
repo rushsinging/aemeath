@@ -502,6 +502,8 @@ impl ReflectionEngine {
 
 要求：
 - 只输出 JSON，不要输出 Markdown。
+- 即使记忆列表为空、或没有任何条目需要处理，也必须只输出符合 schema 的 JSON
+  对象（各数组填空数组），NEVER 输出解释、说明或任何文字。
 - suggested_memories[].layer 只能是 project 或 global，默认优先使用 project。
 - suggested_memories[].category 只能是 fact、decision、preference、pattern、pitfall。
 - 引用已有记忆只能使用「当前项目记忆」列表行首的序号（形如 M3，对应行首 [M3]）。
@@ -523,6 +525,10 @@ impl ReflectionEngine {
     成功落盘后 active MUST ≤ target。当 active > target 时，MUST 通过 outdated_memories（将过时条目归档出 active）/
     supersedes / synthesizes 收敛；系统不会机械裁剪凑数，未达标整批不写。
     当 active ≤ target 时不要为凑数而强制淘汰；仅标记真正过时或被取代的条目。
+  - 每轮 MUST 先审查存量：即使最近对话摘要为空、active ≤ target，也 MUST
+    通读「当前项目记忆」，合并互补信息、提纯重复表述、保留有价值的事实；
+    高相似对只是线索而非合并前提，未检出高相似对 NEVER 作为跳过存量归纳
+    的理由；无须变更时允许空输出，NEVER 为凑数新增或机械淘汰。
   - 判断重复/合并时，issue/PR 编号、日期、版本号本身不构成语义相似性依据——同编号的两条未必重复，编号不同的两条可能重复；以内容实质判断。
   - suggested_memories[].content MUST NOT 携带 issue/PR 编号、commit hash、
     日期戳、版本串等标识性流水信息；归纳旧条目时只提取结论本身（结构性
@@ -548,6 +554,9 @@ JSON 格式：
 
 Requirements:
 - Output JSON only, no Markdown.
+- Even if the list is empty or nothing needs processing, you must still output
+  only a schema-valid JSON object (with empty arrays); NEVER answer with prose
+  or explanations.
 - suggested_memories[].layer must be project or global; prefer project by default.
 - suggested_memories[].category must be fact, decision, preference, pattern, or pitfall.
 - Reference existing memories ONLY by the ordinal shown at the start of each
@@ -579,6 +588,14 @@ Requirements:
     (archives outdated entries out of active) / supersedes / synthesizes; the system never mechanically trims to target,
     and a miss fails the whole apply with no writes.
     When active ≤ target, do not force eviction just to hit a quota; only mark truly outdated or replaced entries.
+  - Every round MUST review the existing corpus first: even when the recent
+    conversation summary is empty and active ≤ target, you MUST
+    read the whole Current project memory list, merge complementary
+    information, distill overlapping phrasing, and keep still-valuable
+    facts; high-similarity pairs are only a clue, not a precondition for
+    merging — the absence of such pairs is NEVER a reason to skip the
+    corpus review; an empty output is allowed when nothing needs to change;
+    NEVER add or evict mechanically to hit a quota.
   - When judging duplicates or merges, issue/PR numbers, dates, and version
     strings do not by themselves establish semantic similarity — two entries
     sharing a number may differ, two entries with different numbers may be
@@ -641,9 +658,19 @@ impl ReflectionEngine {
         raw: &str,
         references: &ReflectionReferenceTable,
     ) -> ReflectionResult<ResolvedReflectionOutput> {
+        self.parse_output_diagnostic(raw, references)
+            .map_err(|(error, _)| error)
+    }
+
+    /// 保留现有领域错误，同时向执行层提供不含响应正文的解析位置。
+    pub(crate) fn parse_output_diagnostic(
+        &self,
+        raw: &str,
+        references: &ReflectionReferenceTable,
+    ) -> Result<ResolvedReflectionOutput, (ReflectionError, Option<String>)> {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
-            return Err(ReflectionError::Unparseable);
+            return Err((ReflectionError::Unparseable, None));
         }
 
         let fenced = trimmed
@@ -657,18 +684,28 @@ impl ReflectionEngine {
             // Preserve serde's structural error for JSON-looking, incomplete input.
             trimmed
         } else {
-            return Err(ReflectionError::Unparseable);
+            return Err((ReflectionError::Unparseable, None));
         };
 
-        let raw_output: RawReflectionOutput =
-            serde_json::from_str(source).map_err(|_| ReflectionError::Parse)?;
+        let raw_output: RawReflectionOutput = serde_json::from_str(source).map_err(|error| {
+            let detail = format!(
+                "category={:?} line={} column={}",
+                error.classify(),
+                error.line(),
+                error.column(),
+            );
+            (ReflectionError::Parse, Some(detail))
+        })?;
         let mut unresolved = Vec::new();
         let mut suggested_memories = Vec::with_capacity(raw_output.suggested_memories.len());
         for (index, suggestion) in raw_output.suggested_memories.into_iter().enumerate() {
             if suggestion.content.trim().is_empty() {
-                return Err(ReflectionError::InvalidSuggestion(format!(
-                    "suggested_memories[{index}].content must not be empty"
-                )));
+                return Err((
+                    ReflectionError::InvalidSuggestion(format!(
+                        "suggested_memories[{index}].content must not be empty"
+                    )),
+                    None,
+                ));
             }
             suggested_memories.push(MemorySuggestion {
                 layer: suggestion.layer,
@@ -786,6 +823,7 @@ impl ReflectionEngine {
 判断时 issue/PR 编号、日期、版本号本身不构成保留或清除的依据，以内容实质判断。
 当前 active={active_count}，收敛目标 target={target_active_entries}，硬上限 hard_cap={max_entries}。
 本步只做清除、NEVER 新增：清除是 corpus 卫生，不算为凑数强制淘汰；没有可清除条目时输出空数组。
+即使记忆列表为空、或没有任何条目需要清除，也必须只输出上述 JSON 对象（outdated_memories 为空数组），NEVER 输出解释、说明或任何文字。
 
 只输出 JSON，不要输出 Markdown：
 {{
@@ -805,6 +843,7 @@ Removal grounds (three):
 Issue/PR numbers, dates, and version strings by themselves are neither grounds to keep nor to remove; judge by substance.
 Current active={active_count}, converge target={target_active_entries}, hard cap={max_entries}.
 This step only removes and NEVER adds: removal is corpus hygiene, not quota-forced eviction; output an empty array when nothing qualifies.
+Even if the list is empty or nothing qualifies for removal, you must still output only the JSON object above (with an empty array); NEVER answer with prose or explanations.
 
 Output JSON only, no Markdown:
 {{
@@ -852,6 +891,8 @@ Output JSON only, no Markdown:
 - 高相似对（J ≥ {:.2}，建议合并）：
 {pairs}
 - 高相似对清单中每一对，MUST 给出 synthesizes（合并为一条新记忆并引用两侧行号），或说明为何保留两条。
+- 相似度只是线索、不是合并或保留的依据：即使未检出高相似对，也 MUST 通读存量
+  全部条目，按内容实质审查互补与重复；无须变更时允许空输出，NEVER 机械淘汰凑数。
 - 当 active ≥ target 时，新增建议需搭配等量淘汰（outdated_memories / supersedes），NEVER 只增不减。",
                 status.archive_count,
                 crate::domain::constants::REFLECT_DUPLICATE_PAIR_THRESHOLD,
@@ -882,6 +923,10 @@ Output JSON only, no Markdown:
 - High-similarity pairs (J ≥ {:.2}, merge candidates):
 {pairs}
 - For every listed pair you must produce a synthesizes suggestion merging both sides (citing both ordinals), or explain why both must stay.
+- Similarity is only a clue, never grounds for merging or keeping: even with
+  no high-similarity pairs you must still read the whole corpus and judge
+  complementarity and duplication by substance; an empty output is allowed
+  when nothing needs to change; NEVER evict mechanically to meet a quota.
 - When active ≥ target, each new suggestion must be paired with an equal amount of eviction (outdated_memories / supersedes); NEVER add without reducing.",
                 status.archive_count,
                 crate::domain::constants::REFLECT_DUPLICATE_PAIR_THRESHOLD,

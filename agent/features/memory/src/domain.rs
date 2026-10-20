@@ -15,7 +15,6 @@ mod policy_tests;
 #[path = "domain/reflection_error_boundary_tests.rs"]
 mod reflection_error_boundary_tests;
 
-pub use constants::reflect_target_active_entries;
 pub use model::*;
 pub use persistence::*;
 pub use policy::*;

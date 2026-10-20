@@ -559,9 +559,8 @@ where
                                 continue;
                             }
                         };
-                        // 游标增量切片（#1827）：有效游标 → 只带增量；缺失/失效
-                        // （首次或 compact 截断）→ 回退全量。增量为空（上次反思后无
-                        // 新对话）→ 跳过执行，NEVER 为空跑支付 token。
+                        // 游标仅控制新增会话材料：已覆盖对话不重复进入。
+                        // 即使增量为空，手动反思仍审查现有有效记忆的合并与提纯。
                         let history_messages = bound.session().structured_messages();
                         let history_len = history_messages.len() as u64;
                         let cursor = crate::application::loop_engine::chat::reflection::latest_coverage_cursor(
@@ -572,15 +571,6 @@ where
                             &history_messages,
                             cursor,
                         ) {
-                            Some(increment) if increment.is_empty() => {
-                                sink.send_event(RuntimeStreamEvent::CommandResultText {
-                                    text: "自上次反思以来无新增对话内容，已跳过本次手动反思。"
-                                        .to_string(),
-                                    is_error: false,
-                                })
-                                .await;
-                                continue;
-                            }
                             Some(increment) => {
                                 manual_reflection_messages = increment;
                             }
@@ -977,6 +967,12 @@ where
                         &runtime_context,
                         main_run_port::ChatCompactionObserver {
                             pre_compact_material: pre_compact_material.clone(),
+                            reflection_history: std::sync::Arc::clone(
+                                &shell
+                                    .runtime_context_factory
+                                    .services()
+                                    .reflection_history,
+                            ),
                         },
                     );
                 let mut interaction =

@@ -1,3 +1,4 @@
+use super::response::{request_reflection_response, ReflectionPhase};
 use crate::ports::ProviderPort;
 use futures::StreamExt;
 use memory::api::reflection::{
@@ -118,11 +119,24 @@ pub(crate) async fn execute_reflection(
 
     // 取消优先：已取消时跳过 Step 1，交 Step 2 原取消路径收口。
     let noise_result = if cancel.is_cancelled() {
-        Ok((0, 0))
+        Ok((
+            0,
+            0,
+            memory::api::reflection::ReflectionApplyResult::default(),
+        ))
     } else {
-        call_noise_phase(&invocation, &noise_prompt, memory, &write_permit, cancel).await
+        call_noise_phase(
+            &invocation,
+            &noise_prompt,
+            lang,
+            identity,
+            memory,
+            &write_permit,
+            cancel,
+        )
+        .await
     };
-    let (noise_input_tokens, noise_output_tokens) = match noise_result {
+    let (noise_input_tokens, noise_output_tokens, noise_apply) = match noise_result {
         Ok(usage) => usage,
         Err(error) => {
             ReflectionWorkflow::record_failure(
@@ -144,20 +158,15 @@ pub(crate) async fn execute_reflection(
         max_entries,
     )
     .await;
-    // 空响应有界重试：同一 prompt 再调一次 provider；provider 错误（LlmCall）
-    // 与取消路径 NEVER 重试，仍按现状落 Failed(EmptyResponse)。
-    let response =
-        match call_provider(&invocation, user_prompt_messages(&prompt.text), cancel).await {
-            Ok(response) => Ok(response),
-            Err(ReflectionExecutionError::EmptyResponse) if !cancel.is_cancelled() => {
-                log::warn!(
-                    target: crate::LOG_TARGET,
-                    "reflection_empty_response_retry id={}", identity.id,
-                );
-                call_provider(&invocation, user_prompt_messages(&prompt.text), cancel).await
-            }
-            Err(error) => Err(error),
-        };
+    let response = request_reflection_response(
+        &invocation,
+        &prompt,
+        lang,
+        ReflectionPhase::Synthesis,
+        identity,
+        cancel,
+    )
+    .await;
     let (mut raw_response, mut input_tokens, mut output_tokens) = match response {
         Ok(response) => response,
         Err(error) => {
@@ -171,52 +180,9 @@ pub(crate) async fn execute_reflection(
             return Err(error);
         }
     };
-    // 解析修复：调用 complete 之前先做不落盘的预解析；失败时把原反思 prompt、
-    // 原始响应与精确校验错误发回模型做一次有界格式修复（上限 1 次，NEVER
-    // 递归）。修复调用失败或修复后仍不合法 → 回退原始响应交 complete，按现状
-    // 落 Failed(Parse) 语义；取消后 NEVER 再发起修复调用。
-    if let Err(validation_error) =
-        ReflectionWorkflow::parse_for_repair(&raw_response, &prompt.references)
-    {
-        if cancel.is_cancelled() {
-            log::warn!(
-                target: crate::LOG_TARGET,
-                "reflection_repair_skipped reason=cancelled id={}", identity.id,
-            );
-        } else {
-            log::warn!(
-                target: crate::LOG_TARGET,
-                "reflection_repair_attempt id={} validation_error={}",
-                identity.id,
-                validation_error,
-            );
-            let repair_messages =
-                build_repair_messages(&prompt.text, &raw_response, lang, &validation_error);
-            match call_provider(&invocation, repair_messages, cancel).await {
-                Ok((repaired, repair_input_tokens, repair_output_tokens)) => {
-                    input_tokens += repair_input_tokens;
-                    output_tokens += repair_output_tokens;
-                    if ReflectionWorkflow::parse_for_repair(&repaired, &prompt.references).is_ok() {
-                        raw_response = repaired;
-                    } else {
-                        log::warn!(
-                            target: crate::LOG_TARGET,
-                            "reflection_repair_still_unparseable id={}", identity.id,
-                        );
-                    }
-                }
-                Err(error) => {
-                    log::warn!(
-                        target: crate::LOG_TARGET,
-                        "reflection_repair_failed id={} error={:?}", identity.id, error,
-                    );
-                }
-            }
-        }
-    }
     input_tokens = input_tokens.saturating_add(noise_input_tokens);
     output_tokens = output_tokens.saturating_add(noise_output_tokens);
-    let mut completed: ReflectionExecutionResult = ReflectionWorkflow::complete(
+    let mut completed: ReflectionExecutionResult = ReflectionWorkflow::complete_with_prior_apply(
         history,
         memory,
         identity,
@@ -230,6 +196,7 @@ pub(crate) async fn execute_reflection(
         },
         started.elapsed().as_millis() as u64,
         Some(&write_permit),
+        &noise_apply,
     )
     .await?;
 
@@ -255,7 +222,7 @@ pub(crate) async fn execute_reflection(
                 input_tokens = input_tokens.saturating_add(repair_input_tokens);
                 output_tokens = output_tokens.saturating_add(repair_output_tokens);
                 raw_response = repaired;
-                completed = ReflectionWorkflow::complete(
+                completed = ReflectionWorkflow::complete_with_prior_apply(
                     history,
                     memory,
                     identity,
@@ -269,6 +236,7 @@ pub(crate) async fn execute_reflection(
                     },
                     started.elapsed().as_millis() as u64,
                     Some(&write_permit),
+                    &noise_apply,
                 )
                 .await?;
             }
@@ -294,13 +262,11 @@ pub(crate) async fn execute_reflection(
 }
 
 /// 初次请求的单条 user 消息（重试沿用同一 prompt 原样重发）。
-fn user_prompt_messages(prompt_text: &str) -> Vec<share::message::Message> {
+pub(super) fn user_prompt_messages(prompt_text: &str) -> Vec<share::message::Message> {
     vec![share::message::Message::user(prompt_text)]
 }
 
-/// 构造一次性的格式修复消息：原反思 prompt（user）→ 原始响应（assistant）→
-/// 纠错指令（user），文案按 lang 中英。system prompt 由 [`call_provider`]
-/// 沿用原样（`invocation.system_prompt_text`）。
+/// 容量未达标时构造一次补问，保留原请求和响应并重申同一收敛目标。
 /// 容量未达标时的同轮补问：目标仍为同一 `target`（NEVER 降比例）。
 fn build_capacity_repair_messages(
     prompt_text: &str,
@@ -335,38 +301,7 @@ fn build_capacity_repair_messages(
     ]
 }
 
-fn build_repair_messages(
-    prompt_text: &str,
-    raw_response: &str,
-    lang: &str,
-    validation_error: &str,
-) -> Vec<share::message::Message> {
-    let instruction = if lang == "zh" {
-        format!(
-            "你上一次的输出不是合法 JSON 或不符合反思输出要求，请只输出符合要求的 JSON，\
-             不要输出 Markdown、解释或任何其他文字。校验错误：{validation_error}"
-        )
-    } else {
-        format!(
-            "Your previous output was not valid JSON or did not match the required reflection \
-             schema. Output only a single JSON object that satisfies the requirements — no \
-             Markdown fences, no prose, no extra text. Validation error: {validation_error}"
-        )
-    };
-    vec![
-        share::message::Message::user(prompt_text),
-        share::message::Message {
-            role: share::message::Role::Assistant,
-            content: vec![share::message::ContentBlock::Text {
-                text: raw_response.to_string(),
-            }],
-            metadata: None,
-        },
-        share::message::Message::user(instruction),
-    ]
-}
-
-async fn call_provider(
+pub(super) async fn call_provider(
     invocation: &ReflectionInvocation<'_>,
     messages: Vec<share::message::Message>,
     cancel: &tokio_util::sync::CancellationToken,
@@ -421,57 +356,62 @@ async fn call_provider(
     Err(ReflectionExecutionError::LlmCall)
 }
 
-/// #1987 Step 1（去噪）阶段：调用 provider（空响应有界重试一次）→ 解析
-/// `outdated_memories` → 非空则 under_permit 应用。返回 (input, output) token。
+/// 去噪与归纳共用有界请求/修复策略；只应用去噪结果中的过时条目。
 async fn call_noise_phase(
     invocation: &ReflectionInvocation<'_>,
     noise_prompt: &memory::api::reflection::ReflectionPrompt,
+    lang: &str,
+    identity: &ReflectionExecutionIdentity,
     memory: &dyn memory::api::MemoryPort,
     write_permit: &memory::api::MemoryWritePermit,
     cancel: &tokio_util::sync::CancellationToken,
-) -> Result<(u32, u32), ReflectionExecutionError> {
-    use memory::api::reflection::ReflectionOutput;
+) -> Result<(u32, u32, memory::api::reflection::ReflectionApplyResult), ReflectionExecutionError> {
+    use memory::api::reflection::{ReflectionApplyResult, ReflectionOutput};
 
-    let response =
-        match call_provider(invocation, user_prompt_messages(&noise_prompt.text), cancel).await {
-            Ok(response) => Ok(response),
-            Err(ReflectionExecutionError::EmptyResponse) if !cancel.is_cancelled() => {
-                log::warn!(target: crate::LOG_TARGET, "reflection_noise_empty_retry",);
-                call_provider(invocation, user_prompt_messages(&noise_prompt.text), cancel).await
-            }
-            Err(error) => Err(error),
-        };
-    let (raw, input_tokens, output_tokens) = response?;
+    let (raw, input_tokens, output_tokens) = request_reflection_response(
+        invocation,
+        noise_prompt,
+        lang,
+        ReflectionPhase::Noise,
+        identity,
+        cancel,
+    )
+    .await?;
     let parsed = match ReflectionEngine.parse_output(&raw, &noise_prompt.references) {
         Ok(parsed) => parsed,
         Err(_) => return Err(ReflectionExecutionError::Unparseable),
     };
     if parsed.output.outdated_memories.is_empty() {
-        return Ok((input_tokens, output_tokens));
+        return Ok((
+            input_tokens,
+            output_tokens,
+            ReflectionApplyResult::default(),
+        ));
     }
     let noise_output = ReflectionOutput {
         deviations: Vec::new(),
         suggested_memories: Vec::new(),
         outdated_memories: parsed.output.outdated_memories,
     };
-    match memory
+    let apply_result = match memory
         .apply_reflection_under_permit(&noise_output, write_permit)
         .await
     {
-        Ok(_) => {}
+        Ok(applied) => applied,
         Err(memory::api::MemoryError::CapacityNotMet { active, target }) => {
             // 去噪只降不升：门禁未过说明存量本就超标，交 Step 2 / 补问收口。
             log::warn!(
                 target: crate::LOG_TARGET,
                 "reflection_noise_capacity_deferred active={active} target={target}",
             );
+            ReflectionApplyResult::default()
         }
         Err(error) => {
             log::warn!(target: crate::LOG_TARGET, "reflection_noise_apply_failed {error:?}");
             return Err(ReflectionExecutionError::Apply);
         }
-    }
-    Ok((input_tokens, output_tokens))
+    };
+    Ok((input_tokens, output_tokens, apply_result))
 }
 
 #[cfg(test)]

@@ -15,7 +15,7 @@ pub(crate) fn default_interval_runs() -> usize {
 }
 
 pub(crate) fn default_reflection_timeout_secs() -> u64 {
-    240
+    600
 }
 
 pub(crate) fn default_target_active_entries() -> usize {
@@ -95,8 +95,17 @@ pub struct ReflectionConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
 
-    /// Reflection 执行超时（秒）：默认 240s，覆盖成功耗时长尾
-    /// （旧硬编码 120s 紧贴 p99 导致超时成为最大失败来源）。
+    /// 反思专用推理深度；未配置时沿用反思模型 binding 的请求档位。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<crate::reasoning::ReasoningLevel>,
+
+    /// 反思专用单次输出预算；未配置时沿用模型 binding 的请求预算。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+
+    /// Reflection 执行超时（秒）：默认 600s，覆盖两步反思（去噪 + 归纳）在
+    /// 长 prompt（~60k chars）+ Max reasoning 下的成功耗时长尾（240s 实测
+    /// 在 deepseek-v4.1-flash 上两步串行必然超时）。
     #[serde(default = "default_reflection_timeout_secs")]
     pub timeout_secs: u64,
 
@@ -116,6 +125,8 @@ impl Default for ReflectionConfig {
             interval_runs: default_interval_runs(),
             auto_apply_suggestions: false,
             model: None,
+            reasoning: None,
+            max_tokens: None,
             timeout_secs: default_reflection_timeout_secs(),
             target_active_entries: default_target_active_entries(),
         }

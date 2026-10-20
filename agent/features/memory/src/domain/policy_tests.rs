@@ -199,3 +199,39 @@ fn the_supersede_field_round_trips_and_stays_absent_by_default() {
         "unset supersede must not occupy the payload: {plain}"
     );
 }
+
+/// 容量门禁口径（#2002 统一）：`effective_active_count_at` 在 outdated / 被取代
+/// 之外 MUST 再排除 TTL 过期残留——pinned 过期条目留在 active、不可注入、
+/// 不进反思 prompt，若仍计入收敛目标，门禁将永远无法满足。
+#[test]
+fn effective_active_count_at_excludes_pinned_ttl_residue() {
+    let now = 1_000;
+    let fresh = entry(0, now);
+    let outdated = {
+        let mut stale = entry(1, now);
+        stale.outdated = true;
+        stale
+    };
+    let superseded = {
+        let mut stale = entry(2, now);
+        stale.superseded_by = Some(test_id(0));
+        stale
+    };
+    let mut pinned_expired = entry(3, 100);
+    pinned_expired.ttl = Some(Duration::from_secs(50)); // 100 + 50 < 1_000 过期
+    pinned_expired.pinned = true;
+    let mut expired = entry(4, 100);
+    expired.ttl = Some(Duration::from_secs(50));
+
+    let entries = &[fresh, outdated, superseded, pinned_expired, expired];
+    assert_eq!(
+        crate::domain::effective_active_count(entries),
+        3,
+        "旧口径只排 outdated / 被取代，不判 TTL"
+    );
+    assert_eq!(
+        crate::domain::effective_active_count_at(entries, now),
+        1,
+        "门禁口径 MUST 只剩未失效且未过期条目"
+    );
+}

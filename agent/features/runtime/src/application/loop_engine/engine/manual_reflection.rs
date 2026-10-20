@@ -12,12 +12,11 @@
 use super::*;
 use crate::application::reflection::ReflectionTaskCompletionStatus;
 
-/// 手动反思阶段的收口方向。
+/// 手动反思阶段的收口方向。统一异步链路（#2002）：派发即收口回到
+/// `DrainingInput`，取消/超时由 detached 内部处理（Run 侧 Terminal 方向已退役）。
 pub(super) enum ManualReflectionDirective {
-    /// 反思已完成并回到 `DrainingInput`，交给后续 drain 收口。
+    /// 派发已收口并回到 `DrainingInput`，交给后续 drain 收口。
     Settled,
-    /// 已取消或超时，Run 已进入终态。
-    Terminal,
 }
 
 pub(super) async fn execute_manual_reflection(
@@ -63,6 +62,11 @@ pub(super) async fn execute_manual_reflection(
         }
     };
     match outcome {
+        // 统一异步链路（#2002）：Manual 派发即收口——端口层已把 Detached（派发
+        // 成功）/BusySkipped/DisabledSkipped 折叠为 Ready(Succeeded/Failed)，
+        // Run 立即回 DrainingInput，NEVER 等待执行终态；取消/超时由 detached
+        // 任务内部处理（cancel 不影响异步，D2），Run 侧 Cancelled/TimedOut
+        // 分支已退役。
         ManualReflectionOutcome::Ready(status) => {
             let terminal = if status == ReflectionTaskCompletionStatus::Succeeded {
                 ActivityTerminal::Succeeded
@@ -79,24 +83,6 @@ pub(super) async fn execute_manual_reflection(
             }
             transition_and_emit(run, execution, port, RunTransition::ReflectionCompleted).await?;
             Ok(ManualReflectionDirective::Settled)
-        }
-        ManualReflectionOutcome::Cancelled => {
-            if let Some(activity_id) = activity_id {
-                let _ = port.finish_activity(activity_id, ActivityTerminal::Cancelled);
-            }
-            // 用户取消（Esc/Ctrl-C 经 `cancel_current_run` cancel root token）→
-            // UserExit 终止语义，与 registry 侧 control 一致；NEVER 伪装成
-            // SessionShutdown（会话关闭）。
-            terminate_interrupted_run(run, execution, port, sdk::RunTerminationReason::UserExit)
-                .await?;
-            Ok(ManualReflectionDirective::Terminal)
-        }
-        ManualReflectionOutcome::TimedOut => {
-            if let Some(activity_id) = activity_id {
-                let _ = port.finish_activity(activity_id, ActivityTerminal::Terminated);
-            }
-            timeout_run(run, execution, port).await?;
-            Ok(ManualReflectionDirective::Terminal)
         }
     }
 }

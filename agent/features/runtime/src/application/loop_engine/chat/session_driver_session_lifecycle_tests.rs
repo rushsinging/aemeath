@@ -1583,6 +1583,58 @@ async fn test_reflect_now_disabled_is_noop_without_run() {
 /// Run 根 activity 快照必须出现（Run 已创建）；但 NEVER 递增 run_count / 发 RunChanged，
 /// 也 NEVER 进入模型回合（不从主 run flow 注入模型）。
 #[tokio::test]
+async fn manual_reflection_empty_increment_still_reviews_existing_memory() {
+    struct CoveredHistory;
+    #[async_trait::async_trait]
+    impl memory::api::ReflectionHistoryQuery for CoveredHistory {
+        async fn list(&self, _limit: usize) -> Result<Vec<memory::api::reflection::ReflectionSafeSummary>, memory::api::MemoryError> {
+            let mut record = memory::api::reflection::ReflectionRecord::running(
+                "covered-history",
+                1,
+                memory::api::reflection::ReflectionTrigger::Manual,
+            );
+            record.status = memory::api::reflection::ReflectionStatus::Succeeded;
+            record.coverage_end = Some(0);
+            Ok(vec![record.safe_summary()])
+        }
+    }
+    #[async_trait::async_trait]
+    impl memory::api::ReflectionHistoryStore for CoveredHistory {
+        async fn append(&self, _record: &memory::api::reflection::ReflectionRecord) -> Result<(), memory::api::MemoryError> { Ok(()) }
+        async fn upsert(&self, _record: &memory::api::reflection::ReflectionRecord) -> Result<(), memory::api::MemoryError> { Ok(()) }
+    }
+    let sink = RecordingSink::default();
+    let (input_tx, input_events) = ChannelInputEvents::new();
+    input_tx.send(sdk::ChatInputEvent::ReflectNow).unwrap();
+    let mut shell = test_shell();
+    let services = shell.runtime_context_factory.services().clone();
+    shell.runtime_context_factory = Arc::new(crate::application::run::context_factory::RuntimeContextFactory::new(
+        services.tool_catalog,
+        services.tool_execution,
+        services.policy,
+        Arc::new(CoveredHistory),
+        services.task,
+        services.hooks,
+        services.usage_sink,
+        services.scoring_for_recall,
+        services.scoring_for_skill_match,
+        services.policy_triage,
+    ));
+    shell.set_test_session_id("test-reflect-existing-memory-without-new-dialog");
+    let context = test_session_driver_input(sink.clone(), input_events, shell);
+    let run = tokio::spawn(run_session_command_driver(context));
+    wait_for_retry_test_condition("无新增对话的存量审查回执", || !sink.command_result_texts().is_empty()).await;
+    drop(input_tx);
+    tokio::time::timeout(std::time::Duration::from_secs(10), run).await.unwrap().unwrap();
+    let results = sink.command_result_texts();
+    assert!(results.iter().any(|(text, _)| text.contains("后台开始")), "无新增对话仍应触发存量反思: {results:?}");
+    assert!(!results.iter().any(|(text, _)| text.contains("无新增对话内容") || text.contains("已跳过本次手动反思")));
+    assert!(sink.lifecycle_events().iter().any(|event| matches!(event,
+        crate::domain::agent_run::RuntimeLifecycleEvent::Transitioned { to: crate::domain::agent_run::RunStatus::Reflecting, .. }
+    )));
+}
+
+#[tokio::test]
 async fn test_reflect_now_runs_a_real_run_without_run_changed() {
     let sink = RecordingSink::default();
     let (input_tx, input_events) = ChannelInputEvents::new();
@@ -1661,11 +1713,13 @@ async fn test_reflect_now_runs_a_real_run_without_run_changed() {
     let (text, is_error) = texts
         .first()
         .expect("手动反思 Run 结束必须发布终态 CommandResultText");
+    // 统一异步链路（#2002）：受理回执为「已在后台开始」；执行失败终态不再经
+    // CommandResultText 上报（由 detached 完成点处理）。
     assert!(
-        text.contains("执行失败"),
-        "生产反思 adapter 无 LLM 出口，终态应为失败态文案: {text}"
+        text.contains("后台开始"),
+        "受理回执应为后台开始文案: {text}"
     );
-    assert!(*is_error, "执行失败必须按 is_error 上报: {text}");
+    assert!(!*is_error, "派发成功回执不是错误: {text}");
 }
 
 // ---------------------------------------------------------------------------
@@ -1868,8 +1922,8 @@ async fn manual_reflection_run_does_not_persist_session_or_touch_updated_at() {
         .first()
         .expect("手动反思 Run 结束必须发布终态 CommandResultText");
     assert!(
-        terminal_text.contains("执行失败"),
-        "前置：应走真实 Run 的失败终态，而非禁用跳过文案: {terminal_text}"
+        terminal_text.contains("后台开始"),
+        "前置：应走真实 Run 的受理回执（后台开始），而非禁用跳过文案: {terminal_text}"
     );
 
     let recorded = persistence_calls.lock().unwrap().clone();

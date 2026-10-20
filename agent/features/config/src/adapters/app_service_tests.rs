@@ -57,6 +57,41 @@ async fn update_replaces_committed_snapshot_even_without_receiver() {
 }
 
 #[tokio::test]
+async fn memory_update_persists_reflection_request_overrides() {
+    let dir = tempfile::tempdir().unwrap();
+    let service =
+        ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
+            .with_native_store(NativeConfigStore::new(
+                storage::wire_file_system_blob(dir.path()).unwrap(),
+            ));
+    let memory: share::config::MemoryConfig =
+        serde_json::from_str(r#"{"reflection":{"reasoning":"high","max_tokens":64000}}"#).unwrap();
+    service
+        .update(ConfigUpdateData::SetMemoryConfig { config: memory })
+        .await
+        .unwrap();
+    let snapshot = service.committed_snapshot();
+    assert_eq!(
+        snapshot.memory().reflection.reasoning,
+        Some(share::reasoning::ReasoningLevel::High)
+    );
+    assert_eq!(snapshot.memory().reflection.max_tokens, Some(64_000));
+
+    let rebuilt =
+        ConfigAppService::with_global_path(Some(dir.path()), dir.path().join("config.json"))
+            .with_native_store(NativeConfigStore::new(
+                storage::wire_file_system_blob(dir.path()).unwrap(),
+            ));
+    rebuilt.load().await.unwrap();
+    let snapshot = rebuilt.committed_snapshot();
+    assert_eq!(
+        snapshot.memory().reflection.reasoning,
+        Some(share::reasoning::ReasoningLevel::High)
+    );
+    assert_eq!(snapshot.memory().reflection.max_tokens, Some(64_000));
+}
+
+#[tokio::test]
 async fn consecutive_updates_preserve_previously_committed_fields() {
     let dir = tempfile::tempdir().unwrap();
     let storage = storage::wire_file_system_blob(dir.path()).unwrap();

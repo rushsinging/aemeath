@@ -25,9 +25,7 @@ use crate::application::loop_engine::{
     ModelInvocationPort, PendingInteractionWork, ReflectionPhasePort, StepCommit,
     StepPersistencePort, ToolGuardDecision, ToolOrchestrationPort,
 };
-use crate::application::reflection::{
-    ReflectionRunOutcome, ReflectionTaskAdapter, ReflectionTaskCompletionStatus,
-};
+use crate::application::reflection::{ReflectionRunOutcome, ReflectionTaskAdapter};
 use crate::application::run::context::RuntimeContext;
 use crate::application::run::execution_state::RunExecutionState;
 use crate::application::tool::tool_result_materializer::ToolResultMaterializer;
@@ -272,30 +270,20 @@ impl<'a> RuntimeReflection<'a> {
     ///
     /// Manual Reflection Run 无 RunStep：`run_step_id=None` 时生成仅记账用的
     /// UUIDv7；`model_invocation_id` 同理。不发布 cost。
-    pub(crate) fn record_succeeded_usage(
+    pub(crate) fn detached_usage_recording(
         runtime_context: &RuntimeContext,
         run_id: &sdk::RunId,
         run_step_id: Option<&sdk::RunStepId>,
-        metadata: &crate::application::reflection::ReflectionTaskMetadata,
-    ) {
-        let usage = crate::ports::TokenUsageData {
-            input_tokens: Some(metadata.input_tokens),
-            output_tokens: Some(metadata.output_tokens),
-            ..crate::ports::TokenUsageData::default()
-        };
-        crate::application::model::invocation::record_successful_usage(
-            runtime_context.usage_sink().as_ref(),
-            crate::application::model::usage::UsageRecordContext {
-                session_id: sdk::SessionId::new(runtime_context.skill_load_session_id()),
-                run_id: run_id.clone(),
-                // Manual Reflection Run 无 RunStep：仅记账 id（PR 披露）。
-                run_step_id: run_step_id.cloned().unwrap_or_else(sdk::RunStepId::new_v7),
-                model_invocation_id: sdk::ModelInvocationId::new_v7(),
-                model: runtime_context.provider_ref().model.clone(),
-            },
-            usage,
-            crate::application::model::invocation::unix_timestamp_millis,
-        );
+        model: provider::ModelInfo,
+    ) -> crate::application::loop_engine::chat::reflection::DetachedUsageRecording {
+        crate::application::loop_engine::chat::reflection::DetachedUsageRecording {
+            usage_sink: runtime_context.usage_sink(),
+            model,
+            session_id: sdk::SessionId::new(runtime_context.skill_load_session_id()),
+            run_id: run_id.clone(),
+            // Manual Reflection Run 无 RunStep：仅记账 id（PR 披露）。
+            run_step_id: run_step_id.cloned(),
+        }
     }
 }
 
@@ -334,9 +322,19 @@ impl ReflectionPhasePort for RuntimeReflection<'_> {
         })
     }
 
-    fn take_pre_compact_messages(&self) -> Option<Vec<Message>> {
+    fn take_pre_compact_messages(
+        &self,
+    ) -> Option<crate::application::loop_engine::chat::reflection::PreCompactReflectionMaterial>
+    {
         self.pre_compact_material
             .take_for_reflection(self.runtime_context.config_ref().config().memory())
+    }
+
+    fn restore_pre_compact_material(
+        &mut self,
+        material: &crate::application::loop_engine::chat::reflection::PreCompactReflectionMaterial,
+    ) {
+        self.pre_compact_material.restore(material);
     }
 
     async fn run_reflection(
@@ -348,6 +346,28 @@ impl ReflectionPhasePort for RuntimeReflection<'_> {
         coverage_end: Option<u64>,
         cancel: CancellationToken,
     ) -> Result<ReflectionRunOutcome, LoopEngineError> {
+        // #2002 M2：完成侧副作用（Succeeded usage 记账、memory update notice、
+        // PreCompact 槽游标推进）随 hook 迁到 detached 完成点——同步路径不再
+        // 等待终态（Interval 现状的记账缺口由此补齐，三触发同一路径）。
+        let pre_compact_slot = matches!(
+            trigger,
+            crate::application::reflection::ReflectionTaskTrigger::PreCompact
+        )
+        .then(|| self.pre_compact_material.clone());
+        let completion_hook =
+            crate::application::loop_engine::chat::reflection::detached_completion_hook(
+                self.runtime_context.event_sink(),
+                self.language.clone(),
+                Some(Self::detached_usage_recording(
+                    self.runtime_context,
+                    run_id,
+                    run_step_id,
+                    self.runtime_context.provider_ref().model.clone(),
+                )),
+                pre_compact_slot,
+                coverage_end,
+                trigger,
+            );
         let outcome = crate::application::loop_engine::chat::reflection::run(
             &self.reflection_tasks,
             trigger,
@@ -360,27 +380,7 @@ impl ReflectionPhasePort for RuntimeReflection<'_> {
             self.runtime_context.reflection_history_ref(),
             coverage_end,
             cancel,
-        )
-        .await;
-        // 仅 Succeeded 且带 usage metadata 的终态经共享
-        // `record_successful_usage` 计入 /usage（Interval/PreCompact/Manual 同路径）。
-        if let ReflectionRunOutcome::Completed(completion) = &outcome {
-            if completion.status == ReflectionTaskCompletionStatus::Succeeded {
-                if let Some(metadata) = &completion.metadata {
-                    Self::record_succeeded_usage(
-                        self.runtime_context,
-                        run_id,
-                        run_step_id,
-                        metadata,
-                    );
-                }
-            }
-        }
-        // 行为从 classify_terminal 原样搬迁：成功且有记忆变更时发布 TUI notice。
-        crate::application::loop_engine::chat::reflection::announce_memory_update(
-            &self.runtime_context.event_sink(),
-            &outcome,
-            &self.language,
+            Some(completion_hook),
         )
         .await;
         Ok(outcome)

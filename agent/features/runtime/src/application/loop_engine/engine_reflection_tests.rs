@@ -66,9 +66,19 @@ impl crate::application::loop_engine::ReflectionPhasePort for ReflectionFake {
         }
     }
 
-    fn take_pre_compact_messages(&self) -> Option<Vec<share::message::Message>> {
+    fn take_pre_compact_messages(
+        &self,
+    ) -> Option<crate::application::loop_engine::chat::reflection::PreCompactReflectionMaterial>
+    {
         self.pre_compact_material
             .take_for_reflection(&self.memory_config)
+    }
+
+    fn restore_pre_compact_material(
+        &mut self,
+        material: &crate::application::loop_engine::chat::reflection::PreCompactReflectionMaterial,
+    ) {
+        self.pre_compact_material.restore(material);
     }
 
     async fn run_reflection(
@@ -1068,10 +1078,12 @@ async fn pre_compact_reflection_skipped_for_wakeup_intent_run() {
 use crate::application::loop_engine::{ManualReflectionOutcome, ManualReflectionPort};
 
 /// 手动反思端口的脚本化终态；`PortError` 模拟端口 Err（契约违约）。
+/// 原Cancelled/TimedOut 脚本随统一异步链路（#2002 D2「cancel 不影响异步、
+/// 终态仅完成/异常两档」）退役：Manual 派发即收口，Run 侧不再有取消/超时
+/// 收口路径；替代证据 = task_tests 的 detached_run_ignores_cancelled_caller_token
+/// 与本文件的 Ready 派发收口用例。
 enum ManualReflectionScript {
     Ready(ReflectionTaskCompletionStatus),
-    Cancelled,
-    TimedOut,
     PortError,
 }
 
@@ -1099,8 +1111,6 @@ impl ManualReflectionPort for ManualReflectionFake {
             ManualReflectionScript::Ready(status) => {
                 Ok(ManualReflectionOutcome::Ready(*status))
             }
-            ManualReflectionScript::Cancelled => Ok(ManualReflectionOutcome::Cancelled),
-            ManualReflectionScript::TimedOut => Ok(ManualReflectionOutcome::TimedOut),
             ManualReflectionScript::PortError => {
                 Err(LoopEngineError::Adapter("手动反思端口故障".to_string()))
             }
@@ -1308,82 +1318,14 @@ async fn manual_reflection_port_error_settles_activity_and_state_before_propagat
     );
 }
 
-#[tokio::test]
-async fn manual_reflection_cancelled_terminates_run_and_closes_activity() {
-    let result = drive_manual_reflection_run(ManualReflectionScript::Cancelled).await;
+// 退役测试记录（#2002 D2「cancel 不影响异步」）：
+// - manual_reflection_cancelled_terminates_run_and_closes_activity：Manual 取消
+//   不再终止 Run（detached 独立 token）；替代证据 = task_tests 的
+//   detached_run_ignores_cancelled_caller_token（终态 Succeeded 落盘）。
+// - manual_reflection_timeout_fails_run_and_closes_activity：超时由 detached
+//   内部 timeout 强制并落盘终态，Run 不再 Failed 收口；替代证据 = task_tests 的
+//   timeout_reports_timed_out_without_waiting_for_the_executor。
 
-    match &result.directive {
-        Ok(LoopDirective::Terminal) => {}
-        other => panic!("取消的手动反思 Run 应以 Terminal 收口: {other:?}"),
-    }
-    assert_eq!(result.run.status(), RunStatus::Terminated);
-    assert_manual_reflection_round_trip_status(&result, RunStatus::Terminated);
-    let reflections = reflection_activities(&result.activities);
-    assert_eq!(reflections.len(), 1, "必须恰好发布一次 Reflection activity");
-    assert_eq!(reflections[0].state, sdk::ActivityStateView::Cancelled);
-    assert_eq!(result.calls, 1);
-
-    // 用户取消（Esc/Ctrl-C 经 `cancel_current_run` cancel root token）必须投影为
-    // `UserExit` 终止语义——registry 侧 control 同为 UserExit；NEVER 伪装成
-    // `SessionShutdown`（会话关闭），二者在 TUI/审计语义上不同。
-    let terminated_reasons: Vec<sdk::RunTerminationReason> = result
-        .events
-        .iter()
-        .filter_map(|event| match event {
-            RuntimeLifecycleEvent::Terminated { reason, .. } => Some(*reason),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        terminated_reasons,
-        vec![sdk::RunTerminationReason::UserExit],
-        "手动反思取消的权威终态必须是 UserExit"
-    );
-    let requested_reasons: Vec<sdk::RunTerminationReason> = result
-        .events
-        .iter()
-        .filter_map(|event| match event {
-            RuntimeLifecycleEvent::TerminationRequested { reason, .. } => Some(*reason),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        requested_reasons,
-        vec![sdk::RunTerminationReason::UserExit],
-        "手动反思取消的终止请求必须是 UserExit"
-    );
-}
-
-#[tokio::test]
-async fn manual_reflection_timeout_fails_run_and_closes_activity() {
-    let result = drive_manual_reflection_run(ManualReflectionScript::TimedOut).await;
-
-    match &result.directive {
-        Ok(LoopDirective::Terminal) => {}
-        other => panic!("超时的手动反思 Run 应以 Terminal 收口: {other:?}"),
-    }
-    assert_eq!(result.run.status(), RunStatus::Failed);
-    let reflections = reflection_activities(&result.activities);
-    assert_eq!(reflections.len(), 1, "必须恰好发布一次 Reflection activity");
-    assert_eq!(reflections[0].state, sdk::ActivityStateView::Terminated);
-    assert_eq!(result.calls, 1);
-}
-
-/// 取消/超时路径也必须先完成 DrainingInput→Reflecting 的入口转移。
-fn assert_manual_reflection_round_trip_status(
-    result: &ManualReflectionRunResult,
-    final_status: RunStatus,
-) {
-    let transitions = transition_events(&result.events);
-    transition_index(
-        &transitions,
-        RunStatus::DrainingInput,
-        RunStatus::Reflecting,
-        RunTransitionReason::BeginReflection,
-    )
-    .expect("手动反思必须发布 DrainingInput→Reflecting (BeginReflection)");
-    assert_eq!(result.run.status(), final_status);
-}
 
 // ---------------------------------------------------------------------------
 // 单用途 Run 的用户输入回流（Manual Run 期间 user message NEVER 驱动模型调用）

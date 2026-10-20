@@ -177,6 +177,8 @@ enum ScriptedStep {
 struct RecordedRequest {
     system: String,
     messages: Vec<(&'static str, String)>,
+    reasoning: share::reasoning::ReasoningLevel,
+    max_output_tokens: u32,
 }
 
 /// 按调用顺序回放响应的反思测试 provider。脚本耗尽后再次被调用即 panic——
@@ -214,6 +216,8 @@ impl ProviderPort for ScriptedReflectionProvider {
         self.requests.lock().unwrap().push(RecordedRequest {
             system: request.system.clone(),
             messages,
+            reasoning: request.reasoning,
+            max_output_tokens: request.max_output_tokens,
         });
         let step = self
             .steps
@@ -274,6 +278,158 @@ const NOISE_EMPTY_JSON: &str = r#"{"outdated_memories":[]}"#;
 const NOISE_STALE_JSON: &str = r#"{"outdated_memories":["M1"]}"#;
 const REPAIRED_REFLECTION_JSON: &str =
     r#"{"deviations":["repaired"],"suggested_memories":[],"outdated_memories":[]}"#;
+
+#[tokio::test]
+async fn noise_parse_failure_repairs_once_then_continues_to_synthesis() {
+    let broken_response = r#"{"outdated_memories":[{"id":"M1"}]}"#;
+    let provider = ScriptedReflectionProvider::new(vec![
+        ScriptedStep::Text(broken_response.to_string()),
+        ScriptedStep::Text(NOISE_EMPTY_JSON.to_string()),
+        ScriptedStep::Text(VALID_REFLECTION_JSON.to_string()),
+    ]);
+    let history = RecordingHistory::default();
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let result = run_scripted_reflection(&provider, &history, "zh", &cancel)
+        .await
+        .unwrap();
+    assert_eq!(result.output.deviations, ["drift"]);
+    assert_eq!((result.input_tokens, result.output_tokens), (33, 66));
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 3);
+    let repair = &requests[1];
+    assert_eq!(repair.messages.len(), 3);
+    assert_eq!(repair.messages[0], requests[0].messages[0]);
+    assert_eq!(
+        repair.messages[1],
+        ("assistant", broken_response.to_string())
+    );
+    assert!(repair.messages[2].1.contains("校验错误"));
+    assert!(
+        requests[2].messages[0]
+            .1
+            .contains("Recent conversation summary")
+            || requests[2].messages[0].1.contains("最近对话摘要")
+    );
+    for request in requests {
+        assert_eq!(request.system, "system");
+        assert_eq!(request.reasoning, share::reasoning::ReasoningLevel::Off);
+        assert_eq!(request.max_output_tokens, 4_096);
+    }
+    assert_eq!(
+        history.list(1).await.unwrap()[0].status,
+        memory::api::reflection::ReflectionStatus::Succeeded
+    );
+}
+
+#[tokio::test]
+async fn noise_failed_repair_remains_bounded_and_records_original_parse_failure() {
+    let provider = ScriptedReflectionProvider::new(vec![
+        ScriptedStep::Text("not json".to_string()),
+        ScriptedStep::Text("still not json".to_string()),
+    ]);
+    let history = RecordingHistory::default();
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let error = run_scripted_reflection(&provider, &history, "en", &cancel)
+        .await
+        .unwrap_err();
+    assert_eq!(error, ReflectionExecutionError::Unparseable);
+    assert_eq!(provider.requests().len(), 2, "去噪只允许一次格式修复");
+    assert_eq!(
+        history.list(1).await.unwrap()[0].error_category,
+        Some(ReflectionErrorCategory::Parse)
+    );
+}
+
+#[tokio::test]
+async fn noise_repair_provider_error_keeps_original_parse_failure() {
+    for repair in [ScriptedStep::InvokeError, ScriptedStep::Empty] {
+        let provider = ScriptedReflectionProvider::new(vec![
+            ScriptedStep::Text("not json".to_string()),
+            repair,
+        ]);
+        let history = RecordingHistory::default();
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let error = run_scripted_reflection(&provider, &history, "en", &cancel)
+            .await
+            .unwrap_err();
+        assert_eq!(error, ReflectionExecutionError::Unparseable);
+        assert_eq!(provider.requests().len(), 2);
+        assert_eq!(
+            history.list(1).await.unwrap()[0].error_category,
+            Some(ReflectionErrorCategory::Parse)
+        );
+    }
+}
+
+#[tokio::test]
+async fn noise_empty_response_retries_before_the_single_parse_repair() {
+    let provider = ScriptedReflectionProvider::new(vec![
+        ScriptedStep::Empty,
+        ScriptedStep::Text("not json".to_string()),
+        ScriptedStep::Text(NOISE_EMPTY_JSON.to_string()),
+        ScriptedStep::Text(VALID_REFLECTION_JSON.to_string()),
+    ]);
+    let history = RecordingHistory::default();
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let result = run_scripted_reflection(&provider, &history, "en", &cancel)
+        .await
+        .unwrap();
+    assert_eq!(result.output.deviations, ["drift"]);
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 4);
+    assert_eq!(requests[0], requests[1]);
+    assert_eq!(requests[2].messages.len(), 3);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn parse_diagnostic_records_phase_position_and_masked_preview() {
+    let _capture = crate::test_log::begin();
+    let private_text = "sk-private-memory-token";
+    let broken_response =
+        format!(r#"{{"outdated_memories":["{private_text}",{{"id":"{private_text}"}}]}}"#);
+    let provider = ScriptedReflectionProvider::new(vec![
+        ScriptedStep::Text(broken_response),
+        ScriptedStep::Text(NOISE_EMPTY_JSON.to_string()),
+        ScriptedStep::Text(VALID_REFLECTION_JSON.to_string()),
+    ]);
+    let history = RecordingHistory::default();
+    let cancel = tokio_util::sync::CancellationToken::new();
+    run_scripted_reflection(&provider, &history, "en", &cancel)
+        .await
+        .unwrap();
+    let records = crate::test_log::drain();
+    let diagnostic = records
+        .iter()
+        .find(|(_, message)| message.contains("reflection_parse_diagnostic"))
+        .expect("解析失败必须输出诊断");
+    assert_eq!(diagnostic.0, log::Level::Debug);
+    for expected in [
+        "phase=noise",
+        "attempt=initial",
+        "category=Data",
+        "line=1",
+        "column=",
+        "response_chars=",
+        "response_preview=",
+    ] {
+        assert!(diagnostic.1.contains(expected), "{}", diagnostic.1);
+    }
+    for (_, message) in records {
+        assert!(!message.contains(private_text), "日志不能包含私有响应正文");
+    }
+}
+
+#[tokio::test]
+async fn noise_empty_response_retry_is_bounded() {
+    let provider = ScriptedReflectionProvider::new(vec![ScriptedStep::Empty, ScriptedStep::Empty]);
+    let history = RecordingHistory::default();
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let error = run_scripted_reflection(&provider, &history, "en", &cancel)
+        .await
+        .unwrap_err();
+    assert_eq!(error, ReflectionExecutionError::EmptyResponse);
+    assert_eq!(provider.requests().len(), 2);
+}
 
 #[tokio::test]
 async fn empty_first_response_is_retried_once_with_the_same_prompt() {
@@ -493,6 +649,50 @@ async fn valid_output_calls_provider_once_without_repair() {
 }
 
 #[tokio::test]
+async fn reflection_execution_preserves_request_parameters_during_retry_and_repair() {
+    let provider = ScriptedReflectionProvider::new(vec![
+        ScriptedStep::Text(NOISE_EMPTY_JSON.to_string()),
+        ScriptedStep::Empty,
+        ScriptedStep::Text("not json at all".to_string()),
+        ScriptedStep::Text(VALID_REFLECTION_JSON.to_string()),
+    ]);
+    let history = RecordingHistory::default();
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let model = model();
+    let result = execute_reflection(
+        &[share::message::Message::user("reflect")],
+        "en",
+        false,
+        150,
+        200,
+        ReflectionInvocation {
+            provider: &provider,
+            model: &model,
+            max_tokens: 64_000,
+            requested_reasoning: share::reasoning::ReasoningLevel::High,
+            system_prompt_text: "system",
+        },
+        &NoOpMemory,
+        &history,
+        &identity(),
+        &cancel,
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.output.deviations, ["drift"]);
+    let requests = provider.requests();
+    assert_eq!(
+        requests.len(),
+        4,
+        "去噪、归纳、空响应重试和解析修复必须完整执行"
+    );
+    for request in requests {
+        assert_eq!(request.reasoning, share::reasoning::ReasoningLevel::High);
+        assert_eq!(request.max_output_tokens, 64_000);
+    }
+}
+
+#[tokio::test]
 async fn cancelled_parse_failure_skips_the_repair_call() {
     // 取消短路 Step1（脚本无去噪步）；第二步脚本若被消费说明取消后仍发起了修复。
     let provider = ScriptedReflectionProvider::new(vec![
@@ -582,6 +782,14 @@ async fn two_phase_reflection_removes_noise_then_completes() {
     // 两步各一次调用；token 合并（ScriptedProvider 每次同额）。
     assert_eq!(provider.requests().len(), 2);
     assert_eq!((result.input_tokens, result.output_tokens), (22, 44));
+    let applied = result.apply_result.as_ref().expect("必须汇总去噪应用结果");
+    assert_eq!(applied.attempted, 1);
+    assert_eq!(applied.completed, 1);
+    assert_eq!(applied.outdated_marked, 1);
+    let persisted = history.records.lock().unwrap();
+    let record = persisted.last().expect("最终记录必须落盘");
+    assert_eq!(record.apply_result.as_ref(), Some(applied));
+    drop(persisted);
     // Step1 的 Step2 prompt 不再含噪音条目。
     let second_prompt = &provider.requests()[1];
     assert!(
