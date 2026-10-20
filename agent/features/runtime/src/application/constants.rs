@@ -93,10 +93,12 @@ pub(crate) const MEMORY_RECALL_RECALL_LIMIT: usize = 20;
 pub(crate) const MEMORY_RECALL_TOP_K: usize = 3;
 
 /// 记忆召回：注入内容的字符预算（超预算依次减条，宁可不注入不超预算）。
-pub(crate) const MEMORY_RECALL_BUDGET_CHARS: usize = 1_200;
+/// 与写入端单条上限（500）对齐后抬升，正常条目（≤500）保证完整注入。
+pub(crate) const MEMORY_RECALL_BUDGET_CHARS: usize = 2_500;
 
-/// 记忆召回：单条内容预览字符上限。
-pub(crate) const MEMORY_RECALL_PREVIEW_CHARS: usize = 200;
+/// 记忆召回：单条内容预览字符上限（= memory 写入端单条上限）。
+/// 上限内条目全文注入；仅存量超长条目（写入不变式上线前遗留）触发兜底截断。
+pub(crate) const MEMORY_RECALL_PREVIEW_CHARS: usize = 500;
 
 /// 记忆召回：相关性阈值门——top1 评分概率低于此值时本 turn 不注入
 ///（防噪音稀释上下文）。

@@ -716,6 +716,55 @@ fn reflection_output(layer: MemoryLayer, content: &str) -> ReflectionOutput {
 }
 
 #[tokio::test]
+async fn reflection_apply_skips_over_length_suggestion_without_failing_batch() {
+    // 写入端长度不变式拒绝超长 content；反思批量 apply 时超长单条跳过
+    // （计入 attempted 差额），其余 suggestion 照常落地，NEVER 整批失败。
+    let mut output = reflection_output(MemoryLayer::Project, "正常长度的反思结论");
+    output.suggested_memories.push(MemorySuggestion {
+        layer: MemoryLayer::Project,
+        category: MemoryCategory::Fact,
+        content: "长".repeat(crate::constants::MEMORY_CONTENT_MAX_CHARS + 1),
+        tags: vec![],
+        reason: "test".to_string(),
+        supersedes: vec![],
+        synthesizes: Vec::new(),
+    });
+
+    // 提交后 list() 现读磁盘：committed 内容 = 本轮落地的正常条（时钟 4242 生成 id）。
+    let reflected = MemoryEntry::new(
+        reflection_memory_id(4242).unwrap(),
+        4242,
+        MemoryLayer::Project,
+        MemoryCategory::Fact,
+        "正常长度的反思结论",
+        MemorySource::Llm,
+    )
+    .unwrap();
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
+        layer_script(
+            vec![
+                Ok(empty_layer(1, MemoryLayer::Project)),
+                Ok(committed(2, MemoryLayer::Project, vec![reflected])),
+            ],
+            vec![Ok(receipt(2, MemoryCommitVisibility::Visible))],
+        ),
+    );
+    let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 4242)
+        .await
+        .unwrap();
+
+    let applied = service.apply_reflection(&output).await.unwrap();
+
+    assert_eq!(applied.attempted, 2);
+    assert_eq!(applied.suggestions_added, 1);
+    assert_eq!(applied.completed, 1);
+    let persisted = service.list(None).await;
+    assert_eq!(persisted.len(), 1);
+    assert!(persisted[0].content.contains("正常长度的反思结论"));
+}
+
+#[tokio::test]
 async fn reflection_commit_failure_propagates_and_keeps_committed_state() {
     let store = ScriptedStore::new(
         layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),

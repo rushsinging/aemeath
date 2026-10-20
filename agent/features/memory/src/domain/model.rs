@@ -160,6 +160,14 @@ impl MemoryEntry {
                 message: "记忆内容不能为空".to_string(),
             });
         }
+        if content.chars().count() > crate::constants::MEMORY_CONTENT_MAX_CHARS {
+            return Err(MemoryError::InvalidEntry {
+                message: format!(
+                    "记忆内容不能超过 {} 字符，请拆分为多条",
+                    crate::constants::MEMORY_CONTENT_MAX_CHARS
+                ),
+            });
+        }
         Ok(Self {
             id,
             layer,

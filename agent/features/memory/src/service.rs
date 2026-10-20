@@ -1155,6 +1155,19 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
         // form of partial application.
         let mut prepared = Vec::with_capacity(output.suggested_memories.len());
         for suggestion in &output.suggested_memories {
+            // 写入端长度不变式：超长 suggestion 逐条跳过并记录，NEVER 让
+            // 单条超长作废整批建议（对齐非法 outdated 引用的跳过语义）。
+            if suggestion.content.chars().count() > crate::constants::MEMORY_CONTENT_MAX_CHARS
+                || suggestion.content.trim().is_empty()
+            {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "memory_reflection_suggestion_skipped reason=content_length chars={} max={}",
+                    suggestion.content.chars().count(),
+                    crate::constants::MEMORY_CONTENT_MAX_CHARS,
+                );
+                continue;
+            }
             let now = (self.clock)();
             let id = reflection_memory_id(now)?;
             let mut entry = MemoryEntry::new(
@@ -1197,7 +1210,8 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
         }
 
         let mut result = ReflectionApplyResult {
-            attempted: prepared.len() + outdated.len(),
+            // 按请求总数计（含被跳过的超长条），attempted - completed 是诚实的跳过差额。
+            attempted: output.suggested_memories.len() + outdated.len(),
             ..ReflectionApplyResult::default()
         };
         {

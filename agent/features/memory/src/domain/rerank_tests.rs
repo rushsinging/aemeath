@@ -46,8 +46,11 @@ fn build_rerank_request_constructs_choice_with_index_keys() {
 
 #[test]
 fn build_rerank_request_truncates_long_content() {
-    let long_content = "长".repeat(1000);
-    let candidates = vec![hit(&long_content), hit("短")];
+    // 存量盘上可能存在超过写入上限的超长条目（写入不变式上线前的遗留），
+    // 绕过 `MemoryEntry::new` 直接构造，验证评分侧截断兜底仍然生效。
+    let mut overlong = hit("短");
+    overlong.entry.content = "长".repeat(1000);
+    let candidates = vec![overlong, hit("短")];
     let (_, question) = build_rerank_request("查询", &candidates).expect("应构造成功");
     match question {
         ScoringQuestion::Choice { criteria, .. } => {

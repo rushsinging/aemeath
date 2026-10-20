@@ -1,4 +1,4 @@
-use super::constants::{MAX_CONTENT_CHARS, MAX_TAGS, MAX_TAG_CHARS};
+use super::constants::{MAX_TAGS, MAX_TAG_CHARS};
 use memory::api::{MemoryCategory, MemoryLayer};
 use serde_json::Value;
 
@@ -63,12 +63,11 @@ pub(super) fn parse_tags(input: &Value) -> Result<Vec<String>, String> {
     Ok(parsed)
 }
 
+/// content 长度上限由 memory domain 写入不变式统一校验
+///（`MemoryEntry::new`，错误消息含拆分引导），工具层 NEVER 重复定义。
 pub(super) fn validate_content(content: &str) -> Result<(), String> {
     if content.trim().is_empty() {
         return Err("memory content 不能为空".to_string());
-    }
-    if content.chars().count() > MAX_CONTENT_CHARS {
-        return Err(format!("memory content 不能超过 {MAX_CONTENT_CHARS} 字符"));
     }
     Ok(())
 }
