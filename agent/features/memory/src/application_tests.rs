@@ -60,6 +60,7 @@ async fn build_prompt_reads_memory_and_owned_message_snapshot() {
         100,
         150,
         200,
+        0,
     )
     .await;
 
@@ -70,7 +71,11 @@ async fn build_prompt_reads_memory_and_owned_message_snapshot() {
 /// M12：反思 prompt 不得包含失效条目。依据是 051 §8.2 的可见性矩阵与污染循环
 /// 论证——基于已失效事实产出的新建议会把失效内容复制进记忆。
 #[tokio::test]
-async fn build_prompt_excludes_entries_that_injection_would_reject() {
+/// #2007：反思输入全可见——失效条目（outdated / 被取代）进入「失效驻留」
+/// 标注段供 LLM 裁决（确认淘汰或保留），TTL 过期条目留在正常段（D1：依然
+/// 注入，只催促处理）。失效段 NEVER 作为新建议的证据来源，抑制 M12 曾论证
+/// 的污染循环。
+async fn build_prompt_shows_lapsed_entries_in_adjudication_section() {
     let memory = crate::adapters::InMemoryMemory::new(crate::adapters::MemoryPolicy::default())
         .expect("policy must be valid");
     let now = 1_000u64;
@@ -97,6 +102,7 @@ async fn build_prompt_excludes_entries_that_injection_would_reject() {
     )
     .unwrap();
     outdated.outdated = true;
+    outdated.pinned = true;
     memory.write(outdated).await.unwrap();
 
     let mut expiring = MemoryEntry::new(
@@ -129,6 +135,7 @@ async fn build_prompt_excludes_entries_that_injection_would_reject() {
         now + 20,
         150,
         200,
+        0,
     )
     .await;
 
@@ -137,13 +144,28 @@ async fn build_prompt_excludes_entries_that_injection_would_reject() {
         "live memory must reach the reflection: {}",
         prompt.text
     );
-    for excluded in ["staging host", "billing provider", "incident runbook"] {
+    assert!(
+        prompt.text.contains("Lapsed entries"),
+        "失效条目 MUST 进入失效驻留标注段: {}",
+        prompt.text
+    );
+    for lapsed in ["staging host", "billing provider"] {
         assert!(
-            !prompt.text.contains(excluded),
-            "M12: `{excluded}` is no longer valid input, but it reached the prompt:\n{}",
+            prompt.text.contains(lapsed),
+            "#2007: 失效条目 `{lapsed}` 必须对反思可见（失效驻留段）:\n{}",
             prompt.text
         );
     }
+    assert!(
+        prompt.text.contains("incident runbook"),
+        "#2007 D1: TTL 过期条目 MUST 留在正常段（依然注入，只催促处理）:\n{}",
+        prompt.text
+    );
+    assert!(
+        prompt.text.contains("NEVER use this section as evidence"),
+        "失效段 MUST 声明不作为新建议证据来源:\n{}",
+        prompt.text
+    );
 }
 
 #[test]
@@ -312,7 +334,7 @@ async fn build_prompt_truncates_messages_beyond_budget() {
         )));
     }
 
-    let prompt = ReflectionWorkflow::build_prompt(&messages, "en", &memory, 1, 150, 200).await;
+    let prompt = ReflectionWorkflow::build_prompt(&messages, "en", &memory, 1, 150, 200, 0).await;
     assert!(
         !prompt.text.contains("marker-0000"),
         "超预算时最早消息必须被截出 prompt"
@@ -349,7 +371,7 @@ async fn complete_resolves_ordinal_references_end_to_end() {
     memory.write(first.clone()).await.unwrap();
     memory.write(second.clone()).await.unwrap();
 
-    let prompt = ReflectionWorkflow::build_prompt(&[], "en", &memory, 100, 150, 200).await;
+    let prompt = ReflectionWorkflow::build_prompt(&[], "en", &memory, 100, 150, 200, 0).await;
     assert!(prompt.text.contains("[M1]"), "反思输入 MUST 携带行序号");
     assert!(
         !prompt.text.contains(&first.id.to_string()),
@@ -555,7 +577,7 @@ async fn event_reflection_ops_complete_emits_trigger_apply_cost() {
         recorder: Arc::clone(&recorder),
     };
 
-    let prompt = ReflectionWorkflow::build_prompt(&[], "en", &memory, 100, 150, 200).await;
+    let prompt = ReflectionWorkflow::build_prompt(&[], "en", &memory, 100, 150, 200, 0).await;
     let token_usage = ReflectionTokenUsage {
         input_tokens: 11,
         output_tokens: 7,
@@ -698,6 +720,7 @@ async fn build_prompt_embeds_corpus_status_from_memory_state() {
         now,
         150,
         200,
+        0,
     )
     .await;
 
@@ -706,4 +729,81 @@ async fn build_prompt_embeds_corpus_status_from_memory_state() {
     assert!(prompt.text.contains("fact=2"));
     assert!(prompt.text.contains("M1 × M2"));
     assert!(prompt.text.contains("must produce a synthesizes"));
+}
+
+/// #2007 D1：TTL 过期条目留在 live 段并带 `[TTL expired]` 行内标注催促
+/// 反思裁决；条目级 `Some(0)`（永不过期）与全局禁用（default=0）不标注。
+#[tokio::test]
+async fn build_prompt_marks_ttl_expired_live_entries() {
+    let memory = crate::adapters::InMemoryMemory::new(crate::adapters::MemoryPolicy::default())
+        .expect("policy must be valid");
+    let now = 1_000u64;
+
+    let mut quiet = MemoryEntry::new(
+        MemoryId::now_v7(),
+        now,
+        MemoryLayer::Project,
+        MemoryCategory::Fact,
+        "quietly stale fact",
+        MemorySource::User,
+    )
+    .unwrap();
+    quiet.last_confirmed_at = 100; // 900s 静默 > default 1_000s? 用 default=500 判过期
+    memory.write(quiet.clone()).await.unwrap();
+
+    let mut eternal = MemoryEntry::new(
+        MemoryId::now_v7(),
+        now,
+        MemoryLayer::Project,
+        MemoryCategory::Decision,
+        "permanent decision",
+        MemorySource::User,
+    )
+    .unwrap();
+    eternal.last_confirmed_at = 100;
+    eternal.ttl = Some(std::time::Duration::from_secs(0)); // 永不过期
+    memory.write(eternal).await.unwrap();
+
+    let prompt = ReflectionWorkflow::build_prompt(
+        &[share::message::Message::user("review ttl")],
+        "en",
+        &memory,
+        now,
+        150,
+        200,
+        500,
+    )
+    .await;
+    assert!(
+        prompt.text.contains("[TTL expired]"),
+        "静默过期条目 MUST 带催促标注: {}",
+        prompt.text
+    );
+    assert!(
+        prompt.text.contains("quietly stale fact"),
+        "TTL 过期条目仍在 live 段（依然注入）"
+    );
+    assert!(
+        !prompt
+            .text
+            .contains("[TTL expired] [Decision][permanent decision"),
+        "ttl=Some(0) 永不过期 MUST NOT 标注: {}",
+        prompt.text
+    );
+
+    // 全局禁用（default=0）：无标注。
+    let disabled = ReflectionWorkflow::build_prompt(
+        &[share::message::Message::user("review ttl")],
+        "en",
+        &memory,
+        now,
+        150,
+        200,
+        0,
+    )
+    .await;
+    assert!(
+        !disabled.text.contains("[TTL expired]"),
+        "全局禁用 TTL 时 MUST NOT 标注"
+    );
 }

@@ -63,6 +63,7 @@ fn op_group(op: MemoryEventOp) -> &'static str {
         | MemoryEventOp::Delete
         | MemoryEventOp::Pin
         | MemoryEventOp::MarkOutdated
+        | MemoryEventOp::ConfirmHit
         | MemoryEventOp::ArchiveRestore
         | MemoryEventOp::Compact
         | MemoryEventOp::SupersedeSynthesis => "write",
@@ -85,8 +86,8 @@ fn memory_event_round_trips_through_serde_json() {
 }
 
 #[test]
-fn memory_event_op_covers_exactly_nineteen_operations() {
-    // 监控操作面映射表以测试常量固化：读 4 / 写 8 / 反思 3 / 生命周期 4 = 19。
+fn memory_event_op_covers_exactly_twenty_operations() {
+    // 监控操作面映射表以测试常量固化：读 4 / 写 9 / 反思 3 / 生命周期 4 = 20。
     let all_ops = [
         (MemoryEventOp::RetrieveForInject, "retrieve_for_inject"),
         (MemoryEventOp::Search, "search"),
@@ -97,6 +98,7 @@ fn memory_event_op_covers_exactly_nineteen_operations() {
         (MemoryEventOp::Delete, "delete"),
         (MemoryEventOp::Pin, "pin"),
         (MemoryEventOp::MarkOutdated, "mark_outdated"),
+        (MemoryEventOp::ConfirmHit, "confirm_hit"),
         (MemoryEventOp::ArchiveRestore, "archive_restore"),
         (MemoryEventOp::Compact, "compact"),
         (MemoryEventOp::SupersedeSynthesis, "supersede_synthesis"),
@@ -108,7 +110,7 @@ fn memory_event_op_covers_exactly_nineteen_operations() {
         (MemoryEventOp::AssemblyFingerprint, "assembly_fingerprint"),
         (MemoryEventOp::EvictionWatermark, "eviction_watermark"),
     ];
-    assert_eq!(all_ops.len(), 19);
+    assert_eq!(all_ops.len(), 20);
 
     let mut group_counts: HashMap<&'static str, usize> = HashMap::new();
     for (op, expected_name) in all_ops {
@@ -123,7 +125,7 @@ fn memory_event_op_covers_exactly_nineteen_operations() {
         *group_counts.entry(op_group(op)).or_insert(0) += 1;
     }
     assert_eq!(group_counts.get("read"), Some(&4));
-    assert_eq!(group_counts.get("write"), Some(&8));
+    assert_eq!(group_counts.get("write"), Some(&9));
     assert_eq!(group_counts.get("reflection"), Some(&3));
     assert_eq!(group_counts.get("lifecycle"), Some(&4));
 }

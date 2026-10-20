@@ -237,6 +237,8 @@ fn patch_for_update(
                     // SetMemoryConfig 的输入视图不携带事件保留天数键（非 TUI 关注点）：
                     // patch 不触碰该键，保留文件层既有 event_retention_days。
                     event_retention_days: None,
+                    // #2007：同理，默认 TTL 不经 SetMemoryConfig 触达，保留文件层值。
+                    default_ttl_secs: None,
                     reflection: Some(share::config::domain::merge::ReflectionConfigPatch {
                         enabled: Some(config.reflection.enabled),
                         interval_runs: Some(config.reflection.interval_runs),

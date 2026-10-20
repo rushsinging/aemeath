@@ -123,6 +123,7 @@ async fn golden_memory(entries: &[&str]) -> MemoryWithEvents {
         max_entries: 200,
         similarity_threshold: 0.8,
         target_active_entries: 150,
+        default_ttl_secs: 0,
     })
     .expect("golden policy");
     for content in entries {
@@ -261,6 +262,7 @@ async fn golden_capacity_breach_fails_whole_batch_without_writing() {
         max_entries: 10,
         similarity_threshold: 0.8,
         target_active_entries: 1,
+        default_ttl_secs: 0,
     })
     .expect("golden policy");
     for content in ["占位事实一", "占位事实二"] {

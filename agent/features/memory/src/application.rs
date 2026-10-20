@@ -54,21 +54,22 @@ impl ReflectionWorkflow {
         now: u64,
         target_active_entries: usize,
         max_entries: usize,
+        default_ttl_secs: u64,
     ) -> ReflectionPrompt {
         let engine = ReflectionEngine;
-        // M12：反思输入排除失效条目（outdated / 被取代 / TTL 过期）。
-        let eligible = memory
-            .list(Some(MemoryLayer::Project))
-            .await
+        // #2007：反思输入全可见——live（未失效）进正常段，lapsed（outdated /
+        // 被取代）进失效驻留标注段供 LLM 裁决；TTL 过期留在 live 段。
+        let all_entries = memory.list(Some(MemoryLayer::Project)).await;
+        let (live, lapsed): (Vec<_>, Vec<_>) = all_entries
             .into_iter()
-            .filter(|entry| crate::domain::is_reflection_input_eligible(entry, now))
-            .collect::<Vec<_>>();
+            .partition(|entry| !crate::domain::is_lapsed(entry));
         let capacity = ReflectionCapacityBudget {
-            active_count: eligible.len(),
+            active_count: live.len(),
             target_active_entries,
             max_entries,
         };
-        let (project_memory, references) = engine.format_memory_summary(&eligible);
+        let (project_memory, references) =
+            engine.format_memory_summary_with_lapsed(&live, &lapsed, now, default_ttl_secs);
         // #1987：corpus 现状（分类分布 / archive / top-K 高相似对）注入 prompt，
         // 引导 LLM 合并收敛而非只增不并；计算在持锁的 prompt 构建阶段完成。
         let stats = memory.stats().await;
@@ -84,8 +85,7 @@ impl ReflectionWorkflow {
             .map(|category| {
                 (
                     *category,
-                    eligible
-                        .iter()
+                    live.iter()
                         .filter(|entry| entry.category == *category)
                         .count(),
                 )
@@ -96,7 +96,7 @@ impl ReflectionWorkflow {
             archive_count: stats.project_archive_count,
             category_counts,
             duplicate_pairs: ReflectionEngine::top_similar_pairs(
-                &eligible,
+                &live,
                 crate::domain::constants::REFLECT_DUPLICATE_PAIR_THRESHOLD,
                 crate::domain::constants::REFLECT_DUPLICATE_PAIR_TOP_K,
             ),
@@ -135,20 +135,21 @@ impl ReflectionWorkflow {
         now: u64,
         target_active_entries: usize,
         max_entries: usize,
+        default_ttl_secs: u64,
     ) -> ReflectionPrompt {
         let engine = ReflectionEngine;
-        let eligible = memory
-            .list(Some(MemoryLayer::Project))
-            .await
+        // #2007：与 build_prompt 同口径——live 进正常段，lapsed 进失效驻留段。
+        let all_entries = memory.list(Some(MemoryLayer::Project)).await;
+        let (live, lapsed): (Vec<_>, Vec<_>) = all_entries
             .into_iter()
-            .filter(|entry| crate::domain::is_reflection_input_eligible(entry, now))
-            .collect::<Vec<_>>();
+            .partition(|entry| !crate::domain::is_lapsed(entry));
         let capacity = ReflectionCapacityBudget {
-            active_count: eligible.len(),
+            active_count: live.len(),
             target_active_entries,
             max_entries,
         };
-        let (project_memory, references) = engine.format_memory_summary(&eligible);
+        let (project_memory, references) =
+            engine.format_memory_summary_with_lapsed(&live, &lapsed, now, default_ttl_secs);
         let text = engine.build_noise_prompt(&project_memory, lang, capacity, None);
         ReflectionPrompt { text, references }
     }

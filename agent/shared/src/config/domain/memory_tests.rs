@@ -138,3 +138,14 @@ fn test_reflection_target_active_entries_defaults_to_150_and_deserializes_overri
     let config: MemoryConfig = serde_json::from_str(json).unwrap();
     assert_eq!(config.reflection.target_active_entries, 120);
 }
+
+/// #2007 D2：全局默认 TTL 默认 30 天（2_592_000 秒），0 = 禁用 TTL。
+#[test]
+fn test_default_ttl_secs_defaults_to_30_days_and_deserializes_override() {
+    let empty: MemoryConfig = serde_json::from_str("{}").unwrap();
+    assert_eq!(empty.default_ttl_secs, 2_592_000);
+    let config: MemoryConfig = serde_json::from_str(r#"{ "default_ttl_secs": 86400 }"#).unwrap();
+    assert_eq!(config.default_ttl_secs, 86_400);
+    let disabled: MemoryConfig = serde_json::from_str(r#"{ "default_ttl_secs": 0 }"#).unwrap();
+    assert_eq!(disabled.default_ttl_secs, 0);
+}

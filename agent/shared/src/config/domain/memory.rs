@@ -22,6 +22,10 @@ pub(crate) fn default_target_active_entries() -> usize {
     150
 }
 
+pub(crate) fn default_memory_ttl_secs() -> u64 {
+    30 * 24 * 60 * 60
+}
+
 pub(crate) fn default_event_retention_days() -> u32 {
     30
 }
@@ -60,6 +64,13 @@ pub struct MemoryConfig {
     /// `0` = 禁用 GC（从不删除）；默认 30。NEVER 表示关闭写入。
     #[serde(default = "default_event_retention_days")]
     pub event_retention_days: u32,
+
+    /// #2007：全局默认 TTL（秒），默认 30 天；`0` = 禁用 TTL。
+    /// TTL = 自最后确认（search/recall 命中刷新）以来的静默期上限：
+    /// 过期不停注入，只在反思 prompt 中催促 LLM 裁决（标记 outdated 或保留）；
+    /// 条目级 `ttl` 覆盖全局默认。
+    #[serde(default = "default_memory_ttl_secs")]
+    pub default_ttl_secs: u64,
 }
 
 impl Default for MemoryConfig {
@@ -71,6 +82,7 @@ impl Default for MemoryConfig {
             reflection: ReflectionConfig::default(),
             inject_token_budget: None,
             event_retention_days: default_event_retention_days(),
+            default_ttl_secs: default_memory_ttl_secs(),
         }
     }
 }

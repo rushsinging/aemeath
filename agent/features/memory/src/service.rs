@@ -630,16 +630,13 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
         (state.global.dataset.clone(), state.project.dataset.clone())
     }
 
-    /// 反思提交后收敛复核的告警文案。与 apply 预检、反思 prompt 三处同源：
-    /// 计数用「有效且未过期」口径（[`crate::domain::effective_active_count_at`]，
-    /// outdated / 被取代 / TTL 过期残留已不可注入，MUST NOT 误报成超载——
-    /// pinned 过期条目留在 active 但不占收敛目标）；target 取策略
-    /// `target_active_entries`（生产装配即配置值）。返回 `None` 表示无需告警。
+    /// 反思提交后收敛复核的告警文案。与 apply 预检、反思 prompt 共用
+    /// effective_active_count：仅排除 outdated / 被取代，TTL 过期仍计入。
+    /// target 取策略 target_active_entries，返回 None 表示无需告警。
     fn reflection_above_target_after_commit_notice(&self) -> Option<String> {
-        let now = (self.clock)();
         let project_active = {
             let state = self.state.read().expect("memory state lock poisoned");
-            crate::domain::effective_active_count_at(state.project.dataset.active(), now)
+            crate::domain::effective_active_count(state.project.dataset.active())
         };
         let target = self.policy.target_active_entries;
         (project_active > target).then(|| {
@@ -852,6 +849,7 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             category: query.category,
             include_archive: query.include_archive,
             exclude_stale: query.exclude_stale,
+            confirm_hits: query.confirm_hits,
             now: query.now,
         };
         let active = global
@@ -916,10 +914,79 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             },
         ))
         .await;
+        if query.confirm_hits {
+            let ids: Vec<_> = hits.iter().map(|hit| hit.entry.id).collect();
+            if let Err(error) = self.confirm_hits(&ids, query.now).await {
+                log::warn!(target: crate::LOG_TARGET, "memory_confirm_hits_failed source=search error={error:?}");
+            }
+        }
         MemorySearchResult {
             mode: MemoryRetrievalMode::ExplicitSearch,
             hits,
         }
+    }
+
+    async fn confirm_hits(&self, ids: &[MemoryId], now: u64) -> Result<usize, MemoryError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let Some(os_locks) = self.store.try_acquire_os_write_locks().await? else {
+            log::debug!(target: crate::LOG_TARGET, "memory_confirm_hits_skipped reason=corpus_busy count={}", ids.len());
+            return Ok(0);
+        };
+        let _permit = match tokio::time::timeout(
+            crate::constants::CONFIRM_HITS_LOCK_TIMEOUT,
+            self.write_gate.acquire(os_locks),
+        )
+        .await
+        {
+            Ok(permit) => permit,
+            Err(_) => {
+                log::debug!(target: crate::LOG_TARGET, "memory_confirm_hits_skipped reason=corpus_busy count={}", ids.len());
+                return Ok(0);
+            }
+        };
+        let mut confirmed = 0;
+        for layer in [MemoryLayer::Global, MemoryLayer::Project] {
+            // 检索读取不覆写内存快照；确认必须以当前已提交盘面为写入基准。
+            let latest = load_layer(&self.store, layer).await?;
+            self.set_layer_state(layer, latest);
+            let slot: WriteCapture = Default::default();
+            let capture = Arc::clone(&slot);
+            let changed = self
+                .mutate_layer(layer, |dataset| {
+                    let mut before = Vec::new();
+                    let mut after = Vec::new();
+                    for entry in dataset.active_mut() {
+                        if !ids.contains(&entry.id) {
+                            continue;
+                        }
+                        let previous = entry.clone();
+                        if crate::domain::confirm_hit(entry, now) {
+                            before.push(previous);
+                            after.push(entry.clone());
+                        }
+                    }
+                    let count = after.len();
+                    *capture.lock().expect("confirm event slot poisoned") = (before, after);
+                    Ok((count, count > 0))
+                })
+                .await?;
+            if changed > 0 {
+                let (before, after) = slot.lock().expect("confirm event slot poisoned").clone();
+                let correlation = format!("confirm_hit-{layer:?}-{}", uuid::Uuid::now_v7());
+                let mut event = self.build_write_event(
+                    MemoryEventOp::ConfirmHit,
+                    correlation.clone(),
+                    correlation,
+                    EventChange::Write { before, after },
+                );
+                event.layer = Some(layer);
+                self.emit_event(event).await;
+                confirmed += changed;
+            }
+        }
+        Ok(confirmed)
     }
 
     async fn write(&self, entry: MemoryEntry) -> Result<WriteResult, MemoryError> {
@@ -1179,6 +1246,8 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                 MemorySource::Llm,
             )?;
             entry.tags = suggestion.tags.clone();
+            // #2007：条目级 TTL 覆盖全局默认；0 = 永不过期。
+            entry.ttl = suggestion.ttl_secs.map(std::time::Duration::from_secs);
             // M13: fewer than two sources is a copy, not a synthesis. The
             // content is still written — only the type marking is withheld.
             if !apply_synthesis(&mut entry, &suggestion.synthesizes)
@@ -1215,7 +1284,6 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             ..ReflectionApplyResult::default()
         };
         {
-            let now = (self.clock)();
             let (global, project) = self.snapshot();
             let project_active = simulate_project_active_after_reflection(
                 &global,
@@ -1223,7 +1291,6 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                 &prepared,
                 &outdated,
                 self.policy,
-                now,
             )?;
             // 收敛目标与反思 prompt 同源：一律取策略 target_active_entries
             // （生产装配即 memory.reflection.target_active_entries 配置值），
@@ -1335,10 +1402,8 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
             log::warn!(target: crate::LOG_TARGET, "{notice}");
         }
         // 收敛率评测口径：应用完成后读取盘面有效 active 与本次目标，
-        // 与反思 prompt、容量门禁同一取值来源。
-        let now = (self.clock)();
-        let project_active =
-            crate::domain::effective_active_count_at(self.snapshot().1.active(), now);
+        // 与反思 prompt、容量门禁同一取值来源（#2007：TTL 过期仍计入）。
+        let project_active = crate::domain::effective_active_count(self.snapshot().1.active());
         result.active_after = Some(project_active);
         result.capacity_target = Some(self.policy.target_active_entries);
         Ok(result)
@@ -1351,7 +1416,7 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
     /// 异步门闩二次 lock_owned 会重入死锁）。返回值即实际归档条数口径。
     async fn sweep_stale_under_permit(
         &self,
-        now: u64,
+        _now: u64,
         _permit: &MemoryWritePermit,
     ) -> Result<usize, MemoryError> {
         // 与 mutate_layer 同一 state 基准扫描：permit 持有期间进程内无并发
@@ -1365,7 +1430,7 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
                 .iter()
                 .chain(state.project.dataset.active())
                 .filter(|entry| !entry.pinned)
-                .filter(|entry| !crate::domain::is_reflection_input_eligible(entry, now))
+                .filter(|entry| crate::domain::is_lapsed(entry))
                 .map(|entry| entry.id)
                 .collect()
         };
@@ -1583,15 +1648,14 @@ fn partial_apply_or(error: MemoryError, result: &ReflectionApplyResult) -> Memor
 }
 
 /// 在候选盘面上试算 reflect apply 后的 project active 条数（含 outdated→归档）。
-/// 仅用于容量门禁；NEVER 在此路径写盘。计数用「有效且未过期」口径——
-/// pinned TTL 过期残留不会被本批归档，但 MUST NOT 占用收敛目标。
+/// 仅用于容量门禁；NEVER 在此路径写盘。计数用有效口径（outdated / 被取代
+/// 不计；#2007 后 TTL 过期仍计入——它依然注入）。
 fn simulate_project_active_after_reflection(
     global: &MemoryDataset,
     project: &MemoryDataset,
     prepared: &[(MemoryEntry, Vec<MemoryId>)],
     outdated: &[MemoryId],
     policy: MemoryPolicy,
-    now: u64,
 ) -> Result<usize, MemoryError> {
     let mut global = global.clone();
     let mut project = project.clone();
@@ -1621,10 +1685,7 @@ fn simulate_project_active_after_reflection(
             }
         }
     }
-    Ok(crate::domain::effective_active_count_at(
-        project.active(),
-        now,
-    ))
+    Ok(crate::domain::effective_active_count(project.active()))
 }
 
 /// Applies one Reflection suggestion as one dataset mutation. On capacity it

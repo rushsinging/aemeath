@@ -52,6 +52,7 @@ async fn memory_with(entries: Vec<&str>) -> crate::adapters::InMemoryMemory {
         max_entries: 50,
         similarity_threshold: 0.8,
         target_active_entries: 150,
+        default_ttl_secs: 0,
     })
     .expect("policy 合法");
     for content in entries {

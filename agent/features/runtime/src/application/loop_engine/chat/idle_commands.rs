@@ -233,6 +233,8 @@ pub async fn execute_memory(
                     category: None,
                     include_archive: false,
                     exclude_stale: false,
+                    // 用户显式检索同样构成确认（#2007 D3）。
+                    confirm_hits: true,
                     now: unix_now(),
                 };
                 let result = port.search(&query).await;

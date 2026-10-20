@@ -151,6 +151,16 @@ fn lock_corpus_via_root(
     root: &storage_api::SafeStorageRoot,
     segment: &str,
 ) -> Result<OsWriteLockHandle, MemoryError> {
+    lock_corpus_with_mode(root, segment, false)?.ok_or(MemoryError::Storage {
+        kind: MemoryStorageErrorKind::ConcurrentWrite,
+    })
+}
+
+fn lock_corpus_with_mode(
+    root: &storage_api::SafeStorageRoot,
+    segment: &str,
+    nonblocking: bool,
+) -> Result<Option<OsWriteLockHandle>, MemoryError> {
     use fs2::FileExt;
     use std::str::FromStr;
 
@@ -183,10 +193,18 @@ fn lock_corpus_via_root(
         .map_err(|_| MemoryError::Storage {
             kind: MemoryStorageErrorKind::Io,
         })?;
-    file.lock_exclusive().map_err(|_| MemoryError::Storage {
-        kind: MemoryStorageErrorKind::Io,
-    })?;
-    Ok(OsWriteLockHandle::from_file(file))
+    let locked = if nonblocking {
+        file.try_lock_exclusive()
+    } else {
+        file.lock_exclusive()
+    };
+    match locked {
+        Ok(()) => Ok(Some(OsWriteLockHandle::from_file(file))),
+        Err(error) if nonblocking && error.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+        Err(_) => Err(MemoryError::Storage {
+            kind: MemoryStorageErrorKind::Io,
+        }),
+    }
 }
 
 fn dataset_key(segment: &str) -> storage_api::DatasetKeyData {
@@ -342,6 +360,29 @@ impl MemoryDatasetStore for AtomicDatasetMemoryStore {
             locks.push(lock_corpus_via_root(root, segment)?);
         }
         Ok(locks)
+    }
+
+    async fn try_acquire_os_write_locks(
+        &self,
+    ) -> Result<Option<Vec<OsWriteLockHandle>>, MemoryError> {
+        let Some(root) = &self.lock_root else {
+            return Ok(Some(Vec::new()));
+        };
+        let mut locks = Vec::with_capacity(2);
+        for key in [&self.global, &self.project] {
+            let segment = key
+                .segments()
+                .first()
+                .map(|segment| segment.as_str())
+                .ok_or(MemoryError::Storage {
+                    kind: MemoryStorageErrorKind::Io,
+                })?;
+            let Some(lock) = lock_corpus_with_mode(root, segment, true)? else {
+                return Ok(None);
+            };
+            locks.push(lock);
+        }
+        Ok(Some(locks))
     }
 }
 
@@ -500,6 +541,7 @@ impl MemoryOpener for DatasetMemoryOpener {
             max_entries: config.max_entries,
             similarity_threshold: config.similarity_threshold,
             target_active_entries: config.reflection.target_active_entries,
+            default_ttl_secs: config.default_ttl_secs,
         };
         let legacy = self.legacy_factory.create_for(key);
         // 生产路径注入真 event store：retention 取 candidate config（`0` = 禁用 GC），
@@ -625,6 +667,9 @@ pub struct MemoryPolicy {
     pub similarity_threshold: f64,
     /// Reflect 收敛目标 active 条数；与 max_entries 差值作 add 缓冲。
     pub target_active_entries: usize,
+    /// #2007：全局默认 TTL（秒），0 = 禁用；条目级 `ttl` 覆盖。过期不停注入，
+    /// 只在反思 prompt 中催促 LLM 裁决。
+    pub default_ttl_secs: u64,
 }
 
 impl Default for MemoryPolicy {
@@ -634,6 +679,7 @@ impl Default for MemoryPolicy {
             max_entries: defaults.max_entries,
             similarity_threshold: defaults.similarity_threshold,
             target_active_entries: defaults.reflection.target_active_entries,
+            default_ttl_secs: defaults.default_ttl_secs,
         }
     }
 }
@@ -721,29 +767,63 @@ impl MemoryPort for InMemoryMemory {
     }
 
     async fn search(&self, query: &MemorySearchQuery) -> MemorySearchResult {
-        let state = self.state.read().expect("memory state lock poisoned");
-        let active = state
-            .active
-            .iter()
-            .map(|entry| (entry, MemoryLocation::Active));
-        let archive = state
-            .archive
-            .iter()
-            .map(|entry| (entry, MemoryLocation::Archive));
-        let entries: Box<dyn Iterator<Item = (&MemoryEntry, MemoryLocation)>> =
-            if query.include_archive {
-                Box::new(active.chain(archive))
-            } else {
-                Box::new(active)
-            };
-        let candidates = entries
-            .filter(|(entry, _)| matches_filters(entry, query.layer, query.category))
-            .filter(|(entry, _)| !query.exclude_stale || is_injection_eligible(entry, query.now));
-        let hits = crate::domain::lexical_search::rank_explicit_search(candidates, query);
+        let hits = {
+            let state = self.state.read().expect("memory state lock poisoned");
+            let active = state
+                .active
+                .iter()
+                .map(|entry| (entry, MemoryLocation::Active));
+            let archive = state
+                .archive
+                .iter()
+                .map(|entry| (entry, MemoryLocation::Archive));
+            let entries: Box<dyn Iterator<Item = (&MemoryEntry, MemoryLocation)>> =
+                if query.include_archive {
+                    Box::new(active.chain(archive))
+                } else {
+                    Box::new(active)
+                };
+            let candidates = entries
+                .filter(|(entry, _)| matches_filters(entry, query.layer, query.category))
+                .filter(|(entry, _)| {
+                    !query.exclude_stale || is_injection_eligible(entry, query.now)
+                });
+            crate::domain::lexical_search::rank_explicit_search(candidates, query)
+        };
+        if query.confirm_hits {
+            let ids: Vec<_> = hits.iter().map(|hit| hit.entry.id).collect();
+            let _ = self.confirm_hits(&ids, query.now).await;
+        }
         MemorySearchResult {
             mode: MemoryRetrievalMode::ExplicitSearch,
             hits,
         }
+    }
+
+    async fn confirm_hits(&self, ids: &[MemoryId], now: u64) -> Result<usize, MemoryError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let Ok(permit) = tokio::time::timeout(
+            crate::constants::CONFIRM_HITS_LOCK_TIMEOUT,
+            self.acquire_write_permit(),
+        )
+        .await
+        else {
+            return Ok(0);
+        };
+        let _permit = permit?;
+        let mut state = self.state.write().expect("memory state lock poisoned");
+        let mut confirmed = 0;
+        for entry in &mut state.active {
+            if ids.contains(&entry.id) && crate::domain::confirm_hit(entry, now) {
+                confirmed += 1;
+            }
+        }
+        if confirmed > 0 {
+            state.revision += 1;
+        }
+        Ok(confirmed)
     }
 
     async fn write(&self, mut entry: MemoryEntry) -> Result<WriteResult, MemoryError> {
@@ -908,6 +988,8 @@ impl MemoryPort for InMemoryMemory {
                 MemorySource::Llm,
             )?;
             entry.tags = suggestion.tags.clone();
+            // #2007：条目级 TTL 覆盖全局默认；0 = 永不过期。
+            entry.ttl = suggestion.ttl_secs.map(std::time::Duration::from_secs);
             if !apply_synthesis(&mut entry, &suggestion.synthesizes)
                 && !suggestion.synthesizes.is_empty()
             {
@@ -957,10 +1039,9 @@ impl MemoryPort for InMemoryMemory {
             result.completed += 1;
         }
 
-        // 与生产 MemoryService 门禁同口径：有效且未过期（pinned TTL 过期残留
-        // 不占收敛目标），target 用策略值。
-        let gate_now = (self.clock)();
-        let project_active = crate::domain::effective_active_count_at(&candidate.active, gate_now);
+        // 与生产 MemoryService 门禁同口径：有效（outdated / 被取代不计，
+        // TTL 过期仍计入），target 用策略值。
+        let project_active = crate::domain::effective_active_count(&candidate.active);
         let target = self.policy.target_active_entries;
         if project_active > target {
             return Err(MemoryError::CapacityNotMet {
@@ -969,7 +1050,8 @@ impl MemoryPort for InMemoryMemory {
             });
         }
 
-        let settled_active = crate::domain::effective_active_count_at(&candidate.active, gate_now);
+        // #2007：active_after 与门禁同口径——有效（TTL 过期仍计入）。
+        let settled_active = crate::domain::effective_active_count(&candidate.active);
         *state = candidate;
         // 与生产侧同口径透出收敛率评测字段：在 apply 完成后的盘面重算，
         // NEVER 复用门禁块的试算值（supersede/归档尚未发生的时点值）。
@@ -984,7 +1066,7 @@ impl MemoryPort for InMemoryMemory {
 
     async fn sweep_stale_under_permit(
         &self,
-        now: u64,
+        _now: u64,
         _permit: &MemoryWritePermit,
     ) -> Result<usize, MemoryError> {
         let stale: Vec<MemoryId> = {
@@ -993,7 +1075,7 @@ impl MemoryPort for InMemoryMemory {
                 .active
                 .iter()
                 .filter(|entry| !entry.pinned)
-                .filter(|entry| !crate::domain::is_reflection_input_eligible(entry, now))
+                .filter(|entry| crate::domain::is_lapsed(entry))
                 .map(|entry| entry.id)
                 .collect()
         };

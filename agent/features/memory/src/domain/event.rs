@@ -99,6 +99,7 @@ pub enum MemoryEventOp {
     Delete,
     Pin,
     MarkOutdated,
+    ConfirmHit,
     ArchiveRestore,
     Compact,
     SupersedeSynthesis,

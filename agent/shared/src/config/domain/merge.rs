@@ -336,6 +336,9 @@ pub struct MemoryConfigPatch {
     /// 事件流 / reflection-history 日切 segment 保留天数（`0` = 禁用 GC）。
     #[serde(default)]
     pub event_retention_days: Option<u32>,
+    /// #2007：全局默认 TTL（秒）覆盖；`0` = 禁用。
+    #[serde(default)]
+    pub default_ttl_secs: Option<u64>,
     #[serde(default)]
     pub reflection: Option<ReflectionConfigPatch>,
 }
@@ -902,6 +905,9 @@ pub(crate) fn apply_memory_patch(mut base: MemoryConfig, patch: MemoryConfigPatc
     }
     if let Some(v) = patch.event_retention_days {
         base.event_retention_days = v;
+    }
+    if let Some(v) = patch.default_ttl_secs {
+        base.default_ttl_secs = v;
     }
     if let Some(v) = patch.reflection {
         base.reflection = apply_reflection_patch(base.reflection, v);

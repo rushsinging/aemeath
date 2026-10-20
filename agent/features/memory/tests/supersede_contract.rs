@@ -33,6 +33,7 @@ fn suggestion(content: &str, supersedes: Vec<MemoryId>) -> MemorySuggestion {
         reason: "test".to_string(),
         supersedes,
         synthesizes: Vec::new(),
+        ttl_secs: None,
     }
 }
 
@@ -41,6 +42,7 @@ fn port() -> InMemoryMemory {
         max_entries: 50,
         similarity_threshold: 0.8,
         target_active_entries: 150,
+        default_ttl_secs: 0,
     })
     .expect("policy must be valid")
 }
@@ -78,6 +80,7 @@ async fn search(memory: &dyn MemoryPort, text: &str) -> Vec<MemorySearchHit> {
             category: None,
             include_archive: false,
             exclude_stale: false,
+            confirm_hits: false,
             now: now(),
         })
         .await

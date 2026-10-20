@@ -18,47 +18,42 @@ pub fn apply_synthesis(entry: &mut MemoryEntry, synthesizes: &[MemoryId]) -> boo
     true
 }
 
-/// M10：被取代条目不可注入。与 M5（outdated）、M8（TTL）同层，
-/// `pinned` 不绕过——pinned 保护「不要淘汰」，不保护「不要被取代」。
-pub fn is_injection_eligible(entry: &MemoryEntry, now: u64) -> bool {
-    entry.superseded_by.is_none() && !entry.outdated && !entry.is_ttl_expired(now)
+/// M10：被取代条目不可注入，与 M5（outdated）同层。#2007 后失效唯一定义
+/// 归拢为 [`is_lapsed`]（outdated / 被取代，均由 LLM 裁决产生）；TTL 过期
+/// 不是失效（D1：依然注入，只作为反思催促信号）。
+pub fn is_injection_eligible(entry: &MemoryEntry, _now: u64) -> bool {
+    !is_lapsed(entry)
 }
 
-/// M12：反思输入排除失效条目。
-///
-/// 判定与 [`is_injection_eligible`] 同源（失效就是失效），但语义独立——注入
-/// 关心「当前对话要不要带这条」，反思关心「LLM 能不能基于这条产出新建议」。
-/// 051 §8.2 论证：读入失效条目会形成「建议 → 写入 → 下次反思基于它再产出
-/// 建议」的污染循环。
-///
-/// 不排斥 pinned 与归纳产物：反思需要看到来源事实与已成立的结论，才能判断
-/// 它们是否仍然有效。
-pub fn is_reflection_input_eligible(entry: &MemoryEntry, now: u64) -> bool {
-    is_injection_eligible(entry, now)
+/// #2007：失效（lapsed）= outdated 或被取代——LLM 裁决产生的唯一失效态，
+/// 生效即停注入、可被 sweep 归档（pinned 除外，D4）。TTL 过期不属于失效。
+pub fn is_lapsed(entry: &MemoryEntry) -> bool {
+    entry.outdated || entry.superseded_by.is_some()
 }
+
+/// 命中确认只推进有效条目的确认时间；重复或旧时间不产生写入。
+/// 确认次数按不同秒的有效确认累计，溢出时饱和。
+pub(crate) fn confirm_hit(entry: &mut MemoryEntry, now: u64) -> bool {
+    if is_lapsed(entry) || entry.last_confirmed_at >= now {
+        return false;
+    }
+    entry.last_confirmed_at = now;
+    entry.confirmation_count = entry.confirmation_count.saturating_add(1);
+    true
+}
+
+// M12 → #2007：反思输入全可见——失效条目进入「失效驻留」标注段供 LLM
+// 裁决（确认淘汰或保留），TTL 过期条目留在正常段并带催促标注。失效段
+// NEVER 作为新建议的证据来源（051 §8.2 的污染循环由分段与指令抑制）。
 
 /// 容量口径（#1987 用户拍板）：active 中的 outdated / 被取代残留已不可注入，
 /// MUST NOT 计入 max_entries 与 reflect 收敛目标——max_entries / target 约束的
-/// 都是「有效 active」。
+/// 都是「有效 active」。#2007 后 TTL 过期不构成失效（依然注入），统一用本
+/// 口径，不再有带 `now` 的变体。
 pub fn effective_active_count(entries: &[MemoryEntry]) -> usize {
     entries
         .iter()
         .filter(|entry| !entry.outdated && entry.superseded_by.is_none())
-        .count()
-}
-
-/// 反思收敛口径（#2002 统一）：在 [`effective_active_count`] 基础上再排除
-/// TTL 过期残留。sweep 只归档未 pinned 的过期条目，pinned 过期条目留在
-/// active、不可注入、也不进反思 prompt——MUST NOT 占用反思收敛目标，否则
-/// 门禁永远无法满足、告警会在未超标时误报。反思门禁与提交后告警 MUST 用
-/// 本口径；写路径 max_entries 门禁仍用 [`effective_active_count`]（TTL 的
-/// 物理收敛由 compact / sweep 各自语义负责）。
-pub fn effective_active_count_at(entries: &[MemoryEntry], now: u64) -> usize {
-    entries
-        .iter()
-        .filter(|entry| {
-            !entry.outdated && entry.superseded_by.is_none() && !entry.is_ttl_expired(now)
-        })
         .count()
 }
 

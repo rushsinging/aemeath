@@ -337,11 +337,12 @@ impl MemoryRecallReminderSource {
     }
 
     async fn recall(&self, message_text: &str) -> Option<String> {
+        let now = (self.now)();
         let recalled = memory::api::search::recall_relevant(
             self.memory.as_ref(),
             self.scorer.as_ref(),
             message_text,
-            (self.now)(),
+            now,
             crate::application::constants::MEMORY_RECALL_RECALL_LIMIT,
             // 预算减条需要候选冗余：多召回一倍供截断时递补。
             crate::application::constants::MEMORY_RECALL_TOP_K * 2,
@@ -354,6 +355,7 @@ impl MemoryRecallReminderSource {
         }
         // token 预算（字符近似）：逐条累加，超预算依次减条——宁可不注入不超预算。
         let mut entries = Vec::new();
+        let mut confirmed_ids = Vec::new();
         let mut used_chars = 0usize;
         for item in recalled {
             let preview = recall_content_preview(&item.entry.content);
@@ -362,6 +364,7 @@ impl MemoryRecallReminderSource {
                 break;
             }
             used_chars += line_chars;
+            confirmed_ids.push(item.entry.id);
             entries.push(context::MemoryRecallEntryData {
                 id: item.entry.id.to_string(),
                 content_preview: preview,
@@ -370,7 +373,14 @@ impl MemoryRecallReminderSource {
         if entries.is_empty() {
             return None;
         }
-        serde_json::to_string(&context::InvocationReminderData::MemoryRecall { entries }).ok()
+        let snapshot =
+            serde_json::to_string(&context::InvocationReminderData::MemoryRecall { entries })
+                .ok()?;
+        // 只有通过相关性门控和预算并完成物化的命中才续期，候选池不续期。
+        if let Err(error) = self.memory.confirm_hits(&confirmed_ids, now).await {
+            log::warn!(target: crate::LOG_TARGET, "memory_confirm_hits_failed source=recall error={error}");
+        }
+        Some(snapshot)
     }
 }
 

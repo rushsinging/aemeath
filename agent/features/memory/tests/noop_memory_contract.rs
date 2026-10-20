@@ -23,6 +23,7 @@ async fn noop_memory_is_explicitly_disabled_and_has_no_mutation_effects() {
             category: None,
             include_archive: true,
             exclude_stale: false,
+            confirm_hits: false,
             now: 100,
         })
         .await;

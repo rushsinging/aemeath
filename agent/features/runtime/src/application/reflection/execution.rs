@@ -77,6 +77,7 @@ pub(crate) async fn execute_reflection(
     auto_apply: bool,
     target_active_entries: usize,
     max_entries: usize,
+    default_ttl_secs: u64,
     invocation: ReflectionInvocation<'_>,
     memory: &dyn MemoryPort,
     history: &dyn ReflectionHistoryStore,
@@ -102,10 +103,12 @@ pub(crate) async fn execute_reflection(
         identity.timestamp,
         target_active_entries,
         max_entries,
+        default_ttl_secs,
     )
     .await;
-    // #1987 残留清扫：active 中已失效（outdated/被取代/TTL 过期）且未 pinned
-    // 的条目系统侧直接归档（M12 之外的终态收口），LLM 无需也不应看见它们。
+    // #1987/#2007 残留清扫：active 中已失效（outdated/被取代）且未 pinned 的
+    // 条目系统侧直接归档；pinned 驻留（D4）与 TTL 过期（D1，非失效）不归档，
+    // 由反思 prompt 的失效驻留段与 TTL 标注催促 LLM 裁决。
     let swept = memory
         .sweep_stale_under_permit(identity.timestamp, &write_permit)
         .await
@@ -156,6 +159,7 @@ pub(crate) async fn execute_reflection(
         identity.timestamp,
         target_active_entries,
         max_entries,
+        default_ttl_secs,
     )
     .await;
     let response = request_reflection_response(

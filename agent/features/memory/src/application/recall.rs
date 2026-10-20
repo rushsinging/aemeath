@@ -55,6 +55,8 @@ async fn recall_relevant_inner(
             category: None,
             include_archive: false,
             exclude_stale: true,
+            // 候选不续期；调用方完成相关性门控和预算物化后确认实际命中。
+            confirm_hits: false,
             now,
         })
         .await;

@@ -206,6 +206,7 @@ async fn reflection_generated_memory_remains_searchable_through_tool_contract() 
                 reason: "user preference".to_string(),
                 supersedes: vec![],
                 synthesizes: vec![],
+                ttl_secs: None,
             }],
             ..ReflectionOutput::default()
         })
@@ -358,6 +359,7 @@ async fn full_add_returns_actionable_typed_eviction_candidates_without_mutation(
             max_entries: 1,
             similarity_threshold: 0.8,
             target_active_entries: 150,
+            default_ttl_secs: 0,
         },
         || 2_000,
     )

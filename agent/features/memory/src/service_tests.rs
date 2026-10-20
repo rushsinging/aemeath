@@ -78,6 +78,12 @@ impl MemoryDatasetStore for ScriptedStore {
     fn event_revision_label(revision: &Self::Revision) -> Option<String> {
         Some(revision.to_string())
     }
+
+    async fn try_acquire_os_write_locks(
+        &self,
+    ) -> Result<Option<Vec<crate::write_lock::OsWriteLockHandle>>, MemoryError> {
+        Ok(Some(Vec::new()))
+    }
 }
 
 fn layer_script(
@@ -135,6 +141,7 @@ fn small_policy() -> MemoryPolicy {
         max_entries: 1,
         similarity_threshold: 0.8,
         target_active_entries: 150,
+        default_ttl_secs: 0,
     }
 }
 
@@ -395,6 +402,7 @@ async fn explicit_search_ranks_non_contiguous_multi_term_matches() {
             category: None,
             include_archive: false,
             exclude_stale: false,
+            confirm_hits: false,
             now: 4_242,
         })
         .await;
@@ -450,6 +458,7 @@ async fn explicit_search_matches_chinese_subphrases_and_mixed_code_terms() {
             category: None,
             include_archive: false,
             exclude_stale: false,
+            confirm_hits: false,
             now: 4_242,
         })
         .await;
@@ -466,6 +475,7 @@ async fn explicit_search_matches_chinese_subphrases_and_mixed_code_terms() {
             category: None,
             include_archive: false,
             exclude_stale: false,
+            confirm_hits: false,
             now: 4_242,
         })
         .await;
@@ -501,6 +511,7 @@ async fn explicit_search_chinese_bigram_ranking_is_deterministic() {
         category: None,
         include_archive: false,
         exclude_stale: false,
+        confirm_hits: false,
         now: 4_242,
     };
 
@@ -550,6 +561,7 @@ async fn explicit_search_is_deterministic_and_empty_query_returns_no_hits() {
         category: None,
         include_archive: false,
         exclude_stale: false,
+        confirm_hits: false,
         now: 4_242,
     };
 
@@ -639,6 +651,7 @@ async fn explicit_search_filters_by_tag_category_and_layer() {
             category: Some(MemoryCategory::Pattern),
             include_archive: false,
             exclude_stale: false,
+            confirm_hits: false,
             now: 4_242,
         })
         .await;
@@ -683,6 +696,7 @@ async fn explicit_search_includes_archive_status_without_mutation() {
             category: None,
             include_archive: true,
             exclude_stale: false,
+            confirm_hits: false,
             now: 4_242,
         })
         .await;
@@ -710,6 +724,7 @@ fn reflection_output(layer: MemoryLayer, content: &str) -> ReflectionOutput {
             reason: "test".to_string(),
             supersedes: vec![],
             synthesizes: Vec::new(),
+            ttl_secs: None,
         }],
         ..ReflectionOutput::default()
     }
@@ -728,6 +743,7 @@ async fn reflection_apply_skips_over_length_suggestion_without_failing_batch() {
         reason: "test".to_string(),
         supersedes: vec![],
         synthesizes: Vec::new(),
+        ttl_secs: None,
     });
 
     // 提交后 list() 现读磁盘：committed 内容 = 本轮落地的正常条（时钟 4242 生成 id）。
@@ -872,6 +888,7 @@ async fn queries_read_latest_from_store_per_call() {
             category: None,
             include_archive: true,
             exclude_stale: false,
+            confirm_hits: false,
             now: 10,
         })
         .await;
@@ -1084,6 +1101,7 @@ fn rerank_query(text: &str, limit: usize) -> MemorySearchQuery {
         category: None,
         include_archive: false,
         exclude_stale: false,
+        confirm_hits: false,
         now: 4_242,
     }
 }
@@ -1207,6 +1225,7 @@ async fn read_methods_reflect_dataset_committed_after_open() {
             category: None,
             include_archive: false,
             exclude_stale: false,
+            confirm_hits: false,
             now: 100,
         })
         .await;
@@ -1275,6 +1294,7 @@ async fn read_hits_concurrent_write_and_reloads_once() {
             category: None,
             include_archive: false,
             exclude_stale: false,
+            confirm_hits: false,
             now: 100,
         })
         .await;
@@ -1315,6 +1335,7 @@ async fn read_falls_back_to_snapshot_when_store_keeps_failing() {
             category: None,
             include_archive: false,
             exclude_stale: false,
+            confirm_hits: false,
             now: 100,
         })
         .await;
@@ -1582,6 +1603,7 @@ async fn event_read_ops_search_emits_candidates_with_content() {
             category: None,
             include_archive: false,
             exclude_stale: false,
+            confirm_hits: false,
             now: 10,
         })
         .await;
@@ -2055,6 +2077,7 @@ async fn event_write_ops_synthesis_write_emits_full_entry_via_apply_reflection()
             reason: "test".to_string(),
             supersedes: vec![],
             synthesizes: vec![source_one.id, source_two.id],
+            ttl_secs: None,
         }],
         outdated_memories: vec![],
     };
@@ -2289,14 +2312,22 @@ async fn search_exclude_stale_drops_ineligible_entries_from_candidates() {
             include_archive: false,
             now: 4_242,
             exclude_stale: true,
+            confirm_hits: false,
         })
         .await;
     let excluded_ids: Vec<_> = excluded.hits.iter().map(|hit| hit.entry.id).collect();
     assert_eq!(
-        excluded_ids,
-        vec![valid.id],
-        "exclude_stale must drop outdated/superseded/ttl-expired from candidates"
+        excluded_ids.len(),
+        2,
+        "#2007 D1: exclude_stale 只排 outdated/superseded，TTL 过期仍可召回"
     );
+    assert!(excluded_ids.contains(&valid.id));
+    assert!(
+        excluded_ids.contains(&stale_ttl.id),
+        "TTL 过期条目 MUST 仍在召回候选（只催促反思处理）"
+    );
+    assert!(!excluded_ids.contains(&stale_outdated.id));
+    assert!(!excluded_ids.contains(&stale_superseded.id));
 
     let default = service
         .search(&MemorySearchQuery {
@@ -2307,6 +2338,7 @@ async fn search_exclude_stale_drops_ineligible_entries_from_candidates() {
             include_archive: false,
             now: 4_242,
             exclude_stale: false,
+            confirm_hits: false,
         })
         .await;
     assert_eq!(
