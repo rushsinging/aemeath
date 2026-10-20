@@ -180,10 +180,29 @@ impl MemoryEntry {
         })
     }
 
+    /// TTL = 自最后确认以来的静默期上限（#2007）：search/recall 命中会刷新
+    /// `last_confirmed_at` 即续期；基准 NEVER 落回 created_at 一次性判死。
+    /// `ttl = Some(0)` 显式表示永不过期（条目级禁用）。
     pub fn is_ttl_expired(&self, now: u64) -> bool {
         self.ttl
-            .map(|ttl| now > self.created_at.saturating_add(ttl.as_secs()))
+            .filter(|ttl| ttl.as_secs() > 0)
+            .map(|ttl| now > self.last_confirmed_at.saturating_add(ttl.as_secs()))
             .unwrap_or(false)
+    }
+
+    /// 带全局默认 TTL 的过期判定（#2007 D2：`memory.default_ttl_secs`，0 =
+    /// 禁用）。条目自身 `ttl` 优先（`Some(0)` = 永不过期），未设置时用全局默认。
+    pub fn is_ttl_expired_with_default(&self, now: u64, default_ttl_secs: u64) -> bool {
+        match self.ttl {
+            Some(ttl) if ttl.as_secs() > 0 => {
+                now > self.last_confirmed_at.saturating_add(ttl.as_secs())
+            }
+            Some(_) => false,
+            None => {
+                default_ttl_secs > 0
+                    && now > self.last_confirmed_at.saturating_add(default_ttl_secs)
+            }
+        }
     }
 }
 
@@ -269,5 +288,10 @@ pub struct MemorySearchQuery {
     /// 不进入词法候选（不占召回与重排名额）；显式搜索保持 false 以维持
     /// 「过期可见 + 状态标注」的可见性契约（M5/M10 仅约束注入）。
     pub exclude_stale: bool,
+    /// #2007 D3：显式检索命中即确认——true 时命中条目 best-effort 刷新
+    /// `last_confirmed_at`（TTL 续期基准）与 `confirmation_count`。只有
+    /// MemorySearch 工具层置 true；注入召回与内部检索 MUST NOT 置 true
+    /// （系统选中 ≠ 被证明有效）。
+    pub confirm_hits: bool,
     pub now: u64,
 }

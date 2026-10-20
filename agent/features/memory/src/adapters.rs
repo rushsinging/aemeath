@@ -500,6 +500,7 @@ impl MemoryOpener for DatasetMemoryOpener {
             max_entries: config.max_entries,
             similarity_threshold: config.similarity_threshold,
             target_active_entries: config.reflection.target_active_entries,
+            default_ttl_secs: config.default_ttl_secs,
         };
         let legacy = self.legacy_factory.create_for(key);
         // 生产路径注入真 event store：retention 取 candidate config（`0` = 禁用 GC），
@@ -625,6 +626,9 @@ pub struct MemoryPolicy {
     pub similarity_threshold: f64,
     /// Reflect 收敛目标 active 条数；与 max_entries 差值作 add 缓冲。
     pub target_active_entries: usize,
+    /// #2007：全局默认 TTL（秒），0 = 禁用；条目级 `ttl` 覆盖。过期不停注入，
+    /// 只在反思 prompt 中催促 LLM 裁决。
+    pub default_ttl_secs: u64,
 }
 
 impl Default for MemoryPolicy {
@@ -634,6 +638,7 @@ impl Default for MemoryPolicy {
             max_entries: defaults.max_entries,
             similarity_threshold: defaults.similarity_threshold,
             target_active_entries: defaults.reflection.target_active_entries,
+            default_ttl_secs: defaults.default_ttl_secs,
         }
     }
 }
@@ -896,6 +901,8 @@ impl MemoryPort for InMemoryMemory {
                 MemorySource::Llm,
             )?;
             entry.tags = suggestion.tags.clone();
+            // #2007：条目级 TTL 覆盖全局默认；0 = 永不过期。
+            entry.ttl = suggestion.ttl_secs.map(std::time::Duration::from_secs);
             if !apply_synthesis(&mut entry, &suggestion.synthesizes)
                 && !suggestion.synthesizes.is_empty()
             {
@@ -945,10 +952,9 @@ impl MemoryPort for InMemoryMemory {
             result.completed += 1;
         }
 
-        // 与生产 MemoryService 门禁同口径：有效且未过期（pinned TTL 过期残留
-        // 不占收敛目标），target 用策略值。
-        let gate_now = (self.clock)();
-        let project_active = crate::domain::effective_active_count_at(&candidate.active, gate_now);
+        // 与生产 MemoryService 门禁同口径：有效（outdated / 被取代不计，
+        // TTL 过期仍计入），target 用策略值。
+        let project_active = crate::domain::effective_active_count(&candidate.active);
         let target = self.policy.target_active_entries;
         if project_active > target {
             return Err(MemoryError::CapacityNotMet {
@@ -967,7 +973,7 @@ impl MemoryPort for InMemoryMemory {
 
     async fn sweep_stale_under_permit(
         &self,
-        now: u64,
+        _now: u64,
         _permit: &MemoryWritePermit,
     ) -> Result<usize, MemoryError> {
         let stale: Vec<MemoryId> = {
@@ -976,7 +982,7 @@ impl MemoryPort for InMemoryMemory {
                 .active
                 .iter()
                 .filter(|entry| !entry.pinned)
-                .filter(|entry| !crate::domain::is_reflection_input_eligible(entry, now))
+                .filter(|entry| crate::domain::is_lapsed(entry))
                 .map(|entry| entry.id)
                 .collect()
         };

@@ -30,6 +30,7 @@ fn port() -> InMemoryMemory {
         max_entries: 50,
         similarity_threshold: 0.8,
         target_active_entries: 150,
+        default_ttl_secs: 0,
     })
     .expect("policy must be valid")
 }
@@ -49,6 +50,7 @@ async fn archived_entries(memory: &InMemoryMemory, text: &str) -> Vec<MemoryEntr
             category: None,
             include_archive: true,
             exclude_stale: false,
+            confirm_hits: false,
             now: now(),
         })
         .await

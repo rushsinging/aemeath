@@ -61,7 +61,8 @@ fn superseded_entries_are_never_injection_eligible_even_when_pinned() {
     );
 }
 
-/// M10 与既有标记并存：任一标记都足以排除注入。
+/// M10 与既有标记并存：outdated / 被取代排除注入；TTL 过期是纯信号（#2007 D1），
+/// MUST NOT 排除注入。
 #[test]
 fn injection_eligibility_rejects_every_exclusion_reason() {
     let now = 1_000;
@@ -73,13 +74,37 @@ fn injection_eligibility_rejects_every_exclusion_reason() {
     let mut expiring = entry(1, now);
     expiring.ttl = Some(Duration::from_secs(10));
     assert!(
-        !is_injection_eligible(&expiring, now + 20),
-        "M8 still holds"
+        is_injection_eligible(&expiring, now + 20),
+        "#2007 D1: TTL 过期依然注入，只催促反思处理"
     );
 
     let mut superseded = entry(2, now);
     superseded.superseded_by = Some(test_id(3));
     assert!(!is_injection_eligible(&superseded, now), "M10 holds");
+}
+
+/// #2007：失效（lapsed）= outdated 或被取代，是 LLM 裁决产生的唯一失效态；
+/// 注入停用、sweep 可归档（pinned 除外）都以它为准，TTL 过期不属于失效。
+#[test]
+fn is_lapsed_covers_outdated_and_superseded_only() {
+    let now = 1_000;
+
+    let mut outdated = entry(0, now);
+    outdated.outdated = true;
+    assert!(is_lapsed(&outdated));
+
+    let mut superseded = entry(1, now);
+    superseded.superseded_by = Some(test_id(2));
+    assert!(is_lapsed(&superseded));
+
+    let mut ttl_quiet = entry(2, now);
+    ttl_quiet.ttl = Some(Duration::from_secs(10));
+    assert!(
+        !is_lapsed(&ttl_quiet),
+        "TTL 过期不是失效：先判 expired 再说，这里只看结构字段"
+    );
+
+    assert!(!is_lapsed(&entry(3, now)));
 }
 
 /// 链 0←1←2（0 已被 1 取代，1 已被 2 取代）。取代链尾或链中都不成环。
@@ -200,11 +225,10 @@ fn the_supersede_field_round_trips_and_stays_absent_by_default() {
     );
 }
 
-/// 容量门禁口径（#2002 统一）：`effective_active_count_at` 在 outdated / 被取代
-/// 之外 MUST 再排除 TTL 过期残留——pinned 过期条目留在 active、不可注入、
-/// 不进反思 prompt，若仍计入收敛目标，门禁将永远无法满足。
+/// #2007：TTL 过期不构成失效，capacity 口径恢复只排 outdated / 被取代
+/// （TTL 过期条目仍注入，MUST 占收敛目标，避免「注入中却不占目标」的反向暗态）。
 #[test]
-fn effective_active_count_at_excludes_pinned_ttl_residue() {
+fn effective_active_count_keeps_ttl_expired_entries() {
     let now = 1_000;
     let fresh = entry(0, now);
     let outdated = {
@@ -218,20 +242,13 @@ fn effective_active_count_at_excludes_pinned_ttl_residue() {
         stale
     };
     let mut pinned_expired = entry(3, 100);
-    pinned_expired.ttl = Some(Duration::from_secs(50)); // 100 + 50 < 1_000 过期
+    pinned_expired.ttl = Some(Duration::from_secs(50)); // 100 + 50 < 1_000 静默过期
     pinned_expired.pinned = true;
-    let mut expired = entry(4, 100);
-    expired.ttl = Some(Duration::from_secs(50));
 
-    let entries = &[fresh, outdated, superseded, pinned_expired, expired];
+    let entries = &[fresh, outdated, superseded, pinned_expired];
     assert_eq!(
         crate::domain::effective_active_count(entries),
-        3,
-        "旧口径只排 outdated / 被取代，不判 TTL"
-    );
-    assert_eq!(
-        crate::domain::effective_active_count_at(entries, now),
-        1,
-        "门禁口径 MUST 只剩未失效且未过期条目"
+        2,
+        "容量口径只排 outdated / 被取代；TTL 过期（含 pinned）MUST 计入"
     );
 }

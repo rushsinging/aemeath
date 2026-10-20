@@ -139,6 +139,11 @@ pub struct MemoryAddInput {
     pub tags: Option<Vec<String>>,
     /// 是否置顶以避免容量淘汰。Pin to protect from capacity eviction.
     pub pinned: Option<bool>,
+    /// 可选条目级 TTL（秒），覆盖全局默认（memory.default_ttl_secs，默认
+    /// 30 天）；0 = 永不过期。TTL 过期不停注入，只催促反思复核。
+    /// Optional per-entry TTL in seconds overriding the global default
+    /// (default 30 days); 0 = never expires.
+    pub ttl_secs: Option<u64>,
 }
 
 /// Input for the `MemorySearch` tool: lexical search over memory entries.

@@ -46,6 +46,10 @@ pub struct MemorySuggestion {
     /// 降级为普通建议（#1776）。
     #[serde(default, deserialize_with = "null_as_empty_vec")]
     pub synthesizes: Vec<MemoryId>,
+    /// #2007：条目级 TTL（秒）覆盖全局默认；`0` = 永不过期；缺省沿用全局
+    /// 默认（memory.default_ttl_secs）。时效性事实建议短 TTL，长期决策省略。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl_secs: Option<u64>,
 }
 
 /// The complete published-language response expected from a Reflection model.
@@ -247,6 +251,8 @@ struct RawMemorySuggestion {
     supersedes: Vec<String>,
     #[serde(default, deserialize_with = "null_as_empty_vec")]
     synthesizes: Vec<String>,
+    #[serde(default)]
+    ttl_secs: Option<u64>,
 }
 
 /// A provider-independent message projection used by the pure Reflection service.
@@ -516,6 +522,9 @@ impl ReflectionEngine {
   ③ 越界：与本项目无关的内容（其它项目、通用环境琐事）——它们不属于本 corpus。
   清除噪音与越界条目不算「为凑数强制淘汰」，是维护 corpus 卫生的正当理由。
 - suggested_memories[].synthesizes 只在**归纳多条已有记忆**时填这些条目序号。
+- suggested_memories[].ttl_secs 是可选的条目级 TTL（秒）：时效性事实（版本号、
+  进行中状态）建议短 TTL（如 604800=7 天）；长期决策省略该字段（沿用全局默认）；
+  0 表示永不过期。
   单条来源不是归纳（那只是改写），此时留空数组——不足两条来源的归纳 MUST NOT
   产出。结论被新证据修正时在正文里写「曾…现…」，不要输出置信度数字。
 - suggested_memories[].supersedes 只在**新记忆明确取代某条已有记忆**时填该
@@ -578,6 +587,10 @@ Requirements:
   synthesis over fewer than two sources must not be produced. When new evidence
   corrects a conclusion, phrase the change in the content ("used to …, now …")
   instead of emitting a confidence number.
+- Set suggested_memories[].ttl_secs ONLY for time-sensitive facts (version
+  numbers, in-flight status): a short TTL in seconds (e.g. 604800 = 7 days)
+  schedules the entry for reflection review once it goes quiet; omit it for
+  durable decisions (global default applies); 0 means never expires.
 - Fill suggested_memories[].supersedes with an ordinal ONLY when the
     new memory explicitly replaces it (a changed deploy target, port, or reversed
     conclusion). Leave it empty when the two memories merely complement each
@@ -713,6 +726,7 @@ impl ReflectionEngine {
                 content: suggestion.content,
                 tags: suggestion.tags,
                 reason: suggestion.reason,
+                ttl_secs: suggestion.ttl_secs,
                 supersedes: resolve_reference_tokens(
                     suggestion.supersedes,
                     references,
@@ -972,6 +986,93 @@ Output JSON only, no Markdown:
         (text, references)
     }
 
+    /// #2007：反思输入全可见的两段渲染——live 段沿用现有行格式，lapsed 段
+    /// （outdated / 被取代，含 pinned 驻留）单独成段仅供裁决：确认淘汰（加入
+    /// `outdated_memories`）或保留驻留。序号表覆盖全量（live 在前、lapsed
+    /// 连续编号），失效条目因此仍可被 `outdated_memories` 引用。
+    pub fn format_memory_summary_with_lapsed(
+        &self,
+        live: &[MemoryEntry],
+        lapsed: &[MemoryEntry],
+        now: u64,
+        default_ttl_secs: u64,
+    ) -> (String, ReflectionReferenceTable) {
+        if lapsed.is_empty() {
+            let references = ReflectionReferenceTable::from_entries(live);
+            let text = references
+                .references
+                .iter()
+                .zip(live.iter())
+                .map(|((ordinal, _), entry)| {
+                    format!(
+                        "- [M{}] [{:?}][{}]{} {}",
+                        ordinal,
+                        entry.category,
+                        entry.tags.join(","),
+                        ttl_expired_mark(entry, now, default_ttl_secs),
+                        entry.content
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            return (text, references);
+        }
+        let mut all = live.to_vec();
+        all.extend_from_slice(lapsed);
+        let references = ReflectionReferenceTable::from_entries(&all);
+        let render = |entry: &MemoryEntry, ordinal: u32, lapsed_marks: Option<&str>| {
+            let marks = match lapsed_marks {
+                Some(marks) => format!("[{}]", marks),
+                None => ttl_expired_mark(entry, now, default_ttl_secs),
+            };
+            format!(
+                "- [M{}] [{:?}][{}]{} {}",
+                ordinal,
+                entry.category,
+                entry.tags.join(","),
+                marks,
+                entry.content
+            )
+        };
+        let live_lines = references
+            .references
+            .iter()
+            .zip(all.iter())
+            .take(live.len())
+            .map(|((ordinal, _), entry)| render(entry, *ordinal, None))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let lapsed_lines = references
+            .references
+            .iter()
+            .zip(all.iter())
+            .skip(live.len())
+            .map(|((ordinal, _), entry)| {
+                let mut marks = Vec::new();
+                if entry.pinned {
+                    marks.push("pinned");
+                }
+                if entry.outdated {
+                    marks.push("outdated");
+                }
+                if entry.superseded_by.is_some() {
+                    marks.push("superseded");
+                }
+                let marks = marks.join("|");
+                render(entry, *ordinal, Some(&marks))
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let text = format!(
+            "{live_lines}\n\n# Lapsed entries (adjudication only)\n\
+             Entries below are lapsed (superseded or outdated) but still resident, some \
+             pin-protected. Adjudicate each: confirm removal via outdated_memories, or keep \
+             it resident. NEVER use this section as evidence for new suggestions.\n\
+             {lapsed_lines}"
+        );
+        (text, references)
+    }
+
     pub fn recent_messages_summary(
         &self,
         messages: &[ReflectionMessage],
@@ -1010,3 +1111,14 @@ mod tests;
 #[cfg(test)]
 #[path = "reflection_corpus_status_tests.rs"]
 mod corpus_status_tests;
+
+/// #2007 D1：TTL 过期标注——live 条目静默过期时行内 `[TTL expired]`，催促
+/// 反思 LLM 裁决（标记 outdated 或保留）；未过期返回空串。条目级 `ttl`
+/// 优先，未设置时用全局默认（`0` = 禁用）。
+fn ttl_expired_mark(entry: &MemoryEntry, now: u64, default_ttl_secs: u64) -> String {
+    if entry.is_ttl_expired_with_default(now, default_ttl_secs) {
+        "[TTL expired] ".to_string()
+    } else {
+        String::new()
+    }
+}

@@ -39,11 +39,11 @@ async fn real_corpus_copy_sweep_preserves_valid_and_pinned_entries() {
         .as_secs();
     let expected_swept = active
         .iter()
-        .filter(|entry| !entry.pinned && !is_reflection_input_eligible(entry, now))
+        .filter(|entry| !entry.pinned && is_lapsed(entry))
         .count();
     let expected_kept: Vec<_> = active
         .iter()
-        .filter(|entry| entry.pinned || is_reflection_input_eligible(entry, now))
+        .filter(|entry| entry.pinned || !is_lapsed(entry))
         .map(|entry| entry.id)
         .collect();
     let root = sweep_root("real-corpus-copy");
@@ -161,6 +161,7 @@ fn suggestion(layer: MemoryLayer, content: &str) -> MemorySuggestion {
         reason: "test".to_string(),
         supersedes: vec![],
         synthesizes: Vec::new(),
+        ttl_secs: None,
     }
 }
 
@@ -318,6 +319,7 @@ async fn apply_reflection_rejects_when_above_target_without_writing() {
         max_entries: 10,
         similarity_threshold: 0.8,
         target_active_entries: 2,
+        default_ttl_secs: 0,
     })
     .expect("policy");
     for content in ["keep-1", "keep-2", "keep-3"] {
@@ -356,6 +358,7 @@ async fn apply_reflection_commits_when_outdated_archives_down_to_target() {
         max_entries: 10,
         similarity_threshold: 0.8,
         target_active_entries: 2,
+        default_ttl_secs: 0,
     })
     .expect("policy");
     let mut ids = Vec::new();
@@ -386,6 +389,7 @@ async fn write_capacity_ignores_stale_entries() {
         max_entries: 2,
         similarity_threshold: 0.8,
         target_active_entries: 1,
+        default_ttl_secs: 0,
     })
     .expect("policy");
     let first = entry(MemoryLayer::Project, "alpha rule");
@@ -413,6 +417,7 @@ async fn reflection_capacity_gate_counts_effective_active_only() {
         max_entries: 10,
         similarity_threshold: 0.8,
         target_active_entries: 7,
+        default_ttl_secs: 0,
     })
     .expect("policy");
     let mut ids = Vec::new();
@@ -507,13 +512,14 @@ fn pinned_stale_entry(layer: MemoryLayer, content: &str) -> MemoryEntry {
 /// 生产残留清扫：active 中已 outdated / 被取代 / TTL 过期且非 pinned 的
 /// 条目 MUST 归档出 active（双层各归各的）；返回值是实际归档条数口径。
 #[tokio::test]
-async fn sweep_stale_under_permit_archives_outdated_superseded_and_ttl_residue() {
+async fn sweep_stale_under_permit_archives_outdated_and_superseded_but_keeps_ttl_quiet() {
     let root = sweep_root("stale");
     let store = sweep_store(&root);
     let fresh = entry(MemoryLayer::Project, "still fresh");
     let residues = vec![
         outdated_entry(MemoryLayer::Project, "already outdated"),
         superseded_entry(MemoryLayer::Project, "already superseded"),
+        // #2007 D1：TTL 过期不是失效——sweep NEVER 归档仅静默过期的条目。
         ttl_expired_entry(MemoryLayer::Project, "ttl expired"),
     ];
     let global_outdated = outdated_entry(MemoryLayer::Global, "stale global fact");
@@ -531,13 +537,19 @@ async fn sweep_stale_under_permit_archives_outdated_superseded_and_ttl_residue()
         .sweep_stale_under_permit(200, &permit)
         .await
         .unwrap();
-    assert_eq!(swept, 4, "双层 4 条非 pinned 失效残留 MUST 全部归档");
+    assert_eq!(
+        swept, 3,
+        "双层 3 条非 pinned 失效（outdated/被取代）MUST 归档"
+    );
 
     let stats = service.stats().await;
-    assert_eq!(stats.project_count, 1, "仅有效条目留在 project active");
     assert_eq!(
-        stats.project_archive_count, 3,
-        "outdated / 被取代 / TTL 三条 MUST 归档"
+        stats.project_count, 2,
+        "有效条目与 TTL 过期条目留在 project active"
+    );
+    assert_eq!(
+        stats.project_archive_count, 2,
+        "outdated / 被取代 两条 MUST 归档；TTL 过期 NOT 归档（#2007 D1）"
     );
     assert_eq!(stats.global_count, 0, "global 层残留不得留在 active");
     assert_eq!(stats.global_archive_count, 1, "global 层残留同样归档");
@@ -548,7 +560,14 @@ async fn sweep_stale_under_permit_archives_outdated_superseded_and_ttl_residue()
         .iter()
         .map(|listed| listed.id)
         .collect();
-    assert_eq!(active_ids, vec![fresh.id], "有效条目 MUST 留在 active");
+    assert_eq!(active_ids.len(), 2, "有效条目 + TTL 过期条目留在 active");
+    assert!(active_ids.contains(&fresh.id), "有效条目 MUST 留在 active");
+    assert!(
+        active_ids
+            .iter()
+            .any(|id| residues.iter().any(|residue| residue.id == *id)),
+        "TTL 过期条目 MUST 留在 active（只催促反思，不物理清理）"
+    );
     drop(permit);
     std::fs::remove_dir_all(&root).unwrap();
 }
@@ -661,8 +680,8 @@ async fn swept_archive_survives_reopen_and_second_sweep_is_idempotent() {
             .sweep_stale_under_permit(200, &first_permit)
             .await
             .unwrap(),
-        3,
-        "首轮 MUST 归档全部 3 条残留"
+        2,
+        "#2007 D1: 首轮只归档 outdated / 被取代 2 条；TTL 过期留 active"
     );
     drop(first_permit);
     drop(first);
@@ -672,8 +691,11 @@ async fn swept_archive_survives_reopen_and_second_sweep_is_idempotent() {
             .await
             .unwrap();
     let stats = reopened.stats().await;
-    assert_eq!(stats.project_count, 1, "重开后 active 仅剩有效条目");
-    assert_eq!(stats.project_archive_count, 3, "归档 MUST 落盘并随重开恢复");
+    assert_eq!(
+        stats.project_count, 2,
+        "重开后 active 剩有效条目 + TTL 过期条目（#2007 不归档）"
+    );
+    assert_eq!(stats.project_archive_count, 2, "归档 MUST 落盘并随重开恢复");
     let reopened_permit = reopened.acquire_write_permit().await.unwrap();
     let reswept = reopened
         .sweep_stale_under_permit(200, &reopened_permit)
@@ -682,7 +704,7 @@ async fn swept_archive_survives_reopen_and_second_sweep_is_idempotent() {
     assert_eq!(reswept, 0, "再次清扫 MUST 幂等返回 0");
     assert_eq!(
         reopened.stats().await.project_archive_count,
-        3,
+        2,
         "再次清扫 MUST NOT 改变盘面"
     );
     drop(reopened_permit);
@@ -709,6 +731,7 @@ async fn reflection_after_commit_notice_counts_effective_active_only() {
         max_entries: 4, // target = floor(4 × 0.75) = 3
         similarity_threshold: 0.8,
         target_active_entries: 3,
+        default_ttl_secs: 0,
     };
     let service = MemoryService::open_with_clock(sweep_store(&root), policy, || 200)
         .await
@@ -784,6 +807,7 @@ async fn capacity_gate_and_warning_use_policy_target_not_formula() {
         max_entries: 10, // floor(10 × 0.75) = 7，与配置目标 3 分叉
         similarity_threshold: 0.8,
         target_active_entries: 3,
+        default_ttl_secs: 0,
     };
     let service = MemoryService::open_with_clock(sweep_store(&root), policy, || 200)
         .await
@@ -825,6 +849,7 @@ async fn capacity_gate_accepts_when_policy_target_above_formula() {
         max_entries: 10, // floor(10 × 0.75) = 7 < 配置目标 8
         similarity_threshold: 0.8,
         target_active_entries: 8,
+        default_ttl_secs: 0,
     };
     let service = MemoryService::open_with_clock(sweep_store(&root), policy, || 200)
         .await
@@ -845,11 +870,11 @@ async fn capacity_gate_accepts_when_policy_target_above_formula() {
     std::fs::remove_dir_all(&root).unwrap();
 }
 
-/// pinned TTL 过期残留 MUST NOT 占用收敛目标：门禁与告警同用「有效且未过期」
-/// 口径——pinned 过期条目留在 active、不可注入、不进反思 prompt，若仍计入
-/// 目标，门禁永远无法满足、告警会在未超标时误报（修复前有效口径 4 > 3）。
+/// #2007：TTL 过期不构成失效——门禁与告警恢复「只排 outdated / 被取代」的
+/// 有效口径。TTL 过期（含 pinned）条目依然注入，MUST 占用收敛目标；否则
+/// 会出现「注入中却不占目标」的反向暗态（修复前 #2002 曾把 TTL 过期排除）。
 #[tokio::test]
-async fn capacity_gate_and_warning_exclude_pinned_ttl_residue() {
+async fn capacity_gate_and_warning_count_ttl_expired_entries() {
     let root = sweep_root("pinned-ttl-target");
     let store = sweep_store(&root);
     let mut pinned_expired = ttl_expired_entry(MemoryLayer::Project, "pinned expired");
@@ -865,26 +890,179 @@ async fn capacity_gate_and_warning_exclude_pinned_ttl_residue() {
         max_entries: 10,
         similarity_threshold: 0.8,
         target_active_entries: 3,
+        default_ttl_secs: 0,
     };
     let service = MemoryService::open_with_clock(sweep_store(&root), policy, || 200)
         .await
         .unwrap();
 
-    let result = service
-        .apply_reflection(&ReflectionOutput::default())
-        .await
-        .expect("未过期有效 3 ≤ 目标 3，pinned 过期残留 MUST 不占目标");
-    assert_eq!(result.attempted, 0);
-    assert!(
+    assert_eq!(
         service
-            .reflection_above_target_after_commit_notice()
-            .is_none(),
-        "未过期有效 3 ≤ 目标 3 MUST NOT 告警"
+            .apply_reflection(&ReflectionOutput::default())
+            .await
+            .expect_err("TTL 过期（含 pinned）计入有效 active：4 > 3 MUST 拦截"),
+        MemoryError::CapacityNotMet {
+            active: 4,
+            target: 3,
+        }
+    );
+    let notice = service
+        .reflection_above_target_after_commit_notice()
+        .expect("有效口径 4 > 目标 3 MUST 告警（TTL 过期计入）");
+    assert!(
+        notice.contains("active=4 target=3"),
+        "告警 MUST 携带计入 TTL 过期的有效口径，got {notice}"
+    );
+    drop(service);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// #2007：pinned 可被反思标 outdated——标记生效（停注入、outdated_marked 计数），
+/// 但归档跳过（D4：pinned 物理驻留 active），形成「可见的失效驻留」。
+#[tokio::test]
+async fn apply_reflection_marks_pinned_outdated_keeps_resident_and_stops_injection() {
+    let root = sweep_root("pinned-outdated");
+    let store = sweep_store(&root);
+    let mut pinned = entry(MemoryLayer::Project, "pinned delivery log");
+    pinned.pinned = true;
+    seed_layer(&store, MemoryLayer::Project, vec![pinned.clone()]).await;
+    let service =
+        MemoryService::open_with_clock(sweep_store(&root), MemoryPolicy::default(), || 200)
+            .await
+            .unwrap();
+
+    let result = service
+        .apply_reflection(&ReflectionOutput {
+            outdated_memories: vec![pinned.id.to_string()],
+            ..ReflectionOutput::default()
+        })
+        .await
+        .expect("pinned 的 outdated 引用 MUST 放行（#2007：LLM 可裁决）");
+    assert_eq!(
+        result.outdated_marked, 1,
+        "pinned 标记 MUST 计入 outdated_marked"
+    );
+
+    let listed = service.list(Some(MemoryLayer::Project)).await;
+    assert_eq!(listed.len(), 1, "D4: pinned 条目 MUST 物理驻留 active");
+    assert!(listed[0].outdated, "驻留条目 MUST 已带 outdated 标记");
+    assert!(listed[0].pinned);
+
+    let recalled = service
+        .search(&MemorySearchQuery {
+            text: "pinned delivery".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: 200,
+            exclude_stale: true,
+            confirm_hits: false,
+        })
+        .await;
+    assert!(
+        recalled.hits.is_empty(),
+        "outdated 后 MUST 停注入（exclude_stale 召回为空）"
+    );
+    drop(service);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// #2007 D3：显式检索（exclude_stale=false）命中刷新 last_confirmed_at 与
+/// confirmation_count（TTL 随之续期）；注入召回（exclude_stale=true）MUST NOT
+/// 刷新——系统选中 ≠ 被证明有效；失效条目命中不刷新。
+#[tokio::test]
+async fn explicit_search_refreshes_confirmation_but_injection_recall_does_not() {
+    let root = sweep_root("confirm-hit");
+    let store = sweep_store(&root);
+    let mut fresh = entry(MemoryLayer::Project, "rust deploy checklist");
+    fresh.last_confirmed_at = 100;
+    let mut other = entry(MemoryLayer::Project, "kotlin release plan");
+    other.last_confirmed_at = 100;
+    let mut lapsed = outdated_entry(MemoryLayer::Project, "rust deploy runbook");
+    lapsed.last_confirmed_at = 100;
+    seed_layer(
+        &store,
+        MemoryLayer::Project,
+        vec![fresh.clone(), other.clone(), lapsed.clone()],
+    )
+    .await;
+    let service =
+        MemoryService::open_with_clock(sweep_store(&root), MemoryPolicy::default(), || 200)
+            .await
+            .unwrap();
+
+    // 显式检索：命中条目刷新（fresh 命中；lapsed 命中也不刷新）。
+    service
+        .search(&MemorySearchQuery {
+            text: "rust deploy checklist".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: 200,
+            exclude_stale: false,
+            confirm_hits: true,
+        })
+        .await;
+    let confirmed: Vec<_> = service
+        .list(Some(MemoryLayer::Project))
+        .await
+        .into_iter()
+        .map(|listed| {
+            (
+                listed.id,
+                listed.last_confirmed_at,
+                listed.confirmation_count,
+            )
+        })
+        .collect();
+    let lookup = |id: &MemoryId| {
+        confirmed
+            .iter()
+            .find(|(entry_id, _, _)| entry_id == id)
+            .copied()
+            .unwrap()
+    };
+    assert_eq!(
+        lookup(&fresh.id).1,
+        200,
+        "显式命中 MUST 刷新 last_confirmed_at"
     );
     assert_eq!(
-        service.list(Some(MemoryLayer::Project)).await.len(),
-        4,
-        "门禁放行不改盘面，pinned 过期条目仍在物理 active"
+        lookup(&fresh.id).2,
+        1,
+        "显式命中 MUST 累计 confirmation_count"
+    );
+    assert_eq!(
+        lookup(&other.id).1,
+        100,
+        "未命中条目 MUST NOT 刷新（best-effort 只刷命中）"
+    );
+    assert_eq!(lookup(&lapsed.id).1, 100, "失效条目命中 MUST NOT 刷新确认");
+
+    // 注入召回：exclude_stale=true 不刷新。
+    service
+        .search(&MemorySearchQuery {
+            text: "rust deploy checklist".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: false,
+            now: 300,
+            exclude_stale: true,
+            confirm_hits: false,
+        })
+        .await;
+    let after = service
+        .list(Some(MemoryLayer::Project))
+        .await
+        .into_iter()
+        .find(|listed| listed.id == fresh.id)
+        .unwrap();
+    assert_eq!(
+        after.last_confirmed_at, 200,
+        "注入召回（exclude_stale=true）MUST NOT 刷新确认"
     );
     drop(service);
     std::fs::remove_dir_all(&root).unwrap();

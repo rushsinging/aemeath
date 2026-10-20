@@ -67,6 +67,7 @@ async fn apply_reflection_under_outer_permit_does_not_reacquire() {
         max_entries: 10,
         similarity_threshold: 0.9,
         target_active_entries: 8,
+        default_ttl_secs: 0,
     })
     .unwrap();
     let permit = memory.acquire_write_permit().await.unwrap();
@@ -93,6 +94,7 @@ async fn sweep_stale_archives_only_ineligible_unpinned_entries() {
         max_entries: 10,
         similarity_threshold: 1.0,
         target_active_entries: 7,
+        default_ttl_secs: 0,
     })
     .unwrap();
     let mut stale = fact_entry("已过时的旧口径");

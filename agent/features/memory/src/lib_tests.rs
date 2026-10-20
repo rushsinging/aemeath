@@ -112,6 +112,7 @@ async fn reflection_history_list_with_content_projects_texts_and_suggestions() {
             reason: "because".into(),
             supersedes: vec![],
             synthesizes: Vec::new(),
+            ttl_secs: None,
         }],
         outdated_memories: vec![],
     });

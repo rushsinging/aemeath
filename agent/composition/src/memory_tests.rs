@@ -76,6 +76,7 @@ async fn sub_disabled_is_noop_and_shared_reuses_active_without_opening() {
         category: None,
         include_archive: false,
         exclude_stale: false,
+        confirm_hits: false,
         now: 0,
     };
     assert_eq!(

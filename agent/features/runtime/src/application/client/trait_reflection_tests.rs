@@ -57,6 +57,7 @@ fn sdk_view_maps_content_projection_with_layer_and_category() {
             reason: "why".into(),
             supersedes: vec![],
             synthesizes: vec![],
+            ttl_secs: None,
         }]),
     });
 
@@ -98,6 +99,7 @@ fn sdk_view_maps_all_layer_and_category_variants() {
                 reason: "r".into(),
                 supersedes: vec![],
                 synthesizes: vec![],
+                ttl_secs: None,
             });
             assert_eq!(mapped.layer, expected_layer);
             assert_eq!(mapped.category, expected_category);

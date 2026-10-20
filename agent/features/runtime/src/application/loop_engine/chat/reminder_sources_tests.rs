@@ -225,6 +225,7 @@ async fn recall_memory(entries: Vec<&str>) -> Arc<dyn memory::api::MemoryPort> {
         max_entries: 50,
         similarity_threshold: 0.8,
         target_active_entries: 150,
+        default_ttl_secs: 0,
     })
     .expect("policy 合法");
     for content in entries {
@@ -257,6 +258,7 @@ async fn memory_recall_source_never_materializes_outdated_memory() {
             category: None,
             include_archive: false,
             exclude_stale: false,
+            confirm_hits: false,
             now: 4_242,
         })
         .await;

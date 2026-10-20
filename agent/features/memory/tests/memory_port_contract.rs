@@ -20,6 +20,7 @@ async fn in_memory_fake_satisfies_memory_port_contract() {
         max_entries: 2,
         similarity_threshold: 0.8,
         target_active_entries: 150,
+        default_ttl_secs: 0,
     })
     .unwrap();
 
@@ -78,6 +79,7 @@ async fn in_memory_fake_satisfies_memory_port_contract() {
             category: None,
             include_archive: true,
             exclude_stale: false,
+            confirm_hits: false,
             now: 200,
         })
         .await;
@@ -107,6 +109,7 @@ async fn explicit_search_returns_ineligible_archive_without_panicking() {
             category: None,
             include_archive: true,
             exclude_stale: false,
+            confirm_hits: false,
             now: 102,
         })
         .await;
@@ -147,6 +150,7 @@ async fn mutations_are_typed_and_queries_do_not_change_revision() {
             category: None,
             include_archive: true,
             exclude_stale: false,
+            confirm_hits: false,
             now: 100,
         })
         .await;
@@ -159,6 +163,7 @@ async fn restore_when_layer_is_full_is_not_committed_and_returns_candidates() {
         max_entries: 1,
         similarity_threshold: 0.8,
         target_active_entries: 150,
+        default_ttl_secs: 0,
     })
     .unwrap();
     let archived = entry("archived", "archived fact", 100);
@@ -186,6 +191,7 @@ async fn restore_when_layer_is_full_is_not_committed_and_returns_candidates() {
             category: None,
             include_archive: true,
             exclude_stale: false,
+            confirm_hits: false,
             now: 200,
         })
         .await;
@@ -245,6 +251,7 @@ fn suggestion(layer: MemoryLayer, content: &str) -> MemorySuggestion {
         reason: "test".to_string(),
         supersedes: vec![],
         synthesizes: Vec::new(),
+        ttl_secs: None,
     }
 }
 
@@ -277,6 +284,7 @@ async fn reflection_evicts_unpinned_candidate_and_retries_once() {
             max_entries: 1,
             similarity_threshold: 0.8,
             target_active_entries: 150,
+            default_ttl_secs: 0,
         },
         || 200,
     )
@@ -307,6 +315,7 @@ async fn reflection_reports_full_capacity_when_only_pinned_entries_exist() {
             max_entries: 1,
             similarity_threshold: 0.8,
             target_active_entries: 150,
+            default_ttl_secs: 0,
         },
         || 200,
     )
@@ -358,6 +367,7 @@ async fn reflection_marks_existing_outdated_ids_and_skips_invalid_ids() {
             category: None,
             include_archive: true,
             exclude_stale: false,
+            confirm_hits: false,
             now: 200,
         })
         .await;
@@ -419,6 +429,7 @@ async fn reflection_applies_mixed_suggestion_and_outdated_id_as_one_result() {
             category: None,
             include_archive: true,
             exclude_stale: false,
+            confirm_hits: false,
             now: 200,
         })
         .await;

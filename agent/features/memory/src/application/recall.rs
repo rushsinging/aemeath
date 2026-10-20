@@ -55,6 +55,7 @@ async fn recall_relevant_inner(
             category: None,
             include_archive: false,
             exclude_stale: true,
+            confirm_hits: false,
             now,
         })
         .await;

@@ -7,6 +7,7 @@ fn test_port() -> InMemoryMemory {
         max_entries: 100,
         similarity_threshold: 0.9,
         target_active_entries: 150,
+        default_ttl_secs: 0,
     })
     .expect("valid policy")
 }

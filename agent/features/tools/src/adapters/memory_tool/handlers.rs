@@ -54,6 +54,11 @@ pub(super) async fn add_memory(
         .get("pinned")
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
+    // #2007：条目级 TTL（秒）覆盖全局默认；0 = 永不过期。
+    entry.ttl = input
+        .get("ttl_secs")
+        .and_then(|value| value.as_u64())
+        .map(std::time::Duration::from_secs);
     if let Some(session_id) = ctx.parent_session_id() {
         entry.source_ref = Some(session_id);
     }
@@ -152,6 +157,8 @@ pub(super) async fn search_memory(
         category,
         include_archive: false,
         exclude_stale: false,
+        // #2007 D3：LLM 显式检索命中即确认（刷新 last_confirmed_at，TTL 续期）。
+        confirm_hits: true,
         now,
     };
     let result = port.search(&query).await;

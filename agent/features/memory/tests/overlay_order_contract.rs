@@ -33,6 +33,7 @@ fn port() -> InMemoryMemory {
         max_entries: 50,
         similarity_threshold: 0.8,
         target_active_entries: 150,
+        default_ttl_secs: 0,
     })
     .expect("policy must be valid")
 }
@@ -81,6 +82,7 @@ async fn a_synthesized_conclusion_is_offered_before_the_facts_it_covers() {
                 reason: "combines facts".to_string(),
                 supersedes: vec![],
                 synthesizes: vec![fact.id, other.id],
+                ttl_secs: None,
             }],
             ..Default::default()
         })
@@ -119,6 +121,7 @@ async fn all_synthesized_entries_lead_the_injection_order() {
                     reason: "combines facts".to_string(),
                     supersedes: vec![],
                     synthesizes: sources.clone(),
+                    ttl_secs: None,
                 }],
                 ..Default::default()
             })
@@ -180,6 +183,7 @@ async fn explicit_search_keeps_the_conclusion_and_its_sources_side_by_side() {
                 reason: "combines facts".to_string(),
                 supersedes: vec![],
                 synthesizes: vec![fact.id, other.id],
+                ttl_secs: None,
             }],
             ..Default::default()
         })
@@ -225,6 +229,7 @@ async fn search_project_hits(memory: &InMemoryMemory, text: &str) -> Vec<MemoryS
             category: None,
             include_archive: false,
             exclude_stale: false,
+            confirm_hits: false,
             now: now(),
         })
         .await

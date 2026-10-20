@@ -101,6 +101,7 @@ async fn runtime_invokes_provider_then_delegates_parse_apply_and_history_to_memo
         false,
         150,
         200,
+        0,
         ReflectionInvocation {
             provider: &provider,
             model: &model,
@@ -137,6 +138,7 @@ async fn malformed_provider_text_returns_safe_runtime_error_and_memory_records_p
         false,
         150,
         200,
+        0,
         ReflectionInvocation {
             provider: &provider,
             model: &model,
@@ -256,6 +258,7 @@ async fn run_scripted_reflection(
         false,
         150,
         200,
+        0,
         ReflectionInvocation {
             provider,
             model: &model,
@@ -665,6 +668,7 @@ async fn reflection_execution_preserves_request_parameters_during_retry_and_repa
         false,
         150,
         200,
+        0,
         ReflectionInvocation {
             provider: &provider,
             model: &model,
@@ -721,6 +725,7 @@ async fn two_phase_reflection_removes_noise_then_completes() {
         max_entries: 10,
         similarity_threshold: 0.8,
         target_active_entries: 7,
+        default_ttl_secs: 0,
     })
     .unwrap();
     let noisy = memory::api::MemoryEntry::new(
@@ -767,6 +772,7 @@ async fn two_phase_reflection_removes_noise_then_completes() {
         true,
         7,
         10,
+        0,
         invocation,
         &memory,
         &history,

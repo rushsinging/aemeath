@@ -30,6 +30,7 @@ fn port() -> InMemoryMemory {
         max_entries: 50,
         similarity_threshold: 0.8,
         target_active_entries: 150,
+        default_ttl_secs: 0,
     })
     .expect("policy must be valid")
 }
@@ -43,6 +44,7 @@ fn suggestion(content: &str) -> MemorySuggestion {
         reason: "combines two facts".to_string(),
         supersedes: Vec::new(),
         synthesizes: Vec::new(),
+        ttl_secs: None,
     }
 }
 
