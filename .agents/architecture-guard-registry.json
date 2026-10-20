@@ -976,6 +976,7 @@
         "ports",
         "ports.rs",
         "ports_tests.rs",
+        "reflection_golden_tests.rs",
         "reflection_history_jsonl.rs",
         "reflection_history_jsonl_tests.rs",
         "service.rs",
