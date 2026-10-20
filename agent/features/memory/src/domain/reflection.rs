@@ -506,6 +506,8 @@ impl ReflectionEngine {
   对象（各数组填空数组），NEVER 输出解释、说明或任何文字。
 - suggested_memories[].layer 只能是 project 或 global，默认优先使用 project。
 - suggested_memories[].category 只能是 fact、decision、preference、pattern、pitfall。
+- suggested_memories[].content 单条不超过 500 字符；信息过多时拆分为多条，NEVER
+  超长输出（超长条目会被系统拒绝落盘）。
 - 引用已有记忆只能使用「当前项目记忆」列表行首的序号（形如 M3，对应行首 [M3]）。
   NEVER 编造列表中不存在的序号，NEVER 用标签、正文或任何其他标识充当引用。
   正确示例："outdated_memories": ["M2"]。
@@ -559,6 +561,8 @@ Requirements:
   or explanations.
 - suggested_memories[].layer must be project or global; prefer project by default.
 - suggested_memories[].category must be fact, decision, preference, pattern, or pitfall.
+- Each suggested_memories[].content must stay within 500 characters; split into
+  multiple entries instead of exceeding it (over-length entries are rejected).
 - Reference existing memories ONLY by the ordinal shown at the start of each
   "Current project memory" line (e.g. M3 for a line beginning with [M3]).
   NEVER invent an ordinal that is not in the list; NEVER use tags, content, or

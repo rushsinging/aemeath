@@ -885,6 +885,18 @@ impl MemoryPort for InMemoryMemory {
         };
 
         for suggestion in &output.suggested_memories {
+            // 写入端长度不变式：超长/空 suggestion 逐条跳过并记录（与生产版同语义）。
+            if suggestion.content.chars().count() > crate::constants::MEMORY_CONTENT_MAX_CHARS
+                || suggestion.content.trim().is_empty()
+            {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "memory_reflection_suggestion_skipped reason=content_length chars={} max={}",
+                    suggestion.content.chars().count(),
+                    crate::constants::MEMORY_CONTENT_MAX_CHARS,
+                );
+                continue;
+            }
             let now = (self.clock)();
             let id = reflection_memory_id(now)?;
             let mut entry = MemoryEntry::new(

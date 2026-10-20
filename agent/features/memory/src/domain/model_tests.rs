@@ -37,6 +37,34 @@ fn entry_rejects_blank_content() {
 }
 
 #[test]
+fn entry_accepts_content_at_max_chars() {
+    let content = "长".repeat(crate::constants::MEMORY_CONTENT_MAX_CHARS);
+    let result = MemoryEntry::new(
+        MemoryId::now_v7(),
+        10,
+        MemoryLayer::Project,
+        MemoryCategory::Fact,
+        content,
+        MemorySource::Llm,
+    );
+    assert!(result.is_ok());
+}
+
+#[test]
+fn entry_rejects_content_exceeding_max_chars() {
+    let content = "长".repeat(crate::constants::MEMORY_CONTENT_MAX_CHARS + 1);
+    let result = MemoryEntry::new(
+        MemoryId::now_v7(),
+        10,
+        MemoryLayer::Project,
+        MemoryCategory::Fact,
+        content,
+        MemorySource::Llm,
+    );
+    assert!(matches!(result, Err(MemoryError::InvalidEntry { .. })));
+}
+
+#[test]
 fn ttl_expires_only_after_created_at_plus_ttl() {
     let mut memory = entry("memory-ttl");
     memory.ttl = Some(Duration::from_secs(10));

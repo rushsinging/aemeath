@@ -1,6 +1,6 @@
 //! memory 工具常量（#1146 双轨归位）。
+//! content 长度上限不在此处——由 memory domain 写入不变式统一持有。
 
-pub(super) const MAX_CONTENT_CHARS: usize = 500;
 pub(super) const MAX_TAGS: usize = 10;
 pub(super) const MAX_TAG_CHARS: usize = 32;
 
