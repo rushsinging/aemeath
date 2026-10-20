@@ -192,11 +192,14 @@ impl ReflectionWorkflow {
             duration_ms,
             write_permit,
             &ReflectionApplyResult::default(),
+            0,
         )
         .await
     }
 
     /// 统一记录前置去噪与本阶段的真实应用结果，避免最终记录遗漏已提交变更。
+    /// `stale_swept` 为执行编排 sweep_stale 归档的失效残留条数，随最终
+    /// record 透出（0 表示未归档任何条目，与 None 的「未触达 sweep」区分）。
     #[allow(clippy::too_many_arguments)]
     pub async fn complete_with_prior_apply(
         history: &dyn ReflectionHistoryStore,
@@ -210,6 +213,7 @@ impl ReflectionWorkflow {
         duration_ms: u64,
         write_permit: Option<&crate::write_lock::MemoryWritePermit>,
         prior_apply: &ReflectionApplyResult,
+        stale_swept: u32,
     ) -> Result<ReflectionExecutionResult, ReflectionWorkflowError> {
         Self::emit_reflection_event(
             memory,
@@ -318,6 +322,10 @@ impl ReflectionWorkflow {
                         suggestions_added,
                         outdated_marked,
                         superseded,
+                        // 容量字段仅由真实 apply 路径填充；partial 重建结果
+                        // 无法得知盘面终值，保持 None。
+                        active_after: None,
+                        capacity_target: None,
                     }),
                     Some(ReflectionErrorCategory::Apply),
                 ),
@@ -402,6 +410,7 @@ impl ReflectionWorkflow {
             } else {
                 None
             },
+            stale_swept: Some(stale_swept),
         };
         history
             .upsert(&record)
@@ -414,8 +423,10 @@ impl ReflectionWorkflow {
             identity,
             EventChange::Reflection {
                 summary: format!(
-                    "status={status:?};category={error_category:?};duration_ms={duration_ms};input_tokens={};output_tokens={}",
-                    token_usage.input_tokens, token_usage.output_tokens
+                    "status={status:?};category={error_category:?};duration_ms={duration_ms};input_tokens={};output_tokens={};{}",
+                    token_usage.input_tokens,
+                    token_usage.output_tokens,
+                    capacity_annotation(apply_result.as_ref()),
                 ),
                 affected: Vec::new(),
             },
@@ -549,6 +560,19 @@ impl ReflectionWorkflow {
             reaped += 1;
         }
         Ok(reaped)
+    }
+}
+
+/// 收敛率评测的 cost 事件注脚：真实 apply 完成时透出「应用后有效 active /
+/// 容量目标」，未触达 apply（解析失败等）时不追加字段。
+fn capacity_annotation(apply_result: Option<&ReflectionApplyResult>) -> String {
+    match apply_result {
+        Some(result) if result.active_after.is_some() => format!(
+            "active_after={};target={}",
+            result.active_after.unwrap_or_default(),
+            result.capacity_target.unwrap_or_default()
+        ),
+        _ => String::new(),
     }
 }
 

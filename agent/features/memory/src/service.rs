@@ -1320,6 +1320,13 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
         if let Some(notice) = self.reflection_above_target_after_commit_notice() {
             log::warn!(target: crate::LOG_TARGET, "{notice}");
         }
+        // 收敛率评测口径：应用完成后读取盘面有效 active 与本次目标，
+        // 与反思 prompt、容量门禁同一取值来源。
+        let now = (self.clock)();
+        let project_active =
+            crate::domain::effective_active_count_at(self.snapshot().1.active(), now);
+        result.active_after = Some(project_active);
+        result.capacity_target = Some(self.policy.target_active_entries);
         Ok(result)
     }
 

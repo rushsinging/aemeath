@@ -140,5 +140,9 @@ pub mod api;
 mod lib_tests;
 
 #[cfg(test)]
+#[path = "reflection_golden_tests.rs"]
+mod reflection_golden_tests;
+
+#[cfg(test)]
 #[path = "event_coverage_tests.rs"]
 mod event_coverage_tests;

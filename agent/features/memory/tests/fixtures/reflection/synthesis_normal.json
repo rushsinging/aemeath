@@ -1,0 +1,17 @@
+{
+  "deviations": [
+    "K1 行的部署结论已被新事实取代，归纳合并为单条终态"
+  ],
+  "suggested_memories": [
+    {
+      "layer": "project",
+      "category": "decision",
+      "content": "部署目标已从旧集群迁移到新集群，所有发布脚本 MUST 指向新集群地址",
+      "tags": ["deploy", "golden"],
+      "reason": "合并 K1 与 K2 的矛盾结论，以最新事实为准",
+      "supersedes": ["M1"],
+      "synthesizes": []
+    }
+  ],
+  "outdated_memories": ["M2"]
+}

@@ -1,0 +1,42 @@
+{
+  "total": 236,
+  "parse_success_rate": 0.8008474576271186,
+  "failed_categories": {
+    "timed_out": 23,
+    "parse": 11,
+    "empty_response": 5,
+    "cancelled": 4,
+    "llm_call": 1,
+    "apply": 3
+  },
+  "suggestion_validity_proxy": 0.7177033492822966,
+  "supersede_established_rate": 1.0,
+  "outdated_marked_rate": 0.9580838323353293,
+  "suggestion_count": 418,
+  "supersedes_ref_count": 56,
+  "outdated_ref_count": 167,
+  "duration_ms": {
+    "p50": 37592,
+    "p95": 120100,
+    "max": 290686
+  },
+  "input_tokens": {
+    "p50": 17111,
+    "p95": 40737
+  },
+  "output_tokens": {
+    "p50": 2043,
+    "p95": 12127
+  },
+  "capacity_field_coverage": {
+    "active_after": 0,
+    "capacity_target": 0,
+    "stale_swept": 0
+  },
+  "convergence_samples": 0,
+  "not_measured": [
+    "content correctness precision/recall (需人工 gold)",
+    "downstream task gain",
+    "repair 轮次（旧 record 未结构化记录）"
+  ]
+}
