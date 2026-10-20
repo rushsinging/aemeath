@@ -969,7 +969,12 @@ impl MemoryPort for InMemoryMemory {
             });
         }
 
+        let settled_active = crate::domain::effective_active_count_at(&candidate.active, gate_now);
         *state = candidate;
+        // 与生产侧同口径透出收敛率评测字段：在 apply 完成后的盘面重算，
+        // NEVER 复用门禁块的试算值（supersede/归档尚未发生的时点值）。
+        result.active_after = Some(settled_active);
+        result.capacity_target = Some(target);
         Ok(result)
     }
     async fn archive(&self, ids: &[MemoryId]) -> Result<bool, MemoryError> {

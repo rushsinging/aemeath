@@ -1,0 +1,15 @@
+{
+  "deviations": [],
+  "suggested_memories": [
+    {
+      "layer": "project",
+      "category": "fact",
+      "content": "超出容量目标的新建议，MUST 触发整批不写",
+      "tags": [],
+      "reason": "golden",
+      "supersedes": [],
+      "synthesizes": []
+    }
+  ],
+  "outdated_memories": []
+}

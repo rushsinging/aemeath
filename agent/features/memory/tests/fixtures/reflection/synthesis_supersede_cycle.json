@@ -1,0 +1,15 @@
+{
+  "deviations": [],
+  "suggested_memories": [
+    {
+      "layer": "project",
+      "category": "fact",
+      "content": "试图取代自身所在归纳链形成环，该关系 MUST 被环检测拒写",
+      "tags": [],
+      "reason": "golden",
+      "supersedes": ["M1", "M2"],
+      "synthesizes": []
+    }
+  ],
+  "outdated_memories": []
+}

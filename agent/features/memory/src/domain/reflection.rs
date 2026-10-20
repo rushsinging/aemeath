@@ -353,6 +353,14 @@ pub struct ReflectionApplyResult {
     /// the cycle guard (M9) counts in neither this nor `completed`, so
     /// `attempted - completed` stays the honest skipped-operation count.
     pub superseded: usize,
+    /// 应用完成后 project 层的有效 active 数（outdated/superseded/TTL 之外），
+    /// 供反思收敛率评测直接从 apply 结果读取；解析失败等未触达 apply 的
+    /// 路径保持 None。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_after: Option<usize>,
+    /// 本次 apply 所依据的容量目标（policy.target_active_entries）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capacity_target: Option<usize>,
 }
 
 /// One completed Reflection result. Persistence is supplied by a separate adapter.
@@ -374,6 +382,10 @@ pub struct ReflectionRecord {
     /// 消息计数）。仅 Succeeded 终态推进；缺失（旧记录/未推进）时调用方回退。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_end: Option<u64>,
+    /// 执行编排 sweep_stale 实际归档的失效残留条数（未触达 sweep 的路径
+    /// 保持 None）；与 apply_result 的去噪计数相互独立。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stale_swept: Option<u32>,
 }
 
 impl ReflectionRecord {
@@ -389,6 +401,7 @@ impl ReflectionRecord {
             token_usage: None,
             duration_ms: 0,
             coverage_end: None,
+            stale_swept: None,
         }
     }
 
@@ -410,6 +423,7 @@ impl ReflectionRecord {
             token_usage: None,
             duration_ms,
             coverage_end: None,
+            stale_swept: None,
         }
     }
 
