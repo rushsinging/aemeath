@@ -78,6 +78,12 @@ impl MemoryDatasetStore for ScriptedStore {
     fn event_revision_label(revision: &Self::Revision) -> Option<String> {
         Some(revision.to_string())
     }
+
+    async fn try_acquire_os_write_locks(
+        &self,
+    ) -> Result<Option<Vec<crate::write_lock::OsWriteLockHandle>>, MemoryError> {
+        Ok(Some(Vec::new()))
+    }
 }
 
 fn layer_script(

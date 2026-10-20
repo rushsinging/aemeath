@@ -151,6 +151,16 @@ fn lock_corpus_via_root(
     root: &storage_api::SafeStorageRoot,
     segment: &str,
 ) -> Result<OsWriteLockHandle, MemoryError> {
+    lock_corpus_with_mode(root, segment, false)?.ok_or(MemoryError::Storage {
+        kind: MemoryStorageErrorKind::ConcurrentWrite,
+    })
+}
+
+fn lock_corpus_with_mode(
+    root: &storage_api::SafeStorageRoot,
+    segment: &str,
+    nonblocking: bool,
+) -> Result<Option<OsWriteLockHandle>, MemoryError> {
     use fs2::FileExt;
     use std::str::FromStr;
 
@@ -183,10 +193,18 @@ fn lock_corpus_via_root(
         .map_err(|_| MemoryError::Storage {
             kind: MemoryStorageErrorKind::Io,
         })?;
-    file.lock_exclusive().map_err(|_| MemoryError::Storage {
-        kind: MemoryStorageErrorKind::Io,
-    })?;
-    Ok(OsWriteLockHandle::from_file(file))
+    let locked = if nonblocking {
+        file.try_lock_exclusive()
+    } else {
+        file.lock_exclusive()
+    };
+    match locked {
+        Ok(()) => Ok(Some(OsWriteLockHandle::from_file(file))),
+        Err(error) if nonblocking && error.kind() == std::io::ErrorKind::WouldBlock => Ok(None),
+        Err(_) => Err(MemoryError::Storage {
+            kind: MemoryStorageErrorKind::Io,
+        }),
+    }
 }
 
 fn dataset_key(segment: &str) -> storage_api::DatasetKeyData {
@@ -342,6 +360,29 @@ impl MemoryDatasetStore for AtomicDatasetMemoryStore {
             locks.push(lock_corpus_via_root(root, segment)?);
         }
         Ok(locks)
+    }
+
+    async fn try_acquire_os_write_locks(
+        &self,
+    ) -> Result<Option<Vec<OsWriteLockHandle>>, MemoryError> {
+        let Some(root) = &self.lock_root else {
+            return Ok(Some(Vec::new()));
+        };
+        let mut locks = Vec::with_capacity(2);
+        for key in [&self.global, &self.project] {
+            let segment = key
+                .segments()
+                .first()
+                .map(|segment| segment.as_str())
+                .ok_or(MemoryError::Storage {
+                    kind: MemoryStorageErrorKind::Io,
+                })?;
+            let Some(lock) = lock_corpus_with_mode(root, segment, true)? else {
+                return Ok(None);
+            };
+            locks.push(lock);
+        }
+        Ok(Some(locks))
     }
 }
 
@@ -726,29 +767,63 @@ impl MemoryPort for InMemoryMemory {
     }
 
     async fn search(&self, query: &MemorySearchQuery) -> MemorySearchResult {
-        let state = self.state.read().expect("memory state lock poisoned");
-        let active = state
-            .active
-            .iter()
-            .map(|entry| (entry, MemoryLocation::Active));
-        let archive = state
-            .archive
-            .iter()
-            .map(|entry| (entry, MemoryLocation::Archive));
-        let entries: Box<dyn Iterator<Item = (&MemoryEntry, MemoryLocation)>> =
-            if query.include_archive {
-                Box::new(active.chain(archive))
-            } else {
-                Box::new(active)
-            };
-        let candidates = entries
-            .filter(|(entry, _)| matches_filters(entry, query.layer, query.category))
-            .filter(|(entry, _)| !query.exclude_stale || is_injection_eligible(entry, query.now));
-        let hits = crate::domain::lexical_search::rank_explicit_search(candidates, query);
+        let hits = {
+            let state = self.state.read().expect("memory state lock poisoned");
+            let active = state
+                .active
+                .iter()
+                .map(|entry| (entry, MemoryLocation::Active));
+            let archive = state
+                .archive
+                .iter()
+                .map(|entry| (entry, MemoryLocation::Archive));
+            let entries: Box<dyn Iterator<Item = (&MemoryEntry, MemoryLocation)>> =
+                if query.include_archive {
+                    Box::new(active.chain(archive))
+                } else {
+                    Box::new(active)
+                };
+            let candidates = entries
+                .filter(|(entry, _)| matches_filters(entry, query.layer, query.category))
+                .filter(|(entry, _)| {
+                    !query.exclude_stale || is_injection_eligible(entry, query.now)
+                });
+            crate::domain::lexical_search::rank_explicit_search(candidates, query)
+        };
+        if query.confirm_hits {
+            let ids: Vec<_> = hits.iter().map(|hit| hit.entry.id).collect();
+            let _ = self.confirm_hits(&ids, query.now).await;
+        }
         MemorySearchResult {
             mode: MemoryRetrievalMode::ExplicitSearch,
             hits,
         }
+    }
+
+    async fn confirm_hits(&self, ids: &[MemoryId], now: u64) -> Result<usize, MemoryError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let Ok(permit) = tokio::time::timeout(
+            crate::constants::CONFIRM_HITS_LOCK_TIMEOUT,
+            self.acquire_write_permit(),
+        )
+        .await
+        else {
+            return Ok(0);
+        };
+        let _permit = permit?;
+        let mut state = self.state.write().expect("memory state lock poisoned");
+        let mut confirmed = 0;
+        for entry in &mut state.active {
+            if ids.contains(&entry.id) && crate::domain::confirm_hit(entry, now) {
+                confirmed += 1;
+            }
+        }
+        if confirmed > 0 {
+            state.revision += 1;
+        }
+        Ok(confirmed)
     }
 
     async fn write(&self, mut entry: MemoryEntry) -> Result<WriteResult, MemoryError> {

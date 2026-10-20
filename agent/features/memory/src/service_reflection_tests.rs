@@ -1069,6 +1069,172 @@ async fn explicit_search_refreshes_confirmation_but_injection_recall_does_not() 
 }
 
 #[tokio::test]
+async fn confirm_hits_persists_active_entries_and_is_idempotent() {
+    let root = sweep_root("confirm-recall");
+    let store = sweep_store(&root);
+    let fresh = entry(MemoryLayer::Project, "recall fresh");
+    let mut pinned = entry(MemoryLayer::Global, "recall pinned");
+    pinned.pinned = true;
+    let stale = outdated_entry(MemoryLayer::Project, "recall outdated");
+    seed_layer(
+        &store,
+        MemoryLayer::Project,
+        vec![fresh.clone(), stale.clone()],
+    )
+    .await;
+    seed_layer(&store, MemoryLayer::Global, vec![pinned.clone()]).await;
+    let service =
+        MemoryService::open_with_clock(sweep_store(&root), MemoryPolicy::default(), || 200)
+            .await
+            .unwrap();
+    let ids = vec![fresh.id, fresh.id, pinned.id, stale.id, MemoryId::now_v7()];
+    assert_eq!(service.confirm_hits(&ids, 200).await.unwrap(), 2);
+    assert_eq!(service.confirm_hits(&ids, 200).await.unwrap(), 0);
+    assert_eq!(service.confirm_hits(&ids, 150).await.unwrap(), 0);
+    drop(service);
+    let reopened =
+        MemoryService::open_with_clock(sweep_store(&root), MemoryPolicy::default(), || 200)
+            .await
+            .unwrap();
+    for stored in reopened.list(None).await {
+        assert_eq!(
+            stored.last_confirmed_at,
+            if stored.id == stale.id { 100 } else { 200 }
+        );
+        assert_eq!(stored.confirmation_count, u32::from(stored.id != stale.id));
+    }
+    drop(reopened);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn confirm_hits_skips_busy_corpus_without_blocking_recall() {
+    let root = sweep_root("confirm-busy");
+    let store = sweep_store(&root);
+    let fresh = entry(MemoryLayer::Project, "recall busy");
+    seed_layer(&store, MemoryLayer::Project, vec![fresh.clone()]).await;
+    let service =
+        MemoryService::open_with_clock(sweep_store(&root), MemoryPolicy::default(), || 200)
+            .await
+            .unwrap();
+    let permit = service.acquire_write_permit().await.unwrap();
+    let confirmed = tokio::time::timeout(
+        Duration::from_secs(1),
+        service.confirm_hits(&[fresh.id], 200),
+    )
+    .await
+    .expect("Reflect 持锁时续期必须有界跳过，不得等待 LLM 窗口")
+    .unwrap();
+    assert_eq!(confirmed, 0);
+    drop(permit);
+    assert_eq!(service.list(None).await[0].last_confirmed_at, 100);
+    drop(service);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn confirm_hits_rechecks_current_entry_after_cas_conflict() {
+    let fresh = entry(MemoryLayer::Project, "recall conflict");
+    for became_outdated in [false, true] {
+        let mut newer = fresh.clone();
+        newer.last_confirmed_at = 300;
+        newer.outdated = became_outdated;
+        let store = ScriptedStore::new(
+            layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 2], vec![]),
+            layer_script(
+                vec![
+                    Ok(committed(1, MemoryLayer::Project, vec![fresh.clone()])),
+                    Ok(committed(1, MemoryLayer::Project, vec![fresh.clone()])),
+                    Ok(committed(2, MemoryLayer::Project, vec![newer.clone()])),
+                    Ok(committed(2, MemoryLayer::Project, vec![newer])),
+                ],
+                vec![Err(MemoryError::Storage {
+                    kind: MemoryStorageErrorKind::ConcurrentWrite,
+                })],
+            ),
+        );
+        let service = MemoryService::open_with_clock(store, MemoryPolicy::default(), || 200)
+            .await
+            .unwrap();
+        assert_eq!(service.confirm_hits(&[fresh.id], 200).await.unwrap(), 0);
+        let (global, project) = service.snapshot();
+        assert!(global.active().is_empty());
+        assert_eq!(project.active()[0].last_confirmed_at, 300);
+        assert_eq!(project.active()[0].confirmation_count, 0);
+        assert_eq!(project.active()[0].outdated, became_outdated);
+    }
+}
+
+#[tokio::test]
+async fn confirm_hits_batches_events_per_layer_and_keeps_failures_non_mutating() {
+    use crate::domain::event::{EventChange, MemoryEventOp};
+    use std::sync::Arc;
+    let fresh = entry(MemoryLayer::Project, "recall event one");
+    let other = entry(MemoryLayer::Project, "recall event two");
+    let mut renewed = fresh.clone();
+    renewed.last_confirmed_at = 200;
+    renewed.confirmation_count = 1;
+    let store = ScriptedStore::new(
+        layer_script(vec![Ok(empty_layer(1, MemoryLayer::Global)); 3], vec![]),
+        layer_script(
+            vec![
+                Ok(committed(
+                    1,
+                    MemoryLayer::Project,
+                    vec![fresh.clone(), other.clone()],
+                )),
+                Ok(committed(
+                    1,
+                    MemoryLayer::Project,
+                    vec![fresh.clone(), other.clone()],
+                )),
+                Ok(committed(
+                    2,
+                    MemoryLayer::Project,
+                    vec![renewed, other.clone()],
+                )),
+            ],
+            vec![Ok(receipt(2)), Err(storage_error())],
+        ),
+    );
+    let recorder = RecordingEventAppend::default();
+    let service = MemoryService::open_with_clock_and_scorer_and_events(
+        store,
+        MemoryPolicy::default(),
+        || 200,
+        None,
+        Arc::new(recorder.clone()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        service
+            .confirm_hits(&[fresh.id, other.id], 200)
+            .await
+            .unwrap(),
+        2
+    );
+    assert!(service.confirm_hits(&[fresh.id], 300).await.is_err());
+    let events: Vec<_> = recorder
+        .events()
+        .into_iter()
+        .filter(|event| event.op == MemoryEventOp::ConfirmHit)
+        .collect();
+    assert_eq!(
+        events.len(),
+        1,
+        "同层合批只发一条确认事件，失败不发成功事件"
+    );
+    let EventChange::Write { before, after } = &events[0].change else {
+        panic!("确认事件须含变更前后快照");
+    };
+    assert_eq!(before.len(), 2);
+    assert_eq!(after.len(), 2);
+    assert!(after.iter().all(|entry| entry.last_confirmed_at == 200));
+    assert_eq!(service.snapshot().1.active()[0].last_confirmed_at, 200);
+}
+
+#[tokio::test]
 async fn apply_reflection_reports_capacity_fields_for_convergence_tracking() {
     // 反思质量评测需要从 apply 结果直接读出「应用后有效 active」与
     // 「容量目标」，否则收敛率只能靠外部快照对账。

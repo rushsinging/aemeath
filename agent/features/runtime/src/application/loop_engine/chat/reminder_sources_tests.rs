@@ -358,6 +358,84 @@ async fn recall_scoring_failure_clears_cache_silently() {
 }
 
 #[tokio::test]
+async fn recall_renews_only_entries_materialized_within_budget() {
+    let contents: Vec<String> = (0..8)
+        .map(|index| format!("worktree 记忆 {index} {}", "细".repeat(450)))
+        .collect();
+    let memory = recall_memory(contents.iter().map(String::as_str).collect()).await;
+    let source = MemoryRecallReminderSource::with_clock(
+        Arc::clone(&memory),
+        Arc::new(KeywordScoring {
+            keyword: "worktree",
+            high: 0.9,
+        }),
+        Arc::new(|| 4_242),
+    );
+    source.refresh("worktree").await;
+    let snapshot = source.build().expect("应物化召回快照");
+    let context::InvocationReminderData::MemoryRecall { entries } =
+        serde_json::from_str(&snapshot.data).unwrap()
+    else {
+        panic!("期望 MemoryRecall 快照");
+    };
+    assert!(entries.len() < contents.len(), "预算必须淘汰部分候选");
+    for entry in memory.list(None).await {
+        let included = entries.iter().any(|item| item.id == entry.id.to_string());
+        assert_eq!(entry.last_confirmed_at, if included { 4_242 } else { 10 });
+        assert_eq!(entry.confirmation_count, u32::from(included));
+    }
+    source.refresh("worktree").await;
+    assert!(
+        memory
+            .list(None)
+            .await
+            .iter()
+            .all(|entry| entry.confirmation_count <= 1),
+        "同秒重复命中不能重复累计确认次数"
+    );
+}
+
+#[tokio::test]
+async fn recall_single_hit_renews_but_rejected_and_failed_recall_do_not() {
+    let memory = recall_memory(vec!["worktree 单条召回"]).await;
+    let low_source = MemoryRecallReminderSource::with_clock(
+        Arc::clone(&memory),
+        Arc::new(KeywordScoring {
+            keyword: "worktree",
+            high: 0.3,
+        }),
+        Arc::new(|| 4_242),
+    );
+    low_source.refresh("worktree").await;
+    assert!(low_source.build().is_none());
+    assert_eq!(memory.list(None).await[0].last_confirmed_at, 10);
+    let failed_source = MemoryRecallReminderSource::with_clock(
+        Arc::clone(&memory),
+        Arc::new(FailingScoring),
+        Arc::new(|| 4_242),
+    );
+    failed_source.refresh("worktree").await;
+    assert!(failed_source.build().is_none());
+    assert_eq!(memory.list(None).await[0].last_confirmed_at, 10);
+    let accepted_source = MemoryRecallReminderSource::with_clock(
+        Arc::clone(&memory),
+        Arc::new(KeywordScoring {
+            keyword: "worktree",
+            high: 0.9,
+        }),
+        Arc::new(|| 4_242),
+    );
+    accepted_source.refresh("不存在的检索词").await;
+    assert!(accepted_source.build().is_none());
+    assert_eq!(memory.list(None).await[0].last_confirmed_at, 10);
+    accepted_source.refresh("worktree").await;
+    assert!(accepted_source.build().is_some());
+    let renewed = memory.list(None).await;
+    assert_eq!(renewed[0].last_confirmed_at, 4_242);
+    assert_eq!(renewed[0].confirmation_count, 1);
+}
+
+#[tokio::test]
 async fn recall_budget_drops_tail_entries() {
     let long_entry = "超".repeat(180);
     let source = MemoryRecallReminderSource::with_clock(

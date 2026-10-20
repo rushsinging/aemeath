@@ -426,6 +426,47 @@ async fn distinct_project_keys_share_global_and_isolate_project() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+#[tokio::test]
+async fn confirmation_skips_os_lock_held_by_another_service() {
+    use crate::service::MemoryService;
+    let root = unique_root("confirm-os-lock");
+    let lock_root = storage_api::SafeStorageRoot::open(&root).unwrap();
+    let storage = shared_storage(&root);
+    let first = MemoryService::open_with_clock(
+        AtomicDatasetMemoryStore::with_lock_root(
+            Arc::clone(&storage),
+            project_key(),
+            Some(lock_root.clone()),
+        ),
+        MemoryPolicy::default(),
+        || 100,
+    )
+    .await
+    .unwrap();
+    let second = MemoryService::open_with_clock(
+        AtomicDatasetMemoryStore::with_lock_root(storage, project_key(), Some(lock_root)),
+        MemoryPolicy::default(),
+        || 200,
+    )
+    .await
+    .unwrap();
+    let memory_entry = entry(MemoryLayer::Project, "confirmation os lock");
+    first.write(memory_entry.clone()).await.unwrap();
+    let permit = first.acquire_write_permit().await.unwrap();
+    assert_eq!(
+        second.confirm_hits(&[memory_entry.id], 200).await.unwrap(),
+        0
+    );
+    drop(permit);
+    assert_eq!(
+        second.confirm_hits(&[memory_entry.id], 200).await.unwrap(),
+        1
+    );
+    drop(first);
+    drop(second);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn os_write_lock_blocks_second_service_until_released() {
     use crate::service::MemoryService;

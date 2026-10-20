@@ -26,6 +26,10 @@ pub(crate) const GLOBAL_DATASET_SEGMENT: &str = "global";
 /// Corpus 写锁文件名（独立于 storage `dataset.lock`，供 Reflect LLM 窗口长持）。
 pub(crate) const WRITE_LOCK_FILE: &str = "write.lock";
 
+/// 命中续期等待 corpus 写许可的上限，不排队等待后台反思的 LLM 窗口。
+pub(crate) const CONFIRM_HITS_LOCK_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(50);
+
 /// Members are canonicalized into name order by Storage; "active" sorts before
 /// "archive".
 /// Members are canonicalized into name order by Storage; "active" sorts before

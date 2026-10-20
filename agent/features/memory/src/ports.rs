@@ -172,6 +172,13 @@ pub trait MemoryDatasetStore: Send + Sync {
     async fn acquire_os_write_locks(&self) -> Result<Vec<OsWriteLockHandle>, MemoryError> {
         Ok(Vec::new())
     }
+
+    /// 命中续期专用的非阻塞取锁。不能非阻塞获取的实现缺省跳过续期。
+    async fn try_acquire_os_write_locks(
+        &self,
+    ) -> Result<Option<Vec<OsWriteLockHandle>>, MemoryError> {
+        Ok(None)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -268,13 +275,20 @@ pub trait ReflectionHistoryStore: ReflectionHistoryQuery {
 
 #[async_trait]
 pub trait MemoryPort: Send + Sync {
-    /// 获取 corpus 写许可（进程内 + 可选 OS flock）。同 task 可重入。
+    /// 获取 corpus 写许可（进程内 + 可选 OS flock）。已持许可时必须走
+    /// `*_under_permit`，禁止对同一门闩嵌套取锁。
     async fn acquire_write_permit(&self) -> Result<MemoryWritePermit, MemoryError> {
         Ok(MemoryWritePermit::noop())
     }
 
     async fn retrieve_for_inject(&self, query: &MemoryQuery) -> MemorySearchResult;
     async fn search(&self, query: &MemorySearchQuery) -> MemorySearchResult;
+    /// 确认显式 search 或已物化 recall 的命中。只刷新仍有效的 active 条目，
+    /// 时间单调、同秒幂等；写锁忙时有界跳过，不得阻塞检索等待后台反思。
+    /// 返回实际续期条数；NoOp 与只读测试端口缺省不写入。
+    async fn confirm_hits(&self, _ids: &[MemoryId], _now: u64) -> Result<usize, MemoryError> {
+        Ok(0)
+    }
     async fn write(&self, entry: MemoryEntry) -> Result<WriteResult, MemoryError>;
     async fn update(&self, id: &MemoryId, content: &str) -> Result<bool, MemoryError>;
     async fn delete(&self, id: &MemoryId) -> Result<bool, MemoryError>;

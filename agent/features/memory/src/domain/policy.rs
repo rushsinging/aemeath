@@ -31,6 +31,17 @@ pub fn is_lapsed(entry: &MemoryEntry) -> bool {
     entry.outdated || entry.superseded_by.is_some()
 }
 
+/// 命中确认只推进有效条目的确认时间；重复或旧时间不产生写入。
+/// 确认次数按不同秒的有效确认累计，溢出时饱和。
+pub(crate) fn confirm_hit(entry: &mut MemoryEntry, now: u64) -> bool {
+    if is_lapsed(entry) || entry.last_confirmed_at >= now {
+        return false;
+    }
+    entry.last_confirmed_at = now;
+    entry.confirmation_count = entry.confirmation_count.saturating_add(1);
+    true
+}
+
 // M12 → #2007：反思输入全可见——失效条目进入「失效驻留」标注段供 LLM
 // 裁决（确认淘汰或保留），TTL 过期条目留在正常段并带催促标注。失效段
 // NEVER 作为新建议的证据来源（051 §8.2 的污染循环由分段与指令抑制）。

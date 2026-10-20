@@ -292,14 +292,12 @@ pub struct MemorySearchQuery {
     pub layer: Option<MemoryLayer>,
     pub category: Option<MemoryCategory>,
     pub include_archive: bool,
-    /// 注入视角（recall 链路）：true 时 outdated / superseded / TTL 过期条目
-    /// 不进入词法候选（不占召回与重排名额）；显式搜索保持 false 以维持
-    /// 「过期可见 + 状态标注」的可见性契约（M5/M10 仅约束注入）。
+    /// 注入视角：true 时仅排除 outdated / superseded；TTL 过期仍可召回。
+    /// 显式搜索保持 false，以保留失效条目的查询和状态标注。
     pub exclude_stale: bool,
-    /// #2007 D3：显式检索命中即确认——true 时命中条目 best-effort 刷新
-    /// `last_confirmed_at`（TTL 续期基准）与 `confirmation_count`。只有
-    /// MemorySearch 工具层置 true；注入召回与内部检索 MUST NOT 置 true
-    /// （系统选中 ≠ 被证明有效）。
+    /// 显式 search 的命中确认开关。recall 的候选搜索必须为 false，
+    /// 待调用方完成相关性门控与预算物化后通过 `MemoryPort::confirm_hits`
+    /// 仅确认实际入选条目；启动自动注入与内部检索不刷新确认时间。
     pub confirm_hits: bool,
     pub now: u64,
 }

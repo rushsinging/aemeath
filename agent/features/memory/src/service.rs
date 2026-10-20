@@ -630,40 +630,9 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
         (state.global.dataset.clone(), state.project.dataset.clone())
     }
 
-    /// #2007 D3：best-effort 确认刷新——只在确认时间推进时写（同秒幂等）、
-    /// 失效条目跳过；单条失败仅 warn，MUST NOT 影响检索结果。
-    async fn confirm_search_hits(&self, hits: &[crate::domain::MemorySearchHit], now: u64) {
-        for hit in hits {
-            let entry = &hit.entry;
-            if crate::domain::is_lapsed(entry) || entry.last_confirmed_at >= now {
-                continue;
-            }
-            let id = entry.id;
-            if let Err(error) = self
-                .mutate_entry_and_emit(
-                    MemoryEventOp::ConfirmHit,
-                    "confirm_hit",
-                    id,
-                    move |target| {
-                        target.last_confirmed_at = now;
-                        target.confirmation_count += 1;
-                    },
-                )
-                .await
-            {
-                log::warn!(
-                    target: crate::LOG_TARGET,
-                    "memory_confirm_hit_failed id={id} error={error:?}"
-                );
-            }
-        }
-    }
-
-    /// 反思提交后收敛复核的告警文案。与 apply 预检、反思 prompt 三处同源：
-    /// 计数用「有效且未过期」口径（[`crate::domain::effective_active_count_at`]，
-    /// outdated / 被取代 / TTL 过期残留已不可注入，MUST NOT 误报成超载——
-    /// pinned 过期条目留在 active 但不占收敛目标）；target 取策略
-    /// `target_active_entries`（生产装配即配置值）。返回 `None` 表示无需告警。
+    /// 反思提交后收敛复核的告警文案。与 apply 预检、反思 prompt 共用
+    /// effective_active_count：仅排除 outdated / 被取代，TTL 过期仍计入。
+    /// target 取策略 target_active_entries，返回 None 表示无需告警。
     fn reflection_above_target_after_commit_notice(&self) -> Option<String> {
         let project_active = {
             let state = self.state.read().expect("memory state lock poisoned");
@@ -946,14 +915,78 @@ impl<S: MemoryDatasetStore> MemoryPort for MemoryService<S> {
         ))
         .await;
         if query.confirm_hits {
-            // #2007 D3：显式检索命中即确认——刷新 last_confirmed_at（TTL 续期
-            // 基准）与 confirmation_count；注入召回与内部检索不刷新。
-            self.confirm_search_hits(&hits, query.now).await;
+            let ids: Vec<_> = hits.iter().map(|hit| hit.entry.id).collect();
+            if let Err(error) = self.confirm_hits(&ids, query.now).await {
+                log::warn!(target: crate::LOG_TARGET, "memory_confirm_hits_failed source=search error={error:?}");
+            }
         }
         MemorySearchResult {
             mode: MemoryRetrievalMode::ExplicitSearch,
             hits,
         }
+    }
+
+    async fn confirm_hits(&self, ids: &[MemoryId], now: u64) -> Result<usize, MemoryError> {
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        let Some(os_locks) = self.store.try_acquire_os_write_locks().await? else {
+            log::debug!(target: crate::LOG_TARGET, "memory_confirm_hits_skipped reason=corpus_busy count={}", ids.len());
+            return Ok(0);
+        };
+        let _permit = match tokio::time::timeout(
+            crate::constants::CONFIRM_HITS_LOCK_TIMEOUT,
+            self.write_gate.acquire(os_locks),
+        )
+        .await
+        {
+            Ok(permit) => permit,
+            Err(_) => {
+                log::debug!(target: crate::LOG_TARGET, "memory_confirm_hits_skipped reason=corpus_busy count={}", ids.len());
+                return Ok(0);
+            }
+        };
+        let mut confirmed = 0;
+        for layer in [MemoryLayer::Global, MemoryLayer::Project] {
+            // 检索读取不覆写内存快照；确认必须以当前已提交盘面为写入基准。
+            let latest = load_layer(&self.store, layer).await?;
+            self.set_layer_state(layer, latest);
+            let slot: WriteCapture = Default::default();
+            let capture = Arc::clone(&slot);
+            let changed = self
+                .mutate_layer(layer, |dataset| {
+                    let mut before = Vec::new();
+                    let mut after = Vec::new();
+                    for entry in dataset.active_mut() {
+                        if !ids.contains(&entry.id) {
+                            continue;
+                        }
+                        let previous = entry.clone();
+                        if crate::domain::confirm_hit(entry, now) {
+                            before.push(previous);
+                            after.push(entry.clone());
+                        }
+                    }
+                    let count = after.len();
+                    *capture.lock().expect("confirm event slot poisoned") = (before, after);
+                    Ok((count, count > 0))
+                })
+                .await?;
+            if changed > 0 {
+                let (before, after) = slot.lock().expect("confirm event slot poisoned").clone();
+                let correlation = format!("confirm_hit-{layer:?}-{}", uuid::Uuid::now_v7());
+                let mut event = self.build_write_event(
+                    MemoryEventOp::ConfirmHit,
+                    correlation.clone(),
+                    correlation,
+                    EventChange::Write { before, after },
+                );
+                event.layer = Some(layer);
+                self.emit_event(event).await;
+                confirmed += changed;
+            }
+        }
+        Ok(confirmed)
     }
 
     async fn write(&self, entry: MemoryEntry) -> Result<WriteResult, MemoryError> {
