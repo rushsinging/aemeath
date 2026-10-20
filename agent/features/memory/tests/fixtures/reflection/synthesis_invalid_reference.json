@@ -1,0 +1,15 @@
+{
+  "deviations": [],
+  "suggested_memories": [
+    {
+      "layer": "project",
+      "category": "fact",
+      "content": "合法建议照常写入，非法引用逐条跳过",
+      "tags": [],
+      "reason": "golden",
+      "supersedes": [],
+      "synthesizes": []
+    }
+  ],
+  "outdated_memories": ["some-tag-slug", "M1"]
+}

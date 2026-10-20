@@ -289,6 +289,7 @@ async fn malformed_synthesis_keeps_prior_committed_noise_in_failure_history() {
         9,
         None,
         &prior_apply,
+        0,
     )
     .await
     .unwrap_err();
@@ -609,6 +610,7 @@ async fn event_reflection_ops_complete_emits_trigger_apply_cost() {
         88,
         None,
         &prior_apply,
+        0,
     )
     .await
     .unwrap();

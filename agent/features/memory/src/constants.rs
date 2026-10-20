@@ -38,6 +38,9 @@ pub(crate) const ACTIVE_MEMBER: &str = "active";
 
 pub(crate) const SCHEMA_VERSION: u32 = 1;
 
+/// 单条记忆 content 字符上限（写入端统一不变式，schema 声明与校验同源）。
+pub(crate) const MEMORY_CONTENT_MAX_CHARS: usize = 500;
+
 /// 生产事件流 envelope 的 schema 版本（`MemoryEvent::schema_version` 写入值）。
 pub(crate) const EVENT_SCHEMA_VERSION: u32 = 1;
 

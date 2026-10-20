@@ -890,6 +890,18 @@ impl MemoryPort for InMemoryMemory {
         };
 
         for suggestion in &output.suggested_memories {
+            // 写入端长度不变式：超长/空 suggestion 逐条跳过并记录（与生产版同语义）。
+            if suggestion.content.chars().count() > crate::constants::MEMORY_CONTENT_MAX_CHARS
+                || suggestion.content.trim().is_empty()
+            {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "memory_reflection_suggestion_skipped reason=content_length chars={} max={}",
+                    suggestion.content.chars().count(),
+                    crate::constants::MEMORY_CONTENT_MAX_CHARS,
+                );
+                continue;
+            }
             let now = (self.clock)();
             let id = reflection_memory_id(now)?;
             let mut entry = MemoryEntry::new(
@@ -963,7 +975,13 @@ impl MemoryPort for InMemoryMemory {
             });
         }
 
+        // #2007：active_after 与门禁同口径——有效（TTL 过期仍计入）。
+        let settled_active = crate::domain::effective_active_count(&candidate.active);
         *state = candidate;
+        // 与生产侧同口径透出收敛率评测字段：在 apply 完成后的盘面重算，
+        // NEVER 复用门禁块的试算值（supersede/归档尚未发生的时点值）。
+        result.active_after = Some(settled_active);
+        result.capacity_target = Some(target);
         Ok(result)
     }
     async fn archive(&self, ids: &[MemoryId]) -> Result<bool, MemoryError> {

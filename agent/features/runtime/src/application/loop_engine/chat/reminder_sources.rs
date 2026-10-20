@@ -271,6 +271,30 @@ impl ReminderSource for BackgroundProcessReminderSource {
     }
 }
 
+/// 召回内容预览：上限内全文注入；仅存量超长条目（写入端长度不变式上线前
+/// 遗留）触发兜底截断——在窗口内最后一个句边界截断（找不到则硬截），并追加
+/// 截断标记（标记计入总长，预览 NEVER 超上限、NEVER 无声腰斩）。
+fn recall_content_preview(content: &str) -> String {
+    const TRUNCATION_MARKER: &str = "…（截断）";
+    let max_chars = crate::application::constants::MEMORY_RECALL_PREVIEW_CHARS;
+    if content.chars().count() <= max_chars {
+        return content.to_string();
+    }
+    let window_chars: Vec<char> = content
+        .chars()
+        .take(max_chars - TRUNCATION_MARKER.chars().count())
+        .collect();
+    let sentence_end = window_chars
+        .iter()
+        .rposition(|ch| matches!(ch, '。' | '；' | '！' | '？' | '\n' | '.' | ';' | '!' | '?'));
+    let mut preview: String = match sentence_end {
+        Some(index) => window_chars[..=index].iter().collect(),
+        None => window_chars.into_iter().collect(),
+    };
+    preview.push_str(TRUNCATION_MARKER);
+    preview
+}
+
 /// per-message 记忆主动召回 source（#1834）：`refresh` 预物化（async）+
 /// `build` 读缓存（sync）。
 ///
@@ -332,12 +356,7 @@ impl MemoryRecallReminderSource {
         let mut entries = Vec::new();
         let mut used_chars = 0usize;
         for item in recalled {
-            let preview: String = item
-                .entry
-                .content
-                .chars()
-                .take(crate::application::constants::MEMORY_RECALL_PREVIEW_CHARS)
-                .collect();
+            let preview = recall_content_preview(&item.entry.content);
             let line_chars = preview.chars().count() + item.entry.id.to_string().len() + 4;
             if used_chars + line_chars > crate::application::constants::MEMORY_RECALL_BUDGET_CHARS {
                 break;

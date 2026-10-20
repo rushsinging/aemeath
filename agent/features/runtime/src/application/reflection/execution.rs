@@ -201,6 +201,7 @@ pub(crate) async fn execute_reflection(
         started.elapsed().as_millis() as u64,
         Some(&write_permit),
         &noise_apply,
+        swept as u32,
     )
     .await?;
 
@@ -241,6 +242,7 @@ pub(crate) async fn execute_reflection(
                     started.elapsed().as_millis() as u64,
                     Some(&write_permit),
                     &noise_apply,
+                    swept as u32,
                 )
                 .await?;
             }

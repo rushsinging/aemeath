@@ -229,15 +229,18 @@ async fn recall_memory(entries: Vec<&str>) -> Arc<dyn memory::api::MemoryPort> {
     })
     .expect("policy 合法");
     for content in entries {
-        let entry = memory::api::MemoryEntry::new(
+        // 先经 `new` 构造合法条目，再覆写 content——存量盘上可能存在写入端
+        // 长度不变式上线前的超长遗留条目，fixture 必须能表达该形态。
+        let mut entry = memory::api::MemoryEntry::new(
             memory::api::MemoryId::now_v7(),
             10,
             memory::api::MemoryLayer::Project,
             memory::api::MemoryCategory::Fact,
-            content,
+            "占位",
             memory::api::MemorySource::User,
         )
         .expect("entry 构造");
+        entry.content = content.to_string();
         memory.write(entry).await.expect("写入");
     }
     Arc::new(memory)
@@ -384,6 +387,69 @@ async fn recall_budget_drops_tail_entries() {
     );
     assert!(count >= 1);
     let _ = long_entry; // 长内容场景由预览截断覆盖（预览上限 200 字符）
+}
+
+#[tokio::test]
+async fn recall_preview_keeps_full_content_within_write_limit() {
+    // 写入端上限 500 内的条目永远完整注入——LLM 消费全文，NEVER 半句话。
+    let content = format!("{}。完整结论必须完整注入。", "详".repeat(480));
+    let source = MemoryRecallReminderSource::with_clock(
+        recall_memory(vec![&content]).await,
+        Arc::new(KeywordScoring {
+            keyword: "完整",
+            high: 0.9,
+        }),
+        Arc::new(|| 4_242),
+    );
+    source.refresh("完整结论怎么用").await;
+    let snapshot = source.build().expect("应有快照");
+    let data: context::InvocationReminderData =
+        serde_json::from_str(&snapshot.data).expect("合法快照");
+    match &data {
+        context::InvocationReminderData::MemoryRecall { entries } => {
+            assert_eq!(entries.len(), 1);
+            assert_eq!(
+                entries[0].content_preview, content,
+                "≤ 写入上限的条目必须原文注入"
+            );
+        }
+        other => panic!("期望 MemoryRecall，实际 {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn recall_preview_trims_overlong_entry_at_sentence_boundary_with_marker() {
+    // 存量盘上超长条目（写入不变式上线前遗留）的兜底：句边界截断 + 截断标记。
+    let overlong = format!("第一句结论完整保留。{}", "尾部冗余细节。".repeat(120));
+    let source = MemoryRecallReminderSource::with_clock(
+        recall_memory(vec![&overlong]).await,
+        Arc::new(KeywordScoring {
+            keyword: "结论",
+            high: 0.9,
+        }),
+        Arc::new(|| 4_242),
+    );
+    source.refresh("结论是什么").await;
+    let snapshot = source.build().expect("应有快照");
+    let data: context::InvocationReminderData =
+        serde_json::from_str(&snapshot.data).expect("合法快照");
+    match &data {
+        context::InvocationReminderData::MemoryRecall { entries } => {
+            let preview = &entries[0].content_preview;
+            assert!(
+                preview.chars().count()
+                    <= crate::application::constants::MEMORY_RECALL_PREVIEW_CHARS,
+                "兜底预览不得超过预览上限：{}",
+                preview.chars().count()
+            );
+            assert!(
+                preview.contains("第一句结论完整保留"),
+                "句首关键结论必须在预览内"
+            );
+            assert!(preview.contains("（截断）"), "截断必须显式标记");
+        }
+        other => panic!("期望 MemoryRecall，实际 {other:?}"),
+    }
 }
 
 #[tokio::test]

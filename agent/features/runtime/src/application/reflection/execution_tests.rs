@@ -795,6 +795,8 @@ async fn two_phase_reflection_removes_noise_then_completes() {
     let persisted = history.records.lock().unwrap();
     let record = persisted.last().expect("最终记录必须落盘");
     assert_eq!(record.apply_result.as_ref(), Some(applied));
+    // sweep 归档的失效残留计数进 record（本例：residual 1 条；noisy 走去噪不计入）。
+    assert_eq!(record.stale_swept, Some(1));
     drop(persisted);
     // Step1 的 Step2 prompt 不再含噪音条目。
     let second_prompt = &provider.requests()[1];

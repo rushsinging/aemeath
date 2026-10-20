@@ -1067,3 +1067,31 @@ async fn explicit_search_refreshes_confirmation_but_injection_recall_does_not() 
     drop(service);
     std::fs::remove_dir_all(&root).unwrap();
 }
+
+#[tokio::test]
+async fn apply_reflection_reports_capacity_fields_for_convergence_tracking() {
+    // 反思质量评测需要从 apply 结果直接读出「应用后有效 active」与
+    // 「容量目标」，否则收敛率只能靠外部快照对账。
+    let memory = InMemoryMemory::new(MemoryPolicy {
+        max_entries: 10,
+        similarity_threshold: 0.8,
+        target_active_entries: 5,
+        default_ttl_secs: 0,
+    })
+    .expect("policy");
+    memory
+        .write(entry(MemoryLayer::Project, "existing fact"))
+        .await
+        .expect("write");
+
+    let result = memory
+        .apply_reflection(&ReflectionOutput {
+            suggested_memories: vec![suggestion(MemoryLayer::Project, "merged fact")],
+            ..ReflectionOutput::default()
+        })
+        .await
+        .expect("apply");
+
+    assert_eq!(result.active_after, Some(2), "应用后有效 active = 2");
+    assert_eq!(result.capacity_target, Some(5), "容量目标随结果透出");
+}

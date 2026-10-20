@@ -1,4 +1,3 @@
-use super::constants::MAX_CONTENT_CHARS;
 use super::helpers::*;
 use super::*;
 use crate::adapters::memory_tool::{
@@ -113,6 +112,37 @@ async fn add_result_returns_full_id_for_follow_up_actions() {
     assert_eq!(id.len(), "mem_".len() + 11);
     assert!(share::ids::is_typed_id(&id, "mem"));
     assert!(result.text.contains(&id));
+}
+
+#[tokio::test]
+async fn add_result_rejects_over_length_content_with_actionable_error() {
+    // 长度上限由 memory domain 写入不变式统一持有；工具层透传其可行动错误
+    //（含拆分引导），NEVER 重复定义第二套上限。
+    let memory =
+        memory::api::InMemoryMemory::new_with_clock(MemoryPolicy::default(), || 2_000).unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let context = crate::domain::test_support::TestToolExecutionContextBuilder::new(
+        workspace.path().to_path_buf(),
+    )
+    .build();
+
+    let result = handlers::add_memory(
+        serde_json::json!({
+            "content": "长".repeat(501),
+            "layer": "project",
+            "category": "fact"
+        }),
+        &context,
+        &memory,
+    )
+    .await;
+
+    assert!(result.is_error, "超长 content 必须被拒绝");
+    assert!(
+        result.text.contains("500") && result.text.contains("拆分"),
+        "错误消息应含上限与拆分引导：{}",
+        result.text
+    );
 }
 
 #[tokio::test]
@@ -708,11 +738,8 @@ fn test_validate_content_empty() {
     assert!(validate_content("   ").is_err());
 }
 
-#[test]
-fn test_validate_content_too_long() {
-    let content = "x".repeat(MAX_CONTENT_CHARS + 1);
-    assert!(validate_content(&content).is_err());
-}
+// 超长 content 拒绝已上移为 memory domain 写入不变式
+//（MemoryEntry::new，见 memory crate model_tests），工具层不再重复校验。
 
 #[test]
 fn test_parse_tags_normal() {

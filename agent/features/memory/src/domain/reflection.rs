@@ -359,6 +359,14 @@ pub struct ReflectionApplyResult {
     /// the cycle guard (M9) counts in neither this nor `completed`, so
     /// `attempted - completed` stays the honest skipped-operation count.
     pub superseded: usize,
+    /// 应用完成后 project 层的有效 active 数（outdated/superseded/TTL 之外），
+    /// 供反思收敛率评测直接从 apply 结果读取；解析失败等未触达 apply 的
+    /// 路径保持 None。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_after: Option<usize>,
+    /// 本次 apply 所依据的容量目标（policy.target_active_entries）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capacity_target: Option<usize>,
 }
 
 /// One completed Reflection result. Persistence is supplied by a separate adapter.
@@ -380,6 +388,10 @@ pub struct ReflectionRecord {
     /// 消息计数）。仅 Succeeded 终态推进；缺失（旧记录/未推进）时调用方回退。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_end: Option<u64>,
+    /// 执行编排 sweep_stale 实际归档的失效残留条数（未触达 sweep 的路径
+    /// 保持 None）；与 apply_result 的去噪计数相互独立。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stale_swept: Option<u32>,
 }
 
 impl ReflectionRecord {
@@ -395,6 +407,7 @@ impl ReflectionRecord {
             token_usage: None,
             duration_ms: 0,
             coverage_end: None,
+            stale_swept: None,
         }
     }
 
@@ -416,6 +429,7 @@ impl ReflectionRecord {
             token_usage: None,
             duration_ms,
             coverage_end: None,
+            stale_swept: None,
         }
     }
 
@@ -512,6 +526,8 @@ impl ReflectionEngine {
   对象（各数组填空数组），NEVER 输出解释、说明或任何文字。
 - suggested_memories[].layer 只能是 project 或 global，默认优先使用 project。
 - suggested_memories[].category 只能是 fact、decision、preference、pattern、pitfall。
+- suggested_memories[].content 单条不超过 500 字符；信息过多时拆分为多条，NEVER
+  超长输出（超长条目会被系统拒绝落盘）。
 - 引用已有记忆只能使用「当前项目记忆」列表行首的序号（形如 M3，对应行首 [M3]）。
   NEVER 编造列表中不存在的序号，NEVER 用标签、正文或任何其他标识充当引用。
   正确示例："outdated_memories": ["M2"]。
@@ -568,6 +584,8 @@ Requirements:
   or explanations.
 - suggested_memories[].layer must be project or global; prefer project by default.
 - suggested_memories[].category must be fact, decision, preference, pattern, or pitfall.
+- Each suggested_memories[].content must stay within 500 characters; split into
+  multiple entries instead of exceeding it (over-length entries are rejected).
 - Reference existing memories ONLY by the ordinal shown at the start of each
   "Current project memory" line (e.g. M3 for a line beginning with [M3]).
   NEVER invent an ordinal that is not in the list; NEVER use tags, content, or

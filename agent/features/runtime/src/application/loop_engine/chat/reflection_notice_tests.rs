@@ -79,6 +79,8 @@ fn payload_with(applied: usize) -> CompleteReflectionResult {
             suggestions_added: applied,
             outdated_marked: 0,
             superseded: 0,
+            active_after: None,
+            capacity_target: None,
         }),
         ..successful_payload()
     }
