@@ -40,6 +40,10 @@ pub use application::client::{
     RuntimeCoreDependenciesData, RuntimeToolAssemblyDependenciesData, SessionBootstrapAssemblyData,
     SessionModelSlotData, SkillBootstrapAssemblyData,
 };
+pub use application::client::{
+    wire_session_switch_coordinator, BoundMainRun, SessionSwitchCoordinator,
+    SessionSwitchCoordinatorBuilder, SessionSwitchDependencies,
+};
 pub use application::compact_generator::ProviderCompactGenerator;
 // #1248: RuntimeContextFactory is the narrow crate-root construction entry.
 // RuntimeServices stays internal; callers construct via RuntimeContextFactory::new(…).

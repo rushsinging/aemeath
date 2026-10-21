@@ -157,7 +157,9 @@ pub mod guidance {
 
 pub mod session {
     pub use crate::domain::session::{
-        CanonicalSession, PersistedWorkspaceContext, SessionMetadata, SnapshotState,
+        new_session_id, now_iso, same_project_identity, CanonicalSession,
+        PersistedWorkspaceContext, SessionMetadata, SessionRestore, SessionResumeLoad,
+        SnapshotState,
     };
 }
 

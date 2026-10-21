@@ -6,6 +6,7 @@ mod mapping;
 pub mod resume_helper;
 pub(crate) mod session_model_persist;
 pub(crate) mod session_query;
+mod session_switch;
 mod skill_catalog_refresh;
 mod startup_resume;
 mod trait_chat;
@@ -39,3 +40,7 @@ pub use from_args::{
 };
 pub use mapping::config_snapshot_to_sdk;
 pub use resume_helper::resume_session_to_backing;
+pub use session_switch::{
+    wire_session_switch_coordinator, BoundMainRun, SessionSwitchCoordinator,
+    SessionSwitchCoordinatorBuilder, SessionSwitchDependencies,
+};
