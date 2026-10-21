@@ -111,7 +111,6 @@ fn builtin_catalog_exposes_the_complete_stable_descriptor_matrix() {
             "exit",
             "help",
             "init",
-            "memory",
             "model",
             "reflect",
             "reflect-now",

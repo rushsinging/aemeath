@@ -25,7 +25,6 @@ pub(crate) fn event_kind_name(event: &ChatInputEvent) -> &'static str {
         ChatInputEvent::SetThinking { .. } => "SetThinking",
         ChatInputEvent::InitProject { .. } => "InitProject",
         ChatInputEvent::ManageSession { .. } => "ManageSession",
-        ChatInputEvent::ManageMemory { .. } => "ManageMemory",
         ChatInputEvent::ResumeSession { .. } => "ResumeSession",
         ChatInputEvent::QueryReflectionHistory { .. } => "QueryReflectionHistory",
         ChatInputEvent::ListModels => "ListModels",
@@ -90,10 +89,6 @@ pub enum PendingCommand {
     ManageSession {
         args: String,
     },
-    /// 管理记忆（/memory 非 remind）。
-    ManageMemory {
-        args: String,
-    },
     /// 恢复会话（/resume <id>）。
     ResumeSession {
         id: String,
@@ -102,8 +97,6 @@ pub enum PendingCommand {
     QueryReflectionHistory {
         limit: usize,
     },
-    /// 查询模型列表。
-    ListModels,
 }
 
 // #567: 手动实现 PartialEq/Eq，不比较变体内数据。
@@ -536,16 +529,6 @@ where
                     buffer.push(ChatInputEvent::ManageSession { args });
                 }
             }
-            ChatInputEvent::ManageMemory { args } => {
-                if is_idle {
-                    pending_command = Some(PendingCommand::ManageMemory { args });
-                    requeued_events = requeue_remaining(buffer, &mut iter);
-                    decision = GateDecision::Proceed;
-                    break;
-                } else {
-                    buffer.push(ChatInputEvent::ManageMemory { args });
-                }
-            }
             ChatInputEvent::ResumeSession { id } => {
                 if is_idle {
                     pending_command = Some(PendingCommand::ResumeSession { id });
@@ -567,14 +550,13 @@ where
                 }
             }
             ChatInputEvent::ListModels => {
-                if is_idle {
-                    pending_command = Some(PendingCommand::ListModels);
-                    requeued_events = requeue_remaining(buffer, &mut iter);
-                    decision = GateDecision::Proceed;
-                    break;
-                } else {
-                    buffer.push(ChatInputEvent::ListModels);
-                }
+                // 查询类事件在输入接收点由 `ImmediateQueryDispatcher` 就地消费，
+                // 永不排队。若有残留到达 gate，直接丢弃并留痕以便定位遗漏点。
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "[input_gate] ListModels reached gate; dropped (immediate query dispatcher owns it)"
+                );
+                dropped_events += 1;
             }
         }
     }
