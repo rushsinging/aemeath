@@ -1130,3 +1130,26 @@ fn struct_field_presence_excludes_registered_paths() {
             .expect("enforce");
     assert!(violations.is_empty(), "{violations:?}");
 }
+
+#[test]
+fn dev_self_dependency_edge_is_exempted() {
+    // dev-dependencies 自引用（Rust 官方 integration-test 模式，用于暴露
+    // dev feature）不计入生产依赖方向矩阵。
+    let self_dev =
+        serde_json::json!({ "name": "runtime", "kind": "dev", "path": "agent/features/runtime" });
+    let self_normal = serde_json::json!({ "name": "runtime", "path": "agent/features/runtime" });
+    let other_dev =
+        serde_json::json!({ "name": "tools", "kind": "dev", "path": "agent/features/tools" });
+    assert!(!crate::guards_rules::dependency_edge_counts(
+        "runtime", &self_dev
+    ));
+    // 非 dev 的自引用（异常数据）仍计入，由矩阵报违规兜底。
+    assert!(crate::guards_rules::dependency_edge_counts(
+        "runtime",
+        &self_normal
+    ));
+    // 他 crate 的 dev 边维持原行为（计入，保持与迁移前一致）。
+    assert!(crate::guards_rules::dependency_edge_counts(
+        "runtime", &other_dev
+    ));
+}
