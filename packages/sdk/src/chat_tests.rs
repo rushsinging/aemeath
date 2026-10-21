@@ -36,12 +36,6 @@ fn queue_display_text_derives_command_text_for_every_control_event() {
             "/session list",
         ),
         (
-            ChatInputEvent::ManageMemory {
-                args: String::new(),
-            },
-            "/memory",
-        ),
-        (
             ChatInputEvent::ResumeSession {
                 id: "s-1".to_string(),
             },

@@ -91,7 +91,7 @@ Config 通过只读 ConfigSnapshot 提供 MemoryConfig（enabled / max_entries /
 
 ### Tool & Skill & Command
 
-Slash Command 的 `SnapshotQuery`（`/memory` 查看列表）和 `ApplicationControl`（`/memory add` / `/memory delete` / `/memory pin`）经 `AgentClient` 进入核心，再由 CommandRouter 路由到 Memory BC 的 `MemoryPort`。CLI / TUI 不直接持有 MemoryPort，Memory BC 也不处理 Slash 文本解析。
+Slash `/memory` 命令（`list` / `add` / `delete` / `pin` / `search` / `compact` / `stats`）已退役：Memory 的读写入口收敛为 5 个单一职责工具（`MemoryAdd` / `MemorySearch` / `MemoryList` / `MemoryUpdate` / `MemoryDelete`）与自动注入 / 反思链路。CLI / TUI 不直接持有 `MemoryPort`，Memory BC 也不处理 Slash 文本解析。
 
 ## 6. 设计边界
 

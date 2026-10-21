@@ -102,9 +102,15 @@ async fn idle_returns_background_process_wakeup_when_signal_arrives() {
 
     // 先投递信号（unbounded：recv 前已排队，select 立即命中唤醒分支）。
     notifier.wakeup().unwrap();
-    let result =
-        idle_until_resume_or_shutdown(&source, &sink, &mut pending, &task_store, Some(&mut waiter))
-            .await;
+    let result = idle_until_resume_or_shutdown(
+        &source,
+        &sink,
+        &mut pending,
+        &task_store,
+        Some(&mut waiter),
+        &crate::application::loop_engine::chat::immediate_query::test_support::no_io_dispatcher(),
+    )
+    .await;
     assert!(
         matches!(result, IdleResult::BackgroundProcessWakeup),
         "唤醒信号应驱动 Wakeup Run 结果，实际 {result:?}"
@@ -130,6 +136,7 @@ async fn idle_without_wakeup_waiter_keeps_existing_behavior() {
         &mut pending,
         &task::TaskStore::new(),
         None,
+        &crate::application::loop_engine::chat::immediate_query::test_support::no_io_dispatcher(),
     )
     .await;
     match result {
@@ -139,6 +146,80 @@ async fn idle_without_wakeup_waiter_keeps_existing_behavior() {
             assert_eq!(accepted_inputs.len(), 1, "用户消息照常受理");
         }
         other => panic!("无 wakeup 时应走既有 Resumed 路径，实际 {other:?}"),
+    }
+}
+
+#[derive(Default, Clone)]
+struct RecordingSink(Arc<Mutex<Vec<&'static str>>>);
+
+impl RecordingSink {
+    fn kinds(&self) -> Vec<&'static str> {
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+
+    fn record(&self, event: &RuntimeStreamEvent) {
+        let kind = match event {
+            RuntimeStreamEvent::ModelList { .. } => "ModelList",
+            RuntimeStreamEvent::CommandResultText { .. } => "CommandResultText",
+            _ => "Other",
+        };
+        self.0
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .push(kind);
+    }
+}
+
+impl ChatEventSink for RecordingSink {
+    fn send_event<'a>(
+        &'a self,
+        event: RuntimeStreamEvent,
+    ) -> Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+        self.record(&event);
+        Box::pin(async {})
+    }
+
+    fn try_send_event(&self, event: RuntimeStreamEvent) {
+        self.record(&event);
+    }
+}
+
+#[tokio::test]
+async fn idle_dispatches_list_models_immediately_without_queueing() {
+    // idle 收到查询后必须就地执行并回 ModelList，NEVER 进入 pending 队列。
+    let source = ScriptedInputSource {
+        received: Arc::new(Mutex::new(VecDeque::from(vec![
+            ChatInputEvent::ListModels,
+            user_event("hello"),
+        ]))),
+    };
+    let mut pending = PendingInputBuffer::default();
+    let sink = RecordingSink::default();
+
+    let result = idle_until_resume_or_shutdown(
+        &source,
+        &sink,
+        &mut pending,
+        &task::TaskStore::new(),
+        None,
+        &crate::application::loop_engine::chat::immediate_query::test_support::no_io_dispatcher(),
+    )
+    .await;
+
+    let has_model_list = sink.kinds().contains(&"ModelList");
+    assert!(
+        has_model_list,
+        "idle 必须即时回 ModelList，实际事件: {:?}",
+        sink.kinds()
+    );
+    match result {
+        IdleResult::Resumed {
+            accepted_inputs, ..
+        } => assert_eq!(accepted_inputs.len(), 1, "仅用户消息被受理"),
+        other => panic!("查询后应继续等待用户输入，实际 {other:?}"),
     }
 }
 

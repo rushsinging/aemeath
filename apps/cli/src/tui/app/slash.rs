@@ -228,13 +228,6 @@ Build info:
                     spawn_effect: None,
                 }
             }
-            // /memory 的所有子命令统一走事件流，由 runtime idle 分支执行。
-            "memory" => {
-                let args = args.clone();
-                UpdateResult::one(Effect::SendChatInputEvent {
-                    event: sdk::ChatInputEvent::ManageMemory { args },
-                })
-            }
             _ => {
                 self.append_error_notice(format!("Unsupported command route: /{command}"));
                 UpdateResult::none()
