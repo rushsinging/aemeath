@@ -235,7 +235,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
     );
     let session_management: Arc<dyn context::SessionManagementPort> =
         Arc::new(NoopSessionManagement);
-    let wiring = context::wire_main_session(context::MainSessionDependencies {
+    let wiring = runtime::wire_session_switch_coordinator(runtime::SessionSwitchDependencies {
         workspace: workspace.clone(),
         task_persist: task.persist(),
         config_reader: config.reader(),
@@ -312,7 +312,7 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         &session_management
     ));
     assert!(
-        Arc::ptr_eq(&dependencies.wiring(), &wiring_clone),
+        Arc::ptr_eq(&dependencies.session_switch(), &wiring_clone),
         "wiring Arc identity preserved"
     );
 

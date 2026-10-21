@@ -246,7 +246,7 @@ async fn make_test_shell(
     )
     .await
     .expect("wire config");
-    let wiring = context::test_support::wire_in_memory(
+    let wiring = crate::application::client::session_switch::wire_test_session_switch(
         &workspace,
         task_wiring.persist(),
         config.reader(),
@@ -257,7 +257,7 @@ async fn make_test_shell(
         ))),
     )
     .await;
-    let snapshot = wiring.committed_config();
+    let snapshot = wiring.committed_config_snapshot();
     let binding = crate::application::model::test_support::test_binding(Vec::new());
     let policy: Arc<dyn Policy> = policy::allow_all();
     let _memory: Arc<dyn MemoryPort> = Arc::new(memory::api::NoOpMemory);
@@ -285,9 +285,9 @@ async fn make_test_shell(
     let tool_result_materializer =
         crate::application::tool::test_support::test_tool_result_materializer();
     let active_run = Arc::new(crate::application::run::active_registry::wire_active_run_registry());
-    let config_query = wiring.config_query();
-    let config_writer = wiring.config_writer();
-    let session_management = wiring.session_management();
+    let config_query = wiring.gate_aware_config_reader();
+    let config_writer = wiring.gate_aware_config_writer();
+    let session_management = Arc::new(context::test_support::UnavailableSessionManagement);
     let cwd = root.clone();
 
     // #1248 TaskData 3: Build RuntimeContextFactory for test SessionRuntime.
@@ -387,7 +387,7 @@ async fn session_runtime_holds_session_state_without_runtime_context() {
         make_test_shell(crate::application::run::context::ParentRunContextSource::new()).await;
 
     // SessionRuntime has wiring + workspace (session-level).
-    let _wiring = &shell.wiring;
+    let _wiring = &shell.session_switch;
     let _workspace = &shell.workspace;
     let _session_id = shell.session_snapshot().session_id().to_string();
 
@@ -567,7 +567,7 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     .await
     .expect("wire config");
     let task_wiring = task::wire_task();
-    let wiring = context::test_support::wire_in_memory(
+    let wiring = crate::application::client::session_switch::wire_test_session_switch(
         &workspace,
         task_wiring.persist(),
         config.reader(),
@@ -815,7 +815,7 @@ fn startup_resume_precedes_current_project_config_read() {
         .find("resolve_startup_session")
         .expect("source should contain resolve_startup_session");
     let snapshot_pos = source
-        .rfind("let snapshot = wiring.committed_config()")
+        .rfind("let snapshot = coordinator.committed_config_snapshot()")
         .expect("source should contain committed_config read");
 
     assert!(

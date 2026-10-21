@@ -3,6 +3,11 @@ name = "runtime"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# Enables test-only session_switch helpers. Consumers must add `runtime` to
+# `[dev-dependencies]` with `features = ["dev"]`. Never enabled in production.
+dev = []
+
 [dependencies]
 share = { path = "../../shared" }
 utils = { path = "../../../packages/global/utils" }
@@ -42,6 +47,9 @@ logging = { path = "../../../packages/global/logging" }
 tempfile = "3"
 
 [dev-dependencies]
+# 自引用：integration tests（tests/）编译时 lib 不带 --test，
+# test helper 需 dev feature 才可见。
+runtime = { path = ".", features = ["dev"] }
 tools = { path = "../tools", features = ["test-harness"] }
 futures-util = { workspace = true }
 context = { path = "../context", features = ["dev"] }

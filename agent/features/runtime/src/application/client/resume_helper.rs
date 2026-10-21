@@ -7,14 +7,14 @@ pub type ResumeError = context::SessionManagementError;
 
 pub async fn resume_session_to_backing(
     session_id: &str,
-    wiring: &context::MainSessionWiring,
+    coordinator: &crate::SessionSwitchCoordinator,
 ) -> Result<context::SessionResumeViewData, ResumeError> {
     log::debug!(
         target: LOG_TARGET,
         "resume_lifecycle boundary=runtime_resume_helper stage=backing_load_started session_id={}",
         session_id
     );
-    let resume_view = match wiring.resume_session(session_id).await {
+    let resume_view = match coordinator.resume_session(session_id).await {
         Ok(resume_view) => resume_view,
         Err(error) => {
             log::warn!(

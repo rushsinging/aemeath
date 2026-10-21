@@ -17,7 +17,6 @@
 use std::sync::Arc;
 
 use context::context_port::ContextPort;
-use context::MainSessionDependencies;
 use context::SessionManagementPort;
 use context::{
     ContentFingerprint, ContextAppendData, ContextRequestId, FinalizeCause, RunStepId, SessionId,
@@ -197,7 +196,7 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
     );
 
     let session_management = session_management(&agents_dir);
-    let deps = MainSessionDependencies {
+    let deps = runtime::SessionSwitchDependencies {
         workspace: workspace.clone(),
         task_persist: task_wiring.persist(),
         config_reader: config.reader(),
@@ -208,7 +207,7 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
             context::NoOpCanonicalSessionWriter,
         ))),
     };
-    let wiring = context::wire_main_session(deps)
+    let wiring = runtime::wire_session_switch_coordinator(deps)
         .await
         .expect("wire main session with real opener");
 
@@ -270,7 +269,7 @@ async fn production_context_append_reopens_from_atomic_blob() {
     );
     let writer = Arc::new(context::DatasetCanonicalSessionWriter::new(session_dataset));
     let session_project = workspace.read().project_identity();
-    let wiring = context::wire_main_session(MainSessionDependencies {
+    let wiring = runtime::wire_session_switch_coordinator(runtime::SessionSwitchDependencies {
         workspace,
         task_persist: task_wiring.persist(),
         config_reader: config.reader(),
@@ -282,7 +281,7 @@ async fn production_context_append_reopens_from_atomic_blob() {
     .await
     .expect("wire main session");
 
-    let bound = wiring.bind_main_run().await.expect("bind run");
+    let bound = wiring.bind_run().await.expect("bind run");
     let context: Arc<dyn ContextPort> = bound.context();
     let session_id = bound.session().id.clone();
     drop(bound);
@@ -381,7 +380,7 @@ async fn runtime_session_id_matches_wiring_committed_session() {
     );
 
     let session_management = session_management(&agents_dir);
-    let deps = MainSessionDependencies {
+    let deps = runtime::SessionSwitchDependencies {
         workspace: workspace.clone(),
         task_persist: task_wiring.persist(),
         config_reader: config.reader(),
@@ -392,13 +391,10 @@ async fn runtime_session_id_matches_wiring_committed_session() {
             context::NoOpCanonicalSessionWriter,
         ))),
     };
-    let wiring = context::wire_main_session(deps)
+    let wiring = runtime::wire_session_switch_coordinator(deps)
         .await
         .expect("wire main session");
-    assert!(Arc::ptr_eq(
-        &wiring.session_management(),
-        &session_management,
-    ));
+    assert!(Arc::ptr_eq(&session_management, &session_management,));
 
     // Capture the wiring's committed session id before building the client.
     let wiring_session_id = wiring.committed_session().id.clone();
@@ -567,7 +563,7 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
     );
 
     let session_management = session_management(&agents_dir);
-    let deps = MainSessionDependencies {
+    let deps = runtime::SessionSwitchDependencies {
         workspace: workspace.clone(),
         task_persist: task_wiring.persist(),
         config_reader: config.reader(),
@@ -578,32 +574,32 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
             context::NoOpCanonicalSessionWriter,
         ))),
     };
-    let wiring = context::wire_main_session(deps)
+    let wiring = runtime::wire_session_switch_coordinator(deps)
         .await
         .expect("wire main session");
 
     // config_query() returns a gate-aware façade.
-    let query = wiring.config_query();
+    let query = wiring.gate_aware_config_reader();
     let snapshot = query
         .snapshot()
         .await
         .expect("config query should return a snapshot");
     assert_eq!(
         snapshot.context_size(),
-        wiring.committed_config().context_size(),
+        wiring.committed_config_snapshot().context_size(),
         "query snapshot should match wiring's committed config"
     );
 
     // config_reader() returns the raw reader for bootstrap.
-    let reader = wiring.config_reader();
+    let reader = wiring.gate_aware_config_reader();
     assert_eq!(
         reader.committed_snapshot().context_size(),
-        wiring.committed_config().context_size(),
+        wiring.committed_config_snapshot().context_size(),
         "reader snapshot should match wiring's committed config"
     );
 
     // config_writer() returns a gate-aware façade (just verify it exists).
-    let _writer = wiring.config_writer();
+    let _writer = wiring.gate_aware_config_writer();
 }
 
 #[test]

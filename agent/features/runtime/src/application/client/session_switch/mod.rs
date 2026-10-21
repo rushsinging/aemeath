@@ -5,6 +5,7 @@
 //! 只开口协议方法，NEVER 暴露依赖转发访问器。
 
 mod bound;
+mod config_gate;
 mod coordinator;
 mod error;
 mod gate;
@@ -15,11 +16,13 @@ pub use coordinator::{
     SessionSwitchCoordinator, SessionSwitchCoordinatorBuilder, SessionSwitchDependencies,
 };
 pub use error::MainSessionError;
+pub use gate::OwnedSessionSharedPermit;
 
 use std::sync::Arc;
 
 use config::{PreparedProjectConfigData, ProjectConfigLocationData};
 use context::session::{CanonicalSession, SnapshotState};
+
 use memory::api::ProjectMemoryKey;
 use share::session_types::ProjectIdentityData;
 
@@ -88,4 +91,38 @@ pub async fn wire_session_switch_coordinator(
             context_factory: deps.context_factory,
         },
     )))
+}
+
+/// 测试装配：内存 opener + 调用方注入的 port 集（对齐 context
+/// `test_support::wire_in_memory` 的形态，#2025 C2 切换配套）。
+///
+/// 生产 MUST NOT 使用；组装逻辑与 `wire_session_switch_coordinator`
+/// 的 bootstrap 协议一致（initial canonical + config prepare/commit +
+/// memory eager open）。
+#[cfg(any(test, feature = "dev"))]
+use config::{ConfigReader, ProjectConfigParticipant};
+#[cfg(any(test, feature = "dev"))]
+use context::{MainContextFactory, SessionManagementPort};
+#[cfg(any(test, feature = "dev"))]
+use task::TaskPersist;
+#[cfg(any(test, feature = "dev"))]
+pub async fn wire_test_session_switch(
+    workspace: &project::Workspace,
+    task_persist: std::sync::Arc<dyn TaskPersist>,
+    config_reader: std::sync::Arc<dyn ConfigReader>,
+    config_participant: std::sync::Arc<dyn ProjectConfigParticipant>,
+    session_management: std::sync::Arc<dyn SessionManagementPort>,
+    context_factory: std::sync::Arc<dyn MainContextFactory>,
+) -> std::sync::Arc<SessionSwitchCoordinator> {
+    wire_session_switch_coordinator(SessionSwitchDependencies {
+        workspace: workspace.clone(),
+        task_persist,
+        config_reader,
+        config_participant,
+        memory_opener: Box::new(context::test_support::InMemoryTestOpener),
+        session_management,
+        context_factory,
+    })
+    .await
+    .expect("test session switch wiring is infallible with in-memory opener")
 }

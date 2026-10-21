@@ -313,8 +313,8 @@ impl SessionRunFixtureBuilder {
         ));
         let now = chrono::Utc::now().to_rfc3339();
         let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::api::NoOpMemory);
-        let wiring = Arc::new(context::MainSessionWiring::build(
-            context::MainSessionWiringBuilder {
+        let wiring = Arc::new(crate::SessionSwitchCoordinator::assemble(
+            crate::SessionSwitchCoordinatorBuilder {
                 workspace_read: workspace.read(),
                 workspace_persist: workspace.persist(),
                 task_persist: task_store.clone(),

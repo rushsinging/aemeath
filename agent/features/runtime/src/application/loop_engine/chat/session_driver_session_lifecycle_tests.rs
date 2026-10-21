@@ -1877,7 +1877,7 @@ async fn manual_reflection_run_does_not_persist_session_or_touch_updated_at() {
 
     let (factory, persistence_calls) = RecordingContextFactory::new();
     let mut shell = test_shell();
-    shell.wiring = test_wiring_with_context_factory(factory);
+    shell.session_switch = test_wiring_with_context_factory(factory);
     shell.memory_config = share::config::MemoryConfig {
         enabled: true,
         reflection: share::config::ReflectionConfig {
@@ -1887,7 +1887,7 @@ async fn manual_reflection_run_does_not_persist_session_or_touch_updated_at() {
         ..Default::default()
     };
     shell.set_test_session_id("test-reflect-now-no-persist");
-    let wiring = shell.wiring.clone();
+    let wiring = shell.session_switch.clone();
 
     let before = wiring.committed_session();
     let before_message_count = before.structured_messages().len();
@@ -1965,7 +1965,7 @@ async fn control_normal_run_records_session_persistence() {
         .unwrap();
     let (factory, calls) = RecordingContextFactory::new();
     let mut shell = test_shell();
-    shell.wiring = test_wiring_with_context_factory(factory);
+    shell.session_switch = test_wiring_with_context_factory(factory);
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec!["r1"]),

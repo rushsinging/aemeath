@@ -1828,6 +1828,7 @@
         "CompleteReflectionResult",
         "InitialProviderAssemblyData",
         "ModelRuntimeSettingsData",
+        "OwnedSessionSharedPermit",
         "ParentRunContextSource",
         "PolicyTriage",
         "PromptAssemblyData",
@@ -1867,7 +1868,8 @@
         "wire_active_run_registry",
         "wire_agent_client_from_args",
         "wire_agent_runner",
-        "wire_session_switch_coordinator"
+        "wire_session_switch_coordinator",
+        "wire_test_session_switch"
       ],
       "reason": "F-2：runtime crate 根窄 façade（#1022 登记，消费者证明制）",
       "profile": "fast"

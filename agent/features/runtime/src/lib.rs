@@ -32,6 +32,8 @@ pub use application::tool::tool_result_materializer::{
 };
 pub use application::tool::triage::{PolicyTriage, TriageEscalation};
 
+#[cfg(any(test, feature = "dev"))]
+pub use application::client::wire_test_session_switch;
 pub use application::client::{
     config_snapshot_to_sdk, resolve_concurrency_limits, resolve_model_runtime_settings,
     resume_session_to_backing, wire_agent_client_from_args, wire_agent_runner, AgentClientImpl,
@@ -41,8 +43,8 @@ pub use application::client::{
     SessionModelSlotData, SkillBootstrapAssemblyData,
 };
 pub use application::client::{
-    wire_session_switch_coordinator, BoundMainRun, SessionSwitchCoordinator,
-    SessionSwitchCoordinatorBuilder, SessionSwitchDependencies,
+    wire_session_switch_coordinator, BoundMainRun, OwnedSessionSharedPermit,
+    SessionSwitchCoordinator, SessionSwitchCoordinatorBuilder, SessionSwitchDependencies,
 };
 pub use application::compact_generator::ProviderCompactGenerator;
 // #1248: RuntimeContextFactory is the narrow crate-root construction entry.

@@ -124,7 +124,7 @@ impl SessionModelState {
 /// delegates Context assembly to the held `runtime_context_factory`.
 ///
 /// Fields are grouped by §2.2 categories:
-/// - Session identity, wiring, workspace
+/// - Session identity, session switch coordinator, workspace
 /// - Config query/writer, session management
 /// - Model switching (provider factory, current binding)
 /// - Prompt bootstrap (system blocks, git context, user guidance, skills)
@@ -136,7 +136,7 @@ pub struct SessionRuntime {
     pub(crate) session_state:
         Arc<std::sync::RwLock<crate::application::run::creation::SessionState>>,
     pub workspace: project::Workspace,
-    pub wiring: Arc<context::MainSessionWiring>,
+    pub session_switch: Arc<crate::application::client::session_switch::SessionSwitchCoordinator>,
 
     // ── Config ──
     pub config_query: Arc<dyn config::ConfigReader>,
@@ -208,11 +208,10 @@ pub struct SessionRuntime {
 
 impl SessionRuntime {
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         session_state: Arc<std::sync::RwLock<crate::application::run::creation::SessionState>>,
         workspace: project::Workspace,
-        wiring: Arc<context::MainSessionWiring>,
+        session_switch: Arc<crate::application::client::session_switch::SessionSwitchCoordinator>,
         config_query: Arc<dyn config::ConfigReader>,
         config_writer: Arc<dyn config::ConfigWriter>,
         session_management: Arc<dyn context::SessionManagementPort>,
@@ -258,7 +257,7 @@ impl SessionRuntime {
         Self {
             session_state,
             workspace,
-            wiring,
+            session_switch,
             config_query,
             config_writer,
             session_management,

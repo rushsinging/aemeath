@@ -15,6 +15,7 @@ use context::SessionManagementPort;
 use context::{SessionManagementError, SessionMetadataUpdateData};
 use memory::api::{MemoryOpener, MemoryPort};
 use project::{WorkspaceReader, WorkspaceWriter};
+use share::config::domain::snapshot::ConfigSnapshot;
 use share::session_types::ProjectIdentityData;
 use task::TaskPersist;
 
@@ -110,6 +111,11 @@ impl SessionSwitchCoordinator {
         Arc::clone(&self.committed_session.read().unwrap())
     }
 
+    /// 当前 committed config snapshot（四元组读取，语义同 context 侧直读）。
+    pub fn committed_config_snapshot(&self) -> ConfigSnapshot {
+        self.config_reader.committed_snapshot()
+    }
+
     /// 当前 committed Context port。
     pub fn committed_context(&self) -> Arc<dyn context::ContextPort> {
         Arc::clone(&self.context)
@@ -141,6 +147,14 @@ impl SessionSwitchCoordinator {
     }
 
     // ── shared-permit 协议 ──
+
+    /// 非阻塞取 shared permit：Run 创建（含 sub-run）准入尝试，
+    /// 切换进行中返回 `Err`（对齐 context 侧 gate 语义）。
+    pub fn try_acquire_shared(
+        &self,
+    ) -> Result<super::gate::OwnedSessionSharedPermit, super::gate::SessionSwitchInProgress> {
+        self.gate.try_acquire_shared()
+    }
 
     /// shared permit 内执行读取：idle 期磁盘 session 操作（如 `/session export`）
     /// 的最小 gate-aware 读路径，防止与 resume 竞态。

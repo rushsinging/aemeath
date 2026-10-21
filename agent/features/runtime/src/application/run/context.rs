@@ -440,7 +440,7 @@ pub struct RuntimeContext {
     /// SDK-facing full-state delivery registry；不拥有业务决策。
     published_state: crate::application::published_state::PublishedStateRegistry,
     /// Optional session lease held for the full Run lifetime.
-    session_lease: Option<Arc<context::OwnedSessionSharedPermit>>,
+    session_lease: Option<Arc<crate::OwnedSessionSharedPermit>>,
     /// System One 评分端口（session 级，来自 RuntimeServices，双槽独立）。
     scoring_for_recall: Option<Arc<dyn systemone::ScoringPort>>,
     /// skill match 场景槽位（session 级，来自 RuntimeServices）。
@@ -511,7 +511,7 @@ impl RuntimeContext {
         }
     }
 
-    pub(super) fn hold_session_lease(mut self, lease: context::OwnedSessionSharedPermit) -> Self {
+    pub(super) fn hold_session_lease(mut self, lease: crate::OwnedSessionSharedPermit) -> Self {
         self.session_lease = Some(Arc::new(lease));
         self
     }

@@ -40,7 +40,9 @@ pub use from_args::{
 };
 pub use mapping::config_snapshot_to_sdk;
 pub use resume_helper::resume_session_to_backing;
+#[cfg(any(test, feature = "dev"))]
+pub use session_switch::wire_test_session_switch;
 pub use session_switch::{
-    wire_session_switch_coordinator, BoundMainRun, SessionSwitchCoordinator,
-    SessionSwitchCoordinatorBuilder, SessionSwitchDependencies,
+    wire_session_switch_coordinator, BoundMainRun, OwnedSessionSharedPermit,
+    SessionSwitchCoordinator, SessionSwitchCoordinatorBuilder, SessionSwitchDependencies,
 };

@@ -64,18 +64,17 @@ pub(crate) fn map_resume_view_to_sdk_backing(
 /// - 恢复失败 → `SdkError::Init`（跨项目 resume 由 wiring 侧拒绝，committed snapshot 不变）。
 pub(crate) async fn resolve_startup_session(
     resume: Option<&str>,
-    wiring: &context::MainSessionWiring,
+    coordinator: &crate::SessionSwitchCoordinator,
 ) -> Result<(String, Option<LocalSessionResumeBacking>), SdkError> {
     match resume {
         Some(resume_id) => {
-            let resume_view =
-                resume_session_to_backing(resume_id, wiring)
-                    .await
-                    .map_err(|error| {
-                        SdkError::Init(format!(
-                            "startup resume of session {resume_id} failed: {error}"
-                        ))
-                    })?;
+            let resume_view = resume_session_to_backing(resume_id, coordinator)
+                .await
+                .map_err(|error| {
+                    SdkError::Init(format!(
+                        "startup resume of session {resume_id} failed: {error}"
+                    ))
+                })?;
             log::info!(
                 target: crate::LOG_TARGET,
                 "startup resume: {}",
@@ -97,7 +96,7 @@ pub(crate) async fn resolve_startup_session(
             Ok((session_id, Some(startup_resume)))
         }
         None => {
-            let session_id = wiring.committed_session().id.clone();
+            let session_id = coordinator.committed_session().id.clone();
             log::info!(target: crate::LOG_TARGET, "session started");
             Ok((session_id, None))
         }
