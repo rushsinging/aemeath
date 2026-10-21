@@ -154,9 +154,14 @@ impl memory::api::MemoryOpener for TestMemoryOpener {
 }
 
 fn test_wiring() -> Arc<crate::SessionSwitchCoordinator> {
-    test_wiring_with_context_factory(Arc::new(context::ProductionMainContextFactory::new(
-        Arc::new(context::NoOpCanonicalSessionWriter),
-    )))
+    let workspace = project::wire_production_workspace(std::env::current_dir().unwrap(), None)
+        .expect("workspace 初始化成功");
+    test_wiring_with_context_factory(Arc::new(
+        context::ProductionMainContextFactory::new(Arc::new(
+            context::NoOpCanonicalSessionWriter,
+        ))
+        .with_persistence(std::sync::Arc::new(task::TaskStore::new()), workspace.persist()),
+    ))
 }
 
 /// 允许测试注入自定义 `MainContextFactory`（如装饰 production context、
@@ -175,7 +180,7 @@ fn test_wiring_with_context_factory(
         crate::SessionSwitchCoordinatorBuilder {
             workspace_read: workspace.read(),
             workspace_persist: persist.clone(),
-            task_persist: Arc::new(task::TaskStore::new()),
+            task_restore: std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(std::sync::Arc::new(task::TaskStore::new()))),
             config_reader: config.clone(),
             config_participant: config,
             memory_opener: Box::new(TestMemoryOpener),

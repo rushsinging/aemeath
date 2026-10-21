@@ -10,28 +10,76 @@
   },
   "construction_symbols": [
     {
-      "id": "construction.storage.filesystemblobadapter",
-      "symbol": "FileSystemBlobAdapter",
-      "owner_crate": "storage",
-      "kind": "adapter",
+      "id": "construction.audit.wire-append-store-for",
+      "symbol": "wire_append_store_for",
+      "owner_crate": "audit",
+      "kind": "wire",
       "allowed_paths": [
-        "agent/features/storage/src/lib.rs"
+        "agent/composition/src"
       ],
       "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Blob filesystem adapter is crate-private; the sole construction site is the file_system_blob composition wiring constructor in storage lib.rs (#861/#950/#1647)",
-      "tracking_issue": 1647
+      "reason": "审计追加存储的文件系统适配工厂（原 append_store_for 更名 wire_ 前缀类）；跨 BC 调用点仅 composition 装配",
+      "tracking_issue": 1705
     },
     {
-      "id": "construction.storage.filesystemdatasetadapter",
-      "symbol": "FileSystemDatasetAdapter",
-      "owner_crate": "storage",
+      "id": "construction.config.nativeconfigstore",
+      "symbol": "NativeConfigStore",
+      "owner_crate": "config",
       "kind": "adapter",
       "allowed_paths": [
-        "agent/features/storage/src/lib.rs"
+        "agent/composition/src"
       ],
       "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Dataset filesystem adapter is crate-private; the sole construction site is the file_system_dataset composition wiring constructor in storage lib.rs (#861/#950/#1647)",
-      "tracking_issue": 1647
+      "reason": "Config native store is assembled only by the Composition Root (#861/#949)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.config.wire-config-override-store",
+      "symbol": "wire_config_override_store",
+      "owner_crate": "config",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "native override 注入工厂（原 native_override_store 更名 wire_ 前缀类）；唯一跨 BC 调用点为 composition 装配",
+      "tracking_issue": 1706
+    },
+    {
+      "id": "construction.config.wire-global-connect-store",
+      "symbol": "wire_global_connect_store",
+      "owner_crate": "config",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "全局连接存储注入工厂：Filesystem 实现已收窄 crate 内，composition 唯一构造入口（façade 边界收敛批次）",
+      "tracking_issue": 1706
+    },
+    {
+      "id": "construction.config.wire-project-config-with-agents-dir",
+      "symbol": "wire_project_config_with_agents_dir",
+      "owner_crate": "config",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "reason": "Config wiring with agents_dir override is test-bounded (#1385); invoked only by the Composition Root",
+      "tracking_issue": 1385,
+      "guard": "check-cross-bc-construction-registry.sh"
+    },
+    {
+      "id": "construction.config.wire-project-config-with-cli",
+      "symbol": "wire_project_config_with_cli",
+      "owner_crate": "config",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Project config wiring is invoked only by the Composition Root (#949)",
+      "tracking_issue": 1067
     },
     {
       "id": "construction.context.atomicblobacceptedinputwriter",
@@ -58,18 +106,6 @@
       "tracking_issue": 1067
     },
     {
-      "id": "construction.context.datasetsessionmanagement",
-      "symbol": "DatasetSessionManagement",
-      "owner_crate": "context",
-      "kind": "adapter",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Dataset session management is assembled only by the Composition Root (#861/#950)",
-      "tracking_issue": 1067
-    },
-    {
       "id": "construction.context.datasetcanonicalsessionwriter",
       "symbol": "DatasetCanonicalSessionWriter",
       "owner_crate": "context",
@@ -82,6 +118,54 @@
       "tracking_issue": 1067
     },
     {
+      "id": "construction.context.datasetsessionmanagement",
+      "symbol": "DatasetSessionManagement",
+      "owner_crate": "context",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Dataset session management is assembled only by the Composition Root (#861/#950)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.context.isolated-context",
+      "symbol": "wire_isolated_context",
+      "owner_crate": "context",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/features/runtime/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "隔离上下文构造工厂（isolated_context 家族更名）；runtime 子代理派生调用",
+      "tracking_issue": 1707
+    },
+    {
+      "id": "construction.context.isolated-context-with-skill",
+      "symbol": "wire_isolated_context_with_skill",
+      "owner_crate": "context",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/features/runtime/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "隔离上下文构造工厂（isolated_context 家族更名）；runtime 子代理派生调用",
+      "tracking_issue": 1707
+    },
+    {
+      "id": "construction.context.isolated-context-with-workspace-skills",
+      "symbol": "wire_isolated_context_with_workspace_skills",
+      "owner_crate": "context",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/features/runtime/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "隔离上下文构造工厂（isolated_context 家族更名）；runtime 子代理派生调用",
+      "tracking_issue": 1707
+    },
+    {
       "id": "construction.context.productionmaincontextfactory",
       "symbol": "ProductionMainContextFactory",
       "owner_crate": "context",
@@ -91,42 +175,6 @@
       ],
       "guard": "check-cross-bc-construction-registry.sh",
       "reason": "Main context factory is assembled only by the Composition Root (#861/#950)",
-      "tracking_issue": 1067
-    },
-    {
-      "id": "construction.context.workspaceskillqueryfactory",
-      "symbol": "WorkspaceSkillQueryFactory",
-      "owner_crate": "context",
-      "kind": "adapter",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Skill query factory is assembled only by the Composition Root or inside the Context adapters (#1067)",
-      "tracking_issue": 1067
-    },
-    {
-      "id": "construction.config.nativeconfigstore",
-      "symbol": "NativeConfigStore",
-      "owner_crate": "config",
-      "kind": "adapter",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Config native store is assembled only by the Composition Root (#861/#949)",
-      "tracking_issue": 1067
-    },
-    {
-      "id": "construction.policy.configuredpolicy",
-      "symbol": "ConfiguredPolicy",
-      "owner_crate": "policy",
-      "kind": "adapter",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Policy adapter is assembled only by the Composition Root (#861)",
       "tracking_issue": 1067
     },
     {
@@ -142,6 +190,91 @@
       "tracking_issue": 1067
     },
     {
+      "id": "construction.context.workspaceskillqueryfactory",
+      "symbol": "WorkspaceSkillQueryFactory",
+      "owner_crate": "context",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Skill query factory is assembled only by the Composition Root or inside the Context adapters (#1067)",
+      "tracking_issue": 1067
+    },
+    {
+      "id": "construction.hook.wire-hook-dispatcher",
+      "symbol": "wire_hook_dispatcher",
+      "owner_crate": "hook",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src",
+        "agent/features/runtime/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "生产 hook 派发器工厂（原 build_dispatcher 更名 + 返回 Arc<dyn HookDispatcher> 实现体私有化）；runtime/context 装配点调用",
+      "tracking_issue": 1708
+    },
+    {
+      "id": "construction.memory.wire-legacy-memory-source-factory",
+      "symbol": "wire_legacy_memory_source_factory",
+      "owner_crate": "memory",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "runtime 装配工厂（build_agent_runner/from_args_with_workspace 更名 wire_ 前缀类）；跨 BC 调用点仅 composition 装配",
+      "tracking_issue": 1713
+    },
+    {
+      "id": "construction.memory.wire-memory-event-store",
+      "symbol": "wire_memory_event_store",
+      "owner_crate": "memory",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "memory 事件流 JsonlSegmentEventStore 收窄后 composition 唯一构造入口",
+      "tracking_issue": 1903
+    },
+    {
+      "id": "construction.memory.wire-memory-opener",
+      "symbol": "wire_memory_opener",
+      "owner_crate": "memory",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "memory 实现体收窄后 composition 唯一构造入口（façade 边界收敛批次）",
+      "tracking_issue": 1709
+    },
+    {
+      "id": "construction.memory.wire-reflection-history-store",
+      "symbol": "wire_reflection_history_store",
+      "owner_crate": "memory",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "memory 实现体收窄后 composition 唯一构造入口（façade 边界收敛批次）",
+      "tracking_issue": 1709
+    },
+    {
+      "id": "construction.policy.configuredpolicy",
+      "symbol": "ConfiguredPolicy",
+      "owner_crate": "policy",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Policy adapter is assembled only by the Composition Root (#861)",
+      "tracking_issue": 1067
+    },
+    {
       "id": "construction.project.wire-production-workspace",
       "symbol": "wire_production_workspace",
       "owner_crate": "project",
@@ -151,90 +284,6 @@
       ],
       "guard": "check-cross-bc-construction-registry.sh",
       "reason": "Production workspace wiring is invoked only by the Composition Root (#893)",
-      "tracking_issue": 1067
-    },
-    {
-      "id": "construction.tools.wire-commands",
-      "symbol": "wire_commands",
-      "owner_crate": "tools",
-      "kind": "wire",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Command catalog wiring is invoked only by the Composition Root (#861)",
-      "tracking_issue": 1067
-    },
-    {
-      "id": "construction.runtime.atomicblobtoolresultstore",
-      "symbol": "AtomicBlobToolResultStore",
-      "owner_crate": "runtime",
-      "kind": "adapter",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Tool Result store is assembled only by the Composition Root (#1294)",
-      "tracking_issue": 1067
-    },
-    {
-      "id": "construction.config.wire-project-config-with-cli",
-      "symbol": "wire_project_config_with_cli",
-      "owner_crate": "config",
-      "kind": "wire",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Project config wiring is invoked only by the Composition Root (#949)",
-      "tracking_issue": 1067
-    },
-    {
-      "id": "construction.task.wire-task",
-      "symbol": "wire_task",
-      "owner_crate": "task",
-      "kind": "wire",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Task wiring is invoked only by the Composition Root",
-      "tracking_issue": 1067
-    },
-    {
-      "id": "construction.tools.wire-builtin-catalog-execution",
-      "symbol": "wire_builtin_catalog_execution",
-      "owner_crate": "tools",
-      "kind": "wire",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Builtin catalog/execution wiring is invoked only by the Composition Root (#1294)",
-      "tracking_issue": 1067
-    },
-    {
-      "id": "construction.tools.wire-skills",
-      "symbol": "wire_skills",
-      "owner_crate": "tools",
-      "kind": "wire",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Skill wiring is invoked only by the Composition Root (#1294)",
-      "tracking_issue": 1067
-    },
-    {
-      "id": "construction.runtime.wire-sdk-chat-ingress",
-      "symbol": "wire_sdk_chat_ingress",
-      "owner_crate": "runtime",
-      "kind": "wire",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "SDK chat ingress wiring is invoked only by the Composition Root",
       "tracking_issue": 1067
     },
     {
@@ -248,6 +297,30 @@
       "guard": "check-cross-bc-construction-registry.sh",
       "reason": "Provider immutable transport pool is assembled only by the Composition Root (#1645)",
       "tracking_issue": 1645
+    },
+    {
+      "id": "construction.provider.wire-probe-client",
+      "symbol": "wire_probe_client",
+      "owner_crate": "provider",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Connect probe client construction and probe execution semantics (run_connectivity_probe) are owned by provider; composition bridges config request translation only (#1861)",
+      "tracking_issue": 1861
+    },
+    {
+      "id": "construction.provider.wire-provider-assembly",
+      "symbol": "wire_provider_assembly",
+      "owner_crate": "provider",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Factory build kernel (client assembly + capability derivation) is owned by provider; composition only bridges runtime spec translation and binding assembly (#1861)",
+      "tracking_issue": 1861
     },
     {
       "id": "construction.provider.wire-provider-client",
@@ -274,28 +347,40 @@
       "tracking_issue": 1861
     },
     {
-      "id": "construction.provider.wire-provider-assembly",
-      "symbol": "wire_provider_assembly",
-      "owner_crate": "provider",
+      "id": "construction.runtime.agent-client-from-args",
+      "symbol": "wire_agent_client_from_args",
+      "owner_crate": "runtime",
       "kind": "wire",
       "allowed_paths": [
         "agent/composition/src"
       ],
       "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Factory build kernel (client assembly + capability derivation) is owned by provider; composition only bridges runtime spec translation and binding assembly (#1861)",
-      "tracking_issue": 1861
+      "reason": "memory 实现体收窄后 composition 唯一构造入口（façade 边界收敛批次）",
+      "tracking_issue": 1709
     },
     {
-      "id": "construction.provider.wire-probe-client",
-      "symbol": "wire_probe_client",
-      "owner_crate": "provider",
+      "id": "construction.runtime.agent-runner",
+      "symbol": "wire_agent_runner",
+      "owner_crate": "runtime",
       "kind": "wire",
       "allowed_paths": [
         "agent/composition/src"
       ],
       "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Connect probe client construction and probe execution semantics (run_connectivity_probe) are owned by provider; composition bridges config request translation only (#1861)",
-      "tracking_issue": 1861
+      "reason": "runtime 装配工厂（build_agent_runner/from_args_with_workspace 更名 wire_ 前缀类）；跨 BC 调用点仅 composition 装配",
+      "tracking_issue": 1713
+    },
+    {
+      "id": "construction.runtime.atomicblobtoolresultstore",
+      "symbol": "AtomicBlobToolResultStore",
+      "owner_crate": "runtime",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/composition/src"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Tool Result store is assembled only by the Composition Root (#1294)",
+      "tracking_issue": 1067
     },
     {
       "id": "construction.runtime.wire-active-run-registry",
@@ -310,65 +395,28 @@
       "tracking_issue": 1678
     },
     {
-      "id": "construction.config.wire-project-config-with-agents-dir",
-      "symbol": "wire_project_config_with_agents_dir",
-      "owner_crate": "config",
-      "kind": "wire",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "reason": "Config wiring with agents_dir override is test-bounded (#1385); invoked only by the Composition Root",
-      "tracking_issue": 1385,
-      "guard": "check-cross-bc-construction-registry.sh"
-    },
-    {
-      "id": "construction.config.wire-config-override-store",
-      "symbol": "wire_config_override_store",
-      "owner_crate": "config",
+      "id": "construction.runtime.wire-sdk-chat-ingress",
+      "symbol": "wire_sdk_chat_ingress",
+      "owner_crate": "runtime",
       "kind": "wire",
       "allowed_paths": [
         "agent/composition/src"
       ],
       "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "native override 注入工厂（原 native_override_store 更名 wire_ 前缀类）；唯一跨 BC 调用点为 composition 装配",
-      "tracking_issue": 1706
+      "reason": "SDK chat ingress wiring is invoked only by the Composition Root",
+      "tracking_issue": 1067
     },
     {
-      "id": "construction.audit.wire-append-store-for",
-      "symbol": "wire_append_store_for",
-      "owner_crate": "audit",
+      "id": "construction.runtime.wire-session-switch-coordinator",
+      "symbol": "wire_session_switch_coordinator",
+      "owner_crate": "runtime",
       "kind": "wire",
       "allowed_paths": [
-        "agent/composition/src"
+        "agent/composition/src/runtime.rs"
       ],
       "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "审计追加存储的文件系统适配工厂（原 append_store_for 更名 wire_ 前缀类）；跨 BC 调用点仅 composition 装配",
-      "tracking_issue": 1705
-    },
-    {
-      "id": "construction.hook.wire-hook-dispatcher",
-      "symbol": "wire_hook_dispatcher",
-      "owner_crate": "hook",
-      "kind": "wire",
-      "allowed_paths": [
-        "agent/composition/src",
-        "agent/features/runtime/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "生产 hook 派发器工厂（原 build_dispatcher 更名 + 返回 Arc<dyn HookDispatcher> 实现体私有化）；runtime/context 装配点调用",
-      "tracking_issue": 1708
-    },
-    {
-      "id": "construction.config.wire-global-connect-store",
-      "symbol": "wire_global_connect_store",
-      "owner_crate": "config",
-      "kind": "wire",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "全局连接存储注入工厂：Filesystem 实现已收窄 crate 内，composition 唯一构造入口（façade 边界收敛批次）",
-      "tracking_issue": 1706
+      "reason": "Main Session 切换协调器（#2025 迁 runtime）的唯一生产装配入口，composition 根调用并注入各 BC port",
+      "tracking_issue": 2025
     },
     {
       "id": "construction.storage.file-system-blob",
@@ -397,16 +445,28 @@
       "tracking_issue": 1714
     },
     {
-      "id": "construction.systemone.wire-scoring-port",
-      "symbol": "wire_http_scoring_port",
-      "owner_crate": "systemone",
-      "kind": "wire",
+      "id": "construction.storage.filesystemblobadapter",
+      "symbol": "FileSystemBlobAdapter",
+      "owner_crate": "storage",
+      "kind": "adapter",
       "allowed_paths": [
-        "agent/features/systemone/tests"
+        "agent/features/storage/src/lib.rs"
       ],
       "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "Jev HTTP scoring wiring is feature http-adapter only (test/eval parity per design 01-systemone-scoring §4.3); production composition must never invoke it",
-      "tracking_issue": 1831
+      "reason": "Blob filesystem adapter is crate-private; the sole construction site is the file_system_blob composition wiring constructor in storage lib.rs (#861/#950/#1647)",
+      "tracking_issue": 1647
+    },
+    {
+      "id": "construction.storage.filesystemdatasetadapter",
+      "symbol": "FileSystemDatasetAdapter",
+      "owner_crate": "storage",
+      "kind": "adapter",
+      "allowed_paths": [
+        "agent/features/storage/src/lib.rs"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Dataset filesystem adapter is crate-private; the sole construction site is the file_system_dataset composition wiring constructor in storage lib.rs (#861/#950/#1647)",
+      "tracking_issue": 1647
     },
     {
       "id": "construction.systemone.wire-embedded-scoring",
@@ -445,112 +505,64 @@
       "tracking_issue": 1833
     },
     {
-      "id": "construction.runtime.agent-runner",
-      "symbol": "wire_agent_runner",
-      "owner_crate": "runtime",
+      "id": "construction.systemone.wire-scoring-port",
+      "symbol": "wire_http_scoring_port",
+      "owner_crate": "systemone",
+      "kind": "wire",
+      "allowed_paths": [
+        "agent/features/systemone/tests"
+      ],
+      "guard": "check-cross-bc-construction-registry.sh",
+      "reason": "Jev HTTP scoring wiring is feature http-adapter only (test/eval parity per design 01-systemone-scoring §4.3); production composition must never invoke it",
+      "tracking_issue": 1831
+    },
+    {
+      "id": "construction.task.wire-task",
+      "symbol": "wire_task",
+      "owner_crate": "task",
       "kind": "wire",
       "allowed_paths": [
         "agent/composition/src"
       ],
       "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "runtime 装配工厂（build_agent_runner/from_args_with_workspace 更名 wire_ 前缀类）；跨 BC 调用点仅 composition 装配",
-      "tracking_issue": 1713
+      "reason": "Task wiring is invoked only by the Composition Root",
+      "tracking_issue": 1067
     },
     {
-      "id": "construction.memory.wire-memory-opener",
-      "symbol": "wire_memory_opener",
-      "owner_crate": "memory",
+      "id": "construction.tools.wire-builtin-catalog-execution",
+      "symbol": "wire_builtin_catalog_execution",
+      "owner_crate": "tools",
       "kind": "wire",
       "allowed_paths": [
         "agent/composition/src"
       ],
       "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "memory 实现体收窄后 composition 唯一构造入口（façade 边界收敛批次）",
-      "tracking_issue": 1709
+      "reason": "Builtin catalog/execution wiring is invoked only by the Composition Root (#1294)",
+      "tracking_issue": 1067
     },
     {
-      "id": "construction.runtime.agent-client-from-args",
-      "symbol": "wire_agent_client_from_args",
-      "owner_crate": "runtime",
+      "id": "construction.tools.wire-commands",
+      "symbol": "wire_commands",
+      "owner_crate": "tools",
       "kind": "wire",
       "allowed_paths": [
         "agent/composition/src"
       ],
       "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "memory 实现体收窄后 composition 唯一构造入口（façade 边界收敛批次）",
-      "tracking_issue": 1709
+      "reason": "Command catalog wiring is invoked only by the Composition Root (#861)",
+      "tracking_issue": 1067
     },
     {
-      "id": "construction.memory.wire-legacy-memory-source-factory",
-      "symbol": "wire_legacy_memory_source_factory",
-      "owner_crate": "memory",
+      "id": "construction.tools.wire-skills",
+      "symbol": "wire_skills",
+      "owner_crate": "tools",
       "kind": "wire",
       "allowed_paths": [
         "agent/composition/src"
       ],
       "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "runtime 装配工厂（build_agent_runner/from_args_with_workspace 更名 wire_ 前缀类）；跨 BC 调用点仅 composition 装配",
-      "tracking_issue": 1713
-    },
-    {
-      "id": "construction.memory.wire-reflection-history-store",
-      "symbol": "wire_reflection_history_store",
-      "owner_crate": "memory",
-      "kind": "wire",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "memory 实现体收窄后 composition 唯一构造入口（façade 边界收敛批次）",
-      "tracking_issue": 1709
-    },
-    {
-      "id": "construction.memory.wire-memory-event-store",
-      "symbol": "wire_memory_event_store",
-      "owner_crate": "memory",
-      "kind": "wire",
-      "allowed_paths": [
-        "agent/composition/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "memory 事件流 JsonlSegmentEventStore 收窄后 composition 唯一构造入口",
-      "tracking_issue": 1903
-    },
-    {
-      "id": "construction.context.isolated-context",
-      "symbol": "wire_isolated_context",
-      "owner_crate": "context",
-      "kind": "wire",
-      "allowed_paths": [
-        "agent/features/runtime/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "隔离上下文构造工厂（isolated_context 家族更名）；runtime 子代理派生调用",
-      "tracking_issue": 1707
-    },
-    {
-      "id": "construction.context.isolated-context-with-workspace-skills",
-      "symbol": "wire_isolated_context_with_workspace_skills",
-      "owner_crate": "context",
-      "kind": "wire",
-      "allowed_paths": [
-        "agent/features/runtime/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "隔离上下文构造工厂（isolated_context 家族更名）；runtime 子代理派生调用",
-      "tracking_issue": 1707
-    },
-    {
-      "id": "construction.context.isolated-context-with-skill",
-      "symbol": "wire_isolated_context_with_skill",
-      "owner_crate": "context",
-      "kind": "wire",
-      "allowed_paths": [
-        "agent/features/runtime/src"
-      ],
-      "guard": "check-cross-bc-construction-registry.sh",
-      "reason": "隔离上下文构造工厂（isolated_context 家族更名）；runtime 子代理派生调用",
-      "tracking_issue": 1707
+      "reason": "Skill wiring is invoked only by the Composition Root (#1294)",
+      "tracking_issue": 1067
     }
   ],
   "entries": [],
@@ -1936,6 +1948,7 @@
         "BatchStatusData",
         "InterruptedBatchInfoData",
         "PreparedTaskRestoreData",
+        "SessionRestoreTicket",
         "StaleBatchInfoData",
         "TaskAccess",
         "TaskBatchSnapshotData",
@@ -1950,6 +1963,8 @@
         "TaskPriorityStatsData",
         "TaskProgressItemData",
         "TaskProgressSnapshotData",
+        "TaskRestoreAccess",
+        "TaskRestoreAccessAdapter",
         "TaskRevisionData",
         "TaskSnapshotData",
         "TaskStatusData",

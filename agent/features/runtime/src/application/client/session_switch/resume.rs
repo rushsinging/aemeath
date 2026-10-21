@@ -12,7 +12,6 @@ use context::session::{same_project_identity, CanonicalSession, SessionRestore, 
 use context::{SessionManagementError, SessionResumeViewData};
 use memory::api::ProjectMemoryKey;
 use project::WorkspaceRestoreData;
-use task::{PreparedTaskRestoreData, TaskSnapshotData};
 
 use super::coordinator::SessionSwitchCoordinator;
 use super::error::MainSessionError;
@@ -144,22 +143,23 @@ impl SessionSwitchCoordinator {
             .await?;
 
         // ── 4. TaskData prepare ──
-        // Missing/CapturedEmpty 映射到 empty snapshot，commit 时清掉陈旧任务。
-        let prepared_task: PreparedTaskRestoreData = match &session.tasks {
+        // Missing/CapturedEmpty 映射到清空语义，commit 时清掉陈旧任务。
+        // 经 TaskRestoreAccess 窄 port（runtime 不直接持 Task 持久化类型）。
+        let prepared_task = match &session.tasks {
             SnapshotState::Captured(snapshot) => self
-                .task_persist
-                .prepare_restore(snapshot)
+                .task_restore
+                .prepare_session_restore(Some(snapshot))
                 .map_err(MainSessionError::TaskRestore)?,
             SnapshotState::Missing | SnapshotState::CapturedEmpty => self
-                .task_persist
-                .prepare_restore(&TaskSnapshotData::empty())
+                .task_restore
+                .prepare_session_restore(None)
                 .map_err(MainSessionError::TaskRestore)?,
         };
 
         // ════════ 全部 prepare 成功 — commit 阶段（同步、无 await）════════
 
         self.workspace_persist.commit_restore(prepared_workspace);
-        self.task_persist.commit_restore(prepared_task);
+        self.task_restore.commit_session_restore(prepared_task);
 
         // 发布新的 committed Session + Memory。其它 shared permit 持有者被
         // exclusive permit 阻塞，此写无竞争。

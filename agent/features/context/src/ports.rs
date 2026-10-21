@@ -20,11 +20,12 @@ pub(crate) use session_snapshot_store::{
 };
 
 pub trait MainContextFactory: Send + Sync {
+    /// 构建绑定 per-session 活状态（session / memory / mutation gate）的
+    /// ContextPort。稳定 port（task / workspace 持久化）在 factory 构造时
+    /// 注入，MUST NOT 出现在 build 参数（#2025：runtime 不可见 Task 持久化类型）。
     fn build(
         &self,
         session: Arc<RwLock<Arc<crate::domain::session::CanonicalSession>>>,
-        task_persist: Arc<dyn task::TaskPersist>,
-        workspace_persist: Arc<dyn project::WorkspaceWriter>,
         memory: Arc<RwLock<Arc<dyn memory::api::MemoryPort>>>,
         mutation_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Arc<dyn ContextPort>;

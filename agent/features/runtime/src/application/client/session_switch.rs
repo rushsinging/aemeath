@@ -81,7 +81,7 @@ pub async fn wire_session_switch_coordinator(
         SessionSwitchCoordinatorBuilder {
             workspace_read,
             workspace_persist,
-            task_persist: deps.task_persist,
+            task_restore: deps.task_restore,
             config_reader: deps.config_reader,
             config_participant: deps.config_participant,
             memory_opener: deps.memory_opener,
@@ -103,12 +103,11 @@ pub async fn wire_session_switch_coordinator(
 use config::{ConfigReader, ProjectConfigParticipant};
 #[cfg(any(test, feature = "dev"))]
 use context::{MainContextFactory, SessionManagementPort};
-#[cfg(any(test, feature = "dev"))]
-use task::TaskPersist;
+
 #[cfg(any(test, feature = "dev"))]
 pub async fn wire_test_session_switch(
     workspace: &project::Workspace,
-    task_persist: std::sync::Arc<dyn TaskPersist>,
+    task_restore: std::sync::Arc<task::TaskRestoreAccessAdapter>,
     config_reader: std::sync::Arc<dyn ConfigReader>,
     config_participant: std::sync::Arc<dyn ProjectConfigParticipant>,
     session_management: std::sync::Arc<dyn SessionManagementPort>,
@@ -116,7 +115,7 @@ pub async fn wire_test_session_switch(
 ) -> std::sync::Arc<SessionSwitchCoordinator> {
     wire_session_switch_coordinator(SessionSwitchDependencies {
         workspace: workspace.clone(),
-        task_persist,
+        task_restore,
         config_reader,
         config_participant,
         memory_opener: Box::new(context::test_support::InMemoryTestOpener),

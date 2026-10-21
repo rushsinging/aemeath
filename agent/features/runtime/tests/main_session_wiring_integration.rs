@@ -83,13 +83,16 @@ async fn make_wiring_and_workspace(
         ));
     let wiring = runtime::wire_test_session_switch(
         &workspace,
-        task_wiring.persist(),
+        std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(task_wiring.persist())),
         config.reader(),
         config.participant(),
         Arc::clone(&session_management) as Arc<dyn context::SessionManagementPort>,
-        Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
-        ))),
+        Arc::new(
+            context::ProductionMainContextFactory::new(Arc::new(
+                context::NoOpCanonicalSessionWriter,
+            ))
+            .with_persistence(task_wiring.persist(), workspace.persist()),
+        ),
     )
     .await;
     (wiring, workspace, session_management)
@@ -254,13 +257,16 @@ async fn config_query_and_writer_come_from_wiring() {
 
     let wiring = runtime::wire_test_session_switch(
         &workspace,
-        task_wiring.persist(),
+        std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(task_wiring.persist())),
         config.reader(),
         config.participant(),
         session_management,
-        Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
-        ))),
+        Arc::new(
+            context::ProductionMainContextFactory::new(Arc::new(
+                context::NoOpCanonicalSessionWriter,
+            ))
+            .with_persistence(task_wiring.persist(), workspace.persist()),
+        ),
     )
     .await;
 

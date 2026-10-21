@@ -134,6 +134,9 @@ mod adapters;
 mod domain;
 
 pub use adapters::{wire_task, TaskStore, TaskWiring};
+pub use domain::task_restore_access::{
+    SessionRestoreTicket, TaskRestoreAccess, TaskRestoreAccessAdapter,
+};
 pub use domain::{
     BatchCreateSpecData, BatchData, BatchIdData, BatchStatusData, InterruptedBatchInfoData,
     PreparedTaskRestoreData, StaleBatchInfoData, TaskAccess, TaskBatchSnapshotData,

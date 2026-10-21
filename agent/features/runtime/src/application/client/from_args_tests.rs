@@ -248,13 +248,16 @@ async fn make_test_shell(
     .expect("wire config");
     let wiring = crate::application::client::session_switch::wire_test_session_switch(
         &workspace,
-        task_wiring.persist(),
+        std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(task_wiring.persist())),
         config.reader(),
         config.participant(),
         Arc::new(context::test_support::UnavailableSessionManagement),
-        Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
-        ))),
+        Arc::new(
+            context::ProductionMainContextFactory::new(Arc::new(
+                context::NoOpCanonicalSessionWriter,
+            ))
+            .with_persistence(task_wiring.persist(), workspace.persist()),
+        ),
     )
     .await;
     let snapshot = wiring.committed_config_snapshot();
@@ -569,13 +572,16 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
     let task_wiring = task::wire_task();
     let wiring = crate::application::client::session_switch::wire_test_session_switch(
         &workspace,
-        task_wiring.persist(),
+        std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(task_wiring.persist())),
         config.reader(),
         config.participant(),
         Arc::new(context::test_support::UnavailableSessionManagement),
-        Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
-        ))),
+        Arc::new(
+            context::ProductionMainContextFactory::new(Arc::new(
+                context::NoOpCanonicalSessionWriter,
+            ))
+            .with_persistence(task_wiring.persist(), workspace.persist()),
+        ),
     )
     .await;
     let policy: Arc<dyn policy::Policy> = policy::allow_all();

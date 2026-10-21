@@ -312,7 +312,9 @@ pub(crate) async fn from_args_with_gateways(
         )));
     let deps = runtime::SessionSwitchDependencies {
         workspace: workspace.clone(),
-        task_persist: task_wiring.persist(),
+        task_restore: std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(
+            task_wiring.persist(),
+        )),
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener: memory::wire_memory_opener(
@@ -340,7 +342,8 @@ pub(crate) async fn from_args_with_gateways(
                 skill_catalog.clone(),
                 Arc::new(context::WorkspaceSkillQueryFactory::new(workspace.read())),
             )
-            .with_generator(Arc::new(compact_generator)),
+            .with_generator(Arc::new(compact_generator))
+            .with_persistence(task_wiring.persist(), workspace.persist()),
         ),
     };
     let wiring = runtime::wire_session_switch_coordinator(deps)

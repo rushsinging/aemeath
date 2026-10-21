@@ -198,15 +198,21 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
     let session_management = session_management(&agents_dir);
     let deps = runtime::SessionSwitchDependencies {
         workspace: workspace.clone(),
-        task_persist: task_wiring.persist(),
+        task_restore: std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(
+            task_wiring.persist(),
+        )),
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener,
         session_management: session_management.clone(),
-        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
-        ))),
+        context_factory: Arc::new(
+            context::ProductionMainContextFactory::new(Arc::new(
+                context::NoOpCanonicalSessionWriter,
+            ))
+            .with_persistence(task_wiring.persist(), workspace.persist()),
+        ),
     };
+
     let wiring = runtime::wire_session_switch_coordinator(deps)
         .await
         .expect("wire main session with real opener");
@@ -269,14 +275,20 @@ async fn production_context_append_reopens_from_atomic_blob() {
     );
     let writer = Arc::new(context::DatasetCanonicalSessionWriter::new(session_dataset));
     let session_project = workspace.read().project_identity();
+    let workspace_persist = workspace.persist();
     let wiring = runtime::wire_session_switch_coordinator(runtime::SessionSwitchDependencies {
         workspace,
-        task_persist: task_wiring.persist(),
+        task_restore: std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(
+            task_wiring.persist(),
+        )),
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener,
         session_management: session_management.clone(),
-        context_factory: Arc::new(context::ProductionMainContextFactory::new(writer)),
+        context_factory: Arc::new(
+            context::ProductionMainContextFactory::new(writer)
+                .with_persistence(task_wiring.persist(), workspace_persist),
+        ),
     })
     .await
     .expect("wire main session");
@@ -382,14 +394,19 @@ async fn runtime_session_id_matches_wiring_committed_session() {
     let session_management = session_management(&agents_dir);
     let deps = runtime::SessionSwitchDependencies {
         workspace: workspace.clone(),
-        task_persist: task_wiring.persist(),
+        task_restore: std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(
+            task_wiring.persist(),
+        )),
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener,
         session_management: session_management.clone(),
-        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
-        ))),
+        context_factory: Arc::new(
+            context::ProductionMainContextFactory::new(Arc::new(
+                context::NoOpCanonicalSessionWriter,
+            ))
+            .with_persistence(task_wiring.persist(), workspace.persist()),
+        ),
     };
     let wiring = runtime::wire_session_switch_coordinator(deps)
         .await
@@ -565,14 +582,19 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
     let session_management = session_management(&agents_dir);
     let deps = runtime::SessionSwitchDependencies {
         workspace: workspace.clone(),
-        task_persist: task_wiring.persist(),
+        task_restore: std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(
+            task_wiring.persist(),
+        )),
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener,
         session_management: session_management.clone(),
-        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
-        ))),
+        context_factory: Arc::new(
+            context::ProductionMainContextFactory::new(Arc::new(
+                context::NoOpCanonicalSessionWriter,
+            ))
+            .with_persistence(task_wiring.persist(), workspace.persist()),
+        ),
     };
     let wiring = runtime::wire_session_switch_coordinator(deps)
         .await

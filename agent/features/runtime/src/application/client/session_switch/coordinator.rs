@@ -17,7 +17,7 @@ use memory::api::{MemoryOpener, MemoryPort};
 use project::{WorkspaceReader, WorkspaceWriter};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::session_types::ProjectIdentityData;
-use task::TaskPersist;
+use task::TaskRestoreAccess;
 
 use super::bound::BoundMainRun;
 use super::gate::{SessionSwitchClosed, SessionSwitchGate};
@@ -27,7 +27,7 @@ use super::gate::{SessionSwitchClosed, SessionSwitchGate};
 /// composition 注入各 BC port；协调者持有它们仅供切换协议内部使用。
 pub struct SessionSwitchDependencies {
     pub workspace: project::Workspace,
-    pub task_persist: Arc<dyn TaskPersist>,
+    pub task_restore: Arc<dyn TaskRestoreAccess>,
     pub config_reader: Arc<dyn ConfigReader>,
     pub config_participant: Arc<dyn ProjectConfigParticipant>,
     pub memory_opener: Box<dyn MemoryOpener>,
@@ -41,7 +41,7 @@ pub struct SessionSwitchDependencies {
 pub struct SessionSwitchCoordinatorBuilder {
     pub workspace_read: Arc<dyn WorkspaceReader>,
     pub workspace_persist: Arc<dyn WorkspaceWriter>,
-    pub task_persist: Arc<dyn TaskPersist>,
+    pub task_restore: Arc<dyn TaskRestoreAccess>,
     pub config_reader: Arc<dyn ConfigReader>,
     pub config_participant: Arc<dyn ProjectConfigParticipant>,
     pub memory_opener: Box<dyn MemoryOpener>,
@@ -60,7 +60,7 @@ pub struct SessionSwitchCoordinator {
     pub(super) gate: SessionSwitchGate,
     pub(super) workspace_read: Arc<dyn WorkspaceReader>,
     pub(super) workspace_persist: Arc<dyn WorkspaceWriter>,
-    pub(super) task_persist: Arc<dyn TaskPersist>,
+    pub(super) task_restore: Arc<dyn TaskRestoreAccess>,
     pub(super) config_reader: Arc<dyn ConfigReader>,
     pub(super) config_participant: Arc<dyn ProjectConfigParticipant>,
     pub(super) memory_opener: Box<dyn MemoryOpener>,
@@ -82,8 +82,6 @@ impl SessionSwitchCoordinator {
         let pending_session_restart_revision = Arc::new(StdRwLock::new(None));
         let context = builder.context_factory.build(
             Arc::clone(&committed_session),
-            Arc::clone(&builder.task_persist),
-            Arc::clone(&builder.workspace_persist),
             Arc::clone(&committed_memory),
             Arc::clone(&mutation_gate),
         );
@@ -91,7 +89,7 @@ impl SessionSwitchCoordinator {
             gate: SessionSwitchGate::new(),
             workspace_read: builder.workspace_read,
             workspace_persist: builder.workspace_persist,
-            task_persist: builder.task_persist,
+            task_restore: builder.task_restore,
             config_reader: builder.config_reader,
             config_participant: builder.config_participant,
             memory_opener: builder.memory_opener,

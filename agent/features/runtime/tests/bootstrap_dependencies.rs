@@ -237,14 +237,17 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         Arc::new(NoopSessionManagement);
     let wiring = runtime::wire_session_switch_coordinator(runtime::SessionSwitchDependencies {
         workspace: workspace.clone(),
-        task_persist: task.persist(),
+        task_restore: std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(task.persist())),
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener,
         session_management: session_management.clone(),
-        context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-            context::NoOpCanonicalSessionWriter,
-        ))),
+        context_factory: Arc::new(
+            context::ProductionMainContextFactory::new(Arc::new(
+                context::NoOpCanonicalSessionWriter,
+            ))
+            .with_persistence(task.persist(), workspace.persist()),
+        ),
     })
     .await
     .unwrap();

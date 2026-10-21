@@ -93,14 +93,19 @@ impl TestEnv {
         };
         let dependencies = SessionSwitchDependencies {
             workspace: workspace.clone(),
-            task_persist: task_wiring.persist(),
+            task_restore: std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(
+                task_wiring.persist(),
+            )),
             config_reader: config.reader(),
             config_participant: config.participant(),
             memory_opener,
             session_management: Arc::clone(&session_management) as Arc<dyn SessionManagementPort>,
-            context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-                context::NoOpCanonicalSessionWriter,
-            ))),
+            context_factory: Arc::new(
+                context::ProductionMainContextFactory::new(Arc::new(
+                    context::NoOpCanonicalSessionWriter,
+                ))
+                .with_persistence(task_wiring.persist(), workspace.persist()),
+            ),
         };
         Self {
             temp,

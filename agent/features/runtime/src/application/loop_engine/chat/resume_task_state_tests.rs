@@ -158,16 +158,22 @@ fn resumed_shell(
         crate::SessionSwitchCoordinatorBuilder {
             workspace_read: workspace.read(),
             workspace_persist: workspace.persist(),
-            task_persist: task_store,
+            task_restore: std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(task_store)),
             config_reader: config.clone(),
             config_participant: config,
             memory_opener: Box::new(TestMemoryOpener),
             session_management,
             initial_session: shell.session_switch.committed_session().as_ref().clone(),
             initial_memory: shell.session_switch.committed_memory(),
-            context_factory: Arc::new(context::ProductionMainContextFactory::new(Arc::new(
-                context::NoOpCanonicalSessionWriter,
-            ))),
+            context_factory: Arc::new(
+                context::ProductionMainContextFactory::new(Arc::new(
+                    context::NoOpCanonicalSessionWriter,
+                ))
+                .with_persistence(
+                    std::sync::Arc::new(task::TaskStore::new()),
+                    workspace.persist(),
+                ),
+            ),
         },
     ));
     shell
