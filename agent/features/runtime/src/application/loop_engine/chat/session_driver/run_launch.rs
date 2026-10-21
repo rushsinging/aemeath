@@ -390,7 +390,7 @@ where
             // 查询类事件的即时分派器：run 与 idle 两条接收路径共用，查询 NEVER 排队。
             let immediate_query = crate::application::loop_engine::chat::immediate_query::ImmediateQueryDispatcher::new(
                 session_queries.clone(),
-                wiring.config_reader(),
+                shell.config_query.clone(),
             );
             'session: loop {
                 // Busy user messages are no longer deferred to the session. They
