@@ -16,8 +16,8 @@
 
 ## 核心决策（已拍板）
 
-1. **承载**：RSI 独立进程（daemon），NEVER 由 memory reflect 承担——职责正交：reflect 治理记忆条目，RSI 编辑 harness 组件。
-2. **触发**：Manual / Interval / Idle 三触发；改进形态为轻量单步（多 rollout 探测不进本里程碑）。
+1. **承载**：RSI 常驻独立进程（daemon），NEVER 由 memory reflect 承担——职责正交：reflect 治理记忆条目，RSI 编辑 harness 组件。daemon **负责落盘**（validate + 原子写），主进程只做热载检测与 Remind 通知。
+2. **触发**：定时为主（`harness.rsi.interval_secs` 可配置，与交互会话零耦合）+ Manual 控制面触发；材料量大 MUST 分块执行；多 rollout 探测不进本里程碑。
 3. **热载**：run 边界轮询复用 config_reload 骨架，NEVER 引入文件系统事件监听。
 4. **组件职责分层**：policy（能力面）与 guardrails（行为规则）NEVER 合并；STATIC_SYSTEM_PROMPT 本体 NEVER 开放编辑，开放的是 overlay 追加层。
 5. **经验库**：独立 corpus，schema 与 memory 分离；采纳编辑 MUST 绑定行为证据。

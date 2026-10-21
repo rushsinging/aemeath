@@ -22,13 +22,15 @@ guidance 目录从静态两文件改为动态发现。
 ## 2. 一致性模型（核心契约）
 
 1. **run 开始时快照组件树**：记 `ComponentTreeVersion`（内容指纹集合）。run 执行期间组件版本**固定不变**——包括 tool loop 内行为（c8 plugin 里程碑也不中途换版本）。
-2. **下一 run 边界三段式**：`detect`（指纹对比）→ `validate`（registry 校验新内容）→ `生效 | 回退`。
+2. **下一 run 边界三段式**：`detect`（指纹对比）→ `validate`（registry 防御性复检，无论写入方是 daemon 还是外部编辑器）→ `生效 | 回退`。
 3. **校验失败回退**：保留旧版本继续运行 + TUI 用户可见通知（复用 ConfigDiff 通知通道，新增 `ComponentReloadFailed` 事件，含组件 id 与校验错误）。**NEVER 带病热载**。
 4. **原子写约定**：所有组件文件变更经 registry `write`（tmp+rename），外部编辑器建议同样约定（文档提示，不强制）。
 
-## 3. 与 RSI 变更集的衔接
+## 3. 与 RSI 变更的衔接
 
-RSI daemon 返回的 ChangeSet 由主进程执行：**统一 validate → 统一 write → 下一 run 边界自然生效**（RSI 写入不需要独立的热载推送，走同一条 run 边界路径）。校验失败时 ChangeSet 整份作废，daemon 侧记录失败经验（见 04 分片）。
+RSI daemon 定时周期内**自行完成** validate → 原子写盘（daemon 负责落盘，见 03 分片）；主进程无需接收或执行 ChangeSet。落盘后的生效路径与任何外部编辑一致：下一 run 边界三段式检测。
+
+**Remind 通知 LLM**：变更生效（含 RSI 产生）时，复用 GuidanceReloadPolicy 通道向 LLM 发送 system reminder（组件已更新及要点摘要），失败回退发 `ComponentReloadFailed` 通知——成功与失败都让模型侧可感知，NEVER 静默换脑。
 
 ## 4. 验收
 
