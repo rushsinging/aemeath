@@ -254,24 +254,6 @@ where
                     }
                     continue;
                 }
-                PendingCommand::ManageMemory { args } => {
-                    let wiring_for_memory = wiring.clone();
-                    let config = memory_config.clone();
-                    let result = wiring
-                        .with_shared(async move {
-                            let memory = wiring_for_memory.committed_memory();
-                            super::super::idle_commands::execute_memory(&args, memory.as_ref(), &config)
-                                .await
-                        })
-                        .await;
-                    let (text, is_error) = result.unwrap_or_else(|_| {
-                        ("Session is being switched, please retry.".to_string(), true)
-                    });
-                    let _ = sink
-                        .send_event(RuntimeStreamEvent::CommandResultText { text, is_error })
-                        .await;
-                    continue;
-                }
                 PendingCommand::ResumeSession { id } => {
                     match crate::application::client::resume_helper::resume_session_to_backing(
                         &id,
@@ -398,27 +380,15 @@ where
                     manual_reflection_requested = true;
                     continue;
                 }
-                PendingCommand::ListModels => match session_queries.list_models().await {
-                    Ok(models) => {
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::ModelList { models })
-                            .await;
-                        continue;
-                    }
-                    Err(e) => {
-                        let _ = sink
-                            .send_event(RuntimeStreamEvent::CommandResultText {
-                                text: format!("List models failed: {e}"),
-                                is_error: true,
-                            })
-                            .await;
-                        continue;
-                    }
-                },
             }
         };
     }
 
+            // 查询类事件的即时分派器：run 与 idle 两条接收路径共用，查询 NEVER 排队。
+            let immediate_query = crate::application::loop_engine::chat::immediate_query::ImmediateQueryDispatcher::new(
+                session_queries.clone(),
+                wiring.config_reader(),
+            );
             'session: loop {
                 // Busy user messages are no longer deferred to the session. They
                           // accumulate in the Run-scoped buffer and are consumed within the
@@ -463,12 +433,13 @@ where
                               }
                           } else {
                               idle_until_resume_or_shutdown(
-                                  &input_events,
-                                  &sink,
-                                  &mut pending_input,
-                                  task_access.as_ref(),
-                                  background_wakeup.as_mut(),
-                              )
+                                                                  &input_events,
+                                                                  &sink,
+                                                                  &mut pending_input,
+                                                                  task_access.as_ref(),
+                                                                  background_wakeup.as_mut(),
+                                                                  &immediate_query,
+                                                              )
                               .await
                           };
 
@@ -929,6 +900,7 @@ where
                 let model_observer = main_run_port::ChatModelObserver {
                     runtime_context: runtime_context.clone(),
                     input: input_source.clone(),
+                    immediate_query: immediate_query.clone(),
                     context_size,
                     turn_context: turn_context.clone(),
                     tool_identity: tool_identity.clone(),

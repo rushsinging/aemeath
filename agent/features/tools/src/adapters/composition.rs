@@ -288,14 +288,6 @@ fn builtin_command_descriptors(
             A::RequiredText,
         ),
         (
-            "memory",
-            &["mem"],
-            "Manage memory",
-            M::ApplicationControl,
-            T::Memory,
-            A::OptionalText,
-        ),
-        (
             "version",
             &[],
             "Show version information",

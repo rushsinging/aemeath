@@ -11,7 +11,7 @@ Memory BC 提供两种检索模式，分别服务不同消费场景：
 | 模式 | 方法 | 场景 | 排序依据 |
 |---|---|---|---|
 | **自动注入** | `retrieve_for_inject(&MemoryQuery)` | 每轮 LLM 调用前自动注入 | eligibility 硬过滤 + injection_score |
-| **Query-aware 检索** | `search(&MemorySearchQuery)` | 用户 `/memory search` 或管理查询 | relevance 主排序 + search_tie_break_score |
+| **Query-aware 检索** | `search(&MemorySearchQuery)` | `MemorySearch` 工具（显式检索）或管理查询 | relevance 主排序 + search_tie_break_score |
 
 ### 1.1 自动注入检索
 

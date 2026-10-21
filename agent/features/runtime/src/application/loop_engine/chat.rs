@@ -12,6 +12,7 @@ mod idle_commands;
 mod idle_lifecycle;
 #[cfg(test)]
 mod idle_lifecycle_tests;
+pub(crate) mod immediate_query;
 pub(crate) mod input_gate;
 #[cfg(test)]
 mod input_gate_reset_withdraw_tests;

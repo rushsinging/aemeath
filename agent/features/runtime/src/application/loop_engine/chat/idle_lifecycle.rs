@@ -2,6 +2,7 @@
 
 use crate::application::loop_engine::chat::apply_gate;
 use crate::application::loop_engine::chat::events::{ChatEventSink, RuntimeStreamEvent};
+use crate::application::loop_engine::chat::immediate_query::ImmediateQueryDispatcher;
 use crate::application::loop_engine::chat::input_gate::{
     event_kind_name, GateKind, InputEventDrainPort, PendingCommand, PendingInputBuffer,
 };
@@ -61,45 +62,56 @@ pub(crate) enum IdleResult {
     BackgroundProcessWakeup,
 }
 
-async fn await_idle_input<I: InputEventDrainPort>(
+async fn await_idle_input<I, S>(
     input_events: &I,
     pending: &mut PendingInputBuffer,
     wakeup: Option<&mut crate::application::session::wakeup::WakeupWaiter>,
-) -> IdleResult {
-    let event = match pending.pop_front() {
-        Some(event) => Some(event),
-        None => match wakeup {
-            // 无 wakeup 接入（如部分测试场景）：保持既有纯输入等待。
-            None => input_events.recv_next_input().await,
-            // idle 等待点 select：输入与后台进程唤醒竞争（D13：不仲裁，
-            // 先到先服务；输入侧被选中时唤醒信号保留给下一轮 idle）。
-            Some(waiter) => {
-                tokio::select! {
-                    event = input_events.recv_next_input() => event,
-                    signal = waiter.wait() => match signal {
-                        Some(()) => return IdleResult::BackgroundProcessWakeup,
-                        // 发送端全部释放（session 退出）：不再等待 wakeup，
-                        // 回落到纯输入等待语义。
-                        None => input_events.recv_next_input().await,
-                    },
+    immediate_query: &ImmediateQueryDispatcher,
+    sink: &S,
+) -> IdleResult
+where
+    I: InputEventDrainPort,
+    S: ChatEventSink,
+{
+    let mut wakeup = wakeup;
+    loop {
+        let event = match pending.pop_front() {
+            Some(event) => Some(event),
+            None => match wakeup.as_deref_mut() {
+                // 无 wakeup 接入（如部分测试场景）：保持既有纯输入等待。
+                None => input_events.recv_next_input().await,
+                // idle 等待点 select：输入与后台进程唤醒竞争（D13：不仲裁，
+                // 先到先服务；输入侧被选中时唤醒信号保留给下一轮 idle）。
+                Some(waiter) => {
+                    tokio::select! {
+                        event = input_events.recv_next_input() => event,
+                        signal = waiter.wait() => match signal {
+                            Some(()) => return IdleResult::BackgroundProcessWakeup,
+                            // 发送端全部释放（session 退出）：不再等待 wakeup，
+                            // 回落到纯输入等待语义。
+                            None => input_events.recv_next_input().await,
+                        },
+                    }
                 }
-            }
-        },
-    };
-    match event {
-        Some(event) => {
-            log::debug!(
-                target: crate::LOG_TARGET,
-                "session idle woken by event kind={}",
-                event_kind_name(&event)
-            );
-            pending.push(event);
-            IdleResult::Resumed {
-                segment_id: String::new(),
-                accepted_inputs: Vec::new(),
-            }
+            },
+        };
+        let Some(event) = event else {
+            return IdleResult::Shutdown;
+        };
+        log::debug!(
+            target: crate::LOG_TARGET,
+            "session idle woken by event kind={}",
+            event_kind_name(&event)
+        );
+        // 查询类事件就地执行并回事件，不进入 pending：idle 不是排队的理由。
+        if immediate_query.try_dispatch(&event, sink).await {
+            continue;
         }
-        None => IdleResult::Shutdown,
+        pending.push(event);
+        return IdleResult::Resumed {
+            segment_id: String::new(),
+            accepted_inputs: Vec::new(),
+        };
     }
 }
 
@@ -109,13 +121,22 @@ pub(crate) async fn idle_until_resume_or_shutdown<I, S>(
     pending: &mut PendingInputBuffer,
     task_access: &dyn task::TaskAccess,
     mut wakeup: Option<&mut crate::application::session::wakeup::WakeupWaiter>,
+    immediate_query: &ImmediateQueryDispatcher,
 ) -> IdleResult
 where
     I: InputEventDrainPort,
     S: ChatEventSink,
 {
     loop {
-        match await_idle_input(input_events, pending, wakeup.as_deref_mut()).await {
+        match await_idle_input(
+            input_events,
+            pending,
+            wakeup.as_deref_mut(),
+            immediate_query,
+            sink,
+        )
+        .await
+        {
             IdleResult::Resumed { .. } => {
                 let segment_id = sdk::ChatId::new_v7().to_string();
                 let gate = apply_gate(GateKind::BeforeLlm, pending, sink, task_access, true).await;

@@ -103,11 +103,6 @@ pub enum ChatInputEvent {
     ManageSession {
         args: String,
     },
-    /// 管理记忆。由 `/memory` 触发。
-    /// args: "" / "list" / "add ..." / "delete ..." / "pin ..." / "search ..." / "compact" / "stats"
-    ManageMemory {
-        args: String,
-    },
     /// 恢复指定会话。由 `/resume <id>` 触发。
     /// 需要走 idle gate（替换 loop messages）。
     ResumeSession {
@@ -181,7 +176,6 @@ impl ChatInputEvent {
                 });
             }
             Self::ManageSession { args } => return Some(with_argument("/session", args)),
-            Self::ManageMemory { args } => return Some(with_argument("/memory", args)),
             Self::ResumeSession { id } => return Some(with_argument("/resume", id)),
             Self::QueryReflectionHistory { limit } => {
                 return Some(with_argument("/reflect", &limit.to_string()));
