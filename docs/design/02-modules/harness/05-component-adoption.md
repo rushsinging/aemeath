@@ -36,6 +36,10 @@
 
 ### c4 tool_guidance 覆盖层
 - 形态二选一（开放决策 D1）：独立文件 vs 并入 guardrails 段（省 always-on 预算）。
+- **注入通道**（D1 第二维度，NEVER 进工具 schema——外置 schema 会版本漂移破坏调用）：
+  - 通道 A：system prompt stable 段尾（prompt caching 友好、每 run 必见；代价：修改使缓存失效）
+  - 通道 B：user-context 消息（与 AGENTS.md 同通道；改动不破缓存）
+- 注入内容：跨工具使用技巧 prose（工具选择、超时策略、分段读取、大结果处理）——RSI 证据最丰富（工具误用/重试信号）的槽位。
 
 ### c6 config
 - `aemeath.json` 进 watch 面；变更走 run 边界生效 + Remind 通知（复用既有 reload 策略）。
@@ -49,7 +53,7 @@
 
 | # | 决策 | 默认倾向 | 拍板时点 |
 |---|---|---|---|
-| D1 | c4 独立文件 vs 并入 guardrails 段 | 并入段（省预算） | P3 实施前 |
+| D1 | c4 形态：独立文件 vs 并入 guardrails 段；**注入通道**：A（system prompt stable 段，prompt caching 友好但修改破缓存）vs B（user-context 消息，改动不破缓存、语义权重略低） | 并入段 + 通道 B | P3 实施前 |
 | D2 | run 内 background process 跨边界的组件版本归属 | 按发起 run 快照 | 热载实施时 |
 | D3 | overlay 全局文件是否开放 RSI 编辑 | 先只开放项目级 | P1 验收后 |
 | D4 | 经验库 Active 容量与整理策略数值 | 100 条/超限 LLM 整理 | daemon 实施时 |

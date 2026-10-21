@@ -20,4 +20,5 @@
 2. **触发**：定时为主（`harness.rsi.interval_secs` 可配置，与交互会话零耦合）+ Manual 控制面触发；材料量大 MUST 分块执行；多 rollout 探测不进本里程碑。
 3. **热载**：run 边界轮询复用 config_reload 骨架，NEVER 引入文件系统事件监听。
 4. **组件职责分层**：policy（能力面）与 guardrails（行为规则）NEVER 合并；STATIC_SYSTEM_PROMPT 本体 NEVER 开放编辑，开放的是 overlay 追加层。
-5. **经验库**：独立 corpus，schema 与 memory 分离；采纳编辑 MUST 绑定行为证据。
+5. **AlwaysOnProse 组件族**：c1 overlay / c2 guardrails / c4 tool_guidance 机制一份（共享 adapter），语义分槽（内容性质、RSI 证据维度、预算记账、Remind 语义各自独立）。
+6. **经验库**：独立 corpus，schema 与 memory 分离；采纳编辑 MUST 绑定行为证据。
