@@ -9,8 +9,8 @@ use crate::domain::session::{
 
 /// Context-owned Session identity management contract.
 ///
-/// Composition supplies one implementation to both `MainSessionWiring` and
-/// Runtime. Consumers never select Storage adapters or inspect blob protocol files.
+/// Composition supplies one implementation to both the runtime session-switch
+/// coordinator and Runtime. Consumers never select Storage adapters or inspect blob protocol files.
 #[async_trait]
 pub trait SessionManagementPort: Send + Sync {
     /// Loads only a session whose persisted workspace has the current stable

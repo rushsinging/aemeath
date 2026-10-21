@@ -17,7 +17,6 @@ mod prompt_source;
 pub(crate) mod session_legacy_workspace;
 #[cfg(any(test, feature = "dev"))]
 mod session_lifecycle;
-mod session_resume;
 mod skill_prompt_source;
 mod tool_receipt_ledger;
 
