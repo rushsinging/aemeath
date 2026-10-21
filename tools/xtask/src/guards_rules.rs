@@ -852,6 +852,18 @@ fn owning_crate_of(relative_file: &str) -> String {
 }
 
 /// F-4：cargo metadata 的 workspace path 依赖边集合（crate → 依赖 crate 名）。
+/// dev-dependencies 的自引用（dep == 自身）是 Rust 官方 integration-test
+/// 模式（给 `tests/` 暴露 dev feature），不进入生产依赖方向矩阵；其余
+/// dev 边维持原行为计入（测试耦合仍受矩阵约束）。
+pub fn dependency_edge_counts(package_name: &str, dependency: &serde_json::Value) -> bool {
+    if dependency["kind"].as_str() == Some("dev")
+        && dependency["name"].as_str() == Some(package_name)
+    {
+        return false;
+    }
+    true
+}
+
 pub fn workspace_dependency_edges(
     repo_root: &std::path::Path,
 ) -> Result<std::collections::BTreeMap<String, Vec<String>>> {
@@ -883,6 +895,9 @@ pub fn workspace_dependency_edges(
         let mut dependencies = Vec::new();
         if let Some(deps) = package["dependencies"].as_array() {
             for dependency in deps {
+                if !dependency_edge_counts(&name, dependency) {
+                    continue;
+                }
                 let Some(dep_path) = dependency["path"].as_str() else {
                     continue;
                 };

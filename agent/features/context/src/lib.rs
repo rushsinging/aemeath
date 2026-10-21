@@ -4,8 +4,8 @@
 //!
 //! | 组 | 实体 |
 //! |---|---|
-//! | 工厂 | `wire_main_session`（出口 `SdkError`）、`wire_isolated_context{,_with_skill,_with_workspace_skills}`（isolated_context 家族更名） |
-//! | 角色和职能 | `ContextPort`（+context_port 模块 glob 面）、`SessionManagementPort`、`MainSessionWiring`（生产协调器）+ Gate 家族、适配器实现体（composition 装配面） |
+//! | 工厂 | `wire_isolated_context{,_with_skill,_with_workspace_skills}`（isolated_context 家族）；Main Session 协调（resume 原子协议）已迁 runtime `SessionSwitchCoordinator`（#2025） |
+//! | 角色和职能 | `ContextPort`（+context_port 模块 glob 面）、`SessionManagementPort`、适配器实现体（composition 装配面）；Main Session 协调已迁 runtime `SessionSwitchCoordinator`（#2025） |
 //! | 数据和生命周期 | 36 个 Data（ContextRequest/StepReceipt/Compact*/ToolReceipt*/Session 展示类）；session 持久化内核（SessionCodec/Generation 族等）已内部化 pub(crate) |
 //! | Error | SessionManagementError/ContextPortError/ContextAppendError/AcceptedInputError（活跃 match 保留）；MainSessionError 内部化（wire 出口统一 SdkError） |
 //!
@@ -47,13 +47,9 @@ pub use domain::session::{
 };
 pub use ports::SessionManagementPort;
 
-// Main Session coordinator — cross-BC wiring for Runtime bootstrap.
+// 跨 crate 测试支撑（cfg test / dev）。
 #[cfg(any(test, feature = "dev"))]
 pub use application::test_support;
-pub use application::{
-    wire_main_session, MainSessionDependencies, MainSessionWiring, MainSessionWiringBuilder,
-    OwnedSessionSharedPermit,
-};
 
 // 窄 façade根导出（#1022 收口：内部层 mod 私有，跨 BC 消费只经 crate 根与语义模块）
 #[cfg(test)]
@@ -67,7 +63,6 @@ pub use adapters::{
     AtomicBlobAcceptedInputWriter, AtomicBlobSessionManagement, AtomicBlobToolReceiptWriter,
     DatasetCanonicalSessionWriter, DatasetSessionManagement, WorkspaceSkillQueryFactory,
 };
-pub use application::main_session;
 #[cfg(test)]
 pub(crate) use application::ContextApplicationService;
 #[cfg(test)]
@@ -157,7 +152,9 @@ pub mod guidance {
 
 pub mod session {
     pub use crate::domain::session::{
-        CanonicalSession, PersistedWorkspaceContext, SessionMetadata, SnapshotState,
+        new_session_id, now_iso, same_project_identity, CanonicalSession,
+        PersistedWorkspaceContext, SessionMetadata, SessionRestore, SessionResumeLoad,
+        SnapshotState,
     };
 }
 
@@ -173,9 +170,6 @@ mod integration_tests {
     mod in_memory_session_backing;
     mod injection_freeze;
     mod isolated_context_with_skill;
-    mod main_session_config_facade;
-    mod main_session_gate;
-    mod main_session_wiring;
     mod session_envelope_codec;
     mod session_management_port_contract;
     mod session_persistence_service;

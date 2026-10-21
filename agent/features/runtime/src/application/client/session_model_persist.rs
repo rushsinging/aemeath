@@ -12,7 +12,7 @@ pub(crate) fn session_model_key(source_key: &str, model_id: &str) -> String {
 ///
 /// Failures are logged and swallowed so model persistence never blocks chat.
 ///
-/// Prefer [`persist_session_model_on_wiring`] when a [`context::MainSessionWiring`]
+/// Prefer [`persist_session_model_on_wiring`] when a [`SessionSwitchCoordinator`]
 /// is available — that path holds `mutation_gate` and syncs `committed_session`.
 pub(crate) async fn persist_session_model(
     session_management: &dyn context::SessionManagementPort,
@@ -61,12 +61,13 @@ pub(crate) async fn persist_session_model(
 /// Write model onto session metadata, syncing in-memory revision when `session_id`
 /// is the wiring's currently committed active session.
 ///
-/// - Active session → [`MainSessionWiring::update_active_session_metadata`]
-///   (mutation_gate + disk + committed revision sync).
+/// - Active session → [`SessionSwitchCoordinator::update_active_session_metadata`]
+///   (mutation_gate + disk + committed revision sync)。
 /// - Other id (bootstrap `--resume` target before `resolve_startup_session`) →
-///   disk-only [`persist_session_model`].
+///   disk-only [`persist_session_model`]（`session_management` 由调用方平铺注入）。
 pub(crate) async fn persist_session_model_on_wiring(
-    wiring: &context::MainSessionWiring,
+    coordinator: &crate::SessionSwitchCoordinator,
+    session_management: &dyn context::SessionManagementPort,
     session_id: &str,
     model: &str,
 ) {
@@ -74,8 +75,8 @@ pub(crate) async fn persist_session_model_on_wiring(
     if model.is_empty() {
         return;
     }
-    if wiring.committed_session().id == session_id {
-        if let Err(error) = wiring
+    if coordinator.committed_session().id == session_id {
+        if let Err(error) = coordinator
             .update_active_session_metadata(context::SessionMetadataUpdateData {
                 model: Some(model.to_string()),
                 ..Default::default()
@@ -90,9 +91,9 @@ pub(crate) async fn persist_session_model_on_wiring(
         return;
     }
     persist_session_model(
-        wiring.session_management().as_ref(),
+        session_management,
         session_id,
-        &wiring.project_identity(),
+        &coordinator.project_identity(),
         model,
     )
     .await;
@@ -100,12 +101,14 @@ pub(crate) async fn persist_session_model_on_wiring(
 
 /// Bootstrap/switch helper: write `source/model` from a resolved binding.
 pub(crate) async fn persist_resolved_model_for_session(
-    wiring: &context::MainSessionWiring,
+    coordinator: &crate::SessionSwitchCoordinator,
+    session_management: &dyn context::SessionManagementPort,
     session_id: &str,
     resolved_model: &ResolvedModel,
 ) {
     persist_session_model_on_wiring(
-        wiring,
+        coordinator,
+        session_management,
         session_id,
         &session_model_key(&resolved_model.source_key, &resolved_model.model.id),
     )

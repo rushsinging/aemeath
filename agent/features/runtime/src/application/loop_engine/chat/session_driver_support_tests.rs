@@ -153,17 +153,22 @@ impl memory::api::MemoryOpener for TestMemoryOpener {
     }
 }
 
-fn test_wiring() -> Arc<context::MainSessionWiring> {
-    test_wiring_with_context_factory(Arc::new(context::ProductionMainContextFactory::new(
-        Arc::new(context::NoOpCanonicalSessionWriter),
-    )))
+fn test_wiring() -> Arc<crate::SessionSwitchCoordinator> {
+    let workspace = project::wire_production_workspace(std::env::current_dir().unwrap(), None)
+        .expect("workspace 初始化成功");
+    test_wiring_with_context_factory(Arc::new(
+        context::ProductionMainContextFactory::new(Arc::new(
+            context::NoOpCanonicalSessionWriter,
+        ))
+        .with_persistence(std::sync::Arc::new(task::TaskStore::new()), workspace.persist()),
+    ))
 }
 
 /// 允许测试注入自定义 `MainContextFactory`（如装饰 production context、
 /// 记录 session 落盘类端口调用的 fake 工厂）。
 fn test_wiring_with_context_factory(
     context_factory: Arc<dyn context::MainContextFactory>,
-) -> Arc<context::MainSessionWiring> {
+) -> Arc<crate::SessionSwitchCoordinator> {
     let workspace = project::wire_production_workspace(std::env::current_dir().unwrap(), None)
         .expect("workspace 初始化成功");
     let persist = workspace.persist();
@@ -171,11 +176,11 @@ fn test_wiring_with_context_factory(
         &workspace.read().initial_cwd(),
     ), std::path::PathBuf::from("/nonexistent/test-isolated-config.json")));
     let now = chrono::Utc::now().to_rfc3339();
-    Arc::new(context::MainSessionWiring::build(
-        context::MainSessionWiringBuilder {
+    Arc::new(crate::SessionSwitchCoordinator::assemble(
+        crate::SessionSwitchCoordinatorBuilder {
             workspace_read: workspace.read(),
             workspace_persist: persist.clone(),
-            task_persist: Arc::new(task::TaskStore::new()),
+            task_restore: std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(std::sync::Arc::new(task::TaskStore::new()))),
             config_reader: config.clone(),
             config_participant: config,
             memory_opener: Box::new(TestMemoryOpener),
@@ -322,7 +327,7 @@ fn test_shell_with_catalog(
             ),
         )),
         workspace,
-        wiring,
+        session_switch: wiring,
         config_query: Arc::new(config::ConfigAppService::with_global_path(None, std::path::PathBuf::from("/nonexistent/test-isolated-config.json"))),
         config_writer: Arc::new(config::ConfigAppService::with_global_path(None, std::path::PathBuf::from("/nonexistent/test-isolated-config.json"))),
         session_management: Arc::new(context::test_support::UnavailableSessionManagement),
@@ -430,7 +435,7 @@ fn test_shell_with_task_store(
             ),
         )),
         workspace,
-        wiring,
+        session_switch: wiring,
         config_query: Arc::new(config::ConfigAppService::with_global_path(None, std::path::PathBuf::from("/nonexistent/test-isolated-config.json"))),
         config_writer: Arc::new(config::ConfigAppService::with_global_path(None, std::path::PathBuf::from("/nonexistent/test-isolated-config.json"))),
         session_management: Arc::new(context::test_support::UnavailableSessionManagement),
@@ -965,10 +970,10 @@ fn retry_main_context_with_wiring(
     input_events: ChannelInputEvents,
 ) -> (
     SessionCommandDriverInput<RecordingSink, ChannelInputEvents>,
-    Arc<context::MainSessionWiring>,
+    Arc<crate::SessionSwitchCoordinator>,
 ) {
     let shell = test_shell();
-    let wiring = shell.wiring.clone();
+    let wiring = shell.session_switch.clone();
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(provider),
     );

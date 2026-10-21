@@ -112,7 +112,7 @@ pub struct SessionMetadataUpdateData {
 }
 
 impl SessionMetadataUpdateData {
-    pub(crate) fn apply(self, metadata: &mut SessionMetadata) {
+    pub fn apply(self, metadata: &mut SessionMetadata) {
         if let Some(title) = self.title {
             metadata.title = Some(title);
         }

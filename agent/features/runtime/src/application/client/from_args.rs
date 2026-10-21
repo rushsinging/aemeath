@@ -68,7 +68,7 @@ impl RuntimeToolAssemblyDependenciesData {
 /// 由 Composition 装配、供 Runtime bootstrap 转发的基础运行资源。
 pub struct RuntimeCoreDependenciesData {
     workspace: project::Workspace,
-    wiring: Arc<context::MainSessionWiring>,
+    session_switch: Arc<crate::SessionSwitchCoordinator>,
     provider_factory: Arc<dyn ProviderFactory>,
     session_management: Arc<dyn context::SessionManagementPort>,
 }
@@ -76,13 +76,13 @@ pub struct RuntimeCoreDependenciesData {
 impl RuntimeCoreDependenciesData {
     pub fn new(
         workspace: project::Workspace,
-        wiring: Arc<context::MainSessionWiring>,
+        session_switch: Arc<crate::SessionSwitchCoordinator>,
         provider_factory: Arc<dyn ProviderFactory>,
         session_management: Arc<dyn context::SessionManagementPort>,
     ) -> Self {
         Self {
             workspace,
-            wiring,
+            session_switch,
             provider_factory,
             session_management,
         }
@@ -283,8 +283,8 @@ impl RuntimeBootstrapDependenciesData {
         self.core.session_management.clone()
     }
 
-    pub fn wiring(&self) -> Arc<context::MainSessionWiring> {
-        self.core.wiring.clone()
+    pub fn session_switch(&self) -> Arc<crate::SessionSwitchCoordinator> {
+        self.core.session_switch.clone()
     }
 
     pub fn tool_catalog(&self) -> Arc<dyn tools::ToolCatalogPort> {
@@ -328,7 +328,7 @@ pub async fn wire_agent_client_from_args(
     } = dependencies;
     let RuntimeCoreDependenciesData {
         workspace,
-        wiring,
+        session_switch: coordinator,
         provider_factory,
         session_management,
     } = core;
@@ -351,10 +351,10 @@ pub async fn wire_agent_client_from_args(
     } = runner_assembly;
     let _ = &session_management;
 
-    // Config query/writer come from the wiring gate-aware façade.
-    // Bootstrap reads committed_config directly from wiring (one-shot).
-    let config_query = wiring.config_query();
-    let config_writer = wiring.config_writer();
+    // Config query/writer 来自 coordinator 的 gate-aware 协议 façade。
+    // bootstrap 一次性读 committed_config_snapshot。
+    let config_query = coordinator.gate_aware_config_reader();
+    let config_writer = coordinator.gate_aware_config_writer();
 
     let SessionBootstrapAssemblyData {
         cwd,
@@ -380,9 +380,10 @@ pub async fn wire_agent_client_from_args(
     compact_model_slot.bind(model_state.clone());
     let persist_session_id = resume
         .clone()
-        .unwrap_or_else(|| wiring.committed_session().id.clone());
+        .unwrap_or_else(|| coordinator.committed_session().id.clone());
     super::session_model_persist::persist_resolved_model_for_session(
-        &wiring,
+        &coordinator,
+        session_management.as_ref(),
         &persist_session_id,
         &resolved_model,
     )
@@ -392,7 +393,7 @@ pub async fn wire_agent_client_from_args(
     // A rejected cross-project id leaves the committed snapshot unchanged.
     // 职责 1（resume 解析与 SDK backing 映射）由 startup_resume 模块承担。
     let (session_id, startup_resume) =
-        super::startup_resume::resolve_startup_session(resume.as_deref(), &wiring).await?;
+        super::startup_resume::resolve_startup_session(resume.as_deref(), &coordinator).await?;
     // Session id determined above; committed_config remains bound to the
     // current project because cross-project resume is rejected.
 
@@ -407,7 +408,7 @@ pub async fn wire_agent_client_from_args(
     .await;
 
     // 4. Read the current committed config snapshot.
-    let snapshot = wiring.committed_config();
+    let snapshot = coordinator.committed_config_snapshot();
 
     // 5. 日志已由 Composition 在进入 Runtime 前初始化。
 
@@ -461,7 +462,7 @@ pub async fn wire_agent_client_from_args(
             ),
         )),
         workspace.clone(),
-        wiring.clone(),
+        coordinator.clone(),
         config_query.clone(),
         config_writer.clone(),
         session_management.clone(),

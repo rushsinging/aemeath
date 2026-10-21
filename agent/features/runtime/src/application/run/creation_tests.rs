@@ -21,6 +21,7 @@ fn p6_9_5_session_snapshot_contains_only_value_facts() {
         "Arc<",
         "RuntimeWorkspaceAccess",
         "MainSessionWiring",
+        "SessionSwitchCoordinator",
         "InteractionPort",
         "ProviderBindingData",
         "Mutex<",

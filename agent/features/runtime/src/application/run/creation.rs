@@ -12,7 +12,7 @@ use crate::domain::agent_run::{Run, RunId, RunSpec, RunSpecError};
 /// 纯值 [`RunCreationRequest`] 的 Session live binding view。
 #[derive(Clone)]
 pub(crate) struct SessionRunBindings {
-    wiring: Arc<context::MainSessionWiring>,
+    session_switch: Arc<crate::SessionSwitchCoordinator>,
     provider: Arc<crate::ports::ProviderBindingData>,
     interaction: Arc<dyn crate::application::interaction::port::InteractionPort>,
     reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
@@ -25,7 +25,7 @@ pub(crate) struct SessionRunBindings {
 
 impl SessionRunBindings {
     pub(crate) fn new(
-        wiring: Arc<context::MainSessionWiring>,
+        session_switch: Arc<crate::SessionSwitchCoordinator>,
         provider: Arc<crate::ports::ProviderBindingData>,
         interaction: Arc<dyn crate::application::interaction::port::InteractionPort>,
         reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
@@ -33,7 +33,7 @@ impl SessionRunBindings {
         usage: RunUsageTracker,
     ) -> Self {
         Self {
-            wiring,
+            session_switch,
             provider,
             interaction,
             reasoning,
@@ -42,8 +42,8 @@ impl SessionRunBindings {
         }
     }
 
-    pub(crate) fn wiring(&self) -> &Arc<context::MainSessionWiring> {
-        &self.wiring
+    pub(crate) fn session_switch(&self) -> &Arc<crate::SessionSwitchCoordinator> {
+        &self.session_switch
     }
 
     pub(crate) fn provider(&self) -> &Arc<crate::ports::ProviderBindingData> {

@@ -70,7 +70,7 @@
 
 代表性规则族（完整清单以 registry 为准）：
 
-- **跨 crate 边界**：`use.features.no-internal-segment-penetration`（内部层禁穿透）、`use.share.adapter-single-root`（adapter 唯一根）、`dependency.workspace-matrix`（依赖矩阵）。
+- **跨 crate 边界**：`use.features.no-internal-segment-penetration`（内部层禁穿透）、`use.share.adapter-single-root`（adapter 唯一根）、`dependency.workspace-matrix`（依赖矩阵；仅统计生产依赖边——dev-dependencies 的自引用是 Rust 官方 integration-test 模式（给 `tests/` 暴露 dev feature），不计入矩阵；其余 dev 边照常计入）。
 - **窄 façade**：`facade.<crate>.root-exports` 系列（逐 crate 导出白名单）。
 - **层序与布局**：`layer.<crate>.hexagonal-order`、`layout.<crate>.hexagonal-top-level` 系列。
 - **构造与装配**：`construction_symbols` 数据区（owner crate 内部放行，越界构造与未登记跨 BC wire fail-closed）。

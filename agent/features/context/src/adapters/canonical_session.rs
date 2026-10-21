@@ -253,6 +253,8 @@ impl CanonicalSessionWriter for NoOpCanonicalSessionWriter {
 
 pub struct ProductionMainContextFactory {
     writer: Arc<dyn CanonicalSessionWriter>,
+    task_persist: Option<Arc<dyn task::TaskPersist>>,
+    workspace_persist: Option<Arc<dyn project::WorkspaceWriter>>,
     accepted_input_writer: Arc<dyn AcceptedInputWriter>,
     tool_receipt_writer: Arc<dyn ToolReceiptWriter>,
     /// 可选注入的 Skill metadata catalog 与 Context-owned query factory。
@@ -265,6 +267,8 @@ pub struct ProductionMainContextFactory {
 impl ProductionMainContextFactory {
     pub fn new(writer: Arc<dyn CanonicalSessionWriter>) -> Self {
         Self {
+            task_persist: None,
+            workspace_persist: None,
             writer,
             accepted_input_writer: Arc::new(NoOpAcceptedInputWriter),
             tool_receipt_writer: Arc::new(NoOpToolReceiptWriter),
@@ -294,6 +298,17 @@ impl ProductionMainContextFactory {
         self
     }
 
+    /// 注入稳定持久化 port（task / workspace）；build 时不再重复传递。
+    pub fn with_persistence(
+        mut self,
+        task_persist: Arc<dyn task::TaskPersist>,
+        workspace_persist: Arc<dyn project::WorkspaceWriter>,
+    ) -> Self {
+        self.task_persist = Some(task_persist);
+        self.workspace_persist = Some(workspace_persist);
+        self
+    }
+
     /// 注入 LLM 摘要生成器（#1486），compact 优先走 LLM 语义压缩。
     pub fn with_generator(mut self, generator: Arc<dyn CompactGenerator>) -> Self {
         self.generator = Some(generator);
@@ -305,11 +320,17 @@ impl MainContextFactory for ProductionMainContextFactory {
     fn build(
         &self,
         session: Arc<RwLock<Arc<CanonicalSession>>>,
-        task_persist: Arc<dyn task::TaskPersist>,
-        workspace_persist: Arc<dyn project::WorkspaceWriter>,
         memory: Arc<RwLock<Arc<dyn memory::api::MemoryPort>>>,
         mutation_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Arc<dyn ContextPort> {
+        let task_persist = self
+            .task_persist
+            .clone()
+            .expect("factory task persistence must be injected via with_persistence");
+        let workspace_persist = self
+            .workspace_persist
+            .clone()
+            .expect("factory workspace persistence must be injected via with_persistence");
         let prompt: Arc<dyn crate::ports::ContextPromptSource> =
             match (&self.skill_catalog, &self.query_factory) {
                 (Some(catalog), Some(factory)) => {

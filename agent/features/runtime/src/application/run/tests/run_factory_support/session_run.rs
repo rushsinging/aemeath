@@ -18,8 +18,6 @@ impl context::MainContextFactory for FixedMainContextFactory {
     fn build(
         &self,
         _session: Arc<RwLock<Arc<context::session::CanonicalSession>>>,
-        _task_persist: Arc<dyn task::TaskPersist>,
-        _workspace_persist: Arc<dyn project::WorkspaceWriter>,
         _memory: Arc<RwLock<Arc<dyn memory::api::MemoryPort>>>,
         _mutation_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Arc<dyn ContextPort> {
@@ -313,11 +311,13 @@ impl SessionRunFixtureBuilder {
         ));
         let now = chrono::Utc::now().to_rfc3339();
         let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::api::NoOpMemory);
-        let wiring = Arc::new(context::MainSessionWiring::build(
-            context::MainSessionWiringBuilder {
+        let wiring = Arc::new(crate::SessionSwitchCoordinator::assemble(
+            crate::SessionSwitchCoordinatorBuilder {
                 workspace_read: workspace.read(),
                 workspace_persist: workspace.persist(),
-                task_persist: task_store.clone(),
+                task_restore: std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(
+                    task_store.clone(),
+                )),
                 config_reader: config_service.clone(),
                 config_participant: config_service,
                 memory_opener: Box::new(context::test_support::InMemoryTestOpener),

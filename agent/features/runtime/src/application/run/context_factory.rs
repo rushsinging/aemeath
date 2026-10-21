@@ -58,7 +58,7 @@ impl ToolCatalogPort for RestrictedToolCatalog {
 
 struct SessionResolution {
     snapshot: SessionSnapshot,
-    lease: Option<context::OwnedSessionSharedPermit>,
+    lease: Option<crate::OwnedSessionSharedPermit>,
 }
 
 struct WorkspaceSelection {
@@ -365,13 +365,12 @@ impl RuntimeContextFactory {
                 lease: None,
             });
         };
-        let wiring = session.wiring();
-        let lease = wiring
-            .gate()
+        let session_switch = session.session_switch();
+        let lease = session_switch
             .try_acquire_shared()
             .map_err(|_| RunCreationError::ContextAssembly)?;
-        let committed = wiring.committed_session();
-        let config = wiring.committed_config();
+        let committed = session_switch.committed_session();
+        let config = session_switch.committed_config_snapshot();
         let snapshot = if committed.id == request.session().session_id()
             && config.revision().get() == request.session().revision()
         {
@@ -486,7 +485,7 @@ impl RuntimeContextFactory {
     ) -> Result<ContextSelection, RunCreationError> {
         if let Some(bindings) = bindings.session() {
             return Ok(ContextSelection {
-                port: bindings.wiring().committed_context(),
+                port: bindings.session_switch().committed_context(),
             });
         }
         let workspace = workspace
@@ -512,7 +511,7 @@ impl RuntimeContextFactory {
         bindings: &RunCreationBindings,
     ) -> Result<MemorySelection, RunCreationError> {
         let port = match bindings.session() {
-            Some(session) => session.wiring().committed_memory(),
+            Some(session) => session.session_switch().committed_memory(),
             None => Arc::new(memory::api::NoOpMemory),
         };
         Ok(MemorySelection { port })

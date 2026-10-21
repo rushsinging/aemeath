@@ -6,6 +6,7 @@ mod snapshot;
 mod state;
 mod task_access;
 mod task_persist;
+pub mod task_restore_access;
 
 #[cfg(test)]
 mod query_tests;

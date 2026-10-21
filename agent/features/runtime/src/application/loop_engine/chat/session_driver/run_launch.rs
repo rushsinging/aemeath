@@ -54,7 +54,7 @@ where
             let user_context = shell.user_context.clone();
             let system_prompt_text = shell.system_prompt_text.clone();
             let workspace = shell.workspace.clone();
-            let wiring = shell.wiring.clone();
+            let wiring = shell.session_switch.clone();
             let tool_result_materializer = shell.tool_result_materializer.clone();
             let agent_runner: Option<Arc<dyn tools::published::agent::AgentRunner>> =
                 Some(shell.agent_runner.clone());
@@ -149,7 +149,7 @@ where
                         Ok((new_binding, result)) => {
                             *reasoning.lock().unwrap_or_else(|error| error.into_inner()) =
                                 new_binding.requested_reasoning;
-                            let committed_config = shell.wiring.committed_config();
+                            let committed_config = shell.session_switch.committed_config_snapshot();
                             shell
                                 .session_state
                                 .write()
@@ -158,7 +158,8 @@ where
                             shell.model_state.update_binding(Arc::new(new_binding));
                             context_size = result.context_window;
                             crate::application::client::session_model_persist::persist_session_model_on_wiring(
-                                &shell.wiring,
+                                &shell.session_switch,
+                                shell.session_management.as_ref(),
                                 &session_id,
                                 &selection,
                             )
@@ -215,11 +216,13 @@ where
                         let result = wiring
                             .with_shared({
                                 let wiring = wiring.clone();
+                                let session_management = shell.session_management.clone();
                                 async move {
                                     super::super::idle_commands::execute_session(
                                         &args,
                                         &active_session_id,
                                         &wiring,
+                                        session_management.as_ref(),
                                     )
                                     .await
                                 }
@@ -280,7 +283,7 @@ where
                                 .unwrap()
                                 .update_session(
                                     session_id.clone(),
-                                    wiring.committed_config(),
+                                    wiring.committed_config_snapshot(),
                                 );
                             messages = resume_view.active_messages.clone();
                             let _ = sink
@@ -387,7 +390,7 @@ where
             // 查询类事件的即时分派器：run 与 idle 两条接收路径共用，查询 NEVER 排队。
             let immediate_query = crate::application::loop_engine::chat::immediate_query::ImmediateQueryDispatcher::new(
                 session_queries.clone(),
-                wiring.config_reader(),
+                shell.config_query.clone(),
             );
             'session: loop {
                 // Busy user messages are no longer deferred to the session. They
@@ -469,7 +472,7 @@ where
                 let (segment_id, accepted_inputs) = match idle_result {
                     IdleResult::Shutdown => break 'session,
                     IdleResult::ResetRequested => {
-                        let bound = match wiring.bind_main_run().await {
+                        let bound = match wiring.bind_run().await {
                             Ok(bound) => bound,
                             Err(error) => {
                                 sink.send_event(RuntimeStreamEvent::CommandResultText {
@@ -520,7 +523,7 @@ where
                     }
                     IdleResult::ManualReflectionRequested => {
                         manual_reflection_requested = false;
-                        let bound = match wiring.bind_main_run().await {
+                        let bound = match wiring.bind_run().await {
                             Ok(bound) => bound,
                             Err(error) => {
                                 sink.send_event(RuntimeStreamEvent::CommandResultText {
@@ -589,7 +592,7 @@ where
 
                 // returns Ready with user input.
 
-                let config_reader = wiring.config_reader();
+                let config_reader = shell.config_query.clone();
                 let turn_boundary_config = handle_turn_boundary_config(
                     &mut config_snapshot,
                     config_reader.as_ref(),
@@ -920,7 +923,7 @@ where
                 let interval_material =
                     crate::application::loop_engine::chat::reflection::IntervalReflectionMaterialSlot::default();
                 if !manual_reflection_run && !manual_compaction_run {
-                    if let Ok(bound) = wiring.bind_main_run().await {
+                    if let Ok(bound) = wiring.bind_run().await {
                         let history_messages = bound.session().structured_messages();
                         let cursor = crate::application::loop_engine::chat::reflection::latest_coverage_cursor(
                             &shell.runtime_context_factory.services().reflection_history,

@@ -14,21 +14,22 @@ pub(super) struct MainRunPreparation {
 
 pub(super) fn prepare_main_run(
     shell: &crate::application::client::SessionRuntime,
-    wiring: &Arc<context::MainSessionWiring>,
+    wiring: &Arc<crate::SessionSwitchCoordinator>,
     reasoning: &Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
     sink_handle: &crate::application::loop_engine::chat::ChatEventSinkHandle,
     session_usage: &crate::application::run::context::RunUsageTracker,
     spec: RunSpec,
 ) -> Result<MainRunPreparation, RunCreationError> {
-    let run_config =
-        crate::application::run::config::RunConfigSnapshot::capture(wiring.committed_config());
+    let run_config = crate::application::run::config::RunConfigSnapshot::capture(
+        wiring.committed_config_snapshot(),
+    );
     let session_snapshot = {
         let binding = shell.model_state.binding();
         let mut session_state = shell
             .session_state
             .write()
             .unwrap_or_else(|error| error.into_inner());
-        session_state.update_provider_binding(binding.as_ref(), wiring.committed_config());
+        session_state.update_provider_binding(binding.as_ref(), wiring.committed_config_snapshot());
         session_state.snapshot_for_run()
     };
     let session_bindings = SessionRunBindings::new(

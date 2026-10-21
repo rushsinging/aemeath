@@ -1736,10 +1736,16 @@ struct RecordingContextFactory {
 impl RecordingContextFactory {
     fn new() -> (Arc<Self>, Arc<Mutex<Vec<String>>>) {
         let persistence_calls = Arc::new(Mutex::new(Vec::new()));
+        let workspace = project::wire_production_workspace(std::env::current_dir().unwrap(), None)
+            .expect("workspace 初始化成功");
         let factory = Self {
             inner: context::ProductionMainContextFactory::new(Arc::new(
                 context::NoOpCanonicalSessionWriter,
-            )),
+            ))
+            .with_persistence(
+                std::sync::Arc::new(task::TaskStore::new()),
+                workspace.persist(),
+            ),
             persistence_calls: persistence_calls.clone(),
         };
         (Arc::new(factory), persistence_calls)
@@ -1750,16 +1756,12 @@ impl context::MainContextFactory for RecordingContextFactory {
     fn build(
         &self,
         session: Arc<std::sync::RwLock<Arc<context::CanonicalSession>>>,
-        task_persist: Arc<dyn task::TaskPersist>,
-        workspace_persist: Arc<dyn project::WorkspaceWriter>,
         memory: Arc<std::sync::RwLock<Arc<dyn memory::api::MemoryPort>>>,
         mutation_gate: Arc<tokio::sync::Mutex<()>>,
     ) -> Arc<dyn context::ContextPort> {
         let inner = <context::ProductionMainContextFactory as context::MainContextFactory>::build(
             &self.inner,
             session,
-            task_persist,
-            workspace_persist,
             memory,
             mutation_gate,
         );
@@ -1877,7 +1879,7 @@ async fn manual_reflection_run_does_not_persist_session_or_touch_updated_at() {
 
     let (factory, persistence_calls) = RecordingContextFactory::new();
     let mut shell = test_shell();
-    shell.wiring = test_wiring_with_context_factory(factory);
+    shell.session_switch = test_wiring_with_context_factory(factory);
     shell.memory_config = share::config::MemoryConfig {
         enabled: true,
         reflection: share::config::ReflectionConfig {
@@ -1887,7 +1889,7 @@ async fn manual_reflection_run_does_not_persist_session_or_touch_updated_at() {
         ..Default::default()
     };
     shell.set_test_session_id("test-reflect-now-no-persist");
-    let wiring = shell.wiring.clone();
+    let wiring = shell.session_switch.clone();
 
     let before = wiring.committed_session();
     let before_message_count = before.structured_messages().len();
@@ -1965,7 +1967,7 @@ async fn control_normal_run_records_session_persistence() {
         .unwrap();
     let (factory, calls) = RecordingContextFactory::new();
     let mut shell = test_shell();
-    shell.wiring = test_wiring_with_context_factory(factory);
+    shell.session_switch = test_wiring_with_context_factory(factory);
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec!["r1"]),

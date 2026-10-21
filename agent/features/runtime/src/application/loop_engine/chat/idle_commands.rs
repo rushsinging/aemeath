@@ -35,10 +35,10 @@ pub fn execute_init(cwd: &str, force: bool) -> (String, bool) {
 pub async fn execute_session(
     args: &str,
     session_id: &str,
-    wiring: &context::MainSessionWiring,
+    coordinator: &crate::SessionSwitchCoordinator,
+    session_management: &dyn context::SessionManagementPort,
 ) -> (String, bool) {
-    let project = wiring.project_identity();
-    let session_management = wiring.session_management();
+    let project = coordinator.project_identity();
     let parts: Vec<&str> = args.split_whitespace().collect();
     if parts.is_empty() {
         return (format!("Current session: {}", session_id), false);
@@ -77,7 +77,7 @@ pub async fn execute_session(
             };
             // 当前 active session：走 wiring 同步 committed revision，避免 CAS 漂移。
             let result = if rename_id == session_id {
-                wiring
+                coordinator
                     .update_active_session_metadata(update)
                     .await
                     .map(|_| ())

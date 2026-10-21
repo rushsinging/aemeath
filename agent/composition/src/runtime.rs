@@ -55,12 +55,12 @@ impl tools::BackgroundProcessAccess for UnboundBackgroundProcessAccess {
 }
 
 struct WiringMemoryPortSource {
-    wiring: Arc<context::MainSessionWiring>,
+    session_switch: Arc<runtime::SessionSwitchCoordinator>,
 }
 
 impl tools::MemoryPortSource for WiringMemoryPortSource {
     fn current(&self) -> Arc<dyn memory::api::MemoryPort> {
-        self.wiring.committed_memory()
+        self.session_switch.committed_memory()
     }
 }
 
@@ -310,9 +310,11 @@ pub(crate) async fn from_args_with_gateways(
             gateways.provider.clone(),
             initial_provider.compact_model_slot(),
         )));
-    let deps = context::MainSessionDependencies {
+    let deps = runtime::SessionSwitchDependencies {
         workspace: workspace.clone(),
-        task_persist: task_wiring.persist(),
+        task_restore: std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(
+            task_wiring.persist(),
+        )),
         config_reader: config.reader(),
         config_participant: config.participant(),
         memory_opener: memory::wire_memory_opener(
@@ -340,10 +342,11 @@ pub(crate) async fn from_args_with_gateways(
                 skill_catalog.clone(),
                 Arc::new(context::WorkspaceSkillQueryFactory::new(workspace.read())),
             )
-            .with_generator(Arc::new(compact_generator)),
+            .with_generator(Arc::new(compact_generator))
+            .with_persistence(task_wiring.persist(), workspace.persist()),
         ),
     };
-    let wiring = context::wire_main_session(deps)
+    let wiring = runtime::wire_session_switch_coordinator(deps)
         .await
         .map_err(|error| sdk::SdkError::Init(error.to_string()))?;
 
@@ -359,7 +362,7 @@ pub(crate) async fn from_args_with_gateways(
     let tool_assembly = wire_runtime_tool_assembly(
         task_wiring.access(),
         Arc::new(WiringMemoryPortSource {
-            wiring: wiring.clone(),
+            session_switch: wiring.clone(),
         }),
         workspace.control(),
         skill_loader.clone(),
