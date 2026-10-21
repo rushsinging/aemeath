@@ -25,12 +25,15 @@ impl ConfigDiff {
     }
 }
 
-/// 收集需要监控的文件路径。
+/// 收集需要监控的文件/目录路径。
 ///
 /// 包括：
 /// - 指令文件：从 cwd 向上 5 级祖先目录，每层 `CLAUDE.md` + `AGENTS.md`；
 ///   全局指令 `~/.agents/AGENTS.md`，fallback `~/.claude/CLAUDE.md`
-/// - Guidance 文件：`~/.agents/guidance/_default.md`、`~/.agents/guidance/_reasoning.md`
+/// - Guidance 文件：`~/.agents/guidance/` 下动态发现的 `*.md`
+/// - 组件面（#2015 热载 watch 扩展）：guardrails（全局+项目）、
+///   tool_guidance（全局）、config（全局+项目 `aemeath.json`）、
+///   skills 目录（全局+项目 `.agents`/`.claude`）、scripts 目录（全局+项目）
 pub fn collect_watched_files(cwd: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
 
@@ -45,12 +48,47 @@ pub fn collect_watched_files(cwd: &Path) -> Vec<PathBuf> {
     files.push(expand_home(&paths::global_agents_md_path()));
     files.push(expand_home(&paths::old_global_claude_md_path()));
 
-    // ── Guidance 文件（静态已知的） ──
+    // ── Guidance 文件（目录动态发现，替代静态文件清单）──
     let guidance_dir = expand_home(&paths::global_guidance_dir());
-    files.push(guidance_dir.join("_default.md"));
-    files.push(guidance_dir.join("_reasoning.md"));
+    files.extend(discover_markdown_files(&guidance_dir));
+
+    // ── 组件面（#2015）──
+    // guardrails：全局 + 项目
+    files.push(expand_home(&paths::global_guardrails_path()));
+    files.push(paths::project_guardrails_path(cwd));
+    // tool_guidance 覆盖层：全局
+    files.push(expand_home(&paths::global_tool_guidance_path()));
+    // config：全局 + 项目 aemeath.json
+    files.push(expand_home(&paths::global_config_path()));
+    files.push(paths::project_config_path(cwd));
+    // skills 目录（目录级监控）
+    files.push(expand_home(&paths::global_skills_dir()));
+    files.push(paths::project_skills_dir(cwd));
+    files.push(paths::project_claude_skills_dir(cwd));
+    // scripts 目录（目录级监控）
+    files.push(expand_home(&paths::global_scripts_dir()));
+    files.push(paths::project_scripts_dir(cwd));
 
     files
+}
+
+/// 枚举目录下的 `*.md` 文件（目录不存在时返回空）。
+fn discover_markdown_files(directory: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return Vec::new();
+    };
+    let mut markdown_files: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("md"))
+        })
+        .collect();
+    markdown_files.sort();
+    markdown_files
 }
 
 /// 初始化配置变更快照注册表。
@@ -66,6 +104,43 @@ pub fn init_snapshot_registry(cwd: &Path) -> SourceSnapshotRegistry {
         registry.len()
     );
     registry
+}
+
+/// 单个组件变更的防御复检拒绝记录（#2015 热载三段式的 validate 段产出）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentReloadRejection {
+    /// 校验失败的组件文件路径。
+    pub path: PathBuf,
+    /// 拒绝原因（呈现给日志与调用方通知）。
+    pub reason: String,
+}
+
+/// 对组件类文件变更做防御性复检（frontmatter 形状）。
+///
+/// 覆盖 guardrails.md 与 tool_guidance.md（指令文件任意文本合法、
+/// skills/scripts 目录变更在装配期逐文件校验，均不在此列）。
+/// 返回被拒列表；空列表 = 全部通过，可照常生效。
+pub fn validate_component_changes(changes: &[FileChange]) -> Vec<ComponentReloadRejection> {
+    changes
+        .iter()
+        .filter(|change| {
+            let path_text = change.path.to_string_lossy();
+            path_text.ends_with("guardrails.md") || path_text.ends_with("tool_guidance.md")
+        })
+        .filter_map(|change| {
+            // 文件被删除时无从校验内容，视为通过（删除本身是合法变更）。
+            if change.kind == FileChangeKind::Deleted {
+                return None;
+            }
+            match harness::adapters::filesystem::validate_component_file_shape(&change.path) {
+                Ok(()) => None,
+                Err(error) => Some(ComponentReloadRejection {
+                    path: change.path.clone(),
+                    reason: error.message().to_string(),
+                }),
+            }
+        })
+        .collect()
 }
 
 /// 检测配置变更。
@@ -114,8 +189,19 @@ fn classify_change_key(path: &Path, kind: &FileChangeKind) -> String {
     let path_str = path.to_string_lossy();
     if path_str.contains("CLAUDE.md") || path_str.contains("AGENTS.md") {
         format!("instructions:{}:{}", prefix, file_name)
+    } else if path_str.ends_with("guardrails.md") {
+        format!("guardrails:{}:{}", prefix, file_name)
+    } else if path_str.ends_with("tool_guidance.md") {
+        // 注意 MUST 先于 guidance 分支：`tool_guidance.md` 也 contains("guidance")。
+        format!("tool_guidance:{}:{}", prefix, file_name)
     } else if path_str.contains("guidance") {
         format!("guidance:{}:{}", prefix, file_name)
+    } else if path_str.ends_with("aemeath.json") {
+        format!("config:{}:{}", prefix, file_name)
+    } else if path_str.contains("/skills/") || path_str.ends_with("/skills") {
+        format!("skills:{}:{}", prefix, file_name)
+    } else if path_str.contains("/scripts/") || path_str.ends_with("/scripts") {
+        format!("scripts:{}:{}", prefix, file_name)
     } else {
         format!("other:{}:{}", prefix, file_name)
     }

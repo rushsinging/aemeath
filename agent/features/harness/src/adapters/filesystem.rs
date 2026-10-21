@@ -176,3 +176,19 @@ impl ComponentRegistry for FilesystemComponentRegistry {
         }
     }
 }
+
+/// 校验组件文件内容的形状（frontmatter 必须为键值映射）。
+///
+/// 供热载防御复检（#2015 detect→validate→生效/回退 的 validate 段）：
+/// 对监控到的组件文件变更，在生效前复检内容形状，失败则该条变更回退
+/// （由调用方保留旧版并通知），NEVER 带病生效。
+pub fn validate_component_file_shape(path: &Path) -> Result<(), HarnessError> {
+    let text = std::fs::read_to_string(path).map_err(|error| {
+        HarnessError::storage(
+            ERROR_DOMAIN,
+            format!("读取组件文件失败 {}: {error}", path.display()),
+        )
+    })?;
+    let content = FilesystemComponentRegistry::parse_content(&text)?;
+    FilesystemComponentRegistry::validate_content_shape(&content)
+}

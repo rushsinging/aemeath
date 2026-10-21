@@ -2054,6 +2054,7 @@
           "audit",
           "config",
           "context",
+          "harness",
           "hook",
           "logging",
           "memory",
@@ -2144,7 +2145,10 @@
           "utils"
         ],
         "logging": [],
-        "utils": []
+        "utils": [],
+        "harness": [
+          "share"
+        ]
       },
       "reason": "F-4：workspace 业务依赖矩阵（cargo metadata path 依赖边校验；不在矩阵的 crate 跳过）",
       "profile": "fast"

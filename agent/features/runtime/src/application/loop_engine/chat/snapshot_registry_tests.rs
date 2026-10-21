@@ -153,3 +153,103 @@ fn test_nonexistent_file_no_snapshot() {
 
     let _ = fs::remove_dir(&dir);
 }
+
+// ── 目录监控（#2015 热载 watch 面）──
+
+#[test]
+fn directory_snapshot_detects_added_entry() {
+    let parent = temp_dir();
+    let skills_dir = parent.join("skills");
+    fs::create_dir_all(&skills_dir).expect("create skills dir");
+
+    let mut registry = SourceSnapshotRegistry::new();
+    registry.register(skills_dir.clone());
+    registry.take_baseline();
+    assert!(registry.check_for_changes().is_empty());
+
+    fs::write(skills_dir.join("alpha.md"), "new skill").expect("write skill");
+    let changes = registry.check_for_changes();
+    assert_eq!(changes.len(), 1, "新增子条目必须检出：{changes:?}");
+    assert_eq!(changes[0].path, skills_dir);
+    assert_eq!(changes[0].kind, FileChangeKind::Modified);
+
+    let _ = fs::remove_dir_all(&parent);
+}
+
+#[test]
+fn directory_snapshot_detects_removed_entry() {
+    let parent = temp_dir();
+    let skills_dir = parent.join("skills");
+    fs::create_dir_all(&skills_dir).expect("create skills dir");
+    fs::write(skills_dir.join("alpha.md"), "skill").expect("write skill");
+
+    let mut registry = SourceSnapshotRegistry::new();
+    registry.register(skills_dir.clone());
+    registry.take_baseline();
+
+    fs::remove_file(skills_dir.join("alpha.md")).expect("remove skill");
+    let changes = registry.check_for_changes();
+    assert_eq!(changes.len(), 1, "删除子条目必须检出：{changes:?}");
+    assert_eq!(changes[0].kind, FileChangeKind::Modified);
+
+    let _ = fs::remove_dir_all(&parent);
+}
+
+#[test]
+fn directory_snapshot_detects_child_content_change_without_dir_mtime_change() {
+    let parent = temp_dir();
+    let skills_dir = parent.join("skills");
+    fs::create_dir_all(&skills_dir).expect("create skills dir");
+    let child = skills_dir.join("alpha.md");
+    fs::write(&child, "v1").expect("write skill");
+
+    let mut registry = SourceSnapshotRegistry::new();
+    registry.register(skills_dir.clone());
+    registry.take_baseline();
+
+    // 子文件内容变化：目录 mtime 与条目数均不变——目录指纹（含子条目 mtime
+    // 的清单）MUST 检出，NEVER 因目录元数据未变而跳过。
+    fs::write(&child, "v2 with different content").expect("rewrite skill");
+    let changes = registry.check_for_changes();
+    assert_eq!(changes.len(), 1, "子文件内容变化必须检出：{changes:?}");
+    assert_eq!(changes[0].kind, FileChangeKind::Modified);
+
+    let _ = fs::remove_dir_all(&parent);
+}
+
+#[test]
+fn directory_snapshot_unchanged_when_idle() {
+    let parent = temp_dir();
+    let scripts_dir = parent.join("scripts");
+    fs::create_dir_all(&scripts_dir).expect("create scripts dir");
+    fs::write(scripts_dir.join("run.sh"), "echo hi").expect("write script");
+
+    let mut registry = SourceSnapshotRegistry::new();
+    registry.register(scripts_dir.clone());
+    registry.take_baseline();
+    assert!(registry.check_for_changes().is_empty());
+    assert!(
+        registry.check_for_changes().is_empty(),
+        "连续空转 NEVER 误报"
+    );
+
+    let _ = fs::remove_dir_all(&parent);
+}
+
+#[test]
+fn directory_snapshot_detects_directory_removal() {
+    let parent = temp_dir();
+    let skills_dir = parent.join("skills");
+    fs::create_dir_all(&skills_dir).expect("create skills dir");
+
+    let mut registry = SourceSnapshotRegistry::new();
+    registry.register(skills_dir.clone());
+    registry.take_baseline();
+
+    fs::remove_dir(&skills_dir).expect("remove skills dir");
+    let changes = registry.check_for_changes();
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].kind, FileChangeKind::Deleted);
+
+    let _ = fs::remove_dir(&parent);
+}

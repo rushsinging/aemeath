@@ -13,6 +13,10 @@ pub(crate) struct TurnBoundaryConfigOutcome {
     pub refresh: Result<ConfigRefreshOutcomeData, share::error::DomainError>,
     /// 变更的 guidance / instruction 文件路径（空 = 无变化）。
     pub guidance_changed_paths: Vec<String>,
+    /// 防御复检被拒的组件变更（#2015 三段式 validate 段产出；
+    /// 被拒条目保留旧版，注入侧排除由各组件装配接入）。
+    pub component_rejections:
+        Vec<crate::application::loop_engine::chat::config_reload::ComponentReloadRejection>,
 }
 
 /// Turn 边界配置变更检测与 diagnostic 通知。
@@ -72,13 +76,34 @@ where
     }
 
     let config_diff = check_config_changes(config_snapshot);
+    // #2015 三段式 detect→validate→生效：组件类文件变更先过防御复检，
+    // 被拒条目保留旧版（NEVER 带病生效），从对外事件中剔除并 warn。
+    let component_rejections =
+        crate::application::loop_engine::chat::config_reload::validate_component_changes(
+            &config_diff.changes,
+        );
+    let rejected_paths: Vec<String> = component_rejections
+        .iter()
+        .map(|rejection| rejection.path.display().to_string())
+        .collect();
+    for rejection in &component_rejections {
+        log::warn!(target: crate::LOG_TARGET,
+            "[config_reload] 组件变更校验失败，保留旧版：{}（{}）",
+            rejection.path.display(),
+            rejection.reason
+        );
+    }
     // changed_keys 与 changes 同序（classify_change_key 逐条映射），zip 过滤
-    // guidance / instruction 前缀并保留完整路径（Read 引导目标）。
+    // guidance / instruction 前缀并保留完整路径（Read 引导目标）；
+    // 被拒路径的 key 一并剔除。
     let guidance_changed_paths = config_diff
         .changes
         .iter()
         .zip(config_diff.changed_keys.iter())
-        .filter(|(_, key)| key.starts_with("guidance:") || key.starts_with("instruction:"))
+        .filter(|(change, key)| {
+            (key.starts_with("guidance:") || key.starts_with("instruction:"))
+                && !rejected_paths.contains(&change.path.display().to_string())
+        })
         .map(|(change, _)| change.path.display().to_string())
         .collect::<Vec<_>>();
     if config_diff.has_changes() {
@@ -87,17 +112,33 @@ where
             step_count,
             config_diff.changed_keys
         );
-        // 通过 sink 发送 ConfigReloaded 事件通知客户端
-        sink.send_event(RuntimeStreamEvent::ConfigReloaded {
-            changed_keys: config_diff.changed_keys.clone(),
-            view: crate::application::client::config_snapshot_to_sdk(
-                &config_reader.committed_snapshot(),
-            ),
-        })
-        .await;
+        // 通过 sink 发送 ConfigReloaded 事件通知客户端（被拒条目剔除后）
+        let effective_keys: Vec<String> = config_diff
+            .changed_keys
+            .iter()
+            .filter(|key| {
+                !component_rejections.iter().any(|rejection| {
+                    rejection
+                        .path
+                        .file_name()
+                        .is_some_and(|name| key.ends_with(name.to_string_lossy().as_ref()))
+                })
+            })
+            .cloned()
+            .collect();
+        if !effective_keys.is_empty() {
+            sink.send_event(RuntimeStreamEvent::ConfigReloaded {
+                changed_keys: effective_keys,
+                view: crate::application::client::config_snapshot_to_sdk(
+                    &config_reader.committed_snapshot(),
+                ),
+            })
+            .await;
+        }
     }
     TurnBoundaryConfigOutcome {
         refresh,
         guidance_changed_paths,
+        component_rejections,
     }
 }

@@ -775,6 +775,16 @@ where
                         ),
                     ));
                 }
+                // #2015：防御复检被拒的组件变更——保留旧版已定案（loop_phases
+                // 内 warn + 事件剔除）；此处记录被拒面供后续组件装配 issue
+                // 接入注入侧排除与 LLM 通知扩展。
+                if !turn_boundary_config.component_rejections.is_empty() {
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "component_rejections_pending_adoption trigger=turn_boundary_config count={}",
+                        turn_boundary_config.component_rejections.len(),
+                    );
+                }
                 if runtime_context.provider_ref().model.model != shell.prompt_model_id {
                     log::debug!(
                         target: crate::LOG_TARGET,

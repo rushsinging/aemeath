@@ -3696,6 +3696,7 @@ dependencies = [
  "env_logger",
  "futures",
  "futures-util",
+ "harness",
  "hook",
  "inventory",
  "log",
