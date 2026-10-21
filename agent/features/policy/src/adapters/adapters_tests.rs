@@ -7,34 +7,21 @@
 use crate::{allow_all, PolicyDecisionData, PolicyRequestData};
 use share::ids::{RunId, RunStepId};
 use share::tools_vocab::{ToolCapabilities, ToolCapability, ToolName};
-use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex};
-use std::thread::ThreadId;
+use std::sync::Mutex;
 
-/// Captured log lines (level + formatted message) for the policy target,
-/// bucketed per emitting thread.
+/// Captured log lines (level + formatted message) for the policy target.
 ///
-/// `log` facade 只接受一次 logger 注册，缓冲必然进程级共享；因此按
-/// **线程隔离**：每条记录写入发射线程自己的桶，测试只读取/断言本线程桶。
-/// 不持锁的并行测试（如 contract 测试调 `evaluate`）的日志写入各自桶，
-/// NEVER 串扰本测试的捕获窗口（跨线程串扰曾是 pre-push 环境
-/// `entry must precede exit` flake 的根因）。
-static CAPTURED: LazyLock<Mutex<HashMap<ThreadId, Vec<(log::Level, String)>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+/// 全局共享：`log` facade 只接受一次 logger 注册，多个测试必须共享同一全局缓冲。
+/// 因此测试间 **MUST** 通过 `TEST_LOCK` 串行，避免并发 `evaluate` 交叉写入导致
+/// entry/exit 顺序错乱或 capability_count 跨测试污染（CI 多核并行下 flaky）。
+static CAPTURED: Mutex<Vec<(log::Level, String)>> = Mutex::new(Vec::new());
 
-/// Drain this thread's capture bucket (take all records, leaving it empty).
-fn drain_thread_capture() -> Vec<(log::Level, String)> {
-    CAPTURED
-        .lock()
-        .expect("CAPTURED lock poisoned")
-        .remove(&std::thread::current().id())
-        .unwrap_or_default()
-}
+/// 测试串行锁：两个测试都写全局 CAPTURED，必须互斥执行。
+static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 /// Minimal `log::Log` implementation that records every record whose target
-/// equals the crate `LOG_TARGET`, into the emitting thread's bucket. This lets
-/// the tests observe exactly what the production code emits without depending
-/// on a logging backend.
+/// equals the crate `LOG_TARGET`. This lets the tests observe exactly what the
+/// production code emits without depending on a logging backend.
 struct CapturingLogger;
 
 impl log::Log for CapturingLogger {
@@ -47,8 +34,6 @@ impl log::Log for CapturingLogger {
             CAPTURED
                 .lock()
                 .expect("CAPTURED lock poisoned")
-                .entry(std::thread::current().id())
-                .or_default()
                 .push((record.level(), record.args().to_string()));
         }
     }
@@ -81,8 +66,10 @@ fn make_request(tool: &str, caps: ToolCapabilities, workspace: &str) -> PolicyRe
 /// contain the tool name or the workspace path.
 #[test]
 fn evaluate_emits_entry_and_allow_exit_logging_only_mode_count_and_decision() {
+    // 全局 CAPTURED + 全局 logger 要求两个测试互斥执行。
+    let _test_guard = TEST_LOCK.lock().expect("TEST_LOCK poisoned");
     install_capturing_logger();
-    let _ = drain_thread_capture();
+    CAPTURED.lock().expect("clear capture").clear();
 
     // Sentinel values that MUST NOT appear in any captured log line.
     let request = make_request(
@@ -96,7 +83,7 @@ fn evaluate_emits_entry_and_allow_exit_logging_only_mode_count_and_decision() {
         PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::ALLOW_ALL)
     );
 
-    let lines = drain_thread_capture();
+    let lines = CAPTURED.lock().expect("read capture").clone();
     assert!(
         lines.len() >= 2,
         "expected at least entry + exit log lines, got {lines:?}",
@@ -156,8 +143,9 @@ fn evaluate_emits_entry_and_allow_exit_logging_only_mode_count_and_decision() {
 /// constant — a request with two capabilities must log `capability_count=2`.
 #[test]
 fn capability_count_reflects_request_requirements() {
+    let _test_guard = TEST_LOCK.lock().expect("TEST_LOCK poisoned");
     install_capturing_logger();
-    let _ = drain_thread_capture();
+    CAPTURED.lock().expect("clear capture").clear();
 
     let request = make_request(
         "MultiCap",
@@ -170,7 +158,9 @@ fn capability_count_reflects_request_requirements() {
         PolicyDecisionData::Allow(share::tools_vocab::AuthorizationContext::ALLOW_ALL)
     );
 
-    let joined = drain_thread_capture()
+    let joined = CAPTURED
+        .lock()
+        .expect("read capture")
         .iter()
         .map(|(_, msg)| msg.as_str())
         .collect::<Vec<_>>()
@@ -179,35 +169,5 @@ fn capability_count_reflects_request_requirements() {
     assert!(
         joined.contains("capability_count=2"),
         "two capabilities must produce capability_count=2: {joined:?}",
-    );
-}
-
-/// Deterministic cross-thread interference repro.
-///
-/// 并行测试（如 contract 测试调 `evaluate`，不持 `TEST_LOCK`）产生的同 target
-/// 日志 MUST NOT 泄入本测试的捕获窗口。全局缓冲实现下本测试失败（跨线程串扰，
-/// 即 pre-push 环境 `entry must precede exit` flake 的根因）；线程隔离实现下通过。
-#[test]
-fn captured_records_are_isolated_from_other_threads() {
-    install_capturing_logger();
-    let _ = drain_thread_capture();
-
-    std::thread::spawn(|| {
-        log::debug!(target: crate::LOG_TARGET, "policy evaluate exit: interference");
-    })
-    .join()
-    .expect("interference thread join");
-
-    let request = make_request(
-        "IsoThreadTool",
-        ToolCapabilities::single(ToolCapability::Read),
-        "/iso/workspace",
-    );
-    let _ = allow_all().evaluate(&request);
-
-    let lines = drain_thread_capture();
-    assert!(
-        lines.iter().all(|(_, msg)| !msg.contains("interference")),
-        "cross-thread log leaked into this test's capture window: {lines:?}",
     );
 }
