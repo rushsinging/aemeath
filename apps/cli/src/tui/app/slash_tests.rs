@@ -546,3 +546,79 @@ fn resume_input_fetches_session_list_once() {
         "请求应为 ManageSession list：{received:?}"
     );
 }
+
+// ── #2032：/think 档位调节 ──
+
+#[test]
+fn think_slash_command_with_level_returns_set_thinking_event() {
+    let mut app = app_with_builtin_router();
+    let result = app.handle_slash_command("/think high");
+
+    match sent_chat_event(&result) {
+        Some(sdk::ChatInputEvent::SetThinking {
+            request: sdk::ThinkingRequest::Level(level),
+        }) => assert_eq!(*level, sdk::ReasoningLevel::High),
+        other => panic!("/think high 应发送 SetThinking Level(high)，实际 {other:?}"),
+    }
+}
+
+#[test]
+fn think_slash_command_with_invalid_level_reports_error_without_event() {
+    let mut app = app_with_builtin_router();
+    let result = app.handle_slash_command("/think turbo");
+
+    assert!(sent_chat_event(&result).is_none(), "非法档位不得发送事件");
+    assert!(
+        error_texts(&app)
+            .iter()
+            .any(|text| text.contains("Unknown reasoning level")),
+        "应提示非法档位错误，实际 {:?}",
+        error_texts(&app)
+    );
+}
+
+#[test]
+fn think_slash_command_without_args_opens_level_dialog() {
+    let mut app = app_with_builtin_router();
+    let result = app.handle_slash_command("/think");
+
+    assert!(
+        sent_chat_event(&result).is_none(),
+        "/think 无参数不应发送事件"
+    );
+    let dialog = app
+        .layout
+        .active_dialog()
+        .expect("/think 无参数应打开档位对话框");
+    let options = dialog.options();
+    assert_eq!(options.len(), 7, "档位全集固定 7 档，实际 {options:?}");
+    assert_eq!(options[0], "off", "首项为 off（无当前标记）");
+}
+
+#[test]
+fn think_dialog_confirm_resubmits_think_slash_command() {
+    let mut app = app_with_builtin_router();
+    app.handle_slash_command("/think");
+    // 选中第 5 项（high）后确认：等价提交 /think high。
+    for _ in 0..4 {
+        app.layout.active_dialog_mut().unwrap().select_next();
+    }
+    let selected = app.layout.selected_model_key().expect("应有选中项");
+    assert_eq!(selected, "high");
+
+    let prefix = app
+        .layout
+        .dialog_command_prefix
+        .clone()
+        .expect("应记录命令前缀");
+    assert_eq!(prefix, "/think");
+
+    let command = format!("{prefix} {selected}");
+    let result = app.handle_slash_command(&command);
+    match sent_chat_event(&result) {
+        Some(sdk::ChatInputEvent::SetThinking {
+            request: sdk::ThinkingRequest::Level(level),
+        }) => assert_eq!(*level, sdk::ReasoningLevel::High),
+        other => panic!("对话框确认应等价 /think high，实际 {other:?}"),
+    }
+}

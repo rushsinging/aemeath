@@ -41,6 +41,12 @@ impl Dialog {
         }
     }
 
+    /// 选项文案只读视图（测试与渲染断言用）。
+    #[cfg(test)]
+    pub fn options(&self) -> &[String] {
+        &self.options
+    }
+
     /// Move selection up (wraps around)
     pub fn select_prev(&mut self) {
         if self.selected > 0 {

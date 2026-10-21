@@ -90,7 +90,8 @@ struct HookSelection {
 }
 
 struct ReasoningSelection {
-    port: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
+    port:
+        Arc<std::sync::Mutex<crate::application::run::session_reasoning::SessionReasoningControl>>,
 }
 
 struct EventRouteSelection {

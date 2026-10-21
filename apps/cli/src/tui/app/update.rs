@@ -476,11 +476,16 @@ impl App {
                 }
                 self.append_system_notice(format!("[switched to {display_name}]"));
             }
-            TuiRuntimeEvent::ThinkingChanged { enabled, level } => {
+            TuiRuntimeEvent::ThinkingChanged {
+                enabled,
+                requested: _,
+                effective,
+            } => {
+                // #2032：状态栏显示 clamp 后映射档位（effective）。
                 self.apply_agent_intent(AgentIntent::RuntimePresentation(
                     crate::tui::model::runtime_presentation::RuntimePresentationIntent::Thinking {
                         enabled: *enabled,
-                        level: *level,
+                        level: *effective,
                     },
                 ));
             }

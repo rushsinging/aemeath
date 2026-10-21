@@ -128,3 +128,30 @@ fn metadata_update_applies_model_selection() {
 
     assert_eq!(metadata.model.as_deref(), Some("Zhipu Coding Plan/glm-5.3"));
 }
+
+#[test]
+fn metadata_update_applies_reasoning_effort_selection() {
+    let mut metadata = SessionMetadata::default();
+    SessionMetadataUpdateData {
+        reasoning_effort: Some("high".to_string()),
+        ..Default::default()
+    }
+    .apply(&mut metadata);
+
+    assert_eq!(metadata.reasoning_effort.as_deref(), Some("high"));
+}
+
+#[test]
+fn metadata_update_without_reasoning_effort_keeps_existing_value() {
+    let mut metadata = SessionMetadata {
+        reasoning_effort: Some("max".to_string()),
+        ..Default::default()
+    };
+    SessionMetadataUpdateData {
+        model: Some("zhipu/glm-5.3".to_string()),
+        ..Default::default()
+    }
+    .apply(&mut metadata);
+
+    assert_eq!(metadata.reasoning_effort.as_deref(), Some("max"));
+}

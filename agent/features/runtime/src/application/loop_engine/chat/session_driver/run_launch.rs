@@ -69,7 +69,11 @@ where
             let task_access = shell.runtime_context_factory.services().task.clone();
 
             let binding = shell.model_state.binding();
-            let reasoning = Arc::new(std::sync::Mutex::new(binding.requested_reasoning));
+            // #2032：会话级 reasoning 控制。resume 恢复时 session metadata 的
+            // `reasoning_effort` 视为用户显式选择；否则跟随模型 entry 默认档。
+            let reasoning = Arc::new(std::sync::Mutex::new(
+                initial_session_reasoning(&shell.session_switch, binding.requested_reasoning),
+            ));
             let session_snapshot = shell.session_snapshot();
             let mut context_size = shell.context_size;
             let mut session_id = session_snapshot.session_id().to_string();
@@ -147,8 +151,11 @@ where
                 PendingCommand::SwitchModel { selection } => {
                     match (build_switched_client)(&selection).await {
                         Ok((new_binding, result)) => {
-                            *reasoning.lock().unwrap_or_else(|error| error.into_inner()) =
-                                new_binding.requested_reasoning;
+                            // #2032：模型切换仅当用户未 /think 显式选择时跟随新模型默认档。
+                            reasoning
+                                .lock()
+                                .unwrap_or_else(|error| error.into_inner())
+                                .on_model_switched(new_binding.requested_reasoning);
                             let committed_config = shell.session_switch.committed_config_snapshot();
                             shell
                                 .session_state
@@ -179,8 +186,22 @@ where
                     }
                     continue;
                 }
-                PendingCommand::SetThinking { desired } => {
-                    execute_set_thinking(reasoning.as_ref(), &sink, desired).await;
+                PendingCommand::SetThinking { request } => {
+                    // #2032：档位调节 + 映射档位回执；请求档位落 session metadata。
+                    let requested = execute_set_thinking(
+                        reasoning.as_ref(),
+                        &sink,
+                        request,
+                        shell.model_state.binding().as_ref(),
+                    )
+                    .await;
+                    crate::application::client::session_reasoning_persist::persist_session_reasoning_on_wiring(
+                        &shell.session_switch,
+                        shell.session_management.as_ref(),
+                        &session_id,
+                        requested,
+                    )
+                    .await;
                     continue;
                 }
                 PendingCommand::InitProject { force } => {
@@ -266,6 +287,13 @@ where
                     {
                         Ok(resume_view) => {
                             session_id = resume_view.session_id.clone();
+                            // #2032：会话切换后 reasoning 档位跟随新会话 metadata
+                            // 的 `reasoning_effort`（无则跟随当前模型默认档）。
+                            *reasoning.lock().unwrap_or_else(|error| error.into_inner()) =
+                                initial_session_reasoning(
+                                    &wiring,
+                                    shell.model_state.binding().requested_reasoning,
+                                );
                             // 会话身份已切换：emit SessionStart 让外部集成重新捕获
                             // 恢复后的会话 id（生命周期点，失败不阻断恢复流程）。
                             crate::application::hook::session_start::emit_session_start(
@@ -1098,4 +1126,32 @@ where
         },
     )
     .await
+}
+
+/// #2032：由 committed session metadata 构造会话级 reasoning 控制初值。
+///
+/// resume 的会话在 metadata 上落有 `reasoning_effort` 时视为用户显式选择
+/// （`/model` 切换不覆盖）；否则跟随模型 entry 默认档。
+fn initial_session_reasoning(
+    coordinator: &crate::SessionSwitchCoordinator,
+    model_default: share::reasoning::ReasoningLevel,
+) -> crate::application::run::session_reasoning::SessionReasoningControl {
+    match coordinator
+        .committed_session()
+        .metadata
+        .reasoning_effort
+        .as_deref()
+        .and_then(share::reasoning::ReasoningLevel::parse)
+    {
+        Some(level) => {
+            crate::application::run::session_reasoning::SessionReasoningControl::from_user_selection(
+                level,
+            )
+        }
+        None => {
+            crate::application::run::session_reasoning::SessionReasoningControl::from_model_default(
+                model_default,
+            )
+        }
+    }
 }

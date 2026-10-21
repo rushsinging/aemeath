@@ -730,8 +730,10 @@ pub(crate) enum TuiRuntimeEvent {
     },
     ThinkingChanged {
         enabled: bool,
-        /// 切换后的 reasoning 深度（#1616 状态栏直接显示）。
-        level: ReasoningLevelView,
+        /// 用户请求档位（/think 选择值，#2032）。
+        requested: ReasoningLevelView,
+        /// clamp 到模型能力上限后的映射档位（#1616 状态栏直接显示）。
+        effective: ReasoningLevelView,
     },
     CommandResultText {
         text: String,

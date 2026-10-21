@@ -109,6 +109,7 @@ pub struct SessionMetadataUpdateData {
     pub notes: Option<String>,
     pub is_favorite: Option<bool>,
     pub model: Option<String>,
+    pub reasoning_effort: Option<String>,
 }
 
 impl SessionMetadataUpdateData {
@@ -127,6 +128,9 @@ impl SessionMetadataUpdateData {
         }
         if let Some(model) = self.model {
             metadata.model = Some(model);
+        }
+        if let Some(reasoning_effort) = self.reasoning_effort {
+            metadata.reasoning_effort = Some(reasoning_effort);
         }
     }
 }

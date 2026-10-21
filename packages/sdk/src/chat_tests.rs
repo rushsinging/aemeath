@@ -16,17 +16,28 @@ fn queue_display_text_derives_command_text_for_every_control_event() {
         ),
         (
             ChatInputEvent::SetThinking {
-                desired: Some(true),
+                request: ThinkingRequest::On,
             },
             "/think on",
         ),
         (
             ChatInputEvent::SetThinking {
-                desired: Some(false),
+                request: ThinkingRequest::Off,
             },
             "/think off",
         ),
-        (ChatInputEvent::SetThinking { desired: None }, "/think"),
+        (
+            ChatInputEvent::SetThinking {
+                request: ThinkingRequest::Toggle,
+            },
+            "/think",
+        ),
+        (
+            ChatInputEvent::SetThinking {
+                request: ThinkingRequest::Level(crate::ReasoningLevel::High),
+            },
+            "/think high",
+        ),
         (ChatInputEvent::InitProject { force: true }, "/init --force"),
         (ChatInputEvent::InitProject { force: false }, "/init"),
         (

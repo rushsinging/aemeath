@@ -60,8 +60,8 @@ pub use chat::{
     ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView, ResumedSessionStep,
     ResumedStepFinalizeCause, RunStatusView, RunTimingView, SkillRequest, SubRunActivityEventView,
     SubRunActivityKindView, SubRunIdentityView, SubRunStartedEventView, SubRunTerminalOutcomeView,
-    ToolCallStatusView, ToolProgressEventView, ToolResultImage, WorkspaceContextView,
-    WorkspaceStackEntryView,
+    ThinkingRequest, ToolCallStatusView, ToolProgressEventView, ToolResultImage,
+    WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::{
     AgentClient, ConfigFormClient, ConnectClient, DisplayHistoryQuery, RunControlClient,

@@ -79,7 +79,7 @@ pub enum PendingCommand {
         selection: String,
     },
     SetThinking {
-        desired: Option<bool>,
+        request: sdk::ThinkingRequest,
     },
     /// 初始化项目（/init）。
     InitProject {
@@ -498,15 +498,15 @@ where
                     buffer.push(ChatInputEvent::SwitchModel { selection });
                 }
             }
-            ChatInputEvent::SetThinking { desired } => {
+            ChatInputEvent::SetThinking { request } => {
                 if is_idle {
-                    pending_command = Some(PendingCommand::SetThinking { desired });
+                    pending_command = Some(PendingCommand::SetThinking { request });
                     requeued_events = requeue_remaining(buffer, &mut iter);
                     decision = GateDecision::Proceed;
                     break;
                 } else {
                     // busy：放回 buffer，等run 结束回到 idle 再处理。
-                    buffer.push(ChatInputEvent::SetThinking { desired });
+                    buffer.push(ChatInputEvent::SetThinking { request });
                 }
             }
             ChatInputEvent::InitProject { force } => {

@@ -372,7 +372,7 @@ pub struct ModelBindings {
     pub interaction: Arc<dyn InteractionPort>,
     pub memory: Arc<dyn MemoryPort>,
     pub config: RunConfigSnapshot,
-    pub reasoning: Arc<Mutex<share::reasoning::ReasoningLevel>>,
+    pub reasoning: Arc<Mutex<crate::application::run::session_reasoning::SessionReasoningControl>>,
     pub tool_catalog: Option<Arc<dyn ToolCatalogPort>>,
 }
 
@@ -426,7 +426,7 @@ pub struct RuntimeContext {
     usage_sink: Arc<dyn crate::ports::UsageSink>,
     skill_load_state: Arc<dyn tools::published::skill::SkillLoadStatePort>,
     skill_load_session_id: String,
-    reasoning: Arc<Mutex<share::reasoning::ReasoningLevel>>,
+    reasoning: Arc<Mutex<crate::application::run::session_reasoning::SessionReasoningControl>>,
     config: RunConfigSnapshot,
     cancel: RunCancellationScope,
     /// 事件输出 sink。
@@ -612,7 +612,9 @@ impl RuntimeContext {
         &self.skill_load_session_id
     }
     /// Reasoning 端口，`Arc` clone。
-    pub fn reasoning(&self) -> Arc<Mutex<share::reasoning::ReasoningLevel>> {
+    pub(crate) fn reasoning(
+        &self,
+    ) -> Arc<Mutex<crate::application::run::session_reasoning::SessionReasoningControl>> {
         self.reasoning.clone()
     } // ── 借用 accessor（Clone 类型） ──
 
@@ -674,7 +676,9 @@ impl RuntimeContext {
         &self.hooks
     }
     /// Reasoning port reference.
-    pub fn reasoning_ref(&self) -> &Arc<Mutex<share::reasoning::ReasoningLevel>> {
+    pub(crate) fn reasoning_ref(
+        &self,
+    ) -> &Arc<Mutex<crate::application::run::session_reasoning::SessionReasoningControl>> {
         &self.reasoning
     }
     /// Run config snapshot reference.
