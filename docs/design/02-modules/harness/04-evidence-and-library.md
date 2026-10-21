@@ -56,7 +56,7 @@ struct LessonEntry {
 | 治理对象 | 记忆条目（corpus 去噪/归纳/容量收敛） | harness 组件改进经验 |
 | 触发 | 独立三触发 + 写锁体系 | 本模块三触发，daemon 串行 |
 | 写路径 | memory 模块独占 | harness 模块独占 |
-| 进程 | 主进程 detached 派发 | 独立 daemon |
+| 进程 | 主进程 detached 派发（0.3.0 迁入 daemon，见 03 分片第 6 节） | 独立 daemon |
 
 两者 NEVER 共享 corpus、写锁或触发器；唯一交汇点是都消费 runtime 事件流的只读投影。
 

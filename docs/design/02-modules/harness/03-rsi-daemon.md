@@ -62,7 +62,17 @@ enum RsiControlAck {
 | `interval_secs` | 1800 | Timer 触发周期 |
 | `chunk_max_components` | 实施定值 | 每块材料组件数上限 |
 
-## 6. 验收
+## 6. 任务类型可插拔与 reflect 迁移路线（0.3.0）
+
+daemon 框架按**任务类型**插拔设计：`TaskKind::{MemoryReflect, HarnessRsi}`，每种任务独立装配材料装配器、LLM 阶段、落盘器与配置节；本里程碑只实现 `HarnessRsi`，但框架接口 MUST 预留任务注册面（成本近零，避免 reflect 迁入时改框架）。
+
+**reflect 全面迁入 daemon（0.3.0）的前提已核实**：compact 只在 session 文件追加 `ActiveCompactMarker`（summary + `start_at` 游标），消息区物理保留全量（占位化仅发生在内存窗口，NEVER 落盘）——daemon 读盘可取全量材料（含 ToolResult 原文）。因此：
+
+- **PreCompact 触发退役**：compact 不丢材料，其抢救价值由定时反思等价覆盖（晚到但不缺）；
+- reflect 三触发全部 daemon 化，无主进程内联例外；
+- 迁移后 memory corpus 与经验库仍分库分锁（治理对象正交，见 04 分片），仅共享 daemon 进程基建。
+
+## 7. 验收
 
 - **daemon 生命周期**：常驻不自动退出、显式 stop、崩溃后重拉，主会话全程可用（L4 场景）。
 - **控制协议**：Trigger/Status/Stop 往返、Busy 排队路径。
