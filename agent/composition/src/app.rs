@@ -1409,8 +1409,8 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let startup_resume = runtime_client.client.startup_resume();
     let allow_all = runtime_client.client.allow_all();
     let context_size = runtime_client.client.context_size();
-    let requested_level = runtime_client.client.requested_reasoning();
-    let thinking = requested_level != share::reasoning::ReasoningLevel::Off;
+    let effective_level = runtime_client.client.effective_reasoning();
+    let thinking = effective_level != share::reasoning::ReasoningLevel::Off;
     let command_wiring = crate::tools::wire_commands()
         .map_err(|error| SdkError::Init(format!("命令目录初始化失败：{error}")))?;
     let connect_facade = wire_connect(&agents_dir, Some(user_agent.clone()));
@@ -1436,7 +1436,7 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         allow_all,
         context_size,
         thinking,
-        reasoning_level: requested_level,
+        reasoning_level: effective_level,
         config_view,
         memory_config: launch.memory_config,
         skill_snapshot: launch.skill_snapshot,
