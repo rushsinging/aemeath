@@ -19,11 +19,16 @@ use std::thread::ThreadId;
 /// 不持锁的并行测试（如 contract 测试调 `evaluate`）的日志写入各自桶，
 /// NEVER 串扰本测试的捕获窗口（跨线程串扰曾是 pre-push 环境
 /// `entry must precede exit` flake 的根因）。
-static CAPTURED: LazyLock<Mutex<HashMap<ThreadId, Vec<(log::Level, String)>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+/// One thread's captured records: (level, formatted message).
+type CaptureBucket = Vec<(log::Level, String)>;
+
+/// Per-thread capture buffer: thread id → its captured records.
+type CaptureBuffer = LazyLock<Mutex<HashMap<ThreadId, CaptureBucket>>>;
+
+static CAPTURED: CaptureBuffer = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Drain this thread's capture bucket (take all records, leaving it empty).
-fn drain_thread_capture() -> Vec<(log::Level, String)> {
+fn drain_thread_capture() -> CaptureBucket {
     CAPTURED
         .lock()
         .expect("CAPTURED lock poisoned")
