@@ -69,10 +69,12 @@ where
             let task_access = shell.runtime_context_factory.services().task.clone();
 
             let binding = shell.model_state.binding();
-            // #2032：会话级 reasoning 控制。resume 恢复时 session metadata 的
-            // `reasoning_effort` 视为用户显式选择；否则跟随模型 entry 默认档。
+            // #2032：会话级 reasoning 控制（resume metadata 恢复优先，
+            // 语义单一源在 coordinator）。
             let reasoning = Arc::new(std::sync::Mutex::new(
-                initial_session_reasoning(&shell.session_switch, binding.requested_reasoning),
+                shell
+                    .session_switch
+                    .committed_reasoning_control(binding.requested_reasoning),
             ));
             let session_snapshot = shell.session_snapshot();
             let mut context_size = shell.context_size;
@@ -290,8 +292,7 @@ where
                             // #2032：会话切换后 reasoning 档位跟随新会话 metadata
                             // 的 `reasoning_effort`（无则跟随当前模型默认档）。
                             *reasoning.lock().unwrap_or_else(|error| error.into_inner()) =
-                                initial_session_reasoning(
-                                    &wiring,
+                                wiring.committed_reasoning_control(
                                     shell.model_state.binding().requested_reasoning,
                                 );
                             // 会话身份已切换：emit SessionStart 让外部集成重新捕获
@@ -1126,32 +1127,4 @@ where
         },
     )
     .await
-}
-
-/// #2032：由 committed session metadata 构造会话级 reasoning 控制初值。
-///
-/// resume 的会话在 metadata 上落有 `reasoning_effort` 时视为用户显式选择
-/// （`/model` 切换不覆盖）；否则跟随模型 entry 默认档。
-fn initial_session_reasoning(
-    coordinator: &crate::SessionSwitchCoordinator,
-    model_default: share::reasoning::ReasoningLevel,
-) -> crate::application::run::session_reasoning::SessionReasoningControl {
-    match coordinator
-        .committed_session()
-        .metadata
-        .reasoning_effort
-        .as_deref()
-        .and_then(share::reasoning::ReasoningLevel::parse)
-    {
-        Some(level) => {
-            crate::application::run::session_reasoning::SessionReasoningControl::from_user_selection(
-                level,
-            )
-        }
-        None => {
-            crate::application::run::session_reasoning::SessionReasoningControl::from_model_default(
-                model_default,
-            )
-        }
-    }
 }
