@@ -526,6 +526,13 @@ fn catalog_covers_exactly_runtime_owners() {
             "agent-hook.log",
         ),
         (
+            "agent/features/harness",
+            "aemeath:agent:harness",
+            Owner::Harness,
+            Sink::Harness,
+            "agent-harness.log",
+        ),
+        (
             "agent/features/memory",
             "aemeath:agent:memory",
             Owner::Memory,

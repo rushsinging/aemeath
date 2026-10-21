@@ -1,0 +1,19 @@
+[package]
+name = "harness"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# 组件树注册表只依赖共享内核：路径与错误体系来自 share。
+share = { path = "../../shared" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yml = "0.0.12"
+log = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
+
+# 继承 workspace 零容忍 lint 基线（#1995）。
+[lints]
+workspace = true

@@ -30,6 +30,7 @@ pub(crate) enum ModuleOwner {
     Context,
     Config,
     Memory,
+    Harness,
     TaskData,
     Systemone,
 }
@@ -54,6 +55,7 @@ pub(crate) enum DiagnosticSinkId {
     Context,
     Config,
     Memory,
+    Harness,
     TaskData,
     Systemone,
 }

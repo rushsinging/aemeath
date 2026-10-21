@@ -64,6 +64,12 @@ pub(crate) const TARGETS: &[TargetSpec] = &[
         file_name: "agent-memory.log",
     },
     TargetSpec {
+        target: LogTarget::new("aemeath:agent:harness"),
+        owner: ModuleOwner::Harness,
+        sink: DiagnosticSinkId::Harness,
+        file_name: "agent-harness.log",
+    },
+    TargetSpec {
         target: LogTarget::new("aemeath:agent:task"),
         owner: ModuleOwner::TaskData,
         sink: DiagnosticSinkId::TaskData,
