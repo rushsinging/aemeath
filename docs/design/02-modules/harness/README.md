@@ -22,4 +22,4 @@
 4. **组件职责分层**：policy（能力面）与 guardrails（行为规则）NEVER 合并；STATIC_SYSTEM_PROMPT 本体 NEVER 开放编辑，开放的是 overlay 追加层。
 5. **AlwaysOnProse 组件族**：c1 overlay / c2 guardrails / c4 tool_guidance 机制一份（共享 adapter），语义分槽（内容性质、RSI 证据维度、预算记账、Remind 语义各自独立）。
 6. **经验库**：独立 corpus，schema 与 memory 分离；采纳编辑 MUST 绑定行为证据。
-7. **任务类型可插拔**：daemon 框架按 `TaskKind` 注册任务，本里程碑交付 HarnessRsi 与 MemoryReflect 两个任务；reflect 迁入与 PreCompact 退役为本档交付——compact 后 session 落盘仍全量（marker + 游标，消息区保留），PreCompact 触发随之退役。
+7. **职责边界（2026-10-22 拍板）**：harness daemon 保持单一职责（纯组件治理），reflect NEVER 进入 harness 进程（保持主进程 detached 现状，PreCompact 保留）；执行模式两档——`aemeath rsi run`（一次性）与 `aemeath rsi serve`（后台定时），TaskKind 插拔面保留、当前仅 HarnessRsi。
