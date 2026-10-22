@@ -30,12 +30,12 @@ fn test_clamp_effort_openai_passthrough_all_levels() {
 
 #[test]
 fn test_clamp_effort_volcengine_downgrades_high_above() {
+    // #2032 修正后方舟阶梯到 Max：全档直通（服务端归并由
+    // server_effective_effort 层处理，NEVER 阶梯层提前截断）。
     let driver = VolcengineDriver;
-    assert_eq!(driver.clamp_effort("low"), "low");
-    assert_eq!(driver.clamp_effort("medium"), "medium");
-    assert_eq!(driver.clamp_effort("high"), "medium");
-    assert_eq!(driver.clamp_effort("xhigh"), "medium");
-    assert_eq!(driver.clamp_effort("max"), "medium");
+    for level in &["low", "medium", "high", "xhigh", "max"] {
+        assert_eq!(driver.clamp_effort(level), *level);
+    }
 }
 
 #[test]
@@ -93,12 +93,10 @@ fn test_clamped_object_unchanged_when_within_range() {
 
 #[test]
 fn test_clamped_object_downgrades_effort_for_volcengine() {
+    // #2032：阶梯全档后 high 直通（归并口径在 server_effective_effort）。
     let config = ReasoningConfig::Object(json!({"effort": "high"}));
     let clamped = config.clamped(&VolcengineDriver);
-    assert_eq!(
-        clamped,
-        ReasoningConfig::Object(json!({"effort": "medium"}))
-    );
+    assert_eq!(clamped, ReasoningConfig::Object(json!({"effort": "high"})));
 }
 
 #[test]

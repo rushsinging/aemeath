@@ -204,16 +204,22 @@ fn volcengine_bool_true_sends_enabled_thinking() {
 
 #[test]
 fn volcengine_object_reasoning_sends_reasoning_only() {
+    // #2032 修正后方舟与智谱同构：thinking 开关 + 顶层 reasoning_effort，
+    // NEVER 嵌套 `reasoning` 对象透传。
     let config = ReasoningConfig::Object(serde_json::json!({"effort":"medium"}));
     let mut body = base_body();
 
     VolcengineDriver.apply_reasoning_fields(&mut body, Some(&config), true);
 
     assert_eq!(
-        body.get("reasoning"),
-        Some(&serde_json::json!({"effort":"medium"}))
+        body.get("reasoning_effort"),
+        Some(&serde_json::json!("medium"))
     );
-    assert!(body.get("thinking").is_none());
+    assert_eq!(
+        body.get("thinking"),
+        Some(&serde_json::json!({"type": "enabled"}))
+    );
+    assert!(body.get("reasoning").is_none());
 }
 
 #[test]

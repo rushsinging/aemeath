@@ -258,6 +258,9 @@ impl OpenAIProviderConfig {
                 ProviderDriverKind::Mimo => "/chat/completions".to_string(),
                 ProviderDriverKind::DeepSeek => "/chat/completions".to_string(),
                 ProviderDriverKind::Agnes => "/chat/completions".to_string(),
+                // Kimi（platform.kimi.com）：coding 端点 baseUrl 自带 /v1，
+                // 剥尾后拼 /v1/chat/completions。
+                ProviderDriverKind::Kimi => "/v1/chat/completions".to_string(),
                 // Ollama 有专用 OllamaProvider，不经此 OpenAI 兼容路径；
                 // 兜底归入 OpenAI 风格 suffix。
                 ProviderDriverKind::OpenAI
