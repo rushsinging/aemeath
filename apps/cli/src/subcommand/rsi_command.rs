@@ -15,3 +15,15 @@ pub(crate) async fn run_rsi_serve_command() {
         }
     }
 }
+
+pub(crate) async fn run_rsi_run_command() {
+    match composition::harness::run_rsi_run_once().await {
+        composition::harness::RsiRunExit::Done { summary } => {
+            println!("rsi run 完成：{summary}");
+        }
+        composition::harness::RsiRunExit::Failure { message, exit_code } => {
+            eprintln!("{message}");
+            std::process::exit(exit_code);
+        }
+    }
+}

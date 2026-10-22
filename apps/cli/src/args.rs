@@ -145,7 +145,9 @@ pub enum SystemoneCommands {
 /// `aemeath rsi` 子命令集。
 #[derive(Subcommand)]
 pub enum RsiCommands {
-    /// 启动 RSI 维护 daemon（常驻；定时改进 harness 组件与记忆治理）
+    /// 一次性执行单轮改进周期后退出（手动触发与验收入口）
+    Run,
+    /// 启动 RSI 维护 daemon（常驻；定时改进 harness 组件）
     Serve,
 }
 

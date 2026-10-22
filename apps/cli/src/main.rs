@@ -72,6 +72,9 @@ async fn main() {
             }
         },
         Some(Commands::Rsi { command }) => match command {
+            args::RsiCommands::Run => {
+                subcommand::rsi_command::run_rsi_run_command().await;
+            }
             args::RsiCommands::Serve => {
                 subcommand::rsi_command::run_rsi_serve_command().await;
             }

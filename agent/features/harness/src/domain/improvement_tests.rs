@@ -61,6 +61,7 @@ impl RsiLlmPort for ScriptedLlm {
 #[test]
 fn materials_chunked_by_configured_size() {
     let materials = ImprovementMaterials {
+        lessons: vec![],
         component_contents: vec![
             (id("a"), body_content("1")),
             (id("b"), body_content("2")),
@@ -80,7 +81,7 @@ fn materials_chunked_by_configured_size() {
 #[test]
 fn block_proposal_envelope_parses() {
     let propose = parse_block_proposal(
-        r#"{"decision":"propose","change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"x"},"content":{"frontmatter":null,"body":"new"}}]}}"#,
+        r#"{"decision":"propose","reason":"依据","change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"x"},"content":{"frontmatter":null,"body":"new"}}]}}"#,
     )
     .expect("propose 必须可解析");
     assert!(matches!(propose, BlockProposal::Propose { .. }));
@@ -96,7 +97,7 @@ fn block_proposal_envelope_parses() {
 #[test]
 fn block_prompt_carries_materials_and_contract() {
     let chunk = vec![(id("alpha"), body_content("正文内容"))];
-    let prompt = build_block_prompt(&chunk);
+    let prompt = build_block_prompt(&chunk, &[]);
     assert!(prompt.contains("alpha"));
     assert!(prompt.contains("正文内容"));
     assert!(prompt.contains("no_change"));
@@ -113,15 +114,25 @@ async fn cycle_adopts_and_summarizes_per_block() {
         (untouched.clone(), body_content("keep")),
     ]);
     let llm = ScriptedLlm::new(vec![
-        r#"{"decision":"propose","change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"mentioned"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
+        r#"{"decision":"propose","reason":"正文过时","change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"mentioned"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
         r#"{"decision":"no_change","reason":"证据不足"}"#.to_string(),
     ]);
 
-    let outcome = run_improvement_cycle(&mut registry, &llm, &config(1))
+    let lesson_store = crate::domain::lesson::LessonStore::new(
+        tempfile::tempdir()
+            .expect("tempdir")
+            .path()
+            .join("library.jsonl"),
+    );
+    let outcome = run_improvement_cycle(&mut registry, &llm, &lesson_store, &config(1))
         .await
         .expect("周期必须成功");
     assert!(outcome.summary.contains("采纳 1"));
     assert!(outcome.summary.contains("无变更 1"));
+    // 采纳块 MUST 回写带证据的 Active lesson（复利输入）
+    let lessons = lesson_store.load_active().expect("lessons");
+    assert_eq!(lessons.len(), 1);
+    assert!(!lessons[0].evidence.is_empty());
     assert_eq!(
         registry
             .content_of(&mentioned)
@@ -146,10 +157,16 @@ async fn malformed_block_discarded_without_blocking_others() {
     ]);
     let llm = ScriptedLlm::new(vec![
         "这不是 JSON".to_string(),
-        r#"{"decision":"propose","change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"good"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
+        r#"{"decision":"propose","reason":"正文过时","change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"good"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
     ]);
 
-    let outcome = run_improvement_cycle(&mut registry, &llm, &config(1))
+    let lesson_store = crate::domain::lesson::LessonStore::new(
+        tempfile::tempdir()
+            .expect("tempdir")
+            .path()
+            .join("library.jsonl"),
+    );
+    let outcome = run_improvement_cycle(&mut registry, &llm, &lesson_store, &config(1))
         .await
         .expect("周期必须成功");
     assert!(outcome.summary.contains("作废 1"));
@@ -167,7 +184,13 @@ async fn malformed_block_discarded_without_blocking_others() {
 async fn empty_registry_yields_empty_cycle() {
     let mut registry = FakeRegistry::with_entries(vec![]);
     let llm = ScriptedLlm::new(vec![]);
-    let outcome = run_improvement_cycle(&mut registry, &llm, &config(4))
+    let lesson_store = crate::domain::lesson::LessonStore::new(
+        tempfile::tempdir()
+            .expect("tempdir")
+            .path()
+            .join("library.jsonl"),
+    );
+    let outcome = run_improvement_cycle(&mut registry, &llm, &lesson_store, &config(4))
         .await
         .expect("空注册表 NEVER 报错");
     assert!(outcome.summary.contains("空周期"));
