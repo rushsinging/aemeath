@@ -841,11 +841,13 @@ pub enum ChatEvent {
     ModelSwitched {
         result: crate::ModelSwitchResult,
     },
-    /// Reasoning 模式切换完成通知（#497）。TUI 据此更新 thinking 状态 + 回显。
-    /// `level` 携带当前 reasoning 深度（#1616 状态栏展示）。
+    /// Reasoning 档位调节完成通知（#497 / #2032）。TUI 据此更新 thinking 状态 + 回显。
+    /// `requested` 是用户请求档位；`effective` 是 clamp 到当前模型能力上限后的
+    /// 映射档位（#1616 状态栏展示用它）。
     ThinkingChanged {
         enabled: bool,
-        level: share::reasoning::ReasoningLevel,
+        requested: share::reasoning::ReasoningLevel,
+        effective: share::reasoning::ReasoningLevel,
     },
     /// 上下文估算完成通知（#497）。TUI 据此显示 token 占用信息。
     ContextEstimated {

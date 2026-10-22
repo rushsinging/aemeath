@@ -53,12 +53,13 @@ impl<'a> ContextRequestCoordinator<'a> {
             pending_messages,
             system_prompt: SystemPromptSpecData::new(self.source.system_prompt),
             model_id: self.source.model_id.to_string(),
-            effective_reasoning: *self
+            effective_reasoning: self
                 .source
                 .runtime_context
                 .reasoning_ref()
                 .lock()
-                .unwrap_or_else(|error| error.into_inner()),
+                .unwrap_or_else(|error| error.into_inner())
+                .requested(),
             language: Language::new(self.source.language),
             agent_roles: self.source.agent_roles.clone(),
             config_snapshot: self.source.config.config().clone(),

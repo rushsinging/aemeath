@@ -209,3 +209,37 @@ fn builtin_catalog_routes_reflect_now_as_memory_application_control() {
             && command.command.as_str() == "reflect"
     ));
 }
+
+/// #2032：生产 builtin catalog 提供 `/think`（ApplicationControl / Config，
+/// OptionalText——无参打开档位对话框、带参直设档位）。
+#[test]
+fn builtin_catalog_routes_think_as_config_application_control() {
+    let wiring =
+        crate::adapters::composition::wire_commands(Vec::new()).expect("wire builtin commands");
+
+    let router = wiring.router();
+
+    let no_args = router
+        .resolve(SlashInput::new("/think"))
+        .expect("resolve /think");
+    assert!(matches!(
+        no_args,
+        CommandRoute::ApplicationControl {
+            ref target,
+            ref command,
+            ..
+        } if *target == ApplicationControlTarget::Config
+            && command.command.as_str() == "think"
+            && command.arguments.as_slice().is_empty()
+    ));
+
+    let with_level = router
+        .resolve(SlashInput::new("/think high"))
+        .expect("resolve /think high");
+    assert!(matches!(
+        with_level,
+        CommandRoute::ApplicationControl { ref command, .. }
+            if command.command.as_str() == "think"
+                && command.arguments.as_slice() == ["high"]
+    ));
+}

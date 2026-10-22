@@ -76,6 +76,13 @@ pub(crate) trait LlmProvider: Send + Sync {
     fn max_reasoning_level(&self) -> ReasoningLevel {
         ReasoningLevel::High
     }
+
+    /// 服务端对档位的归并行为（#2032）：返回服务端实际执行的档位，
+    /// 是 wire effort、/think 回执与 UI 映射表的统一显示/发送口径。
+    /// 默认恒等；有归并知识（官方文档）的 driver 覆写。
+    fn server_effective_effort(&self, level: ReasoningLevel) -> ReasoningLevel {
+        level
+    }
 }
 
 #[cfg(test)]

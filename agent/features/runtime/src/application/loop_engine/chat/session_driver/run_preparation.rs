@@ -15,7 +15,9 @@ pub(super) struct MainRunPreparation {
 pub(super) fn prepare_main_run(
     shell: &crate::application::client::SessionRuntime,
     wiring: &Arc<crate::SessionSwitchCoordinator>,
-    reasoning: &Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
+    reasoning: &Arc<
+        std::sync::Mutex<crate::application::run::session_reasoning::SessionReasoningControl>,
+    >,
     sink_handle: &crate::application::loop_engine::chat::ChatEventSinkHandle,
     session_usage: &crate::application::run::context::RunUsageTracker,
     spec: RunSpec,

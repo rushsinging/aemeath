@@ -232,6 +232,14 @@ fn builtin_command_descriptors(
             A::OptionalText,
         ),
         (
+            "think",
+            &[],
+            "Adjust reasoning effort level",
+            M::ApplicationControl,
+            T::Config,
+            A::OptionalText,
+        ),
+        (
             "context",
             &[],
             "Show context window usage",

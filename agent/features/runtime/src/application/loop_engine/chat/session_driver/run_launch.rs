@@ -69,7 +69,13 @@ where
             let task_access = shell.runtime_context_factory.services().task.clone();
 
             let binding = shell.model_state.binding();
-            let reasoning = Arc::new(std::sync::Mutex::new(binding.requested_reasoning));
+            // #2032：会话级 reasoning 控制（resume metadata 恢复优先，
+            // 语义单一源在 coordinator）。
+            let reasoning = Arc::new(std::sync::Mutex::new(
+                shell
+                    .session_switch
+                    .committed_reasoning_control(binding.requested_reasoning),
+            ));
             let session_snapshot = shell.session_snapshot();
             let mut context_size = shell.context_size;
             let mut session_id = session_snapshot.session_id().to_string();
@@ -146,9 +152,18 @@ where
                     }
                 PendingCommand::SwitchModel { selection } => {
                     match (build_switched_client)(&selection).await {
-                        Ok((new_binding, result)) => {
-                            *reasoning.lock().unwrap_or_else(|error| error.into_inner()) =
-                                new_binding.requested_reasoning;
+                        Ok((new_binding, mut result)) => {
+                            // #2032：模型切换仅当用户未 /think 显式选择时跟随新模型默认档。
+                            let session_requested = {
+                                let mut control = reasoning
+                                    .lock()
+                                    .unwrap_or_else(|error| error.into_inner());
+                                control.on_model_switched(new_binding.requested_reasoning);
+                                control.requested()
+                            };
+                            // 回执与状态栏显示会话档位 clamp 后的映射档位。
+                            result.reasoning_level =
+                                Some(new_binding.model.resolve_reasoning(session_requested));
                             let committed_config = shell.session_switch.committed_config_snapshot();
                             shell
                                 .session_state
@@ -179,8 +194,22 @@ where
                     }
                     continue;
                 }
-                PendingCommand::SetThinking { desired } => {
-                    execute_set_thinking(reasoning.as_ref(), &sink, desired).await;
+                PendingCommand::SetThinking { request } => {
+                    // #2032：档位调节 + 映射档位回执；请求档位落 session metadata。
+                    let requested = execute_set_thinking(
+                        reasoning.as_ref(),
+                        &sink,
+                        request,
+                        shell.model_state.binding().as_ref(),
+                    )
+                    .await;
+                    crate::application::client::session_reasoning_persist::persist_session_reasoning_on_wiring(
+                        &shell.session_switch,
+                        shell.session_management.as_ref(),
+                        &session_id,
+                        requested,
+                    )
+                    .await;
                     continue;
                 }
                 PendingCommand::InitProject { force } => {
@@ -266,6 +295,12 @@ where
                     {
                         Ok(resume_view) => {
                             session_id = resume_view.session_id.clone();
+                            // #2032：会话切换后 reasoning 档位跟随新会话 metadata
+                            // 的 `reasoning_effort`（无则跟随当前模型默认档）。
+                            *reasoning.lock().unwrap_or_else(|error| error.into_inner()) =
+                                wiring.committed_reasoning_control(
+                                    shell.model_state.binding().requested_reasoning,
+                                );
                             // 会话身份已切换：emit SessionStart 让外部集成重新捕获
                             // 恢复后的会话 id（生命周期点，失败不阻断恢复流程）。
                             crate::application::hook::session_start::emit_session_start(

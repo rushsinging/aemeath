@@ -288,6 +288,7 @@ pub(crate) fn test_model_info() -> provider::ModelInfo {
         supports_parallel_tool_calls: true,
         supports_streaming: true,
         supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+        server_effort_map: Vec::new(),
         context_limit: Some(128_000),
         output_limit: Some(8192),
     }
@@ -376,6 +377,7 @@ pub(crate) fn binding_from_llm_provider(
         supports_parallel_tool_calls: true,
         supports_streaming: true,
         supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+        server_effort_map: Vec::new(),
         context_limit: Some(128_000),
         output_limit: Some(8_192),
     };

@@ -446,3 +446,26 @@ fn openai_streaming_http_client_uses_connect_timeout() {
 
     assert!(debug.contains("connect_timeout"), "{debug}");
 }
+
+// ── #2032 D4：finalUrl 直连——完整 endpoint 跳过拼接 ──
+
+#[test]
+fn full_chat_endpoint_base_url_is_used_as_is() {
+    let config =
+        OpenAIProviderConfig::from_driver(crate::ProviderDriverKind::Zhipu, "Zhipu Coding Plan");
+    let provider = OpenAICompatibleProvider::new(
+        config,
+        "test-key".to_string(),
+        Some("https://gw.example.com/odd/path/v4/chat/completions".to_string()),
+        Some("glm-5.3".to_string()),
+        8192,
+        false,
+        None,
+        30,
+    );
+    assert_eq!(
+        provider.chat_url(),
+        "https://gw.example.com/odd/path/v4/chat/completions",
+        "完整 endpoint 原样直连，NEVER 剥尾重拼"
+    );
+}

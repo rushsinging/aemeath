@@ -11,6 +11,7 @@ use std::collections::HashMap;
 fn provider_with_user_agent(value: &str) -> ProviderModelsConfig {
     ProviderModelsConfig {
         base_url: "https://example.test".to_string(),
+        final_url: None,
         api_key: String::new(),
         driver: "anthropic".to_string(),
         models: vec![ModelEntryConfig {

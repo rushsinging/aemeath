@@ -93,7 +93,14 @@ impl ProviderRuntimeResolver {
         resolved_model: &ResolvedModel,
         base_url_override: Option<&str>,
     ) -> ResolvedProviderRuntimeConfig {
-        let provider_base_url = non_empty(resolved_model.source_config.base_url.as_str());
+        // #2032 D4：finalUrl（完整 endpoint 直连）优先于 baseUrl；
+        // override（CLI/env 临时覆盖）仍最高。
+        let provider_base_url = resolved_model
+            .source_config
+            .final_url
+            .as_deref()
+            .and_then(non_empty)
+            .or_else(|| non_empty(resolved_model.source_config.base_url.as_str()));
         let catalog = find_by_source(&resolved_model.source_key)
             .or_else(|| find_by_driver(&resolved_model.driver));
         let base_url = base_url_override

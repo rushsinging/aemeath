@@ -423,7 +423,33 @@ impl AgentClientImpl {
         self.inner.shell.context_size
     }
 
-    pub fn requested_reasoning(&self) -> share::reasoning::ReasoningLevel {
-        self.inner.shell.model_state.binding().requested_reasoning
+    /// 启动时生效的 reasoning 映射档位（#1616 TUI 状态栏初始展示）：
+    /// resume 会话 metadata 的 `reasoning_effort` 优先，模型默认档兜底
+    /// （#2032），再统一 clamp 到当前模型能力上限——显示口径与
+    /// `ThinkingChanged.effective` 一致。
+    pub fn effective_reasoning(&self) -> share::reasoning::ReasoningLevel {
+        let shell = &self.inner.shell;
+        let binding = shell.model_state.binding();
+        let requested = shell
+            .session_switch
+            .committed_reasoning_control(binding.requested_reasoning)
+            .requested();
+        binding.model.resolve_reasoning(requested)
+    }
+
+    /// 当前模型全档映射表（#2032：/think 对话框逐档映射标注的单一真相源
+    /// 计算；TUI 只渲染）。每项 (requested, effective)。
+    pub fn reasoning_effort_map(
+        &self,
+    ) -> Vec<(
+        share::reasoning::ReasoningLevel,
+        share::reasoning::ReasoningLevel,
+    )> {
+        self.inner
+            .shell
+            .model_state
+            .binding()
+            .model
+            .reasoning_effort_map()
     }
 }

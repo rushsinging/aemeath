@@ -238,4 +238,11 @@ impl LlmProvider for OpenAICompatibleProvider {
     fn max_reasoning_level(&self) -> crate::domain::capability::ReasoningLevel {
         self.driver.max_reasoning_level()
     }
+
+    fn server_effective_effort(
+        &self,
+        level: crate::domain::capability::ReasoningLevel,
+    ) -> crate::domain::capability::ReasoningLevel {
+        self.driver.server_effective_effort(&self.model, level)
+    }
 }

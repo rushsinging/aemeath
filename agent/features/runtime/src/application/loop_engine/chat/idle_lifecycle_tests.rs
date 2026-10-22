@@ -1,10 +1,10 @@
-//! idle 生命周期的 wakeup 接线测试（#252 PR2）。
+//! idle 生命周期的 wakeup 接线测试（#252 PR2）+ `/think` 档位执行测试（#2032）。
 
 use std::collections::VecDeque;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
-use super::idle_lifecycle::{idle_until_resume_or_shutdown, IdleResult};
+use super::idle_lifecycle::{execute_set_thinking, idle_until_resume_or_shutdown, IdleResult};
 use crate::application::loop_engine::chat::input_gate::{
     InputEventDrainPort, InputEventFuture, InputEventOptFuture, PendingInputBuffer,
 };
@@ -227,4 +227,195 @@ const fn _static_assert_sink_clone_send_sync()
 where
     NullSink: Clone + Send + Sync + 'static,
 {
+}
+
+// ── #2032：/think 档位执行 ──
+
+/// 记录 ThinkingChanged 明细与 SystemMessage 回执的 sink。
+#[derive(Default, Clone)]
+struct ThinkingRecorderSink {
+    changed: Arc<
+        Mutex<
+            Vec<(
+                bool,
+                share::reasoning::ReasoningLevel,
+                share::reasoning::ReasoningLevel,
+            )>,
+        >,
+    >,
+    receipts: Arc<Mutex<Vec<String>>>,
+}
+
+impl ChatEventSink for ThinkingRecorderSink {
+    fn send_event<'a>(
+        &'a self,
+        event: RuntimeStreamEvent,
+    ) -> Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+        match event {
+            RuntimeStreamEvent::ThinkingChanged {
+                enabled,
+                requested,
+                effective,
+            } => {
+                self.changed
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .push((enabled, requested, effective));
+            }
+            RuntimeStreamEvent::SystemMessage(text) => {
+                self.receipts
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .push(text);
+            }
+            _ => {}
+        }
+        Box::pin(async {})
+    }
+
+    fn try_send_event(&self, _event: RuntimeStreamEvent) {}
+}
+
+/// 构造支持阶梯 ≤ `max_level` 的测试 binding。
+fn thinking_binding(
+    max_level: share::reasoning::ReasoningLevel,
+) -> crate::ports::ProviderBindingData {
+    let ladder = [
+        share::reasoning::ReasoningLevel::Off,
+        share::reasoning::ReasoningLevel::Minimal,
+        share::reasoning::ReasoningLevel::Low,
+        share::reasoning::ReasoningLevel::Medium,
+        share::reasoning::ReasoningLevel::High,
+        share::reasoning::ReasoningLevel::Xhigh,
+        share::reasoning::ReasoningLevel::Max,
+    ];
+    let model = crate::ports::provider_port::ModelInfo {
+        provider: "test".to_string(),
+        model: "test-model".to_string(),
+        supports_tools: true,
+        supports_parallel_tool_calls: false,
+        supports_streaming: true,
+        supported_reasoning: ladder
+            .into_iter()
+            .filter(|level| *level <= max_level)
+            .collect(),
+        server_effort_map: Vec::new(),
+        context_limit: Some(128_000),
+        output_limit: Some(8_192),
+    };
+    crate::ports::ProviderBindingData {
+        provider: Arc::new(crate::ports::provider_port::fake::FakeProvider::new()),
+        model,
+        max_tokens: 4_096,
+        requested_reasoning: share::reasoning::ReasoningLevel::Medium,
+    }
+}
+
+#[tokio::test]
+async fn set_thinking_level_emits_requested_and_clamped_effective() {
+    let control = Mutex::new(
+        crate::application::run::session_reasoning::SessionReasoningControl::from_model_default(
+            share::reasoning::ReasoningLevel::Medium,
+        ),
+    );
+    let sink = ThinkingRecorderSink::default();
+    // 模型能力上限 High：请求 Max 应 clamp 到 High。
+    let binding = thinking_binding(share::reasoning::ReasoningLevel::High);
+
+    let requested = execute_set_thinking(
+        &control,
+        &sink,
+        sdk::ThinkingRequest::Level(share::reasoning::ReasoningLevel::Max),
+        &binding,
+    )
+    .await;
+
+    assert_eq!(requested, share::reasoning::ReasoningLevel::Max);
+    assert_eq!(
+        sink.changed
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_slice(),
+        [(
+            true,
+            share::reasoning::ReasoningLevel::Max,
+            share::reasoning::ReasoningLevel::High
+        )],
+        "ThinkingChanged 应携带请求档位与 clamp 后映射档位"
+    );
+    let receipts = sink
+        .receipts
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    assert_eq!(receipts.len(), 1);
+    assert!(
+        receipts[0].contains("high") && receipts[0].contains("clamped"),
+        "回执应展示映射档位与 clamp 说明，实际：{}",
+        receipts[0]
+    );
+}
+
+#[tokio::test]
+async fn set_thinking_level_within_capability_has_plain_receipt() {
+    let control = Mutex::new(
+        crate::application::run::session_reasoning::SessionReasoningControl::from_model_default(
+            share::reasoning::ReasoningLevel::Off,
+        ),
+    );
+    let sink = ThinkingRecorderSink::default();
+    let binding = thinking_binding(share::reasoning::ReasoningLevel::Max);
+
+    let requested = execute_set_thinking(
+        &control,
+        &sink,
+        sdk::ThinkingRequest::Level(share::reasoning::ReasoningLevel::High),
+        &binding,
+    )
+    .await;
+
+    assert_eq!(requested, share::reasoning::ReasoningLevel::High);
+    let receipts = sink
+        .receipts
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts[0], "[thinking mode: high]");
+}
+
+#[tokio::test]
+async fn set_thinking_toggle_off_then_on_roundtrips() {
+    let control = Mutex::new(
+        crate::application::run::session_reasoning::SessionReasoningControl::from_user_selection(
+            share::reasoning::ReasoningLevel::Xhigh,
+        ),
+    );
+    let sink = ThinkingRecorderSink::default();
+    let binding = thinking_binding(share::reasoning::ReasoningLevel::Max);
+
+    execute_set_thinking(&control, &sink, sdk::ThinkingRequest::Toggle, &binding).await;
+    execute_set_thinking(&control, &sink, sdk::ThinkingRequest::Toggle, &binding).await;
+
+    let changed = sink
+        .changed
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone();
+    assert_eq!(
+        changed.as_slice(),
+        [
+            (
+                false,
+                share::reasoning::ReasoningLevel::Off,
+                share::reasoning::ReasoningLevel::Off
+            ),
+            (
+                true,
+                share::reasoning::ReasoningLevel::Medium,
+                share::reasoning::ReasoningLevel::Medium
+            ),
+        ],
+        "toggle 应先关（Off）再开（Medium），与旧语义一致"
+    );
 }

@@ -33,6 +33,7 @@ impl runtime::ProviderFactory for TestProviderFactory {
                 supports_parallel_tool_calls: true,
                 supports_streaming: true,
                 supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+                server_effort_map: Vec::new(),
                 context_limit: spec.context_window,
                 output_limit: Some(spec.max_tokens as usize),
             },

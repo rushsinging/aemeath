@@ -54,6 +54,11 @@ impl App {
             // #740：用已回填缓存呈现对话框（或挂起等待），并附带 ListModels 刷新。
             return UpdateResult::one(self.open_model_selection_dialog());
         }
+        if command == "think" && !has_args {
+            // #2032：档位全集固定，直接打开选择对话框（无需异步回填）。
+            self.open_think_level_dialog();
+            return UpdateResult::none();
+        }
 
         match command {
             _command if matches!(route, sdk::CommandRoute::SkillRequest(_)) => {
@@ -228,6 +233,14 @@ Build info:
                     spawn_effect: None,
                 }
             }
+            "think" if has_args => {
+                // /think <level> — 本地解析档位并走 SetThinking 事件流（#2032）
+                let effects = self.handle_think_with_args(&args).into_iter().collect();
+                UpdateResult {
+                    effects,
+                    spawn_effect: None,
+                }
+            }
             _ => {
                 self.append_error_notice(format!("Unsupported command route: /{command}"));
                 UpdateResult::none()
@@ -272,5 +285,77 @@ Build info:
                 selection: arg.to_string(),
             },
         })
+    }
+
+    /// 解析 /think <level> 参数（#2032）：合法档位直发 `SetThinking` 事件流；
+    /// 非法档位本地报错（不发事件）。
+    fn handle_think_with_args(&mut self, args: &str) -> Option<Effect> {
+        let arg = args.trim();
+        if arg.is_empty() {
+            return None;
+        }
+        match sdk::ReasoningLevel::parse(arg) {
+            Some(level) => Some(Effect::SendChatInputEvent {
+                event: sdk::ChatInputEvent::SetThinking {
+                    request: sdk::ThinkingRequest::Level(level),
+                },
+            }),
+            None => {
+                self.append_error_notice(format!(
+                    "Unknown reasoning level: {arg}. Valid levels: off, minimal, low, medium, high, xhigh, max"
+                ));
+                None
+            }
+        }
+    }
+
+    /// 打开 /think 档位选择对话框（#2032）：固定 7 档全集；每档按当前模型
+    /// 能力上限标注映射结果（`high → medium`）；当前档位（映射后）行以
+    /// SUCCESS 高亮（NEVER 字符标记）；确认等价提交 `/think <level>`。
+    fn open_think_level_dialog(&mut self) {
+        let current = self.model.runtime_presentation.reasoning_level();
+        let effort_map = self
+            .model
+            .runtime_presentation
+            .reasoning_effort_map()
+            .to_vec();
+        let levels = sdk::ReasoningLevel::ALL;
+        let to_view = crate::tui::adapter::event_mapping::reasoning_level_view;
+        let mut current_index = 0;
+        let options = levels
+            .iter()
+            .enumerate()
+            .map(|(index, level)| {
+                let level_view = to_view(*level);
+                if level_view == current {
+                    current_index = index;
+                }
+                let mut text = level_view.as_str().to_string();
+                // 映射表由 runtime 权威 resolve（阶梯离散取值，含
+                // minimal→off 类空隙降档），TUI 只查表渲染。
+                if let Some((_, effective)) = effort_map
+                    .iter()
+                    .find(|(requested, _)| *requested == level_view)
+                {
+                    if *effective != level_view {
+                        text.push_str(&format!(" → {}", effective.as_str()));
+                    }
+                }
+                text
+            })
+            .collect::<Vec<_>>();
+        let keys = levels
+            .iter()
+            .map(|level| level.as_str().to_string())
+            .collect();
+        self.layout.open_command_dialog(
+            crate::tui::render::dialog::Dialog::select_with_current(
+                "Select Reasoning Effort",
+                options,
+                current_index,
+            ),
+            keys,
+            "/think",
+        );
     }
 }

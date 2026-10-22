@@ -18,6 +18,7 @@ pub enum DriverKind {
     Minimax,
     Mimo,
     DeepSeek,
+    Kimi,
     Agnes,
     Ollama,
 }
@@ -34,6 +35,7 @@ impl DriverKind {
             "minimax" => Some(DriverKind::Minimax),
             "mimo" => Some(DriverKind::Mimo),
             "deepseek" => Some(DriverKind::DeepSeek),
+            "kimi" => Some(DriverKind::Kimi),
             "agnes" => Some(DriverKind::Agnes),
             "ollama" => Some(DriverKind::Ollama),
             _ => None,
@@ -51,13 +53,14 @@ impl DriverKind {
             DriverKind::Minimax => "minimax",
             DriverKind::Mimo => "mimo",
             DriverKind::DeepSeek => "deepseek",
+            DriverKind::Kimi => "kimi",
             DriverKind::Agnes => "agnes",
             DriverKind::Ollama => "ollama",
         }
     }
 
     /// 全部已知 driver（一致性测试与目录校验用）。
-    pub const ALL: [DriverKind; 10] = [
+    pub const ALL: [DriverKind; 11] = [
         DriverKind::Anthropic,
         DriverKind::OpenAI,
         DriverKind::Zhipu,
@@ -66,6 +69,7 @@ impl DriverKind {
         DriverKind::Minimax,
         DriverKind::Mimo,
         DriverKind::DeepSeek,
+        DriverKind::Kimi,
         DriverKind::Agnes,
         DriverKind::Ollama,
     ];

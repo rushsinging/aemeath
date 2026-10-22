@@ -7,40 +7,49 @@ use crate::application::loop_engine::chat::input_gate::{
     event_kind_name, GateKind, InputEventDrainPort, PendingCommand, PendingInputBuffer,
 };
 use crate::application::loop_engine::AcceptedUserInput;
+use crate::application::run::session_reasoning::SessionReasoningControl;
+use crate::ports::ProviderBindingData;
 use share::reasoning::ReasoningLevel;
 
-fn requested_level_for_thinking(
-    reasoning: &std::sync::Mutex<ReasoningLevel>,
-    desired: Option<bool>,
-) -> ReasoningLevel {
-    let mut current = reasoning.lock().unwrap_or_else(|error| error.into_inner());
-    let enabled = desired.unwrap_or(matches!(*current, ReasoningLevel::Off));
-    *current = if enabled {
-        ReasoningLevel::Medium
-    } else {
-        ReasoningLevel::Off
-    };
-    *current
-}
-
+/// 执行 `/think` 档位调节（#2032）：
+/// 1. `SessionReasoningControl::apply_thinking_request` 解析请求档位；
+/// 2. `ModelInfo::resolve_reasoning` clamp 到当前模型能力上限得映射档位；
+/// 3. `ThinkingChanged { requested, effective }` 回传 TUI（状态栏显示映射档位）。
+///
+/// 返回请求档位（canonical 字符串落盘由调用方负责）。
 pub(crate) async fn execute_set_thinking<S>(
-    reasoning: &std::sync::Mutex<ReasoningLevel>,
+    reasoning: &std::sync::Mutex<SessionReasoningControl>,
     sink: &S,
-    desired: Option<bool>,
+    request: sdk::ThinkingRequest,
+    binding: &ProviderBindingData,
 ) -> ReasoningLevel
 where
     S: ChatEventSink,
 {
-    let level = requested_level_for_thinking(reasoning, desired);
-    let enabled = !matches!(level, ReasoningLevel::Off);
-    sink.send_event(RuntimeStreamEvent::ThinkingChanged { enabled, level })
-        .await;
-    sink.send_event(RuntimeStreamEvent::SystemMessage(format!(
-        "[thinking mode: {}]",
-        level.as_str()
-    )))
+    let requested = reasoning
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .apply_thinking_request(request);
+    let effective = binding.model.resolve_reasoning(requested);
+    let enabled = !matches!(effective, ReasoningLevel::Off);
+    sink.send_event(RuntimeStreamEvent::ThinkingChanged {
+        enabled,
+        requested,
+        effective,
+    })
     .await;
-    level
+    let receipt = if effective == requested {
+        format!("[thinking mode: {}]", effective.as_str())
+    } else {
+        format!(
+            "[thinking mode: {} (requested {}, clamped to model capability)]",
+            effective.as_str(),
+            requested.as_str()
+        )
+    };
+    sink.send_event(RuntimeStreamEvent::SystemMessage(receipt))
+        .await;
+    requested
 }
 
 #[derive(Debug)]

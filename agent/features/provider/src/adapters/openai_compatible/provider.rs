@@ -109,6 +109,20 @@ impl OpenAICompatibleProvider {
     }
 
     pub(crate) fn chat_url(&self) -> String {
+        // #2032 D4：finalUrl 直连——base_url 已是完整 chat endpoint
+        //（以已知 suffix 结尾）时原样使用，跳过剥尾与拼接。
+        const KNOWN_CHAT_SUFFIXES: [&str; 4] = [
+            "/chat/completions",
+            "/messages",
+            "/responses",
+            "/completions",
+        ];
+        if KNOWN_CHAT_SUFFIXES
+            .iter()
+            .any(|suffix| self.base_url.ends_with(suffix))
+        {
+            return self.base_url.clone();
+        }
         format!("{}{}", self.base_url, self.config.chat_api_suffix)
     }
 }

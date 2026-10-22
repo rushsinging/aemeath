@@ -117,7 +117,8 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
         };
 
         // 组合根从 config/spec 投影构造 ModelInfo；supported_reasoning 阶梯
-        // 由装配（client.max_reasoning_level）覆盖——此处填占位。
+        // 与 server_effort_map 均由装配（client 能力 + driver 归并）覆盖——
+        // 此处填占位。
         let model = ModelInfo {
             provider: spec.source_key.clone(),
             model: spec.model.clone(),
@@ -125,6 +126,7 @@ impl ProviderFactoryTrait for DefaultProviderFactory {
             supports_parallel_tool_calls: true,
             supports_streaming: true,
             supported_reasoning: vec![ReasoningLevel::Off],
+            server_effort_map: Vec::new(),
             context_limit: spec.context_window,
             output_limit: Some(spec.max_tokens as usize),
         };

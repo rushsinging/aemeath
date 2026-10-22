@@ -123,6 +123,7 @@ fn test_factory() -> Arc<dyn ProviderFactory> {
                     ReasoningLevel::Low,
                     ReasoningLevel::Medium,
                 ],
+                server_effort_map: Vec::new(),
                 context_limit: spec.context_window,
                 output_limit: Some(spec.max_tokens as usize),
             };

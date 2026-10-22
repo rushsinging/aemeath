@@ -31,6 +31,7 @@ fn system(os: &str, arch: &str, version: Option<&str>) -> SystemInformation {
 fn provider_config(user_agent: Option<&str>) -> ProviderModelsConfig {
     ProviderModelsConfig {
         base_url: "https://example.test".to_string(),
+        final_url: None,
         api_key: String::new(),
         driver: "anthropic".to_string(),
         models: vec![],

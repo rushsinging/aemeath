@@ -232,11 +232,12 @@ async fn invoke_model_impl(
     );
 
     let binding = observer.runtime_context().provider();
-    let reasoning = *observer
+    let reasoning = observer
         .runtime_context()
         .reasoning()
         .lock()
-        .unwrap_or_else(|error| error.into_inner());
+        .unwrap_or_else(|error| error.into_inner())
+        .requested();
     let started = Instant::now();
     let mut coordinator = ModelInvocationCoordinator::new();
     let response = loop {

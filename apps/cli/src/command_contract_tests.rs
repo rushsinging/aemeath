@@ -48,7 +48,8 @@ fn help_and_completion_come_from_the_injected_catalog() {
 
     assert!(help.iter().any(|line| line.contains("/help")));
     assert!(help.iter().any(|line| line.contains("/quit")));
-    assert!(!help.iter().any(|line| line.contains("/think")));
+    // #2032：/think 进入 builtin catalog 后 /help 必须可见。
+    assert!(help.iter().any(|line| line.contains("/think")));
 }
 
 #[test]

@@ -1047,6 +1047,9 @@ pub struct AgentClientBootstrap {
     pub thinking: bool,
     /// 启动时生效的 reasoning 深度（#1616 TUI 状态栏初始展示）。
     pub reasoning_level: share::reasoning::ReasoningLevel,
+    /// 当前模型全档映射表（#2032 /think 对话框逐档映射标注；runtime
+    /// 权威计算，TUI 只渲染）。
+    pub reasoning_effort_map: Vec<sdk::ReasoningEffortMapping>,
     pub config_view: sdk::ConfigView,
     pub memory_config: MemoryConfigView,
     pub skill_snapshot: sdk::SkillsUpdatedEvent,
@@ -1409,8 +1412,17 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
     let startup_resume = runtime_client.client.startup_resume();
     let allow_all = runtime_client.client.allow_all();
     let context_size = runtime_client.client.context_size();
-    let requested_level = runtime_client.client.requested_reasoning();
-    let thinking = requested_level != share::reasoning::ReasoningLevel::Off;
+    let effective_level = runtime_client.client.effective_reasoning();
+    let thinking = effective_level != share::reasoning::ReasoningLevel::Off;
+    let reasoning_effort_map = runtime_client
+        .client
+        .reasoning_effort_map()
+        .into_iter()
+        .map(|(requested, effective)| sdk::ReasoningEffortMapping {
+            requested,
+            effective,
+        })
+        .collect();
     let command_wiring = crate::tools::wire_commands()
         .map_err(|error| SdkError::Init(format!("命令目录初始化失败：{error}")))?;
     let connect_facade = wire_connect(&agents_dir, Some(user_agent.clone()));
@@ -1436,7 +1448,8 @@ pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstr
         allow_all,
         context_size,
         thinking,
-        reasoning_level: requested_level,
+        reasoning_level: effective_level,
+        reasoning_effort_map,
         config_view,
         memory_config: launch.memory_config,
         skill_snapshot: launch.skill_snapshot,

@@ -39,6 +39,12 @@ pub struct ProviderModelsConfig {
     #[serde(default, rename = "baseUrl")]
     pub base_url: String,
 
+    /// Chat endpoint 完整直连 URL（#2032 D4）：设置后跳过 baseUrl 剥尾与
+    /// driver suffix 拼接，直接作为请求 endpoint——用于路径不规则的网关。
+    /// 与 `baseUrl` 二选一；`finalUrl` 优先。
+    #[serde(default, rename = "finalUrl")]
+    pub final_url: Option<String>,
+
     /// API key for this source.
     #[serde(default, rename = "apiKey")]
     pub api_key: String,

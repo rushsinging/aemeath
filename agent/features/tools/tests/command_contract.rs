@@ -117,6 +117,7 @@ fn builtin_catalog_exposes_the_complete_stable_descriptor_matrix() {
             "resume",
             "session",
             "stats",
+            "think",
             "update",
             "usage",
             "version",

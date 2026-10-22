@@ -730,8 +730,10 @@ pub(crate) enum TuiRuntimeEvent {
     },
     ThinkingChanged {
         enabled: bool,
-        /// 切换后的 reasoning 深度（#1616 状态栏直接显示）。
-        level: ReasoningLevelView,
+        /// 用户请求档位（/think 选择值，#2032）。
+        requested: ReasoningLevelView,
+        /// clamp 到模型能力上限后的映射档位（#1616 状态栏直接显示）。
+        effective: ReasoningLevelView,
     },
     CommandResultText {
         text: String,
@@ -743,6 +745,8 @@ pub(crate) enum TuiRuntimeEvent {
         reasoning_active: Option<bool>,
         /// 切换后生效的 reasoning 深度（#1616 状态栏直接显示）。
         reasoning_level: Option<ReasoningLevelView>,
+        /// 切换后模型全档映射表（#2032 /think 对话框逐档映射标注）。
+        reasoning_effort_map: Vec<(ReasoningLevelView, ReasoningLevelView)>,
     },
     ContextEstimated {
         estimated_tokens: usize,

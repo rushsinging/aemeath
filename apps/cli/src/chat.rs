@@ -214,6 +214,27 @@ pub(crate) async fn run_chat(args: Args) {
                 },
             ),
         );
+        // #2032：模型全档映射表（/think 对话框逐档映射标注，runtime 权威计算）。
+        app.apply_agent_intent(
+            crate::tui::update::intent::AgentIntent::RuntimePresentation(
+                crate::tui::model::runtime_presentation::RuntimePresentationIntent::ReasoningCapability {
+                    effort_map: bootstrap
+                        .reasoning_effort_map
+                        .iter()
+                        .map(|mapping| {
+                            (
+                                crate::tui::adapter::event_mapping::reasoning_level_view(
+                                    mapping.requested,
+                                ),
+                                crate::tui::adapter::event_mapping::reasoning_level_view(
+                                    mapping.effective,
+                                ),
+                            )
+                        })
+                        .collect(),
+                },
+            ),
+        );
         if let Some(resume) = startup_resume {
             crate::tui::log_debug!(
                 "resume_lifecycle boundary=cli_to_tui stage=startup_view_received session_id={} steps={} messages={}",
