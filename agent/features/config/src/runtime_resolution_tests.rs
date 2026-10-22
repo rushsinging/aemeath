@@ -41,6 +41,7 @@ fn snapshot_with_global_user_agent(
         ProviderModelsConfig {
             driver: driver.to_string(),
             base_url: base_url.to_string(),
+            final_url: None,
             user_agent: user_agent.map(str::to_string),
             api_key: "secret".to_string(),
             models: vec![ModelEntryConfig {

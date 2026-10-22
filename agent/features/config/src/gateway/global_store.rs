@@ -322,6 +322,7 @@ fn merge_draft(mut root: Value, draft: &ConnectDraft) -> Result<Value, GlobalCon
         .collect();
     let provider_config = share::config::models::ProviderModelsConfig {
         base_url: base_url.clone(),
+        final_url: None,
         api_key: draft
             .api_key_plaintext()
             .map(str::to_string)

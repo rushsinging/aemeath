@@ -8,6 +8,7 @@ fn test_config() -> ModelsConfig {
         "LiteLLM".to_string(),
         ProviderModelsConfig {
             base_url: "http://localhost:4000".to_string(),
+            final_url: None,
             api_key: String::new(),
             driver: "openai".to_string(),
             models: vec![ModelEntryConfig {

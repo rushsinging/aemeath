@@ -8,6 +8,7 @@ fn models_config(model_max_tokens: u32) -> ModelsConfig {
         "zhipu".to_string(),
         ProviderModelsConfig {
             base_url: "https://zhipu.example.com".to_string(),
+            final_url: None,
             api_key: "zhipu-key".to_string(),
             driver: "zhipu".to_string(),
             models: vec![ModelEntryConfig {
