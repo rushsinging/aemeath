@@ -9,6 +9,7 @@ use serde_json::Value;
 use crate::config::{
     audit::AuditConfig,
     context::ContextConfig,
+    harness::HarnessConfig,
     hooks::HooksConfig,
     legacy::{ApiConfig, ModelConfig},
     logging::{LoggingConfig, SubAgentLogConfig},
@@ -64,6 +65,8 @@ pub struct ConfigPatch {
     #[serde(default)]
     pub memory: Option<MemoryConfigPatch>,
     #[serde(default)]
+    pub harness: Option<HarnessConfigPatch>,
+    #[serde(default)]
     pub logging: Option<LoggingConfigPatch>,
     #[serde(default)]
     pub guidance: Option<GuidanceConfigPatch>,
@@ -95,6 +98,7 @@ impl ConfigPatch {
             && self.storage.is_none()
             && self.scoring.is_none()
             && self.memory.is_none()
+            && self.harness.is_none()
             && self.logging.is_none()
             && self.guidance.is_none()
             && self.hooks.is_none()
@@ -320,6 +324,22 @@ pub struct StorageConfigPatch {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct HarnessConfigPatch {
+    #[serde(default)]
+    pub rsi: Option<RsiConfigPatch>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct RsiConfigPatch {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub interval_secs: Option<u64>,
+    #[serde(default)]
+    pub chunk_max_components: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct MemoryConfigPatch {
     #[serde(default)]
     pub enabled: Option<bool>,
@@ -453,6 +473,9 @@ pub fn apply_patch(mut base: Config, patch: ConfigPatch) -> Config {
     }
     if let Some(memory) = patch.memory {
         base.memory = apply_memory_patch(base.memory, memory);
+    }
+    if let Some(harness) = patch.harness {
+        base.harness = apply_harness_patch(base.harness, harness);
     }
     if let Some(logging) = patch.logging {
         base.logging = apply_logging_patch(base.logging, logging);
@@ -886,6 +909,24 @@ pub(crate) fn merge_hooks(base: HooksConfig, overlay: HooksConfig) -> HooksConfi
         },
         events,
     }
+}
+
+pub(crate) fn apply_harness_patch(
+    mut base: HarnessConfig,
+    patch: HarnessConfigPatch,
+) -> HarnessConfig {
+    if let Some(rsi) = patch.rsi {
+        if let Some(v) = rsi.enabled {
+            base.rsi.enabled = v;
+        }
+        if let Some(v) = rsi.interval_secs {
+            base.rsi.interval_secs = v;
+        }
+        if let Some(v) = rsi.chunk_max_components {
+            base.rsi.chunk_max_components = v;
+        }
+    }
+    base
 }
 
 pub(crate) fn apply_memory_patch(mut base: MemoryConfig, patch: MemoryConfigPatch) -> MemoryConfig {
