@@ -78,7 +78,7 @@ pub(crate) use domain::session::{
 pub(crate) use domain::ContextMessages;
 pub use domain::{
     AcceptedInputAppendData, AcceptedInputError, ContextAppendData, ContextRequestId,
-    SessionRevision, SystemBlock, Urgency,
+    SessionRevision, Urgency,
 };
 pub use domain::{
     AppendReceiptData, BackgroundProcessCompletionStatus, BackgroundProcessReminderItemData,
