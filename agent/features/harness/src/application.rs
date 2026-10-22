@@ -14,6 +14,14 @@ pub trait ComponentRegistry: Send {
     /// 枚举全部可编辑组件（稳定排序）。
     fn list(&self) -> Vec<ComponentId>;
 
+    /// 本 registry 是否处理该 kind 的组件（路由新组件用；默认不处理）。
+    ///
+    /// 组合 registry 路由顺序：已有组件（list 命中）优先于 handles 声明。
+    fn handles(&self, id: &ComponentId) -> bool {
+        let _ = id;
+        false
+    }
+
     /// 读取单个组件的当前内容。
     fn read(&self, id: &ComponentId) -> Result<ComponentContent, HarnessError>;
 

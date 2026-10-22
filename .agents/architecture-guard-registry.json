@@ -2148,7 +2148,8 @@
         "logging": [],
         "utils": [],
         "harness": [
-          "share"
+          "share",
+          "utils"
         ]
       },
       "reason": "F-4：workspace 业务依赖矩阵（cargo metadata path 依赖边校验；不在矩阵的 crate 跳过）",

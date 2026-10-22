@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 # 组件树注册表只依赖共享内核：路径与错误体系来自 share。
 share = { path = "../../shared" }
+utils = { path = "../../../packages/global/utils" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yml = "0.0.12"
