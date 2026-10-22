@@ -51,12 +51,6 @@ pub struct LessonEntry {
     pub status: LessonStatus,
 }
 
-/// 经验条目单条 lesson 文本上限（对齐 memory content 上限族）。
-pub const LESSON_MAX_CHARS: usize = 500;
-
-/// 经验条目摘录上限。
-pub const EXCERPT_MAX_CHARS: usize = 200;
-
 impl LessonEntry {
     /// 构造 Active 新条目（校验证据与长度不变量）。
     pub fn new(
@@ -74,17 +68,23 @@ impl LessonEntry {
                 "经验条目 MUST 携带至少一条证据绑定",
             ));
         }
-        if lesson.chars().count() > LESSON_MAX_CHARS {
+        if lesson.chars().count() > crate::constants::LESSON_MAX_CHARS {
             return Err(HarnessError::invalid(
                 ERROR_DOMAIN,
-                format!("经验条目超长（>{LESSON_MAX_CHARS} 字符），请收敛表述"),
+                format!(
+                    "经验条目超长（>{} 字符），请收敛表述",
+                    crate::constants::LESSON_MAX_CHARS
+                ),
             ));
         }
         for binding in &evidence {
-            if binding.excerpt.chars().count() > EXCERPT_MAX_CHARS {
+            if binding.excerpt.chars().count() > crate::constants::EXCERPT_MAX_CHARS {
                 return Err(HarnessError::invalid(
                     ERROR_DOMAIN,
-                    format!("证据摘录超长（>{EXCERPT_MAX_CHARS} 字符）"),
+                    format!(
+                        "证据摘录超长（>{} 字符）",
+                        crate::constants::EXCERPT_MAX_CHARS
+                    ),
                 ));
             }
         }

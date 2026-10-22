@@ -242,10 +242,13 @@ async fn trigger_runs_cycle_and_writes_component_file() {
     #[async_trait]
     impl RsiLlmPort for JsonLlm {
         async fn complete(&self, _prompt: &str) -> Result<String, HarnessError> {
-            Ok(r#"{"decision":"propose","change_set":{"edits":[{"action":"upsert","id":{"kind":"guardrails","name":"default"},"content":{"frontmatter":null,"body":"新规则：先读后写"}}]}}"#.to_string())
+            Ok(r#"{"decision":"propose","reason":"初始规则过于简略","change_set":{"edits":[{"action":"upsert","id":{"kind":"guardrails","name":"default"},"content":{"frontmatter":null,"body":"新规则：先读后写"}}]}}"#.to_string())
         }
     }
 
+    let lesson_store = std::sync::Arc::new(crate::domain::lesson::LessonStore::new(
+        temp.path().join("library.jsonl"),
+    ));
     let mut tasks = TaskRegistry::new();
     tasks
         .register(
@@ -253,6 +256,7 @@ async fn trigger_runs_cycle_and_writes_component_file() {
             Box::new(HarnessRsiCycleTask::new(
                 registry,
                 Arc::new(JsonLlm),
+                lesson_store,
                 share::config::RsiConfig::default(),
             )),
         )

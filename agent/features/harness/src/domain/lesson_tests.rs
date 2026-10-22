@@ -1,8 +1,7 @@
 //! 经验库契约测试：证据不变量、长度上限、追加/读取/退役、损坏行容忍。
 
-use crate::domain::lesson::{
-    EvidenceBinding, LessonEntry, LessonStatus, SignalKind, EXCERPT_MAX_CHARS, LESSON_MAX_CHARS,
-};
+use crate::constants::{EXCERPT_MAX_CHARS, LESSON_MAX_CHARS};
+use crate::domain::lesson::{EvidenceBinding, LessonEntry, LessonStatus, SignalKind};
 
 fn entry(lesson: &str) -> Result<LessonEntry, crate::domain::errors::HarnessError> {
     LessonEntry::new(

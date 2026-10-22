@@ -3,6 +3,7 @@
 use crate::application::ComponentRegistry;
 use crate::domain::errors::HarnessError;
 use crate::domain::improvement::{run_improvement_cycle, RsiLlmPort};
+use crate::domain::lesson::LessonStore;
 use crate::domain::task::{CycleOutcome, RsiTask};
 use async_trait::async_trait;
 use share::config::RsiConfig;
@@ -16,6 +17,7 @@ use tokio::sync::Mutex;
 pub struct HarnessRsiCycleTask {
     registry: Arc<Mutex<Box<dyn ComponentRegistry + Send>>>,
     llm: Arc<dyn RsiLlmPort>,
+    lesson_store: Arc<LessonStore>,
     config: RsiConfig,
 }
 
@@ -23,11 +25,13 @@ impl HarnessRsiCycleTask {
     pub fn new(
         registry: Arc<Mutex<Box<dyn ComponentRegistry + Send>>>,
         llm: Arc<dyn RsiLlmPort>,
+        lesson_store: Arc<LessonStore>,
         config: RsiConfig,
     ) -> Self {
         Self {
             registry,
             llm,
+            lesson_store,
             config,
         }
     }
@@ -37,6 +41,12 @@ impl HarnessRsiCycleTask {
 impl RsiTask for HarnessRsiCycleTask {
     async fn run_cycle(&mut self) -> Result<CycleOutcome, HarnessError> {
         let registry = &mut **self.registry.lock().await;
-        run_improvement_cycle(registry, self.llm.as_ref(), &self.config).await
+        run_improvement_cycle(
+            registry,
+            self.llm.as_ref(),
+            &self.lesson_store,
+            &self.config,
+        )
+        .await
     }
 }

@@ -9,6 +9,7 @@ use crate::constants::ERROR_DOMAIN;
 use crate::domain::changeset::{apply_change_set, AppliedEdit, ChangeSet};
 use crate::domain::component::{ComponentContent, ComponentId};
 use crate::domain::errors::HarnessError;
+use crate::domain::lesson::{EvidenceBinding, LessonEntry, LessonStore, SignalKind};
 use crate::domain::task::CycleOutcome;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -22,10 +23,12 @@ pub trait RsiLlmPort: Send + Sync {
     async fn complete(&self, prompt: &str) -> Result<String, HarnessError>;
 }
 
-/// 一轮改进的材料（唯一装配点：行为信号与经验库随 #2017 扩入）。
+/// 一轮改进的材料（行为信号自动采集随信号装配接入扩展）。
 pub struct ImprovementMaterials {
     /// 参与编辑面的组件当前内容。
     pub component_contents: Vec<(ComponentId, ComponentContent)>,
+    /// Active 经验（改进级递归的复利输入：历史 lesson 指导本次提案）。
+    pub lessons: Vec<LessonEntry>,
 }
 
 /// 逐块提案的 LLM 应答信封：NEVER 裸 ChangeSet——LLM 需要能表达
@@ -34,7 +37,11 @@ pub struct ImprovementMaterials {
 #[serde(tag = "decision", rename_all = "snake_case")]
 pub enum BlockProposal {
     /// 采纳提案（omitted-is-inherited：只携带要改的组件）。
-    Propose { change_set: ChangeSet },
+    /// `reason` 为提案依据（证据绑定的摘录来源）。
+    Propose {
+        reason: String,
+        change_set: ChangeSet,
+    },
     /// 无变更：证据不支持任何编辑（合法结果）。
     NoChange { reason: String },
 }
@@ -52,8 +59,20 @@ pub fn chunk_materials(
         .collect()
 }
 
-/// 组装单块提案 prompt（结构化材料 + 编辑契约 + 输出格式）。
-pub fn build_block_prompt(chunk: &[(ComponentId, ComponentContent)]) -> String {
+/// 组装单块提案 prompt（结构化材料 + 经验 + 编辑契约 + 输出格式）。
+pub fn build_block_prompt(
+    chunk: &[(ComponentId, ComponentContent)],
+    lessons: &[LessonEntry],
+) -> String {
+    let lessons_block = if lessons.is_empty() {
+        "（暂无历史经验）".to_string()
+    } else {
+        lessons
+            .iter()
+            .map(|entry| format!("- [{}] {}", entry.component_kind, entry.lesson))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
     let mut components_json = Vec::with_capacity(chunk.len());
     for (id, content) in chunk {
         components_json.push(serde_json::json!({
@@ -68,6 +87,9 @@ pub fn build_block_prompt(chunk: &[(ComponentId, ComponentContent)]) -> String {
 
 {materials_block}
 
+历史经验（此前采纳的改进结论，供参考、可被新证据推翻）：
+{lessons_block}
+
 任务：基于材料判断是否存在值得改进的组件内容问题（缺失、冗余、错误）。
 只有当材料本身能支撑某个具体编辑时才提案；证据不足时选择 no_change——
 那是一个正当答案，比牵强的编辑更好。
@@ -77,7 +99,7 @@ pub fn build_block_prompt(chunk: &[(ComponentId, ComponentContent)]) -> String {
 - 任一条目校验失败会作废整份提案
 
 只输出一个 JSON 对象，格式二选一：
-{{"decision":"propose","change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"skill","name":"<名>","content":…}}]}}}}
+{{"decision":"propose","reason":"<提案依据，一句话>","change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"skill","name":"<名>","content":…}}]}}}}
 {{"decision":"no_change","reason":"<一句话理由>"}}
 不要输出 JSON 以外的任何文字。"#
     )
@@ -95,8 +117,11 @@ async fn run_block(
     registry: &mut dyn ComponentRegistry,
     llm: &dyn RsiLlmPort,
     chunk: &[(ComponentId, ComponentContent)],
+    lessons: &[LessonEntry],
+    lesson_store: &LessonStore,
+    cycle_ref: &str,
 ) -> (Vec<AppliedEdit>, &'static str) {
-    let prompt = build_block_prompt(chunk);
+    let prompt = build_block_prompt(chunk, lessons);
     let Ok(response) = llm.complete(&prompt).await else {
         return (Vec::new(), "作废（LLM 调用失败）");
     };
@@ -106,10 +131,55 @@ async fn run_block(
     };
     match proposal {
         BlockProposal::NoChange { .. } => (Vec::new(), "无变更"),
-        BlockProposal::Propose { change_set } => match apply_change_set(registry, &change_set) {
-            Ok(applied) => (applied, "采纳"),
-            Err(_) => (Vec::new(), "作废（校验失败）"),
-        },
+        BlockProposal::Propose { reason, change_set } => {
+            match apply_change_set(registry, &change_set) {
+                Ok(applied) => {
+                    record_adopted_lesson(lesson_store, &change_set, &reason, cycle_ref);
+                    (applied, "采纳")
+                }
+                Err(_) => (Vec::new(), "作废（校验失败）"),
+            }
+        }
+    }
+}
+
+/// 采纳回写：每条采纳的 edit MUST 产生带证据的 Active lesson。
+/// 回写失败只 warn（经验库 IO 故障 NEVER 作废已落盘的组件变更）。
+fn record_adopted_lesson(
+    lesson_store: &LessonStore,
+    change_set: &ChangeSet,
+    reason: &str,
+    cycle_ref: &str,
+) {
+    for edit in &change_set.edits {
+        let (id, action) = match edit {
+            crate::domain::changeset::ComponentEdit::Upsert { id, .. } => (id, "upsert"),
+            crate::domain::changeset::ComponentEdit::Delete { id } => (id, "delete"),
+        };
+        let entry = LessonEntry::new(
+            format!("{cycle_ref}:{id}"),
+            id.kind.as_str(),
+            format!("{action} {id}：{reason}"),
+            vec![EvidenceBinding {
+                run_ref: cycle_ref.to_string(),
+                signal: SignalKind::CycleObservation,
+                excerpt: reason.chars().take(200).collect(),
+            }],
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_secs())
+                .unwrap_or(0),
+        );
+        match entry {
+            Ok(entry) => {
+                if let Err(error) = lesson_store.append(&entry) {
+                    log::warn!(target: crate::LOG_TARGET, "经验回写失败（组件变更已生效）：{error}");
+                }
+            }
+            Err(error) => {
+                log::warn!(target: crate::LOG_TARGET, "经验条目构造失败（跳过回写）：{error}");
+            }
+        }
     }
 }
 
@@ -117,8 +187,16 @@ async fn run_block(
 pub async fn run_improvement_cycle(
     registry: &mut dyn ComponentRegistry,
     llm: &dyn RsiLlmPort,
+    lesson_store: &LessonStore,
     config: &RsiConfig,
 ) -> Result<CycleOutcome, HarnessError> {
+    let cycle_ref = format!(
+        "cycle-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or(0)
+    );
     let ids = registry.list();
     if ids.is_empty() {
         return Ok(CycleOutcome {
@@ -129,14 +207,19 @@ pub async fn run_improvement_cycle(
     for id in &ids {
         component_contents.push((id.clone(), registry.read(id)?));
     }
-    let materials = ImprovementMaterials { component_contents };
+    let lessons = lesson_store.load_active()?;
+    let materials = ImprovementMaterials {
+        component_contents,
+        lessons: lessons.clone(),
+    };
     let chunks = chunk_materials(materials, config.chunk_max_components);
 
     let mut adopted = 0usize;
     let mut no_change = 0usize;
     let mut discarded = 0usize;
     for chunk in &chunks {
-        let (_applied, label) = run_block(registry, llm, chunk).await;
+        let (_applied, label) =
+            run_block(registry, llm, chunk, &lessons, lesson_store, &cycle_ref).await;
         match label {
             "采纳" => adopted += 1,
             "无变更" => no_change += 1,
