@@ -90,25 +90,43 @@ pub fn build_block_prompt(
 历史经验（此前采纳的改进结论，供参考、可被新证据推翻）：
 {lessons_block}
 
-任务：基于材料判断是否存在值得改进的组件内容问题（缺失、冗余、错误）。
-只有当材料本身能支撑某个具体编辑时才提案；证据不足时选择 no_change——
-那是一个正当答案，比牵强的编辑更好。
+任务：基于材料判断是否存在值得改进的组件内容问题（缺失、冗余、错误、
+空壳占位）。空壳占位（TODO、无实际内容的正文）视为应修复的缺陷——
+为其写出有用的实际内容。只有当材料本身能支撑某个具体编辑时才提案；
+证据不足时选择 no_change——那是一个正当答案，比牵强的编辑更好。
 
 编辑契约：
 - 提案只携带要变更的组件（未提及的组件自动保持原样）
 - 任一条目校验失败会作废整份提案
 
 只输出一个 JSON 对象，格式二选一：
-{{"decision":"propose","reason":"<提案依据，一句话>","change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"skill","name":"<名>","content":…}}]}}}}
+{{"decision":"propose","reason":"<提案依据，一句话>","change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"skill","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
 {{"decision":"no_change","reason":"<一句话理由>"}}
 不要输出 JSON 以外的任何文字。"#
     )
 }
 
 /// 解析单块 LLM 应答（信封 → BlockProposal）。
+///
+/// 流式取首个 JSON 值：容忍模型在 JSON 后追加的说明文字或
+/// markdown 围栏残迹（对齐反思链路的解析容忍形态）。
 pub fn parse_block_proposal(response_text: &str) -> Result<BlockProposal, HarnessError> {
-    serde_json::from_str::<BlockProposal>(response_text.trim())
-        .map_err(|error| HarnessError::invalid(ERROR_DOMAIN, format!("提案应答解析失败：{error}")))
+    let trimmed = response_text.trim();
+    let payload_start = trimmed
+        .find('{')
+        .ok_or_else(|| HarnessError::invalid(ERROR_DOMAIN, "提案应答不含 JSON 对象"))?;
+    let json_source = trimmed
+        .get(payload_start..)
+        .ok_or_else(|| HarnessError::invalid(ERROR_DOMAIN, "提案应答载荷切分越界"))?;
+    let mut stream = serde_json::Deserializer::from_str(json_source).into_iter::<BlockProposal>();
+    match stream.next() {
+        Some(Ok(proposal)) => Ok(proposal),
+        Some(Err(error)) => Err(HarnessError::invalid(
+            ERROR_DOMAIN,
+            format!("提案应答解析失败：{error}"),
+        )),
+        None => Err(HarnessError::invalid(ERROR_DOMAIN, "提案应答 JSON 流为空")),
+    }
 }
 
 /// 单块执行：LLM 提案 → 解析 → registry 预检/落盘。
@@ -127,7 +145,24 @@ async fn run_block(
     };
     let proposal = match parse_block_proposal(&response) {
         Ok(proposal) => proposal,
-        Err(_) => return (Vec::new(), "作废（应答解析失败）"),
+        Err(error) => {
+            eprintln!(
+                "[e2e-diag] err={}; tail={}",
+                error.message(),
+                response
+                    .chars()
+                    .rev()
+                    .take(300)
+                    .collect::<String>()
+                    .chars()
+                    .rev()
+                    .collect::<String>()
+            );
+            log::warn!(target: crate::LOG_TARGET,
+                "提案应答解析失败（前 200 字符）：{}…；错误：{}",
+                response.chars().take(200).collect::<String>(), error.message());
+            return (Vec::new(), "作废（应答解析失败）");
+        }
     };
     match proposal {
         BlockProposal::NoChange { .. } => (Vec::new(), "无变更"),

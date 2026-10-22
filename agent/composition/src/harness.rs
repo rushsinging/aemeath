@@ -118,7 +118,7 @@ impl RsiLlmPort for ProductionRsiLlm {
         let request = ProviderRequestData::new(
             self.model.model.clone(),
             [share::message::Message::user(prompt.to_string())],
-            4096,
+            16384,
             ReasoningLevel::Off,
         );
         let response = self
@@ -167,7 +167,7 @@ pub fn wire_rsi_llm(config: &share::config::Config) -> Result<Arc<dyn RsiLlmPort
         reasoning: false,
         reasoning_config: None,
         timeout_secs: 300,
-        user_agent: None,
+        user_agent: Some(config.api.user_agent.clone()),
     };
     let client = LlmClient::from_config(spec)
         .map_err(|error| format!("构造 provider 客户端失败：{error}"))?;
