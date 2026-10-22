@@ -8,9 +8,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use config::{PreparedProjectConfigData, ProjectConfigLocationData};
-use context::session::{same_project_identity, CanonicalSession, SessionRestore, SnapshotState};
+use context::session::{CanonicalSession, SessionRestore, SnapshotState};
 use context::{SessionManagementError, SessionResumeViewData};
 use memory::api::ProjectMemoryKey;
+use project::same_project_identity;
 use project::WorkspaceRestoreData;
 
 use super::coordinator::SessionSwitchCoordinator;

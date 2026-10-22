@@ -6,6 +6,8 @@
 
 use std::sync::Arc;
 
+pub use crate::adapters::AtomicBlobSessionManagement;
+
 use crate::domain::session::CanonicalSession;
 use crate::ports::SessionManagementPort;
 use async_trait::async_trait;

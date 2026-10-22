@@ -643,3 +643,22 @@ impl WorkspaceState {
 #[cfg(test)]
 #[path = "state_tests.rs"]
 mod tests;
+
+/// 两个 [`ProjectIdentityData`] 是否指向同一稳定项目：git 项目按
+/// `git_common_dir` 相等判定（worktree 共享 common-dir 视为同项目）；
+/// 非 git 项目按 canonical `initial_cwd` 相等判定。
+///
+/// #1863：自 context session 域迁入——纯项目身份比较，零 session 知识。
+pub fn same_project_identity(
+    current: &ProjectIdentityData,
+    persisted: &ProjectIdentityData,
+) -> bool {
+    match (
+        current.git_common_dir.as_deref(),
+        persisted.git_common_dir.as_deref(),
+    ) {
+        (Some(current_git), Some(stored_git)) => current_git == stored_git,
+        (None, None) => current.initial_cwd == persisted.initial_cwd,
+        _ => false,
+    }
+}

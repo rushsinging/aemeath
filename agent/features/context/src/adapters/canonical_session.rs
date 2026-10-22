@@ -783,7 +783,7 @@ impl CanonicalSessionRepository {
         // 再次加载会命中 AlreadyLoaded 拒绝重发，模型永远拿不回内容。
         candidate.skill_load_records.clear();
         candidate.revision += 1;
-        candidate.updated_at = crate::domain::session::now_iso();
+        candidate.updated_at = share::time::now_iso();
         self.persist_candidate(&current, &candidate)
             .await
             .map_err(ContextPortError::Compact)?;
@@ -946,7 +946,7 @@ impl SessionRepository for CanonicalSessionRepository {
             });
         }
         let mut candidate = (*current).clone();
-        candidate.updated_at = crate::domain::session::now_iso();
+        candidate.updated_at = share::time::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
         candidate.append_accepted_input(
@@ -1011,7 +1011,7 @@ impl SessionRepository for CanonicalSessionRepository {
                 changed: false,
             });
         }
-        candidate.updated_at = crate::domain::session::now_iso();
+        candidate.updated_at = share::time::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
         let receipt = candidate
@@ -1082,7 +1082,7 @@ impl SessionRepository for CanonicalSessionRepository {
             return Ok(decision);
         }
         candidate.revision += 1;
-        candidate.updated_at = crate::domain::session::now_iso();
+        candidate.updated_at = share::time::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
         self.persist_candidate(&current, &candidate)
@@ -1155,7 +1155,7 @@ impl SessionRepository for CanonicalSessionRepository {
                 current.step_receipts(append.run_id.as_ref(), append.step_id.as_str());
         }
         candidate.revision += 1;
-        candidate.updated_at = crate::domain::session::now_iso();
+        candidate.updated_at = share::time::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
         candidate.append_finalized_outcome(
@@ -1256,7 +1256,7 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.committed_steps = candidate.committed_steps.cleared();
         candidate.skill_load_records.clear();
         candidate.revision += 1;
-        candidate.updated_at = crate::domain::session::now_iso();
+        candidate.updated_at = share::time::now_iso();
         candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
         // `/clear` 是逻辑断点：磁盘 step 成员无限保留，state 记录 clear

@@ -34,7 +34,7 @@ async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
     std::fs::create_dir_all(&root).expect("create storage root");
     let blob: Arc<dyn storage::AtomicBlobPort> =
         storage::wire_file_system_blob(&root).expect("create filesystem blob adapter");
-    let port = crate::AtomicBlobSessionManagement::new(Arc::clone(&blob));
+    let port = crate::adapters::AtomicBlobSessionManagement::new(Arc::clone(&blob));
     let writer = crate::AtomicBlobCanonicalSessionWriter::new(blob);
     let project = ProjectIdentityData {
         initial_cwd: "/receipt-ledger".to_string(),
@@ -81,9 +81,10 @@ async fn session_management_filters_and_loads_only_matching_project_identity() {
         uuid::Uuid::now_v7()
     ));
     std::fs::create_dir_all(&root).expect("create storage root");
-    let port: Arc<dyn SessionManagementPort> = Arc::new(crate::AtomicBlobSessionManagement::new(
-        storage::wire_file_system_blob(&root).expect("create filesystem blob adapter"),
-    ));
+    let port: Arc<dyn SessionManagementPort> =
+        Arc::new(crate::adapters::AtomicBlobSessionManagement::new(
+            storage::wire_file_system_blob(&root).expect("create filesystem blob adapter"),
+        ));
     let project_a = ProjectIdentityData {
         initial_cwd: "/project-a".to_string(),
         git_common_dir: Some("/project-a/.git".to_string()),
@@ -181,7 +182,7 @@ async fn session_management_lists_only_primary_sessions_for_current_project() {
     std::fs::create_dir_all(&root).expect("create storage root");
     let blob = storage::wire_file_system_blob(&root).expect("create filesystem blob adapter");
     let port: Arc<dyn SessionManagementPort> =
-        Arc::new(crate::AtomicBlobSessionManagement::new(blob));
+        Arc::new(crate::adapters::AtomicBlobSessionManagement::new(blob));
     let project = ProjectIdentityData {
         initial_cwd: "/session-primary".to_string(),
         git_common_dir: None,
@@ -211,9 +212,10 @@ async fn session_management_imports_exports_updates_and_deletes_through_injected
         uuid::Uuid::now_v7()
     ));
     std::fs::create_dir_all(&root).expect("create storage root");
-    let port: Arc<dyn SessionManagementPort> = Arc::new(crate::AtomicBlobSessionManagement::new(
-        storage::wire_file_system_blob(&root).expect("create filesystem blob adapter"),
-    ));
+    let port: Arc<dyn SessionManagementPort> =
+        Arc::new(crate::adapters::AtomicBlobSessionManagement::new(
+            storage::wire_file_system_blob(&root).expect("create filesystem blob adapter"),
+        ));
     let project = ProjectIdentityData {
         initial_cwd: "/session-lifecycle".to_string(),
         git_common_dir: None,

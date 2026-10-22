@@ -22,7 +22,7 @@ pub(crate) mod service;
 
 pub use adapters::git::{run_git_command, GitCommandOutcome};
 pub use adapters::wiring::{wire_production_workspace, Workspace};
-pub use domain::state::WorkspaceRestoreData;
+pub use domain::state::{same_project_identity, WorkspaceRestoreData};
 pub use domain::types::GitOperationError;
 pub use domain::types::{WorkspaceControl, WorkspaceData, WorkspaceReader, WorkspaceWriter};
 

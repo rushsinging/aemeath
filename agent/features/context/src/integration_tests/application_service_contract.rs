@@ -1,3 +1,4 @@
+use crate::domain::session::CommittedStepMessages;
 use std::sync::Arc;
 
 use crate::CommittedMemoryRetrieveAdapter;
@@ -8,10 +9,7 @@ use crate::{
     SystemPromptSpecData, ToolCallIdentityData, ToolCallReceiptData, ToolOutcomeKindData,
     ToolTerminalReceiptData,
 };
-use crate::{
-    CommittedRunSlice, CommittedRunStep, CommittedStepMessages, FinalizedOutcomeRecord,
-    SessionHistory,
-};
+use crate::{CommittedRunSlice, CommittedRunStep, FinalizedOutcomeRecord, SessionHistory};
 use crate::{
     ContextMemorySource, ContextPort, ContextPromptSource, MemoryMaterialization,
     PromptMaterialization, SessionRepository, SessionSnapshot,

@@ -106,7 +106,7 @@ fn config_native_store(agents_dir: &Path) -> config::NativeConfigStore {
 }
 
 fn session_management(agents_dir: &Path) -> Arc<dyn SessionManagementPort> {
-    Arc::new(context::AtomicBlobSessionManagement::new(
+    Arc::new(context::test_support::AtomicBlobSessionManagement::new(
         storage::wire_file_system_blob(agents_dir).expect("create session blob"),
     ))
 }

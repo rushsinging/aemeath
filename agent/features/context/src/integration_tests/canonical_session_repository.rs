@@ -695,7 +695,7 @@ fn session_with_tool_result(session_id: &SessionId, revision: u64) -> CanonicalS
             }],
         )]
         .into(),
-        committed_steps: vec![crate::CommittedStep {
+        committed_steps: vec![crate::domain::session::CommittedStep {
             run_id: "run".to_string(),
             step_id: "step".to_string(),
             fingerprint: "outcome".to_string(),
@@ -1309,7 +1309,7 @@ async fn finalized_append_reuses_existing_committed_step_entry_backing() {
     let session_id = SessionId::new("shared-ledger");
     let mut session = CanonicalSession::fixture(session_id.as_str());
     session.revision = 1;
-    session.committed_steps = vec![crate::CommittedStep::fixture(
+    session.committed_steps = vec![crate::domain::session::CommittedStep::fixture(
         "run-existing",
         "step-existing",
         "existing",

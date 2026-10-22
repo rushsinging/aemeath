@@ -1,7 +1,8 @@
 use crate::decode_session;
+use crate::domain::session::{CommittedStep, CommittedStepMessages};
 use crate::{
-    AcceptedInputRecord, CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStep,
-    CommittedStepMessages, FinalizedOutcomeRecord, SessionCodec, SessionCodecError, SnapshotState,
+    AcceptedInputRecord, CanonicalSession, CommittedRunSlice, CommittedRunStep,
+    FinalizedOutcomeRecord, SessionCodec, SessionCodecError, SnapshotState,
     CURRENT_SESSION_SCHEMA_VERSION,
 };
 use crate::{FinalizeCause, StepReceiptData, ToolOutcomeKindData};

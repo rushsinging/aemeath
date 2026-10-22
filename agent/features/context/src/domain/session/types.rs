@@ -1,6 +1,5 @@
 //! Session-owned value types and identifiers.
 
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::{NoContext, Timestamp, Uuid};
@@ -26,8 +25,4 @@ pub fn extract_project_name(cwd: &str) -> Option<String> {
 
 pub fn new_session_id() -> String {
     Uuid::new_v7(Timestamp::now(NoContext)).to_string()
-}
-
-pub fn now_iso() -> String {
-    Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }

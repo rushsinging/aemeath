@@ -55,7 +55,7 @@ async fn dataset_reader_migrates_legacy_blob_once_when_dataset_is_absent() {
     let blob: Arc<dyn storage::AtomicBlobPort> =
         storage::wire_file_system_blob(root.path()).expect("blob adapter");
     let expected = session_with_step("legacy", 4, "legacy history");
-    let legacy_management = crate::AtomicBlobSessionManagement::new(blob.clone());
+    let legacy_management = crate::adapters::AtomicBlobSessionManagement::new(blob.clone());
     let project = share::session_types::ProjectIdentityData {
         initial_cwd: "/legacy".to_string(),
         git_common_dir: None,

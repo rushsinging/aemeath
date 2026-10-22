@@ -1,3 +1,4 @@
+use crate::domain::session::CommittedStepMessages;
 use std::sync::Arc;
 
 use share::message::{ContentBlock, Message};
@@ -7,8 +8,8 @@ use crate::compact::{
     ContextReadStep, ProtectedRunPolicy,
 };
 use crate::{
-    AcceptedInputRecord, CommittedRunSlice, CommittedRunStep, CommittedStepMessages,
-    FinalizedOutcomeRecord, SessionHistory,
+    AcceptedInputRecord, CommittedRunSlice, CommittedRunStep, FinalizedOutcomeRecord,
+    SessionHistory,
 };
 use crate::{
     CleanupConfirmation, FinalizeCause, SessionId, ToolCallIdentityData, ToolCallReceiptData,

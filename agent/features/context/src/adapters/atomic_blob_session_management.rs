@@ -6,7 +6,7 @@ use storage::{AtomicBlobPort, SafePathSegmentData, StorageNamespaceData};
 use crate::adapters::{AtomicBlobSessionStore, LegacySessionDecoder};
 use crate::application::{SessionLoadError, SessionPersistenceService};
 use crate::domain::session::{
-    now_iso, project_dir_segment, session_matches_project, CanonicalSession, SessionCodec,
+    project_dir_segment, session_matches_project, CanonicalSession, SessionCodec,
     SessionListEntryData, SessionManagementError, SessionMetadataUpdateData,
 };
 use crate::ports::SessionManagementPort;
@@ -197,7 +197,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
         let before = self.load_for_project(id, project).await?;
         let mut after = before.clone();
         update.apply(&mut after.metadata);
-        after.updated_at = now_iso();
+        after.updated_at = share::time::now_iso();
         // 与 DatasetSessionManagement 对齐：metadata 更新 MUST bump revision，
         // 否则 CAS 调用方无法感知旁路写；同值 skip 由上层 wiring 负责。
         after.revision += 1;

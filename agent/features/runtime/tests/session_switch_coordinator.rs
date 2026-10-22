@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use context::session::SessionMetadata;
-use context::{AtomicBlobSessionManagement, SessionManagementPort};
+use context::test_support::AtomicBlobSessionManagement;
+use context::SessionManagementPort;
 use memory::api::{MemoryOpener, MemoryOpenerError, MemoryPort, ProjectMemoryKey};
 use share::config::domain::snapshot::ConfigRevision;
 use share::message::{Message, Role};

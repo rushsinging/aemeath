@@ -7,7 +7,7 @@ use crate::adapters::{
     AtomicBlobSessionManagement, DatasetCanonicalSessionWriter, DatasetSessionReader,
 };
 use crate::domain::session::{
-    now_iso, project_dir_segment, session_matches_project, CanonicalSession, SessionCodec,
+    project_dir_segment, session_matches_project, CanonicalSession, SessionCodec,
     SessionListEntryData, SessionManagementError, SessionMetadataUpdateData,
 };
 use crate::ports::SessionManagementPort;
@@ -198,7 +198,7 @@ impl SessionManagementPort for DatasetSessionManagement {
         let before = self.load_for_project(id, project).await?;
         let mut after = before.clone();
         update.apply(&mut after.metadata);
-        after.updated_at = now_iso();
+        after.updated_at = share::time::now_iso();
         after.revision += 1;
         self.writer
             .save_incremental(&before, &after)

@@ -36,6 +36,7 @@ pub mod message;
 pub mod reasoning;
 pub mod session_types;
 pub mod string_idx;
+pub mod time;
 pub mod tools_vocab;
 
 #[cfg(test)]

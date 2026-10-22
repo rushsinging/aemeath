@@ -60,8 +60,8 @@ pub(crate) use adapters::{
     LegacySessionDecoder, NoOpContextMemorySource, SkillPromptSource, ToolReceiptWriter,
 };
 pub use adapters::{
-    AtomicBlobAcceptedInputWriter, AtomicBlobSessionManagement, AtomicBlobToolReceiptWriter,
-    DatasetCanonicalSessionWriter, DatasetSessionManagement, WorkspaceSkillQueryFactory,
+    AtomicBlobAcceptedInputWriter, AtomicBlobToolReceiptWriter, DatasetCanonicalSessionWriter,
+    DatasetSessionManagement, WorkspaceSkillQueryFactory,
 };
 #[cfg(test)]
 pub(crate) use application::ContextApplicationService;
@@ -74,7 +74,7 @@ pub(crate) use domain::session::{
     SessionCommitPlan, SessionGenerationCodec, SessionGenerationManifest,
     SessionGenerationWireError, SessionHistory, CURRENT_SESSION_SCHEMA_VERSION,
 };
-pub use domain::session::{CanonicalSession, CommittedStep, CommittedStepMessages, SnapshotState};
+pub use domain::session::{CanonicalSession, SnapshotState};
 #[cfg(test)]
 pub(crate) use domain::ContextMessages;
 pub use domain::{
@@ -103,7 +103,6 @@ pub(crate) use ports::{
 pub use ports::{ContextPort, MainContextFactory};
 
 pub mod api {
-    pub use crate::adapters::migrate_flat_sessions_to_project_dirs;
     pub use crate::domain::session::{DisplayHistoryStepIndexData, DisplayHistoryStepWindowData};
 }
 
@@ -152,8 +151,7 @@ pub mod guidance {
 
 pub mod session {
     pub use crate::domain::session::{
-        new_session_id, now_iso, same_project_identity, CanonicalSession,
-        PersistedWorkspaceContext, SessionMetadata, SessionRestore, SessionResumeLoad,
+        new_session_id, CanonicalSession, SessionMetadata, SessionRestore, SessionResumeLoad,
         SnapshotState,
     };
 }

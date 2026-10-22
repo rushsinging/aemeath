@@ -36,7 +36,7 @@ pub async fn wire_session_switch_coordinator(
     let workspace_read = deps.workspace.read();
     let workspace_persist = deps.workspace.persist();
     let workspace_snapshot = workspace_persist.snapshot();
-    let now = context::session::now_iso();
+    let now = share::time::now_iso();
     let initial_session = CanonicalSession {
         id: context::session::new_session_id(),
         chats: Vec::new(),

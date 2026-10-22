@@ -71,25 +71,11 @@ fn session_display_project(session: &CanonicalSession) -> Option<String> {
 /// Compares stable project identity without treating individual worktree roots
 /// as distinct projects. Git projects use `git_common_dir`; non-git projects use
 /// their canonical `initial_cwd`.
-pub fn same_project_identity(
-    current: &ProjectIdentityData,
-    persisted: &ProjectIdentityData,
-) -> bool {
-    match (
-        current.git_common_dir.as_deref(),
-        persisted.git_common_dir.as_deref(),
-    ) {
-        (Some(current_git), Some(stored_git)) => current_git == stored_git,
-        (None, None) => current.initial_cwd == persisted.initial_cwd,
-        _ => false,
-    }
-}
-
 pub fn session_matches_project(session: &CanonicalSession, current: &ProjectIdentityData) -> bool {
     let SnapshotState::Captured(workspace) = &session.workspace else {
         return false;
     };
-    same_project_identity(current, &workspace.project_identity)
+    project::same_project_identity(current, &workspace.project_identity)
 }
 
 fn first_line(message: &Message) -> Option<String> {
