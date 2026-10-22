@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use share::config::file_snapshot::{FileChange, FileChangeKind, FileSnapshot};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 /// 文件变更快照注册表。
 ///
@@ -52,7 +53,7 @@ impl SourceSnapshotRegistry {
     pub fn take_baseline(&mut self) {
         self.snapshots.clear();
         for path in &self.paths {
-            if let Some(snap) = snapshot_file(path) {
+            if let Some(snap) = snapshot_entry(path) {
                 self.snapshots.insert(path.clone(), snap);
             }
         }
@@ -66,11 +67,11 @@ impl SourceSnapshotRegistry {
         let mut changes = Vec::new();
 
         for path in &self.paths {
-            let current_snap = snapshot_file(path);
+            let current_snap = snapshot_entry(path);
             let previous_snap = self.snapshots.get(path);
 
             match (previous_snap, current_snap) {
-                // 文件之前存在，现在不存在 → 删除
+                // 条目之前存在，现在不存在 → 删除
                 (Some(_), None) => {
                     changes.push(FileChange {
                         path: path.clone(),
@@ -78,7 +79,7 @@ impl SourceSnapshotRegistry {
                     });
                     self.snapshots.remove(path);
                 }
-                // 文件之前不存在，现在存在 → 新增
+                // 条目之前不存在，现在存在 → 新增
                 (None, Some(snap)) => {
                     changes.push(FileChange {
                         path: path.clone(),
@@ -88,16 +89,16 @@ impl SourceSnapshotRegistry {
                 }
                 // 两份快照都在，比对
                 (Some(prev), Some(curr)) => {
-                    if file_changed_with_path(prev, &curr, path) {
+                    if entry_changed_with_path(prev, &curr, path) {
                         changes.push(FileChange {
                             path: path.clone(),
                             kind: FileChangeKind::Modified,
                         });
-                        // 更新快照：存入 sha256 以便后续兜底比对
+                        // 更新快照：存入内容指纹以便后续兜底比对
                         let updated = FileSnapshot {
                             mtime: curr.mtime,
                             size: curr.size,
-                            sha256: compute_sha256(path),
+                            sha256: compute_entry_sha256(path),
                         };
                         self.snapshots.insert(path.clone(), updated);
                     }
@@ -122,9 +123,28 @@ impl Default for SourceSnapshotRegistry {
     }
 }
 
-/// 对单个文件拍快照。文件不存在或无法读取时返回 None。
-fn snapshot_file(path: &Path) -> Option<FileSnapshot> {
+/// 对单个监控条目拍快照（文件或目录）。不存在或不可读时返回 None。
+///
+/// 目录条目的快照：`mtime` 为目录自身 mtime，`size` 为直接子条目数，
+/// `sha256` 为子条目清单指纹（子条目名 + 类型 + 子条目 mtime）。
+/// 子文件内容修改不改目录元数据，因此目录变化判定 NEVER 走元数据快速路径，
+/// 每次检测重算清单指纹（见 [`entry_changed_with_path`]）。
+fn snapshot_entry(path: &Path) -> Option<FileSnapshot> {
     let meta = std::fs::metadata(path).ok()?;
+    if meta.is_dir() {
+        let listing_sha = directory_listing_digest(path)?;
+        let mut dir_mtime = meta.modified().ok()?;
+        let entry_count = std::fs::read_dir(path).ok()?.count() as u64;
+        // 目录 mtime 精度兜底：与清单指纹无关，仅保留元数据位。
+        if dir_mtime == SystemTime::UNIX_EPOCH {
+            dir_mtime = SystemTime::now();
+        }
+        return Some(FileSnapshot {
+            mtime: dir_mtime,
+            size: entry_count,
+            sha256: Some(listing_sha),
+        });
+    }
     if !meta.is_file() {
         return None;
     }
@@ -138,6 +158,41 @@ fn snapshot_file(path: &Path) -> Option<FileSnapshot> {
     })
 }
 
+/// 计算目录直接子条目清单的 sha256（子条目名 + 类型 + 子条目 mtime）。
+///
+/// 清单参与排序保证稳定序；子条目 mtime 纳秒计入，使子文件内容
+/// 修改（目录元数据不变）也能被检出。
+fn directory_listing_digest(path: &Path) -> Option<[u8; 32]> {
+    let mut listing: Vec<(String, bool, u128)> = Vec::new();
+    for entry in std::fs::read_dir(path).ok()? {
+        let entry = entry.ok()?;
+        let entry_name = entry.file_name().to_string_lossy().to_string();
+        let entry_meta = entry.metadata().ok()?;
+        let is_dir = entry_meta.is_dir();
+        let entry_mtime = entry_meta
+            .modified()
+            .ok()
+            .map(|time| {
+                time.duration_since(SystemTime::UNIX_EPOCH)
+                    .map(|duration| duration.as_nanos())
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0);
+        listing.push((entry_name, is_dir, entry_mtime));
+    }
+    listing.sort();
+    let mut hasher = Sha256::new();
+    for (entry_name, is_dir, entry_mtime) in listing {
+        hasher.update(entry_name.as_bytes());
+        hasher.update(if is_dir { b"/d" } else { b"/f" });
+        hasher.update(entry_mtime.to_le_bytes());
+    }
+    let result = hasher.finalize();
+    let mut digest = [0u8; 32];
+    digest.copy_from_slice(&result);
+    Some(digest)
+}
+
 /// 计算文件内容的 sha256。
 fn compute_sha256(path: &Path) -> Option<[u8; 32]> {
     let data = std::fs::read(path).ok()?;
@@ -149,11 +204,33 @@ fn compute_sha256(path: &Path) -> Option<[u8; 32]> {
     Some(hash)
 }
 
-/// 比对两份快照是否有变化（可访问文件路径做 sha256 兜底）。
+/// 按条目形态计算内容指纹（文件 = 内容 sha256；目录 = 清单指纹）。
+fn compute_entry_sha256(path: &Path) -> Option<[u8; 32]> {
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.is_dir() => directory_listing_digest(path),
+        _ => compute_sha256(path),
+    }
+}
+
+/// 比对两份快照是否有变化（文件与目录策略不同）。
 ///
-/// 策略：
+/// 文件策略：
 /// 1. 先比较 (mtime, size)，一致则认为无变化
 /// 2. 任一不同则用 sha256 兜底——处理编辑器原子替换（mtime 倒退但内容相同）
+///
+/// 目录策略：NEVER 走元数据快速路径——子文件内容修改不改目录 mtime 与
+/// 条目数，必须每次重算清单指纹对比。
+fn entry_changed_with_path(prev: &FileSnapshot, curr: &FileSnapshot, path: &Path) -> bool {
+    if path.is_dir() {
+        return match (prev.sha256, curr.sha256) {
+            (Some(prev_sha), Some(curr_sha)) => prev_sha != curr_sha,
+            // 任一侧缺指纹：保守认为变了（下次快照即补齐指纹）
+            _ => true,
+        };
+    }
+    file_changed_with_path(prev, curr, path)
+}
+
 fn file_changed_with_path(prev: &FileSnapshot, curr: &FileSnapshot, path: &Path) -> bool {
     // 快速路径：mtime 和 size 都没变
     if curr.mtime == prev.mtime && curr.size == prev.size {
