@@ -206,6 +206,14 @@ pub fn wire_component_registry(
         },
         share::config::paths::global_tool_guidance_path(),
     );
+    // overlay（c1）：全局 AGENTS.md（#2019 registry 化；项目链注入侧不变）
+    component_paths.insert(
+        harness::ComponentId {
+            kind: harness::ComponentKind::SystemPromptOverlay,
+            name: harness::ComponentName::new("global"),
+        },
+        share::config::paths::global_agents_md_path(),
+    );
     let prose_registry: Box<dyn harness::ComponentRegistry + Send> =
         Box::new(harness::adapters::filesystem::FilesystemComponentRegistry::new(component_paths));
     let scripts_registry: Box<dyn harness::ComponentRegistry + Send> = Box::new(
@@ -213,10 +221,16 @@ pub fn wire_component_registry(
             share::config::paths::global_scripts_dir(),
         ),
     );
+    let skills_registry: Box<dyn harness::ComponentRegistry + Send> = Box::new(
+        harness::adapters::skills_registry::SkillsDirectoryRegistry::new(
+            share::config::paths::global_skills_dir(),
+        ),
+    );
     let _ = config;
     let composite = harness::adapters::composite::CompositeComponentRegistry::new(vec![
         prose_registry,
         scripts_registry,
+        skills_registry,
     ]);
     Ok(Arc::new(tokio::sync::Mutex::new(Box::new(composite))))
 }
