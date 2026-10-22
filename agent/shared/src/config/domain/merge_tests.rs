@@ -529,3 +529,34 @@ fn memory_default_ttl_secs_patch_overrides_and_defaults_to_30_days() {
     let config = apply_patch(Config::default(), disabled);
     assert_eq!(config.memory.default_ttl_secs, 0, "0 = 显式禁用 TTL");
 }
+
+// ── harness.rsi.* 配置节（#2016）──
+
+#[test]
+fn harness_rsi_defaults() {
+    let config = Config::default();
+    assert!(config.harness.rsi.enabled);
+    assert_eq!(config.harness.rsi.interval_secs, 1800);
+    assert_eq!(config.harness.rsi.chunk_max_components, 8);
+}
+
+#[test]
+fn harness_rsi_patch_merges_fields() {
+    let base = Config::default();
+    let patch = ConfigPatch {
+        harness: Some(HarnessConfigPatch {
+            rsi: Some(RsiConfigPatch {
+                enabled: Some(false),
+                interval_secs: Some(60),
+                chunk_max_components: Some(4),
+            }),
+        }),
+        ..Default::default()
+    };
+    let mut chain = PriorityChain::new();
+    chain.push(patch);
+    let merged = chain.merge(base);
+    assert!(!merged.harness.rsi.enabled);
+    assert_eq!(merged.harness.rsi.interval_secs, 60);
+    assert_eq!(merged.harness.rsi.chunk_max_components, 4);
+}

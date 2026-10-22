@@ -36,3 +36,7 @@ pub(crate) const HF_CDN_REDIRECT_HOSTS: [&str; 4] = [
     "transfer.xethub.hf.co",
     "cdn-lfs.hf.co",
 ];
+
+/// RSI daemon 定时周期默认值（`harness.rsi.interval_secs` 配置接入前的
+/// 装配默认；配置节落地后由配置读取）。
+pub const RSI_INTERVAL_DEFAULT: std::time::Duration = std::time::Duration::from_secs(1800);

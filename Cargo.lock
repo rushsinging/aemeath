@@ -571,6 +571,7 @@ dependencies = [
  "config",
  "context",
  "futures-util",
+ "harness",
  "hook",
  "log",
  "logging",
@@ -1675,12 +1676,14 @@ dependencies = [
 name = "harness"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "log",
  "serde",
  "serde_json",
  "serde_yml",
  "share",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]

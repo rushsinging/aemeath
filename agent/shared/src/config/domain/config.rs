@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::audit::AuditConfig;
 use crate::config::context::ContextConfig;
+use crate::config::harness::HarnessConfig;
 use crate::config::hooks::HooksConfig;
 use crate::config::legacy::{ApiConfig, ModelConfig};
 use crate::config::logging::LoggingConfig;
@@ -121,6 +122,9 @@ pub struct Config {
     /// Memory and reflection configuration
     #[serde(default)]
     pub memory: MemoryConfig,
+    /// Harness RSI 维护 daemon 配置（`harness.rsi.*`）。
+    #[serde(default)]
+    pub harness: HarnessConfig,
 
     /// Logging configuration
     #[serde(default)]
@@ -162,6 +166,7 @@ impl Default for Config {
             scoring: crate::config::scoring::ScoringConfig::default(),
             hooks: HooksConfig::default(),
             memory: MemoryConfig::default(),
+            harness: HarnessConfig::default(),
             logging: LoggingConfig::default(),
             guidance: GuidanceConfig::default(),
             update: UpdateConfig::default(),

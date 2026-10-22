@@ -10,7 +10,8 @@ use crate::domain::component::{ComponentContent, ComponentId};
 use crate::domain::errors::HarnessError;
 
 /// 单条组件编辑。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
 pub enum ComponentEdit {
     /// 新建或更新组件。
     Upsert {
@@ -22,7 +23,7 @@ pub enum ComponentEdit {
 }
 
 /// 组件变更集（RSI 提案与热载 diff 的载体）。
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ChangeSet {
     pub edits: Vec<ComponentEdit>,
 }

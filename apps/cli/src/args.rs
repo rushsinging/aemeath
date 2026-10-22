@@ -116,6 +116,12 @@ pub enum Commands {
         command: SystemoneCommands,
     },
 
+    /// Manage the harness RSI maintenance daemon
+    Rsi {
+        #[command(subcommand)]
+        command: RsiCommands,
+    },
+
     /// Check for and install updates
     Update {
         /// Only check for available updates, don't install
@@ -133,6 +139,13 @@ pub enum SystemoneCommands {
     /// Download and install the System One scoring model (~/.agents/models/systemone)
     Download,
     /// 启动本机 scoring daemon（加载一份 GGUF，经 UDS 服务多会话）
+    Serve,
+}
+
+/// `aemeath rsi` 子命令集。
+#[derive(Subcommand)]
+pub enum RsiCommands {
+    /// 启动 RSI 维护 daemon（常驻；定时改进 harness 组件与记忆治理）
     Serve,
 }
 
