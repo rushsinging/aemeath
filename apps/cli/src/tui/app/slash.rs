@@ -314,16 +314,12 @@ Build info:
     /// SUCCESS 高亮（NEVER 字符标记）；确认等价提交 `/think <level>`。
     fn open_think_level_dialog(&mut self) {
         let current = self.model.runtime_presentation.reasoning_level();
-        let max_level = self.model.runtime_presentation.reasoning_max_level();
-        let levels = [
-            sdk::ReasoningLevel::Off,
-            sdk::ReasoningLevel::Minimal,
-            sdk::ReasoningLevel::Low,
-            sdk::ReasoningLevel::Medium,
-            sdk::ReasoningLevel::High,
-            sdk::ReasoningLevel::Xhigh,
-            sdk::ReasoningLevel::Max,
-        ];
+        let effort_map = self
+            .model
+            .runtime_presentation
+            .reasoning_effort_map()
+            .to_vec();
+        let levels = sdk::ReasoningLevel::ALL;
         let to_view = crate::tui::adapter::event_mapping::reasoning_level_view;
         let mut current_index = 0;
         let options = levels
@@ -331,14 +327,19 @@ Build info:
             .enumerate()
             .map(|(index, level)| {
                 let level_view = to_view(*level);
-                let mapped = level_view.clamped_to(max_level);
                 if level_view == current {
                     current_index = index;
                 }
                 let mut text = level_view.as_str().to_string();
-                if mapped != level_view {
-                    // 超上限档位标注映射结果（如 `max → medium`）。
-                    text.push_str(&format!(" → {}", mapped.as_str()));
+                // 映射表由 runtime 权威 resolve（阶梯离散取值，含
+                // minimal→off 类空隙降档），TUI 只查表渲染。
+                if let Some((_, effective)) = effort_map
+                    .iter()
+                    .find(|(requested, _)| *requested == level_view)
+                {
+                    if *effective != level_view {
+                        text.push_str(&format!(" → {}", effective.as_str()));
+                    }
                 }
                 text
             })

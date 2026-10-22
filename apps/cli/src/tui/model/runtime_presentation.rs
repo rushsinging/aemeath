@@ -12,10 +12,10 @@ pub enum RuntimePresentationIntent {
         enabled: bool,
         level: ReasoningLevelView,
     },
-    /// 当前模型 reasoning 能力上限（#2032）：bootstrap 与模型切换时更新，
-    /// /think 对话框据此逐档渲染映射标注。
+    /// 当前模型全档映射表（#2032）：bootstrap 与模型切换时更新，
+    /// /think 对话框逐档渲染映射标注（runtime 权威计算，TUI 只存只渲染）。
     ReasoningCapability {
-        max_level: ReasoningLevelView,
+        effort_map: Vec<(ReasoningLevelView, ReasoningLevelView)>,
     },
 }
 
@@ -31,7 +31,7 @@ pub enum RuntimePresentationChange {
         level: ReasoningLevelView,
     },
     ReasoningCapability {
-        max_level: ReasoningLevelView,
+        effort_map: Vec<(ReasoningLevelView, ReasoningLevelView)>,
     },
 }
 
@@ -42,7 +42,7 @@ pub struct RuntimePresentation {
     context_size: u64,
     thinking: bool,
     reasoning_level: ReasoningLevelView,
-    reasoning_max_level: ReasoningLevelView,
+    reasoning_effort_map: Vec<(ReasoningLevelView, ReasoningLevelView)>,
 }
 
 impl Default for RuntimePresentation {
@@ -53,8 +53,8 @@ impl Default for RuntimePresentation {
             context_size: 0,
             thinking: true,
             reasoning_level: ReasoningLevelView::High,
-            // 能力上限收到 bootstrap/模型切换更新前按全档算（无映射标注）。
-            reasoning_max_level: ReasoningLevelView::Max,
+            // 映射表收到 bootstrap/模型切换更新前为空（无映射标注）。
+            reasoning_effort_map: Vec::new(),
         }
     }
 }
@@ -81,9 +81,9 @@ impl RuntimePresentation {
         self.reasoning_level
     }
 
-    /// 当前模型 reasoning 能力上限（#2032 对话框逐档映射标注）。
-    pub(crate) fn reasoning_max_level(&self) -> ReasoningLevelView {
-        self.reasoning_max_level
+    /// 当前模型全档映射表（#2032 对话框逐档映射标注）。
+    pub(crate) fn reasoning_effort_map(&self) -> &[(ReasoningLevelView, ReasoningLevelView)] {
+        &self.reasoning_effort_map
     }
 
     pub fn apply(&mut self, intent: RuntimePresentationIntent) -> RuntimePresentationChange {
@@ -102,9 +102,9 @@ impl RuntimePresentation {
                 self.reasoning_level = level;
                 RuntimePresentationChange::Thinking { enabled, level }
             }
-            RuntimePresentationIntent::ReasoningCapability { max_level } => {
-                self.reasoning_max_level = max_level;
-                RuntimePresentationChange::ReasoningCapability { max_level }
+            RuntimePresentationIntent::ReasoningCapability { effort_map } => {
+                self.reasoning_effort_map = effort_map.clone();
+                RuntimePresentationChange::ReasoningCapability { effort_map }
             }
         }
     }

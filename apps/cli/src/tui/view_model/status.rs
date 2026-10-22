@@ -65,38 +65,6 @@ impl ReasoningLevelView {
             Self::Max => "max",
         }
     }
-
-    /// 档位阶梯序值（Off=0 … Max=6），供 clamp 比较。
-    fn rank(self) -> u8 {
-        match self {
-            Self::Off => 0,
-            Self::Minimal => 1,
-            Self::Low => 2,
-            Self::Medium => 3,
-            Self::High => 4,
-            Self::Xhigh => 5,
-            Self::Max => 6,
-        }
-    }
-
-    fn from_rank(rank: u8) -> Self {
-        match rank {
-            0 => Self::Off,
-            1 => Self::Minimal,
-            2 => Self::Low,
-            3 => Self::Medium,
-            4 => Self::High,
-            5 => Self::Xhigh,
-            _ => Self::Max,
-        }
-    }
-
-    /// clamp 到模型能力上限（#2032 对话框逐档映射标注）：
-    /// 高于上限取上限，Off 恒为 Off。与 runtime
-    /// `ModelInfo::resolve_reasoning` 同语义的视图层本地计算。
-    pub fn clamped_to(self, max_level: Self) -> Self {
-        Self::from_rank(self.rank().min(max_level.rank()))
-    }
 }
 
 /// 状态栏运行态视图模型：StatusBar 渲染所需 token/tps/model/session/context 的唯一派生表示。

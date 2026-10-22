@@ -91,7 +91,17 @@ pub(crate) fn build_provider_binding_from_runtime_model(
         context_window: resolved_model.model.context_window,
         reasoning_active: Some(requested_reasoning != share::reasoning::ReasoningLevel::Off),
         reasoning_level: Some(binding.model.resolve_reasoning(requested_reasoning)),
-        reasoning_max_level: Some(binding.model.max_reasoning_level()),
+        reasoning_effort_map: Some(
+            binding
+                .model
+                .reasoning_effort_map()
+                .into_iter()
+                .map(|(requested, effective)| sdk::ReasoningEffortMapping {
+                    requested,
+                    effective,
+                })
+                .collect(),
+        ),
     };
 
     Ok((binding, result))

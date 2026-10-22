@@ -214,13 +214,24 @@ pub(crate) async fn run_chat(args: Args) {
                 },
             ),
         );
-        // #2032：模型能力上限（/think 对话框逐档映射标注）。
+        // #2032：模型全档映射表（/think 对话框逐档映射标注，runtime 权威计算）。
         app.apply_agent_intent(
             crate::tui::update::intent::AgentIntent::RuntimePresentation(
                 crate::tui::model::runtime_presentation::RuntimePresentationIntent::ReasoningCapability {
-                    max_level: crate::tui::adapter::event_mapping::reasoning_level_view(
-                        bootstrap.reasoning_max_level,
-                    ),
+                    effort_map: bootstrap
+                        .reasoning_effort_map
+                        .iter()
+                        .map(|mapping| {
+                            (
+                                crate::tui::adapter::event_mapping::reasoning_level_view(
+                                    mapping.requested,
+                                ),
+                                crate::tui::adapter::event_mapping::reasoning_level_view(
+                                    mapping.effective,
+                                ),
+                            )
+                        })
+                        .collect(),
                 },
             ),
         );

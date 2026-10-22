@@ -597,11 +597,22 @@ fn think_slash_command_without_args_opens_level_dialog() {
 
 #[test]
 fn think_dialog_annotates_mapping_against_model_capability() {
+    use crate::tui::view_model::status::ReasoningLevelView as Level;
     let mut app = app_with_builtin_router();
-    // 模拟能力上限 medium 的模型（如 mimo driver）：bootstrap 投影更新上限。
+    // 构造含降档条目的映射表（表由 runtime resolve 权威给出；TUI 对任意
+    // 表内容只负责渲染——覆盖离散阶梯空隙降档场景，如 minimal → off）。
+    let ladder_pairs = [
+        (Level::Off, Level::Off),
+        (Level::Minimal, Level::Off),
+        (Level::Low, Level::Off),
+        (Level::Medium, Level::Medium),
+        (Level::High, Level::Medium),
+        (Level::Xhigh, Level::Medium),
+        (Level::Max, Level::Medium),
+    ];
     app.apply_agent_intent(crate::tui::update::intent::AgentIntent::RuntimePresentation(
         crate::tui::model::runtime_presentation::RuntimePresentationIntent::ReasoningCapability {
-            max_level: crate::tui::view_model::status::ReasoningLevelView::Medium,
+            effort_map: ladder_pairs.to_vec(),
         },
     ));
     // 当前档位 medium（映射后）。
@@ -609,7 +620,7 @@ fn think_dialog_annotates_mapping_against_model_capability() {
         crate::tui::update::intent::AgentIntent::RuntimePresentation(
             crate::tui::model::runtime_presentation::RuntimePresentationIntent::Thinking {
                 enabled: true,
-                level: crate::tui::view_model::status::ReasoningLevelView::Medium,
+                level: Level::Medium,
             },
         ),
     );
@@ -620,13 +631,19 @@ fn think_dialog_annotates_mapping_against_model_capability() {
         .expect("/think 无参数应打开档位对话框");
     let options = dialog.options();
     assert_eq!(
+        options[1], "minimal → off",
+        "映射表给出降档时对话框必须如实标注（表驱动渲染），实际 {options:?}"
+    );
+    assert_eq!(options[2], "low → off", "实际 {options:?}");
+    assert_eq!(
         options[4], "high → medium",
         "超上限档位应标注映射结果，实际 {options:?}"
     );
     assert_eq!(options[6], "max → medium", "实际 {options:?}");
     assert_eq!(
         options[3], "medium",
-        "当前档位行文案无字符标记（高亮由 Dialog current_index 渲染），实际 {options:?}"
+        "阶梯内档位无映射标注；当前档位行文案无字符标记（高亮由 Dialog
+        current_index 渲染），实际 {options:?}"
     );
 }
 

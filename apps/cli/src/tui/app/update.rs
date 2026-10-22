@@ -426,16 +426,14 @@ impl App {
                 context_window,
                 reasoning_active,
                 reasoning_level,
-                reasoning_max_level,
+                reasoning_effort_map,
             } => {
-                // #2032：切换后模型能力上限先行更新（对话框映射标注）。
-                if let Some(max_level) = reasoning_max_level {
-                    self.apply_agent_intent(AgentIntent::RuntimePresentation(
-                        crate::tui::model::runtime_presentation::RuntimePresentationIntent::ReasoningCapability {
-                            max_level: *max_level,
-                        },
-                    ));
-                }
+                // #2032：切换后模型全档映射表先行更新（对话框映射标注）。
+                self.apply_agent_intent(AgentIntent::RuntimePresentation(
+                    crate::tui::model::runtime_presentation::RuntimePresentationIntent::ReasoningCapability {
+                        effort_map: reasoning_effort_map.clone(),
+                    },
+                ));
                 if *context_window > 0 {
                     self.apply_agent_intent(AgentIntent::RuntimePresentation(
                         crate::tui::model::runtime_presentation::RuntimePresentationIntent::ContextSize(

@@ -43,17 +43,23 @@ fn runtime_presentation_thinking_intent_updates_reasoning_level_too() {
     assert_eq!(presentation.reasoning_level(), ReasoningLevel::Off);
 }
 
-// ── #2032：能力上限状态 ──
+// ── #2032：全档映射表状态 ──
 
 #[test]
-fn reasoning_capability_intent_updates_max_level() {
+fn reasoning_capability_intent_updates_effort_map() {
     use super::*;
     let mut presentation = RuntimePresentation::default();
     presentation.apply(RuntimePresentationIntent::ReasoningCapability {
-        max_level: ReasoningLevelView::Medium,
+        effort_map: vec![
+            (ReasoningLevelView::Minimal, ReasoningLevelView::Off),
+            (ReasoningLevelView::High, ReasoningLevelView::Medium),
+        ],
     });
     assert_eq!(
-        presentation.reasoning_max_level(),
-        ReasoningLevelView::Medium
+        presentation.reasoning_effort_map(),
+        &[
+            (ReasoningLevelView::Minimal, ReasoningLevelView::Off),
+            (ReasoningLevelView::High, ReasoningLevelView::Medium),
+        ]
     );
 }

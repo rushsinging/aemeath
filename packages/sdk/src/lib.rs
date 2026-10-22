@@ -70,7 +70,8 @@ pub use commands::{
     ApplicationControlCommand, ApplicationControlTarget, CommandArgumentSchema, CommandCatalogPort,
     CommandCompletion, CommandDescriptor, CommandMechanism, CommandName, CommandParseError,
     CommandRoute, CommandRouterPort, CommandTarget, ContextEstimate, ModelSwitchResult,
-    ParsedArguments, SkillRequestCommand, SlashInput, SnapshotQueryCommand, SnapshotQueryTarget,
+    ParsedArguments, ReasoningEffortMapping, SkillRequestCommand, SlashInput, SnapshotQueryCommand,
+    SnapshotQueryTarget,
 };
 pub use config_form::{
     ConfigFormAction, ConfigFormActionId, ConfigFormActionStyle, ConfigFormBusy,

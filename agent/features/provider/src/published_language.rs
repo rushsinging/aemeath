@@ -48,9 +48,18 @@ impl ModelInfo {
         crate::domain::capability::resolve_supported(&self.supported_reasoning, requested)
     }
 
-    /// 能力阶梯的最高档（#2032：状态栏映射档位与 /think 对话框逐档标注）。
+    /// 能力阶梯的最高档。
     pub fn max_reasoning_level(&self) -> ReasoningLevel {
         crate::domain::capability::maximum_supported(&self.supported_reasoning)
+    }
+
+    /// 全档映射表（#2032 /think 对话框逐档标注的单一真相源计算）：
+    /// 对 `ReasoningLevel::ALL` 每档 resolve，TUI 只渲染 NEVER 复制 resolve。
+    pub fn reasoning_effort_map(&self) -> Vec<(ReasoningLevel, ReasoningLevel)> {
+        ReasoningLevel::ALL
+            .into_iter()
+            .map(|requested| (requested, self.resolve_reasoning(requested)))
+            .collect()
     }
 }
 

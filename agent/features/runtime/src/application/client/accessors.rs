@@ -437,13 +437,19 @@ impl AgentClientImpl {
         binding.model.resolve_reasoning(requested)
     }
 
-    /// 当前模型 reasoning 能力上限（#2032：/think 对话框逐档映射标注）。
-    pub fn reasoning_max_level(&self) -> share::reasoning::ReasoningLevel {
+    /// 当前模型全档映射表（#2032：/think 对话框逐档映射标注的单一真相源
+    /// 计算；TUI 只渲染）。每项 (requested, effective)。
+    pub fn reasoning_effort_map(
+        &self,
+    ) -> Vec<(
+        share::reasoning::ReasoningLevel,
+        share::reasoning::ReasoningLevel,
+    )> {
         self.inner
             .shell
             .model_state
             .binding()
             .model
-            .max_reasoning_level()
+            .reasoning_effort_map()
     }
 }
