@@ -209,6 +209,11 @@ pub fn global_scripts_dir() -> PathBuf {
     global_agents_dir().join(SCRIPTS_DIR_NAME)
 }
 
+/// 全局 plugins 组件目录（c8，#2030）。
+pub fn global_plugins_dir() -> PathBuf {
+    global_agents_dir().join("plugins")
+}
+
 /// 项目级 scripts 组件目录（c7，#2020）。
 pub fn project_scripts_dir(cwd: &Path) -> PathBuf {
     cwd.join(AGENTS_DIR_NAME).join(SCRIPTS_DIR_NAME)

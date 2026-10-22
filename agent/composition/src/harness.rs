@@ -226,11 +226,17 @@ pub fn wire_component_registry(
             share::config::paths::global_skills_dir(),
         ),
     );
+    let plugins_registry: Box<dyn harness::ComponentRegistry + Send> = Box::new(
+        harness::adapters::plugins_registry::PluginsDirectoryRegistry::new(
+            share::config::paths::global_plugins_dir(),
+        ),
+    );
     let _ = config;
     let composite = harness::adapters::composite::CompositeComponentRegistry::new(vec![
         prose_registry,
         scripts_registry,
         skills_registry,
+        plugins_registry,
     ]);
     Ok(Arc::new(tokio::sync::Mutex::new(Box::new(composite))))
 }

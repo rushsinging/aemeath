@@ -56,6 +56,9 @@ where
             let workspace = shell.workspace.clone();
             let wiring = shell.session_switch.clone();
             let tool_result_materializer = shell.tool_result_materializer.clone();
+            // c8 plugin seam：run 边界重建（run 内版本固定，#2030 契约）。
+            tool_result_materializer
+                .reload_plugin_seam_from_directory(&share::config::paths::global_plugins_dir());
             let agent_runner: Option<Arc<dyn tools::published::agent::AgentRunner>> =
                 Some(shell.agent_runner.clone());
             let max_tool_concurrency = shell.max_tool_concurrency;

@@ -18,3 +18,4 @@ pub use domain::component::{
     diff_contents, ComponentContent, ComponentId, ComponentKind, ComponentName, ContentChange,
 };
 pub use domain::errors::HarnessError;
+pub use domain::plugin::{PluginRule, PluginSeamEngine, SeamEffect, SeamOutcome};

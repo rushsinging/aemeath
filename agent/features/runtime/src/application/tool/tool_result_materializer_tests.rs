@@ -273,3 +273,62 @@ async fn main_and_sub_paths_share_the_same_tool_result_projection() {
     assert!(!encoded.contains("甲乙丙丁戊"));
     assert!(encoded.contains("tool-result://session/tool"));
 }
+
+// ---- #2030 c8 plugin seam：run 边界重建 + 工具结果变换 ----
+
+/// reload 后 seam 生效：trim 超预算输出带标记。
+#[tokio::test]
+async fn plugin_seam_trims_after_reload() {
+    let blobs = Arc::new(FakeBlobPort::default());
+    let materializer = ToolResultMaterializer::new(
+        blobs,
+        ToolResultMaterializationPolicyData::new(4000, 3000, 1),
+    );
+
+    // 空 engine：直返
+    let (untouched, outcomes) = materializer.apply_plugin_seam("Bash", "raw", false);
+    assert_eq!(untouched, "raw");
+    assert!(outcomes.is_empty());
+
+    // 写一个 trim plugin 并重建（run 边界语义）
+    let plugins_dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(plugins_dir.path().join("guard")).expect("dir");
+    std::fs::write(
+        plugins_dir.path().join("guard/plugin.md"),
+        "---\nname: guard\ndescription: 输出防护\n---\n## seam: trim_output\ntool: Bash\nmax_chars: 10\n",
+    )
+    .expect("write");
+    materializer.reload_plugin_seam_from_directory(plugins_dir.path());
+
+    let (trimmed, outcomes) = materializer.apply_plugin_seam("Bash", &"x".repeat(50), false);
+    assert!(trimmed.contains("（plugin seam 截断）"));
+    assert_eq!(outcomes.len(), 1);
+}
+
+/// 坏 plugin 声明：跳过并 warn，NEVER 阻断其余 plugin。
+#[tokio::test]
+async fn plugin_seam_skips_malformed_plugin() {
+    let blobs = Arc::new(FakeBlobPort::default());
+    let materializer = ToolResultMaterializer::new(
+        blobs,
+        ToolResultMaterializationPolicyData::new(4000, 3000, 1),
+    );
+    let plugins_dir = tempfile::tempdir().expect("tempdir");
+    std::fs::create_dir_all(plugins_dir.path().join("bad")).expect("dir");
+    std::fs::write(
+        plugins_dir.path().join("bad/plugin.md"),
+        "---\nname: bad\ndescription: 坏\n---\n## seam: unknown_kind\nx: 1\n",
+    )
+    .expect("write");
+    std::fs::create_dir_all(plugins_dir.path().join("good")).expect("dir");
+    std::fs::write(
+        plugins_dir.path().join("good/plugin.md"),
+        "---\nname: good\ndescription: 好\n---\n## seam: error_hint\ntool: Bash\npattern: \"denied\"\nhint: 检查权限\n",
+    )
+    .expect("write");
+    materializer.reload_plugin_seam_from_directory(plugins_dir.path());
+
+    let (hinted, outcomes) = materializer.apply_plugin_seam("Bash", "permission denied", true);
+    assert!(hinted.ends_with("检查权限"));
+    assert_eq!(outcomes.len(), 1);
+}

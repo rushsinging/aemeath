@@ -18,9 +18,14 @@ pub(crate) async fn materialize_tool_results(
     let provider_results: Vec<_> = results
         .into_iter()
         .map(|ex| {
+            let (seam_text, _seam_outcomes) = materializer.apply_plugin_seam(
+                &ex.tool_name,
+                &ex.outcome.text,
+                ex.outcome.is_error,
+            );
             (
                 ex.provider_id,
-                ex.outcome.text,
+                seam_text,
                 ex.outcome.data,
                 ex.outcome.is_error,
                 ex.outcome.images,
