@@ -600,7 +600,7 @@ fn guardrails_section_truncates_at_budget_with_marker() {
 
 #[tokio::test]
 async fn guardrails_missing_files_yield_no_section() {
-    let _guard = TOOL_GUIDANCE_ENV_LOCK.lock().unwrap();
+    let _guard = TOOL_GUIDANCE_ENV_LOCK.lock().await;
     let cwd = tempfile::tempdir().unwrap();
     // 全局/项目 guardrails 均不存在（全局路径指向临时隔离目录）
     std::env::set_var("AEMEATH_AGENTS_DIR", cwd.path());
@@ -611,8 +611,10 @@ async fn guardrails_missing_files_yield_no_section() {
 
 // ---- #2022 tool_guidance（c4）注入契约：user-context 消息侧（通道 B） ----
 
-/// env 依赖测试互斥（AEMEATH_AGENTS_DIR 全局变量并行踩踏防护）。
-static TOOL_GUIDANCE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// env 依赖测试互斥（AEMEATH_AGENTS_DIR 全局变量并行踩踏防护；
+/// tokio 互斥——guard 可跨 await 持有）。
+static TOOL_GUIDANCE_ENV_LOCK: std::sync::LazyLock<tokio::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 #[test]
 fn tool_guidance_section_wraps_content_with_source_tag() {
@@ -631,7 +633,7 @@ fn tool_guidance_section_truncates_at_budget_with_marker() {
 
 #[tokio::test]
 async fn tool_guidance_missing_file_yields_none() {
-    let _guard = TOOL_GUIDANCE_ENV_LOCK.lock().unwrap();
+    let _guard = TOOL_GUIDANCE_ENV_LOCK.lock().await;
     let cwd = tempfile::tempdir().unwrap();
     std::env::set_var("AEMEATH_AGENTS_DIR", cwd.path());
     let section = load_tool_guidance_section().await;
@@ -641,7 +643,7 @@ async fn tool_guidance_missing_file_yields_none() {
 
 #[tokio::test]
 async fn claude_md_message_appends_tool_guidance_section() {
-    let _guard = TOOL_GUIDANCE_ENV_LOCK.lock().unwrap();
+    let _guard = TOOL_GUIDANCE_ENV_LOCK.lock().await;
     let cwd = tempfile::tempdir().unwrap();
     std::env::set_var("AEMEATH_AGENTS_DIR", cwd.path());
     std::fs::write(
