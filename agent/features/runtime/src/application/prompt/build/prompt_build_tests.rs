@@ -570,3 +570,40 @@ async fn test_load_agents_md_preserves_identical_content_from_distinct_sources()
     assert_eq!(content.matches("<guidance source=").count(), 2);
     assert_eq!(content.matches("identical content").count(), 2);
 }
+
+// ---- #2021 guardrails 注入契约 ----
+
+#[test]
+fn guardrails_section_wraps_content_with_source_tag() {
+    let section = render_guardrails_section("/home/u/.agents/guardrails.md", "NEVER 删除生产数据");
+    assert!(section.contains("<guardrails source=\"/home/u/.agents/guardrails.md\">"));
+    assert!(section.contains("NEVER 删除生产数据"));
+    assert!(section.contains("</guardrails>"));
+}
+
+#[test]
+fn guardrails_section_truncates_at_budget_with_marker() {
+    let oversized = "规则".repeat(crate::constants::GUARDRAILS_SECTION_MAX_CHARS);
+    let section = render_guardrails_section("p", &oversized);
+    assert!(section.contains("（截断）"), "超预算必须带截断标记");
+    let content_len = section
+        .strip_prefix("<guardrails source=\"p\">\n")
+        .and_then(|s| s.strip_suffix("\n</guardrails>"))
+        .expect("标签结构")
+        .chars()
+        .count();
+    assert!(
+        content_len <= crate::constants::GUARDRAILS_SECTION_MAX_CHARS + 10,
+        "正文必须受预算约束：{content_len}"
+    );
+}
+
+#[tokio::test]
+async fn guardrails_missing_files_yield_no_section() {
+    let cwd = tempfile::tempdir().unwrap();
+    // 全局/项目 guardrails 均不存在（全局路径指向临时隔离目录）
+    std::env::set_var("AEMEATH_AGENTS_DIR", cwd.path());
+    let sections = load_guardrails_sections(cwd.path()).await;
+    std::env::remove_var("AEMEATH_AGENTS_DIR");
+    assert!(sections.is_empty(), "缺文件 NEVER 产生空段");
+}

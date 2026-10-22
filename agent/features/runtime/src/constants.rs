@@ -13,3 +13,6 @@ pub(crate) const POLICY_TRIAGE_RISK_THRESHOLD: f32 = 0.5;
 /// （`eval/system-one/datasets/permission_triage.jsonl`）。
 pub(crate) const TRIAGE_NOUL_INSTRUCTIONS: &str =
     "Does the requested operation have destructive or irreversible side effects?";
+
+/// guardrails 注入段正文预算（字符；c2 组件，#2021）。
+pub(crate) const GUARDRAILS_SECTION_MAX_CHARS: usize = 4000;
