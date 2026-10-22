@@ -56,33 +56,21 @@ async fn duplicate_registration_rejected() {
 /// 全周期串行执行：每个任务恰好跑一次，按 kind 名稳定排序。
 #[tokio::test]
 async fn run_all_cycles_runs_each_task_once_in_stable_order() {
-    let mut registry = TaskRegistry::new();
-    let reflect = CountingTask {
-        calls: AtomicU32::new(0),
-        fail: false,
-    };
     let rsi = CountingTask {
         calls: AtomicU32::new(0),
         fail: false,
     };
-    registry
-        .register(TaskKind::MemoryReflect, Box::new(reflect))
-        .expect("register");
+    let mut registry = TaskRegistry::new();
     registry
         .register(TaskKind::HarnessRsi, Box::new(rsi))
         .expect("register");
-
     let results = registry.run_all_cycles().await;
-    assert_eq!(results.len(), 2);
-    let (first_kind, first) = &results[0];
-    let (second_kind, second) = &results[1];
-    // 字典序：harness-rsi < memory-reflect
-    assert_eq!(*first_kind, TaskKind::HarnessRsi);
-    assert_eq!(*second_kind, TaskKind::MemoryReflect);
-    assert!(first.is_ok() && second.is_ok());
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].0, TaskKind::HarnessRsi);
+    assert!(results[0].1.is_ok());
 }
 
-/// 单任务失败 NEVER 中断其余任务（失败隔离，结果携带 Err）。
+/// 失败任务在结果中携带 Err（调用方汇总呈现，NEVER 中断进程）。
 #[tokio::test]
 async fn failing_task_does_not_block_others() {
     let mut registry = TaskRegistry::new();
@@ -95,22 +83,10 @@ async fn failing_task_does_not_block_others() {
             }),
         )
         .expect("register");
-    registry
-        .register(
-            TaskKind::MemoryReflect,
-            Box::new(CountingTask {
-                calls: AtomicU32::new(0),
-                fail: false,
-            }),
-        )
-        .expect("register");
 
     let results = registry.run_all_cycles().await;
-    assert_eq!(results.len(), 2);
+    assert_eq!(results.len(), 1);
     assert!(results
         .iter()
-        .any(|(kind, result)| { *kind == TaskKind::HarnessRsi && result.is_err() }));
-    assert!(results
-        .iter()
-        .any(|(kind, result)| { *kind == TaskKind::MemoryReflect && result.is_ok() }));
+        .any(|(kind, result)| *kind == TaskKind::HarnessRsi && result.is_err()));
 }

@@ -1,7 +1,7 @@
 //! RSI 任务注册面：daemon 按 TaskKind 插拔改进任务（03 分片第 6 节）。
 //!
-//! 本里程碑注册 `HarnessRsi` 与 `MemoryReflect`（reflect 迁入由 #2029 完成，
-//! 注册位先行）；任务实现 NEVER 由 daemon 框架耦合具体领域逻辑。
+//! 当前仅注册 `HarnessRsi`（reflect NEVER 进入 harness 进程——2026-10-22 拍板，
+//! 纯组件治理单一职责）；插拔面保留给后续组件治理任务（如 c8 plugin）。
 
 use crate::constants::ERROR_DOMAIN;
 use crate::domain::errors::HarnessError;
@@ -9,19 +9,20 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 
 /// 改进任务类别（注册面键）。
+///
+/// 当前仅 `HarnessRsi`（纯组件治理，单一职责——reflect NEVER 进入
+/// harness 进程，2026-10-22 拍板）；插拔面保留给后续组件治理任务
+/// （如 c8 plugin）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TaskKind {
     /// harness 组件改进（证据→提案→原子落盘）。
     HarnessRsi,
-    /// memory 反思（reflect 迁入，#2029）。
-    MemoryReflect,
 }
 
 impl TaskKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::HarnessRsi => "harness-rsi",
-            Self::MemoryReflect => "memory-reflect",
         }
     }
 }

@@ -62,15 +62,22 @@ enum RsiControlAck {
 | `interval_secs` | 1800 | Timer 触发周期 |
 | `chunk_max_components` | 实施定值 | 每块材料组件数上限 |
 
-## 6. 任务类型可插拔与 reflect 迁移（0.2.0）
+## 6. 执行模式与职责边界（2026-10-22 拍板修订）
 
-daemon 框架按**任务类型**插拔设计：`TaskKind::{MemoryReflect, HarnessRsi}`，每种任务独立装配材料装配器、LLM 阶段、落盘器与配置节；本里程碑实现 `HarnessRsi` 与 `MemoryReflect` 两个任务。
+### 两种执行模式
 
-**reflect 全面迁入 daemon（本里程碑）的前提已核实**：compact 只在 session 文件追加 `ActiveCompactMarker`（summary + `start_at` 游标），消息区物理保留全量（占位化仅发生在内存窗口，NEVER 落盘）——daemon 读盘可取全量材料（含 ToolResult 原文）。因此：
+| 模式 | 命令 | 行为 |
+|---|---|---|
+| **一次性执行** | `aemeath rsi run` | 执行单轮改进周期（分块提案→落盘）后退出；Manual 语义的 CLI 面，e2e 验收与手动触发入口 |
+| **后台定时** | `aemeath rsi serve` | 常驻 daemon + Timer 周期 + UDS 控制面（Trigger/Status/Stop） |
 
-- **PreCompact 触发退役**：compact 不丢材料，其抢救价值由定时反思等价覆盖（晚到但不缺）；
-- reflect 三触发全部 daemon 化，无主进程内联例外；
-- 迁移后 memory corpus 与经验库仍分库分锁（治理对象正交，见 04 分片），仅共享 daemon 进程基建。
+两模式共用同一改进循环与 registry（仅调度外壳不同）。
+
+### 职责边界：reflect NEVER 进入 harness 进程
+
+harness daemon **保持单一职责**（纯 harness 组件治理）。memory reflect 维持主进程 detached 派发现状，PreCompact 触发保留——「reflect 迁入 daemon + PreCompact 退役」方案已取消（原 #2029，用户 2026-10-22 拍板：harness 进程不宜过重）。
+
+TaskKind 插拔面保留（c8 plugin 等后续组件治理任务可注册），但当前仅 `HarnessRsi` 一个注册任务；`MemoryReflect` 注册位撤销。
 
 ## 7. 验收
 
