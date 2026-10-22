@@ -150,7 +150,13 @@ pub async fn build_system_prompt_parts(
     let is_git = is_git_repo(cwd).await;
 
     // --- Static part: instructions that don't change between sessions ---
-    let static_part = static_system_prompt_for(&cwd_str, is_git, lang, context.permission_mode);
+    let mut static_part = static_system_prompt_for(&cwd_str, is_git, lang, context.permission_mode);
+
+    // --- guardrails（c2 组件）：全局 + 项目 guardrails.md 追加进 stable 段 ---
+    for section in load_guardrails_sections(cwd).await {
+        static_part.push_str("\n\n");
+        static_part.push_str(&section);
+    }
 
     // --- One-time Git context: injected as a regular message, never system prompt ---
     let initial_git_context = if is_git {
@@ -295,3 +301,38 @@ pub async fn load_agents_md(
 #[cfg(test)]
 #[path = "prompt_build_tests.rs"]
 mod prompt_build_tests;
+
+// ---- #2021 guardrails（c2）注入：全局 + 项目 guardrails.md → static_part ----
+
+/// 渲染单个 guardrails 段（source 标签包裹 + 预算截断）。
+fn render_guardrails_section(source_path: &str, content: &str) -> String {
+    let mut body: String = content.trim().chars().collect();
+    let budget = crate::constants::GUARDRAILS_SECTION_MAX_CHARS;
+    if body.chars().count() > budget {
+        body = body.chars().take(budget).collect();
+        body.push_str("…（截断）");
+    }
+    format!("<guardrails source=\"{source_path}\">\n{body}\n</guardrails>")
+}
+
+/// 加载全局 + 项目 guardrails 段（缺文件跳过，NEVER 产生空段）。
+async fn load_guardrails_sections(cwd: &Path) -> Vec<String> {
+    let candidates = [
+        paths::global_guardrails_path(),
+        paths::project_guardrails_path(cwd),
+    ];
+    let mut sections = Vec::new();
+    for path in candidates {
+        match tokio::fs::read_to_string(&path).await {
+            Ok(content) if !content.trim().is_empty() => {
+                sections.push(render_guardrails_section(&path.to_string_lossy(), &content));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                log::warn!(target: crate::LOG_TARGET, "Failed to read guardrails {}: {}", path.display(), error);
+            }
+        }
+    }
+    sections
+}
