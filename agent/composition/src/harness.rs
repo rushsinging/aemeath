@@ -178,18 +178,19 @@ pub fn wire_rsi_llm(config: &share::config::Config) -> Result<Arc<dyn RsiLlmPort
         supports_parallel_tool_calls: false,
         supports_streaming: true,
         supported_reasoning: vec![ReasoningLevel::Off],
+        server_effort_map: Vec::new(),
         context_limit: Some(128 * 1024),
         output_limit: Some(4096),
     };
     Ok(Arc::new(ProductionRsiLlm { client, model }))
 }
 
-/// 装配组件文件 registry（全局 guardrails/tool_guidance + 经验库路径）。
-/// 组件面按接入进度扩展（skills 目录扫描随 #2018）。
+/// 装配组件 registry：全局 guardrails/tool_guidance（FS）+ scripts 目录
+/// 扫描，经组合 registry 合并为单一视图。组件面按接入进度扩展
+///（skills 目录扫描随 #2018）。
 pub fn wire_component_registry(
     config: &share::config::Config,
 ) -> Result<Arc<tokio::sync::Mutex<Box<dyn harness::ComponentRegistry + Send>>>, HarnessError> {
-    let agents_dir = share::config::paths::global_agents_dir();
     let mut component_paths = HashMap::new();
     component_paths.insert(
         harness::ComponentId {
@@ -205,9 +206,19 @@ pub fn wire_component_registry(
         },
         share::config::paths::global_tool_guidance_path(),
     );
-    let _ = (agents_dir, config);
-    let registry = harness::adapters::filesystem::FilesystemComponentRegistry::new(component_paths);
-    Ok(Arc::new(tokio::sync::Mutex::new(Box::new(registry))))
+    let prose_registry: Box<dyn harness::ComponentRegistry + Send> =
+        Box::new(harness::adapters::filesystem::FilesystemComponentRegistry::new(component_paths));
+    let scripts_registry: Box<dyn harness::ComponentRegistry + Send> = Box::new(
+        harness::adapters::scripts_registry::ScriptsDirectoryRegistry::new(
+            share::config::paths::global_scripts_dir(),
+        ),
+    );
+    let _ = config;
+    let composite = harness::adapters::composite::CompositeComponentRegistry::new(vec![
+        prose_registry,
+        scripts_registry,
+    ]);
+    Ok(Arc::new(tokio::sync::Mutex::new(Box::new(composite))))
 }
 
 /// 经验库路径（`{agents_dir}/harness/library.jsonl`，独立于 memory corpus）。
