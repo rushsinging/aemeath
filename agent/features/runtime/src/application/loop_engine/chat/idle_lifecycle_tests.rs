@@ -299,6 +299,7 @@ fn thinking_binding(
             .into_iter()
             .filter(|level| *level <= max_level)
             .collect(),
+        server_effort_map: Vec::new(),
         context_limit: Some(128_000),
         output_limit: Some(8_192),
     };

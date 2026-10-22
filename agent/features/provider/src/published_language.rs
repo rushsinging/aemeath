@@ -34,6 +34,10 @@ pub struct ModelInfo {
     pub supports_streaming: bool,
     /// Reasoning 支持阶梯（升序去重；由 client 装配时按 driver 能力覆盖）。
     pub supported_reasoning: Vec<ReasoningLevel>,
+    /// 服务端档位归并表（#2032，装配时由 driver 官方文档知识生成；
+    /// 空表=恒等）。`resolve_reasoning` 在阶梯 resolve 后叠加本表，
+    /// 保证 UI 映射表与 invoke wire 口径一致。
+    pub server_effort_map: Vec<(ReasoningLevel, ReasoningLevel)>,
     /// 上下文窗口大小（token 数），`None` 表示未知。
     pub context_limit: Option<usize>,
     /// 最大输出 token 数，`None` 表示未知。
@@ -41,11 +45,17 @@ pub struct ModelInfo {
 }
 
 impl ModelInfo {
-    /// 请求档位在支持阶梯内的 clamp：阶梯中 ≤requested 的最大档，Off 兜底。
-    ///
-    /// 原 reasoning 能力数据类型的 resolve 逻辑（#1861 v4 摊平进实体）。
+    /// 请求档位在支持阶梯内的 clamp 后叠加服务端归并（#2032）：
+    /// 阶梯中 ≤requested 的最大档，Off 兜底；再经 `server_effort_map`
+    /// 归并到服务端实际执行档位——invoke、回执与 UI 映射表统一口径。
     pub fn resolve_reasoning(&self, requested: ReasoningLevel) -> ReasoningLevel {
-        crate::domain::capability::resolve_supported(&self.supported_reasoning, requested)
+        let ladder_resolved =
+            crate::domain::capability::resolve_supported(&self.supported_reasoning, requested);
+        self.server_effort_map
+            .iter()
+            .find(|(from, _)| *from == ladder_resolved)
+            .map(|(_, to)| *to)
+            .unwrap_or(ladder_resolved)
     }
 
     /// 能力阶梯的最高档。

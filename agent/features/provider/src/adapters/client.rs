@@ -157,7 +157,10 @@ fn build_provider_and_scope(
             ))
         }
     };
-    let effective_reasoning = requested_reasoning.clamped_to(provider_impl.max_reasoning_level());
+    // #2032：阶梯 clamp 后叠加服务端归并——wire effort 与显示口径统一真相。
+    let effective_reasoning = provider_impl.server_effective_effort(
+        requested_reasoning.clamped_to(provider_impl.max_reasoning_level()),
+    );
     let default_scope = crate::domain::invoke::InvocationScopeData::new(
         model,
         if options.max_tokens == 0 {
@@ -205,6 +208,10 @@ pub fn wire_provider_client(
         supported_reasoning: crate::domain::capability::supported_reasoning_from_max(
             client.max_reasoning_level(),
         ),
+        server_effort_map: ReasoningLevel::ALL
+            .into_iter()
+            .map(|level| (level, client.effective_reasoning_for(level)))
+            .collect(),
         ..model
     };
     Ok((client, model))
@@ -583,7 +590,7 @@ impl LlmClient {
             self.default_scope.model(),
             self.default_scope.max_tokens(),
             requested_reasoning,
-            requested_reasoning.clamped_to(self.provider.max_reasoning_level()),
+            self.effective_reasoning_for(requested_reasoning),
         )?;
         Ok(self)
     }
@@ -608,8 +615,16 @@ impl LlmClient {
             model,
             max_tokens.unwrap_or_else(|| self.default_scope.max_tokens()),
             requested_reasoning,
-            requested_reasoning.clamped_to(self.provider.max_reasoning_level()),
+            self.effective_reasoning_for(requested_reasoning),
         )
+    }
+
+    /// #2032：请求档位 → 实际生效档位的统一计算（单一真相源）：
+    /// 能力阶梯 clamp 后叠加服务端归并（`LlmProvider::server_effective_effort`）。
+    /// wire effort、/think 回执与 UI 映射表全部消费该口径。
+    pub fn effective_reasoning_for(&self, requested: ReasoningLevel) -> ReasoningLevel {
+        self.provider
+            .server_effective_effort(requested.clamped_to(self.provider.max_reasoning_level()))
     }
 
     pub fn model_name(&self) -> &str {

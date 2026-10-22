@@ -35,6 +35,7 @@ fn test_model_info() -> ModelInfo {
         supports_parallel_tool_calls: false,
         supports_streaming: true,
         supported_reasoning: vec![ReasoningLevel::Off],
+        server_effort_map: Vec::new(),
         context_limit: Some(128_000),
         output_limit: Some(8_192),
     }

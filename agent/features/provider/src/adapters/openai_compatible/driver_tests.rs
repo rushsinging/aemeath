@@ -116,3 +116,71 @@ fn every_openai_compatible_driver_locks_supported_set_only_openai_includes_minim
         );
     }
 }
+
+// ── #2032：服务端档位归并（真相源：智谱官方「深度思考」文档 Coding Plan 语义） ──
+
+#[test]
+fn zhipu_server_effective_effort_merges_glm_53_coding_plan_vocabulary() {
+    let driver = driver_for_provider_driver(ProviderDriverKind::Zhipu);
+    // glm-5.3 系列（Coding Plan）：none/minimal/low → low；medium/high → high；
+    // xhigh/max → max；强制思考（off 也归并 low）。
+    let expectations = [
+        (ReasoningLevel::Off, ReasoningLevel::Low),
+        (ReasoningLevel::Minimal, ReasoningLevel::Low),
+        (ReasoningLevel::Low, ReasoningLevel::Low),
+        (ReasoningLevel::Medium, ReasoningLevel::High),
+        (ReasoningLevel::High, ReasoningLevel::High),
+        (ReasoningLevel::Xhigh, ReasoningLevel::Max),
+        (ReasoningLevel::Max, ReasoningLevel::Max),
+    ];
+    for (requested, expected) in expectations {
+        assert_eq!(
+            driver.server_effective_effort("glm-5.3", requested),
+            expected,
+            "glm-5.3 请求 {requested:?}"
+        );
+    }
+    // FLASH/FLASHX 同语义。
+    assert_eq!(
+        driver.server_effective_effort("glm-5.3-flash", ReasoningLevel::Medium),
+        ReasoningLevel::High
+    );
+}
+
+#[test]
+fn zhipu_server_effective_effort_merges_glm_52_vocabulary() {
+    let driver = driver_for_provider_driver(ProviderDriverKind::Zhipu);
+    // glm-5.2：none/minimal → 放弃思考（off）；low/medium → high；xhigh → max。
+    let expectations = [
+        (ReasoningLevel::Off, ReasoningLevel::Off),
+        (ReasoningLevel::Minimal, ReasoningLevel::Off),
+        (ReasoningLevel::Low, ReasoningLevel::High),
+        (ReasoningLevel::Medium, ReasoningLevel::High),
+        (ReasoningLevel::High, ReasoningLevel::High),
+        (ReasoningLevel::Xhigh, ReasoningLevel::Max),
+        (ReasoningLevel::Max, ReasoningLevel::Max),
+    ];
+    for (requested, expected) in expectations {
+        assert_eq!(
+            driver.server_effective_effort("glm-5.2", requested),
+            expected,
+            "glm-5.2 请求 {requested:?}"
+        );
+    }
+}
+
+#[test]
+fn server_effective_effort_defaults_to_identity_for_other_models_and_drivers() {
+    let zhipu = driver_for_provider_driver(ProviderDriverKind::Zhipu);
+    // 智谱其他模型（4.x/5/5.1 等不支持 effort 字段）：恒等（动态思考无档位语义）。
+    assert_eq!(
+        zhipu.server_effective_effort("glm-4.6", ReasoningLevel::Medium),
+        ReasoningLevel::Medium
+    );
+    // 其他 driver 未声明服务端归并知识前一律恒等。
+    let openai = driver_for_provider_driver(ProviderDriverKind::OpenAI);
+    assert_eq!(
+        openai.server_effective_effort("gpt-5.6", ReasoningLevel::Max),
+        ReasoningLevel::Max
+    );
+}

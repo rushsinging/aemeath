@@ -53,6 +53,7 @@ pub async fn run_connectivity_probe(
         supports_parallel_tool_calls: false,
         supports_streaming: true,
         supported_reasoning: vec![ReasoningLevel::Off],
+        server_effort_map: Vec::new(),
         context_limit: None,
         output_limit: None,
     };

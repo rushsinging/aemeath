@@ -68,6 +68,15 @@ pub trait ChatApiDriver: Send + Sync {
     fn max_reasoning_level(&self) -> ReasoningLevel {
         maximum_supported(&self.reasoning_capability())
     }
+
+    /// 服务端对请求档位的归并行为（#2032）：driver 是协议形状唯一知识源，
+    /// 返回服务端实际执行的档位（UI 映射表、/think 回执与 wire effort 的
+    /// 统一显示/发送口径）。默认恒等（服务端忠实执行）。
+    ///
+    /// 知识来源 MUST 为各 provider 官方文档，NEVER 依赖传闻或旧注释。
+    fn server_effective_effort(&self, _model: &str, level: ReasoningLevel) -> ReasoningLevel {
+        level
+    }
 }
 
 #[derive(Debug)]
@@ -134,6 +143,35 @@ impl ChatApiDriver for ZhipuDriver {
         effort_capability(ReasoningLevel::Max)
     }
 
+    /// 智谱服务端 effort 归并（#2032，真相源：智谱开放平台「深度思考」
+    /// 官方文档 Coding Plan 请求语义）：
+    /// - `glm-5.3`/`glm-5.3-flash`/`glm-5.3-flashx`（强制思考，不支持
+    ///   disabled）：`none`/`minimal`/`low` → `low`；`medium`/`high` →
+    ///   `high`；`xhigh`/`max` → `max`。
+    /// - `glm-5.2`：`none`/`minimal` → 放弃思考（off）；`low`/`medium` →
+    ///   `high`；`xhigh` → `max`。
+    /// - 其余模型（不支持 reasoning_effort 字段，thinking.type 动态思考）：
+    ///   恒等，无档位语义。
+    fn server_effective_effort(&self, model: &str, level: ReasoningLevel) -> ReasoningLevel {
+        use ReasoningLevel::*;
+        if model.starts_with("glm-5.3") {
+            match level {
+                Off | Minimal | Low => Low,
+                Medium | High => High,
+                Xhigh | Max => Max,
+            }
+        } else if model.starts_with("glm-5.2") {
+            match level {
+                Off | Minimal => Off,
+                Low | Medium => High,
+                High => High,
+                Xhigh | Max => Max,
+            }
+        } else {
+            level
+        }
+    }
+
     fn apply_reasoning_fields(
         &self,
         request_body: &mut serde_json::Value,
@@ -147,8 +185,9 @@ impl ChatApiDriver for ZhipuDriver {
         let thinking_type = if enabled { "enabled" } else { "disabled" };
         request_body["thinking"] = serde_json::json!({"type": thinking_type});
 
-        // thinking 开启时附带 reasoning_effort 字段（仅 GLM-5.2 生效）。
-        // 服务端兼容映射：low/medium → high, xhigh → max。
+        // thinking 开启时附带 reasoning_effort 字段；effort 值由会话链的
+        // server_effective_effort 归并后经 for_scope/from_scope 写入，
+        // 此处只透传（NEVER 在此层再做映射）。
         if enabled {
             if let Some(effort) = reasoning_config.and_then(|c| c.as_effort()) {
                 request_body["reasoning_effort"] = serde_json::Value::String(effort);
