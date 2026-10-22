@@ -208,3 +208,84 @@ async fn client_reports_unavailable_when_daemon_absent() {
         .expect_err("未启动必须失败");
     assert_eq!(error.category(), share::error::ErrorCategory::Unavailable);
 }
+
+// ── 全链路：Trigger → HarnessRsi 周期 → 组件文件落盘（桩 LLM）──
+
+use crate::adapters::filesystem::FilesystemComponentRegistry;
+use crate::domain::component::{ComponentId, ComponentKind, ComponentName};
+use crate::domain::cycle_task::HarnessRsiCycleTask;
+use crate::domain::improvement::RsiLlmPort;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+#[tokio::test]
+async fn trigger_runs_cycle_and_writes_component_file() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    // 组件文件 registry：guardrails 单文件
+    let component_path = temp.path().join("guardrails.md");
+    std::fs::write(&component_path, "初始规则").expect("seed");
+    let mut component_paths = HashMap::new();
+    component_paths.insert(
+        ComponentId {
+            kind: ComponentKind::Guardrails,
+            name: ComponentName::new("default"),
+        },
+        component_path.clone(),
+    );
+    let boxed_registry: Box<dyn crate::application::ComponentRegistry + Send> =
+        Box::new(FilesystemComponentRegistry::new(component_paths));
+    let registry: Arc<tokio::sync::Mutex<Box<dyn crate::application::ComponentRegistry + Send>>> =
+        Arc::new(tokio::sync::Mutex::new(boxed_registry));
+
+    // 桩 LLM：提案把 guardrails 正文改为新规则
+    struct JsonLlm;
+    #[async_trait]
+    impl RsiLlmPort for JsonLlm {
+        async fn complete(&self, _prompt: &str) -> Result<String, HarnessError> {
+            Ok(r#"{"decision":"propose","change_set":{"edits":[{"action":"upsert","id":{"kind":"guardrails","name":"default"},"content":{"frontmatter":null,"body":"新规则：先读后写"}}]}}"#.to_string())
+        }
+    }
+
+    let mut tasks = TaskRegistry::new();
+    tasks
+        .register(
+            TaskKind::HarnessRsi,
+            Box::new(HarnessRsiCycleTask::new(
+                registry,
+                Arc::new(JsonLlm),
+                share::config::RsiConfig::default(),
+            )),
+        )
+        .expect("register");
+
+    let sock = endpoints_under(temp.path()).sock;
+    let daemon = spawn_daemon(temp.path(), tasks, Duration::from_secs(3600)).await;
+
+    send_control(
+        &sock,
+        &RsiControl::Trigger {
+            request_id: "r1".into(),
+        },
+    )
+    .await
+    .expect("Trigger");
+
+    // 等周期落盘
+    let mut written = false;
+    for _ in 0..100 {
+        if let Ok(text) = std::fs::read_to_string(&component_path) {
+            if text.contains("先读后写") {
+                written = true;
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(written, "Trigger 周期必须把提案原子写入组件文件");
+
+    let _ = send_control(&sock, &RsiControl::Stop).await;
+    tokio::time::timeout(Duration::from_secs(2), daemon)
+        .await
+        .expect("daemon 必须优雅退出")
+        .expect("join");
+}

@@ -3,7 +3,10 @@
 use std::fmt;
 
 /// 组件类别（8 个可编辑槽位；声明序即 `list()` 的 kind 排序序）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "kebab-case")]
 pub enum ComponentKind {
     Guardrails,
     MemoryView,
@@ -32,7 +35,9 @@ impl ComponentKind {
 }
 
 /// 多实例组件（skills/scripts/…）内的实例名；单例组件用固定名。
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct ComponentName(String);
 
 impl ComponentName {
@@ -52,7 +57,9 @@ impl fmt::Display for ComponentName {
 }
 
 /// 组件唯一标识：类别 + 实例名。
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct ComponentId {
     pub kind: ComponentKind,
     pub name: ComponentName,
@@ -65,7 +72,7 @@ impl fmt::Display for ComponentId {
 }
 
 /// 组件结构化正文：frontmatter 字段 + markdown 正文（非裸字节）。
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct ComponentContent {
     /// YAML frontmatter 解析后的结构化字段（无 frontmatter 的组件为 None）。
     pub frontmatter: Option<serde_json::Value>,
