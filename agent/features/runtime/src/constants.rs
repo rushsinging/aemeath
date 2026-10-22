@@ -16,3 +16,6 @@ pub(crate) const TRIAGE_NOUL_INSTRUCTIONS: &str =
 
 /// guardrails 注入段正文预算（字符；c2 组件，#2021）。
 pub(crate) const GUARDRAILS_SECTION_MAX_CHARS: usize = 4000;
+
+/// tool_guidance 注入段正文预算（字符；c4 组件，#2022）。
+pub(crate) const TOOL_GUIDANCE_SECTION_MAX_CHARS: usize = 4000;

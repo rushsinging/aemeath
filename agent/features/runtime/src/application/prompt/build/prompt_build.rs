@@ -167,7 +167,14 @@ pub async fn build_system_prompt_parts(
     };
 
     // --- Project instructions: will be injected as a separate user-context message ---
-    let claude_md = load_agents_md(cwd, hook_port, cwd).await;
+    let mut claude_md = load_agents_md(cwd, hook_port, cwd).await;
+
+    // --- tool_guidance（c4 组件）：user-context 消息尾部追加（通道 B：
+    // 修改不破 stable 段 prompt cache，#2022） ---
+    if let Some(section) = load_tool_guidance_section().await {
+        claude_md.push_str("\n\n");
+        claude_md.push_str(&section);
+    }
 
     SystemPromptParts {
         static_part,
@@ -335,4 +342,34 @@ async fn load_guardrails_sections(cwd: &Path) -> Vec<String> {
         }
     }
     sections
+}
+
+// ---- #2022 tool_guidance（c4）注入：user-context 消息侧（通道 B） ----
+
+/// 渲染 tool_guidance 段（source 标签包裹 + 预算截断）。
+fn render_tool_guidance_section(source_path: &str, content: &str) -> String {
+    let mut body: String = content.trim().chars().collect();
+    let budget = crate::constants::TOOL_GUIDANCE_SECTION_MAX_CHARS;
+    if body.chars().count() > budget {
+        body = body.chars().take(budget).collect();
+        body.push_str("…（截断）");
+    }
+    format!("<tool_guidance source=\"{source_path}\">\n{body}\n</tool_guidance>")
+}
+
+/// 加载全局 tool_guidance 覆盖段（缺文件/空内容 → None）。
+async fn load_tool_guidance_section() -> Option<String> {
+    let path = paths::global_tool_guidance_path();
+    match tokio::fs::read_to_string(&path).await {
+        Ok(content) if !content.trim().is_empty() => Some(render_tool_guidance_section(
+            &path.to_string_lossy(),
+            &content,
+        )),
+        Ok(_) => None,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            log::warn!(target: crate::LOG_TARGET, "Failed to read tool_guidance {}: {}", path.display(), error);
+            None
+        }
+    }
 }

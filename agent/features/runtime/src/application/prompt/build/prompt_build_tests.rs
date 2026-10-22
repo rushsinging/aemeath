@@ -600,10 +600,57 @@ fn guardrails_section_truncates_at_budget_with_marker() {
 
 #[tokio::test]
 async fn guardrails_missing_files_yield_no_section() {
+    let _guard = TOOL_GUIDANCE_ENV_LOCK.lock().unwrap();
     let cwd = tempfile::tempdir().unwrap();
     // 全局/项目 guardrails 均不存在（全局路径指向临时隔离目录）
     std::env::set_var("AEMEATH_AGENTS_DIR", cwd.path());
     let sections = load_guardrails_sections(cwd.path()).await;
     std::env::remove_var("AEMEATH_AGENTS_DIR");
     assert!(sections.is_empty(), "缺文件 NEVER 产生空段");
+}
+
+// ---- #2022 tool_guidance（c4）注入契约：user-context 消息侧（通道 B） ----
+
+/// env 依赖测试互斥（AEMEATH_AGENTS_DIR 全局变量并行踩踏防护）。
+static TOOL_GUIDANCE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[test]
+fn tool_guidance_section_wraps_content_with_source_tag() {
+    let section = render_tool_guidance_section("/home/u/.agents/tool_guidance.md", "优先用 Grep");
+    assert!(section.contains("<tool_guidance source=\"/home/u/.agents/tool_guidance.md\">"));
+    assert!(section.contains("优先用 Grep"));
+    assert!(section.contains("</tool_guidance>"));
+}
+
+#[test]
+fn tool_guidance_section_truncates_at_budget_with_marker() {
+    let oversized = "指南".repeat(crate::constants::TOOL_GUIDANCE_SECTION_MAX_CHARS);
+    let section = render_tool_guidance_section("p", &oversized);
+    assert!(section.contains("（截断）"), "超预算必须带截断标记");
+}
+
+#[tokio::test]
+async fn tool_guidance_missing_file_yields_none() {
+    let _guard = TOOL_GUIDANCE_ENV_LOCK.lock().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    std::env::set_var("AEMEATH_AGENTS_DIR", cwd.path());
+    let section = load_tool_guidance_section().await;
+    std::env::remove_var("AEMEATH_AGENTS_DIR");
+    assert!(section.is_none(), "缺文件 NEVER 产生空段");
+}
+
+#[tokio::test]
+async fn claude_md_message_appends_tool_guidance_section() {
+    let _guard = TOOL_GUIDANCE_ENV_LOCK.lock().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    std::env::set_var("AEMEATH_AGENTS_DIR", cwd.path());
+    std::fs::write(
+        cwd.path().join("tool_guidance.md"),
+        "# 工具指南\n优先并行派发",
+    )
+    .unwrap();
+    let section = load_tool_guidance_section().await;
+    std::env::remove_var("AEMEATH_AGENTS_DIR");
+    let section = section.expect("tool_guidance 必须加载");
+    assert!(section.contains("优先并行派发"));
 }
