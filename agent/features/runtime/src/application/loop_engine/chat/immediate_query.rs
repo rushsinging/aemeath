@@ -3,6 +3,17 @@
 //! 查询类输入事件（当前为 `ListModels`）语义是 request/response，不改变会话
 //! 状态，因此 NEVER 进入 gate / pending command：在输入接收点就地执行并回事件。
 //!
+//! # ingress 契约（#2042）
+//!
+//! 所有输入接收路径 MUST 在 admit / 入队之前先过 [`ImmediateQueryDispatcher::try_dispatch`]
+//! （经 `BufferedInputAdapter::dispatch_immediate_query` 或直接引用）：
+//! - turn 边界 drain 与 AwaitUser park：`input_strategy.rs`（adapter 统一持有）；
+//! - busy 模型回调：`main_run_port.rs`（经 adapter 统一入口）；
+//! - idle 接收：`idle_lifecycle.rs`（独立引用同一实现）。
+//!
+//! 新增接收路径漏接会表现为查询事件被 TUI 回显为排队命令（如 `/model`）且
+//! 刷新在 idle gate 兜底 drop 中静默丢失。
+//!
 //! 查询前先比对配置源指纹，保证模型清单反映磁盘最新配置；否则运行中修改
 //! `aemeath.json` 后要等到下一个 turn 边界才可见。
 

@@ -739,6 +739,7 @@ where
                         pending_input: pending_input.clone(),                        run_input_buffer: runtime_context.input(),
                         continuation: input_continuation.clone(),
                         run_id: run_id.clone(),
+                        immediate_query: immediate_query.clone(),
                     };
                 let mut launch_input = input_source.clone();
                 // The idle gate consumed and typed the initial user input.
@@ -948,7 +949,6 @@ where
                 let model_observer = main_run_port::ChatModelObserver {
                     runtime_context: runtime_context.clone(),
                     input: input_source.clone(),
-                    immediate_query: immediate_query.clone(),
                     context_size,
                     turn_context: turn_context.clone(),
                     tool_identity: tool_identity.clone(),

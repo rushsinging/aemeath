@@ -9,6 +9,7 @@
 use sdk::ChatInputEvent;
 use share::message::Message;
 
+use crate::application::loop_engine::chat::immediate_query::ImmediateQueryDispatcher;
 use crate::application::loop_engine::chat::run_input_buffer::BufferDrain;
 use crate::application::loop_engine::chat::{
     ChatEventSink, ChatEventSinkHandle, InputEventDrainPort, PendingInputBuffer, RuntimeStreamEvent,
@@ -142,12 +143,25 @@ where
     /// Stop-hook feedback, step-prefix relay and tool-results continuation.
     pub continuation: InputContinuationState,
     pub run_id: sdk::RunId,
+    /// 查询类事件（request/response）的统一 ingress 分派器：所有经本
+    /// adapter 的接收路径（turn 边界 drain、busy 模型回调）MUST 先过
+    /// [`BufferedInputAdapter::dispatch_immediate_query`] 再入 gate / pending，
+    /// 消除各接收点各自判断的漏接面（#2042）。
+    pub immediate_query: ImmediateQueryDispatcher,
 }
 
 impl<I> BufferedInputAdapter<I>
 where
     I: SessionInputPort,
 {
+    /// 查询类事件统一 ingress 前置过滤：命中即就地执行并回事件，NEVER 排队。
+    ///
+    /// 所有输入接收路径在 admit / 入队之前 MUST 先调用此入口（#2042）；
+    /// 新增接收路径漏接会表现为查询事件被 TUI 回显为排队命令且刷新丢失。
+    pub(crate) async fn dispatch_immediate_query(&self, event: &ChatInputEvent) -> bool {
+        self.immediate_query.try_dispatch(event, &self.sink).await
+    }
+
     pub(crate) fn drain_remaining_events(&mut self) {
         let sealed = self.run_input_buffer.is_sealed();
         let drained = self.run_input_buffer.with_lock(|buffer| buffer.drain_all());
@@ -269,6 +283,12 @@ where
                     }
                 }
                 other => {
+                    // #2042：查询类事件统一 ingress 前置过滤——命中即就地
+                    // 分派回事件，NEVER 进入命令队列（否则 TUI 回显 /model
+                    // 且 idle gate 兜底 drop 丢失刷新）。
+                    if self.dispatch_immediate_query(&other).await {
+                        continue;
+                    }
                     // 控制类命令入队：发布全量快照，UI 才知道命令已排队（#1816）。
                     self.pending_input.push(other);
                     self.publish_command_queue_snapshot().await;
@@ -525,50 +545,68 @@ where
             self.run_id,
             expected_epoch,
         );
-        let event = self.input_events.recv_next_input().await;
+        // Async park: wait for the next input event from the channel.
+        // engine's await_interruptible wraps this future — cancel/timeout
+        // will drop it automatically.
         log::debug!(
             target: crate::LOG_TARGET,
-            "[input_strategy] session input wait completed run_id={} epoch={:?} event_kind={}",
+            "[input_strategy] awaiting session input run_id={} epoch={:?}",
             self.run_id,
             expected_epoch,
-            event.as_ref().map(chat_input_event_kind).unwrap_or("source_closed"),
         );
-        match event {
-            None => {
-                // Channel closed — seal.
-                Ok(DrainOutcome::EmptyAndSealed {
-                    epoch: expected_epoch,
-                })
-            }
-            Some(
-                event @ (ChatInputEvent::UserMessage { .. } | ChatInputEvent::SkillRequest(_)),
-            ) => {
-                let outcome = self.run_input_buffer.with_lock(|b| {
-                    b.push(event);
-                    b.try_drain_unsealed(expected_epoch)
-                });
-                match outcome {
-                    BufferDrain::Ready { batch, epoch } => Ok(DrainOutcome::Ready { batch, epoch }),
-                    BufferDrain::Empty { epoch } => Ok(DrainOutcome::NoInput { epoch }),
-                    BufferDrain::EmptyAndSealed { epoch }
-                    | BufferDrain::AlreadySealed { epoch } => {
-                        Ok(DrainOutcome::EmptyAndSealed { epoch })
-                    }
-                    BufferDrain::EpochMismatch { expected, actual } => {
-                        Err(LoopEngineError::Adapter(format!(
-                            "drain epoch 不匹配：期望 {:?}，实际 {:?}",
-                            expected, actual,
-                        )))
-                    }
+        loop {
+            let event = self.input_events.recv_next_input().await;
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "[input_strategy] session input wait completed run_id={} epoch={:?} event_kind={}",
+                self.run_id,
+                expected_epoch,
+                event.as_ref().map(chat_input_event_kind).unwrap_or("source_closed"),
+            );
+            match event {
+                None => {
+                    // Channel closed — seal.
+                    return Ok(DrainOutcome::EmptyAndSealed {
+                        epoch: expected_epoch,
+                    });
                 }
-            }
-            Some(other) => {
-                // Non-UserMessage command: defer to session idle gate.
-                self.pending_input.push(other);
-                self.publish_command_queue_snapshot().await;
-                Ok(DrainOutcome::EmptyAndSealed {
-                    epoch: expected_epoch,
-                })
+                Some(
+                    event @ (ChatInputEvent::UserMessage { .. } | ChatInputEvent::SkillRequest(_)),
+                ) => {
+                    let outcome = self.run_input_buffer.with_lock(|b| {
+                        b.push(event);
+                        b.try_drain_unsealed(expected_epoch)
+                    });
+                    return match outcome {
+                        BufferDrain::Ready { batch, epoch } => {
+                            Ok(DrainOutcome::Ready { batch, epoch })
+                        }
+                        BufferDrain::Empty { epoch } => Ok(DrainOutcome::NoInput { epoch }),
+                        BufferDrain::EmptyAndSealed { epoch }
+                        | BufferDrain::AlreadySealed { epoch } => {
+                            Ok(DrainOutcome::EmptyAndSealed { epoch })
+                        }
+                        BufferDrain::EpochMismatch { expected, actual } => {
+                            Err(LoopEngineError::Adapter(format!(
+                                "drain epoch 不匹配：期望 {:?}，实际 {:?}",
+                                expected, actual,
+                            )))
+                        }
+                    };
+                }
+                Some(other) => {
+                    // #2042：查询类事件统一 ingress 前置过滤，命中即就地
+                    // 分派并继续等待用户输入，NEVER 入队、不收口 Run。
+                    if self.dispatch_immediate_query(&other).await {
+                        continue;
+                    }
+                    // Non-UserMessage command: defer to session idle gate.
+                    self.pending_input.push(other);
+                    self.publish_command_queue_snapshot().await;
+                    return Ok(DrainOutcome::EmptyAndSealed {
+                        epoch: expected_epoch,
+                    });
+                }
             }
         }
     }
@@ -822,6 +860,8 @@ mod batched_user_input_tests {
             run_input_buffer: crate::application::run::context::RunInputBufferHandle::new(),
             continuation: InputContinuationState::default(),
             run_id: share::ids::RunId::new_v7(),
+            immediate_query: crate::application::loop_engine::chat::immediate_query::test_support::no_io_dispatcher(
+            ),
         };
         (adapter, sink)
     }
