@@ -624,7 +624,10 @@ fn think_dialog_annotates_mapping_against_model_capability() {
         "超上限档位应标注映射结果，实际 {options:?}"
     );
     assert_eq!(options[6], "max → medium", "实际 {options:?}");
-    assert_eq!(options[3], "medium ←", "当前档位行带标记，实际 {options:?}");
+    assert_eq!(
+        options[3], "medium",
+        "当前档位行文案无字符标记（高亮由 Dialog current_index 渲染），实际 {options:?}"
+    );
 }
 
 #[test]

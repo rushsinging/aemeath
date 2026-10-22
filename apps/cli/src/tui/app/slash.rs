@@ -310,8 +310,8 @@ Build info:
     }
 
     /// 打开 /think 档位选择对话框（#2032）：固定 7 档全集；每档按当前模型
-    /// 能力上限标注映射结果（`high → medium`），当前档位（映射后）带 ←
-    /// 标记；确认等价提交 `/think <level>`。
+    /// 能力上限标注映射结果（`high → medium`）；当前档位（映射后）行以
+    /// SUCCESS 高亮（NEVER 字符标记）；确认等价提交 `/think <level>`。
     fn open_think_level_dialog(&mut self) {
         let current = self.model.runtime_presentation.reasoning_level();
         let max_level = self.model.runtime_presentation.reasoning_max_level();
@@ -325,18 +325,20 @@ Build info:
             sdk::ReasoningLevel::Max,
         ];
         let to_view = crate::tui::adapter::event_mapping::reasoning_level_view;
+        let mut current_index = 0;
         let options = levels
             .iter()
-            .map(|level| {
+            .enumerate()
+            .map(|(index, level)| {
                 let level_view = to_view(*level);
                 let mapped = level_view.clamped_to(max_level);
+                if level_view == current {
+                    current_index = index;
+                }
                 let mut text = level_view.as_str().to_string();
                 if mapped != level_view {
                     // 超上限档位标注映射结果（如 `max → medium`）。
                     text.push_str(&format!(" → {}", mapped.as_str()));
-                } else if level_view == current {
-                    // ← 只标档位本身即当前的行；映射行不重复标（等价档太多）。
-                    text.push_str(" ←");
                 }
                 text
             })
@@ -346,7 +348,11 @@ Build info:
             .map(|level| level.as_str().to_string())
             .collect();
         self.layout.open_command_dialog(
-            crate::tui::render::dialog::Dialog::select("Select Reasoning Effort", options),
+            crate::tui::render::dialog::Dialog::select_with_current(
+                "Select Reasoning Effort",
+                options,
+                current_index,
+            ),
             keys,
             "/think",
         );

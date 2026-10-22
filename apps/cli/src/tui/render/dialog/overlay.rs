@@ -17,6 +17,9 @@ pub struct Dialog {
     title: String,
     options: Vec<String>,
     selected: usize,
+    /// 当前生效项索引（#2032 /think 当前档位）：非选中时以 SUCCESS 高亮
+    /// 区分于光标选中项（WARNING）。`None` 表示无当前项标注。
+    current_index: Option<usize>,
     /// Whether the dialog is visible
     pub visible: bool,
 }
@@ -28,7 +31,16 @@ impl Dialog {
             title: title.to_string(),
             options,
             selected: 0,
+            current_index: None,
             visible: true,
+        }
+    }
+
+    /// 创建带「当前生效项」高亮的选择对话框（#2032 /think 档位选择）。
+    pub fn select_with_current(title: &str, options: Vec<String>, current_index: usize) -> Self {
+        Self {
+            current_index: Some(current_index),
+            ..Self::select(title, options)
         }
     }
 
@@ -105,6 +117,14 @@ impl Dialog {
                     format!(" > {}", option),
                     Style::default()
                         .fg(theme::WARNING)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else if Some(i) == self.current_index {
+                // 当前生效项：SUCCESS 高亮（#2032，NEVER 字符标记）。
+                lines.push(Line::styled(
+                    format!("   {}", option),
+                    Style::default()
+                        .fg(theme::SUCCESS)
                         .add_modifier(Modifier::BOLD),
                 ));
             } else {
