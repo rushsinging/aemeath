@@ -17,3 +17,6 @@ pub mod scripts_registry;
 mod scripts_registry_tests;
 #[cfg(test)]
 mod scripts_tests;
+pub mod skills_registry;
+#[cfg(test)]
+mod skills_registry_tests;

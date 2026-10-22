@@ -54,32 +54,40 @@ impl FilesystemComponentRegistry {
 
     /// 解析落盘文本（可选 frontmatter 块 + 正文）。
     fn parse_content(text: &str) -> Result<ComponentContent, HarnessError> {
-        let Some(stripped) = text.strip_prefix("---\n") else {
-            // 无 frontmatter 定界符：整个文件都是正文。
-            return Ok(ComponentContent {
-                frontmatter: None,
-                body: text.to_string(),
-            });
-        };
-        let end = stripped.find("\n---\n").ok_or_else(|| {
-            HarnessError::invalid(ERROR_DOMAIN, "缺少 frontmatter 结束定界符 ---")
-        })?;
-        let frontmatter_text = stripped
-            .get(..end)
-            .ok_or_else(|| HarnessError::invalid(ERROR_DOMAIN, "frontmatter 区段切分越界"))?;
-        let body = stripped
-            .get(end + "\n---\n".len()..)
-            .ok_or_else(|| HarnessError::invalid(ERROR_DOMAIN, "正文区段切分越界"))?;
-        let frontmatter: serde_json::Value =
-            serde_yml::from_str(frontmatter_text).map_err(|error| {
-                HarnessError::invalid(ERROR_DOMAIN, format!("frontmatter 解析失败：{error}"))
-            })?;
-        Ok(ComponentContent {
-            frontmatter: Some(frontmatter),
-            body: body.to_string(),
-        })
+        parse_markdown_with_frontmatter(text)
     }
+}
 
+/// 解析 markdown + 可选 YAML frontmatter（--- 定界；无定界符时整体为正文）。
+/// filesystem 与 skills registry 共用（DRY：组件族统一落盘形态）。
+pub fn parse_markdown_with_frontmatter(text: &str) -> Result<ComponentContent, HarnessError> {
+    let Some(stripped) = text.strip_prefix("---\n") else {
+        // 无 frontmatter 定界符：整个文件都是正文。
+        return Ok(ComponentContent {
+            frontmatter: None,
+            body: text.to_string(),
+        });
+    };
+    let end = stripped
+        .find("\n---\n")
+        .ok_or_else(|| HarnessError::invalid(ERROR_DOMAIN, "缺少 frontmatter 结束定界符 ---"))?;
+    let frontmatter_text = stripped
+        .get(..end)
+        .ok_or_else(|| HarnessError::invalid(ERROR_DOMAIN, "frontmatter 区段切分越界"))?;
+    let body = stripped
+        .get(end + "\n---\n".len()..)
+        .ok_or_else(|| HarnessError::invalid(ERROR_DOMAIN, "正文区段切分越界"))?;
+    let frontmatter: serde_json::Value =
+        serde_yml::from_str(frontmatter_text).map_err(|error| {
+            HarnessError::invalid(ERROR_DOMAIN, format!("frontmatter 解析失败：{error}"))
+        })?;
+    Ok(ComponentContent {
+        frontmatter: Some(frontmatter),
+        body: body.to_string(),
+    })
+}
+
+impl FilesystemComponentRegistry {
     /// 原子写：同目录临时文件 + rename（读方 NEVER 看到半写状态）。
     fn atomic_write(path: &Path, text: &str) -> Result<(), HarnessError> {
         let parent_directory = path.parent().ok_or_else(|| {
