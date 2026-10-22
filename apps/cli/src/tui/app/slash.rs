@@ -16,14 +16,6 @@ pub(crate) fn resolve_slash_for_delivery(
     router.resolve(sdk::SlashInput::new(input))
 }
 
-/// sdk 档位与 TUI 视图档位比较（两个独立枚举，经 adapter 投影对齐）。
-fn reasoning_level_matches(
-    level: sdk::ReasoningLevel,
-    view: crate::tui::view_model::status::ReasoningLevelView,
-) -> bool {
-    crate::tui::adapter::event_mapping::reasoning_level_view(level) == view
-}
-
 impl App {
     /// 纯同步 slash 分发：只做状态写入并返回 `UpdateResult`，所有 I/O
     /// 经 `Effect` 由 run_loop 的统一 effect 循环执行。
@@ -317,10 +309,12 @@ Build info:
         }
     }
 
-    /// 打开 /think 档位选择对话框（#2032）：固定 7 档全集，当前档位（clamp 后
-    /// 映射档位）带 ← 标记；确认等价提交 `/think <level>`。
+    /// 打开 /think 档位选择对话框（#2032）：固定 7 档全集；每档按当前模型
+    /// 能力上限标注映射结果（`high → medium`），当前档位（映射后）带 ←
+    /// 标记；确认等价提交 `/think <level>`。
     fn open_think_level_dialog(&mut self) {
         let current = self.model.runtime_presentation.reasoning_level();
+        let max_level = self.model.runtime_presentation.reasoning_max_level();
         let levels = [
             sdk::ReasoningLevel::Off,
             sdk::ReasoningLevel::Minimal,
@@ -330,15 +324,21 @@ Build info:
             sdk::ReasoningLevel::Xhigh,
             sdk::ReasoningLevel::Max,
         ];
+        let to_view = crate::tui::adapter::event_mapping::reasoning_level_view;
         let options = levels
             .iter()
             .map(|level| {
-                let marker = if reasoning_level_matches(*level, current) {
-                    " ←"
-                } else {
-                    ""
-                };
-                format!("{level}{marker}")
+                let level_view = to_view(*level);
+                let mapped = level_view.clamped_to(max_level);
+                let mut text = level_view.as_str().to_string();
+                if mapped != level_view {
+                    // 超上限档位标注映射结果（如 `max → medium`）。
+                    text.push_str(&format!(" → {}", mapped.as_str()));
+                } else if level_view == current {
+                    // ← 只标档位本身即当前的行；映射行不重复标（等价档太多）。
+                    text.push_str(" ←");
+                }
+                text
             })
             .collect::<Vec<_>>();
         let keys = levels

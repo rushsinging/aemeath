@@ -12,6 +12,11 @@ pub enum RuntimePresentationIntent {
         enabled: bool,
         level: ReasoningLevelView,
     },
+    /// 当前模型 reasoning 能力上限（#2032）：bootstrap 与模型切换时更新，
+    /// /think 对话框据此逐档渲染映射标注。
+    ReasoningCapability {
+        max_level: ReasoningLevelView,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -25,6 +30,9 @@ pub enum RuntimePresentationChange {
         enabled: bool,
         level: ReasoningLevelView,
     },
+    ReasoningCapability {
+        max_level: ReasoningLevelView,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -34,6 +42,7 @@ pub struct RuntimePresentation {
     context_size: u64,
     thinking: bool,
     reasoning_level: ReasoningLevelView,
+    reasoning_max_level: ReasoningLevelView,
 }
 
 impl Default for RuntimePresentation {
@@ -44,6 +53,8 @@ impl Default for RuntimePresentation {
             context_size: 0,
             thinking: true,
             reasoning_level: ReasoningLevelView::High,
+            // 能力上限收到 bootstrap/模型切换更新前按全档算（无映射标注）。
+            reasoning_max_level: ReasoningLevelView::Max,
         }
     }
 }
@@ -70,6 +81,11 @@ impl RuntimePresentation {
         self.reasoning_level
     }
 
+    /// 当前模型 reasoning 能力上限（#2032 对话框逐档映射标注）。
+    pub(crate) fn reasoning_max_level(&self) -> ReasoningLevelView {
+        self.reasoning_max_level
+    }
+
     pub fn apply(&mut self, intent: RuntimePresentationIntent) -> RuntimePresentationChange {
         match intent {
             RuntimePresentationIntent::ProviderModel { provider, model_id } => {
@@ -85,6 +101,10 @@ impl RuntimePresentation {
                 self.thinking = enabled;
                 self.reasoning_level = level;
                 RuntimePresentationChange::Thinking { enabled, level }
+            }
+            RuntimePresentationIntent::ReasoningCapability { max_level } => {
+                self.reasoning_max_level = max_level;
+                RuntimePresentationChange::ReasoningCapability { max_level }
             }
         }
     }

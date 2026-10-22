@@ -474,6 +474,7 @@ pub(crate) fn sdk_event_to_tui_event(event: sdk::ChatEvent) -> SdkEventMapping {
             context_window: result.context_window,
             reasoning_active: result.reasoning_active,
             reasoning_level: result.reasoning_level.map(reasoning_level_view),
+            reasoning_max_level: result.reasoning_max_level.map(reasoning_level_view),
         },
         ChatEvent::ThinkingChanged {
             enabled,

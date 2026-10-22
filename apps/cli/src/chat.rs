@@ -214,6 +214,16 @@ pub(crate) async fn run_chat(args: Args) {
                 },
             ),
         );
+        // #2032：模型能力上限（/think 对话框逐档映射标注）。
+        app.apply_agent_intent(
+            crate::tui::update::intent::AgentIntent::RuntimePresentation(
+                crate::tui::model::runtime_presentation::RuntimePresentationIntent::ReasoningCapability {
+                    max_level: crate::tui::adapter::event_mapping::reasoning_level_view(
+                        bootstrap.reasoning_max_level,
+                    ),
+                },
+            ),
+        );
         if let Some(resume) = startup_resume {
             crate::tui::log_debug!(
                 "resume_lifecycle boundary=cli_to_tui stage=startup_view_received session_id={} steps={} messages={}",

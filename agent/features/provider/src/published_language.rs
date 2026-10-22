@@ -47,6 +47,11 @@ impl ModelInfo {
     pub fn resolve_reasoning(&self, requested: ReasoningLevel) -> ReasoningLevel {
         crate::domain::capability::resolve_supported(&self.supported_reasoning, requested)
     }
+
+    /// 能力阶梯的最高档（#2032：状态栏映射档位与 /think 对话框逐档标注）。
+    pub fn max_reasoning_level(&self) -> ReasoningLevel {
+        crate::domain::capability::maximum_supported(&self.supported_reasoning)
+    }
 }
 
 // ─── Raw Usage ──────────────────────────────────────────

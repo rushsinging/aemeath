@@ -745,6 +745,8 @@ pub(crate) enum TuiRuntimeEvent {
         reasoning_active: Option<bool>,
         /// 切换后生效的 reasoning 深度（#1616 状态栏直接显示）。
         reasoning_level: Option<ReasoningLevelView>,
+        /// 切换后模型能力上限（#2032 /think 对话框逐档映射标注）。
+        reasoning_max_level: Option<ReasoningLevelView>,
     },
     ContextEstimated {
         estimated_tokens: usize,

@@ -596,6 +596,38 @@ fn think_slash_command_without_args_opens_level_dialog() {
 }
 
 #[test]
+fn think_dialog_annotates_mapping_against_model_capability() {
+    let mut app = app_with_builtin_router();
+    // 模拟能力上限 medium 的模型（如 mimo driver）：bootstrap 投影更新上限。
+    app.apply_agent_intent(crate::tui::update::intent::AgentIntent::RuntimePresentation(
+        crate::tui::model::runtime_presentation::RuntimePresentationIntent::ReasoningCapability {
+            max_level: crate::tui::view_model::status::ReasoningLevelView::Medium,
+        },
+    ));
+    // 当前档位 medium（映射后）。
+    app.apply_agent_intent(
+        crate::tui::update::intent::AgentIntent::RuntimePresentation(
+            crate::tui::model::runtime_presentation::RuntimePresentationIntent::Thinking {
+                enabled: true,
+                level: crate::tui::view_model::status::ReasoningLevelView::Medium,
+            },
+        ),
+    );
+    app.handle_slash_command("/think");
+    let dialog = app
+        .layout
+        .active_dialog()
+        .expect("/think 无参数应打开档位对话框");
+    let options = dialog.options();
+    assert_eq!(
+        options[4], "high → medium",
+        "超上限档位应标注映射结果，实际 {options:?}"
+    );
+    assert_eq!(options[6], "max → medium", "实际 {options:?}");
+    assert_eq!(options[3], "medium ←", "当前档位行带标记，实际 {options:?}");
+}
+
+#[test]
 fn think_dialog_confirm_resubmits_think_slash_command() {
     let mut app = app_with_builtin_router();
     app.handle_slash_command("/think");

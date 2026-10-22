@@ -90,7 +90,8 @@ pub(crate) fn build_provider_binding_from_runtime_model(
         display_name: display,
         context_window: resolved_model.model.context_window,
         reasoning_active: Some(requested_reasoning != share::reasoning::ReasoningLevel::Off),
-        reasoning_level: Some(requested_reasoning),
+        reasoning_level: Some(binding.model.resolve_reasoning(requested_reasoning)),
+        reasoning_max_level: Some(binding.model.max_reasoning_level()),
     };
 
     Ok((binding, result))

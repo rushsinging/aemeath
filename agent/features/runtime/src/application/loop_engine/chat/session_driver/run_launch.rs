@@ -152,12 +152,18 @@ where
                     }
                 PendingCommand::SwitchModel { selection } => {
                     match (build_switched_client)(&selection).await {
-                        Ok((new_binding, result)) => {
+                        Ok((new_binding, mut result)) => {
                             // #2032：模型切换仅当用户未 /think 显式选择时跟随新模型默认档。
-                            reasoning
-                                .lock()
-                                .unwrap_or_else(|error| error.into_inner())
-                                .on_model_switched(new_binding.requested_reasoning);
+                            let session_requested = {
+                                let mut control = reasoning
+                                    .lock()
+                                    .unwrap_or_else(|error| error.into_inner());
+                                control.on_model_switched(new_binding.requested_reasoning);
+                                control.requested()
+                            };
+                            // 回执与状态栏显示会话档位 clamp 后的映射档位。
+                            result.reasoning_level =
+                                Some(new_binding.model.resolve_reasoning(session_requested));
                             let committed_config = shell.session_switch.committed_config_snapshot();
                             shell
                                 .session_state

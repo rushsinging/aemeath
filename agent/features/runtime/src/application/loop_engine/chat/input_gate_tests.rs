@@ -200,6 +200,48 @@ async fn compact_input_becomes_idle_command_and_is_buffered_while_busy() {
     assert!(!busy_buffer.is_empty());
 }
 
+/// #2032：/think idle 受理为 PendingCommand；busy 排队等 run 结束回 idle 执行
+///（与 SwitchModel 同语义，NEVER busy 丢弃）。
+#[tokio::test]
+async fn set_thinking_idle_becomes_pending_command_and_is_buffered_while_busy() {
+    let idle_buffer = PendingInputBuffer::default();
+    idle_buffer.push(ChatInputEvent::SetThinking {
+        request: sdk::ThinkingRequest::Level(share::reasoning::ReasoningLevel::High),
+    });
+    let idle_outcome = apply_gate(
+        GateKind::BeforeLlm,
+        &idle_buffer,
+        &TestSink::default(),
+        &task::TaskStore::new(),
+        true,
+    )
+    .await;
+
+    assert!(matches!(
+        idle_outcome.pending_command,
+        Some(PendingCommand::SetThinking {
+            request: sdk::ThinkingRequest::Level(share::reasoning::ReasoningLevel::High),
+        })
+    ));
+    assert!(idle_buffer.is_empty());
+
+    let busy_buffer = PendingInputBuffer::default();
+    busy_buffer.push(ChatInputEvent::SetThinking {
+        request: sdk::ThinkingRequest::Level(share::reasoning::ReasoningLevel::Max),
+    });
+    let busy_outcome = apply_gate(
+        GateKind::BeforeLlm,
+        &busy_buffer,
+        &TestSink::default(),
+        &task::TaskStore::new(),
+        false,
+    )
+    .await;
+
+    assert!(busy_outcome.pending_command.is_none());
+    assert!(!busy_buffer.is_empty(), "busy 时 /think 必须排队而非丢弃");
+}
+
 /// `/reflect-now` idle 受理为 PendingCommand；busy 直接提示丢弃，NEVER 排队。
 #[tokio::test]
 async fn reflect_now_idle_becomes_pending_command_and_busy_drops_with_notice() {

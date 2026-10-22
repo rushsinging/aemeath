@@ -36,4 +36,7 @@ pub struct ModelSwitchResult {
     pub reasoning_active: Option<bool>,
     /// 切换后生效的 reasoning 深度（#1616 状态栏展示）。旧构造方缺省为 `None`。
     pub reasoning_level: Option<share::reasoning::ReasoningLevel>,
+    /// 切换后模型能力上限（#2032 对话框逐档映射标注）。
+    /// 旧构造方缺省为 `None`（按全档处理）。
+    pub reasoning_max_level: Option<share::reasoning::ReasoningLevel>,
 }
