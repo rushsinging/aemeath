@@ -543,3 +543,72 @@ async fn refresh_publishes_to_watch_subscribers_once() {
     changes.changed().await.unwrap();
     assert_eq!(changes.borrow().model_name(), "second");
 }
+
+// ---- #2023 c6 config 热载：agents 定义 run 边界生效 ----
+
+#[tokio::test]
+async fn refresh_reloads_agent_roster_for_next_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let global = dir.path().join("global.json");
+    std::fs::write(
+        &global,
+        r#"{"agents":{"names":{"coder":{"role":"coder"},"reviewer":{"role":"reviewer"}},"default":"coder"}}"#,
+    )
+    .unwrap();
+    let service = ConfigAppService::with_global_path(None, global.clone());
+    service.load().await.unwrap();
+    assert!(service
+        .committed_snapshot()
+        .agents()
+        .names
+        .contains_key("coder"));
+    assert!(service
+        .committed_snapshot()
+        .agents()
+        .names
+        .contains_key("reviewer"));
+
+    // 改 config：新增 agent 定义 → refresh → 下一 run 读到新名册
+    std::fs::write(
+        &global,
+        r#"{"agents":{"names":{"coder":{"role":"coder"},"reviewer":{"role":"reviewer"},"tester":{"role":"coder"}},"default":"coder"}}"#,
+    )
+    .unwrap();
+    let outcome = service.refresh_if_sources_changed().await;
+
+    assert!(matches!(
+        outcome,
+        Ok(ConfigRefreshOutcomeData::Reloaded { .. })
+    ));
+    assert!(service
+        .committed_snapshot()
+        .agents()
+        .names
+        .contains_key("tester"));
+}
+
+#[tokio::test]
+async fn refresh_agent_role_definitions_updated() {
+    let dir = tempfile::tempdir().unwrap();
+    let global = dir.path().join("global.json");
+    std::fs::write(
+        &global,
+        r#"{"agents":{"names":{"coder":{"role":"coder"}},"roles":{"coder":{"description":"旧描述"}}}}"#,
+    )
+    .unwrap();
+    let service = ConfigAppService::with_global_path(None, global.clone());
+    service.load().await.unwrap();
+
+    std::fs::write(
+        &global,
+        r#"{"agents":{"names":{"coder":{"role":"coder"}},"roles":{"coder":{"description":"新描述"}}}}"#,
+    )
+    .unwrap();
+    service.refresh_if_sources_changed().await.unwrap();
+
+    let roles = service.committed_snapshot().agents().merged_roles();
+    assert_eq!(
+        roles.get("coder").map(|role| role.description.as_str()),
+        Some("新描述")
+    );
+}

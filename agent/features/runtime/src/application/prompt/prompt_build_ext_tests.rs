@@ -290,3 +290,28 @@ fn background_process_section_is_bilingual_and_covers_core_semantics() {
         "不应再鼓励用 Status 替代完成通知"
     );
 }
+
+// ── #2023 c6 config 热载：refresh 后名册经 snapshot 进入下一 run prompt ──
+
+#[test]
+fn snapshot_with_new_agent_renders_into_next_run_prompt() {
+    use std::collections::HashMap;
+    let mut names = HashMap::new();
+    names.insert(
+        "tester".to_string(),
+        AgentInstanceConfig {
+            role: "coder".to_string(),
+            ..Default::default()
+        },
+    );
+    // 模拟 refresh 后的 committed snapshot（含新增 tester 实例）
+    let snapshot = make_snapshot(names, "en");
+
+    let mut prompt = String::new();
+    append_agent_roles(&mut prompt, Some(&snapshot), "en");
+
+    assert!(
+        prompt.contains("tester"),
+        "新增 agent 定义必须进入下一 run prompt"
+    );
+}
