@@ -2,11 +2,11 @@ use crate::InMemorySessionRepository;
 use crate::SessionRepository;
 use crate::{
     AcceptedInputAppendData, AcceptedInputError, CleanupConfirmation, ContentFingerprint,
-    ContextAppendData, ContextAppendError, ContextRequestId, FinalizeCause, RunStepId, SessionId,
-    SessionRevision, ToolCallIdentityData, ToolOutcomeKindData, ToolReceiptMutationData,
-    ToolTerminalReceiptData,
+    ContextAppendData, ContextAppendError, ContextRequestId, FinalizeCause, SessionRevision,
+    ToolCallIdentityData, ToolOutcomeKindData, ToolReceiptMutationData, ToolTerminalReceiptData,
 };
 use sdk::RunId;
+use share::ids::{RunStepId, SessionId};
 use share::message::{ContentBlock, Message};
 
 fn append(fingerprint: &str) -> ContextAppendData {

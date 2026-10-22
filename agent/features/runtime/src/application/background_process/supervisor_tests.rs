@@ -2,9 +2,10 @@ use super::*;
 use crate::domain::background_process::{
     BackgroundInvalidationReason, BackgroundProcessState, BackgroundProcessTerminalKind,
 };
-use context::{SessionId, ToolCallIdentityData};
+use context::ToolCallIdentityData;
 use sdk::{RunId, RunStepId};
 use share::ids::BackgroundProcessId;
+use share::ids::SessionId;
 use std::time::{Duration, SystemTime};
 
 fn identity(call_suffix: &str) -> ToolCallIdentityData {

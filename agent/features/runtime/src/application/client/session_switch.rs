@@ -21,7 +21,7 @@ pub use gate::OwnedSessionSharedPermit;
 use std::sync::Arc;
 
 use config::{PreparedProjectConfigData, ProjectConfigLocationData};
-use context::session::{CanonicalSession, SnapshotState};
+use context::session::CanonicalSession;
 
 use memory::api::ProjectMemoryKey;
 use share::session_types::ProjectIdentityData;
@@ -36,22 +36,9 @@ pub async fn wire_session_switch_coordinator(
     let workspace_read = deps.workspace.read();
     let workspace_persist = deps.workspace.persist();
     let workspace_snapshot = workspace_persist.snapshot();
-    let now = share::time::now_iso();
-    let initial_session = CanonicalSession {
-        id: context::session::new_session_id(),
-        chats: Vec::new(),
-        created_at: now.clone(),
-        updated_at: now,
-        metadata: Default::default(),
-        tasks: SnapshotState::Missing,
-        workspace: SnapshotState::Captured(workspace_snapshot),
-        revision: 0,
-        compact: None,
-        cleared_after: None,
-        run_slices: Default::default(),
-        committed_steps: Default::default(),
-        skill_load_records: Vec::new(),
-    };
+    // 快照经 empty + capture 两步组装（槽位字段 crate 私有）。
+    let mut initial_session = CanonicalSession::empty(context::session::new_session_id());
+    initial_session.capture_workspace(workspace_snapshot);
 
     // 从已验证的 workspace 身份 bootstrap 初始 config 位置：执行
     // prepare_for_project + commit_project，让活跃 project 位置从启动即就绪

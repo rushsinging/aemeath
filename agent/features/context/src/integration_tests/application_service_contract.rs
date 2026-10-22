@@ -1,18 +1,18 @@
 use crate::domain::session::CommittedStepMessages;
+use share::ids::{RunStepId, SessionId};
 use std::sync::Arc;
 
 use crate::CommittedMemoryRetrieveAdapter;
 use crate::ContextApplicationService;
 use crate::{
     CleanupConfirmation, ContextAppendData, ContextMessages, ContextRequestData, ContextRequestId,
-    FinalizeCause, Language, RunStepId, SessionId, SessionRevision, SystemBlock,
-    SystemPromptSpecData, ToolCallIdentityData, ToolCallReceiptData, ToolOutcomeKindData,
-    ToolTerminalReceiptData,
+    FinalizeCause, Language, SessionRevision, SystemBlock, SystemPromptSpecData,
+    ToolCallIdentityData, ToolCallReceiptData, ToolOutcomeKindData, ToolTerminalReceiptData,
 };
 use crate::{CommittedRunSlice, CommittedRunStep, FinalizedOutcomeRecord, SessionHistory};
 use crate::{
     ContextMemorySource, ContextPort, ContextPromptSource, MemoryMaterialization,
-    PromptMaterialization, SessionRepository, SessionSnapshot,
+    PromptMaterialization, SessionItem, SessionRepository,
 };
 use async_trait::async_trait;
 use memory::api::{MemoryPort, NoOpMemory};
@@ -187,8 +187,8 @@ fn structured_fake_session() -> FakeSession {
 
 #[async_trait]
 impl SessionRepository for FakeSession {
-    async fn snapshot(&self, _session_id: &SessionId) -> Result<SessionSnapshot, String> {
-        Ok(SessionSnapshot {
+    async fn snapshot(&self, _session_id: &SessionId) -> Result<SessionItem, String> {
+        Ok(SessionItem {
             revision: SessionRevision::new(2),
             messages: self.messages.clone(),
             structured_history: self.structured_history.clone(),

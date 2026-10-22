@@ -3,8 +3,9 @@
 use std::sync::Mutex;
 use std::time::SystemTime;
 
-use context::{SessionId, ToolCallIdentityData};
+use context::ToolCallIdentityData;
 use sdk::{RunId, RunStepId};
+use share::ids::SessionId;
 use tools::published::agent::{AgentProgressEvent, AgentProgressKind, AgentToolCallProgress};
 use tools::published::execution::{ProgressSink, ToolProgressEvent};
 use tools::published::sub_run::SubRunTerminalOutcome;

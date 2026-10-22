@@ -65,7 +65,7 @@ impl SessionRunFixture {
         self.session_state.snapshot_for_run().revision()
     }
 
-    pub(crate) fn session_snapshot(&self) -> crate::application::run::creation::SessionSnapshot {
+    pub(crate) fn session_snapshot(&self) -> crate::application::run::creation::SessionItem {
         self.session_state.snapshot_for_run()
     }
 
@@ -309,7 +309,6 @@ impl SessionRunFixtureBuilder {
             Some(&self.workspace_root),
             share::config::paths::global_config_path(),
         ));
-        let now = chrono::Utc::now().to_rfc3339();
         let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::api::NoOpMemory);
         let wiring = Arc::new(crate::SessionSwitchCoordinator::assemble(
             crate::SessionSwitchCoordinatorBuilder {
@@ -322,22 +321,13 @@ impl SessionRunFixtureBuilder {
                 config_participant: config_service,
                 memory_opener: Box::new(context::test_support::InMemoryTestOpener),
                 session_management: Arc::new(context::test_support::UnavailableSessionManagement),
-                initial_session: context::session::CanonicalSession {
-                    id: session_snapshot.session_id().to_string(),
-                    chats: Vec::new(),
-                    created_at: now.clone(),
-                    updated_at: now,
-                    metadata: Default::default(),
-                    tasks: context::session::SnapshotState::Missing,
-                    workspace: context::session::SnapshotState::Captured(
-                        workspace.persist().snapshot(),
-                    ),
-                    revision: session_snapshot.revision(),
-                    compact: None,
-                    cleared_after: None,
-                    run_slices: Vec::new().into(),
-                    committed_steps: Default::default(),
-                    skill_load_records: Vec::new(),
+                initial_session: {
+                    let mut session = context::session::CanonicalSession::empty(
+                        session_snapshot.session_id().to_string(),
+                    );
+                    session.capture_workspace(workspace.persist().snapshot());
+                    session.revision = session_snapshot.revision();
+                    session
                 },
                 initial_memory: memory.clone(),
                 context_factory: Arc::new(FixedMainContextFactory {

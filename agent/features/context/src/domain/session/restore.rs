@@ -25,8 +25,11 @@ impl SessionRestoreStepData {
     }
 }
 
+/// 恢复结果（领域形态，含 message_segments 保真；对外视图由消费边界映射）。
 #[derive(Debug, Clone)]
 pub struct SessionRestore {
+    pub session_id: String,
+    pub display_history: Option<crate::domain::session::DisplayHistoryStepIndexData>,
     pub active_messages: Vec<Message>,
     pub display_steps: Vec<SessionRestoreStepData>,
     pub compacted: bool,
@@ -45,6 +48,8 @@ impl SessionRestore {
             .cloned()
             .collect();
         Self {
+            session_id: session.id.clone(),
+            display_history: None,
             active_messages,
             display_steps: Vec::new(),
             compacted: session.compact.is_some(),
@@ -52,6 +57,15 @@ impl SessionRestore {
             trimmed: active_trimmed,
             repaired: active_repaired,
         }
+    }
+
+    /// 附带展示索引（resume 协议在 load 后回填）。
+    pub fn with_display_history(
+        mut self,
+        index: crate::domain::session::DisplayHistoryStepIndexData,
+    ) -> Self {
+        self.display_history = Some(index);
+        self
     }
 
     pub fn from_canonical(session: &CanonicalSession) -> Self {
@@ -64,6 +78,8 @@ impl SessionRestore {
             .cloned()
             .collect();
         Self {
+            session_id: session.id.clone(),
+            display_history: None,
             active_messages,
             display_steps,
             compacted: session.compact.is_some(),

@@ -1,3 +1,4 @@
+use share::ids::SessionId;
 use std::collections::HashMap;
 
 use async_trait::async_trait;

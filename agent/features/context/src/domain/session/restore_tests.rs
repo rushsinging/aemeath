@@ -1,7 +1,7 @@
 use super::*;
 use crate::domain::session::{
     AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
-    CommittedRunStep, RunStepCursor, SnapshotState,
+    CommittedRunStep, RunStepCursor, SessionSnapshotState,
 };
 use share::message::{ContentBlock, Message, Role};
 use std::path::Path;
@@ -53,8 +53,8 @@ fn unfinished_tool_session_with_outcome(
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
         metadata: Default::default(),
-        tasks: SnapshotState::Missing,
-        workspace: SnapshotState::Missing,
+        tasks: SessionSnapshotState::Missing,
+        workspace: SessionSnapshotState::Missing,
         revision: 0,
         compact: None,
         cleared_after: None,
@@ -97,8 +97,8 @@ fn two_step_session() -> CanonicalSession {
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
         metadata: Default::default(),
-        tasks: SnapshotState::Missing,
-        workspace: SnapshotState::Missing,
+        tasks: SessionSnapshotState::Missing,
+        workspace: SessionSnapshotState::Missing,
         revision: 0,
         compact: None,
         cleared_after: None,
@@ -362,8 +362,8 @@ fn restore_reads_only_steps_from_active_marker() {
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
         metadata: Default::default(),
-        tasks: SnapshotState::Missing,
-        workspace: SnapshotState::Missing,
+        tasks: SessionSnapshotState::Missing,
+        workspace: SessionSnapshotState::Missing,
         revision: 0,
         compact: Some(ActiveCompactMarker {
             summary: "summary".to_string(),

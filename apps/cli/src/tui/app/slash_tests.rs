@@ -312,8 +312,8 @@ fn model_summary(provider: &str, id: &str, name: &str) -> sdk::ModelSummary {
     }
 }
 
-fn session_summary(id: &str, summary: &str) -> sdk::SessionSummary {
-    sdk::SessionSummary {
+fn session_summary(id: &str, summary: &str) -> sdk::SessionItemList {
+    sdk::SessionItemList {
         id: id.to_string(),
         title: None,
         project: None,

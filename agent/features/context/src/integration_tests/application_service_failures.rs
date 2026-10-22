@@ -1,14 +1,15 @@
+use share::ids::SessionId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::ContextApplicationService;
 use crate::{
-    ContextAppendData, ContextRequestData, ContextRequestId, Language, SessionId, SessionRevision,
+    ContextAppendData, ContextRequestData, ContextRequestId, Language, SessionRevision,
     SystemPromptSpecData,
 };
 use crate::{
     ContextMemorySource, ContextPromptSource, MemoryMaterialization, PromptMaterialization,
-    SessionRepository, SessionSnapshot,
+    SessionItem, SessionRepository,
 };
 use async_trait::async_trait;
 use sdk::RunId;
@@ -19,8 +20,8 @@ use share::reasoning::ReasoningLevel;
 struct Session;
 #[async_trait]
 impl SessionRepository for Session {
-    async fn snapshot(&self, _session_id: &SessionId) -> Result<SessionSnapshot, String> {
-        Ok(SessionSnapshot {
+    async fn snapshot(&self, _session_id: &SessionId) -> Result<SessionItem, String> {
+        Ok(SessionItem {
             revision: SessionRevision::new(0),
             messages: vec![].into(),
             structured_history: None,
@@ -92,7 +93,7 @@ fn request() -> ContextRequestData {
         session_id: SessionId::new("session"),
         request_id: ContextRequestId::new("request"),
         run_id: RunId::new("run"),
-        step_id: crate::RunStepId::new("step"),
+        step_id: share::ids::RunStepId::new("step"),
         pending_messages: vec![],
         system_prompt: SystemPromptSpecData::new("system"),
         model_id: "fake/model".into(),

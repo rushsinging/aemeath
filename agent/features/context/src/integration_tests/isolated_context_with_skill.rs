@@ -1,5 +1,6 @@
 //! Isolated context with Skill metadata catalog (Issue #1438).
 
+use share::ids::{RunStepId, SessionId};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;

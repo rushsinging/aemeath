@@ -112,7 +112,7 @@ pub use run::{
 pub use runtime_status::{ContextBudgetView, ContextDecisionSourceView, RuntimeStatusView};
 pub use session::{
     ChatMessage, ChatMessageMetadata, ChatMessageSource, HookNoticeKindView, HookNoticeView,
-    SessionSnapshot, SessionSummary, SkillRequestMetadataView,
+    SessionItem, SessionItemList, SkillRequestMetadataView,
 };
 pub use share::message::ContentBlock as LocalResumeContentBlock;
 pub use share::message::{

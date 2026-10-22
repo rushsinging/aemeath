@@ -2,8 +2,9 @@ use super::{
     AcceptedInputRecord, CommittedRunSlice, CommittedRunStep, CommittedStep, CommittedStepLedger,
     FinalizedOutcomeRecord, SessionHistory,
 };
-use crate::domain::{FinalizeCause, SessionId, ToolCallIdentityData, ToolReceiptMutationData};
+use crate::domain::{FinalizeCause, ToolCallIdentityData, ToolReceiptMutationData};
 use sdk::{RunId, RunStepId};
+use share::ids::SessionId;
 use share::message::Message;
 use std::sync::Arc;
 

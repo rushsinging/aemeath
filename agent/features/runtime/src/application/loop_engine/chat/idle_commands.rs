@@ -71,21 +71,30 @@ pub async fn execute_session(
             }
             let rename_id = parts[1];
             let title = parts[2..].join(" ");
-            let update = context::SessionMetadataUpdateData {
-                title: Some(title.clone()),
-                ..Default::default()
-            };
-            // 当前 active session：走 wiring 同步 committed revision，避免 CAS 漂移。
+            // 覆盖式更新：读现值-改 title-回传整份 metadata。
+            // 当前 active session：走 coordinator 同步 committed revision，避免 CAS 漂移。
             let result = if rename_id == session_id {
+                let mut updated = coordinator.committed_session().metadata.clone();
+                updated.title = Some(title.clone());
                 coordinator
-                    .update_active_session_metadata(update)
+                    .update_active_session_metadata(updated)
                     .await
                     .map(|_| ())
             } else {
-                session_management
-                    .update_metadata_for_project(rename_id, &project, update)
+                match session_management
+                    .load_for_project(rename_id, &project)
                     .await
-                    .map(|_| ())
+                {
+                    Ok(session) => {
+                        let mut updated = session.metadata.clone();
+                        updated.title = Some(title.clone());
+                        session_management
+                            .update_metadata_for_project(rename_id, &project, updated)
+                            .await
+                            .map(|_| ())
+                    }
+                    Err(error) => Err(error),
+                }
             };
             match result {
                 Ok(()) => (format!("Session {} renamed to {}", rename_id, title), false),

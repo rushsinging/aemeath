@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 /// 从 ChatStream 中等待 `SessionList` 事件，返回会话列表。
 /// 流关闭时返回 None。
-async fn wait_for_session_list(stream: &mut sdk::ChatStream) -> Option<Vec<sdk::SessionSummary>> {
+async fn wait_for_session_list(stream: &mut sdk::ChatStream) -> Option<Vec<sdk::SessionItemList>> {
     while let Some(event) = stream.recv().await {
         if let sdk::ChatEvent::SessionList { sessions } = event {
             return Some(sessions);

@@ -1,3 +1,4 @@
+use share::ids::SessionId;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -7,10 +8,10 @@ use crate::domain::session::{AcceptedInputRecord, FinalizedOutcomeRecord, Sessio
 use crate::domain::{
     AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
     CompactOutcome, CompactRequestData, CompactSkipReason, ContextAppendData, ContextAppendError,
-    ContextMessage, ContextPortError, SessionId, SessionRevision, ToolCallReceiptData,
+    ContextMessage, ContextPortError, SessionRevision, ToolCallReceiptData,
     ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
-use crate::ports::{SessionRepository, SessionSnapshot};
+use crate::ports::{SessionItem, SessionRepository};
 
 #[derive(Default)]
 struct SessionState {
@@ -87,12 +88,12 @@ impl InMemorySessionRepository {
 
 #[async_trait]
 impl SessionRepository for InMemorySessionRepository {
-    async fn snapshot(&self, session_id: &SessionId) -> Result<SessionSnapshot, String> {
+    async fn snapshot(&self, session_id: &SessionId) -> Result<SessionItem, String> {
         let sessions = self.sessions.lock().map_err(|error| error.to_string())?;
         let state = sessions
             .get(session_id.as_str())
             .ok_or_else(|| format!("Session 不存在：{session_id}"))?;
-        Ok(SessionSnapshot {
+        Ok(SessionItem {
             revision: SessionRevision::new(state.revision),
             messages: state.messages.clone().into(),
             structured_history: Some(state.history.clone()),

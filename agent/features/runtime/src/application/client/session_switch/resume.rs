@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use config::{PreparedProjectConfigData, ProjectConfigLocationData};
-use context::session::{CanonicalSession, SessionRestore, SnapshotState};
-use context::{SessionManagementError, SessionResumeViewData};
+use context::session::{CanonicalSession, SessionRestore};
+use context::SessionManagementError;
 use memory::api::ProjectMemoryKey;
 use project::same_project_identity;
 use project::WorkspaceRestoreData;
@@ -23,7 +23,7 @@ impl SessionSwitchCoordinator {
     pub async fn resume_session(
         &self,
         session_id: &str,
-    ) -> Result<SessionResumeViewData, SessionManagementError> {
+    ) -> Result<context::session::SessionRestore, SessionManagementError> {
         let started = Instant::now();
         let project = self.project_identity();
         log::debug!(
@@ -64,16 +64,12 @@ impl SessionSwitchCoordinator {
             started.elapsed().as_secs_f64() * 1000.0,
             restore_started.elapsed().as_secs_f64() * 1000.0
         );
-        Ok(SessionResumeViewData {
-            session_id: committed.id.clone(),
-            active_messages: restore.active_messages,
-            display_steps: restore.display_steps,
-            display_history,
-            compacted: restore.compacted,
-            created_at: restore.created_at,
-            trimmed: restore.trimmed,
-            repaired: restore.repaired,
-        })
+        // 回执 = SessionRestore（恢复结果领域形态；对外视图由消费边界映射）。
+        let restore = match display_history {
+            Some(index) => restore.with_display_history(index),
+            None => restore,
+        };
+        Ok(restore)
     }
 
     /// 独占区切换协议：先 prepare 全部参与方（Project → Config → Memory →
@@ -84,7 +80,7 @@ impl SessionSwitchCoordinator {
     /// root 匹配。
     pub(super) async fn resume_prepared(
         &self,
-        mut session: CanonicalSession,
+        session: CanonicalSession,
     ) -> Result<(), MainSessionError> {
         let _exclusive = self
             .gate
@@ -94,14 +90,18 @@ impl SessionSwitchCoordinator {
         let _mutation = self.mutation_gate.lock().await;
 
         // ── 1. Project prepare ──
-        // workspace 槽位必须携带类型化上下文；Missing/CapturedEmpty 无安全
+        // workspace 快照经提取方法取得；缺失（Missing/CapturedEmpty）无安全
         // 默认值，直接拒绝。
-        let prepared_workspace: WorkspaceRestoreData = match &session.workspace {
-            SnapshotState::Captured(dto) => match self.workspace_persist.prepare_restore(dto) {
+        let workspace_dto = match session.workspace_snapshot() {
+            Some(dto) => dto.clone(),
+            None => return Err(MainSessionError::WorkspaceMissing),
+        };
+        let prepared_workspace: WorkspaceRestoreData =
+            match self.workspace_persist.prepare_restore(&workspace_dto) {
                 Ok(prepared) => prepared,
                 Err(error) if error.message().contains("路径不存在") => {
                     let live_identity = self.workspace_read.project_identity();
-                    if !same_project_identity(&live_identity, &dto.project_identity) {
+                    if !same_project_identity(&live_identity, &workspace_dto.project_identity) {
                         return Err(MainSessionError::ProjectMismatch);
                     }
                     let live_workspace = self.workspace_persist.snapshot();
@@ -109,15 +109,10 @@ impl SessionSwitchCoordinator {
                         target: LOG_TARGET,
                         "会话工作区已不存在，继续使用当前工作区"
                     );
-                    session.workspace = SnapshotState::Captured(live_workspace.clone());
                     self.workspace_persist.prepare_restore(&live_workspace)?
                 }
                 Err(error) => return Err(error.into()),
-            },
-            SnapshotState::Missing | SnapshotState::CapturedEmpty => {
-                return Err(MainSessionError::WorkspaceMissing);
-            }
-        };
+            };
 
         let prepared_identity = prepared_workspace.project_identity().clone();
         let live_identity = self.workspace_read.project_identity();
@@ -146,16 +141,10 @@ impl SessionSwitchCoordinator {
         // ── 4. TaskData prepare ──
         // Missing/CapturedEmpty 映射到清空语义，commit 时清掉陈旧任务。
         // 经 TaskRestoreAccess 窄 port（runtime 不直接持 Task 持久化类型）。
-        let prepared_task = match &session.tasks {
-            SnapshotState::Captured(snapshot) => self
-                .task_restore
-                .prepare_session_restore(Some(snapshot))
-                .map_err(MainSessionError::TaskRestore)?,
-            SnapshotState::Missing | SnapshotState::CapturedEmpty => self
-                .task_restore
-                .prepare_session_restore(None)
-                .map_err(MainSessionError::TaskRestore)?,
-        };
+        let prepared_task = self
+            .task_restore
+            .prepare_session_restore(session.task_snapshot())
+            .map_err(MainSessionError::TaskRestore)?;
 
         // ════════ 全部 prepare 成功 — commit 阶段（同步、无 await）════════
 

@@ -13,8 +13,8 @@ use crate::{
     ConnectOutcome, ConnectView, ControlDeadline, ElementSpacingView, InteractionCancelReason,
     InteractionCommandOutcome, InteractionReply, InteractionRequest, InteractionRequestBody,
     MarkdownSpacingModeView, MarkdownSpacingOverridesView, ModelSummary, ProjectContext,
-    ReflectionHistoryView, RunTerminationReason, SessionResumeFailureKind, SessionSnapshot,
-    SessionSummary, TaskBatchStatusView, TaskBatchView, TaskItemStatusView, TaskItemView,
+    ReflectionHistoryView, RunTerminationReason, SessionItem, SessionItemList,
+    SessionResumeFailureKind, TaskBatchStatusView, TaskBatchView, TaskItemStatusView, TaskItemView,
     TaskPriorityView, TaskStateView, TerminateRunOutcome, WorkspaceContextView,
 };
 
@@ -53,8 +53,8 @@ pub fn components_document() -> Value {
     register::<ModelSummary>(&mut definitions);
     register::<ReflectionHistoryView>(&mut definitions);
     register::<ChatEventContext>(&mut definitions);
-    register::<SessionSummary>(&mut definitions);
-    register::<SessionSnapshot>(&mut definitions);
+    register::<SessionItemList>(&mut definitions);
+    register::<SessionItem>(&mut definitions);
     register::<ChatMessage>(&mut definitions);
     register::<WorkspaceContextView>(&mut definitions);
     register::<SessionResumeFailureKind>(&mut definitions);

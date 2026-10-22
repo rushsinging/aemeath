@@ -11,10 +11,10 @@ use crate::domain::agent_run::{InteractionBindingMode, RunSpec};
 fn p6_9_5_session_snapshot_contains_only_value_facts() {
     let source = include_str!("creation.rs");
     let snapshot = source
-        .split("pub struct SessionSnapshot")
+        .split("pub struct SessionItem")
         .nth(1)
-        .and_then(|tail| tail.split("impl SessionSnapshot").next())
-        .expect("SessionSnapshot definition");
+        .and_then(|tail| tail.split("impl SessionItem").next())
+        .expect("SessionItem definition");
 
     for forbidden in [
         "SessionCapabilitySnapshot",
@@ -28,7 +28,7 @@ fn p6_9_5_session_snapshot_contains_only_value_facts() {
     ] {
         assert!(
             !snapshot.contains(forbidden),
-            "SessionSnapshot contains live capability: {forbidden}"
+            "SessionItem contains live capability: {forbidden}"
         );
     }
 }
@@ -68,7 +68,7 @@ fn p6_12_run_creation_request_contains_only_value_inputs() {
         .expect("RunCreationRequest definition");
 
     assert!(request.contains("run_id: Option<RunId>"));
-    assert!(request.contains("session: SessionSnapshot"));
+    assert!(request.contains("session: SessionItem"));
     assert!(request.contains("parent: Option<ParentRunFacts>"));
     for forbidden in [
         "bindings:",

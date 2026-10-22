@@ -8,14 +8,14 @@ pub type ResumeError = context::SessionManagementError;
 pub async fn resume_session_to_backing(
     session_id: &str,
     coordinator: &crate::SessionSwitchCoordinator,
-) -> Result<context::SessionResumeViewData, ResumeError> {
+) -> Result<context::session::SessionRestore, ResumeError> {
     log::debug!(
         target: LOG_TARGET,
         "resume_lifecycle boundary=runtime_resume_helper stage=backing_load_started session_id={}",
         session_id
     );
-    let resume_view = match coordinator.resume_session(session_id).await {
-        Ok(resume_view) => resume_view,
+    let restore = match coordinator.resume_session(session_id).await {
+        Ok(restore) => restore,
         Err(error) => {
             log::warn!(
                 target: LOG_TARGET,
@@ -30,24 +30,24 @@ pub async fn resume_session_to_backing(
         target: LOG_TARGET,
         "resume_lifecycle boundary=runtime_resume_helper stage=backing_load_completed requested_session_id={} loaded_session_id={} active_messages={} display_index_steps={} legacy_steps={} trimmed={} repaired={}",
         session_id,
-        resume_view.session_id,
-        resume_view.active_messages.len(),
-        resume_view
+        restore.session_id,
+        restore.active_messages.len(),
+        restore
             .display_history
             .as_ref()
             .map_or(0, |index| index.steps().len()),
-        resume_view.display_steps.len(),
-        resume_view.trimmed,
-        resume_view.repaired
+        restore.display_steps.len(),
+        restore.trimmed,
+        restore.repaired
     );
-    if resume_view.trimmed > 0 || resume_view.repaired > 0 {
+    if restore.trimmed > 0 || restore.repaired > 0 {
         log::info!(
             target: LOG_TARGET,
             "resume {}: trimmed={} repaired={}",
-            resume_view.session_id,
-            resume_view.trimmed,
-            resume_view.repaired
+            restore.session_id,
+            restore.trimmed,
+            restore.repaired
         );
     }
-    Ok(resume_view)
+    Ok(restore)
 }

@@ -1,3 +1,4 @@
+use share::ids::SessionId;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -9,7 +10,7 @@ use crate::domain::{
     AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
     CompactOutcome, CompactRequestData, CompactionDecisionData, ContextAppendData,
     ContextAppendError, ContextMessage, ContextPortError, ContextRequestData, ContextWindowData,
-    ManualCompactRequestData, RunId, SessionId, SystemBlock, ToolReceiptMutationData,
+    ManualCompactRequestData, RunId, SystemBlock, ToolReceiptMutationData,
     ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
 use crate::ports::{ContextMemorySource, ContextPort, ContextPromptSource, SessionRepository};

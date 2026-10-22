@@ -1,16 +1,17 @@
+use share::ids::{RunStepId, SessionId};
 use std::sync::{Arc, Mutex, RwLock};
 
+use crate::domain::session::SessionSnapshotState;
 use crate::SessionRepository;
 use crate::{
     AcceptedInputAppendData, AcceptedInputError, CompactRequestData, CompactTrigger,
     ContentFingerprint, ContextAppendData, ContextAppendError, ContextRequestData,
-    ContextRequestId, FinalizeCause, Language, ManualCompactRequestData, RunStepId, SessionId,
-    SessionRevision, SystemPromptSpecData, ToolCallIdentityData, ToolCallState,
-    ToolReceiptMutationData,
+    ContextRequestId, FinalizeCause, Language, ManualCompactRequestData, SessionRevision,
+    SystemPromptSpecData, ToolCallIdentityData, ToolCallState, ToolReceiptMutationData,
 };
 use crate::{
     AcceptedInputRecord, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
-    SessionCommitPlan, SnapshotState,
+    SessionCommitPlan,
 };
 use crate::{CanonicalSessionRepository, CanonicalSessionWriter};
 use async_trait::async_trait;
@@ -363,8 +364,8 @@ fn repository(
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
             metadata: Default::default(),
-            tasks: SnapshotState::Missing,
-            workspace: SnapshotState::Captured(workspace()),
+            tasks: SessionSnapshotState::Missing,
+            workspace: SessionSnapshotState::Captured(workspace()),
             revision: 0,
             compact: None,
             cleared_after: None,
@@ -400,8 +401,8 @@ fn ten_step_session(
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
         metadata: Default::default(),
-        tasks: SnapshotState::Missing,
-        workspace: SnapshotState::Captured(workspace()),
+        tasks: SessionSnapshotState::Missing,
+        workspace: SessionSnapshotState::Captured(workspace()),
         revision,
         compact: None,
         cleared_after: None,
@@ -674,8 +675,8 @@ fn session_with_tool_result(session_id: &SessionId, revision: u64) -> CanonicalS
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
         metadata: Default::default(),
-        tasks: SnapshotState::Missing,
-        workspace: SnapshotState::Captured(workspace()),
+        tasks: SessionSnapshotState::Missing,
+        workspace: SessionSnapshotState::Captured(workspace()),
         revision,
         compact: None,
         cleared_after: None,
@@ -956,8 +957,8 @@ async fn lifecycle_workload_counts_100_500_and_1000_committed_steps() {
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
             metadata: Default::default(),
-            tasks: SnapshotState::Missing,
-            workspace: SnapshotState::Captured(workspace()),
+            tasks: SessionSnapshotState::Missing,
+            workspace: SessionSnapshotState::Captured(workspace()),
             revision: step_count as u64,
             compact: None,
             cleared_after: None,
@@ -1279,8 +1280,8 @@ async fn snapshot_reads_structured_view_not_legacy_chats() {
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
         metadata: Default::default(),
-        tasks: SnapshotState::Missing,
-        workspace: SnapshotState::Captured(workspace()),
+        tasks: SessionSnapshotState::Missing,
+        workspace: SessionSnapshotState::Captured(workspace()),
         revision: 0,
         compact: None,
         cleared_after: None,
@@ -1347,8 +1348,8 @@ async fn finalized_append_reuses_unchanged_run_slice_backing() {
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
         metadata: Default::default(),
-        tasks: SnapshotState::Missing,
-        workspace: SnapshotState::Captured(workspace()),
+        tasks: SessionSnapshotState::Missing,
+        workspace: SessionSnapshotState::Captured(workspace()),
         revision: 1,
         compact: None,
         cleared_after: None,
@@ -1433,7 +1434,7 @@ async fn append_persists_candidate_before_publishing_revision() {
     assert_eq!(writer.saved.lock().unwrap().len(), 1);
     assert!(matches!(
         holder.read().unwrap().tasks,
-        SnapshotState::Captured(_)
+        SessionSnapshotState::Captured(_)
     ));
 }
 

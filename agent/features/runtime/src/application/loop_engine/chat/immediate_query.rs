@@ -77,7 +77,7 @@ pub(crate) mod test_support {
 
     use super::*;
     use config::ConfigRefreshOutcomeData;
-    use sdk::{ModelSummary, ReflectionHistoryView, SdkError, SessionSummary};
+    use sdk::{ModelSummary, ReflectionHistoryView, SdkError, SessionItemList};
     use share::config::domain::snapshot::ConfigSnapshot;
     use share::error::DomainError;
 
@@ -93,7 +93,7 @@ pub(crate) mod test_support {
             Ok(Vec::new())
         }
 
-        async fn list_sessions(&self) -> Result<Vec<SessionSummary>, SdkError> {
+        async fn list_sessions(&self) -> Result<Vec<SessionItemList>, SdkError> {
             Ok(Vec::new())
         }
 

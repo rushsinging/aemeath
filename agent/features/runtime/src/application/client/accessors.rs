@@ -317,7 +317,7 @@ impl SessionRuntime {
         state.update_session(session_id, config);
     }
 
-    pub(crate) fn session_snapshot(&self) -> crate::application::run::creation::SessionSnapshot {
+    pub(crate) fn session_snapshot(&self) -> crate::application::run::creation::SessionItem {
         self.session_state.read().unwrap().snapshot_for_run()
     }
 }

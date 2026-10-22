@@ -1,8 +1,9 @@
 use crate::{
-    CleanupConfirmation, SessionId, ToolCallIdentityData, ToolCallReceiptData, ToolCallState,
+    CleanupConfirmation, ToolCallIdentityData, ToolCallReceiptData, ToolCallState,
     ToolOutcomeKindData, ToolReceiptMutationData, ToolTerminalReceiptData,
 };
 use sdk::{RunId, RunStepId};
+use share::ids::SessionId;
 
 fn identity() -> ToolCallIdentityData {
     ToolCallIdentityData {

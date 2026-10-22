@@ -175,7 +175,6 @@ fn test_wiring_with_context_factory(
     let config = Arc::new(config::ConfigAppService::with_global_path(Some(
         &workspace.read().initial_cwd(),
     ), std::path::PathBuf::from("/nonexistent/test-isolated-config.json")));
-    let now = chrono::Utc::now().to_rfc3339();
     Arc::new(crate::SessionSwitchCoordinator::assemble(
         crate::SessionSwitchCoordinatorBuilder {
             workspace_read: workspace.read(),
@@ -185,20 +184,11 @@ fn test_wiring_with_context_factory(
             config_participant: config,
             memory_opener: Box::new(TestMemoryOpener),
             session_management: Arc::new(context::test_support::UnavailableSessionManagement),
-            initial_session: context::session::CanonicalSession {
-                id: uuid::Uuid::now_v7().to_string(),
-                chats: Vec::new(),
-                created_at: now.clone(),
-                updated_at: now,
-                metadata: Default::default(),
-                tasks: context::session::SnapshotState::Missing,
-                workspace: context::session::SnapshotState::Captured(persist.snapshot()),
-                revision: 0,
-                compact: None,
-                cleared_after: None,
-                run_slices: Vec::new().into(),
-                committed_steps: Default::default(),
-                skill_load_records: Vec::new(),
+            initial_session: {
+                let mut session =
+                    context::session::CanonicalSession::empty(uuid::Uuid::now_v7().to_string());
+                session.capture_workspace(persist.snapshot());
+                session
             },
             initial_memory: Arc::new(memory::api::NoOpMemory),
             context_factory,
@@ -518,7 +508,7 @@ impl crate::ports::SessionQueryPort for FakeSessionQuery {
     async fn list_models(&self) -> Result<Vec<sdk::ModelSummary>, sdk::SdkError> {
         Ok(Vec::new())
     }
-    async fn list_sessions(&self) -> Result<Vec<sdk::SessionSummary>, sdk::SdkError> {
+    async fn list_sessions(&self) -> Result<Vec<sdk::SessionItemList>, sdk::SdkError> {
         Ok(Vec::new())
     }
     async fn list_reflection_history(

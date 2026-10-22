@@ -11,8 +11,8 @@ use std::sync::{Arc, RwLock as StdRwLock};
 use config::{ConfigReader, ProjectConfigParticipant};
 use context::session::CanonicalSession;
 use context::MainContextFactory;
+use context::SessionManagementError;
 use context::SessionManagementPort;
-use context::{SessionManagementError, SessionMetadataUpdateData};
 use memory::api::{MemoryOpener, MemoryPort};
 use project::{WorkspaceReader, WorkspaceWriter};
 use share::config::domain::snapshot::ConfigSnapshot;
@@ -185,20 +185,18 @@ impl SessionSwitchCoordinator {
 
     // ── metadata 协议（mutation_gate 串行化）──
 
-    /// 原子更新活跃会话 metadata：先落盘再回读合并 revision/updated_at，
-    /// 只同步 metadata 路径改的字段，保留内存里其它 committed 内容。
+    /// 原子更新活跃会话 metadata（覆盖式：调用方读现值-改字段-回传整份），
+    /// 先落盘再回读合并 revision/updated_at，保留内存里其它 committed 内容。
     pub async fn update_active_session_metadata(
         &self,
-        update: SessionMetadataUpdateData,
+        update: context::session::SessionMetadata,
     ) -> Result<(), SessionManagementError> {
         let _mutation = self.mutation_gate.lock().await;
         let before = self.committed_session();
         let session_id = before.id.clone();
         let project = self.project_identity();
 
-        let mut probed = before.metadata.clone();
-        update.clone().apply(&mut probed);
-        if probed == before.metadata {
+        if update == before.metadata {
             return Ok(());
         }
 

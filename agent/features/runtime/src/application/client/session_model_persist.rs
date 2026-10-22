@@ -40,15 +40,23 @@ pub(crate) async fn persist_session_model(
             );
         }
     }
+    // 覆盖式更新：先读现值、只改 model、回传整份 metadata。
+    let existing = session_management
+        .load_for_project(session_id, project)
+        .await;
+    let mut updated = match &existing {
+        Ok(session) => session.metadata.clone(),
+        Err(error) => {
+            log::warn!(
+                target: crate::LOG_TARGET,
+                "persist session model failed to load: session={session_id} error={error}"
+            );
+            return;
+        }
+    };
+    updated.model = Some(model.to_string());
     if let Err(error) = session_management
-        .update_metadata_for_project(
-            session_id,
-            project,
-            context::SessionMetadataUpdateData {
-                model: Some(model.to_string()),
-                ..Default::default()
-            },
-        )
+        .update_metadata_for_project(session_id, project, updated)
         .await
     {
         log::warn!(
@@ -76,13 +84,9 @@ pub(crate) async fn persist_session_model_on_wiring(
         return;
     }
     if coordinator.committed_session().id == session_id {
-        if let Err(error) = coordinator
-            .update_active_session_metadata(context::SessionMetadataUpdateData {
-                model: Some(model.to_string()),
-                ..Default::default()
-            })
-            .await
-        {
+        let mut updated = coordinator.committed_session().metadata.clone();
+        updated.model = Some(model.to_string());
+        if let Err(error) = coordinator.update_active_session_metadata(updated).await {
             log::warn!(
                 target: crate::LOG_TARGET,
                 "persist session model (active sync) failed: session={session_id} model={model} error={error}"

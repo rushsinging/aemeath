@@ -1,3 +1,4 @@
+use share::ids::SessionId;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
@@ -5,8 +6,8 @@ use async_trait::async_trait;
 use crate::domain::{
     AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
     CompactOutcome, CompactRequestData, ContextAppendData, ContextAppendError, ContextMessages,
-    ContextPortError, ContextRequestData, ManualCompactRequestData, SessionId, SessionRevision,
-    SystemBlock, ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
+    ContextPortError, ContextRequestData, ManualCompactRequestData, SessionRevision, SystemBlock,
+    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
 
 pub mod context_port;
@@ -39,7 +40,7 @@ pub trait SessionDecoder: Send + Sync {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SessionSnapshot {
+pub(crate) struct SessionItem {
     pub revision: SessionRevision,
     pub messages: ContextMessages,
     pub structured_history: Option<crate::domain::session::SessionHistory>,
@@ -48,7 +49,7 @@ pub(crate) struct SessionSnapshot {
 
 #[async_trait]
 pub(crate) trait SessionRepository: Send + Sync {
-    async fn snapshot(&self, session_id: &SessionId) -> Result<SessionSnapshot, String>;
+    async fn snapshot(&self, session_id: &SessionId) -> Result<SessionItem, String>;
     async fn append_accepted_input(
         &self,
         _append: &AcceptedInputAppendData,

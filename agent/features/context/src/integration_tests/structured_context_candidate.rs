@@ -1,4 +1,5 @@
 use crate::domain::session::CommittedStepMessages;
+use share::ids::SessionId;
 use std::sync::Arc;
 
 use share::message::{ContentBlock, Message};
@@ -12,7 +13,7 @@ use crate::{
     SessionHistory,
 };
 use crate::{
-    CleanupConfirmation, FinalizeCause, SessionId, ToolCallIdentityData, ToolCallReceiptData,
+    CleanupConfirmation, FinalizeCause, ToolCallIdentityData, ToolCallReceiptData,
     ToolOutcomeKindData, ToolTerminalReceiptData,
 };
 

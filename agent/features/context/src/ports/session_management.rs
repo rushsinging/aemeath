@@ -3,8 +3,8 @@ use async_trait::async_trait;
 use share::session_types::ProjectIdentityData;
 
 use crate::domain::session::{
-    CanonicalSession, DisplayHistoryStepWindowData, SessionListEntryData, SessionManagementError,
-    SessionMetadataUpdateData, SessionResumeLoad,
+    CanonicalSession, DisplayHistoryStepWindowData, SessionManagementError, SessionMetadata,
+    SessionResumeLoad,
 };
 
 /// Context-owned Session identity management contract.
@@ -51,7 +51,7 @@ pub trait SessionManagementPort: Send + Sync {
     async fn list_for_project(
         &self,
         project: &ProjectIdentityData,
-    ) -> Result<Vec<SessionListEntryData>, SessionManagementError>;
+    ) -> Result<Vec<sdk::SessionItemList>, SessionManagementError>;
 
     /// Exports only a session belonging to the supplied stable project identity.
     async fn export_for_project(
@@ -66,7 +66,7 @@ pub trait SessionManagementPort: Send + Sync {
         &self,
         bytes: &[u8],
         project: &ProjectIdentityData,
-    ) -> Result<SessionListEntryData, SessionManagementError>;
+    ) -> Result<sdk::SessionItemList, SessionManagementError>;
 
     /// Updates metadata only for a session belonging to the supplied stable
     /// project identity.
@@ -74,8 +74,8 @@ pub trait SessionManagementPort: Send + Sync {
         &self,
         id: &str,
         project: &ProjectIdentityData,
-        update: SessionMetadataUpdateData,
-    ) -> Result<SessionListEntryData, SessionManagementError>;
+        update: SessionMetadata,
+    ) -> Result<sdk::SessionItemList, SessionManagementError>;
 
     /// Deletes only a session belonging to the supplied stable project identity.
     async fn delete_for_project(

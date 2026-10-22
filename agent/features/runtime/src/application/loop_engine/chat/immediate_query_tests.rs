@@ -4,7 +4,7 @@ use super::*;
 use crate::application::loop_engine::chat::events::RuntimeStreamEvent;
 use crate::ports::SessionQueryPort;
 use config::{ConfigReader, ConfigRefreshOutcomeData};
-use sdk::{ChatInputEvent, ModelSummary, ReflectionHistoryView, SdkError, SessionSummary};
+use sdk::{ChatInputEvent, ModelSummary, ReflectionHistoryView, SdkError, SessionItemList};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::error::DomainError;
 use std::pin::Pin;
@@ -126,7 +126,7 @@ impl SessionQueryPort for FakeSessionQueries {
             .unwrap_or(Ok(Vec::new()))
     }
 
-    async fn list_sessions(&self) -> Result<Vec<SessionSummary>, SdkError> {
+    async fn list_sessions(&self) -> Result<Vec<SessionItemList>, SdkError> {
         Ok(Vec::new())
     }
 

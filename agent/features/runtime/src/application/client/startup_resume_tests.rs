@@ -6,10 +6,10 @@
 
 use std::sync::Arc;
 
+use context::session::SessionRestore;
 use context::DisplayHistoryStepIndexData;
 use context::FinalizeCause;
 use context::SessionRestoreStepData;
-use context::SessionResumeViewData;
 use share::message::{Message, Role};
 
 use super::map_resume_view_to_sdk_backing;
@@ -29,8 +29,8 @@ fn resume_step(
     }
 }
 
-fn sample_resume_view() -> SessionResumeViewData {
-    SessionResumeViewData {
+fn sample_resume_view() -> SessionRestore {
+    SessionRestore {
         session_id: "session-42".to_string(),
         active_messages: vec![Message::placeholder(Role::Assistant)],
         display_steps: vec![

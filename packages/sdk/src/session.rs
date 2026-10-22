@@ -259,15 +259,23 @@ impl ChatMessage {
 ///
 /// 底层 Vec 消息通过 Arc 共享，clone 开销低。
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct SessionSnapshot {
+pub struct SessionItem {
     /// Session ID。
     pub id: String,
+    /// 用户自定义标题（metadata 投影）。
+    pub title: Option<String>,
     /// 消息列表摘要（消息数量）。
     pub message_count: usize,
     /// 总 token 使用量。
     pub total_tokens: u64,
-    /// 完整消息列表（仅在 load_session 时填充，snapshot 为 None）。
+    /// 完整消息列表（resume 视图填充）。
     pub messages: Vec<ChatMessage>,
+    /// 展示步骤（resume 视图填充；每步含 run/step id 与消息段）。
+    pub steps: Vec<crate::ResumedSessionStep>,
+    /// 展示历史索引（存在时表示新布局索引恢复）。
+    pub display_index: Option<crate::DisplayHistoryIndex>,
+    /// 会话是否处于 compact 后状态。
+    pub compacted: bool,
     /// 创建时间（ISO 8601）。
     pub created_at: Option<String>,
     /// 消息清洗中移除的消息数。
@@ -282,7 +290,7 @@ pub struct SessionSnapshot {
 
 /// Session 列表中的摘要条目。
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct SessionSummary {
+pub struct SessionItemList {
     /// Session ID。
     pub id: String,
     /// 用户自定义标题。

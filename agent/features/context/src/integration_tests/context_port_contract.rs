@@ -5,13 +5,14 @@ use crate::context_port::{
     CompactRequestData, CompactResult, CompactTrigger, CompactionDecisionData, ContentFingerprint,
     ContextAppendData, ContextAppendError, ContextMessage, ContextPort, ContextPortError,
     ContextRequestData, ContextRequestId, ContextWindowData, DecisionReason, FinalizeCause,
-    Language, ManualCompactRequestData, RunStepId, SessionId, SessionRevision, StepReceiptData,
-    SystemPromptSpecData, TokenBudget, ToolOutcomeKindData, Urgency,
+    Language, ManualCompactRequestData, SessionRevision, StepReceiptData, SystemPromptSpecData,
+    TokenBudget, ToolOutcomeKindData, Urgency,
 };
 use async_trait::async_trait;
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
+use share::ids::{RunStepId, SessionId};
 use share::message::Message;
 use share::reasoning::ReasoningLevel;
 

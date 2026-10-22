@@ -2,7 +2,7 @@
 //!
 //! The factory holds [`RuntimeServices`] (session-scoped shared ports) and
 //! assembles a per-Run [`RuntimeContext`] from a [`RunSpec`], a
-//! [`SessionSnapshot`] and optional parent Run capabilities.
+//! [`SessionItem`] and optional parent Run capabilities.
 //!
 //! Capability-semantic decisions (interaction, hook, reasoning) are driven
 //! by the binding-mode fields in [`RunSpec`], validated against parent
@@ -18,7 +18,7 @@ use crate::application::run::context::{
     RunCapabilityBindings, RuntimeContext, RuntimeContextAssemblyToken, RuntimeServices,
 };
 use crate::application::run::creation::{
-    RunCreationBindings, RunCreationError, RunCreationRequest, SessionSnapshot,
+    RunCreationBindings, RunCreationError, RunCreationRequest, SessionItem,
 };
 use crate::application::run::workspace::RuntimeWorkspaceAccess;
 use crate::domain::agent_run::{HookBindingMode, InteractionBindingMode, RunSpec};
@@ -57,7 +57,7 @@ impl ToolCatalogPort for RestrictedToolCatalog {
 // ── Factory ──
 
 struct SessionResolution {
-    snapshot: SessionSnapshot,
+    snapshot: SessionItem,
     lease: Option<crate::OwnedSessionSharedPermit>,
 }
 
@@ -231,14 +231,8 @@ impl RuntimeContextFactory {
         &self,
         request: &RunCreationRequest,
         bindings: &RunCreationBindings,
-    ) -> Result<
-        (
-            RuntimeContext,
-            SessionSnapshot,
-            Option<RuntimeWorkspaceAccess>,
-        ),
-        RunCreationError,
-    > {
+    ) -> Result<(RuntimeContext, SessionItem, Option<RuntimeWorkspaceAccess>), RunCreationError>
+    {
         let session = self.resolve_session(request, bindings)?;
         let workspace = self.select_workspace(bindings)?;
         // sub run 的 agent 只解析一次，供 provider 选择与 tool catalog 裁剪共用。
@@ -307,14 +301,8 @@ impl RuntimeContextFactory {
         hook: HookSelection,
         skill_load_state: Arc<dyn tools::published::skill::SkillLoadStatePort>,
         resources: RunCreationResources,
-    ) -> Result<
-        (
-            RuntimeContext,
-            SessionSnapshot,
-            Option<RuntimeWorkspaceAccess>,
-        ),
-        RunCreationError,
-    > {
+    ) -> Result<(RuntimeContext, SessionItem, Option<RuntimeWorkspaceAccess>), RunCreationError>
+    {
         let services = RuntimeServices {
             tool_catalog: bindings
                 .model

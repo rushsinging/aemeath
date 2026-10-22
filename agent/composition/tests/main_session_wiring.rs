@@ -19,10 +19,10 @@ use std::sync::Arc;
 use context::context_port::ContextPort;
 use context::SessionManagementPort;
 use context::{
-    ContentFingerprint, ContextAppendData, ContextRequestId, FinalizeCause, RunStepId, SessionId,
-    SessionRevision,
+    ContentFingerprint, ContextAppendData, ContextRequestId, FinalizeCause, SessionRevision,
 };
 use sdk::{ChatBootstrapArgs, RunId};
+use share::ids::{RunStepId, SessionId};
 use share::message::Message;
 use std::path::Path;
 

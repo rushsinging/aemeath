@@ -1,3 +1,4 @@
+use share::ids::SessionId;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
@@ -5,15 +6,15 @@ use async_trait::async_trait;
 use crate::adapters::compact_summary::{compact_messages_with_llm, CompactGenerator};
 use crate::domain::session::{
     AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, CommittedStep,
-    FinalizedOutcomeRecord, SessionCommitPlan, SnapshotState,
+    FinalizedOutcomeRecord, SessionCommitPlan, SessionSnapshotState,
 };
 use crate::domain::{
     AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
     CompactOutcome, CompactRequestData, CompactSkipReason, ContextAppendData, ContextAppendError,
-    ContextPortError, ManualCompactRequestData, SessionId, SessionRevision,
-    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
+    ContextPortError, ManualCompactRequestData, SessionRevision, ToolReceiptMutationData,
+    ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
-use crate::ports::{ContextPort, MainContextFactory, SessionRepository, SessionSnapshot};
+use crate::ports::{ContextPort, MainContextFactory, SessionItem, SessionRepository};
 
 #[async_trait]
 pub trait CanonicalSessionWriter: Send + Sync {
@@ -890,7 +891,7 @@ impl CanonicalSessionRepository {
 
 #[async_trait]
 impl SessionRepository for CanonicalSessionRepository {
-    async fn snapshot(&self, session_id: &SessionId) -> Result<SessionSnapshot, String> {
+    async fn snapshot(&self, session_id: &SessionId) -> Result<SessionItem, String> {
         let session = self.session.read().map_err(|error| error.to_string())?;
         if session.id != session_id.as_str() {
             return Err(format!("Session 不存在：{session_id}"));
@@ -909,7 +910,7 @@ impl SessionRepository for CanonicalSessionRepository {
                 .collect(),
             Vec::new(),
         );
-        Ok(SessionSnapshot {
+        Ok(SessionItem {
             revision: SessionRevision::new(session.revision),
             messages,
             structured_history: Some(structured_history),
@@ -947,8 +948,8 @@ impl SessionRepository for CanonicalSessionRepository {
         }
         let mut candidate = (*current).clone();
         candidate.updated_at = share::time::now_iso();
-        candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
-        candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
+        candidate.tasks = SessionSnapshotState::Captured(self.task_persist.collect_snapshot());
+        candidate.workspace = SessionSnapshotState::Captured(self.workspace_persist.snapshot());
         candidate.append_accepted_input(
             append.run_id.as_ref(),
             append.step_id.as_str(),
@@ -1012,8 +1013,8 @@ impl SessionRepository for CanonicalSessionRepository {
             });
         }
         candidate.updated_at = share::time::now_iso();
-        candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
-        candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
+        candidate.tasks = SessionSnapshotState::Captured(self.task_persist.collect_snapshot());
+        candidate.workspace = SessionSnapshotState::Captured(self.workspace_persist.snapshot());
         let receipt = candidate
             .tool_receipt(&mutation)
             .expect("advanced receipt must exist")
@@ -1083,8 +1084,8 @@ impl SessionRepository for CanonicalSessionRepository {
         }
         candidate.revision += 1;
         candidate.updated_at = share::time::now_iso();
-        candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
-        candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
+        candidate.tasks = SessionSnapshotState::Captured(self.task_persist.collect_snapshot());
+        candidate.workspace = SessionSnapshotState::Captured(self.workspace_persist.snapshot());
         self.persist_candidate(&current, &candidate)
             .await
             .map_err(tools::published::skill::SkillLoadStateError::Storage)?;
@@ -1156,8 +1157,8 @@ impl SessionRepository for CanonicalSessionRepository {
         }
         candidate.revision += 1;
         candidate.updated_at = share::time::now_iso();
-        candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
-        candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
+        candidate.tasks = SessionSnapshotState::Captured(self.task_persist.collect_snapshot());
+        candidate.workspace = SessionSnapshotState::Captured(self.workspace_persist.snapshot());
         candidate.append_finalized_outcome(
             append.run_id.as_ref(),
             append.step_id.as_str(),
@@ -1257,8 +1258,8 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.skill_load_records.clear();
         candidate.revision += 1;
         candidate.updated_at = share::time::now_iso();
-        candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
-        candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
+        candidate.tasks = SessionSnapshotState::Captured(self.task_persist.collect_snapshot());
+        candidate.workspace = SessionSnapshotState::Captured(self.workspace_persist.snapshot());
         // `/clear` 是逻辑断点：磁盘 step 成员无限保留，state 记录 clear
         // 边界，由 writer 按 persisted manifest 计算并返回对齐后的快照。
         let fallback = candidate.clone();

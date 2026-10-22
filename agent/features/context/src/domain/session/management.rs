@@ -1,56 +1,40 @@
-use serde::{Deserialize, Serialize};
 use share::message::{Message, Role};
 use share::session_types::ProjectIdentityData;
 
 use super::{
-    extract_project_name, CanonicalSession, DisplayHistoryStepIndexData, SessionMetadata,
-    SessionRestoreStepData, SnapshotState,
+    extract_project_name, CanonicalSession, DisplayHistoryStepIndexData, SessionSnapshotState,
 };
 
-/// Context-owned session list projection published to Runtime/SDK adapters.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SessionListEntryData {
-    pub id: String,
-    pub title: Option<String>,
-    pub project: Option<String>,
-    pub model: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-    pub message_count: usize,
-    pub preview: Option<String>,
-    pub summary: String,
-}
-
-impl SessionListEntryData {
-    pub(crate) fn from_canonical(session: &CanonicalSession) -> Self {
-        let messages = session.structured_messages();
-        let preview = messages
-            .iter()
-            .find(|message| message.role == Role::User)
-            .and_then(first_line);
-        let summary = session
-            .metadata
-            .title
-            .clone()
-            .or_else(|| preview.clone())
-            .unwrap_or_else(|| {
-                if messages.is_empty() {
-                    "(empty)".to_string()
-                } else {
-                    "unknown".to_string()
-                }
-            });
-        Self {
-            id: session.id.clone(),
-            title: session.metadata.title.clone(),
-            project: session_display_project(session),
-            model: session.metadata.model.clone(),
-            created_at: session.created_at.clone(),
-            updated_at: session.updated_at.clone(),
-            message_count: messages.len(),
-            preview,
-            summary,
-        }
+/// 会话列表行（发布语言形态，sdk 同型统一）。
+/// 会话列表行投影：canonical → sdk 发布语言（唯一视图模型）。
+pub(crate) fn project_list_item(session: &CanonicalSession) -> sdk::SessionItemList {
+    let messages = session.structured_messages();
+    let preview = messages
+        .iter()
+        .find(|message| message.role == Role::User)
+        .and_then(first_line);
+    let summary = session
+        .metadata
+        .title
+        .clone()
+        .or_else(|| preview.clone())
+        .unwrap_or_else(|| {
+            if messages.is_empty() {
+                "(empty)".to_string()
+            } else {
+                "unknown".to_string()
+            }
+        });
+    sdk::SessionItemList {
+        id: session.id.clone(),
+        title: session.metadata.title.clone(),
+        project: session_display_project(session),
+        model: session.metadata.model.clone(),
+        created_at: session.created_at.clone(),
+        updated_at: session.updated_at.clone(),
+        message_count: messages.len(),
+        preview,
+        summary,
     }
 }
 
@@ -62,7 +46,7 @@ fn session_display_project(session: &CanonicalSession) -> Option<String> {
     if let Some(explicit) = session.metadata.project.as_deref() {
         return Some(explicit.to_string());
     }
-    let SnapshotState::Captured(workspace) = &session.workspace else {
+    let SessionSnapshotState::Captured(workspace) = &session.workspace else {
         return None;
     };
     extract_project_name(&workspace.project_identity.initial_cwd)
@@ -72,7 +56,7 @@ fn session_display_project(session: &CanonicalSession) -> Option<String> {
 /// as distinct projects. Git projects use `git_common_dir`; non-git projects use
 /// their canonical `initial_cwd`.
 pub fn session_matches_project(session: &CanonicalSession, current: &ProjectIdentityData) -> bool {
-    let SnapshotState::Captured(workspace) = &session.workspace else {
+    let SessionSnapshotState::Captured(workspace) = &session.workspace else {
         return false;
     };
     project::same_project_identity(current, &workspace.project_identity)
@@ -88,52 +72,10 @@ fn first_line(message: &Message) -> Option<String> {
 #[path = "management_tests.rs"]
 mod tests;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SessionMetadataUpdateData {
-    pub title: Option<String>,
-    pub tags: Option<Vec<String>>,
-    pub notes: Option<String>,
-    pub is_favorite: Option<bool>,
-    pub model: Option<String>,
-}
-
-impl SessionMetadataUpdateData {
-    pub fn apply(self, metadata: &mut SessionMetadata) {
-        if let Some(title) = self.title {
-            metadata.title = Some(title);
-        }
-        if let Some(tags) = self.tags {
-            metadata.tags = tags;
-        }
-        if let Some(notes) = self.notes {
-            metadata.notes = Some(notes);
-        }
-        if let Some(is_favorite) = self.is_favorite {
-            metadata.is_favorite = is_favorite;
-        }
-        if let Some(model) = self.model {
-            metadata.model = Some(model);
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct SessionResumeLoad {
     pub active_session: CanonicalSession,
     pub display_history: Option<DisplayHistoryStepIndexData>,
-}
-
-/// Runtime-safe resume view. Session internals never cross the crate boundary.
-#[derive(Debug, Clone)]
-pub struct SessionResumeViewData {
-    pub session_id: String,
-    pub active_messages: Vec<Message>,
-    pub display_steps: Vec<SessionRestoreStepData>,
-    pub display_history: Option<DisplayHistoryStepIndexData>,
-    pub compacted: bool,
-    pub created_at: String,
-    pub trimmed: usize,
-    pub repaired: usize,
 }
 
 #[derive(Debug, thiserror::Error)]

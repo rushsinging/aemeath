@@ -84,7 +84,7 @@ pub struct Agent {
     pub agent_semaphore: Arc<tokio::sync::Semaphore>,
     pub workspace_persist: Arc<dyn project::WorkspaceWriter>,
     pub(crate) context: ContextCoordinator,
-    pub(crate) session_id: context::SessionId,
+    pub(crate) session_id: share::ids::SessionId,
     pub(crate) tool_result_materializer:
         Arc<crate::application::tool::tool_result_materializer::ToolResultMaterializer>,
     pub(crate) committed_side_effects:
@@ -157,7 +157,7 @@ impl Agent {
                 &ctx,
             ),
             context: ContextCoordinator::new(context::wire_isolated_context("test-session")),
-            session_id: context::SessionId::new("test-session"),
+            session_id: share::ids::SessionId::new("test-session"),
             tool_result_materializer:
                 crate::application::tool::test_support::test_tool_result_materializer(),
             committed_side_effects: Default::default(),

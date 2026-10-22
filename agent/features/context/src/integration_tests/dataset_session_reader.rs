@@ -61,15 +61,16 @@ async fn dataset_reader_migrates_legacy_blob_once_when_dataset_is_absent() {
         git_common_dir: None,
     };
     let mut expected = expected;
-    expected.workspace =
-        crate::SnapshotState::Captured(share::session_types::PersistedWorkspaceContext {
+    expected.workspace = crate::domain::session::SessionSnapshotState::Captured(
+        share::session_types::PersistedWorkspaceContext {
             workspace_id: share::session_types::WorkspaceId::derive(&project, "/legacy"),
             project_identity: project.clone(),
             path_base: "/legacy".to_string(),
             workspace_root: "/legacy".to_string(),
             worktree_kind: share::session_types::WorktreeKind::Primary,
             context_stack: Vec::new(),
-        });
+        },
+    );
     crate::SessionManagementPort::import_for_project(
         &legacy_management,
         &crate::SessionCodec::encode(&expected).expect("encode legacy"),

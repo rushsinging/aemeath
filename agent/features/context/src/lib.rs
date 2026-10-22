@@ -4,7 +4,7 @@
 //!
 //! | 组 | 实体 |
 //! |---|---|
-//! | 工厂 | `wire_isolated_context{,_with_skill,_with_workspace_skills}`（isolated_context 家族）；Main Session 协调（resume 原子协议）已迁 runtime `SessionSwitchCoordinator`（#2025） |
+//! | 工厂 | `wire_isolated_context{_with_skill,_with_workspace_skills}`（isolated_context 家族）；Main Session 协调（resume 原子协议）已迁 runtime `SessionSwitchCoordinator`（#2025） |
 //! | 角色和职能 | `ContextPort`（+context_port 模块 glob 面）、`SessionManagementPort`、适配器实现体（composition 装配面）；Main Session 协调已迁 runtime `SessionSwitchCoordinator`（#2025） |
 //! | 数据和生命周期 | 36 个 Data（ContextRequest/StepReceipt/Compact*/ToolReceipt*/Session 展示类）；session 持久化内核（SessionCodec/Generation 族等）已内部化 pub(crate) |
 //! | Error | SessionManagementError/ContextPortError/ContextAppendError/AcceptedInputError（活跃 match 保留）；MainSessionError 内部化（wire 出口统一 SdkError） |
@@ -41,9 +41,8 @@ pub use domain::reminder::{
     ReminderPriority, ReminderSnapshot, ReminderSource,
 };
 pub use domain::session::{
-    DisplayHistoryStepIndexData, DisplayHistoryStepWindowData, SessionListEntryData,
-    SessionManagementError, SessionMetadataUpdateData, SessionRestoreStepData,
-    SessionResumeViewData,
+    DisplayHistoryStepIndexData, DisplayHistoryStepWindowData, SessionManagementError,
+    SessionRestoreStepData,
 };
 pub use ports::SessionManagementPort;
 
@@ -67,6 +66,7 @@ pub use adapters::{
 pub(crate) use application::ContextApplicationService;
 #[cfg(test)]
 pub(crate) use application::{SessionLoadError, SessionPersistenceService};
+pub use domain::session::CanonicalSession;
 #[cfg(test)]
 pub(crate) use domain::session::{
     project_dir_segment, AcceptedInputRecord, ActiveCompactMarker, ChatSegment, CommittedRunSlice,
@@ -74,7 +74,6 @@ pub(crate) use domain::session::{
     SessionCommitPlan, SessionGenerationCodec, SessionGenerationManifest,
     SessionGenerationWireError, SessionHistory, CURRENT_SESSION_SCHEMA_VERSION,
 };
-pub use domain::session::{CanonicalSession, SnapshotState};
 #[cfg(test)]
 pub(crate) use domain::ContextMessages;
 pub use domain::{
@@ -88,16 +87,16 @@ pub use domain::{
     CompactSkipReason, CompactSummaryQuality, CompactTrigger, CompactionDecisionData,
     ContentFingerprint, ContextAppendError, ContextPortError, ContextRequestData,
     ContextWindowData, DecisionReason, FinalizeCause, InvocationReminderData, Language,
-    ManualCompactRequestData, MemoryRecallEntryData, RunStepId, SessionId, StepReceiptData,
-    SystemPromptSpecData, TaskProgressReminderData, TaskProgressReminderItemData,
-    TaskProgressStatus, ToolCallIdentityData, ToolCallReceiptData, ToolCallState,
-    ToolOutcomeKindData, ToolReceiptMutationData, ToolReceiptMutationError,
-    ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
+    ManualCompactRequestData, MemoryRecallEntryData, StepReceiptData, SystemPromptSpecData,
+    TaskProgressReminderData, TaskProgressReminderItemData, TaskProgressStatus,
+    ToolCallIdentityData, ToolCallReceiptData, ToolCallState, ToolOutcomeKindData,
+    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
+    ToolTerminalReceiptData,
 };
 #[cfg(test)]
 pub(crate) use ports::{
     ContextMemorySource, ContextPromptSource, MemoryMaterialization, PromptMaterialization,
-    PromptMaterializationError, SessionGeneration, SessionRepository, SessionSnapshot,
+    PromptMaterializationError, SessionGeneration, SessionItem, SessionRepository,
     SessionSnapshotStore, SessionStoreError, SkillQueryFactory,
 };
 pub use ports::{ContextPort, MainContextFactory};
@@ -115,9 +114,9 @@ pub mod context_port {
         CompactOutcome, CompactRequestData, CompactResult, CompactSkipReason, CompactTrigger,
         CompactionDecisionData, ContentFingerprint, ContextAppendData, ContextAppendError,
         ContextPortError, ContextRequestData, ContextRequestId, ContextWindowData, DecisionReason,
-        FinalizeCause, Language, ManualCompactRequestData, RunStepId, SessionId, SessionRevision,
-        StepReceiptData, SystemBlock, SystemPromptSpecData, TokenBudget, ToolOutcomeKindData,
-        ToolSchemaData, Urgency,
+        FinalizeCause, Language, ManualCompactRequestData, SessionRevision, StepReceiptData,
+        SystemBlock, SystemPromptSpecData, TokenBudget, ToolOutcomeKindData, ToolSchemaData,
+        Urgency,
     };
     pub use crate::ports::ContextPort;
 }
@@ -152,7 +151,6 @@ pub mod guidance {
 pub mod session {
     pub use crate::domain::session::{
         new_session_id, CanonicalSession, SessionMetadata, SessionRestore, SessionResumeLoad,
-        SnapshotState,
     };
 }
 

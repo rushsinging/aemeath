@@ -29,7 +29,7 @@ impl ParentRunFixture {
     pub(crate) fn create(
         &self,
         spec: RunSpec,
-        session: crate::application::run::creation::SessionSnapshot,
+        session: crate::application::run::creation::SessionItem,
         parent_run_id: RunId,
         parent_spec: RunSpec,
         parent_context: Arc<crate::application::run::context::RuntimeContext>,

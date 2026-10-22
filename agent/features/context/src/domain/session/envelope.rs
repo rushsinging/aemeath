@@ -13,7 +13,7 @@ use super::{ChatSegment, PersistedWorkspaceContext, SessionMetadata};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", content = "value", rename_all = "snake_case")]
-pub enum SnapshotState<T> {
+pub(crate) enum SessionSnapshotState<T> {
     Missing,
     CapturedEmpty,
     Captured(T),
@@ -546,11 +546,11 @@ pub struct CanonicalSession {
     pub metadata: SessionMetadata,
     /// Canonical typed task image owned by the TaskData BC. The TaskData snapshot uses
     /// its own versioned `encode`/`decode` wire rather than serde on the runtime
-    /// entities, so the [`SnapshotState`] slot is bridged through
+    /// entities, so the [`SessionSnapshotState`] slot is bridged through
     /// [`task_snapshot_state`] instead of a plain derive.
     #[serde(with = "task_snapshot_state")]
-    pub tasks: SnapshotState<TaskSnapshotData>,
-    pub workspace: SnapshotState<PersistedWorkspaceContext>,
+    pub(crate) tasks: SessionSnapshotState<TaskSnapshotData>,
+    pub(crate) workspace: SessionSnapshotState<PersistedWorkspaceContext>,
     pub revision: u64,
     #[serde(default)]
     pub compact: Option<ActiveCompactMarker>,
@@ -831,6 +831,53 @@ impl CanonicalSession {
         self.compact.as_ref().map(|marker| marker.summary.as_str())
     }
 
+    /// 空 session 两步构造（配合 `capture_workspace` / `capture_tasks`）。
+    pub fn empty(id: impl Into<String>) -> Self {
+        let now = share::time::now_iso();
+        Self {
+            id: id.into(),
+            chats: Vec::new(),
+            created_at: now.clone(),
+            updated_at: now,
+            metadata: SessionMetadata::default(),
+            tasks: SessionSnapshotState::Missing,
+            workspace: SessionSnapshotState::Missing,
+            revision: 0,
+            compact: None,
+            cleared_after: None,
+            run_slices: Default::default(),
+            committed_steps: Default::default(),
+            skill_load_records: Vec::new(),
+        }
+    }
+
+    /// resume 提取 workspace 快照：Missing / CapturedEmpty → None
+    ///（协议上层按语义拒绝）；Captured → 完整快照引用。
+    pub fn workspace_snapshot(&self) -> Option<&PersistedWorkspaceContext> {
+        match &self.workspace {
+            SessionSnapshotState::Captured(context) => Some(context),
+            _ => None,
+        }
+    }
+
+    /// resume 提取 task 快照：None = 清空语义（Missing / CapturedEmpty）。
+    pub fn task_snapshot(&self) -> Option<&TaskSnapshotData> {
+        match &self.tasks {
+            SessionSnapshotState::Captured(snapshot) => Some(snapshot),
+            _ => None,
+        }
+    }
+
+    /// 写侧：捕获 workspace 快照（bootstrap 组装 initial session 用）。
+    pub fn capture_workspace(&mut self, workspace: PersistedWorkspaceContext) {
+        self.workspace = SessionSnapshotState::Captured(workspace);
+    }
+
+    /// 写侧：捕获 task 快照。
+    pub fn capture_tasks(&mut self, tasks: TaskSnapshotData) {
+        self.tasks = SessionSnapshotState::Captured(tasks);
+    }
+
     pub fn fixture(id: &str) -> Self {
         Self {
             id: id.into(),
@@ -838,8 +885,8 @@ impl CanonicalSession {
             created_at: "2026-01-01T00:00:00Z".into(),
             updated_at: "2026-01-01T00:00:00Z".into(),
             metadata: SessionMetadata::default(),
-            tasks: SnapshotState::Missing,
-            workspace: SnapshotState::Missing,
+            tasks: SessionSnapshotState::Missing,
+            workspace: SessionSnapshotState::Missing,
             revision: 0,
             compact: None,
             cleared_after: None,
@@ -877,8 +924,8 @@ struct V2CanonicalSession {
     #[serde(default)]
     metadata: SessionMetadata,
     #[serde(with = "task_snapshot_state")]
-    tasks: SnapshotState<TaskSnapshotData>,
-    workspace: SnapshotState<PersistedWorkspaceContext>,
+    tasks: SessionSnapshotState<TaskSnapshotData>,
+    workspace: SessionSnapshotState<PersistedWorkspaceContext>,
     #[serde(default)]
     revision: u64,
     #[serde(default)]
@@ -957,8 +1004,8 @@ struct V1VersionedEnvelope {
     #[serde(default)]
     metadata: SessionMetadata,
     #[serde(with = "task_snapshot_state")]
-    tasks: SnapshotState<TaskSnapshotData>,
-    workspace: SnapshotState<PersistedWorkspaceContext>,
+    tasks: SessionSnapshotState<TaskSnapshotData>,
+    workspace: SessionSnapshotState<PersistedWorkspaceContext>,
     #[serde(default)]
     revision: u64,
     #[serde(default)]
@@ -1045,33 +1092,33 @@ fn upgrade_legacy_task_snapshot(legacy: Value) -> Result<TaskSnapshotData, Sessi
         .map_err(|error| SessionCodecError::InvalidJson(error.to_string()))
 }
 
-/// serde bridge for `SnapshotState<TaskSnapshotData>`.
+/// serde bridge for `SessionSnapshotState<TaskSnapshotData>`.
 ///
 /// [`TaskSnapshotData`] intentionally does not implement serde on its runtime
 /// entities; its canonical wire form is produced by `encode`/`decode`. This
-/// module reuses the derived [`SnapshotState`] tagging by routing the captured
+/// module reuses the derived [`SessionSnapshotState`] tagging by routing the captured
 /// payload through a `serde_json::Value` produced by that canonical codec, so
 /// the envelope stays a plain typed field while the TaskData BC keeps sole ownership
 /// of its wire format.
 pub(super) mod task_snapshot_state {
-    use super::{SnapshotState, TaskSnapshotData, Value};
+    use super::{SessionSnapshotState, TaskSnapshotData, Value};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
     pub(in crate::domain::session) fn serialize<S>(
-        state: &SnapshotState<TaskSnapshotData>,
+        state: &SessionSnapshotState<TaskSnapshotData>,
         serializer: S,
     ) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
         let wire = match state {
-            SnapshotState::Missing => SnapshotState::Missing,
-            SnapshotState::CapturedEmpty => SnapshotState::CapturedEmpty,
-            SnapshotState::Captured(snapshot) => {
+            SessionSnapshotState::Missing => SessionSnapshotState::Missing,
+            SessionSnapshotState::CapturedEmpty => SessionSnapshotState::CapturedEmpty,
+            SessionSnapshotState::Captured(snapshot) => {
                 let bytes = snapshot.encode().map_err(serde::ser::Error::custom)?;
                 let value: Value =
                     serde_json::from_slice(&bytes).map_err(serde::ser::Error::custom)?;
-                SnapshotState::Captured(value)
+                SessionSnapshotState::Captured(value)
             }
         };
         wire.serialize(serializer)
@@ -1079,20 +1126,22 @@ pub(super) mod task_snapshot_state {
 
     pub(in crate::domain::session) fn deserialize<'de, D>(
         deserializer: D,
-    ) -> Result<SnapshotState<TaskSnapshotData>, D::Error>
+    ) -> Result<SessionSnapshotState<TaskSnapshotData>, D::Error>
     where
         D: Deserializer<'de>,
     {
-        Ok(match SnapshotState::<Value>::deserialize(deserializer)? {
-            SnapshotState::Missing => SnapshotState::Missing,
-            SnapshotState::CapturedEmpty => SnapshotState::CapturedEmpty,
-            SnapshotState::Captured(value) => {
-                let bytes = serde_json::to_vec(&value).map_err(serde::de::Error::custom)?;
-                let snapshot =
-                    TaskSnapshotData::decode(&bytes).map_err(serde::de::Error::custom)?;
-                SnapshotState::Captured(snapshot)
-            }
-        })
+        Ok(
+            match SessionSnapshotState::<Value>::deserialize(deserializer)? {
+                SessionSnapshotState::Missing => SessionSnapshotState::Missing,
+                SessionSnapshotState::CapturedEmpty => SessionSnapshotState::CapturedEmpty,
+                SessionSnapshotState::Captured(value) => {
+                    let bytes = serde_json::to_vec(&value).map_err(serde::de::Error::custom)?;
+                    let snapshot =
+                        TaskSnapshotData::decode(&bytes).map_err(serde::de::Error::custom)?;
+                    SessionSnapshotState::Captured(snapshot)
+                }
+            },
+        )
     }
 }
 
@@ -1253,10 +1302,10 @@ impl SessionCodec {
         let (workspace, captured_workspace) = upgrade_workspace(legacy.cwd, legacy.workspace)?;
         let tasks = match legacy.tasks {
             Some(legacy_tasks) => {
-                SnapshotState::Captured(upgrade_legacy_task_snapshot(legacy_tasks)?)
+                SessionSnapshotState::Captured(upgrade_legacy_task_snapshot(legacy_tasks)?)
             }
-            None if captured_workspace => SnapshotState::CapturedEmpty,
-            None => SnapshotState::Missing,
+            None if captured_workspace => SessionSnapshotState::CapturedEmpty,
+            None => SessionSnapshotState::Missing,
         };
         let run_slices = Self::synthetic_run_slices(&legacy.chats);
         let compact = Self::marker_from_chats(&legacy.chats, &run_slices, 0);
@@ -1268,7 +1317,10 @@ impl SessionCodec {
                 updated_at: legacy.updated_at,
                 metadata: legacy.metadata,
                 tasks,
-                workspace: workspace.map_or(SnapshotState::Missing, SnapshotState::Captured),
+                workspace: workspace.map_or(
+                    SessionSnapshotState::Missing,
+                    SessionSnapshotState::Captured,
+                ),
                 revision: 0,
                 compact,
                 cleared_after: None,

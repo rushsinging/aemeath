@@ -1,3 +1,4 @@
+use share::ids::{RunStepId, SessionId};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -11,12 +12,12 @@ use share::reasoning::ReasoningLevel;
 use super::performance::{capture, percentiles_ns};
 use super::service::{render_user_input_timestamp_prefix, ContextApplicationService};
 use crate::domain::{
-    ContextAppendData, ContextMessages, ContextRequestData, ContextRequestId, Language, RunStepId,
-    SessionId, SessionRevision, SystemBlock, SystemPromptSpecData,
+    ContextAppendData, ContextMessages, ContextRequestData, ContextRequestId, Language,
+    SessionRevision, SystemBlock, SystemPromptSpecData,
 };
 use crate::ports::{
     ContextMemorySource, ContextPort, ContextPromptSource, MemoryMaterialization,
-    PromptMaterialization, SessionRepository, SessionSnapshot,
+    PromptMaterialization, SessionItem, SessionRepository,
 };
 
 struct BaselineSession {
@@ -32,8 +33,8 @@ struct BaselineSession {
 
 #[async_trait]
 impl SessionRepository for BaselineSession {
-    async fn snapshot(&self, _session_id: &SessionId) -> Result<SessionSnapshot, String> {
-        Ok(SessionSnapshot {
+    async fn snapshot(&self, _session_id: &SessionId) -> Result<SessionItem, String> {
+        Ok(SessionItem {
             revision: self.revision,
             messages: self.messages.clone(),
             structured_history: None,

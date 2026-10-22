@@ -1,5 +1,5 @@
 use super::*;
-use context::SessionId;
+use share::ids::SessionId;
 use std::time::Duration;
 
 use sdk::{RunId, RunStepId};

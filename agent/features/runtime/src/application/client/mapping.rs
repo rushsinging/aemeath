@@ -1,6 +1,6 @@
 use sdk::{
     ConfigFieldData, ConfigUpdateResult, ConfigView, ElementSpacingView, MarkdownSpacingModeView,
-    MarkdownSpacingOverridesView, MemoryConfigView, ReflectionConfigView, SessionSummary,
+    MarkdownSpacingOverridesView, MemoryConfigView, ReflectionConfigView,
 };
 
 pub fn config_snapshot_to_sdk(
@@ -98,22 +98,6 @@ pub(crate) fn memory_config_to_sdk(config: share::config::MemoryConfig) -> Memor
             interval_runs: config.reflection.interval_runs,
             auto_apply_suggestions: config.reflection.auto_apply_suggestions,
         },
-    }
-}
-
-pub(crate) fn session_summary_from_context(
-    session: context::SessionListEntryData,
-) -> SessionSummary {
-    SessionSummary {
-        id: session.id,
-        title: session.title,
-        project: session.project,
-        model: session.model,
-        created_at: session.created_at,
-        updated_at: session.updated_at,
-        message_count: session.message_count,
-        preview: session.preview,
-        summary: session.summary,
     }
 }
 
@@ -248,3 +232,26 @@ pub(crate) fn model_display(source_key: &str, model_name: &str, model_id: &str) 
 #[cfg(test)]
 #[path = "mapping_tests.rs"]
 mod tests;
+
+/// domain 展示索引 → sdk 发布语言（resume 回执与 startup backing 共用）。
+pub(crate) fn display_history_index_to_sdk(
+    index: context::api::DisplayHistoryStepIndexData,
+) -> sdk::DisplayHistoryIndex {
+    sdk::DisplayHistoryIndex {
+        session_id: index.session_id().to_string(),
+        generation_revision: index.generation_revision(),
+        steps: index
+            .steps()
+            .iter()
+            .map(|step| sdk::DisplayHistoryStepReference {
+                run_id: step.run_id().to_string(),
+                step_id: step.step_id().to_string(),
+                member_name: step.member_name().to_string(),
+                estimated_lines: step.estimated_lines(),
+                user_input_history: step.user_input_history().to_vec(),
+                finalize_cause: step.finalize_cause().map(map_finalize_cause_to_sdk),
+                duration_ms: step.duration_ms(),
+            })
+            .collect(),
+    }
+}

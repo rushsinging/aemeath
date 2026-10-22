@@ -28,8 +28,8 @@ pub use context_port::{
     AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
     CompactOutcome, CompactRequestData, CompactTrigger, ContentFingerprint, ContextAppendData,
     ContextAppendError, ContextPort, ContextPortError, ContextRequestData, ContextRequestId,
-    ContextWindowData, FinalizeCause, Language, ManualCompactRequestData, RunStepId, SessionId,
-    SessionRevision, StepReceiptData, SystemPromptSpecData, ToolSchemaData,
+    ContextWindowData, FinalizeCause, Language, ManualCompactRequestData, SessionRevision,
+    StepReceiptData, SystemPromptSpecData, ToolSchemaData,
 };
 #[cfg(test)]
 pub use context_port::{
@@ -46,6 +46,7 @@ pub use provider_port::{
 #[cfg(test)]
 pub use provider_port::{ProviderError, ProviderResponseStream};
 pub use session_query::SessionQueryPort;
+pub use share::ids::{RunStepId, SessionId};
 pub use tool_result_blob::ToolResultBlobPort;
 pub(crate) use tool_result_blob::{ToolResultBlobError, ToolResultBlobRef};
 pub use usage_sink::{UnavailableUsageSink, UsageSink};

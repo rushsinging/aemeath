@@ -456,7 +456,7 @@ impl AgentRunner for CliAgentRunner {
                 context: crate::application::context::coordination::ContextCoordinator::new(
                     derived.instance.context().context(),
                 ),
-                session_id: context::SessionId::new(&derived.session_id),
+                session_id: share::ids::SessionId::new(&derived.session_id),
                 ctx: sub_ctx,
                 max_tool_concurrency: self.max_tool_concurrency,
                 agent_semaphore: self.agent_semaphore.clone(),
