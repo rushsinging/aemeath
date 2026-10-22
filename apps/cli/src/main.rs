@@ -71,6 +71,11 @@ async fn main() {
                 subcommand::systemone_command::run_systemone_serve_command().await;
             }
         },
+        Some(Commands::Rsi { command }) => match command {
+            args::RsiCommands::Serve => {
+                subcommand::rsi_command::run_rsi_serve_command().await;
+            }
+        },
         Some(Commands::Version) => {
             println!("aemeath {}", composition::version());
         }
