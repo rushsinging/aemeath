@@ -18,4 +18,7 @@ pub use domain::component::{
     diff_contents, ComponentContent, ComponentId, ComponentKind, ComponentName, ContentChange,
 };
 pub use domain::errors::HarnessError;
+pub use domain::evidence::{
+    aggregate_evidence, EvidenceBundle, EvidenceSignal, SessionEventRecord,
+};
 pub use domain::plugin::{PluginRule, PluginSeamEngine, SeamEffect, SeamOutcome};

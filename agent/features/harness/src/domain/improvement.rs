@@ -29,6 +29,8 @@ pub struct ImprovementMaterials {
     pub component_contents: Vec<(ComponentId, ComponentContent)>,
     /// Active 经验（改进级递归的复利输入：历史 lesson 指导本次提案）。
     pub lessons: Vec<LessonEntry>,
+    /// 执行证据（#2048：session 行为聚合信号，改进的主要依据）。
+    pub evidence: crate::domain::evidence::EvidenceBundle,
 }
 
 /// 逐块提案的 LLM 应答信封：NEVER 裸 ChangeSet——LLM 需要能表达
@@ -63,6 +65,7 @@ pub fn chunk_materials(
 pub fn build_block_prompt(
     chunk: &[(ComponentId, ComponentContent)],
     lessons: &[LessonEntry],
+    evidence: &crate::domain::evidence::EvidenceBundle,
 ) -> String {
     let lessons_block = if lessons.is_empty() {
         "（暂无历史经验）".to_string()
@@ -73,6 +76,7 @@ pub fn build_block_prompt(
             .collect::<Vec<_>>()
             .join("\n")
     };
+    let evidence_block = render_evidence_block(evidence);
     let mut components_json = Vec::with_capacity(chunk.len());
     for (id, content) in chunk {
         components_json.push(serde_json::json!({
@@ -87,13 +91,18 @@ pub fn build_block_prompt(
 
 {materials_block}
 
+近期执行证据（session 行为聚合信号——改进的主要依据）：
+{evidence_block}
+
 历史经验（此前采纳的改进结论，供参考、可被新证据推翻）：
 {lessons_block}
 
-任务：基于材料判断是否存在值得改进的组件内容问题（缺失、冗余、错误、
-空壳占位）。空壳占位（TODO、无实际内容的正文）视为应修复的缺陷——
-为其写出有用的实际内容。只有当材料本身能支撑某个具体编辑时才提案；
-证据不足时选择 no_change——那是一个正当答案，比牵强的编辑更好。
+任务：基于执行证据判断组件是否存在值得改进的问题（缺失、冗余、错误、
+空壳占位、重复失败未覆盖的规则）。空壳占位（TODO、无实际内容的正文）
+视为应修复的缺陷——为其写出有用的实际内容。每条编辑 MUST 指出它回应
+证据中的哪条信号（reason 中引用其 signal id，如 repeated_failure:Bash:…）；
+无法对应任何信号的编辑是投机，NEVER 提出。证据与组件现状都不足时选择
+no_change——那是一个正当答案，比牵强的编辑更好。
 
 编辑契约：
 - 提案只携带要变更的组件（未提及的组件自动保持原样）
@@ -136,10 +145,11 @@ async fn run_block(
     llm: &dyn RsiLlmPort,
     chunk: &[(ComponentId, ComponentContent)],
     lessons: &[LessonEntry],
+    evidence: &crate::domain::evidence::EvidenceBundle,
     lesson_store: &LessonStore,
     cycle_ref: &str,
 ) -> (Vec<AppliedEdit>, &'static str) {
-    let prompt = build_block_prompt(chunk, lessons);
+    let prompt = build_block_prompt(chunk, lessons, evidence);
     let Ok(response) = llm.complete(&prompt).await else {
         return (Vec::new(), "作废（LLM 调用失败）");
     };
@@ -197,7 +207,7 @@ fn record_adopted_lesson(
             format!("{action} {id}：{reason}"),
             vec![EvidenceBinding {
                 run_ref: cycle_ref.to_string(),
-                signal: SignalKind::CycleObservation,
+                signal: signal_kind_from_reason(reason),
                 excerpt: reason.chars().take(200).collect(),
             }],
             std::time::SystemTime::now()
@@ -224,6 +234,7 @@ pub async fn run_improvement_cycle(
     llm: &dyn RsiLlmPort,
     lesson_store: &LessonStore,
     config: &RsiConfig,
+    evidence: crate::domain::evidence::EvidenceBundle,
 ) -> Result<CycleOutcome, HarnessError> {
     let cycle_ref = format!(
         "cycle-{}",
@@ -246,6 +257,7 @@ pub async fn run_improvement_cycle(
     let materials = ImprovementMaterials {
         component_contents,
         lessons: lessons.clone(),
+        evidence: evidence.clone(),
     };
     let chunks = chunk_materials(materials, config.chunk_max_components);
 
@@ -253,8 +265,16 @@ pub async fn run_improvement_cycle(
     let mut no_change = 0usize;
     let mut discarded = 0usize;
     for chunk in &chunks {
-        let (_applied, label) =
-            run_block(registry, llm, chunk, &lessons, lesson_store, &cycle_ref).await;
+        let (_applied, label) = run_block(
+            registry,
+            llm,
+            chunk,
+            &lessons,
+            &evidence,
+            lesson_store,
+            &cycle_ref,
+        )
+        .await;
         match label {
             "采纳" => adopted += 1,
             "无变更" => no_change += 1,
@@ -265,4 +285,47 @@ pub async fn run_improvement_cycle(
     Ok(CycleOutcome {
         summary: format!("采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}"),
     })
+}
+
+/// 渲染 evidence 块（空证据兜底；按优先级序，signal id 供提案引用）。
+fn render_evidence_block(evidence: &crate::domain::evidence::EvidenceBundle) -> String {
+    if evidence.signals.is_empty() {
+        return "（近期无执行证据）".to_string();
+    }
+    // 渲染层按 kind 优先级排序（聚合保证顺序，此处防御外部构造的 bundle；
+    // #2049 预算裁剪同用该优先级）。
+    let mut ordered: Vec<_> = evidence.signals.iter().collect();
+    ordered.sort_by_key(|signal| signal.kind.render_priority());
+    ordered
+        .into_iter()
+        .map(|signal| {
+            format!(
+                "- {} | {}{}",
+                signal.signal_id,
+                signal.summary,
+                signal
+                    .excerpt
+                    .as_deref()
+                    .map(|excerpt| format!(" | 摘录: {excerpt}"))
+                    .unwrap_or_default()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// 从提案 reason 提取引用的信号类别（v1 启发：signal id 前缀匹配；
+/// 无引用时兜底 CycleObservation——模型自述）。
+pub(crate) fn signal_kind_from_reason(reason: &str) -> SignalKind {
+    for (prefix, kind) in [
+        ("repeated_failure:", SignalKind::RepeatedFailure),
+        ("retry_pattern:", SignalKind::RetryPattern),
+        ("oversized_result:", SignalKind::OversizedResult),
+        ("run_outcome:", SignalKind::RunOutcome),
+    ] {
+        if reason.contains(prefix) {
+            return kind;
+        }
+    }
+    SignalKind::CycleObservation
 }

@@ -8,16 +8,10 @@ use crate::domain::errors::HarnessError;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// 行为信号类别（#2017 首批：改进周期上下文信号；
-/// usage/重试/用户反馈等自动采集信号随信号装配接入扩展）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SignalKind {
-    /// 周期材料观察（组件内容本身暴露的问题）。
-    CycleObservation,
-    /// 手动/e2e 触发上下文。
-    ManualContext,
-}
+// SignalKind 统一定义于 domain::evidence（#2048 扩展六类，
+// CycleObservation 保留为兜底信号；旧 ManualContext 迁移语义由
+// CycleObservation 覆盖——手动触发上下文即周期观察）。
+pub use crate::domain::evidence::SignalKind;
 
 /// 证据绑定：每条被采纳的 lesson MUST 至少携带一条。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
