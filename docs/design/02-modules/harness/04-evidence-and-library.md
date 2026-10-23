@@ -34,7 +34,7 @@
 
 ### 2A.2 投影器（`SessionEvidenceProjector`，harness crate）
 
-- **输入**：sessions 根目录 + 证据窗口（配置 `harness.rsi.evidence_window_runs`，默认 20 个 run；窗口内按 updated_at 取最新 N 个 session dataset）。
+- **输入**：sessions 根目录 + 证据流窗口（由 2A.5 流模型决定：checkpoint 游标 + 步长 + 首次 30 天窗口；投影器只处理本次周期分到的 session 段）。
 - **输出**：`EvidenceBundle`（分块进材料，见 2A.3），聚合而非全文——**NEVER 把 ToolResult 原文整段进材料**，每信号类最多携带 2 条有界摘录（对齐 memory 内容预览常量族）。
 
 聚合信号类（对齐 §2 信号集 + Harness² 三级优先）：
@@ -73,7 +73,35 @@ enum SignalKind {
 
 `run_ref` 扩展承载真实 `run_id`（session dataset 的 run 标识）；采纳回写时优先绑定提案引用的真实信号，`CycleObservation` 仅在无引用时兜底。**归因纪律对齐 Harness² experience reflector**：无法归因到单一信号的编辑标 `confounded` 语义（lesson 文本中显式声明），NEVER 编造归因（"an invented attribution poisons the library"）。
 
-### 2A.5 边界与排期
+### 2A.5 数据源流模型（checkpoint · 步长 · 数据源分块，2026-10-23 拍板）
+
+> 修正 v1 语义：分块对象是**数据源（session 证据流）**，NEVER 按组件分块——组件面是每轮提案的编辑对象，不是分块单位。模型对齐 Harness² 的 continual-learning 任务流（`schedule.py::stream_order`）与断点纪律（`runmark.py`）：处理单元推进、完成显式打标、指纹校验复用。
+
+```
+session 流（按 updated_at 全序）
+   │  首次：最近 initial_window_days（默认 30）天活跃 session
+   │  之后：从 checkpoint 游标往后
+   ▼
+[步长裁剪] 每次跑最多 max_sessions_per_cycle 个 session（防单次跑爆）
+   ▼
+[数据源分块] 切为若干证据块（每块 = 一段 session/run 证据投影）
+   ▼
+每块独立：证据投影 → 全组件提案 → 采纳落盘 → lesson
+   （块级幂等：单块失败只作废该块，游标 NEVER 推进过失败块）
+   ▼
+块成功 → checkpoint 推进（最后处理的 session id + 时间戳 + 组件树指纹）
+```
+
+**checkpoint 契约**（对齐 runmark 纪律，落盘 `~/.agents/harness/checkpoint.json`）：
+
+1. **显式推进**：只有「块执行完成且落盘成功」才写游标——输出存在不等于完成（"presence of output is not enough"）；
+2. **指纹校验**：checkpoint 记录处理时的组件树指纹；组件树在游标之后被外部修改（指纹不符）时，当块从游标重跑——NEVER 用陈旧组件状态生成的提案覆盖新改动；
+3. **首次窗口**：无 checkpoint 时默认读最近 30 天（`harness.rsi.evidence_initial_window_days`，可配）活跃 session；
+4. **步长上限**：`harness.rsi.evidence_max_sessions_per_cycle`——每次周期最多处理的 session 数，超出的留待下周期（增量消化，NEVER 一次吞尽）。
+
+**组件面体积控制**：单块内若组件面过大导致材料超预算，按组件分次提案作为**体积兜底**（v1 的 `chunk_max_components` 语义降级至此并标注待废弃；正确的主分块单位永远是数据源块）。
+
+### 2A.6 边界与排期
 
 - Probe/Compose（多 rollout 行为对比）留 0.3.0；本节交付「单 rollout + 真实证据」。
 - 投影性能：manifest 定位 + 成员流式扫描，百 run 量级毫秒级；NEVER 全量加载 ToolResult 原文进内存。
