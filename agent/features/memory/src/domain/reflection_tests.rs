@@ -531,3 +531,56 @@ fn prompts_forbid_prose_when_corpus_is_empty() {
         "en 归纳 prompt MUST 含空语料兜底指令"
     );
 }
+
+/// #2007 收敛强化：去噪与归纳 prompt MUST 含「新旧结论取代」显式裁决规则
+/// ——同主题存在更新结论时旧版 MUST 出局，NEVER 新旧口径同时有效。
+#[test]
+fn prompts_require_new_conclusion_supersession() {
+    let engine = ReflectionEngine;
+    let capacity = ReflectionCapacityBudget {
+        active_count: 3,
+        target_active_entries: 150,
+        max_entries: 200,
+    };
+    let zh_noise = engine.build_noise_prompt("", "zh", capacity, None);
+    assert!(
+        zh_noise.contains("新旧两个口径同时保持有效") && zh_noise.contains("旧版本即视为被推翻"),
+        "zh 去噪 prompt MUST 含新旧取代判据: {zh_noise}"
+    );
+    let en_noise = engine.build_noise_prompt("", "en", capacity, None);
+    assert!(
+        en_noise.contains("a newer conclusion on") && en_noise.contains("both stay valid"),
+        "en 去噪 prompt MUST 含新旧取代判据: {en_noise}"
+    );
+    let zh_synthesis = engine.build_prompt("", "", "zh", capacity, None);
+    assert!(
+        zh_synthesis.contains("supersedes 中引用旧条目"),
+        "zh 归纳 prompt MUST 要求新建议 supersedes 同主题旧结论"
+    );
+    let en_synthesis = engine.build_prompt("", "", "en", capacity, None);
+    assert!(
+        en_synthesis.contains("supersedes must cite the superseded entry"),
+        "en 归纳 prompt MUST 要求新建议 supersedes 同主题旧结论"
+    );
+}
+
+/// #2007 收敛强化：归纳 prompt MUST 含超长提纯指令（[Overlong] 条目压缩取代）。
+#[test]
+fn prompts_require_overlong_refinement() {
+    let engine = ReflectionEngine;
+    let capacity = ReflectionCapacityBudget {
+        active_count: 3,
+        target_active_entries: 150,
+        max_entries: 200,
+    };
+    let zh = engine.build_prompt("", "", "zh", capacity, None);
+    assert!(
+        zh.contains("[Overlong]") && zh.contains("压缩版新建议"),
+        "zh 归纳 prompt MUST 含超长提纯指令: {zh}"
+    );
+    let en = engine.build_prompt("", "", "en", capacity, None);
+    assert!(
+        en.contains("[Overlong]") && en.contains("condensed replacement"),
+        "en 归纳 prompt MUST 含超长提纯指令: {en}"
+    );
+}

@@ -554,7 +554,13 @@ impl ReflectionEngine {
     通读「当前项目记忆」，合并互补信息、提纯重复表述、保留有价值的事实；
     高相似对只是线索而非合并前提，未检出高相似对 NEVER 作为跳过存量归纳
     的理由；无须变更时允许空输出，NEVER 为凑数新增或机械淘汰。
+  - 新旧结论取代：输出新建议时检查存量是否已有同主题旧结论；若新结论修正了旧口径，
+    supersedes 中引用旧条目；发现盘上已存在新旧并存而本轮未通过 outdated_memories
+    处理的，把旧条加入 outdated_memories——同一主题 NEVER 同时保留两个有效版本。
   - 判断重复/合并时，issue/PR 编号、日期、版本号本身不构成语义相似性依据——同编号的两条未必重复，编号不同的两条可能重复；以内容实质判断。
+  - 超长提纯：带 [Overlong] 标注的条目 MUST 输出压缩版新建议（≤500 字符：保留结论
+    与边界，删除过程叙述、流水账与重复例证）并在 supersedes 中引用原条目；确有不可
+    压缩理由时说明，NEVER 原样保留。
   - suggested_memories[].content MUST NOT 携带 issue/PR 编号、commit hash、
     日期戳、版本串等标识性流水信息；归纳旧条目时只提取结论本身（结构性
     事实、口径、教训），NEVER 复制其交付痕迹。
@@ -586,6 +592,11 @@ Requirements:
 - suggested_memories[].category must be fact, decision, preference, pattern, or pitfall.
 - Each suggested_memories[].content must stay within 500 characters; split into
   multiple entries instead of exceeding it (over-length entries are rejected).
+- Overlong refinement: entries marked [Overlong] MUST get a condensed replacement
+  suggestion (≤500 characters: keep conclusions and boundaries, drop procedural
+  narrative, delivery logs, and repeated examples) whose supersedes cites the
+  original entry; state the reason only when it is truly incompressible — NEVER
+  keep it as is.
 - Reference existing memories ONLY by the ordinal shown at the start of each
   "Current project memory" line (e.g. M3 for a line beginning with [M3]).
   NEVER invent an ordinal that is not in the list; NEVER use tags, content, or
@@ -627,6 +638,12 @@ Requirements:
     merging — the absence of such pairs is NEVER a reason to skip the
     corpus review; an empty output is allowed when nothing needs to change;
     NEVER add or evict mechanically to hit a quota.
+  - New-conclusion supersession: before emitting a suggestion, check whether an
+    older conclusion on the same topic already exists; if the suggestion corrects
+    the old convention, its supersedes must cite the superseded entry. If old and
+    new versions of the same topic already coexist on disk and the old one is not
+    handled via outdated_memories this round, add the old entry to
+    outdated_memories — a topic NEVER keeps two valid versions at once.
   - When judging duplicates or merges, issue/PR numbers, dates, and version
     strings do not by themselves establish semantic similarity — two entries
     sharing a number may differ, two entries with different numbers may be
@@ -849,7 +866,9 @@ impl ReflectionEngine {
             r#"你是 Aemeath 的 Reflection 去噪引擎。请审查当前项目记忆列表，找出应清除的条目。
 
 清除依据（三类）：
-① 被新事实推翻、不应再注入；
+① 被新事实推翻、不应再注入——同一主题存在更新版本的结论（参数值、单位、默认值、
+  机制路径、公式口径已变化）时，旧版本即视为被推翻，MUST 加入 outdated_memories；
+  NEVER 让同一主题的新旧两个口径同时保持有效，否则注入时会给出互相矛盾的指导；
 ② 噪音：单次交付流水账（squash/CLOSED/清分支/安装版本推进）、已时过境迁的状态快照（磁盘空间、待 CI、进度百分比等）；
 ③ 越界：与本项目无关的内容（其它项目、通用环境琐事）——它们不属于本 corpus。
 判断时 issue/PR 编号、日期、版本号本身不构成保留或清除的依据，以内容实质判断。
@@ -869,7 +888,11 @@ impl ReflectionEngine {
             r#"You are the Aemeath Reflection noise-removal engine. Review the current project memory list and identify entries to remove.
 
 Removal grounds (three):
-① superseded by new facts and must stop being injected;
+① superseded by new facts and must stop being injected — when a newer conclusion on
+  the same topic exists (parameter values, units, defaults, mechanism paths, or
+  formula conventions have changed), the old version counts as superseded and MUST
+  go into outdated_memories; NEVER let old and new versions both stay valid, or
+  injection would give contradictory guidance;
 ② noise entries: one-off delivery logs (squash/CLOSED/branch cleanup, install version bumps) and stale status snapshots (disk space, pending CI, progress percentages);
 ③ off-project content unrelated to this project (other projects, generic environment trivia) — it does not belong in this corpus.
 Issue/PR numbers, dates, and version strings by themselves are neither grounds to keep nor to remove; judge by substance.
@@ -1134,9 +1157,12 @@ mod corpus_status_tests;
 /// 反思 LLM 裁决（标记 outdated 或保留）；未过期返回空串。条目级 `ttl`
 /// 优先，未设置时用全局默认（`0` = 禁用）。
 fn ttl_expired_mark(entry: &MemoryEntry, now: u64, default_ttl_secs: u64) -> String {
+    let mut marks = String::new();
     if entry.is_ttl_expired_with_default(now, default_ttl_secs) {
-        "[TTL expired] ".to_string()
-    } else {
-        String::new()
+        marks.push_str("[TTL expired] ");
     }
+    if entry.content.chars().count() > crate::constants::MEMORY_CONTENT_MAX_CHARS {
+        marks.push_str("[Overlong] ");
+    }
+    marks
 }
