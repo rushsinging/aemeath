@@ -60,7 +60,10 @@ enum RsiControlAck {
 | `model` | 继承默认 | 独立模型档 |
 | `max_tokens` / `reasoning` | 继承 catalog | 独立输出预算与思考档（结构化 JSON 输出任务需显式降思考档的教训已在反思链路验证） |
 | `interval_secs` | 1800 | Timer 触发周期 |
-| `chunk_max_components` | 实施定值 | 每块材料组件数上限 |
+| `evidence_initial_window_days` | 30 | 首次（无 checkpoint）读取的活跃 session 时间窗（天） |
+| `evidence_max_sessions_per_cycle` | 实施定值 | 每周期步长上限：最多处理的 session 数，超出留待下周期增量消化 |
+| `evidence_block_runs` | 实施定值 | 数据源分块粒度：每块包含的 run 数上限（流模型见 04 分片 §2A.5） |
+| `chunk_max_components` | 待废弃 | v1 按组件分块的遗留参数，语义降级为「单块内组件面体积兜底」（主分块单位是数据源块，04 分片 §2A.5） |
 
 ## 6. 执行模式与职责边界（2026-10-22 拍板修订）
 
@@ -72,6 +75,29 @@ enum RsiControlAck {
 | **后台定时** | `aemeath rsi serve` | 常驻 daemon + Timer 周期 + UDS 控制面（Trigger/Status/Stop） |
 
 两模式共用同一改进循环与 registry（仅调度外壳不同）。
+
+### CLI 参数面（`rsi run`）
+
+```
+aemeath rsi run [--dry-run] [--max-sessions N] [--window-days N] [--json]
+```
+
+| 参数 | 说明 |
+|---|---|
+| `--dry-run` | 预演模式（见下） |
+| `--max-sessions N` | 覆盖 `evidence_max_sessions_per_cycle`（仅本次） |
+| `--window-days N` | 覆盖 `evidence_initial_window_days`（仅本次；仅无 checkpoint 时生效） |
+| `--json` | 结果以 JSON 输出（机器可读，e2e/脚本用） |
+
+### dry-run 模式（2026-10-23 拍板增补）
+
+`aemeath rsi run --dry-run` 执行**完整周期但不产生任何持久副作用**：
+
+- ✅ 执行：证据投影（按流模型取数）→ LLM 提案 → ChangeSet 校验（含整份作废预检）
+- ❌ 不执行：组件落盘、lesson 写入、checkpoint 推进——三者全部跳过（校验失败的作废同样只报告不落任何状态）
+- **预览输出**：每块的提案摘要（组件 id + 编辑类型 + reason + diff 概要）写入 stdout（`--json` 时输出结构化结果），并落 `~/.agents/harness/dry-run-preview.md` 供事后查看（预览文件 ALWAYS 覆盖写，NEVER 累积）
+- **checkpoint 语义**：dry-run NEVER 推进游标——下次正式跑仍从原游标取同一批 session（这正是预演的意义：看到「这批证据会产出什么提案」再决定是否正式执行）
+- `rsi serve` 不提供 dry-run（定时自动跑无预览消费方）
 
 ### 职责边界：reflect NEVER 进入 harness 进程
 

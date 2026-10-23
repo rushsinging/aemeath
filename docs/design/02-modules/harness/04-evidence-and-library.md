@@ -18,6 +18,95 @@
 
 信号为**既有落盘事件的汇总视图**（runtime 事件流与 usage 事实的落盘投影），NEVER 新建独立埋点通道，也 NEVER 依赖主进程内存态——会话全部关闭后 daemon 仍可离线读取。
 
+## 2A. 执行证据装配（SessionEvidenceProjection，2026-10-23 增补）
+
+> 背景：v1 实施后复盘发现材料只有「组件内容 + lessons」，缺执行证据——改进依据是组件长什么样而非 agent 实际怎么跑，模型只能发现表面缺陷（TODO 空壳）。对照 Harness² 源码（`core/prompts.py` propose）：**每条编辑 MUST 追溯到轨迹中的某个时刻，否则就是投机**（"If you cannot name the moment, the edit is speculation"）。本节把 §2 的信号集落为可实施的投影装配。
+
+### 2A.1 数据源（全部既有落盘，NEVER 新埋点）
+
+| 来源 | 位置 | 提供的信号 |
+|---|---|---|
+| step 记录 | `~/.agents/session/<id>.dataset/members/<hash>`（manifest 登记成员） | 消息区含 ToolResult 原文（错误文本、重试、超长触发）、accepted_input |
+| session 状态 | 同 dataset 的 `session-state` 成员 | chats、compact 标记、committed_steps 数 |
+| session 元数据 | 同 dataset 的 `metadata` 成员 | 模型、创建/更新时间、reasoning 档 |
+
+投影器只读 dataset（manifest 定位成员、按成员清单流式扫描），NEVER 依赖主进程内存态。
+
+### 2A.2 投影器（`SessionEvidenceProjector`，harness crate）
+
+- **输入**：sessions 根目录 + 证据流窗口（由 2A.5 流模型决定：checkpoint 游标 + 步长 + 首次 30 天窗口；投影器只处理本次周期分到的 session 段）。
+- **输出**：`EvidenceBundle`（分块进材料，见 2A.3），聚合而非全文——**NEVER 把 ToolResult 原文整段进材料**，每信号类最多携带 2 条有界摘录（对齐 memory 内容预览常量族）。
+
+聚合信号类（对齐 §2 信号集 + Harness² 三级优先）：
+
+| 优先级 | 信号类 | 聚合逻辑 |
+|---|---|---|
+| 1 | `repeated_failure` | 同 (tool, 错误签名) 聚合计数 ≥2；携带计数 + 摘录 |
+| 2 | `retry_pattern` | 同工具近似参数指纹的重复调用（Edit old_string 不匹配重试等） |
+| 3 | `oversized_result` | 触发 materializer 落盘阈值的 tool call 统计（次数 + 体积分布） |
+| 4 | `run_outcome` | run 终态分布（完成/取消/超时/ContextTooLong） |
+| 5 | `user_correction` | reject 后改写重发的交互事件（有则记录） |
+| 6 | `token_efficiency` | 每 run 输入/输出消耗汇总（均值与离群） |
+
+### 2A.3 材料注入与提案门禁
+
+- `ImprovementMaterials` 增第三字段 `evidence: EvidenceBundle`；`build_block_prompt` 在组件块与 lessons 块之间注入 **evidence 块**（证据是改进依据，lessons 是历史经验）。
+- 证据块字符预算独立（`EVIDENCE_BLOCK_MAX_CHARS`，实施定值，量级 6000）；超限按 2A.2 优先级从低往高裁剪。
+- **提案门禁分阶段**：v1 prompt 明文约束「每条编辑 MUST 指出它回应 evidence 中的哪条信号（引用 signal id）；无法对应的编辑是投机，NEVER 提出」；v2（后续）解析侧校验引用存在性，缺失引用的 edit 拒绝。
+- 空证据兜底：窗口内无 session/无信号时渲染「（近期无执行证据）」，周期照常执行（对齐空 corpus JSON 兜底先例）。
+
+### 2A.4 lesson 证据信号扩展
+
+`EvidenceBinding.signal` 从单一 `cycle_observation` 扩为 `SignalKind` 枚举：
+
+```rust
+enum SignalKind {
+    CycleObservation,   // v1：模型自述提案理由（保留，降为兜底信号）
+    RepeatedFailure,    // 真实行为信号（2A.2 聚合）
+    RetryPattern,
+    OversizedResult,
+    RunOutcome,
+    UserCorrection,
+    TokenEfficiency,
+}
+```
+
+`run_ref` 扩展承载真实 `run_id`（session dataset 的 run 标识）；采纳回写时优先绑定提案引用的真实信号，`CycleObservation` 仅在无引用时兜底。**归因纪律对齐 Harness² experience reflector**：无法归因到单一信号的编辑标 `confounded` 语义（lesson 文本中显式声明），NEVER 编造归因（"an invented attribution poisons the library"）。
+
+### 2A.5 数据源流模型（checkpoint · 步长 · 数据源分块，2026-10-23 拍板）
+
+> 修正 v1 语义：分块对象是**数据源（session 证据流）**，NEVER 按组件分块——组件面是每轮提案的编辑对象，不是分块单位。模型对齐 Harness² 的 continual-learning 任务流（`schedule.py::stream_order`）与断点纪律（`runmark.py`）：处理单元推进、完成显式打标、指纹校验复用。
+
+```
+session 流（按 updated_at 全序）
+   │  首次：最近 initial_window_days（默认 30）天活跃 session
+   │  之后：从 checkpoint 游标往后
+   ▼
+[步长裁剪] 每次跑最多 max_sessions_per_cycle 个 session（防单次跑爆）
+   ▼
+[数据源分块] 切为若干证据块（每块 = 一段 session/run 证据投影）
+   ▼
+每块独立：证据投影 → 全组件提案 → 采纳落盘 → lesson
+   （块级幂等：单块失败只作废该块，游标 NEVER 推进过失败块）
+   ▼
+块成功 → checkpoint 推进（最后处理的 session id + 时间戳 + 组件树指纹）
+```
+
+**checkpoint 契约**（对齐 runmark 纪律，落盘 `~/.agents/harness/checkpoint.json`）：
+
+1. **显式推进**：只有「块执行完成且落盘成功」才写游标——输出存在不等于完成（"presence of output is not enough"）；
+2. **指纹校验**：checkpoint 记录处理时的组件树指纹；组件树在游标之后被外部修改（指纹不符）时，当块从游标重跑——NEVER 用陈旧组件状态生成的提案覆盖新改动；
+3. **首次窗口**：无 checkpoint 时默认读最近 30 天（`harness.rsi.evidence_initial_window_days`，可配）活跃 session；
+4. **步长上限**：`harness.rsi.evidence_max_sessions_per_cycle`——每次周期最多处理的 session 数，超出的留待下周期（增量消化，NEVER 一次吞尽）。
+
+**组件面体积控制**：单块内若组件面过大导致材料超预算，按组件分次提案作为**体积兜底**（v1 的 `chunk_max_components` 语义降级至此并标注待废弃；正确的主分块单位永远是数据源块）。
+
+### 2A.6 边界与排期
+
+- Probe/Compose（多 rollout 行为对比）留 0.3.0；本节交付「单 rollout + 真实证据」。
+- 投影性能：manifest 定位 + 成员流式扫描，百 run 量级毫秒级；NEVER 全量加载 ToolResult 原文进内存。
+- 实施排期：harness 投影器（domain 聚合 + dataset 读取 adapter，TDD）→ improvement 材料扩展 → daemon/CLI 接线 → 真模型 e2e（验收：有证据材料下提案引用 signal id，lesson 落盘带真实 SignalKind）。作为 #2046 验收前置项。
+
 ## 3. 证据绑定（EvidenceBinding）
 
 ```rust
@@ -62,6 +151,7 @@ struct LessonEntry {
 
 ## 6. 验收
 
+- 证据装配（2A）：投影器从真实 dataset fixture 提取聚合信号（L2）；材料含 evidence 块、空证据兜底渲染（L2）；真模型在有证据材料下提案引用 signal id、lesson 落盘带真实 SignalKind（e2e，#2046 前置）。
 - 证据不变量：无证据提案被拒（L2）；采纳 lesson 均含 EvidenceBinding（L2 + e2e）。
 - 真模型 e2e：一次完整循环后经验库出现带证据的 Active lesson，且下一次改进周期的材料分块消费到该 lesson。
 - JSON 兜底：空组件树/无信号时 daemon 仍输出合法 JSON 结构（对齐反思空 corpus 兜底教训，NEVER 自然语言解释）。
