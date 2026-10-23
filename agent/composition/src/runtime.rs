@@ -293,12 +293,6 @@ pub(crate) async fn from_args_with_gateways(
     }
     let scoring_ports = scoring_assembly.assignment;
     let startup_notices = crate::systemone::scoring_startup_notices(&scoring_assembly.outcome);
-    let compact_generator =
-        runtime::ProviderCompactGenerator::new(Arc::new(runtime::CompactModelResolver::new(
-            config.reader(),
-            gateways.provider.clone(),
-            initial_provider.compact_model_slot(),
-        )));
     let deps = runtime::SessionSwitchDependencies {
         workspace: workspace.clone(),
         task_restore: std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(
@@ -331,7 +325,6 @@ pub(crate) async fn from_args_with_gateways(
                 skill_catalog.clone(),
                 Arc::new(context::WorkspaceSkillQueryFactory::new(workspace.read())),
             )
-            .with_generator(Arc::new(compact_generator))
             .with_persistence(task_wiring.persist(), workspace.persist()),
         ),
     };

@@ -8,14 +8,11 @@ use super::constants::{
     FALLBACK_TEXT_BLOCK_MAX_BYTES, FALLBACK_TOOL_RESULT_MAX_BYTES, MAIN_USER_OBJECTIVE_MAX_CHARS,
     MAX_REDUCE_REFRESH_ROUNDS, MAX_TYPED_OUTPUT_REPAIR_ATTEMPTS, REFRESH_BUDGET_RATIO,
 };
+use crate::domain::compact::llm_error::CompactLlmError;
 use crate::domain::compact::{
     sanitize_tool_pairs, CompactProgressFn, CompactStageData, CompactWorkData,
 };
-use crate::domain::{
-    CompactGenerationFailureData, CompactGenerationFailureKind, CompactGenerationOutputData,
-    CompactSummaryQuality,
-};
-use async_trait::async_trait;
+use crate::domain::CompactSummaryQuality;
 use futures_util::StreamExt;
 use share::message::{ContentBlock, Message, MessageSource, Role};
 use share::string_idx::slice_head;
@@ -65,50 +62,19 @@ fn emit_progress_completed(
     }
 }
 
-/// Context-owned external-detail port for generating LLM text during compaction.
-///
-/// The implementor (typically a runtime adapter wrapping a `ProviderPort`)
-/// invokes the LLM with the supplied request messages and returns the full
-/// text output. Context retains ownership of prompt construction, map-reduce
-/// orchestration, summary parsing, cancellation propagation, and fallback.
-///
-/// This trait is the sole boundary through which compact logic reaches an LLM;
-/// production code must not depend on a concrete Provider construction handle.
-#[async_trait]
-pub trait CompactGenerator: Send + Sync {
-    /// Generate the full text output for the given request messages.
-    ///
-    /// Returns the concatenated text content on success, or an error message
-    /// describing the failure. Cancellation is cooperative via `cancel`.
-    async fn generate(
-        &self,
-        request: Vec<Message>,
-        cancel: &CancellationToken,
-    ) -> Result<CompactGenerationOutputData, CompactGenerationFailureData>;
-
-    /// 本次 compact 调用模型的输入窗口。
-    ///
-    /// `None`（默认）表示与 summary 注入的对话模型窗口一致；实现方只有在
-    /// 确实使用不同模型时才返回更小窗口，Context 据此收紧 Map 分块目标，
-    /// **NEVER** 依据未知窗口放大预算。
-    async fn compact_context_window(&self) -> Option<usize> {
-        None
-    }
-}
-
 struct MapReduceCompactOutput {
     summary: String,
     degraded_chunks: usize,
-    degradation_failure: Option<CompactGenerationFailureKind>,
+    degradation_failure: Option<String>,
     locally_degraded_to_budget: bool,
 }
 
 impl MapReduceCompactOutput {
     fn quality(&self) -> CompactSummaryQuality {
-        match self.degradation_failure {
+        match &self.degradation_failure {
             Some(failure) => CompactSummaryQuality::PartialMapFallback {
                 degraded_chunks: self.degraded_chunks,
-                failure,
+                failure: failure.clone(),
             },
             None if self.locally_degraded_to_budget => {
                 CompactSummaryQuality::LlmWithLocalBudgetDegradation
@@ -155,14 +121,14 @@ pub(crate) fn build_refresh_prompt(
 
 /// 调用 LLM 对当前 typed checkpoint 再压一次。
 async fn llm_refresh(
-    generator: &dyn CompactGenerator,
+    binding: &crate::domain::CompactLlmBinding,
     checkpoint: &crate::domain::compact::ContinuationCheckpoint,
     budget: usize,
     cancel: &CancellationToken,
-) -> Result<crate::domain::compact::ContinuationCheckpoint, CompactGenerationFailureData> {
+) -> Result<crate::domain::compact::ContinuationCheckpoint, CompactLlmError> {
     let prompt = build_refresh_prompt(checkpoint, budget);
     let refreshed = generate_and_validate_typed(
-        generator,
+        binding,
         "refresh",
         vec![Message::user(prompt)],
         cancel,
@@ -173,10 +139,7 @@ async fn llm_refresh(
                 .clone()
                 .apply_compression_patch(patch)
                 .map_err(|error| {
-                    CompactGenerationFailureData::new(
-                        CompactGenerationFailureKind::InvalidSummary,
-                        format!("refresh compact patch 无效：{error}"),
-                    )
+                    CompactLlmError::InvalidSummary(format!("refresh compact patch 无效：{error}"))
                 })
         },
     )
@@ -746,17 +709,17 @@ pub async fn compact_messages_with_llm(
     messages: &[Message],
     previous_summary: Option<&str>,
     context_size: usize,
-    generator: Option<&dyn CompactGenerator>,
+    binding: Option<&crate::domain::CompactLlmBinding>,
     progress: Option<&dyn CompactProgressFn>,
-    task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
+    task_snapshot: Option<&task::CompactTaskSnapshotData>,
     cancel: &CancellationToken,
     tail: CompactTail<'_>,
 ) -> Option<CompactResult> {
     // summary 预算归注入窗口；Map 分块归 compact 调用模型窗口（若不同）。
-    let budgets = match generator {
-        Some(generator) => crate::domain::compact::CompactBudgetSources::resolve(
+    let budgets = match binding {
+        Some(binding) => crate::domain::compact::CompactBudgetSources::resolve(
             context_size,
-            generator.compact_context_window().await,
+            binding.compact_context_window,
         ),
         None => crate::domain::compact::CompactBudgetSources::same(context_size),
     };
@@ -781,14 +744,14 @@ pub async fn compact_messages_with_llm(
         target: crate::LOG_TARGET,
         "[compact] 开始：messages={total} early={} early_tokens={early_tokens} previous_summary={previous_len} chars mode={}",
         early_messages.len(),
-        if generator.is_some() { "llm" } else { "local" },
+        if binding.is_some() { "llm" } else { "local" },
     );
-    let (summary, quality) = match generator {
-        Some(generator) => {
-            let result: Result<(String, CompactSummaryQuality), CompactGenerationFailureData> =
+    let (summary, quality) = match binding {
+        Some(binding) => {
+            let result: Result<(String, CompactSummaryQuality), CompactLlmError> =
                 if early_tokens > budgets.chunk_target_tokens() {
                     compact_messages_map_reduce(
-                        generator,
+                        binding,
                         early_messages,
                         previous_summary,
                         progress,
@@ -804,7 +767,7 @@ pub async fn compact_messages_with_llm(
                 } else {
                     emit_progress(progress, CompactStageData::Generating);
                     llm_compact(
-                        generator,
+                        binding,
                         early_messages,
                         previous_summary,
                         budgets,
@@ -816,24 +779,23 @@ pub async fn compact_messages_with_llm(
                 };
             match result {
                 Ok(result) => result,
-                Err(error) if error.permits_local_fallback() => {
+                Err(error) if matches!(&error, CompactLlmError::Provider(prov) if prov.is_cancelled()) =>
+                {
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "[compact] LLM 摘要取消，不提交本地 fallback：{error}",
+                    );
+                    return None;
+                }
+                Err(error) => {
                     log::warn!(
                         target: crate::LOG_TARGET,
-                        "[compact] LLM 摘要失败，回退本地路径：{}",
-                        error.message,
+                        "[compact] LLM 摘要失败，回退本地路径：{error}",
                     );
                     (
                         build_summary_text(early_messages, previous_summary),
-                        CompactSummaryQuality::LocalFallback(error.kind),
+                        CompactSummaryQuality::LocalFallback(error.kind_label().to_string()),
                     )
-                }
-                Err(error) => {
-                    log::debug!(
-                        target: crate::LOG_TARGET,
-                        "[compact] LLM 摘要取消，不提交本地 fallback：{}",
-                        error.message,
-                    );
-                    return None;
                 }
             }
         }
@@ -867,20 +829,26 @@ pub async fn compact_messages_with_llm(
 
 /// 底层 LLM 调用：通过 `CompactGenerator` 发送 request 消息列表并收集非空文本。
 async fn llm_generate(
-    generator: &dyn CompactGenerator,
+    binding: &crate::domain::CompactLlmBinding,
     request: Vec<Message>,
     cancel: &CancellationToken,
-) -> Result<CompactGenerationOutputData, CompactGenerationFailureData> {
-    let output = generator.generate(request, cancel).await?;
-    if output.text().trim().is_empty() {
-        return Err(CompactGenerationFailureData::new(
-            CompactGenerationFailureKind::InvalidSummary,
-            format!(
+) -> Result<provider::composition::LlmTextOutputData, CompactLlmError> {
+    let output = binding
+        .invoker
+        .invoke_text(
+            &binding.model,
+            &compact_invoke_request(request, binding.max_output_tokens),
+            cancel,
+        )
+        .await
+        .map_err(CompactLlmError::Provider)?;
+    if output.text.trim().is_empty() {
+        return Err(CompactLlmError::InvalidSummary(format!(
                 "LLM 返回了空的 compact 结构化响应：completion_reason={} text_deltas={} non_text_deltas={} completed={}",
-                output.completion_reason().unwrap_or("unknown"),
-                output.text_delta_count(),
-                output.non_text_delta_count(),
-                output.stream_completed(),
+                output.completion_reason.as_deref().unwrap_or("unknown"),
+                output.text_delta_count,
+                output.non_text_delta_count,
+                output.stream_completed,
             ),
         ));
     }
@@ -895,18 +863,17 @@ fn build_empty_output_retry_request(mut request: Vec<Message>) -> Vec<Message> {
 }
 
 async fn llm_generate_with_empty_retry(
-    generator: &dyn CompactGenerator,
+    binding: &crate::domain::CompactLlmBinding,
     stage: &str,
     request: Vec<Message>,
     cancel: &CancellationToken,
-) -> Result<CompactGenerationOutputData, CompactGenerationFailureData> {
-    match llm_generate(generator, request.clone(), cancel).await {
+) -> Result<provider::composition::LlmTextOutputData, CompactLlmError> {
+    match llm_generate(binding, request.clone(), cancel).await {
         Ok(output) => Ok(output),
-        Err(error) if error.kind == CompactGenerationFailureKind::InvalidSummary => {
+        Err(CompactLlmError::InvalidSummary(_)) => {
             if cancel.is_cancelled() {
-                return Err(CompactGenerationFailureData::new(
-                    CompactGenerationFailureKind::Cancelled,
-                    "compact 空响应重试前已取消",
+                return Err(CompactLlmError::Provider(
+                    provider::ProviderError::cancelled(),
                 ));
             }
             log::debug!(
@@ -915,12 +882,12 @@ async fn llm_generate_with_empty_retry(
                 request.len(),
             );
             let retry_result =
-                llm_generate(generator, build_empty_output_retry_request(request), cancel).await;
+                llm_generate(binding, build_empty_output_retry_request(request), cancel).await;
             if let Err(retry_error) = &retry_result {
                 log::warn!(
                     target: crate::LOG_TARGET,
                     "[compact] stage={stage} attempt=2 failure={:?} action=retry_exhausted",
-                    retry_error.kind,
+                    retry_error.kind_label(),
                 );
             }
             retry_result
@@ -932,7 +899,7 @@ async fn llm_generate_with_empty_retry(
 fn decode_typed_json<T: serde::de::DeserializeOwned>(
     stage: &str,
     response: &str,
-) -> Result<T, CompactGenerationFailureData> {
+) -> Result<T, CompactLlmError> {
     let trimmed = response.trim();
     let json = trimmed
         .strip_prefix("```json")
@@ -941,17 +908,14 @@ fn decode_typed_json<T: serde::de::DeserializeOwned>(
         .map(str::trim)
         .unwrap_or(trimmed);
     serde_json::from_str(json).map_err(|error| {
-        CompactGenerationFailureData::new(
-            CompactGenerationFailureKind::InvalidSummary,
-            format!("{stage} compact JSON 无效：{error}"),
-        )
+        CompactLlmError::InvalidSummary(format!("{stage} compact JSON 无效：{error}"))
     })
 }
 
 fn build_typed_output_repair_request(
     stage: &str,
     invalid_response: &str,
-    validation_error: &CompactGenerationFailureData,
+    validation_error: &CompactLlmError,
 ) -> Vec<Message> {
     let invalid_response = slice_head(invalid_response, FALLBACK_PREVIOUS_SUMMARY_CAP);
     vec![Message::user(format!(
@@ -960,23 +924,23 @@ fn build_typed_output_repair_request(
          Preserve every supported fact, source, sequence, authority, scope, lifecycle, constraint action, objective, evidence, working-set item, risk, and resume intent from the invalid output. Do not invent facts or authority.\n\
          Repairing MUST NOT change a fact's kind semantics: an objective MUST stay kind=objective and MUST NOT be downgraded to working_set, committed_fact, risk, or resume_candidate. Move a misplaced kind value into the \"kind\" field instead of dropping it.\n\
          Validation error: {}\n\n<invalid_typed_output>\n{}\n</invalid_typed_output>",
-        validation_error.message, invalid_response
+        validation_error, invalid_response
     ))]
 }
 
 async fn generate_and_validate_typed<Decoded, Validate>(
-    generator: &dyn CompactGenerator,
+    binding: &crate::domain::CompactLlmBinding,
     stage: &str,
     request: Vec<Message>,
     cancel: &CancellationToken,
     validate: Validate,
-) -> Result<Decoded, CompactGenerationFailureData>
+) -> Result<Decoded, CompactLlmError>
 where
-    Validate: Fn(&str) -> Result<Decoded, CompactGenerationFailureData>,
+    Validate: Fn(&str) -> Result<Decoded, CompactLlmError>,
 {
-    let mut response = llm_generate_with_empty_retry(generator, stage, request, cancel)
+    let mut response = llm_generate_with_empty_retry(binding, stage, request, cancel)
         .await?
-        .into_text();
+        .text;
     let mut validation_error = match validate(&response) {
         Ok(decoded) => return Ok(decoded),
         Err(error) => error,
@@ -984,20 +948,17 @@ where
 
     for repair_attempt in 1..=MAX_TYPED_OUTPUT_REPAIR_ATTEMPTS {
         if cancel.is_cancelled() {
-            return Err(CompactGenerationFailureData::new(
-                CompactGenerationFailureKind::Cancelled,
-                format!("{stage} compact 格式修复前已取消"),
+            return Err(CompactLlmError::Provider(
+                provider::ProviderError::cancelled(),
             ));
         }
         log::warn!(
             target: crate::LOG_TARGET,
             "[compact] {stage} typed 输出无效，发起格式修复 attempt={repair_attempt}: {}",
-            validation_error.message,
+            validation_error,
         );
         let repair_request = build_typed_output_repair_request(stage, &response, &validation_error);
-        response = llm_generate(generator, repair_request, cancel)
-            .await?
-            .into_text();
+        response = llm_generate(binding, repair_request, cancel).await?.text;
         match validate(&response) {
             Ok(decoded) => return Ok(decoded),
             Err(error) => validation_error = error,
@@ -1008,48 +969,42 @@ where
 }
 
 async fn generate_and_decode_typed<Decoded: serde::de::DeserializeOwned>(
-    generator: &dyn CompactGenerator,
+    binding: &crate::domain::CompactLlmBinding,
     stage: &str,
     request: Vec<Message>,
     cancel: &CancellationToken,
-) -> Result<Decoded, CompactGenerationFailureData> {
-    generate_and_validate_typed(generator, stage, request, cancel, |response| {
+) -> Result<Decoded, CompactLlmError> {
+    generate_and_validate_typed(binding, stage, request, cancel, |response| {
         decode_typed_json(stage, response)
     })
     .await
 }
 
 async fn llm_extract_facts(
-    generator: &dyn CompactGenerator,
+    binding: &crate::domain::CompactLlmBinding,
     early_messages: &[Message],
     previous_summary: Option<&str>,
     budgets: crate::domain::compact::CompactBudgetSources,
     cancel: &CancellationToken,
-) -> Result<crate::domain::compact::CompactFactBatch, CompactGenerationFailureData> {
+) -> Result<crate::domain::compact::CompactFactBatch, CompactLlmError> {
     let request = build_compact_request(
         early_messages,
         previous_summary,
         budgets.previous_summary_budget(),
     );
-    generate_and_decode_typed(generator, "map", request, cancel).await
+    generate_and_decode_typed(binding, "map", request, cancel).await
 }
 
 async fn llm_extract_facts_or_local_fallback(
-    generator: &dyn CompactGenerator,
+    binding: &crate::domain::CompactLlmBinding,
     chunk_index: usize,
     total_chunks: usize,
     messages: &[Message],
     previous_summary: Option<&str>,
     budgets: crate::domain::compact::CompactBudgetSources,
     cancel: &CancellationToken,
-) -> Result<
-    (
-        crate::domain::compact::CompactFactBatch,
-        Option<CompactGenerationFailureKind>,
-    ),
-    CompactGenerationFailureData,
-> {
-    match llm_extract_facts(generator, messages, previous_summary, budgets, cancel).await {
+) -> Result<(crate::domain::compact::CompactFactBatch, Option<String>), CompactLlmError> {
+    match llm_extract_facts(binding, messages, previous_summary, budgets, cancel).await {
         Ok(facts) => {
             log::debug!(
                 target: crate::LOG_TARGET,
@@ -1062,17 +1017,20 @@ async fn llm_extract_facts_or_local_fallback(
             );
             Ok((facts, None))
         }
-        Err(error) if error.kind == CompactGenerationFailureKind::InvalidSummary => {
+        Err(error @ CompactLlmError::InvalidSummary(_)) => {
             log::warn!(
                 target: crate::LOG_TARGET,
                 "[compact] stage=map chunk={}/{} outcome=local_chunk_fallback failure={:?} input_messages={} input_tokens={}",
                 chunk_index + 1,
                 total_chunks,
-                error.kind,
+                error.kind_label(),
                 messages.len(),
                 crate::domain::token_budget::estimate_messages_tokens(messages),
             );
-            Ok((local_chunk_fallback_fact_batch(messages)?, Some(error.kind)))
+            Ok((
+                local_chunk_fallback_fact_batch(messages)?,
+                Some(error.kind_label().to_string()),
+            ))
         }
         Err(error) => Err(error),
     }
@@ -1084,15 +1042,12 @@ async fn llm_extract_facts_or_local_fallback(
 /// 的 LLM 提取成果，否则一次局部失败会把整轮 compact 退化为全量文本降级。
 fn local_chunk_fallback_fact_batch(
     messages: &[Message],
-) -> Result<crate::domain::compact::CompactFactBatch, CompactGenerationFailureData> {
+) -> Result<crate::domain::compact::CompactFactBatch, CompactLlmError> {
     let fallback = build_summary_text(messages, None);
     crate::domain::compact::ContinuationCheckpoint::parse(&fallback)
         .map(checkpoint_to_fact_batch)
         .map_err(|parse_error| {
-            CompactGenerationFailureData::new(
-                CompactGenerationFailureKind::InvalidSummary,
-                format!("local chunk fallback 无法解析：{parse_error}"),
-            )
+            CompactLlmError::InvalidSummary(format!("local chunk fallback 无法解析：{parse_error}"))
         })
 }
 
@@ -1205,7 +1160,7 @@ pub(crate) fn latest_main_user_request(messages: &[Message]) -> Option<String> {
 fn reduce_facts_with_objective_fallback(
     facts: crate::domain::compact::CompactFactBatch,
     messages: &[Message],
-    task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
+    task_snapshot: Option<&task::CompactTaskSnapshotData>,
 ) -> Result<crate::domain::compact::ContinuationCheckpoint, crate::domain::compact::CheckpointError>
 {
     let facts_have_main_user_objective = facts.facts().iter().any(|fact| {
@@ -1235,30 +1190,24 @@ fn reduce_facts_with_objective_fallback(
 
 /// 调用 LLM 对 early_messages 提取 typed facts，再由本地 reducer 生成 checkpoint。
 async fn llm_compact(
-    generator: &dyn CompactGenerator,
+    binding: &crate::domain::CompactLlmBinding,
     early_messages: &[Message],
     previous_summary: Option<&str>,
     budgets: crate::domain::compact::CompactBudgetSources,
-    task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
+    task_snapshot: Option<&task::CompactTaskSnapshotData>,
     cancel: &CancellationToken,
-) -> Result<String, CompactGenerationFailureData> {
+) -> Result<String, CompactLlmError> {
     let facts =
-        llm_extract_facts(generator, early_messages, previous_summary, budgets, cancel).await?;
+        llm_extract_facts(binding, early_messages, previous_summary, budgets, cancel).await?;
     let checkpoint = reduce_facts_with_objective_fallback(facts, early_messages, task_snapshot)
         .map_err(|error| {
-            CompactGenerationFailureData::new(
-                CompactGenerationFailureKind::InvalidSummary,
-                format!("map compact facts 无法归并：{error}"),
-            )
+            CompactLlmError::InvalidSummary(format!("map compact facts 无法归并：{error}"))
         })?;
     checkpoint
         .normalize_to_budget(budgets.summary_budget())
         .map(|checkpoint| checkpoint.render())
         .map_err(|error| {
-            CompactGenerationFailureData::new(
-                CompactGenerationFailureKind::InvalidSummary,
-                format!("map compact checkpoint 无法收敛：{error}"),
-            )
+            CompactLlmError::InvalidSummary(format!("map compact checkpoint 无法收敛：{error}"))
         })
 }
 
@@ -1294,14 +1243,14 @@ fn split_messages_into_chunks(messages: &[Message], target_tokens: usize) -> Vec
 /// 3. 收敛：最终摘要超过预算时再压一次（最多 `MAX_REDUCE_REFRESH_ROUNDS` 轮），
 ///    避免超大摘要直接注入 system（#1486）。
 async fn compact_messages_map_reduce(
-    generator: &dyn CompactGenerator,
+    binding: &crate::domain::CompactLlmBinding,
     early_messages: &[Message],
     previous_summary: Option<&str>,
     progress: Option<&dyn CompactProgressFn>,
     budgets: crate::domain::compact::CompactBudgetSources,
-    task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
+    task_snapshot: Option<&task::CompactTaskSnapshotData>,
     cancel: &CancellationToken,
-) -> Result<MapReduceCompactOutput, CompactGenerationFailureData> {
+) -> Result<MapReduceCompactOutput, CompactLlmError> {
     use crate::domain::token_budget::estimate_messages_tokens;
 
     let chunk_target = budgets.chunk_target_tokens();
@@ -1329,7 +1278,7 @@ async fn compact_messages_map_reduce(
             let previous_for_chunk = (chunk_index == 0).then_some(previous_summary).flatten();
             async move {
                 match llm_extract_facts_or_local_fallback(
-                    generator,
+                    binding,
                     chunk_index,
                     total_chunks,
                     chunk,
@@ -1347,17 +1296,20 @@ async fn compact_messages_map_reduce(
         .collect::<Vec<_>>();
     let mut in_flight = futures_util::stream::iter(futures).buffer_unordered(concurrency);
     let mut indexed_fact_batches = Vec::with_capacity(total_chunks);
-    let mut failed_chunks: Vec<(usize, CompactGenerationFailureData)> = Vec::new();
+    let mut failed_chunks: Vec<(usize, CompactLlmError)> = Vec::new();
     let mut completed_chunks = 0usize;
     while let Some(fact_batch) = in_flight.next().await {
         match fact_batch {
             Ok(entry) => indexed_fact_batches.push(entry),
-            // 取消等不可降级错误必须整体上抛；其余 chunk 级错误本地降级，
+            // 取消不可降级，必须整体上抛；其余 chunk 级错误本地降级，
             // 不牵连已完成的 LLM 提取成果。
-            Err((chunk_index, error)) if error.permits_local_fallback() => {
+            Err((_, error)) if matches!(&error, CompactLlmError::Provider(prov) if prov.is_cancelled()) =>
+            {
+                return Err(error);
+            }
+            Err((chunk_index, error)) => {
                 failed_chunks.push((chunk_index, error));
             }
-            Err((_, error)) => return Err(error),
         }
         completed_chunks += 1;
         emit_progress_completed(
@@ -1377,22 +1329,21 @@ async fn compact_messages_map_reduce(
             "[compact] stage=map chunk={}/{} outcome=local_chunk_fallback failure={:?} input_messages={} input_tokens={}",
             chunk_index + 1,
             total_chunks,
-            error.kind,
+            error.kind_label(),
             chunks[chunk_index].len(),
             estimate_messages_tokens(&chunks[chunk_index]),
         );
         let facts = local_chunk_fallback_fact_batch(&chunks[chunk_index])?;
-        indexed_fact_batches.push((chunk_index, facts, Some(error.kind)));
+        indexed_fact_batches.push((chunk_index, facts, Some(error.kind_label().to_string())));
     }
     indexed_fact_batches.sort_by_key(|(chunk_index, _, _)| *chunk_index);
     if let Some(previous_summary) = previous_summary {
         let checkpoint = crate::domain::compact::CanonicalCompactSummary::decode(previous_summary)
             .map(crate::domain::compact::CanonicalCompactSummary::into_checkpoint)
             .map_err(|parse_error| {
-                CompactGenerationFailureData::new(
-                    CompactGenerationFailureKind::InvalidSummary,
-                    format!("previous compact checkpoint 无法解析：{parse_error}"),
-                )
+                CompactLlmError::InvalidSummary(format!(
+                    "previous compact checkpoint 无法解析：{parse_error}"
+                ))
             })?;
         indexed_fact_batches.insert(0, (0, checkpoint_to_fact_batch(checkpoint), None));
     }
@@ -1402,7 +1353,7 @@ async fn compact_messages_map_reduce(
         .count();
     let degradation_failure = indexed_fact_batches
         .iter()
-        .find_map(|(_, _, degradation)| *degradation);
+        .find_map(|(_, _, degradation)| degradation.clone());
     log::info!(
         target: crate::LOG_TARGET,
         "[compact] map 完成：total_chunks={total_chunks} successful_chunks={} degraded_chunks={degraded_chunks}",
@@ -1428,10 +1379,7 @@ async fn compact_messages_map_reduce(
                 locally_degraded_to_budget: false,
             })
             .map_err(|error| {
-                CompactGenerationFailureData::new(
-                    CompactGenerationFailureKind::InvalidSummary,
-                    format!("map compact facts 无法归并：{error}"),
-                )
+                CompactLlmError::InvalidSummary(format!("map compact facts 无法归并：{error}"))
             });
     }
 
@@ -1458,10 +1406,7 @@ async fn compact_messages_map_reduce(
         task_snapshot,
     )
     .map_err(|error| {
-        CompactGenerationFailureData::new(
-            CompactGenerationFailureKind::InvalidSummary,
-            format!("reduce compact facts 无法归并：{error}"),
-        )
+        CompactLlmError::InvalidSummary(format!("reduce compact facts 无法归并：{error}"))
     })?;
     let mut final_summary = final_checkpoint.render();
     log::info!(
@@ -1488,19 +1433,22 @@ async fn compact_messages_map_reduce(
             MAX_REDUCE_REFRESH_ROUNDS,
         );
         let tokens_before = crate::domain::token_budget::estimate_tokens(&final_summary);
-        let refreshed_checkpoint =
-            match llm_refresh(generator, &final_checkpoint, budget, cancel).await {
-                Ok(checkpoint) => checkpoint,
-                Err(error) if error.permits_local_fallback() => {
-                    log::warn!(
-                        target: crate::LOG_TARGET,
-                        "[compact] refresh 结果无效，保留当前 typed checkpoint：{}",
-                        error.message,
-                    );
-                    break;
-                }
-                Err(error) => return Err(error),
-            };
+        let refreshed_checkpoint = match llm_refresh(binding, &final_checkpoint, budget, cancel)
+            .await
+        {
+            Ok(checkpoint) => checkpoint,
+            Err(error) if matches!(&error, CompactLlmError::Provider(prov) if prov.is_cancelled()) =>
+            {
+                return Err(error);
+            }
+            Err(error) => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "[compact] refresh 结果无效，保留当前 typed checkpoint：{error}",
+                );
+                break;
+            }
+        };
         emit_progress_completed(
             progress,
             CompactStageData::Refreshing,
@@ -1540,10 +1488,9 @@ async fn compact_messages_map_reduce(
         final_checkpoint = final_checkpoint
             .degrade_to_budget(budget)
             .map_err(|error| {
-                CompactGenerationFailureData::new(
-                    CompactGenerationFailureKind::InvalidSummary,
-                    format!("compact checkpoint 无法安全降级到预算：{error}"),
-                )
+                CompactLlmError::InvalidSummary(format!(
+                    "compact checkpoint 无法安全降级到预算：{error}"
+                ))
             })?;
         final_summary = final_checkpoint.render();
         locally_degraded_to_budget = true;
@@ -1564,3 +1511,16 @@ async fn compact_messages_map_reduce(
 #[cfg(test)]
 #[path = "compact_summary_tests.rs"]
 mod compact_summary_tests;
+
+/// 组 compact LLM 调用请求（Off reasoning；取消由调用方 token 传入）。
+fn compact_invoke_request(
+    messages: Vec<Message>,
+    max_output_tokens: u32,
+) -> provider::ProviderRequestData {
+    provider::ProviderRequestData::new(
+        String::new(),
+        messages,
+        max_output_tokens,
+        share::reasoning::ReasoningLevel::Off,
+    )
+}

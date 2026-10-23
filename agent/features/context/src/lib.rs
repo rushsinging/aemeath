@@ -77,20 +77,18 @@ pub(crate) use domain::session::{
 #[cfg(test)]
 pub(crate) use domain::ContextMessages;
 pub use domain::{
-    AcceptedInputAppendData, AcceptedInputError, ContextAppendData, SessionRevision, Urgency,
+    AcceptedInputAppendData, AcceptedInputError, CompactLlmBinding, ContextAppendData,
+    SessionRevision, Urgency,
 };
 pub use domain::{
     AppendReceiptData, BackgroundProcessCompletionStatus, BackgroundProcessReminderItemData,
-    CleanupConfirmation, CompactGenerationFailureData, CompactGenerationFailureKind,
-    CompactGenerationOutputData, CompactOutcome, CompactRequestData, CompactResult,
-    CompactSkipReason, CompactSummaryQuality, CompactTrigger, CompactionDecisionData,
-    ContentFingerprint, ContextAppendError, ContextPortError, ContextRequestData,
+    CleanupConfirmation, CompactOutcome, CompactRequestData, CompactTrigger,
+    CompactionDecisionData, ContextAppendError, ContextPortError, ContextRequestData,
     ContextWindowData, DecisionReason, FinalizeCause, InvocationReminderData, Language,
-    ManualCompactRequestData, MemoryRecallEntryData, StepReceiptData, SystemPromptSpecData,
-    TaskProgressReminderData, TaskProgressReminderItemData, TaskProgressStatus,
-    ToolCallIdentityData, ToolCallReceiptData, ToolCallState, ToolOutcomeKindData,
-    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
-    ToolTerminalReceiptData,
+    MemoryRecallEntryData, StepReceiptData, SystemPromptSpecData, TaskProgressReminderData,
+    TaskProgressReminderItemData, TaskProgressStatus, ToolCallIdentityData, ToolCallReceiptData,
+    ToolCallState, ToolOutcomeKindData, ToolReceiptMutationData, ToolReceiptMutationError,
+    ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
 };
 pub use ports::{
     ContextAppendPort, ContextCompactPort, ContextPorts, ContextWindowPort, ReminderControlPort,
@@ -112,11 +110,11 @@ pub mod context_port {
     pub(crate) use crate::domain::ContextMessage;
     pub use crate::domain::{
         AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-        CompactOutcome, CompactRequestData, CompactResult, CompactSkipReason, CompactTrigger,
-        CompactionDecisionData, ContentFingerprint, ContextAppendData, ContextAppendError,
-        ContextPortError, ContextRequestData, ContextWindowData, DecisionReason, FinalizeCause,
-        Language, ManualCompactRequestData, SessionRevision, StepReceiptData, SystemBlock,
-        SystemPromptSpecData, TokenBudget, ToolOutcomeKindData, Urgency,
+        CompactOutcome, CompactRequestData, CompactTrigger, CompactionDecisionData,
+        ContextAppendData, ContextAppendError, ContextPortError, ContextRequestData,
+        ContextWindowData, DecisionReason, FinalizeCause, Language, SessionRevision,
+        StepReceiptData, SystemBlock, SystemPromptSpecData, TokenBudget, ToolOutcomeKindData,
+        Urgency,
     };
     pub use crate::ports::{
         ContextAppendPort, ContextCompactPort, ContextPorts, ContextWindowPort, ReminderControlPort,
@@ -124,22 +122,22 @@ pub mod context_port {
 }
 
 pub mod compact {
-    pub use crate::adapters::compact_summary::{
-        messages_selected_for_precompact_memory, CompactGenerator,
-    };
+    pub use crate::adapters::compact_summary::messages_selected_for_precompact_memory;
     #[cfg(test)]
     pub(crate) use crate::domain::compact::{
         microcompact_exploration, snip_superseded_exploration, CheckpointSections,
         ContextReadCandidate, ContextReadRun, ContextReadStep, ContinuationCheckpoint,
         ContinuationStatus, ProtectedRunPolicy,
     };
-    pub use crate::domain::compact::{
-        CompactProgressFn, CompactStageData, CompactTaskBatchStatusData, CompactTaskItemData,
-        CompactTaskSnapshotData, CompactTaskStatusData, CompactWorkData,
-    };
+    pub use crate::domain::compact::{CompactProgressFn, CompactStageData, CompactWorkData};
     #[cfg(test)]
     pub(crate) use crate::domain::token_budget::{estimate_tokens, summary_budget};
     pub use crate::domain::{estimate_messages_tokens, estimate_tool_schemas_tokens};
+    pub use crate::domain::{CompactResult, CompactSkipReason, CompactSummaryQuality};
+    pub use task::{
+        CompactTaskBatchStatusData, CompactTaskItemData, CompactTaskSnapshotData,
+        CompactTaskStatusData,
+    };
 }
 
 pub mod guidance {

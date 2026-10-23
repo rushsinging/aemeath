@@ -28,12 +28,11 @@ pub use context_port::{
     AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
     CompactOutcome, CompactRequestData, CompactTrigger, ContextAppendData, ContextAppendError,
     ContextPortError, ContextRequestData, ContextWindowData, FinalizeCause, Language,
-    ManualCompactRequestData, SessionRevision, StepReceiptData, SystemPromptSpecData,
+    SessionRevision, StepReceiptData, SystemPromptSpecData,
 };
 #[cfg(test)]
 pub use context_port::{
-    CompactResult, CompactSkipReason, CompactionDecisionData, DecisionReason, SystemBlock,
-    TokenBudget, ToolOutcomeKindData, Urgency,
+    CompactionDecisionData, DecisionReason, SystemBlock, TokenBudget, ToolOutcomeKindData, Urgency,
 };
 #[cfg(test)]
 pub use context_port::{

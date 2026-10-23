@@ -40,13 +40,6 @@ impl crate::ports::ContextCompactPort for FakeContextPort {
     ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
         Err(crate::ports::ContextPortError::Compact("fake".into()))
     }
-
-    async fn manual_compact(
-        &self,
-        _request: &crate::ports::ManualCompactRequestData,
-    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
 }
 #[async_trait]
 impl crate::ports::ContextAppendPort for FakeContextPort {

@@ -21,8 +21,8 @@ use crate::application::tool::execution_supervisor::{
 use async_trait::async_trait;
 use context::{
     CompactOutcome, CompactRequestData, CompactionDecisionData, ContextAppendData,
-    ContextPortError, ContextRequestData, ContextWindowData, ManualCompactRequestData,
-    ToolCallIdentityData, ToolReceiptMutationData, ToolReceiptMutationReceiptData,
+    ContextPortError, ContextRequestData, ContextWindowData, ToolCallIdentityData,
+    ToolReceiptMutationData, ToolReceiptMutationReceiptData,
 };
 use sdk::{RunId, RunStepId};
 use share::ids::BackgroundProcessId;
@@ -104,14 +104,6 @@ impl context::ContextCompactPort for RecordingContextPort {
     ) -> Result<CompactOutcome, ContextPortError> {
         Err(ContextPortError::SessionRepository(
             "test port 不支持 compact".into(),
-        ))
-    }
-    async fn manual_compact(
-        &self,
-        _request: &ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
-        Err(ContextPortError::SessionRepository(
-            "test port 不支持 manual_compact".into(),
         ))
     }
 }

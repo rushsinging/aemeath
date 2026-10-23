@@ -197,7 +197,7 @@ pub(crate) fn build_task_reminder_intent(
 /// 将当前 TaskData aggregate 冻结为 Context-owned typed compact snapshot。
 pub(crate) fn build_compact_task_snapshot(
     access: &dyn TaskAccess,
-) -> Option<context::compact::CompactTaskSnapshotData> {
+) -> Option<task::CompactTaskSnapshotData> {
     let batch_id = access.current_batch()?;
     let batch_snapshot = access.batch_snapshot(batch_id)?;
     let batch = batch_snapshot.batch();
@@ -206,9 +206,9 @@ pub(crate) fn build_compact_task_snapshot(
         return None;
     }
     let status = match batch.status() {
-        BatchStatusData::Active => context::compact::CompactTaskBatchStatusData::Active,
-        BatchStatusData::Paused => context::compact::CompactTaskBatchStatusData::Paused,
-        BatchStatusData::Archived => context::compact::CompactTaskBatchStatusData::Archived,
+        BatchStatusData::Active => task::CompactTaskBatchStatusData::Active,
+        BatchStatusData::Paused => task::CompactTaskBatchStatusData::Paused,
+        BatchStatusData::Archived => task::CompactTaskBatchStatusData::Archived,
     };
     let sequence_by_id = batch_snapshot
         .tasks()
@@ -220,15 +220,13 @@ pub(crate) fn build_compact_task_snapshot(
         .iter()
         .filter(|task| task.status() != TaskStatusData::Deleted)
         .map(|task| {
-            context::compact::CompactTaskItemData::new(
+            task::CompactTaskItemData::new(
                 task.seq(),
                 task.subject(),
                 match task.status() {
-                    TaskStatusData::Pending => context::compact::CompactTaskStatusData::Pending,
-                    TaskStatusData::InProgress => {
-                        context::compact::CompactTaskStatusData::InProgress
-                    }
-                    TaskStatusData::Completed => context::compact::CompactTaskStatusData::Completed,
+                    TaskStatusData::Pending => task::CompactTaskStatusData::Pending,
+                    TaskStatusData::InProgress => task::CompactTaskStatusData::InProgress,
+                    TaskStatusData::Completed => task::CompactTaskStatusData::Completed,
                     TaskStatusData::Deleted => unreachable!("deleted tasks were filtered"),
                 },
                 task.blocked_by()
@@ -241,7 +239,7 @@ pub(crate) fn build_compact_task_snapshot(
     if items.is_empty() {
         return None;
     }
-    Some(context::compact::CompactTaskSnapshotData::new(
+    Some(task::CompactTaskSnapshotData::new(
         access.revision().get(),
         batch.id().get(),
         batch_summary,

@@ -54,7 +54,6 @@ impl SessionRepository for BaselineSession {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: self.revision,
-            fingerprint: append.fingerprint()?,
         })
     }
 
@@ -76,15 +75,6 @@ impl SessionRepository for BaselineSession {
                 crate::domain::CompactSkipReason::ResumeProtection,
             ))
         }
-    }
-
-    async fn commit_manual_compaction(
-        &self,
-        _request: &crate::domain::ManualCompactRequestData,
-    ) -> Result<crate::domain::CompactOutcome, crate::domain::ContextPortError> {
-        Ok(crate::domain::CompactOutcome::Skipped(
-            crate::domain::CompactSkipReason::ResumeProtection,
-        ))
     }
 
     async fn clear(&self, _session_id: &SessionId) -> Result<(), crate::domain::ContextPortError> {
@@ -319,6 +309,7 @@ fn tool_result_message(bytes: usize) -> (Message, usize) {
 
 fn compact_request(source: ContextRequestData) -> crate::domain::CompactRequestData {
     crate::domain::CompactRequestData {
+        llm: None,
         run_id: RunId::new("baseline-run"),
         source_revision: SessionRevision::new(42),
         source,

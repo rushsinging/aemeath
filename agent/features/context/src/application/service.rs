@@ -10,8 +10,8 @@ use crate::domain::{
     AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
     CompactOutcome, CompactRequestData, CompactionDecisionData, ContextAppendData,
     ContextAppendError, ContextMessage, ContextPortError, ContextRequestData, ContextWindowData,
-    ManualCompactRequestData, RunId, SystemBlock, ToolReceiptMutationData,
-    ToolReceiptMutationError, ToolReceiptMutationReceiptData,
+    RunId, SystemBlock, ToolReceiptMutationData, ToolReceiptMutationError,
+    ToolReceiptMutationReceiptData,
 };
 use crate::ports::{
     ContextAppendPort, ContextCompactPort, ContextMemorySource, ContextPromptSource,
@@ -423,18 +423,6 @@ impl ContextCompactPort for ContextApplicationService {
                     );
                 }
             }
-        }
-        Ok(outcome)
-    }
-
-    async fn manual_compact(
-        &self,
-        request: &ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
-        let outcome = self.session.commit_manual_compaction(request).await?;
-        if matches!(outcome, CompactOutcome::Committed(_)) {
-            // #1777：手动 compact 同样刷新冻结的注入内容。
-            self.mark_injection_stale();
         }
         Ok(outcome)
     }

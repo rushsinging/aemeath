@@ -3,15 +3,15 @@ use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 
-use crate::adapters::compact_summary::{compact_messages_with_llm, CompactGenerator};
+use crate::adapters::compact_summary::compact_messages_with_llm;
 use crate::domain::session::{
     AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, CommittedStep,
     FinalizedOutcomeRecord, SessionCommitPlan, SessionSnapshotState,
 };
 use crate::domain::{
     AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, CompactSkipReason, ContextAppendData, ContextAppendError,
-    ContextPortError, ManualCompactRequestData, SessionRevision, ToolReceiptMutationData,
+    CompactOutcome, CompactRequestData, CompactSkipReason, CompactTrigger, ContextAppendData,
+    ContextAppendError, ContextPortError, SessionRevision, ToolReceiptMutationData,
     ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
 use crate::ports::{ContextPorts, SessionItem, SessionRepository};
@@ -261,8 +261,6 @@ pub struct MainContextFactory {
     /// 可选注入的 Skill metadata catalog 与 Context-owned query factory。
     skill_catalog: Option<Arc<dyn tools::published::skill::SkillCatalogPort>>,
     query_factory: Option<Arc<dyn crate::ports::SkillQueryFactory>>,
-    /// 可选注入的 LLM 摘要生成器（#1486）；None 时 compact 走本地压缩。
-    generator: Option<Arc<dyn CompactGenerator>>,
 }
 
 impl MainContextFactory {
@@ -275,7 +273,6 @@ impl MainContextFactory {
             tool_receipt_writer: Arc::new(NoOpToolReceiptWriter),
             skill_catalog: None,
             query_factory: None,
-            generator: None,
         }
     }
 
@@ -307,12 +304,6 @@ impl MainContextFactory {
     ) -> Self {
         self.task_persist = Some(task_persist);
         self.workspace_persist = Some(workspace_persist);
-        self
-    }
-
-    /// 注入 LLM 摘要生成器（#1486），compact 优先走 LLM 语义压缩。
-    pub fn with_generator(mut self, generator: Arc<dyn CompactGenerator>) -> Self {
-        self.generator = Some(generator);
         self
     }
 }
@@ -351,9 +342,6 @@ impl MainContextFactory {
             mutation_gate,
         );
         repository = repository.with_accepted_input_writer(Arc::clone(&self.accepted_input_writer));
-        if let Some(generator) = &self.generator {
-            repository = repository.with_generator(Arc::clone(generator));
-        }
         repository = repository.with_tool_receipt_writer(Arc::clone(&self.tool_receipt_writer));
         ContextPorts::from_service(Arc::new(
             crate::application::ContextApplicationService::new(
@@ -428,7 +416,6 @@ pub(crate) struct CanonicalSessionRepository {
     mutation_gate: Arc<tokio::sync::Mutex<()>>,
     /// 可选注入的 LLM 摘要生成器（#1486）。Some 时 compact 走 LLM 语义压缩，
     /// 失败自动 fallback 本地；None 时直接走本地文本压缩。
-    generator: Option<Arc<dyn CompactGenerator>>,
     auto_compact_state: Arc<std::sync::Mutex<crate::domain::compact::AutoCompactState>>,
 }
 
@@ -448,7 +435,6 @@ impl CanonicalSessionRepository {
             tool_receipt_writer: Arc::new(NoOpToolReceiptWriter),
             writer,
             mutation_gate,
-            generator: None,
             auto_compact_state: Arc::new(std::sync::Mutex::new(
                 crate::domain::compact::AutoCompactState::default(),
             )),
@@ -462,11 +448,6 @@ impl CanonicalSessionRepository {
 
     pub fn with_tool_receipt_writer(mut self, writer: Arc<dyn ToolReceiptWriter>) -> Self {
         self.tool_receipt_writer = writer;
-        self
-    }
-
-    pub fn with_generator(mut self, generator: Arc<dyn CompactGenerator>) -> Self {
-        self.generator = Some(generator);
         self
     }
 
@@ -502,6 +483,7 @@ impl CanonicalSessionRepository {
     /// 计数/Finalizing 阶段实时上报；`None` 表示调用方不关心进度。
     ///
     /// 返回 `(summary, recent_messages)`；消息太少无法压缩时返回 `None`。
+    #[allow(clippy::too_many_arguments)]
     async fn compact_visible_messages(
         &self,
         messages: &[share::message::Message],
@@ -509,20 +491,21 @@ impl CanonicalSessionRepository {
         context_size: usize,
         step_boundaries: &[usize],
         progress: Option<std::sync::Arc<dyn crate::domain::CompactProgressFn>>,
-        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
+        task_snapshot: Option<&task::CompactTaskSnapshotData>,
+        llm: Option<&crate::domain::CompactLlmBinding>,
         cancellation: &tokio_util::sync::CancellationToken,
     ) -> Option<crate::adapters::compact_summary::CompactResult> {
         let tail = crate::adapters::compact_summary::CompactTail::from_context(
             step_boundaries,
             context_size,
         );
-        match &self.generator {
-            Some(generator) => {
+        match llm {
+            Some(binding) => {
                 let result = compact_messages_with_llm(
                     messages,
                     previous_summary,
                     context_size,
-                    Some(generator.as_ref()),
+                    Some(binding),
                     progress.as_deref(),
                     task_snapshot,
                     cancellation,
@@ -565,7 +548,7 @@ impl CanonicalSessionRepository {
     /// 收敛到同一 Context-owned summary budget。
     fn append_task_snapshot_companion(
         summary: &str,
-        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
+        task_snapshot: Option<&task::CompactTaskSnapshotData>,
         budget: usize,
     ) -> Result<String, crate::domain::compact::CheckpointError> {
         let checkpoint =
@@ -619,6 +602,7 @@ impl CanonicalSessionRepository {
                 request.source.context_size,
                 request.progress.clone(),
                 request.task_snapshot.as_ref(),
+                request.llm.as_ref(),
                 &request.cancellation,
             )
             .await
@@ -699,7 +683,8 @@ impl CanonicalSessionRepository {
         source: &CompactSource,
         context_size: usize,
         progress: Option<std::sync::Arc<dyn crate::domain::CompactProgressFn>>,
-        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
+        task_snapshot: Option<&task::CompactTaskSnapshotData>,
+        llm: Option<&crate::domain::CompactLlmBinding>,
         cancellation: &tokio_util::sync::CancellationToken,
     ) -> Result<Option<GeneratedCompact>, crate::domain::CompactSkipReason> {
         let Some(compacted) = self
@@ -710,6 +695,7 @@ impl CanonicalSessionRepository {
                 &source.step_boundaries,
                 progress,
                 task_snapshot,
+                llm,
                 cancellation,
             )
             .await
@@ -810,29 +796,22 @@ impl CanonicalSessionRepository {
         ))
     }
 
-    fn receipt(
-        append: &ContextAppendData,
-        fingerprint: &crate::domain::ContentFingerprint,
-        revision: SessionRevision,
-    ) -> AppendReceiptData {
+    fn receipt(append: &ContextAppendData, revision: SessionRevision) -> AppendReceiptData {
         AppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: revision,
-            fingerprint: fingerprint.clone(),
         }
     }
 
     fn accepted_receipt(
         append: &AcceptedInputAppendData,
-        fingerprint: &crate::domain::ContentFingerprint,
         revision: SessionRevision,
     ) -> AcceptedInputReceiptData {
         AcceptedInputReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: revision,
-            fingerprint: fingerprint.clone(),
         }
     }
 
@@ -947,7 +926,6 @@ impl SessionRepository for CanonicalSessionRepository {
             if input.fingerprint == fingerprint.as_str() {
                 return Ok(Self::accepted_receipt(
                     append,
-                    &fingerprint,
                     SessionRevision::new(input.committed_revision),
                 ));
             }
@@ -986,7 +964,7 @@ impl SessionRepository for CanonicalSessionRepository {
         let revision = SessionRevision::new(candidate.revision);
         self.publish_generation(&current, candidate)
             .map_err(AcceptedInputError::Storage)?;
-        Ok(Self::accepted_receipt(append, &fingerprint, revision))
+        Ok(Self::accepted_receipt(append, revision))
     }
 
     async fn advance_tool_receipt(
@@ -1132,7 +1110,7 @@ impl SessionRepository for CanonicalSessionRepository {
                     append.step_id.as_str(),
                 )
                 .await;
-                return Ok(Self::receipt(append, &fingerprint, revision));
+                return Ok(Self::receipt(append, revision));
             }
             return Err(ContextAppendError::ContentConflict {
                 run_id: append.run_id.clone(),
@@ -1202,13 +1180,42 @@ impl SessionRepository for CanonicalSessionRepository {
             append.step_id.as_str(),
         )
         .await;
-        Ok(Self::receipt(&append, &fingerprint, revision))
+        Ok(Self::receipt(&append, revision))
     }
 
     async fn commit_compaction(
         &self,
         request: &CompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError> {
+        // 手动压缩：跳过熔断（用户显式要求）与 revision 对齐（直接取当前）。
+        if matches!(request.trigger, CompactTrigger::Manual) {
+            let source = self
+                .freeze_compact_source(&request.source.session_id, None)
+                .await?;
+            if source.messages.len() <= 4 {
+                return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
+            }
+            let generated = match self
+                .generate_compact(
+                    &source,
+                    request.source.context_size,
+                    request.progress.clone(),
+                    request.task_snapshot.as_ref(),
+                    request.llm.as_ref(),
+                    &tokio_util::sync::CancellationToken::new(),
+                )
+                .await
+            {
+                Ok(Some(generated)) => generated,
+                Ok(None) => {
+                    return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
+                }
+                Err(reason) => return Ok(CompactOutcome::Skipped(reason)),
+            };
+            return self
+                .commit_generated_compact(&request.source.session_id, &source, generated)
+                .await;
+        }
         let Some(attempt) = self.begin_auto_compact_attempt(
             request.source.config_snapshot.auto_compact_failure_limit(),
         ) else {
@@ -1219,36 +1226,6 @@ impl SessionRepository for CanonicalSessionRepository {
         let result = self.commit_automatic_compaction(request).await;
         attempt.finish(&result);
         result
-    }
-
-    async fn commit_manual_compaction(
-        &self,
-        request: &ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
-        let source = self
-            .freeze_compact_source(&request.session_id, None)
-            .await?;
-        if source.messages.len() <= 4 {
-            return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
-        }
-        let generated = match self
-            .generate_compact(
-                &source,
-                request.context_size,
-                request.progress.clone(),
-                request.task_snapshot.as_ref(),
-                &tokio_util::sync::CancellationToken::new(),
-            )
-            .await
-        {
-            Ok(Some(generated)) => generated,
-            Ok(None) => {
-                return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
-            }
-            Err(reason) => return Ok(CompactOutcome::Skipped(reason)),
-        };
-        self.commit_generated_compact(&request.session_id, &source, generated)
-            .await
     }
 
     async fn clear(&self, session_id: &SessionId) -> Result<(), ContextPortError> {

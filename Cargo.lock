@@ -659,6 +659,7 @@ dependencies = [
  "log",
  "memory",
  "project",
+ "provider",
  "regex",
  "sdk",
  "serde",

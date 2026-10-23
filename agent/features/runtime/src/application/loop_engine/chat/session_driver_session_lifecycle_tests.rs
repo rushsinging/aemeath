@@ -1818,13 +1818,6 @@ impl context::ContextCompactPort for RecordingContextPort {
         self.inner.compact.compact(request).await
     }
 
-    async fn manual_compact(
-        &self,
-        request: &crate::ports::ManualCompactRequestData,
-    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
-        self.record_persistence("manual_compact");
-        self.inner.compact.manual_compact(request).await
-    }
 
 }
 

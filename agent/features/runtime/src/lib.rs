@@ -46,7 +46,7 @@ pub use application::client::{
     wire_session_switch_coordinator, BoundMainRun, OwnedSessionSharedPermit,
     SessionSwitchCoordinator, SessionSwitchCoordinatorBuilder, SessionSwitchDependencies,
 };
-pub use application::compact_generator::ProviderCompactGenerator;
+pub use application::compact_generator::CompactLlmBindingFactory;
 // #1248: RuntimeContextFactory is the narrow crate-root construction entry.
 // RuntimeServices stays internal; callers construct via RuntimeContextFactory::new(…).
 pub use application::prompt::build::{build_system_prompt_parts, PromptContextData};

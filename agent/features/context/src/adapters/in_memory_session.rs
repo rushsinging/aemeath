@@ -69,7 +69,6 @@ impl InMemorySessionRepository {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision,
-            fingerprint: append.fingerprint()?,
         })
     }
 
@@ -81,7 +80,6 @@ impl InMemorySessionRepository {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision,
-            fingerprint: append.fingerprint()?,
         })
     }
 }
@@ -308,13 +306,6 @@ impl SessionRepository for InMemorySessionRepository {
     async fn commit_compaction(
         &self,
         _request: &CompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
-        Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection))
-    }
-
-    async fn commit_manual_compaction(
-        &self,
-        _request: &crate::domain::ManualCompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError> {
         Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection))
     }

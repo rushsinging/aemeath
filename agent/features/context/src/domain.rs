@@ -74,7 +74,18 @@ macro_rules! string_value_object {
 
 string_value_object!(Language);
 string_value_object!(SystemPromptSpecData);
-string_value_object!(ContentFingerprint);
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct ContentFingerprint(String);
+
+impl ContentFingerprint {
+    pub(crate) fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 /// Session backing 的单调 revision。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -467,6 +478,19 @@ pub enum CompactTrigger {
     Manual,
 }
 
+/// compact 摘要的 LLM 绑定（调用方按轮注入；依赖 provider 通用端口）。
+#[derive(Clone)]
+pub struct CompactLlmBinding {
+    /// 通用 LLM 文本调用端口（runtime 注入 provider 实现）。
+    pub invoker: std::sync::Arc<dyn provider::composition::LlmTextInvokePort>,
+    /// 目标 compact 模型。
+    pub model: provider::ModelInfo,
+    /// 摘要输出上限。
+    pub max_output_tokens: u32,
+    /// compact 调用模型的输入窗口（None = 与注入窗口一致）。
+    pub compact_context_window: Option<usize>,
+}
+
 #[derive(Clone)]
 pub struct CompactRequestData {
     pub run_id: RunId,
@@ -478,7 +502,11 @@ pub struct CompactRequestData {
     pub progress: Option<Arc<dyn CompactProgressFn>>,
     /// 当前 typed TaskData 快照：参与 Rust-owned checkpoint 协调，并由同一快照
     /// 确定性渲染非权威 `Current Task State` companion。
-    pub task_snapshot: Option<crate::domain::compact::CompactTaskSnapshotData>,
+    pub task_snapshot: Option<task::CompactTaskSnapshotData>,
+    /// 本轮 LLM 摘要绑定（#1863 反转）：`None` = 本地压缩。
+    /// invoker 为通用 LLM 文本端口（provider PL），模型/窗口/预算由调用方
+    /// 按轮解析注入——context 不定义专用生成器抽象。
+    pub llm: Option<CompactLlmBinding>,
     /// 当前 Run 的取消信号。摘要生成必须合作式消费；取消后不得提交 fallback。
     pub cancellation: tokio_util::sync::CancellationToken,
 }
@@ -506,140 +534,16 @@ impl std::fmt::Debug for CompactRequestData {
     }
 }
 
-#[derive(Clone)]
-pub struct ManualCompactRequestData {
-    pub session_id: SessionId,
-    pub run_id: RunId,
-    pub system_prompt: SystemPromptSpecData,
-    pub context_size: usize,
-    /// 压缩进度回调（#1500），语义同 [`CompactRequestData::progress`]。
-    pub progress: Option<Arc<dyn CompactProgressFn>>,
-    /// 当前 typed TaskData 快照，语义同 [`CompactRequestData::task_snapshot`]。
-    pub task_snapshot: Option<crate::domain::compact::CompactTaskSnapshotData>,
-}
-
-impl std::fmt::Debug for ManualCompactRequestData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ManualCompactRequestData")
-            .field("session_id", &self.session_id)
-            .field("run_id", &self.run_id)
-            .field("system_prompt", &self.system_prompt)
-            .field("context_size", &self.context_size)
-            .field("progress", &self.progress.as_ref().map(|_| "<callback>"))
-            .field(
-                "task_snapshot",
-                &self.task_snapshot.as_ref().map(|snapshot| {
-                    (
-                        snapshot.revision(),
-                        snapshot.batch_id(),
-                        snapshot.items().len(),
-                    )
-                }),
-            )
-            .finish()
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompactGenerationOutputData {
-    text: String,
-    completion_reason: Option<String>,
-    text_delta_count: usize,
-    non_text_delta_count: usize,
-    completed: bool,
-}
-
-impl CompactGenerationOutputData {
-    pub fn completed(
-        text: impl Into<String>,
-        completion_reason: Option<impl Into<String>>,
-        text_delta_count: usize,
-        non_text_delta_count: usize,
-    ) -> Self {
-        Self {
-            text: text.into(),
-            completion_reason: completion_reason.map(Into::into),
-            text_delta_count,
-            non_text_delta_count,
-            completed: true,
-        }
-    }
-
-    pub fn text(&self) -> &str {
-        &self.text
-    }
-
-    pub fn into_text(self) -> String {
-        self.text
-    }
-
-    pub fn completion_reason(&self) -> Option<&str> {
-        self.completion_reason.as_deref()
-    }
-
-    pub const fn text_delta_count(&self) -> usize {
-        self.text_delta_count
-    }
-
-    pub const fn non_text_delta_count(&self) -> usize {
-        self.non_text_delta_count
-    }
-
-    pub const fn stream_completed(&self) -> bool {
-        self.completed
-    }
-}
-
-impl From<String> for CompactGenerationOutputData {
-    fn from(text: String) -> Self {
-        Self::completed(text, None::<String>, 0, 0)
-    }
-}
-
-impl From<&str> for CompactGenerationOutputData {
-    fn from(text: &str) -> Self {
-        Self::completed(text, None::<String>, 0, 0)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CompactGenerationFailureKind {
-    Cancelled,
-    RateLimited,
-    ContextTooLong,
-    Timeout,
-    Provider,
-    InvalidSummary,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompactGenerationFailureData {
-    pub kind: CompactGenerationFailureKind,
-    pub message: String,
-}
-
-impl CompactGenerationFailureData {
-    pub fn new(kind: CompactGenerationFailureKind, message: impl Into<String>) -> Self {
-        Self {
-            kind,
-            message: message.into(),
-        }
-    }
-
-    pub const fn permits_local_fallback(&self) -> bool {
-        !matches!(self.kind, CompactGenerationFailureKind::Cancelled)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactSummaryQuality {
     Llm,
     LlmWithLocalBudgetDegradation,
     PartialMapFallback {
         degraded_chunks: usize,
-        failure: CompactGenerationFailureKind,
+        /// 降级原因标签（LLM 错误类别摘要，展示用）。
+        failure: String,
     },
-    LocalFallback(CompactGenerationFailureKind),
+    LocalFallback(String),
     LocalOnly,
 }
 
@@ -790,7 +694,7 @@ pub struct AcceptedInputAppendData {
 
 impl AcceptedInputAppendData {
     /// 内容指纹（内容寻址，#1863 内化：与提交方无关，逐字节兼容旧实现）。
-    pub fn fingerprint(&self) -> Result<ContentFingerprint, AcceptedInputError> {
+    pub(crate) fn fingerprint(&self) -> Result<ContentFingerprint, AcceptedInputError> {
         let payload = serde_json::to_vec(&(
             self.session_id.as_str(),
             self.run_id.to_string(),
@@ -813,7 +717,6 @@ pub struct AcceptedInputReceiptData {
     pub run_id: RunId,
     pub step_id: RunStepId,
     pub committed_revision: SessionRevision,
-    pub fingerprint: ContentFingerprint,
 }
 
 /// accepted input append 的 typed failure。
@@ -848,12 +751,11 @@ pub struct AppendReceiptData {
     pub run_id: RunId,
     pub step_id: RunStepId,
     pub committed_revision: SessionRevision,
-    pub fingerprint: ContentFingerprint,
 }
 
 impl ContextAppendData {
     /// 内容指纹（内容寻址，#1863 内化：与提交方无关，逐字节兼容旧实现）。
-    pub fn fingerprint(&self) -> Result<ContentFingerprint, ContextAppendError> {
+    pub(crate) fn fingerprint(&self) -> Result<ContentFingerprint, ContextAppendError> {
         let payload = serde_json::to_vec(&(
             self.session_id.as_str(),
             self.run_id.to_string(),

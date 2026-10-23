@@ -33,11 +33,6 @@ pub trait ContextCompactPort: Send + Sync {
         &self,
         request: &CompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError>;
-
-    async fn manual_compact(
-        &self,
-        request: &ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError>;
 }
 
 /// 回写端口：历史 append、回执推进与查询。

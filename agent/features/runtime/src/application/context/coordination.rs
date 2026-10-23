@@ -21,8 +21,8 @@
 use crate::ports::{
     AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
     CompactOutcome, CompactRequestData, CompactTrigger, ContextAppendData, ContextAppendError,
-    ContextPortError, ContextRequestData, ContextWindowData, FinalizeCause,
-    ManualCompactRequestData, SessionId, SessionRevision, StepReceiptData,
+    ContextPortError, ContextRequestData, ContextWindowData, FinalizeCause, SessionId,
+    SessionRevision, StepReceiptData,
 };
 use context::{ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData};
 use sdk::RunStepId;
@@ -108,12 +108,39 @@ impl ContextCoordinator {
         Ok(self.compaction_decision(request).await?.needed)
     }
 
+    /// 手动压缩入口：compact(trigger: Manual)（#1863 单一压缩操作）。
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn manual_compact(
+        &self,
+        request: &ContextRequestData,
+        progress: std::sync::Arc<dyn crate::application::loop_engine::CompactProgressView>,
+        task_snapshot: Option<task::CompactTaskSnapshotData>,
+    ) -> Result<CompactOutcome, ContextPortError> {
+        let progress: Option<std::sync::Arc<dyn context::compact::CompactProgressFn>> =
+            Some(std::sync::Arc::new(
+                crate::application::loop_engine::compaction::CompactProgressAdapter(progress),
+            ));
+        self.ports
+            .compact
+            .compact(&CompactRequestData {
+                llm: None,
+                run_id: request.run_id.clone(),
+                source_revision: SessionRevision::new(0),
+                source: request.clone(),
+                trigger: CompactTrigger::Manual,
+                progress,
+                task_snapshot,
+                cancellation: tokio_util::sync::CancellationToken::new(),
+            })
+            .await
+    }
+
     pub(crate) async fn compact(
         &self,
         request: &ContextRequestData,
         source_revision: SessionRevision,
         progress: std::sync::Arc<dyn crate::application::loop_engine::CompactProgressView>,
-        task_snapshot: Option<context::compact::CompactTaskSnapshotData>,
+        task_snapshot: Option<task::CompactTaskSnapshotData>,
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<CompactOutcome, ContextPortError> {
         let progress: Option<std::sync::Arc<dyn context::compact::CompactProgressFn>> =
@@ -123,6 +150,7 @@ impl ContextCoordinator {
         self.ports
             .compact
             .compact(&CompactRequestData {
+                llm: None,
                 run_id: request.run_id.clone(),
                 source_revision,
                 source: request.clone(),
@@ -132,13 +160,6 @@ impl ContextCoordinator {
                 cancellation,
             })
             .await
-    }
-
-    pub(crate) async fn manual_compact(
-        &self,
-        request: &ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
-        self.ports.compact.manual_compact(request).await
     }
 
     pub(crate) async fn clear_session(

@@ -29,11 +29,12 @@ use crate::application::reflection::{
     ReflectionRunOutcome, ReflectionTaskAdapter, ReflectionTaskTrigger,
 };
 use crate::ports::{
-    CompactOutcome, CompactRequestData, CompactResult, CompactSkipReason, CompactionDecisionData,
-    ContextPortError, ContextRequestData, ContextWindowData, DecisionReason, InteractionRequestId,
+    CompactOutcome, CompactRequestData, CompactionDecisionData, ContextPortError,
+    ContextRequestData, ContextWindowData, DecisionReason, InteractionRequestId,
     Language as ContextLanguage, SessionId, SessionRevision, SystemBlock, SystemPromptSpecData,
     TokenBudget, Urgency,
 };
+use context::compact::{CompactResult, CompactSkipReason, CompactSummaryQuality};
 
 /// `submit_complete` builds its own executor closure and ignores the
 /// adapter's `executor` field, so we cannot use a capturing closure to
@@ -147,15 +148,6 @@ impl crate::ports::ContextCompactPort for StubContextPort {
             .unwrap()
             .take()
             .expect("stub outcome must be configured exactly once")
-    }
-
-    async fn manual_compact(
-        &self,
-        _request: &crate::ports::ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
-        Err(ContextPortError::Compact(
-            "stub: manual_compact".to_string(),
-        ))
     }
 }
 #[async_trait]
@@ -412,7 +404,7 @@ fn committed_outcome() -> CompactOutcome {
         summary: "summary".to_string(),
         recent_messages: vec![],
         source_revision: SessionRevision::new(7),
-        quality: context::CompactSummaryQuality::LocalOnly,
+        quality: CompactSummaryQuality::LocalOnly,
     })
 }
 

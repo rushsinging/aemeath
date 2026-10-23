@@ -13,9 +13,9 @@ use crate::{
 };
 use crate::{CommittedRunSlice, CommittedRunStep, FinalizedOutcomeRecord, SessionHistory};
 use crate::{
-    ContextAppendPort, ContextCompactPort, ContextMemorySource, ContextPromptSource,
-    ContextWindowPort, MemoryMaterialization, PromptMaterialization, ReminderControlPort,
-    SessionItem, SessionRepository,
+    ContextAppendPort, ContextMemorySource, ContextPromptSource, ContextWindowPort,
+    MemoryMaterialization, PromptMaterialization, ReminderControlPort, SessionItem,
+    SessionRepository,
 };
 use async_trait::async_trait;
 use memory::api::{MemoryPort, NoOpMemory};
@@ -206,7 +206,6 @@ impl SessionRepository for FakeSession {
         Ok(crate::AppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
-            fingerprint: append.fingerprint().unwrap(),
             committed_revision: SessionRevision::new(3),
         })
     }
@@ -216,20 +215,8 @@ impl SessionRepository for FakeSession {
         _request: &crate::CompactRequestData,
     ) -> Result<crate::CompactOutcome, crate::ContextPortError> {
         Ok(crate::CompactOutcome::Skipped(
-            crate::CompactSkipReason::ResumeProtection,
+            crate::domain::CompactSkipReason::ResumeProtection,
         ))
-    }
-
-    async fn commit_manual_compaction(
-        &self,
-        _request: &crate::ManualCompactRequestData,
-    ) -> Result<crate::CompactOutcome, crate::ContextPortError> {
-        Ok(crate::CompactOutcome::Committed(crate::CompactResult {
-            summary: "manual".into(),
-            recent_messages: vec![],
-            source_revision: SessionRevision::new(4),
-            quality: crate::CompactSummaryQuality::LocalOnly,
-        }))
     }
 
     async fn clear(&self, _session_id: &SessionId) -> Result<(), crate::ContextPortError> {
@@ -769,30 +756,4 @@ async fn append_delegates_finalized_step_to_session_backing() {
     };
     let receipt = service().append_and_persist(&append).await.unwrap();
     assert_eq!(receipt.committed_revision, SessionRevision::new(3));
-}
-
-#[tokio::test]
-async fn manual_compact_and_clear_session_delegate_to_session_repository() {
-    let service = service();
-    let outcome = service
-        .manual_compact(&crate::ManualCompactRequestData {
-            session_id: SessionId::new("session"),
-            run_id: RunId::new("run"),
-            system_prompt: crate::SystemPromptSpecData::new("system"),
-            context_size: 128_000,
-            progress: None,
-            task_snapshot: None,
-        })
-        .await
-        .unwrap();
-    assert!(matches!(
-        outcome,
-        crate::CompactOutcome::Committed(ref result)
-            if result.source_revision == SessionRevision::new(4)
-    ));
-
-    service
-        .clear_session(&SessionId::new("session"))
-        .await
-        .unwrap();
 }

@@ -6,8 +6,8 @@ use crate::SessionRepository;
 use crate::{
     AcceptedInputAppendData, AcceptedInputError, CompactRequestData, CompactTrigger,
     ContextAppendData, ContextAppendError, ContextRequestData, FinalizeCause, Language,
-    ManualCompactRequestData, SessionRevision, SystemPromptSpecData, ToolCallIdentityData,
-    ToolCallState, ToolReceiptMutationData,
+    SessionRevision, SystemPromptSpecData, ToolCallIdentityData, ToolCallState,
+    ToolReceiptMutationData,
 };
 use crate::{
     AcceptedInputRecord, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
@@ -249,6 +249,82 @@ fn accepted_input() -> AcceptedInputAppendData {
     }
 }
 
+/// 测试用固定文本 LLM 端口（#1863 反转后的 generator mock 替身）。
+struct FixedTextInvoker {
+    text: String,
+    started: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    release: tokio::sync::Mutex<tokio::sync::mpsc::Receiver<()>>,
+    fail_with_cancel: bool,
+}
+
+#[async_trait::async_trait]
+impl provider::composition::LlmTextInvokePort for FixedTextInvoker {
+    async fn invoke_text(
+        &self,
+        _model: &provider::ModelInfo,
+        _request: &provider::ProviderRequestData,
+        _cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        if let Some(started) = self.started.lock().unwrap().take() {
+            let _ = started.send(());
+        }
+        self.release.lock().await.recv().await;
+        if self.fail_with_cancel {
+            return Err(provider::ProviderError::cancelled());
+        }
+        Ok(provider::composition::LlmTextOutputData {
+            text: self.text.clone(),
+            completion_reason: Some("end_turn".to_string()),
+            text_delta_count: 1,
+            non_text_delta_count: 0,
+            stream_completed: true,
+        })
+    }
+}
+
+/// 构造测试 binding（fixed invoker）。
+fn test_llm_binding(
+    invoker: std::sync::Arc<dyn provider::composition::LlmTextInvokePort>,
+) -> Option<crate::domain::CompactLlmBinding> {
+    Some(crate::domain::CompactLlmBinding {
+        invoker,
+        model: provider::ModelInfo {
+            provider: "test".to_string(),
+            model: "compact-test".to_string(),
+            supports_tools: false,
+            supports_parallel_tool_calls: false,
+            supports_streaming: true,
+            supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+            context_limit: Some(100_000),
+            output_limit: Some(4096),
+        },
+        max_output_tokens: 1024,
+        compact_context_window: None,
+    })
+}
+
+/// 测试用 provider 失败端口（熔断测试：每次调用计数并报错）。
+struct ProviderFailingInvoker {
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl provider::composition::LlmTextInvokePort for ProviderFailingInvoker {
+    async fn invoke_text(
+        &self,
+        _model: &provider::ModelInfo,
+        _request: &provider::ProviderRequestData,
+        _cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        use std::sync::atomic::Ordering;
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Err(provider::ProviderError::fatal(
+            provider::ProviderErrorKind::UpstreamUnavailable,
+            "provider failed",
+        ))
+    }
+}
+
 fn valid_fact_batch(objective: &str) -> String {
     serde_json::json!({
         "facts": [
@@ -415,6 +491,7 @@ async fn compact(repository: &CanonicalSessionRepository, session_id: SessionId,
     request.context_size = 100_000;
     let outcome = repository
         .commit_compaction(&CompactRequestData {
+            llm: None,
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(revision),
             source: request,
@@ -575,6 +652,7 @@ async fn compaction_clears_skill_load_records() {
     assert!(matches!(
         repository
             .commit_compaction(&CompactRequestData {
+                llm: None,
                 run_id: RunId::new("run"),
                 source_revision: SessionRevision::new(1),
                 source,
@@ -911,6 +989,7 @@ async fn compaction_changes_visibility_without_dropping_persisted_structure() {
     request.context_size = 100_000;
     let (result, lifecycle) =
         crate::capture_session_lifecycle(repository.commit_compaction(&CompactRequestData {
+            llm: None,
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,
@@ -1539,32 +1618,7 @@ async fn failed_durable_write_does_not_publish_candidate() {
 
 #[tokio::test]
 async fn compact_generation_does_not_hold_session_mutation_gate() {
-    use crate::compact::CompactGenerator;
     use tokio::sync::{mpsc, oneshot};
-    use tokio_util::sync::CancellationToken;
-
-    struct BlockingGenerator {
-        started: Mutex<Option<oneshot::Sender<()>>>,
-        release: tokio::sync::Mutex<mpsc::Receiver<()>>,
-    }
-
-    #[async_trait::async_trait]
-    impl CompactGenerator for BlockingGenerator {
-        async fn generate(
-            &self,
-            _request: Vec<Message>,
-            _cancel: &CancellationToken,
-        ) -> Result<crate::CompactGenerationOutputData, crate::CompactGenerationFailureData>
-        {
-            if let Some(started) = self.started.lock().unwrap().take() {
-                let _ = started.send(());
-            }
-            self.release.lock().await.recv().await;
-            Ok(crate::CompactGenerationOutputData::from(valid_fact_batch(
-                "generated",
-            )))
-        }
-    }
 
     let writer = Arc::new(RecordingWriter::default());
     let session_id = SessionId::new("unlocked-generation-session");
@@ -1572,10 +1626,13 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
         repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
     let (started_sender, started_receiver) = oneshot::channel();
     let (release_sender, release_receiver) = mpsc::channel(1);
-    let repository = Arc::new(repository.with_generator(Arc::new(BlockingGenerator {
+    let llm = test_llm_binding(Arc::new(FixedTextInvoker {
+        text: valid_fact_batch("generated"),
         started: Mutex::new(Some(started_sender)),
         release: tokio::sync::Mutex::new(release_receiver),
-    })));
+        fail_with_cancel: false,
+    }));
+    let repository = Arc::new(repository);
     let mut request = compact_request(session_id.clone());
     request.context_size = 100_000;
     let compact_task = {
@@ -1589,6 +1646,7 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
                     trigger: CompactTrigger::Automatic,
                     progress: None,
                     task_snapshot: None,
+                    llm,
                     cancellation: tokio_util::sync::CancellationToken::new(),
                 })
                 .await
@@ -1629,32 +1687,18 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
 
 #[tokio::test]
 async fn cancelled_compaction_does_not_commit_local_fallback() {
-    use crate::compact::CompactGenerator;
-    use crate::{CompactGenerationFailureData, CompactGenerationFailureKind};
     use tokio_util::sync::CancellationToken;
-
-    struct CancelledGenerator;
-
-    #[async_trait::async_trait]
-    impl CompactGenerator for CancelledGenerator {
-        async fn generate(
-            &self,
-            _request: Vec<Message>,
-            cancel: &CancellationToken,
-        ) -> Result<crate::CompactGenerationOutputData, CompactGenerationFailureData> {
-            assert!(cancel.is_cancelled());
-            Err(CompactGenerationFailureData::new(
-                CompactGenerationFailureKind::Cancelled,
-                "cancelled",
-            ))
-        }
-    }
 
     let writer = Arc::new(RecordingWriter::default());
     let session_id = SessionId::new("cancelled-compact-session");
     let (repository, holder) =
         repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
-    let repository = repository.with_generator(Arc::new(CancelledGenerator));
+    let llm = test_llm_binding(Arc::new(FixedTextInvoker {
+        text: String::new(),
+        started: Mutex::new(None),
+        release: tokio::sync::Mutex::new(tokio::sync::mpsc::channel(1).1),
+        fail_with_cancel: true,
+    }));
     let cancellation = CancellationToken::new();
     cancellation.cancel();
     let request = compact_request(session_id);
@@ -1667,6 +1711,7 @@ async fn cancelled_compaction_does_not_commit_local_fallback() {
             trigger: CompactTrigger::Automatic,
             progress: None,
             task_snapshot: None,
+            llm,
             cancellation,
         })
         .await
@@ -1674,7 +1719,7 @@ async fn cancelled_compaction_does_not_commit_local_fallback() {
 
     assert!(matches!(
         outcome,
-        crate::CompactOutcome::Skipped(crate::CompactSkipReason::Cancelled)
+        crate::CompactOutcome::Skipped(crate::domain::CompactSkipReason::Cancelled)
     ));
     let session = holder.read().unwrap();
     assert_eq!(session.revision, 0);
@@ -1683,29 +1728,7 @@ async fn cancelled_compaction_does_not_commit_local_fallback() {
 
 #[tokio::test]
 async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
-    use crate::compact::CompactGenerator;
-    use crate::{CompactGenerationFailureData, CompactGenerationFailureKind};
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use tokio_util::sync::CancellationToken;
-
-    struct FailingGenerator {
-        calls: Arc<AtomicUsize>,
-    }
-
-    #[async_trait::async_trait]
-    impl CompactGenerator for FailingGenerator {
-        async fn generate(
-            &self,
-            _request: Vec<Message>,
-            _cancel: &CancellationToken,
-        ) -> Result<crate::CompactGenerationOutputData, CompactGenerationFailureData> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            Err(CompactGenerationFailureData::new(
-                CompactGenerationFailureKind::Provider,
-                "provider failed",
-            ))
-        }
-    }
 
     struct FailingWriter;
 
@@ -1727,7 +1750,7 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
         ten_step_session(&session_id, vec![], 0),
     );
     let calls = Arc::new(AtomicUsize::new(0));
-    let repository = repository.with_generator(Arc::new(FailingGenerator {
+    let llm = test_llm_binding(Arc::new(ProviderFailingInvoker {
         calls: Arc::clone(&calls),
     }));
     let mut request = compact_request(session_id.clone());
@@ -1749,121 +1772,31 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
                 trigger: CompactTrigger::Automatic,
                 progress: None,
                 task_snapshot: None,
-                cancellation: CancellationToken::new(),
+                llm: llm.clone(),
+                cancellation: tokio_util::sync::CancellationToken::new(),
             })
             .await
             .is_err());
     }
     let outcome = repository
         .commit_compaction(&CompactRequestData {
+            llm: None,
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,
             trigger: CompactTrigger::Automatic,
             progress: None,
             task_snapshot: None,
-            cancellation: CancellationToken::new(),
+            cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
         .unwrap();
 
     assert!(matches!(
         outcome,
-        crate::CompactOutcome::Skipped(crate::CompactSkipReason::CircuitBreakerOpen)
+        crate::CompactOutcome::Skipped(crate::domain::CompactSkipReason::CircuitBreakerOpen)
     ));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
-}
-
-#[tokio::test]
-async fn manual_compact_bypasses_automatic_circuit_breaker() {
-    use crate::compact::CompactGenerator;
-    use crate::{CompactGenerationFailureData, CompactGenerationFailureKind};
-    use tokio_util::sync::CancellationToken;
-
-    struct SwitchableGenerator {
-        should_fail: Arc<std::sync::atomic::AtomicBool>,
-    }
-
-    #[async_trait::async_trait]
-    impl CompactGenerator for SwitchableGenerator {
-        async fn generate(
-            &self,
-            _request: Vec<Message>,
-            _cancel: &CancellationToken,
-        ) -> Result<crate::CompactGenerationOutputData, CompactGenerationFailureData> {
-            if self.should_fail.load(std::sync::atomic::Ordering::SeqCst) {
-                Err(CompactGenerationFailureData::new(
-                    CompactGenerationFailureKind::Provider,
-                    "provider failed",
-                ))
-            } else {
-                Ok(crate::CompactGenerationOutputData::from(valid_fact_batch(
-                    "manual",
-                )))
-            }
-        }
-    }
-
-    let session_id = SessionId::new("manual-bypass-session");
-    let mut session = ten_step_session(&session_id, vec![], 0);
-    session.run_slices = (0..10)
-        .map(|index| {
-            CommittedRunSlice::new(
-                format!("run-{index}"),
-                vec![CommittedRunStep::compatibility_outcome_only(
-                    format!("step-{index}"),
-                    vec![
-                        Message::user(format!("message-{index}-user")),
-                        Message::user(format!("message-{index}-assistant")),
-                    ],
-                )],
-            )
-        })
-        .collect::<Vec<_>>()
-        .into();
-    let (repository, holder) =
-        repository_with_session(Arc::new(RecordingWriter::default()), session);
-    let should_fail = Arc::new(std::sync::atomic::AtomicBool::new(true));
-    let repository = repository.with_generator(Arc::new(SwitchableGenerator {
-        should_fail: Arc::clone(&should_fail),
-    }));
-    let mut automatic_source = compact_request(session_id.clone());
-    automatic_source.config_snapshot = ConfigSnapshot::from_arc(Arc::new(Config {
-        context: share::config::ContextConfig {
-            auto_compact_failure_limit: 1,
-            ..Default::default()
-        },
-        ..Config::default()
-    }));
-    let automatic = CompactRequestData {
-        run_id: automatic_source.run_id.clone(),
-        source_revision: SessionRevision::new(99),
-        source: automatic_source,
-        trigger: CompactTrigger::Automatic,
-        progress: None,
-        task_snapshot: None,
-        cancellation: CancellationToken::new(),
-    };
-    let _ = repository.commit_compaction(&automatic).await;
-    should_fail.store(false, std::sync::atomic::Ordering::SeqCst);
-
-    let outcome = repository
-        .commit_manual_compaction(&ManualCompactRequestData {
-            session_id,
-            run_id: RunId::new("manual-run"),
-            system_prompt: SystemPromptSpecData::new("system"),
-            context_size: 200_000,
-            progress: None,
-            task_snapshot: None,
-        })
-        .await
-        .unwrap();
-
-    assert!(
-        matches!(outcome, crate::CompactOutcome::Committed(_)),
-        "unexpected manual compact outcome: {outcome:?}"
-    );
-    assert!(holder.read().unwrap().compact.is_some());
 }
 
 #[tokio::test]
@@ -1878,6 +1811,7 @@ async fn automatic_compaction_executes_after_actual_token_decision() {
 
     let outcome = repository
         .commit_compaction(&CompactRequestData {
+            llm: None,
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,
@@ -1885,27 +1819,6 @@ async fn automatic_compaction_executes_after_actual_token_decision() {
             progress: None,
             task_snapshot: None,
             cancellation: tokio_util::sync::CancellationToken::new(),
-        })
-        .await
-        .unwrap();
-
-    assert!(matches!(outcome, crate::CompactOutcome::Committed(_)));
-}
-
-#[tokio::test]
-async fn manual_compaction_bypasses_automatic_threshold() {
-    let writer = Arc::new(RecordingWriter::default());
-    let session_id = SessionId::new("manual-compact-session");
-    let (repository, _) = repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
-
-    let outcome = repository
-        .commit_manual_compaction(&ManualCompactRequestData {
-            session_id,
-            run_id: RunId::new("manual-run"),
-            system_prompt: SystemPromptSpecData::new("system"),
-            context_size: 1_000_000,
-            progress: None,
-            task_snapshot: None,
         })
         .await
         .unwrap();
@@ -1998,6 +1911,7 @@ async fn compaction_rejects_stale_source_revision() {
 
     let result = repository
         .commit_compaction(&CompactRequestData {
+            llm: None,
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(1),
             source: request,
@@ -2056,34 +1970,21 @@ async fn finalized_append_commits_typed_plan_with_expected_revision() {
     assert!(commit.plan.removed_members().is_empty());
 }
 
-/// #1486：注入 generator 后 commit_compaction 走 LLM 语义压缩，
+/// #1486：请求带 LLM 绑定后 commit_compaction 走 LLM 语义压缩，
 /// summary 来自生成器而非本地 fallback 模板。
 #[tokio::test]
 async fn commit_compaction_with_generator_uses_llm_summary() {
-    use crate::compact::CompactGenerator;
-    use tokio_util::sync::CancellationToken;
-
-    struct FixedGenerator(&'static str);
-    #[async_trait::async_trait]
-    impl CompactGenerator for FixedGenerator {
-        async fn generate(
-            &self,
-            _request: Vec<Message>,
-            _cancel: &CancellationToken,
-        ) -> Result<crate::CompactGenerationOutputData, crate::CompactGenerationFailureData>
-        {
-            Ok(crate::CompactGenerationOutputData::from(valid_fact_batch(
-                self.0,
-            )))
-        }
-    }
-
     let writer = Arc::new(RecordingWriter::default());
     let session_id = SessionId::new("session");
     let (base_repository, _holder) =
         repository_with_session(writer.clone(), ten_step_session(&session_id, vec![], 0));
-    let repository_under_test =
-        base_repository.with_generator(Arc::new(FixedGenerator("LLM 生成的语义摘要")));
+    let repository_under_test = base_repository;
+    let llm = test_llm_binding(Arc::new(FixedTextInvoker {
+        text: valid_fact_batch("LLM 生成的语义摘要"),
+        started: Mutex::new(None),
+        release: tokio::sync::Mutex::new(tokio::sync::mpsc::channel(1).1),
+        fail_with_cancel: false,
+    }));
 
     let mut generated_request = compact_request(session_id.clone());
     generated_request.context_size = 100_000;
@@ -2095,6 +1996,7 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
             trigger: CompactTrigger::Automatic,
             progress: None,
             task_snapshot: None,
+            llm,
             cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
@@ -2137,6 +2039,7 @@ async fn commit_compaction_reconciles_typed_task_snapshot_and_companion() {
     request.context_size = 100_000;
     let outcome = base_repository
         .commit_compaction(&crate::CompactRequestData {
+            llm: None,
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,
@@ -2191,6 +2094,7 @@ async fn commit_compaction_keeps_large_task_companion_within_summary_budget() {
 
     let outcome = base_repository
         .commit_compaction(&crate::CompactRequestData {
+            llm: None,
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,

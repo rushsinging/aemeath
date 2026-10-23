@@ -307,19 +307,35 @@ impl crate::application::loop_engine::ManualCompactionPort for ChatManualCompact
             crate::application::loop_engine::chat::task_snapshot::build_compact_task_snapshot(
                 self.runtime_context.task().as_ref(),
             );
-        let progress_callback: Arc<dyn context::compact::CompactProgressFn> =
-            Arc::new(move |stage, work| {
-                progress.emit(compact_stage_view(stage), compact_work_view(work));
-            });
-        let request = crate::ports::ManualCompactRequestData {
-            session_id: crate::ports::SessionId::new(self.session_id.clone()),
-            run_id: run_id.clone(),
-            system_prompt: crate::ports::SystemPromptSpecData::new(self.system_prompt.clone()),
-            context_size: self.context_size,
-            progress: Some(progress_callback),
-            task_snapshot,
-        };
-        match coordinator.manual_compact(&request).await {
+        // 进度视图直接透传给 coordination 包装（其内部转换 context 回调形态）。
+        // 手动压缩 = compact(trigger: Manual)（#1863：单一压缩入口）。
+        // ContextRequestData 经统一 coordinator 组装（与自动路径同源）。
+        let request_source =
+            crate::application::loop_engine::context_request::ContextRequestSource {
+                runtime_context: &self.runtime_context,
+                session_id: &self.session_id,
+                system_prompt: &self.system_prompt,
+                model_id: &self.runtime_context.provider_ref().model.model,
+                language: "",
+                agent_roles: Default::default(),
+                config: self.runtime_context.config(),
+                context_size: self.context_size,
+                max_output_tokens: 0,
+                raw_tool_schemas: Vec::new(),
+            };
+        let request =
+            crate::application::loop_engine::context_request::ContextRequestCoordinator::new(
+                request_source,
+            )
+            .build_request(
+                &run_id.clone(),
+                &share::ids::RunStepId::new("manual-compact"),
+                Vec::new(),
+            );
+        match coordinator
+            .manual_compact(&request, progress, task_snapshot)
+            .await
+        {
             Ok(crate::ports::CompactOutcome::Committed(result)) => {
                 self.runtime_context
                     .event_sink()
@@ -441,30 +457,6 @@ impl crate::application::loop_engine::ManualReflectionPort for ChatManualReflect
                 )
             }
         })
-    }
-}
-
-fn compact_stage_view(stage: context::compact::CompactStageData) -> sdk::CompactStageView {
-    match stage {
-        context::compact::CompactStageData::Preparing => sdk::CompactStageView::Preparing,
-        context::compact::CompactStageData::Generating => sdk::CompactStageView::Generating,
-        context::compact::CompactStageData::Mapping => sdk::CompactStageView::Mapping,
-        context::compact::CompactStageData::Reducing => sdk::CompactStageView::Reducing,
-        context::compact::CompactStageData::Refreshing => sdk::CompactStageView::Refreshing,
-        context::compact::CompactStageData::Finalizing => sdk::CompactStageView::Finalizing,
-    }
-}
-
-fn compact_work_view(work: context::compact::CompactWorkData) -> sdk::CompactWorkView {
-    match work {
-        context::compact::CompactWorkData::Indeterminate => sdk::CompactWorkView::Indeterminate,
-        context::compact::CompactWorkData::Determinate { completed, total } => {
-            let (Ok(completed), Ok(total)) = (u32::try_from(completed), u32::try_from(total))
-            else {
-                return sdk::CompactWorkView::Indeterminate;
-            };
-            sdk::CompactWorkView::Determinate { completed, total }
-        }
     }
 }
 

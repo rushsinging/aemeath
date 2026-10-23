@@ -5,8 +5,8 @@ use async_trait::async_trait;
 use crate::domain::{
     AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
     CompactOutcome, CompactRequestData, ContextAppendData, ContextAppendError, ContextMessages,
-    ContextPortError, ContextRequestData, ManualCompactRequestData, SessionRevision, SystemBlock,
-    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
+    ContextPortError, ContextRequestData, SessionRevision, SystemBlock, ToolReceiptMutationData,
+    ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
 
 pub mod context_port;
@@ -83,10 +83,6 @@ pub(crate) trait SessionRepository: Send + Sync {
     async fn commit_compaction(
         &self,
         request: &CompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError>;
-    async fn commit_manual_compaction(
-        &self,
-        request: &ManualCompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError>;
     async fn clear(&self, session_id: &SessionId) -> Result<(), ContextPortError>;
 }

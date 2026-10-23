@@ -42,18 +42,6 @@ impl SessionRepository for Session {
         unreachable!()
     }
 
-    async fn commit_manual_compaction(
-        &self,
-        _request: &crate::ManualCompactRequestData,
-    ) -> Result<crate::CompactOutcome, crate::ContextPortError> {
-        Ok(crate::CompactOutcome::Committed(crate::CompactResult {
-            summary: "manual".into(),
-            recent_messages: vec![],
-            source_revision: SessionRevision::new(1),
-            quality: crate::CompactSummaryQuality::LocalOnly,
-        }))
-    }
-
     async fn clear(&self, _session_id: &SessionId) -> Result<(), crate::ContextPortError> {
         Ok(())
     }

@@ -125,37 +125,6 @@ async fn a_new_session_injects_again() {
     assert_eq!(memory_content(&window), "memory generation 2");
 }
 
-/// A committed compaction is the one refresh point: the conversation it
-/// rewrote is exactly what the memory was retrieved for.
-#[tokio::test]
-async fn a_committed_compaction_refreshes_the_frozen_injection() {
-    let calls = Arc::new(AtomicUsize::new(0));
-    let service = service_with_memory(Arc::new(CountingMemory {
-        calls: Arc::clone(&calls),
-    }));
-
-    let before = service.build_window(&request()).await.unwrap();
-    service
-        .manual_compact(&crate::ManualCompactRequestData {
-            session_id: SessionId::new("session"),
-            run_id: RunId::new("run"),
-            system_prompt: SystemPromptSpecData::new("system"),
-            context_size: 128_000,
-            progress: None,
-            task_snapshot: None,
-        })
-        .await
-        .unwrap();
-    let after = service.build_window(&request()).await.unwrap();
-
-    assert_eq!(memory_content(&before), "memory generation 1");
-    assert_eq!(
-        memory_content(&after),
-        "memory generation 2",
-        "a committed compaction must re-retrieve memory"
-    );
-}
-
 /// A compaction that did not commit changed nothing, so the frozen block stays.
 #[tokio::test]
 async fn a_skipped_compaction_keeps_the_frozen_injection() {
@@ -168,6 +137,7 @@ async fn a_skipped_compaction_keeps_the_frozen_injection() {
     // The fixture's automatic compaction reports `Skipped`.
     service
         .compact(&crate::CompactRequestData {
+            llm: None,
             run_id: RunId::new("run"),
             source_revision: crate::SessionRevision::new(3),
             source: request(),
