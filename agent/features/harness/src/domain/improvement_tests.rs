@@ -135,6 +135,8 @@ async fn cycle_adopts_and_summarizes_per_block() {
         &lesson_store,
         &config(1),
         Default::default(),
+        false,
+        &mut Vec::new(),
     )
     .await
     .expect("周期必须成功");
@@ -183,6 +185,8 @@ async fn malformed_block_discarded_without_blocking_others() {
         &lesson_store,
         &config(1),
         Default::default(),
+        false,
+        &mut Vec::new(),
     )
     .await
     .expect("周期必须成功");
@@ -213,6 +217,8 @@ async fn empty_registry_yields_empty_cycle() {
         &lesson_store,
         &config(4),
         Default::default(),
+        false,
+        &mut Vec::new(),
     )
     .await
     .expect("空注册表 NEVER 报错");

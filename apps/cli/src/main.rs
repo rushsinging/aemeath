@@ -72,8 +72,21 @@ async fn main() {
             }
         },
         Some(Commands::Rsi { command }) => match command {
-            args::RsiCommands::Run => {
-                subcommand::rsi_command::run_rsi_run_command().await;
+            args::RsiCommands::Run {
+                dry_run,
+                max_sessions,
+                window_days,
+                json,
+            } => {
+                subcommand::rsi_command::run_rsi_run_command(
+                    subcommand::rsi_command::RsiRunOptions {
+                        dry_run,
+                        max_sessions,
+                        window_days,
+                        json,
+                    },
+                )
+                .await;
             }
             args::RsiCommands::Serve => {
                 subcommand::rsi_command::run_rsi_serve_command().await;

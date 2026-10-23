@@ -21,6 +21,8 @@ pub struct HarnessRsiCycleTask {
     config: RsiConfig,
     /// 证据流端口（#2049 流模型：plan → block_evidence → advance）。
     stream_port: Box<dyn crate::domain::stream_port::EvidenceStreamPort>,
+    /// 预演模式（#2050）：完整周期但零持久副作用。
+    dry_run: bool,
 }
 
 impl HarnessRsiCycleTask {
@@ -36,7 +38,14 @@ impl HarnessRsiCycleTask {
             lesson_store,
             config,
             stream_port: Box::new(crate::domain::stream_port::FakeEvidenceStream::default()),
+            dry_run: false,
         }
+    }
+
+    /// 预演模式（#2050）：组件/lesson/checkpoint 全不写。
+    pub fn with_dry_run(mut self) -> Self {
+        self.dry_run = true;
+        self
     }
 
     /// 注入证据流端口（#2049 流模型）。
@@ -57,12 +66,13 @@ impl RsiTask for HarnessRsiCycleTask {
         // 块成功（周期 Ok——作废也是明确处理结论）才推进游标。
         let params = crate::domain::stream::StreamPlanParams {
             initial_window_days: self.config.evidence_initial_window_days,
-            max_sessions_per_cycle: self.config.evidence_max_sessions_per_cycle,
-            block_session_limit: self.config.evidence_block_sessions,
+            max_runs_per_cycle: self.config.evidence_max_sessions_per_cycle.max(1),
+            block_run_limit: self.config.evidence_block_sessions.max(1),
             component_tree_fingerprint: String::new(),
         };
         let blocks = self.stream_port.plan(&params);
         let mut summary_parts = Vec::new();
+        let mut preview_lines = Vec::new();
         for block in &blocks {
             let evidence = self.stream_port.block_evidence(block);
             let outcome = run_improvement_cycle(
@@ -71,19 +81,26 @@ impl RsiTask for HarnessRsiCycleTask {
                 &self.lesson_store,
                 &self.config,
                 evidence,
+                self.dry_run,
+                &mut preview_lines,
             )
             .await?;
             summary_parts.push(outcome.summary);
-            let fingerprint = crate::domain::stream_port::component_tree_fingerprint(registry);
-            self.stream_port.advance(block, fingerprint);
+            if !self.dry_run {
+                let fingerprint = crate::domain::stream_port::component_tree_fingerprint(registry);
+                self.stream_port.advance(block, fingerprint);
+            }
         }
         if summary_parts.is_empty() {
             return Ok(crate::domain::task::CycleOutcome {
                 summary: "无待处理证据块".to_string(),
             });
         }
-        Ok(crate::domain::task::CycleOutcome {
-            summary: summary_parts.join(" | "),
-        })
+        let mut summary = summary_parts.join(" | ");
+        if self.dry_run && !preview_lines.is_empty() {
+            summary.push_str("\n（dry-run 预览）\n");
+            summary.push_str(&preview_lines.join("\n"));
+        }
+        Ok(crate::domain::task::CycleOutcome { summary })
     }
 }

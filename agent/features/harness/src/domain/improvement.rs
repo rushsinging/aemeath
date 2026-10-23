@@ -140,6 +140,7 @@ pub fn parse_block_proposal(response_text: &str) -> Result<BlockProposal, Harnes
 
 /// 单块执行：LLM 提案 → 解析 → registry 预检/落盘。
 /// 返回 (applied, outcome_label)；解析失败或校验作废都只作废该块。
+#[allow(clippy::too_many_arguments)]
 async fn run_block(
     registry: &mut dyn ComponentRegistry,
     llm: &dyn RsiLlmPort,
@@ -148,6 +149,8 @@ async fn run_block(
     evidence: &crate::domain::evidence::EvidenceBundle,
     lesson_store: &LessonStore,
     cycle_ref: &str,
+    dry_run: bool,
+    preview_lines: &mut Vec<String>,
 ) -> (Vec<AppliedEdit>, &'static str) {
     let prompt = build_block_prompt(chunk, lessons, evidence);
     let Ok(response) = llm.complete(&prompt).await else {
@@ -177,6 +180,37 @@ async fn run_block(
     match proposal {
         BlockProposal::NoChange { .. } => (Vec::new(), "无变更"),
         BlockProposal::Propose { reason, change_set } => {
+            if dry_run {
+                // 预演（#2050）：逐条校验（含整份作废预检）但不落盘、
+                // 不写 lesson、不推游标；预览行供 preview 文件。
+                let mut valid = true;
+                for edit in &change_set.edits {
+                    let (id, content) = match edit {
+                        crate::domain::changeset::ComponentEdit::Upsert { id, content } => {
+                            (id, Some(content))
+                        }
+                        crate::domain::changeset::ComponentEdit::Delete { id } => (id, None),
+                    };
+                    let outcome = match content {
+                        Some(content) => registry.validate(id, content),
+                        None => registry.read(id).map(|_| ()),
+                    };
+                    match outcome {
+                        Ok(()) => {
+                            preview_lines.push(format!("[dry-run] upsert/delete {id}：{reason}"))
+                        }
+                        Err(error) => {
+                            valid = false;
+                            preview_lines.push(format!("[dry-run] 拒绝 {id}：{}", error.message()));
+                        }
+                    }
+                }
+                return if valid {
+                    (Vec::new(), "预演（将采纳）")
+                } else {
+                    (Vec::new(), "预演（将作废）")
+                };
+            }
             match apply_change_set(registry, &change_set) {
                 Ok(applied) => {
                     record_adopted_lesson(lesson_store, &change_set, &reason, cycle_ref);
@@ -235,6 +269,8 @@ pub async fn run_improvement_cycle(
     lesson_store: &LessonStore,
     config: &RsiConfig,
     evidence: crate::domain::evidence::EvidenceBundle,
+    dry_run: bool,
+    preview_lines: &mut Vec<String>,
 ) -> Result<CycleOutcome, HarnessError> {
     let cycle_ref = format!(
         "cycle-{}",
@@ -273,17 +309,24 @@ pub async fn run_improvement_cycle(
             &evidence,
             lesson_store,
             &cycle_ref,
+            dry_run,
+            preview_lines,
         )
         .await;
         match label {
             "采纳" => adopted += 1,
             "无变更" => no_change += 1,
+            // 预演 label（将采纳/将作废）由 preview_lines 呈现详情，
+            // 计数只归入对应桶（#2050）
+            "预演（将采纳）" => adopted += 1,
+            "预演（将作废）" => discarded += 1,
             _ => discarded += 1,
         }
         log::info!(target: crate::LOG_TARGET, "改进块完成：{label}");
     }
+    let prefix = if dry_run { "（dry-run）" } else { "" };
     Ok(CycleOutcome {
-        summary: format!("采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}"),
+        summary: format!("{prefix}采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}"),
     })
 }
 

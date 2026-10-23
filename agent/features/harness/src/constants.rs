@@ -33,3 +33,6 @@ pub(crate) const EVIDENCE_EXCERPT_BOUND: usize = 200;
 
 /// checkpoint 落盘文件名（`~/.agents/harness/checkpoint.json`，#2049）。
 pub const CHECKPOINT_FILE_NAME: &str = "checkpoint.json";
+
+/// 已完成 session 条目的 checkpoint 保留上限（自动清理，#2057）。
+pub const COMPLETE_SESSION_RETENTION: usize = 50;

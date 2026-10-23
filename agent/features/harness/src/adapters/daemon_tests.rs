@@ -253,9 +253,9 @@ async fn trigger_runs_cycle_and_writes_component_file() {
     // 流模型（#2049）：注入单块计划——周期对每块独立提案落盘
     let stream = crate::domain::stream_port::FakeEvidenceStream {
         plans: std::sync::Mutex::new(vec![crate::domain::stream::EvidenceBlockPlan {
-            sessions: vec![crate::domain::stream::SessionStreamEntry {
+            runs: vec![crate::domain::stream::RunRef {
                 session_key: "s1.dataset".to_string(),
-                updated_at_secs: 1,
+                run_id: "run-1".to_string(),
             }],
         }]),
         advanced: std::sync::Mutex::new(Vec::new()),

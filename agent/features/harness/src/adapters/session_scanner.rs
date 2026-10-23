@@ -7,6 +7,28 @@
 use crate::constants::EVIDENCE_EXCERPT_BOUND;
 use crate::domain::evidence::SessionEventRecord;
 
+/// 轻量提取 dataset 的 run id 清单（有序去重；只读 cursor，NEVER 全量解析成员体）。
+pub fn dataset_run_ids(dataset_dir: &std::path::Path) -> Vec<String> {
+    let mut run_ids: Vec<String> = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dataset_dir.join("members")) else {
+        return run_ids;
+    };
+    for entry in entries.flatten() {
+        let Ok(raw) = std::fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        let Ok(member) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            continue;
+        };
+        if let Some(run_id) = member.pointer("/cursor/run_id").and_then(|v| v.as_str()) {
+            if !run_ids.iter().any(|existing| existing == run_id) {
+                run_ids.push(run_id.to_string());
+            }
+        }
+    }
+    run_ids
+}
+
 /// 扫描单个 session dataset 目录，产出事件流（成员损坏跳过并计数）。
 pub struct SessionDatasetScanner;
 

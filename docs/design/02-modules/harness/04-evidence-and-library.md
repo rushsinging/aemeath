@@ -101,7 +101,29 @@ session 流（按 updated_at 全序）
 
 **组件面体积控制**：单块内若组件面过大导致材料超预算，按组件分次提案作为**体积兜底**（v1 的 `chunk_max_components` 语义降级至此并标注待废弃；正确的主分块单位永远是数据源块）。
 
-### 2A.6 边界与排期
+### 2A.6 run 级游标修订（2026-10-23 拍板，修正 §2A.5 session 级缺陷）
+
+> 复盘发现 §2A.5 的 session 级单点全序游标对「可变条目流」不完备：session 更新改 mtime 导致条目漂移——重读冗余或**永久漏读**；并发更新下 mtime 不稳定。修订为 **run 级处理状态**：
+
+**checkpoint 形态**（`~/.agents/harness/checkpoint.json`，原子写）：
+
+```json
+{
+  "sessions": {
+    "<session_key>": {
+      "processed_run_ids": ["run-1", "run-2"],
+      "session_complete": true
+    }
+  }
+}
+```
+
+- **增量判定**：扫描时按 step `cursor.run_id` 分组，跳过 `processed_run_ids` 集合内的 run——session 更新只新增 run，NEVER 漂移、NEVER 漏读、重读零冗余（run_id 集合判定，不依赖 mtime 可比性）；
+- **步长按 run**：`evidence_max_runs_per_cycle`（每周期最多处理 run 数）；块边界优先切在 **session 边界**（尽量完成一个 session）；单 session run 数超块上限才切（`session_complete: false`，下周期续）；
+- **调度序**：mtime 只决定处理顺序，NEVER 承担游标语义；
+- **自动清理**：checkpoint 条目只保留 ①未完成 session（`session_complete: false`）②最近 N 条（默认 50）已完整处理的 session——超出的删除（重读风险限于极旧 session，且首次窗口天然限制选集）；盘上已消失的 session 条目即时清理。
+
+### 2A.7 边界与排期
 
 - Probe/Compose（多 rollout 行为对比）留 0.3.0；本节交付「单 rollout + 真实证据」。
 - 投影性能：manifest 定位 + 成员流式扫描，百 run 量级毫秒级；NEVER 全量加载 ToolResult 原文进内存。

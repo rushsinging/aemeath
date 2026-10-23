@@ -58,12 +58,9 @@ impl EvidenceStreamPort for FakeEvidenceStream {
     }
 
     fn advance(&self, block: &EvidenceBlockPlan, _fingerprint: String) {
-        self.advanced.lock().expect("advanced lock").push(
-            block
-                .sessions
-                .last()
-                .map(|e| e.session_key.clone())
-                .unwrap_or_default(),
-        );
+        self.advanced
+            .lock()
+            .expect("advanced lock")
+            .extend(block.runs.iter().map(|run| run.run_id.clone()));
     }
 }
