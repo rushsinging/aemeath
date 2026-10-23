@@ -5,7 +5,7 @@
 //! run_id 集合（NEVER 依赖 mtime 可比性——session 更新只新增 run，
 //! 条目不漂移、不漏读、不冗余）。
 
-use crate::constants::{CHECKPOINT_FILE_NAME, ERROR_DOMAIN};
+use crate::constants::{CHECKPOINT_FILE_NAME, COMPLETE_SESSION_RETENTION, ERROR_DOMAIN};
 use crate::domain::errors::HarnessError;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -25,9 +25,6 @@ pub struct SessionProgress {
 pub struct EvidenceStreamState {
     pub sessions: BTreeMap<String, SessionProgress>,
 }
-
-/// 已完成 session 条目的保留上限（自动清理防过长）。
-pub const COMPLETE_SESSION_RETENTION: usize = 50;
 
 /// 从 checkpoint 文件读状态（缺失/损坏返回默认——按首次处理，NEVER 阻断）。
 pub fn load_stream_state(harness_dir: &Path) -> Result<EvidenceStreamState, HarnessError> {
