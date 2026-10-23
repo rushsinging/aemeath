@@ -289,14 +289,17 @@ pub async fn run_rsi_run_once() -> RsiRunExit {
         }
     };
     let lesson_store = wire_lesson_store();
-    let evidence_loader = wire_evidence_loader();
+    let stream = ProductionEvidenceStream {
+        datasets_root: share::config::paths::global_session_datasets_dir(),
+        harness_dir: share::config::paths::global_agents_dir().join("harness"),
+    };
     let mut task = harness::domain::cycle_task::HarnessRsiCycleTask::new(
         registry,
         llm,
         lesson_store,
         config.harness.rsi.clone(),
     )
-    .with_evidence_loader(evidence_loader);
+    .with_evidence_stream(Box::new(stream));
     use harness::domain::task::RsiTask;
     match task.run_cycle().await {
         Ok(outcome) => RsiRunExit::Done {
@@ -309,46 +312,99 @@ pub async fn run_rsi_run_once() -> RsiRunExit {
     }
 }
 
-/// 执行证据装载器（#2048）：扫描 session dataset 根，取最新 N 个
-/// dataset 聚合（#2049 流模型接入前形态；扫描失败降级空证据——
-/// NEVER 因证据缺失阻断改进周期）。
-fn wire_evidence_loader() -> Box<dyn Fn() -> harness::EvidenceBundle + Send> {
-    Box::new(|| {
-        let datasets_root = share::config::paths::global_session_datasets_dir();
-        let Ok(entries) = std::fs::read_dir(&datasets_root) else {
-            return harness::EvidenceBundle::default();
+/// 生产证据流端口（#2049 流模型）：plan（游标+窗口+步长+分块）→
+/// block_evidence（扫描聚合）→ advance（游标推进 + 指纹基线）。
+struct ProductionEvidenceStream {
+    datasets_root: std::path::PathBuf,
+    harness_dir: std::path::PathBuf,
+}
+
+impl harness::EvidenceStreamPort for ProductionEvidenceStream {
+    fn plan(&self, params: &harness::StreamPlanParams) -> Vec<harness::EvidenceBlockPlan> {
+        let entries = enumerate_session_entries(&self.datasets_root);
+        let cursor = match harness::load_cursor(&self.harness_dir) {
+            Ok(cursor) => cursor,
+            Err(error) => {
+                log::warn!(target: crate::LOG_TARGET, "checkpoint 读取失败，按首次窗口处理：{}", error.message());
+                None
+            }
         };
-        let mut datasets: Vec<std::path::PathBuf> = entries
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| {
-                path.is_dir()
-                    && path
-                        .extension()
-                        .and_then(|ext| ext.to_str())
-                        .is_some_and(|ext| ext == "dataset")
-            })
-            .collect();
-        // 最新优先（mtime 降序），上限 20（#2049 步长参数化）
-        datasets.sort_by_key(|path| {
-            std::cmp::Reverse(
-                path.metadata()
-                    .and_then(|meta| meta.modified())
-                    .ok()
-                    .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|duration| duration.as_secs())
-                    .unwrap_or(0),
-            )
-        });
-        datasets.truncate(20);
+        if let Some(cursor) = &cursor {
+            if cursor.component_tree_fingerprint != params.component_tree_fingerprint
+                && !cursor.component_tree_fingerprint.is_empty()
+                && !params.component_tree_fingerprint.is_empty()
+            {
+                log::warn!(target: crate::LOG_TARGET, "组件树在游标后被外部修改（指纹不符），证据处理照常");
+            }
+        }
+        harness::plan_evidence_stream(entries, cursor.as_ref(), params)
+    }
+
+    fn block_evidence(&self, block: &harness::EvidenceBlockPlan) -> harness::EvidenceBundle {
         let mut events = Vec::new();
-        for dataset in &datasets {
+        for session in &block.sessions {
+            let dataset = self.datasets_root.join(&session.session_key);
             let report =
-                harness::adapters::session_scanner::SessionDatasetScanner::scan_dataset(dataset);
+                harness::adapters::session_scanner::SessionDatasetScanner::scan_dataset(&dataset);
             events.extend(report.events);
         }
         harness::aggregate_evidence(&events)
-    })
+    }
+
+    fn advance(&self, block: &harness::EvidenceBlockPlan, fingerprint: String) {
+        let Some(last) = block.sessions.last() else {
+            return;
+        };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        let cursor = harness::EvidenceStreamCursor {
+            last_session_key: last.session_key.clone(),
+            last_session_updated_at_secs: last.updated_at_secs,
+            completed_at_secs: now,
+            component_tree_fingerprint: fingerprint,
+        };
+        if let Err(error) = harness::save_cursor(&self.harness_dir, &cursor) {
+            log::warn!(target: crate::LOG_TARGET, "checkpoint 推进失败（下周期将重读本块）：{}", error.message());
+        }
+    }
+}
+
+/// 枚举 session dataset 根的流条目（mtime 全序原料）。
+fn enumerate_session_entries(datasets_root: &std::path::Path) -> Vec<harness::SessionStreamEntry> {
+    let Ok(entries) = std::fs::read_dir(datasets_root) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_dir()
+                && path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| ext == "dataset")
+        })
+        .map(|path| {
+            let session_key = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("")
+                .to_string();
+            let updated_at_secs = path
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_secs())
+                .unwrap_or(0);
+            harness::SessionStreamEntry {
+                session_key,
+                updated_at_secs,
+            }
+        })
+        .collect()
 }
 
 /// 最小配置加载：默认值 + `~/.agents/aemeath.json` patch 层合并。

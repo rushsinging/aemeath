@@ -30,3 +30,6 @@ pub const OVERSIZED_RESULT_CHARS: usize = 3000;
 
 /// 证据摘录上限（对齐 lesson excerpt 常量族）。
 pub(crate) const EVIDENCE_EXCERPT_BOUND: usize = 200;
+
+/// checkpoint 落盘文件名（`~/.agents/harness/checkpoint.json`，#2049）。
+pub const CHECKPOINT_FILE_NAME: &str = "checkpoint.json";

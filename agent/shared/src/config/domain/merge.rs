@@ -337,6 +337,12 @@ pub struct RsiConfigPatch {
     pub interval_secs: Option<u64>,
     #[serde(default)]
     pub chunk_max_components: Option<usize>,
+    #[serde(default)]
+    pub evidence_initial_window_days: Option<u64>,
+    #[serde(default)]
+    pub evidence_max_sessions_per_cycle: Option<usize>,
+    #[serde(default)]
+    pub evidence_block_sessions: Option<usize>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -924,6 +930,15 @@ pub(crate) fn apply_harness_patch(
         }
         if let Some(v) = rsi.chunk_max_components {
             base.rsi.chunk_max_components = v;
+        }
+        if let Some(v) = rsi.evidence_initial_window_days {
+            base.rsi.evidence_initial_window_days = v;
+        }
+        if let Some(v) = rsi.evidence_max_sessions_per_cycle {
+            base.rsi.evidence_max_sessions_per_cycle = v;
+        }
+        if let Some(v) = rsi.evidence_block_sessions {
+            base.rsi.evidence_block_sessions = v;
         }
     }
     base

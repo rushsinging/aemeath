@@ -19,9 +19,8 @@ pub struct HarnessRsiCycleTask {
     llm: Arc<dyn RsiLlmPort>,
     lesson_store: Arc<LessonStore>,
     config: RsiConfig,
-    /// 执行证据装载器（装配层扫描 session dataset；#2049 流模型
-    /// 接入前为「最新 N dataset 聚合」形态）。
-    evidence_loader: Box<dyn Fn() -> crate::domain::evidence::EvidenceBundle + Send>,
+    /// 证据流端口（#2049 流模型：plan → block_evidence → advance）。
+    stream_port: Box<dyn crate::domain::stream_port::EvidenceStreamPort>,
 }
 
 impl HarnessRsiCycleTask {
@@ -36,16 +35,16 @@ impl HarnessRsiCycleTask {
             llm,
             lesson_store,
             config,
-            evidence_loader: Box::new(crate::domain::evidence::EvidenceBundle::default),
+            stream_port: Box::new(crate::domain::stream_port::FakeEvidenceStream::default()),
         }
     }
 
-    /// 注入执行证据装载器（#2048）。
-    pub fn with_evidence_loader(
+    /// 注入证据流端口（#2049 流模型）。
+    pub fn with_evidence_stream(
         mut self,
-        loader: Box<dyn Fn() -> crate::domain::evidence::EvidenceBundle + Send>,
+        stream_port: Box<dyn crate::domain::stream_port::EvidenceStreamPort>,
     ) -> Self {
-        self.evidence_loader = loader;
+        self.stream_port = stream_port;
         self
     }
 }
@@ -54,14 +53,37 @@ impl HarnessRsiCycleTask {
 impl RsiTask for HarnessRsiCycleTask {
     async fn run_cycle(&mut self) -> Result<CycleOutcome, HarnessError> {
         let registry = &mut **self.registry.lock().await;
-        let evidence = (self.evidence_loader)();
-        run_improvement_cycle(
-            registry,
-            self.llm.as_ref(),
-            &self.lesson_store,
-            &self.config,
-            evidence,
-        )
-        .await
+        // 数据源块驱动（#2049）：每块独立「证据 → 提案 → 采纳 → lesson」，
+        // 块成功（周期 Ok——作废也是明确处理结论）才推进游标。
+        let params = crate::domain::stream::StreamPlanParams {
+            initial_window_days: self.config.evidence_initial_window_days,
+            max_sessions_per_cycle: self.config.evidence_max_sessions_per_cycle,
+            block_session_limit: self.config.evidence_block_sessions,
+            component_tree_fingerprint: String::new(),
+        };
+        let blocks = self.stream_port.plan(&params);
+        let mut summary_parts = Vec::new();
+        for block in &blocks {
+            let evidence = self.stream_port.block_evidence(block);
+            let outcome = run_improvement_cycle(
+                registry,
+                self.llm.as_ref(),
+                &self.lesson_store,
+                &self.config,
+                evidence,
+            )
+            .await?;
+            summary_parts.push(outcome.summary);
+            let fingerprint = crate::domain::stream_port::component_tree_fingerprint(registry);
+            self.stream_port.advance(block, fingerprint);
+        }
+        if summary_parts.is_empty() {
+            return Ok(crate::domain::task::CycleOutcome {
+                summary: "无待处理证据块".to_string(),
+            });
+        }
+        Ok(crate::domain::task::CycleOutcome {
+            summary: summary_parts.join(" | "),
+        })
     }
 }
