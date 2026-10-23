@@ -23,7 +23,7 @@ pub use domain::evidence::{
 };
 pub use domain::plugin::{PluginRule, PluginSeamEngine, SeamEffect, SeamOutcome};
 pub use domain::stream::{
-    load_cursor, plan_evidence_stream, save_cursor, EvidenceBlockPlan, EvidenceStreamCursor,
-    SessionStreamEntry, StreamPlanParams,
+    load_stream_state, plan_evidence_stream, save_stream_state, EvidenceBlockPlan,
+    EvidenceStreamState, RunRef, SessionProgress, SessionStreamEntry, StreamPlanParams,
 };
 pub use domain::stream_port::EvidenceStreamPort;

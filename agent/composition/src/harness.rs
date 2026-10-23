@@ -364,50 +364,95 @@ struct ProductionEvidenceStream {
 impl harness::EvidenceStreamPort for ProductionEvidenceStream {
     fn plan(&self, params: &harness::StreamPlanParams) -> Vec<harness::EvidenceBlockPlan> {
         let entries = enumerate_session_entries(&self.datasets_root);
-        let cursor = match harness::load_cursor(&self.harness_dir) {
-            Ok(cursor) => cursor,
+        let state = match harness::load_stream_state(&self.harness_dir) {
+            Ok(state) => state,
             Err(error) => {
-                log::warn!(target: crate::LOG_TARGET, "checkpoint 读取失败，按首次窗口处理：{}", error.message());
-                None
+                log::warn!(target: crate::LOG_TARGET, "checkpoint 读取失败，按首次处理：{}", error.message());
+                harness::EvidenceStreamState::default()
             }
         };
-        if let Some(cursor) = &cursor {
-            if cursor.component_tree_fingerprint != params.component_tree_fingerprint
-                && !cursor.component_tree_fingerprint.is_empty()
-                && !params.component_tree_fingerprint.is_empty()
-            {
-                log::warn!(target: crate::LOG_TARGET, "组件树在游标后被外部修改（指纹不符），证据处理照常");
-            }
+        // session → run 清单（轻量 cursor 提取）
+        let mut session_runs = std::collections::BTreeMap::new();
+        for entry in &entries {
+            let run_ids = harness::adapters::session_scanner::dataset_run_ids(
+                &self.datasets_root.join(&entry.session_key),
+            );
+            session_runs.insert(entry.session_key.clone(), run_ids);
         }
-        harness::plan_evidence_stream(entries, cursor.as_ref(), params)
+        harness::plan_evidence_stream(entries, &state, &session_runs, params)
     }
 
     fn block_evidence(&self, block: &harness::EvidenceBlockPlan) -> harness::EvidenceBundle {
         let mut events = Vec::new();
-        for session in &block.sessions {
-            let dataset = self.datasets_root.join(&session.session_key);
-            let report =
-                harness::adapters::session_scanner::SessionDatasetScanner::scan_dataset(&dataset);
-            events.extend(report.events);
+        // 按 session 分组扫描，块内过滤 run
+        let mut by_session: std::collections::BTreeMap<&str, std::collections::BTreeSet<&str>> =
+            Default::default();
+        for run_ref in &block.runs {
+            by_session
+                .entry(run_ref.session_key.as_str())
+                .or_default()
+                .insert(run_ref.run_id.as_str());
+        }
+        for (session_key, run_ids) in by_session {
+            let report = harness::adapters::session_scanner::SessionDatasetScanner::scan_dataset(
+                &self.datasets_root.join(session_key),
+            );
+            events.extend(
+                report
+                    .events
+                    .into_iter()
+                    .filter(|event| run_ids.contains(event.run_id.as_str())),
+            );
         }
         harness::aggregate_evidence(&events)
     }
 
-    fn advance(&self, block: &harness::EvidenceBlockPlan, fingerprint: String) {
-        let Some(last) = block.sessions.last() else {
-            return;
+    fn advance(&self, block: &harness::EvidenceBlockPlan, _fingerprint: String) {
+        let mut state = match harness::load_stream_state(&self.harness_dir) {
+            Ok(state) => state,
+            Err(_) => harness::EvidenceStreamState::default(),
         };
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_secs())
-            .unwrap_or(0);
-        let cursor = harness::EvidenceStreamCursor {
-            last_session_key: last.session_key.clone(),
-            last_session_updated_at_secs: last.updated_at_secs,
-            completed_at_secs: now,
-            component_tree_fingerprint: fingerprint,
-        };
-        if let Err(error) = harness::save_cursor(&self.harness_dir, &cursor) {
+        let mut touched_sessions: Vec<String> = Vec::new();
+        for run_ref in &block.runs {
+            let progress = state
+                .sessions
+                .entry(run_ref.session_key.clone())
+                .or_default();
+            if !progress.processed_run_ids.contains(&run_ref.run_id) {
+                progress.processed_run_ids.push(run_ref.run_id.clone());
+            }
+            if !touched_sessions.contains(&run_ref.session_key) {
+                touched_sessions.push(run_ref.session_key.clone());
+            }
+        }
+        // session_complete：该 session 盘上全部 run 均已处理
+        for session_key in touched_sessions {
+            let all_runs = harness::adapters::session_scanner::dataset_run_ids(
+                &self.datasets_root.join(&session_key),
+            );
+            if let Some(progress) = state.sessions.get_mut(&session_key) {
+                progress.session_complete = all_runs
+                    .iter()
+                    .all(|run_id| progress.processed_run_ids.contains(run_id));
+            }
+        }
+        let live: std::collections::BTreeSet<String> = std::fs::read_dir(&self.datasets_root)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter(|entry| {
+                        entry.path().is_dir()
+                            && entry
+                                .path()
+                                .extension()
+                                .and_then(|ext| ext.to_str())
+                                .is_some_and(|ext| ext == "dataset")
+                    })
+                    .filter_map(|entry| entry.file_name().into_string().ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Err(error) = harness::save_stream_state(&self.harness_dir, &state, &live) {
             log::warn!(target: crate::LOG_TARGET, "checkpoint 推进失败（下周期将重读本块）：{}", error.message());
         }
     }
