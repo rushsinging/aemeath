@@ -43,7 +43,7 @@ fn entry_enforces_excerpt_length_bound() {
         "结论",
         vec![EvidenceBinding {
             run_ref: "cycle-1".to_string(),
-            signal: SignalKind::ManualContext,
+            signal: SignalKind::CycleObservation,
             excerpt: "摘".repeat(EXCERPT_MAX_CHARS + 1),
         }],
         1000,

@@ -19,6 +19,9 @@ pub struct HarnessRsiCycleTask {
     llm: Arc<dyn RsiLlmPort>,
     lesson_store: Arc<LessonStore>,
     config: RsiConfig,
+    /// 执行证据装载器（装配层扫描 session dataset；#2049 流模型
+    /// 接入前为「最新 N dataset 聚合」形态）。
+    evidence_loader: Box<dyn Fn() -> crate::domain::evidence::EvidenceBundle + Send>,
 }
 
 impl HarnessRsiCycleTask {
@@ -33,7 +36,17 @@ impl HarnessRsiCycleTask {
             llm,
             lesson_store,
             config,
+            evidence_loader: Box::new(crate::domain::evidence::EvidenceBundle::default),
         }
+    }
+
+    /// 注入执行证据装载器（#2048）。
+    pub fn with_evidence_loader(
+        mut self,
+        loader: Box<dyn Fn() -> crate::domain::evidence::EvidenceBundle + Send>,
+    ) -> Self {
+        self.evidence_loader = loader;
+        self
     }
 }
 
@@ -41,11 +54,13 @@ impl HarnessRsiCycleTask {
 impl RsiTask for HarnessRsiCycleTask {
     async fn run_cycle(&mut self) -> Result<CycleOutcome, HarnessError> {
         let registry = &mut **self.registry.lock().await;
+        let evidence = (self.evidence_loader)();
         run_improvement_cycle(
             registry,
             self.llm.as_ref(),
             &self.lesson_store,
             &self.config,
+            evidence,
         )
         .await
     }

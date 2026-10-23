@@ -24,3 +24,9 @@ pub const SKILL_MAX_BYTES: u64 = 64 * 1024;
 
 /// 单 plugin.md 大小上限（64 KiB，#2030）。
 pub const PLUGIN_MAX_BYTES: u64 = 64 * 1024;
+
+/// 超长结果判定阈值（证据投影，对齐 materializer floor 3000）。
+pub const OVERSIZED_RESULT_CHARS: usize = 3000;
+
+/// 证据摘录上限（对齐 lesson excerpt 常量族）。
+pub(crate) const EVIDENCE_EXCERPT_BOUND: usize = 200;

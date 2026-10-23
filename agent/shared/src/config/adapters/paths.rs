@@ -209,6 +209,11 @@ pub fn global_scripts_dir() -> PathBuf {
     global_agents_dir().join(SCRIPTS_DIR_NAME)
 }
 
+/// session dataset 落盘根（单数 `session/`；`sessions/` 是 lock 目录）。
+pub fn global_session_datasets_dir() -> PathBuf {
+    global_agents_dir().join("session")
+}
+
 /// 全局 plugins 组件目录（c8，#2030）。
 pub fn global_plugins_dir() -> PathBuf {
     global_agents_dir().join("plugins")

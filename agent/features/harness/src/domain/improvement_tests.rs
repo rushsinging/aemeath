@@ -62,6 +62,7 @@ impl RsiLlmPort for ScriptedLlm {
 fn materials_chunked_by_configured_size() {
     let materials = ImprovementMaterials {
         lessons: vec![],
+        evidence: crate::domain::evidence::EvidenceBundle::default(),
         component_contents: vec![
             (id("a"), body_content("1")),
             (id("b"), body_content("2")),
@@ -97,7 +98,11 @@ fn block_proposal_envelope_parses() {
 #[test]
 fn block_prompt_carries_materials_and_contract() {
     let chunk = vec![(id("alpha"), body_content("正文内容"))];
-    let prompt = build_block_prompt(&chunk, &[]);
+    let prompt = build_block_prompt(
+        &chunk,
+        &[],
+        &crate::domain::evidence::EvidenceBundle::default(),
+    );
     assert!(prompt.contains("alpha"));
     assert!(prompt.contains("正文内容"));
     assert!(prompt.contains("no_change"));
@@ -124,9 +129,15 @@ async fn cycle_adopts_and_summarizes_per_block() {
             .path()
             .join("library.jsonl"),
     );
-    let outcome = run_improvement_cycle(&mut registry, &llm, &lesson_store, &config(1))
-        .await
-        .expect("周期必须成功");
+    let outcome = run_improvement_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &config(1),
+        Default::default(),
+    )
+    .await
+    .expect("周期必须成功");
     assert!(outcome.summary.contains("采纳 1"));
     assert!(outcome.summary.contains("无变更 1"));
     // 采纳块 MUST 回写带证据的 Active lesson（复利输入）
@@ -166,9 +177,15 @@ async fn malformed_block_discarded_without_blocking_others() {
             .path()
             .join("library.jsonl"),
     );
-    let outcome = run_improvement_cycle(&mut registry, &llm, &lesson_store, &config(1))
-        .await
-        .expect("周期必须成功");
+    let outcome = run_improvement_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &config(1),
+        Default::default(),
+    )
+    .await
+    .expect("周期必须成功");
     assert!(outcome.summary.contains("作废 1"));
     assert!(outcome.summary.contains("采纳 1"));
     assert_eq!(
@@ -190,8 +207,87 @@ async fn empty_registry_yields_empty_cycle() {
             .path()
             .join("library.jsonl"),
     );
-    let outcome = run_improvement_cycle(&mut registry, &llm, &lesson_store, &config(4))
-        .await
-        .expect("空注册表 NEVER 报错");
+    let outcome = run_improvement_cycle(
+        &mut registry,
+        &llm,
+        &lesson_store,
+        &config(4),
+        Default::default(),
+    )
+    .await
+    .expect("空注册表 NEVER 报错");
     assert!(outcome.summary.contains("空周期"));
+}
+
+// ---- #2048 evidence 材料注入 ----
+
+/// prompt 含 evidence 块（signal id 可引用）与引用约束；空证据兜底。
+#[test]
+fn block_prompt_carries_evidence_block_and_reference_rule() {
+    use crate::domain::evidence::{
+        aggregate_evidence, EvidenceSignal, SessionEventRecord, SignalKind,
+    };
+    let chunk = vec![(id("alpha"), body_content("正文"))];
+    let events = vec![
+        SessionEventRecord {
+            session_id: "s".into(),
+            run_id: "r".into(),
+            tool_name: Some("Bash".into()),
+            is_error: true,
+            error_text: Some("exit code 1: boom".into()),
+            result_chars: 10,
+            call_fingerprint: None,
+        };
+        2
+    ];
+    let evidence = aggregate_evidence(&events);
+    let prompt = build_block_prompt(&chunk, &[], &evidence);
+    assert!(prompt.contains("repeated_failure:Bash:"));
+    assert!(prompt.contains("MUST 指出它回应"), "引用约束必须在 prompt");
+
+    let empty_prompt = build_block_prompt(&chunk, &[], &Default::default());
+    assert!(empty_prompt.contains("（近期无执行证据）"), "空证据兜底");
+
+    // 优先级渲染顺序
+    let bundle_with_both = crate::domain::evidence::EvidenceBundle {
+        signals: vec![
+            EvidenceSignal {
+                kind: SignalKind::RunOutcome,
+                signal_id: "run_outcome:aggregate".into(),
+                summary: "终态".into(),
+                excerpt: None,
+            },
+            EvidenceSignal {
+                kind: SignalKind::RepeatedFailure,
+                signal_id: "repeated_failure:Bash:x".into(),
+                summary: "失败".into(),
+                excerpt: None,
+            },
+        ],
+        sessions_covered: 1,
+    };
+    let both_prompt = build_block_prompt(&chunk, &[], &bundle_with_both);
+    let failure_pos = both_prompt.find("repeated_failure:Bash:x").unwrap();
+    let outcome_pos = both_prompt.find("run_outcome:aggregate").unwrap();
+    assert!(failure_pos < outcome_pos, "repeated_failure 渲染在前");
+}
+
+/// lesson 绑定：reason 引用 signal id 时绑定真实 kind。
+#[test]
+fn lesson_signal_kind_bound_from_reason_reference() {
+    assert_eq!(
+        crate::domain::improvement::signal_kind_from_reason(
+            "回应 repeated_failure:Bash:exit-##-code 的证据"
+        ),
+        crate::domain::evidence::SignalKind::RepeatedFailure
+    );
+    assert_eq!(
+        crate::domain::improvement::signal_kind_from_reason("回应 retry_pattern:Edit:f 的证据"),
+        crate::domain::evidence::SignalKind::RetryPattern
+    );
+    assert_eq!(
+        crate::domain::improvement::signal_kind_from_reason("组件是空壳占位"),
+        crate::domain::evidence::SignalKind::CycleObservation,
+        "无引用兜底模型自述"
+    );
 }
