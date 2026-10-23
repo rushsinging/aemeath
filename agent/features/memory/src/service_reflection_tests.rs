@@ -917,10 +917,11 @@ async fn capacity_gate_and_warning_count_ttl_expired_entries() {
     std::fs::remove_dir_all(&root).unwrap();
 }
 
-/// #2007：pinned 可被反思标 outdated——标记生效（停注入、outdated_marked 计数），
-/// 但归档跳过（D4：pinned 物理驻留 active），形成「可见的失效驻留」。
+/// #2007 智能清退：LLM 通过 outdated_memories 裁决 pinned 条目失效时，
+/// apply 自动 unpin → 标 outdated → 归档（用户无感知，事件流可追溯）；
+/// sweep 仍不清 pinned——清退只由 LLM 裁决驱动， NEVER 机械清理。
 #[tokio::test]
-async fn apply_reflection_marks_pinned_outdated_keeps_resident_and_stops_injection() {
+async fn apply_reflection_retires_pinned_outdated_by_unpin_and_archive() {
     let root = sweep_root("pinned-outdated");
     let store = sweep_store(&root);
     let mut pinned = entry(MemoryLayer::Project, "pinned delivery log");
@@ -943,10 +944,29 @@ async fn apply_reflection_marks_pinned_outdated_keeps_resident_and_stops_injecti
         "pinned 标记 MUST 计入 outdated_marked"
     );
 
-    let listed = service.list(Some(MemoryLayer::Project)).await;
-    assert_eq!(listed.len(), 1, "D4: pinned 条目 MUST 物理驻留 active");
-    assert!(listed[0].outdated, "驻留条目 MUST 已带 outdated 标记");
-    assert!(listed[0].pinned);
+    assert!(
+        service.list(Some(MemoryLayer::Project)).await.is_empty(),
+        "裁决清退后 pinned 条目 MUST 移出 active"
+    );
+    let archived_hits = service
+        .search(&MemorySearchQuery {
+            text: "pinned delivery".to_string(),
+            limit: 10,
+            layer: Some(MemoryLayer::Project),
+            category: None,
+            include_archive: true,
+            now: 200,
+            exclude_stale: false,
+            confirm_hits: false,
+        })
+        .await;
+    assert_eq!(archived_hits.hits.len(), 1, "被裁决条目 MUST 归档而非驻留");
+    let archived = &archived_hits.hits[0].entry;
+    assert!(archived.outdated, "归档条目 MUST 带 outdated 标记");
+    assert!(
+        !archived.pinned,
+        "裁决清退 MUST 先解除 pin（事件可追溯 unpin）"
+    );
 
     let recalled = service
         .search(&MemorySearchQuery {
@@ -1260,4 +1280,83 @@ async fn apply_reflection_reports_capacity_fields_for_convergence_tracking() {
 
     assert_eq!(result.active_after, Some(2), "应用后有效 active = 2");
     assert_eq!(result.capacity_target, Some(5), "容量目标随结果透出");
+}
+
+/// #2007 智能清退（工具路径）：MemoryUpdate mark_outdated 对 pinned 同样
+/// 解锁——裁决失效即解除 pin 保护，后续 sweep 可正常归档。
+#[tokio::test]
+async fn mark_outdated_unlocks_pinned_for_sweep() {
+    let root = sweep_root("mark-outdated-unpin");
+    let store = sweep_store(&root);
+    let mut pinned = entry(MemoryLayer::Project, "pinned stale fact");
+    pinned.pinned = true;
+    seed_layer(&store, MemoryLayer::Project, vec![pinned.clone()]).await;
+    let service =
+        MemoryService::open_with_clock(sweep_store(&root), MemoryPolicy::default(), || 200)
+            .await
+            .unwrap();
+
+    assert!(service.mark_outdated(&pinned.id).await.unwrap());
+    let listed = service.list(Some(MemoryLayer::Project)).await;
+    assert_eq!(listed.len(), 1);
+    assert!(listed[0].outdated);
+    assert!(!listed[0].pinned, "mark_outdated MUST 顺带解除 pin");
+
+    let permit = service.acquire_write_permit().await.unwrap();
+    let swept = service
+        .sweep_stale_under_permit(200, &permit)
+        .await
+        .unwrap();
+    drop(permit);
+    assert_eq!(swept, 1, "解锁后 sweep 可归档该失效条目");
+    drop(service);
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// #2007 收敛强化：超长（>500 字符）存量条目行内 MUST 带 [Overlong] 标注
+/// 供反思提纯；正常长度条目无标注。超长条目是写入端上限之前的遗留数据，
+/// 经 seed 直写 dataset 表达（MemoryEntry::new 会拒绝超长内容）。
+#[tokio::test]
+async fn build_prompt_marks_overlong_legacy_entries() {
+    let root = sweep_root("overlong-mark");
+    let store = sweep_store(&root);
+    let mut overlong = entry(MemoryLayer::Project, "占位");
+    overlong.content = format!("超长存量结论 {}", "细".repeat(520));
+    let normal = entry(MemoryLayer::Project, "normal length fact");
+    seed_layer(&store, MemoryLayer::Project, vec![overlong, normal.clone()]).await;
+    let service =
+        MemoryService::open_with_clock(sweep_store(&root), MemoryPolicy::default(), || 200)
+            .await
+            .unwrap();
+
+    let prompt = crate::application::ReflectionWorkflow::build_prompt(
+        &[share::message::Message::user("refine")],
+        "zh",
+        &service,
+        200,
+        150,
+        200,
+        0,
+    )
+    .await;
+    let marked_line = prompt
+        .text
+        .lines()
+        .find(|line| line.contains("[Overlong]") && line.contains("超长存量结论"))
+        .unwrap_or_else(|| panic!("超长条目行内 MUST 带 [Overlong] 标注: {}", prompt.text));
+    assert!(
+        marked_line.starts_with("- [M"),
+        "标注 MUST 落在条目行: {marked_line}"
+    );
+    let normal_line = prompt
+        .text
+        .lines()
+        .find(|line| line.contains("normal length fact"))
+        .expect("正常条目 MUST 出现在 prompt");
+    assert!(
+        !normal_line.contains("[Overlong]") && !normal_line.contains("[TTL expired]"),
+        "正常长度条目 MUST NOT 带信号标注: {normal_line}"
+    );
+    drop(service);
+    std::fs::remove_dir_all(&root).unwrap();
 }
