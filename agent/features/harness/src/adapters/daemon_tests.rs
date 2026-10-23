@@ -250,15 +250,28 @@ async fn trigger_runs_cycle_and_writes_component_file() {
         temp.path().join("library.jsonl"),
     ));
     let mut tasks = TaskRegistry::new();
+    // 流模型（#2049）：注入单块计划——周期对每块独立提案落盘
+    let stream = crate::domain::stream_port::FakeEvidenceStream {
+        plans: std::sync::Mutex::new(vec![crate::domain::stream::EvidenceBlockPlan {
+            sessions: vec![crate::domain::stream::SessionStreamEntry {
+                session_key: "s1.dataset".to_string(),
+                updated_at_secs: 1,
+            }],
+        }]),
+        advanced: std::sync::Mutex::new(Vec::new()),
+    };
     tasks
         .register(
             TaskKind::HarnessRsi,
-            Box::new(HarnessRsiCycleTask::new(
-                registry,
-                Arc::new(JsonLlm),
-                lesson_store,
-                share::config::RsiConfig::default(),
-            )),
+            Box::new(
+                HarnessRsiCycleTask::new(
+                    registry,
+                    Arc::new(JsonLlm),
+                    lesson_store,
+                    share::config::RsiConfig::default(),
+                )
+                .with_evidence_stream(Box::new(stream)),
+            ),
         )
         .expect("register");
 

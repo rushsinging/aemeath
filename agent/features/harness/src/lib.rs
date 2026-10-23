@@ -22,3 +22,8 @@ pub use domain::evidence::{
     aggregate_evidence, EvidenceBundle, EvidenceSignal, SessionEventRecord,
 };
 pub use domain::plugin::{PluginRule, PluginSeamEngine, SeamEffect, SeamOutcome};
+pub use domain::stream::{
+    load_cursor, plan_evidence_stream, save_cursor, EvidenceBlockPlan, EvidenceStreamCursor,
+    SessionStreamEntry, StreamPlanParams,
+};
+pub use domain::stream_port::EvidenceStreamPort;

@@ -549,6 +549,9 @@ fn harness_rsi_patch_merges_fields() {
                 enabled: Some(false),
                 interval_secs: Some(60),
                 chunk_max_components: Some(4),
+                evidence_initial_window_days: Some(7),
+                evidence_max_sessions_per_cycle: Some(10),
+                evidence_block_sessions: Some(3),
             }),
         }),
         ..Default::default()
@@ -559,4 +562,7 @@ fn harness_rsi_patch_merges_fields() {
     assert!(!merged.harness.rsi.enabled);
     assert_eq!(merged.harness.rsi.interval_secs, 60);
     assert_eq!(merged.harness.rsi.chunk_max_components, 4);
+    assert_eq!(merged.harness.rsi.evidence_initial_window_days, 7);
+    assert_eq!(merged.harness.rsi.evidence_max_sessions_per_cycle, 10);
+    assert_eq!(merged.harness.rsi.evidence_block_sessions, 3);
 }
