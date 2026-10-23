@@ -387,11 +387,16 @@ pub(crate) async fn send_tool_result<S>(
 ) where
     S: ChatEventSink,
 {
+    let (seam_text, _seam_outcomes) = materializer.apply_plugin_seam(
+        &execution.tool_name,
+        &execution.outcome.text,
+        execution.outcome.is_error,
+    );
     let (output, content) = materializer
         .materialize_display_result(
             session_id,
             &execution.provider_id,
-            &execution.outcome.text,
+            &seam_text,
             &execution.outcome.data,
         )
         .await;

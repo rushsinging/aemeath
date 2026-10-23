@@ -17,6 +17,9 @@ mod improvement_tests;
 pub mod lesson;
 #[cfg(test)]
 mod lesson_tests;
+pub mod plugin;
+#[cfg(test)]
+mod plugin_tests;
 pub mod task;
 #[cfg(test)]
 mod task_tests;

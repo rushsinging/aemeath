@@ -11,6 +11,9 @@ mod daemon_tests;
 pub mod filesystem;
 #[cfg(test)]
 mod filesystem_tests;
+pub mod plugins_registry;
+#[cfg(test)]
+mod plugins_registry_tests;
 pub mod scripts;
 pub mod scripts_registry;
 #[cfg(test)]

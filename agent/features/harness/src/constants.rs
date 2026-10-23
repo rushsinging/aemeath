@@ -21,3 +21,6 @@ pub const SCRIPT_MAX_BYTES: u64 = 64 * 1024;
 
 /// 单 SKILL.md body 大小上限（64 KiB，#2018）。
 pub const SKILL_MAX_BYTES: u64 = 64 * 1024;
+
+/// 单 plugin.md 大小上限（64 KiB，#2030）。
+pub const PLUGIN_MAX_BYTES: u64 = 64 * 1024;

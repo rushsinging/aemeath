@@ -150,6 +150,8 @@ pub struct ToolResultMaterializer {
     blobs: Arc<dyn ToolResultBlobPort>,
     policy: ToolResultMaterializationPolicyData,
     completed: Arc<Mutex<CompletedToolResultMaterializations>>,
+    /// plugin seam 引擎（c8，#2030）：run 边界重建（run 内版本固定）。
+    plugin_seam: Arc<std::sync::RwLock<harness::PluginSeamEngine>>,
 }
 
 impl ToolResultMaterializer {
@@ -158,6 +160,7 @@ impl ToolResultMaterializer {
         policy: ToolResultMaterializationPolicyData,
     ) -> Self {
         Self {
+            plugin_seam: Arc::new(std::sync::RwLock::new(harness::PluginSeamEngine::new())),
             blobs,
             policy,
             completed: Arc::new(Mutex::new(CompletedToolResultMaterializations::default())),
@@ -208,6 +211,53 @@ impl ToolResultMaterializer {
             materialized.push((tool_use_id, text, content, is_error, images));
         }
         Message::tool_results_rich(materialized)
+    }
+
+    /// 应用 plugin seam（c8）：工具结果进 provider 消息前的语义变换。
+    /// engine 为空时零开销直返。
+    pub fn apply_plugin_seam(
+        &self,
+        tool_name: &str,
+        text: &str,
+        is_error: bool,
+    ) -> (String, Vec<harness::SeamOutcome>) {
+        let seam = self.plugin_seam.read().expect("plugin seam engine lock");
+        if seam.is_empty() {
+            return (text.to_string(), Vec::new());
+        }
+        let (transformed, outcomes) = seam.apply(tool_name, text, is_error);
+        for outcome in &outcomes {
+            log::debug!(
+                target: crate::LOG_TARGET,
+                "plugin seam applied: plugin={} rule_index={} effect={:?}",
+                outcome.plugin_name,
+                outcome.rule_index,
+                outcome.applied
+            );
+        }
+        (transformed, outcomes)
+    }
+
+    /// run 边界重建 seam engine（从 plugins 目录声明重新装配；
+    /// run 内版本固定契约由调用时机保证——只在 run launch 执行）。
+    pub fn reload_plugin_seam_from_directory(&self, directory: &std::path::Path) {
+        let registry =
+            harness::adapters::plugins_registry::PluginsDirectoryRegistry::new(directory);
+        use harness::ComponentRegistry as _;
+        let mut engine = harness::PluginSeamEngine::new();
+        for id in registry.list() {
+            let Ok(content) = registry.read(&id) else {
+                log::warn!(target: crate::LOG_TARGET, "plugin 读取失败，跳过：{id}");
+                continue;
+            };
+            match harness::adapters::plugins_registry::parse_plugin_rules(&content.body) {
+                Ok(rules) => engine.register(id.name.as_str(), &rules),
+                Err(error) => {
+                    log::warn!(target: crate::LOG_TARGET, "plugin 规则解析失败，跳过 {id}：{error}")
+                }
+            }
+        }
+        *self.plugin_seam.write().expect("plugin seam engine lock") = engine;
     }
 
     pub async fn materialize(
