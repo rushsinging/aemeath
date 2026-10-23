@@ -1,3 +1,4 @@
+use share::ids::InteractionRequestId;
 use share::ids::SessionId;
 use std::collections::HashMap;
 
@@ -13,7 +14,7 @@ struct FakeContextPort;
 fn request() -> ContextRequestData {
     ContextRequestData {
         session_id: SessionId::new("session"),
-        request_id: ContextRequestId::new("request"),
+        request_id: InteractionRequestId::new("request"),
         run_id: sdk::RunId::new("run"),
         step_id: sdk::RunStepId::new("step"),
         pending_messages: vec![],
@@ -33,7 +34,7 @@ fn request() -> ContextRequestData {
 }
 
 #[async_trait]
-impl ContextPort for FakeContextPort {
+impl ContextWindowPort for FakeContextPort {
     async fn build_window(
         &self,
         request: &ContextRequestData,
@@ -47,7 +48,10 @@ impl ContextPort for FakeContextPort {
             compaction_decision: self.needs_compaction(request).await?,
         })
     }
+}
 
+#[async_trait]
+impl ContextCompactPort for FakeContextPort {
     async fn needs_compaction(
         &self,
         _request: &ContextRequestData,
@@ -81,7 +85,10 @@ impl ContextPort for FakeContextPort {
             quality: context::CompactSummaryQuality::LocalOnly,
         }))
     }
+}
 
+#[async_trait]
+impl ContextAppendPort for FakeContextPort {
     async fn clear_session(&self, _session_id: &SessionId) -> Result<(), ContextPortError> {
         Ok(())
     }
@@ -94,7 +101,7 @@ impl ContextPort for FakeContextPort {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(1),
-            fingerprint: append.fingerprint.clone(),
+            fingerprint: append.fingerprint().unwrap(),
         })
     }
 }

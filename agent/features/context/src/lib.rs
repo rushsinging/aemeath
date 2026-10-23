@@ -34,7 +34,7 @@ mod ports;
 #[cfg(test)]
 pub(crate) use adapters::wire_isolated_context_with_skill;
 pub use adapters::{wire_isolated_context, wire_isolated_context_with_workspace_skills};
-pub use adapters::{NoOpCanonicalSessionWriter, ProductionMainContextFactory};
+pub use adapters::{MainContextFactory, NoOpCanonicalSessionWriter};
 pub use domain::reminder::{
     render_invocation_reminder_body, CompactBehavior, InjectBehavior, RefreshTrigger,
     ReminderDedup, ReminderEventSource, ReminderKind, ReminderPlacement, ReminderPolicy,
@@ -77,8 +77,7 @@ pub(crate) use domain::session::{
 #[cfg(test)]
 pub(crate) use domain::ContextMessages;
 pub use domain::{
-    AcceptedInputAppendData, AcceptedInputError, ContextAppendData, ContextRequestId,
-    SessionRevision, Urgency,
+    AcceptedInputAppendData, AcceptedInputError, ContextAppendData, SessionRevision, Urgency,
 };
 pub use domain::{
     AppendReceiptData, BackgroundProcessCompletionStatus, BackgroundProcessReminderItemData,
@@ -93,13 +92,15 @@ pub use domain::{
     ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
     ToolTerminalReceiptData,
 };
+pub use ports::{
+    ContextAppendPort, ContextCompactPort, ContextPorts, ContextWindowPort, ReminderControlPort,
+};
 #[cfg(test)]
 pub(crate) use ports::{
     ContextMemorySource, ContextPromptSource, MemoryMaterialization, PromptMaterialization,
     PromptMaterializationError, SessionGeneration, SessionItem, SessionRepository,
     SessionSnapshotStore, SessionStoreError, SkillQueryFactory,
 };
-pub use ports::{ContextPort, MainContextFactory};
 
 pub mod api {
     pub use crate::domain::session::{DisplayHistoryStepIndexData, DisplayHistoryStepWindowData};
@@ -113,12 +114,13 @@ pub mod context_port {
         AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
         CompactOutcome, CompactRequestData, CompactResult, CompactSkipReason, CompactTrigger,
         CompactionDecisionData, ContentFingerprint, ContextAppendData, ContextAppendError,
-        ContextPortError, ContextRequestData, ContextRequestId, ContextWindowData, DecisionReason,
-        FinalizeCause, Language, ManualCompactRequestData, SessionRevision, StepReceiptData,
-        SystemBlock, SystemPromptSpecData, TokenBudget, ToolOutcomeKindData, ToolSchemaData,
-        Urgency,
+        ContextPortError, ContextRequestData, ContextWindowData, DecisionReason, FinalizeCause,
+        Language, ManualCompactRequestData, SessionRevision, StepReceiptData, SystemBlock,
+        SystemPromptSpecData, TokenBudget, ToolOutcomeKindData, Urgency,
     };
-    pub use crate::ports::ContextPort;
+    pub use crate::ports::{
+        ContextAppendPort, ContextCompactPort, ContextPorts, ContextWindowPort, ReminderControlPort,
+    };
 }
 
 pub mod compact {

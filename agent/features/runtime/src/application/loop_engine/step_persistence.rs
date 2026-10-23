@@ -28,7 +28,7 @@ pub(crate) struct StepPersistenceCoordinator {
 impl StepPersistenceCoordinator {
     pub(crate) fn from_context(runtime_context: &RuntimeContext) -> Self {
         Self {
-            context: ContextCoordinator::new(runtime_context.context()),
+            context: ContextCoordinator::new(runtime_context.context().clone()),
             usage: runtime_context.usage(),
         }
     }

@@ -98,7 +98,7 @@ pub async fn wire_test_session_switch(
     config_reader: std::sync::Arc<dyn ConfigReader>,
     config_participant: std::sync::Arc<dyn ProjectConfigParticipant>,
     session_management: std::sync::Arc<dyn SessionManagementPort>,
-    context_factory: std::sync::Arc<dyn MainContextFactory>,
+    context_factory: std::sync::Arc<MainContextFactory>,
 ) -> std::sync::Arc<SessionSwitchCoordinator> {
     wire_session_switch_coordinator(SessionSwitchDependencies {
         workspace: workspace.clone(),

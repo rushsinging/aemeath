@@ -155,13 +155,15 @@ fn resumed_shell(
             initial_session: shell.session_switch.committed_session().as_ref().clone(),
             initial_memory: shell.session_switch.committed_memory(),
             context_factory: Arc::new(
-                context::ProductionMainContextFactory::new(Arc::new(
-                    context::NoOpCanonicalSessionWriter,
-                ))
-                .with_persistence(
-                    std::sync::Arc::new(task::TaskStore::new()),
-                    workspace.persist(),
-                ),
+                context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
+                    .with_persistence(
+                        std::sync::Arc::new(task::TaskStore::new()),
+                        workspace.persist(),
+                    )
+                    .with_persistence(
+                        std::sync::Arc::new(task::TaskStore::new()),
+                        workspace.persist(),
+                    ),
             ),
         },
     ));

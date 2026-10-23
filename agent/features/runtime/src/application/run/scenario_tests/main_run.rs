@@ -56,8 +56,8 @@ async fn main_run_uses_single_factory_launcher_and_loop() {
     assert!(matches!(result, RunLaunchResult::Terminal));
     assert_eq!(instance.run().status(), RunStatus::Completed);
     assert!(Arc::ptr_eq(
-        &instance.context().context(),
-        &committed_context
+        &instance.context().context().window,
+        &committed_context.window
     ));
     assert!(harness.saw_input_and_model());
     assert_eq!(harness.terminal_event_count(), 1);

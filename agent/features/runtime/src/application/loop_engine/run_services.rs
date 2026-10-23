@@ -121,6 +121,7 @@ where
         self.context_request
             .runtime_context
             .context()
+            .reminders
             .reminder_step_advanced(&self.run_id, step_ordinal as u64);
         // per-message 记忆召回（#1834）：开关开启时先预物化（评分 await），
         // 再触发 pipeline 的 OnUserMessage 重建——保证注入的是当轮快照。
@@ -148,6 +149,7 @@ where
             self.context_request
                 .runtime_context
                 .context()
+                .reminders
                 .reminder_user_message_received(&self.run_id);
         }
         StepPersistenceCoordinator::from_context(self.context_request.runtime_context)

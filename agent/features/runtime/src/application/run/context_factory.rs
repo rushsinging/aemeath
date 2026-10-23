@@ -70,7 +70,7 @@ struct ProviderSelection {
 }
 
 struct ContextSelection {
-    port: Arc<dyn crate::ports::ContextPort>,
+    ports: context::ContextPorts,
 }
 
 struct MemorySelection {
@@ -244,23 +244,25 @@ impl RuntimeContextFactory {
         let context = self.select_context(request, bindings, &session, &workspace)?;
         let memory = self.select_memory(bindings)?;
         let tool_catalog = self.select_tool_catalog(request, bindings, derived_agent.as_ref())?;
-        let parent = bindings.parent().map(|parent| parent.context().clone());
+        let parent: Option<RuntimeContext> = bindings
+            .parent()
+            .map(|parent| (*parent.context().clone()).clone());
         let interaction =
-            self.select_interaction_port(request.spec(), bindings, parent.as_deref())?;
+            self.select_interaction_port(request.spec(), bindings, parent.as_ref())?;
         let run_config = crate::application::run::config::RunConfigSnapshot::capture(
             session.snapshot.config().clone(),
         );
-        let hook = self.select_hook_port(request.spec(), &run_config, parent.as_deref())?;
-        let reasoning = self.select_reasoning_port(bindings, parent.as_deref())?;
+        let hook = self.select_hook_port(request.spec(), &run_config, parent.as_ref())?;
+        let reasoning = self.select_reasoning_port(bindings, parent.as_ref())?;
         let event_route = self.select_event_route(bindings)?;
         let activity_publisher = Arc::new(event_route.sink.clone());
-        let lifecycle = self.select_lifecycle(request, bindings, parent.as_deref())?;
-        let skill_load = self.select_skill_load(&context, parent.as_deref(), &session);
+        let lifecycle = self.select_lifecycle(request, bindings, parent.as_ref())?;
+        let skill_load = self.select_skill_load(&context, parent.as_ref(), &session);
         // Run 根 Activity 目的由 spec intent 决定（Manual Reflection Run 投影 Reflection）。
         let run_purpose = crate::application::activity::RunPurpose::from(request.spec().intent());
         let bindings = RunCapabilityBindings {
             model: crate::application::run::context::ModelBindings {
-                context: context.port,
+                context: context.ports,
                 provider: provider.binding,
                 interaction: interaction.port,
                 memory: memory.port,
@@ -473,7 +475,7 @@ impl RuntimeContextFactory {
     ) -> Result<ContextSelection, RunCreationError> {
         if let Some(bindings) = bindings.session() {
             return Ok(ContextSelection {
-                port: bindings.session_switch().committed_context(),
+                ports: bindings.session_switch().committed_context().clone(),
             });
         }
         let workspace = workspace
@@ -486,7 +488,7 @@ impl RuntimeContextFactory {
             .ok_or(RunCreationError::ContextAssembly)?
             .clone();
         Ok(ContextSelection {
-            port: context::wire_isolated_context_with_workspace_skills(
+            ports: context::wire_isolated_context_with_workspace_skills(
                 session.snapshot.session_id(),
                 skill_catalog,
                 workspace.views().read(),
@@ -646,7 +648,7 @@ impl RuntimeContextFactory {
             None => SkillLoadSelection {
                 state: Arc::new(
                     crate::application::context::skill_load_state::ContextSkillLoadState::new(
-                        context.port.clone(),
+                        context.ports.append.clone(),
                     ),
                 ),
                 session_id: session.snapshot.session_id().to_string(),

@@ -7,7 +7,6 @@
 use std::sync::Arc;
 
 use context::session::CanonicalSession;
-use context::ContextPort;
 use memory::api::MemoryPort;
 use share::config::domain::snapshot::ConfigSnapshot;
 
@@ -17,7 +16,7 @@ pub struct BoundMainRun {
     /// 持有期内阻塞 resume（exclusive）；release 解锁，不可读取。
     permit: OwnedSessionSharedPermit,
     session: Arc<CanonicalSession>,
-    context: Arc<dyn ContextPort>,
+    context: context::ContextPorts,
     memory: Arc<dyn MemoryPort>,
     config: ConfigSnapshot,
 }
@@ -26,7 +25,7 @@ impl BoundMainRun {
     pub(super) fn new(
         permit: OwnedSessionSharedPermit,
         session: Arc<CanonicalSession>,
-        context: Arc<dyn ContextPort>,
+        context: context::ContextPorts,
         memory: Arc<dyn MemoryPort>,
         config: ConfigSnapshot,
     ) -> Self {
@@ -59,8 +58,8 @@ impl BoundMainRun {
         Arc::clone(&self.session)
     }
 
-    pub fn context(&self) -> Arc<dyn ContextPort> {
-        Arc::clone(&self.context)
+    pub fn context(&self) -> &context::ContextPorts {
+        &self.context
     }
 
     pub fn memory(&self) -> &dyn MemoryPort {

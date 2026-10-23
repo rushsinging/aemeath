@@ -243,10 +243,8 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         memory_opener,
         session_management: session_management.clone(),
         context_factory: Arc::new(
-            context::ProductionMainContextFactory::new(Arc::new(
-                context::NoOpCanonicalSessionWriter,
-            ))
-            .with_persistence(task.persist(), workspace.persist()),
+            context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
+                .with_persistence(task.persist(), workspace.persist()),
         ),
     })
     .await

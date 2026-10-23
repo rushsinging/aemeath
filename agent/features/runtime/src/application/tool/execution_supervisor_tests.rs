@@ -74,8 +74,10 @@ struct RecordingContextPort {
     states: Arc<Mutex<Vec<String>>>,
 }
 
+impl context::ReminderControlPort for RecordingContextPort {}
+
 #[async_trait]
-impl context::ContextPort for RecordingContextPort {
+impl context::ContextWindowPort for RecordingContextPort {
     async fn build_window(
         &self,
         _request: &ContextRequestData,
@@ -84,6 +86,10 @@ impl context::ContextPort for RecordingContextPort {
             "test port 不支持 build_window".into(),
         ))
     }
+}
+
+#[async_trait]
+impl context::ContextCompactPort for RecordingContextPort {
     async fn needs_compaction(
         &self,
         _request: &ContextRequestData,
@@ -108,6 +114,10 @@ impl context::ContextPort for RecordingContextPort {
             "test port 不支持 manual_compact".into(),
         ))
     }
+}
+
+#[async_trait]
+impl context::ContextAppendPort for RecordingContextPort {
     async fn clear_session(
         &self,
         _session_id: &share::ids::SessionId,
@@ -192,7 +202,7 @@ fn supervisor_with(sleep: Duration) -> (ToolExecutionSupervisor, Arc<Mutex<Vec<S
     let supervisor = ToolExecutionSupervisor::new(
         Arc::new(SleepingToolPort { sleep }),
         sequential_test_tool_catalog("SleepTool", 300),
-        ContextCoordinator::new(Arc::new(port)),
+        ContextCoordinator::new(context::ContextPorts::from_service(Arc::new(port))),
     );
     (supervisor, states)
 }

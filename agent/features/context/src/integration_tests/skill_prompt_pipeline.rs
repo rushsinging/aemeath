@@ -1,6 +1,6 @@
 //! Skill metadata directory contract (Issue #1438).
 
-use share::ids::{RunStepId, SessionId};
+use share::ids::{InteractionRequestId, RunStepId, SessionId};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -52,7 +52,7 @@ fn base_request() -> ContextRequestData {
     use crate::*;
     ContextRequestData {
         session_id: SessionId::new("session"),
-        request_id: ContextRequestId::new("request"),
+        request_id: InteractionRequestId::new("request"),
         run_id: sdk::RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![],

@@ -19,12 +19,12 @@ use crate::{
 
 fn finalized(messages: Vec<Message>) -> FinalizedOutcomeRecord {
     FinalizedOutcomeRecord {
+        fingerprint: "structured-test".to_string(),
         finalize_cause: FinalizeCause::Completed,
         duration_ms: None,
         messages: messages.into(),
         receipts: Vec::new(),
         api_input_tokens: None,
-        fingerprint: "fixture".into(),
         committed_revision: 1,
     }
 }

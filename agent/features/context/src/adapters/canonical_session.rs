@@ -14,7 +14,7 @@ use crate::domain::{
     ContextPortError, ManualCompactRequestData, SessionRevision, ToolReceiptMutationData,
     ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
-use crate::ports::{ContextPort, MainContextFactory, SessionItem, SessionRepository};
+use crate::ports::{ContextPorts, SessionItem, SessionRepository};
 
 #[async_trait]
 pub trait CanonicalSessionWriter: Send + Sync {
@@ -252,7 +252,7 @@ impl CanonicalSessionWriter for NoOpCanonicalSessionWriter {
     }
 }
 
-pub struct ProductionMainContextFactory {
+pub struct MainContextFactory {
     writer: Arc<dyn CanonicalSessionWriter>,
     task_persist: Option<Arc<dyn task::TaskPersist>>,
     workspace_persist: Option<Arc<dyn project::WorkspaceWriter>>,
@@ -265,7 +265,7 @@ pub struct ProductionMainContextFactory {
     generator: Option<Arc<dyn CompactGenerator>>,
 }
 
-impl ProductionMainContextFactory {
+impl MainContextFactory {
     pub fn new(writer: Arc<dyn CanonicalSessionWriter>) -> Self {
         Self {
             task_persist: None,
@@ -317,13 +317,14 @@ impl ProductionMainContextFactory {
     }
 }
 
-impl MainContextFactory for ProductionMainContextFactory {
-    fn build(
+impl MainContextFactory {
+    /// 构建 per-session 活状态的 ContextPorts 聚合。
+    pub fn build(
         &self,
         session: Arc<RwLock<Arc<CanonicalSession>>>,
         memory: Arc<RwLock<Arc<dyn memory::api::MemoryPort>>>,
         mutation_gate: Arc<tokio::sync::Mutex<()>>,
-    ) -> Arc<dyn ContextPort> {
+    ) -> ContextPorts {
         let task_persist = self
             .task_persist
             .clone()
@@ -354,10 +355,12 @@ impl MainContextFactory for ProductionMainContextFactory {
             repository = repository.with_generator(Arc::clone(generator));
         }
         repository = repository.with_tool_receipt_writer(Arc::clone(&self.tool_receipt_writer));
-        Arc::new(crate::application::ContextApplicationService::new(
-            Arc::new(repository),
-            prompt,
-            Arc::new(crate::adapters::CommittedMemoryRetrieveAdapter::new(memory)),
+        ContextPorts::from_service(Arc::new(
+            crate::application::ContextApplicationService::new(
+                Arc::new(repository),
+                prompt,
+                Arc::new(crate::adapters::CommittedMemoryRetrieveAdapter::new(memory)),
+            ),
         ))
     }
 }
@@ -807,24 +810,29 @@ impl CanonicalSessionRepository {
         ))
     }
 
-    fn receipt(append: &ContextAppendData, revision: SessionRevision) -> AppendReceiptData {
+    fn receipt(
+        append: &ContextAppendData,
+        fingerprint: &crate::domain::ContentFingerprint,
+        revision: SessionRevision,
+    ) -> AppendReceiptData {
         AppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: revision,
-            fingerprint: append.fingerprint.clone(),
+            fingerprint: fingerprint.clone(),
         }
     }
 
     fn accepted_receipt(
         append: &AcceptedInputAppendData,
+        fingerprint: &crate::domain::ContentFingerprint,
         revision: SessionRevision,
     ) -> AcceptedInputReceiptData {
         AcceptedInputReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: revision,
-            fingerprint: append.fingerprint.clone(),
+            fingerprint: fingerprint.clone(),
         }
     }
 
@@ -933,11 +941,13 @@ impl SessionRepository for CanonicalSessionRepository {
                 append.session_id.clone(),
             ));
         }
+        let fingerprint = append.fingerprint()?;
         if let Some(input) = current.accepted_input(append.run_id.as_ref(), append.step_id.as_str())
         {
-            if input.fingerprint == append.fingerprint.as_str() {
+            if input.fingerprint == fingerprint.as_str() {
                 return Ok(Self::accepted_receipt(
                     append,
+                    &fingerprint,
                     SessionRevision::new(input.committed_revision),
                 ));
             }
@@ -955,7 +965,7 @@ impl SessionRepository for CanonicalSessionRepository {
             append.step_id.as_str(),
             AcceptedInputRecord::new(
                 append.messages.clone(),
-                append.fingerprint.as_str(),
+                fingerprint.as_str(),
                 candidate.revision,
             ),
         );
@@ -976,7 +986,7 @@ impl SessionRepository for CanonicalSessionRepository {
         let revision = SessionRevision::new(candidate.revision);
         self.publish_generation(&current, candidate)
             .map_err(AcceptedInputError::Storage)?;
-        Ok(Self::accepted_receipt(append, revision))
+        Ok(Self::accepted_receipt(append, &fingerprint, revision))
     }
 
     async fn advance_tool_receipt(
@@ -1109,11 +1119,12 @@ impl SessionRepository for CanonicalSessionRepository {
                 append.session_id.clone(),
             ));
         }
+        let fingerprint = append.fingerprint()?;
         if let Some(committed) = current
             .committed_steps
             .find(append.run_id.as_ref(), append.step_id.as_str())
         {
-            if committed.fingerprint == append.fingerprint.as_str() {
+            if committed.fingerprint == fingerprint.as_str() {
                 let revision = SessionRevision::new(committed.committed_revision);
                 self.acknowledge_finalized_input_ledger(
                     &current.id,
@@ -1121,7 +1132,7 @@ impl SessionRepository for CanonicalSessionRepository {
                     append.step_id.as_str(),
                 )
                 .await;
-                return Ok(Self::receipt(append, revision));
+                return Ok(Self::receipt(append, &fingerprint, revision));
             }
             return Err(ContextAppendError::ContentConflict {
                 run_id: append.run_id.clone(),
@@ -1168,14 +1179,14 @@ impl SessionRepository for CanonicalSessionRepository {
                 messages: append.messages.clone().into(),
                 receipts: append.receipts.clone(),
                 api_input_tokens: append.api_input_tokens,
-                fingerprint: append.fingerprint.as_str().to_string(),
+                fingerprint: fingerprint.as_str().to_string(),
                 committed_revision: candidate.revision,
             },
         );
         candidate.committed_steps = candidate.committed_steps.append(CommittedStep {
             run_id: append.run_id.to_string(),
             step_id: append.step_id.as_str().to_string(),
-            fingerprint: append.fingerprint.as_str().to_string(),
+            fingerprint: fingerprint.as_str().to_string(),
             committed_revision: candidate.revision,
         });
 
@@ -1191,7 +1202,7 @@ impl SessionRepository for CanonicalSessionRepository {
             append.step_id.as_str(),
         )
         .await;
-        Ok(Self::receipt(&append, revision))
+        Ok(Self::receipt(&append, &fingerprint, revision))
     }
 
     async fn commit_compaction(

@@ -483,7 +483,7 @@ where
                             }
                         };
                         let session_id = crate::ports::SessionId::new(bound.session().id.clone());
-                        let coordinator = crate::application::context::coordination::ContextCoordinator::new(bound.context());
+                        let coordinator = crate::application::context::coordination::ContextCoordinator::new(bound.context().clone());
                         match coordinator.clear_session(&session_id).await {
                             Ok(()) => {
                                 messages.clear();
@@ -825,16 +825,16 @@ where
                     }
                 }
                 let reminder_context_port = runtime_context.context();
-                reminder_context_port.create_reminder_pipeline(
+                reminder_context_port.reminders.create_reminder_pipeline(
                     run_id.clone(),
                     std::mem::take(&mut reminder_sources),
                 );
-                reminder_context_port.reminder_run_started(&run_id);
+                reminder_context_port.reminders.reminder_run_started(&run_id);
                 // Wakeup Run（#252 D11）：本 Run 无用户消息、无 handle_event
                 // 触发点——启动时显式触发 background_process 事件，把监督器内
                 // 「终态未通知」事实经 OnEvent source build（take）进注入队列。
                 if background_wakeup_run {
-                    reminder_context_port.reminder_handle_event(
+                    reminder_context_port.reminders.reminder_handle_event(
                         &run_id,
                         &context::ReminderEventSource::background_process(),
                     );
@@ -1079,7 +1079,7 @@ where
                 //（07-reminder-pipeline.md）。
                 runtime_context
                     .context()
-                    .drop_reminder_pipeline(&run_id);
+                    .reminders.drop_reminder_pipeline(&run_id);
                 // Run 收口滞留检测（#252 注入确认制兜底）：reminder 管线
                 // 销毁后监督器若仍有未确认完成事实，补发 wakeup 信号立即
                 // 补注入（否则需等下一个任务完成 / 用户输入捎带）。

@@ -182,11 +182,16 @@ pub fn autocompact_threshold(context_size: usize, max_output_tokens: usize, rati
 /// Estimate the token overhead of tool schemas.
 /// Tool schemas are JSON objects sent with every API call.
 /// This is a significant fixed cost that must be accounted for.
-pub fn estimate_tool_schemas_tokens(tool_schemas: &[serde_json::Value]) -> usize {
+pub fn estimate_tool_schemas_tokens(tool_schemas: &[tools::ToolDefinition]) -> usize {
     tool_schemas
         .iter()
-        .map(|schema| estimate_json_tokens(&schema.to_string()))
+        .map(|schema| estimate_json_tokens(&schema_json(schema)))
         .sum()
+}
+
+/// 工具定义的估算用 JSON 形态（序列化仅发生在估算内部）。
+fn schema_json(schema: &tools::ToolDefinition) -> String {
+    serde_json::to_string(schema).unwrap_or_default()
 }
 
 #[cfg(test)]

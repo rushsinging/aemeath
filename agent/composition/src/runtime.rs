@@ -318,7 +318,7 @@ pub(crate) async fn from_args_with_gateways(
         ),
         session_management: session_management.clone(),
         context_factory: Arc::new(
-            context::ProductionMainContextFactory::new(Arc::new(
+            context::MainContextFactory::new(Arc::new(
                 context::DatasetCanonicalSessionWriter::new(session_dataset),
             ))
             .with_accepted_input_writer(Arc::new(context::AtomicBlobAcceptedInputWriter::new(

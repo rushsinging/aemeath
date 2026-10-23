@@ -13,7 +13,7 @@ use crate::application::run::run_factory_support::{
     doubles::{FakeContextPort, RecordingEventSink},
     SessionRunFixture,
 };
-use crate::ports::ContextPort;
+use crate::ports::ContextPorts;
 use tools::ToolProfileName;
 
 fn make_run_instance() -> RunInstance {
@@ -33,7 +33,7 @@ fn runtime_context_production_model_has_no_flat_run_context_bindings() {
 
 #[test]
 fn main_runtime_context_preserves_injected_port_identity() {
-    let context_port: Arc<dyn ContextPort> = Arc::new(FakeContextPort);
+    let context_port: ContextPorts = ContextPorts::from_service(Arc::new(FakeContextPort));
     let fixture = SessionRunFixture::builder()
         .with_context_port(context_port)
         .build();
@@ -42,7 +42,10 @@ fn main_runtime_context_preserves_injected_port_identity() {
         .expect("production RunFactory should create test run");
     let context = instance.context();
 
-    assert!(Arc::ptr_eq(&context.context(), fixture.committed_context()));
+    assert!(Arc::ptr_eq(
+        &context.context().window,
+        &fixture.committed_context().window
+    ));
     assert!(Arc::ptr_eq(&context.provider(), fixture.provider()));
     assert!(Arc::ptr_eq(&context.tool_catalog(), fixture.tool_catalog()));
     assert!(Arc::ptr_eq(
@@ -60,8 +63,10 @@ fn main_runtime_context_preserves_injected_port_identity() {
 
 #[test]
 fn runtime_context_cancel_scope_is_per_run() {
-    let ctx1 = make_run_instance().context().clone();
-    let ctx2 = make_run_instance().context().clone();
+    let inst1 = make_run_instance();
+    let inst2 = make_run_instance();
+    let ctx1 = inst1.context();
+    let ctx2 = inst2.context();
 
     assert!(!ctx1.cancel().token().is_cancelled());
     assert!(!ctx2.cancel().token().is_cancelled());
@@ -89,7 +94,8 @@ fn child_cancel_does_not_propagate_to_parent() {
 
 #[test]
 fn runtime_context_has_all_required_accessors() {
-    let ctx = make_run_instance().context().clone();
+    let inst = make_run_instance();
+    let ctx = inst.context();
 
     let _context = ctx.context();
     let _provider = ctx.provider();
@@ -108,7 +114,8 @@ fn runtime_context_has_all_required_accessors() {
 
 #[test]
 fn runtime_context_config_accessor_returns_snapshot() {
-    let ctx = make_run_instance().context().clone();
+    let inst = make_run_instance();
+    let ctx = inst.context();
     let cfg = ctx.config();
     let _revision = cfg.revision();
     let _allow_all = cfg.allow_all();
@@ -124,7 +131,8 @@ fn runtime_context_config_accessor_returns_snapshot() {
 /// results from their injected implementations.
 #[test]
 fn runtime_context_ports_are_functional_not_just_identity() {
-    let ctx = make_run_instance().context().clone();
+    let inst = make_run_instance();
+    let ctx = inst.context();
 
     // Tool catalog: snapshot() returns a valid catalog.
     let catalog = ctx
@@ -175,7 +183,7 @@ fn parent_run_context_source_preserves_run_identity() {
     let frame = Arc::new(ParentRunFrame {
         run_id: run_id.clone(),
         spec: crate::domain::agent_run::RunSpec::main(),
-        context: Arc::new(make_run_instance().context().clone()),
+        context: std::sync::Arc::new(make_run_instance().context().clone()),
     });
     let _guard = source.install(frame);
 
@@ -194,7 +202,7 @@ fn parent_run_context_source_install_recovers_from_poison() {
     let frame = Arc::new(ParentRunFrame {
         run_id: crate::domain::agent_run::RunId::new_v7(),
         spec: crate::domain::agent_run::RunSpec::main(),
-        context: Arc::new(make_run_instance().context().clone()),
+        context: std::sync::Arc::new(make_run_instance().context().clone()),
     });
     let _guard = source.install(frame);
     // If we got here without panicking, poison recovery works.
@@ -210,7 +218,7 @@ fn parent_run_context_source_get_recovers_from_poison() {
     let frame = Arc::new(ParentRunFrame {
         run_id: crate::domain::agent_run::RunId::new_v7(),
         spec: crate::domain::agent_run::RunSpec::main(),
-        context: Arc::new(make_run_instance().context().clone()),
+        context: std::sync::Arc::new(make_run_instance().context().clone()),
     });
     let _guard = source.install(frame);
 
@@ -236,7 +244,7 @@ fn parent_run_frame_guard_drop_does_not_double_panic_on_poison() {
     let frame = Arc::new(ParentRunFrame {
         run_id: crate::domain::agent_run::RunId::new_v7(),
         spec: crate::domain::agent_run::RunSpec::main(),
-        context: Arc::new(make_run_instance().context().clone()),
+        context: std::sync::Arc::new(make_run_instance().context().clone()),
     });
     let guard = source.install(frame);
 
@@ -261,7 +269,7 @@ fn parent_run_context_source_install_works_after_poison_recovery() {
     let frame = Arc::new(ParentRunFrame {
         run_id: crate::domain::agent_run::RunId::new_v7(),
         spec: crate::domain::agent_run::RunSpec::main(),
-        context: Arc::new(make_run_instance().context().clone()),
+        context: std::sync::Arc::new(make_run_instance().context().clone()),
     });
     let guard = source.install(frame);
 
@@ -348,7 +356,8 @@ fn run_cancellation_scope_clone_shares_state() {
 /// context sees the same token as the original.
 #[test]
 fn runtime_context_clone_shares_cancellation() {
-    let ctx_a = make_run_instance().context().clone();
+    let inst_a = make_run_instance();
+    let ctx_a = inst_a.context();
     let ctx_b = ctx_a.clone();
 
     ctx_a.cancel().token().cancel();
@@ -606,7 +615,7 @@ fn runtime_context_input_accessor_preserves_identity() {
 #[test]
 fn runtime_context_clone_shares_io_seams() {
     let (instance, _event_sink, usage, input) = make_instance_with_io_seams();
-    let context = instance.context().clone();
+    let context = instance.context();
     let clone = context.clone();
 
     usage.update(777);

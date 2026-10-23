@@ -16,12 +16,10 @@
 
 use std::sync::Arc;
 
-use context::context_port::ContextPort;
 use context::SessionManagementPort;
-use context::{
-    ContentFingerprint, ContextAppendData, ContextRequestId, FinalizeCause, SessionRevision,
-};
+use context::{ContextAppendData, FinalizeCause, SessionRevision};
 use sdk::{ChatBootstrapArgs, RunId};
+use share::ids::InteractionRequestId;
 use share::ids::{RunStepId, SessionId};
 use share::message::Message;
 use std::path::Path;
@@ -206,10 +204,8 @@ async fn production_wiring_uses_real_filesystem_backed_memory() {
         memory_opener,
         session_management: session_management.clone(),
         context_factory: Arc::new(
-            context::ProductionMainContextFactory::new(Arc::new(
-                context::NoOpCanonicalSessionWriter,
-            ))
-            .with_persistence(task_wiring.persist(), workspace.persist()),
+            context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
+                .with_persistence(task_wiring.persist(), workspace.persist()),
         ),
     };
 
@@ -286,7 +282,7 @@ async fn production_context_append_reopens_from_atomic_blob() {
         memory_opener,
         session_management: session_management.clone(),
         context_factory: Arc::new(
-            context::ProductionMainContextFactory::new(writer)
+            context::MainContextFactory::new(writer)
                 .with_persistence(task_wiring.persist(), workspace_persist),
         ),
     })
@@ -294,7 +290,7 @@ async fn production_context_append_reopens_from_atomic_blob() {
     .expect("wire main session");
 
     let bound = wiring.bind_run().await.expect("bind run");
-    let context: Arc<dyn ContextPort> = bound.context();
+    let context = bound.context().clone();
     let session_id = bound.session().id.clone();
     drop(bound);
     let append = ContextAppendData {
@@ -302,15 +298,15 @@ async fn production_context_append_reopens_from_atomic_blob() {
         expected_revision: SessionRevision::new(0),
         run_id: RunId::new("production-run"),
         step_id: RunStepId::new("production-step"),
-        source_request_id: ContextRequestId::new("production-request"),
+        source_request_id: InteractionRequestId::new("production-request"),
         finalize_cause: FinalizeCause::Completed,
         duration_ms: None,
         messages: vec![Message::user("production durable fact")],
         receipts: vec![],
         api_input_tokens: Some(34),
-        fingerprint: ContentFingerprint::new("production-fingerprint"),
     };
     context
+        .append
         .append_and_persist(&append)
         .await
         .expect("persist production append");
@@ -324,9 +320,10 @@ async fn production_context_append_reopens_from_atomic_blob() {
     assert_eq!(reopened["id"], session_id);
     assert_eq!(reopened["revision"], 1);
     assert_eq!(reopened["committed_steps"].as_array().unwrap().len(), 1);
+    // 指纹由内容推导（#1863 内化 context），落盘值应与载荷计算值一致。
     assert_eq!(
         reopened["committed_steps"][0]["fingerprint"],
-        "production-fingerprint"
+        serde_json::Value::String(append.fingerprint().unwrap().as_str().to_string())
     );
     let slices = reopened["run_slices"]
         .as_array()
@@ -339,7 +336,10 @@ async fn production_context_append_reopens_from_atomic_blob() {
     assert_eq!(outcome["messages"].as_array().unwrap().len(), 1);
     assert_eq!(outcome["messages"][0]["role"], "user");
     assert_eq!(outcome["api_input_tokens"], 34);
-    assert_eq!(outcome["fingerprint"], "production-fingerprint");
+    assert_eq!(
+        outcome["fingerprint"],
+        serde_json::Value::String(append.fingerprint().unwrap().as_str().to_string())
+    );
     assert_eq!(outcome["committed_revision"], 1);
 }
 
@@ -402,10 +402,8 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         memory_opener,
         session_management: session_management.clone(),
         context_factory: Arc::new(
-            context::ProductionMainContextFactory::new(Arc::new(
-                context::NoOpCanonicalSessionWriter,
-            ))
-            .with_persistence(task_wiring.persist(), workspace.persist()),
+            context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
+                .with_persistence(task_wiring.persist(), workspace.persist()),
         ),
     };
     let wiring = runtime::wire_session_switch_coordinator(deps)
@@ -590,10 +588,8 @@ async fn config_query_and_writer_are_gate_aware_from_wiring() {
         memory_opener,
         session_management: session_management.clone(),
         context_factory: Arc::new(
-            context::ProductionMainContextFactory::new(Arc::new(
-                context::NoOpCanonicalSessionWriter,
-            ))
-            .with_persistence(task_wiring.persist(), workspace.persist()),
+            context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
+                .with_persistence(task_wiring.persist(), workspace.persist()),
         ),
     };
     let wiring = runtime::wire_session_switch_coordinator(deps)

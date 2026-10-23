@@ -102,10 +102,8 @@ impl TestEnv {
             memory_opener,
             session_management: Arc::clone(&session_management) as Arc<dyn SessionManagementPort>,
             context_factory: Arc::new(
-                context::ProductionMainContextFactory::new(Arc::new(
-                    context::NoOpCanonicalSessionWriter,
-                ))
-                .with_persistence(task_wiring.persist(), workspace.persist()),
+                context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
+                    .with_persistence(task_wiring.persist(), workspace.persist()),
             ),
         };
         Self {

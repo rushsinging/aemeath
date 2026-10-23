@@ -1,4 +1,4 @@
-//! ContextPort — Context Management 对 Runtime 发布的类型化 OHS。
+//! Context 语义端口族（Window / Compact / Append / ReminderControl）——对 Runtime 的类型化 OHS。
 
 use std::sync::Arc;
 
@@ -12,12 +12,18 @@ pub use crate::domain::*;
 /// Runtime 每个 RunStep 开始时构建 window；需要时执行 compact；普通完成、
 /// CancelRunStep 或 TerminateRun 经 StepFinalizer 收口后提交唯一 ContextAppendData。
 #[async_trait]
-pub trait ContextPort: Send + Sync {
+/// Window 构建端口：组装本轮上下文（注入内容 + 预算分配）。
+#[async_trait]
+pub trait ContextWindowPort: Send + Sync {
     async fn build_window(
         &self,
         request: &ContextRequestData,
     ) -> Result<ContextWindowData, ContextPortError>;
+}
 
+/// 压缩端口：L1–L5 压缩决策与执行。
+#[async_trait]
+pub trait ContextCompactPort: Send + Sync {
     async fn needs_compaction(
         &self,
         request: &ContextRequestData,
@@ -32,7 +38,11 @@ pub trait ContextPort: Send + Sync {
         &self,
         request: &ManualCompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError>;
+}
 
+/// 回写端口：历史 append、回执推进与查询。
+#[async_trait]
+pub trait ContextAppendPort: Send + Sync {
     async fn clear_session(&self, session_id: &SessionId) -> Result<(), ContextPortError>;
 
     async fn append_accepted_input(
@@ -80,14 +90,12 @@ pub trait ContextPort: Send + Sync {
         &self,
         append: &ContextAppendData,
     ) -> Result<AppendReceiptData, ContextAppendError>;
+}
 
-    // ─── Reminder 统一管线控制面（07-reminder-pipeline.md）────────────
-    //
-    // Run 生命周期句柄与 typed 事件推送。默认 no-op：测试替身与不接入
-    // reminder 管线的 ContextPort 实现保持兼容；生产实现由
-    // ContextApplicationService 提供。注入决策在 build_window 内部
-    // 按 policy 自动完成，Runtime 不感知 placement / dedup / 预算。
-
+/// Reminder 管线控制面（07-reminder-pipeline.md）：Run 生命周期句柄与
+/// typed 事件推送。注入决策在 build_window 内部按 policy 自动完成，
+/// Runtime 不感知 placement / dedup / 预算。
+pub trait ReminderControlPort: Send + Sync {
     /// Run 启动：为该 Run 创建 reminder 管线（同 RunId 重复创建替换旧管线）。
     fn create_reminder_pipeline(&self, _run_id: RunId, _sources: Vec<Arc<dyn ReminderSource>>) {}
 
@@ -108,4 +116,32 @@ pub trait ContextPort: Send + Sync {
 
     /// 用户消息到达事件：`OnUserMessage` 类 source 重建入队。
     fn reminder_user_message_received(&self, _run_id: &RunId) {}
+}
+
+/// 四个语义端口的聚合视图（factory 产出形态；消费方按字段取所需 port）。
+#[derive(Clone)]
+pub struct ContextPorts {
+    pub window: Arc<dyn ContextWindowPort>,
+    pub compact: Arc<dyn ContextCompactPort>,
+    pub append: Arc<dyn ContextAppendPort>,
+    pub reminders: Arc<dyn ReminderControlPort>,
+}
+
+impl ContextPorts {
+    /// 单一服务实例的四端口视图（同一 `Arc`，方法分派到同一实现）。
+    pub fn from_service<T>(service: Arc<T>) -> Self
+    where
+        T: ContextWindowPort
+            + ContextCompactPort
+            + ContextAppendPort
+            + ReminderControlPort
+            + 'static,
+    {
+        Self {
+            window: service.clone(),
+            compact: service.clone(),
+            append: service.clone(),
+            reminders: service,
+        }
+    }
 }

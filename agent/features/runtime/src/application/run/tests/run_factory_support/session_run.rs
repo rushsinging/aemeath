@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use crate::application::interaction::port::{InteractionBridge, InteractionPort};
 use crate::application::run::context_factory::RuntimeContextFactory;
@@ -8,22 +8,7 @@ use crate::application::run::creation::{
 };
 use crate::application::run::factory::RunFactory;
 use crate::domain::agent_run::RunSpec;
-use crate::ports::{ContextPort, ProviderBindingData};
-
-struct FixedMainContextFactory {
-    context: Arc<dyn ContextPort>,
-}
-
-impl context::MainContextFactory for FixedMainContextFactory {
-    fn build(
-        &self,
-        _session: Arc<RwLock<Arc<context::session::CanonicalSession>>>,
-        _memory: Arc<RwLock<Arc<dyn memory::api::MemoryPort>>>,
-        _mutation_gate: Arc<tokio::sync::Mutex<()>>,
-    ) -> Arc<dyn ContextPort> {
-        self.context.clone()
-    }
-}
+use crate::ports::{ContextPorts, ProviderBindingData};
 
 use super::doubles::{
     fake_provider_binding, FakeContextPort, FakeHookPort, FakePolicyPort, FakeReflectionHistory,
@@ -34,7 +19,7 @@ pub(crate) struct SessionRunFixture {
     context_factory: Arc<RuntimeContextFactory>,
     session_state: SessionState,
     session_bindings: SessionRunBindings,
-    context_port: Arc<dyn ContextPort>,
+    context_port: ContextPorts,
     memory: Arc<dyn memory::api::MemoryPort>,
     provider: Arc<ProviderBindingData>,
     interaction: Arc<dyn InteractionPort>,
@@ -51,7 +36,8 @@ impl SessionRunFixture {
         SessionRunFixtureBuilder::new()
     }
 
-    pub(crate) fn context_factory(&self) -> Arc<RuntimeContextFactory> {
+    /// Derived/scenario 测试取 RuntimeContextFactory。
+    pub(crate) fn runtime_context_factory(&self) -> Arc<RuntimeContextFactory> {
         self.context_factory.clone()
     }
 
@@ -69,7 +55,7 @@ impl SessionRunFixture {
         self.session_state.snapshot_for_run()
     }
 
-    pub(crate) fn committed_context(&self) -> &Arc<dyn ContextPort> {
+    pub(crate) fn committed_context(&self) -> &ContextPorts {
         &self.context_port
     }
 
@@ -129,7 +115,7 @@ impl Default for SessionRunFixture {
 }
 
 pub(crate) struct SessionRunFixtureBuilder {
-    context_port: Arc<dyn ContextPort>,
+    context_port: ContextPorts,
     provider: Arc<ProviderBindingData>,
     interaction: Arc<dyn InteractionPort>,
     reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
@@ -154,7 +140,7 @@ pub(crate) struct SessionRunFixtureBuilder {
 impl SessionRunFixtureBuilder {
     pub(crate) fn new() -> Self {
         Self {
-            context_port: Arc::new(FakeContextPort),
+            context_port: ContextPorts::from_service(Arc::new(FakeContextPort)),
             provider: fake_provider_binding(),
             interaction: Arc::new(InteractionBridge::new()),
             reasoning: Arc::new(std::sync::Mutex::new(
@@ -184,7 +170,7 @@ impl SessionRunFixtureBuilder {
         }
     }
 
-    pub(crate) fn with_context_port(mut self, context: Arc<dyn ContextPort>) -> Self {
+    pub(crate) fn with_context_port(mut self, context: ContextPorts) -> Self {
         self.context_port = context;
         self
     }
@@ -310,7 +296,7 @@ impl SessionRunFixtureBuilder {
             share::config::paths::global_config_path(),
         ));
         let memory: Arc<dyn memory::api::MemoryPort> = Arc::new(memory::api::NoOpMemory);
-        let wiring = Arc::new(crate::SessionSwitchCoordinator::assemble(
+        let wiring = Arc::new(crate::SessionSwitchCoordinator::assemble_with_ports(
             crate::SessionSwitchCoordinatorBuilder {
                 workspace_read: workspace.read(),
                 workspace_persist: workspace.persist(),
@@ -330,10 +316,17 @@ impl SessionRunFixtureBuilder {
                     session
                 },
                 initial_memory: memory.clone(),
-                context_factory: Arc::new(FixedMainContextFactory {
-                    context: self.context_port.clone(),
-                }),
+                context_factory: std::sync::Arc::new(
+                    context::MainContextFactory::new(std::sync::Arc::new(
+                        context::NoOpCanonicalSessionWriter,
+                    ))
+                    .with_persistence(
+                        std::sync::Arc::new(task::TaskStore::new()),
+                        workspace.persist(),
+                    ),
+                ),
             },
+            self.context_port.clone(),
         ));
         let committed_context = wiring.committed_context();
         let committed_memory = wiring.committed_memory();
@@ -341,7 +334,7 @@ impl SessionRunFixtureBuilder {
             .event_sink_handle
             .unwrap_or_else(|| self.event_sink.handle());
         let session_bindings = SessionRunBindings::new(
-            wiring,
+            std::sync::Arc::clone(&wiring),
             self.provider.clone(),
             self.interaction.clone(),
             self.reasoning.clone(),
@@ -369,7 +362,7 @@ impl SessionRunFixtureBuilder {
             context_factory,
             session_state,
             session_bindings,
-            context_port: committed_context,
+            context_port: committed_context.clone(),
             memory: committed_memory,
             provider: self.provider,
             interaction: self.interaction,

@@ -7,13 +7,14 @@
 //! was retrieved for.
 
 use crate::domain::SystemBlock;
+use share::ids::InteractionRequestId;
 use share::ids::SessionId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::{
-    ContextApplicationService, ContextMemorySource, ContextPort, ContextRequestData,
-    ContextRequestId, MemoryMaterialization, SystemPromptSpecData,
+    ContextAppendPort, ContextApplicationService, ContextCompactPort, ContextMemorySource,
+    ContextRequestData, ContextWindowPort, MemoryMaterialization, SystemPromptSpecData,
 };
 use async_trait::async_trait;
 use sdk::{RunId, RunStepId};
@@ -94,7 +95,7 @@ async fn a_new_session_injects_again() {
     service.build_window(&request()).await.unwrap();
     let other_session = ContextRequestData {
         session_id: SessionId::new("other-session"),
-        request_id: ContextRequestId::new("request"),
+        request_id: InteractionRequestId::new("request"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![],

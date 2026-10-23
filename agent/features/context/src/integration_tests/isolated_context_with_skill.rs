@@ -1,6 +1,6 @@
 //! Isolated context with Skill metadata catalog (Issue #1438).
 
-use share::ids::{RunStepId, SessionId};
+use share::ids::{InteractionRequestId, RunStepId, SessionId};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -40,7 +40,7 @@ fn base_request() -> ContextRequestData {
     use crate::*;
     ContextRequestData {
         session_id: SessionId::new("isolated-session"),
-        request_id: ContextRequestId::new("request"),
+        request_id: InteractionRequestId::new("request"),
         run_id: sdk::RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![],
@@ -66,7 +66,7 @@ async fn isolated_context_with_skill_catalog_builds_metadata_directory() {
         Arc::new(FakeCatalog),
         Arc::new(FixedQueryFactory),
     );
-    let window = port.build_window(&base_request()).await.unwrap();
+    let window = port.window.build_window(&base_request()).await.unwrap();
     let block = window
         .system_blocks
         .iter()
@@ -81,7 +81,7 @@ async fn isolated_context_with_skill_catalog_builds_metadata_directory() {
 #[tokio::test]
 async fn isolated_context_without_catalog_has_no_skills_block() {
     let port = crate::wire_isolated_context("isolated-session");
-    let window = port.build_window(&base_request()).await.unwrap();
+    let window = port.window.build_window(&base_request()).await.unwrap();
     assert!(!window
         .system_blocks
         .iter()

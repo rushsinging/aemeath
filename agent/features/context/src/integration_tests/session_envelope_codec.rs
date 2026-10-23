@@ -235,6 +235,7 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
                 1,
             )),
             outcome: Some(FinalizedOutcomeRecord {
+                fingerprint: "codec-test".to_string(),
                 finalize_cause: FinalizeCause::UserCancelledStep,
                 duration_ms: Some(7_325_000),
                 messages: vec![Message::user("partial assistant")].into(),
@@ -244,7 +245,6 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
                     ToolOutcomeKindData::CancellationUnconfirmed,
                 )],
                 api_input_tokens: Some(42),
-                fingerprint: "outcome-fingerprint".to_string(),
                 committed_revision: 2,
             }),
             tool_receipts: Vec::new(),
@@ -266,7 +266,7 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
         ToolOutcomeKindData::CancellationUnconfirmed
     );
     assert_eq!(outcome.api_input_tokens, Some(42));
-    assert_eq!(outcome.fingerprint, "outcome-fingerprint");
+    assert_eq!(outcome.fingerprint, "codec-test");
     assert_eq!(outcome.committed_revision, 2);
     assert_eq!(
         decoded

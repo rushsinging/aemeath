@@ -140,7 +140,7 @@ pub(crate) fn make_agent(
         catalog: catalog.clone(),
         execution: runtime_context.tool_execution(),
         context: crate::application::context::coordination::ContextCoordinator::new(
-            runtime_context.context(),
+            runtime_context.context().clone(),
         ),
         session_id: share::ids::SessionId::new(session_id),
         ctx: tools::published::execution::ToolExecutionContext::new(
@@ -301,7 +301,7 @@ impl crate::application::loop_engine::ManualCompactionPort for ChatManualCompact
         progress: Arc<dyn crate::application::loop_engine::CompactProgressView>,
     ) -> Result<crate::application::loop_engine::ManualCompactionOutcome, LoopEngineError> {
         let coordinator = crate::application::context::coordination::ContextCoordinator::new(
-            self.runtime_context.context(),
+            self.runtime_context.context().clone(),
         );
         let task_snapshot =
             crate::application::loop_engine::chat::task_snapshot::build_compact_task_snapshot(

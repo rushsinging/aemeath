@@ -13,7 +13,10 @@ use crate::domain::{
     ManualCompactRequestData, RunId, SystemBlock, ToolReceiptMutationData,
     ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
-use crate::ports::{ContextMemorySource, ContextPort, ContextPromptSource, SessionRepository};
+use crate::ports::{
+    ContextAppendPort, ContextCompactPort, ContextMemorySource, ContextPromptSource,
+    ContextWindowPort, ReminderControlPort, SessionRepository,
+};
 
 pub(crate) struct ContextApplicationService {
     session: Arc<dyn SessionRepository>,
@@ -381,14 +384,17 @@ fn context_message_tool_result_metrics(messages: &crate::domain::ContextMessages
 }
 
 #[async_trait]
-impl ContextPort for ContextApplicationService {
+impl ContextWindowPort for ContextApplicationService {
     async fn build_window(
         &self,
         request: &ContextRequestData,
     ) -> Result<ContextWindowData, ContextPortError> {
         self.build_candidate(request).await
     }
+}
 
+#[async_trait]
+impl ContextCompactPort for ContextApplicationService {
     async fn needs_compaction(
         &self,
         request: &ContextRequestData,
@@ -432,7 +438,10 @@ impl ContextPort for ContextApplicationService {
         }
         Ok(outcome)
     }
+}
 
+#[async_trait]
+impl ContextAppendPort for ContextApplicationService {
     async fn clear_session(&self, session_id: &SessionId) -> Result<(), ContextPortError> {
         let cleared = self.session.clear(session_id).await?;
         // 清除的是该 Session 的冻结注入，下一次窗口重新注入。
@@ -503,9 +512,9 @@ impl ContextPort for ContextApplicationService {
         enriched.messages = messages;
         self.session.append_finalized(&enriched).await
     }
+}
 
-    // ─── Reminder 统一管线控制面（ContextPort 默认方法的生产实现）───
-
+impl ReminderControlPort for ContextApplicationService {
     /// Reminder 管线句柄：Run 启动创建（同 RunId 重复创建替换旧管线）。
     fn create_reminder_pipeline(&self, run_id: RunId, sources: Vec<Arc<dyn ReminderSource>>) {
         self.reminder_pipelines

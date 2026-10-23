@@ -4,14 +4,14 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::ports::ContextPort;
+use context::ContextAppendPort;
 
 pub(crate) struct ContextSkillLoadState {
-    context: Arc<dyn ContextPort>,
+    context: Arc<dyn ContextAppendPort>,
 }
 
 impl ContextSkillLoadState {
-    pub(crate) fn new(context: Arc<dyn ContextPort>) -> Self {
+    pub(crate) fn new(context: Arc<dyn ContextAppendPort>) -> Self {
         Self { context }
     }
 }

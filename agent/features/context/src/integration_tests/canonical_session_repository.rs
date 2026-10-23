@@ -1,13 +1,13 @@
-use share::ids::{RunStepId, SessionId};
+use share::ids::{InteractionRequestId, RunStepId, SessionId};
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::domain::session::SessionSnapshotState;
 use crate::SessionRepository;
 use crate::{
     AcceptedInputAppendData, AcceptedInputError, CompactRequestData, CompactTrigger,
-    ContentFingerprint, ContextAppendData, ContextAppendError, ContextRequestData,
-    ContextRequestId, FinalizeCause, Language, ManualCompactRequestData, SessionRevision,
-    SystemPromptSpecData, ToolCallIdentityData, ToolCallState, ToolReceiptMutationData,
+    ContextAppendData, ContextAppendError, ContextRequestData, FinalizeCause, Language,
+    ManualCompactRequestData, SessionRevision, SystemPromptSpecData, ToolCallIdentityData,
+    ToolCallState, ToolReceiptMutationData,
 };
 use crate::{
     AcceptedInputRecord, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
@@ -211,19 +211,18 @@ fn workspace() -> PersistedWorkspaceContext {
     }
 }
 
-fn append(fingerprint: &str) -> ContextAppendData {
+fn append() -> ContextAppendData {
     ContextAppendData {
         session_id: SessionId::new("session"),
         expected_revision: SessionRevision::new(0),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
-        source_request_id: ContextRequestId::new("request"),
+        source_request_id: InteractionRequestId::new("request"),
         finalize_cause: FinalizeCause::Completed,
         duration_ms: None,
         messages: vec![Message::user("fact")],
         receipts: vec![],
         api_input_tokens: None,
-        fingerprint: ContentFingerprint::new(fingerprint),
     }
 }
 
@@ -240,14 +239,13 @@ fn tool_identity() -> ToolCallIdentityData {
     }
 }
 
-fn accepted_input(fingerprint: &str) -> AcceptedInputAppendData {
+fn accepted_input() -> AcceptedInputAppendData {
     AcceptedInputAppendData {
         session_id: SessionId::new("session"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
-        source_request_id: ContextRequestId::new("request"),
+        source_request_id: InteractionRequestId::new("request"),
         messages: vec![Message::user("accepted fact")],
-        fingerprint: ContentFingerprint::new(fingerprint),
     }
 }
 
@@ -285,7 +283,7 @@ fn valid_fact_batch(objective: &str) -> String {
 fn compact_request(session_id: SessionId) -> ContextRequestData {
     ContextRequestData {
         session_id,
-        request_id: ContextRequestId::new("request"),
+        request_id: InteractionRequestId::new("request"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![],
@@ -715,7 +713,7 @@ async fn lifecycle_capture_reports_structure_and_releases_replaced_generation() 
     let (repository, holder) =
         repository_with_session(writer, session_with_tool_result(&session_id, 1));
 
-    let mut appended = append("next");
+    let mut appended = append();
     appended.session_id = session_id;
     appended.expected_revision = SessionRevision::new(1);
     appended.run_id = RunId::new("run-2");
@@ -752,7 +750,7 @@ async fn lifecycle_weak_probe_stays_live_until_external_arc_is_dropped() {
     let external = holder.read().unwrap().clone();
 
     let (result, lifecycle) =
-        crate::capture_session_lifecycle(repository.append_finalized(&append("same"))).await;
+        crate::capture_session_lifecycle(repository.append_finalized(&append())).await;
     result.unwrap();
 
     let replaced = lifecycle.transitions[0].replaced_generation.clone();
@@ -967,7 +965,7 @@ async fn lifecycle_workload_counts_100_500_and_1000_committed_steps() {
             skill_load_records: Vec::new(),
         };
         let (repository, _) = repository_with_session(writer, session);
-        let mut appended = append("tail");
+        let mut appended = append();
         appended.session_id = session_id;
         appended.expected_revision = SessionRevision::new(step_count as u64);
         appended.run_id = RunId::new("tail-run");
@@ -994,7 +992,7 @@ async fn accepted_input_persists_before_publish() {
     let accepted_writer = Arc::new(RecordingAcceptedInputWriter::default());
     let (repository, holder) =
         repository_with_accepted_input_writer(writer.clone(), accepted_writer);
-    let accepted = accepted_input("input-v1");
+    let accepted = accepted_input();
 
     let receipt = repository.append_accepted_input(&accepted).await.unwrap();
 
@@ -1026,14 +1024,15 @@ async fn accepted_input_is_idempotent_but_rejects_content_conflict() {
     let writer = Arc::new(RecordingWriter::default());
     let accepted_writer = Arc::new(RecordingAcceptedInputWriter::default());
     let (repository, _) = repository_with_accepted_input_writer(writer, accepted_writer);
-    let accepted = accepted_input("input-v1");
+    let accepted = accepted_input();
 
     let first = repository.append_accepted_input(&accepted).await.unwrap();
     let second = repository.append_accepted_input(&accepted).await.unwrap();
     assert_eq!(first, second);
 
+    // 冲突载荷：同 run/step 不同内容（指纹由内容推导，改消息即改指纹）。
     let mut conflicting = accepted;
-    conflicting.fingerprint = ContentFingerprint::new("input-v2");
+    conflicting.messages = vec![Message::user("conflicting input")];
     assert!(matches!(
         repository.append_accepted_input(&conflicting).await,
         Err(AcceptedInputError::ContentConflict { .. })
@@ -1050,7 +1049,7 @@ async fn accepted_input_storage_failure_does_not_publish_or_advance_revision() {
     });
     let (repository, holder) =
         repository_with_accepted_input_writer(writer.clone(), accepted_writer);
-    let accepted = accepted_input("input-failure");
+    let accepted = accepted_input();
 
     let result = repository.append_accepted_input(&accepted).await;
 
@@ -1069,7 +1068,7 @@ async fn accepted_input_duplicate_after_persist_is_published_exactly_once() {
     let accepted_writer = Arc::new(RecordingAcceptedInputWriter::default());
     let (repository, holder) =
         repository_with_accepted_input_writer(writer.clone(), accepted_writer);
-    let accepted = accepted_input("input-retry");
+    let accepted = accepted_input();
 
     repository.append_accepted_input(&accepted).await.unwrap();
     repository.append_accepted_input(&accepted).await.unwrap();
@@ -1084,13 +1083,10 @@ async fn finalized_append_acknowledges_accepted_input_after_canonical_publish() 
     let writer = Arc::new(RecordingWriter::default());
     let accepted_writer = Arc::new(RecordingAcceptedInputWriter::default());
     let (repository, _) = repository_with_accepted_input_writer(writer, accepted_writer.clone());
-    let accepted = accepted_input("input-to-finalize");
+    let accepted = accepted_input();
     repository.append_accepted_input(&accepted).await.unwrap();
 
-    repository
-        .append_finalized(&append("finalized"))
-        .await
-        .unwrap();
+    repository.append_finalized(&append()).await.unwrap();
 
     assert_eq!(
         *accepted_writer.cleared.lock().unwrap(),
@@ -1106,7 +1102,7 @@ async fn finalized_append_bridges_messages_into_structured_outcome() {
     let (repository, holder) = repository(writer);
     let run_id = RunId::new("run");
     let step_id = RunStepId::new("step");
-    let mut finalized = append("same");
+    let mut finalized = append();
     finalized.run_id = run_id.clone();
     finalized.step_id = step_id.clone();
 
@@ -1122,7 +1118,10 @@ async fn finalized_append_bridges_messages_into_structured_outcome() {
     assert_eq!(outcome.messages[0].text_content(), "fact");
     assert!(outcome.receipts.is_empty());
     assert_eq!(outcome.api_input_tokens, None);
-    assert_eq!(outcome.fingerprint, "same");
+    assert_eq!(
+        outcome.fingerprint,
+        finalized.fingerprint().unwrap().as_str()
+    );
     assert_eq!(outcome.committed_revision, 1);
 }
 
@@ -1130,10 +1129,10 @@ async fn finalized_append_bridges_messages_into_structured_outcome() {
 async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
     let writer = Arc::new(RecordingWriter::default());
     let (repository, holder) = repository(writer);
-    let accepted = accepted_input("input-v1");
+    let accepted = accepted_input();
     repository.append_accepted_input(&accepted).await.unwrap();
 
-    let mut finalized = append("outcome-v1");
+    let mut finalized = append();
     finalized.expected_revision = SessionRevision::new(1);
     finalized.finalize_cause = FinalizeCause::UserCancelledStep;
     finalized.api_input_tokens = Some(42);
@@ -1152,7 +1151,7 @@ async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
     );
     assert_eq!(
         step.accepted_input.as_ref().unwrap().fingerprint,
-        "input-v1"
+        accepted_input().fingerprint().unwrap().as_str()
     );
     assert_eq!(step.accepted_input.as_ref().unwrap().committed_revision, 0);
     let outcome = step.outcome.as_ref().unwrap();
@@ -1162,7 +1161,10 @@ async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
         outcome.receipts[0].outcome(),
         crate::ToolOutcomeKindData::CancellationUnconfirmed
     );
-    assert_eq!(outcome.fingerprint, "outcome-v1");
+    assert_eq!(
+        outcome.fingerprint,
+        finalized.fingerprint().unwrap().as_str()
+    );
     assert_eq!(outcome.committed_revision, receipt.committed_revision.get());
 }
 
@@ -1319,7 +1321,7 @@ async fn finalized_append_reuses_existing_committed_step_entry_backing() {
     .into();
     let existing_entry = Arc::clone(&session.committed_steps.entries()[0]);
     let (repository, holder) = repository_with_session(writer, session);
-    let mut mutation = append("new");
+    let mut mutation = append();
     mutation.session_id = session_id;
     mutation.expected_revision = SessionRevision::new(1);
     mutation.run_id = RunId::new("run-new");
@@ -1366,7 +1368,7 @@ async fn finalized_append_reuses_unchanged_run_slice_backing() {
     };
     let existing_slice = Arc::clone(&session.run_slices.slices()[0]);
     let (repository, holder) = repository_with_session(writer, session);
-    let mut mutation = append("new");
+    let mut mutation = append();
     mutation.session_id = session_id;
     mutation.expected_revision = SessionRevision::new(1);
     mutation.run_id = RunId::new("run-new");
@@ -1393,7 +1395,7 @@ async fn accepted_input_uses_independent_writer_before_publish() {
         repository_with_accepted_input_writer(writer.clone(), accepted_input_writer.clone());
 
     let receipt = repository
-        .append_accepted_input(&accepted_input("input-ledger"))
+        .append_accepted_input(&accepted_input())
         .await
         .unwrap();
 
@@ -1415,7 +1417,7 @@ async fn accepted_input_writer_failure_does_not_publish_candidate() {
         repository_with_accepted_input_writer(writer.clone(), accepted_input_writer);
 
     assert!(matches!(
-        repository.append_accepted_input(&accepted_input("input-ledger")).await,
+        repository.append_accepted_input(&accepted_input()).await,
         Err(AcceptedInputError::Storage(message)) if message == "input disk full"
     ));
     assert_eq!(holder.read().unwrap().revision, 0);
@@ -1427,7 +1429,7 @@ async fn append_persists_candidate_before_publishing_revision() {
     let writer = Arc::new(RecordingWriter::default());
     let (repository, holder) = repository(writer.clone());
 
-    let receipt = repository.append_finalized(&append("same")).await.unwrap();
+    let receipt = repository.append_finalized(&append()).await.unwrap();
 
     assert_eq!(receipt.committed_revision, SessionRevision::new(1));
     assert_eq!(holder.read().unwrap().revision, 1);
@@ -1495,10 +1497,10 @@ async fn concurrent_appends_with_same_revision_allow_one_commit_and_reject_one_c
     let writer = Arc::new(RecordingWriter::default());
     let (repository, holder) = repository(writer);
 
-    let mut first = append("first");
+    let mut first = append();
     first.run_id = RunId::new("run-first");
     first.step_id = RunStepId::new("step-first");
-    let mut second = append("second");
+    let mut second = append();
     second.run_id = RunId::new("run-second");
     second.step_id = RunStepId::new("step-second");
 
@@ -1529,7 +1531,7 @@ async fn failed_durable_write_does_not_publish_candidate() {
     let (repository, holder) = repository(writer);
 
     assert!(matches!(
-        repository.append_finalized(&append("same")).await,
+        repository.append_finalized(&append()).await,
         Err(ContextAppendError::Storage(message)) if message == "disk full"
     ));
     assert_eq!(holder.read().unwrap().revision, 0);
@@ -1596,7 +1598,7 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
     started_receiver
         .await
         .expect("compact generator should begin before concurrent mutation");
-    let mut concurrent_append = append("concurrent");
+    let mut concurrent_append = append();
     concurrent_append.session_id = session_id;
     concurrent_append.run_id = RunId::new("concurrent-run");
     concurrent_append.step_id = RunStepId::new("concurrent-step");
@@ -1919,7 +1921,7 @@ async fn compact_marker_keeps_new_steps_visible() {
         repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
     compact(&repository, session_id.clone(), 0).await;
 
-    let mut appended = append("new-step");
+    let mut appended = append();
     appended.session_id = session_id;
     appended.expected_revision = SessionRevision::new(1);
     appended.run_id = RunId::new("run-new");
@@ -1957,7 +1959,7 @@ async fn second_compact_advances_single_marker() {
         .unwrap();
 
     for index in 0..6 {
-        let mut appended = append(format!("new-step-{index}").as_str());
+        let mut appended = append();
         appended.session_id = session_id.clone();
         appended.expected_revision = SessionRevision::new(1 + index);
         appended.run_id = RunId::new(format!("run-new-{index}"));
@@ -2015,12 +2017,15 @@ async fn duplicate_key_is_idempotent_and_conflicting_content_is_typed() {
     let writer = Arc::new(RecordingWriter::default());
     let (repository, _) = repository(writer.clone());
 
-    let first = repository.append_finalized(&append("same")).await.unwrap();
-    let second = repository.append_finalized(&append("same")).await.unwrap();
+    let first = repository.append_finalized(&append()).await.unwrap();
+    let second = repository.append_finalized(&append()).await.unwrap();
     assert_eq!(first, second);
     assert_eq!(writer.saved.lock().unwrap().len(), 1);
+    // 同 key 不同内容（指纹由内容推导）→ typed conflict。
+    let mut conflicting = append();
+    conflicting.messages = vec![Message::user("conflicting fact")];
     assert!(matches!(
-        repository.append_finalized(&append("different")).await,
+        repository.append_finalized(&conflicting).await,
         Err(ContextAppendError::ContentConflict { .. })
     ));
 }
@@ -2031,7 +2036,7 @@ async fn finalized_append_commits_typed_plan_with_expected_revision() {
     let (repository, _) = repository(writer.clone());
 
     repository
-        .append_finalized(&append("typed-plan"))
+        .append_finalized(&append())
         .await
         .expect("append should commit");
 
@@ -2221,7 +2226,7 @@ async fn append_recovers_from_wiped_dataset_by_full_rebuild() {
     });
     let (repository, holder) = repository(writer.clone());
 
-    let receipt = repository.append_finalized(&append("recovered")).await;
+    let receipt = repository.append_finalized(&append()).await;
 
     let receipt = receipt.expect("append must recover from a wiped dataset");
     assert_eq!(receipt.committed_revision, SessionRevision::new(1));
@@ -2246,7 +2251,7 @@ async fn append_surfaces_error_when_rebuild_also_fails() {
     });
     let (repository, holder) = repository(writer.clone());
 
-    let outcome = repository.append_finalized(&append("still-failing")).await;
+    let outcome = repository.append_finalized(&append()).await;
 
     assert!(
         outcome.is_err(),

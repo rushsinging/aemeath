@@ -38,9 +38,11 @@ pub use tool_receipt::{
 
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize};
+use share::ids::InteractionRequestId;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use sha2::{Digest, Sha256};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::AgentRoleDefinition;
 pub use share::ids::{RunId, RunStepId, SessionId};
@@ -70,7 +72,6 @@ macro_rules! string_value_object {
     };
 }
 
-string_value_object!(ContextRequestId);
 string_value_object!(Language);
 string_value_object!(SystemPromptSpecData);
 string_value_object!(ContentFingerprint);
@@ -211,46 +212,11 @@ pub enum TaskProgressStatus {
     Pending,
 }
 
-/// LLM 工具 schema 投影（结构化真相：name/description/input_schema）。
-///
-/// 归属 context（工具装配域）：由 tools 目录投影生成，wire 形态
-/// （`to_tool_definition`）与其 raw JSON 同构。provider 侧请求直接
-/// 携带 wire-ready `serde_json::Value`，不再定义跨域类型。
-#[derive(Debug, Clone, PartialEq)]
-pub struct ToolSchemaData {
-    pub name: String,
-    pub description: String,
-    pub input_schema: serde_json::Value,
-}
-
-impl ToolSchemaData {
-    /// 从 wire JSON 反构（runtime raw_tool_schemas 入口）。
-    pub fn from_wire(value: &serde_json::Value) -> Option<Self> {
-        let name = value.get("name")?.as_str()?.to_string();
-        let description = value.get("description")?.as_str()?.to_string();
-        let input_schema = value.get("input_schema")?.clone();
-        Some(Self {
-            name,
-            description,
-            input_schema,
-        })
-    }
-
-    /// 渲染为完整 tool 定义 JSON（`{name, description, input_schema}`）。
-    pub fn to_tool_definition(&self) -> serde_json::Value {
-        serde_json::json!({
-            "name": self.name,
-            "description": self.description,
-            "input_schema": self.input_schema,
-        })
-    }
-}
-
 /// 构建 window 的不可变输入；历史由 Context backing 独占。
 #[derive(Debug, Clone)]
 pub struct ContextRequestData {
     pub session_id: SessionId,
-    pub request_id: ContextRequestId,
+    pub request_id: InteractionRequestId,
     pub run_id: RunId,
     pub step_id: RunStepId,
     pub pending_messages: Vec<ContextMessage>,
@@ -270,7 +236,8 @@ pub struct ContextRequestData {
     /// [`DecisionReason::HeuristicFallback`] 路径；`None` 或超出
     /// `[0.5, 2.0]` 的值按 1.0（不校准）处理。
     pub heuristic_calibration: Option<f64>,
-    pub tool_schemas: Vec<ToolSchemaData>,
+    /// 工具 schema（`tools::ToolDefinition` 稳定类型；估算由 context 内部完成）。
+    pub tool_schemas: Vec<tools::ToolDefinition>,
     pub tool_schema_tokens: usize,
 }
 
@@ -451,7 +418,8 @@ pub struct ContextWindowData {
     pub backing_revision: SessionRevision,
     pub system_blocks: Vec<SystemBlock>,
     pub messages: ContextMessages,
-    pub tool_schemas: Vec<ToolSchemaData>,
+    /// 工具 schema（`tools::ToolDefinition` 稳定类型；估算由 context 内部完成）。
+    pub tool_schemas: Vec<tools::ToolDefinition>,
     pub token_estimation: TokenBudget,
     pub compaction_decision: CompactionDecisionData,
 }
@@ -816,9 +784,27 @@ pub struct AcceptedInputAppendData {
     pub session_id: SessionId,
     pub run_id: RunId,
     pub step_id: RunStepId,
-    pub source_request_id: ContextRequestId,
+    pub source_request_id: InteractionRequestId,
     pub messages: Vec<ContextMessage>,
-    pub fingerprint: ContentFingerprint,
+}
+
+impl AcceptedInputAppendData {
+    /// 内容指纹（内容寻址，#1863 内化：与提交方无关，逐字节兼容旧实现）。
+    pub fn fingerprint(&self) -> Result<ContentFingerprint, AcceptedInputError> {
+        let payload = serde_json::to_vec(&(
+            self.session_id.as_str(),
+            self.run_id.to_string(),
+            self.step_id.as_str(),
+            &self.messages,
+        ))
+        .map_err(|error| {
+            AcceptedInputError::Storage(format!("accepted input 指纹编码失败：{error}"))
+        })?;
+        Ok(ContentFingerprint::new(format!(
+            "{:x}",
+            Sha256::digest(payload)
+        )))
+    }
 }
 
 /// accepted input durable commit 的确定性回执。
@@ -848,13 +834,12 @@ pub struct ContextAppendData {
     pub expected_revision: SessionRevision,
     pub run_id: RunId,
     pub step_id: RunStepId,
-    pub source_request_id: ContextRequestId,
+    pub source_request_id: InteractionRequestId,
     pub finalize_cause: FinalizeCause,
     pub duration_ms: Option<u64>,
     pub messages: Vec<ContextMessage>,
     pub receipts: Vec<StepReceiptData>,
     pub api_input_tokens: Option<u64>,
-    pub fingerprint: ContentFingerprint,
 }
 
 /// append durable commit 的确定性回执。
@@ -864,6 +849,43 @@ pub struct AppendReceiptData {
     pub step_id: RunStepId,
     pub committed_revision: SessionRevision,
     pub fingerprint: ContentFingerprint,
+}
+
+impl ContextAppendData {
+    /// 内容指纹（内容寻址，#1863 内化：与提交方无关，逐字节兼容旧实现）。
+    pub fn fingerprint(&self) -> Result<ContentFingerprint, ContextAppendError> {
+        let payload = serde_json::to_vec(&(
+            self.session_id.as_str(),
+            self.run_id.to_string(),
+            self.step_id.as_str(),
+            format!("{:?}", self.finalize_cause),
+            self.duration_ms,
+            &self.messages,
+            self.receipts
+                .iter()
+                .map(|receipt| {
+                    (
+                        receipt.call_id(),
+                        receipt.index(),
+                        format!("{:?}", receipt.outcome()),
+                        receipt.is_agent(),
+                        receipt.summary(),
+                        receipt.artifact_refs(),
+                        receipt.possible_side_effects(),
+                        receipt.unfinished_call_ids(),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            self.api_input_tokens,
+        ))
+        .map_err(|error| {
+            ContextAppendError::Storage(format!("ContextAppendData 指纹编码失败：{error}"))
+        })?;
+        Ok(ContentFingerprint::new(format!(
+            "{:x}",
+            Sha256::digest(payload)
+        )))
+    }
 }
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
@@ -903,3 +925,7 @@ pub enum ContextPortError {
     #[error("Context 压缩失败：{0}")]
     Compact(String),
 }
+
+#[cfg(test)]
+#[path = "domain/context_fingerprint_tests.rs"]
+mod context_fingerprint_tests;

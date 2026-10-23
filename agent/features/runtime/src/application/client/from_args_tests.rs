@@ -253,10 +253,8 @@ async fn make_test_shell(
         config.participant(),
         Arc::new(context::test_support::UnavailableSessionManagement),
         Arc::new(
-            context::ProductionMainContextFactory::new(Arc::new(
-                context::NoOpCanonicalSessionWriter,
-            ))
-            .with_persistence(task_wiring.persist(), workspace.persist()),
+            context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
+                .with_persistence(task_wiring.persist(), workspace.persist()),
         ),
     )
     .await;
@@ -577,10 +575,8 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         config.participant(),
         Arc::new(context::test_support::UnavailableSessionManagement),
         Arc::new(
-            context::ProductionMainContextFactory::new(Arc::new(
-                context::NoOpCanonicalSessionWriter,
-            ))
-            .with_persistence(task_wiring.persist(), workspace.persist()),
+            context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
+                .with_persistence(task_wiring.persist(), workspace.persist()),
         ),
     )
     .await;

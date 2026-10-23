@@ -1,38 +1,37 @@
 use crate::InMemorySessionRepository;
 use crate::SessionRepository;
 use crate::{
-    AcceptedInputAppendData, AcceptedInputError, CleanupConfirmation, ContentFingerprint,
-    ContextAppendData, ContextAppendError, ContextRequestId, FinalizeCause, SessionRevision,
-    ToolCallIdentityData, ToolOutcomeKindData, ToolReceiptMutationData, ToolTerminalReceiptData,
+    AcceptedInputAppendData, AcceptedInputError, CleanupConfirmation, ContextAppendData,
+    ContextAppendError, FinalizeCause, SessionRevision, ToolCallIdentityData, ToolOutcomeKindData,
+    ToolReceiptMutationData, ToolTerminalReceiptData,
 };
 use sdk::RunId;
+use share::ids::InteractionRequestId;
 use share::ids::{RunStepId, SessionId};
 use share::message::{ContentBlock, Message};
 
-fn append(fingerprint: &str) -> ContextAppendData {
+fn append() -> ContextAppendData {
     ContextAppendData {
         session_id: SessionId::new("session"),
         expected_revision: SessionRevision::new(0),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
-        source_request_id: ContextRequestId::new("request"),
+        source_request_id: InteractionRequestId::new("request"),
         finalize_cause: FinalizeCause::Completed,
         duration_ms: None,
         messages: vec![Message::user("fact")],
         receipts: vec![],
         api_input_tokens: None,
-        fingerprint: ContentFingerprint::new(fingerprint),
     }
 }
 
-fn accepted_input(fingerprint: &str) -> AcceptedInputAppendData {
+fn accepted_input() -> AcceptedInputAppendData {
     AcceptedInputAppendData {
         session_id: SessionId::new("session"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
-        source_request_id: ContextRequestId::new("request"),
+        source_request_id: InteractionRequestId::new("request"),
         messages: vec![Message::user("accepted")],
-        fingerprint: ContentFingerprint::new(fingerprint),
     }
 }
 
@@ -111,13 +110,12 @@ async fn commit_tool_step(
             expected_revision: current_revision.max(receipt_revision),
             run_id: RunId::new(run_id),
             step_id: RunStepId::new(step_id),
-            source_request_id: ContextRequestId::new(format!("request-{step_id}")),
+            source_request_id: InteractionRequestId::new(format!("request-{step_id}")),
             finalize_cause: FinalizeCause::Completed,
             duration_ms: None,
             messages: vec![tool_message(call_id, tool_name, path, text)],
             receipts: vec![],
             api_input_tokens: None,
-            fingerprint: ContentFingerprint::new(format!("fp-{step_id}")),
         })
         .await
         .unwrap();
@@ -126,7 +124,7 @@ async fn commit_tool_step(
 #[tokio::test]
 async fn build_window_applies_l3_to_isolated_subagent_history() {
     use crate::ContextApplicationService;
-    use crate::{ContextPort, ContextPromptSource, PromptMaterialization};
+    use crate::{ContextPromptSource, ContextWindowPort, PromptMaterialization};
     use crate::{ContextRequestData, Language, SystemPromptSpecData};
     use share::config::domain::snapshot::ConfigSnapshot;
     use share::config::Config;
@@ -169,7 +167,7 @@ async fn build_window_applies_l3_to_isolated_subagent_history() {
     );
     let request = ContextRequestData {
         session_id,
-        request_id: ContextRequestId::new("request-window"),
+        request_id: InteractionRequestId::new("request-window"),
         run_id: RunId::new("active"),
         step_id: RunStepId::new("active-step"),
         pending_messages: vec![],
@@ -220,7 +218,7 @@ async fn snapshot_preserves_structured_run_step_receipts_for_isolated_context() 
     backing.seed(&session_id, SessionRevision::new(0), vec![], None);
     let identity = tool_identity("run", "step", "read-call", "Read");
     backing
-        .append_accepted_input(&accepted_input("input-v1"))
+        .append_accepted_input(&accepted_input())
         .await
         .unwrap();
     backing
@@ -241,7 +239,7 @@ async fn snapshot_preserves_structured_run_step_receipts_for_isolated_context() 
         ))
         .await
         .unwrap();
-    let mut outcome = append("outcome-v1");
+    let mut outcome = append();
     outcome.expected_revision = SessionRevision::new(3);
     backing.append_finalized(&outcome).await.unwrap();
 
@@ -263,7 +261,7 @@ async fn accepted_input_has_independent_idempotency_from_finalized_outcome() {
     let session_id = SessionId::new("session");
     backing.seed(&session_id, SessionRevision::new(0), vec![], None);
 
-    let input = accepted_input("input-v1");
+    let input = accepted_input();
     let receipt = backing.append_accepted_input(&input).await.unwrap();
     assert_eq!(receipt.committed_revision, SessionRevision::new(1));
     assert_eq!(
@@ -271,7 +269,7 @@ async fn accepted_input_has_independent_idempotency_from_finalized_outcome() {
         receipt
     );
 
-    let mut outcome = append("outcome-v1");
+    let mut outcome = append();
     outcome.expected_revision = SessionRevision::new(1);
     backing.append_finalized(&outcome).await.unwrap();
     assert_eq!(
@@ -280,7 +278,7 @@ async fn accepted_input_has_independent_idempotency_from_finalized_outcome() {
     );
 
     let mut conflict = input;
-    conflict.fingerprint = ContentFingerprint::new("input-v2");
+    conflict.messages = vec![Message::user("conflicting input")];
     assert!(matches!(
         backing.append_accepted_input(&conflict).await,
         Err(AcceptedInputError::ContentConflict { .. })
@@ -292,7 +290,7 @@ async fn finalized_outcome_keeps_receipt_metadata_for_idempotent_retry() {
     let backing = InMemorySessionRepository::new();
     let session_id = SessionId::new("session");
     backing.seed(&session_id, SessionRevision::new(0), vec![], None);
-    let mut outcome = append("outcome-v1");
+    let mut outcome = append();
     outcome.finalize_cause = FinalizeCause::RunTerminated;
     outcome.api_input_tokens = Some(21);
     outcome.receipts = vec![crate::StepReceiptData::agent(
@@ -320,8 +318,8 @@ async fn same_step_and_fingerprint_is_idempotent() {
         vec![],
         None,
     );
-    let first = backing.append_finalized(&append("same")).await.unwrap();
-    let second = backing.append_finalized(&append("same")).await.unwrap();
+    let first = backing.append_finalized(&append()).await.unwrap();
+    let second = backing.append_finalized(&append()).await.unwrap();
     assert_eq!(first, second);
     assert_eq!(
         backing
@@ -343,9 +341,11 @@ async fn same_step_and_different_fingerprint_conflicts() {
         vec![],
         None,
     );
-    backing.append_finalized(&append("first")).await.unwrap();
+    backing.append_finalized(&append()).await.unwrap();
+    let mut conflicting = append();
+    conflicting.messages = vec![Message::user("conflicting")];
     assert!(matches!(
-        backing.append_finalized(&append("other")).await,
+        backing.append_finalized(&conflicting).await,
         Err(ContextAppendError::ContentConflict { .. })
     ));
 }

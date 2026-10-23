@@ -197,7 +197,7 @@ async fn invoke_model_impl(
 ) -> Result<(ModelStep, StepTokenUsage), LoopEngineError> {
     if execution.context_window().is_none() {
         if let Some(request) = execution.context_request() {
-            let coordinator = ContextCoordinator::new(observer.runtime_context().context());
+            let coordinator = ContextCoordinator::new(observer.runtime_context().context().clone());
             let window = coordinator
                 .build_window(request)
                 .await
@@ -255,12 +255,13 @@ async fn invoke_model_impl(
         let messages = invocation_context.messages_for_api().to_vec();
         let system = invocation_context.system.clone();
         let static_prefix_len = invocation_context.static_prefix_len;
-        // context 结构化投影 → wire-ready tool 定义（Value）。
+        // provider 出口才序列化（内部全程 tools::ToolDefinition 稳定类型）。
         let tools: Vec<serde_json::Value> = window
             .tool_schemas
             .iter()
-            .map(crate::ports::ToolSchemaData::to_tool_definition)
-            .collect();
+            .map(serde_json::to_value)
+            .collect::<Result<_, _>>()
+            .unwrap_or_default();
         let stream_cancel = cancel.clone();
         let committed_delta = observer.committed_delta();
         let invocation = async {

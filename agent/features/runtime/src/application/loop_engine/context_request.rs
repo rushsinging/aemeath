@@ -5,8 +5,7 @@ use share::message::Message;
 use crate::application::run::config::RunConfigSnapshot;
 use crate::application::run::context::RuntimeContext;
 use crate::ports::{
-    ContextRequestData, ContextRequestId, Language, RunStepId, SessionId, SystemPromptSpecData,
-    ToolSchemaData,
+    ContextRequestData, InteractionRequestId, Language, RunStepId, SessionId, SystemPromptSpecData,
 };
 
 /// Frozen values required to build one Step's Context request.
@@ -39,15 +38,15 @@ impl<'a> ContextRequestCoordinator<'a> {
         step_id: &RunStepId,
         pending_messages: Vec<Message>,
     ) -> ContextRequestData {
-        let tool_schemas = self
+        let tool_schemas: Vec<tools::ToolDefinition> = self
             .source
             .raw_tool_schemas
             .iter()
-            .filter_map(ToolSchemaData::from_wire)
+            .filter_map(tools::ToolDefinition::from_wire)
             .collect();
         ContextRequestData {
             session_id: SessionId::new(self.source.session_id),
-            request_id: ContextRequestId::new(share::ids::new_typed_id("irq")),
+            request_id: InteractionRequestId::new(share::ids::new_typed_id("irq")),
             run_id: run_id.clone(),
             step_id: step_id.clone(),
             pending_messages,
@@ -66,10 +65,8 @@ impl<'a> ContextRequestCoordinator<'a> {
             max_output_tokens: self.source.max_output_tokens,
             last_api_total_tokens: self.source.runtime_context.usage().get(),
             heuristic_calibration: Some(self.source.runtime_context.usage().calibration_factor()),
+            tool_schema_tokens: context::compact::estimate_tool_schemas_tokens(&tool_schemas),
             tool_schemas,
-            tool_schema_tokens: context::compact::estimate_tool_schemas_tokens(
-                &self.source.raw_tool_schemas,
-            ),
         }
     }
 }

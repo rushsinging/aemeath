@@ -28,8 +28,8 @@ pub(crate) use canonical_session::{
     ToolReceiptWriter,
 };
 pub use canonical_session::{
-    AtomicBlobAcceptedInputWriter, AtomicBlobToolReceiptWriter, NoOpCanonicalSessionWriter,
-    ProductionMainContextFactory,
+    AtomicBlobAcceptedInputWriter, AtomicBlobToolReceiptWriter, MainContextFactory,
+    NoOpCanonicalSessionWriter,
 };
 pub use dataset_session_management::DatasetSessionManagement;
 pub(crate) use dataset_session_reader::DatasetSessionReader;
@@ -46,7 +46,7 @@ pub(crate) use skill_prompt_source::skill_prompt_budget;
 pub(crate) use skill_prompt_source::SkillPromptSource;
 pub use skill_prompt_source::WorkspaceSkillQueryFactory;
 
-pub fn wire_isolated_context(session_id: &str) -> Arc<dyn crate::ports::ContextPort> {
+pub fn wire_isolated_context(session_id: &str) -> crate::ports::ContextPorts {
     let repository = Arc::new(InMemorySessionRepository::new());
     repository.seed(
         &crate::domain::SessionId::new(session_id),
@@ -54,10 +54,12 @@ pub fn wire_isolated_context(session_id: &str) -> Arc<dyn crate::ports::ContextP
         Vec::new(),
         None,
     );
-    Arc::new(crate::application::ContextApplicationService::new(
-        repository,
-        Arc::new(BaselinePromptSource),
-        Arc::new(NoOpContextMemorySource),
+    crate::ports::ContextPorts::from_service(Arc::new(
+        crate::application::ContextApplicationService::new(
+            repository,
+            Arc::new(BaselinePromptSource),
+            Arc::new(NoOpContextMemorySource),
+        ),
     ))
 }
 
@@ -70,7 +72,7 @@ pub(crate) fn wire_isolated_context_with_skill(
     session_id: &str,
     catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
     query_factory: Arc<dyn crate::ports::SkillQueryFactory>,
-) -> Arc<dyn crate::ports::ContextPort> {
+) -> crate::ports::ContextPorts {
     let repository = Arc::new(InMemorySessionRepository::new());
     repository.seed(
         &crate::domain::SessionId::new(session_id),
@@ -78,10 +80,12 @@ pub(crate) fn wire_isolated_context_with_skill(
         Vec::new(),
         None,
     );
-    Arc::new(crate::application::ContextApplicationService::new(
-        repository,
-        Arc::new(SkillPromptSource::new(catalog, query_factory)),
-        Arc::new(NoOpContextMemorySource),
+    crate::ports::ContextPorts::from_service(Arc::new(
+        crate::application::ContextApplicationService::new(
+            repository,
+            Arc::new(SkillPromptSource::new(catalog, query_factory)),
+            Arc::new(NoOpContextMemorySource),
+        ),
     ))
 }
 
@@ -95,7 +99,7 @@ pub fn wire_isolated_context_with_workspace_skills(
     session_id: &str,
     catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
     workspace: Arc<dyn project::WorkspaceReader>,
-) -> Arc<dyn crate::ports::ContextPort> {
+) -> crate::ports::ContextPorts {
     wire_isolated_context_with_skill(
         session_id,
         catalog,

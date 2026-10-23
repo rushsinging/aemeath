@@ -364,7 +364,7 @@ fn sub_context_derivation_uses_parent_cancel_child_scope() {
     .expect("derive_sub_run should succeed");
 
     // Child cancel token is derived from parent scope.
-    let child_cancel = derived.instance.context().cancel().clone();
+    let child_cancel = derived.instance.context().clone().cancel().clone();
     let parent_cancel = parent_ctx.cancel().clone();
 
     // Child cancel does NOT propagate to parent.
@@ -384,7 +384,7 @@ fn sub_context_derivation_uses_parent_cancel_child_scope() {
         Arc::new(make_test_factory()),
     )
     .expect("derive_sub_run should succeed");
-    let child2_cancel = derived2.instance.context().cancel().clone();
+    let child2_cancel = derived2.instance.context().clone().cancel().clone();
     parent_cancel.token().cancel();
     assert!(child2_cancel.token().is_cancelled());
 }
@@ -415,7 +415,7 @@ fn sub_context_derivation_restricts_tool_catalog() {
 
     // Derived tool catalog is not the parent's full catalog.
     assert!(!Arc::ptr_eq(
-        &derived.instance.context().tool_catalog(),
+        &derived.instance.context().clone().tool_catalog(),
         &parent_ctx.tool_catalog()
     ));
     // The restricted snapshot must be retrievable.
@@ -457,7 +457,7 @@ fn sub_context_derivation_disables_memory_by_default() {
 
     // Sub memory is NOT the same Arc as parent.
     assert!(!Arc::ptr_eq(
-        &derived.instance.context().memory(),
+        &derived.instance.context().clone().memory(),
         &parent_ctx.memory()
     ));
 }
@@ -488,8 +488,8 @@ fn sub_context_derivation_uses_isolated_context() {
 
     // Context port must be DIFFERENT from parent.
     assert!(!Arc::ptr_eq(
-        &derived.instance.context().context(),
-        &parent_ctx.context()
+        &derived.instance.context().context().window,
+        &parent_ctx.context().window
     ));
 }
 
@@ -525,14 +525,14 @@ fn sub_context_derivation_does_not_widen_policy_or_interaction() {
 
     // Policy: same Arc as parent (both from the same factory).
     assert!(Arc::ptr_eq(
-        &derived.instance.context().policy(),
+        &derived.instance.context().clone().policy(),
         &parent_ctx.policy()
     ));
 
     // Interaction: ParentMediated uses a child-scoped wrapper rather than
     // exposing the parent's port identity directly.
     assert!(!Arc::ptr_eq(
-        &derived.instance.context().interaction(),
+        &derived.instance.context().clone().interaction(),
         &parent_ctx.interaction()
     ));
 }
@@ -607,7 +607,7 @@ fn sub_restricted_catalog_rejects_non_sub_agent_scope() {
     )
     .expect("derive_sub_run should succeed");
 
-    let catalog = derived.instance.context().tool_catalog();
+    let catalog = derived.instance.context().clone().tool_catalog();
 
     // sub-agent / sub-agent-restricted must succeed.
     catalog

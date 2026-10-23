@@ -64,25 +64,25 @@ impl InMemorySessionRepository {
     fn receipt(
         append: &ContextAppendData,
         committed_revision: SessionRevision,
-    ) -> AppendReceiptData {
-        AppendReceiptData {
+    ) -> Result<AppendReceiptData, ContextAppendError> {
+        Ok(AppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision,
-            fingerprint: append.fingerprint.clone(),
-        }
+            fingerprint: append.fingerprint()?,
+        })
     }
 
     fn accepted_receipt(
         append: &AcceptedInputAppendData,
         committed_revision: SessionRevision,
-    ) -> AcceptedInputReceiptData {
-        AcceptedInputReceiptData {
+    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
+        Ok(AcceptedInputReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision,
-            fingerprint: append.fingerprint.clone(),
-        }
+            fingerprint: append.fingerprint()?,
+        })
     }
 }
 
@@ -117,11 +117,11 @@ impl SessionRepository for InMemorySessionRepository {
             append.step_id.as_str().to_string(),
         );
         if let Some(input) = state.accepted_steps.get(&key) {
-            if input.fingerprint == append.fingerprint.as_str() {
-                return Ok(Self::accepted_receipt(
+            if input.fingerprint == append.fingerprint()?.as_str() {
+                return Self::accepted_receipt(
                     append,
                     SessionRevision::new(input.committed_revision),
-                ));
+                );
             }
             return Err(AcceptedInputError::ContentConflict {
                 run_id: append.run_id.clone(),
@@ -130,7 +130,7 @@ impl SessionRepository for InMemorySessionRepository {
         }
         let accepted_input = AcceptedInputRecord::new(
             append.messages.clone(),
-            append.fingerprint.as_str(),
+            append.fingerprint()?.as_str(),
             state.revision + 1,
         );
         state.messages.extend(append.messages.clone());
@@ -142,7 +142,7 @@ impl SessionRepository for InMemorySessionRepository {
         state.revision += 1;
         let committed_revision = SessionRevision::new(state.revision);
         state.accepted_steps.insert(key, accepted_input);
-        Ok(Self::accepted_receipt(append, committed_revision))
+        Self::accepted_receipt(append, committed_revision)
     }
 
     async fn advance_tool_receipt(
@@ -261,11 +261,8 @@ impl SessionRepository for InMemorySessionRepository {
             append.step_id.as_str().to_string(),
         );
         if let Some(outcome) = state.committed_steps.get(&key) {
-            if outcome.fingerprint == append.fingerprint.as_str() {
-                return Ok(Self::receipt(
-                    append,
-                    SessionRevision::new(outcome.committed_revision),
-                ));
+            if outcome.fingerprint == append.fingerprint()?.as_str() {
+                return Self::receipt(append, SessionRevision::new(outcome.committed_revision));
             }
             return Err(ContextAppendError::ContentConflict {
                 run_id: append.run_id.clone(),
@@ -289,14 +286,15 @@ impl SessionRepository for InMemorySessionRepository {
         state.messages.extend(append.messages.clone());
         state.revision += 1;
         let committed_revision = SessionRevision::new(state.revision);
+        let fingerprint = append.fingerprint()?;
         let outcome = FinalizedOutcomeRecord {
             finalize_cause: append.finalize_cause,
             duration_ms: append.duration_ms,
             messages: append.messages.clone().into(),
             receipts: append.receipts.clone(),
             api_input_tokens: append.api_input_tokens,
-            fingerprint: append.fingerprint.as_str().to_string(),
             committed_revision: committed_revision.get(),
+            fingerprint: fingerprint.as_str().to_string(),
         };
         state.history = state.history.append_finalized_outcome(
             append.run_id.as_ref(),
@@ -304,7 +302,7 @@ impl SessionRepository for InMemorySessionRepository {
             outcome.clone(),
         );
         state.committed_steps.insert(key, outcome);
-        Ok(Self::receipt(append, committed_revision))
+        Self::receipt(append, committed_revision)
     }
 
     async fn commit_compaction(

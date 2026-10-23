@@ -27,7 +27,8 @@ use crate::application::loop_engine::chat::run_input_buffer::RunInputBuffer;
 use crate::application::loop_engine::chat::ChatEventSinkHandle;
 use crate::application::run::config::RunConfigSnapshot;
 use crate::domain::agent_run::RunSpec;
-use crate::ports::{ContextPort, Policy, ProviderBindingData};
+use crate::ports::{Policy, ProviderBindingData};
+use context::ContextPorts;
 use hook::HookDispatcher;
 use memory::api::{MemoryPort, ReflectionHistoryStore};
 use task::TaskAccess;
@@ -367,7 +368,7 @@ pub struct RunCapabilityBindings {
 
 #[derive(Clone)]
 pub struct ModelBindings {
-    pub context: Arc<dyn ContextPort>,
+    pub context: ContextPorts,
     pub provider: Arc<ProviderBindingData>,
     pub interaction: Arc<dyn InteractionPort>,
     pub memory: Arc<dyn MemoryPort>,
@@ -413,7 +414,7 @@ pub struct LifecycleBindings {
 /// [`derive_sub_run`].
 #[derive(Clone)]
 pub struct RuntimeContext {
-    context: Arc<dyn ContextPort>,
+    context: ContextPorts,
     provider: Arc<ProviderBindingData>,
     tool_catalog: Arc<dyn ToolCatalogPort>,
     tool_execution: Arc<dyn ToolExecutionPort>,
@@ -518,9 +519,9 @@ impl RuntimeContext {
 
     // ── Arc clone accessor（RunLoop adapter 需要共享 ownership） ──
 
-    /// Context Management BC 端口，`Arc` clone。
-    pub fn context(&self) -> Arc<dyn ContextPort> {
-        self.context.clone()
+    /// Context Management BC 语义端口聚合。
+    pub fn context(&self) -> &ContextPorts {
+        &self.context
     }
     /// Provider 绑定，`Arc` clone。
     pub fn provider(&self) -> Arc<ProviderBindingData> {

@@ -68,7 +68,7 @@ pub(crate) struct CompactionCoordinator {
 impl CompactionCoordinator {
     pub(crate) fn from_context(runtime_context: &RuntimeContext) -> Self {
         Self {
-            context: ContextCoordinator::new(runtime_context.context()),
+            context: ContextCoordinator::new(runtime_context.context().clone()),
             usage: runtime_context.usage(),
             published_state: runtime_context.published_state(),
             event_sink: runtime_context.event_sink(),

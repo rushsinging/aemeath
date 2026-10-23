@@ -1,11 +1,10 @@
-use share::ids::SessionId;
+use share::ids::{InteractionRequestId, SessionId};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::ContextApplicationService;
 use crate::{
-    ContextAppendData, ContextRequestData, ContextRequestId, Language, SessionRevision,
-    SystemPromptSpecData,
+    ContextAppendData, ContextRequestData, Language, SessionRevision, SystemPromptSpecData,
 };
 use crate::{
     ContextMemorySource, ContextPromptSource, MemoryMaterialization, PromptMaterialization,
@@ -91,7 +90,7 @@ impl ContextMemorySource for CountingMemory {
 fn request() -> ContextRequestData {
     ContextRequestData {
         session_id: SessionId::new("session"),
-        request_id: ContextRequestId::new("request"),
+        request_id: InteractionRequestId::new("request"),
         run_id: RunId::new("run"),
         step_id: share::ids::RunStepId::new("step"),
         pending_messages: vec![],
@@ -112,7 +111,7 @@ fn request() -> ContextRequestData {
 
 #[tokio::test]
 async fn prompt_failure_is_typed_and_stops_before_memory_materialization() {
-    use crate::ContextPort;
+    use crate::ContextWindowPort;
 
     let memory_calls = Arc::new(AtomicUsize::new(0));
     let service = ContextApplicationService::new(

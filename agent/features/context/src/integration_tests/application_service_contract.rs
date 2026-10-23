@@ -1,19 +1,21 @@
 use crate::domain::session::CommittedStepMessages;
 use crate::domain::SystemBlock;
+use share::ids::InteractionRequestId;
 use share::ids::{RunStepId, SessionId};
 use std::sync::Arc;
 
 use crate::CommittedMemoryRetrieveAdapter;
 use crate::ContextApplicationService;
 use crate::{
-    CleanupConfirmation, ContextAppendData, ContextMessages, ContextRequestData, ContextRequestId,
-    FinalizeCause, Language, SessionRevision, SystemPromptSpecData, ToolCallIdentityData,
-    ToolCallReceiptData, ToolOutcomeKindData, ToolTerminalReceiptData,
+    CleanupConfirmation, ContextAppendData, ContextMessages, ContextRequestData, FinalizeCause,
+    Language, SessionRevision, SystemPromptSpecData, ToolCallIdentityData, ToolCallReceiptData,
+    ToolOutcomeKindData, ToolTerminalReceiptData,
 };
 use crate::{CommittedRunSlice, CommittedRunStep, FinalizedOutcomeRecord, SessionHistory};
 use crate::{
-    ContextMemorySource, ContextPort, ContextPromptSource, MemoryMaterialization,
-    PromptMaterialization, SessionItem, SessionRepository,
+    ContextAppendPort, ContextCompactPort, ContextMemorySource, ContextPromptSource,
+    ContextWindowPort, MemoryMaterialization, PromptMaterialization, ReminderControlPort,
+    SessionItem, SessionRepository,
 };
 use async_trait::async_trait;
 use memory::api::{MemoryPort, NoOpMemory};
@@ -71,6 +73,7 @@ fn structured_fake_session() -> FakeSession {
                 step_id: normalized_step_id.as_str().to_string(),
                 accepted_input: None,
                 outcome: Some(FinalizedOutcomeRecord {
+                    fingerprint: format!("fp-{step_id}"),
                     finalize_cause: FinalizeCause::Completed,
                     duration_ms: None,
                     messages: CommittedStepMessages::from(vec![Message {
@@ -92,7 +95,6 @@ fn structured_fake_session() -> FakeSession {
                     }]),
                     receipts: vec![],
                     api_input_tokens: None,
-                    fingerprint: format!("fp-{step_id}"),
                     committed_revision: 2,
                 }),
                 tool_receipts: vec![ToolCallReceiptData {
@@ -204,8 +206,8 @@ impl SessionRepository for FakeSession {
         Ok(crate::AppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
+            fingerprint: append.fingerprint().unwrap(),
             committed_revision: SessionRevision::new(3),
-            fingerprint: append.fingerprint.clone(),
         })
     }
 
@@ -275,7 +277,7 @@ fn block(kind: &str) -> SystemBlock {
 pub(super) fn request() -> ContextRequestData {
     ContextRequestData {
         session_id: SessionId::new("session"),
-        request_id: ContextRequestId::new("request"),
+        request_id: InteractionRequestId::new("request"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("pending")],
@@ -442,7 +444,7 @@ async fn repeated_windows_preserve_bounded_tool_result_bytes_across_steps() {
     let service = service();
     let first = service.build_window(&request()).await.unwrap();
     let mut next_request = request();
-    next_request.request_id = ContextRequestId::new("request-next");
+    next_request.request_id = InteractionRequestId::new("request-next");
     next_request.step_id = RunStepId::new("step-next");
     next_request.pending_messages = vec![Message::user("next pending")];
     let second = service.build_window(&next_request).await.unwrap();
@@ -686,12 +688,12 @@ async fn build_window_renders_reminder_pipeline_injection_by_placement() {
     ));
     let context_service = service();
     let run_id = request().run_id;
-    ContextPort::create_reminder_pipeline(
+    ReminderControlPort::create_reminder_pipeline(
         &context_service,
         run_id.clone(),
         vec![task_source.clone(), guidance_source, mismatch_source],
     );
-    ContextPort::reminder_run_started(&context_service, &run_id);
+    ReminderControlPort::reminder_run_started(&context_service, &run_id);
 
     let window = context_service.build_window(&request()).await.unwrap();
 
@@ -737,7 +739,7 @@ async fn build_window_renders_reminder_pipeline_injection_by_placement() {
     assert_eq!(task_kind_positions.len(), 1);
     assert!(task_kind_positions[0].0 < tail_reminders[0].len());
 
-    ContextPort::drop_reminder_pipeline(&context_service, &run_id);
+    ReminderControlPort::drop_reminder_pipeline(&context_service, &run_id);
 }
 
 #[tokio::test]
@@ -758,13 +760,12 @@ async fn append_delegates_finalized_step_to_session_backing() {
         expected_revision: SessionRevision::new(2),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
-        source_request_id: ContextRequestId::new("request"),
+        source_request_id: InteractionRequestId::new("request"),
         finalize_cause: FinalizeCause::RunTerminated,
         duration_ms: None,
         messages: vec![Message::user("partial")],
         receipts: vec![],
         api_input_tokens: None,
-        fingerprint: crate::ContentFingerprint::new("fp"),
     };
     let receipt = service().append_and_persist(&append).await.unwrap();
     assert_eq!(receipt.committed_revision, SessionRevision::new(3));

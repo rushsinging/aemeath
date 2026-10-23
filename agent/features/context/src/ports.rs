@@ -1,5 +1,4 @@
 use share::ids::SessionId;
-use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 
@@ -14,23 +13,13 @@ pub mod context_port;
 pub mod session_management;
 pub mod session_snapshot_store;
 pub(crate) use crate::domain::PromptMaterializationError;
-pub use context_port::ContextPort;
+pub use context_port::{
+    ContextAppendPort, ContextCompactPort, ContextPorts, ContextWindowPort, ReminderControlPort,
+};
 pub use session_management::SessionManagementPort;
 pub(crate) use session_snapshot_store::{
     SessionGeneration, SessionSnapshotStore, SessionStoreError,
 };
-
-pub trait MainContextFactory: Send + Sync {
-    /// 构建绑定 per-session 活状态（session / memory / mutation gate）的
-    /// ContextPort。稳定 port（task / workspace 持久化）在 factory 构造时
-    /// 注入，MUST NOT 出现在 build 参数（#2025：runtime 不可见 Task 持久化类型）。
-    fn build(
-        &self,
-        session: Arc<RwLock<Arc<crate::domain::session::CanonicalSession>>>,
-        memory: Arc<RwLock<Arc<dyn memory::api::MemoryPort>>>,
-        mutation_gate: Arc<tokio::sync::Mutex<()>>,
-    ) -> Arc<dyn ContextPort>;
-}
 
 pub trait SessionDecoder: Send + Sync {
     fn decode(

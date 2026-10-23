@@ -1,15 +1,17 @@
+use context::ContentFingerprint;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::ports::{
     AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
     CompactOutcome, CompactRequestData, CompactResult, CompactSkipReason, CompactionDecisionData,
-    ContentFingerprint, ContextAppendData, ContextAppendError, ContextPort, ContextPortError,
-    ContextRequestData, ContextRequestId, ContextWindowData, DecisionReason, FinalizeCause,
-    Language, ManualCompactRequestData, SessionId, SessionRevision, StepReceiptData, SystemBlock,
-    SystemPromptSpecData, TokenBudget, ToolOutcomeKindData, Urgency,
+    ContextAppendData, ContextAppendError, ContextPortError, ContextRequestData, ContextWindowData,
+    DecisionReason, FinalizeCause, InteractionRequestId, Language, ManualCompactRequestData,
+    SessionId, SessionRevision, StepReceiptData, SystemBlock, SystemPromptSpecData, TokenBudget,
+    ToolOutcomeKindData, Urgency,
 };
 use async_trait::async_trait;
+use context::{ContextAppendPort, ContextCompactPort, ContextWindowPort};
 use sdk::{RunId, RunStepId};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
@@ -27,7 +29,8 @@ struct RecordingPort {
 }
 
 #[async_trait]
-impl ContextPort for RecordingPort {
+#[async_trait]
+impl ContextWindowPort for RecordingPort {
     async fn build_window(
         &self,
         request: &ContextRequestData,
@@ -60,7 +63,9 @@ impl ContextPort for RecordingPort {
             },
         })
     }
-
+}
+#[async_trait]
+impl ContextCompactPort for RecordingPort {
     async fn needs_compaction(
         &self,
         _request: &ContextRequestData,
@@ -103,7 +108,12 @@ impl ContextPort for RecordingPort {
             quality: context::CompactSummaryQuality::LocalOnly,
         }))
     }
+}
+// 与原 ContextPort 默认实现等价的 no-op reminder 面。
+impl context::ReminderControlPort for RecordingPort {}
 
+#[async_trait]
+impl ContextAppendPort for RecordingPort {
     async fn clear_session(&self, session_id: &SessionId) -> Result<(), ContextPortError> {
         self.calls.lock().unwrap().push("clear_session");
         assert!(!session_id.as_str().is_empty());
@@ -120,7 +130,7 @@ impl ContextPort for RecordingPort {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(2),
-            fingerprint: append.fingerprint.clone(),
+            fingerprint: append.fingerprint().unwrap(),
         })
     }
 
@@ -134,7 +144,7 @@ impl ContextPort for RecordingPort {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(2),
-            fingerprint: append.fingerprint.clone(),
+            fingerprint: append.fingerprint().unwrap(),
         })
     }
 }
@@ -142,7 +152,7 @@ impl ContextPort for RecordingPort {
 fn request() -> ContextRequestData {
     ContextRequestData {
         session_id: SessionId::new("session"),
-        request_id: ContextRequestId::new("request"),
+        request_id: InteractionRequestId::new("request"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("input")],
@@ -164,7 +174,7 @@ fn request() -> ContextRequestData {
 #[tokio::test]
 async fn coordinator_uses_same_frozen_request_for_build_decision_and_compact() {
     let port = Arc::new(RecordingPort::default());
-    let coordinator = ContextCoordinator::new(port.clone());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
 
     coordinator.build_window(&frozen).await.unwrap();
@@ -194,7 +204,7 @@ async fn coordinator_uses_same_frozen_request_for_build_decision_and_compact() {
 #[tokio::test]
 async fn coordinator_returns_complete_window_and_decision_fields() {
     let port = Arc::new(RecordingPort::default());
-    let coordinator = ContextCoordinator::new(port);
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port));
     let frozen = request();
 
     let window = coordinator.build_window(&frozen).await.unwrap();
@@ -215,7 +225,7 @@ async fn coordinator_returns_complete_window_and_decision_fields() {
 #[tokio::test]
 async fn coordinator_delegates_manual_compact_and_clear_session_to_port() {
     let port = Arc::new(RecordingPort::default());
-    let coordinator = ContextCoordinator::new(port.clone());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
 
     let manual = coordinator
@@ -245,7 +255,7 @@ async fn coordinator_delegates_manual_compact_and_clear_session_to_port() {
 #[tokio::test]
 async fn coordinator_appends_only_accepted_input_with_stable_fingerprint() {
     let port = Arc::new(RecordingPort::default());
-    let coordinator = ContextCoordinator::new(port.clone());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
     let messages = vec![Message::user("accepted")];
 
@@ -261,14 +271,14 @@ async fn coordinator_appends_only_accepted_input_with_stable_fingerprint() {
         serde_json::to_value(&accepted[0].messages).unwrap(),
         serde_json::to_value(&messages).unwrap()
     );
-    assert_eq!(receipt.fingerprint, accepted[0].fingerprint);
-    assert_ne!(accepted[0].fingerprint, ContentFingerprint::new(""));
+    assert_eq!(receipt.fingerprint, accepted[0].fingerprint().unwrap());
+    assert_ne!(accepted[0].fingerprint().unwrap().as_str(), "");
 }
 
 #[tokio::test]
 async fn finalized_step_appends_once_with_original_message_order() {
     let port = Arc::new(RecordingPort::default());
-    let coordinator = ContextCoordinator::new(port.clone());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
     let messages = vec![
         Message {
@@ -311,13 +321,13 @@ async fn finalized_step_appends_once_with_original_message_order() {
             .count(),
         1
     );
-    assert_ne!(appends[0].fingerprint, ContentFingerprint::new(""));
+    assert_ne!(appends[0].fingerprint().unwrap().as_str(), "");
 }
 
 #[tokio::test]
 async fn finalized_step_returns_receipt_and_preserves_every_boundary_field() {
     let port = Arc::new(RecordingPort::default());
-    let coordinator = ContextCoordinator::new(port.clone());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
     let messages = vec![Message::user("finalized")];
     let receipts = vec![
@@ -361,7 +371,7 @@ async fn finalized_step_returns_receipt_and_preserves_every_boundary_field() {
     assert_eq!(receipt.run_id, append.run_id);
     assert_eq!(receipt.step_id, append.step_id);
     assert_eq!(receipt.committed_revision, SessionRevision::new(2));
-    assert_eq!(receipt.fingerprint, append.fingerprint);
+    assert_eq!(receipt.fingerprint, append.fingerprint().unwrap());
 }
 
 #[tokio::test]
@@ -373,7 +383,8 @@ async fn fingerprint_is_stable_and_sensitive_to_finalized_facts() {
         api_input_tokens: Option<u64>,
     ) -> ContentFingerprint {
         let port = Arc::new(RecordingPort::default());
-        let coordinator = ContextCoordinator::new(port.clone());
+        let coordinator =
+            ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
         coordinator
             .append_finalized(
                 &request(),
@@ -387,7 +398,7 @@ async fn fingerprint_is_stable_and_sensitive_to_finalized_facts() {
             )
             .await
             .unwrap();
-        let fingerprint = port.appends.lock().unwrap()[0].fingerprint.clone();
+        let fingerprint = port.appends.lock().unwrap()[0].fingerprint().unwrap();
         fingerprint
     }
 
@@ -471,13 +482,17 @@ async fn append_conflict_is_returned_without_hidden_retry() {
         calls: Mutex<usize>,
     }
     #[async_trait]
-    impl ContextPort for ConflictPort {
+    #[async_trait::async_trait]
+    impl context::ContextWindowPort for ConflictPort {
         async fn build_window(
             &self,
             _: &ContextRequestData,
         ) -> Result<ContextWindowData, ContextPortError> {
             unreachable!()
         }
+    }
+    #[async_trait::async_trait]
+    impl context::ContextCompactPort for ConflictPort {
         async fn needs_compaction(
             &self,
             _: &ContextRequestData,
@@ -496,6 +511,11 @@ async fn append_conflict_is_returned_without_hidden_retry() {
         ) -> Result<CompactOutcome, ContextPortError> {
             unreachable!()
         }
+    }
+    impl context::ReminderControlPort for ConflictPort {}
+
+    #[async_trait]
+    impl ContextAppendPort for ConflictPort {
         async fn clear_session(&self, _: &SessionId) -> Result<(), ContextPortError> {
             unreachable!()
         }
@@ -514,7 +534,7 @@ async fn append_conflict_is_returned_without_hidden_retry() {
     let port = Arc::new(ConflictPort {
         calls: Mutex::new(0),
     });
-    let coordinator = ContextCoordinator::new(port.clone());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     assert!(matches!(
         coordinator
             .append_finalized(
@@ -537,13 +557,17 @@ async fn append_conflict_is_returned_without_hidden_retry() {
 async fn skipped_compaction_is_returned_without_hidden_retry() {
     struct SkippingPort;
     #[async_trait]
-    impl ContextPort for SkippingPort {
+    #[async_trait::async_trait]
+    impl context::ContextWindowPort for SkippingPort {
         async fn build_window(
             &self,
             _: &ContextRequestData,
         ) -> Result<ContextWindowData, ContextPortError> {
             unreachable!()
         }
+    }
+    #[async_trait::async_trait]
+    impl context::ContextCompactPort for SkippingPort {
         async fn needs_compaction(
             &self,
             _: &ContextRequestData,
@@ -562,6 +586,11 @@ async fn skipped_compaction_is_returned_without_hidden_retry() {
         ) -> Result<CompactOutcome, ContextPortError> {
             unreachable!()
         }
+    }
+    impl context::ReminderControlPort for SkippingPort {}
+
+    #[async_trait]
+    impl ContextAppendPort for SkippingPort {
         async fn clear_session(&self, _: &SessionId) -> Result<(), ContextPortError> {
             unreachable!()
         }
@@ -573,7 +602,8 @@ async fn skipped_compaction_is_returned_without_hidden_retry() {
         }
     }
 
-    let coordinator = ContextCoordinator::new(Arc::new(SkippingPort));
+    let coordinator =
+        ContextCoordinator::new(context::ContextPorts::from_service(Arc::new(SkippingPort)));
     assert!(matches!(
         coordinator
             .compact(
@@ -633,7 +663,7 @@ fn automatic_compact_skipped_preserves_usage_and_window() {
 #[tokio::test]
 async fn compact_progress_forwarding_reaches_request_and_maps_stage_and_chunks() {
     let port = Arc::new(RecordingPort::default());
-    let coordinator = ContextCoordinator::new(port.clone());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
 
     type CompactProgressRecord = (sdk::CompactStageView, sdk::CompactWorkView);

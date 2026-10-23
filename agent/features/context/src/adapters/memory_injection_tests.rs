@@ -17,7 +17,8 @@ use share::message::Message;
 use share::reasoning::ReasoningLevel;
 
 use super::*;
-use crate::domain::{ContextRequestId, Language, SystemPromptSpecData};
+use crate::domain::{Language, SystemPromptSpecData};
+use share::ids::InteractionRequestId;
 
 struct FakeMemory {
     result: MemorySearchResult,
@@ -222,7 +223,7 @@ fn request(enabled: bool, inject_token_budget: Option<usize>) -> ContextRequestD
     config.memory.inject_token_budget = inject_token_budget;
     ContextRequestData {
         session_id: sdk::SessionId::new("session"),
-        request_id: ContextRequestId::new("request"),
+        request_id: InteractionRequestId::new("request"),
         run_id: RunId::new("run"),
         step_id: sdk::RunStepId::new("step"),
         pending_messages: vec![Message::user("pending")],

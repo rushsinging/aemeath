@@ -18,17 +18,14 @@
 //! Runtime 只在本模块协调 Context-owned OHS；冻结 request 的字段映射留在调用方，
 //! 不扩展第五个 ContextPort 方法。
 
-use std::sync::Arc;
-
 use crate::ports::{
     AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, CompactTrigger, ContentFingerprint, ContextAppendData,
-    ContextAppendError, ContextPort, ContextPortError, ContextRequestData, ContextWindowData,
-    FinalizeCause, ManualCompactRequestData, SessionId, SessionRevision, StepReceiptData,
+    CompactOutcome, CompactRequestData, CompactTrigger, ContextAppendData, ContextAppendError,
+    ContextPortError, ContextRequestData, ContextWindowData, FinalizeCause,
+    ManualCompactRequestData, SessionId, SessionRevision, StepReceiptData,
 };
 use context::{ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData};
 use sdk::RunStepId;
-use sha2::{Digest, Sha256};
 use share::message::Message;
 
 /// Apply the Runtime-owned state transition for an automatic compact outcome.
@@ -53,12 +50,12 @@ pub(crate) fn apply_automatic_compact_outcome<T>(
 /// Runtime 对 Context-owned 四方法端口的单一协调 façade。
 #[derive(Clone)]
 pub(crate) struct ContextCoordinator {
-    port: Arc<dyn ContextPort>,
+    ports: context::ContextPorts,
 }
 
 impl ContextCoordinator {
-    pub(crate) fn new(port: Arc<dyn ContextPort>) -> Self {
-        Self { port }
+    pub(crate) fn new(ports: context::ContextPorts) -> Self {
+        Self { ports }
     }
 
     /// Reminder 事件触发转发（#252：后台进程完成 → OnEvent source 重建）。
@@ -67,7 +64,9 @@ impl ContextCoordinator {
         run_id: &sdk::RunId,
         event_source: &context::ReminderEventSource,
     ) {
-        self.port.reminder_handle_event(run_id, event_source);
+        self.ports
+            .reminders
+            .reminder_handle_event(run_id, event_source);
     }
 
     pub(crate) async fn build_window(
@@ -81,7 +80,7 @@ impl ContextCoordinator {
             request.run_id,
             request.step_id.as_str(),
         );
-        let window = self.port.build_window(request).await?;
+        let window = self.ports.window.build_window(request).await?;
         log::debug!(
             target: crate::LOG_TARGET,
             "context_window_received request_id={} revision={} messages={} system_blocks={} tool_schemas={}",
@@ -98,7 +97,7 @@ impl ContextCoordinator {
         &self,
         request: &ContextRequestData,
     ) -> Result<context::CompactionDecisionData, ContextPortError> {
-        self.port.needs_compaction(request).await
+        self.ports.compact.needs_compaction(request).await
     }
 
     #[cfg(test)]
@@ -121,7 +120,8 @@ impl ContextCoordinator {
             Some(std::sync::Arc::new(
                 crate::application::loop_engine::compaction::CompactProgressAdapter(progress),
             ));
-        self.port
+        self.ports
+            .compact
             .compact(&CompactRequestData {
                 run_id: request.run_id.clone(),
                 source_revision,
@@ -138,14 +138,14 @@ impl ContextCoordinator {
         &self,
         request: &ManualCompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError> {
-        self.port.manual_compact(request).await
+        self.ports.compact.manual_compact(request).await
     }
 
     pub(crate) async fn clear_session(
         &self,
         session_id: &SessionId,
     ) -> Result<(), ContextPortError> {
-        self.port.clear_session(session_id).await
+        self.ports.append.clear_session(session_id).await
     }
 
     pub(crate) async fn append_accepted_input(
@@ -153,15 +153,14 @@ impl ContextCoordinator {
         request: &ContextRequestData,
         messages: Vec<Message>,
     ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
-        let fingerprint = accepted_input_fingerprint(request, &messages)?;
-        self.port
+        self.ports
+            .append
             .append_accepted_input(&AcceptedInputAppendData {
                 session_id: request.session_id.clone(),
                 run_id: request.run_id.clone(),
                 step_id: request.step_id.clone(),
                 source_request_id: request.request_id.clone(),
                 messages,
-                fingerprint,
             })
             .await
     }
@@ -170,14 +169,15 @@ impl ContextCoordinator {
         &self,
         mutation: ToolReceiptMutationData,
     ) -> Result<ToolReceiptMutationReceiptData, ToolReceiptMutationError> {
-        self.port.advance_tool_receipt(mutation).await
+        self.ports.append.advance_tool_receipt(mutation).await
     }
 
     pub(crate) async fn step_receipts(
         &self,
         request: &ContextRequestData,
     ) -> Result<Vec<StepReceiptData>, ToolReceiptMutationError> {
-        self.port
+        self.ports
+            .append
             .step_receipts(&request.session_id, &request.run_id, &request.step_id)
             .await
     }
@@ -194,16 +194,8 @@ impl ContextCoordinator {
         receipts: Vec<StepReceiptData>,
         api_input_tokens: Option<u64>,
     ) -> Result<AppendReceiptData, ContextAppendError> {
-        let fingerprint = fingerprint(
-            request,
-            &step_id,
-            finalize_cause,
-            duration_ms,
-            &messages,
-            &receipts,
-            api_input_tokens,
-        )?;
-        self.port
+        self.ports
+            .append
             .append_and_persist(&ContextAppendData {
                 session_id: request.session_id.clone(),
                 expected_revision,
@@ -215,69 +207,9 @@ impl ContextCoordinator {
                 messages,
                 receipts,
                 api_input_tokens,
-                fingerprint,
             })
             .await
     }
-}
-
-fn accepted_input_fingerprint(
-    request: &ContextRequestData,
-    messages: &[Message],
-) -> Result<ContentFingerprint, AcceptedInputError> {
-    let payload = serde_json::to_vec(&(
-        request.session_id.as_str(),
-        request.run_id.to_string(),
-        request.step_id.as_str(),
-        messages,
-    ))
-    .map_err(|error| {
-        AcceptedInputError::Storage(format!("accepted input 指纹编码失败：{error}"))
-    })?;
-    Ok(ContentFingerprint::new(format!(
-        "{:x}",
-        Sha256::digest(payload)
-    )))
-}
-
-fn fingerprint(
-    request: &ContextRequestData,
-    step_id: &RunStepId,
-    finalize_cause: FinalizeCause,
-    duration_ms: Option<u64>,
-    messages: &[Message],
-    receipts: &[StepReceiptData],
-    api_input_tokens: Option<u64>,
-) -> Result<ContentFingerprint, ContextAppendError> {
-    let payload = serde_json::to_vec(&(
-        request.session_id.as_str(),
-        request.run_id.to_string(),
-        step_id.as_str(),
-        format!("{finalize_cause:?}"),
-        duration_ms,
-        messages,
-        receipts
-            .iter()
-            .map(|receipt| {
-                (
-                    receipt.call_id(),
-                    receipt.index(),
-                    format!("{:?}", receipt.outcome()),
-                    receipt.is_agent(),
-                    receipt.summary(),
-                    receipt.artifact_refs(),
-                    receipt.possible_side_effects(),
-                    receipt.unfinished_call_ids(),
-                )
-            })
-            .collect::<Vec<_>>(),
-        api_input_tokens,
-    ))
-    .map_err(|error| {
-        ContextAppendError::Storage(format!("ContextAppendData 指纹编码失败：{error}"))
-    })?;
-    let digest = Sha256::digest(payload);
-    Ok(ContentFingerprint::new(format!("{digest:x}")))
 }
 
 #[cfg(test)]

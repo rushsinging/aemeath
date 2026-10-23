@@ -106,7 +106,7 @@ pub(super) async fn launch_sub_run(
     mut stuck: DerivedStuckObserver,
     finalizer: SubRunFinalizer,
 ) -> AgentRunTerminal {
-    let runtime_context = instance.context().clone();
+    let runtime_context = instance.context();
     let cancel = runtime_context.cancel().token().clone();
     let _signal_propagation =
         CancellationPropagationGuard::new(tool_execution_context.cancellation(), cancel.clone());

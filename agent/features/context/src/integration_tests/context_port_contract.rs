@@ -1,13 +1,14 @@
+use share::ids::InteractionRequestId;
 use std::collections::HashMap;
 
 use crate::context_port::{
     AcceptedInputAppendData, AcceptedInputReceiptData, AppendReceiptData, CompactOutcome,
-    CompactRequestData, CompactResult, CompactTrigger, CompactionDecisionData, ContentFingerprint,
-    ContextAppendData, ContextAppendError, ContextMessage, ContextPort, ContextPortError,
-    ContextRequestData, ContextRequestId, ContextWindowData, DecisionReason, FinalizeCause,
-    Language, ManualCompactRequestData, SessionRevision, StepReceiptData, SystemPromptSpecData,
-    TokenBudget, ToolOutcomeKindData, Urgency,
+    CompactRequestData, CompactResult, CompactTrigger, CompactionDecisionData, ContextAppendData,
+    ContextAppendError, ContextMessage, ContextPortError, ContextRequestData, ContextWindowData,
+    DecisionReason, FinalizeCause, Language, ManualCompactRequestData, SessionRevision,
+    StepReceiptData, SystemPromptSpecData, TokenBudget, ToolOutcomeKindData, Urgency,
 };
+use crate::context_port::{ContextAppendPort, ContextCompactPort, ContextWindowPort};
 use async_trait::async_trait;
 use sdk::RunId;
 use share::config::domain::snapshot::ConfigSnapshot;
@@ -33,7 +34,7 @@ fn decision() -> CompactionDecisionData {
 fn request() -> ContextRequestData {
     ContextRequestData {
         session_id: SessionId::new("session-1"),
-        request_id: ContextRequestId::new("request-1"),
+        request_id: InteractionRequestId::new("request-1"),
         run_id: RunId::new("run-1"),
         step_id: RunStepId::new("step-1"),
         pending_messages: vec![Message::user("hello")],
@@ -53,7 +54,7 @@ fn request() -> ContextRequestData {
 }
 
 #[async_trait]
-impl ContextPort for FakeContextPort {
+impl ContextWindowPort for FakeContextPort {
     async fn build_window(
         &self,
         request: &ContextRequestData,
@@ -67,7 +68,10 @@ impl ContextPort for FakeContextPort {
             compaction_decision: decision(),
         })
     }
+}
 
+#[async_trait]
+impl ContextCompactPort for FakeContextPort {
     async fn needs_compaction(
         &self,
         _request: &ContextRequestData,
@@ -99,7 +103,10 @@ impl ContextPort for FakeContextPort {
             quality: crate::CompactSummaryQuality::LocalOnly,
         }))
     }
+}
 
+#[async_trait]
+impl ContextAppendPort for FakeContextPort {
     async fn clear_session(&self, _session_id: &SessionId) -> Result<(), ContextPortError> {
         Ok(())
     }
@@ -110,9 +117,9 @@ impl ContextPort for FakeContextPort {
     ) -> Result<AcceptedInputReceiptData, crate::context_port::AcceptedInputError> {
         Ok(AcceptedInputReceiptData {
             run_id: append.run_id.clone(),
+            fingerprint: append.fingerprint().unwrap(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(4),
-            fingerprint: append.fingerprint.clone(),
         })
     }
 
@@ -123,8 +130,8 @@ impl ContextPort for FakeContextPort {
         Ok(AppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
+            fingerprint: append.fingerprint().unwrap(),
             committed_revision: SessionRevision::new(4),
-            fingerprint: append.fingerprint.clone(),
         })
     }
 }
@@ -136,16 +143,15 @@ async fn accepted_input_port_returns_typed_receipt() {
         session_id: SessionId::new("session-1"),
         run_id: RunId::new("run-1"),
         step_id: RunStepId::new("step-1"),
-        source_request_id: ContextRequestId::new("request-1"),
+        source_request_id: InteractionRequestId::new("request-1"),
         messages: vec![Message::user("accepted")],
-        fingerprint: ContentFingerprint::new("input-fingerprint"),
     };
 
     let receipt: AcceptedInputReceiptData = port.append_accepted_input(&accepted).await.unwrap();
     assert_eq!(receipt.run_id, accepted.run_id);
     assert_eq!(receipt.step_id, accepted.step_id);
     assert_eq!(receipt.committed_revision, SessionRevision::new(4));
-    assert_eq!(receipt.fingerprint, accepted.fingerprint);
+    assert_eq!(receipt.fingerprint, accepted.fingerprint().unwrap());
 }
 
 #[tokio::test]
@@ -207,7 +213,7 @@ fn finalized_append() -> ContextAppendData {
         expected_revision: SessionRevision::new(3),
         run_id: RunId::new("run-1"),
         step_id: RunStepId::new("step-1"),
-        source_request_id: ContextRequestId::new("request-1"),
+        source_request_id: InteractionRequestId::new("request-1"),
         finalize_cause: FinalizeCause::UserCancelledStep,
         duration_ms: Some(7_325_000),
         messages: vec![Message::user("finalized")],
@@ -222,7 +228,6 @@ fn finalized_append() -> ContextAppendData {
                 .with_unfinished_call("child-call-9"),
         ],
         api_input_tokens: Some(42),
-        fingerprint: ContentFingerprint::new("fingerprint-1"),
     }
 }
 
@@ -249,7 +254,7 @@ async fn append_returns_typed_receipt_and_conflict_errors_remain_distinct() {
     let append = finalized_append();
     let receipt = FakeContextPort.append_and_persist(&append).await.unwrap();
     assert_eq!(receipt.committed_revision, SessionRevision::new(4));
-    assert_eq!(receipt.fingerprint, append.fingerprint);
+    assert_eq!(receipt.fingerprint, append.fingerprint().unwrap());
 
     let revision_conflict = ContextAppendError::RevisionConflict {
         expected: SessionRevision::new(3),

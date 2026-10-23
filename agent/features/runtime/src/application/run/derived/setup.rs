@@ -454,7 +454,7 @@ impl AgentRunner for CliAgentRunner {
                 catalog: sub_catalog,
                 execution: derived.instance.context().tool_execution(),
                 context: crate::application::context::coordination::ContextCoordinator::new(
-                    derived.instance.context().context(),
+                    derived.instance.context().context().clone(),
                 ),
                 session_id: share::ids::SessionId::new(&derived.session_id),
                 ctx: sub_ctx,
@@ -572,11 +572,11 @@ impl AgentRunner for CliAgentRunner {
                 ));
             }
             let derived_context_port = runtime_context.context();
-            derived_context_port.create_reminder_pipeline(
+            derived_context_port.reminders.create_reminder_pipeline(
                 run_id.clone(),
                 std::mem::take(&mut derived_reminder_sources),
             );
-            derived_context_port.reminder_run_started(&run_id);
+            derived_context_port.reminders.reminder_run_started(&run_id);
             let persistence =
                 crate::application::loop_engine::run_services::RuntimeStepPersistence::new(
                     run_id.clone(),
@@ -670,7 +670,7 @@ impl AgentRunner for CliAgentRunner {
             )
             .await;
             // Reminder 管线句柄随 derived run 销毁（07-reminder-pipeline.md）。
-            runtime_context.context().drop_reminder_pipeline(&run_id);
+            runtime_context.context().reminders.drop_reminder_pipeline(&run_id);
             sub_run_terminal
         })
         .await
