@@ -325,7 +325,7 @@ impl harness::EvidenceStreamPort for ProductionEvidenceStream {
         let cursor = match harness::load_cursor(&self.harness_dir) {
             Ok(cursor) => cursor,
             Err(error) => {
-                log::warn!(target: "aemeath:composition", "checkpoint 读取失败，按首次窗口处理：{}", error.message());
+                log::warn!(target: crate::LOG_TARGET, "checkpoint 读取失败，按首次窗口处理：{}", error.message());
                 None
             }
         };
@@ -334,7 +334,7 @@ impl harness::EvidenceStreamPort for ProductionEvidenceStream {
                 && !cursor.component_tree_fingerprint.is_empty()
                 && !params.component_tree_fingerprint.is_empty()
             {
-                log::warn!(target: "aemeath:composition", "组件树在游标后被外部修改（指纹不符），证据处理照常");
+                log::warn!(target: crate::LOG_TARGET, "组件树在游标后被外部修改（指纹不符），证据处理照常");
             }
         }
         harness::plan_evidence_stream(entries, cursor.as_ref(), params)
@@ -366,7 +366,7 @@ impl harness::EvidenceStreamPort for ProductionEvidenceStream {
             component_tree_fingerprint: fingerprint,
         };
         if let Err(error) = harness::save_cursor(&self.harness_dir, &cursor) {
-            log::warn!(target: "aemeath:composition", "checkpoint 推进失败（下周期将重读本块）：{}", error.message());
+            log::warn!(target: crate::LOG_TARGET, "checkpoint 推进失败（下周期将重读本块）：{}", error.message());
         }
     }
 }
