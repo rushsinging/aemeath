@@ -260,7 +260,33 @@ pub fn wire_lesson_store() -> Arc<LessonStore> {
 }
 
 /// `aemeath rsi run`：一次性执行单轮改进周期后退出。
+/// rsi run 参数覆盖（#2050，仅本次生效）。
+pub struct RsiRunOverrides {
+    pub max_sessions: Option<usize>,
+    pub window_days: Option<u64>,
+}
+
 pub async fn run_rsi_run_once() -> RsiRunExit {
+    run_rsi_run_inner(
+        &RsiRunOverrides {
+            max_sessions: None,
+            window_days: None,
+        },
+        false,
+    )
+    .await
+}
+
+pub async fn run_rsi_run_once_with(overrides: &RsiRunOverrides) -> RsiRunExit {
+    run_rsi_run_inner(overrides, false).await
+}
+
+/// dry-run：完整周期但零持久副作用（#2050）。
+pub async fn run_rsi_run_dry(overrides: &RsiRunOverrides) -> RsiRunExit {
+    run_rsi_run_inner(overrides, true).await
+}
+
+async fn run_rsi_run_inner(overrides: &RsiRunOverrides, dry_run: bool) -> RsiRunExit {
     let config = match load_global_config_layered() {
         Ok(config) => config,
         Err(message) => {
@@ -288,23 +314,39 @@ pub async fn run_rsi_run_once() -> RsiRunExit {
             }
         }
     };
+    let mut rsi_config = config.harness.rsi.clone();
+    if let Some(max_sessions) = overrides.max_sessions {
+        rsi_config.evidence_max_sessions_per_cycle = max_sessions;
+    }
+    if let Some(window_days) = overrides.window_days {
+        rsi_config.evidence_initial_window_days = window_days;
+    }
     let lesson_store = wire_lesson_store();
     let stream = ProductionEvidenceStream {
         datasets_root: share::config::paths::global_session_datasets_dir(),
         harness_dir: share::config::paths::global_agents_dir().join("harness"),
     };
-    let mut task = harness::domain::cycle_task::HarnessRsiCycleTask::new(
+    let task = harness::domain::cycle_task::HarnessRsiCycleTask::new(
         registry,
         llm,
         lesson_store,
-        config.harness.rsi.clone(),
+        rsi_config,
     )
     .with_evidence_stream(Box::new(stream));
+    let mut task = task;
+    if dry_run {
+        task = task.with_dry_run();
+    }
     use harness::domain::task::RsiTask;
     match task.run_cycle().await {
-        Ok(outcome) => RsiRunExit::Done {
-            summary: outcome.summary,
-        },
+        Ok(outcome) => {
+            if dry_run {
+                write_dry_run_preview(&outcome.summary);
+            }
+            RsiRunExit::Done {
+                summary: outcome.summary,
+            }
+        }
         Err(error) => RsiRunExit::Failure {
             message: format!("改进周期失败：{}", error.message()),
             exit_code: 1,
@@ -425,4 +467,17 @@ fn load_global_config_layered() -> Result<share::config::Config, String> {
     let mut chain = share::config::domain::merge::PriorityChain::new();
     chain.push(patch);
     Ok(chain.merge(base))
+}
+
+/// dry-run 预览落盘（ALWAYS 覆盖写，NEVER 累积；#2050）。
+fn write_dry_run_preview(summary: &str) {
+    let harness_dir = share::config::paths::global_agents_dir().join("harness");
+    if let Err(error) = std::fs::create_dir_all(&harness_dir) {
+        log::warn!(target: crate::LOG_TARGET, "创建 harness 目录失败：{error}");
+        return;
+    }
+    let preview_path = harness_dir.join("dry-run-preview.md");
+    if let Err(error) = std::fs::write(&preview_path, summary) {
+        log::warn!(target: crate::LOG_TARGET, "写 dry-run 预览失败：{error}");
+    }
 }
