@@ -408,10 +408,7 @@ impl harness::EvidenceStreamPort for ProductionEvidenceStream {
     }
 
     fn advance(&self, block: &harness::EvidenceBlockPlan, _fingerprint: String) {
-        let mut state = match harness::load_stream_state(&self.harness_dir) {
-            Ok(state) => state,
-            Err(_) => harness::EvidenceStreamState::default(),
-        };
+        let mut state = harness::load_stream_state(&self.harness_dir).unwrap_or_default();
         let mut touched_sessions: Vec<String> = Vec::new();
         for run_ref in &block.runs {
             let progress = state
