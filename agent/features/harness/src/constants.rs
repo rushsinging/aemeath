@@ -33,3 +33,6 @@ pub const CHECKPOINT_FILE_NAME: &str = "checkpoint.json";
 
 /// 已完成 session 条目的 checkpoint 保留上限（自动清理，#2057）。
 pub const COMPLETE_SESSION_RETENTION: usize = 50;
+
+/// RSI 过程事件流 GC 保留天数（#2070）。
+pub const EVENT_RETENTION_DAYS: u64 = 30;

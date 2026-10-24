@@ -137,6 +137,7 @@ async fn cycle_adopts_and_summarizes_per_block() {
         Default::default(),
         false,
         &mut Vec::new(),
+        None,
     )
     .await
     .expect("周期必须成功");
@@ -187,6 +188,7 @@ async fn malformed_block_discarded_without_blocking_others() {
         Default::default(),
         false,
         &mut Vec::new(),
+        None,
     )
     .await
     .expect("周期必须成功");
@@ -219,6 +221,7 @@ async fn empty_registry_yields_empty_cycle() {
         Default::default(),
         false,
         &mut Vec::new(),
+        None,
     )
     .await
     .expect("空注册表 NEVER 报错");
