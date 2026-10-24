@@ -97,9 +97,9 @@ async fn main_and_sub_catalog_publish_exact_skill_schema_and_execute_body() {
             "skill": { "type": "string", "minLength": 1 },
             "timeout": {
                 "type": "integer",
-                "description": "Timeout in seconds (default 120, max 3600)",
+                "description": "Timeout in seconds (default 1800, max 86400)",
                 "minimum": 1,
-                "maximum": 3600
+                "maximum": 86400
             }
         },
         "required": ["skill"],
@@ -338,4 +338,53 @@ fn empty_background_source(
         }
     }
     std::sync::Arc::new(FixedSource(std::sync::Arc::new(EmptyAccess)))
+}
+
+/// 后台化开启时 catalog 快照把通用工具默认预算抬到 24h，并同步 schema 文案；
+/// Watch 是例外（永不转后台，固定 300s）。
+#[tokio::test]
+async fn backgrounding_enabled_catalog_publishes_24h_timeout_with_watch_exception() {
+    let temp = tempfile::tempdir().unwrap();
+    write_skill(temp.path(), "commit", "SKILL_BODY_SENTINEL");
+    let workspace = project::wire_production_workspace(temp.path().to_path_buf(), None).unwrap();
+    let skill = wire_skills();
+    let wiring = wire_builtin_catalog_execution(
+        Arc::new(task::TaskStore::new()),
+        memory_source(),
+        workspace.control(),
+        skill.loader(),
+        skill.catalog(),
+        empty_background_source(),
+        Vec::new(),
+    )
+    .unwrap();
+
+    let snapshot = wiring
+        .catalog()
+        .snapshot_with_backgrounding(
+            &RegistryScopeName::new("main"),
+            &ToolProfileName::new("main-full"),
+            true,
+        )
+        .unwrap();
+
+    let skill_descriptor = snapshot
+        .find(&ToolName::new("Skill"))
+        .expect("Skill catalog entry");
+    assert_eq!(skill_descriptor.timeout_secs, 86400);
+    assert_eq!(skill_descriptor.max_timeout_secs, 86400);
+    assert_eq!(
+        skill_descriptor.input_schema["properties"]["timeout"]["description"],
+        json!("Timeout in seconds (default 86400, max 86400)")
+    );
+
+    let watch_descriptor = snapshot
+        .find(&ToolName::new("BackgroundProcessWatch"))
+        .expect("Watch catalog entry");
+    assert_eq!(watch_descriptor.timeout_secs, 300);
+    assert_eq!(watch_descriptor.max_timeout_secs, 300);
+    assert_eq!(
+        watch_descriptor.input_schema["properties"]["timeout"]["description"],
+        json!("Timeout in seconds (default 300, max 300)")
+    );
 }

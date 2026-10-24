@@ -20,6 +20,7 @@ pub struct WebFetchResult {
 pub struct WebFetchInput {
     /// The URL to fetch
     pub url: String,
-    /// Timeout in seconds (default 30, max 3600)
+    /// Timeout in seconds; the runtime resolves the default (24h when background
+    /// execution is enabled, otherwise this tool's 30s) and caps it at 86400.
     pub timeout: Option<u64>,
 }

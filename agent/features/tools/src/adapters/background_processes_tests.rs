@@ -168,21 +168,19 @@ async fn stop_tool_reports_signal() {
 }
 
 #[test]
-fn watch_tool_framework_timeout_is_300_not_default_120() {
+fn watch_tool_framework_timeout_is_300_and_immune_to_background_budget() {
     use crate::domain::TypedTool;
     let tool = BackgroundProcessWatchTool { source: source() };
-    assert_eq!(
-        tool.timeout_secs(),
-        crate::domain::constants::WATCH_TOOL_TIMEOUT_SECS
-    );
-    assert_eq!(tool.timeout_secs(), 300);
+    assert_eq!(tool.get_timeout_secs(None, false), 300);
+    // 后台档（24h）不得抬高 Watch：本工具永不转后台。
+    assert_eq!(tool.get_timeout_secs(None, true), 300);
     assert_eq!(
         crate::domain::types::background_processes::resolve_watch_wait_secs(Some(60)),
         60
     );
     assert!(
         crate::domain::types::background_processes::resolve_watch_wait_secs(None)
-            < tool.timeout_secs(),
+            < tool.get_timeout_secs(None, false),
         "内部 wait MUST 短于框架 timeout"
     );
 }

@@ -16,13 +16,15 @@ struct SpyToolCatalog {
 }
 
 impl tools::ToolCatalogPort for SpyToolCatalog {
-    fn snapshot(
+    fn snapshot_with_backgrounding(
         &self,
         scope: &tools::RegistryScopeName,
         profile: &tools::ToolProfileName,
+        backgrounding_enabled: bool,
     ) -> Result<tools::ToolCatalogSnapshot, tools::ToolCatalogError> {
         self.called.store(true, Ordering::SeqCst);
-        self.inner.snapshot(scope, profile)
+        self.inner
+            .snapshot_with_backgrounding(scope, profile, backgrounding_enabled)
     }
 }
 

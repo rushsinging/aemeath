@@ -38,10 +38,11 @@ struct RestrictedToolCatalog {
 }
 
 impl ToolCatalogPort for RestrictedToolCatalog {
-    fn snapshot(
+    fn snapshot_with_backgrounding(
         &self,
         scope: &RegistryScopeName,
         profile: &ToolProfileName,
+        _backgrounding_enabled: bool,
     ) -> Result<ToolCatalogSnapshot, ToolCatalogError> {
         // sub run 的快照创建时已按其 role profile 裁剪；此处只服务
         // sub-agent scope（restricted 与 role:<name> profile 均可重复取回）。
@@ -538,7 +539,14 @@ impl RuntimeContextFactory {
         let snapshot = parent
             .context()
             .tool_catalog()
-            .snapshot(&RegistryScopeName::new("sub-agent"), &profile_name)
+            .snapshot_with_backgrounding(
+                &RegistryScopeName::new("sub-agent"),
+                &profile_name,
+                crate::application::run::config::background_threshold_from_context(
+                    parent.context(),
+                )
+                .is_some(),
+            )
             .map_err(|error| RunCreationError::SubToolCatalog {
                 message: error.to_string(),
             })?;

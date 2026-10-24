@@ -1,4 +1,4 @@
-use super::constants::{SUB_AGENT_DEFAULT_TIMEOUT_SECS, SUB_AGENT_TIMEOUT_CAP_SECS};
+use super::constants::SUB_AGENT_DEFAULT_TIMEOUT_SECS;
 use crate::domain::types::agent::{AgentInput, AgentResult};
 use crate::domain::{ToolExecutionContext, TypedTool, TypedToolResult};
 use async_trait::async_trait;
@@ -38,12 +38,13 @@ impl TypedTool for AgentTool {
         true // Sub-agents are independent — safe to run in parallel
     }
 
-    fn timeout_secs(&self) -> u64 {
-        SUB_AGENT_DEFAULT_TIMEOUT_SECS
-    }
-
-    fn max_timeout_secs(&self) -> u64 {
-        SUB_AGENT_TIMEOUT_CAP_SECS
+    fn get_timeout_secs(&self, requested: Option<u64>, backgrounding_enabled: bool) -> u64 {
+        crate::domain::timeout_policy::get_timeout_secs(
+            requested,
+            SUB_AGENT_DEFAULT_TIMEOUT_SECS,
+            crate::domain::constants::DEFAULT_TOOL_MAX_TIMEOUT_SECS,
+            backgrounding_enabled,
+        )
     }
 
     fn cancellation(&self) -> crate::domain::published_language::CancellationDeclaration {
@@ -68,11 +69,11 @@ impl TypedTool for AgentTool {
         let prompt = args.prompt.as_str();
 
         let cwd = ctx.workspace_read().current_path_base();
-        let timeout_secs = crate::domain::timeout_policy::resolve_tool_timeout(
-            args.timeout,
-            SUB_AGENT_DEFAULT_TIMEOUT_SECS,
-            SUB_AGENT_TIMEOUT_CAP_SECS,
-        );
+        // Runtime 已按档位解析并下发；直接调用（单测）时回落到本工具默认档。
+        let timeout_secs = ctx
+            .scope()
+            .effective_timeout_secs()
+            .unwrap_or_else(|| self.get_timeout_secs(args.timeout, false));
         let timeout = std::time::Duration::from_secs(timeout_secs);
         let runner = match ctx.agent_dispatch() {
             Some(r) => r,

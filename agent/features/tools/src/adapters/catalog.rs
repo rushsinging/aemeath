@@ -106,10 +106,11 @@ impl CatalogAdapter {
 }
 
 impl crate::domain::ToolCatalogPort for CatalogAdapter {
-    fn snapshot(
+    fn snapshot_with_backgrounding(
         &self,
         scope_name: &RegistryScopeName,
         profile_name: &ToolProfileName,
+        backgrounding_enabled: bool,
     ) -> Result<ToolCatalogSnapshot, ToolCatalogError> {
         let scope =
             self.backing
@@ -129,10 +130,21 @@ impl crate::domain::ToolCatalogPort for CatalogAdapter {
             .filter(|spec| is_authorized(spec, profile))
             .filter_map(|spec| {
                 let tool = self.backing.registry().get(spec.name().normalized())?;
+                let default_timeout_secs = tool.get_timeout_secs(None, backgrounding_enabled);
+                let max_timeout_secs = tool.get_timeout_secs(Some(u64::MAX), backgrounding_enabled);
+                let input_schema = if tool.supports_configurable_timeout() {
+                    crate::domain::timeout_policy::inject_timeout_into_input_schema(
+                        tool.input_schema(),
+                        default_timeout_secs,
+                        max_timeout_secs,
+                    )
+                } else {
+                    tool.input_schema()
+                };
                 Some(ToolDescriptor {
                     name: crate::domain::published_language::ToolName::new(tool.name()),
                     description: tool.description().to_string(),
-                    input_schema: tool.input_schema(),
+                    input_schema,
                     required_capabilities: spec.required_capabilities(),
                     concurrency: if tool.is_concurrency_safe() {
                         ConcurrencyDeclaration::safe()
@@ -140,8 +152,8 @@ impl crate::domain::ToolCatalogPort for CatalogAdapter {
                         ConcurrencyDeclaration::serialized()
                     },
                     cancellation: tool.cancellation(),
-                    timeout_secs: tool.timeout_secs(),
-                    max_timeout_secs: tool.max_timeout_secs(),
+                    timeout_secs: default_timeout_secs,
+                    max_timeout_secs,
                     read_only: tool.is_read_only(),
                     background_log_direct: tool.background_log_direct(),
                     input_safety: if tool.name().eq_ignore_ascii_case("bash") {

@@ -10,7 +10,7 @@ use crate::ports::{
 use hook::{HookDispatcher, HookInvocationData, HookOutcomeData};
 use tools::published::execution::{ToolExecutionOutcome, ToolExecutionPort, ToolInvocation};
 use tools::published::skill::{SkillCatalogPort, SkillDescriptor, SkillQuery};
-use tools::{ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot, ToolProfileName};
+use tools::{ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot};
 
 pub(crate) struct FakeContextPort;
 
@@ -119,10 +119,11 @@ impl ProviderFactory for FakeProviderFactory {
 pub(crate) struct FakeToolCatalog;
 
 impl ToolCatalogPort for FakeToolCatalog {
-    fn snapshot(
+    fn snapshot_with_backgrounding(
         &self,
         scope: &tools::RegistryScopeName,
-        profile: &ToolProfileName,
+        profile: &tools::ToolProfileName,
+        _backgrounding_enabled: bool,
     ) -> Result<ToolCatalogSnapshot, ToolCatalogError> {
         Ok(ToolCatalogSnapshot::new(
             scope.clone(),

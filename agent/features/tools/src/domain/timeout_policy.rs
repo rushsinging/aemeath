@@ -2,7 +2,29 @@
 
 use serde_json::{json, Value};
 
-use super::constants::DEFAULT_TOOL_MAX_TIMEOUT_SECS;
+use super::constants::{BACKGROUND_TOOL_TIMEOUT_SECS, DEFAULT_TOOL_MAX_TIMEOUT_SECS};
+
+/// 解析一次工具调用的 effective `timeout`（秒），三层优先级单一实现：
+///
+/// 1. 显式 `requested` → clamp 到 `[1, max_secs]`（后台档也 **NEVER** 覆盖用户值）
+/// 2. 无 `requested` 且 `backgrounding_enabled` → `BACKGROUND_TOOL_TIMEOUT_SECS`
+/// 3. 否则 → 工具自定义 `tool_default_secs`，缺省回落 `DEFAULT_TOOL_TIMEOUT_SECS`
+///
+/// `tool_default_secs` / `max_secs` 由各工具的 `Tool::get_timeout_secs`
+/// 覆写注入；runtime 侧用 catalog 发布快照传同一对值。
+pub fn get_timeout_secs(
+    requested: Option<u64>,
+    tool_default_secs: u64,
+    max_secs: u64,
+    backgrounding_enabled: bool,
+) -> u64 {
+    let selected_default = if requested.is_none() && backgrounding_enabled {
+        BACKGROUND_TOOL_TIMEOUT_SECS
+    } else {
+        tool_default_secs
+    };
+    resolve_tool_timeout(requested, selected_default, max_secs)
+}
 
 /// 解析工具 `timeout` 入参（秒）。
 ///
@@ -87,6 +109,7 @@ pub fn default_tool_max_timeout_secs() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use super::super::constants::DEFAULT_TOOL_TIMEOUT_SECS;
     use super::*;
 
     #[test]
@@ -101,6 +124,70 @@ mod tests {
         assert_eq!(resolve_tool_timeout(Some(0), 120, 3600), 1);
         assert_eq!(resolve_tool_timeout(Some(99999), 120, 3600), 3600);
         assert_eq!(resolve_tool_timeout(Some(50), 120, 3600), 50);
+    }
+
+    #[test]
+    fn get_timeout_secs_prefers_explicit_request_over_every_default() {
+        assert_eq!(
+            get_timeout_secs(Some(60), 1800, DEFAULT_TOOL_MAX_TIMEOUT_SECS, false),
+            60
+        );
+        assert_eq!(
+            get_timeout_secs(Some(60), 1800, DEFAULT_TOOL_MAX_TIMEOUT_SECS, true),
+            60
+        );
+        assert_eq!(
+            get_timeout_secs(Some(0), 1800, DEFAULT_TOOL_MAX_TIMEOUT_SECS, true),
+            1
+        );
+        assert_eq!(
+            get_timeout_secs(Some(u64::MAX), 1800, DEFAULT_TOOL_MAX_TIMEOUT_SECS, true),
+            DEFAULT_TOOL_MAX_TIMEOUT_SECS
+        );
+    }
+
+    #[test]
+    fn get_timeout_secs_backgrounding_replaces_default_with_background_budget() {
+        assert_eq!(
+            get_timeout_secs(
+                None,
+                DEFAULT_TOOL_TIMEOUT_SECS,
+                DEFAULT_TOOL_MAX_TIMEOUT_SECS,
+                true
+            ),
+            BACKGROUND_TOOL_TIMEOUT_SECS
+        );
+        assert_eq!(
+            get_timeout_secs(None, 30, DEFAULT_TOOL_MAX_TIMEOUT_SECS, true),
+            86400
+        );
+        // 上限更小的工具（Watch）不会被后台档抬高。
+        assert_eq!(get_timeout_secs(None, 300, 300, true), 300);
+    }
+
+    #[test]
+    fn get_timeout_secs_without_backgrounding_uses_tool_default() {
+        assert_eq!(
+            get_timeout_secs(
+                None,
+                DEFAULT_TOOL_TIMEOUT_SECS,
+                DEFAULT_TOOL_MAX_TIMEOUT_SECS,
+                false
+            ),
+            DEFAULT_TOOL_TIMEOUT_SECS
+        );
+        assert_eq!(
+            get_timeout_secs(None, 30, DEFAULT_TOOL_MAX_TIMEOUT_SECS, false),
+            30
+        );
+        assert_eq!(
+            get_timeout_secs(None, 3600, DEFAULT_TOOL_MAX_TIMEOUT_SECS, false),
+            3600
+        );
+        assert_eq!(
+            get_timeout_secs(None, 0, DEFAULT_TOOL_MAX_TIMEOUT_SECS, false),
+            1
+        );
     }
 
     #[test]

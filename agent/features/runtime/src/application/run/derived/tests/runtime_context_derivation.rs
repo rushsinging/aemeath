@@ -11,10 +11,11 @@ use tools::{ToolCatalogPort, ToolProfileName};
 
 pub(super) struct FakeToolCat;
 impl ToolCatalogPort for FakeToolCat {
-    fn snapshot(
+    fn snapshot_with_backgrounding(
         &self,
         scope: &tools::RegistryScopeName,
-        profile: &ToolProfileName,
+        profile: &tools::ToolProfileName,
+        _backgrounding_enabled: bool,
     ) -> Result<tools::ToolCatalogSnapshot, tools::ToolCatalogError> {
         Ok(tools::ToolCatalogSnapshot::new(
             scope.clone(),
@@ -654,10 +655,11 @@ struct RecordingToolCatalog {
 }
 
 impl ToolCatalogPort for RecordingToolCatalog {
-    fn snapshot(
+    fn snapshot_with_backgrounding(
         &self,
         scope: &tools::RegistryScopeName,
-        profile: &ToolProfileName,
+        profile: &tools::ToolProfileName,
+        _backgrounding_enabled: bool,
     ) -> Result<tools::ToolCatalogSnapshot, tools::ToolCatalogError> {
         self.calls
             .lock()
@@ -803,10 +805,11 @@ fn sub_derivation_with_role_policy_queries_role_profile() {
 struct FailingToolCatalog;
 
 impl ToolCatalogPort for FailingToolCatalog {
-    fn snapshot(
+    fn snapshot_with_backgrounding(
         &self,
         scope: &tools::RegistryScopeName,
-        profile: &ToolProfileName,
+        profile: &tools::ToolProfileName,
+        _backgrounding_enabled: bool,
     ) -> Result<tools::ToolCatalogSnapshot, tools::ToolCatalogError> {
         if scope.as_str() == "sub-agent" && profile.as_str() == "sub-agent-restricted" {
             return Err(tools::ToolCatalogError::UnknownScope {

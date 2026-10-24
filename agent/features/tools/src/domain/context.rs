@@ -34,6 +34,10 @@ pub struct ExecutionScope {
     registry_scope: RegistryScopeName,
     profile: ToolProfileName,
     deadline: Option<SystemTime>,
+    /// Runtime 派发前解析出的 effective `timeout`（秒）。工具实现直接读它
+    /// 做超时控制，保证与框架 deadline 同源；未经过 supervisor 的直接
+    /// 调用为 `None`，工具回落到自己的默认值解析。
+    effective_timeout_secs: Option<u64>,
 }
 pub struct ExecutionScopeBuilder(ExecutionScope);
 impl ExecutionScope {
@@ -51,6 +55,7 @@ impl ExecutionScope {
             registry_scope: RegistryScopeName::new("main"),
             profile: ToolProfileName::new("main-full"),
             deadline: None,
+            effective_timeout_secs: None,
         })
     }
     pub fn run_id(&self) -> &str {
@@ -76,6 +81,15 @@ impl ExecutionScope {
     }
     pub fn deadline(&self) -> Option<SystemTime> {
         self.deadline
+    }
+    /// Runtime 解析出的 effective `timeout`（秒）；见字段文档。
+    pub fn effective_timeout_secs(&self) -> Option<u64> {
+        self.effective_timeout_secs
+    }
+    /// 注入派发前解析结果（consuming，供 supervisor 同步 invocation 与 context）。
+    pub fn with_effective_timeout_secs(mut self, secs: u64) -> Self {
+        self.effective_timeout_secs = Some(secs);
+        self
     }
 }
 impl ExecutionScopeBuilder {
@@ -256,6 +270,12 @@ impl ToolExecutionContext {
     /// 输出直绑路径注入（#1890）：per-call clone 后调用。
     pub fn with_background_log_path(mut self, path: std::path::PathBuf) -> Self {
         self.background_log_path = Some(path);
+        self
+    }
+
+    /// 注入 runtime 解析出的 effective `timeout`（秒），与 invocation 侧同步。
+    pub fn with_effective_timeout_secs(mut self, secs: u64) -> Self {
+        self.scope = self.scope.with_effective_timeout_secs(secs);
         self
     }
 
