@@ -1215,7 +1215,7 @@ fn logging_init_decision(
     }
 }
 
-fn init_logging(
+pub(crate) fn init_logging(
     snapshot: &ConfigSnapshot,
     output_mode: sdk::LoggingOutputMode,
     native_stderr: sdk::NativeStderrMode,

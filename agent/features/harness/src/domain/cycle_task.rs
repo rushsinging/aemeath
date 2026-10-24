@@ -71,10 +71,45 @@ impl RsiTask for HarnessRsiCycleTask {
             component_tree_fingerprint: String::new(),
         };
         let blocks = self.stream_port.plan(&params);
+        let cursor_start = self.stream_port.cursor_summary();
         let mut summary_parts = Vec::new();
         let mut preview_lines = Vec::new();
-        for block in &blocks {
+        let mut report_lines = Vec::new();
+        if self.dry_run {
+            report_lines.push(format!(
+                "—— checkpoint：起始 {}（dry-run NEVER 推进）",
+                cursor_start.as_deref().unwrap_or("无游标（首次周期）")
+            ));
+            report_lines.push(format!("—— 数据源分块：{} 块", blocks.len()));
+        }
+        for (block_index, block) in blocks.iter().enumerate() {
             let evidence = self.stream_port.block_evidence(block);
+            if self.dry_run {
+                let sessions: Vec<String> = block
+                    .runs
+                    .iter()
+                    .map(|run| format!("{}#{}", short_key(&run.session_key), run.run_id))
+                    .collect();
+                report_lines.push(format!(
+                    "  块 {}/{}：{}",
+                    block_index + 1,
+                    blocks.len(),
+                    sessions.join("，")
+                ));
+                let signals: Vec<String> = evidence
+                    .signals
+                    .iter()
+                    .map(|signal| signal.signal_id.clone())
+                    .collect();
+                report_lines.push(format!(
+                    "    证据：{}",
+                    if signals.is_empty() {
+                        "（无信号）".to_string()
+                    } else {
+                        signals.join(" | ")
+                    }
+                ));
+            }
             let outcome = run_improvement_cycle(
                 registry,
                 self.llm.as_ref(),
@@ -85,6 +120,9 @@ impl RsiTask for HarnessRsiCycleTask {
                 &mut preview_lines,
             )
             .await?;
+            if self.dry_run {
+                report_lines.push(format!("    提案结果：{}", outcome.summary));
+            }
             summary_parts.push(outcome.summary);
             if !self.dry_run {
                 let fingerprint = crate::domain::stream_port::component_tree_fingerprint(registry);
@@ -97,10 +135,25 @@ impl RsiTask for HarnessRsiCycleTask {
             });
         }
         let mut summary = summary_parts.join(" | ");
-        if self.dry_run && !preview_lines.is_empty() {
-            summary.push_str("\n（dry-run 预览）\n");
-            summary.push_str(&preview_lines.join("\n"));
+        if self.dry_run {
+            summary.push_str("\n（dry-run 报告）\n");
+            summary.push_str(&report_lines.join("\n"));
+            if !preview_lines.is_empty() {
+                summary.push_str("\n—— 组件落盘结果（预演，零写入）：\n");
+                summary.push_str(&preview_lines.join("\n"));
+            }
         }
         Ok(crate::domain::task::CycleOutcome { summary })
     }
+}
+
+/// session key 短形态（截 UUID 前段，报告可读）。
+fn short_key(session_key: &str) -> String {
+    session_key
+        .strip_suffix(".dataset")
+        .unwrap_or(session_key)
+        .split('-')
+        .next()
+        .unwrap_or(session_key)
+        .to_string()
 }

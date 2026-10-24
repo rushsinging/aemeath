@@ -297,3 +297,38 @@ fn lesson_signal_kind_bound_from_reason_reference() {
         "无引用兜底模型自述"
     );
 }
+
+// ---- dry-run 富预览（实在总结：前后规模 + 要点 + 依据）----
+
+#[test]
+fn dry_run_edit_summary_carries_scale_and_highlights() {
+    use crate::adapters::filesystem::FilesystemComponentRegistry;
+    use std::collections::HashMap;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("g.md");
+    std::fs::write(&path, "TODO: 待补充。\n").expect("write");
+    let mut registry_map: HashMap<ComponentId, std::path::PathBuf> = HashMap::new();
+    registry_map.insert(id("alpha"), path.clone());
+    let mut registry = FilesystemComponentRegistry::new(registry_map);
+
+    let content = ComponentContent {
+        frontmatter: None,
+        body: "# 执行规则\n## 编辑防护\n正文行。\n".to_string(),
+    };
+    let summary = crate::domain::improvement::render_dry_run_edit_summary(
+        &mut registry,
+        &id("alpha"),
+        Some(&content),
+        "回应 repeated_failure:Edit:x",
+    );
+    assert!(summary.contains("upsert"));
+    assert!(summary.contains("1 行 → 3 行"), "前后规模：{summary}");
+    assert!(
+        summary.contains("# 执行规则 / ## 编辑防护"),
+        "标题要点：{summary}"
+    );
+    assert!(
+        summary.contains("依据：回应 repeated_failure"),
+        "依据：{summary}"
+    );
+}
