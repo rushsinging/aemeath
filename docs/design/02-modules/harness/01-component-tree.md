@@ -15,7 +15,7 @@
 | c4 | tool_guidance 覆盖层 | `~/.agents/tool_guidance.md`（新增） | always-on 段（通道见 05 D1） | 仅使用指南 prose；工具 schema/描述本体编译期固定，NEVER 外置 |
 | c5 | skills | 全局 `~/.agents/skills/` + 项目 `.agents/skills/`、`.claude/skills/` | 按需 | 单个 `SKILL.md` 整文件（frontmatter 校验对齐现有加载器） |
 | c6 | sub_agents | `aemeath.json` 的 agents 定义（names + role 绑定） | 派发时 | config 热载生效（见 02 分片），RSI 编辑后置 |
-| c8 | plugin | 预留位（0.3.0） | loop 内 | seam + tool loop 中间件 + TUI 渲染，本里程碑不落地 |
+> c8 plugin：**RSI 不可见**（2026-10-24 拍板——客户端/UI 相关，暂停 RSI 自动编辑）；seam 执行面（run 边界 reload、tool result 变换）保留。
 
 ### 1.1 AlwaysOnProse 组件族：机制一份，语义分槽
 

@@ -232,16 +232,12 @@ pub fn wire_component_registry(
             share::config::paths::global_skills_dir(),
         ),
     );
-    let plugins_registry: Box<dyn harness::ComponentRegistry + Send> = Box::new(
-        harness::adapters::plugins_registry::PluginsDirectoryRegistry::new(
-            share::config::paths::global_plugins_dir(),
-        ),
-    );
+    // c8 plugins 不进 RSI 可编辑面（2026-10-24 拍板：客户端/UI 相关，
+    // 暂停 RSI 自动编辑；seam 执行面（run 边界 reload）保持不变）。
     let _ = config;
     let composite = harness::adapters::composite::CompositeComponentRegistry::new(vec![
         prose_registry,
         skills_registry,
-        plugins_registry,
     ]);
     Ok(Arc::new(tokio::sync::Mutex::new(Box::new(composite))))
 }
