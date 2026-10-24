@@ -267,11 +267,25 @@ fn render_user_guidance(files: &[UserGuidanceFile]) -> String {
             let source = escape_xml_attribute(&file.path.to_string_lossy());
             format!(
                 "<guidance source=\"{}\">\n{}\n</guidance>",
-                source, file.content
+                source,
+                truncate_guidance_content(&file.content, &file.path.to_string_lossy())
             )
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+/// overlay 单文件注入预算（#2063）：超预算时 **NEVER 腰斩正文**
+/// （指令是语义整体，截断会丢关键规则）——改为不注入正文，仅留
+/// 引导行让模型按需 Read 全文（全文可达、语义完整、常驻成本 O(1)）。
+fn truncate_guidance_content(content: &str, source_path: &str) -> String {
+    let budget = crate::constants::GUIDANCE_FILE_MAX_CHARS;
+    if content.chars().count() <= budget {
+        return content.to_string();
+    }
+    format!(
+        "（本 guidance 文件 {source_path} 超过注入预算 {budget} 字符，正文未注入——         需要其内容时用 Read 工具读取完整文件，NEVER 凭猜测假设其内容）"
+    )
 }
 
 async fn load_agents_md_from_paths(

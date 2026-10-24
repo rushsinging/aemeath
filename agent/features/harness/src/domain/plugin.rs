@@ -59,10 +59,26 @@ pub enum SeamEffect {
 
 /// seam 引擎：规则集按序应用，首个 trim 生效后仍允许后续 hint 追加
 /// （trim 改文本、hint 追加行——两者正交）。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Default)]
 pub struct PluginSeamEngine {
     /// 规则来源 plugin 名（与规则一一对应）。
     rules: Vec<(String, PluginRule)>,
+}
+
+impl PartialEq for PluginSeamEngine {
+    fn eq(&self, other: &Self) -> bool {
+        self.rules == other.rules
+    }
+}
+impl Eq for PluginSeamEngine {}
+
+impl Clone for PluginSeamEngine {
+    fn clone(&self) -> Self {
+        // 计数是 run 态——克隆即新 run（归零）
+        Self {
+            rules: self.rules.clone(),
+        }
+    }
 }
 
 impl PluginSeamEngine {
@@ -97,9 +113,18 @@ impl PluginSeamEngine {
                 PluginRule::TrimOutput { max_chars, .. } => {
                     let original_chars = output.chars().count();
                     if original_chars > *max_chars {
-                        let mut trimmed: String = output.chars().take(*max_chars).collect();
-                        trimmed.push_str("…（plugin seam 截断）");
-                        output = trimmed;
+                        // 首尾保留（语义保持：头部结论 + 尾部输出 +
+                        // 中间省略标记——NEVER 纯腰斩，对齐 Watch log
+                        // tail 口径与语义压缩终态方向）。
+                        let head_budget = max_chars * 2 / 3;
+                        let tail_budget = max_chars - head_budget;
+                        let head: String = output.chars().take(head_budget).collect();
+                        let tail: String =
+                            output.chars().skip(original_chars - tail_budget).collect();
+                        output = format!(
+                            "{head}\n…（plugin seam：中间省略 {omitted} 字符，共 {original_chars}）\n{tail}",
+                            omitted = original_chars - head_budget - tail_budget
+                        );
                         outcomes.push(SeamOutcome {
                             rule_index: index,
                             plugin_name: plugin_name.clone(),

@@ -51,7 +51,7 @@ pub fn parse_plugin_rules(body: &str) -> Result<Vec<PluginRule>, HarnessError> {
             other => {
                 return Err(HarnessError::invalid(
                     ERROR_DOMAIN,
-                    format!("未知 seam 类型：{other}（v1 仅 trim_output / error_hint）"),
+                    format!("未知 seam 类型：{other}（支持 trim_output / error_hint；更多 seam 随 #2069 重设计）"),
                 ));
             }
         };

@@ -19,3 +19,6 @@ pub(crate) const GUARDRAILS_SECTION_MAX_CHARS: usize = 4000;
 
 /// tool_guidance 注入段正文预算（字符；c4 组件，#2022）。
 pub(crate) const TOOL_GUIDANCE_SECTION_MAX_CHARS: usize = 4000;
+
+/// overlay（AGENTS.md）单文件注入预算（#2063）。
+pub(crate) const GUIDANCE_FILE_MAX_CHARS: usize = 8000;

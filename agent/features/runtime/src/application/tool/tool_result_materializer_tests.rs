@@ -301,7 +301,7 @@ async fn plugin_seam_trims_after_reload() {
     materializer.reload_plugin_seam_from_directory(plugins_dir.path());
 
     let (trimmed, outcomes) = materializer.apply_plugin_seam("Bash", &"x".repeat(50), false);
-    assert!(trimmed.contains("（plugin seam 截断）"));
+    assert!(trimmed.contains("中间省略"));
     assert_eq!(outcomes.len(), 1);
 }
 

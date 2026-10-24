@@ -695,3 +695,22 @@ async fn claude_md_message_appends_tool_guidance_section() {
     let section = section.expect("tool_guidance 必须加载");
     assert!(section.contains("优先并行派发"));
 }
+
+// ---- #2063 overlay 注入预算 ----
+
+#[test]
+fn guidance_content_replaced_with_read_hint_when_over_budget() {
+    let oversized = "行".repeat(crate::constants::GUIDANCE_FILE_MAX_CHARS + 500);
+    let replaced = truncate_guidance_content(&oversized, "/p/AGENTS.md");
+    // NEVER 腰斩：超预算正文零注入，只留引导（语义完整 + 常驻 O(1)）
+    assert!(replaced.contains("超过注入预算"));
+    assert!(replaced.contains("Read 工具读取完整文件"));
+    assert!(replaced.contains("/p/AGENTS.md"));
+    assert!(!replaced.contains("行行"), "正文 NEVER 部分注入");
+    let normal = "正常内容";
+    assert_eq!(
+        truncate_guidance_content(normal, "/p"),
+        normal,
+        "预算内直过"
+    );
+}

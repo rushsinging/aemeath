@@ -23,7 +23,8 @@ fn trim_output_truncates_with_marker() {
     let mut engine = PluginSeamEngine::new();
     engine.register("output-guard", &[trim_rule("Bash", 10)]);
     let (text, outcomes) = engine.apply("Bash", &"x".repeat(50), false);
-    assert!(text.contains("（plugin seam 截断）"));
+    assert!(text.contains("中间省略"), "首尾保留形态");
+    assert!(text.ends_with('x'), "尾部保留");
     assert_eq!(outcomes.len(), 1);
     assert!(text.chars().count() < 50);
 }
@@ -45,7 +46,7 @@ fn rule_scoped_by_tool_name_with_wildcard() {
     engine.register("guard", &[trim_rule("Grep", 5), trim_rule("", 3)]);
     let (text, _) = engine.apply("Bash", &"y".repeat(20), false);
     // Grep 规则不匹配 Bash；空 tool 通配命中（预算 3）
-    assert!(text.contains("（plugin seam 截断）"));
+    assert!(text.contains("中间省略"), "首尾保留形态");
     let (unmatched, _) = engine.apply("Bash", "abc", false);
     assert_eq!(unmatched, "abc");
 }
@@ -77,11 +78,11 @@ fn trim_and_hint_compose_in_one_pass() {
         "combo",
         &[
             trim_rule("Bash", 10),
-            hint_rule("Bash", "截断", "hint-line"),
+            hint_rule("Bash", "省略", "hint-line"),
         ],
     );
     let (text, outcomes) = engine.apply("Bash", &format!("{} error", "z".repeat(50)), true);
-    assert!(text.contains("（plugin seam 截断）"));
+    assert!(text.contains("中间省略"), "首尾保留形态");
     assert!(text.ends_with("hint-line"));
     assert_eq!(outcomes.len(), 2);
 }
