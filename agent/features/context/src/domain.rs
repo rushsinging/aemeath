@@ -100,6 +100,12 @@ pub enum InvocationReminderData {
         /// 变更的 guidance / instruction 文件路径（Remind 引导 LLM Read 的目标）。
         paths: Vec<String>,
     },
+    /// aemeath.json 配置变更（含 agents 名册，#2046）：会话冻结快照不变，
+    /// 下次会话生效全文——本 Remind 是会话内模型感知配置变更的唯一通道。
+    ConfigSourcesChanged {
+        /// 变更键（ConfigReloaded 的 changed_keys）。
+        changed_keys: Vec<String>,
+    },
     ModelGuidanceMismatch {
         session_model_id: String,
         run_model_id: String,
@@ -150,6 +156,10 @@ impl InvocationReminderData {
         Self::GuidanceSourcesChanged { paths }
     }
 
+    pub fn config_sources_changed(changed_keys: Vec<String>) -> Self {
+        Self::ConfigSourcesChanged { changed_keys }
+    }
+
     pub fn model_guidance_mismatch(
         session_model_id: impl Into<String>,
         run_model_id: impl Into<String>,
@@ -180,6 +190,7 @@ impl InvocationReminderData {
         match self {
             Self::TaskProgress(_) => "task_progress",
             Self::GuidanceSourcesChanged { .. } => "guidance_sources_changed",
+            Self::ConfigSourcesChanged { .. } => "config_sources_changed",
             Self::ModelGuidanceMismatch { .. } => "model_guidance_mismatch",
             Self::MemoryUpdated { .. } => "memory_updated",
             Self::MemoryRecall { .. } => "memory_recall",

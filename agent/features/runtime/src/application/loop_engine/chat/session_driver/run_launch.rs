@@ -814,6 +814,24 @@ where
                         ),
                     ));
                 }
+                // #2046：aemeath.json 配置变更（含 agents 名册）——模型可见
+                // Remind（ConfigReloaded 事件只到 TUI/SDK，本 Remind 是会话内
+                // 模型感知配置变更的唯一通道）。
+                if matches!(
+                    &turn_boundary_config.refresh,
+                    Ok(config::ConfigRefreshOutcomeData::Reloaded { .. })
+                ) {
+                    let changed_keys = vec!["config:reloaded".to_string()];
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "reminder_source_registered kind=config_sources_changed trigger=turn_boundary_config"
+                    );
+                    reminder_sources.push(std::sync::Arc::new(
+                        crate::application::loop_engine::chat::reminder_sources::RunStartFactReminderSource::config_sources_changed(
+                            changed_keys,
+                        ),
+                    ));
+                }
                 // #2015：防御复检被拒的组件变更——保留旧版已定案（loop_phases
                 // 内 warn + 事件剔除）；此处记录被拒面供后续组件装配 issue
                 // 接入注入侧排除与 LLM 通知扩展。
