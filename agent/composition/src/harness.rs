@@ -227,11 +227,6 @@ pub fn wire_component_registry(
     );
     let prose_registry: Box<dyn harness::ComponentRegistry + Send> =
         Box::new(harness::adapters::filesystem::FilesystemComponentRegistry::new(component_paths));
-    let scripts_registry: Box<dyn harness::ComponentRegistry + Send> = Box::new(
-        harness::adapters::scripts_registry::ScriptsDirectoryRegistry::new(
-            share::config::paths::global_scripts_dir(),
-        ),
-    );
     let skills_registry: Box<dyn harness::ComponentRegistry + Send> = Box::new(
         harness::adapters::skills_registry::SkillsDirectoryRegistry::new(
             share::config::paths::global_skills_dir(),
@@ -245,7 +240,6 @@ pub fn wire_component_registry(
     let _ = config;
     let composite = harness::adapters::composite::CompositeComponentRegistry::new(vec![
         prose_registry,
-        scripts_registry,
         skills_registry,
         plugins_registry,
     ]);
