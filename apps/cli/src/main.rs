@@ -91,6 +91,12 @@ async fn main() {
             args::RsiCommands::Serve => {
                 subcommand::rsi_command::run_rsi_serve_command().await;
             }
+            args::RsiCommands::History { component } => {
+                subcommand::rsi_command::run_rsi_history_command(component.as_deref());
+            }
+            args::RsiCommands::Rollback { component, cycle } => {
+                subcommand::rsi_command::run_rsi_rollback_command(&component, cycle.as_deref());
+            }
         },
         Some(Commands::Version) => {
             println!("aemeath {}", composition::version());

@@ -33,4 +33,31 @@ pub trait ComponentRegistry: Send {
 
     /// 删除组件。
     fn delete(&mut self, id: &ComponentId) -> Result<(), HarnessError>;
+
+    /// 读取组件**原始落盘文本**（#2074 回滚用：逐字节恢复，NEVER 经
+    /// frontmatter 对象往返重排 key）。默认实现走 content 序列化。
+    fn read_raw(&self, id: &ComponentId) -> Result<String, HarnessError> {
+        let content = self.read(id)?;
+        let mut text = String::new();
+        if let Some(frontmatter) = &content.frontmatter {
+            let yaml = serde_yml::to_string(frontmatter).map_err(|error| {
+                HarnessError::invalid(
+                    crate::constants::ERROR_DOMAIN,
+                    format!("frontmatter 序列化失败：{error}"),
+                )
+            })?;
+            text.push_str("---\n");
+            text.push_str(yaml.trim_end());
+            text.push_str("\n---\n");
+        }
+        text.push_str(&content.body);
+        Ok(text)
+    }
+
+    /// 写入**原始文本**（#2074 回滚：先校验解析结果再原子写）。
+    /// 默认实现解析为 content 后走 write。
+    fn write_raw(&mut self, id: &ComponentId, text: &str) -> Result<(), HarnessError> {
+        let content = crate::adapters::filesystem::parse_markdown_with_frontmatter(text)?;
+        self.write(id, &content)
+    }
 }

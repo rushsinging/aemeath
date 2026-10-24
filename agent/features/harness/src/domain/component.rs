@@ -18,6 +18,17 @@ pub enum ComponentKind {
 }
 
 impl ComponentKind {
+    /// 全部变体（解析/枚举用）。
+    pub const ALL: [Self; 7] = [
+        Self::Guardrails,
+        Self::MemoryView,
+        Self::Plugin,
+        Self::Skill,
+        Self::SubAgents,
+        Self::SystemPromptOverlay,
+        Self::ToolGuidance,
+    ];
+
     /// 稳定的日志/展示名（小写连字符）。
     pub fn as_str(self) -> &'static str {
         match self {
@@ -108,4 +119,16 @@ pub fn diff_contents(
             }
         }
     }
+}
+
+/// 解析 `<kind>/<name>` 为 ComponentId（kind 按 as_str 反向匹配）。
+pub fn parse_component_id(raw: &str) -> Option<ComponentId> {
+    let (kind_text, name) = raw.split_once('/')?;
+    let kind = ComponentKind::ALL
+        .into_iter()
+        .find(|kind| kind.as_str() == kind_text)?;
+    Some(ComponentId {
+        kind,
+        name: crate::domain::component::ComponentName::new(name),
+    })
 }

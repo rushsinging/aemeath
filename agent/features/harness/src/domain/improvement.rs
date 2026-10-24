@@ -153,6 +153,7 @@ async fn run_block(
     preview_lines: &mut Vec<String>,
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
     block_index: usize,
+    version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
 ) -> (Vec<(AppliedEdit, String)>, &'static str) {
     let prompt = build_block_prompt(chunk, lessons, evidence);
     let response = match llm.complete(&prompt).await {
@@ -229,6 +230,21 @@ async fn run_block(
                 } else {
                     (Vec::new(), "预演（将作废）")
                 };
+            }
+            // #2074：采纳前逐 edit 快照旧内容（回滚依据；失败仅 warn——NEVER
+            // 阻断采纳，但会丢失该次回滚能力）
+            if let Some(version_store) = version_store {
+                for edit in &change_set.edits {
+                    let (id, action) = match edit {
+                        crate::domain::changeset::ComponentEdit::Upsert { id, .. } => {
+                            (id, "upsert")
+                        }
+                        crate::domain::changeset::ComponentEdit::Delete { id } => (id, "delete"),
+                    };
+                    if let Err(error) = version_store.capture(registry, id, cycle_ref, action) {
+                        log::warn!(target: crate::LOG_TARGET, "组件快照失败（回滚能力缺失）：{error}");
+                    }
+                }
             }
             match apply_change_set(registry, &change_set) {
                 Ok(applied) => {
@@ -346,6 +362,7 @@ fn record_adopted_lesson(
 }
 
 /// 执行一轮完整改进周期（分块串行、块级幂等：单块失败不影响其余块）。
+#[allow(clippy::too_many_arguments)]
 pub async fn run_improvement_cycle(
     registry: &mut dyn ComponentRegistry,
     llm: &dyn RsiLlmPort,
@@ -355,6 +372,7 @@ pub async fn run_improvement_cycle(
     dry_run: bool,
     preview_lines: &mut Vec<String>,
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
+    version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
 ) -> Result<CycleOutcome, HarnessError> {
     let cycle_ref = format!(
         "cycle-{}",
@@ -399,6 +417,7 @@ pub async fn run_improvement_cycle(
             preview_lines,
             recorder,
             block_index,
+            version_store,
         )
         .await;
         for (edit, edit_reason) in &block_adoptions {
@@ -535,6 +554,7 @@ pub async fn run_compose_phase(
     dry_run: bool,
     preview_lines: &mut Vec<String>,
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
+    version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
 ) -> Result<Option<CycleOutcome>, HarnessError> {
     if adoptions.is_empty() {
         return Ok(None);
@@ -615,6 +635,24 @@ pub async fn run_compose_phase(
                 }
                 "仲裁修正（将采纳）"
             } else {
+                // #2074：采纳前逐 edit 快照旧内容（回滚依据；失败仅 warn——NEVER
+                // 阻断采纳，但会丢失该次回滚能力）
+                if let Some(version_store) = version_store {
+                    for edit in &change_set.edits {
+                        let (id, action) = match edit {
+                            crate::domain::changeset::ComponentEdit::Upsert { id, .. } => {
+                                (id, "upsert")
+                            }
+                            crate::domain::changeset::ComponentEdit::Delete { id } => {
+                                (id, "delete")
+                            }
+                        };
+                        if let Err(error) = version_store.capture(registry, id, &cycle_ref, action)
+                        {
+                            log::warn!(target: crate::LOG_TARGET, "组件快照失败（回滚能力缺失）：{error}");
+                        }
+                    }
+                }
                 match apply_change_set(registry, &change_set) {
                     Ok(_) => {
                         record_adopted_lesson(

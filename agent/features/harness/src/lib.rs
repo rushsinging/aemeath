@@ -15,7 +15,8 @@ pub(crate) use constants::LOG_TARGET;
 pub use application::ComponentRegistry;
 pub use domain::changeset::{apply_change_set, AppliedEdit, ChangeSet, ComponentEdit};
 pub use domain::component::{
-    diff_contents, ComponentContent, ComponentId, ComponentKind, ComponentName, ContentChange,
+    diff_contents, parse_component_id, ComponentContent, ComponentId, ComponentKind, ComponentName,
+    ContentChange,
 };
 pub use domain::errors::HarnessError;
 pub use domain::evidence::{
