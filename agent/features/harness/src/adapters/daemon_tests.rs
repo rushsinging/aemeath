@@ -24,6 +24,7 @@ impl RsiTask for FastTask {
         let calls = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         Ok(CycleOutcome {
             summary: format!("快周期 #{calls}"),
+            adopted: Vec::new(),
         })
     }
 }
@@ -37,6 +38,7 @@ impl RsiTask for SlowTask {
         tokio::time::sleep(Duration::from_millis(300)).await;
         Ok(CycleOutcome {
             summary: "慢周期完成".to_string(),
+            adopted: Vec::new(),
         })
     }
 }

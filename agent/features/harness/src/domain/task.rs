@@ -32,6 +32,15 @@ impl TaskKind {
 pub struct CycleOutcome {
     /// 人类可读结果摘要（如「采纳 2 / 作废 1 / 无变更 0」）。
     pub summary: String,
+    /// 本周期采纳的编辑记录（Compose 汇总块的材料，#2065 A）。
+    pub adopted: Vec<AdoptionRecord>,
+}
+
+/// 单条采纳记录（组件 + 提案依据）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdoptionRecord {
+    pub id: crate::domain::component::ComponentId,
+    pub reason: String,
 }
 
 /// RSI 任务接口：一个完整改进周期（分块在实现内部组织）。

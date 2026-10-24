@@ -23,6 +23,7 @@ impl RsiTask for CountingTask {
         }
         Ok(CycleOutcome {
             summary: format!("ok-{calls}"),
+            adopted: Vec::new(),
         })
     }
 }

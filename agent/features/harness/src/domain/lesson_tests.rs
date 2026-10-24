@@ -1,7 +1,7 @@
 //! 经验库契约测试：证据不变量、长度上限、追加/读取/退役、损坏行容忍。
 
 use crate::constants::{EXCERPT_MAX_CHARS, LESSON_MAX_CHARS};
-use crate::domain::lesson::{EvidenceBinding, LessonEntry, LessonStatus, SignalKind};
+use crate::domain::lesson::{EvidenceBinding, LessonEntry, LessonStatus, LessonStore, SignalKind};
 
 fn entry(lesson: &str) -> Result<LessonEntry, crate::domain::errors::HarnessError> {
     LessonEntry::new(
@@ -110,4 +110,53 @@ fn store_missing_file_yields_empty() {
     let store = crate::domain::lesson::LessonStore::new(temp.path().join("none.jsonl"));
     assert!(store.load_all().expect("missing").is_empty());
     assert!(store.load_active().expect("missing active").is_empty());
+}
+
+// ---- #2065 B：组件级 lesson 退役 ----
+
+#[test]
+fn retire_for_component_supersedes_old_active_lessons() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = LessonStore::new(dir.path().join("lib.jsonl"));
+    // 旧周期的 guardrails/default lesson（Active）
+    let old_lesson = LessonEntry::new(
+        "cycle-1:guardrails/default".to_string(),
+        "guardrails",
+        "旧结论".to_string(),
+        vec![EvidenceBinding {
+            run_ref: "cycle-1".to_string(),
+            signal: SignalKind::CycleObservation,
+            excerpt: "e".to_string(),
+        }],
+        1000,
+    )
+    .expect("构造");
+    store.append(&old_lesson).expect("append");
+    // 其他组件的 lesson（不应被退役）
+    let other = LessonEntry::new(
+        "cycle-1:skill/alpha".to_string(),
+        "skill",
+        "别的组件".to_string(),
+        vec![EvidenceBinding {
+            run_ref: "cycle-1".to_string(),
+            signal: SignalKind::CycleObservation,
+            excerpt: "e".to_string(),
+        }],
+        1000,
+    )
+    .expect("构造");
+    store.append(&other).expect("append");
+
+    let guardrails_id = crate::domain::component::ComponentId {
+        kind: crate::domain::component::ComponentKind::Guardrails,
+        name: crate::domain::component::ComponentName::new("default"),
+    };
+    let retired = store.retire_for_component(&guardrails_id).expect("retire");
+
+    assert_eq!(retired, 1, "只退役目标组件");
+    let active = store.load_active().expect("active");
+    assert!(active
+        .iter()
+        .all(|entry| entry.id.ends_with(":skill/alpha")));
+    assert!(active.len() == 1, "其他组件保留：{active:?}");
 }

@@ -151,7 +151,7 @@ async fn run_block(
     cycle_ref: &str,
     dry_run: bool,
     preview_lines: &mut Vec<String>,
-) -> (Vec<AppliedEdit>, &'static str) {
+) -> (Vec<(AppliedEdit, String)>, &'static str) {
     let prompt = build_block_prompt(chunk, lessons, evidence);
     let response = match llm.complete(&prompt).await {
         Ok(response) => response,
@@ -221,7 +221,11 @@ async fn run_block(
             match apply_change_set(registry, &change_set) {
                 Ok(applied) => {
                     record_adopted_lesson(lesson_store, &change_set, &reason, cycle_ref);
-                    (applied, "采纳")
+                    let adoption: Vec<(AppliedEdit, String)> = applied
+                        .into_iter()
+                        .map(|edit| (edit, reason.clone()))
+                        .collect();
+                    (adoption, "采纳")
                 }
                 Err(_) => (Vec::new(), "作废（校验失败）"),
             }
@@ -258,6 +262,10 @@ fn record_adopted_lesson(
         );
         match entry {
             Ok(entry) => {
+                // #2065 B：覆盖组件前退役旧 Active lesson（新现实取代旧经验）
+                if let Err(error) = lesson_store.retire_for_component(id) {
+                    log::warn!(target: crate::LOG_TARGET, "旧 lesson 退役失败（继续追加新 lesson）：{error}");
+                }
                 if let Err(error) = lesson_store.append(&entry) {
                     log::warn!(target: crate::LOG_TARGET, "经验回写失败（组件变更已生效）：{error}");
                 }
@@ -290,6 +298,7 @@ pub async fn run_improvement_cycle(
     if ids.is_empty() {
         return Ok(CycleOutcome {
             summary: "无组件：空周期".to_string(),
+            adopted: Vec::new(),
         });
     }
     let mut component_contents = Vec::with_capacity(ids.len());
@@ -307,8 +316,9 @@ pub async fn run_improvement_cycle(
     let mut adopted = 0usize;
     let mut no_change = 0usize;
     let mut discarded = 0usize;
+    let mut adoption_records: Vec<crate::domain::task::AdoptionRecord> = Vec::new();
     for chunk in &chunks {
-        let (_applied, label) = run_block(
+        let (block_adoptions, label) = run_block(
             registry,
             llm,
             chunk,
@@ -320,6 +330,14 @@ pub async fn run_improvement_cycle(
             preview_lines,
         )
         .await;
+        for (edit, edit_reason) in &block_adoptions {
+            adoption_records.push(crate::domain::task::AdoptionRecord {
+                id: match edit {
+                    AppliedEdit::Upserted { id } | AppliedEdit::Deleted { id } => id.clone(),
+                },
+                reason: edit_reason.clone(),
+            });
+        }
         match label {
             "采纳" => adopted += 1,
             "无变更" => no_change += 1,
@@ -334,6 +352,7 @@ pub async fn run_improvement_cycle(
     let prefix = if dry_run { "（dry-run）" } else { "" };
     Ok(CycleOutcome {
         summary: format!("{prefix}采纳 {adopted} / 无变更 {no_change} / 作废 {discarded}"),
+        adopted: adoption_records,
     })
 }
 
@@ -432,4 +451,116 @@ pub(crate) fn render_dry_run_edit_summary(
     }
     summary.push_str(&format!("\n  依据：{reason}"));
     summary
+}
+
+/// 周期 Compose 汇总块（#2065 A，对齐 Harness² Compose）：全部数据源块
+/// 执行完后纵观本周期全部采纳——检测矛盾/合并/精炼，产出终版变更。
+/// 无采纳时跳过（NEVER 为凑 Compose 而造编辑）。
+pub async fn run_compose_phase(
+    registry: &mut dyn ComponentRegistry,
+    llm: &dyn RsiLlmPort,
+    lesson_store: &LessonStore,
+    adoptions: &[crate::domain::task::AdoptionRecord],
+    dry_run: bool,
+    preview_lines: &mut Vec<String>,
+) -> Result<Option<CycleOutcome>, HarnessError> {
+    if adoptions.is_empty() {
+        return Ok(None);
+    }
+    let cycle_ref = format!(
+        "compose-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis())
+            .unwrap_or(0)
+    );
+    // 材料：采纳清单 + 涉及组件的当前终态
+    let mut touched_ids: Vec<ComponentId> = Vec::new();
+    for adoption in adoptions {
+        if !touched_ids.contains(&adoption.id) {
+            touched_ids.push(adoption.id.clone());
+        }
+    }
+    let mut components_json = Vec::new();
+    for id in &touched_ids {
+        if let Ok(content) = registry.read(id) {
+            components_json.push(serde_json::json!({
+                "id": id,
+                "frontmatter": content.frontmatter,
+                "body": content.body,
+            }));
+        }
+    }
+    let adoptions_block: Vec<String> = adoptions
+        .iter()
+        .map(|adoption| format!("- {}：{}", adoption.id, adoption.reason))
+        .collect();
+    let materials_block = serde_json::to_string(&components_json).expect("组件材料序列化不可失败");
+    let prompt = format!(
+        r#"你是 harness 仲裁器（Compose）。本周期多个证据块分别产生了以下采纳：
+
+{adoptions}
+
+涉及组件的当前（各块编辑叠加后的）终态：
+
+{materials}
+
+任务：纵观全部采纳与终态——检测块间矛盾（同一问题不同规则、重复条款、
+相互冲突的指令）、可合并项（多块各写一半的同类规则）与可精炼项（冗余
+展开）。仅当发现真实矛盾或明确可合并/精炼时产出修正编辑；各块结论
+一致且终态良好时选择 no_change——那是一个正当答案。
+
+编辑契约同改进块（omitted-is-inherited；upsert 的 content.body 为
+完整正文）。只输出一个 JSON 对象，格式二选一（NEVER 输出其他形态）：
+{{"decision":"propose","reason":"<仲裁依据，一句话>","change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"<kind>","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
+{{"decision":"no_change","reason":"<一句话理由>"}}
+不要输出 JSON 以外的任何文字。"#,
+        adoptions = adoptions_block.join("\n"),
+        materials = materials_block,
+    );
+    let Ok(response) = llm.complete(&prompt).await else {
+        return Ok(Some(CycleOutcome {
+            summary: "Compose：LLM 调用失败（跳过仲裁）".to_string(),
+            adopted: Vec::new(),
+        }));
+    };
+    let label = match parse_block_proposal(&response) {
+        Ok(BlockProposal::NoChange { .. }) => "无变更（各块结论一致）",
+        Ok(BlockProposal::Propose { reason, change_set }) => {
+            if dry_run {
+                for edit in &change_set.edits {
+                    let (id, content) = match edit {
+                        crate::domain::changeset::ComponentEdit::Upsert { id, content } => {
+                            (id, Some(content))
+                        }
+                        crate::domain::changeset::ComponentEdit::Delete { id } => (id, None),
+                    };
+                    preview_lines.push(format!(
+                        "[dry-run][Compose] {}",
+                        render_dry_run_edit_summary(registry, id, content, &reason)
+                            .trim_start_matches("[dry-run] ")
+                    ));
+                }
+                "仲裁修正（将采纳）"
+            } else {
+                match apply_change_set(registry, &change_set) {
+                    Ok(_) => {
+                        record_adopted_lesson(lesson_store, &change_set, &reason, &cycle_ref);
+                        "仲裁修正（已采纳）"
+                    }
+                    Err(_) => "仲裁修正（校验失败作废）",
+                }
+            }
+        }
+        Err(_) => "解析失败（跳过仲裁）",
+    };
+    let summary = if dry_run {
+        format!("（dry-run）Compose：{label}")
+    } else {
+        format!("Compose：{label}")
+    };
+    Ok(Some(CycleOutcome {
+        summary,
+        adopted: Vec::new(),
+    }))
 }
