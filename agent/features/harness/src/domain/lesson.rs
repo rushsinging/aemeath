@@ -4,6 +4,7 @@
 //! 独立于 memory corpus——路径、schema、写路径全部分离，NEVER 混用。
 
 use crate::constants::ERROR_DOMAIN;
+use crate::domain::component::ComponentId;
 use crate::domain::errors::HarnessError;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -163,6 +164,27 @@ impl LessonStore {
     }
 
     /// 将指定 id 标记 Retired（重写文件：经验库小，全量重写可接受）。
+    /// 退役某组件的全部 Active lesson（id 尾缀 ":{kind}/{name}" 匹配；
+    /// #2065 B：新提案覆盖组件内容后，旧 lesson 与新现实矛盾——
+    /// 继续注入会误导后续周期（复利毒药），NEVER 留脏 lesson）。
+    pub fn retire_for_component(&self, component_id: &ComponentId) -> Result<usize, HarnessError> {
+        let suffix = format!(":{component_id}");
+        let entries = self.load_all()?;
+        let mut retired_count = 0usize;
+        let mut rewritten = Vec::with_capacity(entries.len());
+        for mut entry in entries {
+            if entry.status == LessonStatus::Active && entry.id.ends_with(&suffix) {
+                entry.status = LessonStatus::Retired;
+                retired_count += 1;
+            }
+            rewritten.push(entry);
+        }
+        if retired_count > 0 {
+            self.rewrite_all(&rewritten)?;
+        }
+        Ok(retired_count)
+    }
+
     pub fn retire(&self, lesson_id: &str) -> Result<bool, HarnessError> {
         let entries = self.load_all()?;
         let mut found = false;

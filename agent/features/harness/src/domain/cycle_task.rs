@@ -75,6 +75,7 @@ impl RsiTask for HarnessRsiCycleTask {
         let mut summary_parts = Vec::new();
         let mut preview_lines = Vec::new();
         let mut report_lines = Vec::new();
+        let mut all_adoptions: Vec<crate::domain::task::AdoptionRecord> = Vec::new();
         if self.dry_run {
             report_lines.push(format!(
                 "—— checkpoint：起始 {}（dry-run NEVER 推进）",
@@ -124,14 +125,34 @@ impl RsiTask for HarnessRsiCycleTask {
                 report_lines.push(format!("    提案结果：{}", outcome.summary));
             }
             summary_parts.push(outcome.summary);
+            all_adoptions.extend(outcome.adopted);
             if !self.dry_run {
                 let fingerprint = crate::domain::stream_port::component_tree_fingerprint(registry);
                 self.stream_port.advance(block, fingerprint);
             }
         }
+        // #2065 A：周期 Compose 汇总块——纵观全部采纳仲裁矛盾/合并/精炼
+        if !all_adoptions.is_empty() {
+            if let Ok(Some(compose_outcome)) = crate::domain::improvement::run_compose_phase(
+                registry,
+                self.llm.as_ref(),
+                &self.lesson_store,
+                &all_adoptions,
+                self.dry_run,
+                &mut preview_lines,
+            )
+            .await
+            {
+                if self.dry_run {
+                    report_lines.push(format!("    Compose：{}", compose_outcome.summary));
+                }
+                summary_parts.push(compose_outcome.summary);
+            }
+        }
         if summary_parts.is_empty() {
             return Ok(crate::domain::task::CycleOutcome {
                 summary: "无待处理证据块".to_string(),
+                adopted: Vec::new(),
             });
         }
         let mut summary = summary_parts.join(" | ");
@@ -143,7 +164,10 @@ impl RsiTask for HarnessRsiCycleTask {
                 summary.push_str(&preview_lines.join("\n"));
             }
         }
-        Ok(crate::domain::task::CycleOutcome { summary })
+        Ok(crate::domain::task::CycleOutcome {
+            summary,
+            adopted: all_adoptions,
+        })
     }
 }
 
