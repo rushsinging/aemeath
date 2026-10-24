@@ -124,12 +124,10 @@ fn test_classify_change_key_skills_directory() {
 }
 
 #[test]
-fn test_classify_change_key_scripts_directory() {
+fn test_classify_change_key_scripts_directory_falls_back() {
+    // #2060：scripts 目录退役并入 skills——不再专属分类，走 other fallback
     let path = PathBuf::from("/project/.agents/scripts");
-    assert_eq!(
-        classify_change_key(&path, &FileChangeKind::Added),
-        "scripts:added:scripts"
-    );
+    assert!(classify_change_key(&path, &FileChangeKind::Added).starts_with("other:added:"));
 }
 
 #[test]

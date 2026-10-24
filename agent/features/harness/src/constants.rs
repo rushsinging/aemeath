@@ -16,9 +16,6 @@ pub const LESSON_MAX_CHARS: usize = 500;
 /// 经验条目证据摘录上限。
 pub const EXCERPT_MAX_CHARS: usize = 200;
 
-/// 单脚本大小上限（64 KiB）。
-pub const SCRIPT_MAX_BYTES: u64 = 64 * 1024;
-
 /// 单 SKILL.md body 大小上限（64 KiB，#2018）。
 pub const SKILL_MAX_BYTES: u64 = 64 * 1024;
 

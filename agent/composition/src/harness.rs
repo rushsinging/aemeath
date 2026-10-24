@@ -157,10 +157,19 @@ impl RsiLlmPort for ProductionRsiLlm {
 
 /// 装配生产 RSI LLM 端口：default binding 解析 → provider 客户端。
 pub fn wire_rsi_llm(config: &share::config::Config) -> Result<Arc<dyn RsiLlmPort>, String> {
-    let resolved = config
-        .models
-        .resolve_default_model()
-        .map_err(|error| format!("解析默认模型失败：{error}"))?;
+    // harness.rsi.model 独立档优先；空则继承 models.default（对齐
+    // memory.reflection.model 范式——改进模型可与对话模型分离）。
+    let resolved = if config.harness.rsi.model.trim().is_empty() {
+        config
+            .models
+            .resolve_default_model()
+            .map_err(|error| format!("解析默认模型失败：{error}"))?
+    } else {
+        config
+            .models
+            .resolve_model_selection(&config.harness.rsi.model)
+            .map_err(|error| format!("解析 harness.rsi.model 失败：{error}"))?
+    };
     let spec = ProviderClientSpecData {
         driver: resolved.driver.clone(),
         source_key: resolved.source_key.clone(),
@@ -227,27 +236,17 @@ pub fn wire_component_registry(
     );
     let prose_registry: Box<dyn harness::ComponentRegistry + Send> =
         Box::new(harness::adapters::filesystem::FilesystemComponentRegistry::new(component_paths));
-    let scripts_registry: Box<dyn harness::ComponentRegistry + Send> = Box::new(
-        harness::adapters::scripts_registry::ScriptsDirectoryRegistry::new(
-            share::config::paths::global_scripts_dir(),
-        ),
-    );
     let skills_registry: Box<dyn harness::ComponentRegistry + Send> = Box::new(
         harness::adapters::skills_registry::SkillsDirectoryRegistry::new(
             share::config::paths::global_skills_dir(),
         ),
     );
-    let plugins_registry: Box<dyn harness::ComponentRegistry + Send> = Box::new(
-        harness::adapters::plugins_registry::PluginsDirectoryRegistry::new(
-            share::config::paths::global_plugins_dir(),
-        ),
-    );
+    // c8 plugins 不进 RSI 可编辑面（2026-10-24 拍板：客户端/UI 相关，
+    // 暂停 RSI 自动编辑；seam 执行面（run 边界 reload）保持不变）。
     let _ = config;
     let composite = harness::adapters::composite::CompositeComponentRegistry::new(vec![
         prose_registry,
-        scripts_registry,
         skills_registry,
-        plugins_registry,
     ]);
     Ok(Arc::new(tokio::sync::Mutex::new(Box::new(composite))))
 }

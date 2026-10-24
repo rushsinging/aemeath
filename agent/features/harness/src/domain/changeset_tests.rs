@@ -96,8 +96,8 @@ fn any_invalid_edit_discards_whole_change_set() {
 /// Delete 不存在的组件 → 整份 ChangeSet 作废（含同批合法条目）。
 #[test]
 fn delete_missing_component_discards_whole_change_set() {
-    let existing = id(ComponentKind::Script, "existing");
-    let ghost = id(ComponentKind::Script, "ghost");
+    let existing = id(ComponentKind::Skill, "existing");
+    let ghost = id(ComponentKind::Skill, "ghost");
     let mut registry = FakeRegistry::with_entries(vec![(existing.clone(), body_content("old"))]);
 
     let change_set = ChangeSet {

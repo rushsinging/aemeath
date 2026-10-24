@@ -33,7 +33,7 @@ impl ConfigDiff {
 /// - Guidance 文件：`~/.agents/guidance/` 下动态发现的 `*.md`
 /// - 组件面（#2015 热载 watch 扩展）：guardrails（全局+项目）、
 ///   tool_guidance（全局）、config（全局+项目 `aemeath.json`）、
-///   skills 目录（全局+项目 `.agents`/`.claude`）、scripts 目录（全局+项目）
+///   skills 目录（全局+项目 `.agents`/`.claude`）；scripts 目录已退役并入 skills（#2060）
 pub fn collect_watched_files(cwd: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
 
@@ -65,10 +65,6 @@ pub fn collect_watched_files(cwd: &Path) -> Vec<PathBuf> {
     files.push(expand_home(&paths::global_skills_dir()));
     files.push(paths::project_skills_dir(cwd));
     files.push(paths::project_claude_skills_dir(cwd));
-    // scripts 目录（目录级监控）
-    files.push(expand_home(&paths::global_scripts_dir()));
-    files.push(paths::project_scripts_dir(cwd));
-
     files
 }
 
@@ -118,7 +114,7 @@ pub struct ComponentReloadRejection {
 /// 对组件类文件变更做防御性复检（frontmatter 形状）。
 ///
 /// 覆盖 guardrails.md 与 tool_guidance.md（指令文件任意文本合法、
-/// skills/scripts 目录变更在装配期逐文件校验，均不在此列）。
+/// skills 目录变更在装配期逐文件校验，不在此列；scripts 目录已退役（#2060）。
 /// 返回被拒列表；空列表 = 全部通过，可照常生效。
 pub fn validate_component_changes(changes: &[FileChange]) -> Vec<ComponentReloadRejection> {
     changes
@@ -200,8 +196,6 @@ fn classify_change_key(path: &Path, kind: &FileChangeKind) -> String {
         format!("config:{}:{}", prefix, file_name)
     } else if path_str.contains("/skills/") || path_str.ends_with("/skills") {
         format!("skills:{}:{}", prefix, file_name)
-    } else if path_str.contains("/scripts/") || path_str.ends_with("/scripts") {
-        format!("scripts:{}:{}", prefix, file_name)
     } else {
         format!("other:{}:{}", prefix, file_name)
     }

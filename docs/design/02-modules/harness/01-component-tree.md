@@ -1,7 +1,9 @@
 # Harness · 组件树与注册表
 
 > 层级：02-modules / harness｜状态：Target｜Milestone：v0.2.0
-> 本文定义 8 个可编辑组件的 aemeath 形态与 ComponentRegistry 统一契约。所有组件读写 MUST 经 registry，NEVER 散落直连文件。
+> 本文定义 **7 个可编辑组件**的 aemeath 形态与 ComponentRegistry 统一契约。所有组件读写 MUST 经 registry，NEVER 散落直连文件。
+>
+> 组件表 8→7（2026-10-24 拍板，#2060）：c7 scripts **降级并入 c5 skills**——独立注入通道缺失（可见性寄生在其他组件文本引用，不满足组件自洽单元四要件）。脚本回归 skill 伴随资源形态（`skills/<name>/scripts/`，SKILL.md 正文引用可见）；`~/.agents/scripts/` 独立目录与 ScriptsDirectoryRegistry 退役，存量内容不迁移不删除。
 
 ## 1. 组件清单（aemeath 形态）
 
@@ -13,8 +15,7 @@
 | c4 | tool_guidance 覆盖层 | `~/.agents/tool_guidance.md`（新增） | always-on 段（通道见 05 D1） | 仅使用指南 prose；工具 schema/描述本体编译期固定，NEVER 外置 |
 | c5 | skills | 全局 `~/.agents/skills/` + 项目 `.agents/skills/`、`.claude/skills/` | 按需 | 单个 `SKILL.md` 整文件（frontmatter 校验对齐现有加载器） |
 | c6 | sub_agents | `aemeath.json` 的 agents 定义（names + role 绑定） | 派发时 | config 热载生效（见 02 分片），RSI 编辑后置 |
-| c7 | scripts | `~/.agents/scripts/` + 项目 `.agents/scripts/`（新增） | 按需（Bash 调用时执行） | 单脚本文件 + frontmatter；引用可见性规则见 05 分片 |
-| c8 | plugin | 预留位（0.3.0） | loop 内 | seam + tool loop 中间件 + TUI 渲染，本里程碑不落地 |
+> c8 plugin：**RSI 不可见**（2026-10-24 拍板——客户端/UI 相关，暂停 RSI 自动编辑）；seam 执行面（run 边界 reload、tool result 变换）保留。
 
 ### 1.1 AlwaysOnProse 组件族：机制一份，语义分槽
 
@@ -33,7 +34,7 @@ c1 overlay、c2 guardrails、c4 tool_guidance 的**机制高度一致**（markdo
 enum ComponentKind { SystemPromptOverlay, Guardrails, MemoryView, ToolGuidance,
                      Skill, SubAgents, Script, Plugin /* 预留 */ }
 
-struct ComponentId { kind: ComponentKind, name: ComponentName }  // name 用于 skills/scripts 等多实例组件
+struct ComponentId { kind: ComponentKind, name: ComponentName }  // name 用于 skills/plugins 等多实例组件
 
 trait ComponentRegistry {
     fn list(&self) -> Vec<ComponentId>;

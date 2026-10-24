@@ -547,6 +547,7 @@ fn harness_rsi_patch_merges_fields() {
         harness: Some(HarnessConfigPatch {
             rsi: Some(RsiConfigPatch {
                 enabled: Some(false),
+                model: Some("DeepSeek/deepseek-flash".to_string()),
                 interval_secs: Some(60),
                 chunk_max_components: Some(4),
                 evidence_initial_window_days: Some(7),
@@ -560,6 +561,7 @@ fn harness_rsi_patch_merges_fields() {
     chain.push(patch);
     let merged = chain.merge(base);
     assert!(!merged.harness.rsi.enabled);
+    assert_eq!(merged.harness.rsi.model, "DeepSeek/deepseek-flash");
     assert_eq!(merged.harness.rsi.interval_secs, 60);
     assert_eq!(merged.harness.rsi.chunk_max_components, 4);
     assert_eq!(merged.harness.rsi.evidence_initial_window_days, 7);

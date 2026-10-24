@@ -14,12 +14,6 @@ mod filesystem_tests;
 pub mod plugins_registry;
 #[cfg(test)]
 mod plugins_registry_tests;
-pub mod scripts;
-pub mod scripts_registry;
-#[cfg(test)]
-mod scripts_registry_tests;
-#[cfg(test)]
-mod scripts_tests;
 pub mod session_scanner;
 #[cfg(test)]
 mod session_scanner_tests;
