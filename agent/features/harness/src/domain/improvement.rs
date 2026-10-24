@@ -153,8 +153,12 @@ async fn run_block(
     preview_lines: &mut Vec<String>,
 ) -> (Vec<AppliedEdit>, &'static str) {
     let prompt = build_block_prompt(chunk, lessons, evidence);
-    let Ok(response) = llm.complete(&prompt).await else {
-        return (Vec::new(), "作废（LLM 调用失败）");
+    let response = match llm.complete(&prompt).await {
+        Ok(response) => response,
+        Err(error) => {
+            eprintln!("[diag] llm err={}", error.message());
+            return (Vec::new(), "作废（LLM 调用失败）");
+        }
     };
     let proposal = match parse_block_proposal(&response) {
         Ok(proposal) => proposal,
@@ -196,9 +200,12 @@ async fn run_block(
                         None => registry.read(id).map(|_| ()),
                     };
                     match outcome {
-                        Ok(()) => {
-                            preview_lines.push(format!("[dry-run] upsert/delete {id}：{reason}"))
-                        }
+                        Ok(()) => preview_lines.push(render_dry_run_edit_summary(
+                            registry,
+                            id,
+                            content,
+                            reason.as_str(),
+                        )),
                         Err(error) => {
                             valid = false;
                             preview_lines.push(format!("[dry-run] 拒绝 {id}：{}", error.message()));
@@ -371,4 +378,58 @@ pub(crate) fn signal_kind_from_reason(reason: &str) -> SignalKind {
         }
     }
     SignalKind::CycleObservation
+}
+
+/// dry-run 单条编辑的实在总结：动作 + 前后规模对比 + 新内容要点
+/// （标题行；旧内容规模来自盘上版本，缺失标记新建）。
+pub(crate) fn render_dry_run_edit_summary(
+    registry: &mut dyn ComponentRegistry,
+    id: &ComponentId,
+    content: Option<&ComponentContent>,
+    reason: &str,
+) -> String {
+    let action = if content.is_some() {
+        "upsert"
+    } else {
+        "delete"
+    };
+    let mut summary = format!("[dry-run] {action} {id}");
+    if let Some(content) = content {
+        let new_lines = content.body.lines().count();
+        let new_chars = content.body.chars().count();
+        match registry.read(id) {
+            Ok(old) => {
+                let old_lines = old.body.lines().count();
+                let old_chars = old.body.chars().count();
+                summary.push_str(&format!(
+                    "\n  变更：正文 {old_lines} 行 → {new_lines} 行（{old_chars} → {new_chars} 字符）"
+                ));
+            }
+            Err(_) => summary.push_str(&format!(
+                "\n  变更：新建正文（{new_lines} 行 / {new_chars} 字符）"
+            )),
+        }
+        let highlights: Vec<&str> = content
+            .body
+            .lines()
+            .map(str::trim_start)
+            .filter(|line| line.starts_with('#'))
+            .take(4)
+            .collect();
+        if !highlights.is_empty() {
+            summary.push_str(&format!("\n  新内容要点：{}", highlights.join(" / ")));
+        } else if let Some(first_meaningful) = content
+            .body
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+        {
+            let bounded: String = first_meaningful.chars().take(60).collect();
+            summary.push_str(&format!("\n  新内容首行：{bounded}"));
+        }
+    } else {
+        summary.push_str("（整组件删除）");
+    }
+    summary.push_str(&format!("\n  依据：{reason}"));
+    summary
 }

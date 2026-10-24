@@ -173,27 +173,36 @@ pub fn wire_rsi_llm(config: &share::config::Config) -> Result<Arc<dyn RsiLlmPort
     let spec = ProviderClientSpecData {
         driver: resolved.driver.clone(),
         source_key: resolved.source_key.clone(),
-        api_style: None,
+        // 模型级 api_style 与主链同源（openai driver 默认 Responses API，
+        // 兼容网关模型需 chat_completions——None 会 404）。
+        api_style: resolved.model.api_style.clone(),
         api_key: resolved.source_config.api_key.clone(),
         base_url: if resolved.source_config.base_url.is_empty() {
             None
         } else {
             Some(resolved.source_config.base_url.clone())
         },
-        model: resolved.model.name.clone(),
+        model: resolved.model.id.clone(),
         max_tokens: resolved.model.max_tokens,
         // #2032 阶梯装配：requested=false 会被连续化档位判为 effective 超
         // 限；声明支持并按模型阶梯取最低档请求（结构化输出低思考）。
         reasoning: true,
         reasoning_config: None,
         timeout_secs: 300,
-        user_agent: Some(config.api.user_agent.clone()),
+        // UA 走 snapshot 装配（Provider专属→全局→catalog→内置，#1851 链），
+        // 与主会话同源——裸 config.api.user_agent 会被网关按 UA 路由拒绝
+        // （token-plan 实证 404 model unavailable）。
+        user_agent: Some(
+            share::config::domain::snapshot::ConfigSnapshot::new(config.clone())
+                .user_agent()
+                .to_string(),
+        ),
     };
     let client = LlmClient::from_config(spec)
         .map_err(|error| format!("构造 provider 客户端失败：{error}"))?;
     let model = ModelInfo {
         provider: resolved.source_key.clone(),
-        model: resolved.model.name.clone(),
+        model: resolved.model.id.clone(),
         supports_tools: false,
         supports_parallel_tool_calls: false,
         supports_streaming: true,
@@ -286,6 +295,20 @@ pub async fn run_rsi_run_dry(overrides: &RsiRunOverrides) -> RsiRunExit {
 }
 
 async fn run_rsi_run_inner(overrides: &RsiRunOverrides, dry_run: bool) -> RsiRunExit {
+    // rsi run 是独立 CLI 进程：先装日志（失败不阻断，降级 eprintln）。
+    if let Ok(log_config) = load_global_config_layered() {
+        let snapshot = share::config::domain::snapshot::ConfigSnapshot::new(log_config);
+        let logs_dir = share::config::paths::global_logs_dir();
+        if let Err(error) = crate::app::init_logging(
+            &snapshot,
+            sdk::LoggingOutputMode::File,
+            sdk::NativeStderrMode::Preserve,
+            &logs_dir,
+        ) {
+            // 日志初始化失败时 logger 未装——降级无输出，仅放弃观测性
+            let _ = error;
+        }
+    }
     let config = match load_global_config_layered() {
         Ok(config) => config,
         Err(message) => {
@@ -404,6 +427,27 @@ impl harness::EvidenceStreamPort for ProductionEvidenceStream {
             );
         }
         harness::aggregate_evidence(&events)
+    }
+
+    fn cursor_summary(&self) -> Option<String> {
+        harness::load_stream_state(&self.harness_dir)
+            .ok()
+            .and_then(|state| {
+                state
+                    .sessions
+                    .iter()
+                    .rfind(|(_, progress)| {
+                        !progress.session_complete || !progress.processed_run_ids.is_empty()
+                    })
+                    .map(|(key, progress)| {
+                        format!(
+                            "{}（runs {}，complete={}）",
+                            key,
+                            progress.processed_run_ids.len(),
+                            progress.session_complete
+                        )
+                    })
+            })
     }
 
     fn advance(&self, block: &harness::EvidenceBlockPlan, _fingerprint: String) {

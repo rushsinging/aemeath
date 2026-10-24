@@ -23,6 +23,11 @@ pub trait EvidenceStreamPort: Send + Sync {
     /// 推进游标到块尾（只在块处理完成后调用——输出存在不等于完成；
     /// 记录块执行后的组件树指纹作下一块基线）。
     fn advance(&self, block: &EvidenceBlockPlan, component_tree_fingerprint: String);
+
+    /// 当前 checkpoint 概要（dry-run 报告用：起始游标位置；None=首次）。
+    fn cursor_summary(&self) -> Option<String> {
+        None
+    }
 }
 
 /// 组件树指纹：registry 全组件内容哈希（稳定序）。
