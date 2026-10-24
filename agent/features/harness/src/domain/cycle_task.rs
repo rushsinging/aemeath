@@ -25,6 +25,8 @@ pub struct HarnessRsiCycleTask {
     dry_run: bool,
     /// 过程事件记录器（#2070：周期全链路事实落盘，评测输入）。
     recorder: Option<std::sync::Arc<crate::domain::events::RsiEventRecorder>>,
+    /// 组件版本快照库（#2074：采纳前备份，回滚依据）。
+    version_store: Option<std::sync::Arc<crate::domain::versioning::ComponentVersionStore>>,
 }
 
 impl HarnessRsiCycleTask {
@@ -42,7 +44,17 @@ impl HarnessRsiCycleTask {
             stream_port: Box::new(crate::domain::stream_port::FakeEvidenceStream::default()),
             dry_run: false,
             recorder: None,
+            version_store: None,
         }
+    }
+
+    /// 注入组件版本快照库（#2074）。
+    pub fn with_version_store(
+        mut self,
+        store: std::sync::Arc<crate::domain::versioning::ComponentVersionStore>,
+    ) -> Self {
+        self.version_store = Some(store);
+        self
     }
 
     /// 注入过程事件记录器（#2070）。
@@ -164,6 +176,7 @@ impl RsiTask for HarnessRsiCycleTask {
                 self.dry_run,
                 &mut preview_lines,
                 self.recorder.as_deref(),
+                self.version_store.as_deref(),
             )
             .await?;
             if self.dry_run {
@@ -186,6 +199,7 @@ impl RsiTask for HarnessRsiCycleTask {
                 self.dry_run,
                 &mut preview_lines,
                 self.recorder.as_deref(),
+                self.version_store.as_deref(),
             )
             .await
             {

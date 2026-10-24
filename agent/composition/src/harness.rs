@@ -360,6 +360,11 @@ async fn run_rsi_run_inner(overrides: &RsiRunOverrides, dry_run: bool) -> RsiRun
         harness::domain::events::RsiEventRecorder::new(
             share::config::paths::global_agents_dir().join("harness/events"),
         ),
+    ))
+    .with_version_store(std::sync::Arc::new(
+        harness::domain::versioning::ComponentVersionStore::new(
+            share::config::paths::global_agents_dir().join("harness/versions"),
+        ),
     ));
     let mut task = task;
     if dry_run {
@@ -570,5 +575,146 @@ fn write_dry_run_preview(summary: &str) {
     let preview_path = harness_dir.join("dry-run-preview.md");
     if let Err(error) = std::fs::write(&preview_path, summary) {
         log::warn!(target: crate::LOG_TARGET, "写 dry-run 预览失败：{error}");
+    }
+}
+
+/// `rsi history [--component <kind>/<name>]`（#2074）：列组件快照历史。
+pub fn run_rsi_history(component: Option<&str>) -> RsiRunExit {
+    let config = match load_global_config_layered() {
+        Ok(config) => config,
+        Err(message) => {
+            return RsiRunExit::Failure {
+                message,
+                exit_code: 2,
+            }
+        }
+    };
+    let registry = match wire_component_registry(&config) {
+        Ok(registry) => registry,
+        Err(error) => {
+            return RsiRunExit::Failure {
+                message: format!("装配组件 registry 失败：{}", error.message()),
+                exit_code: 2,
+            }
+        }
+    };
+    let store = harness::domain::versioning::ComponentVersionStore::new(
+        share::config::paths::global_agents_dir().join("harness/versions"),
+    );
+    let ids: Vec<harness::ComponentId> = match component {
+        Some(raw) => match harness::parse_component_id(raw) {
+            Some(id) => vec![id],
+            None => {
+                return RsiRunExit::Failure {
+                    message: format!("组件标识无效（需要 <kind>/<name>）：{raw}"),
+                    exit_code: 2,
+                }
+            }
+        },
+        None => {
+            let guard = match registry.try_lock() {
+                Ok(guard) => guard,
+                Err(_) => {
+                    return RsiRunExit::Failure {
+                        message: "registry 锁不可用".to_string(),
+                        exit_code: 1,
+                    }
+                }
+            };
+            guard.list()
+        }
+    };
+    let mut lines = Vec::new();
+    for id in &ids {
+        match store.history(id) {
+            Ok(history) if history.is_empty() => {}
+            Ok(history) => {
+                for snapshot in history {
+                    lines.push(format!(
+                        "{}  {}  action={}  {}",
+                        id,
+                        snapshot.cycle_id,
+                        snapshot.action,
+                        match &snapshot.payload {
+                            harness::domain::versioning::SnapshotContent::Existing { raw } => {
+                                format!("原文 {} 字符", raw.chars().count())
+                            }
+                            harness::domain::versioning::SnapshotContent::Tombstone => {
+                                "（新建前）".to_string()
+                            }
+                        }
+                    ));
+                }
+            }
+            Err(error) => {
+                return RsiRunExit::Failure {
+                    message: format!("读取历史失败：{}", error.message()),
+                    exit_code: 1,
+                }
+            }
+        }
+    }
+    RsiRunExit::Done {
+        summary: if lines.is_empty() {
+            "（无快照历史）".to_string()
+        } else {
+            lines.join("\n")
+        },
+    }
+}
+
+/// `rsi rollback <kind>/<name> [--cycle <id>]`（#2074）：恢复组件到快照。
+pub fn run_rsi_rollback(component: &str, cycle: Option<&str>) -> RsiRunExit {
+    let config = match load_global_config_layered() {
+        Ok(config) => config,
+        Err(message) => {
+            return RsiRunExit::Failure {
+                message,
+                exit_code: 2,
+            }
+        }
+    };
+    let registry = match wire_component_registry(&config) {
+        Ok(registry) => registry,
+        Err(error) => {
+            return RsiRunExit::Failure {
+                message: format!("装配组件 registry 失败：{}", error.message()),
+                exit_code: 2,
+            }
+        }
+    };
+    let Some(id) = harness::parse_component_id(component) else {
+        return RsiRunExit::Failure {
+            message: format!("组件标识无效（需要 <kind>/<name>）：{component}"),
+            exit_code: 2,
+        };
+    };
+    let store = harness::domain::versioning::ComponentVersionStore::new(
+        share::config::paths::global_agents_dir().join("harness/versions"),
+    );
+    let snapshot = match store.load(&id, cycle) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            return RsiRunExit::Failure {
+                message: format!("加载快照失败：{}", error.message()),
+                exit_code: 1,
+            }
+        }
+    };
+    let mut guard = match registry.try_lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return RsiRunExit::Failure {
+                message: "registry 锁不可用".to_string(),
+                exit_code: 1,
+            }
+        }
+    };
+    match harness::domain::versioning::rollback_component(&mut **guard, &id, &snapshot) {
+        Ok(message) => RsiRunExit::Done { summary: message },
+        Err(error) => RsiRunExit::Failure {
+            message: format!("回滚失败：{}", error.message()),
+            exit_code: 1,
+        },
     }
 }

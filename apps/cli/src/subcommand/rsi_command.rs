@@ -47,3 +47,25 @@ pub(crate) async fn run_rsi_run_command(options: RsiRunOptions) {
         }
     }
 }
+
+/// `rsi history`（#2074）。
+pub(crate) fn run_rsi_history_command(component: Option<&str>) {
+    match composition::harness::run_rsi_history(component) {
+        composition::harness::RsiRunExit::Done { summary } => println!("{summary}"),
+        composition::harness::RsiRunExit::Failure { message, exit_code } => {
+            eprintln!("{message}");
+            std::process::exit(exit_code);
+        }
+    }
+}
+
+/// `rsi rollback`（#2074）。
+pub(crate) fn run_rsi_rollback_command(component: &str, cycle: Option<&str>) {
+    match composition::harness::run_rsi_rollback(component, cycle) {
+        composition::harness::RsiRunExit::Done { summary } => println!("{summary}"),
+        composition::harness::RsiRunExit::Failure { message, exit_code } => {
+            eprintln!("{message}");
+            std::process::exit(exit_code);
+        }
+    }
+}

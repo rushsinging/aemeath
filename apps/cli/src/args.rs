@@ -163,6 +163,20 @@ pub enum RsiCommands {
     },
     /// 启动 RSI 维护 daemon（常驻；定时改进 harness 组件）
     Serve,
+    /// 列出组件快照历史（回滚依据）
+    History {
+        /// 限定组件（<kind>/<name>）；省略则列全部
+        #[arg(long)]
+        component: Option<String>,
+    },
+    /// 回滚组件到快照（默认最近一次采纳前）
+    Rollback {
+        /// 组件标识（<kind>/<name>）
+        component: String,
+        /// 指定 cycle id（省略则用最近快照）
+        #[arg(long)]
+        cycle: Option<String>,
+    },
 }
 
 /// The original Args struct, used by the rest of main.rs to avoid touching all call sites.

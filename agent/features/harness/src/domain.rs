@@ -33,3 +33,4 @@ pub mod task;
 mod task_tests;
 #[cfg(test)]
 pub(crate) mod test_support;
+pub mod versioning;

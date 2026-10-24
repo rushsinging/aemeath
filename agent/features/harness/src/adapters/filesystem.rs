@@ -161,6 +161,29 @@ impl ComponentRegistry for FilesystemComponentRegistry {
         Self::validate_content_shape(content)
     }
 
+    /// 原始文本读（#2074：逐字节，不经 frontmatter 对象往返）。
+    fn read_raw(&self, id: &ComponentId) -> Result<String, HarnessError> {
+        let path = self.path_of(id).ok_or_else(|| {
+            HarnessError::invalid(ERROR_DOMAIN, format!("组件未注册文件路径：{id}"))
+        })?;
+        std::fs::read_to_string(path).map_err(|error| {
+            HarnessError::storage(
+                ERROR_DOMAIN,
+                format!("读取组件文件失败 {}: {error}", path.display()),
+            )
+        })
+    }
+
+    /// 原始文本写（#2074：解析校验后原子写，保留原字节布局）。
+    fn write_raw(&mut self, id: &ComponentId, text: &str) -> Result<(), HarnessError> {
+        let content = parse_markdown_with_frontmatter(text)?;
+        self.validate(id, &content)?;
+        let path = self.path_of(id).ok_or_else(|| {
+            HarnessError::invalid(ERROR_DOMAIN, format!("组件未注册文件路径：{id}"))
+        })?;
+        Self::atomic_write(path, text)
+    }
+
     fn write(&mut self, id: &ComponentId, content: &ComponentContent) -> Result<(), HarnessError> {
         self.validate(id, content)?;
         let path = self.path_of(id).expect("validate 已确认路径存在");
