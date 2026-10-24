@@ -426,6 +426,7 @@ pub(crate) async fn from_args_with_gateways(
         Some(&initial_provider.binding().model.provider),
         Some(&initial_provider.binding().model.model),
         snapshot.permission_mode(),
+        snapshot.tool_background_threshold_secs() > 0,
     );
     let prompt_parts =
         runtime::build_system_prompt_parts(&prompt_context, &hook_runner, snapshot.language())

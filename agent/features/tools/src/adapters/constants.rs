@@ -3,15 +3,11 @@
 use std::time::Duration;
 
 pub(crate) const SUB_AGENT_DEFAULT_TIMEOUT_SECS: u64 = 3600;
-pub(crate) const SUB_AGENT_TIMEOUT_CAP_SECS: u64 = 10800;
 
-/// Bash `timeout` 字段单位：秒（硬切，不再接受毫秒）。
-pub(crate) const BASH_DEFAULT_TIMEOUT_SECS: u64 = 120;
-pub(crate) const BASH_MAX_TIMEOUT_SECS: u64 = 3600;
-
-/// WebFetch `timeout` 字段单位：秒（硬切，不再接受毫秒）。
+/// WebFetch `timeout` 字段单位：秒（硬切，不再接受毫秒）。网络单请求
+/// 不需要 30 分钟默认预算，故覆写工具默认值；上限统一走
+/// [`crate::domain::constants::DEFAULT_TOOL_MAX_TIMEOUT_SECS`]。
 pub(crate) const WEB_FETCH_DEFAULT_TIMEOUT_SECS: u64 = 30;
-pub(crate) const WEB_FETCH_MAX_TIMEOUT_SECS: u64 = 3600;
 
 pub(crate) const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
 

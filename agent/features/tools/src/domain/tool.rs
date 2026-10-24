@@ -58,14 +58,18 @@ pub trait Tool: Send + Sync {
         false
     }
 
-    /// 省略入参 `timeout` 时的默认秒数（框架 effective deadline 与业务默认对齐）。
-    fn timeout_secs(&self) -> u64 {
-        120
-    }
-
-    /// 入参 `timeout` 可设置的上限（秒）。通用默认 3600；Agent/Watch 可覆盖。
-    fn max_timeout_secs(&self) -> u64 {
-        crate::domain::constants::DEFAULT_TOOL_MAX_TIMEOUT_SECS
+    /// 解析本次调用的 effective `timeout`（秒）。
+    ///
+    /// 三层优先级：显式 `requested` → 后台档背景预算 → 工具自定义默认值。
+    /// 差异化工具覆写本方法并传入自己的默认/上限常量；默认实现即
+    /// 「通用工具吃 `DEFAULT_TOOL_TIMEOUT_SECS` / `DEFAULT_TOOL_MAX_TIMEOUT_SECS`」。
+    fn get_timeout_secs(&self, requested: Option<u64>, backgrounding_enabled: bool) -> u64 {
+        crate::domain::timeout_policy::get_timeout_secs(
+            requested,
+            crate::domain::constants::DEFAULT_TOOL_TIMEOUT_SECS,
+            crate::domain::constants::DEFAULT_TOOL_MAX_TIMEOUT_SECS,
+            backgrounding_enabled,
+        )
     }
 
     /// 是否在 input schema 暴露可配置 `timeout`（MCP 动态工具为 false）。
@@ -186,14 +190,15 @@ pub trait TypedTool: Send + Sync {
         false
     }
 
-    /// 省略入参 `timeout` 时的默认秒数。
-    fn timeout_secs(&self) -> u64 {
-        120
-    }
-
-    /// 入参 `timeout` 上限（秒）。
-    fn max_timeout_secs(&self) -> u64 {
-        crate::domain::constants::DEFAULT_TOOL_MAX_TIMEOUT_SECS
+    /// 解析本次调用的 effective `timeout`（秒），语义同
+    /// [`Tool::get_timeout_secs`](crate::domain::Tool::get_timeout_secs)。
+    fn get_timeout_secs(&self, requested: Option<u64>, backgrounding_enabled: bool) -> u64 {
+        crate::domain::timeout_policy::get_timeout_secs(
+            requested,
+            crate::domain::constants::DEFAULT_TOOL_TIMEOUT_SECS,
+            crate::domain::constants::DEFAULT_TOOL_MAX_TIMEOUT_SECS,
+            backgrounding_enabled,
+        )
     }
 
     /// 是否在 input schema 暴露可配置 `timeout`（MCP 为 false）。
@@ -250,16 +255,8 @@ impl<T: TypedTool> Tool for TypedToolAdapter<T> {
     }
 
     fn input_schema(&self) -> Value {
-        let schema = self.0.input_schema();
-        if self.0.supports_configurable_timeout() {
-            crate::domain::timeout_policy::inject_timeout_into_input_schema(
-                schema,
-                self.0.timeout_secs(),
-                self.0.max_timeout_secs(),
-            )
-        } else {
-            schema
-        }
+        // `timeout` 字段注入挪到 catalog 发布（需要会话级后台化开关）。
+        self.0.input_schema()
     }
 
     fn data_schema(&self) -> Value {
@@ -278,12 +275,8 @@ impl<T: TypedTool> Tool for TypedToolAdapter<T> {
         self.0.background_log_direct()
     }
 
-    fn timeout_secs(&self) -> u64 {
-        self.0.timeout_secs()
-    }
-
-    fn max_timeout_secs(&self) -> u64 {
-        self.0.max_timeout_secs()
+    fn get_timeout_secs(&self, requested: Option<u64>, backgrounding_enabled: bool) -> u64 {
+        self.0.get_timeout_secs(requested, backgrounding_enabled)
     }
 
     fn supports_configurable_timeout(&self) -> bool {

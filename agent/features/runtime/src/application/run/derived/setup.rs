@@ -374,9 +374,13 @@ impl AgentRunner for CliAgentRunner {
             };
 
             // ── #1385: Catalog from derived.instance.context() (NOT from self.tool_catalog) ──
-            let sub_catalog = match derived.instance.context().tool_catalog().snapshot(
+            let sub_catalog = match derived.instance.context().tool_catalog().snapshot_with_backgrounding(
                 &tools::RegistryScopeName::new("sub-agent"),
                 &tools::ToolProfileName::new("sub-agent-restricted"),
+                crate::application::run::config::background_threshold_from_context(
+                    derived.instance.context(),
+                )
+                .is_some(),
             ) {
                 Ok(snapshot) => snapshot,
                 Err(error) => {

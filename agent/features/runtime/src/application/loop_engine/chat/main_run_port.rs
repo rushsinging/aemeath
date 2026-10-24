@@ -120,9 +120,11 @@ pub(crate) fn make_agent(
 ) -> Agent {
     let catalog = runtime_context
         .tool_catalog_ref()
-        .snapshot(
+        .snapshot_with_backgrounding(
             &tools::RegistryScopeName::new("main"),
             &tools::ToolProfileName::new("main-full"),
+            crate::application::run::config::background_threshold_from_context(runtime_context)
+                .is_some(),
         )
         .unwrap_or_else(|_| tools::ToolCatalogSnapshot::new("main", "main-full", Vec::new()));
     let runtime_provider = config::resolve_provider_runtime_for_selection(

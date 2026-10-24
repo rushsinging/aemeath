@@ -65,7 +65,7 @@ async fn test_agent_tool_uses_finite_default_timeout() {
 }
 
 #[tokio::test]
-async fn test_agent_tool_caps_timeout_at_three_hours() {
+async fn test_agent_tool_caps_timeout_at_24_hours() {
     let tool = AgentTool;
     let runner = Arc::new(StubRunner::default());
     let ctx = test_ctx_with_runner(runner.clone());
@@ -76,7 +76,7 @@ async fn test_agent_tool_caps_timeout_at_three_hours() {
                 "prompt": "finished",
                 "description": "run task",
                 "agent": "coder",
-                "timeout": 20000,
+                "timeout": 100000,
             }),
             &ctx,
         )
@@ -85,7 +85,7 @@ async fn test_agent_tool_caps_timeout_at_three_hours() {
     assert!(!result.is_error);
     assert_eq!(
         *runner.captured_timeout.lock().unwrap(),
-        std::time::Duration::from_secs(10800)
+        std::time::Duration::from_secs(86400)
     );
 }
 

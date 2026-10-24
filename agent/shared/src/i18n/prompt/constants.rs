@@ -110,3 +110,32 @@ pub const STATIC_SYSTEM_PROMPT_ZH: &str = r#"你是一个交互式软件工程 a
 - path_base 是相对路径解析基；workspace_root 是安全边界。
 - 优先使用相对路径；绝对路径必须位于当前 workspace 内。
 - EnterWorktree 或 ExitWorktree 后，以工具返回的最新 path_base/workspace_root 为准，禁止复用其他 checkout 的路径。"#;
+
+// ── system.rs：工具超时预算 guidance（按会话后台化开关分档）──
+/// 后台执行已启用时的 `timeout` guidance（英文）。
+pub const TOOL_TIMEOUT_GUIDANCE_ENABLED_EN: &str = r#"
+
+# Tool timeout budget
+- Background execution is enabled: tools default to a 24h (86400s) budget, so do not set `timeout` unless necessary — set it only when a shorter cutoff is genuinely wanted.
+- `BackgroundProcessWatch` is the exception: its timeout is capped at 300s regardless."#;
+
+/// 后台执行已启用时的 `timeout` guidance（中文）。
+pub const TOOL_TIMEOUT_GUIDANCE_ENABLED_ZH: &str = r#"
+
+# 工具超时预算
+- 后台执行已启用：工具默认预算为 24h（86400s），一般无需设置 `timeout`；只有确实需要更短收口时才显式设置。
+- `BackgroundProcessWatch` 例外：其超时固定上限 300s。"#;
+
+/// 后台执行未启用时的 `timeout` guidance（英文）。
+pub const TOOL_TIMEOUT_GUIDANCE_DISABLED_EN: &str = r#"
+
+# Tool timeout budget
+- Background execution is disabled: the default budget is 30m (1800s); `WebFetch` defaults to 30s and `Agent` defaults to 1h.
+- For tasks expected to run longer, you MUST pass an explicit `timeout` (max 86400s); otherwise the call aborts when the default expires."#;
+
+/// 后台执行未启用时的 `timeout` guidance（中文）。
+pub const TOOL_TIMEOUT_GUIDANCE_DISABLED_ZH: &str = r#"
+
+# 工具超时预算
+- 后台执行未启用：默认预算 30m（1800s）；`WebFetch` 默认 30s、`Agent` 默认 1h。
+- 预计运行更久的任务必须显式传 `timeout`（上限 86400s），否则到达默认值即中止。"#;

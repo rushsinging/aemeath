@@ -23,7 +23,9 @@ pub struct ExitWorktreeResult {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ExitWorktreeInput {
-    /// Timeout in seconds (default 120, max 3600)
+    /// Timeout in seconds; the runtime resolves the default (24h when
+    /// background execution is enabled, otherwise the tool default) and caps
+    /// it at 86400.
     #[serde(default)]
     pub timeout: Option<u64>,
 }

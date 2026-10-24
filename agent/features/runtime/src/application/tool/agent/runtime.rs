@@ -132,7 +132,7 @@ async fn call_tool_with_timeout(
             task_change: None,
         });
     }
-    let timeout = tool.timeout_secs();
+    let timeout = tool.get_timeout_secs(None, false);
     let cancellation = ctx.cancellation();
     tokio::select! {
         _ = cancellation.cancelled() => Err(tool_call_cancelled_message(name)),

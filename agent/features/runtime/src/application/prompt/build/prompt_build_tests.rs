@@ -131,6 +131,7 @@ fn test_prompt_context_new_preserves_model_metadata() {
         Some("openrouter"),
         Some("anthropic/claude-sonnet-4"),
         share::config::PermissionModeConfig::Ask,
+        false,
     );
 
     assert_eq!(context.cwd, cwd);
@@ -243,6 +244,42 @@ fn test_project_instruction_walk_does_not_scan_descendants_when_climbing_parents
 }
 
 #[tokio::test]
+async fn timeout_guidance_switches_with_backgrounding_flag() {
+    let hook_runner: Arc<dyn HookDispatcher> = hook::wire_hook_dispatcher(
+        &share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config::default()),
+    )
+    .unwrap();
+    let cwd = PathBuf::from("/tmp/project");
+
+    let enabled_context = PromptContextData::new(
+        &cwd,
+        None,
+        None,
+        share::config::PermissionModeConfig::Ask,
+        true,
+    );
+    let enabled_parts = build_system_prompt_parts(&enabled_context, &hook_runner, "en").await;
+    assert!(enabled_parts.static_part.contains("86400"));
+    assert!(enabled_parts.static_part.contains("do not set `timeout`"));
+    assert!(enabled_parts.static_part.contains("BackgroundProcessWatch"));
+    assert!(!enabled_parts.static_part.contains("1800"));
+
+    let disabled_context = PromptContextData::new(
+        &cwd,
+        None,
+        None,
+        share::config::PermissionModeConfig::Ask,
+        false,
+    );
+    let disabled_parts = build_system_prompt_parts(&disabled_context, &hook_runner, "en").await;
+    assert!(disabled_parts.static_part.contains("1800"));
+    assert!(disabled_parts
+        .static_part
+        .contains("MUST pass an explicit `timeout`"));
+    assert!(!disabled_parts.static_part.contains("24h"));
+}
+
+#[tokio::test]
 async fn build_system_prompt_parts_captures_git_once_without_changing_static_prompt() {
     let cwd = tempfile::tempdir().unwrap();
     let init = std::process::Command::new("git")
@@ -260,6 +297,7 @@ async fn build_system_prompt_parts_captures_git_once_without_changing_static_pro
         Some("deepseek"),
         Some("deepseek-chat"),
         share::config::PermissionModeConfig::Ask,
+        false,
     );
 
     let parts = build_system_prompt_parts(&context, &hook_runner, "en").await;
@@ -283,6 +321,7 @@ async fn build_system_prompt_parts_when_cwd_deleted_reports_attribution() {
         None,
         None,
         share::config::PermissionModeConfig::Ask,
+        false,
     );
 
     let parts = build_system_prompt_parts(&context, &hook_runner, "en").await;

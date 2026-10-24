@@ -26,6 +26,10 @@ pub struct PromptContextData {
     pub provider_name: Option<String>,
     pub model_name: Option<String>,
     pub permission_mode: PermissionModeConfig,
+    /// 会话是否启用后台化（`tool_background_threshold_secs > 0`）。
+    /// 决定 `timeout` 预算 guidance 的档位；system prompt 会话级冻结，
+    /// 配置变更要等下个会话或 compact 后重组才生效。
+    pub backgrounding_enabled: bool,
 }
 
 impl PromptContextData {
@@ -34,12 +38,14 @@ impl PromptContextData {
         provider_name: Option<&str>,
         model_name: Option<&str>,
         permission_mode: PermissionModeConfig,
+        backgrounding_enabled: bool,
     ) -> Self {
         Self {
             cwd: cwd.to_path_buf(),
             provider_name: provider_name.map(str::to_string),
             model_name: model_name.map(str::to_string),
             permission_mode,
+            backgrounding_enabled,
         }
     }
 }
@@ -56,12 +62,13 @@ fn static_system_prompt_for(
     is_git: bool,
     lang: &str,
     permission_mode: PermissionModeConfig,
+    backgrounding_enabled: bool,
 ) -> String {
     let prompt = static_system_prompt(lang)
         .replace("{cwd_str}", cwd_str)
         .replace("{is_git}", &is_git.to_string());
 
-    match permission_mode {
+    let prompt_with_mode = match permission_mode {
         PermissionModeConfig::AllowAll => {
             let (workspace_boundary, relative_path_guidance, worktree_guidance) = match lang {
                 "zh" => (
@@ -103,12 +110,18 @@ fn static_system_prompt_for(
                 )
         }
         PermissionModeConfig::Ask | PermissionModeConfig::AutoRead => prompt,
-    }
+    };
+    let mut prompt = prompt_with_mode;
+    prompt.push_str(share::i18n::prompt::system::tool_timeout_guidance(
+        lang,
+        backgrounding_enabled,
+    ));
+    prompt
 }
 
 #[cfg(test)]
 fn static_system_prompt_for_test(cwd_str: &str, is_git: bool, lang: &str) -> String {
-    static_system_prompt_for(cwd_str, is_git, lang, PermissionModeConfig::Ask)
+    static_system_prompt_for(cwd_str, is_git, lang, PermissionModeConfig::Ask, false)
 }
 
 #[cfg(test)]
@@ -118,7 +131,7 @@ fn static_system_prompt_for_test_with_permission_mode(
     lang: &str,
     permission_mode: PermissionModeConfig,
 ) -> String {
-    static_system_prompt_for(cwd_str, is_git, lang, permission_mode)
+    static_system_prompt_for(cwd_str, is_git, lang, permission_mode, false)
 }
 
 /// Build commit guidance with provider/model trailer. 文案模板迁自 `share::i18n::prompt::commit`。
@@ -150,7 +163,13 @@ pub async fn build_system_prompt_parts(
     let is_git = is_git_repo(cwd).await;
 
     // --- Static part: instructions that don't change between sessions ---
-    let mut static_part = static_system_prompt_for(&cwd_str, is_git, lang, context.permission_mode);
+    let mut static_part = static_system_prompt_for(
+        &cwd_str,
+        is_git,
+        lang,
+        context.permission_mode,
+        context.backgrounding_enabled,
+    );
 
     // --- guardrails（c2 组件）：全局 + 项目 guardrails.md 追加进 stable 段 ---
     for section in load_guardrails_sections(cwd).await {

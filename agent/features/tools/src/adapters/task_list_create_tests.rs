@@ -85,5 +85,5 @@ fn test_task_list_create_timeout_is_short_for_memory_only_tool() {
     let access: Arc<dyn task::TaskAccess> = Arc::new(task::TaskStore::new());
     let tool = TaskListCreateTool { access };
 
-    assert_eq!(tool.timeout_secs(), 5);
+    assert_eq!(tool.get_timeout_secs(None, false), 5);
 }

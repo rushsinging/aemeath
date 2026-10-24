@@ -26,6 +26,8 @@ pub struct BashInput {
     pub goal: String,
     /// The bash command to execute
     pub command: String,
-    /// Timeout in seconds (default 120, max 3600)
+    /// Timeout in seconds; the runtime resolves the default (24h when
+    /// background execution is enabled, otherwise the tool default) and caps
+    /// it at 86400.
     pub timeout: Option<u64>,
 }

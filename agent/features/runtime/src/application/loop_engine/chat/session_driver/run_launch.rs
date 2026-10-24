@@ -919,9 +919,13 @@ where
                         max_output_tokens: runtime_context.provider_ref().max_tokens as usize,
                         raw_tool_schemas: runtime_context
                             .tool_catalog_ref()
-                            .snapshot(
+                            .snapshot_with_backgrounding(
                                 &tools::RegistryScopeName::new("main"),
                                 &tools::ToolProfileName::new("main-full"),
+                                crate::application::run::config::background_threshold_from_context(
+                                    &runtime_context,
+                                )
+                                .is_some(),
                             )
                             .map(|snapshot| snapshot.model_schemas())
                             .unwrap_or_default(),

@@ -773,7 +773,7 @@ async fn test_bash_command_killed_by_signal_reports_signal_in_message() {
 }
 
 #[test]
-fn bash_tool_timeout_secs_allows_up_to_one_hour() {
+fn bash_tool_timeout_defaults_to_30m_and_background_budget_to_24h() {
     let workspace = tempdir().unwrap();
     let ctx = crate::domain::test_support::TestToolExecutionContextBuilder::new(
         workspace.path().to_path_buf(),
@@ -781,9 +781,9 @@ fn bash_tool_timeout_secs_allows_up_to_one_hour() {
     .allow_all(true)
     .build();
     let tool = bash_tool(&ctx);
-    // default 保持 120；max=3600，由入参 timeout + supervisor resolve 抬高 deadline。
-    assert_eq!(tool.timeout_secs(), 120);
-    assert_eq!(tool.max_timeout_secs(), 3600);
+    assert_eq!(tool.get_timeout_secs(None, false), 1800);
+    assert_eq!(tool.get_timeout_secs(None, true), 86400);
+    assert_eq!(tool.get_timeout_secs(Some(3600), false), 3600);
 }
 
 /// timeout 默认值/上限属参数契约，唯一真相源是 `BashInput::timeout` 字段 doc
@@ -803,8 +803,8 @@ fn bash_tool_timeout_max_lives_in_schema_and_both_description_channels_agree() {
         .as_str()
         .expect("timeout description");
     assert!(
-        timeout_desc.contains("max 3600") && timeout_desc.contains("seconds"),
-        "schema should advertise the 3600s max in seconds, got: {timeout_desc}"
+        timeout_desc.contains("Timeout in seconds") && timeout_desc.contains("background"),
+        "字段 doc 必须声明单位为秒且说明后台档语义（具体数字由 catalog 注入），got: {timeout_desc}"
     );
     assert_eq!(
         tool.description_for("en"),

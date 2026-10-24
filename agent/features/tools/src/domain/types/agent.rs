@@ -20,7 +20,8 @@ pub struct AgentInput {
     pub description: String,
     /// Required named agent. Must exactly match an instance name in the system prompt's Available Agent Roles roster (machine key: `config.agents.names`).
     pub agent: String,
-    /// Timeout in seconds (default 3600, max 10800)
+    /// Timeout in seconds; the runtime resolves the default (24h when background
+    /// execution is enabled, otherwise this tool's 1h) and caps it at 86400.
     pub timeout: Option<u64>,
 }
 
