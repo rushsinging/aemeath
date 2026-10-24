@@ -133,10 +133,8 @@ impl RsiEventRecorder {
             else {
                 continue;
             };
-            if name < cutoff {
-                if std::fs::remove_file(&path).is_ok() {
-                    removed += 1;
-                }
+            if name < cutoff && std::fs::remove_file(&path).is_ok() {
+                removed += 1;
             }
         }
         removed
