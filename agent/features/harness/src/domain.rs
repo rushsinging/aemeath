@@ -11,6 +11,7 @@ pub mod daemon_protocol;
 #[cfg(test)]
 mod daemon_protocol_tests;
 pub mod errors;
+pub mod events;
 pub mod evidence;
 #[cfg(test)]
 mod evidence_tests;

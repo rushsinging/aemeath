@@ -151,6 +151,8 @@ async fn run_block(
     cycle_ref: &str,
     dry_run: bool,
     preview_lines: &mut Vec<String>,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+    block_index: usize,
 ) -> (Vec<(AppliedEdit, String)>, &'static str) {
     let prompt = build_block_prompt(chunk, lessons, evidence);
     let response = match llm.complete(&prompt).await {
@@ -161,20 +163,30 @@ async fn run_block(
         }
     };
     let proposal = match parse_block_proposal(&response) {
-        Ok(proposal) => proposal,
+        Ok(proposal) => {
+            if let Some(recorder) = recorder {
+                let (reason, edits) = match &proposal {
+                    BlockProposal::Propose { reason, change_set } => {
+                        (reason.clone(), change_set.edits.len())
+                    }
+                    BlockProposal::NoChange { reason } => (reason.clone(), 0),
+                };
+                recorder.record(&crate::domain::events::RsiCycleEvent::ProposalParsed {
+                    block_index,
+                    reason: reason.chars().take(200).collect(),
+                    edits,
+                });
+            }
+            proposal
+        }
         Err(error) => {
-            eprintln!(
-                "[e2e-diag] err={}; tail={}",
-                error.message(),
-                response
-                    .chars()
-                    .rev()
-                    .take(300)
-                    .collect::<String>()
-                    .chars()
-                    .rev()
-                    .collect::<String>()
-            );
+            if let Some(recorder) = recorder {
+                recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                    block_index,
+                    stage: "parse".to_string(),
+                    message: error.message().chars().take(120).collect(),
+                });
+            }
             log::warn!(target: crate::LOG_TARGET,
                 "提案应答解析失败（前 200 字符）：{}…；错误：{}",
                 response.chars().take(200).collect::<String>(), error.message());
@@ -220,7 +232,33 @@ async fn run_block(
             }
             match apply_change_set(registry, &change_set) {
                 Ok(applied) => {
-                    record_adopted_lesson(lesson_store, &change_set, &reason, cycle_ref);
+                    if let Some(recorder) = recorder {
+                        for edit in &change_set.edits {
+                            let (component, action, old_chars, new_chars) = match edit {
+                                crate::domain::changeset::ComponentEdit::Upsert { id, content } => {
+                                    let old = registry
+                                        .read(id)
+                                        .map(|c| c.body.chars().count())
+                                        .unwrap_or(0);
+                                    (format!("{id}"), "upsert", old, content.body.chars().count())
+                                }
+                                crate::domain::changeset::ComponentEdit::Delete { id } => {
+                                    let old = registry
+                                        .read(id)
+                                        .map(|c| c.body.chars().count())
+                                        .unwrap_or(0);
+                                    (format!("{id}"), "delete", old, 0)
+                                }
+                            };
+                            recorder.record(&crate::domain::events::RsiCycleEvent::EditApplied {
+                                component,
+                                action: action.to_string(),
+                                old_chars,
+                                new_chars,
+                            });
+                        }
+                    }
+                    record_adopted_lesson(lesson_store, &change_set, &reason, cycle_ref, recorder);
                     let adoption: Vec<(AppliedEdit, String)> = applied
                         .into_iter()
                         .map(|edit| (edit, reason.clone()))
@@ -240,6 +278,7 @@ fn record_adopted_lesson(
     change_set: &ChangeSet,
     reason: &str,
     cycle_ref: &str,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
 ) {
     for edit in &change_set.edits {
         let (id, action) = match edit {
@@ -262,12 +301,41 @@ fn record_adopted_lesson(
         );
         match entry {
             Ok(entry) => {
+                let entry_id = entry.id.clone();
+                let entry_signal = entry
+                    .evidence
+                    .first()
+                    .map(|binding| binding.signal)
+                    .unwrap_or(crate::domain::evidence::SignalKind::CycleObservation);
                 // #2065 B：覆盖组件前退役旧 Active lesson（新现实取代旧经验）
-                if let Err(error) = lesson_store.retire_for_component(id) {
-                    log::warn!(target: crate::LOG_TARGET, "旧 lesson 退役失败（继续追加新 lesson）：{error}");
+                match lesson_store.retire_for_component(id) {
+                    Ok(retired) if retired > 0 => {
+                        if let Some(recorder) = recorder {
+                            recorder.record(&crate::domain::events::RsiCycleEvent::LessonRetired {
+                                component: format!("{id}"),
+                                count: retired,
+                            });
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        log::warn!(target: crate::LOG_TARGET, "旧 lesson 退役失败（继续追加新 lesson）：{error}");
+                    }
                 }
-                if let Err(error) = lesson_store.append(&entry) {
-                    log::warn!(target: crate::LOG_TARGET, "经验回写失败（组件变更已生效）：{error}");
+                match lesson_store.append(&entry) {
+                    Ok(()) => {
+                        if let Some(recorder) = recorder {
+                            recorder.record(
+                                &crate::domain::events::RsiCycleEvent::LessonRecorded {
+                                    lesson_id: entry_id.clone(),
+                                    signal: entry_signal.as_str().to_string(),
+                                },
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        log::warn!(target: crate::LOG_TARGET, "经验回写失败（组件变更已生效）：{error}");
+                    }
                 }
             }
             Err(error) => {
@@ -286,6 +354,7 @@ pub async fn run_improvement_cycle(
     evidence: crate::domain::evidence::EvidenceBundle,
     dry_run: bool,
     preview_lines: &mut Vec<String>,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
 ) -> Result<CycleOutcome, HarnessError> {
     let cycle_ref = format!(
         "cycle-{}",
@@ -317,7 +386,7 @@ pub async fn run_improvement_cycle(
     let mut no_change = 0usize;
     let mut discarded = 0usize;
     let mut adoption_records: Vec<crate::domain::task::AdoptionRecord> = Vec::new();
-    for chunk in &chunks {
+    for (block_index, chunk) in chunks.iter().enumerate() {
         let (block_adoptions, label) = run_block(
             registry,
             llm,
@@ -328,6 +397,8 @@ pub async fn run_improvement_cycle(
             &cycle_ref,
             dry_run,
             preview_lines,
+            recorder,
+            block_index,
         )
         .await;
         for (edit, edit_reason) in &block_adoptions {
@@ -463,6 +534,7 @@ pub async fn run_compose_phase(
     adoptions: &[crate::domain::task::AdoptionRecord],
     dry_run: bool,
     preview_lines: &mut Vec<String>,
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
 ) -> Result<Option<CycleOutcome>, HarnessError> {
     if adoptions.is_empty() {
         return Ok(None);
@@ -545,7 +617,13 @@ pub async fn run_compose_phase(
             } else {
                 match apply_change_set(registry, &change_set) {
                     Ok(_) => {
-                        record_adopted_lesson(lesson_store, &change_set, &reason, &cycle_ref);
+                        record_adopted_lesson(
+                            lesson_store,
+                            &change_set,
+                            &reason,
+                            &cycle_ref,
+                            recorder,
+                        );
                         "仲裁修正（已采纳）"
                     }
                     Err(_) => "仲裁修正（校验失败作废）",
@@ -559,6 +637,11 @@ pub async fn run_compose_phase(
     } else {
         format!("Compose：{label}")
     };
+    if let Some(recorder) = recorder {
+        recorder.record(&crate::domain::events::RsiCycleEvent::ComposeResult {
+            label: label.to_string(),
+        });
+    }
     Ok(Some(CycleOutcome {
         summary,
         adopted: Vec::new(),

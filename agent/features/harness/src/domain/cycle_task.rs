@@ -23,6 +23,8 @@ pub struct HarnessRsiCycleTask {
     stream_port: Box<dyn crate::domain::stream_port::EvidenceStreamPort>,
     /// 预演模式（#2050）：完整周期但零持久副作用。
     dry_run: bool,
+    /// 过程事件记录器（#2070：周期全链路事实落盘，评测输入）。
+    recorder: Option<std::sync::Arc<crate::domain::events::RsiEventRecorder>>,
 }
 
 impl HarnessRsiCycleTask {
@@ -39,7 +41,17 @@ impl HarnessRsiCycleTask {
             config,
             stream_port: Box::new(crate::domain::stream_port::FakeEvidenceStream::default()),
             dry_run: false,
+            recorder: None,
         }
+    }
+
+    /// 注入过程事件记录器（#2070）。
+    pub fn with_event_recorder(
+        mut self,
+        recorder: std::sync::Arc<crate::domain::events::RsiEventRecorder>,
+    ) -> Self {
+        self.recorder = Some(recorder);
+        self
     }
 
     /// 预演模式（#2050）：组件/lesson/checkpoint 全不写。
@@ -71,6 +83,23 @@ impl RsiTask for HarnessRsiCycleTask {
             component_tree_fingerprint: String::new(),
         };
         let blocks = self.stream_port.plan(&params);
+        let cycle_started = std::time::Instant::now();
+        let cycle_id = format!(
+            "cycle-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_millis())
+                .unwrap_or(0)
+        );
+        if let Some(recorder) = &self.recorder {
+            recorder.record(&crate::domain::events::RsiCycleEvent::CycleStart {
+                cycle_id: cycle_id.clone(),
+                trigger: "manual".to_string(),
+                model: String::new(),
+                dry_run: self.dry_run,
+                blocks: blocks.len(),
+            });
+        }
         let cursor_start = self.stream_port.cursor_summary();
         let mut summary_parts = Vec::new();
         let mut preview_lines = Vec::new();
@@ -85,6 +114,21 @@ impl RsiTask for HarnessRsiCycleTask {
         }
         for (block_index, block) in blocks.iter().enumerate() {
             let evidence = self.stream_port.block_evidence(block);
+            if let Some(recorder) = &self.recorder {
+                recorder.record(&crate::domain::events::RsiCycleEvent::BlockEvidence {
+                    block_index,
+                    sessions_runs: block
+                        .runs
+                        .iter()
+                        .map(|run| format!("{}#{}", run.session_key, run.run_id))
+                        .collect(),
+                    signals: evidence
+                        .signals
+                        .iter()
+                        .map(|signal| signal.signal_id.clone())
+                        .collect(),
+                });
+            }
             if self.dry_run {
                 let sessions: Vec<String> = block
                     .runs
@@ -119,6 +163,7 @@ impl RsiTask for HarnessRsiCycleTask {
                 evidence,
                 self.dry_run,
                 &mut preview_lines,
+                self.recorder.as_deref(),
             )
             .await?;
             if self.dry_run {
@@ -140,6 +185,7 @@ impl RsiTask for HarnessRsiCycleTask {
                 &all_adoptions,
                 self.dry_run,
                 &mut preview_lines,
+                self.recorder.as_deref(),
             )
             .await
             {
@@ -163,6 +209,12 @@ impl RsiTask for HarnessRsiCycleTask {
                 summary.push_str("\n—— 组件落盘结果（预演，零写入）：\n");
                 summary.push_str(&preview_lines.join("\n"));
             }
+        }
+        if let Some(recorder) = &self.recorder {
+            recorder.record(&crate::domain::events::RsiCycleEvent::CycleEnd {
+                summary: summary.chars().take(200).collect(),
+                duration_ms: cycle_started.elapsed().as_millis() as u64,
+            });
         }
         Ok(crate::domain::task::CycleOutcome {
             summary,

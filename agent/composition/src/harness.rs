@@ -354,7 +354,13 @@ async fn run_rsi_run_inner(overrides: &RsiRunOverrides, dry_run: bool) -> RsiRun
         lesson_store,
         rsi_config,
     )
-    .with_evidence_stream(Box::new(stream));
+    .with_evidence_stream(Box::new(stream))
+    // #2070：过程事件记录器（fail-open；GC 由 recorder 自管）
+    .with_event_recorder(std::sync::Arc::new(
+        harness::domain::events::RsiEventRecorder::new(
+            share::config::paths::global_agents_dir().join("harness/events"),
+        ),
+    ));
     let mut task = task;
     if dry_run {
         task = task.with_dry_run();
