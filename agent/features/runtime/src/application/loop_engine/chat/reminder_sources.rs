@@ -104,6 +104,24 @@ impl RunStartFactReminderSource {
         }
     }
 
+    /// aemeath.json 配置变更（含 agents 名册，#2046）：会话冻结快照不变，
+    /// 本 Remind 是会话内模型感知配置变更的唯一通道。
+    pub(crate) fn config_sources_changed(changed_keys: Vec<String>) -> Self {
+        Self {
+            kind: ReminderKind::new("config_sources_changed"),
+            data: context::InvocationReminderData::config_sources_changed(changed_keys),
+            policy: ReminderPolicy {
+                refresh: context::RefreshTrigger::OnRunStart,
+                placement: ReminderPlacement::SystemTail,
+                inject: InjectBehavior {
+                    dedup: ReminderDedup::SkipIfUnchanged,
+                    priority: ReminderPriority::environment(),
+                },
+                compact: CompactBehavior::Reinstate,
+            },
+        }
+    }
+
     pub(crate) fn model_guidance_mismatch(
         session_model_id: impl Into<String>,
         run_model_id: impl Into<String>,
