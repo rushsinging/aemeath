@@ -157,10 +157,19 @@ impl RsiLlmPort for ProductionRsiLlm {
 
 /// 装配生产 RSI LLM 端口：default binding 解析 → provider 客户端。
 pub fn wire_rsi_llm(config: &share::config::Config) -> Result<Arc<dyn RsiLlmPort>, String> {
-    let resolved = config
-        .models
-        .resolve_default_model()
-        .map_err(|error| format!("解析默认模型失败：{error}"))?;
+    // harness.rsi.model 独立档优先；空则继承 models.default（对齐
+    // memory.reflection.model 范式——改进模型可与对话模型分离）。
+    let resolved = if config.harness.rsi.model.trim().is_empty() {
+        config
+            .models
+            .resolve_default_model()
+            .map_err(|error| format!("解析默认模型失败：{error}"))?
+    } else {
+        config
+            .models
+            .resolve_model_selection(&config.harness.rsi.model)
+            .map_err(|error| format!("解析 harness.rsi.model 失败：{error}"))?
+    };
     let spec = ProviderClientSpecData {
         driver: resolved.driver.clone(),
         source_key: resolved.source_key.clone(),

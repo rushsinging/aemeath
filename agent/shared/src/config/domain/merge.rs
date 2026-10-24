@@ -334,6 +334,8 @@ pub struct RsiConfigPatch {
     #[serde(default)]
     pub enabled: Option<bool>,
     #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
     pub interval_secs: Option<u64>,
     #[serde(default)]
     pub chunk_max_components: Option<usize>,
@@ -924,6 +926,9 @@ pub(crate) fn apply_harness_patch(
     if let Some(rsi) = patch.rsi {
         if let Some(v) = rsi.enabled {
             base.rsi.enabled = v;
+        }
+        if let Some(v) = rsi.model {
+            base.rsi.model = v;
         }
         if let Some(v) = rsi.interval_secs {
             base.rsi.interval_secs = v;

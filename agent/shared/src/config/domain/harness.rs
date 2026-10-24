@@ -29,6 +29,11 @@ pub struct RsiConfig {
     #[serde(default = "crate::config::ui::default_true")]
     pub enabled: bool,
 
+    /// RSI 独立模型档（"<source>/<model>" 格式；空=继承 models.default，
+    /// 对齐 memory.reflection.model 范式——改进模型可与对话模型分离）。
+    #[serde(default)]
+    pub model: String,
+
     /// Timer 触发周期（秒）。
     #[serde(default = "default_interval_secs")]
     pub interval_secs: u64,
@@ -55,6 +60,7 @@ impl Default for RsiConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            model: String::new(),
             interval_secs: default_interval_secs(),
             chunk_max_components: default_chunk_max_components(),
             evidence_initial_window_days: default_evidence_initial_window_days(),
