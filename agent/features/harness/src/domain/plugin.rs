@@ -83,8 +83,9 @@ pub enum SeamEffect {
 pub struct PluginSeamEngine {
     /// 规则来源 plugin 名（与规则一一对应）。
     rules: Vec<(String, PluginRule)>,
-    /// run 内调用计数（RateLimit 用；engine 每次 run 边界重建归零）。
-    call_counts: std::cell::RefCell<std::collections::HashMap<String, usize>>,
+    /// run 内调用计数（RateLimit 用；engine 每次 run 边界重建归零。
+    /// Mutex 非 RefCell——engine 经 materializer 跨 await，MUST Send+Sync）。
+    call_counts: std::sync::Mutex<std::collections::HashMap<String, usize>>,
 }
 
 impl PartialEq for PluginSeamEngine {
@@ -158,7 +159,7 @@ impl PluginSeamEngine {
                     }
                 }
                 PluginRule::RateLimit { max_calls, .. } => {
-                    let mut counts = self.call_counts.borrow_mut();
+                    let mut counts = self.call_counts.lock().expect("plugin seam 计数锁");
                     let count = counts.entry(tool_name.to_string()).or_insert(0);
                     *count += 1;
                     if *count > *max_calls {
