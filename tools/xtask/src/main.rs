@@ -7,6 +7,22 @@ use std::process::Command;
 fn main() -> Result<()> {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
+        Some("cache-clean") => {
+            let dry_run = args.next().as_deref() == Some("--dry-run");
+            let repo_root = PathBuf::from(args.next().unwrap_or_else(|| ".".to_owned()));
+            let cache_root = PathBuf::from(
+                env::var("AEMEATH_TARGET_CACHE_ROOT")
+                    .unwrap_or_else(|_| format!("{}/.cache/aemeath-target", env::var("HOME").unwrap_or_default())),
+            );
+            let (removed, freed) = xtask::cache_clean::clean(&cache_root, &repo_root, dry_run)?;
+            println!(
+                "cache-clean：{} 个目录，释放 {} MB{}",
+                removed,
+                freed / 1024 / 1024,
+                if dry_run { "（dry-run，未实际删除）" } else { "" }
+            );
+            Ok(())
+        }
         Some("coverage-summary") => {
             let report = PathBuf::from(args.next().context("缺少 coverage report 路径")?);
             let root = PathBuf::from(args.next().context("缺少 workspace root 路径")?);

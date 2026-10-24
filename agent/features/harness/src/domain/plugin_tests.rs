@@ -1,6 +1,6 @@
 //! plugin domain 契约测试（#2030 commit 1）。
 
-use crate::domain::plugin::{validate_plugin_rule, PluginRule, PluginSeamEngine};
+use crate::domain::plugin::{validate_plugin_rule, PluginRule, PluginSeamEngine, SeamEffect};
 
 fn trim_rule(tool: &str, max_chars: usize) -> PluginRule {
     PluginRule::TrimOutput {
@@ -93,4 +93,79 @@ fn rule_validation_rejects_empty_params() {
     assert!(validate_plugin_rule(&hint_rule("Bash", "", "h")).is_err());
     assert!(validate_plugin_rule(&hint_rule("Bash", "p", " ")).is_err());
     assert!(validate_plugin_rule(&trim_rule("Bash", 10)).is_ok());
+}
+
+// ---- #2063 seam v2：限流与写后验证 ----
+
+fn rate_rule(tool: &str, max_calls: usize) -> PluginRule {
+    PluginRule::RateLimit {
+        tool: tool.to_string(),
+        max_calls,
+    }
+}
+
+fn verify_rule(tool: &str, pattern: &str) -> PluginRule {
+    PluginRule::VerifyAfterWrite {
+        tool: tool.to_string(),
+        pattern: pattern.to_string(),
+    }
+}
+
+/// 限流：超限后结果替换为限流提示；未超限原样。
+#[test]
+fn rate_limit_replaces_after_threshold() {
+    let mut engine = PluginSeamEngine::new();
+    engine.register("limiter", &[rate_rule("Bash", 2)]);
+    let (first, _) = engine.apply("Bash", "ok-1", false);
+    assert_eq!(first, "ok-1");
+    let (second, _) = engine.apply("Bash", "ok-2", false);
+    assert_eq!(second, "ok-2");
+    let (third, outcomes) = engine.apply("Bash", "would-be-3", false);
+    assert!(third.contains("已达本 run 调用上限 2"));
+    assert!(matches!(
+        outcomes[0].applied,
+        SeamEffect::RateLimited { call_index: 3 }
+    ));
+    // 其他工具不受限
+    let (other, _) = engine.apply("Grep", "fine", false);
+    assert_eq!(other, "fine");
+}
+
+/// 写后验证：命中 pattern 追加验证提示。
+#[test]
+fn verify_after_write_appends_prompt() {
+    let mut engine = PluginSeamEngine::new();
+    engine.register("verifier", &[verify_rule("Edit", "The file")]);
+    let (text, outcomes) = engine.apply("Edit", "The file x.rs has been updated", false);
+    assert!(text.ends_with("用 Read/Grep 复核产物后再继续"));
+    assert_eq!(outcomes.len(), 1);
+    let (no_hit, _) = engine.apply("Edit", "no match here", false);
+    assert_eq!(no_hit, "no match here");
+}
+
+/// 规则校验：max_calls=0 / 空 pattern 拒绝。
+#[test]
+fn v2_rule_validation() {
+    assert!(validate_plugin_rule(&rate_rule("Bash", 0)).is_err());
+    assert!(validate_plugin_rule(&rate_rule("Bash", 3)).is_ok());
+    assert!(validate_plugin_rule(&verify_rule("Edit", "")).is_err());
+    assert!(validate_plugin_rule(&verify_rule("Edit", "x")).is_ok());
+}
+
+/// 解析：两新 seam 节。
+#[test]
+fn parse_v2_seam_sections() {
+    let rules = crate::adapters::plugins_registry::parse_plugin_rules(
+        "## seam: rate_limit
+tool: Bash
+max_calls: 5
+
+## seam: verify_after_write
+tool: Edit
+pattern: The file
+",
+    )
+    .expect("解析");
+    assert!(rules.contains(&rate_rule("Bash", 5)));
+    assert!(rules.contains(&verify_rule("Edit", "The file")));
 }

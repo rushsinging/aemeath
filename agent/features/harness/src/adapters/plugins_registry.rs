@@ -38,6 +38,28 @@ pub fn parse_plugin_rules(body: &str) -> Result<Vec<PluginRule>, HarnessError> {
                     max_chars: parsed.max_chars,
                 }
             }
+            "rate_limit" => {
+                let parsed: RateLimitBody = serde_yml::from_str(yaml_body).map_err(|error| {
+                    HarnessError::invalid(ERROR_DOMAIN, format!("rate_limit 参数解析失败：{error}"))
+                })?;
+                PluginRule::RateLimit {
+                    tool: parsed.tool,
+                    max_calls: parsed.max_calls,
+                }
+            }
+            "verify_after_write" => {
+                let parsed: VerifyAfterWriteBody =
+                    serde_yml::from_str(yaml_body).map_err(|error| {
+                        HarnessError::invalid(
+                            ERROR_DOMAIN,
+                            format!("verify_after_write 参数解析失败：{error}"),
+                        )
+                    })?;
+                PluginRule::VerifyAfterWrite {
+                    tool: parsed.tool,
+                    pattern: parsed.pattern,
+                }
+            }
             "error_hint" => {
                 let parsed: ErrorHintBody = serde_yml::from_str(yaml_body).map_err(|error| {
                     HarnessError::invalid(ERROR_DOMAIN, format!("error_hint 参数解析失败：{error}"))
@@ -51,7 +73,7 @@ pub fn parse_plugin_rules(body: &str) -> Result<Vec<PluginRule>, HarnessError> {
             other => {
                 return Err(HarnessError::invalid(
                     ERROR_DOMAIN,
-                    format!("未知 seam 类型：{other}（v1 仅 trim_output / error_hint）"),
+                    format!("未知 seam 类型：{other}（支持 trim_output / error_hint / rate_limit / verify_after_write）"),
                 ));
             }
         };
@@ -79,6 +101,20 @@ struct TrimOutputBody {
     #[serde(default)]
     tool: String,
     max_chars: usize,
+}
+
+#[derive(serde::Deserialize)]
+struct RateLimitBody {
+    #[serde(default)]
+    tool: String,
+    max_calls: usize,
+}
+
+#[derive(serde::Deserialize)]
+struct VerifyAfterWriteBody {
+    #[serde(default)]
+    tool: String,
+    pattern: String,
 }
 
 #[derive(serde::Deserialize)]

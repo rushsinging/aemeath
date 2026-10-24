@@ -267,11 +267,24 @@ fn render_user_guidance(files: &[UserGuidanceFile]) -> String {
             let source = escape_xml_attribute(&file.path.to_string_lossy());
             format!(
                 "<guidance source=\"{}\">\n{}\n</guidance>",
-                source, file.content
+                source,
+                truncate_guidance_content(&file.content)
             )
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+/// overlay 单文件注入预算（#2063：AGENTS.md 是唯一无护栏的注入通道，
+/// 全量拼接会撑爆 user-context；对齐 guardrails 族加预算 + 截断标记）。
+fn truncate_guidance_content(content: &str) -> String {
+    let budget = crate::constants::GUIDANCE_FILE_MAX_CHARS;
+    if content.chars().count() <= budget {
+        return content.to_string();
+    }
+    let mut truncated: String = content.chars().take(budget).collect();
+    truncated.push_str("\n…（guidance 超长截断，完整内容用 Read 工具读取该文件）");
+    truncated
 }
 
 async fn load_agents_md_from_paths(

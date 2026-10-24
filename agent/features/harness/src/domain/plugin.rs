@@ -30,6 +30,22 @@ pub enum PluginRule {
         /// 追加的提示行。
         hint: String,
     },
+    /// run 内调用限流：超过 max_calls 后，后续结果替换为限流提示
+    ///（seam 在结果侧——执行不可阻断，以可见截断表达拒绝，#2063）。
+    RateLimit {
+        /// 目标工具名（精确匹配；空 = 全部工具）。
+        tool: String,
+        /// 每 run 最大调用次数。
+        max_calls: usize,
+    },
+    /// 写后即验证：结果命中 pattern 时尾部追加验证提示
+    ///（引导模型用 Read/Grep 复核产物）。
+    VerifyAfterWrite {
+        /// 目标工具名（精确匹配；空 = 全部工具）。
+        tool: String,
+        /// 需验证信号（子串匹配）。
+        pattern: String,
+    },
 }
 
 impl PluginRule {
@@ -37,6 +53,8 @@ impl PluginRule {
         let rule_tool = match self {
             Self::TrimOutput { tool, .. } => tool,
             Self::ErrorHint { tool, .. } => tool,
+            Self::RateLimit { tool, .. } => tool,
+            Self::VerifyAfterWrite { tool, .. } => tool,
         };
         rule_tool.is_empty() || rule_tool == tool_name
     }
@@ -55,14 +73,35 @@ pub struct SeamOutcome {
 pub enum SeamEffect {
     Trimmed { original_chars: usize },
     Hinted,
+    RateLimited { call_index: usize },
+    VerifyPrompted,
 }
 
 /// seam 引擎：规则集按序应用，首个 trim 生效后仍允许后续 hint 追加
 /// （trim 改文本、hint 追加行——两者正交）。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Default)]
 pub struct PluginSeamEngine {
     /// 规则来源 plugin 名（与规则一一对应）。
     rules: Vec<(String, PluginRule)>,
+    /// run 内调用计数（RateLimit 用；engine 每次 run 边界重建归零）。
+    call_counts: std::cell::RefCell<std::collections::HashMap<String, usize>>,
+}
+
+impl PartialEq for PluginSeamEngine {
+    fn eq(&self, other: &Self) -> bool {
+        self.rules == other.rules
+    }
+}
+impl Eq for PluginSeamEngine {}
+
+impl Clone for PluginSeamEngine {
+    fn clone(&self) -> Self {
+        // 计数是 run 态——克隆即新 run（归零）
+        Self {
+            rules: self.rules.clone(),
+            call_counts: Default::default(),
+        }
+    }
 }
 
 impl PluginSeamEngine {
@@ -118,6 +157,31 @@ impl PluginSeamEngine {
                         });
                     }
                 }
+                PluginRule::RateLimit { max_calls, .. } => {
+                    let mut counts = self.call_counts.borrow_mut();
+                    let count = counts.entry(tool_name.to_string()).or_insert(0);
+                    *count += 1;
+                    if *count > *max_calls {
+                        output = format!(
+                            "[plugin seam] 工具 {tool_name} 已达本 run 调用上限 {max_calls}（第 {count} 次被限流）——请换方法或汇总现有结果"
+                        );
+                        outcomes.push(SeamOutcome {
+                            rule_index: index,
+                            plugin_name: plugin_name.clone(),
+                            applied: SeamEffect::RateLimited { call_index: *count },
+                        });
+                    }
+                }
+                PluginRule::VerifyAfterWrite { pattern, .. } => {
+                    if output.contains(pattern.as_str()) {
+                        output.push_str("\n[plugin seam] 写后即验证：命中需验证信号——用 Read/Grep 复核产物后再继续");
+                        outcomes.push(SeamOutcome {
+                            rule_index: index,
+                            plugin_name: plugin_name.clone(),
+                            applied: SeamEffect::VerifyPrompted,
+                        });
+                    }
+                }
             }
         }
         (output, outcomes)
@@ -140,6 +204,22 @@ pub fn validate_plugin_rule(rule: &PluginRule) -> Result<(), HarnessError> {
                 return Err(HarnessError::invalid(
                     ERROR_DOMAIN,
                     "error_hint 规则 pattern 与 hint MUST 非空",
+                ));
+            }
+        }
+        PluginRule::RateLimit { max_calls, .. } => {
+            if *max_calls == 0 {
+                return Err(HarnessError::invalid(
+                    ERROR_DOMAIN,
+                    "rate_limit 规则 max_calls MUST > 0",
+                ));
+            }
+        }
+        PluginRule::VerifyAfterWrite { pattern, .. } => {
+            if pattern.trim().is_empty() {
+                return Err(HarnessError::invalid(
+                    ERROR_DOMAIN,
+                    "verify_after_write 规则 pattern MUST 非空",
                 ));
             }
         }

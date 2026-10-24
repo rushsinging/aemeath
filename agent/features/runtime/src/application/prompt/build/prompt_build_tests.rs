@@ -695,3 +695,18 @@ async fn claude_md_message_appends_tool_guidance_section() {
     let section = section.expect("tool_guidance 必须加载");
     assert!(section.contains("优先并行派发"));
 }
+
+// ---- #2063 overlay 注入预算 ----
+
+#[test]
+fn guidance_content_truncated_at_budget_with_marker() {
+    let oversized = "行".repeat(crate::constants::GUIDANCE_FILE_MAX_CHARS + 500);
+    let truncated = truncate_guidance_content(&oversized);
+    assert!(truncated.contains("（guidance 超长截断"));
+    assert!(
+        truncated.chars().count() <= crate::constants::GUIDANCE_FILE_MAX_CHARS + 60,
+        "预算约束"
+    );
+    let normal = "正常内容";
+    assert_eq!(truncate_guidance_content(normal), normal, "预算内直过");
+}

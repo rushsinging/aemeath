@@ -26,9 +26,11 @@
 - 只读聚合现有注入链路（全局 + 项目 5 级 + 安全检查）；registry `write` 仅开放**当前 cwd 解析出的最高优先级文件**（项目级），全局文件编辑后置。
 - diff 语义：按注入顺序逐层 diff。
 
-### c7 scripts
-- frontmatter：`name`、`description`、`lang`（sh/py）；语法预检：`bash -n` / `py_compile`；大小上限（实施定值）。
-- 引用可见性：同 c5 规则。执行仅经 Bash 工具，NEVER 新执行通道。
+### c7 scripts（已退役，#2060 并入 c5）
+- 独立组件退役：无独立注入通道（可见性寄生其他组件文本）不满足自洽四要件。
+- 脚本回归 **skill 伴随资源**形态：`skills/<name>/scripts/`，SKILL.md 正文
+  引用即对模型可见；执行仅经 Bash 工具，NEVER 新执行通道。
+- 存量 `~/.agents/scripts/` 不迁移不删除（目录退役即不再扫描）。
 
 ### c2 guardrails
 - always-on 注入段，进入 prompt 装配链；token 预算记账（加规则要付账，注入段有界）。
