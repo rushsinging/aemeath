@@ -15,13 +15,80 @@ use tokio_util::sync::CancellationToken;
 // 截断 JSON 恢复函数已提取到 `provider::adapters::json_recovery`，
 // 由 stream / non_stream / Anthropic 路径共享。
 
+/// 单个 tool call 的流式累积状态。
+///
+/// 各 OpenAI 兼容网关对「本帧未提供该字段」有两种表达：**省略字段**（Aliyun）
+/// 与**显式空串**（Qiniu）。两者语义等价，MUST 一并视为缺失，不得覆盖既有值——
+/// 否则首帧给出的真实 `id` 会被后续空串冲掉，导致跨层关联断裂：TUI 收不到
+/// 参数增量（goal 丢失、参数退化为原始 JSON）、`ToolCallCompleted` 无法收敛状态。
+#[derive(Debug, Default, Clone)]
+pub(crate) struct ToolCallAccum {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) arguments: String,
+    pub(crate) delta_count: u32,
+}
+
+/// 合并一帧 `tool_calls` delta 后的判定结果。
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct ToolCallMergeOutcome {
+    /// `name` 是否为本条目首次非空出现（用于实时建卡）。
+    pub(crate) name_is_new: bool,
+    /// 本帧是否携带 `arguments` 增量（决定是否推送参数预览）。
+    pub(crate) has_arguments: bool,
+}
+
+impl ToolCallAccum {
+    /// 合并一帧 `tool_calls` delta。
+    ///
+    /// - `id` / `name`：仅在非空时采纳（空串等同字段缺失）
+    /// - `arguments`：只做追加
+    pub(crate) fn merge(&mut self, _index: usize, tc: &serde_json::Value) -> ToolCallMergeOutcome {
+        if let Some(id) = tc
+            .get("id")
+            .and_then(|value| value.as_str())
+            .filter(|id| !id.is_empty())
+        {
+            self.id = id.to_string();
+        }
+
+        let mut outcome = ToolCallMergeOutcome::default();
+        if let Some(function) = tc.get("function") {
+            if let Some(name) = function
+                .get("name")
+                .and_then(|value| value.as_str())
+                .filter(|name| !name.is_empty())
+            {
+                outcome.name_is_new = self.name.is_empty();
+                self.name = name.to_string();
+            }
+            if let Some(arguments) = function.get("arguments").and_then(|value| value.as_str()) {
+                self.arguments.push_str(arguments);
+                self.delta_count += 1;
+                outcome.has_arguments = true;
+            }
+        }
+        outcome
+    }
+
+    /// 保证存在稳定 `id`：缺失时按 `index` 兜底。
+    ///
+    /// 兜底 MUST 在发出「跨层标识」前完成（`emit_tool_use_start` /
+    /// `emit_tool_call_completed`），否则并行多路 tool call 会因 id 同为空而互相串错。
+    pub(crate) fn ensure_id(&mut self, index: usize) {
+        if self.id.is_empty() {
+            self.id = format!("call_{}", index);
+        }
+    }
+}
+
 /// 格式化流状态快照，用于 idle timeout / error 诊断日志。
 ///
 /// 输出形如：`text=42B reasoning=0B tools=[Write: 12KB/45d, Read: 0B/0d]`
 fn format_stream_snapshot(
     text: &str,
     reasoning: &str,
-    tool_calls: &std::collections::HashMap<usize, (String, String, String, u32)>,
+    tool_calls: &std::collections::HashMap<usize, ToolCallAccum>,
 ) -> String {
     let mut parts: Vec<String> = Vec::new();
     parts.push(format!("text={}B", text.len()));
@@ -31,8 +98,13 @@ fn format_stream_snapshot(
         sorted.sort_by_key(|(i, _)| **i);
         let tools_str: Vec<String> = sorted
             .iter()
-            .map(|(_, (_, name, args, delta_count))| {
-                format!("{}: {}B/{}d", name, args.len(), delta_count)
+            .map(|(_, accum)| {
+                format!(
+                    "{}: {}B/{}d",
+                    accum.name,
+                    accum.arguments.len(),
+                    accum.delta_count
+                )
             })
             .collect();
         parts.push(format!("tools=[{}]", tools_str.join(", ")));
@@ -50,7 +122,7 @@ pub(crate) async fn parse_openai_stream(
     let mut current_text = String::new();
     let mut reasoning_normalizer = ReasoningDeltaNormalizer::new();
     // (id, name, arguments_str, delta_count) per index — delta_count is for diagnostics
-    let mut current_tool_calls: std::collections::HashMap<usize, (String, String, String, u32)> =
+    let mut current_tool_calls: std::collections::HashMap<usize, ToolCallAccum> =
         std::collections::HashMap::new();
     // #1494：已发出 ToolCallCompleted 的 index（index 切换先发，流结束兜底跳过）。
     let mut completed_tool_indices: std::collections::HashSet<usize> =
@@ -251,15 +323,17 @@ pub(crate) async fn parse_openai_stream(
                                     if completed_tool_indices.contains(&prior_index) {
                                         continue;
                                     }
-                                    if let Some((id, name, arguments, _)) =
-                                        current_tool_calls.get(&prior_index)
-                                    {
+                                    if let Some(accum) = current_tool_calls.get(&prior_index) {
+                                        // 发出前必须补齐跨层 id，否则空 id 会让
+                                        // runtime 无法把结果关联回原 tool call。
+                                        let mut emitted = accum.clone();
+                                        emitted.ensure_id(prior_index);
                                         if try_emit_completed_tool_call(
                                             handler,
                                             prior_index,
-                                            id.clone(),
-                                            name.clone(),
-                                            arguments,
+                                            emitted.id,
+                                            emitted.name,
+                                            &emitted.arguments,
                                         ) {
                                             completed_tool_indices.insert(prior_index);
                                         }
@@ -268,60 +342,37 @@ pub(crate) async fn parse_openai_stream(
                             }
 
                             // 获取或创建 tool call 条目
-                            let entry = current_tool_calls.entry(index).or_insert_with(|| {
-                                (String::new(), String::new(), String::new(), 0)
-                            });
+                            let entry = current_tool_calls.entry(index).or_default();
 
-                            // 如果存在则更新 ID
-                            if let Some(id) = tc.get("id").and_then(|i| i.as_str()) {
-                                entry.0 = id.to_string();
+                            // 合并本帧 delta：id / name 的空串一律视为缺失，arguments 只追加。
+                            let outcome = entry.merge(index, tc);
+
+                            if outcome.name_is_new {
+                                // 建卡前补齐跨层 id（provider 可能只发 name 不发 id）。
+                                entry.ensure_id(index);
+                                log::debug!(target: crate::LOG_TARGET,
+                                    "[openai-compat stream] tool_use_start: name={} id={} index={}",
+                                    entry.name, entry.id, index,
+                                );
+                                handler.emit_tool_use_start(&entry.name, Some(&entry.id), index);
                             }
 
-                            // 更新 function 信息
-                            if let Some(function) = tc.get("function") {
-                                if let Some(name) = function.get("name").and_then(|n| n.as_str()) {
-                                    // First time we see this tool call's name — notify the
-                                    // handler immediately so the UI can show it in real time.
-                                    // Skip empty names: some providers send name="" in early
-                                    // deltas before the real name arrives.
-                                    let is_new = entry.1.is_empty() && !name.is_empty();
-                                    if !name.is_empty() {
-                                        entry.1 = name.to_string();
-                                    }
-                                    if entry.0.is_empty() {
-                                        // 某些 provider 不发送 tool call ID
-                                        entry.0 = format!("call_{}", index);
-                                    }
-                                    if is_new {
-                                        log::debug!(target: crate::LOG_TARGET,
-                                            "[openai-compat stream] tool_use_start: name={} id={} index={}",
-                                            name, entry.0, index,
-                                        );
-                                        handler.emit_tool_use_start(name, Some(&entry.0), index);
-                                    }
+                            if outcome.has_arguments && !entry.name.is_empty() {
+                                if entry.delta_count == 1 {
+                                    log::debug!(target: crate::LOG_TARGET,
+                                        "[openai-compat stream] tool_args_first_delta: name={} index={} delta_bytes={}",
+                                        entry.name, index, entry.arguments.len(),
+                                    );
                                 }
-                                if let Some(args) =
-                                    function.get("arguments").and_then(|a| a.as_str())
-                                {
-                                    entry.2.push_str(args);
-                                    entry.3 += 1;
-                                    if entry.3 == 1 {
-                                        log::debug!(target: crate::LOG_TARGET,
-                                            "[openai-compat stream] tool_args_first_delta: name={} index={} delta_bytes={}",
-                                            entry.1, index, args.len(),
-                                        );
-                                    }
-                                    // Notify handler with accumulated arguments for
-                                    // real-time UI updates (e.g. showing file path).
-                                    if !entry.1.is_empty() {
-                                        handler.emit_tool_arguments_delta(
-                                            index,
-                                            &entry.1,
-                                            Some(&entry.0),
-                                            &entry.2,
-                                        );
-                                    }
-                                }
+                                // Notify handler with accumulated arguments for
+                                // real-time UI updates (e.g. showing file path).
+                                entry.ensure_id(index);
+                                handler.emit_tool_arguments_delta(
+                                    index,
+                                    &entry.name,
+                                    Some(&entry.id),
+                                    &entry.arguments,
+                                );
                             }
                         }
                     }
@@ -361,7 +412,15 @@ pub(crate) async fn parse_openai_stream(
     sorted_tool_calls.sort_by_key(|(i, _)| *i);
 
     let mut truncated_tool: Option<(String, String, String, String, usize, u32)> = None;
-    for (tool_index, (id, name, arguments, delta_count)) in sorted_tool_calls {
+    for (tool_index, mut accum) in sorted_tool_calls {
+        // content block 与跨层事件都携带该 id，缺失时按 index 兜底。
+        accum.ensure_id(tool_index);
+        let ToolCallAccum {
+            id,
+            name,
+            arguments,
+            delta_count,
+        } = accum;
         if name.is_empty() {
             log::warn!(target: crate::LOG_TARGET,
                 "[openai-compat stream] tool_call entry with empty name: id={}, args_bytes={}, delta_count={} — skipping",
@@ -495,3 +554,7 @@ fn try_emit_completed_tool_call(
 #[cfg(test)]
 #[path = "stream_tests.rs"]
 mod json_recovery_tests;
+
+#[cfg(test)]
+#[path = "tool_call_accum_tests.rs"]
+mod tool_call_accum_tests;
