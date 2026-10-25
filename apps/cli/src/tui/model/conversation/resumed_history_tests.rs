@@ -373,3 +373,56 @@ fn reminder_messages_are_hidden_on_display_history_window() {
         "window 路径保留 Reminder 类型后必须隐藏，不能当普通用户消息"
     );
 }
+
+#[test]
+fn blank_assistant_and_thinking_blocks_are_hidden_on_resume() {
+    let mut backing = ResumedHistoryBacking::from_index(index("session", 7, 1));
+    let mut loaded = window("session", 7, 0);
+    loaded.steps[0].messages = vec![
+        TuiChatMessage::user_text("visible user input"),
+        TuiChatMessage {
+            role: "assistant".to_string(),
+            content: vec![TuiContentBlock::Thinking {
+                thinking: "\n".to_string(),
+                signature: None,
+            }],
+            input_id: None,
+            source: TuiMessageSource::User,
+            hook_notice: None,
+            skill_request: None,
+        },
+        TuiChatMessage {
+            role: "assistant".to_string(),
+            content: vec![TuiContentBlock::text("\n\n")],
+            input_id: None,
+            source: TuiMessageSource::User,
+            hook_notice: None,
+            skill_request: None,
+        },
+        TuiChatMessage::assistant_text("real answer"),
+    ];
+
+    assert!(backing.apply_window(loaded));
+
+    let thinking_items = backing
+        .items()
+        .iter()
+        .filter(|item| matches!(item.kind, ResumedHistoryItemKind::Thinking { .. }))
+        .count();
+    assert_eq!(thinking_items, 0, "纯空白 thinking block 不应产生历史项");
+
+    let assistant_items: Vec<_> = backing
+        .items()
+        .iter()
+        .filter(|item| matches!(item.kind, ResumedHistoryItemKind::AssistantText { .. }))
+        .collect();
+    assert_eq!(
+        assistant_items.len(),
+        1,
+        "纯空白 assistant block 不应产生历史项"
+    );
+    assert_eq!(
+        assistant_items[0].estimated_lines, 2,
+        "被跳过的空白块不得虚增行数估算"
+    );
+}
