@@ -64,7 +64,7 @@ src/
 
 ## 相关文档
 
-- Workflow 战术设计：[../workflow/01-reasoning-graph.md](../workflow/01-reasoning-graph.md)
+- Workflow 战术设计：[../workflow/01-workflow-design.md](../workflow/01-workflow-design.md)
 - Runtime 端口：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Provider 端口：[../provider/02-ports-stream-and-client-scope.md](../provider/02-ports-stream-and-client-scope.md)
 

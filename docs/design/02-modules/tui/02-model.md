@@ -155,6 +155,8 @@ enum TuiRunStatus {
 
 控制链只使用 typed target identity：TUI 在 `RunStepStarted` 时缓存当前 Main `(run_id, step_id)`，Esc / Ctrl+C 仅在 identity 可用时发出 `CancelRunStep`；identity 尚不可用时不再回退到无 identity 的 `CancelCurrentRun`。`CancelRunStepOutcome` 仅是 command ACK：`Accepted / AlreadyCancelling` 可更新 cancelling 提示，但不得停止 processing、追加 terminal notice 或生成取消内容。Step 取消终态只消费 Runtime 发布的 `RunStepCancellationTerminal::{Cancelled, CancellationUnconfirmed}`；Live 与 Resume 均以 Context finalized Step 中同一 typed receipt 事实为输入。
 
+Workflow 是 Session 级独立 Graph 聚合：Workflow 状态与 Graph 阶段语义 **NEVER** 进入 `RunStatus` / Conversation lifecycle，TUI 也不为 Workflow Graph 建立 projection。
+
 ### 3.3 RunStep 投影与 RunStepStatus 状态机
 
 ```rust
@@ -313,7 +315,6 @@ struct RunRuntimeState {
     task_status: TaskStatusSnapshot,
     processing_jobs: Vec<ProcessingJob>,
     status_notice: StatusNotice,
-    graph_phase: Option<String>,
     transient_notice_expiry: Option<Instant>,
 }
 ```
@@ -431,9 +432,7 @@ Compact operation progress 不存入 `RunRuntimeState`，而是由 Activity fact
 |---|---|
 | `set_status_notice(notice)` | 设置持久 notice，清空 expiry |
 | `set_transient_status_notice(notice, expires_at)` | 设置临时 notice + 过期时间 |
-| `set_graph_phase(phase)` | 设置 graph_phase，同步派生 notice（当无临时 notice 时） |
-| `expire_transient_notice(now)` | 检查过期，回退到 graph_phase 派生的持久态 |
-| `notice_from_phase(phase)` | idle→"Ready"，其他→phase 文案 |
+| `expire_transient_notice(now)` | 检查临时 notice 过期，过期后回退到持久 `status_notice` |
 
 #### 3.6.6 InteractionState
 
@@ -564,7 +563,7 @@ ConversationChange 覆盖：
 - 排队：`QueuedSubmissionAdded` / `QueuedSubmissionsCleared`
 - Agent activity：`AgentActivitiesRecorded` / `AgentMetaUpdated`；前者只更新 owning Agent ToolCall 的 bounded preview，不创建独立 conversation block 或 output timeline item
 - Interaction：`InteractionShown` / `InteractionUpdated` / `InteractionReplyRequested` / `InteractionCancelRequested` / `InteractionStateChanged` / `InteractionProtocolConflict`
-- 运行态：`UsageChanged` / `LiveTpsChanged` / `ProcessingJobChanged` / `RuntimeStatusReplaced` / `ActivityObservationChanged` / `StatusNoticeChanged` / `ThinkingChanged` / `GraphPhaseChanged`
+- 运行态：`UsageChanged` / `LiveTpsChanged` / `ProcessingJobChanged` / `RuntimeStatusReplaced` / `ActivityObservationChanged` / `StatusNoticeChanged` / `ThinkingChanged`
 - 脏标记：`OutputDirty` / `StyleBoundaryResetRequired`
 
 > `InteractionReplyRejected`（outcome=`InvalidReply`）与 `InteractionCancelRejected`（outcome=`CancelRejected`）都经 `InteractionStateChanged` Change 回退 phase 并保留 draft，**NEVER** 折叠进 `InteractionReplyFailed`；完整 outcome → Intent → Change 映射见 [03-event-flow-and-acl.md §4.6](03-event-flow-and-acl.md#46-interaction-command-outcome-类型化投影)。

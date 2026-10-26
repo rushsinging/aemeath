@@ -280,7 +280,7 @@ struct ConfigPatch {
 - 14 个 section 走 `apply_patch`（字段级合并）
 - `hooks` 不走 14-section 的字段级 `apply_patch`，但合并算法刻意不同：
   - **hooks**：语义是合并事件表——按事件 `key` 级合并；同 key 以 patch 覆盖 base，不同 key 累加保留，算法见 `merge_hooks`（§3.3）
-- `reasoning_graph` 已退役（#921 收缩范围）：Config 不再承载 `ReasoningGraphConfig`；Workflow 五节点采用固定默认 effort，无 config 驱动 override。是否保留/接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策
+- `reasoning_graph` 已退役（#921 收缩范围）：Config 不再承载 `ReasoningGraphConfig`；ReasoningLevel 从配置 / 用户命令静态冻结，与 Workflow Graph 解耦。相关上限控制与生产接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 重新决策
 
 ### 3.3 合并算法
 
@@ -680,10 +680,10 @@ impl ConfigTranslator for ClaudeTranslator {
 
 `ReasoningGraphConfig`（含 `enabled`、`nodes` override 与 `max_reasoning`）已从 Config 全部退役。Config 不再承载 reasoning graph 相关配置。
 
-- Workflow 五节点（Idle/Explore/Plan/Execute/Verify）采用固定默认 effort 映射，无 config 驱动 override
+- Workflow Graph 的旧 ReasoningGraph / 五节点 effort 映射仅保留在退役历史说明，不属于 Config 当前模型
 - Config **NEVER** 复制节点默认 effort——该映射由 Workflow 唯一拥有
-- `max_reasoning`（用户配置上限）不再存在于 Config；如需 reasoning level 上限控制，由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 重新决策其归属与形式
-- 是否保留 Workflow ReasoningGraph 能力本身、以及是否接线到生产链路，同样由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策
+- ReasoningLevel 只从配置 / 用户命令静态冻结，与 Workflow Graph 解耦；如需 reasoning level 上限控制，由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 重新决策其归属与形式
+- Workflow Graph 是否接线到生产链路，由 01-workflow-design.md 的五个 Workflow Tool 与上下文组织边界定义（Runtime 按 Session 最新状态组织上下文，具体读取 / 注入协议待决）；具体生产接线仍由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策
 - `ConfigPatch` / `ConfigSnapshot` 均不再包含 `reasoning_graph` 字段
 
 ## 8. EnvAdapter — 业务环境变量唯一入口
@@ -698,7 +698,7 @@ impl ConfigTranslator for ClaudeTranslator {
 
 ## 9. 相关文档
 
-- Workflow 战术设计（ReasoningPort + clamp 链，五节点固定默认 effort）：[../workflow/01-reasoning-graph.md](../workflow/01-reasoning-graph.md)
+- Workflow 单文档设计（Graph Definition / Graph Kernel / 五个 Workflow Tool / 生命周期）：[../workflow/01-workflow-design.md](../workflow/01-workflow-design.md)
 - Runtime 装配（每 Run 捕获 ConfigSnapshot）：[../runtime/06-ports-and-adapters.md](../runtime/06-ports-and-adapters.md)
 - Provider 端口（模型 reasoning 配置）：[../provider/02-ports-stream-and-client-scope.md](../provider/02-ports-stream-and-client-scope.md)
 - 上下文地图（Config = 通用域 BC）：[../../01-system/03-context-map.md](../../01-system/03-context-map.md)
@@ -713,6 +713,6 @@ impl ConfigTranslator for ClaudeTranslator {
 | 2026-07-14 | 明确 Config-owned active state、project-aware prepare / commit participant，并与 Session gate、Memory candidate 装配闭环 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 将非 Run query / subscribe 收口到 async gate-aware façade，明确 #933 delivery seam 与 #871 coordinator 的所有权 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-14 | 修复 review #5/#6/#18/#19：`ConfigUpdate` 删除 `SessionSwitchGate`（gate/coordinator 明确归属 #871 composition）；hooks 字段注释与 key 级 `merge_hooks` 算法对齐；新增最高优先级 `RuntimeOverrideAdapter` layer 并定义其 project-scoped 持久化范围；无失败提交段（Memory install 与 Config install 之间）只允许 panic/crash injection，失败/取消注入收口到 handoff 前与 `persist_update` await 点 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
-| 2026-07-17 | #921 收缩范围：`ReasoningGraphConfig`（含 `enabled`/`nodes`/`max_reasoning`）从 Config 全部退役；`ConfigPatch`/`ConfigSnapshot` 移除 `reasoning_graph` 字段与 accessor；§7 改为退役说明；Workflow 五节点采用固定默认 effort，是否保留/接线由 v0.2.0 #1142 决策 | [#921](https://github.com/rushsinging/aemeath/issues/921) |
+| 2026-07-17 | #921 收缩范围：`ReasoningGraphConfig`（含 `enabled`/`nodes`/`max_reasoning`）从 Config 全部退役；`ConfigPatch`/`ConfigSnapshot` 移除 `reasoning_graph` 字段与 accessor；§7 改为静态 ReasoningLevel 与旧轨退役说明；Workflow Graph 目标见 01-workflow-design.md | [#921](https://github.com/rushsinging/aemeath/issues/921) |
 | 2026-07-21 | #1293 将 Config override backing 的 filesystem 选择上移至 Composition；Config wiring 显式接收 `NativeConfigStore`，并以构造权 Guard 锁定 | [#1293](https://github.com/rushsinging/aemeath/issues/1293) |
 | 2026-07-18 | #871 回写实际实现：`ConfigQueryError` 只保留 `Unavailable`；`ConfigWriter::update` 返回 `ConfigChangeSet`；`MainSessionConfigFacade` 拆分为 `GateAwareConfigQuery` / `GateAwareConfigWriter`；§3.1 RuntimeOverride 补充实现差距说明（durable store 已存在但 chain-layer 重放未实现） | [#871](https://github.com/rushsinging/aemeath/issues/871) |
