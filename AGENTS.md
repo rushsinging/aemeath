@@ -70,6 +70,7 @@ AEMEATH_LOG_LEVEL=aemeath:tui=debug,aemeath:agent:runtime=trace cargo run
 | `specs/3.4-runtime.md` | `agent/features/runtime/**` —— Agent 循环、tool 执行编排、token budget、compact、Usage 事实关联、slash 命令 | 改暂停 / 恢复 / 重试（同步检查 `token_estimation`）、Usage 事实关联、新增 slash 命令 |
 | `docs/design/02-modules/harness/`（无 specs 分片） | `agent/features/harness/**` —— RSI 组件树 registry、证据流模型（run 级 checkpoint）、改进循环、plugin seam、经验库；composition `harness.rs` 装配 | 改组件树 / RSI daemon / 证据装配 / checkpoint / lesson corpus / plugin seam / `harness.rsi.*` 配置（配置登记同步 `specs/3.9-config-compat.md`） |
 | `specs/3.5-tools.md` | `agent/features/tools/**` —— `Tool` trait、`ToolRegistry`、MCP 主体 | 新增内置 Tool，或改 MCP 工具加载 / 注册 |
+| `docs/design/02-modules/workflow/`（无 specs 分片） | `agent/features/workflow/**` —— Workflow Graph 领域模型、Kernel 结构校验、六 `workflow_*` Tool 协议 | 改 Graph 不变量 / 生命周期状态机 / Replanning continuation / Tool schema（真相源 `01-workflow-design.md`） |
 | `specs/3.6-provider.md` | `agent/features/provider/**` —— provider 的 HTTP / stream 实现 | 新增 provider（同步加 model guidance 文件，并在 `specs/3.9-config-compat.md` 补默认值） |
 | `specs/3.7-prompt.md` | `agent/features/prompt/**` —— Guidance 系统、系统提示、上下文注入 | 改 provider 默认 model（影响 guidance 前缀匹配），或改系统提示注入 |
 | `specs/3.8-project.md` | `agent/features/project/**` —— worktree 工作区上下文（`WorkspaceService` 单一可变状态源、Hexagonal 分层、git 出站端口） | 改 worktree 进入 / 退出 / 持久化（同步 `specs/3.10-storage.md` 会话落盘），或经 slash 命令操作 worktree（涉及 `specs/3.4-runtime.md`） |

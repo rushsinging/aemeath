@@ -106,6 +106,12 @@ pub(crate) const TARGETS: &[TargetSpec] = &[
         file_name: "audit-diagnostic.log",
     },
     TargetSpec {
+        target: LogTarget::new("aemeath:agent:workflow"),
+        owner: ModuleOwner::Workflow,
+        sink: DiagnosticSinkId::Workflow,
+        file_name: "agent-workflow.log",
+    },
+    TargetSpec {
         target: LogTarget::new("aemeath:agent:update"),
         owner: ModuleOwner::Update,
         sink: DiagnosticSinkId::Update,

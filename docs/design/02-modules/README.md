@@ -17,7 +17,7 @@
 | [project/](project/README.md) | Workspace 聚合根、Frame 栈、fork 隔离、三端口、GitWorktreeOps、git 上下文供给 |
 | [memory/](memory/README.md) | MemoryEntry 聚合、检索与注入、Reflection 引擎、MemoryPort |
 | [provider/](provider/README.md) | Provider ACL、统一调用流、模型能力、reasoning 映射与不可变 Invocation Scope |
-| [workflow/](workflow/README.md) | Session 级 Graph Definition / Node / Edge / State / Failure Routing、Graph Kernel 校验、五个 workflow tool、四状态生命周期（层级待决）与 Session active 指针 |
+| [workflow/](workflow/README.md) | Session 级 Graph Definition / Node / Edge / State、Graph Kernel 结构校验、六个 workflow tool、五状态生命周期与 ActiveMode、Replanning continuation、Session active 指针 |
 | [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、Config-owned OHS / project participant、Provider Catalog、Connect 向导、首次聊天初始化与 CompatibilityAdapter ACL |
 | [tui/](tui/README.md) | 八层 TEA 管线、六 Context 投影、Intent / Change / Effect、SDK ACL、ViewAssembler / ViewModel / Render 与三类 Interaction 资源隔离 |
 | [storage/](storage/README.md) | 原子读写、backup / quarantine、路径安全及数据所有权边界 |
