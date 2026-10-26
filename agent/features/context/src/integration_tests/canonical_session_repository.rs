@@ -1076,11 +1076,11 @@ async fn accepted_input_persists_before_publish() {
 
     let receipt = repository.append_accepted_input(&accepted).await.unwrap();
 
-    assert_eq!(receipt.committed_revision, SessionRevision::new(0));
+    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
     assert_eq!(writer.saved.lock().unwrap().len(), 0);
     {
         let session = holder.read().unwrap();
-        assert_eq!(session.revision, 0);
+        assert_eq!(session.revision, 1);
         let step = &session.run_slices[0].steps[0];
         assert_eq!(
             step.accepted_input.as_ref().unwrap().messages[0].text_content(),
@@ -1097,6 +1097,21 @@ async fn accepted_input_persists_before_publish() {
             .text_content(),
         "accepted fact"
     );
+}
+
+#[tokio::test]
+async fn accepted_input_advances_revision_and_returns_post_commit_revision() {
+    let writer = Arc::new(RecordingWriter::default());
+    let accepted_writer = Arc::new(RecordingAcceptedInputWriter::default());
+    let (repository, holder) = repository_with_accepted_input_writer(writer, accepted_writer);
+    let accepted = accepted_input();
+
+    let receipt = repository.append_accepted_input(&accepted).await.unwrap();
+
+    // accepted input 是 durable commit：与 finalized append 语义一致，
+    // 推进 session revision 并在回执中返回提交后版本（A1 统一语义）。
+    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
+    assert_eq!(holder.read().unwrap().revision, 1);
 }
 
 #[tokio::test]
@@ -1153,7 +1168,7 @@ async fn accepted_input_duplicate_after_persist_is_published_exactly_once() {
     repository.append_accepted_input(&accepted).await.unwrap();
     repository.append_accepted_input(&accepted).await.unwrap();
 
-    assert_eq!(holder.read().unwrap().revision, 0);
+    assert_eq!(holder.read().unwrap().revision, 1);
     assert_eq!(holder.read().unwrap().run_slices[0].steps.len(), 1);
     assert_eq!(writer.saved.lock().unwrap().len(), 0);
 }
@@ -1176,6 +1191,51 @@ async fn finalized_append_acknowledges_accepted_input_after_canonical_publish() 
         )]
     );
 }
+#[tokio::test]
+async fn finalized_append_persists_empty_receipts_without_implicit_backfill() {
+    let writer = Arc::new(RecordingWriter::default());
+    let (repository, holder) = repository(writer);
+    // 活账本先落一个 terminal receipt（供旧隐式回填路径"可见"）。
+    repository
+        .advance_tool_receipt(ToolReceiptMutationData::pending(
+            tool_identity(),
+            "safe preview",
+        ))
+        .await
+        .unwrap();
+    repository
+        .advance_tool_receipt(ToolReceiptMutationData::running(tool_identity()))
+        .await
+        .unwrap();
+    repository
+        .advance_tool_receipt(ToolReceiptMutationData::terminal(
+            tool_identity(),
+            crate::ToolTerminalReceiptData::new(
+                crate::ToolOutcomeKindData::Success,
+                "tool completed",
+                tools::CleanupConfirmation::NotApplicable,
+            ),
+        ))
+        .await
+        .unwrap();
+
+    // 调用方携带空 receipts 提交：adapter 必须原样落盘，
+    // 禁止在 fingerprint 计算之后隐式替换内容（A2 装配责任归调用方）。
+    let empty_append = append();
+    let receipt = repository.append_finalized(&empty_append).await.unwrap();
+    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
+
+    let session = holder.read().unwrap();
+    let outcome = session.run_slices[0].steps[0]
+        .outcome
+        .as_ref()
+        .expect("outcome must exist");
+    assert!(
+        outcome.receipts.is_empty(),
+        "落盘 receipts 必须等于载荷（空），不得隐式回填活账本"
+    );
+}
+
 #[tokio::test]
 async fn finalized_append_bridges_messages_into_structured_outcome() {
     let writer = Arc::new(RecordingWriter::default());
@@ -1238,7 +1298,7 @@ async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
         step.accepted_input.as_ref().unwrap().fingerprint,
         accepted_input().fingerprint().unwrap().as_str()
     );
-    assert_eq!(step.accepted_input.as_ref().unwrap().committed_revision, 0);
+    assert_eq!(step.accepted_input.as_ref().unwrap().committed_revision, 1);
     let outcome = step.outcome.as_ref().unwrap();
     assert_eq!(outcome.finalize_cause, FinalizeCause::UserCancelledStep);
     assert_eq!(outcome.api_input_tokens, Some(42));
@@ -1484,8 +1544,8 @@ async fn accepted_input_uses_independent_writer_before_publish() {
         .await
         .unwrap();
 
-    assert_eq!(receipt.committed_revision, SessionRevision::new(0));
-    assert_eq!(holder.read().unwrap().revision, 0);
+    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
+    assert_eq!(holder.read().unwrap().revision, 1);
     assert_eq!(writer.saved.lock().unwrap().len(), 0);
     assert_eq!(accepted_input_writer.saved.lock().unwrap().len(), 1);
 }

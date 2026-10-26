@@ -961,6 +961,7 @@ impl SessionRepository for CanonicalSessionRepository {
             });
         }
         let mut candidate = (*current).clone();
+        candidate.revision += 1;
         candidate.updated_at = share::time::now_iso();
         candidate.tasks = SessionSnapshotState::Captured(self.task_persist.collect_snapshot());
         candidate.workspace = SessionSnapshotState::Captured(self.workspace_persist.snapshot());
@@ -1165,11 +1166,6 @@ impl SessionRepository for CanonicalSessionRepository {
         }
 
         let mut candidate = (*current).clone();
-        let mut append = append.clone();
-        if append.receipts.is_empty() {
-            append.receipts =
-                current.step_receipts(append.run_id.as_ref(), append.step_id.as_str());
-        }
         candidate.revision += 1;
         candidate.updated_at = share::time::now_iso();
         candidate.tasks = SessionSnapshotState::Captured(self.task_persist.collect_snapshot());
@@ -1206,7 +1202,7 @@ impl SessionRepository for CanonicalSessionRepository {
             append.step_id.as_str(),
         )
         .await;
-        Ok(Self::receipt(&append, revision))
+        Ok(Self::receipt(append, revision))
     }
 
     async fn commit_compaction(
