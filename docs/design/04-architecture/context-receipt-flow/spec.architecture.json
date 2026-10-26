@@ -1,0 +1,330 @@
+{
+ "schema_version": 1,
+ "diagram_type": "architecture",
+ "meta": {
+  "title": "Context Receipt 全链路",
+  "subtitle": "写入双轨 · 读取单轨 · 恢复不对称 —— A/C/B 修复点（点击节点看详情）",
+  "quality_profile": "showcase",
+  "visual_preset": "blueprint"
+ },
+ "layout": {
+  "mode": "grid",
+  "origin": [
+   80,
+   140
+  ],
+  "cols": 5,
+  "gapX": 56,
+  "gapY": 84,
+  "cellW": 208,
+  "cellH": 84
+ },
+ "components": [
+  {
+   "id": "f01",
+   "type": "backend",
+   "label": "工具执行",
+   "sublabel": "runtime · 终态事实",
+   "row": 0,
+   "col": 0
+  },
+  {
+   "id": "f02",
+   "type": "messagebus",
+   "label": "MutationData",
+   "sublabel": "identity + next",
+   "row": 0,
+   "col": 1
+  },
+  {
+   "id": "f03",
+   "type": "backend",
+   "label": "advance 状态机",
+   "sublabel": "幂等 · 防倒退",
+   "row": 0,
+   "col": 2
+  },
+  {
+   "id": "f04",
+   "type": "database",
+   "label": "sidecar 双写",
+   "sublabel": "ledger 先写",
+   "row": 0,
+   "col": 3
+  },
+  {
+   "id": "f05",
+   "type": "database",
+   "label": "Session 提交",
+   "sublabel": "崩溃安全 member",
+   "row": 0,
+   "col": 4
+  },
+  {
+   "id": "f11",
+   "type": "security",
+   "label": "step finalize",
+   "sublabel": "三种终结原因",
+   "row": 1,
+   "col": 0
+  },
+  {
+   "id": "f12",
+   "type": "backend",
+   "label": "to_step_receipt",
+   "sublabel": "压扁成快照",
+   "row": 1,
+   "col": 1
+  },
+  {
+   "id": "f13",
+   "type": "backend",
+   "label": "fingerprint",
+   "sublabel": "含 receipts 指纹",
+   "row": 1,
+   "col": 2
+  },
+  {
+   "id": "f14",
+   "type": "backend",
+   "label": "空回填 ×2",
+   "sublabel": "时序颠倒",
+   "row": 1,
+   "col": 3
+  },
+  {
+   "id": "f15",
+   "type": "backend",
+   "label": "append / accept",
+   "sublabel": "提交回执",
+   "row": 1,
+   "col": 4
+  },
+  {
+   "id": "f21",
+   "type": "backend",
+   "label": "实时派生读",
+   "sublabel": "step_receipts()",
+   "row": 2,
+   "col": 0
+  },
+  {
+   "id": "f22",
+   "type": "database",
+   "label": "冻结快照",
+   "sublabel": "无生产读者",
+   "row": 2,
+   "col": 1
+  },
+  {
+   "id": "f23",
+   "type": "security",
+   "label": "取消终态判定",
+   "sublabel": "Unconfirmed?",
+   "row": 2,
+   "col": 2
+  },
+  {
+   "id": "f24",
+   "type": "backend",
+   "label": "resume 修复",
+   "sublabel": "provider-safe",
+   "row": 2,
+   "col": 3
+  },
+  {
+   "id": "f31",
+   "type": "backend",
+   "label": "legacy 恢复",
+   "sublabel": "overlay tool ledger",
+   "row": 3,
+   "col": 0
+  },
+  {
+   "id": "f32",
+   "type": "backend",
+   "label": "dataset 恢复",
+   "sublabel": "只 overlay accepted",
+   "row": 3,
+   "col": 1
+  },
+  {
+   "id": "f33",
+   "type": "backend",
+   "label": "/clear",
+   "sublabel": "两 adapter 相反",
+   "row": 3,
+   "col": 2
+  },
+  {
+   "id": "f34",
+   "type": "backend",
+   "label": "compact 后",
+   "sublabel": "无收纳确认",
+   "row": 3,
+   "col": 3
+  }
+ ],
+ "boundaries": [
+  {
+   "kind": "region",
+   "label": "① 执行期推进（高频）",
+   "wraps": [
+    "f01",
+    "f02",
+    "f03",
+    "f04",
+    "f05"
+   ],
+   "pad": 26
+  },
+  {
+   "kind": "region",
+   "label": "② 收口与提交",
+   "wraps": [
+    "f11",
+    "f12",
+    "f13",
+    "f14",
+    "f15"
+   ],
+   "pad": 26
+  },
+  {
+   "kind": "region",
+   "label": "③ 读取消费",
+   "wraps": [
+    "f21",
+    "f22",
+    "f23",
+    "f24"
+   ],
+   "pad": 26
+  },
+  {
+   "kind": "region",
+   "label": "④ 恢复与边界（sidecar 生命周期）",
+   "wraps": [
+    "f31",
+    "f32",
+    "f33",
+    "f34"
+   ],
+   "pad": 26
+  }
+ ],
+ "connections": [
+  {
+   "id": "e1",
+   "from": "f01",
+   "to": "f02",
+   "label": "终态事实"
+  },
+  {
+   "id": "e2",
+   "from": "f02",
+   "to": "f03",
+   "label": "状态机校验"
+  },
+  {
+   "id": "e3",
+   "from": "f03",
+   "to": "f04",
+   "label": "① 先写"
+  },
+  {
+   "id": "e4",
+   "from": "f03",
+   "to": "f05",
+   "label": "② 后提交"
+  },
+  {
+   "id": "e6",
+   "from": "f11",
+   "to": "f12",
+   "label": "只取 Terminal"
+  },
+  {
+   "id": "e7",
+   "from": "f12",
+   "to": "f13",
+   "label": "进指纹"
+  },
+  {
+   "id": "e8",
+   "from": "f13",
+   "to": "f14",
+   "label": "空则补",
+   "variant": "dashed"
+  },
+  {
+   "id": "e9",
+   "from": "f14",
+   "to": "f15",
+   "label": "落盘内容已换"
+  },
+  {
+   "id": "e10",
+   "from": "f03",
+   "to": "f21",
+   "label": "读实时账本",
+   "variant": "dashed"
+  },
+  {
+   "id": "e11",
+   "from": "f12",
+   "to": "f22",
+   "label": "写冻结快照",
+   "variant": "dashed"
+  },
+  {
+   "id": "e12",
+   "from": "f21",
+   "to": "f23",
+   "label": "outcome 判定"
+  },
+  {
+   "id": "e13",
+   "from": "f31",
+   "to": "f03",
+   "label": "旧 receipt 叠回",
+   "variant": "dashed"
+  },
+  {
+   "id": "e14",
+   "from": "f04",
+   "to": "f31",
+   "label": "仅此入口"
+  },
+  {
+   "id": "e15",
+   "from": "f04",
+   "to": "f33",
+   "label": "不清 ledger"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "rose",
+   "title": "缺陷 → 修复阶段",
+   "items": [
+    "A1 revision 相反：canonical accepted N vs in_memory N+1 → 阶段 A",
+    "A2 fingerprint 后回填 ×2（runtime+context）→ 阶段 A",
+    "C sidecar 半启用 WAL（入口不对称/clear 复活/无回收）→ 阶段 C",
+    "B1 双真相：读永远实时、冻结快照无读者 → 阶段 B",
+    "B2 压扁丢 cleanup · artifact_refs 无源 → 阶段 B",
+    "B3 call-id 回退规则两处实现 → 阶段 B"
+   ]
+  },
+  {
+   "dot": "slate",
+   "title": "终态（A→C→B 后）",
+   "items": [
+    "一个真相源：Canonical Session 内嵌 receipt",
+    "一次原子提交：commit_incremental（ProcessCrashSafe）",
+    "一条读路径：按 finalize 边界选实时 / 冻结",
+    "sidecar 一次性只读迁移后退役"
+   ]
+  }
+ ]
+}
