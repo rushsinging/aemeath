@@ -39,14 +39,15 @@ async fn spawn_serve(
     oneshot::Sender<()>,
     tokio::task::JoinHandle<io::Result<()>>,
 ) {
-    // 先 bind 取地址再交给 serve（测试用随机端口；生产端口显式配置）。
-    let probe = TcpListener::bind("127.0.0.1:0").await.expect("probe bind");
-    let address = probe.local_addr().expect("probe addr");
-    drop(probe);
+    // 直接持有已 bind 的 listener（测试随机端口；生产端口显式配置），
+    // 消除 bind-drop-rebind 端口竞态。
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener bind");
+    let address = listener.local_addr().expect("listener addr");
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    let listen = address.to_string();
     let handle = tokio::spawn(async move {
-        run_daemon_http_serve(&listen, port, "kev-0.8b-q8-r1".to_string(), shutdown_rx).await
+        serve_http_on(listener, port, "kev-0.8b-q8-r1".to_string(), shutdown_rx).await
     });
     (format!("http://{address}"), shutdown_tx, handle)
 }
