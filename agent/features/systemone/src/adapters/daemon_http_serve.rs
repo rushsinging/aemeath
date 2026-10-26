@@ -35,9 +35,20 @@ pub async fn run_daemon_http_serve(
     listen: &str,
     port: Arc<dyn ScoringPort>,
     engine_revision: String,
-    mut shutdown: oneshot::Receiver<()>,
+    shutdown: oneshot::Receiver<()>,
 ) -> io::Result<()> {
     let listener = TcpListener::bind(listen).await?;
+    serve_http_on(listener, port, engine_revision, shutdown).await
+}
+
+/// 在**已 bind** 的 listener 上服务评分（生产 bind 与测试共享同一 accept 循环；
+/// 测试直接持有 listener 消除 bind-drop-rebind 端口竞态）。
+pub(crate) async fn serve_http_on(
+    listener: TcpListener,
+    port: Arc<dyn ScoringPort>,
+    engine_revision: String,
+    mut shutdown: oneshot::Receiver<()>,
+) -> io::Result<()> {
     let state = Arc::new(DaemonHttpState {
         port,
         engine_revision,

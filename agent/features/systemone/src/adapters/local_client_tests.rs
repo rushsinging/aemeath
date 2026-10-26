@@ -1,7 +1,7 @@
 //! LocalSystemOneClient L2 测试：对 daemon_http_serve 真 server 做 loopback 端到端。
 
 use super::*;
-use crate::adapters::daemon_http_serve::run_daemon_http_serve;
+use crate::adapters::daemon_http_serve::serve_http_on;
 use crate::domain::CalibrationLevel;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -25,14 +25,14 @@ impl ScoringPort for StubPort {
 async fn spawn_real_daemon(
     answer: Result<Vec<ScoringAnswer>, ScoringUnavailable>,
 ) -> (String, oneshot::Sender<()>) {
-    let probe = TcpListener::bind("127.0.0.1:0").await.expect("probe bind");
-    let address = probe.local_addr().expect("probe addr");
-    drop(probe);
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener bind");
+    let address = listener.local_addr().expect("listener addr");
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    let listen = address.to_string();
     tokio::spawn(async move {
-        let _ = run_daemon_http_serve(
-            &listen,
+        let _ = serve_http_on(
+            listener,
             Arc::new(StubPort { answer }),
             "kev-0.8b-q8-r1".to_string(),
             shutdown_rx,
