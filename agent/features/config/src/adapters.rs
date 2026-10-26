@@ -178,7 +178,7 @@ impl EnvAdapter {
                 || bailian_base_url.is_some()
                 || bailian_full_url.is_some()
                 || bailian_model.is_some())
-            .then(|| share::config::domain::merge::BailianScoringConfigPatch {
+            .then_some(share::config::domain::merge::BailianScoringConfigPatch {
                 api_key: bailian_api_key,
                 base_url: bailian_base_url,
                 full_url: bailian_full_url,
