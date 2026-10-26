@@ -608,6 +608,10 @@ pub enum ToolOutcomeKindData {
     Suspended,
 }
 
+fn default_cleanup_confirmation() -> tools::CleanupConfirmation {
+    tools::CleanupConfirmation::NotApplicable
+}
+
 /// finalized Step 中可确定重放的 Tool/Agent receipt（纯数据 DTO）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunStepReceiptData {
@@ -616,7 +620,9 @@ pub struct RunStepReceiptData {
     pub outcome: ToolOutcomeKindData,
     pub agent: bool,
     pub summary: Option<String>,
-    pub artifact_refs: Vec<String>,
+    /// 终态清理确认（B2 补齐：与 ToolTerminalReceiptData 对齐；旧盘缺省 NotApplicable）。
+    #[serde(default = "default_cleanup_confirmation")]
+    pub cleanup: tools::CleanupConfirmation,
     pub possible_side_effects: Vec<String>,
     pub unfinished_call_ids: Vec<String>,
 }
@@ -703,7 +709,7 @@ impl ContextAppendData {
                         format!("{:?}", receipt.outcome),
                         receipt.agent,
                         receipt.summary.as_deref(),
-                        &receipt.artifact_refs,
+                        &receipt.cleanup,
                         &receipt.possible_side_effects,
                         &receipt.unfinished_call_ids,
                     )

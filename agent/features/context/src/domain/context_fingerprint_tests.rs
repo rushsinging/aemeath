@@ -47,7 +47,7 @@ fn legacy_runtime_fingerprint(append: &ContextAppendData) -> String {
                     format!("{:?}", receipt.outcome),
                     receipt.agent,
                     receipt.summary.as_deref(),
-                    &receipt.artifact_refs,
+                    &receipt.cleanup,
                     &receipt.possible_side_effects,
                     &receipt.unfinished_call_ids,
                 )

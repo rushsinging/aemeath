@@ -245,7 +245,7 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
                     outcome: ToolOutcomeKindData::CancellationUnconfirmed,
                     agent: true,
                     summary: None,
-                    artifact_refs: Vec::new(),
+                    cleanup: tools::CleanupConfirmation::NotApplicable,
                     possible_side_effects: Vec::new(),
                     unfinished_call_ids: Vec::new(),
                 }],

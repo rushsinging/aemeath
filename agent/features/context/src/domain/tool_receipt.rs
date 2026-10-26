@@ -98,7 +98,7 @@ impl ToolCallReceiptData {
             outcome: terminal.outcome,
             agent: self.identity.agent,
             summary: Some(terminal.safe_reason.clone()),
-            artifact_refs: Vec::new(),
+            cleanup: terminal.cleanup,
             possible_side_effects: terminal.possible_side_effects().to_vec(),
             unfinished_call_ids: terminal.unfinished_call_ids().to_vec(),
         })

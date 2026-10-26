@@ -301,7 +301,7 @@ async fn finalized_outcome_keeps_receipt_metadata_for_idempotent_retry() {
         outcome: crate::ToolOutcomeKindData::CancellationUnconfirmed,
         agent: true,
         summary: None,
-        artifact_refs: Vec::new(),
+        cleanup: tools::CleanupConfirmation::NotApplicable,
         possible_side_effects: Vec::new(),
         unfinished_call_ids: Vec::new(),
     }];

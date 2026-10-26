@@ -1163,7 +1163,7 @@ async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
         outcome: crate::ToolOutcomeKindData::CancellationUnconfirmed,
         agent: true,
         summary: None,
-        artifact_refs: Vec::new(),
+        cleanup: tools::CleanupConfirmation::NotApplicable,
         possible_side_effects: Vec::new(),
         unfinished_call_ids: Vec::new(),
     }];

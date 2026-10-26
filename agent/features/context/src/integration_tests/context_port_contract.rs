@@ -144,7 +144,7 @@ fn finalized_append() -> ContextAppendData {
                 outcome: ToolOutcomeKindData::Success,
                 agent: false,
                 summary: None,
-                artifact_refs: Vec::new(),
+                cleanup: tools::CleanupConfirmation::NotApplicable,
                 possible_side_effects: Vec::new(),
                 unfinished_call_ids: Vec::new(),
             },
@@ -154,7 +154,7 @@ fn finalized_append() -> ContextAppendData {
                 outcome: ToolOutcomeKindData::Failure,
                 agent: false,
                 summary: None,
-                artifact_refs: Vec::new(),
+                cleanup: tools::CleanupConfirmation::NotApplicable,
                 possible_side_effects: Vec::new(),
                 unfinished_call_ids: Vec::new(),
             },
@@ -164,7 +164,7 @@ fn finalized_append() -> ContextAppendData {
                 outcome: ToolOutcomeKindData::Success,
                 agent: true,
                 summary: Some("child finished".to_string()),
-                artifact_refs: vec!["artifact://child-result".to_string()],
+                cleanup: tools::CleanupConfirmation::NotApplicable,
                 possible_side_effects: Vec::new(),
                 unfinished_call_ids: Vec::new(),
             },
@@ -174,7 +174,7 @@ fn finalized_append() -> ContextAppendData {
                 outcome: ToolOutcomeKindData::CancellationUnconfirmed,
                 agent: true,
                 summary: None,
-                artifact_refs: Vec::new(),
+                cleanup: tools::CleanupConfirmation::NotApplicable,
                 possible_side_effects: vec!["remote write may have started".to_string()],
                 unfinished_call_ids: vec!["child-call-9".to_string()],
             },
@@ -194,8 +194,8 @@ fn mixed_tool_outcomes_and_agent_receipts_preserve_original_order() {
         Some("child finished")
     );
     assert_eq!(
-        &append.receipts[2].artifact_refs[..],
-        &["artifact://child-result".to_string()]
+        append.receipts[2].cleanup,
+        tools::CleanupConfirmation::NotApplicable
     );
     assert_eq!(
         append.receipts[3].outcome,
