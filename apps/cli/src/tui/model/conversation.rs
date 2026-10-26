@@ -42,6 +42,9 @@ pub mod streaming_preview;
 pub mod task_status;
 pub mod terminal;
 pub mod text_stream;
+#[cfg(test)]
+#[path = "conversation/text_stream_tests.rs"]
+mod text_stream_tests;
 pub mod tool_call;
 mod tool_flow;
 mod tool_observe;
