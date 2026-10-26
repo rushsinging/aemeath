@@ -1,199 +1,200 @@
 {
-  "schema_version": 1,
-  "diagram_type": "architecture",
-  "meta": {
-    "title": "Context 根面 Published Language 设计图",
-    "subtitle": "终态设计 · 根符号 93 · 5 pub mod（api/compact/guidance/session/context_port）",
-    "quality_profile": "showcase",
-    "visual_preset": "blueprint"
+ "schema_version": 1,
+ "diagram_type": "architecture",
+ "meta": {
+  "title": "Context 根面 Published Language 设计图",
+  "subtitle": "终态设计 · 根符号 93 · 5 pub mod（api/compact/guidance/session/context_port）",
+  "quality_profile": "showcase",
+  "visual_preset": "blueprint",
+  "output": "index.html"
+ },
+ "layout": {
+  "mode": "grid",
+  "origin": [
+   80,
+   120
+  ],
+  "cols": 6,
+  "gapX": 60,
+  "gapY": 70,
+  "cellW": 200,
+  "cellH": 80
+ },
+ "components": [
+  {
+   "id": "ctx",
+   "type": "backend",
+   "label": "context crate",
+   "sublabel": "Context BC 聚合",
+   "row": 1,
+   "col": 2
   },
-  "layout": {
-    "mode": "grid",
-    "origin": [
-      80,
-      120
-    ],
-    "cols": 6,
-    "gapX": 60,
-    "gapY": 70,
-    "cellW": 200,
-    "cellH": 80
+  {
+   "id": "w1",
+   "type": "database",
+   "label": "Session",
+   "sublabel": "聚合根 · 端口 · 恢复",
+   "row": 2,
+   "col": 0
   },
-  "components": [
-    {
-      "id": "ctx",
-      "type": "backend",
-      "label": "context crate",
-      "sublabel": "Context BC 聚合",
-      "row": 1,
-      "col": 2
-    },
-    {
-      "id": "w1",
-      "type": "database",
-      "label": "Session",
-      "sublabel": "聚合根 · 端口 · 恢复",
-      "row": 2,
-      "col": 0
-    },
-    {
-      "id": "w2",
-      "type": "backend",
-      "label": "Window·Budget",
-      "sublabel": "四拆端口 · 预算 · 工厂",
-      "row": 2,
-      "col": 1
-    },
-    {
-      "id": "w23",
-      "type": "cloud",
-      "label": "Compact",
-      "sublabel": "单入口 · LLM 绑定",
-      "row": 2,
-      "col": 2
-    },
-    {
-      "id": "w4",
-      "type": "security",
-      "label": "Prompt·Guidance",
-      "sublabel": "Language · 组装器 · guidance",
-      "row": 2,
-      "col": 3
-    },
-    {
-      "id": "w5",
-      "type": "messagebus",
-      "label": "注入",
-      "sublabel": "Reminder · Memory",
-      "row": 2,
-      "col": 4
-    },
-    {
-      "id": "w6",
-      "type": "database",
-      "label": "持久化",
-      "sublabel": "回执 · 状态 · 变更",
-      "row": 2,
-      "col": 5
-    },
-    {
-      "id": "runtime",
-      "type": "frontend",
-      "label": "runtime",
-      "sublabel": "Run 生命周期",
-      "row": 0,
-      "col": 2
-    },
-    {
-      "id": "composition",
-      "type": "cloud",
-      "label": "composition",
-      "sublabel": "装配 wire",
-      "row": 0,
-      "col": 0
-    },
-    {
-      "id": "provider",
-      "type": "external",
-      "label": "provider",
-      "sublabel": "LLM 端口实现",
-      "row": 3,
-      "col": 3
-    },
-    {
-      "id": "task",
-      "type": "external",
-      "label": "task",
-      "sublabel": "CompactTask ×4",
-      "row": 3,
-      "col": 1
-    },
-    {
-      "id": "sdk",
-      "type": "frontend",
-      "label": "sdk / TUI",
-      "sublabel": "SessionItem 视图",
-      "row": 0,
-      "col": 4
-    }
-  ],
-  "boundaries": [
-    {
-      "kind": "region",
-      "label": "context 根面 PL（白名单 95）",
-      "wraps": [
-        "ctx",
-        "w1",
-        "w2",
-        "w23",
-        "w4",
-        "w5",
-        "w6"
-      ],
-      "pad": 40
-    }
-  ],
-  "connections": [
-    {
-      "id": "rt-ctx",
-      "from": "runtime",
-      "to": "ctx",
-      "label": "consume PL",
-      "labelDy": 20
-    },
-    {
-      "id": "comp-ctx",
-      "from": "composition",
-      "to": "ctx",
-      "label": "wire 装配",
-      "variant": "dashed"
-    },
-    {
-      "id": "sdk-rt",
-      "from": "sdk",
-      "to": "runtime",
-      "label": "视图映射"
-    },
-    {
-      "id": "ctx-provider",
-      "from": "ctx",
-      "to": "provider",
-      "label": "LLM 反转",
-      "variant": "security",
-      "fromSide": "right",
-      "toSide": "top",
-      "labelDy": 35
-    },
-    {
-      "id": "task-ctx",
-      "from": "task",
-      "to": "ctx",
-      "label": "CompactTask ×4",
-      "variant": "dashed"
-    }
-  ],
-  "cards": [
-    {
-      "dot": "slate",
-      "title": "退役 / 迁出（PL 边界外置）",
-      "items": [
-        "→ share::ids：SessionId · RunStepId · InteractionRequestId",
-        "→ tools：ToolDefinition（原 ToolSchemaData）",
-        "→ sdk：SessionItemList · SessionItem",
-        "→ task：CompactTaskSnapshot 家族 ×4",
-        "→ provider：LlmTextInvokePort · LlmTextOutputData",
-        "外置：ContextPort 单体 · Factory trait · ManualCompact · Generator · ContentFingerprint · CommittedStep · SystemBlock 根导出"
-      ]
-    },
-    {
-      "dot": "amber",
-      "title": "状态与裁决",
-      "items": [
-        "已定：Session · Window·Budget · Compact（终态）",
-        "当前：Prompt·Guidance（Language/SpecData 待裁决）",
-        "待盘：注入 · 回写链 · 错误/杂项",
-        "guard 81 rules · 0 violations"
-      ]
-    }
-  ]
+  {
+   "id": "w2",
+   "type": "backend",
+   "label": "Window·Budget",
+   "sublabel": "四拆端口 · 预算 · 工厂",
+   "row": 2,
+   "col": 1
+  },
+  {
+   "id": "w23",
+   "type": "cloud",
+   "label": "Compact",
+   "sublabel": "单入口 · LLM 绑定",
+   "row": 2,
+   "col": 2
+  },
+  {
+   "id": "w4",
+   "type": "security",
+   "label": "Prompt·Guidance",
+   "sublabel": "Language · 组装器 · guidance",
+   "row": 2,
+   "col": 3
+  },
+  {
+   "id": "w5",
+   "type": "messagebus",
+   "label": "注入",
+   "sublabel": "Reminder · Memory",
+   "row": 2,
+   "col": 4
+  },
+  {
+   "id": "w6",
+   "type": "database",
+   "label": "持久化",
+   "sublabel": "回执 · 状态 · 变更",
+   "row": 2,
+   "col": 5
+  },
+  {
+   "id": "runtime",
+   "type": "frontend",
+   "label": "runtime",
+   "sublabel": "Run 生命周期",
+   "row": 0,
+   "col": 2
+  },
+  {
+   "id": "composition",
+   "type": "cloud",
+   "label": "composition",
+   "sublabel": "装配 wire",
+   "row": 0,
+   "col": 0
+  },
+  {
+   "id": "provider",
+   "type": "external",
+   "label": "provider",
+   "sublabel": "LLM 端口实现",
+   "row": 3,
+   "col": 3
+  },
+  {
+   "id": "task",
+   "type": "external",
+   "label": "task",
+   "sublabel": "CompactTask ×4",
+   "row": 3,
+   "col": 1
+  },
+  {
+   "id": "sdk",
+   "type": "frontend",
+   "label": "sdk / TUI",
+   "sublabel": "SessionItem 视图",
+   "row": 0,
+   "col": 4
+  }
+ ],
+ "boundaries": [
+  {
+   "kind": "region",
+   "label": "context 根面 PL（白名单 95）",
+   "wraps": [
+    "ctx",
+    "w1",
+    "w2",
+    "w23",
+    "w4",
+    "w5",
+    "w6"
+   ],
+   "pad": 40
+  }
+ ],
+ "connections": [
+  {
+   "id": "rt-ctx",
+   "from": "runtime",
+   "to": "ctx",
+   "label": "consume PL",
+   "labelDy": 20
+  },
+  {
+   "id": "comp-ctx",
+   "from": "composition",
+   "to": "ctx",
+   "label": "wire 装配",
+   "variant": "dashed"
+  },
+  {
+   "id": "sdk-rt",
+   "from": "sdk",
+   "to": "runtime",
+   "label": "视图映射"
+  },
+  {
+   "id": "ctx-provider",
+   "from": "ctx",
+   "to": "provider",
+   "label": "LLM 反转",
+   "variant": "security",
+   "fromSide": "right",
+   "toSide": "top",
+   "labelDy": 35
+  },
+  {
+   "id": "task-ctx",
+   "from": "task",
+   "to": "ctx",
+   "label": "CompactTask ×4",
+   "variant": "dashed"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "slate",
+   "title": "退役 / 迁出（PL 边界外置）",
+   "items": [
+    "→ share::ids：SessionId · RunStepId · InteractionRequestId",
+    "→ tools：ToolDefinition（原 ToolSchemaData）",
+    "→ sdk：SessionItemList · SessionItem",
+    "→ task：CompactTaskSnapshot 家族 ×4",
+    "→ provider：LlmTextInvokePort · LlmTextOutputData",
+    "外置：ContextPort 单体 · Factory trait · ManualCompact · Generator · ContentFingerprint · CommittedStep · SystemBlock 根导出"
+   ]
+  },
+  {
+   "dot": "amber",
+   "title": "状态与裁决",
+   "items": [
+    "已定：Session · Window·Budget · Compact（终态）",
+    "当前：Prompt·Guidance（Language/SpecData 待裁决）",
+    "待盘：注入 · 回写链 · 错误/杂项",
+    "guard 81 rules · 0 violations"
+   ]
+  }
+ ]
 }

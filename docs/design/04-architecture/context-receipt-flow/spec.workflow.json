@@ -1,12 +1,13 @@
 {
- "schema_version": 1,
+ "schema_version": 2,
  "diagram_type": "workflow",
  "meta": {
   "title": "Context Receipt 全链路",
   "subtitle": "写入双轨 · 读取单轨 · 恢复不对称 —— A/C/B 修复点（点击节点看详情）",
   "visual_preset": "blueprint",
   "quality_profile": "showcase",
-  "animation": "none"
+  "animation": "none",
+  "output": "index-v3.html"
  },
  "lanes": [
   {
@@ -227,20 +228,7 @@
    "from": "f03",
    "to": "f12",
    "label": "step 终结·FinalizeCause",
-   "role": "async",
-   "route": "auto",
-   "fromSide": "bottom",
-   "toSide": "top",
-   "via": [
-    [
-     220,
-     170
-    ],
-    [
-     88,
-     170
-    ]
-   ]
+   "role": "async"
   },
   {
    "id": "e07",
@@ -269,27 +257,6 @@
    "to": "f21",
    "label": "实时派生",
    "role": "async",
-   "route": "auto",
-   "fromSide": "bottom",
-   "toSide": "top",
-   "via": [
-    [
-     220,
-     185
-    ],
-    [
-     32,
-     185
-    ],
-    [
-     32,
-     328
-    ],
-    [
-     88,
-     328
-    ]
-   ],
    "labelDy": 26
   },
   {
@@ -297,43 +264,20 @@
    "from": "f12",
    "to": "f22",
    "label": "写冻结",
-   "role": "async",
-   "route": "drop"
+   "role": "async"
   },
   {
    "id": "e12",
    "from": "f21",
    "to": "f23",
    "label": "outcome 判定",
-   "role": "main",
-   "route": "bottom-channel"
+   "role": "main"
   },
   {
    "id": "e13",
    "from": "f04",
    "to": "f31",
-   "role": "async",
-   "route": "auto",
-   "fromSide": "bottom",
-   "toSide": "top",
-   "via": [
-    [
-     430,
-     161
-    ],
-    [
-     704,
-     161
-    ],
-    [
-     704,
-     436
-    ],
-    [
-     88,
-     436
-    ]
-   ]
+   "role": "async"
   }
  ]
 }
