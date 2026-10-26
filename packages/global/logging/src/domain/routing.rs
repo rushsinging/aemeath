@@ -33,6 +33,7 @@ pub(crate) enum ModuleOwner {
     Harness,
     TaskData,
     Systemone,
+    Workflow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -58,6 +59,7 @@ pub(crate) enum DiagnosticSinkId {
     Harness,
     TaskData,
     Systemone,
+    Workflow,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

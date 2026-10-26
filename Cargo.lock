@@ -5746,6 +5746,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "workflow"
+version = "0.0.0"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "share",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
