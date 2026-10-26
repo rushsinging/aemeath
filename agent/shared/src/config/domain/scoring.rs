@@ -2,7 +2,8 @@
 
 pub use super::constants::{
     DEFAULT_BAILIAN_SCORING_MODEL, DEFAULT_EVENT_RETENTION_DAYS,
-    DEFAULT_SCORING_CONNECT_TIMEOUT_SECS, DEFAULT_SCORING_INFER_TIMEOUT_SECS,
+    DEFAULT_SCORING_CONNECT_TIMEOUT_SECS, DEFAULT_SCORING_HTTP_LISTEN,
+    DEFAULT_SCORING_INFER_TIMEOUT_SECS,
 };
 use serde::{Deserialize, Serialize};
 
@@ -23,6 +24,10 @@ fn default_connect_timeout_secs() -> u64 {
 
 fn default_infer_timeout_secs() -> u64 {
     DEFAULT_SCORING_INFER_TIMEOUT_SECS
+}
+
+fn default_http_listen() -> String {
+    DEFAULT_SCORING_HTTP_LISTEN.to_string()
 }
 
 fn default_bailian_model() -> String {
@@ -126,6 +131,18 @@ impl BailianScoringConfig {
     }
 }
 
+impl ScoringConfig {
+    /// client 端点解析：`http_endpoint` 优先，否则 `http://{http_listen}/systemone`。
+    pub fn resolve_http_endpoint(&self) -> String {
+        if let Some(endpoint) = self.http_endpoint.as_deref().map(str::trim) {
+            if !endpoint.is_empty() {
+                return endpoint.to_string();
+            }
+        }
+        format!("http://{}/systemone", self.http_listen)
+    }
+}
+
 impl Default for ScoringConfig {
     /// 总闸门默认开（场景开关默认全关）；`enabled=false` 仅经显式配置/env。
     /// backend 默认 local（既有行为零破坏）。
@@ -139,7 +156,8 @@ impl Default for ScoringConfig {
             policy_triage: false,
             memory_recall: false,
             event_retention_days: DEFAULT_EVENT_RETENTION_DAYS,
-            socket_path: None,
+            http_listen: DEFAULT_SCORING_HTTP_LISTEN.to_string(),
+            http_endpoint: None,
             connect_timeout_secs: DEFAULT_SCORING_CONNECT_TIMEOUT_SECS,
             infer_timeout_secs: DEFAULT_SCORING_INFER_TIMEOUT_SECS,
         }
@@ -187,9 +205,15 @@ pub struct ScoringConfig {
     #[serde(default = "default_event_retention_days", alias = "eventRetentionDays")]
     pub event_retention_days: u32,
 
-    /// 可选覆盖 UDS 路径；缺省为 `{agents_dir}/scoring/scoring.sock`。
-    #[serde(default, alias = "socketPath")]
-    pub socket_path: Option<String>,
+    /// local daemon HTTP 监听地址（`host:port`，默认 `127.0.0.1:9000`；
+    /// 端口显式配置，#2096：UDS 退役，不做随机端口 + port 文件发现）。
+    #[serde(default = "default_http_listen", alias = "httpListen")]
+    pub http_listen: String,
+
+    /// client 完整 HTTP 端点（可选；缺省 `http://{http_listen}/systemone`，
+    /// 同机零配置；远程/独立部署时显式指定）。
+    #[serde(default, alias = "httpEndpoint")]
+    pub http_endpoint: Option<String>,
 
     /// 连接（含惰性拉起等待）超时秒数（默认 2）。
     #[serde(default = "default_connect_timeout_secs", alias = "connectTimeoutSecs")]

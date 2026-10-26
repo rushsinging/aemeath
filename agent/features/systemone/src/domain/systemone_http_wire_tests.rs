@@ -1,4 +1,4 @@
-//! bailian_wire 契约测试：TypeSafe System One 协议形状与领域类型互转。
+//! systemone_http_wire 契约测试：TypeSafe System One 协议形状与领域类型互转。
 //!
 //! fixture 采用 2026-10-26 对百炼 `decision-model-preview` 的实测响应原文，
 //! 钉死 wire 形状（beta 阶段协议漂移必须被本文件捕获，设计 #2095）。
@@ -122,7 +122,7 @@ const DOC_SCORE_RESPONSE: &str = r#"{"model":"decision-model-preview","request_i
 
 #[test]
 fn parse_real_choice_response_restores_request_order_probabilities() {
-    let response: BailianSystemOneResponse =
+    let response: SystemOneHttpResponse =
         serde_json::from_str(REAL_CHOICE_RESPONSE).expect("实测响应必须可解析");
     let questions = vec![sample_questions()[0].clone()];
     // 响应 qid 是 rank（历史请求）；改写为 q0 模拟本客户端请求。
@@ -157,7 +157,7 @@ fn parse_real_choice_response_restores_request_order_probabilities() {
 
 #[test]
 fn parse_real_noul_response_maps_p_true() {
-    let response: BailianSystemOneResponse =
+    let response: SystemOneHttpResponse =
         serde_json::from_str(REAL_NOUL_RESPONSE).expect("实测响应必须可解析");
     let questions = vec![sample_questions()[1].clone()];
     let answers = parse_answers(&response, &questions).expect("解析应成功");
@@ -174,7 +174,7 @@ fn parse_real_noul_response_maps_p_true() {
 
 #[test]
 fn parse_doc_score_response_restores_index_ordered_probabilities() {
-    let response: BailianSystemOneResponse =
+    let response: SystemOneHttpResponse =
         serde_json::from_str(DOC_SCORE_RESPONSE).expect("文档响应必须可解析");
     let questions = vec![sample_questions()[2].clone()];
     let answers = parse_answers(&response, &questions).expect("解析应成功");
@@ -198,7 +198,7 @@ fn parse_doc_score_response_restores_index_ordered_probabilities() {
 
 #[test]
 fn parse_answers_rejects_missing_question_id() {
-    let response: BailianSystemOneResponse = serde_json::from_value(serde_json::json!({
+    let response: SystemOneHttpResponse = serde_json::from_value(serde_json::json!({
         "model": "decision-model-preview",
         "request_id": "r",
         "answers": {},
@@ -210,7 +210,7 @@ fn parse_answers_rejects_missing_question_id() {
     let error = parse_answers(&response, &questions).expect_err("缺 qid 必须报错");
     assert_eq!(
         error,
-        BailianWireError::MissingAnswer {
+        SystemOneHttpWireError::MissingAnswer {
             question_id: "q0".into()
         }
     );
@@ -218,7 +218,7 @@ fn parse_answers_rejects_missing_question_id() {
 
 #[test]
 fn parse_answers_rejects_type_mismatch() {
-    let response: BailianSystemOneResponse = serde_json::from_value(serde_json::json!({
+    let response: SystemOneHttpResponse = serde_json::from_value(serde_json::json!({
         "model": "decision-model-preview",
         "request_id": "r",
         "answers": {
@@ -232,7 +232,7 @@ fn parse_answers_rejects_type_mismatch() {
     let error = parse_answers(&response, &questions).expect_err("题型不匹配必须报错");
     assert_eq!(
         error,
-        BailianWireError::TypeMismatch {
+        SystemOneHttpWireError::TypeMismatch {
             question_id: "q0".into()
         }
     );
@@ -241,7 +241,7 @@ fn parse_answers_rejects_type_mismatch() {
 #[test]
 fn parse_choice_fills_missing_candidates_with_zero_probability() {
     // 响应 probabilities 缺 m2（协议允许仅返回部分候选时防御性补 0）。
-    let response: BailianSystemOneResponse = serde_json::from_value(serde_json::json!({
+    let response: SystemOneHttpResponse = serde_json::from_value(serde_json::json!({
         "model": "decision-model-preview",
         "request_id": "r",
         "answers": {
@@ -270,7 +270,7 @@ fn parse_choice_fills_missing_candidates_with_zero_probability() {
 
 #[test]
 fn parse_score_fills_missing_levels_with_zero_probability() {
-    let response: BailianSystemOneResponse = serde_json::from_value(serde_json::json!({
+    let response: SystemOneHttpResponse = serde_json::from_value(serde_json::json!({
         "model": "decision-model-preview",
         "request_id": "r",
         "answers": {
@@ -293,13 +293,13 @@ fn parse_score_fills_missing_levels_with_zero_probability() {
 #[test]
 fn roundtrip_all_three_question_kinds_preserves_semantics() {
     let questions = sample_questions();
-    let response = BailianSystemOneResponse {
+    let response = SystemOneHttpResponse {
         model: "decision-model-preview".into(),
         request_id: "roundtrip".into(),
         answers: std::collections::BTreeMap::from([
             (
                 "q0".into(),
-                BailianAnswerWire::Choice {
+                SystemOneAnswerWire::Choice {
                     choice: "m2".into(),
                     confidence: 0.55,
                     probabilities: std::collections::BTreeMap::from([
@@ -309,10 +309,10 @@ fn roundtrip_all_three_question_kinds_preserves_semantics() {
                     ]),
                 },
             ),
-            ("q1".into(), BailianAnswerWire::Noul { noul: 0.25 }),
+            ("q1".into(), SystemOneAnswerWire::Noul { noul: 0.25 }),
             (
                 "q2".into(),
-                BailianAnswerWire::Score {
+                SystemOneAnswerWire::Score {
                     score: 1.0,
                     confidence: 0.7,
                     legend: std::collections::BTreeMap::new(),
@@ -324,7 +324,7 @@ fn roundtrip_all_three_question_kinds_preserves_semantics() {
                 },
             ),
         ]),
-        usage: BailianUsageWire { input_tokens: 42 },
+        usage: SystemOneUsageWire { input_tokens: 42 },
         latency_ms: 12.5,
     };
     let answers = parse_answers(&response, &questions).expect("往返应成功");
@@ -335,5 +335,116 @@ fn roundtrip_all_three_question_kinds_preserves_semantics() {
     );
     assert!(
         matches!(&answers[2], ScoringAnswer::Score { score, .. } if (*score - 1.0).abs() < f64::EPSILON)
+    );
+}
+
+// ── server 方向转换（#2096：daemon HTTP handler 复用同一 DTO 层）──
+
+#[test]
+fn parse_request_roundtrips_with_build_request() {
+    let original = sample_questions();
+    let request = build_request("kev-0.8b-q8-r1", &sample_state(), &original);
+    let (state, questions) = parse_request(&request).expect("往返解析应成功");
+    assert_eq!(state, sample_state());
+    assert_eq!(
+        questions, original,
+        "qid 按 q0..qN 还原为 Vec 且保持请求语义"
+    );
+}
+
+#[test]
+fn parse_request_rejects_blank_state() {
+    let request = SystemOneHttpRequest {
+        model: "m".into(),
+        state: "   ".into(),
+        questions: Default::default(),
+    };
+    assert!(parse_request(&request).is_err(), "空白 state 必须拒绝");
+}
+
+#[test]
+fn build_response_maps_answers_back_to_question_ids() {
+    let answers = vec![
+        ScoringAnswer::noul(0.9, CalibrationLevel::Raw).expect("noul 构造"),
+        ScoringAnswer::choice(
+            "m1",
+            vec![("m1".into(), 0.8), ("m2".into(), 0.2)],
+            0.8,
+            CalibrationLevel::Raw,
+        )
+        .expect("choice 构造"),
+    ];
+    let response = build_response("kev-0.8b-q8-r1", &answers, 12.5);
+    assert_eq!(response.model, "kev-0.8b-q8-r1");
+    assert_eq!(response.latency_ms, 12.5);
+    let keys: Vec<&String> = response.answers.keys().collect();
+    assert_eq!(keys, ["q0", "q1"]);
+    assert!(matches!(
+        response.answers["q0"],
+        SystemOneAnswerWire::Noul { noul } if (noul - 0.9).abs() < f64::EPSILON
+    ));
+    match &response.answers["q1"] {
+        SystemOneAnswerWire::Choice {
+            choice,
+            probabilities,
+            ..
+        } => {
+            assert_eq!(choice, "m1");
+            assert_eq!(probabilities.get("m2"), Some(&0.2));
+        }
+        other => panic!("q1 应为 Choice：{other:?}"),
+    }
+}
+
+#[test]
+fn build_response_score_probabilities_use_index_keys() {
+    let answers = vec![
+        ScoringAnswer::score(1.5, vec![0.1, 0.5, 0.4], 0.7, CalibrationLevel::Raw)
+            .expect("score 构造"),
+    ];
+    let response = build_response("rev", &answers, 1.0);
+    match &response.answers["q0"] {
+        SystemOneAnswerWire::Score {
+            score,
+            probabilities,
+            ..
+        } => {
+            assert_eq!(score, &1.5);
+            assert_eq!(probabilities.get("0"), Some(&0.1));
+            assert_eq!(probabilities.get("1"), Some(&0.5));
+            assert_eq!(probabilities.get("2"), Some(&0.4));
+        }
+        other => panic!("应为 Score：{other:?}"),
+    }
+}
+
+#[test]
+fn full_http_roundtrip_preserves_domain_semantics() {
+    // server 方向 parse_request → 领域 → build_response → client 方向 parse_answers。
+    let questions = sample_questions();
+    let request = build_request("rev", &sample_state(), &questions);
+    let (_, parsed_questions) = parse_request(&request).expect("server 解析");
+    let domain_answers = vec![
+        ScoringAnswer::choice(
+            "m2",
+            vec![("m1".into(), 0.1), ("m2".into(), 0.9)],
+            0.9,
+            CalibrationLevel::Raw,
+        )
+        .expect("choice"),
+        ScoringAnswer::noul(0.75, CalibrationLevel::Raw).expect("noul"),
+        ScoringAnswer::score(2.0, vec![0.0, 0.0, 1.0], 1.0, CalibrationLevel::Raw).expect("score"),
+    ];
+    let response = build_response("rev", &domain_answers, 5.0);
+    let wire_json = serde_json::to_string(&response).expect("响应序列化");
+    let decoded: SystemOneHttpResponse = serde_json::from_str(&wire_json).expect("client 侧解析");
+    let answers = parse_answers(&decoded, &parsed_questions).expect("client 还原");
+    assert_eq!(answers.len(), 3);
+    assert!(matches!(&answers[0], ScoringAnswer::Choice { choice, .. } if choice == "m2"));
+    assert!(
+        matches!(&answers[1], ScoringAnswer::Noul { p_true, .. } if (*p_true - 0.75).abs() < f64::EPSILON)
+    );
+    assert!(
+        matches!(&answers[2], ScoringAnswer::Score { score, .. } if (*score - 2.0).abs() < f64::EPSILON)
     );
 }

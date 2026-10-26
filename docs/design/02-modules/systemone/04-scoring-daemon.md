@@ -79,12 +79,12 @@ aemeath systemone serve --detach # 如需后台（实现 MAY 延后；launchd �
 - 同一二进制；**仅** `serve`（及 `systemone download`）路径编译并加载引擎（feature `systemone-daemon`）。
 - 日常 `aemeath` 交互会话路径 **NEVER** 链接 llama.cpp / 加载 GGUF。
 
-### 4.2 单实例
+### 4.2 单实例（HTTP 替代 UDS 后）
 
-- 启动时获取 `~/.agents/scoring/scoring.lock`（文件锁）；已占用则：
-  - 若 sock 健康 → 退出 0（或打印「已在运行」后退出 0）；
-  - 若 sock 不健康 → 报告并失败（避免双实例抢 sock）。
-- 监听 `~/.agents/scoring/scoring.sock`（或 `scoring.socket_path`）；创建前 unlink 陈旧 sock（仅当锁归本进程）。
+- **UDS sock 模式已取消（#2096 拍板）**：不再有 `scoring.sock` / `scoring.lock` 文件。
+- 单实例由 **HTTP 端口 bind 互斥**天然保证：第二个实例 bind 同一 `scoring.http_listen` 地址失败 → 报告并失败退出（避免双实例抢端口）。
+- 监听 `scoring.http_listen`（显式 `host:port`，默认 `127.0.0.1:9000`；**端口显式配置，NEVER 随机分配 + port 文件发现**）。
+- **不做鉴权、不做网段限制**（明文 HTTP；监听地址由配置决定，暴露面由部署者负责）。
 
 ### 4.3 客户端惰性拉起
 
@@ -92,9 +92,9 @@ aemeath systemone serve --detach # 如需后台（实现 MAY 延后；launchd �
 
 1. `scoring.enabled == true`，且
 2. 至少一个场景开关开启，且
-3. 连接 sock 失败（不存在 / 拒绝），
+3. HTTP 探活失败（`scoring.http_endpoint` 连接拒绝 / 超时），
 
-则客户端尝试 `spawn` 当前可执行文件的 `systemone serve`（带单实例锁语义），短暂等待 sock 就绪后重连。
+则客户端尝试 `spawn` 当前可执行文件的 `systemone serve`（同一 `scoring.http_listen` 配置），短暂等待 `/healthz` 就绪后重连。
 
 - 会话退出 **NEVER** 杀掉 daemon（多会话共享）。
 - `scoring.enabled=false` 或四场景全关 → **零成本**（不连、不 spawn、不检查模型）。
@@ -110,63 +110,30 @@ aemeath systemone serve --detach # 如需后台（实现 MAY 延后；launchd �
 - 客户端侧 → `ScoringUnavailable` + **首次**用户可见提示（Q4）；之后同场景静默降级。
 - **NEVER** 自动下载；**NEVER** 回退旧 Jev HTTP。
 
-## 5. 传输与协议
+## 5. 传输与协议（#2096：HTTP 替代 UDS）
 
 ### 5.1 传输
 
-- Unix domain socket，路径默认 `${AEMEATH_AGENTS_DIR:-~/.agents}/scoring/scoring.sock`。
-- 权限：sock 文件 `0600`；目录遵循现有 agents 根权限。
-- 首版仅本机；NEVER 监听 TCP。
+- **HTTP（TCP）**，监听地址 `scoring.http_listen`（显式 `host:port`，默认 `127.0.0.1:9000`）。
+- 原 UDS `scoring.sock` 传输与 length-prefixed 帧协议**整体退役**；`scoring.socket_path` 旧配置键残留忽略（弃用门禁见 specs/3.9）。
+- **不做鉴权、不做网段限制**：明文 HTTP，无 Bearer token；监听非 loopback 地址是合法的显式部署选择。
 
-### 5.2 帧格式
+### 5.2 协议形态：System One JSON（与 bailian 同构）
 
-- Length-prefixed JSON：`u32` little-endian 字节长度 + UTF-8 JSON body。
-- 每连接可多请求；服务端按到达顺序串行处理（单 worker）。
+- 端点：`POST /systemone`（评分）+ `GET /healthz`（就绪探活）。
+- wire 与百炼决策模型 API **同构**：`{model, state, questions: {qid: {type, instructions, criteria}}}` → `{answers: {qid: ...}, usage, latency_ms}`；**NEVER** 透传旧 length-prefixed 帧协议。
+- **wire DTO 层共享**（`systemone_http_wire`）：server（daemon HTTP handler）与 client（`LocalSystemOneClient` / `BailianSystemOneClient`）复用同一 DTO 与领域转换函数；**client 类型 NEVER 泛化**——bailian 专用 client 保留，未来其他 web 提供商各自独立 client。
+- daemon 响应 `model` 回显本地引擎 `engine_revision`；无云端 `request_id`（置空或本地 UUID）。
+- 每连接可多请求；服务端按到达顺序串行处理（单 worker 推理队列语义不变）。
 
-### 5.3 消息形状（示意）
+### 5.3 错误语义
 
-请求对齐 `ScoringPort::answer` 输入；响应对齐校准后概率分布。字段名以实施 PR 的 serde 类型为准，本稿锁定语义：
-
-```json
-// Request
-{
-  "protocol_version": 1,
-  "method": "answer",
-  "id": "corr-optional",
-  "params": {
-    "scenario": "memory_rerank",
-    "questions": [ /* ScoringQuestion 序列化 */ ]
-  }
-}
-
-// Response (ok)
-{
-  "protocol_version": 1,
-  "id": "corr-optional",
-  "result": {
-    "answers": [ /* 概率分布 + CalibrationLevel */ ],
-    "engine_revision": "kev-0.8b@…",
-    "latency_ms": 42
-  }
-}
-
-// Response (error)
-{
-  "protocol_version": 1,
-  "id": "corr-optional",
-  "error": {
-    "kind": "unavailable|timeout|protocol|internal",
-    "message": "…"
-  }
-}
-```
-
-- `protocol_version` 不匹配 → `error.kind=protocol` → 客户端映射 `ScoringUnavailable`。
-- 健康检查 MAY 另提供 `method=ping`（实现期决定；非阻塞主路径）。
+- 传输层（连接拒绝 / 超时）与协议层错误（JSON 非法、题型不匹配、答案缺失）映射 `ScoringUnavailable`（`UnavailableKind` 分类），消费点按设计 §4.4 统一降级。
+- 健康检查：`GET /healthz` → 200（引擎就绪）/ 503（引擎未就绪）。
 
 ### 5.4 超时
 
-| 阶段 | 默认 | 配置键（建议） |
+| 阶段 | 默认 | 配置键 |
 |---|---|---|
 | 连接（含惰性拉起等待） | 2s | `scoring.connect_timeout_secs` |
 | 单次推理 | 30s | `scoring.infer_timeout_secs` |

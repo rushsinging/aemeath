@@ -638,8 +638,10 @@ pub struct ScoringConfigPatch {
     pub memory_recall: Option<bool>,
     #[serde(default, alias = "eventRetentionDays")]
     pub event_retention_days: Option<u32>,
-    #[serde(default, alias = "socketPath")]
-    pub socket_path: Option<String>,
+    #[serde(default, alias = "httpListen")]
+    pub http_listen: Option<String>,
+    #[serde(default, alias = "httpEndpoint")]
+    pub http_endpoint: Option<String>,
     #[serde(default, alias = "connectTimeoutSecs")]
     pub connect_timeout_secs: Option<u64>,
     #[serde(default, alias = "inferTimeoutSecs")]
@@ -707,8 +709,11 @@ pub(crate) fn apply_scoring_patch(
         // `0` 是合法覆盖值（禁用 GC），不得与「未设置」混淆。
         base.event_retention_days = v;
     }
-    if let Some(v) = patch.socket_path {
-        base.socket_path = Some(v);
+    if let Some(v) = patch.http_listen {
+        base.http_listen = v;
+    }
+    if let Some(v) = patch.http_endpoint {
+        base.http_endpoint = Some(v);
     }
     if let Some(v) = patch.connect_timeout_secs {
         base.connect_timeout_secs = v;

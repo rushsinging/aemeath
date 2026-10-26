@@ -38,6 +38,9 @@ pub const DEFAULT_SCORING_INFER_TIMEOUT_SECS: u64 = 30;
 /// bailian 驱动默认模型名（百炼决策模型，TypeSafe System One 协议）。
 pub const DEFAULT_BAILIAN_SCORING_MODEL: &str = "decision-model-preview";
 
+/// local daemon HTTP 监听地址默认值（#2096：UDS 退役，端口显式配置）。
+pub const DEFAULT_SCORING_HTTP_LISTEN: &str = "127.0.0.1:9000";
+
 // ── snapshot.rs：hook 执行 / stop block 默认值 ──
 pub(crate) const DEFAULT_HOOK_EXECUTION_MAX_ATTEMPTS: u8 = 3;
 pub(crate) const DEFAULT_STOP_HOOK_MAX_BLOCKS: usize = 15;
