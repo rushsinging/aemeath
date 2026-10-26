@@ -1,0 +1,339 @@
+{
+ "schema_version": 1,
+ "diagram_type": "workflow",
+ "meta": {
+  "title": "Context Receipt 全链路",
+  "subtitle": "写入双轨 · 读取单轨 · 恢复不对称 —— A/C/B 修复点（点击节点看详情）",
+  "visual_preset": "blueprint",
+  "quality_profile": "showcase",
+  "animation": "none"
+ },
+ "lanes": [
+  {
+   "id": "exec",
+   "label": "① 执行期推进（高频写）"
+  },
+  {
+   "id": "commit",
+   "label": "② 收口与提交（一次性）"
+  },
+  {
+   "id": "read",
+   "label": "③ 读取消费"
+  },
+  {
+   "id": "recover",
+   "label": "④ 恢复与边界（sidecar 生命周期）",
+   "variant": "exception"
+  }
+ ],
+ "nodes": [
+  {
+   "id": "f01",
+   "lane": "exec",
+   "col": 0,
+   "type": "backend",
+   "label": "工具执行",
+   "sublabel": "execution_supervisor",
+   "tag": "runtime",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f03",
+   "lane": "exec",
+   "col": 1,
+   "type": "backend",
+   "label": "状态机",
+   "sublabel": "advance·幂等防倒退",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f04",
+   "lane": "exec",
+   "col": 3,
+   "type": "database",
+   "label": "边车双写",
+   "sublabel": "sidecar 先写",
+   "tag": "缺陷 C",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f05",
+   "lane": "exec",
+   "col": 5,
+   "type": "database",
+   "label": "会话提交",
+   "sublabel": "commit_incremental",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f12",
+   "lane": "commit",
+   "col": 0,
+   "type": "backend",
+   "label": "收口压扁",
+   "sublabel": "to_step_receipt",
+   "tag": "缺陷 B2 B3",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f13",
+   "lane": "commit",
+   "col": 1,
+   "type": "backend",
+   "label": "指纹",
+   "sublabel": "含 receipts",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f14",
+   "lane": "commit",
+   "col": 3,
+   "type": "security",
+   "label": "空回填",
+   "sublabel": "×2 · 时序颠倒",
+   "tag": "缺陷 A2",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f15",
+   "lane": "commit",
+   "col": 5,
+   "type": "backend",
+   "label": "提交回执",
+   "sublabel": "append / accept",
+   "tag": "缺陷 A1",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f21",
+   "lane": "read",
+   "col": 0,
+   "type": "backend",
+   "label": "实时读",
+   "sublabel": "step_receipts()",
+   "tag": "缺陷 B1",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f22",
+   "lane": "read",
+   "col": 1,
+   "type": "database",
+   "label": "冻结快照",
+   "sublabel": "无生产读者",
+   "tag": "缺陷 B1",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f23",
+   "lane": "read",
+   "col": 3,
+   "type": "security",
+   "label": "终态判定",
+   "sublabel": "Unconfirmed?",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f24",
+   "lane": "read",
+   "col": 5,
+   "type": "backend",
+   "label": "恢复修复",
+   "sublabel": "provider-safe",
+   "tag": "缺陷 B3",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f31",
+   "lane": "recover",
+   "col": 0,
+   "type": "backend",
+   "label": "旧式恢复",
+   "sublabel": "legacy overlay",
+   "tag": "缺陷 C",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f32",
+   "lane": "recover",
+   "col": 1,
+   "type": "backend",
+   "label": "数据集恢复",
+   "sublabel": "dataset·不对称",
+   "tag": "缺陷 C",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f33",
+   "lane": "recover",
+   "col": 3,
+   "type": "backend",
+   "label": "清空边界",
+   "sublabel": "/clear 相反",
+   "tag": "缺陷 C",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f34",
+   "lane": "recover",
+   "col": 5,
+   "type": "backend",
+   "label": "压缩之后",
+   "sublabel": "无收纳确认",
+   "tag": "缺陷 C",
+   "width": 88,
+   "height": 54
+  }
+ ],
+ "edges": [
+  {
+   "id": "e01",
+   "from": "f01",
+   "to": "f03",
+   "role": "main"
+  },
+  {
+   "id": "e03",
+   "from": "f03",
+   "to": "f04",
+   "label": "① 先写",
+   "role": "main"
+  },
+  {
+   "id": "e04",
+   "from": "f04",
+   "to": "f05",
+   "label": "② 再提交",
+   "role": "main"
+  },
+  {
+   "id": "e05",
+   "from": "f03",
+   "to": "f12",
+   "label": "step 终结·FinalizeCause",
+   "role": "async",
+   "route": "auto",
+   "fromSide": "bottom",
+   "toSide": "top",
+   "via": [
+    [
+     220,
+     170
+    ],
+    [
+     88,
+     170
+    ]
+   ]
+  },
+  {
+   "id": "e07",
+   "from": "f12",
+   "to": "f13",
+   "label": "进指纹",
+   "role": "main"
+  },
+  {
+   "id": "e08",
+   "from": "f13",
+   "to": "f14",
+   "label": "空则补",
+   "role": "branch"
+  },
+  {
+   "id": "e09",
+   "from": "f14",
+   "to": "f15",
+   "label": "",
+   "role": "main"
+  },
+  {
+   "id": "e10",
+   "from": "f03",
+   "to": "f21",
+   "label": "实时派生",
+   "role": "async",
+   "route": "auto",
+   "fromSide": "bottom",
+   "toSide": "top",
+   "via": [
+    [
+     220,
+     185
+    ],
+    [
+     32,
+     185
+    ],
+    [
+     32,
+     328
+    ],
+    [
+     88,
+     328
+    ]
+   ],
+   "labelDy": 26
+  },
+  {
+   "id": "e11",
+   "from": "f12",
+   "to": "f22",
+   "label": "写冻结",
+   "role": "async",
+   "route": "drop"
+  },
+  {
+   "id": "e12",
+   "from": "f21",
+   "to": "f23",
+   "label": "outcome 判定",
+   "role": "main",
+   "route": "bottom-channel"
+  },
+  {
+   "id": "e13",
+   "from": "f04",
+   "to": "f31",
+   "role": "async",
+   "route": "auto",
+   "fromSide": "bottom",
+   "toSide": "top",
+   "via": [
+    [
+     430,
+     161
+    ],
+    [
+     704,
+     161
+    ],
+    [
+     704,
+     436
+    ],
+    [
+     88,
+     436
+    ]
+   ]
+  }
+ ]
+}

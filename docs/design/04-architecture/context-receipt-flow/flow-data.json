@@ -9,7 +9,8 @@
   "refs": [
    "runtime/.../tool/execution_supervisor.rs:550 terminal_receipt()"
   ],
-  "defects": []
+  "defects": [],
+  "label": "工具执行"
  },
  "f02": {
   "stage": "执行",
@@ -21,7 +22,8 @@
   "refs": [
    "context/domain/tool_receipt.rs:167"
   ],
-  "defects": []
+  "defects": [],
+  "label": "MutationData"
  },
  "f03": {
   "stage": "执行",
@@ -34,7 +36,8 @@
    "context/adapters/canonical_session.rs:1010-1050",
    "context/domain/session/envelope.rs advance_tool_receipt"
   ],
-  "defects": []
+  "defects": [],
+  "label": "状态机"
  },
  "f04": {
   "stage": "执行",
@@ -52,7 +55,8 @@
     "code": "C",
     "text": "WAL 条件 7 缺 5：无新旧比较、无 finalize 收纳确认、/clear 不清、compact 不回收、崩溃窗口无测试；dataset 入口不 overlay。半吊子 WAL = 假恢复保证"
    }
-  ]
+  ],
+  "label": "边车双写"
  },
  "f05": {
   "stage": "执行",
@@ -69,7 +73,8 @@
     "code": "C",
     "text": "与 sidecar 构成双写；两写点之间的失败窗口行为 legacy/dataset 不同"
    }
-  ]
+  ],
+  "label": "会话提交"
  },
  "f11": {
   "stage": "收口",
@@ -81,7 +86,8 @@
   "refs": [
    "context/domain.rs:593"
   ],
-  "defects": []
+  "defects": [],
+  "label": "step finalize"
  },
  "f12": {
   "stage": "收口",
@@ -102,7 +108,8 @@
     "code": "B3",
     "text": "call-id 回退规则在 restore.rs:274 provider_call_id() 重复实现"
    }
-  ]
+  ],
+  "label": "收口压扁"
  },
  "f13": {
   "stage": "收口",
@@ -114,7 +121,8 @@
   "refs": [
    "runtime/.../context/coordination.rs:197-275"
   ],
-  "defects": []
+  "defects": [],
+  "label": "指纹"
  },
  "f14": {
   "stage": "收口",
@@ -132,7 +140,8 @@
     "code": "A2",
     "text": "回填发生在 fingerprint 计算之后 → 指纹不能证明落盘内容；重试可能因实时 receipt 已变而假冲突；两份重复逻辑"
    }
-  ]
+  ],
+  "label": "空回填"
  },
  "f15": {
   "stage": "收口",
@@ -150,7 +159,8 @@
     "code": "A1",
     "text": "revision 语义相反：同一 port 两个 adapter 对 accept 返回不同值（canonical N / in_memory N+1），canonical accept 甚至不推进 revision"
    }
-  ]
+  ],
+  "label": "提交回执"
  },
  "f21": {
   "stage": "读取",
@@ -167,7 +177,8 @@
     "code": "B1",
     "text": "finalize 后后台调用仍可推进 → 实时与冻结快照永久分叉，无版本关联或对账"
    }
-  ]
+  ],
+  "label": "实时读"
  },
  "f22": {
   "stage": "读取",
@@ -184,7 +195,8 @@
     "code": "B1",
     "text": "双真相里'落盘却无人读'的那份"
    }
-  ]
+  ],
+  "label": "冻结快照"
  },
  "f23": {
   "stage": "读取",
@@ -196,7 +208,8 @@
   "refs": [
    "runtime/.../engine/phases.rs:207"
   ],
-  "defects": []
+  "defects": [],
+  "label": "终态判定"
  },
  "f24": {
   "stage": "读取",
@@ -213,7 +226,8 @@
     "code": "B3",
     "text": "call-id 回退规则与 to_step_receipt 重复实现，规则变更需改两处"
    }
-  ]
+  ],
+  "label": "恢复修复"
  },
  "f31": {
   "stage": "恢复",
@@ -230,7 +244,8 @@
     "code": "C",
     "text": "overlay 直接 advance 叠加，无新旧比较，可能把旧调用重新带回（/clear 后复活路径）"
    }
-  ]
+  ],
+  "label": "旧式恢复"
  },
  "f32": {
   "stage": "恢复",
@@ -247,7 +262,8 @@
     "code": "C",
     "text": "恢复入口不对称：同一份数据 legacy 能恢复、dataset 静默丢"
    }
-  ]
+  ],
+  "label": "数据集恢复"
  },
  "f33": {
   "stage": "恢复",
@@ -265,7 +281,8 @@
     "code": "C",
     "text": "两 adapter 行为相反；canonical 清后 legacy overlay 可把旧 receipt 复活"
    }
-  ]
+  ],
+  "label": "清空边界"
  },
  "f34": {
   "stage": "恢复",
@@ -282,6 +299,7 @@
     "code": "C",
     "text": "sidecar 无生命周期终点，文件无限增长且语义含混"
    }
-  ]
+  ],
+  "label": "压缩之后"
  }
 }
