@@ -1,0 +1,53 @@
+@startuml receipt-flow-c4
+!include <C4/C4_Component>
+' Context Receipt 全链路 —— C4 Container 视图（写入双轨 / 读取单轨 / 恢复不对称）
+' A/C/B 修复点以 tag 标注
+
+title Context Receipt 全链路（C4）
+
+Person(runtime_exec, "Runtime 工具执行", "execution_supervisor")
+System_Boundary(b1, "① 执行期推进（高频写）") {
+  Component(advance, "advance 状态机", "context", "幂等 · 防倒退 · changed")
+  ComponentDb(sidecar, "sidecar 双写", "ledger", "先写 · 半启用 WAL [C]")
+  ComponentDb(session_store, "Canonical Session", "dataset", "commit_incremental 崩溃安全")
+}
+
+System_Boundary(b2, "② 收口与提交（一次性）") {
+  Component(finalize, "step finalize", "context", "FinalizeCause ×3")
+  Component(tostep, "收口压扁", "context", "to_step_receipt [B2 B3]")
+  Component(fp, "fingerprint", "runtime", "含 receipts 内容指纹")
+  Component(backfill, "空回填 ×2", "context+runtime", "时序颠倒 [A2]")
+  Component(append, "append / accept", "context", "提交回执 [A1]")
+}
+
+System_Boundary(b3, "③ 读取消费") {
+  Component(liveread, "实时派生读", "context", "step_receipts() [B1]")
+  ComponentDb(frozen, "冻结快照", "envelope", "无生产读者 [B1]")
+  Component(judge, "取消终态判定", "runtime", "CancellationUnconfirmed?")
+  Component(resume, "resume 修复", "context", "provider-safe [B3]")
+}
+
+System_Boundary(b4, "④ 恢复与边界（sidecar 生命周期）[C]") {
+  Component(legacy, "legacy 恢复", "context", "overlay tool ledger")
+  Component(dataset_rec, "dataset 恢复", "context", "只 overlay accepted（不对称）")
+  Component(clear, "/clear", "context", "两 adapter 行为相反")
+  Component(compact, "compact 后", "context", "无收纳确认")
+}
+
+Rel(runtime_exec, advance, "① MutationData 报告推进", "ToolReceiptMutationData")
+Rel(advance, sidecar, "② 先写", "receipt")
+Rel(advance, session_store, "③ 后提交", "member")
+Rel(advance, finalize, "step 终结", "event")
+Rel(finalize, tostep, "④ 只取 Terminal 压扁", "")
+Rel(tostep, fp, "⑤ 进指纹", "RunStepReceiptData")
+Rel(fp, backfill, "⑥ 空 receipts 则补（指纹后）[A2]", "")
+Rel(backfill, append, "⑦ 落盘", "ContextAppendData")
+Rel(append, runtime_exec, "⑧ 回执（N vs N+1 相反）[A1]", "SessionAppendReceiptData")
+Rel(advance, liveread, "实时派生（永远读活账本）[B1]", "")
+Rel(tostep, frozen, "写冻结快照（无读者）[B1]", "")
+Rel(liveread, judge, "outcome 判定", "")
+Rel(sidecar, legacy, "仅此入口恢复", "")
+Rel(sidecar, clear, "不清 ledger → 复活路径", "")
+
+SHOW_LEGEND()
+@enduml
