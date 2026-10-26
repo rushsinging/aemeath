@@ -26,6 +26,7 @@ mod ports;
 mod wiring;
 
 pub use adapters::audited::AuditedScoringAdapter;
+pub use adapters::bailian_client::BailianSystemOneClient;
 pub use adapters::calibrated::CalibratedScoringAdapter;
 pub use adapters::calibration_store::{CalibrationArtifact, CalibrationStore};
 pub use adapters::daemon_client::{ensure_scoring_daemon_ready, DaemonScoringClient};

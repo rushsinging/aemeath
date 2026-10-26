@@ -158,6 +158,18 @@ aemeath systemone download
 
 生产配置中的 `AEMEATH_SCORING_URL`、`AEMEATH_SCORING_MODEL`、`AEMEATH_SCORING_TIMEOUT_MS` 随 HTTP 退役进入兼容清理；具体移除节奏遵循配置弃用门禁，NEVER 留下看似生效但实际无消费点的死配置。daemon 使用独立的 `scoring.socket_path` / timeout 配置，**NEVER** 复用上述已退役键名充当生产开关。
 
+### 4.3.1 bailian 云端驱动（backend 分流，#2095）
+
+退役边界针对的是旧 **Jev 线格式** HTTP adapter；现行 `scoring.backend` 驱动分流与此无关：
+
+- `scoring.backend = "local"`（默认）：现状 UDS daemon 路径（§4.1），消费 `scoring.socket_path` / `connect_timeout_secs`。
+- `scoring.backend = "bailian"`：百炼决策模型（TypeSafe System One 协议）HTTPS 直连，`BailianSystemOneClient` 实现 `ScoringPort`：
+  - 端点 = `scoring.bailian.full_url`（优先）或 `scoring.bailian.base_url + "/systemone"`；Bearer 鉴权凭证为 `scoring.bailian.api_key`，与 `models.providers` **独立，NEVER 混用**；
+  - wire 协议与本域领域语言逐字段同构（noul/choice/score、probabilities 候选集内归一化），转换在 `domain/bailian_wire.rs`（qid q0..qN 按请求序生成/还原，缺失候选/档位补 0，calibration 恒 `Raw`），契约测试用实测响应 fixture 钉死形状（beta 防漂移）；
+  - 装配（`assemble_bailian_ports`）**NEVER** 读发行 manifest、**NEVER** 拉起 systemone daemon；审计 `engine_revision` 取 `bailian/{model}`（单一真相源）；
+  - 配置缺失/非法（缺 api_key 或端点）fail-open：不装配端口 + 单条中文提醒（`BailianConfigInvalid`），主聊天 NEVER 阻断；传输/协议错误映射 `ScoringUnavailable`，消费点按 §4.4 统一降级；
+  - 复用 `scoring.infer_timeout_secs` 作单请求超时；四场景开关（rerank/recall/skill_match/policy_triage）语义与 local 后端完全一致。
+
 ### 4.4 错误语义
 
 - 初始化失败（模型缺失、下载未执行、校验失败、平台不支持、GGUF/PointerHead 不兼容、llama.cpp 初始化失败）：记录 error 或用户可见提醒，**禁用整个 System One**，不装配评分端口；主 agent 继续运行。

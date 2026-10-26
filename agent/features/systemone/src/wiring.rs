@@ -142,7 +142,7 @@ pub async fn wire_embedded_scoring_per_scenario(
             *scenario,
             wrap_calibrated_audited(
                 raw.clone(),
-                &manifest,
+                &manifest.engine_revision,
                 &scoring_dir,
                 scenario,
                 event_retention_days,
@@ -167,7 +167,7 @@ pub async fn wire_embedded_scoring(
     let raw = wire_embedded_scoring_raw(models_dir, manifest.clone()).await?;
     Ok(wrap_calibrated_audited(
         raw,
-        &manifest,
+        &manifest.engine_revision,
         &scoring_dir,
         "embedded",
         event_retention_days,
@@ -218,7 +218,7 @@ pub async fn wire_embedded_scoring_raw(
 /// 配置，由 composition 注入；`0`=仅禁用 GC，NEVER 表示关闭写入）。
 pub fn wrap_calibrated_audited(
     inner: Arc<dyn ScoringPort>,
-    manifest: &ModelManifest,
+    engine_revision: &str,
     scoring_dir: &Path,
     scenario: &'static str,
     event_retention_days: u32,
@@ -230,7 +230,7 @@ pub fn wrap_calibrated_audited(
         JsonlSegmentScoringEventStore::new(scoring_dir.to_path_buf(), event_retention_days);
     let mut audited = AuditedScoringAdapter::new(
         calibrated,
-        manifest.engine_revision.clone(),
+        engine_revision.to_string(),
         event_store,
         Arc::new(|| chrono::Utc::now().to_rfc3339()),
         scenario,

@@ -156,6 +156,34 @@ impl EnvAdapter {
                 parse_non_negative(source.get("AEMEATH_SCORING_CONNECT_TIMEOUT_SECS"));
             let infer_timeout_secs =
                 parse_non_negative(source.get("AEMEATH_SCORING_INFER_TIMEOUT_SECS"));
+            let backend =
+                source
+                    .get("AEMEATH_SCORING_BACKEND")
+                    .and_then(|value| match value.trim() {
+                        "local" => Some(share::config::domain::scoring::ScoringBackend::Local),
+                        "bailian" => Some(share::config::domain::scoring::ScoringBackend::Bailian),
+                        _ => None,
+                    });
+            let bailian_env_field = |key: &str| {
+                source
+                    .get(key)
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+            };
+            let bailian_api_key = bailian_env_field("AEMEATH_SCORING_BAILIAN_API_KEY");
+            let bailian_base_url = bailian_env_field("AEMEATH_SCORING_BAILIAN_BASE_URL");
+            let bailian_full_url = bailian_env_field("AEMEATH_SCORING_BAILIAN_FULL_URL");
+            let bailian_model = bailian_env_field("AEMEATH_SCORING_BAILIAN_MODEL");
+            let bailian = (bailian_api_key.is_some()
+                || bailian_base_url.is_some()
+                || bailian_full_url.is_some()
+                || bailian_model.is_some())
+            .then(|| share::config::domain::merge::BailianScoringConfigPatch {
+                api_key: bailian_api_key,
+                base_url: bailian_base_url,
+                full_url: bailian_full_url,
+                model: bailian_model,
+            });
             (enabled.is_some()
                 || memory_rerank.is_some()
                 || skill_match.is_some()
@@ -163,9 +191,13 @@ impl EnvAdapter {
                 || memory_recall.is_some()
                 || socket_path.is_some()
                 || connect_timeout_secs.is_some()
-                || infer_timeout_secs.is_some())
+                || infer_timeout_secs.is_some()
+                || backend.is_some()
+                || bailian.is_some())
             .then_some(share::config::domain::merge::ScoringConfigPatch {
                 enabled,
+                backend,
+                bailian,
                 memory_rerank,
                 skill_match,
                 policy_triage,
