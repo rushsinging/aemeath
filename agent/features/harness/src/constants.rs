@@ -36,3 +36,6 @@ pub const COMPLETE_SESSION_RETENTION: usize = 50;
 
 /// RSI 过程事件流 GC 保留天数（#2070）。
 pub const EVENT_RETENTION_DAYS: u64 = 30;
+
+/// lesson 过期阈值：距上次判定超过该秒数且未被引用 → 退役（#2092）。
+pub const LESSON_STALE_AFTER_SECS: u64 = 30 * 24 * 3600;

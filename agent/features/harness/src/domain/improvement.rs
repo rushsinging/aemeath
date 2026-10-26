@@ -144,6 +144,17 @@ pub fn build_diagnosis_prompt(
     lessons: &[LessonEntry],
     evidence: &crate::domain::evidence::EvidenceBundle,
 ) -> String {
+    build_diagnosis_prompt_with_strength(chunk, lessons, evidence, &[])
+}
+
+/// 带强度档位的诊断 prompt（#2092）：证据块逐条标注强度与处置，
+/// 未达阈值（observe）的信号模型 MUST 不为其提案。
+pub fn build_diagnosis_prompt_with_strength(
+    chunk: &[(ComponentId, ComponentContent)],
+    lessons: &[LessonEntry],
+    evidence: &crate::domain::evidence::EvidenceBundle,
+    verdicts: &[crate::domain::strength::StrengthVerdict],
+) -> String {
     let lessons_block = if lessons.is_empty() {
         "（暂无历史经验）".to_string()
     } else {
@@ -153,7 +164,11 @@ pub fn build_diagnosis_prompt(
             .collect::<Vec<_>>()
             .join("\n")
     };
-    let evidence_block = render_evidence_block(evidence);
+    let evidence_block = if verdicts.is_empty() {
+        render_evidence_block(evidence)
+    } else {
+        render_evidence_block_with_strength(evidence, verdicts)
+    };
     let components_json: Vec<serde_json::Value> = chunk
         .iter()
         .map(|(id, content)| {
@@ -610,6 +625,7 @@ fn record_adopted_lesson(
 
 /// 诊断优先周期（#2078 修订）：每块 1 次诊断（仅产出 issue），
 /// 跨块汇总后返回——**不落盘**、不写 lesson，执行派发由 #2092 门禁决定。
+#[allow(clippy::too_many_arguments)]
 pub async fn run_diagnosis_cycle(
     registry: &mut dyn ComponentRegistry,
     llm: &dyn RsiLlmPort,
@@ -618,6 +634,8 @@ pub async fn run_diagnosis_cycle(
     lessons: &[LessonEntry],
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
     report_lines: &mut Vec<String>,
+    history: &mut crate::domain::strength::SignalHistory,
+    cycle_id: &str,
 ) -> Result<DiagnosisSummary, HarnessError> {
     let ids = registry.list();
     let mut component_contents = Vec::with_capacity(ids.len());
@@ -630,9 +648,59 @@ pub async fn run_diagnosis_cycle(
         evidence: evidence.clone(),
     };
     let chunks = chunk_materials(materials, config.chunk_max_components);
+    // #2092 强度门禁：累计本周期证据 → 逐信号判定档位
+    history.accumulate(cycle_id, &evidence.signals);
+    let thresholds = crate::domain::strength::StrengthThresholds::default();
+    // 按 signal_id 去重（多块会各自产出同一信号）——判定与报告都只做一次
+    let mut unique_signals: Vec<&crate::domain::evidence::EvidenceSignal> = Vec::new();
+    for signal in &evidence.signals {
+        if !unique_signals
+            .iter()
+            .any(|existing| existing.signal_id == signal.signal_id)
+        {
+            unique_signals.push(signal);
+        }
+    }
+    let verdicts: Vec<crate::domain::strength::StrengthVerdict> = unique_signals
+        .iter()
+        .map(|signal| {
+            let input = history.build_input(cycle_id, signal, lessons);
+            crate::domain::strength::judge_strength(&input, &thresholds)
+        })
+        .collect();
+    for verdict in &verdicts {
+        if let Some(recorder) = recorder {
+            recorder.record(&crate::domain::events::RsiCycleEvent::StrengthGate {
+                signal_id: verdict.signal_id.clone(),
+                tier: verdict.tier.as_str().to_string(),
+                rationale: verdict.rationale.clone(),
+            });
+        }
+        report_lines.push(format!(
+            "  [强度] {} → {}（{}）",
+            verdict.signal_id,
+            verdict.tier.as_str(),
+            verdict.rationale
+        ));
+    }
+    // observe 档的信号不进入提案材料（只观察）
+    let actionable: Vec<&crate::domain::evidence::EvidenceSignal> = evidence
+        .signals
+        .iter()
+        .filter(|signal| {
+            verdicts
+                .iter()
+                .find(|verdict| verdict.signal_id == signal.signal_id)
+                .map(|verdict| verdict.tier.allows_apply())
+                .unwrap_or(true)
+        })
+        .collect();
+    let mut gated_evidence = evidence.clone();
+    gated_evidence.signals = actionable.into_iter().cloned().collect();
     let mut per_block: Vec<Vec<DiagnosedIssue>> = Vec::new();
     for (block_index, chunk) in chunks.iter().enumerate() {
-        let prompt = build_diagnosis_prompt(chunk, lessons, &evidence);
+        let prompt =
+            build_diagnosis_prompt_with_strength(chunk, lessons, &gated_evidence, &verdicts);
         let issues = match llm.complete(&prompt).await {
             Ok(response) => match parse_diagnosis(&response) {
                 Ok(DiagnosisProposal::Diagnose { issues, .. }) => issues,
@@ -665,6 +733,21 @@ pub async fn run_diagnosis_cycle(
         per_block.push(issues);
     }
     let summary = DiagnosisSummary::merge(per_block);
+    // #2092：按强度档位过滤——observe 档不进执行派发
+    let strong_ids: std::collections::BTreeSet<String> = verdicts
+        .iter()
+        .filter(|verdict| verdict.tier.allows_apply())
+        .map(|verdict| verdict.signal_id.clone())
+        .collect();
+    let dispatchable = summary.issues.iter().any(|issue| {
+        strong_ids.contains(&issue.target_signal)
+            || strong_ids
+                .iter()
+                .any(|signal_id| signal_id.contains(&issue.target_signal))
+    });
+    if !dispatchable && !summary.is_empty() {
+        report_lines.push("  [派发] 全部任务未达落盘阈值（observe）——仅观察，不执行".to_string());
+    }
     if let Some(recorder) = recorder {
         recorder.record(&crate::domain::events::RsiCycleEvent::DiagnosisSummarized {
             issues: summary.issues.len(),
@@ -766,6 +849,42 @@ pub async fn run_improvement_cycle(
 }
 
 /// 渲染 evidence 块（空证据兜底；按优先级序，signal id 供提案引用）。
+/// 渲染带强度档位的证据块（#2092）：每条标注 tier 与处置依据。
+fn render_evidence_block_with_strength(
+    evidence: &crate::domain::evidence::EvidenceBundle,
+    verdicts: &[crate::domain::strength::StrengthVerdict],
+) -> String {
+    if evidence.signals.is_empty() {
+        return "（近期无执行证据）".to_string();
+    }
+    let mut ordered: Vec<_> = evidence.signals.iter().collect();
+    ordered.sort_by_key(|signal| signal.kind.render_priority());
+    ordered
+        .into_iter()
+        .map(|signal| {
+            let strength = verdicts
+                .iter()
+                .find(|verdict| verdict.signal_id == signal.signal_id)
+                .map(|verdict| {
+                    format!(" [强度: {} | {}]", verdict.tier.as_str(), verdict.rationale)
+                })
+                .unwrap_or_default();
+            format!(
+                "- {} | {}{}{}",
+                signal.signal_id,
+                signal.summary,
+                strength,
+                signal
+                    .excerpt
+                    .as_deref()
+                    .map(|excerpt| format!(" | 摘录: {excerpt}"))
+                    .unwrap_or_default()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn render_evidence_block(evidence: &crate::domain::evidence::EvidenceBundle) -> String {
     if evidence.signals.is_empty() {
         return "（近期无执行证据）".to_string();

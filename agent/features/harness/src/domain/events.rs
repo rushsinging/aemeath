@@ -56,6 +56,16 @@ pub enum RsiCycleEvent {
         lesson_id: String,
         signal: String,
     },
+    StrengthGate {
+        signal_id: String,
+        tier: String,
+        rationale: String,
+    },
+    LessonReviewed {
+        lesson_id: String,
+        action: String,
+        rationale: String,
+    },
     LessonVerified {
         lesson_id: String,
         component: String,

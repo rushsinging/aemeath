@@ -77,6 +77,14 @@ pub struct EvidenceSignal {
     pub summary: String,
     /// 代表性摘录（有界）。
     pub excerpt: Option<String>,
+    /// 本次聚合内的出现次数（#2092 强度门禁的结构化输入；
+    /// 旧数据缺该字段时按 1 计）。
+    #[serde(default = "default_occurrences")]
+    pub occurrences: usize,
+}
+
+fn default_occurrences() -> usize {
+    1
 }
 
 /// 一个证据块（一段 session/run 的聚合结果，#2049 流模型的分块单位）。
@@ -135,6 +143,7 @@ pub fn aggregate_evidence(events: &[SessionEventRecord]) -> EvidenceBundle {
             signal_id: format!("repeated_failure:{tool}:{signature}"),
             summary: format!("工具 {tool} 重复失败 ×{count}（签名：{signature}）"),
             excerpt: truncate_chars(&excerpt, EVIDENCE_EXCERPT_BOUND),
+            occurrences: count,
         })
         .collect();
     repeated.sort_by(|a, b| b.summary.cmp(&a.summary));
@@ -148,6 +157,7 @@ pub fn aggregate_evidence(events: &[SessionEventRecord]) -> EvidenceBundle {
             signal_id: format!("retry_pattern:{tool}:{fingerprint}"),
             summary: format!("工具 {tool} 同参数重复调用 ×{count}（疑似重试）"),
             excerpt: None,
+            occurrences: count,
         })
         .collect();
     retries.sort_by(|a, b| b.summary.cmp(&a.summary));
@@ -160,6 +170,7 @@ pub fn aggregate_evidence(events: &[SessionEventRecord]) -> EvidenceBundle {
             signal_id: format!("oversized_result:{tool}"),
             summary: format!("工具 {tool} 超长结果（≥{OVERSIZED_RESULT_CHARS} 字符）×{count}"),
             excerpt: None,
+            occurrences: count,
         })
         .collect();
     oversized.sort_by(|a, b| b.summary.cmp(&a.summary));
@@ -176,6 +187,7 @@ pub fn aggregate_evidence(events: &[SessionEventRecord]) -> EvidenceBundle {
             signal_id: "run_outcome:aggregate".to_string(),
             summary: format!("run 终态分布：{}", parts.join(", ")),
             excerpt: None,
+            occurrences: 1,
         });
     }
 
