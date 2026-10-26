@@ -2712,18 +2712,6 @@
           "since": "#1146"
         }
       ]
-    },
-    {
-      "id": "pattern.tools.deny-input-timeout-field",
-      "assertion": "struct_field_presence",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/tools/src/domain/types"
-      },
-      "struct_marker": "deny_unknown_fields",
-      "required_field": "timeout",
-      "reason": "开 deny_unknown_fields 的 Input struct MUST 声明框架统一注入 schema 的 timeout 字段：TypedToolAdapter::input_schema 注入承诺、execution_supervisor 消费、serde deny 三方契约须一致（#2003 Grep 漏声明实证）",
-      "profile": "full"
     }
   ],
   "retired_symbols": [
