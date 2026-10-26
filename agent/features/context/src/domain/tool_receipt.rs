@@ -77,16 +77,21 @@ pub struct ToolCallReceiptData {
     pub state: ToolCallState,
 }
 
+/// 调用 id 回退规则单一实现：provider 优先、runtime 兜底。
+/// to_step_receipt 与 resume 修复共用，规则变更只改此处。
+pub(crate) fn effective_call_id(identity: &ToolCallIdentityData) -> &str {
+    identity
+        .provider_call_id
+        .as_deref()
+        .unwrap_or(&identity.runtime_call_id)
+}
+
 impl ToolCallReceiptData {
     pub fn to_step_receipt(&self) -> Option<super::RunStepReceiptData> {
         let ToolCallState::Terminal(terminal) = &self.state else {
             return None;
         };
-        let call_id = self
-            .identity
-            .provider_call_id
-            .as_deref()
-            .unwrap_or(&self.identity.runtime_call_id);
+        let call_id = effective_call_id(&self.identity);
         Some(super::RunStepReceiptData {
             call_id: call_id.to_string(),
             index: self.identity.call_index,

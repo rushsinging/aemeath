@@ -427,17 +427,22 @@ impl SessionHistory {
     }
 
     pub fn step_receipts(&self, run_id: &str, step_id: &str) -> Vec<RunStepReceiptData> {
-        let mut receipts = self
-            .step(run_id, step_id)
-            .map(|step| {
-                step.tool_receipts
+        let Some(step) = self.step(run_id, step_id) else {
+            return Vec::new();
+        };
+        match &step.outcome {
+            // B1：finalize 后只读冻结快照——后台调用迟到推进不再改写已收口视图。
+            Some(outcome) => outcome.receipts.clone(),
+            None => {
+                let mut receipts: Vec<_> = step
+                    .tool_receipts
                     .iter()
                     .filter_map(ToolCallReceiptData::to_step_receipt)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        receipts.sort_by_key(|r| r.index);
-        receipts
+                    .collect();
+                receipts.sort_by_key(|r| r.index);
+                receipts
+            }
+        }
     }
 
     pub fn advance_tool_receipt(

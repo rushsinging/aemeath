@@ -272,11 +272,8 @@ fn restored_tool_input(receipt: &ToolCallReceiptData) -> serde_json::Value {
 }
 
 fn provider_call_id(receipt: &ToolCallReceiptData) -> &str {
-    receipt
-        .identity
-        .provider_call_id
-        .as_deref()
-        .unwrap_or(&receipt.identity.runtime_call_id)
+    // B3：回退规则收敛至 tool_receipt::effective_call_id 单一实现。
+    crate::domain::tool_receipt::effective_call_id(&receipt.identity)
 }
 
 #[cfg(test)]
