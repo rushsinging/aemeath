@@ -13,6 +13,7 @@
 | [03-rsi-daemon.md](03-rsi-daemon.md) | RSI 独立进程：UDS 协议、生命周期、三触发、单步改进循环、harness.rsi.* 配置 |
 | [04-evidence-and-library.md](04-evidence-and-library.md) | 行为对比信号、证据绑定、经验库 corpus、与 memory 反思的职责边界 |
 | [05-component-adoption.md](05-component-adoption.md) | 各组件接入契约与排期、开放决策清单 |
+| [06-prompts.md](06-prompts.md) | **RSI 提示词契约**：改进块 / Compose 全文与设计约束、解析容忍、模型差异、改动验收要求 |
 
 ## 核心决策（已拍板）
 
@@ -23,3 +24,4 @@
 5. **AlwaysOnProse 组件族**：c1 overlay / c2 guardrails / c4 tool_guidance 机制一份（共享 adapter），语义分槽（内容性质、RSI 证据维度、预算记账、Remind 语义各自独立）。
 6. **经验库**：独立 corpus，schema 与 memory 分离；采纳编辑 MUST 绑定行为证据。
 7. **职责边界（2026-10-22 拍板）**：harness daemon 保持单一职责（纯组件治理），reflect NEVER 进入 harness 进程（保持主进程 detached 现状，PreCompact 保留）；执行模式两档——`aemeath rsi run`（一次性）与 `aemeath rsi serve`（后台定时），TaskKind 插拔面保留、当前仅 HarnessRsi。
+8. **提示词即产品**（2026-10-25）：改进块与 Compose 两处 prompt 是 RSI 质量的第一真相源，全文与设计理由见 [06-prompts.md](06-prompts.md)；改动任一 prompt MUST 同步该分片并附真模型 e2e 证据。
