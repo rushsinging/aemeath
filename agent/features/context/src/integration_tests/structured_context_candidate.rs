@@ -8,14 +8,13 @@ use crate::compact::{
     microcompact_exploration, snip_superseded_exploration, ContextReadCandidate, ContextReadRun,
     ContextReadStep, ProtectedRunPolicy,
 };
+use crate::tool_receipt::ToolCallReceiptData;
 use crate::{
     AcceptedInputRecord, CommittedRunSlice, CommittedRunStep, FinalizedOutcomeRecord,
     SessionHistory,
 };
-use crate::{
-    CleanupConfirmation, FinalizeCause, ToolCallIdentityData, ToolCallReceiptData,
-    ToolOutcomeKindData, ToolTerminalReceiptData,
-};
+use crate::{FinalizeCause, ToolCallIdentityData, ToolOutcomeKindData, ToolTerminalReceiptData};
+use tools::CleanupConfirmation;
 
 fn finalized(messages: Vec<Message>) -> FinalizedOutcomeRecord {
     FinalizedOutcomeRecord {
@@ -147,7 +146,7 @@ fn terminal_receipt(
             agent: false,
         },
         input_preview: input.to_string(),
-        state: crate::ToolCallState::Terminal(ToolTerminalReceiptData::new(
+        state: crate::tool_receipt::ToolCallState::Terminal(ToolTerminalReceiptData::new(
             outcome,
             "terminal",
             CleanupConfirmation::NotApplicable,

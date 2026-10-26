@@ -6,8 +6,7 @@ use crate::SessionRepository;
 use crate::{
     AcceptedInputAppendData, AcceptedInputError, CompactRequestData, CompactTrigger,
     ContextAppendData, ContextAppendError, ContextRequestData, FinalizeCause, Language,
-    SessionRevision, SystemPromptSpecData, ToolCallIdentityData, ToolCallState,
-    ToolReceiptMutationData,
+    SessionRevision, ToolCallIdentityData, ToolReceiptMutationData,
 };
 use crate::{
     AcceptedInputRecord, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
@@ -26,6 +25,7 @@ use share::session_types::{
 };
 use task::{PreparedTaskRestoreData, TaskPersist, TaskSnapshotData};
 
+use crate::tool_receipt::ToolCallState;
 use tools::published::skill::{
     SkillLoadDecision, SkillLoadMutation, SkillLoadScope, SkillLoadStateError,
 };
@@ -91,7 +91,7 @@ impl CanonicalSessionWriter for RecordingWriter {
 
 #[derive(Default)]
 struct RecordingToolReceiptWriter {
-    saved: Mutex<Vec<crate::ToolCallReceiptData>>,
+    saved: Mutex<Vec<crate::tool_receipt::ToolCallReceiptData>>,
     fail: bool,
 }
 
@@ -101,7 +101,7 @@ impl crate::ToolReceiptWriter for RecordingToolReceiptWriter {
         &self,
         _session_id: &str,
         _revision: u64,
-        receipt: &crate::ToolCallReceiptData,
+        receipt: &crate::tool_receipt::ToolCallReceiptData,
     ) -> Result<(), String> {
         if self.fail {
             return Err("receipt disk full".to_string());
@@ -363,10 +363,11 @@ fn compact_request(session_id: SessionId) -> ContextRequestData {
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
-        language: Language::new("zh"),
+        language: Language::Zh,
         agent_roles: Default::default(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 1,

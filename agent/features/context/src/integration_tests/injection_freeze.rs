@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use crate::{
     ContextAppendPort, ContextApplicationService, ContextCompactPort, ContextMemorySource,
-    ContextRequestData, ContextWindowPort, MemoryMaterialization, SystemPromptSpecData,
+    ContextRequestData, ContextWindowPort, MemoryMaterialization,
 };
 use async_trait::async_trait;
 use sdk::{RunId, RunStepId};
@@ -48,7 +48,9 @@ impl ContextMemorySource for CountingMemory {
 fn service_with_memory(memory: Arc<CountingMemory>) -> ContextApplicationService {
     ContextApplicationService::new(
         Arc::new(simple_fake_session()),
-        Arc::new(crate::adapters::BaselinePromptSource),
+        Arc::new(crate::adapters::BaselinePromptSource::new(Arc::new(
+            crate::adapters::SystemPromptAssembly::new(None),
+        ))),
         memory,
     )
 }
@@ -99,10 +101,11 @@ async fn a_new_session_injects_again() {
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".into(),
         effective_reasoning: share::reasoning::ReasoningLevel::Off,
-        language: crate::Language::new("en"),
+        language: crate::Language::En,
         agent_roles: std::collections::HashMap::new(),
         config_snapshot: share::config::domain::snapshot::ConfigSnapshot::new(
             share::config::Config::default(),

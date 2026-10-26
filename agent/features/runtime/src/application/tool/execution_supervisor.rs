@@ -1,10 +1,7 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use context::{
-    CleanupConfirmation as ReceiptCleanupConfirmation, ToolCallIdentityData,
-    ToolReceiptMutationData, ToolTerminalReceiptData,
-};
+use context::{ToolCallIdentityData, ToolReceiptMutationData, ToolTerminalReceiptData};
 use share::ids::BackgroundProcessId;
 use tools::published::execution::ToolExecutionOutcome as PublishedToolOutcome;
 use tools::published::execution::{
@@ -555,14 +552,14 @@ fn terminal_receipt(outcome: &PublishedToolOutcome) -> ToolTerminalReceiptData {
         PublishedToolOutcome::TimedOut(details) => ToolTerminalReceiptData::new(
             context::ToolOutcomeKindData::TimedOut,
             details.safe_reason.clone(),
-            receipt_cleanup(details.cleanup),
+            details.cleanup,
         ),
         PublishedToolOutcome::CancellationUnconfirmed(details) => {
             details.possible_side_effects.iter().fold(
                 ToolTerminalReceiptData::new(
                     context::ToolOutcomeKindData::CancellationUnconfirmed,
                     details.safe_reason.clone(),
-                    receipt_cleanup(details.cleanup),
+                    details.cleanup,
                 ),
                 |receipt, effect| receipt.with_possible_side_effect(effect.clone()),
             )
@@ -570,31 +567,23 @@ fn terminal_receipt(outcome: &PublishedToolOutcome) -> ToolTerminalReceiptData {
         PublishedToolOutcome::Cancelled(cancelled) => ToolTerminalReceiptData::new(
             context::ToolOutcomeKindData::Cancelled,
             cancelled.reason.clone(),
-            ReceiptCleanupConfirmation::Confirmed,
+            CleanupConfirmation::Confirmed,
         ),
         PublishedToolOutcome::Success(_) => ToolTerminalReceiptData::new(
             context::ToolOutcomeKindData::Success,
             "tool completed",
-            ReceiptCleanupConfirmation::NotApplicable,
+            CleanupConfirmation::NotApplicable,
         ),
         PublishedToolOutcome::Failure(failure) => ToolTerminalReceiptData::new(
             context::ToolOutcomeKindData::Failure,
             failure.safe_message.clone(),
-            ReceiptCleanupConfirmation::NotApplicable,
+            CleanupConfirmation::NotApplicable,
         ),
         PublishedToolOutcome::Suspended(_) => ToolTerminalReceiptData::new(
             context::ToolOutcomeKindData::Suspended,
             "tool suspended",
-            ReceiptCleanupConfirmation::NotApplicable,
+            CleanupConfirmation::NotApplicable,
         ),
-    }
-}
-
-fn receipt_cleanup(cleanup: CleanupConfirmation) -> ReceiptCleanupConfirmation {
-    match cleanup {
-        CleanupConfirmation::Confirmed => ReceiptCleanupConfirmation::Confirmed,
-        CleanupConfirmation::Unconfirmed => ReceiptCleanupConfirmation::Unconfirmed,
-        CleanupConfirmation::NotApplicable => ReceiptCleanupConfirmation::NotApplicable,
     }
 }
 

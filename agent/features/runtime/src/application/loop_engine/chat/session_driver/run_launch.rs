@@ -54,6 +54,7 @@ where
             let user_context = shell.user_context.clone();
             let system_prompt_text = shell.system_prompt_text.clone();
             let workspace = shell.workspace.clone();
+            let workspace_root = workspace.read().current_workspace_root();
             let wiring = shell.session_switch.clone();
             let tool_result_materializer = shell.tool_result_materializer.clone();
             let agent_runner: Option<Arc<dyn tools::published::agent::AgentRunner>> =
@@ -843,7 +844,8 @@ where
                     crate::application::loop_engine::run_services::ContextRequest {
                         runtime_context: &runtime_context,
                         session_id: &session_id,
-                        system_prompt: &cacheable_system_prompt,
+                        workspace_root: &workspace_root,
+                        workspace_is_git: shell.workspace_is_git,
                         model_id: &runtime_context.provider_ref().model.model,
                         language: &language,
                         agent_roles: std::collections::HashMap::new(),
@@ -1008,7 +1010,8 @@ where
                 let mut manual_compaction = main_run_port::ChatManualCompaction {
                     runtime_context: runtime_context.clone(),
                     session_id: session_id.clone(),
-                    system_prompt: cacheable_system_prompt.clone(),
+                    workspace_root: workspace_root.clone(),
+                    workspace_is_git: shell.workspace_is_git,
                     context_size,
                 };
                 // 手动反思端口：messages 是 idle 受理时冻结的 committed 快照；

@@ -13,7 +13,6 @@ use super::performance::{capture, percentiles_ns};
 use super::service::{render_user_input_timestamp_prefix, ContextApplicationService};
 use crate::domain::{
     ContextAppendData, ContextMessages, ContextRequestData, Language, SessionRevision, SystemBlock,
-    SystemPromptSpecData,
 };
 use crate::ports::{
     ContextCompactPort, ContextMemorySource, ContextPromptSource, ContextWindowPort,
@@ -128,10 +127,11 @@ fn request(last_api_total_tokens: Option<u64>) -> ContextRequestData {
         run_id: RunId::new("baseline-run"),
         step_id: RunStepId::new("baseline-step"),
         pending_messages: vec![Message::user("pending")],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
-        language: Language::new("zh"),
+        language: Language::Zh,
         agent_roles: Default::default(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 128_000,

@@ -2,12 +2,8 @@ use super::{SessionId, ToolOutcomeKindData};
 use serde::{Deserialize, Serialize};
 use share::ids::{RunId, RunStepId};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CleanupConfirmation {
-    Confirmed,
-    Unconfirmed,
-    NotApplicable,
-}
+/// 清理确认状态：与 `tools` 的同名 PL 同一语义，直接复用避免双类型转换。
+pub use tools::CleanupConfirmation;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolCallIdentityData {

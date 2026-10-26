@@ -27,6 +27,7 @@ pub mod error;
 mod error_domain_tests;
 pub mod i18n;
 pub mod ids;
+pub mod instructions;
 
 #[cfg(test)]
 #[path = "ids_tests.rs"]

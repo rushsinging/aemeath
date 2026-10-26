@@ -1,138 +1,44 @@
-//! Prompt 构建辅助函数（从 CLI setup.rs 迁移）。
+//! 会话级系统提示组装入口（#1863 W4）。
+//!
+//! 组装职责归 Context：本函数只负责把会话事实（工作区、模型、语言、配置快照）
+//! 与 Hook 通知端口交给 `context::SystemPromptAssembly`，并把结果返回给组合根
+//! 冻结进 prompt 装配数据。Runtime 不再拼接任何提示段落。
 
-use crate::application::prompt::instructions_hook::PromptInstructionsHook;
-use hook::HookDispatcher;
-use share::config::domain::snapshot::ConfigSnapshot;
-use share::i18n::prompt::sections::{agent_roles_footer, agent_roles_header};
 use std::sync::Arc;
 
+use hook::HookDispatcher;
+use share::config::domain::snapshot::ConfigSnapshot;
+
+use crate::application::prompt::instructions_notifier::HookInstructionsNotifier;
+
+/// 组装会话级静态系统提示。
+///
+/// `workspace_is_git` 由调用方探测后传入——Context 组装提示时不触发子进程。
 pub async fn build_static_prompt(
     cwd: &std::path::Path,
     model: &str,
     reasoning: bool,
     config_file: Option<&ConfigSnapshot>,
     hook_port: &Arc<dyn HookDispatcher>,
-    prompt_parts: crate::application::prompt::build::SystemPromptParts,
+    workspace_is_git: bool,
 ) -> String {
-    let guidance_config = config_file
-        .map(|snap| snap.models().guidance.clone())
-        .unwrap_or_default();
-    let language = config_file.map(|snap| snap.language()).unwrap_or("en");
-    let instructions_hook = PromptInstructionsHook {
-        hooks: hook_port.clone(),
+    let snapshot = match config_file {
+        Some(snapshot) => snapshot.clone(),
+        None => {
+            share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config::default())
+        }
+    };
+    let notifier: Arc<dyn hook::InstructionsLoadedNotifier> = Arc::new(
+        HookInstructionsNotifier::new(Arc::clone(hook_port), cwd.to_path_buf()),
+    );
+    let assembly = context::SystemPromptAssembly::new(Some(notifier));
+    let inputs = context::SessionPromptInputsData {
         workspace_root: cwd.to_path_buf(),
-    };
-    let model_guidance = context::guidance::resolve_guidance_async(
-        model,
-        &guidance_config,
+        workspace_is_git,
+        model_id: model.to_string(),
         reasoning,
-        language,
-        Some(&instructions_hook),
-    )
-    .await;
-
-    let mut prompt = prompt_parts.static_part;
-    append_agent_roles(&mut prompt, config_file, language);
-    if !model_guidance.is_empty() {
-        prompt.push_str("\n\n");
-        prompt.push_str(&model_guidance);
-    }
-    // #252 PR3：后台进程特性说明（仅阈值启用时注入；显式 0 = 禁用后台化
-    // 的会话不注入）。统一模型 / 占位语义 / 查询与停止用法 / sequential 提示。
-    let background_threshold = config_file
-        .map(|snap| snap.tool_background_threshold_secs())
-        .unwrap_or(0);
-    if background_threshold > 0 {
-        prompt.push_str("\n\n");
-        prompt.push_str(background_processes_guidance_section(language));
-    }
-    prompt
-}
-
-/// 后台进程特性 system prompt 段（#252 D6 / 设计 §8，双语）。
-pub(crate) fn background_processes_guidance_section(lang: &str) -> &'static str {
-    match lang {
-        "zh" => {
-            "# 后台进程\n\
-            超过前台等待阈值（当前会话已启用）的 tool call 会自动转后台运行：你会先收到一条占位结果（标注任务已转后台、非终态，并附任务日志文件路径），任务完成会主动通知你并回注结果，届时可继续处理。\n\
-            - 转后台不等于完成：不要重复派发同一任务；先处理其他可并发的工作，或等待完成通知唤醒后继续。\n\
-            - 优先等待完成通知；NEVER 对同一 task_id 忙等轮询 BackgroundProcessStatus。\n\
-            - 确需中途进度时用 BackgroundProcessLogs（task_id + 增量游标，全量字节无截断）或直接读占位里的日志文件路径；不要为「等完成」反复调用 Logs。\n\
-            - BackgroundProcessStatus 仅偶发一次用于确认（例如怀疑通知丢失）；用 BackgroundProcessList 查看列表，用 BackgroundProcessStop 请求停止。\n\
-            - 需要主动短等时可用 BackgroundProcessWatch（强制前台；超时唯一来源为 Tool 框架 300s，内部略提前收口并返回 still_running；NEVER 传 timeout_secs）。NEVER 对同一 task_id 连续狂调 Watch（仍受 fuse）；完成通知与 reminder 不因 Watch 而抑制。\n\
-            - sequential-only 工具的前序调用转后台后，同轮后续命令可能与未完成的前序并行；有顺序依赖时应等待完成通知，不要用 Status 轮询替代。"
-        }
-        _ => {
-            "# Background processes\n\
-            Tool calls that exceed the foreground waiting threshold (enabled in this session) are automatically moved to the background: you first receive a placeholder result (marked as moved to the background, not final, and including the task log file path), and you will be notified when the task completes.\n\
-            - Moved to the background is not completion: do not re-dispatch the same task; work on other concurrent work first, or wait to be woken by the completion notification.\n\
-            - Prefer waiting for the completion notification; NEVER busy-poll BackgroundProcessStatus for the same task_id.\n\
-            - For mid-run progress use BackgroundProcessLogs (task_id + incremental cursor, full bytes without truncation) or read the log file path from the placeholder; do not poll Logs just to wait for completion.\n\
-            - Use BackgroundProcessStatus only occasionally to confirm (e.g. if a notification seems missing); use BackgroundProcessList for the task list and BackgroundProcessStop to request a stop.\n\
-            - For an explicit short wait use BackgroundProcessWatch (forced foreground; sole timeout is the Tool framework 300s, with an earlier internal still_running return; NEVER pass timeout_secs). NEVER spam Watch on the same task_id (still fuse-governed); completion notifications and reminders are not suppressed by Watch.\n\
-            - When a sequential-only predecessor has been moved to the background, later commands in the same round may run concurrently with it; if order matters, wait for the completion notification — do not substitute Status polling."
-        }
-    }
-}
-
-fn append_agent_roles(prompt: &mut String, config_file: Option<&ConfigSnapshot>, lang: &str) {
-    let Some(snap) = config_file else {
-        return;
+        language: snapshot.language().to_string(),
+        config_snapshot: snapshot,
     };
-    let agents = snap.agents();
-    let merged_roles = agents.merged_roles();
-    // 枚举具名实例（names）；描述取实例值，role 描述仅作 fallback。
-    let role_lines: Vec<String> = agents
-        .names
-        .iter()
-        .filter(|(_, instance)| instance.enabled)
-        .map(|(name, instance)| {
-            let description = if instance.description.is_empty() {
-                merged_roles
-                    .get(&instance.role)
-                    .map(|role| role.description.as_str())
-                    .unwrap_or("")
-            } else {
-                instance.description.as_str()
-            };
-            let desc = if description.is_empty() {
-                String::new()
-            } else {
-                format!(": {}", description)
-            };
-            let model_info = if instance.model.is_empty() {
-                String::new()
-            } else {
-                format!(" (model: {})", instance.model)
-            };
-            // R3：标注绑定模型在 config.models 中的可用性，让 LLM 可预判。
-            // 回退口径与 AgentsConfig::resolve_agent 一致：空 instance.model → default_model。
-            let effective_model = if instance.model.trim().is_empty() {
-                agents.default_model.as_str()
-            } else {
-                instance.model.as_str()
-            };
-            let availability = if effective_model.trim().is_empty() {
-                " [no model configured]".to_string()
-            } else if snap.models().find_model(effective_model).is_none() {
-                format!(" [model unavailable: {effective_model}]")
-            } else {
-                String::new()
-            };
-            format!(
-                "- `{}` [{}]{}{}{}",
-                name, instance.role, desc, model_info, availability
-            )
-        })
-        .collect();
-    if role_lines.is_empty() {
-        return;
-    }
-    let footer = agent_roles_footer(lang);
-    let header = agent_roles_header(lang);
-    prompt.push_str(&format!("{}{}{}", header, role_lines.join("\n"), footer));
+    assembly.materialize_session_prompt(&inputs).await
 }
-
-#[cfg(test)]
-#[path = "prompt_build_ext_tests.rs"]
-mod tests;

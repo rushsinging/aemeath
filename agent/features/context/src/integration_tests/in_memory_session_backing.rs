@@ -1,14 +1,15 @@
 use crate::InMemorySessionRepository;
 use crate::SessionRepository;
 use crate::{
-    AcceptedInputAppendData, AcceptedInputError, CleanupConfirmation, ContextAppendData,
-    ContextAppendError, FinalizeCause, SessionRevision, ToolCallIdentityData, ToolOutcomeKindData,
+    AcceptedInputAppendData, AcceptedInputError, ContextAppendData, ContextAppendError,
+    FinalizeCause, SessionRevision, ToolCallIdentityData, ToolOutcomeKindData,
     ToolReceiptMutationData, ToolTerminalReceiptData,
 };
 use sdk::RunId;
 use share::ids::InteractionRequestId;
 use share::ids::{RunStepId, SessionId};
 use share::message::{ContentBlock, Message};
+use tools::CleanupConfirmation;
 
 fn append() -> ContextAppendData {
     ContextAppendData {
@@ -125,7 +126,7 @@ async fn commit_tool_step(
 async fn build_window_applies_l3_to_isolated_subagent_history() {
     use crate::ContextApplicationService;
     use crate::{ContextPromptSource, ContextWindowPort, PromptMaterialization};
-    use crate::{ContextRequestData, Language, SystemPromptSpecData};
+    use crate::{ContextRequestData, Language};
     use share::config::domain::snapshot::ConfigSnapshot;
     use share::config::Config;
     use share::reasoning::ReasoningLevel;
@@ -171,10 +172,11 @@ async fn build_window_applies_l3_to_isolated_subagent_history() {
         run_id: RunId::new("active"),
         step_id: RunStepId::new("active-step"),
         pending_messages: vec![],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
-        language: Language::new("en"),
+        language: Language::En,
         agent_roles: Default::default(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 128_000,

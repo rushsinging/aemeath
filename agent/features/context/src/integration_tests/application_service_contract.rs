@@ -4,14 +4,14 @@ use share::ids::InteractionRequestId;
 use share::ids::{RunStepId, SessionId};
 use std::sync::Arc;
 
+use crate::tool_receipt::ToolCallReceiptData;
 use crate::CommittedMemoryRetrieveAdapter;
 use crate::ContextApplicationService;
-use crate::{
-    CleanupConfirmation, ContextAppendData, ContextMessages, ContextRequestData, FinalizeCause,
-    Language, SessionRevision, SystemPromptSpecData, ToolCallIdentityData, ToolCallReceiptData,
-    ToolOutcomeKindData, ToolTerminalReceiptData,
-};
 use crate::{CommittedRunSlice, CommittedRunStep, FinalizedOutcomeRecord, SessionHistory};
+use crate::{
+    ContextAppendData, ContextMessages, ContextRequestData, FinalizeCause, Language,
+    SessionRevision, ToolCallIdentityData, ToolOutcomeKindData, ToolTerminalReceiptData,
+};
 use crate::{
     ContextAppendPort, ContextMemorySource, ContextPromptSource, ContextWindowPort,
     MemoryMaterialization, PromptMaterialization, ReminderControlPort, SessionItem,
@@ -24,6 +24,7 @@ use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
 use share::message::{ContentBlock, Message};
 use share::reasoning::ReasoningLevel;
+use tools::CleanupConfirmation;
 
 const CHECKPOINT: &str = "## Immutable Constraints\n- review only\n\n## Current Objective\n- inspect resume\n\n## Committed Facts\n- persisted\n\n## Uncommitted Working Set\n- none\n\n## Open Decisions / Risks\n- dynamic state\n\n## Resume Cursor\n- Next action: revalidate once\n\n## Required Revalidation\n- revalidate git\n\n## Archived Milestones\n- baseline\n\n## Continuation Status\nContinue";
 
@@ -109,11 +110,13 @@ fn structured_fake_session() -> FakeSession {
                         agent: false,
                     },
                     input_preview: input.to_string(),
-                    state: crate::ToolCallState::Terminal(ToolTerminalReceiptData::new(
-                        ToolOutcomeKindData::Success,
-                        "terminal",
-                        CleanupConfirmation::NotApplicable,
-                    )),
+                    state: crate::tool_receipt::ToolCallState::Terminal(
+                        ToolTerminalReceiptData::new(
+                            ToolOutcomeKindData::Success,
+                            "terminal",
+                            CleanupConfirmation::NotApplicable,
+                        ),
+                    ),
                 }],
             }
         };
@@ -268,10 +271,11 @@ pub(super) fn request() -> ContextRequestData {
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("pending")],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
-        language: Language::new("zh"),
+        language: Language::Zh,
         agent_roles: Default::default(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 128_000,

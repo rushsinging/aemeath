@@ -288,7 +288,9 @@ impl crate::application::loop_engine::compaction::CompactionObserver for ChatCom
 pub(crate) struct ChatManualCompaction {
     pub runtime_context: RuntimeContext,
     pub session_id: String,
-    pub system_prompt: String,
+    /// 工作区根与 git 事实：Context 组装系统提示所需。
+    pub workspace_root: std::path::PathBuf,
+    pub workspace_is_git: bool,
     pub context_size: usize,
 }
 
@@ -314,7 +316,8 @@ impl crate::application::loop_engine::ManualCompactionPort for ChatManualCompact
             crate::application::loop_engine::context_request::ContextRequestSource {
                 runtime_context: &self.runtime_context,
                 session_id: &self.session_id,
-                system_prompt: &self.system_prompt,
+                workspace_root: &self.workspace_root,
+                workspace_is_git: self.workspace_is_git,
                 model_id: &self.runtime_context.provider_ref().model.model,
                 language: "",
                 agent_roles: Default::default(),

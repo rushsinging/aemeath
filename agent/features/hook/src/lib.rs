@@ -29,5 +29,5 @@ pub use domain::{
 };
 pub use ports::{
     HookCancellationSignal, HookDispatchContextData, HookDispatcher, HookExecutionEventData,
-    HookExecutionObserver, HookExecutionTerminalData,
+    HookExecutionObserver, HookExecutionTerminalData, InstructionsLoadedNotifier,
 };

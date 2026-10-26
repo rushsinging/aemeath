@@ -6,7 +6,7 @@ use crate::ports::{
     CompactOutcome, CompactRequestData, CompactionDecisionData, ContextAppendData,
     ContextAppendError, ContextPortError, ContextRequestData, ContextWindowData, DecisionReason,
     FinalizeCause, InteractionRequestId, Language, SessionId, SessionRevision, StepReceiptData,
-    SystemBlock, SystemPromptSpecData, TokenBudget, ToolOutcomeKindData, Urgency,
+    SystemBlock, TokenBudget, ToolOutcomeKindData, Urgency,
 };
 use async_trait::async_trait;
 use context::compact::{CompactResult, CompactSkipReason, CompactSummaryQuality};
@@ -140,10 +140,11 @@ fn request() -> ContextRequestData {
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("input")],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
-        language: Language::new("zh"),
+        language: Language::Zh,
         agent_roles: HashMap::new(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 128_000,

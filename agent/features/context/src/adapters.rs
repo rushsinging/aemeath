@@ -17,6 +17,10 @@ pub(crate) mod session_legacy_workspace;
 #[cfg(any(test, feature = "dev"))]
 mod session_lifecycle;
 mod skill_prompt_source;
+mod system_prompt;
+#[cfg(test)]
+#[path = "adapters/system_prompt_tests.rs"]
+mod system_prompt_tests;
 mod tool_receipt_ledger;
 
 pub(crate) use atomic_blob_session::AtomicBlobSessionStore;
@@ -45,6 +49,7 @@ pub(crate) use session_lifecycle::capture as capture_session_lifecycle;
 pub(crate) use skill_prompt_source::skill_prompt_budget;
 pub(crate) use skill_prompt_source::SkillPromptSource;
 pub use skill_prompt_source::WorkspaceSkillQueryFactory;
+pub use system_prompt::{SessionPromptInputsData, SystemPromptAssembly};
 
 pub fn wire_isolated_context(session_id: &str) -> crate::ports::ContextPorts {
     let repository = Arc::new(InMemorySessionRepository::new());
@@ -57,7 +62,9 @@ pub fn wire_isolated_context(session_id: &str) -> crate::ports::ContextPorts {
     crate::ports::ContextPorts::from_service(Arc::new(
         crate::application::ContextApplicationService::new(
             repository,
-            Arc::new(BaselinePromptSource),
+            Arc::new(BaselinePromptSource::new(Arc::new(
+                SystemPromptAssembly::new(None),
+            ))),
             Arc::new(NoOpContextMemorySource),
         ),
     ))
@@ -83,7 +90,11 @@ pub(crate) fn wire_isolated_context_with_skill(
     crate::ports::ContextPorts::from_service(Arc::new(
         crate::application::ContextApplicationService::new(
             repository,
-            Arc::new(SkillPromptSource::new(catalog, query_factory)),
+            Arc::new(SkillPromptSource::new(
+                catalog,
+                query_factory,
+                Arc::new(SystemPromptAssembly::new(None)),
+            )),
             Arc::new(NoOpContextMemorySource),
         ),
     ))

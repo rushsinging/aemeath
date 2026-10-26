@@ -34,7 +34,7 @@ fn global_guidance_dir() -> PathBuf {
 pub use constants::{DEFAULT_FILES_EN, DEFAULT_FILES_ZH, DEFAULT_FILE_NAMES};
 #[cfg(test)]
 pub(crate) use resolver::resolve_guidance;
-pub use resolver::resolve_guidance_async;
+pub(crate) use resolver::resolve_guidance_with_sources;
 pub(crate) use share::i18n::prompt::discipline::universal_execution_discipline;
 pub use share::i18n::prompt::discipline::{
     UNIVERSAL_EXECUTION_DISCIPLINE_EN, UNIVERSAL_EXECUTION_DISCIPLINE_ZH,

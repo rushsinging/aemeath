@@ -31,8 +31,7 @@ use crate::application::reflection::{
 use crate::ports::{
     CompactOutcome, CompactRequestData, CompactionDecisionData, ContextPortError,
     ContextRequestData, ContextWindowData, DecisionReason, InteractionRequestId,
-    Language as ContextLanguage, SessionId, SessionRevision, SystemBlock, SystemPromptSpecData,
-    TokenBudget, Urgency,
+    Language as ContextLanguage, SessionId, SessionRevision, SystemBlock, TokenBudget, Urgency,
 };
 use context::compact::{CompactResult, CompactSkipReason, CompactSummaryQuality};
 
@@ -54,10 +53,11 @@ fn frozen_request() -> ContextRequestData {
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("seed")],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".to_string(),
         effective_reasoning: share::reasoning::ReasoningLevel::Off,
-        language: ContextLanguage::new("en"),
+        language: ContextLanguage::En,
         agent_roles: HashMap::new(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 128_000,

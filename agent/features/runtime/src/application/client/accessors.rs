@@ -157,6 +157,8 @@ pub struct SessionRuntime {
     pub initial_git_context: String,
     pub user_context: String,
     pub prompt_model_id: String,
+    /// 工作区是否为 git 仓库：Context 组装系统提示的输入事实。
+    pub workspace_is_git: bool,
 
     // ── Skills ──
     pub skill_catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
@@ -224,6 +226,7 @@ impl SessionRuntime {
         initial_git_context: String,
         user_context: String,
         prompt_model_id: String,
+        workspace_is_git: bool,
         skill_catalog: Arc<dyn tools::published::skill::SkillCatalogPort>,
         initial_skill_snapshot: tools::published::skill::SkillCatalogSnapshot,
         skill_refresh: crate::application::client::SkillCatalogRefresh,
@@ -270,6 +273,7 @@ impl SessionRuntime {
             initial_git_context,
             user_context,
             prompt_model_id,
+            workspace_is_git,
             skill_catalog,
             initial_skill_snapshot,
             skill_refresh,

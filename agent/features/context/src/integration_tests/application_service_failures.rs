@@ -3,9 +3,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::ContextApplicationService;
-use crate::{
-    ContextAppendData, ContextRequestData, Language, SessionRevision, SystemPromptSpecData,
-};
+use crate::{ContextAppendData, ContextRequestData, Language, SessionRevision};
 use crate::{
     ContextMemorySource, ContextPromptSource, MemoryMaterialization, PromptMaterialization,
     SessionItem, SessionRepository,
@@ -82,10 +80,11 @@ fn request() -> ContextRequestData {
         run_id: RunId::new("run"),
         step_id: share::ids::RunStepId::new("step"),
         pending_messages: vec![],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
-        language: Language::new("zh"),
+        language: Language::Zh,
         agent_roles: Default::default(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 128_000,

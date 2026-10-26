@@ -7,9 +7,7 @@ use share::config::Config;
 use share::message::Message;
 use share::reasoning::ReasoningLevel;
 
-use super::{
-    context_decision, ContextRequestData, DecisionReason, Language, SessionId, SystemPromptSpecData,
-};
+use super::{context_decision, ContextRequestData, DecisionReason, Language, SessionId};
 
 fn request(last_api_total_tokens: Option<u64>) -> ContextRequestData {
     ContextRequestData {
@@ -18,10 +16,11 @@ fn request(last_api_total_tokens: Option<u64>) -> ContextRequestData {
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("pending")],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
-        language: Language::new("zh"),
+        language: Language::Zh,
         agent_roles: HashMap::new(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 2_000,

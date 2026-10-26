@@ -141,3 +141,9 @@ pub trait HookDispatcher: Send + Sync {
         self.dispatch(invocation, cancellation).await
     }
 }
+
+/// 指令文件加载通知端口（#1863 W4）。
+///
+/// 契约实体定义在 `share::instructions`（Context 需触发而不得依赖 Hook crate）；
+/// 此处重导出使 Hook BC 仍以自己的端口名对外。
+pub use share::instructions::InstructionsLoadedNotifier;

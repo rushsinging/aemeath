@@ -509,7 +509,13 @@ async fn runtime_session_id_matches_wiring_committed_session() {
         runtime::composition::wire_sdk_chat_ingress(),
         initial_provider,
         runtime::SessionBootstrapAssemblyData::new(root.clone(), 8192, true, false, None),
-        runtime::PromptAssemblyData::new(String::new(), String::new(), String::new(), "test-model"),
+        runtime::PromptAssemblyData {
+            system_prompt_text: String::new(),
+            initial_git_context: String::new(),
+            user_context: String::new(),
+            model_id: "test-model".to_string(),
+            workspace_is_git: false,
+        },
         runtime::SkillBootstrapAssemblyData::new(
             tools::composition::wire_skills().catalog(),
             workspace.clone(),

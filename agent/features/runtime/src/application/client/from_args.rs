@@ -139,28 +139,12 @@ impl SkillBootstrapAssemblyData {
 }
 
 pub struct PromptAssemblyData {
-    /// Composition 拼好的整段静态 system prompt（#1861 v4：块级
-    /// 原块级 system 数据类型消除，拼接职责归组合根）。
+    /// Context 组装的静态系统提示；`workspace_is_git` 为组装输入事实。
     pub system_prompt_text: String,
     pub initial_git_context: String,
     pub user_context: String,
     pub model_id: String,
-}
-
-impl PromptAssemblyData {
-    pub fn new(
-        system_prompt_text: String,
-        initial_git_context: String,
-        user_context: String,
-        model_id: impl Into<String>,
-    ) -> Self {
-        Self {
-            system_prompt_text,
-            initial_git_context,
-            user_context,
-            model_id: model_id.into(),
-        }
-    }
+    pub workspace_is_git: bool,
 }
 
 pub struct InitialProviderAssemblyData {
@@ -439,6 +423,7 @@ pub async fn wire_agent_client_from_args(
         initial_git_context,
         user_context,
         model_id,
+        workspace_is_git,
     } = prompt;
 
     // 19. Concurrency
@@ -475,6 +460,7 @@ pub async fn wire_agent_client_from_args(
         initial_git_context,
         user_context,
         model_id,
+        workspace_is_git,
         skill_catalog,
         initial_skill_snapshot,
         skill_refresh,

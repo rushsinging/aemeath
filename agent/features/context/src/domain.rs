@@ -31,9 +31,8 @@ pub use token_budget::{
 };
 
 pub use tool_receipt::{
-    CleanupConfirmation, ToolCallIdentityData, ToolCallReceiptData, ToolCallState,
-    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
-    ToolTerminalReceiptData,
+    ToolCallIdentityData, ToolCallReceiptData, ToolCallState, ToolReceiptMutationData,
+    ToolReceiptMutationError, ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
 };
 
 use serde::ser::SerializeSeq;
@@ -49,31 +48,47 @@ pub use share::ids::{RunId, RunStepId, SessionId};
 pub use share::message::Message as ContextMessage;
 use share::reasoning::ReasoningLevel;
 
-macro_rules! string_value_object {
-    ($name:ident) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-        pub struct $name(String);
-
-        impl $name {
-            pub fn new(value: impl Into<String>) -> Self {
-                Self(value.into())
-            }
-
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-        }
-
-        impl std::fmt::Display for $name {
-            fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                formatter.write_str(&self.0)
-            }
-        }
-    };
+/// 界面语言：决定 guidance 文件从 `{language}/` 子目录优先加载。
+///
+/// 取值域封闭为已知语言；配置层仍存 `String`，在 `from_config` 边界归一化，
+/// 未知值降级 `En` 并记 warn，保证新配置项不会因拼写错误中断会话启动。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Language {
+    #[default]
+    En,
+    Zh,
 }
 
-string_value_object!(Language);
-string_value_object!(SystemPromptSpecData);
+impl Language {
+    /// 从配置字符串归一化；未知语言降级 `En`。
+    pub fn from_config(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "zh" | "zh-cn" | "zh-hans" => Self::Zh,
+            "en" | "en-us" | "" => Self::En,
+            other => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "[context] unknown language={other:?} action=fallback_en"
+                );
+                Self::En
+            }
+        }
+    }
+
+    /// 线上/磁盘表示：guidance 子目录名。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::En => "en",
+            Self::Zh => "zh",
+        }
+    }
+}
+
+impl std::fmt::Display for Language {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ContentFingerprint(String);
 
@@ -231,7 +246,11 @@ pub struct ContextRequestData {
     pub run_id: RunId,
     pub step_id: RunStepId,
     pub pending_messages: Vec<ContextMessage>,
-    pub system_prompt: SystemPromptSpecData,
+    /// 工作区根：系统提示里的 `{cwd_str}` 与该会话的相对路径解析基。
+    pub workspace_root: std::path::PathBuf,
+    /// 工作区是否为 git 仓库：由 Runtime 在构造请求时探测并携带，
+    /// 使 Context 组装静态提示时无需再起子进程。
+    pub workspace_is_git: bool,
     pub model_id: String,
     pub effective_reasoning: ReasoningLevel,
     pub language: Language,
@@ -831,3 +850,6 @@ pub enum ContextPortError {
 #[cfg(test)]
 #[path = "domain/context_fingerprint_tests.rs"]
 mod context_fingerprint_tests;
+
+#[cfg(test)]
+mod language_tests;

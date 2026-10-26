@@ -261,6 +261,8 @@ pub struct MainContextFactory {
     /// 可选注入的 Skill metadata catalog 与 Context-owned query factory。
     skill_catalog: Option<Arc<dyn tools::published::skill::SkillCatalogPort>>,
     query_factory: Option<Arc<dyn crate::ports::SkillQueryFactory>>,
+    /// Hook BC 注入的指令加载通知端口：Context 组装系统提示时触发。
+    instructions_loaded: Option<Arc<dyn share::instructions::InstructionsLoadedNotifier>>,
 }
 
 impl MainContextFactory {
@@ -273,7 +275,27 @@ impl MainContextFactory {
             tool_receipt_writer: Arc::new(NoOpToolReceiptWriter),
             skill_catalog: None,
             query_factory: None,
+            instructions_loaded: None,
         }
+    }
+
+    /// 注入原子 blob 存储：内部装配 accepted-input / tool-receipt 两个 writer。
+    ///
+    /// 具体 writer 类型是实现细节，不进入 crate 公开面。
+    pub fn with_atomic_blob_storage(mut self, blob: Arc<dyn storage::AtomicBlobPort>) -> Self {
+        self.accepted_input_writer =
+            Arc::new(AtomicBlobAcceptedInputWriter::new(Arc::clone(&blob)));
+        self.tool_receipt_writer = Arc::new(AtomicBlobToolReceiptWriter::new(blob));
+        self
+    }
+
+    /// 注入指令加载通知端口（hook 域定义，Runtime 装配实现）。
+    pub fn with_instructions_loaded(
+        mut self,
+        notifier: Arc<dyn share::instructions::InstructionsLoadedNotifier>,
+    ) -> Self {
+        self.instructions_loaded = Some(notifier);
+        self
     }
 
     pub fn with_accepted_input_writer(mut self, writer: Arc<dyn AcceptedInputWriter>) -> Self {
@@ -324,15 +346,19 @@ impl MainContextFactory {
             .workspace_persist
             .clone()
             .expect("factory workspace persistence must be injected via with_persistence");
+        let assembly = Arc::new(crate::adapters::SystemPromptAssembly::new(
+            self.instructions_loaded.clone(),
+        ));
         let prompt: Arc<dyn crate::ports::ContextPromptSource> =
             match (&self.skill_catalog, &self.query_factory) {
                 (Some(catalog), Some(factory)) => {
                     Arc::new(crate::adapters::SkillPromptSource::new(
                         Arc::clone(catalog),
                         Arc::clone(factory),
+                        Arc::clone(&assembly),
                     ))
                 }
-                _ => Arc::new(crate::adapters::BaselinePromptSource),
+                _ => Arc::new(crate::adapters::BaselinePromptSource::new(assembly)),
             };
         let mut repository = CanonicalSessionRepository::new(
             session,

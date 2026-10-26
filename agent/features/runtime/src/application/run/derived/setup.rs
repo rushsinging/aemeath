@@ -527,6 +527,11 @@ impl AgentRunner for CliAgentRunner {
             let runtime_context = derived.instance.context().clone();
             let tool_execution_context = agent.ctx.clone();
             let workspace_read = agent.ctx.workspace_read();
+            // 派生 Run 与父会话共享工作区事实：Context 组装系统提示的输入。
+            let workspace_root = workspace_read.current_workspace_root();
+            // 派生 Run 占比低，直接探测一次即可；主 Run 由装配期事实注入。
+            let workspace_is_git =
+                crate::application::prompt::build::git_context::is_git_repo(&workspace_root).await;
             let turn_context = crate::application::loop_engine::chat::RuntimeRunContext::new(
                 sdk::ChatId::from_legacy_or_new(&session_id),
                 sdk::ChatRunId::new_v7(),
@@ -583,7 +588,8 @@ impl AgentRunner for CliAgentRunner {
                     crate::application::loop_engine::run_services::ContextRequest {
                         runtime_context: &runtime_context,
                         session_id: &session_id,
-                        system_prompt: &system,
+                        workspace_root: &workspace_root,
+                        workspace_is_git,
                         model_id: &model_name,
                         language: &language,
                         agent_roles,
@@ -645,7 +651,7 @@ impl AgentRunner for CliAgentRunner {
                 role_name: agent_name_for_log,
                 model_name: model_name.clone(),
                 runtime_context: runtime_context.clone(),
-                workspace_root,
+                workspace_root: workspace_root.clone(),
                 session_id: session_id.clone(),
                 prompt: prompt.to_string(),
                 system: system.clone(),

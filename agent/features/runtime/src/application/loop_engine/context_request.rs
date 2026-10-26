@@ -4,15 +4,15 @@ use share::message::Message;
 
 use crate::application::run::config::RunConfigSnapshot;
 use crate::application::run::context::RuntimeContext;
-use crate::ports::{
-    ContextRequestData, InteractionRequestId, Language, RunStepId, SessionId, SystemPromptSpecData,
-};
+use crate::ports::{ContextRequestData, InteractionRequestId, Language, RunStepId, SessionId};
 
 /// Frozen values required to build one Step's Context request.
 pub(crate) struct ContextRequestSource<'a> {
     pub runtime_context: &'a RuntimeContext,
     pub session_id: &'a str,
-    pub system_prompt: &'a str,
+    /// 工作区根与 git 事实：Context 组装系统提示所需，Runtime 启动时探测一次。
+    pub workspace_root: &'a std::path::Path,
+    pub workspace_is_git: bool,
     pub model_id: &'a str,
     pub language: &'a str,
     pub agent_roles: HashMap<String, share::config::AgentRoleDefinition>,
@@ -50,7 +50,8 @@ impl<'a> ContextRequestCoordinator<'a> {
             run_id: run_id.clone(),
             step_id: step_id.clone(),
             pending_messages,
-            system_prompt: SystemPromptSpecData::new(self.source.system_prompt),
+            workspace_root: self.source.workspace_root.to_path_buf(),
+            workspace_is_git: self.source.workspace_is_git,
             model_id: self.source.model_id.to_string(),
             effective_reasoning: *self
                 .source
@@ -58,7 +59,7 @@ impl<'a> ContextRequestCoordinator<'a> {
                 .reasoning_ref()
                 .lock()
                 .unwrap_or_else(|error| error.into_inner()),
-            language: Language::new(self.source.language),
+            language: Language::from_config(self.source.language),
             agent_roles: self.source.agent_roles.clone(),
             config_snapshot: self.source.config.config().clone(),
             context_size: self.source.context_size,

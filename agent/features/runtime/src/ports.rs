@@ -28,7 +28,7 @@ pub use context_port::{
     AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
     CompactOutcome, CompactRequestData, CompactTrigger, ContextAppendData, ContextAppendError,
     ContextPortError, ContextRequestData, ContextWindowData, FinalizeCause, Language,
-    SessionRevision, StepReceiptData, SystemPromptSpecData,
+    SessionRevision, StepReceiptData,
 };
 #[cfg(test)]
 pub use context_port::{

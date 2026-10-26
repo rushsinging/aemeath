@@ -125,7 +125,7 @@ impl context::ContextAppendPort for RecordingContextPort {
             .expect("receipt 状态记录锁")
             .push(format!("{:?}", mutation.next));
         Ok(ToolReceiptMutationReceiptData {
-            receipt: context::ToolCallReceiptData {
+            receipt: context::tool_receipt::ToolCallReceiptData {
                 identity: mutation.identity,
                 input_preview: mutation.input_preview.unwrap_or_default(),
                 state: mutation.next,

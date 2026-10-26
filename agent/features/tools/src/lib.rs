@@ -16,6 +16,7 @@ pub mod published;
 pub use domain::types;
 
 // Published language: shared-kernel tool types, DTOs, and ports.
+pub use domain::published_language::CleanupConfirmation;
 pub use domain::tool_definition::ToolDefinition;
 pub use domain::{
     AuthorizationContext, BackgroundProcessAccess, BackgroundProcessAccessSource,

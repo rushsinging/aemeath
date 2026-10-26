@@ -2,8 +2,7 @@ use super::execution_state::RunExecutionState;
 use crate::application::loop_engine::PendingInteractionWork;
 use crate::ports::{
     CompactionDecisionData, ContextRequestData, ContextWindowData, DecisionReason,
-    InteractionRequestId, Language, SessionId, SessionRevision, SystemPromptSpecData, TokenBudget,
-    Urgency,
+    InteractionRequestId, Language, SessionId, SessionRevision, TokenBudget, Urgency,
 };
 use sdk::{RunId, RunStepId};
 use share::reasoning::ReasoningLevel;
@@ -20,10 +19,11 @@ fn context_request(step_id: &str) -> ContextRequestData {
         run_id: RunId::new("run"),
         step_id: RunStepId::new(step_id),
         pending_messages: vec![],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
-        language: Language::new("zh"),
+        language: Language::Zh,
         agent_roles: HashMap::new(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 128_000,

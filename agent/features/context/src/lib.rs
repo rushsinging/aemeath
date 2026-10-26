@@ -59,8 +59,8 @@ pub(crate) use adapters::{
     LegacySessionDecoder, NoOpContextMemorySource, SkillPromptSource, ToolReceiptWriter,
 };
 pub use adapters::{
-    AtomicBlobAcceptedInputWriter, AtomicBlobToolReceiptWriter, DatasetCanonicalSessionWriter,
-    DatasetSessionManagement, WorkspaceSkillQueryFactory,
+    DatasetCanonicalSessionWriter, DatasetSessionManagement, SessionPromptInputsData,
+    SystemPromptAssembly, WorkspaceSkillQueryFactory,
 };
 #[cfg(test)]
 pub(crate) use application::ContextApplicationService;
@@ -82,12 +82,11 @@ pub use domain::{
 };
 pub use domain::{
     AppendReceiptData, BackgroundProcessCompletionStatus, BackgroundProcessReminderItemData,
-    CleanupConfirmation, CompactOutcome, CompactRequestData, CompactTrigger,
-    CompactionDecisionData, ContextAppendError, ContextPortError, ContextRequestData,
-    ContextWindowData, DecisionReason, FinalizeCause, InvocationReminderData, Language,
-    MemoryRecallEntryData, StepReceiptData, SystemPromptSpecData, TaskProgressReminderData,
-    TaskProgressReminderItemData, TaskProgressStatus, ToolCallIdentityData, ToolCallReceiptData,
-    ToolCallState, ToolOutcomeKindData, ToolReceiptMutationData, ToolReceiptMutationError,
+    CompactOutcome, CompactRequestData, CompactTrigger, CompactionDecisionData, ContextAppendError,
+    ContextPortError, ContextRequestData, ContextWindowData, DecisionReason, FinalizeCause,
+    InvocationReminderData, Language, MemoryRecallEntryData, StepReceiptData,
+    TaskProgressReminderData, TaskProgressReminderItemData, TaskProgressStatus,
+    ToolCallIdentityData, ToolOutcomeKindData, ToolReceiptMutationData, ToolReceiptMutationError,
     ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
 };
 pub use ports::{
@@ -113,12 +112,17 @@ pub mod context_port {
         CompactOutcome, CompactRequestData, CompactTrigger, CompactionDecisionData,
         ContextAppendData, ContextAppendError, ContextPortError, ContextRequestData,
         ContextWindowData, DecisionReason, FinalizeCause, Language, SessionRevision,
-        StepReceiptData, SystemBlock, SystemPromptSpecData, TokenBudget, ToolOutcomeKindData,
-        Urgency,
+        StepReceiptData, SystemBlock, TokenBudget, ToolOutcomeKindData, Urgency,
     };
     pub use crate::ports::{
         ContextAppendPort, ContextCompactPort, ContextPorts, ContextWindowPort, ReminderControlPort,
     };
+}
+
+pub mod tool_receipt {
+    //! 工具回执的持久化细节类型：Context 内部账本与 Runtime 测试替身消费，
+    //! 不属于跨 BC 稳定契约。
+    pub use crate::domain::tool_receipt::{ToolCallReceiptData, ToolCallState};
 }
 
 pub mod compact {
@@ -141,9 +145,7 @@ pub mod compact {
 }
 
 pub mod guidance {
-    pub use crate::adapters::prompt::{
-        assess_guidance, init_guidance_dir, resolve_guidance_async, InstructionsLoadedHook,
-    };
+    pub use crate::adapters::prompt::{assess_guidance, init_guidance_dir};
     #[cfg(test)]
     pub(crate) use crate::adapters::prompt::{resolve_guidance, universal_execution_discipline};
 }

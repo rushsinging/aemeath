@@ -95,7 +95,13 @@ impl tools::published::agent::AgentRunner for NoopAgentRunner {
 }
 
 fn test_prompt_assembly() -> runtime::PromptAssemblyData {
-    runtime::PromptAssemblyData::new(String::new(), String::new(), String::new(), "test-model")
+    runtime::PromptAssemblyData {
+        system_prompt_text: String::new(),
+        initial_git_context: String::new(),
+        user_context: String::new(),
+        model_id: "test-model".to_string(),
+        workspace_is_git: false,
+    }
 }
 
 fn test_session_bootstrap_assembly(

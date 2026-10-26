@@ -60,7 +60,7 @@ async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
         call_index: 0,
         agent: false,
     };
-    let receipt = crate::ToolCallReceiptData::pending(identity, "safe preview");
+    let receipt = crate::tool_receipt::ToolCallReceiptData::pending(identity, "safe preview");
     writer
         .save_tool_receipt(session_id.as_str(), 1, &receipt)
         .await

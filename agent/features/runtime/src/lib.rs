@@ -49,7 +49,9 @@ pub use application::client::{
 pub use application::compact_generator::CompactLlmBindingFactory;
 // #1248: RuntimeContextFactory is the narrow crate-root construction entry.
 // RuntimeServices stays internal; callers construct via RuntimeContextFactory::new(…).
+pub use application::prompt::build::git_context::is_git_repo as workspace_is_git;
 pub use application::prompt::build::{build_system_prompt_parts, PromptContextData};
+pub use application::prompt::instructions_notifier::HookInstructionsNotifier;
 pub use application::prompt::prompt_build_ext::build_static_prompt;
 pub use application::reflection::{
     CompleteReflectionResult, ReflectionTaskAdapter, ReflectionTaskCompletionStatus,
