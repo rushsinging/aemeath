@@ -54,9 +54,10 @@ fn map_unavailable_kind(kind: UnavailableKind) -> DaemonErrorKind {
     match kind {
         UnavailableKind::Timeout => DaemonErrorKind::Timeout,
         UnavailableKind::Schema => DaemonErrorKind::Protocol,
-        UnavailableKind::Disabled | UnavailableKind::Connect | UnavailableKind::Server => {
-            DaemonErrorKind::Unavailable
-        }
+        UnavailableKind::Disabled
+        | UnavailableKind::Connect
+        | UnavailableKind::Server
+        | UnavailableKind::Client => DaemonErrorKind::Unavailable,
     }
 }
 

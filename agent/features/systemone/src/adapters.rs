@@ -1,4 +1,5 @@
 pub mod audited;
+pub mod bailian_client;
 pub mod calibrated;
 pub mod calibration_store;
 pub mod daemon_client;

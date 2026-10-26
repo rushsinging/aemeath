@@ -644,6 +644,23 @@ pub struct ScoringConfigPatch {
     pub connect_timeout_secs: Option<u64>,
     #[serde(default, alias = "inferTimeoutSecs")]
     pub infer_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub backend: Option<super::scoring::ScoringBackend>,
+    #[serde(default)]
+    pub bailian: Option<BailianScoringConfigPatch>,
+}
+
+/// `BailianScoringConfig` 的分层合并 patch：仅覆盖显式设置的字段。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct BailianScoringConfigPatch {
+    #[serde(default, alias = "apiKey")]
+    pub api_key: Option<String>,
+    #[serde(default, alias = "baseUrl")]
+    pub base_url: Option<String>,
+    #[serde(default, alias = "fullUrl")]
+    pub full_url: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 pub(crate) fn apply_tools_patch(mut base: ToolsConfig, patch: ToolsConfigPatch) -> ToolsConfig {
@@ -698,6 +715,24 @@ pub(crate) fn apply_scoring_patch(
     }
     if let Some(v) = patch.infer_timeout_secs {
         base.infer_timeout_secs = v;
+    }
+    if let Some(v) = patch.backend {
+        base.backend = v;
+    }
+    if let Some(bailian_patch) = patch.bailian {
+        let bailian = &mut base.bailian;
+        if let Some(v) = bailian_patch.api_key {
+            bailian.api_key = Some(v);
+        }
+        if let Some(v) = bailian_patch.base_url {
+            bailian.base_url = Some(v);
+        }
+        if let Some(v) = bailian_patch.full_url {
+            bailian.full_url = Some(v);
+        }
+        if let Some(v) = bailian_patch.model {
+            bailian.model = v;
+        }
     }
     base
 }

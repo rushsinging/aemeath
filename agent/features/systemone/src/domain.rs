@@ -1,3 +1,4 @@
+pub mod bailian_wire;
 pub mod daemon_protocol;
 pub mod error;
 pub mod event;

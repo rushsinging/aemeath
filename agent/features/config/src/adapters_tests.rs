@@ -101,6 +101,57 @@ fn env_adapter_ignores_retired_scoring_http_envs() {
 }
 
 #[test]
+fn env_adapter_maps_scoring_backend_env_into_patch() {
+    let source = FakeEnv(HashMap::from([(
+        "AEMEATH_SCORING_BACKEND".into(),
+        "bailian".into(),
+    )]));
+    let patch = EnvAdapter::read(&source);
+    let scoring = patch.scoring.expect("backend env 应产出 patch");
+    assert_eq!(
+        scoring.backend,
+        Some(share::config::domain::scoring::ScoringBackend::Bailian)
+    );
+
+    // 非法 backend 值：忽略该字段（宽松解析），不得 panic；忽略后无其它
+    // 字段时不得产出空 patch。
+    let invalid = FakeEnv(HashMap::from([(
+        "AEMEATH_SCORING_BACKEND".into(),
+        "ark".into(),
+    )]));
+    let patch = EnvAdapter::read(&invalid);
+    assert!(
+        patch.scoring.is_none(),
+        "非法 backend 值被忽略后不得产出空 patch"
+    );
+}
+
+#[test]
+fn env_adapter_maps_bailian_connection_envs_into_patch() {
+    let source = FakeEnv(HashMap::from([
+        ("AEMEATH_SCORING_BAILIAN_API_KEY".into(), "sk-env".into()),
+        (
+            "AEMEATH_SCORING_BAILIAN_BASE_URL".into(),
+            "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1".into(),
+        ),
+        (
+            "AEMEATH_SCORING_BAILIAN_MODEL".into(),
+            "decision-model-preview".into(),
+        ),
+    ]));
+    let patch = EnvAdapter::read(&source);
+    let scoring = patch.scoring.expect("bailian env 应产出 patch");
+    let bailian = scoring.bailian.expect("bailian 子 patch 应存在");
+    assert_eq!(bailian.api_key.as_deref(), Some("sk-env"));
+    assert_eq!(
+        bailian.base_url.as_deref(),
+        Some("https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1")
+    );
+    assert_eq!(bailian.model.as_deref(), Some("decision-model-preview"));
+    assert_eq!(bailian.full_url, None, "未设置的 env 字段不得伪造");
+}
+
+#[test]
 fn env_adapter_ignores_invalid_scoring_envs() {
     let source = FakeEnv(HashMap::from([
         ("AEMEATH_SCORING_MEMORY_RERANK".into(), "maybe".into()),

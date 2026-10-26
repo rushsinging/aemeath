@@ -216,7 +216,7 @@ async fn wrap_calibrated_audited_appends_scoring_event_with_manifest_revision() 
     let manifest = fixture_manifest();
     let port = wrap_calibrated_audited(
         Arc::new(StubScoringPort),
-        &manifest,
+        &manifest.engine_revision,
         &scoring_dir,
         "memory_rerank",
         share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
@@ -310,7 +310,7 @@ async fn wrap_calibrated_audited_emits_for_all_four_scenarios_including_unavaila
         let port = if *expect_ok {
             wrap_calibrated_audited(
                 Arc::new(OkPort),
-                &manifest,
+                &manifest.engine_revision,
                 &scoring_dir,
                 scenario,
                 share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,
@@ -319,7 +319,7 @@ async fn wrap_calibrated_audited_emits_for_all_four_scenarios_including_unavaila
         } else {
             wrap_calibrated_audited(
                 Arc::new(UnavailablePort),
-                &manifest,
+                &manifest.engine_revision,
                 &scoring_dir,
                 scenario,
                 share::config::scoring::DEFAULT_EVENT_RETENTION_DAYS,

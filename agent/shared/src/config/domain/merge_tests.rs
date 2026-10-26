@@ -1,4 +1,5 @@
 use super::*;
+use crate::config::domain::scoring::ScoringBackend;
 use crate::config::domain::snapshot::ConfigSnapshot;
 use crate::config::ui::MarkdownSpacingMode;
 
@@ -57,6 +58,8 @@ fn scoring_patch_overrides_only_set_fields_and_reaches_snapshot() {
     assert_eq!(
         keys,
         [
+            "backend",
+            "bailian",
             "connect_timeout_secs",
             "enabled",
             "event_retention_days",
@@ -67,7 +70,58 @@ fn scoring_patch_overrides_only_set_fields_and_reaches_snapshot() {
             "skill_match",
             "socket_path",
         ],
-        "合并结果不得出现退役 HTTP 字段",
+        "合并结果不得出现退役 HTTP 顶层字段；backend 驱动配置正常出现在合并面",
+    );
+}
+
+// ── backend 驱动 patch（#2095：bailian 云端 backend）──
+
+#[test]
+fn scoring_backend_patch_overrides_lower_layer() {
+    let global: ConfigPatch =
+        serde_json::from_str(r#"{"scoring":{"backend":"bailian"}}"#).expect("低层解析");
+    let env_layer = ConfigPatch {
+        scoring: Some(ScoringConfigPatch {
+            backend: Some(ScoringBackend::Local),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let config = apply_patch(apply_patch(Config::default(), global), env_layer);
+    assert_eq!(
+        ConfigSnapshot::new(config).scoring().backend,
+        ScoringBackend::Local,
+        "高层 env 应覆盖低层文件配置"
+    );
+}
+
+#[test]
+fn scoring_bailian_patch_overrides_set_fields_only() {
+    let global: ConfigPatch = serde_json::from_str(
+        r#"{"scoring":{"bailian":{"api_key":"sk-low","base_url":"https://low.example.com/v1"}}}"#,
+    )
+    .expect("低层解析");
+    let env_layer = ConfigPatch {
+        scoring: Some(ScoringConfigPatch {
+            bailian: Some(BailianScoringConfigPatch {
+                api_key: Some("sk-high".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let scoring = ConfigSnapshot::new(apply_patch(
+        apply_patch(Config::default(), global),
+        env_layer,
+    ))
+    .scoring()
+    .clone();
+    assert_eq!(scoring.bailian.api_key.as_deref(), Some("sk-high"));
+    assert_eq!(
+        scoring.bailian.base_url.as_deref(),
+        Some("https://low.example.com/v1"),
+        "未设置的字段保留低层值"
     );
 }
 
