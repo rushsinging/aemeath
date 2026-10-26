@@ -27,6 +27,8 @@ pub struct HarnessRsiCycleTask {
     recorder: Option<std::sync::Arc<crate::domain::events::RsiEventRecorder>>,
     /// 组件版本快照库（#2074：采纳前备份，回滚依据）。
     version_store: Option<std::sync::Arc<crate::domain::versioning::ComponentVersionStore>>,
+    /// 跨周期信号累计文件（#2092 强度门禁的持久状态）。
+    history_path: std::path::PathBuf,
 }
 
 impl HarnessRsiCycleTask {
@@ -45,7 +47,14 @@ impl HarnessRsiCycleTask {
             dry_run: false,
             recorder: None,
             version_store: None,
+            history_path: std::path::PathBuf::new(),
         }
+    }
+
+    /// 注入跨周期信号累计文件路径（#2092）。
+    pub fn with_history_path(mut self, path: impl Into<std::path::PathBuf>) -> Self {
+        self.history_path = path.into();
+        self
     }
 
     /// 注入组件版本快照库（#2074）。
@@ -160,6 +169,32 @@ impl RsiTask for HarnessRsiCycleTask {
                 .verify_pending(&current_signals, has_new_evidence, now_secs)
                 .unwrap_or_default()
         };
+        // #2092 lesson review：过期清理（长期未被引用的 Active lesson 退役）
+        if !self.dry_run {
+            let current_cycle_index = now_secs;
+            let review = crate::domain::strength::review_lessons(
+                &self.lesson_store.load_all().unwrap_or_default(),
+                current_cycle_index,
+                crate::constants::LESSON_STALE_AFTER_SECS,
+                &current_signals,
+            );
+            for outcome in &review {
+                if let Some(recorder) = &self.recorder {
+                    recorder.record(&crate::domain::events::RsiCycleEvent::LessonReviewed {
+                        lesson_id: outcome.lesson_id.clone(),
+                        action: "retire_stale".to_string(),
+                        rationale: outcome.rationale.clone(),
+                    });
+                }
+                if let Err(error) = self.lesson_store.retire(&outcome.lesson_id) {
+                    log::warn!(target: crate::LOG_TARGET, "过期 lesson 退役失败：{error}");
+                }
+                report_lines.push(format!(
+                    "  [review] {} → 过期退役（{}）",
+                    outcome.lesson_id, outcome.rationale
+                ));
+            }
+        }
         for outcome in &verification_outcomes {
             if let Some(recorder) = &self.recorder {
                 recorder.record(&crate::domain::events::RsiCycleEvent::LessonVerified {
@@ -182,6 +217,8 @@ impl RsiTask for HarnessRsiCycleTask {
                     .extend(evidence.signals.iter().cloned());
                 merged_evidence.sessions_covered += evidence.sessions_covered;
             }
+            // #2092：跨周期信号累计（持久化到 harness/signal-history.json）
+            let mut history = load_signal_history(&self.history_path);
             let summary = crate::domain::improvement::run_diagnosis_cycle(
                 registry,
                 self.llm.as_ref(),
@@ -190,8 +227,11 @@ impl RsiTask for HarnessRsiCycleTask {
                 &lessons,
                 self.recorder.as_deref(),
                 &mut diagnosis_report,
+                &mut history,
+                &cycle_id,
             )
             .await?;
+            save_signal_history(&self.history_path, &history);
             let prefix = if self.dry_run { "（dry-run）" } else { "" };
             let mut summary_text = format!(
                 "{prefix}诊断完成：{} 条任务（不改动组件）",
@@ -352,4 +392,34 @@ fn short_key(session_key: &str) -> String {
         .next()
         .unwrap_or(session_key)
         .to_string()
+}
+
+/// 读取跨周期信号累计（缺失/损坏 → 空历史，fail-open）。
+fn load_signal_history(path: &std::path::Path) -> crate::domain::strength::SignalHistory {
+    if path.as_os_str().is_empty() {
+        return crate::domain::strength::SignalHistory::default();
+    }
+    match std::fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
+        Err(_) => crate::domain::strength::SignalHistory::default(),
+    }
+}
+
+/// 写回跨周期信号累计（原子写；失败只 warn——门禁降级不影响改进）。
+fn save_signal_history(path: &std::path::Path, history: &crate::domain::strength::SignalHistory) {
+    if path.as_os_str().is_empty() {
+        return;
+    }
+    let Ok(text) = serde_json::to_string(history) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let temp = path.with_extension("tmp");
+    if std::fs::write(&temp, text).is_ok() {
+        if let Err(error) = std::fs::rename(&temp, path) {
+            log::warn!(target: crate::LOG_TARGET, "信号累计写回失败：{error}");
+        }
+    }
 }

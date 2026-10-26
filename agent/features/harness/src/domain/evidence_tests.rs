@@ -134,6 +134,7 @@ fn sessions_covered_and_signal_cap() {
                 signal_id: format!("sig-{index}"),
                 summary: "x".into(),
                 excerpt: None,
+                occurrences: 1,
             })
             .collect(),
         sessions_covered: 0,

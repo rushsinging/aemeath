@@ -90,6 +90,31 @@ enum SignalKind {
 - **事件流**：`lesson_verified { lesson_id, component, target_signal, status }`
 - **dry-run**：只预演判定（`judge_verification` 纯函数），NEVER 改写经验库；报告标注「预演，未落盘」
 
+### 2A.4c 证据强度门禁与 lesson review（#2092）
+
+**问题**：单块内 `×2` 即可落盘（偶然重试写永久规则）；同一问题分散在多个周期各 1 次则永远被过滤（永不聚合）。
+
+**强度分档**（`StrengthThresholds`，默认值）：
+
+| 档位 | 条件 | 处置 |
+|---|---|---|
+| `observe` | 累计 < 3 次 | 只报告，**不进提案材料** |
+| `light` | 累计 3–5 次 | 轻量落盘（一条规则） |
+| `strong` | 累计 ≥ 6 次 **或** 跨 ≥ 3 周期 | 强落盘（要求更具体的规则） |
+| `rework` | 曾修过且上次验证 ineffective | 强制重修（升级强度，不重复写同类） |
+
+**跨周期累计**（`SignalHistory` → `harness/signal-history.json`）：
+- 同周期内同 signal_id 取**最大** occurrences（多块各自聚合同一信号时，重复相加会虚增强度——实测缺陷）
+- 跨周期才累加班次；`last_cycle_id` 保证同周期重复调用不重复计
+- 持久化原子写、fail-open（缺失/损坏 → 空历史）
+
+**lesson review**：
+- **过期清理**：距上次判定超过 `LESSON_STALE_AFTER_SECS`（30 天）且未被本周期引用 → `RetireStale`（NEVER 无界保留）
+- **选择性退役**：按 review 结论退役，替代 v1 的「同组件全量退役」（有效内容不再被连带丢弃）
+- **有效性复核**：复用 §2A.4b 三态状态机
+
+**事件流**：`strength_gate { signal_id, tier, rationale }`、`lesson_reviewed { lesson_id, action, rationale }`。
+
 ### 2A.5 数据源流模型（checkpoint · 步长 · 数据源分块，2026-10-23 拍板）
 
 > 修正 v1 语义：分块对象是**数据源（session 证据流）**，NEVER 按组件分块——组件面是每轮提案的编辑对象，不是分块单位。模型对齐 Harness² 的 continual-learning 任务流（`schedule.py::stream_order`）与断点纪律（`runmark.py`）：处理单元推进、完成显式打标、指纹校验复用。

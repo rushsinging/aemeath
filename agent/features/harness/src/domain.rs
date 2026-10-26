@@ -28,6 +28,7 @@ pub mod stream;
 pub mod stream_port;
 #[cfg(test)]
 mod stream_tests;
+pub mod strength;
 pub mod task;
 #[cfg(test)]
 mod task_tests;

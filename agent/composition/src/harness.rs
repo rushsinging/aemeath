@@ -365,7 +365,10 @@ async fn run_rsi_run_inner(overrides: &RsiRunOverrides, dry_run: bool) -> RsiRun
         harness::domain::versioning::ComponentVersionStore::new(
             share::config::paths::global_agents_dir().join("harness/versions"),
         ),
-    ));
+    ))
+    .with_history_path(
+        share::config::paths::global_agents_dir().join("harness/signal-history.json"),
+    );
     let mut task = task;
     if dry_run {
         task = task.with_dry_run();
