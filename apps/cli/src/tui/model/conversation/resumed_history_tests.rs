@@ -383,7 +383,8 @@ fn blank_assistant_and_thinking_blocks_are_hidden_on_resume() {
         TuiChatMessage {
             role: "assistant".to_string(),
             content: vec![TuiContentBlock::Thinking {
-                thinking: "\n".to_string(),
+                // 真实 session 证据：tool_use 前 thinking 为单个空格。
+                thinking: " ".to_string(),
                 signature: None,
             }],
             input_id: None,
