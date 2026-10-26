@@ -1374,6 +1374,29 @@ pub async fn configured_user_agent(args: AgentArgs) -> Result<String, SdkError> 
         .to_string())
 }
 
+/// `systemone serve` 的 HTTP 监听地址（读分层配置 `scoring.http_listen`）。
+pub async fn configured_scoring_http_listen(args: AgentArgs) -> Result<String, SdkError> {
+    let cwd = args
+        .cwd
+        .clone()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let agents_dir = share::config::paths::global_agents_dir();
+    let config = config::wire_project_config_with_cli(
+        &cwd,
+        wire_config_override_store(&agents_dir)?,
+        cli_config_input(&args),
+    )
+    .await
+    .map_err(|error| SdkError::Init(error.to_string()))?;
+    Ok(config
+        .reader()
+        .committed_snapshot()
+        .scoring()
+        .http_listen
+        .clone())
+}
+
 pub async fn build_agent_bootstrap(args: AgentArgs) -> Result<AgentClientBootstrap, SdkError> {
     let cwd = args
         .cwd

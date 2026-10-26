@@ -9,8 +9,8 @@
 
 use std::time::Duration;
 
-use crate::domain::bailian_wire::{self, BailianSystemOneResponse};
 use crate::domain::error::{ScoringUnavailable, UnavailableKind};
+use crate::domain::systemone_http_wire::{self, SystemOneHttpResponse};
 use crate::domain::{ScoringAnswer, ScoringQuestion, ScoringState};
 use crate::ports::ScoringPort;
 
@@ -69,7 +69,7 @@ impl ScoringPort for BailianSystemOneClient {
         state: &ScoringState,
         questions: &[ScoringQuestion],
     ) -> Result<Vec<ScoringAnswer>, ScoringUnavailable> {
-        let request_body = bailian_wire::build_request(&self.model, state, questions);
+        let request_body = systemone_http_wire::build_request(&self.model, state, questions);
         let response = self
             .http
             .post(&self.endpoint)
@@ -94,10 +94,10 @@ impl ScoringPort for BailianSystemOneClient {
             };
             return Err(ScoringUnavailable::new(kind, detail));
         }
-        let wire_response: BailianSystemOneResponse = response.json().await.map_err(|error| {
+        let wire_response: SystemOneHttpResponse = response.json().await.map_err(|error| {
             ScoringUnavailable::new(UnavailableKind::Schema, format!("响应 JSON 非法：{error}"))
         })?;
-        bailian_wire::parse_answers(&wire_response, questions).map_err(|wire_error| {
+        systemone_http_wire::parse_answers(&wire_response, questions).map_err(|wire_error| {
             ScoringUnavailable::new(UnavailableKind::Schema, wire_error.to_string())
         })
     }

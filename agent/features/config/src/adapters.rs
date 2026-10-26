@@ -148,8 +148,12 @@ impl EnvAdapter {
             let skill_match = parse_bool_switch(source.get("AEMEATH_SCORING_SKILL_MATCH"));
             let policy_triage = parse_bool_switch(source.get("AEMEATH_SCORING_POLICY_TRIAGE"));
             let memory_recall = parse_bool_switch(source.get("AEMEATH_SCORING_MEMORY_RECALL"));
-            let socket_path = source
-                .get("AEMEATH_SCORING_SOCKET_PATH")
+            let http_listen = source
+                .get("AEMEATH_SCORING_HTTP_LISTEN")
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+            let http_endpoint = source
+                .get("AEMEATH_SCORING_HTTP_ENDPOINT")
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty());
             let connect_timeout_secs =
@@ -189,7 +193,8 @@ impl EnvAdapter {
                 || skill_match.is_some()
                 || policy_triage.is_some()
                 || memory_recall.is_some()
-                || socket_path.is_some()
+                || http_listen.is_some()
+                || http_endpoint.is_some()
                 || connect_timeout_secs.is_some()
                 || infer_timeout_secs.is_some()
                 || backend.is_some()
@@ -204,7 +209,8 @@ impl EnvAdapter {
                 memory_recall,
                 // 事件保留天数暂无业务 env：仅经配置文件分层合并设置。
                 event_retention_days: None,
-                socket_path,
+                http_listen,
+                http_endpoint,
                 connect_timeout_secs,
                 infer_timeout_secs,
             })

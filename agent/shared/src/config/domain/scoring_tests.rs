@@ -39,12 +39,13 @@ fn scoring_config_ignores_retired_http_keys() {
             "connect_timeout_secs",
             "enabled",
             "event_retention_days",
+            "http_endpoint",
+            "http_listen",
             "infer_timeout_secs",
             "memory_recall",
             "memory_rerank",
             "policy_triage",
             "skill_match",
-            "socket_path",
         ],
         "序列化面允许场景开关、事件保留、daemon socket/超时与 backend 驱动配置；退役 HTTP 顶层字段不得回归"
     );
@@ -101,7 +102,7 @@ fn event_retention_days_zero_is_legal_gc_off_not_write_off() {
 }
 
 #[test]
-fn scoring_config_defaults_daemon_timeouts_and_empty_socket_path() {
+fn scoring_config_defaults_daemon_timeouts_and_http_listen() {
     let config = ScoringConfig::default();
     assert_eq!(
         config.connect_timeout_secs,
@@ -111,22 +112,59 @@ fn scoring_config_defaults_daemon_timeouts_and_empty_socket_path() {
         config.infer_timeout_secs,
         DEFAULT_SCORING_INFER_TIMEOUT_SECS
     );
-    assert!(config.socket_path.is_none());
+    assert_eq!(config.http_listen, DEFAULT_SCORING_HTTP_LISTEN);
+    assert!(config.http_endpoint.is_none());
 }
 
 #[test]
-fn scoring_config_accepts_socket_path_and_timeout_aliases() {
+fn scoring_config_accepts_http_listen_and_timeout_aliases() {
     let config: ScoringConfig = serde_json::from_str(
         r#"{
-            "socketPath": "/tmp/custom.sock",
+            "httpListen": "127.0.0.1:9100",
             "connectTimeoutSecs": 5,
             "inferTimeoutSecs": 60
         }"#,
     )
     .expect("deserialize");
-    assert_eq!(config.socket_path.as_deref(), Some("/tmp/custom.sock"));
+    assert_eq!(config.http_listen, "127.0.0.1:9100");
     assert_eq!(config.connect_timeout_secs, 5);
     assert_eq!(config.infer_timeout_secs, 60);
+}
+
+#[test]
+fn scoring_http_endpoint_defaults_from_listen() {
+    let config = ScoringConfig::default();
+    assert_eq!(
+        config.resolve_http_endpoint(),
+        format!("http://{DEFAULT_SCORING_HTTP_LISTEN}/systemone"),
+        "client 端点缺省由 http_listen 推导（同机零配置）"
+    );
+}
+
+#[test]
+fn scoring_http_endpoint_explicit_value_wins() {
+    let config: ScoringConfig =
+        serde_json::from_str(r#"{"httpEndpoint": "https://scoring.example.com/systemone"}"#)
+            .expect("显式 endpoint 解析");
+    assert_eq!(
+        config.resolve_http_endpoint(),
+        "https://scoring.example.com/systemone"
+    );
+}
+
+#[test]
+fn scoring_socket_path_retired_key_ignored() {
+    // UDS 退役（#2096 拍板）：旧 socket_path 残留键被忽略而非报错，
+    // 序列化面不再出现该字段。
+    let config: ScoringConfig = serde_json::from_str(
+        r#"{"socketPath": "/tmp/legacy.sock", "socket_path": "/tmp/legacy2.sock"}"#,
+    )
+    .expect("退役键残留应被忽略");
+    let value = serde_json::to_value(&config).expect("序列化");
+    assert!(
+        value.get("socket_path").is_none(),
+        "序列化面不得再出现 socket_path"
+    );
 }
 
 // ── backend 驱动选择（#2095：bailian 云端 backend）──
@@ -260,12 +298,13 @@ fn scoring_config_serialization_includes_backend_and_bailian() {
             "connect_timeout_secs",
             "enabled",
             "event_retention_days",
+            "http_endpoint",
+            "http_listen",
             "infer_timeout_secs",
             "memory_recall",
             "memory_rerank",
             "policy_triage",
             "skill_match",
-            "socket_path",
         ],
         "序列化面应含 backend 与 bailian 驱动配置"
     );

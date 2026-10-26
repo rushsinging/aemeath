@@ -68,7 +68,8 @@ async fn main() {
                 subcommand::systemone_command::run_systemone_download_command(user_agent).await;
             }
             args::SystemoneCommands::Serve => {
-                subcommand::systemone_command::run_systemone_serve_command().await;
+                let args = Args::from(cli.run_args);
+                subcommand::systemone_command::run_systemone_serve_command(args).await;
             }
         },
         Some(Commands::Rsi { command }) => match command {

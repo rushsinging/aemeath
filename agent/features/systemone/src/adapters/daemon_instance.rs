@@ -1,126 +1,69 @@
-//! Scoring daemon 单实例锁与 sock 路径解析。
+//! Scoring daemon 惰性拉起与 HTTP 就绪探活（#2096：UDS 退役）。
 //!
-//! 设计依据：`docs/design/02-modules/systemone/04-scoring-daemon.md` §4.2 / §5.1。
+//! 探活语义与原 UDS `UnixStream::connect` 等价：TCP connect 成功即 daemon
+//! 在监听。端口 bind 互斥天然保证单实例，不再有 lock 文件。
 
-use std::fs::{self, File, OpenOptions};
-use std::io;
-use std::path::{Path, PathBuf};
+use std::time::Duration;
 
-use crate::constants::{SCORING_DIR_NAME, SCORING_LOCK_FILE, SCORING_SOCK_FILE};
-
-/// Daemon 落盘端点：scoring 目录、sock、lock。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DaemonEndpoints {
-    pub scoring_dir: PathBuf,
-    pub sock: PathBuf,
-    pub lock: PathBuf,
-}
-
-impl DaemonEndpoints {
-    /// 默认路径：`{agents_dir}/scoring/scoring.sock` + `scoring.lock`。
-    pub fn under_agents_dir(agents_dir: &Path) -> Self {
-        Self::under_agents_dir_with_socket(agents_dir, None)
+/// 确保 local daemon HTTP 端点可用：先探活，不通则惰性拉起
+/// `systemone serve`（同一进程二进制），等待端口就绪。
+pub fn ensure_scoring_http_ready(endpoint: &str, connect_timeout: Duration) -> Result<(), String> {
+    if scoring_http_connectable(endpoint) {
+        return Ok(());
     }
+    let executable = std::env::current_exe().map_err(|error| {
+        format!("定位当前可执行文件失败，无法惰性拉起 systemone serve：{error}")
+    })?;
+    let mut command = std::process::Command::new(&executable);
+    command
+        .args(["systemone", "serve"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    utils::configure_std_noninteractive(&mut command)
+        .map_err(|error| format!("配置 systemone serve 非交互隔离失败：{error}"))?;
+    command
+        .spawn()
+        .map_err(|error| format!("惰性拉起 `systemone serve` 失败：{error}"))?;
 
-    /// `socket_path` 覆盖 sock；lock **始终**落在 `{agents_dir}/scoring/scoring.lock`
-    ///（单实例按 agents 根隔离，不随 sock 覆盖漂移）。
-    pub fn under_agents_dir_with_socket(agents_dir: &Path, socket_path: Option<PathBuf>) -> Self {
-        let scoring_dir = agents_dir.join(SCORING_DIR_NAME);
-        let sock = socket_path.unwrap_or_else(|| scoring_dir.join(SCORING_SOCK_FILE));
-        let lock = scoring_dir.join(SCORING_LOCK_FILE);
-        Self {
-            scoring_dir,
-            sock,
-            lock,
+    let started = std::time::Instant::now();
+    while started.elapsed() < connect_timeout {
+        if scoring_http_connectable(endpoint) {
+            return Ok(());
         }
+        std::thread::sleep(Duration::from_millis(50));
     }
+    Err(format!(
+        "等待 scoring daemon HTTP 就绪超时（{}s）；可手动执行 `aemeath systemone serve`，模型缺失时先 `aemeath systemone download`",
+        connect_timeout.as_secs().max(1)
+    ))
 }
 
-/// 单实例锁错误。
-#[derive(Debug)]
-pub enum DaemonLockError {
-    AlreadyRunning,
-    Io(io::Error),
+/// 从 endpoint URL 提取 `host:port` 并 TCP 探活。
+fn scoring_http_connectable(endpoint: &str) -> bool {
+    let Some(authority) = endpoint_authority(endpoint) else {
+        return false;
+    };
+    std::net::TcpStream::connect(authority).is_ok()
 }
 
-impl std::fmt::Display for DaemonLockError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::AlreadyRunning => formatter.write_str("scoring daemon 已在运行（lock 被占用）"),
-            Self::Io(error) => write!(formatter, "scoring daemon lock IO 失败：{error}"),
-        }
+/// 解析 `http[s]://host:port/path` 的 authority（host:port；缺省端口 80/443）。
+fn endpoint_authority(endpoint: &str) -> Option<String> {
+    let without_scheme = endpoint
+        .strip_prefix("http://")
+        .or_else(|| endpoint.strip_prefix("https://"))
+        .unwrap_or(endpoint);
+    let authority = without_scheme.split('/').next().unwrap_or("");
+    if authority.is_empty() {
+        return None;
     }
-}
-
-impl std::error::Error for DaemonLockError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Io(error) => Some(error),
-            Self::AlreadyRunning => None,
-        }
+    if authority.contains(':') {
+        Some(authority.to_string())
+    } else if endpoint.starts_with("https://") {
+        Some(format!("{authority}:443"))
+    } else {
+        Some(format!("{authority}:80"))
     }
-}
-
-impl From<io::Error> for DaemonLockError {
-    fn from(value: io::Error) -> Self {
-        Self::Io(value)
-    }
-}
-
-/// 持有 `scoring.lock` 的排他文件锁；drop 时解锁。
-#[derive(Debug)]
-pub struct DaemonLockGuard {
-    _file: File,
-}
-
-/// 获取非阻塞排他锁；已被占用 → [`DaemonLockError::AlreadyRunning`]。
-pub fn acquire_daemon_lock(lock_path: &Path) -> Result<DaemonLockGuard, DaemonLockError> {
-    if let Some(parent) = lock_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let file = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .truncate(false)
-        .open(lock_path)?;
-    flock_exclusive_nonblock(&file)?;
-    Ok(DaemonLockGuard { _file: file })
-}
-
-/// 在持有单实例锁的前提下，清除陈旧 sock 文件（仅当路径存在）。
-///
-/// 调用方 MUST 在 bind 监听前调用；无锁时本函数不可用（API 强制传入 guard）。
-pub fn prepare_socket_path(sock_path: &Path, _lock: &DaemonLockGuard) -> io::Result<()> {
-    if sock_path.exists() {
-        fs::remove_file(sock_path)?;
-    }
-    if let Some(parent) = sock_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    Ok(())
-}
-
-#[cfg(unix)]
-fn flock_exclusive_nonblock(file: &File) -> Result<(), DaemonLockError> {
-    use rustix::fs::{flock, FlockOperation};
-    match flock(file, FlockOperation::NonBlockingLockExclusive) {
-        Ok(()) => Ok(()),
-        Err(error)
-            if error == rustix::io::Errno::WOULDBLOCK || error == rustix::io::Errno::AGAIN =>
-        {
-            Err(DaemonLockError::AlreadyRunning)
-        }
-        Err(error) => Err(DaemonLockError::Io(io::Error::from(error))),
-    }
-}
-
-#[cfg(not(unix))]
-fn flock_exclusive_nonblock(_file: &File) -> Result<(), DaemonLockError> {
-    Err(DaemonLockError::Io(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "scoring daemon lock 仅支持 Unix",
-    )))
 }
 
 #[cfg(test)]

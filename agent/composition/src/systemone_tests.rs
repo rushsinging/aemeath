@@ -35,7 +35,7 @@ struct RecordingDaemonLauncher {
 impl ScoringDaemonLauncher for RecordingDaemonLauncher {
     fn ensure_ready(
         &self,
-        _sock: &std::path::Path,
+        _endpoint: &str,
         _connect_timeout: std::time::Duration,
     ) -> Result<(), String> {
         self.calls.fetch_add(1, Ordering::SeqCst);
@@ -45,9 +45,11 @@ impl ScoringDaemonLauncher for RecordingDaemonLauncher {
 
 #[test]
 fn process_daemon_launcher_skips_lazy_spawn_under_cfg_test() {
-    let sock = std::path::Path::new("/tmp/aemeath-scoring-daemon-launcher-test.sock");
     let err = ProcessDaemonLauncher
-        .ensure_ready(sock, std::time::Duration::from_millis(10))
+        .ensure_ready(
+            "http://127.0.0.1:1/systemone",
+            std::time::Duration::from_millis(10),
+        )
         .expect_err("cfg(test) 必须禁用惰性拉起");
     assert!(err.contains("单测禁用惰性拉起"), "unexpected detail: {err}");
 }
@@ -335,8 +337,8 @@ fn production_scoring_sources_never_reference_http_scoring_factory() {
         "会话生产装配必须走 daemon 客户端路径"
     );
     assert!(
-        systemone.contains("DaemonScoringClient"),
-        "会话生产装配必须构造 DaemonScoringClient"
+        systemone.contains("LocalSystemOneClient"),
+        "会话生产装配必须构造 LocalSystemOneClient（#2096：UDS 退役，HTTP 替代）"
     );
     // `pub async fn assemble_scoring_ports` 本体不得再委托 ProductionEmbeddedFactory。
     let start = systemone
@@ -530,7 +532,7 @@ async fn master_gate_defaults_to_enabled() {
 #[tokio::test]
 async fn run_scoring_serve_without_engine_skips_ready_callback() {
     let called = AtomicUsize::new(0);
-    let exit = run_scoring_serve(|_sock| {
+    let exit = run_scoring_serve("127.0.0.1:0", |_listen| {
         called.fetch_add(1, Ordering::SeqCst);
     })
     .await;

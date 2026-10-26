@@ -22,7 +22,7 @@ use crate::domain::published_language::{
 
 /// wire 转换失败原因。
 #[derive(Debug, Clone, PartialEq)]
-pub enum BailianWireError {
+pub enum SystemOneHttpWireError {
     /// 响应缺少请求中的 qid 答案。
     MissingAnswer { question_id: String },
     /// 响应题型与请求题型不一致。
@@ -31,7 +31,7 @@ pub enum BailianWireError {
     InvalidAnswer { question_id: String, reason: String },
 }
 
-impl std::fmt::Display for BailianWireError {
+impl std::fmt::Display for SystemOneHttpWireError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::MissingAnswer { question_id } => {
@@ -50,20 +50,20 @@ impl std::fmt::Display for BailianWireError {
     }
 }
 
-impl std::error::Error for BailianWireError {}
+impl std::error::Error for SystemOneHttpWireError {}
 
 /// 请求体。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct BailianSystemOneRequest {
+pub struct SystemOneHttpRequest {
     pub model: String,
     pub state: String,
-    pub questions: BTreeMap<String, BailianQuestionWire>,
+    pub questions: BTreeMap<String, SystemOneQuestionWire>,
 }
 
 /// 单题 wire 形态。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
-pub enum BailianQuestionWire {
+pub enum SystemOneQuestionWire {
     Choice {
         instructions: String,
         criteria: BTreeMap<String, String>,
@@ -71,7 +71,7 @@ pub enum BailianQuestionWire {
     Noul {
         instructions: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        criteria: Option<BailianNoulCriteriaWire>,
+        criteria: Option<SystemOneNoulCriteriaWire>,
     },
     Score {
         instructions: String,
@@ -81,7 +81,7 @@ pub enum BailianQuestionWire {
 
 /// noul 题型 true/false 语义描述。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct BailianNoulCriteriaWire {
+pub struct SystemOneNoulCriteriaWire {
     #[serde(rename = "true")]
     pub when_true: String,
     #[serde(rename = "false")]
@@ -90,24 +90,24 @@ pub struct BailianNoulCriteriaWire {
 
 /// 响应体。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct BailianSystemOneResponse {
+pub struct SystemOneHttpResponse {
     pub model: String,
     #[serde(default)]
     pub request_id: String,
-    pub answers: BTreeMap<String, BailianAnswerWire>,
+    pub answers: BTreeMap<String, SystemOneAnswerWire>,
     #[serde(default = "default_zero_token_usage")]
-    pub usage: BailianUsageWire,
+    pub usage: SystemOneUsageWire,
     #[serde(default)]
     pub latency_ms: f64,
 }
 
-fn default_zero_token_usage() -> BailianUsageWire {
-    BailianUsageWire { input_tokens: 0 }
+fn default_zero_token_usage() -> SystemOneUsageWire {
+    SystemOneUsageWire { input_tokens: 0 }
 }
 
 /// token 用量。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BailianUsageWire {
+pub struct SystemOneUsageWire {
     #[serde(default)]
     pub input_tokens: u64,
 }
@@ -115,7 +115,7 @@ pub struct BailianUsageWire {
 /// 单题答案 wire 形态。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
-pub enum BailianAnswerWire {
+pub enum SystemOneAnswerWire {
     Noul {
         noul: f64,
     },
@@ -138,27 +138,27 @@ pub fn build_request(
     model: &str,
     state: &ScoringState,
     questions: &[ScoringQuestion],
-) -> BailianSystemOneRequest {
+) -> SystemOneHttpRequest {
     let questions = questions
         .iter()
         .enumerate()
         .map(|(index, question)| (format!("q{index}"), to_question_wire(question)))
         .collect();
-    BailianSystemOneRequest {
+    SystemOneHttpRequest {
         model: model.to_string(),
         state: state.as_str().to_string(),
         questions,
     }
 }
 
-fn to_question_wire(question: &ScoringQuestion) -> BailianQuestionWire {
+fn to_question_wire(question: &ScoringQuestion) -> SystemOneQuestionWire {
     match question {
         ScoringQuestion::Noul {
             instructions,
             criteria,
-        } => BailianQuestionWire::Noul {
+        } => SystemOneQuestionWire::Noul {
             instructions: instructions.clone(),
-            criteria: criteria.as_ref().map(|noul| BailianNoulCriteriaWire {
+            criteria: criteria.as_ref().map(|noul| SystemOneNoulCriteriaWire {
                 when_true: noul.when_true().to_string(),
                 when_false: noul.when_false().to_string(),
             }),
@@ -166,7 +166,7 @@ fn to_question_wire(question: &ScoringQuestion) -> BailianQuestionWire {
         ScoringQuestion::Choice {
             instructions,
             criteria,
-        } => BailianQuestionWire::Choice {
+        } => SystemOneQuestionWire::Choice {
             instructions: instructions.clone(),
             criteria: criteria
                 .iter()
@@ -176,7 +176,7 @@ fn to_question_wire(question: &ScoringQuestion) -> BailianQuestionWire {
         ScoringQuestion::Score {
             instructions,
             levels,
-        } => BailianQuestionWire::Score {
+        } => SystemOneQuestionWire::Score {
             instructions: instructions.clone(),
             criteria: levels.clone(),
         },
@@ -185,26 +185,26 @@ fn to_question_wire(question: &ScoringQuestion) -> BailianQuestionWire {
 
 /// 按请求 qid 顺序解析答案为领域类型（缺失候选/档位补 0，calibration=Raw）。
 pub fn parse_answers(
-    response: &BailianSystemOneResponse,
+    response: &SystemOneHttpResponse,
     questions: &[ScoringQuestion],
-) -> Result<Vec<ScoringAnswer>, BailianWireError> {
+) -> Result<Vec<ScoringAnswer>, SystemOneHttpWireError> {
     questions
         .iter()
         .enumerate()
         .map(|(index, question)| {
             let question_id = format!("q{index}");
             let answer_wire = response.answers.get(&question_id).ok_or_else(|| {
-                BailianWireError::MissingAnswer {
+                SystemOneHttpWireError::MissingAnswer {
                     question_id: question_id.clone(),
                 }
             })?;
             let parsed = match (question, answer_wire) {
-                (ScoringQuestion::Noul { .. }, BailianAnswerWire::Noul { noul }) => {
+                (ScoringQuestion::Noul { .. }, SystemOneAnswerWire::Noul { noul }) => {
                     ScoringAnswer::noul(*noul, CalibrationLevel::Raw)
                 }
                 (
                     ScoringQuestion::Choice { criteria, .. },
-                    BailianAnswerWire::Choice {
+                    SystemOneAnswerWire::Choice {
                         choice,
                         confidence,
                         probabilities,
@@ -225,7 +225,7 @@ pub fn parse_answers(
                 }
                 (
                     ScoringQuestion::Score { levels, .. },
-                    BailianAnswerWire::Score {
+                    SystemOneAnswerWire::Score {
                         score,
                         confidence,
                         probabilities,
@@ -243,10 +243,10 @@ pub fn parse_answers(
                     ScoringAnswer::score(*score, restored, *confidence, CalibrationLevel::Raw)
                 }
                 _ => {
-                    return Err(BailianWireError::TypeMismatch { question_id });
+                    return Err(SystemOneHttpWireError::TypeMismatch { question_id });
                 }
             };
-            parsed.map_err(|rejected| BailianWireError::InvalidAnswer {
+            parsed.map_err(|rejected| SystemOneHttpWireError::InvalidAnswer {
                 question_id,
                 reason: format!("{rejected:?}"),
             })
@@ -255,5 +255,126 @@ pub fn parse_answers(
 }
 
 #[cfg(test)]
-#[path = "bailian_wire_tests.rs"]
+#[path = "systemone_http_wire_tests.rs"]
 mod tests;
+
+// ── server 方向转换（#2096：daemon HTTP handler 与 client 共用同一 DTO 层）──
+
+/// 解析请求为领域输入：qid 按 q0..qN 还原 Vec（与 `build_request` 互逆）。
+pub fn parse_request(
+    request: &SystemOneHttpRequest,
+) -> Result<(ScoringState, Vec<ScoringQuestion>), SystemOneHttpWireError> {
+    let state = ScoringState::new(request.state.clone()).ok_or_else(|| {
+        SystemOneHttpWireError::InvalidAnswer {
+            question_id: "<state>".into(),
+            reason: "state 为空白".into(),
+        }
+    })?;
+    let questions = (0..request.questions.len())
+        .map(|index| {
+            let question_id = format!("q{index}");
+            let wire = request.questions.get(&question_id).ok_or_else(|| {
+                SystemOneHttpWireError::MissingAnswer {
+                    question_id: question_id.clone(),
+                }
+            })?;
+            match wire {
+                SystemOneQuestionWire::Noul {
+                    instructions,
+                    criteria,
+                } => ScoringQuestion::noul(
+                    instructions.clone(),
+                    criteria.as_ref().map(|noul| {
+                        crate::domain::published_language::NoulCriteria::new(
+                            noul.when_true.clone(),
+                            noul.when_false.clone(),
+                        )
+                        .expect("criteria 非空已在领域构造校验")
+                    }),
+                )
+                .ok_or_else(|| SystemOneHttpWireError::InvalidAnswer {
+                    question_id: question_id.clone(),
+                    reason: "noul instructions 为空白".into(),
+                }),
+                SystemOneQuestionWire::Choice {
+                    instructions,
+                    criteria,
+                } => {
+                    let criteria = criteria
+                        .iter()
+                        .map(|(key, description)| (key.clone(), description.clone()))
+                        .collect::<Vec<_>>();
+                    ScoringQuestion::choice(instructions.clone(), criteria).map_err(|rejected| {
+                        SystemOneHttpWireError::InvalidAnswer {
+                            question_id: question_id.clone(),
+                            reason: format!("{rejected:?}"),
+                        }
+                    })
+                }
+                SystemOneQuestionWire::Score {
+                    instructions,
+                    criteria,
+                } => ScoringQuestion::score(instructions.clone(), criteria.clone()).map_err(
+                    |rejected| SystemOneHttpWireError::InvalidAnswer {
+                        question_id: question_id.clone(),
+                        reason: format!("{rejected:?}"),
+                    },
+                ),
+            }
+        })
+        .collect::<Result<Vec<_>, SystemOneHttpWireError>>()?;
+    Ok((state, questions))
+}
+
+/// 构造响应：按 q0..qN 把领域答案写回 qid map（与 `parse_answers` 互逆）。
+pub fn build_response(
+    model: &str,
+    answers: &[ScoringAnswer],
+    latency_ms: f64,
+) -> SystemOneHttpResponse {
+    let answers = answers
+        .iter()
+        .enumerate()
+        .map(|(index, answer)| {
+            let wire = match answer {
+                ScoringAnswer::Noul { p_true, .. } => SystemOneAnswerWire::Noul { noul: *p_true },
+                ScoringAnswer::Choice {
+                    choice,
+                    probabilities,
+                    confidence,
+                    ..
+                } => SystemOneAnswerWire::Choice {
+                    choice: choice.clone(),
+                    confidence: *confidence,
+                    probabilities: probabilities
+                        .iter()
+                        .map(|(key, probability)| (key.clone(), *probability))
+                        .collect(),
+                },
+                ScoringAnswer::Score {
+                    score,
+                    probabilities,
+                    confidence,
+                    ..
+                } => SystemOneAnswerWire::Score {
+                    score: *score,
+                    confidence: *confidence,
+                    legend: Default::default(),
+                    probabilities: probabilities
+                        .iter()
+                        .enumerate()
+                        .map(|(level, probability)| (level.to_string(), *probability))
+                        .collect(),
+                },
+            };
+            (format!("q{index}"), wire)
+        })
+        .collect();
+    SystemOneHttpResponse {
+        model: model.to_string(),
+        request_id: String::new(),
+        answers,
+        usage: SystemOneUsageWire { input_tokens: 0 },
+        latency_ms,
+    }
+}
