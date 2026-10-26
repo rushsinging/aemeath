@@ -53,12 +53,19 @@ TerminateRun: 任意非终态 → Terminating → Terminated
 
 ## 2. Workflow（支撑域）
 
-> 仅承载 reasoning effort 调节，经端口被 Agent Runtime 消费；不做多-agent 图编排（无此长期计划）。
+> Workflow 是独立 Bounded Context，拥有 Session 级工作流 Graph；只编排 Graph 节点，不编排 Run，不调用 LLM、不执行 Tool。
 
 | 术语 | 定义 |
 |---|---|
-| **Reasoning Node** | reasoning graph 的阶段节点：IDLE / EXPLORE / PLAN / EXECUTE / VERIFY，用于调节 effort。 |
-| **Reasoning Level** | 统一的推理强度抽象：Off / Minimal / Low / Medium / High / Xhigh / Max；`none` 仅是 Off 的 OpenAI wire alias。Provider 按 driver capability 向下 clamp。 |
+| **Workflow** | Session 级独立聚合（0..n，同一时刻至多一个 Active）：工作流 Graph 的定义、状态与节点结论的拥有者。仅经五个始终可见的 `workflow_*` Tool（`workflow_create` / `workflow_list` / `workflow_query` / `workflow_update` / `workflow_node_update`）与 Runtime 协作；不创建 Run、不驱动 Run 生命周期，不从属 Runtime Goal。用户不直接操作 Workflow，只有 LLM 经 Tool 做语义操作。 |
+| **Graph Definition** | Workflow 拥有的图定义：`objective`、`nodes`、`edges`、`initial_nodes`、`failure_routing` 的结构化提案与已提交 revision；允许 DAG、回边、自环、Join 与并行 `active_nodes`。 |
+| **Node** | Graph 中的工作单元，带状态与节点结论（node conclusion）/证据引用；节点结论、证据与移动提议只能由 LLM 经 `workflow_node_update` 提交，Kernel 只做结构 / revision / 证据存在校验。**不是** effort 阶段节点。 |
+| **Edge** | 节点间的条件迁移；回边与自环是普通 Edge，**Loop 不是 Runtime 类型，也不是特殊 Graph 节点**。 |
+| **Failure Routing** | Graph 定义内声明的失败出口：节点执行失败时的目标路由，由 Graph Kernel 判定，不由 Runtime 计算。 |
+| **ConfirmNode** | Graph 中表达“该节点存在需要用户确认的条件”的通用语义节点：LLM 自行用普通文本或 AskUser 完成确认并经 `workflow_node_update` 保存通过与证据；节点不驱动 Runtime / UI，Kernel 不理解确认语义。 |
+| **WorkflowStatus** | Workflow 生命周期状态四种已知行为：`Active` / `Inactive` / `Completed` / `Cancelled`（四并列还是 Open / Closed 分层尚未拍板）；`Inactive` 可被 LLM 重新激活，`Completed` / `Cancelled` 不可逆仅历史查询；`Suspended` / `AwaitingUser` / `Sleeping` 不是 Workflow 状态。离开 `Active`（deactivate / complete / cancel）后 Session `active_workflow` 指针清空。 |
+| **Runtime Goal** | Runtime 拥有的跨 Run 长任务聚合根（objective、执行模式、继续授权、run history），管理跨 Run 继续策略；与 Workflow 互不从属。 |
+| **Reasoning Level** | 统一的推理强度抽象：Off / Minimal / Low / Medium / High / Xhigh / Max；`none` 仅是 Off 的 OpenAI wire alias。**与 Workflow 解耦**：只从配置 / 用户命令静态冻结，Provider 按 driver capability 独立向下 clamp。 |
 
 ## 3. Context Management（支撑域）
 
@@ -138,7 +145,8 @@ TerminateRun: 任意非终态 → Terminating → Terminated
 | **Run Step** | **Model Invocation** | Run Step=一次「调模型 + 用响应 + 执行工具」往返；Model Invocation=其中那一次具体的 LLM 调用。一个 Run Step 通常含一次 Model Invocation。 |
 | **Main Agent** | **SubAgent** | 前者是用户输入直接触发的顶层执行主体（发起 Main Run）；后者是父级经工具派生的子执行主体（发起 Sub Run）。共用状态机与 Loop，差异在 ExecutionPolicy。 |
 | **领域 Message** | **provider 线格式消息** | 前者是领域内部模型；后者是各家 API 的传输格式。经 Provider 内部 ACL 转换，禁止跨界直用。 |
-| **Reasoning Node** | **Run 状态** | 前者是 effort 调节状态机（Workflow）；后者是执行生命周期状态机（Agent Runtime）。职责不同，不可混淆。 |
+| **Workflow Node** | **Run 状态** | 前者是 Graph 节点状态与节点结论（Workflow 拥有，含 `WorkflowStatus` 与 Graph State）；后者是执行生命周期状态机（Agent Runtime）。Runtime 只按 Session 最新状态组织上下文、路由 `workflow_*` Tool，不推进 Graph；职责不同，不可混淆。 |
+| **Workflow** | **Runtime Goal** | Workflow 是 Session 级 Graph 聚合（0..n，至多一个 Active），管理 Node / Edge / State / Failure Routing 与节点结论；Runtime Goal 是跨 Run 的长任务聚合根，管理继续策略与 Run 归属。二者互不从属：Goal 生命周期不创建 / 销毁 / 切换 Workflow，Graph 回边与失败路由也不属于 Goal 的继续策略。 |
 | **Activity** | **Run** | Run 是唯一 Agent 执行生命周期状态机；Activity 是由 Runtime 从 Run、Step、Model、Tool、Hook、Compact 与 Interaction 事实派生的观测集合。Activity 可以表达父子拓扑和局部计时，但不能推进、暂停或终止 Run。 |
 | **Activity Observation** | **Activity Summary** | Observation 是 Runtime 发布的完整 typed 事实；Summary 是 TUI 按用户受众和优先级生成的低噪声展示行。前者跨边界传输，后者只存在于展示层。 |
 | **Activity Snapshot** | **Activity Change** | Snapshot 是按 revision 的全量修复 / 初始化事实；Change 是同一 revision 序列中的增量事实。消费者发现 revision gap 时必须请求或等待 Snapshot，禁止用增量猜测缺失事实。 |
@@ -164,6 +172,7 @@ TerminateRun: 任意非终态 → Terminating → Terminated
 | 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run、Turn→Run Step；补 Main Agent 与 SubAgent 对照 | #760 |
 | 2026-07-11 | Workflow 降为支撑域（第 2 节标题），移除不做的 Workflow Graph 编排术语 | #760 |
 | 2026-07-28 | #1438 将 Skill 重新定义为由 LLM 按需调用的特殊动态 Tool，并增加 metadata snapshot、SkillRequest、SkillLoadPort 与 LoadedSkill 术语 | [#1438](https://github.com/rushsinging/aemeath/issues/1438) |
+| 2026-10-07 | Workflow 术语同步 workflow/01-workflow-design.md 冻结决策：Session 0..n Workflow、四状态（层级待决）、五个 `workflow_*` Tool、ConfirmNode 最小语义；移除 `WorkflowRuntimeView` / `WorkflowBindingSnapshot` / tool policy 旧口径 | workflow/01-workflow-design.md |
 | 2026-07-12 | 新增 Tool/Skill/Command 统一语言，明确 Scope/Profile、Prompt Fragment 与 MCP Tool 边界 | #787 |
 | 2026-07-12 | 将 Run 精确为唯一 Agent 执行生命周期状态机，避免与其他 BC 局部聚合状态机冲突 | #743 / #787 |
 | 2026-07-14 | 新增 Project Identity / Workspace ID，统一 Session resume、Memory 分区与 Tool Scope 的身份语言 | [#972](https://github.com/rushsinging/aemeath/issues/972) |

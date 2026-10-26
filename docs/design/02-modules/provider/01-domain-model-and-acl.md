@@ -18,7 +18,7 @@ struct InvocationRequest {
 
 struct RequestedInvocationOptions {
     requested_max_output_tokens: Option<OutputTokenLimit>,
-    reasoning: ReasoningLevel, // Workflow 固定默认 desired effort（Config user maximum 已退役，#921）
+    reasoning: ReasoningLevel, // Runtime 在 Run 创建时冻结的 ReasoningLevel（配置 / 用户命令；Config user maximum 已退役，#921）
 }
 
 struct ResolvedInvocationOptions {
@@ -100,14 +100,14 @@ enum ReasoningMappingKind {
 统一职责链：
 
 ```text
-Requested Reasoning = Workflow Desired（Config user maximum 已退役，#921）
+Requested Reasoning = Runtime frozen ReasoningLevel（Run 创建时冻结；Config user maximum 已退役，#921）
 Effective Reasoning = greatest supported level <= Requested Reasoning
 ```
 
 其中：
 
-- Config 拥有用户默认值与来源优先级（`reasoning_graph` 含 `max_reasoning` 已退役，#921）；如需 reasoning level 上限控制，由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 重新决策
-- Workflow 发布 graph 的固定默认 desired effort（无 config clamp）
+- Config 拥有用户默认值与来源优先级（旧 `reasoning_graph` / `max_reasoning` 已退役，#921）；如需 reasoning level 上限控制，由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 重新决策
+- Runtime 在 Run 创建时冻结 `ReasoningLevel`（仅来自配置 / 用户命令），Provider 独立执行 model-capability clamp；Workflow 不拥有 reasoning level，Workflow 与 reasoning level 解耦，Provider resolver 不感知 Graph
 - Runtime 在构建 Context Window **之前**调用 Provider-owned `resolve_invocation_options`；
 - resolver 根据 driver + model 的 `supported` 档位集合选择不高于 requested 的最高档位，同时解析 context/output limits（`context_size` 来源：`ModelCapability.context_limit`，若为 None 则 fallback 到 ConfigSnapshot 提供的 `context_size` 默认值），并返回不可变 `ResolvedInvocationOptions`；
 - Runtime 把同一个 `effective_reasoning` 同时放入 `ContextRequest`（供 Prompt guidance）与 `InvocationRequest.options`；
@@ -119,7 +119,7 @@ Effective Reasoning = greatest supported level <= Requested Reasoning
 因此单次模型调用只有一条 reasoning 数据流（Target 设计）：
 
 ```text
-ReasoningPort.current_requested_level
+Runtime frozen ReasoningLevel
   → ProviderPort.resolve_invocation_options
   → ResolvedInvocationOptions.effective_reasoning
        ├─ ContextRequest.effective_reasoning → PromptRequest.effective_reasoning

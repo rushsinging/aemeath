@@ -1,6 +1,6 @@
 # Agent Runtime · 运行时所有权与统一装配
 
-> 层级：02-modules / runtime（模块战术设计）  
+> 层级：02-modules / runtime（模块战术设计）
 > 状态：Target（目标设计）
 >
 > 本文记录 Runtime 的最终所有权、控制反转与装配边界。它只描述终态，不记录实现进度。任何按 Main/Sub 分类的生产类型、调用方手填的 `RunContextBindings`、fat `RunLoopPort` 或 Runtime 内第二 Composition Root 都不属于目标模型。

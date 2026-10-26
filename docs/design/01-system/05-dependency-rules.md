@@ -36,7 +36,7 @@ Git CLI / 子进程 detail ──实现 Project 消费方拥有的 git worktree 
 | R4 | **外部驱动 detail NEVER 触碰能力内部**：TUI / CLI 只经 `AgentClient`，NEVER import Runtime 内部类型 | UI 里出现 Runtime 的内部上下文类型 |
 | R5 | **Config 单向下发**：所有 BC 顺从消费只读 `ConfigSnapshot`，NEVER 反向依赖，NEVER 绕过快照读裸配置 / env 散点 | 业务代码里直接读环境变量 |
 | R6 | **Composition Root MUST 是唯一生产装配入口**：具体实现选择、factory 调用与跨能力接线只由组合根发起；模块可在 composition-only opaque factory 内构造私有 detail，但 NEVER 自行选择候选实现或从业务路径触发生产装配；“唯一”按每个 deployable production assembly（可独立构建 / 部署的生产制品）解释——同一 deployable 内 MUST 只有一个组合根，不同 deployable（如未来 Server 化的控制面与 worker）MAY 各自拥有独立的唯一组合根 | 能力在业务路径直接 `new` 存储实现，或根据全局配置自行挑选 adapter，或同一 deployable 内出现第二个装配入口 |
-| R7 | **边界模型 MUST 按 Context Map 转换或共享**：provider wire type **MUST** 经 Provider ACL 转为稳定 `Message`；`DomainEvent` **MUST** 经 TUI ACL 转为 TUI Model；只有 [Context Map](03-context-map.md) 登记的 Shared Kernel 类型 **MAY** 在其列明的参与 BC 间跨界（`Message` 用于 Runtime / Context Management / Provider，`ReasoningLevel` 用于 Workflow / Config / Runtime / Context Management / Provider），其他内部类型 **NEVER** 直通 | provider wire type 直接进入 Runtime，或 `DomainEvent` 直接进入 TUI Model，或未登记类型被多个 BC 各自复制 |
+| R7 | **边界模型 MUST 按 Context Map 转换或共享**：provider wire type **MUST** 经 Provider ACL 转为稳定 `Message`；`DomainEvent` **MUST** 经 TUI ACL 转为 TUI Model；只有 [Context Map](03-context-map.md) 登记的 Shared Kernel 类型 **MAY** 在其列明的参与 BC 间跨界（`Message` 用于 Runtime / Context Management / Provider，`ReasoningLevel` 用于 Agent Runtime / Context Management / Provider），其他内部类型 **NEVER** 直通 | provider wire type 直接进入 Runtime，或 `DomainEvent` 直接进入 TUI Model，或未登记类型被多个 BC 各自复制 |
 | R8 | **同 crate 内 Hexagonal 层级依赖方向**：feature crate 内部 **MUST** 采用 Hexagonal 依赖方向（`domain ← application ← ports ← adapters`）。`domain` **NEVER** 依赖 `application` / `ports` / `adapters`；`application` 只依赖 `domain`（+ 经 `ports` 消费外部）；`ports` 只依赖 `domain`；`adapters` 可依赖 `ports` + `domain`。小模块 MAY 只使用部分层，**NEVER** 为对称预建空层。采用 `capabilities/` 递归竖切时，每个 capability 内部仍 **MUST** 遵守此方向 | `domain` 层 `use crate::adapters::xxx`；`application` 层直接 `use crate::adapters::xxx` 绕过 `ports`；`ports` 层依赖 `adapters` |
 
 ## 3. 目录名称不证明依赖方向
@@ -51,10 +51,10 @@ Git CLI / 子进程 detail ──实现 Project 消费方拥有的 git worktree 
 ## 4. Agent 执行生命周期状态机原则
 
 - **MUST** `Run` 是全系统唯一的 **Agent 执行生命周期状态机**，位于 Agent Runtime 内，且**内存态、不持久化、崩溃从头开始**。
-- **MAY** 其他 BC 为自身局部聚合定义状态机（例如 Task 状态迁移、Workflow effort 调节、MCP Connection 生命周期），但这些状态机 **NEVER** 复制、驱动或替代 Run 的执行生命周期。
+- **MAY** 其他 BC 为自身局部聚合定义状态机（例如 Task 状态迁移、Workflow Graph 节点状态与迁移校验、MCP Connection 生命周期），但这些状态机 **NEVER** 复制、驱动或替代 Run 的执行生命周期。
 - Session **NEVER** 拥有独立状态机——Session 是数据聚合（对话历史容器），其“状态”是 Run 状态的投影或 IO 动作，无独立执行生命周期不变量。
 - 系统 **NEVER** 引入 durable model invocation checkpoint 链（人在环 CLI 由“人 + 文件系统真实状态”兜底副作用一致性）。
-- Reasoning Node 状态机（Workflow）是 **effort 调节机**，与 Run **执行状态机**职责分离，NEVER 混淆。
+- Workflow Graph Kernel 状态与迁移校验属于 Workflow BC，与 Run **执行状态机**职责分离，NEVER 混淆。
 
 ## 5. Future 演进的依赖约束
 
