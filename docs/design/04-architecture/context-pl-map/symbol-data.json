@@ -4460,20 +4460,18 @@
    "duty": "工具调用收敛结果摘要（纯数据 DTO，8 个公开字段、无方法）：step finalize 时把本轮 tool/agent 调用的 call_id、序号、结果种类、安全摘要、产物引用、可能副作用与未收敛调用 写入 FinalizedOutcomeRecord；跨 crate 仅外部读 outcome 字段判定取消终态，其余字段 context 内部构造与持久化消费",
    "deep_path": null,
    "def": "domain.rs",
-   "signature": "pub struct StepReceiptData {",
-   "fields": [],
-   "methods": [
-    "tool(call_id: impl Into<String>, index: usize, outcome: ToolOutco)",
-    "agent(call_id: impl Into<String>, index: usize, outcome: ToolOutco)",
-    "with_summary(mut self, summary: impl Into<String>)",
-    "with_artifact_ref(mut self, artifact_ref: impl Into<String>)",
-    "with_possible_side_effect(mut self, effect: impl Into<String>)",
-    "with_unfinished_call(mut self, call_id: impl Into<String>)",
-    "call_id(&self)",
-    "summary(&self)",
-    "artifact_refs(&self)",
-    "possible_side_effects(&self)"
+   "signature": "pub struct StepReceiptData {  // 纯数据 DTO，无 inherent 方法",
+   "fields": [
+    "pub call_id: String",
+    "pub index: usize",
+    "pub outcome: ToolOutcomeKindData",
+    "pub agent: bool",
+    "pub summary: Option<String>",
+    "pub artifact_refs: Vec<String>",
+    "pub possible_side_effects: Vec<String>",
+    "pub unfinished_call_ids: Vec<String>"
    ],
+   "methods": [],
    "consumer_count": 6,
    "consumers": [
     {
