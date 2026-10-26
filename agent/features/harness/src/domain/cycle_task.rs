@@ -231,7 +231,10 @@ impl RsiTask for HarnessRsiCycleTask {
                 &cycle_id,
             )
             .await?;
-            save_signal_history(&self.history_path, &history);
+            // dry-run：只预演累计（内存中判定），NEVER 写 signal-history
+            if !self.dry_run {
+                save_signal_history(&self.history_path, &history);
+            }
             let prefix = if self.dry_run { "（dry-run）" } else { "" };
             let mut summary_text = format!(
                 "{prefix}诊断完成：{} 条任务（不改动组件）",
