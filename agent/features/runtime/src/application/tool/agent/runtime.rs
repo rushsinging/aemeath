@@ -119,6 +119,8 @@ async fn call_tool_with_timeout(
         return Err(tool_call_cancelled_message(name));
     }
     tools::published::schema_validation::strip_runtime_meta(&mut input);
+    // 与生产 ExecutionAdapter 对齐：`timeout` 由框架消费，校验前摘除。
+    tools::types::take_timeout_from_input(&mut input);
     if let Err(mismatch) =
         tools::published::schema_validation::validate_tool_input(name, &tool.input_schema(), &input)
     {

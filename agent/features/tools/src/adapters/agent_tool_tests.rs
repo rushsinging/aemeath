@@ -64,11 +64,19 @@ async fn test_agent_tool_uses_finite_default_timeout() {
         .contains("wall-clock timeout: 3600 seconds"));
 }
 
+/// `timeout` 上限属工具参数契约：解析归 `get_timeout_secs`（框架在派发前调用）。
+/// 工具内部只消费 `ctx.effective_timeout_secs()`，MUST 原样采用框架下发值。
 #[tokio::test]
 async fn test_agent_tool_caps_timeout_at_24_hours() {
     let tool = AgentTool;
+    assert_eq!(
+        tool.get_timeout_secs(Some(100_000), false),
+        86_400,
+        "显式 timeout MUST 被 clamp 到 24h 上限"
+    );
+
     let runner = Arc::new(StubRunner::default());
-    let ctx = test_ctx_with_runner(runner.clone());
+    let ctx = test_ctx_with_runner(runner.clone()).with_effective_timeout_secs(86_400);
 
     let result = tool
         .call(
@@ -76,7 +84,6 @@ async fn test_agent_tool_caps_timeout_at_24_hours() {
                 "prompt": "finished",
                 "description": "run task",
                 "agent": "coder",
-                "timeout": 100000,
             }),
             &ctx,
         )
@@ -85,15 +92,22 @@ async fn test_agent_tool_caps_timeout_at_24_hours() {
     assert!(!result.is_error);
     assert_eq!(
         *runner.captured_timeout.lock().unwrap(),
-        std::time::Duration::from_secs(86400)
+        std::time::Duration::from_secs(86_400)
     );
 }
 
+/// 零值 MUST 归一到 1 秒（框架解析层），工具原样采用框架下发值。
 #[tokio::test]
 async fn test_agent_tool_clamps_zero_timeout_to_one_second() {
     let tool = AgentTool;
+    assert_eq!(
+        tool.get_timeout_secs(Some(0), false),
+        1,
+        "0 MUST 被 clamp 到 1 秒"
+    );
+
     let runner = Arc::new(StubRunner::default());
-    let ctx = test_ctx_with_runner(runner.clone());
+    let ctx = test_ctx_with_runner(runner.clone()).with_effective_timeout_secs(1);
 
     let result = tool
         .call(
@@ -101,7 +115,6 @@ async fn test_agent_tool_clamps_zero_timeout_to_one_second() {
                 "prompt": "finished",
                 "description": "run task",
                 "agent": "coder",
-                "timeout": 0,
             }),
             &ctx,
         )
@@ -119,16 +132,30 @@ async fn test_agent_tool_clamps_zero_timeout_to_one_second() {
         .contains("0 means unlimited"));
 }
 
+/// `timeout` 由 Catalog 统一注入发布 schema，工具自身 schema MUST NOT 声明它。
 #[test]
 fn test_agent_tool_schema_describes_timeout_without_max_turns() {
     let tool = AgentTool;
 
-    let schema = tool.input_schema().to_string();
+    let own_schema = tool.input_schema().to_string();
     let description = tool.description();
 
-    assert!(schema.contains("timeout"));
-    assert!(!schema.contains("max_turns"));
+    assert!(
+        !own_schema.contains("timeout"),
+        "工具 schema MUST NOT 声明 timeout（由 catalog 注入）: {own_schema}"
+    );
+    assert!(!own_schema.contains("max_turns"));
     assert!(!description.contains("1000 rounds"));
+
+    let published = crate::domain::timeout_policy::inject_timeout_into_input_schema(
+        tool.input_schema(),
+        tool.get_timeout_secs(None, false),
+        tool.get_timeout_secs(Some(u64::MAX), false),
+    );
+    assert!(
+        published.to_string().contains("timeout"),
+        "catalog 注入后发布 schema MUST 含 timeout: {published}"
+    );
 }
 
 #[tokio::test]

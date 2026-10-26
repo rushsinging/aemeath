@@ -128,6 +128,25 @@ async fn status_tool_unknown_task_errors() {
     assert!(result.is_error, "未知任务必须报错");
 }
 
+/// 原始缺陷回归：模型按 catalog 注入的发布 schema 传 `timeout` 时，
+/// 框架 MUST 在执行前摘除，`BackgroundProcessLogs` 不得因此报未知字段。
+#[tokio::test]
+async fn logs_tool_accepts_framework_timeout_after_strip() {
+    let tool = BackgroundProcessLogsTool { source: source() };
+    let mut input = serde_json::json!({"task_id": "task-1", "timeout": 30});
+    let taken = crate::domain::timeout_policy::take_timeout_from_input(&mut input);
+    assert_eq!(taken, Some(30));
+
+    let result = tool.call(input, &test_context()).await;
+    assert!(
+        !result.is_error,
+        "框架摘除 timeout 后 MUST 正常读取日志: {}",
+        result.text
+    );
+    let log = result.data.expect("结构化数据").log;
+    assert!(log.text.contains("line-1"));
+}
+
 #[tokio::test]
 async fn logs_tool_returns_chunk_and_cursor() {
     let tool = BackgroundProcessLogsTool { source: source() };

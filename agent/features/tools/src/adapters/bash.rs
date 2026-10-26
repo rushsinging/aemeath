@@ -143,10 +143,11 @@ impl TypedTool for BashTool {
             }
         }
         // Runtime 已按档位解析并下发；直接调用（单测）时回落到本工具默认档。
+        // `timeout` 是框架级通用参数，执行前已被框架摘除，**NEVER** 读 `args.timeout`。
         let timeout_secs = ctx
             .scope()
             .effective_timeout_secs()
-            .unwrap_or_else(|| self.get_timeout_secs(args.timeout, false));
+            .unwrap_or_else(|| self.get_timeout_secs(None, false));
 
         let path_base = ctx.workspace_read().current_path_base();
         log::debug!(

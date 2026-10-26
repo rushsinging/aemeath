@@ -568,3 +568,98 @@ async fn parent_adapter_drop_does_not_hang_run_with_full_coordinator_api() {
     assert_eq!(run.status(), RunStatus::ExecutingTools);
     assert!(run.pending_interaction().is_none());
 }
+
+// ── approval 直连执行的 effective timeout ─────────────────────────
+
+/// approval 直连执行不经 supervisor：catalog 查不到工具时 MUST 返回 `None`，
+/// 由工具自身 `get_timeout_secs(None, false)` 回落默认档，而不是编造值。
+#[test]
+fn approval_path_returns_none_when_tool_missing_from_catalog() {
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
+        std::path::PathBuf::from("/tmp"),
+        cancel,
+    );
+    let catalog: std::sync::Arc<dyn tools::ToolCatalogPort> =
+        std::sync::Arc::new(crate::application::run::run_factory_support::doubles::FakeToolCatalog);
+
+    assert_eq!(
+        super::resolve_approved_timeout(
+            &catalog,
+            &ctx,
+            "Bash",
+            &serde_json::json!({"timeout": 60})
+        ),
+        None,
+        "catalog 无 descriptor 时 MUST 回落工具自身默认档"
+    );
+}
+
+/// 固定返回指定 snapshot 的 catalog 桩（复用 tools 的测试 catalog 工厂）。
+struct SnapshotToolCatalog(tools::ToolCatalogSnapshot);
+
+impl tools::ToolCatalogPort for SnapshotToolCatalog {
+    fn snapshot_with_backgrounding(
+        &self,
+        _scope: &tools::RegistryScopeName,
+        _profile: &tools::ToolProfileName,
+        _backgrounding_enabled: bool,
+    ) -> Result<tools::ToolCatalogSnapshot, tools::ToolCatalogError> {
+        Ok(self.0.clone())
+    }
+}
+
+fn approval_timeout_fixture() -> (
+    std::sync::Arc<dyn tools::ToolCatalogPort>,
+    tools::published::execution::ToolExecutionContext,
+) {
+    let ctx = crate::application::run::workspace_test_support::test_tool_execution_context(
+        std::path::PathBuf::from("/tmp"),
+        tokio_util::sync::CancellationToken::new(),
+    );
+    let catalog: std::sync::Arc<dyn tools::ToolCatalogPort> =
+        std::sync::Arc::new(SnapshotToolCatalog(
+            tools::test_support::sequential_test_tool_catalog("Bash", 1800),
+        ));
+    (catalog, ctx)
+}
+
+#[test]
+fn approval_path_resolves_explicit_timeout_like_supervisor() {
+    let (catalog, ctx) = approval_timeout_fixture();
+    assert_eq!(
+        super::resolve_approved_timeout(
+            &catalog,
+            &ctx,
+            "Bash",
+            &serde_json::json!({"command": "ls", "timeout": 60}),
+        ),
+        Some(60),
+        "显式 timeout MUST 被采纳（与 supervisor 同源）"
+    );
+}
+
+#[test]
+fn approval_path_clamps_timeout_and_falls_back_to_catalog_default() {
+    let (catalog, ctx) = approval_timeout_fixture();
+    assert_eq!(
+        super::resolve_approved_timeout(
+            &catalog,
+            &ctx,
+            "Bash",
+            &serde_json::json!({"command": "ls", "timeout": 100_000}),
+        ),
+        Some(86_400),
+        "超上限 MUST 被 clamp 到 max_timeout_secs"
+    );
+    assert_eq!(
+        super::resolve_approved_timeout(
+            &catalog,
+            &ctx,
+            "Bash",
+            &serde_json::json!({"command": "ls"}),
+        ),
+        Some(1800),
+        "缺省 MUST 用 descriptor.timeout_secs"
+    );
+}
