@@ -7,11 +7,10 @@ use async_trait::async_trait;
 use crate::application::reminder_pipeline::ReminderPipeline;
 use crate::domain::reminder::{ReminderEventSource, ReminderSource};
 use crate::domain::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, CompactionDecisionData, ContextAppendData,
-    ContextAppendError, ContextMessage, ContextPortError, ContextRequestData, ContextWindowData,
-    RunId, SystemBlock, ToolReceiptMutationData, ToolReceiptMutationError,
-    ToolReceiptMutationReceiptData,
+    AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
+    CompactionDecisionData, ContextAppendData, ContextAppendError, ContextMessage,
+    ContextPortError, ContextRequestData, ContextWindowData, RunId, SessionAppendReceiptData,
+    SystemBlock, ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
 use crate::ports::{
     ContextAppendPort, ContextCompactPort, ContextMemorySource, ContextPromptSource,
@@ -449,7 +448,7 @@ impl ContextAppendPort for ContextApplicationService {
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
+    ) -> Result<SessionAppendReceiptData, AcceptedInputError> {
         self.session.append_accepted_input(append).await
     }
 
@@ -465,7 +464,7 @@ impl ContextAppendPort for ContextApplicationService {
         session_id: &SessionId,
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::domain::StepReceiptData>, ToolReceiptMutationError> {
+    ) -> Result<Vec<crate::domain::RunStepReceiptData>, ToolReceiptMutationError> {
         self.session
             .step_receipts(session_id, run_id, step_id)
             .await
@@ -484,7 +483,7 @@ impl ContextAppendPort for ContextApplicationService {
     async fn append_and_persist(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError> {
+    ) -> Result<SessionAppendReceiptData, ContextAppendError> {
         // #1848 尾部注入类 reminder 显式落盘：flush 本 Run 待落盘的注入
         // 消息并前置到提交消息头部（canonical 顺序 u → R → a/tool），
         // 使注入轮后的请求前缀逐 token 稳定（prompt cache 命中）。

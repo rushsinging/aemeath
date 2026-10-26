@@ -19,10 +19,10 @@
 //! 不扩展第五个 ContextPort 方法。
 
 use crate::ports::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, CompactTrigger, ContextAppendData, ContextAppendError,
-    ContextPortError, ContextRequestData, ContextWindowData, FinalizeCause, SessionId,
-    SessionRevision, StepReceiptData,
+    AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
+    CompactTrigger, ContextAppendData, ContextAppendError, ContextPortError, ContextRequestData,
+    ContextWindowData, FinalizeCause, RunStepReceiptData, SessionAppendReceiptData, SessionId,
+    SessionRevision,
 };
 use context::{ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData};
 use sdk::RunStepId;
@@ -173,7 +173,7 @@ impl ContextCoordinator {
         &self,
         request: &ContextRequestData,
         messages: Vec<Message>,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
+    ) -> Result<SessionAppendReceiptData, AcceptedInputError> {
         self.ports
             .append
             .append_accepted_input(&AcceptedInputAppendData {
@@ -196,7 +196,7 @@ impl ContextCoordinator {
     pub(crate) async fn step_receipts(
         &self,
         request: &ContextRequestData,
-    ) -> Result<Vec<StepReceiptData>, ToolReceiptMutationError> {
+    ) -> Result<Vec<RunStepReceiptData>, ToolReceiptMutationError> {
         self.ports
             .append
             .step_receipts(&request.session_id, &request.run_id, &request.step_id)
@@ -212,9 +212,9 @@ impl ContextCoordinator {
         finalize_cause: FinalizeCause,
         duration_ms: Option<u64>,
         messages: Vec<Message>,
-        receipts: Vec<StepReceiptData>,
+        receipts: Vec<RunStepReceiptData>,
         api_input_tokens: Option<u64>,
-    ) -> Result<AppendReceiptData, ContextAppendError> {
+    ) -> Result<SessionAppendReceiptData, ContextAppendError> {
         self.ports
             .append
             .append_and_persist(&ContextAppendData {

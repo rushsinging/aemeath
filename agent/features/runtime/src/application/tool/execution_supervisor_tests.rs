@@ -136,7 +136,7 @@ impl context::ContextAppendPort for RecordingContextPort {
     async fn append_and_persist(
         &self,
         _append: &ContextAppendData,
-    ) -> Result<context::AppendReceiptData, context::ContextAppendError> {
+    ) -> Result<context::SessionAppendReceiptData, context::ContextAppendError> {
         Err(context::ContextAppendError::Storage(
             "test port 不支持 append_and_persist".to_string(),
         ))

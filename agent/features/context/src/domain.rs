@@ -610,7 +610,7 @@ pub enum ToolOutcomeKindData {
 
 /// finalized Step 中可确定重放的 Tool/Agent receipt（纯数据 DTO）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct StepReceiptData {
+pub struct RunStepReceiptData {
     pub call_id: String,
     pub index: usize,
     pub outcome: ToolOutcomeKindData,
@@ -650,14 +650,6 @@ impl AcceptedInputAppendData {
     }
 }
 
-/// accepted input durable commit 的确定性回执。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AcceptedInputReceiptData {
-    pub run_id: RunId,
-    pub step_id: RunStepId,
-    pub committed_revision: SessionRevision,
-}
-
 /// accepted input append 的 typed failure。
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum AcceptedInputError {
@@ -680,13 +672,13 @@ pub struct ContextAppendData {
     pub finalize_cause: FinalizeCause,
     pub duration_ms: Option<u64>,
     pub messages: Vec<ContextMessage>,
-    pub receipts: Vec<StepReceiptData>,
+    pub receipts: Vec<RunStepReceiptData>,
     pub api_input_tokens: Option<u64>,
 }
 
-/// append durable commit 的确定性回执。
+/// 会话追加（finalized step / accepted input）durable commit 的统一确定性回执。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AppendReceiptData {
+pub struct SessionAppendReceiptData {
     pub run_id: RunId,
     pub step_id: RunStepId,
     pub committed_revision: SessionRevision,

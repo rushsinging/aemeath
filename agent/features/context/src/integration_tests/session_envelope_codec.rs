@@ -5,7 +5,7 @@ use crate::{
     AcceptedInputRecord, CanonicalSession, CommittedRunSlice, CommittedRunStep,
     FinalizedOutcomeRecord, SessionCodec, SessionCodecError, CURRENT_SESSION_SCHEMA_VERSION,
 };
-use crate::{FinalizeCause, StepReceiptData, ToolOutcomeKindData};
+use crate::{FinalizeCause, RunStepReceiptData, ToolOutcomeKindData};
 use serde_json::json;
 use share::message::{ContentBlock, Message, Role};
 use share::session_types::{
@@ -239,7 +239,7 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
                 finalize_cause: FinalizeCause::UserCancelledStep,
                 duration_ms: Some(7_325_000),
                 messages: vec![Message::user("partial assistant")].into(),
-                receipts: vec![StepReceiptData {
+                receipts: vec![RunStepReceiptData {
                     call_id: "agent-call".to_string(),
                     index: 0,
                     outcome: ToolOutcomeKindData::CancellationUnconfirmed,

@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::ports::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, CompactionDecisionData, ContextAppendData,
-    ContextAppendError, ContextPortError, ContextRequestData, ContextWindowData, DecisionReason,
-    FinalizeCause, InteractionRequestId, Language, SessionId, SessionRevision, StepReceiptData,
+    AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
+    CompactionDecisionData, ContextAppendData, ContextAppendError, ContextPortError,
+    ContextRequestData, ContextWindowData, DecisionReason, FinalizeCause, InteractionRequestId,
+    Language, RunStepReceiptData, SessionAppendReceiptData, SessionId, SessionRevision,
     SystemBlock, TokenBudget, ToolOutcomeKindData, Urgency,
 };
 use async_trait::async_trait;
@@ -109,10 +109,10 @@ impl ContextAppendPort for RecordingPort {
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
+    ) -> Result<SessionAppendReceiptData, AcceptedInputError> {
         self.calls.lock().unwrap().push("append_accepted_input");
         self.accepted_inputs.lock().unwrap().push(append.clone());
-        Ok(AcceptedInputReceiptData {
+        Ok(SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(2),
@@ -122,10 +122,10 @@ impl ContextAppendPort for RecordingPort {
     async fn append_and_persist(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError> {
+    ) -> Result<SessionAppendReceiptData, ContextAppendError> {
         self.calls.lock().unwrap().push("append_and_persist");
         self.appends.lock().unwrap().push(append.clone());
-        Ok(AppendReceiptData {
+        Ok(SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(2),
@@ -284,7 +284,7 @@ async fn finalized_step_returns_receipt_and_preserves_every_boundary_field() {
     let frozen = request();
     let messages = vec![Message::user("finalized")];
     let receipts = vec![
-        StepReceiptData {
+        RunStepReceiptData {
             call_id: "tool-1".to_string(),
             index: 0,
             outcome: ToolOutcomeKindData::Failure,
@@ -294,7 +294,7 @@ async fn finalized_step_returns_receipt_and_preserves_every_boundary_field() {
             possible_side_effects: Vec::new(),
             unfinished_call_ids: Vec::new(),
         },
-        StepReceiptData {
+        RunStepReceiptData {
             call_id: "agent-1".to_string(),
             index: 1,
             outcome: ToolOutcomeKindData::CancellationUnconfirmed,

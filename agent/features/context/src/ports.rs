@@ -3,9 +3,9 @@ use share::ids::SessionId;
 use async_trait::async_trait;
 
 use crate::domain::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, ContextAppendData, ContextAppendError, ContextMessages,
-    ContextPortError, ContextRequestData, SessionRevision, SystemBlock, ToolReceiptMutationData,
+    AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
+    ContextAppendData, ContextAppendError, ContextMessages, ContextPortError, ContextRequestData,
+    SessionAppendReceiptData, SessionRevision, SystemBlock, ToolReceiptMutationData,
     ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
 
@@ -42,7 +42,7 @@ pub(crate) trait SessionRepository: Send + Sync {
     async fn append_accepted_input(
         &self,
         _append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
+    ) -> Result<SessionAppendReceiptData, AcceptedInputError> {
         Err(AcceptedInputError::Storage(
             "此 SessionRepository 未实现已接受输入持久化".to_string(),
         ))
@@ -60,7 +60,7 @@ pub(crate) trait SessionRepository: Send + Sync {
         _session_id: &SessionId,
         _run_id: &sdk::RunId,
         _step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::domain::StepReceiptData>, ToolReceiptMutationError> {
+    ) -> Result<Vec<crate::domain::RunStepReceiptData>, ToolReceiptMutationError> {
         Err(ToolReceiptMutationError::Storage(
             "此 SessionRepository 未实现 Step receipt 查询".to_string(),
         ))
@@ -79,7 +79,7 @@ pub(crate) trait SessionRepository: Send + Sync {
     async fn append_finalized(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError>;
+    ) -> Result<SessionAppendReceiptData, ContextAppendError>;
     async fn commit_compaction(
         &self,
         request: &CompactRequestData,

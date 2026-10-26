@@ -44,12 +44,12 @@ impl SessionRepository for BaselineSession {
     async fn append_finalized(
         &self,
         append: &ContextAppendData,
-    ) -> Result<crate::domain::AppendReceiptData, crate::domain::ContextAppendError> {
+    ) -> Result<crate::domain::SessionAppendReceiptData, crate::domain::ContextAppendError> {
         self.finalized_appends
             .lock()
             .expect("finalized appends lock poisoned")
             .push(append.messages.clone());
-        Ok(crate::domain::AppendReceiptData {
+        Ok(crate::domain::SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: self.revision,

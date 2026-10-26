@@ -159,7 +159,7 @@ impl crate::ports::ContextAppendPort for StubContextPort {
     async fn append_and_persist(
         &self,
         _append: &crate::ports::ContextAppendData,
-    ) -> Result<crate::ports::AppendReceiptData, crate::ports::ContextAppendError> {
+    ) -> Result<crate::ports::SessionAppendReceiptData, crate::ports::ContextAppendError> {
         Err(crate::ports::ContextAppendError::Storage(
             "stub".to_string(),
         ))

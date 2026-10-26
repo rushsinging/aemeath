@@ -81,13 +81,13 @@ pub use domain::{
     SessionRevision, Urgency,
 };
 pub use domain::{
-    AppendReceiptData, BackgroundProcessCompletionStatus, BackgroundProcessReminderItemData,
-    CompactOutcome, CompactRequestData, CompactTrigger, CompactionDecisionData, ContextAppendError,
+    BackgroundProcessCompletionStatus, BackgroundProcessReminderItemData, CompactOutcome,
+    CompactRequestData, CompactTrigger, CompactionDecisionData, ContextAppendError,
     ContextPortError, ContextRequestData, ContextWindowData, DecisionReason, FinalizeCause,
-    InvocationReminderData, Language, MemoryRecallEntryData, StepReceiptData,
-    TaskProgressReminderData, TaskProgressReminderItemData, TaskProgressStatus,
-    ToolCallIdentityData, ToolOutcomeKindData, ToolReceiptMutationData, ToolReceiptMutationError,
-    ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
+    InvocationReminderData, Language, MemoryRecallEntryData, RunStepReceiptData,
+    SessionAppendReceiptData, TaskProgressReminderData, TaskProgressReminderItemData,
+    TaskProgressStatus, ToolCallIdentityData, ToolOutcomeKindData, ToolReceiptMutationData,
+    ToolReceiptMutationError, ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
 };
 pub use ports::{
     ContextAppendPort, ContextCompactPort, ContextPorts, ContextWindowPort, ReminderControlPort,
@@ -108,11 +108,11 @@ pub mod context_port {
     #[cfg(test)]
     pub(crate) use crate::domain::ContextMessage;
     pub use crate::domain::{
-        AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-        CompactOutcome, CompactRequestData, CompactTrigger, CompactionDecisionData,
-        ContextAppendData, ContextAppendError, ContextPortError, ContextRequestData,
-        ContextWindowData, DecisionReason, FinalizeCause, Language, SessionRevision,
-        StepReceiptData, SystemBlock, TokenBudget, ToolOutcomeKindData, Urgency,
+        AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
+        CompactTrigger, CompactionDecisionData, ContextAppendData, ContextAppendError,
+        ContextPortError, ContextRequestData, ContextWindowData, DecisionReason, FinalizeCause,
+        Language, RunStepReceiptData, SessionAppendReceiptData, SessionRevision, SystemBlock,
+        TokenBudget, ToolOutcomeKindData, Urgency,
     };
     pub use crate::ports::{
         ContextAppendPort, ContextCompactPort, ContextPorts, ContextWindowPort, ReminderControlPort,

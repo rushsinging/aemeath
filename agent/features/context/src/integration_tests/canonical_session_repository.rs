@@ -1216,7 +1216,7 @@ async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
     finalized.expected_revision = SessionRevision::new(1);
     finalized.finalize_cause = FinalizeCause::UserCancelledStep;
     finalized.api_input_tokens = Some(42);
-    finalized.receipts = vec![crate::StepReceiptData {
+    finalized.receipts = vec![crate::RunStepReceiptData {
         call_id: "agent-call".to_string(),
         index: 0,
         outcome: crate::ToolOutcomeKindData::CancellationUnconfirmed,

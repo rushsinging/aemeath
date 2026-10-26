@@ -2,10 +2,10 @@ use share::ids::InteractionRequestId;
 
 use crate::compact::CompactResult;
 use crate::context_port::{
-    AcceptedInputAppendData, AcceptedInputReceiptData, AppendReceiptData, CompactOutcome,
-    CompactRequestData, CompactTrigger, CompactionDecisionData, ContextAppendData,
-    ContextAppendError, ContextMessage, ContextPortError, ContextRequestData, ContextWindowData,
-    DecisionReason, FinalizeCause, SessionRevision, StepReceiptData, TokenBudget,
+    AcceptedInputAppendData, CompactOutcome, CompactRequestData, CompactTrigger,
+    CompactionDecisionData, ContextAppendData, ContextAppendError, ContextMessage,
+    ContextPortError, ContextRequestData, ContextWindowData, DecisionReason, FinalizeCause,
+    RunStepReceiptData, SessionAppendReceiptData, SessionRevision, TokenBudget,
     ToolOutcomeKindData, Urgency,
 };
 use crate::context_port::{ContextAppendPort, ContextCompactPort, ContextWindowPort};
@@ -77,8 +77,8 @@ impl ContextAppendPort for FakeContextPort {
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, crate::context_port::AcceptedInputError> {
-        Ok(AcceptedInputReceiptData {
+    ) -> Result<SessionAppendReceiptData, crate::context_port::AcceptedInputError> {
+        Ok(SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(4),
@@ -88,8 +88,8 @@ impl ContextAppendPort for FakeContextPort {
     async fn append_and_persist(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError> {
-        Ok(AppendReceiptData {
+    ) -> Result<SessionAppendReceiptData, ContextAppendError> {
+        Ok(SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(4),
@@ -108,7 +108,7 @@ async fn accepted_input_port_returns_typed_receipt() {
         messages: vec![Message::user("accepted")],
     };
 
-    let receipt: AcceptedInputReceiptData = port.append_accepted_input(&accepted).await.unwrap();
+    let receipt: SessionAppendReceiptData = port.append_accepted_input(&accepted).await.unwrap();
     assert_eq!(receipt.run_id, accepted.run_id);
     assert_eq!(receipt.step_id, accepted.step_id);
     assert_eq!(receipt.committed_revision, SessionRevision::new(4));
@@ -138,7 +138,7 @@ fn finalized_append() -> ContextAppendData {
         duration_ms: Some(7_325_000),
         messages: vec![Message::user("finalized")],
         receipts: vec![
-            StepReceiptData {
+            RunStepReceiptData {
                 call_id: "call-1".to_string(),
                 index: 0,
                 outcome: ToolOutcomeKindData::Success,
@@ -148,7 +148,7 @@ fn finalized_append() -> ContextAppendData {
                 possible_side_effects: Vec::new(),
                 unfinished_call_ids: Vec::new(),
             },
-            StepReceiptData {
+            RunStepReceiptData {
                 call_id: "call-2".to_string(),
                 index: 1,
                 outcome: ToolOutcomeKindData::Failure,
@@ -158,7 +158,7 @@ fn finalized_append() -> ContextAppendData {
                 possible_side_effects: Vec::new(),
                 unfinished_call_ids: Vec::new(),
             },
-            StepReceiptData {
+            RunStepReceiptData {
                 call_id: "call-3".to_string(),
                 index: 2,
                 outcome: ToolOutcomeKindData::Success,
@@ -168,7 +168,7 @@ fn finalized_append() -> ContextAppendData {
                 possible_side_effects: Vec::new(),
                 unfinished_call_ids: Vec::new(),
             },
-            StepReceiptData {
+            RunStepReceiptData {
                 call_id: "call-4".to_string(),
                 index: 3,
                 outcome: ToolOutcomeKindData::CancellationUnconfirmed,

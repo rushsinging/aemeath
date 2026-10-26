@@ -60,7 +60,7 @@ impl StepPersistenceCoordinator {
     pub(crate) async fn load_step_receipts(
         &self,
         request: &crate::ports::ContextRequestData,
-    ) -> Result<Vec<crate::ports::StepReceiptData>, LoopEngineError> {
+    ) -> Result<Vec<crate::ports::RunStepReceiptData>, LoopEngineError> {
         self.context
             .step_receipts(request)
             .await

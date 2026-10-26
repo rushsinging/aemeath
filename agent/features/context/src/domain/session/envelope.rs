@@ -7,7 +7,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use task::TaskSnapshotData;
 
-use crate::domain::{FinalizeCause, StepReceiptData, ToolCallReceiptData, ToolReceiptMutationData};
+use crate::domain::{
+    FinalizeCause, RunStepReceiptData, ToolCallReceiptData, ToolReceiptMutationData,
+};
 
 use super::{ChatSegment, PersistedWorkspaceContext, SessionMetadata};
 
@@ -210,7 +212,7 @@ pub struct FinalizedOutcomeRecord {
     #[serde(default)]
     pub duration_ms: Option<u64>,
     pub messages: CommittedStepMessages,
-    pub receipts: Vec<StepReceiptData>,
+    pub receipts: Vec<RunStepReceiptData>,
     pub api_input_tokens: Option<u64>,
     pub fingerprint: String,
     pub committed_revision: u64,
@@ -424,7 +426,7 @@ impl SessionHistory {
         .find(|receipt| receipt.identity == mutation.identity)
     }
 
-    pub fn step_receipts(&self, run_id: &str, step_id: &str) -> Vec<StepReceiptData> {
+    pub fn step_receipts(&self, run_id: &str, step_id: &str) -> Vec<RunStepReceiptData> {
         let mut receipts = self
             .step(run_id, step_id)
             .map(|step| {
@@ -625,7 +627,7 @@ impl CanonicalSession {
         tools::published::skill::SkillLoadDecision::Fresh
     }
 
-    pub fn step_receipts(&self, run_id: &str, step_id: &str) -> Vec<StepReceiptData> {
+    pub fn step_receipts(&self, run_id: &str, step_id: &str) -> Vec<RunStepReceiptData> {
         self.run_slices.step_receipts(run_id, step_id)
     }
 

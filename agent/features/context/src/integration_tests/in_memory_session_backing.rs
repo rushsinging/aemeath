@@ -295,7 +295,7 @@ async fn finalized_outcome_keeps_receipt_metadata_for_idempotent_retry() {
     let mut outcome = append();
     outcome.finalize_cause = FinalizeCause::RunTerminated;
     outcome.api_input_tokens = Some(21);
-    outcome.receipts = vec![crate::StepReceiptData {
+    outcome.receipts = vec![crate::RunStepReceiptData {
         call_id: "agent-call".to_string(),
         index: 0,
         outcome: crate::ToolOutcomeKindData::CancellationUnconfirmed,

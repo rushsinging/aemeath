@@ -200,7 +200,7 @@ where
 }
 
 pub(super) fn terminal_from_cleanup_receipts(
-    receipts: &[crate::ports::StepReceiptData],
+    receipts: &[crate::ports::RunStepReceiptData],
 ) -> crate::domain::agent_run::RunStepStatus {
     if receipts
         .iter()

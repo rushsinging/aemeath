@@ -88,18 +88,17 @@
    "CompactBehavior"
   ],
   "持久化": [
-   "StepReceiptData",
    "FinalizeCause",
-   "AppendReceiptData",
-   "AcceptedInputReceiptData",
+   "RunStepReceiptData",
+   "SessionAppendReceiptData",
+   "ToolCallIdentityData",
    "ToolCallReceiptData",
    "ToolCallState",
-   "ToolCallIdentityData",
-   "ToolTerminalReceiptData",
    "ToolOutcomeKindData",
    "ToolReceiptMutationData",
    "ToolReceiptMutationError",
-   "ToolReceiptMutationReceiptData"
+   "ToolReceiptMutationReceiptData",
+   "ToolTerminalReceiptData"
   ]
  },
  "nodeGroup": {
@@ -237,182 +236,6 @@
       {
        "line": 1837,
        "code": "        &self,\n        append: &crate::ports::AcceptedInputAppendData,\n    ) -> Result<crate::ports::AcceptedInputReceiptData, crate::ports::AcceptedInputError> {\n        self.record_persistence(\"append_accepted_input\");\n        self.inner.append.append_accepted_input(append).await",
-       "kind": "implty",
-       "label": "接口实现",
-       "at": 2
-      }
-     ]
-    }
-   ]
-  },
-  "AcceptedInputReceiptData": {
-   "kind": "struct",
-   "duty": "已受理用户输入的持久化回执：确认输入落盘位置与新修订号",
-   "deep_path": null,
-   "def": "domain.rs",
-   "signature": "pub struct AcceptedInputReceiptData {",
-   "fields": [
-    "pub run_id: RunId",
-    "pub step_id: RunStepId",
-    "pub committed_revision: SessionRevision"
-   ],
-   "methods": [],
-   "consumer_count": 3,
-   "consumers": [
-    {
-     "file": "agent/features/runtime/src/application/context/coordination.rs",
-     "module": "runtime :: application/context/coordination.rs",
-     "forms": [
-      "接口实现"
-     ],
-     "snippets": [
-      {
-       "line": 176,
-       "code": "        request: &ContextRequestData,\n        messages: Vec<Message>,\n    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {\n        self.ports\n            .append",
-       "kind": "implty",
-       "label": "接口实现",
-       "at": 2
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/application/context/coordination_tests.rs",
-     "module": "runtime :: application/context/coordination_tests.rs",
-     "forms": [
-      "构造"
-     ],
-     "snippets": [
-      {
-       "line": 115,
-       "code": "        self.calls.lock().unwrap().push(\"append_accepted_input\");\n        self.accepted_inputs.lock().unwrap().push(append.clone());\n        Ok(AcceptedInputReceiptData {\n            run_id: append.run_id.clone(),\n            step_id: append.step_id.clone(),",
-       "kind": "ctor",
-       "label": "构造",
-       "at": 2
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/application/loop_engine/chat/session_driver_session_lifecycle_tests.rs",
-     "module": "runtime :: application/loop_engine/chat/session_driver_session_lifecycle_tests.rs",
-     "forms": [
-      "接口实现"
-     ],
-     "snippets": [
-      {
-       "line": 1837,
-       "code": "        &self,\n        append: &crate::ports::AcceptedInputAppendData,\n    ) -> Result<crate::ports::AcceptedInputReceiptData, crate::ports::AcceptedInputError> {\n        self.record_persistence(\"append_accepted_input\");\n        self.inner.append.append_accepted_input(append).await",
-       "kind": "implty",
-       "label": "接口实现",
-       "at": 2
-      }
-     ]
-    }
-   ]
-  },
-  "AppendReceiptData": {
-   "kind": "struct",
-   "duty": "会话追加的持久化回执：确认本轮 step 已写入并返回新修订号",
-   "deep_path": null,
-   "def": "domain.rs",
-   "signature": "pub struct AppendReceiptData {",
-   "fields": [
-    "pub run_id: RunId",
-    "pub step_id: RunStepId",
-    "pub committed_revision: SessionRevision"
-   ],
-   "methods": [],
-   "consumer_count": 6,
-   "consumers": [
-    {
-     "file": "agent/features/runtime/src/application/context/coordination.rs",
-     "module": "runtime :: application/context/coordination.rs",
-     "forms": [
-      "接口实现"
-     ],
-     "snippets": [
-      {
-       "line": 217,
-       "code": "        receipts: Vec<StepReceiptData>,\n        api_input_tokens: Option<u64>,\n    ) -> Result<AppendReceiptData, ContextAppendError> {\n        self.ports\n            .append",
-       "kind": "implty",
-       "label": "接口实现",
-       "at": 2
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/application/context/coordination_tests.rs",
-     "module": "runtime :: application/context/coordination_tests.rs",
-     "forms": [
-      "构造"
-     ],
-     "snippets": [
-      {
-       "line": 128,
-       "code": "        self.calls.lock().unwrap().push(\"append_and_persist\");\n        self.appends.lock().unwrap().push(append.clone());\n        Ok(AppendReceiptData {\n            run_id: append.run_id.clone(),\n            step_id: append.step_id.clone(),",
-       "kind": "ctor",
-       "label": "构造",
-       "at": 2
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/application/loop_engine/chat/pre_compact_trigger_tests.rs",
-     "module": "runtime :: application/loop_engine/chat/pre_compact_trigger_tests.rs",
-     "forms": [
-      "接口实现"
-     ],
-     "snippets": [
-      {
-       "line": 163,
-       "code": "        &self,\n        _append: &crate::ports::ContextAppendData,\n    ) -> Result<crate::ports::AppendReceiptData, crate::ports::ContextAppendError> {\n        Err(crate::ports::ContextAppendError::Storage(\n            \"stub\".to_string(),",
-       "kind": "implty",
-       "label": "接口实现",
-       "at": 2
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/application/loop_engine/chat/session_driver_session_lifecycle_tests.rs",
-     "module": "runtime :: application/loop_engine/chat/session_driver_session_lifecycle_tests.rs",
-     "forms": [
-      "接口实现"
-     ],
-     "snippets": [
-      {
-       "line": 1873,
-       "code": "        &self,\n        append: &crate::ports::ContextAppendData,\n    ) -> Result<crate::ports::AppendReceiptData, crate::ports::ContextAppendError> {\n        self.record_persistence(\"append_and_persist\");\n        self.inner.append.append_and_persist(append).await",
-       "kind": "implty",
-       "label": "接口实现",
-       "at": 2
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/application/run/tests/run_factory_support/fakes.rs",
-     "module": "runtime :: application/run/tests/run_factory_support/fakes.rs",
-     "forms": [
-      "接口实现"
-     ],
-     "snippets": [
-      {
-       "line": 56,
-       "code": "        &self,\n        _append: &crate::ports::ContextAppendData,\n    ) -> Result<crate::ports::AppendReceiptData, crate::ports::ContextAppendError> {\n        Err(crate::ports::ContextAppendError::Storage(\"fake\".into()))\n    }",
-       "kind": "implty",
-       "label": "接口实现",
-       "at": 2
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/application/tool/execution_supervisor_tests.rs",
-     "module": "runtime :: application/tool/execution_supervisor_tests.rs",
-     "forms": [
-      "接口实现"
-     ],
-     "snippets": [
-      {
-       "line": 139,
-       "code": "        &self,\n        _append: &ContextAppendData,\n    ) -> Result<context::AppendReceiptData, context::ContextAppendError> {\n        Err(context::ContextAppendError::Storage(\n            \"test port 不支持 append_and_persist\".to_string(),",
        "kind": "implty",
        "label": "接口实现",
        "at": 2
@@ -4455,161 +4278,6 @@
     }
    ]
   },
-  "StepReceiptData": {
-   "kind": "struct",
-   "duty": "工具调用收敛结果摘要（纯数据 DTO，8 个公开字段、无方法）：step finalize 时把本轮 tool/agent 调用的 call_id、序号、结果种类、安全摘要、产物引用、可能副作用与未收敛调用 写入 FinalizedOutcomeRecord；跨 crate 仅外部读 outcome 字段判定取消终态，其余字段 context 内部构造与持久化消费",
-   "deep_path": null,
-   "def": "domain.rs",
-   "signature": "pub struct StepReceiptData {  // 纯数据 DTO，无 inherent 方法",
-   "fields": [
-    "pub call_id: String",
-    "pub index: usize",
-    "pub outcome: ToolOutcomeKindData",
-    "pub agent: bool",
-    "pub summary: Option<String>",
-    "pub artifact_refs: Vec<String>",
-    "pub possible_side_effects: Vec<String>",
-    "pub unfinished_call_ids: Vec<String>"
-   ],
-   "methods": [],
-   "consumer_count": 6,
-   "consumers": [
-    {
-     "file": "agent/features/runtime/src/application/context/coordination.rs",
-     "module": "runtime :: application/context/coordination.rs",
-     "forms": [
-      "接口实现",
-      "接口实现"
-     ],
-     "snippets": [
-      {
-       "line": 199,
-       "code": "        &self,\n        request: &ContextRequestData,\n    ) -> Result<Vec<StepReceiptData>, ToolReceiptMutationError> {\n        self.ports\n            .append",
-       "kind": "implty",
-       "label": "接口实现",
-       "at": 2
-      },
-      {
-       "line": 215,
-       "code": "        duration_ms: Option<u64>,\n        messages: Vec<Message>,\n        receipts: Vec<StepReceiptData>,\n        api_input_tokens: Option<u64>,\n    ) -> Result<AppendReceiptData, ContextAppendError> {",
-       "kind": "implty",
-       "label": "接口实现",
-       "at": 2
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/application/loop_engine/engine/contracts.rs",
-     "module": "runtime :: application/loop_engine/engine/contracts.rs",
-     "forms": [
-      "类型引用",
-      "类型引用"
-     ],
-     "snippets": [
-      {
-       "line": 512,
-       "code": "    pub duration_ms: Option<u64>,\n    pub messages: Vec<share::message::Message>,\n    pub receipts: Vec<crate::ports::StepReceiptData>,\n}\n",
-       "kind": "fnty",
-       "label": "类型引用",
-       "at": 2
-      },
-      {
-       "line": 578,
-       "code": "        &mut self,\n        _request: &crate::ports::ContextRequestData,\n    ) -> Result<Vec<crate::ports::StepReceiptData>, LoopEngineError> {\n        Ok(Vec::new())\n    }",
-       "kind": "fnty",
-       "label": "类型引用",
-       "at": 2
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/application/loop_engine/chat/session_driver_session_lifecycle_tests.rs",
-     "module": "runtime :: application/loop_engine/chat/session_driver_session_lifecycle_tests.rs",
-     "forms": [
-      "接口实现"
-     ],
-     "snippets": [
-      {
-       "line": 1855,
-       "code": "        run_id: &sdk::RunId,\n        step_id: &sdk::RunStepId,\n    ) -> Result<Vec<crate::ports::StepReceiptData>, context::ToolReceiptMutationError> {\n        self.inner.append.step_receipts( session_id, run_id, step_id).await\n    }",
-       "kind": "implty",
-       "label": "接口实现",
-       "at": 2
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/application/loop_engine/engine/phases.rs",
-     "module": "runtime :: application/loop_engine/engine/phases.rs",
-     "forms": [
-      "接口实现"
-     ],
-     "snippets": [
-      {
-       "line": 203,
-       "code": "\npub(super) fn terminal_from_cleanup_receipts(\n    receipts: &[crate::ports::StepReceiptData],\n) -> crate::domain::agent_run::RunStepStatus {\n    if receipts",
-       "kind": "implty",
-       "label": "接口实现",
-       "at": 2
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/application/loop_engine/run_services.rs",
-     "module": "runtime :: application/loop_engine/run_services.rs",
-     "forms": [
-      "接口实现"
-     ],
-     "snippets": [
-      {
-       "line": 166,
-       "code": "        &mut self,\n        request: &crate::ports::ContextRequestData,\n    ) -> Result<Vec<crate::ports::StepReceiptData>, LoopEngineError> {\n        StepPersistenceCoordinator::from_context(self.context_request.runtime_context)\n            .load_step_receipts(request)",
-       "kind": "implty",
-       "label": "接口实现",
-       "at": 2
-      }
-     ]
-    },
-    {
-     "file": "agent/features/runtime/src/application/loop_engine/step_persistence.rs",
-     "module": "runtime :: application/loop_engine/step_persistence.rs",
-     "forms": [
-      "接口实现"
-     ],
-     "snippets": [
-      {
-       "line": 63,
-       "code": "        &self,\n        request: &crate::ports::ContextRequestData,\n    ) -> Result<Vec<crate::ports::StepReceiptData>, LoopEngineError> {\n        self.context\n            .step_receipts(request)",
-       "kind": "implty",
-       "label": "接口实现",
-       "at": 2
-      }
-     ]
-    }
-   ],
-   "codeRefs": [
-    {
-     "file": "agent/features/context/src/domain.rs",
-     "line": 612,
-     "note": "纯数据 struct 定义（8 pub 字段，无 inherent 方法）"
-    },
-    {
-     "file": "agent/features/context/src/domain/tool_receipt.rs",
-     "line": 80,
-     "note": "to_step_receipt 构造字面量（唯一生产构造点）"
-    },
-    {
-     "file": "agent/features/context/src/domain/session/envelope.rs",
-     "line": 427,
-     "note": "step_receipts 按 (run,step) 读回并排序"
-    },
-    {
-     "file": "agent/features/runtime/src/application/loop_engine/engine/phases.rs",
-     "line": 207,
-     "note": "外部唯一消费：读 outcome 字段判定 CancellationUnconfirmed"
-    }
-   ]
-  },
   "SystemBlock": {
    "kind": "struct",
    "duty": "context 自有的 system 块：kind + 正文 + cacheable/cache_break 缓存语义",
@@ -5885,6 +5553,188 @@
        "at": 2
       }
      ]
+    }
+   ]
+  },
+  "RunStepReceiptData": {
+   "kind": "struct",
+   "duty": "工具调用收敛结果摘要（纯数据 DTO，8 个公开字段、无方法）：step finalize 时把本轮 tool/agent 调用的 call_id、序号、结果种类、安全摘要、产物引用、可能副作用与未收敛调用 写入 FinalizedOutcomeRecord；跨 crate 仅外部读 outcome 字段判定取消终态，其余字段 context 内部构造与持久化消费",
+   "deep_path": null,
+   "def": "domain.rs",
+   "signature": "pub struct RunStepReceiptData {  // 纯数据 DTO，无 inherent 方法",
+   "fields": [
+    "pub call_id: String",
+    "pub index: usize",
+    "pub outcome: ToolOutcomeKindData",
+    "pub agent: bool",
+    "pub summary: Option<String>",
+    "pub artifact_refs: Vec<String>",
+    "pub possible_side_effects: Vec<String>",
+    "pub unfinished_call_ids: Vec<String>"
+   ],
+   "methods": [],
+   "consumer_count": 6,
+   "consumers": [
+    {
+     "file": "agent/features/runtime/src/application/context/coordination.rs",
+     "module": "runtime :: application/context/coordination.rs",
+     "forms": [
+      "接口实现",
+      "接口实现"
+     ],
+     "snippets": [
+      {
+       "line": 199,
+       "code": "        &self,\n        request: &ContextRequestData,\n    ) -> Result<Vec<StepReceiptData>, ToolReceiptMutationError> {\n        self.ports\n            .append",
+       "kind": "implty",
+       "label": "接口实现",
+       "at": 2
+      },
+      {
+       "line": 215,
+       "code": "        duration_ms: Option<u64>,\n        messages: Vec<Message>,\n        receipts: Vec<StepReceiptData>,\n        api_input_tokens: Option<u64>,\n    ) -> Result<AppendReceiptData, ContextAppendError> {",
+       "kind": "implty",
+       "label": "接口实现",
+       "at": 2
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/loop_engine/engine/contracts.rs",
+     "module": "runtime :: application/loop_engine/engine/contracts.rs",
+     "forms": [
+      "类型引用",
+      "类型引用"
+     ],
+     "snippets": [
+      {
+       "line": 512,
+       "code": "    pub duration_ms: Option<u64>,\n    pub messages: Vec<share::message::Message>,\n    pub receipts: Vec<crate::ports::StepReceiptData>,\n}\n",
+       "kind": "fnty",
+       "label": "类型引用",
+       "at": 2
+      },
+      {
+       "line": 578,
+       "code": "        &mut self,\n        _request: &crate::ports::ContextRequestData,\n    ) -> Result<Vec<crate::ports::StepReceiptData>, LoopEngineError> {\n        Ok(Vec::new())\n    }",
+       "kind": "fnty",
+       "label": "类型引用",
+       "at": 2
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/loop_engine/chat/session_driver_session_lifecycle_tests.rs",
+     "module": "runtime :: application/loop_engine/chat/session_driver_session_lifecycle_tests.rs",
+     "forms": [
+      "接口实现"
+     ],
+     "snippets": [
+      {
+       "line": 1855,
+       "code": "        run_id: &sdk::RunId,\n        step_id: &sdk::RunStepId,\n    ) -> Result<Vec<crate::ports::StepReceiptData>, context::ToolReceiptMutationError> {\n        self.inner.append.step_receipts( session_id, run_id, step_id).await\n    }",
+       "kind": "implty",
+       "label": "接口实现",
+       "at": 2
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/loop_engine/engine/phases.rs",
+     "module": "runtime :: application/loop_engine/engine/phases.rs",
+     "forms": [
+      "接口实现"
+     ],
+     "snippets": [
+      {
+       "line": 203,
+       "code": "\npub(super) fn terminal_from_cleanup_receipts(\n    receipts: &[crate::ports::StepReceiptData],\n) -> crate::domain::agent_run::RunStepStatus {\n    if receipts",
+       "kind": "implty",
+       "label": "接口实现",
+       "at": 2
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/loop_engine/run_services.rs",
+     "module": "runtime :: application/loop_engine/run_services.rs",
+     "forms": [
+      "接口实现"
+     ],
+     "snippets": [
+      {
+       "line": 166,
+       "code": "        &mut self,\n        request: &crate::ports::ContextRequestData,\n    ) -> Result<Vec<crate::ports::StepReceiptData>, LoopEngineError> {\n        StepPersistenceCoordinator::from_context(self.context_request.runtime_context)\n            .load_step_receipts(request)",
+       "kind": "implty",
+       "label": "接口实现",
+       "at": 2
+      }
+     ]
+    },
+    {
+     "file": "agent/features/runtime/src/application/loop_engine/step_persistence.rs",
+     "module": "runtime :: application/loop_engine/step_persistence.rs",
+     "forms": [
+      "接口实现"
+     ],
+     "snippets": [
+      {
+       "line": 63,
+       "code": "        &self,\n        request: &crate::ports::ContextRequestData,\n    ) -> Result<Vec<crate::ports::StepReceiptData>, LoopEngineError> {\n        self.context\n            .step_receipts(request)",
+       "kind": "implty",
+       "label": "接口实现",
+       "at": 2
+      }
+     ]
+    }
+   ],
+   "codeRefs": [
+    {
+     "file": "agent/features/context/src/domain.rs",
+     "line": 612,
+     "note": "纯数据 struct 定义（8 pub 字段，无 inherent 方法）"
+    },
+    {
+     "file": "agent/features/context/src/domain/tool_receipt.rs",
+     "line": 80,
+     "note": "to_step_receipt 构造字面量（唯一生产构造点）"
+    },
+    {
+     "file": "agent/features/context/src/domain/session/envelope.rs",
+     "line": 427,
+     "note": "step_receipts 按 (run,step) 读回并排序"
+    },
+    {
+     "file": "agent/features/runtime/src/application/loop_engine/engine/phases.rs",
+     "line": 207,
+     "note": "外部唯一消费：读 outcome 字段判定 CancellationUnconfirmed"
+    }
+   ]
+  },
+  "SessionAppendReceiptData": {
+   "kind": "struct",
+   "duty": "会话追加（finalized step / accepted input 两条 append 路径）durable commit 的统一确定性回执：确认本次内容已落盘并返回 CAS 新修订号 committed_revision；由原 AppendReceiptData 与 AcceptedInputReceiptData 同构合并而来",
+   "deep_path": null,
+   "def": "domain.rs",
+   "signature": "pub struct SessionAppendReceiptData {",
+   "fields": [
+    "pub run_id: RunId",
+    "pub step_id: RunStepId",
+    "pub committed_revision: SessionRevision"
+   ],
+   "methods": [],
+   "consumer_count": 9,
+   "consumers": [],
+   "codeRefs": [
+    {
+     "file": "agent/features/context/src/domain.rs",
+     "line": 687,
+     "note": "统一回执定义（3 字段）"
+    },
+    {
+     "file": "agent/features/context/src/ports/context_port.rs",
+     "line": 46,
+     "note": "append_finalized / accept_input 返回"
     }
    ]
   }

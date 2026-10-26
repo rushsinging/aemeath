@@ -205,8 +205,8 @@ impl SessionRepository for FakeSession {
     async fn append_finalized(
         &self,
         append: &ContextAppendData,
-    ) -> Result<crate::AppendReceiptData, crate::ContextAppendError> {
-        Ok(crate::AppendReceiptData {
+    ) -> Result<crate::SessionAppendReceiptData, crate::ContextAppendError> {
+        Ok(crate::SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(3),

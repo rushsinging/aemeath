@@ -1834,7 +1834,7 @@ impl context::ContextAppendPort for RecordingContextPort {
     async fn append_accepted_input(
         &self,
         append: &crate::ports::AcceptedInputAppendData,
-    ) -> Result<crate::ports::AcceptedInputReceiptData, crate::ports::AcceptedInputError> {
+    ) -> Result<crate::ports::SessionAppendReceiptData, crate::ports::AcceptedInputError> {
         self.record_persistence("append_accepted_input");
         self.inner.append.append_accepted_input(append).await
     }
@@ -1852,7 +1852,7 @@ impl context::ContextAppendPort for RecordingContextPort {
         session_id: &crate::ports::SessionId,
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::ports::StepReceiptData>, context::ToolReceiptMutationError> {
+    ) -> Result<Vec<crate::ports::RunStepReceiptData>, context::ToolReceiptMutationError> {
         self.inner.append.step_receipts( session_id, run_id, step_id).await
     }
 
@@ -1870,7 +1870,7 @@ impl context::ContextAppendPort for RecordingContextPort {
     async fn append_and_persist(
         &self,
         append: &crate::ports::ContextAppendData,
-    ) -> Result<crate::ports::AppendReceiptData, crate::ports::ContextAppendError> {
+    ) -> Result<crate::ports::SessionAppendReceiptData, crate::ports::ContextAppendError> {
         self.record_persistence("append_and_persist");
         self.inner.append.append_and_persist(append).await
     }

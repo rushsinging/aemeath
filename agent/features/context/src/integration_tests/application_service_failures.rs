@@ -29,7 +29,7 @@ impl SessionRepository for Session {
     async fn append_finalized(
         &self,
         _append: &ContextAppendData,
-    ) -> Result<crate::AppendReceiptData, crate::ContextAppendError> {
+    ) -> Result<crate::SessionAppendReceiptData, crate::ContextAppendError> {
         unreachable!()
     }
 

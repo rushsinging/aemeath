@@ -78,7 +78,7 @@ pub struct ToolCallReceiptData {
 }
 
 impl ToolCallReceiptData {
-    pub fn to_step_receipt(&self) -> Option<super::StepReceiptData> {
+    pub fn to_step_receipt(&self) -> Option<super::RunStepReceiptData> {
         let ToolCallState::Terminal(terminal) = &self.state else {
             return None;
         };
@@ -87,7 +87,7 @@ impl ToolCallReceiptData {
             .provider_call_id
             .as_deref()
             .unwrap_or(&self.identity.runtime_call_id);
-        Some(super::StepReceiptData {
+        Some(super::RunStepReceiptData {
             call_id: call_id.to_string(),
             index: self.identity.call_index,
             outcome: terminal.outcome,

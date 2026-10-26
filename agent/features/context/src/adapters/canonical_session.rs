@@ -9,10 +9,10 @@ use crate::domain::session::{
     FinalizedOutcomeRecord, SessionCommitPlan, SessionSnapshotState,
 };
 use crate::domain::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, CompactSkipReason, CompactTrigger, ContextAppendData,
-    ContextAppendError, ContextPortError, SessionRevision, ToolReceiptMutationData,
-    ToolReceiptMutationError, ToolReceiptMutationReceiptData,
+    AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
+    CompactSkipReason, CompactTrigger, ContextAppendData, ContextAppendError, ContextPortError,
+    SessionAppendReceiptData, SessionRevision, ToolReceiptMutationData, ToolReceiptMutationError,
+    ToolReceiptMutationReceiptData,
 };
 use crate::ports::{ContextPorts, SessionItem, SessionRepository};
 
@@ -822,8 +822,8 @@ impl CanonicalSessionRepository {
         ))
     }
 
-    fn receipt(append: &ContextAppendData, revision: SessionRevision) -> AppendReceiptData {
-        AppendReceiptData {
+    fn receipt(append: &ContextAppendData, revision: SessionRevision) -> SessionAppendReceiptData {
+        SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: revision,
@@ -833,8 +833,8 @@ impl CanonicalSessionRepository {
     fn accepted_receipt(
         append: &AcceptedInputAppendData,
         revision: SessionRevision,
-    ) -> AcceptedInputReceiptData {
-        AcceptedInputReceiptData {
+    ) -> SessionAppendReceiptData {
+        SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: revision,
@@ -934,7 +934,7 @@ impl SessionRepository for CanonicalSessionRepository {
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
+    ) -> Result<SessionAppendReceiptData, AcceptedInputError> {
         let _mutation = self.mutation_gate.lock().await;
         let current = self
             .session
@@ -1051,7 +1051,7 @@ impl SessionRepository for CanonicalSessionRepository {
         session_id: &SessionId,
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::domain::StepReceiptData>, ToolReceiptMutationError> {
+    ) -> Result<Vec<crate::domain::RunStepReceiptData>, ToolReceiptMutationError> {
         let current = self
             .session
             .read()
@@ -1111,7 +1111,7 @@ impl SessionRepository for CanonicalSessionRepository {
     async fn append_finalized(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError> {
+    ) -> Result<SessionAppendReceiptData, ContextAppendError> {
         let _mutation = self.mutation_gate.lock().await;
         let current = self
             .session

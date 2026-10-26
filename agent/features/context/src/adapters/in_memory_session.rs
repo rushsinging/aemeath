@@ -6,10 +6,10 @@ use async_trait::async_trait;
 
 use crate::domain::session::{AcceptedInputRecord, FinalizedOutcomeRecord, SessionHistory};
 use crate::domain::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, CompactSkipReason, ContextAppendData, ContextAppendError,
-    ContextMessage, ContextPortError, SessionRevision, ToolCallReceiptData,
-    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
+    AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
+    CompactSkipReason, ContextAppendData, ContextAppendError, ContextMessage, ContextPortError,
+    SessionAppendReceiptData, SessionRevision, ToolCallReceiptData, ToolReceiptMutationData,
+    ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
 use crate::ports::{SessionItem, SessionRepository};
 
@@ -64,8 +64,8 @@ impl InMemorySessionRepository {
     fn receipt(
         append: &ContextAppendData,
         committed_revision: SessionRevision,
-    ) -> Result<AppendReceiptData, ContextAppendError> {
-        Ok(AppendReceiptData {
+    ) -> Result<SessionAppendReceiptData, ContextAppendError> {
+        Ok(SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision,
@@ -75,8 +75,8 @@ impl InMemorySessionRepository {
     fn accepted_receipt(
         append: &AcceptedInputAppendData,
         committed_revision: SessionRevision,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
-        Ok(AcceptedInputReceiptData {
+    ) -> Result<SessionAppendReceiptData, AcceptedInputError> {
+        Ok(SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision,
@@ -102,7 +102,7 @@ impl SessionRepository for InMemorySessionRepository {
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
+    ) -> Result<SessionAppendReceiptData, AcceptedInputError> {
         let mut sessions = self
             .sessions
             .lock()
@@ -188,7 +188,7 @@ impl SessionRepository for InMemorySessionRepository {
         session_id: &SessionId,
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::domain::StepReceiptData>, ToolReceiptMutationError> {
+    ) -> Result<Vec<crate::domain::RunStepReceiptData>, ToolReceiptMutationError> {
         let sessions = self
             .sessions
             .lock()
@@ -246,7 +246,7 @@ impl SessionRepository for InMemorySessionRepository {
     async fn append_finalized(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError> {
+    ) -> Result<SessionAppendReceiptData, ContextAppendError> {
         let mut sessions = self
             .sessions
             .lock()

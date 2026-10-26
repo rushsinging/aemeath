@@ -163,7 +163,7 @@ where
     async fn load_step_receipts(
         &mut self,
         request: &crate::ports::ContextRequestData,
-    ) -> Result<Vec<crate::ports::StepReceiptData>, LoopEngineError> {
+    ) -> Result<Vec<crate::ports::RunStepReceiptData>, LoopEngineError> {
         StepPersistenceCoordinator::from_context(self.context_request.runtime_context)
             .load_step_receipts(request)
             .await

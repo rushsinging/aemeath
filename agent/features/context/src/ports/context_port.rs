@@ -43,7 +43,7 @@ pub trait ContextAppendPort: Send + Sync {
     async fn append_accepted_input(
         &self,
         _append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
+    ) -> Result<SessionAppendReceiptData, AcceptedInputError> {
         Err(AcceptedInputError::Storage(
             "此 ContextPort 未实现已接受输入持久化".to_string(),
         ))
@@ -63,7 +63,7 @@ pub trait ContextAppendPort: Send + Sync {
         _session_id: &SessionId,
         _run_id: &sdk::RunId,
         _step_id: &sdk::RunStepId,
-    ) -> Result<Vec<StepReceiptData>, ToolReceiptMutationError> {
+    ) -> Result<Vec<RunStepReceiptData>, ToolReceiptMutationError> {
         Err(ToolReceiptMutationError::Storage(
             "此 ContextPort 未实现 Step receipt 查询".to_string(),
         ))
@@ -84,7 +84,7 @@ pub trait ContextAppendPort: Send + Sync {
     async fn append_and_persist(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError>;
+    ) -> Result<SessionAppendReceiptData, ContextAppendError>;
 }
 
 /// Reminder 管线控制面（07-reminder-pipeline.md）：Run 生命周期句柄与
