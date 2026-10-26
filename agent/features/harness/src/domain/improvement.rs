@@ -74,6 +74,56 @@ pub struct DiagnosedIssue {
     pub direction: String,
 }
 
+/// 跨块诊断汇总（#2078 修订）：同一 (component, target_signal) 合并
+/// 计数——执行派发与强度门禁（#2092）消费本结构，NEVER 逐块决策。
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DiagnosisSummary {
+    /// 合并后的改进任务（按出现次数降序）。
+    pub issues: Vec<AggregatedIssue>,
+}
+
+/// 汇总后的单条任务。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AggregatedIssue {
+    pub component: String,
+    pub target_signal: String,
+    pub problem: String,
+    pub direction: String,
+    /// 跨块出现次数（同 component+signal 计数）。
+    pub occurrences: usize,
+}
+
+impl DiagnosisSummary {
+    /// 把各块诊断结果合并（同 component+target_signal 累加次数，
+    /// 保留首次出现的 problem/direction）。
+    pub fn merge(per_block: Vec<Vec<DiagnosedIssue>>) -> Self {
+        let mut aggregated: Vec<AggregatedIssue> = Vec::new();
+        for issues in per_block {
+            for issue in issues {
+                match aggregated.iter_mut().find(|existing| {
+                    existing.component == issue.component
+                        && existing.target_signal == issue.target_signal
+                }) {
+                    Some(existing) => existing.occurrences += 1,
+                    None => aggregated.push(AggregatedIssue {
+                        component: issue.component,
+                        target_signal: issue.target_signal,
+                        problem: issue.problem,
+                        direction: issue.direction,
+                        occurrences: 1,
+                    }),
+                }
+            }
+        }
+        aggregated.sort_by(|a, b| b.occurrences.cmp(&a.occurrences));
+        Self { issues: aggregated }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.issues.is_empty()
+    }
+}
+
 /// 诊断应答信封：NEVER 裸数组——模型需要能表达「证据不足以支撑任何改进」。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "decision", rename_all = "snake_case")]
@@ -341,46 +391,9 @@ async fn run_block(
     block_index: usize,
     version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
 ) -> (Vec<(AppliedEdit, String)>, &'static str) {
-    // ---- 阶段 A：诊断（只出改进任务，不写正文，#2078）----
-    let diagnosis_prompt = build_diagnosis_prompt(chunk, lessons, evidence);
-    let diagnosis = match llm.complete(&diagnosis_prompt).await {
-        Ok(response) => match parse_diagnosis(&response) {
-            Ok(proposal) => proposal,
-            Err(error) => {
-                if let Some(recorder) = recorder {
-                    recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
-                        block_index,
-                        stage: "diagnosis_parse".to_string(),
-                        message: error.message().chars().take(120).collect(),
-                    });
-                }
-                return (Vec::new(), "作废（诊断解析失败）");
-            }
-        },
-        Err(_) => return (Vec::new(), "作废（诊断调用失败）"),
-    };
-    let issues = match diagnosis {
-        DiagnosisProposal::NoIssue { .. } => {
-            if let Some(recorder) = recorder {
-                recorder.record(&crate::domain::events::RsiCycleEvent::DiagnosisParsed {
-                    block_index,
-                    issues: 0,
-                });
-            }
-            return (Vec::new(), "无变更");
-        }
-        DiagnosisProposal::Diagnose { issues, .. } => {
-            if let Some(recorder) = recorder {
-                recorder.record(&crate::domain::events::RsiCycleEvent::DiagnosisParsed {
-                    block_index,
-                    issues: issues.len(),
-                });
-            }
-            issues
-        }
-    };
-    // ---- 阶段 B：执行（消费诊断，产出具体修改）----
-    let prompt = build_execution_prompt(&issues, chunk);
+    // 单阶段（#2078 修订）：诊断/执行派发归 #2092，本 PR 的 diagnose_only
+    // 模式走 run_diagnosis_cycle 的跨块汇总路径；本函数保持 v1 单阶段行为。
+    let prompt = build_block_prompt(chunk, lessons, evidence);
     let Ok(response) = llm.complete(&prompt).await else {
         return (Vec::new(), "作废（LLM 调用失败）");
     };
@@ -580,6 +593,78 @@ fn record_adopted_lesson(
             }
         }
     }
+}
+
+/// 诊断优先周期（#2078 修订）：每块 1 次诊断（仅产出 issue），
+/// 跨块汇总后返回——**不落盘**、不写 lesson，执行派发由 #2092 门禁决定。
+pub async fn run_diagnosis_cycle(
+    registry: &mut dyn ComponentRegistry,
+    llm: &dyn RsiLlmPort,
+    config: &RsiConfig,
+    evidence: crate::domain::evidence::EvidenceBundle,
+    lessons: &[LessonEntry],
+    recorder: Option<&crate::domain::events::RsiEventRecorder>,
+    report_lines: &mut Vec<String>,
+) -> Result<DiagnosisSummary, HarnessError> {
+    let ids = registry.list();
+    let mut component_contents = Vec::with_capacity(ids.len());
+    for id in &ids {
+        component_contents.push((id.clone(), registry.read(id)?));
+    }
+    let materials = ImprovementMaterials {
+        component_contents,
+        lessons: lessons.to_vec(),
+        evidence: evidence.clone(),
+    };
+    let chunks = chunk_materials(materials, config.chunk_max_components);
+    let mut per_block: Vec<Vec<DiagnosedIssue>> = Vec::new();
+    for (block_index, chunk) in chunks.iter().enumerate() {
+        let prompt = build_diagnosis_prompt(chunk, lessons, &evidence);
+        let issues = match llm.complete(&prompt).await {
+            Ok(response) => match parse_diagnosis(&response) {
+                Ok(DiagnosisProposal::Diagnose { issues, .. }) => issues,
+                Ok(DiagnosisProposal::NoIssue { .. }) => Vec::new(),
+                Err(error) => {
+                    if let Some(recorder) = recorder {
+                        recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                            block_index,
+                            stage: "diagnosis_parse".to_string(),
+                            message: error.message().chars().take(120).collect(),
+                        });
+                    }
+                    Vec::new()
+                }
+            },
+            Err(_) => Vec::new(),
+        };
+        if let Some(recorder) = recorder {
+            recorder.record(&crate::domain::events::RsiCycleEvent::DiagnosisParsed {
+                block_index,
+                issues: issues.len(),
+            });
+        }
+        report_lines.push(format!(
+            "  块 {}/{}：诊断 {} 条任务",
+            block_index + 1,
+            chunks.len(),
+            issues.len()
+        ));
+        per_block.push(issues);
+    }
+    let summary = DiagnosisSummary::merge(per_block);
+    if let Some(recorder) = recorder {
+        recorder.record(&crate::domain::events::RsiCycleEvent::DiagnosisSummarized {
+            issues: summary.issues.len(),
+            occurrences: summary.issues.iter().map(|issue| issue.occurrences).sum(),
+        });
+    }
+    for issue in &summary.issues {
+        report_lines.push(format!(
+            "  [诊断汇总] {} ← {}（×{}）：{} → {}",
+            issue.component, issue.target_signal, issue.occurrences, issue.problem, issue.direction
+        ));
+    }
+    Ok(summary)
 }
 
 /// 执行一轮完整改进周期（分块串行、块级幂等：单块失败不影响其余块）。

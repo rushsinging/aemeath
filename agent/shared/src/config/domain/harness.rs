@@ -22,6 +22,18 @@ pub(crate) fn default_evidence_block_sessions() -> usize {
     5
 }
 
+/// RSI 改进执行模式（#2078 拍板修订）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RsiExecutionMode {
+    /// 单阶段：证据 → 一次提案 → 落盘（v1 行为，默认保持兼容）。
+    #[default]
+    SinglePhase,
+    /// 诊断优先：每块 1 次诊断只产出 issue，跨块汇总，执行派发由后续
+    /// 强度门禁（#2092）决定——本模式当前**不落盘**。
+    DiagnoseOnly,
+}
+
 /// RSI 维护 daemon 配置。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RsiConfig {
@@ -54,6 +66,11 @@ pub struct RsiConfig {
     /// 数据源分块粒度：每块 session 数上限。
     #[serde(default = "default_evidence_block_sessions")]
     pub evidence_block_sessions: usize,
+
+    /// 改进执行模式（#2078）：single_phase（默认，一次提案即落盘）/
+    /// diagnose_only（每块仅诊断 + 跨块汇总，不落盘，执行由 #2092 派发）。
+    #[serde(default)]
+    pub execution_mode: RsiExecutionMode,
 }
 
 impl Default for RsiConfig {
@@ -66,6 +83,7 @@ impl Default for RsiConfig {
             evidence_initial_window_days: default_evidence_initial_window_days(),
             evidence_max_sessions_per_cycle: default_evidence_max_sessions_per_cycle(),
             evidence_block_sessions: default_evidence_block_sessions(),
+            execution_mode: RsiExecutionMode::default(),
         }
     }
 }

@@ -345,6 +345,8 @@ pub struct RsiConfigPatch {
     pub evidence_max_sessions_per_cycle: Option<usize>,
     #[serde(default)]
     pub evidence_block_sessions: Option<usize>,
+    #[serde(default)]
+    pub execution_mode: Option<crate::config::RsiExecutionMode>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -944,6 +946,9 @@ pub(crate) fn apply_harness_patch(
         }
         if let Some(v) = rsi.evidence_block_sessions {
             base.rsi.evidence_block_sessions = v;
+        }
+        if let Some(v) = rsi.execution_mode {
+            base.rsi.execution_mode = v;
         }
     }
     base

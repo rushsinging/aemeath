@@ -117,6 +117,41 @@ impl RsiTask for HarnessRsiCycleTask {
         let mut preview_lines = Vec::new();
         let mut report_lines = Vec::new();
         let mut all_adoptions: Vec<crate::domain::task::AdoptionRecord> = Vec::new();
+
+        // #2078 修订：诊断优先模式——每块 1 次诊断 + 跨块汇总，不落盘。
+        if self.config.execution_mode == share::config::RsiExecutionMode::DiagnoseOnly {
+            let lessons = self.lesson_store.load_active().unwrap_or_default();
+            let mut diagnosis_report = Vec::new();
+            let mut merged_evidence = crate::domain::evidence::EvidenceBundle::default();
+            for block in &blocks {
+                let evidence = self.stream_port.block_evidence(block);
+                merged_evidence.signals.extend(evidence.signals);
+                merged_evidence.sessions_covered += evidence.sessions_covered;
+            }
+            let summary = crate::domain::improvement::run_diagnosis_cycle(
+                registry,
+                self.llm.as_ref(),
+                &self.config,
+                merged_evidence,
+                &lessons,
+                self.recorder.as_deref(),
+                &mut diagnosis_report,
+            )
+            .await?;
+            let prefix = if self.dry_run { "（dry-run）" } else { "" };
+            let mut summary_text = format!(
+                "{prefix}诊断完成：{} 条任务（不改动组件）",
+                summary.issues.len()
+            );
+            if !diagnosis_report.is_empty() {
+                summary_text.push_str("\n（诊断报告）\n");
+                summary_text.push_str(&diagnosis_report.join("\n"));
+            }
+            return Ok(crate::domain::task::CycleOutcome {
+                summary: summary_text,
+                adopted: Vec::new(),
+            });
+        }
         if self.dry_run {
             report_lines.push(format!(
                 "—— checkpoint：起始 {}（dry-run NEVER 推进）",

@@ -21,7 +21,7 @@ pub use audit::AuditConfig;
 pub use context::ContextConfig;
 pub use domain::config::{Config, GuidanceConfig, GuidanceReloadPolicy};
 pub use file_snapshot::{FileChange, FileChangeKind, FileSnapshot};
-pub use harness::{HarnessConfig, RsiConfig};
+pub use harness::{HarnessConfig, RsiConfig, RsiExecutionMode};
 pub use hooks::HooksConfig;
 pub use legacy::{ApiConfig, ModelConfig};
 pub use logging::LoggingConfig;
