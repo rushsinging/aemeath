@@ -37,12 +37,12 @@ pub(crate) async fn run_systemone_serve_command(args: crate::args::Args) {
         .await
         .unwrap_or_else(|error| crate::fatal_error::report_fatal(error));
     let exit = composition::systemone::run_scoring_serve(&http_listen, |listen| {
-        println!("systemone serve 监听 http://{listen}");
+        println!("systemone serve 监听 {listen}");
     })
     .await;
     match exit {
         ScoringServeExit::Stopped { listen } => {
-            println!("systemone serve 已停止（http://{listen}）");
+            println!("systemone serve 已停止（{listen}）");
         }
         ScoringServeExit::Failure { message, exit_code } => {
             eprintln!("{message}");

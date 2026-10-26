@@ -577,7 +577,8 @@ pub async fn run_scoring_serve(http_listen: &str, on_ready: impl FnOnce(&str)) -
     };
 
     let listen = http_listen.to_string();
-    on_ready(&listen);
+    let listen_url = format!("http://{listen}");
+    on_ready(&listen_url);
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let serve = tokio::spawn(async move {
         systemone::run_daemon_http_serve(
@@ -593,7 +594,7 @@ pub async fn run_scoring_serve(http_listen: &str, on_ready: impl FnOnce(&str)) -
     let _ = shutdown_tx.send(());
     match serve.await {
         Ok(Ok(())) => ScoringServeExit::Stopped {
-            listen: http_listen.to_string(),
+            listen: format!("http://{http_listen}"),
         },
         Ok(Err(error)) => ScoringServeExit::Failure {
             message: error.to_string(),
