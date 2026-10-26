@@ -28,7 +28,7 @@ fn session_for_project(
 }
 
 #[tokio::test]
-async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
+async fn session_management_migrates_legacy_tool_receipt_ledger_on_resume() {
     let root = std::env::temp_dir().join(format!(
         "aemeath-tool-receipt-ledger-contract-{}",
         uuid::Uuid::now_v7()
@@ -37,7 +37,7 @@ async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
     let blob: Arc<dyn storage::AtomicBlobPort> =
         storage::wire_file_system_blob(&root).expect("create filesystem blob adapter");
     let port = crate::adapters::AtomicBlobSessionManagement::new(Arc::clone(&blob));
-    let writer = crate::AtomicBlobCanonicalSessionWriter::new(blob);
+    // C 阶段：sidecar 退役，本测试验证一次性迁移读——用旧 ledger 直写构造存量数据。
     let project = ProjectIdentityData {
         initial_cwd: "/receipt-ledger".to_string(),
         git_common_dir: None,
@@ -61,10 +61,14 @@ async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
         agent: false,
     };
     let receipt = crate::tool_receipt::ToolCallReceiptData::pending(identity, "safe preview");
-    writer
-        .save_tool_receipt(session_id.as_str(), 1, &receipt)
-        .await
-        .expect("persist receipt ledger");
+    crate::adapters::tool_receipt_ledger::AtomicBlobToolReceiptLedger::new(
+        blob,
+        session_id.as_str(),
+    )
+    .expect("open legacy ledger")
+    .save(1, &receipt)
+    .await
+    .expect("persist receipt ledger");
 
     let resumed = port
         .load_for_project(session_id.as_str(), &project)

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-mod accepted_input_ledger;
+pub(crate) mod accepted_input_ledger;
 mod atomic_blob_session;
 mod atomic_blob_session_management;
 mod canonical_session;
@@ -21,20 +21,14 @@ mod system_prompt;
 #[cfg(test)]
 #[path = "adapters/system_prompt_tests.rs"]
 mod system_prompt_tests;
-mod tool_receipt_ledger;
+pub(crate) mod tool_receipt_ledger;
 
 pub(crate) use atomic_blob_session::AtomicBlobSessionStore;
 pub use atomic_blob_session_management::AtomicBlobSessionManagement;
-pub(crate) use canonical_session::CanonicalSessionWriter;
 #[cfg(test)]
-pub(crate) use canonical_session::{
-    AcceptedInputWriter, AtomicBlobCanonicalSessionWriter, CanonicalSessionRepository,
-    ToolReceiptWriter,
-};
-pub use canonical_session::{
-    AtomicBlobAcceptedInputWriter, AtomicBlobToolReceiptWriter, MainContextFactory,
-    NoOpCanonicalSessionWriter,
-};
+pub(crate) use canonical_session::CanonicalSessionRepository;
+pub(crate) use canonical_session::CanonicalSessionWriter;
+pub use canonical_session::{MainContextFactory, NoOpCanonicalSessionWriter};
 pub use dataset_session_management::DatasetSessionManagement;
 pub(crate) use dataset_session_reader::DatasetSessionReader;
 pub use dataset_session_writer::DatasetCanonicalSessionWriter;

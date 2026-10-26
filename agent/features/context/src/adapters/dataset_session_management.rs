@@ -16,7 +16,6 @@ use crate::ports::SessionManagementPort;
 pub struct DatasetSessionManagement {
     dataset: Arc<dyn AtomicDatasetPort>,
     legacy: Arc<AtomicBlobSessionManagement>,
-    receipt_blob: Arc<dyn AtomicBlobPort>,
     reader: DatasetSessionReader,
     writer: DatasetCanonicalSessionWriter,
 }
@@ -26,18 +25,11 @@ impl DatasetSessionManagement {
         Self {
             dataset: Arc::clone(&dataset),
             legacy: Arc::new(AtomicBlobSessionManagement::new(Arc::clone(&legacy_blob))),
-            receipt_blob: legacy_blob.clone(),
             reader: DatasetSessionReader::new(Arc::clone(&dataset), Some(Arc::clone(&legacy_blob))),
             writer: DatasetCanonicalSessionWriter::new(Arc::clone(&dataset)),
         }
     }
 
-    pub fn accepted_input_writer(&self) -> crate::adapters::AtomicBlobAcceptedInputWriter {
-        crate::adapters::AtomicBlobAcceptedInputWriter::new(Arc::clone(&self.receipt_blob))
-    }
-    pub fn tool_receipt_writer(&self) -> crate::adapters::AtomicBlobToolReceiptWriter {
-        crate::adapters::AtomicBlobToolReceiptWriter::new(Arc::clone(&self.receipt_blob))
-    }
     async fn load_canonical(
         &self,
         project_dir: Option<&SafePathSegmentData>,

@@ -53,10 +53,9 @@ pub use application::test_support;
 // 窄 façade根导出（#1022 收口：内部层 mod 私有，跨 BC 消费只经 crate 根与语义模块）
 #[cfg(test)]
 pub(crate) use adapters::{
-    decode_session, skill_prompt_budget, AcceptedInputWriter, AtomicBlobCanonicalSessionWriter,
-    AtomicBlobSessionStore, CanonicalSessionRepository, CanonicalSessionWriter,
-    CommittedMemoryRetrieveAdapter, DatasetSessionReader, InMemorySessionRepository,
-    LegacySessionDecoder, NoOpContextMemorySource, SkillPromptSource, ToolReceiptWriter,
+    decode_session, skill_prompt_budget, AtomicBlobSessionStore, CanonicalSessionRepository,
+    CanonicalSessionWriter, CommittedMemoryRetrieveAdapter, DatasetSessionReader,
+    InMemorySessionRepository, LegacySessionDecoder, NoOpContextMemorySource, SkillPromptSource,
 };
 pub use adapters::{
     DatasetCanonicalSessionWriter, DatasetSessionManagement, SessionPromptInputsData,

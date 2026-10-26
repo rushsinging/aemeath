@@ -78,6 +78,8 @@ impl AtomicBlobToolReceiptLedger {
         Ok(ledger)
     }
 
+    /// C 阶段：生产已停写；仅供迁移/契约测试构造旧 sidecar 存量数据。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) async fn save(
         &self,
         revision: u64,

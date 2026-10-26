@@ -315,7 +315,6 @@ pub(crate) async fn from_args_with_gateways(
             context::MainContextFactory::new(Arc::new(
                 context::DatasetCanonicalSessionWriter::new(session_dataset),
             ))
-            .with_atomic_blob_storage(session_blob.clone())
             .with_skill_catalog(
                 skill_catalog.clone(),
                 Arc::new(context::WorkspaceSkillQueryFactory::new(workspace.read())),
