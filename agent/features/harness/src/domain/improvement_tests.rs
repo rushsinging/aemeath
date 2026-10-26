@@ -119,7 +119,9 @@ async fn cycle_adopts_and_summarizes_per_block() {
         (untouched.clone(), body_content("keep")),
     ]);
     let llm = ScriptedLlm::new(vec![
+        r#"{"decision":"diagnose","reason":"正文过时","issues":[{"component":"skill/mentioned","target_signal":"repeated_failure:Bash:x","problem":"正文过时","direction":"重写正文"}]}"#.to_string(),
         r#"{"decision":"propose","reason":"正文过时","change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"mentioned"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
+        r#"{"decision":"diagnose","reason":"正文过时","issues":[{"component":"skill/mentioned","target_signal":"repeated_failure:Bash:x","problem":"正文过时","direction":"重写正文"}]}"#.to_string(),
         r#"{"decision":"no_change","reason":"证据不足"}"#.to_string(),
     ]);
 
@@ -172,6 +174,7 @@ async fn malformed_block_discarded_without_blocking_others() {
     ]);
     let llm = ScriptedLlm::new(vec![
         "这不是 JSON".to_string(),
+        r#"{"decision":"diagnose","reason":"正文过时","issues":[{"component":"skill/good","target_signal":"repeated_failure:Bash:x","problem":"正文过时","direction":"重写正文"}]}"#.to_string(),
         r#"{"decision":"propose","reason":"正文过时","change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"good"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
     ]);
 

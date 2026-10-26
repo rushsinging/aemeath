@@ -243,7 +243,11 @@ async fn trigger_runs_cycle_and_writes_component_file() {
     struct JsonLlm;
     #[async_trait]
     impl RsiLlmPort for JsonLlm {
-        async fn complete(&self, _prompt: &str) -> Result<String, HarnessError> {
+        async fn complete(&self, prompt: &str) -> Result<String, HarnessError> {
+            // #2078 两阶段：诊断 prompt 与执行 prompt 分别应答
+            if prompt.contains("问题诊断器") {
+                return Ok(r#"{"decision":"diagnose","reason":"初始规则过于简略","issues":[{"component":"guardrails/default","target_signal":"repeated_failure:Bash:x","problem":"规则过简","direction":"补充先读后写"}]}"#.to_string());
+            }
             Ok(r#"{"decision":"propose","reason":"初始规则过于简略","change_set":{"edits":[{"action":"upsert","id":{"kind":"guardrails","name":"default"},"content":{"frontmatter":null,"body":"新规则：先读后写"}}]}}"#.to_string())
         }
     }

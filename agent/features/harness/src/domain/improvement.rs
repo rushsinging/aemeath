@@ -61,6 +61,166 @@ pub fn chunk_materials(
         .collect()
 }
 
+/// 诊断阶段产出：一条待落地的改进任务（lesson 的载体）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiagnosedIssue {
+    /// 目标组件（kind/name 形态字符串）。
+    pub component: String,
+    /// 具体证据信号 id（如 repeated_failure:Bash:permission denied）。
+    pub target_signal: String,
+    /// 问题陈述（有界）。
+    pub problem: String,
+    /// 改进方向（有界，不含具体正文）。
+    pub direction: String,
+}
+
+/// 诊断应答信封：NEVER 裸数组——模型需要能表达「证据不足以支撑任何改进」。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "decision", rename_all = "snake_case")]
+pub enum DiagnosisProposal {
+    Diagnose {
+        reason: String,
+        issues: Vec<DiagnosedIssue>,
+    },
+    NoIssue {
+        reason: String,
+    },
+}
+
+/// 诊断阶段 prompt（#2078）：只回答「什么问题、依据哪条信号、往哪改」，
+/// NEVER 产出具体正文——执行阶段才写内容。
+pub fn build_diagnosis_prompt(
+    chunk: &[(ComponentId, ComponentContent)],
+    lessons: &[LessonEntry],
+    evidence: &crate::domain::evidence::EvidenceBundle,
+) -> String {
+    let lessons_block = if lessons.is_empty() {
+        "（暂无历史经验）".to_string()
+    } else {
+        lessons
+            .iter()
+            .map(|entry| format!("- [{}] {}", entry.component_kind, entry.lesson))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let evidence_block = render_evidence_block(evidence);
+    let components_json: Vec<serde_json::Value> = chunk
+        .iter()
+        .map(|(id, content)| {
+            serde_json::json!({
+                "id": id,
+                "frontmatter": content.frontmatter,
+                "body": content.body,
+            })
+        })
+        .collect();
+    let materials_block = serde_json::to_string(&components_json).expect("组件材料序列化不可失败");
+    format!(
+        r#"你是 harness 问题诊断器（诊断阶段，不写正文）。以下是若干组件的当前内容：
+
+{materials_block}
+
+近期执行证据（session 行为聚合信号）：
+{evidence_block}
+
+历史经验（供参考、可被新证据推翻）：
+{lessons_block}
+
+任务：判断哪些问题值得改进，为每个问题产出一条「改进任务」：
+- component：目标组件 id（必须是上面材料中的组件，形如 guardrails/default）
+- target_signal：该问题对应证据中的**具体 signal id**（逐字引用，如
+  repeated_failure:Bash:permission denied: /etc/shadow）
+- problem：一句话说清问题是什么（谁在什么场景失败/代价多大）
+- direction：改进方向（要覆盖什么场景、采取什么类型的措施；NEVER 写完整正文）
+
+判断标准：
+- 每条 task 的 target_signal MUST 逐字出现在上面的证据块中；无法对应的
+  问题 NEVER 提出。
+- 证据不足或组件现状已覆盖该场景时选择 no_issue——正当答案。
+- 一个组件可有多条 task；总数不超过证据中不同 signal 的个数。
+- 优先修：重复失败（repeated_failure）、同参重试（retry_pattern）、
+  超长结果（oversized_result）、run 终态异常（run_outcome）。
+
+只输出一个 JSON 对象，格式二选一：
+{{"decision":"diagnose","reason":"<判断依据，一句话>","issues":[{{"component":"<kind>/<name>","target_signal":"<signal id>","problem":"<一句话>","direction":"<方向>"}}]}}
+{{"decision":"no_issue","reason":"<一句话理由>"}}
+不要输出 JSON 以外的任何文字。"#
+    )
+}
+
+/// 解析诊断应答（流式取首个 JSON 值，容忍 trailing）。
+pub fn parse_diagnosis(response_text: &str) -> Result<DiagnosisProposal, HarnessError> {
+    let trimmed = response_text.trim();
+    let payload_start = trimmed
+        .find('{')
+        .ok_or_else(|| HarnessError::invalid(ERROR_DOMAIN, "诊断应答不含 JSON 对象"))?;
+    let json_source = trimmed
+        .get(payload_start..)
+        .ok_or_else(|| HarnessError::invalid(ERROR_DOMAIN, "诊断应答载荷切分越界"))?;
+    let mut stream =
+        serde_json::Deserializer::from_str(json_source).into_iter::<DiagnosisProposal>();
+    match stream.next() {
+        Some(Ok(proposal)) => Ok(proposal),
+        Some(Err(error)) => Err(HarnessError::invalid(
+            ERROR_DOMAIN,
+            format!("诊断应答解析失败：{error}"),
+        )),
+        None => Err(HarnessError::invalid(ERROR_DOMAIN, "诊断应答 JSON 流为空")),
+    }
+}
+
+/// 执行阶段 prompt（#2078）：消费诊断出的改进任务，写出具体组件修改。
+pub fn build_execution_prompt(
+    issues: &[DiagnosedIssue],
+    chunk: &[(ComponentId, ComponentContent)],
+) -> String {
+    let issues_block = issues
+        .iter()
+        .map(|issue| {
+            format!(
+                "- 组件 {}：问题「{}」；方向「{}」；对应证据 {}\n",
+                issue.component, issue.problem, issue.direction, issue.target_signal
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    let components_json: Vec<serde_json::Value> = chunk
+        .iter()
+        .map(|(id, content)| {
+            serde_json::json!({
+                "id": id,
+                "frontmatter": content.frontmatter,
+                "body": content.body,
+            })
+        })
+        .collect();
+    let materials_block = serde_json::to_string(&components_json).expect("组件材料序列化不可失败");
+    format!(
+        r#"你是 harness 组件执行器（执行阶段）。以下是诊断阶段产出的改进任务：
+
+{issues_block}
+以下是对应组件的当前内容：
+
+{materials_block}
+
+任务：为每条改进任务写出具体的组件修改（完整正文），要求：
+- **可执行**：规则必须写清「什么条件下」+「必须/禁止做什么」。
+- **不破坏**：只改任务指向的部分；与任务无关的现有规则 MUST 原样保留。
+- **不冲突**：新规则不得与现有内容矛盾；重复时只补差异部分。
+- **成本意识**：always-on 组件每轮付费，用最短篇幅表达完整语义。
+- 每条编辑的 reason MUST 引用该任务的 target_signal。
+
+编辑契约：
+- 提案只携带要变更的组件（未提及的组件自动保持原样）
+- 任一条目校验失败会作废整份提案
+
+只输出一个 JSON 对象，格式二选一：
+{{"decision":"propose","reason":"<依据，引用 signal id>","change_set":{{"edits":[{{"action":"upsert","id":{{"kind":"skill","name":"<名>"}},"content":{{"frontmatter":null,"body":"<完整正文>"}}}}]}}}}
+{{"decision":"no_change","reason":"<一句话理由>"}}
+不要输出 JSON 以外的任何文字。"#
+    )
+}
+
 /// 组装单块提案 prompt（结构化材料 + 经验 + 编辑契约 + 输出格式）。
 pub fn build_block_prompt(
     chunk: &[(ComponentId, ComponentContent)],
@@ -181,13 +341,48 @@ async fn run_block(
     block_index: usize,
     version_store: Option<&crate::domain::versioning::ComponentVersionStore>,
 ) -> (Vec<(AppliedEdit, String)>, &'static str) {
-    let prompt = build_block_prompt(chunk, lessons, evidence);
-    let response = match llm.complete(&prompt).await {
-        Ok(response) => response,
-        Err(error) => {
-            eprintln!("[diag] llm err={}", error.message());
-            return (Vec::new(), "作废（LLM 调用失败）");
+    // ---- 阶段 A：诊断（只出改进任务，不写正文，#2078）----
+    let diagnosis_prompt = build_diagnosis_prompt(chunk, lessons, evidence);
+    let diagnosis = match llm.complete(&diagnosis_prompt).await {
+        Ok(response) => match parse_diagnosis(&response) {
+            Ok(proposal) => proposal,
+            Err(error) => {
+                if let Some(recorder) = recorder {
+                    recorder.record(&crate::domain::events::RsiCycleEvent::ProposalRejected {
+                        block_index,
+                        stage: "diagnosis_parse".to_string(),
+                        message: error.message().chars().take(120).collect(),
+                    });
+                }
+                return (Vec::new(), "作废（诊断解析失败）");
+            }
+        },
+        Err(_) => return (Vec::new(), "作废（诊断调用失败）"),
+    };
+    let issues = match diagnosis {
+        DiagnosisProposal::NoIssue { .. } => {
+            if let Some(recorder) = recorder {
+                recorder.record(&crate::domain::events::RsiCycleEvent::DiagnosisParsed {
+                    block_index,
+                    issues: 0,
+                });
+            }
+            return (Vec::new(), "无变更");
         }
+        DiagnosisProposal::Diagnose { issues, .. } => {
+            if let Some(recorder) = recorder {
+                recorder.record(&crate::domain::events::RsiCycleEvent::DiagnosisParsed {
+                    block_index,
+                    issues: issues.len(),
+                });
+            }
+            issues
+        }
+    };
+    // ---- 阶段 B：执行（消费诊断，产出具体修改）----
+    let prompt = build_execution_prompt(&issues, chunk);
+    let Ok(response) = llm.complete(&prompt).await else {
+        return (Vec::new(), "作废（LLM 调用失败）");
     };
     let proposal = match parse_block_proposal(&response) {
         Ok(proposal) => {
