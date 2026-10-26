@@ -26,6 +26,8 @@ pub(crate) async fn parse_ollama_stream(
     let mut current_text = String::new();
     let mut reasoning_normalizer = ReasoningDeltaNormalizer::new();
     let mut final_tool_calls: Vec<(String, String, serde_json::Value)> = Vec::new();
+    // #2104：arguments 字段缺失的 tool call（index、id、name），流结束发失败帧。
+    let mut unparseable_tool_calls: Vec<(usize, String, String)> = Vec::new();
     let mut usage = crate::adapters::wire::Usage {
         input_tokens: 0,
         output_tokens: 0,
@@ -125,12 +127,23 @@ pub(crate) async fn parse_ollama_stream(
                             .and_then(|n| n.as_str())
                             .unwrap_or("")
                             .to_string();
-                        let input = function
-                            .get("arguments")
-                            .cloned()
-                            .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
-                        if !name.is_empty() {
-                            final_tool_calls.push((id, name, input));
+                        // #2104：arguments 字段缺失 = 模型只发 name（无参数内容），
+                        // NEVER 降级 `{}` 执行——记入失败列表由流结束发失败帧。
+                        match function.get("arguments") {
+                            Some(input) => {
+                                if !name.is_empty() {
+                                    final_tool_calls.push((id, name, input.clone()));
+                                }
+                            }
+                            None => {
+                                if !name.is_empty() {
+                                    log::warn!(target: crate::LOG_TARGET,
+                                        "[ollama stream] tool_call '{}' (id={}) has no arguments field — emitting unparseable payload",
+                                        name, id
+                                    );
+                                    unparseable_tool_calls.push((idx, id, name));
+                                }
+                            }
                         }
                     }
                 }
@@ -190,6 +203,22 @@ pub(crate) async fn parse_ollama_stream(
         // 只能在此（流结束）发出 ToolCallCompleted——runtime 的旁路执行此时才触发。
         handler.emit_tool_call_completed(idx, id.clone(), name.clone(), input.clone());
         content_blocks.push(ContentBlock::ToolUse { id, name, input });
+    }
+    for (idx, id, name) in unparseable_tool_calls {
+        handler.emit_tool_use_start(&name, Some(&id), idx);
+        // #2104：与 openai_compatible 失败帧同构——骨架块 + 失败帧短路执行。
+        content_blocks.push(ContentBlock::ToolUse {
+            id: id.clone(),
+            name: name.clone(),
+            input: serde_json::Value::Object(serde_json::Map::new()),
+        });
+        handler.emit_tool_call_arguments_unparseable(
+            idx,
+            id,
+            name,
+            String::new(),
+            "model emitted tool name only; no arguments were provided".to_string(),
+        );
     }
 
     log::debug!(target: crate::LOG_TARGET,

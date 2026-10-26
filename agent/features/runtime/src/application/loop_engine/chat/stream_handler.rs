@@ -65,7 +65,8 @@ fn has_actionable_output(output: &[ProviderContentData]) -> bool {
         // 增量帧不进聚合 output（见 InvocationEventReducer 文档）。
         ProviderContentData::ToolCallStarted { .. }
         | ProviderContentData::ToolArgumentsDelta { .. }
-        | ProviderContentData::ToolCallCompleted { .. } => false,
+        | ProviderContentData::ToolCallCompleted { .. }
+        | ProviderContentData::ToolCallArgumentsUnparseable { .. } => false,
     })
 }
 
@@ -178,7 +179,8 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
             // 增量帧不进终态输出（与 provider 非流式聚合同源）。
             ProviderContentData::ToolCallStarted { .. }
             | ProviderContentData::ToolArgumentsDelta { .. }
-            | ProviderContentData::ToolCallCompleted { .. } => {}
+            | ProviderContentData::ToolCallCompleted { .. }
+            | ProviderContentData::ToolCallArgumentsUnparseable { .. } => {}
         }
     }
 
@@ -272,6 +274,30 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                             name,
                             arguments,
                         });
+                    }
+                    // #2104：arguments 无法解析——NEVER 执行骨架 `{}`：
+                    // 骨架 ToolUse 进聚合输出维持 tool_use/tool_result 配对，
+                    // 失败事实经 streaming 通道物化 is_error ToolResult 回给 LLM。
+                    ProviderContentData::ToolCallArgumentsUnparseable {
+                        index,
+                        id,
+                        name,
+                        raw_arguments,
+                        diagnostic,
+                    } => {
+                        self.saw_visible_delta = true;
+                        self.push_output(ProviderContentData::ToolCall {
+                            id: id.clone(),
+                            name: name.clone(),
+                            arguments: serde_json::Value::Object(serde_json::Map::new()),
+                        });
+                        self.handler.on_tool_call_unparseable(
+                            index,
+                            id,
+                            name,
+                            raw_arguments,
+                            diagnostic,
+                        );
                     }
                 }
                 Ok(None)
@@ -540,6 +566,39 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
             index,
             input: arguments.clone(),
         });
+    }
+
+    /// #2104：流中 tool call arguments 无法解析——不执行，经 streaming 通道
+    /// 直接物化 `is_error` ToolResult（含诊断与原始片段）回给 LLM。
+    fn on_tool_call_unparseable(
+        &mut self,
+        index: usize,
+        provider_id: String,
+        name: String,
+        raw_arguments: String,
+        diagnostic: String,
+    ) {
+        log::warn!(target: crate::LOG_TARGET,
+            "on_tool_call_unparseable: name={} provider_id={} raw_bytes={} diagnostic={}",
+            name, provider_id, raw_arguments.len(), diagnostic,
+        );
+        let Some(executor) = &self.streaming_tool else {
+            // 未装配 streaming 通道（非 Main Run）：无执行短路能力，骨架将走
+            // 常规工具轮次的 schema 校验失败路径（登记于 issue #2104 follow-up）。
+            return;
+        };
+        let id = self.runtime_tool_id(index, Some(&provider_id));
+        executor.record_unparseable(
+            crate::application::tool::agent::ToolCall {
+                id,
+                provider_id,
+                name,
+                index,
+                input: serde_json::Value::Object(serde_json::Map::new()),
+            },
+            raw_arguments,
+            diagnostic,
+        );
     }
 }
 

@@ -26,6 +26,9 @@ pub(crate) type StreamingToolRoundResult =
 /// 流事件投影器（reducer）依赖的提交端口：流中 `ToolCallCompleted` → 立即执行。
 pub(crate) trait StreamingToolSubmitPort: Send + Sync {
     fn submit(&self, call: ToolCall);
+
+    /// #2104：流中 arguments 无法解析的 tool call——短路执行，物化 error 结果。
+    fn record_unparseable(&self, call: ToolCall, raw_arguments: String, diagnostic: String);
 }
 
 /// 旁路执行句柄：流中 `submit` 立即执行（并发受 semaphore 限制），
@@ -156,6 +159,34 @@ fn enqueue_streaming_operation(
         handle
     };
     state.pending.push(handle);
+}
+
+/// #2104：构造 arguments 无法解析的 error ToolExecution（诊断 + 原始片段
+/// 前 500 字符），供 `record_unparseable` 物化与单元测试共用。
+pub(crate) fn unparseable_tool_execution(
+    call: &ToolCall,
+    raw_arguments: &str,
+    diagnostic: &str,
+) -> crate::application::tool::agent::ToolExecution {
+    let raw_preview: String = raw_arguments.chars().take(500).collect();
+    let message = format!(
+        "Tool call failed: arguments could not be parsed as JSON.\n\nDiagnostic: {diagnostic}\n\nRaw arguments (first 500 chars): {raw_preview}\n\nThe tool was not executed. Re-issue the call with well-formed JSON arguments."
+    );
+    crate::application::tool::agent::ToolExecution::new(
+        call,
+        tools::ToolOutcome {
+            text: message,
+            data: serde_json::json!({
+                "status": "error",
+                "error_type": "tool_arguments_unparseable",
+                "diagnostic": diagnostic,
+                "raw_arguments_preview": raw_preview,
+            }),
+            is_error: true,
+            images: Vec::new(),
+            task_change: None,
+        },
+    )
 }
 
 impl StreamingToolExecutor {
@@ -328,10 +359,97 @@ impl StreamingToolExecutor {
         );
         results
     }
+
+    /// #2104：流中 tool call arguments 无法解析——NEVER 执行，直接物化
+    /// `is_error` ToolResult（含诊断与原始片段前 500 字符）回给 LLM。
+    /// 与 `submit` 同源接受 invocation 代际校验；结果进同一缓冲，
+    /// 由 engine Tools 阶段 `take_results` 统一汇总。
+    pub(crate) fn record_unparseable(
+        &self,
+        call: ToolCall,
+        raw_arguments: String,
+        diagnostic: String,
+    ) {
+        let inner = self.inner.clone();
+        let invocation = {
+            let state = inner
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            let Some(invocation) = state.invocation.clone() else {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "[streaming_tool] record_unparseable skipped: invocation not attached (call={})",
+                    call.name
+                );
+                return;
+            };
+            invocation
+        };
+        log::warn!(
+            target: crate::LOG_TARGET,
+            "[streaming_tool] record_unparseable tool={} id={} raw_bytes={} diagnostic={}",
+            call.name,
+            call.id,
+            raw_arguments.len(),
+            diagnostic
+        );
+        let execution = unparseable_tool_execution(&call, &raw_arguments, &diagnostic);
+        // TUI 收口：与正常执行结果同通道发 ToolResult 事件（卡片由
+        // ToolCallStarted 建卡、ToolResult 收口），无需额外状态事件。
+        let sink = inner.runtime_context.event_sink();
+        let sink_context = inner.turn_context.clone();
+        let event_execution = execution.clone();
+        let session_id = inner.agent.session_id.as_ref().to_string();
+        let materializer = inner.agent.tool_result_materializer.clone();
+        let event_task = async move {
+            crate::application::loop_engine::chat::tools::send_tool_result(
+                &sink,
+                &sink_context,
+                &event_execution,
+                materializer.as_ref(),
+                &session_id,
+            )
+            .await;
+        };
+        let accept_inner = inner.clone();
+        let result_task = async move {
+            let accepted = accept_inner
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .accept_result(
+                    &invocation,
+                    StreamingToolRoundResult {
+                        results: vec![execution],
+                        fuse_bypassed: Vec::new(),
+                        suspensions: Vec::new(),
+                        approvals: Vec::new(),
+                    },
+                );
+            if !accepted {
+                log::debug!(
+                    target: crate::LOG_TARGET,
+                    "[streaming_tool] discarded stale unparseable round tool={} step_id={} generation={}",
+                    invocation.step_id, invocation.step_id, invocation.generation
+                );
+            }
+            let _ = event_task.await;
+        };
+        let mut state = inner
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        enqueue_streaming_operation(&mut state, true, result_task);
+    }
 }
 
 impl StreamingToolSubmitPort for StreamingToolExecutor {
     fn submit(&self, call: ToolCall) {
         StreamingToolExecutor::submit(self, call);
+    }
+
+    fn record_unparseable(&self, call: ToolCall, raw_arguments: String, diagnostic: String) {
+        StreamingToolExecutor::record_unparseable(self, call, raw_arguments, diagnostic);
     }
 }
