@@ -221,6 +221,23 @@ pub enum ProviderContentData {
         /// 验证过的 JSON 参数。
         arguments: serde_json::Value,
     },
+    /// Tool call arguments 无法解析为可执行输入的失败帧（流增量；仅内存流转，
+    /// **NEVER** 落盘）。流正常结束但拼接后的 arguments 仍不是合法 JSON
+    /// （重复前缀等 Syntax 类错误）或模型全程未给出 arguments 时发出。
+    /// Runtime 据此短路执行并合成 `is_error` ToolResult 回给 LLM；
+    /// assistant 消息侧仅保留 `ToolUse { input: {} }` 配对骨架。
+    /// EOF 截断不走此路径（仍走 `StreamTruncated` 整轮重试）。
+    ToolCallArgumentsUnparseable {
+        index: usize,
+        /// Provider 原始 tool-call ID。
+        id: String,
+        /// 工具名称。
+        name: String,
+        /// 模型原始给出的 arguments 全文（未经任何补全；缺省时为空串）。
+        raw_arguments: String,
+        /// 解析失败诊断（serde 错误信息或「未提供 arguments」说明）。
+        diagnostic: String,
+    },
 }
 
 /// 流式响应类型。

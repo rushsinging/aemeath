@@ -35,6 +35,9 @@ mod reasoning;
 #[cfg(test)]
 #[path = "tests/responses_reasoning.rs"]
 mod responses_reasoning;
+#[cfg(test)]
+#[path = "tests/tool_arguments_unparseable.rs"]
+mod tool_arguments_unparseable;
 
 async fn spawn_openai_counting_server(raw_response: &'static str) -> (String, Arc<AtomicUsize>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

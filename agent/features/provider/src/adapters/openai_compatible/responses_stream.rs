@@ -180,17 +180,49 @@ pub(crate) async fn parse_responses_stream(
                         // #1494：Responses 协议级"参数完整"信号——立即解析并发出
                         // ToolCallCompleted，runtime 据此边流边执行。
                         let (call_id, name, full_args) = entry.clone();
-                        let parsed = serde_json::from_str::<serde_json::Value>(&full_args)
-                            .unwrap_or_else(|_| {
-                                crate::adapters::json_recovery::try_complete_truncated_json(
+                        match serde_json::from_str::<serde_json::Value>(&full_args) {
+                            Ok(parsed) => {
+                                handler.emit_tool_call_completed(
+                                    output_index,
+                                    call_id,
+                                    name,
+                                    parsed,
+                                );
+                                completed_tool_indices.insert(output_index);
+                            }
+                            Err(parse_error) => {
+                                // #2104：协议已宣告参数完整但仍不可解析——
+                                // NEVER 降级 `{}` 发完成帧，改发失败帧短路执行。
+                                match crate::adapters::json_recovery::try_complete_truncated_json(
                                     &full_args,
-                                )
-                                .unwrap_or_else(|| {
-                                    serde_json::Value::Object(serde_json::Map::new())
-                                })
-                            });
-                        handler.emit_tool_call_completed(output_index, call_id, name, parsed);
-                        completed_tool_indices.insert(output_index);
+                                ) {
+                                    Some(recovered) => {
+                                        handler.emit_tool_call_completed(
+                                            output_index,
+                                            call_id,
+                                            name,
+                                            recovered,
+                                        );
+                                        completed_tool_indices.insert(output_index);
+                                    }
+                                    None => {
+                                        log::warn!(target: crate::LOG_TARGET,
+                                            "[responses stream] function_call arguments parse failed ({} bytes): {} — emitting unparseable payload",
+                                            full_args.len(), parse_error
+                                        );
+                                        handler.emit_tool_call_arguments_unparseable(
+                                            output_index,
+                                            call_id,
+                                            name,
+                                            full_args,
+                                            parse_error.to_string(),
+                                        );
+                                        // 失败帧已终态收口该 index，无需 completed 兜底。
+                                        completed_tool_indices.insert(output_index);
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -245,16 +277,41 @@ pub(crate) async fn parse_responses_stream(
     sorted_indices.sort();
     for idx in sorted_indices {
         if let Some((id, name, args_str)) = function_calls.remove(&idx) {
-            let input: serde_json::Value =
-                serde_json::from_str(&args_str).unwrap_or(serde_json::json!({}));
-            content_blocks.push(ContentBlock::ToolUse {
-                id: id.clone(),
-                name: name.clone(),
-                input: input.clone(),
-            });
-            // #1494 兜底：arguments.done 未发出（事件缺失 / 解析失败）时补发。
-            if !completed_tool_indices.contains(&idx) {
-                handler.emit_tool_call_completed(idx, id, name, input);
+            // #2104：done 事件已发过失败帧的（completed_tool_indices 收口）
+            // 只补骨架；未收口的（事件缺失 / 解析失败）在此终态判定。
+            match serde_json::from_str::<serde_json::Value>(&args_str) {
+                Ok(input) => {
+                    content_blocks.push(ContentBlock::ToolUse {
+                        id: id.clone(),
+                        name: name.clone(),
+                        input: input.clone(),
+                    });
+                    // #1494 兜底：arguments.done 未发出（事件缺失）时补发。
+                    if !completed_tool_indices.contains(&idx) {
+                        handler.emit_tool_call_completed(idx, id, name, input);
+                    }
+                }
+                Err(parse_error) => {
+                    // 配对骨架：协议要求 tool_use 存在，但 input 无业务含义。
+                    content_blocks.push(ContentBlock::ToolUse {
+                        id: id.clone(),
+                        name: name.clone(),
+                        input: serde_json::Value::Object(serde_json::Map::new()),
+                    });
+                    if !completed_tool_indices.contains(&idx) {
+                        log::warn!(target: crate::LOG_TARGET,
+                            "[responses stream] function_call arguments parse failed at stream end ({} bytes): {} — emitting unparseable payload",
+                            args_str.len(), parse_error
+                        );
+                        handler.emit_tool_call_arguments_unparseable(
+                            idx,
+                            id,
+                            name,
+                            args_str,
+                            parse_error.to_string(),
+                        );
+                    }
+                }
             }
         }
     }

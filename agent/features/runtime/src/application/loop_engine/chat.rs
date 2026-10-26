@@ -51,6 +51,9 @@ mod stream_handler;
 mod stream_handler_tests;
 pub(crate) mod streaming_tool;
 pub(crate) mod task_snapshot;
+#[cfg(test)]
+#[path = "chat/tool_unparseable_tests.rs"]
+mod tool_unparseable_tests;
 pub(crate) mod tools;
 
 pub use events::{

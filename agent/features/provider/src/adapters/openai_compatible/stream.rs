@@ -431,15 +431,23 @@ pub(crate) async fn parse_openai_stream(
         // Note: on_tool_use_start was already called during streaming
         // when the name first appeared in a delta chunk. No need to
         // call it again here.
-        let input: serde_json::Value = if arguments.is_empty() {
+        // #2104：解析结果三态——成功 / 失败帧（非 EOF 语法错误或缺 arguments）/
+        // EOF 截断（记录后流结束抛 StreamTruncated 整轮重试）。
+        enum ArgumentsOutcome {
+            Parsed(serde_json::Value),
+            Unparseable { diagnostic: String },
+        }
+        let outcome: ArgumentsOutcome = if arguments.is_empty() {
             log::warn!(target: crate::LOG_TARGET,
-                "[openai-compat stream] tool_call '{}' (id={}) had NO arguments delta after {} chunks — model emitted name only. Falling back to {{}}.",
+                "[openai-compat stream] tool_call '{}' (id={}) had NO arguments delta after {} chunks — model emitted name only. Emitting unparseable payload.",
                 name, id, delta_count
             );
-            serde_json::Value::Object(serde_json::Map::new())
+            ArgumentsOutcome::Unparseable {
+                diagnostic: "model emitted tool name only; no arguments were provided".to_string(),
+            }
         } else {
             match serde_json::from_str(&arguments) {
-                Ok(v) => v,
+                Ok(v) => ArgumentsOutcome::Parsed(v),
                 Err(e) => {
                     let is_eof = matches!(e.classify(), serde_json::error::Category::Eof);
 
@@ -451,7 +459,7 @@ pub(crate) async fn parse_openai_stream(
                             "[openai-compat stream] tool_call '{}' (id={}) arguments truncated mid-string but heuristic recovery succeeded after {} delta chunks ({} bytes) — using recovered JSON. (Original error: {})",
                             name, id, delta_count, arguments.len(), e
                         );
-                        recovered
+                        ArgumentsOutcome::Parsed(recovered)
                     } else {
                         let head: String = arguments.chars().take(300).collect();
                         let tail_rev: String =
@@ -461,30 +469,59 @@ pub(crate) async fn parse_openai_stream(
                             "[openai-compat stream] tool_call '{}' (id={}) arguments parse failed after {} delta chunks ({} bytes): {} — heuristic recovery also failed. head: {} | tail: {}",
                             name, id, delta_count, arguments.len(), e, head, tail
                         );
-                        if is_eof && truncated_tool.is_none() {
-                            truncated_tool = Some((
-                                id.clone(),
-                                name.clone(),
-                                head,
-                                tail,
-                                arguments.len(),
-                                delta_count,
-                            ));
+                        if is_eof {
+                            if truncated_tool.is_none() {
+                                truncated_tool = Some((
+                                    id.clone(),
+                                    name.clone(),
+                                    head,
+                                    tail,
+                                    arguments.len(),
+                                    delta_count,
+                                ));
+                            }
+                            // EOF 形态留待流结束统一抛 StreamTruncated；骨架块先占位。
+                            ArgumentsOutcome::Parsed(serde_json::Value::Object(
+                                serde_json::Map::new(),
+                            ))
+                        } else {
+                            // #2104：非 EOF 语法错误（如网关重复前缀拼接）。
+                            // NEVER 静默降级为 `{}` 提交执行——发失败帧让 runtime
+                            // 短路并合成 is_error ToolResult 回给 LLM。
+                            ArgumentsOutcome::Unparseable {
+                                diagnostic: e.to_string(),
+                            }
                         }
-                        serde_json::Value::Object(serde_json::Map::new())
                     }
                 }
             }
         };
-        content_blocks.push(ContentBlock::ToolUse {
-            id: id.clone(),
-            name: name.clone(),
-            input: input.clone(),
-        });
-        // #1494 兜底：index 切换时未发出（参数解析失败 / 单 tool call 无切换）的，
-        // 流结束解析成功后补发；已发出的跳过。
-        if !completed_tool_indices.contains(&tool_index) {
-            handler.emit_tool_call_completed(tool_index, id, name, input);
+        match outcome {
+            ArgumentsOutcome::Unparseable { diagnostic } => {
+                content_blocks.push(ContentBlock::ToolUse {
+                    id: id.clone(),
+                    name: name.clone(),
+                    // 配对骨架：协议要求 tool_use 存在，但该 input 无业务含义，
+                    // runtime 已由失败帧短路，NEVER 执行。
+                    input: serde_json::Value::Object(serde_json::Map::new()),
+                });
+                handler.emit_tool_call_arguments_unparseable(
+                    tool_index, id, name, arguments, diagnostic,
+                );
+                continue;
+            }
+            ArgumentsOutcome::Parsed(input) => {
+                content_blocks.push(ContentBlock::ToolUse {
+                    id: id.clone(),
+                    name: name.clone(),
+                    input: input.clone(),
+                });
+                // #1494 兜底：index 切换时未发出（参数解析失败 / 单 tool call 无切换）的，
+                // 流结束解析成功后补发；已发出的跳过。
+                if !completed_tool_indices.contains(&tool_index) {
+                    handler.emit_tool_call_completed(tool_index, id, name, input);
+                }
+            }
         }
     }
 

@@ -440,6 +440,15 @@ impl LlmClient {
                             arguments,
                         });
                     }
+                    // #2104：聚合视图（无生产消费方）与流式 content_blocks 同构——
+                    // 失败帧降为配对骨架；失败语义仅流式消费方（runtime）使用。
+                    ProviderContentData::ToolCallArgumentsUnparseable { id, name, .. } => {
+                        response.output.push(ProviderContentData::ToolCall {
+                            id,
+                            name,
+                            arguments: serde_json::Value::Object(serde_json::Map::new()),
+                        });
+                    }
                     ProviderContentData::ToolCallStarted { .. }
                     | ProviderContentData::ToolArgumentsDelta { .. } => {}
                 },

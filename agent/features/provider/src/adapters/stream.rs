@@ -101,6 +101,25 @@ pub(crate) trait InvocationSink: Send {
             arguments,
         });
     }
+
+    /// #2104：流结束但 arguments 仍无法解析为可执行输入 → 发失败帧。
+    /// runtime 据此短路执行并合成 `is_error` ToolResult 回给 LLM。
+    fn emit_tool_call_arguments_unparseable(
+        &mut self,
+        index: usize,
+        id: String,
+        name: String,
+        raw_arguments: String,
+        diagnostic: String,
+    ) {
+        self.on_delta(ProviderContentData::ToolCallArgumentsUnparseable {
+            index,
+            id,
+            name,
+            raw_arguments,
+            diagnostic,
+        });
+    }
 }
 
 #[derive(Clone, Copy)]
