@@ -64,6 +64,7 @@ enum RsiControlAck {
 | `evidence_max_sessions_per_cycle` | 实施定值 | 每周期步长上限：最多处理的 session 数，超出留待下周期增量消化 |
 | `evidence_block_runs` | 实施定值 | 数据源分块粒度：每块包含的 run 数上限（流模型见 04 分片 §2A.5） |
 | `chunk_max_components` | 待废弃 | v1 按组件分块的遗留参数，语义降级为「单块内组件面体积兜底」（主分块单位是数据源块，04 分片 §2A.5） |
+| `execution_mode` | `single_phase` | 改进执行模式：`single_phase`（一次提案即落盘，v1 行为）/ `diagnose_only`（每块 1 次诊断仅产出 issue + 跨块汇总，**不落盘**，执行派发与强度门禁由 #2092 决定，#2078） |
 
 ## 6. 执行模式与职责边界（2026-10-22 拍板修订）
 

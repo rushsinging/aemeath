@@ -25,6 +25,14 @@ pub enum RsiCycleEvent {
         sessions_runs: Vec<String>,
         signals: Vec<String>,
     },
+    DiagnosisSummarized {
+        issues: usize,
+        occurrences: usize,
+    },
+    DiagnosisParsed {
+        block_index: usize,
+        issues: usize,
+    },
     ProposalParsed {
         block_index: usize,
         reason: String,

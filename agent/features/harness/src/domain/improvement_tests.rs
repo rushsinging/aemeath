@@ -118,6 +118,7 @@ async fn cycle_adopts_and_summarizes_per_block() {
         (mentioned.clone(), body_content("old")),
         (untouched.clone(), body_content("keep")),
     ]);
+    // 单阶段（#2078 修订）：每块一次提案调用
     let llm = ScriptedLlm::new(vec![
         r#"{"decision":"propose","reason":"正文过时","change_set":{"edits":[{"action":"upsert","id":{"kind":"skill","name":"mentioned"},"content":{"frontmatter":null,"body":"new"}}]}}"#.to_string(),
         r#"{"decision":"no_change","reason":"证据不足"}"#.to_string(),
