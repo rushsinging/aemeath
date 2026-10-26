@@ -56,6 +56,12 @@ pub enum RsiCycleEvent {
         lesson_id: String,
         signal: String,
     },
+    LessonVerified {
+        lesson_id: String,
+        component: String,
+        target_signal: String,
+        status: String,
+    },
     LessonRetired {
         component: String,
         count: usize,

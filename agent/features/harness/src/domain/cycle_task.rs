@@ -118,14 +118,68 @@ impl RsiTask for HarnessRsiCycleTask {
         let mut report_lines = Vec::new();
         let mut all_adoptions: Vec<crate::domain::task::AdoptionRecord> = Vec::new();
 
+        // #2080 验证阶段：周期开头用本周期证据判定上轮改进是否生效。
+        // 证据一次性收集（块循环复用，避免二次扫描）。
+        let block_evidences: Vec<crate::domain::evidence::EvidenceBundle> = blocks
+            .iter()
+            .map(|block| self.stream_port.block_evidence(block))
+            .collect();
+        let current_signals: Vec<String> = block_evidences
+            .iter()
+            .flat_map(|evidence| {
+                evidence
+                    .signals
+                    .iter()
+                    .map(|signal| signal.signal_id.clone())
+            })
+            .collect();
+        let has_new_evidence = !current_signals.is_empty()
+            || block_evidences
+                .iter()
+                .any(|evidence| evidence.sessions_covered > 0);
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        let verification_outcomes = if self.dry_run {
+            // dry-run 零副作用：只预演判定，NEVER 改写经验库
+            self.lesson_store
+                .load_all()
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|lesson| {
+                    crate::domain::lesson::judge_verification(
+                        lesson,
+                        &current_signals,
+                        has_new_evidence,
+                    )
+                })
+                .collect::<Vec<_>>()
+        } else {
+            self.lesson_store
+                .verify_pending(&current_signals, has_new_evidence, now_secs)
+                .unwrap_or_default()
+        };
+        for outcome in &verification_outcomes {
+            if let Some(recorder) = &self.recorder {
+                recorder.record(&crate::domain::events::RsiCycleEvent::LessonVerified {
+                    lesson_id: outcome.lesson_id.clone(),
+                    component: outcome.component_kind.clone(),
+                    target_signal: outcome.target_signal.clone(),
+                    status: format!("{:?}", outcome.status).to_lowercase(),
+                });
+            }
+        }
+
         // #2078 修订：诊断优先模式——每块 1 次诊断 + 跨块汇总，不落盘。
         if self.config.execution_mode == share::config::RsiExecutionMode::DiagnoseOnly {
             let lessons = self.lesson_store.load_active().unwrap_or_default();
             let mut diagnosis_report = Vec::new();
             let mut merged_evidence = crate::domain::evidence::EvidenceBundle::default();
-            for block in &blocks {
-                let evidence = self.stream_port.block_evidence(block);
-                merged_evidence.signals.extend(evidence.signals);
+            for evidence in &block_evidences {
+                merged_evidence
+                    .signals
+                    .extend(evidence.signals.iter().cloned());
                 merged_evidence.sessions_covered += evidence.sessions_covered;
             }
             let summary = crate::domain::improvement::run_diagnosis_cycle(
@@ -160,7 +214,7 @@ impl RsiTask for HarnessRsiCycleTask {
             report_lines.push(format!("—— 数据源分块：{} 块", blocks.len()));
         }
         for (block_index, block) in blocks.iter().enumerate() {
-            let evidence = self.stream_port.block_evidence(block);
+            let evidence = block_evidences[block_index].clone();
             if let Some(recorder) = &self.recorder {
                 recorder.record(&crate::domain::events::RsiCycleEvent::BlockEvidence {
                     block_index,
@@ -251,6 +305,23 @@ impl RsiTask for HarnessRsiCycleTask {
             });
         }
         let mut summary = summary_parts.join(" | ");
+        // #2080：验证结论在正式与 dry-run 均展示（验证是周期产物之一）
+        if !verification_outcomes.is_empty() {
+            summary.push_str("\n（验证结论）\n");
+            for outcome in &verification_outcomes {
+                summary.push_str(&format!(
+                    "  {} ← {}：{:?}{}\n",
+                    outcome.component_kind,
+                    outcome.target_signal,
+                    outcome.status,
+                    if self.dry_run {
+                        "（预演，未落盘）"
+                    } else {
+                        ""
+                    }
+                ));
+            }
+        }
         if self.dry_run {
             summary.push_str("\n（dry-run 报告）\n");
             summary.push_str(&report_lines.join("\n"));
