@@ -1464,9 +1464,17 @@ impl crate::application::interaction::coordinator::InteractionCompletionContextP
                 std::path::PathBuf::from("/tmp"),
                 step_cancel,
             );
+        static FAKE_TOOL_CATALOG: std::sync::LazyLock<
+            std::sync::Arc<dyn tools::ToolCatalogPort>,
+        > = std::sync::LazyLock::new(|| {
+            std::sync::Arc::new(
+                crate::application::run::run_factory_support::doubles::FakeToolCatalog,
+            )
+        });
         crate::application::interaction::coordinator::InteractionCompletionContext::new(
             tool_context,
             tool_execution,
+            &FAKE_TOOL_CATALOG,
             materializer,
             "test-session",
         )

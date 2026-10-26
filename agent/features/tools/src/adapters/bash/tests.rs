@@ -786,9 +786,10 @@ fn bash_tool_timeout_defaults_to_30m_and_background_budget_to_24h() {
     assert_eq!(tool.get_timeout_secs(Some(3600), false), 3600);
 }
 
-/// timeout 默认值/上限属参数契约，唯一真相源是 `BashInput::timeout` 字段 doc
-/// （schema 注入 LLM）；description 只答 when-to-use。两条 description 通道必须
-/// 同口径，且都不得出现已被 schema 取代的 600s 过时上限。
+/// timeout 默认值/上限属框架参数契约，唯一真相源是 `Tool::get_timeout_secs`
+/// 与 Catalog 注入的发布 schema；工具自身 schema MUST NOT 声明 `timeout`。
+/// description 只答 when-to-use，两条 description 通道必须同口径，
+/// 且都不得出现已被 schema 取代的 600s 过时上限。
 #[test]
 fn bash_tool_timeout_max_lives_in_schema_and_both_description_channels_agree() {
     let workspace = tempdir().unwrap();
@@ -798,13 +799,23 @@ fn bash_tool_timeout_max_lives_in_schema_and_both_description_channels_agree() {
     .allow_all(true)
     .build();
     let tool = bash_tool(&ctx);
-    let schema = tool.input_schema();
-    let timeout_desc = schema["properties"]["timeout"]["description"]
-        .as_str()
-        .expect("timeout description");
+    let own_schema = tool.input_schema().to_string();
     assert!(
-        timeout_desc.contains("Timeout in seconds") && timeout_desc.contains("background"),
-        "字段 doc 必须声明单位为秒且说明后台档语义（具体数字由 catalog 注入），got: {timeout_desc}"
+        !own_schema.contains("timeout"),
+        "工具 schema MUST NOT 声明 timeout（由 catalog 注入）: {own_schema}"
+    );
+
+    let published = crate::domain::timeout_policy::inject_timeout_into_input_schema(
+        tool.input_schema(),
+        tool.get_timeout_secs(None, false),
+        tool.get_timeout_secs(Some(u64::MAX), false),
+    );
+    let timeout_desc = published["properties"]["timeout"]["description"]
+        .as_str()
+        .expect("catalog 注入后必须有 timeout description");
+    assert!(
+        timeout_desc.contains("Timeout in seconds") && timeout_desc.contains("max"),
+        "发布 schema 必须声明单位为秒与上限，got: {timeout_desc}"
     );
     assert_eq!(
         tool.description_for("en"),

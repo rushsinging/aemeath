@@ -19,6 +19,10 @@ pub struct BashResult {
 /// Typed input for the `bash` tool.
 ///
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
+///
+/// `timeout` **MUST NOT** 在此声明：它是框架级通用参数，由 catalog 统一注入到
+/// 发布给模型的 schema，并在执行前由框架摘除、解析成 effective 值写入
+/// `ExecutionScope`。工具只读 `ctx.effective_timeout_secs()`。
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct BashInput {
@@ -26,8 +30,4 @@ pub struct BashInput {
     pub goal: String,
     /// The bash command to execute
     pub command: String,
-    /// Timeout in seconds; the runtime resolves the default (24h when
-    /// background execution is enabled, otherwise the tool default) and caps
-    /// it at 86400.
-    pub timeout: Option<u64>,
 }

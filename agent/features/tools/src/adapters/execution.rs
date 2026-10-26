@@ -72,10 +72,17 @@ impl ExecutionAdapter {
         };
         let context = context.with_authorization(invocation.authorization);
 
+        // `timeout` 是框架级通用参数：runtime 已解析成 effective 值写入
+        // `ExecutionScope`，工具只读 `ctx.effective_timeout_secs()`。这里在校验前
+        // 摘除，使「catalog 注入发布的 schema」与「工具自身 input_schema」对同一份
+        // 入参给出一致判定，避免把合法 `timeout` 判成未知字段。
+        let mut input = invocation.input;
+        crate::domain::timeout_policy::take_timeout_from_input(&mut input);
+
         if let Err(mismatch) = crate::domain::schema_validator::validate_tool_input(
             tool.name(),
             &tool.input_schema(),
-            &invocation.input,
+            &input,
         ) {
             return ToolExecutionOutcome::failure(
                 ToolErrorKind::InvalidInput,
@@ -83,14 +90,14 @@ impl ExecutionAdapter {
             );
         }
 
-        if let Some(suspension) = tool.suspension(&invocation.input) {
+        if let Some(suspension) = tool.suspension(&input) {
             return match suspension {
                 Ok(value) => ToolExecutionOutcome::Suspended(value),
                 Err(message) => ToolExecutionOutcome::failure(ToolErrorKind::InvalidInput, message),
             };
         }
 
-        map_legacy_result(tool.call(invocation.input, &context).await)
+        map_legacy_result(tool.call(input, &context).await)
     }
 }
 

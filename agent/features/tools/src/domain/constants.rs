@@ -96,6 +96,12 @@ pub const BACKGROUND_TOOL_TIMEOUT_SECS: u64 = 86400;
 /// `get_timeout_secs` 覆写里收敛到 300。
 pub const DEFAULT_TOOL_MAX_TIMEOUT_SECS: u64 = 86400;
 
+/// 框架级通用 `timeout` 入参的 JSON 字段名（秒）。
+///
+/// Catalog 用它注入发布 schema，`ExecutionAdapter` 用它在校验与派发前摘除。
+/// **NEVER** 使用 `timeout_secs` 作为该字段名。
+pub const TIMEOUT_INPUT_FIELD: &str = "timeout";
+
 // ─── background_processes.rs（#1931 / #1946 Watch）───
 
 /// `BackgroundProcessWatch` 的 Tool 框架超时（秒）。

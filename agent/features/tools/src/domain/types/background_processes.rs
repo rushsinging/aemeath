@@ -105,18 +105,15 @@ pub struct BackgroundProcessStopResult {
 
 /// `BackgroundProcessWatch` input.
 ///
-/// 等待上限经统一入参 `timeout`（秒）设置；Tool 框架硬上限仍为
-/// [`WATCH_TOOL_TIMEOUT_SECS`]（#1946）：入参与内部 wait 必须在该上限内收口，
-/// **NEVER** 让框架 deadline 先于 wait 砍成 cleanup unconfirmed。
-/// **NEVER** 使用 `timeout_secs` 字段名（与 Bash/Agent/WebFetch 统一为 `timeout`）。
+/// 等待上限取框架解析的 effective `timeout`（`ctx.effective_timeout_secs()`），
+/// 工具框架硬上限仍为 [`WATCH_TOOL_TIMEOUT_SECS`]（#1946）：入参与内部 wait 必须
+/// 在该上限内收口，**NEVER** 让框架 deadline 先于 wait 砍成 cleanup unconfirmed。
+/// `timeout` 是框架级通用参数，catalog 注入发布、执行前框架摘除，**MUST NOT**
+/// 在此声明（本工具无自有字段）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BackgroundProcessWatchInput {
     /// Task id（`task_` / typed id 前缀）。
     pub task_id: String,
-    /// Timeout in seconds (default 300, max 300).
-    /// Omit to wait up to the framework cap (minus a short internal grace).
-    #[serde(default)]
-    pub timeout: Option<u64>,
 }
 
 /// Watch 等待结局。
@@ -202,37 +199,31 @@ mod tests {
     }
 
     #[test]
-    fn watch_input_accepts_unified_timeout_field() {
+    fn watch_input_keeps_only_task_id_and_schema_omits_framework_timeout() {
+        // `timeout` 是框架级通用参数：框架在派发前摘除，工具 input 只承载自有字段。
+        // 直接反序列化（旁路，未经框架摘除）时 MUST 容忍该字段而非报错。
         let input: BackgroundProcessWatchInput = serde_json::from_value(serde_json::json!({
             "task_id": "bgp_watch1",
             "timeout": 60
         }))
-        .expect("timeout 应可解析");
+        .expect("含框架 timeout 的 input 必须可解析（旁路兼容）");
         assert_eq!(input.task_id, "bgp_watch1");
-        assert_eq!(input.timeout, Some(60));
-        let omitted: BackgroundProcessWatchInput = serde_json::from_value(serde_json::json!({
-            "task_id": "bgp_watch2"
-        }))
-        .expect("省略 timeout 应默认 None");
-        assert_eq!(omitted.timeout, None);
-        let ignored: BackgroundProcessWatchInput = serde_json::from_value(serde_json::json!({
+
+        let legacy: BackgroundProcessWatchInput = serde_json::from_value(serde_json::json!({
             "task_id": "bgp_legacy",
             "timeout_secs": 60
         }))
         .expect("旧 timeout_secs 字段名 MUST 被忽略");
-        assert_eq!(ignored.timeout, None);
+        assert_eq!(legacy.task_id, "bgp_legacy");
+
         let schema = {
             use crate::domain::types::ToolSchema;
             BackgroundProcessWatchInput::data_schema()
         };
         let schema_text = schema.to_string();
         assert!(
-            schema_text.contains("\"timeout\"") || schema_text.contains("timeout"),
-            "Watch input schema MUST 暴露统一 timeout：{schema_text}"
-        );
-        assert!(
-            !schema_text.contains("timeout_secs"),
-            "Watch input schema MUST NOT 暴露 timeout_secs：{schema_text}"
+            !schema_text.contains("timeout"),
+            "工具 input schema MUST NOT 声明 timeout（由 catalog 统一注入）：{schema_text}"
         );
     }
 

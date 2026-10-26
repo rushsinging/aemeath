@@ -2,7 +2,9 @@
 
 use serde_json::{json, Value};
 
-use super::constants::{BACKGROUND_TOOL_TIMEOUT_SECS, DEFAULT_TOOL_MAX_TIMEOUT_SECS};
+use super::constants::{
+    BACKGROUND_TOOL_TIMEOUT_SECS, DEFAULT_TOOL_MAX_TIMEOUT_SECS, TIMEOUT_INPUT_FIELD,
+};
 
 /// 解析一次工具调用的 effective `timeout`（秒），三层优先级单一实现：
 ///
@@ -39,8 +41,27 @@ pub fn resolve_tool_timeout(requested: Option<u64>, default_secs: u64, max_secs:
 }
 
 /// 从工具入参 JSON 提取可选 `timeout`（秒）。非整数或缺省返回 `None`。
+///
+/// 只读不删，供派发前解析 effective 值（runtime supervisor）使用；
+/// 需要「提取并摘除」时用 [`take_timeout_from_input`]。
 pub fn extract_timeout_from_input(input: &Value) -> Option<u64> {
-    input.get("timeout").and_then(Value::as_u64)
+    input.get(TIMEOUT_INPUT_FIELD).and_then(Value::as_u64)
+}
+
+/// 从对象型入参中**摘取** `timeout`：返回解析值并从对象移除该字段。
+///
+/// 框架在派发执行前调用：`timeout` 是框架级通用参数，由 runtime 解析成
+/// effective 值写入 `ExecutionScope`，工具只读 `ctx.effective_timeout_secs()`。
+/// 摘除后工具自己的 `input_schema`（不含 `timeout`）与入参天然一致，
+/// 避免「发布 schema 注入、执行校验不认」的双合同。
+///
+/// - 非对象入参 → 直接返回 `None`，不改动。
+/// - 字段存在但非整数（如 `"12"`）→ 返回 `None` **并移除**该字段：
+///   框架已判定它不是合法 `timeout`，留给工具只会变成未知字段报错。
+pub fn take_timeout_from_input(input: &mut Value) -> Option<u64> {
+    let object = input.as_object_mut()?;
+    let raw = object.remove(TIMEOUT_INPUT_FIELD)?;
+    raw.as_u64()
 }
 
 /// 幂等注入可选 `timeout` 字段到 input JSON Schema。
@@ -198,6 +219,45 @@ mod tests {
             Some(12)
         );
         assert_eq!(extract_timeout_from_input(&json!({"timeout": "12"})), None);
+    }
+
+    #[test]
+    fn extract_does_not_mutate_input() {
+        let input = json!({"timeout": 12});
+        assert_eq!(extract_timeout_from_input(&input), Some(12));
+        assert_eq!(input, json!({"timeout": 12}));
+    }
+
+    #[test]
+    fn take_removes_field_and_returns_value() {
+        let mut input = json!({"task_id": "bgp_1", "timeout": 30});
+        assert_eq!(take_timeout_from_input(&mut input), Some(30));
+        assert_eq!(input, json!({"task_id": "bgp_1"}));
+    }
+
+    #[test]
+    fn take_returns_none_and_leaves_other_fields_when_absent() {
+        let mut input = json!({"task_id": "bgp_1"});
+        assert_eq!(take_timeout_from_input(&mut input), None);
+        assert_eq!(input, json!({"task_id": "bgp_1"}));
+    }
+
+    #[test]
+    fn take_drops_non_integer_timeout_so_tool_schema_stays_consistent() {
+        let mut input = json!({"task_id": "bgp_1", "timeout": "30"});
+        assert_eq!(take_timeout_from_input(&mut input), None);
+        assert_eq!(
+            input,
+            json!({"task_id": "bgp_1"}),
+            "非法 timeout MUST 被摘除，否则工具 schema 会报未知字段"
+        );
+    }
+
+    #[test]
+    fn take_passes_through_non_object_input() {
+        let mut input = json!("plain");
+        assert_eq!(take_timeout_from_input(&mut input), None);
+        assert_eq!(input, json!("plain"));
     }
 
     #[test]
