@@ -553,6 +553,7 @@ fn harness_rsi_patch_merges_fields() {
                 evidence_initial_window_days: Some(7),
                 evidence_max_sessions_per_cycle: Some(10),
                 evidence_block_sessions: Some(3),
+                execution_mode: Some(crate::config::RsiExecutionMode::DiagnoseOnly),
             }),
         }),
         ..Default::default()
@@ -567,4 +568,8 @@ fn harness_rsi_patch_merges_fields() {
     assert_eq!(merged.harness.rsi.evidence_initial_window_days, 7);
     assert_eq!(merged.harness.rsi.evidence_max_sessions_per_cycle, 10);
     assert_eq!(merged.harness.rsi.evidence_block_sessions, 3);
+    assert_eq!(
+        merged.harness.rsi.execution_mode,
+        crate::config::RsiExecutionMode::DiagnoseOnly
+    );
 }

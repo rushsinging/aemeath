@@ -115,7 +115,7 @@ impl DiagnosisSummary {
                 }
             }
         }
-        aggregated.sort_by(|a, b| b.occurrences.cmp(&a.occurrences));
+        aggregated.sort_by_key(|issue| std::cmp::Reverse(issue.occurrences));
         Self { issues: aggregated }
     }
 
