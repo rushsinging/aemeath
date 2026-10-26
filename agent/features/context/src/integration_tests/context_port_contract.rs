@@ -138,14 +138,46 @@ fn finalized_append() -> ContextAppendData {
         duration_ms: Some(7_325_000),
         messages: vec![Message::user("finalized")],
         receipts: vec![
-            StepReceiptData::tool("call-1", 0, ToolOutcomeKindData::Success),
-            StepReceiptData::tool("call-2", 1, ToolOutcomeKindData::Failure),
-            StepReceiptData::agent("call-3", 2, ToolOutcomeKindData::Success)
-                .with_summary("child finished")
-                .with_artifact_ref("artifact://child-result"),
-            StepReceiptData::agent("call-4", 3, ToolOutcomeKindData::CancellationUnconfirmed)
-                .with_possible_side_effect("remote write may have started")
-                .with_unfinished_call("child-call-9"),
+            StepReceiptData {
+                call_id: "call-1".to_string(),
+                index: 0,
+                outcome: ToolOutcomeKindData::Success,
+                agent: false,
+                summary: None,
+                artifact_refs: Vec::new(),
+                possible_side_effects: Vec::new(),
+                unfinished_call_ids: Vec::new(),
+            },
+            StepReceiptData {
+                call_id: "call-2".to_string(),
+                index: 1,
+                outcome: ToolOutcomeKindData::Failure,
+                agent: false,
+                summary: None,
+                artifact_refs: Vec::new(),
+                possible_side_effects: Vec::new(),
+                unfinished_call_ids: Vec::new(),
+            },
+            StepReceiptData {
+                call_id: "call-3".to_string(),
+                index: 2,
+                outcome: ToolOutcomeKindData::Success,
+                agent: true,
+                summary: Some("child finished".to_string()),
+                artifact_refs: vec!["artifact://child-result".to_string()],
+                possible_side_effects: Vec::new(),
+                unfinished_call_ids: Vec::new(),
+            },
+            StepReceiptData {
+                call_id: "call-4".to_string(),
+                index: 3,
+                outcome: ToolOutcomeKindData::CancellationUnconfirmed,
+                agent: true,
+                summary: None,
+                artifact_refs: Vec::new(),
+                possible_side_effects: vec!["remote write may have started".to_string()],
+                unfinished_call_ids: vec!["child-call-9".to_string()],
+            },
         ],
         api_input_tokens: Some(42),
     }
@@ -154,19 +186,25 @@ fn finalized_append() -> ContextAppendData {
 #[test]
 fn mixed_tool_outcomes_and_agent_receipts_preserve_original_order() {
     let append = finalized_append();
-    let indexes: Vec<_> = append.receipts.iter().map(StepReceiptData::index).collect();
+    let indexes: Vec<_> = append.receipts.iter().map(|r| r.index).collect();
 
     assert_eq!(indexes, vec![0, 1, 2, 3]);
-    assert_eq!(append.receipts[2].summary(), Some("child finished"));
     assert_eq!(
-        append.receipts[2].artifact_refs(),
+        append.receipts[2].summary.as_deref(),
+        Some("child finished")
+    );
+    assert_eq!(
+        &append.receipts[2].artifact_refs[..],
         &["artifact://child-result".to_string()]
     );
     assert_eq!(
-        append.receipts[3].outcome(),
+        append.receipts[3].outcome,
         ToolOutcomeKindData::CancellationUnconfirmed
     );
-    assert_eq!(append.receipts[3].unfinished_call_ids(), &["child-call-9"]);
+    assert_eq!(
+        &append.receipts[3].unfinished_call_ids[..],
+        &["child-call-9"]
+    );
 }
 
 #[tokio::test]

@@ -434,7 +434,7 @@ impl SessionHistory {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
-        receipts.sort_by_key(StepReceiptData::index);
+        receipts.sort_by_key(|r| r.index);
         receipts
     }
 

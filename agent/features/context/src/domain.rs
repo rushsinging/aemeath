@@ -608,97 +608,17 @@ pub enum ToolOutcomeKindData {
     Suspended,
 }
 
-/// finalized Step 中可确定重放的 Tool/Agent receipt。
+/// finalized Step 中可确定重放的 Tool/Agent receipt（纯数据 DTO）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StepReceiptData {
-    call_id: String,
-    index: usize,
-    outcome: ToolOutcomeKindData,
-    agent: bool,
-    summary: Option<String>,
-    artifact_refs: Vec<String>,
-    possible_side_effects: Vec<String>,
-    unfinished_call_ids: Vec<String>,
-}
-
-impl StepReceiptData {
-    pub fn tool(call_id: impl Into<String>, index: usize, outcome: ToolOutcomeKindData) -> Self {
-        Self::new(call_id, index, outcome, false)
-    }
-
-    pub fn agent(call_id: impl Into<String>, index: usize, outcome: ToolOutcomeKindData) -> Self {
-        Self::new(call_id, index, outcome, true)
-    }
-
-    fn new(
-        call_id: impl Into<String>,
-        index: usize,
-        outcome: ToolOutcomeKindData,
-        agent: bool,
-    ) -> Self {
-        Self {
-            call_id: call_id.into(),
-            index,
-            outcome,
-            agent,
-            summary: None,
-            artifact_refs: Vec::new(),
-            possible_side_effects: Vec::new(),
-            unfinished_call_ids: Vec::new(),
-        }
-    }
-
-    pub fn with_summary(mut self, summary: impl Into<String>) -> Self {
-        self.summary = Some(summary.into());
-        self
-    }
-
-    pub fn with_artifact_ref(mut self, artifact_ref: impl Into<String>) -> Self {
-        self.artifact_refs.push(artifact_ref.into());
-        self
-    }
-
-    pub fn with_possible_side_effect(mut self, effect: impl Into<String>) -> Self {
-        self.possible_side_effects.push(effect.into());
-        self
-    }
-
-    pub fn with_unfinished_call(mut self, call_id: impl Into<String>) -> Self {
-        self.unfinished_call_ids.push(call_id.into());
-        self
-    }
-
-    pub fn call_id(&self) -> &str {
-        &self.call_id
-    }
-
-    pub const fn index(&self) -> usize {
-        self.index
-    }
-
-    pub const fn outcome(&self) -> ToolOutcomeKindData {
-        self.outcome
-    }
-
-    pub const fn is_agent(&self) -> bool {
-        self.agent
-    }
-
-    pub fn summary(&self) -> Option<&str> {
-        self.summary.as_deref()
-    }
-
-    pub fn artifact_refs(&self) -> &[String] {
-        &self.artifact_refs
-    }
-
-    pub fn possible_side_effects(&self) -> &[String] {
-        &self.possible_side_effects
-    }
-
-    pub fn unfinished_call_ids(&self) -> &[String] {
-        &self.unfinished_call_ids
-    }
+    pub call_id: String,
+    pub index: usize,
+    pub outcome: ToolOutcomeKindData,
+    pub agent: bool,
+    pub summary: Option<String>,
+    pub artifact_refs: Vec<String>,
+    pub possible_side_effects: Vec<String>,
+    pub unfinished_call_ids: Vec<String>,
 }
 
 /// 已绑定到 RunStep 的不可变 user 输入提交载荷。
@@ -786,14 +706,14 @@ impl ContextAppendData {
                 .iter()
                 .map(|receipt| {
                     (
-                        receipt.call_id(),
-                        receipt.index(),
-                        format!("{:?}", receipt.outcome()),
-                        receipt.is_agent(),
-                        receipt.summary(),
-                        receipt.artifact_refs(),
-                        receipt.possible_side_effects(),
-                        receipt.unfinished_call_ids(),
+                        &receipt.call_id,
+                        receipt.index,
+                        format!("{:?}", receipt.outcome),
+                        receipt.agent,
+                        receipt.summary.as_deref(),
+                        &receipt.artifact_refs,
+                        &receipt.possible_side_effects,
+                        &receipt.unfinished_call_ids,
                     )
                 })
                 .collect::<Vec<_>>(),

@@ -239,11 +239,16 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
                 finalize_cause: FinalizeCause::UserCancelledStep,
                 duration_ms: Some(7_325_000),
                 messages: vec![Message::user("partial assistant")].into(),
-                receipts: vec![StepReceiptData::agent(
-                    "agent-call",
-                    0,
-                    ToolOutcomeKindData::CancellationUnconfirmed,
-                )],
+                receipts: vec![StepReceiptData {
+                    call_id: "agent-call".to_string(),
+                    index: 0,
+                    outcome: ToolOutcomeKindData::CancellationUnconfirmed,
+                    agent: true,
+                    summary: None,
+                    artifact_refs: Vec::new(),
+                    possible_side_effects: Vec::new(),
+                    unfinished_call_ids: Vec::new(),
+                }],
                 api_input_tokens: Some(42),
                 committed_revision: 2,
             }),
@@ -262,7 +267,7 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
     assert_eq!(outcome.duration_ms, Some(7_325_000));
     assert_eq!(outcome.messages[0].text_content(), "partial assistant");
     assert_eq!(
-        outcome.receipts[0].outcome(),
+        outcome.receipts[0].outcome,
         ToolOutcomeKindData::CancellationUnconfirmed
     );
     assert_eq!(outcome.api_input_tokens, Some(42));

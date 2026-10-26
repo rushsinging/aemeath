@@ -284,12 +284,26 @@ async fn finalized_step_returns_receipt_and_preserves_every_boundary_field() {
     let frozen = request();
     let messages = vec![Message::user("finalized")];
     let receipts = vec![
-        StepReceiptData::tool("tool-1", 0, ToolOutcomeKindData::Failure),
-        StepReceiptData::agent("agent-1", 1, ToolOutcomeKindData::CancellationUnconfirmed)
-            .with_summary("child partial")
-            .with_artifact_ref("artifact://child")
-            .with_possible_side_effect("remote write may have started")
-            .with_unfinished_call("nested-1"),
+        StepReceiptData {
+            call_id: "tool-1".to_string(),
+            index: 0,
+            outcome: ToolOutcomeKindData::Failure,
+            agent: false,
+            summary: None,
+            artifact_refs: Vec::new(),
+            possible_side_effects: Vec::new(),
+            unfinished_call_ids: Vec::new(),
+        },
+        StepReceiptData {
+            call_id: "agent-1".to_string(),
+            index: 1,
+            outcome: ToolOutcomeKindData::CancellationUnconfirmed,
+            agent: true,
+            summary: Some("child partial".to_string()),
+            artifact_refs: vec!["artifact://child".to_string()],
+            possible_side_effects: vec!["remote write may have started".to_string()],
+            unfinished_call_ids: vec!["nested-1".to_string()],
+        },
     ];
 
     let receipt = coordinator

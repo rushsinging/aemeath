@@ -4457,7 +4457,7 @@
   },
   "StepReceiptData": {
    "kind": "struct",
-   "duty": "工具调用收敛结果摘要（只含终态）：step finalize 时把本轮所有 tool/agent 调用的call_id、序号、结果种类、摘要与副作用/未完成调用一并写入 FinalizedOutcomeRecord，供 resume 对账与审计回放",
+   "duty": "工具调用收敛结果摘要（纯数据 DTO，8 个公开字段、无方法）：step finalize 时把本轮 tool/agent 调用的 call_id、序号、结果种类、安全摘要、产物引用、可能副作用与未收敛调用 写入 FinalizedOutcomeRecord；跨 crate 仅外部读 outcome 字段判定取消终态，其余字段 context 内部构造与持久化消费",
    "deep_path": null,
    "def": "domain.rs",
    "signature": "pub struct StepReceiptData {",
@@ -4587,6 +4587,28 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "codeRefs": [
+    {
+     "file": "agent/features/context/src/domain.rs",
+     "line": 612,
+     "note": "纯数据 struct 定义（8 pub 字段，无 inherent 方法）"
+    },
+    {
+     "file": "agent/features/context/src/domain/tool_receipt.rs",
+     "line": 80,
+     "note": "to_step_receipt 构造字面量（唯一生产构造点）"
+    },
+    {
+     "file": "agent/features/context/src/domain/session/envelope.rs",
+     "line": 427,
+     "note": "step_receipts 按 (run,step) 读回并排序"
+    },
+    {
+     "file": "agent/features/runtime/src/application/loop_engine/engine/phases.rs",
+     "line": 207,
+     "note": "外部唯一消费：读 outcome 字段判定 CancellationUnconfirmed"
     }
    ]
   },

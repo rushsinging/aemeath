@@ -87,26 +87,16 @@ impl ToolCallReceiptData {
             .provider_call_id
             .as_deref()
             .unwrap_or(&self.identity.runtime_call_id);
-        let receipt = if self.identity.agent {
-            super::StepReceiptData::agent(call_id, self.identity.call_index, terminal.outcome)
-        } else {
-            super::StepReceiptData::tool(call_id, self.identity.call_index, terminal.outcome)
-        }
-        .with_summary(terminal.safe_reason.clone());
-        let receipt = terminal
-            .possible_side_effects()
-            .iter()
-            .fold(receipt, |receipt, effect| {
-                receipt.with_possible_side_effect(effect.clone())
-            });
-        Some(
-            terminal
-                .unfinished_call_ids()
-                .iter()
-                .fold(receipt, |receipt, call_id| {
-                    receipt.with_unfinished_call(call_id.clone())
-                }),
-        )
+        Some(super::StepReceiptData {
+            call_id: call_id.to_string(),
+            index: self.identity.call_index,
+            outcome: terminal.outcome,
+            agent: self.identity.agent,
+            summary: Some(terminal.safe_reason.clone()),
+            artifact_refs: Vec::new(),
+            possible_side_effects: terminal.possible_side_effects().to_vec(),
+            unfinished_call_ids: terminal.unfinished_call_ids().to_vec(),
+        })
     }
 
     pub fn pending(identity: ToolCallIdentityData, input_preview: impl Into<String>) -> Self {

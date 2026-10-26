@@ -42,14 +42,14 @@ fn legacy_runtime_fingerprint(append: &ContextAppendData) -> String {
             .iter()
             .map(|receipt| {
                 (
-                    receipt.call_id(),
-                    receipt.index(),
-                    format!("{:?}", receipt.outcome()),
-                    receipt.is_agent(),
-                    receipt.summary(),
-                    receipt.artifact_refs(),
-                    receipt.possible_side_effects(),
-                    receipt.unfinished_call_ids(),
+                    &receipt.call_id,
+                    receipt.index,
+                    format!("{:?}", receipt.outcome),
+                    receipt.agent,
+                    receipt.summary.as_deref(),
+                    &receipt.artifact_refs,
+                    &receipt.possible_side_effects,
+                    &receipt.unfinished_call_ids,
                 )
             })
             .collect::<Vec<_>>(),

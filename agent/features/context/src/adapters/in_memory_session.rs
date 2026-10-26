@@ -204,7 +204,7 @@ impl SessionRepository for InMemorySessionRepository {
             })
             .filter_map(ToolCallReceiptData::to_step_receipt)
             .collect::<Vec<_>>();
-        receipts.sort_by_key(crate::domain::StepReceiptData::index);
+        receipts.sort_by_key(|r| r.index);
         Ok(receipts)
     }
 

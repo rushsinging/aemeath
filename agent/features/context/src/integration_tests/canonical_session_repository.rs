@@ -1216,11 +1216,16 @@ async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
     finalized.expected_revision = SessionRevision::new(1);
     finalized.finalize_cause = FinalizeCause::UserCancelledStep;
     finalized.api_input_tokens = Some(42);
-    finalized.receipts = vec![crate::StepReceiptData::agent(
-        "agent-call",
-        0,
-        crate::ToolOutcomeKindData::CancellationUnconfirmed,
-    )];
+    finalized.receipts = vec![crate::StepReceiptData {
+        call_id: "agent-call".to_string(),
+        index: 0,
+        outcome: crate::ToolOutcomeKindData::CancellationUnconfirmed,
+        agent: true,
+        summary: None,
+        artifact_refs: Vec::new(),
+        possible_side_effects: Vec::new(),
+        unfinished_call_ids: Vec::new(),
+    }];
     let receipt = repository.append_finalized(&finalized).await.unwrap();
 
     let session = holder.read().unwrap();
@@ -1238,7 +1243,7 @@ async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
     assert_eq!(outcome.finalize_cause, FinalizeCause::UserCancelledStep);
     assert_eq!(outcome.api_input_tokens, Some(42));
     assert_eq!(
-        outcome.receipts[0].outcome(),
+        outcome.receipts[0].outcome,
         crate::ToolOutcomeKindData::CancellationUnconfirmed
     );
     assert_eq!(
