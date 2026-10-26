@@ -73,6 +73,23 @@ enum SignalKind {
 
 `run_ref` 扩展承载真实 `run_id`（session dataset 的 run 标识）；采纳回写时优先绑定提案引用的真实信号，`CycleObservation` 仅在无引用时兜底。**归因纪律对齐 Harness² experience reflector**：无法归因到单一信号的编辑标 `confounded` 语义（lesson 文本中显式声明），NEVER 编造归因（"an invented attribution poisons the library"）。
 
+### 2A.4b 验证阶段（#2080）
+
+改进采纳后不再直接「标 active 就算成功」——每周期开头用**本周期证据**判定上轮改进是否生效：
+
+| 判定 | 条件 | 后果 |
+|---|---|---|
+| `verified` | 目标信号在本周期证据中消失 | 规则生效，lesson 保留 Active |
+| `ineffective` | 目标信号仍出现 | 规则无效——作为重修输入（#2092 强制重修路径） |
+| `pending` | 无新证据（样本不足） | 保持待验证，**NEVER 编造结论** |
+
+- **判定依据**：lesson 落盘时绑定 `verification.target_signal`（从提案 reason 推断信号类别 → 在当轮证据中取同类完整 signal id；模型未引用时退回证据中优先级最高的信号，保证 lesson 总能进入验证）
+- **信号匹配**：精确或互相包含（错误文本常被截断，严格相等会漏判）
+- **幂等**：`checked_at != 0` 的条目不再判定（同一 lesson 只验证一次）
+- **落盘**：`LessonEntry.verification { status, target_signal, checked_at }`；旧 JSONL 缺字段按默认 Pending/空 target 兼容
+- **事件流**：`lesson_verified { lesson_id, component, target_signal, status }`
+- **dry-run**：只预演判定（`judge_verification` 纯函数），NEVER 改写经验库；报告标注「预演，未落盘」
+
 ### 2A.5 数据源流模型（checkpoint · 步长 · 数据源分块，2026-10-23 拍板）
 
 > 修正 v1 语义：分块对象是**数据源（session 证据流）**，NEVER 按组件分块——组件面是每轮提案的编辑对象，不是分块单位。模型对齐 Harness² 的 continual-learning 任务流（`schedule.py::stream_order`）与断点纪律（`runmark.py`）：处理单元推进、完成显式打标、指纹校验复用。

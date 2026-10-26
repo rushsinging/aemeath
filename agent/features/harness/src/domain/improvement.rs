@@ -508,7 +508,14 @@ async fn run_block(
                             });
                         }
                     }
-                    record_adopted_lesson(lesson_store, &change_set, &reason, cycle_ref, recorder);
+                    record_adopted_lesson(
+                        lesson_store,
+                        &change_set,
+                        &reason,
+                        cycle_ref,
+                        recorder,
+                        evidence,
+                    );
                     let adoption: Vec<(AppliedEdit, String)> = applied
                         .into_iter()
                         .map(|edit| (edit, reason.clone()))
@@ -529,6 +536,7 @@ fn record_adopted_lesson(
     reason: &str,
     cycle_ref: &str,
     recorder: Option<&crate::domain::events::RsiEventRecorder>,
+    evidence: &crate::domain::evidence::EvidenceBundle,
 ) {
     for edit in &change_set.edits {
         let (id, action) = match edit {
@@ -551,6 +559,11 @@ fn record_adopted_lesson(
         );
         match entry {
             Ok(entry) => {
+                let mut entry = entry;
+                // #2080：绑定本经验要解决的信号（验证阶段判定依据）——
+                // 从 reason 推断信号类别，再在证据里取同类完整 signal id。
+                let target_signal = resolve_target_signal(reason, evidence);
+                entry.verification.target_signal = target_signal;
                 let entry_id = entry.id.clone();
                 let entry_signal = entry
                     .evidence
@@ -779,6 +792,31 @@ fn render_evidence_block(evidence: &crate::domain::evidence::EvidenceBundle) -> 
         .join("\n")
 }
 
+/// 解析本经验要解决的完整 signal id（#2080）：reason 推断信号类别 →
+/// 在证据中取同类首个 signal id；无匹配返回空（不参与验证）。
+fn resolve_target_signal(
+    reason: &str,
+    evidence: &crate::domain::evidence::EvidenceBundle,
+) -> String {
+    let kind = signal_kind_from_reason(reason);
+    // 优先取 reason 引用类别的信号；模型未引用（兜底 CycleObservation）时
+    // 退回证据中优先级最高的信号——确保 lesson 总能进入验证（#2080），
+    // NEVER 因模型省了 signal id 就永久 pending。
+    let matched = evidence
+        .signals
+        .iter()
+        .find(|signal| signal.kind == kind)
+        .or_else(|| {
+            evidence
+                .signals
+                .iter()
+                .min_by_key(|signal| signal.kind.render_priority())
+        });
+    matched
+        .map(|signal| signal.signal_id.clone())
+        .unwrap_or_default()
+}
+
 /// 从提案 reason 提取引用的信号类别（v1 启发：signal id 前缀匹配；
 /// 无引用时兜底 CycleObservation——模型自述）。
 pub(crate) fn signal_kind_from_reason(reason: &str) -> SignalKind {
@@ -970,12 +1008,15 @@ pub async fn run_compose_phase(
                 }
                 match apply_change_set(registry, &change_set) {
                     Ok(_) => {
+                        // Compose 无新证据：传空 bundle（该 lesson 不参与
+                        // 信号级验证，#2080）
                         record_adopted_lesson(
                             lesson_store,
                             &change_set,
                             &reason,
                             &cycle_ref,
                             recorder,
+                            &crate::domain::evidence::EvidenceBundle::default(),
                         );
                         "仲裁修正（已采纳）"
                     }

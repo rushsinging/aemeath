@@ -32,6 +32,31 @@ pub enum LessonStatus {
     Retired,
 }
 
+/// 改进生效判定状态（#2080，对齐 Harness² helped/hurt/confounded）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VerificationStatus {
+    /// 待验证：尚未拿到「改进后」的新证据。
+    #[default]
+    Pending,
+    /// 已生效：目标信号在改进后的新证据中消失。
+    Verified,
+    /// 未生效：目标信号仍出现——规则无效，应作为重修输入。
+    Ineffective,
+}
+
+/// 单条经验的验证状态。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct LessonVerification {
+    pub status: VerificationStatus,
+    /// 本经验要解决的信号 id（判定依据；空 = 不参与验证，旧条目）。
+    #[serde(default)]
+    pub target_signal: String,
+    /// 判定时刻（Unix 秒；0 = 未判定——幂等键）。
+    #[serde(default)]
+    pub checked_at: u64,
+}
+
 /// 单条经验。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LessonEntry {
@@ -44,6 +69,9 @@ pub struct LessonEntry {
     pub evidence: Vec<EvidenceBinding>,
     pub adopted_at: u64,
     pub status: LessonStatus,
+    /// 改进生效判定（#2080；旧条目缺该字段时按默认 Pending/空 target）。
+    #[serde(default)]
+    pub verification: LessonVerification,
 }
 
 impl LessonEntry {
@@ -90,8 +118,56 @@ impl LessonEntry {
             evidence,
             adopted_at,
             status: LessonStatus::Active,
+            verification: LessonVerification::default(),
         })
     }
+}
+
+/// 单条验证判定结果（供事件流与报告）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerificationOutcome {
+    pub lesson_id: String,
+    pub component_kind: String,
+    pub target_signal: String,
+    pub status: VerificationStatus,
+}
+
+/// 验证判定（#2080，纯函数）：只判 Active + Pending + 有 target_signal
+/// 且未判定过的条目。
+///
+/// - 无新证据（`has_new_evidence == false`）→ 保持 Pending（样本不足，
+///   NEVER 编造结论）
+/// - 目标信号仍出现 → Ineffective（规则未挡住）
+/// - 目标信号消失 → Verified
+///
+/// 信号匹配用「精确或互相包含」：错误文本可能被截断，严格相等会漏判。
+pub fn judge_verification(
+    lesson: &LessonEntry,
+    current_signals: &[String],
+    has_new_evidence: bool,
+) -> Option<VerificationOutcome> {
+    if lesson.status != LessonStatus::Active
+        || lesson.verification.status != VerificationStatus::Pending
+        || lesson.verification.target_signal.trim().is_empty()
+        || lesson.verification.checked_at != 0
+        || !has_new_evidence
+    {
+        return None;
+    }
+    let target = lesson.verification.target_signal.as_str();
+    let still_present = current_signals.iter().any(|signal| {
+        signal == target || signal.contains(target) || target.contains(signal.as_str())
+    });
+    Some(VerificationOutcome {
+        lesson_id: lesson.id.clone(),
+        component_kind: lesson.component_kind.clone(),
+        target_signal: lesson.verification.target_signal.clone(),
+        status: if still_present {
+            VerificationStatus::Ineffective
+        } else {
+            VerificationStatus::Verified
+        },
+    })
 }
 
 /// JSONL 文件经验库。
@@ -200,6 +276,31 @@ impl LessonStore {
             self.rewrite_all(&rewritten)?;
         }
         Ok(found)
+    }
+
+    /// 验证阶段（#2080）：对全部 Pending 经验按本周期证据判定，落盘结果。
+    /// 返回判定明细（空 = 无可验证条目或样本不足）。
+    pub fn verify_pending(
+        &self,
+        current_signals: &[String],
+        has_new_evidence: bool,
+        now: u64,
+    ) -> Result<Vec<VerificationOutcome>, HarnessError> {
+        let entries = self.load_all()?;
+        let mut outcomes = Vec::new();
+        let mut rewritten = Vec::with_capacity(entries.len());
+        for mut entry in entries {
+            if let Some(outcome) = judge_verification(&entry, current_signals, has_new_evidence) {
+                entry.verification.status = outcome.status;
+                entry.verification.checked_at = now;
+                outcomes.push(outcome);
+            }
+            rewritten.push(entry);
+        }
+        if !outcomes.is_empty() {
+            self.rewrite_all(&rewritten)?;
+        }
+        Ok(outcomes)
     }
 
     fn rewrite_all(&self, entries: &[LessonEntry]) -> Result<(), HarnessError> {

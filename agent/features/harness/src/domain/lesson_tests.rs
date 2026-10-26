@@ -1,7 +1,9 @@
 //! 经验库契约测试：证据不变量、长度上限、追加/读取/退役、损坏行容忍。
 
 use crate::constants::{EXCERPT_MAX_CHARS, LESSON_MAX_CHARS};
-use crate::domain::lesson::{EvidenceBinding, LessonEntry, LessonStatus, LessonStore, SignalKind};
+use crate::domain::lesson::{
+    EvidenceBinding, LessonEntry, LessonStatus, LessonStore, SignalKind, VerificationStatus,
+};
 
 fn entry(lesson: &str) -> Result<LessonEntry, crate::domain::errors::HarnessError> {
     LessonEntry::new(
@@ -159,4 +161,89 @@ fn retire_for_component_supersedes_old_active_lessons() {
         .iter()
         .all(|entry| entry.id.ends_with(":skill/alpha")));
     assert!(active.len() == 1, "其他组件保留：{active:?}");
+}
+
+// ---- #2080 验证阶段：三态状态机与幂等 ----
+
+fn pending_lesson(id: &str, target_signal: &str) -> LessonEntry {
+    let mut entry = LessonEntry::new(
+        id.to_string(),
+        "guardrails",
+        "规则结论".to_string(),
+        vec![EvidenceBinding {
+            run_ref: "cycle-1".to_string(),
+            signal: SignalKind::RepeatedFailure,
+            excerpt: "e".to_string(),
+        }],
+        1000,
+    )
+    .expect("构造");
+    entry.verification.target_signal = target_signal.to_string();
+    entry
+}
+
+/// 三态：信号仍在 → Ineffective；信号消失 → Verified；无新证据 → 不判定。
+#[test]
+fn verification_state_machine_three_states() {
+    let lesson = pending_lesson("l1", "repeated_failure:Bash:permission denied");
+
+    let still = crate::domain::lesson::judge_verification(
+        &lesson,
+        &["repeated_failure:Bash:permission denied: /etc/shadow".to_string()],
+        true,
+    )
+    .expect("应判定");
+    assert_eq!(still.status, VerificationStatus::Ineffective);
+
+    let gone = crate::domain::lesson::judge_verification(
+        &lesson,
+        &["retry_pattern:Edit:abc".to_string()],
+        true,
+    )
+    .expect("应判定");
+    assert_eq!(gone.status, VerificationStatus::Verified);
+
+    // 无新证据：样本不足，NEVER 编造结论
+    assert!(crate::domain::lesson::judge_verification(&lesson, &[], false).is_none());
+}
+
+/// 旧条目（无 target_signal）与已判定条目不参与验证。
+#[test]
+fn verification_skips_legacy_and_checked() {
+    let legacy = pending_lesson("l2", "");
+    assert!(crate::domain::lesson::judge_verification(&legacy, &[], true).is_none());
+
+    let mut checked = pending_lesson("l3", "repeated_failure:Bash:x");
+    checked.verification.status = VerificationStatus::Verified;
+    checked.verification.checked_at = 12345;
+    assert!(crate::domain::lesson::judge_verification(&checked, &[], true).is_none());
+}
+
+/// store 级：判定落盘 + 幂等（第二次不再判定）。
+#[test]
+fn verify_pending_persists_and_is_idempotent() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = LessonStore::new(dir.path().join("library.jsonl"));
+    store
+        .append(&pending_lesson("l4", "repeated_failure:Bash:boom"))
+        .expect("append");
+
+    let first = store
+        .verify_pending(&["repeated_failure:Bash:boom".to_string()], true, 5000)
+        .expect("verify");
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].status, VerificationStatus::Ineffective);
+
+    let stored = store.load_all().expect("load");
+    assert_eq!(
+        stored[0].verification.status,
+        VerificationStatus::Ineffective
+    );
+    assert_eq!(stored[0].verification.checked_at, 5000);
+
+    // 幂等：已判定条目不再参与
+    let second = store
+        .verify_pending(&["repeated_failure:Bash:boom".to_string()], true, 9000)
+        .expect("verify again");
+    assert!(second.is_empty());
 }
