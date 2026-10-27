@@ -25,6 +25,9 @@
     .pl-chain-name{font-weight:700;color:#15803d}
     .pl-chain-path{margin:2px 0 4px 8px;padding-left:8px;border-left:2px solid #bbf7d0;color:#166534;font-size:10px;line-height:1.55}
     .pl-chain-step{margin:1px 0}
+    .pl-gchain{margin:0 0 10px;padding:9px 11px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:5px}
+    .pl-gchain-title{font-weight:700;color:#15803d;font-size:11.5px;margin-bottom:5px}
+    .pl-gchain-step{color:#166534;font-size:10.5px;line-height:1.6;margin:1px 0}
     .pl-duty{color:#475569;font-size:11px;line-height:1.55;margin:4px 0 2px;
       overflow-wrap:anywhere;white-space:normal}
     .pl-sym-name{font-size:13px;font-weight:700;color:#0f172a;cursor:pointer;display:flex;
@@ -84,7 +87,10 @@
     document.getElementById('pl-title').textContent = groupName;
     document.getElementById('pl-count').textContent = syms.length + ' 符号';
     const body = document.getElementById('pl-body');
-    body.innerHTML = syms.map(name => {
+    const gc = (DATA.groupChains || {})[groupName];
+    const chainBlock = gc ? '<div class="pl-gchain"><div class="pl-gchain-title">完整链路 · ' + esc(gc.chain) + '</div>' +
+      gc.path.map((st, i) => '<div class="pl-gchain-step">' + (i + 1) + '. ' + esc(st) + '</div>').join('') + '</div>' : '';
+    body.innerHTML = chainBlock + syms.map(name => {
       const s = DATA.symbols[name];
       if (!s) return '';
       const fields = (s.fields || []).map(f => '<div class="pl-field">' + esc(f) + '</div>').join('');
