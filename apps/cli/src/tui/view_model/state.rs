@@ -38,5 +38,11 @@ pub(crate) static TOOL_DISPLAY_NAMES: LazyLock<HashMap<&'static str, &'static st
             ("TaskListCreate", "New Task List"),
             ("TaskListComplete", "Complete List"),
             ("TaskStop", "Stop Task"),
+            ("workflow_create", "Create Workflow"),
+            ("workflow_list", "Workflows"),
+            ("workflow_query", "Workflow"),
+            ("workflow_update", "Workflow State"),
+            ("workflow_node_update", "Workflow Node"),
+            ("workflow_replan", "Replan Workflow"),
         ])
     });

@@ -4,7 +4,7 @@ use crate::adapters::{
     agent_tool, ask_user, background_processes, bash, file_edit, file_read, file_write, glob_tool,
     grep, memory_tool, skill_tool, task_block_by, task_create, task_get, task_list,
     task_list_complete, task_list_create, task_lists, task_stop, task_update, tool_search,
-    web_fetch, web_search, worktree,
+    web_fetch, web_search, workflow_tool, worktree,
 };
 use crate::domain::memory_source::MemoryPortSource;
 use crate::domain::published_language::ToolCapabilities as Caps;
@@ -49,18 +49,33 @@ pub(crate) fn profile_for(scope: BuiltinRegistryScope, main_parent: &ToolProfile
     }
 }
 
+/// 内置工具装配依赖；随工具族增长打包传递，避免签名持续膨胀。
+pub(crate) struct BuiltinRegistryWiring {
+    pub task_access: Arc<dyn TaskAccess>,
+    pub memory_source: Arc<dyn MemoryPortSource>,
+    pub workspace_control: Arc<dyn project::WorkspaceControl>,
+    pub skill_loader: Arc<dyn crate::domain::SkillLoadPort>,
+    pub skill_catalog: Arc<dyn crate::domain::SkillCatalogPort>,
+    pub background_source:
+        Arc<dyn crate::domain::background_process_port::BackgroundProcessAccessSource>,
+    /// 六个 Workflow Tool 的执行后端（#2084）；None 时不注册六工具。
+    pub workflow_backend: Option<Arc<dyn workflow::WorkflowToolBackend>>,
+}
+
 pub(crate) fn register_named_scope(
     registry: &ToolRegistry,
-    task_access: Arc<dyn TaskAccess>,
-    memory_source: Arc<dyn MemoryPortSource>,
-    workspace_control: Arc<dyn project::WorkspaceControl>,
-    skill_loader: Arc<dyn crate::domain::SkillLoadPort>,
-    skill_catalog: Arc<dyn crate::domain::SkillCatalogPort>,
-    background_source: Arc<
-        dyn crate::domain::background_process_port::BackgroundProcessAccessSource,
-    >,
+    wiring: BuiltinRegistryWiring,
     selected_scope: BuiltinRegistryScope,
 ) -> RegistryScope {
+    let BuiltinRegistryWiring {
+        task_access,
+        memory_source,
+        workspace_control,
+        skill_loader,
+        skill_catalog,
+        background_source,
+        workflow_backend,
+    } = wiring;
     let mut scope = RegistryScopeBuilder::new(selected_scope.name());
 
     // This macro is the single built-in registration specification: each row
@@ -255,6 +270,52 @@ pub(crate) fn register_named_scope(
             control: workspace_control.clone()
         }
     );
+
+    // 六个 Workflow Tool（#2084）：协议与 adapter 就绪；真实 backend 由
+    // #2085–#2087 实现并在 composition 注入。未注入时不注册，避免向 LLM
+    // 暴露无法执行的半成品工具。
+    if let Some(backend) = workflow_backend {
+        builtin!(
+            "workflow_create",
+            Caps::All,
+            workflow_tool::WorkflowCreateTool {
+                backend: backend.clone()
+            }
+        );
+        builtin!(
+            "workflow_list",
+            Caps::All,
+            workflow_tool::WorkflowListTool {
+                backend: backend.clone()
+            }
+        );
+        builtin!(
+            "workflow_query",
+            Caps::All,
+            workflow_tool::WorkflowQueryTool {
+                backend: backend.clone()
+            }
+        );
+        builtin!(
+            "workflow_update",
+            Caps::All,
+            workflow_tool::WorkflowUpdateTool {
+                backend: backend.clone()
+            }
+        );
+        builtin!(
+            "workflow_node_update",
+            Caps::All,
+            workflow_tool::WorkflowNodeUpdateTool {
+                backend: backend.clone()
+            }
+        );
+        builtin!(
+            "workflow_replan",
+            Caps::All,
+            workflow_tool::WorkflowReplanTool { backend }
+        );
+    }
 
     let built_scope = scope.build();
     debug_assert_eq!(built_scope.name().as_str(), selected_scope.name());

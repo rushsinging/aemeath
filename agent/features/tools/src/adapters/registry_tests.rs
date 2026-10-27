@@ -28,12 +28,15 @@ fn assembled_scope(scope: BuiltinRegistryScope) -> RegistryScope {
         .control();
     register_named_scope(
         &registry,
-        task_access,
-        test_memory_source(),
-        control,
-        crate::composition::wire_skills().loader(),
-        crate::composition::wire_skills().catalog(),
-        test_background_source(),
+        BuiltinRegistryWiring {
+            task_access,
+            memory_source: test_memory_source(),
+            workspace_control: control,
+            skill_loader: crate::composition::wire_skills().loader(),
+            skill_catalog: crate::composition::wire_skills().catalog(),
+            background_source: test_background_source(),
+            workflow_backend: None,
+        },
         scope,
     )
 }
@@ -183,12 +186,15 @@ fn registry_exposes_five_memory_tools_and_no_legacy_memory() {
         .control();
     register_named_scope(
         &registry,
-        task_access,
-        test_memory_source(),
-        control,
-        crate::composition::wire_skills().loader(),
-        crate::composition::wire_skills().catalog(),
-        test_background_source(),
+        BuiltinRegistryWiring {
+            task_access,
+            memory_source: test_memory_source(),
+            workspace_control: control,
+            skill_loader: crate::composition::wire_skills().loader(),
+            skill_catalog: crate::composition::wire_skills().catalog(),
+            background_source: test_background_source(),
+            workflow_backend: None,
+        },
         BuiltinRegistryScope::Main,
     );
     for name in [
@@ -220,12 +226,15 @@ fn every_tool_description_matches_its_english_i18n_text() {
         .control();
     register_named_scope(
         &registry,
-        task_access,
-        test_memory_source(),
-        control,
-        crate::composition::wire_skills().loader(),
-        crate::composition::wire_skills().catalog(),
-        test_background_source(),
+        BuiltinRegistryWiring {
+            task_access,
+            memory_source: test_memory_source(),
+            workspace_control: control,
+            skill_loader: crate::composition::wire_skills().loader(),
+            skill_catalog: crate::composition::wire_skills().catalog(),
+            background_source: test_background_source(),
+            workflow_backend: None,
+        },
         BuiltinRegistryScope::Main,
     );
 
@@ -314,5 +323,142 @@ fn sub_agent_scope_characterization_is_exact() {
     assert!(sub_agent_names.contains("agent"));
     for ordinary_tool in ["read", "grep", "bash", "skill"] {
         assert!(sub_agent_names.contains(ordinary_tool));
+    }
+}
+
+/// 与 `assembled_scope` 相同，但注入可选 Workflow backend（#2084）。
+fn assembled_scope_with_backend(
+    scope: BuiltinRegistryScope,
+    workflow_backend: Option<Arc<dyn workflow::WorkflowToolBackend>>,
+) -> RegistryScope {
+    let registry = ToolRegistry::new();
+    let task_access: Arc<dyn TaskAccess> = Arc::new(TaskStore::new());
+    let workspace = tempfile::tempdir().expect("workspace");
+    let control = project::wire_production_workspace(workspace.path().to_path_buf(), None)
+        .expect("workspace wiring")
+        .control();
+    register_named_scope(
+        &registry,
+        BuiltinRegistryWiring {
+            task_access,
+            memory_source: test_memory_source(),
+            workspace_control: control,
+            skill_loader: crate::composition::wire_skills().loader(),
+            skill_catalog: crate::composition::wire_skills().catalog(),
+            background_source: test_background_source(),
+            workflow_backend,
+        },
+        scope,
+    )
+}
+
+/// 未注入 backend 时不注册六工具：避免向 LLM 暴露无法执行的工具。
+#[test]
+fn workflow_tools_absent_without_backend() {
+    let names = assembled_scope_with_backend(BuiltinRegistryScope::Main, None)
+        .iter()
+        .map(|spec| spec.name().normalized().to_owned())
+        .collect::<BTreeSet<String>>();
+    for name in [
+        "workflow_create",
+        "workflow_list",
+        "workflow_query",
+        "workflow_update",
+        "workflow_node_update",
+        "workflow_replan",
+    ] {
+        assert!(
+            !names.contains(name),
+            "{name} must not be registered without backend"
+        );
+    }
+}
+
+/// 注入 backend 时六个 Workflow Tool 全部出现在 catalog scope。
+#[test]
+fn workflow_tools_registered_with_backend() {
+    struct UnusedBackend;
+    #[async_trait::async_trait]
+    impl workflow::WorkflowToolBackend for UnusedBackend {
+        async fn create(
+            &self,
+            _spec: workflow::CreateWorkflowSpec,
+        ) -> Result<workflow::WorkflowSummaryData, workflow::WorkflowToolError> {
+            Err(workflow::WorkflowToolError::WorkflowNotVisible {
+                workflow_id: "unused".to_owned(),
+            })
+        }
+        async fn list(
+            &self,
+            _query: workflow::ListWorkflowsQuery,
+        ) -> Result<workflow::ListWorkflowsData, workflow::WorkflowToolError> {
+            Err(workflow::WorkflowToolError::WorkflowNotVisible {
+                workflow_id: "unused".to_owned(),
+            })
+        }
+        async fn query(
+            &self,
+            _query: workflow::QueryWorkflowQuery,
+        ) -> Result<workflow::WorkflowDetailData, workflow::WorkflowToolError> {
+            Err(workflow::WorkflowToolError::WorkflowNotVisible {
+                workflow_id: "unused".to_owned(),
+            })
+        }
+        async fn update(
+            &self,
+            _command: workflow::UpdateWorkflowCommand,
+        ) -> Result<workflow::LifecycleResultData, workflow::WorkflowToolError> {
+            Err(workflow::WorkflowToolError::WorkflowNotVisible {
+                workflow_id: "unused".to_owned(),
+            })
+        }
+        async fn node_update(
+            &self,
+            _command: workflow::UpdateNodeCommand,
+        ) -> Result<workflow::NodeUpdateResultData, workflow::WorkflowToolError> {
+            Err(workflow::WorkflowToolError::WorkflowNotVisible {
+                workflow_id: "unused".to_owned(),
+            })
+        }
+        async fn replan(
+            &self,
+            _command: workflow::ReplanWorkflowCommand,
+        ) -> Result<workflow::ReplanResultData, workflow::WorkflowToolError> {
+            Err(workflow::WorkflowToolError::WorkflowNotVisible {
+                workflow_id: "unused".to_owned(),
+            })
+        }
+    }
+
+    let scope =
+        assembled_scope_with_backend(BuiltinRegistryScope::Main, Some(Arc::new(UnusedBackend)));
+    let names = scope
+        .iter()
+        .map(|spec| spec.name().normalized().to_owned())
+        .collect::<BTreeSet<String>>();
+    for name in [
+        "workflow_create",
+        "workflow_list",
+        "workflow_query",
+        "workflow_update",
+        "workflow_node_update",
+        "workflow_replan",
+    ] {
+        assert!(
+            names.contains(name),
+            "{name} must be registered with backend"
+        );
+    }
+    // 六个工具归 All 位（main 专属），与 Memory 同档。
+    for spec in scope
+        .iter()
+        .filter(|spec| spec.name().normalized().starts_with("workflow_"))
+    {
+        assert_eq!(
+            spec.required_capabilities(),
+            crate::domain::published_language::ToolCapabilities::All,
+            "{} must require Caps::All",
+            spec.name().normalized()
+        );
     }
 }

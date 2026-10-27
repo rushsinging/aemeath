@@ -899,7 +899,8 @@
         "domain",
         "domain.rs",
         "lib.rs",
-        "constants.rs"
+        "constants.rs",
+        "ports.rs"
       ],
       "reason": "F-3：workflow Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
       "profile": "fast"
@@ -2107,7 +2108,8 @@
           "share",
           "systemone",
           "task",
-          "utils"
+          "utils",
+          "workflow"
         ],
         "storage": [
           "share"
