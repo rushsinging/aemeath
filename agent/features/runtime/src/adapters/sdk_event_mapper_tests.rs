@@ -636,31 +636,44 @@ fn model_invocation_retry_mapping_preserves_context_attempt_and_delay() {
     }
 }
 
-/// #1616：ThinkingChanged 携带 reasoning 深度，mapper 必须结构化透传给 SDK。
+/// #1616 / #2032：ThinkingChanged 携带请求档位与 clamp 后映射档位，
+/// mapper 必须结构化透传给 SDK。
 #[test]
-fn thinking_changed_mapping_preserves_reasoning_level_for_sdk() {
+fn thinking_changed_mapping_preserves_requested_and_effective_levels_for_sdk() {
     let event = RuntimeStreamEvent::ThinkingChanged {
         enabled: true,
-        level: share::reasoning::ReasoningLevel::High,
+        requested: share::reasoning::ReasoningLevel::Max,
+        effective: share::reasoning::ReasoningLevel::High,
     };
 
     match map_stream_event(event) {
-        sdk::ChatEvent::ThinkingChanged { enabled, level } => {
+        sdk::ChatEvent::ThinkingChanged {
+            enabled,
+            requested,
+            effective,
+        } => {
             assert!(enabled);
-            assert_eq!(level, share::reasoning::ReasoningLevel::High);
+            assert_eq!(requested, share::reasoning::ReasoningLevel::Max);
+            assert_eq!(effective, share::reasoning::ReasoningLevel::High);
         }
         other => panic!("unexpected event: {other:?}"),
     }
 
     let event = RuntimeStreamEvent::ThinkingChanged {
         enabled: false,
-        level: share::reasoning::ReasoningLevel::Off,
+        requested: share::reasoning::ReasoningLevel::Off,
+        effective: share::reasoning::ReasoningLevel::Off,
     };
 
     match map_stream_event(event) {
-        sdk::ChatEvent::ThinkingChanged { enabled, level } => {
+        sdk::ChatEvent::ThinkingChanged {
+            enabled,
+            requested,
+            effective,
+        } => {
             assert!(!enabled);
-            assert_eq!(level, share::reasoning::ReasoningLevel::Off);
+            assert_eq!(requested, share::reasoning::ReasoningLevel::Off);
+            assert_eq!(effective, share::reasoning::ReasoningLevel::Off);
         }
         other => panic!("unexpected event: {other:?}"),
     }

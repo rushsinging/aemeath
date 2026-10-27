@@ -136,6 +136,31 @@ impl SessionSwitchCoordinator {
         Arc::clone(&self.committed_session.read().unwrap())
     }
 
+    /// 会话当前 reasoning 档位控制（#2032）：metadata 的
+    /// `reasoning_effort` 视为用户显式选择，缺省/非法回退模型默认档。
+    /// bootstrap 投影与 run_launch 初始状态共用此单一语义。
+    pub(crate) fn committed_reasoning_control(
+        &self,
+        model_default: share::reasoning::ReasoningLevel,
+    ) -> crate::application::run::session_reasoning::SessionReasoningControl {
+        match self
+            .committed_session()
+            .metadata
+            .reasoning_effort
+            .as_deref()
+            .and_then(share::reasoning::ReasoningLevel::parse)
+        {
+            Some(level) => {
+                crate::application::run::session_reasoning::SessionReasoningControl::from_user_selection(level)
+            }
+            None => {
+                crate::application::run::session_reasoning::SessionReasoningControl::from_model_default(
+                    model_default,
+                )
+            }
+        }
+    }
+
     /// 当前 committed config snapshot（四元组读取，语义同 context 侧直读）。
     pub fn committed_config_snapshot(&self) -> ConfigSnapshot {
         self.config_reader.committed_snapshot()

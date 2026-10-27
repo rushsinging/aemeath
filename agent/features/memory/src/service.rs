@@ -71,6 +71,9 @@ impl<S: MemoryDatasetStore> MemoryService<S> {
     async fn mark_outdated_locked(&self, id: &MemoryId) -> Result<bool, MemoryError> {
         self.mutate_entry_and_emit(MemoryEventOp::MarkOutdated, "mark_outdated", *id, |entry| {
             entry.outdated = true;
+            // #2007 智能清退：LLM 裁决失效即解除 pin 保护——pin 只保护未失效
+            // 条目不被 sweep/容量淘汰，NEVER 保护已被裁决失效的条目驻留。
+            entry.pinned = false;
         })
         .await
     }

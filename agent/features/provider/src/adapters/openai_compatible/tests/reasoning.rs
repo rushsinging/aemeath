@@ -204,16 +204,22 @@ fn volcengine_bool_true_sends_enabled_thinking() {
 
 #[test]
 fn volcengine_object_reasoning_sends_reasoning_only() {
+    // #2032 修正后方舟与智谱同构：thinking 开关 + 顶层 reasoning_effort，
+    // NEVER 嵌套 `reasoning` 对象透传。
     let config = ReasoningConfig::Object(serde_json::json!({"effort":"medium"}));
     let mut body = base_body();
 
     VolcengineDriver.apply_reasoning_fields(&mut body, Some(&config), true);
 
     assert_eq!(
-        body.get("reasoning"),
-        Some(&serde_json::json!({"effort":"medium"}))
+        body.get("reasoning_effort"),
+        Some(&serde_json::json!("medium"))
     );
-    assert!(body.get("thinking").is_none());
+    assert_eq!(
+        body.get("thinking"),
+        Some(&serde_json::json!({"type": "enabled"}))
+    );
+    assert!(body.get("reasoning").is_none());
 }
 
 #[test]
@@ -426,4 +432,56 @@ fn agnes_provider_thinking_budget_keeps_enable_thinking_true_no_effort() {
     );
     assert!(body.get("reasoning").is_none());
     assert!(body.get("reasoning_effort").is_none());
+}
+
+// ── #2032：会话档位 → wire effort 的统一归并口径（glm-5.3 官方 Coding Plan） ──
+
+#[test]
+fn zhipu_glm_53_scope_medium_sends_effort_high_and_never_disabled() {
+    // provider 持 driver+model：effective_reasoning_for 是 clamp+服务端归并
+    // 的单一计算点（invoke wire、回执与 UI 映射表同口径）。
+    let config = OpenAIProviderConfig::from_driver(ProviderDriverKind::Zhipu, "Zhipu Coding Plan");
+    let provider = OpenAICompatibleProvider::new(
+        config,
+        "test-key".to_string(),
+        Some("https://open.bigmodel.cn/api/coding/paas".to_string()),
+        Some("glm-5.3".to_string()),
+        8192,
+        false,
+        None,
+        30,
+    );
+    let client = crate::adapters::client::LlmClient::from_provider(std::sync::Arc::new(provider));
+
+    // 选 medium → 服务端归并 high。
+    assert_eq!(
+        client.effective_reasoning_for(ReasoningLevel::Medium),
+        ReasoningLevel::High
+    );
+    // glm-5.3 强制思考：选 off 实际 low（wire 不再发 disabled 的口径基础）。
+    assert_eq!(
+        client.effective_reasoning_for(ReasoningLevel::Off),
+        ReasoningLevel::Low
+    );
+    // minimal → low。
+    assert_eq!(
+        client.effective_reasoning_for(ReasoningLevel::Minimal),
+        ReasoningLevel::Low
+    );
+
+    // scope effective=High 时 wire 发 reasoning_effort=high、thinking enabled。
+    let scoped = ReasoningConfig::from_scope(
+        ReasoningLevel::High,
+        &crate::adapters::openai_compatible::driver::ZhipuDriver,
+    );
+    let mut body = base_body();
+    ZhipuDriver.apply_reasoning_fields(&mut body, Some(&scoped), true);
+    assert_eq!(
+        body.get("reasoning_effort"),
+        Some(&serde_json::json!("high"))
+    );
+    assert_eq!(
+        body.get("thinking"),
+        Some(&serde_json::json!({"type": "enabled"}))
+    );
 }

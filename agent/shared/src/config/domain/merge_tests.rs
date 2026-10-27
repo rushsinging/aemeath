@@ -1,4 +1,5 @@
 use super::*;
+use crate::config::domain::scoring::ScoringBackend;
 use crate::config::domain::snapshot::ConfigSnapshot;
 use crate::config::ui::MarkdownSpacingMode;
 
@@ -57,17 +58,71 @@ fn scoring_patch_overrides_only_set_fields_and_reaches_snapshot() {
     assert_eq!(
         keys,
         [
+            "backend",
+            "bailian",
             "connect_timeout_secs",
             "enabled",
             "event_retention_days",
+            "http_endpoint",
+            "http_listen",
             "infer_timeout_secs",
             "memory_recall",
             "memory_rerank",
             "policy_triage",
             "skill_match",
-            "socket_path",
         ],
-        "合并结果不得出现退役 HTTP 字段",
+        "合并结果不得出现退役 HTTP 顶层字段；backend 驱动配置正常出现在合并面",
+    );
+}
+
+// ── backend 驱动 patch（#2095：bailian 云端 backend）──
+
+#[test]
+fn scoring_backend_patch_overrides_lower_layer() {
+    let global: ConfigPatch =
+        serde_json::from_str(r#"{"scoring":{"backend":"bailian"}}"#).expect("低层解析");
+    let env_layer = ConfigPatch {
+        scoring: Some(ScoringConfigPatch {
+            backend: Some(ScoringBackend::Local),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let config = apply_patch(apply_patch(Config::default(), global), env_layer);
+    assert_eq!(
+        ConfigSnapshot::new(config).scoring().backend,
+        ScoringBackend::Local,
+        "高层 env 应覆盖低层文件配置"
+    );
+}
+
+#[test]
+fn scoring_bailian_patch_overrides_set_fields_only() {
+    let global: ConfigPatch = serde_json::from_str(
+        r#"{"scoring":{"bailian":{"api_key":"sk-low","base_url":"https://low.example.com/v1"}}}"#,
+    )
+    .expect("低层解析");
+    let env_layer = ConfigPatch {
+        scoring: Some(ScoringConfigPatch {
+            bailian: Some(BailianScoringConfigPatch {
+                api_key: Some("sk-high".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let scoring = ConfigSnapshot::new(apply_patch(
+        apply_patch(Config::default(), global),
+        env_layer,
+    ))
+    .scoring()
+    .clone();
+    assert_eq!(scoring.bailian.api_key.as_deref(), Some("sk-high"));
+    assert_eq!(
+        scoring.bailian.base_url.as_deref(),
+        Some("https://low.example.com/v1"),
+        "未设置的字段保留低层值"
     );
 }
 
@@ -528,4 +583,48 @@ fn memory_default_ttl_secs_patch_overrides_and_defaults_to_30_days() {
         serde_json::from_str(r#"{"memory":{"default_ttl_secs":0}}"#).unwrap();
     let config = apply_patch(Config::default(), disabled);
     assert_eq!(config.memory.default_ttl_secs, 0, "0 = 显式禁用 TTL");
+}
+
+// ── harness.rsi.* 配置节（#2016）──
+
+#[test]
+fn harness_rsi_defaults() {
+    let config = Config::default();
+    assert!(config.harness.rsi.enabled);
+    assert_eq!(config.harness.rsi.interval_secs, 1800);
+    assert_eq!(config.harness.rsi.chunk_max_components, 8);
+}
+
+#[test]
+fn harness_rsi_patch_merges_fields() {
+    let base = Config::default();
+    let patch = ConfigPatch {
+        harness: Some(HarnessConfigPatch {
+            rsi: Some(RsiConfigPatch {
+                enabled: Some(false),
+                model: Some("DeepSeek/deepseek-flash".to_string()),
+                interval_secs: Some(60),
+                chunk_max_components: Some(4),
+                evidence_initial_window_days: Some(7),
+                evidence_max_sessions_per_cycle: Some(10),
+                evidence_block_sessions: Some(3),
+                execution_mode: Some(crate::config::RsiExecutionMode::DiagnoseOnly),
+            }),
+        }),
+        ..Default::default()
+    };
+    let mut chain = PriorityChain::new();
+    chain.push(patch);
+    let merged = chain.merge(base);
+    assert!(!merged.harness.rsi.enabled);
+    assert_eq!(merged.harness.rsi.model, "DeepSeek/deepseek-flash");
+    assert_eq!(merged.harness.rsi.interval_secs, 60);
+    assert_eq!(merged.harness.rsi.chunk_max_components, 4);
+    assert_eq!(merged.harness.rsi.evidence_initial_window_days, 7);
+    assert_eq!(merged.harness.rsi.evidence_max_sessions_per_cycle, 10);
+    assert_eq!(merged.harness.rsi.evidence_block_sessions, 3);
+    assert_eq!(
+        merged.harness.rsi.execution_mode,
+        crate::config::RsiExecutionMode::DiagnoseOnly
+    );
 }

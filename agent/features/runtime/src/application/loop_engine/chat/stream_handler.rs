@@ -65,8 +65,32 @@ fn has_actionable_output(output: &[ProviderContentData]) -> bool {
         // 增量帧不进聚合 output（见 InvocationEventReducer 文档）。
         ProviderContentData::ToolCallStarted { .. }
         | ProviderContentData::ToolArgumentsDelta { .. }
-        | ProviderContentData::ToolCallCompleted { .. } => false,
+        | ProviderContentData::ToolCallCompleted { .. }
+        | ProviderContentData::ToolCallArgumentsUnparseable { .. } => false,
     })
+}
+
+/// 文本是否含可见内容；纯空白（含单空格、全部换行）不构成可见内容块。
+fn has_visible_content(text: &str) -> bool {
+    !text.trim().is_empty()
+}
+
+/// 纯空白文本 / 思考块不写入持久化消息：provider（实测 Agnes 推 `"\n\n"`、
+/// 部分模型在 tool_use 前推 `" "`）会发出无可见内容的块，落盘后既污染
+/// context 与 token 预算，也会在 TUI 渲染成只有 marker 的空卡片。
+///
+/// 带 `signature` 的 thinking 例外保留：Anthropic 要求签名块原样回传，
+/// 丢弃会让后续请求 400（`thinking.signature` 校验），代价远大于省下的空白。
+/// `ToolUse` 不受影响；`has_actionable_output` 已保证过滤后不会得到空消息。
+fn keeps_persisted_block(block: &ContentBlock) -> bool {
+    match block {
+        ContentBlock::Text { text } => has_visible_content(text),
+        ContentBlock::Thinking {
+            thinking,
+            signature,
+        } => signature.is_some() || has_visible_content(thinking),
+        _ => true,
+    }
 }
 
 fn empty_completion_error() -> provider::ProviderError {
@@ -117,9 +141,12 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
             ProviderContentData::Text(text) => {
                 if let Some(ProviderContentData::Text(existing)) = self.output.last_mut() {
                     existing.push_str(&text);
-                } else {
+                } else if has_visible_content(&text) {
                     self.output.push(ProviderContentData::Text(text));
                 }
+                // 无累计 Text 时的纯空白帧不成块：它是 provider 在正文开始前
+                // 单独推送的分隔噪声（Agnes 推 `"\n\n"`），若聚合会变成
+                // `"\n\nanswer"` 的前导空白并随消息落盘。
             }
             ProviderContentData::Thinking {
                 thinking,
@@ -141,7 +168,7 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                 }) = self.output.last_mut()
                 {
                     existing.push_str(&thinking);
-                } else {
+                } else if has_visible_content(&thinking) || signature.is_some() {
                     self.output.push(ProviderContentData::Thinking {
                         thinking,
                         signature,
@@ -152,7 +179,8 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
             // 增量帧不进终态输出（与 provider 非流式聚合同源）。
             ProviderContentData::ToolCallStarted { .. }
             | ProviderContentData::ToolArgumentsDelta { .. }
-            | ProviderContentData::ToolCallCompleted { .. } => {}
+            | ProviderContentData::ToolCallCompleted { .. }
+            | ProviderContentData::ToolCallArgumentsUnparseable { .. } => {}
         }
     }
 
@@ -247,6 +275,30 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                             arguments,
                         });
                     }
+                    // #2104：arguments 无法解析——NEVER 执行骨架 `{}`：
+                    // 骨架 ToolUse 进聚合输出维持 tool_use/tool_result 配对，
+                    // 失败事实经 streaming 通道物化 is_error ToolResult 回给 LLM。
+                    ProviderContentData::ToolCallArgumentsUnparseable {
+                        index,
+                        id,
+                        name,
+                        raw_arguments,
+                        diagnostic,
+                    } => {
+                        self.saw_visible_delta = true;
+                        self.push_output(ProviderContentData::ToolCall {
+                            id: id.clone(),
+                            name: name.clone(),
+                            arguments: serde_json::Value::Object(serde_json::Map::new()),
+                        });
+                        self.handler.on_tool_call_unparseable(
+                            index,
+                            id,
+                            name,
+                            raw_arguments,
+                            diagnostic,
+                        );
+                    }
                 }
                 Ok(None)
             }
@@ -296,6 +348,7 @@ impl<S: ChatEventSink> InvocationEventReducer<S> {
                         },
                         _ => unreachable!("only terminal content blocks accumulate"),
                     })
+                    .filter(keeps_persisted_block)
                     .collect();
                 let usage = std::mem::take(&mut self.usage);
                 Ok(Some(InvocationResponse {
@@ -513,6 +566,39 @@ impl<S: ChatEventSink> RuntimeEventProjector<S> {
             index,
             input: arguments.clone(),
         });
+    }
+
+    /// #2104：流中 tool call arguments 无法解析——不执行，经 streaming 通道
+    /// 直接物化 `is_error` ToolResult（含诊断与原始片段）回给 LLM。
+    fn on_tool_call_unparseable(
+        &mut self,
+        index: usize,
+        provider_id: String,
+        name: String,
+        raw_arguments: String,
+        diagnostic: String,
+    ) {
+        log::warn!(target: crate::LOG_TARGET,
+            "on_tool_call_unparseable: name={} provider_id={} raw_bytes={} diagnostic={}",
+            name, provider_id, raw_arguments.len(), diagnostic,
+        );
+        let Some(executor) = &self.streaming_tool else {
+            // 未装配 streaming 通道（非 Main Run）：无执行短路能力，骨架将走
+            // 常规工具轮次的 schema 校验失败路径（登记于 issue #2104 follow-up）。
+            return;
+        };
+        let id = self.runtime_tool_id(index, Some(&provider_id));
+        executor.record_unparseable(
+            crate::application::tool::agent::ToolCall {
+                id,
+                provider_id,
+                name,
+                index,
+                input: serde_json::Value::Object(serde_json::Map::new()),
+            },
+            raw_arguments,
+            diagnostic,
+        );
     }
 }
 

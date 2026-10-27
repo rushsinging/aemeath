@@ -602,3 +602,73 @@ async fn backgrounded_summary_uses_goal_text_not_tool_input() {
         "NEVER 机械 input= 摘要"
     );
 }
+
+// ── effective timeout 三档（P4）───────────────────────────────────────
+
+type CapturedTimeout = Arc<Mutex<Option<u64>>>;
+type RecordedStates = Arc<Mutex<Vec<String>>>;
+
+/// 捕获 supervisor 下传的 effective timeout，并校验 invocation 与 context
+/// 的 scope 完全一致（否则 ExecutionAdapter 会拒绝执行）。
+struct CapturingToolPort {
+    captured: CapturedTimeout,
+}
+
+#[async_trait]
+impl ToolExecutionPort for CapturingToolPort {
+    async fn execute(
+        &self,
+        invocation: ToolInvocation,
+        context: &ToolExecutionContext,
+    ) -> ToolExecutionOutcome {
+        assert_eq!(
+            invocation.execution_scope,
+            *context.scope(),
+            "invocation 与 context 的 scope 必须同源"
+        );
+        *self.captured.lock().unwrap() = context.scope().effective_timeout_secs();
+        ToolExecutionOutcome::success_text("captured")
+    }
+}
+
+fn supervisor_capturing_timeout() -> (ToolExecutionSupervisor, RecordedStates, CapturedTimeout) {
+    let states = Arc::new(Mutex::new(Vec::new()));
+    let captured = Arc::new(Mutex::new(None));
+    let supervisor = ToolExecutionSupervisor::new(
+        Arc::new(CapturingToolPort {
+            captured: Arc::clone(&captured),
+        }),
+        sequential_test_tool_catalog("SleepTool", 300),
+        ContextCoordinator::new(context::ContextPorts::from_service(Arc::new(
+            RecordingContextPort {
+                states: Arc::clone(&states),
+            },
+        ))),
+    );
+    (supervisor, states, captured)
+}
+
+#[tokio::test]
+async fn effective_timeout_uses_catalog_default_without_backgrounding() {
+    let (supervisor, _states, captured) = supervisor_capturing_timeout();
+    let call = supervised_call(test_context(), None, None);
+    supervisor.execute(call).await.expect("执行应成功");
+    assert_eq!(*captured.lock().unwrap(), Some(300));
+}
+
+#[tokio::test]
+async fn effective_timeout_raises_to_background_budget_when_threshold_enabled() {
+    let (supervisor, _states, captured) = supervisor_capturing_timeout();
+    let call = supervised_call(test_context(), Some(Duration::from_secs(3600)), None);
+    supervisor.execute(call).await.expect("执行应成功");
+    assert_eq!(*captured.lock().unwrap(), Some(86400));
+}
+
+#[tokio::test]
+async fn explicit_timeout_wins_over_background_budget() {
+    let (supervisor, _states, captured) = supervisor_capturing_timeout();
+    let mut call = supervised_call(test_context(), Some(Duration::from_secs(3600)), None);
+    call.invocation.input = serde_json::json!({ "timeout": 42 });
+    supervisor.execute(call).await.expect("执行应成功");
+    assert_eq!(*captured.lock().unwrap(), Some(42));
+}

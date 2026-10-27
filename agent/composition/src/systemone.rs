@@ -51,6 +51,17 @@ pub enum ScoringStartupOutcome {
     /// 发行 manifest 未提供（仓库无经确认的发行 URL / SHA-256）：不加载模型、
     /// 不回退 HTTP。
     ManifestUnavailable,
+    /// bailian 云端驱动装配成功（`scoring.backend=bailian`）。
+    BailianReady {
+        /// 决策模型名（审计 engine_revision 同源）。
+        model: String,
+    },
+    /// bailian 驱动配置缺失/非法（缺 api_key 或端点）：fail-open——不装配
+    /// 端口、单条提醒，主聊天 **NEVER** 阻断。
+    BailianConfigInvalid {
+        /// 中文原因（指向 `scoring.bailian` 配置项）。
+        detail: String,
+    },
 }
 
 impl Display for ScoringStartupOutcome {
@@ -66,6 +77,13 @@ impl Display for ScoringStartupOutcome {
                 formatter,
                 "System One 发行模型 manifest 未提供，评分端口为空（不加载模型、不回退 HTTP）"
             ),
+            Self::BailianReady { model } => {
+                write!(
+                    formatter,
+                    "System One 评分端口已装配（bailian 云端驱动：{model}）"
+                )
+            }
+            Self::BailianConfigInvalid { detail } => write!(formatter, "{detail}"),
         }
     }
 }
@@ -85,7 +103,9 @@ pub struct StartupNotice {
 #[must_use]
 pub(crate) fn scoring_startup_notices(outcome: &ScoringStartupOutcome) -> Vec<StartupNotice> {
     match outcome {
-        ScoringStartupOutcome::Disabled | ScoringStartupOutcome::Ready => Vec::new(),
+        ScoringStartupOutcome::Disabled
+        | ScoringStartupOutcome::Ready
+        | ScoringStartupOutcome::BailianReady { .. } => Vec::new(),
         outcome => vec![StartupNotice {
             message: outcome.to_string(),
         }],
@@ -272,39 +292,40 @@ pub async fn assemble_scoring_ports(scoring: &share::config::ScoringConfig) -> S
 
 /// 惰性拉起 scoring daemon 的注入点（测试可 stub，避免真实 spawn）。
 pub(crate) trait ScoringDaemonLauncher: Send + Sync {
-    /// sock 已可连则 Ok；否则尝试 spawn `systemone serve` 并等待就绪。
+    /// HTTP 端点可探活则 Ok；否则尝试 spawn `systemone serve` 并等待就绪。
     fn ensure_ready(
         &self,
-        sock: &std::path::Path,
+        endpoint: &str,
         connect_timeout: std::time::Duration,
     ) -> Result<(), String>;
 }
 
-/// 生产 launcher：探测 sock → `current_exe systemone serve` → 轮询就绪。
+/// 生产 launcher：HTTP 探活 → `current_exe systemone serve` → 轮询就绪。
 pub(crate) struct ProcessDaemonLauncher;
 
 impl ScoringDaemonLauncher for ProcessDaemonLauncher {
     fn ensure_ready(
         &self,
-        sock: &std::path::Path,
+        endpoint: &str,
         connect_timeout: std::time::Duration,
     ) -> Result<(), String> {
         // composition 单测的 current_exe 是 `deps/composition-*` 测试二进制：
         // 对其 spawn `systemone serve` 会挂起并污染并行用例（如 L4 日志等待）。
         // 生产路径（非测试运行时）仍走惰性拉起。
         if cfg!(test) {
-            let _ = (sock, connect_timeout);
+            let _ = (endpoint, connect_timeout);
             Err(
                 "composition 单测禁用惰性拉起 systemone serve（避免测试二进制被误 spawn）"
                     .to_owned(),
             )
         } else {
-            systemone::ensure_scoring_daemon_ready(sock, connect_timeout)
+            systemone::ensure_scoring_http_ready(endpoint, connect_timeout)
         }
     }
 }
 
-/// 生产 / 契约：daemon 客户端装配矩阵（可注入 launcher 与 manifest 源）。
+/// 生产 / 契约：评分端口装配矩阵（可注入 launcher 与 manifest 源）。
+/// 按 `scoring.backend` 分流：local（UDS daemon）/ bailian（百炼 HTTPS）。
 pub(crate) async fn assemble_daemon_scoring_ports_with(
     scoring: &share::config::ScoringConfig,
     source: &dyn ReleaseManifestSource,
@@ -324,39 +345,60 @@ pub(crate) async fn assemble_daemon_scoring_ports_with(
             context_slot,
         };
     }
-    let Some(manifest) = source.release_manifest() else {
+    match scoring.backend {
+        share::config::scoring::ScoringBackend::Bailian => {
+            assemble_bailian_ports(scoring, context_slot, context_source)
+        }
+        share::config::scoring::ScoringBackend::Local => {
+            assemble_local_daemon_ports(scoring, source, launcher, context_slot, context_source)
+                .await
+        }
+    }
+}
+
+/// bailian 分支：配置校验 fail-open；成功时构造 HTTPS 客户端并按场景包装
+/// 校准/审计外壳（engine_revision = `bailian/{model}`，审计单一真相源）。
+/// **NEVER** 读发行 manifest、**NEVER** 拉起 systemone daemon。
+fn assemble_bailian_ports(
+    scoring: &share::config::ScoringConfig,
+    context_slot: Arc<systemone::ScoringCallContextSlot>,
+    context_source: Arc<dyn Fn() -> systemone::ScoringCallContext + Send + Sync>,
+) -> ScoringAssembly {
+    if let Err(error) = scoring.bailian.validate() {
         return ScoringAssembly {
             assignment: ScoringPortAssignment::default(),
-            outcome: ScoringStartupOutcome::ManifestUnavailable,
+            outcome: ScoringStartupOutcome::BailianConfigInvalid {
+                detail: format!(
+                    "bailian 评分驱动配置不完整（{error}）：请在配置文件 scoring.bailian 补齐 api_key 与 base_url（或 full_url）"
+                ),
+            },
             context_slot,
         };
-    };
-
-    let agents_dir = share::config::paths::global_agents_dir();
-    let endpoints = systemone::DaemonEndpoints::under_agents_dir_with_socket(
-        &agents_dir,
-        scoring.socket_path.as_ref().map(std::path::PathBuf::from),
-    );
-    let connect_timeout = std::time::Duration::from_secs(scoring.connect_timeout_secs);
+    }
+    let endpoint = scoring
+        .bailian
+        .resolve_endpoint()
+        .expect("validate 已保证端点可解析");
+    let api_key = scoring
+        .bailian
+        .api_key
+        .clone()
+        .expect("validate 已保证 api_key 存在");
     let infer_timeout = std::time::Duration::from_secs(scoring.infer_timeout_secs);
-
-    let daemon_outcome = match launcher.ensure_ready(&endpoints.sock, connect_timeout) {
-        Ok(()) => ScoringStartupOutcome::Ready,
-        Err(detail) => ScoringStartupOutcome::DaemonUnreachable { detail },
-    };
-
-    let raw_port: Arc<dyn systemone::ScoringPort> = Arc::new(systemone::DaemonScoringClient::new(
-        endpoints.sock,
-        connect_timeout,
-        infer_timeout,
-    ));
-
+    let raw_port: Arc<dyn systemone::ScoringPort> =
+        Arc::new(systemone::BailianSystemOneClient::new(
+            endpoint,
+            api_key,
+            scoring.bailian.model.clone(),
+            infer_timeout,
+        ));
+    let engine_revision = format!("bailian/{}", scoring.bailian.model);
     ScoringAssembly {
         assignment: ScoringPortAssignment {
             for_memory_rerank: scoring.memory_rerank.then(|| {
                 systemone::wrap_calibrated_audited(
                     Arc::clone(&raw_port),
-                    &manifest,
+                    &engine_revision,
                     &scoring_dir(),
                     "memory_rerank",
                     scoring.event_retention_days,
@@ -366,7 +408,7 @@ pub(crate) async fn assemble_daemon_scoring_ports_with(
             for_memory_recall: scoring.memory_recall.then(|| {
                 systemone::wrap_calibrated_audited(
                     Arc::clone(&raw_port),
-                    &manifest,
+                    &engine_revision,
                     &scoring_dir(),
                     "memory_recall",
                     scoring.event_retention_days,
@@ -376,7 +418,7 @@ pub(crate) async fn assemble_daemon_scoring_ports_with(
             for_skill_match: scoring.skill_match.then(|| {
                 systemone::wrap_calibrated_audited(
                     Arc::clone(&raw_port),
-                    &manifest,
+                    &engine_revision,
                     &scoring_dir(),
                     "skill_match",
                     scoring.event_retention_days,
@@ -386,7 +428,88 @@ pub(crate) async fn assemble_daemon_scoring_ports_with(
             for_policy_triage: scoring.policy_triage.then(|| {
                 systemone::wrap_calibrated_audited(
                     Arc::clone(&raw_port),
-                    &manifest,
+                    &engine_revision,
+                    &scoring_dir(),
+                    "policy_triage",
+                    scoring.event_retention_days,
+                    Some(Arc::clone(&context_source)),
+                )
+            }),
+        },
+        outcome: ScoringStartupOutcome::BailianReady {
+            model: scoring.bailian.model.clone(),
+        },
+        context_slot,
+    }
+}
+
+/// local 分支：读发行 manifest → 惰性拉起 daemon → UDS 客户端按场景包装。
+async fn assemble_local_daemon_ports(
+    scoring: &share::config::ScoringConfig,
+    source: &dyn ReleaseManifestSource,
+    launcher: &dyn ScoringDaemonLauncher,
+    context_slot: Arc<systemone::ScoringCallContextSlot>,
+    context_source: Arc<dyn Fn() -> systemone::ScoringCallContext + Send + Sync>,
+) -> ScoringAssembly {
+    let Some(manifest) = source.release_manifest() else {
+        return ScoringAssembly {
+            assignment: ScoringPortAssignment::default(),
+            outcome: ScoringStartupOutcome::ManifestUnavailable,
+            context_slot,
+        };
+    };
+
+    let endpoint = scoring.resolve_http_endpoint();
+    let connect_timeout = std::time::Duration::from_secs(scoring.connect_timeout_secs);
+    let infer_timeout = std::time::Duration::from_secs(scoring.infer_timeout_secs);
+
+    let daemon_outcome = match launcher.ensure_ready(&endpoint, connect_timeout) {
+        Ok(()) => ScoringStartupOutcome::Ready,
+        Err(detail) => ScoringStartupOutcome::DaemonUnreachable { detail },
+    };
+
+    let raw_port: Arc<dyn systemone::ScoringPort> = Arc::new(systemone::LocalSystemOneClient::new(
+        endpoint,
+        manifest.engine_revision.clone(),
+        infer_timeout,
+    ));
+
+    ScoringAssembly {
+        assignment: ScoringPortAssignment {
+            for_memory_rerank: scoring.memory_rerank.then(|| {
+                systemone::wrap_calibrated_audited(
+                    Arc::clone(&raw_port),
+                    &manifest.engine_revision,
+                    &scoring_dir(),
+                    "memory_rerank",
+                    scoring.event_retention_days,
+                    Some(Arc::clone(&context_source)),
+                )
+            }),
+            for_memory_recall: scoring.memory_recall.then(|| {
+                systemone::wrap_calibrated_audited(
+                    Arc::clone(&raw_port),
+                    &manifest.engine_revision,
+                    &scoring_dir(),
+                    "memory_recall",
+                    scoring.event_retention_days,
+                    Some(Arc::clone(&context_source)),
+                )
+            }),
+            for_skill_match: scoring.skill_match.then(|| {
+                systemone::wrap_calibrated_audited(
+                    Arc::clone(&raw_port),
+                    &manifest.engine_revision,
+                    &scoring_dir(),
+                    "skill_match",
+                    scoring.event_retention_days,
+                    Some(Arc::clone(&context_source)),
+                )
+            }),
+            for_policy_triage: scoring.policy_triage.then(|| {
+                systemone::wrap_calibrated_audited(
+                    Arc::clone(&raw_port),
+                    &manifest.engine_revision,
                     &scoring_dir(),
                     "policy_triage",
                     scoring.event_retention_days,
@@ -407,7 +530,7 @@ mod tests;
 #[derive(Debug)]
 pub enum ScoringServeExit {
     /// 正常优雅退出（收到 shutdown）。
-    Stopped { sock: std::path::PathBuf },
+    Stopped { listen: String },
     /// 启动失败（feature / 模型 / 锁 / IO）。
     Failure { message: String, exit_code: i32 },
 }
@@ -419,7 +542,7 @@ pub enum ScoringServeExit {
 /// `on_ready` 在锁与引擎就绪、开始监听前调用一次，携带 sock 路径——
 /// 库层 **NEVER** 直接写 stdout（`#![deny(clippy::print_stdout)]`），
 /// 用户可见输出由调用方（CLI 子命令）渲染。
-pub async fn run_scoring_serve(on_ready: impl FnOnce(&std::path::Path)) -> ScoringServeExit {
+pub async fn run_scoring_serve(http_listen: &str, on_ready: impl FnOnce(&str)) -> ScoringServeExit {
     if !systemone::EMBEDDED_SCORING_AVAILABLE {
         return ScoringServeExit::Failure {
             message: "本构建未启用 System One 引擎（feature `systemone-daemon` / `embedded`）；无法启动 systemone serve。".to_owned(),
@@ -432,27 +555,6 @@ pub async fn run_scoring_serve(on_ready: impl FnOnce(&std::path::Path)) -> Scori
             message: "发行 manifest 不可用，无法启动 systemone serve。".to_owned(),
             exit_code: 2,
         };
-    };
-
-    let agents_dir = share::config::paths::global_agents_dir();
-    let endpoints = systemone::DaemonEndpoints::under_agents_dir(&agents_dir);
-    let lock = match systemone::acquire_daemon_lock(&endpoints.lock) {
-        Ok(lock) => lock,
-        Err(systemone::DaemonLockError::AlreadyRunning) => {
-            return ScoringServeExit::Failure {
-                message: format!(
-                    "scoring daemon 已在运行（lock={}）。",
-                    endpoints.lock.display()
-                ),
-                exit_code: 0,
-            };
-        }
-        Err(error) => {
-            return ScoringServeExit::Failure {
-                message: error.to_string(),
-                exit_code: 1,
-            };
-        }
     };
 
     let port = match ProductionEmbeddedFactory.wire(&manifest).await {
@@ -474,13 +576,13 @@ pub async fn run_scoring_serve(on_ready: impl FnOnce(&std::path::Path)) -> Scori
         }
     };
 
-    let sock = endpoints.sock.clone();
-    on_ready(&sock);
+    let listen = http_listen.to_string();
+    let listen_url = format!("http://{listen}");
+    on_ready(&listen_url);
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
     let serve = tokio::spawn(async move {
-        systemone::run_daemon_accept_loop(
-            endpoints,
-            lock,
+        systemone::run_daemon_http_serve(
+            &listen,
             port,
             manifest.engine_revision.clone(),
             shutdown_rx,
@@ -491,7 +593,9 @@ pub async fn run_scoring_serve(on_ready: impl FnOnce(&std::path::Path)) -> Scori
     let _ = tokio::signal::ctrl_c().await;
     let _ = shutdown_tx.send(());
     match serve.await {
-        Ok(Ok(())) => ScoringServeExit::Stopped { sock },
+        Ok(Ok(())) => ScoringServeExit::Stopped {
+            listen: format!("http://{http_listen}"),
+        },
         Ok(Err(error)) => ScoringServeExit::Failure {
             message: error.to_string(),
             exit_code: 1,

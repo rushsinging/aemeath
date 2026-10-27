@@ -195,3 +195,151 @@ fn reducer_closes_active_block_for_synthetic_raw_eof_failure() {
         .iter()
         .any(|event| matches!(event, RuntimeStreamEvent::BlockComplete { .. })));
 }
+
+#[test]
+fn reducer_drops_whitespace_only_thinking_from_persisted_message() {
+    // 真实 session 证据：模型在 tool_use 前推送 thinking=" "，
+    // 落盘消息形如 {"type":"thinking","thinking":" "} 紧跟 tool_use。
+    let mut reducer = InvocationEventReducer::new(RecordingSink::default());
+    let response = apply_completion(
+        &mut reducer,
+        vec![
+            ProviderContentData::Thinking {
+                thinking: " ".to_string(),
+                signature: None,
+            },
+            ProviderContentData::ToolCall {
+                id: "toolu_1".to_string(),
+                name: "echo".to_string(),
+                arguments: serde_json::json!({"text": "hi"}),
+            },
+        ],
+    )
+    .unwrap()
+    .expect("stop frame produces response");
+
+    assert!(
+        matches!(
+            &response.assistant_message.content[..],
+            [share::message::ContentBlock::ToolUse { .. }]
+        ),
+        "纯空白 thinking 不应写入 context，实际: {:?}",
+        response.assistant_message.content
+    );
+}
+
+#[test]
+fn reducer_drops_whitespace_only_text_from_persisted_message() {
+    let mut reducer = InvocationEventReducer::new(RecordingSink::default());
+    let response = apply_completion(
+        &mut reducer,
+        vec![
+            ProviderContentData::Text("\n\n".to_string()),
+            ProviderContentData::Text("answer".to_string()),
+        ],
+    )
+    .unwrap()
+    .expect("stop frame produces response");
+
+    assert!(
+        matches!(
+            &response.assistant_message.content[..],
+            [share::message::ContentBlock::Text { text }] if text == "answer"
+        ),
+        "纯空白 text 不应写入 context，实际: {:?}",
+        response.assistant_message.content
+    );
+}
+
+#[test]
+fn reducer_keeps_nonblank_thinking_in_persisted_message() {
+    let mut reducer = InvocationEventReducer::new(RecordingSink::default());
+    let response = apply_completion(
+        &mut reducer,
+        vec![
+            ProviderContentData::Thinking {
+                thinking: "real plan".to_string(),
+                signature: Some("sig".to_string()),
+            },
+            ProviderContentData::Text("answer".to_string()),
+        ],
+    )
+    .unwrap()
+    .expect("stop frame produces response");
+
+    assert!(
+        matches!(
+            &response.assistant_message.content[..],
+            [
+                share::message::ContentBlock::Thinking { .. },
+                share::message::ContentBlock::Text { .. }
+            ]
+        ),
+        "非空白 thinking MUST 保留，实际: {:?}",
+        response.assistant_message.content
+    );
+}
+
+#[test]
+fn reducer_drops_whitespace_variants_of_every_shape() {
+    for blank in [" ", "  ", "\t", "\n", "\r\n", " \n \t "] {
+        let mut reducer = InvocationEventReducer::new(RecordingSink::default());
+        let response = apply_completion(
+            &mut reducer,
+            vec![
+                ProviderContentData::Thinking {
+                    thinking: blank.to_string(),
+                    signature: None,
+                },
+                ProviderContentData::Text(blank.to_string()),
+                ProviderContentData::ToolCall {
+                    id: "toolu_1".to_string(),
+                    name: "echo".to_string(),
+                    arguments: serde_json::json!({}),
+                },
+            ],
+        )
+        .unwrap()
+        .expect("stop frame produces response");
+
+        assert!(
+            matches!(
+                &response.assistant_message.content[..],
+                [share::message::ContentBlock::ToolUse { .. }]
+            ),
+            "空白形态 {blank:?} 不应写入 context，实际: {:?}",
+            response.assistant_message.content
+        );
+    }
+}
+
+#[test]
+fn reducer_keeps_whitespace_thinking_carrying_signature() {
+    // Anthropic 要求签名 thinking 块原样回传；即便正文是空白也必须保留，
+    // 否则后续请求 400（thinking.signature 校验）。
+    let mut reducer = InvocationEventReducer::new(RecordingSink::default());
+    let response = apply_completion(
+        &mut reducer,
+        vec![
+            ProviderContentData::Thinking {
+                thinking: " ".to_string(),
+                signature: Some("sig-abc".to_string()),
+            },
+            ProviderContentData::Text("answer".to_string()),
+        ],
+    )
+    .unwrap()
+    .expect("stop frame produces response");
+
+    assert!(
+        matches!(
+            &response.assistant_message.content[..],
+            [
+                share::message::ContentBlock::Thinking { signature: Some(sig), .. },
+                share::message::ContentBlock::Text { .. }
+            ] if sig == "sig-abc"
+        ),
+        "带 signature 的 thinking MUST 保留，实际: {:?}",
+        response.assistant_message.content
+    );
+}

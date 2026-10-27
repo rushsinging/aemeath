@@ -3,7 +3,7 @@
 > 层级：01-system（系统级总体设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：[#972](https://github.com/rushsinging/aemeath/issues/972)
 > 本文定义 15 个 Bounded Context 之间的集成关系、方向、端口与防腐边界。以核心域 **Agent Runtime** 为中心组织（hub-and-spoke）。**只描述目标态集成关系，不记录当前代码位置。**
-> **v0.1.0 scope（#921 收缩）**：Provider option resolver 领域迁移已完成但未接生产链路；Config `reasoning_graph` 已退役，Workflow 五节点采用固定默认 effort；Main 已通过 ReasoningPort 接线；Provider resolver 尚未接线。上述集成关系是 Target 设计，v0.1.0 中 Runtime/Context/TUI 尚未端到端消费 Provider resolver。是否接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策。
+> **Workflow Graph 目标设计**：Workflow 是独立 Bounded Context，拥有 Session 级 Graph Definition / Node / Edge / State（一个 Session 0..n Workflow，同一时刻至多一个 Active），经六个始终出现在 LLM Tool Schema 的 Graph tool（`workflow_create` / `workflow_list` / `workflow_query` / `workflow_update` / `workflow_node_update` / `workflow_replan`）与 Runtime 协作；Runtime 每轮按 Session 最新状态组织上下文，向 Provider 只传通用 messages / tool schema / model options（具体读取 / 注入协议待决，见 workflow/01-workflow-design.md），Runtime 不解释节点语义、不计算下一节点、不推进 Graph，也不存在 Workflow 反向约束 Run 的专用查询端口。旧 Reasoning Graph（Reasoning Node、五节点固定 effort、ReasoningPort、GraphPhaseChanged）已退役；ReasoningLevel 只从配置 / 用户命令静态冻结。**Provider option resolver 领域迁移已完成但仍未接生产链路**，上述集成关系是 Target 设计，Runtime/Context/TUI 尚未端到端消费 Provider resolver；是否接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策。
 
 ## 1. 集成模式图例
 
@@ -32,7 +32,7 @@
    ┌───────┼────────┬────────┬────────┬───────┬───────┬────────┐
    ▼       ▼        ▼        ▼        ▼       ▼       ▼        ▼
  Context Workflow Provider  Tool    Policy  Memory  Task      Hook
- Mgmt   (reason.) (ACL)   &Skill&Cmd
+ Mgmt   (Graph)   (ACL)   &Skill&Cmd
    │                                                      │
    ▼ 持久化（C/S）                                         ▼ Pub/Sub
    Storage  ◀── Memory / Audit 也经此落盘                   Audit（Usage facts）
@@ -63,7 +63,7 @@
 | 供应方 | 模式 | 契约与所有权 | 说明 |
 |---|---|---|---|
 | Context Management | C/S | Context-owned `ContextPort` + `SessionManagementPort` OHS | Runtime 请求“构建本轮 Context Window”；Composition 把同一 Session 管理实例注入 runtime 的 SessionSwitchCoordinator（resume 协调，#2025）与 Runtime（SDK / idle Session 命令）。Session list、resume、export、import、metadata update 与 delete 仅接受当前 `ProjectIdentity`（Git 以 common-dir、非 Git 以 canonical root 匹配）；resume 成功后 Runtime 将唯一活动 Session ID 切换为恢复目标，Context / Tool / Hook / Tool Result 统一消费该 ID；TUI 只消费 SDK 事件 |
-| Workflow | C/S | Workflow-owned `ReasoningPort` OHS | Runtime 询问当前 reasoning effort（reasoning graph 观察 tool 类型 / 结果调节）；Workflow **NEVER** 阻塞 loop 或强制流程，仅作 effort 调节器。**v0.1.0 scope（#921 收缩）**：五节点固定默认 effort（Config `reasoning_graph` 已退役）；Main 已通过 ReasoningPort 接线；Provider resolver 尚未接线；是否接线由 v0.2.0 #1142 决策 |
+| Workflow | C/S（Runtime 是 Customer，Workflow 是 Supplier） | Workflow-owned Graph tools façade：六个始终出现在 LLM Tool Schema 的 `workflow_create` / `workflow_list` / `workflow_query` / `workflow_update` / `workflow_node_update` / `workflow_replan` | 六个 Graph tool 经 Runtime 通用 ToolOrchestration 路由，业务校验与状态迁移归 Workflow Kernel（MVP 无 revision/CAS）；Runtime 每轮按 Session 最新状态组织上下文，**NEVER** 每次 Model Invocation 向 Workflow 发专用查询、**NEVER** 解释节点语义、计算下一节点或推进 Graph；Workflow **NEVER** 调用 LLM、执行 Tool、创建 Run 或驱动 Run 生命周期，也**不是**反向约束 Run 上下文的查询端口；用户不直接操作 Workflow，语义操作只由 LLM 经 Tool 完成 |
 | Provider | C/S + **ACL**(在 Provider 内) | Runtime-owned outbound `ProviderPort` | Provider adapter 吸收各家 LLM 差异，实现 Runtime 定义的统一调用语言与有序流。**v0.1.0 scope（#921 收缩）**：option resolver 领域迁移完成但未接生产链路——Runtime 尚未在 `build_window` 前调用 resolver；是否接线由 v0.2.0 #1142 决策 |
 | Tool & Skill & Command | C/S | Tool-owned `ToolCatalogPort` + `ToolExecutionPort` OHS；Skill / Command 各自发布窄 façade | Tool 目录与函数调用分离；Tools 同时发布仅含元数据的 `SkillCatalogPort` 与调用时按 identity 加载单个正文的 `SkillLoadPort`。唯一稳定 `Skill` Tool 只经 ToolExecution 执行；Context 仅消费 Skill metadata directory，Runtime 只编排 `SkillRequest` 与 ToolExecution、不读取 Skill 文件。Skill slash route 与客户端补全由同一个版本化全量快照原子派生；普通 Command 只按 SnapshotQuery / ApplicationControl 确定性路由并保持稳定。#1294 后 Composition 一次构造 filesystem backing 并分发窄端口；MCP Ready 生命周期、动态同步与 revision 由 #1327 承接 |
 | Policy | C/S | Policy-owned `PolicyPort` OHS | v0.1.0 只装配 `AllowAllPolicy`（安全审批、Deny / RequireApproval 为 **Future**，接口预留但不在 v0.1.0 验收范围）；控制流仍归 Runtime |
@@ -79,7 +79,7 @@
 
 Interaction 同样不是第 16 个 BC：Runtime-owned `InteractionPort` 隔离 TUI / Server / parent-mediated request-reply detail。AskUser Tool 只返回 Tool-owned typed suspension，由 Runtime ACL 映射为 `InteractionRequest`、保存 continuation 并独占 `AwaitingUser` / resume 状态转换；Tool BC **NEVER** 再发布同义 `UserInteraction` port。
 
-**Runtime IoC 终态**：Runtime 定义唯一 `RuntimeContextFactory` 及其消费的窄 factory/port contracts，Composition 注入实现；该 factory 的产物严格是 `RuntimeContext`。所有 Run 来源只提交 `RunCreationRequest`，由 Runtime-owned `RunFactory` 调用 factory，并按 `RunSpec` 的 `InteractionBindingMode`（Client / ParentMediated / Unavailable）、`HookBindingMode`（Full / BoundaryOnly）与 `ReasoningBindingMode`（Adaptive / Fixed / Inherit / NoOp）及父 capability ceiling 生成 `RunInstance`。ParentMediated 使用 child-scoped adapter 隔离 request ownership，NEVER 复用父 `InteractionPort` Arc；Sub 的 BoundaryOnly Hook capability 按 Hook metadata 转发 Stop 与生命周期 boundary，过滤 Tool/Notification point。Main/Sub 不是生产类型，Loop Engine 直接编排 `Run + RuntimeContext + RunExecutionState`。
+**Runtime IoC 终态**：Runtime 定义唯一 `RuntimeContextFactory` 及其消费的窄 factory/port contracts，Composition 注入实现；该 factory 的产物严格是 `RuntimeContext`。所有 Run 来源只提交 `RunCreationRequest`，由 Runtime-owned `RunFactory` 调用 factory，并按 `RunSpec` 的 `InteractionBindingMode`（Client / ParentMediated / Unavailable）、`HookBindingMode`（Full / BoundaryOnly）与静态 ReasoningLevel（只从配置 / 用户命令冻结，Provider clamp 独立，与 Workflow Graph 解耦）及父 capability ceiling 生成 `RunInstance`。ParentMediated 使用 child-scoped adapter 隔离 request ownership，NEVER 复用父 `InteractionPort` Arc；Sub 的 BoundaryOnly Hook capability 按 Hook metadata 转发 Stop 与生命周期 boundary，过滤 Tool/Notification point。Main/Sub 不是生产类型，Loop Engine 直接编排 `Run + RuntimeContext + RunExecutionState`。
 
 `WorkspaceMode` 是 `RunSpec` 的装配策略，不形成 Runtime → Project 出站边。Composition 在 active-main-session-slot scope 中保留 Project wiring：Main agent 启动时只选择一次 production wiring，同一 Session 的全部 Main Run 复用；运行期 resume 在排他 gate 内替换完整 state。Sub 由 composition-provided AgentDispatch 对父 scope 执行 isolated derivation；Runtime **NEVER** 持有 Project 端口或 wiring。
 
@@ -113,7 +113,7 @@ Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启
 | 共享内核 | 参与 BC | 风险控制 |
 |---|---|---|
 | `Message`（对话消息类型） | Agent Runtime / Context Management / Provider | 最小化，只放稳定核心类型 |
-| `ReasoningLevel`（七档 canonical：`Off / Minimal / Low / Medium / High / Xhigh / Max`；`None` 为 Off 输入别名与 OpenAI wire alias，内部 canonical **NEVER** 为 `None`） | Workflow / Agent Runtime / Context Management / Provider | 只共享稳定有序枚举；graph（固定默认 effort）、model capability 与 wire 映射仍归各 BC 所有。Config `reasoning_graph` 含 user max 已退役（#921） |
+| `ReasoningLevel`（七档 canonical：`Off / Minimal / Low / Medium / High / Xhigh / Max`；`None` 为 Off 输入别名与 OpenAI wire alias，内部 canonical **NEVER** 为 `None`） | Agent Runtime / Context Management / Provider | 只共享稳定有序枚举；ReasoningLevel 只从配置 / 用户命令静态冻结，与 Workflow Graph 解耦；model capability clamp 与 wire 映射仍归各 BC 所有。Config `reasoning_graph` 含 user max 已退役（#921） |
 | `Task` 类型 | 实为 **Task BC 的 Published Language**（非 SK），其他 BC 引用其发布类型 | 不变量由 Task BC 独占 |
 
 领域标识 **NEVER** 使用“全域 ID”共享内核：每个 ID 仍由领域所有者定义语义；当同一 identity 必须跨 BC、进程内 SDK event 与持久化事实稳定关联时，所有者 **MUST** 通过 `packages/sdk` 发布唯一 UUIDv7 newtype，其他 BC 直接复用而不得重定义。`SessionId`（Context-owned）、`RunId` / `RunStepId` / `ModelInvocationId`（Runtime-owned）采用该发布机制；ToolCallId 同理。TaskId / BatchId 使用 Task-owned 单 Session 数字格式，WorkspaceId 使用 Project-owned deterministic opaque 格式。跨 BC **NEVER** 退化为无所有权的通用 `Id`。
@@ -156,7 +156,7 @@ Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启
 | 2026-07-11 | 初稿：集成模式、入站 / 出站边、Shared Kernel、ACL、Future 预留 | #760 |
 | 2026-07-11 | 清理 crate 路径引用改为纯目标态、文档引用链接化、新增修改历史 | #760 |
 | 2026-07-11 | 术语改名：Agent Execution→Agent Runtime、AgentRun→Run、缩写 AE→Runtime | #760 |
-| 2026-07-11 | Workflow 降为支撑域：移出核心框、并入 §4 出站端口表（ReasoningPort）、删原"核心内部"节、Future 去多-agent 编排 | #760 |
+| 2026-07-11 | Workflow 降为支撑域：移出核心框、并入 §4 出站端口表（Workflow Graph tools / `WorkflowRuntimeViewQuery`，后者已于 2026-10-07 移除）、删原“核心内部”节、Future 去多-agent 编排 | #760 |
 | 2026-07-28 | #1438 将 Skill 边改为 metadata Catalog + call-time Load，唯一 Skill Tool 经 ToolExecution 执行；SkillRequest、route 与客户端补全使用同一版本化快照，Runtime 不读取 Skill 文件 | [#1438](https://github.com/rushsinging/aemeath/issues/1438) |
 | 2026-07-12 | Tool BC 出站契约拆为 Catalog/Execution 双端口；Skill 与 Command 使用独立端口，MCP 定位为 Tool adapter | #787 |
 | 2026-07-12 | 将 Run 限定为唯一 Agent 执行生命周期状态机，与各 BC 局部聚合状态机区分 | #743 / #787 |
@@ -168,5 +168,6 @@ Config 自己持有唯一 active `{ProjectConfigLocation, ConfigSnapshot}`。启
 | 2026-07-16 | §3 入站 C/S 表补齐 REPL 为 `AgentClient` 的 v0.1.0 Customer（与 CLI / TUI 并列，Server 仍只在 §9 Future），统一 Agent Runtime 是 AgentClient Supplier 的措辞 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-17 | #927 明确跨 BC identity 发布机制：语义所有权不变，`SessionId` / `RunId` / `RunStepId` / `ModelInvocationId` 经 SDK 发布唯一 UUIDv7 newtype，Audit 与 Context/Runtime 复用而不重复定义 | [#927](https://github.com/rushsinging/aemeath/issues/927) |
 | 2026-07-17 | 持久化边对齐 AtomicDataset 现状：独立 OHS/adapter、Prepared commit point、roll-forward 与 typed corruption；Memory 集成 deferred 至 #896 | [#983](https://github.com/rushsinging/aemeath/issues/983) |
-| 2026-07-17 | #921 收缩范围：Provider resolver 领域迁移完成但未接生产链路；Config `reasoning_graph` 退役，Workflow 五节点固定默认 effort；Main ReasoningPort 已接线；Runtime/Context/TUI 尚未端到端消费 Provider resolver；是否接线由 v0.2.0 #1142 决策 | [#921](https://github.com/rushsinging/aemeath/issues/921) |
+| 2026-07-17 | #921 收缩范围：Provider resolver 领域迁移完成但未接生产链路；Config `reasoning_graph` 与五节点固定 effort 轨退役；旧 Main ReasoningPort 轨由 Graph 重设计取代；Runtime/Context/TUI 尚未端到端消费 Provider resolver；Workflow Graph 目标接线见 01-workflow-design.md | [#921](https://github.com/rushsinging/aemeath/issues/921) |
 | 2026-07-22 | #1393 Shared Kernel `ReasoningLevel` 扩展为七档 canonical（`Off / Minimal / Low / Medium / High / Xhigh / Max`）；`None` 明确为 Off 输入别名与 OpenAI wire alias，内部 canonical 保持 `Off` | [#1393](https://github.com/rushsinging/aemeath/issues/1393) |
+| 2026-10-07 | Workflow 集成口径同步 workflow/01-workflow-design.md：五个 workflow Tool、Session 0..n Workflow、Runtime 按 Session 最新状态组织上下文；删除 `WorkflowRuntimeViewQuery` 与每次 Model Invocation 查询 / tool policy 转换的既定描述，改为普通 Tool 按 Active Node Role 复用 Tools BC capability Profile 收缩、Workflow Tool 始终可见；Workflow 不作为反向约束 Run 的查询端口 | workflow/01-workflow-design.md |

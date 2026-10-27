@@ -146,6 +146,7 @@ struct Run {
     status: RunStatus,         // 唯一状态机；目标终态仅 Completed / Failed / Terminated
     termination: Option<RunTermination>, // TerminateRun 接受后的 reason + absolute deadline
     pending_interaction: Option<PendingInteraction>, // 与 AwaitingInteraction 同步存活，不持久化
+    binding: RunBinding,       // 创建时 Goal 关联事实（Run 不携带任何 Workflow 字段，见 §2.4）
     steps: Vec<RunStep>,       // 内部实体序列
     started_at: Instant,
 }
@@ -228,6 +229,24 @@ Provider ACL **MUST** 在 `InvocationResponse` 进入 Runtime 前完成 token �
 
 > **注**：`RuntimeContext` 不进 Run 聚合——它是活资源，由派生逻辑装配后作为参数传入 Loop Engine；崩溃重建即可（呼应"从头开始"，见 `05-recovery-semantics`）。
 
+### 2.4 RunBinding —— 创建时 Goal 关联事实（Run 与 Workflow 无绑定）
+
+Workflow 是 Session 级独立 Graph BC：Graph 拥有 Definition / Node / Edge / State / Failure Routing，允许 DAG、回边、自环、Join 与并行 active_nodes。这些都是 Workflow 内部语义，不是 Runtime 类型；Loop 既不是 Runtime 类型，也不是特殊 Graph 节点。Runtime Goal 是独立的跨 Run 聚合。Run 只在创建时捕获 Goal 关联事实：
+
+```rust
+/// Run 创建时捕获；只读随 Run 存活。
+/// 不含 loop_id——Loop 不是 Runtime 类型。
+/// 不存在 workflow_id / workflow_revision / workflow_node_path 等 Workflow 字段，
+/// 也不存在 WorkflowBindingSnapshot 一类绑定快照。
+struct RunBinding {
+    goal_id: Option<GoalId>,
+}
+```
+
+- Run、RunStep、ModelInvocation **不持有任何 Workflow 字段或绑定快照**；因此不存在绑定 Workflow 的 Run，也不存在跨 Graph 迁移问题。有无 Goal 的 Run（含 Standalone Run）在这点上完全相同。
+- Workflow 与 Run 只通过 Session 级上下文组织与 LLM 的五个 `workflow_*` Tool 调用发生关系；Runtime 每轮按 Session 最新状态组织上下文，具体读取 / 注入协议待决（见 [Workflow 设计](../workflow/01-workflow-design.md)）。
+- `goal_id` 只记录 Run 创建时与 Runtime Goal 的关联；Goal 生命周期是独立跨 Run 聚合，既不改写 Workflow Graph 的 Definition / State / Failure Routing，也不被 Graph 节点结果直接改变。
+
 ## 3. 不变量（Run 聚合守护）
 
 1. Run 进入 `Completed/Failed/Terminated` 后**不可再加 Run Step**
@@ -292,7 +311,7 @@ struct RunSpec {
     policy:    PolicyMode,            // v0.1.0: AllowAll
     memory:    MemoryMode,            // Enabled | Disabled(不读不写/不 reflection)
     hooks:     HookMode,              // Full | BoundaryOnly | Disabled
-    reasoning: ReasoningMode,         // GraphDriven | EffortOnly(level) | Inherit
+    reasoning: ReasoningMode,         // Fixed(level) | Inherit：创建时静态冻结，执行期间不变
     task:      TaskMode,              // Shared | Isolated
     finalization: FinalizationSpec,   // deterministic summary / receipt 策略
 }
@@ -324,10 +343,9 @@ enum PolicyMode    { AllowAll }                         // CLI --yolo 的领域�
 enum MemoryMode    { Enabled, Disabled }
 enum HookMode      { Full, BoundaryOnly, Disabled }   // BoundaryOnly: 仅 start/stop
 enum ReasoningMode {
-    GraphDriven,
-    EffortOnly(ReasoningLevel), // role / RunSpec 声明的固定 requested level
-    Inherit,
-} // Main: GraphDriven; Sub: EffortOnly/Inherit
+    Fixed(ReasoningLevel),      // 配置 / RunSpec / 用户命令声明的固定 requested level
+    Inherit,                    // Run 创建时冻结父 Run 的 requested level
+} // 静态冻结：只从配置 / 用户命令冻结，Main / Sub 同形态，执行期间不再变化
 enum TaskMode      { Shared, Isolated }
 
 /// #1248: InteractionBindingMode 驱动 factory 的 InteractionPort 选择。
@@ -337,12 +355,11 @@ enum InteractionBindingMode {
     Unavailable,        // typed unavailable，不悬挂
 }
 
-/// #1248: ReasoningBindingMode 驱动 factory 的 ReasoningPort 选择。
+/// #1248: ReasoningBindingMode 驱动 factory 在 Run 创建时冻结 ReasoningLevel 的来源；静态，不随执行变化。
 enum ReasoningBindingMode {
-    Adaptive,           // graph-driven（Main）
-    Fixed(ReasoningLevel), // 固定 effort（Sub 角色预设）
-    Inherit,            // 从父 context snapshot 继承，独立实例
-    NoOp,               // 所有写操作无副作用
+    Fixed(ReasoningLevel), // 配置 / RunSpec / 用户命令声明的固定 level
+    Inherit,               // 创建时快照父 Run 的 requested level，独立冻结
+    NoOp,                  // 不携带 reasoning 请求，写操作无副作用
 }
 
 /// HookBindingMode 驱动 factory 装配受限 Hook capability adapter。
@@ -371,7 +388,7 @@ struct RuntimeContext {
     reflection: Arc<dyn ReflectionWorkflowPort>, // Memory-owned prompt/parse/apply/history workflow；Provider 调用仍归 Runtime
     task:      Arc<dyn TaskAccess>,     // Sub: 独立实例；NEVER 暴露 TaskPersist
     hooks:     Arc<dyn HookPort>,       // Full / BoundaryOnly capability adapter
-    reasoning: Arc<dyn ReasoningPort>,  // 发布 requested level；Sub: EffortOnly/Inherit
+    reasoning: ReasoningLevel,          // Run 创建时冻结的 requested level（配置 / 用户命令 / 父 Run 快照）
     usage:     Arc<dyn UsageSink>,      // 非阻塞；Audit MVP 只记录 metadata
     config:    ConfigSnapshot,          // Main/Sub 共享
     clock:     Arc<dyn Clock>,          // request builder 冻结 CalendarDate；Prompt 不读全局时钟
@@ -395,12 +412,28 @@ struct RuntimeContext {
 | `policy` | AllowAll | AllowAll | v0.1.0 同一 PolicyPort；Future 模式另行设计 |
 | `memory` | Enabled | Disabled | Main 使用 active session slot 的同一 Arc；Sub 为 `NoOpMemory` 或显式共享父 Arc |
 | `hooks` | Full | BoundaryOnly | per-tool / 仅 start-stop |
-| `reasoning` | GraphDriven | EffortOnly(level)/Inherit | 全 graph / 固定 requested effort / 继承父 requested effort；model clamp 由 Provider resolver 完成 |
+| `reasoning` | Fixed(level) / Inherit | Fixed(level) / Inherit | 创建时静态冻结 requested level（配置 / 用户命令 / 父 Run 快照）；model clamp 由 Provider resolver 完成 |
 | `task` | Shared | Isolated | 独立 `TaskStore` |
 | `tools` | Main Scope + 完整基线 Profile | Sub Scope + 收缩 Profile | Scope 决定装配资源，Profile 只按 capability 收缩 |
 | `finalization.summary` | Deterministic（默认 per-tool 512、总计 `min(4096, context_window×2%)`） | None（默认不生成自身 Context 投影） | 固定模板消费 typed receipts；NEVER 调用 LLM |
 | `finalization.receipt` | Full | Safety（不可降低） | StepFinalizer 收集；父 Agent Tool 消费 Sub terminal receipt |
 | `cancel` | 新建 Run root + per-Step child scope | 从父 tool scope 派生 child Run root + per-Step child scope | 父 Step cancel 对 Agent Tool 传播 `TerminateRun(ParentStepCancelled)`；共享父绝对 deadline |
+
+### 6.1 上下文中的 Workflow（无专用查询端口）
+
+Workflow 归属 Workflow BC；Runtime 不解释 Graph 语义、不计算下一节点、不自行推进 Graph，也从不调用 Workflow 内的 LLM / Tool。Runtime **每轮按 Session 最新状态组织上下文**（Active Workflow 若存在，其状态是 Session 状态的一部分），向 Provider 只传通用 messages、tool schema 与 model options：
+
+```text
+Session 最新状态（含 Active Workflow，若存在）
+  ↓ Runtime 每轮组织上下文（具体读取 / 注入协议待决）
+Runtime（Loop Engine）
+  ↓ 通用 messages + tool schema + model options
+Provider（不感知 Graph）
+```
+
+- 不存在 `WorkflowRuntimeView` / `WorkflowRuntimeViewQuery` 一类专用查询端口：RuntimeContext 不装配 Workflow query port，`ModelInvocation` 不读取任何 Graph 字段；
+- Runtime 如何取得 Active Workflow 状态、何时刷新与上下文预算属于待决策；已冻结的是 Provider 完全不知道 Graph，五个 `workflow_*` Tool 始终对 LLM 暴露，且普通 Tool 在每次 Model Invocation 前按当前 Active Node 的 Node Role capability Profile 收缩；并行 Active Node 的 capability 先取并集，再受 Run 基础 Scope 与父 capability ceiling 约束；
+- 已发出的 Model Invocation 不被中途改写，Workflow 更新或 Node Role 变化只在下一次 Model Invocation / continuation Step 组织上下文时生效；节点语义、迁移条件、Failure Routing 与 Replan 全部归 Workflow Kernel，业务校验经五个 Tool 的 ToolOrchestration 路由进入 Workflow。边界真相见 [Workflow 设计](../workflow/01-workflow-design.md)。
 
 ## 7. SubAgent 派生：控制权矩阵 + 安全铁律
 
@@ -420,7 +453,7 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 | **timeout** | 🟢 main 可控（有 cap）| 任务时长；0=无限 |
 | **memory** | 🟢 main 可控（默认 off）| `share_memory` 参数，main 决定是否给 sub 注入 |
 | **system_suffix** | 🟡 role 预设 | 角色人设 |
-| **reasoning effort** | 🟡 role 预设 + 继承父 | role>model>继承父进程 |
+| **reasoning effort** | 🟡 配置 / 用户命令冻结 | role 预设或继承父 Run；创建时冻结，执行期间不变 |
 | **tools** | 🔴 Scope/Profile 固定受限，**不可扩大** | 安全：Scope 只移除资源，Profile capability 集只收缩 |
 | **workspace** | 🔴 固定独立 | 安全：隔离，防改父目录 |
 | **policy** | 🔴 固定继承，**不可放宽** | 安全铁律 |
@@ -438,7 +471,7 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 | memory | 读写 + reflection | **不读不写**（可由 main 开启注入）|
 | hooks | Full | BoundaryOnly（start/stop）|
 | policy | AllowAll | AllowAll |
-| reasoning | GraphDriven | EffortOnly(level) / Inherit（无 graph，固定或继承 requested level）|
+| reasoning | 配置 / 用户命令冻结的 level | Fixed(level) / Inherit（创建时冻结，执行期间不变）|
 | provider | 共享不可变 transport；独立 Invocation Scope | 共享不可变 transport；独立 Invocation Scope |
 | timeout | 默认 0（无限）| 可配有限值 |
 | 事件出口 | → TUI | → 父 Run（#612）|
@@ -459,16 +492,17 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 
 三种 `InteractionContinuation`（UserQuestions、ToolApproval、HardPause）均由统一 `InteractionCoordinator` 驱动 Run continuation；`reply` / `cancel` 均经 `InteractionPort` 分派。parent-mediated 复用父 context 的同一 Arc<dyn InteractionPort>——identity 与 reply/cancel 语义不变。
 
-### 8.2 Reasoning 隔离
+### 8.2 Reasoning Level 静态冻结
 
-| ReasoningBindingMode | Port 实例 | observe 行为 |
-|---|---|---|
-| `Adaptive` | `AdaptiveReasoningPort`（含 ReasoningGraph）| 推进 graph，可能改变 current |
-| `Fixed(level)` | `GraphlessReasoningPort` | 固定返回 level |
-| `Inherit` | `GraphlessReasoningPort::from_parent` | snapshot 父 current → 独立实例，observe 不推进 graph、不修改父 requested |
-| `NoOp` | `NoOpReasoningPort` | 默认 Off，写操作无副作用 |
+| ReasoningBindingMode | 冻结行为 |
+|---|---|
+| `Fixed(level)` | Run 创建时冻结配置 / RunSpec / 用户命令声明的 requested level |
+| `Inherit` | Run 创建时快照父 Run 的 requested level，得到独立冻结值 |
+| `NoOp` | 不携带 reasoning 请求，默认 Off，写操作无副作用 |
 
-> **#1142 deferred**：Provider requested→effective clamp 链未端到端接线；五节点固定默认 effort（Config `reasoning_graph` 已退役）。是否保留并接线由 v0.2.0 #1142 决策。
+reasoning level 只从配置或用户命令冻结，一经创建不再变化；不存在运行期改写或按 Graph 推进 reasoning 的路径。Workflow Graph 的推进、节点语义与 Failure Routing 完全归 Workflow BC（见 [Workflow 设计](../workflow/01-workflow-design.md)），Runtime 每轮按 Session 最新状态组织上下文（见 §6.1），不解释节点语义、不自行推进 Graph。
+
+> **#1142 deferred**：Provider requested→effective clamp 链未端到端接线（Config `reasoning_graph` 已退役）；是否接线由 v0.2.0 #1142 决策。
 
 ### 8.3 退役边界
 
@@ -483,6 +517,7 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 - 恢复语义：[05-recovery-semantics.md](05-recovery-semantics.md)
 - 端口与装配：[06-ports-and-adapters.md](06-ports-and-adapters.md)
 - Session 聚合：[../context-management/01-session.md](../context-management/01-session.md)
+- Workflow Graph 设计（边界与不变量真相源）：[../workflow/01-workflow-design.md](../workflow/01-workflow-design.md)
 - Project Workspace 端口：[../project/02-ports-and-adapters.md](../project/02-ports-and-adapters.md)
 - 代码组织规范：[../../01-system/06-code-organization.md](../../01-system/06-code-organization.md)
 - 迁移治理：[../../03-engineering/03-migration-governance.md](../../03-engineering/03-migration-governance.md)
@@ -504,3 +539,4 @@ SubAgent 派生 = 父 Run 给出**子 RunSpec** → 注入 dispatch Tool 的 com
 | 2026-07-15 | RunSpec 增加 FinalizationSpec：Main 默认 deterministic summary + Full receipt，Sub 默认无 summary + Safety receipt；父 CancelRunStep 对 Agent Tool Sub 传播共享绝对 deadline 的 TerminateRun | [#700](https://github.com/rushsinging/aemeath/issues/700) |
 | 2026-07-15 | Run 聚合与领域事件对齐 CancelRunStep/TerminateRun：目标终态改为 Completed/Failed/Terminated；旧 Cancelled 仅保留迁移兼容 | [#700](https://github.com/rushsinging/aemeath/issues/700) / [PR #1036](https://github.com/rushsinging/aemeath/pull/1036) |
 | 2026-07-17 | 冻结 Provider usage 标准化口径；要求 finalized RunStep identity 随 ContextAppend 保留到 Context backing，扁平化延后到 Provider 出站投影 | compact token reset design |
+| 2026-10-07 | 同步 workflow/01-workflow-design.md：删除 `WorkflowBindingSnapshot`、`RunBinding` 的 workflow 三字段与 RuntimeContext `workflow_view` 装配；§6.1 改为“Runtime 按 Session 最新状态组织上下文、无专用查询端口”，ModelInvocation 不读 Graph 字段 | workflow/01-workflow-design.md |

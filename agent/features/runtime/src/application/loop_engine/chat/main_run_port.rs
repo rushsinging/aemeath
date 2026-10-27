@@ -7,9 +7,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::application::loop_engine::chat::post_batch::run_post_tool_batch;
 use crate::application::loop_engine::chat::stream_handler::InvocationEventReducer;
-use crate::application::loop_engine::chat::{
-    immediate_query::ImmediateQueryDispatcher, ChatEventSink, RuntimeRunContext, RuntimeStreamEvent,
-};
+use crate::application::loop_engine::chat::{ChatEventSink, RuntimeRunContext, RuntimeStreamEvent};
 use crate::application::loop_engine::event_strategy::{ChatStreamEventObserver, RunEventObserver};
 use crate::application::loop_engine::input_strategy::{
     BufferedInputAdapter, InputContinuationState, SessionInputPort,
@@ -122,9 +120,11 @@ pub(crate) fn make_agent(
 ) -> Agent {
     let catalog = runtime_context
         .tool_catalog_ref()
-        .snapshot(
+        .snapshot_with_backgrounding(
             &tools::RegistryScopeName::new("main"),
             &tools::ToolProfileName::new("main-full"),
+            crate::application::run::config::background_threshold_from_context(runtime_context)
+                .is_some(),
         )
         .unwrap_or_else(|_| tools::ToolCatalogSnapshot::new("main", "main-full", Vec::new()));
     let runtime_provider = config::resolve_provider_runtime_for_selection(
@@ -557,8 +557,6 @@ where
 {
     pub runtime_context: RuntimeContext,
     pub input: BufferedInputAdapter<I>,
-    /// 查询类事件的即时分派器：run 期间收到查询就地执行，NEVER 排队。
-    pub immediate_query: ImmediateQueryDispatcher,
     pub context_size: usize,
     pub turn_context: RuntimeRunContext,
     pub tool_identity: crate::application::tool::coordination::identity::ToolIdentityRegistry,
@@ -572,9 +570,9 @@ where
     I: SessionInputPort,
 {
     async fn queue_busy_event(&mut self, event: sdk::ChatInputEvent) {
-        // 查询语义是 request/response：就地执行并回事件，NEVER 排队等待 run 边界。
-        let event_sink = self.runtime_context.event_sink();
-        if self.immediate_query.try_dispatch(&event, &event_sink).await {
+        // 查询语义是 request/response：经 adapter 统一 ingress 前置过滤，
+        // 命中就地执行并回事件，NEVER 排队等待 run 边界（#2042）。
+        if self.input.dispatch_immediate_query(&event).await {
             return;
         }
         match event {

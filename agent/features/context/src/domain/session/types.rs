@@ -13,6 +13,10 @@ pub struct SessionMetadata {
     pub notes: Option<String>,
     pub is_favorite: bool,
     pub model: Option<String>,
+    /// 会话选定的 reasoning effort 档位（"off".."max"，canonical 取值见
+    /// `share::reasoning::ReasoningLevel::as_str`）。`None` 表示未显式选择，
+    /// 跟随模型 entry 默认档。
+    pub reasoning_effort: Option<String>,
     pub project: Option<String>,
 }
 

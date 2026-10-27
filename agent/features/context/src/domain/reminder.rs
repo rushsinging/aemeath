@@ -511,6 +511,17 @@ pub fn render_invocation_reminder_body(
                 ),
             }
         }
+        crate::domain::InvocationReminderData::ConfigSourcesChanged { changed_keys } => {
+            let key_list = changed_keys.join(", ");
+            match language {
+                "zh" => format!(
+                    "aemeath.json 配置已变更（键：{key_list}；含 agent 名册等）。当前会话的冻结配置快照与系统提示保持不变，全文于下次会话生效；本轮起请以本提醒为准——agent 名册若变化，按最新配置理解可用 agent。"
+                ),
+                _ => format!(
+                    "aemeath.json configuration changed (keys: {key_list}; includes the agent roster). This session's frozen config snapshot and system prompt remain unchanged; the full text takes effect next session. From this run on, treat this reminder as current — if the agent roster changed, understand available agents per the latest config."
+                ),
+            }
+        }
         crate::domain::InvocationReminderData::ModelGuidanceMismatch {
             session_model_id,
             run_model_id,

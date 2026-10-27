@@ -127,7 +127,7 @@ config.json
 1. **只收缩**：`ToolFilter` 只能从注册池与父 ceiling 里做减法，任何扩展在 `derive_restricted` 处报 `CapabilityEscalation`。
 2. **单一裁剪点**：注册表 `builtin!` 的 `[main, sub]` 布尔退役，改为统一注册池 + capability 组装。无 policy 的 sub run 使用 `Read|Write|Execute|NetworkAccess` 默认组；Memory/Brief/ToolSearch 归 `All` 位（main 专属）默认对 sub 隐藏（用户决策：empty-caps 不无脑放行），其余与原 sub 集一致。
 3. **AskUserQuestion（Interact 组）不进内置职能**：sub run 是 NonInteractive + ParentMediated，交互代理链路（问题冒泡→main 转述→答案回灌）不存在；config 显式给自定义职能声明 `Interact` 时工具可见可调用，但挂起后无法在 sub 环境完成恢复（等待至 timeout）——交互代理是 P2 独立特性，落地前不建议任何职能声明 `Interact`。
-4. **绑定时机固定**：role 在 sub run 创建（`Agent` 工具调用）时解析并冻结进 RunSpec，run 存续期内不变更。
+4. **绑定时机固定**：Sub-agent role 在 sub run 创建（`Agent` 工具调用）时解析并冻结进 RunSpec，run 存续期内不变更。Workflow Node Role 是另一领域身份，不复用 `agents.roles` 配置对象；它仅复用本 BC 的 capability vocabulary / ToolProfile 裁剪机制，并在每次 Model Invocation 前按 Session 最新 Active Node 重新计算，具体规则以 [Workflow 设计 §3.5](../workflow/01-workflow-design.md#35-node-role-与普通-tool-policy) 为准。
 
 ## 6. 与现有机制的关系
 

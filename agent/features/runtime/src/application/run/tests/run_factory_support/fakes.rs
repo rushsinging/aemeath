@@ -11,7 +11,7 @@ use crate::ports::{
 use hook::{HookDispatcher, HookInvocationData, HookOutcomeData};
 use tools::published::execution::{ToolExecutionOutcome, ToolExecutionPort, ToolInvocation};
 use tools::published::skill::{SkillCatalogPort, SkillDescriptor, SkillQuery};
-use tools::{ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot, ToolProfileName};
+use tools::{ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot};
 
 pub(crate) struct FakeContextPort;
 
@@ -83,6 +83,7 @@ pub(crate) fn fake_provider_binding() -> Arc<ProviderBindingData> {
             supports_parallel_tool_calls: false,
             supports_streaming: true,
             supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+            server_effort_map: Vec::new(),
             context_limit: Some(128_000),
             output_limit: Some(8_192),
         },
@@ -104,6 +105,7 @@ impl ProviderFactory for FakeProviderFactory {
                 supports_parallel_tool_calls: true,
                 supports_streaming: true,
                 supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+                server_effort_map: Vec::new(),
                 context_limit: spec.context_window,
                 output_limit: Some(spec.max_tokens as usize),
             },
@@ -116,10 +118,11 @@ impl ProviderFactory for FakeProviderFactory {
 pub(crate) struct FakeToolCatalog;
 
 impl ToolCatalogPort for FakeToolCatalog {
-    fn snapshot(
+    fn snapshot_with_backgrounding(
         &self,
         scope: &tools::RegistryScopeName,
-        profile: &ToolProfileName,
+        profile: &tools::ToolProfileName,
+        _backgrounding_enabled: bool,
     ) -> Result<ToolCatalogSnapshot, ToolCatalogError> {
         Ok(ToolCatalogSnapshot::new(
             scope.clone(),

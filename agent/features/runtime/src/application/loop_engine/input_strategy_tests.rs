@@ -56,6 +56,8 @@ fn adapter_without_user_input() -> BufferedInputAdapter<NoOpInput> {
         run_input_buffer: crate::application::run::context::RunInputBufferHandle::new(),
         continuation: InputContinuationState::default(),
         run_id: share::ids::RunId::new_v7(),
+        immediate_query:
+            crate::application::loop_engine::chat::immediate_query::test_support::no_io_dispatcher(),
     }
 }
 
@@ -137,5 +139,144 @@ async fn without_wakeup_continuation_empty_input_seals_immediately() {
     assert!(
         matches!(outcome, DrainOutcome::EmptyAndSealed { .. }),
         "无 wakeup 续延时空批照常收口（普通 Run 语义不变），实际 {outcome:?}"
+    );
+}
+
+/// #2042 复现：turn 边界 drain 窗口收到的 `ListModels` 是 request/response
+/// 查询事件，必须就地分派直接回 `ModelList`，NEVER 进入控制命令队列
+/// （入队会被 TUI 回显为 `/model`，且 idle gate 兜底 drop 丢失刷新）。
+#[tokio::test]
+async fn drain_window_list_models_dispatches_immediately_without_queueing() {
+    let scripted_input = ScriptedInput::new(vec![ChatInputEvent::ListModels]);
+    let recording_sink = RecordingSink::default();
+    let mut adapter = BufferedInputAdapter {
+        input_events: scripted_input,
+        sink: ChatEventSinkHandle::new(recording_sink.clone()),
+        pending_input: PendingInputBuffer::default(),
+        run_input_buffer: crate::application::run::context::RunInputBufferHandle::new(),
+        continuation: InputContinuationState::default(),
+        run_id: share::ids::RunId::new_v7(),
+        immediate_query:
+            crate::application::loop_engine::chat::immediate_query::test_support::no_io_dispatcher(),
+    };
+
+    let outcome = adapter
+        .drain_input(DrainEpoch(0))
+        .await
+        .expect("drain 窗口含查询事件时 drain 不报错");
+
+    // Run 语义本身不受查询事件影响：空批照常收口。
+    assert!(
+        matches!(outcome, DrainOutcome::EmptyAndSealed { .. }),
+        "查询事件就地消费后空批照常收口，实际 {outcome:?}"
+    );
+
+    let events = recording_sink.events.lock().unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, RuntimeStreamEvent::ModelList { .. })),
+        "ListModels 应就地分派直接回 ModelList，实际事件: {events:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, RuntimeStreamEvent::ControlCommandsQueued { .. })),
+        "查询事件 NEVER 发布命令队列快照（否则 TUI 回显 /model），实际事件: {events:?}"
+    );
+    drop(events);
+    assert!(
+        adapter.pending_input.command_snapshot().is_empty(),
+        "查询事件 NEVER 进入 pending_input，实际队列: {:?}",
+        adapter.pending_input.command_snapshot()
+    );
+}
+
+/// 按脚本吐出事件的输入源：drain 一次性返回脚本，recv 按序逐条返回。
+#[derive(Clone, Default)]
+struct ScriptedInput {
+    drain_events: Arc<Mutex<Vec<ChatInputEvent>>>,
+    recv_events: Arc<Mutex<std::collections::VecDeque<ChatInputEvent>>>,
+}
+
+impl ScriptedInput {
+    fn new(events: Vec<ChatInputEvent>) -> Self {
+        Self {
+            drain_events: Arc::new(Mutex::new(events)),
+            recv_events: Arc::new(Mutex::new(std::collections::VecDeque::new())),
+        }
+    }
+
+    fn with_recv_events(events: Vec<ChatInputEvent>) -> Self {
+        Self {
+            drain_events: Arc::new(Mutex::new(Vec::new())),
+            recv_events: Arc::new(Mutex::new(events.into())),
+        }
+    }
+}
+
+impl InputEventDrainPort for ScriptedInput {
+    fn drain_input_events<'a>(&'a self) -> InputEventFuture<'a> {
+        Box::pin(async move { self.drain_events.lock().unwrap().drain(..).collect() })
+    }
+
+    fn recv_next_input<'a>(&'a self) -> InputEventOptFuture<'a> {
+        Box::pin(async move { self.recv_events.lock().unwrap().pop_front() })
+    }
+}
+
+impl SessionInputPort for ScriptedInput {
+    fn defer(&self, event: ChatInputEvent) {
+        // 查询事件消费路径 NEVER defer；记录以便断言未被误转移。
+        self.drain_events.lock().unwrap().push(event);
+    }
+}
+
+/// #2042 ingress 一致性契约：AwaitUser park 路径收到 `ListModels` 同样
+/// 必须就地分派回 `ModelList` 并继续等待用户输入，NEVER 入队、不收口 Run。
+#[tokio::test]
+async fn await_user_input_list_models_dispatches_without_queueing_or_sealing() {
+    let scripted_input = ScriptedInput::with_recv_events(vec![ChatInputEvent::ListModels]);
+    let recording_sink = RecordingSink::default();
+    let mut adapter = BufferedInputAdapter {
+        input_events: scripted_input,
+        sink: ChatEventSinkHandle::new(recording_sink.clone()),
+        pending_input: PendingInputBuffer::default(),
+        run_input_buffer: crate::application::run::context::RunInputBufferHandle::new(),
+        continuation: InputContinuationState::default(),
+        run_id: share::ids::RunId::new_v7(),
+        immediate_query:
+            crate::application::loop_engine::chat::immediate_query::test_support::no_io_dispatcher(),
+    };
+
+    let outcome = adapter
+        .await_user_input(DrainEpoch(0))
+        .await
+        .expect("AwaitUser 查询事件路径不报错");
+
+    // 查询事件消费后 recv 队列为空 → 源关闭收口（而非因查询事件本身收口）。
+    assert!(
+        matches!(outcome, DrainOutcome::EmptyAndSealed { .. }),
+        "recv 源关闭才收口，实际 {outcome:?}"
+    );
+
+    let events = recording_sink.events.lock().unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, RuntimeStreamEvent::ModelList { .. })),
+        "AwaitUser 收到 ListModels 应就地分派回 ModelList，实际事件: {events:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, RuntimeStreamEvent::ControlCommandsQueued { .. })),
+        "查询事件 NEVER 发布命令队列快照，实际事件: {events:?}"
+    );
+    drop(events);
+    assert!(
+        adapter.pending_input.command_snapshot().is_empty(),
+        "查询事件 NEVER 进入 pending_input，实际队列: {:?}",
+        adapter.pending_input.command_snapshot()
     );
 }

@@ -634,3 +634,21 @@ fn background_process_identity() -> context::ToolCallIdentityData {
         agent: false,
     }
 }
+
+// ---- #2046 config_sources_changed（agents 名册 Remind）----
+
+#[test]
+fn config_sources_changed_renders_key_list_and_session_semantics() {
+    let source = super::RunStartFactReminderSource::config_sources_changed(vec![
+        "config:reloaded".to_string()
+    ]);
+    assert_eq!(source.kind().as_str(), "config_sources_changed");
+    let snapshot = source.build().expect("快照必须可构建");
+    let zh = source.render(&snapshot, "zh");
+    assert!(zh.contains("aemeath.json 配置已变更"), "zh 文案：{zh}");
+    assert!(zh.contains("config:reloaded"), "变更键 MUST 出现：{zh}");
+    assert!(zh.contains("下次会话生效"), "会话冻结语义：{zh}");
+    assert!(zh.contains("agent 名册"), "名册提示：{zh}");
+    let en = source.render(&snapshot, "en");
+    assert!(en.contains("configuration changed"));
+}

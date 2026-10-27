@@ -17,7 +17,7 @@
 | [project/](project/README.md) | Workspace 聚合根、Frame 栈、fork 隔离、三端口、GitWorktreeOps、git 上下文供给 |
 | [memory/](memory/README.md) | MemoryEntry 聚合、检索与注入、Reflection 引擎、MemoryPort |
 | [provider/](provider/README.md) | Provider ACL、统一调用流、模型能力、reasoning 映射与不可变 Invocation Scope |
-| [workflow/](workflow/README.md) | ReasoningNode 状态机、effort 调节、ReasoningPort OHS 与 clamp 不变量 |
+| [workflow/](workflow/README.md) | Session 级 Graph Definition / Node / Edge / State、Graph Kernel 结构校验、六个 workflow tool、五状态生命周期与 ActiveMode、Replanning continuation、Session active 指针 |
 | [config/](config/README.md) | Config 分层优先级链、ConfigSnapshot PL、Config-owned OHS / project participant、Provider Catalog、Connect 向导、首次聊天初始化与 CompatibilityAdapter ACL |
 | [tui/](tui/README.md) | 八层 TEA 管线、六 Context 投影、Intent / Change / Effect、SDK ACL、ViewAssembler / ViewModel / Render 与三类 Interaction 资源隔离 |
 | [storage/](storage/README.md) | 原子读写、backup / quarantine、路径安全及数据所有权边界 |
@@ -42,7 +42,7 @@
 | Storage | `domain + ports + adapters` 三层 | `safe_path`、`atomic_blob`、`atomic_dataset` 的 Published Language 与策略在 domain，OHS 在 ports，文件系统 detail 在 adapters；稳定层名和单向依赖可机械阻止路径/I/O 下沉、adapter 泄漏与 façade 漂移 |
 | Task Management | `domain + adapters` 两层 | transition、dependency、batch、snapshot 共同守护同一 `TaskStoreState` 聚合 |
 | Project / Workspace | `domain + adapters` 两层 | Workspace 是唯一聚合与状态源；Git 仅是可替换外部 detail |
-| Workflow | `domain + adapters` 两层 | v0.1.0 仅有 Reasoning Graph / effort 调节，无第二个独立变化轴 |
+| Workflow | `domain + application + ports` 三层 | Graph Definition / Node / Edge / State 与 Kernel 校验在 domain，五个 workflow tool 用例编排在 application，Workflow Tool façade 在 ports；Facts / Evidence 是否需要独立入站契约仍待决；无易变外部 detail，不预建 adapters |
 | Policy | `domain + adapters` 两层 | v0.1.0 只有 Policy evaluate 与 AllowAll 实现，无内部子能力或出站 seam |
 | Provider | `domain + ports + adapters` 三层 | invoke/capability/error 策略在 domain；Anthropic/OpenAI-compatible/Ollama 技术实现在 adapters |
 | Config | `domain + application + ports + adapters` 四层 | effective-config 核心维持扁平；Connect 引入独立用例编排与 Provider Probe 出站 seam，Catalog/状态机/UA 策略仍归 domain，外部 I/O 归 adapters |
@@ -79,7 +79,7 @@
 | 2026-07-12 | 新增 tools/ 战术设计：Tool 双端口、Scope/Profile、Skill/Command 与 MCP 生命周期 | #787 |
 | 2026-07-12 | 新增 provider/ 战术设计：ProviderPort、ACL、流语义、模型能力与 Invocation Scope | #788 |
 | 2026-07-12 | 新增 context-management/ 02-05：Compact 家族、Token Budget、Prompt/Guidance、Memory 注入 | #786 |
-| 2026-07-12 | 新增 workflow/ 与 config/ 战术设计：ReasoningNode、ReasoningPort、Config 分层、ConfigSnapshot PL | #792 |
+| 2026-07-12 | 新增 workflow/ 与 config/ 战术设计：Workflow Graph Definition / Kernel / RuntimeView（RuntimeView 口径已于 2026-10-07 退役）、Config 分层、ConfigSnapshot PL；旧 ReasoningNode / ReasoningPort 仅保留在 workflow 退役历史说明 | #792 |
 | 2026-07-12 | 新增 Storage、Logging、Application Version Control 三个通用域摘要设计 | #793 |
 | 2026-07-12 | 新增 memory/ 战术设计：MemoryEntry 聚合、检索与注入、Reflection 引擎、MemoryPort | #789 |
 | 2026-07-12 | 新增 task/ 战术设计：Task 聚合、状态机、依赖图不变量、Batch、TaskPort、PL | #791 |
@@ -94,3 +94,4 @@
 | 2026-08-01 | 补充统一 Activity 观测目标：ActivityCoordinator / ActivityObservation / ActivitySnapshot / ActivityChange / ActivitySummary 的职责、跨层边界与 gap 修复语义；明确 Activity 不构成独立 BC 或第二 Run 状态机 | 统一 Activity 观测 |
 | 2026-08-01 | 补充统一 Activity 观测目标：ActivityCoordinator / ActivityObservation / ActivitySnapshot / ActivityChange / ActivitySummary 的职责、跨层边界与 gap 修复语义；明确 Activity 不构成独立 BC 或第二 Run 状态机 | 统一 Activity 观测 |
 | 2026-10-03 | 新增 systemone/ 战术设计：System One 三题型评分端口、kev 单引擎 jev_http adapter、校准子系统与 Rust 化三步演进 | [#1831](https://github.com/rushsinging/aemeath/issues/1831) |
+| 2026-10-25 | Workflow 行同步 workflow/01-workflow-design.md 冻结口径：六个 workflow tool、五状态生命周期、Replanning continuation 与 MVP 验收链；移除 WorkflowRuntimeView / tool policy / ReasoningPort 旧描述 | workflow/01-workflow-design.md |

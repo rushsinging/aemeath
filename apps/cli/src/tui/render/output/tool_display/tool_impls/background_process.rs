@@ -40,6 +40,27 @@ fn watch_header(goal: &str, task_id: &str) -> String {
     }
 }
 
+/// #2113：带 `task_id` 的 progress 工具（Status/Logs/Stop）共享 header 映射：
+/// runtime 注入的 goal 存在 → `{name} · {goal}`（NEVER 含 id）；
+/// 否则回退现状 `{name} {task_id}`（纯展示，零业务）。
+fn progress_goal_header(display_name: &str, input: &serde_json::Value, task_id: &str) -> String {
+    let goal = input
+        .get("goal")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("");
+    if !goal.is_empty() {
+        return format!("{display_name} · {goal}");
+    }
+    let id = task_id.trim();
+    if id.is_empty() {
+        display_name.to_string()
+    } else {
+        format!("{display_name} {id}")
+    }
+}
+
 fn watch_goal_from_input(input: &serde_json::Value) -> String {
     input
         .get("goal")
@@ -128,10 +149,7 @@ impl ToolDisplay for BackgroundProcessStatusDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let args = parse_input::<BackgroundProcessStatusInput>(input);
-        if args.task_id.is_empty() {
-            return self.display_name().to_string();
-        }
-        format!("{} {}", self.display_name(), args.task_id)
+        progress_goal_header(self.display_name(), input, &args.task_id)
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -173,10 +191,7 @@ impl ToolDisplay for BackgroundProcessLogsDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let args = parse_input::<BackgroundProcessLogsInput>(input);
-        if args.task_id.is_empty() {
-            return self.display_name().to_string();
-        }
-        format!("{} {}", self.display_name(), args.task_id)
+        progress_goal_header(self.display_name(), input, &args.task_id)
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]
@@ -210,10 +225,7 @@ impl ToolDisplay for BackgroundProcessStopDisplay {
     }
     fn format_header(&self, input: &serde_json::Value, _workspace_root: Option<&Path>) -> String {
         let args = parse_input::<BackgroundProcessStopInput>(input);
-        if args.task_id.is_empty() {
-            return self.display_name().to_string();
-        }
-        format!("{} {}", self.display_name(), args.task_id)
+        progress_goal_header(self.display_name(), input, &args.task_id)
     }
     fn format_details(&self, _input: &serde_json::Value) -> Vec<String> {
         vec![]

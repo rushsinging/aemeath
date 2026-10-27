@@ -379,7 +379,7 @@ enum CommandMechanism {
 
 ### ApplicationControl
 
-调用目标 BC 的应用 Command Port 执行状态变更，例如 compact、cancel、resume、model/thinking 配置修改、memory mutation 或 session deletion。`/thinking` 写入 Config；Workflow 只经 ReasoningPort 消费配置并调节 effort，不作为 Command target。
+调用目标 BC 的应用 Command Port 执行状态变更，例如 compact、cancel、resume、model/thinking 配置修改、memory mutation 或 session deletion。`/thinking` 写入 Config；Workflow Graph 不拥有 reasoning level，也不作为该 Command 的直接 target。`/clear` 属于 session reset 的 ApplicationControl：它按 Session 语义同步、不可恢复地清空对话与该 Session 全部 Workflow 及 active 指针（见 workflow/01-workflow-design.md §2.2），**不新增 `workflow_clear` Tool**；任何 slash / 用户输入都 **NEVER** 直接对 Workflow 执行 create / query / update / activate / deactivate / complete / cancel——这些语义操作只能由 LLM 经五个 `workflow_*` Tool 完成，用户的表达只是 LLM 的语义输入。
 
 三类 route 不共享执行 trait 或结果数据模型。Router 只解析为 `SkillRequestCommand`、`SnapshotQueryCommand` 或 `ApplicationControlCommand`；SkillRequest 进入正常 Run 并由模型决定 Tool 调用，后两类由确定性 handler 调用目标端口。CLI、TUI、Server 使用各自 ACL 展示类型化结果。
 

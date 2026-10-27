@@ -6,6 +6,7 @@ members = [
     "agent/features/audit",
     "agent/features/config",
     "agent/features/hook",
+    "agent/features/harness",
     "agent/features/memory",
     "agent/features/policy",
     "agent/features/context",
@@ -17,6 +18,7 @@ members = [
     "agent/features/task",
     "agent/features/tools",
     "agent/features/update",
+    "agent/features/workflow",
     "agent/shared",
     "packages/sdk",
     "packages/global/logging",
@@ -35,6 +37,9 @@ tokio-util = { version = "0.7", features = ["io", "codec", "rt"] }
 futures-util = "0.3"
 chrono = "0.4"
 reqwest = { version = "0.12", features = ["stream", "json"] }
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
 semver = "1"
 sha2 = "0.10"
 flate2 = "1.0"

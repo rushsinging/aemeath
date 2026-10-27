@@ -19,11 +19,8 @@ pub struct ExitWorktreeResult {
 /// Typed input for the `exit_worktree` tool.
 ///
 /// build.rs 由本 struct 生成 `input_schema`。拒绝未知字段（含已移除的 `path`），
-/// 防止误用直接切换旁路；`timeout` 由框架统一注入，须在此显式声明以免 deny 失败。
+/// 防止误用直接切换旁路。`timeout` 是框架级通用参数，由 catalog 注入发布、
+/// 执行前框架摘除，**MUST NOT** 在此声明（工具无自有字段）。
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct ExitWorktreeInput {
-    /// Timeout in seconds (default 120, max 3600)
-    #[serde(default)]
-    pub timeout: Option<u64>,
-}
+pub struct ExitWorktreeInput {}

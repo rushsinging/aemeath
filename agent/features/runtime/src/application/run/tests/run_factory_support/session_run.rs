@@ -23,7 +23,8 @@ pub(crate) struct SessionRunFixture {
     memory: Arc<dyn memory::api::MemoryPort>,
     provider: Arc<ProviderBindingData>,
     interaction: Arc<dyn InteractionPort>,
-    reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
+    reasoning:
+        Arc<std::sync::Mutex<crate::application::run::session_reasoning::SessionReasoningControl>>,
     event_sink: RecordingEventSink,
     tool_catalog: Arc<dyn tools::ToolCatalogPort>,
     tool_execution: Arc<dyn tools::published::execution::ToolExecutionPort>,
@@ -71,7 +72,10 @@ impl SessionRunFixture {
         &self.interaction
     }
 
-    pub(crate) fn reasoning(&self) -> &Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>> {
+    pub(crate) fn reasoning(
+        &self,
+    ) -> &Arc<std::sync::Mutex<crate::application::run::session_reasoning::SessionReasoningControl>>
+    {
         &self.reasoning
     }
 
@@ -118,7 +122,8 @@ pub(crate) struct SessionRunFixtureBuilder {
     context_port: ContextPorts,
     provider: Arc<ProviderBindingData>,
     interaction: Arc<dyn InteractionPort>,
-    reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
+    reasoning:
+        Arc<std::sync::Mutex<crate::application::run::session_reasoning::SessionReasoningControl>>,
     event_sink: RecordingEventSink,
     event_sink_handle: Option<crate::application::loop_engine::chat::ChatEventSinkHandle>,
     hooks: Arc<dyn hook::HookDispatcher>,
@@ -144,7 +149,9 @@ impl SessionRunFixtureBuilder {
             provider: fake_provider_binding(),
             interaction: Arc::new(InteractionBridge::new()),
             reasoning: Arc::new(std::sync::Mutex::new(
-                share::reasoning::ReasoningLevel::Medium,
+                crate::application::run::session_reasoning::SessionReasoningControl::from_model_default(
+                    share::reasoning::ReasoningLevel::Medium,
+                ),
             )),
             event_sink: RecordingEventSink::default(),
             event_sink_handle: None,
@@ -187,7 +194,9 @@ impl SessionRunFixtureBuilder {
 
     pub(crate) fn with_reasoning(
         mut self,
-        reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
+        reasoning: Arc<
+            std::sync::Mutex<crate::application::run::session_reasoning::SessionReasoningControl>,
+        >,
     ) -> Self {
         self.reasoning = reasoning;
         self

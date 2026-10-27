@@ -393,7 +393,7 @@ where
         pre_dispatch.executions.len(),
     );
     let mut display_call = effective_call.clone();
-    enrich_watch_goal_from_ledger(agent, &mut display_call);
+    enrich_progress_goal_from_ledger(agent, &mut display_call);
     send_tool_call_status(sink, context, &display_call, RuntimeToolCallStatus::Ready).await;
     send_tool_call_status(sink, context, &display_call, RuntimeToolCallStatus::Running).await;
     log::debug!(target: crate::LOG_TARGET,
@@ -516,14 +516,21 @@ where
     out
 }
 
-/// #1964：Watch 展示前由 runtime 查账本注入 `goal` 到 arguments（TUI 零业务）。
-fn enrich_watch_goal_from_ledger(agent: &Agent, call: &mut ToolCall) {
-    if call.name != "BackgroundProcessWatch" {
-        return;
-    }
-    let Some(runtime) = agent.background_processes.as_ref() else {
-        return;
-    };
+/// #2113：带 `task_id` 的 progress 工具族（Watch/Status/Logs/Stop）统一
+/// 由 runtime 查账本注入 `goal` 到 arguments（TUI 零业务）。
+fn is_goal_enrichable_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "BackgroundProcessWatch"
+            | "BackgroundProcessStatus"
+            | "BackgroundProcessLogs"
+            | "BackgroundProcessStop"
+    )
+}
+
+/// 从账本读取 goal 并注入到 tool call arguments；未知 id / 空 goal /
+/// 无 `task_id` 时不注入。
+fn inject_goal_from_ledger(call: &mut ToolCall, access: &dyn tools::BackgroundProcessAccess) {
     let Some(task_id) = call
         .input
         .get("task_id")
@@ -533,8 +540,7 @@ fn enrich_watch_goal_from_ledger(agent: &Agent, call: &mut ToolCall) {
     else {
         return;
     };
-    let Some(detail) = tools::BackgroundProcessAccess::task_status(runtime.as_ref(), task_id)
-    else {
+    let Some(detail) = access.task_status(task_id) else {
         return;
     };
     let goal = detail.summary.goal.trim();
@@ -547,6 +553,17 @@ fn enrich_watch_goal_from_ledger(agent: &Agent, call: &mut ToolCall) {
             serde_json::Value::String(goal.to_string()),
         );
     }
+}
+
+/// #1964/#2113：展示前由 runtime 查账本注入 `goal` 到 arguments（TUI 零业务）。
+fn enrich_progress_goal_from_ledger(agent: &Agent, call: &mut ToolCall) {
+    if !is_goal_enrichable_tool(&call.name) {
+        return;
+    }
+    let Some(runtime) = agent.background_processes.as_ref() else {
+        return;
+    };
+    inject_goal_from_ledger(call, runtime.as_ref());
 }
 
 /// 是否为该工具装配 `ToolProgressEvent` → `ToolOutputDelta` 转发通道。

@@ -44,7 +44,7 @@ Provider 的价值不是统一所有供应商特性，而是把差异收敛到�
 |---|---|
 | 供应商协议 ACL | Run / Run Step 状态机 |
 | 单次调用的请求发送与流解析 | Context Window 构建与 compact 决策 |
-| 模型能力声明与查询 | Workflow reasoning 阶段调节 |
+| 模型能力声明与查询 | 感知 Workflow / Graph 的 reasoning 调节（ReasoningLevel 与 Workflow 解耦，Provider 不感知 Graph） |
 | reasoning 能力 clamp 与 wire 映射 | 跨调用重试、退避、降级、故障转移 |
 | stop reason、usage、错误分类 | Tool 执行、Policy、Hook、审批 |
 | 取消传播到 HTTP 与流读取 | Pricing、Cost 聚合与审计策略 |
@@ -89,7 +89,7 @@ Context Management 构建 Context Window；Provider 只接收已经装配完成�
 
 ### Workflow / Config
 
-Workflow 根据 Reasoning Node 发布固定默认 desired effort（Config `reasoning_graph` 含 `max_reasoning` 已退役，#921）。Runtime 在构建 Context Window 前调用 Provider resolver；Provider 根据目标模型能力做最后一道 clamp，并返回带 capability fingerprint 的不可变 options。Runtime 把同一个 effective 档位交给 Prompt 与 `InvocationRequest`，Provider `invoke` 只校验后映射到 wire 字段。Provider 不读取散点 env，也不拥有用户默认值。Provider Catalog、Provider 专属/官方 SDK/全局 UA 四级解析与 Connect 状态属于 Config；Provider 仅实现 Config-owned 最小 Probe port，并让 Probe 与正式调用复用 request ACL。完整边界见 [Config Connect 设计](../config/02-provider-catalog-and-connect.md)。
+ReasoningLevel 从配置或用户命令静态冻结，与 Workflow Graph 解耦。Runtime 在构建 Context Window 前调用 Provider resolver；Provider 根据目标模型能力做最后一道 clamp，并返回带 capability fingerprint 的不可变 options。Runtime 把同一个 effective 档位交给 Prompt 与 `InvocationRequest`，Provider `invoke` 只校验后映射到 wire 字段。Provider 不读取散点 env，也不拥有用户默认值。Provider Catalog、Provider 专属/官方 SDK/全局 UA 四级解析与 Connect 状态属于 Config；Provider 仅实现 Config-owned 最小 Probe port，并让 Probe 与正式调用复用 request ACL。完整边界见 [Config Connect 设计](../config/02-provider-catalog-and-connect.md)。
 
 > **v0.1.0 scope（#921 收缩）**：resolver 领域模型已完成迁移但 Runtime 尚未在生产链路调用 resolver；端到端 clamp 链是 Target 设计，v0.1.0 未接生产链路。是否接线由 v0.2.0 #1142 决策；#1142 仍延期，**NEVER** 冒充完成。
 

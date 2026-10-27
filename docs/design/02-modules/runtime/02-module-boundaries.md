@@ -99,7 +99,7 @@ agent/features/runtime/src/
 ### model_invocation
 - **职责**：调 `ProviderPort` 发起 LLM 调用、组装流式响应、提取 tool_calls、记录 Provider ACL 标准化后的 `RawUsageSnapshot`（provider-neutral、单 attempt 累计快照）；**退避重试**：仅在本 attempt 无可见 delta 已提交（或可原子回滚）时，对 Retryable(超时/5xx/429/流中断)指数退避重试（首次调用 + 最多 10 次重试，共最多 11 attempts；单次退避封顶 60 秒），Fatal(4xx) 直接失败，context 超限→compact（详见 `03-loop` §5）
 - **状态**：无（产出 `ModelInvocation` VO 交回 Run Step）；重试期 emit `ModelInvocationRetrying{attempt}`
-- 消费：`ProviderPort`（返回 Retryable/Fatal 分类错误）、`UsageSink`；v0.1.0 保留现有 Main `ReasoningPort` 接线，但不在本模块接 Provider resolver → Context/Invocation effective reasoning 冻结链，该生产接线由 v0.2.0 #1142 决策
+- 消费：`ProviderPort`（返回 Retryable/Fatal 分类错误）、`UsageSink`；reasoning level 为 Run 创建时静态冻结的 `ReasoningLevel`（仅来自配置 / 用户命令），与 Workflow 解耦；`ModelInvocation` 不读取任何 Graph 字段，Provider 不感知 Graph，Runtime 每轮按 Session 最新状态组织上下文（具体读取 / 注入协议待决，见 workflow/01-workflow-design.md）；Provider resolver → Context/Invocation effective reasoning 冻结链尚未接生产链路，该接线由 v0.2.0 #1142 决策
 
 ### tool_coordination
 - **职责**：ToolCall 双 ID 映射（领域 `ToolCallId` ↔ provider_id）、Policy/Hook/审批、timeout/cancellation、多调用并发、结果回收与 Run Step 写入
@@ -204,3 +204,4 @@ Runtime owns live execution mechanics—including semaphore, cancellation implem
 | 2026-07-12 | Hook 边界补单端口与 3/15 两层重试；Usage 从 sdk_event_mapper 分离到 model_invocation→UsageSink | #790 |
 | 2026-07-18 | #875 冻结重试口径为首次调用 + 最多 10 次重试（最多 11 attempts），单次退避封顶 60 秒；v0.1.0 不接 Provider resolver effective reasoning 链 | [#875](https://github.com/rushsinging/aemeath/issues/875) |
 | 2026-07-17 | Provider usage 出口改为 ACL 标准化 UsageSnapshot，Runtime 不再解释 provider 原始 token 字段 | compact token reset design |
+| 2026-10-07 | model_invocation 消费同步 workflow/01-workflow-design.md：移除 `WorkflowRuntimeViewQuery` 每次 Invocation 查询与 tool_policies 收缩描述，改为 ModelInvocation 不读 Graph 字段、Runtime 按 Session 最新状态组织上下文 | workflow/01-workflow-design.md |

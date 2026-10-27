@@ -476,11 +476,16 @@ impl App {
         });
     }
 
-    /// 将文本复制到系统剪贴板，并据结果在 status bar 给出临时反馈。
+    /// 将文本复制到系统剪贴板（无图形会话时降级终端 OSC 52），并据结果在 status bar 给出临时反馈。
     fn copy_to_clipboard_effect(&mut self, text: &str) {
         match crate::tui::render::input::clipboard::copy_text(text) {
-            Ok(()) => {
+            Ok(crate::tui::render::input::clipboard::CopyOutcome::SystemClipboard) => {
                 self.set_transient_notice(StatusNotice::success("已复制选中内容"));
+            }
+            Ok(crate::tui::render::input::clipboard::CopyOutcome::TerminalOsc52) => {
+                self.set_transient_notice(StatusNotice::success(
+                    "已通过终端复制（OSC 52，需终端支持）",
+                ));
             }
             Err(err) => {
                 crate::tui::log_warn!("复制选中内容失败: {err}");

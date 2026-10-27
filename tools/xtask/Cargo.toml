@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 anyhow = "1"
+project = { path = "../../agent/features/project" }
 serde.workspace = true
 serde_json.workspace = true
 sdk = { path = "../../packages/sdk" }

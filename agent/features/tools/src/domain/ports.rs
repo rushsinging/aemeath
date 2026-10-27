@@ -37,6 +37,17 @@ pub trait ToolCatalogPort: Send + Sync {
         &self,
         scope: &RegistryScopeName,
         profile: &ToolProfileName,
+    ) -> Result<ToolCatalogSnapshot, ToolCatalogError> {
+        self.snapshot_with_backgrounding(scope, profile, false)
+    }
+
+    /// 按会话后台化开关生成快照：`backgrounding_enabled` 决定无显式入参
+    /// 调用的 `timeout` 预算（24h 档）与 schema 描述文案。
+    fn snapshot_with_backgrounding(
+        &self,
+        scope: &RegistryScopeName,
+        profile: &ToolProfileName,
+        backgrounding_enabled: bool,
     ) -> Result<ToolCatalogSnapshot, ToolCatalogError>;
 
     /// Projects a run-scoped catalog using the frozen Config tool selection.
@@ -48,7 +59,18 @@ pub trait ToolCatalogPort: Send + Sync {
         profile: &ToolProfileName,
         selection: &share::config::ToolSelection,
     ) -> Result<ToolCatalogSnapshot, ToolCatalogError> {
-        self.snapshot(scope, profile)
+        self.snapshot_for_run_with_backgrounding(scope, profile, selection, false)
+    }
+
+    /// [`snapshot_for_run`](Self::snapshot_for_run) 的档位感知版本。
+    fn snapshot_for_run_with_backgrounding(
+        &self,
+        scope: &RegistryScopeName,
+        profile: &ToolProfileName,
+        selection: &share::config::ToolSelection,
+        backgrounding_enabled: bool,
+    ) -> Result<ToolCatalogSnapshot, ToolCatalogError> {
+        self.snapshot_with_backgrounding(scope, profile, backgrounding_enabled)
             .map(|snapshot| snapshot.selected(selection))
     }
 }

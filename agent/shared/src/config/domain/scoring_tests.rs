@@ -34,17 +34,20 @@ fn scoring_config_ignores_retired_http_keys() {
     assert_eq!(
         keys,
         [
+            "backend",
+            "bailian",
             "connect_timeout_secs",
             "enabled",
             "event_retention_days",
+            "http_endpoint",
+            "http_listen",
             "infer_timeout_secs",
             "memory_recall",
             "memory_rerank",
             "policy_triage",
             "skill_match",
-            "socket_path",
         ],
-        "序列化面允许场景开关、事件保留、daemon socket/超时；HTTP 端点字段不得回归"
+        "序列化面允许场景开关、事件保留、daemon socket/超时与 backend 驱动配置；退役 HTTP 顶层字段不得回归"
     );
 }
 
@@ -99,7 +102,7 @@ fn event_retention_days_zero_is_legal_gc_off_not_write_off() {
 }
 
 #[test]
-fn scoring_config_defaults_daemon_timeouts_and_empty_socket_path() {
+fn scoring_config_defaults_daemon_timeouts_and_http_listen() {
     let config = ScoringConfig::default();
     assert_eq!(
         config.connect_timeout_secs,
@@ -109,20 +112,200 @@ fn scoring_config_defaults_daemon_timeouts_and_empty_socket_path() {
         config.infer_timeout_secs,
         DEFAULT_SCORING_INFER_TIMEOUT_SECS
     );
-    assert!(config.socket_path.is_none());
+    assert_eq!(config.http_listen, DEFAULT_SCORING_HTTP_LISTEN);
+    assert!(config.http_endpoint.is_none());
 }
 
 #[test]
-fn scoring_config_accepts_socket_path_and_timeout_aliases() {
+fn scoring_config_accepts_http_listen_and_timeout_aliases() {
     let config: ScoringConfig = serde_json::from_str(
         r#"{
-            "socketPath": "/tmp/custom.sock",
+            "httpListen": "127.0.0.1:9100",
             "connectTimeoutSecs": 5,
             "inferTimeoutSecs": 60
         }"#,
     )
     .expect("deserialize");
-    assert_eq!(config.socket_path.as_deref(), Some("/tmp/custom.sock"));
+    assert_eq!(config.http_listen, "127.0.0.1:9100");
     assert_eq!(config.connect_timeout_secs, 5);
     assert_eq!(config.infer_timeout_secs, 60);
+}
+
+#[test]
+fn scoring_http_endpoint_defaults_from_listen() {
+    let config = ScoringConfig::default();
+    assert_eq!(
+        config.resolve_http_endpoint(),
+        format!("http://{DEFAULT_SCORING_HTTP_LISTEN}/systemone"),
+        "client 端点缺省由 http_listen 推导（同机零配置）"
+    );
+}
+
+#[test]
+fn scoring_http_endpoint_explicit_value_wins() {
+    let config: ScoringConfig =
+        serde_json::from_str(r#"{"httpEndpoint": "https://scoring.example.com/systemone"}"#)
+            .expect("显式 endpoint 解析");
+    assert_eq!(
+        config.resolve_http_endpoint(),
+        "https://scoring.example.com/systemone"
+    );
+}
+
+#[test]
+fn scoring_socket_path_retired_key_ignored() {
+    // UDS 退役（#2096 拍板）：旧 socket_path 残留键被忽略而非报错，
+    // 序列化面不再出现该字段。
+    let config: ScoringConfig = serde_json::from_str(
+        r#"{"socketPath": "/tmp/legacy.sock", "socket_path": "/tmp/legacy2.sock"}"#,
+    )
+    .expect("退役键残留应被忽略");
+    let value = serde_json::to_value(&config).expect("序列化");
+    assert!(
+        value.get("socket_path").is_none(),
+        "序列化面不得再出现 socket_path"
+    );
+}
+
+// ── backend 驱动选择（#2095：bailian 云端 backend）──
+
+#[test]
+fn scoring_backend_defaults_to_local() {
+    assert_eq!(ScoringConfig::default().backend, ScoringBackend::Local);
+    let from_empty: ScoringConfig = serde_json::from_str(r#"{}"#).expect("空对象应解析");
+    assert_eq!(from_empty.backend, ScoringBackend::Local);
+}
+
+#[test]
+fn scoring_backend_parses_bailian_and_rejects_unknown_values() {
+    let config: ScoringConfig =
+        serde_json::from_str(r#"{"backend":"bailian"}"#).expect("bailian 应可解析");
+    assert_eq!(config.backend, ScoringBackend::Bailian);
+
+    let config: ScoringConfig =
+        serde_json::from_str(r#"{"backend":"local"}"#).expect("local 应可解析");
+    assert_eq!(config.backend, ScoringBackend::Local);
+
+    let result: Result<ScoringConfig, _> = serde_json::from_str(r#"{"backend":"ark"}"#);
+    assert!(result.is_err(), "未知 backend 值必须拒绝而非静默回退");
+}
+
+#[test]
+fn bailian_config_defaults_model_only() {
+    let config = BailianScoringConfig::default();
+    assert_eq!(config.model, DEFAULT_BAILIAN_SCORING_MODEL);
+    assert!(config.api_key.is_none());
+    assert!(config.base_url.is_none());
+    assert!(config.full_url.is_none());
+}
+
+#[test]
+fn bailian_config_accepts_camel_case_aliases() {
+    let config: ScoringConfig = serde_json::from_str(
+        r#"{
+            "backend": "bailian",
+            "bailian": {
+                "apiKey": "sk-test",
+                "baseUrl": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+                "model": "decision-model-preview"
+            }
+        }"#,
+    )
+    .expect("camelCase 别名应可解析");
+    assert_eq!(config.bailian.api_key.as_deref(), Some("sk-test"));
+    assert_eq!(
+        config.bailian.base_url.as_deref(),
+        Some("https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1")
+    );
+    assert_eq!(config.bailian.model, "decision-model-preview");
+}
+
+#[test]
+fn bailian_endpoint_prefers_full_url_over_base_url() {
+    let config = BailianScoringConfig {
+        full_url: Some("https://example.com/api/v1/systemone".into()),
+        base_url: Some("https://other.com/compatible-mode/v1".into()),
+        ..Default::default()
+    };
+    assert_eq!(
+        config.resolve_endpoint().expect("full_url 优先"),
+        "https://example.com/api/v1/systemone"
+    );
+}
+
+#[test]
+fn bailian_endpoint_joins_systemone_path_trimming_trailing_slash() {
+    let config = BailianScoringConfig {
+        base_url: Some(
+            "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/".into(),
+        ),
+        ..Default::default()
+    };
+    assert_eq!(
+        config.resolve_endpoint().expect("拼接应去尾斜杠"),
+        "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone"
+    );
+}
+
+#[test]
+fn bailian_endpoint_requires_at_least_one_url() {
+    let config = BailianScoringConfig::default();
+    assert!(
+        config.resolve_endpoint().is_err(),
+        "base_url 与 full_url 均缺时必须报错"
+    );
+}
+
+#[test]
+fn bailian_config_validate_requires_api_key_and_endpoint() {
+    let no_key = BailianScoringConfig {
+        base_url: Some("https://example.com/compatible-mode/v1".into()),
+        ..Default::default()
+    };
+    assert!(no_key.validate().is_err(), "缺 api_key 必须校验失败");
+
+    let no_url = BailianScoringConfig {
+        api_key: Some("sk-test".into()),
+        ..Default::default()
+    };
+    assert!(no_url.validate().is_err(), "缺端点必须校验失败");
+
+    let complete = BailianScoringConfig {
+        api_key: Some("sk-test".into()),
+        base_url: Some("https://example.com/compatible-mode/v1".into()),
+        ..Default::default()
+    };
+    assert!(complete.validate().is_ok(), "完整配置必须校验通过");
+}
+
+#[test]
+fn scoring_config_serialization_includes_backend_and_bailian() {
+    let config: ScoringConfig =
+        serde_json::from_str(r#"{"backend":"bailian"}"#).expect("backend 应可解析");
+    let value = serde_json::to_value(&config).expect("ScoringConfig 应可序列化");
+    let mut keys: Vec<&str> = value
+        .as_object()
+        .expect("对象")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        [
+            "backend",
+            "bailian",
+            "connect_timeout_secs",
+            "enabled",
+            "event_retention_days",
+            "http_endpoint",
+            "http_listen",
+            "infer_timeout_secs",
+            "memory_recall",
+            "memory_rerank",
+            "policy_triage",
+            "skill_match",
+        ],
+        "序列化面应含 backend 与 bailian 驱动配置"
+    );
 }

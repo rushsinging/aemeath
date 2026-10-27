@@ -39,6 +39,7 @@ struct ContractPorts {
     restricted_context: ToolExecutionContext,
     scope: ExecutionScope,
     calls: Arc<AtomicUsize>,
+    last_input: Arc<std::sync::Mutex<Option<Value>>>,
 }
 
 type FactoryFuture = Pin<Box<dyn Future<Output = ContractPorts>>>;
@@ -47,9 +48,11 @@ type ContractFactory = fn() -> FactoryFuture;
 fn adapter_factory() -> FactoryFuture {
     Box::pin(async {
         let calls = Arc::new(AtomicUsize::new(0));
+        let last_input = Arc::new(std::sync::Mutex::new(None));
         let registry = Arc::new(ToolRegistry::new());
         registry.register(CountingTool {
             calls: calls.clone(),
+            last_input: last_input.clone(),
         });
         registry.register(SuspendingTool);
 
@@ -95,6 +98,7 @@ fn adapter_factory() -> FactoryFuture {
             restricted_context,
             scope,
             calls,
+            last_input,
         }
     })
 }
@@ -419,6 +423,71 @@ fn invocation(scope: &ExecutionScope, name: &str, input: Value) -> ToolInvocatio
     ToolInvocation::new(name, input, scope.clone())
 }
 
+/// `timeout` 是框架级通用参数：catalog 把它注入发布 schema，执行层 MUST 在
+/// 校验与派发前摘除，使工具自身的 input_schema（不含 timeout）与入参一致。
+#[tokio::test]
+async fn framework_timeout_is_accepted_and_stripped_before_tool_call() {
+    let ports = adapter_factory().await;
+
+    let outcome = ports
+        .execution
+        .execute(
+            invocation(
+                &ports.scope,
+                "Counting",
+                json!({"value": "x", "timeout": 30}),
+            ),
+            &ports.context,
+        )
+        .await;
+
+    assert!(
+        outcome.is_success(),
+        "含框架 timeout 的调用必须通过校验: {outcome:?}"
+    );
+    let captured = ports
+        .last_input
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("tool 必须收到 input");
+    assert!(
+        !captured
+            .as_object()
+            .expect("object input")
+            .contains_key("timeout"),
+        "框架 MUST 在派发前摘除 timeout: {captured}"
+    );
+    assert_eq!(captured["value"], "x");
+}
+
+/// 摘除只针对 `timeout`：其他未知字段仍按 schema 拒绝，校验强度未被放宽。
+#[tokio::test]
+async fn stripping_timeout_does_not_weaken_unknown_field_rejection() {
+    let ports = adapter_factory().await;
+
+    let outcome = ports
+        .execution
+        .execute(
+            invocation(&ports.scope, "Counting", json!({"value": "x", "bogus": 1})),
+            &ports.context,
+        )
+        .await;
+
+    assert!(
+        matches!(
+            outcome,
+            ExecutionOutcome::Failure(ref failure)
+                if failure.kind == crate::domain::published_language::ToolErrorKind::InvalidInput
+        ),
+        "未知字段 bogus 必须仍被拒绝: {outcome:?}"
+    );
+    assert!(
+        ports.last_input.lock().unwrap().is_none(),
+        "校验失败时 tool 不得被调用"
+    );
+}
+
 fn invocation_for_run_and_profile(
     scope: &ExecutionScope,
     run_id: &str,
@@ -462,6 +531,8 @@ fn assert_unavailable(outcome: ExecutionOutcome) {
 
 struct CountingTool {
     calls: Arc<AtomicUsize>,
+    /// 记录工具实际收到的 input，用于断言框架已在派发前摘除 `timeout`。
+    last_input: Arc<std::sync::Mutex<Option<Value>>>,
 }
 
 #[async_trait]
@@ -476,8 +547,9 @@ impl TypedTool for CountingTool {
     fn input_schema(&self) -> Value {
         json!({"type":"object","properties":{"value":{"type":"string"}},"required":["value"]})
     }
-    async fn call(&self, _input: Value, _ctx: &ToolExecutionContext) -> TypedToolResult<Value> {
+    async fn call(&self, input: Value, _ctx: &ToolExecutionContext) -> TypedToolResult<Value> {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        *self.last_input.lock().unwrap() = Some(input);
         TypedToolResult::success("ok", Value::Null)
     }
 }

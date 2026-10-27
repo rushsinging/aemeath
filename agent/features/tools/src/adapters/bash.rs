@@ -120,14 +120,6 @@ impl TypedTool for BashTool {
         crate::domain::published_language::CancellationDeclaration::Cooperative
     }
 
-    fn timeout_secs(&self) -> u64 {
-        super::constants::BASH_DEFAULT_TIMEOUT_SECS
-    }
-
-    fn max_timeout_secs(&self) -> u64 {
-        super::constants::BASH_MAX_TIMEOUT_SECS
-    }
-
     fn is_input_safe(&self, input: &Value) -> bool {
         input
             .get("command")
@@ -150,11 +142,12 @@ impl TypedTool for BashTool {
                 return TypedToolResult::error(format!("Shell injection pattern blocked ({reason}): {command}\nUse separate Bash calls instead."));
             }
         }
-        let timeout_secs = crate::domain::timeout_policy::resolve_tool_timeout(
-            args.timeout,
-            super::constants::BASH_DEFAULT_TIMEOUT_SECS,
-            super::constants::BASH_MAX_TIMEOUT_SECS,
-        );
+        // Runtime 已按档位解析并下发；直接调用（单测）时回落到本工具默认档。
+        // `timeout` 是框架级通用参数，执行前已被框架摘除，**NEVER** 读 `args.timeout`。
+        let timeout_secs = ctx
+            .scope()
+            .effective_timeout_secs()
+            .unwrap_or_else(|| self.get_timeout_secs(None, false));
 
         let path_base = ctx.workspace_read().current_path_base();
         log::debug!(

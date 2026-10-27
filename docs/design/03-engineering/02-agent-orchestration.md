@@ -6,7 +6,7 @@
 
 ## 1. 背景与目的
 
-Issue #358 的历史动机是：开放式 Agent Loop 对不确定任务很合适，但高频确定流程若完全依赖 prompt，会带来成本、漂移与回归困难。本文不据此判断仓库当前哪条主线“成熟”或“空白”；Current 一律由 Migration Governance 给出，Workflow Target 见 [Reasoning Graph](../02-modules/workflow/01-reasoning-graph.md)。
+Issue #358 的历史动机是：开放式 Agent Loop 对不确定任务很合适，但高频确定流程若完全依赖 prompt，会带来成本、漂移与回归困难。本文不据此判断仓库当前哪条主线“成熟”或“空白”；Current 一律由 Migration Governance 给出，Workflow Target 见 [Workflow Graph](../02-modules/workflow/01-workflow-design.md)——该文档是 Workflow/Graph 主线**当前**的 Target 设计唯一真相源。
 
 纯 agent loop 在开放编程场景下是正确选择，但带来三个问题（见 Issue #358）：
 
@@ -130,15 +130,15 @@ aemeath 的主循环整体上体现了这种工程化形态——推理隐式化
 
 ## 4. 历史调研盘点（Issue #358 PoC 阶段快照，非当前事实）
 
-> 本节是 Issue #358 PoC 阶段对 `main` 分支代码做的**一次性核对（2026-06）**，记录当时对五条主线成熟度的判断依据，**仅作历史调研留存**，**NEVER** 当作当前代码现状引用——代码持续演进，下表出现过的具体路径、常量、阈值与「基本空白」结论都可能已经过期，其中「Workflow 基本空白」的结论**已确认过期**（现有 `runtime` crate 内的 `reasoning_graph` 模块）。**当前** Current → Target 差距、责任、进度与退出条件 **MUST** 只以 [Migration Governance](03-migration-governance.md) 为唯一治理真相；Workflow 主线的**当前**设计真相见 [`docs/design/02-modules/workflow/01-reasoning-graph.md`](../02-modules/workflow/01-reasoning-graph.md)。
+> 本节是 Issue #358 PoC 阶段对 `main` 分支代码做的**一次性核对（2026-06）**，记录当时对五条主线成熟度的判断依据，**仅作历史调研留存**，**NEVER** 当作当前代码现状引用——代码持续演进，下表出现过的具体路径、常量、阈值与「基本空白」结论都可能已经过期，其中「Workflow 基本空白」的结论**已确认过期**（现有 `runtime` crate 内的 `reasoning_graph` 模块）。**当前** Current → Target 差距、责任、进度与退出条件 **MUST** 只以 [Migration Governance](03-migration-governance.md) 为唯一治理真相；Workflow 主线的**当前**设计真相见 [`docs/design/02-modules/workflow/01-workflow-design.md`](../02-modules/workflow/01-workflow-design.md)。
 
 | 主线 | 调研时（2026-06）的判断 | 判断依据（历史快照，不代表现状） |
 |---|---|---|
 | **Context** | 扎实 | guidance resolver / skill loader、compact 子系统（compact/microcompact/autocompact/token_estimation/summary/truncate）按输入占比分级 urgency 触发压缩 |
 | **Harness** | 扎实 | TypedTool trait + registry（Agent/Task/WebSearch 等）、policy、hook、audit |
 | **Loop** | 扎实，但无 checkpoint | 经典工程化 agent loop（推理隐式化 + 代码驱动推进 + 协议驱动停止）；调研时状态散在局部变量，无显式状态对象、无 turn 边界持久化 |
-| **Workflow** | 调研时判断「基本空白」 | 调研时 grep `workflow` 仅命中字符串字面量，非抽象层；**此判断已过期**，Current 状态见 Migration Governance 与 [workflow/01-reasoning-graph.md](../02-modules/workflow/01-reasoning-graph.md) |
-| **Graph** | 调研时判断「基本空白」 | 调研时未见 node/edge/state/checkpoint 原语；Current 状态同上，**MUST** 查 Migration Governance |
+| **Workflow** | 调研时判断「基本空白」 | 调研时 grep `workflow` 仅命中字符串字面量，非抽象层；**此判断已过期**，当前 Target 见 [Workflow 单文档设计](../02-modules/workflow/01-workflow-design.md)，Current → Target 差距与迁移状态仍以 Migration Governance 为准 |
+| **Graph** | 调研时判断「基本空白」 | 调研时未见 node/edge/state/checkpoint 原语；当前 Target 见 [Workflow 单文档设计](../02-modules/workflow/01-workflow-design.md)，Current → Target 差距与迁移状态 **MUST** 查 Migration Governance |
 | **sub-agent** | 语义偏弱 | 作为普通 TypedTool 注册（name=`"Agent"`），内部复用共享 Loop Engine；调研时无子图表达、无独立 checkpoint、输入输出契约隐式 |
 
 **结论（历史判断，供 §5 决策框架的背景参考）**：调研当时 Context / Harness / Loop 三条线支撑了「开放编程助手」场景，Workflow / Graph 的空白被认为是 Issue #358 三个痛点的直接成因。§5 的决策框架据此设计，框架本身不因本节判断过期而失效；但**不要**把本节任何一行当作现状依据——查现状一律去 Migration Governance。
@@ -225,7 +225,7 @@ aemeath 的主循环整体上体现了这种工程化形态——推理隐式化
 | 状态模型 | `Annotated` + reducer 函数（默认覆盖，可自定义合并，内置 `add_messages` 按消息 ID 合并） | 消息传递 + 按 scope 隔离的共享状态存储，可见性受 superstep 屏障约束 |
 | 持久化 | checkpointer（thread 级短期状态）+ store（跨 thread 长期记忆）；`exit`/`async`/`sync` 三档可调持久化强度 | superstep 边界 checkpoint（第三方评论：目前偏基础能力，手动续跑、无自动故障检测，生产级容错还需配 Azure Durable Task Extension） |
 
-**两个独立团队收敛到同一套执行模型**（Pregel/BSP + superstep + 同步屏障），是本次调研对 aemeath 最有分量的信号：Workflow BC 当前把控制流编排（DAG / 状态图）列为「远期方向」、暂缓实现（见 [workflow/01-reasoning-graph.md §9](../02-modules/workflow/01-reasoning-graph.md)）；若该方向未来真正启动，这套「superstep 边界同步、事务性批量提交、条件边路由」的设计已经过两方独立验证，风险低于自创一套并行同步语义。
+**两个独立团队收敛到同一套执行模型**（Pregel/BSP + superstep + 同步屏障），是本次调研对 aemeath 最有分量的信号：这套模型可作为 [Workflow 单文档设计](../02-modules/workflow/01-workflow-design.md) 中 Graph Kernel 未来实现并行 Join、条件边与批量迁移时的外部参考；aemeath 当前不引入 durable graph/checkpoint，也不把业界模型直接当作现行实现约束。
 
 ### 7.3 尚未确证的开放问题
 
@@ -249,4 +249,4 @@ aemeath 的主循环整体上体现了这种工程化形态——推理隐式化
 - Issue #358：本方向的原始动机与四个探索方向。
 - [`docs/design/01-system/01-product-and-domain.md`](../01-system/01-product-and-domain.md) §3.1 核心域 / §4 Bounded Context 清单：aemeath **当前**的领域划分，编排层的落点 **MUST** 遵循。
 - `docs/design/02-modules/runtime/01-domain-model.md`：现有 Agent Looping 的设计真相源，任何 loop 改造 **MUST** 先核对此文档。
-- [`docs/design/02-modules/workflow/01-reasoning-graph.md`](../02-modules/workflow/01-reasoning-graph.md)：Workflow BC **当前**设计真相源（ReasoningGraph effort 调节 5 节点状态机 + §9 Workflow Engine 远期方向）。
+- [`docs/design/02-modules/workflow/01-workflow-design.md`](../02-modules/workflow/01-workflow-design.md)：Workflow BC 当前设计真相源（Session 级 Graph Definition / Kernel / 五个 Workflow Tool，以及与 Runtime Goal、Run 的边界；不含 WorkflowRuntimeView 一类专用查询端口）。

@@ -207,11 +207,12 @@ pub enum RuntimeStreamEvent {
     ModelSwitched {
         result: sdk::ModelSwitchResult,
     },
-    /// Reasoning 模式切换完成通知（#497）。runtime idle 分支执行 set_thinking 后回传结果。
-    /// `level` 携带切换后的 reasoning 深度（#1616 状态栏展示）。
+    /// Reasoning 档位调节完成通知（#497 / #2032）。runtime idle 分支执行 set_thinking 后回传结果。
+    /// `requested` 是用户请求档位；`effective` 是 clamp 到模型能力上限后的映射档位。
     ThinkingChanged {
         enabled: bool,
-        level: ReasoningLevel,
+        requested: ReasoningLevel,
+        effective: ReasoningLevel,
     },
     /// 上下文估算完成通知（#497）。runtime idle 分支执行 estimate 后回传结果。
     ContextEstimated {

@@ -82,8 +82,25 @@ pub(crate) const SAFE_DEVS: &[&str] = &["/dev/null", "/dev/stdout", "/dev/stderr
 
 // ─── timeout policy（全工具统一入参）───
 
-/// 通用工具 `timeout` 入参上限（秒）。Agent / Watch 可覆盖。
-pub const DEFAULT_TOOL_MAX_TIMEOUT_SECS: u64 = 3600;
+/// 未启用后台化时工具的通用默认 `timeout`（秒，30 分钟）。
+///
+/// 差异化工具（WebFetch / Agent / Watch 等）在自己的
+/// `get_timeout_secs` 覆写里使用各自常量，不读本值。
+pub const DEFAULT_TOOL_TIMEOUT_SECS: u64 = 1800;
+
+/// 启用后台化（`tool_background_threshold_secs > 0`）时，无显式入参
+/// 调用的默认预算（秒，24 小时）：后台任务允许跑满一天。
+pub const BACKGROUND_TOOL_TIMEOUT_SECS: u64 = 86400;
+
+/// 入参 `timeout` 可设置的上限（秒，24 小时）。Watch 在自己的
+/// `get_timeout_secs` 覆写里收敛到 300。
+pub const DEFAULT_TOOL_MAX_TIMEOUT_SECS: u64 = 86400;
+
+/// 框架级通用 `timeout` 入参的 JSON 字段名（秒）。
+///
+/// Catalog 用它注入发布 schema，`ExecutionAdapter` 用它在校验与派发前摘除。
+/// **NEVER** 使用 `timeout_secs` 作为该字段名。
+pub const TIMEOUT_INPUT_FIELD: &str = "timeout";
 
 // ─── background_processes.rs（#1931 / #1946 Watch）───
 

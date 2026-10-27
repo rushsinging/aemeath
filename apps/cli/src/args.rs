@@ -116,6 +116,12 @@ pub enum Commands {
         command: SystemoneCommands,
     },
 
+    /// Manage the harness RSI maintenance daemon
+    Rsi {
+        #[command(subcommand)]
+        command: RsiCommands,
+    },
+
     /// Check for and install updates
     Update {
         /// Only check for available updates, don't install
@@ -134,6 +140,43 @@ pub enum SystemoneCommands {
     Download,
     /// 启动本机 scoring daemon（加载一份 GGUF，经 UDS 服务多会话）
     Serve,
+}
+
+/// `aemeath rsi` 子命令集。
+#[derive(Subcommand)]
+pub enum RsiCommands {
+    /// 一次性执行单轮改进周期后退出（手动触发与验收入口）
+    Run {
+        /// 预演模式：完整周期但零持久副作用（组件/lesson/checkpoint 全不写），
+        /// 预览落 ~/.agents/harness/dry-run-preview.md（覆盖写）
+        #[arg(long)]
+        dry_run: bool,
+        /// 覆盖 evidence_max_sessions_per_cycle（仅本次）
+        #[arg(long)]
+        max_sessions: Option<usize>,
+        /// 覆盖 evidence_initial_window_days（仅本次；仅无 checkpoint 时生效）
+        #[arg(long)]
+        window_days: Option<u64>,
+        /// 结果以 JSON 输出（机器可读）
+        #[arg(long)]
+        json: bool,
+    },
+    /// 启动 RSI 维护 daemon（常驻；定时改进 harness 组件）
+    Serve,
+    /// 列出组件快照历史（回滚依据）
+    History {
+        /// 限定组件（<kind>/<name>）；省略则列全部
+        #[arg(long)]
+        component: Option<String>,
+    },
+    /// 回滚组件到快照（默认最近一次采纳前）
+    Rollback {
+        /// 组件标识（<kind>/<name>）
+        component: String,
+        /// 指定 cycle id（省略则用最近快照）
+        #[arg(long)]
+        cycle: Option<String>,
+    },
 }
 
 /// The original Args struct, used by the rest of main.rs to avoid touching all call sites.

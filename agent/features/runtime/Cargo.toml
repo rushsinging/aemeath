@@ -18,6 +18,7 @@ project = { path = "../project" }
 memory = { path = "../memory" }
 systemone = { path = "../systemone" }
 policy = { path = "../policy" }
+harness = { path = "../harness" }
 context = { path = "../context" }
 storage = { path = "../storage" }
 task = { path = "../task" }

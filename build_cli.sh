@@ -22,11 +22,11 @@ TARGET_DIR="$(cargo metadata --format-version 1 --no-deps \
 # Limit parallel rustc jobs to avoid hook-time SIGTERM on memory pressure.
 CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
 
-# #1935：默认启用 composition/systemone-daemon，使安装的 aemeath 可直接
-# `systemone serve`（链入 llama.cpp/GGUF 引擎，体积约 +8M）。会话侧仍走
-# DaemonScoringClient + UDS，不在会话进程内加载模型。
-# 需要瘦身安装时：`AEMEATH_CLI_FEATURES= ./build_cli.sh`（空串关闭默认 feature）。
-DEFAULT_CLI_FEATURES="composition/systemone-daemon"
+# #1935：systemone embedded 评分引擎改为可选编译——所有平台默认不启用
+# composition/systemone-daemon（llama.cpp/GGUF 引擎体积约 +8M，且 native 路径
+# 仅 macOS arm64 可用，其余平台运行期 fail-closed）。需要 `systemone serve`
+# 时显式开启：`AEMEATH_CLI_FEATURES="composition/systemone-daemon" ./build_cli.sh`。
+DEFAULT_CLI_FEATURES=""
 CLI_FEATURES="${AEMEATH_CLI_FEATURES-$DEFAULT_CLI_FEATURES}"
 FEATURE_ARGS=()
 if [[ -n "$CLI_FEATURES" ]]; then
@@ -48,7 +48,13 @@ fi
 cargo build --release --package cli "${FEATURE_ARGS[@]}" --jobs "$CARGO_BUILD_JOBS"
 
 mkdir -p "$INSTALL_DIR"
-cp "$TARGET_DIR/release/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
+# 运行中的 aemeath 进程持有旧 inode，直接 cp 覆盖目标会报 ETXTBSY（文本文件忙）
+# 并以非零退出结束脚本。先写同目录临时文件再原子 rename：正在运行的旧二进制
+# 不受影响，新启动的进程使用新版本。
+INSTALL_TMP="$INSTALL_DIR/.$BIN_NAME.tmp"
+cp "$TARGET_DIR/release/$BIN_NAME" "$INSTALL_TMP"
+chmod 755 "$INSTALL_TMP"
+mv -f "$INSTALL_TMP" "$INSTALL_DIR/$BIN_NAME"
 
 # macOS Gatekeeper kills freshly-copied ad-hoc signed binaries on some
 # versions due to `com.apple.provenance` xattr + signature mismatch after

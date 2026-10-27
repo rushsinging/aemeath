@@ -34,6 +34,10 @@ pub struct ModelInfo {
     pub supports_streaming: bool,
     /// Reasoning 支持阶梯（升序去重；由 client 装配时按 driver 能力覆盖）。
     pub supported_reasoning: Vec<ReasoningLevel>,
+    /// 服务端档位归并表（#2032，装配时由 driver 官方文档知识生成；
+    /// 空表=恒等）。`resolve_reasoning` 在阶梯 resolve 后叠加本表，
+    /// 保证 UI 映射表与 invoke wire 口径一致。
+    pub server_effort_map: Vec<(ReasoningLevel, ReasoningLevel)>,
     /// 上下文窗口大小（token 数），`None` 表示未知。
     pub context_limit: Option<usize>,
     /// 最大输出 token 数，`None` 表示未知。
@@ -41,11 +45,31 @@ pub struct ModelInfo {
 }
 
 impl ModelInfo {
-    /// 请求档位在支持阶梯内的 clamp：阶梯中 ≤requested 的最大档，Off 兜底。
-    ///
-    /// 原 reasoning 能力数据类型的 resolve 逻辑（#1861 v4 摊平进实体）。
+    /// 请求档位在支持阶梯内的 clamp 后叠加服务端归并（#2032）：
+    /// 阶梯中 ≤requested 的最大档，Off 兜底；再经 `server_effort_map`
+    /// 归并到服务端实际执行档位——invoke、回执与 UI 映射表统一口径。
     pub fn resolve_reasoning(&self, requested: ReasoningLevel) -> ReasoningLevel {
-        crate::domain::capability::resolve_supported(&self.supported_reasoning, requested)
+        let ladder_resolved =
+            crate::domain::capability::resolve_supported(&self.supported_reasoning, requested);
+        self.server_effort_map
+            .iter()
+            .find(|(from, _)| *from == ladder_resolved)
+            .map(|(_, to)| *to)
+            .unwrap_or(ladder_resolved)
+    }
+
+    /// 能力阶梯的最高档。
+    pub fn max_reasoning_level(&self) -> ReasoningLevel {
+        crate::domain::capability::maximum_supported(&self.supported_reasoning)
+    }
+
+    /// 全档映射表（#2032 /think 对话框逐档标注的单一真相源计算）：
+    /// 对 `ReasoningLevel::ALL` 每档 resolve，TUI 只渲染 NEVER 复制 resolve。
+    pub fn reasoning_effort_map(&self) -> Vec<(ReasoningLevel, ReasoningLevel)> {
+        ReasoningLevel::ALL
+            .into_iter()
+            .map(|requested| (requested, self.resolve_reasoning(requested)))
+            .collect()
     }
 }
 
@@ -196,6 +220,23 @@ pub enum ProviderContentData {
         name: String,
         /// 验证过的 JSON 参数。
         arguments: serde_json::Value,
+    },
+    /// Tool call arguments 无法解析为可执行输入的失败帧（流增量；仅内存流转，
+    /// **NEVER** 落盘）。流正常结束但拼接后的 arguments 仍不是合法 JSON
+    /// （重复前缀等 Syntax 类错误）或模型全程未给出 arguments 时发出。
+    /// Runtime 据此短路执行并合成 `is_error` ToolResult 回给 LLM；
+    /// assistant 消息侧仅保留 `ToolUse { input: {} }` 配对骨架。
+    /// EOF 截断不走此路径（仍走 `StreamTruncated` 整轮重试）。
+    ToolCallArgumentsUnparseable {
+        index: usize,
+        /// Provider 原始 tool-call ID。
+        id: String,
+        /// 工具名称。
+        name: String,
+        /// 模型原始给出的 arguments 全文（未经任何补全；缺省时为空串）。
+        raw_arguments: String,
+        /// 解析失败诊断（serde 错误信息或「未提供 arguments」说明）。
+        diagnostic: String,
     },
 }
 

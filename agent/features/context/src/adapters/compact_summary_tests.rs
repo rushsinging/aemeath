@@ -63,6 +63,7 @@ fn summary_test_binding(
             supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
             context_limit: Some(100_000),
             output_limit: Some(4096),
+            server_effort_map: Default::default(),
         },
         max_output_tokens: 1024,
         compact_context_window: window,

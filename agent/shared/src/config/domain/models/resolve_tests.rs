@@ -6,6 +6,7 @@ fn resolver_config() -> ModelsConfig {
         "Zhipu".to_string(),
         ProviderModelsConfig {
             base_url: "https://zhipu.example.com".to_string(),
+            final_url: None,
             api_key: "zhipu-key".to_string(),
             driver: "zhipu".to_string(),
             models: vec![ModelEntryConfig {
@@ -25,6 +26,7 @@ fn resolver_config() -> ModelsConfig {
         "LiteLLM".to_string(),
         ProviderModelsConfig {
             base_url: "https://litellm.example.com".to_string(),
+            final_url: None,
             api_key: "litellm-key".to_string(),
             driver: "litellm".to_string(),
             models: vec![ModelEntryConfig {

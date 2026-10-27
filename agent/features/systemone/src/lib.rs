@@ -26,13 +26,11 @@ mod ports;
 mod wiring;
 
 pub use adapters::audited::AuditedScoringAdapter;
+pub use adapters::bailian_client::BailianSystemOneClient;
 pub use adapters::calibrated::CalibratedScoringAdapter;
 pub use adapters::calibration_store::{CalibrationArtifact, CalibrationStore};
-pub use adapters::daemon_client::{ensure_scoring_daemon_ready, DaemonScoringClient};
-pub use adapters::daemon_instance::{
-    acquire_daemon_lock, prepare_socket_path, DaemonEndpoints, DaemonLockError, DaemonLockGuard,
-};
-pub use adapters::daemon_serve::run_daemon_accept_loop;
+pub use adapters::daemon_http_serve::run_daemon_http_serve;
+pub use adapters::daemon_instance::ensure_scoring_http_ready;
 #[cfg(feature = "embedded")]
 pub use adapters::embedded::{EmbeddedInitError, EmbeddedScoringAdapter};
 pub use adapters::event_jsonl::JsonlSegmentScoringEventStore;
@@ -41,6 +39,7 @@ pub use adapters::fetch_http::HttpArtifactFetcher;
 pub use adapters::jev_http::JevHttpScoringAdapter;
 #[cfg(feature = "embedded")]
 pub use adapters::llama_worker::WorkerInitError;
+pub use adapters::local_client::LocalSystemOneClient;
 pub use adapters::model_assets::{
     LocalModelAssetStore, ModelInstallError, PreparedStagedInstall, StagedInstallCommit,
     StagingDirectory,

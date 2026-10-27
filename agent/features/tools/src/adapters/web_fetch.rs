@@ -133,18 +133,19 @@ impl TypedTool for WebFetchTool {
         true
     }
 
-    fn timeout_secs(&self) -> u64 {
-        super::constants::WEB_FETCH_DEFAULT_TIMEOUT_SECS
-    }
-
-    fn max_timeout_secs(&self) -> u64 {
-        super::constants::WEB_FETCH_MAX_TIMEOUT_SECS
+    fn get_timeout_secs(&self, requested: Option<u64>, backgrounding_enabled: bool) -> u64 {
+        crate::domain::timeout_policy::get_timeout_secs(
+            requested,
+            super::constants::WEB_FETCH_DEFAULT_TIMEOUT_SECS,
+            crate::domain::constants::DEFAULT_TOOL_MAX_TIMEOUT_SECS,
+            backgrounding_enabled,
+        )
     }
 
     async fn call(
         &self,
         input: serde_json::Value,
-        _ctx: &ToolExecutionContext,
+        ctx: &ToolExecutionContext,
     ) -> TypedToolResult<WebFetchResult> {
         let args: WebFetchInput = match serde_json::from_value(input) {
             Ok(a) => a,
@@ -172,11 +173,12 @@ impl TypedTool for WebFetchTool {
         }
         let raw_url = args.url.as_str();
 
-        let timeout_secs = crate::domain::timeout_policy::resolve_tool_timeout(
-            args.timeout,
-            super::constants::WEB_FETCH_DEFAULT_TIMEOUT_SECS,
-            super::constants::WEB_FETCH_MAX_TIMEOUT_SECS,
-        );
+        // Runtime 已按档位解析并下发；直接调用（单测）时回落到本工具默认档。
+        // `timeout` 是框架级通用参数，执行前已被框架摘除，**NEVER** 读 `args.timeout`。
+        let timeout_secs = ctx
+            .scope()
+            .effective_timeout_secs()
+            .unwrap_or_else(|| self.get_timeout_secs(None, false));
 
         // Validate URL and upgrade http to https
         let mut url = match validate_url(raw_url) {

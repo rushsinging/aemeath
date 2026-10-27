@@ -1,9 +1,9 @@
-pub mod daemon_protocol;
 pub mod error;
 pub mod event;
 pub mod model_manifest;
 pub mod pointer_head;
 pub mod published_language;
+pub mod systemone_http_wire;
 pub mod temperature;
 
 pub use error::{ScoringUnavailable, UnavailableKind};

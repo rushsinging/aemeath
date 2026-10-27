@@ -9,6 +9,7 @@ use serde_json::Value;
 use crate::config::{
     audit::AuditConfig,
     context::ContextConfig,
+    harness::HarnessConfig,
     hooks::HooksConfig,
     legacy::{ApiConfig, ModelConfig},
     logging::{LoggingConfig, SubAgentLogConfig},
@@ -64,6 +65,8 @@ pub struct ConfigPatch {
     #[serde(default)]
     pub memory: Option<MemoryConfigPatch>,
     #[serde(default)]
+    pub harness: Option<HarnessConfigPatch>,
+    #[serde(default)]
     pub logging: Option<LoggingConfigPatch>,
     #[serde(default)]
     pub guidance: Option<GuidanceConfigPatch>,
@@ -95,6 +98,7 @@ impl ConfigPatch {
             && self.storage.is_none()
             && self.scoring.is_none()
             && self.memory.is_none()
+            && self.harness.is_none()
             && self.logging.is_none()
             && self.guidance.is_none()
             && self.hooks.is_none()
@@ -320,6 +324,32 @@ pub struct StorageConfigPatch {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct HarnessConfigPatch {
+    #[serde(default)]
+    pub rsi: Option<RsiConfigPatch>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct RsiConfigPatch {
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub interval_secs: Option<u64>,
+    #[serde(default)]
+    pub chunk_max_components: Option<usize>,
+    #[serde(default)]
+    pub evidence_initial_window_days: Option<u64>,
+    #[serde(default)]
+    pub evidence_max_sessions_per_cycle: Option<usize>,
+    #[serde(default)]
+    pub evidence_block_sessions: Option<usize>,
+    #[serde(default)]
+    pub execution_mode: Option<crate::config::RsiExecutionMode>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct MemoryConfigPatch {
     #[serde(default)]
     pub enabled: Option<bool>,
@@ -453,6 +483,9 @@ pub fn apply_patch(mut base: Config, patch: ConfigPatch) -> Config {
     }
     if let Some(memory) = patch.memory {
         base.memory = apply_memory_patch(base.memory, memory);
+    }
+    if let Some(harness) = patch.harness {
+        base.harness = apply_harness_patch(base.harness, harness);
     }
     if let Some(logging) = patch.logging {
         base.logging = apply_logging_patch(base.logging, logging);
@@ -605,12 +638,31 @@ pub struct ScoringConfigPatch {
     pub memory_recall: Option<bool>,
     #[serde(default, alias = "eventRetentionDays")]
     pub event_retention_days: Option<u32>,
-    #[serde(default, alias = "socketPath")]
-    pub socket_path: Option<String>,
+    #[serde(default, alias = "httpListen")]
+    pub http_listen: Option<String>,
+    #[serde(default, alias = "httpEndpoint")]
+    pub http_endpoint: Option<String>,
     #[serde(default, alias = "connectTimeoutSecs")]
     pub connect_timeout_secs: Option<u64>,
     #[serde(default, alias = "inferTimeoutSecs")]
     pub infer_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub backend: Option<super::scoring::ScoringBackend>,
+    #[serde(default)]
+    pub bailian: Option<BailianScoringConfigPatch>,
+}
+
+/// `BailianScoringConfig` 的分层合并 patch：仅覆盖显式设置的字段。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct BailianScoringConfigPatch {
+    #[serde(default, alias = "apiKey")]
+    pub api_key: Option<String>,
+    #[serde(default, alias = "baseUrl")]
+    pub base_url: Option<String>,
+    #[serde(default, alias = "fullUrl")]
+    pub full_url: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 pub(crate) fn apply_tools_patch(mut base: ToolsConfig, patch: ToolsConfigPatch) -> ToolsConfig {
@@ -657,14 +709,35 @@ pub(crate) fn apply_scoring_patch(
         // `0` 是合法覆盖值（禁用 GC），不得与「未设置」混淆。
         base.event_retention_days = v;
     }
-    if let Some(v) = patch.socket_path {
-        base.socket_path = Some(v);
+    if let Some(v) = patch.http_listen {
+        base.http_listen = v;
+    }
+    if let Some(v) = patch.http_endpoint {
+        base.http_endpoint = Some(v);
     }
     if let Some(v) = patch.connect_timeout_secs {
         base.connect_timeout_secs = v;
     }
     if let Some(v) = patch.infer_timeout_secs {
         base.infer_timeout_secs = v;
+    }
+    if let Some(v) = patch.backend {
+        base.backend = v;
+    }
+    if let Some(bailian_patch) = patch.bailian {
+        let bailian = &mut base.bailian;
+        if let Some(v) = bailian_patch.api_key {
+            bailian.api_key = Some(v);
+        }
+        if let Some(v) = bailian_patch.base_url {
+            bailian.base_url = Some(v);
+        }
+        if let Some(v) = bailian_patch.full_url {
+            bailian.full_url = Some(v);
+        }
+        if let Some(v) = bailian_patch.model {
+            bailian.model = v;
+        }
     }
     base
 }
@@ -886,6 +959,39 @@ pub(crate) fn merge_hooks(base: HooksConfig, overlay: HooksConfig) -> HooksConfi
         },
         events,
     }
+}
+
+pub(crate) fn apply_harness_patch(
+    mut base: HarnessConfig,
+    patch: HarnessConfigPatch,
+) -> HarnessConfig {
+    if let Some(rsi) = patch.rsi {
+        if let Some(v) = rsi.enabled {
+            base.rsi.enabled = v;
+        }
+        if let Some(v) = rsi.model {
+            base.rsi.model = v;
+        }
+        if let Some(v) = rsi.interval_secs {
+            base.rsi.interval_secs = v;
+        }
+        if let Some(v) = rsi.chunk_max_components {
+            base.rsi.chunk_max_components = v;
+        }
+        if let Some(v) = rsi.evidence_initial_window_days {
+            base.rsi.evidence_initial_window_days = v;
+        }
+        if let Some(v) = rsi.evidence_max_sessions_per_cycle {
+            base.rsi.evidence_max_sessions_per_cycle = v;
+        }
+        if let Some(v) = rsi.evidence_block_sessions {
+            base.rsi.evidence_block_sessions = v;
+        }
+        if let Some(v) = rsi.execution_mode {
+            base.rsi.execution_mode = v;
+        }
+    }
+    base
 }
 
 pub(crate) fn apply_memory_patch(mut base: MemoryConfig, patch: MemoryConfigPatch) -> MemoryConfig {

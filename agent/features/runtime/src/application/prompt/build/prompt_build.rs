@@ -26,6 +26,10 @@ pub struct PromptContextData {
     pub provider_name: Option<String>,
     pub model_name: Option<String>,
     pub permission_mode: PermissionModeConfig,
+    /// 会话是否启用后台化（`tool_background_threshold_secs > 0`）。
+    /// 决定 `timeout` 预算 guidance 的档位；system prompt 会话级冻结，
+    /// 配置变更要等下个会话或 compact 后重组才生效。
+    pub backgrounding_enabled: bool,
 }
 
 impl PromptContextData {
@@ -34,12 +38,14 @@ impl PromptContextData {
         provider_name: Option<&str>,
         model_name: Option<&str>,
         permission_mode: PermissionModeConfig,
+        backgrounding_enabled: bool,
     ) -> Self {
         Self {
             cwd: cwd.to_path_buf(),
             provider_name: provider_name.map(str::to_string),
             model_name: model_name.map(str::to_string),
             permission_mode,
+            backgrounding_enabled,
         }
     }
 }
@@ -56,12 +62,13 @@ fn static_system_prompt_for(
     is_git: bool,
     lang: &str,
     permission_mode: PermissionModeConfig,
+    backgrounding_enabled: bool,
 ) -> String {
     let prompt = static_system_prompt(lang)
         .replace("{cwd_str}", cwd_str)
         .replace("{is_git}", &is_git.to_string());
 
-    match permission_mode {
+    let prompt_with_mode = match permission_mode {
         PermissionModeConfig::AllowAll => {
             let (workspace_boundary, relative_path_guidance, worktree_guidance) = match lang {
                 "zh" => (
@@ -103,12 +110,18 @@ fn static_system_prompt_for(
                 )
         }
         PermissionModeConfig::Ask | PermissionModeConfig::AutoRead => prompt,
-    }
+    };
+    let mut prompt = prompt_with_mode;
+    prompt.push_str(share::i18n::prompt::system::tool_timeout_guidance(
+        lang,
+        backgrounding_enabled,
+    ));
+    prompt
 }
 
 #[cfg(test)]
 fn static_system_prompt_for_test(cwd_str: &str, is_git: bool, lang: &str) -> String {
-    static_system_prompt_for(cwd_str, is_git, lang, PermissionModeConfig::Ask)
+    static_system_prompt_for(cwd_str, is_git, lang, PermissionModeConfig::Ask, false)
 }
 
 #[cfg(test)]
@@ -118,7 +131,7 @@ fn static_system_prompt_for_test_with_permission_mode(
     lang: &str,
     permission_mode: PermissionModeConfig,
 ) -> String {
-    static_system_prompt_for(cwd_str, is_git, lang, permission_mode)
+    static_system_prompt_for(cwd_str, is_git, lang, permission_mode, false)
 }
 
 /// Build commit guidance with provider/model trailer. 文案模板迁自 `share::i18n::prompt::commit`。
@@ -150,7 +163,19 @@ pub async fn build_system_prompt_parts(
     let is_git = is_git_repo(cwd).await;
 
     // --- Static part: instructions that don't change between sessions ---
-    let static_part = static_system_prompt_for(&cwd_str, is_git, lang, context.permission_mode);
+    let mut static_part = static_system_prompt_for(
+        &cwd_str,
+        is_git,
+        lang,
+        context.permission_mode,
+        context.backgrounding_enabled,
+    );
+
+    // --- guardrails（c2 组件）：全局 + 项目 guardrails.md 追加进 stable 段 ---
+    for section in load_guardrails_sections(cwd).await {
+        static_part.push_str("\n\n");
+        static_part.push_str(&section);
+    }
 
     // --- One-time Git context: injected as a regular message, never system prompt ---
     let initial_git_context = if is_git {
@@ -161,7 +186,14 @@ pub async fn build_system_prompt_parts(
     };
 
     // --- Project instructions: will be injected as a separate user-context message ---
-    let claude_md = load_agents_md(cwd, hook_port, cwd).await;
+    let mut claude_md = load_agents_md(cwd, hook_port, cwd).await;
+
+    // --- tool_guidance（c4 组件）：user-context 消息尾部追加（通道 B：
+    // 修改不破 stable 段 prompt cache，#2022） ---
+    if let Some(section) = load_tool_guidance_section().await {
+        claude_md.push_str("\n\n");
+        claude_md.push_str(&section);
+    }
 
     SystemPromptParts {
         static_part,
@@ -235,11 +267,25 @@ fn render_user_guidance(files: &[UserGuidanceFile]) -> String {
             let source = escape_xml_attribute(&file.path.to_string_lossy());
             format!(
                 "<guidance source=\"{}\">\n{}\n</guidance>",
-                source, file.content
+                source,
+                truncate_guidance_content(&file.content, &file.path.to_string_lossy())
             )
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+/// overlay 单文件注入预算（#2063）：超预算时 **NEVER 腰斩正文**
+/// （指令是语义整体，截断会丢关键规则）——改为不注入正文，仅留
+/// 引导行让模型按需 Read 全文（全文可达、语义完整、常驻成本 O(1)）。
+fn truncate_guidance_content(content: &str, source_path: &str) -> String {
+    let budget = crate::constants::GUIDANCE_FILE_MAX_CHARS;
+    if content.chars().count() <= budget {
+        return content.to_string();
+    }
+    format!(
+        "（本 guidance 文件 {source_path} 超过注入预算 {budget} 字符，正文未注入——         需要其内容时用 Read 工具读取完整文件，NEVER 凭猜测假设其内容）"
+    )
 }
 
 async fn load_agents_md_from_paths(
@@ -295,3 +341,68 @@ pub async fn load_agents_md(
 #[cfg(test)]
 #[path = "prompt_build_tests.rs"]
 mod prompt_build_tests;
+
+// ---- #2021 guardrails（c2）注入：全局 + 项目 guardrails.md → static_part ----
+
+/// 渲染单个 guardrails 段（source 标签包裹 + 预算截断）。
+fn render_guardrails_section(source_path: &str, content: &str) -> String {
+    let mut body: String = content.trim().chars().collect();
+    let budget = crate::constants::GUARDRAILS_SECTION_MAX_CHARS;
+    if body.chars().count() > budget {
+        body = body.chars().take(budget).collect();
+        body.push_str("…（截断）");
+    }
+    format!("<guardrails source=\"{source_path}\">\n{body}\n</guardrails>")
+}
+
+/// 加载全局 + 项目 guardrails 段（缺文件跳过，NEVER 产生空段）。
+async fn load_guardrails_sections(cwd: &Path) -> Vec<String> {
+    let candidates = [
+        paths::global_guardrails_path(),
+        paths::project_guardrails_path(cwd),
+    ];
+    let mut sections = Vec::new();
+    for path in candidates {
+        match tokio::fs::read_to_string(&path).await {
+            Ok(content) if !content.trim().is_empty() => {
+                sections.push(render_guardrails_section(&path.to_string_lossy(), &content));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                log::warn!(target: crate::LOG_TARGET, "Failed to read guardrails {}: {}", path.display(), error);
+            }
+        }
+    }
+    sections
+}
+
+// ---- #2022 tool_guidance（c4）注入：user-context 消息侧（通道 B） ----
+
+/// 渲染 tool_guidance 段（source 标签包裹 + 预算截断）。
+fn render_tool_guidance_section(source_path: &str, content: &str) -> String {
+    let mut body: String = content.trim().chars().collect();
+    let budget = crate::constants::TOOL_GUIDANCE_SECTION_MAX_CHARS;
+    if body.chars().count() > budget {
+        body = body.chars().take(budget).collect();
+        body.push_str("…（截断）");
+    }
+    format!("<tool_guidance source=\"{source_path}\">\n{body}\n</tool_guidance>")
+}
+
+/// 加载全局 tool_guidance 覆盖段（缺文件/空内容 → None）。
+async fn load_tool_guidance_section() -> Option<String> {
+    let path = paths::global_tool_guidance_path();
+    match tokio::fs::read_to_string(&path).await {
+        Ok(content) if !content.trim().is_empty() => Some(render_tool_guidance_section(
+            &path.to_string_lossy(),
+            &content,
+        )),
+        Ok(_) => None,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            log::warn!(target: crate::LOG_TARGET, "Failed to read tool_guidance {}: {}", path.display(), error);
+            None
+        }
+    }
+}

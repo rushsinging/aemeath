@@ -18,6 +18,8 @@ pub enum UnavailableKind {
     Timeout,
     /// 服务端 5xx。
     Server,
+    /// 客户端请求被拒绝（4xx：鉴权 / 限流 / 请求非法）。
+    Client,
     /// 请求被拒绝（422）或响应 schema 非法。
     Schema,
 }
@@ -42,6 +44,7 @@ impl std::fmt::Display for ScoringUnavailable {
             UnavailableKind::Connect => "连接失败",
             UnavailableKind::Timeout => "请求超时",
             UnavailableKind::Server => "服务端错误",
+            UnavailableKind::Client => "请求被拒绝",
             UnavailableKind::Schema => "线格式非法",
         };
         write!(formatter, "评分服务不可用（{kind}）：{}", self.detail)

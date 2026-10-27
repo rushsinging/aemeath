@@ -8,7 +8,7 @@ use tools::published::execution::{
     CancellationDeclaration, CancellationSignal, CleanupConfirmation, ToolExecutionContext,
     ToolExecutionPort, ToolInvocation,
 };
-use tools::types::{extract_timeout_from_input, resolve_tool_timeout};
+use tools::types::{extract_timeout_from_input, get_timeout_secs};
 use tools::ToolCatalogSnapshot;
 
 use crate::application::constants::DEFAULT_GRACE;
@@ -225,7 +225,7 @@ impl ToolExecutionSupervisor {
 
     pub(crate) async fn execute(
         &self,
-        call: SupervisedToolCall,
+        mut call: SupervisedToolCall,
     ) -> Result<(PublishedToolOutcome, Duration), ToolExecutionSupervisorError> {
         let descriptor = self
             .catalog
@@ -251,10 +251,11 @@ impl ToolExecutionSupervisor {
         self.context
             .advance_tool_receipt(ToolReceiptMutationData::running(call.identity.clone()))
             .await?;
-        let tool_timeout_secs = resolve_tool_timeout(
+        let tool_timeout_secs = get_timeout_secs(
             extract_timeout_from_input(&call.invocation.input),
             descriptor.timeout_secs,
             descriptor.max_timeout_secs,
+            call.background_threshold.is_some(),
         );
         log::debug!(
             target: crate::LOG_TARGET,
@@ -273,6 +274,13 @@ impl ToolExecutionSupervisor {
             call.run_deadline,
             Some(SystemTime::now() + Duration::from_secs(tool_timeout_secs)),
         );
+        // 解析结果单点下传：工具内部 kill 定时器与框架 deadline 必须同源，
+        // 否则「后台档 24h」会被工具内部默认值提前砍断。
+        call.invocation.execution_scope = call
+            .invocation
+            .execution_scope
+            .clone()
+            .with_effective_timeout_secs(tool_timeout_secs);
         log::debug!(
             target: crate::LOG_TARGET,
             "tool execution cancellation identity: run_id={} step_id={} call_id={} tool={} caller_cancelled={} context_cancelled={} declared={:?}",
@@ -320,8 +328,12 @@ impl ToolExecutionSupervisor {
             Some(dd) => call
                 .context
                 .clone()
-                .with_background_log_path(dd.path.clone()),
-            None => call.context.clone(),
+                .with_background_log_path(dd.path.clone())
+                .with_effective_timeout_secs(tool_timeout_secs),
+            None => call
+                .context
+                .clone()
+                .with_effective_timeout_secs(tool_timeout_secs),
         };
         // spawn-first：执行体独立于前台等待，转后台时不 abort 继续运行。
         let mut join_handle = spawn_tool_execution(

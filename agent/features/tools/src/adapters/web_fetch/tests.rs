@@ -93,16 +93,27 @@ fn test_web_fetch_result_schema_includes_links() {
     assert!(properties.get("links").is_some());
 }
 
+/// `timeout` 由 Catalog 统一注入发布 schema（秒），工具自身 schema MUST NOT 声明它。
 #[test]
 fn web_fetch_timeout_schema_advertises_seconds() {
     let tool = WebFetchTool;
-    let schema = tool.input_schema();
-    let timeout_desc = schema["properties"]["timeout"]["description"]
+    let own_schema = tool.input_schema().to_string();
+    assert!(
+        !own_schema.contains("timeout"),
+        "工具 schema MUST NOT 声明 timeout（由 catalog 注入）: {own_schema}"
+    );
+
+    let published = crate::domain::timeout_policy::inject_timeout_into_input_schema(
+        tool.input_schema(),
+        tool.get_timeout_secs(None, false),
+        tool.get_timeout_secs(Some(u64::MAX), false),
+    );
+    let timeout_desc = published["properties"]["timeout"]["description"]
         .as_str()
-        .expect("timeout description");
+        .expect("catalog 注入后必须有 timeout description");
     assert!(
         timeout_desc.contains("seconds") && timeout_desc.contains("30"),
-        "WebFetch timeout schema must be seconds: {timeout_desc}"
+        "WebFetch timeout schema must be seconds with 30s default: {timeout_desc}"
     );
     assert!(
         !timeout_desc.contains("milliseconds") && !timeout_desc.contains("30000"),

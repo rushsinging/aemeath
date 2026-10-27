@@ -57,6 +57,7 @@ fn recording_binding(recorder: Arc<RequestParameterRecorder>) -> Arc<ProviderBin
                 ReasoningLevel::High,
                 ReasoningLevel::Max,
             ],
+            server_effort_map: Vec::new(),
             context_limit: Some(128_000),
             // 生产装配目前与 binding.max_tokens 同源；不能依靠该字段抬高反思预算。
             output_limit: Some(20_000),

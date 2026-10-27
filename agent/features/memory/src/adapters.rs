@@ -922,7 +922,11 @@ impl MemoryPort for InMemoryMemory {
 
     async fn mark_outdated(&self, id: &MemoryId) -> Result<bool, MemoryError> {
         let _permit = self.acquire_write_permit().await?;
-        self.mutate_entry(id, |entry| entry.outdated = true)
+        // #2007 智能清退：裁决失效即解除 pin（与生产 MemoryService 同口径）。
+        self.mutate_entry(id, |entry| {
+            entry.outdated = true;
+            entry.pinned = false;
+        })
     }
 
     async fn apply_reflection(

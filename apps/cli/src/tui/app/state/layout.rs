@@ -14,6 +14,9 @@ pub(crate) struct UiLayout {
     pub last_terminal_size: Option<TerminalSize>,
     pub active_dialog: Option<Dialog>,
     pub dialog_model_keys: Vec<String>,
+    /// 对话框确认后重新提交的 slash 命令前缀（"/model"、"/think"）；
+    /// Enter 等价提交 `{prefix} {selected}`（#2032 泛化）。
+    pub dialog_command_prefix: Option<String>,
     /// Ctrl+C 第一次按下的时间（用于 double-CtrlC 退出）
     pub last_ctrlc: Option<std::time::Instant>,
 }
@@ -51,11 +54,26 @@ impl UiLayout {
     pub(crate) fn clear_dialog(&mut self) {
         self.active_dialog = None;
         self.dialog_model_keys.clear();
+        self.dialog_command_prefix = None;
     }
 
     pub(crate) fn open_model_dialog(&mut self, dialog: Dialog, model_keys: Vec<String>) {
         self.active_dialog = Some(dialog);
         self.dialog_model_keys = model_keys;
+        self.dialog_command_prefix = Some("/model".to_string());
+    }
+
+    /// #2032：通用命令选择对话框（如 `/think` 档位选择）。
+    /// 确认后等价提交 `{command_prefix} {selected}`。
+    pub(crate) fn open_command_dialog(
+        &mut self,
+        dialog: Dialog,
+        keys: Vec<String>,
+        command_prefix: &str,
+    ) {
+        self.active_dialog = Some(dialog);
+        self.dialog_model_keys = keys;
+        self.dialog_command_prefix = Some(command_prefix.to_string());
     }
 
     pub(crate) fn update_areas(

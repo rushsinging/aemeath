@@ -3,7 +3,7 @@
 > 层级：02-modules / runtime（模块战术设计）
 > 状态：Target（目标设计）｜Milestone：v0.1.0｜对应 Issue：#761（S2）/ [#972](https://github.com/rushsinging/aemeath/issues/972)
 > 本文定义 Agent Runtime 的入站 OHS、所消费的能力契约、RuntimeContext 装配与 Composition Root。**只描述目标态**；实现缺口记入 `03-engineering/migration-governance`。
-> **v0.1.0 scope（#921 收缩）**：Provider option resolver 领域模型已完成迁移但未接生产链路；Config `reasoning_graph` 已退役，五节点采用固定默认 effort；Main 已通过 ReasoningPort 接线；Provider resolver 尚未接线。Runtime/Context/TUI 尚未端到端消费 Provider resolver。是否接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策。
+> **v0.1.0 scope（#921 收缩）**：Provider option resolver 领域模型已完成迁移但未接生产链路；Config `reasoning_graph` 已退役，reasoning level 为 Run 创建时静态冻结的 ReasoningLevel（配置 / 用户命令），不存在运行期 Graph 推进；Workflow 侧 Runtime 每轮按 Session 最新状态组织上下文，不装配 Workflow 专用查询端口（见 workflow/01-workflow-design.md）；Provider resolver 尚未接线。Runtime/Context/TUI 尚未端到端消费 Provider resolver。是否接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策。
 
 ## 1. 入站端口（OHS + Published Language）
 
@@ -37,7 +37,7 @@ trait AgentClient {
         reason: InteractionCancelReason,
     ) -> InteractionCommandOutcome;
     /// /think 命令入站入口：设置下一个 Run 的 reasoning level 上限。
-    /// 返回 Workflow-owned requested 值（Config user maximum clamp 已退役，#921；NEVER 经 Provider resolver 计算 effective）。
+    /// 返回 Run 创建时冻结的 requested 值（Config user maximum clamp 已退役，#921；NEVER 经 Provider resolver 计算 effective）。
     fn set_reasoning_level(
         &self,
         session_hint: SessionId,
@@ -46,7 +46,7 @@ trait AgentClient {
 }
 
 enum ReasoningLevelOutcome {
-    Accepted { requested: ReasoningLevel }, // Workflow requested 值（Config user-max clamp 已退役，#921）
+    Accepted { requested: ReasoningLevel }, // Run 创建时冻结的 requested 值（Config user-max clamp 已退役，#921）
     Unsupported,
 }
 
@@ -122,7 +122,7 @@ Runtime-owned Port 只对应真实外部 seam：
 | Memory | `MemoryPort` / `ReflectionWorkflow` / `ReflectionHistoryStore` | 当前项目 Memory，以及 Memory-owned prompt/parse/apply/history workflow；Runtime 只负责 Reflection 触发、Provider 调用和任务生命周期，见 [Memory ports](../memory/04-ports-and-adapters.md) |
 | Task | `TaskAccess` | 日常 Task 命令 / 查询；`TaskPersist` **NEVER** 进入 Runtime；见 [Task contracts](../task/02-ports-and-published-language.md) |
 | Hook | `HookPort` | 类型化 hook dispatch；Runtime 直接消费 Hook-owned façade，不定义同义 Port/Outcome。`HookOutcome` 经 application `outcome_mapper` 无损映射 directive、结构化 reason、全部 attempts 与 typed display messages；updated input 在 `tool_coordination` 重新经过 frozen Catalog、Tools-owned schema validation 与 Policy；见 [Hook](../hook/README.md) |
-| Workflow | `ReasoningPort` | effort 调节；见 [Workflow](../workflow/01-reasoning-graph.md) |
+| Workflow | 五个 `workflow_*` Tool（经既有 `ToolCatalogPort` / `ToolExecutionPort` 暴露与路由） | `workflow_create` / `workflow_list` / `workflow_query` / `workflow_update` / `workflow_node_update` **始终对 LLM 暴露**；普通 Tool 的 schema 在每次 Model Invocation 前按当前 Active Node 的 Node Role capability Profile 收缩，Profile 复用 Tools BC 的 capability vocabulary / `ToolProfile` / 父 ceiling，只收缩不放宽；Runtime 只做通用解析、Policy、Hook 与 Tool Result 回传，业务校验与 revision 提交归 Workflow Kernel；Runtime **不为 Workflow 装配专用查询端口**，每轮按 Session 最新状态组织上下文（Prompt 读取 / 注入协议待决）；真相源见 [Workflow](../workflow/01-workflow-design.md) |
 | Config | `ConfigSnapshot` PL | 本 Run 的只读配置快照；见 [Config](../config/01-config-layer.md) |
 
 `ProviderPort`、`InteractionPort`、`EventSink`、`UsageSink`、`InputPort`、`CommandScheduler` 与 `InteractionInbox` 隔离 Runtime 策略和易变外部 detail，因此由 Runtime 拥有。它们的**唯一签名真相源**分别是：`ProviderPort` 见本文 §2.1；`InteractionPort` 及其 Published Language 见本文 §2.2；`EventSink` / `UsageSink` 见本文 §2.3。Provider 文档只登记 adapter 实现面，本文其余章节和其他供应方文档只登记使用面或 adapter 行为，**NEVER** 复制第二份 trait：
@@ -307,6 +307,8 @@ submit(trigger, owned message snapshot)
 
 调用方只提交 `RunCreationRequest { spec, session, parent }`。`RuntimeContextFactory` 负责绑定 `RuntimeContext`；Runtime-owned `RunFactory::create` 协调创建处于 `Idle` 的 `RunInstance { run, context, execution }`。调用方不得构造具体 Port 后通过 `RunContextBindings`、`RuntimeContextParts` 或同构参数袋手填 Context；输入内容也不得混入创建请求，首次和后续输入统一经 `InputPort` 激活 Run。
 
+**Run 创建关联事实**：Run 创建时 Runtime 只捕获 Goal 关联事实并随 Run 存活——`RunBinding { goal_id? }`（Runtime Goal 关联只记录创建时事实，Goal 是独立跨 Run 聚合）。Run **不携带任何 Workflow 字段**：不存在 `WorkflowBindingSnapshot`、不存在绑定 Workflow 的 Run、不存在跨 Graph 迁移，也不存在 Standalone Run 的 Workflow 绑定三字段；Workflow 与 Run 只通过 Session 级上下文组织与 LLM 的五个 `workflow_*` Tool 调用发生关系。`RunBinding` **不含 `loop_id`**——Loop 不是 Runtime 类型，回边 / 自环 / Join / 并行 active_nodes 是 Workflow Graph 内部语义，Runtime 不解释也不持有。边界真相见 [Workflow](../workflow/01-workflow-design.md)，本文只登记使用面。
+
 ```rust
 // Runtime-owned application contracts.
 trait RuntimeContextFactory: Send + Sync {
@@ -441,9 +443,9 @@ Run 准备时，Runtime bootstrap/application 从 `SessionState` 捕获一致的
 
 `InteractionBindingMode::ParentMediated` 创建独立 child-scoped adapter；Sub Hook capability 创建包装 run-scoped Dispatcher 的 `BoundaryHookPort`。该 adapter 以 Hook-owned `HookPointMetadata.class` 为唯一过滤真相：Boundary point（含 Stop 与 SubRun 生命周期）必须转发，Tool/Notification point 无副作用返回 Proceed。两者都必须在 factory 内完成，不能先返回完整 Port 再要求调用方自律过滤，也不能复制 HookPoint allow-list。
 
-`reasoning` 装配 **MUST** 只构造 Workflow-owned requested-level 状态：Adaptive 使用五节点固定默认 effort，Fixed 使用 RunSpec 声明值，Inherit 冻结父 requested value，NoOp 绑定无副作用实现。它 **NEVER** 接收具体 Provider client；每次 invocation 的 model clamp 由 Loop 在 `build_window` 前经 `ProviderPort` 完成。
+`reasoning` 装配 **MUST** 在 Run 创建时冻结为静态 `ReasoningLevel`：`Fixed` 使用配置 / RunSpec / 用户命令声明值，`Inherit` 冻结父 Run requested value，`NoOp` 不携带 reasoning 请求。level 一经冻结，执行期间不再变化；装配 **NEVER** 接收具体 Provider client，也 **NEVER** 存在运行期改写 level 的端口。每次 invocation 的 model clamp 由 Loop 在 `build_window` 前经 `ProviderPort` 完成。RuntimeContext **不装配 Workflow 查询端口**：每轮上下文按 Session 最新状态组织，如何取得 Active Workflow 与刷新时机待决（见 workflow/01-workflow-design.md）。
 
-> **v0.1.0 scope（#921 收缩）**：Provider option resolver 领域模型已完成迁移但 Runtime **尚未**在生产链路调用 `resolve_invocation_options`；ReasoningPort **尚未**接线到生产 loop。上述 clamp 链是 Target 设计，v0.1.0 未接生产链路。是否接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策。
+> **v0.1.0 scope（#921 收缩）**：Provider option resolver 领域模型已完成迁移但 Runtime **尚未**在生产链路调用 `resolve_invocation_options`；上述静态 ReasoningLevel 冻结与 clamp 链是 Target 设计，v0.1.0 未接生产链路。是否接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策。
 
 以 `WorkspaceMode::Inherit` 创建的 Run，factory 实现必须在一致性 gate 下取得当前 Session 的 Context / Memory / ConfigSnapshot / TaskAccess 与 owned shared lease；返回的能力必须绑定该 lease 的逻辑生命周期，不能单独缓存或逃逸。由此 Context、MemoryTool、TaskTool 与 Reflection 看到同一实例与项目配置，而 restore authority 仍留在 composition-private session wiring。
 
@@ -518,5 +520,6 @@ session wiring 内部可持有唯一 SessionSwitchCoordinator、稳定 backing�
 | 2026-07-14 | `ReasoningLevelOutcome::Accepted` 字段从 `effective` 改为 `requested`，对齐 Workflow 的 `/think` 反馈决策：命令层只暴露 user-max-clamped requested 值，NEVER 承诺尚未计算的 provider-ceiling-resolved effective 值 | [#972](https://github.com/rushsinging/aemeath/issues/972) |
 | 2026-07-15 | 经能力事实复核，Runtime 当前只有单一 `agent_execution` 能力；端口与适配器作为 crate 根六边形层组织，`agent/composition` 保持唯一对象图与 factory 入口 | [#995](https://github.com/rushsinging/aemeath/issues/995) |
 | 2026-07-15 | 曾按多个稳定能力递归竖切并把 Port/adapter 就近分散；此结论已由上一条复核记录取代 | [#995](https://github.com/rushsinging/aemeath/issues/995) |
-| 2026-07-17 | #921 收缩范围：Config `reasoning_graph` 退役后 `reasoning_for` 移除 config graph 参数；Provider resolver 领域迁移完成但未接生产链路；Main 已通过 ReasoningPort 接线；Provider resolver 尚未接线；Runtime/Context/TUI 均未端到端消费 resolver 或 ReasoningPort；是否接线由 v0.2.0 #1142 决策 | [#921](https://github.com/rushsinging/aemeath/issues/921) |
+| 2026-07-17 | #921 收缩范围：Config `reasoning_graph` 退役后 `reasoning_for` 移除 config graph 参数；Provider resolver 领域迁移完成但未接生产链路；旧 Main ReasoningPort 轨已由 Graph 重设计取代；Provider resolver 尚未接线；Runtime/Context/TUI 均未端到端消费 resolver；Workflow 侧改为可选 `WorkflowRuntimeViewQuery`；是否接线由 v0.2.0 [#1142](https://github.com/rushsinging/aemeath/issues/1142) 决策 | [#921](https://github.com/rushsinging/aemeath/issues/921) |
 | 2026-07-18 | ContextPort 增加只读 `compact_status`，Runtime 只消费 coverage / phase / usage Published Language，不接触 scheduler、manifest 或 shard | [#1162](https://github.com/rushsinging/aemeath/issues/1162) |
+| 2026-10-07 | 同步 workflow/01-workflow-design.md：删除 `WorkflowRuntimeViewQuery` 消费契约与 `RunBinding` workflow 三字段 / `WorkflowBindingSnapshot`（上表 2026-07-17 行记录的旧口径已由本行取代），Workflow Tool 改经既有 Catalog / Execution 端口始终暴露，Runtime 每轮按 Session 最新状态组织上下文 | workflow/01-workflow-design.md |

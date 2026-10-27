@@ -68,7 +68,35 @@ async fn main() {
                 subcommand::systemone_command::run_systemone_download_command(user_agent).await;
             }
             args::SystemoneCommands::Serve => {
-                subcommand::systemone_command::run_systemone_serve_command().await;
+                let args = Args::from(cli.run_args);
+                subcommand::systemone_command::run_systemone_serve_command(args).await;
+            }
+        },
+        Some(Commands::Rsi { command }) => match command {
+            args::RsiCommands::Run {
+                dry_run,
+                max_sessions,
+                window_days,
+                json,
+            } => {
+                subcommand::rsi_command::run_rsi_run_command(
+                    subcommand::rsi_command::RsiRunOptions {
+                        dry_run,
+                        max_sessions,
+                        window_days,
+                        json,
+                    },
+                )
+                .await;
+            }
+            args::RsiCommands::Serve => {
+                subcommand::rsi_command::run_rsi_serve_command().await;
+            }
+            args::RsiCommands::History { component } => {
+                subcommand::rsi_command::run_rsi_history_command(component.as_deref());
+            }
+            args::RsiCommands::Rollback { component, cycle } => {
+                subcommand::rsi_command::run_rsi_rollback_command(&component, cycle.as_deref());
             }
         },
         Some(Commands::Version) => {

@@ -57,6 +57,9 @@ where
             let workspace_root = workspace.read().current_workspace_root();
             let wiring = shell.session_switch.clone();
             let tool_result_materializer = shell.tool_result_materializer.clone();
+            // c8 plugin seam：run 边界重建（run 内版本固定，#2030 契约）。
+            tool_result_materializer
+                .reload_plugin_seam_from_directory(&share::config::paths::global_plugins_dir());
             let agent_runner: Option<Arc<dyn tools::published::agent::AgentRunner>> =
                 Some(shell.agent_runner.clone());
             let max_tool_concurrency = shell.max_tool_concurrency;
@@ -70,7 +73,13 @@ where
             let task_access = shell.runtime_context_factory.services().task.clone();
 
             let binding = shell.model_state.binding();
-            let reasoning = Arc::new(std::sync::Mutex::new(binding.requested_reasoning));
+            // #2032：会话级 reasoning 控制（resume metadata 恢复优先，
+            // 语义单一源在 coordinator）。
+            let reasoning = Arc::new(std::sync::Mutex::new(
+                shell
+                    .session_switch
+                    .committed_reasoning_control(binding.requested_reasoning),
+            ));
             let session_snapshot = shell.session_snapshot();
             let mut context_size = shell.context_size;
             let mut session_id = session_snapshot.session_id().to_string();
@@ -147,9 +156,18 @@ where
                     }
                 PendingCommand::SwitchModel { selection } => {
                     match (build_switched_client)(&selection).await {
-                        Ok((new_binding, result)) => {
-                            *reasoning.lock().unwrap_or_else(|error| error.into_inner()) =
-                                new_binding.requested_reasoning;
+                        Ok((new_binding, mut result)) => {
+                            // #2032：模型切换仅当用户未 /think 显式选择时跟随新模型默认档。
+                            let session_requested = {
+                                let mut control = reasoning
+                                    .lock()
+                                    .unwrap_or_else(|error| error.into_inner());
+                                control.on_model_switched(new_binding.requested_reasoning);
+                                control.requested()
+                            };
+                            // 回执与状态栏显示会话档位 clamp 后的映射档位。
+                            result.reasoning_level =
+                                Some(new_binding.model.resolve_reasoning(session_requested));
                             let committed_config = shell.session_switch.committed_config_snapshot();
                             shell
                                 .session_state
@@ -180,8 +198,22 @@ where
                     }
                     continue;
                 }
-                PendingCommand::SetThinking { desired } => {
-                    execute_set_thinking(reasoning.as_ref(), &sink, desired).await;
+                PendingCommand::SetThinking { request } => {
+                    // #2032：档位调节 + 映射档位回执；请求档位落 session metadata。
+                    let requested = execute_set_thinking(
+                        reasoning.as_ref(),
+                        &sink,
+                        request,
+                        shell.model_state.binding().as_ref(),
+                    )
+                    .await;
+                    crate::application::client::session_reasoning_persist::persist_session_reasoning_on_wiring(
+                        &shell.session_switch,
+                        shell.session_management.as_ref(),
+                        &session_id,
+                        requested,
+                    )
+                    .await;
                     continue;
                 }
                 PendingCommand::InitProject { force } => {
@@ -267,6 +299,12 @@ where
                     {
                         Ok(resume_view) => {
                             session_id = resume_view.session_id.clone();
+                            // #2032：会话切换后 reasoning 档位跟随新会话 metadata
+                            // 的 `reasoning_effort`（无则跟随当前模型默认档）。
+                            *reasoning.lock().unwrap_or_else(|error| error.into_inner()) =
+                                wiring.committed_reasoning_control(
+                                    shell.model_state.binding().requested_reasoning,
+                                );
                             // 会话身份已切换：emit SessionStart 让外部集成重新捕获
                             // 恢复后的会话 id（生命周期点，失败不阻断恢复流程）。
                             crate::application::hook::session_start::emit_session_start(
@@ -705,6 +743,7 @@ where
                         pending_input: pending_input.clone(),                        run_input_buffer: runtime_context.input(),
                         continuation: input_continuation.clone(),
                         run_id: run_id.clone(),
+                        immediate_query: immediate_query.clone(),
                     };
                 let mut launch_input = input_source.clone();
                 // The idle gate consumed and typed the initial user input.
@@ -775,6 +814,34 @@ where
                                 .guidance_reload_policy(),
                         ),
                     ));
+                }
+                // #2046：aemeath.json 配置变更（含 agents 名册）——模型可见
+                // Remind（ConfigReloaded 事件只到 TUI/SDK，本 Remind 是会话内
+                // 模型感知配置变更的唯一通道）。
+                if matches!(
+                    &turn_boundary_config.refresh,
+                    Ok(config::ConfigRefreshOutcomeData::Reloaded { .. })
+                ) {
+                    let changed_keys = vec!["config:reloaded".to_string()];
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "reminder_source_registered kind=config_sources_changed trigger=turn_boundary_config"
+                    );
+                    reminder_sources.push(std::sync::Arc::new(
+                        crate::application::loop_engine::chat::reminder_sources::RunStartFactReminderSource::config_sources_changed(
+                            changed_keys,
+                        ),
+                    ));
+                }
+                // #2015：防御复检被拒的组件变更——保留旧版已定案（loop_phases
+                // 内 warn + 事件剔除）；此处记录被拒面供后续组件装配 issue
+                // 接入注入侧排除与 LLM 通知扩展。
+                if !turn_boundary_config.component_rejections.is_empty() {
+                    log::debug!(
+                        target: crate::LOG_TARGET,
+                        "component_rejections_pending_adoption trigger=turn_boundary_config count={}",
+                        turn_boundary_config.component_rejections.len(),
+                    );
                 }
                 if runtime_context.provider_ref().model.model != shell.prompt_model_id {
                     log::debug!(
@@ -854,9 +921,13 @@ where
                         max_output_tokens: runtime_context.provider_ref().max_tokens as usize,
                         raw_tool_schemas: runtime_context
                             .tool_catalog_ref()
-                            .snapshot(
+                            .snapshot_with_backgrounding(
                                 &tools::RegistryScopeName::new("main"),
                                 &tools::ToolProfileName::new("main-full"),
+                                crate::application::run::config::background_threshold_from_context(
+                                    &runtime_context,
+                                )
+                                .is_some(),
                             )
                             .map(|snapshot| snapshot.model_schemas())
                             .unwrap_or_default(),
@@ -905,7 +976,6 @@ where
                 let model_observer = main_run_port::ChatModelObserver {
                     runtime_context: runtime_context.clone(),
                     input: input_source.clone(),
-                    immediate_query: immediate_query.clone(),
                     context_size,
                     turn_context: turn_context.clone(),
                     tool_identity: tool_identity.clone(),

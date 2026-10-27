@@ -41,6 +41,9 @@ use crate::domain::agent_run::{InteractionContinuation, Run, RunTransitionError}
 pub struct InteractionCompletionContext<'a> {
     tool_context: tools::published::execution::ToolExecutionContext,
     tool_execution: &'a dyn tools::published::execution::ToolExecutionPort,
+    /// 批准后直连执行时解析 `timeout` 用：approval 路径不经 supervisor，
+    /// 必须在此把 effective `timeout` 补进 scope，否则工具只能回落默认档。
+    tool_catalog: &'a std::sync::Arc<dyn tools::ToolCatalogPort>,
     materializer: &'a crate::application::tool::tool_result_materializer::ToolResultMaterializer,
     session_id: &'a str,
 }
@@ -49,12 +52,14 @@ impl<'a> InteractionCompletionContext<'a> {
     pub fn new(
         tool_context: tools::published::execution::ToolExecutionContext,
         tool_execution: &'a dyn tools::published::execution::ToolExecutionPort,
+        tool_catalog: &'a std::sync::Arc<dyn tools::ToolCatalogPort>,
         materializer: &'a crate::application::tool::tool_result_materializer::ToolResultMaterializer,
         session_id: &'a str,
     ) -> Self {
         Self {
             tool_context,
             tool_execution,
+            tool_catalog,
             materializer,
             session_id,
         }
@@ -345,6 +350,33 @@ fn suspended_identity(
         .unwrap_or_else(|| (String::new(), "AskUserQuestion".to_string()))
 }
 
+/// 解析 approval 直连执行的 effective `timeout`（秒）。
+///
+/// 与 `ToolExecutionSupervisor` 使用同一 `get_timeout_secs` 与同一份 catalog
+/// 快照语义；approval 路径没有后台化决策，按前台档解析。catalog 不可用或
+/// 查不到该工具时返回 `None`，由工具自身 `get_timeout_secs(None, false)`
+/// 回落默认档（与摘除前的行为一致）。
+fn resolve_approved_timeout(
+    tool_catalog: &std::sync::Arc<dyn tools::ToolCatalogPort>,
+    tool_context: &tools::published::execution::ToolExecutionContext,
+    tool_name: &str,
+    input: &serde_json::Value,
+) -> Option<u64> {
+    let scope = tool_context.scope();
+    let snapshot =
+        tool_catalog.snapshot_with_backgrounding(scope.registry_scope(), scope.profile(), false);
+    let descriptor = snapshot
+        .ok()?
+        .find(&tools::ToolName::new(tool_name))
+        .cloned()?;
+    Some(tools::types::get_timeout_secs(
+        tools::types::extract_timeout_from_input(input),
+        descriptor.timeout_secs,
+        descriptor.max_timeout_secs,
+        false,
+    ))
+}
+
 async fn execute_approved_call(
     context: &InteractionCompletionContext<'_>,
     id: &sdk::ToolCallId,
@@ -361,15 +393,26 @@ async fn execute_approved_call(
     let call = approval.call;
     let mut input = call.input.clone();
     tools::published::schema_validation::strip_runtime_meta(&mut input);
+    // approval 直连执行不经 supervisor，`timeout` 的解析必须在这里补做，
+    // 与 supervisor 同源（同一 `get_timeout_secs` 与 catalog 快照）。
+    let effective_timeout_secs = resolve_approved_timeout(
+        context.tool_catalog,
+        &context.tool_context,
+        &call.name,
+        &input,
+    );
+    let mut tool_context = context
+        .tool_context
+        .with_authorization(approval.authorization);
+    if let Some(secs) = effective_timeout_secs {
+        tool_context = tool_context.with_effective_timeout_secs(secs);
+    }
     let invocation = tools::published::execution::ToolInvocation::new(
         call.name.as_str(),
         input,
-        context.tool_context.scope().clone(),
+        tool_context.scope().clone(),
     )
     .with_authorization(approval.authorization);
-    let tool_context = context
-        .tool_context
-        .with_authorization(approval.authorization);
     let domain = context
         .tool_execution
         .execute(invocation, &tool_context)

@@ -304,14 +304,15 @@ impl TypedTool for BackgroundProcessWatchTool {
     fn is_concurrency_safe(&self) -> bool {
         true
     }
-    fn timeout_secs(&self) -> u64 {
-        // #1946：框架硬上限固定 300；统一入参 timeout 只缩短内部 wait，
-        // NEVER 超过此上限，避免 effective deadline 先砍。
-        WATCH_TOOL_TIMEOUT_SECS
-    }
-
-    fn max_timeout_secs(&self) -> u64 {
-        WATCH_TOOL_TIMEOUT_SECS
+    fn get_timeout_secs(&self, requested: Option<u64>, _backgrounding_enabled: bool) -> u64 {
+        // #1946：框架硬上限固定 300，且本工具永不转后台，后台档
+        // （24h）对 Watch 不生效；入参 timeout 只能缩短内部 wait。
+        crate::domain::timeout_policy::get_timeout_secs(
+            requested,
+            WATCH_TOOL_TIMEOUT_SECS,
+            WATCH_TOOL_TIMEOUT_SECS,
+            false,
+        )
     }
 
     async fn call(
@@ -326,7 +327,11 @@ impl TypedTool for BackgroundProcessWatchTool {
         if args.task_id.is_empty() {
             return TypedToolResult::error("task_id is required".to_string());
         }
-        let timeout = Duration::from_secs(resolve_watch_wait_secs(args.timeout));
+        // `timeout` 是框架级通用参数：框架已解析成 effective 值（含 300s 硬上限）
+        // 写入 scope，执行前从入参摘除；这里只读 scope，**NEVER** 读 input。
+        let timeout = Duration::from_secs(resolve_watch_wait_secs(
+            ctx.scope().effective_timeout_secs(),
+        ));
         let access = self.source.current();
         let progress = ctx.progress_sink();
         match wait_task(

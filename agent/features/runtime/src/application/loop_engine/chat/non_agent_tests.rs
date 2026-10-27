@@ -329,3 +329,121 @@ async fn missing_committed_change_never_infers_task_hooks_from_name_or_result_te
 
     assert!(dispatch_task_facts(outcome).await.is_empty());
 }
+
+// ── progress 工具族 goal 注入（#2113）───────────────────────────
+
+/// 账本 fake：`bgp_ledger` 有 goal，`bgp_blank` goal 为空，其余未知。
+struct GoalLedgerAccess;
+
+impl tools::BackgroundProcessAccess for GoalLedgerAccess {
+    fn list_tasks(&self) -> Vec<tools::types::background_processes::BackgroundProcessSummaryData> {
+        vec![]
+    }
+
+    fn task_status(
+        &self,
+        task_id: &str,
+    ) -> Option<tools::types::background_processes::BackgroundProcessDetailData> {
+        let goal = match task_id {
+            "bgp_ledger" => "cargo test 全量门禁",
+            "bgp_blank" => "",
+            _ => return None,
+        };
+        Some(
+            tools::types::background_processes::BackgroundProcessDetailData {
+                summary: tools::types::background_processes::BackgroundProcessSummaryData {
+                    task_id: task_id.to_string(),
+                    tool_name: "Bash".to_string(),
+                    state: "backgrounded".to_string(),
+                    goal: goal.to_string(),
+                    duration_ms: None,
+                },
+                deadline_remaining_ms: None,
+                total_written_bytes: 0,
+            },
+        )
+    }
+
+    fn read_task_log(
+        &self,
+        _task_id: &str,
+        _cursor: Option<u64>,
+        _max_bytes: usize,
+    ) -> Option<tools::types::background_processes::BackgroundProcessLogData> {
+        None
+    }
+
+    fn stop_task(
+        &self,
+        task_id: &str,
+    ) -> Result<tools::types::background_processes::BackgroundProcessStopData, String> {
+        Err(format!("unknown task {task_id}"))
+    }
+}
+
+#[test]
+fn goal_enrichable_tools_cover_all_task_id_progress_tools() {
+    for tool_name in [
+        "BackgroundProcessWatch",
+        "BackgroundProcessStatus",
+        "BackgroundProcessLogs",
+        "BackgroundProcessStop",
+    ] {
+        assert!(
+            is_goal_enrichable_tool(tool_name),
+            "{tool_name} 应注入 goal"
+        );
+    }
+    for tool_name in ["BackgroundProcessList", "Bash", "Read", "TaskGet"] {
+        assert!(
+            !is_goal_enrichable_tool(tool_name),
+            "{tool_name} NEVER 注入 goal"
+        );
+    }
+}
+
+#[test]
+fn ledger_goal_injected_for_every_progress_tool_with_task_id() {
+    for tool_name in [
+        "BackgroundProcessWatch",
+        "BackgroundProcessStatus",
+        "BackgroundProcessLogs",
+        "BackgroundProcessStop",
+    ] {
+        let mut progress_call = call(tool_name, 1);
+        progress_call.input = serde_json::json!({"task_id": "bgp_ledger"});
+        inject_goal_from_ledger(&mut progress_call, &GoalLedgerAccess);
+        assert_eq!(
+            progress_call.input.get("goal"),
+            Some(&Value::String("cargo test 全量门禁".to_string())),
+            "{tool_name} header 映射依赖注入的 goal"
+        );
+    }
+}
+
+#[test]
+fn ledger_goal_never_injected_for_unknown_id_blank_goal_or_missing_task_id() {
+    let mut unknown_id_call = call("BackgroundProcessStatus", 2);
+    unknown_id_call.input = serde_json::json!({"task_id": "bgp_missing"});
+    inject_goal_from_ledger(&mut unknown_id_call, &GoalLedgerAccess);
+    assert!(
+        unknown_id_call.input.get("goal").is_none(),
+        "未知 id NEVER 注入 goal"
+    );
+
+    let mut blank_goal_call = call("BackgroundProcessStop", 3);
+    blank_goal_call.input = serde_json::json!({"task_id": "bgp_blank"});
+    inject_goal_from_ledger(&mut blank_goal_call, &GoalLedgerAccess);
+    assert!(
+        blank_goal_call.input.get("goal").is_none(),
+        "空 goal NEVER 注入"
+    );
+
+    let mut no_task_id_call = call("BackgroundProcessLogs", 4);
+    no_task_id_call.input = serde_json::json!({"timeout": 60});
+    inject_goal_from_ledger(&mut no_task_id_call, &GoalLedgerAccess);
+    assert!(
+        no_task_id_call.input.get("goal").is_none(),
+        "无 task_id NEVER 注入 goal"
+    );
+}

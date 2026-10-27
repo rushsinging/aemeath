@@ -64,6 +64,12 @@ pub(crate) const TARGETS: &[TargetSpec] = &[
         file_name: "agent-memory.log",
     },
     TargetSpec {
+        target: LogTarget::new("aemeath:agent:harness"),
+        owner: ModuleOwner::Harness,
+        sink: DiagnosticSinkId::Harness,
+        file_name: "agent-harness.log",
+    },
+    TargetSpec {
         target: LogTarget::new("aemeath:agent:task"),
         owner: ModuleOwner::TaskData,
         sink: DiagnosticSinkId::TaskData,
@@ -98,6 +104,12 @@ pub(crate) const TARGETS: &[TargetSpec] = &[
         owner: ModuleOwner::Audit,
         sink: DiagnosticSinkId::AuditDiagnostic,
         file_name: "audit-diagnostic.log",
+    },
+    TargetSpec {
+        target: LogTarget::new("aemeath:agent:workflow"),
+        owner: ModuleOwner::Workflow,
+        sink: DiagnosticSinkId::Workflow,
+        file_name: "agent-workflow.log",
     },
     TargetSpec {
         target: LogTarget::new("aemeath:agent:update"),

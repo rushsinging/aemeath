@@ -15,11 +15,12 @@ pub struct WebFetchResult {
 /// Typed input for the `web_fetch` tool.
 ///
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
+///
+/// `timeout` **MUST NOT** 在此声明：框架级通用参数，catalog 注入发布、
+/// 执行前框架摘除，工具只读 `ctx.effective_timeout_secs()`。
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(default)]
 pub struct WebFetchInput {
     /// The URL to fetch
     pub url: String,
-    /// Timeout in seconds (default 30, max 3600)
-    pub timeout: Option<u64>,
 }

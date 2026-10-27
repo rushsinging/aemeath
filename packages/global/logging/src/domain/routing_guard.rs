@@ -461,6 +461,10 @@ const OWNERS: &[(&str, OwnerRule)] = &[
         OwnerRule::new("config", "aemeath:agent:config", "crate::LOG_TARGET"),
     ),
     (
+        "agent/features/harness",
+        OwnerRule::new("harness", "aemeath:agent:harness", "crate::LOG_TARGET"),
+    ),
+    (
         "agent/features/hook",
         OwnerRule::new("hook", "aemeath:agent:hook", "crate::LOG_TARGET"),
     ),
@@ -507,6 +511,10 @@ const OWNERS: &[(&str, OwnerRule)] = &[
     (
         "agent/features/update",
         OwnerRule::new("update", "aemeath:agent:update", "crate::LOG_TARGET"),
+    ),
+    (
+        "agent/features/workflow",
+        OwnerRule::new("workflow", "aemeath:agent:workflow", "crate::LOG_TARGET"),
     ),
     (
         "agent/shared",

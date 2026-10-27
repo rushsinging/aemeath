@@ -897,7 +897,9 @@
       },
       "allowed_entries": [
         "domain",
-        "lib.rs"
+        "domain.rs",
+        "lib.rs",
+        "constants.rs"
       ],
       "reason": "F-3：workflow Hexagonal 层目录与顶层文件白名单（#1022 矩阵）",
       "profile": "fast"
@@ -2025,6 +2027,7 @@
           "audit",
           "config",
           "context",
+          "harness",
           "hook",
           "logging",
           "memory",
@@ -2045,6 +2048,7 @@
           "audit",
           "config",
           "context",
+          "harness",
           "hook",
           "logging",
           "memory",
@@ -2135,7 +2139,11 @@
           "utils"
         ],
         "logging": [],
-        "utils": []
+        "utils": [],
+        "harness": [
+          "share",
+          "utils"
+        ]
       },
       "reason": "F-4：workspace 业务依赖矩阵（cargo metadata path 依赖边校验；不在矩阵的 crate 跳过）",
       "profile": "fast"
@@ -2197,6 +2205,7 @@
         "constants.rs",
         "delivery_logging.rs",
         "delivery_logging_tests.rs",
+        "harness.rs",
         "lib.rs",
         "lib_tests.rs",
         "memory.rs",
@@ -2696,18 +2705,6 @@
           "since": "#1146"
         }
       ]
-    },
-    {
-      "id": "pattern.tools.deny-input-timeout-field",
-      "assertion": "struct_field_presence",
-      "scope": {
-        "kind": "path_prefix",
-        "value": "agent/features/tools/src/domain/types"
-      },
-      "struct_marker": "deny_unknown_fields",
-      "required_field": "timeout",
-      "reason": "开 deny_unknown_fields 的 Input struct MUST 声明框架统一注入 schema 的 timeout 字段：TypedToolAdapter::input_schema 注入承诺、execution_supervisor 消费、serde deny 三方契约须一致（#2003 Grep 漏声明实证）",
-      "profile": "full"
     }
   ],
   "retired_symbols": [

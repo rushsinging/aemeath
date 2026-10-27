@@ -12,6 +12,9 @@ pub struct AgentResult {
 ///
 /// build.rs 由本 struct 生成 `input_schema`（字段 `///` 注释即 LLM 看到的参数描述）。
 /// 字段标识符即 JSON property 名（build.rs 使用标识符，忽略 serde rename）。
+///
+/// `timeout` **MUST NOT** 在此声明：框架级通用参数，catalog 注入发布、
+/// 执行前框架摘除，工具只读 `ctx.effective_timeout_secs()`。
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AgentInput {
     /// The task for the agent to perform
@@ -20,8 +23,6 @@ pub struct AgentInput {
     pub description: String,
     /// Required named agent. Must exactly match an instance name in the system prompt's Available Agent Roles roster (machine key: `config.agents.names`).
     pub agent: String,
-    /// Timeout in seconds (default 3600, max 10800)
-    pub timeout: Option<u64>,
 }
 
 #[cfg(test)]

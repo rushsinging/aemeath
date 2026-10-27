@@ -1,4 +1,5 @@
 use super::constants::MAX_LOADED_HISTORY_STEPS;
+use super::text_stream::has_visible_content;
 use crate::tui::adapter::runtime_view::TuiResumedStepFinalizeCause;
 use sdk::{
     LocalResumeContentBlock as ContentBlock, LocalResumeMessage as Message,
@@ -585,6 +586,7 @@ fn build_items_for_step(step_index: usize, step: &ResumedHistoryStep) -> Vec<Res
             _ => {
                 for (block_index, block) in message.content.iter().enumerate() {
                     let (kind, estimated_lines) = match block {
+                        ContentBlock::Text { text } if !has_visible_content(text) => continue,
                         ContentBlock::Text { text } => (
                             ResumedHistoryItemKind::AssistantText {
                                 message_index,
@@ -592,6 +594,11 @@ fn build_items_for_step(step_index: usize, step: &ResumedHistoryStep) -> Vec<Res
                             },
                             text.lines().count().max(1).saturating_add(1),
                         ),
+                        ContentBlock::Thinking { thinking, .. }
+                            if !has_visible_content(thinking) =>
+                        {
+                            continue;
+                        }
                         ContentBlock::Thinking { thinking, .. } => (
                             ResumedHistoryItemKind::Thinking {
                                 message_index,

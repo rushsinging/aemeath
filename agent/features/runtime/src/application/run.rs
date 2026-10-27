@@ -12,6 +12,7 @@ pub(crate) mod launcher;
 pub(crate) mod run_factory_support;
 #[cfg(test)]
 mod scenario_tests;
+pub(crate) mod session_reasoning;
 #[cfg(test)]
 #[path = "run/test_support_tests.rs"]
 mod test_support_tests;

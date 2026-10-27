@@ -41,8 +41,14 @@ impl TypedTool for TaskListCreateTool {
         false
     }
 
-    fn timeout_secs(&self) -> u64 {
-        5
+    fn get_timeout_secs(&self, requested: Option<u64>, backgrounding_enabled: bool) -> u64 {
+        // 纯内存写入，默认 5s 足够；仍接受显式 timeout 与统一上限。
+        crate::domain::timeout_policy::get_timeout_secs(
+            requested,
+            5,
+            crate::domain::constants::DEFAULT_TOOL_MAX_TIMEOUT_SECS,
+            backgrounding_enabled,
+        )
     }
 
     async fn call(

@@ -60,8 +60,8 @@ pub use chat::{
     ReflectionStatusView, ReflectionTokenUsageView, ReflectionTriggerView, ResumedSessionStep,
     ResumedStepFinalizeCause, RunStatusView, RunTimingView, SkillRequest, SubRunActivityEventView,
     SubRunActivityKindView, SubRunIdentityView, SubRunStartedEventView, SubRunTerminalOutcomeView,
-    ToolCallStatusView, ToolProgressEventView, ToolResultImage, WorkspaceContextView,
-    WorkspaceStackEntryView,
+    ThinkingRequest, ToolCallStatusView, ToolProgressEventView, ToolResultImage,
+    WorkspaceContextView, WorkspaceStackEntryView,
 };
 pub use client::{
     AgentClient, ConfigFormClient, ConnectClient, DisplayHistoryQuery, RunControlClient,
@@ -70,7 +70,8 @@ pub use commands::{
     ApplicationControlCommand, ApplicationControlTarget, CommandArgumentSchema, CommandCatalogPort,
     CommandCompletion, CommandDescriptor, CommandMechanism, CommandName, CommandParseError,
     CommandRoute, CommandRouterPort, CommandTarget, ContextEstimate, ModelSwitchResult,
-    ParsedArguments, SkillRequestCommand, SlashInput, SnapshotQueryCommand, SnapshotQueryTarget,
+    ParsedArguments, ReasoningEffortMapping, SkillRequestCommand, SlashInput, SnapshotQueryCommand,
+    SnapshotQueryTarget,
 };
 pub use config_form::{
     ConfigFormAction, ConfigFormActionId, ConfigFormActionStyle, ConfigFormBusy,

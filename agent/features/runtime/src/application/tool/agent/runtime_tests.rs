@@ -57,7 +57,7 @@ impl TypedTool for TimedTool {
     fn is_concurrency_safe(&self) -> bool {
         self.safe
     }
-    fn timeout_secs(&self) -> u64 {
+    fn get_timeout_secs(&self, _requested: Option<u64>, _backgrounding_enabled: bool) -> u64 {
         5
     }
     async fn call(
@@ -660,7 +660,7 @@ async fn test_execute_tools_timeout_message_distinguishes_tool_call_execution() 
         fn input_schema(&self) -> Value {
             serde_json::json!({"type": "object"})
         }
-        fn timeout_secs(&self) -> u64 {
+        fn get_timeout_secs(&self, _requested: Option<u64>, _backgrounding_enabled: bool) -> u64 {
             1
         }
         async fn call(
@@ -815,7 +815,7 @@ async fn test_execute_tools_deadline_notifies_cooperative_tool_cancellation() {
         fn input_schema(&self) -> Value {
             serde_json::json!({"type": "object"})
         }
-        fn timeout_secs(&self) -> u64 {
+        fn get_timeout_secs(&self, _requested: Option<u64>, _backgrounding_enabled: bool) -> u64 {
             1
         }
         fn cancellation(&self) -> tools::published::execution::CancellationDeclaration {
@@ -892,7 +892,7 @@ async fn test_execute_tools_cancel_notifies_cooperative_tool_cancellation() {
         fn input_schema(&self) -> Value {
             serde_json::json!({"type": "object"})
         }
-        fn timeout_secs(&self) -> u64 {
+        fn get_timeout_secs(&self, _requested: Option<u64>, _backgrounding_enabled: bool) -> u64 {
             600
         }
         fn cancellation(&self) -> tools::published::execution::CancellationDeclaration {

@@ -128,6 +128,25 @@ async fn status_tool_unknown_task_errors() {
     assert!(result.is_error, "未知任务必须报错");
 }
 
+/// 原始缺陷回归：模型按 catalog 注入的发布 schema 传 `timeout` 时，
+/// 框架 MUST 在执行前摘除，`BackgroundProcessLogs` 不得因此报未知字段。
+#[tokio::test]
+async fn logs_tool_accepts_framework_timeout_after_strip() {
+    let tool = BackgroundProcessLogsTool { source: source() };
+    let mut input = serde_json::json!({"task_id": "task-1", "timeout": 30});
+    let taken = crate::domain::timeout_policy::take_timeout_from_input(&mut input);
+    assert_eq!(taken, Some(30));
+
+    let result = tool.call(input, &test_context()).await;
+    assert!(
+        !result.is_error,
+        "框架摘除 timeout 后 MUST 正常读取日志: {}",
+        result.text
+    );
+    let log = result.data.expect("结构化数据").log;
+    assert!(log.text.contains("line-1"));
+}
+
 #[tokio::test]
 async fn logs_tool_returns_chunk_and_cursor() {
     let tool = BackgroundProcessLogsTool { source: source() };
@@ -168,21 +187,19 @@ async fn stop_tool_reports_signal() {
 }
 
 #[test]
-fn watch_tool_framework_timeout_is_300_not_default_120() {
+fn watch_tool_framework_timeout_is_300_and_immune_to_background_budget() {
     use crate::domain::TypedTool;
     let tool = BackgroundProcessWatchTool { source: source() };
-    assert_eq!(
-        tool.timeout_secs(),
-        crate::domain::constants::WATCH_TOOL_TIMEOUT_SECS
-    );
-    assert_eq!(tool.timeout_secs(), 300);
+    assert_eq!(tool.get_timeout_secs(None, false), 300);
+    // 后台档（24h）不得抬高 Watch：本工具永不转后台。
+    assert_eq!(tool.get_timeout_secs(None, true), 300);
     assert_eq!(
         crate::domain::types::background_processes::resolve_watch_wait_secs(Some(60)),
         60
     );
     assert!(
         crate::domain::types::background_processes::resolve_watch_wait_secs(None)
-            < tool.timeout_secs(),
+            < tool.get_timeout_secs(None, false),
         "内部 wait MUST 短于框架 timeout"
     );
 }

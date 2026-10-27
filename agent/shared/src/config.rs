@@ -12,8 +12,8 @@ pub mod domain;
 
 pub use adapters::paths;
 pub use domain::{
-    audit, context, file_snapshot, hooks, legacy, logging, memory, models, permissions, runtime,
-    scope, scoring, skills, storage, tools, ui, update,
+    audit, context, file_snapshot, harness, hooks, legacy, logging, memory, models, permissions,
+    runtime, scope, scoring, skills, storage, tools, ui, update,
 };
 
 // Re-exports for backward compatibility
@@ -21,6 +21,7 @@ pub use audit::AuditConfig;
 pub use context::ContextConfig;
 pub use domain::config::{Config, GuidanceConfig, GuidanceReloadPolicy};
 pub use file_snapshot::{FileChange, FileChangeKind, FileSnapshot};
+pub use harness::{HarnessConfig, RsiConfig, RsiExecutionMode};
 pub use hooks::HooksConfig;
 pub use legacy::{ApiConfig, ModelConfig};
 pub use logging::LoggingConfig;

@@ -479,6 +479,7 @@ impl InteractionPublisher for ChatInteractionPublisher<'_> {
                 crate::application::run::context::RunCancellationScope::from_token(step_cancel),
             )),
             self.runtime_context.tool_execution_ref().as_ref(),
+            self.runtime_context.tool_catalog_ref(),
             self.materializer,
             self.session_id,
         )
@@ -522,6 +523,7 @@ impl InteractionPublisher for ProgressInteractionPublisher<'_> {
                 crate::application::run::context::RunCancellationScope::from_token(step_cancel),
             )),
             self.runtime_context.tool_execution_ref().as_ref(),
+            self.runtime_context.tool_catalog_ref(),
             self.materializer,
             self.session_id,
         )

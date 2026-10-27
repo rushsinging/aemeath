@@ -209,23 +209,22 @@ fn test_exit_worktree_schema() {
     let schema = tool.input_schema();
 
     assert_eq!(schema["type"], "object");
-    // path 已移除；仅允许框架统一的可选 timeout。
+    // path 已移除；`timeout` 是框架级通用参数，由 catalog 注入发布，工具自身不声明。
     let props = schema
         .get("properties")
         .and_then(|v| v.as_object())
         .expect("ExitWorktree schema should have properties");
     assert!(
-        props.contains_key("timeout"),
-        "ExitWorktree should declare timeout, got: {schema}"
-    );
-    assert!(
         !props.contains_key("path"),
         "ExitWorktree must not declare path, got: {schema}"
     );
-    assert_eq!(
-        props.len(),
-        1,
-        "ExitWorktree should only declare timeout, got: {schema}"
+    assert!(
+        !props.contains_key("timeout"),
+        "ExitWorktree MUST NOT declare timeout（由 catalog 注入）, got: {schema}"
+    );
+    assert!(
+        props.is_empty(),
+        "ExitWorktree has no own fields, got: {schema}"
     );
     assert!(schema
         .get("required")

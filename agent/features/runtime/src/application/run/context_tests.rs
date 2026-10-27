@@ -167,9 +167,10 @@ fn runtime_context_ports_are_functional_not_just_identity() {
     );
 
     assert_eq!(
-        *ctx.reasoning()
+        ctx.reasoning()
             .lock()
-            .unwrap_or_else(|error| error.into_inner()),
+            .unwrap_or_else(|error| error.into_inner())
+            .requested(),
         share::reasoning::ReasoningLevel::Medium,
     );
 }

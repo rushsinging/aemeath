@@ -39,7 +39,7 @@ aemeath 是一个基于 Rust 的 **AI 编程助手**，以 TUI 为主要交付�
 | **Policy** | 权限评估（工具执行前的准入判断）。 |
 | **Audit** | v0.1.0 记录与查询 Usage metadata；Cost / Pricing 仅为 Future 能力，当前不计算、不持久化。 |
 | **Tool & Skill & Command** | 工具生态：内置 Tool、Skill、Slash 命令、MCP 集成。 |
-| **Workflow** | agent 行为的推理调节：reasoning effort 阶段调节（reasoning graph），经端口被 Agent Runtime 消费。不做多-agent 图编排；sub-agent 的派生与执行属 Agent Runtime。 |
+| **Workflow** | Session 级工作流 Graph：Graph Definition / Node / Edge / State / Failure Routing 与节点结论，经 Graph Kernel 校验；Runtime 每轮按 Session 最新状态组织上下文，LLM 经五个始终可见的 `workflow_*` Tool 提交语义操作。SubAgent 的派生与执行属 Agent Runtime，不是 Graph。 |
 
 ### 3.3 通用子域 Generic Subdomain（可买可换的通用能力）
 
@@ -66,7 +66,7 @@ Bounded Context 是**解决方案空间**的边界，一个 BC 内部维持一�
 | 6 | **Policy** | 支撑 | 权限评估 |
 | 7 | **Audit** | 支撑 | 审计事件；Usage metadata（v0.1.0）；Cost / Pricing（**Future**） |
 | 8 | **Tool & Skill & Command** | 支撑 | 内置 Tool、Skill、Slash 命令、MCP |
-| 9 | **Workflow** | 支撑 | reasoning effort 阶段调节（reasoning graph），经端口被 Agent Runtime 消费 |
+| 9 | **Workflow** | 支撑 | Session 级 Graph Definition / Node / Edge / State / Failure Routing、Graph Kernel 与五个 workflow Tool 的业务校验，LLM 经 Runtime 通用 ToolOrchestration 消费 |
 | 10 | **Provider** | 通用 | LLM 供应商 ACL、统一调用与流式 |
 | 11 | **Hook** | 通用 | 生命周期钩子执行 |
 | 12 | **Storage** | 通用 | 持久化机制（原子写、损坏兜底） |
@@ -88,7 +88,7 @@ Bounded Context 是**解决方案空间**的边界，一个 BC 内部维持一�
 | **Policy** | 权限规则、路径/能力约束与 `PolicyDecision`；工具执行前的准入判断 | 用户审批交互；Hook 执行；Tool 函数调用；Runtime 阻断后的控制流；Audit 记录 |
 | **Audit** | 不可变 Audit Event；原始 usage 的审计语义；不可变事件 sink 策略、查询与派生投影；物理持久化经 Storage Port；Cost / Pricing 聚合属 **Future**（v0.1.0 仅 Usage metadata） | 阻塞或驱动 Runtime；权限决策；普通诊断日志及 Logging sink；Provider 调用编排；业务实体状态 |
 | **Tool & Skill & Command** | Tool Catalog/Execution；Registry Scope 与 capability Profile；ToolOutcome；Skill metadata 发现、版本化快照、按 identity 调用时加载与唯一动态 Skill Tool；SkillRequest / SnapshotQuery / ApplicationControl 解析路由；MCP Tool adapter 与局部连接状态机；连接状态不驱动 Run | Policy/Hook/审批；timeout、跨 Tool 并发和 Run Step 编排；Context Window 注入策略；目标 BC 的查询/写入不变量；终端渲染 |
-| **Workflow** | Reasoning Node 局部 effort 调节状态机、effort 推断与 `ReasoningPort`；应用 Config 提供的静态上限，并根据观察信号调节推理强度；该状态机不驱动 Run | 静态阈值和默认值所有权；Run 流程编排或执行状态机；SubAgent 图；Tool gate；Policy；模型调用；Slash Command 的写入所有权 |
+| **Workflow** | Graph Definition / Node / Edge / State / Failure Routing；节点结论（node conclusion）与证据引用；Graph Kernel 校验与 revision；五个 workflow Tool（`workflow_create` / `workflow_list` / `workflow_query` / `workflow_update` / `workflow_node_update`）的业务校验；`WorkflowStatus`（Active / Inactive / Completed / Cancelled，层级待决）与 Session `workflows` 关联及 `active_workflow` 指针；该状态机不驱动 Run | Run 编排或 Run 生命周期；调用 LLM、执行 Tool、Provider 协议；SubAgent Graph（SubAgent 是 Runtime capability）；Policy / Hook / 用户审批；Runtime Goal 生命周期与跨 Run 继续策略；静态 ReasoningLevel 与 Provider clamp 所有权；Slash Command 的写入所有权；直接面向用户交互（用户只与 LLM 对话，语义操作由 LLM 经 Tool 完成） |
 | **Provider** | 各厂商 API ACL；统一 invoke/stream；模型能力声明；reasoning 参数映射；原始 token usage 提取（未定价）与供应商错误分类 | Run loop；Context Window 构建；跨调用业务重试/故障转移策略；Tool 执行；Cost/Pricing 聚合；UI 事件投影 |
 | **Hook** | Hook 配置匹配；子进程执行、环境变量、timeout；输出解析；阻断/放行与 feedback 语义 | Hook 触发时机；阻断后的 Runtime 重试/停止编排；Policy 规则；Tool 执行；Audit 事件存储 |
 | **Storage** | 原子读写、物理路径/文件格式 adapter、损坏检测与安全兜底、存储后端机制 | Session/Memory/Task/Workspace 等数据及 Snapshot 语义所有权；领域 schema 与业务迁移决策；retention/compact/eviction 业务策略；Run checkpoint |
@@ -114,7 +114,7 @@ Bounded Context 是**解决方案空间**的边界，一个 BC 内部维持一�
 2. **Session 属 Context Management**：Session 的主体是对话历史（喂给 LLM 的上下文本体），因此归 Context Management，而非独立 BC。
 3. **无 durable invocation**：aemeath 是人在环的交互式 CLI，崩溃后由用户重新发起、LLM 基于真实文件系统状态重新决策，副作用一致性由"人 + 文件系统"兜底。因此不做引擎级 durable checkpoint，仅保留 Run Step 级 session 快照。
 4. **Loop 是模块非 BC**：Agent Loop 复杂性通过 Agent Runtime 内部模块拆分（Loop Engine + 各 Coordinator + 端口）解决，不制造伪 BC。
-5. **Workflow 是支撑域 BC，非核心、非编排**：仅承载 reasoning effort 调节（reasoning graph），经端口被 Agent Runtime 消费；**不做多-agent 图编排（无此长期计划）**。v0.2.0 的"单 main + 多 sub"场景由 Agent Runtime 的 SubAgent 能力承担，不属编排。
+5. **Workflow 是支撑域 BC，Session 级 Graph orchestration、非核心**：拥有 Graph Definition / Node / Edge / State / Failure Routing、Graph Kernel 与五个 workflow Tool 的业务校验；Runtime 每轮按 Session 最新状态组织上下文，向 Provider 只传通用 messages / tool schema / model options，具体读取 / 注入协议待决；**只编排 Graph 节点，不编排 Run**——不创建 Run、不驱动 Run 生命周期，Run 与 Run 之间的继续权属于对话驱动与 Runtime 授权策略。Runtime Goal 是独立跨 Run 聚合，Workflow 不从属 Goal；“单 main + 多 sub”的 SubAgent 派生与执行由 Agent Runtime 能力承担，不是 Graph 节点。
 
 ## 6. 相关文档
 
@@ -128,6 +128,7 @@ Bounded Context 是**解决方案空间**的边界，一个 BC 内部维持一�
 
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-10-07 | Workflow 口径同步 workflow/01-workflow-design.md：Session 0..n Workflow、四状态（层级待决）、五个 workflow Tool、Runtime 按 Session 最新状态组织上下文；移除 `WorkflowRuntimeView` / tool policy / 三类 tool 旧口径 | workflow/01-workflow-design.md |
 | 2026-08-09 | 明确 Audit v0.1.0 为 Usage-only；Runtime/SDK/TUI 旧 Cost surface 与历史写路径退役，Future Cost/Pricing 需另行设计 | #932 |
 | 2026-07-11 | 初稿：产品目标、子域三分类、15 BC 清单、关键约束 | #760 |
 | 2026-07-11 | 改为纯目标态（移除当前代码落点列）、文档引用链接化、新增修改历史 | #760 |

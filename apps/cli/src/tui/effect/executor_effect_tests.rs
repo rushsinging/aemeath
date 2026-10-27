@@ -178,3 +178,31 @@ fn executor_routes_terminal_notification_to_injected_writer() {
         "executor 分支必须委托 write_terminal_notification（注入 writer 的唯一写出入口）"
     );
 }
+
+/// CopyToClipboard 接线契约：executor 必须按 `CopyOutcome` 区分系统剪贴板与终端
+/// OSC 52 两条成功提示。NEVER 在测试中直接执行该 Effect——它向真实 stdout /
+/// 系统剪贴板写入；字节契约由 `clipboard_tests` 的注入 writer 测试覆盖。
+#[test]
+fn executor_maps_copy_outcome_to_distinct_notices() {
+    let source = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tui/effect/executor.rs"),
+    )
+    .expect("read executor source");
+
+    assert!(
+        source.contains("CopyOutcome::SystemClipboard"),
+        "executor 必须区分 SystemClipboard 结果"
+    );
+    assert!(
+        source.contains("CopyOutcome::TerminalOsc52"),
+        "executor 必须区分 TerminalOsc52 结果"
+    );
+    assert!(
+        source.contains("已复制选中内容"),
+        "系统剪贴板成功提示必须保留"
+    );
+    assert!(
+        source.contains("已通过终端复制"),
+        "OSC 52 成功提示必须区分于系统剪贴板"
+    );
+}

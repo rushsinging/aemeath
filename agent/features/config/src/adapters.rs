@@ -148,31 +148,69 @@ impl EnvAdapter {
             let skill_match = parse_bool_switch(source.get("AEMEATH_SCORING_SKILL_MATCH"));
             let policy_triage = parse_bool_switch(source.get("AEMEATH_SCORING_POLICY_TRIAGE"));
             let memory_recall = parse_bool_switch(source.get("AEMEATH_SCORING_MEMORY_RECALL"));
-            let socket_path = source
-                .get("AEMEATH_SCORING_SOCKET_PATH")
+            let http_listen = source
+                .get("AEMEATH_SCORING_HTTP_LISTEN")
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+            let http_endpoint = source
+                .get("AEMEATH_SCORING_HTTP_ENDPOINT")
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty());
             let connect_timeout_secs =
                 parse_non_negative(source.get("AEMEATH_SCORING_CONNECT_TIMEOUT_SECS"));
             let infer_timeout_secs =
                 parse_non_negative(source.get("AEMEATH_SCORING_INFER_TIMEOUT_SECS"));
+            let backend =
+                source
+                    .get("AEMEATH_SCORING_BACKEND")
+                    .and_then(|value| match value.trim() {
+                        "local" => Some(share::config::domain::scoring::ScoringBackend::Local),
+                        "bailian" => Some(share::config::domain::scoring::ScoringBackend::Bailian),
+                        _ => None,
+                    });
+            let bailian_env_field = |key: &str| {
+                source
+                    .get(key)
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+            };
+            let bailian_api_key = bailian_env_field("AEMEATH_SCORING_BAILIAN_API_KEY");
+            let bailian_base_url = bailian_env_field("AEMEATH_SCORING_BAILIAN_BASE_URL");
+            let bailian_full_url = bailian_env_field("AEMEATH_SCORING_BAILIAN_FULL_URL");
+            let bailian_model = bailian_env_field("AEMEATH_SCORING_BAILIAN_MODEL");
+            let bailian = (bailian_api_key.is_some()
+                || bailian_base_url.is_some()
+                || bailian_full_url.is_some()
+                || bailian_model.is_some())
+            .then_some(share::config::domain::merge::BailianScoringConfigPatch {
+                api_key: bailian_api_key,
+                base_url: bailian_base_url,
+                full_url: bailian_full_url,
+                model: bailian_model,
+            });
             (enabled.is_some()
                 || memory_rerank.is_some()
                 || skill_match.is_some()
                 || policy_triage.is_some()
                 || memory_recall.is_some()
-                || socket_path.is_some()
+                || http_listen.is_some()
+                || http_endpoint.is_some()
                 || connect_timeout_secs.is_some()
-                || infer_timeout_secs.is_some())
+                || infer_timeout_secs.is_some()
+                || backend.is_some()
+                || bailian.is_some())
             .then_some(share::config::domain::merge::ScoringConfigPatch {
                 enabled,
+                backend,
+                bailian,
                 memory_rerank,
                 skill_match,
                 policy_triage,
                 memory_recall,
                 // 事件保留天数暂无业务 env：仅经配置文件分层合并设置。
                 event_retention_days: None,
-                socket_path,
+                http_listen,
+                http_endpoint,
                 connect_timeout_secs,
                 infer_timeout_secs,
             })

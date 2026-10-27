@@ -9,7 +9,7 @@
 System One 决策模型是一类**非生成式**评分服务：对「状态 × 候选集」一次前向（或少量前向）直接输出校准概率分布，延迟远低于生成式 LLM。Scoring BC 把它作为 aemeath 内部决策点（记忆重排、Skill 匹配、权限预筛等）的可选增强能力接入：
 
 - **可选增强，NEVER 阻断主循环**：System One 未安装、加载失败、推理超时、开关关闭时，消费点回退到原有词法/启发式路径；初始化失败必须明确报错并禁用 System One，NEVER 静默切换到另一评分后端。
-- **生产路径为本机 scoring daemon**：kev 0.8B 的 Q8_0 GGUF + 外置 PointerHead 由**单一** `aemeath systemone serve` 常驻加载；各会话经 Unix domain socket 调用，多进程共享一份权重（见 [04-scoring-daemon.md](04-scoring-daemon.md) / #1935）。进程内 embedded **已退役**，不再是生产或测试默认路径。
+- **生产路径为本机 scoring daemon**：kev 0.8B 的 Q8_0 GGUF + 外置 PointerHead 由**单一** `aemeath systemone serve` 常驻加载；各会话经 HTTP 调用（#2096：UDS 已退役，HTTP 替代；`scoring.http_listen` / `http_endpoint`），多进程共享一份权重（见 [04-scoring-daemon.md](04-scoring-daemon.md)）。进程内 embedded **已退役**，不再是生产或测试默认路径。
 - **外部 HTTP（Jev）不是生产 fallback**：`jev_http` 仅保留为测试 / 离线对分；daemon 不可用时 fail-open，NEVER 回退 HTTP。
 - **模型按需手动安装**：启动会话 `aemeath` NEVER 主动下载模型；缺失时提示执行 `aemeath systemone download`。模型安装、校验和缓存由独立命令负责；daemon 启动失败同样引导 download，NEVER 自动下载。
 - **协议无锁定**：`ScoringPort` 不暴露引擎或传输细节（无 URL / sock 路径概念泄漏到消费点）；客户端 daemon adapter 与 HTTP adapter（测试）都只是换一个 `ScoringPort` 实现。
@@ -71,7 +71,9 @@ domain/
   pointer_head.rs         — hidden states → q/k 投影 → 校准 logits（纯领域数学）
 ports.rs                  — ScoringPort / CalibrationPort / ModelAssetPort
 adapters/
-  daemon_client.rs        — 会话侧 ScoringPort：UDS 客户端（生产路径）
+  local_client.rs         — 会话侧 ScoringPort：local daemon HTTP 客户端（生产路径，#2096）
+  bailian_client.rs       — 会话侧 ScoringPort：bailian 云端 HTTPS 客户端（#2095）
+  daemon_http_serve.rs    — daemon HTTP accept loop：POST /systemone + GET /healthz
   daemon_serve.rs         — `aemeath systemone serve`：单实例锁 + listener + 串行 worker
   llama_worker.rs         — llama.cpp context 的单线程生命周期与逐 token hidden 读取（仅 serve 路径）
   model_assets.rs         — manifest、下载、sha256 校验、原子安装与本地解析
@@ -105,12 +107,12 @@ trait CalibrationPort {
 
 > 详细契约见 [04-scoring-daemon.md](04-scoring-daemon.md)（#1935）。此处只保留与引擎/模型相关的摘要。
 
-- **进程模型**：`aemeath systemone serve` 常驻加载 1 份权重；会话进程经 UDS 调用 `DaemonScoringClient`（实现 `ScoringPort`）。
+- **进程模型**：`aemeath systemone serve` 常驻加载 1 份权重；会话进程经 HTTP 调用 `LocalSystemOneClient`（实现 `ScoringPort`）。
 - **首批平台**：macOS arm64；其他平台未实现时明确报告不可用并禁用 System One，NEVER 自动回退 HTTP，NEVER 回退进程内 embedded。
 - **模型形态**：Qwen3.5-0.8B + kev LoRA 合并后的 **Q8_0 GGUF（约 775–812MB）**，加外置 PointerHead 权重。Q4_K_M 在 79-case 对分仅 94.9% argmax 一致，NEVER 用于生产评分。
 - **推理机制**（daemon 进程内）：对 kev 编码协议产生的逐题 causal row 做 llama.cpp embedding 前向，读取逐 token normed hidden states；在 `<|fim_suffix|>` 的 decide 位置与每个 `<|box_end|>` option 位置取 hidden，执行 `q(h_decide)`、`k(h_option)`、点积、温度缩放与 softmax。
 - **Rust 接入**：优先使用 `llama-cpp-2` safe binding；若 safe 层未暴露逐 token hidden，仅对 `llama_get_embeddings_ith` 等必要 API 使用 `llama-cpp-sys-2` 薄封装，unsafe MUST 局限在 serve 侧 adapter 内。
-- **生命周期**：llama model/context 与 PointerHead 固定驻留 daemon 内专用 worker thread（单 worker 串行）；会话侧异步 `ScoringPort` 只做 UDS RPC，NEVER 在会话进程持有 C/C++ context。
+- **生命周期**：llama model/context 与 PointerHead 固定驻留 daemon 内专用 worker thread（单 worker 串行）；会话侧异步 `ScoringPort` 只做 HTTP RPC，NEVER 在会话进程持有 C/C++ context。
 - **退役进程内 embedded**：会话 composition **NEVER** 再装配进程内引擎；测试用 mock 或真 daemon。原 embedded 路径仅作为代码迁移源，合并进 serve 后删除生产出口。
 - **已知上游缺陷规避**：llama.cpp（ggml-metal-device.m，residency sets 释放断言）在 device 释放期可能 SIGABRT；engine init 期设置 `GGML_METAL_NO_RESIDENCY=1` 关闭该特性（用户显式配置时不覆盖），上游修复后移除。
 
@@ -157,6 +159,18 @@ aemeath systemone download
 - 与 daemon 路径的离线回归基准（显式启用 `http-adapter` feature）。
 
 生产配置中的 `AEMEATH_SCORING_URL`、`AEMEATH_SCORING_MODEL`、`AEMEATH_SCORING_TIMEOUT_MS` 随 HTTP 退役进入兼容清理；具体移除节奏遵循配置弃用门禁，NEVER 留下看似生效但实际无消费点的死配置。daemon 使用独立的 `scoring.socket_path` / timeout 配置，**NEVER** 复用上述已退役键名充当生产开关。
+
+### 4.3.1 bailian 云端驱动（backend 分流，#2095）
+
+退役边界针对的是旧 **Jev 线格式** HTTP adapter；现行 `scoring.backend` 驱动分流与此无关：
+
+- `scoring.backend = "local"`（默认）：现状 UDS daemon 路径（§4.1），消费 `scoring.socket_path` / `connect_timeout_secs`。
+- `scoring.backend = "bailian"`：百炼决策模型（TypeSafe System One 协议）HTTPS 直连，`BailianSystemOneClient` 实现 `ScoringPort`：
+  - 端点 = `scoring.bailian.full_url`（优先）或 `scoring.bailian.base_url + "/systemone"`；Bearer 鉴权凭证为 `scoring.bailian.api_key`，与 `models.providers` **独立，NEVER 混用**；
+  - wire 协议与本域领域语言逐字段同构（noul/choice/score、probabilities 候选集内归一化），转换在 `domain/bailian_wire.rs`（qid q0..qN 按请求序生成/还原，缺失候选/档位补 0，calibration 恒 `Raw`），契约测试用实测响应 fixture 钉死形状（beta 防漂移）；
+  - 装配（`assemble_bailian_ports`）**NEVER** 读发行 manifest、**NEVER** 拉起 systemone daemon；审计 `engine_revision` 取 `bailian/{model}`（单一真相源）；
+  - 配置缺失/非法（缺 api_key 或端点）fail-open：不装配端口 + 单条中文提醒（`BailianConfigInvalid`），主聊天 NEVER 阻断；传输/协议错误映射 `ScoringUnavailable`，消费点按 §4.4 统一降级；
+  - 复用 `scoring.infer_timeout_secs` 作单请求超时；四场景开关（rerank/recall/skill_match/policy_triage）语义与 local 后端完全一致。
 
 ### 4.4 错误语义
 

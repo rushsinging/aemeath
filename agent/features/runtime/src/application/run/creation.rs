@@ -15,7 +15,8 @@ pub(crate) struct SessionRunBindings {
     session_switch: Arc<crate::SessionSwitchCoordinator>,
     provider: Arc<crate::ports::ProviderBindingData>,
     interaction: Arc<dyn crate::application::interaction::port::InteractionPort>,
-    reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
+    reasoning:
+        Arc<std::sync::Mutex<crate::application::run::session_reasoning::SessionReasoningControl>>,
     event_sink: ChatEventSinkHandle,
     /// Per-Session usage tracker — shared across all Main Runs in the same
     /// session so a new Run inherits the last known API total tokens instead
@@ -28,7 +29,9 @@ impl SessionRunBindings {
         session_switch: Arc<crate::SessionSwitchCoordinator>,
         provider: Arc<crate::ports::ProviderBindingData>,
         interaction: Arc<dyn crate::application::interaction::port::InteractionPort>,
-        reasoning: Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>>,
+        reasoning: Arc<
+            std::sync::Mutex<crate::application::run::session_reasoning::SessionReasoningControl>,
+        >,
         event_sink: ChatEventSinkHandle,
         usage: RunUsageTracker,
     ) -> Self {
@@ -56,7 +59,10 @@ impl SessionRunBindings {
         &self.interaction
     }
 
-    pub(crate) fn reasoning(&self) -> &Arc<std::sync::Mutex<share::reasoning::ReasoningLevel>> {
+    pub(crate) fn reasoning(
+        &self,
+    ) -> &Arc<std::sync::Mutex<crate::application::run::session_reasoning::SessionReasoningControl>>
+    {
         &self.reasoning
     }
 

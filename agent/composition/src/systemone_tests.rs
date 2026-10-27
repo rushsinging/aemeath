@@ -35,7 +35,7 @@ struct RecordingDaemonLauncher {
 impl ScoringDaemonLauncher for RecordingDaemonLauncher {
     fn ensure_ready(
         &self,
-        _sock: &std::path::Path,
+        _endpoint: &str,
         _connect_timeout: std::time::Duration,
     ) -> Result<(), String> {
         self.calls.fetch_add(1, Ordering::SeqCst);
@@ -45,9 +45,11 @@ impl ScoringDaemonLauncher for RecordingDaemonLauncher {
 
 #[test]
 fn process_daemon_launcher_skips_lazy_spawn_under_cfg_test() {
-    let sock = std::path::Path::new("/tmp/aemeath-scoring-daemon-launcher-test.sock");
     let err = ProcessDaemonLauncher
-        .ensure_ready(sock, std::time::Duration::from_millis(10))
+        .ensure_ready(
+            "http://127.0.0.1:1/systemone",
+            std::time::Duration::from_millis(10),
+        )
         .expect_err("cfg(test) 必须禁用惰性拉起");
     assert!(err.contains("单测禁用惰性拉起"), "unexpected detail: {err}");
 }
@@ -147,6 +149,132 @@ async fn daemon_assembly_ready_when_launcher_succeeds() {
     assert!(scoring_startup_notices(&assembly.outcome).is_empty());
 }
 
+// ── bailian backend 装配矩阵（#2095）──
+
+fn bailian_enabled() -> share::config::ScoringConfig {
+    share::config::ScoringConfig {
+        backend: share::config::scoring::ScoringBackend::Bailian,
+        bailian: share::config::scoring::BailianScoringConfig {
+            api_key: Some("sk-test".into()),
+            base_url: Some(
+                "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1".into(),
+            ),
+            ..Default::default()
+        },
+        ..all_enabled()
+    }
+}
+
+/// manifest 源恒为 None：bailian 路径 NEVER 咨询 manifest（结构性证明）。
+struct NeverManifestSource {
+    consulted: AtomicUsize,
+}
+
+impl ReleaseManifestSource for NeverManifestSource {
+    fn release_manifest(&self) -> Option<systemone::ModelManifest> {
+        self.consulted.fetch_add(1, Ordering::SeqCst);
+        None
+    }
+}
+
+#[tokio::test]
+async fn bailian_assembly_wires_ports_without_manifest_or_daemon() {
+    let source = NeverManifestSource {
+        consulted: AtomicUsize::new(0),
+    };
+    let launcher = RecordingDaemonLauncher {
+        calls: AtomicUsize::new(0),
+        result: Ok(()),
+    };
+    let assembly = assemble_daemon_scoring_ports_with(&bailian_enabled(), &source, &launcher).await;
+
+    assert_eq!(
+        source.consulted.load(Ordering::SeqCst),
+        0,
+        "bailian 路径不得读取发行 manifest"
+    );
+    assert_eq!(
+        launcher.calls.load(Ordering::SeqCst),
+        0,
+        "bailian 路径不得拉起 systemone daemon"
+    );
+    assert!(
+        matches!(
+            &assembly.outcome,
+            ScoringStartupOutcome::BailianReady { model } if model == "decision-model-preview"
+        ),
+        "outcome={:?}",
+        assembly.outcome
+    );
+    assert!(assembly.assignment.for_memory_rerank.is_some());
+    assert!(assembly.assignment.for_memory_recall.is_some());
+    assert!(assembly.assignment.for_skill_match.is_some());
+    assert!(assembly.assignment.for_policy_triage.is_some());
+    assert!(scoring_startup_notices(&assembly.outcome).is_empty());
+}
+
+#[tokio::test]
+async fn bailian_assembly_fail_open_on_invalid_config() {
+    // 缺 api_key：必须 fail-open（不装配端口、单条中文提醒、NEVER 阻断）。
+    let invalid = share::config::ScoringConfig {
+        bailian: share::config::scoring::BailianScoringConfig {
+            base_url: Some(
+                "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1".into(),
+            ),
+            ..Default::default()
+        },
+        ..bailian_enabled()
+    };
+    let source = NeverManifestSource {
+        consulted: AtomicUsize::new(0),
+    };
+    let launcher = RecordingDaemonLauncher {
+        calls: AtomicUsize::new(0),
+        result: Ok(()),
+    };
+    let assembly = assemble_daemon_scoring_ports_with(&invalid, &source, &launcher).await;
+    assert!(
+        matches!(
+            assembly.outcome,
+            ScoringStartupOutcome::BailianConfigInvalid { .. }
+        ),
+        "outcome={:?}",
+        assembly.outcome
+    );
+    assert_no_ports(&assembly.assignment);
+    let notices = scoring_startup_notices(&assembly.outcome);
+    assert_eq!(notices.len(), 1, "恰好一条提醒");
+    assert!(
+        notices[0].message.contains("api_key") || notices[0].message.contains("scoring.bailian"),
+        "提醒应指出配置项：{}",
+        notices[0].message
+    );
+}
+
+#[tokio::test]
+async fn bailian_assembly_disabled_still_zero_cost() {
+    // 总闸关 + backend=bailian：零成本路径不回归。
+    let disabled = share::config::ScoringConfig {
+        enabled: false,
+        ..bailian_enabled()
+    };
+    let source = NeverManifestSource {
+        consulted: AtomicUsize::new(0),
+    };
+    let launcher = RecordingDaemonLauncher {
+        calls: AtomicUsize::new(0),
+        result: Ok(()),
+    };
+    let assembly = assemble_daemon_scoring_ports_with(&disabled, &source, &launcher).await;
+    assert_eq!(assembly.outcome, ScoringStartupOutcome::Disabled);
+    assert_no_ports(&assembly.assignment);
+    assert_eq!(
+        source.consulted.load(Ordering::SeqCst),
+        0,
+        "零成本路径不得咨询 manifest"
+    );
+}
+
 #[tokio::test]
 async fn daemon_assembly_disabled_is_zero_cost_without_launcher() {
     let source = RecordingSource::with_manifest(fixture_manifest());
@@ -209,8 +337,8 @@ fn production_scoring_sources_never_reference_http_scoring_factory() {
         "会话生产装配必须走 daemon 客户端路径"
     );
     assert!(
-        systemone.contains("DaemonScoringClient"),
-        "会话生产装配必须构造 DaemonScoringClient"
+        systemone.contains("LocalSystemOneClient"),
+        "会话生产装配必须构造 LocalSystemOneClient（#2096：UDS 退役，HTTP 替代）"
     );
     // `pub async fn assemble_scoring_ports` 本体不得再委托 ProductionEmbeddedFactory。
     let start = systemone
@@ -404,7 +532,7 @@ async fn master_gate_defaults_to_enabled() {
 #[tokio::test]
 async fn run_scoring_serve_without_engine_skips_ready_callback() {
     let called = AtomicUsize::new(0);
-    let exit = run_scoring_serve(|_sock| {
+    let exit = run_scoring_serve("127.0.0.1:0", |_listen| {
         called.fetch_add(1, Ordering::SeqCst);
     })
     .await;

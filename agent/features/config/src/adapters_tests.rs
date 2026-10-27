@@ -70,15 +70,15 @@ fn env_adapter_maps_scoring_envs_into_patch() {
 fn env_adapter_maps_scoring_daemon_socket_and_timeout_envs() {
     let source = FakeEnv(HashMap::from([
         (
-            "AEMEATH_SCORING_SOCKET_PATH".into(),
-            "/tmp/custom.sock".into(),
+            "AEMEATH_SCORING_HTTP_LISTEN".into(),
+            "127.0.0.1:9100".into(),
         ),
         ("AEMEATH_SCORING_CONNECT_TIMEOUT_SECS".into(), "5".into()),
         ("AEMEATH_SCORING_INFER_TIMEOUT_SECS".into(), "45".into()),
     ]));
     let patch = EnvAdapter::read(&source);
     let scoring = patch.scoring.expect("daemon env 应产出 patch");
-    assert_eq!(scoring.socket_path.as_deref(), Some("/tmp/custom.sock"));
+    assert_eq!(scoring.http_listen.as_deref(), Some("127.0.0.1:9100"));
     assert_eq!(scoring.connect_timeout_secs, Some(5));
     assert_eq!(scoring.infer_timeout_secs, Some(45));
 }
@@ -98,6 +98,86 @@ fn env_adapter_ignores_retired_scoring_http_envs() {
         "仅存在退役 HTTP env 时不得产出 patch：{:?}",
         patch.scoring
     );
+}
+
+#[test]
+fn env_adapter_maps_scoring_http_endpoint_into_patch() {
+    let source = FakeEnv(HashMap::from([(
+        "AEMEATH_SCORING_HTTP_ENDPOINT".into(),
+        "http://127.0.0.1:9100/systemone".into(),
+    )]));
+    let patch = EnvAdapter::read(&source);
+    let scoring = patch.scoring.expect("http endpoint env 应产出 patch");
+    assert_eq!(
+        scoring.http_endpoint.as_deref(),
+        Some("http://127.0.0.1:9100/systemone")
+    );
+}
+
+#[test]
+fn env_adapter_ignores_retired_socket_path_env() {
+    // UDS 退役（#2096）：AEMEATH_SCORING_SOCKET_PATH 不再产出字段。
+    let source = FakeEnv(HashMap::from([(
+        "AEMEATH_SCORING_SOCKET_PATH".into(),
+        "/tmp/legacy.sock".into(),
+    )]));
+    let patch = EnvAdapter::read(&source);
+    assert!(
+        patch.scoring.is_none(),
+        "退役 socket env 不得产出 patch：{:?}",
+        patch.scoring
+    );
+}
+
+#[test]
+fn env_adapter_maps_scoring_backend_env_into_patch() {
+    let source = FakeEnv(HashMap::from([(
+        "AEMEATH_SCORING_BACKEND".into(),
+        "bailian".into(),
+    )]));
+    let patch = EnvAdapter::read(&source);
+    let scoring = patch.scoring.expect("backend env 应产出 patch");
+    assert_eq!(
+        scoring.backend,
+        Some(share::config::domain::scoring::ScoringBackend::Bailian)
+    );
+
+    // 非法 backend 值：忽略该字段（宽松解析），不得 panic；忽略后无其它
+    // 字段时不得产出空 patch。
+    let invalid = FakeEnv(HashMap::from([(
+        "AEMEATH_SCORING_BACKEND".into(),
+        "ark".into(),
+    )]));
+    let patch = EnvAdapter::read(&invalid);
+    assert!(
+        patch.scoring.is_none(),
+        "非法 backend 值被忽略后不得产出空 patch"
+    );
+}
+
+#[test]
+fn env_adapter_maps_bailian_connection_envs_into_patch() {
+    let source = FakeEnv(HashMap::from([
+        ("AEMEATH_SCORING_BAILIAN_API_KEY".into(), "sk-env".into()),
+        (
+            "AEMEATH_SCORING_BAILIAN_BASE_URL".into(),
+            "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1".into(),
+        ),
+        (
+            "AEMEATH_SCORING_BAILIAN_MODEL".into(),
+            "decision-model-preview".into(),
+        ),
+    ]));
+    let patch = EnvAdapter::read(&source);
+    let scoring = patch.scoring.expect("bailian env 应产出 patch");
+    let bailian = scoring.bailian.expect("bailian 子 patch 应存在");
+    assert_eq!(bailian.api_key.as_deref(), Some("sk-env"));
+    assert_eq!(
+        bailian.base_url.as_deref(),
+        Some("https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1")
+    );
+    assert_eq!(bailian.model.as_deref(), Some("decision-model-preview"));
+    assert_eq!(bailian.full_url, None, "未设置的 env 字段不得伪造");
 }
 
 #[test]

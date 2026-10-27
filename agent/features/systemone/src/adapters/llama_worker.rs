@@ -54,6 +54,11 @@ pub(crate) struct RowHiddenVectors {
 
 impl RowHiddenVectors {
     /// 构造回传向量。
+    // 仅 macOS arm64 native 引擎构造；其余平台 fail-closed 编译，保留协议契约。
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        allow(dead_code)
+    )]
     pub(crate) fn new(decide: Vec<f32>, options: Vec<Vec<f32>>) -> Self {
         Self { decide, options }
     }
@@ -67,6 +72,11 @@ pub(crate) struct WorkerFailure {
 
 impl WorkerFailure {
     /// 构造失败原因（detail 必须为中文，来自 native 层错误转换）。
+    // 仅 macOS arm64 native 引擎构造；其余平台 fail-closed 编译，保留协议契约。
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        allow(dead_code)
+    )]
     pub(crate) fn new(detail: impl Into<String>) -> Self {
         Self {
             detail: detail.into(),
@@ -81,6 +91,12 @@ impl std::fmt::Display for WorkerFailure {
 }
 
 /// worker 对单个请求的回执。
+// 变体仅由 macOS arm64 native worker 循环构造；其余平台 fail-closed 编译，
+// facade 侧 `run_rows` 仍按本枚举 match，保留协议契约。
+#[cfg_attr(
+    not(all(target_os = "macos", target_arch = "aarch64")),
+    allow(dead_code)
+)]
 pub(crate) enum WorkerResponse {
     /// 逐行 owned hidden 向量，顺序与请求 rows 一致。
     Hidden(Vec<RowHiddenVectors>),
@@ -89,6 +105,12 @@ pub(crate) enum WorkerResponse {
 }
 
 /// worker 请求：owned rows + 该请求专属的回执通道。
+// 字段仅由 macOS arm64 native worker 循环读取；其余平台 fail-closed 编译，
+// facade 侧 `run_rows` 仍构造本结构，保留协议契约。
+#[cfg_attr(
+    not(all(target_os = "macos", target_arch = "aarch64")),
+    allow(dead_code)
+)]
 pub(crate) struct WorkerRequest {
     /// 待前向的 owned rows。
     pub(crate) rows: Vec<CausalRow>,
@@ -97,6 +119,11 @@ pub(crate) struct WorkerRequest {
 }
 
 /// 前向引擎契约：native llama.cpp 与测试 fake 共用的 contract seam。
+// 仅 macOS arm64 native 引擎实现与消费；其余平台 fail-closed 编译，保留契约定义。
+#[cfg_attr(
+    not(all(target_os = "macos", target_arch = "aarch64")),
+    allow(dead_code)
+)]
 pub(crate) trait RowEmbeddingEngine {
     /// 对一批 owned row 前向，返回逐行 owned hidden 向量。
     fn embed_rows(&mut self, rows: Vec<CausalRow>) -> Result<Vec<RowHiddenVectors>, WorkerFailure>;
@@ -190,6 +217,12 @@ impl EmbeddedWorkerClient {
 }
 
 /// native worker 启动配置：模型路径、期望 hidden 宽度与上下文容量。
+// 字段仅由 macOS arm64 native 引擎读取（init 期对账）；其余平台 fail-closed
+// 编译时 `start_llama_worker` 丢弃配置，保留协议契约。
+#[cfg_attr(
+    not(all(target_os = "macos", target_arch = "aarch64")),
+    allow(dead_code)
+)]
 pub(crate) struct LlamaWorkerConfig {
     /// `model.gguf` 绝对路径。
     pub(crate) model_path: PathBuf,
@@ -205,6 +238,12 @@ pub(crate) struct LlamaWorkerConfig {
 ///
 /// native 类型只存在于线程闭包内部；调用方经返回的初始化通道 await
 /// [`EmbeddedWorkerClient`]，初始化失败时 NEVER 产生 client。
+// 仅 macOS arm64 的 `start_llama_worker` 真实实现装配；其余平台 fail-closed
+// 分支不启动 worker 线程，保留实现供首批平台复用。
+#[cfg_attr(
+    not(all(target_os = "macos", target_arch = "aarch64")),
+    allow(dead_code)
+)]
 pub(crate) fn spawn_worker_thread<E, F>(
     init_engine: F,
 ) -> oneshot::Receiver<Result<EmbeddedWorkerClient, WorkerInitError>>

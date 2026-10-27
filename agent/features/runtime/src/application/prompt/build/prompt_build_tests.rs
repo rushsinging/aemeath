@@ -131,6 +131,7 @@ fn test_prompt_context_new_preserves_model_metadata() {
         Some("openrouter"),
         Some("anthropic/claude-sonnet-4"),
         share::config::PermissionModeConfig::Ask,
+        false,
     );
 
     assert_eq!(context.cwd, cwd);
@@ -243,6 +244,42 @@ fn test_project_instruction_walk_does_not_scan_descendants_when_climbing_parents
 }
 
 #[tokio::test]
+async fn timeout_guidance_switches_with_backgrounding_flag() {
+    let hook_runner: Arc<dyn HookDispatcher> = hook::wire_hook_dispatcher(
+        &share::config::domain::snapshot::ConfigSnapshot::new(share::config::Config::default()),
+    )
+    .unwrap();
+    let cwd = PathBuf::from("/tmp/project");
+
+    let enabled_context = PromptContextData::new(
+        &cwd,
+        None,
+        None,
+        share::config::PermissionModeConfig::Ask,
+        true,
+    );
+    let enabled_parts = build_system_prompt_parts(&enabled_context, &hook_runner, "en").await;
+    assert!(enabled_parts.static_part.contains("86400"));
+    assert!(enabled_parts.static_part.contains("do not set `timeout`"));
+    assert!(enabled_parts.static_part.contains("BackgroundProcessWatch"));
+    assert!(!enabled_parts.static_part.contains("1800"));
+
+    let disabled_context = PromptContextData::new(
+        &cwd,
+        None,
+        None,
+        share::config::PermissionModeConfig::Ask,
+        false,
+    );
+    let disabled_parts = build_system_prompt_parts(&disabled_context, &hook_runner, "en").await;
+    assert!(disabled_parts.static_part.contains("1800"));
+    assert!(disabled_parts
+        .static_part
+        .contains("MUST pass an explicit `timeout`"));
+    assert!(!disabled_parts.static_part.contains("24h"));
+}
+
+#[tokio::test]
 async fn build_system_prompt_parts_captures_git_once_without_changing_static_prompt() {
     let cwd = tempfile::tempdir().unwrap();
     let init = std::process::Command::new("git")
@@ -260,6 +297,7 @@ async fn build_system_prompt_parts_captures_git_once_without_changing_static_pro
         Some("deepseek"),
         Some("deepseek-chat"),
         share::config::PermissionModeConfig::Ask,
+        false,
     );
 
     let parts = build_system_prompt_parts(&context, &hook_runner, "en").await;
@@ -283,6 +321,7 @@ async fn build_system_prompt_parts_when_cwd_deleted_reports_attribution() {
         None,
         None,
         share::config::PermissionModeConfig::Ask,
+        false,
     );
 
     let parts = build_system_prompt_parts(&context, &hook_runner, "en").await;
@@ -569,4 +608,109 @@ async fn test_load_agents_md_preserves_identical_content_from_distinct_sources()
 
     assert_eq!(content.matches("<guidance source=").count(), 2);
     assert_eq!(content.matches("identical content").count(), 2);
+}
+
+// ---- #2021 guardrails 注入契约 ----
+
+#[test]
+fn guardrails_section_wraps_content_with_source_tag() {
+    let section = render_guardrails_section("/home/u/.agents/guardrails.md", "NEVER 删除生产数据");
+    assert!(section.contains("<guardrails source=\"/home/u/.agents/guardrails.md\">"));
+    assert!(section.contains("NEVER 删除生产数据"));
+    assert!(section.contains("</guardrails>"));
+}
+
+#[test]
+fn guardrails_section_truncates_at_budget_with_marker() {
+    let oversized = "规则".repeat(crate::constants::GUARDRAILS_SECTION_MAX_CHARS);
+    let section = render_guardrails_section("p", &oversized);
+    assert!(section.contains("（截断）"), "超预算必须带截断标记");
+    let content_len = section
+        .strip_prefix("<guardrails source=\"p\">\n")
+        .and_then(|s| s.strip_suffix("\n</guardrails>"))
+        .expect("标签结构")
+        .chars()
+        .count();
+    assert!(
+        content_len <= crate::constants::GUARDRAILS_SECTION_MAX_CHARS + 10,
+        "正文必须受预算约束：{content_len}"
+    );
+}
+
+#[tokio::test]
+async fn guardrails_missing_files_yield_no_section() {
+    let _guard = TOOL_GUIDANCE_ENV_LOCK.lock().await;
+    let cwd = tempfile::tempdir().unwrap();
+    // 全局/项目 guardrails 均不存在（全局路径指向临时隔离目录）
+    std::env::set_var("AEMEATH_AGENTS_DIR", cwd.path());
+    let sections = load_guardrails_sections(cwd.path()).await;
+    std::env::remove_var("AEMEATH_AGENTS_DIR");
+    assert!(sections.is_empty(), "缺文件 NEVER 产生空段");
+}
+
+// ---- #2022 tool_guidance（c4）注入契约：user-context 消息侧（通道 B） ----
+
+/// env 依赖测试互斥（AEMEATH_AGENTS_DIR 全局变量并行踩踏防护；
+/// tokio 互斥——guard 可跨 await 持有）。
+static TOOL_GUIDANCE_ENV_LOCK: std::sync::LazyLock<tokio::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| tokio::sync::Mutex::new(()));
+
+#[test]
+fn tool_guidance_section_wraps_content_with_source_tag() {
+    let section = render_tool_guidance_section("/home/u/.agents/tool_guidance.md", "优先用 Grep");
+    assert!(section.contains("<tool_guidance source=\"/home/u/.agents/tool_guidance.md\">"));
+    assert!(section.contains("优先用 Grep"));
+    assert!(section.contains("</tool_guidance>"));
+}
+
+#[test]
+fn tool_guidance_section_truncates_at_budget_with_marker() {
+    let oversized = "指南".repeat(crate::constants::TOOL_GUIDANCE_SECTION_MAX_CHARS);
+    let section = render_tool_guidance_section("p", &oversized);
+    assert!(section.contains("（截断）"), "超预算必须带截断标记");
+}
+
+#[tokio::test]
+async fn tool_guidance_missing_file_yields_none() {
+    let _guard = TOOL_GUIDANCE_ENV_LOCK.lock().await;
+    let cwd = tempfile::tempdir().unwrap();
+    std::env::set_var("AEMEATH_AGENTS_DIR", cwd.path());
+    let section = load_tool_guidance_section().await;
+    std::env::remove_var("AEMEATH_AGENTS_DIR");
+    assert!(section.is_none(), "缺文件 NEVER 产生空段");
+}
+
+#[tokio::test]
+async fn claude_md_message_appends_tool_guidance_section() {
+    let _guard = TOOL_GUIDANCE_ENV_LOCK.lock().await;
+    let cwd = tempfile::tempdir().unwrap();
+    std::env::set_var("AEMEATH_AGENTS_DIR", cwd.path());
+    std::fs::write(
+        cwd.path().join("tool_guidance.md"),
+        "# 工具指南\n优先并行派发",
+    )
+    .unwrap();
+    let section = load_tool_guidance_section().await;
+    std::env::remove_var("AEMEATH_AGENTS_DIR");
+    let section = section.expect("tool_guidance 必须加载");
+    assert!(section.contains("优先并行派发"));
+}
+
+// ---- #2063 overlay 注入预算 ----
+
+#[test]
+fn guidance_content_replaced_with_read_hint_when_over_budget() {
+    let oversized = "行".repeat(crate::constants::GUIDANCE_FILE_MAX_CHARS + 500);
+    let replaced = truncate_guidance_content(&oversized, "/p/AGENTS.md");
+    // NEVER 腰斩：超预算正文零注入，只留引导（语义完整 + 常驻 O(1)）
+    assert!(replaced.contains("超过注入预算"));
+    assert!(replaced.contains("Read 工具读取完整文件"));
+    assert!(replaced.contains("/p/AGENTS.md"));
+    assert!(!replaced.contains("行行"), "正文 NEVER 部分注入");
+    let normal = "正常内容";
+    assert_eq!(
+        truncate_guidance_content(normal, "/p"),
+        normal,
+        "预算内直过"
+    );
 }

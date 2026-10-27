@@ -17,11 +17,13 @@ struct Session {                       // 聚合根（可序列化，持久化�
     tasks: TaskSnapshot,
     workspace: PersistedWorkspaceContext,
     skill_load_records: Vec<SkillLoadRecord>, // Main Session 内按 Agent scope 持久化正文 revision
+    workflows: Vec<WorkflowId>,          // 0..n Workflow identity 关联；Workflow 状态本体 Workflow-owned，具体持久化协议待决
+    active_workflow: Option<WorkflowId>, // 0..1：至多一个 Active 的指针，Workflow 离开 Active 后清空
     created_at: Timestamp,
     updated_at: Timestamp,
 }
 ```
-> Session 的 Target 对话历史 **MUST** 以 `run_slices` 为唯一常规 backing；`ActiveCompactMarker` 仅保存 summary、`start_at: Option<(RunId, RunStepId)>` 与 source revision，读取投影从第一个可见完整 Step 开始。每次 compact 原子替换同一个 marker；新的 Step 只追加 `run_slices`，因此天然位于 marker 之后。`chats` 仅作为 v1/legacy reader DTO 的内存兼容字段，v2 writer **NEVER** 输出它；旧 top-level `messages` / `cwd` 同样只存在于 reader DTO。
+> Session 的 Target 对话历史 **MUST** 以 `run_slices` 为唯一常规 backing；`ActiveCompactMarker` 仅保存 summary、`start_at: Option<(RunId, RunStepId)>` 与 source revision，读取投影从第一个可见完整 Step 开始。每次 compact 原子替换同一个 marker；新的 Step 只追加 `run_slices`，因此天然位于 marker 之后。`chats` 仅作为 v1/legacy reader DTO 的内存兼容字段，v2 writer **NEVER** 输出它；旧 top-level `messages` / `cwd` 同样只存在于 reader DTO。`workflows` 是 Session 与 Workflow 聚合的 identity 关联（0..n，**NEVER** 内嵌 Workflow 状态本体，Workflow-owned state 仍归 Workflow BC）；`active_workflow` 是其中的 active 指针（0..1）：同一时刻至多一个 Active Workflow，Workflow 离开 Active（deactivate / complete / cancel）后清空该指针。`/clear` 是 Session reset：清空对话时同步、**不可恢复地移除该 Session 全部 Workflow 关联与 active 指针**，之后 `workflow_list` / `workflow_query` / `workflow_update(activate)` 均不可恢复（见 workflow/01-workflow-design.md §2.2）。两者都**不**替代 `run_slices`——对话事实仍以 `run_slices` 为唯一 backing；`workflows` 这里只是概念字段，不冻结 wire schema。Workflow 数据如何落盘、如何与 Session 原子关联，以及 resume 与损坏恢复均待决。
 ## 3. RunSlice / RunStep 与活动 Compact Marker
 ```rust
 struct CommittedRunSlice {
@@ -61,10 +63,12 @@ Session **拥有对话历史**，**MUST** 只内嵌其他 BC 发布的 DTO 副�
 ## 5. Session 与 Run 的关系
 ```
 Session（对话历史容器，跨多次输入）
-  └── run_slices
+  ├── run_slices
         ├── Run #1 → Step #1 / Step #2 / ...
         ├── Run #2 → Step #1 / Step #2 / ...
         └── ActiveCompactMarker（summary + 首个可见 Step）
+  ├── workflows（0..n，identity / reference 关联；Active / Inactive / Completed / Cancelled）
+  └── active_workflow（Option<WorkflowId>，0..1；active 指针，不替代 run_slices；/clear 一并不可恢复移除）
 ```
 - **一个 Session 含多个 Run 的结构化事实**；compact marker 只改变活跃读取起点，不创建第二条历史链
 - **Run 读写 Session**：在 `freeze_step` 绑定 user input 后、首次 `build_window` 前，Runtime 经 `append_accepted_input` 将仅包含 accepted user facts 的 `AcceptedInputRecord` durable 写入；同一 Step 后续由 `StepFinalizer` 经 `ContextAppend` 只补充 outcome。accepted append 在 Context mutation gate 内自行读取当前 revision、检查 `(run_id, step_id, fingerprint)` 幂等/冲突、durable save 后再 publish；它**不**要求 Runtime 提供 CAS。finalized outcome 发生在 window 构建后，仍以 `ContextWindow.backing_revision` 作为 `expected_revision` 做 CAS。
@@ -83,6 +87,7 @@ Session 采用两阶段 per-RunStep 持久化：`freeze_step` 已绑定的 user 
 每次成功提交 **MUST** 保存：
 - Session identity、完整 metadata、`created_at`、`updated_at` 与 schema version；
 - `run_slices`、活动 compact marker 与提交后的 `SessionRevision`；
+- Session 与 Workflow 的 identity 关联（概念上 `workflows` 0..n）以及 `active_workflow` 指针必须随 Session reset / resume 保持一致：同一时刻至多一个 Active，Workflow 离开 Active（deactivate / complete / cancel）后指针清空为 `None`；`/clear` 同步、不可恢复地移除全部关联与 active 指针。**具体 writer 字段、Workflow 状态本体的存储位置、跨 BC 原子提交、resume 与损坏恢复仍待决，本清单不宣称当前 Session writer 已保存这些字段。**
 - 当前 Step 已绑定并由 finalizer 纳入本次提交的 user inputs；尚在 InputBuffer、未绑定 Step 的内容不提升为 Session 事实；
 - 普通完成时的完整 assistant message，或控制收口时由 finalizer 明确冻结的 partial assistant projection；原始 stream delta 不直接落盘；
 - assistant 已声明的 Tool Calls，以及按原 ToolCall 顺序排列的协议完整 terminal results；
@@ -181,6 +186,7 @@ Context Management 还负责会话 identity：session 列表、元数据、`/res
 ## 修改历史
 | 日期 | 变更 | 关联 |
 |---|---|---|
+| 2026-10-07 | Workflow 关联同步 workflow/01-workflow-design.md：新增 `workflows` 0..n identity 关联的概念字段、`active_workflow` 改为 active 指针（离开 Active 清空）、登记 `/clear` 不可恢复移除全部 Workflow；具体 writer schema、跨 BC 原子持久化、resume 与损坏恢复待决 | workflow/01-workflow-design.md |
 | 2026-07-23 | #1296 以聚合 Guard 验收 #1292 已落地的 Session backing Composition-only construction；聚合 Guard 不取代 Session Port/Adapter 契约测试 | [#1296](https://github.com/rushsinging/aemeath/issues/1296) |
 | 2026-07-11 | 初稿：Session 聚合、ChatChain/ChatSegment、跨 BC 快照组装、与 Run 关系、恢复边界 | #761 |
 | 2026-07-12 | 补充 ContextPort 相关文档交叉引用 | #786 |

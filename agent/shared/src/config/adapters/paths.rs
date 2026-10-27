@@ -3,10 +3,11 @@
 use std::path::{Path, PathBuf};
 
 pub use super::constants::{
-    AGENTS_DIR_ENV, AGENTS_DIR_NAME, AGENTS_MD, CLAUDE_DIR_NAME, CLAUDE_MD, GUIDANCE_DIR_NAME,
-    HISTORY_FILE, HOOKS_DIR_NAME, LOGS_DIR_NAME, MCP_CONFIG_FILE, MEMORY_DIR_NAME, MODELS_DIR_NAME,
-    NEW_CONFIG_FILE, OLD_AEMEATH_DIR_NAME, OLD_CONFIG_FILE, SESSIONS_DIR_NAME, SETTINGS_FILE,
-    SKILLS_DIR_NAME, SYSTEMONE_DIR_NAME, TOOL_RESULTS_DIR_NAME, WORKTREES_DIR_NAME,
+    AGENTS_DIR_ENV, AGENTS_DIR_NAME, AGENTS_MD, CLAUDE_DIR_NAME, CLAUDE_MD, GUARDRAILS_FILE_NAME,
+    GUIDANCE_DIR_NAME, HISTORY_FILE, HOOKS_DIR_NAME, LOGS_DIR_NAME, MCP_CONFIG_FILE,
+    MEMORY_DIR_NAME, MODELS_DIR_NAME, NEW_CONFIG_FILE, OLD_AEMEATH_DIR_NAME, OLD_CONFIG_FILE,
+    SCRIPTS_DIR_NAME, SESSIONS_DIR_NAME, SETTINGS_FILE, SKILLS_DIR_NAME, SYSTEMONE_DIR_NAME,
+    TOOL_GUIDANCE_FILE_NAME, TOOL_RESULTS_DIR_NAME, WORKTREES_DIR_NAME,
 };
 
 /// 解析 home 目录（读取 `$HOME`）。
@@ -186,6 +187,41 @@ pub fn project_skills_dir(cwd: &Path) -> PathBuf {
 
 pub fn old_project_skills_dir(cwd: &Path) -> PathBuf {
     cwd.join(OLD_AEMEATH_DIR_NAME).join(SKILLS_DIR_NAME)
+}
+
+/// 全局 guardrails 组件文件（c2，#2021）。
+pub fn global_guardrails_path() -> PathBuf {
+    global_agents_dir().join(GUARDRAILS_FILE_NAME)
+}
+
+/// 项目级 guardrails 组件文件（c2，#2021）。
+pub fn project_guardrails_path(cwd: &Path) -> PathBuf {
+    cwd.join(AGENTS_DIR_NAME).join(GUARDRAILS_FILE_NAME)
+}
+
+/// 全局 tool_guidance 覆盖层（c4，#2022）。
+pub fn global_tool_guidance_path() -> PathBuf {
+    global_agents_dir().join(TOOL_GUIDANCE_FILE_NAME)
+}
+
+/// 全局 scripts 组件目录（c7，#2020）。
+pub fn global_scripts_dir() -> PathBuf {
+    global_agents_dir().join(SCRIPTS_DIR_NAME)
+}
+
+/// session dataset 落盘根（单数 `session/`；`sessions/` 是 lock 目录）。
+pub fn global_session_datasets_dir() -> PathBuf {
+    global_agents_dir().join("session")
+}
+
+/// 全局 plugins 组件目录（c8，#2030）。
+pub fn global_plugins_dir() -> PathBuf {
+    global_agents_dir().join("plugins")
+}
+
+/// 项目级 scripts 组件目录（c7，#2020）。
+pub fn project_scripts_dir(cwd: &Path) -> PathBuf {
+    cwd.join(AGENTS_DIR_NAME).join(SCRIPTS_DIR_NAME)
 }
 
 #[cfg(test)]

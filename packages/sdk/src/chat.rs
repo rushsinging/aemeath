@@ -39,6 +39,23 @@ pub struct SkillRequest {
     pub raw_input: String,
 }
 
+/// `/think` 的 reasoning 档位调节请求。
+///
+/// - `Toggle` / `On` / `Off` 保留旧 `/think`（无参 / on / off）三形态；
+/// - `Level` 为显式档位选择（`/think high` 或档位对话框），最终生效档位
+///   仍会被 provider 能力上限 clamp（见 `share::reasoning::ReasoningLevel`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThinkingRequest {
+    /// 在开/关之间切换（开 = `Medium`）。
+    Toggle,
+    /// 开启（= `Medium`），等价旧 `/think on`。
+    On,
+    /// 关闭（= `Off`），等价旧 `/think off`。
+    Off,
+    /// 显式档位（`off`..`max`）。
+    Level(crate::ReasoningLevel),
+}
+
 /// Chat 运行期间追加到 runtime 的输入事件。
 #[derive(Debug, Clone)]
 pub enum ChatInputEvent {
@@ -85,13 +102,14 @@ pub enum ChatInputEvent {
     SwitchModel {
         selection: String,
     },
-    /// 用户请求切换 reasoning 模式：idle 时立即执行，busy 时排队等run结束后执行。
+    /// 用户请求调节 reasoning 档位：idle 时立即执行，busy 时排队等run结束后执行。
     ///
-    /// 由 `/think` 触发，走 runtime 事件流（#497）。`desired = None` 表示 toggle。
+    /// 由 `/think` 触发，走 runtime 事件流（#497）。`ThinkingRequest` 覆盖旧
+    /// toggle/on/off 三形态与显式档位（`/think high` 或对话框选择）。
     /// runtime idle 分支更新会话级 reasoning 状态，后续调用通过不可变 InvocationScopeData 读取；
     /// 结果通过 `ThinkingChanged` 事件回传 TUI。
     SetThinking {
-        desired: Option<bool>,
+        request: ThinkingRequest,
     },
     /// 初始化项目。由 `/init` 触发。
     /// force = true 时强制重新初始化
@@ -161,11 +179,12 @@ impl ChatInputEvent {
             Self::SwitchModel { selection } => {
                 return Some(with_argument("/model", selection));
             }
-            Self::SetThinking { desired } => {
-                return Some(match desired {
-                    Some(true) => "/think on".to_string(),
-                    Some(false) => "/think off".to_string(),
-                    None => "/think".to_string(),
+            Self::SetThinking { request } => {
+                return Some(match request {
+                    ThinkingRequest::On => "/think on".to_string(),
+                    ThinkingRequest::Off => "/think off".to_string(),
+                    ThinkingRequest::Toggle => "/think".to_string(),
+                    ThinkingRequest::Level(level) => format!("/think {level}"),
                 });
             }
             Self::InitProject { force } => {

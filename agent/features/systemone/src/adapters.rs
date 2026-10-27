@@ -1,9 +1,9 @@
 pub mod audited;
+pub mod bailian_client;
 pub mod calibrated;
 pub mod calibration_store;
-pub mod daemon_client;
+pub mod daemon_http_serve;
 pub mod daemon_instance;
-pub mod daemon_serve;
 #[cfg(feature = "embedded")]
 pub mod embedded;
 pub mod event_jsonl;
@@ -20,6 +20,7 @@ pub mod kev_causal_row;
 pub mod kev_hf_tokenizer;
 #[cfg(feature = "embedded")]
 pub mod kev_question_plan;
+pub mod local_client;
 // 原生 llama.cpp worker 仅在首批平台（macOS arm64）编译；
 // 其余平台经 `llama_worker::start_llama_worker` 的 cfg 分支报告不支持。
 #[cfg(all(feature = "embedded", target_os = "macos", target_arch = "aarch64"))]

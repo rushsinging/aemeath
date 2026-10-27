@@ -10,6 +10,7 @@ fn model_info_unifies_identity_and_capability() {
         supports_parallel_tool_calls: true,
         supports_streaming: true,
         supported_reasoning: vec![ReasoningLevel::Off],
+        server_effort_map: Vec::new(),
         context_limit: Some(200_000),
         output_limit: Some(8_192),
     };
@@ -50,6 +51,7 @@ fn reasoning_capability_none() {
         supports_parallel_tool_calls: false,
         supports_streaming: true,
         supported_reasoning: vec![ReasoningLevel::Off],
+        server_effort_map: Vec::new(),
         context_limit: None,
         output_limit: None,
     };
@@ -73,6 +75,7 @@ fn resolver_selects_highest_supported_level_not_above_requested() {
             ReasoningLevel::Medium,
             ReasoningLevel::Max,
         ],
+        server_effort_map: Vec::new(),
         context_limit: Some(128_000),
         output_limit: Some(8_192),
     };
@@ -102,6 +105,7 @@ fn model_with_supported(supported_reasoning: Vec<ReasoningLevel>) -> ModelInfo {
         supports_parallel_tool_calls: true,
         supports_streaming: true,
         supported_reasoning,
+        server_effort_map: Vec::new(),
         context_limit: Some(200_000),
         output_limit: Some(8_192),
     }
@@ -280,4 +284,54 @@ fn tool_call_identity_can_bind_provider_id_after_start() {
             ..
         } if id == "call_late"
     ));
+}
+
+// ── #2032：resolve_reasoning 叠加服务端归并 ──
+
+#[test]
+fn resolve_reasoning_applies_server_effort_map_after_ladder() {
+    let info = ModelInfo {
+        provider: "Zhipu Coding Plan".to_string(),
+        model: "glm-5.3".to_string(),
+        supports_tools: true,
+        supports_parallel_tool_calls: false,
+        supports_streaming: true,
+        supported_reasoning: vec![
+            ReasoningLevel::Off,
+            ReasoningLevel::Minimal,
+            ReasoningLevel::Low,
+            ReasoningLevel::Medium,
+            ReasoningLevel::High,
+            ReasoningLevel::Xhigh,
+            ReasoningLevel::Max,
+        ],
+        // 官方 Coding Plan 归并（装配时由 driver 生成，此处直接给定）。
+        server_effort_map: vec![
+            (ReasoningLevel::Off, ReasoningLevel::Low),
+            (ReasoningLevel::Minimal, ReasoningLevel::Low),
+            (ReasoningLevel::Low, ReasoningLevel::Low),
+            (ReasoningLevel::Medium, ReasoningLevel::High),
+            (ReasoningLevel::High, ReasoningLevel::High),
+            (ReasoningLevel::Xhigh, ReasoningLevel::Max),
+            (ReasoningLevel::Max, ReasoningLevel::Max),
+        ],
+        context_limit: Some(128_000),
+        output_limit: Some(8_192),
+    };
+    assert_eq!(
+        info.resolve_reasoning(ReasoningLevel::Medium),
+        ReasoningLevel::High
+    );
+    assert_eq!(
+        info.resolve_reasoning(ReasoningLevel::Off),
+        ReasoningLevel::Low
+    );
+    assert_eq!(
+        info.reasoning_effort_map()
+            .iter()
+            .find(|(from, _)| *from == ReasoningLevel::Minimal)
+            .map(|(_, to)| *to),
+        Some(ReasoningLevel::Low),
+        "映射表逐档含归并结果（minimal → low）"
+    );
 }

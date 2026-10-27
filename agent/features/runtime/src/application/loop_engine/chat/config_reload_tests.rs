@@ -21,9 +21,10 @@ fn temp_dir() -> PathBuf {
 
 #[test]
 fn test_classify_change_key_non_prompt_asset() {
+    // #2015 语义升级：aemeath.json 升为 config: 前缀（原 other:）。
     let path = PathBuf::from("/home/user/.agents/aemeath.json");
     let key = classify_change_key(&path, &FileChangeKind::Modified);
-    assert!(key.starts_with("other:modified:"));
+    assert!(key.starts_with("config:modified:"));
 }
 
 #[test]
@@ -82,4 +83,118 @@ fn test_check_config_changes_detects_modification() {
 
     let _ = fs::remove_file(&file_path);
     let _ = fs::remove_dir(&dir);
+}
+
+// ── #2015 watch 面扩展与 key 分类 ──
+
+#[test]
+fn test_classify_change_key_guardrails() {
+    let path = PathBuf::from("/project/.agents/guardrails.md");
+    assert_eq!(
+        classify_change_key(&path, &FileChangeKind::Modified),
+        "guardrails:modified:guardrails.md"
+    );
+}
+
+#[test]
+fn test_classify_change_key_tool_guidance() {
+    let path = PathBuf::from("/home/user/.agents/tool_guidance.md");
+    assert_eq!(
+        classify_change_key(&path, &FileChangeKind::Added),
+        "tool_guidance:added:tool_guidance.md"
+    );
+}
+
+#[test]
+fn test_classify_change_key_config_file() {
+    let path = PathBuf::from("/home/user/.agents/aemeath.json");
+    assert_eq!(
+        classify_change_key(&path, &FileChangeKind::Modified),
+        "config:modified:aemeath.json"
+    );
+}
+
+#[test]
+fn test_classify_change_key_skills_directory() {
+    let path = PathBuf::from("/home/user/.agents/skills");
+    assert_eq!(
+        classify_change_key(&path, &FileChangeKind::Modified),
+        "skills:modified:skills"
+    );
+}
+
+#[test]
+fn test_classify_change_key_scripts_directory_falls_back() {
+    // #2060：scripts 目录退役并入 skills——不再专属分类，走 other fallback
+    let path = PathBuf::from("/project/.agents/scripts");
+    assert!(classify_change_key(&path, &FileChangeKind::Added).starts_with("other:added:"));
+}
+
+#[test]
+fn test_classify_change_key_other_still_fallbacks() {
+    let path = PathBuf::from("/tmp/notes.txt");
+    assert!(classify_change_key(&path, &FileChangeKind::Modified).starts_with("other:modified:"));
+}
+
+// ── #2015 防御复检（validate 段）──
+
+#[test]
+fn validate_component_changes_rejects_malformed_frontmatter() {
+    let dir = temp_dir();
+    let guardrails_path = dir.join("guardrails.md");
+    fs::write(&guardrails_path, "---\n- just\n- a list\n---\n规则正文").expect("write");
+
+    let rejections = validate_component_changes(&[FileChange {
+        path: guardrails_path.clone(),
+        kind: FileChangeKind::Modified,
+    }]);
+    assert_eq!(rejections.len(), 1, "frontmatter 非映射必须被拒");
+    assert_eq!(rejections[0].path, guardrails_path);
+    assert!(!rejections[0].reason.is_empty());
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn validate_component_changes_accepts_well_formed_guardrails() {
+    let dir = temp_dir();
+    let guardrails_path = dir.join("guardrails.md");
+    fs::write(&guardrails_path, "纯规则正文，无 frontmatter").expect("write");
+
+    let rejections = validate_component_changes(&[FileChange {
+        path: guardrails_path,
+        kind: FileChangeKind::Modified,
+    }]);
+    assert!(rejections.is_empty(), "合法内容必须放行：{rejections:?}");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn validate_component_changes_skips_deleted_files() {
+    let dir = temp_dir();
+    let tool_guidance_path = dir.join("tool_guidance.md");
+
+    let rejections = validate_component_changes(&[FileChange {
+        path: tool_guidance_path,
+        kind: FileChangeKind::Deleted,
+    }]);
+    assert!(rejections.is_empty(), "删除是合法变更，无从校验内容");
+
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn validate_component_changes_ignores_non_component_files() {
+    let dir = temp_dir();
+    let notes_path = dir.join("notes.md");
+    fs::write(&notes_path, "---\n- 不是组件\n---\n").expect("write");
+
+    let rejections = validate_component_changes(&[FileChange {
+        path: notes_path,
+        kind: FileChangeKind::Modified,
+    }]);
+    assert!(rejections.is_empty(), "非组件面文件不参与复检");
+
+    let _ = fs::remove_dir_all(&dir);
 }

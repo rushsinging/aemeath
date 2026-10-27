@@ -1,3 +1,4 @@
+pub mod cache_clean;
 pub mod coverage;
 pub mod guard_registry;
 pub mod guards;

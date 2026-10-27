@@ -2,7 +2,31 @@
 
 use serde_json::{json, Value};
 
-use super::constants::DEFAULT_TOOL_MAX_TIMEOUT_SECS;
+use super::constants::{
+    BACKGROUND_TOOL_TIMEOUT_SECS, DEFAULT_TOOL_MAX_TIMEOUT_SECS, TIMEOUT_INPUT_FIELD,
+};
+
+/// 解析一次工具调用的 effective `timeout`（秒），三层优先级单一实现：
+///
+/// 1. 显式 `requested` → clamp 到 `[1, max_secs]`（后台档也 **NEVER** 覆盖用户值）
+/// 2. 无 `requested` 且 `backgrounding_enabled` → `BACKGROUND_TOOL_TIMEOUT_SECS`
+/// 3. 否则 → 工具自定义 `tool_default_secs`，缺省回落 `DEFAULT_TOOL_TIMEOUT_SECS`
+///
+/// `tool_default_secs` / `max_secs` 由各工具的 `Tool::get_timeout_secs`
+/// 覆写注入；runtime 侧用 catalog 发布快照传同一对值。
+pub fn get_timeout_secs(
+    requested: Option<u64>,
+    tool_default_secs: u64,
+    max_secs: u64,
+    backgrounding_enabled: bool,
+) -> u64 {
+    let selected_default = if requested.is_none() && backgrounding_enabled {
+        BACKGROUND_TOOL_TIMEOUT_SECS
+    } else {
+        tool_default_secs
+    };
+    resolve_tool_timeout(requested, selected_default, max_secs)
+}
 
 /// 解析工具 `timeout` 入参（秒）。
 ///
@@ -17,8 +41,27 @@ pub fn resolve_tool_timeout(requested: Option<u64>, default_secs: u64, max_secs:
 }
 
 /// 从工具入参 JSON 提取可选 `timeout`（秒）。非整数或缺省返回 `None`。
+///
+/// 只读不删，供派发前解析 effective 值（runtime supervisor）使用；
+/// 需要「提取并摘除」时用 [`take_timeout_from_input`]。
 pub fn extract_timeout_from_input(input: &Value) -> Option<u64> {
-    input.get("timeout").and_then(Value::as_u64)
+    input.get(TIMEOUT_INPUT_FIELD).and_then(Value::as_u64)
+}
+
+/// 从对象型入参中**摘取** `timeout`：返回解析值并从对象移除该字段。
+///
+/// 框架在派发执行前调用：`timeout` 是框架级通用参数，由 runtime 解析成
+/// effective 值写入 `ExecutionScope`，工具只读 `ctx.effective_timeout_secs()`。
+/// 摘除后工具自己的 `input_schema`（不含 `timeout`）与入参天然一致，
+/// 避免「发布 schema 注入、执行校验不认」的双合同。
+///
+/// - 非对象入参 → 直接返回 `None`，不改动。
+/// - 字段存在但非整数（如 `"12"`）→ 返回 `None` **并移除**该字段：
+///   框架已判定它不是合法 `timeout`，留给工具只会变成未知字段报错。
+pub fn take_timeout_from_input(input: &mut Value) -> Option<u64> {
+    let object = input.as_object_mut()?;
+    let raw = object.remove(TIMEOUT_INPUT_FIELD)?;
+    raw.as_u64()
 }
 
 /// 幂等注入可选 `timeout` 字段到 input JSON Schema。
@@ -87,6 +130,7 @@ pub fn default_tool_max_timeout_secs() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use super::super::constants::DEFAULT_TOOL_TIMEOUT_SECS;
     use super::*;
 
     #[test]
@@ -104,6 +148,70 @@ mod tests {
     }
 
     #[test]
+    fn get_timeout_secs_prefers_explicit_request_over_every_default() {
+        assert_eq!(
+            get_timeout_secs(Some(60), 1800, DEFAULT_TOOL_MAX_TIMEOUT_SECS, false),
+            60
+        );
+        assert_eq!(
+            get_timeout_secs(Some(60), 1800, DEFAULT_TOOL_MAX_TIMEOUT_SECS, true),
+            60
+        );
+        assert_eq!(
+            get_timeout_secs(Some(0), 1800, DEFAULT_TOOL_MAX_TIMEOUT_SECS, true),
+            1
+        );
+        assert_eq!(
+            get_timeout_secs(Some(u64::MAX), 1800, DEFAULT_TOOL_MAX_TIMEOUT_SECS, true),
+            DEFAULT_TOOL_MAX_TIMEOUT_SECS
+        );
+    }
+
+    #[test]
+    fn get_timeout_secs_backgrounding_replaces_default_with_background_budget() {
+        assert_eq!(
+            get_timeout_secs(
+                None,
+                DEFAULT_TOOL_TIMEOUT_SECS,
+                DEFAULT_TOOL_MAX_TIMEOUT_SECS,
+                true
+            ),
+            BACKGROUND_TOOL_TIMEOUT_SECS
+        );
+        assert_eq!(
+            get_timeout_secs(None, 30, DEFAULT_TOOL_MAX_TIMEOUT_SECS, true),
+            86400
+        );
+        // 上限更小的工具（Watch）不会被后台档抬高。
+        assert_eq!(get_timeout_secs(None, 300, 300, true), 300);
+    }
+
+    #[test]
+    fn get_timeout_secs_without_backgrounding_uses_tool_default() {
+        assert_eq!(
+            get_timeout_secs(
+                None,
+                DEFAULT_TOOL_TIMEOUT_SECS,
+                DEFAULT_TOOL_MAX_TIMEOUT_SECS,
+                false
+            ),
+            DEFAULT_TOOL_TIMEOUT_SECS
+        );
+        assert_eq!(
+            get_timeout_secs(None, 30, DEFAULT_TOOL_MAX_TIMEOUT_SECS, false),
+            30
+        );
+        assert_eq!(
+            get_timeout_secs(None, 3600, DEFAULT_TOOL_MAX_TIMEOUT_SECS, false),
+            3600
+        );
+        assert_eq!(
+            get_timeout_secs(None, 0, DEFAULT_TOOL_MAX_TIMEOUT_SECS, false),
+            1
+        );
+    }
+
+    #[test]
     fn extract_reads_integer_timeout_only() {
         assert_eq!(extract_timeout_from_input(&json!({})), None);
         assert_eq!(
@@ -111,6 +219,45 @@ mod tests {
             Some(12)
         );
         assert_eq!(extract_timeout_from_input(&json!({"timeout": "12"})), None);
+    }
+
+    #[test]
+    fn extract_does_not_mutate_input() {
+        let input = json!({"timeout": 12});
+        assert_eq!(extract_timeout_from_input(&input), Some(12));
+        assert_eq!(input, json!({"timeout": 12}));
+    }
+
+    #[test]
+    fn take_removes_field_and_returns_value() {
+        let mut input = json!({"task_id": "bgp_1", "timeout": 30});
+        assert_eq!(take_timeout_from_input(&mut input), Some(30));
+        assert_eq!(input, json!({"task_id": "bgp_1"}));
+    }
+
+    #[test]
+    fn take_returns_none_and_leaves_other_fields_when_absent() {
+        let mut input = json!({"task_id": "bgp_1"});
+        assert_eq!(take_timeout_from_input(&mut input), None);
+        assert_eq!(input, json!({"task_id": "bgp_1"}));
+    }
+
+    #[test]
+    fn take_drops_non_integer_timeout_so_tool_schema_stays_consistent() {
+        let mut input = json!({"task_id": "bgp_1", "timeout": "30"});
+        assert_eq!(take_timeout_from_input(&mut input), None);
+        assert_eq!(
+            input,
+            json!({"task_id": "bgp_1"}),
+            "非法 timeout MUST 被摘除，否则工具 schema 会报未知字段"
+        );
+    }
+
+    #[test]
+    fn take_passes_through_non_object_input() {
+        let mut input = json!("plain");
+        assert_eq!(take_timeout_from_input(&mut input), None);
+        assert_eq!(input, json!("plain"));
     }
 
     #[test]

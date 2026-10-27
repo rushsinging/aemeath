@@ -18,6 +18,12 @@ pub const MEMORY_DIR_NAME: &str = "memory";
 pub const SESSIONS_DIR_NAME: &str = "sessions";
 pub const WORKTREES_DIR_NAME: &str = "worktrees";
 pub const HOOKS_DIR_NAME: &str = "hooks";
+/// guardrails 组件文件名（c2，#2021）。
+pub const GUARDRAILS_FILE_NAME: &str = "guardrails.md";
+/// tool_guidance 覆盖层文件名（c4，#2022）。
+pub const TOOL_GUIDANCE_FILE_NAME: &str = "tool_guidance.md";
+/// scripts 组件目录名（c7，#2020）。
+pub const SCRIPTS_DIR_NAME: &str = "scripts";
 pub const TOOL_RESULTS_DIR_NAME: &str = "tool-results";
 pub const MCP_CONFIG_FILE: &str = "mcp.json";
 pub const HISTORY_FILE: &str = "history.json";
