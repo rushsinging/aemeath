@@ -1,9 +1,11 @@
+use share::ids::SessionId;
 use std::sync::Arc;
 
 use crate::decode_session;
+use crate::domain::session::SessionSnapshotState;
 use crate::SessionManagementPort;
-use crate::{CanonicalSession, SessionCodec, SnapshotState};
-use crate::{SessionId, ToolCallIdentityData};
+use crate::ToolCallIdentityData;
+use crate::{CanonicalSession, SessionCodec};
 use share::session_types::{
     PersistedWorkspaceContext, ProjectIdentityData, WorkspaceId, WorktreeKind,
 };
@@ -14,7 +16,7 @@ fn session_for_project(
     workspace_root: &str,
 ) -> CanonicalSession {
     let mut session = CanonicalSession::fixture(id);
-    session.workspace = SnapshotState::Captured(PersistedWorkspaceContext {
+    session.workspace = SessionSnapshotState::Captured(PersistedWorkspaceContext {
         workspace_id: WorkspaceId::derive(&identity, workspace_root),
         project_identity: identity,
         path_base: workspace_root.to_string(),
@@ -26,7 +28,7 @@ fn session_for_project(
 }
 
 #[tokio::test]
-async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
+async fn session_management_migrates_legacy_tool_receipt_ledger_on_resume() {
     let root = std::env::temp_dir().join(format!(
         "aemeath-tool-receipt-ledger-contract-{}",
         uuid::Uuid::now_v7()
@@ -34,8 +36,8 @@ async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
     std::fs::create_dir_all(&root).expect("create storage root");
     let blob: Arc<dyn storage::AtomicBlobPort> =
         storage::wire_file_system_blob(&root).expect("create filesystem blob adapter");
-    let port = crate::AtomicBlobSessionManagement::new(Arc::clone(&blob));
-    let writer = crate::AtomicBlobCanonicalSessionWriter::new(blob);
+    let port = crate::adapters::AtomicBlobSessionManagement::new(Arc::clone(&blob));
+    // C 阶段：sidecar 退役，本测试验证一次性迁移读——用旧 ledger 直写构造存量数据。
     let project = ProjectIdentityData {
         initial_cwd: "/receipt-ledger".to_string(),
         git_common_dir: None,
@@ -51,18 +53,22 @@ async fn session_management_overlays_durable_tool_receipt_ledger_on_resume() {
     let identity = ToolCallIdentityData {
         session_id: session_id.clone(),
         run_id: sdk::RunId::new("run"),
-        step_id: crate::RunStepId::new("step"),
+        step_id: share::ids::RunStepId::new("step"),
         runtime_call_id: "call-1".to_string(),
         provider_call_id: Some("provider-1".to_string()),
         tool_name: "Glob".to_string(),
         call_index: 0,
         agent: false,
     };
-    let receipt = crate::ToolCallReceiptData::pending(identity, "safe preview");
-    writer
-        .save_tool_receipt(session_id.as_str(), 1, &receipt)
-        .await
-        .expect("persist receipt ledger");
+    let receipt = crate::tool_receipt::ToolCallReceiptData::pending(identity, "safe preview");
+    crate::adapters::tool_receipt_ledger::AtomicBlobToolReceiptLedger::new(
+        blob,
+        session_id.as_str(),
+    )
+    .expect("open legacy ledger")
+    .save(1, &receipt)
+    .await
+    .expect("persist receipt ledger");
 
     let resumed = port
         .load_for_project(session_id.as_str(), &project)
@@ -81,9 +87,10 @@ async fn session_management_filters_and_loads_only_matching_project_identity() {
         uuid::Uuid::now_v7()
     ));
     std::fs::create_dir_all(&root).expect("create storage root");
-    let port: Arc<dyn SessionManagementPort> = Arc::new(crate::AtomicBlobSessionManagement::new(
-        storage::wire_file_system_blob(&root).expect("create filesystem blob adapter"),
-    ));
+    let port: Arc<dyn SessionManagementPort> =
+        Arc::new(crate::adapters::AtomicBlobSessionManagement::new(
+            storage::wire_file_system_blob(&root).expect("create filesystem blob adapter"),
+        ));
     let project_a = ProjectIdentityData {
         initial_cwd: "/project-a".to_string(),
         git_common_dir: Some("/project-a/.git".to_string()),
@@ -144,7 +151,8 @@ async fn session_management_filters_and_loads_only_matching_project_identity() {
         port.update_metadata_for_project(
             "project-b",
             &same_git_other_worktree,
-            crate::SessionMetadataUpdateData {
+            // 覆盖式更新：载荷为整份 metadata（此处仅构造最小形态）。
+            crate::session::SessionMetadata {
                 title: Some("forbidden".to_string()),
                 ..Default::default()
             },
@@ -181,7 +189,7 @@ async fn session_management_lists_only_primary_sessions_for_current_project() {
     std::fs::create_dir_all(&root).expect("create storage root");
     let blob = storage::wire_file_system_blob(&root).expect("create filesystem blob adapter");
     let port: Arc<dyn SessionManagementPort> =
-        Arc::new(crate::AtomicBlobSessionManagement::new(blob));
+        Arc::new(crate::adapters::AtomicBlobSessionManagement::new(blob));
     let project = ProjectIdentityData {
         initial_cwd: "/session-primary".to_string(),
         git_common_dir: None,
@@ -211,9 +219,10 @@ async fn session_management_imports_exports_updates_and_deletes_through_injected
         uuid::Uuid::now_v7()
     ));
     std::fs::create_dir_all(&root).expect("create storage root");
-    let port: Arc<dyn SessionManagementPort> = Arc::new(crate::AtomicBlobSessionManagement::new(
-        storage::wire_file_system_blob(&root).expect("create filesystem blob adapter"),
-    ));
+    let port: Arc<dyn SessionManagementPort> =
+        Arc::new(crate::adapters::AtomicBlobSessionManagement::new(
+            storage::wire_file_system_blob(&root).expect("create filesystem blob adapter"),
+        ));
     let project = ProjectIdentityData {
         initial_cwd: "/session-lifecycle".to_string(),
         git_common_dir: None,
@@ -245,7 +254,7 @@ async fn session_management_imports_exports_updates_and_deletes_through_injected
         .update_metadata_for_project(
             "session-lifecycle",
             &project,
-            crate::SessionMetadataUpdateData {
+            crate::session::SessionMetadata {
                 title: Some("renamed".to_string()),
                 model: Some("Zhipu Coding Plan/glm-5.3".to_string()),
                 ..Default::default()

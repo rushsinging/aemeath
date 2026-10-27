@@ -60,7 +60,7 @@ async fn derived_run_uses_parent_factory_launcher_and_same_loop() {
     let derived_spec = parent_spec
         .derive_sub("derived", Duration::from_secs(30))
         .expect("parent ceiling permits restricted Derived Run");
-    let mut derived = ParentRunFixture::new(session_fixture.context_factory())
+    let mut derived = ParentRunFixture::new(session_fixture.runtime_context_factory())
         .create(
             derived_spec.clone(),
             session_fixture.session_snapshot(),
@@ -82,11 +82,11 @@ async fn derived_run_uses_parent_factory_launcher_and_same_loop() {
     assert_eq!(derived.run().parent_id(), Some(&parent_run_id));
     assert_eq!(derived.run().spec(), &derived_spec);
     assert!(!Arc::ptr_eq(
-        &derived.context().context(),
-        &parent_context.context()
+        &derived.context().context().window,
+        &parent_context.context().window
     ));
     assert!(!Arc::ptr_eq(
-        &derived.context().interaction(),
+        &derived.context().clone().interaction(),
         &parent_context.interaction()
     ));
     derived

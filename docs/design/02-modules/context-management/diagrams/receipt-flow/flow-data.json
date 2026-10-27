@@ -1,0 +1,305 @@
+{
+ "f01": {
+  "stage": "执行",
+  "duty": "runtime 执行工具/子代理调用，结束时构造终态事实 ToolTerminalReceiptData（outcome + safe_reason + possible_side_effects + unfinished_call_ids + cleanup）。",
+  "io": {
+   "in": "工具执行结果 / 取消 / 超时",
+   "out": "ToolTerminalReceiptData"
+  },
+  "refs": [
+   "runtime/.../tool/execution_supervisor.rs:550 terminal_receipt()"
+  ],
+  "defects": [],
+  "label": "工具执行"
+ },
+ "f02": {
+  "stage": "执行",
+  "duty": "把推进意图打包成变更命令：identity（session/run/step + runtime_call_id + provider_call_id + 工具名 + 序号 + agent 标志）+ input_preview + next 状态。构造器 running()/terminal()/backgrounded()。",
+  "io": {
+   "in": "ToolTerminalReceiptData",
+   "out": "ToolReceiptMutationData"
+  },
+  "refs": [
+   "context/domain/tool_receipt.rs:167"
+  ],
+  "defects": [],
+  "label": "MutationData"
+ },
+ "f03": {
+  "stage": "执行",
+  "duty": "context 在内存 candidate 上跑状态机：Pending→Running→(Backgrounded)→Terminal。幂等（同状态返回 changed=false）、防倒退（InvalidTransition）、终态不可覆盖（TerminalStateConflict）。返回 MutationReceiptData{receipt, changed}。",
+  "io": {
+   "in": "ToolReceiptMutationData",
+   "out": "ToolReceiptMutationReceiptData"
+  },
+  "refs": [
+   "context/adapters/canonical_session.rs:1010-1050",
+   "context/domain/session/envelope.rs advance_tool_receipt"
+  ],
+  "defects": [],
+  "label": "状态机"
+ },
+ "f04": {
+  "stage": "执行",
+  "duty": "sidecar 独立文件先写：tool_receipt_writer.save(session_id, revision, receipt)；accepted input 同构走 accepted_input_writer。写在 Session 提交之前——这是唯一'WAL 价值'窗口。",
+  "io": {
+   "in": "最新 receipt",
+   "out": "sidecar 文件（tool/accepted 两份 ledger）"
+  },
+  "refs": [
+   "context/adapters/canonical_session.rs:1032 save",
+   "AtomicBlobToolReceiptLedger"
+  ],
+  "defects": [
+   {
+    "code": "C",
+    "text": "【C 阶段已修复】WAL 条件 7 缺 5：无新旧比较、无 finalize 收纳确认、/clear 不清、compact 不回收、崩溃窗口无测试；dataset 入口不 overlay。半吊子 WAL = 假恢复保证"
+   }
+  ],
+  "label": "边车双写"
+ },
+ "f05": {
+  "stage": "执行",
+  "duty": "Session member 经 dataset commit_incremental 提交（DurabilityData::ProcessCrashSafe，增量、原子、进程崩溃安全）。成功后才 publish 内存 generation。",
+  "io": {
+   "in": "candidate（含 receipts）",
+   "out": "持久化 Session member"
+  },
+  "refs": [
+   "context/adapters/dataset_session_writer.rs:193-230"
+  ],
+  "defects": [
+   {
+    "code": "C",
+    "text": "【C 阶段已修复】与 sidecar 构成双写；两写点之间的失败窗口行为 legacy/dataset 不同"
+   }
+  ],
+  "label": "会话提交"
+ },
+ "f11": {
+  "stage": "收口",
+  "duty": "step 终结：FinalizeCause = Completed / UserCancelledStep / RunTerminated。触发把运行期活账本压扁为不可变摘要。",
+  "io": {
+   "in": "终结事件",
+   "out": "FinalizeCause"
+  },
+  "refs": [
+   "context/domain.rs:593"
+  ],
+  "defects": [],
+  "label": "step finalize"
+ },
+ "f12": {
+  "stage": "收口",
+  "duty": "to_step_receipt()：只对 Terminal 状态的调用产出 RunStepReceiptData（纯 DTO 8 字段）。call_id 规则 = provider_call_id 优先、runtime_call_id 兜底。",
+  "io": {
+   "in": "ToolCallReceiptData（活账本）",
+   "out": "RunStepReceiptData"
+  },
+  "refs": [
+   "context/domain/tool_receipt.rs:80-97"
+  ],
+  "defects": [
+   {
+    "code": "B2",
+    "text": "【B2 已修复】丢 cleanup 字段；artifact_refs 无任何生产写入源但进指纹与盘格式"
+   },
+   {
+    "code": "B3",
+    "text": "【B3 已修复】call-id 回退规则在 restore.rs:274 provider_call_id() 重复实现"
+   }
+  ],
+  "label": "收口压扁"
+ },
+ "f13": {
+  "stage": "收口",
+  "duty": "runtime 用 ContextAppendData 全量内容（含 receipts 元组：call_id/index/outcome/agent/summary/refs/side_effects/unfinished）算 SHA-256 内容指纹，作为幂等重放判定键。",
+  "io": {
+   "in": "ContextAppendData",
+   "out": "fingerprint(String)"
+  },
+  "refs": [
+   "runtime/.../context/coordination.rs:197-275"
+  ],
+  "defects": [],
+  "label": "指纹"
+ },
+ "f14": {
+  "stage": "收口",
+  "duty": "receipts 为空时的回填：runtime step_persistence.rs:79-86 与 context canonical_session.rs:1166-1169 各有一份'空则从当前实时账本加载'。",
+  "io": {
+   "in": "空 receipts",
+   "out": "实时账本快照"
+  },
+  "refs": [
+   "runtime step_persistence.rs:79-86",
+   "context canonical_session.rs:1166"
+  ],
+  "defects": [
+   {
+    "code": "A2",
+    "text": "【A 阶段已修复】回填发生在 fingerprint 计算之后 → 指纹不能证明落盘内容；重试可能因实时 receipt 已变而假冲突；两份重复逻辑"
+   }
+  ],
+  "label": "空回填"
+ },
+ "f15": {
+  "stage": "收口",
+  "duty": "两条提交路径返回 SessionAppendReceiptData{run_id, step_id, committed_revision}：append_finalized 两 adapter 均返回自增后 N+1；accept_input canonical 返回未自增 N、in_memory 返回 N+1。",
+  "io": {
+   "in": "ContextAppendData / AcceptedInputAppendData",
+   "out": "SessionAppendReceiptData"
+  },
+  "refs": [
+   "context canonical_session.rs:943-993(accept) / 1131-1209(append)",
+   "in_memory_session.rs:110-143"
+  ],
+  "defects": [
+   {
+    "code": "A1",
+    "text": "【A 阶段已修复】revision 语义相反：同一 port 两个 adapter 对 accept 返回不同值（canonical N / in_memory N+1），canonical accept 甚至不推进 revision"
+   }
+  ],
+  "label": "提交回执"
+ },
+ "f21": {
+  "stage": "读取",
+  "duty": "step_receipts(run_id, step_id)：永远从实时 tool_receipts 派生（filter_map(to_step_receipt) + 按 index 排序）。runtime load_step_receipts 消费。",
+  "io": {
+   "in": "(run_id, step_id)",
+   "out": "Vec<RunStepReceiptData>"
+  },
+  "refs": [
+   "context/domain/session/envelope.rs:427-439"
+  ],
+  "defects": [
+   {
+    "code": "B1",
+    "text": "【B1 已修复】finalize 后后台调用仍可推进 → 实时与冻结快照永久分叉，无版本关联或对账"
+   }
+  ],
+  "label": "实时读"
+ },
+ "f22": {
+  "stage": "读取",
+  "duty": "FinalizedOutcomeRecord.receipts：finalize 时复制的冻结快照，随 Session 落盘——但生产查询不读它（无读者）。",
+  "io": {
+   "in": "to_step_receipt 产物",
+   "out": "落盘快照"
+  },
+  "refs": [
+   "context/domain/session/envelope.rs:213"
+  ],
+  "defects": [
+   {
+    "code": "B1",
+    "text": "【B1 已修复】双真相里'落盘却无人读'的那份"
+   }
+  ],
+  "label": "冻结快照"
+ },
+ "f23": {
+  "stage": "读取",
+  "duty": "terminal_from_cleanup_receipts：任一 receipt.outcome == CancellationUnconfirmed → RunStepStatus::CancellationUnconfirmed（脏取消，警告副作用）；否则 Cancelled（净取消）。读的是 receipt.outcome 字段。",
+  "io": {
+   "in": "Vec<RunStepReceiptData>",
+   "out": "RunStepStatus"
+  },
+  "refs": [
+   "runtime/.../engine/phases.rs:207"
+  ],
+  "defects": [],
+  "label": "终态判定"
+ },
+ "f24": {
+  "stage": "读取",
+  "duty": "resume 时对未完成 ToolCall 做 provider-safe 修复；用 provider_call_id(receipt) 取 call-id（provider 优先 runtime 兜底）。",
+  "io": {
+   "in": "恢复的 receipts",
+   "out": "修复后的调用状态"
+  },
+  "refs": [
+   "context/domain/session/restore.rs:274-280"
+  ],
+  "defects": [
+   {
+    "code": "B3",
+    "text": "【B3 已修复】call-id 回退规则与 to_step_receipt 重复实现，规则变更需改两处"
+   }
+  ],
+  "label": "恢复修复"
+ },
+ "f31": {
+  "stage": "恢复",
+  "duty": "legacy 加载：AtomicBlobToolReceiptLedger.overlay(&mut session) 把 sidecar 里的旧 receipt 叠回 Session——唯一恢复 tool receipt 的入口。",
+  "io": {
+   "in": "sidecar ledger 文件",
+   "out": "Session 内 receipts"
+  },
+  "refs": [
+   "context/adapters/atomic_blob_session_management.rs:73-80"
+  ],
+  "defects": [
+   {
+    "code": "C",
+    "text": "【C 阶段已修复】overlay 直接 advance 叠加，无新旧比较，可能把旧调用重新带回（/clear 后复活路径）"
+   }
+  ],
+  "label": "旧式恢复"
+ },
+ "f32": {
+  "stage": "恢复",
+  "duty": "dataset 加载：只 overlay AtomicBlobAcceptedInputLedger（accepted input），不 overlay tool receipt ledger。",
+  "io": {
+   "in": "legacy blob",
+   "out": "accepted input 叠回"
+  },
+  "refs": [
+   "context/adapters/dataset_session_reader.rs:481-491"
+  ],
+  "defects": [
+   {
+    "code": "C",
+    "text": "【C 阶段已修复】恢复入口不对称：同一份数据 legacy 能恢复、dataset 静默丢"
+   }
+  ],
+  "label": "数据集恢复"
+ },
+ "f33": {
+  "stage": "恢复",
+  "duty": "/clear：canonical 清 chats/run_slices/committed_steps 但不清 tool receipt ledger（in_memory 却清 tool_receipts）。",
+  "io": {
+   "in": "/clear 命令",
+   "out": "逻辑断点提交"
+  },
+  "refs": [
+   "context/adapters/canonical_session.rs:1257-1290",
+   "in_memory_session.rs:313-330"
+  ],
+  "defects": [
+   {
+    "code": "C",
+    "text": "【C 阶段已修复】两 adapter 行为相反；canonical 清后 legacy overlay 可把旧 receipt 复活"
+   }
+  ],
+  "label": "清空边界"
+ },
+ "f34": {
+  "stage": "恢复",
+  "duty": "compact 后：sidecar 记录没有'已进入快照'的确认/回收机制；finalize 后也不知道哪些 sidecar 记录已被收纳。",
+  "io": {
+   "in": "compact/finalize",
+   "out": "（无回收动作）"
+  },
+  "refs": [
+   "—"
+  ],
+  "defects": [
+   {
+    "code": "C",
+    "text": "【C 阶段已修复】sidecar 无生命周期终点，文件无限增长且语义含混"
+   }
+  ],
+  "label": "压缩之后"
+ }
+}

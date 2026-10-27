@@ -1,14 +1,12 @@
+use share::ids::{InteractionRequestId, SessionId};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::ContextApplicationService;
-use crate::{
-    ContextAppendData, ContextRequestData, ContextRequestId, Language, SessionId, SessionRevision,
-    SystemPromptSpecData,
-};
+use crate::{ContextAppendData, ContextRequestData, Language, SessionRevision};
 use crate::{
     ContextMemorySource, ContextPromptSource, MemoryMaterialization, PromptMaterialization,
-    SessionRepository, SessionSnapshot,
+    SessionItem, SessionRepository,
 };
 use async_trait::async_trait;
 use sdk::RunId;
@@ -19,8 +17,8 @@ use share::reasoning::ReasoningLevel;
 struct Session;
 #[async_trait]
 impl SessionRepository for Session {
-    async fn snapshot(&self, _session_id: &SessionId) -> Result<SessionSnapshot, String> {
-        Ok(SessionSnapshot {
+    async fn snapshot(&self, _session_id: &SessionId) -> Result<SessionItem, String> {
+        Ok(SessionItem {
             revision: SessionRevision::new(0),
             messages: vec![].into(),
             structured_history: None,
@@ -31,7 +29,7 @@ impl SessionRepository for Session {
     async fn append_finalized(
         &self,
         _append: &ContextAppendData,
-    ) -> Result<crate::AppendReceiptData, crate::ContextAppendError> {
+    ) -> Result<crate::SessionAppendReceiptData, crate::ContextAppendError> {
         unreachable!()
     }
 
@@ -40,18 +38,6 @@ impl SessionRepository for Session {
         _request: &crate::CompactRequestData,
     ) -> Result<crate::CompactOutcome, crate::ContextPortError> {
         unreachable!()
-    }
-
-    async fn commit_manual_compaction(
-        &self,
-        _request: &crate::ManualCompactRequestData,
-    ) -> Result<crate::CompactOutcome, crate::ContextPortError> {
-        Ok(crate::CompactOutcome::Committed(crate::CompactResult {
-            summary: "manual".into(),
-            recent_messages: vec![],
-            source_revision: SessionRevision::new(1),
-            quality: crate::CompactSummaryQuality::LocalOnly,
-        }))
     }
 
     async fn clear(&self, _session_id: &SessionId) -> Result<(), crate::ContextPortError> {
@@ -90,14 +76,15 @@ impl ContextMemorySource for CountingMemory {
 fn request() -> ContextRequestData {
     ContextRequestData {
         session_id: SessionId::new("session"),
-        request_id: ContextRequestId::new("request"),
+        request_id: InteractionRequestId::new("request"),
         run_id: RunId::new("run"),
-        step_id: crate::RunStepId::new("step"),
+        step_id: share::ids::RunStepId::new("step"),
         pending_messages: vec![],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
-        language: Language::new("zh"),
+        language: Language::Zh,
         agent_roles: Default::default(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 128_000,
@@ -111,7 +98,7 @@ fn request() -> ContextRequestData {
 
 #[tokio::test]
 async fn prompt_failure_is_typed_and_stops_before_memory_materialization() {
-    use crate::ContextPort;
+    use crate::ContextWindowPort;
 
     let memory_calls = Arc::new(AtomicUsize::new(0));
     let service = ContextApplicationService::new(

@@ -1,19 +1,20 @@
+use share::ids::SessionId;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
 
-use crate::adapters::compact_summary::{compact_messages_with_llm, CompactGenerator};
+use crate::adapters::compact_summary::compact_messages_with_llm;
 use crate::domain::session::{
     AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, CommittedStep,
-    FinalizedOutcomeRecord, SessionCommitPlan, SnapshotState,
+    FinalizedOutcomeRecord, SessionCommitPlan, SessionSnapshotState,
 };
 use crate::domain::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, CompactSkipReason, ContextAppendData, ContextAppendError,
-    ContextPortError, ManualCompactRequestData, SessionId, SessionRevision,
-    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
+    AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
+    CompactSkipReason, CompactTrigger, ContextAppendData, ContextAppendError, ContextPortError,
+    SessionAppendReceiptData, SessionRevision, ToolReceiptMutationData, ToolReceiptMutationError,
+    ToolReceiptMutationReceiptData,
 };
-use crate::ports::{ContextPort, MainContextFactory, SessionRepository, SessionSnapshot};
+use crate::ports::{ContextPorts, SessionItem, SessionRepository};
 
 #[async_trait]
 pub trait CanonicalSessionWriter: Send + Sync {
@@ -52,191 +53,6 @@ pub trait CanonicalSessionWriter: Send + Sync {
     }
 }
 
-#[async_trait]
-pub trait AcceptedInputWriter: Send + Sync {
-    async fn save(
-        &self,
-        session_id: &str,
-        revision: u64,
-        run_id: &str,
-        step_id: &str,
-        input: &AcceptedInputRecord,
-    ) -> Result<(), String>;
-
-    async fn acknowledge_finalized_input(
-        &self,
-        _session_id: &str,
-        _run_id: &str,
-        _step_id: &str,
-    ) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn delete_all(&self, _session_id: &str) -> Result<(), String> {
-        Ok(())
-    }
-}
-
-pub struct NoOpAcceptedInputWriter;
-
-#[async_trait]
-impl AcceptedInputWriter for NoOpAcceptedInputWriter {
-    async fn save(
-        &self,
-        _session_id: &str,
-        _revision: u64,
-        _run_id: &str,
-        _step_id: &str,
-        _input: &AcceptedInputRecord,
-    ) -> Result<(), String> {
-        Ok(())
-    }
-}
-
-#[async_trait]
-pub trait ToolReceiptWriter: Send + Sync {
-    async fn save(
-        &self,
-        session_id: &str,
-        revision: u64,
-        receipt: &crate::domain::ToolCallReceiptData,
-    ) -> Result<(), String>;
-}
-
-pub struct AtomicBlobAcceptedInputWriter {
-    blob: Arc<dyn storage::AtomicBlobPort>,
-}
-
-impl AtomicBlobAcceptedInputWriter {
-    pub fn new(blob: Arc<dyn storage::AtomicBlobPort>) -> Self {
-        Self { blob }
-    }
-}
-
-#[async_trait]
-impl AcceptedInputWriter for AtomicBlobAcceptedInputWriter {
-    async fn save(
-        &self,
-        session_id: &str,
-        revision: u64,
-        run_id: &str,
-        step_id: &str,
-        input: &AcceptedInputRecord,
-    ) -> Result<(), String> {
-        crate::adapters::accepted_input_ledger::AtomicBlobAcceptedInputLedger::new(
-            Arc::clone(&self.blob),
-            session_id,
-        )?
-        .save(revision, run_id, step_id, input)
-        .await
-    }
-
-    async fn acknowledge_finalized_input(
-        &self,
-        session_id: &str,
-        run_id: &str,
-        step_id: &str,
-    ) -> Result<(), String> {
-        crate::adapters::accepted_input_ledger::AtomicBlobAcceptedInputLedger::new(
-            Arc::clone(&self.blob),
-            session_id,
-        )?
-        .acknowledge_finalized_input(run_id, step_id)
-        .await
-    }
-
-    async fn delete_all(&self, session_id: &str) -> Result<(), String> {
-        crate::adapters::accepted_input_ledger::AtomicBlobAcceptedInputLedger::new(
-            Arc::clone(&self.blob),
-            session_id,
-        )?
-        .delete()
-        .await
-    }
-}
-
-pub struct AtomicBlobToolReceiptWriter {
-    blob: Arc<dyn storage::AtomicBlobPort>,
-}
-
-impl AtomicBlobToolReceiptWriter {
-    pub fn new(blob: Arc<dyn storage::AtomicBlobPort>) -> Self {
-        Self { blob }
-    }
-}
-
-#[async_trait]
-impl ToolReceiptWriter for AtomicBlobToolReceiptWriter {
-    async fn save(
-        &self,
-        session_id: &str,
-        revision: u64,
-        receipt: &crate::domain::ToolCallReceiptData,
-    ) -> Result<(), String> {
-        crate::adapters::tool_receipt_ledger::AtomicBlobToolReceiptLedger::new(
-            Arc::clone(&self.blob),
-            session_id,
-        )?
-        .save(revision, receipt)
-        .await
-    }
-}
-
-pub struct NoOpToolReceiptWriter;
-
-#[async_trait]
-impl ToolReceiptWriter for NoOpToolReceiptWriter {
-    async fn save(
-        &self,
-        _session_id: &str,
-        _revision: u64,
-        _receipt: &crate::domain::ToolCallReceiptData,
-    ) -> Result<(), String> {
-        Ok(())
-    }
-}
-
-/// 预留给 dev 门控契约测试的 blob 落盘写入器：常规测试与生产不构造。
-#[cfg_attr(any(not(test), feature = "dev"), allow(dead_code))]
-pub(crate) struct AtomicBlobCanonicalSessionWriter {
-    blob: Arc<dyn storage::AtomicBlobPort>,
-}
-
-#[cfg_attr(any(not(test), feature = "dev"), allow(dead_code))]
-impl AtomicBlobCanonicalSessionWriter {
-    pub fn new(blob: Arc<dyn storage::AtomicBlobPort>) -> Self {
-        Self { blob }
-    }
-
-    pub async fn save_tool_receipt(
-        &self,
-        session_id: &str,
-        revision: u64,
-        receipt: &crate::domain::ToolCallReceiptData,
-    ) -> Result<(), String> {
-        crate::adapters::tool_receipt_ledger::AtomicBlobToolReceiptLedger::new(
-            Arc::clone(&self.blob),
-            session_id,
-        )?
-        .save(revision, receipt)
-        .await
-    }
-}
-
-#[cfg_attr(any(not(test), feature = "dev"), allow(dead_code))]
-#[async_trait]
-impl ToolReceiptWriter for AtomicBlobCanonicalSessionWriter {
-    async fn save(
-        &self,
-        session_id: &str,
-        revision: u64,
-        receipt: &crate::domain::ToolCallReceiptData,
-    ) -> Result<(), String> {
-        AtomicBlobCanonicalSessionWriter::save_tool_receipt(self, session_id, revision, receipt)
-            .await
-    }
-}
-
 pub struct NoOpCanonicalSessionWriter;
 
 #[async_trait]
@@ -251,40 +67,35 @@ impl CanonicalSessionWriter for NoOpCanonicalSessionWriter {
     }
 }
 
-pub struct ProductionMainContextFactory {
+pub struct MainContextFactory {
     writer: Arc<dyn CanonicalSessionWriter>,
     task_persist: Option<Arc<dyn task::TaskPersist>>,
     workspace_persist: Option<Arc<dyn project::WorkspaceWriter>>,
-    accepted_input_writer: Arc<dyn AcceptedInputWriter>,
-    tool_receipt_writer: Arc<dyn ToolReceiptWriter>,
     /// 可选注入的 Skill metadata catalog 与 Context-owned query factory。
     skill_catalog: Option<Arc<dyn tools::published::skill::SkillCatalogPort>>,
     query_factory: Option<Arc<dyn crate::ports::SkillQueryFactory>>,
-    /// 可选注入的 LLM 摘要生成器（#1486）；None 时 compact 走本地压缩。
-    generator: Option<Arc<dyn CompactGenerator>>,
+    /// Hook BC 注入的指令加载通知端口：Context 组装系统提示时触发。
+    instructions_loaded: Option<Arc<dyn share::instructions::InstructionsLoadedNotifier>>,
 }
 
-impl ProductionMainContextFactory {
+impl MainContextFactory {
     pub fn new(writer: Arc<dyn CanonicalSessionWriter>) -> Self {
         Self {
             task_persist: None,
             workspace_persist: None,
             writer,
-            accepted_input_writer: Arc::new(NoOpAcceptedInputWriter),
-            tool_receipt_writer: Arc::new(NoOpToolReceiptWriter),
             skill_catalog: None,
             query_factory: None,
-            generator: None,
+            instructions_loaded: None,
         }
     }
 
-    pub fn with_accepted_input_writer(mut self, writer: Arc<dyn AcceptedInputWriter>) -> Self {
-        self.accepted_input_writer = writer;
-        self
-    }
-
-    pub fn with_tool_receipt_writer(mut self, writer: Arc<dyn ToolReceiptWriter>) -> Self {
-        self.tool_receipt_writer = writer;
+    /// 注入指令加载通知端口（hook 域定义，Runtime 装配实现）。
+    pub fn with_instructions_loaded(
+        mut self,
+        notifier: Arc<dyn share::instructions::InstructionsLoadedNotifier>,
+    ) -> Self {
+        self.instructions_loaded = Some(notifier);
         self
     }
 
@@ -308,21 +119,16 @@ impl ProductionMainContextFactory {
         self.workspace_persist = Some(workspace_persist);
         self
     }
-
-    /// 注入 LLM 摘要生成器（#1486），compact 优先走 LLM 语义压缩。
-    pub fn with_generator(mut self, generator: Arc<dyn CompactGenerator>) -> Self {
-        self.generator = Some(generator);
-        self
-    }
 }
 
-impl MainContextFactory for ProductionMainContextFactory {
-    fn build(
+impl MainContextFactory {
+    /// 构建 per-session 活状态的 ContextPorts 聚合。
+    pub fn build(
         &self,
         session: Arc<RwLock<Arc<CanonicalSession>>>,
         memory: Arc<RwLock<Arc<dyn memory::api::MemoryPort>>>,
         mutation_gate: Arc<tokio::sync::Mutex<()>>,
-    ) -> Arc<dyn ContextPort> {
+    ) -> ContextPorts {
         let task_persist = self
             .task_persist
             .clone()
@@ -331,32 +137,33 @@ impl MainContextFactory for ProductionMainContextFactory {
             .workspace_persist
             .clone()
             .expect("factory workspace persistence must be injected via with_persistence");
+        let assembly = Arc::new(crate::adapters::SystemPromptAssembly::new(
+            self.instructions_loaded.clone(),
+        ));
         let prompt: Arc<dyn crate::ports::ContextPromptSource> =
             match (&self.skill_catalog, &self.query_factory) {
                 (Some(catalog), Some(factory)) => {
                     Arc::new(crate::adapters::SkillPromptSource::new(
                         Arc::clone(catalog),
                         Arc::clone(factory),
+                        Arc::clone(&assembly),
                     ))
                 }
-                _ => Arc::new(crate::adapters::BaselinePromptSource),
+                _ => Arc::new(crate::adapters::BaselinePromptSource::new(assembly)),
             };
-        let mut repository = CanonicalSessionRepository::new(
+        let repository = CanonicalSessionRepository::new(
             session,
             task_persist,
             workspace_persist,
             Arc::clone(&self.writer),
             mutation_gate,
         );
-        repository = repository.with_accepted_input_writer(Arc::clone(&self.accepted_input_writer));
-        if let Some(generator) = &self.generator {
-            repository = repository.with_generator(Arc::clone(generator));
-        }
-        repository = repository.with_tool_receipt_writer(Arc::clone(&self.tool_receipt_writer));
-        Arc::new(crate::application::ContextApplicationService::new(
-            Arc::new(repository),
-            prompt,
-            Arc::new(crate::adapters::CommittedMemoryRetrieveAdapter::new(memory)),
+        ContextPorts::from_service(Arc::new(
+            crate::application::ContextApplicationService::new(
+                Arc::new(repository),
+                prompt,
+                Arc::new(crate::adapters::CommittedMemoryRetrieveAdapter::new(memory)),
+            ),
         ))
     }
 }
@@ -419,12 +226,9 @@ pub(crate) struct CanonicalSessionRepository {
     task_persist: Arc<dyn task::TaskPersist>,
     workspace_persist: Arc<dyn project::WorkspaceWriter>,
     writer: Arc<dyn CanonicalSessionWriter>,
-    accepted_input_writer: Arc<dyn AcceptedInputWriter>,
-    tool_receipt_writer: Arc<dyn ToolReceiptWriter>,
     mutation_gate: Arc<tokio::sync::Mutex<()>>,
     /// 可选注入的 LLM 摘要生成器（#1486）。Some 时 compact 走 LLM 语义压缩，
     /// 失败自动 fallback 本地；None 时直接走本地文本压缩。
-    generator: Option<Arc<dyn CompactGenerator>>,
     auto_compact_state: Arc<std::sync::Mutex<crate::domain::compact::AutoCompactState>>,
 }
 
@@ -440,51 +244,11 @@ impl CanonicalSessionRepository {
             session,
             task_persist,
             workspace_persist,
-            accepted_input_writer: Arc::new(NoOpAcceptedInputWriter),
-            tool_receipt_writer: Arc::new(NoOpToolReceiptWriter),
             writer,
             mutation_gate,
-            generator: None,
             auto_compact_state: Arc::new(std::sync::Mutex::new(
                 crate::domain::compact::AutoCompactState::default(),
             )),
-        }
-    }
-
-    pub fn with_accepted_input_writer(mut self, writer: Arc<dyn AcceptedInputWriter>) -> Self {
-        self.accepted_input_writer = writer;
-        self
-    }
-
-    pub fn with_tool_receipt_writer(mut self, writer: Arc<dyn ToolReceiptWriter>) -> Self {
-        self.tool_receipt_writer = writer;
-        self
-    }
-
-    pub fn with_generator(mut self, generator: Arc<dyn CompactGenerator>) -> Self {
-        self.generator = Some(generator);
-        self
-    }
-
-    async fn acknowledge_finalized_input_ledger(
-        &self,
-        session_id: &str,
-        run_id: &str,
-        step_id: &str,
-    ) {
-        if let Err(error) = self
-            .accepted_input_writer
-            .acknowledge_finalized_input(session_id, run_id, step_id)
-            .await
-        {
-            log::warn!(
-                target: crate::LOG_TARGET,
-                "accepted input ledger cleanup deferred session_id={} run_id={} step_id={} error={}",
-                session_id,
-                run_id,
-                step_id,
-                error
-            );
         }
     }
 
@@ -498,6 +262,7 @@ impl CanonicalSessionRepository {
     /// 计数/Finalizing 阶段实时上报；`None` 表示调用方不关心进度。
     ///
     /// 返回 `(summary, recent_messages)`；消息太少无法压缩时返回 `None`。
+    #[allow(clippy::too_many_arguments)]
     async fn compact_visible_messages(
         &self,
         messages: &[share::message::Message],
@@ -505,20 +270,21 @@ impl CanonicalSessionRepository {
         context_size: usize,
         step_boundaries: &[usize],
         progress: Option<std::sync::Arc<dyn crate::domain::CompactProgressFn>>,
-        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
+        task_snapshot: Option<&task::CompactTaskSnapshotData>,
+        llm: Option<&crate::domain::CompactLlmBinding>,
         cancellation: &tokio_util::sync::CancellationToken,
     ) -> Option<crate::adapters::compact_summary::CompactResult> {
         let tail = crate::adapters::compact_summary::CompactTail::from_context(
             step_boundaries,
             context_size,
         );
-        match &self.generator {
-            Some(generator) => {
+        match llm {
+            Some(binding) => {
                 let result = compact_messages_with_llm(
                     messages,
                     previous_summary,
                     context_size,
-                    Some(generator.as_ref()),
+                    Some(binding),
                     progress.as_deref(),
                     task_snapshot,
                     cancellation,
@@ -561,7 +327,7 @@ impl CanonicalSessionRepository {
     /// 收敛到同一 Context-owned summary budget。
     fn append_task_snapshot_companion(
         summary: &str,
-        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
+        task_snapshot: Option<&task::CompactTaskSnapshotData>,
         budget: usize,
     ) -> Result<String, crate::domain::compact::CheckpointError> {
         let checkpoint =
@@ -615,6 +381,7 @@ impl CanonicalSessionRepository {
                 request.source.context_size,
                 request.progress.clone(),
                 request.task_snapshot.as_ref(),
+                request.llm.as_ref(),
                 &request.cancellation,
             )
             .await
@@ -695,7 +462,8 @@ impl CanonicalSessionRepository {
         source: &CompactSource,
         context_size: usize,
         progress: Option<std::sync::Arc<dyn crate::domain::CompactProgressFn>>,
-        task_snapshot: Option<&crate::domain::compact::CompactTaskSnapshotData>,
+        task_snapshot: Option<&task::CompactTaskSnapshotData>,
+        llm: Option<&crate::domain::CompactLlmBinding>,
         cancellation: &tokio_util::sync::CancellationToken,
     ) -> Result<Option<GeneratedCompact>, crate::domain::CompactSkipReason> {
         let Some(compacted) = self
@@ -706,6 +474,7 @@ impl CanonicalSessionRepository {
                 &source.step_boundaries,
                 progress,
                 task_snapshot,
+                llm,
                 cancellation,
             )
             .await
@@ -783,7 +552,7 @@ impl CanonicalSessionRepository {
         // 再次加载会命中 AlreadyLoaded 拒绝重发，模型永远拿不回内容。
         candidate.skill_load_records.clear();
         candidate.revision += 1;
-        candidate.updated_at = crate::domain::session::now_iso();
+        candidate.updated_at = share::time::now_iso();
         self.persist_candidate(&current, &candidate)
             .await
             .map_err(ContextPortError::Compact)?;
@@ -806,24 +575,22 @@ impl CanonicalSessionRepository {
         ))
     }
 
-    fn receipt(append: &ContextAppendData, revision: SessionRevision) -> AppendReceiptData {
-        AppendReceiptData {
+    fn receipt(append: &ContextAppendData, revision: SessionRevision) -> SessionAppendReceiptData {
+        SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: revision,
-            fingerprint: append.fingerprint.clone(),
         }
     }
 
     fn accepted_receipt(
         append: &AcceptedInputAppendData,
         revision: SessionRevision,
-    ) -> AcceptedInputReceiptData {
-        AcceptedInputReceiptData {
+    ) -> SessionAppendReceiptData {
+        SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: revision,
-            fingerprint: append.fingerprint.clone(),
         }
     }
 
@@ -890,7 +657,7 @@ impl CanonicalSessionRepository {
 
 #[async_trait]
 impl SessionRepository for CanonicalSessionRepository {
-    async fn snapshot(&self, session_id: &SessionId) -> Result<SessionSnapshot, String> {
+    async fn snapshot(&self, session_id: &SessionId) -> Result<SessionItem, String> {
         let session = self.session.read().map_err(|error| error.to_string())?;
         if session.id != session_id.as_str() {
             return Err(format!("Session 不存在：{session_id}"));
@@ -909,7 +676,7 @@ impl SessionRepository for CanonicalSessionRepository {
                 .collect(),
             Vec::new(),
         );
-        Ok(SessionSnapshot {
+        Ok(SessionItem {
             revision: SessionRevision::new(session.revision),
             messages,
             structured_history: Some(structured_history),
@@ -920,7 +687,7 @@ impl SessionRepository for CanonicalSessionRepository {
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
+    ) -> Result<SessionAppendReceiptData, AcceptedInputError> {
         let _mutation = self.mutation_gate.lock().await;
         let current = self
             .session
@@ -932,9 +699,10 @@ impl SessionRepository for CanonicalSessionRepository {
                 append.session_id.clone(),
             ));
         }
+        let fingerprint = append.fingerprint()?;
         if let Some(input) = current.accepted_input(append.run_id.as_ref(), append.step_id.as_str())
         {
-            if input.fingerprint == append.fingerprint.as_str() {
+            if input.fingerprint == fingerprint.as_str() {
                 return Ok(Self::accepted_receipt(
                     append,
                     SessionRevision::new(input.committed_revision),
@@ -946,30 +714,21 @@ impl SessionRepository for CanonicalSessionRepository {
             });
         }
         let mut candidate = (*current).clone();
-        candidate.updated_at = crate::domain::session::now_iso();
-        candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
-        candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
+        candidate.revision += 1;
+        candidate.updated_at = share::time::now_iso();
+        candidate.tasks = SessionSnapshotState::Captured(self.task_persist.collect_snapshot());
+        candidate.workspace = SessionSnapshotState::Captured(self.workspace_persist.snapshot());
         candidate.append_accepted_input(
             append.run_id.as_ref(),
             append.step_id.as_str(),
             AcceptedInputRecord::new(
                 append.messages.clone(),
-                append.fingerprint.as_str(),
+                fingerprint.as_str(),
                 candidate.revision,
             ),
         );
-        let input = candidate
-            .accepted_input(append.run_id.as_ref(), append.step_id.as_str())
-            .expect("accepted input must exist")
-            .clone();
-        self.accepted_input_writer
-            .save(
-                &current.id,
-                candidate.revision,
-                append.run_id.as_ref(),
-                append.step_id.as_str(),
-                &input,
-            )
+        // C 阶段：sidecar 退役——accepted input 随 Session member 一次原子提交。
+        self.persist_candidate(&current, &candidate)
             .await
             .map_err(AcceptedInputError::Storage)?;
         let revision = SessionRevision::new(candidate.revision);
@@ -1011,16 +770,17 @@ impl SessionRepository for CanonicalSessionRepository {
                 changed: false,
             });
         }
-        candidate.updated_at = crate::domain::session::now_iso();
-        candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
-        candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
+        candidate.revision += 1;
+        candidate.updated_at = share::time::now_iso();
+        candidate.tasks = SessionSnapshotState::Captured(self.task_persist.collect_snapshot());
+        candidate.workspace = SessionSnapshotState::Captured(self.workspace_persist.snapshot());
         let receipt = candidate
             .tool_receipt(&mutation)
             .expect("advanced receipt must exist")
             .clone();
-        let revision = current.revision;
-        self.tool_receipt_writer
-            .save(&current.id, revision, &receipt)
+        // C 阶段：sidecar 退役——receipt 变更随 Session member 一次原子提交，
+        // durable 语义与普通 Session 写入一致（提交失败不发布内存态并报错）。
+        self.persist_candidate(&current, &candidate)
             .await
             .map_err(ToolReceiptMutationError::Storage)?;
         self.publish_generation(&current, candidate)
@@ -1036,7 +796,7 @@ impl SessionRepository for CanonicalSessionRepository {
         session_id: &SessionId,
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::domain::StepReceiptData>, ToolReceiptMutationError> {
+    ) -> Result<Vec<crate::domain::RunStepReceiptData>, ToolReceiptMutationError> {
         let current = self
             .session
             .read()
@@ -1082,9 +842,9 @@ impl SessionRepository for CanonicalSessionRepository {
             return Ok(decision);
         }
         candidate.revision += 1;
-        candidate.updated_at = crate::domain::session::now_iso();
-        candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
-        candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
+        candidate.updated_at = share::time::now_iso();
+        candidate.tasks = SessionSnapshotState::Captured(self.task_persist.collect_snapshot());
+        candidate.workspace = SessionSnapshotState::Captured(self.workspace_persist.snapshot());
         self.persist_candidate(&current, &candidate)
             .await
             .map_err(tools::published::skill::SkillLoadStateError::Storage)?;
@@ -1096,7 +856,7 @@ impl SessionRepository for CanonicalSessionRepository {
     async fn append_finalized(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError> {
+    ) -> Result<SessionAppendReceiptData, ContextAppendError> {
         let _mutation = self.mutation_gate.lock().await;
         let current = self
             .session
@@ -1108,18 +868,13 @@ impl SessionRepository for CanonicalSessionRepository {
                 append.session_id.clone(),
             ));
         }
+        let fingerprint = append.fingerprint()?;
         if let Some(committed) = current
             .committed_steps
             .find(append.run_id.as_ref(), append.step_id.as_str())
         {
-            if committed.fingerprint == append.fingerprint.as_str() {
+            if committed.fingerprint == fingerprint.as_str() {
                 let revision = SessionRevision::new(committed.committed_revision);
-                self.acknowledge_finalized_input_ledger(
-                    &current.id,
-                    append.run_id.as_ref(),
-                    append.step_id.as_str(),
-                )
-                .await;
                 return Ok(Self::receipt(append, revision));
             }
             return Err(ContextAppendError::ContentConflict {
@@ -1149,15 +904,10 @@ impl SessionRepository for CanonicalSessionRepository {
         }
 
         let mut candidate = (*current).clone();
-        let mut append = append.clone();
-        if append.receipts.is_empty() {
-            append.receipts =
-                current.step_receipts(append.run_id.as_ref(), append.step_id.as_str());
-        }
         candidate.revision += 1;
-        candidate.updated_at = crate::domain::session::now_iso();
-        candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
-        candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
+        candidate.updated_at = share::time::now_iso();
+        candidate.tasks = SessionSnapshotState::Captured(self.task_persist.collect_snapshot());
+        candidate.workspace = SessionSnapshotState::Captured(self.workspace_persist.snapshot());
         candidate.append_finalized_outcome(
             append.run_id.as_ref(),
             append.step_id.as_str(),
@@ -1167,14 +917,14 @@ impl SessionRepository for CanonicalSessionRepository {
                 messages: append.messages.clone().into(),
                 receipts: append.receipts.clone(),
                 api_input_tokens: append.api_input_tokens,
-                fingerprint: append.fingerprint.as_str().to_string(),
+                fingerprint: fingerprint.as_str().to_string(),
                 committed_revision: candidate.revision,
             },
         );
         candidate.committed_steps = candidate.committed_steps.append(CommittedStep {
             run_id: append.run_id.to_string(),
             step_id: append.step_id.as_str().to_string(),
-            fingerprint: append.fingerprint.as_str().to_string(),
+            fingerprint: fingerprint.as_str().to_string(),
             committed_revision: candidate.revision,
         });
 
@@ -1184,19 +934,42 @@ impl SessionRepository for CanonicalSessionRepository {
         let revision = SessionRevision::new(candidate.revision);
         self.publish_generation(&current, candidate)
             .map_err(ContextAppendError::Storage)?;
-        self.acknowledge_finalized_input_ledger(
-            &current.id,
-            append.run_id.as_ref(),
-            append.step_id.as_str(),
-        )
-        .await;
-        Ok(Self::receipt(&append, revision))
+        Ok(Self::receipt(append, revision))
     }
 
     async fn commit_compaction(
         &self,
         request: &CompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError> {
+        // 手动压缩：跳过熔断（用户显式要求）与 revision 对齐（直接取当前）。
+        if matches!(request.trigger, CompactTrigger::Manual) {
+            let source = self
+                .freeze_compact_source(&request.source.session_id, None)
+                .await?;
+            if source.messages.len() <= 4 {
+                return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
+            }
+            let generated = match self
+                .generate_compact(
+                    &source,
+                    request.source.context_size,
+                    request.progress.clone(),
+                    request.task_snapshot.as_ref(),
+                    request.llm.as_ref(),
+                    &tokio_util::sync::CancellationToken::new(),
+                )
+                .await
+            {
+                Ok(Some(generated)) => generated,
+                Ok(None) => {
+                    return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
+                }
+                Err(reason) => return Ok(CompactOutcome::Skipped(reason)),
+            };
+            return self
+                .commit_generated_compact(&request.source.session_id, &source, generated)
+                .await;
+        }
         let Some(attempt) = self.begin_auto_compact_attempt(
             request.source.config_snapshot.auto_compact_failure_limit(),
         ) else {
@@ -1207,36 +980,6 @@ impl SessionRepository for CanonicalSessionRepository {
         let result = self.commit_automatic_compaction(request).await;
         attempt.finish(&result);
         result
-    }
-
-    async fn commit_manual_compaction(
-        &self,
-        request: &ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
-        let source = self
-            .freeze_compact_source(&request.session_id, None)
-            .await?;
-        if source.messages.len() <= 4 {
-            return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
-        }
-        let generated = match self
-            .generate_compact(
-                &source,
-                request.context_size,
-                request.progress.clone(),
-                request.task_snapshot.as_ref(),
-                &tokio_util::sync::CancellationToken::new(),
-            )
-            .await
-        {
-            Ok(Some(generated)) => generated,
-            Ok(None) => {
-                return Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection));
-            }
-            Err(reason) => return Ok(CompactOutcome::Skipped(reason)),
-        };
-        self.commit_generated_compact(&request.session_id, &source, generated)
-            .await
     }
 
     async fn clear(&self, session_id: &SessionId) -> Result<(), ContextPortError> {
@@ -1256,9 +999,9 @@ impl SessionRepository for CanonicalSessionRepository {
         candidate.committed_steps = candidate.committed_steps.cleared();
         candidate.skill_load_records.clear();
         candidate.revision += 1;
-        candidate.updated_at = crate::domain::session::now_iso();
-        candidate.tasks = SnapshotState::Captured(self.task_persist.collect_snapshot());
-        candidate.workspace = SnapshotState::Captured(self.workspace_persist.snapshot());
+        candidate.updated_at = share::time::now_iso();
+        candidate.tasks = SessionSnapshotState::Captured(self.task_persist.collect_snapshot());
+        candidate.workspace = SessionSnapshotState::Captured(self.workspace_persist.snapshot());
         // `/clear` 是逻辑断点：磁盘 step 成员无限保留，state 记录 clear
         // 边界，由 writer 按 persisted manifest 计算并返回对齐后的快照。
         let fallback = candidate.clone();
@@ -1283,10 +1026,6 @@ impl SessionRepository for CanonicalSessionRepository {
             }
         };
         self.publish_generation(&current, cleared)
-            .map_err(ContextPortError::SessionRepository)?;
-        self.accepted_input_writer
-            .delete_all(&current.id)
-            .await
             .map_err(ContextPortError::SessionRepository)?;
         Ok(())
     }

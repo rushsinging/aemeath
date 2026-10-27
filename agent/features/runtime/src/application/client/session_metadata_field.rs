@@ -28,16 +28,12 @@ impl SessionMetadataField {
         }
     }
 
-    fn build_update(self, value: String) -> context::SessionMetadataUpdateData {
+    /// overwrite 语义（SessionMetadataUpdateData 已按拍板合并进 SessionMetadata）：
+    /// 在已加载的完整 metadata 上应用单字段，再整体写回。
+    fn apply(self, metadata: &mut SessionMetadata, value: String) {
         match self {
-            Self::Model => context::SessionMetadataUpdateData {
-                model: Some(value),
-                ..Default::default()
-            },
-            Self::ReasoningEffort => context::SessionMetadataUpdateData {
-                reasoning_effort: Some(value),
-                ..Default::default()
-            },
+            Self::Model => metadata.model = Some(value),
+            Self::ReasoningEffort => metadata.reasoning_effort = Some(value),
         }
     }
 }
@@ -55,7 +51,8 @@ pub(crate) async fn persist_metadata_field(
     if value.is_empty() {
         return;
     }
-    match session_management
+    // overwrite 语义需要完整 metadata：load 失败则跳过本次写（不构造半量载荷）。
+    let mut metadata = match session_management
         .load_for_project(session_id, project)
         .await
     {
@@ -63,16 +60,19 @@ pub(crate) async fn persist_metadata_field(
             if field.read_current(&session.metadata).as_deref() == Some(value) {
                 return;
             }
+            session.metadata.clone()
         }
         Err(error) => {
             log::warn!(
                 target: crate::LOG_TARGET,
-                "persist session {field_name} load failed (continuing write): session={session_id} error={error}"
+                "persist session {field_name} load failed (skip write): session={session_id} error={error}"
             );
+            return;
         }
-    }
+    };
+    field.apply(&mut metadata, value.to_string());
     if let Err(error) = session_management
-        .update_metadata_for_project(session_id, project, field.build_update(value.to_string()))
+        .update_metadata_for_project(session_id, project, metadata)
         .await
     {
         log::warn!(
@@ -97,10 +97,9 @@ pub(crate) async fn persist_metadata_field_on_coordinator(
         return;
     }
     if coordinator.committed_session().id == session_id {
-        if let Err(error) = coordinator
-            .update_active_session_metadata(field.build_update(value.to_string()))
-            .await
-        {
+        let mut metadata = coordinator.committed_session().metadata.clone();
+        field.apply(&mut metadata, value.to_string());
+        if let Err(error) = coordinator.update_active_session_metadata(metadata).await {
             log::warn!(
                 target: crate::LOG_TARGET,
                 "persist session {} (active sync) failed: session={session_id} value={value} error={error}",

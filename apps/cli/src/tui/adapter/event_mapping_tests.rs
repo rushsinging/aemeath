@@ -1061,7 +1061,7 @@ fn model_and_session_list_map_every_field_to_tui_owned_dto() {
     assert_eq!(models[0].max_tokens, 8_000);
 
     let session_mapping = sdk_event_to_tui_event(sdk::ChatEvent::SessionList {
-        sessions: vec![sdk::SessionSummary {
+        sessions: vec![sdk::SessionItemList {
             id: "s-100".to_owned(),
             title: Some("custom title".to_owned()),
             project: Some("/repo".to_owned()),

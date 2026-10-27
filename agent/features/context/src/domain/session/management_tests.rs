@@ -1,7 +1,7 @@
-use super::*;
+use crate::domain::session::project_list_item;
 use crate::domain::session::{
     AcceptedInputRecord, ActiveCompactMarker, CanonicalSession, CommittedRunSlice,
-    CommittedRunStep, RunStepCursor, SnapshotState,
+    CommittedRunStep, RunStepCursor, SessionMetadata, SessionSnapshotState,
 };
 use share::message::Message;
 use share::session_types::{PersistedWorkspaceContext, ProjectIdentityData};
@@ -13,8 +13,8 @@ fn session() -> CanonicalSession {
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
         metadata: SessionMetadata::default(),
-        tasks: SnapshotState::Missing,
-        workspace: SnapshotState::Missing,
+        tasks: SessionSnapshotState::Missing,
+        workspace: SessionSnapshotState::Missing,
         revision: 0,
         compact: Some(ActiveCompactMarker {
             summary: "summary".to_string(),
@@ -49,7 +49,7 @@ fn session() -> CanonicalSession {
 
 #[test]
 fn list_entry_reads_marker_projected_messages() {
-    let entry = SessionListEntryData::from_canonical(&session());
+    let entry = project_list_item(&session());
 
     assert_eq!(entry.message_count, 1);
     assert_eq!(entry.preview.as_deref(), Some("visible preview"));
@@ -72,7 +72,7 @@ fn cleared_empty_session() -> CanonicalSession {
 
 fn captured_workspace_session(initial_cwd: &str) -> CanonicalSession {
     let mut session = cleared_empty_session();
-    session.workspace = SnapshotState::Captured(PersistedWorkspaceContext {
+    session.workspace = SessionSnapshotState::Captured(PersistedWorkspaceContext {
         project_identity: ProjectIdentityData {
             initial_cwd: initial_cwd.to_string(),
             git_common_dir: None,
@@ -84,7 +84,7 @@ fn captured_workspace_session(initial_cwd: &str) -> CanonicalSession {
 
 #[test]
 fn list_entry_marks_cleared_empty_tail_as_empty_instead_of_unknown() {
-    let entry = SessionListEntryData::from_canonical(&cleared_empty_session());
+    let entry = project_list_item(&cleared_empty_session());
 
     assert_eq!(entry.message_count, 0);
     assert_eq!(entry.preview, None);
@@ -93,9 +93,7 @@ fn list_entry_marks_cleared_empty_tail_as_empty_instead_of_unknown() {
 
 #[test]
 fn list_entry_derives_project_name_from_workspace_identity() {
-    let entry = SessionListEntryData::from_canonical(&captured_workspace_session(
-        "/Users/dev/work/aemeath",
-    ));
+    let entry = project_list_item(&captured_workspace_session("/Users/dev/work/aemeath"));
 
     assert_eq!(entry.project.as_deref(), Some("aemeath"));
 }
@@ -105,53 +103,14 @@ fn list_entry_prefers_explicit_metadata_project_over_workspace_identity() {
     let mut session = captured_workspace_session("/Users/dev/work/aemeath");
     session.metadata.project = Some("custom-project".to_string());
 
-    let entry = SessionListEntryData::from_canonical(&session);
+    let entry = project_list_item(&session);
 
     assert_eq!(entry.project.as_deref(), Some("custom-project"));
 }
 
 #[test]
 fn list_entry_keeps_project_none_without_workspace_snapshot() {
-    let entry = SessionListEntryData::from_canonical(&cleared_empty_session());
+    let entry = project_list_item(&cleared_empty_session());
 
     assert_eq!(entry.project, None);
-}
-
-#[test]
-fn metadata_update_applies_model_selection() {
-    let mut metadata = SessionMetadata::default();
-    SessionMetadataUpdateData {
-        model: Some("Zhipu Coding Plan/glm-5.3".to_string()),
-        ..Default::default()
-    }
-    .apply(&mut metadata);
-
-    assert_eq!(metadata.model.as_deref(), Some("Zhipu Coding Plan/glm-5.3"));
-}
-
-#[test]
-fn metadata_update_applies_reasoning_effort_selection() {
-    let mut metadata = SessionMetadata::default();
-    SessionMetadataUpdateData {
-        reasoning_effort: Some("high".to_string()),
-        ..Default::default()
-    }
-    .apply(&mut metadata);
-
-    assert_eq!(metadata.reasoning_effort.as_deref(), Some("high"));
-}
-
-#[test]
-fn metadata_update_without_reasoning_effort_keeps_existing_value() {
-    let mut metadata = SessionMetadata {
-        reasoning_effort: Some("max".to_string()),
-        ..Default::default()
-    };
-    SessionMetadataUpdateData {
-        model: Some("zhipu/glm-5.3".to_string()),
-        ..Default::default()
-    }
-    .apply(&mut metadata);
-
-    assert_eq!(metadata.reasoning_effort.as_deref(), Some("max"));
 }

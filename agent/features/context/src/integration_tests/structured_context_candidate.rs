@@ -1,3 +1,5 @@
+use crate::domain::session::CommittedStepMessages;
+use share::ids::SessionId;
 use std::sync::Arc;
 
 use share::message::{ContentBlock, Message};
@@ -6,23 +8,22 @@ use crate::compact::{
     microcompact_exploration, snip_superseded_exploration, ContextReadCandidate, ContextReadRun,
     ContextReadStep, ProtectedRunPolicy,
 };
+use crate::tool_receipt::ToolCallReceiptData;
 use crate::{
-    AcceptedInputRecord, CommittedRunSlice, CommittedRunStep, CommittedStepMessages,
-    FinalizedOutcomeRecord, SessionHistory,
+    AcceptedInputRecord, CommittedRunSlice, CommittedRunStep, FinalizedOutcomeRecord,
+    SessionHistory,
 };
-use crate::{
-    CleanupConfirmation, FinalizeCause, SessionId, ToolCallIdentityData, ToolCallReceiptData,
-    ToolOutcomeKindData, ToolTerminalReceiptData,
-};
+use crate::{FinalizeCause, ToolCallIdentityData, ToolOutcomeKindData, ToolTerminalReceiptData};
+use tools::CleanupConfirmation;
 
 fn finalized(messages: Vec<Message>) -> FinalizedOutcomeRecord {
     FinalizedOutcomeRecord {
+        fingerprint: "structured-test".to_string(),
         finalize_cause: FinalizeCause::Completed,
         duration_ms: None,
         messages: messages.into(),
         receipts: Vec::new(),
         api_input_tokens: None,
-        fingerprint: "fixture".into(),
         committed_revision: 1,
     }
 }
@@ -145,7 +146,7 @@ fn terminal_receipt(
             agent: false,
         },
         input_preview: input.to_string(),
-        state: crate::ToolCallState::Terminal(ToolTerminalReceiptData::new(
+        state: crate::tool_receipt::ToolCallState::Terminal(ToolTerminalReceiptData::new(
             outcome,
             "terminal",
             CleanupConfirmation::NotApplicable,

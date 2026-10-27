@@ -34,7 +34,9 @@ use crate::ports::{ContextRequestData as _CtxRequestData, RunStepId};
 pub(crate) struct ContextRequest<'a> {
     pub runtime_context: &'a RuntimeContext,
     pub session_id: &'a str,
-    pub system_prompt: &'a str,
+    /// 工作区根与 git 事实：Context 组装系统提示的输入，Runtime 启动时探测。
+    pub workspace_root: &'a std::path::Path,
+    pub workspace_is_git: bool,
     pub model_id: &'a str,
     pub language: &'a str,
     pub agent_roles: std::collections::HashMap<String, share::config::AgentRoleDefinition>,
@@ -73,7 +75,8 @@ where
         ContextRequestSource {
             runtime_context: self.context_request.runtime_context,
             session_id: self.context_request.session_id,
-            system_prompt: self.context_request.system_prompt,
+            workspace_root: self.context_request.workspace_root,
+            workspace_is_git: self.context_request.workspace_is_git,
             model_id: self.context_request.model_id,
             language: self.context_request.language,
             agent_roles: self.context_request.agent_roles.clone(),
@@ -121,6 +124,7 @@ where
         self.context_request
             .runtime_context
             .context()
+            .reminders
             .reminder_step_advanced(&self.run_id, step_ordinal as u64);
         // per-message 记忆召回（#1834）：开关开启时先预物化（评分 await），
         // 再触发 pipeline 的 OnUserMessage 重建——保证注入的是当轮快照。
@@ -148,6 +152,7 @@ where
             self.context_request
                 .runtime_context
                 .context()
+                .reminders
                 .reminder_user_message_received(&self.run_id);
         }
         StepPersistenceCoordinator::from_context(self.context_request.runtime_context)
@@ -158,7 +163,7 @@ where
     async fn load_step_receipts(
         &mut self,
         request: &crate::ports::ContextRequestData,
-    ) -> Result<Vec<crate::ports::StepReceiptData>, LoopEngineError> {
+    ) -> Result<Vec<crate::ports::RunStepReceiptData>, LoopEngineError> {
         StepPersistenceCoordinator::from_context(self.context_request.runtime_context)
             .load_step_receipts(request)
             .await

@@ -324,7 +324,7 @@ fn manual_reflection_port(
     let port = ChatManualReflection {
         runtime_context,
         reflection_tasks: ReflectionTaskAdapter::production(Duration::from_secs(5)),
-        system_prompt: "system".to_string(),
+        system_prompt: String::new(),
         language: "zh".to_string(),
         messages: vec![Message::user("visible committed history")],
         coverage_end: None,

@@ -253,10 +253,8 @@ async fn make_test_shell(
         config.participant(),
         Arc::new(context::test_support::UnavailableSessionManagement),
         Arc::new(
-            context::ProductionMainContextFactory::new(Arc::new(
-                context::NoOpCanonicalSessionWriter,
-            ))
-            .with_persistence(task_wiring.persist(), workspace.persist()),
+            context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
+                .with_persistence(task_wiring.persist(), workspace.persist()),
         ),
     )
     .await;
@@ -359,6 +357,7 @@ async fn make_test_shell(
         String::new(),
         String::new(),
         "test-model".to_string(),
+        false,
         skill_wiring.catalog(),
         initial_skill_snapshot,
         skill_refresh,
@@ -577,10 +576,8 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         config.participant(),
         Arc::new(context::test_support::UnavailableSessionManagement),
         Arc::new(
-            context::ProductionMainContextFactory::new(Arc::new(
-                context::NoOpCanonicalSessionWriter,
-            ))
-            .with_persistence(task_wiring.persist(), workspace.persist()),
+            context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
+                .with_persistence(task_wiring.persist(), workspace.persist()),
         ),
     )
     .await;
@@ -669,7 +666,13 @@ async fn from_args_preserves_workspace_views_and_main_policy_identity() {
         crate::composition::wire_sdk_chat_ingress(),
         initial_provider,
         SessionBootstrapAssemblyData::new(root.clone(), 8192, true, false, None),
-        PromptAssemblyData::new(String::new(), String::new(), String::new(), "test-model"),
+        PromptAssemblyData {
+            system_prompt_text: String::new(),
+            initial_git_context: String::new(),
+            user_context: String::new(),
+            model_id: "test-model".to_string(),
+            workspace_is_git: false,
+        },
         SkillBootstrapAssemblyData::new(
             skill_wiring.catalog(),
             workspace.clone(),

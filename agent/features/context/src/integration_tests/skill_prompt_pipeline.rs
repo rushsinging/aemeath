@@ -1,5 +1,6 @@
 //! Skill metadata directory contract (Issue #1438).
 
+use share::ids::{InteractionRequestId, RunStepId, SessionId};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -44,21 +45,26 @@ fn descriptor(name: &str, description: &str, hint: Option<&str>) -> SkillDescrip
 }
 
 fn source(skills: Vec<SkillDescriptor>) -> SkillPromptSource {
-    SkillPromptSource::new(Arc::new(FakeCatalog(skills)), Arc::new(FixedQueryFactory))
+    SkillPromptSource::new(
+        Arc::new(FakeCatalog(skills)),
+        Arc::new(FixedQueryFactory),
+        Arc::new(crate::adapters::SystemPromptAssembly::new(None)),
+    )
 }
 
 fn base_request() -> ContextRequestData {
     use crate::*;
     ContextRequestData {
         session_id: SessionId::new("session"),
-        request_id: ContextRequestId::new("request"),
+        request_id: InteractionRequestId::new("request"),
         run_id: sdk::RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![],
-        system_prompt: SystemPromptSpecData::new("base system prompt"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
-        language: Language::new("en"),
+        language: Language::En,
         agent_roles: Default::default(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 128_000,
@@ -119,7 +125,7 @@ async fn duplicate_identity_is_deduplicated_and_empty_catalog_omits_block() {
 #[tokio::test]
 async fn chinese_header_and_budget_are_deterministic() {
     let mut request = base_request();
-    request.language = crate::Language::new("zh");
+    request.language = crate::Language::Zh;
     request.context_size = 8_000;
     let result = source(vec![descriptor("alpha", &"x".repeat(8_000), None)])
         .materialize(&request)

@@ -1868,6 +1868,82 @@
       "title": "ControlDeadline",
       "type": "object"
     },
+    "DisplayHistoryIndex": {
+      "properties": {
+        "generation_revision": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/DisplayHistoryStepReference"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "session_id",
+        "generation_revision",
+        "steps"
+      ],
+      "type": "object"
+    },
+    "DisplayHistoryStepReference": {
+      "properties": {
+        "duration_ms": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "estimated_lines": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "finalize_cause": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResumedStepFinalizeCause"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "member_name": {
+          "type": "string"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "step_id": {
+          "type": "string"
+        },
+        "user_input_history": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "run_id",
+        "step_id",
+        "member_name",
+        "estimated_lines"
+      ],
+      "type": "object"
+    },
     "ElementSpacingView": {
       "properties": {
         "after": {
@@ -2570,6 +2646,57 @@
       ],
       "type": "string"
     },
+    "ResumedSessionStep": {
+      "description": "会话恢复时由 Context 发布的完整用户可见 RunStep 历史投影。\ncompact 仅影响 Runtime active context，不过滤此展示投影。",
+      "properties": {
+        "duration_ms": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "finalize_cause": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResumedStepFinalizeCause"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "messages": {
+          "items": {
+            "$ref": "#/$defs/ChatMessage"
+          },
+          "type": "array"
+        },
+        "run_id": {
+          "type": "string"
+        },
+        "step_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "step_id",
+        "messages"
+      ],
+      "type": "object"
+    },
+    "ResumedStepFinalizeCause": {
+      "enum": [
+        "Completed",
+        "UserCancelledStep",
+        "RunTerminated"
+      ],
+      "type": "string"
+    },
     "RiskLevel": {
       "enum": [
         "Low",
@@ -2619,36 +2746,30 @@
       "title": "RunTerminationReason",
       "type": "string"
     },
-    "SessionResumeFailureKind": {
-      "description": "`SessionResumeFailed` 的失败分类（#636 D2）。",
-      "oneOf": [
-        {
-          "const": "not_found",
-          "description": "session 文件不存在。",
-          "type": "string"
-        },
-        {
-          "const": "corrupt",
-          "description": "JSON 损坏且 .bak 回退失败。",
-          "type": "string"
-        },
-        {
-          "const": "io",
-          "description": "底层 IO 错误。",
-          "type": "string"
-        }
-      ],
-      "title": "SessionResumeFailureKind"
-    },
-    "SessionSnapshot": {
+    "SessionItem": {
       "description": "Session 快照（cheap clone）。\n\n底层 Vec 消息通过 Arc 共享，clone 开销低。",
       "properties": {
+        "compacted": {
+          "description": "会话是否处于 compact 后状态。",
+          "type": "boolean"
+        },
         "created_at": {
           "description": "创建时间（ISO 8601）。",
           "type": [
             "string",
             "null"
           ]
+        },
+        "display_index": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DisplayHistoryIndex"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "展示历史索引（存在时表示新布局索引恢复）。"
         },
         "id": {
           "description": "Session ID。",
@@ -2661,7 +2782,7 @@
           "type": "integer"
         },
         "messages": {
-          "description": "完整消息列表（仅在 load_session 时填充，snapshot 为 None）。",
+          "description": "完整消息列表（resume 视图填充）。",
           "items": {
             "$ref": "#/$defs/ChatMessage"
           },
@@ -2673,8 +2794,22 @@
           "minimum": 0,
           "type": "integer"
         },
+        "steps": {
+          "description": "展示步骤（resume 视图填充；每步含 run/step id 与消息段）。",
+          "items": {
+            "$ref": "#/$defs/ResumedSessionStep"
+          },
+          "type": "array"
+        },
         "tasks": {
           "description": "任务快照（Session 恢复时用于重建任务状态）。"
+        },
+        "title": {
+          "description": "用户自定义标题（metadata 投影）。",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "total_tokens": {
           "description": "总 token 使用量。",
@@ -2705,13 +2840,15 @@
         "message_count",
         "total_tokens",
         "messages",
+        "steps",
+        "compacted",
         "trimmed",
         "repaired"
       ],
-      "title": "SessionSnapshot",
+      "title": "SessionItem",
       "type": "object"
     },
-    "SessionSummary": {
+    "SessionItemList": {
       "description": "Session 列表中的摘要条目。",
       "properties": {
         "created_at": {
@@ -2772,8 +2909,29 @@
         "message_count",
         "summary"
       ],
-      "title": "SessionSummary",
+      "title": "SessionItemList",
       "type": "object"
+    },
+    "SessionResumeFailureKind": {
+      "description": "`SessionResumeFailed` 的失败分类（#636 D2）。",
+      "oneOf": [
+        {
+          "const": "not_found",
+          "description": "session 文件不存在。",
+          "type": "string"
+        },
+        {
+          "const": "corrupt",
+          "description": "JSON 损坏且 .bak 回退失败。",
+          "type": "string"
+        },
+        {
+          "const": "io",
+          "description": "底层 IO 错误。",
+          "type": "string"
+        }
+      ],
+      "title": "SessionResumeFailureKind"
     },
     "SkillRequestMetadataView": {
       "properties": {

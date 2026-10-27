@@ -1,11 +1,8 @@
 use super::*;
 use share::config::paths;
 use std::collections::HashMap;
-use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::pin::pin;
 use std::sync::{Mutex, MutexGuard};
-use std::task::{Context, Poll, Waker};
 
 static ENV_LOCK: &Mutex<()> = &super::super::GUIDANCE_ENV_LOCK;
 
@@ -85,33 +82,6 @@ fn assert_ordered(content: &str, expected: &[&str]) {
 
 fn count_occurrences(content: &str, needle: &str) -> usize {
     content.match_indices(needle).count()
-}
-
-fn block_on<F: Future>(future: F) -> F::Output {
-    let waker = Waker::noop();
-    let mut context = Context::from_waker(waker);
-    let mut future = pin!(future);
-    loop {
-        match future.as_mut().poll(&mut context) {
-            Poll::Ready(output) => return output,
-            Poll::Pending => std::thread::yield_now(),
-        }
-    }
-}
-
-#[derive(Default)]
-struct HookRecorder {
-    calls: Mutex<Vec<(String, String)>>,
-}
-
-#[async_trait::async_trait(?Send)]
-impl InstructionsLoadedHook for HookRecorder {
-    async fn on_instructions_loaded(&self, file_path: &str, instruction_type: &str) {
-        self.calls
-            .lock()
-            .unwrap()
-            .push((file_path.to_string(), instruction_type.to_string()));
-    }
 }
 
 #[test]
@@ -285,7 +255,7 @@ fn test_resolve_guidance_scans_each_config_file() {
 }
 
 #[test]
-fn test_resolve_guidance_async_hooks_each_loaded_file_in_order() {
+fn test_resolve_guidance_async_reports_loaded_files_in_order() {
     let fixture = TestGuidanceDir::new("async_hooks");
     let default = fixture.write_guidance("_default.md", "default guidance");
     let generic = fixture.write_guidance("claude.md", "root generic");
@@ -302,18 +272,12 @@ fn test_resolve_guidance_async_hooks_each_loaded_file_in_order() {
             config_specific.display().to_string(),
         ),
     ]);
-    let hook = HookRecorder::default();
 
-    let resolved = block_on(resolve_guidance_async(
-        "claude-sonnet-4",
-        &config,
-        true,
-        "zh",
-        Some(&hook),
-    ));
+    let (resolution, sources) =
+        super::resolve_guidance_with_sources("claude-sonnet-4", &config, true, "zh");
 
     assert_ordered(
-        &resolved,
+        &resolution,
         &[
             "default guidance",
             "zh generic",
@@ -323,27 +287,20 @@ fn test_resolve_guidance_async_hooks_each_loaded_file_in_order() {
             "reasoning guidance",
         ],
     );
-    let calls = hook.calls.lock().unwrap();
-    let actual_paths: Vec<&str> = calls.iter().map(|(path, _)| path.as_str()).collect();
+    let actual_paths: Vec<&str> = sources.iter().map(String::as_str).collect();
+    let zh_generic = fixture.guidance_dir().join("zh/claude.md");
     let expected_paths = vec![
         default.to_str().unwrap(),
-        fixture
-            .guidance_dir()
-            .join("zh/claude.md")
-            .to_str()
-            .unwrap()
-            .to_string()
-            .leak(),
+        zh_generic.to_str().unwrap(),
         family.to_str().unwrap(),
         config_generic.to_str().unwrap(),
         config_specific.to_str().unwrap(),
         reasoning.to_str().unwrap(),
     ];
     assert_eq!(actual_paths, expected_paths);
-    assert!(calls.iter().all(|(_, kind)| kind == "guidance"));
-    assert!(!calls
-        .iter()
-        .any(|(path, _)| path == generic.to_str().unwrap()));
+    assert!(!sources.iter().any(|path| path == generic.to_str().unwrap()));
+    // 内建默认无磁盘路径时不进入加载事实清单。
+    assert!(sources.iter().all(|path| !path.is_empty()));
 }
 
 #[test]

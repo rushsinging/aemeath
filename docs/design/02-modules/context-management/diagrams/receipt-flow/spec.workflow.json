@@ -1,0 +1,326 @@
+{
+ "schema_version": 2,
+ "diagram_type": "workflow",
+ "meta": {
+  "title": "Context Receipt 全链路",
+  "subtitle": "一个真相源 · 一次原子提交 · 一条读路径（A→C→B 修复后终态）",
+  "visual_preset": "editorial",
+  "quality_profile": "showcase",
+  "animation": "none",
+  "output": "index-v3.html"
+ },
+ "lanes": [
+  {
+   "id": "exec",
+   "label": "① 执行期推进（高频写）"
+  },
+  {
+   "id": "commit",
+   "label": "② 收口与提交（一次性）"
+  },
+  {
+   "id": "read",
+   "label": "③ 读取消费"
+  },
+  {
+   "id": "recover",
+   "label": "④ 恢复与边界（sidecar 生命周期）",
+   "variant": "exception"
+  }
+ ],
+ "nodes": [
+  {
+   "id": "f01",
+   "lane": "exec",
+   "col": 0,
+   "type": "backend",
+   "label": "工具执行",
+   "sublabel": "execution_supervisor",
+   "tag": "runtime",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f03",
+   "lane": "exec",
+   "col": 1,
+   "type": "backend",
+   "label": "状态机",
+   "sublabel": "advance·幂等防倒退",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f04",
+   "lane": "exec",
+   "col": 3,
+   "type": "database",
+   "label": "边车双写",
+   "sublabel": "sidecar 先写",
+   "tag": "缺陷 C",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f05",
+   "lane": "exec",
+   "col": 5,
+   "type": "database",
+   "label": "会话提交",
+   "sublabel": "commit_incremental",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f12",
+   "lane": "commit",
+   "col": 0,
+   "type": "backend",
+   "label": "收口压扁",
+   "sublabel": "to_step_receipt",
+   "tag": "缺陷 B2 B3",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f13",
+   "lane": "commit",
+   "col": 1,
+   "type": "backend",
+   "label": "指纹",
+   "sublabel": "含 receipts",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f14",
+   "lane": "commit",
+   "col": 3,
+   "type": "security",
+   "label": "空回填",
+   "sublabel": "×2 · 时序颠倒",
+   "tag": "缺陷 A2",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f15",
+   "lane": "commit",
+   "col": 5,
+   "type": "backend",
+   "label": "提交回执",
+   "sublabel": "append / accept",
+   "tag": "缺陷 A1",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f21",
+   "lane": "read",
+   "col": 0,
+   "type": "backend",
+   "label": "实时读",
+   "sublabel": "step_receipts()",
+   "tag": "缺陷 B1",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f22",
+   "lane": "read",
+   "col": 1,
+   "type": "database",
+   "label": "冻结快照",
+   "sublabel": "无生产读者",
+   "tag": "缺陷 B1",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f23",
+   "lane": "read",
+   "col": 3,
+   "type": "security",
+   "label": "终态判定",
+   "sublabel": "Unconfirmed?",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f24",
+   "lane": "read",
+   "col": 5,
+   "type": "backend",
+   "label": "恢复修复",
+   "sublabel": "provider-safe",
+   "tag": "缺陷 B3",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f31",
+   "lane": "recover",
+   "col": 0,
+   "type": "backend",
+   "label": "旧式恢复",
+   "sublabel": "legacy overlay",
+   "tag": "缺陷 C",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f32",
+   "lane": "recover",
+   "col": 1,
+   "type": "backend",
+   "label": "数据集恢复",
+   "sublabel": "dataset·不对称",
+   "tag": "缺陷 C",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f33",
+   "lane": "recover",
+   "col": 3,
+   "type": "backend",
+   "label": "清空边界",
+   "sublabel": "/clear 相反",
+   "tag": "缺陷 C",
+   "width": 88,
+   "height": 54
+  },
+  {
+   "id": "f34",
+   "lane": "recover",
+   "col": 5,
+   "type": "backend",
+   "label": "压缩之后",
+   "sublabel": "无收纳确认",
+   "tag": "缺陷 C",
+   "width": 88,
+   "height": 54
+  }
+ ],
+ "edges": [
+  {
+   "id": "e01",
+   "from": "f01",
+   "to": "f03",
+   "role": "main"
+  },
+  {
+   "id": "e03",
+   "from": "f03",
+   "to": "f04",
+   "label": "① 先写",
+   "role": "main"
+  },
+  {
+   "id": "e04",
+   "from": "f04",
+   "to": "f05",
+   "label": "② 再提交",
+   "role": "main"
+  },
+  {
+   "id": "e05",
+   "from": "f03",
+   "to": "f12",
+   "label": "step 终结·FinalizeCause",
+   "role": "async"
+  },
+  {
+   "id": "e07",
+   "from": "f12",
+   "to": "f13",
+   "label": "进指纹",
+   "role": "main"
+  },
+  {
+   "id": "e08",
+   "from": "f13",
+   "to": "f14",
+   "label": "空则补",
+   "role": "branch"
+  },
+  {
+   "id": "e09",
+   "from": "f14",
+   "to": "f15",
+   "label": "",
+   "role": "main"
+  },
+  {
+   "id": "e11",
+   "from": "f12",
+   "to": "f22",
+   "label": "写冻结",
+   "role": "async"
+  },
+  {
+   "id": "e12",
+   "from": "f21",
+   "to": "f23",
+   "label": "outcome 判定",
+   "role": "main"
+  },
+  {
+   "id": "e13",
+   "from": "f04",
+   "to": "f31",
+   "role": "async"
+  }
+ ],
+ "phases": [
+  {
+   "id": "write",
+   "label": "写入：receipt 随 Session 一次原子提交",
+   "fromCol": 0,
+   "toCol": 0
+  },
+  {
+   "id": "seal",
+   "label": "收口：finalize 压扁冻结，指纹=落盘",
+   "fromCol": 1,
+   "toCol": 2,
+   "variant": "emphasis"
+  },
+  {
+   "id": "live",
+   "label": "读取与恢复：finalize 后只读冻结",
+   "fromCol": 3,
+   "toCol": 5,
+   "variant": "dashed"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "cyan",
+   "title": "① 写入规则：什么时候落盘？",
+   "items": [
+    "advance / accept / append：receipt 变更随 Session member 一次 commit_incremental",
+    "sidecar 物理双写已退役（仅保留旧文件迁移读）",
+    "durable = Session 原子提交成功；失败返回明确错误按未确认处理"
+   ]
+  },
+  {
+   "dot": "amber",
+   "title": "② 收口规则：指纹与 revision",
+   "items": [
+    "receipts 装配唯一化到 runtime 构造 ContextAppendData 之前",
+    "revision 恒为提交后值（accepted 与 finalized 一致）",
+    "fingerprint 8 位元组含 cleanup；旧指纹对账不受影响"
+   ]
+  },
+  {
+   "dot": "violet",
+   "title": "③ 读取与恢复规则",
+   "items": [
+    "未 finalize：step_receipts 从实时账本派生",
+    "已 finalize：只读冻结快照，后台迟到推进不改写",
+    "旧 sidecar：一次性只读迁移（不存在才补、禁 Terminal 倒退）"
+   ]
+  }
+ ]
+}

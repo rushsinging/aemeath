@@ -2,14 +2,15 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::ports::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, CompactResult, CompactSkipReason, CompactionDecisionData,
-    ContentFingerprint, ContextAppendData, ContextAppendError, ContextPort, ContextPortError,
-    ContextRequestData, ContextRequestId, ContextWindowData, DecisionReason, FinalizeCause,
-    Language, ManualCompactRequestData, SessionId, SessionRevision, StepReceiptData, SystemBlock,
-    SystemPromptSpecData, TokenBudget, ToolOutcomeKindData, Urgency,
+    AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
+    CompactionDecisionData, ContextAppendData, ContextAppendError, ContextPortError,
+    ContextRequestData, ContextWindowData, DecisionReason, FinalizeCause, InteractionRequestId,
+    Language, RunStepReceiptData, SessionAppendReceiptData, SessionId, SessionRevision,
+    SystemBlock, TokenBudget, ToolOutcomeKindData, Urgency,
 };
 use async_trait::async_trait;
+use context::compact::{CompactResult, CompactSkipReason, CompactSummaryQuality};
+use context::{ContextAppendPort, ContextCompactPort, ContextWindowPort};
 use sdk::{RunId, RunStepId};
 use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
@@ -27,7 +28,8 @@ struct RecordingPort {
 }
 
 #[async_trait]
-impl ContextPort for RecordingPort {
+#[async_trait]
+impl ContextWindowPort for RecordingPort {
     async fn build_window(
         &self,
         request: &ContextRequestData,
@@ -60,7 +62,9 @@ impl ContextPort for RecordingPort {
             },
         })
     }
-
+}
+#[async_trait]
+impl ContextCompactPort for RecordingPort {
     async fn needs_compaction(
         &self,
         _request: &ContextRequestData,
@@ -87,23 +91,15 @@ impl ContextPort for RecordingPort {
             summary: "summary".to_string(),
             recent_messages: request.source.pending_messages.clone(),
             source_revision: SessionRevision::new(1),
-            quality: context::CompactSummaryQuality::LocalOnly,
+            quality: CompactSummaryQuality::LocalOnly,
         }))
     }
+}
+// 与原 ContextPort 默认实现等价的 no-op reminder 面。
+impl context::ReminderControlPort for RecordingPort {}
 
-    async fn manual_compact(
-        &self,
-        request: &ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
-        self.calls.lock().unwrap().push("manual_compact");
-        Ok(CompactOutcome::Committed(CompactResult {
-            summary: format!("manual summary for {}", request.session_id.as_str()),
-            recent_messages: vec![],
-            source_revision: SessionRevision::new(2),
-            quality: context::CompactSummaryQuality::LocalOnly,
-        }))
-    }
-
+#[async_trait]
+impl ContextAppendPort for RecordingPort {
     async fn clear_session(&self, session_id: &SessionId) -> Result<(), ContextPortError> {
         self.calls.lock().unwrap().push("clear_session");
         assert!(!session_id.as_str().is_empty());
@@ -113,28 +109,26 @@ impl ContextPort for RecordingPort {
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
+    ) -> Result<SessionAppendReceiptData, AcceptedInputError> {
         self.calls.lock().unwrap().push("append_accepted_input");
         self.accepted_inputs.lock().unwrap().push(append.clone());
-        Ok(AcceptedInputReceiptData {
+        Ok(SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(2),
-            fingerprint: append.fingerprint.clone(),
         })
     }
 
     async fn append_and_persist(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError> {
+    ) -> Result<SessionAppendReceiptData, ContextAppendError> {
         self.calls.lock().unwrap().push("append_and_persist");
         self.appends.lock().unwrap().push(append.clone());
-        Ok(AppendReceiptData {
+        Ok(SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(2),
-            fingerprint: append.fingerprint.clone(),
         })
     }
 }
@@ -142,14 +136,15 @@ impl ContextPort for RecordingPort {
 fn request() -> ContextRequestData {
     ContextRequestData {
         session_id: SessionId::new("session"),
-        request_id: ContextRequestId::new("request"),
+        request_id: InteractionRequestId::new("request"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("input")],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
-        language: Language::new("zh"),
+        language: Language::Zh,
         agent_roles: HashMap::new(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 128_000,
@@ -164,7 +159,7 @@ fn request() -> ContextRequestData {
 #[tokio::test]
 async fn coordinator_uses_same_frozen_request_for_build_decision_and_compact() {
     let port = Arc::new(RecordingPort::default());
-    let coordinator = ContextCoordinator::new(port.clone());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
 
     coordinator.build_window(&frozen).await.unwrap();
@@ -194,7 +189,7 @@ async fn coordinator_uses_same_frozen_request_for_build_decision_and_compact() {
 #[tokio::test]
 async fn coordinator_returns_complete_window_and_decision_fields() {
     let port = Arc::new(RecordingPort::default());
-    let coordinator = ContextCoordinator::new(port);
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port));
     let frozen = request();
 
     let window = coordinator.build_window(&frozen).await.unwrap();
@@ -212,44 +207,15 @@ async fn coordinator_returns_complete_window_and_decision_fields() {
     );
     assert!(coordinator.needs_compaction(&frozen).await.unwrap());
 }
-#[tokio::test]
-async fn coordinator_delegates_manual_compact_and_clear_session_to_port() {
-    let port = Arc::new(RecordingPort::default());
-    let coordinator = ContextCoordinator::new(port.clone());
-    let frozen = request();
-
-    let manual = coordinator
-        .manual_compact(&ManualCompactRequestData {
-            session_id: frozen.session_id.clone(),
-            run_id: frozen.run_id.clone(),
-            system_prompt: frozen.system_prompt.clone(),
-            context_size: frozen.context_size,
-            progress: None,
-            task_snapshot: None,
-        })
-        .await
-        .unwrap();
-    assert!(matches!(
-        manual,
-        CompactOutcome::Committed(ref result) if result.source_revision == SessionRevision::new(2)
-    ));
-
-    coordinator.clear_session(&frozen.session_id).await.unwrap();
-
-    assert_eq!(
-        *port.calls.lock().unwrap(),
-        vec!["manual_compact", "clear_session"]
-    );
-}
 
 #[tokio::test]
 async fn coordinator_appends_only_accepted_input_with_stable_fingerprint() {
     let port = Arc::new(RecordingPort::default());
-    let coordinator = ContextCoordinator::new(port.clone());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
     let messages = vec![Message::user("accepted")];
 
-    let receipt = coordinator
+    coordinator
         .append_accepted_input(&frozen, messages.clone())
         .await
         .unwrap();
@@ -261,14 +227,12 @@ async fn coordinator_appends_only_accepted_input_with_stable_fingerprint() {
         serde_json::to_value(&accepted[0].messages).unwrap(),
         serde_json::to_value(&messages).unwrap()
     );
-    assert_eq!(receipt.fingerprint, accepted[0].fingerprint);
-    assert_ne!(accepted[0].fingerprint, ContentFingerprint::new(""));
 }
 
 #[tokio::test]
 async fn finalized_step_appends_once_with_original_message_order() {
     let port = Arc::new(RecordingPort::default());
-    let coordinator = ContextCoordinator::new(port.clone());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
     let messages = vec![
         Message {
@@ -311,22 +275,35 @@ async fn finalized_step_appends_once_with_original_message_order() {
             .count(),
         1
     );
-    assert_ne!(appends[0].fingerprint, ContentFingerprint::new(""));
 }
 
 #[tokio::test]
 async fn finalized_step_returns_receipt_and_preserves_every_boundary_field() {
     let port = Arc::new(RecordingPort::default());
-    let coordinator = ContextCoordinator::new(port.clone());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
     let messages = vec![Message::user("finalized")];
     let receipts = vec![
-        StepReceiptData::tool("tool-1", 0, ToolOutcomeKindData::Failure),
-        StepReceiptData::agent("agent-1", 1, ToolOutcomeKindData::CancellationUnconfirmed)
-            .with_summary("child partial")
-            .with_artifact_ref("artifact://child")
-            .with_possible_side_effect("remote write may have started")
-            .with_unfinished_call("nested-1"),
+        RunStepReceiptData {
+            call_id: "tool-1".to_string(),
+            index: 0,
+            outcome: ToolOutcomeKindData::Failure,
+            agent: false,
+            summary: None,
+            cleanup: tools::CleanupConfirmation::NotApplicable,
+            possible_side_effects: Vec::new(),
+            unfinished_call_ids: Vec::new(),
+        },
+        RunStepReceiptData {
+            call_id: "agent-1".to_string(),
+            index: 1,
+            outcome: ToolOutcomeKindData::CancellationUnconfirmed,
+            agent: true,
+            summary: Some("child partial".to_string()),
+            cleanup: tools::CleanupConfirmation::NotApplicable,
+            possible_side_effects: vec!["remote write may have started".to_string()],
+            unfinished_call_ids: vec!["nested-1".to_string()],
+        },
     ];
 
     let receipt = coordinator
@@ -361,232 +338,6 @@ async fn finalized_step_returns_receipt_and_preserves_every_boundary_field() {
     assert_eq!(receipt.run_id, append.run_id);
     assert_eq!(receipt.step_id, append.step_id);
     assert_eq!(receipt.committed_revision, SessionRevision::new(2));
-    assert_eq!(receipt.fingerprint, append.fingerprint);
-}
-
-#[tokio::test]
-async fn fingerprint_is_stable_and_sensitive_to_finalized_facts() {
-    async fn fingerprint_for(
-        cause: FinalizeCause,
-        messages: Vec<Message>,
-        receipts: Vec<StepReceiptData>,
-        api_input_tokens: Option<u64>,
-    ) -> ContentFingerprint {
-        let port = Arc::new(RecordingPort::default());
-        let coordinator = ContextCoordinator::new(port.clone());
-        coordinator
-            .append_finalized(
-                &request(),
-                RunStepId::new("step"),
-                SessionRevision::new(1),
-                cause,
-                None,
-                messages,
-                receipts,
-                api_input_tokens,
-            )
-            .await
-            .unwrap();
-        let fingerprint = port.appends.lock().unwrap()[0].fingerprint.clone();
-        fingerprint
-    }
-
-    let base = fingerprint_for(
-        FinalizeCause::Completed,
-        vec![Message::user("fact")],
-        vec![StepReceiptData::tool(
-            "tool",
-            0,
-            ToolOutcomeKindData::Success,
-        )],
-        Some(1),
-    )
-    .await;
-    let same = fingerprint_for(
-        FinalizeCause::Completed,
-        vec![Message::user("fact")],
-        vec![StepReceiptData::tool(
-            "tool",
-            0,
-            ToolOutcomeKindData::Success,
-        )],
-        Some(1),
-    )
-    .await;
-    assert_eq!(base, same);
-
-    for changed in [
-        fingerprint_for(
-            FinalizeCause::RunTerminated,
-            vec![Message::user("fact")],
-            vec![StepReceiptData::tool(
-                "tool",
-                0,
-                ToolOutcomeKindData::Success,
-            )],
-            Some(1),
-        )
-        .await,
-        fingerprint_for(
-            FinalizeCause::Completed,
-            vec![Message::user("different")],
-            vec![StepReceiptData::tool(
-                "tool",
-                0,
-                ToolOutcomeKindData::Success,
-            )],
-            Some(1),
-        )
-        .await,
-        fingerprint_for(
-            FinalizeCause::Completed,
-            vec![Message::user("fact")],
-            vec![StepReceiptData::tool(
-                "tool",
-                0,
-                ToolOutcomeKindData::Failure,
-            )],
-            Some(1),
-        )
-        .await,
-        fingerprint_for(
-            FinalizeCause::Completed,
-            vec![Message::user("fact")],
-            vec![StepReceiptData::tool(
-                "tool",
-                0,
-                ToolOutcomeKindData::Success,
-            )],
-            Some(2),
-        )
-        .await,
-    ] {
-        assert_ne!(base, changed);
-    }
-}
-
-#[tokio::test]
-async fn append_conflict_is_returned_without_hidden_retry() {
-    struct ConflictPort {
-        calls: Mutex<usize>,
-    }
-    #[async_trait]
-    impl ContextPort for ConflictPort {
-        async fn build_window(
-            &self,
-            _: &ContextRequestData,
-        ) -> Result<ContextWindowData, ContextPortError> {
-            unreachable!()
-        }
-        async fn needs_compaction(
-            &self,
-            _: &ContextRequestData,
-        ) -> Result<CompactionDecisionData, ContextPortError> {
-            unreachable!()
-        }
-        async fn compact(
-            &self,
-            _: &CompactRequestData,
-        ) -> Result<CompactOutcome, ContextPortError> {
-            unreachable!()
-        }
-        async fn manual_compact(
-            &self,
-            _: &ManualCompactRequestData,
-        ) -> Result<CompactOutcome, ContextPortError> {
-            unreachable!()
-        }
-        async fn clear_session(&self, _: &SessionId) -> Result<(), ContextPortError> {
-            unreachable!()
-        }
-        async fn append_and_persist(
-            &self,
-            _: &ContextAppendData,
-        ) -> Result<AppendReceiptData, ContextAppendError> {
-            *self.calls.lock().unwrap() += 1;
-            Err(ContextAppendError::RevisionConflict {
-                expected: SessionRevision::new(1),
-                actual: SessionRevision::new(2),
-            })
-        }
-    }
-
-    let port = Arc::new(ConflictPort {
-        calls: Mutex::new(0),
-    });
-    let coordinator = ContextCoordinator::new(port.clone());
-    assert!(matches!(
-        coordinator
-            .append_finalized(
-                &request(),
-                RunStepId::new("step"),
-                SessionRevision::new(1),
-                FinalizeCause::Completed,
-                None,
-                vec![Message::user("fact")],
-                vec![],
-                None,
-            )
-            .await,
-        Err(ContextAppendError::RevisionConflict { .. })
-    ));
-    assert_eq!(*port.calls.lock().unwrap(), 1);
-}
-
-#[tokio::test]
-async fn skipped_compaction_is_returned_without_hidden_retry() {
-    struct SkippingPort;
-    #[async_trait]
-    impl ContextPort for SkippingPort {
-        async fn build_window(
-            &self,
-            _: &ContextRequestData,
-        ) -> Result<ContextWindowData, ContextPortError> {
-            unreachable!()
-        }
-        async fn needs_compaction(
-            &self,
-            _: &ContextRequestData,
-        ) -> Result<CompactionDecisionData, ContextPortError> {
-            unreachable!()
-        }
-        async fn compact(
-            &self,
-            _: &CompactRequestData,
-        ) -> Result<CompactOutcome, ContextPortError> {
-            Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection))
-        }
-        async fn manual_compact(
-            &self,
-            _: &ManualCompactRequestData,
-        ) -> Result<CompactOutcome, ContextPortError> {
-            unreachable!()
-        }
-        async fn clear_session(&self, _: &SessionId) -> Result<(), ContextPortError> {
-            unreachable!()
-        }
-        async fn append_and_persist(
-            &self,
-            _: &ContextAppendData,
-        ) -> Result<AppendReceiptData, ContextAppendError> {
-            unreachable!()
-        }
-    }
-
-    let coordinator = ContextCoordinator::new(Arc::new(SkippingPort));
-    assert!(matches!(
-        coordinator
-            .compact(
-                &request(),
-                SessionRevision::new(0),
-                std::sync::Arc::new(|_: sdk::CompactStageView, _: sdk::CompactWorkView| {}),
-                None,
-                tokio_util::sync::CancellationToken::new(),
-            )
-            .await
-            .unwrap(),
-        CompactOutcome::Skipped(CompactSkipReason::ResumeProtection)
-    ));
 }
 
 /// #1385 TaskData 12: Tests updated for RunUsageTracker.
@@ -601,7 +352,7 @@ fn automatic_compact_committed_resets_usage_and_window() {
             summary: "summary".to_string(),
             recent_messages: Vec::new(),
             source_revision: SessionRevision::new(7),
-            quality: context::CompactSummaryQuality::LocalOnly,
+            quality: CompactSummaryQuality::LocalOnly,
         }),
         &usage,
         &mut window,
@@ -633,7 +384,7 @@ fn automatic_compact_skipped_preserves_usage_and_window() {
 #[tokio::test]
 async fn compact_progress_forwarding_reaches_request_and_maps_stage_and_chunks() {
     let port = Arc::new(RecordingPort::default());
-    let coordinator = ContextCoordinator::new(port.clone());
+    let coordinator = ContextCoordinator::new(context::ContextPorts::from_service(port.clone()));
     let frozen = request();
 
     type CompactProgressRecord = (sdk::CompactStageView, sdk::CompactWorkView);

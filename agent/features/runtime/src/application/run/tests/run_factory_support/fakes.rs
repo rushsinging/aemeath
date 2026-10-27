@@ -1,11 +1,12 @@
+use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 
 use crate::application::loop_engine::chat::{
     ChatEventSink, ChatEventSinkHandle, EventFuture, RuntimeStreamEvent,
 };
 use crate::ports::{
-    ContextPort, Policy, PolicyDecisionData, PolicyRequestData, ProviderBindingData,
-    ProviderBuildSpecData, ProviderError, ProviderFactory, ProviderPort,
+    Policy, PolicyDecisionData, PolicyRequestData, ProviderBindingData, ProviderBuildSpecData,
+    ProviderError, ProviderFactory, ProviderPort,
 };
 use hook::{HookDispatcher, HookInvocationData, HookOutcomeData};
 use tools::published::execution::{ToolExecutionOutcome, ToolExecutionPort, ToolInvocation};
@@ -15,14 +16,17 @@ use tools::{ToolCatalogError, ToolCatalogPort, ToolCatalogSnapshot};
 pub(crate) struct FakeContextPort;
 
 #[async_trait::async_trait]
-impl ContextPort for FakeContextPort {
+#[async_trait]
+impl crate::ports::ContextWindowPort for FakeContextPort {
     async fn build_window(
         &self,
         _request: &crate::ports::ContextRequestData,
     ) -> Result<crate::ports::ContextWindowData, crate::ports::ContextPortError> {
         Err(crate::ports::ContextPortError::Compact("fake".into()))
     }
-
+}
+#[async_trait]
+impl crate::ports::ContextCompactPort for FakeContextPort {
     async fn needs_compaction(
         &self,
         _request: &crate::ports::ContextRequestData,
@@ -36,14 +40,9 @@ impl ContextPort for FakeContextPort {
     ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
         Err(crate::ports::ContextPortError::Compact("fake".into()))
     }
-
-    async fn manual_compact(
-        &self,
-        _request: &crate::ports::ManualCompactRequestData,
-    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
-        Err(crate::ports::ContextPortError::Compact("fake".into()))
-    }
-
+}
+#[async_trait]
+impl crate::ports::ContextAppendPort for FakeContextPort {
     async fn clear_session(
         &self,
         _session_id: &crate::ports::SessionId,
@@ -54,7 +53,7 @@ impl ContextPort for FakeContextPort {
     async fn append_and_persist(
         &self,
         _append: &crate::ports::ContextAppendData,
-    ) -> Result<crate::ports::AppendReceiptData, crate::ports::ContextAppendError> {
+    ) -> Result<crate::ports::SessionAppendReceiptData, crate::ports::ContextAppendError> {
         Err(crate::ports::ContextAppendError::Storage("fake".into()))
     }
 }
@@ -263,3 +262,5 @@ impl ChatEventSink for RecordingEventSink {
             .push(event);
     }
 }
+
+impl crate::ports::ReminderControlPort for FakeContextPort {}

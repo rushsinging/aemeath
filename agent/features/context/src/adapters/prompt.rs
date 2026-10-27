@@ -8,11 +8,12 @@ mod constants;
 pub(crate) mod guidance;
 pub(crate) mod security;
 mod state;
+#[cfg(test)]
+pub(crate) use state::GUIDANCE_ENV_LOCK;
 
+pub use guidance::init_guidance_dir;
 #[cfg(test)]
 pub(crate) use guidance::resolve_guidance;
-pub use guidance::resolver::InstructionsLoadedHook;
-pub use guidance::{init_guidance_dir, resolve_guidance_async};
 // 仅 guidance 契约测试消费（prompt_source.rs 直连 share::i18n catalog）。
 #[cfg(test)]
 pub(crate) use guidance::universal_execution_discipline;

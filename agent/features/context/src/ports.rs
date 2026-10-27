@@ -1,35 +1,25 @@
-use std::sync::{Arc, RwLock};
+use share::ids::SessionId;
 
 use async_trait::async_trait;
 
 use crate::domain::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, ContextAppendData, ContextAppendError, ContextMessages,
-    ContextPortError, ContextRequestData, ManualCompactRequestData, SessionId, SessionRevision,
-    SystemBlock, ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
+    AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
+    ContextAppendData, ContextAppendError, ContextMessages, ContextPortError, ContextRequestData,
+    SessionAppendReceiptData, SessionRevision, SystemBlock, ToolReceiptMutationData,
+    ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
 
 pub mod context_port;
 pub mod session_management;
 pub mod session_snapshot_store;
 pub(crate) use crate::domain::PromptMaterializationError;
-pub use context_port::ContextPort;
+pub use context_port::{
+    ContextAppendPort, ContextCompactPort, ContextPorts, ContextWindowPort, ReminderControlPort,
+};
 pub use session_management::SessionManagementPort;
 pub(crate) use session_snapshot_store::{
     SessionGeneration, SessionSnapshotStore, SessionStoreError,
 };
-
-pub trait MainContextFactory: Send + Sync {
-    /// 构建绑定 per-session 活状态（session / memory / mutation gate）的
-    /// ContextPort。稳定 port（task / workspace 持久化）在 factory 构造时
-    /// 注入，MUST NOT 出现在 build 参数（#2025：runtime 不可见 Task 持久化类型）。
-    fn build(
-        &self,
-        session: Arc<RwLock<Arc<crate::domain::session::CanonicalSession>>>,
-        memory: Arc<RwLock<Arc<dyn memory::api::MemoryPort>>>,
-        mutation_gate: Arc<tokio::sync::Mutex<()>>,
-    ) -> Arc<dyn ContextPort>;
-}
 
 pub trait SessionDecoder: Send + Sync {
     fn decode(
@@ -39,7 +29,7 @@ pub trait SessionDecoder: Send + Sync {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SessionSnapshot {
+pub(crate) struct SessionItem {
     pub revision: SessionRevision,
     pub messages: ContextMessages,
     pub structured_history: Option<crate::domain::session::SessionHistory>,
@@ -48,11 +38,11 @@ pub(crate) struct SessionSnapshot {
 
 #[async_trait]
 pub(crate) trait SessionRepository: Send + Sync {
-    async fn snapshot(&self, session_id: &SessionId) -> Result<SessionSnapshot, String>;
+    async fn snapshot(&self, session_id: &SessionId) -> Result<SessionItem, String>;
     async fn append_accepted_input(
         &self,
         _append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
+    ) -> Result<SessionAppendReceiptData, AcceptedInputError> {
         Err(AcceptedInputError::Storage(
             "此 SessionRepository 未实现已接受输入持久化".to_string(),
         ))
@@ -70,7 +60,7 @@ pub(crate) trait SessionRepository: Send + Sync {
         _session_id: &SessionId,
         _run_id: &sdk::RunId,
         _step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::domain::StepReceiptData>, ToolReceiptMutationError> {
+    ) -> Result<Vec<crate::domain::RunStepReceiptData>, ToolReceiptMutationError> {
         Err(ToolReceiptMutationError::Storage(
             "此 SessionRepository 未实现 Step receipt 查询".to_string(),
         ))
@@ -89,14 +79,10 @@ pub(crate) trait SessionRepository: Send + Sync {
     async fn append_finalized(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError>;
+    ) -> Result<SessionAppendReceiptData, ContextAppendError>;
     async fn commit_compaction(
         &self,
         request: &CompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError>;
-    async fn commit_manual_compaction(
-        &self,
-        request: &ManualCompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError>;
     async fn clear(&self, session_id: &SessionId) -> Result<(), ContextPortError>;
 }

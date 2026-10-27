@@ -4,7 +4,7 @@
 //!
 //! | 组 | 实体 |
 //! |---|---|
-//! | 工厂 | `wire_isolated_context{,_with_skill,_with_workspace_skills}`（isolated_context 家族）；Main Session 协调（resume 原子协议）已迁 runtime `SessionSwitchCoordinator`（#2025） |
+//! | 工厂 | `wire_isolated_context{_with_skill,_with_workspace_skills}`（isolated_context 家族）；Main Session 协调（resume 原子协议）已迁 runtime `SessionSwitchCoordinator`（#2025） |
 //! | 角色和职能 | `ContextPort`（+context_port 模块 glob 面）、`SessionManagementPort`、适配器实现体（composition 装配面）；Main Session 协调已迁 runtime `SessionSwitchCoordinator`（#2025） |
 //! | 数据和生命周期 | 36 个 Data（ContextRequest/StepReceipt/Compact*/ToolReceipt*/Session 展示类）；session 持久化内核（SessionCodec/Generation 族等）已内部化 pub(crate) |
 //! | Error | SessionManagementError/ContextPortError/ContextAppendError/AcceptedInputError（活跃 match 保留）；MainSessionError 内部化（wire 出口统一 SdkError） |
@@ -34,16 +34,15 @@ mod ports;
 #[cfg(test)]
 pub(crate) use adapters::wire_isolated_context_with_skill;
 pub use adapters::{wire_isolated_context, wire_isolated_context_with_workspace_skills};
-pub use adapters::{NoOpCanonicalSessionWriter, ProductionMainContextFactory};
+pub use adapters::{MainContextFactory, NoOpCanonicalSessionWriter};
 pub use domain::reminder::{
     render_invocation_reminder_body, CompactBehavior, InjectBehavior, RefreshTrigger,
     ReminderDedup, ReminderEventSource, ReminderKind, ReminderPlacement, ReminderPolicy,
     ReminderPriority, ReminderSnapshot, ReminderSource,
 };
 pub use domain::session::{
-    DisplayHistoryStepIndexData, DisplayHistoryStepWindowData, SessionListEntryData,
-    SessionManagementError, SessionMetadataUpdateData, SessionRestoreStepData,
-    SessionResumeViewData,
+    DisplayHistoryStepIndexData, DisplayHistoryStepWindowData, SessionManagementError,
+    SessionRestoreStepData,
 };
 pub use ports::SessionManagementPort;
 
@@ -54,19 +53,19 @@ pub use application::test_support;
 // 窄 façade根导出（#1022 收口：内部层 mod 私有，跨 BC 消费只经 crate 根与语义模块）
 #[cfg(test)]
 pub(crate) use adapters::{
-    decode_session, skill_prompt_budget, AcceptedInputWriter, AtomicBlobCanonicalSessionWriter,
-    AtomicBlobSessionStore, CanonicalSessionRepository, CanonicalSessionWriter,
-    CommittedMemoryRetrieveAdapter, DatasetSessionReader, InMemorySessionRepository,
-    LegacySessionDecoder, NoOpContextMemorySource, SkillPromptSource, ToolReceiptWriter,
+    decode_session, skill_prompt_budget, AtomicBlobSessionStore, CanonicalSessionRepository,
+    CanonicalSessionWriter, CommittedMemoryRetrieveAdapter, DatasetSessionReader,
+    InMemorySessionRepository, LegacySessionDecoder, NoOpContextMemorySource, SkillPromptSource,
 };
 pub use adapters::{
-    AtomicBlobAcceptedInputWriter, AtomicBlobSessionManagement, AtomicBlobToolReceiptWriter,
-    DatasetCanonicalSessionWriter, DatasetSessionManagement, WorkspaceSkillQueryFactory,
+    DatasetCanonicalSessionWriter, DatasetSessionManagement, SessionPromptInputsData,
+    SystemPromptAssembly, WorkspaceSkillQueryFactory,
 };
 #[cfg(test)]
 pub(crate) use application::ContextApplicationService;
 #[cfg(test)]
 pub(crate) use application::{SessionLoadError, SessionPersistenceService};
+pub use domain::session::CanonicalSession;
 #[cfg(test)]
 pub(crate) use domain::session::{
     project_dir_segment, AcceptedInputRecord, ActiveCompactMarker, ChatSegment, CommittedRunSlice,
@@ -74,36 +73,32 @@ pub(crate) use domain::session::{
     SessionCommitPlan, SessionGenerationCodec, SessionGenerationManifest,
     SessionGenerationWireError, SessionHistory, CURRENT_SESSION_SCHEMA_VERSION,
 };
-pub use domain::session::{CanonicalSession, CommittedStep, CommittedStepMessages, SnapshotState};
 #[cfg(test)]
 pub(crate) use domain::ContextMessages;
 pub use domain::{
-    AcceptedInputAppendData, AcceptedInputError, ContextAppendData, ContextRequestId,
-    SessionRevision, SystemBlock, Urgency,
+    AcceptedInputAppendData, AcceptedInputError, CompactLlmBinding, ContextAppendData,
+    SessionRevision, Urgency,
 };
 pub use domain::{
-    AppendReceiptData, BackgroundProcessCompletionStatus, BackgroundProcessReminderItemData,
-    CleanupConfirmation, CompactGenerationFailureData, CompactGenerationFailureKind,
-    CompactGenerationOutputData, CompactOutcome, CompactRequestData, CompactResult,
-    CompactSkipReason, CompactSummaryQuality, CompactTrigger, CompactionDecisionData,
-    ContentFingerprint, ContextAppendError, ContextPortError, ContextRequestData,
-    ContextWindowData, DecisionReason, FinalizeCause, InvocationReminderData, Language,
-    ManualCompactRequestData, MemoryRecallEntryData, RunStepId, SessionId, StepReceiptData,
-    SystemPromptSpecData, TaskProgressReminderData, TaskProgressReminderItemData,
-    TaskProgressStatus, ToolCallIdentityData, ToolCallReceiptData, ToolCallState,
-    ToolOutcomeKindData, ToolReceiptMutationData, ToolReceiptMutationError,
-    ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
+    BackgroundProcessCompletionStatus, BackgroundProcessReminderItemData, CompactOutcome,
+    CompactRequestData, CompactTrigger, CompactionDecisionData, ContextAppendError,
+    ContextPortError, ContextRequestData, ContextWindowData, DecisionReason, FinalizeCause,
+    InvocationReminderData, Language, MemoryRecallEntryData, RunStepReceiptData,
+    SessionAppendReceiptData, TaskProgressReminderData, TaskProgressReminderItemData,
+    TaskProgressStatus, ToolCallIdentityData, ToolOutcomeKindData, ToolReceiptMutationData,
+    ToolReceiptMutationError, ToolReceiptMutationReceiptData, ToolTerminalReceiptData,
+};
+pub use ports::{
+    ContextAppendPort, ContextCompactPort, ContextPorts, ContextWindowPort, ReminderControlPort,
 };
 #[cfg(test)]
 pub(crate) use ports::{
     ContextMemorySource, ContextPromptSource, MemoryMaterialization, PromptMaterialization,
-    PromptMaterializationError, SessionGeneration, SessionRepository, SessionSnapshot,
+    PromptMaterializationError, SessionGeneration, SessionItem, SessionRepository,
     SessionSnapshotStore, SessionStoreError, SkillQueryFactory,
 };
-pub use ports::{ContextPort, MainContextFactory};
 
 pub mod api {
-    pub use crate::adapters::migrate_flat_sessions_to_project_dirs;
     pub use crate::domain::session::{DisplayHistoryStepIndexData, DisplayHistoryStepWindowData};
 }
 
@@ -112,49 +107,51 @@ pub mod context_port {
     #[cfg(test)]
     pub(crate) use crate::domain::ContextMessage;
     pub use crate::domain::{
-        AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-        CompactOutcome, CompactRequestData, CompactResult, CompactSkipReason, CompactTrigger,
-        CompactionDecisionData, ContentFingerprint, ContextAppendData, ContextAppendError,
-        ContextPortError, ContextRequestData, ContextRequestId, ContextWindowData, DecisionReason,
-        FinalizeCause, Language, ManualCompactRequestData, RunStepId, SessionId, SessionRevision,
-        StepReceiptData, SystemBlock, SystemPromptSpecData, TokenBudget, ToolOutcomeKindData,
-        ToolSchemaData, Urgency,
+        AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
+        CompactTrigger, CompactionDecisionData, ContextAppendData, ContextAppendError,
+        ContextPortError, ContextRequestData, ContextWindowData, DecisionReason, FinalizeCause,
+        Language, RunStepReceiptData, SessionAppendReceiptData, SessionRevision, SystemBlock,
+        TokenBudget, ToolOutcomeKindData, Urgency,
     };
-    pub use crate::ports::ContextPort;
+    pub use crate::ports::{
+        ContextAppendPort, ContextCompactPort, ContextPorts, ContextWindowPort, ReminderControlPort,
+    };
+}
+
+pub mod tool_receipt {
+    //! 工具回执的持久化细节类型：Context 内部账本与 Runtime 测试替身消费，
+    //! 不属于跨 BC 稳定契约。
+    pub use crate::domain::tool_receipt::{ToolCallReceiptData, ToolCallState};
 }
 
 pub mod compact {
-    pub use crate::adapters::compact_summary::{
-        messages_selected_for_precompact_memory, CompactGenerator,
-    };
+    pub use crate::adapters::compact_summary::messages_selected_for_precompact_memory;
     #[cfg(test)]
     pub(crate) use crate::domain::compact::{
         microcompact_exploration, snip_superseded_exploration, CheckpointSections,
         ContextReadCandidate, ContextReadRun, ContextReadStep, ContinuationCheckpoint,
         ContinuationStatus, ProtectedRunPolicy,
     };
-    pub use crate::domain::compact::{
-        CompactProgressFn, CompactStageData, CompactTaskBatchStatusData, CompactTaskItemData,
-        CompactTaskSnapshotData, CompactTaskStatusData, CompactWorkData,
-    };
+    pub use crate::domain::compact::{CompactProgressFn, CompactStageData, CompactWorkData};
     #[cfg(test)]
     pub(crate) use crate::domain::token_budget::{estimate_tokens, summary_budget};
     pub use crate::domain::{estimate_messages_tokens, estimate_tool_schemas_tokens};
+    pub use crate::domain::{CompactResult, CompactSkipReason, CompactSummaryQuality};
+    pub use task::{
+        CompactTaskBatchStatusData, CompactTaskItemData, CompactTaskSnapshotData,
+        CompactTaskStatusData,
+    };
 }
 
 pub mod guidance {
-    pub use crate::adapters::prompt::{
-        assess_guidance, init_guidance_dir, resolve_guidance_async, InstructionsLoadedHook,
-    };
+    pub use crate::adapters::prompt::{assess_guidance, init_guidance_dir};
     #[cfg(test)]
     pub(crate) use crate::adapters::prompt::{resolve_guidance, universal_execution_discipline};
 }
 
 pub mod session {
     pub use crate::domain::session::{
-        new_session_id, now_iso, same_project_identity, CanonicalSession,
-        PersistedWorkspaceContext, SessionMetadata, SessionRestore, SessionResumeLoad,
-        SnapshotState,
+        new_session_id, CanonicalSession, SessionMetadata, SessionRestore, SessionResumeLoad,
     };
 }
 

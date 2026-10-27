@@ -27,6 +27,7 @@ pub mod error;
 mod error_domain_tests;
 pub mod i18n;
 pub mod ids;
+pub mod instructions;
 
 #[cfg(test)]
 #[path = "ids_tests.rs"]
@@ -36,6 +37,7 @@ pub mod message;
 pub mod reasoning;
 pub mod session_types;
 pub mod string_idx;
+pub mod time;
 pub mod tools_vocab;
 
 #[cfg(test)]

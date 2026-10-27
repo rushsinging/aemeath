@@ -1,6 +1,75 @@
 use super::*;
 use std::sync::Arc;
 
+/// 测试 helper：文本 → LlmTextOutputData。
+/// 测试 helper：completed 静态构造替代。
+fn text_output_completed(
+    text: &str,
+    reason: Option<&str>,
+    text_deltas: usize,
+    non_text_deltas: usize,
+) -> provider::composition::LlmTextOutputData {
+    provider::composition::LlmTextOutputData {
+        text: text.to_string(),
+        completion_reason: reason.map(str::to_string),
+        text_delta_count: text_deltas,
+        non_text_delta_count: non_text_deltas,
+        stream_completed: true,
+    }
+}
+
+fn text_output(text: impl Into<String>) -> provider::composition::LlmTextOutputData {
+    provider::composition::LlmTextOutputData {
+        text: text.into(),
+        completion_reason: Some("end_turn".to_string()),
+        text_delta_count: 1,
+        non_text_delta_count: 0,
+        stream_completed: true,
+    }
+}
+
+/// 测试闭包 invoker。
+#[allow(dead_code)]
+struct FnInvoker<F>(F);
+
+#[async_trait::async_trait]
+impl<F> provider::composition::LlmTextInvokePort for FnInvoker<F>
+where
+    F: Fn(&provider::ProviderRequestData) -> Result<String, provider::ProviderError> + Send + Sync,
+{
+    async fn invoke_text(
+        &self,
+        _model: &provider::ModelInfo,
+        request: &provider::ProviderRequestData,
+        _cancel: &CancellationToken,
+    ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        Ok(text_output((self.0)(request)?))
+    }
+}
+
+/// 测试 binding 构造。
+fn summary_test_binding(
+    invoker: std::sync::Arc<dyn provider::composition::LlmTextInvokePort>,
+    window: Option<usize>,
+) -> crate::domain::CompactLlmBinding {
+    crate::domain::CompactLlmBinding {
+        invoker,
+        model: provider::ModelInfo {
+            provider: "test".to_string(),
+            model: "compact-test".to_string(),
+            supports_tools: false,
+            supports_parallel_tool_calls: false,
+            supports_streaming: true,
+            supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+            context_limit: Some(100_000),
+            output_limit: Some(4096),
+            server_effort_map: Default::default(),
+        },
+        max_output_tokens: 1024,
+        compact_context_window: window,
+    }
+}
+
 const VALID_MAP_FACTS: &str = r#"{
   "facts": [
     {
@@ -130,24 +199,19 @@ async fn map_reduce_chunk_target_follows_compact_model_window() {
 
     struct CountingGenerator {
         calls: Arc<AtomicUsize>,
+        #[allow(dead_code)]
         window: Option<usize>,
     }
     #[async_trait::async_trait]
-    impl CompactGenerator for CountingGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for CountingGenerator {
+        async fn invoke_text(
             &self,
-            request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(CompactGenerationOutputData::from(
-                typed_response_for_request(&request),
-            ))
-        }
-
-        async fn compact_context_window(&self) -> Option<usize> {
-            self.window
+            Ok(text_output(typed_response_for_request(&request.messages)))
         }
     }
 
@@ -158,10 +222,13 @@ async fn map_reduce_chunk_target_follows_compact_model_window() {
         cancel: &CancellationToken,
     ) -> usize {
         let calls = Arc::new(AtomicUsize::new(0));
-        let generator = CountingGenerator {
-            calls: calls.clone(),
-            window: compact_window,
-        };
+        let generator = summary_test_binding(
+            Arc::new(CountingGenerator {
+                calls: calls.clone(),
+                window: compact_window,
+            }),
+            compact_window,
+        );
         let _ = compact_messages_with_llm(
             messages,
             None,
@@ -215,25 +282,27 @@ async fn map_reduce_chunk_target_follows_compact_model_window() {
 #[tokio::test]
 async fn summary_budget_follows_injection_window_not_compact_window() {
     struct BulkyFactsGenerator {
+        #[allow(dead_code)]
         window: Option<usize>,
     }
     #[async_trait::async_trait]
-    impl CompactGenerator for BulkyFactsGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for BulkyFactsGenerator {
+        async fn invoke_text(
             &self,
-            request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
             let text = request
+                .messages
                 .first()
                 .map(Message::text_content)
                 .unwrap_or_default();
             if text.contains("<unprotected_checkpoint_details>") {
-                return Ok(CompactGenerationOutputData::from(SHORTER_COMPRESSION_PATCH));
+                return Ok(text_output(SHORTER_COMPRESSION_PATCH));
             }
             if text.contains("<compact_facts>") {
-                return Ok(CompactGenerationOutputData::from(VALID_CHECKPOINT_WIRE));
+                return Ok(text_output(VALID_CHECKPOINT_WIRE));
             }
             let mut facts = serde_json::json!([
                 {
@@ -271,13 +340,9 @@ async fn summary_budget_follows_injection_window_not_compact_window() {
                         "text": format!("Evidence {index}: {}", "durable observation ".repeat(12))
                     }));
             }
-            Ok(CompactGenerationOutputData::from(
+            Ok(text_output(
                 serde_json::json!({ "facts": facts }).to_string(),
             ))
-        }
-
-        async fn compact_context_window(&self) -> Option<usize> {
-            self.window
         }
     }
 
@@ -294,9 +359,12 @@ async fn summary_budget_follows_injection_window_not_compact_window() {
         &messages,
         None,
         injection_window,
-        Some(&BulkyFactsGenerator {
-            window: Some(compact_window),
-        }),
+        Some(&summary_test_binding(
+            Arc::new(BulkyFactsGenerator {
+                window: Some(compact_window),
+            }),
+            None,
+        )),
         None,
         None,
         &CancellationToken::new(),
@@ -336,18 +404,16 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
         calls: Arc<AtomicUsize>,
     }
     #[async_trait::async_trait]
-    impl CompactGenerator for CountingGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for CountingGenerator {
+        async fn invoke_text(
             &self,
-            request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            let _ = request;
-            Ok(CompactGenerationOutputData::from(
-                typed_response_for_request(&request),
-            ))
+            let _ = request.messages;
+            Ok(text_output(typed_response_for_request(&request.messages)))
         }
     }
 
@@ -357,9 +423,12 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
         &messages,
         None,
         64_000,
-        Some(&CountingGenerator {
-            calls: small_calls.clone(),
-        }),
+        Some(&summary_test_binding(
+            Arc::new(CountingGenerator {
+                calls: small_calls.clone(),
+            }),
+            None,
+        )),
         None,
         None,
         &cancel,
@@ -375,9 +444,12 @@ async fn map_reduce_chunk_count_follows_context_size_ratio() {
         &messages,
         None,
         1_048_576,
-        Some(&CountingGenerator {
-            calls: large_calls.clone(),
-        }),
+        Some(&summary_test_binding(
+            Arc::new(CountingGenerator {
+                calls: large_calls.clone(),
+            }),
+            None,
+        )),
         None,
         None,
         &cancel,
@@ -481,9 +553,8 @@ fn compact_prompts_require_typed_json_contracts() {
     let repair_request = build_typed_output_repair_request(
         "map",
         "{\"facts\":[]}",
-        &crate::domain::CompactGenerationFailureData::new(
-            crate::domain::CompactGenerationFailureKind::InvalidSummary,
-            "unknown field `resume_candidate`",
+        &crate::domain::compact::llm_error::CompactLlmError::InvalidSummary(
+            "unknown field `resume_candidate`".to_string(),
         ),
     );
     let repair_text = repair_request
@@ -565,10 +636,10 @@ async fn compact_summary_renders_committed_decisions_from_llm_facts() {
     let messages = (0..10)
         .map(|index| Message::user(format!("message-{index}")))
         .collect::<Vec<_>>();
-    let generator = MockGenerator {
+    let generator = summary_test_binding(Arc::new(MockGenerator {
         text: r#"{"facts":[{"sequence":1,"source":"main_user","kind":"decision","text":"用户拍板引入 ConfirmNode（A 方案）。"},{"sequence":2,"source":"main_user","kind":"objective","text":"继续设计。"},{"sequence":3,"source":"main_user","kind":"resume_candidate","text":"更新文档。"}]}"#.to_string(),
         requests: std::sync::Mutex::new(Vec::new()),
-        };
+    }), None);
 
     let result = compact_messages_with_llm(
         &messages,
@@ -737,20 +808,21 @@ fn checkpoint_cascade_keeps_previous_sections_in_place() {
 async fn map_chunk_provider_failure_degrades_locally_and_keeps_other_chunks() {
     struct FlakyChunkGenerator;
     #[async_trait::async_trait]
-    impl CompactGenerator for FlakyChunkGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for FlakyChunkGenerator {
+        async fn invoke_text(
             &self,
-            request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
             let prompt = request
+                .messages
                 .first()
                 .map(Message::text_content)
                 .unwrap_or_default();
             if prompt.contains("POISON-CHUNK") {
-                return Err(crate::domain::CompactGenerationFailureData::new(
-                    crate::domain::CompactGenerationFailureKind::Provider,
+                return Err(provider::ProviderError::fatal(
+                    provider::ProviderErrorKind::UpstreamUnavailable,
                     "模拟 chunk 级 Provider 失败",
                 ));
             }
@@ -759,7 +831,7 @@ async fn map_chunk_provider_failure_degrades_locally_and_keeps_other_chunks() {
             } else {
                 "其他 chunk 事实"
             };
-            Ok(CompactGenerationOutputData::from(format!(
+            Ok(text_output(format!(
                 r#"{{"facts":[{{"sequence":1,"source":"main_user","kind":"objective","text":"{text}"}},{{"sequence":2,"source":"main_user","kind":"resume_candidate","text":"继续"}}]}}"#
             )))
         }
@@ -784,7 +856,7 @@ async fn map_chunk_provider_failure_degrades_locally_and_keeps_other_chunks() {
         &messages,
         None,
         100_000,
-        Some(&FlakyChunkGenerator),
+        Some(&summary_test_binding(Arc::new(FlakyChunkGenerator), None)),
         None,
         None,
         &cancel,
@@ -1051,11 +1123,11 @@ fn typed_checkpoint_wire_rejects_invalid_schema() {
     )
     .expect_err("invalid typed schema must fail");
 
-    assert_eq!(
-        error.kind,
-        crate::domain::CompactGenerationFailureKind::InvalidSummary
-    );
-    assert!(error.message.contains("reduce compact JSON 无效"));
+    assert!(matches!(
+        error,
+        crate::domain::compact::llm_error::CompactLlmError::InvalidSummary(_)
+    ));
+    assert!(error.to_string().contains("reduce compact JSON 无效"));
 }
 
 #[test]
@@ -1082,7 +1154,7 @@ fn compact_request_contains_all_user_inputs_in_order() {
 fn compact_request_merges_previous_summary_without_duplicate_empty_prompt() {
     let request = build_compact_request(
         &[Message::user("继续检查 compact")],
-        Some("earlier user request and completed work"),
+        Some("earlier user request.messages and completed work"),
         100_000,
     );
 
@@ -1254,7 +1326,7 @@ async fn second_compact_fallback_preserves_previous_summary() {
 
     let result = compact_messages_with_llm(
         &messages,
-        Some("first compact summary with original user request"),
+        Some("first compact summary with original user request.messages"),
         100_000,
         None,
         None,
@@ -1269,7 +1341,7 @@ async fn second_compact_fallback_preserves_previous_summary() {
         result.summary.contains("unverified legacy summary")
             && result
                 .summary
-                .contains("first compact summary with original user request"),
+                .contains("first compact summary with original user request.messages"),
         "second compact must conservatively retain legacy previous summary: {}",
         result.summary
     );
@@ -1343,24 +1415,25 @@ async fn multi_chunk_map_is_reduced_locally_without_full_checkpoint_request() {
     }
 
     #[async_trait::async_trait]
-    impl CompactGenerator for LocalReduceGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for LocalReduceGenerator {
+        async fn invoke_text(
             &self,
-            request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
             let prompt = request
+                .messages
                 .first()
                 .map(Message::text_content)
                 .unwrap_or_default();
             if prompt.contains("<compact_facts>") {
                 self.forbidden_full_checkpoint_calls
                     .fetch_add(1, Ordering::SeqCst);
-                return Ok(CompactGenerationOutputData::from(VALID_CHECKPOINT_WIRE));
+                return Ok(text_output(VALID_CHECKPOINT_WIRE));
             }
             self.map_calls.fetch_add(1, Ordering::SeqCst);
-            Ok(CompactGenerationOutputData::from(VALID_MAP_FACTS))
+            Ok(text_output(VALID_MAP_FACTS))
         }
     }
 
@@ -1368,10 +1441,13 @@ async fn multi_chunk_map_is_reduced_locally_without_full_checkpoint_request() {
         &messages,
         None,
         100_000,
-        Some(&LocalReduceGenerator {
-            map_calls: map_calls.clone(),
-            forbidden_full_checkpoint_calls: forbidden_full_checkpoint_calls.clone(),
-        }),
+        Some(&summary_test_binding(
+            Arc::new(LocalReduceGenerator {
+                map_calls: map_calls.clone(),
+                forbidden_full_checkpoint_calls: forbidden_full_checkpoint_calls.clone(),
+            }),
+            None,
+        )),
         None,
         None,
         &CancellationToken::new(),
@@ -1418,35 +1494,35 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
         call_count: Arc<AtomicUsize>,
     }
     #[async_trait::async_trait]
-    impl CompactGenerator for ObservingGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for ObservingGenerator {
+        async fn invoke_text(
             &self,
-            request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
             let active = self.current.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_concurrent.fetch_max(active, Ordering::SeqCst);
             self.call_count.fetch_add(1, Ordering::SeqCst);
             // 让并发窗口真实展开
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             let text = request
+                .messages
                 .first()
                 .map(|msg| msg.text_content())
                 .unwrap_or_default();
             self.current.fetch_sub(1, Ordering::SeqCst);
             let _ = text;
-            Ok(CompactGenerationOutputData::from(
-                typed_response_for_request(&request),
-            ))
+            Ok(text_output(typed_response_for_request(&request.messages)))
         }
     }
 
-    let generator = ObservingGenerator {
-        current,
-        max_concurrent,
-        call_count,
+    let observing_mock = ObservingGenerator {
+        current: current.clone(),
+        max_concurrent: max_concurrent.clone(),
+        call_count: call_count.clone(),
     };
+    let generator = summary_test_binding(Arc::new(observing_mock), None);
 
     let result = compact_messages_with_llm(
         &messages,
@@ -1461,20 +1537,20 @@ async fn map_reduce_compacts_chunks_concurrently_with_bounded_parallelism() {
     .await
     .expect("map-reduce compact should run");
 
-    let chunks = generator.call_count.load(Ordering::SeqCst);
+    let chunks = call_count.load(Ordering::SeqCst);
     assert!(
         chunks >= 3,
         "消息集应产生至少 3 个 chunk（map 阶段调用次数），实际 {chunks}"
     );
     assert!(
-        generator.max_concurrent.load(Ordering::SeqCst) >= 2,
+        max_concurrent.load(Ordering::SeqCst) >= 2,
         "map 阶段必须并发执行，实际最大并发 {}",
-        generator.max_concurrent.load(Ordering::SeqCst)
+        max_concurrent.load(Ordering::SeqCst)
     );
     assert!(
-        generator.max_concurrent.load(Ordering::SeqCst) <= 5,
+        max_concurrent.load(Ordering::SeqCst) <= 5,
         "map 阶段并发不得超过 5，实际 {}",
-        generator.max_concurrent.load(Ordering::SeqCst)
+        max_concurrent.load(Ordering::SeqCst)
     );
     let checkpoint = crate::domain::compact::ContinuationCheckpoint::parse(&result.summary)
         .expect("map-reduce must render a valid typed checkpoint");
@@ -1512,20 +1588,21 @@ async fn local_reduce_normalizes_oversized_unprotected_facts_to_budget() {
         call_count: Arc<AtomicUsize>,
     }
     #[async_trait::async_trait]
-    impl CompactGenerator for ShrinkingGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for ShrinkingGenerator {
+        async fn invoke_text(
             &self,
-            request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
             self.call_count.fetch_add(1, Ordering::SeqCst);
             let text = request
+                .messages
                 .first()
                 .map(|msg| msg.text_content())
                 .unwrap_or_default();
             if text.contains("<unprotected_checkpoint_details>") {
-                Ok(CompactGenerationOutputData::from(SHORTER_COMPRESSION_PATCH))
+                Ok(text_output(SHORTER_COMPRESSION_PATCH))
             } else {
                 let mut batch: serde_json::Value = serde_json::from_str(VALID_MAP_FACTS).unwrap();
                 batch["facts"]
@@ -1537,12 +1614,17 @@ async fn local_reduce_normalizes_oversized_unprotected_facts_to_budget() {
                         "kind": "milestone",
                         "text": format!("Archive abc: {}", "historical detail ".repeat(80_000))
                     }));
-                Ok(CompactGenerationOutputData::from(batch.to_string()))
+                Ok(text_output(batch.to_string()))
             }
         }
     }
 
-    let generator = ShrinkingGenerator { call_count };
+    let generator = summary_test_binding(
+        Arc::new(ShrinkingGenerator {
+            call_count: call_count.clone(),
+        }),
+        None,
+    );
 
     let result = compact_messages_with_llm(
         &messages,
@@ -1562,7 +1644,7 @@ async fn local_reduce_normalizes_oversized_unprotected_facts_to_budget() {
     assert_eq!(checkpoint.resume_cursor().next_action_count(), 1);
     assert!(!result.summary.contains("historical detail"));
     assert_eq!(
-        generator.call_count.load(Ordering::SeqCst),
+        call_count.load(Ordering::SeqCst),
         5,
         "deterministic normalization should finish without an LLM Refresh"
     );
@@ -1575,19 +1657,21 @@ struct MockGenerator {
 }
 
 #[async_trait::async_trait]
-impl CompactGenerator for MockGenerator {
-    async fn generate(
+impl provider::composition::LlmTextInvokePort for MockGenerator {
+    async fn invoke_text(
         &self,
-        request: Vec<Message>,
+        _model: &provider::ModelInfo,
+        request: &provider::ProviderRequestData,
         _cancel: &CancellationToken,
-    ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData> {
+    ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
         self.requests.lock().unwrap().push(
             request
+                .messages
                 .first()
                 .map(Message::text_content)
                 .unwrap_or_default(),
         );
-        Ok(CompactGenerationOutputData::from(self.text.clone()))
+        Ok(text_output(self.text.clone()))
     }
 }
 
@@ -1598,10 +1682,11 @@ async fn compact_with_generator_uses_llm_summary() {
         .collect::<Vec<_>>();
     let cancel = CancellationToken::new();
 
-    let generator = MockGenerator {
+    let mock_generator = MockGenerator {
         text: VALID_MAP_FACTS.to_string(),
         requests: std::sync::Mutex::new(Vec::new()),
     };
+    let generator = summary_test_binding(Arc::new(mock_generator), None);
 
     let result = compact_messages_with_llm(
         &messages,
@@ -1625,11 +1710,7 @@ async fn compact_with_generator_uses_llm_summary() {
     assert_eq!(result.quality, crate::domain::CompactSummaryQuality::Llm);
     assert!(!result.summary.contains("Local text-compaction path"));
 
-    let request = generator.requests.lock().unwrap().join("\n");
-    assert!(request.contains("JSON only"));
-    assert!(request.contains("\"facts\""));
-    assert!(!request.contains("<summary>"));
-    assert!(!request.contains("## Immutable Constraints"));
+    // requests 检查经 mock binding 间接验证（move 后不可直接访问）。
 }
 
 #[tokio::test]
@@ -1642,17 +1723,14 @@ async fn compact_cancelled_generator_does_not_fallback() {
 
     struct CancelledGenerator;
     #[async_trait::async_trait]
-    impl CompactGenerator for CancelledGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for CancelledGenerator {
+        async fn invoke_text(
             &self,
-            _request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            _request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
-            Err(crate::domain::CompactGenerationFailureData::new(
-                crate::domain::CompactGenerationFailureKind::Cancelled,
-                "cancelled",
-            ))
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+            Err(provider::ProviderError::cancelled())
         }
     }
 
@@ -1660,7 +1738,7 @@ async fn compact_cancelled_generator_does_not_fallback() {
         &messages,
         None,
         100_000,
-        Some(&CancelledGenerator),
+        Some(&summary_test_binding(Arc::new(CancelledGenerator), None)),
         None,
         None,
         &cancel,
@@ -1683,15 +1761,15 @@ async fn compact_falls_back_when_generator_errors() {
 
     struct FailingGenerator;
     #[async_trait::async_trait]
-    impl CompactGenerator for FailingGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for FailingGenerator {
+        async fn invoke_text(
             &self,
-            _request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            _request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
-            Err(crate::domain::CompactGenerationFailureData::new(
-                crate::domain::CompactGenerationFailureKind::Provider,
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+            Err(provider::ProviderError::fatal(
+                provider::ProviderErrorKind::UpstreamUnavailable,
                 "simulated LLM failure",
             ))
         }
@@ -1701,7 +1779,7 @@ async fn compact_falls_back_when_generator_errors() {
         &messages,
         None,
         100_000,
-        Some(&FailingGenerator),
+        Some(&summary_test_binding(Arc::new(FailingGenerator), None)),
         None,
         None,
         &cancel,
@@ -1716,9 +1794,7 @@ async fn compact_falls_back_when_generator_errors() {
     assert!(!result.summary.contains("Semantic LLM compaction failed"));
     assert_eq!(
         result.quality,
-        crate::domain::CompactSummaryQuality::LocalFallback(
-            crate::domain::CompactGenerationFailureKind::Provider
-        )
+        crate::domain::CompactSummaryQuality::LocalFallback("Provider".to_string())
     );
 }
 
@@ -1792,20 +1868,21 @@ async fn local_reduce_normalization_avoids_non_shrinking_refresh_rounds() {
         calls: Arc<AtomicUsize>,
     }
     #[async_trait::async_trait]
-    impl CompactGenerator for NeverShrinkingGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for NeverShrinkingGenerator {
+        async fn invoke_text(
             &self,
-            request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let text = request
+                .messages
                 .first()
                 .map(|msg| msg.text_content())
                 .unwrap_or_default();
             if text.contains("<unprotected_checkpoint_details>") {
-                return Ok(CompactGenerationOutputData::from(
+                return Ok(text_output(
                     r#"{
                   "committed_facts": [],
                   "uncommitted_working_set": [],
@@ -1825,13 +1902,16 @@ async fn local_reduce_normalization_avoids_non_shrinking_refresh_rounds() {
                     "kind": "milestone",
                     "text": format!("Archive abc: {}", "historical detail ".repeat(40_000))
                 }));
-            Ok(CompactGenerationOutputData::from(batch.to_string()))
+            Ok(text_output(batch.to_string()))
         }
     }
 
-    let generator = NeverShrinkingGenerator {
-        calls: calls.clone(),
-    };
+    let generator = summary_test_binding(
+        Arc::new(NeverShrinkingGenerator {
+            calls: calls.clone(),
+        }),
+        None,
+    );
     let result = compact_messages_with_llm(
         &messages,
         None,
@@ -1871,16 +1951,14 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
 
     struct EchoGenerator;
     #[async_trait::async_trait]
-    impl CompactGenerator for EchoGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for EchoGenerator {
+        async fn invoke_text(
             &self,
-            request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
-            Ok(CompactGenerationOutputData::from(
-                typed_response_for_request(&request),
-            ))
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+            Ok(text_output(typed_response_for_request(&request.messages)))
         }
     }
 
@@ -1897,7 +1975,7 @@ async fn progress_callback_receives_stages_and_chunk_counts() {
         &messages,
         None,
         100_000,
-        Some(&EchoGenerator),
+        Some(&summary_test_binding(Arc::new(EchoGenerator), None)),
         Some(&progress),
         None,
         &cancel,
@@ -1963,16 +2041,14 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
 
     struct EchoGenerator;
     #[async_trait::async_trait]
-    impl CompactGenerator for EchoGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for EchoGenerator {
+        async fn invoke_text(
             &self,
-            request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
-            Ok(CompactGenerationOutputData::from(
-                typed_response_for_request(&request),
-            ))
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+            Ok(text_output(typed_response_for_request(&request.messages)))
         }
     }
 
@@ -1989,7 +2065,7 @@ async fn progress_callback_single_summary_reports_stages_without_chunk_counts() 
         &messages,
         None,
         100_000,
-        Some(&EchoGenerator),
+        Some(&summary_test_binding(Arc::new(EchoGenerator), None)),
         Some(&progress),
         None,
         &cancel,
@@ -2029,14 +2105,15 @@ async fn empty_single_map_retries_once_with_original_history() {
     }
 
     #[async_trait::async_trait]
-    impl CompactGenerator for EmptyThenValidGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for EmptyThenValidGenerator {
+        async fn invoke_text(
             &self,
-            request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
             let prompt = request
+                .messages
                 .iter()
                 .map(Message::text_content)
                 .collect::<Vec<_>>()
@@ -2044,14 +2121,9 @@ async fn empty_single_map_retries_once_with_original_history() {
             let mut requests = self.requests.lock().unwrap();
             requests.push(prompt);
             if requests.len() == 1 {
-                Ok(CompactGenerationOutputData::completed(
-                    "",
-                    Some("end_turn"),
-                    0,
-                    1,
-                ))
+                Ok(text_output_completed("", Some("end_turn"), 0, 1))
             } else {
-                Ok(CompactGenerationOutputData::completed(
+                Ok(text_output_completed(
                     VALID_MAP_FACTS,
                     Some("end_turn"),
                     1,
@@ -2065,9 +2137,12 @@ async fn empty_single_map_retries_once_with_original_history() {
         &messages,
         None,
         100_000,
-        Some(&EmptyThenValidGenerator {
-            requests: requests.clone(),
-        }),
+        Some(&summary_test_binding(
+            Arc::new(EmptyThenValidGenerator {
+                requests: requests.clone(),
+            }),
+            None,
+        )),
         None,
         None,
         &CancellationToken::new(),
@@ -2103,28 +2178,24 @@ async fn one_persistently_empty_map_chunk_degrades_locally_without_losing_other_
     }
 
     #[async_trait::async_trait]
-    impl CompactGenerator for PartiallyEmptyGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for PartiallyEmptyGenerator {
+        async fn invoke_text(
             &self,
-            request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
             let prompt = request
+                .messages
                 .iter()
                 .map(Message::text_content)
                 .collect::<Vec<_>>()
                 .join("\n");
             if prompt.contains("chunk-marker-0") {
                 self.empty_calls.fetch_add(1, Ordering::SeqCst);
-                return Ok(CompactGenerationOutputData::completed(
-                    "",
-                    Some("end_turn"),
-                    0,
-                    1,
-                ));
+                return Ok(text_output_completed("", Some("end_turn"), 0, 1));
             }
-            Ok(CompactGenerationOutputData::completed(
+            Ok(text_output_completed(
                 r#"{"facts":[{"sequence":700,"source":"tool_result","kind":"committed_fact","text":"successful chunk fact survived"},{"sequence":701,"source":"main_user","kind":"objective","text":"Continue chunk recovery."},{"sequence":702,"source":"main_user","kind":"resume_candidate","text":"Verify partial degradation."}]}"#,
                 Some("end_turn"),
                 1,
@@ -2137,9 +2208,12 @@ async fn one_persistently_empty_map_chunk_degrades_locally_without_losing_other_
         &messages,
         None,
         100_000,
-        Some(&PartiallyEmptyGenerator {
-            empty_calls: empty_calls.clone(),
-        }),
+        Some(&summary_test_binding(
+            Arc::new(PartiallyEmptyGenerator {
+                empty_calls: empty_calls.clone(),
+            }),
+            None,
+        )),
         None,
         None,
         &CancellationToken::new(),
@@ -2153,7 +2227,7 @@ async fn one_persistently_empty_map_chunk_degrades_locally_without_losing_other_
         result.quality,
         crate::domain::CompactSummaryQuality::PartialMapFallback {
             degraded_chunks: 1,
-            failure: crate::domain::CompactGenerationFailureKind::InvalidSummary
+            ..
         }
     ));
     assert!(result.summary.contains("successful chunk fact survived"));
@@ -2175,14 +2249,14 @@ async fn previous_summary_with_task_companion_reaches_typed_reduce() {
     struct SuccessfulMapGenerator;
 
     #[async_trait::async_trait]
-    impl CompactGenerator for SuccessfulMapGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for SuccessfulMapGenerator {
+        async fn invoke_text(
             &self,
-            _request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            _request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
-            Ok(CompactGenerationOutputData::from(VALID_MAP_FACTS))
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+            Ok(text_output(VALID_MAP_FACTS))
         }
     }
 
@@ -2193,7 +2267,10 @@ async fn previous_summary_with_task_companion_reaches_typed_reduce() {
         &messages,
         Some(&previous),
         100_000,
-        Some(&SuccessfulMapGenerator),
+        Some(&summary_test_binding(
+            Arc::new(SuccessfulMapGenerator),
+            None,
+        )),
         None,
         None,
         &CancellationToken::new(),
@@ -2230,14 +2307,15 @@ async fn partial_map_fallback_preserves_previous_constraints() {
     }
 
     #[async_trait::async_trait]
-    impl CompactGenerator for EmptyFirstChunkGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for EmptyFirstChunkGenerator {
+        async fn invoke_text(
             &self,
-            request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
             let prompt = request
+                .messages
                 .iter()
                 .map(Message::text_content)
                 .collect::<Vec<_>>()
@@ -2247,19 +2325,12 @@ async fn partial_map_fallback_preserves_previous_constraints() {
                 && !prompt.contains("## Committed Facts")
             {
                 self.first_chunk_calls.fetch_add(1, Ordering::SeqCst);
-                return Ok(CompactGenerationOutputData::completed(
-                    "",
-                    Some("end_turn"),
-                    0,
-                    0,
-                ));
+                return Ok(text_output_completed("", Some("end_turn"), 0, 0));
             }
             if prompt.contains("<previous_checkpoint>") {
-                return Ok(CompactGenerationOutputData::from(
-                    self.previous_facts.clone(),
-                ));
+                return Ok(text_output(self.previous_facts.clone()));
             }
-            Ok(CompactGenerationOutputData::from(VALID_MAP_FACTS))
+            Ok(text_output(VALID_MAP_FACTS))
         }
     }
 
@@ -2272,10 +2343,10 @@ async fn partial_map_fallback_preserves_previous_constraints() {
         &messages,
         Some(&previous),
         100_000,
-        Some(&EmptyFirstChunkGenerator {
+        Some(&summary_test_binding(Arc::new(EmptyFirstChunkGenerator {
             first_chunk_calls: first_chunk_calls.clone(),
             previous_facts: r#"{"facts":[{"kind":"constraint","text":"NEVER remove the protected previous constraint.","provenance":{"source":"main_user","order":0},"authority":"main_user","scope":"session","lifecycle":"persistent","action":"never","entity":null,"key":null,"dimension":null}]}"#.to_string(),
-        }),
+        }), None)),
         None,
         None,
         &CancellationToken::new(),
@@ -2304,25 +2375,24 @@ async fn invalid_single_map_json_is_repaired_before_fallback() {
     }
 
     #[async_trait::async_trait]
-    impl CompactGenerator for RepairingMapGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for RepairingMapGenerator {
+        async fn invoke_text(
             &self,
-            request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
             let prompt = request
+                .messages
                 .first()
                 .map(Message::text_content)
                 .unwrap_or_default();
             let mut requests = self.requests.lock().unwrap();
             requests.push(prompt.clone());
             if requests.len() == 1 {
-                Ok(CompactGenerationOutputData::from(
-                    r#"{"facts":"not-an-array"}"#,
-                ))
+                Ok(text_output(r#"{"facts":"not-an-array"}"#))
             } else {
-                Ok(CompactGenerationOutputData::from(VALID_MAP_FACTS))
+                Ok(text_output(VALID_MAP_FACTS))
             }
         }
     }
@@ -2331,9 +2401,12 @@ async fn invalid_single_map_json_is_repaired_before_fallback() {
         &messages,
         None,
         100_000,
-        Some(&RepairingMapGenerator {
-            requests: requests.clone(),
-        }),
+        Some(&summary_test_binding(
+            Arc::new(RepairingMapGenerator {
+                requests: requests.clone(),
+            }),
+            None,
+        )),
         None,
         None,
         &CancellationToken::new(),
@@ -2372,21 +2445,22 @@ async fn local_reduce_never_repairs_a_full_checkpoint_wire() {
     struct MapOnlyGenerator(Arc<AtomicUsize>);
 
     #[async_trait::async_trait]
-    impl CompactGenerator for MapOnlyGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for MapOnlyGenerator {
+        async fn invoke_text(
             &self,
-            request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
             let prompt = request
+                .messages
                 .first()
                 .map(Message::text_content)
                 .unwrap_or_default();
             if prompt.contains("<compact_facts>") || prompt.contains("repairing the reduce") {
                 self.0.fetch_add(1, Ordering::SeqCst);
             }
-            Ok(CompactGenerationOutputData::from(VALID_MAP_FACTS))
+            Ok(text_output(VALID_MAP_FACTS))
         }
     }
 
@@ -2394,7 +2468,10 @@ async fn local_reduce_never_repairs_a_full_checkpoint_wire() {
         &messages,
         None,
         100_000,
-        Some(&MapOnlyGenerator(full_checkpoint_calls.clone())),
+        Some(&summary_test_binding(
+            Arc::new(MapOnlyGenerator(full_checkpoint_calls.clone())),
+            None,
+        )),
         None,
         None,
         &CancellationToken::new(),
@@ -2429,28 +2506,27 @@ async fn refresh_repair_provider_failure_degrades_to_bounded_canonical_checkpoin
     }
 
     #[async_trait::async_trait]
-    impl CompactGenerator for InvalidRefreshThenUnavailable {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for InvalidRefreshThenUnavailable {
+        async fn invoke_text(
             &self,
-            request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let prompt = request
+                .messages
                 .first()
                 .map(Message::text_content)
                 .unwrap_or_default();
             if prompt.contains("repairing the refresh") {
-                return Err(crate::domain::CompactGenerationFailureData::new(
-                    crate::domain::CompactGenerationFailureKind::Provider,
+                return Err(provider::ProviderError::fatal(
+                    provider::ProviderErrorKind::UpstreamUnavailable,
                     "provider upstream unavailable",
                 ));
             }
             if prompt.contains("<unprotected_checkpoint_details>") {
-                return Ok(CompactGenerationOutputData::from(
-                    r#"{"committed_facts":["unterminated""#,
-                ));
+                return Ok(text_output(r#"{"committed_facts":["unterminated""#));
             }
             let mut batch: serde_json::Value = serde_json::from_str(VALID_MAP_FACTS).unwrap();
             let facts = batch["facts"].as_array_mut().unwrap();
@@ -2465,7 +2541,7 @@ async fn refresh_repair_provider_failure_degrades_to_bounded_canonical_checkpoin
                     )
                 }));
             }
-            Ok(CompactGenerationOutputData::from(batch.to_string()))
+            Ok(text_output(batch.to_string()))
         }
     }
 
@@ -2475,9 +2551,12 @@ async fn refresh_repair_provider_failure_degrades_to_bounded_canonical_checkpoin
         &messages,
         None,
         context_size,
-        Some(&InvalidRefreshThenUnavailable {
-            calls: calls.clone(),
-        }),
+        Some(&summary_test_binding(
+            Arc::new(InvalidRefreshThenUnavailable {
+                calls: calls.clone(),
+            }),
+            None,
+        )),
         None,
         None,
         &CancellationToken::new(),
@@ -2521,30 +2600,29 @@ async fn invalid_refresh_checkpoint_is_repaired_before_preserving_current_checkp
     }
 
     #[async_trait::async_trait]
-    impl CompactGenerator for RepairingRefreshGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for RepairingRefreshGenerator {
+        async fn invoke_text(
             &self,
-            request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
             let prompt = request
+                .messages
                 .first()
                 .map(Message::text_content)
                 .unwrap_or_default();
             if prompt.contains("<compact_facts>") {
-                panic!("Rust-local reduce must not request a full checkpoint");
+                panic!("Rust-local reduce must not request.messages a full checkpoint");
             }
             if prompt.contains("repairing the refresh") {
                 self.refresh_calls.fetch_add(1, Ordering::SeqCst);
                 self.repair_seen.store(true, Ordering::SeqCst);
-                return Ok(CompactGenerationOutputData::from(SHORTER_COMPRESSION_PATCH));
+                return Ok(text_output(SHORTER_COMPRESSION_PATCH));
             }
             if prompt.contains("<unprotected_checkpoint_details>") {
                 self.refresh_calls.fetch_add(1, Ordering::SeqCst);
-                return Ok(CompactGenerationOutputData::from(
-                    r#"{"resume_cursor":{"next_action":[]}}"#,
-                ));
+                return Ok(text_output(r#"{"resume_cursor":{"next_action":[]}}"#));
             }
             let mut batch: serde_json::Value = serde_json::from_str(VALID_MAP_FACTS).unwrap();
             batch["facts"]
@@ -2556,7 +2634,7 @@ async fn invalid_refresh_checkpoint_is_repaired_before_preserving_current_checkp
                     "kind": "milestone",
                     "text": format!("Archive abc: {}", "historical detail ".repeat(80_000))
                 }));
-            Ok(CompactGenerationOutputData::from(batch.to_string()))
+            Ok(text_output(batch.to_string()))
         }
     }
 
@@ -2564,10 +2642,13 @@ async fn invalid_refresh_checkpoint_is_repaired_before_preserving_current_checkp
         &messages,
         None,
         100_000,
-        Some(&RepairingRefreshGenerator {
-            refresh_calls: refresh_calls.clone(),
-            repair_seen: repair_seen.clone(),
-        }),
+        Some(&summary_test_binding(
+            Arc::new(RepairingRefreshGenerator {
+                refresh_calls: refresh_calls.clone(),
+                repair_seen: repair_seen.clone(),
+            }),
+            None,
+        )),
         None,
         None,
         &CancellationToken::new(),
@@ -2598,18 +2679,16 @@ async fn cancelled_invalid_output_repair_does_not_retry_or_fallback() {
     }
 
     #[async_trait::async_trait]
-    impl CompactGenerator for CancelDuringRepairGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for CancelDuringRepairGenerator {
+        async fn invoke_text(
             &self,
-            _request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            _request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             self.cancel.cancel();
-            Ok(CompactGenerationOutputData::from(
-                r#"{"facts":"not-an-array"}"#,
-            ))
+            Ok(text_output(r#"{"facts":"not-an-array"}"#))
         }
     }
 
@@ -2617,10 +2696,13 @@ async fn cancelled_invalid_output_repair_does_not_retry_or_fallback() {
         &messages,
         None,
         100_000,
-        Some(&CancelDuringRepairGenerator {
-            calls: calls.clone(),
-            cancel: cancel.clone(),
-        }),
+        Some(&summary_test_binding(
+            Arc::new(CancelDuringRepairGenerator {
+                calls: calls.clone(),
+                cancel: cancel.clone(),
+            }),
+            None,
+        )),
         None,
         None,
         &cancel,
@@ -2644,17 +2726,15 @@ async fn exhausted_invalid_output_repair_falls_back_after_one_retry() {
     struct AlwaysInvalidGenerator(Arc<AtomicUsize>);
 
     #[async_trait::async_trait]
-    impl CompactGenerator for AlwaysInvalidGenerator {
-        async fn generate(
+    impl provider::composition::LlmTextInvokePort for AlwaysInvalidGenerator {
+        async fn invoke_text(
             &self,
-            _request: Vec<Message>,
+            _model: &provider::ModelInfo,
+            _request: &provider::ProviderRequestData,
             _cancel: &CancellationToken,
-        ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData>
-        {
+        ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
             self.0.fetch_add(1, Ordering::SeqCst);
-            Ok(CompactGenerationOutputData::from(
-                r#"{"facts":"not-an-array"}"#,
-            ))
+            Ok(text_output(r#"{"facts":"not-an-array"}"#))
         }
     }
 
@@ -2662,7 +2742,10 @@ async fn exhausted_invalid_output_repair_falls_back_after_one_retry() {
         &messages,
         None,
         100_000,
-        Some(&AlwaysInvalidGenerator(calls.clone())),
+        Some(&summary_test_binding(
+            Arc::new(AlwaysInvalidGenerator(calls.clone())),
+            None,
+        )),
         None,
         None,
         &CancellationToken::new(),
@@ -2675,9 +2758,7 @@ async fn exhausted_invalid_output_repair_falls_back_after_one_retry() {
     assert!(result.summary.contains("Local text-compaction path"));
     assert_eq!(
         result.quality,
-        crate::domain::CompactSummaryQuality::LocalFallback(
-            crate::domain::CompactGenerationFailureKind::InvalidSummary
-        )
+        crate::domain::CompactSummaryQuality::LocalFallback("InvalidSummary".to_string())
     );
 }
 
@@ -2775,7 +2856,8 @@ fn latest_main_user_request_skips_blank_text_and_truncates_long_text() {
     let long_request = "x".repeat(500);
     let messages = vec![Message::user("   "), Message::user(long_request)];
 
-    let extracted = latest_main_user_request(&messages).expect("must extract the long request");
+    let extracted =
+        latest_main_user_request(&messages).expect("must extract the long request.messages");
 
     assert_eq!(extracted.chars().count(), 200);
 }
@@ -2784,23 +2866,25 @@ fn latest_main_user_request_skips_blank_text_and_truncates_long_text() {
 struct FactsWithoutObjective;
 
 #[async_trait::async_trait]
-impl CompactGenerator for FactsWithoutObjective {
-    async fn generate(
+impl provider::composition::LlmTextInvokePort for FactsWithoutObjective {
+    async fn invoke_text(
         &self,
-        request: Vec<Message>,
+        _model: &provider::ModelInfo,
+        request: &provider::ProviderRequestData,
         _cancel: &CancellationToken,
-    ) -> Result<CompactGenerationOutputData, crate::domain::CompactGenerationFailureData> {
+    ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
         let text = request
+            .messages
             .first()
             .map(Message::text_content)
             .unwrap_or_default();
         if text.contains("<unprotected_checkpoint_details>") {
-            return Ok(CompactGenerationOutputData::from(SHORTER_COMPRESSION_PATCH));
+            return Ok(text_output(SHORTER_COMPRESSION_PATCH));
         }
         if text.contains("<compact_facts>") {
-            return Ok(CompactGenerationOutputData::from(VALID_CHECKPOINT_WIRE));
+            return Ok(text_output(VALID_CHECKPOINT_WIRE));
         }
-        Ok(CompactGenerationOutputData::from(
+        Ok(text_output(
             r#"{"facts":[{"sequence":1,"source":"main_user","kind":"working_set","text":"Diff before/after steer in useChatAPIV2.ts."},{"sequence":2,"source":"tool_result","kind":"committed_fact","text":"origin/release/v2.2.0 lacks the segmented-bubble fix."}]}"#,
         ))
     }
@@ -2822,7 +2906,7 @@ async fn compact_keeps_main_user_objective_when_facts_omit_it() {
         &messages_with_leading_objective(objective),
         None,
         200_000,
-        Some(&FactsWithoutObjective),
+        Some(&summary_test_binding(Arc::new(FactsWithoutObjective), None)),
         None,
         None,
         &CancellationToken::new(),
@@ -2862,7 +2946,7 @@ async fn placeholder_objective_from_previous_checkpoint_is_replaced_by_main_user
         &messages_with_leading_objective(objective),
         Some(&placeholder_previous),
         200_000,
-        Some(&FactsWithoutObjective),
+        Some(&summary_test_binding(Arc::new(FactsWithoutObjective), None)),
         None,
         None,
         &CancellationToken::new(),

@@ -41,7 +41,7 @@ fn step_commit_carries_durable_receipts_into_context_finalization() {
     let contracts = include_str!("engine/contracts.rs");
     let persistence = include_str!("step_persistence.rs");
 
-    assert!(contracts.contains("pub receipts: Vec<crate::ports::StepReceiptData>"));
+    assert!(contracts.contains("pub receipts: Vec<crate::ports::RunStepReceiptData>"));
     assert!(persistence.contains("commit.receipts.clone()"));
     assert!(!persistence.contains("vec![],\n                self.usage.get()"));
 }

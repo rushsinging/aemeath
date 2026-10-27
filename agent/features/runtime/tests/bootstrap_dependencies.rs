@@ -96,7 +96,13 @@ impl tools::published::agent::AgentRunner for NoopAgentRunner {
 }
 
 fn test_prompt_assembly() -> runtime::PromptAssemblyData {
-    runtime::PromptAssemblyData::new(String::new(), String::new(), String::new(), "test-model")
+    runtime::PromptAssemblyData {
+        system_prompt_text: String::new(),
+        initial_git_context: String::new(),
+        user_context: String::new(),
+        model_id: "test-model".to_string(),
+        workspace_is_git: false,
+    }
 }
 
 fn test_session_bootstrap_assembly(
@@ -149,7 +155,7 @@ impl context::SessionManagementPort for NoopSessionManagement {
     async fn list_for_project(
         &self,
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<context::SessionListEntryData>, context::SessionManagementError> {
+    ) -> Result<Vec<sdk::SessionItemList>, context::SessionManagementError> {
         Ok(Vec::new())
     }
 
@@ -165,7 +171,7 @@ impl context::SessionManagementPort for NoopSessionManagement {
         &self,
         _bytes: &[u8],
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<context::SessionListEntryData, context::SessionManagementError> {
+    ) -> Result<sdk::SessionItemList, context::SessionManagementError> {
         Err(context::SessionManagementError::Storage(
             "test port".to_string(),
         ))
@@ -175,8 +181,8 @@ impl context::SessionManagementPort for NoopSessionManagement {
         &self,
         id: &str,
         _project: &share::session_types::ProjectIdentityData,
-        _update: context::SessionMetadataUpdateData,
-    ) -> Result<context::SessionListEntryData, context::SessionManagementError> {
+        _update: context::session::SessionMetadata,
+    ) -> Result<sdk::SessionItemList, context::SessionManagementError> {
         Err(context::SessionManagementError::NotFound(id.to_string()))
     }
 
@@ -244,10 +250,8 @@ async fn bootstrap_dependencies_preserve_injected_task_views() {
         memory_opener,
         session_management: session_management.clone(),
         context_factory: Arc::new(
-            context::ProductionMainContextFactory::new(Arc::new(
-                context::NoOpCanonicalSessionWriter,
-            ))
-            .with_persistence(task.persist(), workspace.persist()),
+            context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
+                .with_persistence(task.persist(), workspace.persist()),
         ),
     })
     .await

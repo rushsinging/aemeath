@@ -1,3 +1,4 @@
+use share::ids::SessionId;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -5,12 +6,12 @@ use async_trait::async_trait;
 
 use crate::domain::session::{AcceptedInputRecord, FinalizedOutcomeRecord, SessionHistory};
 use crate::domain::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, CompactSkipReason, ContextAppendData, ContextAppendError,
-    ContextMessage, ContextPortError, SessionId, SessionRevision, ToolCallReceiptData,
-    ToolReceiptMutationData, ToolReceiptMutationError, ToolReceiptMutationReceiptData,
+    AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
+    CompactSkipReason, ContextAppendData, ContextAppendError, ContextMessage, ContextPortError,
+    SessionAppendReceiptData, SessionRevision, ToolCallReceiptData, ToolReceiptMutationData,
+    ToolReceiptMutationError, ToolReceiptMutationReceiptData,
 };
-use crate::ports::{SessionRepository, SessionSnapshot};
+use crate::ports::{SessionItem, SessionRepository};
 
 #[derive(Default)]
 struct SessionState {
@@ -63,36 +64,34 @@ impl InMemorySessionRepository {
     fn receipt(
         append: &ContextAppendData,
         committed_revision: SessionRevision,
-    ) -> AppendReceiptData {
-        AppendReceiptData {
+    ) -> Result<SessionAppendReceiptData, ContextAppendError> {
+        Ok(SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision,
-            fingerprint: append.fingerprint.clone(),
-        }
+        })
     }
 
     fn accepted_receipt(
         append: &AcceptedInputAppendData,
         committed_revision: SessionRevision,
-    ) -> AcceptedInputReceiptData {
-        AcceptedInputReceiptData {
+    ) -> Result<SessionAppendReceiptData, AcceptedInputError> {
+        Ok(SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision,
-            fingerprint: append.fingerprint.clone(),
-        }
+        })
     }
 }
 
 #[async_trait]
 impl SessionRepository for InMemorySessionRepository {
-    async fn snapshot(&self, session_id: &SessionId) -> Result<SessionSnapshot, String> {
+    async fn snapshot(&self, session_id: &SessionId) -> Result<SessionItem, String> {
         let sessions = self.sessions.lock().map_err(|error| error.to_string())?;
         let state = sessions
             .get(session_id.as_str())
             .ok_or_else(|| format!("Session 不存在：{session_id}"))?;
-        Ok(SessionSnapshot {
+        Ok(SessionItem {
             revision: SessionRevision::new(state.revision),
             messages: state.messages.clone().into(),
             structured_history: Some(state.history.clone()),
@@ -103,7 +102,7 @@ impl SessionRepository for InMemorySessionRepository {
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, AcceptedInputError> {
+    ) -> Result<SessionAppendReceiptData, AcceptedInputError> {
         let mut sessions = self
             .sessions
             .lock()
@@ -116,11 +115,11 @@ impl SessionRepository for InMemorySessionRepository {
             append.step_id.as_str().to_string(),
         );
         if let Some(input) = state.accepted_steps.get(&key) {
-            if input.fingerprint == append.fingerprint.as_str() {
-                return Ok(Self::accepted_receipt(
+            if input.fingerprint == append.fingerprint()?.as_str() {
+                return Self::accepted_receipt(
                     append,
                     SessionRevision::new(input.committed_revision),
-                ));
+                );
             }
             return Err(AcceptedInputError::ContentConflict {
                 run_id: append.run_id.clone(),
@@ -129,7 +128,7 @@ impl SessionRepository for InMemorySessionRepository {
         }
         let accepted_input = AcceptedInputRecord::new(
             append.messages.clone(),
-            append.fingerprint.as_str(),
+            append.fingerprint()?.as_str(),
             state.revision + 1,
         );
         state.messages.extend(append.messages.clone());
@@ -141,7 +140,7 @@ impl SessionRepository for InMemorySessionRepository {
         state.revision += 1;
         let committed_revision = SessionRevision::new(state.revision);
         state.accepted_steps.insert(key, accepted_input);
-        Ok(Self::accepted_receipt(append, committed_revision))
+        Self::accepted_receipt(append, committed_revision)
     }
 
     async fn advance_tool_receipt(
@@ -189,7 +188,7 @@ impl SessionRepository for InMemorySessionRepository {
         session_id: &SessionId,
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::domain::StepReceiptData>, ToolReceiptMutationError> {
+    ) -> Result<Vec<crate::domain::RunStepReceiptData>, ToolReceiptMutationError> {
         let sessions = self
             .sessions
             .lock()
@@ -205,7 +204,7 @@ impl SessionRepository for InMemorySessionRepository {
             })
             .filter_map(ToolCallReceiptData::to_step_receipt)
             .collect::<Vec<_>>();
-        receipts.sort_by_key(crate::domain::StepReceiptData::index);
+        receipts.sort_by_key(|r| r.index);
         Ok(receipts)
     }
 
@@ -247,7 +246,7 @@ impl SessionRepository for InMemorySessionRepository {
     async fn append_finalized(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError> {
+    ) -> Result<SessionAppendReceiptData, ContextAppendError> {
         let mut sessions = self
             .sessions
             .lock()
@@ -260,11 +259,8 @@ impl SessionRepository for InMemorySessionRepository {
             append.step_id.as_str().to_string(),
         );
         if let Some(outcome) = state.committed_steps.get(&key) {
-            if outcome.fingerprint == append.fingerprint.as_str() {
-                return Ok(Self::receipt(
-                    append,
-                    SessionRevision::new(outcome.committed_revision),
-                ));
+            if outcome.fingerprint == append.fingerprint()?.as_str() {
+                return Self::receipt(append, SessionRevision::new(outcome.committed_revision));
             }
             return Err(ContextAppendError::ContentConflict {
                 run_id: append.run_id.clone(),
@@ -288,14 +284,15 @@ impl SessionRepository for InMemorySessionRepository {
         state.messages.extend(append.messages.clone());
         state.revision += 1;
         let committed_revision = SessionRevision::new(state.revision);
+        let fingerprint = append.fingerprint()?;
         let outcome = FinalizedOutcomeRecord {
             finalize_cause: append.finalize_cause,
             duration_ms: append.duration_ms,
             messages: append.messages.clone().into(),
             receipts: append.receipts.clone(),
             api_input_tokens: append.api_input_tokens,
-            fingerprint: append.fingerprint.as_str().to_string(),
             committed_revision: committed_revision.get(),
+            fingerprint: fingerprint.as_str().to_string(),
         };
         state.history = state.history.append_finalized_outcome(
             append.run_id.as_ref(),
@@ -303,19 +300,12 @@ impl SessionRepository for InMemorySessionRepository {
             outcome.clone(),
         );
         state.committed_steps.insert(key, outcome);
-        Ok(Self::receipt(append, committed_revision))
+        Self::receipt(append, committed_revision)
     }
 
     async fn commit_compaction(
         &self,
         _request: &CompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
-        Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection))
-    }
-
-    async fn commit_manual_compaction(
-        &self,
-        _request: &crate::domain::ManualCompactRequestData,
     ) -> Result<CompactOutcome, ContextPortError> {
         Ok(CompactOutcome::Skipped(CompactSkipReason::ResumeProtection))
     }

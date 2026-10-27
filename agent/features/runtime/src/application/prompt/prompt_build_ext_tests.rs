@@ -291,27 +291,139 @@ fn background_process_section_is_bilingual_and_covers_core_semantics() {
     );
 }
 
-// ── #2023 c6 config 热载：refresh 后名册经 snapshot 进入下一 run prompt ──
+// ── InstructionsLoaded 派发（context 出数据 → runtime 派 hook）────────────
 
-#[test]
-fn snapshot_with_new_agent_renders_into_next_run_prompt() {
-    use std::collections::HashMap;
-    let mut names = HashMap::new();
-    names.insert(
-        "tester".to_string(),
-        AgentInstanceConfig {
-            role: "coder".to_string(),
-            ..Default::default()
+/// 记录 `InstructionsLoaded` 调用的 dispatcher fake。
+#[derive(Default)]
+struct RecordingInstructionsHookPort {
+    loaded: std::sync::Mutex<Vec<(String, String)>>,
+}
+
+#[async_trait::async_trait]
+impl HookDispatcher for RecordingInstructionsHookPort {
+    async fn dispatch(
+        &self,
+        invocation: hook::HookInvocationData,
+        _cancellation: &dyn hook::HookCancellationSignal,
+    ) -> hook::HookOutcomeData {
+        if let hook::HookInvocationData::InstructionsLoaded {
+            file_path,
+            instruction_type,
+        } = invocation
+        {
+            self.loaded
+                .lock()
+                .unwrap()
+                .push((file_path, instruction_type));
+        }
+        hook::HookOutcomeData::proceed()
+    }
+}
+
+/// 隔离 guidance 目录：设置 `AEMEATH_AGENTS_DIR` 后写入指定 guidance 文件。
+struct GuidanceFixture {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    root: std::path::PathBuf,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl GuidanceFixture {
+    fn new(tag: &str) -> Self {
+        // guidance 目录由 AEMEATH_AGENTS_DIR 决定；runtime 测试与 context 测试
+        // 分属独立测试二进制，此处用本 crate 内的全局锁即可隔离同进程并发。
+        static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let lock = ENV_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let previous = std::env::var_os("AEMEATH_AGENTS_DIR");
+        let root = std::env::temp_dir().join(format!("aemeath-prompt-build-{tag}"));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("guidance")).unwrap();
+        std::env::set_var("AEMEATH_AGENTS_DIR", &root);
+        Self {
+            _lock: lock,
+            root,
+            previous,
+        }
+    }
+
+    fn write(&self, name: &str, content: &str) -> std::path::PathBuf {
+        let path = self.root.join("guidance").join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&path, content).unwrap();
+        path
+    }
+}
+
+impl Drop for GuidanceFixture {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(value) => std::env::set_var("AEMEATH_AGENTS_DIR", value),
+            None => std::env::remove_var("AEMEATH_AGENTS_DIR"),
+        }
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+/// 每个实际加载的 guidance 文件都必须派发一次 `InstructionsLoaded`，
+/// 且 instruction_type 恒为 "guidance"——这是 context 报告事实、runtime 派发的契约。
+#[tokio::test]
+async fn build_static_prompt_dispatches_instructions_loaded_per_file() {
+    let fixture = GuidanceFixture::new("dispatch");
+    let default_file = fixture.write("_default.md", "default guidance");
+    let model_file = fixture.write("fake.md", "fake prefix guidance");
+    let hook_port = Arc::new(RecordingInstructionsHookPort::default());
+    let port: Arc<dyn HookDispatcher> = hook_port.clone();
+
+    let prompt = build_static_prompt(
+        std::path::Path::new("/tmp/project"),
+        "fake/model",
+        false,
+        None,
+        &port,
+        crate::application::prompt::build::SystemPromptParts {
+            static_part: "core-system".to_string(),
+            initial_git_context: String::new(),
+            claude_md: String::new(),
         },
-    );
-    // 模拟 refresh 后的 committed snapshot（含新增 tester 实例）
-    let snapshot = make_snapshot(names, "en");
+    )
+    .await;
 
-    let mut prompt = String::new();
-    append_agent_roles(&mut prompt, Some(&snapshot), "en");
-
-    assert!(
-        prompt.contains("tester"),
-        "新增 agent 定义必须进入下一 run prompt"
+    assert!(prompt.contains("default guidance"), "{prompt}");
+    assert!(prompt.contains("fake prefix guidance"), "{prompt}");
+    let loaded = hook_port.loaded.lock().unwrap().clone();
+    let paths: Vec<&str> = loaded.iter().map(|(path, _)| path.as_str()).collect();
+    assert_eq!(
+        paths,
+        vec![
+            default_file.to_str().unwrap(),
+            model_file.to_str().unwrap()
+        ],
+        "每个加载文件各派发一次，顺序与拼装顺序一致"
     );
+    assert!(loaded.iter().all(|(_, kind)| kind == "guidance"));
+}
+
+/// 无 guidance 文件命中时不得产生任何派发。
+#[tokio::test]
+async fn build_static_prompt_skips_hook_when_no_guidance_file_loaded() {
+    let _fixture = GuidanceFixture::new("empty");
+    let hook_port = Arc::new(RecordingInstructionsHookPort::default());
+    let port: Arc<dyn HookDispatcher> = hook_port.clone();
+
+    let _ = build_static_prompt(
+        std::path::Path::new("/tmp/project"),
+        "unknown/model",
+        false,
+        None,
+        &port,
+        crate::application::prompt::build::SystemPromptParts {
+            static_part: "core-system".to_string(),
+            initial_git_context: String::new(),
+            claude_md: String::new(),
+        },
+    )
+    .await;
+
+    assert!(hook_port.loaded.lock().unwrap().is_empty());
 }

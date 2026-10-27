@@ -1729,51 +1729,32 @@ async fn test_reflect_now_runs_a_real_run_without_run_changed() {
 /// 装饰 production context 的 `MainContextFactory`：统计 session 落盘类端口
 /// 调用（`append_and_persist` 等持久化方法），读路径原样转发给内层。
 struct RecordingContextFactory {
-    inner: context::ProductionMainContextFactory,
     persistence_calls: Arc<Mutex<Vec<String>>>,
 }
 
 impl RecordingContextFactory {
-    fn new() -> (Arc<Self>, Arc<Mutex<Vec<String>>>) {
-        let persistence_calls = Arc::new(Mutex::new(Vec::new()));
-        let workspace = project::wire_production_workspace(std::env::current_dir().unwrap(), None)
-            .expect("workspace 初始化成功");
-        let factory = Self {
-            inner: context::ProductionMainContextFactory::new(Arc::new(
-                context::NoOpCanonicalSessionWriter,
-            ))
-            .with_persistence(
-                std::sync::Arc::new(task::TaskStore::new()),
-                workspace.persist(),
-            ),
-            persistence_calls: persistence_calls.clone(),
-        };
-        (Arc::new(factory), persistence_calls)
-    }
-}
-
-impl context::MainContextFactory for RecordingContextFactory {
-    fn build(
-        &self,
-        session: Arc<std::sync::RwLock<Arc<context::CanonicalSession>>>,
-        memory: Arc<std::sync::RwLock<Arc<dyn memory::api::MemoryPort>>>,
-        mutation_gate: Arc<tokio::sync::Mutex<()>>,
-    ) -> Arc<dyn context::ContextPort> {
-        let inner = <context::ProductionMainContextFactory as context::MainContextFactory>::build(
-            &self.inner,
-            session,
-            memory,
-            mutation_gate,
-        );
-        Arc::new(RecordingContextPort {
+    /// 测试入口：包装既有 ContextPorts 为记录型（保持四端口语义）。
+    fn wrap_ports(&self, inner: context::ContextPorts) -> context::ContextPorts {
+        context::ContextPorts::from_service(Arc::new(RecordingContextPort {
             inner,
             persistence_calls: self.persistence_calls.clone(),
-        })
+        }))
+    }
+
+    fn new() -> (Arc<Self>, Arc<Mutex<Vec<String>>>) {
+        let persistence_calls = Arc::new(Mutex::new(Vec::new()));
+        (
+            Arc::new(Self {
+                persistence_calls: persistence_calls.clone(),
+            }),
+            persistence_calls,
+        )
     }
 }
 
+
 struct RecordingContextPort {
-    inner: Arc<dyn context::ContextPort>,
+    inner: context::ContextPorts,
     persistence_calls: Arc<Mutex<Vec<String>>>,
 }
 
@@ -1783,20 +1764,50 @@ impl RecordingContextPort {
     }
 }
 
+
+impl context::ReminderControlPort for RecordingContextPort {
+    fn create_reminder_pipeline(&self, run_id: sdk::RunId, sources: Vec<std::sync::Arc<dyn context::ReminderSource>>) {
+        self.inner.reminders.create_reminder_pipeline(run_id, sources)
+    }
+    fn drop_reminder_pipeline(&self, run_id: &sdk::RunId) {
+        self.inner.reminders.drop_reminder_pipeline(run_id)
+    }
+    fn reminder_run_started(&self, run_id: &sdk::RunId) {
+        self.inner.reminders.reminder_run_started(run_id)
+    }
+    fn reminder_handle_event(&self, run_id: &sdk::RunId, event_source: &context::ReminderEventSource) {
+        self.record_persistence("reminder_handle_event");
+        self.inner.reminders.reminder_handle_event(run_id, event_source)
+    }
+    fn reminder_task_mutated(&self, run_id: &sdk::RunId) {
+        self.inner.reminders.reminder_task_mutated(run_id)
+    }
+    fn reminder_step_advanced(&self, run_id: &sdk::RunId, step: u64) {
+        self.inner.reminders.reminder_step_advanced(run_id, step)
+    }
+    fn reminder_user_message_received(&self, run_id: &sdk::RunId) {
+        self.inner.reminders.reminder_user_message_received(run_id)
+    }
+}
+
 #[async_trait]
-impl context::ContextPort for RecordingContextPort {
+impl context::ContextWindowPort for RecordingContextPort {
     async fn build_window(
         &self,
         request: &crate::ports::ContextRequestData,
     ) -> Result<crate::ports::ContextWindowData, crate::ports::ContextPortError> {
-        context::ContextPort::build_window(&*self.inner, request).await
+        self.inner.window.build_window(request).await
     }
 
+}
+
+#[async_trait]
+impl context::ContextCompactPort for RecordingContextPort {
     async fn needs_compaction(
         &self,
         request: &crate::ports::ContextRequestData,
     ) -> Result<crate::ports::CompactionDecisionData, crate::ports::ContextPortError> {
-        context::ContextPort::needs_compaction(&*self.inner, request).await
+        self.inner.compact.needs_compaction(request).await
     }
 
     async fn compact(
@@ -1804,31 +1815,28 @@ impl context::ContextPort for RecordingContextPort {
         request: &crate::ports::CompactRequestData,
     ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
         self.record_persistence("compact");
-        context::ContextPort::compact(&*self.inner, request).await
+        self.inner.compact.compact(request).await
     }
 
-    async fn manual_compact(
-        &self,
-        request: &crate::ports::ManualCompactRequestData,
-    ) -> Result<crate::ports::CompactOutcome, crate::ports::ContextPortError> {
-        self.record_persistence("manual_compact");
-        context::ContextPort::manual_compact(&*self.inner, request).await
-    }
 
+}
+
+#[async_trait]
+impl context::ContextAppendPort for RecordingContextPort {
     async fn clear_session(
         &self,
         session_id: &crate::ports::SessionId,
     ) -> Result<(), crate::ports::ContextPortError> {
         self.record_persistence("clear_session");
-        context::ContextPort::clear_session(&*self.inner, session_id).await
+        self.inner.append.clear_session(session_id).await
     }
 
     async fn append_accepted_input(
         &self,
         append: &crate::ports::AcceptedInputAppendData,
-    ) -> Result<crate::ports::AcceptedInputReceiptData, crate::ports::AcceptedInputError> {
+    ) -> Result<crate::ports::SessionAppendReceiptData, crate::ports::AcceptedInputError> {
         self.record_persistence("append_accepted_input");
-        context::ContextPort::append_accepted_input(&*self.inner, append).await
+        self.inner.append.append_accepted_input(append).await
     }
 
     async fn advance_tool_receipt(
@@ -1836,7 +1844,7 @@ impl context::ContextPort for RecordingContextPort {
         mutation: context::ToolReceiptMutationData,
     ) -> Result<context::ToolReceiptMutationReceiptData, context::ToolReceiptMutationError> {
         self.record_persistence("advance_tool_receipt");
-        context::ContextPort::advance_tool_receipt(&*self.inner, mutation).await
+        self.inner.append.advance_tool_receipt(mutation).await
     }
 
     async fn step_receipts(
@@ -1844,8 +1852,8 @@ impl context::ContextPort for RecordingContextPort {
         session_id: &crate::ports::SessionId,
         run_id: &sdk::RunId,
         step_id: &sdk::RunStepId,
-    ) -> Result<Vec<crate::ports::StepReceiptData>, context::ToolReceiptMutationError> {
-        context::ContextPort::step_receipts(&*self.inner, session_id, run_id, step_id).await
+    ) -> Result<Vec<crate::ports::RunStepReceiptData>, context::ToolReceiptMutationError> {
+        self.inner.append.step_receipts( session_id, run_id, step_id).await
     }
 
     async fn compare_and_record_skill_load(
@@ -1856,15 +1864,15 @@ impl context::ContextPort for RecordingContextPort {
         ::tools::published::skill::SkillLoadStateError,
     > {
         self.record_persistence("compare_and_record_skill_load");
-        context::ContextPort::compare_and_record_skill_load(&*self.inner, mutation).await
+        self.inner.append.compare_and_record_skill_load(mutation).await
     }
 
     async fn append_and_persist(
         &self,
         append: &crate::ports::ContextAppendData,
-    ) -> Result<crate::ports::AppendReceiptData, crate::ports::ContextAppendError> {
+    ) -> Result<crate::ports::SessionAppendReceiptData, crate::ports::ContextAppendError> {
         self.record_persistence("append_and_persist");
-        context::ContextPort::append_and_persist(&*self.inner, append).await
+        self.inner.append.append_and_persist(append).await
     }
 }
 
@@ -1879,7 +1887,15 @@ async fn manual_reflection_run_does_not_persist_session_or_touch_updated_at() {
 
     let (factory, persistence_calls) = RecordingContextFactory::new();
     let mut shell = test_shell();
-    shell.session_switch = test_wiring_with_context_factory(factory);
+    let plain = test_wiring();
+    let inner_ports = plain.committed_context().clone();
+    let builder = test_wiring_builder();
+    shell.session_switch = std::sync::Arc::new(
+        crate::SessionSwitchCoordinator::assemble_with_ports(
+            builder,
+            factory.wrap_ports(inner_ports),
+        ),
+    );
     shell.memory_config = share::config::MemoryConfig {
         enabled: true,
         reflection: share::config::ReflectionConfig {
@@ -1967,7 +1983,13 @@ async fn control_normal_run_records_session_persistence() {
         .unwrap();
     let (factory, calls) = RecordingContextFactory::new();
     let mut shell = test_shell();
-    shell.session_switch = test_wiring_with_context_factory(factory);
+    shell.session_switch = test_wiring();
+    let inner_ports = shell.session_switch.committed_context().clone();
+    let wrapped = factory.wrap_ports(inner_ports);
+    let builder = test_wiring_builder();
+    shell.session_switch = std::sync::Arc::new(
+        crate::SessionSwitchCoordinator::assemble_with_ports(builder, wrapped),
+    );
     shell.model_state.update_binding(
         crate::application::model::test_support::binding_from_llm_provider(Arc::new(
             SequenceProvider::new(vec!["r1"]),

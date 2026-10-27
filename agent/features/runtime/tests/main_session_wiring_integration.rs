@@ -77,7 +77,7 @@ async fn make_wiring_and_workspace(
     .expect("wire config");
     let task_wiring = task::wire_task();
     let session_management: Arc<dyn context::SessionManagementPort> =
-        Arc::new(context::AtomicBlobSessionManagement::new(
+        Arc::new(context::test_support::AtomicBlobSessionManagement::new(
             storage::wire_file_system_blob(temp.path().join("agents"))
                 .expect("create session blob"),
         ));
@@ -88,10 +88,8 @@ async fn make_wiring_and_workspace(
         config.participant(),
         Arc::clone(&session_management) as Arc<dyn context::SessionManagementPort>,
         Arc::new(
-            context::ProductionMainContextFactory::new(Arc::new(
-                context::NoOpCanonicalSessionWriter,
-            ))
-            .with_persistence(task_wiring.persist(), workspace.persist()),
+            context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
+                .with_persistence(task_wiring.persist(), workspace.persist()),
         ),
     )
     .await;
@@ -250,7 +248,7 @@ async fn config_query_and_writer_come_from_wiring() {
     .expect("wire config");
     let task_wiring = task::wire_task();
     let session_management: Arc<dyn context::SessionManagementPort> =
-        Arc::new(context::AtomicBlobSessionManagement::new(
+        Arc::new(context::test_support::AtomicBlobSessionManagement::new(
             storage::wire_file_system_blob(temp.path().join("agents"))
                 .expect("create session blob"),
         ));
@@ -262,10 +260,8 @@ async fn config_query_and_writer_come_from_wiring() {
         config.participant(),
         session_management,
         Arc::new(
-            context::ProductionMainContextFactory::new(Arc::new(
-                context::NoOpCanonicalSessionWriter,
-            ))
-            .with_persistence(task_wiring.persist(), workspace.persist()),
+            context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
+                .with_persistence(task_wiring.persist(), workspace.persist()),
         ),
     )
     .await;

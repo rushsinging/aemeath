@@ -153,21 +153,54 @@ impl memory::api::MemoryOpener for TestMemoryOpener {
     }
 }
 
-fn test_wiring() -> Arc<crate::SessionSwitchCoordinator> {
+pub(crate) fn test_wiring() -> Arc<crate::SessionSwitchCoordinator> {
     let workspace = project::wire_production_workspace(std::env::current_dir().unwrap(), None)
         .expect("workspace 初始化成功");
     test_wiring_with_context_factory(Arc::new(
-        context::ProductionMainContextFactory::new(Arc::new(
+        context::MainContextFactory::new(Arc::new(
             context::NoOpCanonicalSessionWriter,
         ))
         .with_persistence(std::sync::Arc::new(task::TaskStore::new()), workspace.persist()),
     ))
 }
 
+/// 记录型装饰器测试用：暴露组装 builder（factory 产物可被替换）。
+pub(crate) fn test_wiring_builder() -> crate::SessionSwitchCoordinatorBuilder {
+    let workspace = project::wire_production_workspace(std::env::current_dir().unwrap(), None)
+        .expect("workspace 初始化成功");
+    let persist = workspace.persist();
+    let config = Arc::new(config::ConfigAppService::with_global_path(
+        Some(&workspace.read().initial_cwd()),
+        std::path::PathBuf::from("/nonexistent/test-isolated-config.json"),
+    ));
+    let mut initial_session = context::session::CanonicalSession::empty("test-session");
+    initial_session.capture_workspace(persist.snapshot());
+    crate::SessionSwitchCoordinatorBuilder {
+        workspace_read: workspace.read(),
+        workspace_persist: persist,
+        task_restore: std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(
+            std::sync::Arc::new(task::TaskStore::new()),
+        )),
+        config_reader: config.clone(),
+        config_participant: config,
+        memory_opener: Box::new(TestMemoryOpener),
+        session_management: Arc::new(context::test_support::UnavailableSessionManagement),
+        initial_session,
+        initial_memory: Arc::new(memory::api::NoOpMemory),
+        context_factory: Arc::new(
+            context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
+                .with_persistence(
+                    std::sync::Arc::new(task::TaskStore::new()),
+                    workspace.persist(),
+                ),
+        ),
+    }
+}
+
 /// 允许测试注入自定义 `MainContextFactory`（如装饰 production context、
 /// 记录 session 落盘类端口调用的 fake 工厂）。
 fn test_wiring_with_context_factory(
-    context_factory: Arc<dyn context::MainContextFactory>,
+    context_factory: Arc<context::MainContextFactory>,
 ) -> Arc<crate::SessionSwitchCoordinator> {
     let workspace = project::wire_production_workspace(std::env::current_dir().unwrap(), None)
         .expect("workspace 初始化成功");
@@ -175,7 +208,6 @@ fn test_wiring_with_context_factory(
     let config = Arc::new(config::ConfigAppService::with_global_path(Some(
         &workspace.read().initial_cwd(),
     ), std::path::PathBuf::from("/nonexistent/test-isolated-config.json")));
-    let now = chrono::Utc::now().to_rfc3339();
     Arc::new(crate::SessionSwitchCoordinator::assemble(
         crate::SessionSwitchCoordinatorBuilder {
             workspace_read: workspace.read(),
@@ -185,20 +217,11 @@ fn test_wiring_with_context_factory(
             config_participant: config,
             memory_opener: Box::new(TestMemoryOpener),
             session_management: Arc::new(context::test_support::UnavailableSessionManagement),
-            initial_session: context::session::CanonicalSession {
-                id: uuid::Uuid::now_v7().to_string(),
-                chats: Vec::new(),
-                created_at: now.clone(),
-                updated_at: now,
-                metadata: Default::default(),
-                tasks: context::session::SnapshotState::Missing,
-                workspace: context::session::SnapshotState::Captured(persist.snapshot()),
-                revision: 0,
-                compact: None,
-                cleared_after: None,
-                run_slices: Vec::new().into(),
-                committed_steps: Default::default(),
-                skill_load_records: Vec::new(),
+            initial_session: {
+                let mut session =
+                    context::session::CanonicalSession::empty(uuid::Uuid::now_v7().to_string());
+                session.capture_workspace(persist.snapshot());
+                session
             },
             initial_memory: Arc::new(memory::api::NoOpMemory),
             context_factory,
@@ -350,6 +373,7 @@ fn test_shell_with_catalog(
         initial_git_context: String::new(),
         user_context: String::new(),
         prompt_model_id: "test-model".to_string(),
+        workspace_is_git: false,
         skill_catalog,
         initial_skill_snapshot,
         skill_refresh,
@@ -458,6 +482,7 @@ fn test_shell_with_task_store(
         initial_git_context: String::new(),
         user_context: String::new(),
         prompt_model_id: "test-model".to_string(),
+        workspace_is_git: false,
         skill_catalog,
         initial_skill_snapshot,
         skill_refresh,
@@ -518,7 +543,7 @@ impl crate::ports::SessionQueryPort for FakeSessionQuery {
     async fn list_models(&self) -> Result<Vec<sdk::ModelSummary>, sdk::SdkError> {
         Ok(Vec::new())
     }
-    async fn list_sessions(&self) -> Result<Vec<sdk::SessionSummary>, sdk::SdkError> {
+    async fn list_sessions(&self) -> Result<Vec<sdk::SessionItemList>, sdk::SdkError> {
         Ok(Vec::new())
     }
     async fn list_reflection_history(

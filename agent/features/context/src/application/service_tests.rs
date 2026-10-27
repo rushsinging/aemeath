@@ -1,3 +1,4 @@
+use share::ids::{InteractionRequestId, RunStepId, SessionId};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -11,12 +12,11 @@ use share::reasoning::ReasoningLevel;
 use super::performance::{capture, percentiles_ns};
 use super::service::{render_user_input_timestamp_prefix, ContextApplicationService};
 use crate::domain::{
-    ContextAppendData, ContextMessages, ContextRequestData, ContextRequestId, Language, RunStepId,
-    SessionId, SessionRevision, SystemBlock, SystemPromptSpecData,
+    ContextAppendData, ContextMessages, ContextRequestData, Language, SessionRevision, SystemBlock,
 };
 use crate::ports::{
-    ContextMemorySource, ContextPort, ContextPromptSource, MemoryMaterialization,
-    PromptMaterialization, SessionRepository, SessionSnapshot,
+    ContextCompactPort, ContextMemorySource, ContextPromptSource, ContextWindowPort,
+    MemoryMaterialization, PromptMaterialization, SessionItem, SessionRepository,
 };
 
 struct BaselineSession {
@@ -32,8 +32,8 @@ struct BaselineSession {
 
 #[async_trait]
 impl SessionRepository for BaselineSession {
-    async fn snapshot(&self, _session_id: &SessionId) -> Result<SessionSnapshot, String> {
-        Ok(SessionSnapshot {
+    async fn snapshot(&self, _session_id: &SessionId) -> Result<SessionItem, String> {
+        Ok(SessionItem {
             revision: self.revision,
             messages: self.messages.clone(),
             structured_history: None,
@@ -44,16 +44,15 @@ impl SessionRepository for BaselineSession {
     async fn append_finalized(
         &self,
         append: &ContextAppendData,
-    ) -> Result<crate::domain::AppendReceiptData, crate::domain::ContextAppendError> {
+    ) -> Result<crate::domain::SessionAppendReceiptData, crate::domain::ContextAppendError> {
         self.finalized_appends
             .lock()
             .expect("finalized appends lock poisoned")
             .push(append.messages.clone());
-        Ok(crate::domain::AppendReceiptData {
+        Ok(crate::domain::SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: self.revision,
-            fingerprint: append.fingerprint.clone(),
         })
     }
 
@@ -75,15 +74,6 @@ impl SessionRepository for BaselineSession {
                 crate::domain::CompactSkipReason::ResumeProtection,
             ))
         }
-    }
-
-    async fn commit_manual_compaction(
-        &self,
-        _request: &crate::domain::ManualCompactRequestData,
-    ) -> Result<crate::domain::CompactOutcome, crate::domain::ContextPortError> {
-        Ok(crate::domain::CompactOutcome::Skipped(
-            crate::domain::CompactSkipReason::ResumeProtection,
-        ))
     }
 
     async fn clear(&self, _session_id: &SessionId) -> Result<(), crate::domain::ContextPortError> {
@@ -133,14 +123,15 @@ fn block(kind: &str) -> SystemBlock {
 fn request(last_api_total_tokens: Option<u64>) -> ContextRequestData {
     ContextRequestData {
         session_id: SessionId::new("baseline-session"),
-        request_id: ContextRequestId::new("baseline-request"),
+        request_id: InteractionRequestId::new("baseline-request"),
         run_id: RunId::new("baseline-run"),
         step_id: RunStepId::new("baseline-step"),
         pending_messages: vec![Message::user("pending")],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
-        language: Language::new("zh"),
+        language: Language::Zh,
         agent_roles: Default::default(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 128_000,
@@ -318,6 +309,7 @@ fn tool_result_message(bytes: usize) -> (Message, usize) {
 
 fn compact_request(source: ContextRequestData) -> crate::domain::CompactRequestData {
     crate::domain::CompactRequestData {
+        llm: None,
         run_id: RunId::new("baseline-run"),
         source_revision: SessionRevision::new(42),
         source,
@@ -716,12 +708,12 @@ async fn build_window_injects_reminder_pipeline_tail_and_system_tail() {
     });
     let service = service(vec![], 1);
     let run_id = request(None).run_id;
-    crate::ports::ContextPort::create_reminder_pipeline(
+    crate::ports::ReminderControlPort::create_reminder_pipeline(
         &service,
         run_id.clone(),
         vec![tail_source, system_source],
     );
-    crate::ports::ContextPort::reminder_run_started(&service, &run_id);
+    crate::ports::ReminderControlPort::reminder_run_started(&service, &run_id);
 
     let window = service
         .build_window(&request(None))
@@ -753,7 +745,7 @@ async fn build_window_injects_reminder_pipeline_tail_and_system_tail() {
         .content
         .contains("kind=\"model-guidance-mismatch\""));
 
-    crate::ports::ContextPort::drop_reminder_pipeline(&service, &run_id);
+    crate::ports::ReminderControlPort::drop_reminder_pipeline(&service, &run_id);
     let window_after_drop = service
         .build_window(&request(None))
         .await
@@ -823,7 +815,7 @@ impl crate::domain::reminder::ReminderSource for UserMessageTestSource {
 async fn reminder_user_message_received_enqueues_snapshot_into_window() {
     let service = service(vec![], 1);
     let run_id = request(None).run_id;
-    crate::ports::ContextPort::create_reminder_pipeline(
+    crate::ports::ReminderControlPort::create_reminder_pipeline(
         &service,
         run_id.clone(),
         vec![Arc::new(UserMessageTestSource {
@@ -840,7 +832,7 @@ async fn reminder_user_message_received_enqueues_snapshot_into_window() {
         "未触发用户消息事件前不得注入"
     );
 
-    crate::ports::ContextPort::reminder_user_message_received(&service, &run_id);
+    crate::ports::ReminderControlPort::reminder_user_message_received(&service, &run_id);
 
     let after = service
         .build_window(&request(None))
@@ -876,12 +868,12 @@ async fn append_and_persist_prepends_pending_reminder_before_step_messages() {
     );
     let context_request = request(None);
     let run_id = context_request.run_id.clone();
-    crate::ports::ContextPort::create_reminder_pipeline(
+    crate::ports::ReminderControlPort::create_reminder_pipeline(
         &service,
         run_id.clone(),
         vec![tail_source],
     );
-    crate::ports::ContextPort::reminder_run_started(&service, &run_id);
+    crate::ports::ReminderControlPort::reminder_run_started(&service, &run_id);
     let window = service
         .build_window(&context_request)
         .await
@@ -905,19 +897,18 @@ async fn append_and_persist_prepends_pending_reminder_before_step_messages() {
         messages: vec![Message::placeholder(share::message::Role::Assistant)],
         receipts: vec![],
         api_input_tokens: Some(120),
-        fingerprint: crate::domain::ContentFingerprint::new("f"),
     };
-    crate::ports::ContextPort::append_and_persist(&service, &recorded)
+    crate::ports::ContextAppendPort::append_and_persist(&service, &recorded)
         .await
         .expect("提交");
 
     // 第二次提交（无新注入）。
     recorded.messages = vec![Message::placeholder(share::message::Role::Assistant)];
-    crate::ports::ContextPort::append_and_persist(&service, &recorded)
+    crate::ports::ContextAppendPort::append_and_persist(&service, &recorded)
         .await
         .expect("第二次提交");
 
-    crate::ports::ContextPort::drop_reminder_pipeline(&service, &run_id);
+    crate::ports::ReminderControlPort::drop_reminder_pipeline(&service, &run_id);
 
     let appends = baseline
         .finalized_appends

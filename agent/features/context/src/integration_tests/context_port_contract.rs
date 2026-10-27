@@ -1,19 +1,18 @@
-use std::collections::HashMap;
+use share::ids::InteractionRequestId;
 
+use crate::compact::CompactResult;
 use crate::context_port::{
-    AcceptedInputAppendData, AcceptedInputReceiptData, AppendReceiptData, CompactOutcome,
-    CompactRequestData, CompactResult, CompactTrigger, CompactionDecisionData, ContentFingerprint,
-    ContextAppendData, ContextAppendError, ContextMessage, ContextPort, ContextPortError,
-    ContextRequestData, ContextRequestId, ContextWindowData, DecisionReason, FinalizeCause,
-    Language, ManualCompactRequestData, RunStepId, SessionId, SessionRevision, StepReceiptData,
-    SystemPromptSpecData, TokenBudget, ToolOutcomeKindData, Urgency,
+    AcceptedInputAppendData, CompactOutcome, CompactRequestData, CompactTrigger,
+    CompactionDecisionData, ContextAppendData, ContextAppendError, ContextMessage,
+    ContextPortError, ContextRequestData, ContextWindowData, DecisionReason, FinalizeCause,
+    RunStepReceiptData, SessionAppendReceiptData, SessionRevision, TokenBudget,
+    ToolOutcomeKindData, Urgency,
 };
+use crate::context_port::{ContextAppendPort, ContextCompactPort, ContextWindowPort};
 use async_trait::async_trait;
 use sdk::RunId;
-use share::config::domain::snapshot::ConfigSnapshot;
-use share::config::Config;
+use share::ids::{RunStepId, SessionId};
 use share::message::Message;
-use share::reasoning::ReasoningLevel;
 
 struct FakeContextPort;
 
@@ -29,30 +28,8 @@ fn decision() -> CompactionDecisionData {
     }
 }
 
-fn request() -> ContextRequestData {
-    ContextRequestData {
-        session_id: SessionId::new("session-1"),
-        request_id: ContextRequestId::new("request-1"),
-        run_id: RunId::new("run-1"),
-        step_id: RunStepId::new("step-1"),
-        pending_messages: vec![Message::user("hello")],
-        system_prompt: SystemPromptSpecData::new("system"),
-        model_id: "fake/model".into(),
-        effective_reasoning: ReasoningLevel::Off,
-        language: Language::new("zh"),
-        agent_roles: HashMap::new(),
-        config_snapshot: ConfigSnapshot::new(Config::default()),
-        context_size: 128_000,
-        max_output_tokens: 8_192,
-        last_api_total_tokens: None,
-        heuristic_calibration: None,
-        tool_schemas: vec![],
-        tool_schema_tokens: 0,
-    }
-}
-
 #[async_trait]
-impl ContextPort for FakeContextPort {
+impl ContextWindowPort for FakeContextPort {
     async fn build_window(
         &self,
         request: &ContextRequestData,
@@ -66,7 +43,10 @@ impl ContextPort for FakeContextPort {
             compaction_decision: decision(),
         })
     }
+}
 
+#[async_trait]
+impl ContextCompactPort for FakeContextPort {
     async fn needs_compaction(
         &self,
         _request: &ContextRequestData,
@@ -83,22 +63,13 @@ impl ContextPort for FakeContextPort {
             summary: "summary".into(),
             recent_messages: vec![],
             source_revision: SessionRevision::new(3),
-            quality: crate::CompactSummaryQuality::LocalOnly,
+            quality: crate::domain::CompactSummaryQuality::LocalOnly,
         }))
     }
+}
 
-    async fn manual_compact(
-        &self,
-        request: &ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
-        Ok(CompactOutcome::Committed(CompactResult {
-            summary: format!("manual summary for {}", request.session_id.as_str()),
-            recent_messages: vec![],
-            source_revision: SessionRevision::new(5),
-            quality: crate::CompactSummaryQuality::LocalOnly,
-        }))
-    }
-
+#[async_trait]
+impl ContextAppendPort for FakeContextPort {
     async fn clear_session(&self, _session_id: &SessionId) -> Result<(), ContextPortError> {
         Ok(())
     }
@@ -106,24 +77,22 @@ impl ContextPort for FakeContextPort {
     async fn append_accepted_input(
         &self,
         append: &AcceptedInputAppendData,
-    ) -> Result<AcceptedInputReceiptData, crate::context_port::AcceptedInputError> {
-        Ok(AcceptedInputReceiptData {
+    ) -> Result<SessionAppendReceiptData, crate::context_port::AcceptedInputError> {
+        Ok(SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(4),
-            fingerprint: append.fingerprint.clone(),
         })
     }
 
     async fn append_and_persist(
         &self,
         append: &ContextAppendData,
-    ) -> Result<AppendReceiptData, ContextAppendError> {
-        Ok(AppendReceiptData {
+    ) -> Result<SessionAppendReceiptData, ContextAppendError> {
+        Ok(SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(4),
-            fingerprint: append.fingerprint.clone(),
         })
     }
 }
@@ -135,56 +104,14 @@ async fn accepted_input_port_returns_typed_receipt() {
         session_id: SessionId::new("session-1"),
         run_id: RunId::new("run-1"),
         step_id: RunStepId::new("step-1"),
-        source_request_id: ContextRequestId::new("request-1"),
+        source_request_id: InteractionRequestId::new("request-1"),
         messages: vec![Message::user("accepted")],
-        fingerprint: ContentFingerprint::new("input-fingerprint"),
     };
 
-    let receipt: AcceptedInputReceiptData = port.append_accepted_input(&accepted).await.unwrap();
+    let receipt: SessionAppendReceiptData = port.append_accepted_input(&accepted).await.unwrap();
     assert_eq!(receipt.run_id, accepted.run_id);
     assert_eq!(receipt.step_id, accepted.step_id);
     assert_eq!(receipt.committed_revision, SessionRevision::new(4));
-    assert_eq!(receipt.fingerprint, accepted.fingerprint);
-}
-
-#[tokio::test]
-async fn context_port_exposes_provider_neutral_six_method_contract() {
-    let request = request();
-    let port = FakeContextPort;
-
-    let window = port.build_window(&request).await.unwrap();
-    assert_eq!(window.messages.len(), 1);
-    assert!(!port.needs_compaction(&request).await.unwrap().needed);
-    assert!(matches!(
-        port.compact(&CompactRequestData {
-            run_id: request.run_id.clone(),
-            source_revision: SessionRevision::new(3),
-            source: request.clone(),
-            trigger: CompactTrigger::Automatic,
-            progress: None,
-            task_snapshot: None,
-            cancellation: tokio_util::sync::CancellationToken::new(),
-        })
-        .await
-        .unwrap(),
-        CompactOutcome::Committed(_)
-    ));
-
-    let manual = port
-        .manual_compact(&ManualCompactRequestData {
-            session_id: request.session_id.clone(),
-            run_id: request.run_id.clone(),
-            system_prompt: request.system_prompt.clone(),
-            context_size: request.context_size,
-            progress: None,
-            task_snapshot: None,
-        })
-        .await
-        .unwrap();
-    assert!(matches!(manual, CompactOutcome::Committed(ref result)
-        if result.source_revision == SessionRevision::new(5)));
-
-    assert_eq!(port.clear_session(&request.session_id).await.unwrap(), ());
 }
 
 #[test]
@@ -206,41 +133,78 @@ fn finalized_append() -> ContextAppendData {
         expected_revision: SessionRevision::new(3),
         run_id: RunId::new("run-1"),
         step_id: RunStepId::new("step-1"),
-        source_request_id: ContextRequestId::new("request-1"),
+        source_request_id: InteractionRequestId::new("request-1"),
         finalize_cause: FinalizeCause::UserCancelledStep,
         duration_ms: Some(7_325_000),
         messages: vec![Message::user("finalized")],
         receipts: vec![
-            StepReceiptData::tool("call-1", 0, ToolOutcomeKindData::Success),
-            StepReceiptData::tool("call-2", 1, ToolOutcomeKindData::Failure),
-            StepReceiptData::agent("call-3", 2, ToolOutcomeKindData::Success)
-                .with_summary("child finished")
-                .with_artifact_ref("artifact://child-result"),
-            StepReceiptData::agent("call-4", 3, ToolOutcomeKindData::CancellationUnconfirmed)
-                .with_possible_side_effect("remote write may have started")
-                .with_unfinished_call("child-call-9"),
+            RunStepReceiptData {
+                call_id: "call-1".to_string(),
+                index: 0,
+                outcome: ToolOutcomeKindData::Success,
+                agent: false,
+                summary: None,
+                cleanup: tools::CleanupConfirmation::NotApplicable,
+                possible_side_effects: Vec::new(),
+                unfinished_call_ids: Vec::new(),
+            },
+            RunStepReceiptData {
+                call_id: "call-2".to_string(),
+                index: 1,
+                outcome: ToolOutcomeKindData::Failure,
+                agent: false,
+                summary: None,
+                cleanup: tools::CleanupConfirmation::NotApplicable,
+                possible_side_effects: Vec::new(),
+                unfinished_call_ids: Vec::new(),
+            },
+            RunStepReceiptData {
+                call_id: "call-3".to_string(),
+                index: 2,
+                outcome: ToolOutcomeKindData::Success,
+                agent: true,
+                summary: Some("child finished".to_string()),
+                cleanup: tools::CleanupConfirmation::NotApplicable,
+                possible_side_effects: Vec::new(),
+                unfinished_call_ids: Vec::new(),
+            },
+            RunStepReceiptData {
+                call_id: "call-4".to_string(),
+                index: 3,
+                outcome: ToolOutcomeKindData::CancellationUnconfirmed,
+                agent: true,
+                summary: None,
+                cleanup: tools::CleanupConfirmation::NotApplicable,
+                possible_side_effects: vec!["remote write may have started".to_string()],
+                unfinished_call_ids: vec!["child-call-9".to_string()],
+            },
         ],
         api_input_tokens: Some(42),
-        fingerprint: ContentFingerprint::new("fingerprint-1"),
     }
 }
 
 #[test]
 fn mixed_tool_outcomes_and_agent_receipts_preserve_original_order() {
     let append = finalized_append();
-    let indexes: Vec<_> = append.receipts.iter().map(StepReceiptData::index).collect();
+    let indexes: Vec<_> = append.receipts.iter().map(|r| r.index).collect();
 
     assert_eq!(indexes, vec![0, 1, 2, 3]);
-    assert_eq!(append.receipts[2].summary(), Some("child finished"));
     assert_eq!(
-        append.receipts[2].artifact_refs(),
-        &["artifact://child-result".to_string()]
+        append.receipts[2].summary.as_deref(),
+        Some("child finished")
     );
     assert_eq!(
-        append.receipts[3].outcome(),
+        append.receipts[2].cleanup,
+        tools::CleanupConfirmation::NotApplicable
+    );
+    assert_eq!(
+        append.receipts[3].outcome,
         ToolOutcomeKindData::CancellationUnconfirmed
     );
-    assert_eq!(append.receipts[3].unfinished_call_ids(), &["child-call-9"]);
+    assert_eq!(
+        &append.receipts[3].unfinished_call_ids[..],
+        &["child-call-9"]
+    );
 }
 
 #[tokio::test]
@@ -248,7 +212,6 @@ async fn append_returns_typed_receipt_and_conflict_errors_remain_distinct() {
     let append = finalized_append();
     let receipt = FakeContextPort.append_and_persist(&append).await.unwrap();
     assert_eq!(receipt.committed_revision, SessionRevision::new(4));
-    assert_eq!(receipt.fingerprint, append.fingerprint);
 
     let revision_conflict = ContextAppendError::RevisionConflict {
         expected: SessionRevision::new(3),

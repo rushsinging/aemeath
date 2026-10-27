@@ -7,11 +7,11 @@ pub(crate) use generation::{
     SessionGenerationWireError,
 };
 
-pub use share::session_types::PersistedWorkspaceContext;
-
 mod constants;
 #[cfg_attr(not(test), allow(unused_imports))]
 pub(crate) use constants::CURRENT_SESSION_SCHEMA_VERSION;
+pub(crate) use envelope::SessionSnapshotState;
+pub(crate) use share::session_types::PersistedWorkspaceContext;
 mod chat_chain;
 mod envelope;
 mod generation;
@@ -29,7 +29,7 @@ pub(crate) use envelope::{
 };
 pub use envelope::{
     CanonicalSession, CommittedStep, CommittedStepLedger, CommittedStepMessages, DecodedSession,
-    SkillLoadRecord, SnapshotState,
+    SkillLoadRecord,
 };
 pub use generation::{
     DisplayHistoryStepIndexData, DisplayHistoryStepWindowData, SessionStepMember,
@@ -39,11 +39,9 @@ pub use generation::{
 // workspace feature 统一下 dev 门控测试不参与 clippy 编译，显式标注未用豁免。
 #[allow(unused_imports)]
 pub use generation::{SessionMemberBytes, SessionMetadataMember, SessionStateMember};
-pub use management::{
-    same_project_identity, session_matches_project, SessionListEntryData, SessionManagementError,
-    SessionMetadataUpdateData, SessionResumeLoad, SessionResumeViewData,
-};
+pub(crate) use management::project_list_item;
+pub use management::{session_matches_project, SessionManagementError, SessionResumeLoad};
 pub(crate) use project_layout::project_dir_segment;
 pub use project_layout::session_project_dir;
 pub use restore::{SessionRestore, SessionRestoreStepData};
-pub use types::{extract_project_name, new_session_id, now_iso, SessionMetadata};
+pub use types::{extract_project_name, new_session_id, SessionMetadata};

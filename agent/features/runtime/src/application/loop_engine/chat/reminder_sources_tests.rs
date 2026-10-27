@@ -624,7 +624,7 @@ fn background_process_source_build_peeks_until_confirmed_and_renders() {
 
 fn background_process_identity() -> context::ToolCallIdentityData {
     context::ToolCallIdentityData {
-        session_id: context::SessionId::new("session-1"),
+        session_id: share::ids::SessionId::new("session-1"),
         run_id: sdk::RunId::new("run-1"),
         step_id: sdk::RunStepId::new("step-1"),
         runtime_call_id: "runtime-call-1".to_string(),

@@ -34,6 +34,7 @@ pub mod suspension;
 pub mod test_support;
 pub mod timeout_policy;
 pub mod tool;
+pub mod tool_definition;
 #[cfg(test)]
 #[path = "domain/tool_tests.rs"]
 mod tool_tests;

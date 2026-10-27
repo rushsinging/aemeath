@@ -130,8 +130,8 @@ impl SessionState {
         self.revision = self.revision.saturating_add(1);
     }
 
-    pub fn snapshot_for_run(&self) -> SessionSnapshot {
-        SessionSnapshot {
+    pub fn snapshot_for_run(&self) -> SessionItem {
+        SessionItem {
             session_id: self.session_id.clone(),
             workspace_root: self.workspace_root.clone(),
             model_key: self.model_key.clone(),
@@ -143,7 +143,7 @@ impl SessionState {
 
 /// Run 准备时冻结的会话纯值快照。
 #[derive(Debug, Clone)]
-pub struct SessionSnapshot {
+pub struct SessionItem {
     session_id: String,
     workspace_root: PathBuf,
     model_key: String,
@@ -151,7 +151,7 @@ pub struct SessionSnapshot {
     revision: u64,
 }
 
-impl SessionSnapshot {
+impl SessionItem {
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
@@ -307,14 +307,14 @@ impl From<RunSpecError> for RunCreationError {
 pub struct RunCreationRequest {
     run_id: Option<RunId>,
     spec: RunSpec,
-    session: SessionSnapshot,
+    session: SessionItem,
     parent: Option<ParentRunFacts>,
 }
 
 impl RunCreationRequest {
     pub fn new(
         spec: RunSpec,
-        session: SessionSnapshot,
+        session: SessionItem,
         parent: Option<ParentRunFacts>,
     ) -> Result<Self, RunCreationError> {
         if let Some(parent) = &parent {
@@ -341,7 +341,7 @@ impl RunCreationRequest {
         &self.spec
     }
 
-    pub fn session(&self) -> &SessionSnapshot {
+    pub fn session(&self) -> &SessionItem {
         &self.session
     }
 
@@ -349,7 +349,7 @@ impl RunCreationRequest {
         self.parent.as_ref()
     }
 
-    pub(crate) fn with_session(mut self, session: SessionSnapshot) -> Self {
+    pub(crate) fn with_session(mut self, session: SessionItem) -> Self {
         self.session = session;
         self
     }
@@ -362,7 +362,7 @@ impl RunCreationRequest {
 pub struct RunInstance {
     run: Run,
     execution: RunExecutionState,
-    session: SessionSnapshot,
+    session: SessionItem,
     context: crate::application::run::context::RuntimeContext,
     workspace: Option<crate::application::run::workspace::RuntimeWorkspaceAccess>,
 }
@@ -372,7 +372,7 @@ impl RunInstance {
         run_id: RunId,
         spec: RunSpec,
         parent_run_id: Option<RunId>,
-        session: SessionSnapshot,
+        session: SessionItem,
         context: crate::application::run::context::RuntimeContext,
         workspace: Option<crate::application::run::workspace::RuntimeWorkspaceAccess>,
     ) -> Self {
@@ -394,7 +394,7 @@ impl RunInstance {
         &self.run
     }
 
-    pub fn session(&self) -> &SessionSnapshot {
+    pub fn session(&self) -> &SessionItem {
         &self.session
     }
 

@@ -35,10 +35,10 @@ pub(crate) fn project_dir_segment(identity: &ProjectIdentityData) -> SafePathSeg
 /// workspace 缺失（无归属信息）时返回 `None`，调用方退回平铺 key。
 pub fn session_project_dir(session: &super::CanonicalSession) -> Option<SafePathSegmentData> {
     match &session.workspace {
-        super::SnapshotState::Captured(context) => {
+        super::SessionSnapshotState::Captured(context) => {
             Some(project_dir_segment(&context.project_identity))
         }
-        super::SnapshotState::CapturedEmpty | super::SnapshotState::Missing => None,
+        super::SessionSnapshotState::CapturedEmpty | super::SessionSnapshotState::Missing => None,
     }
 }
 

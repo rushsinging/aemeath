@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use sdk::{ModelSummary, ReflectionHistoryView, SdkError, SessionSummary};
+use sdk::{ModelSummary, ReflectionHistoryView, SdkError, SessionItemList};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::SessionQueryPort;
@@ -15,8 +15,8 @@ fn canned_model() -> ModelSummary {
     }
 }
 
-fn canned_session() -> SessionSummary {
-    SessionSummary {
+fn canned_session() -> SessionItemList {
+    SessionItemList {
         id: "session-1".into(),
         title: Some("Test Session".into()),
         project: Some("test-project".into()),
@@ -79,7 +79,7 @@ impl SessionQueryPort for RecordingFake {
         }
     }
 
-    async fn list_sessions(&self) -> Result<Vec<SessionSummary>, SdkError> {
+    async fn list_sessions(&self) -> Result<Vec<SessionItemList>, SdkError> {
         self.session_calls.fetch_add(1, Ordering::SeqCst);
         if self.should_error {
             Err(SdkError::Session("sessions unavailable".into()))

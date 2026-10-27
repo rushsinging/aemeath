@@ -1,10 +1,11 @@
 use crate::decode_session;
+use crate::domain::session::SessionSnapshotState;
+use crate::domain::session::{CommittedStep, CommittedStepMessages};
 use crate::{
-    AcceptedInputRecord, CanonicalSession, CommittedRunSlice, CommittedRunStep, CommittedStep,
-    CommittedStepMessages, FinalizedOutcomeRecord, SessionCodec, SessionCodecError, SnapshotState,
-    CURRENT_SESSION_SCHEMA_VERSION,
+    AcceptedInputRecord, CanonicalSession, CommittedRunSlice, CommittedRunStep,
+    FinalizedOutcomeRecord, SessionCodec, SessionCodecError, CURRENT_SESSION_SCHEMA_VERSION,
 };
-use crate::{FinalizeCause, StepReceiptData, ToolOutcomeKindData};
+use crate::{FinalizeCause, RunStepReceiptData, ToolOutcomeKindData};
 use serde_json::json;
 use share::message::{ContentBlock, Message, Role};
 use share::session_types::{
@@ -151,8 +152,14 @@ fn legacy_messages_upgrade_to_single_normal_chat() {
         "legacy fact"
     );
     assert_eq!(decoded.session.metadata.title.as_deref(), Some("old"));
-    assert!(matches!(decoded.session.tasks, SnapshotState::Missing));
-    assert!(matches!(decoded.session.workspace, SnapshotState::Missing));
+    assert!(matches!(
+        decoded.session.tasks,
+        SessionSnapshotState::Missing
+    ));
+    assert!(matches!(
+        decoded.session.workspace,
+        SessionSnapshotState::Missing
+    ));
 }
 
 #[test]
@@ -228,16 +235,21 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
                 1,
             )),
             outcome: Some(FinalizedOutcomeRecord {
+                fingerprint: "codec-test".to_string(),
                 finalize_cause: FinalizeCause::UserCancelledStep,
                 duration_ms: Some(7_325_000),
                 messages: vec![Message::user("partial assistant")].into(),
-                receipts: vec![StepReceiptData::agent(
-                    "agent-call",
-                    0,
-                    ToolOutcomeKindData::CancellationUnconfirmed,
-                )],
+                receipts: vec![RunStepReceiptData {
+                    call_id: "agent-call".to_string(),
+                    index: 0,
+                    outcome: ToolOutcomeKindData::CancellationUnconfirmed,
+                    agent: true,
+                    summary: None,
+                    cleanup: tools::CleanupConfirmation::NotApplicable,
+                    possible_side_effects: Vec::new(),
+                    unfinished_call_ids: Vec::new(),
+                }],
                 api_input_tokens: Some(42),
-                fingerprint: "outcome-fingerprint".to_string(),
                 committed_revision: 2,
             }),
             tool_receipts: Vec::new(),
@@ -255,11 +267,11 @@ fn finalized_outcome_round_trips_receipts_without_repeating_accepted_input() {
     assert_eq!(outcome.duration_ms, Some(7_325_000));
     assert_eq!(outcome.messages[0].text_content(), "partial assistant");
     assert_eq!(
-        outcome.receipts[0].outcome(),
+        outcome.receipts[0].outcome,
         ToolOutcomeKindData::CancellationUnconfirmed
     );
     assert_eq!(outcome.api_input_tokens, Some(42));
-    assert_eq!(outcome.fingerprint, "outcome-fingerprint");
+    assert_eq!(outcome.fingerprint, "codec-test");
     assert_eq!(outcome.committed_revision, 2);
     assert_eq!(
         decoded
@@ -391,16 +403,16 @@ fn legacy_messages_upgrade_to_single_synthetic_step() {
 #[test]
 fn explicit_empty_snapshot_is_distinct_from_missing() {
     let mut session = CanonicalSession::fixture("empty");
-    session.tasks = SnapshotState::CapturedEmpty;
-    session.workspace = SnapshotState::CapturedEmpty;
+    session.tasks = SessionSnapshotState::CapturedEmpty;
+    session.workspace = SessionSnapshotState::CapturedEmpty;
     let decoded = decode_session(&SessionCodec::encode(&session).unwrap()).unwrap();
     assert!(matches!(
         decoded.session.tasks,
-        SnapshotState::CapturedEmpty
+        SessionSnapshotState::CapturedEmpty
     ));
     assert!(matches!(
         decoded.session.workspace,
-        SnapshotState::CapturedEmpty
+        SessionSnapshotState::CapturedEmpty
     ));
 }
 
@@ -493,10 +505,10 @@ fn canonical_text(path: &std::path::Path) -> String {
 }
 
 fn captured_workspace(
-    state: &SnapshotState<PersistedWorkspaceContext>,
+    state: &SessionSnapshotState<PersistedWorkspaceContext>,
 ) -> PersistedWorkspaceContext {
     match state {
-        SnapshotState::Captured(ctx) => ctx.clone(),
+        SessionSnapshotState::Captured(ctx) => ctx.clone(),
         other => panic!("expected an upgraded Captured workspace, got {other:?}"),
     }
 }
@@ -506,7 +518,7 @@ fn captured_workspace(
 #[test]
 fn canonical_writer_never_emits_top_level_cwd() {
     let mut session = CanonicalSession::fixture("no-cwd");
-    session.workspace = SnapshotState::Captured(PersistedWorkspaceContext {
+    session.workspace = SessionSnapshotState::Captured(PersistedWorkspaceContext {
         workspace_id: WorkspaceId::from("ws-cwd-guard"),
         project_identity: ProjectIdentityData {
             initial_cwd: "/tmp/project".to_string(),
@@ -693,7 +705,7 @@ fn legacy_upgrade_records_missing_tasks_as_captured_empty() {
     let decoded = decode_session(&bytes).unwrap();
     assert!(decoded.upgraded_from_legacy);
     assert!(
-        matches!(decoded.session.tasks, SnapshotState::CapturedEmpty),
+        matches!(decoded.session.tasks, SessionSnapshotState::CapturedEmpty),
         "升级路径下缺失 tasks 必须记为 CapturedEmpty 而非 Missing"
     );
 

@@ -509,7 +509,7 @@ pub struct StepCommit {
     pub cause: crate::ports::FinalizeCause,
     pub duration_ms: Option<u64>,
     pub messages: Vec<share::message::Message>,
-    pub receipts: Vec<crate::ports::StepReceiptData>,
+    pub receipts: Vec<crate::ports::RunStepReceiptData>,
 }
 
 pub(super) fn prepare_step_commit(
@@ -575,7 +575,7 @@ pub trait StepPersistencePort: Send {
     async fn load_step_receipts(
         &mut self,
         _request: &crate::ports::ContextRequestData,
-    ) -> Result<Vec<crate::ports::StepReceiptData>, LoopEngineError> {
+    ) -> Result<Vec<crate::ports::RunStepReceiptData>, LoopEngineError> {
         Ok(Vec::new())
     }
     async fn persist_step_commit(&mut self, _commit: &StepCommit) -> Result<(), LoopEngineError> {

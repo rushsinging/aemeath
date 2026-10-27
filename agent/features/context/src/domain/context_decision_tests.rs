@@ -1,3 +1,4 @@
+use share::ids::InteractionRequestId;
 use std::collections::HashMap;
 
 use sdk::{RunId, RunStepId};
@@ -6,22 +7,20 @@ use share::config::Config;
 use share::message::Message;
 use share::reasoning::ReasoningLevel;
 
-use super::{
-    context_decision, ContextRequestData, ContextRequestId, DecisionReason, Language, SessionId,
-    SystemPromptSpecData,
-};
+use super::{context_decision, ContextRequestData, DecisionReason, Language, SessionId};
 
 fn request(last_api_total_tokens: Option<u64>) -> ContextRequestData {
     ContextRequestData {
         session_id: SessionId::new("session"),
-        request_id: ContextRequestId::new("request"),
+        request_id: InteractionRequestId::new("request"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("pending")],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
-        language: Language::new("zh"),
+        language: Language::Zh,
         agent_roles: HashMap::new(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 2_000,
@@ -147,9 +146,12 @@ fn heuristic_estimate_with_realistic_mix_no_longer_triggers_at_43_percent() {
     let english_message =
         "the quick brown fox jumps over the lazy dog and inspects the token budget logic. "
             .repeat(1200); // ~100K ASCII
-    let tool_schema_json = r#"{"name":"Bash","description":"run a shell command","parameters":{"type":"object","properties":{"command":{"type":"string"}}}}"#;
-    let tool_schemas: Vec<serde_json::Value> = (0..80)
-        .map(|_| serde_json::from_str(tool_schema_json).unwrap())
+    let tool_schema_json = r#"{"name":"Bash","description":"run a shell command","input_schema":{"type":"object","properties":{"command":{"type":"string"}}}}"#;
+    let tool_schemas: Vec<tools::ToolDefinition> = (0..80)
+        .map(|_| {
+            tools::ToolDefinition::from_wire(&serde_json::from_str(tool_schema_json).unwrap())
+                .unwrap()
+        })
         .collect();
 
     let candidate = ContextRequestData {

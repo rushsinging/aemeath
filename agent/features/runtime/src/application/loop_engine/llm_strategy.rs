@@ -64,11 +64,12 @@ pub(crate) fn extract_invocation_context(window: &ContextWindowData) -> Invocati
         .iter()
         .map(Message::to_llm_view)
         .collect::<Vec<_>>();
-    let tool_schemas = window
+    let tool_schemas: Vec<serde_json::Value> = window
         .tool_schemas
         .iter()
-        .map(|schema| schema.to_tool_definition())
-        .collect::<Vec<_>>();
+        .map(serde_json::to_value)
+        .collect::<Result<_, _>>()
+        .unwrap_or_default();
     // 块映射改拼接：system = blocks.join("\n\n")；static_prefix_len = 最后一个
     // cache_break 块末尾的累计字节长度（含该块，不含其后的连接符）。
     let mut system = String::new();

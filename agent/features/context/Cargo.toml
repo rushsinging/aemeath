@@ -14,6 +14,7 @@ utils = { path = "../../../packages/global/utils" }
 storage = { path = "../storage" }
 task = { path = "../task" }
 project = { path = "../project" }
+provider = { path = "../provider" }
 memory = { path = "../memory" }
 config = { path = "../config" }
 sdk = { path = "../../../packages/sdk" }

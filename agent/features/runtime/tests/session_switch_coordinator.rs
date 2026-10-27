@@ -8,7 +8,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use context::session::SessionMetadata;
-use context::{AtomicBlobSessionManagement, SessionManagementPort};
+use context::test_support::AtomicBlobSessionManagement;
+use context::SessionManagementPort;
 use memory::api::{MemoryOpener, MemoryOpenerError, MemoryPort, ProjectMemoryKey};
 use share::config::domain::snapshot::ConfigRevision;
 use share::message::{Message, Role};
@@ -101,10 +102,8 @@ impl TestEnv {
             memory_opener,
             session_management: Arc::clone(&session_management) as Arc<dyn SessionManagementPort>,
             context_factory: Arc::new(
-                context::ProductionMainContextFactory::new(Arc::new(
-                    context::NoOpCanonicalSessionWriter,
-                ))
-                .with_persistence(task_wiring.persist(), workspace.persist()),
+                context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
+                    .with_persistence(task_wiring.persist(), workspace.persist()),
             ),
         };
         Self {

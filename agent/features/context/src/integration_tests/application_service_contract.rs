@@ -1,20 +1,21 @@
+use crate::domain::session::CommittedStepMessages;
+use crate::domain::SystemBlock;
+use share::ids::InteractionRequestId;
+use share::ids::{RunStepId, SessionId};
 use std::sync::Arc;
 
+use crate::tool_receipt::ToolCallReceiptData;
 use crate::CommittedMemoryRetrieveAdapter;
 use crate::ContextApplicationService;
+use crate::{CommittedRunSlice, CommittedRunStep, FinalizedOutcomeRecord, SessionHistory};
 use crate::{
-    CleanupConfirmation, ContextAppendData, ContextMessages, ContextRequestData, ContextRequestId,
-    FinalizeCause, Language, RunStepId, SessionId, SessionRevision, SystemBlock,
-    SystemPromptSpecData, ToolCallIdentityData, ToolCallReceiptData, ToolOutcomeKindData,
-    ToolTerminalReceiptData,
+    ContextAppendData, ContextMessages, ContextRequestData, FinalizeCause, Language,
+    SessionRevision, ToolCallIdentityData, ToolOutcomeKindData, ToolTerminalReceiptData,
 };
 use crate::{
-    CommittedRunSlice, CommittedRunStep, CommittedStepMessages, FinalizedOutcomeRecord,
-    SessionHistory,
-};
-use crate::{
-    ContextMemorySource, ContextPort, ContextPromptSource, MemoryMaterialization,
-    PromptMaterialization, SessionRepository, SessionSnapshot,
+    ContextAppendPort, ContextMemorySource, ContextPromptSource, ContextWindowPort,
+    MemoryMaterialization, PromptMaterialization, ReminderControlPort, SessionItem,
+    SessionRepository,
 };
 use async_trait::async_trait;
 use memory::api::{MemoryPort, NoOpMemory};
@@ -23,6 +24,7 @@ use share::config::domain::snapshot::ConfigSnapshot;
 use share::config::Config;
 use share::message::{ContentBlock, Message};
 use share::reasoning::ReasoningLevel;
+use tools::CleanupConfirmation;
 
 const CHECKPOINT: &str = "## Immutable Constraints\n- review only\n\n## Current Objective\n- inspect resume\n\n## Committed Facts\n- persisted\n\n## Uncommitted Working Set\n- none\n\n## Open Decisions / Risks\n- dynamic state\n\n## Resume Cursor\n- Next action: revalidate once\n\n## Required Revalidation\n- revalidate git\n\n## Archived Milestones\n- baseline\n\n## Continuation Status\nContinue";
 
@@ -72,6 +74,7 @@ fn structured_fake_session() -> FakeSession {
                 step_id: normalized_step_id.as_str().to_string(),
                 accepted_input: None,
                 outcome: Some(FinalizedOutcomeRecord {
+                    fingerprint: format!("fp-{step_id}"),
                     finalize_cause: FinalizeCause::Completed,
                     duration_ms: None,
                     messages: CommittedStepMessages::from(vec![Message {
@@ -93,7 +96,6 @@ fn structured_fake_session() -> FakeSession {
                     }]),
                     receipts: vec![],
                     api_input_tokens: None,
-                    fingerprint: format!("fp-{step_id}"),
                     committed_revision: 2,
                 }),
                 tool_receipts: vec![ToolCallReceiptData {
@@ -108,11 +110,13 @@ fn structured_fake_session() -> FakeSession {
                         agent: false,
                     },
                     input_preview: input.to_string(),
-                    state: crate::ToolCallState::Terminal(ToolTerminalReceiptData::new(
-                        ToolOutcomeKindData::Success,
-                        "terminal",
-                        CleanupConfirmation::NotApplicable,
-                    )),
+                    state: crate::tool_receipt::ToolCallState::Terminal(
+                        ToolTerminalReceiptData::new(
+                            ToolOutcomeKindData::Success,
+                            "terminal",
+                            CleanupConfirmation::NotApplicable,
+                        ),
+                    ),
                 }],
             }
         };
@@ -189,8 +193,8 @@ fn structured_fake_session() -> FakeSession {
 
 #[async_trait]
 impl SessionRepository for FakeSession {
-    async fn snapshot(&self, _session_id: &SessionId) -> Result<SessionSnapshot, String> {
-        Ok(SessionSnapshot {
+    async fn snapshot(&self, _session_id: &SessionId) -> Result<SessionItem, String> {
+        Ok(SessionItem {
             revision: SessionRevision::new(2),
             messages: self.messages.clone(),
             structured_history: self.structured_history.clone(),
@@ -201,12 +205,11 @@ impl SessionRepository for FakeSession {
     async fn append_finalized(
         &self,
         append: &ContextAppendData,
-    ) -> Result<crate::AppendReceiptData, crate::ContextAppendError> {
-        Ok(crate::AppendReceiptData {
+    ) -> Result<crate::SessionAppendReceiptData, crate::ContextAppendError> {
+        Ok(crate::SessionAppendReceiptData {
             run_id: append.run_id.clone(),
             step_id: append.step_id.clone(),
             committed_revision: SessionRevision::new(3),
-            fingerprint: append.fingerprint.clone(),
         })
     }
 
@@ -215,20 +218,8 @@ impl SessionRepository for FakeSession {
         _request: &crate::CompactRequestData,
     ) -> Result<crate::CompactOutcome, crate::ContextPortError> {
         Ok(crate::CompactOutcome::Skipped(
-            crate::CompactSkipReason::ResumeProtection,
+            crate::domain::CompactSkipReason::ResumeProtection,
         ))
-    }
-
-    async fn commit_manual_compaction(
-        &self,
-        _request: &crate::ManualCompactRequestData,
-    ) -> Result<crate::CompactOutcome, crate::ContextPortError> {
-        Ok(crate::CompactOutcome::Committed(crate::CompactResult {
-            summary: "manual".into(),
-            recent_messages: vec![],
-            source_revision: SessionRevision::new(4),
-            quality: crate::CompactSummaryQuality::LocalOnly,
-        }))
     }
 
     async fn clear(&self, _session_id: &SessionId) -> Result<(), crate::ContextPortError> {
@@ -276,14 +267,15 @@ fn block(kind: &str) -> SystemBlock {
 pub(super) fn request() -> ContextRequestData {
     ContextRequestData {
         session_id: SessionId::new("session"),
-        request_id: ContextRequestId::new("request"),
+        request_id: InteractionRequestId::new("request"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("pending")],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".into(),
         effective_reasoning: ReasoningLevel::Off,
-        language: Language::new("zh"),
+        language: Language::Zh,
         agent_roles: Default::default(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 128_000,
@@ -443,7 +435,7 @@ async fn repeated_windows_preserve_bounded_tool_result_bytes_across_steps() {
     let service = service();
     let first = service.build_window(&request()).await.unwrap();
     let mut next_request = request();
-    next_request.request_id = ContextRequestId::new("request-next");
+    next_request.request_id = InteractionRequestId::new("request-next");
     next_request.step_id = RunStepId::new("step-next");
     next_request.pending_messages = vec![Message::user("next pending")];
     let second = service.build_window(&next_request).await.unwrap();
@@ -687,12 +679,12 @@ async fn build_window_renders_reminder_pipeline_injection_by_placement() {
     ));
     let context_service = service();
     let run_id = request().run_id;
-    ContextPort::create_reminder_pipeline(
+    ReminderControlPort::create_reminder_pipeline(
         &context_service,
         run_id.clone(),
         vec![task_source.clone(), guidance_source, mismatch_source],
     );
-    ContextPort::reminder_run_started(&context_service, &run_id);
+    ReminderControlPort::reminder_run_started(&context_service, &run_id);
 
     let window = context_service.build_window(&request()).await.unwrap();
 
@@ -738,7 +730,7 @@ async fn build_window_renders_reminder_pipeline_injection_by_placement() {
     assert_eq!(task_kind_positions.len(), 1);
     assert!(task_kind_positions[0].0 < tail_reminders[0].len());
 
-    ContextPort::drop_reminder_pipeline(&context_service, &run_id);
+    ReminderControlPort::drop_reminder_pipeline(&context_service, &run_id);
 }
 
 #[tokio::test]
@@ -759,40 +751,13 @@ async fn append_delegates_finalized_step_to_session_backing() {
         expected_revision: SessionRevision::new(2),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
-        source_request_id: ContextRequestId::new("request"),
+        source_request_id: InteractionRequestId::new("request"),
         finalize_cause: FinalizeCause::RunTerminated,
         duration_ms: None,
         messages: vec![Message::user("partial")],
         receipts: vec![],
         api_input_tokens: None,
-        fingerprint: crate::ContentFingerprint::new("fp"),
     };
     let receipt = service().append_and_persist(&append).await.unwrap();
     assert_eq!(receipt.committed_revision, SessionRevision::new(3));
-}
-
-#[tokio::test]
-async fn manual_compact_and_clear_session_delegate_to_session_repository() {
-    let service = service();
-    let outcome = service
-        .manual_compact(&crate::ManualCompactRequestData {
-            session_id: SessionId::new("session"),
-            run_id: RunId::new("run"),
-            system_prompt: crate::SystemPromptSpecData::new("system"),
-            context_size: 128_000,
-            progress: None,
-            task_snapshot: None,
-        })
-        .await
-        .unwrap();
-    assert!(matches!(
-        outcome,
-        crate::CompactOutcome::Committed(ref result)
-            if result.source_revision == SessionRevision::new(4)
-    ));
-
-    service
-        .clear_session(&SessionId::new("session"))
-        .await
-        .unwrap();
 }

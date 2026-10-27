@@ -1,16 +1,16 @@
+use share::ids::{InteractionRequestId, RunStepId, SessionId};
 use std::sync::{Arc, Mutex, RwLock};
 
+use crate::domain::session::SessionSnapshotState;
 use crate::SessionRepository;
 use crate::{
     AcceptedInputAppendData, AcceptedInputError, CompactRequestData, CompactTrigger,
-    ContentFingerprint, ContextAppendData, ContextAppendError, ContextRequestData,
-    ContextRequestId, FinalizeCause, Language, ManualCompactRequestData, RunStepId, SessionId,
-    SessionRevision, SystemPromptSpecData, ToolCallIdentityData, ToolCallState,
-    ToolReceiptMutationData,
+    ContextAppendData, ContextAppendError, ContextRequestData, FinalizeCause, Language,
+    SessionRevision, ToolCallIdentityData, ToolReceiptMutationData,
 };
 use crate::{
     AcceptedInputRecord, CanonicalSession, ChatSegment, CommittedRunSlice, CommittedRunStep,
-    SessionCommitPlan, SnapshotState,
+    SessionCommitPlan,
 };
 use crate::{CanonicalSessionRepository, CanonicalSessionWriter};
 use async_trait::async_trait;
@@ -25,6 +25,7 @@ use share::session_types::{
 };
 use task::{PreparedTaskRestoreData, TaskPersist, TaskSnapshotData};
 
+use crate::tool_receipt::ToolCallState;
 use tools::published::skill::{
     SkillLoadDecision, SkillLoadMutation, SkillLoadScope, SkillLoadStateError,
 };
@@ -88,78 +89,6 @@ impl CanonicalSessionWriter for RecordingWriter {
     }
 }
 
-#[derive(Default)]
-struct RecordingToolReceiptWriter {
-    saved: Mutex<Vec<crate::ToolCallReceiptData>>,
-    fail: bool,
-}
-
-#[async_trait]
-impl crate::ToolReceiptWriter for RecordingToolReceiptWriter {
-    async fn save(
-        &self,
-        _session_id: &str,
-        _revision: u64,
-        receipt: &crate::ToolCallReceiptData,
-    ) -> Result<(), String> {
-        if self.fail {
-            return Err("receipt disk full".to_string());
-        }
-        self.saved.lock().unwrap().push(receipt.clone());
-        Ok(())
-    }
-}
-
-type AcceptedInputWrite = (String, u64, String, String, AcceptedInputRecord);
-
-#[derive(Default)]
-struct RecordingAcceptedInputWriter {
-    saved: Mutex<Vec<AcceptedInputWrite>>,
-    cleared: Mutex<Vec<(String, String)>>,
-    fail: bool,
-}
-
-#[async_trait]
-impl crate::AcceptedInputWriter for RecordingAcceptedInputWriter {
-    async fn save(
-        &self,
-        session_id: &str,
-        revision: u64,
-        run_id: &str,
-        step_id: &str,
-        input: &AcceptedInputRecord,
-    ) -> Result<(), String> {
-        if self.fail {
-            return Err("input disk full".to_string());
-        }
-        self.saved.lock().unwrap().push((
-            session_id.to_string(),
-            revision,
-            run_id.to_string(),
-            step_id.to_string(),
-            input.clone(),
-        ));
-        Ok(())
-    }
-
-    async fn acknowledge_finalized_input(
-        &self,
-        _session_id: &str,
-        run_id: &str,
-        step_id: &str,
-    ) -> Result<(), String> {
-        self.cleared
-            .lock()
-            .unwrap()
-            .push((run_id.to_string(), step_id.to_string()));
-        Ok(())
-    }
-
-    async fn delete_all(&self, _session_id: &str) -> Result<(), String> {
-        Ok(())
-    }
-}
-
 struct EmptyTask;
 
 impl TaskPersist for EmptyTask {
@@ -210,19 +139,18 @@ fn workspace() -> PersistedWorkspaceContext {
     }
 }
 
-fn append(fingerprint: &str) -> ContextAppendData {
+fn append() -> ContextAppendData {
     ContextAppendData {
         session_id: SessionId::new("session"),
         expected_revision: SessionRevision::new(0),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
-        source_request_id: ContextRequestId::new("request"),
+        source_request_id: InteractionRequestId::new("request"),
         finalize_cause: FinalizeCause::Completed,
         duration_ms: None,
         messages: vec![Message::user("fact")],
         receipts: vec![],
         api_input_tokens: None,
-        fingerprint: ContentFingerprint::new(fingerprint),
     }
 }
 
@@ -239,14 +167,90 @@ fn tool_identity() -> ToolCallIdentityData {
     }
 }
 
-fn accepted_input(fingerprint: &str) -> AcceptedInputAppendData {
+fn accepted_input() -> AcceptedInputAppendData {
     AcceptedInputAppendData {
         session_id: SessionId::new("session"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
-        source_request_id: ContextRequestId::new("request"),
+        source_request_id: InteractionRequestId::new("request"),
         messages: vec![Message::user("accepted fact")],
-        fingerprint: ContentFingerprint::new(fingerprint),
+    }
+}
+
+/// 测试用固定文本 LLM 端口（#1863 反转后的 generator mock 替身）。
+struct FixedTextInvoker {
+    text: String,
+    started: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    release: tokio::sync::Mutex<tokio::sync::mpsc::Receiver<()>>,
+    fail_with_cancel: bool,
+}
+
+#[async_trait::async_trait]
+impl provider::composition::LlmTextInvokePort for FixedTextInvoker {
+    async fn invoke_text(
+        &self,
+        _model: &provider::ModelInfo,
+        _request: &provider::ProviderRequestData,
+        _cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        if let Some(started) = self.started.lock().unwrap().take() {
+            let _ = started.send(());
+        }
+        self.release.lock().await.recv().await;
+        if self.fail_with_cancel {
+            return Err(provider::ProviderError::cancelled());
+        }
+        Ok(provider::composition::LlmTextOutputData {
+            text: self.text.clone(),
+            completion_reason: Some("end_turn".to_string()),
+            text_delta_count: 1,
+            non_text_delta_count: 0,
+            stream_completed: true,
+        })
+    }
+}
+
+/// 构造测试 binding（fixed invoker）。
+fn test_llm_binding(
+    invoker: std::sync::Arc<dyn provider::composition::LlmTextInvokePort>,
+) -> Option<crate::domain::CompactLlmBinding> {
+    Some(crate::domain::CompactLlmBinding {
+        invoker,
+        model: provider::ModelInfo {
+            provider: "test".to_string(),
+            model: "compact-test".to_string(),
+            supports_tools: false,
+            supports_parallel_tool_calls: false,
+            supports_streaming: true,
+            supported_reasoning: vec![share::reasoning::ReasoningLevel::Off],
+            context_limit: Some(100_000),
+            output_limit: Some(4096),
+            server_effort_map: Default::default(),
+        },
+        max_output_tokens: 1024,
+        compact_context_window: None,
+    })
+}
+
+/// 测试用 provider 失败端口（熔断测试：每次调用计数并报错）。
+struct ProviderFailingInvoker {
+    calls: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl provider::composition::LlmTextInvokePort for ProviderFailingInvoker {
+    async fn invoke_text(
+        &self,
+        _model: &provider::ModelInfo,
+        _request: &provider::ProviderRequestData,
+        _cancel: &tokio_util::sync::CancellationToken,
+    ) -> Result<provider::composition::LlmTextOutputData, provider::ProviderError> {
+        use std::sync::atomic::Ordering;
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Err(provider::ProviderError::fatal(
+            provider::ProviderErrorKind::UpstreamUnavailable,
+            "provider failed",
+        ))
     }
 }
 
@@ -284,14 +288,15 @@ fn valid_fact_batch(objective: &str) -> String {
 fn compact_request(session_id: SessionId) -> ContextRequestData {
     ContextRequestData {
         session_id,
-        request_id: ContextRequestId::new("request"),
+        request_id: InteractionRequestId::new("request"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
-        language: Language::new("zh"),
+        language: Language::Zh,
         agent_roles: Default::default(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 1,
@@ -323,31 +328,6 @@ fn repository_with_session(
     )
 }
 
-fn repository_with_receipt_writer(
-    writer: Arc<RecordingWriter>,
-    receipt_writer: Arc<RecordingToolReceiptWriter>,
-) -> (
-    CanonicalSessionRepository,
-    Arc<RwLock<Arc<CanonicalSession>>>,
-) {
-    let (repository, holder) = repository(writer);
-    (repository.with_tool_receipt_writer(receipt_writer), holder)
-}
-
-fn repository_with_accepted_input_writer(
-    writer: Arc<RecordingWriter>,
-    accepted_input_writer: Arc<RecordingAcceptedInputWriter>,
-) -> (
-    CanonicalSessionRepository,
-    Arc<RwLock<Arc<CanonicalSession>>>,
-) {
-    let (repository, holder) = repository(writer);
-    (
-        repository.with_accepted_input_writer(accepted_input_writer),
-        holder,
-    )
-}
-
 fn repository(
     writer: Arc<RecordingWriter>,
 ) -> (
@@ -363,8 +343,8 @@ fn repository(
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
             metadata: Default::default(),
-            tasks: SnapshotState::Missing,
-            workspace: SnapshotState::Captured(workspace()),
+            tasks: SessionSnapshotState::Missing,
+            workspace: SessionSnapshotState::Captured(workspace()),
             revision: 0,
             compact: None,
             cleared_after: None,
@@ -400,8 +380,8 @@ fn ten_step_session(
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
         metadata: Default::default(),
-        tasks: SnapshotState::Missing,
-        workspace: SnapshotState::Captured(workspace()),
+        tasks: SessionSnapshotState::Missing,
+        workspace: SessionSnapshotState::Captured(workspace()),
         revision,
         compact: None,
         cleared_after: None,
@@ -416,6 +396,7 @@ async fn compact(repository: &CanonicalSessionRepository, session_id: SessionId,
     request.context_size = 100_000;
     let outcome = repository
         .commit_compaction(&CompactRequestData {
+            llm: None,
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(revision),
             source: request,
@@ -576,6 +557,7 @@ async fn compaction_clears_skill_load_records() {
     assert!(matches!(
         repository
             .commit_compaction(&CompactRequestData {
+                llm: None,
                 run_id: RunId::new("run"),
                 source_revision: SessionRevision::new(1),
                 source,
@@ -674,8 +656,8 @@ fn session_with_tool_result(session_id: &SessionId, revision: u64) -> CanonicalS
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
         metadata: Default::default(),
-        tasks: SnapshotState::Missing,
-        workspace: SnapshotState::Captured(workspace()),
+        tasks: SessionSnapshotState::Missing,
+        workspace: SessionSnapshotState::Captured(workspace()),
         revision,
         compact: None,
         cleared_after: None,
@@ -695,7 +677,7 @@ fn session_with_tool_result(session_id: &SessionId, revision: u64) -> CanonicalS
             }],
         )]
         .into(),
-        committed_steps: vec![crate::CommittedStep {
+        committed_steps: vec![crate::domain::session::CommittedStep {
             run_id: "run".to_string(),
             step_id: "step".to_string(),
             fingerprint: "outcome".to_string(),
@@ -714,7 +696,7 @@ async fn lifecycle_capture_reports_structure_and_releases_replaced_generation() 
     let (repository, holder) =
         repository_with_session(writer, session_with_tool_result(&session_id, 1));
 
-    let mut appended = append("next");
+    let mut appended = append();
     appended.session_id = session_id;
     appended.expected_revision = SessionRevision::new(1);
     appended.run_id = RunId::new("run-2");
@@ -751,7 +733,7 @@ async fn lifecycle_weak_probe_stays_live_until_external_arc_is_dropped() {
     let external = holder.read().unwrap().clone();
 
     let (result, lifecycle) =
-        crate::capture_session_lifecycle(repository.append_finalized(&append("same"))).await;
+        crate::capture_session_lifecycle(repository.append_finalized(&append())).await;
     result.unwrap();
 
     let replaced = lifecycle.transitions[0].replaced_generation.clone();
@@ -912,6 +894,7 @@ async fn compaction_changes_visibility_without_dropping_persisted_structure() {
     request.context_size = 100_000;
     let (result, lifecycle) =
         crate::capture_session_lifecycle(repository.commit_compaction(&CompactRequestData {
+            llm: None,
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,
@@ -956,8 +939,8 @@ async fn lifecycle_workload_counts_100_500_and_1000_committed_steps() {
             created_at: "2026-01-01T00:00:00Z".to_string(),
             updated_at: "2026-01-01T00:00:00Z".to_string(),
             metadata: Default::default(),
-            tasks: SnapshotState::Missing,
-            workspace: SnapshotState::Captured(workspace()),
+            tasks: SessionSnapshotState::Missing,
+            workspace: SessionSnapshotState::Captured(workspace()),
             revision: step_count as u64,
             compact: None,
             cleared_after: None,
@@ -966,7 +949,7 @@ async fn lifecycle_workload_counts_100_500_and_1000_committed_steps() {
             skill_load_records: Vec::new(),
         };
         let (repository, _) = repository_with_session(writer, session);
-        let mut appended = append("tail");
+        let mut appended = append();
         appended.session_id = session_id;
         appended.expected_revision = SessionRevision::new(step_count as u64);
         appended.run_id = RunId::new("tail-run");
@@ -990,18 +973,17 @@ async fn lifecycle_workload_counts_100_500_and_1000_committed_steps() {
 #[tokio::test]
 async fn accepted_input_persists_before_publish() {
     let writer = Arc::new(RecordingWriter::default());
-    let accepted_writer = Arc::new(RecordingAcceptedInputWriter::default());
-    let (repository, holder) =
-        repository_with_accepted_input_writer(writer.clone(), accepted_writer);
-    let accepted = accepted_input("input-v1");
+    let (repository, holder) = repository(writer.clone());
+    let accepted = accepted_input();
 
     let receipt = repository.append_accepted_input(&accepted).await.unwrap();
 
-    assert_eq!(receipt.committed_revision, SessionRevision::new(0));
-    assert_eq!(writer.saved.lock().unwrap().len(), 0);
+    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
+    // C 阶段：accepted input 随 Session member 单写提交（sidecar 退役）。
+    assert_eq!(writer.saved.lock().unwrap().len(), 1);
     {
         let session = holder.read().unwrap();
-        assert_eq!(session.revision, 0);
+        assert_eq!(session.revision, 1);
         let step = &session.run_slices[0].steps[0];
         assert_eq!(
             step.accepted_input.as_ref().unwrap().messages[0].text_content(),
@@ -1021,18 +1003,32 @@ async fn accepted_input_persists_before_publish() {
 }
 
 #[tokio::test]
+async fn accepted_input_advances_revision_and_returns_post_commit_revision() {
+    let writer = Arc::new(RecordingWriter::default());
+    let (repository, holder) = repository(writer);
+    let accepted = accepted_input();
+
+    let receipt = repository.append_accepted_input(&accepted).await.unwrap();
+
+    // accepted input 是 durable commit：与 finalized append 语义一致，
+    // 推进 session revision 并在回执中返回提交后版本（A1 统一语义）。
+    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
+    assert_eq!(holder.read().unwrap().revision, 1);
+}
+
+#[tokio::test]
 async fn accepted_input_is_idempotent_but_rejects_content_conflict() {
     let writer = Arc::new(RecordingWriter::default());
-    let accepted_writer = Arc::new(RecordingAcceptedInputWriter::default());
-    let (repository, _) = repository_with_accepted_input_writer(writer, accepted_writer);
-    let accepted = accepted_input("input-v1");
+    let (repository, _) = repository(writer);
+    let accepted = accepted_input();
 
     let first = repository.append_accepted_input(&accepted).await.unwrap();
     let second = repository.append_accepted_input(&accepted).await.unwrap();
     assert_eq!(first, second);
 
+    // 冲突载荷：同 run/step 不同内容（指纹由内容推导，改消息即改指纹）。
     let mut conflicting = accepted;
-    conflicting.fingerprint = ContentFingerprint::new("input-v2");
+    conflicting.messages = vec![Message::user("conflicting input")];
     assert!(matches!(
         repository.append_accepted_input(&conflicting).await,
         Err(AcceptedInputError::ContentConflict { .. })
@@ -1041,71 +1037,94 @@ async fn accepted_input_is_idempotent_but_rejects_content_conflict() {
 
 #[tokio::test]
 async fn accepted_input_storage_failure_does_not_publish_or_advance_revision() {
-    let writer = Arc::new(RecordingWriter::default());
-    let accepted_writer = Arc::new(RecordingAcceptedInputWriter {
-        saved: Mutex::new(vec![]),
-        cleared: Mutex::new(vec![]),
-        fail: true,
-    });
-    let (repository, holder) =
-        repository_with_accepted_input_writer(writer.clone(), accepted_writer);
-    let accepted = accepted_input("input-failure");
+    #[allow(clippy::field_reassign_with_default)]
+    let writer = {
+        let mut failing = RecordingWriter::default();
+        failing.fail = true;
+        Arc::new(failing)
+    };
+    let (repository, holder) = repository(writer);
+    let accepted = accepted_input();
 
     let result = repository.append_accepted_input(&accepted).await;
 
-    assert!(matches!(
-        result,
-        Err(AcceptedInputError::Storage(message)) if message == "input disk full"
-    ));
+    // C 阶段：Session member 提交失败 → 明确错误，不发布内存态、不推进 revision。
+    assert!(matches!(result, Err(AcceptedInputError::Storage(_))));
     assert_eq!(holder.read().unwrap().revision, 0);
     assert!(holder.read().unwrap().run_slices.is_empty());
-    assert!(writer.saved.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn accepted_input_duplicate_after_persist_is_published_exactly_once() {
     let writer = Arc::new(RecordingWriter::default());
-    let accepted_writer = Arc::new(RecordingAcceptedInputWriter::default());
-    let (repository, holder) =
-        repository_with_accepted_input_writer(writer.clone(), accepted_writer);
-    let accepted = accepted_input("input-retry");
+    let (repository, holder) = repository(writer.clone());
+    let accepted = accepted_input();
 
     repository.append_accepted_input(&accepted).await.unwrap();
     repository.append_accepted_input(&accepted).await.unwrap();
 
-    assert_eq!(holder.read().unwrap().revision, 0);
+    assert_eq!(holder.read().unwrap().revision, 1);
     assert_eq!(holder.read().unwrap().run_slices[0].steps.len(), 1);
-    assert_eq!(writer.saved.lock().unwrap().len(), 0);
+    assert_eq!(
+        writer.saved.lock().unwrap().len(),
+        1,
+        "幂等重放不得二次提交 member"
+    );
 }
 
 #[tokio::test]
-async fn finalized_append_acknowledges_accepted_input_after_canonical_publish() {
+async fn finalized_append_persists_empty_receipts_without_implicit_backfill() {
     let writer = Arc::new(RecordingWriter::default());
-    let accepted_writer = Arc::new(RecordingAcceptedInputWriter::default());
-    let (repository, _) = repository_with_accepted_input_writer(writer, accepted_writer.clone());
-    let accepted = accepted_input("input-to-finalize");
-    repository.append_accepted_input(&accepted).await.unwrap();
-
+    let (repository, holder) = repository(writer);
+    // 活账本先落一个 terminal receipt（供旧隐式回填路径"可见"）。
     repository
-        .append_finalized(&append("finalized"))
+        .advance_tool_receipt(ToolReceiptMutationData::pending(
+            tool_identity(),
+            "safe preview",
+        ))
+        .await
+        .unwrap();
+    repository
+        .advance_tool_receipt(ToolReceiptMutationData::running(tool_identity()))
+        .await
+        .unwrap();
+    repository
+        .advance_tool_receipt(ToolReceiptMutationData::terminal(
+            tool_identity(),
+            crate::ToolTerminalReceiptData::new(
+                crate::ToolOutcomeKindData::Success,
+                "tool completed",
+                tools::CleanupConfirmation::NotApplicable,
+            ),
+        ))
         .await
         .unwrap();
 
-    assert_eq!(
-        *accepted_writer.cleared.lock().unwrap(),
-        vec![(
-            accepted.run_id.to_string(),
-            accepted.step_id.as_str().to_string()
-        )]
+    // 调用方携带空 receipts 提交：adapter 必须原样落盘，
+    // 禁止在 fingerprint 计算之后隐式替换内容（A2 装配责任归调用方）。
+    let empty_append = append();
+    let receipt = repository.append_finalized(&empty_append).await.unwrap();
+    // 3 次 advance（revision 1→3）+ append 提交（4）。
+    assert_eq!(receipt.committed_revision, SessionRevision::new(4));
+
+    let session = holder.read().unwrap();
+    let outcome = session.run_slices[0].steps[0]
+        .outcome
+        .as_ref()
+        .expect("outcome must exist");
+    assert!(
+        outcome.receipts.is_empty(),
+        "落盘 receipts 必须等于载荷（空），不得隐式回填活账本"
     );
 }
+
 #[tokio::test]
 async fn finalized_append_bridges_messages_into_structured_outcome() {
     let writer = Arc::new(RecordingWriter::default());
     let (repository, holder) = repository(writer);
     let run_id = RunId::new("run");
     let step_id = RunStepId::new("step");
-    let mut finalized = append("same");
+    let mut finalized = append();
     finalized.run_id = run_id.clone();
     finalized.step_id = step_id.clone();
 
@@ -1121,7 +1140,10 @@ async fn finalized_append_bridges_messages_into_structured_outcome() {
     assert_eq!(outcome.messages[0].text_content(), "fact");
     assert!(outcome.receipts.is_empty());
     assert_eq!(outcome.api_input_tokens, None);
-    assert_eq!(outcome.fingerprint, "same");
+    assert_eq!(
+        outcome.fingerprint,
+        finalized.fingerprint().unwrap().as_str()
+    );
     assert_eq!(outcome.committed_revision, 1);
 }
 
@@ -1129,18 +1151,23 @@ async fn finalized_append_bridges_messages_into_structured_outcome() {
 async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
     let writer = Arc::new(RecordingWriter::default());
     let (repository, holder) = repository(writer);
-    let accepted = accepted_input("input-v1");
+    let accepted = accepted_input();
     repository.append_accepted_input(&accepted).await.unwrap();
 
-    let mut finalized = append("outcome-v1");
+    let mut finalized = append();
     finalized.expected_revision = SessionRevision::new(1);
     finalized.finalize_cause = FinalizeCause::UserCancelledStep;
     finalized.api_input_tokens = Some(42);
-    finalized.receipts = vec![crate::StepReceiptData::agent(
-        "agent-call",
-        0,
-        crate::ToolOutcomeKindData::CancellationUnconfirmed,
-    )];
+    finalized.receipts = vec![crate::RunStepReceiptData {
+        call_id: "agent-call".to_string(),
+        index: 0,
+        outcome: crate::ToolOutcomeKindData::CancellationUnconfirmed,
+        agent: true,
+        summary: None,
+        cleanup: tools::CleanupConfirmation::NotApplicable,
+        possible_side_effects: Vec::new(),
+        unfinished_call_ids: Vec::new(),
+    }];
     let receipt = repository.append_finalized(&finalized).await.unwrap();
 
     let session = holder.read().unwrap();
@@ -1151,17 +1178,20 @@ async fn finalized_outcome_preserves_accepted_input_and_receipt_metadata() {
     );
     assert_eq!(
         step.accepted_input.as_ref().unwrap().fingerprint,
-        "input-v1"
+        accepted_input().fingerprint().unwrap().as_str()
     );
-    assert_eq!(step.accepted_input.as_ref().unwrap().committed_revision, 0);
+    assert_eq!(step.accepted_input.as_ref().unwrap().committed_revision, 1);
     let outcome = step.outcome.as_ref().unwrap();
     assert_eq!(outcome.finalize_cause, FinalizeCause::UserCancelledStep);
     assert_eq!(outcome.api_input_tokens, Some(42));
     assert_eq!(
-        outcome.receipts[0].outcome(),
+        outcome.receipts[0].outcome,
         crate::ToolOutcomeKindData::CancellationUnconfirmed
     );
-    assert_eq!(outcome.fingerprint, "outcome-v1");
+    assert_eq!(
+        outcome.fingerprint,
+        finalized.fingerprint().unwrap().as_str()
+    );
     assert_eq!(outcome.committed_revision, receipt.committed_revision.get());
 }
 
@@ -1279,8 +1309,8 @@ async fn snapshot_reads_structured_view_not_legacy_chats() {
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
         metadata: Default::default(),
-        tasks: SnapshotState::Missing,
-        workspace: SnapshotState::Captured(workspace()),
+        tasks: SessionSnapshotState::Missing,
+        workspace: SessionSnapshotState::Captured(workspace()),
         revision: 0,
         compact: None,
         cleared_after: None,
@@ -1309,7 +1339,7 @@ async fn finalized_append_reuses_existing_committed_step_entry_backing() {
     let session_id = SessionId::new("shared-ledger");
     let mut session = CanonicalSession::fixture(session_id.as_str());
     session.revision = 1;
-    session.committed_steps = vec![crate::CommittedStep::fixture(
+    session.committed_steps = vec![crate::domain::session::CommittedStep::fixture(
         "run-existing",
         "step-existing",
         "existing",
@@ -1318,7 +1348,7 @@ async fn finalized_append_reuses_existing_committed_step_entry_backing() {
     .into();
     let existing_entry = Arc::clone(&session.committed_steps.entries()[0]);
     let (repository, holder) = repository_with_session(writer, session);
-    let mut mutation = append("new");
+    let mut mutation = append();
     mutation.session_id = session_id;
     mutation.expected_revision = SessionRevision::new(1);
     mutation.run_id = RunId::new("run-new");
@@ -1347,8 +1377,8 @@ async fn finalized_append_reuses_unchanged_run_slice_backing() {
         created_at: "2026-01-01T00:00:00Z".to_string(),
         updated_at: "2026-01-01T00:00:00Z".to_string(),
         metadata: Default::default(),
-        tasks: SnapshotState::Missing,
-        workspace: SnapshotState::Captured(workspace()),
+        tasks: SessionSnapshotState::Missing,
+        workspace: SessionSnapshotState::Captured(workspace()),
         revision: 1,
         compact: None,
         cleared_after: None,
@@ -1365,7 +1395,7 @@ async fn finalized_append_reuses_unchanged_run_slice_backing() {
     };
     let existing_slice = Arc::clone(&session.run_slices.slices()[0]);
     let (repository, holder) = repository_with_session(writer, session);
-    let mut mutation = append("new");
+    let mut mutation = append();
     mutation.session_id = session_id;
     mutation.expected_revision = SessionRevision::new(1);
     mutation.run_id = RunId::new("run-new");
@@ -1385,64 +1415,9 @@ async fn finalized_append_reuses_unchanged_run_slice_backing() {
 }
 
 #[tokio::test]
-async fn accepted_input_uses_independent_writer_before_publish() {
-    let writer = Arc::new(RecordingWriter::default());
-    let accepted_input_writer = Arc::new(RecordingAcceptedInputWriter::default());
-    let (repository, holder) =
-        repository_with_accepted_input_writer(writer.clone(), accepted_input_writer.clone());
-
-    let receipt = repository
-        .append_accepted_input(&accepted_input("input-ledger"))
-        .await
-        .unwrap();
-
-    assert_eq!(receipt.committed_revision, SessionRevision::new(0));
-    assert_eq!(holder.read().unwrap().revision, 0);
-    assert_eq!(writer.saved.lock().unwrap().len(), 0);
-    assert_eq!(accepted_input_writer.saved.lock().unwrap().len(), 1);
-}
-
-#[tokio::test]
-async fn accepted_input_writer_failure_does_not_publish_candidate() {
-    let writer = Arc::new(RecordingWriter::default());
-    let accepted_input_writer = Arc::new(RecordingAcceptedInputWriter {
-        saved: Mutex::new(vec![]),
-        cleared: Mutex::new(vec![]),
-        fail: true,
-    });
-    let (repository, holder) =
-        repository_with_accepted_input_writer(writer.clone(), accepted_input_writer);
-
-    assert!(matches!(
-        repository.append_accepted_input(&accepted_input("input-ledger")).await,
-        Err(AcceptedInputError::Storage(message)) if message == "input disk full"
-    ));
-    assert_eq!(holder.read().unwrap().revision, 0);
-    assert!(holder.read().unwrap().run_slices.is_empty());
-    assert_eq!(writer.saved.lock().unwrap().len(), 0);
-}
-#[tokio::test]
-async fn append_persists_candidate_before_publishing_revision() {
-    let writer = Arc::new(RecordingWriter::default());
-    let (repository, holder) = repository(writer.clone());
-
-    let receipt = repository.append_finalized(&append("same")).await.unwrap();
-
-    assert_eq!(receipt.committed_revision, SessionRevision::new(1));
-    assert_eq!(holder.read().unwrap().revision, 1);
-    assert_eq!(writer.saved.lock().unwrap().len(), 1);
-    assert!(matches!(
-        holder.read().unwrap().tasks,
-        SnapshotState::Captured(_)
-    ));
-}
-
-#[tokio::test]
 async fn advance_tool_receipt_persists_before_publish_and_is_idempotent() {
     let writer = Arc::new(RecordingWriter::default());
-    let receipt_writer = Arc::new(RecordingToolReceiptWriter::default());
-    let (repository, holder) =
-        repository_with_receipt_writer(writer.clone(), receipt_writer.clone());
+    let (repository, holder) = repository(writer.clone());
     let mutation = ToolReceiptMutationData::pending(tool_identity(), "safe preview");
 
     let first = repository
@@ -1453,11 +1428,13 @@ async fn advance_tool_receipt_persists_before_publish_and_is_idempotent() {
 
     assert!(first.changed);
     assert!(!second.changed);
-    assert_eq!(holder.read().unwrap().revision, 0);
+    // C 阶段：sidecar 退役，receipt 变更随 Session member 一次原子提交（不再双写）；
+    // dataset commit boundary 要求每次提交 revision 递增，幂等重放不重复提交。
+    assert_eq!(holder.read().unwrap().revision, 1);
     assert_eq!(
         writer.saved.lock().unwrap().len(),
-        0,
-        "Tool receipt mutation must not invoke the canonical Session writer"
+        1,
+        "Tool receipt mutation must commit the canonical Session member exactly once"
     );
     assert_eq!(
         holder.read().unwrap().run_slices[0].steps[0].tool_receipts[0].state,
@@ -1467,26 +1444,26 @@ async fn advance_tool_receipt_persists_before_publish_and_is_idempotent() {
 
 #[tokio::test]
 async fn advance_tool_receipt_write_failure_does_not_publish_candidate() {
-    let writer = Arc::new(RecordingWriter::default());
-    let receipt_writer = Arc::new(RecordingToolReceiptWriter {
-        saved: Mutex::new(vec![]),
-        fail: true,
-    });
-    let (repository, holder) = repository_with_receipt_writer(writer.clone(), receipt_writer);
+    // C 阶段：失败的 Session member 提交不得发布内存 candidate（单写一致性）。
+    #[allow(clippy::field_reassign_with_default)]
+    let writer = {
+        let mut failing = RecordingWriter::default();
+        failing.fail = true;
+        Arc::new(failing)
+    };
+    let (repository, holder) = repository(writer);
 
     assert!(matches!(
         repository
-            .advance_tool_receipt(ToolReceiptMutationData::pending(tool_identity(), "safe preview"))
+            .advance_tool_receipt(ToolReceiptMutationData::pending(
+                tool_identity(),
+                "safe preview"
+            ))
             .await,
-        Err(crate::ToolReceiptMutationError::Storage(message)) if message == "receipt disk full"
+        Err(crate::ToolReceiptMutationError::Storage(_))
     ));
     assert_eq!(holder.read().unwrap().revision, 0);
     assert!(holder.read().unwrap().run_slices.is_empty());
-    assert_eq!(
-        writer.saved.lock().unwrap().len(),
-        0,
-        "失败的 receipt 写入不得回退调用 canonical Session writer"
-    );
 }
 
 #[tokio::test]
@@ -1494,10 +1471,10 @@ async fn concurrent_appends_with_same_revision_allow_one_commit_and_reject_one_c
     let writer = Arc::new(RecordingWriter::default());
     let (repository, holder) = repository(writer);
 
-    let mut first = append("first");
+    let mut first = append();
     first.run_id = RunId::new("run-first");
     first.step_id = RunStepId::new("step-first");
-    let mut second = append("second");
+    let mut second = append();
     second.run_id = RunId::new("run-second");
     second.step_id = RunStepId::new("step-second");
 
@@ -1528,7 +1505,7 @@ async fn failed_durable_write_does_not_publish_candidate() {
     let (repository, holder) = repository(writer);
 
     assert!(matches!(
-        repository.append_finalized(&append("same")).await,
+        repository.append_finalized(&append()).await,
         Err(ContextAppendError::Storage(message)) if message == "disk full"
     ));
     assert_eq!(holder.read().unwrap().revision, 0);
@@ -1536,32 +1513,7 @@ async fn failed_durable_write_does_not_publish_candidate() {
 
 #[tokio::test]
 async fn compact_generation_does_not_hold_session_mutation_gate() {
-    use crate::compact::CompactGenerator;
     use tokio::sync::{mpsc, oneshot};
-    use tokio_util::sync::CancellationToken;
-
-    struct BlockingGenerator {
-        started: Mutex<Option<oneshot::Sender<()>>>,
-        release: tokio::sync::Mutex<mpsc::Receiver<()>>,
-    }
-
-    #[async_trait::async_trait]
-    impl CompactGenerator for BlockingGenerator {
-        async fn generate(
-            &self,
-            _request: Vec<Message>,
-            _cancel: &CancellationToken,
-        ) -> Result<crate::CompactGenerationOutputData, crate::CompactGenerationFailureData>
-        {
-            if let Some(started) = self.started.lock().unwrap().take() {
-                let _ = started.send(());
-            }
-            self.release.lock().await.recv().await;
-            Ok(crate::CompactGenerationOutputData::from(valid_fact_batch(
-                "generated",
-            )))
-        }
-    }
 
     let writer = Arc::new(RecordingWriter::default());
     let session_id = SessionId::new("unlocked-generation-session");
@@ -1569,10 +1521,13 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
         repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
     let (started_sender, started_receiver) = oneshot::channel();
     let (release_sender, release_receiver) = mpsc::channel(1);
-    let repository = Arc::new(repository.with_generator(Arc::new(BlockingGenerator {
+    let llm = test_llm_binding(Arc::new(FixedTextInvoker {
+        text: valid_fact_batch("generated"),
         started: Mutex::new(Some(started_sender)),
         release: tokio::sync::Mutex::new(release_receiver),
-    })));
+        fail_with_cancel: false,
+    }));
+    let repository = Arc::new(repository);
     let mut request = compact_request(session_id.clone());
     request.context_size = 100_000;
     let compact_task = {
@@ -1586,6 +1541,7 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
                     trigger: CompactTrigger::Automatic,
                     progress: None,
                     task_snapshot: None,
+                    llm,
                     cancellation: tokio_util::sync::CancellationToken::new(),
                 })
                 .await
@@ -1595,7 +1551,7 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
     started_receiver
         .await
         .expect("compact generator should begin before concurrent mutation");
-    let mut concurrent_append = append("concurrent");
+    let mut concurrent_append = append();
     concurrent_append.session_id = session_id;
     concurrent_append.run_id = RunId::new("concurrent-run");
     concurrent_append.step_id = RunStepId::new("concurrent-step");
@@ -1626,32 +1582,18 @@ async fn compact_generation_does_not_hold_session_mutation_gate() {
 
 #[tokio::test]
 async fn cancelled_compaction_does_not_commit_local_fallback() {
-    use crate::compact::CompactGenerator;
-    use crate::{CompactGenerationFailureData, CompactGenerationFailureKind};
     use tokio_util::sync::CancellationToken;
-
-    struct CancelledGenerator;
-
-    #[async_trait::async_trait]
-    impl CompactGenerator for CancelledGenerator {
-        async fn generate(
-            &self,
-            _request: Vec<Message>,
-            cancel: &CancellationToken,
-        ) -> Result<crate::CompactGenerationOutputData, CompactGenerationFailureData> {
-            assert!(cancel.is_cancelled());
-            Err(CompactGenerationFailureData::new(
-                CompactGenerationFailureKind::Cancelled,
-                "cancelled",
-            ))
-        }
-    }
 
     let writer = Arc::new(RecordingWriter::default());
     let session_id = SessionId::new("cancelled-compact-session");
     let (repository, holder) =
         repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
-    let repository = repository.with_generator(Arc::new(CancelledGenerator));
+    let llm = test_llm_binding(Arc::new(FixedTextInvoker {
+        text: String::new(),
+        started: Mutex::new(None),
+        release: tokio::sync::Mutex::new(tokio::sync::mpsc::channel(1).1),
+        fail_with_cancel: true,
+    }));
     let cancellation = CancellationToken::new();
     cancellation.cancel();
     let request = compact_request(session_id);
@@ -1664,6 +1606,7 @@ async fn cancelled_compaction_does_not_commit_local_fallback() {
             trigger: CompactTrigger::Automatic,
             progress: None,
             task_snapshot: None,
+            llm,
             cancellation,
         })
         .await
@@ -1671,7 +1614,7 @@ async fn cancelled_compaction_does_not_commit_local_fallback() {
 
     assert!(matches!(
         outcome,
-        crate::CompactOutcome::Skipped(crate::CompactSkipReason::Cancelled)
+        crate::CompactOutcome::Skipped(crate::domain::CompactSkipReason::Cancelled)
     ));
     let session = holder.read().unwrap();
     assert_eq!(session.revision, 0);
@@ -1680,29 +1623,7 @@ async fn cancelled_compaction_does_not_commit_local_fallback() {
 
 #[tokio::test]
 async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
-    use crate::compact::CompactGenerator;
-    use crate::{CompactGenerationFailureData, CompactGenerationFailureKind};
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use tokio_util::sync::CancellationToken;
-
-    struct FailingGenerator {
-        calls: Arc<AtomicUsize>,
-    }
-
-    #[async_trait::async_trait]
-    impl CompactGenerator for FailingGenerator {
-        async fn generate(
-            &self,
-            _request: Vec<Message>,
-            _cancel: &CancellationToken,
-        ) -> Result<crate::CompactGenerationOutputData, CompactGenerationFailureData> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            Err(CompactGenerationFailureData::new(
-                CompactGenerationFailureKind::Provider,
-                "provider failed",
-            ))
-        }
-    }
 
     struct FailingWriter;
 
@@ -1724,7 +1645,7 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
         ten_step_session(&session_id, vec![], 0),
     );
     let calls = Arc::new(AtomicUsize::new(0));
-    let repository = repository.with_generator(Arc::new(FailingGenerator {
+    let llm = test_llm_binding(Arc::new(ProviderFailingInvoker {
         calls: Arc::clone(&calls),
     }));
     let mut request = compact_request(session_id.clone());
@@ -1746,121 +1667,31 @@ async fn automatic_compact_circuit_breaker_opens_after_configured_failures() {
                 trigger: CompactTrigger::Automatic,
                 progress: None,
                 task_snapshot: None,
-                cancellation: CancellationToken::new(),
+                llm: llm.clone(),
+                cancellation: tokio_util::sync::CancellationToken::new(),
             })
             .await
             .is_err());
     }
     let outcome = repository
         .commit_compaction(&CompactRequestData {
+            llm: None,
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,
             trigger: CompactTrigger::Automatic,
             progress: None,
             task_snapshot: None,
-            cancellation: CancellationToken::new(),
+            cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
         .unwrap();
 
     assert!(matches!(
         outcome,
-        crate::CompactOutcome::Skipped(crate::CompactSkipReason::CircuitBreakerOpen)
+        crate::CompactOutcome::Skipped(crate::domain::CompactSkipReason::CircuitBreakerOpen)
     ));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
-}
-
-#[tokio::test]
-async fn manual_compact_bypasses_automatic_circuit_breaker() {
-    use crate::compact::CompactGenerator;
-    use crate::{CompactGenerationFailureData, CompactGenerationFailureKind};
-    use tokio_util::sync::CancellationToken;
-
-    struct SwitchableGenerator {
-        should_fail: Arc<std::sync::atomic::AtomicBool>,
-    }
-
-    #[async_trait::async_trait]
-    impl CompactGenerator for SwitchableGenerator {
-        async fn generate(
-            &self,
-            _request: Vec<Message>,
-            _cancel: &CancellationToken,
-        ) -> Result<crate::CompactGenerationOutputData, CompactGenerationFailureData> {
-            if self.should_fail.load(std::sync::atomic::Ordering::SeqCst) {
-                Err(CompactGenerationFailureData::new(
-                    CompactGenerationFailureKind::Provider,
-                    "provider failed",
-                ))
-            } else {
-                Ok(crate::CompactGenerationOutputData::from(valid_fact_batch(
-                    "manual",
-                )))
-            }
-        }
-    }
-
-    let session_id = SessionId::new("manual-bypass-session");
-    let mut session = ten_step_session(&session_id, vec![], 0);
-    session.run_slices = (0..10)
-        .map(|index| {
-            CommittedRunSlice::new(
-                format!("run-{index}"),
-                vec![CommittedRunStep::compatibility_outcome_only(
-                    format!("step-{index}"),
-                    vec![
-                        Message::user(format!("message-{index}-user")),
-                        Message::user(format!("message-{index}-assistant")),
-                    ],
-                )],
-            )
-        })
-        .collect::<Vec<_>>()
-        .into();
-    let (repository, holder) =
-        repository_with_session(Arc::new(RecordingWriter::default()), session);
-    let should_fail = Arc::new(std::sync::atomic::AtomicBool::new(true));
-    let repository = repository.with_generator(Arc::new(SwitchableGenerator {
-        should_fail: Arc::clone(&should_fail),
-    }));
-    let mut automatic_source = compact_request(session_id.clone());
-    automatic_source.config_snapshot = ConfigSnapshot::from_arc(Arc::new(Config {
-        context: share::config::ContextConfig {
-            auto_compact_failure_limit: 1,
-            ..Default::default()
-        },
-        ..Config::default()
-    }));
-    let automatic = CompactRequestData {
-        run_id: automatic_source.run_id.clone(),
-        source_revision: SessionRevision::new(99),
-        source: automatic_source,
-        trigger: CompactTrigger::Automatic,
-        progress: None,
-        task_snapshot: None,
-        cancellation: CancellationToken::new(),
-    };
-    let _ = repository.commit_compaction(&automatic).await;
-    should_fail.store(false, std::sync::atomic::Ordering::SeqCst);
-
-    let outcome = repository
-        .commit_manual_compaction(&ManualCompactRequestData {
-            session_id,
-            run_id: RunId::new("manual-run"),
-            system_prompt: SystemPromptSpecData::new("system"),
-            context_size: 200_000,
-            progress: None,
-            task_snapshot: None,
-        })
-        .await
-        .unwrap();
-
-    assert!(
-        matches!(outcome, crate::CompactOutcome::Committed(_)),
-        "unexpected manual compact outcome: {outcome:?}"
-    );
-    assert!(holder.read().unwrap().compact.is_some());
 }
 
 #[tokio::test]
@@ -1875,6 +1706,7 @@ async fn automatic_compaction_executes_after_actual_token_decision() {
 
     let outcome = repository
         .commit_compaction(&CompactRequestData {
+            llm: None,
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,
@@ -1890,27 +1722,6 @@ async fn automatic_compaction_executes_after_actual_token_decision() {
 }
 
 #[tokio::test]
-async fn manual_compaction_bypasses_automatic_threshold() {
-    let writer = Arc::new(RecordingWriter::default());
-    let session_id = SessionId::new("manual-compact-session");
-    let (repository, _) = repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
-
-    let outcome = repository
-        .commit_manual_compaction(&ManualCompactRequestData {
-            session_id,
-            run_id: RunId::new("manual-run"),
-            system_prompt: SystemPromptSpecData::new("system"),
-            context_size: 1_000_000,
-            progress: None,
-            task_snapshot: None,
-        })
-        .await
-        .unwrap();
-
-    assert!(matches!(outcome, crate::CompactOutcome::Committed(_)));
-}
-
-#[tokio::test]
 async fn compact_marker_keeps_new_steps_visible() {
     let writer = Arc::new(RecordingWriter::default());
     let session_id = SessionId::new("marker-session");
@@ -1918,7 +1729,7 @@ async fn compact_marker_keeps_new_steps_visible() {
         repository_with_session(writer, ten_step_session(&session_id, vec![], 0));
     compact(&repository, session_id.clone(), 0).await;
 
-    let mut appended = append("new-step");
+    let mut appended = append();
     appended.session_id = session_id;
     appended.expected_revision = SessionRevision::new(1);
     appended.run_id = RunId::new("run-new");
@@ -1956,7 +1767,7 @@ async fn second_compact_advances_single_marker() {
         .unwrap();
 
     for index in 0..6 {
-        let mut appended = append(format!("new-step-{index}").as_str());
+        let mut appended = append();
         appended.session_id = session_id.clone();
         appended.expected_revision = SessionRevision::new(1 + index);
         appended.run_id = RunId::new(format!("run-new-{index}"));
@@ -1995,6 +1806,7 @@ async fn compaction_rejects_stale_source_revision() {
 
     let result = repository
         .commit_compaction(&CompactRequestData {
+            llm: None,
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(1),
             source: request,
@@ -2014,12 +1826,15 @@ async fn duplicate_key_is_idempotent_and_conflicting_content_is_typed() {
     let writer = Arc::new(RecordingWriter::default());
     let (repository, _) = repository(writer.clone());
 
-    let first = repository.append_finalized(&append("same")).await.unwrap();
-    let second = repository.append_finalized(&append("same")).await.unwrap();
+    let first = repository.append_finalized(&append()).await.unwrap();
+    let second = repository.append_finalized(&append()).await.unwrap();
     assert_eq!(first, second);
     assert_eq!(writer.saved.lock().unwrap().len(), 1);
+    // 同 key 不同内容（指纹由内容推导）→ typed conflict。
+    let mut conflicting = append();
+    conflicting.messages = vec![Message::user("conflicting fact")];
     assert!(matches!(
-        repository.append_finalized(&append("different")).await,
+        repository.append_finalized(&conflicting).await,
         Err(ContextAppendError::ContentConflict { .. })
     ));
 }
@@ -2030,7 +1845,7 @@ async fn finalized_append_commits_typed_plan_with_expected_revision() {
     let (repository, _) = repository(writer.clone());
 
     repository
-        .append_finalized(&append("typed-plan"))
+        .append_finalized(&append())
         .await
         .expect("append should commit");
 
@@ -2050,34 +1865,21 @@ async fn finalized_append_commits_typed_plan_with_expected_revision() {
     assert!(commit.plan.removed_members().is_empty());
 }
 
-/// #1486：注入 generator 后 commit_compaction 走 LLM 语义压缩，
+/// #1486：请求带 LLM 绑定后 commit_compaction 走 LLM 语义压缩，
 /// summary 来自生成器而非本地 fallback 模板。
 #[tokio::test]
 async fn commit_compaction_with_generator_uses_llm_summary() {
-    use crate::compact::CompactGenerator;
-    use tokio_util::sync::CancellationToken;
-
-    struct FixedGenerator(&'static str);
-    #[async_trait::async_trait]
-    impl CompactGenerator for FixedGenerator {
-        async fn generate(
-            &self,
-            _request: Vec<Message>,
-            _cancel: &CancellationToken,
-        ) -> Result<crate::CompactGenerationOutputData, crate::CompactGenerationFailureData>
-        {
-            Ok(crate::CompactGenerationOutputData::from(valid_fact_batch(
-                self.0,
-            )))
-        }
-    }
-
     let writer = Arc::new(RecordingWriter::default());
     let session_id = SessionId::new("session");
     let (base_repository, _holder) =
         repository_with_session(writer.clone(), ten_step_session(&session_id, vec![], 0));
-    let repository_under_test =
-        base_repository.with_generator(Arc::new(FixedGenerator("LLM 生成的语义摘要")));
+    let repository_under_test = base_repository;
+    let llm = test_llm_binding(Arc::new(FixedTextInvoker {
+        text: valid_fact_batch("LLM 生成的语义摘要"),
+        started: Mutex::new(None),
+        release: tokio::sync::Mutex::new(tokio::sync::mpsc::channel(1).1),
+        fail_with_cancel: false,
+    }));
 
     let mut generated_request = compact_request(session_id.clone());
     generated_request.context_size = 100_000;
@@ -2089,6 +1891,7 @@ async fn commit_compaction_with_generator_uses_llm_summary() {
             trigger: CompactTrigger::Automatic,
             progress: None,
             task_snapshot: None,
+            llm,
             cancellation: tokio_util::sync::CancellationToken::new(),
         })
         .await
@@ -2131,6 +1934,7 @@ async fn commit_compaction_reconciles_typed_task_snapshot_and_companion() {
     request.context_size = 100_000;
     let outcome = base_repository
         .commit_compaction(&crate::CompactRequestData {
+            llm: None,
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,
@@ -2185,6 +1989,7 @@ async fn commit_compaction_keeps_large_task_companion_within_summary_budget() {
 
     let outcome = base_repository
         .commit_compaction(&crate::CompactRequestData {
+            llm: None,
             run_id: request.run_id.clone(),
             source_revision: SessionRevision::new(0),
             source: request,
@@ -2220,7 +2025,7 @@ async fn append_recovers_from_wiped_dataset_by_full_rebuild() {
     });
     let (repository, holder) = repository(writer.clone());
 
-    let receipt = repository.append_finalized(&append("recovered")).await;
+    let receipt = repository.append_finalized(&append()).await;
 
     let receipt = receipt.expect("append must recover from a wiped dataset");
     assert_eq!(receipt.committed_revision, SessionRevision::new(1));
@@ -2245,7 +2050,7 @@ async fn append_surfaces_error_when_rebuild_also_fails() {
     });
     let (repository, holder) = repository(writer.clone());
 
-    let outcome = repository.append_finalized(&append("still-failing")).await;
+    let outcome = repository.append_finalized(&append()).await;
 
     assert!(
         outcome.is_err(),

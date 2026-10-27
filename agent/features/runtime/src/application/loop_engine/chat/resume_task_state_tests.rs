@@ -21,7 +21,7 @@ impl context::SessionManagementPort for ResumeSessionManagement {
     async fn list_for_project(
         &self,
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<context::SessionListEntryData>, SessionManagementError> {
+    ) -> Result<Vec<sdk::SessionItemList>, SessionManagementError> {
         Ok(Vec::new())
     }
 
@@ -37,7 +37,7 @@ impl context::SessionManagementPort for ResumeSessionManagement {
         &self,
         _bytes: &[u8],
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<context::SessionListEntryData, SessionManagementError> {
+    ) -> Result<sdk::SessionItemList, SessionManagementError> {
         Err(SessionManagementError::Storage("unused".to_owned()))
     }
 
@@ -45,8 +45,8 @@ impl context::SessionManagementPort for ResumeSessionManagement {
         &self,
         _id: &str,
         _project: &share::session_types::ProjectIdentityData,
-        _update: context::SessionMetadataUpdateData,
-    ) -> Result<context::SessionListEntryData, SessionManagementError> {
+        _update: context::session::SessionMetadata,
+    ) -> Result<sdk::SessionItemList, SessionManagementError> {
         Err(SessionManagementError::Storage("unused".to_owned()))
     }
 
@@ -120,22 +120,11 @@ fn restored_session(
     workspace: share::session_types::PersistedWorkspaceContext,
     tasks: task::TaskSnapshotData,
 ) -> context::session::CanonicalSession {
-    let now = chrono::Utc::now().to_rfc3339();
-    context::session::CanonicalSession {
-        id: session_id.to_owned(),
-        chats: Vec::new(),
-        created_at: now.clone(),
-        updated_at: now,
-        metadata: Default::default(),
-        tasks: context::session::SnapshotState::Captured(tasks),
-        workspace: context::session::SnapshotState::Captured(workspace),
-        revision: 9,
-        compact: None,
-        cleared_after: None,
-        run_slices: Vec::new().into(),
-        committed_steps: Default::default(),
-        skill_load_records: Vec::new(),
-    }
+    let mut session = context::session::CanonicalSession::empty(session_id.to_owned());
+    session.capture_tasks(tasks);
+    session.capture_workspace(workspace);
+    session.revision = 9;
+    session
 }
 
 fn resumed_shell(
@@ -166,13 +155,15 @@ fn resumed_shell(
             initial_session: shell.session_switch.committed_session().as_ref().clone(),
             initial_memory: shell.session_switch.committed_memory(),
             context_factory: Arc::new(
-                context::ProductionMainContextFactory::new(Arc::new(
-                    context::NoOpCanonicalSessionWriter,
-                ))
-                .with_persistence(
-                    std::sync::Arc::new(task::TaskStore::new()),
-                    workspace.persist(),
-                ),
+                context::MainContextFactory::new(Arc::new(context::NoOpCanonicalSessionWriter))
+                    .with_persistence(
+                        std::sync::Arc::new(task::TaskStore::new()),
+                        workspace.persist(),
+                    )
+                    .with_persistence(
+                        std::sync::Arc::new(task::TaskStore::new()),
+                        workspace.persist(),
+                    ),
             ),
         },
     ));

@@ -157,7 +157,7 @@ async fn sub_run_uses_its_committed_hooks_while_parent_hooks_remain_frozen() {
     let sub_spec = main_spec()
         .derive_sub("coder", std::time::Duration::from_secs(30))
         .expect("derive sub spec");
-    let sub = ParentRunFixture::new(parent_fixture.context_factory())
+    let sub = ParentRunFixture::new(parent_fixture.runtime_context_factory())
         .create(
             sub_spec,
             sub_session.snapshot_for_run(),
@@ -212,14 +212,17 @@ fn session_run_factory_preserves_committed_capability_bindings() {
     let instance = fixture
         .create(main_spec())
         .expect("production RunFactory should create a session instance");
-    let context = instance.context();
+    let context = instance.context().clone();
 
     assert!(instance.run().parent_id().is_none());
     assert_eq!(
         instance.session().revision(),
         fixture.session_snapshot().revision()
     );
-    assert!(Arc::ptr_eq(&context.context(), fixture.committed_context()));
+    assert!(Arc::ptr_eq(
+        &context.context().window,
+        &fixture.committed_context().window
+    ));
     assert!(Arc::ptr_eq(&context.memory(), fixture.memory()));
     assert!(Arc::ptr_eq(&context.provider(), fixture.provider()));
     assert!(Arc::ptr_eq(&context.tool_catalog(), fixture.tool_catalog()));
@@ -283,7 +286,7 @@ fn session_and_sub_runs_share_the_factory_usage_sink() {
     let sub_spec = main_spec()
         .derive_sub("coder", std::time::Duration::from_secs(30))
         .expect("derive sub spec");
-    let sub = ParentRunFixture::new(fixture.context_factory())
+    let sub = ParentRunFixture::new(fixture.runtime_context_factory())
         .create(
             sub_spec,
             fixture.session_snapshot(),
@@ -294,8 +297,14 @@ fn session_and_sub_runs_share_the_factory_usage_sink() {
         )
         .expect("create sub run");
 
-    assert!(Arc::ptr_eq(&parent.context().usage_sink(), &usage_sink));
-    assert!(Arc::ptr_eq(&sub.context().usage_sink(), &usage_sink));
+    assert!(Arc::ptr_eq(
+        &parent.context().clone().usage_sink(),
+        &usage_sink
+    ));
+    assert!(Arc::ptr_eq(
+        &sub.context().clone().usage_sink(),
+        &usage_sink
+    ));
 }
 
 #[test]
@@ -305,8 +314,8 @@ fn session_run_factory_creates_independent_per_run_resources() {
     let second = fixture.create(main_spec()).expect("create second run");
 
     assert!(Arc::ptr_eq(
-        &first.context().reasoning(),
-        &second.context().reasoning()
+        &first.context().clone().reasoning(),
+        &second.context().clone().reasoning()
     ));
     first
         .context()
@@ -320,20 +329,20 @@ fn session_run_factory_creates_independent_per_run_resources() {
         .context()
         .input()
         .with_lock(|buffer| buffer.is_empty()));
-    first.context().cancel().token().cancel();
-    assert!(!second.context().cancel().token().is_cancelled());
+    first.context().clone().cancel().token().cancel();
+    assert!(!second.context().clone().cancel().token().is_cancelled());
     // usage tracker is now per-Session (shared across runs) — see
     // session_run_factory_shares_usage_tracker_across_runs
-    first.context().usage().update(17);
-    assert_eq!(second.context().usage().get(), Some(17));
+    first.context().clone().usage().update(17);
+    assert_eq!(second.context().clone().usage().get(), Some(17));
 
     assert!(Arc::ptr_eq(
-        &first.context().tool_execution(),
-        &second.context().tool_execution()
+        &first.context().clone().tool_execution(),
+        &second.context().clone().tool_execution()
     ));
     assert!(Arc::ptr_eq(
-        &first.context().policy(),
-        &second.context().policy()
+        &first.context().clone().policy(),
+        &second.context().clone().policy()
     ));
 }
 
@@ -346,12 +355,12 @@ fn session_run_factory_shares_usage_tracker_across_runs() {
     // Per-Session tracker: second Run inherits the value set by the first,
     // so the compaction decision can use the last known API total instead
     // of falling back to a heuristic estimate on the first step.
-    first.context().usage().update(42_000);
-    assert_eq!(second.context().usage().get(), Some(42_000));
+    first.context().clone().usage().update(42_000);
+    assert_eq!(second.context().clone().usage().get(), Some(42_000));
 
     // Mutations from the second Run are also visible to the first.
-    second.context().usage().update(99_000);
-    assert_eq!(first.context().usage().get(), Some(99_000));
+    second.context().clone().usage().update(99_000);
+    assert_eq!(first.context().clone().usage().get(), Some(99_000));
 }
 
 #[test]
@@ -363,7 +372,7 @@ fn session_fixture_can_create_a_run_through_the_production_factory() {
 
     assert!(instance.run().parent_id().is_none());
     assert_eq!(
-        instance.context().config().revision(),
+        instance.context().clone().config().revision(),
         fixture.session_snapshot().config().revision()
     );
     assert_eq!(instance.session().session_id(), "test-session");
@@ -445,7 +454,7 @@ fn run_factory_without_bound_session_fails_closed() {
     let request = RunCreationRequest::new(main_spec(), session.snapshot_for_run(), None).unwrap();
     let parent = fixture.create(main_spec()).expect("create parent run");
     let factory = RunFactory::for_parent(
-        fixture.context_factory(),
+        fixture.runtime_context_factory(),
         crate::application::run::creation::ParentRunBindings::from_active_run(
             Arc::new(parent.context().clone()),
             crate::application::run::workspace_test_support::test_runtime_workspace_access(),
@@ -521,13 +530,13 @@ fn run_root_activity_purpose_follows_spec_intent() {
         .create(RunSpec::manual_reflection())
         .expect("create manual reflection run");
     assert_eq!(
-        reflection.context().activities().run_purpose(),
+        reflection.context().clone().activities().run_purpose(),
         crate::application::activity::RunPurpose::Reflection
     );
 
     let main = fixture.create(main_spec()).expect("create main run");
     assert_eq!(
-        main.context().activities().run_purpose(),
+        main.context().clone().activities().run_purpose(),
         crate::application::activity::RunPurpose::Main
     );
 }

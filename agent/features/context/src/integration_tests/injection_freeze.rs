@@ -6,12 +6,15 @@
 //! point — a committed compaction, which rewrites the conversation the memory
 //! was retrieved for.
 
+use crate::domain::SystemBlock;
+use share::ids::InteractionRequestId;
+use share::ids::SessionId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::{
-    ContextApplicationService, ContextMemorySource, ContextPort, ContextRequestData,
-    ContextRequestId, MemoryMaterialization, SessionId, SystemBlock, SystemPromptSpecData,
+    ContextAppendPort, ContextApplicationService, ContextCompactPort, ContextMemorySource,
+    ContextRequestData, ContextWindowPort, MemoryMaterialization,
 };
 use async_trait::async_trait;
 use sdk::{RunId, RunStepId};
@@ -45,7 +48,9 @@ impl ContextMemorySource for CountingMemory {
 fn service_with_memory(memory: Arc<CountingMemory>) -> ContextApplicationService {
     ContextApplicationService::new(
         Arc::new(simple_fake_session()),
-        Arc::new(crate::adapters::BaselinePromptSource),
+        Arc::new(crate::adapters::BaselinePromptSource::new(Arc::new(
+            crate::adapters::SystemPromptAssembly::new(None),
+        ))),
         memory,
     )
 }
@@ -92,14 +97,15 @@ async fn a_new_session_injects_again() {
     service.build_window(&request()).await.unwrap();
     let other_session = ContextRequestData {
         session_id: SessionId::new("other-session"),
-        request_id: ContextRequestId::new("request"),
+        request_id: InteractionRequestId::new("request"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".into(),
         effective_reasoning: share::reasoning::ReasoningLevel::Off,
-        language: crate::Language::new("en"),
+        language: crate::Language::En,
         agent_roles: std::collections::HashMap::new(),
         config_snapshot: share::config::domain::snapshot::ConfigSnapshot::new(
             share::config::Config::default(),
@@ -122,37 +128,6 @@ async fn a_new_session_injects_again() {
     assert_eq!(memory_content(&window), "memory generation 2");
 }
 
-/// A committed compaction is the one refresh point: the conversation it
-/// rewrote is exactly what the memory was retrieved for.
-#[tokio::test]
-async fn a_committed_compaction_refreshes_the_frozen_injection() {
-    let calls = Arc::new(AtomicUsize::new(0));
-    let service = service_with_memory(Arc::new(CountingMemory {
-        calls: Arc::clone(&calls),
-    }));
-
-    let before = service.build_window(&request()).await.unwrap();
-    service
-        .manual_compact(&crate::ManualCompactRequestData {
-            session_id: SessionId::new("session"),
-            run_id: RunId::new("run"),
-            system_prompt: SystemPromptSpecData::new("system"),
-            context_size: 128_000,
-            progress: None,
-            task_snapshot: None,
-        })
-        .await
-        .unwrap();
-    let after = service.build_window(&request()).await.unwrap();
-
-    assert_eq!(memory_content(&before), "memory generation 1");
-    assert_eq!(
-        memory_content(&after),
-        "memory generation 2",
-        "a committed compaction must re-retrieve memory"
-    );
-}
-
 /// A compaction that did not commit changed nothing, so the frozen block stays.
 #[tokio::test]
 async fn a_skipped_compaction_keeps_the_frozen_injection() {
@@ -165,6 +140,7 @@ async fn a_skipped_compaction_keeps_the_frozen_injection() {
     // The fixture's automatic compaction reports `Skipped`.
     service
         .compact(&crate::CompactRequestData {
+            llm: None,
             run_id: RunId::new("run"),
             source_revision: crate::SessionRevision::new(3),
             source: request(),

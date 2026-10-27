@@ -25,16 +25,18 @@ pub mod tool_result_blob;
 pub mod usage_sink;
 
 pub use context_port::{
-    AcceptedInputAppendData, AcceptedInputError, AcceptedInputReceiptData, AppendReceiptData,
-    CompactOutcome, CompactRequestData, CompactTrigger, ContentFingerprint, ContextAppendData,
-    ContextAppendError, ContextPort, ContextPortError, ContextRequestData, ContextRequestId,
-    ContextWindowData, FinalizeCause, Language, ManualCompactRequestData, RunStepId, SessionId,
-    SessionRevision, StepReceiptData, SystemPromptSpecData, ToolSchemaData,
+    AcceptedInputAppendData, AcceptedInputError, CompactOutcome, CompactRequestData,
+    CompactTrigger, ContextAppendData, ContextAppendError, ContextPortError, ContextRequestData,
+    ContextWindowData, FinalizeCause, Language, RunStepReceiptData, SessionAppendReceiptData,
+    SessionRevision,
 };
 #[cfg(test)]
 pub use context_port::{
-    CompactResult, CompactSkipReason, CompactionDecisionData, DecisionReason, SystemBlock,
-    TokenBudget, ToolOutcomeKindData, Urgency,
+    CompactionDecisionData, DecisionReason, SystemBlock, TokenBudget, ToolOutcomeKindData, Urgency,
+};
+#[cfg(test)]
+pub use context_port::{
+    ContextAppendPort, ContextCompactPort, ContextPorts, ContextWindowPort, ReminderControlPort,
 };
 pub use policy_port::Policy;
 #[cfg(test)]
@@ -46,6 +48,7 @@ pub use provider_port::{
 #[cfg(test)]
 pub use provider_port::{ProviderError, ProviderResponseStream};
 pub use session_query::SessionQueryPort;
+pub use share::ids::{InteractionRequestId, RunStepId, SessionId};
 pub use tool_result_blob::ToolResultBlobPort;
 pub(crate) use tool_result_blob::{ToolResultBlobError, ToolResultBlobRef};
 pub use usage_sink::{UnavailableUsageSink, UsageSink};

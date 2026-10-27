@@ -1,6 +1,6 @@
 //! session 相关方法实际逻辑。
 
-use sdk::{DisplayHistoryWindowRequest, SdkError, SessionSummary};
+use sdk::{DisplayHistoryWindowRequest, SdkError, SessionItemList};
 
 use super::accessors::AgentClientImpl;
 use super::mapping;
@@ -33,7 +33,7 @@ pub(super) async fn load_display_history_window_impl(
 
 pub(super) async fn list_sessions_impl(
     me: &AgentClientImpl,
-) -> Result<Vec<SessionSummary>, SdkError> {
+) -> Result<Vec<SessionItemList>, SdkError> {
     let session_management = me.inner.shell.session_management.clone();
     let project = me.inner.shell.session_switch.project_identity();
     let sessions = me
@@ -44,8 +44,5 @@ pub(super) async fn list_sessions_impl(
         .await
         .map_err(|error| SdkError::Session(error.to_string()))?
         .map_err(|error| SdkError::Session(error.to_string()))?;
-    Ok(sessions
-        .into_iter()
-        .map(mapping::session_summary_from_context)
-        .collect())
+    Ok(sessions.into_iter().collect())
 }

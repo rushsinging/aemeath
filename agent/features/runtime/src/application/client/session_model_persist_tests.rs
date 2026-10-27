@@ -1,5 +1,5 @@
 use super::*;
-use context::session::{CanonicalSession, SessionMetadata, SnapshotState};
+use context::session::{CanonicalSession, SessionMetadata};
 use context::SessionManagementError;
 use share::session_types::ProjectIdentityData;
 use std::sync::Mutex;
@@ -19,24 +19,13 @@ impl RecordingSessionManagement {
     }
 
     fn session_with_model(id: &str, model: Option<String>) -> CanonicalSession {
-        CanonicalSession {
-            id: id.to_string(),
-            chats: vec![],
-            created_at: "2026-01-01T00:00:00Z".into(),
-            updated_at: "2026-01-01T00:00:00Z".into(),
-            metadata: SessionMetadata {
-                model,
-                ..SessionMetadata::default()
-            },
-            tasks: SnapshotState::Missing,
-            workspace: SnapshotState::Missing,
-            revision: 1,
-            compact: None,
-            cleared_after: None,
-            run_slices: Default::default(),
-            committed_steps: Default::default(),
-            skill_load_records: Vec::new(),
-        }
+        let mut session = CanonicalSession::empty(id.to_string());
+        session.metadata = SessionMetadata {
+            model,
+            ..SessionMetadata::default()
+        };
+        session.revision = 1;
+        session
     }
 }
 
@@ -56,7 +45,7 @@ impl context::SessionManagementPort for RecordingSessionManagement {
     async fn list_for_project(
         &self,
         _project: &ProjectIdentityData,
-    ) -> Result<Vec<context::SessionListEntryData>, SessionManagementError> {
+    ) -> Result<Vec<sdk::SessionItemList>, SessionManagementError> {
         Ok(Vec::new())
     }
 
@@ -72,7 +61,7 @@ impl context::SessionManagementPort for RecordingSessionManagement {
         &self,
         _bytes: &[u8],
         _project: &ProjectIdentityData,
-    ) -> Result<context::SessionListEntryData, SessionManagementError> {
+    ) -> Result<sdk::SessionItemList, SessionManagementError> {
         Err(SessionManagementError::Storage("unused".into()))
     }
 
@@ -80,13 +69,13 @@ impl context::SessionManagementPort for RecordingSessionManagement {
         &self,
         id: &str,
         _project: &ProjectIdentityData,
-        update: context::SessionMetadataUpdateData,
-    ) -> Result<context::SessionListEntryData, SessionManagementError> {
+        update: context::session::SessionMetadata,
+    ) -> Result<sdk::SessionItemList, SessionManagementError> {
         self.updates
             .lock()
             .unwrap()
             .push((id.to_string(), update.model.clone()));
-        Ok(context::SessionListEntryData {
+        Ok(sdk::SessionItemList {
             id: id.to_string(),
             title: None,
             project: None,

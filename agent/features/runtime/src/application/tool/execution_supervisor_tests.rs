@@ -19,14 +19,14 @@ use crate::application::tool::execution_supervisor::{
     dispatch_started_time, SupervisedToolCall, ToolExecutionSupervisor,
 };
 use async_trait::async_trait;
-use context::SessionId;
 use context::{
     CompactOutcome, CompactRequestData, CompactionDecisionData, ContextAppendData,
-    ContextPortError, ContextRequestData, ContextWindowData, ManualCompactRequestData,
-    ToolCallIdentityData, ToolReceiptMutationData, ToolReceiptMutationReceiptData,
+    ContextPortError, ContextRequestData, ContextWindowData, ToolCallIdentityData,
+    ToolReceiptMutationData, ToolReceiptMutationReceiptData,
 };
 use sdk::{RunId, RunStepId};
 use share::ids::BackgroundProcessId;
+use share::ids::SessionId;
 use std::sync::{Arc, Mutex};
 use tools::published::execution::{
     CancellationSignal, ToolExecutionContext, ToolExecutionOutcome, ToolExecutionPort,
@@ -74,8 +74,10 @@ struct RecordingContextPort {
     states: Arc<Mutex<Vec<String>>>,
 }
 
+impl context::ReminderControlPort for RecordingContextPort {}
+
 #[async_trait]
-impl context::ContextPort for RecordingContextPort {
+impl context::ContextWindowPort for RecordingContextPort {
     async fn build_window(
         &self,
         _request: &ContextRequestData,
@@ -84,6 +86,10 @@ impl context::ContextPort for RecordingContextPort {
             "test port 不支持 build_window".into(),
         ))
     }
+}
+
+#[async_trait]
+impl context::ContextCompactPort for RecordingContextPort {
     async fn needs_compaction(
         &self,
         _request: &ContextRequestData,
@@ -100,17 +106,13 @@ impl context::ContextPort for RecordingContextPort {
             "test port 不支持 compact".into(),
         ))
     }
-    async fn manual_compact(
-        &self,
-        _request: &ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
-        Err(ContextPortError::SessionRepository(
-            "test port 不支持 manual_compact".into(),
-        ))
-    }
+}
+
+#[async_trait]
+impl context::ContextAppendPort for RecordingContextPort {
     async fn clear_session(
         &self,
-        _session_id: &context::SessionId,
+        _session_id: &share::ids::SessionId,
     ) -> Result<(), ContextPortError> {
         Ok(())
     }
@@ -123,7 +125,7 @@ impl context::ContextPort for RecordingContextPort {
             .expect("receipt 状态记录锁")
             .push(format!("{:?}", mutation.next));
         Ok(ToolReceiptMutationReceiptData {
-            receipt: context::ToolCallReceiptData {
+            receipt: context::tool_receipt::ToolCallReceiptData {
                 identity: mutation.identity,
                 input_preview: mutation.input_preview.unwrap_or_default(),
                 state: mutation.next,
@@ -134,7 +136,7 @@ impl context::ContextPort for RecordingContextPort {
     async fn append_and_persist(
         &self,
         _append: &ContextAppendData,
-    ) -> Result<context::AppendReceiptData, context::ContextAppendError> {
+    ) -> Result<context::SessionAppendReceiptData, context::ContextAppendError> {
         Err(context::ContextAppendError::Storage(
             "test port 不支持 append_and_persist".to_string(),
         ))
@@ -192,7 +194,7 @@ fn supervisor_with(sleep: Duration) -> (ToolExecutionSupervisor, Arc<Mutex<Vec<S
     let supervisor = ToolExecutionSupervisor::new(
         Arc::new(SleepingToolPort { sleep }),
         sequential_test_tool_catalog("SleepTool", 300),
-        ContextCoordinator::new(Arc::new(port)),
+        ContextCoordinator::new(context::ContextPorts::from_service(Arc::new(port))),
     );
     (supervisor, states)
 }
@@ -637,9 +639,11 @@ fn supervisor_capturing_timeout() -> (ToolExecutionSupervisor, RecordedStates, C
             captured: Arc::clone(&captured),
         }),
         sequential_test_tool_catalog("SleepTool", 300),
-        ContextCoordinator::new(Arc::new(RecordingContextPort {
-            states: Arc::clone(&states),
-        })),
+        ContextCoordinator::new(context::ContextPorts::from_service(Arc::new(
+            RecordingContextPort {
+                states: Arc::clone(&states),
+            },
+        ))),
     );
     (supervisor, states, captured)
 }

@@ -6,6 +6,8 @@
 
 use std::sync::Arc;
 
+pub use crate::adapters::AtomicBlobSessionManagement;
+
 use crate::domain::session::CanonicalSession;
 use crate::ports::SessionManagementPort;
 use async_trait::async_trait;
@@ -50,10 +52,7 @@ impl SessionManagementPort for UnavailableSessionManagement {
     async fn list_for_project(
         &self,
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<
-        Vec<crate::domain::session::SessionListEntryData>,
-        crate::domain::session::SessionManagementError,
-    > {
+    ) -> Result<Vec<sdk::SessionItemList>, crate::domain::session::SessionManagementError> {
         Ok(Vec::new())
     }
 
@@ -71,10 +70,7 @@ impl SessionManagementPort for UnavailableSessionManagement {
         &self,
         _bytes: &[u8],
         _project: &share::session_types::ProjectIdentityData,
-    ) -> Result<
-        crate::domain::session::SessionListEntryData,
-        crate::domain::session::SessionManagementError,
-    > {
+    ) -> Result<sdk::SessionItemList, crate::domain::session::SessionManagementError> {
         Err(crate::domain::session::SessionManagementError::Storage(
             "test session port unavailable".to_string(),
         ))
@@ -84,11 +80,8 @@ impl SessionManagementPort for UnavailableSessionManagement {
         &self,
         id: &str,
         _project: &share::session_types::ProjectIdentityData,
-        _update: crate::domain::session::SessionMetadataUpdateData,
-    ) -> Result<
-        crate::domain::session::SessionListEntryData,
-        crate::domain::session::SessionManagementError,
-    > {
+        _update: crate::domain::session::SessionMetadata,
+    ) -> Result<sdk::SessionItemList, crate::domain::session::SessionManagementError> {
         Err(crate::domain::session::SessionManagementError::NotFound(
             id.to_string(),
         ))

@@ -1,3 +1,4 @@
+pub mod compact_snapshot;
 mod constants;
 mod lifecycle;
 mod model;

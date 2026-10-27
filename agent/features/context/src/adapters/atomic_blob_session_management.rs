@@ -1,3 +1,4 @@
+use crate::domain::session::project_list_item;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -6,8 +7,8 @@ use storage::{AtomicBlobPort, SafePathSegmentData, StorageNamespaceData};
 use crate::adapters::{AtomicBlobSessionStore, LegacySessionDecoder};
 use crate::application::{SessionLoadError, SessionPersistenceService};
 use crate::domain::session::{
-    now_iso, project_dir_segment, session_matches_project, CanonicalSession, SessionCodec,
-    SessionListEntryData, SessionManagementError, SessionMetadataUpdateData,
+    project_dir_segment, session_matches_project, CanonicalSession, SessionCodec,
+    SessionManagementError, SessionMetadata,
 };
 use crate::ports::SessionManagementPort;
 
@@ -120,7 +121,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
     async fn list_for_project(
         &self,
         project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<SessionListEntryData>, SessionManagementError> {
+    ) -> Result<Vec<sdk::SessionItemList>, SessionManagementError> {
         let project_dir = project_dir_segment(project);
         let entries = self
             .blob
@@ -144,7 +145,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
                     // 目录段与 identity 不符（手放/碰撞）：跳过。
                     continue;
                 }
-                sessions.push(SessionListEntryData::from_canonical(&session));
+                sessions.push(project_list_item(&session));
             }
         }
         sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
@@ -165,7 +166,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
         &self,
         bytes: &[u8],
         project: &share::session_types::ProjectIdentityData,
-    ) -> Result<SessionListEntryData, SessionManagementError> {
+    ) -> Result<sdk::SessionItemList, SessionManagementError> {
         let decoded = crate::adapters::decode_session(bytes).map_err(|error| match error {
             crate::domain::session::SessionCodecError::UnsupportedFutureVersion {
                 version, ..
@@ -185,19 +186,19 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
             .save(&session)
             .await
             .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
-        Ok(SessionListEntryData::from_canonical(&session))
+        Ok(project_list_item(&session))
     }
 
     async fn update_metadata_for_project(
         &self,
         id: &str,
         project: &share::session_types::ProjectIdentityData,
-        update: SessionMetadataUpdateData,
-    ) -> Result<SessionListEntryData, SessionManagementError> {
+        update: SessionMetadata,
+    ) -> Result<sdk::SessionItemList, SessionManagementError> {
         let before = self.load_for_project(id, project).await?;
         let mut after = before.clone();
-        update.apply(&mut after.metadata);
-        after.updated_at = now_iso();
+        after.metadata = update;
+        after.updated_at = share::time::now_iso();
         // 与 DatasetSessionManagement 对齐：metadata 更新 MUST bump revision，
         // 否则 CAS 调用方无法感知旁路写；同值 skip 由上层 wiring 负责。
         after.revision += 1;
@@ -210,7 +211,7 @@ impl SessionManagementPort for AtomicBlobSessionManagement {
             .save(&after)
             .await
             .map_err(|error| SessionManagementError::Storage(error.to_string()))?;
-        Ok(SessionListEntryData::from_canonical(&after))
+        Ok(project_list_item(&after))
     }
 
     async fn delete_for_project(

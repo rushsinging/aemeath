@@ -1,35 +1,20 @@
 use super::*;
-use context::session::{CanonicalSession, SessionMetadata, SnapshotState};
+use context::session::{CanonicalSession, SessionMetadata};
 use context::SessionManagementError;
 use share::session_types::ProjectIdentityData;
 use std::sync::Mutex;
 
 #[derive(Default)]
 struct RecordingSessionManagement {
-    updates: Mutex<Vec<context::SessionMetadataUpdateData>>,
+    updates: Mutex<Vec<SessionMetadata>>,
     stored_reasoning_effort: Mutex<Option<String>>,
 }
 
 impl RecordingSessionManagement {
     fn session_with_reasoning_effort(id: &str, value: Option<String>) -> CanonicalSession {
-        CanonicalSession {
-            id: id.to_string(),
-            chats: vec![],
-            created_at: "2026-01-01T00:00:00Z".into(),
-            updated_at: "2026-01-01T00:00:00Z".into(),
-            metadata: SessionMetadata {
-                reasoning_effort: value,
-                ..SessionMetadata::default()
-            },
-            tasks: SnapshotState::Missing,
-            workspace: SnapshotState::Missing,
-            revision: 1,
-            compact: None,
-            cleared_after: None,
-            run_slices: Default::default(),
-            committed_steps: Default::default(),
-            skill_load_records: Vec::new(),
-        }
+        let mut session = CanonicalSession::fixture(id);
+        session.metadata.reasoning_effort = value;
+        session
     }
 }
 
@@ -49,7 +34,7 @@ impl context::SessionManagementPort for RecordingSessionManagement {
     async fn list_for_project(
         &self,
         _project: &ProjectIdentityData,
-    ) -> Result<Vec<context::SessionListEntryData>, SessionManagementError> {
+    ) -> Result<Vec<sdk::SessionItemList>, SessionManagementError> {
         Ok(Vec::new())
     }
 
@@ -65,7 +50,7 @@ impl context::SessionManagementPort for RecordingSessionManagement {
         &self,
         _bytes: &[u8],
         _project: &ProjectIdentityData,
-    ) -> Result<context::SessionListEntryData, SessionManagementError> {
+    ) -> Result<sdk::SessionItemList, SessionManagementError> {
         Err(SessionManagementError::Storage("unused".into()))
     }
 
@@ -73,10 +58,10 @@ impl context::SessionManagementPort for RecordingSessionManagement {
         &self,
         _id: &str,
         _project: &ProjectIdentityData,
-        update: context::SessionMetadataUpdateData,
-    ) -> Result<context::SessionListEntryData, SessionManagementError> {
+        update: SessionMetadata,
+    ) -> Result<sdk::SessionItemList, SessionManagementError> {
         self.updates.lock().unwrap().push(update.clone());
-        Ok(context::SessionListEntryData {
+        Ok(sdk::SessionItemList {
             id: "session-1".to_string(),
             title: None,
             project: None,

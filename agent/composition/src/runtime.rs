@@ -192,18 +192,7 @@ pub(crate) async fn from_args_with_gateways(
     );
     // 后台一次性迁移存量平铺 session 到 project 目录段布局：串行逐个加载
     // （内存峰值 = 单个 session），不阻塞装配与用户消息；失败由下次启动自愈。
-    {
-        let migration_blob = session_blob.clone();
-        tokio::spawn(async move {
-            let report = context::api::migrate_flat_sessions_to_project_dirs(migration_blob).await;
-            log::debug!(
-                target: crate::LOG_TARGET,
-                "session_flat_migration spawned migrated={} skipped={}",
-                report.migrated,
-                report.skipped
-            );
-        });
-    }
+    {}
 
     let snapshot = config.reader().committed_snapshot();
     let session_model = load_resume_session_model(
@@ -304,12 +293,6 @@ pub(crate) async fn from_args_with_gateways(
     }
     let scoring_ports = scoring_assembly.assignment;
     let startup_notices = crate::systemone::scoring_startup_notices(&scoring_assembly.outcome);
-    let compact_generator =
-        runtime::ProviderCompactGenerator::new(Arc::new(runtime::CompactModelResolver::new(
-            config.reader(),
-            gateways.provider.clone(),
-            initial_provider.compact_model_slot(),
-        )));
     let deps = runtime::SessionSwitchDependencies {
         workspace: workspace.clone(),
         task_restore: std::sync::Arc::new(task::TaskRestoreAccessAdapter::new(
@@ -329,21 +312,21 @@ pub(crate) async fn from_args_with_gateways(
         ),
         session_management: session_management.clone(),
         context_factory: Arc::new(
-            context::ProductionMainContextFactory::new(Arc::new(
+            context::MainContextFactory::new(Arc::new(
                 context::DatasetCanonicalSessionWriter::new(session_dataset),
             ))
-            .with_accepted_input_writer(Arc::new(context::AtomicBlobAcceptedInputWriter::new(
-                session_blob.clone(),
-            )))
-            .with_tool_receipt_writer(Arc::new(context::AtomicBlobToolReceiptWriter::new(
-                session_blob,
-            )))
             .with_skill_catalog(
                 skill_catalog.clone(),
                 Arc::new(context::WorkspaceSkillQueryFactory::new(workspace.read())),
             )
-            .with_generator(Arc::new(compact_generator))
-            .with_persistence(task_wiring.persist(), workspace.persist()),
+            .with_persistence(task_wiring.persist(), workspace.persist())
+            // 指令加载通知端口：Context 组装系统提示时触发，Runtime 实现派发。
+            .with_instructions_loaded(Arc::new(
+                runtime::HookInstructionsNotifier::new(
+                    hook_runner.clone(),
+                    workspace.read().current_workspace_root(),
+                ),
+            )),
         ),
     };
     let wiring = runtime::wire_session_switch_coordinator(deps)
@@ -431,21 +414,23 @@ pub(crate) async fn from_args_with_gateways(
     let prompt_parts =
         runtime::build_system_prompt_parts(&prompt_context, &hook_runner, snapshot.language())
             .await;
+    let workspace_is_git = runtime::workspace_is_git(&prompt_root).await;
     let static_prompt = runtime::build_static_prompt(
         &prompt_root,
         &initial_provider.binding().model.model,
         initial_provider.runtime_settings().reasoning,
         Some(&snapshot),
         &hook_runner,
-        prompt_parts.clone(),
+        workspace_is_git,
     )
     .await;
-    let prompt = runtime::PromptAssemblyData::new(
-        static_prompt,
-        prompt_parts.initial_git_context,
-        prompt_parts.claude_md,
-        initial_provider.binding().model.model.clone(),
-    );
+    let prompt = runtime::PromptAssemblyData {
+        system_prompt_text: static_prompt,
+        initial_git_context: prompt_parts.initial_git_context,
+        user_context: prompt_parts.claude_md,
+        model_id: initial_provider.binding().model.model.clone(),
+        workspace_is_git,
+    };
 
     let available_tools = tool_assembly
         .catalog

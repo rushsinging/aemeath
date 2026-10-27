@@ -6,11 +6,6 @@ use std::path::{Path, PathBuf};
 use super::constants::{DEFAULT_FILES_EN, DEFAULT_FILES_ZH};
 use super::guidance_dir;
 
-#[async_trait::async_trait(?Send)]
-pub trait InstructionsLoadedHook {
-    async fn on_instructions_loaded(&self, file_path: &str, instruction_type: &str);
-}
-
 #[derive(Debug)]
 struct LoadedGuidance {
     path: Option<PathBuf>,
@@ -41,7 +36,7 @@ impl LoadedGuidance {
 ///   3. Every matching config guidance entry, general to specific
 ///   4. If `reasoning == true`, append `_reasoning.md`
 ///
-/// 同步版本仅契约测试使用；生产路径走带 hook 的 [`resolve_guidance_async`]。
+/// 契约测试用薄封装：只取正文。
 #[cfg(test)]
 pub(crate) fn resolve_guidance(
     model_id: &str,
@@ -56,21 +51,27 @@ pub(crate) fn resolve_guidance(
         .join("\n")
 }
 
-/// Resolve guidance and trigger `InstructionsLoaded` once per loaded file.
-pub async fn resolve_guidance_async(
+/// 解析 guidance 正文，并返回本轮实际加载的文件路径。
+///
+/// 通知 hook 是调用方（Context 组装器）的职责：本函数只报告事实。
+pub(crate) fn resolve_guidance_with_sources(
     model_id: &str,
     config_guidance: &HashMap<String, String>,
     reasoning: bool,
     language: &str,
-    hook_runner: Option<&dyn InstructionsLoadedHook>,
-) -> String {
+) -> (String, Vec<String>) {
     let guidance = collect_guidance(model_id, config_guidance, reasoning, language);
-    trigger_loaded_hooks(&guidance, hook_runner).await;
-    guidance
+    let sources = guidance
+        .iter()
+        .filter_map(|item| item.path.as_ref())
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect();
+    let text = guidance
         .into_iter()
         .map(|guidance| guidance.content)
         .collect::<Vec<_>>()
-        .join("\n")
+        .join("\n");
+    (text, sources)
 }
 
 fn collect_guidance(
@@ -102,22 +103,6 @@ fn collect_model_guidance(
     let mut guidance = load_prefix_matched_files_with_lang(model_id, language);
     guidance.extend(load_matching_config_guidance(model_id, config_guidance));
     guidance
-}
-
-async fn trigger_loaded_hooks(
-    guidance: &[LoadedGuidance],
-    hook_runner: Option<&dyn InstructionsLoadedHook>,
-) {
-    let Some(hook_runner) = hook_runner else {
-        return;
-    };
-    for item in guidance {
-        if let Some(path) = &item.path {
-            hook_runner
-                .on_instructions_loaded(&path.to_string_lossy(), "guidance")
-                .await;
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------

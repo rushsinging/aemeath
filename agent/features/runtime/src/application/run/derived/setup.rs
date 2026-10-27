@@ -458,9 +458,9 @@ impl AgentRunner for CliAgentRunner {
                 catalog: sub_catalog,
                 execution: derived.instance.context().tool_execution(),
                 context: crate::application::context::coordination::ContextCoordinator::new(
-                    derived.instance.context().context(),
+                    derived.instance.context().context().clone(),
                 ),
-                session_id: context::SessionId::new(&derived.session_id),
+                session_id: share::ids::SessionId::new(&derived.session_id),
                 ctx: sub_ctx,
                 max_tool_concurrency: self.max_tool_concurrency,
                 agent_semaphore: self.agent_semaphore.clone(),
@@ -531,6 +531,11 @@ impl AgentRunner for CliAgentRunner {
             let runtime_context = derived.instance.context().clone();
             let tool_execution_context = agent.ctx.clone();
             let workspace_read = agent.ctx.workspace_read();
+            // 派生 Run 与父会话共享工作区事实：Context 组装系统提示的输入。
+            let workspace_root = workspace_read.current_workspace_root();
+            // 派生 Run 占比低，直接探测一次即可；主 Run 由装配期事实注入。
+            let workspace_is_git =
+                crate::application::prompt::build::git_context::is_git_repo(&workspace_root).await;
             let turn_context = crate::application::loop_engine::chat::RuntimeRunContext::new(
                 sdk::ChatId::from_legacy_or_new(&session_id),
                 sdk::ChatRunId::new_v7(),
@@ -576,18 +581,19 @@ impl AgentRunner for CliAgentRunner {
                 ));
             }
             let derived_context_port = runtime_context.context();
-            derived_context_port.create_reminder_pipeline(
+            derived_context_port.reminders.create_reminder_pipeline(
                 run_id.clone(),
                 std::mem::take(&mut derived_reminder_sources),
             );
-            derived_context_port.reminder_run_started(&run_id);
+            derived_context_port.reminders.reminder_run_started(&run_id);
             let persistence =
                 crate::application::loop_engine::run_services::RuntimeStepPersistence::new(
                     run_id.clone(),
                     crate::application::loop_engine::run_services::ContextRequest {
                         runtime_context: &runtime_context,
                         session_id: &session_id,
-                        system_prompt: &system,
+                        workspace_root: &workspace_root,
+                        workspace_is_git,
                         model_id: &model_name,
                         language: &language,
                         agent_roles,
@@ -649,7 +655,7 @@ impl AgentRunner for CliAgentRunner {
                 role_name: agent_name_for_log,
                 model_name: model_name.clone(),
                 runtime_context: runtime_context.clone(),
-                workspace_root,
+                workspace_root: workspace_root.clone(),
                 session_id: session_id.clone(),
                 prompt: prompt.to_string(),
                 system: system.clone(),
@@ -674,7 +680,7 @@ impl AgentRunner for CliAgentRunner {
             )
             .await;
             // Reminder 管线句柄随 derived run 销毁（07-reminder-pipeline.md）。
-            runtime_context.context().drop_reminder_pipeline(&run_id);
+            runtime_context.context().reminders.drop_reminder_pipeline(&run_id);
             sub_run_terminal
         })
         .await

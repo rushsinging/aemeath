@@ -248,7 +248,7 @@ pub enum RuntimeStreamEvent {
     },
     /// #567：会话列表回传。
     SessionList {
-        sessions: Vec<sdk::SessionSummary>,
+        sessions: Vec<sdk::SessionItemList>,
     },
     /// #567：项目上下文回传。
     ProjectInfo {

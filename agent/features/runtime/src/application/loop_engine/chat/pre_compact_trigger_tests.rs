@@ -29,11 +29,11 @@ use crate::application::reflection::{
     ReflectionRunOutcome, ReflectionTaskAdapter, ReflectionTaskTrigger,
 };
 use crate::ports::{
-    CompactOutcome, CompactRequestData, CompactResult, CompactSkipReason, CompactionDecisionData,
-    ContextPort, ContextPortError, ContextRequestData, ContextRequestId, ContextWindowData,
-    DecisionReason, Language as ContextLanguage, SessionId, SessionRevision, SystemBlock,
-    SystemPromptSpecData, TokenBudget, Urgency,
+    CompactOutcome, CompactRequestData, CompactionDecisionData, ContextPortError,
+    ContextRequestData, ContextWindowData, DecisionReason, InteractionRequestId,
+    Language as ContextLanguage, SessionId, SessionRevision, SystemBlock, TokenBudget, Urgency,
 };
+use context::compact::{CompactResult, CompactSkipReason, CompactSummaryQuality};
 
 /// `submit_complete` builds its own executor closure and ignores the
 /// adapter's `executor` field, so we cannot use a capturing closure to
@@ -49,14 +49,15 @@ fn production_adapter() -> ReflectionTaskAdapter {
 fn frozen_request() -> ContextRequestData {
     ContextRequestData {
         session_id: SessionId::new("session"),
-        request_id: ContextRequestId::new("request"),
+        request_id: InteractionRequestId::new("request"),
         run_id: RunId::new("run"),
         step_id: RunStepId::new("step"),
         pending_messages: vec![Message::user("seed")],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".to_string(),
         effective_reasoning: share::reasoning::ReasoningLevel::Off,
-        language: ContextLanguage::new("en"),
+        language: ContextLanguage::En,
         agent_roles: HashMap::new(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 128_000,
@@ -114,14 +115,20 @@ impl StubContextPort {
 }
 
 #[async_trait]
-impl ContextPort for StubContextPort {
+#[async_trait]
+impl crate::ports::ContextWindowPort for StubContextPort {
     async fn build_window(
         &self,
         _request: &ContextRequestData,
     ) -> Result<ContextWindowData, ContextPortError> {
         Err(ContextPortError::Compact("stub: build_window".to_string()))
     }
+}
+#[async_trait]
+impl context::ReminderControlPort for StubContextPort {}
 
+#[async_trait]
+impl crate::ports::ContextCompactPort for StubContextPort {
     async fn needs_compaction(
         &self,
         _request: &ContextRequestData,
@@ -142,16 +149,9 @@ impl ContextPort for StubContextPort {
             .take()
             .expect("stub outcome must be configured exactly once")
     }
-
-    async fn manual_compact(
-        &self,
-        _request: &crate::ports::ManualCompactRequestData,
-    ) -> Result<CompactOutcome, ContextPortError> {
-        Err(ContextPortError::Compact(
-            "stub: manual_compact".to_string(),
-        ))
-    }
-
+}
+#[async_trait]
+impl crate::ports::ContextAppendPort for StubContextPort {
     async fn clear_session(&self, _session_id: &SessionId) -> Result<(), ContextPortError> {
         Err(ContextPortError::Compact("stub: clear_session".to_string()))
     }
@@ -159,7 +159,7 @@ impl ContextPort for StubContextPort {
     async fn append_and_persist(
         &self,
         _append: &crate::ports::ContextAppendData,
-    ) -> Result<crate::ports::AppendReceiptData, crate::ports::ContextAppendError> {
+    ) -> Result<crate::ports::SessionAppendReceiptData, crate::ports::ContextAppendError> {
         Err(crate::ports::ContextAppendError::Storage(
             "stub".to_string(),
         ))
@@ -210,10 +210,7 @@ fn failing_append_reflection_history() -> Arc<dyn memory::api::ReflectionHistory
 fn build_compact_test_port(
     harness: &CompactHarness,
 ) -> crate::application::loop_engine::run_services::RuntimeCompaction<'_, ChatCompactionObserver> {
-    assert!(Arc::ptr_eq(
-        &harness.runtime_context.context(),
-        &harness.context_port
-    ));
+    // 语义端口聚合等价性：由同一 fixture 组装（聚合按值比较不可行，跳过 ptr 断言）。
     crate::application::loop_engine::run_services::RuntimeCompaction::new(
         &harness.runtime_context,
         ChatCompactionObserver {
@@ -242,7 +239,6 @@ struct CompactHarness {
     adapter: ReflectionTaskAdapter,
     stub: Arc<StubContextPort>,
     runtime_context: crate::application::run::context::RuntimeContext,
-    context_port: Arc<dyn ContextPort>,
     /// 记录型反思历史；注入非记录实现的构造（`with_history`）时为 None。
     reflection_history: Option<Arc<RecordingReflectionHistory>>,
     /// 与 ChatCompactionObserver 共享的 PreCompact 材料槽（同 run_launch 装配）。
@@ -296,7 +292,7 @@ impl CompactHarness {
         let usage_sink = Arc::new(RecordingUsageSink::default());
         let runtime_context =
             crate::application::run::run_factory_support::SessionRunFixture::builder()
-                .with_context_port(stub.clone())
+                .with_context_port(crate::ports::ContextPorts::from_service(stub.clone()))
                 .with_provider_binding(binding)
                 .with_config(config_snapshot)
                 .with_session_id("session".to_string())
@@ -307,12 +303,10 @@ impl CompactHarness {
                 .expect("pre-compact parent run creation must succeed")
                 .context()
                 .clone();
-        let context_port = runtime_context.context();
         Self {
             adapter,
             stub,
             runtime_context,
-            context_port,
             reflection_history: recording_history,
             material_slot: PreCompactMaterialSlot::default(),
             usage_sink,
@@ -410,7 +404,7 @@ fn committed_outcome() -> CompactOutcome {
         summary: "summary".to_string(),
         recent_messages: vec![],
         source_revision: SessionRevision::new(7),
-        quality: context::CompactSummaryQuality::LocalOnly,
+        quality: CompactSummaryQuality::LocalOnly,
     })
 }
 

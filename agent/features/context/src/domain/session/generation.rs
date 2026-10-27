@@ -12,7 +12,7 @@ use super::constants::CURRENT_SESSION_SCHEMA_VERSION;
 use super::{
     envelope::task_snapshot_state, ActiveCompactMarker, CanonicalSession, ChatSegment,
     CommittedRunStep, CommittedStepLedger, PersistedWorkspaceContext, RunStepCursor,
-    SessionHistory, SessionMetadata, SkillLoadRecord, SnapshotState,
+    SessionHistory, SessionMetadata, SessionSnapshotState, SkillLoadRecord,
 };
 use task::TaskSnapshotData;
 
@@ -497,8 +497,8 @@ pub struct SessionStateMember {
     #[serde(default)]
     chats: Vec<ChatSegment>,
     #[serde(with = "task_snapshot_state")]
-    tasks: SnapshotState<TaskSnapshotData>,
-    workspace: SnapshotState<PersistedWorkspaceContext>,
+    tasks: SessionSnapshotState<TaskSnapshotData>,
+    workspace: SessionSnapshotState<PersistedWorkspaceContext>,
     #[serde(default)]
     compact: Option<ActiveCompactMarker>,
     /// `/clear` 逻辑断点：最后被清除的 step cursor；旧代 state 无此字段。
@@ -614,8 +614,8 @@ impl SessionCommitPlan {
             created_at: session.created_at.clone(),
             updated_at: session.created_at.clone(),
             metadata: SessionMetadata::default(),
-            tasks: SnapshotState::Missing,
-            workspace: SnapshotState::Missing,
+            tasks: SessionSnapshotState::Missing,
+            workspace: SessionSnapshotState::Missing,
             revision: 0,
             compact: None,
             cleared_after: None,

@@ -11,8 +11,8 @@ use std::sync::{Arc, RwLock as StdRwLock};
 use config::{ConfigReader, ProjectConfigParticipant};
 use context::session::CanonicalSession;
 use context::MainContextFactory;
+use context::SessionManagementError;
 use context::SessionManagementPort;
-use context::{SessionManagementError, SessionMetadataUpdateData};
 use memory::api::{MemoryOpener, MemoryPort};
 use project::{WorkspaceReader, WorkspaceWriter};
 use share::config::domain::snapshot::ConfigSnapshot;
@@ -34,7 +34,7 @@ pub struct SessionSwitchDependencies {
     /// composition 注入的唯一 Session 管理 Port。协议只在 resume / metadata
     /// 更新时借用；Runtime 侧 Session 命令持同一 Arc。
     pub session_management: Arc<dyn SessionManagementPort>,
-    pub context_factory: Arc<dyn MainContextFactory>,
+    pub context_factory: Arc<MainContextFactory>,
 }
 
 /// 带初始 committed 状态的完整装配入参（测试与 bootstrap 共用）。
@@ -48,7 +48,7 @@ pub struct SessionSwitchCoordinatorBuilder {
     pub session_management: Arc<dyn SessionManagementPort>,
     pub initial_session: CanonicalSession,
     pub initial_memory: Arc<dyn MemoryPort>,
-    pub context_factory: Arc<dyn MainContextFactory>,
+    pub context_factory: Arc<MainContextFactory>,
 }
 
 /// Main Session 切换协调者。
@@ -69,7 +69,7 @@ pub struct SessionSwitchCoordinator {
     pub(super) committed_memory: Arc<StdRwLock<Arc<dyn MemoryPort>>>,
     pub(super) pending_session_restart_revision:
         Arc<StdRwLock<Option<share::config::domain::snapshot::ConfigRevision>>>,
-    pub(super) context: Arc<dyn context::ContextPort>,
+    pub(super) context: context::ContextPorts,
     pub(super) mutation_gate: Arc<tokio::sync::Mutex<()>>,
 }
 
@@ -77,14 +77,41 @@ impl SessionSwitchCoordinator {
     /// 从跨 BC 依赖与初始 committed 状态组装协调者。
     pub fn assemble(builder: SessionSwitchCoordinatorBuilder) -> Self {
         let committed_session = Arc::new(StdRwLock::new(Arc::new(builder.initial_session)));
-        let mutation_gate = Arc::new(tokio::sync::Mutex::new(()));
         let committed_memory = Arc::new(StdRwLock::new(builder.initial_memory));
-        let pending_session_restart_revision = Arc::new(StdRwLock::new(None));
+        let mutation_gate = Arc::new(tokio::sync::Mutex::new(()));
         let context = builder.context_factory.build(
             Arc::clone(&committed_session),
             Arc::clone(&committed_memory),
             Arc::clone(&mutation_gate),
         );
+        let pending_session_restart_revision = Arc::new(StdRwLock::new(None));
+        Self {
+            gate: SessionSwitchGate::new(),
+            workspace_read: builder.workspace_read,
+            workspace_persist: builder.workspace_persist,
+            task_restore: builder.task_restore,
+            config_reader: builder.config_reader,
+            config_participant: builder.config_participant,
+            memory_opener: builder.memory_opener,
+            session_management: builder.session_management,
+            committed_session,
+            committed_memory,
+            pending_session_restart_revision,
+            context,
+            mutation_gate,
+        }
+    }
+
+    /// 测试钩子：以注入的 ContextPorts（如记录型装饰器）替代 factory 产物组装。
+    #[cfg(any(test, feature = "dev"))]
+    pub fn assemble_with_ports(
+        builder: SessionSwitchCoordinatorBuilder,
+        context: context::ContextPorts,
+    ) -> Self {
+        let committed_session = Arc::new(StdRwLock::new(Arc::new(builder.initial_session)));
+        let committed_memory = Arc::new(StdRwLock::new(builder.initial_memory));
+        let mutation_gate = Arc::new(tokio::sync::Mutex::new(()));
+        let pending_session_restart_revision = Arc::new(StdRwLock::new(None));
         Self {
             gate: SessionSwitchGate::new(),
             workspace_read: builder.workspace_read,
@@ -140,8 +167,8 @@ impl SessionSwitchCoordinator {
     }
 
     /// 当前 committed Context port。
-    pub fn committed_context(&self) -> Arc<dyn context::ContextPort> {
-        Arc::clone(&self.context)
+    pub fn committed_context(&self) -> &context::ContextPorts {
+        &self.context
     }
 
     /// 当前 committed memory port。
@@ -202,7 +229,7 @@ impl SessionSwitchCoordinator {
         Ok(BoundMainRun::new(
             permit,
             session,
-            Arc::clone(&self.context),
+            self.context.clone(),
             memory,
             config,
         ))
@@ -210,20 +237,18 @@ impl SessionSwitchCoordinator {
 
     // ── metadata 协议（mutation_gate 串行化）──
 
-    /// 原子更新活跃会话 metadata：先落盘再回读合并 revision/updated_at，
-    /// 只同步 metadata 路径改的字段，保留内存里其它 committed 内容。
+    /// 原子更新活跃会话 metadata（覆盖式：调用方读现值-改字段-回传整份），
+    /// 先落盘再回读合并 revision/updated_at，保留内存里其它 committed 内容。
     pub async fn update_active_session_metadata(
         &self,
-        update: SessionMetadataUpdateData,
+        update: context::session::SessionMetadata,
     ) -> Result<(), SessionManagementError> {
         let _mutation = self.mutation_gate.lock().await;
         let before = self.committed_session();
         let session_id = before.id.clone();
         let project = self.project_identity();
 
-        let mut probed = before.metadata.clone();
-        update.clone().apply(&mut probed);
-        if probed == before.metadata {
+        if update == before.metadata {
             return Ok(());
         }
 

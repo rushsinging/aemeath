@@ -1,7 +1,8 @@
 use super::AtomicBlobToolReceiptLedger;
 use crate::domain::session::CanonicalSession;
-use crate::domain::{SessionId, ToolCallIdentityData, ToolCallReceiptData};
+use crate::domain::{ToolCallIdentityData, ToolCallReceiptData};
 use sdk::{RunId, RunStepId};
+use share::ids::SessionId;
 use std::sync::Arc;
 
 #[tokio::test]

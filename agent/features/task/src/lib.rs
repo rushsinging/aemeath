@@ -134,6 +134,9 @@ mod adapters;
 mod domain;
 
 pub use adapters::{wire_task, TaskStore, TaskWiring};
+pub use domain::compact_snapshot::{
+    CompactTaskBatchStatusData, CompactTaskItemData, CompactTaskSnapshotData, CompactTaskStatusData,
+};
 pub use domain::task_restore_access::{
     SessionRestoreTicket, TaskRestoreAccess, TaskRestoreAccessAdapter,
 };

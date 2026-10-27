@@ -1,0 +1,27 @@
+%% Context Receipt 全链路（Mermaid flowchart）
+%% 渲染：GitHub/GitLab 的 ```mermaid``` 代码块原生渲染；
+%%      或粘贴到 https://mermaid.live ；或 mermaid-cli: mmdc -i receipt-flow.mmd -o out.svg
+%% A1/A2/B1/B2/B3/C 缺陷已全部修复（A→C→B 三阶段），此处保留标注作审计线索。
+flowchart LR
+    subgraph S1["① 执行期推进（高频写）"]
+        f01[工具执行<br/>execution_supervisor] -->|MutationData| f02[advance 状态机<br/>幂等·防倒退]
+        f02 -->|① 一次原子提交<br/>member| f03[(Canonical Session<br/>commit_incremental)]
+    end
+    subgraph S2["② 收口与提交（一次性）"]
+        f11[step finalize<br/>FinalizeCause ×3] -->|只取 Terminal| f12[to_step_receipt<br/>cleanup 带入]
+        f12 -->|进指纹| f13[fingerprint<br/>落盘=指纹]
+        f13 -->|8 位元组| f14[append / accept<br/>回执=提交后 revision]
+    end
+    subgraph S3["③ 读取消费"]
+        f21[step_receipts<br/>finalize 前读实时] --> f22[取消终态判定<br/>Unconfirmed?]
+        f23[冻结快照<br/>finalize 后只读]:::fixed
+    end
+    subgraph S4["④ 恢复与边界（sidecar 已退役）"]
+        f31[legacy 恢复<br/>一次性迁移读]:::fixed
+        f32[/clear · compact<br/>随 Session generation 一致/]:::fixed
+    end
+    f02 -.->|step 终结| f11
+    f02 -.->|实时派生| f21
+    f12 -.->|写冻结| f23
+    f31 -.->|保守合并不倒退| f02
+    classDef fixed stroke-dasharray: 5 5;

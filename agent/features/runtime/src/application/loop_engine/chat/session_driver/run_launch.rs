@@ -54,6 +54,7 @@ where
             let user_context = shell.user_context.clone();
             let system_prompt_text = shell.system_prompt_text.clone();
             let workspace = shell.workspace.clone();
+            let workspace_root = workspace.read().current_workspace_root();
             let wiring = shell.session_switch.clone();
             let tool_result_materializer = shell.tool_result_materializer.clone();
             // c8 plugin seam：run 边界重建（run 内版本固定，#2030 契约）。
@@ -521,7 +522,7 @@ where
                             }
                         };
                         let session_id = crate::ports::SessionId::new(bound.session().id.clone());
-                        let coordinator = crate::application::context::coordination::ContextCoordinator::new(bound.context());
+                        let coordinator = crate::application::context::coordination::ContextCoordinator::new(bound.context().clone());
                         match coordinator.clear_session(&session_id).await {
                             Ok(()) => {
                                 messages.clear();
@@ -892,16 +893,16 @@ where
                     }
                 }
                 let reminder_context_port = runtime_context.context();
-                reminder_context_port.create_reminder_pipeline(
+                reminder_context_port.reminders.create_reminder_pipeline(
                     run_id.clone(),
                     std::mem::take(&mut reminder_sources),
                 );
-                reminder_context_port.reminder_run_started(&run_id);
+                reminder_context_port.reminders.reminder_run_started(&run_id);
                 // Wakeup Run（#252 D11）：本 Run 无用户消息、无 handle_event
                 // 触发点——启动时显式触发 background_process 事件，把监督器内
                 // 「终态未通知」事实经 OnEvent source build（take）进注入队列。
                 if background_wakeup_run {
-                    reminder_context_port.reminder_handle_event(
+                    reminder_context_port.reminders.reminder_handle_event(
                         &run_id,
                         &context::ReminderEventSource::background_process(),
                     );
@@ -910,7 +911,8 @@ where
                     crate::application::loop_engine::run_services::ContextRequest {
                         runtime_context: &runtime_context,
                         session_id: &session_id,
-                        system_prompt: &cacheable_system_prompt,
+                        workspace_root: &workspace_root,
+                        workspace_is_git: shell.workspace_is_git,
                         model_id: &runtime_context.provider_ref().model.model,
                         language: &language,
                         agent_roles: std::collections::HashMap::new(),
@@ -1078,7 +1080,8 @@ where
                 let mut manual_compaction = main_run_port::ChatManualCompaction {
                     runtime_context: runtime_context.clone(),
                     session_id: session_id.clone(),
-                    system_prompt: cacheable_system_prompt.clone(),
+                    workspace_root: workspace_root.clone(),
+                    workspace_is_git: shell.workspace_is_git,
                     context_size,
                 };
                 // 手动反思端口：messages 是 idle 受理时冻结的 committed 快照；
@@ -1149,7 +1152,7 @@ where
                 //（07-reminder-pipeline.md）。
                 runtime_context
                     .context()
-                    .drop_reminder_pipeline(&run_id);
+                    .reminders.drop_reminder_pipeline(&run_id);
                 // Run 收口滞留检测（#252 注入确认制兜底）：reminder 管线
                 // 销毁后监督器若仍有未确认完成事实，补发 wakeup 信号立即
                 // 补注入（否则需等下一个任务完成 / 用户输入捎带）。

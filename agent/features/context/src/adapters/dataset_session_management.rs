@@ -1,3 +1,4 @@
+use crate::domain::session::project_list_item;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -7,15 +8,14 @@ use crate::adapters::{
     AtomicBlobSessionManagement, DatasetCanonicalSessionWriter, DatasetSessionReader,
 };
 use crate::domain::session::{
-    now_iso, project_dir_segment, session_matches_project, CanonicalSession, SessionCodec,
-    SessionListEntryData, SessionManagementError, SessionMetadataUpdateData,
+    project_dir_segment, session_matches_project, CanonicalSession, SessionCodec,
+    SessionManagementError, SessionMetadata,
 };
 use crate::ports::SessionManagementPort;
 
 pub struct DatasetSessionManagement {
     dataset: Arc<dyn AtomicDatasetPort>,
     legacy: Arc<AtomicBlobSessionManagement>,
-    receipt_blob: Arc<dyn AtomicBlobPort>,
     reader: DatasetSessionReader,
     writer: DatasetCanonicalSessionWriter,
 }
@@ -25,18 +25,11 @@ impl DatasetSessionManagement {
         Self {
             dataset: Arc::clone(&dataset),
             legacy: Arc::new(AtomicBlobSessionManagement::new(Arc::clone(&legacy_blob))),
-            receipt_blob: legacy_blob.clone(),
             reader: DatasetSessionReader::new(Arc::clone(&dataset), Some(Arc::clone(&legacy_blob))),
             writer: DatasetCanonicalSessionWriter::new(Arc::clone(&dataset)),
         }
     }
 
-    pub fn accepted_input_writer(&self) -> crate::adapters::AtomicBlobAcceptedInputWriter {
-        crate::adapters::AtomicBlobAcceptedInputWriter::new(Arc::clone(&self.receipt_blob))
-    }
-    pub fn tool_receipt_writer(&self) -> crate::adapters::AtomicBlobToolReceiptWriter {
-        crate::adapters::AtomicBlobToolReceiptWriter::new(Arc::clone(&self.receipt_blob))
-    }
     async fn load_canonical(
         &self,
         project_dir: Option<&SafePathSegmentData>,
@@ -118,7 +111,7 @@ impl SessionManagementPort for DatasetSessionManagement {
     async fn list_for_project(
         &self,
         project: &share::session_types::ProjectIdentityData,
-    ) -> Result<Vec<SessionListEntryData>, SessionManagementError> {
+    ) -> Result<Vec<sdk::SessionItemList>, SessionManagementError> {
         let project_dir = project_dir_segment(project);
         let dataset_keys = self
             .dataset
@@ -145,7 +138,7 @@ impl SessionManagementPort for DatasetSessionManagement {
                 if segments.len() == 1 && !session_matches_project(&session, project) {
                     continue;
                 }
-                sessions.push(SessionListEntryData::from_canonical(&session));
+                sessions.push(project_list_item(&session));
             }
         }
         for entry in self.legacy.list_for_project(project).await? {
@@ -171,7 +164,7 @@ impl SessionManagementPort for DatasetSessionManagement {
         &self,
         bytes: &[u8],
         project: &share::session_types::ProjectIdentityData,
-    ) -> Result<SessionListEntryData, SessionManagementError> {
+    ) -> Result<sdk::SessionItemList, SessionManagementError> {
         let decoded = crate::adapters::decode_session(bytes).map_err(|error| match error {
             crate::domain::session::SessionCodecError::UnsupportedFutureVersion {
                 version, ..
@@ -186,25 +179,25 @@ impl SessionManagementPort for DatasetSessionManagement {
             .save_initial(&session)
             .await
             .map_err(SessionManagementError::Storage)?;
-        Ok(SessionListEntryData::from_canonical(&session))
+        Ok(project_list_item(&session))
     }
 
     async fn update_metadata_for_project(
         &self,
         id: &str,
         project: &share::session_types::ProjectIdentityData,
-        update: SessionMetadataUpdateData,
-    ) -> Result<SessionListEntryData, SessionManagementError> {
+        update: SessionMetadata,
+    ) -> Result<sdk::SessionItemList, SessionManagementError> {
         let before = self.load_for_project(id, project).await?;
         let mut after = before.clone();
-        update.apply(&mut after.metadata);
-        after.updated_at = now_iso();
+        after.metadata = update;
+        after.updated_at = share::time::now_iso();
         after.revision += 1;
         self.writer
             .save_incremental(&before, &after)
             .await
             .map_err(SessionManagementError::Storage)?;
-        Ok(SessionListEntryData::from_canonical(&after))
+        Ok(project_list_item(&after))
     }
 
     async fn delete_for_project(

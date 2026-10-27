@@ -140,9 +140,9 @@ pub(crate) fn make_agent(
         catalog: catalog.clone(),
         execution: runtime_context.tool_execution(),
         context: crate::application::context::coordination::ContextCoordinator::new(
-            runtime_context.context(),
+            runtime_context.context().clone(),
         ),
-        session_id: context::SessionId::new(session_id),
+        session_id: share::ids::SessionId::new(session_id),
         ctx: tools::published::execution::ToolExecutionContext::new(
             tools::ExecutionScope::builder(
                 run_id.to_string(),
@@ -288,7 +288,9 @@ impl crate::application::loop_engine::compaction::CompactionObserver for ChatCom
 pub(crate) struct ChatManualCompaction {
     pub runtime_context: RuntimeContext,
     pub session_id: String,
-    pub system_prompt: String,
+    /// 工作区根与 git 事实：Context 组装系统提示所需。
+    pub workspace_root: std::path::PathBuf,
+    pub workspace_is_git: bool,
     pub context_size: usize,
 }
 
@@ -301,25 +303,42 @@ impl crate::application::loop_engine::ManualCompactionPort for ChatManualCompact
         progress: Arc<dyn crate::application::loop_engine::CompactProgressView>,
     ) -> Result<crate::application::loop_engine::ManualCompactionOutcome, LoopEngineError> {
         let coordinator = crate::application::context::coordination::ContextCoordinator::new(
-            self.runtime_context.context(),
+            self.runtime_context.context().clone(),
         );
         let task_snapshot =
             crate::application::loop_engine::chat::task_snapshot::build_compact_task_snapshot(
                 self.runtime_context.task().as_ref(),
             );
-        let progress_callback: Arc<dyn context::compact::CompactProgressFn> =
-            Arc::new(move |stage, work| {
-                progress.emit(compact_stage_view(stage), compact_work_view(work));
-            });
-        let request = crate::ports::ManualCompactRequestData {
-            session_id: crate::ports::SessionId::new(self.session_id.clone()),
-            run_id: run_id.clone(),
-            system_prompt: crate::ports::SystemPromptSpecData::new(self.system_prompt.clone()),
-            context_size: self.context_size,
-            progress: Some(progress_callback),
-            task_snapshot,
-        };
-        match coordinator.manual_compact(&request).await {
+        // 进度视图直接透传给 coordination 包装（其内部转换 context 回调形态）。
+        // 手动压缩 = compact(trigger: Manual)（#1863：单一压缩入口）。
+        // ContextRequestData 经统一 coordinator 组装（与自动路径同源）。
+        let request_source =
+            crate::application::loop_engine::context_request::ContextRequestSource {
+                runtime_context: &self.runtime_context,
+                session_id: &self.session_id,
+                workspace_root: &self.workspace_root,
+                workspace_is_git: self.workspace_is_git,
+                model_id: &self.runtime_context.provider_ref().model.model,
+                language: "",
+                agent_roles: Default::default(),
+                config: self.runtime_context.config(),
+                context_size: self.context_size,
+                max_output_tokens: 0,
+                raw_tool_schemas: Vec::new(),
+            };
+        let request =
+            crate::application::loop_engine::context_request::ContextRequestCoordinator::new(
+                request_source,
+            )
+            .build_request(
+                &run_id.clone(),
+                &share::ids::RunStepId::new("manual-compact"),
+                Vec::new(),
+            );
+        match coordinator
+            .manual_compact(&request, progress, task_snapshot)
+            .await
+        {
             Ok(crate::ports::CompactOutcome::Committed(result)) => {
                 self.runtime_context
                     .event_sink()
@@ -441,30 +460,6 @@ impl crate::application::loop_engine::ManualReflectionPort for ChatManualReflect
                 )
             }
         })
-    }
-}
-
-fn compact_stage_view(stage: context::compact::CompactStageData) -> sdk::CompactStageView {
-    match stage {
-        context::compact::CompactStageData::Preparing => sdk::CompactStageView::Preparing,
-        context::compact::CompactStageData::Generating => sdk::CompactStageView::Generating,
-        context::compact::CompactStageData::Mapping => sdk::CompactStageView::Mapping,
-        context::compact::CompactStageData::Reducing => sdk::CompactStageView::Reducing,
-        context::compact::CompactStageData::Refreshing => sdk::CompactStageView::Refreshing,
-        context::compact::CompactStageData::Finalizing => sdk::CompactStageView::Finalizing,
-    }
-}
-
-fn compact_work_view(work: context::compact::CompactWorkData) -> sdk::CompactWorkView {
-    match work {
-        context::compact::CompactWorkData::Indeterminate => sdk::CompactWorkView::Indeterminate,
-        context::compact::CompactWorkData::Determinate { completed, total } => {
-            let (Ok(completed), Ok(total)) = (u32::try_from(completed), u32::try_from(total))
-            else {
-                return sdk::CompactWorkView::Indeterminate;
-            };
-            sdk::CompactWorkView::Determinate { completed, total }
-        }
     }
 }
 

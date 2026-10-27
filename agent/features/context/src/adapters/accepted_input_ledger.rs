@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use storage::{
-    AtomicBlobPort, DeleteOptionsData, DurabilityData, GenerationData, ReadOutcomeData,
-    SafePathSegmentData, StorageKeyData, StorageNamespaceData, WriteOptionsData,
+    AtomicBlobPort, DurabilityData, GenerationData, ReadOutcomeData, SafePathSegmentData,
+    StorageKeyData, StorageNamespaceData, WriteOptionsData,
 };
 
 use super::constants::ACCEPTED_INPUT_LEDGER_SCHEMA_VERSION;
@@ -79,6 +79,8 @@ impl AtomicBlobAcceptedInputLedger {
         Ok(ledger)
     }
 
+    /// C 阶段：生产已停写；仅供迁移/契约测试构造旧 sidecar 存量数据。
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) async fn save(
         &self,
         revision: u64,
@@ -125,37 +127,6 @@ impl AtomicBlobAcceptedInputLedger {
         for entry in ledger.inputs {
             session.append_accepted_input(&entry.run_id, &entry.step_id, entry.input);
         }
-        Ok(())
-    }
-
-    pub(crate) async fn acknowledge_finalized_input(
-        &self,
-        run_id: &str,
-        step_id: &str,
-    ) -> Result<(), String> {
-        let mut ledger = self.read().await?;
-        ledger
-            .inputs
-            .retain(|entry| entry.run_id != run_id || entry.step_id != step_id);
-        if ledger.inputs.is_empty() {
-            return self.delete().await;
-        }
-        let bytes = serde_json::to_vec(&ledger).map_err(|error| error.to_string())?;
-        self.blob
-            .write_atomic(
-                &self.key,
-                &bytes,
-                WriteOptionsData::new(DurabilityData::ProcessCrashSafe),
-            )
-            .await
-            .map_err(|error| error.to_string())?;
-        Ok(())
-    }
-    pub(crate) async fn delete(&self) -> Result<(), String> {
-        self.blob
-            .delete_all_generations(&self.key, DeleteOptionsData::default())
-            .await
-            .map_err(|error| error.to_string())?;
         Ok(())
     }
 }

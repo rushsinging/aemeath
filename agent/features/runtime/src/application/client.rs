@@ -19,11 +19,10 @@ mod trait_session;
 
 pub(crate) use accessors::SessionModelState;
 pub(crate) use accessors::{RuntimeContextAssemblyError, SessionInputHandle, SessionRuntime};
-pub use compact_model::{
-    CompactModelOrigin, CompactModelResolveError, CompactModelResolver, SessionModelSlotData,
-};
+pub use compact_model::{CompactModelOrigin, CompactModelResolver, SessionModelSlotData};
 pub(crate) use mapping::{
-    map_finalize_cause_to_sdk, message_to_sdk, skill_snapshot_to_sdk, workspace_context_to_sdk,
+    display_history_index_to_sdk, map_finalize_cause_to_sdk, message_to_sdk, skill_snapshot_to_sdk,
+    workspace_context_to_sdk,
 };
 pub use skill_catalog_refresh::SkillCatalogRefresh;
 // Compact 模型解析复用 model switch 的 binding 构造路径，避免重复实现。

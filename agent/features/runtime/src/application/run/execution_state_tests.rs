@@ -1,9 +1,8 @@
 use super::execution_state::RunExecutionState;
 use crate::application::loop_engine::PendingInteractionWork;
 use crate::ports::{
-    CompactionDecisionData, ContextRequestData, ContextRequestId, ContextWindowData,
-    DecisionReason, Language, SessionId, SessionRevision, SystemPromptSpecData, TokenBudget,
-    Urgency,
+    CompactionDecisionData, ContextRequestData, ContextWindowData, DecisionReason,
+    InteractionRequestId, Language, SessionId, SessionRevision, TokenBudget, Urgency,
 };
 use sdk::{RunId, RunStepId};
 use share::reasoning::ReasoningLevel;
@@ -16,14 +15,15 @@ use std::collections::HashMap;
 fn context_request(step_id: &str) -> ContextRequestData {
     ContextRequestData {
         session_id: SessionId::new("session"),
-        request_id: ContextRequestId::new(format!("request-{step_id}")),
+        request_id: InteractionRequestId::new(format!("request-{step_id}")),
         run_id: RunId::new("run"),
         step_id: RunStepId::new(step_id),
         pending_messages: vec![],
-        system_prompt: SystemPromptSpecData::new("system"),
+        workspace_root: std::path::PathBuf::from("/tmp/workspace"),
+        workspace_is_git: false,
         model_id: "fake/model".to_string(),
         effective_reasoning: ReasoningLevel::Off,
-        language: Language::new("zh"),
+        language: Language::Zh,
         agent_roles: HashMap::new(),
         config_snapshot: ConfigSnapshot::new(Config::default()),
         context_size: 128_000,
@@ -163,7 +163,7 @@ fn context_projection_is_replaced_as_one_step_snapshot() {
 
     assert_eq!(
         state.context_request().unwrap().request_id,
-        ContextRequestId::new("request-step-1"),
+        InteractionRequestId::new("request-step-1"),
     );
     assert!(state.context_window().is_none());
 
@@ -176,7 +176,7 @@ fn context_projection_is_replaced_as_one_step_snapshot() {
     state.replace_context_state(context_request("step-2"), None);
     assert_eq!(
         state.context_request().unwrap().request_id,
-        ContextRequestId::new("request-step-2"),
+        InteractionRequestId::new("request-step-2"),
     );
     assert!(state.context_window().is_none());
 }

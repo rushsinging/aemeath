@@ -13,16 +13,19 @@ use crate::ports::{
 pub(crate) struct SkillPromptSource {
     catalog: Arc<dyn SkillCatalogPort>,
     query_factory: Arc<dyn SkillQueryFactory>,
+    baseline: crate::adapters::BaselinePromptSource,
 }
 
 impl SkillPromptSource {
     pub fn new(
         catalog: Arc<dyn SkillCatalogPort>,
         query_factory: Arc<dyn SkillQueryFactory>,
+        assembly: Arc<crate::adapters::SystemPromptAssembly>,
     ) -> Self {
         Self {
             catalog,
             query_factory,
+            baseline: crate::adapters::BaselinePromptSource::new(assembly),
         }
     }
 }
@@ -104,8 +107,7 @@ impl ContextPromptSource for SkillPromptSource {
         &self,
         request: &ContextRequestData,
     ) -> Result<PromptMaterialization, PromptMaterializationError> {
-        let (mut cacheable, uncached) =
-            crate::adapters::BaselinePromptSource::baseline_blocks(request);
+        let (mut cacheable, uncached) = self.baseline.baseline_blocks(request).await?;
         let descriptors = sort_and_dedup(self.catalog.list(self.query_factory.query(request)));
         let budget = skill_prompt_budget(request.context_size);
         let header_tokens =

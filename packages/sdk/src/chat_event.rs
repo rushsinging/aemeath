@@ -884,7 +884,7 @@ pub enum ChatEvent {
     },
     /// #567：会话列表回传。
     SessionList {
-        sessions: Vec<crate::SessionSummary>,
+        sessions: Vec<crate::SessionItemList>,
     },
     /// #567：项目上下文回传。
     ProjectInfo {
