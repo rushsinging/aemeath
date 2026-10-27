@@ -21,6 +21,10 @@
     .pl-hint{background:#0f172a;color:#64748b;font-size:10px;padding:5px 18px}
     .pl-sym{border-bottom:1px solid #e2e8f0;padding:12px 18px}
     .pl-deep{font-size:9px;padding:0 5px;border-radius:2px;background:#ede9fe;color:#6d28d9;font-weight:600}
+    .pl-chains{margin:5px 0;padding:5px 8px;background:#f0fdf4;border-left:3px solid #16a34a;border-radius:0 4px 4px 0;font-size:10.5px;line-height:1.6}
+    .pl-chain-name{font-weight:700;color:#15803d}
+    .pl-chain-path{margin:2px 0 4px 8px;padding-left:8px;border-left:2px solid #bbf7d0;color:#166534;font-size:10px;line-height:1.55}
+    .pl-chain-step{margin:1px 0}
     .pl-duty{color:#475569;font-size:11px;line-height:1.55;margin:4px 0 2px;
       overflow-wrap:anywhere;white-space:normal}
     .pl-sym-name{font-size:13px;font-weight:700;color:#0f172a;cursor:pointer;display:flex;
@@ -107,6 +111,13 @@
         (s.deep_path ? '<span class="pl-deep">' + esc(s.deep_path) + '::</span>' : '') +
         '<span style="margin-left:auto;color:#94a3b8;font-size:10px">' + s.consumer_count + ' 消费 ▸</span></div>' +
         (s.duty ? '<div class="pl-duty">' + esc(s.duty) + '</div>' : '') +
+        ((s.chains && s.chains.length) ? '<div class="pl-chains">' + s.chains.map(function (c) {
+            return '<div><span class="pl-chain-name">' + esc(c.chain) + '</span>' +
+              (c.role ? ' · ' + esc(c.role) : '') +
+              ((c.path && c.path.length) ? '<div class="pl-chain-path">' + c.path.map(function (st, i) {
+                return '<div class="pl-chain-step">' + (i + 1) + '. ' + esc(st) + '</div>';
+              }).join('') + '</div>' : '') + '</div>';
+        }).join('') + '</div>' : '') +
         '<div class="pl-detail">' +
           (s.signature ? '<div class="pl-sec">定义签名</div><div>' + esc(s.signature) + '</div>' : '') +
           (s.def ? '<div class="pl-sec">定义位置</div><div style="color:#64748b">' + esc(s.def) + '</div>' : '') +

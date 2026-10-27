@@ -182,6 +182,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "窗口/预算链成员（用户已受理输入的追加载荷（含来源请求 id））"
+    }
    ]
   },
   "AcceptedInputError": {
@@ -242,6 +253,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "窗口/预算链成员（已受理输入回写失败分类）"
+    }
    ]
   },
   "BackgroundProcessCompletionStatus": {
@@ -269,6 +291,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "reminder 注入",
+     "path": [
+      "runtime reminder_event → ReminderControlPort(reminder_*)",
+      "→ ReminderPolicy/Dedup 判定 → ReminderSnapshot 入队",
+      "→ build_window 读取 → render_invocation_reminder_body → window message"
+     ],
+     "role": "window 注入链成员（后台进程完成状态：成功 / 失败 / 超时 / 已停止）"
     }
    ]
   },
@@ -309,6 +342,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "reminder 注入",
+     "path": [
+      "runtime reminder_event → ReminderControlPort(reminder_*)",
+      "→ ReminderPolicy/Dedup 判定 → ReminderSnapshot 入队",
+      "→ build_window 读取 → render_invocation_reminder_body → window message"
+     ],
+     "role": "window 注入链成员（后台进程提醒中的单条任务项）"
     }
    ]
   },
@@ -504,6 +548,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "Session 生命周期",
+     "path": [
+      "composition wire_session_management(dataset, blob) → SessionManagementPort",
+      "runtime: list_sessions / resume / update_metadata → adapter canonical_session.rs:925·945·1257",
+      "resume 结果 → SessionItem → sdk chat_event / TUI 渲染"
+     ],
+     "role": "聚合根：历史/metadata/快照的唯一持久化边界"
+    }
    ]
   },
   "CompactBehavior": {
@@ -515,7 +570,18 @@
    "fields": [],
    "methods": [],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "memory 注入",
+     "path": [
+      "turn 边界 accept_step_input → recall_relevant(最新 user 消息)",
+      "→ BM25 → rerank → 门控 → 预算截断 → MemoryRecallEntryData 快照",
+      "→ build_window 注入链 render → window message"
+     ],
+     "role": "window 注入链成员（压缩期提醒行为：压缩前后提醒如何保留或丢弃）"
+    }
+   ]
   },
   "CompactLlmBinding": {
    "kind": "struct",
@@ -555,6 +621,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "compact",
+     "path": [
+      "runtime ChatManualCompaction / auto 触发 → ContextPorts.compact().compact(CompactRequestData)",
+      "→ CompactionDecisionData(L1–L5) → CompactLlmBinding.invoke_text(provider)",
+      "→ canonical_session.rs commit_generated_compact → 新 SourceRevision"
+     ],
+     "role": "LLM 绑定：provider 通用调用端口 + 模型 + 预算"
     }
    ]
   },
@@ -712,6 +789,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "compact",
+     "path": [
+      "runtime ChatManualCompaction / auto 触发 → ContextPorts.compact().compact(CompactRequestData)",
+      "→ CompactionDecisionData(L1–L5) → CompactLlmBinding.invoke_text(provider)",
+      "→ canonical_session.rs commit_generated_compact → 新 SourceRevision"
+     ],
+     "role": "压缩流水线成员（压缩结果：完成（含新修订与摘要）或跳过（含原因））"
+    }
    ]
   },
   "CompactProgressFn": {
@@ -725,7 +813,18 @@
     "emit(&self, stage: CompactStageData, work: CompactWorkData)"
    ],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "compact",
+     "path": [
+      "runtime ChatManualCompaction / auto 触发 → ContextPorts.compact().compact(CompactRequestData)",
+      "→ CompactionDecisionData(L1–L5) → CompactLlmBinding.invoke_text(provider)",
+      "→ canonical_session.rs commit_generated_compact → 新 SourceRevision"
+     ],
+     "role": "压缩流水线成员（压缩进度回调类型：向调用方实时上报阶段与计数）"
+    }
+   ]
   },
   "CompactRequestData": {
    "kind": "struct",
@@ -873,6 +972,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "compact",
+     "path": [
+      "runtime ChatManualCompaction / auto 触发 → ContextPorts.compact().compact(CompactRequestData)",
+      "→ CompactionDecisionData(L1–L5) → CompactLlmBinding.invoke_text(provider)",
+      "→ canonical_session.rs commit_generated_compact → 新 SourceRevision"
+     ],
+     "role": "唯一压缩入口载荷（trigger=Manual/Automatic/PreCompact）"
     }
    ]
   },
@@ -1022,6 +1132,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "compact",
+     "path": [
+      "runtime ChatManualCompaction / auto 触发 → ContextPorts.compact().compact(CompactRequestData)",
+      "→ CompactionDecisionData(L1–L5) → CompactLlmBinding.invoke_text(provider)",
+      "→ canonical_session.rs commit_generated_compact → 新 SourceRevision"
+     ],
+     "role": "压缩流水线成员（压缩结果详情（深路径）：摘要正文、质量档与统计）"
+    }
    ]
   },
   "CompactSkipReason": {
@@ -1033,7 +1154,18 @@
    "fields": [],
    "methods": [],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "compact",
+     "path": [
+      "runtime ChatManualCompaction / auto 触发 → ContextPorts.compact().compact(CompactRequestData)",
+      "→ CompactionDecisionData(L1–L5) → CompactLlmBinding.invoke_text(provider)",
+      "→ canonical_session.rs commit_generated_compact → 新 SourceRevision"
+     ],
+     "role": "压缩流水线成员（压缩跳过原因（深路径）：无需压缩 / 已在进行 / 不可压缩等）"
+    }
+   ]
   },
   "CompactStageData": {
    "kind": "enum",
@@ -1063,6 +1195,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "compact",
+     "path": [
+      "runtime ChatManualCompaction / auto 触发 → ContextPorts.compact().compact(CompactRequestData)",
+      "→ CompactionDecisionData(L1–L5) → CompactLlmBinding.invoke_text(provider)",
+      "→ canonical_session.rs commit_generated_compact → 新 SourceRevision"
+     ],
+     "role": "压缩流水线成员（压缩阶段标识：Preparing / Summarizing / Finaliz）"
+    }
    ]
   },
   "CompactSummaryQuality": {
@@ -1074,7 +1217,18 @@
    "fields": [],
    "methods": [],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "compact",
+     "path": [
+      "runtime ChatManualCompaction / auto 触发 → ContextPorts.compact().compact(CompactRequestData)",
+      "→ CompactionDecisionData(L1–L5) → CompactLlmBinding.invoke_text(provider)",
+      "→ canonical_session.rs commit_generated_compact → 新 SourceRevision"
+     ],
+     "role": "压缩流水线成员（压缩摘要质量档：LLM 生成 / 本地降级（附失败标签））"
+    }
+   ]
   },
   "CompactTaskBatchStatusData": {
    "kind": "module",
@@ -1117,6 +1271,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "compact",
+     "path": [
+      "runtime ChatManualCompaction / auto 触发 → ContextPorts.compact().compact(CompactRequestData)",
+      "→ CompactionDecisionData(L1–L5) → CompactLlmBinding.invoke_text(provider)",
+      "→ canonical_session.rs commit_generated_compact → 新 SourceRevision"
+     ],
+     "role": "压缩流水线成员（任务快照中的批次状态）"
     }
    ]
   },
@@ -1177,6 +1342,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "compact",
+     "path": [
+      "runtime ChatManualCompaction / auto 触发 → ContextPorts.compact().compact(CompactRequestData)",
+      "→ CompactionDecisionData(L1–L5) → CompactLlmBinding.invoke_text(provider)",
+      "→ canonical_session.rs commit_generated_compact → 新 SourceRevision"
+     ],
+     "role": "压缩流水线成员（任务快照中的单条任务项）"
     }
    ]
   },
@@ -1270,6 +1446,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "compact",
+     "path": [
+      "runtime ChatManualCompaction / auto 触发 → ContextPorts.compact().compact(CompactRequestData)",
+      "→ CompactionDecisionData(L1–L5) → CompactLlmBinding.invoke_text(provider)",
+      "→ canonical_session.rs commit_generated_compact → 新 SourceRevision"
+     ],
+     "role": "压缩流水线成员（压缩用的任务快照投影（task crate 定义，context 转发））"
+    }
    ]
   },
   "CompactTaskStatusData": {
@@ -1314,6 +1501,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "compact",
+     "path": [
+      "runtime ChatManualCompaction / auto 触发 → ContextPorts.compact().compact(CompactRequestData)",
+      "→ CompactionDecisionData(L1–L5) → CompactLlmBinding.invoke_text(provider)",
+      "→ canonical_session.rs commit_generated_compact → 新 SourceRevision"
+     ],
+     "role": "压缩流水线成员（任务快照中的任务状态枚举）"
+    }
    ]
   },
   "CompactTrigger": {
@@ -1325,7 +1523,18 @@
    "fields": [],
    "methods": [],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "compact",
+     "path": [
+      "runtime ChatManualCompaction / auto 触发 → ContextPorts.compact().compact(CompactRequestData)",
+      "→ CompactionDecisionData(L1–L5) → CompactLlmBinding.invoke_text(provider)",
+      "→ canonical_session.rs commit_generated_compact → 新 SourceRevision"
+     ],
+     "role": "压缩流水线成员（压缩触发原因：手动 / 自动 / 预压缩等）"
+    }
+   ]
   },
   "CompactWorkData": {
    "kind": "enum",
@@ -1352,6 +1561,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "compact",
+     "path": [
+      "runtime ChatManualCompaction / auto 触发 → ContextPorts.compact().compact(CompactRequestData)",
+      "→ CompactionDecisionData(L1–L5) → CompactLlmBinding.invoke_text(provider)",
+      "→ canonical_session.rs commit_generated_compact → 新 SourceRevision"
+     ],
+     "role": "压缩流水线成员（压缩工作量事实：分块数、已处理块、选中消息数）"
     }
    ]
   },
@@ -1485,6 +1705,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "compact",
+     "path": [
+      "runtime ChatManualCompaction / auto 触发 → ContextPorts.compact().compact(CompactRequestData)",
+      "→ CompactionDecisionData(L1–L5) → CompactLlmBinding.invoke_text(provider)",
+      "→ canonical_session.rs commit_generated_compact → 新 SourceRevision"
+     ],
+     "role": "L1–L5 决策结果（stage/urgency/原因）"
+    }
    ]
   },
   "ContextAppendData": {
@@ -1612,6 +1843,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "窗口/预算链成员（历史回写载荷：待追加消息与其幂等指纹来源）"
+    }
    ]
   },
   "ContextAppendError": {
@@ -1720,6 +1962,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "窗口/预算链成员（历史回写失败分类：修订冲突 / 会话缺失 / 存储错误等）"
+    }
    ]
   },
   "ContextAppendPort": {
@@ -1738,7 +1991,18 @@
     "append_and_persist(\n        &self,\n        append: &ContextAppendData,\n    )"
    ],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "窗口/预算链成员（回写端口：把本轮 step 结果与工具回执追加回会话历史）"
+    }
+   ]
   },
   "ContextCompactPort": {
    "kind": "trait",
@@ -1752,7 +2016,18 @@
     "compact(\n        &self,\n        request: &CompactRequestData,\n    )"
    ],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "窗口/预算链成员（压缩端口：判定是否需要压缩并执行 L1–L5 压缩流水线）"
+    }
+   ]
   },
   "ContextPortError": {
    "kind": "enum",
@@ -1956,6 +2231,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "窗口/预算链成员（context 端口统一错误：按阶段（window/compact/append）"
+    }
    ]
   },
   "ContextPorts": {
@@ -2156,6 +2442,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "四拆端口聚合（window/compact/append/reminder）"
     }
    ]
   },
@@ -2364,6 +2661,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "入站载荷：session/run/step + messages + workspace + 模型参数"
+    }
    ]
   },
   "ContextWindowData": {
@@ -2503,6 +2811,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "窗口/预算链成员（窗口构建产物：system blocks、消息、工具 schema、token ）"
+    }
    ]
   },
   "ContextWindowPort": {
@@ -2516,7 +2835,18 @@
     "build_window(\n        &self,\n        request: &ContextRequestData,\n    )"
    ],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "窗口/预算链成员（窗口构建端口：把请求事实与历史装配成本轮可发送的 context window）"
+    }
+   ]
   },
   "DatasetCanonicalSessionWriter": {
    "kind": "struct",
@@ -2564,6 +2894,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "Session 生命周期",
+     "path": [
+      "composition wire_session_management(dataset, blob) → SessionManagementPort",
+      "runtime: list_sessions / resume / update_metadata → adapter canonical_session.rs:925·945·1257",
+      "resume 结果 → SessionItem → sdk chat_event / TUI 渲染"
+     ],
+     "role": "会话本体：持久化/resume 链成员（canonical 会话写入器：把聚合根原子写入 dataset 目录）"
     }
    ]
   },
@@ -2613,6 +2954,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "Session 生命周期",
+     "path": [
+      "composition wire_session_management(dataset, blob) → SessionManagementPort",
+      "runtime: list_sessions / resume / update_metadata → adapter canonical_session.rs:925·945·1257",
+      "resume 结果 → SessionItem → sdk chat_event / TUI 渲染"
+     ],
+     "role": "会话本体：持久化/resume 链成员（SessionManagementPort 的 dataset 实现：按项目目录）"
+    }
    ]
   },
   "DecisionReason": {
@@ -2624,7 +2976,18 @@
    "fields": [],
    "methods": [],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "compact",
+     "path": [
+      "runtime ChatManualCompaction / auto 触发 → ContextPorts.compact().compact(CompactRequestData)",
+      "→ CompactionDecisionData(L1–L5) → CompactLlmBinding.invoke_text(provider)",
+      "→ canonical_session.rs commit_generated_compact → 新 SourceRevision"
+     ],
+     "role": "压缩流水线成员（判定依据来源：API 上报 / 本地估算 / 强制触发）"
+    }
+   ]
   },
   "DisplayHistoryStepIndexData": {
    "kind": "struct",
@@ -2724,6 +3087,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "Session 生命周期",
+     "path": [
+      "composition wire_session_management(dataset, blob) → SessionManagementPort",
+      "runtime: list_sessions / resume / update_metadata → adapter canonical_session.rs:925·945·1257",
+      "resume 结果 → SessionItem → sdk chat_event / TUI 渲染"
+     ],
+     "role": "会话本体：持久化/resume 链成员（展示历史索引：按步定位历史窗口，供 TUI 分页读取）"
+    }
    ]
   },
   "DisplayHistoryStepWindowData": {
@@ -2756,6 +3130,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "Session 生命周期",
+     "path": [
+      "composition wire_session_management(dataset, blob) → SessionManagementPort",
+      "runtime: list_sessions / resume / update_metadata → adapter canonical_session.rs:925·945·1257",
+      "resume 结果 → SessionItem → sdk chat_event / TUI 渲染"
+     ],
+     "role": "会话本体：持久化/resume 链成员（展示历史窗口切片：一次查询返回的步区间与其边界事实）"
     }
    ]
   },
@@ -2881,6 +3266,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "receipt 收口",
+     "path": [
+      "step finalize(FinalizeCause) → ToolCallReceiptData::to_step_receipt(tool_receipt.rs:80)",
+      "→ runtime coordination 算 fingerprint → ContextAppendData",
+      "→ canonical append_finalized(:1166) → FinalizedOutcomeRecord.receipts 冻结落盘 → SessionAppendReceiptData(提交后 revision)"
+     ],
+     "role": "step 终结原因：Completed/UserCancelledStep/RunTerminated"
+    }
    ]
   },
   "InjectBehavior": {
@@ -2927,6 +3323,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "reminder 注入",
+     "path": [
+      "runtime reminder_event → ReminderControlPort(reminder_*)",
+      "→ ReminderPolicy/Dedup 判定 → ReminderSnapshot 入队",
+      "→ build_window 读取 → render_invocation_reminder_body → window message"
+     ],
+     "role": "window 注入链成员（注入行为档：全文注入 / 摘要注入 / 仅提示存在）"
     }
    ]
   },
@@ -3035,6 +3442,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "reminder 注入",
+     "path": [
+      "runtime reminder_event → ReminderControlPort(reminder_*)",
+      "→ ReminderPolicy/Dedup 判定 → ReminderSnapshot 入队",
+      "→ build_window 读取 → render_invocation_reminder_body → window message"
+     ],
+     "role": "window 注入链成员（调用提醒载荷：本次调用的意图、参数摘要与状态）"
+    }
    ]
   },
   "Language": {
@@ -3065,6 +3483,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "系统提示组装",
+     "path": [
+      "composition: MainContextFactory.build → SystemPromptAssembly::new(instructions_loaded)",
+      "→ assemble(): static(语言分支) → agent_roles → guidance(resolver+缓存) → 后台进程段",
+      "→ Vec<SystemBlock>（cacheable 顺序即 cache prefix）→ build_window 首段"
+     ],
+     "role": "输出语言枚举：决定 static prompt 语言分支"
     }
    ]
   },
@@ -3239,6 +3668,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "装配工厂：writer/skill/compact/instructions 注入 → ContextPorts"
+    }
    ]
   },
   "MemoryRecallEntryData": {
@@ -3270,6 +3710,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "memory 注入",
+     "path": [
+      "turn 边界 accept_step_input → recall_relevant(最新 user 消息)",
+      "→ BM25 → rerank → 门控 → 预算截断 → MemoryRecallEntryData 快照",
+      "→ build_window 注入链 render → window message"
+     ],
+     "role": "召回条目：BM25→rerank→门控→预算后的注入快照"
+    }
    ]
   },
   "NoOpCanonicalSessionWriter": {
@@ -3281,7 +3732,18 @@
    "fields": [],
    "methods": [],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "Session 生命周期",
+     "path": [
+      "composition wire_session_management(dataset, blob) → SessionManagementPort",
+      "runtime: list_sessions / resume / update_metadata → adapter canonical_session.rs:925·945·1257",
+      "resume 结果 → SessionItem → sdk chat_event / TUI 渲染"
+     ],
+     "role": "会话本体：持久化/resume 链成员（不落盘的写入器实现：测试与只读场景使用）"
+    }
+   ]
   },
   "RefreshTrigger": {
    "kind": "enum",
@@ -3317,6 +3779,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "memory 注入",
+     "path": [
+      "turn 边界 accept_step_input → recall_relevant(最新 user 消息)",
+      "→ BM25 → rerank → 门控 → 预算截断 → MemoryRecallEntryData 快照",
+      "→ build_window 注入链 render → window message"
+     ],
+     "role": "window 注入链成员（提醒刷新触发条件：轮次边界 / 工具完成 / 定时等）"
+    }
    ]
   },
   "ReminderControlPort": {
@@ -3336,7 +3809,18 @@
     "reminder_user_message_received(&self, _run_id: &RunId)"
    ],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "窗口/预算链成员（提醒控制端口：创建/推进/注入 reminder 管线）"
+    }
+   ]
   },
   "ReminderDedup": {
    "kind": "enum",
@@ -3347,7 +3831,18 @@
    "fields": [],
    "methods": [],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "reminder 注入",
+     "path": [
+      "runtime reminder_event → ReminderControlPort(reminder_*)",
+      "→ ReminderPolicy/Dedup 判定 → ReminderSnapshot 入队",
+      "→ build_window 读取 → render_invocation_reminder_body → window message"
+     ],
+     "role": "window 注入链成员（提醒去重键：同键提醒不重复注入）"
+    }
+   ]
   },
   "ReminderEventSource": {
    "kind": "struct",
@@ -3443,6 +3938,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "reminder 注入",
+     "path": [
+      "runtime reminder_event → ReminderControlPort(reminder_*)",
+      "→ ReminderPolicy/Dedup 判定 → ReminderSnapshot 入队",
+      "→ build_window 读取 → render_invocation_reminder_body → window message"
+     ],
+     "role": "window 注入链成员（提醒事件源：把运行时事件映射为提醒候选）"
+    }
    ]
   },
   "ReminderKind": {
@@ -3494,6 +4000,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "reminder 注入",
+     "path": [
+      "runtime reminder_event → ReminderControlPort(reminder_*)",
+      "→ ReminderPolicy/Dedup 判定 → ReminderSnapshot 入队",
+      "→ build_window 读取 → render_invocation_reminder_body → window message"
+     ],
+     "role": "window 注入链成员（提醒种类：调用提醒 / 任务进度 / 后台进程完成等）"
+    }
    ]
   },
   "ReminderPlacement": {
@@ -3505,7 +4022,18 @@
    "fields": [],
    "methods": [],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "reminder 注入",
+     "path": [
+      "runtime reminder_event → ReminderControlPort(reminder_*)",
+      "→ ReminderPolicy/Dedup 判定 → ReminderSnapshot 入队",
+      "→ build_window 读取 → render_invocation_reminder_body → window message"
+     ],
+     "role": "window 注入链成员（提醒插入位置：系统提示 / 用户上下文 / 消息尾部）"
+    }
+   ]
   },
   "ReminderPolicy": {
    "kind": "struct",
@@ -3556,6 +4084,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "reminder 注入",
+     "path": [
+      "runtime reminder_event → ReminderControlPort(reminder_*)",
+      "→ ReminderPolicy/Dedup 判定 → ReminderSnapshot 入队",
+      "→ build_window 读取 → render_invocation_reminder_body → window message"
+     ],
+     "role": "window 注入链成员（提醒策略：决定何时刷新、放哪、是否注入与是否随压缩清理）"
+    }
    ]
   },
   "ReminderPriority": {
@@ -3599,6 +4138,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "reminder 注入",
+     "path": [
+      "runtime reminder_event → ReminderControlPort(reminder_*)",
+      "→ ReminderPolicy/Dedup 判定 → ReminderSnapshot 入队",
+      "→ build_window 读取 → render_invocation_reminder_body → window message"
+     ],
+     "role": "window 注入链成员（提醒优先级：同批超预算时的取舍顺序）"
     }
    ]
   },
@@ -3646,6 +4196,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "reminder 注入",
+     "path": [
+      "runtime reminder_event → ReminderControlPort(reminder_*)",
+      "→ ReminderPolicy/Dedup 判定 → ReminderSnapshot 入队",
+      "→ build_window 读取 → render_invocation_reminder_body → window message"
+     ],
+     "role": "window 注入链成员（提醒管线快照：当前排队与已注入提醒的状态）"
+    }
    ]
   },
   "ReminderSource": {
@@ -3663,7 +4224,18 @@
     "confirm_injected(&self)"
    ],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "reminder 注入",
+     "path": [
+      "runtime reminder_event → ReminderControlPort(reminder_*)",
+      "→ ReminderPolicy/Dedup 判定 → ReminderSnapshot 入队",
+      "→ build_window 读取 → render_invocation_reminder_body → window message"
+     ],
+     "role": "window 注入链成员（提醒来源标识：区分不同产生者，用于去重与审计）"
+    }
+   ]
   },
   "SessionManagementError": {
    "kind": "enum",
@@ -3835,6 +4407,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "Session 生命周期",
+     "path": [
+      "composition wire_session_management(dataset, blob) → SessionManagementPort",
+      "runtime: list_sessions / resume / update_metadata → adapter canonical_session.rs:925·945·1257",
+      "resume 结果 → SessionItem → sdk chat_event / TUI 渲染"
+     ],
+     "role": "会话本体：持久化/resume 链成员（会话管理错误分类：NotFound / Invalid / Storage / ）"
+    }
    ]
   },
   "SessionManagementPort": {
@@ -3855,7 +4438,18 @@
     "delete_for_project(\n        &self,\n        id: &str,\n        project: &ProjectI)"
    ],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "Session 生命周期",
+     "path": [
+      "composition wire_session_management(dataset, blob) → SessionManagementPort",
+      "runtime: list_sessions / resume / update_metadata → adapter canonical_session.rs:925·945·1257",
+      "resume 结果 → SessionItem → sdk chat_event / TUI 渲染"
+     ],
+     "role": "端口：list/resume/clear/import 的对外契约"
+    }
+   ]
   },
   "SessionMetadata": {
    "kind": "struct",
@@ -3946,6 +4540,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "Session 生命周期",
+     "path": [
+      "composition wire_session_management(dataset, blob) → SessionManagementPort",
+      "runtime: list_sessions / resume / update_metadata → adapter canonical_session.rs:925·945·1257",
+      "resume 结果 → SessionItem → sdk chat_event / TUI 渲染"
+     ],
+     "role": "会话元数据（model/title 等）读写载体"
+    }
    ]
   },
   "SessionPromptInputsData": {
@@ -3980,6 +4585,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "系统提示组装",
+     "path": [
+      "composition: MainContextFactory.build → SystemPromptAssembly::new(instructions_loaded)",
+      "→ assemble(): static(语言分支) → agent_roles → guidance(resolver+缓存) → 后台进程段",
+      "→ Vec<SystemBlock>（cacheable 顺序即 cache prefix）→ build_window 首段"
+     ],
+     "role": "提示组装链成员（会话级提示组装输入：工作区事实、模型、语言与配置快照）"
     }
    ]
   },
@@ -4078,6 +4694,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "Session 生命周期",
+     "path": [
+      "composition wire_session_management(dataset, blob) → SessionManagementPort",
+      "runtime: list_sessions / resume / update_metadata → adapter canonical_session.rs:925·945·1257",
+      "resume 结果 → SessionItem → sdk chat_event / TUI 渲染"
+     ],
+     "role": "会话本体：持久化/resume 链成员（resume 恢复结果：活动消息、展示历史、压缩标记与裁剪/修复事实）"
+    }
    ]
   },
   "SessionRestoreStepData": {
@@ -4114,6 +4741,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "Session 生命周期",
+     "path": [
+      "composition wire_session_management(dataset, blob) → SessionManagementPort",
+      "runtime: list_sessions / resume / update_metadata → adapter canonical_session.rs:925·945·1257",
+      "resume 结果 → SessionItem → sdk chat_event / TUI 渲染"
+     ],
+     "role": "会话本体：持久化/resume 链成员（resume 恢复的单步展示记录（消息 + 工具调用展示信息））"
+    }
    ]
   },
   "SessionResumeLoad": {
@@ -4128,7 +4766,18 @@
    ],
    "methods": [],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "Session 生命周期",
+     "path": [
+      "composition wire_session_management(dataset, blob) → SessionManagementPort",
+      "runtime: list_sessions / resume / update_metadata → adapter canonical_session.rs:925·945·1257",
+      "resume 结果 → SessionItem → sdk chat_event / TUI 渲染"
+     ],
+     "role": "会话本体：持久化/resume 链成员（磁盘会话加载产物：canonical 信封 + 解码后的恢复上下文）"
+    }
+   ]
   },
   "SessionRevision": {
    "kind": "struct",
@@ -4276,6 +4925,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "Session 生命周期",
+     "path": [
+      "composition wire_session_management(dataset, blob) → SessionManagementPort",
+      "runtime: list_sessions / resume / update_metadata → adapter canonical_session.rs:925·945·1257",
+      "resume 结果 → SessionItem → sdk chat_event / TUI 渲染"
+     ],
+     "role": "CAS 单调版本：每次提交 +1，回执与冲突检测依据"
+    }
    ]
   },
   "SystemBlock": {
@@ -4292,7 +4952,18 @@
    ],
    "methods": [],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "系统块载体：kind/content/cacheable/cache_break"
+    }
+   ]
   },
   "SystemPromptAssembly": {
    "kind": "struct",
@@ -4323,6 +4994,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "系统提示组装",
+     "path": [
+      "composition: MainContextFactory.build → SystemPromptAssembly::new(instructions_loaded)",
+      "→ assemble(): static(语言分支) → agent_roles → guidance(resolver+缓存) → 后台进程段",
+      "→ Vec<SystemBlock>（cacheable 顺序即 cache prefix）→ build_window 首段"
+     ],
+     "role": "组装器：静态提示→agent 名册→guidance→后台段，缓存 guidance"
     }
    ]
   },
@@ -4357,6 +5039,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "reminder 注入",
+     "path": [
+      "runtime reminder_event → ReminderControlPort(reminder_*)",
+      "→ ReminderPolicy/Dedup 判定 → ReminderSnapshot 入队",
+      "→ build_window 读取 → render_invocation_reminder_body → window message"
+     ],
+     "role": "window 注入链成员（任务进度提醒载荷：清单进度与阻塞项）"
+    }
    ]
   },
   "TaskProgressReminderItemData": {
@@ -4390,6 +5083,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "reminder 注入",
+     "path": [
+      "runtime reminder_event → ReminderControlPort(reminder_*)",
+      "→ ReminderPolicy/Dedup 判定 → ReminderSnapshot 入队",
+      "→ build_window 读取 → render_invocation_reminder_body → window message"
+     ],
+     "role": "window 注入链成员（任务进度提醒中的单条任务项）"
+    }
    ]
   },
   "TaskProgressStatus": {
@@ -4401,7 +5105,18 @@
    "fields": [],
    "methods": [],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "reminder 注入",
+     "path": [
+      "runtime reminder_event → ReminderControlPort(reminder_*)",
+      "→ ReminderPolicy/Dedup 判定 → ReminderSnapshot 入队",
+      "→ build_window 读取 → render_invocation_reminder_body → window message"
+     ],
+     "role": "window 注入链成员（任务进度状态：pending / in_progress / completed）"
+    }
+   ]
   },
   "TokenBudget": {
    "kind": "struct",
@@ -4481,6 +5196,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "用量与阈值单一真相：context_window/output/reserved"
     }
    ]
   },
@@ -4631,6 +5357,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "receipt 写入",
+     "path": [
+      "runtime execution_supervisor.terminal_receipt → ToolTerminalReceiptData",
+      "→ context advance_tool_receipt(canonical_session.rs:1010): 状态机+幂等",
+      "→ persist_candidate(member 原子提交, revision+1) → MutationReceiptData{receipt,changed}"
+     ],
+     "role": "对账键：session/run/step + runtime/provider call id + 序号 + agent"
+    }
    ]
   },
   "ToolCallReceiptData": {
@@ -4667,6 +5404,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "receipt 写入",
+     "path": [
+      "runtime execution_supervisor.terminal_receipt → ToolTerminalReceiptData",
+      "→ context advance_tool_receipt(canonical_session.rs:1010): 状态机+幂等",
+      "→ persist_candidate(member 原子提交, revision+1) → MutationReceiptData{receipt,changed}"
+     ],
+     "role": "运行期活账本：identity+input+state，随 member 原子提交"
+    }
    ]
   },
   "ToolCallState": {
@@ -4678,7 +5426,18 @@
    "fields": [],
    "methods": [],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "receipt 写入",
+     "path": [
+      "runtime execution_supervisor.terminal_receipt → ToolTerminalReceiptData",
+      "→ context advance_tool_receipt(canonical_session.rs:1010): 状态机+幂等",
+      "→ persist_candidate(member 原子提交, revision+1) → MutationReceiptData{receipt,changed}"
+     ],
+     "role": "状态机：Pending→Running→(Backgrounded)→Terminal"
+    }
+   ]
   },
   "ToolOutcomeKindData": {
    "kind": "enum",
@@ -4689,7 +5448,18 @@
    "fields": [],
    "methods": [],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "receipt 写入",
+     "path": [
+      "runtime execution_supervisor.terminal_receipt → ToolTerminalReceiptData",
+      "→ context advance_tool_receipt(canonical_session.rs:1010): 状态机+幂等",
+      "→ persist_candidate(member 原子提交, revision+1) → MutationReceiptData{receipt,changed}"
+     ],
+     "role": "终态种类：CancellationUnconfirmed 驱动脏取消判定"
+    }
+   ]
   },
   "ToolReceiptMutationData": {
    "kind": "struct",
@@ -4790,6 +5560,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "receipt 写入",
+     "path": [
+      "runtime execution_supervisor.terminal_receipt → ToolTerminalReceiptData",
+      "→ context advance_tool_receipt(canonical_session.rs:1010): 状态机+幂等",
+      "→ persist_candidate(member 原子提交, revision+1) → MutationReceiptData{receipt,changed}"
+     ],
+     "role": "变更命令：identity+preview+next，构造器 running/terminal/backgrounded"
+    }
    ]
   },
   "ToolReceiptMutationError": {
@@ -4882,6 +5663,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "receipt 写入",
+     "path": [
+      "runtime execution_supervisor.terminal_receipt → ToolTerminalReceiptData",
+      "→ context advance_tool_receipt(canonical_session.rs:1010): 状态机+幂等",
+      "→ persist_candidate(member 原子提交, revision+1) → MutationReceiptData{receipt,changed}"
+     ],
+     "role": "receipt 链成员（工具回执变更失败分类）"
+    }
    ]
   },
   "ToolReceiptMutationReceiptData": {
@@ -4953,6 +5745,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "receipt 写入",
+     "path": [
+      "runtime execution_supervisor.terminal_receipt → ToolTerminalReceiptData",
+      "→ context advance_tool_receipt(canonical_session.rs:1010): 状态机+幂等",
+      "→ persist_candidate(member 原子提交, revision+1) → MutationReceiptData{receipt,changed}"
+     ],
+     "role": "receipt 链成员（工具回执变更回执：确认变更后的修订）"
+    }
    ]
   },
   "ToolTerminalReceiptData": {
@@ -5007,6 +5810,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "receipt 写入",
+     "path": [
+      "runtime execution_supervisor.terminal_receipt → ToolTerminalReceiptData",
+      "→ context advance_tool_receipt(canonical_session.rs:1010): 状态机+幂等",
+      "→ persist_candidate(member 原子提交, revision+1) → MutationReceiptData{receipt,changed}"
+     ],
+     "role": "终态事实：outcome/safe_reason/副作用/未收敛/cleanup"
+    }
    ]
   },
   "Urgency": {
@@ -5018,7 +5832,18 @@
    "fields": [],
    "methods": [],
    "consumer_count": 0,
-   "consumers": []
+   "consumers": [],
+   "chains": [
+    {
+     "chain": "compact",
+     "path": [
+      "runtime ChatManualCompaction / auto 触发 → ContextPorts.compact().compact(CompactRequestData)",
+      "→ CompactionDecisionData(L1–L5) → CompactLlmBinding.invoke_text(provider)",
+      "→ canonical_session.rs commit_generated_compact → 新 SourceRevision"
+     ],
+     "role": "压缩流水线成员（压缩紧急度：None / Monitor / Should / Must）"
+    }
+   ]
   },
   "WorkspaceSkillQueryFactory": {
    "kind": "struct",
@@ -5047,6 +5872,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "窗口/预算链成员（按请求与工作区快照构造技能查询条件）"
     }
    ]
   },
@@ -5078,6 +5914,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "系统提示组装",
+     "path": [
+      "composition: MainContextFactory.build → SystemPromptAssembly::new(instructions_loaded)",
+      "→ assemble(): static(语言分支) → agent_roles → guidance(resolver+缓存) → 后台进程段",
+      "→ Vec<SystemBlock>（cacheable 顺序即 cache prefix）→ build_window 首段"
+     ],
+     "role": "提示组装链成员（guidance 内容安全扫描：返回加警告前缀的正文与命中清单）"
+    }
    ]
   },
   "estimate_messages_tokens": {
@@ -5107,6 +5954,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "窗口/预算链成员（消息列表 token 估算（中英文分档系数））"
     }
    ]
   },
@@ -5138,6 +5996,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "窗口/预算链成员（工具 schema token 估算（供预算与压缩判定））"
+    }
    ]
   },
   "init_guidance_dir": {
@@ -5167,6 +6036,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "系统提示组装",
+     "path": [
+      "composition: MainContextFactory.build → SystemPromptAssembly::new(instructions_loaded)",
+      "→ assemble(): static(语言分支) → agent_roles → guidance(resolver+缓存) → 后台进程段",
+      "→ Vec<SystemBlock>（cacheable 顺序即 cache prefix）→ build_window 首段"
+     ],
+     "role": "提示组装链成员（初始化 guidance 目录与占位文件）"
     }
    ]
   },
@@ -5198,6 +6078,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "系统提示组装",
+     "path": [
+      "composition: MainContextFactory.build → SystemPromptAssembly::new(instructions_loaded)",
+      "→ assemble(): static(语言分支) → agent_roles → guidance(resolver+缓存) → 后台进程段",
+      "→ Vec<SystemBlock>（cacheable 顺序即 cache prefix）→ build_window 首段"
+     ],
+     "role": "提示组装链成员（预压缩阶段选出用于记忆反思的消息集合）"
+    }
    ]
   },
   "new_session_id": {
@@ -5227,6 +6118,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "Session 生命周期",
+     "path": [
+      "composition wire_session_management(dataset, blob) → SessionManagementPort",
+      "runtime: list_sessions / resume / update_metadata → adapter canonical_session.rs:925·945·1257",
+      "resume 结果 → SessionItem → sdk chat_event / TUI 渲染"
+     ],
+     "role": "会话本体：持久化/resume 链成员（生成会话 ID（uuidv7，时间有序））"
     }
    ]
   },
@@ -5273,6 +6175,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "reminder 注入",
+     "path": [
+      "runtime reminder_event → ReminderControlPort(reminder_*)",
+      "→ ReminderPolicy/Dedup 判定 → ReminderSnapshot 入队",
+      "→ build_window 读取 → render_invocation_reminder_body → window message"
+     ],
+     "role": "window 注入链成员（把调用提醒载荷渲染为注入正文（含 XML envelope））"
     }
    ]
   },
@@ -5478,6 +6391,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "Session 生命周期",
+     "path": [
+      "composition wire_session_management(dataset, blob) → SessionManagementPort",
+      "runtime: list_sessions / resume / update_metadata → adapter canonical_session.rs:925·945·1257",
+      "resume 结果 → SessionItem → sdk chat_event / TUI 渲染"
+     ],
+     "role": "会话本体：持久化/resume 链成员（跨 crate 测试支撑面（cfg 开启）：内存会话、假端口等装配 helper）"
+    }
    ]
   },
   "wire_isolated_context": {
@@ -5524,6 +6448,17 @@
       }
      ]
     }
+   ],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "窗口/预算链成员（装配内存隔离的 ContextPorts（无磁盘、无记忆源），供测试与内嵌场景）"
+    }
    ]
   },
   "wire_isolated_context_with_workspace_skills": {
@@ -5553,6 +6488,17 @@
        "at": 2
       }
      ]
+    }
+   ],
+   "chains": [
+    {
+     "chain": "window 构建",
+     "path": [
+      "runtime run_launch → ContextRequestCoordinator::build_request",
+      "→ ContextPorts.window().build_window(context_request.rs) → ContextApplicationService::build_window",
+      "→ 读 CanonicalSession 历史 + SystemBlock 组装 + memory 注入 → ContextWindowData 回 runtime"
+     ],
+     "role": "窗口/预算链成员（同上，但技能查询绑定真实工作区读取端口）"
     }
    ]
   },
@@ -5709,6 +6655,17 @@
      "line": 207,
      "note": "外部唯一消费：读 outcome 字段判定 CancellationUnconfirmed"
     }
+   ],
+   "chains": [
+    {
+     "chain": "receipt 收口",
+     "path": [
+      "step finalize(FinalizeCause) → ToolCallReceiptData::to_step_receipt(tool_receipt.rs:80)",
+      "→ runtime coordination 算 fingerprint → ContextAppendData",
+      "→ canonical append_finalized(:1166) → FinalizedOutcomeRecord.receipts 冻结落盘 → SessionAppendReceiptData(提交后 revision)"
+     ],
+     "role": "step 终态摘要（纯 DTO）：finalize 冻结，reading 侧只读"
+    }
    ]
   },
   "SessionAppendReceiptData": {
@@ -5735,6 +6692,17 @@
      "file": "agent/features/context/src/ports/context_port.rs",
      "line": 46,
      "note": "append_finalized / accept_input 返回"
+    }
+   ],
+   "chains": [
+    {
+     "chain": "receipt 收口",
+     "path": [
+      "step finalize(FinalizeCause) → ToolCallReceiptData::to_step_receipt(tool_receipt.rs:80)",
+      "→ runtime coordination 算 fingerprint → ContextAppendData",
+      "→ canonical append_finalized(:1166) → FinalizedOutcomeRecord.receipts 冻结落盘 → SessionAppendReceiptData(提交后 revision)"
+     ],
+     "role": "提交回执：run/step + 提交后 revision（两种 append 共用）"
     }
    ]
   }
