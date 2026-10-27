@@ -48,7 +48,13 @@ fi
 cargo build --release --package cli "${FEATURE_ARGS[@]}" --jobs "$CARGO_BUILD_JOBS"
 
 mkdir -p "$INSTALL_DIR"
-cp "$TARGET_DIR/release/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
+# 运行中的 aemeath 进程持有旧 inode，直接 cp 覆盖目标会报 ETXTBSY（文本文件忙）
+# 并以非零退出结束脚本。先写同目录临时文件再原子 rename：正在运行的旧二进制
+# 不受影响，新启动的进程使用新版本。
+INSTALL_TMP="$INSTALL_DIR/.$BIN_NAME.tmp"
+cp "$TARGET_DIR/release/$BIN_NAME" "$INSTALL_TMP"
+chmod 755 "$INSTALL_TMP"
+mv -f "$INSTALL_TMP" "$INSTALL_DIR/$BIN_NAME"
 
 # macOS Gatekeeper kills freshly-copied ad-hoc signed binaries on some
 # versions due to `com.apple.provenance` xattr + signature mismatch after
