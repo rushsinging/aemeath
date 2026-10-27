@@ -1,4 +1,17 @@
+use std::io::{self, Write};
 use std::path::Path;
+
+/// OSC 52 payload 上限（base64 编码后字节数）：主流终端对超长序列会静默丢弃或截断。
+const OSC52_MAX_ENCODED_BYTES: usize = 100_000;
+
+/// 复制落点：系统剪贴板或终端 OSC 52，调用方据此给出不同提示。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopyOutcome {
+    /// 已写入系统剪贴板（有图形会话且 arboard 成功）。
+    SystemClipboard,
+    /// 已写入终端 OSC 52 序列（SSH / 无图形会话，或系统剪贴板失败的降级路径）。
+    TerminalOsc52,
+}
 
 /// TUI 本地读取到的图片：已编码字节 + 媒体类型。
 pub struct LocalImage {
@@ -24,17 +37,75 @@ pub async fn read_image() -> Result<LocalImage, String> {
     })
 }
 
-/// 把文本写入系统剪贴板；与读图共用同一个 `arboard` 边界。
-pub fn copy_text(text: &str) -> Result<(), String> {
+/// 复制文本：有图形会话优先系统剪贴板，失败或无图形会话（SSH / tty）时降级
+/// 为终端 OSC 52 序列（`ESC]52;c;<base64>BEL`，由终端模拟器写入**本地**剪贴板）。
+///
+/// OSC 52 是 SSH 远程场景的标准通道；终端不支持时序列无害，**NEVER** 猜测终端能力。
+pub fn copy_text(text: &str) -> Result<CopyOutcome, String> {
     if text.is_empty() {
-        return Ok(());
+        return Ok(CopyOutcome::SystemClipboard);
     }
 
+    let graphic_session = graphic_session_present(
+        std::env::var("DISPLAY").ok().as_deref(),
+        std::env::var("WAYLAND_DISPLAY").ok().as_deref(),
+    );
+    let mut stdout = io::stdout();
+    copy_text_via(text, graphic_session, system_clipboard_set, &mut stdout)
+}
+
+/// `copy_text` 的可测核心：图形会话标志、系统剪贴板写入器与终端 writer 均可注入。
+fn copy_text_via(
+    text: &str,
+    graphic_session: bool,
+    set_system_clipboard: impl FnOnce(&str) -> Result<(), String>,
+    writer: &mut impl Write,
+) -> Result<CopyOutcome, String> {
+    if graphic_session {
+        match set_system_clipboard(text) {
+            Ok(()) => return Ok(CopyOutcome::SystemClipboard),
+            Err(error) => crate::tui::log_warn!("系统剪贴板不可用，降级为终端 OSC 52：{error}"),
+        }
+    }
+
+    write_osc52_clipboard(writer, text)?;
+    Ok(CopyOutcome::TerminalOsc52)
+}
+
+/// 写入系统剪贴板（arboard 边界，与读图共用同一错误映射）。
+fn system_clipboard_set(text: &str) -> Result<(), String> {
     let mut clipboard =
         arboard::Clipboard::new().map_err(|error| clipboard_error("连接系统剪贴板", error))?;
     clipboard
         .set_text(text)
         .map_err(|error| clipboard_error("写入剪贴板", error))
+}
+
+/// 是否存在图形会话（`DISPLAY` / `WAYLAND_DISPLAY` 任一非空）。
+fn graphic_session_present(display: Option<&str>, wayland_display: Option<&str>) -> bool {
+    let present = |value: Option<&str>| value.is_some_and(|value| !value.trim().is_empty());
+    present(display) || present(wayland_display)
+}
+
+fn encode_osc52_payload(text: &str) -> String {
+    use base64::Engine;
+
+    base64::engine::general_purpose::STANDARD.encode(text)
+}
+
+/// 将 OSC 52 序列写入终端 writer（生产入口为 `stdout`）。
+fn write_osc52_clipboard(writer: &mut impl Write, text: &str) -> Result<(), String> {
+    let encoded = encode_osc52_payload(text);
+    if encoded.len() > OSC52_MAX_ENCODED_BYTES {
+        return Err(format!(
+            "待复制内容过长（编码后 {} 字节），超出终端 OSC 52 上限 {OSC52_MAX_ENCODED_BYTES}",
+            encoded.len()
+        ));
+    }
+    writer
+        .write_all(format!("\x1b]52;c;{encoded}\x07").as_bytes())
+        .and_then(|()| writer.flush())
+        .map_err(|error| format!("写入终端 OSC 52 失败：{error}"))
 }
 
 /// TUI 本地处理图片文件

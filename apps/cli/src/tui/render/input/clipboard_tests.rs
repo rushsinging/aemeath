@@ -10,12 +10,126 @@ fn copy_text_empty_is_ok() {
 #[test]
 fn copy_text_reports_chinese_error_or_succeeds() {
     match copy_text("测试") {
-        Ok(()) => {}
+        Ok(_) => {}
         Err(error) => assert!(
             error.contains("剪贴板"),
             "错误消息应为中文剪贴板语境，实际: {error}"
         ),
     }
+}
+
+// ---- OSC 52 终端剪贴板（SSH / 无图形会话路径） ----
+
+#[test]
+fn graphic_session_present_detects_display_variants() {
+    assert!(graphic_session_present(Some(":0"), None));
+    assert!(graphic_session_present(None, Some("wayland-0")));
+    assert!(graphic_session_present(Some(":0"), Some("wayland-0")));
+    assert!(!graphic_session_present(None, None));
+    assert!(!graphic_session_present(Some("   "), Some("")));
+}
+
+#[test]
+fn write_osc52_wraps_base64_payload() {
+    let mut buffer = Vec::new();
+
+    write_osc52_clipboard(&mut buffer, "hello").expect("写入成功");
+
+    assert_eq!(buffer, b"\x1b]52;c;aGVsbG8=\x07");
+}
+
+/// 内容中的控制字符 / Unicode 经 base64 编码后不得破坏序列边界。
+#[test]
+fn write_osc52_round_trips_unicode_and_control_characters() {
+    use base64::Engine;
+
+    let text = "中文\t复制\n🙂\x1b";
+    let mut buffer = Vec::new();
+    write_osc52_clipboard(&mut buffer, text).expect("写入成功");
+    let sequence = String::from_utf8(buffer).expect("序列是 utf8");
+
+    let encoded = sequence
+        .strip_prefix("\x1b]52;c;")
+        .and_then(|body| body.strip_suffix('\x07'))
+        .expect("序列必须为 OSC 52 包裹格式");
+    let decoded = String::from_utf8(
+        base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .expect("payload 必须是合法 base64"),
+    )
+    .expect("解码结果必须是 utf8");
+    assert_eq!(decoded, text);
+    assert_eq!(
+        sequence.matches('\x07').count(),
+        1,
+        "BEL 仅允许作为终止符出现: {sequence:?}"
+    );
+}
+
+/// 无图形会话（SSH / tty）：NEVER 连接系统剪贴板，直接走 OSC 52。
+#[test]
+fn copy_text_uses_terminal_osc52_when_no_graphic_session() {
+    let mut buffer = Vec::new();
+
+    let outcome = copy_text_via(
+        "选中文本",
+        false,
+        |_| panic!("无图形会话时 NEVER 连接系统剪贴板"),
+        &mut buffer,
+    )
+    .expect("OSC 52 写入成功");
+
+    assert!(matches!(outcome, CopyOutcome::TerminalOsc52));
+    assert!(!buffer.is_empty(), "必须写出 OSC 52 序列");
+}
+
+#[test]
+fn copy_text_prefers_system_clipboard_when_available() {
+    let mut buffer = Vec::new();
+    let mut received = String::new();
+
+    let outcome = copy_text_via(
+        "文本",
+        true,
+        |text| {
+            received = text.to_string();
+            Ok(())
+        },
+        &mut buffer,
+    )
+    .expect("系统剪贴板写入成功");
+
+    assert!(matches!(outcome, CopyOutcome::SystemClipboard));
+    assert_eq!(received, "文本");
+    assert!(buffer.is_empty(), "系统剪贴板成功时 NEVER 写 OSC 52");
+}
+
+/// 有图形会话但系统剪贴板失败（X11 超时等）：降级为 OSC 52。
+#[test]
+fn copy_text_falls_back_to_osc52_when_system_clipboard_fails() {
+    let mut buffer = Vec::new();
+
+    let outcome = copy_text_via(
+        "文本",
+        true,
+        |_| Err("连接系统剪贴板失败：x11 server connection timeout".to_string()),
+        &mut buffer,
+    )
+    .expect("降级 OSC 52 成功");
+
+    assert!(matches!(outcome, CopyOutcome::TerminalOsc52));
+    assert!(!buffer.is_empty(), "必须写出 OSC 52 序列");
+}
+
+#[test]
+fn copy_text_rejects_oversized_osc52_payload() {
+    let mut buffer = Vec::new();
+    let oversized = "a".repeat(OSC52_MAX_ENCODED_BYTES);
+
+    let error = copy_text_via(&oversized, false, |_| Ok(()), &mut buffer)
+        .expect_err("超出终端 OSC 52 上限必须失败");
+
+    assert!(error.contains("过长"), "错误应说明内容过长，实际: {error}");
 }
 
 #[test]
