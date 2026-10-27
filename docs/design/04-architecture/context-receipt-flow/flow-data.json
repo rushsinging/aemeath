@@ -53,7 +53,7 @@
   "defects": [
    {
     "code": "C",
-    "text": "WAL 条件 7 缺 5：无新旧比较、无 finalize 收纳确认、/clear 不清、compact 不回收、崩溃窗口无测试；dataset 入口不 overlay。半吊子 WAL = 假恢复保证"
+    "text": "【C 阶段已修复】WAL 条件 7 缺 5：无新旧比较、无 finalize 收纳确认、/clear 不清、compact 不回收、崩溃窗口无测试；dataset 入口不 overlay。半吊子 WAL = 假恢复保证"
    }
   ],
   "label": "边车双写"
@@ -71,7 +71,7 @@
   "defects": [
    {
     "code": "C",
-    "text": "与 sidecar 构成双写；两写点之间的失败窗口行为 legacy/dataset 不同"
+    "text": "【C 阶段已修复】与 sidecar 构成双写；两写点之间的失败窗口行为 legacy/dataset 不同"
    }
   ],
   "label": "会话提交"
@@ -102,11 +102,11 @@
   "defects": [
    {
     "code": "B2",
-    "text": "丢 cleanup 字段；artifact_refs 无任何生产写入源但进指纹与盘格式"
+    "text": "【B2 已修复】丢 cleanup 字段；artifact_refs 无任何生产写入源但进指纹与盘格式"
    },
    {
     "code": "B3",
-    "text": "call-id 回退规则在 restore.rs:274 provider_call_id() 重复实现"
+    "text": "【B3 已修复】call-id 回退规则在 restore.rs:274 provider_call_id() 重复实现"
    }
   ],
   "label": "收口压扁"
@@ -138,7 +138,7 @@
   "defects": [
    {
     "code": "A2",
-    "text": "回填发生在 fingerprint 计算之后 → 指纹不能证明落盘内容；重试可能因实时 receipt 已变而假冲突；两份重复逻辑"
+    "text": "【A 阶段已修复】回填发生在 fingerprint 计算之后 → 指纹不能证明落盘内容；重试可能因实时 receipt 已变而假冲突；两份重复逻辑"
    }
   ],
   "label": "空回填"
@@ -157,7 +157,7 @@
   "defects": [
    {
     "code": "A1",
-    "text": "revision 语义相反：同一 port 两个 adapter 对 accept 返回不同值（canonical N / in_memory N+1），canonical accept 甚至不推进 revision"
+    "text": "【A 阶段已修复】revision 语义相反：同一 port 两个 adapter 对 accept 返回不同值（canonical N / in_memory N+1），canonical accept 甚至不推进 revision"
    }
   ],
   "label": "提交回执"
@@ -175,7 +175,7 @@
   "defects": [
    {
     "code": "B1",
-    "text": "finalize 后后台调用仍可推进 → 实时与冻结快照永久分叉，无版本关联或对账"
+    "text": "【B1 已修复】finalize 后后台调用仍可推进 → 实时与冻结快照永久分叉，无版本关联或对账"
    }
   ],
   "label": "实时读"
@@ -193,7 +193,7 @@
   "defects": [
    {
     "code": "B1",
-    "text": "双真相里'落盘却无人读'的那份"
+    "text": "【B1 已修复】双真相里'落盘却无人读'的那份"
    }
   ],
   "label": "冻结快照"
@@ -224,7 +224,7 @@
   "defects": [
    {
     "code": "B3",
-    "text": "call-id 回退规则与 to_step_receipt 重复实现，规则变更需改两处"
+    "text": "【B3 已修复】call-id 回退规则与 to_step_receipt 重复实现，规则变更需改两处"
    }
   ],
   "label": "恢复修复"
@@ -242,7 +242,7 @@
   "defects": [
    {
     "code": "C",
-    "text": "overlay 直接 advance 叠加，无新旧比较，可能把旧调用重新带回（/clear 后复活路径）"
+    "text": "【C 阶段已修复】overlay 直接 advance 叠加，无新旧比较，可能把旧调用重新带回（/clear 后复活路径）"
    }
   ],
   "label": "旧式恢复"
@@ -260,7 +260,7 @@
   "defects": [
    {
     "code": "C",
-    "text": "恢复入口不对称：同一份数据 legacy 能恢复、dataset 静默丢"
+    "text": "【C 阶段已修复】恢复入口不对称：同一份数据 legacy 能恢复、dataset 静默丢"
    }
   ],
   "label": "数据集恢复"
@@ -279,7 +279,7 @@
   "defects": [
    {
     "code": "C",
-    "text": "两 adapter 行为相反；canonical 清后 legacy overlay 可把旧 receipt 复活"
+    "text": "【C 阶段已修复】两 adapter 行为相反；canonical 清后 legacy overlay 可把旧 receipt 复活"
    }
   ],
   "label": "清空边界"
@@ -297,7 +297,7 @@
   "defects": [
    {
     "code": "C",
-    "text": "sidecar 无生命周期终点，文件无限增长且语义含混"
+    "text": "【C 阶段已修复】sidecar 无生命周期终点，文件无限增长且语义含混"
    }
   ],
   "label": "压缩之后"
