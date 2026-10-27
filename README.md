@@ -38,6 +38,23 @@ aemeath/
 └── README.md               # 仓库入口
 ```
 
+## 本地构建
+
+```bash
+./build_cli.sh        # 构建并安装到 ~/.local/bin/aemeath
+```
+
+构建脚本默认仅在 **macOS arm64** 启用 `composition/systemone-daemon` feature（编译 llama.cpp 原生评分引擎，支持 `systemone serve`）；其他平台 embedded 引擎不支持，默认关闭以免徒增编译时间与体积。
+
+- **macOS**：Xcode Command Line Tools 自带 clang，开箱可用。
+- **Ubuntu/Debian**：如需显式开启该 feature（`AEMEATH_CLI_FEATURES="composition/systemone-daemon" ./build_cli.sh`），需先安装 clang 内置 C 标准头，否则构建报 `'stdbool.h' file not found`：
+
+  ```bash
+  sudo apt install libclang-common-18-dev   # Ubuntu 24.04；其他版本按系统 clang 版本选择
+  ```
+
+- 瘦身安装：`AEMEATH_CLI_FEATURES= ./build_cli.sh`（空串关闭默认 feature）。
+
 ## 文档入口
 
 - 设计真相源：[`docs/design/README.md`](docs/design/README.md)
