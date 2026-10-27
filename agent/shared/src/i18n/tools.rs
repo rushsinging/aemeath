@@ -7,4 +7,5 @@ pub mod core;
 pub mod filesystem;
 pub mod task;
 pub mod web;
+pub mod workflow;
 pub mod worktree;

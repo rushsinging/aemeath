@@ -9,7 +9,7 @@ use std::{collections::HashMap, sync::Arc};
 use crate::adapters::{
     catalog::{CatalogAdapter, ToolBacking, ToolBackingError},
     execution::ExecutionAdapter,
-    registry::{profile_for, register_named_scope, BuiltinRegistryScope},
+    registry::{profile_for, register_named_scope, BuiltinRegistryScope, BuiltinRegistryWiring},
     tool_registry::ToolRegistry,
 };
 use crate::domain::{
@@ -101,12 +101,16 @@ pub fn wire_builtin_catalog_execution(
     for scope_kind in [BuiltinRegistryScope::Main, BuiltinRegistryScope::SubAgent] {
         let scope = register_named_scope(
             &registry,
-            task_access.clone(),
-            memory_source.clone(),
-            workspace_control.clone(),
-            skill_loader.clone(),
-            skill_catalog.clone(),
-            background_source.clone(),
+            BuiltinRegistryWiring {
+                task_access: task_access.clone(),
+                memory_source: memory_source.clone(),
+                workspace_control: workspace_control.clone(),
+                skill_loader: skill_loader.clone(),
+                skill_catalog: skill_catalog.clone(),
+                background_source: background_source.clone(),
+                // Workflow backend 由 #2085 起注入；未注入时不注册六工具。
+                workflow_backend: None,
+            },
             scope_kind,
         );
         let profile = profile_for(scope_kind, &main_profile);

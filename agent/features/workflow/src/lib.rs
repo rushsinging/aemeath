@@ -6,12 +6,19 @@
 //!
 //! 设计真相源：`docs/design/02-modules/workflow/01-workflow-design.md`。
 pub mod domain;
+pub mod ports;
 
 mod constants;
 
 pub(crate) use constants::LOG_TARGET;
 
 pub use domain::{
-    ActiveMode, EdgeDefinition, GraphError, GraphInvariantReason, Kernel, NodeDefinition, NodeId,
-    NodeKind, NodeStatus, Role, WorkflowDefinition, WorkflowStatus,
+    ActiveMode, AllowedAction, CreateWorkflowSpec, EdgeDefinition, EvidenceKind, EvidenceRef,
+    FactSummaryData, GraphError, GraphInvariantReason, Kernel, LifecycleAction,
+    LifecycleResultData, ListWorkflowsData, ListWorkflowsQuery, NodeAction, NodeDefinition, NodeId,
+    NodeKind, NodeStatus, NodeSummaryCounts, NodeUpdateResultData, NodeViewData, PendingNodeUpdate,
+    PendingRewrites, QueryWorkflowQuery, RejoinEdge, ReplanBoundary, ReplanResultData,
+    ReplanWorkflowCommand, Role, SuccessorDecision, UpdateNodeCommand, UpdateWorkflowCommand,
+    WorkflowDefinition, WorkflowDetailData, WorkflowStatus, WorkflowSummaryData, WorkflowToolError,
 };
+pub use ports::WorkflowToolBackend;

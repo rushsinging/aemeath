@@ -4836,6 +4836,7 @@ dependencies = [
  "url",
  "utils",
  "uuid",
+ "workflow",
 ]
 
 [[package]]
@@ -5750,6 +5751,7 @@ dependencies = [
 name = "workflow"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "log",
  "serde",
  "serde_json",

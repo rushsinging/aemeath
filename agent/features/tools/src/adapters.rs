@@ -68,3 +68,4 @@ pub mod tool_registry;
 
 #[cfg(feature = "test-harness")]
 pub mod test_harness;
+pub mod workflow_tool;

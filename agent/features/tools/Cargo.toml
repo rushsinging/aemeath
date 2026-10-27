@@ -12,6 +12,7 @@ project = { path = "../project" }
 memory = { path = "../memory" }
 systemone = { path = "../systemone" }
 task = { path = "../task" }
+workflow = { path = "../workflow" }
 utils = { path = "../../../packages/global/utils" }
 tokio = { workspace = true }
 serde = { workspace = true }

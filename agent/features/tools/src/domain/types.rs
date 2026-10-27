@@ -35,7 +35,21 @@ pub mod glob;
 pub mod grep;
 pub mod read;
 pub mod web_fetch;
+pub mod workflow;
 pub mod write;
+
+// Workflow Tool 协议类型（#2084）。
+pub use workflow::{
+    WorkflowCreateInput, WorkflowCreateResult, WorkflowEdgeInput, WorkflowEdgeResult,
+    WorkflowEvidenceKindInput, WorkflowEvidenceRefInput, WorkflowFactSummaryResult,
+    WorkflowLifecycleActionInput, WorkflowListInput, WorkflowListResult, WorkflowNodeActionInput,
+    WorkflowNodeInput, WorkflowNodeKindInput, WorkflowNodeSummaryResult, WorkflowNodeUpdateInput,
+    WorkflowNodeUpdateResult, WorkflowNodeViewResult, WorkflowPendingNodeUpdateInput,
+    WorkflowPendingRewritesInput, WorkflowQueryInput, WorkflowQueryResult, WorkflowRejoinEdgeInput,
+    WorkflowReplanBoundaryInput, WorkflowReplanInput, WorkflowReplanResult, WorkflowRoleInput,
+    WorkflowStatusInput, WorkflowSuccessorInput, WorkflowSummaryResult, WorkflowUpdateInput,
+    WorkflowUpdateResult,
+};
 
 // Re-exports for ergonomic `use crate::domain::types::XxxResult;`.
 pub use agent::{AgentInput, AgentResult};

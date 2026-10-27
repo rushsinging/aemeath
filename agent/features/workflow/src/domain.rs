@@ -1,5 +1,7 @@
 //! Workflow Graph 领域类型与 Kernel 校验（设计文档 §2、§3、§5.8）。
 pub mod kernel;
+pub mod tool_data;
+pub mod tool_error;
 
 pub use kernel::Kernel;
 
@@ -119,3 +121,12 @@ pub struct GraphError {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject: Option<String>,
 }
+
+pub use tool_data::{
+    AllowedAction, CreateWorkflowSpec, EvidenceKind, EvidenceRef, FactSummaryData, LifecycleAction,
+    LifecycleResultData, ListWorkflowsData, ListWorkflowsQuery, NodeAction, NodeSummaryCounts,
+    NodeUpdateResultData, NodeViewData, PendingNodeUpdate, PendingRewrites, QueryWorkflowQuery,
+    RejoinEdge, ReplanBoundary, ReplanResultData, ReplanWorkflowCommand, SuccessorDecision,
+    UpdateNodeCommand, UpdateWorkflowCommand, WorkflowDetailData, WorkflowSummaryData,
+};
+pub use tool_error::WorkflowToolError;
