@@ -1,43 +1,55 @@
-# 设计图制作规范（archify v3）
+# 设计图制作规范（archify v3 · DDD 安置）
 
-本仓设计图统一用 [archify](https://github.com/tt-a1i/archify) v3 生成：声明式 JSON spec → 自包含 HTML（内联 SVG + 可注入交互面板）。
+本仓设计图统一用 [archify](https://github.com/tt-a1i/archify) v3：声明式 JSON spec → 自包含 HTML（内联 SVG + 可注入交互面板）。
 
-## 目录安置
+## 一、制品安置（与 DDD 文档体系对齐）
 
-每张图一个目录，置于 `docs/design/04-architecture/<模块>-<视图>/`：
+**图跟随它所描述的架构层级，源与产物同目录、按文件名区分**：
 
 ```
-docs/design/04-architecture/context-receipt-flow/   # 模块-视图 命名
-├── spec.workflow.json    # archify spec：布局/节点/边的唯一真相源（类型=文件名第二段）
-├── flow-data.json        # 节点详情数据：duty / io / defects / refs（人工维护字段）
-├── inject-flow.js        # 详情面板注入脚本（点击节点 → 卡片）
-├── index.html            # 构建产物（提交进 git，可直接 file:// 打开）
-└── README.md             # 可选：图的说明与重建命令
+docs/design/
+├── 01-system/diagrams/<视图>/            # 跨模块系统图（context map、依赖流）
+├── 02-modules/<模块>/diagrams/<视图>/     # 模块图：与该模块 NN-*.md 编号文档同居
+│   └── 例：02-modules/context-management/diagrams/published-language-map/
+└── 03-engineering/diagrams/<视图>/       # 工程规则图（守卫、发版流程）
 ```
 
-## 构建流程
+`04-architecture/` 保留其原有文档，不再新放图目录。
+
+## 二、命名规则
+
+| 对象 | 规则 | 示例 |
+|---|---|---|
+| 视图目录 | kebab-case 语义名，不用编号（区别于 NN-*.md 文档） | `published-language-map`、`receipt-flow` |
+| spec 文件 | `spec.<archify图类型>.json` | `spec.workflow.json` |
+| 详情数据 | `<视图短名>-data.json`（人工维护 duty/缺陷/引用） | `flow-data.json`、`symbol-data.json` |
+| 面板注入 | `inject-<视图短名>.js` | `inject-flow.js` |
+| 构建产物 | 固定 `index.html`（提交进 git，可 file:// 打开） | — |
+| Mermaid 变体（可选） | `<视图>.mmd` / `<视图>-mermaid.svg`（PR 内嵌用） | `receipt-flow.mmd` |
+
+## 三、构建
 
 ```bash
-python3 tools/diagram/build_diagram.py docs/design/04-architecture/<图目录>
+python3 tools/diagram/build_diagram.py docs/design/02-modules/<模块>/diagrams/<视图>
+# 产物 <视图>/index.html；Mermaid 变体：mmdc -i <视图>.mmd -o <视图>-mermaid.svg -b transparent
 ```
 
-脚本做四件事：① spec 补 `meta.output` ② archify 渲染底图（校验失败即中止）
-③ spec label 合入 data payload（label 以 spec 为真相源）④ 注入面板生成 index.html。
+脚本流程：spec 补 `meta.output` → archify 渲染（校验失败即止）→ spec label 合入
+data payload → 面板注入 → index.html。
 
-## 新图制作步骤
+## 四、新图五步
 
-1. 按需求选图类型：`architecture`（系统/BC 分层）、`workflow`（泳道流程/数据链路）、
-   `sequence`（调用时序）、`dataflow`（数据管道）、`lifecycle`（状态机）、
-   另有 erd/timeline/tree/class/waterfall。
-2. 读 `~/.agents/skills/archify/schemas/<type>.schema.json` 与一个 examples 对齐字段。
-3. 写 `spec.<type>.json`（col/边布局先粗放，archify v3 自动路由能力较强；
-   showcase 校验对交叉/贴边零容忍，跨泳道边优先走外侧通道 via）。
-4. 写 `<图>-data.json`（每节点 id → 详情）与 `inject-*.js`（可复制现有图的改样式）。
-5. 跑构建脚本，`open index.html` 实测点击交互（agent-browser DOM 断言）。
+1. 定层级：图属于系统 / 哪个模块 / 工程规则 → 选安置目录（上文第一节）。
+2. 选图型：`architecture`（分层/BC）、`workflow`（泳道流程）、`sequence`（时序）、
+   `dataflow`（管道）、`lifecycle`（状态机）、`timeline`（时间轴），另有 erd/tree/class 等。
+3. 对齐 schema：`~/.agents/skills/archify/schemas/<type>.schema.json` + 一个 examples。
+4. 写 spec（先让 v3 自动路由；showcase 对交叉/贴边零容忍，跨泳道边走外侧通道 via；
+   phases 的 col 区间不可重叠）+ data + inject（可复制现有面板）。
+5. 构建 → `open index.html` → agent-browser 实测点击交互。
 
-## 维护纪律
+## 五、维护纪律
 
-- 代码变更后同步更新 `*-data.json` 的事实字段（duty/缺陷状态/行号引用），
-  再重跑构建；**禁止**只改 index.html。
-- 缺陷修复后在 defect 文本标注【已修复（阶段）】而非删除条目（保留审计线索）。
-- 图数据陈旧而代码已变（如符号退役）时，以 spec/根面为准清理 data 条目。
+- 代码变更后更新 `*-data.json` 事实字段再重建；**禁止只改 index.html**。
+- 缺陷修复在 defect 文本标【已修复（阶段）】，保留审计线索不删条目。
+- 符号退役/语义变更以代码为真相源清理 data；spec label 是节点显示名唯一真相源。
+- 变体（Mermaid/C4）非必需不新增；C4 版已验证不适合链路叙事，勿复用。
