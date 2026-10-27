@@ -293,3 +293,48 @@ fn watch_result_renders_outcome_not_json() {
         "应渲染 log_tail：{lines:?}"
     );
 }
+
+// ── #2113：Status/Logs/Stop header 统一 goal 映射（与 Watch 同源）──
+
+#[test]
+fn status_logs_stop_headers_map_injected_goal_without_id() {
+    for tool_name in [
+        "BackgroundProcessStatus",
+        "BackgroundProcessLogs",
+        "BackgroundProcessStop",
+    ] {
+        let display = lookup_display(tool_name).unwrap();
+        // Runtime 已注入账本 goal；header 只读 input.goal。
+        let input = serde_json::json!({
+            "task_id": "bgp_g1",
+            "goal": "跑 cargo test 门禁"
+        });
+        let header = display.format_header(&input, None);
+        assert_eq!(
+            header,
+            format!("{} · 跑 cargo test 门禁", display.display_name()),
+            "{tool_name} 有 goal 应映射为 `{{name}} · {{goal}}`：{header}"
+        );
+        assert!(
+            !header.contains("bgp_g1"),
+            "{tool_name} 有 goal 时 header NEVER 含 id：{header}"
+        );
+    }
+}
+
+#[test]
+fn status_logs_stop_headers_fall_back_to_task_id_without_goal() {
+    for tool_name in [
+        "BackgroundProcessStatus",
+        "BackgroundProcessLogs",
+        "BackgroundProcessStop",
+    ] {
+        let display = lookup_display(tool_name).unwrap();
+        let header = display.format_header(&serde_json::json!({"task_id": "bgp_g2"}), None);
+        assert_eq!(
+            header,
+            format!("{} bgp_g2", display.display_name()),
+            "{tool_name} 无 goal 应回退 `{{name}} {{task_id}}`：{header}"
+        );
+    }
+}
