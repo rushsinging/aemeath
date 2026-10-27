@@ -3,8 +3,8 @@
  "diagram_type": "workflow",
  "meta": {
   "title": "Context Receipt 全链路",
-  "subtitle": "写入双轨 · 读取单轨 · 恢复不对称 —— A/C/B 修复点（点击节点看详情）",
-  "visual_preset": "blueprint",
+  "subtitle": "一个真相源 · 一次原子提交 · 一条读路径（A→C→B 修复后终态）",
+  "visual_preset": "editorial",
   "quality_profile": "showcase",
   "animation": "none",
   "output": "index-v3.html"
@@ -252,14 +252,6 @@
    "role": "main"
   },
   {
-   "id": "e10",
-   "from": "f03",
-   "to": "f21",
-   "label": "实时派生",
-   "role": "async",
-   "labelDy": 26
-  },
-  {
    "id": "e11",
    "from": "f12",
    "to": "f22",
@@ -278,6 +270,57 @@
    "from": "f04",
    "to": "f31",
    "role": "async"
+  }
+ ],
+ "phases": [
+  {
+   "id": "write",
+   "label": "写入：receipt 随 Session 一次原子提交",
+   "fromCol": 0,
+   "toCol": 0
+  },
+  {
+   "id": "seal",
+   "label": "收口：finalize 压扁冻结，指纹=落盘",
+   "fromCol": 1,
+   "toCol": 2,
+   "variant": "emphasis"
+  },
+  {
+   "id": "live",
+   "label": "读取与恢复：finalize 后只读冻结",
+   "fromCol": 3,
+   "toCol": 5,
+   "variant": "dashed"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "cyan",
+   "title": "① 写入规则：什么时候落盘？",
+   "items": [
+    "advance / accept / append：receipt 变更随 Session member 一次 commit_incremental",
+    "sidecar 物理双写已退役（仅保留旧文件迁移读）",
+    "durable = Session 原子提交成功；失败返回明确错误按未确认处理"
+   ]
+  },
+  {
+   "dot": "amber",
+   "title": "② 收口规则：指纹与 revision",
+   "items": [
+    "receipts 装配唯一化到 runtime 构造 ContextAppendData 之前",
+    "revision 恒为提交后值（accepted 与 finalized 一致）",
+    "fingerprint 8 位元组含 cleanup；旧指纹对账不受影响"
+   ]
+  },
+  {
+   "dot": "violet",
+   "title": "③ 读取与恢复规则",
+   "items": [
+    "未 finalize：step_receipts 从实时账本派生",
+    "已 finalize：只读冻结快照，后台迟到推进不改写",
+    "旧 sidecar：一次性只读迁移（不存在才补、禁 Terminal 倒退）"
+   ]
   }
  ]
 }

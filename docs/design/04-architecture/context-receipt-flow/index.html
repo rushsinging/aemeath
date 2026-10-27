@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark" data-preset="blueprint">
+<html lang="en" data-theme="dark" data-preset="editorial">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -5195,7 +5195,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <div class="pulse-dot"></div>
         <h1>Context Receipt 全链路</h1>
       </div>
-      <p class="subtitle">写入双轨 · 读取单轨 · 恢复不对称 —— A/C/B 修复点（点击节点看详情）</p>
+      <p class="subtitle">一个真相源 · 一次原子提交 · 一条读路径（A→C→B 修复后终态）</p>
     </div>
 
 
@@ -5203,9 +5203,9 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     <!-- Main Diagram -->
     <div class="diagram-container" data-detail-level="read"
          data-preset-badge-editorial-plate="ARCHIFY / PLATE 04">
-      <svg viewBox="0 0 795 652" data-reader-fit="width-first" data-layout-contract="readable-v2" role="img" lang="en" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="blueprint" data-quality-profile="showcase" data-node-ui="">
+      <svg viewBox="0 0 904 652" data-reader-fit="width-first" data-layout-contract="readable-v2" role="img" lang="en" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="editorial" data-quality-profile="showcase" data-node-ui="">
         <title id="archify-diagram-title">Context Receipt 全链路</title>
-        <desc id="archify-diagram-description">写入双轨 · 读取单轨 · 恢复不对称 —— A/C/B 修复点（点击节点看详情）</desc>
+        <desc id="archify-diagram-description">一个真相源 · 一次原子提交 · 一条读路径（A→C→B 修复后终态）</desc>
         <!-- Definitions -->
         <defs>
           <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -5250,41 +5250,48 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <rect width="100%" height="100%" fill="url(#grid)" />
 
         <!-- Swimlanes -->
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-0" x="40" y="52" width="727" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-0" x="40" y="52" width="836" height="104" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="74" class="t-muted" font-size="10" font-weight="600">01 / ① 执行期推进（高频写）</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="176" width="727" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="176" width="836" height="104" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="198" class="t-muted" font-size="10" font-weight="600">02 / ② 收口与提交（一次性）</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="300" width="727" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="300" width="836" height="104" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="322" class="t-muted" font-size="10" font-weight="600">03 / ③ 读取消费</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-3" x="40" y="424" width="727" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="exception-lane" data-composition-frame-id="lane-3-exception" x="46" y="430" width="715" height="92" rx="8" class="c-security-group" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-3" x="40" y="424" width="836" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="exception-lane" data-composition-frame-id="lane-3-exception" x="46" y="430" width="824" height="92" rx="8" class="c-security-group" stroke-width="1"/>
         <text x="54" y="446" class="t-security" font-size="10" font-weight="600">EX / ④ 恢复与边界（sidecar 生命周期）</text>
 
         <!-- Phase headers -->
-
+        <path d="M 56 35 H 255.2" class="a-default phase-rule" stroke-width="1" stroke-linecap="round" fill="none"/>
+        <rect x="56.8" y="27" width="197.6" height="16" rx="8" class="c-mask phase-chip"/>
+        <text x="155.6" y="38.5" class="t-muted" font-size="8" font-weight="600" text-anchor="middle" letter-spacing=".04em">写入：receipt 随 Session 一次原子提交</text>
+        <path d="M 299.2 35 H 495.2" class="a-emphasis phase-rule" stroke-width="1" stroke-linecap="round" fill="none"/>
+        <rect x="305.6" y="27" width="183.2" height="16" rx="8" class="c-mask phase-chip"/>
+        <text x="397.2" y="38.5" class="t-backend" font-size="8" font-weight="600" text-anchor="middle" letter-spacing=".04em">收口：finalize 压扁冻结，指纹=落盘</text>
+        <path d="M 539.2 35 H 855.2" class="a-dashed phase-rule" stroke-width="1" stroke-linecap="round" fill="none"/>
+        <rect x="612.8000000000001" y="27" width="168.79999999999998" height="16" rx="8" class="c-mask phase-chip"/>
+        <text x="697.2" y="38.5" class="t-messagebus" font-size="8" font-weight="600" text-anchor="middle" letter-spacing=".04em">读取与恢复：finalize 后只读冻结</text>
 
         <!-- Workflow groups -->
 
 
         <!-- Edge paths -->
-        <path data-edge-from="f01" data-edge-to="f03" data-edge-key="0" data-edge-id="e01" data-composition-routing="workflow-v2-auto" data-edge-role="main" data-composition-points="138,119;184.8,119" d="M 138 119 L 184.8 119" class="a-default" data-animate="edge" style="--step:0" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="f03" data-edge-to="f04" data-edge-label="① 先写" data-edge-key="1" data-edge-id="e03" data-composition-routing="workflow-v2-auto" data-edge-role="main" data-composition-points="272.8,119;424.8,119" d="M 272.8 119 L 424.8 119" class="a-default" data-animate="edge" style="--step:1" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="f04" data-edge-to="f05" data-edge-label="② 再提交" data-edge-key="2" data-edge-id="e04" data-composition-routing="workflow-v2-auto" data-edge-role="main" data-composition-points="512.8,119;664.8,119" d="M 512.8 119 L 664.8 119" class="a-default" data-animate="edge" style="--step:2" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="f03" data-edge-to="f12" data-edge-label="step 终结·FinalizeCause" data-edge-key="3" data-edge-id="e05" data-composition-routing="workflow-v2-auto" data-edge-role="async" data-composition-points="221.8,146;221.8,166;34,166;34,243;50,243" d="M 221.8 146 L 221.8 158 Q 221.8 166 213.8 166 L 42 166 Q 34 166 34 174 L 34 235 Q 34 243 42 243 L 50 243" class="a-default" data-animate="edge" style="--step:3" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="f12" data-edge-to="f13" data-edge-label="进指纹" data-edge-key="4" data-edge-id="e07" data-composition-routing="workflow-v2-auto" data-edge-role="main" data-composition-points="138,243;184.8,243" d="M 138 243 L 184.8 243" class="a-default" data-animate="edge" style="--step:4" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="f13" data-edge-to="f14" data-edge-label="空则补" data-edge-key="5" data-edge-id="e08" data-composition-routing="workflow-v2-auto" data-edge-role="branch" data-composition-points="272.8,243;424.8,243" d="M 272.8 243 L 424.8 243" class="a-default" data-animate="edge" style="--step:5" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="f14" data-edge-to="f15" data-edge-key="6" data-edge-id="e09" data-composition-routing="workflow-v2-auto" data-edge-role="main" data-composition-points="512.8,243;664.8,243" d="M 512.8 243 L 664.8 243" class="a-default" data-animate="edge" style="--step:6" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="f03" data-edge-to="f21" data-edge-label="实时派生" data-edge-key="7" data-edge-id="e10" data-composition-routing="workflow-v2-auto" data-edge-role="async" data-composition-points="228.8,92;228.8,36;18,36;18,367;50,367" d="M 228.8 92 L 228.8 44 Q 228.8 36 220.8 36 L 26 36 Q 18 36 18 44 L 18 359 Q 18 367 26 367 L 50 367" class="a-default" data-animate="edge" style="--step:7" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="f12" data-edge-to="f22" data-edge-label="写冻结" data-edge-key="8" data-edge-id="e11" data-composition-routing="workflow-v2-auto" data-edge-role="async" data-composition-points="94,270;94,290;228.8,290;228.8,340" d="M 94 270 L 94 282 Q 94 290 102 290 L 220.8 290 Q 228.8 290 228.8 298 L 228.8 340" class="a-default" data-animate="edge" style="--step:8" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="f21" data-edge-to="f23" data-edge-label="outcome 判定" data-edge-key="9" data-edge-id="e12" data-composition-routing="workflow-v2-auto" data-edge-role="main" data-composition-points="94,394;94,420;468.8,420;468.8,394" d="M 94 394 L 94 412 Q 94 420 102 420 L 460.8 420 Q 468.8 420 468.8 412 L 468.8 394" class="a-default" data-animate="edge" style="--step:9" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="f04" data-edge-to="f31" data-edge-key="10" data-edge-id="e13" data-composition-routing="workflow-v2-auto" data-edge-role="async" data-composition-points="468.8,92;468.8,76;779,76;779,534;94,534;94,518" d="M 468.8 92 L 468.8 84 Q 468.8 76 476.8 76 L 771 76 Q 779 76 779 84 L 779 526 Q 779 534 771 534 L 102 534 Q 94 534 94 526 L 94 518" class="a-default" data-animate="edge" style="--step:10" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="f01" data-edge-to="f03" data-edge-key="0" data-edge-id="e01" data-composition-routing="workflow-v2-auto" data-edge-role="main" data-composition-points="138,119;293.2,119" d="M 138 119 L 293.2 119" class="a-default" data-animate="edge" style="--step:0" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="f03" data-edge-to="f04" data-edge-label="① 先写" data-edge-key="1" data-edge-id="e03" data-composition-routing="workflow-v2-auto" data-edge-role="main" data-composition-points="381.2,119;533.2,119" d="M 381.2 119 L 533.2 119" class="a-default" data-animate="edge" style="--step:1" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="f04" data-edge-to="f05" data-edge-label="② 再提交" data-edge-key="2" data-edge-id="e04" data-composition-routing="workflow-v2-auto" data-edge-role="main" data-composition-points="621.2,119;773.2,119" d="M 621.2 119 L 773.2 119" class="a-default" data-animate="edge" style="--step:2" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="f03" data-edge-to="f12" data-edge-label="step 终结·FinalizeCause" data-edge-key="3" data-edge-id="e05" data-composition-routing="workflow-v2-auto" data-edge-role="async" data-composition-points="337.2,146;337.2,166;34,166;34,243;50,243" d="M 337.2 146 L 337.2 158 Q 337.2 166 329.2 166 L 42 166 Q 34 166 34 174 L 34 235 Q 34 243 42 243 L 50 243" class="a-default" data-animate="edge" style="--step:3" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="f12" data-edge-to="f13" data-edge-label="进指纹" data-edge-key="4" data-edge-id="e07" data-composition-routing="workflow-v2-auto" data-edge-role="main" data-composition-points="138,243;293.2,243" d="M 138 243 L 293.2 243" class="a-default" data-animate="edge" style="--step:4" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="f13" data-edge-to="f14" data-edge-label="空则补" data-edge-key="5" data-edge-id="e08" data-composition-routing="workflow-v2-auto" data-edge-role="branch" data-composition-points="381.2,243;533.2,243" d="M 381.2 243 L 533.2 243" class="a-default" data-animate="edge" style="--step:5" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="f14" data-edge-to="f15" data-edge-key="6" data-edge-id="e09" data-composition-routing="workflow-v2-auto" data-edge-role="main" data-composition-points="621.2,243;773.2,243" d="M 621.2 243 L 773.2 243" class="a-default" data-animate="edge" style="--step:6" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="f12" data-edge-to="f22" data-edge-label="写冻结" data-edge-key="7" data-edge-id="e11" data-composition-routing="workflow-v2-auto" data-edge-role="async" data-composition-points="138,254;203.6,254;203.6,367;293.2,367" d="M 138 254 L 195.6 254 Q 203.6 254 203.6 262 L 203.6 359 Q 203.6 367 211.6 367 L 293.2 367" class="a-default" data-animate="edge" style="--step:7" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="f21" data-edge-to="f23" data-edge-label="outcome 判定" data-edge-key="8" data-edge-id="e12" data-composition-routing="workflow-v2-auto" data-edge-role="main" data-composition-points="94,394;94,420;577.2,420;577.2,394" d="M 94 394 L 94 412 Q 94 420 102 420 L 569.2 420 Q 577.2 420 577.2 412 L 577.2 394" class="a-default" data-animate="edge" style="--step:8" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="f04" data-edge-to="f31" data-edge-key="9" data-edge-id="e13" data-composition-routing="workflow-v2-auto" data-edge-role="async" data-composition-points="577.2,92;577.2,76;888,76;888,534;94,534;94,518" d="M 577.2 92 L 577.2 84 Q 577.2 76 585.2 76 L 880 76 Q 888 76 888 84 L 888 526 Q 888 534 880 534 L 102 534 Q 94 534 94 526 L 94 518" class="a-default" data-animate="edge" style="--step:9" stroke-width="1.4" marker-end="url(#arrowhead)"/>
 
         <!-- Nodes -->
-        <g id="node-f01" data-node-id="f01" data-node-label="工具执行" tabindex="0" role="button" aria-label="Focus 工具执行, execution_supervisor, ① 执行期推进（高频写）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="execution_supervisor" data-node-tag="runtime" data-node-context="① 执行期推进（高频写）">
-          <title>工具执行 · execution_supervisor · ① 执行期推进（高频写） · runtime</title>
+        <g id="node-f01" data-node-id="f01" data-node-label="工具执行" tabindex="0" role="button" aria-label="Focus 工具执行, execution_supervisor, ① 执行期推进（高频写） › 写入：receipt 随 Session 一次原子提交" aria-pressed="false" data-node-kind="backend" data-node-sublabel="execution_supervisor" data-node-tag="runtime" data-node-context="① 执行期推进（高频写） › 写入：receipt 随 Session 一次原子提交">
+          <title>工具执行 · execution_supervisor · ① 执行期推进（高频写） › 写入：receipt 随 Session 一次原子提交 · runtime</title>
           <rect x="50" y="92" width="88" height="54" rx="8" class="c-mask"/>
           <rect x="50" y="92" width="88" height="54" rx="8" class="c-backend" data-animate="node" style="--step:0" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(56 98) scale(0.6875)">
@@ -5295,44 +5302,44 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="94" y="134" class="t-backend" font-size="7" text-anchor="middle">runtime</text>
         </g>
 
-        <g id="node-f03" data-node-id="f03" data-node-label="状态机" tabindex="0" role="button" aria-label="Focus 状态机, advance·幂等防倒退, ① 执行期推进（高频写）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="advance·幂等防倒退" data-node-context="① 执行期推进（高频写）">
-          <title>状态机 · advance·幂等防倒退 · ① 执行期推进（高频写）</title>
-          <rect x="184.8" y="92" width="88" height="54" rx="8" class="c-mask"/>
-          <rect x="184.8" y="92" width="88" height="54" rx="8" class="c-backend" data-animate="node" style="--step:1" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(190.8 98) scale(0.6875)">
+        <g id="node-f03" data-node-id="f03" data-node-label="状态机" tabindex="0" role="button" aria-label="Focus 状态机, advance·幂等防倒退, ① 执行期推进（高频写） › 收口：finalize 压扁冻结，指纹=落盘" aria-pressed="false" data-node-kind="backend" data-node-sublabel="advance·幂等防倒退" data-node-context="① 执行期推进（高频写） › 收口：finalize 压扁冻结，指纹=落盘">
+          <title>状态机 · advance·幂等防倒退 · ① 执行期推进（高频写） › 收口：finalize 压扁冻结，指纹=落盘</title>
+          <rect x="293.2" y="92" width="88" height="54" rx="8" class="c-mask"/>
+          <rect x="293.2" y="92" width="88" height="54" rx="8" class="c-backend" data-animate="node" style="--step:1" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(299.2 98) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="228.8" y="113" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">状态机</text>
-          <text data-detail="context" x="228.8" y="130" class="t-muted" font-size="7.4" text-anchor="middle">advance·幂等防倒退</text>
+          <text data-node-label="" data-detail-anchor="" x="337.2" y="113" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">状态机</text>
+          <text data-detail="context" x="337.2" y="130" class="t-muted" font-size="7.4" text-anchor="middle">advance·幂等防倒退</text>
         </g>
 
-        <g id="node-f04" data-node-id="f04" data-node-label="边车双写" tabindex="0" role="button" aria-label="Focus 边车双写, sidecar 先写, ① 执行期推进（高频写）" aria-pressed="false" data-node-kind="database" data-node-sublabel="sidecar 先写" data-node-tag="缺陷 C" data-node-context="① 执行期推进（高频写）">
-          <title>边车双写 · sidecar 先写 · ① 执行期推进（高频写） · 缺陷 C</title>
-          <rect x="424.8" y="92" width="88" height="54" rx="8" class="c-mask"/>
-          <rect x="424.8" y="92" width="88" height="54" rx="8" class="c-database" data-animate="node" style="--step:2" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(430.8 98) scale(0.6875)">
+        <g id="node-f04" data-node-id="f04" data-node-label="边车双写" tabindex="0" role="button" aria-label="Focus 边车双写, sidecar 先写, ① 执行期推进（高频写） › 读取与恢复：finalize 后只读冻结" aria-pressed="false" data-node-kind="database" data-node-sublabel="sidecar 先写" data-node-tag="缺陷 C" data-node-context="① 执行期推进（高频写） › 读取与恢复：finalize 后只读冻结">
+          <title>边车双写 · sidecar 先写 · ① 执行期推进（高频写） › 读取与恢复：finalize 后只读冻结 · 缺陷 C</title>
+          <rect x="533.2" y="92" width="88" height="54" rx="8" class="c-mask"/>
+          <rect x="533.2" y="92" width="88" height="54" rx="8" class="c-database" data-animate="node" style="--step:2" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(539.2 98) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="470.2" y="113" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">边车双写</text>
-          <text data-detail="context" x="468.8" y="130" class="t-muted" font-size="8" text-anchor="middle">sidecar 先写</text>
-        <text data-detail="fine" x="468.8" y="134" class="t-database" font-size="7" text-anchor="middle">缺陷 C</text>
+          <text data-node-label="" data-detail-anchor="" x="578.6" y="113" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">边车双写</text>
+          <text data-detail="context" x="577.2" y="130" class="t-muted" font-size="8" text-anchor="middle">sidecar 先写</text>
+        <text data-detail="fine" x="577.2" y="134" class="t-database" font-size="7" text-anchor="middle">缺陷 C</text>
         </g>
 
-        <g id="node-f05" data-node-id="f05" data-node-label="会话提交" tabindex="0" role="button" aria-label="Focus 会话提交, commit_incremental, ① 执行期推进（高频写）" aria-pressed="false" data-node-kind="database" data-node-sublabel="commit_incremental" data-node-context="① 执行期推进（高频写）">
-          <title>会话提交 · commit_incremental · ① 执行期推进（高频写）</title>
-          <rect x="664.8" y="92" width="88" height="54" rx="8" class="c-mask"/>
-          <rect x="664.8" y="92" width="88" height="54" rx="8" class="c-database" data-animate="node" style="--step:3" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(670.8 98) scale(0.6875)">
+        <g id="node-f05" data-node-id="f05" data-node-label="会话提交" tabindex="0" role="button" aria-label="Focus 会话提交, commit_incremental, ① 执行期推进（高频写） › 读取与恢复：finalize 后只读冻结" aria-pressed="false" data-node-kind="database" data-node-sublabel="commit_incremental" data-node-context="① 执行期推进（高频写） › 读取与恢复：finalize 后只读冻结">
+          <title>会话提交 · commit_incremental · ① 执行期推进（高频写） › 读取与恢复：finalize 后只读冻结</title>
+          <rect x="773.2" y="92" width="88" height="54" rx="8" class="c-mask"/>
+          <rect x="773.2" y="92" width="88" height="54" rx="8" class="c-database" data-animate="node" style="--step:3" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(779.2 98) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="710.1999999999999" y="113" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">会话提交</text>
-          <text data-detail="context" x="708.8" y="130" class="t-muted" font-size="7.4" text-anchor="middle">commit_incremental</text>
+          <text data-node-label="" data-detail-anchor="" x="818.6" y="113" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">会话提交</text>
+          <text data-detail="context" x="817.2" y="130" class="t-muted" font-size="7.4" text-anchor="middle">commit_incremental</text>
         </g>
 
-        <g id="node-f12" data-node-id="f12" data-node-label="收口压扁" tabindex="0" role="button" aria-label="Focus 收口压扁, to_step_receipt, ② 收口与提交（一次性）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="to_step_receipt" data-node-tag="缺陷 B2 B3" data-node-context="② 收口与提交（一次性）">
-          <title>收口压扁 · to_step_receipt · ② 收口与提交（一次性） · 缺陷 B2 B3</title>
+        <g id="node-f12" data-node-id="f12" data-node-label="收口压扁" tabindex="0" role="button" aria-label="Focus 收口压扁, to_step_receipt, ② 收口与提交（一次性） › 写入：receipt 随 Session 一次原子提交" aria-pressed="false" data-node-kind="backend" data-node-sublabel="to_step_receipt" data-node-tag="缺陷 B2 B3" data-node-context="② 收口与提交（一次性） › 写入：receipt 随 Session 一次原子提交">
+          <title>收口压扁 · to_step_receipt · ② 收口与提交（一次性） › 写入：receipt 随 Session 一次原子提交 · 缺陷 B2 B3</title>
           <rect x="50" y="216" width="88" height="54" rx="8" class="c-mask"/>
           <rect x="50" y="216" width="88" height="54" rx="8" class="c-backend" data-animate="node" style="--step:4" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(56 222) scale(0.6875)">
@@ -5343,44 +5350,44 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="94" y="258" class="t-backend" font-size="7" text-anchor="middle">缺陷 B2 B3</text>
         </g>
 
-        <g id="node-f13" data-node-id="f13" data-node-label="指纹" tabindex="0" role="button" aria-label="Focus 指纹, 含 receipts, ② 收口与提交（一次性）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="含 receipts" data-node-context="② 收口与提交（一次性）">
-          <title>指纹 · 含 receipts · ② 收口与提交（一次性）</title>
-          <rect x="184.8" y="216" width="88" height="54" rx="8" class="c-mask"/>
-          <rect x="184.8" y="216" width="88" height="54" rx="8" class="c-backend" data-animate="node" style="--step:5" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(190.8 222) scale(0.6875)">
+        <g id="node-f13" data-node-id="f13" data-node-label="指纹" tabindex="0" role="button" aria-label="Focus 指纹, 含 receipts, ② 收口与提交（一次性） › 收口：finalize 压扁冻结，指纹=落盘" aria-pressed="false" data-node-kind="backend" data-node-sublabel="含 receipts" data-node-context="② 收口与提交（一次性） › 收口：finalize 压扁冻结，指纹=落盘">
+          <title>指纹 · 含 receipts · ② 收口与提交（一次性） › 收口：finalize 压扁冻结，指纹=落盘</title>
+          <rect x="293.2" y="216" width="88" height="54" rx="8" class="c-mask"/>
+          <rect x="293.2" y="216" width="88" height="54" rx="8" class="c-backend" data-animate="node" style="--step:5" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(299.2 222) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="228.8" y="237" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">指纹</text>
-          <text data-detail="context" x="228.8" y="254" class="t-muted" font-size="8" text-anchor="middle">含 receipts</text>
+          <text data-node-label="" data-detail-anchor="" x="337.2" y="237" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">指纹</text>
+          <text data-detail="context" x="337.2" y="254" class="t-muted" font-size="8" text-anchor="middle">含 receipts</text>
         </g>
 
-        <g id="node-f14" data-node-id="f14" data-node-label="空回填" tabindex="0" role="button" aria-label="Focus 空回填, ×2 · 时序颠倒, ② 收口与提交（一次性）" aria-pressed="false" data-node-kind="security" data-node-sublabel="×2 · 时序颠倒" data-node-tag="缺陷 A2" data-node-context="② 收口与提交（一次性）">
-          <title>空回填 · ×2 · 时序颠倒 · ② 收口与提交（一次性） · 缺陷 A2</title>
-          <rect x="424.8" y="216" width="88" height="54" rx="8" class="c-mask"/>
-          <rect x="424.8" y="216" width="88" height="54" rx="8" class="c-security" data-animate="node" style="--step:6" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(430.8 222) scale(0.6875)">
+        <g id="node-f14" data-node-id="f14" data-node-label="空回填" tabindex="0" role="button" aria-label="Focus 空回填, ×2 · 时序颠倒, ② 收口与提交（一次性） › 读取与恢复：finalize 后只读冻结" aria-pressed="false" data-node-kind="security" data-node-sublabel="×2 · 时序颠倒" data-node-tag="缺陷 A2" data-node-context="② 收口与提交（一次性） › 读取与恢复：finalize 后只读冻结">
+          <title>空回填 · ×2 · 时序颠倒 · ② 收口与提交（一次性） › 读取与恢复：finalize 后只读冻结 · 缺陷 A2</title>
+          <rect x="533.2" y="216" width="88" height="54" rx="8" class="c-mask"/>
+          <rect x="533.2" y="216" width="88" height="54" rx="8" class="c-security" data-animate="node" style="--step:6" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(539.2 222) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="468.8" y="237" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">空回填</text>
-          <text data-detail="context" x="468.8" y="254" class="t-muted" font-size="8" text-anchor="middle">×2 · 时序颠倒</text>
-        <text data-detail="fine" x="468.8" y="258" class="t-security" font-size="7" text-anchor="middle">缺陷 A2</text>
+          <text data-node-label="" data-detail-anchor="" x="577.2" y="237" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">空回填</text>
+          <text data-detail="context" x="577.2" y="254" class="t-muted" font-size="8" text-anchor="middle">×2 · 时序颠倒</text>
+        <text data-detail="fine" x="577.2" y="258" class="t-security" font-size="7" text-anchor="middle">缺陷 A2</text>
         </g>
 
-        <g id="node-f15" data-node-id="f15" data-node-label="提交回执" tabindex="0" role="button" aria-label="Focus 提交回执, append / accept, ② 收口与提交（一次性）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="append / accept" data-node-tag="缺陷 A1" data-node-context="② 收口与提交（一次性）">
-          <title>提交回执 · append / accept · ② 收口与提交（一次性） · 缺陷 A1</title>
-          <rect x="664.8" y="216" width="88" height="54" rx="8" class="c-mask"/>
-          <rect x="664.8" y="216" width="88" height="54" rx="8" class="c-backend" data-animate="node" style="--step:7" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(670.8 222) scale(0.6875)">
+        <g id="node-f15" data-node-id="f15" data-node-label="提交回执" tabindex="0" role="button" aria-label="Focus 提交回执, append / accept, ② 收口与提交（一次性） › 读取与恢复：finalize 后只读冻结" aria-pressed="false" data-node-kind="backend" data-node-sublabel="append / accept" data-node-tag="缺陷 A1" data-node-context="② 收口与提交（一次性） › 读取与恢复：finalize 后只读冻结">
+          <title>提交回执 · append / accept · ② 收口与提交（一次性） › 读取与恢复：finalize 后只读冻结 · 缺陷 A1</title>
+          <rect x="773.2" y="216" width="88" height="54" rx="8" class="c-mask"/>
+          <rect x="773.2" y="216" width="88" height="54" rx="8" class="c-backend" data-animate="node" style="--step:7" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(779.2 222) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="710.1999999999999" y="237" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">提交回执</text>
-          <text data-detail="context" x="708.8" y="254" class="t-muted" font-size="8" text-anchor="middle">append / accept</text>
-        <text data-detail="fine" x="708.8" y="258" class="t-backend" font-size="7" text-anchor="middle">缺陷 A1</text>
+          <text data-node-label="" data-detail-anchor="" x="818.6" y="237" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">提交回执</text>
+          <text data-detail="context" x="817.2" y="254" class="t-muted" font-size="8" text-anchor="middle">append / accept</text>
+        <text data-detail="fine" x="817.2" y="258" class="t-backend" font-size="7" text-anchor="middle">缺陷 A1</text>
         </g>
 
-        <g id="node-f21" data-node-id="f21" data-node-label="实时读" tabindex="0" role="button" aria-label="Focus 实时读, step_receipts(), ③ 读取消费" aria-pressed="false" data-node-kind="backend" data-node-sublabel="step_receipts()" data-node-tag="缺陷 B1" data-node-context="③ 读取消费">
-          <title>实时读 · step_receipts() · ③ 读取消费 · 缺陷 B1</title>
+        <g id="node-f21" data-node-id="f21" data-node-label="实时读" tabindex="0" role="button" aria-label="Focus 实时读, step_receipts(), ③ 读取消费 › 写入：receipt 随 Session 一次原子提交" aria-pressed="false" data-node-kind="backend" data-node-sublabel="step_receipts()" data-node-tag="缺陷 B1" data-node-context="③ 读取消费 › 写入：receipt 随 Session 一次原子提交">
+          <title>实时读 · step_receipts() · ③ 读取消费 › 写入：receipt 随 Session 一次原子提交 · 缺陷 B1</title>
           <rect x="50" y="340" width="88" height="54" rx="8" class="c-mask"/>
           <rect x="50" y="340" width="88" height="54" rx="8" class="c-backend" data-animate="node" style="--step:8" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(56 346) scale(0.6875)">
@@ -5391,45 +5398,45 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="94" y="382" class="t-backend" font-size="7" text-anchor="middle">缺陷 B1</text>
         </g>
 
-        <g id="node-f22" data-node-id="f22" data-node-label="冻结快照" tabindex="0" role="button" aria-label="Focus 冻结快照, 无生产读者, ③ 读取消费" aria-pressed="false" data-node-kind="database" data-node-sublabel="无生产读者" data-node-tag="缺陷 B1" data-node-context="③ 读取消费">
-          <title>冻结快照 · 无生产读者 · ③ 读取消费 · 缺陷 B1</title>
-          <rect x="184.8" y="340" width="88" height="54" rx="8" class="c-mask"/>
-          <rect x="184.8" y="340" width="88" height="54" rx="8" class="c-database" data-animate="node" style="--step:9" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(190.8 346) scale(0.6875)">
+        <g id="node-f22" data-node-id="f22" data-node-label="冻结快照" tabindex="0" role="button" aria-label="Focus 冻结快照, 无生产读者, ③ 读取消费 › 收口：finalize 压扁冻结，指纹=落盘" aria-pressed="false" data-node-kind="database" data-node-sublabel="无生产读者" data-node-tag="缺陷 B1" data-node-context="③ 读取消费 › 收口：finalize 压扁冻结，指纹=落盘">
+          <title>冻结快照 · 无生产读者 · ③ 读取消费 › 收口：finalize 压扁冻结，指纹=落盘 · 缺陷 B1</title>
+          <rect x="293.2" y="340" width="88" height="54" rx="8" class="c-mask"/>
+          <rect x="293.2" y="340" width="88" height="54" rx="8" class="c-database" data-animate="node" style="--step:9" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(299.2 346) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="230.20000000000002" y="361" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">冻结快照</text>
-          <text data-detail="context" x="228.8" y="378" class="t-muted" font-size="8" text-anchor="middle">无生产读者</text>
-        <text data-detail="fine" x="228.8" y="382" class="t-database" font-size="7" text-anchor="middle">缺陷 B1</text>
+          <text data-node-label="" data-detail-anchor="" x="338.59999999999997" y="361" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">冻结快照</text>
+          <text data-detail="context" x="337.2" y="378" class="t-muted" font-size="8" text-anchor="middle">无生产读者</text>
+        <text data-detail="fine" x="337.2" y="382" class="t-database" font-size="7" text-anchor="middle">缺陷 B1</text>
         </g>
 
-        <g id="node-f23" data-node-id="f23" data-node-label="终态判定" tabindex="0" role="button" aria-label="Focus 终态判定, Unconfirmed?, ③ 读取消费" aria-pressed="false" data-node-kind="security" data-node-sublabel="Unconfirmed?" data-node-context="③ 读取消费">
-          <title>终态判定 · Unconfirmed? · ③ 读取消费</title>
-          <rect x="424.8" y="340" width="88" height="54" rx="8" class="c-mask"/>
-          <rect x="424.8" y="340" width="88" height="54" rx="8" class="c-security" data-animate="node" style="--step:10" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(430.8 346) scale(0.6875)">
+        <g id="node-f23" data-node-id="f23" data-node-label="终态判定" tabindex="0" role="button" aria-label="Focus 终态判定, Unconfirmed?, ③ 读取消费 › 读取与恢复：finalize 后只读冻结" aria-pressed="false" data-node-kind="security" data-node-sublabel="Unconfirmed?" data-node-context="③ 读取消费 › 读取与恢复：finalize 后只读冻结">
+          <title>终态判定 · Unconfirmed? · ③ 读取消费 › 读取与恢复：finalize 后只读冻结</title>
+          <rect x="533.2" y="340" width="88" height="54" rx="8" class="c-mask"/>
+          <rect x="533.2" y="340" width="88" height="54" rx="8" class="c-security" data-animate="node" style="--step:10" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(539.2 346) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="470.2" y="361" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">终态判定</text>
-          <text data-detail="context" x="468.8" y="378" class="t-muted" font-size="8" text-anchor="middle">Unconfirmed?</text>
+          <text data-node-label="" data-detail-anchor="" x="578.6" y="361" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">终态判定</text>
+          <text data-detail="context" x="577.2" y="378" class="t-muted" font-size="8" text-anchor="middle">Unconfirmed?</text>
         </g>
 
-        <g id="node-f24" data-node-id="f24" data-node-label="恢复修复" tabindex="0" role="button" aria-label="Focus 恢复修复, provider-safe, ③ 读取消费" aria-pressed="false" data-node-kind="backend" data-node-sublabel="provider-safe" data-node-tag="缺陷 B3" data-node-context="③ 读取消费">
-          <title>恢复修复 · provider-safe · ③ 读取消费 · 缺陷 B3</title>
-          <rect x="664.8" y="340" width="88" height="54" rx="8" class="c-mask"/>
-          <rect x="664.8" y="340" width="88" height="54" rx="8" class="c-backend" data-animate="node" style="--step:11" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(670.8 346) scale(0.6875)">
+        <g id="node-f24" data-node-id="f24" data-node-label="恢复修复" tabindex="0" role="button" aria-label="Focus 恢复修复, provider-safe, ③ 读取消费 › 读取与恢复：finalize 后只读冻结" aria-pressed="false" data-node-kind="backend" data-node-sublabel="provider-safe" data-node-tag="缺陷 B3" data-node-context="③ 读取消费 › 读取与恢复：finalize 后只读冻结">
+          <title>恢复修复 · provider-safe · ③ 读取消费 › 读取与恢复：finalize 后只读冻结 · 缺陷 B3</title>
+          <rect x="773.2" y="340" width="88" height="54" rx="8" class="c-mask"/>
+          <rect x="773.2" y="340" width="88" height="54" rx="8" class="c-backend" data-animate="node" style="--step:11" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(779.2 346) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="710.1999999999999" y="361" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">恢复修复</text>
-          <text data-detail="context" x="708.8" y="378" class="t-muted" font-size="8" text-anchor="middle">provider-safe</text>
-        <text data-detail="fine" x="708.8" y="382" class="t-backend" font-size="7" text-anchor="middle">缺陷 B3</text>
+          <text data-node-label="" data-detail-anchor="" x="818.6" y="361" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">恢复修复</text>
+          <text data-detail="context" x="817.2" y="378" class="t-muted" font-size="8" text-anchor="middle">provider-safe</text>
+        <text data-detail="fine" x="817.2" y="382" class="t-backend" font-size="7" text-anchor="middle">缺陷 B3</text>
         </g>
 
-        <g id="node-f31" data-node-id="f31" data-node-label="旧式恢复" tabindex="0" role="button" aria-label="Focus 旧式恢复, legacy overlay, ④ 恢复与边界（sidecar 生命周期）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="legacy overlay" data-node-tag="缺陷 C" data-node-context="④ 恢复与边界（sidecar 生命周期）">
-          <title>旧式恢复 · legacy overlay · ④ 恢复与边界（sidecar 生命周期） · 缺陷 C</title>
+        <g id="node-f31" data-node-id="f31" data-node-label="旧式恢复" tabindex="0" role="button" aria-label="Focus 旧式恢复, legacy overlay, ④ 恢复与边界（sidecar 生命周期） › 写入：receipt 随 Session 一次原子提交" aria-pressed="false" data-node-kind="backend" data-node-sublabel="legacy overlay" data-node-tag="缺陷 C" data-node-context="④ 恢复与边界（sidecar 生命周期） › 写入：receipt 随 Session 一次原子提交">
+          <title>旧式恢复 · legacy overlay · ④ 恢复与边界（sidecar 生命周期） › 写入：receipt 随 Session 一次原子提交 · 缺陷 C</title>
           <rect x="50" y="464" width="88" height="54" rx="8" class="c-mask"/>
           <rect x="50" y="464" width="88" height="54" rx="8" class="c-backend" data-animate="node" style="--step:12" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(56 470) scale(0.6875)">
@@ -5440,76 +5447,72 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="94" y="506" class="t-backend" font-size="7" text-anchor="middle">缺陷 C</text>
         </g>
 
-        <g id="node-f32" data-node-id="f32" data-node-label="数据集恢复" tabindex="0" role="button" aria-label="Focus 数据集恢复, dataset·不对称, ④ 恢复与边界（sidecar 生命周期）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="dataset·不对称" data-node-tag="缺陷 C" data-node-context="④ 恢复与边界（sidecar 生命周期）">
-          <title>数据集恢复 · dataset·不对称 · ④ 恢复与边界（sidecar 生命周期） · 缺陷 C</title>
-          <rect x="184.8" y="464" width="88" height="54" rx="8" class="c-mask"/>
-          <rect x="184.8" y="464" width="88" height="54" rx="8" class="c-backend" data-animate="node" style="--step:12" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(190.8 465) scale(0.25)">
+        <g id="node-f32" data-node-id="f32" data-node-label="数据集恢复" tabindex="0" role="button" aria-label="Focus 数据集恢复, dataset·不对称, ④ 恢复与边界（sidecar 生命周期） › 收口：finalize 压扁冻结，指纹=落盘" aria-pressed="false" data-node-kind="backend" data-node-sublabel="dataset·不对称" data-node-tag="缺陷 C" data-node-context="④ 恢复与边界（sidecar 生命周期） › 收口：finalize 压扁冻结，指纹=落盘">
+          <title>数据集恢复 · dataset·不对称 · ④ 恢复与边界（sidecar 生命周期） › 收口：finalize 压扁冻结，指纹=落盘 · 缺陷 C</title>
+          <rect x="293.2" y="464" width="88" height="54" rx="8" class="c-mask"/>
+          <rect x="293.2" y="464" width="88" height="54" rx="8" class="c-backend" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(299.2 465) scale(0.25)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="228.8" y="485" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">数据集恢复</text>
-          <text data-detail="context" x="228.8" y="502" class="t-muted" font-size="8" text-anchor="middle">dataset·不对称</text>
-        <text data-detail="fine" x="228.8" y="506" class="t-backend" font-size="7" text-anchor="middle">缺陷 C</text>
+          <text data-node-label="" data-detail-anchor="" x="337.2" y="485" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">数据集恢复</text>
+          <text data-detail="context" x="337.2" y="502" class="t-muted" font-size="8" text-anchor="middle">dataset·不对称</text>
+        <text data-detail="fine" x="337.2" y="506" class="t-backend" font-size="7" text-anchor="middle">缺陷 C</text>
         </g>
 
-        <g id="node-f33" data-node-id="f33" data-node-label="清空边界" tabindex="0" role="button" aria-label="Focus 清空边界, /clear 相反, ④ 恢复与边界（sidecar 生命周期）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="/clear 相反" data-node-tag="缺陷 C" data-node-context="④ 恢复与边界（sidecar 生命周期）">
-          <title>清空边界 · /clear 相反 · ④ 恢复与边界（sidecar 生命周期） · 缺陷 C</title>
-          <rect x="424.8" y="464" width="88" height="54" rx="8" class="c-mask"/>
-          <rect x="424.8" y="464" width="88" height="54" rx="8" class="c-backend" data-animate="node" style="--step:12" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(430.8 470) scale(0.6875)">
+        <g id="node-f33" data-node-id="f33" data-node-label="清空边界" tabindex="0" role="button" aria-label="Focus 清空边界, /clear 相反, ④ 恢复与边界（sidecar 生命周期） › 读取与恢复：finalize 后只读冻结" aria-pressed="false" data-node-kind="backend" data-node-sublabel="/clear 相反" data-node-tag="缺陷 C" data-node-context="④ 恢复与边界（sidecar 生命周期） › 读取与恢复：finalize 后只读冻结">
+          <title>清空边界 · /clear 相反 · ④ 恢复与边界（sidecar 生命周期） › 读取与恢复：finalize 后只读冻结 · 缺陷 C</title>
+          <rect x="533.2" y="464" width="88" height="54" rx="8" class="c-mask"/>
+          <rect x="533.2" y="464" width="88" height="54" rx="8" class="c-backend" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(539.2 470) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="470.2" y="485" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">清空边界</text>
-          <text data-detail="context" x="468.8" y="502" class="t-muted" font-size="8" text-anchor="middle">/clear 相反</text>
-        <text data-detail="fine" x="468.8" y="506" class="t-backend" font-size="7" text-anchor="middle">缺陷 C</text>
+          <text data-node-label="" data-detail-anchor="" x="578.6" y="485" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">清空边界</text>
+          <text data-detail="context" x="577.2" y="502" class="t-muted" font-size="8" text-anchor="middle">/clear 相反</text>
+        <text data-detail="fine" x="577.2" y="506" class="t-backend" font-size="7" text-anchor="middle">缺陷 C</text>
         </g>
 
-        <g id="node-f34" data-node-id="f34" data-node-label="压缩之后" tabindex="0" role="button" aria-label="Focus 压缩之后, 无收纳确认, ④ 恢复与边界（sidecar 生命周期）" aria-pressed="false" data-node-kind="backend" data-node-sublabel="无收纳确认" data-node-tag="缺陷 C" data-node-context="④ 恢复与边界（sidecar 生命周期）">
-          <title>压缩之后 · 无收纳确认 · ④ 恢复与边界（sidecar 生命周期） · 缺陷 C</title>
-          <rect x="664.8" y="464" width="88" height="54" rx="8" class="c-mask"/>
-          <rect x="664.8" y="464" width="88" height="54" rx="8" class="c-backend" data-animate="node" style="--step:12" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(670.8 470) scale(0.6875)">
+        <g id="node-f34" data-node-id="f34" data-node-label="压缩之后" tabindex="0" role="button" aria-label="Focus 压缩之后, 无收纳确认, ④ 恢复与边界（sidecar 生命周期） › 读取与恢复：finalize 后只读冻结" aria-pressed="false" data-node-kind="backend" data-node-sublabel="无收纳确认" data-node-tag="缺陷 C" data-node-context="④ 恢复与边界（sidecar 生命周期） › 读取与恢复：finalize 后只读冻结">
+          <title>压缩之后 · 无收纳确认 · ④ 恢复与边界（sidecar 生命周期） › 读取与恢复：finalize 后只读冻结 · 缺陷 C</title>
+          <rect x="773.2" y="464" width="88" height="54" rx="8" class="c-mask"/>
+          <rect x="773.2" y="464" width="88" height="54" rx="8" class="c-backend" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(779.2 470) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="710.1999999999999" y="485" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">压缩之后</text>
-          <text data-detail="context" x="708.8" y="502" class="t-muted" font-size="8" text-anchor="middle">无收纳确认</text>
-        <text data-detail="fine" x="708.8" y="506" class="t-backend" font-size="7" text-anchor="middle">缺陷 C</text>
+          <text data-node-label="" data-detail-anchor="" x="818.6" y="485" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">压缩之后</text>
+          <text data-detail="context" x="817.2" y="502" class="t-muted" font-size="8" text-anchor="middle">无收纳确认</text>
+        <text data-detail="fine" x="817.2" y="506" class="t-backend" font-size="7" text-anchor="middle">缺陷 C</text>
         </g>
 
         <!-- Edge labels -->
 
         <g data-detail="context" data-edge-from="f03" data-edge-to="f04" data-edge-label="① 先写" data-edge-key="1" data-edge-id="e03">
-          <rect x="329.40000000000003" y="99" width="38.8" height="14" rx="3" class="c-mask"/>
-          <text x="348.8" y="109" class="t-muted" font-size="8" text-anchor="middle">① 先写</text>
+          <rect x="437.80000000000007" y="99" width="38.8" height="14" rx="3" class="c-mask"/>
+          <text x="457.20000000000005" y="109" class="t-muted" font-size="8" text-anchor="middle">① 先写</text>
         </g>
         <g data-detail="context" data-edge-from="f04" data-edge-to="f05" data-edge-label="② 再提交" data-edge-key="2" data-edge-id="e04">
-          <rect x="564.5999999999999" y="99" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="588.8" y="109" class="t-muted" font-size="8" text-anchor="middle">② 再提交</text>
+          <rect x="673" y="99" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="697.2" y="109" class="t-muted" font-size="8" text-anchor="middle">② 再提交</text>
         </g>
         <g data-detail="context" data-edge-from="f03" data-edge-to="f12" data-edge-label="step 终结·FinalizeCause" data-edge-key="3" data-edge-id="e05">
-          <rect x="67.70000000000002" y="146" width="120.39999999999999" height="14" rx="3" class="c-mask"/>
-          <text x="127.9" y="156" class="t-muted" font-size="8" text-anchor="middle">step 终结·FinalizeCause</text>
+          <rect x="125.4" y="146" width="120.39999999999999" height="14" rx="3" class="c-mask"/>
+          <text x="185.6" y="156" class="t-muted" font-size="8" text-anchor="middle">step 终结·FinalizeCause</text>
         </g>
         <g data-detail="context" data-edge-from="f12" data-edge-to="f13" data-edge-label="进指纹" data-edge-key="4" data-edge-id="e07">
-          <rect x="142" y="223" width="38.8" height="14" rx="3" class="c-mask"/>
-          <text x="161.4" y="233" class="t-muted" font-size="8" text-anchor="middle">进指纹</text>
+          <rect x="196.2" y="223" width="38.8" height="14" rx="3" class="c-mask"/>
+          <text x="215.6" y="233" class="t-muted" font-size="8" text-anchor="middle">进指纹</text>
         </g>
         <g data-detail="context" data-edge-from="f13" data-edge-to="f14" data-edge-label="空则补" data-edge-key="5" data-edge-id="e08">
-          <rect x="329.40000000000003" y="223" width="38.8" height="14" rx="3" class="c-mask"/>
-          <text x="348.8" y="233" class="t-muted" font-size="8" text-anchor="middle">空则补</text>
+          <rect x="437.80000000000007" y="223" width="38.8" height="14" rx="3" class="c-mask"/>
+          <text x="457.20000000000005" y="233" class="t-muted" font-size="8" text-anchor="middle">空则补</text>
         </g>
 
-        <g data-detail="context" data-edge-from="f03" data-edge-to="f21" data-edge-label="实时派生" data-edge-key="7" data-edge-id="e10">
-          <rect x="99.2" y="42" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="123.4" y="52" class="t-muted" font-size="8" text-anchor="middle">实时派生</text>
+        <g data-detail="context" data-edge-from="f12" data-edge-to="f22" data-edge-label="写冻结" data-edge-key="7" data-edge-id="e11">
+          <rect x="228.99999999999997" y="347" width="38.8" height="14" rx="3" class="c-mask"/>
+          <text x="248.39999999999998" y="357" class="t-muted" font-size="8" text-anchor="middle">写冻结</text>
         </g>
-        <g data-detail="context" data-edge-from="f12" data-edge-to="f22" data-edge-label="写冻结" data-edge-key="8" data-edge-id="e11">
-          <rect x="142" y="270" width="38.8" height="14" rx="3" class="c-mask"/>
-          <text x="161.4" y="280" class="t-muted" font-size="8" text-anchor="middle">写冻结</text>
-        </g>
-        <g data-detail="context" data-edge-from="f21" data-edge-to="f23" data-edge-label="outcome 判定" data-edge-key="9" data-edge-id="e12">
-          <rect x="247.59999999999997" y="400" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="281.4" y="410" class="t-muted" font-size="8" text-anchor="middle">outcome 判定</text>
+        <g data-detail="context" data-edge-from="f21" data-edge-to="f23" data-edge-label="outcome 判定" data-edge-key="8" data-edge-id="e12">
+          <rect x="301.8" y="400" width="67.6" height="14" rx="3" class="c-mask"/>
+          <text x="335.6" y="410" class="t-muted" font-size="8" text-anchor="middle">outcome 判定</text>
         </g>
 
 
@@ -5706,7 +5709,41 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     </div>
     <!-- Info Cards -->
     <div class="cards">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot cyan"></div>
+          <h3>① 写入规则：什么时候落盘？</h3>
+        </div>
+        <ul>
+          <li>advance / accept / append：receipt 变更随 Session member 一次 commit_incremental</li>
+          <li>sidecar 物理双写已退役（仅保留旧文件迁移读）</li>
+          <li>durable = Session 原子提交成功；失败返回明确错误按未确认处理</li>
+        </ul>
+      </div>
 
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot amber"></div>
+          <h3>② 收口规则：指纹与 revision</h3>
+        </div>
+        <ul>
+          <li>receipts 装配唯一化到 runtime 构造 ContextAppendData 之前</li>
+          <li>revision 恒为提交后值（accepted 与 finalized 一致）</li>
+          <li>fingerprint 8 位元组含 cleanup；旧指纹对账不受影响</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot violet"></div>
+          <h3>③ 读取与恢复规则</h3>
+        </div>
+        <ul>
+          <li>未 finalize：step_receipts 从实时账本派生</li>
+          <li>已 finalize：只读冻结快照，后台迟到推进不改写</li>
+          <li>旧 sidecar：一次性只读迁移（不存在才补、禁 Terminal 倒退）</li>
+        </ul>
+      </div>
     </div>
     <nav class="node-outline no-print" id="node-outline" hidden aria-labelledby="node-outline-title">
       <div class="node-outline-head">
