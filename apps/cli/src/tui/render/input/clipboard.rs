@@ -1,8 +1,7 @@
 use std::io::{self, Write};
 use std::path::Path;
 
-/// OSC 52 payload 上限（base64 编码后字节数）：主流终端对超长序列会静默丢弃或截断。
-const OSC52_MAX_ENCODED_BYTES: usize = 100_000;
+use super::constants::OSC52_MAX_ENCODED_BYTES;
 
 /// 复制落点：系统剪贴板或终端 OSC 52，调用方据此给出不同提示。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
