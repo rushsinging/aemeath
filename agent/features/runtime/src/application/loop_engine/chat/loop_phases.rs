@@ -39,25 +39,17 @@ where
     match &refresh {
         Ok(ConfigRefreshOutcomeData::Unchanged) => {}
         Ok(ConfigRefreshOutcomeData::Reloaded { scopes, .. }) => {
-            let mut changed_keys = vec!["config:reloaded".to_string()];
-            changed_keys.extend(
-                scopes
-                    .iter()
-                    .map(|scope| format!("config:scope:{}", scope.as_str())),
+            // ConfigReloaded + 可见回显共用统一构造（与即时查询路径一致）。
+            let view = crate::application::client::config_snapshot_to_sdk(
+                &config_reader.committed_snapshot(),
             );
-            sink.send_event(RuntimeStreamEvent::ConfigReloaded {
-                changed_keys,
-                view: crate::application::client::config_snapshot_to_sdk(
-                    &config_reader.committed_snapshot(),
-                ),
-            })
-            .await;
-            // 用户可见回显由 runtime 生成（language 在此可用）；只报「已重载 +
-            // 生效边界」，不做字段级 diff。
-            sink.send_event(RuntimeStreamEvent::SystemMessage(
-                share::i18n::runtime::config_reload::config_reload_notice(language, scopes),
-            ))
-            .await;
+            for event in
+                crate::application::loop_engine::chat::reload_notification::config_reload_events(
+                    language, scopes, view,
+                )
+            {
+                sink.send_event(event).await;
+            }
             if scopes.contains(
                 &share::config::domain::scope::ConfigApplicationScope::SessionRestartRequired,
             ) {

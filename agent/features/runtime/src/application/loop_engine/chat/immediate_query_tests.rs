@@ -15,6 +15,8 @@ use std::sync::{Arc, Mutex};
 enum RecordedEvent {
     ModelList(Vec<ModelSummary>),
     ErrorText { text: String, is_error: bool },
+    ConfigReloaded { changed_keys: Vec<String> },
+    SystemMessage(String),
     Other,
 }
 
@@ -36,6 +38,12 @@ impl RecordingSink {
                 text: text.clone(),
                 is_error: *is_error,
             },
+            RuntimeStreamEvent::ConfigReloaded { changed_keys, .. } => {
+                RecordedEvent::ConfigReloaded {
+                    changed_keys: changed_keys.clone(),
+                }
+            }
+            RuntimeStreamEvent::SystemMessage(text) => RecordedEvent::SystemMessage(text.clone()),
             _ => RecordedEvent::Other,
         };
         self.0
@@ -81,6 +89,7 @@ impl CallOrder {
 
 struct FakeConfigReader {
     order: CallOrder,
+    reloaded: bool,
 }
 
 #[async_trait::async_trait]
@@ -98,6 +107,12 @@ impl ConfigReader for FakeConfigReader {
 
     async fn refresh_if_sources_changed(&self) -> Result<ConfigRefreshOutcomeData, DomainError> {
         self.order.push("refresh");
+        if self.reloaded {
+            return Ok(ConfigRefreshOutcomeData::Reloaded {
+                snapshot: ConfigSnapshot::new(Default::default()),
+                scopes: vec![share::config::domain::scope::ConfigApplicationScope::Run],
+            });
+        }
         Ok(ConfigRefreshOutcomeData::Unchanged)
     }
 
@@ -149,6 +164,7 @@ fn dispatcher(
         }),
         Arc::new(FakeConfigReader {
             order: order.clone(),
+            reloaded: false,
         }),
     )
 }
@@ -254,5 +270,64 @@ async fn each_query_rechecks_config_freshness() {
         order.snapshot(),
         vec!["refresh", "list_models", "refresh", "list_models"],
         "每次查询都必须重新校验配置新鲜度"
+    );
+}
+
+fn dispatcher_with_reload(
+    order: &CallOrder,
+    models: Result<Vec<ModelSummary>, SdkError>,
+) -> ImmediateQueryDispatcher {
+    ImmediateQueryDispatcher::new(
+        Arc::new(FakeSessionQueries {
+            order: order.clone(),
+            models: Mutex::new(Some(models)),
+        }),
+        Arc::new(FakeConfigReader {
+            order: order.clone(),
+            reloaded: true,
+        }),
+    )
+}
+
+/// `/model` 前的刷新若真正提交了新配置，MUST 在返回模型清单之前先发
+/// ConfigReloaded + 可见 SystemMessage；否则该路径会静默吞掉变更，
+/// 之后的 turn 边界只看到 Unchanged，用户永远看不到「已重载」。
+#[tokio::test]
+async fn list_models_reports_config_reload_before_returning_models() {
+    let order = CallOrder::default();
+    let sink = RecordingSink::default();
+    let dispatcher = dispatcher_with_reload(&order, Ok(vec![sample_model()]));
+
+    let consumed = dispatcher
+        .try_dispatch(&ChatInputEvent::ListModels, &sink)
+        .await;
+    assert!(consumed, "ListModels 属于即时查询，必须被就地消费");
+
+    let events = sink.events();
+    assert!(
+        matches!(
+            events.first(),
+            Some(RecordedEvent::ConfigReloaded { changed_keys })
+                if changed_keys.contains(&"config:reloaded".to_string())
+                    && changed_keys.contains(&"config:scope:run".to_string())
+        ),
+        "首个事件必须是带 scope key 的 ConfigReloaded，实际: {events:?}"
+    );
+    assert!(
+        matches!(
+            events.get(1),
+            Some(RecordedEvent::SystemMessage(text))
+                if text.contains("[config] 已重载") || text.contains("[config] reloaded")
+        ),
+        "第二个事件必须是可见回显 SystemMessage，实际: {events:?}"
+    );
+    assert!(
+        matches!(events.last(), Some(RecordedEvent::ModelList(models)) if models.len() == 1),
+        "模型清单必须在回显之后返回，实际: {events:?}"
+    );
+    assert_eq!(
+        order.snapshot(),
+        vec!["refresh", "list_models"],
+        "刷新必须先于清单读取"
     );
 }

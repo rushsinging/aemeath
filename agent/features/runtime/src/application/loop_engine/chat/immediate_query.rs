@@ -19,7 +19,7 @@
 
 use crate::application::loop_engine::chat::events::{ChatEventSink, RuntimeStreamEvent};
 use crate::ports::SessionQueryPort;
-use config::ConfigReader;
+use config::{ConfigReader, ConfigRefreshOutcomeData};
 use sdk::ChatInputEvent;
 use std::sync::Arc;
 
@@ -60,11 +60,30 @@ impl ImmediateQueryDispatcher {
     where
         S: ChatEventSink,
     {
-        if let Err(error) = self.config_reader.refresh_if_sources_changed().await {
-            log::warn!(
-                target: crate::LOG_TARGET,
-                "[immediate_query] config refresh failed: {error}"
-            );
+        match self.config_reader.refresh_if_sources_changed().await {
+            Ok(ConfigRefreshOutcomeData::Reloaded { scopes, .. }) => {
+                // 该路径会把新快照提交到 committed；必须与 turn 边界共用同一
+                // 回显构造，否则之后的 turn 边界只看到 Unchanged，用户永远
+                // 看不到「已重载」。
+                let snapshot = self.config_reader.committed_snapshot();
+                let view = crate::application::client::config_snapshot_to_sdk(&snapshot);
+                for event in
+                    crate::application::loop_engine::chat::reload_notification::config_reload_events(
+                        snapshot.language(),
+                        &scopes,
+                        view,
+                    )
+                {
+                    sink.send_event(event).await;
+                }
+            }
+            Ok(ConfigRefreshOutcomeData::Unchanged) => {}
+            Err(error) => {
+                log::warn!(
+                    target: crate::LOG_TARGET,
+                    "[immediate_query] config refresh failed: {error}"
+                );
+            }
         }
         match self.session_queries.list_models().await {
             Ok(models) => {
