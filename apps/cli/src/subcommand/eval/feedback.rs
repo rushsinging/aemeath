@@ -167,7 +167,7 @@ fn split_steps<'a>(
         .iter()
         .position(|step| &(step.run_id.clone(), step.step_id.clone()) == compact_start)
         .unwrap_or(steps.len());
-    steps.split_at(index)
+    (&steps[..index], &steps[index..])
 }
 
 fn is_interrupted(step: &SessionStepMeta) -> bool {
@@ -179,7 +179,8 @@ fn is_interrupted(step: &SessionStepMeta) -> bool {
 pub(crate) fn evaluate(session: &SessionSnapshot) -> Option<SessionFeedback> {
     let compact_start = session.compact_start.as_ref()?;
     let split = session.compacted_message_count.min(session.messages.len());
-    let (early, tail) = session.messages.split_at(split);
+    let early = &session.messages[..split];
+    let tail = &session.messages[split..];
 
     // 只比较实质请求：短指令（继续/好/ok）之间相似度不可靠，会虚高重问率。
     let early_users: Vec<String> = early
