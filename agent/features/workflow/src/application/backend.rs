@@ -224,16 +224,7 @@ impl WorkflowToolBackend for InMemoryWorkflowBackend {
         command: ReplanWorkflowCommand,
     ) -> Result<ReplanResultData, WorkflowToolError> {
         let aggregate = self.store.get(&command.workflow_id)?;
-        let aggregate = aggregate.lock().expect("aggregate lock");
-        // 非 Replanning 拒绝是真实语义；Replanning 中的 continuation 校验由
-        // #2087 实现（过渡占位，生产开关开启前不暴露）。
-        if aggregate.active_mode() != Some(crate::domain::ActiveMode::Replanning) {
-            return Err(WorkflowToolError::WorkflowNotReplanning {
-                workflow_id: command.workflow_id.clone(),
-            });
-        }
-        Err(WorkflowToolError::WorkflowCannotContinue {
-            workflow_id: command.workflow_id,
-        })
+        let mut aggregate = aggregate.lock().expect("aggregate lock");
+        aggregate.replan(command)
     }
 }
